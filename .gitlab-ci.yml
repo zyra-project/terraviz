@@ -1,0 +1,73 @@
+default:
+  image: node:20-slim
+  interruptible: true
+  tags:
+    - container
+    - woc
+
+# Cache node_modules between jobs on the same branch.
+# The lockfile hash is part of the key so the cache is invalidated on
+# dependency changes.
+cache:
+  key:
+    files:
+      - package-lock.json
+  paths:
+    - node_modules/
+
+stages:
+  - validate
+  - test
+  - build
+
+# ---------------------------------------------------------------------------
+# Validate — run fast checks first so slow jobs only run on clean code
+# ---------------------------------------------------------------------------
+type-check:
+  stage: validate
+  script:
+    - npm ci
+    - npm run type-check
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ---------------------------------------------------------------------------
+# Test — unit tests with coverage report
+# ---------------------------------------------------------------------------
+unit-tests:
+  stage: test
+  script:
+    - npm ci
+    - npm run test:coverage
+  coverage: '/Lines\s*:\s*(\d+\.?\d*)%/'
+  artifacts:
+    when: always
+    reports:
+      # Publish JUnit XML so GitLab shows per-test results in the MR
+      junit: coverage/junit.xml
+      # Publish coverage report so GitLab shows diff coverage on MR diffs
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/cobertura-coverage.xml
+    paths:
+      - coverage/
+    expire_in: 30 days
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ---------------------------------------------------------------------------
+# Build — verify the production bundle compiles (main branch only)
+# ---------------------------------------------------------------------------
+build:
+  stage: build
+  script:
+    - npm ci
+    - npm run build
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 7 days
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
