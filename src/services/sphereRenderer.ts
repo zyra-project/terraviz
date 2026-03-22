@@ -659,7 +659,7 @@ export class SphereRenderer {
   }
 
   /**
-   * Update sphere texture
+   * Update sphere texture (for static images and one-off canvas uploads)
    */
   updateTexture(texture: THREE.Texture | HTMLCanvasElement | HTMLImageElement): void {
     if (!this.sphere) return
@@ -667,6 +667,11 @@ export class SphereRenderer {
     let material = this.sphere.material as THREE.MeshPhongMaterial
     if (Array.isArray(material)) {
       material = material[0] as THREE.MeshPhongMaterial
+    }
+
+    // Dispose old texture to free GPU memory before replacing
+    if (material.map && material.map !== texture) {
+      material.map.dispose()
     }
 
     if (texture instanceof THREE.Texture) {
@@ -681,6 +686,34 @@ export class SphereRenderer {
     material.color.set(0xffffff)
     material.emissive.set(0x000000)
     material.needsUpdate = true
+  }
+
+  /**
+   * Attach a video element as a live texture using THREE.VideoTexture.
+   * Creates the texture once — Three.js handles GPU uploads natively
+   * without an intermediate canvas, preventing GPU memory accumulation.
+   * Returns the VideoTexture so the caller can set needsUpdate on scrub.
+   */
+  setVideoTexture(video: HTMLVideoElement): THREE.VideoTexture {
+    if (!this.sphere) throw new Error('Sphere not initialized')
+
+    let material = this.sphere.material as THREE.MeshPhongMaterial
+    if (Array.isArray(material)) {
+      material = material[0] as THREE.MeshPhongMaterial
+    }
+
+    if (material.map) {
+      material.map.dispose()
+    }
+
+    const videoTexture = new THREE.VideoTexture(video)
+    videoTexture.colorSpace = THREE.SRGBColorSpace
+    material.map = videoTexture
+    material.color.set(0xffffff)
+    material.emissive.set(0x000000)
+    material.needsUpdate = true
+
+    return videoTexture
   }
 
   /**

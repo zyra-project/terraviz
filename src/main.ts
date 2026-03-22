@@ -5,9 +5,9 @@
  * No dataset param = just the default Earth globe
  */
 
+import * as THREE from 'three'
 import { SphereRenderer } from './services/sphereRenderer'
 import { HLSService } from './services/hlsService'
-import { VideoFrameExtractor } from './services/videoFrameExtractor'
 import { dataService } from './services/dataService'
 import { formatDate, videoTimeToDate, isSubDailyPeriod, inferDisplayInterval, getSunPosition } from './utils/time'
 import type { Dataset, AppState } from './types'
@@ -28,12 +28,11 @@ class InteractiveSphere {
 
   private renderer: SphereRenderer | null = null
   private hlsService: HLSService | null = null
-  private frameExtractor: VideoFrameExtractor | null = null
+  private videoTexture: THREE.VideoTexture | null = null
   private playbackUpdateId: number | null = null
   private scrubbing = false
   private displayInterval: { intervalMs: number; showTime: boolean } | null = null
   private loopPauseTimer: ReturnType<typeof setTimeout> | null = null
-  private lastTextureUpload = 0
 
   async initialize(): Promise<void> {
     try {
@@ -211,8 +210,6 @@ class InteractiveSphere {
       await this.hlsService.loadDirect(mp4File.link, video)
     }
 
-    this.frameExtractor = new VideoFrameExtractor()
-
     await new Promise<void>((resolve) => {
       const onCanPlay = () => {
         video.removeEventListener('canplay', onCanPlay)
@@ -235,8 +232,8 @@ class InteractiveSphere {
       this.displayInterval = null
     }
 
-    const canvas = this.frameExtractor.extractFrame(video)
-    this.renderer.updateTexture(canvas)
+    this.videoTexture = this.renderer.setVideoTexture(video)
+    this.videoTexture.needsUpdate = true  // show first frame before play is pressed
 
     const scrubber = document.getElementById('scrubber') as HTMLInputElement
     if (scrubber) {
@@ -256,17 +253,13 @@ class InteractiveSphere {
     this.stopPlaybackLoop()
 
     const loop = () => {
-      if (this.hlsService && this.frameExtractor && this.renderer) {
+      if (this.hlsService && this.renderer) {
         const video = this.hlsService.getVideo()
         if (video && video.readyState >= 2) {
-          // Throttle GPU texture uploads — mobile can't sustain 60 uploads/sec.
-          // 50ms ≈ 20fps which is smooth enough for cloud/environmental animation.
-          const uploadInterval = this.isMobile ? 50 : 0
-          const now = performance.now()
-          if ((!video.paused || this.scrubbing) && now - this.lastTextureUpload >= uploadInterval) {
-            const canvas = this.frameExtractor.extractFrame(video)
-            this.renderer.updateTexture(canvas)
-            this.lastTextureUpload = now
+          // VideoTexture handles GPU uploads natively — just flag needsUpdate
+          // when scrubbing a paused video so Three.js re-uploads the new frame.
+          if (this.scrubbing && this.videoTexture) {
+            this.videoTexture.needsUpdate = true
             this.scrubbing = false
           }
 
@@ -548,9 +541,9 @@ class InteractiveSphere {
 
   private cleanupVideo(): void {
     this.stopPlaybackLoop()
-    if (this.frameExtractor) {
-      this.frameExtractor.destroy()
-      this.frameExtractor = null
+    if (this.videoTexture) {
+      this.videoTexture.dispose()
+      this.videoTexture = null
     }
     if (this.hlsService) {
       this.hlsService.destroy()
