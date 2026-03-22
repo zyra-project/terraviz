@@ -209,7 +209,19 @@
             border-radius: 4px;
         }
 
+        #home-btn:hover {
+            background: rgba(255, 255, 255, 0.1) !important;
+            color: #fff !important;
+            border-color: rgba(255,255,255,0.35) !important;
+        }
+
         @media (max-width: 768px) {
+            #home-btn {
+                min-width: 44px;
+                min-height: 44px;
+                font-size: 1rem;
+            }
+
             #info-panel {
                 max-width: calc(100vw - 1.5rem);
             }
@@ -650,7 +662,9 @@
                     <span id="time-display">--</span>
                 </div>
 
-                <div id="latlng-display" class="hidden" style="position: absolute; top: 1rem; left: 1rem; font-size: 0.75rem; padding: 0.35rem 0.6rem; background: rgba(0, 0, 0, 0.7); border-radius: 4px; font-variant-numeric: tabular-nums; pointer-events: none;"></div>
+                <button id="home-btn" class="hidden" title="Browse datasets" style="position: absolute; top: 0.75rem; left: 0.75rem; pointer-events: auto; padding: 0.3rem 0.55rem; font-size: 0.85rem; background: rgba(0, 0, 0, 0.65); border: 1px solid rgba(255,255,255,0.18); border-radius: 6px; color: #bbb; min-width: 36px; min-height: 36px; line-height: 1;">&#8962;</button>
+
+                <div id="latlng-display" class="hidden" style="position: absolute; top: 1rem; left: 3.5rem; font-size: 0.75rem; padding: 0.35rem 0.6rem; background: rgba(0, 0, 0, 0.7); border-radius: 4px; font-variant-numeric: tabular-nums; pointer-events: none;"></div>
 
 
                 <div id="info-panel" class="ui-panel hidden">

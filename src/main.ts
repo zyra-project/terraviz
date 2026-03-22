@@ -33,6 +33,7 @@ class InteractiveSphere {
   private scrubbing = false
   private displayInterval: { intervalMs: number; showTime: boolean } | null = null
   private loopPauseTimer: ReturnType<typeof setTimeout> | null = null
+  private loadingHideTimer: ReturnType<typeof setTimeout> | null = null
 
   async initialize(): Promise<void> {
     try {
@@ -134,6 +135,7 @@ class InteractiveSphere {
       this.renderer?.removeNightLights()
       this.renderer?.disableSunLighting()
       await this.displayDataset(datasetId)
+      this.showHomeButton()
     } catch (error) {
       this.setError(error instanceof Error ? error.message : 'Failed to load dataset')
     }
@@ -556,10 +558,14 @@ class InteractiveSphere {
       if (screen) {
         this.setLoadingStatus('Ready', 100)
         // Brief pause so the "100%" fill is visible before fading
-        setTimeout(() => {
+        this.loadingHideTimer = setTimeout(() => {
+          this.loadingHideTimer = null
           screen.classList.add('fade-out')
           screen.addEventListener('transitionend', () => {
-            screen.style.display = 'none'
+            // Only hide if we're still faded out (not re-shown mid-transition)
+            if (screen.classList.contains('fade-out')) {
+              screen.style.display = 'none'
+            }
           }, { once: true })
         }, 300)
       }
@@ -609,6 +615,9 @@ class InteractiveSphere {
   }
 
   setupEventListeners(): void {
+    // Home button
+    document.getElementById('home-btn')?.addEventListener('click', () => this.goHome())
+
     // Transport controls
     document.getElementById('rewind-btn')?.addEventListener('click', () => this.rewind())
     document.getElementById('step-back-btn')?.addEventListener('click', () => this.stepFrame(-1))
@@ -797,6 +806,11 @@ class InteractiveSphere {
   }
 
   private showLoadingScreen(message = 'Loading dataset\u2026', progress = 0): void {
+    // Cancel any pending hide so the timer can't fade out a freshly-shown screen
+    if (this.loadingHideTimer !== null) {
+      clearTimeout(this.loadingHideTimer)
+      this.loadingHideTimer = null
+    }
     const screen = document.getElementById('loading-screen')
     if (!screen) return
     screen.style.display = 'flex'
@@ -815,6 +829,37 @@ class InteractiveSphere {
 
   private escapeAttr(value: string): string {
     return value.replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+  }
+
+  private showHomeButton(): void {
+    document.getElementById('home-btn')?.classList.remove('hidden')
+  }
+
+  private hideHomeButton(): void {
+    document.getElementById('home-btn')?.classList.add('hidden')
+  }
+
+  private async goHome(): Promise<void> {
+    this.cleanupVideo()
+    this.appState.currentDataset = null
+    this.showPlaybackControls(false)
+    this.showTimeLabel(false)
+    document.getElementById('info-panel')?.classList.add('hidden')
+    this.hideHomeButton()
+    window.history.pushState({}, '', window.location.pathname)
+
+    this.showLoadingScreen('Loading Earth\u2026', 30)
+    if (this.renderer) {
+      await this.renderer.loadDefaultEarthMaterials()
+      this.setLoadingStatus('Adding atmosphere\u2026', 80)
+      this.renderer.loadCloudOverlay(
+        'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/clouds_8192.jpg'
+      )
+      const sun = getSunPosition(new Date())
+      this.renderer.enableSunLighting(sun.lat, sun.lng)
+    }
+    this.setLoading(false)
+    this.showBrowseUI()
   }
 
   dispose(): void {
