@@ -15,6 +15,7 @@ stages:
   - validate
   - test
   - build
+  - deploy
 
 # ---------------------------------------------------------------------------
 # Validate — run fast checks first so slow jobs only run on clean code
@@ -63,5 +64,24 @@ build:
     paths:
       - dist/
     expire_in: 7 days
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ---------------------------------------------------------------------------
+# Deploy — push dist/ to Cloudflare Pages via wrangler CLI.
+# Requires CI/CD variables: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
+# Project name must match what was created in the Cloudflare dashboard.
+# ---------------------------------------------------------------------------
+deploy:
+  stage: deploy
+  needs: [build]
+  script:
+    - npx wrangler@3 pages deploy dist/
+        --project-name sos-interactive-sphere
+        --branch main
+        --commit-hash $CI_COMMIT_SHA
+  environment:
+    name: production
+    url: https://sos-interactive-sphere.pages.dev
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
