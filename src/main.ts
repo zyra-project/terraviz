@@ -78,8 +78,9 @@ class InteractiveSphere {
         await this.loadDefaultTexture()
         this.setLoadingStatus('Loading dataset\u2026', 65)
         await this.loadDataset(datasetId)
+        this.setLoading(false)
       } else {
-        // No dataset — load enhanced Earth with all maps
+        // No dataset — load enhanced Earth, then show the browse UI on top
         this.setLoadingStatus('Loading Earth textures\u2026', 50)
         await this.renderer.loadDefaultEarthMaterials()
 
@@ -91,9 +92,10 @@ class InteractiveSphere {
         // Position sun based on current UTC time
         const sun = getSunPosition(new Date())
         this.renderer.enableSunLighting(sun.lat, sun.lng)
-      }
 
-      this.setLoading(false)
+        this.setLoading(false)
+        this.showBrowseUI()
+      }
     } catch (error) {
       this.setLoading(false)
       this.setError(error instanceof Error ? error.message : 'Unknown error')
@@ -659,6 +661,160 @@ class InteractiveSphere {
         this.fastForward()
       }
     })
+  }
+
+  // --- Browse UI ---
+
+  private showBrowseUI(): void {
+    const overlay = document.getElementById('browse-overlay')
+    if (!overlay) return
+    overlay.classList.remove('hidden')
+
+    const datasets = this.appState.datasets
+      .filter(d => !d.isHidden)
+      .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0) || a.title.localeCompare(b.title))
+
+    // Collect unique top-level category keys
+    const catSet = new Set<string>()
+    for (const d of datasets) {
+      if (d.enriched?.categories) {
+        Object.keys(d.enriched.categories).forEach(c => catSet.add(c))
+      }
+    }
+    const categories = ['All', ...Array.from(catSet).sort()]
+
+    let activeCategory = 'All'
+    let searchQuery = ''
+
+    // Render category chips
+    const chipBar = document.getElementById('browse-category-bar')
+    if (chipBar) {
+      chipBar.innerHTML = categories
+        .map(cat => `<button class="browse-chip${cat === 'All' ? ' active' : ''}" data-cat="${this.escapeAttr(cat)}">${this.escapeHtml(cat)}</button>`)
+        .join('')
+
+      chipBar.addEventListener('click', (e) => {
+        const btn = (e.target as HTMLElement).closest('.browse-chip') as HTMLElement | null
+        if (!btn) return
+        activeCategory = btn.dataset.cat ?? 'All'
+        chipBar.querySelectorAll('.browse-chip').forEach(c => c.classList.remove('active'))
+        btn.classList.add('active')
+        renderCards()
+      })
+    }
+
+    // Search input
+    const searchInput = document.getElementById('browse-search') as HTMLInputElement | null
+    if (searchInput) {
+      searchInput.addEventListener('input', () => {
+        searchQuery = searchInput.value.trim().toLowerCase()
+        renderCards()
+      })
+      // Focus on desktop, skip on mobile to avoid keyboard pop-up
+      if (!this.isMobile) {
+        setTimeout(() => searchInput.focus(), 200)
+      }
+    }
+
+    const renderCards = () => {
+      const grid = document.getElementById('browse-grid')
+      const countEl = document.getElementById('browse-count')
+      if (!grid) return
+
+      let filtered = datasets
+
+      if (activeCategory !== 'All') {
+        filtered = filtered.filter(d =>
+          d.enriched?.categories != null && activeCategory in d.enriched.categories
+        )
+      }
+
+      if (searchQuery) {
+        filtered = filtered.filter(d => {
+          const title = d.title.toLowerCase()
+          const desc = (d.enriched?.description ?? d.abstractTxt ?? '').toLowerCase()
+          const keywords = [...(d.enriched?.keywords ?? []), ...(d.tags ?? [])].join(' ').toLowerCase()
+          const cats = Object.keys(d.enriched?.categories ?? {}).join(' ').toLowerCase()
+          return title.includes(searchQuery) || desc.includes(searchQuery) ||
+                 keywords.includes(searchQuery) || cats.includes(searchQuery)
+        })
+      }
+
+      if (countEl) {
+        countEl.textContent = `${filtered.length.toLocaleString()} dataset${filtered.length !== 1 ? 's' : ''}`
+      }
+
+      if (filtered.length === 0) {
+        grid.innerHTML = '<div class="browse-no-results">No datasets match your search.</div>'
+        return
+      }
+
+      grid.innerHTML = filtered.map(d => {
+        const isVideo = dataService.isVideoDataset(d)
+        const cats = d.enriched?.categories ? Object.keys(d.enriched.categories).slice(0, 3) : []
+        const rawDesc = d.enriched?.description ?? d.abstractTxt ?? ''
+        const desc = rawDesc.length > 120 ? rawDesc.substring(0, 120).trim() + '\u2026' : rawDesc
+
+        const catsHtml = cats.length
+          ? `<div class="browse-card-cats">${cats.map(c => `<span class="browse-card-cat">${this.escapeHtml(c)}</span>`).join('')}</div>`
+          : ''
+        const descHtml = desc
+          ? `<p class="browse-card-desc">${this.escapeHtml(desc)}</p>`
+          : ''
+
+        return `<div class="browse-card" data-id="${this.escapeAttr(d.id)}">
+          <div class="browse-card-header">
+            <span class="browse-card-title">${this.escapeHtml(d.title)}</span>
+            <span class="browse-card-type ${isVideo ? 'video' : 'image'}">${isVideo ? 'Video' : 'Image'}</span>
+          </div>
+          ${catsHtml}${descHtml}
+        </div>`
+      }).join('')
+
+      // Wire up click handlers
+      grid.querySelectorAll<HTMLElement>('.browse-card').forEach(card => {
+        card.addEventListener('click', () => {
+          const id = card.dataset.id
+          if (id) this.selectDatasetFromBrowse(id)
+        })
+      })
+    }
+
+    renderCards()
+  }
+
+  private hideBrowseUI(): void {
+    const overlay = document.getElementById('browse-overlay')
+    overlay?.classList.add('hidden')
+  }
+
+  private async selectDatasetFromBrowse(id: string): Promise<void> {
+    this.hideBrowseUI()
+    this.showLoadingScreen('Loading dataset\u2026', 20)
+    window.history.pushState({}, '', `?dataset=${encodeURIComponent(id)}`)
+    await this.loadDataset(id)
+    this.setLoading(false)
+  }
+
+  private showLoadingScreen(message = 'Loading dataset\u2026', progress = 0): void {
+    const screen = document.getElementById('loading-screen')
+    if (!screen) return
+    screen.style.display = 'flex'
+    screen.style.opacity = '1'
+    screen.classList.remove('fade-out')
+    this.setLoadingStatus(message, progress)
+  }
+
+  private escapeHtml(text: string): string {
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+  }
+
+  private escapeAttr(value: string): string {
+    return value.replace(/"/g, '&quot;').replace(/'/g, '&#39;')
   }
 
   dispose(): void {
