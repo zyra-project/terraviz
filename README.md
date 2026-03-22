@@ -4,6 +4,8 @@
 
 This is the proof-of-concept for Interactive Sphere, a WebGL-based globe that streams environmental data from the [Science On a Sphere](https://sos.noaa.gov/) project.
 
+![SOS Explorer interface showing the Earth globe with the dataset browse panel](initial-interface.jpg)
+
 ## ✨ POC Scope
 
 What's been built:
