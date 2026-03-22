@@ -11,7 +11,7 @@ export default defineConfig({
     minify: 'esbuild'
   },
   server: {
-    port: 5173,
+    port: process.env.PORT ? parseInt(process.env.PORT) : 5173,
     open: true,
     strictPort: false,
     watch: {
