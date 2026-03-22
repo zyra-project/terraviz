@@ -232,8 +232,19 @@ class InteractiveSphere {
       this.displayInterval = null
     }
 
+    // Force first frame decode before attaching to the sphere — keeps
+    // the default Earth texture visible until we have real video data
+    // instead of flashing a black ball.  Muted autoplay is allowed.
+    try {
+      await video.play()
+      video.pause()
+      video.currentTime = 0
+    } catch {
+      // Autoplay blocked — texture will update when user presses play
+    }
+
     this.videoTexture = this.renderer.setVideoTexture(video)
-    this.videoTexture.needsUpdate = true  // show first frame before play is pressed
+    this.videoTexture.needsUpdate = true
 
     const scrubber = document.getElementById('scrubber') as HTMLInputElement
     if (scrubber) {
