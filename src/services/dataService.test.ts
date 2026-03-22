@@ -111,7 +111,9 @@ describe('DataService.parseTimeMetadata', () => {
     const dataset = makeDataset({
       startTime: '2020-01-01T00:00:00',
       endTime: '2021-01-01T00:00:00',
-      period: 'NOT_A_DURATION'
+      // 'PXXX' starts with P (passes datetime guard) but doesn't match
+      // the duration regex, so parseISO8601Duration throws → 'unknown'.
+      period: 'PXXX'
     })
     const result = dataService.parseTimeMetadata(dataset)
     expect(result.displayMode).toBe('unknown')

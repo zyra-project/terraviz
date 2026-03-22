@@ -71,7 +71,9 @@ describe('parseISO8601Duration', () => {
   })
 
   it('throws on invalid input', () => {
-    expect(() => parseISO8601Duration('NOT_VALID')).toThrow('Invalid ISO 8601 value')
+    // 'GARBAGE' has no 'T' so it won't be tried as a datetime, and it
+    // doesn't match the duration regex, so the function must throw.
+    expect(() => parseISO8601Duration('GARBAGE')).toThrow('Invalid ISO 8601 value')
   })
 })
 

@@ -42,10 +42,8 @@ unit-tests:
     reports:
       # Publish JUnit XML so GitLab shows per-test results in the MR
       junit: coverage/junit.xml
-      # Publish coverage report so GitLab shows diff coverage on MR diffs
-      coverage_report:
-        coverage_format: cobertura
-        path: coverage/cobertura-coverage.xml
+      # coverage_report requires cobertura format; not emitted by vitest/coverage-v8 v1.
+      # Re-enable once upgraded or if cobertura reporter is confirmed working.
     paths:
       - coverage/
     expire_in: 30 days

@@ -12,13 +12,14 @@ export default defineConfig({
     ],
     include: ['src/**/*.test.ts', 'src/**/*.spec.ts'],
     globals: true,
+    setupFiles: ['./src/test-setup.ts'],
     reporters: ['default', 'junit'],
     outputFile: {
       junit: './coverage/junit.xml',
     },
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'lcov', 'html', 'cobertura'],
+      reporter: ['text', 'lcov', 'html'],
       reportsDirectory: './coverage',
       include: ['src/**/*.ts'],
       exclude: ['src/**/*.test.ts', 'src/**/*.spec.ts', 'src/main.ts'],
