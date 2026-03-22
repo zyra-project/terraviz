@@ -885,7 +885,12 @@ export class SphereRenderer {
     // Sync skybox and cloud layer rotation with sphere
     if (this.sphere) {
       if (this.skyboxMesh) {
-        this.skyboxMesh.rotation.copy(this.sphere.rotation)
+        // Apply -90° X rotation to convert astronomical equatorial (Z-up) to Three.js (Y-up)
+        this.skyboxMesh.rotation.set(
+          this.sphere.rotation.x - Math.PI / 2,
+          this.sphere.rotation.y,
+          this.sphere.rotation.z
+        )
       }
       if (this.cloudMesh) {
         this.cloudMesh.rotation.copy(this.sphere.rotation)
