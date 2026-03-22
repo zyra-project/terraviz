@@ -6,12 +6,8 @@ default:
     - woc
 
 # Cache node_modules between jobs on the same branch.
-# The lockfile hash is part of the key so the cache is invalidated on
-# dependency changes.
 cache:
-  key:
-    files:
-      - package-lock.json
+  key: "$CI_COMMIT_REF_SLUG"
   paths:
     - node_modules/
 
@@ -26,7 +22,7 @@ stages:
 type-check:
   stage: validate
   script:
-    - npm ci
+    - npm install
     - npm run type-check
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -38,7 +34,7 @@ type-check:
 unit-tests:
   stage: test
   script:
-    - npm ci
+    - npm install
     - npm run test:coverage
   coverage: '/Lines\s*:\s*(\d+\.?\d*)%/'
   artifacts:
@@ -63,7 +59,7 @@ unit-tests:
 build:
   stage: build
   script:
-    - npm ci
+    - npm install
     - npm run build
   artifacts:
     paths:
