@@ -8,7 +8,7 @@ export default defineConfig({
     outDir: '../dist',
     emptyOutDir: true,
     sourcemap: true,
-    minify: 'esbuild'
+    minify: true
   },
   server: {
     port: process.env.PORT ? parseInt(process.env.PORT) : 5173,
