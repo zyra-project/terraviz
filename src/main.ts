@@ -167,34 +167,52 @@ class InteractiveSphere {
   }
 
   private async loadImageDataset(dataset: Dataset): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const img = new Image()
+    const url = dataset.dataLink
+    const ext = url.match(/(\.\w+)$/)
+    const base = ext ? url.slice(0, -ext[1].length) : url
+    const suffix = ext ? ext[1] : ''
 
-      img.onload = () => {
-        if (!this.renderer) {
-          reject(new Error('Renderer not initialized'))
+    // Pick resolution based on device capability
+    const resolutions = this.isMobile ? ['_2048', '_1024'] : ['_4096', '_2048', '_1024']
+    const candidates = [...resolutions.map(r => `${base}${r}${suffix}`), url]
+
+    const img = await this.tryLoadImage(candidates)
+
+    if (!this.renderer) throw new Error('Renderer not initialized')
+
+    this.renderer.updateTexture(img)
+    if (dataset.startTime) {
+      const showTime = isSubDailyPeriod(dataset.period)
+      this.appState.timeLabel = formatDate(new Date(dataset.startTime), showTime)
+      this.showTimeLabel(true)
+    } else {
+      this.showTimeLabel(false)
+    }
+
+    console.log(`[App] Image dataset loaded successfully: ${img.src}`)
+  }
+
+  private tryLoadImage(urls: string[]): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+      let index = 0
+
+      const tryNext = () => {
+        if (index >= urls.length) {
+          reject(new Error(`Failed to load image, tried: ${urls.join(', ')}`))
           return
         }
 
-        this.renderer.updateTexture(img)
-        if (dataset.startTime) {
-          const showTime = isSubDailyPeriod(dataset.period)
-          this.appState.timeLabel = formatDate(new Date(dataset.startTime), showTime)
-          this.showTimeLabel(true)
-        } else {
-          this.showTimeLabel(false)
+        const img = new Image()
+        img.crossOrigin = 'anonymous'
+        img.onload = () => resolve(img)
+        img.onerror = () => {
+          index++
+          tryNext()
         }
-
-        console.log('[App] Image dataset loaded successfully')
-        resolve()
+        img.src = urls[index]
       }
 
-      img.onerror = () => {
-        reject(new Error(`Failed to load image from ${dataset.dataLink}`))
-      }
-
-      img.crossOrigin = 'anonymous'
-      img.src = dataset.dataLink
+      tryNext()
     })
   }
 
@@ -221,7 +239,7 @@ class InteractiveSphere {
       await this.hlsService.loadDirect(mp4File.link, video)
     }
 
-    await new Promise<void>((resolve) => {
+    await new Promise<void>((resolve, reject) => {
       const onCanPlay = () => {
         video.removeEventListener('canplay', onCanPlay)
         resolve()
@@ -230,6 +248,13 @@ class InteractiveSphere {
         resolve()
       } else {
         video.addEventListener('canplay', onCanPlay)
+        // Guard against the video never becoming playable (e.g. HLS error
+        // recovery loop on mobile).  20 s is generous — most streams load in
+        // under 5 s on a decent connection.
+        setTimeout(() => {
+          video.removeEventListener('canplay', onCanPlay)
+          reject(new Error('Video took too long to load — check your connection and try again'))
+        }, 20000)
       }
     })
 
@@ -439,7 +464,7 @@ class InteractiveSphere {
   private updatePlayButton(paused: boolean): void {
     const playBtn = document.getElementById('play-btn')
     if (playBtn) {
-      playBtn.textContent = paused ? '▶' : '⏸'
+      playBtn.textContent = paused ? '\u25B6\uFE0E' : '\u23F8\uFE0E'
     }
   }
 
@@ -560,6 +585,7 @@ class InteractiveSphere {
         // Brief pause so the "100%" fill is visible before fading
         this.loadingHideTimer = setTimeout(() => {
           this.loadingHideTimer = null
+          screen.style.opacity = '' // clear any inline override before CSS class takes effect
           screen.classList.add('fade-out')
           screen.addEventListener('transitionend', () => {
             // Only hide if we're still faded out (not re-shown mid-transition)
@@ -618,12 +644,35 @@ class InteractiveSphere {
     // Home button
     document.getElementById('home-btn')?.addEventListener('click', () => this.goHome())
 
+    // Browse panel collapse/expand toggle
+    const browseToggle = document.getElementById('browse-toggle')
+    const browseOverlay = document.getElementById('browse-overlay')
+    if (browseToggle && browseOverlay) {
+      browseToggle.addEventListener('click', () => {
+        const collapsed = browseOverlay.classList.toggle('collapsed')
+        browseToggle.innerHTML = collapsed ? '&#9656;' : '&#9666;'
+      })
+    }
+
     // Transport controls
     document.getElementById('rewind-btn')?.addEventListener('click', () => this.rewind())
     document.getElementById('step-back-btn')?.addEventListener('click', () => this.stepFrame(-1))
     document.getElementById('play-btn')?.addEventListener('click', () => this.togglePlayPause())
     document.getElementById('step-fwd-btn')?.addEventListener('click', () => this.stepFrame(1))
     document.getElementById('ff-btn')?.addEventListener('click', () => this.fastForward())
+
+    // Mute/unmute toggle
+    const muteBtn = document.getElementById('mute-btn')
+    if (muteBtn) {
+      muteBtn.addEventListener('click', () => {
+        const video = this.hlsService?.video
+        if (!video) return
+        video.muted = !video.muted
+        muteBtn.textContent = video.muted ? '\u{1F507}\uFE0E' : '\u{1F50A}\uFE0E'
+        muteBtn.style.color = video.muted ? '#aaa' : '#4da6ff'
+        muteBtn.style.borderColor = video.muted ? '#555' : '#4da6ff'
+      })
+    }
 
     // Auto-rotate (both inline and standalone buttons)
     const rotateBtns = [
@@ -683,13 +732,26 @@ class InteractiveSphere {
       .filter(d => !d.isHidden)
       .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0) || a.title.localeCompare(b.title))
 
-    // Collect unique top-level category keys
+    // Update search placeholder with actual count
+    const searchEl = document.getElementById('browse-search') as HTMLInputElement | null
+    if (searchEl) {
+      searchEl.placeholder = `Search ${datasets.length} datasets\u2026`
+    }
+
+    // Collect unique category keys from both enriched metadata and S3 tags
     const catSet = new Set<string>()
     for (const d of datasets) {
       if (d.enriched?.categories) {
         Object.keys(d.enriched.categories).forEach(c => catSet.add(c))
       }
+      if (d.tags) {
+        d.tags.forEach(t => catSet.add(t))
+      }
     }
+    // Remove tags that aren't useful as browse filters
+    catSet.delete('Movies')
+    catSet.delete('Layers')
+    catSet.delete('Tours')
     const categories = ['All', ...Array.from(catSet).sort()]
 
     let activeCategory = 'All'
@@ -734,7 +796,8 @@ class InteractiveSphere {
 
       if (activeCategory !== 'All') {
         filtered = filtered.filter(d =>
-          d.enriched?.categories != null && activeCategory in d.enriched.categories
+          (d.enriched?.categories != null && activeCategory in d.enriched.categories) ||
+          (d.tags != null && d.tags.includes(activeCategory))
         )
       }
 
@@ -762,29 +825,81 @@ class InteractiveSphere {
         const isVideo = dataService.isVideoDataset(d)
         const cats = d.enriched?.categories ? Object.keys(d.enriched.categories).slice(0, 3) : []
         const rawDesc = d.enriched?.description ?? d.abstractTxt ?? ''
-        const desc = rawDesc.length > 120 ? rawDesc.substring(0, 120).trim() + '\u2026' : rawDesc
+        const shortDesc = rawDesc.length > 120 ? rawDesc.substring(0, 120).trim() + '\u2026' : rawDesc
 
         const catsHtml = cats.length
           ? `<div class="browse-card-cats">${cats.map(c => `<span class="browse-card-cat">${this.escapeHtml(c)}</span>`).join('')}</div>`
           : ''
-        const descHtml = desc
-          ? `<p class="browse-card-desc">${this.escapeHtml(desc)}</p>`
+        const shortDescHtml = shortDesc
+          ? `<p class="browse-card-desc">${this.escapeHtml(shortDesc)}</p>`
+          : ''
+
+        // Expanded detail section
+        const fullDescHtml = rawDesc
+          ? `<div class="browse-card-full-desc">${this.escapeHtml(rawDesc)}</div>`
+          : ''
+        const org = d.organization
+        const dev = d.enriched?.datasetDeveloper?.name
+        const visDev = d.enriched?.visDeveloper?.name
+        const dateAdded = d.enriched?.dateAdded
+        const keywords = [...(d.enriched?.keywords ?? []), ...(d.tags ?? [])]
+        const catalogUrl = d.enriched?.catalogUrl
+        const timeRange = d.startTime && d.endTime
+          ? `${new Date(d.startTime).toLocaleDateString()} \u2013 ${new Date(d.endTime).toLocaleDateString()}`
+          : ''
+
+        let metaHtml = ''
+        if (org) metaHtml += `<div class="browse-card-meta"><strong>Source:</strong> ${this.escapeHtml(org)}</div>`
+        if (dev) metaHtml += `<div class="browse-card-meta"><strong>Dataset developer:</strong> ${this.escapeHtml(dev)}</div>`
+        if (visDev) metaHtml += `<div class="browse-card-meta"><strong>Visualization:</strong> ${this.escapeHtml(visDev)}</div>`
+        if (timeRange) metaHtml += `<div class="browse-card-meta"><strong>Time range:</strong> ${timeRange}</div>`
+        if (dateAdded) metaHtml += `<div class="browse-card-meta"><strong>Added:</strong> ${this.escapeHtml(dateAdded)}</div>`
+        if (catalogUrl) metaHtml += `<div class="browse-card-meta"><a href="${this.escapeAttr(catalogUrl)}" target="_blank" rel="noopener" style="color: #4da6ff; text-decoration: none; font-size: 0.65rem;">View in SOS catalog \u2197</a></div>`
+
+        const keywordsHtml = keywords.length
+          ? `<div class="browse-card-keywords">${keywords.slice(0, 12).map(k => `<span class="browse-card-keyword">${this.escapeHtml(k)}</span>`).join('')}</div>`
+          : ''
+
+        const thumbHtml = d.thumbnailLink
+          ? `<img class="browse-card-thumb" src="${this.escapeAttr(d.thumbnailLink)}" alt="" loading="lazy">`
           : ''
 
         return `<div class="browse-card" data-id="${this.escapeAttr(d.id)}">
-          <div class="browse-card-header">
-            <span class="browse-card-title">${this.escapeHtml(d.title)}</span>
-            <span class="browse-card-type ${isVideo ? 'video' : 'image'}">${isVideo ? 'Video' : 'Image'}</span>
+          ${thumbHtml}
+          <div class="browse-card-body">
+            <div class="browse-card-header">
+              <span class="browse-card-title">${this.escapeHtml(d.title)}</span>
+              <button class="browse-card-load" data-id="${this.escapeAttr(d.id)}">Load</button>
+            </div>
+            ${catsHtml}${shortDescHtml}
+            <div class="browse-card-details">
+              ${fullDescHtml}${metaHtml}${keywordsHtml}
+            </div>
           </div>
-          ${catsHtml}${descHtml}
         </div>`
       }).join('')
 
-      // Wire up click handlers
+      // Wire up click handlers — expand/collapse on card click, load on button click
       grid.querySelectorAll<HTMLElement>('.browse-card').forEach(card => {
-        card.addEventListener('click', () => {
-          const id = card.dataset.id
-          if (id) this.selectDatasetFromBrowse(id)
+        card.addEventListener('click', (e) => {
+          // If the load button was clicked, load the dataset
+          const loadBtn = (e.target as HTMLElement).closest('.browse-card-load') as HTMLElement | null
+          if (loadBtn) {
+            e.stopPropagation()
+            const id = loadBtn.dataset.id
+            if (id) this.selectDatasetFromBrowse(id)
+            return
+          }
+          // Don't collapse when clicking links
+          if ((e.target as HTMLElement).tagName === 'A') return
+
+          // Toggle expanded state; collapse any other expanded card
+          const wasExpanded = card.classList.contains('expanded')
+          grid.querySelectorAll('.browse-card.expanded').forEach(c => c.classList.remove('expanded'))
+          if (!wasExpanded) {
+            card.classList.add('expanded')
+            card.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+          }
         })
       })
     }
@@ -814,7 +929,10 @@ class InteractiveSphere {
     const screen = document.getElementById('loading-screen')
     if (!screen) return
     screen.style.display = 'flex'
-    screen.style.opacity = '1'
+    // Do NOT set opacity via inline style — it would override the CSS class rule
+    // (#loading-screen.fade-out { opacity: 0 }) and prevent the transitionend
+    // event from ever firing, leaving the loading screen stuck on screen.
+    screen.style.opacity = ''
     screen.classList.remove('fade-out')
     this.setLoadingStatus(message, progress)
   }

@@ -203,6 +203,7 @@ window.app.appState.currentDataset
 
 - **[PROJECT_PLAN.md](PROJECT_PLAN.md)** - Complete architecture and specifications
 - **[PRE_DEVELOPMENT_CHECKLIST.md](PRE_DEVELOPMENT_CHECKLIST.md)** - Design decisions and considerations
+- **[STYLE_GUIDE.md](STYLE_GUIDE.md)** - UI design language (colors, surfaces, components)
 - **src/services/dataService.ts** - How we fetch and manage datasets
 - **src/services/sphereRenderer.ts** - Three.js sphere implementation
 - **src/types/index.ts** - TypeScript type definitions (read first!)

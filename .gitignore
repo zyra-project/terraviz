@@ -20,6 +20,7 @@ build/
 
 # Working files
 _work/
+.claude/
 
 # Development
 .cache/

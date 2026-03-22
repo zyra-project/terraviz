@@ -26,7 +26,7 @@ const VIDEO_PROXY_BASE = 'https://video-proxy.zyra-project.org/video'
 
 export class HLSService {
   private hls: Hls | null = null
-  private video: HTMLVideoElement | null = null
+  video: HTMLVideoElement | null = null
 
   /**
    * Fetch HLS manifest and metadata from the video proxy
@@ -75,13 +75,14 @@ export class HLSService {
       }
 
       if (Hls.isSupported()) {
+        // Mobile browsers have strict MSE memory quotas. Buffering 600 s of
+        // HD video overflows them, causing fatal MEDIA_ERRORs on most phones.
+        // 30 s is enough for smooth looped playback on mobile.
+        const bufferLength = mobile ? 30 : 600
         this.hls = new Hls({
-          // Buffer the entire video so loops are instant from memory.
-          // The GPU texture leak that caused mobile crashes is fixed
-          // (VideoTexture reuses one texture), so full buffering is safe.
-          maxBufferLength: 600,
-          maxMaxBufferLength: 600,
-          backBufferLength: Infinity,
+          maxBufferLength: bufferLength,
+          maxMaxBufferLength: bufferLength,
+          backBufferLength: mobile ? 30 : Infinity,
           startLevel: mobile ? 0 : -1,
         })
 
@@ -99,14 +100,27 @@ export class HLSService {
           console.log(`[HLS] Quality switched to level ${data.level}: ${level.width}x${level.height} (${level.bitrate} bps)`)
         })
 
+        let networkRecoveries = 0
+        let mediaRecoveries = 0
+        const MAX_RECOVERIES = 3
+
         this.hls.on(Hls.Events.ERROR, (_event, data) => {
           if (data.fatal) {
             console.error('[HLS] Fatal error:', data.type, data.details)
             if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-              // Try to recover from network errors
-              this.hls?.startLoad()
+              if (networkRecoveries < MAX_RECOVERIES) {
+                networkRecoveries++
+                this.hls?.startLoad()
+              } else {
+                reject(new Error(`HLS network error after ${MAX_RECOVERIES} retries: ${data.details}`))
+              }
             } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-              this.hls?.recoverMediaError()
+              if (mediaRecoveries < MAX_RECOVERIES) {
+                mediaRecoveries++
+                this.hls?.recoverMediaError()
+              } else {
+                reject(new Error(`HLS media error after ${MAX_RECOVERIES} retries: ${data.details}`))
+              }
             } else {
               reject(new Error(`HLS fatal error: ${data.details}`))
             }

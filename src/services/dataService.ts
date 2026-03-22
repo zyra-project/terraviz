@@ -58,7 +58,7 @@ class DataService {
 
       // Filter, sort, and enrich datasets
       const datasets = s3Response.data.datasets
-        .filter(d => !d.isHidden)
+        .filter(d => !d.isHidden && this.isSupportedDataset(d))
         .sort((a, b) => (b.weight || 0) - (a.weight || 0))
         .map(d => this.enrichDataset(d))
 
@@ -223,12 +223,16 @@ class DataService {
     return timeInfo
   }
 
+  isSupportedDataset(dataset: Dataset): boolean {
+    return this.isVideoDataset(dataset) || this.isImageDataset(dataset)
+  }
+
   isVideoDataset(dataset: Dataset): boolean {
     return dataset.format === 'video/mp4'
   }
 
   isImageDataset(dataset: Dataset): boolean {
-    return dataset.format === 'image/png' || dataset.format === 'image/jpg'
+    return dataset.format === 'image/png' || dataset.format === 'image/jpg' || dataset.format === 'images/jpg'
   }
 
   clearCache(): void {

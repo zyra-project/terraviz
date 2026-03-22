@@ -697,10 +697,19 @@ export class SphereRenderer {
       material.map = canvasTexture
     }
 
+    // Strip advanced Earth maps so dataset renders with simple unlit material
+    if (material.normalMap) { material.normalMap.dispose(); material.normalMap = null }
+    if (material.specularMap) { material.specularMap.dispose(); material.specularMap = null }
+    if (material.emissiveMap) { material.emissiveMap.dispose(); material.emissiveMap = null }
+    material.shininess = 0
+    material.specular.set(0x000000)
+
     // Reset color so texture shows true colors
     material.color.set(0xffffff)
     material.emissive.set(0x000000)
     material.needsUpdate = true
+
+    this.defaultEarthActive = false
   }
 
   /**
@@ -724,9 +733,19 @@ export class SphereRenderer {
     const videoTexture = new THREE.VideoTexture(video)
     videoTexture.colorSpace = THREE.SRGBColorSpace
     material.map = videoTexture
+
+    // Strip advanced Earth maps so dataset renders with simple unlit material
+    if (material.normalMap) { material.normalMap.dispose(); material.normalMap = null }
+    if (material.specularMap) { material.specularMap.dispose(); material.specularMap = null }
+    if (material.emissiveMap) { material.emissiveMap.dispose(); material.emissiveMap = null }
+    material.shininess = 0
+    material.specular.set(0x000000)
+
     material.color.set(0xffffff)
     material.emissive.set(0x000000)
     material.needsUpdate = true
+
+    this.defaultEarthActive = false
 
     return videoTexture
   }

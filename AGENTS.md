@@ -76,6 +76,10 @@ git remote -v  # Verify remote is set
 git clone https://gitlab.sos.noaa.gov/science-on-a-sphere/explorer/sandbox/interactive-sphere.git
 ```
 
+## UI Style Guide
+
+See **[STYLE_GUIDE.md](STYLE_GUIDE.md)** for the complete visual design language — frosted-glass surfaces, color palette, typography, component specs, and mobile adaptations. All UI overlays must follow this guide for visual consistency.
+
 ## Key Conventions
 
 - Vite root is `./src`, public dir is `../public`

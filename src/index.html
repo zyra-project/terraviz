@@ -50,7 +50,10 @@
 
         .ui-panel {
             pointer-events: auto;
-            background: rgba(0, 0, 0, 0.8);
+            background: rgba(13, 13, 18, 0.88);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 8px;
             font-size: 0.8rem;
         }
@@ -139,7 +142,8 @@
         }
 
         .info-keyword {
-            background: #0066cc;
+            background: rgba(77, 166, 255, 0.12);
+            color: #6ab8ff;
             padding: 0.15rem 0.35rem;
             border-radius: 3px;
             font-size: 0.6rem;
@@ -181,10 +185,10 @@
             color: white;
             border: none;
             padding: 0.5rem 1rem;
-            border-radius: 4px;
+            border-radius: 6px;
             cursor: pointer;
             font-size: 0.875rem;
-            transition: background 0.2s;
+            transition: background 0.2s, color 0.15s, border-color 0.15s;
         }
 
         button:hover {
@@ -192,21 +196,34 @@
         }
 
         .transport-btn {
-            min-width: 24px;
-            padding: 0.2rem 0.35rem;
+            min-width: 28px;
+            padding: 0.3rem 0.4rem;
             font-size: 0.7rem;
             line-height: 1;
+            background: rgba(255, 255, 255, 0.06) !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            color: #ccc !important;
+        }
+
+        .transport-btn:hover {
+            background: rgba(255, 255, 255, 0.12) !important;
+            color: #fff !important;
+            border-color: rgba(77, 166, 255, 0.4) !important;
         }
 
         #time-label {
-            font-size: 0.85rem;
+            font-size: 0.8rem;
             font-weight: 500;
-            padding: 0.5rem 0.75rem;
+            letter-spacing: 0.03em;
+            padding: 0.4rem 0.7rem;
             position: absolute;
-            top: 1rem;
-            right: 1rem;
-            background: rgba(0, 0, 0, 0.7);
-            border-radius: 4px;
+            top: 0.75rem;
+            right: 0.75rem;
+            background: rgba(13, 13, 18, 0.88);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 6px;
         }
 
         #home-btn:hover {
@@ -389,22 +406,54 @@
         /* --- Browse overlay --- */
         #browse-overlay {
             position: fixed;
-            inset: 0;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            width: 420px;
             z-index: 500;
-            background: rgba(13, 13, 18, 0.92);
-            backdrop-filter: blur(4px);
-            -webkit-backdrop-filter: blur(4px);
+            background: rgba(13, 13, 18, 0.88);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
             display: flex;
             flex-direction: column;
-            overflow: hidden;
+            overflow: visible;
+            border-left: 1px solid rgba(255, 255, 255, 0.08);
+            transition: transform 0.3s ease;
+        }
+
+        #browse-overlay.collapsed {
+            transform: translateX(100%);
+        }
+
+        #browse-toggle {
+            position: absolute;
+            top: 50%;
+            left: 0;
+            transform: translate(-100%, -50%);
+            background: rgba(13, 13, 18, 0.92) !important;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.12) !important;
+            border-right: none !important;
+            border-radius: 6px 0 0 6px;
+            color: #aaa !important;
+            padding: 0.75rem 0.35rem;
+            cursor: pointer;
+            font-size: 0.85rem;
+            line-height: 1;
+            transition: color 0.15s, background 0.15s;
+            z-index: 501;
+        }
+
+        #browse-toggle:hover {
+            color: #4da6ff !important;
+            background: rgba(30, 30, 40, 0.95) !important;
         }
 
         #browse-inner {
             display: flex;
             flex-direction: column;
             height: 100%;
-            max-width: 1200px;
-            margin: 0 auto;
             width: 100%;
             padding: 1.5rem 1.5rem 0;
             box-sizing: border-box;
@@ -461,16 +510,9 @@
         #browse-category-bar {
             display: flex;
             gap: 0.4rem;
-            flex-wrap: nowrap;
-            overflow-x: auto;
+            flex-wrap: wrap;
             flex-shrink: 0;
             padding-bottom: 0.75rem;
-            scrollbar-width: none;
-            -ms-overflow-style: none;
-        }
-
-        #browse-category-bar::-webkit-scrollbar {
-            display: none;
         }
 
         .browse-chip {
@@ -523,12 +565,40 @@
             padding: 0.875rem;
             cursor: pointer;
             transition: background 0.15s, border-color 0.15s, transform 0.1s;
+            display: flex;
+            gap: 0.75rem;
+        }
+
+        .browse-card-thumb {
+            flex-shrink: 0;
+            width: 64px;
+            height: 64px;
+            border-radius: 4px;
+            object-fit: cover;
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        .browse-card.expanded .browse-card-thumb {
+            width: 96px;
+            height: 96px;
+        }
+
+        .browse-card-body {
+            flex: 1;
+            min-width: 0;
         }
 
         .browse-card:hover {
             background: rgba(255, 255, 255, 0.08);
             border-color: rgba(77, 166, 255, 0.4);
             transform: translateY(-1px);
+        }
+
+        .browse-card.expanded {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(77, 166, 255, 0.5);
+            transform: none;
+            grid-column: 1 / -1;
         }
 
         .browse-card-header {
@@ -549,6 +619,62 @@
             -webkit-line-clamp: 2;
             -webkit-box-orient: vertical;
             overflow: hidden;
+        }
+
+        .browse-card.expanded .browse-card-title {
+            -webkit-line-clamp: unset;
+            display: block;
+        }
+
+        .browse-card-details {
+            display: none;
+        }
+
+        .browse-card.expanded .browse-card-details {
+            display: block;
+            margin-top: 0.6rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            padding-top: 0.6rem;
+        }
+
+        .browse-card-full-desc {
+            font-size: 0.72rem;
+            color: #bbb;
+            line-height: 1.55;
+            margin-bottom: 0.6rem;
+        }
+
+        .browse-card-meta {
+            font-size: 0.65rem;
+            color: #888;
+            margin-bottom: 0.2rem;
+        }
+
+        .browse-card-meta strong {
+            color: #aaa;
+        }
+
+        .browse-card-keywords {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.2rem;
+            margin: 0.5rem 0;
+        }
+
+        .browse-card-keyword {
+            font-size: 0.58rem;
+            background: rgba(77, 166, 255, 0.12);
+            color: #6ab8ff;
+            padding: 0.12rem 0.35rem;
+            border-radius: 3px;
+        }
+
+        .browse-card-load {
+            flex-shrink: 0;
+            padding: 0.2rem 0.55rem !important;
+            font-size: 0.65rem !important;
+            border-radius: 4px;
+            line-height: 1;
         }
 
         .browse-card-type {
@@ -607,6 +733,11 @@
         }
 
         @media (max-width: 768px) {
+            #browse-overlay {
+                width: 100%;
+                border-left: none;
+            }
+
             #browse-inner {
                 padding: 1rem 1rem 0;
             }
@@ -642,12 +773,13 @@
     </div>
     <!-- Browse overlay — only shown when no ?dataset= URL param -->
     <div id="browse-overlay" class="hidden">
+        <button id="browse-toggle" title="Toggle search panel">&#9666;</button>
         <div id="browse-inner">
             <div id="browse-header">
                 <div class="browse-title">SOS Explorer</div>
                 <div class="browse-subtitle">Browse environmental datasets from NOAA Science On a Sphere</div>
             </div>
-            <input type="search" id="browse-search" placeholder="Search 600+ datasets…" autocomplete="off" spellcheck="false" />
+            <input type="search" id="browse-search" placeholder="Search datasets…" autocomplete="off" spellcheck="false" />
             <div id="browse-category-bar"></div>
             <div id="browse-count"></div>
             <div id="browse-grid"></div>
@@ -662,9 +794,9 @@
                     <span id="time-display">--</span>
                 </div>
 
-                <button id="home-btn" class="hidden" title="Browse datasets" style="position: absolute; top: 0.75rem; left: 0.75rem; pointer-events: auto; padding: 0.3rem 0.55rem; font-size: 0.85rem; background: rgba(0, 0, 0, 0.65); border: 1px solid rgba(255,255,255,0.18); border-radius: 6px; color: #bbb; min-width: 36px; min-height: 36px; line-height: 1;">&#8962;</button>
+                <button id="home-btn" class="hidden" title="Browse datasets" style="position: absolute; top: 0.75rem; left: 0.75rem; pointer-events: auto; padding: 0.3rem 0.55rem; font-size: 0.85rem; background: rgba(13, 13, 18, 0.88); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; color: #bbb; min-width: 36px; min-height: 36px; line-height: 1;">&#8962;</button>
 
-                <div id="latlng-display" class="hidden" style="position: absolute; top: 1rem; left: 3.5rem; font-size: 0.75rem; padding: 0.35rem 0.6rem; background: rgba(0, 0, 0, 0.7); border-radius: 4px; font-variant-numeric: tabular-nums; pointer-events: none;"></div>
+                <div id="latlng-display" class="hidden" style="position: absolute; top: 0.75rem; left: 3.5rem; font-size: 0.72rem; letter-spacing: 0.03em; padding: 0.4rem 0.7rem; background: rgba(13, 13, 18, 0.88); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; font-variant-numeric: tabular-nums; pointer-events: none;"></div>
 
 
                 <div id="info-panel" class="ui-panel hidden">
@@ -675,19 +807,20 @@
                     <div id="info-body"></div>
                 </div>
 
-                <div id="playback-controls" class="ui-panel hidden" style="position: absolute; bottom: 0.75rem; right: 0.75rem; padding: 0.5rem; display: inline-flex; flex-direction: column; align-items: stretch;">
-                    <div style="display: flex; gap: 0.15rem; margin-bottom: 0.3rem; justify-content: center;">
-                        <button id="rewind-btn" class="transport-btn" title="Rewind to start">⏮</button>
-                        <button id="step-back-btn" class="transport-btn" title="Step back one frame">⏪</button>
-                        <button id="play-btn" class="transport-btn" title="Play / Pause">▶</button>
-                        <button id="step-fwd-btn" class="transport-btn" title="Step forward one frame">⏩</button>
-                        <button id="ff-btn" class="transport-btn" title="Fast-forward to end">⏭</button>
-                        <button id="auto-rotate-btn" class="transport-btn" title="Toggle auto-rotation" style="margin-left: 0.3rem; color: #aaa; border: 1px solid #555;">&#x21BB;</button>
+                <div id="playback-controls" class="ui-panel hidden" style="position: absolute; bottom: 0.75rem; right: 0.75rem; padding: 0.5rem 0.6rem; display: inline-flex; flex-direction: column; align-items: stretch;">
+                    <div style="display: flex; gap: 0.2rem; margin-bottom: 0.35rem; justify-content: center;">
+                        <button id="rewind-btn" class="transport-btn" title="Rewind to start">&#x23EE;&#xFE0E;</button>
+                        <button id="step-back-btn" class="transport-btn" title="Step back one frame">&#x23EA;&#xFE0E;</button>
+                        <button id="play-btn" class="transport-btn" title="Play / Pause">&#x25B6;&#xFE0E;</button>
+                        <button id="step-fwd-btn" class="transport-btn" title="Step forward one frame">&#x23E9;&#xFE0E;</button>
+                        <button id="ff-btn" class="transport-btn" title="Fast-forward to end">&#x23ED;&#xFE0E;</button>
+                        <button id="mute-btn" class="transport-btn" title="Unmute audio" style="margin-left: 0.25rem;">&#x1F507;&#xFE0E;</button>
+                        <button id="auto-rotate-btn" class="transport-btn" title="Toggle auto-rotation" style="margin-left: 0.1rem;">&#x21BB;</button>
                     </div>
                     <input type="range" id="scrubber" min="0" max="1000" value="0" style="width: 100%; margin: 0;">
                 </div>
 
-                <button id="auto-rotate-standalone" title="Toggle auto-rotation" style="position: absolute; bottom: 0.75rem; right: 0.75rem; pointer-events: auto; min-width: 28px; padding: 0.3rem 0.5rem; font-size: 0.75rem; background: rgba(0, 0, 0, 0.7); border: 1px solid #555; border-radius: 4px; color: #aaa; cursor: pointer;">&#x21BB;</button>
+                <button id="auto-rotate-standalone" class="transport-btn" title="Toggle auto-rotation" style="position: absolute; bottom: 0.75rem; right: 0.75rem; pointer-events: auto; min-width: 28px; padding: 0.35rem 0.5rem; font-size: 0.75rem; background: rgba(13, 13, 18, 0.88) !important; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08) !important; border-radius: 6px;">&#x21BB;</button>
 
                 <div id="error-message" class="hidden"></div>
             </div>
