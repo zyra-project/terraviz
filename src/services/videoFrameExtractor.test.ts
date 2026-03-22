@@ -79,14 +79,29 @@ describe('VideoFrameExtractor.extractFrame', () => {
 // ---------------------------------------------------------------------------
 // startLoop / stopLoop
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// startLoop / stopLoop
+// rAF re-queues itself on every tick, so vi.runAllTimers() causes an
+// infinite loop. Instead, stub rAF to capture the callback and invoke it
+// exactly once ourselves.
+// ---------------------------------------------------------------------------
 describe('VideoFrameExtractor.startLoop', () => {
+  function stubRaf() {
+    let pending: FrameRequestCallback | null = null
+    vi.stubGlobal('requestAnimationFrame', vi.fn((cb: FrameRequestCallback) => {
+      pending = cb
+      return 1
+    }))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const tick = () => pending?.(performance.now())
+    return { tick }
+  }
+
   it('calls onFrame when video is playing', () => {
-    // Use fake timers so we control rAF execution
-    vi.useFakeTimers()
+    const { tick } = stubRaf()
 
     const extractor = new VideoFrameExtractor()
-    const canvas = extractor.getCanvas()
-    const ctx = canvas.getContext('2d')!
+    const ctx = extractor.getCanvas().getContext('2d')!
     vi.spyOn(ctx, 'drawImage').mockImplementation(() => {})
 
     const video = document.createElement('video')
@@ -96,32 +111,28 @@ describe('VideoFrameExtractor.startLoop', () => {
 
     const onFrame = vi.fn()
     extractor.startLoop(video, onFrame)
-
-    // Run one rAF tick
-    vi.runAllTimers()
+    tick()
 
     expect(onFrame).toHaveBeenCalled()
     extractor.stopLoop()
-    vi.useRealTimers()
+    vi.unstubAllGlobals()
   })
 
   it('does not call onFrame when video is paused', () => {
-    vi.useFakeTimers()
+    const { tick } = stubRaf()
 
     const extractor = new VideoFrameExtractor()
-    const canvas = extractor.getCanvas()
-    const ctx = canvas.getContext('2d')!
+    const ctx = extractor.getCanvas().getContext('2d')!
     vi.spyOn(ctx, 'drawImage').mockImplementation(() => {})
 
-    const video = document.createElement('video')
-    // Default HTMLVideoElement.paused is true
+    const video = document.createElement('video') // paused by default
 
     const onFrame = vi.fn()
     extractor.startLoop(video, onFrame)
-    vi.runAllTimers()
+    tick()
 
     expect(onFrame).not.toHaveBeenCalled()
     extractor.stopLoop()
-    vi.useRealTimers()
+    vi.unstubAllGlobals()
   })
 })
