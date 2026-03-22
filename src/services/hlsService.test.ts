@@ -5,26 +5,29 @@ import { HLSService } from './hlsService'
 // Mock hls.js — we test HLSService logic, not the HLS library itself
 // ---------------------------------------------------------------------------
 vi.mock('hls.js', () => {
-  const MockHls = vi.fn().mockImplementation(() => ({
-    loadSource: vi.fn(),
-    attachMedia: vi.fn(),
-    destroy: vi.fn(),
-    on: vi.fn(),
-    levels: [],
-    startLoad: vi.fn(),
-    recoverMediaError: vi.fn(),
-  }))
-
-  MockHls.isSupported = vi.fn().mockReturnValue(true)
-  MockHls.Events = {
-    MANIFEST_PARSED: 'hlsManifestParsed',
-    LEVEL_SWITCHED: 'hlsLevelSwitched',
-    ERROR: 'hlsError',
-  }
-  MockHls.ErrorTypes = {
-    NETWORK_ERROR: 'networkError',
-    MEDIA_ERROR: 'mediaError',
-  }
+  const MockHls = Object.assign(
+    vi.fn().mockImplementation(() => ({
+      loadSource: vi.fn(),
+      attachMedia: vi.fn(),
+      destroy: vi.fn(),
+      on: vi.fn(),
+      levels: [],
+      startLoad: vi.fn(),
+      recoverMediaError: vi.fn(),
+    })),
+    {
+      isSupported: vi.fn().mockReturnValue(true),
+      Events: {
+        MANIFEST_PARSED: 'hlsManifestParsed',
+        LEVEL_SWITCHED: 'hlsLevelSwitched',
+        ERROR: 'hlsError',
+      },
+      ErrorTypes: {
+        NETWORK_ERROR: 'networkError',
+        MEDIA_ERROR: 'mediaError',
+      },
+    }
+  )
 
   return { default: MockHls }
 })
