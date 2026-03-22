@@ -2,6 +2,9 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+# Install system dependencies
+RUN apk add --no-cache git git-lfs
+
 # Install dependencies first (cached layer)
 COPY package.json package-lock.json ./
 RUN npm ci

@@ -46,11 +46,34 @@ No dataset param = default Earth with real-time cloud overlay.
 
 ## Development
 
+### Docker (Recommended)
+The project includes a `.devcontainer/` configuration for VS Code Dev Containers.
+
+```bash
+# Start the dev container
+docker-compose up
+
+# Inside the container:
+npm run dev          # Vite dev server at http://localhost:5173
+npm run type-check   # TypeScript check
+npm run build        # Production build to dist/
+```
+
+### Local Development
 ```bash
 npm install
 npm run dev          # Vite dev server at http://localhost:5173
 npm run type-check   # TypeScript check
 npm run build        # Production build to dist/
+```
+
+## Repository
+
+**Remote:** `https://gitlab.sos.noaa.gov/science-on-a-sphere/explorer/sandbox/interactive-sphere.git`
+
+```bash
+git remote -v  # Verify remote is set
+git clone https://gitlab.sos.noaa.gov/science-on-a-sphere/explorer/sandbox/interactive-sphere.git
 ```
 
 ## Key Conventions

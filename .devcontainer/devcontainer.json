@@ -1,0 +1,29 @@
+{
+  "name": "Interactive Sphere",
+  "build": {
+    "dockerfile": "../Dockerfile"
+  },
+  "forwardPorts": [5173],
+  "mounts": [
+    "source=${localWorkspaceFolder}/src,target=/app/src,type=bind",
+    "source=${localWorkspaceFolder}/public,target=/app/public,type=bind",
+    "source=${localWorkspaceFolder}/vite.config.ts,target=/app/vite.config.ts,type=bind",
+    "source=${localWorkspaceFolder}/tsconfig.json,target=/app/tsconfig.json,type=bind"
+  ],
+  "containerEnv": {
+    "CHOKIDAR_USEPOLLING": "true"
+  },
+  "postStartCommand": "cd /app && npm run dev -- --host 0.0.0.0",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "bradlc.vscode-tailwindcss"
+      ],
+      "settings": {
+        "typescript.tsdk": "node_modules/typescript/lib"
+      }
+    }
+  }
+}

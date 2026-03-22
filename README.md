@@ -17,10 +17,26 @@ This proves that we can:
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Node.js 18+ and npm/pnpm
 - Modern browser (Chrome 90+, Firefox 88+, Safari 15+, Edge 90+)
 
-### Installation
+### Option 1: Docker (Recommended)
+The project includes a Docker dev container with all dependencies pre-configured.
+
+```bash
+# Start the development container
+# (VS Code Dev Containers extension will prompt you)
+# Or manually:
+docker-compose up
+
+# The app will open at http://localhost:5173
+```
+
+### Option 2: Local Development
+If you prefer to run locally:
+
+**Prerequisites:**
+- Node.js 18+ and npm/pnpm
+- Git
 
 ```bash
 # Install dependencies
@@ -48,19 +64,29 @@ npm run preview
 ```
 interactive-sphere/
 ├── src/
-│   ├── index.html          # Entry HTML
-│   ├── main.ts             # App initialization
+│   ├── index.html          # Single-page app shell, minimal UI overlays
+│   ├── main.ts             # App entry point, dataset loading, playback controls
 │   ├── types/
-│   │   └── index.ts        # TypeScript type definitions
+│   │   └── index.ts        # TypeScript interfaces and type definitions
 │   ├── services/
-│   │   ├── dataService.ts  # SOS metadata fetching
-│   │   └── sphereRenderer.ts # Three.js WebGL rendering
+│   │   ├── sphereRenderer.ts    # Three.js scene, sphere, skybox, cloud overlay
+│   │   ├── dataService.ts       # SOS metadata fetching & cross-reference caching
+│   │   ├── hlsService.ts        # HLS.js video streaming and manifests
+│   │   └── videoFrameExtractor.ts # Extract video frames to sphere texture
 │   └── utils/
-│       └── time.ts         # Temporal data parsing
+│       └── time.ts         # ISO 8601 parsing, date formatting, video-to-date mapping
+├── public/
+│   └── assets/
+│       ├── Earth_Diffuse_6K.jpg         # Default Earth texture
+│       ├── sos_dataset_metadata.json    # Enriched metadata (520+ datasets)
+│       └── skybox/                      # Milky Way cube map (6 faces)
+├── .devcontainer/          # Docker dev container config
 ├── vite.config.ts          # Vite configuration
 ├── tsconfig.json           # TypeScript configuration
-├── package.json            # Dependencies
-└── PROJECT_PLAN.md         # Full project specification
+├── package.json            # Dependencies and scripts
+├── Dockerfile              # Container image definition
+├── docker-compose.yml      # Container orchestration
+└── README.md               # This file
 ```
 
 ## 🎮 Using the POC
