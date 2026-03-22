@@ -58,7 +58,7 @@ export class HLSService {
   /**
    * Load an HLS stream into the video element
    */
-  loadStream(hlsUrl: string, video: HTMLVideoElement): Promise<void> {
+  loadStream(hlsUrl: string, video: HTMLVideoElement, mobile = false): Promise<void> {
     return new Promise((resolve, reject) => {
       // Clean up previous HLS instance
       if (this.hls) {
@@ -67,11 +67,17 @@ export class HLSService {
       }
 
       if (Hls.isSupported()) {
-        this.hls = new Hls({
+        this.hls = new Hls(mobile ? {
+          // Mobile: minimal buffer to keep memory usage low
+          maxBufferLength: 8,
+          maxMaxBufferLength: 15,
+          startLevel: 0,           // Start at lowest quality level
+          capLevelToPlayerSize: true,
+        } : {
           maxBufferLength: 30,
           maxMaxBufferLength: 60,
-          startLevel: -1,    // Auto-detect on first load
-          capLevelToPlayerSize: false,  // Don't cap to element size (it's hidden)
+          startLevel: -1,          // Auto-detect on first load
+          capLevelToPlayerSize: false,
         })
 
         this.hls.loadSource(hlsUrl)

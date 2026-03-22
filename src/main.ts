@@ -24,6 +24,8 @@ class InteractiveSphere {
     totalFrames: 0
   }
 
+  private readonly isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)
+
   private renderer: SphereRenderer | null = null
   private hlsService: HLSService | null = null
   private frameExtractor: VideoFrameExtractor | null = null
@@ -31,6 +33,7 @@ class InteractiveSphere {
   private scrubbing = false
   private displayInterval: { intervalMs: number; showTime: boolean } | null = null
   private loopPauseTimer: ReturnType<typeof setTimeout> | null = null
+  private lastTextureUpload = 0
 
   async initialize(): Promise<void> {
     try {
@@ -40,10 +43,11 @@ class InteractiveSphere {
       if (!container) throw new Error('Container element not found')
 
       this.renderer = new SphereRenderer(container)
+      const segments = this.isMobile ? 32 : 64
       this.renderer.createSphere({
         radius: 1,
-        widthSegments: 64,
-        heightSegments: 64
+        widthSegments: segments,
+        heightSegments: segments
       })
 
       // Wire up lat/lng display
@@ -197,7 +201,7 @@ class InteractiveSphere {
     const video = this.hlsService.createVideo()
 
     try {
-      await this.hlsService.loadStream(manifest.hls, video)
+      await this.hlsService.loadStream(manifest.hls, video, this.isMobile)
     } catch (hlsError) {
       console.warn('[App] HLS failed, falling back to direct MP4:', hlsError)
       const mp4File = manifest.files.find(f => f.quality === '1080p')
@@ -255,9 +259,14 @@ class InteractiveSphere {
       if (this.hlsService && this.frameExtractor && this.renderer) {
         const video = this.hlsService.getVideo()
         if (video && video.readyState >= 2) {
-          if (!video.paused || this.scrubbing) {
+          // Throttle GPU texture uploads — mobile can't sustain 60 uploads/sec.
+          // 50ms ≈ 20fps which is smooth enough for cloud/environmental animation.
+          const uploadInterval = this.isMobile ? 50 : 0
+          const now = performance.now()
+          if ((!video.paused || this.scrubbing) && now - this.lastTextureUpload >= uploadInterval) {
             const canvas = this.frameExtractor.extractFrame(video)
             this.renderer.updateTexture(canvas)
+            this.lastTextureUpload = now
             this.scrubbing = false
           }
 

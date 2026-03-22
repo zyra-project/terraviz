@@ -37,6 +37,8 @@ export class SphereRenderer {
   private atmosphereInner: THREE.Mesh | null = null
   private atmosphereOuter: THREE.Mesh | null = null
 
+  private readonly isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)
+
   constructor(container: HTMLElement) {
     // Scene setup
     this.scene = new THREE.Scene()
@@ -50,13 +52,15 @@ export class SphereRenderer {
 
     // Renderer setup
     this.renderer = new THREE.WebGLRenderer({
-      antialias: true,
+      antialias: !this.isMobile,  // MSAA is expensive on mobile GPUs
       alpha: true,
       preserveDrawingBuffer: true
     })
     this.renderer.setSize(width, height)
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-    this.renderer.shadowMap.enabled = true
+    // Mobile: cap at 1× — retina pixel ratio doubles the framebuffer and kills perf
+    this.renderer.setPixelRatio(this.isMobile ? 1 : Math.min(window.devicePixelRatio, 2))
+    // Shadow maps are GPU-expensive and barely perceptible on small screens
+    this.renderer.shadowMap.enabled = !this.isMobile
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
     container.appendChild(this.renderer.domElement)
 
@@ -729,7 +733,7 @@ export class SphereRenderer {
       canvas.width = img.width
       canvas.height = img.height
       const ctx = canvas.getContext('2d')!
-      ctx.drawImage(img, 0, 0)
+      ctx.drawImage(img, 0, 0, img.width, img.height)
 
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
       const data = imageData.data
