@@ -543,6 +543,7 @@ export class SphereRenderer {
 
   private lastTouchX = 0
   private lastTouchY = 0
+  private lastPinchDistance = 0
 
   private onTouchStart(e: TouchEvent): void {
     if (e.touches.length === 1) {
@@ -551,6 +552,12 @@ export class SphereRenderer {
       this.velocityY = 0
       this.lastTouchX = e.touches[0].clientX
       this.lastTouchY = e.touches[0].clientY
+    } else if (e.touches.length === 2) {
+      this.controls.isRotating = false
+      this.lastPinchDistance = Math.hypot(
+        e.touches[1].clientX - e.touches[0].clientX,
+        e.touches[1].clientY - e.touches[0].clientY
+      )
     }
   }
 
@@ -568,30 +575,22 @@ export class SphereRenderer {
 
       this.lastTouchX = touch.clientX
       this.lastTouchY = touch.clientY
-      
-    } else if (e.touches.length === 2) {
-      // Two finger pinch zoom
-      const touch1 = e.touches[0]
-      const touch2 = e.touches[1]
-      const distance = Math.hypot(
-        touch2.clientX - touch1.clientX,
-        touch2.clientY - touch1.clientY
-      )
-      
-      const prevDistance = (e as any).previousDistance || distance
-      const pinchDelta = (distance - prevDistance) * 0.002
-      const distFromSurface = this.camera.position.z - 1.0
-      const step = distFromSurface * pinchDelta
 
-      this.camera.position.z = Math.max(1.15, Math.min(3.6, this.camera.position.z - step))
-      
-      ;(e as any).previousDistance = distance
+    } else if (e.touches.length === 2) {
+      const distance = Math.hypot(
+        e.touches[1].clientX - e.touches[0].clientX,
+        e.touches[1].clientY - e.touches[0].clientY
+      )
+      const pinchDelta = (distance - this.lastPinchDistance) * 0.002
+      const distFromSurface = this.camera.position.z - 1.0
+      this.camera.position.z = Math.max(1.15, Math.min(3.6, this.camera.position.z - distFromSurface * pinchDelta))
+      this.lastPinchDistance = distance
     }
   }
 
   private onTouchEnd(): void {
     this.controls.isRotating = false
-    ;(window as any).previousDistance = null
+    this.lastPinchDistance = 0
   }
 
   private onWindowResize(container: HTMLElement): void {

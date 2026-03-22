@@ -49,7 +49,15 @@ export class HLSService {
     video.crossOrigin = 'anonymous'
     video.playsInline = true
     video.muted = true // Required for autoplay policies
-    video.style.display = 'none'
+    // Off-screen rather than display:none — mobile browsers skip frame
+    // decoding for hidden elements, which breaks VideoTexture uploads.
+    video.style.position = 'fixed'
+    video.style.top = '-1px'
+    video.style.left = '-1px'
+    video.style.width = '1px'
+    video.style.height = '1px'
+    video.style.opacity = '0'
+    video.style.pointerEvents = 'none'
     document.body.appendChild(video)
     this.video = video
     return video
