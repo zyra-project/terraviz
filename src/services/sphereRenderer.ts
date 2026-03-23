@@ -93,7 +93,7 @@ export class SphereRenderer {
       return new THREE.MeshBasicMaterial({
         map: tex,
         side: THREE.BackSide,
-        color: new THREE.Color(0.3, 0.3, 0.3) // Dim the stars
+        color: new THREE.Color(0.02, 0.02, 0.02) // Dim the stars
       })
     })
 
