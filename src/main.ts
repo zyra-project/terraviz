@@ -9,8 +9,20 @@ import * as THREE from 'three'
 import { SphereRenderer } from './services/sphereRenderer'
 import { HLSService } from './services/hlsService'
 import { dataService } from './services/dataService'
-import { formatDate, videoTimeToDate, isSubDailyPeriod, inferDisplayInterval, getSunPosition } from './utils/time'
-import type { Dataset, AppState } from './types'
+import { formatDate, videoTimeToDate, isSubDailyPeriod, getSunPosition } from './utils/time'
+import type { AppState } from './types'
+
+// Extracted modules
+import { showBrowseUI, hideBrowseUI } from './ui/browseUI'
+import {
+  createPlaybackState, startPlaybackLoop, stopPlaybackLoop,
+  togglePlayPause, rewind, fastForward, stepFrame, onScrub,
+  updatePlayButton, toggleCaptions, resetPlaybackState,
+  type PlaybackState,
+} from './ui/playbackController'
+import {
+  loadImageDataset, loadVideoDataset, displayDatasetInfo,
+} from './services/datasetLoader'
 
 class InteractiveSphere {
   private appState: AppState = {
@@ -29,11 +41,7 @@ class InteractiveSphere {
   private renderer: SphereRenderer | null = null
   private hlsService: HLSService | null = null
   private videoTexture: THREE.VideoTexture | null = null
-  private playbackUpdateId: number | null = null
-  private scrubbing = false
-  private captionTrack: TextTrack | null = null
-  private displayInterval: { intervalMs: number; showTime: boolean } | null = null
-  private loopPauseTimer: ReturnType<typeof setTimeout> | null = null
+  private playback: PlaybackState = createPlaybackState()
   private loadingHideTimer: ReturnType<typeof setTimeout> | null = null
 
   async initialize(): Promise<void> {
@@ -41,7 +49,6 @@ class InteractiveSphere {
       this.setLoading(true)
       this.setLoadingStatus('Starting up\u2026', 5)
 
-      // Pre-flight: check for WebGL support before attempting to create the renderer
       if (!this.checkWebGLSupport()) return
 
       const container = document.getElementById('container')
@@ -78,19 +85,15 @@ class InteractiveSphere {
 
       const datasetId = this.getDatasetIdFromUrl()
       if (datasetId) {
-        // Load a simple texture first, then replace with dataset
         this.setLoadingStatus('Loading Earth texture\u2026', 50)
         await this.loadDefaultTexture()
         this.setLoadingStatus('Loading dataset\u2026', 65)
         await this.loadDataset(datasetId)
         this.setLoading(false)
       } else {
-        // No dataset — load enhanced Earth + clouds in parallel, then show browse UI.
-        // Progress: 20–90% is allocated to texture downloads.
         this.setLoadingStatus('Loading Earth textures\u2026', 20)
         const cloudUrl = 'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/clouds_8192.jpg'
 
-        // Earth textures are ~80% of total bytes, cloud is ~20%
         let earthFraction = 0
         let cloudFraction = 0
         const updateProgress = () => {
@@ -102,12 +105,15 @@ class InteractiveSphere {
           this.renderer.loadCloudOverlay(cloudUrl, (f) => { cloudFraction = f; updateProgress() })
         ])
 
-        // Position sun based on current UTC time
         const sun = getSunPosition(new Date())
         this.renderer.enableSunLighting(sun.lat, sun.lng)
 
         this.setLoading(false)
-        this.showBrowseUI()
+        showBrowseUI(this.appState.datasets, {
+          onSelectDataset: (id) => this.selectDatasetFromBrowse(id),
+          announce: (msg) => this.announce(msg),
+          isMobile: this.isMobile,
+        })
       }
     } catch (error) {
       this.setLoading(false)
@@ -142,14 +148,13 @@ class InteractiveSphere {
 
   private async loadDataset(datasetId: string): Promise<void> {
     try {
-      // Stash old video/texture references — keep the old texture on the sphere
-      // so there's no black-globe flash while the new dataset loads.
       const oldVideoTexture = this.videoTexture
       const oldHlsService = this.hlsService
       this.videoTexture = null
       this.hlsService = null
-      this.stopPlaybackLoop()
-      this.resetPlaybackState()
+      stopPlaybackLoop(this.playback)
+      this.appState.isPlaying = false
+      resetPlaybackState(this.playback)
 
       this.renderer?.removeCloudOverlay()
       this.renderer?.removeNightLights()
@@ -157,7 +162,6 @@ class InteractiveSphere {
       await this.displayDataset(datasetId)
       this.showHomeButton()
 
-      // New texture is on the sphere — now safe to dispose old resources
       if (oldVideoTexture) oldVideoTexture.dispose()
       if (oldHlsService) oldHlsService.destroy()
     } catch (error) {
@@ -178,305 +182,37 @@ class InteractiveSphere {
       hasTimeData: !!(dataset.startTime && dataset.endTime)
     })
 
-    this.displayDatasetInfo(dataset)
+    displayDatasetInfo(dataset, this.appState.datasets, (id) => this.loadDataset(id))
+
+    if (!this.renderer) throw new Error('Renderer not initialized')
+
+    const loaderCallbacks = {
+      showPlaybackControls: (show: boolean) => this.showPlaybackControls(show),
+      showTimeLabel: (show: boolean) => this.showTimeLabel(show),
+      startPlaybackLoop: () => this.doStartPlaybackLoop(),
+    }
 
     if (dataService.isImageDataset(dataset)) {
-      this.showPlaybackControls(false)
-      await this.loadImageDataset(dataset)
+      await loadImageDataset(dataset, this.renderer, this.appState, this.isMobile, loaderCallbacks)
     } else if (dataService.isVideoDataset(dataset)) {
-      await this.loadVideoDataset(dataset)
+      const result = await loadVideoDataset(
+        dataset, this.renderer, this.appState, this.isMobile, this.playback, loaderCallbacks
+      )
+      this.hlsService = result.hlsService
+      this.videoTexture = result.videoTexture
     } else {
       throw new Error(`Unsupported format: ${dataset.format}`)
     }
   }
 
-  private async loadImageDataset(dataset: Dataset): Promise<void> {
-    const url = dataset.dataLink
-    const ext = url.match(/(\.\w+)$/)
-    const base = ext ? url.slice(0, -ext[1].length) : url
-    const suffix = ext ? ext[1] : ''
-
-    // Pick resolution based on device capability
-    const resolutions = this.isMobile ? ['_2048', '_1024'] : ['_4096', '_2048', '_1024']
-    const candidates = [...resolutions.map(r => `${base}${r}${suffix}`), url]
-
-    const img = await this.tryLoadImage(candidates)
-
-    if (!this.renderer) throw new Error('Renderer not initialized')
-
-    this.renderer.updateTexture(img)
-    if (dataset.startTime) {
-      const showTime = isSubDailyPeriod(dataset.period)
-      this.appState.timeLabel = formatDate(new Date(dataset.startTime), showTime)
-      this.showTimeLabel(true)
-    } else {
-      this.showTimeLabel(false)
-    }
-
-    console.log(`[App] Image dataset loaded successfully: ${img.src}`)
-  }
-
-  private tryLoadImage(urls: string[]): Promise<HTMLImageElement> {
-    return new Promise((resolve, reject) => {
-      let index = 0
-
-      const tryNext = () => {
-        if (index >= urls.length) {
-          reject(new Error(`Failed to load image, tried: ${urls.join(', ')}`))
-          return
-        }
-
-        const img = new Image()
-        img.crossOrigin = 'anonymous'
-        img.onload = () => resolve(img)
-        img.onerror = () => {
-          index++
-          tryNext()
-        }
-        img.src = urls[index]
-      }
-
-      tryNext()
-    })
-  }
-
-  private async loadVideoDataset(dataset: Dataset): Promise<void> {
-    if (!this.renderer) throw new Error('Renderer not initialized')
-
-    const vimeoId = dataService.extractVimeoId(dataset.dataLink)
-    if (!vimeoId) throw new Error(`Could not extract Vimeo ID from: ${dataset.dataLink}`)
-
-    this.hlsService = new HLSService()
-    const manifest = await this.hlsService.fetchManifest(vimeoId)
-    console.log('[App] Video manifest received:', { duration: manifest.duration, qualities: manifest.files.length })
-
-    const video = this.hlsService.createVideo()
-
-    try {
-      await this.hlsService.loadStream(manifest.hls, video, this.isMobile)
-    } catch (hlsError) {
-      console.warn('[App] HLS failed, falling back to direct MP4:', hlsError)
-      const mp4File = manifest.files.find(f => f.quality === '1080p')
-        ?? manifest.files.find(f => f.quality === '720p')
-        ?? manifest.files.find(f => f.width && f.link)
-      if (!mp4File) throw new Error('No playable video source found')
-      await this.hlsService.loadDirect(mp4File.link, video)
-    }
-
-    await new Promise<void>((resolve, reject) => {
-      const onCanPlay = () => {
-        video.removeEventListener('canplay', onCanPlay)
-        resolve()
-      }
-      if (video.readyState >= 3) {
-        resolve()
-      } else {
-        video.addEventListener('canplay', onCanPlay)
-        // Guard against the video never becoming playable (e.g. HLS error
-        // recovery loop on mobile).  20 s is generous — most streams load in
-        // under 5 s on a decent connection.
-        setTimeout(() => {
-          video.removeEventListener('canplay', onCanPlay)
-          reject(new Error('Video took too long to load — check your connection and try again'))
-        }, 20000)
-      }
-    })
-
-    // Show mute button only when the stream has audio
-    const muteBtn = document.getElementById('mute-btn') as HTMLElement | null
-    if (muteBtn) {
-      muteBtn.style.display = this.hlsService.hasAudio ? '' : 'none'
-    }
-
-    // Infer display interval from time range + video duration
-    if (dataset.startTime && dataset.endTime) {
-      const start = new Date(dataset.startTime)
-      const end = new Date(dataset.endTime)
-      this.displayInterval = inferDisplayInterval(start, end, video.duration)
-      console.log('[App] Inferred display interval:', this.displayInterval)
-    } else {
-      this.displayInterval = null
-    }
-
-    // Force first frame decode before attaching to the sphere — keeps
-    // the default Earth texture visible until we have real video data
-    // instead of flashing a black ball.  Muted autoplay is allowed.
-    // Wait for an actual decoded frame via requestVideoFrameCallback
-    // (or a short timeout as fallback) before pausing.
-    try {
-      await video.play()
-      await new Promise<void>((resolve) => {
-        if ('requestVideoFrameCallback' in video) {
-          (video as any).requestVideoFrameCallback(() => resolve())
-        } else {
-          setTimeout(resolve, 150)
-        }
-      })
-      video.pause()
-      video.currentTime = 0
-    } catch {
-      // Autoplay blocked — texture will update when user presses play
-    }
-
-    this.videoTexture = this.renderer.setVideoTexture(video)
-    this.videoTexture.needsUpdate = true
-
-    const scrubber = document.getElementById('scrubber') as HTMLInputElement
-    if (scrubber) {
-      scrubber.max = '1000'
-      scrubber.value = '0'
-    }
-
-    this.updateVideoTimeLabel(0)
-    this.showPlaybackControls(true)
-    this.updatePlayButton(true)
-    this.startPlaybackLoop()
-
-    if (dataset.closedCaptionLink) {
-      this.loadCaptions(video, dataset.closedCaptionLink)
-    }
-
-    console.log('[App] Video dataset loaded, duration:', manifest.duration, 's')
-  }
-
-  private startPlaybackLoop(): void {
-    this.stopPlaybackLoop()
-
-    const loop = () => {
-      if (this.hlsService && this.renderer) {
-        const video = this.hlsService.getVideo()
-        if (video && video.readyState >= 2) {
-          // VideoTexture handles GPU uploads natively — just flag needsUpdate
-          // when scrubbing a paused video so Three.js re-uploads the new frame.
-          if (this.scrubbing && this.videoTexture) {
-            this.videoTexture.needsUpdate = true
-            this.scrubbing = false
-          }
-
-          // Auto-loop: pause at end, then restart after 2 seconds
-          if (!video.paused && video.currentTime >= video.duration - 0.05 && !this.loopPauseTimer) {
-            video.pause()
-            this.loopPauseTimer = setTimeout(() => {
-              this.loopPauseTimer = null
-              if (this.hlsService && this.appState.isPlaying) {
-                video.currentTime = 0
-                video.play().catch(() => {})
-              }
-            }, 2000)
-          }
-
-          const scrubber = document.getElementById('scrubber') as HTMLInputElement
-          if (scrubber && !scrubber.matches(':active')) {
-            const fraction = video.duration > 0 ? video.currentTime / video.duration : 0
-            scrubber.value = String(Math.round(fraction * 1000))
-          }
-
-          this.updateVideoTimeLabel(video.currentTime)
-        }
-      }
-
-      this.playbackUpdateId = requestAnimationFrame(loop)
-    }
-
-    this.playbackUpdateId = requestAnimationFrame(loop)
-  }
-
-  private stopPlaybackLoop(): void {
-    if (this.playbackUpdateId !== null) {
-      cancelAnimationFrame(this.playbackUpdateId)
-      this.playbackUpdateId = null
-    }
-  }
-
-  // --- Closed captions ---
-
-  private async loadCaptions(video: HTMLVideoElement, captionUrl: string): Promise<void> {
-    try {
-      // sos.noaa.gov blocks cross-origin requests; route through the existing proxy
-      const fetchUrl = captionUrl.includes('sos.noaa.gov')
-        ? `https://video-proxy.zyra-project.org/captions?url=${encodeURIComponent(captionUrl)}`
-        : captionUrl
-
-      const response = await fetch(fetchUrl)
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      const srt = await response.text()
-
-      const cues = this.parseSRT(srt)
-      if (cues.length === 0) {
-        console.warn('[App] Caption file contained no parseable cues')
-        return
-      }
-
-      const track = video.addTextTrack('captions', 'Closed Captions', 'en')
-      track.mode = 'hidden'
-      for (const cue of cues) {
-        track.addCue(new VTTCue(cue.start, cue.end, cue.text))
-      }
-
-      track.addEventListener('cuechange', () => {
-        const overlay = document.getElementById('caption-overlay')
-        if (!overlay) return
-        const activeCues = track.activeCues
-        if (!activeCues || activeCues.length === 0 || track.mode !== 'showing') {
-          overlay.textContent = ''
-          overlay.style.display = 'none'
-        } else {
-          overlay.textContent = Array.from(activeCues).map(c => (c as VTTCue).text).join('\n')
-          overlay.style.display = 'block'
-        }
-      })
-
-      this.captionTrack = track
-
-      const ccBtn = document.getElementById('cc-btn')
-      if (ccBtn) ccBtn.classList.remove('hidden')
-
-      console.log(`[App] Loaded ${cues.length} caption cues`)
-    } catch (error) {
-      console.warn('[App] Failed to load captions:', error)
-    }
-  }
-
-  private parseSRT(srt: string): Array<{ start: number; end: number; text: string }> {
-    const cues: Array<{ start: number; end: number; text: string }> = []
-    const blocks = srt.trim().split(/\r?\n\s*\r?\n/)
-    for (const block of blocks) {
-      const lines = block.trim().split(/\r?\n/)
-      let timingIdx = -1
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].includes('-->')) { timingIdx = i; break }
-      }
-      if (timingIdx < 0) continue
-      const parts = lines[timingIdx].split('-->')
-      if (parts.length !== 2) continue
-      const start = this.parseSRTTime(parts[0].trim())
-      const end = this.parseSRTTime(parts[1].trim())
-      const text = lines.slice(timingIdx + 1).join('\n').trim()
-      if (text) cues.push({ start, end, text })
-    }
-    return cues
-  }
-
-  private parseSRTTime(t: string): number {
-    const m = t.match(/(\d+):(\d+):(\d+)[,.](\d+)/)
-    if (!m) return 0
-    return parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseInt(m[3]) + parseInt(m[4]) / 1000
-  }
-
-  private toggleCaptions(): void {
-    if (!this.captionTrack) return
-    const ccBtn = document.getElementById('cc-btn')
-    const overlay = document.getElementById('caption-overlay')
-    const turning = this.captionTrack.mode !== 'showing'
-    this.captionTrack.mode = turning ? 'showing' : 'hidden'
-    if (ccBtn) {
-      ccBtn.style.color = turning ? '#4da6ff' : ''
-      ccBtn.style.borderColor = turning ? '#4da6ff' : ''
-    }
-    if (!turning && overlay) {
-      overlay.textContent = ''
-      overlay.style.display = 'none'
-    }
+  private doStartPlaybackLoop(): void {
+    startPlaybackLoop(
+      this.playback,
+      this.hlsService,
+      this.videoTexture,
+      this.appState,
+      (time) => this.updateVideoTimeLabel(time),
+    )
   }
 
   private updateVideoTimeLabel(videoTime: number): void {
@@ -487,11 +223,11 @@ class InteractiveSphere {
       const start = new Date(dataset.startTime)
       const end = new Date(dataset.endTime)
       const videoDuration = this.hlsService?.duration ?? 1
-      const snapMs = this.displayInterval?.intervalMs
+      const snapMs = this.playback.displayInterval?.intervalMs
       const currentDate = videoTimeToDate(videoTime, videoDuration, start, end, snapMs)
       const showTime = dataset.period
         ? isSubDailyPeriod(dataset.period)
-        : (this.displayInterval?.showTime ?? false)
+        : (this.playback.displayInterval?.showTime ?? false)
       this.appState.timeLabel = formatDate(currentDate, showTime)
       this.showTimeLabel(true)
     } else {
@@ -506,7 +242,6 @@ class InteractiveSphere {
       if (show) {
         timeDisplay.textContent = this.appState.timeLabel
         timeLabel.classList.remove('hidden')
-        // Update scrubber accessible text with current time
         const scrubber = document.getElementById('scrubber')
         if (scrubber) scrubber.setAttribute('aria-valuetext', this.appState.timeLabel)
       } else {
@@ -515,235 +250,7 @@ class InteractiveSphere {
     }
   }
 
-  // --- Playback controls ---
-
-  private togglePlayPause(): void {
-    if (!this.hlsService) return
-
-    if (this.hlsService.paused) {
-      this.hlsService.play()?.catch(e => {
-        console.warn('[App] Play failed:', e)
-        this.setError('Playback failed — try clicking play again')
-      })
-      this.appState.isPlaying = true
-    } else {
-      this.hlsService.pause()
-      this.appState.isPlaying = false
-    }
-    this.updatePlayButton(this.hlsService.paused)
-  }
-
-  private rewind(): void {
-    if (!this.hlsService) return
-    this.hlsService.currentTime = 0
-    this.hlsService.pause()
-    this.appState.isPlaying = false
-    this.updatePlayButton(true)
-    this.scrubbing = true
-  }
-
-  private fastForward(): void {
-    if (!this.hlsService) return
-    const video = this.hlsService.getVideo()
-    if (video && video.duration) {
-      video.currentTime = Math.max(0, video.duration - 0.05)
-      this.hlsService.pause()
-      this.appState.isPlaying = false
-      this.updatePlayButton(true)
-      this.scrubbing = true
-    }
-  }
-
-  private stepFrame(direction: 1 | -1): void {
-    if (!this.hlsService) return
-    const video = this.hlsService.getVideo()
-    if (!video || !video.duration) return
-
-    if (!video.paused) {
-      this.hlsService.pause()
-      this.appState.isPlaying = false
-      this.updatePlayButton(true)
-    }
-
-    // Step by one display interval worth of video time, or 1 frame if no interval
-    let step: number
-    const dataset = this.appState.currentDataset
-    if (this.displayInterval && dataset?.startTime && dataset?.endTime) {
-      const totalMs = new Date(dataset.endTime).getTime() - new Date(dataset.startTime).getTime()
-      step = (this.displayInterval.intervalMs / totalMs) * video.duration
-    } else {
-      step = 1 / 30
-    }
-
-    video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + direction * step))
-    this.scrubbing = true
-  }
-
-  private onScrub(value: number): void {
-    if (!this.hlsService) return
-    const fraction = value / 1000
-    const video = this.hlsService.getVideo()
-    if (video && video.duration) {
-      video.currentTime = fraction * video.duration
-      this.scrubbing = true
-    }
-  }
-
-  private updatePlayButton(paused: boolean): void {
-    const playBtn = document.getElementById('play-btn')
-    if (playBtn) {
-      playBtn.textContent = paused ? '\u25B6\uFE0E' : '\u23F8\uFE0E'
-      playBtn.setAttribute('aria-label', paused ? 'Play' : 'Pause')
-    }
-    this.announce(paused ? 'Playback paused' : 'Playback started')
-  }
-
-  // --- Accessibility announcer ---
-
-  private announce(message: string): void {
-    const el = document.getElementById('a11y-announcer')
-    if (el) {
-      // Clear then set to ensure re-announcement of same message
-      el.textContent = ''
-      requestAnimationFrame(() => { el.textContent = message })
-    }
-  }
-
   // --- UI helpers ---
-
-  private displayDatasetInfo(dataset: Dataset): void {
-    const infoPanel = document.getElementById('info-panel')
-    const infoTitle = document.getElementById('info-title')
-    const infoBody = document.getElementById('info-body')
-    const infoHeader = document.getElementById('info-header')
-    if (!infoPanel || !infoTitle || !infoBody || !infoHeader) return
-
-    const e = dataset.enriched
-
-    // Header — always visible
-    infoTitle.textContent = dataset.title
-
-    // Body content
-    let html = ''
-
-    // Source
-    const source = e?.datasetDeveloper?.name || dataset.organization
-    if (source) {
-      html += `<p class="info-source">${source}</p>`
-    }
-
-    // Description
-    const description = e?.description || dataset.abstractTxt
-    if (description) {
-      let text = description
-      if (text.length > 600) {
-        const cut = text.lastIndexOf('.', 600)
-        text = text.substring(0, cut > 200 ? cut + 1 : 600) + '…'
-      }
-      html += `<p class="info-description">${text}</p>`
-    }
-
-    // Legend image (inline thumbnail, click to enlarge)
-    if (dataset.legendLink) {
-      html += `<img src="${dataset.legendLink}" alt="Legend" class="info-legend-thumb" tabindex="0" role="button" aria-label="Enlarge legend">`
-    }
-
-    // Categories
-    if (e?.categories) {
-      const cats = Object.entries(e.categories)
-        .map(([group, subs]) => subs.length ? `${group}: ${subs.join(', ')}` : group)
-      html += `<p class="info-categories">${cats.join(' · ')}</p>`
-    }
-
-    // Keywords
-    const keywords = e?.keywords || dataset.tags
-    if (keywords && keywords.length > 0) {
-      html += `<div class="info-keywords">`
-      keywords.forEach(kw => {
-        html += `<span class="info-keyword">${kw}</span>`
-      })
-      html += `</div>`
-    }
-
-    // Related datasets — clickable links that load into the sphere
-    if (e?.relatedDatasets && e.relatedDatasets.length > 0) {
-      html += `<p class="info-section-label">Related Datasets</p>`
-      html += `<ul class="info-related">`
-      e.relatedDatasets.forEach(rd => {
-        // Find matching dataset ID by title
-        const match = this.appState.datasets.find(d =>
-          d.title.toLowerCase().replace(/\s*\(movie\)\s*/g, '').trim() ===
-          rd.title.toLowerCase().trim()
-        )
-        if (match) {
-          html += `<li><a href="?dataset=${encodeURIComponent(match.id)}" data-dataset-id="${match.id}">${rd.title}</a></li>`
-        } else {
-          html += `<li><span style="color: #777; font-size: 0.7rem;">${rd.title}</span></li>`
-        }
-      })
-      html += `</ul>`
-    }
-
-    // Catalog link
-    if (e?.catalogUrl) {
-      html += `<p class="info-section-label">Source</p>`
-      html += `<a href="${e.catalogUrl}" target="_blank" rel="noopener" class="info-catalog-link">View on NOAA SOS →</a>`
-    }
-
-    infoBody.innerHTML = html
-    infoPanel.classList.remove('hidden')
-
-    // Wire up legend thumbnail to open modal
-    const legendThumb = infoBody.querySelector('.info-legend-thumb') as HTMLElement | null
-    if (legendThumb && dataset.legendLink) {
-      const openLegendModal = () => {
-        let overlay = document.getElementById('legend-modal-overlay')
-        if (!overlay) {
-          overlay = document.createElement('div')
-          overlay.id = 'legend-modal-overlay'
-          overlay.className = 'legend-modal-overlay'
-          overlay.innerHTML = `<img class="legend-modal-img" alt="Legend">`
-          overlay.addEventListener('click', () => overlay!.classList.add('hidden'))
-          document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') overlay!.classList.add('hidden')
-          })
-          document.body.appendChild(overlay)
-        }
-        const img = overlay.querySelector('img')!
-        img.src = dataset.legendLink!
-        overlay.classList.remove('hidden')
-      }
-      legendThumb.addEventListener('click', openLegendModal)
-      legendThumb.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openLegendModal() }
-      })
-    }
-
-    // Wire up related dataset links to load in-place
-    infoBody.querySelectorAll('a[data-dataset-id]').forEach(link => {
-      link.addEventListener('click', (ev) => {
-        ev.preventDefault()
-        const id = (link as HTMLElement).dataset.datasetId
-        if (id) {
-          window.history.pushState({}, '', `?dataset=${encodeURIComponent(id)}`)
-          this.loadDataset(id)
-        }
-      })
-    })
-
-    // Toggle expand/collapse on header click or keyboard
-    const toggleInfoPanel = () => {
-      const expanded = infoPanel.classList.toggle('expanded')
-      infoHeader.setAttribute('aria-expanded', String(expanded))
-    }
-    infoHeader.onclick = toggleInfoPanel
-    infoHeader.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault()
-        toggleInfoPanel()
-      }
-    })
-  }
 
   private showPlaybackControls(show: boolean): void {
     const controls = document.getElementById('playback-controls')
@@ -756,10 +263,6 @@ class InteractiveSphere {
     }
   }
 
-  /**
-   * Test whether the browser can create a WebGL context.
-   * If not, replace the loading screen with an actionable error message.
-   */
   private checkWebGLSupport(): boolean {
     const canvas = document.createElement('canvas')
     const gl = canvas.getContext('webgl2') || canvas.getContext('webgl')
@@ -809,13 +312,11 @@ class InteractiveSphere {
       if (screen) {
         screen.setAttribute('aria-busy', 'false')
         this.setLoadingStatus('Ready', 100)
-        // Brief pause so the "100%" fill is visible before fading
         this.loadingHideTimer = setTimeout(() => {
           this.loadingHideTimer = null
-          screen.style.opacity = '' // clear any inline override before CSS class takes effect
+          screen.style.opacity = ''
           screen.classList.add('fade-out')
           screen.addEventListener('transitionend', () => {
-            // Only hide if we're still faded out (not re-shown mid-transition)
             if (screen.classList.contains('fade-out')) {
               screen.style.display = 'none'
             }
@@ -851,31 +352,16 @@ class InteractiveSphere {
     console.error('[App] Error:', error)
   }
 
-  /** Reset playback UI state without disposing video/texture resources. */
-  private resetPlaybackState(): void {
-    this.appState.isPlaying = false
-    this.displayInterval = null
-    if (this.loopPauseTimer) {
-      clearTimeout(this.loopPauseTimer)
-      this.loopPauseTimer = null
-    }
-    this.captionTrack = null
-    const ccBtn = document.getElementById('cc-btn')
-    if (ccBtn) {
-      ccBtn.classList.add('hidden')
-      ccBtn.style.color = ''
-      ccBtn.style.borderColor = ''
-    }
-    const overlay = document.getElementById('caption-overlay')
-    if (overlay) {
-      overlay.textContent = ''
-      overlay.style.display = 'none'
+  private announce(message: string): void {
+    const el = document.getElementById('a11y-announcer')
+    if (el) {
+      el.textContent = ''
+      requestAnimationFrame(() => { el.textContent = message })
     }
   }
 
-  /** Full cleanup: stop playback, reset UI state, and dispose video/texture resources. */
   private cleanupVideo(): void {
-    this.stopPlaybackLoop()
+    stopPlaybackLoop(this.playback)
     if (this.videoTexture) {
       this.videoTexture.dispose()
       this.videoTexture = null
@@ -884,11 +370,13 @@ class InteractiveSphere {
       this.hlsService.destroy()
       this.hlsService = null
     }
-    this.resetPlaybackState()
+    this.appState.isPlaying = false
+    resetPlaybackState(this.playback)
   }
 
+  // --- Event listeners ---
+
   setupEventListeners(): void {
-    // Home button
     document.getElementById('home-btn')?.addEventListener('click', () => this.goHome())
 
     // Browse panel collapse/expand toggle
@@ -910,13 +398,19 @@ class InteractiveSphere {
       })
     }
 
-    // Transport controls
-    document.getElementById('rewind-btn')?.addEventListener('click', () => this.rewind())
-    document.getElementById('step-back-btn')?.addEventListener('click', () => this.stepFrame(-1))
-    document.getElementById('play-btn')?.addEventListener('click', () => this.togglePlayPause())
-    document.getElementById('step-fwd-btn')?.addEventListener('click', () => this.stepFrame(1))
-    document.getElementById('ff-btn')?.addEventListener('click', () => this.fastForward())
-    document.getElementById('cc-btn')?.addEventListener('click', () => this.toggleCaptions())
+    // Transport controls — delegate to playback module
+    document.getElementById('rewind-btn')?.addEventListener('click', () =>
+      rewind(this.hlsService, this.appState, this.playback, (m) => this.announce(m)))
+    document.getElementById('step-back-btn')?.addEventListener('click', () =>
+      stepFrame(-1, this.hlsService, this.appState, this.playback, (m) => this.announce(m)))
+    document.getElementById('play-btn')?.addEventListener('click', () =>
+      togglePlayPause(this.hlsService, this.appState, (m) => this.announce(m)))
+    document.getElementById('step-fwd-btn')?.addEventListener('click', () =>
+      stepFrame(1, this.hlsService, this.appState, this.playback, (m) => this.announce(m)))
+    document.getElementById('ff-btn')?.addEventListener('click', () =>
+      fastForward(this.hlsService, this.appState, this.playback, (m) => this.announce(m)))
+    document.getElementById('cc-btn')?.addEventListener('click', () =>
+      toggleCaptions(this.playback))
 
     // Mute/unmute toggle
     const muteBtn = document.getElementById('mute-btn')
@@ -932,7 +426,7 @@ class InteractiveSphere {
       })
     }
 
-    // Auto-rotate (both inline and standalone buttons)
+    // Auto-rotate
     const rotateBtns = [
       document.getElementById('auto-rotate-btn'),
       document.getElementById('auto-rotate-standalone')
@@ -953,368 +447,44 @@ class InteractiveSphere {
     const scrubber = document.getElementById('scrubber') as HTMLInputElement
     if (scrubber) {
       scrubber.addEventListener('input', () => {
-        this.onScrub(parseInt(scrubber.value, 10))
+        onScrub(parseInt(scrubber.value, 10), this.hlsService, this.playback)
       })
     }
 
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
-      // Don't intercept keyboard shortcuts when focus is on form elements or browse cards
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
       const browseOverlay = document.getElementById('browse-overlay')
       if (browseOverlay && !browseOverlay.classList.contains('hidden') && browseOverlay.contains(e.target as Node)) return
 
       if (e.code === 'Space') {
         e.preventDefault()
-        this.togglePlayPause()
+        togglePlayPause(this.hlsService, this.appState, (m) => this.announce(m))
       } else if (e.code === 'ArrowLeft') {
         e.preventDefault()
-        this.stepFrame(-1)
+        stepFrame(-1, this.hlsService, this.appState, this.playback, (m) => this.announce(m))
       } else if (e.code === 'ArrowRight') {
         e.preventDefault()
-        this.stepFrame(1)
+        stepFrame(1, this.hlsService, this.appState, this.playback, (m) => this.announce(m))
       } else if (e.code === 'Home') {
         e.preventDefault()
-        this.rewind()
+        rewind(this.hlsService, this.appState, this.playback, (m) => this.announce(m))
       } else if (e.code === 'End') {
         e.preventDefault()
-        this.fastForward()
+        fastForward(this.hlsService, this.appState, this.playback, (m) => this.announce(m))
       }
     })
   }
 
-  // --- Browse UI ---
-
-  private showBrowseUI(): void {
-    const overlay = document.getElementById('browse-overlay')
-    if (!overlay) return
-    overlay.classList.remove('hidden')
-
-    const datasets = this.appState.datasets
-      .filter(d => !d.isHidden)
-      .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0) || a.title.localeCompare(b.title))
-
-    // Update search placeholder with actual count
-    const searchEl = document.getElementById('browse-search') as HTMLInputElement | null
-    if (searchEl) {
-      searchEl.placeholder = `Search ${datasets.length} datasets\u2026`
-    }
-
-    // Collect unique category keys from both enriched metadata and S3 tags
-    const catSet = new Set<string>()
-    for (const d of datasets) {
-      if (d.enriched?.categories) {
-        Object.keys(d.enriched.categories).forEach(c => catSet.add(c))
-      }
-      if (d.tags) {
-        d.tags.forEach(t => catSet.add(t))
-      }
-    }
-    // Remove tags that aren't useful as browse filters
-    catSet.delete('Movies')
-    catSet.delete('Layers')
-    catSet.delete('Tours')
-    const categories = ['All', ...Array.from(catSet).sort()]
-
-    let activeCategory = 'All'
-    let activeSubCategory: string | null = null
-    let activeSort: 'relevance' | 'newest' | 'az' = 'relevance'
-    let searchQuery = ''
-
-    // Build sub-category lookup: top-level category -> sorted sub-categories
-    const subCatMap = new Map<string, Set<string>>()
-    for (const d of datasets) {
-      if (d.enriched?.categories) {
-        for (const [cat, subs] of Object.entries(d.enriched.categories)) {
-          if (!subCatMap.has(cat)) subCatMap.set(cat, new Set())
-          for (const sub of subs) {
-            if (sub) subCatMap.get(cat)!.add(sub)
-          }
-        }
-      }
-    }
-
-    // Render category chips
-    const chipBar = document.getElementById('browse-category-bar')
-    if (chipBar) {
-      chipBar.innerHTML = categories
-        .map(cat => `<button class="browse-chip${cat === 'All' ? ' active' : ''}" data-cat="${this.escapeAttr(cat)}" aria-pressed="${cat === 'All'}">${this.escapeHtml(cat)}</button>`)
-        .join('')
-
-      chipBar.addEventListener('click', (e) => {
-        const btn = (e.target as HTMLElement).closest('.browse-chip') as HTMLElement | null
-        if (!btn) return
-        activeCategory = btn.dataset.cat ?? 'All'
-        activeSubCategory = null
-        chipBar.querySelectorAll('.browse-chip').forEach(c => {
-          c.classList.remove('active')
-          c.setAttribute('aria-pressed', 'false')
-        })
-        btn.classList.add('active')
-        btn.setAttribute('aria-pressed', 'true')
-        renderSubChips()
-        renderCards()
-      })
-    }
-
-    // Sub-category chip bar
-    const subChipBar = document.getElementById('browse-subcategory-bar')
-    const renderSubChips = () => {
-      if (!subChipBar) return
-      if (activeCategory === 'All' || !subCatMap.has(activeCategory)) {
-        subChipBar.innerHTML = ''
-        return
-      }
-      const subs = Array.from(subCatMap.get(activeCategory)!).sort()
-      if (subs.length === 0) { subChipBar.innerHTML = ''; return }
-      subChipBar.innerHTML = subs
-        .map(s => `<button class="browse-subchip${activeSubCategory === s ? ' active' : ''}" data-sub="${this.escapeAttr(s)}" aria-pressed="${activeSubCategory === s}">${this.escapeHtml(s)}</button>`)
-        .join('')
-    }
-    if (subChipBar) {
-      subChipBar.addEventListener('click', (e) => {
-        const btn = (e.target as HTMLElement).closest('.browse-subchip') as HTMLElement | null
-        if (!btn) return
-        const sub = btn.dataset.sub ?? null
-        activeSubCategory = (activeSubCategory === sub) ? null : sub
-        renderSubChips()
-        renderCards()
-      })
-    }
-
-    // Search input + clear button
-    const searchInput = document.getElementById('browse-search') as HTMLInputElement | null
-    const searchClear = document.getElementById('browse-search-clear')
-    const updateSearchClear = () => {
-      searchClear?.classList.toggle('hidden', !searchInput?.value)
-    }
-    if (searchInput) {
-      searchInput.addEventListener('input', () => {
-        searchQuery = searchInput.value.trim().toLowerCase()
-        updateSearchClear()
-        renderCards()
-      })
-      // Focus on desktop, skip on mobile to avoid keyboard pop-up
-      if (!this.isMobile) {
-        setTimeout(() => searchInput.focus(), 200)
-      }
-    }
-    if (searchClear && searchInput) {
-      searchClear.addEventListener('click', () => {
-        searchInput.value = ''
-        searchQuery = ''
-        updateSearchClear()
-        searchInput.focus()
-        renderCards()
-      })
-    }
-
-    // Sort controls
-    const sortBar = document.getElementById('browse-sort')
-    type SortKey = 'relevance' | 'newest' | 'az'
-    const sortOptions: Array<{ key: SortKey; label: string }> = [
-      { key: 'relevance', label: 'Relevance' },
-      { key: 'newest', label: 'Newest' },
-      { key: 'az', label: 'A\u2013Z' },
-    ]
-    if (sortBar) {
-      sortBar.innerHTML = sortOptions
-        .map(o => `<button class="browse-sort-btn${o.key === activeSort ? ' active' : ''}" data-sort="${o.key}" aria-pressed="${o.key === activeSort}">${o.label}</button>`)
-        .join('')
-      sortBar.addEventListener('click', (e) => {
-        const btn = (e.target as HTMLElement).closest('.browse-sort-btn') as HTMLElement | null
-        if (!btn || !btn.dataset.sort) return
-        activeSort = btn.dataset.sort as typeof activeSort
-        sortBar.querySelectorAll('.browse-sort-btn').forEach(b => {
-          b.classList.remove('active')
-          b.setAttribute('aria-pressed', 'false')
-        })
-        btn.classList.add('active')
-        btn.setAttribute('aria-pressed', 'true')
-        renderCards()
-      })
-    }
-
-    const renderCards = () => {
-      const grid = document.getElementById('browse-grid')
-      const countEl = document.getElementById('browse-count')
-      if (!grid) return
-
-      let filtered = [...datasets]
-
-      // Category filter
-      if (activeCategory !== 'All') {
-        filtered = filtered.filter(d =>
-          (d.enriched?.categories != null && activeCategory in d.enriched.categories) ||
-          (d.tags != null && d.tags.includes(activeCategory))
-        )
-        // Sub-category filter
-        if (activeSubCategory) {
-          filtered = filtered.filter(d => {
-            const subs = d.enriched?.categories?.[activeCategory]
-            return subs != null && subs.includes(activeSubCategory!)
-          })
-        }
-      }
-
-      // Text search
-      if (searchQuery) {
-        filtered = filtered.filter(d => {
-          const title = d.title.toLowerCase()
-          const desc = (d.enriched?.description ?? d.abstractTxt ?? '').toLowerCase()
-          const keywords = [...(d.enriched?.keywords ?? []), ...(d.tags ?? [])].join(' ').toLowerCase()
-          const cats = Object.keys(d.enriched?.categories ?? {}).join(' ').toLowerCase()
-          return title.includes(searchQuery) || desc.includes(searchQuery) ||
-                 keywords.includes(searchQuery) || cats.includes(searchQuery)
-        })
-      }
-
-      // Sort
-      switch (activeSort) {
-        case 'newest':
-          filtered.sort((a, b) => {
-            const da = a.enriched?.dateAdded ?? ''
-            const db = b.enriched?.dateAdded ?? ''
-            return db.localeCompare(da)
-          })
-          break
-        case 'az':
-          filtered.sort((a, b) => a.title.localeCompare(b.title))
-          break
-        // 'relevance': keep the original weight-based order from datasets
-      }
-
-      if (countEl) {
-        countEl.textContent = `${filtered.length.toLocaleString()} dataset${filtered.length !== 1 ? 's' : ''}`
-      }
-
-      if (filtered.length === 0) {
-        grid.innerHTML = '<div class="browse-no-results">No datasets match your search.</div>'
-        return
-      }
-
-      grid.innerHTML = filtered.map(d => {
-        const isVideo = dataService.isVideoDataset(d)
-        const cats = d.enriched?.categories ? Object.keys(d.enriched.categories).slice(0, 3) : []
-        const rawDesc = d.enriched?.description ?? d.abstractTxt ?? ''
-        const shortDesc = rawDesc.length > 120 ? rawDesc.substring(0, 120).trim() + '\u2026' : rawDesc
-
-        const catsHtml = cats.length
-          ? `<div class="browse-card-cats">${cats.map(c => `<span class="browse-card-cat">${this.escapeHtml(c)}</span>`).join('')}</div>`
-          : ''
-        const shortDescHtml = shortDesc
-          ? `<p class="browse-card-desc">${this.escapeHtml(shortDesc)}</p>`
-          : ''
-
-        // Expanded detail section
-        const fullDescHtml = rawDesc
-          ? `<div class="browse-card-full-desc">${this.escapeHtml(rawDesc)}</div>`
-          : ''
-        const org = d.organization
-        const dev = d.enriched?.datasetDeveloper?.name
-        const visDev = d.enriched?.visDeveloper?.name
-        const dateAdded = d.enriched?.dateAdded
-        const keywords = [...(d.enriched?.keywords ?? []), ...(d.tags ?? [])]
-        const catalogUrl = d.enriched?.catalogUrl
-        const timeRange = d.startTime && d.endTime
-          ? `${new Date(d.startTime).toLocaleDateString()} \u2013 ${new Date(d.endTime).toLocaleDateString()}`
-          : ''
-
-        let metaHtml = ''
-        if (org) metaHtml += `<div class="browse-card-meta"><strong>Source:</strong> ${this.escapeHtml(org)}</div>`
-        if (dev) metaHtml += `<div class="browse-card-meta"><strong>Dataset developer:</strong> ${this.escapeHtml(dev)}</div>`
-        if (visDev) metaHtml += `<div class="browse-card-meta"><strong>Visualization:</strong> ${this.escapeHtml(visDev)}</div>`
-        if (timeRange) metaHtml += `<div class="browse-card-meta"><strong>Time range:</strong> ${timeRange}</div>`
-        if (dateAdded) metaHtml += `<div class="browse-card-meta"><strong>Added:</strong> ${this.escapeHtml(dateAdded)}</div>`
-        if (catalogUrl) metaHtml += `<div class="browse-card-meta"><a href="${this.escapeAttr(catalogUrl)}" target="_blank" rel="noopener" style="color: #4da6ff; text-decoration: none; font-size: 0.65rem;">View in SOS catalog \u2197</a></div>`
-
-        const keywordsHtml = keywords.length
-          ? `<div class="browse-card-keywords">${keywords.slice(0, 12).map(k => `<span class="browse-card-keyword" data-keyword="${this.escapeAttr(k)}">${this.escapeHtml(k)}</span>`).join('')}</div>`
-          : ''
-
-        const thumbHtml = d.thumbnailLink
-          ? `<img class="browse-card-thumb" src="${this.escapeAttr(d.thumbnailLink)}" alt="${this.escapeAttr(d.title)} thumbnail" loading="lazy">`
-          : ''
-
-        return `<div class="browse-card" data-id="${this.escapeAttr(d.id)}" role="listitem" tabindex="0" aria-label="${this.escapeAttr(d.title)}" aria-expanded="false">
-          ${thumbHtml}
-          <div class="browse-card-body">
-            <div class="browse-card-header">
-              <span class="browse-card-title">${this.escapeHtml(d.title)}</span>
-              <button class="browse-card-load" data-id="${this.escapeAttr(d.id)}" aria-label="Load ${this.escapeAttr(d.title)}">Load</button>
-            </div>
-            ${catsHtml}${shortDescHtml}
-            <div class="browse-card-details">
-              ${fullDescHtml}${metaHtml}${keywordsHtml}
-            </div>
-          </div>
-        </div>`
-      }).join('')
-
-      // Wire up click + keyboard handlers — expand/collapse on card, load on button
-      grid.querySelectorAll<HTMLElement>('.browse-card').forEach(card => {
-        const toggleExpand = () => {
-          const wasExpanded = card.classList.contains('expanded')
-          grid.querySelectorAll<HTMLElement>('.browse-card.expanded').forEach(c => {
-            c.classList.remove('expanded')
-            c.setAttribute('aria-expanded', 'false')
-          })
-          if (!wasExpanded) {
-            card.classList.add('expanded')
-            card.setAttribute('aria-expanded', 'true')
-            card.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-          }
-        }
-
-        card.addEventListener('click', (e) => {
-          const loadBtn = (e.target as HTMLElement).closest('.browse-card-load') as HTMLElement | null
-          if (loadBtn) {
-            e.stopPropagation()
-            const id = loadBtn.dataset.id
-            if (id) this.selectDatasetFromBrowse(id)
-            return
-          }
-          if ((e.target as HTMLElement).tagName === 'A') return
-          // Clickable keywords — filter by the clicked keyword
-          const kwEl = (e.target as HTMLElement).closest('.browse-card-keyword') as HTMLElement | null
-          if (kwEl?.dataset.keyword && searchInput) {
-            e.stopPropagation()
-            searchInput.value = kwEl.dataset.keyword
-            searchQuery = kwEl.dataset.keyword.trim().toLowerCase()
-            updateSearchClear()
-            renderCards()
-            return
-          }
-          toggleExpand()
-        })
-
-        card.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            // Don't toggle when focus is on the Load button (let it click naturally)
-            if ((e.target as HTMLElement).closest('.browse-card-load')) return
-            e.preventDefault()
-            toggleExpand()
-          }
-        })
-      })
-    }
-
-    renderCards()
-  }
-
-  private hideBrowseUI(): void {
-    const overlay = document.getElementById('browse-overlay')
-    overlay?.classList.add('hidden')
-  }
+  // --- Navigation ---
 
   private async selectDatasetFromBrowse(id: string): Promise<void> {
-    this.hideBrowseUI()
+    hideBrowseUI()
     this.announce('Loading dataset\u2026')
     this.showLoadingScreen('Loading dataset\u2026', 20)
     window.history.pushState({}, '', `?dataset=${encodeURIComponent(id)}`)
     await this.loadDataset(id)
     this.setLoading(false)
-    // Announce and move focus to playback area
     const dataset = this.appState.currentDataset
     if (dataset) {
       this.announce(`Loaded dataset: ${dataset.title}`)
@@ -1330,7 +500,6 @@ class InteractiveSphere {
   }
 
   private showLoadingScreen(message = 'Loading dataset\u2026', progress = 0): void {
-    // Cancel any pending hide so the timer can't fade out a freshly-shown screen
     if (this.loadingHideTimer !== null) {
       clearTimeout(this.loadingHideTimer)
       this.loadingHideTimer = null
@@ -1339,13 +508,11 @@ class InteractiveSphere {
     if (!screen) return
     screen.classList.remove('fade-out')
 
-    // If the screen was hidden (display:none), animate it back in.
-    // We need opacity:0 → reflow → opacity:1 so the CSS transition kicks in.
     const wasHidden = screen.style.display === 'none'
     screen.style.display = 'flex'
     if (wasHidden) {
       screen.style.opacity = '0'
-      void screen.offsetHeight  // force reflow
+      void screen.offsetHeight
       screen.style.transition = 'opacity 0.3s ease'
       screen.style.opacity = '1'
       screen.addEventListener('transitionend', () => {
@@ -1356,18 +523,6 @@ class InteractiveSphere {
       screen.style.opacity = ''
     }
     this.setLoadingStatus(message, progress)
-  }
-
-  private escapeHtml(text: string): string {
-    return text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-  }
-
-  private escapeAttr(value: string): string {
-    return value.replace(/"/g, '&quot;').replace(/'/g, '&#39;')
   }
 
   private showHomeButton(): void {
@@ -1404,7 +559,11 @@ class InteractiveSphere {
       this.renderer.enableSunLighting(sun.lat, sun.lng)
     }
     this.setLoading(false)
-    this.showBrowseUI()
+    showBrowseUI(this.appState.datasets, {
+      onSelectDataset: (id) => this.selectDatasetFromBrowse(id),
+      announce: (msg) => this.announce(msg),
+      isMobile: this.isMobile,
+    })
     this.renderer?.setCanvasDescription('Interactive 3D globe showing Earth')
   }
 
