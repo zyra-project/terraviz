@@ -620,6 +620,11 @@ class InteractiveSphere {
       html += `<p class="info-description">${text}</p>`
     }
 
+    // Legend image (inline thumbnail, click to enlarge)
+    if (dataset.legendLink) {
+      html += `<img src="${dataset.legendLink}" alt="Legend" class="info-legend-thumb" tabindex="0" role="button" aria-label="Enlarge legend">`
+    }
+
     // Categories
     if (e?.categories) {
       const cats = Object.entries(e.categories)
@@ -664,6 +669,32 @@ class InteractiveSphere {
 
     infoBody.innerHTML = html
     infoPanel.classList.remove('hidden')
+
+    // Wire up legend thumbnail to open modal
+    const legendThumb = infoBody.querySelector('.info-legend-thumb') as HTMLElement | null
+    if (legendThumb && dataset.legendLink) {
+      const openLegendModal = () => {
+        let overlay = document.getElementById('legend-modal-overlay')
+        if (!overlay) {
+          overlay = document.createElement('div')
+          overlay.id = 'legend-modal-overlay'
+          overlay.className = 'legend-modal-overlay'
+          overlay.innerHTML = `<img class="legend-modal-img" alt="Legend">`
+          overlay.addEventListener('click', () => overlay!.classList.add('hidden'))
+          document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') overlay!.classList.add('hidden')
+          })
+          document.body.appendChild(overlay)
+        }
+        const img = overlay.querySelector('img')!
+        img.src = dataset.legendLink!
+        overlay.classList.remove('hidden')
+      }
+      legendThumb.addEventListener('click', openLegendModal)
+      legendThumb.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openLegendModal() }
+      })
+    }
 
     // Wire up related dataset links to load in-place
     infoBody.querySelectorAll('a[data-dataset-id]').forEach(link => {
