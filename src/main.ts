@@ -1017,7 +1017,22 @@ class InteractiveSphere {
     const categories = ['All', ...Array.from(catSet).sort()]
 
     let activeCategory = 'All'
+    let activeSubCategory: string | null = null
+    let activeSort: 'relevance' | 'newest' | 'az' = 'relevance'
     let searchQuery = ''
+
+    // Build sub-category lookup: top-level category -> sorted sub-categories
+    const subCatMap = new Map<string, Set<string>>()
+    for (const d of datasets) {
+      if (d.enriched?.categories) {
+        for (const [cat, subs] of Object.entries(d.enriched.categories)) {
+          if (!subCatMap.has(cat)) subCatMap.set(cat, new Set())
+          for (const sub of subs) {
+            if (sub) subCatMap.get(cat)!.add(sub)
+          }
+        }
+      }
+    }
 
     // Render category chips
     const chipBar = document.getElementById('browse-category-bar')
@@ -1030,21 +1045,53 @@ class InteractiveSphere {
         const btn = (e.target as HTMLElement).closest('.browse-chip') as HTMLElement | null
         if (!btn) return
         activeCategory = btn.dataset.cat ?? 'All'
+        activeSubCategory = null
         chipBar.querySelectorAll('.browse-chip').forEach(c => {
           c.classList.remove('active')
           c.setAttribute('aria-pressed', 'false')
         })
         btn.classList.add('active')
         btn.setAttribute('aria-pressed', 'true')
+        renderSubChips()
         renderCards()
       })
     }
 
-    // Search input
+    // Sub-category chip bar
+    const subChipBar = document.getElementById('browse-subcategory-bar')
+    const renderSubChips = () => {
+      if (!subChipBar) return
+      if (activeCategory === 'All' || !subCatMap.has(activeCategory)) {
+        subChipBar.innerHTML = ''
+        return
+      }
+      const subs = Array.from(subCatMap.get(activeCategory)!).sort()
+      if (subs.length === 0) { subChipBar.innerHTML = ''; return }
+      subChipBar.innerHTML = subs
+        .map(s => `<button class="browse-subchip${activeSubCategory === s ? ' active' : ''}" data-sub="${this.escapeAttr(s)}" aria-pressed="${activeSubCategory === s}">${this.escapeHtml(s)}</button>`)
+        .join('')
+    }
+    if (subChipBar) {
+      subChipBar.addEventListener('click', (e) => {
+        const btn = (e.target as HTMLElement).closest('.browse-subchip') as HTMLElement | null
+        if (!btn) return
+        const sub = btn.dataset.sub ?? null
+        activeSubCategory = (activeSubCategory === sub) ? null : sub
+        renderSubChips()
+        renderCards()
+      })
+    }
+
+    // Search input + clear button
     const searchInput = document.getElementById('browse-search') as HTMLInputElement | null
+    const searchClear = document.getElementById('browse-search-clear')
+    const updateSearchClear = () => {
+      searchClear?.classList.toggle('hidden', !searchInput?.value)
+    }
     if (searchInput) {
       searchInput.addEventListener('input', () => {
         searchQuery = searchInput.value.trim().toLowerCase()
+        updateSearchClear()
         renderCards()
       })
       // Focus on desktop, skip on mobile to avoid keyboard pop-up
@@ -1052,21 +1099,65 @@ class InteractiveSphere {
         setTimeout(() => searchInput.focus(), 200)
       }
     }
+    if (searchClear && searchInput) {
+      searchClear.addEventListener('click', () => {
+        searchInput.value = ''
+        searchQuery = ''
+        updateSearchClear()
+        searchInput.focus()
+        renderCards()
+      })
+    }
+
+    // Sort controls
+    const sortBar = document.getElementById('browse-sort')
+    type SortKey = 'relevance' | 'newest' | 'az'
+    const sortOptions: Array<{ key: SortKey; label: string }> = [
+      { key: 'relevance', label: 'Relevance' },
+      { key: 'newest', label: 'Newest' },
+      { key: 'az', label: 'A\u2013Z' },
+    ]
+    if (sortBar) {
+      sortBar.innerHTML = sortOptions
+        .map(o => `<button class="browse-sort-btn${o.key === activeSort ? ' active' : ''}" data-sort="${o.key}" aria-pressed="${o.key === activeSort}">${o.label}</button>`)
+        .join('')
+      sortBar.addEventListener('click', (e) => {
+        const btn = (e.target as HTMLElement).closest('.browse-sort-btn') as HTMLElement | null
+        if (!btn || !btn.dataset.sort) return
+        activeSort = btn.dataset.sort as typeof activeSort
+        sortBar.querySelectorAll('.browse-sort-btn').forEach(b => {
+          b.classList.remove('active')
+          b.setAttribute('aria-pressed', 'false')
+        })
+        btn.classList.add('active')
+        btn.setAttribute('aria-pressed', 'true')
+        renderCards()
+      })
+    }
 
     const renderCards = () => {
       const grid = document.getElementById('browse-grid')
       const countEl = document.getElementById('browse-count')
       if (!grid) return
 
-      let filtered = datasets
+      let filtered = [...datasets]
 
+      // Category filter
       if (activeCategory !== 'All') {
         filtered = filtered.filter(d =>
           (d.enriched?.categories != null && activeCategory in d.enriched.categories) ||
           (d.tags != null && d.tags.includes(activeCategory))
         )
+        // Sub-category filter
+        if (activeSubCategory) {
+          filtered = filtered.filter(d => {
+            const subs = d.enriched?.categories?.[activeCategory]
+            return subs != null && subs.includes(activeSubCategory!)
+          })
+        }
       }
 
+      // Text search
       if (searchQuery) {
         filtered = filtered.filter(d => {
           const title = d.title.toLowerCase()
@@ -1076,6 +1167,21 @@ class InteractiveSphere {
           return title.includes(searchQuery) || desc.includes(searchQuery) ||
                  keywords.includes(searchQuery) || cats.includes(searchQuery)
         })
+      }
+
+      // Sort
+      switch (activeSort) {
+        case 'newest':
+          filtered.sort((a, b) => {
+            const da = a.enriched?.dateAdded ?? ''
+            const db = b.enriched?.dateAdded ?? ''
+            return db.localeCompare(da)
+          })
+          break
+        case 'az':
+          filtered.sort((a, b) => a.title.localeCompare(b.title))
+          break
+        // 'relevance': keep the original weight-based order from datasets
       }
 
       if (countEl) {
@@ -1123,7 +1229,7 @@ class InteractiveSphere {
         if (catalogUrl) metaHtml += `<div class="browse-card-meta"><a href="${this.escapeAttr(catalogUrl)}" target="_blank" rel="noopener" style="color: #4da6ff; text-decoration: none; font-size: 0.65rem;">View in SOS catalog \u2197</a></div>`
 
         const keywordsHtml = keywords.length
-          ? `<div class="browse-card-keywords">${keywords.slice(0, 12).map(k => `<span class="browse-card-keyword">${this.escapeHtml(k)}</span>`).join('')}</div>`
+          ? `<div class="browse-card-keywords">${keywords.slice(0, 12).map(k => `<span class="browse-card-keyword" data-keyword="${this.escapeAttr(k)}">${this.escapeHtml(k)}</span>`).join('')}</div>`
           : ''
 
         const thumbHtml = d.thumbnailLink
@@ -1169,6 +1275,16 @@ class InteractiveSphere {
             return
           }
           if ((e.target as HTMLElement).tagName === 'A') return
+          // Clickable keywords — filter by the clicked keyword
+          const kwEl = (e.target as HTMLElement).closest('.browse-card-keyword') as HTMLElement | null
+          if (kwEl?.dataset.keyword && searchInput) {
+            e.stopPropagation()
+            searchInput.value = kwEl.dataset.keyword
+            searchQuery = kwEl.dataset.keyword.trim().toLowerCase()
+            updateSearchClear()
+            renderCards()
+            return
+          }
           toggleExpand()
         })
 
