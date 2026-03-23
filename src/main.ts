@@ -85,14 +85,22 @@ class InteractiveSphere {
         await this.loadDataset(datasetId)
         this.setLoading(false)
       } else {
-        // No dataset — load enhanced Earth, then show the browse UI on top
-        this.setLoadingStatus('Loading Earth textures\u2026', 50)
-        await this.renderer.loadDefaultEarthMaterials()
+        // No dataset — load enhanced Earth + clouds in parallel, then show browse UI.
+        // Progress: 20–90% is allocated to texture downloads.
+        this.setLoadingStatus('Loading Earth textures\u2026', 20)
+        const cloudUrl = 'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/clouds_8192.jpg'
 
-        this.setLoadingStatus('Adding atmosphere\u2026', 85)
-        this.renderer.loadCloudOverlay(
-          'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/clouds_8192.jpg'
-        )
+        // Earth textures are ~80% of total bytes, cloud is ~20%
+        let earthFraction = 0
+        let cloudFraction = 0
+        const updateProgress = () => {
+          const combined = earthFraction * 0.8 + cloudFraction * 0.2
+          this.setLoadingStatus('Loading Earth textures\u2026', 20 + Math.round(combined * 70))
+        }
+        await Promise.all([
+          this.renderer.loadDefaultEarthMaterials((f) => { earthFraction = f; updateProgress() }),
+          this.renderer.loadCloudOverlay(cloudUrl, (f) => { cloudFraction = f; updateProgress() })
+        ])
 
         // Position sun based on current UTC time
         const sun = getSunPosition(new Date())
@@ -134,12 +142,24 @@ class InteractiveSphere {
 
   private async loadDataset(datasetId: string): Promise<void> {
     try {
-      this.cleanupVideo()
+      // Stash old video/texture references — keep the old texture on the sphere
+      // so there's no black-globe flash while the new dataset loads.
+      const oldVideoTexture = this.videoTexture
+      const oldHlsService = this.hlsService
+      this.videoTexture = null
+      this.hlsService = null
+      this.stopPlaybackLoop()
+      this.resetPlaybackState()
+
       this.renderer?.removeCloudOverlay()
       this.renderer?.removeNightLights()
       this.renderer?.disableSunLighting()
       await this.displayDataset(datasetId)
       this.showHomeButton()
+
+      // New texture is on the sphere — now safe to dispose old resources
+      if (oldVideoTexture) oldVideoTexture.dispose()
+      if (oldHlsService) oldHlsService.destroy()
     } catch (error) {
       this.setError(error instanceof Error ? error.message : 'Failed to load dataset')
     }
@@ -831,23 +851,14 @@ class InteractiveSphere {
     console.error('[App] Error:', error)
   }
 
-  private cleanupVideo(): void {
-    this.stopPlaybackLoop()
-    if (this.videoTexture) {
-      this.videoTexture.dispose()
-      this.videoTexture = null
-    }
-    if (this.hlsService) {
-      this.hlsService.destroy()
-      this.hlsService = null
-    }
+  /** Reset playback UI state without disposing video/texture resources. */
+  private resetPlaybackState(): void {
     this.appState.isPlaying = false
     this.displayInterval = null
     if (this.loopPauseTimer) {
       clearTimeout(this.loopPauseTimer)
       this.loopPauseTimer = null
     }
-    // Reset captions
     this.captionTrack = null
     const ccBtn = document.getElementById('cc-btn')
     if (ccBtn) {
@@ -860,6 +871,20 @@ class InteractiveSphere {
       overlay.textContent = ''
       overlay.style.display = 'none'
     }
+  }
+
+  /** Full cleanup: stop playback, reset UI state, and dispose video/texture resources. */
+  private cleanupVideo(): void {
+    this.stopPlaybackLoop()
+    if (this.videoTexture) {
+      this.videoTexture.dispose()
+      this.videoTexture = null
+    }
+    if (this.hlsService) {
+      this.hlsService.destroy()
+      this.hlsService = null
+    }
+    this.resetPlaybackState()
   }
 
   setupEventListeners(): void {
@@ -1196,12 +1221,24 @@ class InteractiveSphere {
     }
     const screen = document.getElementById('loading-screen')
     if (!screen) return
-    screen.style.display = 'flex'
-    // Do NOT set opacity via inline style — it would override the CSS class rule
-    // (#loading-screen.fade-out { opacity: 0 }) and prevent the transitionend
-    // event from ever firing, leaving the loading screen stuck on screen.
-    screen.style.opacity = ''
     screen.classList.remove('fade-out')
+
+    // If the screen was hidden (display:none), animate it back in.
+    // We need opacity:0 → reflow → opacity:1 so the CSS transition kicks in.
+    const wasHidden = screen.style.display === 'none'
+    screen.style.display = 'flex'
+    if (wasHidden) {
+      screen.style.opacity = '0'
+      void screen.offsetHeight  // force reflow
+      screen.style.transition = 'opacity 0.3s ease'
+      screen.style.opacity = '1'
+      screen.addEventListener('transitionend', () => {
+        screen.style.transition = ''
+        screen.style.opacity = ''
+      }, { once: true })
+    } else {
+      screen.style.opacity = ''
+    }
     this.setLoadingStatus(message, progress)
   }
 
@@ -1234,13 +1271,19 @@ class InteractiveSphere {
     this.hideHomeButton()
     window.history.pushState({}, '', window.location.pathname)
 
-    this.showLoadingScreen('Loading Earth\u2026', 30)
+    this.showLoadingScreen('Loading Earth\u2026', 20)
     if (this.renderer) {
-      await this.renderer.loadDefaultEarthMaterials()
-      this.setLoadingStatus('Adding atmosphere\u2026', 80)
-      this.renderer.loadCloudOverlay(
-        'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/clouds_8192.jpg'
-      )
+      const cloudUrl = 'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/clouds_8192.jpg'
+      let earthFraction = 0
+      let cloudFraction = 0
+      const updateProgress = () => {
+        const combined = earthFraction * 0.8 + cloudFraction * 0.2
+        this.setLoadingStatus('Loading Earth\u2026', 20 + Math.round(combined * 70))
+      }
+      await Promise.all([
+        this.renderer.loadDefaultEarthMaterials((f) => { earthFraction = f; updateProgress() }),
+        this.renderer.loadCloudOverlay(cloudUrl, (f) => { cloudFraction = f; updateProgress() })
+      ])
       const sun = getSunPosition(new Date())
       this.renderer.enableSunLighting(sun.lat, sun.lng)
     }

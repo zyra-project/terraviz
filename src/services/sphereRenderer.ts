@@ -4,6 +4,7 @@
 
 import * as THREE from 'three'
 import type { SphereOptions, ControlsState } from '../types'
+import { fetchImageWithProgress } from '../utils/fetchProgress'
 
 export class SphereRenderer {
   private scene: THREE.Scene
@@ -130,83 +131,101 @@ export class SphereRenderer {
    * Night lights use emissiveMap with a custom shader patch so they only appear
    * on the dark (unlit) side of the sphere.
    */
-  loadDefaultEarthMaterials(): Promise<void> {
-    if (!this.sphere) return Promise.resolve()
+  async loadDefaultEarthMaterials(onProgress?: (fraction: number) => void): Promise<void> {
+    if (!this.sphere) return
 
-    const loader = new THREE.TextureLoader()
-
-    return new Promise((resolve) => {
-      let loaded = 0
-      const total = 4
-      const onLoad = () => { if (++loaded >= total) resolve() }
-
-      const diffuse = loader.load('/assets/Earth_Diffuse_6K.jpg', onLoad)
-      const normal = loader.load('/assets/Earth_Normal_2K.jpg', onLoad)
-      const specular = loader.load('/assets/Earth_Specular_2K.jpg', onLoad)
-      const nightLights = loader.load('/assets/Earth_Lights_6K.jpg', onLoad)
-
-      diffuse.colorSpace = THREE.SRGBColorSpace
-      nightLights.colorSpace = THREE.SRGBColorSpace
-
-      const material = new THREE.MeshPhongMaterial({
-        map: diffuse,
-        normalMap: normal,
-        normalScale: new THREE.Vector2(0.4, 0.4),
-        specularMap: specular,
-        specular: new THREE.Color(0xaaaaaa),
-        shininess: 40,
-        emissiveMap: nightLights,
-        emissive: new THREE.Color(0xffffff),
-      })
-
-      // Patch the shader so emissive (night lights) only shows on the unlit side.
-      // Use a custom uniform for sun direction (updated each frame in animate loop).
-      const sunDirUniform = { value: new THREE.Vector3(1, 0, 0) }
-      this.earthShaderUniforms = { uSunDir: sunDirUniform }
-
-      material.onBeforeCompile = (shader) => {
-        shader.uniforms.uSunDir = sunDirUniform
-
-        shader.vertexShader = shader.vertexShader.replace(
-          '#include <common>',
-          `#include <common>
-           uniform vec3 uSunDir;
-           varying float vNdotL;`
-        )
-        shader.vertexShader = shader.vertexShader.replace(
-          '#include <worldpos_vertex>',
-          `#include <worldpos_vertex>
-           vec3 wNormal = normalize((modelMatrix * vec4(objectNormal, 0.0)).xyz);
-           vNdotL = dot(wNormal, uSunDir);`
-        )
-
-        shader.fragmentShader = shader.fragmentShader.replace(
-          '#include <common>',
-          `#include <common>
-           varying float vNdotL;`
-        )
-        shader.fragmentShader = shader.fragmentShader.replace(
-          '#include <emissivemap_fragment>',
-          `#ifdef USE_EMISSIVEMAP
-             vec4 emissiveColor = texture2D( emissiveMap, vEmissiveMapUv );
-             float nightFactor = smoothstep( 0.0, -0.2, vNdotL );
-             totalEmissiveRadiance *= emissiveColor.rgb * nightFactor * 0.5;
-           #endif`
-        )
+    // Track combined download progress across all textures
+    const sizes = [0, 0, 0, 0]   // total bytes per file
+    const loaded = [0, 0, 0, 0]  // loaded bytes per file
+    const reportProgress = () => {
+      const totalBytes = sizes.reduce((a, b) => a + b, 0)
+      if (totalBytes > 0 && onProgress) {
+        onProgress(loaded.reduce((a, b) => a + b, 0) / totalBytes)
       }
+    }
+    const makeProgress = (index: number) => (l: number, t: number) => {
+      sizes[index] = t; loaded[index] = l; reportProgress()
+    }
 
-      // Dispose old material
-      if (this.sphere!.material) {
-        const mats = Array.isArray(this.sphere!.material)
-          ? this.sphere!.material : [this.sphere!.material]
-        mats.forEach(m => m.dispose())
-      }
-      this.sphere!.material = material
+    const urls = [
+      '/assets/Earth_Diffuse_6K.jpg',
+      '/assets/Earth_Normal_2K.jpg',
+      '/assets/Earth_Specular_2K.jpg',
+      '/assets/Earth_Lights_6K.jpg',
+    ]
+    const images = await Promise.all(
+      urls.map((url, i) => fetchImageWithProgress(url, makeProgress(i)))
+    )
 
-      this.defaultEarthActive = true
-      this.createAtmosphere()
-      console.log('[Renderer] Enhanced Earth materials loaded')
+    const toTexture = (img: HTMLImageElement, srgb = false) => {
+      const tex = new THREE.Texture(img)
+      if (srgb) tex.colorSpace = THREE.SRGBColorSpace
+      tex.needsUpdate = true
+      return tex
+    }
+    const diffuse = toTexture(images[0], true)
+    const normal = toTexture(images[1])
+    const specular = toTexture(images[2])
+    const nightLights = toTexture(images[3], true)
+
+    const material = new THREE.MeshPhongMaterial({
+      map: diffuse,
+      normalMap: normal,
+      normalScale: new THREE.Vector2(0.4, 0.4),
+      specularMap: specular,
+      specular: new THREE.Color(0xaaaaaa),
+      shininess: 40,
+      emissiveMap: nightLights,
+      emissive: new THREE.Color(0xffffff),
     })
+
+    // Patch the shader so emissive (night lights) only shows on the unlit side.
+    // Use a custom uniform for sun direction (updated each frame in animate loop).
+    const sunDirUniform = { value: new THREE.Vector3(1, 0, 0) }
+    this.earthShaderUniforms = { uSunDir: sunDirUniform }
+
+    material.onBeforeCompile = (shader) => {
+      shader.uniforms.uSunDir = sunDirUniform
+
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <common>',
+        `#include <common>
+         uniform vec3 uSunDir;
+         varying float vNdotL;`
+      )
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <worldpos_vertex>',
+        `#include <worldpos_vertex>
+         vec3 wNormal = normalize((modelMatrix * vec4(objectNormal, 0.0)).xyz);
+         vNdotL = dot(wNormal, uSunDir);`
+      )
+
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <common>',
+        `#include <common>
+         varying float vNdotL;`
+      )
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <emissivemap_fragment>',
+        `#ifdef USE_EMISSIVEMAP
+           vec4 emissiveColor = texture2D( emissiveMap, vEmissiveMapUv );
+           float nightFactor = smoothstep( 0.0, -0.2, vNdotL );
+           totalEmissiveRadiance *= emissiveColor.rgb * nightFactor * 0.5;
+         #endif`
+      )
+    }
+
+    // Dispose old material
+    if (this.sphere!.material) {
+      const mats = Array.isArray(this.sphere!.material)
+        ? this.sphere!.material : [this.sphere!.material]
+      mats.forEach(m => m.dispose())
+    }
+    this.sphere!.material = material
+
+    this.defaultEarthActive = true
+    this.createAtmosphere()
+    console.log('[Renderer] Enhanced Earth materials loaded')
   }
 
   /**
@@ -795,10 +814,18 @@ export class SphereRenderer {
    * Load a cloud overlay layer on top of the sphere.
    * Black pixels become transparent, white pixels become opaque clouds.
    */
-  loadCloudOverlay(url: string): void {
-    const img = new Image()
-    img.crossOrigin = 'anonymous'
-    img.onload = () => {
+  async loadCloudOverlay(url: string, onProgress?: (fraction: number) => void): Promise<void> {
+    let img: HTMLImageElement
+    try {
+      img = await fetchImageWithProgress(url, (loaded, total) => {
+        onProgress?.(loaded / total)
+      })
+    } catch {
+      console.warn('[Renderer] Cloud overlay failed to load — continuing without clouds')
+      return
+    }
+
+    {
       // Process the cloud image to create a non-linear alpha channel
       // Boost midtones so finer cloud details are preserved
       const canvas = document.createElement('canvas')
@@ -884,7 +911,6 @@ export class SphereRenderer {
 
       console.log('[Renderer] Cloud overlay loaded')
     }
-    img.src = url
   }
 
   /**
