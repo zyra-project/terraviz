@@ -1,0 +1,9 @@
+# Cloudflare Pages configuration
+# The AI binding gives Pages Functions access to Workers AI models
+# at no extra cost on the free tier (~10k requests/day).
+
+name = "interactive-sphere"
+compatibility_date = "2024-12-01"
+
+[ai]
+binding = "AI"

@@ -15,10 +15,14 @@ import { logger } from '../utils/logger'
 // --- Constants ---
 const CONFIG_STORAGE_KEY = 'sos-docent-config'
 
+/** Detect whether we're running on a deployed site (not localhost dev). */
+const isDeployed = typeof window !== 'undefined'
+  && !['localhost', '127.0.0.1'].includes(window.location.hostname)
+
 const DEFAULT_CONFIG: DocentConfig = {
-  apiUrl: 'http://localhost:11434/v1',
+  apiUrl: isDeployed ? '/api' : 'http://localhost:11434/v1',
   apiKey: '',
-  model: 'llama3.2',
+  model: isDeployed ? 'llama-3.1-8b' : 'llama3.2',
   enabled: true,
 }
 
