@@ -5,6 +5,7 @@
 import axios from 'axios'
 import type { Dataset, DatasetMetadata, EnrichedMetadata, TimeInfo } from '../types'
 import { parseISO8601Duration } from '../utils/time'
+import { logger } from '../utils/logger'
 
 const METADATA_URL = 'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/dataset.json'
 const ENRICHED_METADATA_URL = '/assets/sos_dataset_metadata.json'
@@ -34,11 +35,11 @@ class DataService {
     try {
       const now = Date.now()
       if (this.cache && now - this.cacheTime < this.CACHE_DURATION) {
-        console.log('[DataService] Using cached datasets')
+        logger.info('[DataService] Using cached datasets')
         return this.cache.datasets
       }
 
-      console.log('[DataService] Fetching datasets from SOS API...')
+      logger.info('[DataService] Fetching datasets from SOS API...')
 
       // Fetch both sources in parallel
       const [s3Response, enrichedData] = await Promise.all([
@@ -66,10 +67,10 @@ class DataService {
       this.cacheTime = now
 
       const enrichedCount = datasets.filter(d => d.enriched).length
-      console.log(`[DataService] Loaded ${datasets.length} datasets (${enrichedCount} enriched)`)
+      logger.info(`[DataService] Loaded ${datasets.length} datasets (${enrichedCount} enriched)`)
       return datasets
     } catch (error) {
-      console.error('[DataService] Failed to fetch datasets:', error)
+      logger.error('[DataService] Failed to fetch datasets:', error)
       throw new Error(`Failed to fetch datasets: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
@@ -84,7 +85,7 @@ class DataService {
       })
       return response.data || []
     } catch (error) {
-      console.warn('[DataService] Could not load enriched metadata, continuing without it')
+      logger.warn('[DataService] Could not load enriched metadata, continuing without it')
       return []
     }
   }
@@ -216,7 +217,7 @@ class DataService {
         timeInfo.displayMode = 'static'
       }
     } catch (error) {
-      console.warn(`[DataService] Failed to parse time metadata for ${dataset.id}:`, error)
+      logger.warn(`[DataService] Failed to parse time metadata for ${dataset.id}:`, error)
       timeInfo.displayMode = 'unknown'
     }
 

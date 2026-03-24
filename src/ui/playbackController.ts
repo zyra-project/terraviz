@@ -6,6 +6,7 @@
 
 import type { HLSService } from '../services/hlsService'
 import type { AppState, Dataset } from '../types'
+import { logger } from '../utils/logger'
 
 // --- Playback constants ---
 const LOOP_RESTART_DELAY_MS = 2000
@@ -97,7 +98,7 @@ export function togglePlayPause(
 
   if (hlsService.paused) {
     hlsService.play()?.catch(e => {
-      console.warn('[App] Play failed:', e)
+      logger.warn('[App] Play failed:', e)
     })
     appState.isPlaying = true
   } else {
@@ -228,7 +229,7 @@ export async function loadCaptions(
 
     const cues = parseSRT(srt)
     if (cues.length === 0) {
-      console.warn('[App] Caption file contained no parseable cues')
+      logger.warn('[App] Caption file contained no parseable cues')
       return
     }
 
@@ -256,9 +257,9 @@ export async function loadCaptions(
     const ccBtn = document.getElementById('cc-btn')
     if (ccBtn) ccBtn.classList.remove('hidden')
 
-    console.log(`[App] Loaded ${cues.length} caption cues`)
+    logger.info(`[App] Loaded ${cues.length} caption cues`)
   } catch (error) {
-    console.warn('[App] Failed to load captions:', error)
+    logger.warn('[App] Failed to load captions:', error)
   }
 }
 

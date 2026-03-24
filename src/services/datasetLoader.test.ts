@@ -86,7 +86,7 @@ describe('displayDatasetInfo', () => {
     expect(thumb).not.toBeNull()
     expect(thumb.src).toContain('legend.png')
     expect(thumb.getAttribute('role')).toBe('button')
-    expect(thumb.getAttribute('aria-label')).toBe('Enlarge legend')
+    expect(thumb.getAttribute('aria-label')).toBe('Enlarge Sea Surface Temperature legend')
   })
 
   it('renders categories from enriched metadata', () => {

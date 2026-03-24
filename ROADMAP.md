@@ -11,8 +11,8 @@ These items directly determine whether someone can find and use the project at a
 ### ~~1. Dataset search and filtering~~ ✅
 Searchable, filterable dataset browser with keyword search, category and sub-category navigation, expandable cards with thumbnails.
 
-### 2. Accessibility — screen reader support
-ARIA labels and keyboard navigation are in place. The remaining gap is deeper screen reader support — ensuring the full browsing and playback experience is navigable with assistive technology.
+### ~~2. Accessibility — screen reader support~~ ✅
+Legend modal now has `role="dialog"`, `aria-modal`, focus management, and focus restore. Browse card keywords are keyboard-accessible with `role="button"`. "No results" messages are announced via `role="status"`. Legend alt text is dataset-specific.
 
 ### ~~3. Mobile HLS adaptive quality~~ ✅
 ABR now selects the best stream for the device and network. Mobile is capped by resolution but no longer pinned to the lowest quality.
@@ -47,8 +47,8 @@ Sustainable progress requires a codebase that doesn't slow us down.
 ### ~~9. Replace magic numbers with named constants~~ ✅
 Named constants throughout — `main.ts`, `inputHandler.ts`, `playbackController.ts`, `browseUI.ts`.
 
-### 10. Log level control
-Production builds should not emit console logs. Adding log level control lets us keep useful debugging without exposing internals.
+### ~~10. Log level control~~ ✅
+All 28 console calls now route through a `logger` utility with level gating (debug/info/warn/error/silent). Dev builds default to 'info', production to 'warn'. Override at runtime via `window.__LOG_LEVEL__`.
 
 ### ~~11. Debounce the window resize handler~~ ✅
 The resize handler is now debounced (150 ms) to reduce unnecessary recalculations during drag-resize.

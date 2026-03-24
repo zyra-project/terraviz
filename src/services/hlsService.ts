@@ -3,6 +3,7 @@
  */
 
 import Hls from 'hls.js'
+import { logger } from '../utils/logger'
 
 export interface VideoProxyFile {
   quality: string
@@ -98,7 +99,7 @@ export class HLSService {
 
         this.hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
           const levels = this.hls!.levels.map(l => `${l.width}x${l.height}`)
-          console.log(`[HLS] Manifest parsed, ${data.levels.length} quality levels:`, levels)
+          logger.info(`[HLS] Manifest parsed, ${data.levels.length} quality levels:`, levels)
 
           // Cap the max ABR level to the device's screen resolution.
           // Decoding 4K video on a 720p phone wastes memory and can crash
@@ -110,7 +111,7 @@ export class HLSService {
               return level.height <= maxScreenDim ? i : best
             }, 0)
             this.hls!.autoLevelCapping = cap
-            console.log(`[HLS] Mobile ABR capped at level ${cap} (${this.hls!.levels[cap].width}x${this.hls!.levels[cap].height}) for screen ${maxScreenDim}px`)
+            logger.info(`[HLS] Mobile ABR capped at level ${cap} (${this.hls!.levels[cap].width}x${this.hls!.levels[cap].height}) for screen ${maxScreenDim}px`)
           }
 
           resolve()
@@ -118,7 +119,7 @@ export class HLSService {
 
         this.hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
           const level = this.hls!.levels[data.level]
-          console.log(`[HLS] Quality switched to level ${data.level}: ${level.width}x${level.height} (${level.bitrate} bps)`)
+          logger.info(`[HLS] Quality switched to level ${data.level}: ${level.width}x${level.height} (${level.bitrate} bps)`)
         })
 
         let networkRecoveries = 0
@@ -127,7 +128,7 @@ export class HLSService {
 
         this.hls.on(Hls.Events.ERROR, (_event, data) => {
           if (data.fatal) {
-            console.error('[HLS] Fatal error:', data.type, data.details)
+            logger.error('[HLS] Fatal error:', data.type, data.details)
             if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
               if (networkRecoveries < MAX_RECOVERIES) {
                 networkRecoveries++
@@ -142,7 +143,7 @@ export class HLSService {
                 // one level below to prevent repeatedly hitting the same wall.
                 if (this.hls && this.hls.currentLevel > 0) {
                   const safeLevel = this.hls.currentLevel - 1
-                  console.warn(`[HLS] Media error at level ${this.hls.currentLevel}, capping to ${safeLevel}`)
+                  logger.warn(`[HLS] Media error at level ${this.hls.currentLevel}, capping to ${safeLevel}`)
                   this.hls.autoLevelCapping = safeLevel
                 }
                 this.hls?.recoverMediaError()
@@ -172,7 +173,7 @@ export class HLSService {
     return new Promise((resolve, reject) => {
       video.src = mp4Url
       video.addEventListener('loadedmetadata', () => {
-        console.log('[HLS] Direct MP4 loaded, duration:', video.duration)
+        logger.info('[HLS] Direct MP4 loaded, duration:', video.duration)
         resolve()
       }, { once: true })
       video.addEventListener('error', () => {

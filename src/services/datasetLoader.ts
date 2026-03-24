@@ -10,6 +10,7 @@ import { HLSService } from './hlsService'
 import { dataService } from './dataService'
 import type { Dataset, AppState } from '../types'
 import { formatDate, isSubDailyPeriod, inferDisplayInterval } from '../utils/time'
+import { logger } from '../utils/logger'
 import { escapeHtml, escapeAttr } from '../ui/browseUI'
 import type { PlaybackState } from '../ui/playbackController'
 import { updatePlayButton, loadCaptions } from '../ui/playbackController'
@@ -56,7 +57,7 @@ export async function loadImageDataset(
   }
 
   callbacks.showPlaybackControls(false)
-  console.log(`[App] Image dataset loaded successfully: ${img.src}`)
+  logger.info(`[App] Image dataset loaded successfully: ${img.src}`)
 }
 
 function tryLoadImage(urls: string[]): Promise<HTMLImageElement> {
@@ -98,14 +99,14 @@ export async function loadVideoDataset(
 
   const hlsService = new HLSService()
   const manifest = await hlsService.fetchManifest(vimeoId)
-  console.log('[App] Video manifest received:', { duration: manifest.duration, qualities: manifest.files.length })
+  logger.info('[App] Video manifest received:', { duration: manifest.duration, qualities: manifest.files.length })
 
   const video = hlsService.createVideo()
 
   try {
     await hlsService.loadStream(manifest.hls, video, isMobile)
   } catch (hlsError) {
-    console.warn('[App] HLS failed, falling back to direct MP4:', hlsError)
+    logger.warn('[App] HLS failed, falling back to direct MP4:', hlsError)
     const mp4File = manifest.files.find(f => f.quality === '1080p')
       ?? manifest.files.find(f => f.quality === '720p')
       ?? manifest.files.find(f => f.width && f.link)
@@ -140,7 +141,7 @@ export async function loadVideoDataset(
     const start = new Date(dataset.startTime)
     const end = new Date(dataset.endTime)
     playbackState.displayInterval = inferDisplayInterval(start, end, video.duration)
-    console.log('[App] Inferred display interval:', playbackState.displayInterval)
+    logger.info('[App] Inferred display interval:', playbackState.displayInterval)
   } else {
     playbackState.displayInterval = null
   }
@@ -177,7 +178,7 @@ export async function loadVideoDataset(
     loadCaptions(video, dataset.closedCaptionLink, playbackState)
   }
 
-  console.log('[App] Video dataset loaded, duration:', manifest.duration, 's')
+  logger.info('[App] Video dataset loaded, duration:', manifest.duration, 's')
   return { hlsService, videoTexture }
 }
 
@@ -216,7 +217,7 @@ export function displayDatasetInfo(
   }
 
   if (dataset.legendLink) {
-    html += `<img src="${dataset.legendLink}" alt="Legend" class="info-legend-thumb" tabindex="0" role="button" aria-label="Enlarge legend">`
+    html += `<img src="${dataset.legendLink}" alt="${escapeAttr(dataset.title)} legend" class="info-legend-thumb" tabindex="0" role="button" aria-label="Enlarge ${escapeAttr(dataset.title)} legend">`
   }
 
   if (e?.categories) {
@@ -268,16 +269,32 @@ export function displayDatasetInfo(
         overlay = document.createElement('div')
         overlay.id = 'legend-modal-overlay'
         overlay.className = 'legend-modal-overlay'
-        overlay.innerHTML = `<img class="legend-modal-img" alt="Legend">`
-        overlay.addEventListener('click', () => overlay!.classList.add('hidden'))
+        overlay.setAttribute('role', 'dialog')
+        overlay.setAttribute('aria-modal', 'true')
+        overlay.setAttribute('aria-label', 'Legend')
+        overlay.innerHTML = `<img class="legend-modal-img" alt="Legend"><button class="legend-modal-close" aria-label="Close legend">&times;</button>`
+        const closeModal = () => {
+          overlay!.classList.add('hidden')
+          legendThumb.focus()
+        }
+        overlay.querySelector('.legend-modal-close')!.addEventListener('click', (e) => {
+          e.stopPropagation()
+          closeModal()
+        })
+        overlay.addEventListener('click', closeModal)
         document.addEventListener('keydown', (e) => {
-          if (e.key === 'Escape') overlay!.classList.add('hidden')
+          if (e.key === 'Escape' && !overlay!.classList.contains('hidden')) closeModal()
         })
         document.body.appendChild(overlay)
       }
       const img = overlay.querySelector('img')!
       img.src = dataset.legendLink!
+      img.alt = `${dataset.title} legend`
+      overlay.setAttribute('aria-label', `${dataset.title} legend`)
       overlay.classList.remove('hidden')
+      // Move focus into the modal
+      const closeBtn = overlay.querySelector('.legend-modal-close') as HTMLElement
+      if (closeBtn) closeBtn.focus()
     }
     legendThumb.addEventListener('click', openLegendModal)
     legendThumb.addEventListener('keydown', (e) => {

@@ -232,7 +232,7 @@ export function showBrowseUI(datasets: Dataset[], callbacks: BrowseCallbacks): v
     }
 
     if (filtered.length === 0) {
-      grid.innerHTML = '<div class="browse-no-results">No datasets match your search.</div>'
+      grid.innerHTML = '<div class="browse-no-results" role="status">No datasets match your search.</div>'
       return
     }
 
@@ -270,7 +270,7 @@ export function showBrowseUI(datasets: Dataset[], callbacks: BrowseCallbacks): v
       if (catalogUrl) metaHtml += `<div class="browse-card-meta"><a href="${escapeAttr(catalogUrl)}" target="_blank" rel="noopener" style="color: #4da6ff; text-decoration: none; font-size: 0.65rem;">View in SOS catalog \u2197</a></div>`
 
       const keywordsHtml = keywords.length
-        ? `<div class="browse-card-keywords">${keywords.slice(0, MAX_CARD_KEYWORDS).map(k => `<span class="browse-card-keyword" data-keyword="${escapeAttr(k)}">${escapeHtml(k)}</span>`).join('')}</div>`
+        ? `<div class="browse-card-keywords">${keywords.slice(0, MAX_CARD_KEYWORDS).map(k => `<span class="browse-card-keyword" data-keyword="${escapeAttr(k)}" role="button" tabindex="0" aria-label="Filter by ${escapeAttr(k)}">${escapeHtml(k)}</span>`).join('')}</div>`
         : ''
 
       const thumbHtml = d.thumbnailLink
@@ -332,6 +332,16 @@ export function showBrowseUI(datasets: Dataset[], callbacks: BrowseCallbacks): v
       card.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           if ((e.target as HTMLElement).closest('.browse-card-load')) return
+          const kwEl = (e.target as HTMLElement).closest('.browse-card-keyword') as HTMLElement | null
+          if (kwEl?.dataset.keyword && searchInput) {
+            e.preventDefault()
+            e.stopPropagation()
+            searchInput.value = kwEl.dataset.keyword
+            searchQuery = kwEl.dataset.keyword.trim().toLowerCase()
+            updateSearchClear()
+            renderCards()
+            return
+          }
           e.preventDefault()
           toggleExpand()
         }

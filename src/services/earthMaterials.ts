@@ -6,6 +6,7 @@
 
 import * as THREE from 'three'
 import { fetchImageWithProgress } from '../utils/fetchProgress'
+import { logger } from '../utils/logger'
 
 // --- Earth material constants ---
 const NORMAL_MAP_SCALE = 0.4
@@ -172,7 +173,7 @@ export class EarthMaterials {
 
     this.defaultEarthActive = true
     this.createAtmosphere()
-    console.log('[Renderer] Enhanced Earth materials loaded')
+    logger.info('[Renderer] Enhanced Earth materials loaded')
   }
 
   /**
@@ -427,7 +428,7 @@ export class EarthMaterials {
         onProgress?.(loaded / total)
       })
     } catch {
-      console.warn('[Renderer] Cloud overlay failed to load — continuing without clouds')
+      logger.warn('[Renderer] Cloud overlay failed to load — continuing without clouds')
       return
     }
 
@@ -506,7 +507,7 @@ export class EarthMaterials {
       this.cloudMesh = new THREE.Mesh(geometry, material)
       this.scene.add(this.cloudMesh)
 
-      console.log('[Renderer] Cloud overlay loaded')
+      logger.info('[Renderer] Cloud overlay loaded')
     }
   }
 

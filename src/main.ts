@@ -10,6 +10,7 @@ import { SphereRenderer } from './services/sphereRenderer'
 import { HLSService } from './services/hlsService'
 import { dataService } from './services/dataService'
 import { formatDate, videoTimeToDate, isSubDailyPeriod, getSunPosition } from './utils/time'
+import { logger } from './utils/logger'
 import type { AppState } from './types'
 
 // Extracted modules
@@ -143,7 +144,7 @@ class InteractiveSphere {
         resolve()
       }
       img.onerror = () => {
-        console.warn('[App] Default Earth texture not found, using solid color')
+        logger.warn('[App] Default Earth texture not found, using solid color')
         resolve()
       }
       img.src = '/assets/Earth_Diffuse_6K.jpg'
@@ -184,7 +185,7 @@ class InteractiveSphere {
 
     this.appState.currentDataset = dataset
 
-    console.log('[App] Loading dataset:', {
+    logger.info('[App] Loading dataset:', {
       id: dataset.id,
       title: dataset.title,
       format: dataset.format,
@@ -361,7 +362,7 @@ class InteractiveSphere {
         }
       }
     }
-    console.error('[App] Error:', error)
+    logger.error('[App] Error:', error)
   }
 
   private announce(message: string): void {
