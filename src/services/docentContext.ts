@@ -179,6 +179,14 @@ IMPORTANT RULES:
 }
 
 /**
+ * Restore [[LOAD:ID]] placeholders (set by the chat UI for inline buttons)
+ * back to <<LOAD:ID>> so the LLM sees a consistent marker format in history.
+ */
+function restoreLoadMarkers(text: string): string {
+  return text.replace(/\[\[LOAD:([^\]]+)\]\]/g, '<<LOAD:$1>>')
+}
+
+/**
  * Convert ChatMessage history to LLM message format, trimmed to max length.
  */
 export function buildMessageHistory(messages: ChatMessage[]): LLMMessage[] {
@@ -186,7 +194,7 @@ export function buildMessageHistory(messages: ChatMessage[]): LLMMessage[] {
 
   return trimmed.map(msg => ({
     role: msg.role === 'user' ? 'user' as const : 'assistant' as const,
-    content: msg.text,
+    content: msg.role === 'user' ? msg.text : restoreLoadMarkers(msg.text),
   }))
 }
 
@@ -232,7 +240,7 @@ export function buildCompressedHistory(messages: ChatMessage[]): LLMMessage[] {
   if (trimmed.length <= recentCount) {
     return trimmed.map(msg => ({
       role: msg.role === 'user' ? 'user' as const : 'assistant' as const,
-      content: msg.text,
+      content: msg.role === 'user' ? msg.text : restoreLoadMarkers(msg.text),
     }))
   }
 
@@ -249,7 +257,7 @@ export function buildCompressedHistory(messages: ChatMessage[]): LLMMessage[] {
   for (const msg of recent) {
     result.push({
       role: msg.role === 'user' ? 'user' as const : 'assistant' as const,
-      content: msg.text,
+      content: msg.role === 'user' ? msg.text : restoreLoadMarkers(msg.text),
     })
   }
 

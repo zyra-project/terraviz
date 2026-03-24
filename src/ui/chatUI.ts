@@ -344,9 +344,13 @@ async function handleSend(): Promise<void> {
         }
 
         case 'done':
-          // Strip <<LOAD:...>> markers from displayed text
+          // Replace <<LOAD:...>> markers with inline placeholders so buttons
+          // render at the original location in the text, not grouped at the bottom.
           if (docentMsg.text) {
-            docentMsg.text = docentMsg.text.replace(/<?<LOAD:[^>]+>>?\n?/g, '').trim()
+            docentMsg.text = docentMsg.text.replace(
+              /<?<LOAD:([^>]+)>>?\n?/g,
+              (_, id) => `[[LOAD:${id.trim()}]]`,
+            ).trim()
             updateStreamingMessage(docentMsg)
           }
           if (chunk.fallback && docentMsg.text) {
@@ -421,8 +425,9 @@ function renderMessages(): void {
 
 function renderMessage(msg: ChatMessage): string {
   const roleClass = msg.role === 'user' ? 'chat-msg-user' : 'chat-msg-docent'
-  const textHtml = msg.text ? renderMarkdownLite(escapeHtml(msg.text)) : ''
-  const actionsHtml = msg.actions?.length ? renderActions(msg.actions) : ''
+  const { html: textHtml, inlinedIds } = renderChatText(msg.text ?? '', msg.actions)
+  const remaining = msg.actions?.filter(a => !inlinedIds.has(a.datasetId))
+  const actionsHtml = remaining?.length ? renderActions(remaining) : ''
   return `<div class="chat-msg ${roleClass}" data-msg-id="${escapeAttr(msg.id)}">
     <div class="chat-msg-text">${textHtml}</div>
     ${actionsHtml}
@@ -443,22 +448,50 @@ function updateStreamingMessage(msg: ChatMessage): void {
     container.insertAdjacentHTML('beforeend', renderMessage(msg))
     el = container.querySelector(selector)
   } else {
+    const { html, inlinedIds } = renderChatText(msg.text ?? '', msg.actions)
     const textEl = el.querySelector('.chat-msg-text')
     if (textEl) {
-      textEl.innerHTML = msg.text ? renderMarkdownLite(escapeHtml(msg.text)) : ''
+      textEl.innerHTML = html
     }
-    // Update actions
+    // Update remaining (non-inlined) actions at the bottom
+    const remaining = msg.actions?.filter(a => !inlinedIds.has(a.datasetId))
     const existingActions = el.querySelector('.chat-actions')
-    if (msg.actions?.length) {
-      const actionsHtml = renderActions(msg.actions)
+    if (remaining?.length) {
+      const actionsHtml = renderActions(remaining)
       if (existingActions) {
         existingActions.outerHTML = actionsHtml
       } else {
         el.insertAdjacentHTML('beforeend', actionsHtml)
       }
-      wireActionButtons(el)
+    } else if (existingActions) {
+      existingActions.remove()
     }
+    wireActionButtons(el)
   }
+}
+
+/**
+ * Render message text, converting [[LOAD:ID]] placeholders to inline action
+ * buttons and stripping raw <<LOAD:...>> markers (visible during streaming).
+ */
+function renderChatText(
+  text: string,
+  actions?: ChatAction[],
+): { html: string; inlinedIds: Set<string> } {
+  // Strip raw <<LOAD:...>> markers that appear during streaming (before 'done')
+  const clean = text.replace(/<?<LOAD:[^>]+>>?\n?/g, '')
+  let html = renderMarkdownLite(escapeHtml(clean))
+
+  // Replace [[LOAD:ID]] placeholders (set by 'done') with inline action buttons
+  const inlinedIds = new Set<string>()
+  html = html.replace(/\[\[LOAD:([^\]]+)\]\]/g, (_, id) => {
+    const action = actions?.find(a => a.datasetId === id)
+    if (!action) return ''
+    inlinedIds.add(id)
+    return `<button class="chat-action-btn chat-action-inline" data-dataset-id="${escapeAttr(action.datasetId)}" aria-label="Load ${escapeAttr(action.datasetTitle)}"><span class="chat-action-title">${escapeHtml(action.datasetTitle)}</span> <span class="chat-action-load">Load &#x27A4;</span></button>`
+  })
+
+  return { html, inlinedIds }
 }
 
 function renderActions(actions: ChatAction[]): string {
