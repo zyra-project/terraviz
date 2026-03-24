@@ -6,6 +6,7 @@
  * Override at runtime:  (window as any).__LOG_LEVEL__ = 'debug'
  */
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 declare const __BUNDLED_DEV__: boolean
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'silent'
@@ -18,18 +19,13 @@ const LEVEL_ORDER: Record<LogLevel, number> = {
   silent: 4,
 }
 
-function detectDevMode(): boolean {
-  try {
-    // __BUNDLED_DEV__ is defined by Vite at build time
-    if (typeof __BUNDLED_DEV__ !== 'undefined') return __BUNDLED_DEV__
-  } catch { /* not defined */ }
-  try {
-    return !!(import.meta as any).env?.DEV
-  } catch { /* not available */ }
-  return false
-}
-
-const DEFAULT_LEVEL: LogLevel = detectDevMode() ? 'debug' : 'warn'
+// Vite replaces __BUNDLED_DEV__ at compile time.
+// In dev mode (npm run dev) it becomes `true`, in production builds `false`.
+// Falls back to 'debug' if the define is somehow missing (e.g. tests).
+const DEFAULT_LEVEL: LogLevel =
+  (typeof __BUNDLED_DEV__ !== 'undefined' ? __BUNDLED_DEV__ : true)
+    ? 'debug'
+    : 'warn'
 
 function currentLevel(): LogLevel {
   if (typeof window !== 'undefined' && (window as any).__LOG_LEVEL__) {

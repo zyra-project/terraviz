@@ -163,6 +163,7 @@ class InteractiveSphere {
   }
 
   private async loadDataset(datasetId: string): Promise<void> {
+    const gen = this.loadGeneration
     logger.debug('[App] loadDataset start:', datasetId)
     const oldVideoTexture = this.videoTexture
     const oldHlsService = this.hlsService
@@ -177,10 +178,20 @@ class InteractiveSphere {
     this.renderer?.disableSunLighting()
 
     try {
-      await this.displayDataset(datasetId)
+      await this.displayDataset(datasetId, gen)
+      if (gen !== this.loadGeneration) {
+        logger.debug('[App] loadDataset superseded:', datasetId)
+        this.cleanupVideo()
+        return
+      }
       this.showHomeButton()
       logger.debug('[App] loadDataset complete:', datasetId)
     } catch (error) {
+      if (gen !== this.loadGeneration) {
+        logger.debug('[App] loadDataset superseded (error ignored):', datasetId)
+        this.cleanupVideo()
+        return
+      }
       logger.debug('[App] loadDataset failed:', datasetId, error)
       // Clean up any partially-created resources from the failed load
       this.cleanupVideo()
@@ -192,7 +203,7 @@ class InteractiveSphere {
     }
   }
 
-  private async displayDataset(datasetId: string): Promise<void> {
+  private async displayDataset(datasetId: string, gen: number): Promise<void> {
     const dataset = dataService.getDatasetById(datasetId)
     if (!dataset) throw new Error(`Dataset not found: ${datasetId}`)
 
@@ -216,10 +227,18 @@ class InteractiveSphere {
 
     if (dataService.isImageDataset(dataset)) {
       await loadImageDataset(dataset, this.renderer, this.appState, this.isMobile, loaderCallbacks)
+      if (gen !== this.loadGeneration) return
     } else if (dataService.isVideoDataset(dataset)) {
       const result = await loadVideoDataset(
         dataset, this.renderer, this.appState, this.isMobile, this.playback, loaderCallbacks
       )
+      // If a newer load started while we were awaiting, discard these results.
+      // Don't dispose videoTexture here — setVideoTexture already placed it on
+      // the sphere material, so the next load's setVideoTexture will replace it.
+      if (gen !== this.loadGeneration) {
+        result.hlsService.destroy()
+        return
+      }
       this.hlsService = result.hlsService
       this.videoTexture = result.videoTexture
       this.doStartPlaybackLoop()
@@ -397,7 +416,6 @@ class InteractiveSphere {
 
   private async selectDatasetFromChat(id: string): Promise<void> {
     const gen = ++this.loadGeneration
-    logger.debug('[App] selectDatasetFromChat:', id, 'gen:', gen)
     logger.debug('[App] selectDatasetFromChat:', id, 'gen:', gen)
     hideBrowseUI()
     this.announce('Loading dataset\u2026')
