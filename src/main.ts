@@ -15,7 +15,7 @@ import type { AppState } from './types'
 
 // Extracted modules
 import { showBrowseUI, hideBrowseUI } from './ui/browseUI'
-import { initChatUI, notifyDatasetChanged } from './ui/chatUI'
+import { initChatUI, notifyDatasetChanged, showChatTrigger, hideChatTrigger, closeChat } from './ui/chatUI'
 import {
   createPlaybackState, startPlaybackLoop, stopPlaybackLoop,
   togglePlayPause, rewind, fastForward, stepFrame, onScrub,
@@ -104,6 +104,7 @@ class InteractiveSphere {
         this.setLoadingStatus('Loading dataset\u2026', 65)
         await this.loadDataset(datasetId)
         this.setLoading(false)
+        showChatTrigger()
       } else {
         this.setLoadingStatus('Loading Earth textures\u2026', 20)
         const cloudUrl = 'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/clouds_8192.jpg'
@@ -393,6 +394,7 @@ class InteractiveSphere {
     window.history.pushState({}, '', `?dataset=${encodeURIComponent(id)}`)
     await this.loadDataset(id)
     this.setLoading(false)
+    showChatTrigger()
     const dataset = this.appState.currentDataset
     if (dataset) {
       this.announce(`Loaded dataset: ${dataset.title}`)
@@ -521,11 +523,13 @@ class InteractiveSphere {
 
   private async selectDatasetFromBrowse(id: string): Promise<void> {
     hideBrowseUI()
+    closeChat()
     this.announce('Loading dataset\u2026')
     this.showLoadingScreen('Loading dataset\u2026', 20)
     window.history.pushState({}, '', `?dataset=${encodeURIComponent(id)}`)
     await this.loadDataset(id)
     this.setLoading(false)
+    showChatTrigger()
     const dataset = this.appState.currentDataset
     if (dataset) {
       this.announce(`Loaded dataset: ${dataset.title}`)
@@ -601,6 +605,8 @@ class InteractiveSphere {
       this.renderer.enableSunLighting(sun.lat, sun.lng)
     }
     this.setLoading(false)
+    hideChatTrigger()
+    closeChat()
     showBrowseUI(this.appState.datasets, {
       onSelectDataset: (id) => this.selectDatasetFromBrowse(id),
       announce: (msg) => this.announce(msg),

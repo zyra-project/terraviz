@@ -554,6 +554,7 @@
             position: relative;
             flex-shrink: 0;
             margin-bottom: 0.875rem;
+            margin-right: 3rem;
         }
         #browse-search {
             display: block;
@@ -587,6 +588,40 @@
         .browse-search-clear:hover {
             color: #fff;
             background: rgba(255, 255, 255, 0.1);
+        }
+
+        /* Docent button integrated into browse search bar */
+        .browse-chat-btn {
+            position: absolute;
+            right: -3rem;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: rgba(13, 13, 18, 0.92) !important;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.12) !important;
+            color: #bbb !important;
+            font-size: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+            padding: 0 !important;
+            flex-shrink: 0;
+        }
+        .browse-chat-btn:hover {
+            background: rgba(30, 30, 40, 0.95) !important;
+            border-color: rgba(77, 166, 255, 0.4) !important;
+            color: #4da6ff !important;
+        }
+        .browse-chat-btn.chat-trigger-active {
+            border-color: #4da6ff !important;
+            color: #4da6ff !important;
+            box-shadow: 0 0 12px rgba(77, 166, 255, 0.3);
         }
 
         #browse-search::placeholder {
@@ -1047,6 +1082,7 @@
         }
 
         /* --- Chat / Digital Docent --- */
+        /* Standalone trigger: hidden by default, shown when dataset is loaded */
         #chat-trigger {
             position: absolute;
             bottom: 0.75rem;
@@ -1062,12 +1098,15 @@
             border: 1px solid rgba(255, 255, 255, 0.12) !important;
             color: #bbb !important;
             font-size: 1.2rem;
-            display: flex;
+            display: none;
             align-items: center;
             justify-content: center;
             cursor: pointer;
             transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
             padding: 0 !important;
+        }
+        #chat-trigger.visible {
+            display: flex;
         }
         #chat-trigger:hover {
             background: rgba(30, 30, 40, 0.95) !important;
@@ -1081,13 +1120,13 @@
         }
 
         #chat-panel {
-            position: absolute;
+            position: fixed;
             bottom: 4rem;
             left: 0.75rem;
             width: 380px;
             max-height: 520px;
             pointer-events: auto;
-            z-index: 400;
+            z-index: 600;
             background: rgba(13, 13, 18, 0.92);
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
@@ -1379,13 +1418,21 @@
             #chat-panel {
                 width: calc(100vw - 1.5rem);
                 max-height: 60vh;
-                bottom: 4rem;
-                left: 0.75rem;
+                bottom: 0.75rem;
             }
-            #chat-trigger {
+            #chat-trigger.visible {
                 width: 48px;
                 height: 48px;
                 font-size: 1.3rem;
+            }
+            .browse-chat-btn {
+                width: 40px;
+                height: 40px;
+                font-size: 1.1rem;
+                right: -3.25rem;
+            }
+            .browse-search-wrap {
+                margin-right: 3.25rem;
             }
             .chat-action-btn {
                 padding: 0.5rem 0.65rem !important;
@@ -1425,6 +1472,7 @@
                 <label for="browse-search" class="sr-only">Search datasets</label>
                 <input type="search" id="browse-search" placeholder="Search datasets…" autocomplete="off" spellcheck="false" aria-describedby="browse-count" />
                 <button id="browse-search-clear" class="browse-search-clear hidden" aria-label="Clear search" type="button">&times;</button>
+                <button id="browse-chat-btn" class="browse-chat-btn" type="button" title="Ask the docent" aria-label="Open digital docent chat">&#x1F4AC;&#xFE0E;</button>
             </div>
             <div id="browse-category-bar" role="group" aria-label="Filter by category"></div>
             <div id="browse-subcategory-bar" role="group" aria-label="Filter by sub-category"></div>

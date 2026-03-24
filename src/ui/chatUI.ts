@@ -46,11 +46,13 @@ export function initChatUI(cb: ChatCallbacks): void {
 export function openChat(): void {
   const panel = document.getElementById('chat-panel')
   const trigger = document.getElementById('chat-trigger')
+  const browseChatBtn = document.getElementById('browse-chat-btn')
   if (!panel) return
   isOpen = true
   panel.classList.remove('hidden')
   trigger?.classList.add('chat-trigger-active')
   trigger?.setAttribute('aria-expanded', 'true')
+  browseChatBtn?.classList.add('chat-trigger-active')
   scrollToBottom()
   const input = document.getElementById('chat-input') as HTMLTextAreaElement | null
   input?.focus()
@@ -63,11 +65,13 @@ export function openChat(): void {
 export function closeChat(): void {
   const panel = document.getElementById('chat-panel')
   const trigger = document.getElementById('chat-trigger')
+  const browseChatBtn = document.getElementById('browse-chat-btn')
   if (!panel) return
   isOpen = false
   panel.classList.add('hidden')
   trigger?.classList.remove('chat-trigger-active')
   trigger?.setAttribute('aria-expanded', 'false')
+  browseChatBtn?.classList.remove('chat-trigger-active')
   if (settingsOpen) toggleSettings()
   callbacks?.announce('Chat closed')
 }
@@ -130,8 +134,23 @@ function restoreSession(): void {
 
 // --- Event wiring ---
 
+/**
+ * Show the standalone floating chat trigger (used when a dataset is loaded).
+ */
+export function showChatTrigger(): void {
+  document.getElementById('chat-trigger')?.classList.add('visible')
+}
+
+/**
+ * Hide the standalone floating chat trigger (used when browse panel is shown).
+ */
+export function hideChatTrigger(): void {
+  document.getElementById('chat-trigger')?.classList.remove('visible')
+}
+
 function wireEvents(): void {
   document.getElementById('chat-trigger')?.addEventListener('click', toggleChat)
+  document.getElementById('browse-chat-btn')?.addEventListener('click', toggleChat)
   document.getElementById('chat-close')?.addEventListener('click', closeChat)
   document.getElementById('chat-send')?.addEventListener('click', handleSend)
   document.getElementById('chat-settings-btn')?.addEventListener('click', toggleSettings)
