@@ -156,3 +156,13 @@ export interface ChatSession {
   messages: ChatMessage[]
   lastActiveDatasetId: string | null
 }
+
+/**
+ * LLM provider configuration (stored in localStorage)
+ */
+export interface DocentConfig {
+  apiUrl: string    // default: 'http://localhost:11434/v1'
+  apiKey: string    // default: '' (empty = no auth, for Ollama)
+  model: string     // default: 'llama3.2'
+  enabled: boolean  // default: true
+}

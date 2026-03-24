@@ -1,20 +1,20 @@
 /**
  * Chat UI — digital docent chat panel.
  *
- * Renders as a toggleable panel in the bottom-left area (above the info panel),
- * with a floating trigger button. Persists conversation in sessionStorage.
+ * Floating panel in the bottom-left with a trigger button.
+ * Streams LLM responses token-by-token, falls back to local engine.
+ * Persists conversation in sessionStorage, config in localStorage.
  */
 
-import type { ChatMessage, ChatAction, ChatSession } from '../types'
-import { escapeHtml } from './browseUI'
-import { createMessageId, processUserMessage } from '../services/docentEngine'
+import type { ChatMessage, ChatAction, ChatSession, DocentConfig } from '../types'
 import type { Dataset } from '../types'
+import { escapeHtml } from './browseUI'
+import { createMessageId } from '../services/docentEngine'
+import { processMessage, loadConfig, saveConfig, testConnection, getDefaultConfig } from '../services/docentService'
 
 // --- Constants ---
 const SESSION_STORAGE_KEY = 'sos-docent-chat'
-const TYPING_DELAY_MS = 400
-const TYPING_MIN_MS = 300
-const TYPING_MAX_MS = 800
+const MAX_PERSISTED_MESSAGES = 100
 
 export interface ChatCallbacks {
   onLoadDataset: (id: string) => void
@@ -26,6 +26,8 @@ export interface ChatCallbacks {
 let callbacks: ChatCallbacks | null = null
 let messages: ChatMessage[] = []
 let isOpen = false
+let isStreaming = false
+let settingsOpen = false
 
 /**
  * Initialize the chat UI with callbacks and restore session.
@@ -35,7 +37,6 @@ export function initChatUI(cb: ChatCallbacks): void {
   restoreSession()
   wireEvents()
   renderMessages()
-  updateBadge()
 }
 
 /**
@@ -48,7 +49,6 @@ export function openChat(): void {
   isOpen = true
   panel.classList.remove('hidden')
   trigger?.classList.add('chat-trigger-active')
-  updateBadge()
   scrollToBottom()
   const input = document.getElementById('chat-input') as HTMLTextAreaElement | null
   input?.focus()
@@ -65,6 +65,7 @@ export function closeChat(): void {
   isOpen = false
   panel.classList.add('hidden')
   trigger?.classList.remove('chat-trigger-active')
+  if (settingsOpen) toggleSettings()
   callbacks?.announce('Chat closed')
 }
 
@@ -77,9 +78,9 @@ export function toggleChat(): void {
 }
 
 /**
- * Notify the chat that the current dataset changed (for context awareness).
+ * Notify the chat that the current dataset changed.
  */
-export function notifyDatasetChanged(dataset: Dataset | null): void {
+export function notifyDatasetChanged(_dataset: Dataset | null): void {
   saveSession()
 }
 
@@ -97,20 +98,19 @@ export function clearChat(): void {
   messages = []
   saveSession()
   renderMessages()
-  updateBadge()
 }
 
 // --- Session persistence ---
 
 function saveSession(): void {
   const session: ChatSession = {
-    messages,
+    messages: messages.slice(-MAX_PERSISTED_MESSAGES),
     lastActiveDatasetId: callbacks?.getCurrentDataset()?.id ?? null,
   }
   try {
     sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session))
   } catch {
-    // sessionStorage full or unavailable — silently ignore
+    // silently ignore
   }
 }
 
@@ -129,16 +129,11 @@ function restoreSession(): void {
 // --- Event wiring ---
 
 function wireEvents(): void {
-  // Trigger button
   document.getElementById('chat-trigger')?.addEventListener('click', toggleChat)
-
-  // Close button
   document.getElementById('chat-close')?.addEventListener('click', closeChat)
-
-  // Send button
   document.getElementById('chat-send')?.addEventListener('click', handleSend)
+  document.getElementById('chat-settings-btn')?.addEventListener('click', toggleSettings)
 
-  // Input — Enter to send, Shift+Enter for newline
   const input = document.getElementById('chat-input') as HTMLTextAreaElement | null
   if (input) {
     input.addEventListener('keydown', (e) => {
@@ -147,25 +142,100 @@ function wireEvents(): void {
         handleSend()
       }
     })
-    // Auto-resize textarea
     input.addEventListener('input', () => {
       input.style.height = 'auto'
       input.style.height = Math.min(input.scrollHeight, 96) + 'px'
     })
   }
 
-  // Clear button
   document.getElementById('chat-clear')?.addEventListener('click', () => {
     clearChat()
     callbacks?.announce('Chat cleared')
   })
+
+  // Settings form
+  document.getElementById('chat-settings-save')?.addEventListener('click', handleSettingsSave)
+  document.getElementById('chat-settings-test')?.addEventListener('click', handleSettingsTest)
+}
+
+// --- Settings panel ---
+
+function toggleSettings(): void {
+  const panel = document.getElementById('chat-settings')
+  if (!panel) return
+  settingsOpen = !settingsOpen
+  panel.classList.toggle('hidden', !settingsOpen)
+  if (settingsOpen) {
+    populateSettings()
+  }
+}
+
+function populateSettings(): void {
+  const config = loadConfig()
+  const urlInput = document.getElementById('chat-settings-url') as HTMLInputElement | null
+  const keyInput = document.getElementById('chat-settings-key') as HTMLInputElement | null
+  const modelInput = document.getElementById('chat-settings-model') as HTMLInputElement | null
+  const enabledInput = document.getElementById('chat-settings-enabled') as HTMLInputElement | null
+  if (urlInput) urlInput.value = config.apiUrl
+  if (keyInput) keyInput.value = config.apiKey
+  if (modelInput) modelInput.value = config.model
+  if (enabledInput) enabledInput.checked = config.enabled
+}
+
+function readSettingsForm(): DocentConfig {
+  const defaults = getDefaultConfig()
+  const urlInput = document.getElementById('chat-settings-url') as HTMLInputElement | null
+  const keyInput = document.getElementById('chat-settings-key') as HTMLInputElement | null
+  const modelInput = document.getElementById('chat-settings-model') as HTMLInputElement | null
+  const enabledInput = document.getElementById('chat-settings-enabled') as HTMLInputElement | null
+  return {
+    apiUrl: urlInput?.value.trim() || defaults.apiUrl,
+    apiKey: keyInput?.value.trim() ?? '',
+    model: modelInput?.value.trim() || defaults.model,
+    enabled: enabledInput?.checked ?? true,
+  }
+}
+
+function handleSettingsSave(): void {
+  const config = readSettingsForm()
+  saveConfig(config)
+  const status = document.getElementById('chat-settings-status')
+  if (status) {
+    status.textContent = 'Saved'
+    status.className = 'chat-settings-status chat-settings-status-ok'
+    setTimeout(() => { status.textContent = '' }, 2000)
+  }
+  callbacks?.announce('Settings saved')
+}
+
+async function handleSettingsTest(): Promise<void> {
+  const config = readSettingsForm()
+  const status = document.getElementById('chat-settings-status')
+  const testBtn = document.getElementById('chat-settings-test') as HTMLButtonElement | null
+  if (status) {
+    status.textContent = 'Testing…'
+    status.className = 'chat-settings-status'
+  }
+  if (testBtn) testBtn.disabled = true
+
+  const ok = await testConnection(config)
+
+  if (status) {
+    status.textContent = ok ? 'Connected' : 'Failed to connect'
+    status.className = ok
+      ? 'chat-settings-status chat-settings-status-ok'
+      : 'chat-settings-status chat-settings-status-err'
+    setTimeout(() => { status.textContent = '' }, 3000)
+  }
+  if (testBtn) testBtn.disabled = false
+  callbacks?.announce(ok ? 'LLM connection successful' : 'LLM connection failed')
 }
 
 // --- Send / receive ---
 
-function handleSend(): void {
+async function handleSend(): Promise<void> {
   const input = document.getElementById('chat-input') as HTMLTextAreaElement | null
-  if (!input || !callbacks) return
+  if (!input || !callbacks || isStreaming) return
 
   const text = input.value.trim()
   if (!text) return
@@ -184,22 +254,80 @@ function handleSend(): void {
   scrollToBottom()
   saveSession()
 
-  // Show typing indicator, then respond
+  // Create a placeholder docent message for streaming
+  const docentMsg: ChatMessage = {
+    id: createMessageId(),
+    role: 'docent',
+    text: '',
+    actions: [],
+    timestamp: Date.now(),
+  }
+  messages.push(docentMsg)
+  isStreaming = true
   showTyping()
-  const delay = TYPING_MIN_MS + Math.random() * (TYPING_MAX_MS - TYPING_MIN_MS)
-  setTimeout(() => {
-    hideTyping()
-    const docentMsg = processUserMessage(
+  setSendEnabled(false)
+
+  try {
+    const stream = processMessage(
       text,
-      callbacks!.getDatasets(),
-      callbacks!.getCurrentDataset(),
+      messages.slice(0, -1), // history without the placeholder
+      callbacks.getDatasets(),
+      callbacks.getCurrentDataset(),
     )
-    messages.push(docentMsg)
-    renderMessages()
-    scrollToBottom()
-    saveSession()
-    callbacks!.announce('Docent responded')
-  }, delay)
+
+    let firstChunk = true
+    for await (const chunk of stream) {
+      switch (chunk.type) {
+        case 'delta':
+          if (firstChunk) {
+            hideTyping()
+            firstChunk = false
+          }
+          docentMsg.text += chunk.text
+          updateStreamingMessage(docentMsg)
+          scrollToBottom()
+          break
+
+        case 'action':
+          if (!docentMsg.actions) docentMsg.actions = []
+          docentMsg.actions.push(chunk.action)
+          updateStreamingMessage(docentMsg)
+          scrollToBottom()
+          break
+
+        case 'done':
+          break
+
+        case 'error':
+          // Error during streaming — the service handles fallback
+          break
+      }
+    }
+  } catch {
+    if (!docentMsg.text) {
+      docentMsg.text = "Sorry, I had trouble responding. Try asking again, or check the LLM settings."
+    }
+  }
+
+  hideTyping()
+  isStreaming = false
+  setSendEnabled(true)
+
+  // Clean up empty actions array
+  if (docentMsg.actions?.length === 0) delete docentMsg.actions
+
+  // Re-render fully to wire action button events
+  renderMessages()
+  scrollToBottom()
+  saveSession()
+  callbacks.announce('Docent responded')
+}
+
+function setSendEnabled(enabled: boolean): void {
+  const btn = document.getElementById('chat-send') as HTMLButtonElement | null
+  if (btn) btn.disabled = !enabled
+  const input = document.getElementById('chat-input') as HTMLTextAreaElement | null
+  if (input) input.disabled = !enabled
 }
 
 // --- Rendering ---
@@ -219,7 +347,6 @@ function renderMessages(): void {
         <button class="chat-suggestion" data-query="What about space?">Space</button>
       </div>
     </div>`
-    // Wire suggestion buttons
     container.querySelectorAll<HTMLElement>('.chat-suggestion').forEach(btn => {
       btn.addEventListener('click', () => {
         const input = document.getElementById('chat-input') as HTMLTextAreaElement | null
@@ -232,26 +359,48 @@ function renderMessages(): void {
     return
   }
 
-  container.innerHTML = messages.map(msg => {
-    const roleClass = msg.role === 'user' ? 'chat-msg-user' : 'chat-msg-docent'
-    const textHtml = renderMarkdownLite(escapeHtml(msg.text))
-    const actionsHtml = msg.actions?.length ? renderActions(msg.actions) : ''
-    return `<div class="chat-msg ${roleClass}" data-msg-id="${msg.id}">
-      <div class="chat-msg-text">${textHtml}</div>
-      ${actionsHtml}
-    </div>`
-  }).join('')
+  container.innerHTML = messages.map(msg => renderMessage(msg)).join('')
+  wireActionButtons(container)
+}
 
-  // Wire action buttons
-  container.querySelectorAll<HTMLElement>('.chat-action-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const id = btn.dataset.datasetId
-      if (id && callbacks) {
-        callbacks.onLoadDataset(id)
-        callbacks.announce(`Loading dataset`)
+function renderMessage(msg: ChatMessage): string {
+  const roleClass = msg.role === 'user' ? 'chat-msg-user' : 'chat-msg-docent'
+  const textHtml = msg.text ? renderMarkdownLite(escapeHtml(msg.text)) : ''
+  const actionsHtml = msg.actions?.length ? renderActions(msg.actions) : ''
+  return `<div class="chat-msg ${roleClass}" data-msg-id="${msg.id}">
+    <div class="chat-msg-text">${textHtml}</div>
+    ${actionsHtml}
+  </div>`
+}
+
+/**
+ * Update only the currently streaming message (avoids full re-render flicker).
+ */
+function updateStreamingMessage(msg: ChatMessage): void {
+  const container = document.getElementById('chat-messages')
+  if (!container) return
+
+  let el = container.querySelector(`[data-msg-id="${msg.id}"]`)
+  if (!el) {
+    // Append it
+    container.insertAdjacentHTML('beforeend', renderMessage(msg))
+    el = container.querySelector(`[data-msg-id="${msg.id}"]`)
+  } else {
+    const textEl = el.querySelector('.chat-msg-text')
+    if (textEl) {
+      textEl.innerHTML = msg.text ? renderMarkdownLite(escapeHtml(msg.text)) : ''
+    }
+    // Update actions
+    const existingActions = el.querySelector('.chat-actions')
+    if (msg.actions?.length) {
+      const actionsHtml = renderActions(msg.actions)
+      if (existingActions) {
+        existingActions.outerHTML = actionsHtml
+      } else {
+        el.insertAdjacentHTML('beforeend', actionsHtml)
       }
-    })
-  })
+    }
+  }
 }
 
 function renderActions(actions: ChatAction[]): string {
@@ -259,19 +408,32 @@ function renderActions(actions: ChatAction[]): string {
     if (a.type === 'load-dataset') {
       return `<button class="chat-action-btn" data-dataset-id="${escapeHtml(a.datasetId)}" aria-label="Load ${escapeHtml(a.datasetTitle)}">
         <span class="chat-action-title">${escapeHtml(a.datasetTitle)}</span>
-        <span class="chat-action-load">Load</span>
+        <span class="chat-action-load">Load &#x27A4;</span>
       </button>`
     }
     return ''
   }).join('')}</div>`
 }
 
+function wireActionButtons(container: Element): void {
+  container.querySelectorAll<HTMLElement>('.chat-action-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.datasetId
+      if (id && callbacks) {
+        callbacks.onLoadDataset(id)
+        callbacks.announce('Loading dataset')
+      }
+    })
+  })
+}
+
 /**
- * Minimal markdown: bold (**text**) and newlines.
+ * Minimal markdown: **bold**, bullet lists, and newlines.
  */
 function renderMarkdownLite(html: string): string {
   return html
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/^• (.+)$/gm, '<li>$1</li>')
     .replace(/\n/g, '<br>')
 }
 
@@ -292,10 +454,4 @@ function scrollToBottom(): void {
       container.scrollTop = container.scrollHeight
     })
   }
-}
-
-function updateBadge(): void {
-  // No badge needed when open
-  const badge = document.getElementById('chat-badge')
-  if (badge) badge.classList.add('hidden')
 }
