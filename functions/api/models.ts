@@ -42,6 +42,11 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       object: 'list',
       data: [
         {
+          id: '@cf/meta/llama-3.1-70b-instruct',
+          object: 'model',
+          owned_by: 'cloudflare',
+        },
+        {
           id: '@cf/meta/llama-3.1-8b-instruct',
           object: 'model',
           owned_by: 'cloudflare',

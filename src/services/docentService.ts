@@ -21,7 +21,7 @@ export const isLocalDev = typeof window !== 'undefined'
 const DEFAULT_CONFIG: DocentConfig = {
   apiUrl: '/api',
   apiKey: '',
-  model: 'llama-3.1-8b',
+  model: 'llama-3.1-70b',
   enabled: true,
 }
 

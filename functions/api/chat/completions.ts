@@ -30,9 +30,10 @@ interface RequestBody {
 
 // Model mapping: friendly names → Cloudflare AI model IDs
 const MODEL_MAP: Record<string, string> = {
+  'llama-3.1-70b': '@cf/meta/llama-3.1-70b-instruct',
   'llama-3.1-8b': '@cf/meta/llama-3.1-8b-instruct',
   'llama-3.2-3b': '@cf/meta/llama-3.2-3b-instruct',
-  default: '@cf/meta/llama-3.1-8b-instruct',
+  default: '@cf/meta/llama-3.1-70b-instruct',
 }
 
 // Basic per-IP rate limiting (in-memory, resets on deploy)
