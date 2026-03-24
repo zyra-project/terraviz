@@ -199,7 +199,6 @@ class InteractiveSphere {
     const loaderCallbacks = {
       showPlaybackControls: (show: boolean) => this.showPlaybackControls(show),
       showTimeLabel: (show: boolean) => this.showTimeLabel(show),
-      startPlaybackLoop: () => this.doStartPlaybackLoop(),
     }
 
     if (dataService.isImageDataset(dataset)) {
@@ -210,6 +209,7 @@ class InteractiveSphere {
       )
       this.hlsService = result.hlsService
       this.videoTexture = result.videoTexture
+      this.doStartPlaybackLoop()
     } else {
       throw new Error(`Unsupported format: ${dataset.format}`)
     }

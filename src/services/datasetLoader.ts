@@ -25,7 +25,6 @@ const SCRUBBER_MAX = '1000'
 export interface DatasetLoaderCallbacks {
   showPlaybackControls: (show: boolean) => void
   showTimeLabel: (show: boolean) => void
-  startPlaybackLoop: () => void
 }
 
 // --- Image loading ---
@@ -173,7 +172,6 @@ export async function loadVideoDataset(
 
   callbacks.showPlaybackControls(true)
   updatePlayButton(true)
-  callbacks.startPlaybackLoop()
 
   if (dataset.closedCaptionLink) {
     loadCaptions(video, dataset.closedCaptionLink, playbackState)
