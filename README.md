@@ -18,6 +18,28 @@ A WebGL-based globe that streams environmental data from the [Science On a Spher
 - Accessible controls (ARIA labels, keyboard navigation)
 - Frosted-glass UI design language (see [STYLE_GUIDE.md](STYLE_GUIDE.md))
 
+## 🏗️ How It Works
+
+The app is a single-page application built with TypeScript, Three.js, and Vite. Here's how the pieces fit together:
+
+**`main.ts`** is the conductor. It boots the app, fetches datasets, reads the URL to decide what to show, and wires up all the UI controls (play/pause, scrubber, mute, keyboard shortcuts). When a user picks a dataset, `main.ts` coordinates the handoff between the old content and the new.
+
+**`sphereRenderer.ts`** owns the 3D scene — the camera, the WebGL renderer, and the animation loop. It creates the sphere, loads the starfield skybox, and delegates specialized work to three helpers:
+
+- **`earthMaterials.ts`** handles everything that makes the default Earth look realistic: the diffuse texture, normal and specular maps, night-side city lights, a cloud layer fetched from NOAA, an atmospheric glow shell, and sun lighting positioned to match the real sun.
+- **`inputHandler.ts`** turns mouse drags and touch gestures into sphere rotation with momentum and damping. It also tracks where the cursor hits the sphere to show latitude/longitude coordinates.
+- **`datasetLoader.ts`** takes a dataset and figures out how to display it. For images, it tries progressively lower resolutions until one loads. For videos, it sets up HLS streaming through the proxy, waits for the first frame to decode, and attaches the video as a live texture on the sphere.
+
+**`dataService.ts`** is the data layer. It fetches the NOAA dataset catalog from S3 and a local enriched metadata file in parallel, then cross-references them by title to merge in descriptions, categories, keywords, and related datasets. Results are cached for an hour.
+
+**`hlsService.ts`** manages video streaming. It fetches a manifest from the Vimeo proxy, sets up HLS.js with adaptive bitrate selection, and falls back to direct MP4 if HLS fails. It also detects whether the stream has an audio track.
+
+**`browseUI.ts`** builds the dataset browser panel — the search box, category chips, sub-category filters, sorting, and the scrollable list of expandable dataset cards. When a user selects a dataset, it calls back to `main.ts` to load it.
+
+**`playbackController.ts`** manages video playback state: play/pause toggling, frame stepping, scrubber synchronization, and closed caption loading.
+
+**`time.ts`** and **`fetchProgress.ts`** are small utilities — one parses ISO 8601 durations and maps video playback time to real-world dates, the other wraps `fetch` to report download progress as a percentage.
+
 ## 🚀 Quick Start
 
 ### Prerequisites
