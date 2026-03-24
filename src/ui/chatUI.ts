@@ -279,12 +279,12 @@ async function handleSend(): Promise<void> {
 
     let firstChunk = true
     for await (const chunk of stream) {
+      if (firstChunk && (chunk.type === 'delta' || chunk.type === 'action')) {
+        hideTyping()
+        firstChunk = false
+      }
       switch (chunk.type) {
         case 'delta':
-          if (firstChunk) {
-            hideTyping()
-            firstChunk = false
-          }
           docentMsg.text += chunk.text
           updateStreamingMessage(docentMsg)
           scrollToBottom()
@@ -365,7 +365,7 @@ function renderMessage(msg: ChatMessage): string {
   const roleClass = msg.role === 'user' ? 'chat-msg-user' : 'chat-msg-docent'
   const textHtml = msg.text ? renderMarkdownLite(escapeHtml(msg.text)) : ''
   const actionsHtml = msg.actions?.length ? renderActions(msg.actions) : ''
-  return `<div class="chat-msg ${roleClass}" data-msg-id="${msg.id}">
+  return `<div class="chat-msg ${roleClass}" data-msg-id="${escapeAttr(msg.id)}">
     <div class="chat-msg-text">${textHtml}</div>
     ${actionsHtml}
   </div>`
@@ -378,11 +378,12 @@ function updateStreamingMessage(msg: ChatMessage): void {
   const container = document.getElementById('chat-messages')
   if (!container) return
 
-  let el = container.querySelector(`[data-msg-id="${msg.id}"]`)
+  const selector = `[data-msg-id="${CSS.escape(msg.id)}"]`
+  let el = container.querySelector(selector)
   if (!el) {
     // Append it
     container.insertAdjacentHTML('beforeend', renderMessage(msg))
-    el = container.querySelector(`[data-msg-id="${msg.id}"]`)
+    el = container.querySelector(selector)
   } else {
     const textEl = el.querySelector('.chat-msg-text')
     if (textEl) {

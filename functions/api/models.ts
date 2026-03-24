@@ -9,7 +9,26 @@ interface Env {
   AI: unknown
 }
 
-export const onRequestGet: PagesFunction<Env> = async () => {
+function getAllowedOrigin(origin: string | null, requestUrl: string): string | null {
+  if (!origin) return null
+  const devOrigins = new Set(['http://localhost:5173', 'http://localhost:4173'])
+  if (devOrigins.has(origin)) return origin
+  try {
+    const req = new URL(requestUrl)
+    if (origin === req.origin) return origin
+  } catch { /* ignore */ }
+  return null
+}
+
+export const onRequestGet: PagesFunction<Env> = async (context) => {
+  const origin = context.request.headers.get('Origin')
+  const allowed = getAllowedOrigin(origin, context.request.url)
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (allowed) {
+    headers['Access-Control-Allow-Origin'] = allowed
+    headers['Vary'] = 'Origin'
+  }
+
   return new Response(
     JSON.stringify({
       object: 'list',
@@ -26,11 +45,6 @@ export const onRequestGet: PagesFunction<Env> = async () => {
         },
       ],
     }),
-    {
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-      },
-    },
+    { headers },
   )
 }

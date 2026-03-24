@@ -51,25 +51,50 @@ function isRateLimited(ip: string): boolean {
   return entry.count > RATE_LIMIT
 }
 
-function corsHeaders(): Record<string, string> {
-  return {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+// Allowed CORS origins — same-origin in production, localhost for dev
+const ALLOWED_ORIGINS = new Set([
+  'http://localhost:5173',
+  'http://localhost:4173',
+])
+
+function isAllowedOrigin(origin: string | null, requestUrl: string): boolean {
+  if (!origin) return false
+  if (ALLOWED_ORIGINS.has(origin)) return true
+  // Allow same-origin (deployed Pages site)
+  try {
+    const req = new URL(requestUrl)
+    return origin === req.origin
+  } catch {
+    return false
   }
 }
 
-export const onRequestOptions: PagesFunction<Env> = async () => {
-  return new Response(null, { status: 204, headers: corsHeaders() })
+function corsHeaders(origin?: string | null): Record<string, string> {
+  return {
+    'Access-Control-Allow-Origin': origin ?? '',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Vary': 'Origin',
+  }
+}
+
+export const onRequestOptions: PagesFunction<Env> = async (context) => {
+  const origin = context.request.headers.get('Origin')
+  if (!isAllowedOrigin(origin, context.request.url)) {
+    return new Response(null, { status: 403 })
+  }
+  return new Response(null, { status: 204, headers: corsHeaders(origin) })
 }
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
+  const origin = context.request.headers.get('Origin')
+  const cors = corsHeaders(isAllowedOrigin(origin, context.request.url) ? origin : null)
   const ip = context.request.headers.get('CF-Connecting-IP') ?? 'unknown'
 
   if (isRateLimited(ip)) {
     return new Response(JSON.stringify({ error: 'Rate limit exceeded. Try again shortly.' }), {
       status: 429,
-      headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+      headers: { ...cors, 'Content-Type': 'application/json' },
     })
   }
 
@@ -79,14 +104,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   } catch {
     return new Response(JSON.stringify({ error: 'Invalid JSON' }), {
       status: 400,
-      headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+      headers: { ...cors, 'Content-Type': 'application/json' },
     })
   }
 
   if (!body.messages || !Array.isArray(body.messages)) {
     return new Response(JSON.stringify({ error: 'messages array required' }), {
       status: 400,
-      headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+      headers: { ...cors, 'Content-Type': 'application/json' },
     })
   }
 
@@ -97,16 +122,23 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   // Truncate messages to limit token usage
   const messages = body.messages.slice(-22) // system + 20 history + user
 
-  if (body.stream) {
-    return streamResponse(context.env.AI, cfModel, messages)
+  // Workers AI does not support tool calling — strip tools from the request.
+  // The client-side docent service falls back to local engine when no tool calls are returned.
+  if (body.tools?.length) {
+    body.tools = undefined
   }
-  return nonStreamResponse(context.env.AI, cfModel, messages)
+
+  if (body.stream) {
+    return streamResponse(context.env.AI, cfModel, messages, cors)
+  }
+  return nonStreamResponse(context.env.AI, cfModel, messages, cors)
 }
 
 async function streamResponse(
   ai: Env['AI'],
   model: string,
   messages: ChatMessage[],
+  cors: Record<string, string>,
 ): Promise<Response> {
   // Use returnRawResponse to get the raw SSE stream from Workers AI
   const response = (await ai.run(
@@ -121,7 +153,7 @@ async function streamResponse(
   // already return OpenAI-compatible SSE. Pass it through.
   return new Response(response.body, {
     headers: {
-      ...corsHeaders(),
+      ...cors,
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
@@ -133,6 +165,7 @@ async function nonStreamResponse(
   ai: Env['AI'],
   model: string,
   messages: ChatMessage[],
+  cors: Record<string, string>,
 ): Promise<Response> {
   const result = (await ai.run(model, { messages })) as { response?: string }
 
@@ -151,6 +184,6 @@ async function nonStreamResponse(
   }
 
   return new Response(JSON.stringify(payload), {
-    headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+    headers: { ...cors, 'Content-Type': 'application/json' },
   })
 }

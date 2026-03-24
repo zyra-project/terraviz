@@ -91,14 +91,14 @@ export async function* streamChat(
   // Replace the initial connection timeout with a per-chunk inactivity timeout.
   // If no data arrives for 30s during streaming, abort.
   clearTimeout(timeout)
-  const streamController = new AbortController()
-  let inactivityTimer = setTimeout(() => streamController.abort(), REQUEST_TIMEOUT_MS)
+  let inactivityTimer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   const resetInactivity = () => {
     clearTimeout(inactivityTimer)
-    inactivityTimer = setTimeout(() => streamController.abort(), REQUEST_TIMEOUT_MS)
+    inactivityTimer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   }
 
   if (!response.ok) {
+    clearTimeout(inactivityTimer)
     const text = await response.text().catch(() => '')
     logger.warn(`[LLM] API error ${response.status}:`, text)
     yield { type: 'error', message: `API error: ${response.status}` }
@@ -106,6 +106,7 @@ export async function* streamChat(
   }
 
   if (!response.body) {
+    clearTimeout(inactivityTimer)
     yield { type: 'error', message: 'No response body' }
     return
   }

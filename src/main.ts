@@ -379,7 +379,7 @@ class InteractiveSphere {
 
   private initChat(): void {
     initChatUI({
-      onLoadDataset: (id) => this.selectDatasetFromChat(id),
+      onLoadDataset: (id) => { void this.selectDatasetFromChat(id) },
       getDatasets: () => this.appState.datasets,
       getCurrentDataset: () => this.appState.currentDataset,
       announce: (msg) => this.announce(msg),
