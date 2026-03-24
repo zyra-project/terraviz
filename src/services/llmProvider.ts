@@ -225,10 +225,14 @@ export async function checkAvailability(config: DocentConfig): Promise<boolean> 
   if (config.apiKey) {
     headers['Authorization'] = `Bearer ${config.apiKey}`
   }
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 5000)
   try {
-    const res = await fetch(url, { headers, signal: AbortSignal.timeout(5000) })
+    const res = await fetch(url, { headers, signal: controller.signal })
     return res.ok
   } catch {
     return false
+  } finally {
+    clearTimeout(timeoutId)
   }
 }

@@ -165,7 +165,9 @@ export async function* processMessage(
             break
 
           case 'error':
+            // Treat LLM errors as hard failures — abort stream and fall back to local
             logger.info('[Docent] LLM error, falling back to local engine:', chunk.message)
+            llmProducedText = false
             break
 
           case 'done':

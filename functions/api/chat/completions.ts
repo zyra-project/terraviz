@@ -70,12 +70,15 @@ function isAllowedOrigin(origin: string | null, requestUrl: string): boolean {
 }
 
 function corsHeaders(origin?: string | null): Record<string, string> {
-  return {
-    'Access-Control-Allow-Origin': origin ?? '',
+  const headers: Record<string, string> = {
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Vary': 'Origin',
   }
+  if (origin) {
+    headers['Access-Control-Allow-Origin'] = origin
+  }
+  return headers
 }
 
 export const onRequestOptions: PagesFunction<Env> = async (context) => {
@@ -88,7 +91,10 @@ export const onRequestOptions: PagesFunction<Env> = async (context) => {
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const origin = context.request.headers.get('Origin')
-  const cors = corsHeaders(isAllowedOrigin(origin, context.request.url) ? origin : null)
+  if (origin && !isAllowedOrigin(origin, context.request.url)) {
+    return new Response(null, { status: 403 })
+  }
+  const cors = corsHeaders(origin)
   const ip = context.request.headers.get('CF-Connecting-IP') ?? 'unknown'
 
   if (isRateLimited(ip)) {
@@ -122,8 +128,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   // Truncate messages to limit token usage
   const messages = body.messages.slice(-22) // system + 20 history + user
 
-  // Workers AI does not support tool calling — strip tools from the request.
-  // The client-side docent service falls back to local engine when no tool calls are returned.
+  // Workers AI does not support tool calling — strip tools from the request so no tool calls
+  // are produced on this path. The client-side local engine yields action cards independently.
   if (body.tools?.length) {
     body.tools = undefined
   }
@@ -152,6 +158,8 @@ async function streamResponse(
   // Actually, @cf/meta models with stream:true + returnRawResponse
   // already return OpenAI-compatible SSE. Pass it through.
   return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
     headers: {
       ...cors,
       'Content-Type': 'text/event-stream',

@@ -39,7 +39,7 @@ export interface DocentResponse {
 const GREETING_PATTERNS = /^(hi|hello|hey|howdy|greetings|good\s+(morning|afternoon|evening)|sup|yo)\b/i
 const HELP_PATTERNS = /^(help|what can you do|how do(es)? (this|it) work|commands|options)\b/i
 const WHAT_IS_PATTERNS = /^(what('?s| is) this|where am i|what am i (looking at|seeing))\b/i
-const EXPLAIN_PATTERNS = /^(explain|tell me (about|more)|describe|what does this (show|mean))/i
+const EXPLAIN_PATTERNS = /^(explain( this| it)?|tell me (about |more about )?(this|it|the current|what'?s showing)|describe (this|it|the current)|what does this (show|mean))/i
 const RELATED_PATTERNS = /^(show me (something )?(similar|related|like this)|related|more like this|similar)/i
 const CATEGORY_PATTERNS = /^(show me |find |browse |look at )?(atmosphere|ocean|land|space|climate|sun|moon|ice|snow|weather|solar|model|hurricane|coral|temperature|earthquake|tsunami|volcano|fire|ozone|magnetic|gravity|tectonic|water|carbon|satellite)/i
 

@@ -90,8 +90,15 @@ describe('parseIntent', () => {
 
   it('detects explain-current', () => {
     expect(parseIntent('explain this').type).toBe('explain-current')
+    expect(parseIntent('explain').type).toBe('explain-current')
     expect(parseIntent('tell me about this').type).toBe('explain-current')
+    expect(parseIntent('tell me more about it').type).toBe('explain-current')
     expect(parseIntent('describe this').type).toBe('explain-current')
+  })
+
+  it('does not misclassify "tell me about X" as explain-current', () => {
+    expect(parseIntent('tell me about climate change').type).not.toBe('explain-current')
+    expect(parseIntent('Tell me about hurricanes').type).not.toBe('explain-current')
   })
 
   it('detects related', () => {
