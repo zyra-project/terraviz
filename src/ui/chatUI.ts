@@ -14,6 +14,7 @@ import { processMessage, loadConfig, saveConfig, testConnection, getDefaultConfi
 
 // --- Constants ---
 const SESSION_STORAGE_KEY = 'sos-docent-chat'
+const MAX_MESSAGES = 200
 const MAX_PERSISTED_MESSAGES = 100
 
 export interface ChatCallbacks {
@@ -193,7 +194,7 @@ function readSettingsForm(): DocentConfig {
     apiUrl: urlInput?.value.trim() || defaults.apiUrl,
     apiKey: keyInput?.value.trim() ?? '',
     model: modelInput?.value.trim() || defaults.model,
-    enabled: enabledInput?.checked ?? true,
+    enabled: enabledInput?.checked ?? defaults.enabled,
   }
 }
 
@@ -264,6 +265,10 @@ async function handleSend(): Promise<void> {
     timestamp: Date.now(),
   }
   messages.push(docentMsg)
+  // Cap in-memory messages to prevent unbounded growth in long sessions
+  if (messages.length > MAX_MESSAGES) {
+    messages = messages.slice(-MAX_MESSAGES)
+  }
   isStreaming = true
   showTyping()
   setSendEnabled(false)

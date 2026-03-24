@@ -101,9 +101,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return new Response(null, { status: 403 })
   }
   const cors = corsHeaders(origin)
-  const ip = context.request.headers.get('CF-Connecting-IP') ?? 'unknown'
+  const ip = context.request.headers.get('CF-Connecting-IP')
 
-  if (isRateLimited(ip)) {
+  if (ip && isRateLimited(ip)) {
     return new Response(JSON.stringify({ error: 'Rate limit exceeded. Try again shortly.' }), {
       status: 429,
       headers: { ...cors, 'Content-Type': 'application/json' },
@@ -136,6 +136,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   // Workers AI does not support tool calling — strip tools from the request so no tool calls
   // are produced on this path. The client-side local engine yields action cards independently.
+  // Tool-call-driven action cards only work with external OpenAI-compatible providers
+  // (e.g., OpenAI, Ollama) that support the tools/tool_choice API.
   if (body.tools?.length) {
     body.tools = undefined
   }

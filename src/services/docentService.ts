@@ -156,8 +156,10 @@ export async function* processMessage(
 
               if (args.dataset_id) {
                 const idStr = String(args.dataset_id)
-                if (datasets.some(d => d.id === idStr)) {
+                const matchById = datasets.find(d => d.id === idStr)
+                if (matchById) {
                   resolvedId = idStr
+                  resolvedTitle = matchById.title
                 } else {
                   logger.warn('[Docent] Ignoring tool_call with unknown dataset_id:', idStr)
                 }
