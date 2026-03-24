@@ -6,7 +6,7 @@
  */
 
 import type { Dataset, ChatMessage, ChatAction, DocentConfig } from '../types'
-import { streamChat, checkAvailability } from './llmProvider'
+import { streamChat, checkAvailability, type AvailabilityResult } from './llmProvider'
 import { buildSystemPromptForTurn, buildCompressedHistory, getLoadDatasetTool } from './docentContext'
 import { parseIntent, generateResponse, searchDatasets, evaluateAutoLoad } from './docentEngine'
 import { logger } from '../utils/logger'
@@ -14,14 +14,14 @@ import { logger } from '../utils/logger'
 // --- Constants ---
 const CONFIG_STORAGE_KEY = 'sos-docent-config'
 
-/** Detect whether we're running on a deployed site (not localhost dev). */
-const isDeployed = typeof window !== 'undefined'
-  && !['localhost', '127.0.0.1'].includes(window.location.hostname)
+/** Detect localhost dev where the Cloudflare /api proxy may be unavailable. */
+export const isLocalDev = typeof window !== 'undefined'
+  && ['localhost', '127.0.0.1'].includes(window.location.hostname)
 
 const DEFAULT_CONFIG: DocentConfig = {
-  apiUrl: isDeployed ? '/api' : 'http://localhost:11434/v1',
+  apiUrl: '/api',
   apiKey: '',
-  model: isDeployed ? 'llama-3.1-8b' : 'llama3.2',
+  model: 'llama-3.1-8b',
   enabled: true,
 }
 
@@ -67,9 +67,9 @@ export function getDefaultConfig(): DocentConfig {
 }
 
 /**
- * Test if the configured LLM is reachable.
+ * Test if the configured LLM is reachable and the model is available.
  */
-export async function testConnection(config: DocentConfig): Promise<boolean> {
+export async function testConnection(config: DocentConfig): Promise<AvailabilityResult> {
   return checkAvailability(config)
 }
 

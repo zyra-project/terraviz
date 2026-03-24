@@ -217,9 +217,17 @@ export async function* streamChat(
 }
 
 /**
- * Check if the LLM API is reachable.
+ * Check if the LLM API is reachable and the configured model is available.
+ *
+ * Returns an object with connection status and an optional reason on failure,
+ * so the UI can display a meaningful message (e.g. "model not found").
  */
-export async function checkAvailability(config: DocentConfig): Promise<boolean> {
+export interface AvailabilityResult {
+  ok: boolean
+  reason?: string
+}
+
+export async function checkAvailability(config: DocentConfig): Promise<AvailabilityResult> {
   const url = `${config.apiUrl.replace(/\/+$/, '')}/models`
   const headers: Record<string, string> = {}
   if (config.apiKey) {
@@ -229,9 +237,33 @@ export async function checkAvailability(config: DocentConfig): Promise<boolean> 
   const timeoutId = setTimeout(() => controller.abort(), 5000)
   try {
     const res = await fetch(url, { headers, signal: controller.signal })
-    return res.ok
+    if (!res.ok) {
+      return { ok: false, reason: `Server returned ${res.status}` }
+    }
+
+    // Try to verify the configured model exists in the model list
+    try {
+      const body = await res.json() as { data?: { id?: string }[] }
+      const models = body.data
+      if (Array.isArray(models) && models.length > 0) {
+        const modelIds = models.map(m => m.id ?? '')
+        const found = modelIds.some(id =>
+          id === config.model || id.includes(config.model),
+        )
+        if (!found) {
+          return {
+            ok: false,
+            reason: `Connected, but model "${config.model}" not found. Available: ${modelIds.join(', ')}`,
+          }
+        }
+      }
+    } catch {
+      // Could not parse model list — server is reachable, skip model check
+    }
+
+    return { ok: true }
   } catch {
-    return false
+    return { ok: false, reason: 'Could not reach the server' }
   } finally {
     clearTimeout(timeoutId)
   }

@@ -10,7 +10,7 @@ import type { ChatMessage, ChatAction, ChatSession, DocentConfig } from '../type
 import type { Dataset } from '../types'
 import { escapeHtml, escapeAttr } from './browseUI'
 import { createMessageId } from '../services/docentEngine'
-import { processMessage, loadConfig, saveConfig, testConnection, getDefaultConfig } from '../services/docentService'
+import { processMessage, loadConfig, saveConfig, testConnection, getDefaultConfig, isLocalDev } from '../services/docentService'
 
 // --- Constants ---
 const SESSION_STORAGE_KEY = 'sos-docent-chat'
@@ -220,17 +220,20 @@ async function handleSettingsTest(): Promise<void> {
   }
   if (testBtn) testBtn.disabled = true
 
-  const ok = await testConnection(config)
+  const result = await testConnection(config)
 
   if (status) {
-    status.textContent = ok ? 'Connected' : 'Failed to connect'
-    status.className = ok
-      ? 'chat-settings-status chat-settings-status-ok'
-      : 'chat-settings-status chat-settings-status-err'
-    setTimeout(() => { status.textContent = '' }, 3000)
+    if (result.ok) {
+      status.textContent = 'Connected'
+      status.className = 'chat-settings-status chat-settings-status-ok'
+    } else {
+      status.textContent = result.reason ?? 'Failed to connect'
+      status.className = 'chat-settings-status chat-settings-status-err'
+    }
+    setTimeout(() => { status.textContent = '' }, 5000)
   }
   if (testBtn) testBtn.disabled = false
-  callbacks?.announce(ok ? 'LLM connection successful' : 'LLM connection failed')
+  callbacks?.announce(result.ok ? 'LLM connection successful' : 'LLM connection failed')
 }
 
 // --- Send / receive ---
@@ -317,6 +320,13 @@ async function handleSend(): Promise<void> {
         }
 
         case 'done':
+          if (chunk.fallback && docentMsg.text) {
+            const hint = isLocalDev
+              ? '⚠ AI service unavailable — running in offline mode. Make sure `npm run dev` is proxying /api, or configure a local provider in settings.'
+              : '⚠ AI service unavailable — showing offline results. Check LLM settings.'
+            docentMsg.text += `\n\n*${hint}*`
+            updateStreamingMessage(docentMsg)
+          }
           break
       }
     }

@@ -160,21 +160,46 @@ describe('streamChat', () => {
 })
 
 describe('checkAvailability', () => {
-  it('returns true for OK response', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
+  it('returns ok when server responds and model is listed', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ data: [{ id: 'test-model' }] }),
+    }))
     const result = await checkAvailability(testConfig)
-    expect(result).toBe(true)
+    expect(result.ok).toBe(true)
   })
 
-  it('returns false for failed response', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }))
+  it('returns not ok with reason when model is missing', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ data: [{ id: 'other-model' }] }),
+    }))
     const result = await checkAvailability(testConfig)
-    expect(result).toBe(false)
+    expect(result.ok).toBe(false)
+    expect(result.reason).toContain('test-model')
+    expect(result.reason).toContain('not found')
   })
 
-  it('returns false on network error', async () => {
+  it('returns ok when model list cannot be parsed', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.reject(new Error('bad json')),
+    }))
+    const result = await checkAvailability(testConfig)
+    expect(result.ok).toBe(true)
+  })
+
+  it('returns not ok for failed response', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }))
+    const result = await checkAvailability(testConfig)
+    expect(result.ok).toBe(false)
+    expect(result.reason).toContain('503')
+  })
+
+  it('returns not ok on network error', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')))
     const result = await checkAvailability(testConfig)
-    expect(result).toBe(false)
+    expect(result.ok).toBe(false)
+    expect(result.reason).toContain('Could not reach')
   })
 })

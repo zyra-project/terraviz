@@ -342,8 +342,8 @@ describe('processMessage — LLM dataset ID validation', () => {
 describe('config management', () => {
   it('returns default config when nothing saved', () => {
     const config = loadConfig()
-    expect(config.apiUrl).toBe('http://localhost:11434/v1')
-    expect(config.model).toBe('llama3.2')
+    expect(config.apiUrl).toBe('/api')
+    expect(config.model).toBe('llama-3.1-8b')
     expect(config.enabled).toBe(true)
   })
 
