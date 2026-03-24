@@ -8,7 +8,7 @@
 
 import type { ChatMessage, ChatAction, ChatSession, DocentConfig } from '../types'
 import type { Dataset } from '../types'
-import { escapeHtml } from './browseUI'
+import { escapeHtml, escapeAttr } from './browseUI'
 import { createMessageId } from '../services/docentEngine'
 import { processMessage, loadConfig, saveConfig, testConnection, getDefaultConfig } from '../services/docentService'
 
@@ -49,6 +49,7 @@ export function openChat(): void {
   isOpen = true
   panel.classList.remove('hidden')
   trigger?.classList.add('chat-trigger-active')
+  trigger?.setAttribute('aria-expanded', 'true')
   scrollToBottom()
   const input = document.getElementById('chat-input') as HTMLTextAreaElement | null
   input?.focus()
@@ -65,6 +66,7 @@ export function closeChat(): void {
   isOpen = false
   panel.classList.add('hidden')
   trigger?.classList.remove('chat-trigger-active')
+  trigger?.setAttribute('aria-expanded', 'false')
   if (settingsOpen) toggleSettings()
   callbacks?.announce('Chat closed')
 }
@@ -270,7 +272,7 @@ async function handleSend(): Promise<void> {
   try {
     const stream = processMessage(
       text,
-      messages.slice(0, -1), // history without the placeholder
+      messages.slice(0, -2), // history without user msg or placeholder (processMessage re-adds user msg)
       callbacks.getDatasets(),
       callbacks.getCurrentDataset(),
     )
@@ -296,10 +298,6 @@ async function handleSend(): Promise<void> {
           break
 
         case 'done':
-          break
-
-        case 'error':
-          // Error during streaming — the service handles fallback
           break
       }
     }
@@ -399,6 +397,7 @@ function updateStreamingMessage(msg: ChatMessage): void {
       } else {
         el.insertAdjacentHTML('beforeend', actionsHtml)
       }
+      wireActionButtons(el)
     }
   }
 }
@@ -406,7 +405,7 @@ function updateStreamingMessage(msg: ChatMessage): void {
 function renderActions(actions: ChatAction[]): string {
   return `<div class="chat-actions">${actions.map(a => {
     if (a.type === 'load-dataset') {
-      return `<button class="chat-action-btn" data-dataset-id="${escapeHtml(a.datasetId)}" aria-label="Load ${escapeHtml(a.datasetTitle)}">
+      return `<button class="chat-action-btn" data-dataset-id="${escapeAttr(a.datasetId)}" aria-label="Load ${escapeAttr(a.datasetTitle)}">
         <span class="chat-action-title">${escapeHtml(a.datasetTitle)}</span>
         <span class="chat-action-load">Load &#x27A4;</span>
       </button>`
@@ -431,10 +430,24 @@ function wireActionButtons(container: Element): void {
  * Minimal markdown: **bold**, bullet lists, and newlines.
  */
 function renderMarkdownLite(html: string): string {
-  return html
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/^• (.+)$/gm, '<li>$1</li>')
-    .replace(/\n/g, '<br>')
+  const lines = html.split('\n')
+  const out: string[] = []
+  let inList = false
+
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    const bulletMatch = line.match(/^• (.+)$/)
+
+    if (bulletMatch) {
+      if (!inList) { inList = true; out.push('<ul>') }
+      out.push(`<li>${bulletMatch[1]}</li>`)
+    } else {
+      if (inList) { inList = false; out.push('</ul>') }
+      out.push(line === '' ? '<br>' : line + '<br>')
+    }
+  }
+  if (inList) out.push('</ul>')
+  return out.join('')
 }
 
 function showTyping(): void {

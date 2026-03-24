@@ -10,7 +10,6 @@ import type { LLMMessage, LLMTool } from './llmProvider'
 
 // --- Constants ---
 const MAX_HISTORY_MESSAGES = 20
-const MAX_CATEGORY_DATASETS = 8
 
 /**
  * Build a compact summary of available dataset categories with counts.

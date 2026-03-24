@@ -40,7 +40,7 @@ export type StreamChunk =
 
 // --- Constants ---
 const REQUEST_TIMEOUT_MS = 30000
-const STREAM_LINE_PREFIX = 'data: '
+const STREAM_LINE_PREFIX = 'data:'
 
 /**
  * Stream a chat completion from an OpenAI-compatible API.
@@ -88,7 +88,15 @@ export async function* streamChat(
     return
   }
 
+  // Replace the initial connection timeout with a per-chunk inactivity timeout.
+  // If no data arrives for 30s during streaming, abort.
   clearTimeout(timeout)
+  const streamController = new AbortController()
+  let inactivityTimer = setTimeout(() => streamController.abort(), REQUEST_TIMEOUT_MS)
+  const resetInactivity = () => {
+    clearTimeout(inactivityTimer)
+    inactivityTimer = setTimeout(() => streamController.abort(), REQUEST_TIMEOUT_MS)
+  }
 
   if (!response.ok) {
     const text = await response.text().catch(() => '')
@@ -115,6 +123,7 @@ export async function* streamChat(
       const { done, value } = await reader.read()
       if (done) break
 
+      resetInactivity()
       buffer += decoder.decode(value, { stream: true })
       const lines = buffer.split('\n')
       buffer = lines.pop() ?? ''
@@ -122,9 +131,10 @@ export async function* streamChat(
       for (const line of lines) {
         const trimmed = line.trim()
         if (!trimmed || trimmed === STREAM_LINE_PREFIX.trim()) continue
-        if (trimmed === 'data: [DONE]') {
+        if (trimmed === 'data: [DONE]' || trimmed === 'data:[DONE]') {
           // Emit any accumulated tool calls
           for (const [, tc] of toolCallAccum) {
+            if (!tc.name) continue
             try {
               const args = JSON.parse(tc.args || '{}')
               yield { type: 'tool_call', call: { name: tc.name, arguments: args } }
@@ -137,7 +147,7 @@ export async function* streamChat(
         }
         if (!trimmed.startsWith(STREAM_LINE_PREFIX)) continue
 
-        const json = trimmed.slice(STREAM_LINE_PREFIX.length)
+        const json = trimmed.slice(STREAM_LINE_PREFIX.length).trimStart()
         try {
           const chunk = JSON.parse(json)
           const delta = chunk.choices?.[0]?.delta
@@ -157,7 +167,7 @@ export async function* streamChat(
                 toolCallAccum.set(idx, { name: '', args: '' })
               }
               const accum = toolCallAccum.get(idx)!
-              if (tc.function?.name) accum.name += tc.function.name
+              if (tc.function?.name && !accum.name) accum.name = tc.function.name
               if (tc.function?.arguments) accum.args += tc.function.arguments
             }
           }
@@ -187,6 +197,7 @@ export async function* streamChat(
       }
     }
   } finally {
+    clearTimeout(inactivityTimer)
     reader.releaseLock()
   }
 

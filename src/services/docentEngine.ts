@@ -76,7 +76,7 @@ export function scoreDataset(dataset: Dataset, query: string): number {
     const title = dataset.title.toLowerCase()
     if (title.includes(term)) totalScore += TITLE_WEIGHT
 
-    const keywords = [...(dataset.enriched?.keywords ?? []), ...(dataset.tags ?? [])]
+    const keywords = dataset.enriched?.keywords ?? []
     if (keywords.some(k => k.toLowerCase().includes(term))) totalScore += KEYWORD_WEIGHT
 
     const categories = Object.keys(dataset.enriched?.categories ?? {})

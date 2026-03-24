@@ -31,7 +31,6 @@ export type DocentStreamChunk =
   | { type: 'delta'; text: string }
   | { type: 'action'; action: ChatAction }
   | { type: 'done'; fallback: boolean }
-  | { type: 'error'; message: string }
 
 /**
  * Load docent config from localStorage, merging with defaults.
