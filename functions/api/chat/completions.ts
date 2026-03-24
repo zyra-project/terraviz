@@ -154,20 +154,74 @@ async function streamResponse(
   messages: ChatMessage[],
   cors: Record<string, string>,
 ): Promise<Response> {
-  // Use returnRawResponse to get the raw SSE stream from Workers AI
   const response = (await ai.run(
     model,
     { messages, stream: true },
     { returnRawResponse: true },
   )) as Response
 
-  // Workers AI with returnRawResponse gives us an SSE stream,
-  // but in its own format. We need to re-wrap it in OpenAI format.
-  // Actually, @cf/meta models with stream:true + returnRawResponse
-  // already return OpenAI-compatible SSE. Pass it through.
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
+  if (!response.body) {
+    return new Response(JSON.stringify({ error: 'No response from AI' }), {
+      status: 502,
+      headers: { ...cors, 'Content-Type': 'application/json' },
+    })
+  }
+
+  // Workers AI returns its own SSE format: {"response":"token","p":"..."}
+  // Transform it to OpenAI-compatible format: {"choices":[{"delta":{"content":"token"}}]}
+  const chatId = `chatcmpl-${Date.now()}`
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  const encoder = new TextEncoder()
+
+  const transformed = new ReadableStream({
+    async pull(controller) {
+      const { done, value } = await reader.read()
+      if (done) {
+        controller.close()
+        return
+      }
+
+      const text = decoder.decode(value, { stream: true })
+      const lines = text.split('\n')
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const payload = line.slice(6).trim()
+
+        if (payload === '[DONE]') {
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+          continue
+        }
+
+        try {
+          const parsed = JSON.parse(payload)
+
+          // Skip usage-only chunks (response is null or empty with usage)
+          if (parsed.response === null || (parsed.response === '' && parsed.usage)) {
+            continue
+          }
+
+          const openAIChunk = {
+            id: chatId,
+            object: 'chat.completion.chunk',
+            created: Math.floor(Date.now() / 1000),
+            model,
+            choices: [{
+              index: 0,
+              delta: { content: parsed.response },
+              finish_reason: null,
+            }],
+          }
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(openAIChunk)}\n\n`))
+        } catch {
+          // Skip unparseable lines
+        }
+      }
+    },
+  })
+
+  return new Response(transformed, {
     headers: {
       ...cors,
       'Content-Type': 'text/event-stream',
