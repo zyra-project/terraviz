@@ -15,6 +15,7 @@ import type { AppState } from './types'
 
 // Extracted modules
 import { showBrowseUI, hideBrowseUI } from './ui/browseUI'
+import { initChatUI, notifyDatasetChanged } from './ui/chatUI'
 import {
   createPlaybackState, startPlaybackLoop, stopPlaybackLoop,
   togglePlayPause, rewind, fastForward, stepFrame, onScrub,
@@ -92,6 +93,9 @@ class InteractiveSphere {
       // Fetch datasets, then load from URL if specified
       this.setLoadingStatus('Loading datasets\u2026', 30)
       await this.loadDatasets()
+
+      // Initialize digital docent chat (available on all views)
+      this.initChat()
 
       const datasetId = this.getDatasetIdFromUrl()
       if (datasetId) {
@@ -373,6 +377,30 @@ class InteractiveSphere {
     }
   }
 
+  private initChat(): void {
+    initChatUI({
+      onLoadDataset: (id) => { void this.selectDatasetFromChat(id) },
+      getDatasets: () => this.appState.datasets,
+      getCurrentDataset: () => this.appState.currentDataset,
+      announce: (msg) => this.announce(msg),
+    })
+  }
+
+  private async selectDatasetFromChat(id: string): Promise<void> {
+    hideBrowseUI()
+    this.announce('Loading dataset\u2026')
+    this.showLoadingScreen('Loading dataset\u2026', 20)
+    window.history.pushState({}, '', `?dataset=${encodeURIComponent(id)}`)
+    await this.loadDataset(id)
+    this.setLoading(false)
+    const dataset = this.appState.currentDataset
+    if (dataset) {
+      this.announce(`Loaded dataset: ${dataset.title}`)
+      this.renderer?.setCanvasDescription(`3D globe showing ${dataset.title}`)
+      notifyDatasetChanged(dataset)
+    }
+  }
+
   private cleanupVideo(): void {
     stopPlaybackLoop(this.playback)
     if (this.videoTexture) {
@@ -502,6 +530,7 @@ class InteractiveSphere {
     if (dataset) {
       this.announce(`Loaded dataset: ${dataset.title}`)
       this.renderer?.setCanvasDescription(`3D globe showing ${dataset.title}`)
+      notifyDatasetChanged(dataset)
     }
     const playBtn = document.getElementById('play-btn')
     const infoHeader = document.getElementById('info-header')
@@ -578,6 +607,7 @@ class InteractiveSphere {
       isMobile: this.isMobile,
     })
     this.renderer?.setCanvasDescription('Interactive 3D globe showing Earth')
+    notifyDatasetChanged(null)
   }
 
   dispose(): void {

@@ -1045,6 +1045,356 @@
                 padding: 0.625rem;
             }
         }
+
+        /* --- Chat / Digital Docent --- */
+        #chat-trigger {
+            position: absolute;
+            bottom: 0.75rem;
+            left: 0.75rem;
+            pointer-events: auto;
+            z-index: 400;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: rgba(13, 13, 18, 0.92) !important;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.12) !important;
+            color: #bbb !important;
+            font-size: 1.2rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+            padding: 0 !important;
+        }
+        #chat-trigger:hover {
+            background: rgba(30, 30, 40, 0.95) !important;
+            border-color: rgba(77, 166, 255, 0.4) !important;
+            color: #4da6ff !important;
+        }
+        #chat-trigger.chat-trigger-active {
+            border-color: #4da6ff !important;
+            color: #4da6ff !important;
+            box-shadow: 0 0 12px rgba(77, 166, 255, 0.3);
+        }
+
+        #chat-panel {
+            position: absolute;
+            bottom: 4rem;
+            left: 0.75rem;
+            width: 380px;
+            max-height: 520px;
+            pointer-events: auto;
+            z-index: 400;
+            background: rgba(13, 13, 18, 0.92);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+
+        .chat-header {
+            display: flex;
+            align-items: center;
+            padding: 0.6rem 0.75rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            flex-shrink: 0;
+            gap: 0.4rem;
+        }
+        .chat-header-title {
+            flex: 1;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #e8eaf0;
+            letter-spacing: 0.04em;
+        }
+        .chat-header-btn {
+            background: none !important;
+            border: none !important;
+            color: #999 !important;
+            font-size: 0.8rem;
+            cursor: pointer;
+            padding: 0.2rem 0.35rem !important;
+            border-radius: 4px;
+            min-width: auto;
+            line-height: 1;
+        }
+        .chat-header-btn:hover {
+            background: rgba(255, 255, 255, 0.08) !important;
+            color: #fff !important;
+        }
+
+        /* Messages area */
+        #chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0.75rem;
+            min-height: 200px;
+            max-height: 360px;
+        }
+
+        .chat-msg {
+            margin-bottom: 0.6rem;
+            max-width: 88%;
+        }
+        .chat-msg-user {
+            margin-left: auto;
+        }
+        .chat-msg-docent {
+            margin-right: auto;
+        }
+        .chat-msg-text {
+            display: inline-block;
+            padding: 0.45rem 0.65rem;
+            border-radius: 8px;
+            font-size: 0.73rem;
+            line-height: 1.55;
+            color: #e0e0e0;
+            word-break: break-word;
+        }
+        .chat-msg-user .chat-msg-text {
+            background: rgba(77, 166, 255, 0.18);
+            border: 1px solid rgba(77, 166, 255, 0.3);
+            border-radius: 8px 8px 2px 8px;
+        }
+        .chat-msg-docent .chat-msg-text {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 8px 8px 8px 2px;
+        }
+
+        /* Action cards (dataset suggestions) */
+        .chat-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 0.3rem;
+            margin-top: 0.35rem;
+        }
+        .chat-action-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            width: 100%;
+            text-align: left;
+            background: rgba(255, 255, 255, 0.04) !important;
+            border: 1px solid rgba(255, 255, 255, 0.08) !important;
+            border-radius: 6px;
+            padding: 0.4rem 0.55rem !important;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s;
+        }
+        .chat-action-btn:hover {
+            background: rgba(255, 255, 255, 0.08) !important;
+            border-color: rgba(77, 166, 255, 0.4) !important;
+        }
+        .chat-action-title {
+            flex: 1;
+            font-size: 0.68rem;
+            font-weight: 600;
+            color: #e8eaf0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .chat-action-load {
+            font-size: 0.58rem;
+            color: #4da6ff;
+            flex-shrink: 0;
+            font-weight: 500;
+        }
+
+        /* Typing indicator */
+        .chat-typing {
+            padding: 0.3rem 0.75rem;
+            font-size: 0.68rem;
+            color: #999;
+        }
+        .chat-typing-dots {
+            display: inline-flex;
+            gap: 0.2rem;
+        }
+        .chat-typing-dots span {
+            width: 4px;
+            height: 4px;
+            border-radius: 50%;
+            background: #999;
+            animation: chat-dot-pulse 1.2s ease-in-out infinite;
+        }
+        .chat-typing-dots span:nth-child(2) { animation-delay: 0.15s; }
+        .chat-typing-dots span:nth-child(3) { animation-delay: 0.3s; }
+        @keyframes chat-dot-pulse {
+            0%, 60%, 100% { opacity: 0.3; transform: scale(0.8); }
+            30% { opacity: 1; transform: scale(1); }
+        }
+
+        /* Input area */
+        .chat-input-wrap {
+            display: flex;
+            gap: 0.35rem;
+            padding: 0.5rem 0.75rem 0.6rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+            flex-shrink: 0;
+            align-items: flex-end;
+        }
+        #chat-input {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 6px;
+            padding: 0.45rem 0.65rem;
+            color: #fff;
+            font-size: 0.78rem;
+            font-family: inherit;
+            resize: none;
+            line-height: 1.4;
+            min-height: 1.8rem;
+            max-height: 6rem;
+            overflow-y: auto;
+        }
+        #chat-input::placeholder { color: #888; }
+        #chat-input:focus {
+            border-color: rgba(77, 166, 255, 0.5);
+            background: rgba(255, 255, 255, 0.08);
+            outline: none;
+        }
+        #chat-send {
+            padding: 0.4rem 0.6rem !important;
+            font-size: 0.8rem !important;
+            background: #0066cc !important;
+            border: none !important;
+            border-radius: 6px;
+            color: #fff !important;
+            min-width: 34px;
+            min-height: 34px;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+        #chat-send:hover { background: #0052a3 !important; }
+        #chat-send:disabled { opacity: 0.5; cursor: default; }
+
+        /* Welcome state */
+        .chat-welcome {
+            text-align: center;
+            padding: 1.5rem 1rem;
+            color: #bbb;
+            font-size: 0.73rem;
+            line-height: 1.55;
+        }
+        .chat-welcome-icon {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+        .chat-suggestions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.3rem;
+            justify-content: center;
+            margin-top: 0.75rem;
+        }
+        .chat-suggestion {
+            padding: 0.3rem 0.65rem !important;
+            font-size: 0.65rem !important;
+            background: rgba(77, 166, 255, 0.12) !important;
+            border: 1px solid rgba(77, 166, 255, 0.25) !important;
+            color: #6ab8ff !important;
+            border-radius: 999px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .chat-suggestion:hover {
+            background: rgba(77, 166, 255, 0.22) !important;
+            color: #fff !important;
+        }
+
+        /* Settings panel (inline) */
+        #chat-settings {
+            padding: 0.6rem 0.75rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            font-size: 0.68rem;
+        }
+        .chat-settings-row {
+            margin-bottom: 0.4rem;
+        }
+        .chat-settings-row label {
+            display: block;
+            color: #999;
+            font-size: 0.6rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.15rem;
+        }
+        .chat-settings-row input[type="text"],
+        .chat-settings-row input[type="password"] {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 4px;
+            padding: 0.35rem 0.5rem;
+            color: #fff;
+            font-size: 0.7rem;
+            font-family: inherit;
+        }
+        .chat-settings-row input:focus {
+            border-color: rgba(77, 166, 255, 0.5);
+            outline: none;
+        }
+        .chat-settings-check {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            color: #bbb;
+            font-size: 0.68rem;
+        }
+        .chat-settings-check input[type="checkbox"] {
+            accent-color: #4da6ff;
+        }
+        .chat-settings-actions {
+            display: flex;
+            gap: 0.3rem;
+            margin-top: 0.5rem;
+            align-items: center;
+        }
+        .chat-settings-actions button {
+            padding: 0.25rem 0.55rem !important;
+            font-size: 0.62rem !important;
+            border-radius: 4px;
+            min-width: auto;
+        }
+        .chat-settings-status {
+            font-size: 0.62rem;
+            margin-left: 0.4rem;
+            color: #999;
+        }
+        .chat-settings-status-ok { color: #4caf50; }
+        .chat-settings-status-err { color: #f44336; }
+
+        /* Mobile chat */
+        @media (max-width: 768px) {
+            #chat-panel {
+                width: calc(100vw - 1.5rem);
+                max-height: 60vh;
+                bottom: 4rem;
+                left: 0.75rem;
+            }
+            #chat-trigger {
+                width: 48px;
+                height: 48px;
+                font-size: 1.3rem;
+            }
+            .chat-action-btn {
+                padding: 0.5rem 0.65rem !important;
+            }
+            #chat-send {
+                min-width: 44px;
+                min-height: 44px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -1122,6 +1472,56 @@
                 </div>
 
                 <button id="auto-rotate-standalone" class="transport-btn" title="Toggle auto-rotation" aria-label="Toggle auto-rotation" style="position: absolute; bottom: 0.75rem; right: 0.75rem; pointer-events: auto; min-width: 28px; padding: 0.35rem 0.5rem; font-size: 0.75rem; background: rgba(13, 13, 18, 0.88) !important; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08) !important; border-radius: 6px;">&#x21BB;</button>
+
+                <!-- Digital Docent Chat -->
+                <button id="chat-trigger" title="Ask the docent" aria-label="Open digital docent chat" aria-expanded="false">&#x1F4AC;&#xFE0E;</button>
+
+                <div id="chat-panel" class="hidden" role="dialog" aria-label="Digital Docent">
+                    <div class="chat-header">
+                        <span class="chat-header-title">Digital Docent</span>
+                        <button id="chat-settings-btn" class="chat-header-btn" title="Settings" aria-label="Chat settings">&#x2699;&#xFE0E;</button>
+                        <button id="chat-clear" class="chat-header-btn" title="Clear chat" aria-label="Clear chat history">&#x1F5D1;&#xFE0E;</button>
+                        <button id="chat-close" class="chat-header-btn" title="Close chat" aria-label="Close chat">&#x2715;</button>
+                    </div>
+
+                    <div id="chat-settings" class="hidden">
+                        <div class="chat-settings-row">
+                            <label for="chat-settings-url">API URL</label>
+                            <input type="text" id="chat-settings-url" placeholder="/api (or http://localhost:11434/v1)" spellcheck="false" />
+                        </div>
+                        <div class="chat-settings-row">
+                            <label for="chat-settings-key">API Key (optional)</label>
+                            <input type="password" id="chat-settings-key" placeholder="Not needed for built-in AI" />
+                        </div>
+                        <div class="chat-settings-row">
+                            <label for="chat-settings-model">Model</label>
+                            <input type="text" id="chat-settings-model" placeholder="llama-3.1-8b" spellcheck="false" />
+                        </div>
+                        <div class="chat-settings-row">
+                            <label class="chat-settings-check">
+                                <input type="checkbox" id="chat-settings-enabled" checked />
+                                Enable LLM (disable for local-only mode)
+                            </label>
+                        </div>
+                        <div class="chat-settings-actions">
+                            <button id="chat-settings-test" type="button">Test Connection</button>
+                            <button id="chat-settings-save" type="button">Save</button>
+                            <span id="chat-settings-status" class="chat-settings-status"></span>
+                        </div>
+                    </div>
+
+                    <div id="chat-messages" role="log" aria-label="Conversation"></div>
+
+                    <div id="chat-typing" class="chat-typing hidden" aria-live="polite">
+                        <span class="chat-typing-dots"><span></span><span></span><span></span></span>
+                    </div>
+
+                    <div class="chat-input-wrap">
+                        <label for="chat-input" class="sr-only">Ask the docent</label>
+                        <textarea id="chat-input" rows="1" placeholder="Ask about any dataset…" autocomplete="off" spellcheck="true"></textarea>
+                        <button id="chat-send" aria-label="Send message">&#x27A4;</button>
+                    </div>
+                </div>
 
                 <div id="caption-overlay" aria-live="polite"></div>
                 <div id="error-message" class="hidden" role="alert">
