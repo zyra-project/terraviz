@@ -19,6 +19,7 @@
     "three": "^0.160.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260317.1",
     "@rolldown/binding-linux-x64-musl": "^1.0.0-rc.11",
     "@types/node": "^20.10.0",
     "@types/three": "^0.160.0",
