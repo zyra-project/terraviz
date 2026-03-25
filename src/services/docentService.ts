@@ -79,6 +79,46 @@ export async function testConnection(config: DocentConfig): Promise<Availability
  * Hybrid approach: runs local engine instantly for immediate actions,
  * then streams LLM text in parallel. Falls back to local-only if LLM is unavailable.
  */
+
+/**
+ * Yield action chunks for every dataset the LLM referenced in its response,
+ * covering both explicit <<LOAD:ID>> markers and bare INTERNAL_... IDs written
+ * in prose (a common LLM slip despite prompt instructions).
+ */
+async function* extractActionsFromText(
+  text: string,
+  datasets: Dataset[],
+  yieldedIds: Set<string>,
+): AsyncGenerator<DocentStreamChunk> {
+  // Collect all IDs seen in the response — markers take priority, bare IDs are fallback
+  const seen = new Set<string>()
+
+  // 1. Explicit <<LOAD:ID>> markers
+  for (const match of text.matchAll(/<?<LOAD:([^>]+)>>?/g)) {
+    seen.add(match[1].trim())
+  }
+
+  // 2. Bare INTERNAL_... IDs written in prose (LLM ignoring marker instructions)
+  for (const match of text.matchAll(/\bINTERNAL_[A-Z0-9_]+\b/g)) {
+    seen.add(match[0])
+  }
+
+  for (const idStr of seen) {
+    const dataset = datasets.find(d => d.id === idStr)
+    if (dataset && !yieldedIds.has(dataset.id)) {
+      yieldedIds.add(dataset.id)
+      yield {
+        type: 'action',
+        action: {
+          type: 'load-dataset',
+          datasetId: dataset.id,
+          datasetTitle: dataset.title,
+        },
+      }
+    }
+  }
+}
+
 export async function* processMessage(
   input: string,
   history: ChatMessage[],
@@ -205,23 +245,7 @@ export async function* processMessage(
 
           case 'done':
             if (llmProducedText) {
-              // Parse <<LOAD:ID>> markers from text (for providers without tool support)
-              const loadMarkers = accumulatedText.matchAll(/<?<LOAD:([^>]+)>>?/g)
-              for (const match of loadMarkers) {
-                const idStr = match[1].trim()
-                const dataset = datasets.find(d => d.id === idStr)
-                if (dataset && !yieldedIds.has(dataset.id)) {
-                  yieldedIds.add(dataset.id)
-                  yield {
-                    type: 'action',
-                    action: {
-                      type: 'load-dataset',
-                      datasetId: dataset.id,
-                      datasetTitle: dataset.title,
-                    },
-                  }
-                }
-              }
+              yield* extractActionsFromText(accumulatedText, datasets, yieldedIds)
               yield { type: 'done', fallback: false }
               return
             }
@@ -230,23 +254,7 @@ export async function* processMessage(
       }
 
       if (llmProducedText) {
-        // Parse <<LOAD:ID>> markers from text (for providers without tool support)
-        const loadMarkers = accumulatedText.matchAll(/<?<LOAD:([^>]+)>>?/g)
-        for (const match of loadMarkers) {
-          const idStr = match[1].trim()
-          const dataset = datasets.find(d => d.id === idStr)
-          if (dataset && !yieldedIds.has(dataset.id)) {
-            yieldedIds.add(dataset.id)
-            yield {
-              type: 'action',
-              action: {
-                type: 'load-dataset',
-                datasetId: dataset.id,
-                datasetTitle: dataset.title,
-              },
-            }
-          }
-        }
+        yield* extractActionsFromText(accumulatedText, datasets, yieldedIds)
         yield { type: 'done', fallback: false }
         return
       }
