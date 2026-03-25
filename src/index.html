@@ -1472,7 +1472,8 @@
             margin-bottom: 0.15rem;
         }
         .chat-settings-row input[type="text"],
-        .chat-settings-row input[type="password"] {
+        .chat-settings-row input[type="password"],
+        .chat-settings-row select {
             width: 100%;
             background: rgba(255, 255, 255, 0.06);
             border: 1px solid rgba(255, 255, 255, 0.12);
@@ -1482,9 +1483,27 @@
             font-size: 0.7rem;
             font-family: inherit;
         }
-        .chat-settings-row input:focus {
+        .chat-settings-row input:focus,
+        .chat-settings-row select:focus {
             border-color: rgba(77, 166, 255, 0.5);
             outline: none;
+        }
+        .chat-settings-row select {
+            appearance: none;
+            -webkit-appearance: none;
+            cursor: pointer;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23999'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 0.5rem center;
+            padding-right: 1.5rem;
+        }
+        .chat-settings-row select option {
+            background: #1a1a24;
+            color: #fff;
+        }
+        .chat-settings-row select:disabled {
+            opacity: 0.5;
+            cursor: default;
         }
         .chat-settings-check {
             display: flex;
@@ -1651,7 +1670,7 @@
                         </div>
                         <div class="chat-settings-row">
                             <label for="chat-settings-model">Model</label>
-                            <input type="text" id="chat-settings-model" placeholder="llama-3.1-8b" spellcheck="false" />
+                            <select id="chat-settings-model" aria-label="Model"><option value="" disabled>Loading models…</option></select>
                         </div>
                         <div class="chat-settings-row">
                             <label class="chat-settings-check">

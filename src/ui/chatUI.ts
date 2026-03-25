@@ -11,6 +11,7 @@ import type { Dataset } from '../types'
 import { escapeHtml, escapeAttr } from './browseUI'
 import { createMessageId } from '../services/docentEngine'
 import { processMessage, loadConfig, saveConfig, testConnection, getDefaultConfig, isLocalDev } from '../services/docentService'
+import { fetchModels } from '../services/llmProvider'
 
 // --- Constants ---
 const SESSION_STORAGE_KEY = 'sos-docent-chat'
@@ -218,6 +219,16 @@ function wireEvents(): void {
   // Settings form
   document.getElementById('chat-settings-save')?.addEventListener('click', handleSettingsSave)
   document.getElementById('chat-settings-test')?.addEventListener('click', handleSettingsTest)
+  // Re-fetch model list when the URL field loses focus with a changed value
+  let lastFetchedUrl = ''
+  const urlInput = document.getElementById('chat-settings-url') as HTMLInputElement | null
+  urlInput?.addEventListener('blur', () => {
+    const url = urlInput.value.trim()
+    if (url && url !== lastFetchedUrl) {
+      lastFetchedUrl = url
+      void refreshModelSelect(url)
+    }
+  })
 }
 
 // --- Settings panel ---
@@ -236,24 +247,72 @@ function populateSettings(): void {
   const config = loadConfig()
   const urlInput = document.getElementById('chat-settings-url') as HTMLInputElement | null
   const keyInput = document.getElementById('chat-settings-key') as HTMLInputElement | null
-  const modelInput = document.getElementById('chat-settings-model') as HTMLInputElement | null
   const enabledInput = document.getElementById('chat-settings-enabled') as HTMLInputElement | null
   if (urlInput) urlInput.value = config.apiUrl
   if (keyInput) keyInput.value = config.apiKey
-  if (modelInput) modelInput.value = config.model
   if (enabledInput) enabledInput.checked = config.enabled
+  // Seed the select with the saved model immediately, then refresh from API
+  seedModelSelect(config.model)
+  void refreshModelSelect(config.apiUrl, config.model)
+}
+
+/** Put the saved model as the sole option while models are loading. */
+function seedModelSelect(currentModel: string): void {
+  const select = document.getElementById('chat-settings-model') as HTMLSelectElement | null
+  if (!select) return
+  select.innerHTML = ''
+  if (currentModel) {
+    const opt = document.createElement('option')
+    opt.value = currentModel
+    opt.textContent = currentModel
+    select.appendChild(opt)
+  }
+  select.disabled = true
+}
+
+/** Fetch models from the API and populate the select, preserving the current selection. */
+async function refreshModelSelect(apiUrl: string, preferredModel?: string): Promise<void> {
+  const select = document.getElementById('chat-settings-model') as HTMLSelectElement | null
+  if (!select) return
+
+  const config = loadConfig()
+  const selected = preferredModel ?? select.value ?? config.model
+
+  const models = await fetchModels({ ...config, apiUrl })
+
+  select.innerHTML = ''
+  if (models.length === 0) {
+    // Fallback: keep the current value as a manual entry
+    const opt = document.createElement('option')
+    opt.value = selected
+    opt.textContent = selected || 'No models found'
+    select.appendChild(opt)
+    select.disabled = false
+    return
+  }
+
+  // Ensure the currently configured model is always present, even if not in the list
+  const allModels = models.includes(selected) || !selected ? models : [selected, ...models]
+  for (const id of allModels) {
+    const opt = document.createElement('option')
+    opt.value = id
+    opt.textContent = id
+    opt.selected = id === selected
+    select.appendChild(opt)
+  }
+  select.disabled = false
 }
 
 function readSettingsForm(): DocentConfig {
   const defaults = getDefaultConfig()
   const urlInput = document.getElementById('chat-settings-url') as HTMLInputElement | null
   const keyInput = document.getElementById('chat-settings-key') as HTMLInputElement | null
-  const modelInput = document.getElementById('chat-settings-model') as HTMLInputElement | null
+  const modelSelect = document.getElementById('chat-settings-model') as HTMLSelectElement | null
   const enabledInput = document.getElementById('chat-settings-enabled') as HTMLInputElement | null
   return {
     apiUrl: urlInput?.value.trim() || defaults.apiUrl,
     apiKey: keyInput?.value.trim() ?? '',
-    model: modelInput?.value.trim() || defaults.model,
+    model: modelSelect?.value.trim() || defaults.model,
     enabled: enabledInput?.checked ?? defaults.enabled,
   }
 }

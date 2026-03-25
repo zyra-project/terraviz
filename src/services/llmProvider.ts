@@ -268,3 +268,27 @@ export async function checkAvailability(config: DocentConfig): Promise<Availabil
     clearTimeout(timeoutId)
   }
 }
+
+/**
+ * Fetch the list of model IDs available at the configured API URL.
+ * Returns an empty array if the endpoint is unreachable or returns no models.
+ */
+export async function fetchModels(config: DocentConfig): Promise<string[]> {
+  const url = `${config.apiUrl.replace(/\/+$/, '')}/models`
+  const headers: Record<string, string> = {}
+  if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 5000)
+  try {
+    const res = await fetch(url, { headers, signal: controller.signal })
+    if (!res.ok) return []
+    const body = await res.json() as { data?: { id?: string }[] }
+    const models = body.data
+    if (!Array.isArray(models)) return []
+    return models.map(m => m.id ?? '').filter(Boolean).sort()
+  } catch {
+    return []
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
