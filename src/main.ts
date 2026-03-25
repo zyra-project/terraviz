@@ -19,7 +19,7 @@ import { initChatUI, openChat, notifyDatasetChanged, showChatTrigger, hideChatTr
 import {
   createPlaybackState, startPlaybackLoop, stopPlaybackLoop,
   togglePlayPause, rewind, fastForward, stepFrame, onScrub,
-  updatePlayButton, toggleCaptions, resetPlaybackState,
+  updatePlayButton, toggleCaptions, resetPlaybackState, initPlaybackPositioning,
   type PlaybackState,
 } from './ui/playbackController'
 import {
@@ -406,6 +406,7 @@ class InteractiveSphere {
   }
 
   private initChat(): void {
+    initPlaybackPositioning()
     initChatUI({
       onLoadDataset: (id) => { void this.selectDatasetFromChat(id) },
       getDatasets: () => this.appState.datasets,

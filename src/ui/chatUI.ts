@@ -664,18 +664,13 @@ function renderMarkdownLite(html: string): string {
 
 function updateTriggerForInfoPanel(): void {
   const trigger = document.getElementById('chat-trigger')
-  const playback = document.getElementById('playback-controls')
   const infoPanel = document.getElementById('info-panel')
-  if (!infoPanel) return
-  const isPortraitMobile = window.innerWidth <= 600
-    && window.matchMedia('(orientation: portrait)').matches
+  if (!trigger || !infoPanel) return
   if (infoPanel.classList.contains('expanded')) {
     const h = infoPanel.getBoundingClientRect().height
-    if (trigger) trigger.style.bottom = `${h + 12}px`
-    if (playback && isPortraitMobile) playback.style.bottom = `${h + 12}px`
+    trigger.style.bottom = `${h + 12}px`
   } else {
-    if (trigger) trigger.style.bottom = ''
-    if (playback) playback.style.bottom = '0.75rem'
+    trigger.style.bottom = ''
   }
 }
 

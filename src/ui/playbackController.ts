@@ -289,6 +289,32 @@ function parseSRTTime(t: string): number {
   return parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseInt(m[3]) + parseInt(m[4]) / 1000
 }
 
+// --- Info panel positioning ---
+
+/**
+ * Observe the info panel and shift #playback-controls up as it expands.
+ * Only applies on portrait mobile (≤600px width).
+ */
+export function initPlaybackPositioning(): void {
+  const infoPanel = document.getElementById('info-panel')
+  if (!infoPanel || typeof ResizeObserver === 'undefined') return
+
+  const update = () => {
+    const controls = document.getElementById('playback-controls')
+    if (!controls) return
+    const isPortraitMobile = window.innerWidth <= 600
+      && window.matchMedia('(orientation: portrait)').matches
+    if (infoPanel.classList.contains('expanded') && isPortraitMobile) {
+      const h = infoPanel.getBoundingClientRect().height
+      controls.style.bottom = `${h + 12}px`
+    } else {
+      controls.style.bottom = '0.75rem'
+    }
+  }
+
+  new ResizeObserver(update).observe(infoPanel)
+}
+
 // --- Playback state reset ---
 
 export function resetPlaybackState(state: PlaybackState): void {
