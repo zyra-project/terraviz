@@ -22,6 +22,7 @@ vi.mock('../services/docentService', async (importOriginal) => {
 function setupDOM(): void {
   document.body.innerHTML = `
     <button id="chat-trigger"></button>
+    <div id="chat-dataset-prompt" class="hidden"></div>
     <div id="chat-panel" class="hidden">
       <button id="chat-close"></button>
       <button id="chat-settings-btn"></button>
@@ -53,12 +54,14 @@ function makeCallbacks(): MockCallbacks {
     getDatasets: vi.fn().mockReturnValue([]),
     getCurrentDataset: vi.fn().mockReturnValue(null),
     announce: vi.fn(),
+    onOpenBrowse: vi.fn(),
   } as MockCallbacks
 }
 
 beforeEach(() => {
   setupDOM()
   sessionStorage.clear()
+  localStorage.clear()
 })
 
 afterEach(() => {
@@ -156,9 +159,36 @@ describe('clearChat', () => {
 })
 
 describe('notifyDatasetChanged', () => {
-  it('does not throw', () => {
+  it('does not throw with null', () => {
     initChatUI(makeCallbacks())
     expect(() => notifyDatasetChanged(null)).not.toThrow()
+  })
+
+  it('shows the dataset prompt when chat is closed and dataset is non-null', () => {
+    initChatUI(makeCallbacks())
+    const dataset = { id: 'DS_001', title: 'Sea Surface Temperature' } as Parameters<typeof notifyDatasetChanged>[0]
+    notifyDatasetChanged(dataset)
+    const prompt = document.getElementById('chat-dataset-prompt')
+    expect(prompt?.classList.contains('hidden')).toBe(false)
+    expect(prompt?.textContent).toContain('Sea Surface Temperature')
+  })
+
+  it('hides the dataset prompt when null is passed', () => {
+    initChatUI(makeCallbacks())
+    const dataset = { id: 'DS_001', title: 'Sea Surface Temperature' } as Parameters<typeof notifyDatasetChanged>[0]
+    notifyDatasetChanged(dataset)
+    notifyDatasetChanged(null)
+    const prompt = document.getElementById('chat-dataset-prompt')
+    expect(prompt?.classList.contains('hidden')).toBe(true)
+  })
+
+  it('does not show the dataset prompt when chat is open', () => {
+    initChatUI(makeCallbacks())
+    openChat()
+    const dataset = { id: 'DS_001', title: 'Sea Surface Temperature' } as Parameters<typeof notifyDatasetChanged>[0]
+    notifyDatasetChanged(dataset)
+    const prompt = document.getElementById('chat-dataset-prompt')
+    expect(prompt?.classList.contains('hidden')).toBe(true)
   })
 })
 
@@ -318,5 +348,93 @@ describe('handleSend streaming', () => {
       expect(actionBtns.length).toBeGreaterThan(0)
       expect(actionBtns[0].getAttribute('data-dataset-id')).toBe('DS_002')
     })
+  })
+})
+
+describe('trigger label collapse', () => {
+  it('adds collapsed class to trigger on first openChat call', () => {
+    initChatUI(makeCallbacks())
+    openChat()
+    expect(document.getElementById('chat-trigger')?.classList.contains('collapsed')).toBe(true)
+  })
+
+  it('sets localStorage flag on first openChat call', () => {
+    initChatUI(makeCallbacks())
+    openChat()
+    expect(localStorage.getItem('sos-docent-seen')).toBe('1')
+  })
+
+  it('applies collapsed class on init if user has previously opened chat', () => {
+    localStorage.setItem('sos-docent-seen', '1')
+    initChatUI(makeCallbacks())
+    expect(document.getElementById('chat-trigger')?.classList.contains('collapsed')).toBe(true)
+  })
+
+  it('does not apply collapsed class on init for first-time users', () => {
+    initChatUI(makeCallbacks())
+    expect(document.getElementById('chat-trigger')?.classList.contains('collapsed')).toBe(false)
+  })
+})
+
+describe('welcome state copy', () => {
+  it('renders the Digital Docent introduction', () => {
+    initChatUI(makeCallbacks())
+    clearChat() // ensure welcome state regardless of prior module state
+    const messages = document.getElementById('chat-messages')
+    expect(messages?.textContent).toContain('Orbit')
+  })
+
+  it('renders domain-specific suggestion buttons', () => {
+    initChatUI(makeCallbacks())
+    clearChat()
+    const suggestions = document.querySelectorAll('.chat-suggestion')
+    const queries = Array.from(suggestions).map(b => (b as HTMLElement).dataset.query ?? '')
+    expect(queries.some(q => q.includes('sea level rise'))).toBe(true)
+    expect(queries.some(q => q.includes('NDVI'))).toBe(true)
+  })
+})
+
+describe('browse handoff', () => {
+  it('shows "Compare in Browse" link when 3 or more action cards are rendered', async () => {
+    const { processMessage } = await import('../services/docentService')
+    const mockedProcessMessage = vi.mocked(processMessage)
+    const makeAction = (id: string, title: string) => ({
+      type: 'action' as const,
+      action: { type: 'load-dataset' as const, datasetId: id, datasetTitle: title },
+    })
+    mockedProcessMessage.mockImplementation(async function* () {
+      yield makeAction('DS_001', 'Dataset One')
+      yield makeAction('DS_002', 'Dataset Two')
+      yield makeAction('DS_003', 'Dataset Three')
+      yield { type: 'done' as const, fallback: false }
+    })
+    initChatUI(makeCallbacks())
+    openChat()
+    const input = document.getElementById('chat-input') as HTMLTextAreaElement
+    input.value = 'show me ocean data'
+    document.getElementById('chat-send')?.click()
+    await vi.waitFor(() => {
+      expect(document.querySelector('.chat-browse-link')).not.toBeNull()
+    })
+  })
+
+  it('does not show "Compare in Browse" link when fewer than 3 action cards are rendered', async () => {
+    const { processMessage } = await import('../services/docentService')
+    const mockedProcessMessage = vi.mocked(processMessage)
+    mockedProcessMessage.mockImplementation(async function* () {
+      yield { type: 'action' as const, action: { type: 'load-dataset' as const, datasetId: 'DS_001', datasetTitle: 'Dataset One' } }
+      yield { type: 'action' as const, action: { type: 'load-dataset' as const, datasetId: 'DS_002', datasetTitle: 'Dataset Two' } }
+      yield { type: 'done' as const, fallback: false }
+    })
+    initChatUI(makeCallbacks())
+    clearChat() // start from clean state so no prior messages with 3+ actions remain
+    openChat()
+    const input = document.getElementById('chat-input') as HTMLTextAreaElement
+    input.value = 'show me something'
+    document.getElementById('chat-send')?.click()
+    await vi.waitFor(() => {
+      expect(document.querySelector('.chat-action-btn')).not.toBeNull()
+    })
+    expect(document.querySelector('.chat-browse-link')).toBeNull()
   })
 })

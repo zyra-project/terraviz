@@ -101,7 +101,7 @@ describe('buildDatasetLookup', () => {
 describe('buildSystemPrompt', () => {
   it('includes docent role description', () => {
     const prompt = buildSystemPrompt(datasets, null)
-    expect(prompt).toContain('Digital Docent')
+    expect(prompt).toContain('Orbit')
   })
 
   it('includes dataset count', () => {

@@ -14,6 +14,7 @@ import { processMessage, loadConfig, saveConfig, testConnection, getDefaultConfi
 
 // --- Constants ---
 const SESSION_STORAGE_KEY = 'sos-docent-chat'
+const CHAT_OPENED_KEY = 'sos-docent-seen'
 const MAX_MESSAGES = 200
 const MAX_PERSISTED_MESSAGES = 100
 
@@ -22,6 +23,7 @@ export interface ChatCallbacks {
   getDatasets: () => Dataset[]
   getCurrentDataset: () => Dataset | null
   announce: (message: string) => void
+  onOpenBrowse?: () => void
 }
 
 let callbacks: ChatCallbacks | null = null
@@ -29,6 +31,7 @@ let messages: ChatMessage[] = []
 let isOpen = false
 let isStreaming = false
 let settingsOpen = false
+let datasetPromptTimer: ReturnType<typeof setTimeout> | null = null
 
 /**
  * Initialize the chat UI with callbacks and restore session.
@@ -38,6 +41,10 @@ export function initChatUI(cb: ChatCallbacks): void {
   restoreSession()
   wireEvents()
   renderMessages()
+  // Collapse trigger to icon-only if user has opened chat before
+  if (localStorage.getItem(CHAT_OPENED_KEY)) {
+    document.getElementById('chat-trigger')?.classList.add('collapsed')
+  }
 }
 
 /**
@@ -53,6 +60,17 @@ export function openChat(): void {
   trigger?.classList.add('chat-trigger-active')
   trigger?.setAttribute('aria-expanded', 'true')
   browseChatBtn?.classList.add('chat-trigger-active')
+  // Collapse trigger to icon-only after first open
+  localStorage.setItem(CHAT_OPENED_KEY, '1')
+  trigger?.classList.add('collapsed')
+  dismissDatasetPrompt()
+  // Collapse info panel — both can't be tall at the same time
+  const infoPanel = document.getElementById('info-panel')
+  const infoHeader = document.getElementById('info-header')
+  if (infoPanel?.classList.contains('expanded')) {
+    infoPanel.classList.remove('expanded')
+    infoHeader?.setAttribute('aria-expanded', 'false')
+  }
   scrollToBottom()
   const input = document.getElementById('chat-input') as HTMLTextAreaElement | null
   input?.focus()
@@ -87,8 +105,13 @@ export function toggleChat(): void {
 /**
  * Notify the chat that the current dataset changed.
  */
-export function notifyDatasetChanged(_dataset: Dataset | null): void {
+export function notifyDatasetChanged(dataset: Dataset | null): void {
   saveSession()
+  if (dataset && !isOpen) {
+    showDatasetPrompt(dataset)
+  } else {
+    dismissDatasetPrompt()
+  }
 }
 
 /**
@@ -138,7 +161,15 @@ function restoreSession(): void {
  * Show the standalone floating chat trigger (used when a dataset is loaded).
  */
 export function showChatTrigger(): void {
-  document.getElementById('chat-trigger')?.classList.add('visible')
+  const trigger = document.getElementById('chat-trigger')
+  trigger?.classList.add('visible')
+  // One-time pulse on first ever appearance to draw attention
+  if (!localStorage.getItem(CHAT_OPENED_KEY)) {
+    trigger?.classList.remove('pulse')
+    // Force reflow so re-adding the class restarts the animation
+    void trigger?.offsetWidth
+    trigger?.classList.add('pulse')
+  }
 }
 
 /**
@@ -151,6 +182,11 @@ export function hideChatTrigger(): void {
 function wireEvents(): void {
   document.getElementById('chat-trigger')?.addEventListener('click', toggleChat)
   document.getElementById('browse-chat-btn')?.addEventListener('click', toggleChat)
+  // Slide trigger continuously with the info panel as it opens/closes
+  const infoPanel = document.getElementById('info-panel')
+  if (infoPanel && typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(() => updateTriggerForInfoPanel()).observe(infoPanel)
+  }
   document.getElementById('chat-close')?.addEventListener('click', closeChat)
   document.getElementById('chat-send')?.addEventListener('click', handleSend)
   document.getElementById('chat-settings-btn')?.addEventListener('click', toggleSettings)
@@ -332,7 +368,8 @@ async function handleSend(): Promise<void> {
           // Auto-load the top result immediately
           callbacks.onLoadDataset(chunk.action.datasetId)
           if (!docentMsg.text) {
-            docentMsg.text = `I've loaded **${chunk.action.datasetTitle}** onto the globe.`
+            const altHint = chunk.alternatives.length > 0 ? ' Here are some alternatives if this isn\'t quite right:' : ''
+            docentMsg.text = `I've loaded **${chunk.action.datasetTitle}** — that's your closest match.${altHint}`
           }
           if (!docentMsg.actions) docentMsg.actions = []
           for (const alt of chunk.alternatives) {
@@ -399,12 +436,13 @@ function renderMessages(): void {
   if (messages.length === 0) {
     container.innerHTML = `<div class="chat-welcome">
       <div class="chat-welcome-icon" aria-hidden="true">&#x1F30D;</div>
-      <p>I'm your digital docent. Ask me about any topic and I'll find data to show you on the globe.</p>
+      <p><strong>I'm Orbit</strong>, your digital docent — I help you find the right dataset for your question.</p>
+      <p class="chat-welcome-hint">Browse the catalog to compare options side by side. Ask me when you have something specific in mind.</p>
       <div class="chat-suggestions">
-        <button class="chat-suggestion" data-query="Show me hurricanes">Hurricanes</button>
-        <button class="chat-suggestion" data-query="Tell me about climate change">Climate</button>
-        <button class="chat-suggestion" data-query="Show me ocean temperatures">Oceans</button>
-        <button class="chat-suggestion" data-query="What about space?">Space</button>
+        <button class="chat-suggestion" data-query="What datasets show sea level rise?">Sea level rise</button>
+        <button class="chat-suggestion" data-query="Explain what NDVI measures">What is NDVI?</button>
+        <button class="chat-suggestion" data-query="Show me something related to hurricanes">Hurricanes</button>
+        <button class="chat-suggestion" data-query="Which datasets cover the Arctic?">Arctic</button>
       </div>
     </div>`
     container.querySelectorAll<HTMLElement>('.chat-suggestion').forEach(btn => {
@@ -495,7 +533,7 @@ function renderChatText(
 }
 
 function renderActions(actions: ChatAction[]): string {
-  return `<div class="chat-actions">${actions.map(a => {
+  const buttons = actions.map(a => {
     if (a.type === 'load-dataset') {
       return `<button class="chat-action-btn" data-dataset-id="${escapeAttr(a.datasetId)}" aria-label="Load ${escapeAttr(a.datasetTitle)}">
         <span class="chat-action-title">${escapeHtml(a.datasetTitle)}</span>
@@ -503,7 +541,11 @@ function renderActions(actions: ChatAction[]): string {
       </button>`
     }
     return ''
-  }).join('')}</div>`
+  }).join('')
+  const browseFooter = actions.length >= 3 && callbacks?.onOpenBrowse
+    ? `<button class="chat-browse-link">Compare these side by side in Browse &#x2192;</button>`
+    : ''
+  return `<div class="chat-actions">${buttons}${browseFooter}</div>`
 }
 
 function wireActionButtons(container: Element): void {
@@ -525,6 +567,12 @@ function wireActionButtons(container: Element): void {
         actionsEl?.remove()
         saveSession()
       }
+    })
+  })
+  container.querySelectorAll<HTMLElement>('.chat-browse-link').forEach(btn => {
+    btn.addEventListener('click', () => {
+      closeChat()
+      callbacks?.onOpenBrowse?.()
     })
   })
 }
@@ -551,6 +599,50 @@ function renderMarkdownLite(html: string): string {
   }
   if (inList) out.push('</ul>')
   return out.join('')
+}
+
+// --- Trigger / info-panel coordination ---
+
+function updateTriggerForInfoPanel(): void {
+  const trigger = document.getElementById('chat-trigger')
+  const infoPanel = document.getElementById('info-panel')
+  if (!trigger || !infoPanel) return
+  if (infoPanel.classList.contains('expanded')) {
+    const h = infoPanel.getBoundingClientRect().height
+    trigger.style.bottom = `${h + 12}px`
+  } else {
+    trigger.style.bottom = ''
+  }
+}
+
+// --- Contextual dataset prompt ---
+
+function showDatasetPrompt(dataset: Dataset): void {
+  dismissDatasetPrompt()
+  const el = document.getElementById('chat-dataset-prompt')
+  if (!el) return
+  el.textContent = `Ask the Docent about ${dataset.title} \u2192`
+  el.classList.remove('hidden')
+  el.onclick = () => {
+    dismissDatasetPrompt()
+    openChat()
+    const input = document.getElementById('chat-input') as HTMLTextAreaElement | null
+    if (input) {
+      input.value = `Tell me about ${dataset.title}`
+      input.style.height = 'auto'
+      input.style.height = Math.min(input.scrollHeight, 96) + 'px'
+    }
+  }
+  datasetPromptTimer = setTimeout(() => dismissDatasetPrompt(), 8000)
+}
+
+function dismissDatasetPrompt(): void {
+  if (datasetPromptTimer !== null) {
+    clearTimeout(datasetPromptTimer)
+    datasetPromptTimer = null
+  }
+  const el = document.getElementById('chat-dataset-prompt')
+  if (el) el.classList.add('hidden')
 }
 
 function showTyping(): void {

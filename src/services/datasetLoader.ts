@@ -12,6 +12,7 @@ import type { Dataset, AppState } from '../types'
 import { formatDate, isSubDailyPeriod, inferDisplayInterval } from '../utils/time'
 import { logger } from '../utils/logger'
 import { escapeHtml, escapeAttr } from '../ui/browseUI'
+import { closeChat } from '../ui/chatUI'
 import type { PlaybackState } from '../ui/playbackController'
 import { updatePlayButton, loadCaptions } from '../ui/playbackController'
 
@@ -318,6 +319,8 @@ export function displayDatasetInfo(
   const toggleInfoPanel = () => {
     const expanded = infoPanel.classList.toggle('expanded')
     infoHeader.setAttribute('aria-expanded', String(expanded))
+    // Close chat when expanding info — both can't be tall at the same time
+    if (expanded) closeChat()
   }
   infoHeader.onclick = toggleInfoPanel
   infoHeader.addEventListener('keydown', (e) => {

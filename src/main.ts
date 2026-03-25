@@ -15,7 +15,7 @@ import type { AppState } from './types'
 
 // Extracted modules
 import { showBrowseUI, hideBrowseUI } from './ui/browseUI'
-import { initChatUI, notifyDatasetChanged, showChatTrigger, hideChatTrigger, closeChat } from './ui/chatUI'
+import { initChatUI, openChat, notifyDatasetChanged, showChatTrigger, hideChatTrigger, closeChat } from './ui/chatUI'
 import {
   createPlaybackState, startPlaybackLoop, stopPlaybackLoop,
   togglePlayPause, rewind, fastForward, stepFrame, onScrub,
@@ -129,6 +129,7 @@ class InteractiveSphere {
           onSelectDataset: (id) => this.selectDatasetFromBrowse(id),
           announce: (msg) => this.announce(msg),
           isMobile: this.isMobile,
+          onOpenChat: (query) => this.openChatWithQuery(query),
         })
       }
     } catch (error) {
@@ -410,8 +411,28 @@ class InteractiveSphere {
       getDatasets: () => this.appState.datasets,
       getCurrentDataset: () => this.appState.currentDataset,
       announce: (msg) => this.announce(msg),
+      onOpenBrowse: () => {
+        const browseOverlay = document.getElementById('browse-overlay')
+        const browseToggle = document.getElementById('browse-toggle')
+        if (browseOverlay?.classList.contains('collapsed')) {
+          browseToggle?.click()
+        }
+      },
     })
   }
+
+  private openChatWithQuery(query?: string): void {
+    openChat()
+    if (query) {
+      const input = document.getElementById('chat-input') as HTMLTextAreaElement | null
+      if (input) {
+        input.value = query
+        input.style.height = 'auto'
+        input.style.height = Math.min(input.scrollHeight, 96) + 'px'
+      }
+    }
+  }
+
 
   private async selectDatasetFromChat(id: string): Promise<void> {
     const gen = ++this.loadGeneration
@@ -645,6 +666,7 @@ class InteractiveSphere {
       onSelectDataset: (id) => this.selectDatasetFromBrowse(id),
       announce: (msg) => this.announce(msg),
       isMobile: this.isMobile,
+      onOpenChat: (query) => this.openChatWithQuery(query),
     })
     this.renderer?.setCanvasDescription('Interactive 3D globe showing Earth')
     notifyDatasetChanged(null)

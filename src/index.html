@@ -936,6 +936,17 @@
             font-size: 0.85rem;
             padding: 3rem 0;
         }
+        .browse-docent-hint {
+            display: inline-block;
+            margin-top: 0.6rem;
+            color: #4da6ff;
+            font-size: 0.75rem;
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0;
+            text-decoration: underline;
+        }
 
         /* --- Accessibility --- */
         .sr-only {
@@ -1089,24 +1100,41 @@
             left: 0.75rem;
             pointer-events: auto;
             z-index: 400;
-            width: 44px;
             height: 44px;
-            border-radius: 50%;
+            border-radius: 999px;
             background: rgba(13, 13, 18, 0.92) !important;
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
             border: 1px solid rgba(255, 255, 255, 0.12) !important;
             color: #bbb !important;
-            font-size: 1.2rem;
             display: none;
             align-items: center;
             justify-content: center;
+            gap: 0.35rem;
             cursor: pointer;
             transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
-            padding: 0 !important;
+            padding: 0 0.9rem 0 0.7rem !important;
+            white-space: nowrap;
+        }
+        .chat-trigger-icon {
+            font-size: 1.2rem;
+            line-height: 1;
+        }
+        .chat-trigger-label {
+            font-size: 0.75rem;
+            font-weight: 500;
+            letter-spacing: 0.01em;
         }
         #chat-trigger.visible {
             display: flex;
+        }
+        #chat-trigger.collapsed {
+            width: 44px;
+            padding: 0 !important;
+            border-radius: 50%;
+        }
+        #chat-trigger.collapsed .chat-trigger-label {
+            display: none;
         }
         #chat-trigger:hover {
             background: rgba(30, 30, 40, 0.95) !important;
@@ -1117,6 +1145,39 @@
             border-color: #4da6ff !important;
             color: #4da6ff !important;
             box-shadow: 0 0 12px rgba(77, 166, 255, 0.3);
+        }
+        /* Contextual dataset prompt */
+        #chat-dataset-prompt {
+            position: absolute;
+            bottom: 8.25rem;
+            left: 0.75rem;
+            pointer-events: auto;
+            z-index: 400;
+            background: rgba(13, 13, 18, 0.92);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(77, 166, 255, 0.3);
+            border-radius: 8px;
+            color: #6ab8ff;
+            font-size: 0.72rem;
+            padding: 0.45rem 0.7rem;
+            cursor: pointer;
+            white-space: nowrap;
+            max-width: calc(100vw - 1.5rem);
+            animation: chat-prompt-slide-in 0.25s ease-out;
+        }
+        #chat-dataset-prompt.hidden { display: none; }
+        @keyframes chat-prompt-slide-in {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes chat-trigger-pulse {
+            0%   { box-shadow: 0 0 0 0 rgba(77, 166, 255, 0.5); }
+            70%  { box-shadow: 0 0 0 8px rgba(77, 166, 255, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(77, 166, 255, 0); }
+        }
+        #chat-trigger.visible.pulse {
+            animation: chat-trigger-pulse 1.2s ease-out 2;
         }
 
         #chat-panel {
@@ -1152,6 +1213,12 @@
             font-weight: 600;
             color: #e8eaf0;
             letter-spacing: 0.04em;
+        }
+        .chat-header-subtitle {
+            font-weight: 400;
+            font-size: 0.65rem;
+            color: #666;
+            letter-spacing: 0.02em;
         }
         .chat-header-btn {
             background: none !important;
@@ -1353,6 +1420,25 @@
             background: rgba(77, 166, 255, 0.22) !important;
             color: #fff !important;
         }
+        .chat-welcome-hint {
+            color: #777;
+            font-size: 0.68rem;
+            margin-top: 0.35rem;
+            line-height: 1.4;
+        }
+        .chat-browse-link {
+            display: block;
+            width: 100%;
+            margin-top: 0.5rem;
+            padding: 0.35rem 0 !important;
+            font-size: 0.65rem !important;
+            color: #4da6ff !important;
+            background: none !important;
+            border: none !important;
+            cursor: pointer;
+            text-align: left;
+        }
+        .chat-browse-link:hover { text-decoration: underline; }
 
         /* Settings panel (inline) */
         #chat-settings {
@@ -1426,7 +1512,11 @@
             #chat-trigger.visible {
                 width: 48px;
                 height: 48px;
-                font-size: 1.3rem;
+                padding: 0 !important;
+                border-radius: 50%;
+            }
+            #chat-trigger.visible .chat-trigger-label {
+                display: none;
             }
             .browse-chat-btn {
                 width: 40px;
@@ -1475,7 +1565,7 @@
                 <label for="browse-search" class="sr-only">Search datasets</label>
                 <input type="search" id="browse-search" placeholder="Search datasets…" autocomplete="off" spellcheck="false" aria-describedby="browse-count" />
                 <button id="browse-search-clear" class="browse-search-clear hidden" aria-label="Clear search" type="button">&times;</button>
-                <button id="browse-chat-btn" class="browse-chat-btn" type="button" title="Ask the docent" aria-label="Open digital docent chat">&#x1F4AC;&#xFE0E;</button>
+                <button id="browse-chat-btn" class="browse-chat-btn" type="button" title="Ask Orbit" aria-label="Open Orbit, your digital docent">&#x1F4AC;&#xFE0E;</button>
             </div>
             <div id="browse-category-bar" role="group" aria-label="Filter by category"></div>
             <div id="browse-subcategory-bar" role="group" aria-label="Filter by sub-category"></div>
@@ -1524,12 +1614,13 @@
 
                 <button id="auto-rotate-standalone" class="transport-btn" title="Toggle auto-rotation" aria-label="Toggle auto-rotation" style="position: absolute; bottom: 0.75rem; right: 0.75rem; pointer-events: auto; min-width: 28px; padding: 0.35rem 0.5rem; font-size: 0.75rem; background: rgba(13, 13, 18, 0.88) !important; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08) !important; border-radius: 6px;">&#x21BB;</button>
 
-                <!-- Digital Docent Chat -->
-                <button id="chat-trigger" title="Ask the docent" aria-label="Open digital docent chat" aria-expanded="false">&#x1F4AC;&#xFE0E;</button>
+                <!-- Orbit Chat -->
+                <button id="chat-trigger" title="Ask the docent" aria-label="Open digital docent chat" aria-expanded="false"><span class="chat-trigger-icon" aria-hidden="true">&#x1F4AC;&#xFE0E;</span><span class="chat-trigger-label">Ask Orbit</span></button>
+                <div id="chat-dataset-prompt" class="hidden" role="status" aria-live="polite"></div>
 
-                <div id="chat-panel" class="ui-panel hidden" role="dialog" aria-label="Digital Docent">
+                <div id="chat-panel" class="ui-panel hidden" role="dialog" aria-label="Orbit — digital docent">
                     <div class="chat-header">
-                        <span class="chat-header-title">Digital Docent</span>
+                        <span class="chat-header-title">Orbit <span class="chat-header-subtitle">· digital docent</span></span>
                         <button id="chat-settings-btn" class="chat-header-btn" title="Settings" aria-label="Chat settings">&#x2699;&#xFE0E;</button>
                         <button id="chat-clear" class="chat-header-btn" title="Clear chat" aria-label="Clear chat history">&#x1F5D1;&#xFE0E;</button>
                         <button id="chat-close" class="chat-header-btn" title="Close chat" aria-label="Close chat">&#x2715;</button>
@@ -1568,7 +1659,7 @@
                     </div>
 
                     <div class="chat-input-wrap">
-                        <label for="chat-input" class="sr-only">Ask the docent</label>
+                        <label for="chat-input" class="sr-only">Ask Orbit</label>
                         <textarea id="chat-input" rows="1" placeholder="Ask about any dataset…" autocomplete="off" spellcheck="true"></textarea>
                         <button id="chat-send" aria-label="Send message">&#x27A4;</button>
                     </div>

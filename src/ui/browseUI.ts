@@ -18,6 +18,7 @@ export interface BrowseCallbacks {
   onSelectDataset: (id: string) => void
   announce: (message: string) => void
   isMobile: boolean
+  onOpenChat?: (query?: string) => void
 }
 
 export function escapeHtml(text: string): string {
@@ -232,7 +233,15 @@ export function showBrowseUI(datasets: Dataset[], callbacks: BrowseCallbacks): v
     }
 
     if (filtered.length === 0) {
-      grid.innerHTML = '<div class="browse-no-results" role="status">No datasets match your search.</div>'
+      const docentHint = callbacks.onOpenChat
+        ? `<button class="browse-docent-hint">Not sure what you need? Ask Orbit \u2192</button>`
+        : ''
+      grid.innerHTML = `<div class="browse-no-results" role="status">No datasets match your search.${docentHint ? `<br>${docentHint}` : ''}</div>`
+      if (callbacks.onOpenChat) {
+        grid.querySelector('.browse-docent-hint')?.addEventListener('click', () => {
+          callbacks.onOpenChat!(searchQuery || undefined)
+        })
+      }
       return
     }
 

@@ -207,7 +207,7 @@ function describeDataset(dataset: Dataset): string {
 // --- Response generators ---
 
 const GREETINGS = [
-  "Welcome to Science on a Sphere! I'm your digital docent — ask me about any topic and I'll find a dataset to show you. Try asking about oceans, climate, hurricanes, or anything else that interests you.",
+  "Welcome to Science on a Sphere! I'm Orbit, your digital docent — ask me about any topic and I'll find a dataset to show you. Try asking about oceans, climate, hurricanes, or anything else that interests you.",
   "Hello! I'm here to guide you through over 500 visualizations of our planet and beyond. What would you like to explore? You can ask about a topic, or I can tell you more about whatever's on the globe right now.",
   "Hi there! Think of me as your personal guide to Earth science data. Ask me about weather, the ocean floor, space, volcanoes — or just say \"show me something interesting\" and I'll pick something out.",
 ]
