@@ -36,6 +36,25 @@ export function captureGlobeScreenshot(): string | null {
   }
 }
 
+/**
+ * Read overlay context that the canvas screenshot doesn't capture
+ * (time label, playback state, etc.) so the LLM gets the full picture.
+ */
+export function captureViewContext(): string {
+  const parts: string[] = []
+  const timeEl = document.getElementById('time-display')
+  const timeText = timeEl?.textContent?.trim()
+  if (timeText && timeText !== '--') {
+    parts.push(`Time shown: ${timeText}`)
+  }
+  const playBtn = document.getElementById('play-btn')
+  if (playBtn) {
+    const isPlaying = playBtn.getAttribute('aria-label')?.toLowerCase().includes('pause')
+    parts.push(isPlaying ? 'Playback: playing' : 'Playback: paused')
+  }
+  return parts.length > 0 ? parts.join('. ') + '.' : ''
+}
+
 const DEFAULT_CONFIG: DocentConfig = {
   apiUrl: '/api',
   apiKey: '',
@@ -201,6 +220,7 @@ export async function* processMessage(
   currentDataset: Dataset | null,
   config?: DocentConfig,
   screenshotDataUrl?: string | null,
+  viewContext?: string,
 ): AsyncGenerator<DocentStreamChunk> {
   const cfg = config ?? loadConfig()
 
@@ -258,12 +278,15 @@ export async function* processMessage(
       const systemPrompt = buildSystemPromptForTurn(datasets, currentDataset, turnIndex, cfg.readingLevel, visionActive)
 
       // Build the user message — multimodal if vision is active
+      const visionText = visionActive && viewContext
+        ? `[${viewContext}]\n${input}`
+        : input
       const userMessage: LLMMessage = visionActive
         ? {
             role: 'user',
             content: [
               { type: 'image_url', image_url: { url: screenshotDataUrl! } },
-              { type: 'text', text: input },
+              { type: 'text', text: visionText },
             ] as LLMContentPart[],
           }
         : { role: 'user', content: input }

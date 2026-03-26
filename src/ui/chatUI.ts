@@ -10,7 +10,7 @@ import type { ChatMessage, ChatAction, ChatSession, DocentConfig, ReadingLevel }
 import type { Dataset } from '../types'
 import { escapeHtml, escapeAttr } from './browseUI'
 import { createMessageId } from '../services/docentEngine'
-import { processMessage, loadConfig, saveConfig, testConnection, getDefaultConfig, isLocalDev, captureGlobeScreenshot } from '../services/docentService'
+import { processMessage, loadConfig, saveConfig, testConnection, getDefaultConfig, isLocalDev, captureGlobeScreenshot, captureViewContext } from '../services/docentService'
 import { fetchModels } from '../services/llmProvider'
 
 // --- Constants ---
@@ -438,9 +438,10 @@ async function handleSend(): Promise<void> {
   setSendEnabled(false)
 
   try {
-    // Capture globe screenshot if vision mode is active
+    // Capture globe screenshot + overlay context if vision mode is active
     const config = loadConfig()
     const screenshot = config.visionEnabled ? captureGlobeScreenshot() : null
+    const viewContext = config.visionEnabled ? captureViewContext() : undefined
 
     const stream = processMessage(
       text,
@@ -449,6 +450,7 @@ async function handleSend(): Promise<void> {
       callbacks.getCurrentDataset(),
       undefined,
       screenshot,
+      viewContext,
     )
 
     let firstChunk = true
