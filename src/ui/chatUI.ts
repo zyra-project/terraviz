@@ -448,7 +448,7 @@ async function handleSend(): Promise<void> {
       messages.slice(0, -2), // history without user msg or placeholder (processMessage re-adds user msg)
       callbacks.getDatasets(),
       callbacks.getCurrentDataset(),
-      undefined,
+      config,
       screenshot,
       viewContext,
     )

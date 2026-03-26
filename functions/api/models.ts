@@ -42,22 +42,22 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       object: 'list',
       data: [
         {
-          id: '@cf/meta/llama-3.1-70b-instruct',
+          id: 'llama-3.1-70b',
           object: 'model',
           owned_by: 'cloudflare',
         },
         {
-          id: '@cf/meta/llama-3.1-8b-instruct',
+          id: 'llama-3.1-8b',
           object: 'model',
           owned_by: 'cloudflare',
         },
         {
-          id: '@cf/meta/llama-3.2-3b-instruct',
+          id: 'llama-3.2-3b',
           object: 'model',
           owned_by: 'cloudflare',
         },
         {
-          id: '@cf/meta/llama-3.2-11b-vision-instruct',
+          id: 'llama-3.2-11b-vision',
           object: 'model',
           owned_by: 'cloudflare',
         },

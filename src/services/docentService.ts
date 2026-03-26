@@ -299,7 +299,8 @@ export async function* processMessage(
       const tools = [getLoadDatasetTool()]
 
       // Auto-switch to vision model when using the default CF proxy
-      const visionCfg = visionActive && (cfg.apiUrl === '/api' || cfg.apiUrl.endsWith('/api'))
+      const normalizedUrl = cfg.apiUrl.replace(/\/+$/, '')
+      const visionCfg = visionActive && (normalizedUrl === '/api' || normalizedUrl.endsWith('/api'))
         ? { ...cfg, model: CF_VISION_MODEL }
         : cfg
 

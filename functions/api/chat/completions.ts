@@ -72,8 +72,16 @@ function extractImageAndNormalise(
         const dataUrl = part.image_url.url
         const match = dataUrl.match(/^data:[^;]+;base64,(.+)$/)
         if (match) {
-          const binary = atob(match[1])
-          image = Array.from({ length: binary.length }, (_, i) => binary.charCodeAt(i))
+          try {
+            const binary = atob(match[1])
+            const bytes = new Array<number>(binary.length)
+            for (let i = 0; i < binary.length; i++) {
+              bytes[i] = binary.charCodeAt(i)
+            }
+            image = bytes
+          } catch {
+            // Invalid base64 — skip the image rather than failing the request
+          }
         }
       }
     }
@@ -175,9 +183,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     })
   }
 
-  // Resolve the Cloudflare AI model
+  // Resolve the Cloudflare AI model — accept friendly names via MODEL_MAP
+  // or pass through full @cf/... model IDs directly
   const requestedModel = body.model ?? 'default'
-  const cfModel = MODEL_MAP[requestedModel] ?? MODEL_MAP['default']
+  const cfModel = requestedModel.startsWith('@cf/')
+    ? requestedModel
+    : (MODEL_MAP[requestedModel] ?? MODEL_MAP['default'])
 
   // Truncate messages to limit token usage
   const truncated = body.messages.slice(-22) // system + 20 history + user

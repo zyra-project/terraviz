@@ -664,6 +664,34 @@ describe('processMessage — vision mode', () => {
     expect(capturedConfig.model).toBe('llama-3.2-11b-vision')
   })
 
+  it('auto-switches to vision model when apiUrl has trailing slash', async () => {
+    const { streamChat } = await import('./llmProvider')
+    const mockedStream = vi.mocked(streamChat)
+
+    let capturedConfig: any = null
+    mockedStream.mockImplementation(async function* (_msgs, _tools, config) {
+      capturedConfig = config
+      yield { type: 'delta' as const, text: 'ok' }
+      yield { type: 'done' as const }
+    })
+
+    const config: DocentConfig = {
+      apiUrl: '/api/',
+      apiKey: '',
+      model: 'llama-3.1-70b',
+      enabled: true,
+      readingLevel: 'general',
+      visionEnabled: true,
+    }
+
+    for await (const _ of processMessage(
+      'hi', [], datasets, null, config,
+      'data:image/jpeg;base64,abc123',
+    )) { /* consume */ }
+
+    expect(capturedConfig.model).toBe('llama-3.2-11b-vision')
+  })
+
   it('does not switch model when using external API URL', async () => {
     const { streamChat } = await import('./llmProvider')
     const mockedStream = vi.mocked(streamChat)
