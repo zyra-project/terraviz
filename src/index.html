@@ -1673,6 +1673,15 @@
                             <select id="chat-settings-model" aria-label="Model"><option value="" disabled>Loading models…</option></select>
                         </div>
                         <div class="chat-settings-row">
+                            <label for="chat-settings-reading-level">Reading Level</label>
+                            <select id="chat-settings-reading-level" aria-label="Reading level">
+                                <option value="young-learner">Young Learner</option>
+                                <option value="general" selected>General</option>
+                                <option value="in-depth">In-Depth</option>
+                                <option value="expert">Expert</option>
+                            </select>
+                        </div>
+                        <div class="chat-settings-row">
                             <label class="chat-settings-check">
                                 <input type="checkbox" id="chat-settings-enabled" checked />
                                 Enable LLM (disable for local-only mode)

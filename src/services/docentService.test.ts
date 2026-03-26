@@ -30,6 +30,7 @@ const disabledConfig: DocentConfig = {
   apiKey: '',
   model: 'test',
   enabled: false,
+  readingLevel: 'general',
 }
 
 beforeEach(() => {
@@ -105,6 +106,7 @@ describe('processMessage — LLM path', () => {
       apiKey: '',
       model: 'test',
       enabled: true,
+      readingLevel: 'general',
     }
 
     const chunks: DocentStreamChunk[] = []
@@ -133,6 +135,7 @@ describe('processMessage — LLM path', () => {
       apiKey: '',
       model: 'test',
       enabled: true,
+      readingLevel: 'general',
     }
 
     const chunks: DocentStreamChunk[] = []
@@ -167,6 +170,7 @@ describe('processMessage — LLM path', () => {
       apiKey: '',
       model: 'test',
       enabled: true,
+      readingLevel: 'general',
     }
 
     const chunks: DocentStreamChunk[] = []
@@ -201,6 +205,7 @@ describe('processMessage — LLM path', () => {
       apiKey: '',
       model: 'test',
       enabled: true,
+      readingLevel: 'general',
     }
 
     const chunks: DocentStreamChunk[] = []
@@ -229,6 +234,7 @@ describe('processMessage — LLM path', () => {
       apiKey: '',
       model: 'test',
       enabled: true,
+      readingLevel: 'general',
     }
 
     const chunks: DocentStreamChunk[] = []
@@ -289,6 +295,7 @@ describe('processMessage — LLM dataset ID validation', () => {
       apiKey: '',
       model: 'test',
       enabled: true,
+      readingLevel: 'general',
     }
 
     const chunks: DocentStreamChunk[] = []
@@ -324,6 +331,7 @@ describe('processMessage — LLM dataset ID validation', () => {
       apiKey: '',
       model: 'test',
       enabled: true,
+      readingLevel: 'general',
     }
 
     const chunks: DocentStreamChunk[] = []
@@ -353,6 +361,7 @@ describe('config management', () => {
       apiKey: 'sk-test',
       model: 'gpt-4',
       enabled: true,
+      readingLevel: 'general',
     }
     saveConfig(custom)
     const loaded = loadConfig()

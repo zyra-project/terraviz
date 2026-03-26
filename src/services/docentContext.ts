@@ -5,7 +5,7 @@
  * and the current view to give informed, conversational responses.
  */
 
-import type { Dataset, ChatMessage } from '../types'
+import type { Dataset, ChatMessage, ReadingLevel } from '../types'
 import type { LLMMessage, LLMTool } from './llmProvider'
 
 // --- Constants ---
@@ -114,10 +114,25 @@ export function buildSystemPrompt(datasets: Dataset[], currentDataset: Dataset |
  * Turn 0: includes the full dataset catalog.
  * Turn >= 1: includes a compact ID-only dataset reference to save tokens.
  */
+/** Maps each reading level to system prompt instructions for tone and vocabulary. */
+const READING_LEVEL_INSTRUCTIONS: Record<ReadingLevel, string> = {
+  'young-learner': `## Reading Level: Young Learner
+Explain everything as if talking to a curious 10-year-old. Use simple, everyday words and short sentences. Compare scientific concepts to things kids experience — weather, animals, food, sports, playground activities. Show excitement and wonder ("Wow!", "Cool, right?"). Avoid jargon entirely; if a science term is necessary, immediately explain it in plain language. Keep responses under 100 words.`,
+
+  'general': '', // default — no extra instructions needed
+
+  'in-depth': `## Reading Level: In-Depth
+Provide thorough, informative responses suitable for a scientifically curious adult. Use proper scientific terminology but define technical terms on first use. You may exceed the 150-word limit up to 250 words when the topic warrants it. Explain the "how" and "why" behind phenomena, mention relevant measurement methods or data sources when appropriate, and connect topics to broader Earth system processes.`,
+
+  'expert': `## Reading Level: Expert
+Respond at a professional/graduate science level. Use precise scientific terminology freely without defining common domain terms. Focus on data specifics — resolution, temporal coverage, instrumentation, and methodology. Discuss limitations, uncertainties, and how datasets relate to current research. You may use up to 300 words. Assume the reader has strong background knowledge in Earth sciences.`,
+}
+
 export function buildSystemPromptForTurn(
   datasets: Dataset[],
   currentDataset: Dataset | null,
   turnIndex: number,
+  readingLevel: ReadingLevel = 'general',
 ): string {
   const categorySummary = buildCategorySummary(datasets)
   const currentContext = buildCurrentDatasetContext(currentDataset)
@@ -179,7 +194,7 @@ CRITICAL RULES — violations break the UI:
 - Suggest related datasets when relevant — help users discover connections between Earth systems
 - If you don't know something specific, be honest and don't guess — point toward relevant data if possible
 - Keep responses under 150 words unless the user asks for detail
-- REMINDER: Never mention a dataset that is not in the reference list above. Every dataset title you mention must be copied exactly from the list.`
+- REMINDER: Never mention a dataset that is not in the reference list above. Every dataset title you mention must be copied exactly from the list.${READING_LEVEL_INSTRUCTIONS[readingLevel] ? '\n\n' + READING_LEVEL_INSTRUCTIONS[readingLevel] : ''}`
 }
 
 /**

@@ -23,6 +23,7 @@ const DEFAULT_CONFIG: DocentConfig = {
   apiKey: '',
   model: 'llama-3.1-70b',
   enabled: true,
+  readingLevel: 'general',
 }
 
 /** Yielded by the service during response generation */
@@ -178,7 +179,7 @@ export async function* processMessage(
     let accumulatedText = ''
     try {
       const turnIndex = Math.floor(history.length / 2)
-      const systemPrompt = buildSystemPromptForTurn(datasets, currentDataset, turnIndex)
+      const systemPrompt = buildSystemPromptForTurn(datasets, currentDataset, turnIndex, cfg.readingLevel)
       const llmMessages = [
         { role: 'system' as const, content: systemPrompt },
         ...buildCompressedHistory(history),

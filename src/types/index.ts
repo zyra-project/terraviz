@@ -159,9 +159,12 @@ export interface ChatSession {
 /**
  * LLM provider configuration (stored in localStorage)
  */
+export type ReadingLevel = 'young-learner' | 'general' | 'in-depth' | 'expert'
+
 export interface DocentConfig {
-  apiUrl: string    // default: 'http://localhost:11434/v1'
-  apiKey: string    // default: '' (empty = no auth, for Ollama)
-  model: string     // default: 'llama3.2'
-  enabled: boolean  // default: true
+  apiUrl: string         // default: '/api'
+  apiKey: string         // default: '' (empty = no auth, for Ollama)
+  model: string          // default: 'llama-3.1-70b'
+  enabled: boolean       // default: true
+  readingLevel: ReadingLevel  // default: 'general'
 }

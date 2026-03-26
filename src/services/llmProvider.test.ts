@@ -8,6 +8,7 @@ const testConfig: DocentConfig = {
   apiKey: '',
   model: 'test-model',
   enabled: true,
+  readingLevel: 'general',
 }
 
 function makeSSEStream(lines: string[]): ReadableStream<Uint8Array> {

@@ -6,7 +6,7 @@
  * Persists conversation in sessionStorage, config in localStorage.
  */
 
-import type { ChatMessage, ChatAction, ChatSession, DocentConfig } from '../types'
+import type { ChatMessage, ChatAction, ChatSession, DocentConfig, ReadingLevel } from '../types'
 import type { Dataset } from '../types'
 import { escapeHtml, escapeAttr } from './browseUI'
 import { createMessageId } from '../services/docentEngine'
@@ -248,8 +248,10 @@ function populateSettings(): void {
   const urlInput = document.getElementById('chat-settings-url') as HTMLInputElement | null
   const keyInput = document.getElementById('chat-settings-key') as HTMLInputElement | null
   const enabledInput = document.getElementById('chat-settings-enabled') as HTMLInputElement | null
+  const readingLevelSelect = document.getElementById('chat-settings-reading-level') as HTMLSelectElement | null
   if (urlInput) urlInput.value = config.apiUrl
   if (keyInput) keyInput.value = config.apiKey
+  if (readingLevelSelect) readingLevelSelect.value = config.readingLevel
   if (enabledInput) enabledInput.checked = config.enabled
   // Seed the select with the saved model immediately, then refresh from API
   seedModelSelect(config.model)
@@ -308,11 +310,13 @@ function readSettingsForm(): DocentConfig {
   const urlInput = document.getElementById('chat-settings-url') as HTMLInputElement | null
   const keyInput = document.getElementById('chat-settings-key') as HTMLInputElement | null
   const modelSelect = document.getElementById('chat-settings-model') as HTMLSelectElement | null
+  const readingLevelSelect = document.getElementById('chat-settings-reading-level') as HTMLSelectElement | null
   const enabledInput = document.getElementById('chat-settings-enabled') as HTMLInputElement | null
   return {
     apiUrl: urlInput?.value.trim() || defaults.apiUrl,
     apiKey: keyInput?.value.trim() ?? '',
     model: modelSelect?.value.trim() || defaults.model,
+    readingLevel: (readingLevelSelect?.value as ReadingLevel) || defaults.readingLevel,
     enabled: enabledInput?.checked ?? defaults.enabled,
   }
 }
