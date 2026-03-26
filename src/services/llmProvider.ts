@@ -117,7 +117,13 @@ export async function* streamChat(
     clearTimeout(inactivityTimer)
     const text = await response.text().catch(() => '')
     logger.warn(`[LLM] API error ${response.status}:`, text)
-    yield { type: 'error', message: `API error: ${response.status}` }
+    // Extract error detail from JSON body if available
+    let detail = ''
+    try {
+      const parsed = JSON.parse(text)
+      if (parsed.error) detail = `: ${typeof parsed.error === 'string' ? parsed.error : parsed.error.message ?? ''}`
+    } catch { /* not JSON */ }
+    yield { type: 'error', message: `API error ${response.status}${detail}` }
     return
   }
 

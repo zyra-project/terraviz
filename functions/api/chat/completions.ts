@@ -55,8 +55,8 @@ const VISION_MODELS = new Set([
  */
 function extractImageAndNormalise(
   messages: ChatMessage[],
-): { image: number[] | null; textMessages: { role: string; content: string }[] } {
-  let image: number[] | null = null
+): { image: Uint8Array | null; textMessages: { role: string; content: string }[] } {
+  let image: Uint8Array | null = null
 
   const textMessages = messages.map(msg => {
     if (typeof msg.content === 'string') {
@@ -74,7 +74,7 @@ function extractImageAndNormalise(
         if (match) {
           try {
             const binary = atob(match[1])
-            const bytes = new Array<number>(binary.length)
+            const bytes = new Uint8Array(binary.length)
             for (let i = 0; i < binary.length; i++) {
               bytes[i] = binary.charCodeAt(i)
             }
@@ -227,27 +227,31 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
  * Vision models don't support streaming on Workers AI.
  * Call non-streaming, then wrap the result in SSE so the client's
  * streaming parser handles it transparently.
+ *
+ * Errors are returned as SSE text deltas (not HTTP errors) so the
+ * user can see what went wrong directly in the chat.
  */
 async function visionStreamShim(
   ai: Env['AI'],
   model: string,
   messages: { role: string; content: string }[],
   cors: Record<string, string>,
-  image: number[] | null,
+  image: Uint8Array | null,
 ): Promise<Response> {
   const inputs: Record<string, unknown> = { messages }
-  if (image) inputs.image = image
+  if (image) inputs.image = [...image]
 
   let text: string
   try {
     const result = (await ai.run(model, inputs)) as { response?: string }
     text = result.response ?? ''
+    if (!text) {
+      text = '[Vision model returned an empty response. Try rephrasing your question.]'
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Vision model error'
-    return new Response(JSON.stringify({ error: msg }), {
-      status: 502,
-      headers: { ...cors, 'Content-Type': 'application/json' },
-    })
+    // Return the error as chat text so the user can see what went wrong
+    text = `[Vision analysis failed: ${msg}]`
   }
 
   // Wrap the complete response as two SSE chunks (content + final) + [DONE]
@@ -369,10 +373,10 @@ async function nonStreamResponse(
   model: string,
   messages: { role: string; content: string }[],
   cors: Record<string, string>,
-  image?: number[] | null,
+  image?: Uint8Array | null,
 ): Promise<Response> {
   const inputs: Record<string, unknown> = { messages }
-  if (image) inputs.image = image
+  if (image) inputs.image = [...image]
 
   const result = (await ai.run(model, inputs)) as { response?: string }
 
