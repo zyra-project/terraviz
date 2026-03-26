@@ -84,8 +84,8 @@ export async function testConnection(config: DocentConfig): Promise<Availability
 /**
  * Validate dataset IDs found in LLM text against the catalog.
  * Strips invalid <<LOAD:ID>> markers and bare INTERNAL_... IDs,
- * logging warnings for hallucinated references. Returns the cleaned
- * text and the set of valid IDs found.
+ * returning the cleaned text and the sets of valid/invalid IDs.
+ * Pure function — does not log; callers decide when to log.
  */
 export function validateAndCleanText(
   text: string,
@@ -115,10 +115,6 @@ export function validateAndCleanText(
     }
   }
 
-  if (invalidIds.size > 0) {
-    logger.warn('[Docent] Stripped hallucinated dataset IDs:', Array.from(invalidIds))
-  }
-
   // Strip invalid <<LOAD:ID>> markers
   let cleanedText = text.replace(/<?<LOAD:([^>]+)>>?\n?/g, (match, id) => {
     const trimmedId = id.trim()
@@ -136,17 +132,15 @@ export function validateAndCleanText(
 }
 
 /**
- * Yield action chunks for every dataset the LLM referenced in its response,
- * covering both explicit <<LOAD:ID>> markers and bare INTERNAL_... IDs written
- * in prose (a common LLM slip despite prompt instructions).
+ * Yield action chunks for every valid dataset ID found in the text.
+ * Accepts pre-computed validIds from validateAndCleanText() to avoid
+ * duplicate work.
  */
-async function* extractActionsFromText(
-  text: string,
+async function* yieldActionsForValidIds(
+  validIds: Set<string>,
   datasets: Dataset[],
   yieldedIds: Set<string>,
 ): AsyncGenerator<DocentStreamChunk> {
-  const { validIds } = validateAndCleanText(text, datasets)
-
   for (const idStr of validIds) {
     const dataset = datasets.find(d => d.id === idStr)
     if (dataset && !yieldedIds.has(dataset.id)) {
@@ -161,6 +155,23 @@ async function* extractActionsFromText(
       }
     }
   }
+}
+
+/**
+ * Validate accumulated LLM text once, yield action chunks for valid IDs,
+ * and emit a rewrite chunk if any hallucinated IDs were stripped.
+ */
+async function* emitValidatedActions(
+  accumulatedText: string,
+  datasets: Dataset[],
+  yieldedIds: Set<string>,
+): AsyncGenerator<DocentStreamChunk> {
+  const { cleanedText, validIds, invalidIds } = validateAndCleanText(accumulatedText, datasets)
+  if (invalidIds.size > 0) {
+    logger.warn('[Docent] Stripped hallucinated dataset IDs:', Array.from(invalidIds))
+    yield { type: 'rewrite', text: cleanedText }
+  }
+  yield* yieldActionsForValidIds(validIds, datasets, yieldedIds)
 }
 
 export async function* processMessage(
@@ -289,11 +300,7 @@ export async function* processMessage(
 
           case 'done':
             if (llmProducedText) {
-              yield* extractActionsFromText(accumulatedText, datasets, yieldedIds)
-              const { cleanedText, invalidIds } = validateAndCleanText(accumulatedText, datasets)
-              if (invalidIds.size > 0) {
-                yield { type: 'rewrite', text: cleanedText }
-              }
+              yield* emitValidatedActions(accumulatedText, datasets, yieldedIds)
               yield { type: 'done', fallback: false }
               return
             }
@@ -302,11 +309,7 @@ export async function* processMessage(
       }
 
       if (llmProducedText) {
-        yield* extractActionsFromText(accumulatedText, datasets, yieldedIds)
-        const { cleanedText, invalidIds } = validateAndCleanText(accumulatedText, datasets)
-        if (invalidIds.size > 0) {
-          yield { type: 'rewrite', text: cleanedText }
-        }
+        yield* emitValidatedActions(accumulatedText, datasets, yieldedIds)
         yield { type: 'done', fallback: false }
         return
       }
