@@ -235,16 +235,22 @@ const acceptedLicenses = new Set<string>()
  */
 async function ensureLicenseAccepted(ai: Env['AI'], model: string): Promise<void> {
   if (acceptedLicenses.has(model)) return
+  // The error says "submit the prompt 'agree'" — try both prompt and messages formats
+  try {
+    await ai.run(model, { prompt: 'agree' })
+    acceptedLicenses.add(model)
+    return
+  } catch {
+    // prompt format didn't work, try messages format
+  }
   try {
     await ai.run(model, {
       messages: [{ role: 'user', content: 'agree' }],
     })
+    acceptedLicenses.add(model)
   } catch {
-    // Swallow errors — the agreement might already be in place,
-    // or the model may not require it. The actual request will
-    // surface any real errors.
+    // Neither worked — the actual request will surface the error
   }
-  acceptedLicenses.add(model)
 }
 
 /**
