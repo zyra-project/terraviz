@@ -585,13 +585,29 @@ describe('captureViewContext', () => {
     expect(captureViewContext()).toBe('')
   })
 
-  it('combines time and playback state', () => {
+  it('captures dataset title from info panel', () => {
+    document.body.innerHTML = '<span id="info-title">Sea Surface Temperature</span>'
+    const ctx = captureViewContext()
+    expect(ctx).toContain('Dataset loaded: Sea Surface Temperature')
+  })
+
+  it('captures lat/lon coordinates', () => {
+    document.body.innerHTML = '<div id="latlng-display">5.1° N, 139.9° E</div>'
+    const ctx = captureViewContext()
+    expect(ctx).toContain('Globe center: 5.1° N, 139.9° E')
+  })
+
+  it('combines all context fields', () => {
     document.body.innerHTML = `
-      <span id="time-display">Mar 2023</span>
+      <span id="info-title">Atmospheric Chemistry</span>
+      <div id="latlng-display">9.5° N, 137.7° E</div>
+      <span id="time-display">Aug 17, 2006</span>
       <button id="play-btn" aria-label="Pause"></button>
     `
     const ctx = captureViewContext()
-    expect(ctx).toContain('Time shown: Mar 2023')
+    expect(ctx).toContain('Dataset loaded: Atmospheric Chemistry')
+    expect(ctx).toContain('Globe center: 9.5° N, 137.7° E')
+    expect(ctx).toContain('Time shown: Aug 17, 2006')
     expect(ctx).toContain('Playback: playing')
     expect(ctx).toMatch(/\.$/)
   })

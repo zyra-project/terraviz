@@ -284,7 +284,7 @@ describe('buildSystemPromptForTurn — vision mode', () => {
     const prompt = buildSystemPromptForTurn(datasets, null, 0, 'general', true)
     expect(prompt).toContain('Vision Analysis Mode')
     expect(prompt).toContain('screenshot')
-    expect(prompt).toContain('SEE what is displayed')
+    expect(prompt).toContain('loaded dataset')
   })
 
   it('omits vision instructions when visionActive is false', () => {

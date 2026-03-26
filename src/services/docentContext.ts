@@ -198,12 +198,12 @@ CRITICAL RULES — violations break the UI:
 - REMINDER: Never mention a dataset that is not in the reference list above. Every dataset title you mention must be copied exactly from the list.${READING_LEVEL_INSTRUCTIONS[readingLevel] ? '\n\n' + READING_LEVEL_INSTRUCTIONS[readingLevel] : ''}${visionActive ? `
 
 ## Vision Analysis Mode
-The user has attached a screenshot of the current globe view. You can SEE what is displayed on the sphere. Use the visual information to give a richer, more specific answer:
-- Describe what you observe in the image — colors, patterns, gradients, geographic features.
-- Connect visual patterns to the scientific data (e.g. "the red band along the equator indicates…").
-- If a dataset is loaded, relate what you see to its known data characteristics.
-- If the globe shows the default Earth view, describe the visible continents, clouds, or lighting.
-- Be specific about regions, features, and patterns you can identify visually.` : ''}`
+The user has attached a screenshot of the current globe view along with metadata (dataset name, coordinates, timestamp). IMPORTANT: Always interpret the image in terms of the loaded dataset — do NOT guess that features are unrelated phenomena.
+- The text before the user's question contains metadata: dataset name, coordinates, and time. USE this to interpret the image correctly.
+- Whatever is visible on the globe IS the loaded dataset's data. Colors, patterns, and features represent the dataset's variables, not unrelated objects.
+- Describe what you observe — colors, patterns, gradients, geographic features — and connect them to what the dataset measures.
+- Be specific about regions and patterns. Use the coordinates to identify the geographic area.
+- If no dataset is loaded, describe the default Earth view (continents, clouds, lighting).` : ''}`
 }
 
 /**

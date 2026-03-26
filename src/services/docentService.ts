@@ -55,10 +55,26 @@ export function captureGlobeScreenshot(): string | null {
 
 /**
  * Read overlay context that the canvas screenshot doesn't capture
- * (time label, playback state, etc.) so the LLM gets the full picture.
+ * (coordinates, time label, dataset title, playback state, etc.)
+ * so the LLM gets the full picture.
  */
 export function captureViewContext(): string {
   const parts: string[] = []
+
+  // Dataset title from the info panel header
+  const titleEl = document.getElementById('info-title')
+  const titleText = titleEl?.textContent?.trim()
+  if (titleText) {
+    parts.push(`Dataset loaded: ${titleText}`)
+  }
+
+  // Lat/lon coordinates shown on the globe overlay
+  const coordEl = document.getElementById('latlng-display')
+  const coordText = coordEl?.textContent?.trim()
+  if (coordText) {
+    parts.push(`Globe center: ${coordText}`)
+  }
+
   const timeEl = document.getElementById('time-display')
   const timeText = timeEl?.textContent?.trim()
   if (timeText && timeText !== '--') {
