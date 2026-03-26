@@ -300,6 +300,9 @@ export class SphereRenderer {
     }
 
     this.renderer.render(this.scene, this.camera)
+
+    // Expose camera distance for vision context (read by captureViewContext)
+    this.renderer.domElement.dataset.cameraZ = this.camera.position.z.toFixed(2)
   }
 
   // --- Disposal ---

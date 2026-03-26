@@ -85,6 +85,17 @@ export function captureViewContext(): string {
     const isPlaying = playBtn.getAttribute('aria-label')?.toLowerCase().includes('pause')
     parts.push(isPlaying ? 'Playback: playing' : 'Playback: paused')
   }
+
+  // Approximate viewing altitude from camera distance
+  // Sphere radius = 1.0 in scene units ≈ Earth radius (6,371 km)
+  const canvas = document.getElementById('globe-canvas') as HTMLCanvasElement | null
+  const cameraZ = canvas?.dataset.cameraZ ? parseFloat(canvas.dataset.cameraZ) : null
+  if (cameraZ !== null && !isNaN(cameraZ)) {
+    const EARTH_RADIUS_KM = 6371
+    const altitudeKm = Math.round((cameraZ - 1.0) * EARTH_RADIUS_KM)
+    parts.push(`Viewing altitude: ~${altitudeKm.toLocaleString()} km`)
+  }
+
   return parts.length > 0 ? parts.join('. ') + '.' : ''
 }
 
@@ -311,9 +322,25 @@ export async function* processMessage(
       const systemPrompt = buildSystemPromptForTurn(datasets, currentDataset, turnIndex, cfg.readingLevel, visionActive)
 
       // Build the user message — multimodal if vision is active
-      const visionText = visionActive && viewContext
-        ? `[${viewContext}]\n${input}`
-        : input
+      // Inject dataset context directly into the user text so the small
+      // vision model can't miss it (system prompt context often gets lost)
+      let visionPrefix = ''
+      if (visionActive) {
+        const ctxParts: string[] = []
+        if (currentDataset) {
+          ctxParts.push(`DATASET: "${currentDataset.title}"`)
+          const desc = currentDataset.enriched?.description ?? currentDataset.abstractTxt
+          if (desc) {
+            const short = desc.length > 200 ? desc.substring(0, 200) + '…' : desc
+            ctxParts.push(`ABOUT: ${short}`)
+          }
+        }
+        if (viewContext) ctxParts.push(viewContext)
+        if (ctxParts.length > 0) {
+          visionPrefix = `[This image is a scientific data visualization on a 3D globe, NOT a photograph. ${ctxParts.join('. ')}]\n`
+        }
+      }
+      const visionText = visionPrefix + input
       const userMessage: LLMMessage = visionActive
         ? {
             role: 'user',

@@ -198,12 +198,11 @@ CRITICAL RULES — violations break the UI:
 - REMINDER: Never mention a dataset that is not in the reference list above. Every dataset title you mention must be copied exactly from the list.${READING_LEVEL_INSTRUCTIONS[readingLevel] ? '\n\n' + READING_LEVEL_INSTRUCTIONS[readingLevel] : ''}${visionActive ? `
 
 ## Vision Analysis Mode
-The user has attached a screenshot of the current globe view along with metadata (dataset name, coordinates, timestamp). IMPORTANT: Always interpret the image in terms of the loaded dataset — do NOT guess that features are unrelated phenomena.
-- The text before the user's question contains metadata: dataset name, coordinates, and time. USE this to interpret the image correctly.
-- Whatever is visible on the globe IS the loaded dataset's data. Colors, patterns, and features represent the dataset's variables, not unrelated objects.
-- Describe what you observe — colors, patterns, gradients, geographic features — and connect them to what the dataset measures.
-- Be specific about regions and patterns. Use the coordinates to identify the geographic area.
-- If no dataset is loaded, describe the default Earth view (continents, clouds, lighting).` : ''}`
+CRITICAL: The attached image is a SCIENTIFIC DATA VISUALIZATION rendered on a 3D globe — it is NOT a real photograph of Earth. Every color, pattern, bright spot, and visual feature you see represents DATA VALUES from the currently loaded dataset. Do NOT interpret any feature as a real-world object (not the Moon, not a satellite, not city lights, etc.).
+- The user's message starts with metadata in brackets: dataset name, description, coordinates, and time. READ this carefully before answering.
+- Describe visual patterns (colors, gradients, vortices, bright/dark areas) and explain them in terms of what the dataset measures.
+- Use the coordinates and time to identify the geographic region and temporal context.
+- If no dataset is loaded, describe the default Earth view.` : ''}`
 }
 
 /**

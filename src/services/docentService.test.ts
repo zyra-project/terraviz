@@ -611,6 +611,17 @@ describe('captureViewContext', () => {
     expect(ctx).toContain('Playback: playing')
     expect(ctx).toMatch(/\.$/)
   })
+
+  it('captures viewing altitude from camera distance', () => {
+    const canvas = document.createElement('canvas')
+    canvas.id = 'globe-canvas'
+    canvas.dataset.cameraZ = '1.80'  // default camera Z
+    document.body.appendChild(canvas)
+
+    const ctx = captureViewContext()
+    // (1.80 - 1.0) * 6371 = ~5,097 km
+    expect(ctx).toContain('Viewing altitude: ~5,097 km')
+  })
 })
 
 describe('processMessage — vision mode', () => {
