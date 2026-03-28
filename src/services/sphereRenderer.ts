@@ -161,6 +161,11 @@ export class SphereRenderer {
     return this.inputHandler.toggleAutoRotate()
   }
 
+  /** Smoothly animate the globe to center on a geographic location. */
+  flyTo(lat: number, lon: number, altitude?: number): Promise<void> {
+    return this.inputHandler.flyTo(lat, lon, altitude)
+  }
+
   // --- Sphere management ---
 
   /** Create (or replace) the sphere mesh with the given geometry options and optional texture. */

@@ -300,6 +300,70 @@ function parseSRTTime(t: string): number {
   return parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseInt(m[3]) + parseInt(m[4]) / 1000
 }
 
+// --- Time seeking ---
+
+/**
+ * Seek a video dataset to a specific date within its time range.
+ * Returns a result indicating success/failure with a human-readable message.
+ */
+export function seekToDate(
+  isoDate: string,
+  hlsService: HLSService | null,
+  appState: AppState,
+  state: PlaybackState,
+): { success: boolean; message: string } {
+  if (!hlsService) {
+    return { success: false, message: 'No video dataset loaded' }
+  }
+
+  const video = hlsService.getVideo()
+  if (!video || !video.duration) {
+    return { success: false, message: 'Video not ready' }
+  }
+
+  const dataset = appState.currentDataset
+  if (!dataset?.startTime || !dataset?.endTime) {
+    return { success: false, message: 'Dataset has no time range' }
+  }
+
+  const targetDate = new Date(isoDate)
+  if (isNaN(targetDate.getTime())) {
+    return { success: false, message: 'Invalid date format' }
+  }
+
+  const start = new Date(dataset.startTime).getTime()
+  const end = new Date(dataset.endTime).getTime()
+  const totalMs = end - start
+  if (totalMs <= 0) {
+    return { success: false, message: 'Dataset has invalid time range' }
+  }
+
+  // Check if date falls outside the dataset's time range
+  const targetMs = targetDate.getTime()
+  if (targetMs < start || targetMs > end) {
+    const startStr = dataset.startTime!.split('T')[0]
+    const endStr = dataset.endTime!.split('T')[0]
+    return {
+      success: false,
+      message: `Date ${isoDate} is outside this dataset's range (${startStr} to ${endStr})`,
+    }
+  }
+
+  const fraction = (targetMs - start) / totalMs
+
+  video.currentTime = fraction * video.duration
+  state.scrubbing = true
+
+  // Pause if playing so user can inspect the moment
+  if (!video.paused) {
+    hlsService.pause()
+    appState.isPlaying = false
+    updatePlayButton(true)
+  }
+
+  return { success: true, message: `Seeking to ${isoDate}` }
+}
+
 // --- Info panel positioning ---
 
 /**

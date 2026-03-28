@@ -10,6 +10,8 @@ import {
   buildCompressedHistory,
   summarizeOlderMessages,
   getLoadDatasetTool,
+  getFlyToTool,
+  getSetTimeTool,
 } from './docentContext'
 
 function makeDataset(overrides: Partial<Dataset> = {}): Dataset {
@@ -276,6 +278,38 @@ describe('getLoadDatasetTool', () => {
     expect(tool.type).toBe('function')
     expect(tool.function.name).toBe('load_dataset')
     expect(tool.function.parameters).toBeDefined()
+  })
+})
+
+describe('getFlyToTool', () => {
+  it('returns a valid tool definition with lat and lon required', () => {
+    const tool = getFlyToTool()
+    expect(tool.type).toBe('function')
+    expect(tool.function.name).toBe('fly_to')
+    expect(tool.function.parameters.required).toContain('lat')
+    expect(tool.function.parameters.required).toContain('lon')
+    expect(tool.function.parameters.properties).toHaveProperty('altitude')
+    // altitude should not be required
+    expect(tool.function.parameters.required).not.toContain('altitude')
+  })
+})
+
+describe('getSetTimeTool', () => {
+  it('returns a valid tool definition with date required', () => {
+    const tool = getSetTimeTool()
+    expect(tool.type).toBe('function')
+    expect(tool.function.name).toBe('set_time')
+    expect(tool.function.parameters.required).toContain('date')
+    expect(tool.function.parameters.properties).toHaveProperty('date')
+  })
+})
+
+describe('buildSystemPromptForTurn — globe control tools', () => {
+  it('includes fly_to and set_time instructions in system prompt', () => {
+    const prompt = buildSystemPromptForTurn(datasets, null, 0)
+    expect(prompt).toContain('fly_to')
+    expect(prompt).toContain('set_time')
+    expect(prompt).toContain('Globe Control Markers')
   })
 })
 

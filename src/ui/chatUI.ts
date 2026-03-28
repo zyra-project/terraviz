@@ -21,6 +21,8 @@ const MAX_PERSISTED_MESSAGES = 100
 
 export interface ChatCallbacks {
   onLoadDataset: (id: string) => void
+  onFlyTo: (lat: number, lon: number, altitude?: number) => void
+  onSetTime: (isoDate: string) => { success: boolean; message: string }
   getDatasets: () => Dataset[]
   getCurrentDataset: () => Dataset | null
   announce: (message: string) => void
@@ -33,6 +35,9 @@ let isOpen = false
 let isStreaming = false
 let settingsOpen = false
 let datasetPromptTimer: ReturnType<typeof setTimeout> | null = null
+
+/** Globe-control actions deferred until a load-dataset action in the same message completes. */
+let pendingGlobeActions: ChatAction[] = []
 
 /**
  * Initialize the chat UI with callbacks and restore session.
@@ -129,6 +134,40 @@ export function clearChat(): void {
   messages = []
   saveSession()
   renderMessages()
+}
+
+// --- Globe control execution ---
+
+/** Execute a fly-to or set-time action immediately. */
+function executeGlobeAction(action: ChatAction): void {
+  if (!callbacks) return
+  if (action.type === 'fly-to') {
+    callbacks.onFlyTo(action.lat, action.lon, action.altitude)
+  } else if (action.type === 'set-time') {
+    const result = callbacks.onSetTime(action.isoDate)
+    if (!result.success) {
+      callbacks.announce(result.message)
+      // Update the status indicator in the DOM to show the error
+      const statusEls = document.querySelectorAll('.chat-action-status')
+      for (const el of statusEls) {
+        if (el.textContent?.includes(action.isoDate)) {
+          el.textContent = result.message
+          el.classList.add('chat-action-status-err')
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Flush any pending globe-control actions that were deferred while waiting
+ * for a dataset to load. Call this after a dataset finishes loading from chat.
+ */
+export function flushPendingGlobeActions(): void {
+  const actions = pendingGlobeActions.splice(0)
+  for (const action of actions) {
+    executeGlobeAction(action)
+  }
 }
 
 // --- Session persistence ---
@@ -456,6 +495,7 @@ async function handleSend(): Promise<void> {
     )
 
     let firstChunk = true
+    pendingGlobeActions = [] // Clear any stale pending actions
     for await (const chunk of stream) {
       if (firstChunk && chunk.type !== 'done') {
         hideTyping()
@@ -471,16 +511,24 @@ async function handleSend(): Promise<void> {
         case 'action':
           if (!docentMsg.actions) docentMsg.actions = []
           docentMsg.actions.push(chunk.action)
+          // Globe-control actions are always deferred during streaming;
+          // flushed at 'done' (immediate) or after dataset loads (deferred)
+          if (chunk.action.type === 'fly-to' || chunk.action.type === 'set-time') {
+            pendingGlobeActions.push(chunk.action)
+          }
           updateStreamingMessage(docentMsg)
           scrollToBottom()
           break
 
         case 'auto-load': {
           // Auto-load the top result immediately
-          callbacks.onLoadDataset(chunk.action.datasetId)
-          if (!docentMsg.text) {
-            const altHint = chunk.alternatives.length > 0 ? ' Here are some alternatives if this isn\'t quite right:' : ''
-            docentMsg.text = `I've loaded **${chunk.action.datasetTitle}** — that's your closest match.${altHint}`
+          const autoAction = chunk.action
+          if (autoAction.type === 'load-dataset') {
+            callbacks.onLoadDataset(autoAction.datasetId)
+            if (!docentMsg.text) {
+              const altHint = chunk.alternatives.length > 0 ? ' Here are some alternatives if this isn\'t quite right:' : ''
+              docentMsg.text = `I've loaded **${autoAction.datasetTitle}** — that's your closest match.${altHint}`
+            }
           }
           if (!docentMsg.actions) docentMsg.actions = []
           for (const alt of chunk.alternatives) {
@@ -497,7 +545,7 @@ async function handleSend(): Promise<void> {
           updateStreamingMessage(docentMsg)
           break
 
-        case 'done':
+        case 'done': {
           // Replace <<LOAD:...>> markers with inline placeholders so buttons
           // render at the original location in the text, not grouped at the bottom.
           if (docentMsg.text) {
@@ -514,7 +562,18 @@ async function handleSend(): Promise<void> {
             docentMsg.text += `\n\n*${hint}*`
             updateStreamingMessage(docentMsg)
           }
+          // Flush globe-control actions immediately if:
+          // - no load-dataset action in this message, OR
+          // - the only load-dataset actions reference the already-loaded dataset
+          const loadActions = docentMsg.actions?.filter(a => a.type === 'load-dataset') ?? []
+          const currentDataset = callbacks?.getCurrentDataset()
+          const allAlreadyLoaded = loadActions.length > 0
+            && loadActions.every(a => a.type === 'load-dataset' && a.datasetId === currentDataset?.id)
+          if (loadActions.length === 0 || allAlreadyLoaded) {
+            flushPendingGlobeActions()
+          }
           break
+        }
       }
     }
   } catch {
@@ -583,7 +642,7 @@ function renderMessages(): void {
 function renderMessage(msg: ChatMessage): string {
   const roleClass = msg.role === 'user' ? 'chat-msg-user' : 'chat-msg-docent'
   const { html: textHtml, inlinedIds } = renderChatText(msg.text ?? '', msg.actions)
-  const remaining = msg.actions?.filter(a => !inlinedIds.has(a.datasetId))
+  const remaining = msg.actions?.filter(a => a.type !== 'load-dataset' || !inlinedIds.has(a.datasetId))
   const actionsHtml = remaining?.length ? renderActions(remaining) : ''
   return `<div class="chat-msg ${roleClass}" data-msg-id="${escapeAttr(msg.id)}">
     <div class="chat-msg-text">${textHtml}</div>
@@ -611,7 +670,7 @@ function updateStreamingMessage(msg: ChatMessage): void {
       textEl.innerHTML = html
     }
     // Update remaining (non-inlined) actions at the bottom
-    const remaining = msg.actions?.filter(a => !inlinedIds.has(a.datasetId))
+    const remaining = msg.actions?.filter(a => a.type !== 'load-dataset' || !inlinedIds.has(a.datasetId))
     const existingActions = el.querySelector('.chat-actions')
     if (remaining?.length) {
       const actionsHtml = renderActions(remaining)
@@ -635,16 +694,27 @@ function renderChatText(
   text: string,
   actions?: ChatAction[],
 ): { html: string; inlinedIds: Set<string> } {
-  // Strip raw <<LOAD:...>> markers that appear during streaming (before 'done')
-  const clean = text.replace(/<?<LOAD:[^>]+>>?\n?/g, '')
+  // Strip raw <<LOAD:...>>, <<FLY:...>>, <<TIME:...>> markers that appear during streaming
+  let clean = text.replace(/<?<LOAD:[^>]+>>?\n?/g, '')
+  clean = clean.replace(/<?<FLY:[^>]+>>?\n?/g, '')
+  clean = clean.replace(/<?<TIME:[^>]+>>?\n?/g, '')
+  // Strip bare fly_to/set_time text patterns (LLM fallback)
+  clean = clean.replace(/^.*\bfly_to\s*[:(\s]\s*[-\d.,\s]+\)?\s*$/gim, '')
+  clean = clean.replace(/^.*\bset_time\s*[:(\s]\s*"?[^")\n]*"?\s*\)?\s*$/gim, '')
+  clean = clean.replace(/\n{3,}/g, '\n\n')
   let html = renderMarkdownLite(escapeHtml(clean))
 
   // Replace [[LOAD:ID]] placeholders (set by 'done') with inline action buttons
   const inlinedIds = new Set<string>()
+  const currentDatasetId = callbacks?.getCurrentDataset()?.id
   html = html.replace(/\[\[LOAD:([^\]]+)\]\]/g, (_, id) => {
-    const action = actions?.find(a => a.datasetId === id)
-    if (!action) return ''
+    const action = actions?.find(a => a.type === 'load-dataset' && a.datasetId === id)
+    if (!action || action.type !== 'load-dataset') return ''
     inlinedIds.add(id)
+    // Show non-interactive "Loaded" badge if this dataset is already on the globe
+    if (action.datasetId === currentDatasetId) {
+      return `<span class="chat-action-btn chat-action-inline chat-action-loaded"><span class="chat-action-title">${escapeHtml(action.datasetTitle)}</span> <span class="chat-action-load">Loaded &#x2714;</span></span>`
+    }
     return `<button class="chat-action-btn chat-action-inline" data-dataset-id="${escapeAttr(action.datasetId)}" aria-label="Load ${escapeAttr(action.datasetTitle)}"><span class="chat-action-title">${escapeHtml(action.datasetTitle)}</span> <span class="chat-action-load">Load &#x27A4;</span></button>`
   })
 
@@ -653,19 +723,33 @@ function renderChatText(
 
 /** Render a group of dataset action buttons as an HTML string. */
 function renderActions(actions: ChatAction[]): string {
-  const buttons = actions.map(a => {
+  const currentDatasetId = callbacks?.getCurrentDataset()?.id
+  const items = actions.map(a => {
     if (a.type === 'load-dataset') {
+      // Show non-interactive "Loaded" badge if this dataset is already on the globe
+      if (a.datasetId === currentDatasetId) {
+        return `<span class="chat-action-btn chat-action-loaded"><span class="chat-action-title">${escapeHtml(a.datasetTitle)}</span> <span class="chat-action-load">Loaded &#x2714;</span></span>`
+      }
       return `<button class="chat-action-btn" data-dataset-id="${escapeAttr(a.datasetId)}" aria-label="Load ${escapeAttr(a.datasetTitle)}">
         <span class="chat-action-title">${escapeHtml(a.datasetTitle)}</span>
         <span class="chat-action-load">Load &#x27A4;</span>
       </button>`
     }
+    if (a.type === 'fly-to') {
+      const latLabel = Math.abs(a.lat).toFixed(1) + '\u00B0' + (a.lat >= 0 ? 'N' : 'S')
+      const lonLabel = Math.abs(a.lon).toFixed(1) + '\u00B0' + (a.lon >= 0 ? 'E' : 'W')
+      return `<span class="chat-action-status" aria-label="Flying to ${latLabel}, ${lonLabel}">Flying to ${escapeHtml(latLabel)}, ${escapeHtml(lonLabel)}</span>`
+    }
+    if (a.type === 'set-time') {
+      return `<span class="chat-action-status" aria-label="Seeking to ${escapeAttr(a.isoDate)}">Seeking to ${escapeHtml(a.isoDate)}</span>`
+    }
     return ''
   }).join('')
-  const browseFooter = actions.length >= 3 && callbacks?.onOpenBrowse
+  const loadActions = actions.filter(a => a.type === 'load-dataset')
+  const browseFooter = loadActions.length >= 3 && callbacks?.onOpenBrowse
     ? `<button class="chat-browse-link">Compare these side by side in Browse &#x2192;</button>`
     : ''
-  return `<div class="chat-actions">${buttons}${browseFooter}</div>`
+  return `<div class="chat-actions">${items}${browseFooter}</div>`
 }
 
 /** Attach click handlers to action buttons within a rendered message container. */

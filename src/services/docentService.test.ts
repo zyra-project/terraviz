@@ -266,7 +266,7 @@ describe('processMessage — auto-load', () => {
 
     const autoLoad = chunks.find(c => c.type === 'auto-load')
     if (autoLoad && autoLoad.type === 'auto-load') {
-      expect(autoLoad.action.datasetId).toBe('TEST_001')
+      expect(autoLoad.action.type === 'load-dataset' && autoLoad.action.datasetId).toBe('TEST_001')
       expect(autoLoad.alternatives).toBeDefined()
     }
     // Whether or not auto-load fires depends on score thresholds,
@@ -393,6 +393,96 @@ describe('validateAndCleanText', () => {
     const { cleanedText, invalidIds } = validateAndCleanText(text, datasets)
     expect(cleanedText).toBe(text)
     expect(invalidIds.size).toBe(0)
+  })
+
+  it('extracts <<FLY:lat,lon>> markers', () => {
+    const text = 'Let me show you the Gulf.\n<<FLY:29.0,-89.0>>\nHere it is.'
+    const { cleanedText, globeActions } = validateAndCleanText(text, datasets)
+    expect(globeActions).toHaveLength(1)
+    expect(globeActions[0].type).toBe('fly-to')
+    if (globeActions[0].type === 'fly-to') {
+      expect(globeActions[0].lat).toBeCloseTo(29.0)
+      expect(globeActions[0].lon).toBeCloseTo(-89.0)
+      expect(globeActions[0].altitude).toBeUndefined()
+    }
+    expect(cleanedText).not.toContain('FLY')
+  })
+
+  it('extracts <<FLY:lat,lon,alt>> markers with altitude', () => {
+    const text = '<<FLY:29.0,-89.0,3000>>'
+    const { globeActions } = validateAndCleanText(text, datasets)
+    expect(globeActions).toHaveLength(1)
+    if (globeActions[0].type === 'fly-to') {
+      expect(globeActions[0].altitude).toBeCloseTo(3000)
+    }
+  })
+
+  it('extracts <<TIME:date>> markers', () => {
+    const text = 'During the storm.\n<<TIME:2005-08-29>>\nThe surge was devastating.'
+    const { cleanedText, globeActions } = validateAndCleanText(text, datasets)
+    expect(globeActions).toHaveLength(1)
+    expect(globeActions[0].type).toBe('set-time')
+    if (globeActions[0].type === 'set-time') {
+      expect(globeActions[0].isoDate).toBe('2005-08-29')
+    }
+    expect(cleanedText).not.toContain('TIME')
+  })
+
+  it('parses bare fly_to: text as fallback', () => {
+    const text = 'To get a closer look.\nfly_to: 29.0, -89.0, 3000\nHere we go.'
+    const { cleanedText, globeActions } = validateAndCleanText(text, datasets)
+    expect(globeActions).toHaveLength(1)
+    if (globeActions[0].type === 'fly-to') {
+      expect(globeActions[0].lat).toBeCloseTo(29.0)
+      expect(globeActions[0].lon).toBeCloseTo(-89.0)
+      expect(globeActions[0].altitude).toBeCloseTo(3000)
+    }
+    expect(cleanedText).not.toContain('fly_to')
+  })
+
+  it('parses bare set_time: text as fallback', () => {
+    const text = 'Katrina made landfall.\nset_time: 2005-08-29\nThe flooding began.'
+    const { cleanedText, globeActions } = validateAndCleanText(text, datasets)
+    expect(globeActions).toHaveLength(1)
+    if (globeActions[0].type === 'set-time') {
+      expect(globeActions[0].isoDate).toBe('2005-08-29')
+    }
+    expect(cleanedText).not.toContain('set_time')
+  })
+
+  it('extracts multiple globe actions from same text', () => {
+    const text = '<<LOAD:TEST_001>>\n<<FLY:29.0,-89.0,3000>>\n<<TIME:2005-08-29>>'
+    const { globeActions, validIds } = validateAndCleanText(text, datasets)
+    expect(validIds.has('TEST_001')).toBe(true)
+    expect(globeActions).toHaveLength(2)
+    expect(globeActions[0].type).toBe('fly-to')
+    expect(globeActions[1].type).toBe('set-time')
+  })
+
+  it('detects dataset title on its own line as fallback when marker is missing', () => {
+    const text = 'Here is a great dataset.\nSea Surface Temperature\nIt shows ocean temps globally.'
+    const { validIds } = validateAndCleanText(text, datasets)
+    expect(validIds.has('TEST_001')).toBe(true)
+  })
+
+  it('does not match dataset title embedded in a sentence', () => {
+    const text = 'The Sea Surface Temperature dataset shows ocean warming patterns.'
+    const { validIds } = validateAndCleanText(text, datasets)
+    expect(validIds.has('TEST_001')).toBe(false)
+  })
+
+  it('does not false-positive on short titles', () => {
+    const shortDs = [makeDataset({ id: 'SHORT_1', title: 'Ice' })]
+    const text = 'Ice\nThe ice caps are melting.'
+    const { validIds } = validateAndCleanText(text, shortDs)
+    expect(validIds.has('SHORT_1')).toBe(false)
+  })
+
+  it('does not duplicate IDs already found via markers', () => {
+    const text = 'Check this: <<LOAD:TEST_001>>\nSea Surface Temperature'
+    const { validIds } = validateAndCleanText(text, datasets)
+    expect(validIds.has('TEST_001')).toBe(true)
+    expect(validIds.size).toBe(1)
   })
 })
 

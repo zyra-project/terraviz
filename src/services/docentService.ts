@@ -7,7 +7,7 @@
 
 import type { Dataset, ChatMessage, ChatAction, DocentConfig, LegendCache } from '../types'
 import { streamChat, checkAvailability, type AvailabilityResult, type LLMMessage, type LLMContentPart } from './llmProvider'
-import { buildSystemPromptForTurn, buildCompressedHistory, getLoadDatasetTool } from './docentContext'
+import { buildSystemPromptForTurn, buildCompressedHistory, getLoadDatasetTool, getFlyToTool, getSetTimeTool } from './docentContext'
 import { parseIntent, generateResponse, searchDatasets, evaluateAutoLoad } from './docentEngine'
 import { logger } from '../utils/logger'
 
@@ -301,8 +301,15 @@ export async function testConnection(config: DocentConfig): Promise<Availability
  * then streams LLM text in parallel. Falls back to local-only if LLM is unavailable.
  */
 
+/** A fly-to or set-time action extracted from inline markers in LLM text. */
+export type ExtractedGlobeAction =
+  | { type: 'fly-to'; lat: number; lon: number; altitude?: number }
+  | { type: 'set-time'; isoDate: string }
+
 /**
  * Validate dataset IDs found in LLM text against the catalog.
+ * Also extracts <<FLY:...>> and <<TIME:...>> inline markers
+ * (and bare `fly_to:` / `set_time:` fallback patterns).
  * Strips invalid <<LOAD:ID>> markers and bare INTERNAL_... IDs,
  * returning the cleaned text and the sets of valid/invalid IDs.
  * Pure function — does not log; callers decide when to log.
@@ -310,9 +317,10 @@ export async function testConnection(config: DocentConfig): Promise<Availability
 export function validateAndCleanText(
   text: string,
   datasets: Dataset[],
-): { cleanedText: string; validIds: Set<string>; invalidIds: Set<string> } {
+): { cleanedText: string; validIds: Set<string>; invalidIds: Set<string>; globeActions: ExtractedGlobeAction[] } {
   const validIds = new Set<string>()
   const invalidIds = new Set<string>()
+  const globeActions: ExtractedGlobeAction[] = []
   const datasetIdSet = new Set(datasets.map(d => d.id))
 
   // Collect all referenced IDs for validation
@@ -335,6 +343,63 @@ export function validateAndCleanText(
     }
   }
 
+  // Fallback: detect dataset titles that appear on their own line without a marker.
+  // Small LLMs often write the title on its own line instead of using <<LOAD:...>>.
+  // Only match titles on their own line (not embedded in sentences) to avoid
+  // false positives when the LLM merely discusses a dataset in prose.
+  const alreadyReferencedIds = new Set([...validIds, ...invalidIds])
+  const lines = text.split('\n')
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.length < 10) continue
+    for (const d of datasets) {
+      if (alreadyReferencedIds.has(d.id)) continue
+      if (d.title.length < 10) continue
+      // Title must be the entire line (possibly with minor surrounding text like "- " or ":")
+      const stripped = trimmed.replace(/^[-•*]\s*/, '').replace(/:?\s*$/, '')
+      if (stripped.toLowerCase() === d.title.toLowerCase()) {
+        validIds.add(d.id)
+        alreadyReferencedIds.add(d.id)
+      }
+    }
+  }
+
+  // Extract <<FLY:lat,lon[,alt]>> markers
+  for (const match of text.matchAll(/<?<FLY:\s*([-\d.]+)\s*,\s*([-\d.]+)(?:\s*,\s*([-\d.]+))?\s*>>?\n?/g)) {
+    const lat = parseFloat(match[1])
+    const lon = parseFloat(match[2])
+    const alt = match[3] ? parseFloat(match[3]) : undefined
+    if (!isNaN(lat) && !isNaN(lon)) {
+      globeActions.push({ type: 'fly-to', lat, lon, altitude: alt })
+    }
+  }
+
+  // Extract <<TIME:date>> markers
+  for (const match of text.matchAll(/<?<TIME:\s*([^>]+?)\s*>>?\n?/g)) {
+    const isoDate = match[1].trim()
+    if (isoDate && !isNaN(new Date(isoDate).getTime())) {
+      globeActions.push({ type: 'set-time', isoDate })
+    }
+  }
+
+  // Fallback: parse bare `fly_to: lat, lon, alt` patterns (LLMs that ignore marker instructions)
+  for (const match of text.matchAll(/\bfly_to\s*[:(\s]\s*([-\d.]+)\s*,\s*([-\d.]+)(?:\s*,\s*([-\d.]+))?\s*\)?/gi)) {
+    const lat = parseFloat(match[1])
+    const lon = parseFloat(match[2])
+    const alt = match[3] ? parseFloat(match[3]) : undefined
+    if (!isNaN(lat) && !isNaN(lon)) {
+      globeActions.push({ type: 'fly-to', lat, lon, altitude: alt })
+    }
+  }
+
+  // Fallback: parse bare `set_time: date` patterns
+  for (const match of text.matchAll(/\bset_time\s*[:(\s]\s*"?(\d{4}-\d{2}-\d{2}(?:T[^\s")\n]*)?)"?\s*\)?/gi)) {
+    const isoDate = match[1].trim()
+    if (isoDate && !isNaN(new Date(isoDate).getTime())) {
+      globeActions.push({ type: 'set-time', isoDate })
+    }
+  }
+
   // Strip invalid <<LOAD:ID>> markers
   let cleanedText = text.replace(/<?<LOAD:([^>]+)>>?\n?/g, (match, id) => {
     const trimmedId = id.trim()
@@ -348,7 +413,18 @@ export function validateAndCleanText(
     return id
   })
 
-  return { cleanedText, validIds, invalidIds }
+  // Strip <<FLY:...>> and <<TIME:...>> markers from displayed text
+  cleanedText = cleanedText.replace(/<?<FLY:[^>]+>>?\n?/g, '')
+  cleanedText = cleanedText.replace(/<?<TIME:[^>]+>>?\n?/g, '')
+
+  // Strip bare fly_to/set_time text patterns (entire line)
+  cleanedText = cleanedText.replace(/^.*\bfly_to\s*[:(\s]\s*[-\d.,\s]+\)?\s*$/gim, '')
+  cleanedText = cleanedText.replace(/^.*\bset_time\s*[:(\s]\s*"?[^")\n]*"?\s*\)?\s*$/gim, '')
+
+  // Clean up excess blank lines left by stripped markers
+  cleanedText = cleanedText.replace(/\n{3,}/g, '\n\n')
+
+  return { cleanedText, validIds, invalidIds, globeActions }
 }
 
 /**
@@ -379,19 +455,32 @@ async function* yieldActionsForValidIds(
 
 /**
  * Validate accumulated LLM text once, yield action chunks for valid IDs,
- * and emit a rewrite chunk if any hallucinated IDs were stripped.
+ * emit globe-control actions from inline markers, and emit a rewrite
+ * chunk if any hallucinated IDs or markers were stripped.
  */
 async function* emitValidatedActions(
   accumulatedText: string,
   datasets: Dataset[],
   yieldedIds: Set<string>,
 ): AsyncGenerator<DocentStreamChunk> {
-  const { cleanedText, validIds, invalidIds } = validateAndCleanText(accumulatedText, datasets)
+  const { cleanedText, validIds, invalidIds, globeActions } = validateAndCleanText(accumulatedText, datasets)
+  const needsRewrite = invalidIds.size > 0 || globeActions.length > 0
   if (invalidIds.size > 0) {
     logger.warn('[Docent] Stripped hallucinated dataset IDs:', Array.from(invalidIds))
+  }
+  if (needsRewrite) {
     yield { type: 'rewrite', text: cleanedText }
   }
   yield* yieldActionsForValidIds(validIds, datasets, yieldedIds)
+
+  // Yield globe-control actions extracted from inline markers
+  for (const ga of globeActions) {
+    if (ga.type === 'fly-to') {
+      yield { type: 'action', action: { type: 'fly-to', lat: ga.lat, lon: ga.lon, altitude: ga.altitude } }
+    } else {
+      yield { type: 'action', action: { type: 'set-time', isoDate: ga.isoDate } }
+    }
+  }
 }
 
 export async function* processMessage(
@@ -422,13 +511,13 @@ export async function* processMessage(
       const results = searchResults
       const autoResult = evaluateAutoLoad(results)
       if (autoResult) {
-        const action: ChatAction = {
-          type: 'load-dataset',
+        const action = {
+          type: 'load-dataset' as const,
           datasetId: autoResult.autoLoad.id,
           datasetTitle: autoResult.autoLoad.title,
         }
-        const alternatives: ChatAction[] = autoResult.alternatives.map(d => ({
-          type: 'load-dataset',
+        const alternatives = autoResult.alternatives.map(d => ({
+          type: 'load-dataset' as const,
           datasetId: d.id,
           datasetTitle: d.title,
         }))
@@ -441,7 +530,7 @@ export async function* processMessage(
     // Yield local actions immediately (skip any already yielded by auto-load)
     if (localResponse.actions) {
       for (const action of localResponse.actions) {
-        if (!yieldedIds.has(action.datasetId)) {
+        if (action.type === 'load-dataset' && !yieldedIds.has(action.datasetId)) {
           yieldedIds.add(action.datasetId)
           yield { type: 'action', action }
         }
@@ -500,16 +589,25 @@ export async function* processMessage(
         { type: 'text', text: visionText },
       ]
 
+      // Prepend globe state directly into the user message so small models
+      // can't miss it — system messages are often deprioritised.
+      const statePrefix = currentDataset
+        ? `[GLOBE STATE: "${currentDataset.title}" is currently loaded on the globe.${currentTime ? ` Showing: ${currentTime}.` : ''}]\n`
+        : '[GLOBE STATE: No dataset is loaded. The globe shows the default Earth view.]\n'
+
       const userMessage: LLMMessage = visionActive
-        ? { role: 'user', content: visionContentParts }
-        : { role: 'user', content: input }
+        ? { role: 'user', content: [
+            { type: 'image_url' as const, image_url: { url: screenshotDataUrl! } },
+            { type: 'text' as const, text: statePrefix + visionText },
+          ] as LLMContentPart[] }
+        : { role: 'user', content: statePrefix + input }
 
       const llmMessages: LLMMessage[] = [
         { role: 'system' as const, content: systemPrompt },
         ...buildCompressedHistory(history),
         userMessage,
       ]
-      const tools = [getLoadDatasetTool()]
+      const tools = [getLoadDatasetTool(), getFlyToTool(), getSetTimeTool()]
 
       // Auto-switch to vision model when using the default CF proxy
       const normalizedUrl = cfg.apiUrl.replace(/\/+$/, '')
@@ -563,6 +661,22 @@ export async function* processMessage(
                     datasetId: resolvedId,
                     datasetTitle: resolvedTitle ?? String(args.dataset_title ?? resolvedId),
                   },
+                }
+              }
+            } else if (chunk.call.name === 'fly_to') {
+              const args = chunk.call.arguments as { lat?: number; lon?: number; altitude?: number }
+              if (typeof args.lat === 'number' && typeof args.lon === 'number') {
+                yield {
+                  type: 'action',
+                  action: { type: 'fly-to', lat: args.lat, lon: args.lon, altitude: args.altitude },
+                }
+              }
+            } else if (chunk.call.name === 'set_time') {
+              const args = chunk.call.arguments as { date?: string }
+              if (args.date) {
+                yield {
+                  type: 'action',
+                  action: { type: 'set-time', isoDate: args.date },
                 }
               }
             }

@@ -15,11 +15,12 @@ import type { AppState } from './types'
 
 // Extracted modules
 import { showBrowseUI, hideBrowseUI } from './ui/browseUI'
-import { initChatUI, openChat, notifyDatasetChanged, showChatTrigger, hideChatTrigger, closeChat } from './ui/chatUI'
+import { initChatUI, openChat, notifyDatasetChanged, showChatTrigger, hideChatTrigger, closeChat, flushPendingGlobeActions } from './ui/chatUI'
 import {
   createPlaybackState, startPlaybackLoop, stopPlaybackLoop,
   togglePlayPause, rewind, fastForward, stepFrame, onScrub,
   updatePlayButton, toggleCaptions, resetPlaybackState, initPlaybackPositioning,
+  seekToDate,
   type PlaybackState,
 } from './ui/playbackController'
 import {
@@ -441,6 +442,8 @@ class InteractiveSphere {
     initPlaybackPositioning()
     initChatUI({
       onLoadDataset: (id) => { void this.selectDatasetFromChat(id) },
+      onFlyTo: (lat, lon, altitude) => { void this.renderer?.flyTo(lat, lon, altitude) },
+      onSetTime: (isoDate) => seekToDate(isoDate, this.hlsService, this.appState, this.playback),
       getDatasets: () => this.appState.datasets,
       getCurrentDataset: () => this.appState.currentDataset,
       announce: (msg) => this.announce(msg),
@@ -488,6 +491,8 @@ class InteractiveSphere {
       this.announce(`Loaded dataset: ${dataset.title}`)
       this.renderer?.setCanvasDescription(`3D globe showing ${dataset.title}`)
       notifyDatasetChanged(dataset)
+      // Flush deferred globe-control actions (fly-to, set-time) now that the dataset is loaded
+      flushPendingGlobeActions()
     }
   }
 

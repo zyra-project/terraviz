@@ -13,13 +13,15 @@ const DAMPING = 0.88
 const SENSITIVITY = 0.005
 const AUTO_ROTATE_SPEED = 0.0015
 const INERTIA_THRESHOLD = 0.0001
-const ZOOM_MIN = 1.15
-const ZOOM_MAX = 3.6
+export const ZOOM_MIN = 1.15
+export const ZOOM_MAX = 3.6
 const ZOOM_STEP_FACTOR = 0.12
 const SPHERE_SURFACE_RADIUS = 1.0
 const PINCH_SENSITIVITY = 0.002
 const CAMERA_DEFAULT_Z = 1.8
 const RESIZE_DEBOUNCE_MS = 150
+const EARTH_RADIUS_KM = 6371
+const FLY_TO_DURATION_MS = 2500
 
 export class InputHandler {
   private camera: THREE.PerspectiveCamera
@@ -47,6 +49,15 @@ export class InputHandler {
   private lastTouchX = 0
   private lastTouchY = 0
   private lastPinchDistance = 0
+
+  // Fly-to animation state
+  private flyAnim: {
+    startRotX: number; startRotY: number; startZ: number
+    targetRotX: number; targetRotY: number; targetZ: number
+    startTime: number; duration: number
+    resolve: () => void
+  } | null = null
+  private savedAutoRotate = false
 
   constructor(
     container: HTMLElement,
@@ -96,6 +107,7 @@ export class InputHandler {
 
   private onMouseDown(e: MouseEvent): void {
     if (e.target !== this.webglRenderer.domElement) return
+    if (this.flyAnim) this.cancelFlyTo()
     this.controls.isRotating = true
     this.velocityX = 0
     this.velocityY = 0
@@ -143,6 +155,7 @@ export class InputHandler {
 
   private onTouchStart(e: TouchEvent): void {
     if (this.isTouchOnUI(e)) return
+    if (this.flyAnim) this.cancelFlyTo()
 
     if (e.touches.length === 1) {
       this.controls.isRotating = true
@@ -228,6 +241,78 @@ export class InputHandler {
     }
   }
 
+  // --- Fly-to animation ---
+
+  /** Whether a fly-to animation is currently in progress. */
+  get isAnimating(): boolean {
+    return this.flyAnim !== null
+  }
+
+  /**
+   * Smoothly animate the globe to center on a geographic location.
+   * @param lat Latitude in degrees (-90 to 90)
+   * @param lon Longitude in degrees (-180 to 180)
+   * @param altitude Optional viewing altitude in km above the surface
+   */
+  flyTo(lat: number, lon: number, altitude?: number): Promise<void> {
+    // Cancel any in-progress animation
+    this.cancelFlyTo()
+
+    if (!this.sphere) return Promise.resolve()
+
+    const targetRotX = lat * Math.PI / 180
+    // The sphere's default rotation.y=0 faces 90°W (the raycasting formula
+    // is lng = atan2(-z_local, x_local), and at rotY=0 the camera-facing
+    // local point is (0,0,1), giving atan2(-1,0) = -90°).
+    // So to center on longitude L: rotY = -L_rad - PI/2.
+    const targetRotY = -lon * Math.PI / 180 - Math.PI / 2
+
+    const targetZ = altitude !== undefined
+      ? Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, SPHERE_SURFACE_RADIUS + altitude / EARTH_RADIUS_KM))
+      : this.camera.position.z
+
+    // Normalize starting Y rotation to [-PI, PI] so shortest-path works
+    let startRotY = this.sphere.rotation.y % (2 * Math.PI)
+    if (startRotY > Math.PI) startRotY -= 2 * Math.PI
+    if (startRotY < -Math.PI) startRotY += 2 * Math.PI
+
+    // Choose shortest rotation path for Y
+    let deltaY = targetRotY - startRotY
+    if (deltaY > Math.PI) deltaY -= 2 * Math.PI
+    if (deltaY < -Math.PI) deltaY += 2 * Math.PI
+    const adjustedTargetRotY = startRotY + deltaY
+
+    // Save and disable auto-rotate; zero velocity
+    this.savedAutoRotate = this.controls.autoRotate
+    this.controls.autoRotate = false
+    this.velocityX = 0
+    this.velocityY = 0
+
+    return new Promise<void>((resolve) => {
+      this.flyAnim = {
+        startRotX: this.sphere!.rotation.x,
+        startRotY: startRotY,
+        startZ: this.camera.position.z,
+        targetRotX: Math.max(-Math.PI / 2, Math.min(Math.PI / 2, targetRotX)),
+        targetRotY: adjustedTargetRotY,
+        targetZ,
+        startTime: performance.now(),
+        duration: FLY_TO_DURATION_MS,
+        resolve,
+      }
+    })
+  }
+
+  /** Cancel any in-progress fly-to animation, snapping to the current interpolated position. */
+  cancelFlyTo(): void {
+    if (this.flyAnim) {
+      this.flyAnim.resolve()
+      this.flyAnim = null
+      // Restore auto-rotate if it was active before
+      this.controls.autoRotate = this.savedAutoRotate
+    }
+  }
+
   // --- Animate loop helper ---
 
   /**
@@ -235,6 +320,28 @@ export class InputHandler {
    */
   applyFrameUpdate(): void {
     if (!this.sphere) return
+
+    // Fly-to animation takes priority
+    if (this.flyAnim) {
+      const elapsed = performance.now() - this.flyAnim.startTime
+      const rawT = Math.min(1, elapsed / this.flyAnim.duration)
+      const t = easeInOutCubic(rawT)
+
+      this.sphere.rotation.x = this.flyAnim.startRotX + (this.flyAnim.targetRotX - this.flyAnim.startRotX) * t
+      this.sphere.rotation.y = this.flyAnim.startRotY + (this.flyAnim.targetRotY - this.flyAnim.startRotY) * t
+      this.camera.position.z = this.flyAnim.startZ + (this.flyAnim.targetZ - this.flyAnim.startZ) * t
+
+      if (rawT >= 1) {
+        const { resolve } = this.flyAnim
+        this.flyAnim = null
+        this.controls.autoRotate = this.savedAutoRotate
+        resolve()
+      }
+
+      // Update lat/lng display during animation
+      if (this.mouseOverSphere) this.updateLatLng()
+      return
+    }
 
     if (this.controls.autoRotate) {
       this.sphere.rotation.y += AUTO_ROTATE_SPEED
@@ -260,4 +367,9 @@ export class InputHandler {
       this.updateLatLng()
     }
   }
+}
+
+/** Smooth acceleration and deceleration curve. */
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
 }

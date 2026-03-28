@@ -289,7 +289,7 @@ describe('generateResponse', () => {
   it('returns category results for category intent', () => {
     const r = generateResponse({ type: 'category', category: 'space' }, allDatasets, null)
     expect(r.actions).toBeDefined()
-    expect(r.actions!.some(a => a.datasetId === 'TEST_003')).toBe(true)
+    expect(r.actions!.some(a => a.type === 'load-dataset' && a.datasetId === 'TEST_003')).toBe(true)
   })
 
   it('returns related datasets for related intent with current dataset', () => {

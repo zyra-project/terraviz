@@ -132,11 +132,10 @@ export type ChatRole = 'user' | 'docent'
 /**
  * An action the docent can embed in a message (e.g. "Load this dataset")
  */
-export interface ChatAction {
-  type: 'load-dataset'
-  datasetId: string
-  datasetTitle: string
-}
+export type ChatAction =
+  | { type: 'load-dataset'; datasetId: string; datasetTitle: string }
+  | { type: 'fly-to'; lat: number; lon: number; altitude?: number }
+  | { type: 'set-time'; isoDate: string }
 
 /**
  * A single chat message

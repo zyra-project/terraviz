@@ -40,7 +40,7 @@ export function buildCurrentDatasetContext(
   currentTime?: string | null,
 ): string {
   if (!dataset) {
-    return 'The user is currently viewing the default Earth globe with real-time cloud cover. No specific dataset is loaded.'
+    return 'The user is currently viewing the default Earth globe with real-time cloud cover. No specific dataset is loaded. IMPORTANT: Even if you previously suggested a dataset, the user has NOT loaded it unless it appears here as "Currently loaded".'
   }
 
   const parts: string[] = [
@@ -164,6 +164,8 @@ ${buildCompactDatasetLookup(datasets)}`
 
 Your role is to be a warm, knowledgeable guide. You help visitors explore and understand environmental data by explaining what they're seeing and recommending relevant datasets to load onto the globe.
 
+IMPORTANT: All datasets are GLOBAL — they cover the entire Earth, rendered on a 3D sphere. The user's current view only shows one side of the globe, but the data extends everywhere. Never say a dataset "only shows" one region or "doesn't cover" a location. The user can rotate the globe or use <<FLY:...>> to view any part of the world.
+
 ## STRICT RULES — FOLLOW EXACTLY
 1. NEVER mention a dataset by name or ID unless it appears EXACTLY in the dataset reference list below. Do not invent, guess, or paraphrase dataset titles. If you are unsure whether a dataset exists, do NOT mention it.
 2. NEVER describe what a dataset contains beyond what its title says. Do not invent data values, date ranges, or trends.
@@ -171,7 +173,7 @@ Your role is to be a warm, knowledgeable guide. You help visitors explore and un
 4. ONLY discuss Earth science, environmental data, weather, climate, oceans, geology, space science, ecology, and the datasets in this collection.
 5. DECLINE off-topic requests politely: "That's outside my area! I'm here to help you explore Earth science data. Try asking about weather, oceans, climate, volcanoes, or space — or say 'show me something interesting'!"
 
-## Current View
+## Current View (SOURCE OF TRUTH — always check this before assuming what the user sees)
 ${currentContext}
 
 ## Available Categories
@@ -196,9 +198,26 @@ CRITICAL RULES — violations break the UI:
 - NEVER write a dataset ID (INTERNAL_SOS_...) anywhere in your prose text. IDs must ONLY appear inside <<LOAD:...>> markers.
 - Refer to datasets by their TITLE in prose, never by ID. The marker carries the ID silently.
 - EVERY dataset you mention must have a <<LOAD:...>> marker. No exceptions.
-- NEVER say "I'll load", "let me load", or "I've loaded" — the marker triggers loading automatically. Just place the marker.
-- Do NOT ask the user if they want to load — just include the marker.
+- NEVER say "I'll load", "let me load", "I've loaded", "loading this would", or similar. Just place the <<LOAD:...>> marker and move on. The marker automatically creates a Load button for the user.
+- Do NOT ask the user if they want to load, and do NOT describe what loading would do — just include the marker.
+- NEVER assume a dataset is loaded just because you suggested it in a previous message. ALWAYS check the "Current View" section above to see what is actually on the globe right now. If it's not loaded, include the <<LOAD:...>> marker again.
 - Use the FULL ID exactly as listed (starts with INTERNAL_).
+
+## Globe Control Markers
+You can control the globe view by placing markers in your text, just like <<LOAD:...>> markers:
+- <<FLY:lat,lon>> or <<FLY:lat,lon,altitude_km>> — Animate the camera to a location. Altitude in km is optional.
+- <<TIME:ISO_DATE>> — Seek a time-enabled dataset to a specific date.
+
+Place these on their own line. Example — user asks about Hurricane Katrina:
+Here's a look at the 2005 hurricane season.
+<<LOAD:INTERNAL_SOS_42>>
+<<FLY:29.0,-89.0,3000>>
+<<TIME:2005-08-29>>
+
+IMPORTANT rules for globe markers:
+- <<FLY:...>> can be used ANY time the user asks to see a location — it works whether or not a dataset is loaded. If the user asks to fly somewhere, just do it.
+- <<TIME:...>> requires a time-enabled dataset to be loaded. Dates MUST fall within the dataset's time range shown in the "Current View" section. Never suggest a date outside the range.
+- Never write fly_to(...), set_time(...), or similar function-call syntax in your text. Use ONLY the marker format above.
 
 ## Guidelines
 - Be conversational and enthusiastic about science, but concise
@@ -328,6 +347,60 @@ export function getLoadDatasetTool(): LLMTool {
           },
         },
         required: ['dataset_id', 'dataset_title'],
+      },
+    },
+  }
+}
+
+/**
+ * Tool definition for flying the globe camera to a geographic location.
+ */
+export function getFlyToTool(): LLMTool {
+  return {
+    type: 'function',
+    function: {
+      name: 'fly_to',
+      description: 'Smoothly animate the globe camera to center on a specific geographic location. Use this to show the user a particular region when discussing geographic features or events.',
+      parameters: {
+        type: 'object',
+        properties: {
+          lat: {
+            type: 'number',
+            description: 'Latitude in degrees (-90 to 90)',
+          },
+          lon: {
+            type: 'number',
+            description: 'Longitude in degrees (-180 to 180)',
+          },
+          altitude: {
+            type: 'number',
+            description: 'Viewing altitude in kilometers above the surface. Lower values zoom in closer (min ~950 km), higher values show more of the globe (max ~16,500 km). Default: keep current altitude.',
+          },
+        },
+        required: ['lat', 'lon'],
+      },
+    },
+  }
+}
+
+/**
+ * Tool definition for seeking a time-enabled dataset to a specific date.
+ */
+export function getSetTimeTool(): LLMTool {
+  return {
+    type: 'function',
+    function: {
+      name: 'set_time',
+      description: 'Seek the currently loaded time-enabled dataset to a specific date/time. Only works when a video dataset with temporal data is loaded. Use this to show a particular moment in time, such as a storm event or seasonal change.',
+      parameters: {
+        type: 'object',
+        properties: {
+          date: {
+            type: 'string',
+            description: 'ISO 8601 date or datetime string (e.g. "2005-08-29" or "2005-08-29T12:00:00Z")',
+          },
+        },
+        required: ['date'],
       },
     },
   }
