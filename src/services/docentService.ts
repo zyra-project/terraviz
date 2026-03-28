@@ -111,8 +111,12 @@ const legendCache: LegendCache = {
   legendDescriptionForDatasetId: null,
 }
 
-/** Read the current time label from the globe overlay. */
+/** Read the current time label from the globe overlay.
+ * Returns null if the time label is hidden (no temporal data for the current dataset).
+ */
 export function readCurrentTime(): string | null {
+  const labelEl = document.getElementById('time-label')
+  if (!labelEl || labelEl.classList.contains('hidden')) return null
   const el = document.getElementById('time-display')
   const text = el?.textContent?.trim()
   return (text && text !== '--') ? text : null
