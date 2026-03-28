@@ -22,7 +22,13 @@ interface RawEnrichedEntry {
   related_datasets?: Array<{ title: string; url: string }>
 }
 
-class DataService {
+/**
+ * Fetches and caches the SOS dataset catalog, merges enriched metadata,
+ * and provides lookup/filter helpers for the rest of the application.
+ *
+ * Use the pre-built singleton {@link dataService} rather than constructing directly.
+ */
+export class DataService {
   private cache: DatasetMetadata | null = null
   private cacheTime: number = 0
   private readonly CACHE_DURATION = 60 * 60 * 1000 // 1 hour
@@ -224,18 +230,22 @@ class DataService {
     return timeInfo
   }
 
+  /** Check whether a dataset's format is one we can render (video or image). */
   isSupportedDataset(dataset: Dataset): boolean {
     return this.isVideoDataset(dataset) || this.isImageDataset(dataset)
   }
 
+  /** True if the dataset format is `video/mp4`. */
   isVideoDataset(dataset: Dataset): boolean {
     return dataset.format === 'video/mp4'
   }
 
+  /** True if the dataset format is a supported image type (PNG or JPEG). */
   isImageDataset(dataset: Dataset): boolean {
     return dataset.format === 'image/png' || dataset.format === 'image/jpg' || dataset.format === 'images/jpg'
   }
 
+  /** Invalidate the dataset cache, forcing a fresh fetch on the next call. */
   clearCache(): void {
     this.cache = null
     this.cacheTime = 0
