@@ -10,7 +10,7 @@ import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import type { Map as MaplibreMap, StyleSpecification, CustomLayerInterface } from 'maplibre-gl'
 import * as THREE from 'three'
-import { createDayNightTestLayer, syncAtmosphereLight } from './customLayerSpike'
+import { createEarthTileLayer, computeSunLightPosition, type EarthTileLayerControl } from './earthTileLayer'
 import { getSunPosition } from '../utils/time'
 
 // --- GIBS tile endpoints ---
@@ -32,6 +32,7 @@ const DEFAULT_ZOOM = 1.0
  * custom layer in Phase 1.
  */
 function createGlobeStyle(): StyleSpecification {
+  const initSun = getSunPosition(new Date())
   return {
     version: 8,
     name: 'sos-globe',
@@ -82,11 +83,11 @@ function createGlobeStyle(): StyleSpecification {
         7, 0,
       ],
     },
-    // Light is updated dynamically via enableSunLighting() to match the sun
-    // position. Start with a neutral overhead light as a safe default.
+    // Initialize light to current sun position so there's no flash of
+    // incorrect lighting before the earth tile layer's onAdd fires.
     light: {
       anchor: 'map',
-      position: [1.5, 0, 90],
+      position: computeSunLightPosition(initSun.lat, initSun.lng),
     },
   }
 }
@@ -102,6 +103,7 @@ export class MapRenderer {
   private container: HTMLElement | null = null
   private autoRotateInterval: number | null = null
   private autoRotating = false
+  private earthLayer: EarthTileLayerControl | null = null
 
   /**
    * Initialize the MapLibre map inside the given container element.
@@ -134,24 +136,12 @@ export class MapRenderer {
     canvas.setAttribute('aria-label', 'Interactive 3D globe visualization')
     canvas.id = 'globe-canvas'
 
-    // Log when tiles finish loading, and activate Spike C test layer
+    // Add earth tile layer (day/night, city lights, specular, clouds)
     this.map.on('load', () => {
       console.info('[MapRenderer] Map loaded with globe projection')
-      console.info('[MapRenderer] Center:', this.map!.getCenter())
-      console.info('[MapRenderer] Zoom:', this.map!.getZoom())
-
-      // Spike C: add day/night test custom layer to validate Three.js
-      // rendering inside MapLibre's WebGL context on globe projection.
-      // Activated via ?spike=daynight URL param for manual testing.
-      const params = new URLSearchParams(window.location.search)
-      if (params.get('spike') === 'daynight') {
-        const testLayer = createDayNightTestLayer()
-        this.map!.addLayer(testLayer as unknown as maplibregl.LayerSpecification)
-        console.info('[MapRenderer] Spike C day/night test layer activated')
-
-        // Debug panel for tuning MapLibre light position
-        this.createLightDebugPanel()
-      }
+      this.earthLayer = createEarthTileLayer()
+      this.map!.addLayer(this.earthLayer.layer as unknown as maplibregl.LayerSpecification)
+      console.info('[MapRenderer] Earth tile layer added')
     })
   }
 
@@ -372,130 +362,45 @@ export class MapRenderer {
 
   // --- Earth material stubs (Phase 1) ---
 
-  /** Stub: load default earth materials. */
-  async loadDefaultEarthMaterials(_onProgress?: (fraction: number) => void): Promise<void> {
-    // Phase 1: GIBS tiles are already loaded as the base style.
-    // Day/night blend will be a custom layer.
-    _onProgress?.(1)
-  }
-
-  /** Stub: remove night lights. */
-  removeNightLights(): void {
-    // Phase 1: toggle day/night custom layer
-  }
-
-  /**
-   * Enable sun lighting. When the day/night custom layer (spike C) is active,
-   * it handles syncing MapLibre's light from within its render callback
-   * for zero-lag lockstep. This stub is kept for the GlobeRenderer interface.
-   */
-  enableSunLighting(_lat: number, _lng: number): void {
-    // Light sync is handled by the custom layer's render() callback
-    // when spike=daynight is active. See customLayerSpike.ts syncAtmosphereLight().
-  }
-
-  /** Create a debug panel with sliders for tuning MapLibre light position. */
-  private createLightDebugPanel(): void {
-    const panel = document.createElement('div')
-    panel.id = 'light-debug-panel'
-    panel.style.cssText = `
-      position: fixed; top: 10px; right: 10px; z-index: 9999;
-      background: rgba(0,0,0,0.85); color: #fff; padding: 12px 16px;
-      border-radius: 8px; font: 12px/1.6 monospace; min-width: 280px;
-    `
-    const now = new Date()
-    const startOfYear = new Date(now.getFullYear(), 0, 0)
-    const currentDoy = Math.floor((now.getTime() - startOfYear.getTime()) / (1000 * 60 * 60 * 24))
-    const currentHour = now.getUTCHours() + now.getUTCMinutes() / 60
-
-    panel.innerHTML = `
-      <div style="margin-bottom:8px;font-weight:bold;color:#4da6ff;">Time Override</div>
-      <label>Day of year: <span id="dbg-doy-val">${currentDoy}</span> <span id="dbg-date-label"></span></label><br>
-      <input id="dbg-doy" type="range" min="1" max="365" value="${currentDoy}" style="width:100%"><br>
-      <label>Hour (UTC): <span id="dbg-hour-val">${currentHour.toFixed(1)}</span></label><br>
-      <input id="dbg-hour" type="range" min="0" max="240" value="${Math.round(currentHour * 10)}" style="width:100%"><br>
-      <div id="dbg-sun-info" style="margin-top:8px;color:#aaa;font-size:11px;white-space:pre-line;"></div>
-      <button id="dbg-reset" style="margin-top:6px;padding:2px 8px;font-size:11px;cursor:pointer;">Reset to now</button>
-    `
-    document.body.appendChild(panel)
-
-    const doySlider = document.getElementById('dbg-doy') as HTMLInputElement
-    const hourSlider = document.getElementById('dbg-hour') as HTMLInputElement
-    const doyVal = document.getElementById('dbg-doy-val')!
-    const dateLabel = document.getElementById('dbg-date-label')!
-    const hourVal = document.getElementById('dbg-hour-val')!
-    const sunInfo = document.getElementById('dbg-sun-info')!
-    const resetBtn = document.getElementById('dbg-reset')!
-
-    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-
-    const update = () => {
-      const doy = parseInt(doySlider.value)
-      const hour = parseInt(hourSlider.value) / 10
-
-      doyVal.textContent = String(doy)
-      hourVal.textContent = hour.toFixed(1)
-
-      // Build a simulated date from day-of-year + hour
-      const simDate = new Date(now.getFullYear(), 0, doy,
-        Math.floor(hour), Math.round((hour % 1) * 60))
-      dateLabel.textContent = `(${monthNames[simDate.getMonth()]} ${simDate.getDate()})`
-
-      // Expose simulated date globally so the custom layer uses it too
-      ;(window as any).__debugSunDate = simDate
-
-      const sun = getSunPosition(simDate)
-      sunInfo.textContent = `Sun: lat=${sun.lat.toFixed(1)}° lng=${sun.lng.toFixed(1)}°`
-
-      // Sync MapLibre's atmosphere light with the simulated sun
-      if (this.map) syncAtmosphereLight(this.map, sun.lat, sun.lng)
-
-      // Trigger repaint so the custom layer picks up the new date
-      this.map?.triggerRepaint()
+  /** Wait for the earth tile layer's textures (night lights, specular, clouds) to load. */
+  async loadDefaultEarthMaterials(onProgress?: (fraction: number) => void): Promise<void> {
+    // Wait for earth layer to be created (it's added on map 'load')
+    if (!this.earthLayer) {
+      await new Promise<void>(resolve => {
+        const check = () => {
+          if (this.earthLayer) resolve()
+          else setTimeout(check, 50)
+        }
+        check()
+      })
     }
-
-    resetBtn.addEventListener('click', () => {
-      delete (window as any).__debugSunDate
-      const resetNow = new Date()
-      const resetStart = new Date(resetNow.getFullYear(), 0, 0)
-      const resetDoy = Math.floor((resetNow.getTime() - resetStart.getTime()) / (1000 * 60 * 60 * 24))
-      const resetHour = resetNow.getUTCHours() + resetNow.getUTCMinutes() / 60
-      doySlider.value = String(resetDoy)
-      hourSlider.value = String(Math.round(resetHour * 10))
-      doyVal.textContent = String(resetDoy)
-      hourVal.textContent = resetHour.toFixed(1)
-      sunInfo.textContent = 'Using real time'
-      // Re-sync atmosphere light to current time
-      const resetSun = getSunPosition(resetNow)
-      if (this.map) syncAtmosphereLight(this.map, resetSun.lat, resetSun.lng)
-      this.map?.triggerRepaint()
-    })
-
-    doySlider.addEventListener('input', update)
-    hourSlider.addEventListener('input', update)
-
-    // Show initial label without setting __debugSunDate (use real time on load)
-    const initSun = getSunPosition(now)
-    dateLabel.textContent = `(${monthNames[now.getMonth()]} ${now.getDate()})`
-    sunInfo.textContent = `Sun: lat=${initSun.lat.toFixed(1)}° lng=${initSun.lng.toFixed(1)}°`
+    onProgress?.(0.2)
+    await this.earthLayer!.ready
+    onProgress?.(1)
   }
 
-  /** Reset light to neutral overhead position. */
+  /** Hide earth effects (day/night, city lights, specular, clouds) when a dataset is active. */
+  removeNightLights(): void {
+    this.earthLayer?.setVisible(false)
+  }
+
+  /** Update sun direction and re-show the earth tile layer. */
+  enableSunLighting(lat: number, lng: number): void {
+    this.earthLayer?.setVisible(true)
+    this.earthLayer?.setSunPosition(lat, lng)
+  }
+
+  /** Clear sun override — reverts to real-time sun position. */
   disableSunLighting(): void {
-    if (!this.map) return
-    this.map.setLight({
-      anchor: 'map',
-      position: [1.5, 0, 90],
-    })
+    this.earthLayer?.clearSunOverride()
   }
 
-  /** Stub: load cloud overlay. */
+  /** Clouds are loaded by the earth tile layer automatically. Report complete. */
   async loadCloudOverlay(_url: string, _onProgress?: (fraction: number) => void): Promise<void> {
-    // Phase 1: cloud mesh as custom layer
     _onProgress?.(1)
   }
 
-  /** Stub: remove cloud overlay. */
+  /** Cloud removal is handled by the earth tile layer. */
   removeCloudOverlay(): void {
     // Phase 1
   }

@@ -1,23 +1,16 @@
 /**
- * Spike C — Day/night custom layer for MapLibre globe.
+ * Earth tile layer — Day/night, clouds, and specular effects for MapLibre globe.
  *
- * Renders a sphere aligned with MapLibre's globe using two compositing passes:
- *   1. Multiply blend — darkens the night side of the Blue Marble tiles
- *   2. Additive blend — overlays city lights (Earth_Lights texture) on the
- *      night side only
+ * A MapLibre CustomLayerInterface that composites visual effects on top of
+ * the NASA GIBS Blue Marble raster tiles using multi-pass WebGL rendering:
  *
- * Both passes disable depth testing so the sphere composites on top of tiles
- * without z-fighting. The multiply pass outputs white on the day side (no
- * change) and dark on the night side; the additive pass outputs black on the
- * day side (no change) and city light colors on the night side.
+ *   Pass 1 (multiply) — Darkens the night side of the Blue Marble tiles
+ *   Pass 2 (additive) — Overlays city lights on the night side
+ *   Pass 3 (additive) — Specular sun glint on water (masked by clouds)
+ *   Pass 4 (alpha)    — Clouds with day/night darkening and zoom fade
  *
- * Validates:
- *   1. Custom WebGL shaders work inside MapLibre's GL context
- *   2. Globe projection matrix aligns a unit sphere with the tile globe
- *   3. Multi-pass compositing with different blend modes
- *   4. Texture loading and equirectangular UV mapping on the globe
- *
- * Usage: activate via ?renderer=maplibre&spike=daynight URL params.
+ * All passes render a sphere matching MapLibre's ECEF globe geometry with
+ * depth test disabled to avoid z-fighting with the tile layer.
  */
 
 import type { CustomLayerInterface } from 'maplibre-gl'
@@ -353,6 +346,21 @@ export function syncAtmosphereLight(map: MaplibreMap, sunLat: number, sunLng: nu
   })
 }
 
+/** Compute MapLibre light position for a given sun lat/lng. */
+export function computeSunLightPosition(sunLat: number, sunLng: number): [number, number, number] {
+  const sLatR = sunLat * Math.PI / 180
+  const sLngR = sunLng * Math.PI / 180
+  const cx = -(Math.cos(sLatR) * Math.sin(sLngR))
+  const cy = -(Math.sin(sLatR))
+  const cz = -(Math.cos(sLatR) * Math.cos(sLngR))
+  const r = Math.sqrt(cx * cx + cy * cy + cz * cz)
+  if (r < 1e-10) return [1.5, 0, 90]
+  const polar = Math.acos(Math.max(-1, Math.min(1, cz / r))) * 180 / Math.PI
+  const azInternal = Math.atan2(cy, cx)
+  const azimuthal = ((azInternal * 180 / Math.PI - 90) % 360 + 360) % 360
+  return [1.5, azimuthal, polar]
+}
+
 // --- Layer implementation ---
 
 interface DayNightProgram {
@@ -394,7 +402,7 @@ function compileProgram(
   gl.shaderSource(vs, vsSrc)
   gl.compileShader(vs)
   if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
-    console.error(`[Spike C] ${label} vertex shader:`, gl.getShaderInfoLog(vs))
+    console.error(`[EarthTileLayer] ${label} vertex shader:`, gl.getShaderInfoLog(vs))
     return null
   }
 
@@ -402,7 +410,7 @@ function compileProgram(
   gl.shaderSource(fs, fsSrc)
   gl.compileShader(fs)
   if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
-    console.error(`[Spike C] ${label} fragment shader:`, gl.getShaderInfoLog(fs))
+    console.error(`[EarthTileLayer] ${label} fragment shader:`, gl.getShaderInfoLog(fs))
     return null
   }
 
@@ -414,17 +422,31 @@ function compileProgram(
   gl.deleteShader(fs)
 
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-    console.error(`[Spike C] ${label} link:`, gl.getProgramInfoLog(prog))
+    console.error(`[EarthTileLayer] ${label} link:`, gl.getProgramInfoLog(prog))
     return null
   }
   return prog
 }
 
+/** Extended interface for controlling the earth tile layer from MapRenderer. */
+export interface EarthTileLayerControl {
+  /** The MapLibre custom layer interface. */
+  layer: CustomLayerInterface
+  /** Resolves when all textures (night lights, specular, clouds) have loaded. */
+  ready: Promise<void>
+  /** Update sun direction. Called by MapRenderer.enableSunLighting(). */
+  setSunPosition(lat: number, lng: number): void
+  /** Clear sun override — reverts to real-time sun position. */
+  clearSunOverride(): void
+  /** Show or hide all earth effects (day/night, lights, specular, clouds). */
+  setVisible(visible: boolean): void
+}
+
 /**
- * Create a MapLibre CustomLayerInterface that composites day/night shading
- * and city lights onto the globe tiles.
+ * Create a MapLibre CustomLayerInterface that composites day/night shading,
+ * city lights, specular glint, and clouds onto the globe tiles.
  */
-export function createDayNightTestLayer(): CustomLayerInterface {
+export function createEarthTileLayer(): EarthTileLayerControl {
   let darken: DayNightProgram | null = null
   let lights: LightsProgram | null = null
   let specular: SpecularProgram | null = null
@@ -439,12 +461,20 @@ export function createDayNightTestLayer(): CustomLayerInterface {
   let cloudTexReady = false
   let mapRef: MaplibreMap | null = null
 
-  // Sun direction — updated each frame from real time
+  // Sun direction — updated each frame from real time, or set externally
   let sunDir: [number, number, number] = [1, 0, 0]
-  let frameCount = 0
+  let sunOverride: { lat: number; lng: number } | null = null
+  let visible = true
+
+  // Readiness tracking — resolves when all textures are loaded
+  let resolveReady: () => void
+  const readyPromise = new Promise<void>(r => { resolveReady = r })
+  const checkReady = () => {
+    if (nightTexReady && specTexReady && cloudTexReady) resolveReady()
+  }
 
   const layer: CustomLayerInterface = {
-    id: 'day-night-test-layer',
+    id: 'earth-tile-layer',
     type: 'custom',
     renderingMode: '3d',
 
@@ -562,11 +592,12 @@ export function createDayNightTestLayer(): CustomLayerInterface {
         gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_S, gl2.REPEAT)
         gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_T, gl2.CLAMP_TO_EDGE)
         nightTexReady = true
+        checkReady()
         _map.triggerRepaint()
-        console.info('[Spike C] Night lights texture loaded (%dx%d)', img.width, img.height)
+        console.info('[EarthTileLayer] Night lights texture loaded (%dx%d)', img.width, img.height)
       }
       img.onerror = () => {
-        console.warn('[Spike C] Failed to load night lights texture:', NIGHT_LIGHTS_URL)
+        console.warn('[EarthTileLayer] Failed to load night lights texture:', NIGHT_LIGHTS_URL)
       }
       img.src = NIGHT_LIGHTS_URL
 
@@ -587,11 +618,12 @@ export function createDayNightTestLayer(): CustomLayerInterface {
         gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_S, gl2.REPEAT)
         gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_T, gl2.CLAMP_TO_EDGE)
         cloudTexReady = true
+        checkReady()
         _map.triggerRepaint()
-        console.info('[Spike C] Cloud texture loaded (%dx%d)', cloudImg.width, cloudImg.height)
+        console.info('[EarthTileLayer] Cloud texture loaded (%dx%d)', cloudImg.width, cloudImg.height)
       }
       cloudImg.onerror = () => {
-        console.warn('[Spike C] Failed to load cloud texture:', CLOUD_TEXTURE_URL)
+        console.warn('[EarthTileLayer] Failed to load cloud texture:', CLOUD_TEXTURE_URL)
       }
       cloudImg.src = CLOUD_TEXTURE_URL
 
@@ -612,34 +644,23 @@ export function createDayNightTestLayer(): CustomLayerInterface {
         gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_S, gl2.REPEAT)
         gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_T, gl2.CLAMP_TO_EDGE)
         specTexReady = true
+        checkReady()
         _map.triggerRepaint()
-        console.info('[Spike C] Specular map loaded (%dx%d)', specImg.width, specImg.height)
+        console.info('[EarthTileLayer] Specular map loaded (%dx%d)', specImg.width, specImg.height)
       }
-      specImg.onerror = () => console.warn('[Spike C] Failed to load specular map:', SPECULAR_MAP_URL)
+      specImg.onerror = () => console.warn('[EarthTileLayer] Failed to load specular map:', SPECULAR_MAP_URL)
       specImg.src = SPECULAR_MAP_URL
 
-      console.info('[Spike C] Day/night+clouds+specular layer initialized (%d triangles)', indexCount / 3)
+      console.info('[EarthTileLayer] Day/night+clouds+specular layer initialized (%d triangles)', indexCount / 3)
     },
 
     render(gl, args) {
-      if (!darken || !vao) return
+      if (!darken || !vao || !visible) return
       const gl2 = gl as WebGL2RenderingContext
 
-      // Update sun direction — use debug override date if available
-      const dateSource = (window as any).__debugSunDate ?? new Date()
-      const sun = getSunPosition(dateSource)
+      // Update sun direction from override or real-time
+      const sun = sunOverride ?? getSunPosition(new Date())
       sunDir = sunDirectionFromLatLng(sun.lat, sun.lng)
-
-      // Log every 120 frames (~2 sec) for debugging
-      if (frameCount++ % 120 === 0) {
-        const center = mapRef?.getCenter()
-        console.debug(
-          '[Spike C] frame %d | sun ECEF=[%.3f, %.3f, %.3f] | sun geo=[%.1f, %.1f] | camera=[%.1f, %.1f]',
-          frameCount, sunDir[0], sunDir[1], sunDir[2],
-          sun.lat, sun.lng,
-          center?.lat ?? 0, center?.lng ?? 0,
-        )
-      }
 
       const matrix = args.defaultProjectionData.mainMatrix
 
@@ -752,18 +773,27 @@ export function createDayNightTestLayer(): CustomLayerInterface {
     },
   }
 
-  return layer
+  return {
+    layer,
+    ready: readyPromise,
+    setSunPosition(lat: number, lng: number) {
+      sunOverride = { lat, lng }
+      if (mapRef) {
+        syncAtmosphereLight(mapRef, lat, lng)
+        mapRef.triggerRepaint()
+      }
+    },
+    clearSunOverride() {
+      sunOverride = null
+      if (mapRef) {
+        const sun = getSunPosition(new Date())
+        syncAtmosphereLight(mapRef, sun.lat, sun.lng)
+        mapRef.triggerRepaint()
+      }
+    },
+    setVisible(v: boolean) {
+      visible = v
+      mapRef?.triggerRepaint()
+    },
+  }
 }
-
-/**
- * Add the day/night test layer to a MapLibre map.
- * Call this after the map's 'load' event.
- */
-export function addDayNightTestLayer(map: MaplibreMap): void {
-  const layer = createDayNightTestLayer()
-  map.addLayer(layer as unknown as maplibregl.LayerSpecification)
-  console.info('[Spike C] Day/night test layer added')
-}
-
-// Type import for the addLayer cast
-import type maplibregl from 'maplibre-gl'
