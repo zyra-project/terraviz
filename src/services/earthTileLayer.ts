@@ -31,6 +31,33 @@ const CLOUD_ALPHA_GAMMA = 1.8
 const CLOUD_NIGHT_DARKENING = 0.08
 const SPECULAR_SHININESS = 40.0
 const SPECULAR_STRENGTH = 0.6
+const STAR_BRIGHTNESS = 0.4 // higher than Three.js (0.02) since we lack additive glow
+const SKYBOX_FACES = ['px', 'nx', 'py', 'ny', 'pz', 'nz'] as const
+const SKYBOX_URL_BASE = '/assets/skybox/'
+
+// --- Matrix utility ---
+
+/** Invert a 4x4 column-major matrix. Returns false if singular. */
+function invertMat4(out: Float32Array, m: ArrayLike<number>): boolean {
+  const a00=m[0],a01=m[1],a02=m[2],a03=m[3],a10=m[4],a11=m[5],a12=m[6],a13=m[7]
+  const a20=m[8],a21=m[9],a22=m[10],a23=m[11],a30=m[12],a31=m[13],a32=m[14],a33=m[15]
+  const b00=a00*a11-a01*a10,b01=a00*a12-a02*a10,b02=a00*a13-a03*a10
+  const b03=a01*a12-a02*a11,b04=a01*a13-a03*a11,b05=a02*a13-a03*a12
+  const b06=a20*a31-a21*a30,b07=a20*a32-a22*a30,b08=a20*a33-a23*a30
+  const b09=a21*a32-a22*a31,b10=a21*a33-a23*a31,b11=a22*a33-a23*a32
+  let det=b00*b11-b01*b10+b02*b09+b03*b08-b04*b07+b05*b06
+  if (Math.abs(det)<1e-10) return false
+  det=1/det
+  out[0]=(a11*b11-a12*b10+a13*b09)*det;out[1]=(a02*b10-a01*b11-a03*b09)*det
+  out[2]=(a31*b05-a32*b04+a33*b03)*det;out[3]=(a22*b04-a21*b05-a23*b03)*det
+  out[4]=(a12*b08-a10*b11-a13*b07)*det;out[5]=(a00*b11-a02*b08+a03*b07)*det
+  out[6]=(a32*b02-a30*b05-a33*b01)*det;out[7]=(a20*b05-a22*b02+a23*b01)*det
+  out[8]=(a10*b10-a11*b08+a13*b06)*det;out[9]=(a01*b08-a00*b10-a03*b06)*det
+  out[10]=(a30*b04-a31*b02+a33*b00)*det;out[11]=(a21*b02-a20*b04-a23*b00)*det
+  out[12]=(a11*b07-a10*b09-a12*b06)*det;out[13]=(a00*b09-a01*b07+a02*b06)*det
+  out[14]=(a31*b01-a30*b03-a32*b00)*det;out[15]=(a20*b03-a21*b01+a22*b00)*det
+  return true
+}
 
 // --- Sphere geometry ---
 
@@ -300,6 +327,96 @@ const specularFragSrc = `#version 300 es
   }
 `
 
+// Skybox: full-screen pass that samples cubemap faces based on camera rotation
+const skyboxVertSrc = `#version 300 es
+  out vec2 vScreenPos;
+  void main() {
+    float x = float((gl_VertexID & 1) << 2) - 1.0;
+    float y = float((gl_VertexID & 2) << 1) - 1.0;
+    vScreenPos = vec2(x, y);
+    gl_Position = vec4(x, y, 1.0, 1.0);
+  }
+`
+
+const skyboxFragSrc = `#version 300 es
+  precision highp float;
+  uniform sampler2D uFaces[6];
+  uniform vec4 uCamera; // (lat, lng, bearing, pitch) in radians
+  uniform vec2 uAspectFov; // (aspect ratio, fov in radians)
+  uniform float uBrightness;
+  in vec2 vScreenPos;
+  out vec4 fragColor;
+
+  // Rotation helpers
+  vec3 rotX(float a, vec3 v) {
+    float c = cos(a), s = sin(a);
+    return vec3(v.x, v.y*c - v.z*s, v.y*s + v.z*c);
+  }
+  vec3 rotY(float a, vec3 v) {
+    float c = cos(a), s = sin(a);
+    return vec3(v.x*c + v.z*s, v.y, -v.x*s + v.z*c);
+  }
+  vec3 rotZ(float a, vec3 v) {
+    float c = cos(a), s = sin(a);
+    return vec3(v.x*c - v.y*s, v.x*s + v.y*c, v.z);
+  }
+
+  void main() {
+    // Ray direction from screen position using real FOV and aspect ratio
+    float halfFov = uAspectFov.y * 0.5;
+    float tanFov = tan(halfFov);
+    vec3 viewDir = normalize(vec3(
+      vScreenPos.x * tanFov * uAspectFov.x,
+      vScreenPos.y * tanFov,
+      -1.0
+    ));
+
+    // Apply camera rotation: pitch → bearing → lat → lng
+    // This matches MapLibre's camera model
+    float lat = uCamera.x, lng = uCamera.y, bearing = uCamera.z, pitch = uCamera.w;
+    vec3 dir = viewDir;
+    dir = rotX(-pitch, dir);
+    dir = rotZ(bearing, dir);
+    dir = rotX(-lat, dir);
+    dir = rotY(lng, dir);
+
+    // Rotate -90° around X: astronomical Z-up → Y-up (matches Three.js skybox)
+    dir = vec3(dir.x, -dir.z, dir.y);
+
+    // Sample the correct cubemap face
+    vec3 absDir = abs(dir);
+    vec2 uv;
+    int face;
+    if (absDir.x >= absDir.y && absDir.x >= absDir.z) {
+      face = dir.x > 0.0 ? 0 : 1;
+      uv = dir.x > 0.0
+        ? vec2(-dir.z / absDir.x, -dir.y / absDir.x)
+        : vec2(dir.z / absDir.x, -dir.y / absDir.x);
+    } else if (absDir.y >= absDir.x && absDir.y >= absDir.z) {
+      face = dir.y > 0.0 ? 2 : 3;
+      uv = dir.y > 0.0
+        ? vec2(dir.x / absDir.y, dir.z / absDir.y)
+        : vec2(dir.x / absDir.y, -dir.z / absDir.y);
+    } else {
+      face = dir.z > 0.0 ? 4 : 5;
+      uv = dir.z > 0.0
+        ? vec2(dir.x / absDir.z, -dir.y / absDir.z)
+        : vec2(-dir.x / absDir.z, -dir.y / absDir.z);
+    }
+    uv = uv * 0.5 + 0.5;
+
+    vec3 color = vec3(0.0);
+    if (face == 0) color = texture(uFaces[0], uv).rgb;
+    else if (face == 1) color = texture(uFaces[1], uv).rgb;
+    else if (face == 2) color = texture(uFaces[2], uv).rgb;
+    else if (face == 3) color = texture(uFaces[3], uv).rgb;
+    else if (face == 4) color = texture(uFaces[4], uv).rgb;
+    else color = texture(uFaces[5], uv).rgb;
+
+    fragColor = vec4(color * uBrightness, 1.0);
+  }
+`
+
 // Dataset overlay: simple textured sphere (proper equirectangular mapping)
 const datasetVertSrc = `#version 300 es
   layout(location = 0) in vec3 aPosition;
@@ -496,6 +613,14 @@ export function createEarthTileLayer(): EarthTileLayerControl {
   let dataset: DatasetProgram | null = null
   let datasetTex: WebGLTexture | null = null
   let datasetActive = false
+  let skyboxProg: WebGLProgram | null = null
+  let skyboxInvProjLoc: WebGLUniformLocation | null = null
+  let skyboxCameraLoc: WebGLUniformLocation | null = null
+  let skyboxAspectFovLoc: WebGLUniformLocation | null = null
+  let skyboxBrightnessLoc: WebGLUniformLocation | null = null
+  let skyboxFaceLocs: (WebGLUniformLocation | null)[] = []
+  let skyboxFaceTextures: (WebGLTexture | null)[] = []
+  let skyboxReady = false
   let glRef: WebGL2RenderingContext | null = null
   let mapRef: MaplibreMap | null = null
 
@@ -526,6 +651,44 @@ export function createEarthTileLayer(): EarthTileLayerControl {
 
       const gl2 = gl as WebGL2RenderingContext
       glRef = gl2
+
+      // --- Compile skybox shader and load cubemap faces ---
+      skyboxProg = compileProgram(gl2, skyboxVertSrc, skyboxFragSrc, 'skybox')
+      if (skyboxProg) {
+        skyboxInvProjLoc = gl2.getUniformLocation(skyboxProg, 'uInvProjMatrix')
+        skyboxCameraLoc = gl2.getUniformLocation(skyboxProg, 'uCamera')
+        skyboxAspectFovLoc = gl2.getUniformLocation(skyboxProg, 'uAspectFov')
+        skyboxBrightnessLoc = gl2.getUniformLocation(skyboxProg, 'uBrightness')
+        skyboxFaceLocs = SKYBOX_FACES.map((_, i) =>
+          gl2.getUniformLocation(skyboxProg!, `uFaces[${i}]`))
+
+        // Load 6 face textures
+        let facesLoaded = 0
+        skyboxFaceTextures = SKYBOX_FACES.map((face, i) => {
+          const tex = gl2.createTexture()
+          gl2.bindTexture(gl2.TEXTURE_2D, tex)
+          gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.RGBA, 1, 1, 0, gl2.RGBA, gl2.UNSIGNED_BYTE,
+            new Uint8Array([0, 0, 0, 255]))
+          const faceImg = new Image()
+          faceImg.crossOrigin = 'anonymous'
+          faceImg.onload = () => {
+            gl2.bindTexture(gl2.TEXTURE_2D, tex)
+            gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.RGBA, gl2.RGBA, gl2.UNSIGNED_BYTE, faceImg)
+            gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MIN_FILTER, gl2.LINEAR)
+            gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MAG_FILTER, gl2.LINEAR)
+            gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_S, gl2.CLAMP_TO_EDGE)
+            gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_T, gl2.CLAMP_TO_EDGE)
+            facesLoaded++
+            if (facesLoaded === 6) {
+              skyboxReady = true
+              _map.triggerRepaint()
+              console.info('[EarthTileLayer] Skybox loaded (6 faces)')
+            }
+          }
+          faceImg.src = SKYBOX_URL_BASE + face + '.jpg'
+          return tex
+        })
+      }
 
       // --- Compile dataset overlay shader ---
       const datasetProg = compileProgram(gl2, datasetVertSrc, datasetFragSrc, 'dataset')
@@ -716,7 +879,49 @@ export function createEarthTileLayer(): EarthTileLayerControl {
       const gl2 = gl as WebGL2RenderingContext
       const matrix = args.defaultProjectionData.mainMatrix
 
-      // Common GL state
+      // --- Skybox: full-screen pass behind the globe ---
+      // Reconstructs view direction per-pixel and samples cubemap faces.
+      // Depth test ensures stars only show where no globe was drawn.
+      if (skyboxReady && skyboxProg && mapRef) {
+        gl2.enable(gl2.DEPTH_TEST)
+        gl2.depthFunc(gl2.LEQUAL)
+        gl2.depthMask(false)
+        gl2.disable(gl2.BLEND)
+        gl2.disable(gl2.CULL_FACE)
+
+        gl2.useProgram(skyboxProg)
+        gl2.uniform1f(skyboxBrightnessLoc, STAR_BRIGHTNESS)
+
+        // Aspect ratio and FOV for correct angular coverage
+        const canvas = mapRef.getCanvas()
+        const aspect = canvas.width / canvas.height
+        const fov = ((mapRef as any).transform?._fov ?? 0.6435) as number
+        gl2.uniform2f(skyboxAspectFovLoc, aspect, fov)
+
+        // Pass camera rotation angles — skybox responds to rotation only, not zoom
+        const center = mapRef.getCenter()
+        const bearing = mapRef.getBearing() * Math.PI / 180
+        const pitch = mapRef.getPitch() * Math.PI / 180
+        const lat = center.lat * Math.PI / 180
+        const lng = center.lng * Math.PI / 180
+        gl2.uniform4f(skyboxCameraLoc, lat, lng, bearing, pitch)
+
+        // Bind all 6 face textures
+        for (let i = 0; i < 6; i++) {
+          gl2.activeTexture(gl2.TEXTURE0 + i)
+          gl2.bindTexture(gl2.TEXTURE_2D, skyboxFaceTextures[i])
+          gl2.uniform1i(skyboxFaceLocs[i], i)
+        }
+
+        // Full-screen triangle (vertex IDs only, no VAO needed)
+        gl2.bindVertexArray(null)
+        gl2.drawArrays(gl2.TRIANGLES, 0, 3)
+
+        gl2.depthMask(true)
+        gl2.depthFunc(gl2.LESS)
+      }
+
+      // Common GL state for sphere passes
       gl2.disable(gl2.DEPTH_TEST)
       gl2.enable(gl2.CULL_FACE)
       gl2.cullFace(gl2.BACK)
@@ -842,6 +1047,8 @@ export function createEarthTileLayer(): EarthTileLayerControl {
 
     onRemove(_map: MaplibreMap, gl: WebGL2RenderingContext | WebGLRenderingContext) {
       const gl2 = gl as WebGL2RenderingContext
+      if (skyboxProg) gl2.deleteProgram(skyboxProg)
+      for (const tex of skyboxFaceTextures) if (tex) gl2.deleteTexture(tex)
       if (dataset) gl2.deleteProgram(dataset.program)
       if (darken) gl2.deleteProgram(darken.program)
       if (lights) gl2.deleteProgram(lights.program)

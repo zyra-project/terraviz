@@ -24,7 +24,7 @@ const GIBS_MAX_ZOOM = 8
 
 // --- Default camera ---
 const DEFAULT_CENTER: [number, number] = [0, 20]
-const DEFAULT_ZOOM = 1.0
+const DEFAULT_ZOOM = 1.8
 // Zoom limits: ~0.5 shows the full globe, ~8 is the max detail for GIBS tiles
 const MIN_ZOOM = 0.5
 const MAX_ZOOM = 8
@@ -63,7 +63,7 @@ function createGlobeStyle(): StyleSpecification {
       {
         id: 'background',
         type: 'background',
-        paint: { 'background-color': '#000000' },
+        paint: { 'background-color': '#000000', 'background-opacity': 0 },
       },
       {
         id: 'blue-marble-layer',
@@ -124,6 +124,7 @@ export class MapRenderer {
     mapDiv.id = 'maplibre-container'
     mapDiv.style.width = '100%'
     mapDiv.style.height = '100%'
+    mapDiv.style.background = '#000'
     // Insert before the #ui div so it sits behind UI overlays in z-order
     const uiDiv = container.querySelector('#ui')
     if (uiDiv) {
