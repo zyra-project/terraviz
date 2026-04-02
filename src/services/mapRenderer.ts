@@ -1,9 +1,8 @@
 /**
- * MapLibre GL JS globe renderer — Phase 0 spike.
+ * MapLibre GL JS globe renderer.
  *
  * Wraps MapLibre with globe projection, NASA GIBS Blue Marble + Black Marble
- * raster tile sources, and a minimal dark style. Intended to coexist with the
- * existing Three.js SphereRenderer behind a renderer toggle.
+ * raster tile sources, day/night custom layer, and vector labels/boundaries.
  */
 
 import maplibregl from 'maplibre-gl'
@@ -30,8 +29,8 @@ popupStyle.textContent = `
 `
 document.head.appendChild(popupStyle)
 import type { Map as MaplibreMap, StyleSpecification, CustomLayerInterface } from 'maplibre-gl'
-import * as THREE from 'three'
 import { createEarthTileLayer, computeSunLightPosition, type EarthTileLayerControl } from './earthTileLayer'
+import type { GlobeRenderer, VideoTextureHandle } from '../types'
 import { getSunPosition } from '../utils/time'
 
 // --- GIBS tile endpoints ---
@@ -247,13 +246,8 @@ function createGlobeStyle(): StyleSpecification {
   }
 }
 
-/**
- * MapLibre-based globe renderer.
- *
- * Spike A validates: globe projection, GIBS tile loading, basic interaction,
- * and coexistence with the existing Three.js renderer.
- */
-export class MapRenderer {
+/** MapLibre-based globe renderer. */
+export class MapRenderer implements GlobeRenderer {
   private map: MaplibreMap | null = null
   private container: HTMLElement | null = null
   private autoRotateInterval: number | null = null
@@ -555,16 +549,15 @@ export class MapRenderer {
   /**
    * Display an equirectangular video on the globe via custom layer sphere.
    * The render loop updates the texture from the video element each frame.
-   * Returns a THREE.VideoTexture for playback controller compatibility.
+   * Returns a lightweight handle for playback controller compatibility.
    */
-  setVideoTexture(video: HTMLVideoElement): THREE.VideoTexture {
+  setVideoTexture(video: HTMLVideoElement): VideoTextureHandle {
     if (this.earthLayer) {
       this.earthLayer.setDatasetVideo(video)
       try { this.map?.setLayoutProperty('blue-marble-layer', 'visibility', 'none') } catch { /* noop */ }
       console.info('[MapRenderer] Video dataset set via custom layer sphere')
     }
-    // Return a VideoTexture for playback controller compatibility
-    return new THREE.VideoTexture(video)
+    return { needsUpdate: false, dispose() {} }
   }
 
   // --- Earth materials ---

@@ -4,10 +4,9 @@
  * Extracted from InteractiveSphere to isolate data-loading concerns.
  */
 
-import * as THREE from 'three'
 import { HLSService } from './hlsService'
 import { dataService } from './dataService'
-import type { Dataset, AppState, GlobeRenderer } from '../types'
+import type { Dataset, AppState, GlobeRenderer, VideoTextureHandle } from '../types'
 import { formatDate, isSubDailyPeriod, inferDisplayInterval } from '../utils/time'
 import { logger } from '../utils/logger'
 import { escapeHtml, escapeAttr } from '../ui/browseUI'
@@ -96,7 +95,7 @@ export async function loadVideoDataset(
   isMobile: boolean,
   playbackState: PlaybackState,
   callbacks: DatasetLoaderCallbacks,
-): Promise<{ hlsService: HLSService; videoTexture: THREE.VideoTexture }> {
+): Promise<{ hlsService: HLSService; videoTexture: VideoTextureHandle }> {
   const vimeoId = dataService.extractVimeoId(dataset.dataLink)
   if (!vimeoId) throw new Error(`Could not extract Vimeo ID from: ${dataset.dataLink}`)
 

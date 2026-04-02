@@ -2,8 +2,6 @@
  * Type definitions for Interactive Sphere project
  */
 
-import type * as THREE from 'three'
-
 /**
  * Supported dataset formats
  */
@@ -108,13 +106,21 @@ export interface AppState {
 }
 
 /**
- * Common renderer interface — the subset of methods that both SphereRenderer
- * and MapRenderer expose, used by modules like datasetLoader that don't care
- * which backend is active.
+ * Lightweight handle for a video texture, used by the playback controller
+ * to flag manual updates and clean up resources.
+ */
+export interface VideoTextureHandle {
+  needsUpdate: boolean
+  dispose(): void
+}
+
+/**
+ * Globe renderer interface used by modules like datasetLoader that interact
+ * with the MapLibre-based globe.
  */
 export interface GlobeRenderer {
   updateTexture(texture: HTMLCanvasElement | HTMLImageElement): void
-  setVideoTexture(video: HTMLVideoElement): THREE.VideoTexture
+  setVideoTexture(video: HTMLVideoElement): VideoTextureHandle
   flyTo(lat: number, lon: number, altitude?: number): void | Promise<void>
   toggleAutoRotate(): boolean
   setLatLngCallbacks(
@@ -129,25 +135,6 @@ export interface GlobeRenderer {
   loadCloudOverlay(url: string, onProgress?: (fraction: number) => void): Promise<void>
   removeCloudOverlay(): void
   dispose(): void
-}
-
-/**
- * Sphere rendering options
- */
-export interface SphereOptions {
-  radius: number
-  widthSegments: number
-  heightSegments: number
-  texture?: HTMLCanvasElement | HTMLImageElement
-}
-
-/**
- * Controls state
- */
-export interface ControlsState {
-  isRotating: boolean
-  autoRotate: boolean
-  zoomLevel: number
 }
 
 /**

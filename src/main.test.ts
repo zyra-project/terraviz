@@ -5,38 +5,21 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
  *
  * InteractiveSphere is not exported, so we test it by importing the module
  * and interacting with the app instance exposed on window. We mock the
- * heavy dependencies (SphereRenderer, dataService, HLSService) so these
+ * heavy dependencies (MapRenderer, dataService, HLSService) so these
  * tests run fast and in isolation.
  */
 
 // ---------------------------------------------------------------------------
-// Mock THREE + SphereRenderer
+// Mock MapRenderer
 // ---------------------------------------------------------------------------
-vi.mock('three', async (importOriginal) => {
-  const THREE = await importOriginal<typeof import('three')>()
-
-  class MockWebGLRenderer {
-    shadowMap = { enabled: false, type: THREE.PCFSoftShadowMap }
-    domElement = document.createElement('canvas')
-    setSize = vi.fn()
-    setPixelRatio = vi.fn()
-    render = vi.fn()
-    dispose = vi.fn()
-  }
-
-  class MockTextureLoader {
-    load = vi.fn().mockReturnValue(new THREE.Texture())
-  }
-
-  return { ...THREE, WebGLRenderer: MockWebGLRenderer, TextureLoader: MockTextureLoader }
-})
-
 vi.stubGlobal('requestAnimationFrame', vi.fn())
 vi.stubGlobal('cancelAnimationFrame', vi.fn())
 
-vi.mock('./services/sphereRenderer', () => ({
-  SphereRenderer: vi.fn().mockImplementation(() => ({
-    createSphere: vi.fn().mockReturnValue({}),
+vi.mock('./services/mapRenderer', () => ({
+  MapRenderer: vi.fn().mockImplementation(() => ({
+    init: vi.fn(),
+    getMap: vi.fn().mockReturnValue(null),
+    getCanvas: vi.fn().mockReturnValue(null),
     setLatLngCallbacks: vi.fn(),
     loadDefaultEarthMaterials: vi.fn().mockResolvedValue(undefined),
     loadCloudOverlay: vi.fn().mockResolvedValue(undefined),
@@ -48,6 +31,15 @@ vi.mock('./services/sphereRenderer', () => ({
     setVideoTexture: vi.fn().mockReturnValue({ needsUpdate: false, dispose: vi.fn() }),
     setCanvasDescription: vi.fn(),
     toggleAutoRotate: vi.fn().mockReturnValue(true),
+    flyTo: vi.fn().mockResolvedValue(undefined),
+    fitBounds: vi.fn(),
+    toggleLabels: vi.fn(),
+    toggleBoundaries: vi.fn(),
+    addMarker: vi.fn(),
+    clearMarkers: vi.fn(),
+    toggleTerrain: vi.fn(),
+    getViewContext: vi.fn().mockReturnValue(null),
+    highlightRegion: vi.fn(),
     dispose: vi.fn(),
   })),
 }))

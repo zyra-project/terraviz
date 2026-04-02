@@ -23,20 +23,20 @@ npm run test         # vitest run
 
 | File | Responsibility |
 |---|---|
-| `src/main.ts` | App entry — boots subsystems, orchestrates dataset loading |
+| `src/main.ts` | App entry — boots MapLibre renderer, orchestrates dataset loading |
 | `src/types/index.ts` | All shared types (`Dataset`, `ChatMessage`, `AppState`, `DocentConfig`…) |
+| `src/services/mapRenderer.ts` | MapLibre GL JS globe — GIBS tiles, navigation, markers, terrain |
+| `src/services/earthTileLayer.ts` | CustomLayerInterface — day/night blend, clouds, specular, sun, skybox |
 | `src/services/dataService.ts` | Fetches SOS catalog, merges enriched metadata, 1-hour cache |
 | `src/services/datasetLoader.ts` | Loads a dataset onto the globe (HLS or image); manages info panel |
 | `src/services/hlsService.ts` | HLS.js wrapper — adaptive bitrate streaming via Vimeo proxy |
-| `src/services/sphereRenderer.ts` | Three.js scene, sphere geometry, texture management |
-| `src/services/earthMaterials.ts` | Default Earth textures, atmosphere, clouds, sun lighting |
-| `src/services/inputHandler.ts` | Mouse/touch/keyboard globe controls |
 | `src/services/docentService.ts` | Orbit orchestrator — hybrid LLM + local engine |
 | `src/services/docentContext.ts` | LLM system prompt builder, history compression, tool definition |
 | `src/services/docentEngine.ts` | Local keyword-based fallback engine |
 | `src/services/llmProvider.ts` | OpenAI-compatible SSE streaming client + `/models` fetch |
 | `src/ui/chatUI.ts` | Orbit chat panel — rendering, settings, trigger positioning |
 | `src/ui/browseUI.ts` | Dataset browse/search overlay |
+| `src/ui/mapControlsUI.ts` | Map controls overlay — labels, boundaries, terrain toggles |
 | `src/ui/playbackController.ts` | Playback transport controls + portrait-mobile positioning |
 
 ---

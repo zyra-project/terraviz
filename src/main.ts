@@ -5,15 +5,12 @@
  * No dataset param = just the default Earth globe
  */
 
-import * as THREE from 'three'
-import { SphereRenderer } from './services/sphereRenderer'
 import { MapRenderer } from './services/mapRenderer'
-import { getRendererBackend } from './services/rendererToggle'
 import { HLSService } from './services/hlsService'
 import { dataService } from './services/dataService'
 import { formatDate, videoTimeToDate, isSubDailyPeriod, getSunPosition } from './utils/time'
 import { logger } from './utils/logger'
-import type { AppState, GlobeRenderer } from './types'
+import type { AppState, VideoTextureHandle } from './types'
 
 // Extracted modules
 import { showBrowseUI, hideBrowseUI } from './ui/browseUI'
@@ -32,8 +29,6 @@ import {
 import { initLegendForDataset, clearLegendCache, loadConfig } from './services/docentService'
 
 // --- App constants ---
-const SPHERE_SEGMENTS_MOBILE = 32
-const SPHERE_SEGMENTS_DESKTOP = 64
 const EARTH_TEXTURE_WEIGHT = 0.8
 const CLOUD_TEXTURE_WEIGHT = 0.2
 const LOADING_BASE_PROGRESS = 20
@@ -62,18 +57,12 @@ class InteractiveSphere {
 
   private readonly isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)
 
-  private renderer: GlobeRenderer | null = null
-  private readonly rendererBackend = getRendererBackend()
+  private renderer: MapRenderer | null = null
   private hlsService: HLSService | null = null
-  private videoTexture: THREE.VideoTexture | null = null
+  private videoTexture: VideoTextureHandle | null = null
   private playback: PlaybackState = createPlaybackState()
   private loadingHideTimer: ReturnType<typeof setTimeout> | null = null
   private loadGeneration = 0 // guards against concurrent dataset loads
-
-  /** Get the renderer as MapRenderer if it's the active backend. */
-  private getMapRenderer(): MapRenderer | null {
-    return this.rendererBackend === 'maplibre' ? this.renderer as unknown as MapRenderer : null
-  }
 
   /**
    * Boot the application: create the WebGL renderer, fetch the dataset
@@ -91,23 +80,10 @@ class InteractiveSphere {
       if (!container) throw new Error('Container element not found')
 
       this.setLoadingStatus('Creating renderer\u2026', 15)
-      if (this.rendererBackend === 'maplibre') {
-        const mapRenderer = new MapRenderer()
-        mapRenderer.init(container)
-        this.renderer = mapRenderer
-        initMapControls(mapRenderer)
-        logger.info('[App] Using MapLibre renderer')
-      } else {
-        const sphereRenderer = new SphereRenderer(container)
-        const segments = this.isMobile ? SPHERE_SEGMENTS_MOBILE : SPHERE_SEGMENTS_DESKTOP
-        sphereRenderer.createSphere({
-          radius: 1,
-          widthSegments: segments,
-          heightSegments: segments
-        })
-        this.renderer = sphereRenderer
-        logger.info('[App] Using Three.js renderer')
-      }
+      this.renderer = new MapRenderer()
+      this.renderer.init(container)
+      initMapControls(this.renderer)
+      logger.info('[App] Using MapLibre renderer')
 
       // Wire up lat/lng display
       const latlngEl = document.getElementById('latlng-display')
@@ -134,9 +110,7 @@ class InteractiveSphere {
 
       const datasetId = this.getDatasetIdFromUrl()
       if (datasetId) {
-        this.setLoadingStatus('Loading Earth texture\u2026', 50)
-        await this.loadDefaultTexture()
-        this.setLoadingStatus('Loading dataset\u2026', 65)
+        this.setLoadingStatus('Loading dataset\u2026', 50)
         await this.loadDataset(datasetId)
         this.setLoading(false)
         showChatTrigger()
@@ -176,22 +150,6 @@ class InteractiveSphere {
   private getDatasetIdFromUrl(): string | null {
     const params = new URLSearchParams(window.location.search)
     return params.get('dataset')
-  }
-
-  /** Load the fallback Earth diffuse texture from local assets. */
-  private loadDefaultTexture(): Promise<void> {
-    return new Promise((resolve) => {
-      const img = new Image()
-      img.onload = () => {
-        this.renderer?.updateTexture(img)
-        resolve()
-      }
-      img.onerror = () => {
-        logger.warn('[App] Default Earth texture not found, using solid color')
-        resolve()
-      }
-      img.src = '/assets/Earth_Diffuse_6K.jpg'
-    })
   }
 
   /** Fetch the dataset catalog from the data service and store in app state. */
@@ -464,11 +422,11 @@ class InteractiveSphere {
       onLoadDataset: (id) => { void this.selectDatasetFromChat(id) },
       onFlyTo: (lat, lon, altitude) => { void this.renderer?.flyTo(lat, lon, altitude) },
       onSetTime: (isoDate) => seekToDate(isoDate, this.hlsService, this.appState, this.playback),
-      onFitBounds: (bounds, _label) => { this.getMapRenderer()?.fitBounds(bounds) },
-      onAddMarker: (lat, lng, label) => { this.getMapRenderer()?.addMarker(lat, lng, label) },
-      onToggleLabels: (visible) => { this.getMapRenderer()?.toggleLabels(visible) },
-      onHighlightRegion: (geojson, _label) => { this.getMapRenderer()?.highlightRegion(geojson) },
-      getMapViewContext: () => this.getMapRenderer()?.getViewContext() ?? null,
+      onFitBounds: (bounds, _label) => { this.renderer?.fitBounds(bounds) },
+      onAddMarker: (lat, lng, label) => { this.renderer?.addMarker(lat, lng, label) },
+      onToggleLabels: (visible) => { this.renderer?.toggleLabels(visible) },
+      onHighlightRegion: (geojson, _label) => { this.renderer?.highlightRegion(geojson) },
+      getMapViewContext: () => this.renderer?.getViewContext() ?? null,
       getDatasets: () => this.appState.datasets,
       getCurrentDataset: () => this.appState.currentDataset,
       announce: (msg) => this.announce(msg),
