@@ -1011,3 +1011,376 @@ describe('processMessage — vision mode', () => {
     expect(systemMsg.content).toContain('Vision Analysis Mode')
   })
 })
+
+// --- Phase 5: New marker parsing in validateAndCleanText ---
+
+describe('validateAndCleanText — Phase 5 markers', () => {
+  it('extracts <<BOUNDS:west,south,east,north>> markers', () => {
+    const text = 'Here is the Amazon.\n<<BOUNDS:-82,-34,-34,13>>\nCheck it out.'
+    const { cleanedText, globeActions } = validateAndCleanText(text, datasets)
+    expect(globeActions).toHaveLength(1)
+    expect(globeActions[0].type).toBe('fit-bounds')
+    if (globeActions[0].type === 'fit-bounds') {
+      expect(globeActions[0].bounds).toEqual([-82, -34, -34, 13])
+      expect(globeActions[0].label).toBeUndefined()
+    }
+    expect(cleanedText).not.toContain('BOUNDS')
+  })
+
+  it('extracts <<BOUNDS:...>> with label', () => {
+    const text = '<<BOUNDS:-82,-34,-34,13,Amazon Basin>>'
+    const { globeActions } = validateAndCleanText(text, datasets)
+    expect(globeActions).toHaveLength(1)
+    if (globeActions[0].type === 'fit-bounds') {
+      expect(globeActions[0].label).toBe('Amazon Basin')
+    }
+  })
+
+  it('extracts <<MARKER:lat,lng,label>> markers', () => {
+    const text = 'Check out Boulder.\n<<MARKER:40.0,-105.3,Boulder, CO>>\nGreat city.'
+    const { cleanedText, globeActions } = validateAndCleanText(text, datasets)
+    expect(globeActions).toHaveLength(1)
+    expect(globeActions[0].type).toBe('add-marker')
+    if (globeActions[0].type === 'add-marker') {
+      expect(globeActions[0].lat).toBeCloseTo(40.0)
+      expect(globeActions[0].lng).toBeCloseTo(-105.3)
+      expect(globeActions[0].label).toBe('Boulder, CO')
+    }
+    expect(cleanedText).not.toContain('MARKER')
+  })
+
+  it('extracts <<MARKER:lat,lng>> without label', () => {
+    const text = '<<MARKER:35.7,139.7>>'
+    const { globeActions } = validateAndCleanText(text, datasets)
+    expect(globeActions).toHaveLength(1)
+    if (globeActions[0].type === 'add-marker') {
+      expect(globeActions[0].label).toBeUndefined()
+    }
+  })
+
+  it('extracts <<LABELS:on>> markers', () => {
+    const text = 'Let me turn on labels.\n<<LABELS:on>>'
+    const { cleanedText, globeActions } = validateAndCleanText(text, datasets)
+    expect(globeActions).toHaveLength(1)
+    expect(globeActions[0].type).toBe('toggle-labels')
+    if (globeActions[0].type === 'toggle-labels') {
+      expect(globeActions[0].visible).toBe(true)
+    }
+    expect(cleanedText).not.toContain('LABELS')
+  })
+
+  it('extracts <<LABELS:off>> markers', () => {
+    const text = '<<LABELS:off>>'
+    const { globeActions } = validateAndCleanText(text, datasets)
+    expect(globeActions).toHaveLength(1)
+    if (globeActions[0].type === 'toggle-labels') {
+      expect(globeActions[0].visible).toBe(false)
+    }
+  })
+
+  it('extracts <<REGION:name>> markers for known regions', () => {
+    const text = 'Let me highlight Brazil.\n<<REGION:Brazil>>'
+    const { cleanedText, globeActions } = validateAndCleanText(text, datasets)
+    expect(globeActions).toHaveLength(1)
+    expect(globeActions[0].type).toBe('highlight-region')
+    if (globeActions[0].type === 'highlight-region') {
+      expect(globeActions[0].label).toBe('Brazil')
+      expect(globeActions[0].bounds).toBeDefined()
+      expect(globeActions[0].geojson).toBeDefined()
+    }
+    expect(cleanedText).not.toContain('REGION')
+  })
+
+  it('strips <<REGION:name>> even for unknown regions', () => {
+    const text = 'Check out this place.\n<<REGION:Atlantis>>'
+    const { cleanedText, globeActions } = validateAndCleanText(text, datasets)
+    // Unknown region — no action but marker is still stripped from display
+    expect(globeActions.filter(a => a.type === 'highlight-region')).toHaveLength(0)
+    expect(cleanedText).not.toContain('REGION')
+    expect(cleanedText).not.toContain('<<')
+  })
+
+  it('extracts <<REGION:name>> for US states', () => {
+    const text = '<<REGION:Colorado>>'
+    const { globeActions } = validateAndCleanText(text, datasets)
+    expect(globeActions).toHaveLength(1)
+    if (globeActions[0].type === 'highlight-region') {
+      expect(globeActions[0].label).toBe('Colorado')
+    }
+  })
+
+  it('extracts multiple Phase 5 markers from same text', () => {
+    const text = '<<MARKER:40,-105,Denver>>\n<<BOUNDS:-109,37,-102,41,Colorado>>\n<<LABELS:on>>'
+    const { globeActions } = validateAndCleanText(text, datasets)
+    expect(globeActions).toHaveLength(3)
+    const types = globeActions.map(a => a.type)
+    expect(types).toContain('add-marker')
+    expect(types).toContain('fit-bounds')
+    expect(types).toContain('toggle-labels')
+  })
+
+  it('handles mixed Phase 3 and Phase 5 markers', () => {
+    const text = '<<LOAD:TEST_001>>\n<<FLY:29,-89>>\n<<MARKER:40,-105,Test>>\n<<REGION:Brazil>>'
+    const { validIds, globeActions, cleanedText } = validateAndCleanText(text, datasets)
+    expect(validIds.has('TEST_001')).toBe(true)
+    // FLY + MARKER + REGION = 3 actions (REGION resolves to highlight-region)
+    expect(globeActions.length).toBeGreaterThanOrEqual(3)
+    expect(cleanedText).toContain('<<LOAD:TEST_001>>')
+    expect(cleanedText).not.toContain('FLY')
+    expect(cleanedText).not.toContain('MARKER')
+    expect(cleanedText).not.toContain('REGION')
+  })
+})
+
+describe('processMessage — Phase 5 tool calls', () => {
+  const enabledConfig: DocentConfig = {
+    apiUrl: 'http://localhost:11434/v1',
+    apiKey: '',
+    model: 'test',
+    enabled: true,
+    readingLevel: 'general',
+    visionEnabled: false,
+  }
+
+  it('handles fit_bounds tool call', async () => {
+    const { streamChat } = await import('./llmProvider')
+    const mockedStream = vi.mocked(streamChat)
+
+    mockedStream.mockImplementation(async function* () {
+      yield { type: 'delta' as const, text: 'Here is the Amazon Basin.' }
+      yield {
+        type: 'tool_call' as const,
+        call: { name: 'fit_bounds', arguments: { west: -82, south: -34, east: -34, north: 13, label: 'Amazon Basin' } },
+      }
+      yield { type: 'done' as const }
+    })
+
+    const chunks: DocentStreamChunk[] = []
+    for await (const chunk of processMessage('show me the amazon', [], datasets, null, enabledConfig)) {
+      chunks.push(chunk)
+    }
+
+    const action = chunks.find(c => c.type === 'action' && c.action.type === 'fit-bounds')
+    expect(action).toBeDefined()
+    if (action?.type === 'action' && action.action.type === 'fit-bounds') {
+      expect(action.action.bounds).toEqual([-82, -34, -34, 13])
+      expect(action.action.label).toBe('Amazon Basin')
+    }
+  })
+
+  it('handles add_marker tool call', async () => {
+    const { streamChat } = await import('./llmProvider')
+    const mockedStream = vi.mocked(streamChat)
+
+    mockedStream.mockImplementation(async function* () {
+      yield { type: 'delta' as const, text: 'Marker placed.' }
+      yield {
+        type: 'tool_call' as const,
+        call: { name: 'add_marker', arguments: { lat: 40.0, lng: -105.3, label: 'Boulder' } },
+      }
+      yield { type: 'done' as const }
+    })
+
+    const chunks: DocentStreamChunk[] = []
+    for await (const chunk of processMessage('mark boulder', [], datasets, null, enabledConfig)) {
+      chunks.push(chunk)
+    }
+
+    const action = chunks.find(c => c.type === 'action' && c.action.type === 'add-marker')
+    expect(action).toBeDefined()
+    if (action?.type === 'action' && action.action.type === 'add-marker') {
+      expect(action.action.lat).toBeCloseTo(40.0)
+      expect(action.action.lng).toBeCloseTo(-105.3)
+      expect(action.action.label).toBe('Boulder')
+    }
+  })
+
+  it('handles toggle_labels tool call', async () => {
+    const { streamChat } = await import('./llmProvider')
+    const mockedStream = vi.mocked(streamChat)
+
+    mockedStream.mockImplementation(async function* () {
+      yield { type: 'delta' as const, text: 'Labels on.' }
+      yield {
+        type: 'tool_call' as const,
+        call: { name: 'toggle_labels', arguments: { visible: true } },
+      }
+      yield { type: 'done' as const }
+    })
+
+    const chunks: DocentStreamChunk[] = []
+    for await (const chunk of processMessage('show labels', [], datasets, null, enabledConfig)) {
+      chunks.push(chunk)
+    }
+
+    const action = chunks.find(c => c.type === 'action' && c.action.type === 'toggle-labels')
+    expect(action).toBeDefined()
+    if (action?.type === 'action' && action.action.type === 'toggle-labels') {
+      expect(action.action.visible).toBe(true)
+    }
+  })
+
+  it('handles highlight_region tool call with name parameter', async () => {
+    const { streamChat } = await import('./llmProvider')
+    const mockedStream = vi.mocked(streamChat)
+
+    mockedStream.mockImplementation(async function* () {
+      yield { type: 'delta' as const, text: 'Highlighting Brazil.' }
+      yield {
+        type: 'tool_call' as const,
+        call: { name: 'highlight_region', arguments: { name: 'Brazil' } },
+      }
+      yield { type: 'done' as const }
+    })
+
+    const chunks: DocentStreamChunk[] = []
+    for await (const chunk of processMessage('highlight brazil', [], datasets, null, enabledConfig)) {
+      chunks.push(chunk)
+    }
+
+    const highlight = chunks.find(c => c.type === 'action' && c.action.type === 'highlight-region')
+    expect(highlight).toBeDefined()
+    // Should also produce a fit-bounds action to navigate there
+    const fitBounds = chunks.find(c => c.type === 'action' && c.action.type === 'fit-bounds')
+    expect(fitBounds).toBeDefined()
+  })
+
+  it('handles highlight_region tool call with geojson parameter', async () => {
+    const { streamChat } = await import('./llmProvider')
+    const mockedStream = vi.mocked(streamChat)
+
+    const geojson = {
+      type: 'Feature' as const,
+      properties: {},
+      geometry: { type: 'Polygon' as const, coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]] },
+    }
+
+    mockedStream.mockImplementation(async function* () {
+      yield { type: 'delta' as const, text: 'Custom region.' }
+      yield {
+        type: 'tool_call' as const,
+        call: { name: 'highlight_region', arguments: { geojson, label: 'Custom' } },
+      }
+      yield { type: 'done' as const }
+    })
+
+    const chunks: DocentStreamChunk[] = []
+    for await (const chunk of processMessage('highlight this', [], datasets, null, enabledConfig)) {
+      chunks.push(chunk)
+    }
+
+    const action = chunks.find(c => c.type === 'action' && c.action.type === 'highlight-region')
+    expect(action).toBeDefined()
+    if (action?.type === 'action' && action.action.type === 'highlight-region') {
+      expect(action.action.label).toBe('Custom')
+    }
+  })
+
+  it('handles fly_to tool call with place parameter', async () => {
+    const { streamChat } = await import('./llmProvider')
+    const mockedStream = vi.mocked(streamChat)
+
+    mockedStream.mockImplementation(async function* () {
+      yield { type: 'delta' as const, text: 'Flying to Colorado.' }
+      yield {
+        type: 'tool_call' as const,
+        call: { name: 'fly_to', arguments: { place: 'Colorado' } },
+      }
+      yield { type: 'done' as const }
+    })
+
+    const chunks: DocentStreamChunk[] = []
+    for await (const chunk of processMessage('go to colorado', [], datasets, null, enabledConfig)) {
+      chunks.push(chunk)
+    }
+
+    const action = chunks.find(c => c.type === 'action' && c.action.type === 'fly-to')
+    expect(action).toBeDefined()
+    if (action?.type === 'action' && action.action.type === 'fly-to') {
+      // Colorado center is approximately lat 39, lon -105.5
+      expect(action.action.lat).toBeCloseTo(39, 0)
+      expect(action.action.lon).toBeCloseTo(-105.5, 0)
+    }
+  })
+
+  it('ignores fly_to with unknown place name', async () => {
+    const { streamChat } = await import('./llmProvider')
+    const mockedStream = vi.mocked(streamChat)
+
+    mockedStream.mockImplementation(async function* () {
+      yield { type: 'delta' as const, text: 'Hmm.' }
+      yield {
+        type: 'tool_call' as const,
+        call: { name: 'fly_to', arguments: { place: 'Mordor' } },
+      }
+      yield { type: 'done' as const }
+    })
+
+    const chunks: DocentStreamChunk[] = []
+    for await (const chunk of processMessage('go to mordor', [], datasets, null, enabledConfig)) {
+      chunks.push(chunk)
+    }
+
+    const action = chunks.find(c => c.type === 'action' && c.action.type === 'fly-to')
+    expect(action).toBeUndefined()
+  })
+})
+
+describe('processMessage — rewrite for Phase 5 markers', () => {
+  it('yields rewrite chunk when text contains <<REGION:...>> markers', async () => {
+    const { streamChat } = await import('./llmProvider')
+    const mockedStream = vi.mocked(streamChat)
+
+    mockedStream.mockImplementation(async function* () {
+      yield { type: 'delta' as const, text: 'Check out Colorado.\n<<REGION:Colorado>>' }
+      yield { type: 'done' as const }
+    })
+
+    const config: DocentConfig = {
+      apiUrl: 'http://localhost:11434/v1',
+      apiKey: '',
+      model: 'test',
+      enabled: true,
+      readingLevel: 'general',
+      visionEnabled: false,
+    }
+
+    const chunks: DocentStreamChunk[] = []
+    for await (const chunk of processMessage('highlight colorado', [], datasets, null, config)) {
+      chunks.push(chunk)
+    }
+
+    const rewrite = chunks.find(c => c.type === 'rewrite') as { type: 'rewrite'; text: string } | undefined
+    expect(rewrite).toBeDefined()
+    expect(rewrite!.text).not.toContain('REGION')
+    expect(rewrite!.text).toContain('Check out Colorado.')
+  })
+
+  it('yields rewrite chunk even for unknown <<REGION:...>> markers', async () => {
+    const { streamChat } = await import('./llmProvider')
+    const mockedStream = vi.mocked(streamChat)
+
+    mockedStream.mockImplementation(async function* () {
+      yield { type: 'delta' as const, text: 'Looking at Atlantis.\n<<REGION:Atlantis>>' }
+      yield { type: 'done' as const }
+    })
+
+    const config: DocentConfig = {
+      apiUrl: 'http://localhost:11434/v1',
+      apiKey: '',
+      model: 'test',
+      enabled: true,
+      readingLevel: 'general',
+      visionEnabled: false,
+    }
+
+    const chunks: DocentStreamChunk[] = []
+    for await (const chunk of processMessage('highlight atlantis', [], datasets, null, config)) {
+      chunks.push(chunk)
+    }
+
+    const rewrite = chunks.find(c => c.type === 'rewrite') as { type: 'rewrite'; text: string } | undefined
+    expect(rewrite).toBeDefined()
+    expect(rewrite!.text).not.toContain('REGION')
+  })
+})

@@ -109,6 +109,7 @@ function setupDOM(): void {
       <button id="auto-rotate-btn"></button>
     </div>
     <button id="auto-rotate-standalone"></button>
+    <div id="map-controls" class="hidden"></div>
     <button id="home-btn" class="hidden"></button>
     <div id="browse-overlay" class="hidden">
       <div id="browse-category-bar"></div>

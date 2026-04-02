@@ -7,9 +7,10 @@
 
 import type { Dataset, ChatMessage, ChatAction, DocentConfig, LegendCache } from '../types'
 import { streamChat, checkAvailability, type AvailabilityResult, type LLMMessage, type LLMContentPart } from './llmProvider'
-import { buildSystemPromptForTurn, buildCompressedHistory, getLoadDatasetTool, getFlyToTool, getSetTimeTool } from './docentContext'
+import { buildSystemPromptForTurn, buildCompressedHistory, getLoadDatasetTool, getFlyToTool, getSetTimeTool, getFitBoundsTool, getAddMarkerTool, getToggleLabelsTool, getHighlightRegionTool } from './docentContext'
 import { parseIntent, generateResponse, searchDatasets, evaluateAutoLoad } from './docentEngine'
 import { ensureLoaded as ensureQALoaded, getRelevantQA } from './qaService'
+import { resolveRegion, boundsToGeoJSON } from '../data/regions'
 import { logger } from '../utils/logger'
 
 // --- Constants ---
@@ -303,10 +304,14 @@ export async function testConnection(config: DocentConfig): Promise<Availability
  * then streams LLM text in parallel. Falls back to local-only if LLM is unavailable.
  */
 
-/** A fly-to or set-time action extracted from inline markers in LLM text. */
+/** A globe-control action extracted from inline markers in LLM text. */
 export type ExtractedGlobeAction =
   | { type: 'fly-to'; lat: number; lon: number; altitude?: number }
   | { type: 'set-time'; isoDate: string }
+  | { type: 'fit-bounds'; bounds: [number, number, number, number]; label?: string }
+  | { type: 'add-marker'; lat: number; lng: number; label?: string }
+  | { type: 'toggle-labels'; visible: boolean }
+  | { type: 'highlight-region'; geojson: GeoJSON.GeoJSON; label: string; bounds: [number, number, number, number] }
 
 /**
  * Validate dataset IDs found in LLM text against the catalog.
@@ -384,6 +389,49 @@ export function validateAndCleanText(
     }
   }
 
+  // Extract <<BOUNDS:west,south,east,north[,label]>> markers
+  for (const match of text.matchAll(/<?<BOUNDS:\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)(?:\s*,\s*([^>]*?))?\s*>>?\n?/g)) {
+    const west = parseFloat(match[1])
+    const south = parseFloat(match[2])
+    const east = parseFloat(match[3])
+    const north = parseFloat(match[4])
+    const label = match[5]?.trim() || undefined
+    if (!isNaN(west) && !isNaN(south) && !isNaN(east) && !isNaN(north)) {
+      globeActions.push({ type: 'fit-bounds', bounds: [west, south, east, north], label })
+    }
+  }
+
+  // Extract <<MARKER:lat,lng,label>> markers
+  for (const match of text.matchAll(/<?<MARKER:\s*([-\d.]+)\s*,\s*([-\d.]+)(?:\s*,\s*([^>]*?))?\s*>>?\n?/g)) {
+    const lat = parseFloat(match[1])
+    const lng = parseFloat(match[2])
+    const label = match[3]?.trim() || undefined
+    if (!isNaN(lat) && !isNaN(lng)) {
+      globeActions.push({ type: 'add-marker', lat, lng, label })
+    }
+  }
+
+  // Extract <<LABELS:on|off>> markers
+  for (const match of text.matchAll(/<?<LABELS:\s*(on|off)\s*>>?\n?/gi)) {
+    globeActions.push({ type: 'toggle-labels', visible: match[1].toLowerCase() === 'on' })
+  }
+
+  // Extract <<REGION:name>> markers — resolve name to bounding box + GeoJSON
+  for (const match of text.matchAll(/<?<REGION:\s*([^>]+?)\s*>>?\n?/g)) {
+    const regionName = match[1].trim()
+    const region = resolveRegion(regionName)
+    if (region) {
+      globeActions.push({
+        type: 'highlight-region',
+        geojson: boundsToGeoJSON(region.bounds, region.name),
+        label: region.name,
+        bounds: region.bounds,
+      })
+    } else {
+      logger.warn('[Docent] Unknown region in <<REGION:...>> marker:', regionName)
+    }
+  }
+
   // Fallback: parse bare `fly_to: lat, lon, alt` patterns (LLMs that ignore marker instructions)
   for (const match of text.matchAll(/\bfly_to\s*[:(\s]\s*([-\d.]+)\s*,\s*([-\d.]+)(?:\s*,\s*([-\d.]+))?\s*\)?/gi)) {
     const lat = parseFloat(match[1])
@@ -415,9 +463,13 @@ export function validateAndCleanText(
     return id
   })
 
-  // Strip <<FLY:...>> and <<TIME:...>> markers from displayed text
+  // Strip <<FLY:...>>, <<TIME:...>>, <<BOUNDS:...>>, <<MARKER:...>>, <<LABELS:...>> markers from displayed text
   cleanedText = cleanedText.replace(/<?<FLY:[^>]+>>?\n?/g, '')
   cleanedText = cleanedText.replace(/<?<TIME:[^>]+>>?\n?/g, '')
+  cleanedText = cleanedText.replace(/<?<BOUNDS:[^>]+>>?\n?/g, '')
+  cleanedText = cleanedText.replace(/<?<MARKER:[^>]+>>?\n?/g, '')
+  cleanedText = cleanedText.replace(/<?<LABELS:[^>]+>>?\n?/g, '')
+  cleanedText = cleanedText.replace(/<?<REGION:[^>]+>>?\n?/g, '')
 
   // Strip bare fly_to/set_time text patterns (entire line)
   cleanedText = cleanedText.replace(/^.*\bfly_to\s*[:(\s]\s*[-\d.,\s]+\)?\s*$/gim, '')
@@ -466,7 +518,9 @@ async function* emitValidatedActions(
   yieldedIds: Set<string>,
 ): AsyncGenerator<DocentStreamChunk> {
   const { cleanedText, validIds, invalidIds, globeActions } = validateAndCleanText(accumulatedText, datasets)
-  const needsRewrite = invalidIds.size > 0 || globeActions.length > 0
+  // Rewrite whenever the text was modified — covers stripped markers, hallucinated IDs,
+  // and unresolved <<REGION:...>> names that still need to be removed from display.
+  const needsRewrite = cleanedText !== accumulatedText
   if (invalidIds.size > 0) {
     logger.warn('[Docent] Stripped hallucinated dataset IDs:', Array.from(invalidIds))
   }
@@ -479,8 +533,18 @@ async function* emitValidatedActions(
   for (const ga of globeActions) {
     if (ga.type === 'fly-to') {
       yield { type: 'action', action: { type: 'fly-to', lat: ga.lat, lon: ga.lon, altitude: ga.altitude } }
-    } else {
+    } else if (ga.type === 'set-time') {
       yield { type: 'action', action: { type: 'set-time', isoDate: ga.isoDate } }
+    } else if (ga.type === 'fit-bounds') {
+      yield { type: 'action', action: { type: 'fit-bounds', bounds: ga.bounds, label: ga.label } }
+    } else if (ga.type === 'add-marker') {
+      yield { type: 'action', action: { type: 'add-marker', lat: ga.lat, lng: ga.lng, label: ga.label } }
+    } else if (ga.type === 'toggle-labels') {
+      yield { type: 'action', action: { type: 'toggle-labels', visible: ga.visible } }
+    } else if (ga.type === 'highlight-region') {
+      // Highlight the region and navigate to it
+      yield { type: 'action', action: { type: 'highlight-region', geojson: ga.geojson, label: ga.label } }
+      yield { type: 'action', action: { type: 'fit-bounds', bounds: ga.bounds, label: ga.label } }
     }
   }
 }
@@ -493,6 +557,7 @@ export async function* processMessage(
   config?: DocentConfig,
   screenshotDataUrl?: string | null,
   viewContext?: string,
+  mapViewContext?: Parameters<typeof buildSystemPromptForTurn>[8],
 ): AsyncGenerator<DocentStreamChunk> {
   const cfg = config ?? loadConfig()
 
@@ -564,6 +629,7 @@ export async function* processMessage(
         !visionActive ? legendDescription : null,
         !visionActive ? currentTime : null,
         qaContext || null,
+        mapViewContext,
       )
 
       if (cfg.debugPrompt) {
@@ -618,7 +684,7 @@ export async function* processMessage(
         ...buildCompressedHistory(history),
         userMessage,
       ]
-      const tools = [getLoadDatasetTool(), getFlyToTool(), getSetTimeTool()]
+      const tools = [getLoadDatasetTool(), getFlyToTool(), getSetTimeTool(), getFitBoundsTool(), getAddMarkerTool(), getToggleLabelsTool(), getHighlightRegionTool()]
 
       // Auto-switch to vision model when using the default CF proxy
       const normalizedUrl = cfg.apiUrl.replace(/\/+$/, '')
@@ -675,11 +741,21 @@ export async function* processMessage(
                 }
               }
             } else if (chunk.call.name === 'fly_to') {
-              const args = chunk.call.arguments as { lat?: number; lon?: number; altitude?: number }
+              const args = chunk.call.arguments as { lat?: number; lon?: number; place?: string; altitude?: number }
               if (typeof args.lat === 'number' && typeof args.lon === 'number') {
                 yield {
                   type: 'action',
                   action: { type: 'fly-to', lat: args.lat, lon: args.lon, altitude: args.altitude },
+                }
+              } else if (args.place) {
+                // Resolve place name to coordinates via region lookup
+                const region = resolveRegion(args.place)
+                if (region) {
+                  const [west, south, east, north] = region.bounds
+                  yield {
+                    type: 'action',
+                    action: { type: 'fly-to', lat: (south + north) / 2, lon: (west + east) / 2, altitude: args.altitude },
+                  }
                 }
               }
             } else if (chunk.call.name === 'set_time') {
@@ -688,6 +764,51 @@ export async function* processMessage(
                 yield {
                   type: 'action',
                   action: { type: 'set-time', isoDate: args.date },
+                }
+              }
+            } else if (chunk.call.name === 'fit_bounds') {
+              const args = chunk.call.arguments as { west?: number; south?: number; east?: number; north?: number; label?: string }
+              if (typeof args.west === 'number' && typeof args.south === 'number' && typeof args.east === 'number' && typeof args.north === 'number') {
+                yield {
+                  type: 'action',
+                  action: { type: 'fit-bounds', bounds: [args.west, args.south, args.east, args.north], label: args.label },
+                }
+              }
+            } else if (chunk.call.name === 'add_marker') {
+              const args = chunk.call.arguments as { lat?: number; lng?: number; label?: string }
+              if (typeof args.lat === 'number' && typeof args.lng === 'number') {
+                yield {
+                  type: 'action',
+                  action: { type: 'add-marker', lat: args.lat, lng: args.lng, label: args.label },
+                }
+              }
+            } else if (chunk.call.name === 'toggle_labels') {
+              const args = chunk.call.arguments as { visible?: boolean }
+              if (typeof args.visible === 'boolean') {
+                yield {
+                  type: 'action',
+                  action: { type: 'toggle-labels', visible: args.visible },
+                }
+              }
+            } else if (chunk.call.name === 'highlight_region') {
+              const args = chunk.call.arguments as { geojson?: GeoJSON.GeoJSON; name?: string; label?: string }
+              if (args.geojson) {
+                yield {
+                  type: 'action',
+                  action: { type: 'highlight-region', geojson: args.geojson, label: args.label },
+                }
+              } else if (args.name) {
+                // Resolve by name from the region lookup
+                const region = resolveRegion(args.name)
+                if (region) {
+                  yield {
+                    type: 'action',
+                    action: { type: 'highlight-region', geojson: boundsToGeoJSON(region.bounds, region.name), label: region.name },
+                  }
+                  yield {
+                    type: 'action',
+                    action: { type: 'fit-bounds', bounds: region.bounds, label: region.name },
+                  }
                 }
               }
             }

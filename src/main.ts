@@ -17,6 +17,7 @@ import type { AppState, GlobeRenderer } from './types'
 
 // Extracted modules
 import { showBrowseUI, hideBrowseUI } from './ui/browseUI'
+import { initMapControls, updateMapControlsPosition } from './ui/mapControlsUI'
 import { initChatUI, openChat, notifyDatasetChanged, showChatTrigger, hideChatTrigger, closeChat, flushPendingGlobeActions } from './ui/chatUI'
 import {
   createPlaybackState, startPlaybackLoop, stopPlaybackLoop,
@@ -69,6 +70,11 @@ class InteractiveSphere {
   private loadingHideTimer: ReturnType<typeof setTimeout> | null = null
   private loadGeneration = 0 // guards against concurrent dataset loads
 
+  /** Get the renderer as MapRenderer if it's the active backend. */
+  private getMapRenderer(): MapRenderer | null {
+    return this.rendererBackend === 'maplibre' ? this.renderer as unknown as MapRenderer : null
+  }
+
   /**
    * Boot the application: create the WebGL renderer, fetch the dataset
    * catalog, and either load a URL-specified dataset or show the default
@@ -89,6 +95,7 @@ class InteractiveSphere {
         const mapRenderer = new MapRenderer()
         mapRenderer.init(container)
         this.renderer = mapRenderer
+        initMapControls(mapRenderer)
         logger.info('[App] Using MapLibre renderer')
       } else {
         const sphereRenderer = new SphereRenderer(container)
@@ -342,6 +349,7 @@ class InteractiveSphere {
     if (standalone) {
       standalone.classList.toggle('hidden', show)
     }
+    updateMapControlsPosition()
   }
 
   /** Detect WebGL support. If unavailable, display troubleshooting instructions and return false. */
@@ -456,6 +464,11 @@ class InteractiveSphere {
       onLoadDataset: (id) => { void this.selectDatasetFromChat(id) },
       onFlyTo: (lat, lon, altitude) => { void this.renderer?.flyTo(lat, lon, altitude) },
       onSetTime: (isoDate) => seekToDate(isoDate, this.hlsService, this.appState, this.playback),
+      onFitBounds: (bounds, _label) => { this.getMapRenderer()?.fitBounds(bounds) },
+      onAddMarker: (lat, lng, label) => { this.getMapRenderer()?.addMarker(lat, lng, label) },
+      onToggleLabels: (visible) => { this.getMapRenderer()?.toggleLabels(visible) },
+      onHighlightRegion: (geojson, _label) => { this.getMapRenderer()?.highlightRegion(geojson) },
+      getMapViewContext: () => this.getMapRenderer()?.getViewContext() ?? null,
       getDatasets: () => this.appState.datasets,
       getCurrentDataset: () => this.appState.currentDataset,
       announce: (msg) => this.announce(msg),

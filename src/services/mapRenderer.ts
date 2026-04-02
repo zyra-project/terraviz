@@ -120,16 +120,51 @@ function createGlobeStyle(): StyleSpecification {
       },
       // --- Vector layers (hidden by default, toggle-able) ---
       {
+        id: 'coastline-halo',
+        type: 'line',
+        source: 'openmaptiles',
+        'source-layer': 'water',
+        filter: ['==', 'class', 'ocean'],
+        layout: { visibility: 'none' },
+        paint: {
+          'line-color': 'rgba(0, 0, 0, 0.5)',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 0, 2, 5, 4, 8, 5],
+        },
+      },
+      {
+        id: 'coastline',
+        type: 'line',
+        source: 'openmaptiles',
+        'source-layer': 'water',
+        filter: ['==', 'class', 'ocean'],
+        layout: { visibility: 'none' },
+        paint: {
+          'line-color': 'rgba(255, 255, 255, 0.7)',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 0, 0.6, 5, 1.5, 8, 2],
+        },
+      },
+      {
+        id: 'boundaries-halo',
+        type: 'line',
+        source: 'openmaptiles',
+        'source-layer': 'boundary',
+        filter: ['all', ['==', 'admin_level', 2], ['!=', 'maritime', 1]],
+        layout: { visibility: 'none' },
+        paint: {
+          'line-color': 'rgba(0, 0, 0, 0.6)',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 0, 2.5, 5, 5, 8, 6],
+        },
+      },
+      {
         id: 'boundaries',
         type: 'line',
         source: 'openmaptiles',
         'source-layer': 'boundary',
-        filter: ['==', 'admin_level', 2],
+        filter: ['all', ['==', 'admin_level', 2], ['!=', 'maritime', 1]],
         layout: { visibility: 'none' },
         paint: {
-          'line-color': 'rgba(255, 255, 255, 0.4)',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 0, 0.5, 5, 1.5, 8, 2],
-          'line-dasharray': [3, 2],
+          'line-color': 'rgba(255, 255, 255, 0.85)',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 0, 0.8, 5, 2, 8, 3],
         },
       },
       {
@@ -277,20 +312,23 @@ export class MapRenderer {
     canvas.setAttribute('aria-label', 'Interactive 3D globe visualization')
     canvas.id = 'globe-canvas'
 
-    // Add earth tile layer, then move label layers above it so they aren't
-    // darkened by the night-side multiply blend pass.
+    // Add earth tile layer (2d — renders below labels), then skybox layer
+    // (3d — renders after everything, uses depth test for stars behind globe).
+    // Move label layers above the earth tile layer so they aren't darkened.
     this.map.on('load', () => {
       console.info('[MapRenderer] Map loaded with globe projection')
       this.earthLayer = createEarthTileLayer()
       this.map!.addLayer(this.earthLayer.layer as unknown as maplibregl.LayerSpecification)
 
-      // Move label/boundary layers above the custom layer so they aren't
-      // darkened by the night-side multiply blend
+      // Move label/boundary layers above the earth tile layer
       for (const id of this.labelLayerIds) {
         try { this.map!.moveLayer(id) } catch { /* layer may not exist */ }
       }
 
-      console.info('[MapRenderer] Earth tile layer added, labels moved above')
+      // Add skybox as a separate 3d layer (renders after all 2d layers)
+      this.map!.addLayer(this.earthLayer.skyboxLayer as unknown as maplibregl.LayerSpecification)
+
+      console.info('[MapRenderer] Earth tile + skybox layers added, labels moved above')
     })
   }
 
@@ -349,7 +387,7 @@ export class MapRenderer {
 
   // --- Label & boundary layer toggles ---
 
-  private readonly labelLayerIds = ['boundaries', 'country-labels', 'city-labels', 'ocean-labels']
+  private readonly labelLayerIds = ['coastline-halo', 'coastline', 'boundaries-halo', 'boundaries', 'country-labels', 'city-labels', 'ocean-labels']
 
   /** Show or hide all label and boundary layers. */
   toggleLabels(visible?: boolean): boolean {
@@ -363,12 +401,15 @@ export class MapRenderer {
     return show
   }
 
-  /** Show or hide only boundary lines. */
+  /** Show or hide boundary + coastline lines. */
   toggleBoundaries(visible?: boolean): boolean {
     if (!this.map) return false
     const current = this.map.getLayoutProperty('boundaries', 'visibility')
     const show = visible ?? (current === 'none')
-    try { this.map.setLayoutProperty('boundaries', 'visibility', show ? 'visible' : 'none') } catch { /* noop */ }
+    const vis = show ? 'visible' : 'none'
+    for (const id of ['coastline-halo', 'coastline', 'boundaries-halo', 'boundaries']) {
+      try { this.map.setLayoutProperty(id, 'visibility', vis) } catch { /* noop */ }
+    }
     return show
   }
 
@@ -376,7 +417,8 @@ export class MapRenderer {
 
   private markers: maplibregl.Marker[] = []
 
-  /** Add a marker at the given coordinates with an optional popup label. */
+  /** Add a marker at the given coordinates with an optional popup label.
+   *  The popup opens automatically so the label is immediately visible. */
   addMarker(lat: number, lng: number, label?: string): maplibregl.Marker | null {
     if (!this.map) return null
     const marker = new maplibregl.Marker({ color: '#4da6ff' })
@@ -387,6 +429,8 @@ export class MapRenderer {
       ))
     }
     marker.addTo(this.map)
+    // Auto-open popup so label is immediately visible
+    if (label) marker.togglePopup()
     this.markers.push(marker)
     return marker
   }
@@ -584,6 +628,122 @@ export class MapRenderer {
   /** Cloud removal is handled by the earth tile layer. */
   removeCloudOverlay(): void {
     // Phase 1
+  }
+
+  // --- View context for LLM ---
+
+  /**
+   * Query the current viewport state and visible geographic features.
+   * Returns a structured object the LLM can use for richer context.
+   */
+  getViewContext(): {
+    center: { lat: number; lng: number }
+    zoom: number
+    bearing: number
+    pitch: number
+    bounds: { west: number; south: number; east: number; north: number }
+    visibleCountries: string[]
+    visibleOceans: string[]
+  } | null {
+    if (!this.map) return null
+    const center = this.map.getCenter()
+    const bounds = this.map.getBounds()
+    const visibleCountries: string[] = []
+    const visibleOceans: string[] = []
+
+    try {
+      const features = this.map.queryRenderedFeatures(undefined, {
+        layers: ['country-labels'],
+      })
+      const seen = new Set<string>()
+      for (const f of features) {
+        const name = f.properties?.['name:latin'] ?? f.properties?.name
+        if (name && !seen.has(name)) {
+          seen.add(name)
+          visibleCountries.push(name)
+        }
+      }
+    } catch { /* layer may not exist */ }
+
+    try {
+      const features = this.map.queryRenderedFeatures(undefined, {
+        layers: ['ocean-labels'],
+      })
+      const seen = new Set<string>()
+      for (const f of features) {
+        const name = f.properties?.['name:latin'] ?? f.properties?.name
+        if (name && !seen.has(name)) {
+          seen.add(name)
+          visibleOceans.push(name)
+        }
+      }
+    } catch { /* layer may not exist */ }
+
+    return {
+      center: { lat: center.lat, lng: center.lng },
+      zoom: this.map.getZoom(),
+      bearing: this.map.getBearing(),
+      pitch: this.map.getPitch(),
+      bounds: {
+        west: bounds.getWest(),
+        south: bounds.getSouth(),
+        east: bounds.getEast(),
+        north: bounds.getNorth(),
+      },
+      visibleCountries,
+      visibleOceans,
+    }
+  }
+
+  // --- GeoJSON region highlighting ---
+
+  private highlightCounter = 0
+
+  /**
+   * Highlight a GeoJSON region on the map.
+   * Returns the layer ID for later removal.
+   */
+  highlightRegion(geojson: GeoJSON.GeoJSON, options?: { color?: string; opacity?: number }): string | null {
+    if (!this.map) return null
+    const id = `highlight-${++this.highlightCounter}`
+    const sourceId = `${id}-source`
+    this.map.addSource(sourceId, { type: 'geojson', data: geojson })
+    this.map.addLayer({
+      id: `${id}-fill`,
+      type: 'fill',
+      source: sourceId,
+      paint: {
+        'fill-color': options?.color ?? 'rgba(77, 166, 255, 0.3)',
+        'fill-opacity': options?.opacity ?? 0.3,
+      },
+    })
+    this.map.addLayer({
+      id: `${id}-outline`,
+      type: 'line',
+      source: sourceId,
+      paint: {
+        'line-color': options?.color ?? '#4da6ff',
+        'line-width': 2,
+      },
+    })
+    return id
+  }
+
+  /** Remove a highlighted region by its ID. */
+  removeHighlight(id: string): void {
+    if (!this.map) return
+    try { this.map.removeLayer(`${id}-fill`) } catch { /* noop */ }
+    try { this.map.removeLayer(`${id}-outline`) } catch { /* noop */ }
+    try { this.map.removeSource(`${id}-source`) } catch { /* noop */ }
+  }
+
+  /** Remove all highlighted regions. */
+  clearHighlights(): void {
+    if (!this.map) return
+    for (let i = 1; i <= this.highlightCounter; i++) {
+      this.removeHighlight(`highlight-${i}`)
+    }
+    this.highlightCounter = 0
   }
 
   // --- Disposal ---

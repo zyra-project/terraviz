@@ -24,6 +24,11 @@ export interface ChatCallbacks {
   onLoadDataset: (id: string) => void
   onFlyTo: (lat: number, lon: number, altitude?: number) => void
   onSetTime: (isoDate: string) => { success: boolean; message: string }
+  onFitBounds: (bounds: [number, number, number, number], label?: string) => void
+  onAddMarker: (lat: number, lng: number, label?: string) => void
+  onToggleLabels: (visible: boolean) => void
+  onHighlightRegion: (geojson: GeoJSON.GeoJSON, label?: string) => void
+  getMapViewContext: () => unknown
   getDatasets: () => Dataset[]
   getCurrentDataset: () => Dataset | null
   announce: (message: string) => void
@@ -141,7 +146,7 @@ export function clearChat(): void {
 
 // --- Globe control execution ---
 
-/** Execute a fly-to or set-time action immediately. */
+/** Execute a globe-control action immediately. */
 function executeGlobeAction(action: ChatAction): void {
   if (!callbacks) return
   if (action.type === 'fly-to') {
@@ -159,6 +164,14 @@ function executeGlobeAction(action: ChatAction): void {
         }
       }
     }
+  } else if (action.type === 'fit-bounds') {
+    callbacks.onFitBounds(action.bounds, action.label)
+  } else if (action.type === 'add-marker') {
+    callbacks.onAddMarker(action.lat, action.lng, action.label)
+  } else if (action.type === 'toggle-labels') {
+    callbacks.onToggleLabels(action.visible)
+  } else if (action.type === 'highlight-region') {
+    callbacks.onHighlightRegion(action.geojson, action.label)
   }
 }
 
@@ -491,6 +504,9 @@ async function handleSend(): Promise<void> {
     const screenshot = shouldCaptureVision ? captureGlobeScreenshot() : null
     const viewContext = shouldCaptureVision ? captureViewContext() : undefined
 
+    // Capture map geographic context for the LLM system prompt
+    const mapViewContext = callbacks.getMapViewContext?.() ?? undefined
+
     const stream = processMessage(
       text,
       messages.slice(0, -2), // history without user msg or placeholder (processMessage re-adds user msg)
@@ -499,6 +515,7 @@ async function handleSend(): Promise<void> {
       config,
       screenshot,
       viewContext,
+      mapViewContext as any,
     )
 
     let firstChunk = true
@@ -520,7 +537,7 @@ async function handleSend(): Promise<void> {
           docentMsg.actions.push(chunk.action)
           // Globe-control actions are always deferred during streaming;
           // flushed at 'done' (immediate) or after dataset loads (deferred)
-          if (chunk.action.type === 'fly-to' || chunk.action.type === 'set-time') {
+          if (chunk.action.type !== 'load-dataset') {
             pendingGlobeActions.push(chunk.action)
           }
           updateStreamingMessage(docentMsg)
@@ -749,6 +766,21 @@ function renderActions(actions: ChatAction[]): string {
     }
     if (a.type === 'set-time') {
       return `<span class="chat-action-status" aria-label="Seeking to ${escapeAttr(a.isoDate)}">Seeking to ${escapeHtml(a.isoDate)}</span>`
+    }
+    if (a.type === 'fit-bounds') {
+      const label = a.label ?? 'region'
+      return `<span class="chat-action-status" aria-label="Navigating to ${escapeAttr(label)}">Navigating to ${escapeHtml(label)}</span>`
+    }
+    if (a.type === 'add-marker') {
+      const label = a.label ?? `${a.lat.toFixed(1)}, ${a.lng.toFixed(1)}`
+      return `<span class="chat-action-status" aria-label="Marker: ${escapeAttr(label)}">Marker: ${escapeHtml(label)}</span>`
+    }
+    if (a.type === 'toggle-labels') {
+      return `<span class="chat-action-status" aria-label="${a.visible ? 'Labels shown' : 'Labels hidden'}">${a.visible ? 'Labels shown' : 'Labels hidden'}</span>`
+    }
+    if (a.type === 'highlight-region') {
+      const label = a.label ?? 'region'
+      return `<span class="chat-action-status" aria-label="Highlighted ${escapeAttr(label)}">Highlighted ${escapeHtml(label)}</span>`
     }
     return ''
   }).join('')

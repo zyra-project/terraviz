@@ -149,6 +149,7 @@ export function buildSystemPromptForTurn(
   legendDescription?: string | null,
   currentTime?: string | null,
   qaContext?: string | null,
+  mapViewContext?: Parameters<typeof buildViewContextSection>[0],
 ): string {
   const categorySummary = buildCategorySummary(datasets)
   const currentContext = buildCurrentDatasetContext(currentDataset, legendDescription, currentTime)
@@ -175,7 +176,7 @@ IMPORTANT: All datasets are GLOBAL — they cover the entire Earth, rendered on 
 5. DECLINE off-topic requests politely: "That's outside my area! I'm here to help you explore Earth science data. Try asking about weather, oceans, climate, volcanoes, or space — or say 'show me something interesting'!"
 
 ## Current View (SOURCE OF TRUTH — always check this before assuming what the user sees)
-${currentContext}
+${currentContext}${buildViewContextSection(mapViewContext ?? null)}
 ${qaContext ? `\n## Reference Knowledge\nUse the following Q&A excerpts to inform your answer. Paraphrase — do not quote verbatim.\n${qaContext}\n` : ''}
 ## Available Categories
 The collection has ${datasets.length} datasets across these categories:
@@ -215,10 +216,20 @@ Here's a look at the 2005 hurricane season.
 <<FLY:29.0,-89.0,3000>>
 <<TIME:2005-08-29>>
 
+Additional globe markers:
+- <<BOUNDS:west,south,east,north>> or <<BOUNDS:west,south,east,north,label>> — Navigate to a bounding box (e.g. <<BOUNDS:-82,-34,-34,13,Amazon Basin>>)
+- <<MARKER:lat,lng,label>> — Place a labeled marker on the globe (e.g. <<MARKER:35.7,139.7,Tokyo>>)
+- <<LABELS:on>> or <<LABELS:off>> — Show or hide geographic labels and boundaries
+- <<REGION:name>> — Highlight a well-known geographic region and navigate to it. Supported regions include countries (e.g. <<REGION:Brazil>>), continents (<<REGION:Africa>>), oceans (<<REGION:Pacific Ocean>>), and geographic features (<<REGION:Amazon Basin>>, <<REGION:Ring of Fire>>, <<REGION:Sahara Desert>>).
+
 IMPORTANT rules for globe markers:
 - <<FLY:...>> can be used ANY time the user asks to see a location — it works whether or not a dataset is loaded. If the user asks to fly somewhere, just do it.
 - <<TIME:...>> requires a time-enabled dataset to be loaded. Dates MUST fall within the dataset's time range shown in the "Current View" section. Never suggest a date outside the range.
-- Never write fly_to(...), set_time(...), or similar function-call syntax in your text. Use ONLY the marker format above.
+- <<BOUNDS:...>> is great for showing regions, continents, or ocean basins — prefer it over <<FLY:...>> when the user asks about an area rather than a point.
+- <<MARKER:...>> is useful to highlight specific locations being discussed. Markers persist on the globe and include a popup that shows the label when clicked.
+- <<LABELS:on>> is helpful when discussing geographic context — show labels to orient the user, hide them when they clutter the data view.
+- <<REGION:...>> is the best way to highlight a region by name. It draws a highlighted box on the globe and navigates to it. Prefer this over <<BOUNDS:...>> when a well-known region name is available.
+- Never write fly_to(...), set_time(...), fit_bounds(...), highlight_region(...), or similar function-call syntax in your text. Use ONLY the marker format above.
 
 ## Guidelines
 - Be conversational and enthusiastic about science, but concise
@@ -361,7 +372,7 @@ export function getFlyToTool(): LLMTool {
     type: 'function',
     function: {
       name: 'fly_to',
-      description: 'Smoothly animate the globe camera to center on a specific geographic location. Use this to show the user a particular region when discussing geographic features or events.',
+      description: 'Smoothly animate the globe camera to center on a specific geographic location. You can provide lat/lon coordinates, or a place name (country, state, region, ocean) to fly to its center automatically. If both are provided, lat/lon takes priority.',
       parameters: {
         type: 'object',
         properties: {
@@ -373,12 +384,15 @@ export function getFlyToTool(): LLMTool {
             type: 'number',
             description: 'Longitude in degrees (-180 to 180)',
           },
+          place: {
+            type: 'string',
+            description: 'A well-known place name to fly to (e.g. "Colorado", "Japan", "Amazon Basin"). Resolves to the center of the region. Use this instead of lat/lon when you know the place name but not the exact coordinates.',
+          },
           altitude: {
             type: 'number',
             description: 'Viewing altitude in kilometers above the surface. Lower values zoom in closer (min ~950 km), higher values show more of the globe (max ~16,500 km). Default: keep current altitude.',
           },
         },
-        required: ['lat', 'lon'],
       },
     },
   }
@@ -405,4 +419,128 @@ export function getSetTimeTool(): LLMTool {
       },
     },
   }
+}
+
+/**
+ * Tool definition for navigating to a bounding box.
+ */
+export function getFitBoundsTool(): LLMTool {
+  return {
+    type: 'function',
+    function: {
+      name: 'fit_bounds',
+      description: 'Animate the globe camera to fit a geographic bounding box. Use this to show a specific region like a country, ocean basin, or continent.',
+      parameters: {
+        type: 'object',
+        properties: {
+          west: { type: 'number', description: 'Western longitude (-180 to 180)' },
+          south: { type: 'number', description: 'Southern latitude (-90 to 90)' },
+          east: { type: 'number', description: 'Eastern longitude (-180 to 180)' },
+          north: { type: 'number', description: 'Northern latitude (-90 to 90)' },
+          label: { type: 'string', description: 'Optional label for the region (e.g. "Amazon Basin")' },
+        },
+        required: ['west', 'south', 'east', 'north'],
+      },
+    },
+  }
+}
+
+/**
+ * Tool definition for placing a labeled marker on the globe.
+ */
+export function getAddMarkerTool(): LLMTool {
+  return {
+    type: 'function',
+    function: {
+      name: 'add_marker',
+      description: 'Place a labeled marker on the globe at a specific location. Use this to highlight a point of interest discussed in the conversation.',
+      parameters: {
+        type: 'object',
+        properties: {
+          lat: { type: 'number', description: 'Latitude (-90 to 90)' },
+          lng: { type: 'number', description: 'Longitude (-180 to 180)' },
+          label: { type: 'string', description: 'Label text for the marker popup' },
+        },
+        required: ['lat', 'lng'],
+      },
+    },
+  }
+}
+
+/**
+ * Tool definition for toggling geographic labels and boundaries.
+ */
+export function getToggleLabelsTool(): LLMTool {
+  return {
+    type: 'function',
+    function: {
+      name: 'toggle_labels',
+      description: 'Show or hide geographic labels (country names, city names, ocean names) and political boundaries on the globe. Useful for geographic context when discussing specific regions.',
+      parameters: {
+        type: 'object',
+        properties: {
+          visible: { type: 'boolean', description: 'true to show labels, false to hide them' },
+        },
+        required: ['visible'],
+      },
+    },
+  }
+}
+
+/**
+ * Tool definition for highlighting a geographic region.
+ */
+export function getHighlightRegionTool(): LLMTool {
+  return {
+    type: 'function',
+    function: {
+      name: 'highlight_region',
+      description: 'Highlight a geographic region on the globe. You can provide a region name (e.g. "Brazil", "Amazon Basin", "Mediterranean Sea") to use a built-in bounding box, or provide raw GeoJSON for custom shapes. Prefer using "name" over "geojson" — it is simpler and always works for well-known regions.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: 'A well-known region name (country, continent, ocean, geographic feature). Examples: "Brazil", "Amazon Basin", "Pacific Ocean", "Sahara Desert", "Ring of Fire"',
+          },
+          geojson: {
+            type: 'object',
+            description: 'A GeoJSON Feature or FeatureCollection with Polygon/MultiPolygon geometry. Only needed for custom shapes — prefer "name" for well-known regions.',
+          },
+          label: { type: 'string', description: 'Optional display label for the highlighted region' },
+        },
+      },
+    },
+  }
+}
+
+/**
+ * Build a text summary of the current map view context for the LLM system prompt.
+ */
+export function buildViewContextSection(viewContext: {
+  center: { lat: number; lng: number }
+  zoom: number
+  bearing: number
+  pitch: number
+  bounds: { west: number; south: number; east: number; north: number }
+  visibleCountries: string[]
+  visibleOceans: string[]
+} | null): string {
+  if (!viewContext) return ''
+
+  const parts: string[] = []
+  const { center, zoom, bounds, visibleCountries, visibleOceans } = viewContext
+
+  parts.push(`Globe center: ${center.lat.toFixed(1)}°${center.lat >= 0 ? 'N' : 'S'}, ${Math.abs(center.lng).toFixed(1)}°${center.lng >= 0 ? 'E' : 'W'}`)
+  parts.push(`Zoom level: ${zoom.toFixed(1)}`)
+  parts.push(`Viewport bounds: [${bounds.west.toFixed(1)}°W, ${bounds.south.toFixed(1)}°S, ${bounds.east.toFixed(1)}°E, ${bounds.north.toFixed(1)}°N]`)
+
+  if (visibleCountries.length > 0) {
+    parts.push(`Visible countries/regions: ${visibleCountries.slice(0, 15).join(', ')}${visibleCountries.length > 15 ? ` (+${visibleCountries.length - 15} more)` : ''}`)
+  }
+  if (visibleOceans.length > 0) {
+    parts.push(`Visible oceans/seas: ${visibleOceans.join(', ')}`)
+  }
+
+  return `\n## Geographic Context\n${parts.join('\n')}`
 }

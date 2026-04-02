@@ -24,14 +24,14 @@ const CLOUD_TEXTURE_URL = 'https://s3.dualstack.us-east-1.amazonaws.com/metadata
 
 // --- Rendering constants (matched to earthMaterials.ts) ---
 const NIGHT_LIGHT_STRENGTH = 0.5
-const NIGHT_DARKENING = 0.08 // how dark the night side gets (before city lights)
+const NIGHT_DARKENING = 0.03 // how dark the night side gets (before city lights)
 const CLOUD_RADIUS = 1.005   // slightly above globe surface
 const CLOUD_OPACITY = 0.65
 const CLOUD_ALPHA_GAMMA = 1.8
 const CLOUD_NIGHT_DARKENING = 0.08
 const SPECULAR_SHININESS = 40.0
 const SPECULAR_STRENGTH = 0.6
-const STAR_BRIGHTNESS = 0.4 // higher than Three.js (0.02) since we lack additive glow
+const STAR_BRIGHTNESS = 0.2
 const SKYBOX_FACES = ['px', 'nx', 'py', 'ny', 'pz', 'nz'] as const
 const SKYBOX_URL_BASE = '/assets/skybox/'
 
@@ -445,6 +445,72 @@ const datasetFragSrc = `#version 300 es
   }
 `
 
+// --- Sun sprite shaders ---
+// Renders a billboard glow at the sun's projected screen position.
+// Vertex shader positions a screen-aligned quad; fragment draws radial gradient.
+
+const sunVertSrc = `#version 300 es
+  uniform vec4 uSunClip;  // sun position in clip space (x, y, z, w)
+  uniform float uScale;   // quad half-size in clip space
+  uniform float uAspect;  // viewport width / height
+  out vec2 vOffset;        // [-1,1] offset from center
+  void main() {
+    // Screen-aligned quad from vertex ID (0-5 → 2 triangles)
+    vec2 corners[6] = vec2[6](
+      vec2(-1,-1), vec2(1,-1), vec2(1,1),
+      vec2(-1,-1), vec2(1,1), vec2(-1,1)
+    );
+    vOffset = corners[gl_VertexID];
+    vec2 ndcSun = uSunClip.xy / uSunClip.w;
+    float ndcZ = uSunClip.z / uSunClip.w; // 1.0 (same as skybox — occluded by globe)
+    // Correct for aspect ratio so the quad stays circular
+    vec2 scaledOffset = vOffset * uScale;
+    scaledOffset.x /= uAspect;
+    gl_Position = vec4(ndcSun + scaledOffset, ndcZ, 1.0);
+  }
+`
+
+const sunFragSrc = `#version 300 es
+  precision highp float;
+  in vec2 vOffset;
+  uniform float uCoreRadius;
+  uniform float uGlowFalloff;
+  uniform vec3 uCoreColor;
+  uniform vec3 uGlowColor;
+  out vec4 fragColor;
+  void main() {
+    float d = length(vOffset);
+    // Hard-edge discard outside unit circle
+    if (d > 1.0) discard;
+    // Core: bright center with smooth falloff
+    float core = smoothstep(uCoreRadius + 0.05, uCoreRadius - 0.02, d);
+    // Glow: wide soft falloff
+    float glow = exp(-d * d * uGlowFalloff);
+    vec3 color = uCoreColor * core + uGlowColor * glow;
+    float alpha = max(core, glow * 0.5);
+    fragColor = vec4(color * alpha, alpha);
+  }
+`
+
+// Sun sprite constants
+const SUN_WORLD_DISTANCE = 8.0    // distance from globe center in ECEF units
+const SUN_SCREEN_SCALE = 0.12     // base quad half-size in NDC
+const SUN_CORE_RADIUS = 0.12
+const SUN_GLOW_FALLOFF = 3.5
+const SUN_CORE_COLOR: [number, number, number] = [1.0, 0.98, 0.9]    // warm white
+const SUN_GLOW_COLOR: [number, number, number] = [1.0, 0.82, 0.55]   // warm orange
+
+interface SunProgram {
+  program: WebGLProgram
+  sunClipLoc: WebGLUniformLocation | null
+  scaleLoc: WebGLUniformLocation | null
+  aspectLoc: WebGLUniformLocation | null
+  coreRadiusLoc: WebGLUniformLocation | null
+  glowFalloffLoc: WebGLUniformLocation | null
+  coreColorLoc: WebGLUniformLocation | null
+  glowColorLoc: WebGLUniformLocation | null
+}
+
 // --- Atmosphere light sync ---
 
 /**
@@ -583,8 +649,10 @@ function compileProgram(
 
 /** Extended interface for controlling the earth tile layer from MapRenderer. */
 export interface EarthTileLayerControl {
-  /** The MapLibre custom layer interface. */
+  /** The MapLibre custom layer interface (2d — renders below labels). */
   layer: CustomLayerInterface
+  /** Skybox layer (3d — renders after everything, uses depth test for stars). */
+  skyboxLayer: CustomLayerInterface
   /** Resolves when all textures (night lights, specular, clouds) have loaded. */
   ready: Promise<void>
   /** Update sun direction. Called by MapRenderer.enableSunLighting(). */
@@ -632,6 +700,7 @@ export function createEarthTileLayer(): EarthTileLayerControl {
   let skyboxFaceLocs: (WebGLUniformLocation | null)[] = []
   let skyboxFaceTextures: (WebGLTexture | null)[] = []
   let skyboxReady = false
+  let sunProg: SunProgram | null = null
   let glRef: WebGL2RenderingContext | null = null
   let mapRef: MaplibreMap | null = null
 
@@ -655,7 +724,7 @@ export function createEarthTileLayer(): EarthTileLayerControl {
   const layer: CustomLayerInterface = {
     id: 'earth-tile-layer',
     type: 'custom',
-    renderingMode: '3d',
+    renderingMode: '2d',
 
     onAdd(_map: MaplibreMap, gl: WebGL2RenderingContext | WebGLRenderingContext) {
       mapRef = _map
@@ -704,6 +773,21 @@ export function createEarthTileLayer(): EarthTileLayerControl {
           faceImg.src = SKYBOX_URL_BASE + face + '.jpg'
           return tex
         })
+      }
+
+      // --- Compile sun sprite shader ---
+      const sunProgram = compileProgram(gl2, sunVertSrc, sunFragSrc, 'sun')
+      if (sunProgram) {
+        sunProg = {
+          program: sunProgram,
+          sunClipLoc: gl2.getUniformLocation(sunProgram, 'uSunClip'),
+          scaleLoc: gl2.getUniformLocation(sunProgram, 'uScale'),
+          aspectLoc: gl2.getUniformLocation(sunProgram, 'uAspect'),
+          coreRadiusLoc: gl2.getUniformLocation(sunProgram, 'uCoreRadius'),
+          glowFalloffLoc: gl2.getUniformLocation(sunProgram, 'uGlowFalloff'),
+          coreColorLoc: gl2.getUniformLocation(sunProgram, 'uCoreColor'),
+          glowColorLoc: gl2.getUniformLocation(sunProgram, 'uGlowColor'),
+        }
       }
 
       // --- Compile dataset overlay shader ---
@@ -900,47 +984,9 @@ export function createEarthTileLayer(): EarthTileLayerControl {
       const gl2 = gl as WebGL2RenderingContext
       const matrix = args.defaultProjectionData.mainMatrix
 
-      // --- Skybox: full-screen pass behind the globe ---
-      // Reconstructs view direction per-pixel and samples cubemap faces.
-      // Depth test ensures stars only show where no globe was drawn.
-      if (skyboxReady && skyboxProg && mapRef) {
-        gl2.enable(gl2.DEPTH_TEST)
-        gl2.depthFunc(gl2.LEQUAL)
-        gl2.depthMask(false)
-        gl2.disable(gl2.BLEND)
-        gl2.disable(gl2.CULL_FACE)
-
-        gl2.useProgram(skyboxProg)
-        gl2.uniform1f(skyboxBrightnessLoc, STAR_BRIGHTNESS)
-
-        // Aspect ratio and FOV for correct angular coverage
-        const canvas = mapRef.getCanvas()
-        const aspect = canvas.width / canvas.height
-        const fov = ((mapRef as any).transform?._fov ?? 0.6435) as number
-        gl2.uniform2f(skyboxAspectFovLoc, aspect, fov)
-
-        // Pass camera rotation angles — skybox responds to rotation only, not zoom
-        const center = mapRef.getCenter()
-        const bearing = mapRef.getBearing() * Math.PI / 180
-        const pitch = mapRef.getPitch() * Math.PI / 180
-        const lat = center.lat * Math.PI / 180
-        const lng = center.lng * Math.PI / 180
-        gl2.uniform4f(skyboxCameraLoc, lat, lng, bearing, pitch)
-
-        // Bind all 6 face textures
-        for (let i = 0; i < 6; i++) {
-          gl2.activeTexture(gl2.TEXTURE0 + i)
-          gl2.bindTexture(gl2.TEXTURE_2D, skyboxFaceTextures[i])
-          gl2.uniform1i(skyboxFaceLocs[i], i)
-        }
-
-        // Full-screen triangle (vertex IDs only, no VAO needed)
-        gl2.bindVertexArray(null)
-        gl2.drawArrays(gl2.TRIANGLES, 0, 3)
-
-        gl2.depthMask(true)
-        gl2.depthFunc(gl2.LESS)
-      }
+      // Update sun direction every frame (before early returns so skybox layer can use it)
+      const sun = sunOverride ?? getSunPosition(new Date())
+      sunDir = sunDirectionFromLatLng(sun.lat, sun.lng)
 
       // Common GL state for sphere passes
       gl2.disable(gl2.DEPTH_TEST)
@@ -980,10 +1026,6 @@ export function createEarthTileLayer(): EarthTileLayerControl {
         gl2.disable(gl2.CULL_FACE)
         return
       }
-
-      // Update sun direction from override or real-time
-      const sun = sunOverride ?? getSunPosition(new Date())
-      sunDir = sunDirectionFromLatLng(sun.lat, sun.lng)
 
       // --- Pass 1: Multiply blend — darken night side ---
       gl2.enable(gl2.BLEND)
@@ -1080,8 +1122,6 @@ export function createEarthTileLayer(): EarthTileLayerControl {
 
     onRemove(_map: MaplibreMap, gl: WebGL2RenderingContext | WebGLRenderingContext) {
       const gl2 = gl as WebGL2RenderingContext
-      if (skyboxProg) gl2.deleteProgram(skyboxProg)
-      for (const tex of skyboxFaceTextures) if (tex) gl2.deleteTexture(tex)
       if (dataset) gl2.deleteProgram(dataset.program)
       if (darken) gl2.deleteProgram(darken.program)
       if (lights) gl2.deleteProgram(lights.program)
@@ -1095,8 +1135,108 @@ export function createEarthTileLayer(): EarthTileLayerControl {
     },
   }
 
+  // Separate skybox layer — renders in '3d' mode (after all 2D layers)
+  // so the depth buffer contains the globe and stars only draw in space.
+  const skyboxLayerDef: CustomLayerInterface = {
+    id: 'earth-skybox-layer',
+    type: 'custom',
+    renderingMode: '3d',
+
+    onAdd() { /* resources shared with earth-tile-layer via closure */ },
+
+    render(gl, args) {
+      if (!skyboxReady || !skyboxProg || !mapRef) return
+      const gl2 = gl as WebGL2RenderingContext
+
+      gl2.enable(gl2.DEPTH_TEST)
+      gl2.depthFunc(gl2.LEQUAL)
+      gl2.depthMask(false)
+      gl2.disable(gl2.BLEND)
+      gl2.disable(gl2.CULL_FACE)
+
+      gl2.useProgram(skyboxProg)
+      gl2.uniform1f(skyboxBrightnessLoc, STAR_BRIGHTNESS)
+
+      const canvas = mapRef.getCanvas()
+      const aspect = canvas.width / canvas.height
+      const fov = ((mapRef as any).transform?._fov ?? 0.6435) as number
+      gl2.uniform2f(skyboxAspectFovLoc, aspect, fov)
+
+      const center = mapRef.getCenter()
+      const bearing = mapRef.getBearing() * Math.PI / 180
+      const pitch = mapRef.getPitch() * Math.PI / 180
+      const lat = center.lat * Math.PI / 180
+      const lng = center.lng * Math.PI / 180
+      gl2.uniform4f(skyboxCameraLoc, lat, lng, bearing, pitch)
+
+      for (let i = 0; i < 6; i++) {
+        gl2.activeTexture(gl2.TEXTURE0 + i)
+        gl2.bindTexture(gl2.TEXTURE_2D, skyboxFaceTextures[i])
+        gl2.uniform1i(skyboxFaceLocs[i], i)
+      }
+
+      gl2.bindVertexArray(null)
+      gl2.drawArrays(gl2.TRIANGLES, 0, 3)
+
+      gl2.depthMask(true)
+      gl2.depthFunc(gl2.LESS)
+
+      // --- Sun sprite: billboard at the sun's projected screen position ---
+      // Depth occlusion uses the same technique as the skybox: render at depth 1.0
+      // with depthFunc(LEQUAL). The globe writes depth < 1.0, so fragments over
+      // the globe fail. Empty space has depth = 1.0, so 1.0 <= 1.0 passes.
+      if (sunProg && mapRef) {
+        const sx = sunDir[0] * SUN_WORLD_DISTANCE
+        const sy = sunDir[1] * SUN_WORLD_DISTANCE
+        const sz = sunDir[2] * SUN_WORLD_DISTANCE
+
+        const m = args.defaultProjectionData.mainMatrix
+        const clipX = m[0]*sx + m[4]*sy + m[8]*sz + m[12]
+        const clipY = m[1]*sx + m[5]*sy + m[9]*sz + m[13]
+        const clipW = m[3]*sx + m[7]*sy + m[11]*sz + m[15]
+
+        if (clipW > 0) {
+          const canvas = mapRef.getCanvas()
+          const aspect = canvas.width / canvas.height
+
+          gl2.enable(gl2.BLEND)
+          gl2.blendFunc(gl2.SRC_ALPHA, gl2.ONE)
+          gl2.enable(gl2.DEPTH_TEST)
+          gl2.depthFunc(gl2.LEQUAL)
+          gl2.depthMask(false)
+
+          gl2.useProgram(sunProg.program)
+          gl2.uniform4f(sunProg.sunClipLoc, clipX, clipY, clipW, clipW) // z=w so ndcZ=1.0
+          gl2.uniform1f(sunProg.scaleLoc, SUN_SCREEN_SCALE)
+          gl2.uniform1f(sunProg.aspectLoc, aspect)
+          gl2.uniform1f(sunProg.coreRadiusLoc, SUN_CORE_RADIUS)
+          gl2.uniform1f(sunProg.glowFalloffLoc, SUN_GLOW_FALLOFF)
+          gl2.uniform3f(sunProg.coreColorLoc, ...SUN_CORE_COLOR)
+          gl2.uniform3f(sunProg.glowColorLoc, ...SUN_GLOW_COLOR)
+
+          gl2.bindVertexArray(null)
+          gl2.drawArrays(gl2.TRIANGLES, 0, 6)
+
+          gl2.disable(gl2.BLEND)
+          gl2.depthMask(true)
+        }
+      }
+
+      gl2.enable(gl2.DEPTH_TEST)
+      gl2.disable(gl2.CULL_FACE)
+    },
+
+    onRemove(_map: MaplibreMap, gl: WebGL2RenderingContext | WebGLRenderingContext) {
+      const gl2 = gl as WebGL2RenderingContext
+      if (skyboxProg) gl2.deleteProgram(skyboxProg)
+      if (sunProg) gl2.deleteProgram(sunProg.program)
+      for (const tex of skyboxFaceTextures) if (tex) gl2.deleteTexture(tex)
+    },
+  }
+
   return {
     layer,
+    skyboxLayer: skyboxLayerDef,
     ready: readyPromise,
     setSunPosition(lat: number, lng: number) {
       sunOverride = { lat, lng }

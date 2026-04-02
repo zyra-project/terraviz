@@ -162,6 +162,10 @@ export type ChatAction =
   | { type: 'load-dataset'; datasetId: string; datasetTitle: string }
   | { type: 'fly-to'; lat: number; lon: number; altitude?: number }
   | { type: 'set-time'; isoDate: string }
+  | { type: 'fit-bounds'; bounds: [number, number, number, number]; label?: string }
+  | { type: 'add-marker'; lat: number; lng: number; label?: string }
+  | { type: 'toggle-labels'; visible: boolean }
+  | { type: 'highlight-region'; geojson: GeoJSON.GeoJSON; label?: string }
 
 /**
  * A single chat message
