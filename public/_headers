@@ -1,2 +1,4 @@
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://gibs.earthdata.nasa.gov https://tiles.openfreemap.org https://s3.amazonaws.com https://s3.dualstack.us-east-1.amazonaws.com https://sos.noaa.gov https://upload.wikimedia.org; connect-src 'self' https://gibs.earthdata.nasa.gov https://tiles.openfreemap.org https://s3.amazonaws.com https://s3.dualstack.us-east-1.amazonaws.com https://sos.noaa.gov https://player.vimeo.com https://vimeo.com; worker-src 'self' blob:; child-src blob:; font-src 'self' https://tiles.openfreemap.org
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
