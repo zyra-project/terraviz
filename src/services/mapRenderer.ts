@@ -105,17 +105,16 @@ function createGlobeStyle(): StyleSpecification {
         paint: { 'background-color': '#000000', 'background-opacity': 0 },
       },
       {
+        id: 'black-marble-layer',
+        type: 'raster',
+        source: 'black-marble',
+        paint: { 'raster-opacity': 1 },
+      },
+      {
         id: 'blue-marble-layer',
         type: 'raster',
         source: 'blue-marble',
         paint: { 'raster-opacity': 1 },
-      },
-      {
-        id: 'black-marble-layer',
-        type: 'raster',
-        source: 'black-marble',
-        paint: { 'raster-opacity': 0 },
-        layout: { visibility: 'none' },
       },
       // --- Vector layers (hidden by default, toggle-able) ---
       {
@@ -312,6 +311,14 @@ export class MapRenderer implements GlobeRenderer {
     this.map.on('load', () => {
       console.info('[MapRenderer] Map loaded with globe projection')
       this.earthLayer = createEarthTileLayer()
+
+      // Layer order: black-marble → [capture] → blue-marble → [earth-tile] → labels → [skybox]
+      // Insert capture layer between Black Marble and Blue Marble
+      this.map!.addLayer(
+        this.earthLayer.captureLayer as unknown as maplibregl.LayerSpecification,
+        'blue-marble-layer',
+      )
+      // Insert main earth effects layer after Blue Marble (at end of 2d layers)
       this.map!.addLayer(this.earthLayer.layer as unknown as maplibregl.LayerSpecification)
 
       // Move label/boundary layers above the earth tile layer
@@ -322,7 +329,7 @@ export class MapRenderer implements GlobeRenderer {
       // Add skybox as a separate 3d layer (renders after all 2d layers)
       this.map!.addLayer(this.earthLayer.skyboxLayer as unknown as maplibregl.LayerSpecification)
 
-      console.info('[MapRenderer] Earth tile + skybox layers added, labels moved above')
+      console.info('[MapRenderer] Earth tile + capture + skybox layers added, labels moved above')
     })
   }
 
@@ -544,8 +551,9 @@ export class MapRenderer implements GlobeRenderer {
   updateTexture(texture: HTMLCanvasElement | HTMLImageElement): void {
     if (!this.earthLayer) return
     this.earthLayer.setDatasetTexture(texture)
-    // Hide the Blue Marble base layer when a dataset is active
+    // Hide the tile base layers when a dataset is active
     try { this.map?.setLayoutProperty('blue-marble-layer', 'visibility', 'none') } catch { /* noop */ }
+    try { this.map?.setLayoutProperty('black-marble-layer', 'visibility', 'none') } catch { /* noop */ }
     console.info('[MapRenderer] Dataset overlay set via custom layer sphere')
   }
 
@@ -558,6 +566,7 @@ export class MapRenderer implements GlobeRenderer {
     if (this.earthLayer) {
       this.earthLayer.setDatasetVideo(video)
       try { this.map?.setLayoutProperty('blue-marble-layer', 'visibility', 'none') } catch { /* noop */ }
+      try { this.map?.setLayoutProperty('black-marble-layer', 'visibility', 'none') } catch { /* noop */ }
       console.info('[MapRenderer] Video dataset set via custom layer sphere')
     }
     const earthLayer = this.earthLayer
@@ -606,8 +615,9 @@ export class MapRenderer implements GlobeRenderer {
     this.earthLayer?.clearDatasetTexture()
     this.earthLayer?.setVisible(true)
     this.earthLayer?.setSunPosition(lat, lng)
-    // Restore Blue Marble base (may have been hidden for dataset overlay)
+    // Restore tile bases (may have been hidden for dataset overlay)
     try { this.map?.setLayoutProperty('blue-marble-layer', 'visibility', 'visible') } catch { /* noop */ }
+    try { this.map?.setLayoutProperty('black-marble-layer', 'visibility', 'visible') } catch { /* noop */ }
     // Restore atmosphere glow (may have been hidden for dataset overlay)
     try {
       this.map?.setSky({

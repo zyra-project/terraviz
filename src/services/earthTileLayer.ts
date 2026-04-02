@@ -2,12 +2,19 @@
  * Earth tile layer — Day/night, clouds, and specular effects for MapLibre globe.
  *
  * A MapLibre CustomLayerInterface that composites visual effects on top of
- * the NASA GIBS Blue Marble raster tiles using multi-pass WebGL rendering:
+ * the NASA GIBS Blue Marble + Black Marble raster tiles using multi-pass
+ * WebGL rendering:
  *
+ *   Capture layer — Snapshots the Black Marble tiles to an offscreen texture
  *   Pass 1 (multiply) — Darkens the night side of the Blue Marble tiles
- *   Pass 2 (additive) — Overlays city lights on the night side
+ *   Pass 2 (additive) — Overlays Black Marble city lights (screen-space sampled)
  *   Pass 3 (additive) — Specular sun glint on water (masked by clouds)
  *   Pass 4 (alpha)    — Clouds with day/night darkening and zoom fade
+ *
+ * The capture layer renders between Black Marble and Blue Marble in the
+ * MapLibre layer stack, copying the framebuffer (containing rendered Black
+ * Marble tiles) to a texture. Pass 2 then samples this texture in screen
+ * space, giving progressive tile-level zoom detail for night lights.
  *
  * All passes render a sphere matching MapLibre's ECEF globe geometry with
  * depth test disabled to avoid z-fighting with the tile layer.
@@ -17,8 +24,7 @@ import type { CustomLayerInterface } from 'maplibre-gl'
 import type { Map as MaplibreMap } from 'maplibre-gl'
 import { getSunPosition } from '../utils/time'
 
-// --- Texture URLs (same assets as the Three.js globe) ---
-const NIGHT_LIGHTS_URL = '/assets/Earth_Lights_6K.jpg'
+// --- Texture URLs ---
 const SPECULAR_MAP_URL = '/assets/Earth_Specular_2K.jpg'
 const CLOUD_TEXTURE_URL = 'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/clouds_8192.jpg'
 
@@ -172,19 +178,16 @@ const darkenFragSrc = `#version 300 es
   }
 `
 
-// Pass 2: additive blend — overlays city lights on night side
+// Pass 2: additive blend — overlays Black Marble city lights (screen-space sampled)
 const lightsVertSrc = `#version 300 es
   layout(location = 0) in vec3 aPosition;
   layout(location = 1) in vec3 aNormal;
-  layout(location = 2) in vec2 aUV;
   uniform mat4 uMatrix;
   uniform float uRadiusScale;
   out vec3 vNormal;
-  out vec2 vUV;
 
   void main() {
     vNormal = aNormal;
-    vUV = aUV;
     gl_Position = uMatrix * vec4(aPosition * uRadiusScale, 1.0);
   }
 `
@@ -192,10 +195,10 @@ const lightsVertSrc = `#version 300 es
 const lightsFragSrc = `#version 300 es
   precision highp float;
   uniform vec3 uSunDir;
-  uniform sampler2D uNightLights;
+  uniform sampler2D uBlackMarble;
+  uniform vec2 uViewportSize;
   uniform float uLightStrength;
   in vec3 vNormal;
-  in vec2 vUV;
   out vec4 fragColor;
 
   void main() {
@@ -205,8 +208,9 @@ const lightsFragSrc = `#version 300 es
     // Night factor — city lights only visible on dark side
     float nightFactor = smoothstep(0.0, -0.2, NdotL);
 
-    // Sample night lights texture
-    vec3 lights = texture(uNightLights, vUV).rgb;
+    // Sample Black Marble tiles at screen position (captured from framebuffer)
+    vec2 screenUV = gl_FragCoord.xy / uViewportSize;
+    vec3 lights = texture(uBlackMarble, screenUV).rgb;
 
     // Scale by night factor and strength
     // Under additive blend: black (0,0,0) = no change on day side
@@ -589,7 +593,8 @@ interface DayNightProgram {
 }
 
 interface LightsProgram extends DayNightProgram {
-  nightTexLoc: WebGLUniformLocation | null
+  blackMarbleLoc: WebGLUniformLocation | null
+  viewportSizeLoc: WebGLUniformLocation | null
   strengthLoc: WebGLUniformLocation | null
 }
 
@@ -651,6 +656,8 @@ function compileProgram(
 export interface EarthTileLayerControl {
   /** The MapLibre custom layer interface (2d — renders below labels). */
   layer: CustomLayerInterface
+  /** Capture layer (2d — snapshots Black Marble tiles between BM and BM layers). */
+  captureLayer: CustomLayerInterface
   /** Skybox layer (3d — renders after everything, uses depth test for stars). */
   skyboxLayer: CustomLayerInterface
   /** Resolves when all textures (night lights, specular, clouds) have loaded. */
@@ -684,8 +691,8 @@ export function createEarthTileLayer(): EarthTileLayerControl {
   let clouds: CloudsProgram | null = null
   let vao: WebGLVertexArrayObject | null = null
   let indexCount = 0
-  let nightTex: WebGLTexture | null = null
-  let nightTexReady = false
+  let captureTex: WebGLTexture | null = null
+  let captureW = 0, captureH = 0
   let specTex: WebGLTexture | null = null
   let specTexReady = false
   let cloudTex: WebGLTexture | null = null
@@ -721,7 +728,7 @@ export function createEarthTileLayer(): EarthTileLayerControl {
   let resolveReady: () => void
   const readyPromise = new Promise<void>(r => { resolveReady = r })
   const checkReady = () => {
-    if (nightTexReady && specTexReady && cloudTexReady) resolveReady()
+    if (specTexReady && cloudTexReady) resolveReady()
   }
 
   const layer: CustomLayerInterface = {
@@ -821,7 +828,8 @@ export function createEarthTileLayer(): EarthTileLayerControl {
           program: lightsProg,
           matrixLoc: gl2.getUniformLocation(lightsProg, 'uMatrix'),
           sunDirLoc: gl2.getUniformLocation(lightsProg, 'uSunDir'),
-          nightTexLoc: gl2.getUniformLocation(lightsProg, 'uNightLights'),
+          blackMarbleLoc: gl2.getUniformLocation(lightsProg, 'uBlackMarble'),
+          viewportSizeLoc: gl2.getUniformLocation(lightsProg, 'uViewportSize'),
           strengthLoc: gl2.getUniformLocation(lightsProg, 'uLightStrength'),
           radiusScaleLoc: gl2.getUniformLocation(lightsProg, 'uRadiusScale'),
         }
@@ -894,34 +902,17 @@ export function createEarthTileLayer(): EarthTileLayerControl {
 
       gl2.bindVertexArray(null)
 
-      // --- Load night lights texture asynchronously ---
-      nightTex = gl2.createTexture()
-      gl2.bindTexture(gl2.TEXTURE_2D, nightTex)
-      // 1x1 black placeholder until image loads
+      // --- Initialize Black Marble capture texture (populated by capture layer) ---
+      captureTex = gl2.createTexture()
+      gl2.bindTexture(gl2.TEXTURE_2D, captureTex)
       gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.RGBA, 1, 1, 0, gl2.RGBA, gl2.UNSIGNED_BYTE,
         new Uint8Array([0, 0, 0, 255]))
-
-      const img = new Image()
-      img.crossOrigin = 'anonymous'
-      img.onload = () => {
-        gl2.bindTexture(gl2.TEXTURE_2D, nightTex)
-        gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.RGBA, gl2.RGBA, gl2.UNSIGNED_BYTE, img)
-        gl2.generateMipmap(gl2.TEXTURE_2D)
-        gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MIN_FILTER, gl2.LINEAR_MIPMAP_LINEAR)
-        gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MAG_FILTER, gl2.LINEAR)
-        gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_S, gl2.REPEAT)
-        gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_T, gl2.CLAMP_TO_EDGE)
-        nightTexReady = true
-        checkReady()
-        _map.triggerRepaint()
-        console.info('[EarthTileLayer] Night lights texture loaded (%dx%d)', img.width, img.height)
-      }
-      img.onerror = () => {
-        console.warn('[EarthTileLayer] Failed to load night lights texture:', NIGHT_LIGHTS_URL)
-        nightTexReady = true // resolve ready even on failure
-        checkReady()
-      }
-      img.src = NIGHT_LIGHTS_URL
+      gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MIN_FILTER, gl2.LINEAR)
+      gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MAG_FILTER, gl2.LINEAR)
+      gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_S, gl2.CLAMP_TO_EDGE)
+      gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_T, gl2.CLAMP_TO_EDGE)
+      captureW = 0
+      captureH = 0
 
       // --- Load cloud texture asynchronously ---
       cloudTex = gl2.createTexture()
@@ -1041,8 +1032,8 @@ export function createEarthTileLayer(): EarthTileLayerControl {
       gl2.uniform3f(darken.sunDirLoc, sunDir[0], sunDir[1], sunDir[2])
       gl2.drawElements(gl2.TRIANGLES, indexCount, gl2.UNSIGNED_SHORT, 0)
 
-      // --- Pass 2: Additive blend — overlay city lights ---
-      if (lights && nightTexReady) {
+      // --- Pass 2: Additive blend — overlay Black Marble city lights (screen-space) ---
+      if (lights && captureTex && captureW > 0) {
         gl2.blendFunc(gl2.ONE, gl2.ONE) // result = src + dst
 
         gl2.useProgram(lights.program)
@@ -1050,10 +1041,11 @@ export function createEarthTileLayer(): EarthTileLayerControl {
         gl2.uniform1f(lights.radiusScaleLoc, terrainRadiusScale)
         gl2.uniform3f(lights.sunDirLoc, sunDir[0], sunDir[1], sunDir[2])
         gl2.uniform1f(lights.strengthLoc, NIGHT_LIGHT_STRENGTH)
+        gl2.uniform2f(lights.viewportSizeLoc, captureW, captureH)
 
         gl2.activeTexture(gl2.TEXTURE0)
-        gl2.bindTexture(gl2.TEXTURE_2D, nightTex)
-        gl2.uniform1i(lights.nightTexLoc, 0)
+        gl2.bindTexture(gl2.TEXTURE_2D, captureTex)
+        gl2.uniform1i(lights.blackMarbleLoc, 0)
 
         gl2.drawElements(gl2.TRIANGLES, indexCount, gl2.UNSIGNED_SHORT, 0)
       }
@@ -1132,7 +1124,7 @@ export function createEarthTileLayer(): EarthTileLayerControl {
       if (specular) gl2.deleteProgram(specular.program)
       if (clouds) gl2.deleteProgram(clouds.program)
       if (vao) gl2.deleteVertexArray(vao)
-      if (nightTex) gl2.deleteTexture(nightTex)
+      if (captureTex) gl2.deleteTexture(captureTex)
       if (specTex) gl2.deleteTexture(specTex)
       if (cloudTex) gl2.deleteTexture(cloudTex)
       if (datasetTex) gl2.deleteTexture(datasetTex)
@@ -1238,8 +1230,46 @@ export function createEarthTileLayer(): EarthTileLayerControl {
     },
   }
 
+  // Capture layer — renders between Black Marble and Blue Marble in the
+  // MapLibre layer stack. Copies the framebuffer (containing rendered Black
+  // Marble tiles) to captureTex for use in the lights pass.
+  const captureLayerDef: CustomLayerInterface = {
+    id: 'black-marble-capture',
+    type: 'custom',
+    renderingMode: '2d',
+
+    onAdd() { /* resources shared with earth-tile-layer via closure */ },
+
+    render(gl) {
+      // Skip capture when dataset overlay is active (no night lights needed)
+      if (datasetActive || !visible) return
+      if (!captureTex) return
+
+      const gl2 = gl as WebGL2RenderingContext
+      const canvas = mapRef?.getCanvas()
+      if (!canvas) return
+      const w = canvas.width, h = canvas.height
+
+      gl2.activeTexture(gl2.TEXTURE7) // high unit to avoid MapLibre conflicts
+      gl2.bindTexture(gl2.TEXTURE_2D, captureTex)
+
+      // Resize capture texture if canvas dimensions changed
+      if (w !== captureW || h !== captureH) {
+        gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.RGBA, w, h, 0, gl2.RGBA, gl2.UNSIGNED_BYTE, null)
+        captureW = w
+        captureH = h
+      }
+
+      // Copy current framebuffer (Black Marble tiles) to texture
+      gl2.copyTexSubImage2D(gl2.TEXTURE_2D, 0, 0, 0, 0, 0, w, h)
+    },
+
+    onRemove() { /* cleanup handled by earth-tile-layer */ },
+  }
+
   return {
     layer,
+    captureLayer: captureLayerDef,
     skyboxLayer: skyboxLayerDef,
     ready: readyPromise,
     setSunPosition(lat: number, lng: number) {
