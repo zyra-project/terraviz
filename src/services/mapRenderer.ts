@@ -405,10 +405,13 @@ export class MapRenderer {
   toggleTerrain(enabled?: boolean): boolean {
     if (!this.map) return false
     this.terrainEnabled = enabled ?? !this.terrainEnabled
+    const exaggeration = 5
     if (this.terrainEnabled) {
-      this.map.setTerrain({ source: 'terrain-dem', exaggeration: 1.5 })
+      this.map.setTerrain({ source: 'terrain-dem', exaggeration })
+      this.earthLayer?.setTerrainExaggeration(exaggeration)
     } else {
       this.map.setTerrain(null as any)
+      this.earthLayer?.setTerrainExaggeration(0)
     }
     return this.terrainEnabled
   }

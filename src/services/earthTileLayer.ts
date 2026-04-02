@@ -142,11 +142,12 @@ const darkenVertSrc = `#version 300 es
   layout(location = 0) in vec3 aPosition;
   layout(location = 1) in vec3 aNormal;
   uniform mat4 uMatrix;
+  uniform float uRadiusScale;
   out vec3 vNormal;
 
   void main() {
     vNormal = aNormal;
-    gl_Position = uMatrix * vec4(aPosition, 1.0);
+    gl_Position = uMatrix * vec4(aPosition * uRadiusScale, 1.0);
   }
 `
 
@@ -177,13 +178,14 @@ const lightsVertSrc = `#version 300 es
   layout(location = 1) in vec3 aNormal;
   layout(location = 2) in vec2 aUV;
   uniform mat4 uMatrix;
+  uniform float uRadiusScale;
   out vec3 vNormal;
   out vec2 vUV;
 
   void main() {
     vNormal = aNormal;
     vUV = aUV;
-    gl_Position = uMatrix * vec4(aPosition, 1.0);
+    gl_Position = uMatrix * vec4(aPosition * uRadiusScale, 1.0);
   }
 `
 
@@ -277,13 +279,14 @@ const specularVertSrc = `#version 300 es
   layout(location = 1) in vec3 aNormal;
   layout(location = 2) in vec2 aUV;
   uniform mat4 uMatrix;
+  uniform float uRadiusScale;
   out vec3 vNormal;
   out vec2 vUV;
 
   void main() {
     vNormal = aNormal;
     vUV = aUV;
-    gl_Position = uMatrix * vec4(aPosition, 1.0);
+    gl_Position = uMatrix * vec4(aPosition * uRadiusScale, 1.0);
   }
 `
 
@@ -422,11 +425,12 @@ const datasetVertSrc = `#version 300 es
   layout(location = 0) in vec3 aPosition;
   layout(location = 2) in vec2 aUV;
   uniform mat4 uMatrix;
+  uniform float uRadiusScale;
   out vec2 vUV;
 
   void main() {
     vUV = aUV;
-    gl_Position = uMatrix * vec4(aPosition, 1.0);
+    gl_Position = uMatrix * vec4(aPosition * uRadiusScale, 1.0);
   }
 `
 
@@ -508,12 +512,14 @@ interface DatasetProgram {
   program: WebGLProgram
   matrixLoc: WebGLUniformLocation | null
   texLoc: WebGLUniformLocation | null
+  radiusScaleLoc: WebGLUniformLocation | null
 }
 
 interface DayNightProgram {
   program: WebGLProgram
   matrixLoc: WebGLUniformLocation | null
   sunDirLoc: WebGLUniformLocation | null
+  radiusScaleLoc: WebGLUniformLocation | null
 }
 
 interface LightsProgram extends DayNightProgram {
@@ -587,6 +593,8 @@ export interface EarthTileLayerControl {
   clearSunOverride(): void
   /** Show or hide all earth effects (day/night, lights, specular, clouds). */
   setVisible(visible: boolean): void
+  /** Inflate effects sphere to cover exaggerated terrain. 0 = no terrain. */
+  setTerrainExaggeration(exaggeration: number): void
   /** Display an equirectangular image as a dataset overlay on the globe. */
   setDatasetTexture(image: HTMLCanvasElement | HTMLImageElement): void
   /** Display an equirectangular video as a dataset overlay on the globe. */
@@ -631,6 +639,11 @@ export function createEarthTileLayer(): EarthTileLayerControl {
   let sunDir: [number, number, number] = [1, 0, 0]
   let sunOverride: { lat: number; lng: number } | null = null
   let visible = true
+
+  // Terrain-aware radius scale — inflates effects sphere to cover exaggerated terrain.
+  // Max Earth elevation ~8848m / 6371km radius ≈ 0.00139 normalized.
+  // Scale = 1.0 + 0.002 * exaggeration (with safety margin).
+  let terrainRadiusScale = 1.0
 
   // Readiness tracking — resolves when all textures are loaded
   let resolveReady: () => void
@@ -700,6 +713,7 @@ export function createEarthTileLayer(): EarthTileLayerControl {
           program: datasetProg,
           matrixLoc: gl2.getUniformLocation(datasetProg, 'uMatrix'),
           texLoc: gl2.getUniformLocation(datasetProg, 'uDatasetTex'),
+          radiusScaleLoc: gl2.getUniformLocation(datasetProg, 'uRadiusScale'),
         }
       }
 
@@ -710,6 +724,7 @@ export function createEarthTileLayer(): EarthTileLayerControl {
           program: darkenProg,
           matrixLoc: gl2.getUniformLocation(darkenProg, 'uMatrix'),
           sunDirLoc: gl2.getUniformLocation(darkenProg, 'uSunDir'),
+          radiusScaleLoc: gl2.getUniformLocation(darkenProg, 'uRadiusScale'),
         }
       }
 
@@ -721,6 +736,7 @@ export function createEarthTileLayer(): EarthTileLayerControl {
           sunDirLoc: gl2.getUniformLocation(lightsProg, 'uSunDir'),
           nightTexLoc: gl2.getUniformLocation(lightsProg, 'uNightLights'),
           strengthLoc: gl2.getUniformLocation(lightsProg, 'uLightStrength'),
+          radiusScaleLoc: gl2.getUniformLocation(lightsProg, 'uRadiusScale'),
         }
       }
 
@@ -730,6 +746,7 @@ export function createEarthTileLayer(): EarthTileLayerControl {
           program: cloudsProg,
           matrixLoc: gl2.getUniformLocation(cloudsProg, 'uMatrix'),
           sunDirLoc: gl2.getUniformLocation(cloudsProg, 'uSunDir'),
+          radiusScaleLoc: null, // clouds use uRadius instead
           cloudTexLoc: gl2.getUniformLocation(cloudsProg, 'uCloudTex'),
           radiusLoc: gl2.getUniformLocation(cloudsProg, 'uRadius'),
           opacityLoc: gl2.getUniformLocation(cloudsProg, 'uOpacity'),
@@ -745,6 +762,7 @@ export function createEarthTileLayer(): EarthTileLayerControl {
           program: specularProg,
           matrixLoc: gl2.getUniformLocation(specularProg, 'uMatrix'),
           sunDirLoc: gl2.getUniformLocation(specularProg, 'uSunDir'),
+          radiusScaleLoc: gl2.getUniformLocation(specularProg, 'uRadiusScale'),
           specMapLoc: gl2.getUniformLocation(specularProg, 'uSpecMap'),
           cloudMaskLoc: gl2.getUniformLocation(specularProg, 'uCloudMask'),
           viewDirLoc: gl2.getUniformLocation(specularProg, 'uViewDir'),
@@ -943,6 +961,7 @@ export function createEarthTileLayer(): EarthTileLayerControl {
         gl2.disable(gl2.BLEND)
         gl2.useProgram(dataset.program)
         gl2.uniformMatrix4fv(dataset.matrixLoc, false, matrix)
+        gl2.uniform1f(dataset.radiusScaleLoc, terrainRadiusScale)
         gl2.activeTexture(gl2.TEXTURE0)
         gl2.bindTexture(gl2.TEXTURE_2D, datasetTex)
         gl2.uniform1i(dataset.texLoc, 0)
@@ -972,6 +991,7 @@ export function createEarthTileLayer(): EarthTileLayerControl {
 
       gl2.useProgram(darken.program)
       gl2.uniformMatrix4fv(darken.matrixLoc, false, matrix)
+      gl2.uniform1f(darken.radiusScaleLoc, terrainRadiusScale)
       gl2.uniform3f(darken.sunDirLoc, sunDir[0], sunDir[1], sunDir[2])
       gl2.drawElements(gl2.TRIANGLES, indexCount, gl2.UNSIGNED_SHORT, 0)
 
@@ -981,6 +1001,7 @@ export function createEarthTileLayer(): EarthTileLayerControl {
 
         gl2.useProgram(lights.program)
         gl2.uniformMatrix4fv(lights.matrixLoc, false, matrix)
+        gl2.uniform1f(lights.radiusScaleLoc, terrainRadiusScale)
         gl2.uniform3f(lights.sunDirLoc, sunDir[0], sunDir[1], sunDir[2])
         gl2.uniform1f(lights.strengthLoc, NIGHT_LIGHT_STRENGTH)
 
@@ -1007,6 +1028,7 @@ export function createEarthTileLayer(): EarthTileLayerControl {
 
         gl2.useProgram(specular.program)
         gl2.uniformMatrix4fv(specular.matrixLoc, false, matrix)
+        gl2.uniform1f(specular.radiusScaleLoc, terrainRadiusScale)
         gl2.uniform3f(specular.sunDirLoc, sunDir[0], sunDir[1], sunDir[2])
         gl2.uniform3f(specular.viewDirLoc, viewDir[0], viewDir[1], viewDir[2])
         gl2.uniform1f(specular.shininessLoc, SPECULAR_SHININESS)
@@ -1036,7 +1058,7 @@ export function createEarthTileLayer(): EarthTileLayerControl {
         gl2.useProgram(clouds.program)
         gl2.uniformMatrix4fv(clouds.matrixLoc, false, matrix)
         gl2.uniform3f(clouds.sunDirLoc, sunDir[0], sunDir[1], sunDir[2])
-        gl2.uniform1f(clouds.radiusLoc, CLOUD_RADIUS)
+        gl2.uniform1f(clouds.radiusLoc, CLOUD_RADIUS * terrainRadiusScale)
         gl2.uniform1f(clouds.opacityLoc, CLOUD_OPACITY)
         gl2.uniform1f(clouds.alphaGammaLoc, CLOUD_ALPHA_GAMMA)
         gl2.uniform1f(clouds.nightDarkeningLoc, CLOUD_NIGHT_DARKENING)
@@ -1093,6 +1115,15 @@ export function createEarthTileLayer(): EarthTileLayerControl {
     },
     setVisible(v: boolean) {
       visible = v
+      mapRef?.triggerRepaint()
+    },
+    setTerrainExaggeration(exaggeration: number) {
+      // Match MapLibre's globe terrain formula: displacement = exag * elevation / GLOBE_RADIUS
+      // where GLOBE_RADIUS = 6_371_008.8 (from maplibre-gl/src/geo/lng_lat.ts).
+      // Max elevation ~8848m (Everest). Add 5% margin to prevent z-fighting.
+      const MAX_ELEVATION_M = 8848
+      const GLOBE_RADIUS = 6_371_008.8
+      terrainRadiusScale = 1.0 + (MAX_ELEVATION_M * exaggeration / GLOBE_RADIUS) * 1.05
       mapRef?.triggerRepaint()
     },
     setDatasetTexture(image: HTMLCanvasElement | HTMLImageElement) {
