@@ -667,6 +667,8 @@ export interface EarthTileLayerControl {
   setDatasetTexture(image: HTMLCanvasElement | HTMLImageElement): void
   /** Display an equirectangular video as a dataset overlay on the globe. */
   setDatasetVideo(video: HTMLVideoElement): void
+  /** Force a one-shot video texture re-upload (e.g. after scrubbing while paused). */
+  requestVideoUpdate(): void
   /** Remove the current dataset overlay (image or video). */
   clearDatasetTexture(): void
 }
@@ -692,6 +694,7 @@ export function createEarthTileLayer(): EarthTileLayerControl {
   let datasetTex: WebGLTexture | null = null
   let datasetVideo: HTMLVideoElement | null = null
   let datasetActive = false
+  let forceVideoUpdate = false
   let skyboxProg: WebGLProgram | null = null
   let skyboxInvProjLoc: WebGLUniformLocation | null = null
   let skyboxCameraLoc: WebGLUniformLocation | null = null
@@ -996,12 +999,13 @@ export function createEarthTileLayer(): EarthTileLayerControl {
 
       // --- Dataset overlay: opaque textured sphere (replaces earth effects) ---
       if (datasetActive && dataset && datasetTex) {
-        // For video datasets, re-upload the current frame every render
-        if (datasetVideo && !datasetVideo.paused && datasetVideo.readyState >= 2) {
+        // For video datasets, re-upload the current frame every render.
+        // Also re-upload on forceVideoUpdate (scrubbing while paused).
+        if (datasetVideo && datasetVideo.readyState >= 2 && (!datasetVideo.paused || forceVideoUpdate)) {
           gl2.bindTexture(gl2.TEXTURE_2D, datasetTex)
           gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.RGBA, gl2.RGBA, gl2.UNSIGNED_BYTE, datasetVideo)
-          // Request next frame so we keep updating
-          mapRef?.triggerRepaint()
+          forceVideoUpdate = false
+          if (!datasetVideo.paused) mapRef?.triggerRepaint()
         }
 
         gl2.disable(gl2.BLEND)
@@ -1298,6 +1302,12 @@ export function createEarthTileLayer(): EarthTileLayerControl {
       glRef.texParameteri(glRef.TEXTURE_2D, glRef.TEXTURE_WRAP_T, glRef.CLAMP_TO_EDGE)
       datasetActive = true
       mapRef?.triggerRepaint()
+    },
+    requestVideoUpdate() {
+      if (datasetVideo) {
+        forceVideoUpdate = true
+        mapRef?.triggerRepaint()
+      }
     },
     clearDatasetTexture() {
       datasetActive = false

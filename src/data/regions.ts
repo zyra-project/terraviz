@@ -41,10 +41,30 @@ export function getRegionNames(): string[] {
 }
 
 /**
- * Convert a bounding box to a simple GeoJSON Polygon feature.
+ * Convert a bounding box to a GeoJSON Polygon feature.
+ * Handles antimeridian-crossing bounds (west > east) by producing a
+ * MultiPolygon split at the 180° meridian.
  */
 export function boundsToGeoJSON(bounds: [number, number, number, number], name?: string): GeoJSON.Feature {
   const [west, south, east, north] = bounds
+
+  // Antimeridian crossing: west > east means the box wraps around ±180°
+  if (west > east) {
+    return {
+      type: 'Feature',
+      properties: { name: name ?? '' },
+      geometry: {
+        type: 'MultiPolygon',
+        coordinates: [
+          // Western half: west → 180
+          [[[west, south], [180, south], [180, north], [west, north], [west, south]]],
+          // Eastern half: -180 → east
+          [[[-180, south], [east, south], [east, north], [-180, north], [-180, south]]],
+        ],
+      },
+    }
+  }
+
   return {
     type: 'Feature',
     properties: { name: name ?? '' },

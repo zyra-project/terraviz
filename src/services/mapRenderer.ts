@@ -385,9 +385,10 @@ export class MapRenderer implements GlobeRenderer {
 
   /** Show or hide all label and boundary layers. */
   toggleLabels(visible?: boolean): boolean {
-    if (!this.map) return false
-    const firstLayer = this.map.getLayoutProperty('country-labels', 'visibility')
-    const show = visible ?? (firstLayer === 'none')
+    if (!this.map || !this.map.isStyleLoaded()) return false
+    let firstLayer: string | undefined
+    try { firstLayer = this.map.getLayoutProperty('country-labels', 'visibility') } catch { /* style not ready */ }
+    const show = visible ?? (firstLayer === 'none' || firstLayer === undefined)
     const vis = show ? 'visible' : 'none'
     for (const id of this.labelLayerIds) {
       try { this.map.setLayoutProperty(id, 'visibility', vis) } catch { /* noop */ }
@@ -397,9 +398,10 @@ export class MapRenderer implements GlobeRenderer {
 
   /** Show or hide boundary + coastline lines. */
   toggleBoundaries(visible?: boolean): boolean {
-    if (!this.map) return false
-    const current = this.map.getLayoutProperty('boundaries', 'visibility')
-    const show = visible ?? (current === 'none')
+    if (!this.map || !this.map.isStyleLoaded()) return false
+    let current: string | undefined
+    try { current = this.map.getLayoutProperty('boundaries', 'visibility') } catch { /* style not ready */ }
+    const show = visible ?? (current === 'none' || current === undefined)
     const vis = show ? 'visible' : 'none'
     for (const id of ['coastline-halo', 'coastline', 'boundaries-halo', 'boundaries']) {
       try { this.map.setLayoutProperty(id, 'visibility', vis) } catch { /* noop */ }
@@ -418,9 +420,10 @@ export class MapRenderer implements GlobeRenderer {
     const marker = new maplibregl.Marker({ color: '#4da6ff' })
       .setLngLat([lng, lat])
     if (label) {
-      marker.setPopup(new maplibregl.Popup({ offset: 25, className: 'sos-popup' }).setHTML(
-        `<div style="color:#fff;background:rgba(13,13,18,0.92);padding:6px 10px;border-radius:6px;font:13px/1.4 system-ui,sans-serif;white-space:nowrap;">${label}</div>`
-      ))
+      const popupContent = document.createElement('div')
+      popupContent.style.cssText = 'color:#fff;background:rgba(13,13,18,0.92);padding:6px 10px;border-radius:6px;font:13px/1.4 system-ui,sans-serif;white-space:nowrap;'
+      popupContent.textContent = label
+      marker.setPopup(new maplibregl.Popup({ offset: 25, className: 'sos-popup' }).setDOMContent(popupContent))
     }
     marker.addTo(this.map)
     // Auto-open popup so label is immediately visible
@@ -557,7 +560,16 @@ export class MapRenderer implements GlobeRenderer {
       try { this.map?.setLayoutProperty('blue-marble-layer', 'visibility', 'none') } catch { /* noop */ }
       console.info('[MapRenderer] Video dataset set via custom layer sphere')
     }
-    return { needsUpdate: false, dispose() {} }
+    const earthLayer = this.earthLayer
+    let pending = false
+    return {
+      get needsUpdate() { return pending },
+      set needsUpdate(v: boolean) {
+        pending = v
+        if (v) { earthLayer?.requestVideoUpdate(); pending = false }
+      },
+      dispose() {},
+    }
   }
 
   // --- Earth materials ---

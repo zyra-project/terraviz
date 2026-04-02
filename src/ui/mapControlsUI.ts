@@ -15,7 +15,7 @@ export function initMapControls(renderer: MapRenderer): void {
 
   // Build the buttons
   container.innerHTML = `
-    <button class="map-ctrl-btn" id="map-ctrl-labels" title="Toggle labels &amp; boundaries" aria-label="Toggle geographic labels" aria-pressed="false">Labels</button>
+    <button class="map-ctrl-btn" id="map-ctrl-labels" title="Toggle geographic labels" aria-label="Toggle geographic labels" aria-pressed="false">Labels</button>
     <button class="map-ctrl-btn" id="map-ctrl-borders" title="Toggle country borders" aria-label="Toggle country borders" aria-pressed="false">Borders</button>
     <button class="map-ctrl-btn" id="map-ctrl-terrain" title="Toggle 3D terrain" aria-label="Toggle 3D terrain" aria-pressed="false">Terrain</button>
     <button class="map-ctrl-btn" id="map-ctrl-clear" title="Clear markers &amp; highlights" aria-label="Clear markers and highlights">Clear</button>

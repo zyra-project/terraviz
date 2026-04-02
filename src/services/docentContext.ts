@@ -531,9 +531,11 @@ export function buildViewContextSection(viewContext: {
   const parts: string[] = []
   const { center, zoom, bounds, visibleCountries, visibleOceans } = viewContext
 
-  parts.push(`Globe center: ${center.lat.toFixed(1)}°${center.lat >= 0 ? 'N' : 'S'}, ${Math.abs(center.lng).toFixed(1)}°${center.lng >= 0 ? 'E' : 'W'}`)
+  parts.push(`Globe center: ${Math.abs(center.lat).toFixed(1)}°${center.lat >= 0 ? 'N' : 'S'}, ${Math.abs(center.lng).toFixed(1)}°${center.lng >= 0 ? 'E' : 'W'}`)
   parts.push(`Zoom level: ${zoom.toFixed(1)}`)
-  parts.push(`Viewport bounds: [${bounds.west.toFixed(1)}°W, ${bounds.south.toFixed(1)}°S, ${bounds.east.toFixed(1)}°E, ${bounds.north.toFixed(1)}°N]`)
+  const fmtLng = (v: number) => `${Math.abs(v).toFixed(1)}°${v >= 0 ? 'E' : 'W'}`
+  const fmtLat = (v: number) => `${Math.abs(v).toFixed(1)}°${v >= 0 ? 'N' : 'S'}`
+  parts.push(`Viewport bounds: [${fmtLng(bounds.west)}, ${fmtLat(bounds.south)}, ${fmtLng(bounds.east)}, ${fmtLat(bounds.north)}]`)
 
   if (visibleCountries.length > 0) {
     parts.push(`Visible countries/regions: ${visibleCountries.slice(0, 15).join(', ')}${visibleCountries.length > 15 ? ` (+${visibleCountries.length - 15} more)` : ''}`)
