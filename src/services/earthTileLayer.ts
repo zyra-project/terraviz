@@ -589,7 +589,9 @@ export interface EarthTileLayerControl {
   setVisible(visible: boolean): void
   /** Display an equirectangular image as a dataset overlay on the globe. */
   setDatasetTexture(image: HTMLCanvasElement | HTMLImageElement): void
-  /** Remove the current dataset overlay. */
+  /** Display an equirectangular video as a dataset overlay on the globe. */
+  setDatasetVideo(video: HTMLVideoElement): void
+  /** Remove the current dataset overlay (image or video). */
   clearDatasetTexture(): void
 }
 
@@ -612,6 +614,7 @@ export function createEarthTileLayer(): EarthTileLayerControl {
   let cloudTexReady = false
   let dataset: DatasetProgram | null = null
   let datasetTex: WebGLTexture | null = null
+  let datasetVideo: HTMLVideoElement | null = null
   let datasetActive = false
   let skyboxProg: WebGLProgram | null = null
   let skyboxInvProjLoc: WebGLUniformLocation | null = null
@@ -929,6 +932,14 @@ export function createEarthTileLayer(): EarthTileLayerControl {
 
       // --- Dataset overlay: opaque textured sphere (replaces earth effects) ---
       if (datasetActive && dataset && datasetTex) {
+        // For video datasets, re-upload the current frame every render
+        if (datasetVideo && !datasetVideo.paused && datasetVideo.readyState >= 2) {
+          gl2.bindTexture(gl2.TEXTURE_2D, datasetTex)
+          gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.RGBA, gl2.RGBA, gl2.UNSIGNED_BYTE, datasetVideo)
+          // Request next frame so we keep updating
+          mapRef?.triggerRepaint()
+        }
+
         gl2.disable(gl2.BLEND)
         gl2.useProgram(dataset.program)
         gl2.uniformMatrix4fv(dataset.matrixLoc, false, matrix)
@@ -1086,7 +1097,7 @@ export function createEarthTileLayer(): EarthTileLayerControl {
     },
     setDatasetTexture(image: HTMLCanvasElement | HTMLImageElement) {
       if (!glRef) return
-      // Create or reuse the dataset texture
+      datasetVideo = null // clear any previous video
       if (!datasetTex) {
         datasetTex = glRef.createTexture()
       }
@@ -1100,8 +1111,26 @@ export function createEarthTileLayer(): EarthTileLayerControl {
       datasetActive = true
       mapRef?.triggerRepaint()
     },
+    setDatasetVideo(video: HTMLVideoElement) {
+      if (!glRef) return
+      datasetVideo = video
+      if (!datasetTex) {
+        datasetTex = glRef.createTexture()
+      }
+      // Initialize with a single frame — render loop will update per-frame
+      glRef.bindTexture(glRef.TEXTURE_2D, datasetTex)
+      glRef.texImage2D(glRef.TEXTURE_2D, 0, glRef.RGBA, glRef.RGBA, glRef.UNSIGNED_BYTE, video)
+      // No mipmaps for video — LINEAR only (regenerating mipmaps per frame is expensive)
+      glRef.texParameteri(glRef.TEXTURE_2D, glRef.TEXTURE_MIN_FILTER, glRef.LINEAR)
+      glRef.texParameteri(glRef.TEXTURE_2D, glRef.TEXTURE_MAG_FILTER, glRef.LINEAR)
+      glRef.texParameteri(glRef.TEXTURE_2D, glRef.TEXTURE_WRAP_S, glRef.REPEAT)
+      glRef.texParameteri(glRef.TEXTURE_2D, glRef.TEXTURE_WRAP_T, glRef.CLAMP_TO_EDGE)
+      datasetActive = true
+      mapRef?.triggerRepaint()
+    },
     clearDatasetTexture() {
       datasetActive = false
+      datasetVideo = null
       mapRef?.triggerRepaint()
     },
   }

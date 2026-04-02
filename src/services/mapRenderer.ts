@@ -304,37 +304,16 @@ export class MapRenderer {
   }
 
   /**
-   * Display a video on the globe via MapLibre VideoSource.
+   * Display an equirectangular video on the globe via custom layer sphere.
+   * The render loop updates the texture from the video element each frame.
    * Returns a THREE.VideoTexture for playback controller compatibility.
    */
   setVideoTexture(video: HTMLVideoElement): THREE.VideoTexture {
-    if (!this.map) {
-      return new THREE.VideoTexture(video)
+    if (this.earthLayer) {
+      this.earthLayer.setDatasetVideo(video)
+      try { this.map?.setLayoutProperty('blue-marble-layer', 'visibility', 'none') } catch { /* noop */ }
+      console.info('[MapRenderer] Video dataset set via custom layer sphere')
     }
-
-    // Remove previous overlay
-    this.removeDatasetOverlay()
-
-    const bounds: [[number, number], [number, number], [number, number], [number, number]] =
-      [[-180, 85], [180, 85], [180, -85], [-180, -85]]
-
-    this.map.addSource('dataset-overlay', {
-      type: 'video',
-      urls: [video.src || video.currentSrc],
-      coordinates: bounds,
-    })
-
-    this.map.addLayer({
-      id: 'dataset-overlay-layer',
-      type: 'raster',
-      source: 'dataset-overlay',
-      paint: { 'raster-opacity': 1 },
-    })
-
-    this.map.setLayoutProperty('blue-marble-layer', 'visibility', 'none')
-
-    console.info('[MapRenderer] Video overlay added')
-
     // Return a VideoTexture for playback controller compatibility
     return new THREE.VideoTexture(video)
   }
