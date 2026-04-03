@@ -24,8 +24,8 @@ const BLACK_MARBLE_TILES = [
 const GIBS_MAX_ZOOM = 8
 
 // --- Default camera ---
-const DEFAULT_CENTER: [number, number] = [0, 20]
-const DEFAULT_ZOOM = 1.8
+const DEFAULT_CENTER: [number, number] = [-95, 38]
+const DEFAULT_ZOOM = 2.3
 // Zoom limits: ~0.5 shows the full globe, ~8 is the max detail for GIBS tiles
 const MIN_ZOOM = 0.5
 const MAX_ZOOM = 8
@@ -332,6 +332,11 @@ export class MapRenderer implements GlobeRenderer {
     // Move label layers above the earth tile layer so they aren't darkened.
     this.map.on('load', () => {
       logger.info('[MapRenderer] Map loaded with globe projection')
+
+      // Collapse the compact attribution control so it doesn't cover the auto-rotate button
+      const attrib = container.querySelector('.maplibregl-ctrl-attrib.maplibregl-compact')
+      attrib?.classList.remove('maplibregl-compact-show')
+
       this.earthLayer = createEarthTileLayer()
 
       // Layer order: black-marble → [capture] → blue-marble → [earth-tile] → labels → [skybox]
