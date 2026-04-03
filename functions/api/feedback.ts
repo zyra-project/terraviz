@@ -144,9 +144,17 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     })
   }
 
-  // Truncate messages to prevent excessively large payloads
-  const messages = body.messages.slice(-100)
-  const conversationJson = JSON.stringify(messages)
+  // Truncate messages and strip to essential fields to prevent oversized payloads
+  const messages = body.messages.slice(-100).map((m: unknown) => {
+    if (typeof m !== 'object' || m === null) return m
+    const msg = m as Record<string, unknown>
+    return { id: msg.id, role: msg.role, text: msg.text, timestamp: msg.timestamp }
+  })
+  let conversationJson = JSON.stringify(messages)
+  // Cap total size to 500KB to stay well within D1 row limits
+  if (conversationJson.length > 500_000) {
+    conversationJson = JSON.stringify(messages.slice(-20))
+  }
 
   // Extract the rated assistant message text for easy export queries
   const ratedMsg = messages.find((m: unknown) => {

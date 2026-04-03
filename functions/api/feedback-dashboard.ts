@@ -14,6 +14,22 @@ interface Env {
   FEEDBACK_ADMIN_TOKEN?: string
 }
 
+const ALLOWED_ORIGINS = new Set([
+  'http://localhost:5173',
+  'http://localhost:4173',
+])
+
+function isAllowedOrigin(origin: string | null, requestUrl: string): boolean {
+  if (!origin) return false
+  if (ALLOWED_ORIGINS.has(origin)) return true
+  try {
+    const req = new URL(requestUrl)
+    return origin === req.origin
+  } catch {
+    return false
+  }
+}
+
 function corsHeaders(origin?: string | null): Record<string, string> {
   const headers: Record<string, string> = {
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
@@ -36,12 +52,16 @@ function authenticate(request: Request, token?: string): boolean {
 
 export const onRequestOptions: PagesFunction<Env> = async (context) => {
   const origin = context.request.headers.get('Origin')
+  if (!isAllowedOrigin(origin, context.request.url)) {
+    return new Response(null, { status: 403 })
+  }
   return new Response(null, { status: 204, headers: corsHeaders(origin) })
 }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
   const origin = context.request.headers.get('Origin')
-  const cors = corsHeaders(origin)
+  const allowedOrigin = isAllowedOrigin(origin, context.request.url) ? origin : null
+  const cors = corsHeaders(allowedOrigin)
   const jsonHeaders = { ...cors, 'Content-Type': 'application/json' }
 
   if (!authenticate(context.request, context.env.FEEDBACK_ADMIN_TOKEN)) {

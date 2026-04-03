@@ -10,5 +10,5 @@ CREATE TABLE IF NOT EXISTS feedback (
 );
 
 -- Index for querying by rating and date range
-CREATE INDEX idx_feedback_rating ON feedback (rating);
-CREATE INDEX idx_feedback_created_at ON feedback (created_at);
+CREATE INDEX IF NOT EXISTS idx_feedback_rating ON feedback (rating);
+CREATE INDEX IF NOT EXISTS idx_feedback_created_at ON feedback (created_at);

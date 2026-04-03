@@ -976,16 +976,17 @@ function wireFeedbackButtons(container: Element): void {
     btn.addEventListener('click', () => {
       const rating = btn.dataset.feedback as FeedbackRating | undefined
       const msgId = btn.dataset.msgId
-      if (!rating || !msgId) return
+      const feedbackRow = btn.closest<HTMLElement>('.chat-feedback')
+      if (!rating || !msgId || !feedbackRow || feedbackRow.dataset.feedbackSubmitted === 'true') return
 
-      // Disable both buttons immediately
-      const feedbackRow = btn.closest('.chat-feedback')
-      feedbackRow?.querySelectorAll<HTMLButtonElement>('.chat-feedback-btn').forEach(b => {
+      feedbackRow.dataset.feedbackSubmitted = 'true'
+
+      // Disable all buttons to prevent duplicate submissions
+      feedbackRow.querySelectorAll<HTMLButtonElement>('.chat-feedback-btn').forEach(b => {
         b.disabled = true
         b.classList.add('chat-feedback-disabled')
       })
-      // Highlight the selected one
-      ;(btn as HTMLButtonElement).disabled = false
+      // Highlight the selected one (stays disabled)
       btn.classList.add('chat-feedback-rated')
       btn.classList.remove('chat-feedback-disabled')
       btn.setAttribute('aria-pressed', 'true')
@@ -1011,7 +1012,7 @@ function buildFeedbackPayload(messageId: string, rating: FeedbackRating): Feedba
     rating,
     comment: '',
     messageId,
-    messages: messages.map(({ llmContext: _ctx, ...m }) => m),
+    messages: messages.map(m => ({ id: m.id, role: m.role, text: m.text, timestamp: m.timestamp })),
     datasetId: callbacks?.getCurrentDataset()?.id ?? null,
     timestamp: Date.now(),
     systemPrompt: ctx?.systemPrompt,
@@ -1048,7 +1049,8 @@ async function submitInlineRating(messageId: string, rating: FeedbackRating, btn
     showFeedbackExpansion(messageId, rating, btn)
   } catch {
     // Re-enable buttons on failure so user can retry
-    const feedbackRow = btn.closest('.chat-feedback')
+    const feedbackRow = btn.closest<HTMLElement>('.chat-feedback')
+    if (feedbackRow) delete feedbackRow.dataset.feedbackSubmitted
     feedbackRow?.querySelectorAll<HTMLButtonElement>('.chat-feedback-btn').forEach(b => {
       b.disabled = false
       b.classList.remove('chat-feedback-disabled', 'chat-feedback-rated')
