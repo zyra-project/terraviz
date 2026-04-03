@@ -5,16 +5,16 @@
  * No dataset param = just the default Earth globe
  */
 
-import * as THREE from 'three'
-import { SphereRenderer } from './services/sphereRenderer'
+import { MapRenderer } from './services/mapRenderer'
 import { HLSService } from './services/hlsService'
 import { dataService } from './services/dataService'
 import { formatDate, videoTimeToDate, isSubDailyPeriod, getSunPosition } from './utils/time'
 import { logger } from './utils/logger'
-import type { AppState } from './types'
+import type { AppState, VideoTextureHandle } from './types'
 
 // Extracted modules
 import { showBrowseUI, hideBrowseUI } from './ui/browseUI'
+import { initMapControls, updateMapControlsPosition } from './ui/mapControlsUI'
 import { initChatUI, openChat, notifyDatasetChanged, showChatTrigger, hideChatTrigger, closeChat, flushPendingGlobeActions } from './ui/chatUI'
 import {
   createPlaybackState, startPlaybackLoop, stopPlaybackLoop,
@@ -29,8 +29,6 @@ import {
 import { initLegendForDataset, clearLegendCache, loadConfig } from './services/docentService'
 
 // --- App constants ---
-const SPHERE_SEGMENTS_MOBILE = 32
-const SPHERE_SEGMENTS_DESKTOP = 64
 const EARTH_TEXTURE_WEIGHT = 0.8
 const CLOUD_TEXTURE_WEIGHT = 0.2
 const LOADING_BASE_PROGRESS = 20
@@ -59,9 +57,9 @@ class InteractiveSphere {
 
   private readonly isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)
 
-  private renderer: SphereRenderer | null = null
+  private renderer: MapRenderer | null = null
   private hlsService: HLSService | null = null
-  private videoTexture: THREE.VideoTexture | null = null
+  private videoTexture: VideoTextureHandle | null = null
   private playback: PlaybackState = createPlaybackState()
   private loadingHideTimer: ReturnType<typeof setTimeout> | null = null
   private loadGeneration = 0 // guards against concurrent dataset loads
@@ -82,19 +80,16 @@ class InteractiveSphere {
       if (!container) throw new Error('Container element not found')
 
       this.setLoadingStatus('Creating renderer\u2026', 15)
-      this.renderer = new SphereRenderer(container)
-      const segments = this.isMobile ? SPHERE_SEGMENTS_MOBILE : SPHERE_SEGMENTS_DESKTOP
-      this.renderer.createSphere({
-        radius: 1,
-        widthSegments: segments,
-        heightSegments: segments
-      })
+      this.renderer = new MapRenderer()
+      this.renderer.init(container)
+      initMapControls(this.renderer)
+      logger.info('[App] Using MapLibre renderer')
 
       // Wire up lat/lng display
       const latlngEl = document.getElementById('latlng-display')
       if (latlngEl) {
         this.renderer.setLatLngCallbacks(
-          (lat, lng) => {
+          (lat: number, lng: number) => {
             const ns = lat >= 0 ? 'N' : 'S'
             const ew = lng >= 0 ? 'E' : 'W'
             latlngEl.textContent = `${Math.abs(lat).toFixed(1)}° ${ns}, ${Math.abs(lng).toFixed(1)}° ${ew}`
@@ -115,9 +110,7 @@ class InteractiveSphere {
 
       const datasetId = this.getDatasetIdFromUrl()
       if (datasetId) {
-        this.setLoadingStatus('Loading Earth texture\u2026', 50)
-        await this.loadDefaultTexture()
-        this.setLoadingStatus('Loading dataset\u2026', 65)
+        this.setLoadingStatus('Loading dataset\u2026', 50)
         await this.loadDataset(datasetId)
         this.setLoading(false)
         showChatTrigger()
@@ -132,8 +125,8 @@ class InteractiveSphere {
           this.setLoadingStatus('Loading Earth textures\u2026', LOADING_BASE_PROGRESS + Math.round(combined * LOADING_TEXTURE_RANGE))
         }
         await Promise.all([
-          this.renderer.loadDefaultEarthMaterials((f) => { earthFraction = f; updateProgress() }),
-          this.renderer.loadCloudOverlay(cloudUrl, (f) => { cloudFraction = f; updateProgress() })
+          this.renderer.loadDefaultEarthMaterials((f: number) => { earthFraction = f; updateProgress() }),
+          this.renderer.loadCloudOverlay(cloudUrl, (f: number) => { cloudFraction = f; updateProgress() })
         ])
 
         const sun = getSunPosition(new Date())
@@ -157,22 +150,6 @@ class InteractiveSphere {
   private getDatasetIdFromUrl(): string | null {
     const params = new URLSearchParams(window.location.search)
     return params.get('dataset')
-  }
-
-  /** Load the fallback Earth diffuse texture from local assets. */
-  private loadDefaultTexture(): Promise<void> {
-    return new Promise((resolve) => {
-      const img = new Image()
-      img.onload = () => {
-        this.renderer?.updateTexture(img)
-        resolve()
-      }
-      img.onerror = () => {
-        logger.warn('[App] Default Earth texture not found, using solid color')
-        resolve()
-      }
-      img.src = '/assets/Earth_Diffuse_6K.jpg'
-    })
   }
 
   /** Fetch the dataset catalog from the data service and store in app state. */
@@ -330,6 +307,7 @@ class InteractiveSphere {
     if (standalone) {
       standalone.classList.toggle('hidden', show)
     }
+    updateMapControlsPosition()
   }
 
   /** Detect WebGL support. If unavailable, display troubleshooting instructions and return false. */
@@ -444,6 +422,11 @@ class InteractiveSphere {
       onLoadDataset: (id) => { void this.selectDatasetFromChat(id) },
       onFlyTo: (lat, lon, altitude) => { void this.renderer?.flyTo(lat, lon, altitude) },
       onSetTime: (isoDate) => seekToDate(isoDate, this.hlsService, this.appState, this.playback),
+      onFitBounds: (bounds, _label) => { this.renderer?.fitBounds(bounds) },
+      onAddMarker: (lat, lng, label) => { this.renderer?.addMarker(lat, lng, label) },
+      onToggleLabels: (visible) => { this.renderer?.toggleLabels(visible); this.renderer?.toggleBoundaries(visible) },
+      onHighlightRegion: (geojson, _label) => { this.renderer?.highlightRegion(geojson) },
+      getMapViewContext: () => this.renderer?.getViewContext() ?? null,
       getDatasets: () => this.appState.datasets,
       getCurrentDataset: () => this.appState.currentDataset,
       announce: (msg) => this.announce(msg),
@@ -701,8 +684,8 @@ class InteractiveSphere {
         this.setLoadingStatus('Loading Earth\u2026', LOADING_BASE_PROGRESS + Math.round(combined * LOADING_TEXTURE_RANGE))
       }
       await Promise.all([
-        this.renderer.loadDefaultEarthMaterials((f) => { earthFraction = f; updateProgress() }),
-        this.renderer.loadCloudOverlay(cloudUrl, (f) => { cloudFraction = f; updateProgress() })
+        this.renderer.loadDefaultEarthMaterials((f: number) => { earthFraction = f; updateProgress() }),
+        this.renderer.loadCloudOverlay(cloudUrl, (f: number) => { cloudFraction = f; updateProgress() })
       ])
       const sun = getSunPosition(new Date())
       this.renderer.enableSunLighting(sun.lat, sun.lng)

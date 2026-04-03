@@ -4,11 +4,9 @@
  * Extracted from InteractiveSphere to isolate data-loading concerns.
  */
 
-import * as THREE from 'three'
-import type { SphereRenderer } from './sphereRenderer'
 import { HLSService } from './hlsService'
 import { dataService } from './dataService'
-import type { Dataset, AppState } from '../types'
+import type { Dataset, AppState, GlobeRenderer, VideoTextureHandle } from '../types'
 import { formatDate, isSubDailyPeriod, inferDisplayInterval } from '../utils/time'
 import { logger } from '../utils/logger'
 import { escapeHtml, escapeAttr } from '../ui/browseUI'
@@ -34,7 +32,7 @@ export interface DatasetLoaderCallbacks {
 /** Load an image dataset onto the globe, trying progressively lower resolutions on mobile. */
 export async function loadImageDataset(
   dataset: Dataset,
-  renderer: SphereRenderer,
+  renderer: GlobeRenderer,
   appState: AppState,
   isMobile: boolean,
   callbacks: DatasetLoaderCallbacks,
@@ -92,12 +90,12 @@ function tryLoadImage(urls: string[]): Promise<HTMLImageElement> {
 /** Load a video dataset via HLS streaming, set up the video texture, and configure playback controls. */
 export async function loadVideoDataset(
   dataset: Dataset,
-  renderer: SphereRenderer,
+  renderer: GlobeRenderer,
   appState: AppState,
   isMobile: boolean,
   playbackState: PlaybackState,
   callbacks: DatasetLoaderCallbacks,
-): Promise<{ hlsService: HLSService; videoTexture: THREE.VideoTexture }> {
+): Promise<{ hlsService: HLSService; videoTexture: VideoTextureHandle }> {
   const vimeoId = dataService.extractVimeoId(dataset.dataLink)
   if (!vimeoId) throw new Error(`Could not extract Vimeo ID from: ${dataset.dataLink}`)
 

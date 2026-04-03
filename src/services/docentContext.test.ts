@@ -12,6 +12,11 @@ import {
   getLoadDatasetTool,
   getFlyToTool,
   getSetTimeTool,
+  getFitBoundsTool,
+  getAddMarkerTool,
+  getToggleLabelsTool,
+  getHighlightRegionTool,
+  buildViewContextSection,
 } from './docentContext'
 
 function makeDataset(overrides: Partial<Dataset> = {}): Dataset {
@@ -282,15 +287,14 @@ describe('getLoadDatasetTool', () => {
 })
 
 describe('getFlyToTool', () => {
-  it('returns a valid tool definition with lat and lon required', () => {
+  it('returns a valid tool definition with lat, lon, place, and altitude', () => {
     const tool = getFlyToTool()
     expect(tool.type).toBe('function')
     expect(tool.function.name).toBe('fly_to')
-    expect(tool.function.parameters.required).toContain('lat')
-    expect(tool.function.parameters.required).toContain('lon')
+    expect(tool.function.parameters.properties).toHaveProperty('lat')
+    expect(tool.function.parameters.properties).toHaveProperty('lon')
+    expect(tool.function.parameters.properties).toHaveProperty('place')
     expect(tool.function.parameters.properties).toHaveProperty('altitude')
-    // altitude should not be required
-    expect(tool.function.parameters.required).not.toContain('altitude')
   })
 })
 
@@ -335,5 +339,184 @@ describe('buildSystemPromptForTurn — vision mode', () => {
     const prompt = buildSystemPromptForTurn(datasets, null, 0, 'expert', true)
     expect(prompt).toContain('Vision Analysis Mode')
     expect(prompt).toContain('Reading Level: Expert')
+  })
+})
+
+// --- Phase 5: New tool definitions ---
+
+describe('getFitBoundsTool', () => {
+  it('returns a valid tool definition with required bounds params', () => {
+    const tool = getFitBoundsTool()
+    expect(tool.type).toBe('function')
+    expect(tool.function.name).toBe('fit_bounds')
+    const required = tool.function.parameters.required as string[]
+    expect(required).toContain('west')
+    expect(required).toContain('south')
+    expect(required).toContain('east')
+    expect(required).toContain('north')
+    expect(tool.function.parameters.properties).toHaveProperty('label')
+  })
+})
+
+describe('getAddMarkerTool', () => {
+  it('returns a valid tool definition with lat and lng required', () => {
+    const tool = getAddMarkerTool()
+    expect(tool.type).toBe('function')
+    expect(tool.function.name).toBe('add_marker')
+    const required = tool.function.parameters.required as string[]
+    expect(required).toContain('lat')
+    expect(required).toContain('lng')
+    expect(tool.function.parameters.properties).toHaveProperty('label')
+  })
+})
+
+describe('getToggleLabelsTool', () => {
+  it('returns a valid tool definition with visible required', () => {
+    const tool = getToggleLabelsTool()
+    expect(tool.type).toBe('function')
+    expect(tool.function.name).toBe('toggle_labels')
+    const required = tool.function.parameters.required as string[]
+    expect(required).toContain('visible')
+  })
+})
+
+describe('getHighlightRegionTool', () => {
+  it('returns a valid tool definition with name and geojson params', () => {
+    const tool = getHighlightRegionTool()
+    expect(tool.type).toBe('function')
+    expect(tool.function.name).toBe('highlight_region')
+    expect(tool.function.parameters.properties).toHaveProperty('name')
+    expect(tool.function.parameters.properties).toHaveProperty('geojson')
+    expect(tool.function.parameters.properties).toHaveProperty('label')
+  })
+
+  it('does not require any specific parameter (name or geojson)', () => {
+    const tool = getHighlightRegionTool()
+    // Either name or geojson can be used, neither is strictly required
+    expect(tool.function.parameters.required).toBeUndefined()
+  })
+})
+
+// --- Phase 5: View context section ---
+
+describe('buildViewContextSection', () => {
+  it('returns empty string for null context', () => {
+    expect(buildViewContextSection(null)).toBe('')
+  })
+
+  it('includes center coordinates', () => {
+    const ctx = buildViewContextSection({
+      center: { lat: 40.0, lng: -105.3 },
+      zoom: 4.5,
+      bearing: 0,
+      pitch: 0,
+      bounds: { west: -140, south: 10, east: -60, north: 60 },
+      visibleCountries: [],
+      visibleOceans: [],
+    })
+    expect(ctx).toContain('40.0')
+    expect(ctx).toContain('105.3')
+  })
+
+  it('includes zoom level', () => {
+    const ctx = buildViewContextSection({
+      center: { lat: 0, lng: 0 },
+      zoom: 3.2,
+      bearing: 0,
+      pitch: 0,
+      bounds: { west: -90, south: -45, east: 90, north: 45 },
+      visibleCountries: [],
+      visibleOceans: [],
+    })
+    expect(ctx).toContain('3.2')
+  })
+
+  it('includes visible countries when present', () => {
+    const ctx = buildViewContextSection({
+      center: { lat: 0, lng: 0 },
+      zoom: 3,
+      bearing: 0,
+      pitch: 0,
+      bounds: { west: -90, south: -45, east: 90, north: 45 },
+      visibleCountries: ['United States', 'Canada', 'Mexico'],
+      visibleOceans: [],
+    })
+    expect(ctx).toContain('United States')
+    expect(ctx).toContain('Canada')
+    expect(ctx).toContain('Mexico')
+  })
+
+  it('includes visible oceans when present', () => {
+    const ctx = buildViewContextSection({
+      center: { lat: 0, lng: 0 },
+      zoom: 2,
+      bearing: 0,
+      pitch: 0,
+      bounds: { west: -180, south: -60, east: 180, north: 60 },
+      visibleCountries: [],
+      visibleOceans: ['Pacific Ocean', 'Atlantic Ocean'],
+    })
+    expect(ctx).toContain('Pacific Ocean')
+    expect(ctx).toContain('Atlantic Ocean')
+  })
+
+  it('truncates long country lists with count', () => {
+    const countries = Array.from({ length: 20 }, (_, i) => `Country ${i}`)
+    const ctx = buildViewContextSection({
+      center: { lat: 0, lng: 0 },
+      zoom: 1,
+      bearing: 0,
+      pitch: 0,
+      bounds: { west: -180, south: -90, east: 180, north: 90 },
+      visibleCountries: countries,
+      visibleOceans: [],
+    })
+    expect(ctx).toContain('+5 more')
+    expect(ctx).toContain('Country 0')
+    expect(ctx).not.toContain('Country 19')
+  })
+})
+
+// --- Phase 5: System prompt includes new markers ---
+
+describe('buildSystemPromptForTurn — Phase 5 markers', () => {
+  it('includes BOUNDS marker instructions', () => {
+    const prompt = buildSystemPromptForTurn(datasets, null, 0)
+    expect(prompt).toContain('<<BOUNDS:')
+  })
+
+  it('includes MARKER marker instructions', () => {
+    const prompt = buildSystemPromptForTurn(datasets, null, 0)
+    expect(prompt).toContain('<<MARKER:')
+  })
+
+  it('includes LABELS marker instructions', () => {
+    const prompt = buildSystemPromptForTurn(datasets, null, 0)
+    expect(prompt).toContain('<<LABELS:')
+  })
+
+  it('includes REGION marker instructions', () => {
+    const prompt = buildSystemPromptForTurn(datasets, null, 0)
+    expect(prompt).toContain('<<REGION:')
+  })
+
+  it('includes geographic context when mapViewContext is provided', () => {
+    const prompt = buildSystemPromptForTurn(datasets, null, 0, 'general', false, null, null, null, {
+      center: { lat: 40.0, lng: -105.3 },
+      zoom: 4.5,
+      bearing: 0,
+      pitch: 0,
+      bounds: { west: -140, south: 10, east: -60, north: 60 },
+      visibleCountries: ['United States'],
+      visibleOceans: ['Pacific Ocean'],
+    })
+    expect(prompt).toContain('Geographic Context')
+    expect(prompt).toContain('United States')
+    expect(prompt).toContain('Pacific Ocean')
+  })
+
+  it('omits geographic context when mapViewContext is not provided', () => {
+    const prompt = buildSystemPromptForTurn(datasets, null, 0)
+    expect(prompt).not.toContain('Geographic Context')
   })
 })

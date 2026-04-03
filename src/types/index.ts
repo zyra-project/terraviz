@@ -106,22 +106,48 @@ export interface AppState {
 }
 
 /**
- * Sphere rendering options
+ * Structured map view context passed to the LLM system prompt.
  */
-export interface SphereOptions {
-  radius: number
-  widthSegments: number
-  heightSegments: number
-  texture?: HTMLCanvasElement | HTMLImageElement
+export interface MapViewContext {
+  center: { lat: number; lng: number }
+  zoom: number
+  bearing: number
+  pitch: number
+  bounds: { west: number; south: number; east: number; north: number }
+  visibleCountries: string[]
+  visibleOceans: string[]
 }
 
 /**
- * Controls state
+ * Lightweight handle for a video texture, used by the playback controller
+ * to flag manual updates and clean up resources.
  */
-export interface ControlsState {
-  isRotating: boolean
-  autoRotate: boolean
-  zoomLevel: number
+export interface VideoTextureHandle {
+  needsUpdate: boolean
+  dispose(): void
+}
+
+/**
+ * Globe renderer interface used by modules like datasetLoader that interact
+ * with the MapLibre-based globe.
+ */
+export interface GlobeRenderer {
+  updateTexture(texture: HTMLCanvasElement | HTMLImageElement): void
+  setVideoTexture(video: HTMLVideoElement): VideoTextureHandle
+  flyTo(lat: number, lon: number, altitude?: number): void | Promise<void>
+  toggleAutoRotate(): boolean
+  setLatLngCallbacks(
+    onUpdate: (lat: number, lng: number) => void,
+    onClear: () => void,
+  ): void
+  setCanvasDescription(text: string): void
+  loadDefaultEarthMaterials(onProgress?: (fraction: number) => void): Promise<void>
+  removeNightLights(): void
+  enableSunLighting(lat: number, lng: number): void
+  disableSunLighting(): void
+  loadCloudOverlay(url: string, onProgress?: (fraction: number) => void): Promise<void>
+  removeCloudOverlay(): void
+  dispose(): void
 }
 
 /**
@@ -136,6 +162,10 @@ export type ChatAction =
   | { type: 'load-dataset'; datasetId: string; datasetTitle: string }
   | { type: 'fly-to'; lat: number; lon: number; altitude?: number }
   | { type: 'set-time'; isoDate: string }
+  | { type: 'fit-bounds'; bounds: [number, number, number, number]; label?: string }
+  | { type: 'add-marker'; lat: number; lng: number; label?: string }
+  | { type: 'toggle-labels'; visible: boolean }
+  | { type: 'highlight-region'; geojson: GeoJSON.GeoJSON; label?: string }
 
 /**
  * A single chat message

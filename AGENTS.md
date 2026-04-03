@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-WebGL globe (Three.js + Vite + TypeScript) that renders NOAA Science On a Sphere datasets on a 3D sphere with a Milky Way skybox. Supports both static image datasets and HLS video streaming from Vimeo.
+WebGL globe (MapLibre GL JS + Vite + TypeScript) that renders NOAA Science On a Sphere datasets on an interactive 3D globe with NASA GIBS tiles, day/night lighting, and a Milky Way skybox. Supports both static image datasets and HLS video streaming from Vimeo.
 
 ## Architecture
 
@@ -12,25 +12,28 @@ src/
   main.ts                  — App entry point, dataset loading orchestration
   types/index.ts           — All TypeScript interfaces
   services/
-    sphereRenderer.ts      — Three.js scene, sphere, skybox
-    earthMaterials.ts      — Earth textures, atmosphere, sun lighting, clouds
-    inputHandler.ts        — Mouse/touch controls, rotation, zoom, inertia
+    mapRenderer.ts         — MapLibre GL JS globe, GIBS tiles, navigation, markers, terrain
+    earthTileLayer.ts      — Day/night blend, clouds, specular, sun, skybox (CustomLayerInterface)
     datasetLoader.ts       — Dataset loading and texture application
     dataService.ts         — Fetches & cross-references SOS metadata, caches datasets
     hlsService.ts          — HLS.js video streaming with adaptive bitrate
-    videoFrameExtractor.ts — Extracts video frames to canvas for sphere texture
+    docentService.ts       — Orbit orchestrator — hybrid LLM + local engine
+    docentContext.ts       — LLM system prompt, tools, history compression
+    docentEngine.ts        — Local keyword-based fallback engine
+    llmProvider.ts         — OpenAI-compatible SSE streaming client
   ui/
+    chatUI.ts              — Orbit chat panel — rendering, settings, events
     browseUI.ts            — Dataset browser, search, category/sub-category filtering
+    mapControlsUI.ts       — Map controls — labels, boundaries, terrain toggles
     playbackController.ts  — Video playback state and controls
+  data/
+    regions.ts             — Region name → bounding box resolution
   utils/
     time.ts                — ISO 8601 parsing, date formatting, video-to-date mapping
     fetchProgress.ts       — Fetch with byte-level progress reporting
 public/
   assets/
-    Earth_Diffuse_6K.jpg         — Default Earth texture
-    Earth_Normal_2K.jpg          — Normal map for surface detail
     Earth_Specular_2K.jpg        — Specular map for ocean reflections
-    Earth_Lights_6K.jpg          — Night-side city lights
     sos_dataset_metadata.json    — Enriched metadata (520 datasets from NOAA catalog)
     skybox/                      — Milky Way cube map (6 faces, 2048x2048 JPEG)
 ```
@@ -93,8 +96,9 @@ See **[STYLE_GUIDE.md](STYLE_GUIDE.md)** for the complete visual design language
 ## Key Conventions
 
 - Vite root is `./src`, public dir is `../public`
-- Three.js 0.160, use `colorSpace` not `encoding`
-- Sphere rotation uses inertia/damping physics (not mechanical)
-- Skybox is a BoxGeometry mesh (not scene.background) so it rotates with the globe
-- Cloud overlay uses non-linear alpha curve (power 0.55) for fine detail
+- MapLibre GL JS 5.x with globe projection
+- NASA GIBS tiles for Earth base (Blue Marble day, Black Marble night)
+- Day/night blending via CustomLayerInterface with framebuffer capture
+- Cloud overlay uses non-linear alpha curve (gamma 1.8) in WebGL2 shader
+- Skybox rendered as a separate 3D custom layer with cubemap sampling
 - Test files are co-located with source files (e.g., `main.test.ts`, `dataService.test.ts`)

@@ -1106,6 +1106,56 @@
             }
         }
 
+        /* --- Map Overlay Controls --- */
+        #map-controls {
+            position: absolute;
+            bottom: 3.2rem;
+            right: 0.75rem;
+            display: flex;
+            gap: 0.2rem;
+            padding: 0.3rem;
+            pointer-events: auto;
+            z-index: 10;
+        }
+        #map-controls.hidden { display: none; }
+        #map-controls .map-ctrl-btn {
+            min-width: 28px;
+            height: 28px;
+            padding: 0.2rem 0.45rem;
+            font-size: 0.65rem;
+            font-weight: 500;
+            letter-spacing: 0.02em;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #ccc;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s, border-color 0.15s;
+            white-space: nowrap;
+            line-height: 1;
+        }
+        #map-controls .map-ctrl-btn:hover {
+            background: rgba(255, 255, 255, 0.12);
+            color: #fff;
+            border-color: rgba(77, 166, 255, 0.4);
+        }
+        #map-controls .map-ctrl-btn.active {
+            color: #4da6ff;
+            border-color: #4da6ff;
+        }
+        #map-controls .map-ctrl-btn:focus-visible {
+            outline: 2px solid rgba(77, 166, 255, 0.7);
+            outline-offset: 2px;
+            box-shadow: 0 0 8px rgba(77, 166, 255, 0.4);
+        }
+        @media (max-width: 768px) {
+            #map-controls .map-ctrl-btn {
+                min-width: 36px;
+                height: 36px;
+                font-size: 0.75rem;
+            }
+        }
+
         /* --- Chat / Digital Docent --- */
         /* Standalone trigger: hidden by default, shown when dataset is loaded */
         #chat-trigger {
@@ -1702,6 +1752,9 @@
                 </div>
 
                 <button id="auto-rotate-standalone" class="transport-btn" title="Toggle auto-rotation" aria-label="Toggle auto-rotation" style="position: absolute; bottom: 0.75rem; right: 0.75rem; pointer-events: auto; min-width: 28px; padding: 0.35rem 0.5rem; font-size: 0.75rem; background: rgba(13, 13, 18, 0.88) !important; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08) !important; border-radius: 6px;">&#x21BB;</button>
+
+                <!-- Map overlay controls — MapLibre only, hidden by default -->
+                <div id="map-controls" class="ui-panel hidden" role="toolbar" aria-label="Map overlay controls"></div>
 
                 <!-- Orbit Chat -->
                 <button id="chat-trigger" title="Ask the docent" aria-label="Open digital docent chat" aria-expanded="false"><span class="chat-trigger-icon" aria-hidden="true">&#x1F4AC;&#xFE0E;</span><span class="chat-trigger-label">Ask Orbit</span></button>

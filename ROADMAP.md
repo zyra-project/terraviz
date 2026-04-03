@@ -39,13 +39,13 @@ Full category and sub-category navigation in the browse panel.
 Sustainable progress requires a codebase that doesn't slow us down.
 
 ### ~~7. Break up large files~~ ✅
-`sphereRenderer.ts` has been split into `earthMaterials.ts`, `inputHandler.ts`, and `datasetLoader.ts`. Playback controls extracted to `ui/playbackController.ts`. Browse UI extracted to `ui/browseUI.ts`.
+Globe rendering is now handled by `mapRenderer.ts` (MapLibre GL JS) and `earthTileLayer.ts` (custom WebGL2 layer). Dataset loading in `datasetLoader.ts`. Playback controls extracted to `ui/playbackController.ts`. Browse UI extracted to `ui/browseUI.ts`.
 
 ### ~~8. Test coverage for orchestration logic~~ ✅
 `main.test.ts` and test files for all major modules are in place.
 
 ### ~~9. Replace magic numbers with named constants~~ ✅
-Named constants throughout — `main.ts`, `inputHandler.ts`, `playbackController.ts`, `browseUI.ts`.
+Named constants throughout — `main.ts`, `mapRenderer.ts`, `earthTileLayer.ts`, `playbackController.ts`, `browseUI.ts`.
 
 ### ~~10. Log level control~~ ✅
 All 28 console calls now route through a `logger` utility with level gating (debug/info/warn/error/silent). Dev builds default to 'info', production to 'warn'. Override at runtime via `window.__LOG_LEVEL__`.
@@ -59,7 +59,7 @@ The resize handler is now debounced (150 ms) to reduce unnecessary recalculation
 
 Small things that affect the quality of the experience.
 
-- **Fix sphere rotation inertia between dataset switches** — inertia should reset when a new dataset loads, not carry over from the previous one.
+- ~~**Fix sphere rotation inertia between dataset switches**~~ ✅ — resolved by migration to MapLibre (built-in inertia handling).
 - **Make related datasets in the info panel linkable** — if we're showing related content, it should be navigable.
 - **Show date ranges for image datasets** — not just start dates; users should know the full temporal extent of what they're viewing.
 - ~~**Remove `videoFrameExtractor.ts`**~~ ✅ — removed.
