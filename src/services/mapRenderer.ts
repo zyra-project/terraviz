@@ -12,6 +12,7 @@ import type { Map as MaplibreMap, StyleSpecification, CustomLayerInterface } fro
 import { createEarthTileLayer, computeSunLightPosition, type EarthTileLayerControl } from './earthTileLayer'
 import type { GlobeRenderer, MapViewContext, VideoTextureHandle } from '../types'
 import { getSunPosition } from '../utils/time'
+import { logger } from '../utils/logger'
 
 // --- GIBS tile endpoints ---
 const BLUE_MARBLE_TILES = [
@@ -232,6 +233,8 @@ export class MapRenderer implements GlobeRenderer {
   private autoRotateInterval: number | null = null
   private autoRotating = false
   private earthLayer: EarthTileLayerControl | null = null
+  private pendingTexture: HTMLCanvasElement | HTMLImageElement | null = null
+  private pendingVideo: HTMLVideoElement | null = null
 
   /**
    * Initialize the MapLibre map inside the given container element.
@@ -312,7 +315,7 @@ export class MapRenderer implements GlobeRenderer {
     // (3d — renders after everything, uses depth test for stars behind globe).
     // Move label layers above the earth tile layer so they aren't darkened.
     this.map.on('load', () => {
-      console.info('[MapRenderer] Map loaded with globe projection')
+      logger.info('[MapRenderer] Map loaded with globe projection')
       this.earthLayer = createEarthTileLayer()
 
       // Layer order: black-marble → [capture] → blue-marble → [earth-tile] → labels → [skybox]
@@ -332,7 +335,20 @@ export class MapRenderer implements GlobeRenderer {
       // Add skybox as a separate 3d layer (renders after all 2d layers)
       this.map!.addLayer(this.earthLayer.skyboxLayer as unknown as maplibregl.LayerSpecification)
 
-      console.info('[MapRenderer] Earth tile + capture + skybox layers added, labels moved above')
+      // Apply any dataset texture/video that was buffered before the layer was ready
+      if (this.pendingTexture) {
+        this.earthLayer.setDatasetTexture(this.pendingTexture)
+        this.pendingTexture = null
+        try { this.map!.setLayoutProperty('blue-marble-layer', 'visibility', 'none') } catch { /* noop */ }
+        try { this.map!.setLayoutProperty('black-marble-layer', 'visibility', 'none') } catch { /* noop */ }
+      } else if (this.pendingVideo) {
+        this.earthLayer.setDatasetVideo(this.pendingVideo)
+        this.pendingVideo = null
+        try { this.map!.setLayoutProperty('blue-marble-layer', 'visibility', 'none') } catch { /* noop */ }
+        try { this.map!.setLayoutProperty('black-marble-layer', 'visibility', 'none') } catch { /* noop */ }
+      }
+
+      logger.info('[MapRenderer] Earth tile + capture + skybox layers added, labels moved above')
     })
   }
 
@@ -380,8 +396,11 @@ export class MapRenderer implements GlobeRenderer {
    * bounds: [west, south, east, north] in degrees.
    */
   fitBounds(bounds: [number, number, number, number], options?: { padding?: number; duration?: number }): void {
+    let [west, south, east, north] = bounds
+    // Normalize antimeridian-crossing bounds (west > east) by wrapping east
+    if (west > east) east += 360
     this.map?.fitBounds(
-      [[bounds[0], bounds[1]], [bounds[2], bounds[3]]],
+      [[west, south], [east, north]],
       {
         padding: options?.padding ?? 50,
         duration: options?.duration ?? 2500,
@@ -456,7 +475,7 @@ export class MapRenderer implements GlobeRenderer {
 
   /** Toggle 3D terrain elevation. Useful for topography/geology datasets. */
   toggleTerrain(enabled?: boolean): boolean {
-    if (!this.map) return false
+    if (!this.map || !this.map.isStyleLoaded()) return false
     this.terrainEnabled = enabled ?? !this.terrainEnabled
     const exaggeration = 5
     if (this.terrainEnabled) {
@@ -555,12 +574,17 @@ export class MapRenderer implements GlobeRenderer {
    * pole coverage.
    */
   updateTexture(texture: HTMLCanvasElement | HTMLImageElement): void {
-    if (!this.earthLayer) return
+    if (!this.earthLayer) {
+      // Buffer until the earth layer is created on map 'load'
+      this.pendingTexture = texture
+      this.pendingVideo = null
+      return
+    }
     this.earthLayer.setDatasetTexture(texture)
     // Hide the tile base layers when a dataset is active
     try { this.map?.setLayoutProperty('blue-marble-layer', 'visibility', 'none') } catch { /* noop */ }
     try { this.map?.setLayoutProperty('black-marble-layer', 'visibility', 'none') } catch { /* noop */ }
-    console.info('[MapRenderer] Dataset overlay set via custom layer sphere')
+    logger.info('[MapRenderer] Dataset overlay set via custom layer sphere')
   }
 
   /**
@@ -573,7 +597,11 @@ export class MapRenderer implements GlobeRenderer {
       this.earthLayer.setDatasetVideo(video)
       try { this.map?.setLayoutProperty('blue-marble-layer', 'visibility', 'none') } catch { /* noop */ }
       try { this.map?.setLayoutProperty('black-marble-layer', 'visibility', 'none') } catch { /* noop */ }
-      console.info('[MapRenderer] Video dataset set via custom layer sphere')
+      logger.info('[MapRenderer] Video dataset set via custom layer sphere')
+    } else {
+      // Buffer until the earth layer is created on map 'load'
+      this.pendingVideo = video
+      this.pendingTexture = null
     }
     const earthLayer = this.earthLayer
     let pending = false
@@ -593,7 +621,7 @@ export class MapRenderer implements GlobeRenderer {
   async loadDefaultEarthMaterials(onProgress?: (fraction: number) => void): Promise<void> {
     // Wait for earth layer to be created (it's added on map 'load')
     if (!this.earthLayer) {
-      console.debug('[MapRenderer] loadDefaultEarthMaterials: waiting for earth layer...')
+      logger.debug('[MapRenderer] loadDefaultEarthMaterials: waiting for earth layer...')
       await new Promise<void>((resolve, reject) => {
         const start = Date.now()
         const check = () => {
@@ -606,10 +634,10 @@ export class MapRenderer implements GlobeRenderer {
         check()
       })
     }
-    console.debug('[MapRenderer] loadDefaultEarthMaterials: earth layer found, waiting for textures...')
+    logger.debug('[MapRenderer] loadDefaultEarthMaterials: earth layer found, waiting for textures...')
     onProgress?.(0.2)
     await this.earthLayer!.ready
-    console.debug('[MapRenderer] loadDefaultEarthMaterials: textures ready')
+    logger.debug('[MapRenderer] loadDefaultEarthMaterials: textures ready')
     onProgress?.(1)
   }
 
