@@ -9,8 +9,8 @@ A WebGL-based globe that streams environmental data from the [Science On a Spher
 ## ✨ Features
 
 - Searchable, filterable dataset browser with category and sub-category navigation, expandable cards, and thumbnails
-- Interactive 3D sphere with Three.js (rotation, zoom, inertia on desktop and mobile)
-- Enhanced Earth materials (normal maps, specular highlights, night lights, sun lighting, real-time cloud overlay, atmosphere)
+- Interactive 3D globe with MapLibre GL JS (rotation, zoom, inertia on desktop and mobile, geographic labels, boundaries, 3D terrain)
+- NASA GIBS tile-based Earth (Blue Marble day, Black Marble night lights with progressive zoom detail, specular highlights, sun lighting, real-time cloud overlay, atmosphere)
 - Static image datasets with resolution fallback (4096/2048/1024) and download progress
 - HLS video streaming via Vimeo proxy with adaptive bitrate, playback controls, and audio
 - Time synchronization with ISO 8601 parsing and scrubber
@@ -21,15 +21,14 @@ A WebGL-based globe that streams environmental data from the [Science On a Spher
 
 ## 🏗️ How It Works
 
-The app is a single-page application built with TypeScript, Three.js, and Vite. Here's how the pieces fit together:
+The app is a single-page application built with TypeScript, MapLibre GL JS, and Vite. Here's how the pieces fit together:
 
 **`main.ts`** is the conductor. It boots the app, fetches datasets, reads the URL to decide what to show, and wires up all the UI controls (play/pause, scrubber, mute, keyboard shortcuts). When a user picks a dataset, `main.ts` coordinates the handoff between the old content and the new.
 
-**`sphereRenderer.ts`** owns the 3D scene — the camera, the WebGL renderer, and the animation loop. It creates the sphere, loads the starfield skybox, and delegates specialized work to three helpers:
+**`mapRenderer.ts`** owns the globe — it initializes MapLibre GL JS with globe projection, loads NASA GIBS Blue Marble and Black Marble raster tile sources, and manages navigation, markers, labels, boundaries, terrain, and region highlighting. It delegates visual effects to:
 
-- **`earthMaterials.ts`** handles everything that makes the default Earth look realistic: the diffuse texture, normal and specular maps, night-side city lights, a cloud layer fetched from NOAA, an atmospheric glow shell, and sun lighting positioned to match the real sun.
-- **`inputHandler.ts`** turns mouse drags and touch gestures into sphere rotation with momentum and damping. It also tracks where the cursor hits the sphere to show latitude/longitude coordinates.
-- **`datasetLoader.ts`** takes a dataset and figures out how to display it. For images, it tries progressively lower resolutions until one loads. For videos, it sets up HLS streaming through the proxy, waits for the first frame to decode, and attaches the video as a live texture on the sphere.
+- **`earthTileLayer.ts`** is a MapLibre `CustomLayerInterface` that composites day/night shading, city lights (from Black Marble tiles via framebuffer capture), specular sun glint, clouds, and a starfield skybox using multi-pass WebGL2 shaders.
+- **`datasetLoader.ts`** takes a dataset and figures out how to display it. For images, it tries progressively lower resolutions until one loads. For videos, it sets up HLS streaming through the proxy, waits for the first frame to decode, and attaches the video as a live texture on the globe.
 
 **`dataService.ts`** is the data layer. It fetches the NOAA dataset catalog from S3 and a local enriched metadata file in parallel, then cross-references them by title to merge in descriptions, categories, keywords, and related datasets. Results are cached for an hour.
 
@@ -98,9 +97,8 @@ interactive-sphere/
 │   ├── types/
 │   │   └── index.ts             # TypeScript interfaces and type definitions
 │   ├── services/
-│   │   ├── sphereRenderer.ts    # Three.js scene, sphere, skybox
-│   │   ├── earthMaterials.ts    # Earth textures, atmosphere, sun lighting, clouds
-│   │   ├── inputHandler.ts      # Mouse/touch controls, rotation, zoom, inertia
+│   │   ├── mapRenderer.ts       # MapLibre GL JS globe, navigation, markers, terrain
+│   │   ├── earthTileLayer.ts    # Day/night blend, clouds, specular, sun, skybox
 │   │   ├── datasetLoader.ts     # Dataset loading and texture application
 │   │   ├── dataService.ts       # SOS metadata fetching & cross-reference caching
 │   │   ├── hlsService.ts        # HLS.js video streaming with adaptive bitrate
@@ -111,16 +109,16 @@ interactive-sphere/
 │   ├── ui/
 │   │   ├── chatUI.ts            # Orbit chat panel — rendering, settings, events
 │   │   ├── browseUI.ts          # Dataset browser, search, category filtering
+│   │   ├── mapControlsUI.ts     # Map controls — labels, boundaries, terrain toggles
 │   │   └── playbackController.ts # Video playback transport + portrait positioning
+│   ├── data/
+│   │   └── regions.ts           # Region name → bounding box resolution
 │   └── utils/
 │       ├── time.ts              # ISO 8601 parsing, date formatting
 │       └── fetchProgress.ts     # Fetch with byte-level progress reporting
 ├── public/
 │   └── assets/
-│       ├── Earth_Diffuse_6K.jpg         # Default Earth texture
-│       ├── Earth_Normal_2K.jpg          # Normal map for surface detail
 │       ├── Earth_Specular_2K.jpg        # Specular map for ocean reflections
-│       ├── Earth_Lights_6K.jpg          # Night-side city lights
 │       ├── sos_dataset_metadata.json    # Enriched metadata (520+ datasets)
 │       └── skybox/                      # Milky Way cube map (6 faces)
 ├── .devcontainer/          # Docker dev container config
@@ -213,7 +211,7 @@ window.app.appState.currentDataset
 
 **Sphere not rendering**
 - Check WebGL support (most modern browsers)
-- Check DevTools console for Three.js errors
+- Check DevTools console for WebGL/MapLibre errors
 - Try a different browser
 
 **Touch controls not working**
@@ -245,7 +243,7 @@ See **[ROADMAP.md](ROADMAP.md)** for the full prioritized roadmap. Key remaining
 - **[MISSION.md](MISSION.md)** - Project mission
 - **src/types/index.ts** - TypeScript type definitions
 - **src/services/dataService.ts** - Dataset fetching and cross-reference caching
-- **src/services/sphereRenderer.ts** - Three.js scene orchestration
+- **src/services/mapRenderer.ts** - MapLibre globe renderer
 
 ## 🐛 Reporting Issues
 
@@ -259,7 +257,7 @@ When you find issues, note:
 ## 📝 Notes
 
 - **CORS**: All external APIs (S3, Vimeo proxy) require CORS headers. Tests locally with `npm run dev`.
-- **Performance**: LOD (level of detail) settings in `sphereRenderer.ts` can be adjusted for slower devices.
+- **Performance**: MapLibre tile cache and zoom limits are configured in `mapRenderer.ts`.
 - **Mobile**: The UI is responsive, but best tested on actual devices, not just browser DevTools.
 - **Time Data**: Some datasets lack startTime/endTime. Graceful fallback to "Static Image" or "Frame X of Y".
 
@@ -268,7 +266,8 @@ When you find issues, note:
 - **SOS Project**: https://sos.noaa.gov/
 - **Dataset Metadata**: https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/dataset.json
 - **Video Proxy**: https://video-proxy.zyra-project.org/video/{VIMEO_ID}
-- **Three.js Docs**: https://threejs.org/docs/
+- **MapLibre GL JS Docs**: https://maplibre.org/maplibre-gl-js/docs/
+- **NASA GIBS**: https://nasa-gibs.github.io/gibs-api-docs/
 - **HLS.js Docs**: https://hlsjs.readthedocs.io/
 
 ---

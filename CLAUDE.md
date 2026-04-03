@@ -8,7 +8,7 @@
 
 ## Codebase Overview
 
-TypeScript SPA built with Vite and Three.js. Deployed on Cloudflare Pages. No runtime framework — vanilla TS with a few focused libraries (Three.js, HLS.js).
+TypeScript SPA built with Vite and MapLibre GL JS. Deployed on Cloudflare Pages. No runtime framework — vanilla TS with a few focused libraries (MapLibre GL JS, HLS.js).
 
 ### Key commands
 
