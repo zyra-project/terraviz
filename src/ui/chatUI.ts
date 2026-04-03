@@ -946,12 +946,20 @@ function scrollToBottom(): void {
 
 // --- Feedback ---
 
-const FEEDBACK_TAGS = [
+const FEEDBACK_TAGS_NEGATIVE = [
   'Wrong dataset',
   'Inaccurate info',
   'Too long',
   'Off topic',
   'Didn\'t understand my question',
+]
+
+const FEEDBACK_TAGS_POSITIVE = [
+  'Great recommendation',
+  'Clear explanation',
+  'Learned something new',
+  'Good level of detail',
+  'Helped me explore',
 ]
 
 /** Check if viewport is narrow (mobile). */
@@ -1054,8 +1062,9 @@ function showFeedbackExpansion(messageId: string, rating: FeedbackRating, btn: H
 
   const isPositive = rating === 'thumbs-up'
   const placeholder = isPositive ? 'What was helpful? (optional)' : 'What could be improved? (optional)'
+  const tags = isPositive ? FEEDBACK_TAGS_POSITIVE : FEEDBACK_TAGS_NEGATIVE
 
-  const tagsHtml = FEEDBACK_TAGS.map(tag =>
+  const tagsHtml = tags.map(tag =>
     `<button class="chat-feedback-tag" role="checkbox" aria-pressed="false" data-tag="${escapeAttr(tag)}">${escapeHtml(tag)}</button>`,
   ).join('')
 
