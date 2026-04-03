@@ -177,6 +177,7 @@ export interface LLMContextSnapshot {
   readingLevel: ReadingLevel
   visionEnabled: boolean
   fallback: boolean
+  historyCompressed: boolean
 }
 
 /**
@@ -224,6 +225,14 @@ export interface FeedbackPayload {
   }
   /** True if the rated message came from the local engine, not the LLM */
   isFallback?: boolean
+  /** The user message that prompted the rated AI response */
+  userMessage?: string
+  /** Zero-based index of this docent message among all docent messages */
+  turnIndex?: number
+  /** Whether conversation history was compressed for this turn */
+  historyCompressed?: boolean
+  /** Dataset IDs the user clicked to load from this message (implicit positive signal) */
+  actionClicks?: string[]
 }
 
 /**

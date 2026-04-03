@@ -543,42 +543,7 @@ describe('feedback mechanism', () => {
     expect(docentMsg?.querySelector('.chat-feedback')).toBeNull()
   })
 
-  it('opens feedback modal when a thumbs button is clicked', () => {
-    const session = {
-      messages: [
-        { id: 'd1', role: 'docent', text: 'Here is your answer.', timestamp: 1 },
-      ],
-    }
-    sessionStorage.setItem('sos-docent-chat', JSON.stringify(session))
-    initChatUI(makeCallbacks())
-
-    const thumbsUp = document.querySelector('[data-feedback="thumbs-up"]') as HTMLElement
-    thumbsUp.click()
-
-    const modal = document.getElementById('chat-feedback-modal')
-    expect(modal).not.toBeNull()
-    expect(modal?.querySelector('h3')?.textContent).toContain('feedback')
-  })
-
-  it('dismisses feedback modal on cancel', () => {
-    const session = {
-      messages: [
-        { id: 'd1', role: 'docent', text: 'Answer', timestamp: 1 },
-      ],
-    }
-    sessionStorage.setItem('sos-docent-chat', JSON.stringify(session))
-    initChatUI(makeCallbacks())
-
-    const thumbsDown = document.querySelector('[data-feedback="thumbs-down"]') as HTMLElement
-    thumbsDown.click()
-    expect(document.getElementById('chat-feedback-modal')).not.toBeNull()
-
-    const cancelBtn = document.getElementById('chat-feedback-cancel') as HTMLElement
-    cancelBtn.click()
-    expect(document.getElementById('chat-feedback-modal')).toBeNull()
-  })
-
-  it('submits feedback and resets conversation on success', async () => {
+  it('submits rating immediately on click without modal', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), { status: 200 }),
     )
@@ -593,42 +558,88 @@ describe('feedback mechanism', () => {
     const cb = makeCallbacks()
     initChatUI(cb)
 
-    // Open modal via thumbs up
     const thumbsUp = document.querySelector('[data-feedback="thumbs-up"]') as HTMLElement
     thumbsUp.click()
 
-    // Type a comment
-    const textarea = document.getElementById('chat-feedback-comment') as HTMLTextAreaElement
-    textarea.value = 'Very helpful!'
+    // No modal should appear
+    expect(document.getElementById('chat-feedback-modal')).toBeNull()
 
-    // Submit
-    const submitBtn = document.getElementById('chat-feedback-submit') as HTMLElement
-    submitBtn.click()
-
-    // Wait for the fetch to be called
+    // Wait for fetch
     await vi.waitFor(() => {
       expect(fetchSpy).toHaveBeenCalledOnce()
     })
 
-    // Verify the payload
+    // Verify the payload includes new RLHF fields
     const [url, opts] = fetchSpy.mock.calls[0]
     expect(url).toBe('/api/feedback')
     const body = JSON.parse((opts as RequestInit).body as string)
     expect(body.rating).toBe('thumbs-up')
-    expect(body.comment).toBe('Very helpful!')
     expect(body.messageId).toBe('d1')
     expect(body.messages).toHaveLength(2)
+    expect(body.userMessage).toBe('hello')
+    expect(body.turnIndex).toBe(0)
 
-    // Wait for the conversation reset (after 1200ms timeout)
-    await vi.waitFor(() => {
-      expect(getMessages()).toHaveLength(0)
-    }, { timeout: 3000 })
-
-    expect(cb.announce).toHaveBeenCalledWith('Feedback submitted — conversation reset')
     fetchSpy.mockRestore()
   })
 
-  it('shows error message on submission failure', async () => {
+  it('does NOT reset conversation after feedback', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    )
+
+    const session = {
+      messages: [
+        { id: 'u1', role: 'user', text: 'hello', timestamp: 1 },
+        { id: 'd1', role: 'docent', text: 'Hi!', timestamp: 2 },
+      ],
+    }
+    sessionStorage.setItem('sos-docent-chat', JSON.stringify(session))
+    const cb = makeCallbacks()
+    initChatUI(cb)
+
+    const thumbsUp = document.querySelector('[data-feedback="thumbs-up"]') as HTMLElement
+    thumbsUp.click()
+
+    await vi.waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledOnce()
+    })
+
+    // Conversation should still be intact
+    expect(getMessages()).toHaveLength(2)
+    expect(cb.announce).toHaveBeenCalledWith('Feedback submitted')
+
+    fetchSpy.mockRestore()
+  })
+
+  it('disables buttons and highlights selected on click', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    )
+
+    const session = {
+      messages: [
+        { id: 'd1', role: 'docent', text: 'Answer', timestamp: 1 },
+      ],
+    }
+    sessionStorage.setItem('sos-docent-chat', JSON.stringify(session))
+    initChatUI(makeCallbacks())
+
+    const thumbsUp = document.querySelector('[data-feedback="thumbs-up"]') as HTMLElement
+    const thumbsDown = document.querySelector('[data-feedback="thumbs-down"]') as HTMLElement
+    thumbsUp.click()
+
+    // Selected button should be highlighted, other disabled
+    expect(thumbsUp.classList.contains('chat-feedback-rated')).toBe(true)
+    expect(thumbsDown.classList.contains('chat-feedback-disabled')).toBe(true)
+
+    await vi.waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledOnce()
+    })
+
+    fetchSpy.mockRestore()
+  })
+
+  it('re-enables buttons on submission failure', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429 }),
     )
@@ -644,41 +655,49 @@ describe('feedback mechanism', () => {
     const thumbsDown = document.querySelector('[data-feedback="thumbs-down"]') as HTMLElement
     thumbsDown.click()
 
-    const submitBtn = document.getElementById('chat-feedback-submit') as HTMLElement
-    submitBtn.click()
-
     await vi.waitFor(() => {
-      const status = document.getElementById('chat-feedback-status')
-      expect(status?.textContent).toContain('Rate limit exceeded')
-      expect(status?.classList.contains('chat-feedback-status-err')).toBe(true)
+      expect(fetchSpy).toHaveBeenCalledOnce()
     })
 
-    // Messages should NOT be cleared on error
+    // Buttons should be re-enabled after failure
+    await vi.waitFor(() => {
+      expect(thumbsDown.classList.contains('chat-feedback-rated')).toBe(false)
+      expect(thumbsDown.classList.contains('chat-feedback-disabled')).toBe(false)
+    })
+
+    // Messages should still be intact
     expect(getMessages()).toHaveLength(1)
     fetchSpy.mockRestore()
   })
 
-  it('shows correct placeholder text for each rating', () => {
+  it('sends userMessage in payload (the preceding user message)', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    )
+
     const session = {
       messages: [
-        { id: 'd1', role: 'docent', text: 'Answer', timestamp: 1 },
+        { id: 'u1', role: 'user', text: 'Tell me about oceans', timestamp: 1 },
+        { id: 'd1', role: 'docent', text: 'Oceans cover 71%...', timestamp: 2 },
+        { id: 'u2', role: 'user', text: 'What about coral?', timestamp: 3 },
+        { id: 'd2', role: 'docent', text: 'Coral reefs are...', timestamp: 4 },
       ],
     }
     sessionStorage.setItem('sos-docent-chat', JSON.stringify(session))
     initChatUI(makeCallbacks())
 
-    // Thumbs up
-    const thumbsUp = document.querySelector('[data-feedback="thumbs-up"]') as HTMLElement
-    thumbsUp.click()
-    let textarea = document.getElementById('chat-feedback-comment') as HTMLTextAreaElement
-    expect(textarea.placeholder).toContain('helpful')
+    // Rate the second docent message
+    const btns = document.querySelectorAll('[data-feedback="thumbs-up"][data-msg-id="d2"]')
+    ;(btns[0] as HTMLElement).click()
 
-    // Cancel and try thumbs down
-    document.getElementById('chat-feedback-cancel')?.click()
+    await vi.waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledOnce()
+    })
 
-    const thumbsDown = document.querySelector('[data-feedback="thumbs-down"]') as HTMLElement
-    thumbsDown.click()
-    textarea = document.getElementById('chat-feedback-comment') as HTMLTextAreaElement
-    expect(textarea.placeholder).toContain('improved')
+    const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string)
+    expect(body.userMessage).toBe('What about coral?')
+    expect(body.turnIndex).toBe(1)
+
+    fetchSpy.mockRestore()
   })
 })

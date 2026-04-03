@@ -45,8 +45,8 @@ let datasetPromptTimer: ReturnType<typeof setTimeout> | null = null
 /** Globe-control actions deferred until a load-dataset action in the same message completes. */
 let pendingGlobeActions: ChatAction[] = []
 
-/** Tracks in-progress feedback modal state. */
-let feedbackTarget: { messageId: string; rating: FeedbackRating } | null = null
+/** Tracks dataset load actions clicked per message (implicit positive feedback). */
+const actionClickMap = new Map<string, string[]>()
 
 /**
  * Initialize the chat UI with callbacks and restore session.
@@ -579,7 +579,7 @@ async function handleSend(): Promise<void> {
           if (chunk.llmContext) {
             docentMsg.llmContext = chunk.llmContext
           } else {
-            docentMsg.llmContext = { systemPrompt: '', model: '', readingLevel: 'general', visionEnabled: false, fallback: true }
+            docentMsg.llmContext = { systemPrompt: '', model: '', readingLevel: 'general', visionEnabled: false, fallback: true, historyCompressed: false }
           }
           // Replace <<LOAD:...>> markers with inline placeholders so buttons
           // render at the original location in the text, not grouped at the bottom.
@@ -823,9 +823,16 @@ function wireActionButtons(container: Element): void {
         callbacks.onLoadDataset(id)
         callbacks.announce('Loading dataset')
 
-        // Remove action cards from this message after loading
+        // Track the click for implicit feedback
         const msgEl = btn.closest('.chat-msg')
         const msgId = msgEl?.getAttribute('data-msg-id')
+        if (msgId) {
+          const clicks = actionClickMap.get(msgId) ?? []
+          clicks.push(id)
+          actionClickMap.set(msgId, clicks)
+        }
+
+        // Remove action cards from this message after loading
         if (msgId) {
           const msg = messages.find(m => m.id === msgId)
           if (msg) delete msg.actions
@@ -945,75 +952,41 @@ function wireFeedbackButtons(container: Element): void {
     btn.addEventListener('click', () => {
       const rating = btn.dataset.feedback as FeedbackRating | undefined
       const msgId = btn.dataset.msgId
-      if (rating && msgId) {
-        feedbackTarget = { messageId: msgId, rating }
-        showFeedbackModal()
-      }
+      if (!rating || !msgId) return
+
+      // Disable both buttons immediately
+      const feedbackRow = btn.closest('.chat-feedback')
+      feedbackRow?.querySelectorAll<HTMLElement>('.chat-feedback-btn').forEach(b => {
+        b.classList.add('chat-feedback-disabled')
+        b.style.pointerEvents = 'none'
+      })
+      // Highlight the selected one
+      btn.classList.add('chat-feedback-rated')
+      btn.classList.remove('chat-feedback-disabled')
+
+      submitInlineRating(msgId, rating, btn)
     })
   })
 }
 
-/** Show the feedback modal overlay inside the chat panel. */
-function showFeedbackModal(): void {
-  if (!feedbackTarget) return
-  const panel = document.getElementById('chat-panel')
-  if (!panel) return
-
-  // Remove any existing modal element without clearing feedbackTarget
-  document.getElementById('chat-feedback-modal')?.remove()
-
-  const isPositive = feedbackTarget.rating === 'thumbs-up'
-  const icon = isPositive ? '\u{1F44D}\uFE0E' : '\u{1F44E}\uFE0E'
-  const placeholder = isPositive ? 'What was helpful?' : 'What could be improved?'
-
-  const modal = document.createElement('div')
-  modal.className = 'chat-feedback-modal'
-  modal.id = 'chat-feedback-modal'
-  modal.innerHTML = `
-    <h3>Share feedback</h3>
-    <div class="chat-feedback-rating-icon" aria-hidden="true">${icon}</div>
-    <textarea id="chat-feedback-comment" placeholder="${escapeAttr(placeholder)}" rows="3"></textarea>
-    <div class="chat-feedback-modal-actions">
-      <button class="chat-feedback-cancel" id="chat-feedback-cancel">Cancel</button>
-      <button class="chat-feedback-submit" id="chat-feedback-submit">Submit</button>
-    </div>
-    <span class="chat-feedback-status" id="chat-feedback-status"></span>
-  `
-  panel.appendChild(modal)
-
-  document.getElementById('chat-feedback-cancel')?.addEventListener('click', dismissFeedbackModal)
-  document.getElementById('chat-feedback-submit')?.addEventListener('click', handleFeedbackSubmit)
-  document.getElementById('chat-feedback-comment')?.focus()
-}
-
-/** Dismiss the feedback modal and clear state. */
-function dismissFeedbackModal(): void {
-  document.getElementById('chat-feedback-modal')?.remove()
-  feedbackTarget = null
-}
-
-/** Submit feedback to the server, then reset the conversation. */
-async function handleFeedbackSubmit(): Promise<void> {
-  if (!feedbackTarget) return
-
-  const comment = (document.getElementById('chat-feedback-comment') as HTMLTextAreaElement | null)?.value.trim() ?? ''
-  const submitBtn = document.getElementById('chat-feedback-submit') as HTMLButtonElement | null
-  const status = document.getElementById('chat-feedback-status')
-
-  if (submitBtn) submitBtn.disabled = true
-  if (status) {
-    status.textContent = 'Submitting...'
-    status.className = 'chat-feedback-status'
-  }
-
-  const target = feedbackTarget!
-  const ratedMessage = messages.find(m => m.id === target.messageId)
+/** Submit a single-click inline rating to the server. */
+async function submitInlineRating(messageId: string, rating: FeedbackRating, btn: HTMLElement): Promise<void> {
+  const ratedMessage = messages.find(m => m.id === messageId)
   const ctx = ratedMessage?.llmContext
 
+  // Find the user message immediately before the rated AI response
+  const msgIndex = messages.findIndex(m => m.id === messageId)
+  const precedingUserMsg = msgIndex > 0 ? messages[msgIndex - 1] : null
+  const userMessage = precedingUserMsg?.role === 'user' ? precedingUserMsg.text : undefined
+
+  // Compute turn index (0-based count of docent messages up to this one)
+  const docentMessages = messages.filter(m => m.role === 'docent')
+  const turnIndex = docentMessages.findIndex(m => m.id === messageId)
+
   const payload: FeedbackPayload = {
-    rating: target.rating,
-    comment,
-    messageId: target.messageId,
+    rating,
+    comment: '',
+    messageId,
     messages: messages.map(({ llmContext: _ctx, ...m }) => m),
     datasetId: callbacks?.getCurrentDataset()?.id ?? null,
     timestamp: Date.now(),
@@ -1024,6 +997,10 @@ async function handleFeedbackSubmit(): Promise<void> {
       visionEnabled: ctx.visionEnabled,
     } : undefined,
     isFallback: ctx?.fallback ?? true,
+    userMessage,
+    turnIndex: turnIndex >= 0 ? turnIndex : undefined,
+    historyCompressed: ctx?.historyCompressed,
+    actionClicks: actionClickMap.get(messageId),
   }
 
   try {
@@ -1036,28 +1013,23 @@ async function handleFeedbackSubmit(): Promise<void> {
       const err = await res.json().catch(() => ({ error: 'Unknown error' }))
       throw new Error((err as { error?: string }).error ?? `HTTP ${res.status}`)
     }
-    if (status) {
-      status.textContent = 'Thank you for your feedback!'
-      status.className = 'chat-feedback-status chat-feedback-status-ok'
-    }
-    setTimeout(() => {
-      dismissFeedbackModal()
-      clearChat()
-      callbacks?.announce('Feedback submitted — conversation reset')
-    }, 1200)
-  } catch (err) {
-    if (status) {
-      status.textContent = err instanceof Error ? err.message : 'Failed to submit'
-      status.className = 'chat-feedback-status chat-feedback-status-err'
-    }
-    if (submitBtn) submitBtn.disabled = false
+    // Brief checkmark animation
+    btn.classList.add('chat-feedback-success')
+    callbacks?.announce('Feedback submitted')
+  } catch {
+    // Re-enable buttons on failure so user can retry
+    const feedbackRow = btn.closest('.chat-feedback')
+    feedbackRow?.querySelectorAll<HTMLElement>('.chat-feedback-btn').forEach(b => {
+      b.classList.remove('chat-feedback-disabled', 'chat-feedback-rated')
+      b.style.pointerEvents = ''
+    })
   }
 }
 
 /**
  * Submit feedback programmatically (for testing).
  */
-export async function submitFeedback(messageId: string, rating: FeedbackRating): Promise<void> {
-  feedbackTarget = { messageId, rating }
-  showFeedbackModal()
+export function submitFeedback(messageId: string, rating: FeedbackRating): void {
+  const btn = document.querySelector(`[data-feedback="${rating}"][data-msg-id="${messageId}"]`) as HTMLElement | null
+  btn?.click()
 }

@@ -698,6 +698,7 @@ export async function* processMessage(
         readingLevel: cfg.readingLevel as ReadingLevel,
         visionEnabled: visionActive,
         fallback: false,
+        historyCompressed: history.length > 6,
       }
 
       const stream = streamChat(llmMessages, tools, visionCfg, visionActive ? { timeoutMs: VISION_TIMEOUT_MS } : undefined)

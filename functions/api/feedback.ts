@@ -21,6 +21,10 @@ interface FeedbackBody {
   systemPrompt?: string
   modelConfig?: Record<string, unknown>
   isFallback?: boolean
+  userMessage?: string
+  turnIndex?: number
+  historyCompressed?: boolean
+  actionClicks?: string[]
 }
 
 // --- Rate limiting (in-memory, per-isolate) ---
@@ -88,6 +92,10 @@ function isValidBody(body: unknown): body is FeedbackBody {
   if (typeof b.timestamp !== 'number') return false
   if (b.systemPrompt !== undefined && typeof b.systemPrompt !== 'string') return false
   if (b.isFallback !== undefined && typeof b.isFallback !== 'boolean') return false
+  if (b.userMessage !== undefined && typeof b.userMessage !== 'string') return false
+  if (b.turnIndex !== undefined && typeof b.turnIndex !== 'number') return false
+  if (b.historyCompressed !== undefined && typeof b.historyCompressed !== 'boolean') return false
+  if (b.actionClicks !== undefined && !Array.isArray(b.actionClicks)) return false
   return true
 }
 
@@ -142,8 +150,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   if (db) {
     try {
       await db.prepare(
-        `INSERT INTO feedback (rating, comment, message_id, dataset_id, conversation, system_prompt, model_config, is_fallback, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO feedback (rating, comment, message_id, dataset_id, conversation, system_prompt, model_config, is_fallback, user_message, turn_index, history_compressed, action_clicks, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(
         body.rating,
         body.comment.slice(0, 2000),
@@ -153,6 +161,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         (body.systemPrompt ?? '').slice(0, 100_000),
         JSON.stringify(body.modelConfig ?? {}),
         body.isFallback ? 1 : 0,
+        (body.userMessage ?? '').slice(0, 10_000),
+        body.turnIndex ?? null,
+        body.historyCompressed ? 1 : 0,
+        JSON.stringify(body.actionClicks ?? []),
         new Date(body.timestamp).toISOString(),
       ).run()
     } catch (err) {
@@ -171,6 +183,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       model: (body.modelConfig as Record<string, unknown>)?.model ?? 'unknown',
       isFallback: body.isFallback ?? false,
       hasSystemPrompt: !!body.systemPrompt,
+      turnIndex: body.turnIndex,
+      actionClicks: body.actionClicks,
     }))
   }
 
