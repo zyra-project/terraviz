@@ -530,7 +530,7 @@ export class MapRenderer implements GlobeRenderer {
       if (!this.map || !this.autoRotating) return
       const currentBearing = this.map.getBearing()
       this.map.easeTo({
-        bearing: currentBearing - 30,
+        bearing: currentBearing + 30,
         duration: 10000,
         easing: (t: number) => t, // linear
       })
