@@ -95,11 +95,15 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         for (const row of rows) {
+          const safeParse = (s: unknown, fallback: unknown) => {
+            try { return JSON.parse(String(s || JSON.stringify(fallback))) }
+            catch { return fallback }
+          }
           const entry: Record<string, unknown> = {
             user: row.user_message || '',
             assistant: row.assistant_message || '',
             rating: row.rating,
-            tags: JSON.parse((row.tags as string) || '[]'),
+            tags: safeParse(row.tags, []),
             comment: row.comment || '',
             model: (() => {
               try { return (JSON.parse((row.model_config as string) || '{}')).model ?? '' }
@@ -109,7 +113,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
             turn_index: row.turn_index ?? null,
             is_fallback: !!(row.is_fallback),
             history_compressed: !!(row.history_compressed),
-            action_clicks: JSON.parse((row.action_clicks as string) || '[]'),
+            action_clicks: safeParse(row.action_clicks, []),
             timestamp: row.created_at,
           }
           if (includePrompt) {

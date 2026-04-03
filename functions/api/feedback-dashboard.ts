@@ -152,13 +152,19 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       thumbsDownCount: totals?.thumbs_down ?? 0,
       byDay: byDay.results,
       topTags,
-      recentFeedback: recent.results.map(r => ({
-        ...r,
-        tags: JSON.parse(r.tags || '[]'),
-        modelConfig: JSON.parse(r.model_config || '{}'),
-        isFallback: !!r.is_fallback,
-        historyCompressed: !!r.history_compressed,
-      })),
+      recentFeedback: recent.results.map(r => {
+        const safeParse = (s: string, fallback: unknown) => {
+          try { return JSON.parse(s || JSON.stringify(fallback)) }
+          catch { return fallback }
+        }
+        return {
+          ...r,
+          tags: safeParse(r.tags, []),
+          modelConfig: safeParse(r.model_config, {}),
+          isFallback: !!r.is_fallback,
+          historyCompressed: !!r.history_compressed,
+        }
+      }),
     }), { headers: jsonHeaders })
   } catch (err) {
     console.error('Dashboard query failed:', err)

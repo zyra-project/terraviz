@@ -685,8 +685,8 @@ function renderMessage(msg: ChatMessage): string {
   const actionsHtml = remaining?.length ? renderActions(remaining) : ''
   const feedbackHtml = msg.role === 'docent' && msg.text
     ? `<div class="chat-feedback">
-         <button class="chat-feedback-btn" data-feedback="thumbs-up" data-msg-id="${escapeAttr(msg.id)}" aria-label="Good response" title="Good response">&#x1F44D;&#xFE0E;</button>
-         <button class="chat-feedback-btn" data-feedback="thumbs-down" data-msg-id="${escapeAttr(msg.id)}" aria-label="Bad response" title="Bad response">&#x1F44E;&#xFE0E;</button>
+         <button class="chat-feedback-btn" data-feedback="thumbs-up" data-msg-id="${escapeAttr(msg.id)}" aria-label="Good response" aria-pressed="false" title="Good response">&#x1F44D;&#xFE0E;</button>
+         <button class="chat-feedback-btn" data-feedback="thumbs-down" data-msg-id="${escapeAttr(msg.id)}" aria-label="Bad response" aria-pressed="false" title="Bad response">&#x1F44E;&#xFE0E;</button>
        </div>`
     : ''
   return `<div class="chat-msg ${roleClass}" data-msg-id="${escapeAttr(msg.id)}">
@@ -985,11 +985,11 @@ function wireFeedbackButtons(container: Element): void {
       feedbackRow.querySelectorAll<HTMLButtonElement>('.chat-feedback-btn').forEach(b => {
         b.disabled = true
         b.classList.add('chat-feedback-disabled')
+        b.setAttribute('aria-pressed', b === btn ? 'true' : 'false')
       })
       // Highlight the selected one (stays disabled)
       btn.classList.add('chat-feedback-rated')
       btn.classList.remove('chat-feedback-disabled')
-      btn.setAttribute('aria-pressed', 'true')
 
       submitInlineRating(msgId, rating, btn as HTMLButtonElement)
     })
@@ -1056,6 +1056,7 @@ async function submitInlineRating(messageId: string, rating: FeedbackRating, btn
       b.classList.remove('chat-feedback-disabled', 'chat-feedback-rated')
       b.removeAttribute('aria-pressed')
     })
+    callbacks?.announce('Feedback failed — please try again')
   }
 }
 
