@@ -524,13 +524,13 @@ export class MapRenderer implements GlobeRenderer {
 
   private startAutoRotate(): void {
     this.stopAutoRotate()
-    // Use easeTo with a long duration to smoothly rotate the bearing.
-    // Re-trigger every 10 seconds to keep it going.
+    // Shift the center longitude to rotate around the polar axis (west-to-east).
+    // This avoids the wobble caused by bearing rotation on a tilted globe.
     const rotate = () => {
       if (!this.map || !this.autoRotating) return
-      const currentBearing = this.map.getBearing()
+      const center = this.map.getCenter()
       this.map.easeTo({
-        bearing: currentBearing + 30,
+        center: [center.lng - 30, center.lat],
         duration: 10000,
         easing: (t: number) => t, // linear
       })
