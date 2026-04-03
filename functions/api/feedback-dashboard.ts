@@ -107,7 +107,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
     // Recent feedback
     const recent = await db.prepare(
-      `SELECT rating, comment, tags, user_message, assistant_message, dataset_id, model_config, is_fallback, turn_index, created_at
+      `SELECT rating, comment, tags, user_message, assistant_message, dataset_id, model_config, is_fallback, turn_index, history_compressed, system_prompt, created_at
       FROM feedback
       ORDER BY created_at DESC
       LIMIT ?`,
@@ -121,6 +121,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       model_config: string
       is_fallback: number
       turn_index: number | null
+      history_compressed: number
+      system_prompt: string
       created_at: string
     }>()
 
@@ -135,6 +137,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
         tags: JSON.parse(r.tags || '[]'),
         modelConfig: JSON.parse(r.model_config || '{}'),
         isFallback: !!r.is_fallback,
+        historyCompressed: !!r.history_compressed,
       })),
     }), { headers: jsonHeaders })
   } catch (err) {

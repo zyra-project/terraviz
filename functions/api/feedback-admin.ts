@@ -331,6 +331,19 @@ export const onRequestGet: PagesFunction = async (context) => {
       html += field('User Message', r.user_message || '-');
       html += '<div class="detail-field"><div class="detail-label">Assistant Response</div><div class="detail-value mono">' + esc(r.assistant_message || '-') + '</div></div>';
 
+      if (r.system_prompt) {
+        html += '<div class="detail-field"><div class="detail-label">System Prompt</div><div class="detail-value mono">' + esc(r.system_prompt) + '</div></div>';
+      }
+
+      // Context summary
+      const ctxParts = [];
+      if (r.historyCompressed || r.history_compressed) ctxParts.push('History was compressed');
+      const vision = r.modelConfig?.visionEnabled || (typeof r.model_config === 'string' ? (() => { try { return JSON.parse(r.model_config).visionEnabled } catch { return false } })() : false);
+      if (vision) ctxParts.push('Vision mode active');
+      if (ctxParts.length > 0) {
+        html += field('Context Flags', ctxParts.join(' \\u{2022} '));
+      }
+
       html += '</div>';
       overlay.innerHTML = html;
       document.body.appendChild(overlay);
