@@ -16,5 +16,5 @@ binding = "AI"
 [[d1_databases]]
 binding = "FEEDBACK_DB"
 database_name = "sphere-feedback"
-database_id = "<DATABASE_ID>"
+database_id = "78fbe5c3-8e40-4504-b183-155b0069222e"
 migrations_dir = "migrations"
