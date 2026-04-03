@@ -233,6 +233,8 @@ export interface FeedbackPayload {
   historyCompressed?: boolean
   /** Dataset IDs the user clicked to load from this message (implicit positive signal) */
   actionClicks?: string[]
+  /** Quick-select feedback tags (e.g. "Wrong dataset", "Too long") */
+  tags?: string[]
 }
 
 /**

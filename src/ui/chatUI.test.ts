@@ -700,4 +700,142 @@ describe('feedback mechanism', () => {
 
     fetchSpy.mockRestore()
   })
+
+  it('shows inline expansion with tags after successful rating', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    )
+
+    const session = {
+      messages: [
+        { id: 'd1', role: 'docent', text: 'Answer', timestamp: 1 },
+      ],
+    }
+    sessionStorage.setItem('sos-docent-chat', JSON.stringify(session))
+    initChatUI(makeCallbacks())
+
+    const thumbsDown = document.querySelector('[data-feedback="thumbs-down"]') as HTMLElement
+    thumbsDown.click()
+
+    await vi.waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledOnce()
+    })
+
+    // Expansion should appear with tags
+    const expansion = document.getElementById('chat-feedback-expansion')
+    expect(expansion).not.toBeNull()
+    expect(expansion?.querySelectorAll('.chat-feedback-tag').length).toBeGreaterThan(0)
+    expect(expansion?.querySelector('.chat-feedback-comment')).not.toBeNull()
+
+    fetchSpy.mockRestore()
+  })
+
+  it('dismisses expansion on Escape key', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    )
+
+    const session = {
+      messages: [
+        { id: 'd1', role: 'docent', text: 'Answer', timestamp: 1 },
+      ],
+    }
+    sessionStorage.setItem('sos-docent-chat', JSON.stringify(session))
+    initChatUI(makeCallbacks())
+
+    const thumbsUp = document.querySelector('[data-feedback="thumbs-up"]') as HTMLElement
+    thumbsUp.click()
+
+    await vi.waitFor(() => {
+      expect(document.getElementById('chat-feedback-expansion')).not.toBeNull()
+    })
+
+    const expansion = document.getElementById('chat-feedback-expansion')!
+    expansion.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+
+    expect(document.getElementById('chat-feedback-expansion')).toBeNull()
+
+    fetchSpy.mockRestore()
+  })
+
+  it('toggles tag aria-pressed on click', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    )
+
+    const session = {
+      messages: [
+        { id: 'd1', role: 'docent', text: 'Answer', timestamp: 1 },
+      ],
+    }
+    sessionStorage.setItem('sos-docent-chat', JSON.stringify(session))
+    initChatUI(makeCallbacks())
+
+    const thumbsDown = document.querySelector('[data-feedback="thumbs-down"]') as HTMLElement
+    thumbsDown.click()
+
+    await vi.waitFor(() => {
+      expect(document.getElementById('chat-feedback-expansion')).not.toBeNull()
+    })
+
+    const tag = document.querySelector('.chat-feedback-tag') as HTMLElement
+    expect(tag.getAttribute('aria-pressed')).toBe('false')
+    tag.click()
+    expect(tag.getAttribute('aria-pressed')).toBe('true')
+    tag.click()
+    expect(tag.getAttribute('aria-pressed')).toBe('false')
+
+    fetchSpy.mockRestore()
+  })
+
+  it('submits tags and comment on send', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    )
+
+    const session = {
+      messages: [
+        { id: 'u1', role: 'user', text: 'hello', timestamp: 1 },
+        { id: 'd1', role: 'docent', text: 'Answer', timestamp: 2 },
+      ],
+    }
+    sessionStorage.setItem('sos-docent-chat', JSON.stringify(session))
+    initChatUI(makeCallbacks())
+
+    const thumbsDown = document.querySelector('[data-feedback="thumbs-down"]') as HTMLElement
+    thumbsDown.click()
+
+    // Wait for expansion to appear
+    await vi.waitFor(() => {
+      expect(document.getElementById('chat-feedback-expansion')).not.toBeNull()
+    })
+
+    // Select a tag
+    const tag = document.querySelector('.chat-feedback-tag') as HTMLElement
+    tag.click()
+
+    // Type a comment
+    const textarea = document.querySelector('.chat-feedback-comment') as HTMLTextAreaElement
+    textarea.value = 'Wrong dataset suggested'
+
+    // Click send
+    const sendBtn = document.querySelector('.chat-feedback-send') as HTMLElement
+    sendBtn.click()
+
+    // Wait for second fetch (update)
+    await vi.waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledTimes(2)
+    })
+
+    const body = JSON.parse((fetchSpy.mock.calls[1][1] as RequestInit).body as string)
+    expect(body.tags).toHaveLength(1)
+    expect(body.comment).toBe('Wrong dataset suggested')
+
+    // Expansion should be dismissed
+    await vi.waitFor(() => {
+      expect(document.getElementById('chat-feedback-expansion')).toBeNull()
+    })
+
+    fetchSpy.mockRestore()
+  })
 })

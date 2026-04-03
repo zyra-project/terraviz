@@ -25,6 +25,7 @@ interface FeedbackBody {
   turnIndex?: number
   historyCompressed?: boolean
   actionClicks?: string[]
+  tags?: string[]
 }
 
 // --- Rate limiting (in-memory, per-isolate) ---
@@ -96,6 +97,7 @@ function isValidBody(body: unknown): body is FeedbackBody {
   if (b.turnIndex !== undefined && typeof b.turnIndex !== 'number') return false
   if (b.historyCompressed !== undefined && typeof b.historyCompressed !== 'boolean') return false
   if (b.actionClicks !== undefined && !Array.isArray(b.actionClicks)) return false
+  if (b.tags !== undefined && !Array.isArray(b.tags)) return false
   return true
 }
 
@@ -149,12 +151,33 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const db = context.env.FEEDBACK_DB
   if (db) {
     try {
+      const tagsJson = JSON.stringify((body.tags ?? []).slice(0, 10))
+      const comment = body.comment.slice(0, 2000)
+
+      // If tags or comment present, try to update existing row first (second submission)
+      if (comment || (body.tags?.length ?? 0) > 0) {
+        const existing = await db.prepare(
+          'SELECT id FROM feedback WHERE message_id = ? LIMIT 1',
+        ).bind(body.messageId).first<{ id: number }>()
+
+        if (existing) {
+          await db.prepare(
+            'UPDATE feedback SET comment = ?, tags = ? WHERE id = ?',
+          ).bind(comment, tagsJson, existing.id).run()
+          // Skip insert — we updated the existing row
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { ...cors, 'Content-Type': 'application/json' },
+          })
+        }
+      }
+
       await db.prepare(
-        `INSERT INTO feedback (rating, comment, message_id, dataset_id, conversation, system_prompt, model_config, is_fallback, user_message, turn_index, history_compressed, action_clicks, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO feedback (rating, comment, message_id, dataset_id, conversation, system_prompt, model_config, is_fallback, user_message, turn_index, history_compressed, action_clicks, tags, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(
         body.rating,
-        body.comment.slice(0, 2000),
+        comment,
         body.messageId,
         body.datasetId ?? null,
         conversationJson,
@@ -165,6 +188,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         body.turnIndex ?? null,
         body.historyCompressed ? 1 : 0,
         JSON.stringify(body.actionClicks ?? []),
+        tagsJson,
         new Date(body.timestamp).toISOString(),
       ).run()
     } catch (err) {

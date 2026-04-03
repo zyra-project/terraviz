@@ -946,6 +946,19 @@ function scrollToBottom(): void {
 
 // --- Feedback ---
 
+const FEEDBACK_TAGS = [
+  'Wrong dataset',
+  'Inaccurate info',
+  'Too long',
+  'Off topic',
+  'Didn\'t understand my question',
+]
+
+/** Check if viewport is narrow (mobile). */
+function isMobileViewport(): boolean {
+  return window.matchMedia('(max-width: 768px)').matches
+}
+
 /** Attach click handlers to feedback buttons within a rendered message container. */
 function wireFeedbackButtons(container: Element): void {
   container.querySelectorAll<HTMLElement>('.chat-feedback-btn').forEach(btn => {
@@ -958,32 +971,32 @@ function wireFeedbackButtons(container: Element): void {
       const feedbackRow = btn.closest('.chat-feedback')
       feedbackRow?.querySelectorAll<HTMLElement>('.chat-feedback-btn').forEach(b => {
         b.classList.add('chat-feedback-disabled')
+        b.setAttribute('aria-disabled', 'true')
         b.style.pointerEvents = 'none'
       })
       // Highlight the selected one
       btn.classList.add('chat-feedback-rated')
       btn.classList.remove('chat-feedback-disabled')
+      btn.setAttribute('aria-pressed', 'true')
 
       submitInlineRating(msgId, rating, btn)
     })
   })
 }
 
-/** Submit a single-click inline rating to the server. */
-async function submitInlineRating(messageId: string, rating: FeedbackRating, btn: HTMLElement): Promise<void> {
+/** Build the base feedback payload for a given message. */
+function buildFeedbackPayload(messageId: string, rating: FeedbackRating): FeedbackPayload {
   const ratedMessage = messages.find(m => m.id === messageId)
   const ctx = ratedMessage?.llmContext
 
-  // Find the user message immediately before the rated AI response
   const msgIndex = messages.findIndex(m => m.id === messageId)
   const precedingUserMsg = msgIndex > 0 ? messages[msgIndex - 1] : null
   const userMessage = precedingUserMsg?.role === 'user' ? precedingUserMsg.text : undefined
 
-  // Compute turn index (0-based count of docent messages up to this one)
   const docentMessages = messages.filter(m => m.role === 'docent')
   const turnIndex = docentMessages.findIndex(m => m.id === messageId)
 
-  const payload: FeedbackPayload = {
+  return {
     rating,
     comment: '',
     messageId,
@@ -1002,6 +1015,11 @@ async function submitInlineRating(messageId: string, rating: FeedbackRating, btn
     historyCompressed: ctx?.historyCompressed,
     actionClicks: actionClickMap.get(messageId),
   }
+}
+
+/** Submit a single-click inline rating to the server, then show expansion. */
+async function submitInlineRating(messageId: string, rating: FeedbackRating, btn: HTMLElement): Promise<void> {
+  const payload = buildFeedbackPayload(messageId, rating)
 
   try {
     const res = await fetch('/api/feedback', {
@@ -1013,16 +1031,161 @@ async function submitInlineRating(messageId: string, rating: FeedbackRating, btn
       const err = await res.json().catch(() => ({ error: 'Unknown error' }))
       throw new Error((err as { error?: string }).error ?? `HTTP ${res.status}`)
     }
-    // Brief checkmark animation
     btn.classList.add('chat-feedback-success')
     callbacks?.announce('Feedback submitted')
+    // Show optional expansion for richer feedback
+    showFeedbackExpansion(messageId, rating, btn)
   } catch {
     // Re-enable buttons on failure so user can retry
     const feedbackRow = btn.closest('.chat-feedback')
     feedbackRow?.querySelectorAll<HTMLElement>('.chat-feedback-btn').forEach(b => {
       b.classList.remove('chat-feedback-disabled', 'chat-feedback-rated')
+      b.removeAttribute('aria-pressed')
+      b.removeAttribute('aria-disabled')
       b.style.pointerEvents = ''
     })
+  }
+}
+
+/** Show the inline "tell us more" expansion (or bottom sheet on mobile). */
+function showFeedbackExpansion(messageId: string, rating: FeedbackRating, btn: HTMLElement): void {
+  // Remove any existing expansion
+  dismissFeedbackExpansion()
+
+  const isPositive = rating === 'thumbs-up'
+  const placeholder = isPositive ? 'What was helpful? (optional)' : 'What could be improved? (optional)'
+
+  const tagsHtml = FEEDBACK_TAGS.map(tag =>
+    `<button class="chat-feedback-tag" role="checkbox" aria-pressed="false" data-tag="${escapeAttr(tag)}">${escapeHtml(tag)}</button>`,
+  ).join('')
+
+  const expansionHtml = `
+    <div class="chat-feedback-tags">${tagsHtml}</div>
+    <textarea class="chat-feedback-comment" placeholder="${escapeAttr(placeholder)}" rows="2"></textarea>
+    <div class="chat-feedback-expand-actions">
+      <button class="chat-feedback-send">Send</button>
+      <button class="chat-feedback-dismiss" aria-label="Dismiss">Dismiss</button>
+    </div>
+  `
+
+  const useMobile = isMobileViewport()
+
+  if (useMobile) {
+    // Bottom sheet anchored to chat panel
+    const panel = document.getElementById('chat-panel')
+    if (!panel) return
+    const sheet = document.createElement('div')
+    sheet.className = 'chat-feedback-sheet'
+    sheet.id = 'chat-feedback-expansion'
+    sheet.setAttribute('role', 'region')
+    sheet.setAttribute('aria-label', 'Additional feedback')
+    sheet.dataset.messageId = messageId
+    sheet.dataset.rating = rating
+    sheet.innerHTML = `<div class="chat-feedback-sheet-handle" aria-hidden="true"></div>${expansionHtml}`
+    panel.appendChild(sheet)
+    // Trigger slide-up animation
+    requestAnimationFrame(() => sheet.classList.add('chat-feedback-sheet-open'))
+  } else {
+    // Inline expansion below the message
+    const msgEl = btn.closest('.chat-msg')
+    if (!msgEl) return
+    const expand = document.createElement('div')
+    expand.className = 'chat-feedback-expand'
+    expand.id = 'chat-feedback-expansion'
+    expand.setAttribute('role', 'region')
+    expand.setAttribute('aria-label', 'Additional feedback')
+    expand.dataset.messageId = messageId
+    expand.dataset.rating = rating
+    expand.innerHTML = expansionHtml
+    msgEl.after(expand)
+  }
+
+  // Wire events
+  const expansion = document.getElementById('chat-feedback-expansion')!
+  wireExpansionEvents(expansion, messageId, rating)
+
+  // Focus the first tag for keyboard users
+  const firstTag = expansion.querySelector<HTMLElement>('.chat-feedback-tag')
+  firstTag?.focus()
+}
+
+/** Wire up tag toggles, send, dismiss, and keyboard events on the expansion. */
+function wireExpansionEvents(expansion: HTMLElement, messageId: string, rating: FeedbackRating): void {
+  // Tag toggles
+  expansion.querySelectorAll<HTMLElement>('.chat-feedback-tag').forEach(tag => {
+    tag.addEventListener('click', () => {
+      const pressed = tag.getAttribute('aria-pressed') === 'true'
+      tag.setAttribute('aria-pressed', String(!pressed))
+      tag.classList.toggle('chat-feedback-tag-selected', !pressed)
+    })
+  })
+
+  // Send button
+  expansion.querySelector('.chat-feedback-send')?.addEventListener('click', () => {
+    submitFeedbackUpdate(expansion, messageId, rating)
+  })
+
+  // Dismiss button
+  expansion.querySelector('.chat-feedback-dismiss')?.addEventListener('click', () => {
+    dismissFeedbackExpansion()
+  })
+
+  // Escape key
+  expansion.addEventListener('keydown', (e: Event) => {
+    if ((e as KeyboardEvent).key === 'Escape') {
+      dismissFeedbackExpansion()
+    }
+  })
+}
+
+/** Collect tags and comment from expansion, submit update to server. */
+async function submitFeedbackUpdate(expansion: HTMLElement, messageId: string, rating: FeedbackRating): Promise<void> {
+  const tags: string[] = []
+  expansion.querySelectorAll<HTMLElement>('.chat-feedback-tag[aria-pressed="true"]').forEach(tag => {
+    if (tag.dataset.tag) tags.push(tag.dataset.tag)
+  })
+  const comment = (expansion.querySelector('.chat-feedback-comment') as HTMLTextAreaElement | null)?.value.trim() ?? ''
+
+  if (!tags.length && !comment) {
+    dismissFeedbackExpansion()
+    return
+  }
+
+  const sendBtn = expansion.querySelector('.chat-feedback-send') as HTMLButtonElement | null
+  if (sendBtn) sendBtn.disabled = true
+
+  const payload = buildFeedbackPayload(messageId, rating)
+  payload.comment = comment
+  payload.tags = tags
+
+  try {
+    const res = await fetch('/api/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Unknown error' }))
+      throw new Error((err as { error?: string }).error ?? `HTTP ${res.status}`)
+    }
+    callbacks?.announce('Additional feedback submitted')
+    dismissFeedbackExpansion()
+  } catch {
+    if (sendBtn) sendBtn.disabled = false
+  }
+}
+
+/** Remove the feedback expansion or bottom sheet. */
+function dismissFeedbackExpansion(): void {
+  const el = document.getElementById('chat-feedback-expansion')
+  if (!el) return
+  if (el.classList.contains('chat-feedback-sheet')) {
+    el.classList.remove('chat-feedback-sheet-open')
+    el.addEventListener('transitionend', () => el.remove(), { once: true })
+    // Fallback removal if transition doesn't fire
+    setTimeout(() => el.remove(), 350)
+  } else {
+    el.remove()
   }
 }
 
