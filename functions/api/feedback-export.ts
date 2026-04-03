@@ -89,33 +89,39 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     bindings.push(limit)
     const result = await stmt.bind(...bindings).all<Record<string, unknown>>()
 
-    // Stream as JSONL
-    const lines: string[] = []
-    for (const row of result.results) {
-      const entry: Record<string, unknown> = {
-        user: row.user_message || '',
-        assistant: row.assistant_message || '',
-        rating: row.rating,
-        tags: JSON.parse((row.tags as string) || '[]'),
-        comment: row.comment || '',
-        model: (() => {
-          try { return (JSON.parse((row.model_config as string) || '{}')).model ?? '' }
-          catch { return '' }
-        })(),
-        dataset_id: row.dataset_id ?? null,
-        turn_index: row.turn_index ?? null,
-        is_fallback: !!(row.is_fallback),
-        history_compressed: !!(row.history_compressed),
-        action_clicks: JSON.parse((row.action_clicks as string) || '[]'),
-        timestamp: row.created_at,
-      }
-      if (includePrompt) {
-        entry.system = row.system_prompt || ''
-      }
-      lines.push(JSON.stringify(entry))
-    }
+    // Stream as JSONL using ReadableStream to avoid buffering large exports
+    const encoder = new TextEncoder()
+    const rows = result.results
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const row of rows) {
+          const entry: Record<string, unknown> = {
+            user: row.user_message || '',
+            assistant: row.assistant_message || '',
+            rating: row.rating,
+            tags: JSON.parse((row.tags as string) || '[]'),
+            comment: row.comment || '',
+            model: (() => {
+              try { return (JSON.parse((row.model_config as string) || '{}')).model ?? '' }
+              catch { return '' }
+            })(),
+            dataset_id: row.dataset_id ?? null,
+            turn_index: row.turn_index ?? null,
+            is_fallback: !!(row.is_fallback),
+            history_compressed: !!(row.history_compressed),
+            action_clicks: JSON.parse((row.action_clicks as string) || '[]'),
+            timestamp: row.created_at,
+          }
+          if (includePrompt) {
+            entry.system = row.system_prompt || ''
+          }
+          controller.enqueue(encoder.encode(JSON.stringify(entry) + '\n'))
+        }
+        controller.close()
+      },
+    })
 
-    return new Response(lines.join('\n') + (lines.length ? '\n' : ''), {
+    return new Response(stream, {
       headers: {
         'Content-Type': 'application/jsonl',
         'Content-Disposition': `attachment; filename="feedback-export-${new Date().toISOString().slice(0, 10)}.jsonl"`,

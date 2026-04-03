@@ -96,8 +96,9 @@ function isValidBody(body: unknown): body is FeedbackBody {
   if (b.userMessage !== undefined && typeof b.userMessage !== 'string') return false
   if (b.turnIndex !== undefined && typeof b.turnIndex !== 'number') return false
   if (b.historyCompressed !== undefined && typeof b.historyCompressed !== 'boolean') return false
-  if (b.actionClicks !== undefined && !Array.isArray(b.actionClicks)) return false
-  if (b.tags !== undefined && !Array.isArray(b.tags)) return false
+  if (b.datasetId !== undefined && b.datasetId !== null && typeof b.datasetId !== 'string') return false
+  if (b.actionClicks !== undefined && (!Array.isArray(b.actionClicks) || !b.actionClicks.every((v: unknown) => typeof v === 'string'))) return false
+  if (b.tags !== undefined && (!Array.isArray(b.tags) || !b.tags.every((v: unknown) => typeof v === 'string'))) return false
   return true
 }
 
@@ -196,7 +197,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         JSON.stringify(body.actionClicks ?? []),
         tagsJson,
         assistantMessage,
-        new Date(body.timestamp).toISOString(),
+        new Date().toISOString(),
       ).run()
     } catch (err) {
       console.error('Failed to write feedback to D1:', err)

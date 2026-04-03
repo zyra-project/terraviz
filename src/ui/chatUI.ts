@@ -143,6 +143,7 @@ export function getMessages(): ChatMessage[] {
  */
 export function clearChat(): void {
   messages = []
+  actionClickMap.clear()
   saveSession()
   renderMessages()
 }
@@ -575,12 +576,14 @@ async function handleSend(): Promise<void> {
           break
 
         case 'done': {
-          // Attach LLM context for RLHF feedback extraction
-          if (chunk.llmContext) {
-            docentMsg.llmContext = chunk.llmContext
-          } else {
-            docentMsg.llmContext = { systemPrompt: '', model: '', readingLevel: 'general', visionEnabled: false, fallback: true, historyCompressed: false }
-          }
+          // Attach LLM context for RLHF feedback extraction (non-enumerable
+          // so it won't be serialized to sessionStorage by saveSession)
+          Object.defineProperty(docentMsg, 'llmContext', {
+            value: chunk.llmContext ?? { systemPrompt: '', model: '', readingLevel: 'general', visionEnabled: false, fallback: true, historyCompressed: false },
+            writable: true,
+            configurable: true,
+            enumerable: false,
+          })
           // Replace <<LOAD:...>> markers with inline placeholders so buttons
           // render at the original location in the text, not grouped at the bottom.
           if (docentMsg.text) {
@@ -1065,7 +1068,7 @@ function showFeedbackExpansion(messageId: string, rating: FeedbackRating, btn: H
   const tags = isPositive ? FEEDBACK_TAGS_POSITIVE : FEEDBACK_TAGS_NEGATIVE
 
   const tagsHtml = tags.map(tag =>
-    `<button class="chat-feedback-tag" role="checkbox" aria-pressed="false" data-tag="${escapeAttr(tag)}">${escapeHtml(tag)}</button>`,
+    `<button class="chat-feedback-tag" aria-pressed="false" data-tag="${escapeAttr(tag)}">${escapeHtml(tag)}</button>`,
   ).join('')
 
   const expansionHtml = `

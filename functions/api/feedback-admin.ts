@@ -376,7 +376,7 @@ export const onRequestGet: PagesFunction = async (context) => {
       return '<div class="stat-card ' + cls + '"><div class="value">' + val + '</div><div class="label">' + label + '</div></div>';
     }
     function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-    function escAttr(s) { return s.replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+    function escAttr(s) { return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
   </script>
 </body>
 </html>`;
