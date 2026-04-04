@@ -606,259 +606,268 @@ export async function* processMessage(
   }
 
   // --- Try LLM for richer text ---
+  logger.warn('[Docent] Config state:', { enabled: cfg.enabled, apiUrl: cfg.apiUrl, model: cfg.model })
   if (cfg.enabled && cfg.apiUrl) {
-    let llmProducedText = false
-    let accumulatedText = ''
-    try {
-      const turnIndex = Math.floor(history.length / 2)
-      const visionActive = cfg.visionEnabled && !!screenshotDataUrl
-      const cache = getLegendCache()
+    const turnIndex = Math.floor(history.length / 2)
+    const visionActive = cfg.visionEnabled && !!screenshotDataUrl
+    const cache = getLegendCache()
 
-      // Always pass legend text description and current time.
-      // In vision mode these go into the vision prefix text (system prompts are often
-      // deprioritised by small vision models); in non-vision mode into the system prompt.
-      const legendDescription = cache.legendDescription ?? null
-      const currentTime = readCurrentTime()
+    // Always pass legend text description and current time.
+    // In vision mode these go into the vision prefix text (system prompts are often
+    // deprioritised by small vision models); in non-vision mode into the system prompt.
+    const legendDescription = cache.legendDescription ?? null
+    const currentTime = readCurrentTime()
 
-      // Best-effort Q&A knowledge retrieval (non-blocking if not yet loaded)
-      await ensureQALoaded().catch(() => {})
-      const qaContext = getRelevantQA(input, currentDataset, datasets, turnIndex)
+    // Best-effort Q&A knowledge retrieval (non-blocking if not yet loaded)
+    await ensureQALoaded().catch(() => {})
+    const qaContext = getRelevantQA(input, currentDataset, datasets, turnIndex)
 
-      const systemPrompt = buildSystemPromptForTurn(
-        datasets, currentDataset, turnIndex, cfg.readingLevel, visionActive,
-        !visionActive ? legendDescription : null,
-        !visionActive ? currentTime : null,
-        qaContext || null,
-        mapViewContext,
-      )
+    const systemPrompt = buildSystemPromptForTurn(
+      datasets, currentDataset, turnIndex, cfg.readingLevel, visionActive,
+      !visionActive ? legendDescription : null,
+      !visionActive ? currentTime : null,
+      qaContext || null,
+      mapViewContext,
+    )
 
-      if (cfg.debugPrompt) {
-        logger.info('[Docent] Full system prompt:\n' + systemPrompt)
+    if (cfg.debugPrompt) {
+      logger.info('[Docent] Full system prompt:\n' + systemPrompt)
+    }
+
+    // Build the user message — multimodal if vision is active
+    // Inject dataset context directly into the user text so the small
+    // vision model can't miss it (system prompt context often gets lost)
+    let visionPrefix = ''
+    if (visionActive) {
+      const ctxParts: string[] = []
+      if (currentDataset) {
+        ctxParts.push(`DATASET: "${currentDataset.title}"`)
+        const desc = currentDataset.enriched?.description ?? currentDataset.abstractTxt
+        if (desc) {
+          const short = desc.length > 200 ? desc.substring(0, 200) + '…' : desc
+          ctxParts.push(`ABOUT: ${short}`)
+        }
       }
+      if (viewContext) ctxParts.push(viewContext)
+      if (currentTime) ctxParts.push(`TIME: ${currentTime}`)
+      if (legendDescription) ctxParts.push(`LEGEND: ${legendDescription}`)
+      if (ctxParts.length > 0) {
+        visionPrefix = `[This image is a scientific data visualization on a 3D globe, NOT a photograph. ${ctxParts.join('. ')}]\n`
+      }
+    }
+    const visionText = visionPrefix + input
 
-      // Build the user message — multimodal if vision is active
-      // Inject dataset context directly into the user text so the small
-      // vision model can't miss it (system prompt context often gets lost)
-      let visionPrefix = ''
-      if (visionActive) {
-        const ctxParts: string[] = []
-        if (currentDataset) {
-          ctxParts.push(`DATASET: "${currentDataset.title}"`)
-          const desc = currentDataset.enriched?.description ?? currentDataset.abstractTxt
-          if (desc) {
-            const short = desc.length > 200 ? desc.substring(0, 200) + '…' : desc
-            ctxParts.push(`ABOUT: ${short}`)
+    // In vision mode, attach globe screenshot.
+    // Legend context is passed as text in visionPrefix above (CF proxy only supports one image).
+    const visionContentParts: LLMContentPart[] = [
+      { type: 'image_url', image_url: { url: screenshotDataUrl! } },
+      { type: 'text', text: visionText },
+    ]
+
+    // Prepend globe state directly into the user message so small models
+    // can't miss it — system messages are often deprioritised.
+    const statePrefix = currentDataset
+      ? `[GLOBE STATE: "${currentDataset.title}" is currently loaded on the globe.${currentTime ? ` Showing: ${currentTime}.` : ''}]\n`
+      : '[GLOBE STATE: No dataset is loaded. The globe shows the default Earth view.]\n'
+
+    const userMessage: LLMMessage = visionActive
+      ? { role: 'user', content: [
+          { type: 'image_url' as const, image_url: { url: screenshotDataUrl! } },
+          { type: 'text' as const, text: statePrefix + visionText },
+        ] as LLMContentPart[] }
+      : { role: 'user', content: statePrefix + input }
+
+    const llmMessages: LLMMessage[] = [
+      { role: 'system' as const, content: systemPrompt },
+      ...buildCompressedHistory(history),
+      userMessage,
+    ]
+    const tools = [getLoadDatasetTool(), getFlyToTool(), getSetTimeTool(), getFitBoundsTool(), getAddMarkerTool(), getToggleLabelsTool(), getHighlightRegionTool()]
+
+    // Auto-switch to vision model when using the default CF proxy
+    const normalizedUrl = cfg.apiUrl.replace(/\/+$/, '')
+    const visionCfg = visionActive && normalizedUrl === '/api'
+      ? { ...cfg, model: CF_VISION_MODEL }
+      : cfg
+
+    const llmContext: LLMContextSnapshot = {
+      systemPrompt,
+      model: visionCfg.model,
+      readingLevel: cfg.readingLevel as ReadingLevel,
+      visionEnabled: visionActive,
+      fallback: false,
+      historyCompressed: history.length > 6,
+    }
+
+    // Retry once on transient failures (empty stream, network error)
+    const MAX_LLM_ATTEMPTS = 2
+    for (let attempt = 1; attempt <= MAX_LLM_ATTEMPTS; attempt++) {
+      let llmProducedText = false
+      let accumulatedText = ''
+      try {
+        logger.warn(`[Docent] LLM request (attempt ${attempt}/${MAX_LLM_ATTEMPTS}):`, {
+          url: `${visionCfg.apiUrl.replace(/\/+$/, '')}/chat/completions`,
+          model: visionCfg.model,
+          messageCount: llmMessages.length,
+          toolCount: tools.length,
+          vision: visionActive,
+        })
+
+        const stream = streamChat(llmMessages, tools, visionCfg, visionActive ? { timeoutMs: VISION_TIMEOUT_MS } : undefined)
+
+        for await (const chunk of stream) {
+          switch (chunk.type) {
+            case 'delta':
+              llmProducedText = true
+              accumulatedText += chunk.text
+              yield { type: 'delta', text: chunk.text }
+              break
+
+            case 'tool_call':
+              if (chunk.call.name === 'load_dataset') {
+                const args = chunk.call.arguments as { dataset_id?: string; dataset_title?: string }
+                let resolvedId: string | undefined
+                let resolvedTitle: string | undefined
+
+                if (args.dataset_id) {
+                  const idStr = String(args.dataset_id)
+                  const matchById = datasets.find(d => d.id === idStr)
+                  if (matchById) {
+                    resolvedId = idStr
+                    resolvedTitle = matchById.title
+                  } else {
+                    logger.warn('[Docent] Ignoring tool_call with unknown dataset_id:', idStr)
+                  }
+                }
+
+                // Fallback: resolve by title if ID is missing or invalid
+                if (!resolvedId && args.dataset_title) {
+                  const titleLower = String(args.dataset_title).trim().toLowerCase()
+                  const match = datasets.find(d => d.title.trim().toLowerCase() === titleLower)
+                  if (match) {
+                    resolvedId = match.id
+                    resolvedTitle = match.title
+                  }
+                }
+
+                if (resolvedId && !yieldedIds.has(resolvedId)) {
+                  yieldedIds.add(resolvedId)
+                  yield {
+                    type: 'action',
+                    action: {
+                      type: 'load-dataset',
+                      datasetId: resolvedId,
+                      datasetTitle: resolvedTitle ?? String(args.dataset_title ?? resolvedId),
+                    },
+                  }
+                }
+              } else if (chunk.call.name === 'fly_to') {
+                const args = chunk.call.arguments as { lat?: number; lon?: number; place?: string; altitude?: number }
+                if (typeof args.lat === 'number' && typeof args.lon === 'number') {
+                  yield {
+                    type: 'action',
+                    action: { type: 'fly-to', lat: args.lat, lon: args.lon, altitude: args.altitude },
+                  }
+                } else if (args.place) {
+                  // Resolve place name to coordinates via region lookup
+                  const region = resolveRegion(args.place)
+                  if (region) {
+                    const [west, south, east, north] = region.bounds
+                    // Handle antimeridian-crossing bounds (west > east) by wrapping
+                    const lon = west <= east
+                      ? (west + east) / 2
+                      : ((west + east + 360) / 2) % 360 - (((west + east + 360) / 2) % 360 > 180 ? 360 : 0)
+                    yield {
+                      type: 'action',
+                      action: { type: 'fly-to', lat: (south + north) / 2, lon, altitude: args.altitude },
+                    }
+                  }
+                }
+              } else if (chunk.call.name === 'set_time') {
+                const args = chunk.call.arguments as { date?: string }
+                if (args.date) {
+                  yield {
+                    type: 'action',
+                    action: { type: 'set-time', isoDate: args.date },
+                  }
+                }
+              } else if (chunk.call.name === 'fit_bounds') {
+                const args = chunk.call.arguments as { west?: number; south?: number; east?: number; north?: number; label?: string }
+                if (typeof args.west === 'number' && typeof args.south === 'number' && typeof args.east === 'number' && typeof args.north === 'number') {
+                  yield {
+                    type: 'action',
+                    action: { type: 'fit-bounds', bounds: [args.west, args.south, args.east, args.north], label: args.label },
+                  }
+                }
+              } else if (chunk.call.name === 'add_marker') {
+                const args = chunk.call.arguments as { lat?: number; lng?: number; label?: string }
+                if (typeof args.lat === 'number' && typeof args.lng === 'number') {
+                  yield {
+                    type: 'action',
+                    action: { type: 'add-marker', lat: args.lat, lng: args.lng, label: args.label },
+                  }
+                }
+              } else if (chunk.call.name === 'toggle_labels') {
+                const args = chunk.call.arguments as { visible?: boolean }
+                if (typeof args.visible === 'boolean') {
+                  yield {
+                    type: 'action',
+                    action: { type: 'toggle-labels', visible: args.visible },
+                  }
+                }
+              } else if (chunk.call.name === 'highlight_region') {
+                const args = chunk.call.arguments as { geojson?: GeoJSON.GeoJSON; name?: string; label?: string }
+                if (args.geojson) {
+                  yield {
+                    type: 'action',
+                    action: { type: 'highlight-region', geojson: args.geojson, label: args.label },
+                  }
+                } else if (args.name) {
+                  // Resolve by name from the region lookup
+                  const region = resolveRegion(args.name)
+                  if (region) {
+                    yield {
+                      type: 'action',
+                      action: { type: 'highlight-region', geojson: boundsToGeoJSON(region.bounds, region.name), label: region.name },
+                    }
+                    yield {
+                      type: 'action',
+                      action: { type: 'fit-bounds', bounds: region.bounds, label: region.name },
+                    }
+                  }
+                }
+              }
+              break
+
+            case 'error':
+              logger.warn(`[Docent] LLM error (attempt ${attempt}):`, chunk.message)
+              llmProducedText = false
+              break
+
+            case 'done':
+              if (llmProducedText) {
+                yield* emitValidatedActions(accumulatedText, datasets, yieldedIds)
+                yield { type: 'done', fallback: false, llmContext }
+                return
+              }
+              logger.warn(`[Docent] LLM stream completed but produced no text (attempt ${attempt})`)
+              break
           }
         }
-        if (viewContext) ctxParts.push(viewContext)
-        if (currentTime) ctxParts.push(`TIME: ${currentTime}`)
-        if (legendDescription) ctxParts.push(`LEGEND: ${legendDescription}`)
-        if (ctxParts.length > 0) {
-          visionPrefix = `[This image is a scientific data visualization on a 3D globe, NOT a photograph. ${ctxParts.join('. ')}]\n`
+
+        if (llmProducedText) {
+          yield* emitValidatedActions(accumulatedText, datasets, yieldedIds)
+          yield { type: 'done', fallback: false, llmContext }
+          return
         }
-      }
-      const visionText = visionPrefix + input
-
-      // In vision mode, attach globe screenshot.
-      // Legend context is passed as text in visionPrefix above (CF proxy only supports one image).
-      const visionContentParts: LLMContentPart[] = [
-        { type: 'image_url', image_url: { url: screenshotDataUrl! } },
-        { type: 'text', text: visionText },
-      ]
-
-      // Prepend globe state directly into the user message so small models
-      // can't miss it — system messages are often deprioritised.
-      const statePrefix = currentDataset
-        ? `[GLOBE STATE: "${currentDataset.title}" is currently loaded on the globe.${currentTime ? ` Showing: ${currentTime}.` : ''}]\n`
-        : '[GLOBE STATE: No dataset is loaded. The globe shows the default Earth view.]\n'
-
-      const userMessage: LLMMessage = visionActive
-        ? { role: 'user', content: [
-            { type: 'image_url' as const, image_url: { url: screenshotDataUrl! } },
-            { type: 'text' as const, text: statePrefix + visionText },
-          ] as LLMContentPart[] }
-        : { role: 'user', content: statePrefix + input }
-
-      const llmMessages: LLMMessage[] = [
-        { role: 'system' as const, content: systemPrompt },
-        ...buildCompressedHistory(history),
-        userMessage,
-      ]
-      const tools = [getLoadDatasetTool(), getFlyToTool(), getSetTimeTool(), getFitBoundsTool(), getAddMarkerTool(), getToggleLabelsTool(), getHighlightRegionTool()]
-
-      // Auto-switch to vision model when using the default CF proxy
-      const normalizedUrl = cfg.apiUrl.replace(/\/+$/, '')
-      const visionCfg = visionActive && normalizedUrl === '/api'
-        ? { ...cfg, model: CF_VISION_MODEL }
-        : cfg
-
-      const llmContext: LLMContextSnapshot = {
-        systemPrompt,
-        model: visionCfg.model,
-        readingLevel: cfg.readingLevel as ReadingLevel,
-        visionEnabled: visionActive,
-        fallback: false,
-        historyCompressed: history.length > 6,
+      } catch (err) {
+        logger.warn(`[Docent] LLM stream failed (attempt ${attempt}):`, err)
       }
 
-      logger.info('[Docent] LLM request:', {
-        url: `${visionCfg.apiUrl.replace(/\/+$/, '')}/chat/completions`,
-        model: visionCfg.model,
-        messageCount: llmMessages.length,
-        toolCount: tools.length,
-        vision: visionActive,
-      })
-
-      const stream = streamChat(llmMessages, tools, visionCfg, visionActive ? { timeoutMs: VISION_TIMEOUT_MS } : undefined)
-
-      for await (const chunk of stream) {
-        switch (chunk.type) {
-          case 'delta':
-            llmProducedText = true
-            accumulatedText += chunk.text
-            yield { type: 'delta', text: chunk.text }
-            break
-
-          case 'tool_call':
-            if (chunk.call.name === 'load_dataset') {
-              const args = chunk.call.arguments as { dataset_id?: string; dataset_title?: string }
-              let resolvedId: string | undefined
-              let resolvedTitle: string | undefined
-
-              if (args.dataset_id) {
-                const idStr = String(args.dataset_id)
-                const matchById = datasets.find(d => d.id === idStr)
-                if (matchById) {
-                  resolvedId = idStr
-                  resolvedTitle = matchById.title
-                } else {
-                  logger.warn('[Docent] Ignoring tool_call with unknown dataset_id:', idStr)
-                }
-              }
-
-              // Fallback: resolve by title if ID is missing or invalid
-              if (!resolvedId && args.dataset_title) {
-                const titleLower = String(args.dataset_title).trim().toLowerCase()
-                const match = datasets.find(d => d.title.trim().toLowerCase() === titleLower)
-                if (match) {
-                  resolvedId = match.id
-                  resolvedTitle = match.title
-                }
-              }
-
-              if (resolvedId && !yieldedIds.has(resolvedId)) {
-                yieldedIds.add(resolvedId)
-                yield {
-                  type: 'action',
-                  action: {
-                    type: 'load-dataset',
-                    datasetId: resolvedId,
-                    datasetTitle: resolvedTitle ?? String(args.dataset_title ?? resolvedId),
-                  },
-                }
-              }
-            } else if (chunk.call.name === 'fly_to') {
-              const args = chunk.call.arguments as { lat?: number; lon?: number; place?: string; altitude?: number }
-              if (typeof args.lat === 'number' && typeof args.lon === 'number') {
-                yield {
-                  type: 'action',
-                  action: { type: 'fly-to', lat: args.lat, lon: args.lon, altitude: args.altitude },
-                }
-              } else if (args.place) {
-                // Resolve place name to coordinates via region lookup
-                const region = resolveRegion(args.place)
-                if (region) {
-                  const [west, south, east, north] = region.bounds
-                  // Handle antimeridian-crossing bounds (west > east) by wrapping
-                  const lon = west <= east
-                    ? (west + east) / 2
-                    : ((west + east + 360) / 2) % 360 - (((west + east + 360) / 2) % 360 > 180 ? 360 : 0)
-                  yield {
-                    type: 'action',
-                    action: { type: 'fly-to', lat: (south + north) / 2, lon, altitude: args.altitude },
-                  }
-                }
-              }
-            } else if (chunk.call.name === 'set_time') {
-              const args = chunk.call.arguments as { date?: string }
-              if (args.date) {
-                yield {
-                  type: 'action',
-                  action: { type: 'set-time', isoDate: args.date },
-                }
-              }
-            } else if (chunk.call.name === 'fit_bounds') {
-              const args = chunk.call.arguments as { west?: number; south?: number; east?: number; north?: number; label?: string }
-              if (typeof args.west === 'number' && typeof args.south === 'number' && typeof args.east === 'number' && typeof args.north === 'number') {
-                yield {
-                  type: 'action',
-                  action: { type: 'fit-bounds', bounds: [args.west, args.south, args.east, args.north], label: args.label },
-                }
-              }
-            } else if (chunk.call.name === 'add_marker') {
-              const args = chunk.call.arguments as { lat?: number; lng?: number; label?: string }
-              if (typeof args.lat === 'number' && typeof args.lng === 'number') {
-                yield {
-                  type: 'action',
-                  action: { type: 'add-marker', lat: args.lat, lng: args.lng, label: args.label },
-                }
-              }
-            } else if (chunk.call.name === 'toggle_labels') {
-              const args = chunk.call.arguments as { visible?: boolean }
-              if (typeof args.visible === 'boolean') {
-                yield {
-                  type: 'action',
-                  action: { type: 'toggle-labels', visible: args.visible },
-                }
-              }
-            } else if (chunk.call.name === 'highlight_region') {
-              const args = chunk.call.arguments as { geojson?: GeoJSON.GeoJSON; name?: string; label?: string }
-              if (args.geojson) {
-                yield {
-                  type: 'action',
-                  action: { type: 'highlight-region', geojson: args.geojson, label: args.label },
-                }
-              } else if (args.name) {
-                // Resolve by name from the region lookup
-                const region = resolveRegion(args.name)
-                if (region) {
-                  yield {
-                    type: 'action',
-                    action: { type: 'highlight-region', geojson: boundsToGeoJSON(region.bounds, region.name), label: region.name },
-                  }
-                  yield {
-                    type: 'action',
-                    action: { type: 'fit-bounds', bounds: region.bounds, label: region.name },
-                  }
-                }
-              }
-            }
-            break
-
-          case 'error':
-            // Treat LLM errors as hard failures — abort stream and fall back to local
-            logger.warn('[Docent] LLM error, falling back to local engine:', chunk.message)
-            llmProducedText = false
-            break
-
-          case 'done':
-            if (llmProducedText) {
-              yield* emitValidatedActions(accumulatedText, datasets, yieldedIds)
-              yield { type: 'done', fallback: false, llmContext }
-              return
-            }
-            logger.warn('[Docent] LLM stream completed but produced no text — falling back to local engine')
-            break
-        }
+      // If this was the last attempt, fall through to local engine
+      if (attempt < MAX_LLM_ATTEMPTS) {
+        logger.warn('[Docent] Retrying LLM request...')
       }
-
-      if (llmProducedText) {
-        yield* emitValidatedActions(accumulatedText, datasets, yieldedIds)
-        yield { type: 'done', fallback: false, llmContext }
-        return
-      }
-    } catch (err) {
-      logger.warn('[Docent] LLM stream failed, falling back:', err)
     }
   }
 
