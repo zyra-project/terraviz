@@ -91,6 +91,10 @@ function extractImageAndNormalise(
   return { image, textMessages }
 }
 
+// Workers AI default max_tokens is ~256 which truncates conversational responses.
+// 512 tokens ≈ 380 words — enough for Orbit's 150-word guideline with headroom.
+const DEFAULT_MAX_TOKENS = 512
+
 // Basic per-IP rate limiting (in-memory, resets on deploy)
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>()
 const RATE_LIMIT = 30 // requests per window
@@ -279,7 +283,7 @@ async function visionStreamShim(
   // Accept Meta license on first use
   await ensureLicenseAccepted(ai, model)
 
-  const inputs: Record<string, unknown> = { messages }
+  const inputs: Record<string, unknown> = { messages, max_tokens: DEFAULT_MAX_TOKENS }
   if (image) inputs.image = [...image]
 
   let text: string
@@ -334,7 +338,7 @@ async function streamResponse(
 ): Promise<Response> {
   const response = (await ai.run(
     model,
-    { messages, stream: true },
+    { messages, stream: true, max_tokens: DEFAULT_MAX_TOKENS },
     { returnRawResponse: true },
   )) as Response
 
@@ -416,7 +420,7 @@ async function nonStreamResponse(
   cors: Record<string, string>,
   image?: Uint8Array | null,
 ): Promise<Response> {
-  const inputs: Record<string, unknown> = { messages }
+  const inputs: Record<string, unknown> = { messages, max_tokens: DEFAULT_MAX_TOKENS }
   if (image) inputs.image = [...image]
 
   const result = (await ai.run(model, inputs)) as { response?: string }
