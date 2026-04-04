@@ -606,7 +606,7 @@ export async function* processMessage(
   }
 
   // --- Try LLM for richer text ---
-  logger.warn('[Docent] Config state:', { enabled: cfg.enabled, apiUrl: cfg.apiUrl, model: cfg.model })
+  logger.info('[Docent] Config state:', { enabled: cfg.enabled, apiUrl: cfg.apiUrl, model: cfg.model })
   if (cfg.enabled && cfg.apiUrl) {
     const turnIndex = Math.floor(history.length / 2)
     const visionActive = cfg.visionEnabled && !!screenshotDataUrl
@@ -705,7 +705,7 @@ export async function* processMessage(
       let llmProducedText = false
       let accumulatedText = ''
       try {
-        logger.warn(`[Docent] LLM request (attempt ${attempt}/${MAX_LLM_ATTEMPTS}):`, {
+        logger.info(`[Docent] LLM request (attempt ${attempt}/${MAX_LLM_ATTEMPTS}):`, {
           url: `${visionCfg.apiUrl.replace(/\/+$/, '')}/chat/completions`,
           model: visionCfg.model,
           messageCount: llmMessages.length,

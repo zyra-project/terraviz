@@ -454,8 +454,15 @@ async function handleSettingsTest(): Promise<void> {
 
   if (status) {
     if (result.ok) {
-      status.textContent = 'Connected'
-      status.className = 'chat-settings-status chat-settings-status-ok'
+      // Warn if connection works but the Enable checkbox is unchecked
+      const enabledInput = document.getElementById('chat-settings-enabled') as HTMLInputElement | null
+      if (enabledInput && !enabledInput.checked) {
+        status.textContent = 'Connected — but "Enable LLM" is unchecked. Check it and Save to use AI.'
+        status.className = 'chat-settings-status chat-settings-status-err'
+      } else {
+        status.textContent = 'Connected'
+        status.className = 'chat-settings-status chat-settings-status-ok'
+      }
     } else {
       status.textContent = result.reason ?? 'Failed to connect'
       status.className = 'chat-settings-status chat-settings-status-err'
