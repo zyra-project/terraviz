@@ -27,11 +27,20 @@ const DEFAULT_LEVEL: LogLevel =
     ? 'debug'
     : 'warn'
 
+/** Runtime override — set by the debug checkbox in Orbit settings. */
+let runtimeLevel: LogLevel | null = null
+
 function currentLevel(): LogLevel {
+  if (runtimeLevel) return runtimeLevel
   if (typeof window !== 'undefined' && (window as any).__LOG_LEVEL__) {
     return (window as any).__LOG_LEVEL__ as LogLevel
   }
   return DEFAULT_LEVEL
+}
+
+/** Override the log level at runtime (e.g. when the debug checkbox is toggled). Pass null to reset to default. */
+export function setLogLevel(level: LogLevel | null): void {
+  runtimeLevel = level
 }
 
 function shouldLog(level: LogLevel): boolean {

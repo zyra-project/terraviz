@@ -13,6 +13,7 @@ import { createMessageId } from '../services/docentEngine'
 import { processMessage, loadConfig, saveConfig, testConnection, getDefaultConfig, isLocalDev, captureGlobeScreenshot, captureViewContext } from '../services/docentService'
 import { ensureLoaded as ensureQALoaded } from '../services/qaService'
 import { fetchModels } from '../services/llmProvider'
+import { setLogLevel } from '../utils/logger'
 
 // --- Constants ---
 const SESSION_STORAGE_KEY = 'sos-docent-chat'
@@ -349,6 +350,8 @@ function populateSettings(): void {
   if (enabledInput) enabledInput.checked = config.enabled
   if (visionInput) visionInput.checked = config.visionEnabled
   if (debugInput) debugInput.checked = config.debugPrompt ?? false
+  // Apply saved debug log level on startup
+  setLogLevel(config.debugPrompt ? 'debug' : null)
   // Seed the select with the saved model immediately, then refresh from API
   seedModelSelect(config.model)
   void refreshModelSelect(config.apiUrl, config.model)
@@ -424,6 +427,8 @@ function readSettingsForm(): DocentConfig {
 function handleSettingsSave(): void {
   const config = readSettingsForm()
   saveConfig(config)
+  // Apply debug log level at runtime so production console shows all messages
+  setLogLevel(config.debugPrompt ? 'debug' : null)
   // Keep vision toggle button + hint banner in sync with settings checkbox
   setVisionUI(config.visionEnabled)
   const status = document.getElementById('chat-settings-status')

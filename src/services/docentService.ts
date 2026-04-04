@@ -701,6 +701,14 @@ export async function* processMessage(
         historyCompressed: history.length > 6,
       }
 
+      logger.info('[Docent] LLM request:', {
+        url: `${visionCfg.apiUrl.replace(/\/+$/, '')}/chat/completions`,
+        model: visionCfg.model,
+        messageCount: llmMessages.length,
+        toolCount: tools.length,
+        vision: visionActive,
+      })
+
       const stream = streamChat(llmMessages, tools, visionCfg, visionActive ? { timeoutMs: VISION_TIMEOUT_MS } : undefined)
 
       for await (const chunk of stream) {
@@ -829,7 +837,7 @@ export async function* processMessage(
 
           case 'error':
             // Treat LLM errors as hard failures — abort stream and fall back to local
-            logger.info('[Docent] LLM error, falling back to local engine:', chunk.message)
+            logger.warn('[Docent] LLM error, falling back to local engine:', chunk.message)
             llmProducedText = false
             break
 
@@ -849,12 +857,12 @@ export async function* processMessage(
         return
       }
     } catch (err) {
-      logger.info('[Docent] LLM stream failed, falling back:', err)
+      logger.warn('[Docent] LLM stream failed, falling back:', err)
     }
   }
 
   // Local text fallback (actions already yielded above)
-  logger.info('[Docent] Using local engine for text')
+  logger.warn('[Docent] Using local engine for text')
   yield { type: 'delta', text: localResponse.text }
   yield { type: 'done', fallback: true }
 }

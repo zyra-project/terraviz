@@ -113,6 +113,8 @@ export async function* streamChat(
     inactivityTimer = setTimeout(() => controller.abort(), timeoutMs)
   }
 
+  logger.info(`[LLM] Response status: ${response.status} ${response.statusText}`)
+
   if (!response.ok) {
     clearTimeout(inactivityTimer)
     const text = await response.text().catch(() => '')
