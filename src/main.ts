@@ -27,12 +27,10 @@ import {
   loadImageDataset, loadVideoDataset, displayDatasetInfo,
 } from './services/datasetLoader'
 import { initLegendForDataset, clearLegendCache, loadConfig } from './services/docentService'
-import { isMobile as isMobileDevice } from './utils/deviceCapability'
+import { isMobile, getCloudTextureUrl } from './utils/deviceCapability'
 
 // --- App constants ---
-const CLOUD_TEXTURE_URL = isMobileDevice()
-  ? 'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/clouds_4096.jpg'
-  : 'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/clouds_8192.jpg'
+const CLOUD_TEXTURE_URL = getCloudTextureUrl()
 const EARTH_TEXTURE_WEIGHT = 0.8
 const CLOUD_TEXTURE_WEIGHT = 0.2
 const LOADING_BASE_PROGRESS = 20
@@ -59,7 +57,7 @@ class InteractiveSphere {
     totalFrames: 0
   }
 
-  private readonly isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)
+  private readonly isMobile = isMobile()
 
   private renderer: MapRenderer | null = null
   private hlsService: HLSService | null = null

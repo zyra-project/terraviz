@@ -13,8 +13,8 @@ const BLUE_MARBLE_TEMPLATE =
 const BLACK_MARBLE_TEMPLATE =
   '/api/tile/VIIRS_Black_Marble/default/2016-01-01/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png'
 
-/** Generate all tile URLs for zoom levels 0 through maxZoom (inclusive). */
-function generateTileUrls(template: string, maxZoom: number): string[] {
+/** Generate all tile URLs for zoom levels 0 through maxZoom (inclusive). @internal */
+export function generateTileUrls(template: string, maxZoom: number): string[] {
   const urls: string[] = []
   for (let z = 0; z <= maxZoom; z++) {
     const count = 1 << z // 2^z tiles per axis

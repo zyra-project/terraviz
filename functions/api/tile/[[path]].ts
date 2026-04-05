@@ -22,17 +22,32 @@ const ALLOWED_PREFIXES = [
 ]
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
-  const tilePath = (context.params.path as string[]).join('/')
+  const pathParam = context.params.path
+  if (!pathParam) {
+    return new Response('Missing tile path', { status: 400 })
+  }
+
+  const segments = Array.isArray(pathParam) ? pathParam : [pathParam]
+
+  // Reject path traversal attempts
+  for (const segment of segments) {
+    const decoded = decodeURIComponent(segment)
+    if (decoded === '.' || decoded === '..' || decoded.includes('/') || decoded.includes('\\')) {
+      return new Response('Invalid tile path', { status: 400 })
+    }
+  }
+
+  const tilePath = segments.join('/')
 
   if (!ALLOWED_PREFIXES.some(prefix => tilePath.startsWith(prefix))) {
     return new Response('Layer not allowed', { status: 403 })
   }
 
-  const gibs_url = `${GIBS_BASE}/${tilePath}`
+  const gibsUrl = `${GIBS_BASE}/${tilePath}`
 
   let upstream: Response
   try {
-    upstream = await fetch(gibs_url, {
+    upstream = await fetch(gibsUrl, {
       // Cloudflare-specific: cache at the edge for 1 year (tiles never change)
       cf: {
         cacheEverything: true,

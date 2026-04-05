@@ -24,13 +24,11 @@ import type { CustomLayerInterface } from 'maplibre-gl'
 import type { Map as MaplibreMap } from 'maplibre-gl'
 import { getSunPosition } from '../utils/time'
 import { logger } from '../utils/logger'
-import { isMobile } from '../utils/deviceCapability'
+import { getCloudTextureUrl } from '../utils/deviceCapability'
 
 // --- Texture URLs ---
 const SPECULAR_MAP_URL = '/assets/Earth_Specular_2K.jpg'
-const CLOUD_TEXTURE_URL = isMobile()
-  ? 'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/clouds_4096.jpg'
-  : 'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/clouds_8192.jpg'
+const CLOUD_TEXTURE_URL = getCloudTextureUrl()
 
 // --- Rendering constants (matched to earthMaterials.ts) ---
 const NIGHT_LIGHT_STRENGTH = 0.5
@@ -792,7 +790,7 @@ export function createEarthTileLayer(): EarthTileLayerControl {
             faceImg.src = SKYBOX_URL_BASE + face + '.jpg'
           })
         }
-        requestIdleCallback ? requestIdleCallback(loadSkyboxFaces) : setTimeout(loadSkyboxFaces, 200)
+        typeof requestIdleCallback !== 'undefined' ? requestIdleCallback(loadSkyboxFaces) : setTimeout(loadSkyboxFaces, 200)
       }
 
       // --- Compile sun sprite shader ---
@@ -981,7 +979,7 @@ export function createEarthTileLayer(): EarthTileLayerControl {
         }
         specImg.src = SPECULAR_MAP_URL
       }
-      requestIdleCallback ? requestIdleCallback(loadSpecularMap) : setTimeout(loadSpecularMap, 200)
+      typeof requestIdleCallback !== 'undefined' ? requestIdleCallback(loadSpecularMap) : setTimeout(loadSpecularMap, 200)
 
       logger.info('[EarthTileLayer] Day/night+clouds+specular layer initialized (%d triangles)', indexCount / 3)
     },

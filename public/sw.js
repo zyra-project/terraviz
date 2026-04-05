@@ -4,13 +4,13 @@
 
 const CACHE_NAME = 'gibs-tiles-v1'
 
-// URL patterns to intercept with cache-first strategy
-const CACHEABLE_ORIGINS = [
-  'gibs.earthdata.nasa.gov',
-  's3.dualstack.us-east-1.amazonaws.com',
+// External URLs to cache — scoped to specific paths, not entire hostnames
+const CACHEABLE_EXTERNAL = [
+  { hostname: 'gibs.earthdata.nasa.gov', pathPrefix: '/wmts/epsg3857/best/' },
+  { hostname: 's3.dualstack.us-east-1.amazonaws.com', pathPrefix: '/metadata.sosexplorer.gov/' },
 ]
 
-// Also cache same-origin paths (proxied tiles, skybox, specular map, etc.)
+// Same-origin paths to cache (proxied tiles, skybox, specular map, etc.)
 const CACHEABLE_LOCAL_PATHS = [
   '/api/tile/',
   '/assets/skybox/',
@@ -21,8 +21,10 @@ const CACHEABLE_LOCAL_PATHS = [
 function shouldCache(url) {
   const parsed = new URL(url)
 
-  // Match external cacheable origins
-  if (CACHEABLE_ORIGINS.some(origin => parsed.hostname === origin)) {
+  // Match external cacheable origins + path prefixes
+  if (CACHEABLE_EXTERNAL.some(
+    rule => parsed.hostname === rule.hostname && parsed.pathname.startsWith(rule.pathPrefix)
+  )) {
     return true
   }
 
