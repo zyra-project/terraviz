@@ -715,8 +715,9 @@ class InteractiveSphere {
   }
 }
 
-// Register service worker for tile caching (cache-first strategy for GIBS tiles)
-if ('serviceWorker' in navigator) {
+// Register service worker for tile caching (cache-first strategy for GIBS tiles).
+// Skip in Tauri desktop app — tile caching is handled by the Rust backend.
+if ('serviceWorker' in navigator && !(window as any).__TAURI__) {
   navigator.serviceWorker.register('/sw.js').catch(err => {
     logger.warn('[SW] Registration failed:', err)
   })

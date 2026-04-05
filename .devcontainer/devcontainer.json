@@ -6,6 +6,7 @@
   "forwardPorts": [5173],
   "mounts": [
     "source=${localWorkspaceFolder}/src,target=/app/src,type=bind",
+    "source=${localWorkspaceFolder}/src-tauri,target=/app/src-tauri,type=bind",
     "source=${localWorkspaceFolder}/public,target=/app/public,type=bind",
     "source=${localWorkspaceFolder}/vite.config.ts,target=/app/vite.config.ts,type=bind",
     "source=${localWorkspaceFolder}/tsconfig.json,target=/app/tsconfig.json,type=bind"
@@ -21,7 +22,8 @@
         "dbaeumer.vscode-eslint",
         "esbenp.prettier-vscode",
         "bradlc.vscode-tailwindcss",
-        "anthropic.claude-code"
+        "anthropic.claude-code",
+        "rust-lang.rust-analyzer"
       ],
       "settings": {
         "typescript.tsdk": "/app/node_modules/typescript/lib"

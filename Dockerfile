@@ -1,11 +1,31 @@
-FROM node:20-alpine
+FROM node:20-bookworm-slim
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apk add --no-cache git git-lfs bash
+# System dependencies for Tauri development (build + WebKitGTK)
+# Reference: https://v2.tauri.app/start/prerequisites/#linux
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    git-lfs \
+    bash \
+    curl \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    libwebkit2gtk-4.1-dev \
+    libgtk-3-dev \
+    libayatana-appindicator3-dev \
+    librsvg2-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install dependencies first (cached layer)
+# Install Rust toolchain
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Install Tauri CLI
+RUN cargo install tauri-cli --locked
+
+# Install Node dependencies first (cached layer)
 COPY package.json package-lock.json ./
 RUN npm ci
 

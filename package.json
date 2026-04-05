@@ -14,14 +14,18 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
-    "build:qa": "npx tsx scripts/build-qa-index.ts"
+    "build:qa": "npx tsx scripts/build-qa-index.ts",
+    "dev:desktop": "tauri dev",
+    "build:desktop": "tsc && vite build && tauri build"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2",
     "axios": "^1.6.0",
     "hls.js": "^1.4.0",
     "maplibre-gl": "^5.21.1"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2",
     "@cloudflare/workers-types": "^4.20260317.1",
     "@rolldown/binding-linux-x64-musl": "^1.0.0-rc.11",
     "@types/node": "^20.10.0",
