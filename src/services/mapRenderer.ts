@@ -13,13 +13,15 @@ import { createEarthTileLayer, computeSunLightPosition, type EarthTileLayerContr
 import type { GlobeRenderer, MapViewContext, VideoTextureHandle } from '../types'
 import { getSunPosition } from '../utils/time'
 import { logger } from '../utils/logger'
+import { isMobile } from '../utils/deviceCapability'
+import { preloadLowZoomTiles } from './tilePreloader'
 
-// --- GIBS tile endpoints ---
+// --- GIBS tile endpoints (proxied through Cloudflare edge for caching) ---
 const BLUE_MARBLE_TILES = [
-  'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/BlueMarble_NextGeneration/default/2004-08/GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpg'
+  '/api/tile/BlueMarble_NextGeneration/default/2004-08/GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpg'
 ]
 const BLACK_MARBLE_TILES = [
-  'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_Black_Marble/default/2016-01-01/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png'
+  '/api/tile/VIIRS_Black_Marble/default/2016-01-01/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png'
 ]
 const GIBS_MAX_ZOOM = 8
 
@@ -297,6 +299,7 @@ export class MapRenderer implements GlobeRenderer {
       attributionControl: { compact: true },
       preserveDrawingBuffer: true, // needed for captureViewContext / toDataURL
       maxPitch: 85,
+      maxTileCacheSize: isMobile() ? 750 : 2000,
     } as maplibregl.MapOptions)
 
     // Double-click/double-tap resets to default view instead of zoom in
@@ -376,6 +379,15 @@ export class MapRenderer implements GlobeRenderer {
       }
 
       logger.info('[MapRenderer] Earth tile + capture + skybox layers added, labels moved above')
+
+      // Preload low-zoom tiles into browser/SW cache.
+      // Mobile: wait for 'idle' (initial viewport tiles rendered) to avoid bandwidth contention.
+      // Desktop: start immediately after layer setup.
+      if (isMobile()) {
+        this.map!.once('idle', () => preloadLowZoomTiles())
+      } else {
+        preloadLowZoomTiles()
+      }
     })
   }
 

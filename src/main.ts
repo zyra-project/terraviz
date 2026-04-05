@@ -27,8 +27,10 @@ import {
   loadImageDataset, loadVideoDataset, displayDatasetInfo,
 } from './services/datasetLoader'
 import { initLegendForDataset, clearLegendCache, loadConfig } from './services/docentService'
+import { isMobile, getCloudTextureUrl } from './utils/deviceCapability'
 
 // --- App constants ---
+const CLOUD_TEXTURE_URL = getCloudTextureUrl()
 const EARTH_TEXTURE_WEIGHT = 0.8
 const CLOUD_TEXTURE_WEIGHT = 0.2
 const LOADING_BASE_PROGRESS = 20
@@ -55,7 +57,7 @@ class InteractiveSphere {
     totalFrames: 0
   }
 
-  private readonly isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)
+  private readonly isMobile = isMobile()
 
   private renderer: MapRenderer | null = null
   private hlsService: HLSService | null = null
@@ -116,7 +118,7 @@ class InteractiveSphere {
         showChatTrigger()
       } else {
         this.setLoadingStatus('Loading Earth textures\u2026', 20)
-        const cloudUrl = 'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/clouds_8192.jpg'
+        const cloudUrl = CLOUD_TEXTURE_URL
 
         let earthFraction = 0
         let cloudFraction = 0
@@ -677,7 +679,7 @@ class InteractiveSphere {
 
     this.showLoadingScreen('Loading Earth\u2026', 20)
     if (this.renderer) {
-      const cloudUrl = 'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/clouds_8192.jpg'
+      const cloudUrl = CLOUD_TEXTURE_URL
       let earthFraction = 0
       let cloudFraction = 0
       const updateProgress = () => {
@@ -711,6 +713,13 @@ class InteractiveSphere {
       this.renderer.dispose()
     }
   }
+}
+
+// Register service worker for tile caching (cache-first strategy for GIBS tiles)
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(err => {
+    logger.warn('[SW] Registration failed:', err)
+  })
 }
 
 // Initialize app on DOM ready
