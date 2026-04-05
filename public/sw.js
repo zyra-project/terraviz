@@ -10,9 +10,11 @@ const CACHEABLE_EXTERNAL = [
   { hostname: 's3.dualstack.us-east-1.amazonaws.com', pathPrefix: '/metadata.sosexplorer.gov/' },
 ]
 
-// Same-origin paths to cache (proxied tiles, skybox, specular map, etc.)
+// Same-origin static assets to cache (skybox, specular map, etc.)
+// NOTE: /api/tile/ is NOT cached here — those requests hit the Cloudflare Pages
+// Function which has its own edge cache. Caching them in the SW would cause the
+// SW's fetch() to re-intercept itself, producing an error loop.
 const CACHEABLE_LOCAL_PATHS = [
-  '/api/tile/',
   '/assets/skybox/',
   '/assets/Earth_Specular_2K.jpg',
   '/assets/Earth_Normal_2K.jpg',
