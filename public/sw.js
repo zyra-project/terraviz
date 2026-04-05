@@ -11,6 +11,7 @@ const CACHEABLE_EXTERNAL = [
 ]
 
 // Same-origin paths to cache (proxied tiles, skybox, specular map, etc.)
+// These are static textures that rarely change. If they do, bump CACHE_NAME above.
 const CACHEABLE_LOCAL_PATHS = [
   '/api/tile/',
   '/assets/skybox/',

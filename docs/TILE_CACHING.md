@@ -74,7 +74,7 @@ After the map loads, low-zoom tiles (z0-z3) are eagerly fetched in the backgroun
 |--------------------|--------------------------|-----------------------------------|
 | Concurrency        | 6 parallel fetches       | 2 parallel fetches                |
 | Trigger            | After map `load` event   | After map `idle` event            |
-| Slow network (2g)  | Always preloads          | Skipped entirely                  |
+| Slow network (2g)  | Skipped entirely         | Skipped entirely                  |
 
 The preloader populates both the SW cache (via the fetch event handler) and the Cloudflare edge cache.
 
