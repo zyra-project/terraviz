@@ -8,9 +8,7 @@ It is one of the most powerful tools ever built for communicating environmental 
 
 ## What This Project Does
 
-The interactive-sphere project is a web-based viewer that brings SOS datasets to any device — phone, tablet, or laptop. It streams NOAA's curated environmental data onto a navigable 3D globe, putting the same visualizations that live inside science museums directly in the hands of anyone with a browser.
-
-No installation required. No ticket needed. No zip code matters.
+The interactive-sphere project is a web-based viewer that brings SOS datasets to any device — phone, tablet, or laptop. It streams NOAA's curated environmental data onto a navigable 3D globe, putting the same visualizations that live inside science museums directly in the hands of anyone with a browser. Optional desktop versions for Windows, Mac, and Linux are available for those that need the extra power and don't mind the install.
 
 ## Why It Matters
 
