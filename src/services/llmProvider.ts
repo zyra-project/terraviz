@@ -113,6 +113,7 @@ export async function* streamChat(
 
   let response: Response
   try {
+    logger.info('[LLM] POST', url, 'model:', config.model)
     response = await corsFetch(url, {
       method: 'POST',
       headers,
