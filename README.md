@@ -1,11 +1,11 @@
-# Interactive Sphere — Proof of Concept
+# Interactive Sphere
 
 [![Live Demo](https://img.shields.io/badge/Live_Demo-sphere.zyra--project.org-4da6ff)](https://sphere.zyra-project.org)
 [![Windows](https://img.shields.io/badge/Download-Windows-0078D4?logo=windows&logoColor=white)](https://github.com/zyra-project/interactive-sphere/releases/latest/download/Interactive-Sphere-latest-x64.msi)
 [![macOS](https://img.shields.io/badge/Download-macOS-000000?logo=apple&logoColor=white)](https://github.com/zyra-project/interactive-sphere/releases/latest/download/Interactive-Sphere-latest-aarch64.dmg)
 [![Linux](https://img.shields.io/badge/Download-Linux-FCC624?logo=linux&logoColor=black)](https://github.com/zyra-project/interactive-sphere/releases/latest/download/Interactive-Sphere-latest-x64.AppImage)
 
-A WebGL-based globe that streams environmental data from the [Science On a Sphere](https://sos.noaa.gov/) project.
+A WebGL-based globe that streams environmental data from the [Science On a Sphere](https://sos.noaa.gov/) project. Available as a [web app](https://sphere.zyra-project.org) and a native desktop application for Windows, macOS, and Linux.
 
 ![SOS Explorer interface showing the Earth globe with the dataset browse panel](initial-interface.jpg)
 
@@ -21,6 +21,16 @@ A WebGL-based globe that streams environmental data from the [Science On a Spher
 - Collapsible browse panel (desktop sidebar with toggle)
 - Accessible controls (ARIA labels, keyboard navigation)
 - Frosted-glass UI design language (see [STYLE_GUIDE.md](STYLE_GUIDE.md))
+
+### Desktop App (Tauri)
+
+The desktop app includes everything above, plus:
+
+- **Offline dataset downloads** — save any dataset (video or image) for use without an internet connection, with a download manager to view and manage cached data
+- **Local tile cache** — map tiles are cached to disk for faster rendering; low-zoom tiles are preloaded on startup
+- **Local LLM support** — connect Orbit to Ollama, LM Studio, or any OpenAI-compatible server on your local network
+- **Secure API key storage** — keys stored in the OS keychain (Windows Credential Manager / macOS Keychain) instead of localStorage
+- **Auto-updates** — the app checks for new versions on launch and prompts to update
 
 ## 🏗️ How It Works
 
@@ -83,55 +93,81 @@ pnpm dev
 # The app will open at http://localhost:5173
 ```
 
+### Option 3: Desktop App Development
+
+Requires everything from Option 2, plus [Rust](https://rustup.rs/).
+
+```bash
+# Install Rust (if not already installed)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Run the desktop app in dev mode (hot reload)
+npm run dev:desktop
+
+# Build for release
+npm run build:desktop
+```
+
+See [docs/DESKTOP_APP_PLAN.md](docs/DESKTOP_APP_PLAN.md) for the full desktop architecture and build details.
+
 ### Build for Production
 
 ```bash
+# Web
 npm run build
 npm run preview
+
+# Desktop (requires Rust)
+npm run build:desktop
 ```
 
 ## 📁 Project Structure
 
 ```
 interactive-sphere/
-├── src/
-│   ├── index.html               # Single-page app shell
-│   ├── main.ts                  # App entry point, dataset loading orchestration
-│   ├── types/
-│   │   └── index.ts             # TypeScript interfaces and type definitions
+├── src/                         # Web app (shared by web + desktop)
+│   ├── index.html               #   Single-page app shell
+│   ├── main.ts                  #   App entry point, dataset loading orchestration
 │   ├── services/
-│   │   ├── mapRenderer.ts       # MapLibre GL JS globe, navigation, markers, terrain
-│   │   ├── earthTileLayer.ts    # Day/night blend, clouds, specular, sun, skybox
-│   │   ├── datasetLoader.ts     # Dataset loading and texture application
-│   │   ├── dataService.ts       # SOS metadata fetching & cross-reference caching
-│   │   ├── hlsService.ts        # HLS.js video streaming with adaptive bitrate
-│   │   ├── docentService.ts     # Orbit orchestrator — hybrid LLM + local engine
-│   │   ├── docentContext.ts     # LLM system prompt, history compression
-│   │   ├── docentEngine.ts      # Local keyword-based fallback engine
-│   │   └── llmProvider.ts       # OpenAI-compatible SSE streaming client
+│   │   ├── mapRenderer.ts       #   MapLibre GL JS globe, navigation, markers, terrain
+│   │   ├── earthTileLayer.ts    #   Day/night blend, clouds, specular, sun, skybox
+│   │   ├── datasetLoader.ts     #   Dataset loading (network + offline cache)
+│   │   ├── dataService.ts       #   SOS metadata fetching & cross-reference caching
+│   │   ├── hlsService.ts        #   HLS.js video streaming with adaptive bitrate
+│   │   ├── downloadService.ts   #   Offline dataset download manager (desktop only)
+│   │   ├── docentService.ts     #   Orbit orchestrator — hybrid LLM + local engine
+│   │   ├── docentContext.ts     #   LLM system prompt, history compression
+│   │   ├── docentEngine.ts      #   Local keyword-based fallback engine
+│   │   └── llmProvider.ts       #   OpenAI-compatible SSE streaming client
 │   ├── ui/
-│   │   ├── chatUI.ts            # Orbit chat panel — rendering, settings, events
-│   │   ├── browseUI.ts          # Dataset browser, search, category filtering
-│   │   ├── mapControlsUI.ts     # Map controls — labels, boundaries, terrain toggles
-│   │   └── playbackController.ts # Video playback transport + portrait positioning
+│   │   ├── chatUI.ts            #   Orbit chat panel — rendering, settings, events
+│   │   ├── browseUI.ts          #   Dataset browser, search, category filtering
+│   │   ├── downloadUI.ts        #   Download manager panel (desktop only)
+│   │   ├── mapControlsUI.ts     #   Map controls — labels, boundaries, terrain toggles
+│   │   └── playbackController.ts #  Video playback transport + portrait positioning
+│   ├── types/
+│   │   └── index.ts             #   TypeScript interfaces and type definitions
 │   ├── data/
-│   │   └── regions.ts           # Region name → bounding box resolution
+│   │   └── regions.ts           #   Region name → bounding box resolution
 │   └── utils/
-│       ├── time.ts              # ISO 8601 parsing, date formatting
-│       └── fetchProgress.ts     # Fetch with byte-level progress reporting
-├── public/
-│   └── assets/
-│       ├── Earth_Specular_2K.jpg        # Specular map for ocean reflections
-│       ├── sos_dataset_metadata.json    # Enriched metadata (520+ datasets)
-│       └── skybox/                      # Milky Way cube map (6 faces)
-├── .devcontainer/          # Docker dev container config
-├── vite.config.ts          # Vite configuration
-├── vitest.config.ts        # Test configuration
-├── tsconfig.json           # TypeScript configuration
-├── package.json            # Dependencies and scripts
-├── Dockerfile              # Container image definition
-├── docker-compose.yml      # Container orchestration
-└── README.md               # This file
+│       ├── time.ts              #   ISO 8601 parsing, date formatting
+│       └── fetchProgress.ts     #   Fetch with byte-level progress reporting
+├── src-tauri/                   # Desktop app (Tauri v2)
+│   ├── tauri.conf.json          #   Window config, app metadata, updater, security
+│   ├── capabilities/            #   Permission policies (network, filesystem)
+│   ├── Cargo.toml               #   Rust dependencies
+│   └── src/
+│       ├── main.rs              #   Entry point — plugin registration, state setup
+│       ├── tile_cache.rs        #   SHA-256 flat-file tile cache (GIBS tiles)
+│       ├── keychain.rs          #   OS keychain for API key storage
+│       ├── download_manager.rs  #   Dataset download with progress + cancellation
+│       └── download_commands.rs #   Tauri commands for download operations
+├── public/assets/               # Static assets (specular map, metadata, skybox)
+├── functions/                   # Cloudflare Functions (web deploy only)
+├── .github/workflows/           # CI/CD — web deploy, desktop build, release
+├── docs/                        # Architecture docs and plans
+├── vite.config.ts               # Shared Vite configuration
+└── package.json                 # Dependencies and scripts
 ```
 
 ## 🎮 Usage
@@ -175,7 +211,9 @@ The LLM embeds `<<LOAD:DATASET_ID>>` markers inline with its response text. `doc
 
 Any OpenAI-compatible endpoint works: OpenAI, Ollama, LM Studio, Cloudflare AI Gateway, llama.cpp, vLLM. Configure in the Orbit settings panel (gear icon). Settings are persisted in `localStorage` under `sos-docent-config`.
 
-> **Local dev**: The Cloudflare `/api` proxy is unavailable on localhost. Set a direct API URL in Orbit settings, or disable LLM to use the local keyword engine only.
+> **Desktop app**: API keys are stored in the OS keychain (Windows Credential Manager / macOS Keychain) instead of localStorage. The Tauri HTTP plugin bypasses webview CORS, so you can connect directly to local LLM servers on your network.
+
+> **Local dev (web)**: The Cloudflare `/api` proxy is unavailable on localhost. Set a direct API URL in Orbit settings, or disable LLM to use the local keyword engine only.
 
 | Setting | Default | Notes |
 |---|---|---|
@@ -223,30 +261,30 @@ window.app.appState.currentDataset
 
 ## 🎯 What's Next
 
-See **[ROADMAP.md](ROADMAP.md)** for the full prioritized roadmap. Key remaining items:
+See **[ROADMAP.md](ROADMAP.md)** for the web app roadmap and **[docs/DESKTOP_APP_PLAN.md](docs/DESKTOP_APP_PLAN.md)** for the desktop roadmap.
 
-### Reach More People
+### Desktop (Phase 5 — ongoing)
+- Kiosk mode for museum/exhibit deployments
+- Local LLM via Ollama sidecar (fully offline Orbit)
+- Multi-monitor exhibit mode
+- Offline video pre-loading for curated collections
+- Deep linking protocol (`sos://dataset/INTERNAL_SOS_768`)
+
+### Web
 - Screen reader support (beyond current ARIA labels)
-
-### Keep Them Engaged
-- Persistent error messages (stay visible until dismissed)
-
-### Code Health
-- Log level control for production builds
-- Debounce the window resize handler
-
-### Longer Term
-- Offline and low-connectivity support for classrooms
 - Embeddable iframe mode for educators
 
 ## 📚 Key Files to Review
 
-- **[ROADMAP.md](ROADMAP.md)** - Prioritized roadmap
+- **[ROADMAP.md](ROADMAP.md)** - Prioritized web app roadmap
+- **[docs/DESKTOP_APP_PLAN.md](docs/DESKTOP_APP_PLAN.md)** - Desktop app architecture and phases
 - **[STYLE_GUIDE.md](STYLE_GUIDE.md)** - UI design language (colors, surfaces, components)
+- **[CLAUDE.md](CLAUDE.md)** - Codebase instructions for AI-assisted development
 - **[MISSION.md](MISSION.md)** - Project mission
 - **src/types/index.ts** - TypeScript type definitions
 - **src/services/dataService.ts** - Dataset fetching and cross-reference caching
 - **src/services/mapRenderer.ts** - MapLibre globe renderer
+- **src-tauri/tauri.conf.json** - Desktop app configuration
 
 ## 🐛 Reporting Issues
 
