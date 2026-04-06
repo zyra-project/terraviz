@@ -6,11 +6,12 @@
 
 import {
   isDownloadAvailable, listDownloads, deleteDownload, getDownloadsSize,
-  formatBytes, onDownloadProgress, onDownloadComplete, onDownloadError,
-  type DownloadedDataset, type DownloadProgress,
+  getDownloadPath, formatBytes, onDownloadProgress, onDownloadComplete,
+  onDownloadError, type DownloadedDataset, type DownloadProgress,
 } from '../services/downloadService'
 import { escapeHtml, escapeAttr } from './browseUI'
 import { logger } from '../utils/logger'
+import { convertFileSrc } from '@tauri-apps/api/core'
 
 let panelOpen = false
 let unsubProgress: (() => void) | null = null
@@ -116,6 +117,17 @@ async function renderPanel(): Promise<void> {
   }
 
   panel.innerHTML = html
+
+  // Resolve thumbnail paths and set src
+  panel.querySelectorAll<HTMLImageElement>('.dl-mgr-thumb[data-dataset-id]').forEach(async (img) => {
+    const datasetId = img.dataset.datasetId
+    const file = img.dataset.file
+    if (!datasetId || !file) return
+    const path = await getDownloadPath(datasetId, file)
+    if (path) {
+      img.src = convertFileSrc(path)
+    }
+  })
 
   // Wire delete buttons
   panel.querySelectorAll<HTMLButtonElement>('.dl-mgr-delete').forEach(btn => {
