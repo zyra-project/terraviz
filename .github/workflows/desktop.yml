@@ -98,7 +98,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tauriScript: npx tauri
-          args: --bundles none
+          args: --no-bundle
 
       - name: Upload artifacts
         if: github.event_name != 'pull_request'
