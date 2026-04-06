@@ -39,7 +39,7 @@
     ],
     "windows": {
       "wix": {
-        "upgradeCode": "org.zyra-project.interactive-sphere"
+        "upgradeCode": "b5bd2ca8-2976-e36b-ff2b-ae083c8a130a"
       }
     }
   }
