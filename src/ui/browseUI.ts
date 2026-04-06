@@ -10,6 +10,7 @@ import {
   isDownloadAvailable, downloadDataset, getDownload, getDownloadSize,
   isDownloading, formatBytes, cancelDownload,
 } from '../services/downloadService'
+import { closeDownloadPanel } from './downloadUI'
 
 // --- Browse UI constants ---
 const CARD_DESCRIPTION_MAX_LENGTH = 120
@@ -47,6 +48,7 @@ export function showBrowseUI(datasets: Dataset[], callbacks: BrowseCallbacks): v
   const overlay = document.getElementById('browse-overlay')
   if (!overlay) return
   overlay.classList.remove('hidden')
+  closeDownloadPanel()
 
   const visible = datasets
     .filter(d => !d.isHidden)

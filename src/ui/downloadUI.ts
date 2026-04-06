@@ -30,9 +30,22 @@ export async function initDownloadUI(): Promise<void> {
     btn.title = 'Download Manager'
     btn.setAttribute('aria-label', 'Download manager')
     btn.innerHTML = '&#8615;'
-    btn.addEventListener('click', togglePanel)
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation()
+      togglePanel()
+    })
     mapControls.appendChild(btn)
   }
+
+  // Close panel when clicking outside it
+  document.addEventListener('click', (e) => {
+    if (!panelOpen) return
+    const panel = document.getElementById('download-manager')
+    const btn = document.getElementById('download-mgr-btn')
+    const target = e.target as HTMLElement
+    if (panel?.contains(target) || btn?.contains(target)) return
+    closeDownloadPanel()
+  })
 
   // Subscribe to events
   unsubProgress = await onDownloadProgress(handleProgress)
