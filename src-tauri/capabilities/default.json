@@ -10,6 +10,11 @@
     "core:window:allow-set-size",
     "core:window:allow-set-position",
     "core:window:allow-available-monitors",
-    "core:window:allow-current-monitor"
+    "core:window:allow-current-monitor",
+    "http:default",
+    "http:allow-fetch",
+    "http:allow-fetch-cancel",
+    "http:allow-fetch-read-body",
+    "http:allow-fetch-send"
   ]
 }

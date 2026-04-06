@@ -10,6 +10,22 @@
 import type { DocentConfig } from '../types'
 import { logger } from '../utils/logger'
 
+// On Tauri, use the HTTP plugin's fetch to bypass webview CORS restrictions.
+// Local LLM servers (Ollama, LM Studio, etc.) don't set CORS headers for
+// the tauri.localhost origin, so requests from the webview's native fetch fail.
+const IS_TAURI = !!(window as any).__TAURI__
+const tauriFetchPromise = IS_TAURI
+  ? import('@tauri-apps/plugin-http').then(m => m.fetch)
+  : null
+let _tauriFetch: typeof globalThis.fetch | null = null
+tauriFetchPromise?.then(f => { _tauriFetch = f })
+
+/** Use Tauri's CORS-free fetch when available, otherwise native fetch. */
+function corsFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  if (_tauriFetch) return _tauriFetch(input, init)
+  return fetch(input, init)
+}
+
 // --- Types ---
 
 /** A text-only content part. */
@@ -90,7 +106,7 @@ export async function* streamChat(
 
   let response: Response
   try {
-    response = await fetch(url, {
+    response = await corsFetch(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
@@ -269,7 +285,7 @@ export async function checkAvailability(config: DocentConfig): Promise<Availabil
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), 5000)
   try {
-    const res = await fetch(url, { headers, signal: controller.signal })
+    const res = await corsFetch(url, { headers, signal: controller.signal })
     if (!res.ok) {
       return { ok: false, reason: `Server returned ${res.status}` }
     }
@@ -313,7 +329,7 @@ export async function fetchModels(config: DocentConfig): Promise<string[]> {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), 5000)
   try {
-    const res = await fetch(url, { headers, signal: controller.signal })
+    const res = await corsFetch(url, { headers, signal: controller.signal })
     if (!res.ok) return []
     const body = await res.json() as { data?: { id?: string }[] }
     const models = body.data

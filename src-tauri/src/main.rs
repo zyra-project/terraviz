@@ -24,6 +24,7 @@ async fn get_tile(
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_http::init())
         .setup(|app| {
             let app_data = app.path().app_data_dir()
                 .expect("failed to resolve app data directory");
