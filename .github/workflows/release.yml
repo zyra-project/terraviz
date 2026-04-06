@@ -110,3 +110,4 @@ jobs:
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: true
+          updaterJsonPreferNsis: true
