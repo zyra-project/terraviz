@@ -455,6 +455,8 @@ function handleSettingsSave(): void {
 
 async function handleSettingsTest(): Promise<void> {
   const config = readSettingsForm()
+  // Apply debug level before testing so errors appear in console
+  setLogLevel(config.debugPrompt ? 'debug' : null)
   const status = document.getElementById('chat-settings-status')
   const testBtn = document.getElementById('chat-settings-test') as HTMLButtonElement | null
   if (status) {

@@ -28,8 +28,13 @@ const tauriFetchReady: Promise<typeof globalThis.fetch | null> | null = IS_TAURI
 async function corsFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   if (tauriFetchReady) {
     const f = await tauriFetchReady
-    if (f) return f(input, init)
+    if (f) {
+      logger.debug('[LLM] Using Tauri HTTP plugin for', typeof input === 'string' ? input : (input as Request).url)
+      return f(input, init)
+    }
+    logger.warn('[LLM] Tauri HTTP plugin resolved to null, falling back to native fetch')
   }
+  logger.debug('[LLM] Using native fetch for', typeof input === 'string' ? input : (input as Request).url)
   return fetch(input, init)
 }
 
@@ -327,8 +332,10 @@ export async function checkAvailability(config: DocentConfig): Promise<Availabil
     }
 
     return { ok: true }
-  } catch {
-    return { ok: false, reason: 'Could not reach the server' }
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err)
+    logger.error('[LLM] Connection test failed:', detail)
+    return { ok: false, reason: `Could not reach the server: ${detail}` }
   } finally {
     clearTimeout(timeoutId)
   }
