@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use tauri::Emitter;
 use tokio::sync::{Mutex, RwLock};
 
 /// Metadata stored alongside each downloaded dataset.

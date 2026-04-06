@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use serde::Deserialize;
-use tauri::Manager;
+use tauri::Emitter;
 
 use crate::download_manager::{DownloadManager, DownloadedDataset};
 
