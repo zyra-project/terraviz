@@ -12,6 +12,18 @@ const IS_TAURI = !!(window as any).__TAURI__
 
 const VIDEO_PROXY_BASE = 'https://video-proxy.zyra-project.org/video'
 
+// Use Tauri's CORS-free fetch for HEAD probes when available.
+let tauriFetch: typeof globalThis.fetch | null = null
+if (IS_TAURI) {
+  import('@tauri-apps/plugin-http').then(m => {
+    tauriFetch = m.fetch as typeof globalThis.fetch
+  }).catch(() => {})
+}
+function corsFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  if (tauriFetch) return tauriFetch(input, init)
+  return fetch(input, init)
+}
+
 // --- Types ---
 
 export interface DownloadedDataset {
@@ -131,7 +143,7 @@ async function resolveImageAssets(dataset: Dataset): Promise<{ assets: AssetInpu
 
   for (const candidate of candidates) {
     try {
-      const res = await fetch(candidate.url, { method: 'HEAD' })
+      const res = await corsFetch(candidate.url, { method: 'HEAD' })
       if (res.ok) {
         return { assets: [candidate], primaryFile: candidate.filename }
       }
