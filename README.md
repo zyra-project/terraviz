@@ -1,6 +1,9 @@
 # Interactive Sphere — Proof of Concept
 
 [![Live Demo](https://img.shields.io/badge/Live_Demo-sphere.zyra--project.org-4da6ff)](https://sphere.zyra-project.org)
+[![Windows](https://img.shields.io/badge/Download-Windows-0078D4?logo=windows&logoColor=white)](https://github.com/zyra-project/interactive-sphere/releases/latest/download/Interactive-Sphere-latest-x64.msi)
+[![macOS](https://img.shields.io/badge/Download-macOS-000000?logo=apple&logoColor=white)](https://github.com/zyra-project/interactive-sphere/releases/latest/download/Interactive-Sphere-latest-aarch64.dmg)
+[![Linux](https://img.shields.io/badge/Download-Linux-FCC624?logo=linux&logoColor=black)](https://github.com/zyra-project/interactive-sphere/releases/latest/download/Interactive-Sphere-latest-x64.AppImage)
 
 A WebGL-based globe that streams environmental data from the [Science On a Sphere](https://sos.noaa.gov/) project.
 

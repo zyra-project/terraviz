@@ -146,3 +146,42 @@ jobs:
           prerelease: false
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
+
+      # Upload a version-less alias so badge download links stay stable.
+      - name: Upload stable download alias
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ needs.prepare.outputs.tag || github.ref_name }}"
+          # Find the MSI and upload as a stable name
+          MSI=$(find src-tauri/target/release/bundle/msi -name '*.msi' | head -1)
+          if [ -n "$MSI" ]; then
+            cp "$MSI" "Interactive-Sphere-latest-x64.msi"
+            gh release upload "$TAG" "Interactive-Sphere-latest-x64.msi" --clobber
+          fi
+
+      - name: Upload stable download alias
+        if: runner.os == 'macOS'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ needs.prepare.outputs.tag || github.ref_name }}"
+          DMG=$(find src-tauri/target/release/bundle/dmg -name '*.dmg' | head -1)
+          if [ -n "$DMG" ]; then
+            cp "$DMG" "Interactive-Sphere-latest-aarch64.dmg"
+            gh release upload "$TAG" "Interactive-Sphere-latest-aarch64.dmg" --clobber
+          fi
+
+      - name: Upload stable download alias
+        if: runner.os == 'Linux'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ needs.prepare.outputs.tag || github.ref_name }}"
+          APPIMAGE=$(find src-tauri/target/release/bundle/appimage -name '*.AppImage' | head -1)
+          if [ -n "$APPIMAGE" ]; then
+            cp "$APPIMAGE" "Interactive-Sphere-latest-x64.AppImage"
+            gh release upload "$TAG" "Interactive-Sphere-latest-x64.AppImage" --clobber
+          fi
