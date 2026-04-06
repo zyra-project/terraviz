@@ -1,6 +1,7 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod keychain;
 mod tile_cache;
 
 use std::sync::Arc;
@@ -35,7 +36,11 @@ fn main() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_tile])
+        .invoke_handler(tauri::generate_handler![
+            get_tile,
+            keychain::get_api_key,
+            keychain::set_api_key,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

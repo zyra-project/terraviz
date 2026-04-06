@@ -238,10 +238,14 @@ export function getLegendCache(): Readonly<LegendCache> {
   return legendCache
 }
 
+const IS_TAURI = typeof window !== 'undefined' && !!(window as any).__TAURI__
+const tauriInvoke: ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null =
+  IS_TAURI ? (window as any).__TAURI_INTERNALS__?.invoke ?? null : null
+
 const DEFAULT_CONFIG: DocentConfig = {
-  apiUrl: '/api',
+  apiUrl: IS_TAURI ? '' : '/api',
   apiKey: '',
-  model: 'llama-3.1-70b',
+  model: IS_TAURI ? '' : 'llama-3.1-70b',
   enabled: true,
   readingLevel: 'general',
   visionEnabled: false,
@@ -258,6 +262,7 @@ export type DocentStreamChunk =
 
 /**
  * Load docent config from localStorage, merging with defaults.
+ * On Tauri the API key field will be empty — use loadConfigWithKey() when you need it.
  */
 export function loadConfig(): DocentConfig {
   try {
@@ -273,11 +278,37 @@ export function loadConfig(): DocentConfig {
 }
 
 /**
+ * Load config with the API key resolved from OS keychain on Tauri.
+ * Falls back to loadConfig() on web.
+ */
+export async function loadConfigWithKey(): Promise<DocentConfig> {
+  const config = loadConfig()
+  if (tauriInvoke) {
+    try {
+      config.apiKey = (await tauriInvoke('get_api_key')) as string
+    } catch {
+      logger.warn('[Docent] Failed to read API key from keychain')
+    }
+  }
+  return config
+}
+
+/**
  * Save docent config to localStorage.
+ * On Tauri, the API key is stored in the OS keychain instead of localStorage.
  */
 export function saveConfig(config: DocentConfig): void {
   try {
-    localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config))
+    if (tauriInvoke) {
+      // Store API key in OS keychain, strip from localStorage
+      tauriInvoke('set_api_key', { key: config.apiKey }).catch(() => {
+        logger.warn('[Docent] Failed to save API key to keychain')
+      })
+      const stored = { ...config, apiKey: '' }
+      localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(stored))
+    } else {
+      localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config))
+    }
   } catch {
     // localStorage full or unavailable
   }
@@ -289,6 +320,9 @@ export function saveConfig(config: DocentConfig): void {
 export function getDefaultConfig(): DocentConfig {
   return { ...DEFAULT_CONFIG }
 }
+
+/** Whether the app is running in Tauri desktop mode. */
+export { IS_TAURI }
 
 /**
  * Test if the configured LLM is reachable and the model is available.
@@ -559,7 +593,7 @@ export async function* processMessage(
   viewContext?: string,
   mapViewContext?: MapViewContext | null,
 ): AsyncGenerator<DocentStreamChunk> {
-  const cfg = config ?? loadConfig()
+  const cfg = config ?? await loadConfigWithKey()
 
   // --- Phase 3/4: Run local engine instantly for immediate results ---
   const intent = parseIntent(input)
