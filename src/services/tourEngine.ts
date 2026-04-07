@@ -125,15 +125,18 @@ export class TourEngine {
     this.callbacks.onTourEnd()
   }
 
+  /** Read current state without TS narrowing (state can change during awaits). */
+  private isStopped(): boolean { return this._state === 'stopped' }
+
   // ── Main execution loop ────────────────────────────────────────────
 
   private async runLoop(): Promise<void> {
     while (this.index < this.tasks.length) {
-      if (this._state === 'stopped') return
+      if (this.isStopped()) return
       if (this._state === 'paused') {
         // Wait for resume
         await new Promise<void>(resolve => { this.resumeResolver = resolve })
-        if (this._state === 'stopped') return
+        if (this.isStopped()) return
         continue // re-check index (prev/next may have changed it)
       }
 
@@ -144,11 +147,11 @@ export class TourEngine {
       try {
         await this.executeTask(task)
       } catch (err) {
-        if (this._state === 'stopped') return
+        if (this.isStopped()) return
         logger.warn('[Tour] Task failed, skipping:', err)
       }
 
-      if (this._state === 'stopped') return
+      if (this.isStopped()) return
       this.index++
     }
 
