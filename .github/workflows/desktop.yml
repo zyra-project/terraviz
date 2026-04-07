@@ -81,6 +81,11 @@ jobs:
 
       - run: npm ci
 
+      - name: Generate macOS .icns icon
+        if: runner.os == 'macOS'
+        run: |
+          sips -s format icns src-tauri/icons/icon-1024.png --out src-tauri/icons/icon.icns
+
       - name: Build desktop app (signed)
         if: github.event_name != 'pull_request'
         uses: tauri-apps/tauri-action@v0

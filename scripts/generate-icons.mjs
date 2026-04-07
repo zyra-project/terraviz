@@ -128,10 +128,26 @@ async function generateIco(outPath) {
 }
 await generateIco(join(tauriIconsDir, 'icon.ico'));
 
-// Note: .icns generation requires macOS tools or a dedicated library.
-// For now, generate a 512x512 PNG that can be converted to .icns on macOS.
-// On CI (macOS runner), use: sips -s format icns icon-1024.png --out icon.icns
+// Generate ICNS (minimal format with ic08 = 256x256 PNG entry)
+async function generateIcns(outPath) {
+  const svg = Buffer.from(svgIcon(256));
+  const png256 = await sharp(svg).png().toBuffer();
+
+  const entryDataLen = 8 + png256.length;
+  const fileLen = 8 + entryDataLen;
+  const header = Buffer.alloc(8);
+  header.write('icns', 0);
+  header.writeUInt32BE(fileLen, 4);
+  const entryHeader = Buffer.alloc(8);
+  entryHeader.write('ic08', 0);
+  entryHeader.writeUInt32BE(entryDataLen, 4);
+
+  writeFileSync(outPath, Buffer.concat([header, entryHeader, png256]));
+  console.log(`  src-tauri/icons/icon.icns`);
+}
+await generateIcns(join(tauriIconsDir, 'icon.icns'));
+
+// Also generate a 1024px source PNG (useful for higher-res .icns via `sips` on macOS CI)
 await generatePng(1024, join(tauriIconsDir, 'icon-1024.png'));
-console.log('  (use `sips -s format icns icon-1024.png --out icon.icns` on macOS to regenerate .icns)');
 
 console.log('Done!');
