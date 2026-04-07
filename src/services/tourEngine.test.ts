@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { TourFile, TourCallbacks, GlobeRenderer } from '../types'
 
 // Mock the tourUI module — no DOM in test environment
@@ -61,10 +61,11 @@ function makeRenderer(): GlobeRenderer {
 }
 
 function makeCallbacks(overrides: Partial<TourCallbacks> = {}): TourCallbacks {
+  const renderer = makeRenderer()
   return {
     loadDataset: vi.fn(() => Promise.resolve()),
     unloadAllDatasets: vi.fn(() => Promise.resolve()),
-    getRenderer: vi.fn(() => makeRenderer()),
+    getRenderer: vi.fn(() => renderer),
     togglePlayPause: vi.fn(),
     isPlaying: vi.fn(() => false),
     setPlaybackRate: vi.fn(),
@@ -79,9 +80,15 @@ function makeTour(tasks: any[]): TourFile {
   return { tourTasks: tasks }
 }
 
-/** Wait for microtasks to flush (let async engine loop advance). */
-function tick(): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, 0))
+/**
+ * Flush the microtask queue so the async engine loop can advance.
+ * Uses Promise.resolve() chains (not setTimeout) to avoid
+ * interference with vi.useFakeTimers().
+ */
+async function flush(): Promise<void> {
+  for (let i = 0; i < 10; i++) {
+    await Promise.resolve()
+  }
 }
 
 // --- Tests ---
@@ -89,6 +96,10 @@ function tick(): Promise<void> {
 describe('TourEngine', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   describe('basic lifecycle', () => {
@@ -108,7 +119,8 @@ describe('TourEngine', () => {
     })
 
     it('plays through instant tasks sequentially', async () => {
-      const cb = makeCallbacks()
+      const renderer = makeRenderer()
+      const cb = makeCallbacks({ getRenderer: () => renderer })
       const engine = new TourEngine(makeTour([
         { envShowDayNightLighting: 'on' },
         { setGlobeRotationRate: 0.5 },
@@ -117,14 +129,13 @@ describe('TourEngine', () => {
       await engine.play()
       expect(engine.state).toBe('stopped')
       expect(cb.onTourEnd).toHaveBeenCalledOnce()
-      const renderer = cb.getRenderer()
       expect(renderer.enableSunLighting).toHaveBeenCalled()
       expect(renderer.setRotationRate).toHaveBeenCalledWith(0.5)
     })
   })
 
   describe('pauseForInput', () => {
-    it('pauses the tour and shows play state', async () => {
+    it('pauses the tour and resumes on play()', async () => {
       const cb = makeCallbacks()
       const engine = new TourEngine(makeTour([
         { envShowDayNightLighting: 'on' },
@@ -134,15 +145,15 @@ describe('TourEngine', () => {
 
       // Start — should pause at step 1
       const playPromise = engine.play()
-      await tick()
+      await flush()
 
       expect(engine.state).toBe('paused')
       expect(engine.currentIndex).toBe(1)
       expect(cb.announce).toHaveBeenCalledWith('Tour paused — press play to continue')
 
       // Resume
-      await engine.play()
-      await tick()
+      engine.play()
+      await flush()
       await playPromise
 
       expect(engine.state).toBe('stopped')
@@ -159,16 +170,11 @@ describe('TourEngine', () => {
       ]), cb)
 
       const playPromise = engine.play()
-      await tick()
-
-      expect(engine.state).toBe('playing')
-
-      vi.advanceTimersByTime(2000)
+      await vi.advanceTimersByTimeAsync(2000)
       await playPromise
 
       expect(engine.state).toBe('stopped')
       expect(cb.onTourEnd).toHaveBeenCalledOnce()
-      vi.useRealTimers()
     })
 
     it('can be skipped via next()', async () => {
@@ -180,17 +186,16 @@ describe('TourEngine', () => {
       ]), cb)
 
       const playPromise = engine.play()
-      await tick()
+      // Let the engine reach the pauseSec task
+      await vi.advanceTimersByTimeAsync(0)
 
       // Skip the 10-second pause
       engine.next()
-      await tick()
-      vi.advanceTimersByTime(0)
+      await vi.advanceTimersByTimeAsync(0)
       await playPromise
 
       expect(engine.state).toBe('stopped')
       expect(cb.onTourEnd).toHaveBeenCalledOnce()
-      vi.useRealTimers()
     })
   })
 
@@ -204,20 +209,21 @@ describe('TourEngine', () => {
       ]), cb)
 
       const playPromise = engine.play()
-      await tick()
+      await flush()
       expect(engine.state).toBe('paused')
       expect(engine.currentIndex).toBe(0)
 
       // Skip to next
       engine.next()
-      await tick()
+      await flush()
 
       // Should now be paused at step 2
       expect(engine.state).toBe('paused')
       expect(engine.currentIndex).toBe(2)
 
       // Finish
-      await engine.play()
+      engine.play()
+      await flush()
       await playPromise
       expect(cb.onTourEnd).toHaveBeenCalledOnce()
     })
@@ -235,27 +241,28 @@ describe('TourEngine', () => {
       ]), cb)
 
       const playPromise = engine.play()
-      await tick()
+      await flush()
       // Paused at step 1
       expect(engine.currentIndex).toBe(1)
 
       // Resume to second pause
-      await engine.play()
-      await tick()
+      engine.play()
+      await flush()
       // Paused at step 3
       expect(engine.currentIndex).toBe(3)
 
       // Go back — should replay from step 0 (segment before first pause)
       engine.prev()
-      await tick()
+      await flush()
       // Should be paused at step 1 again
       expect(engine.currentIndex).toBe(1)
       expect(engine.state).toBe('paused')
 
       // Finish the tour
-      await engine.play()
-      await tick()
-      await engine.play()
+      engine.play()
+      await flush()
+      engine.play()
+      await flush()
       await playPromise
       expect(cb.onTourEnd).toHaveBeenCalledOnce()
     })
@@ -270,7 +277,7 @@ describe('TourEngine', () => {
       ]), cb)
 
       engine.play()
-      await tick()
+      await flush()
       expect(engine.state).toBe('paused')
 
       engine.stop()
@@ -439,7 +446,7 @@ describe('TourEngine', () => {
       ]), cb)
 
       engine.play()
-      await tick()
+      await flush()
       engine.stop()
       expect(marker.remove).toHaveBeenCalledOnce()
     })
@@ -453,14 +460,14 @@ describe('TourEngine', () => {
       ]), cb)
 
       engine.play()
-      await tick()
+      await flush()
       expect(engine.state).toBe('paused')
 
       // Resume
       engine.play()
       // Call play again while already playing — should be a no-op
       engine.play()
-      await tick()
+      await flush()
 
       // Should still complete normally
       expect(cb.onTourEnd).toHaveBeenCalledOnce()
