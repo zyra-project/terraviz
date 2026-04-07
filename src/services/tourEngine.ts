@@ -266,16 +266,19 @@ export class TourEngine {
       case 'tiltRotateCamera':
         return this.execTiltRotateCamera(value as TiltRotateCameraTaskParams)
       case 'resetCameraZoomOut':
+      case 'resetCameraAndZoomOut':
         return this.execResetCameraZoomOut()
 
       // Flow
       case 'pauseForInput':
         return this.execPauseForInput()
       case 'pauseSeconds':
+      case 'pauseSec':
         return this.execPauseSeconds(value as number)
       case 'loopToBeginning':
         return this.execLoopToBeginning()
       case 'enableTourPlayer':
+      case 'tourPlayerWindow':
         return this.execEnableTourPlayer(value as 'on' | 'off')
       case 'question':
         return this.execQuestion(value as QuestionTaskParams)
@@ -295,6 +298,8 @@ export class TourEngine {
         return this.execClouds(value as 'on' | 'off')
       case 'envShowWorldBorder':
         return this.execWorldBorder(value as 'on' | 'off')
+      case 'worldBorder':
+        return this.execWorldBorderObj(value as { worldBorders: 'on' | 'off' })
       case 'envShowStars':
         // Stars aren't rendered in the web app — log and skip
         logger.info('[Tour] Stars toggle not supported in web player')
@@ -478,6 +483,10 @@ export class TourEngine {
     const renderer = this.callbacks.getRenderer()
     renderer.toggleBoundaries?.(state === 'on')
     renderer.toggleLabels?.(state === 'on')
+  }
+
+  private execWorldBorderObj(params: { worldBorders: 'on' | 'off' }): void {
+    this.execWorldBorder(params.worldBorders)
   }
 
   private execRotationRate(rate: number): void {

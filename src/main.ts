@@ -259,14 +259,23 @@ class InteractiveSphere {
     // Fetch and cache the legend image; generate a text description for non-vision mode.
     initLegendForDataset(dataset, loadConfig())
 
-    // Auto-start a tour if the dataset has one associated via runTourOnLoad
+    // Auto-start a tour if the dataset has one associated via runTourOnLoad.
+    // The value can be either a direct URL to a tour.json file or a dataset ID.
     if (dataset.runTourOnLoad && gen === this.loadGeneration) {
-      const tourDataset = dataService.getDatasetById(dataset.runTourOnLoad)
-      if (tourDataset && tourDataset.format === 'tour/json') {
-        logger.info('[App] Auto-starting tour from runTourOnLoad:', tourDataset.id)
-        await this.startTour(tourDataset.dataLink, gen)
+      const ref = dataset.runTourOnLoad
+      if (ref.startsWith('http://') || ref.startsWith('https://') || ref.endsWith('.json')) {
+        // Direct URL to a tour.json file
+        logger.info('[App] Auto-starting tour from runTourOnLoad URL:', ref)
+        await this.startTour(ref, gen)
       } else {
-        logger.warn('[App] runTourOnLoad references missing or non-tour dataset:', dataset.runTourOnLoad)
+        // Dataset ID reference
+        const tourDataset = dataService.getDatasetById(ref)
+        if (tourDataset && tourDataset.format === 'tour/json') {
+          logger.info('[App] Auto-starting tour from runTourOnLoad dataset:', tourDataset.id)
+          await this.startTour(tourDataset.dataLink, gen)
+        } else {
+          logger.warn('[App] runTourOnLoad references unknown dataset:', ref)
+        }
       }
     }
   }

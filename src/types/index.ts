@@ -287,10 +287,12 @@ export type TourTaskDef =
   | { flyTo: FlyToTaskParams }
   | { tiltRotateCamera: TiltRotateCameraTaskParams }
   | { resetCameraZoomOut: string }
+  | { resetCameraAndZoomOut: string }
   | { showRect: ShowRectTaskParams }
   | { hideRect: string }
   | { pauseForInput: string }
   | { pauseSeconds: number }
+  | { pauseSec: number }
   | { loadDataset: LoadDatasetTaskParams }
   | { unloadAllDatasets: string }
   | { datasetAnimation: DatasetAnimationTaskParams }
@@ -298,9 +300,11 @@ export type TourTaskDef =
   | { envShowClouds: 'on' | 'off' }
   | { envShowStars: 'on' | 'off' }
   | { envShowWorldBorder: 'on' | 'off' }
+  | { worldBorder: WorldBorderTaskParams }
   | { setGlobeRotationRate: number }
   | { loopToBeginning: string }
   | { enableTourPlayer: 'on' | 'off' }
+  | { tourPlayerWindow: 'on' | 'off' }
   | { question: QuestionTaskParams }
   | { playAudio: PlayAudioTaskParams }
   | { stopAudio: string }
@@ -356,6 +360,11 @@ export interface QuestionTaskParams {
   yPct?: number
   widthPct?: number
   heightPct?: number
+}
+
+export interface WorldBorderTaskParams {
+  worldBorders: 'on' | 'off'
+  worldBorderColor?: string
 }
 
 export interface TiltRotateCameraTaskParams {
