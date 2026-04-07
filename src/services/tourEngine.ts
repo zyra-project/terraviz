@@ -569,7 +569,10 @@ export class TourEngine {
   }
 
   private execShowPopupHtml(params: ShowPopupHtmlTaskParams): void {
-    showTourPopup(params)
+    const resolved = params.url
+      ? { ...params, url: this.callbacks.resolveMediaUrl(params.url) }
+      : params
+    showTourPopup(resolved)
   }
 
   // ── Placemark executors ────────────────────────────────────────────

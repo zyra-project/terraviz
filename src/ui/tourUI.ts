@@ -204,7 +204,7 @@ export function showTourImage(params: ShowImageTaskParams): void {
       margin-top: 0.5rem;
       font-size: ${params.fontSize ? params.fontSize + 'px' : '0.8rem'};
       color: ${params.fontColor || '#ddd'};
-      text-align: ${params.captionPos || 'center'};
+      text-align: ${{ left: 'left', right: 'right', top: 'center', bottom: 'center', center: 'center' }[params.captionPos || 'center'] ?? 'center'};
     `
     cap.innerHTML = parseCaptionMarkup(params.caption)
     wrapper.appendChild(cap)
@@ -290,7 +290,7 @@ export function showTourPopup(params: ShowPopupHtmlTaskParams): void {
     const iframe = document.createElement('iframe')
     iframe.src = params.url
     iframe.style.cssText = 'width:100%;height:100%;border:none;border-radius:10px;'
-    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin')
+    iframe.setAttribute('sandbox', 'allow-scripts')
     wrapper.appendChild(iframe)
   } else if (params.html) {
     const content = document.createElement('div')
@@ -402,6 +402,9 @@ let spaceHandler: ((e: KeyboardEvent) => void) | null = null
 
 /** Show the tour controls bar and bind it to the given engine. */
 export function showTourControls(engine: TourEngine): void {
+  // Remove any existing listeners first to prevent duplicates
+  hideTourControls()
+
   boundEngine = engine
 
   controlsEl = document.getElementById('tour-controls')
