@@ -292,6 +292,54 @@ class InteractiveSphere {
     )
   }
 
+  /**
+   * Load a dataset on behalf of the tour engine.
+   * Unlike loadDataset(), this does NOT stop the active tour and does NOT
+   * trigger runTourOnLoad — the tour engine is managing the flow.
+   */
+  private async loadDatasetForTour(datasetId: string): Promise<void> {
+    logger.debug('[App] loadDatasetForTour:', datasetId)
+    stopPlaybackLoop(this.playback)
+    this.appState.isPlaying = false
+    resetPlaybackState(this.playback)
+
+    // Tear down previous video/HLS
+    if (this.videoTexture) { this.videoTexture.dispose(); this.videoTexture = null }
+    if (this.hlsService) { this.hlsService.destroy(); this.hlsService = null }
+
+    this.renderer?.removeCloudOverlay()
+    this.renderer?.removeNightLights()
+    this.renderer?.disableSunLighting()
+
+    const dataset = dataService.getDatasetById(datasetId)
+    if (!dataset) {
+      logger.warn('[App] Tour loadDataset: dataset not found:', datasetId)
+      return
+    }
+
+    this.appState.currentDataset = dataset
+    displayDatasetInfo(dataset, this.appState.datasets, (id) => this.loadDataset(id))
+
+    if (!this.renderer) return
+
+    const loaderCallbacks = {
+      showPlaybackControls: (show: boolean) => this.showPlaybackControls(show),
+      showTimeLabel: (show: boolean) => this.showTimeLabel(show),
+    }
+
+    if (dataService.isImageDataset(dataset)) {
+      await loadImageDataset(dataset, this.renderer, this.appState, this.isMobile, loaderCallbacks)
+    } else if (dataService.isVideoDataset(dataset)) {
+      const result = await loadVideoDataset(
+        dataset, this.renderer, this.appState, this.isMobile, this.playback, loaderCallbacks
+      )
+      this.hlsService = result.hlsService
+      this.videoTexture = result.videoTexture
+      this.doStartPlaybackLoop()
+    }
+    // No runTourOnLoad check — the tour engine is in control
+  }
+
   /** Fetch a tour JSON file and start the tour engine. */
   private async startTour(dataLink: string, gen: number): Promise<void> {
     // Stop any previous tour
@@ -308,7 +356,7 @@ class InteractiveSphere {
 
     this.tourEngine = new TourEngine(tourFile, {
       loadDataset: async (id) => {
-        await this.loadDataset(id)
+        await this.loadDatasetForTour(id)
       },
       unloadAllDatasets: async () => {
         await this.goHome()
