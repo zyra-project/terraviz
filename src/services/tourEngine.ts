@@ -49,6 +49,10 @@ export class TourEngine {
   private resumeResolver: (() => void) | null = null
   private pauseTimer: ReturnType<typeof setTimeout> | null = null
 
+  // When next/prev changes the index during a task, this flag tells the
+  // loop to skip its normal index++ at the bottom of the iteration.
+  private indexOverridden = false
+
   // Abort handle — when the tour is stopped, pending awaits should bail out
   private abortController = new AbortController()
 
@@ -98,34 +102,47 @@ export class TourEngine {
 
   /** Advance to the next task (skipping any current pause). */
   next(): void {
-    if (this.index < this.tasks.length - 1) {
-      // If paused on a pauseForInput, resolve it to advance
-      if (this.resumeResolver) {
-        this.resumeResolver()
-        this.resumeResolver = null
-      }
-      if (this.pauseTimer) {
-        clearTimeout(this.pauseTimer)
-        this.pauseTimer = null
-      }
-      // If stopped, just bump the index — play() will pick it up
-      if (this._state === 'stopped') {
-        this.index++
-        updateTourProgress(this.index, this.tasks.length)
-      }
+    if (this.index >= this.tasks.length - 1) return
+
+    if (this.pauseTimer) {
+      clearTimeout(this.pauseTimer)
+      this.pauseTimer = null
+    }
+
+    this.index++
+    this.indexOverridden = true
+    updateTourProgress(this.index, this.tasks.length)
+
+    if (this.resumeResolver) {
+      this._state = 'playing'
+      updateTourPlayState(true)
+      this.resumeResolver()
+      this.resumeResolver = null
+    } else if (this._state === 'stopped') {
+      // Stopped — user can call play() to start from the new index
     }
   }
 
   /** Go back to the previous task. */
   prev(): void {
-    if (this.index > 0) {
-      this.index = Math.max(0, this.index - 1)
-      updateTourProgress(this.index, this.tasks.length)
-      // If paused on input, resolve so the loop can re-enter at the new index
-      if (this.resumeResolver) {
-        this.resumeResolver()
-        this.resumeResolver = null
-      }
+    if (this.index <= 0) return
+
+    if (this.pauseTimer) {
+      clearTimeout(this.pauseTimer)
+      this.pauseTimer = null
+    }
+
+    this.index--
+    this.indexOverridden = true
+    updateTourProgress(this.index, this.tasks.length)
+
+    if (this.resumeResolver) {
+      this._state = 'playing'
+      updateTourPlayState(true)
+      this.resumeResolver()
+      this.resumeResolver = null
+    } else if (this._state === 'stopped') {
+      // Stopped — user can call play() to start from the new index
     }
   }
 
@@ -165,12 +182,18 @@ export class TourEngine {
     while (this.index < this.tasks.length) {
       if (this.isStopped()) return
       if (this._state === 'paused') {
-        // Wait for resume
+        // Wait for resume (next/prev/play will resolve this)
         await new Promise<void>(resolve => { this.resumeResolver = resolve })
         if (this.isStopped()) return
-        continue // re-check index (prev/next may have changed it)
+        // next()/prev() already set the index — restart iteration
+        if (this.indexOverridden) {
+          this.indexOverridden = false
+          continue
+        }
+        continue
       }
 
+      this.indexOverridden = false
       const task = this.tasks[this.index]
       updateTourProgress(this.index, this.tasks.length)
       logger.debug(`[Tour] Step ${this.index + 1}/${this.tasks.length}:`, task)
@@ -183,7 +206,14 @@ export class TourEngine {
       }
 
       if (this.isStopped()) return
-      this.index++
+
+      // If next()/prev() changed the index during task execution
+      // (e.g. during pauseForInput), don't auto-advance.
+      if (this.indexOverridden) {
+        this.indexOverridden = false
+      } else {
+        this.index++
+      }
     }
 
     // Reached the end
