@@ -457,7 +457,7 @@ export class TourEngine {
       if (match) {
         const requestedFps = parseFloat(match[1])
         const defaultFps = 30
-        const rate = Math.max(0.1, Math.min(4, requestedFps / defaultFps))
+        const rate = Math.max(0.03, Math.min(4, requestedFps / defaultFps))
         this.callbacks.setPlaybackRate(rate)
       }
     }
