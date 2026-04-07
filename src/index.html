@@ -459,7 +459,8 @@
             border-radius: 8px;
             text-align: center;
             max-width: 400px;
-            z-index: 100;
+            z-index: 9000;
+            pointer-events: auto;
         }
 
         #error-dismiss {
@@ -469,9 +470,11 @@
             border: 1px solid rgba(255, 255, 255, 0.3);
             color: #fff;
             border-radius: 4px;
-            padding: 0.35rem 1rem;
+            padding: 0.5rem 1.5rem;
             cursor: pointer;
-            font-size: 0.8rem;
+            font-size: 0.9rem;
+            min-height: 44px;
+            min-width: 44px;
         }
 
         #error-dismiss:hover {
