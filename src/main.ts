@@ -260,8 +260,8 @@ class InteractiveSphere {
     initLegendForDataset(dataset, loadConfig())
 
     // Auto-start a tour if the dataset has one associated via runTourOnLoad.
-    // The value can be either a direct URL to a tour.json file or a dataset ID.
-    if (dataset.runTourOnLoad && gen === this.loadGeneration) {
+    // Skip if a tour is already running (the tour engine triggered this load).
+    if (dataset.runTourOnLoad && gen === this.loadGeneration && !this.tourEngine) {
       const ref = dataset.runTourOnLoad
       if (ref.startsWith('http://') || ref.startsWith('https://') || ref.endsWith('.json')) {
         // Direct URL to a tour.json file
