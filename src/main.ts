@@ -395,6 +395,8 @@ class InteractiveSphere {
 
     showTourControls(this.tourEngine)
     this.showPlaybackControls(false)
+    hideBrowseUI()
+    closeChat()
     void this.tourEngine.play()
   }
 
