@@ -100,7 +100,7 @@ export class TourEngine {
     updateTourPlayState(false)
   }
 
-  /** Advance to the next task (skipping any current pause). */
+  /** Advance to the next pause point (skipping intermediate steps). */
   next(): void {
     if (this.index >= this.tasks.length - 1) return
 
@@ -109,6 +109,8 @@ export class TourEngine {
       this.pauseTimer = null
     }
 
+    // Skip ahead to the step right after the current pause — the loop
+    // will execute steps sequentially until it hits the next pause.
     this.index++
     this.indexOverridden = true
     updateTourProgress(this.index, this.tasks.length)
@@ -123,7 +125,11 @@ export class TourEngine {
     }
   }
 
-  /** Go back to the previous task. */
+  /**
+   * Go back to the previous "segment" — find the pause point before
+   * the current one and replay from the segment start (the pause before
+   * that, or the beginning of the tour).
+   */
   prev(): void {
     if (this.index <= 0) return
 
@@ -132,7 +138,32 @@ export class TourEngine {
       this.pauseTimer = null
     }
 
-    this.index--
+    // Find the previous pause point before our current position
+    let prevPause = -1
+    for (let i = this.index - 1; i >= 0; i--) {
+      const [key] = identifyTask(this.tasks[i])
+      if (key === 'pauseForInput' || key === 'pauseSeconds') {
+        prevPause = i
+        break
+      }
+    }
+
+    // Find the segment start: the pause before prevPause, or index 0
+    let segmentStart = 0
+    if (prevPause > 0) {
+      for (let i = prevPause - 1; i >= 0; i--) {
+        const [key] = identifyTask(this.tasks[i])
+        if (key === 'pauseForInput' || key === 'pauseSeconds') {
+          segmentStart = i + 1
+          break
+        }
+      }
+    }
+
+    // Clean up existing overlays before replaying the segment
+    hideAllTourTextBoxes()
+
+    this.index = segmentStart
     this.indexOverridden = true
     updateTourProgress(this.index, this.tasks.length)
 
