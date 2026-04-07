@@ -299,6 +299,13 @@ class InteractiveSphere {
    */
   private async loadDatasetForTour(datasetId: string): Promise<void> {
     logger.debug('[App] loadDatasetForTour:', datasetId)
+
+    const dataset = dataService.getDatasetById(datasetId)
+    if (!dataset) {
+      logger.warn('[App] Tour loadDataset: dataset not found, skipping:', datasetId)
+      return
+    }
+
     stopPlaybackLoop(this.playback)
     this.appState.isPlaying = false
     resetPlaybackState(this.playback)
@@ -310,12 +317,6 @@ class InteractiveSphere {
     this.renderer?.removeCloudOverlay()
     this.renderer?.removeNightLights()
     this.renderer?.disableSunLighting()
-
-    const dataset = dataService.getDatasetById(datasetId)
-    if (!dataset) {
-      logger.warn('[App] Tour loadDataset: dataset not found:', datasetId)
-      return
-    }
 
     this.appState.currentDataset = dataset
     displayDatasetInfo(dataset, this.appState.datasets, (id) => this.loadDataset(id))

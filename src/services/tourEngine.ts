@@ -458,6 +458,7 @@ export class TourEngine {
         const requestedFps = parseFloat(match[1])
         const defaultFps = 30
         const rate = Math.max(0.03, Math.min(4, requestedFps / defaultFps))
+        logger.info(`[Tour] Setting playback rate: ${requestedFps} fps → ${rate.toFixed(3)}x`)
         this.callbacks.setPlaybackRate(rate)
       }
     }
