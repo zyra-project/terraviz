@@ -258,6 +258,17 @@ class InteractiveSphere {
 
     // Fetch and cache the legend image; generate a text description for non-vision mode.
     initLegendForDataset(dataset, loadConfig())
+
+    // Auto-start a tour if the dataset has one associated via runTourOnLoad
+    if (dataset.runTourOnLoad && gen === this.loadGeneration) {
+      const tourDataset = dataService.getDatasetById(dataset.runTourOnLoad)
+      if (tourDataset && tourDataset.format === 'tour/json') {
+        logger.info('[App] Auto-starting tour from runTourOnLoad:', tourDataset.id)
+        await this.startTour(tourDataset.dataLink, gen)
+      } else {
+        logger.warn('[App] runTourOnLoad references missing or non-tour dataset:', dataset.runTourOnLoad)
+      }
+    }
   }
 
   /** Start the requestAnimationFrame playback loop that syncs the scrubber, time label, and auto-loop. */

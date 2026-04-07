@@ -98,7 +98,8 @@ export function buildDatasetLookup(datasets: Dataset[]): string {
 
   return sorted.map(d => {
     const cats = Object.keys(d.enriched?.categories ?? {}).slice(0, 2).join(', ')
-    return `${d.id} | ${d.title}${cats ? ` [${cats}]` : ''}`
+    const tourTag = d.format === 'tour/json' ? ' [Tour]' : ''
+    return `${d.id} | ${d.title}${tourTag}${cats ? ` [${cats}]` : ''}`
   }).join('\n')
 }
 
@@ -110,7 +111,10 @@ export function buildCompactDatasetLookup(datasets: Dataset[]): string {
   const sorted = [...datasets]
     .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0))
 
-  return sorted.map(d => `${d.id} | ${d.title}`).join('\n')
+  return sorted.map(d => {
+    const tourTag = d.format === 'tour/json' ? ' [Tour]' : ''
+    return `${d.id} | ${d.title}${tourTag}`
+  }).join('\n')
 }
 
 /**
@@ -238,6 +242,7 @@ IMPORTANT rules for globe markers:
 - If the user asks about a topic, find relevant datasets and explain what they show
 - If asked "what is this" or "explain", describe the currently loaded dataset
 - Suggest related datasets when relevant — help users discover connections between Earth systems
+- Datasets marked [Tour] are guided experiences that walk users through a topic with narration, camera movements, and interactive questions. Recommend tours when the user seems new, asks for an overview, or wants to learn about a broad topic. Load them the same way as other datasets with <<LOAD:...>> markers.
 - If you don't know something specific, be honest and don't guess — point toward relevant data if possible
 - Keep responses under 150 words unless the user asks for detail
 - If asked about the dataset legend or color scale: only describe it if a "Legend:" field appears in the Current View section above. If no Legend field is present, say "I don't have the legend details for this dataset right now" — never invent or estimate color scales or value ranges from general knowledge

@@ -127,10 +127,15 @@ TourEngine                          TourUI
 
 ## Phase 3 — Tour Discovery & Authoring
 
-- **Tour browse section** — tours appear in the browse panel as a category (already enabled)
-- **`runTourOnLoad` support** — auto-start a tour when a specific dataset loads (field already exists on `Dataset`)
+### Implemented ✅
+
+- **Tour browse section** — tours appear in the browse panel as a category (enabled in Phase 1)
+- **`runTourOnLoad` support** — after loading an image/video dataset, if it has `runTourOnLoad` set, the associated tour auto-starts on top of the loaded data. Wired in `displayDataset()` in `main.ts`.
+- **Orbit integration** — tour datasets are tagged `[Tour]` in the LLM dataset catalog. The system prompt instructs Orbit to recommend tours for new users, overviews, and broad topics. Tours load via the same `<<LOAD:...>>` markers as regular datasets.
+
+### Remaining
+
 - **Tour builder UI** — visual editor for creating/editing tour JSON files
-- **Orbit integration** — LLM can suggest and start tours contextually
 - **Tour asset bundling** — download tours + their referenced datasets for offline use (Tauri)
 
 ---
