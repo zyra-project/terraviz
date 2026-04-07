@@ -63,18 +63,13 @@ export class DataService {
       // Build enriched lookup map by normalized title
       this.enrichedMap = this.buildEnrichedMap(enrichedData)
 
-      // Filter, sort, and enrich datasets
-      const datasets = s3Response.data.datasets
-        .filter(d => !d.isHidden && this.isSupportedDataset(d))
-        .sort((a, b) => (b.weight || 0) - (a.weight || 0))
-        .map(d => this.enrichDataset(d))
-
       // Inject the built-in sample tour in dev mode for testing
+      const rawDatasets = s3Response.data.datasets
       if ((import.meta as any).env?.DEV) {
-        datasets.push({
+        rawDatasets.push({
           id: 'SAMPLE_TOUR',
           title: 'Tour - Interactive Sphere Demo',
-          format: 'tour/json',
+          format: 'tour/json' as const,
           dataLink: '/assets/test-tour.json',
           organization: 'Interactive Sphere',
           abstractTxt: 'A sample guided tour that demonstrates the tour engine: camera flights, text overlays, day/night lighting, clouds, rotation, and country borders.',
@@ -83,6 +78,12 @@ export class DataService {
           thumbnailLink: '',
         })
       }
+
+      // Filter, sort, and enrich datasets
+      const datasets = rawDatasets
+        .filter(d => !d.isHidden && this.isSupportedDataset(d))
+        .sort((a, b) => (b.weight || 0) - (a.weight || 0))
+        .map(d => this.enrichDataset(d))
 
       this.cache = { datasets }
       this.cacheTime = now

@@ -399,13 +399,15 @@ export function hideAllTourQuestions(): void { questions.removeAll() }
 let controlsEl: HTMLElement | null = null
 let boundEngine: TourEngine | null = null
 let spaceHandler: ((e: KeyboardEvent) => void) | null = null
+let stopCallback: (() => void) | null = null
 
 /** Show the tour controls bar and bind it to the given engine. */
-export function showTourControls(engine: TourEngine): void {
+export function showTourControls(engine: TourEngine, onStop?: () => void): void {
   // Remove any existing listeners first to prevent duplicates
   hideTourControls()
 
   boundEngine = engine
+  stopCallback = onStop ?? null
 
   controlsEl = document.getElementById('tour-controls')
   if (!controlsEl) return
@@ -443,6 +445,7 @@ export function hideTourControls(): void {
     spaceHandler = null
   }
   boundEngine = null
+  stopCallback = null
 }
 
 /** Update the step counter display. */
@@ -480,4 +483,10 @@ function onPlayPause(): void {
   updatePlayPauseBtn(boundEngine.state === 'playing')
 }
 
-function onStop(): void { boundEngine?.stop() }
+function onStop(): void {
+  if (stopCallback) {
+    stopCallback()
+  } else {
+    boundEngine?.stop()
+  }
+}

@@ -345,6 +345,8 @@ class InteractiveSphere {
       this.videoTexture = result.videoTexture
       this.doStartPlaybackLoop()
     }
+
+    initLegendForDataset(dataset, loadConfig())
     // No runTourOnLoad check — the tour engine is in control
   }
 
@@ -388,7 +390,7 @@ class InteractiveSphere {
       },
     })
 
-    showTourControls(this.tourEngine)
+    showTourControls(this.tourEngine, () => this.stopTour())
     this.showPlaybackControls(false)
     hideBrowseUI()
     closeChat()
