@@ -70,7 +70,7 @@ export class DataService {
         .map(d => this.enrichDataset(d))
 
       // Inject the built-in sample tour in dev mode for testing
-      if (import.meta.env.DEV) {
+      if ((import.meta as any).env?.DEV) {
         datasets.push({
           id: 'SAMPLE_TOUR',
           title: 'Tour - Interactive Sphere Demo',
