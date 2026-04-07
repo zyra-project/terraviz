@@ -366,6 +366,9 @@ class InteractiveSphere {
         togglePlayPause(this.hlsService, this.appState, (m) => this.announce(m))
       },
       isPlaying: () => this.appState.isPlaying,
+      setPlaybackRate: (rate) => {
+        if (this.hlsService) this.hlsService.playbackRate = rate
+      },
       onTourEnd: () => this.endTour(),
       announce: (msg) => this.announce(msg),
       resolveMediaUrl: (filename) => {
@@ -386,6 +389,8 @@ class InteractiveSphere {
   private endTour(): void {
     this.cleanupTourOverlays()
     this.tourEngine = null
+    // Reset playback rate to normal in case a tour changed it
+    if (this.hlsService) this.hlsService.playbackRate = 1
     this.announce('Tour ended')
   }
 

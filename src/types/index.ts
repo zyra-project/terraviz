@@ -433,6 +433,7 @@ export interface TourCallbacks {
   getRenderer(): GlobeRenderer
   togglePlayPause(): void
   isPlaying(): boolean
+  setPlaybackRate(rate: number): void
   onTourEnd(): void
   announce(message: string): void
   /** Resolve a media filename relative to the tour's base URL */

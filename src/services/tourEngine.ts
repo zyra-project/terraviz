@@ -450,6 +450,18 @@ export class TourEngine {
   }
 
   private execDatasetAnimation(params: DatasetAnimationTaskParams): void {
+    // Apply requested frame rate as a playback speed ratio.
+    // Videos are encoded at ~30fps; "5 fps" means playbackRate = 5/30.
+    if (params.frameRate) {
+      const match = params.frameRate.match(/^(\d+(?:\.\d+)?)\s*fps$/i)
+      if (match) {
+        const requestedFps = parseFloat(match[1])
+        const defaultFps = 30
+        const rate = Math.max(0.1, Math.min(4, requestedFps / defaultFps))
+        this.callbacks.setPlaybackRate(rate)
+      }
+    }
+
     if (params.animation === 'on' && !this.callbacks.isPlaying()) {
       this.callbacks.togglePlayPause()
     } else if (params.animation === 'off' && this.callbacks.isPlaying()) {
