@@ -255,11 +255,29 @@ export function showTourImage(params: ShowImageTaskParams): void {
   const widthPct = params.widthPct ?? 40
   const heightPct = params.heightPct ?? 40
 
-  wrapper.style.cssText = glassStyles(xPct, yPct, widthPct, heightPct) + `
+  const { left, bottom, width, height } = adaptOverlay(xPct, yPct, widthPct, heightPct)
+
+  // Images use fit-content so the container wraps the actual image.
+  // Constrain the image with vw/vh units to avoid the circular
+  // fit-content + max-width:100% problem.
+  wrapper.style.cssText = `
+    position: absolute;
+    left: ${left}%;
+    bottom: ${bottom}%;
+    width: fit-content;
+    max-width: ${width}%;
+    pointer-events: auto;
+    background: rgba(13, 13, 18, 0.88);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px;
+    overflow: hidden;
+    animation: tour-box-fadein 0.35s ease;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
     padding: 0.75rem;
   `
 
@@ -267,8 +285,8 @@ export function showTourImage(params: ShowImageTaskParams): void {
   img.src = params.filename
   img.alt = params.caption || 'Tour image'
   img.style.cssText = `
-    max-width: 100%;
-    max-height: ${params.caption ? '85%' : '100%'};
+    max-width: ${width}vw;
+    max-height: ${height}vh;
     object-fit: contain;
     border-radius: 6px;
   `
