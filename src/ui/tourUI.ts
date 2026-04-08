@@ -134,8 +134,8 @@ function glassStyles(xPct: number, yPct: number, widthPct: number, heightPct: nu
     position: absolute;
     left: ${left}%;
     bottom: ${bottom}%;
-    width: ${width}%;
-    height: ${height}%;
+    width: min(${width}%, calc(100% - ${left}% - 0.5rem));
+    height: min(${height}%, calc(100% - ${bottom}% - 0.5rem));
     pointer-events: auto;
     background: rgba(13, 13, 18, 0.88);
     backdrop-filter: blur(12px);
@@ -204,7 +204,7 @@ export function showTourTextBox(params: ShowRectTaskParams): void {
     position: absolute;
     left: ${left}%;
     bottom: ${bottom}%;
-    max-width: ${width}vw;
+    max-width: calc(100% - ${left}% - 0.5rem);
     max-height: calc(100% - ${bottom}% - 0.5rem);
     width: fit-content;
     pointer-events: auto;
