@@ -329,9 +329,9 @@ class InteractiveSphere {
 
     if (!this.renderer) return
 
-    // Suppress playback controls — tour controls are active
+    // Allow playback controls for video datasets so users can scrub/pause
     const tourLoaderCallbacks = {
-      showPlaybackControls: (_show: boolean) => { /* tour controls are shown instead */ },
+      showPlaybackControls: (show: boolean) => this.showPlaybackControls(show),
       showTimeLabel: (show: boolean) => this.showTimeLabel(show),
     }
 
