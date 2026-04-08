@@ -417,12 +417,13 @@ class InteractiveSphere {
     void this.tourEngine.play()
   }
 
-  /** Called when the tour finishes or the user stops it. */
+  /** Called when the tour finishes naturally (not via stop button). */
   private endTour(): void {
     this.cleanupTourOverlays()
     this.tourEngine = null
-    this.restorePostTourUI()
     this.announce('Tour ended')
+    // Return to home screen so the user isn't stuck
+    void this.goHome()
   }
 
   /** Stop any active tour without triggering goHome. */
