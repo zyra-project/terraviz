@@ -859,6 +859,7 @@ class InteractiveSphere {
 
   /** Navigate back to the default Earth view: tear down the current dataset, reload Earth materials, and re-show the browse panel. */
   private async goHome(): Promise<void> {
+    this.stopTour()
     this.cleanupVideo()
     clearLegendCache()
     this.appState.currentDataset = null
