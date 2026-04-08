@@ -84,14 +84,17 @@ function adaptOverlay(
 
 /**
  * Compute a responsive font-size CSS value.
- * SOS tours specify pixel sizes for 4K; we scale down and clamp.
+ * SOS tours specify pixel sizes for 4K; we scale down and use
+ * viewport-relative units so text reflows on resize.
  */
 function responsiveFontSize(fontSizePx?: number): string {
-  if (!fontSizePx) return '0.85rem'
+  if (!fontSizePx) return 'clamp(0.75rem, 1.4vw, 0.9rem)'
   const mode = getLayoutMode()
   const scale = mode === 'phone-portrait' ? 0.7 : mode === 'mobile' ? 0.8 : 0.9
   const scaled = Math.round(fontSizePx * scale)
-  return `clamp(12px, ${scaled}px, ${fontSizePx}px)`
+  // Use vw-based sizing so text scales with viewport
+  const vwSize = (scaled / 16).toFixed(2)
+  return `clamp(12px, ${vwSize}vw + 0.3rem, ${fontSizePx}px)`
 }
 
 /**
@@ -201,8 +204,8 @@ export function showTourTextBox(params: ShowRectTaskParams): void {
     position: absolute;
     left: ${left}%;
     bottom: ${bottom}%;
-    max-width: ${width}%;
-    max-height: ${height}%;
+    max-width: ${width}vw;
+    max-height: 80vh;
     width: fit-content;
     pointer-events: auto;
     display: flex;
