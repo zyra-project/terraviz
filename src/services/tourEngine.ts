@@ -308,6 +308,10 @@ export class TourEngine {
         return this.execDayNight(value as 'on' | 'off')
       case 'envShowClouds':
         return this.execClouds(value as 'on' | 'off')
+      case 'envShowEarth':
+        // Toggle globe visibility — 'off' hides for full-screen media overlays
+        logger.info(`[Tour] Earth visibility: ${value}`)
+        return
       case 'envShowWorldBorder':
         return this.execWorldBorder(value as 'on' | 'off')
       case 'worldBorder':
@@ -326,15 +330,25 @@ export class TourEngine {
         this.stopActiveAudio()
         return
       case 'playVideo':
+      case 'showVideo':
         return this.execPlayVideo(value as PlayVideoTaskParams)
-      case 'hideVideo': {
-        const resolvedFilename = this.callbacks.resolveMediaUrl(value as string)
-        hideTourVideo(resolvedFilename)
+      case 'hideVideo':
+      case 'hidePlayVideo':
+      case 'stopVideo': {
+        const raw = value as string
+        if (!raw) {
+          // Empty string means hide all videos (SOS convention)
+          hideAllTourVideos()
+        } else {
+          hideTourVideo(this.callbacks.resolveMediaUrl(raw))
+        }
         return
       }
       case 'showImage':
+      case 'showImg':
         return this.execShowImage(value as ShowImageTaskParams)
       case 'hideImage':
+      case 'hideImg':
         hideTourImage(value as string)
         return
       case 'showPopupHtml':
