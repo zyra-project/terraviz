@@ -335,8 +335,25 @@ export function showTourVideo(params: PlayVideoTaskParams): void {
   const yPct = params.yPct ?? 50
   const sizePct = params.sizePct ?? 50
 
-  wrapper.style.cssText = glassStyles(xPct, yPct, sizePct, sizePct * 0.5625) + `
+  const { left, bottom, width, height } = adaptOverlay(xPct, yPct, sizePct, sizePct * 0.5625)
+
+  wrapper.style.cssText = `
+    position: absolute;
+    left: ${left}%;
+    bottom: ${bottom}%;
+    width: fit-content;
+    max-width: ${width}%;
+    pointer-events: auto;
+    background: rgba(13, 13, 18, 0.88);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px;
+    overflow: hidden;
+    animation: tour-box-fadein 0.35s ease;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
     padding: 0;
+    visibility: hidden;
   `
 
   const video = document.createElement('video')
@@ -344,11 +361,13 @@ export function showTourVideo(params: PlayVideoTaskParams): void {
   video.autoplay = true
   video.controls = params.showControls ?? false
   video.style.cssText = `
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
+    max-width: ${width}vw;
+    max-height: ${height}vh;
+    display: block;
     border-radius: 10px;
   `
+  // Show wrapper once video has dimensions
+  video.onloadedmetadata = () => { wrapper.style.visibility = '' }
   wrapper.appendChild(video)
 
   addCloseButton(wrapper, () => hideTourVideo(videoID))
