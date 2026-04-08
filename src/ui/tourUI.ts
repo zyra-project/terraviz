@@ -20,6 +20,80 @@ import type { TourEngine } from '../services/tourEngine'
 
 // ── Shared helpers ──────────────────────────────────────────────────
 
+/** Viewport layout mode for responsive tour overlays. */
+type LayoutMode = 'desktop' | 'mobile' | 'phone-portrait'
+
+function getLayoutMode(): LayoutMode {
+  const w = window.innerWidth
+  if (w <= 600 && window.innerHeight > w) return 'phone-portrait'
+  if (w <= 768) return 'mobile'
+  return 'desktop'
+}
+
+/**
+ * Transform SOS overlay dimensions for the current viewport.
+ *
+ * The SOS tour format was designed for 4K touchscreens at arm's length.
+ * On a web browser, those same percentage values produce oversized overlays.
+ * This function scales and repositions without changing the tour JSON.
+ */
+function adaptOverlay(
+  xPct: number,
+  yPct: number,
+  widthPct: number,
+  heightPct: number,
+): { left: number; bottom: number; width: number; height: number } {
+  const mode = getLayoutMode()
+
+  let scale: number
+  let w: number
+  let h: number
+  let x: number
+  let y: number
+
+  switch (mode) {
+    case 'phone-portrait':
+      // Stack overlays near the bottom, nearly full width
+      scale = 0.55
+      w = Math.min(92, widthPct * scale * 1.6) // wider on narrow screens
+      h = Math.min(50, heightPct * scale)       // cap height to half screen
+      x = 50                                     // center horizontally
+      y = Math.min(yPct, 40)                     // push toward bottom half
+      break
+    case 'mobile':
+      scale = 0.6
+      w = Math.min(85, widthPct * scale * 1.3)
+      h = Math.min(55, heightPct * scale)
+      x = xPct
+      y = yPct
+      break
+    default: // desktop
+      scale = 0.75
+      w = widthPct * scale
+      h = heightPct * scale
+      x = xPct
+      y = yPct
+  }
+
+  // Clamp to stay on-screen
+  const left = Math.max(1, Math.min(99 - w, x - w / 2))
+  const bottom = Math.max(1, Math.min(99 - h, y - h / 2))
+
+  return { left, bottom, width: w, height: h }
+}
+
+/**
+ * Compute a responsive font-size CSS value.
+ * SOS tours specify pixel sizes for 4K; we scale down and clamp.
+ */
+function responsiveFontSize(fontSizePx?: number): string {
+  if (!fontSizePx) return '0.85rem'
+  const mode = getLayoutMode()
+  const scale = mode === 'phone-portrait' ? 0.7 : mode === 'mobile' ? 0.8 : 0.9
+  const scaled = Math.round(fontSizePx * scale)
+  return `clamp(12px, ${scaled}px, ${fontSizePx}px)`
+}
+
 /**
  * Parse SOS-style markup in captions:
  *   \n           → <br>
@@ -52,14 +126,13 @@ function getOverlayContainer(): HTMLElement {
 
 /** Build glass-surface CSS for positioned overlays. */
 function glassStyles(xPct: number, yPct: number, widthPct: number, heightPct: number): string {
-  const left = Math.max(0, Math.min(100 - widthPct, xPct - widthPct / 2))
-  const bottom = Math.max(0, Math.min(100 - heightPct, yPct - heightPct / 2))
+  const { left, bottom, width, height } = adaptOverlay(xPct, yPct, widthPct, heightPct)
   return `
     position: absolute;
     left: ${left}%;
     bottom: ${bottom}%;
-    width: ${widthPct}%;
-    height: ${heightPct}%;
+    width: ${width}%;
+    height: ${height}%;
     pointer-events: auto;
     background: rgba(13, 13, 18, 0.88);
     backdrop-filter: blur(12px);
@@ -119,15 +192,18 @@ export function showTourTextBox(params: ShowRectTaskParams): void {
   box.dataset.rectId = params.rectID
   box.className = 'tour-textbox'
 
-  const left = Math.max(0, Math.min(100 - params.widthPct, params.xPct - params.widthPct / 2))
-  const bottom = Math.max(0, Math.min(100 - params.heightPct, params.yPct - params.heightPct / 2))
+  const { left, bottom, width, height } = adaptOverlay(
+    params.xPct, params.yPct, params.widthPct, params.heightPct
+  )
+  const fontSize = responsiveFontSize(params.fontSize)
 
   box.style.cssText = `
     position: absolute;
     left: ${left}%;
     bottom: ${bottom}%;
-    width: ${params.widthPct}%;
-    height: ${params.heightPct}%;
+    max-width: ${width}%;
+    max-height: ${height}%;
+    width: fit-content;
     pointer-events: auto;
     display: flex;
     flex-direction: column;
@@ -141,10 +217,10 @@ export function showTourTextBox(params: ShowRectTaskParams): void {
     -webkit-backdrop-filter: blur(12px);
     border: ${params.showBorder ? '1px solid rgba(255,255,255,0.15)' : '1px solid rgba(255,255,255,0.06)'};
     border-radius: 10px;
-    padding: 1.25rem;
+    padding: 1rem 1.25rem;
     color: ${params.fontColor || 'white'};
-    font-size: ${params.fontSize ? params.fontSize + 'px' : '0.85rem'};
-    line-height: 1.55;
+    font-size: ${fontSize};
+    line-height: 1.5;
     overflow-y: auto;
     animation: tour-box-fadein 0.35s ease;
     box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
@@ -202,7 +278,7 @@ export function showTourImage(params: ShowImageTaskParams): void {
     const cap = document.createElement('div')
     cap.style.cssText = `
       margin-top: 0.5rem;
-      font-size: ${params.fontSize ? params.fontSize + 'px' : '0.8rem'};
+      font-size: ${responsiveFontSize(params.fontSize)};
       color: ${params.fontColor || '#ddd'};
       text-align: ${{ left: 'left', right: 'right', top: 'center', bottom: 'center', center: 'center' }[params.captionPos || 'center'] ?? 'center'};
     `
