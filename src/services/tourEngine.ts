@@ -35,7 +35,7 @@ const MI_TO_KM = 1.60934
 // not true orbital altitudes. They need to be scaled down to produce
 // equivalent MapLibre zoom levels. Empirically, 0.47 maps SOS altitudes
 // to views that match the legacy app (e.g., 4200 mi → zoom ~2.0 continent view).
-const SOS_ALTITUDE_SCALE = 0.47
+const SOS_ALTITUDE_SCALE = 0.3
 
 /**
  * Determine which task key is present in a TourTaskDef and return [key, value].

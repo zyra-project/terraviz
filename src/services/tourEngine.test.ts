@@ -296,7 +296,7 @@ describe('TourEngine', () => {
       ]), cb)
 
       await engine.play()
-      expect(renderer.flyTo).toHaveBeenCalledWith(40, -105, 500 * 1.60934 * 0.47)
+      expect(renderer.flyTo).toHaveBeenCalledWith(40, -105, 500 * 1.60934 * 0.3)
     })
 
     it('dispatches loadDataset to callback', async () => {

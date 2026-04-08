@@ -350,6 +350,22 @@ class InteractiveSphere {
     // No runTourOnLoad check — the tour engine is in control
   }
 
+  /** Reset the globe to default Earth for a tour — like goHome but keeps UI clean (no browse panel). */
+  private async unloadForTour(): Promise<void> {
+    this.cleanupVideo()
+    clearLegendCache()
+    this.appState.currentDataset = null
+    this.showPlaybackControls(false)
+    this.showTimeLabel(false)
+    document.getElementById('info-panel')?.classList.add('hidden')
+
+    if (this.renderer) {
+      await this.renderer.loadDefaultEarthMaterials()
+      const sun = getSunPosition(new Date())
+      this.renderer.enableSunLighting(sun.lat, sun.lng)
+    }
+  }
+
   /** Fetch a tour JSON file and start the tour engine. */
   private async startTour(dataLink: string, gen: number): Promise<void> {
     // Stop any previous tour
@@ -369,7 +385,7 @@ class InteractiveSphere {
         await this.loadDatasetForTour(id)
       },
       unloadAllDatasets: async () => {
-        await this.goHome()
+        await this.unloadForTour()
       },
       getRenderer: () => this.renderer!,
       togglePlayPause: () => {
