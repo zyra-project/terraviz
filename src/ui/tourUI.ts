@@ -204,7 +204,7 @@ export function showTourTextBox(params: ShowRectTaskParams): void {
     position: absolute;
     left: ${left}%;
     bottom: ${bottom}%;
-    max-width: calc(100% - ${left}% - 0.5rem);
+    max-width: min(${width}vw, calc(100% - ${left}% - 0.5rem));
     max-height: calc(100% - ${bottom}% - 0.5rem);
     width: fit-content;
     pointer-events: auto;
