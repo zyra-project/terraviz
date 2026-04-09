@@ -195,39 +195,70 @@ export function showTourTextBox(params: ShowRectTaskParams): void {
   box.dataset.rectId = params.rectID
   box.className = 'tour-textbox'
 
-  const { left, bottom, width } = adaptOverlay(
-    params.xPct, params.yPct, params.widthPct, params.heightPct
-  )
+  const mode = getLayoutMode()
   const fontSize = responsiveFontSize(params.fontSize)
 
-  box.style.cssText = `
-    position: absolute;
-    left: ${left}%;
-    bottom: ${bottom}%;
-    max-width: min(${width}vw, calc(100% - ${left}% - 0.5rem));
-    max-height: calc(100% - ${bottom}% - 0.5rem);
-    width: fit-content;
-    pointer-events: auto;
-    display: flex;
-    flex-direction: column;
-    ${params.captionPos === 'center' ? 'align-items:center;text-align:center;' : ''}
-    ${params.captionPos === 'left' ? 'align-items:flex-start;text-align:left;' : ''}
-    ${params.captionPos === 'right' ? 'align-items:flex-end;text-align:right;' : ''}
-    ${params.captionPos === 'top' ? 'align-items:center;text-align:center;' : ''}
-    ${params.captionPos === 'bottom' ? 'align-items:center;text-align:center;' : ''}
-    background: rgba(13, 13, 18, 0.88);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: ${params.showBorder ? '1px solid rgba(255,255,255,0.15)' : '1px solid rgba(255,255,255,0.06)'};
-    border-radius: 10px;
-    padding: 1rem 1.25rem;
-    color: ${params.fontColor || 'white'};
-    font-size: ${fontSize};
-    line-height: 1.5;
-    overflow-y: auto;
-    animation: tour-box-fadein 0.35s ease;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
-  `
+  if (mode === 'phone-portrait') {
+    // Bottom sheet layout — ignore SOS positioning, use full-width bottom panel
+    box.style.cssText = `
+      position: absolute;
+      left: 0.5rem;
+      right: 0.5rem;
+      bottom: 4rem;
+      max-height: 40vh;
+      pointer-events: auto;
+      display: flex;
+      flex-direction: column;
+      text-align: center;
+      background: rgba(13, 13, 18, 0.92);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: ${params.showBorder ? '1px solid rgba(255,255,255,0.15)' : '1px solid rgba(255,255,255,0.06)'};
+      border-radius: 12px;
+      padding: 0.75rem 1rem;
+      color: ${params.fontColor || 'white'};
+      font-size: ${fontSize};
+      line-height: 1.45;
+      overflow-y: auto;
+      animation: tour-box-fadein 0.25s ease;
+      box-shadow: 0 -2px 20px rgba(0, 0, 0, 0.5);
+      z-index: 10;
+    `
+  } else {
+    // Desktop/tablet — positioned overlay
+    const { left, bottom, width } = adaptOverlay(
+      params.xPct, params.yPct, params.widthPct, params.heightPct
+    )
+
+    box.style.cssText = `
+      position: absolute;
+      left: ${left}%;
+      bottom: ${bottom}%;
+      max-width: min(${width}vw, calc(100% - ${left}% - 0.5rem));
+      max-height: calc(100% - ${bottom}% - 0.5rem);
+      width: fit-content;
+      pointer-events: auto;
+      display: flex;
+      flex-direction: column;
+      ${params.captionPos === 'center' ? 'align-items:center;text-align:center;' : ''}
+      ${params.captionPos === 'left' ? 'align-items:flex-start;text-align:left;' : ''}
+      ${params.captionPos === 'right' ? 'align-items:flex-end;text-align:right;' : ''}
+      ${params.captionPos === 'top' ? 'align-items:center;text-align:center;' : ''}
+      ${params.captionPos === 'bottom' ? 'align-items:center;text-align:center;' : ''}
+      background: rgba(13, 13, 18, 0.88);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: ${params.showBorder ? '1px solid rgba(255,255,255,0.15)' : '1px solid rgba(255,255,255,0.06)'};
+      border-radius: 10px;
+      padding: 1rem 1.25rem;
+      color: ${params.fontColor || 'white'};
+      font-size: ${fontSize};
+      line-height: 1.5;
+      overflow-y: auto;
+      animation: tour-box-fadein 0.35s ease;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+    `
+  }
 
   const caption = document.createElement('div')
   caption.innerHTML = parseCaptionMarkup(params.caption)
@@ -341,40 +372,69 @@ export function showTourVideo(params: PlayVideoTaskParams): void {
 
   // Videos are primary content — use less aggressive scaling than text/images
   const mode = getLayoutMode()
-  const videoScale = mode === 'phone-portrait' ? 0.85 : mode === 'mobile' ? 0.9 : 1.0
-  const scaledSize = Math.max(35, sizePct * videoScale)
-  const { left, bottom } = adaptOverlay(xPct, yPct, scaledSize, scaledSize * 0.5625)
 
-  wrapper.style.cssText = `
-    position: absolute;
-    left: ${left}%;
-    bottom: ${bottom}%;
-    width: fit-content;
-    max-width: ${scaledSize}%;
-    pointer-events: auto;
-    background: rgba(13, 13, 18, 0.88);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 10px;
-    overflow: hidden;
-    animation: tour-box-fadein 0.35s ease;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
-    padding: 0;
-    visibility: hidden;
-  `
+  if (mode === 'phone-portrait') {
+    // Full-width centered video on phones
+    wrapper.style.cssText = `
+      position: absolute;
+      left: 0.5rem;
+      right: 0.5rem;
+      top: 2rem;
+      max-height: 50vh;
+      pointer-events: auto;
+      background: rgba(13, 13, 18, 0.92);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 12px;
+      overflow: hidden;
+      animation: tour-box-fadein 0.25s ease;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;`
+  } else {
+    const videoScale = mode === 'mobile' ? 0.9 : 1.0
+    const scaledSize = Math.max(35, sizePct * videoScale)
+    const { left, bottom } = adaptOverlay(xPct, yPct, scaledSize, scaledSize * 0.5625)
+
+    wrapper.style.cssText = `
+      position: absolute;
+      left: ${left}%;
+      bottom: ${bottom}%;
+      width: fit-content;
+      max-width: ${scaledSize}%;
+      pointer-events: auto;
+      background: rgba(13, 13, 18, 0.88);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 10px;
+      overflow: hidden;
+      animation: tour-box-fadein 0.35s ease;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);`
+  }
+  wrapper.style.cssText += 'visibility: hidden;'
 
   const video = document.createElement('video')
   video.src = params.filename
   video.autoplay = true
   video.controls = params.showControls ?? false
-  const videoHeight = scaledSize * 0.5625
-  video.style.cssText = `
-    max-width: ${scaledSize}vw;
-    max-height: ${videoHeight}vh;
-    display: block;
-    border-radius: 10px;
-  `
+  if (mode === 'phone-portrait') {
+    video.style.cssText = `
+      width: 100%;
+      max-height: 50vh;
+      display: block;
+      border-radius: 12px;
+    `
+  } else {
+    const scaledSz = Math.max(35, sizePct * (mode === 'mobile' ? 0.9 : 1.0))
+    video.style.cssText = `
+      max-width: ${scaledSz}vw;
+      max-height: ${scaledSz * 0.5625}vh;
+      display: block;
+      border-radius: 10px;
+    `
+  }
   // Show wrapper once video has dimensions, or on error so it can be closed
   video.onloadedmetadata = () => { wrapper.style.visibility = '' }
   video.onerror = () => { wrapper.style.visibility = '' }
