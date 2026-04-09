@@ -116,7 +116,7 @@
       "animation": "on",
       "frameRate": "10 fps"
     }},
-    {"flyTo": {"lat": 85.0, "lon": 0.0, "altmi": 4500.0, "animated": true}},
+    {"flyTo": {"lat": 78.0, "lon": 0.0, "altmi": 8000.0, "animated": true}},
 
     {"worldBorder": {"worldBorders": "on", "worldBorderColor": "white"}},
 
