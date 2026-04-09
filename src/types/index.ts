@@ -309,10 +309,16 @@ export type TourTaskDef =
   | { question: QuestionTaskParams }
   | { playAudio: PlayAudioTaskParams }
   | { stopAudio: string }
+  | { envShowEarth: 'on' | 'off' }
   | { playVideo: PlayVideoTaskParams }
+  | { showVideo: PlayVideoTaskParams }
   | { hideVideo: string }
+  | { hidePlayVideo: string }
+  | { stopVideo: string }
   | { showImage: ShowImageTaskParams }
+  | { showImg: ShowImageTaskParams }
   | { hideImage: string }
+  | { hideImg: string }
   | { showPopupHtml: ShowPopupHtmlTaskParams }
   | { hidePopupHtml: string }
   | { addPlacemark: AddPlacemarkTaskParams }

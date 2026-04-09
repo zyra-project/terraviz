@@ -381,6 +381,11 @@ class InteractiveSphere {
 
     if (gen !== this.loadGeneration) return
 
+    // Use the final response URL as the base for resolving relative media paths.
+    // This handles redirects and ensures relative URLs work even when dataLink
+    // is a relative path (e.g. /assets/test-tour.json).
+    const tourBaseUrl = resp.url || new URL(dataLink, window.location.href).toString()
+
     this.tourEngine = new TourEngine(tourFile, {
       loadDataset: async (id) => {
         await this.loadDatasetForTour(id)
@@ -401,7 +406,7 @@ class InteractiveSphere {
       announce: (msg) => this.announce(msg),
       resolveMediaUrl: (filename) => {
         try {
-          return new URL(filename, dataLink).toString()
+          return new URL(filename, tourBaseUrl).toString()
         } catch {
           return filename
         }
