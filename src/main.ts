@@ -69,6 +69,7 @@ class InteractiveSphere {
   private loadingHideTimer: ReturnType<typeof setTimeout> | null = null
   private loadGeneration = 0 // guards against concurrent dataset loads
   private tourEngine: TourEngine | null = null
+  private tourIsStandalone = false // true when tour was loaded as a tour/json dataset (not runTourOnLoad)
 
   /**
    * Boot the application: create the WebGL renderer, fetch the dataset
@@ -233,6 +234,7 @@ class InteractiveSphere {
     }
 
     if (dataset.format === 'tour/json') {
+      this.tourIsStandalone = true
       await this.startTour(dataset.dataLink, gen)
       return
     } else if (dataService.isImageDataset(dataset)) {
@@ -422,11 +424,19 @@ class InteractiveSphere {
 
   /** Called when the tour finishes naturally (not via stop button). */
   private endTour(): void {
+    const wasStandalone = this.tourIsStandalone
     this.cleanupTourOverlays()
     this.tourEngine = null
+    this.tourIsStandalone = false
     this.announce('Tour ended')
-    // Return to home screen so the user isn't stuck
-    void this.goHome()
+
+    if (wasStandalone) {
+      // Standalone tour (tour/json dataset) — return home so user isn't stuck
+      void this.goHome()
+    } else {
+      // runTourOnLoad tour — stay on the current dataset, restore playback UI
+      this.restorePostTourUI()
+    }
   }
 
   /** Stop any active tour without triggering goHome. */
@@ -434,6 +444,7 @@ class InteractiveSphere {
     if (this.tourEngine) {
       this.tourEngine.stop()
       this.tourEngine = null
+      this.tourIsStandalone = false
       this.cleanupTourOverlays()
       this.restorePostTourUI()
     }
