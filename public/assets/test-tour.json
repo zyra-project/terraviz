@@ -45,6 +45,7 @@
       "id": "INTERNAL_SOS_420_VIDEO",
       "showLegend": true
     }},
+    {"worldBorder": {"worldBorders": "on", "worldBorderColor": "white"}},
     {"datasetAnimation": {
       "animation": "on",
       "frameRate": "5 fps"
@@ -85,6 +86,7 @@
     }},
     {"pauseForInput": ""},
     {"hideRect": "temp-arctic"},
+    {"worldBorder": {"worldBorders": "off", "worldBorderColor": "white"}},
 
 
     {"unloadAllDatasets": ""},
