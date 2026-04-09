@@ -155,6 +155,7 @@ export interface GlobeRenderer {
   addMarker?(lat: number, lng: number, label?: string): unknown
   clearMarkers?(): void
   setRotationRate?(rate: number): void
+  getMap?(): unknown
 }
 
 /**

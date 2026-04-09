@@ -380,13 +380,23 @@ export class TourEngine {
   private async execFlyTo(params: FlyToTaskParams): Promise<void> {
     const renderer = this.callbacks.getRenderer()
     const altKm = params.altmi * MI_TO_KM * SOS_ALTITUDE_SCALE
+
+    if (params.animated === false) {
+      // Instant jump — use map.jumpTo if available
+      const map = renderer.getMap?.() as any
+      if (map?.jumpTo) {
+        const zoom = Math.log2(6371 * 2 / Math.max(altKm, 1))
+        map.jumpTo({ center: [params.lon, params.lat], zoom })
+        return
+      }
+    }
     await renderer.flyTo(params.lat, params.lon, altKm)
   }
 
   private async execTiltRotateCamera(params: TiltRotateCameraTaskParams): Promise<void> {
     const renderer = this.callbacks.getRenderer()
     // tiltRotateCamera sets pitch and bearing via the underlying map
-    const map = (renderer as any).getMap?.()
+    const map = renderer.getMap?.() as any
     if (!map) return
 
     if (params.animated) {
@@ -405,8 +415,7 @@ export class TourEngine {
 
   private async execResetCameraZoomOut(): Promise<void> {
     const renderer = this.callbacks.getRenderer()
-    // Fly to default view — full globe, straight down
-    const map = (renderer as any).getMap?.()
+    const map = renderer.getMap?.() as any
     if (!map) return
 
     await new Promise<void>(resolve => {

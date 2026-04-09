@@ -670,10 +670,6 @@ export function updateTourPlayState(isPlaying: boolean): void {
   }
 }
 
-function updatePlayPauseBtn(_isPlaying: boolean): void {
-  // Delegate to updateTourPlayState for consistency
-}
-
 function onPrev(): void { boundEngine?.prev() }
 
 function onNext(): void {
@@ -687,7 +683,7 @@ function onPlayPause(): void {
   if (!boundEngine) return
   if (boundEngine.state === 'playing') boundEngine.pause()
   else void boundEngine.play()
-  updatePlayPauseBtn(boundEngine.state === 'playing')
+  updateTourPlayState(boundEngine.state === 'playing')
 }
 
 function onStop(): void {

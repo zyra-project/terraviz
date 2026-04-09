@@ -381,9 +381,6 @@ class InteractiveSphere {
 
     if (gen !== this.loadGeneration) return
 
-    // Compute base URL for resolving relative media filenames in tour tasks
-    const tourBaseUrl = dataLink.substring(0, dataLink.lastIndexOf('/') + 1)
-
     this.tourEngine = new TourEngine(tourFile, {
       loadDataset: async (id) => {
         await this.loadDatasetForTour(id)
@@ -403,11 +400,11 @@ class InteractiveSphere {
       onStop: () => this.stopTour(),
       announce: (msg) => this.announce(msg),
       resolveMediaUrl: (filename) => {
-        // If already absolute, return as-is; otherwise resolve relative to tour JSON
-        if (filename.startsWith('http://') || filename.startsWith('https://') || filename.startsWith('/')) {
+        try {
+          return new URL(filename, dataLink).toString()
+        } catch {
           return filename
         }
-        return tourBaseUrl + filename
       },
     })
 
