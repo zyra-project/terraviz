@@ -332,6 +332,11 @@ class InteractiveSphere {
     this.appState.currentDataset = dataset
     displayDatasetInfo(dataset, this.appState.datasets, (id) => this.loadDataset(id))
 
+    // On small screens, hide the info panel during tours to reduce clutter
+    if (window.innerWidth <= 768) {
+      document.getElementById('info-panel')?.classList.add('hidden')
+    }
+
     if (!this.renderer) return
 
     // Allow playback controls for video datasets so users can scrub/pause
@@ -422,6 +427,17 @@ class InteractiveSphere {
     this.showPlaybackControls(false)
     hideBrowseUI()
     closeChat()
+
+    // On small screens, reduce clutter during tours
+    if (window.innerWidth <= 768) {
+      document.getElementById('map-controls')?.classList.add('hidden')
+      const infoPanel = document.getElementById('info-panel')
+      if (infoPanel) {
+        infoPanel.classList.remove('expanded')
+        infoPanel.querySelector('#info-header')?.setAttribute('aria-expanded', 'false')
+      }
+    }
+
     void this.tourEngine.play()
   }
 
@@ -462,6 +478,8 @@ class InteractiveSphere {
         updatePlayButton(this.hlsService.paused)
       }
     }
+    // Restore map controls hidden during tour
+    document.getElementById('map-controls')?.classList.remove('hidden')
   }
 
   /** Remove all tour UI elements. */
