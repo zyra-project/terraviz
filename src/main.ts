@@ -433,9 +433,11 @@ class InteractiveSphere {
     if (window.innerWidth <= 768) {
       document.getElementById('map-controls')?.classList.add('hidden')
       document.getElementById('info-panel')?.classList.add('hidden')
-      // Shift map center upward so the globe is centered in the visible
-      // space above the tour UI stack (~40% of screen is controls/text)
-      this.renderer?.getMap()?.easeTo?.({ padding: { bottom: Math.round(window.innerHeight * 0.3) }, duration: 800 })
+      // Only shift globe for standalone tours (not runTourOnLoad setup scripts
+      // which complete instantly and would cause a distracting bounce)
+      if (this.tourIsStandalone) {
+        this.renderer?.getMap()?.easeTo?.({ padding: { bottom: Math.round(window.innerHeight * 0.3) }, duration: 800 })
+      }
     }
 
     void this.tourEngine.play()
