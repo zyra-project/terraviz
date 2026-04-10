@@ -246,6 +246,34 @@ export interface FeedbackPayload {
 }
 
 /**
+ * Kind of general feedback — bug report, feature request, or other.
+ */
+export type GeneralFeedbackKind = 'bug' | 'feature' | 'other'
+
+/**
+ * Payload submitted to /api/general-feedback for app-level feedback
+ * (bug reports, feature requests) — distinct from per-message AI
+ * response ratings which use FeedbackPayload.
+ */
+export interface GeneralFeedbackPayload {
+  kind: GeneralFeedbackKind
+  /** User-written description (required, capped server-side at 2000 chars) */
+  message: string
+  /** Optional email or handle for follow-up */
+  contact?: string
+  /** window.location.href at submit time */
+  url?: string
+  /** App version from build metadata */
+  appVersion?: string
+  /** 'web' for browser, 'desktop' for Tauri */
+  platform?: 'web' | 'desktop'
+  /** Currently loaded dataset ID, if any */
+  datasetId?: string | null
+  /** Optional base64 JPEG data URL from screenshotService */
+  screenshot?: string
+}
+
+/**
  * LLM provider configuration (stored in localStorage)
  */
 export type ReadingLevel = 'young-learner' | 'general' | 'in-depth' | 'expert'
