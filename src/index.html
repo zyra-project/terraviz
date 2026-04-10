@@ -277,12 +277,18 @@
             padding: 0.4rem 0.7rem;
             position: absolute;
             top: 0.75rem;
-            right: 0.75rem;
+            /* Clear the help trigger pill (~80px) + gap */
+            right: 6rem;
             background: rgba(13, 13, 18, 0.88);
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
             border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 6px;
+        }
+        /* When the browse overlay is open, the help trigger is hidden,
+           so let the time label return to the corner. */
+        body.browse-open #time-label {
+            right: 0.75rem;
         }
 
         #home-btn:hover {
@@ -2442,6 +2448,10 @@
             .help-btn-primary {
                 min-height: 44px;
             }
+            /* Clear the 48px circular help trigger */
+            #time-label {
+                right: 4.5rem;
+            }
         }
 
         /* Tier 3 — portrait phone: full-screen sheet */
@@ -2451,6 +2461,11 @@
                 right: 0.5rem;
                 width: 40px;
                 height: 40px;
+            }
+            /* Clear the 40px help trigger at 0.5rem inset */
+            #time-label {
+                right: 3.5rem;
+                top: 0.5rem;
             }
             #help-panel {
                 top: 0;
