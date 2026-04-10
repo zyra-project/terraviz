@@ -344,35 +344,40 @@ function onDocumentClick(e: MouseEvent): void {
   closeHelp()
 }
 
-// Module-level refs to the document-level listeners so disposeHelpUI()
-// can remove them cleanly. initHelpUI() is idempotent: calling it twice
-// tears down the previous handlers first so tests (and hot-reloading)
-// don't accumulate listeners.
-let onDocumentKeyDown: ((e: KeyboardEvent) => void) | null = null
-let onDocumentClickRef: ((e: MouseEvent) => void) | null = null
+// AbortController whose signal is passed to every listener added by
+// initHelpUI(). disposeHelpUI() calls .abort() to remove ALL listeners
+// (document-level and element-level) at once. This keeps initHelpUI()
+// idempotent for tests and hot-reload without having to track each
+// listener individually.
+let listenerController: AbortController | null = null
 
 /**
- * Remove global document listeners and reset module state.
- * Exported primarily for tests that re-initialize the UI between
- * runs; also called internally by initHelpUI() for idempotency.
+ * Tear down all listeners added by initHelpUI() and restore the DOM
+ * to a closed state. Exported primarily for tests and hot-reload;
+ * also called internally at the top of initHelpUI() for idempotency.
  */
 export function disposeHelpUI(): void {
-  if (onDocumentKeyDown) {
-    document.removeEventListener('keydown', onDocumentKeyDown)
-    onDocumentKeyDown = null
+  if (listenerController) {
+    listenerController.abort()
+    listenerController = null
   }
-  if (onDocumentClickRef) {
-    document.removeEventListener('click', onDocumentClickRef)
-    onDocumentClickRef = null
-  }
+  // Reset DOM state so if initHelpUI() is called while the panel was
+  // open (hot reload, test setup), the panel isn't left visibly
+  // stranded with no working listeners.
+  const panel = document.getElementById('help-panel')
+  panel?.classList.add('hidden')
+  panel?.setAttribute('aria-hidden', 'true')
+  document.getElementById('help-backdrop')?.classList.add('hidden')
+  document.getElementById('help-trigger')?.setAttribute('aria-expanded', 'false')
+  document.getElementById('help-trigger-browse')?.setAttribute('aria-expanded', 'false')
   isOpen = false
   lastTrigger = null
 }
 
 /** Initialize the help UI — wire up triggers, tabs, and global handlers. */
 export function initHelpUI(): void {
-  // Tear down any existing listeners from a prior init so we don't
-  // accumulate handlers.
+  // Tear down any existing listeners and reset DOM state first so
+  // repeat calls (tests, hot reload) don't accumulate handlers.
   disposeHelpUI()
 
   const trigger = document.getElementById('help-trigger')
@@ -382,11 +387,14 @@ export function initHelpUI(): void {
     return
   }
 
-  trigger.addEventListener('click', () => toggleHelp(trigger))
+  listenerController = new AbortController()
+  const { signal } = listenerController
+
+  trigger.addEventListener('click', () => toggleHelp(trigger), { signal })
 
   // Close button in the panel header (visible on portrait phones; harmless elsewhere)
   const closeBtn = document.getElementById('help-close')
-  closeBtn?.addEventListener('click', closeHelp)
+  closeBtn?.addEventListener('click', closeHelp, { signal })
 
   // Tab list
   const tabs = document.querySelectorAll<HTMLElement>('.help-tab')
@@ -394,19 +402,16 @@ export function initHelpUI(): void {
     tab.addEventListener('click', () => {
       const key = tab.dataset.tab as TabKey | undefined
       if (key) selectTab(key)
-    })
-    tab.addEventListener('keydown', onTabKeyDown)
+    }, { signal })
+    tab.addEventListener('keydown', onTabKeyDown, { signal })
   })
 
-  // Global handlers — stored in module refs so disposeHelpUI() can
-  // remove the exact same function references later.
-  onDocumentKeyDown = (e: KeyboardEvent) => {
+  // Global handlers
+  document.addEventListener('keydown', (e: KeyboardEvent) => {
     if (e.key === 'Escape' && isOpen) {
       e.stopPropagation()
       closeHelp()
     }
-  }
-  onDocumentClickRef = onDocumentClick
-  document.addEventListener('keydown', onDocumentKeyDown)
-  document.addEventListener('click', onDocumentClickRef)
+  }, { signal })
+  document.addEventListener('click', onDocumentClick, { signal })
 }

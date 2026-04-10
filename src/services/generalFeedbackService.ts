@@ -4,24 +4,19 @@
  *
  * Distinct from the AI response feedback flow in chatUI.ts; this one
  * is driven by the help panel's feedback form.
+ *
+ * Uses the browser/webview native fetch rather than the Tauri HTTP
+ * plugin. The endpoint is same-origin, so native fetch resolves the
+ * relative URL correctly and sends an Origin header that matches the
+ * server's CORS allowlist — mirrors chatUI.submitInlineRating() which
+ * also uses plain fetch() to hit /api/feedback on both web and desktop.
+ * The Tauri HTTP plugin is only needed for cross-origin calls like
+ * local LLM servers where the webview's CORS policy would block the
+ * request.
  */
 
 import type { GeneralFeedbackPayload } from '../types'
 import { logger } from '../utils/logger'
-
-// On Tauri, use the HTTP plugin's fetch to bypass webview CORS restrictions.
-const IS_TAURI = !!(window as any).__TAURI__
-const tauriFetchReady: Promise<typeof globalThis.fetch | null> | null = IS_TAURI
-  ? import('@tauri-apps/plugin-http').then(m => m.fetch as typeof globalThis.fetch).catch(() => null)
-  : null
-
-async function corsFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  if (tauriFetchReady) {
-    const f = await tauriFetchReady
-    if (f) return f(input, init)
-  }
-  return fetch(input, init)
-}
 
 export interface SubmitResult {
   ok: boolean
@@ -36,7 +31,7 @@ export interface SubmitResult {
  */
 export async function submitGeneralFeedback(payload: GeneralFeedbackPayload): Promise<SubmitResult> {
   try {
-    const res = await corsFetch('/api/general-feedback', {
+    const res = await fetch('/api/general-feedback', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
