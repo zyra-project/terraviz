@@ -280,8 +280,22 @@ function wireFeedbackForm(): void {
       let screenshot: string | undefined
       if (screenshotEl?.checked) {
         status.textContent = 'Capturing screenshot\u2026'
+        status.className = 'help-form-status'
         const captured = await captureFullScreen()
-        if (captured) screenshot = captured
+        if (captured) {
+          screenshot = captured
+        } else {
+          // Capture can hang or fail on mobile Safari and other
+          // constrained environments. Rather than stranding the
+          // user, surface a clear message and continue with the
+          // text-only report — the description is usually the
+          // most valuable part of a bug report anyway.
+          status.textContent = "Couldn't capture screenshot — sending text only\u2026"
+          status.className = 'help-form-status'
+          // Brief pause so the user reads the message before the
+          // status flips to "Sending…".
+          await new Promise((resolve) => setTimeout(resolve, 800))
+        }
       }
 
       const payload: GeneralFeedbackPayload = {

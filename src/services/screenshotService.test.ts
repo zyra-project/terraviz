@@ -202,4 +202,29 @@ describe('captureFullScreen', () => {
     const result = await captureFullScreen()
     expect(result).toBeNull()
   })
+
+  it('returns null when html2canvas hangs past the timeout', async () => {
+    const globe = document.createElement('canvas')
+    globe.id = 'globe-canvas'
+    globe.width = 100
+    globe.height = 100
+    globe.toDataURL = vi.fn().mockReturnValue('data:image/jpeg;base64,globe')
+    document.body.appendChild(globe)
+
+    // html2canvas returns a promise that never resolves — simulates
+    // the iOS Safari hang. The overall FULL_SCREEN_TIMEOUT_MS (10s)
+    // should kick in and return null.
+    html2canvasMock.mockReturnValue(new Promise(() => { /* never resolves */ }))
+
+    vi.useFakeTimers()
+    try {
+      const capturePromise = captureFullScreen()
+      // Fast-forward past the 10-second overall timeout.
+      await vi.advanceTimersByTimeAsync(10_500)
+      const result = await capturePromise
+      expect(result).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

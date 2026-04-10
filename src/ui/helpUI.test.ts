@@ -224,5 +224,35 @@ describe('helpUI', () => {
       expect(status.textContent).toContain('Rate limit exceeded')
       expect(status.classList.contains('error')).toBe(true)
     })
+
+    it('submits without a screenshot when capture returns null', async () => {
+      // Simulate the iOS Safari hang path: captureFullScreen returns
+      // null (either timed out or failed). Submit should still fire
+      // with screenshot undefined rather than stranding the user.
+      const { captureFullScreen } = await import('../services/screenshotService')
+      vi.mocked(captureFullScreen).mockResolvedValueOnce(null)
+      submitMock.mockResolvedValue({ ok: true, status: 200 })
+
+      const form = document.getElementById('help-feedback-form') as HTMLFormElement
+      const textarea = document.getElementById('help-feedback-message') as HTMLTextAreaElement
+      const screenshotBox = document.getElementById('help-feedback-screenshot') as HTMLInputElement
+      textarea.value = 'Report where the capture stalls on iOS mobile.'
+      screenshotBox.checked = true
+
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+      // The handler awaits the (null) capture and then the 800ms
+      // "sending text only" pause. Drive time forward to flush both.
+      await new Promise(resolve => setTimeout(resolve, 0))
+      await new Promise(resolve => setTimeout(resolve, 900))
+      await new Promise(resolve => setTimeout(resolve, 0))
+
+      expect(submitMock).toHaveBeenCalledTimes(1)
+      const payload = submitMock.mock.calls[0][0]
+      expect(payload.screenshot).toBeUndefined()
+
+      const status = document.getElementById('help-feedback-status')!
+      expect(status.textContent).toMatch(/Thanks/)
+      expect(status.classList.contains('success')).toBe(true)
+    })
   })
 })
