@@ -429,10 +429,13 @@ class InteractiveSphere {
     closeChat()
     document.body.classList.add('tour-active')
 
-    // On small screens, hide non-essential UI during tours
+    // On small screens, hide non-essential UI and shift globe up
     if (window.innerWidth <= 768) {
       document.getElementById('map-controls')?.classList.add('hidden')
       document.getElementById('info-panel')?.classList.add('hidden')
+      // Shift map center upward so the globe is centered in the visible
+      // space above the tour UI stack (~40% of screen is controls/text)
+      this.renderer?.getMap()?.easeTo?.({ padding: { bottom: Math.round(window.innerHeight * 0.3) }, duration: 800 })
     }
 
     void this.tourEngine.play()
@@ -478,6 +481,8 @@ class InteractiveSphere {
     // Restore UI hidden during tour
     document.getElementById('map-controls')?.classList.remove('hidden')
     document.body.classList.remove('tour-active')
+    // Reset map padding that was added to shift globe up on mobile
+    this.renderer?.getMap()?.easeTo?.({ padding: { bottom: 0 }, duration: 500 })
   }
 
   /** Remove all tour UI elements. */
