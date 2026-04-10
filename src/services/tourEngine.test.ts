@@ -21,6 +21,8 @@ vi.mock('../ui/tourUI', () => ({
   showTourControls: vi.fn(),
   hideTourControls: vi.fn(),
   updateTourPlayState: vi.fn(),
+  showTourLegend: vi.fn(),
+  hideTourLegend: vi.fn(),
 }))
 
 // Mock logger to suppress output
