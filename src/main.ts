@@ -339,13 +339,9 @@ class InteractiveSphere {
 
     if (!this.renderer) return
 
-    // On small screens, suppress playback controls during tours to reduce clutter.
-    // On desktop, show them so users can scrub/pause.
-    const isMobileTour = window.innerWidth <= 768
+    // Show playback controls so users can scrub through time-series data
     const tourLoaderCallbacks = {
-      showPlaybackControls: (show: boolean) => {
-        if (!isMobileTour) this.showPlaybackControls(show)
-      },
+      showPlaybackControls: (show: boolean) => this.showPlaybackControls(show),
       showTimeLabel: (show: boolean) => this.showTimeLabel(show),
     }
 
@@ -431,8 +427,9 @@ class InteractiveSphere {
     this.showPlaybackControls(false)
     hideBrowseUI()
     closeChat()
+    document.body.classList.add('tour-active')
 
-    // On small screens, reduce clutter during tours
+    // On small screens, hide non-essential UI during tours
     if (window.innerWidth <= 768) {
       document.getElementById('map-controls')?.classList.add('hidden')
       document.getElementById('info-panel')?.classList.add('hidden')
@@ -478,8 +475,9 @@ class InteractiveSphere {
         updatePlayButton(this.hlsService.paused)
       }
     }
-    // Restore map controls hidden during tour
+    // Restore UI hidden during tour
     document.getElementById('map-controls')?.classList.remove('hidden')
+    document.body.classList.remove('tour-active')
   }
 
   /** Remove all tour UI elements. */

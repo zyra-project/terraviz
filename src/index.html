@@ -579,6 +579,13 @@
             }
         }
 
+        /* Phone portrait: lift playback controls above tour controls */
+        @media (max-width: 600px) and (orientation: portrait) {
+            body.tour-active #playback-controls:not(.hidden) {
+                bottom: 3.5rem !important;
+            }
+        }
+
         #error-message {
             position: absolute;
             top: 50%;

@@ -204,8 +204,8 @@ export function showTourTextBox(params: ShowRectTaskParams): void {
       position: absolute;
       left: 0.5rem;
       right: 0.5rem;
-      bottom: 4rem;
-      max-height: 40vh;
+      bottom: 7rem;
+      max-height: 35vh;
       pointer-events: auto;
       display: flex;
       flex-direction: column;
