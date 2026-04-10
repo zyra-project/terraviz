@@ -441,9 +441,18 @@ export class TourEngine {
   // ── Flow executors ─────────────────────────────────────────────────
 
   private async execPauseForInput(): Promise<void> {
+    await this.pauseAndWait('Tour paused — press play to continue')
+  }
+
+  /**
+   * Pause the tour and wait for the user to resume via play(). Used by
+   * pauseForInput and by media executors that need a user gesture to
+   * unblock browser autoplay policies.
+   */
+  private async pauseAndWait(message: string): Promise<void> {
     this._state = 'paused'
     updateTourPlayState(false)
-    this.callbacks.announce('Tour paused — press play to continue')
+    this.callbacks.announce(message)
     await new Promise<void>(resolve => { this.resumeResolver = resolve })
   }
 
@@ -590,15 +599,34 @@ export class TourEngine {
     const audio = new Audio(url)
     this.activeAudio = audio
 
+    // Start playback. If autoplay is blocked by browser policy, pause the
+    // tour so the user's subsequent play-button click provides a gesture,
+    // then retry once. A second failure is reported normally.
+    const startPlayback = async (): Promise<void> => {
+      try {
+        await audio.play()
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'NotAllowedError') {
+          logger.warn('[Tour] Audio autoplay blocked — pausing for user gesture')
+          await this.pauseAndWait('Audio blocked by browser — press play to continue')
+          if (this.isStopped() || audio !== this.activeAudio) return
+          await audio.play()
+        } else {
+          throw err
+        }
+      }
+    }
+
     if (params.asynchronous) {
       // Fire and forget — don't wait for completion
-      audio.play().catch(err => logger.warn('[Tour] Audio play failed:', err))
+      startPlayback().catch(err => logger.warn('[Tour] Audio play failed:', err))
     } else {
+      await startPlayback()
+      if (this.isStopped() || audio !== this.activeAudio) return
       // Wait for audio to finish
       await new Promise<void>((resolve, reject) => {
         audio.addEventListener('ended', () => resolve(), { once: true })
         audio.addEventListener('error', () => reject(new Error('Audio playback failed')), { once: true })
-        audio.play().catch(reject)
       })
     }
   }

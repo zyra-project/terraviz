@@ -418,6 +418,11 @@ export interface ShowPopupHtmlTaskParams {
   yPct?: number
   widthPct?: number
   heightPct?: number
+  /**
+   * When a `url` is supplied, opt in to running JavaScript inside the
+   * sandboxed iframe. Defaults to false — only enable for trusted origins.
+   */
+  allowScripts?: boolean
 }
 
 export interface AddPlacemarkTaskParams {

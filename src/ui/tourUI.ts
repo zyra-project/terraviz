@@ -479,7 +479,10 @@ export function showTourVideo(params: PlayVideoTaskParams): void {
 
   const video = document.createElement('video')
   video.src = params.filename
-  video.autoplay = true
+  video.playsInline = true
+  // Don't set the autoplay attribute — we call play() explicitly so we can
+  // handle a NotAllowedError (browsers block autoplay with sound unless the
+  // tab has a media-engagement history).
   video.controls = params.showControls ?? false
   if (mode === 'phone-portrait') {
     video.style.cssText = `
@@ -500,6 +503,21 @@ export function showTourVideo(params: PlayVideoTaskParams): void {
   // Show wrapper once video has dimensions, or on error so it can be closed
   video.onloadedmetadata = () => { wrapper.style.visibility = '' }
   video.onerror = () => { wrapper.style.visibility = '' }
+  // Start playback. If the browser blocks autoplay (typically because the
+  // video has audio and the user hasn't interacted yet), fall back to muted
+  // autoplay and expose controls so the user can unmute.
+  const startVideo = async () => {
+    try {
+      await video.play()
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'NotAllowedError') {
+        video.muted = true
+        video.controls = true
+        try { await video.play() } catch { /* give up — controls are visible */ }
+      }
+    }
+  }
+  void startVideo()
   wrapper.appendChild(video)
 
   addCloseButton(wrapper, () => hideTourVideo(videoID))
@@ -545,7 +563,12 @@ export function showTourPopup(params: ShowPopupHtmlTaskParams): void {
     const iframe = document.createElement('iframe')
     iframe.src = params.url
     iframe.style.cssText = 'width:100%;height:100%;border:none;border-radius:10px;'
-    iframe.setAttribute('sandbox', 'allow-scripts')
+    // Default to the most restrictive sandbox — no scripts, no same-origin,
+    // no forms. Tour authors can opt in to scripts via allowScripts on the
+    // task params when the target URL is known-trusted.
+    const sandboxFlags = params.allowScripts ? 'allow-scripts' : ''
+    iframe.setAttribute('sandbox', sandboxFlags)
+    iframe.setAttribute('referrerpolicy', 'no-referrer')
     wrapper.appendChild(iframe)
   } else if (params.html) {
     // Render untrusted HTML in a sandboxed iframe via srcdoc
@@ -671,7 +694,7 @@ export function showTourControls(engine: TourEngine, onStopCb?: () => void): voi
 
   controlsEl.classList.remove('hidden')
   updateTourProgress(engine.currentIndex, engine.totalSteps)
-  // Start with play button disabled — it enables when tour hits a pause
+  // Show the pause icon — tour begins in the playing state
   updateTourPlayState(true)
 
   // Wire buttons
@@ -680,11 +703,11 @@ export function showTourControls(engine: TourEngine, onStopCb?: () => void): voi
   document.getElementById('tour-next-btn')?.addEventListener('click', onNext)
   document.getElementById('tour-stop-btn')?.addEventListener('click', onStop)
 
-  // Space bar handler for resuming paused tours
+  // Space bar handler — toggles play/pause while a tour is active
   spaceHandler = (e: KeyboardEvent) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-    const btn = document.getElementById('tour-play-btn') as HTMLButtonElement | null
-    if (e.code === 'Space' && boundEngine && boundEngine.state === 'paused' && !btn?.disabled) {
+    if (e.code !== 'Space' || !boundEngine) return
+    if (boundEngine.state === 'playing' || boundEngine.state === 'paused') {
       e.preventDefault()
       onPlayPause()
     }
@@ -717,20 +740,18 @@ export function updateTourProgress(index: number, total: number): void {
 export function updateTourPlayState(isPlaying: boolean): void {
   const btn = document.getElementById('tour-play-btn') as HTMLButtonElement | null
   if (!btn) return
+  // Button stays enabled in both states so the user can pause a running
+  // tour or resume a paused one. Icon/label toggles accordingly.
+  btn.disabled = false
+  btn.style.opacity = ''
   if (isPlaying) {
-    // Tour is executing tasks — disable the button
     btn.innerHTML = '&#x23F8;&#xFE0E;'
-    btn.setAttribute('aria-label', 'Tour running')
-    btn.title = 'Tour running'
-    btn.disabled = true
-    btn.style.opacity = '0.4'
+    btn.setAttribute('aria-label', 'Pause tour')
+    btn.title = 'Pause tour'
   } else {
-    // Tour is paused — enable the play button
     btn.innerHTML = '&#x25B6;&#xFE0E;'
     btn.setAttribute('aria-label', 'Continue tour')
     btn.title = 'Continue tour'
-    btn.disabled = false
-    btn.style.opacity = ''
   }
 }
 
