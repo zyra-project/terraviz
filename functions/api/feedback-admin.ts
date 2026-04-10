@@ -14,7 +14,7 @@ export const onRequestGet: PagesFunction = async (context) => {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Orbit Feedback Dashboard</title>
+  <title>Feedback Dashboard</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -130,12 +130,40 @@ export const onRequestGet: PagesFunction = async (context) => {
     .detail-row .detail-field { flex: 1; min-width: 120px; }
     .detail-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; }
     .detail-tag { background: rgba(77,166,255,0.1); border: 1px solid rgba(77,166,255,0.25); border-radius: 10px; padding: 0.15rem 0.5rem; font-size: 0.65rem; color: #6ab8ff; }
+    .detail-screenshot { margin-top: 0.4rem; max-width: 100%; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); display: block; }
+
+    /* Tab bar */
+    .tab-bar { display: flex; gap: 0; margin-bottom: 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.1); }
+    .tab-btn {
+      padding: 0.6rem 1rem; background: none; border: none;
+      border-bottom: 2px solid transparent;
+      color: rgba(255,255,255,0.5); font-size: 0.78rem; letter-spacing: 0.03em;
+      text-transform: uppercase; cursor: pointer; font-family: inherit;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .tab-btn:hover { color: rgba(255,255,255,0.8); }
+    .tab-btn.active { color: #e8eaf0; border-bottom-color: #4da6ff; }
+
+    /* General feedback specific */
+    .stat-card.kind-bug .value { color: #ff8866; }
+    .stat-card.kind-feature .value { color: #4da6ff; }
+    .stat-card.kind-other .value { color: #c8a864; }
+    .chart-bar-bug { background: #ff8866; border-radius: 2px 2px 0 0; min-height: 0; }
+    .chart-bar-feature { background: #4da6ff; border-radius: 0; min-height: 0; }
+    .chart-bar-other { background: #c8a864; border-radius: 0; min-height: 0; }
+    .kind-pill {
+      display: inline-block; padding: 0.1rem 0.45rem; border-radius: 10px;
+      font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .kind-pill.bug { background: rgba(255,136,102,0.15); color: #ff8866; border: 1px solid rgba(255,136,102,0.3); }
+    .kind-pill.feature { background: rgba(77,166,255,0.15); color: #4da6ff; border: 1px solid rgba(77,166,255,0.3); }
+    .kind-pill.other { background: rgba(200,168,100,0.15); color: #c8a864; border: 1px solid rgba(200,168,100,0.3); }
   </style>
 </head>
 <body>
   <div class="login-overlay" id="login">
     <div class="login-box">
-      <h1>Orbit Feedback</h1>
+      <h1>Feedback Dashboard</h1>
       <p>Enter the admin token to view the dashboard</p>
       <input type="password" id="token-input" placeholder="Admin token" autocomplete="off">
       <button id="login-btn">Sign in</button>
@@ -145,12 +173,16 @@ export const onRequestGet: PagesFunction = async (context) => {
 
   <div class="dashboard hidden" id="dashboard">
     <div class="dash-header">
-      <h1>Orbit Feedback Dashboard</h1>
+      <h1>Feedback Dashboard</h1>
       <div class="dash-actions">
         <button id="refresh-btn">Refresh</button>
         <button id="export-btn">Export JSONL</button>
         <button id="logout-btn">Logout</button>
       </div>
+    </div>
+    <div class="tab-bar" role="tablist">
+      <button class="tab-btn active" id="tab-ai" role="tab" data-tab="ai" aria-selected="true">AI Feedback</button>
+      <button class="tab-btn" id="tab-general" role="tab" data-tab="general" aria-selected="false">General Feedback</button>
     </div>
     <div id="content"><div class="loading">Loading...</div></div>
   </div>
@@ -158,6 +190,7 @@ export const onRequestGet: PagesFunction = async (context) => {
   <script>
     const BASE = ${JSON.stringify(baseUrl)};
     let token = sessionStorage.getItem('feedback-token') || '';
+    let activeTab = 'ai';
 
     // Auto-login if token is stored
     if (token) { tryLogin(token); }
@@ -176,9 +209,31 @@ export const onRequestGet: PagesFunction = async (context) => {
       document.getElementById('login').classList.remove('hidden');
       document.getElementById('dashboard').classList.add('hidden');
     });
-    document.getElementById('export-btn').addEventListener('click', async () => {
+    document.getElementById('export-btn').addEventListener('click', exportActiveTab);
+
+    // Tab switching
+    document.getElementById('tab-ai').addEventListener('click', () => switchTab('ai'));
+    document.getElementById('tab-general').addEventListener('click', () => switchTab('general'));
+
+    function switchTab(tab) {
+      if (activeTab === tab) return;
+      activeTab = tab;
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        const selected = btn.dataset.tab === tab;
+        btn.classList.toggle('active', selected);
+        btn.setAttribute('aria-selected', String(selected));
+      });
+      // Update export button label to match the active tab's format
+      document.getElementById('export-btn').textContent = tab === 'ai' ? 'Export JSONL' : 'Export CSV';
+      loadDashboard();
+    }
+
+    async function exportActiveTab() {
       try {
-        const res = await fetch(BASE + '/api/feedback-export?include_prompt=true', {
+        const endpoint = activeTab === 'ai'
+          ? '/api/feedback-export?include_prompt=true'
+          : '/api/general-feedback-export';
+        const res = await fetch(BASE + endpoint, {
           headers: { 'Authorization': 'Bearer ' + token }
         });
         if (!res.ok) throw new Error('Export failed');
@@ -186,11 +241,13 @@ export const onRequestGet: PagesFunction = async (context) => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'feedback-export-' + new Date().toISOString().slice(0,10) + '.jsonl';
+        const ext = activeTab === 'ai' ? 'jsonl' : 'csv';
+        const prefix = activeTab === 'ai' ? 'feedback-export' : 'general-feedback-export';
+        a.download = prefix + '-' + new Date().toISOString().slice(0,10) + '.' + ext;
         a.click();
         URL.revokeObjectURL(url);
       } catch (err) { alert(err.message); }
-    });
+    }
 
     async function tryLogin(t) {
       const err = document.getElementById('login-error');
@@ -211,12 +268,16 @@ export const onRequestGet: PagesFunction = async (context) => {
 
     async function loadDashboard() {
       document.getElementById('content').innerHTML = '<div class="loading">Loading...</div>';
+      const endpoint = activeTab === 'ai'
+        ? '/api/feedback-dashboard?days=30&recent=100'
+        : '/api/general-feedback-dashboard?days=30&recent=100';
       try {
-        const res = await fetch(BASE + '/api/feedback-dashboard?days=30&recent=100', {
+        const res = await fetch(BASE + endpoint, {
           headers: { 'Authorization': 'Bearer ' + token }
         });
         const data = await res.json();
-        renderDashboard(data);
+        if (activeTab === 'ai') renderDashboard(data);
+        else renderGeneralDashboard(data);
       } catch { document.getElementById('content').innerHTML = '<div class="loading">Failed to load</div>'; }
     }
 
@@ -288,6 +349,108 @@ export const onRequestGet: PagesFunction = async (context) => {
           if (window._feedbackRows && window._feedbackRows[idx]) showDetail(window._feedbackRows[idx]);
         });
       });
+    }
+
+    function renderGeneralDashboard(d) {
+      let html = '<div class="stats">';
+      html += statCard(d.totalCount, 'Total', '');
+      html += statCard(d.bugCount, 'Bugs', 'kind-bug');
+      html += statCard(d.featureCount, 'Features', 'kind-feature');
+      html += statCard(d.otherCount, 'Other', 'kind-other');
+      html += '</div>';
+
+      // Chart — stacked bars by kind
+      if (d.byDay && d.byDay.length > 0) {
+        const maxDay = Math.max(...d.byDay.map(r => r.bugs + r.features + r.other), 1);
+        html += '<div class="section"><h2>Last 30 Days</h2><div class="chart-bars">';
+        const days = [...d.byDay].reverse().slice(-30);
+        for (const day of days) {
+          const bH = Math.max((day.bugs / maxDay) * 90, day.bugs > 0 ? 2 : 0);
+          const fH = Math.max((day.features / maxDay) * 90, day.features > 0 ? 2 : 0);
+          const oH = Math.max((day.other / maxDay) * 90, day.other > 0 ? 2 : 0);
+          html += '<div class="chart-bar-group"><div class="chart-bar-stack" style="height:90px">'
+            + '<div class="chart-bar-bug" style="height:' + bH + 'px"></div>'
+            + '<div class="chart-bar-feature" style="height:' + fH + 'px"></div>'
+            + '<div class="chart-bar-other" style="height:' + oH + 'px"></div>'
+            + '</div><div class="chart-label">' + day.date.slice(5) + '</div></div>';
+        }
+        html += '</div></div>';
+      }
+
+      // Recent
+      if (d.recentFeedback && d.recentFeedback.length > 0) {
+        window._generalRows = d.recentFeedback;
+        html += '<div class="section"><h2>Recent Feedback</h2><table><thead><tr>';
+        html += '<th>Kind</th><th>Message</th><th>Contact</th><th>Dataset</th><th>📷</th><th>Date</th>';
+        html += '</tr></thead><tbody>';
+        for (let i = 0; i < d.recentFeedback.length; i++) {
+          const r = d.recentFeedback[i];
+          const pill = '<span class="kind-pill ' + r.kind + '">' + r.kind + '</span>';
+          const ss = r.hasScreenshot ? '📷' : '';
+          const dt = formatDateTime(r.created_at);
+          html += '<tr class="clickable" data-row-idx="' + i + '">'
+            + '<td>' + pill + '</td>'
+            + '<td class="td-comment" title="' + escAttr(r.message || '') + '">' + esc(r.message || '-') + '</td>'
+            + '<td class="td-comment">' + esc(r.contact || '-') + '</td>'
+            + '<td>' + esc(r.dataset_id || '-') + '</td>'
+            + '<td>' + ss + '</td>'
+            + '<td style="white-space:nowrap">' + dt + '</td>'
+            + '</tr>';
+        }
+        html += '</tbody></table></div>';
+      } else {
+        html += '<div class="section"><div class="loading">No feedback yet.</div></div>';
+      }
+
+      document.getElementById('content').innerHTML = html;
+
+      // Wire row clicks
+      document.querySelectorAll('tr.clickable').forEach(tr => {
+        tr.addEventListener('click', () => {
+          const idx = parseInt(tr.dataset.rowIdx);
+          if (window._generalRows && window._generalRows[idx]) showGeneralDetail(window._generalRows[idx]);
+        });
+      });
+    }
+
+    function showGeneralDetail(r) {
+      document.getElementById('detail-overlay')?.remove();
+
+      const overlay = document.createElement('div');
+      overlay.className = 'detail-overlay';
+      overlay.id = 'detail-overlay';
+
+      const pill = '<span class="kind-pill ' + r.kind + '">' + r.kind + '</span>';
+
+      let html = '<div class="detail-panel">';
+      html += '<h2>' + pill + '<button class="detail-close" id="detail-close">&times;</button></h2>';
+
+      html += '<div class="detail-row">';
+      html += field('Date', formatDateTime(r.created_at));
+      html += field('Platform', r.platform || '-');
+      html += field('Dataset', r.dataset_id || '-');
+      html += '</div>';
+
+      html += '<div class="detail-field"><div class="detail-label">Message</div><div class="detail-value">' + esc(r.message || '') + '</div></div>';
+
+      if (r.contact) html += field('Contact', r.contact);
+      if (r.url) html += field('URL', r.url);
+      if (r.app_version) html += field('App Version', r.app_version);
+      if (r.user_agent) html += '<div class="detail-field"><div class="detail-label">User Agent</div><div class="detail-value mono">' + esc(r.user_agent) + '</div></div>';
+
+      if (r.screenshot) {
+        html += '<div class="detail-field"><div class="detail-label">Screenshot</div>'
+          + '<img class="detail-screenshot" src="' + escAttr(r.screenshot) + '" alt="User-attached screenshot of the globe view"></div>';
+      }
+
+      html += '</div>';
+      overlay.innerHTML = html;
+      document.body.appendChild(overlay);
+
+      document.getElementById('detail-close').addEventListener('click', closeDetail);
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) closeDetail(); });
+      overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDetail(); });
+      document.getElementById('detail-close').focus();
     }
 
     function showDetail(r) {
