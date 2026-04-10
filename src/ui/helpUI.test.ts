@@ -13,7 +13,8 @@ vi.mock('../services/generalFeedbackService', () => ({
 
 // Mock the screenshot service
 vi.mock('../services/screenshotService', () => ({
-  captureGlobeScreenshot: vi.fn(async () => 'data:image/jpeg;base64,fake'),
+  captureFullScreen: vi.fn(async () => 'data:image/jpeg;base64,fake'),
+  captureGlobeScreenshot: vi.fn(async () => 'data:image/jpeg;base64,fake-globe'),
 }))
 
 // Import after mocks are set up

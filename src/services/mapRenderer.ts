@@ -461,27 +461,44 @@ export class MapRenderer implements GlobeRenderer {
   }
 
   /**
-   * Capture the current globe view as a downscaled JPEG data URL.
+   * Force MapLibre to render a fresh frame and resolve once the render
+   * event fires. Used as a prelude to screenshot capture so the WebGL
+   * drawing buffer is guaranteed to be populated when we read pixels.
+   */
+  async triggerFreshRender(): Promise<void> {
+    const map = this.map
+    if (!map) return
+    await new Promise<void>((resolve) => {
+      map.once('render', () => resolve())
+      map.triggerRepaint()
+    })
+  }
+
+  /**
+   * Capture the current globe view as a JPEG data URL.
    *
    * A naive `canvas.toDataURL()` is unreliable on MapLibre — even with
    * `preserveDrawingBuffer: true`, the WebGL drawing buffer can be
    * cleared between frames when the map is idle, producing a black
-   * image. Force a fresh repaint and wait for MapLibre to finish
+   * image. We force a fresh repaint and wait for MapLibre to finish
    * rendering before reading pixels.
+   *
+   * @param options.maxSize Max dimension (px) on the longer edge of the
+   * output image. Defaults to SCREENSHOT_MAX_SIZE (512) for the vision
+   * flow. Pass `Infinity` (or a very large number) to skip the
+   * downsample step — useful when compositing into a larger capture.
    *
    * Returns null if the map isn't initialized or the capture fails.
    */
-  async captureScreenshot(): Promise<string | null> {
+  async captureScreenshot(options?: { maxSize?: number }): Promise<string | null> {
     const map = this.map
     if (!map) return null
+    const maxSize = options?.maxSize ?? SCREENSHOT_MAX_SIZE
     try {
-      await new Promise<void>((resolve) => {
-        map.once('render', () => resolve())
-        map.triggerRepaint()
-      })
+      await this.triggerFreshRender()
       const canvas = map.getCanvas()
       const { width, height } = canvas
-      const scale = Math.min(1, SCREENSHOT_MAX_SIZE / Math.max(width, height))
+      const scale = Math.min(1, maxSize / Math.max(width, height))
       if (scale < 1) {
         const offscreen = document.createElement('canvas')
         offscreen.width = Math.round(width * scale)

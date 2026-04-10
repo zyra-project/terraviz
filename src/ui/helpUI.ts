@@ -12,7 +12,7 @@
  */
 
 import type { GeneralFeedbackKind, GeneralFeedbackPayload } from '../types'
-import { captureGlobeScreenshot } from '../services/screenshotService'
+import { captureFullScreen } from '../services/screenshotService'
 import { submitGeneralFeedback } from '../services/generalFeedbackService'
 import { closeChat } from './chatUI'
 import { escapeHtml } from './browseUI'
@@ -270,7 +270,8 @@ function wireFeedbackForm(): void {
 
     let screenshot: string | undefined
     if (screenshotEl?.checked) {
-      const captured = await captureGlobeScreenshot()
+      status.textContent = 'Capturing screenshot\u2026'
+      const captured = await captureFullScreen()
       if (captured) screenshot = captured
     }
 
