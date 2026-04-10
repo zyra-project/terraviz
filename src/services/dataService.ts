@@ -10,6 +10,17 @@ import { logger } from '../utils/logger'
 const METADATA_URL = 'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/dataset.json'
 const ENRICHED_METADATA_URL = '/assets/sos_dataset_metadata.json'
 
+/**
+ * Tour datasets from the upstream SOS catalog that we suppress from the UI
+ * because they use tour tasks our TourEngine doesn't implement yet (e.g.
+ * 360-degree media, Unity-specific scene controls). Revisit when adding
+ * support for the missing tasks.
+ */
+export const HIDDEN_TOUR_IDS: ReadonlySet<string> = new Set([
+  'INTERNAL_SOS_687',                     // 360 Media - National Marine Sanctuaries
+  'INTERNAL_SOS_HRRR_Smoke_Tour_Mobile',  // Tour - HRRR-Smoke and 2020 Fire Season
+])
+
 interface RawEnrichedEntry {
   url?: string
   title?: string
@@ -79,7 +90,7 @@ export class DataService {
 
       // Filter, sort, and enrich datasets
       const datasets = rawDatasets
-        .filter(d => !d.isHidden && this.isSupportedDataset(d))
+        .filter(d => !d.isHidden && !HIDDEN_TOUR_IDS.has(d.id) && this.isSupportedDataset(d))
         .sort((a, b) => (b.weight || 0) - (a.weight || 0))
         .map(d => this.enrichDataset(d))
 

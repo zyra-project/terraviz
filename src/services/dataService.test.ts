@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { dataService } from './dataService'
+import { dataService, HIDDEN_TOUR_IDS } from './dataService'
 import type { Dataset } from '../types'
 
 // Helper to build a minimal Dataset
@@ -127,5 +127,22 @@ describe('DataService.getDatasetById', () => {
   it('returns undefined when cache is empty', () => {
     dataService.clearCache()
     expect(dataService.getDatasetById('any-id')).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// HIDDEN_TOUR_IDS — client-side denylist for unsupported SOS tours
+// ---------------------------------------------------------------------------
+describe('HIDDEN_TOUR_IDS', () => {
+  it('suppresses the 360 Media tour (uses unsupported task types)', () => {
+    expect(HIDDEN_TOUR_IDS.has('INTERNAL_SOS_687')).toBe(true)
+  })
+
+  it('suppresses the HRRR-Smoke tour (uses unsupported task types)', () => {
+    expect(HIDDEN_TOUR_IDS.has('INTERNAL_SOS_HRRR_Smoke_Tour_Mobile')).toBe(true)
+  })
+
+  it('does not suppress the built-in Climate Connections tour', () => {
+    expect(HIDDEN_TOUR_IDS.has('SAMPLE_TOUR')).toBe(false)
   })
 })
