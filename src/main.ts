@@ -142,7 +142,10 @@ class InteractiveSphere {
       this.panelStates = Array.from({ length: this.viewports.getPanelCount() }, createPanelState)
       const primary = this.viewports.getPrimary()
       if (!primary) throw new Error('Viewport manager failed to create a primary renderer')
-      initMapControls(primary, (layout) => this.viewports.setLayout(layout))
+      initMapControls(primary, {
+        onSetLayout: (layout) => this.viewports.setLayout(layout),
+        onOpenBrowse: () => this.openBrowsePanel(),
+      })
       initDownloadUI().catch(err => logger.warn('[App] Download UI init failed:', err))
       initHelpUI()
       logger.info('[App] Using MapLibre renderer (layout: %s)', initialLayout)
@@ -655,6 +658,40 @@ class InteractiveSphere {
       collapseBrowseUI()
     } else {
       hideBrowseUI()
+    }
+  }
+
+  /**
+   * Open (or re-open) the dataset browse panel. Called by the
+   * Browse button in the map-controls toolbar. Handles all three
+   * states the panel can be in: hidden (initial), collapsed (after
+   * a previous multi-view load), or already visible (no-op).
+   */
+  private openBrowsePanel(): void {
+    const overlay = document.getElementById('browse-overlay')
+    // If the overlay has never been populated (initial hidden state
+    // in single-view mode when a ?dataset=FOO URL was used), call
+    // showBrowseUI to render it fresh.
+    const needsFirstRender = !overlay || overlay.classList.contains('hidden')
+    if (needsFirstRender) {
+      showBrowseUI(this.appState.datasets, {
+        onSelectDataset: (id) => this.selectDatasetFromBrowse(id),
+        announce: (msg) => this.announce(msg),
+        isMobile: this.isMobile,
+        onOpenChat: (query) => this.openChatWithQuery(query),
+      })
+      return
+    }
+    // Already rendered — either collapsed or fully visible. Remove
+    // the collapsed class either way and ensure `browse-open` is
+    // set so other UI can react.
+    overlay!.classList.remove('collapsed')
+    document.body.classList.add('browse-open')
+    const toggle = document.getElementById('browse-toggle')
+    if (toggle) {
+      toggle.innerHTML = '&#9666;'
+      toggle.setAttribute('aria-label', 'Close dataset browser')
+      toggle.setAttribute('aria-expanded', 'true')
     }
   }
 

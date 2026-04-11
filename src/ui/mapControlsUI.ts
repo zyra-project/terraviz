@@ -1,23 +1,30 @@
 /**
  * Map Controls UI — floating toolbar for MapLibre overlay toggles.
  *
- * Provides direct buttons for labels, boundaries, terrain, and clearing
- * markers/highlights without needing the chat.
- *
- * When the `?setview=1` dev flag is present, also renders a layout
- * picker (1/2h/2v/4) for multi-viewport smoke testing. The picker is
- * hidden by default until Phase 2 ships real per-viewport datasets.
+ * Provides direct buttons for labels, boundaries, terrain, clearing
+ * markers/highlights, and a Browse button that opens the dataset
+ * list overlay. When the `?setview=` dev flag is present, also
+ * renders a layout picker (1/2h/2v/4) for multi-viewport testing.
  */
 
 import type { MapRenderer } from '../services/mapRenderer'
 import type { ViewLayout } from '../services/viewportManager'
 
+/** Options passed from the app shell to wire additional callbacks. */
+export interface MapControlsCallbacks {
+  /** Multi-viewport: user picked a layout from the picker. */
+  onSetLayout?: (layout: ViewLayout) => void
+  /** User clicked Browse — open the dataset list. */
+  onOpenBrowse?: () => void
+}
+
 /** Show the map controls toolbar and wire events to the MapRenderer.
  *  Idempotent — safe to call multiple times (skips if already initialized). */
 export function initMapControls(
   renderer: MapRenderer,
-  onSetLayout?: (layout: ViewLayout) => void,
+  callbacks: MapControlsCallbacks = {},
 ): void {
+  const { onSetLayout, onOpenBrowse } = callbacks
   const container = document.getElementById('map-controls')
   if (!container || container.dataset.initialized) return
   container.dataset.initialized = 'true'
@@ -38,7 +45,14 @@ export function initMapControls(
   `
     : ''
 
+  // Browse button is always rendered so the dataset list is
+  // discoverable even after the browse panel has been dismissed.
+  // In single-view mode it's a convenience; in multi-view it's
+  // essential — the peek-out toggle tab on the browse panel was
+  // hard to find and sometimes sat off-screen depending on the
+  // viewport width. This button is the durable affordance.
   container.innerHTML = `
+    <button type="button" class="map-ctrl-btn" id="map-ctrl-browse" title="Browse datasets" aria-label="Browse datasets">Browse</button>
     <button type="button" class="map-ctrl-btn" id="map-ctrl-labels" title="Toggle geographic labels" aria-label="Toggle geographic labels" aria-pressed="false">Labels</button>
     <button type="button" class="map-ctrl-btn" id="map-ctrl-borders" title="Toggle country borders" aria-label="Toggle country borders" aria-pressed="false">Borders</button>
     <button type="button" class="map-ctrl-btn" id="map-ctrl-terrain" title="Toggle 3D terrain" aria-label="Toggle 3D terrain" aria-pressed="false">Terrain</button>
@@ -50,10 +64,15 @@ export function initMapControls(
   container.classList.remove('hidden')
 
   // Wire toggle buttons
+  const browseBtn = document.getElementById('map-ctrl-browse')!
   const labelsBtn = document.getElementById('map-ctrl-labels')!
   const bordersBtn = document.getElementById('map-ctrl-borders')!
   const terrainBtn = document.getElementById('map-ctrl-terrain')!
   const clearBtn = document.getElementById('map-ctrl-clear')!
+
+  browseBtn.addEventListener('click', () => {
+    onOpenBrowse?.()
+  })
 
   // Wire layout picker (only when dev flag is set)
   if (setViewDev && onSetLayout) {
