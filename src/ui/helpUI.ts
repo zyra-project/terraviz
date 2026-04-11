@@ -259,10 +259,15 @@ function wireFeedbackForm(): void {
   const submit = document.getElementById('help-feedback-submit') as HTMLButtonElement | null
   if (!form || !textarea || !counter || !status || !submit) return
 
+  // Attach to the same AbortController signal used by initHelpUI() so
+  // disposeHelpUI() tears these listeners down alongside the global
+  // ones. Prevents listener accumulation on hot-reload / repeat init.
+  const signal = listenerController?.signal
+
   const updateCounter = () => {
     counter.textContent = `${textarea.value.length} / ${MESSAGE_MAX}`
   }
-  textarea.addEventListener('input', updateCounter)
+  textarea.addEventListener('input', updateCounter, signal ? { signal } : undefined)
   updateCounter()
 
   form.addEventListener('submit', async (e) => {
@@ -339,7 +344,7 @@ function wireFeedbackForm(): void {
     } finally {
       submit.disabled = false
     }
-  })
+  }, signal ? { signal } : undefined)
 }
 
 /** Handle arrow-key navigation between tabs. */
@@ -364,6 +369,56 @@ function onDocumentClick(e: MouseEvent): void {
   if (trigger?.contains(target)) return
   if (triggerBrowse?.contains(target)) return
   closeHelp()
+}
+
+/**
+ * Return the currently focusable descendants of the help panel,
+ * ignoring elements that are hidden via display:none or
+ * tabindex="-1". Used by the focus trap so Tab/Shift-Tab cycle
+ * within the dialog instead of escaping to the underlying page.
+ */
+function getFocusableInPanel(): HTMLElement[] {
+  const panel = document.getElementById('help-panel')
+  if (!panel) return []
+  const nodes = panel.querySelectorAll<HTMLElement>(
+    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  )
+  return Array.from(nodes).filter((el) => {
+    // display:none elements have no offsetParent (except <body>).
+    // Also skip elements inside a display:none ancestor.
+    if (el.offsetParent === null && el.tagName !== 'BODY') return false
+    return true
+  })
+}
+
+/**
+ * Focus trap for the modal help dialog. Intercepts Tab / Shift-Tab
+ * and cycles focus between the first and last focusable elements
+ * inside the panel so keyboard users can't inadvertently move focus
+ * to the underlying page while the dialog is open. Matches the
+ * behavior implied by aria-modal="true" on the panel.
+ */
+function onTrapFocus(e: KeyboardEvent): void {
+  if (!isOpen || e.key !== 'Tab') return
+  const focusables = getFocusableInPanel()
+  if (focusables.length === 0) return
+  const first = focusables[0]
+  const last = focusables[focusables.length - 1]
+  const active = document.activeElement as HTMLElement | null
+  const panel = document.getElementById('help-panel')
+  const withinPanel = !!(active && panel?.contains(active))
+
+  if (e.shiftKey) {
+    if (!withinPanel || active === first) {
+      e.preventDefault()
+      last.focus()
+    }
+  } else {
+    if (!withinPanel || active === last) {
+      e.preventDefault()
+      first.focus()
+    }
+  }
 }
 
 // AbortController whose signal is passed to every listener added by
@@ -436,4 +491,7 @@ export function initHelpUI(): void {
     }
   }, { signal })
   document.addEventListener('click', onDocumentClick, { signal })
+  // Focus trap — paired with aria-modal="true" on #help-panel so
+  // keyboard focus can't escape the dialog while it's open.
+  document.addEventListener('keydown', onTrapFocus, { signal })
 }

@@ -57,7 +57,7 @@ CREATE INDEX IF NOT EXISTS idx_general_feedback_kind ON general_feedback (kind);
 CREATE INDEX IF NOT EXISTS idx_general_feedback_created_at ON general_feedback (created_at);
 ```
 
-Screenshot is stored as a TEXT data URL. The existing `captureGlobeScreenshot()` helper downsamples to max 512px and compresses at JPEG 0.6 — typical payload is 10–30KB, well under D1 row limits. Server-side cap: 200KB to guard against pathological inputs.
+Screenshot is stored as an optional TEXT data URL. **Updated from the original plan**: the implemented feedback flow captures via a new `captureFullScreen()` helper rather than the older globe-only `captureGlobeScreenshot()`. The image is a full-UI composite (with the help UI and backdrop excluded via html2canvas's `ignoreElements`), scaled to at most 1280px on the longer edge and JPEG-compressed at 0.7 quality client-side. Payloads are materially larger than the old 10–30KB globe-only captures — typical full-UI composites land in the 50–150KB range — so the server enforces a 200KB cap to guard against pathological inputs while staying comfortably within D1 row limits. The globe-only `captureGlobeScreenshot()` path still exists and is used by the Orbit vision flow.
 
 ---
 
@@ -89,7 +89,7 @@ The Orbit chatbot already has `captureGlobeScreenshot()` at `src/services/docent
 
 | File | Responsibility |
 |---|---|
-| `src/services/generalFeedbackService.ts` | Thin module exporting `submitGeneralFeedback(payload)`. POSTs to `/api/general-feedback`. Uses the Tauri HTTP plugin lazy-loaded behind `IS_TAURI` (pattern from `llmProvider.ts`) so desktop builds bypass webview CORS. |
+| `src/services/generalFeedbackService.ts` | Thin module exporting `submitGeneralFeedback(payload)`. POSTs to `/api/general-feedback` using the browser/webview **native `fetch`** — not the Tauri HTTP plugin. The endpoint is same-origin, so native fetch resolves the relative URL correctly and sends an `Origin` header that matches the server's CORS allowlist. This matches how `chatUI.submitInlineRating()` already hits `/api/feedback` on both web and desktop. (The original plan suggested the Tauri HTTP plugin, but that's only needed for cross-origin calls like local LLM servers where webview CORS blocks the webview's fetch; same-origin API routes don't need it.) |
 
 ### UI — new module
 

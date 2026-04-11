@@ -27,7 +27,7 @@ function setupDom(): void {
       <span class="help-trigger-label">Help</span>
     </button>
     <div id="help-backdrop" class="hidden" aria-hidden="true"></div>
-    <div id="help-panel" class="hidden" role="dialog" aria-hidden="true">
+    <div id="help-panel" class="hidden" role="dialog" aria-modal="true" aria-hidden="true">
       <div id="help-header">
         <span id="help-title">Help</span>
         <button id="help-close">×</button>
@@ -101,6 +101,34 @@ describe('helpUI', () => {
       expect(guide.innerHTML).toContain('Navigating the globe')
       expect(guide.innerHTML).toContain('Guided tours')
       expect(guide.innerHTML).toContain('Talking to Orbit')
+    })
+
+    it('traps Tab focus inside the dialog', () => {
+      openHelp()
+      // Switch to the feedback tab so there are multiple focusable
+      // elements in the panel (otherwise the trap has nothing to cycle
+      // between).
+      document.getElementById('help-tab-feedback')!.click()
+
+      const panel = document.getElementById('help-panel')!
+      // Find the last focusable element by querying the same way the
+      // trap does.
+      const focusables = Array.from(panel.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), textarea:not([disabled])',
+      ))
+      expect(focusables.length).toBeGreaterThan(1)
+      const first = focusables[0]
+      const last = focusables[focusables.length - 1]
+
+      // Tab from the last focusable should cycle back to the first.
+      last.focus()
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' }))
+      expect(document.activeElement).toBe(first)
+
+      // Shift-Tab from the first should cycle to the last.
+      first.focus()
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true }))
+      expect(document.activeElement).toBe(last)
     })
   })
 
