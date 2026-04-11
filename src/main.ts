@@ -187,13 +187,21 @@ class InteractiveSphere {
           const combined = earthFraction * EARTH_TEXTURE_WEIGHT + cloudFraction * CLOUD_TEXTURE_WEIGHT
           this.setLoadingStatus('Loading Earth textures\u2026', LOADING_BASE_PROGRESS + Math.round(combined * LOADING_TEXTURE_RANGE))
         }
-        await Promise.all([
-          primary.loadDefaultEarthMaterials((f: number) => { earthFraction = f; updateProgress() }),
-          primary.loadCloudOverlay(cloudUrl, (f: number) => { cloudFraction = f; updateProgress() })
-        ])
-
-        const sun = getSunPosition(new Date())
-        primary.enableSunLighting(sun.lat, sun.lng)
+        // Earth materials are a visual enhancement (day/night, clouds,
+        // specular) — if loading them times out or fails (common in
+        // multi-viewport mode on mobile when 4 WebGL contexts compete
+        // for bandwidth), the base tiles still render fine. Don't let
+        // the failure abort the init flow and block the browse panel.
+        try {
+          await Promise.all([
+            primary.loadDefaultEarthMaterials((f: number) => { earthFraction = f; updateProgress() }),
+            primary.loadCloudOverlay(cloudUrl, (f: number) => { cloudFraction = f; updateProgress() })
+          ])
+          const sun = getSunPosition(new Date())
+          primary.enableSunLighting(sun.lat, sun.lng)
+        } catch (err) {
+          logger.warn('[App] Earth material loading failed — continuing without day/night overlay:', err)
+        }
 
         this.setLoading(false)
         showBrowseUI(this.appState.datasets, {

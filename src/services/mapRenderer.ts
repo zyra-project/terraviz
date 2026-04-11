@@ -819,11 +819,16 @@ export class MapRenderer implements GlobeRenderer {
     // Wait for earth layer to be created (it's added on map 'load')
     if (!this.earthLayer) {
       logger.debug('[MapRenderer] loadDefaultEarthMaterials: waiting for earth layer...')
+      // Generous timeout: in multi-viewport mode four maps compete for
+      // bandwidth and the primary's `load` event can take >10s on
+      // mobile Safari. 30s keeps the poll bounded without being
+      // fatal for slow connections.
+      const EARTH_LAYER_TIMEOUT_MS = 30_000
       await new Promise<void>((resolve, reject) => {
         const start = Date.now()
         const check = () => {
           if (this.earthLayer) return resolve()
-          if (!this.map || Date.now() - start > 10_000) {
+          if (!this.map || Date.now() - start > EARTH_LAYER_TIMEOUT_MS) {
             return reject(new Error('[MapRenderer] Timed out waiting for earth layer'))
           }
           setTimeout(check, 50)
