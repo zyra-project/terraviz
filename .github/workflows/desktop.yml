@@ -1,8 +1,14 @@
 name: Desktop Build
 
+# Triggers are deliberately narrow to keep Git LFS bandwidth in
+# check. The 3-platform matrix below means each qualifying event
+# pulls LFS three times, so we only run on main pushes and on PRs
+# that target main. Feature branches still get desktop build
+# feedback through their PR; they just don't get a fresh build on
+# every intermediate push before the PR exists.
 on:
   push:
-    branches: ['**']
+    branches: [main]
     tags-ignore:
       - 'v*'
     paths:
@@ -44,9 +50,16 @@ jobs:
     runs-on: ${{ matrix.platform }}
 
     steps:
+      # PR builds below run tauri-action with `--no-bundle`, which
+      # compiles Rust to verify the build but doesn't bundle static
+      # assets. In that mode the LFS-tracked skybox and specular
+      # textures aren't needed, so skip the LFS fetch on PR events
+      # to cut bandwidth roughly in half across the 3-platform
+      # matrix. Main-branch pushes still pull LFS because they
+      # produce real signed bundles that ship those assets.
       - uses: actions/checkout@v4
         with:
-          lfs: true
+          lfs: ${{ github.event_name != 'pull_request' }}
 
       - uses: actions/setup-node@v4
         with:
