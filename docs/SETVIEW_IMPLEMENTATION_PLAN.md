@@ -1,10 +1,10 @@
 # setView Implementation Plan
 
-The legacy SOS Explorer `setView` tour task switches the display between a single globe and multi-panel layouts (`FLAT_1`, `FLAT_2`, `FLAT_4`). In legacy SOS those multi-panel layouts used a flat projection because the hardware couldn't tile curved surfaces — we have no such constraint on the web.
+The legacy SOS Explorer `setView` tour task switches the display between a single globe and multi-panel layouts. The legacy app supported multi-globe views (2 or 4 synchronised globes) but did **not** support multi-map views — the `FLAT_*` view names referred to a single flat map, not a grid of flat maps. Multi-panel meant multi-globe.
 
-**This plan treats `setView` as "how many synchronised globes are on screen", not "globe vs flat".** MapLibre GL JS only offers `mercator` and `globe` as built-in projections, and mercator is actively wrong for a polar-heavy Earth-science dataset (it literally cannot display latitudes above ~85°). Equirectangular or polar-stereographic would require writing a second custom WebGL render path; that's out of scope here and tracked as a follow-up under "Future extensions" below.
+**This plan treats `setView` as "how many synchronised globes are on screen".** We're skipping flat projection entirely: MapLibre GL JS only offers `mercator` and `globe` as built-in projections, and mercator is actively wrong for a polar-heavy Earth-science dataset (it literally cannot display latitudes above ~85°). A true equirectangular or polar-stereographic render would require writing a second custom WebGL render path; that's out of scope here and tracked as a follow-up under "Future extensions" below.
 
-Primary user value: **load different datasets into 2 or 4 synchronised globe panels to compare them side-by-side.** Legacy SOS tours that say `setView FLAT_4` get remapped to "4 globe panels" — authoring compatibility with a log note, not pixel parity.
+Primary user value: **load different datasets into 2 or 4 synchronised globe panels to compare them side-by-side** — restoring legacy parity with the multi-globe feature. Legacy `FLAT_*` tour strings (which meant single flat map) get remapped to single-globe with a deprecation log note.
 
 **Reference**: [Tour Task Reference Guide — setView](https://sos.noaa.gov/support/sosx/manuals/tour-builder-guide-complete/tour-task-reference-guide/)
 
@@ -21,7 +21,7 @@ Primary user value: **load different datasets into 2 or 4 synchronised globe pan
 
 ## Non-goals
 
-- Flat / 2D projection of any kind. Legacy `FLAT_*` strings are rendered as globe panels.
+- Flat / 2D projection of any kind. Legacy `FLAT_*` strings collapse to single-globe.
 - Per-viewport camera (divergent views). Lockstep only.
 - Comparison sliders / A-B swipe UI. Separate feature.
 - Independent tour playback per viewport. One tour engine, one transport.
@@ -31,14 +31,18 @@ Primary user value: **load different datasets into 2 or 4 synchronised globe pan
 
 ## Legacy semantics & compatibility mapping
 
-From the SOS tour reference, `setView` accepts a view name. The observed values:
+The legacy SOS `setView` task accepts a view name. Two categories existed:
+
+- **Single-surface views** — `GLOBE` / `SPHERE` for the 3D globe, and `FLAT` / `FLAT_1` (possibly others) for the single flat map. Only one dataset visible at a time.
+- **Multi-globe views** — 2 or 4 synchronised globes, each potentially showing a different dataset. This is the capability we're restoring.
+
+The exact legacy tour-string values for the multi-globe views are **not yet verified** — they need to be confirmed against a reference tour JSON or the SOS docs before we finalise the parser lookup table. Candidate strings seen in the wild include things like `DUAL_GLOBE`, `QUAD_GLOBE`, `GLOBE_2`, `GLOBE_4`; we'll be liberal in what we accept and log a warning on unknown values.
 
 | Legacy string | Internal layout | Notes |
 |---|---|---|
 | `GLOBE` / `SPHERE` | `1` | Default, no-op if already single |
-| `FLAT` / `FLAT_1` | `1` | Logs a one-time deprecation note: "flat projection rendered as globe" |
-| `FLAT_2` | `2h` | Side-by-side. Legacy may have been stacked; we pick side-by-side for parity with typical comparison workflows |
-| `FLAT_4` | `4` | 2×2 grid |
+| `FLAT` / `FLAT_1` / any other `FLAT_*` | `1` | Flat projection not supported — falls back to single-globe with a one-time deprecation log note |
+| *multi-globe strings (TBD)* | `2h` or `4` | Verified before Phase 3 lands |
 
 New tours can pass `{layout}` directly via an extended task param shape. The legacy string is stored verbatim on the task object for round-tripping.
 
@@ -157,28 +161,29 @@ With the machinery in place, the tour task is a thin executor.
 
 **Changes**
 
-1. `src/types/index.ts`
+1. **Before coding**: verify the exact legacy tour-string values used for multi-globe views. Source a reference tour JSON or the SOS docs and finalise the parser lookup table. Phase 3 shouldn't land with a table built on guesses.
+2. `src/types/index.ts`
    - Add to the `TourTaskDef` union:
      ```ts
      | { setView: SetViewTaskParams }
      ```
      ```ts
      export interface SetViewTaskParams {
-       /** Legacy value — 'GLOBE' | 'SPHERE' | 'FLAT' | 'FLAT_1' | 'FLAT_2' | 'FLAT_4' */
+       /** Legacy view name — GLOBE/SPHERE, FLAT_*, and the multi-globe strings (verified in step 1) */
        view: string
      }
      ```
-2. `src/services/tourEngine.ts`
+3. `src/services/tourEngine.ts`
    - `executeSetView(params)`:
-     - Parse legacy string → `ViewLayout` via a small lookup. Log a deprecation note once per session when rendering legacy `FLAT_*` as globe panels.
+     - Parse legacy string → `ViewLayout` via the lookup from step 1. Log a one-time deprecation note when falling back on `FLAT_*` → single-globe. Log a warning on an unknown view name and default to single-globe.
      - Call `callbacks.setView({ layout })`.
      - Reset the `nextLoadSlot` cursor to 0 so subsequent `loadDataset` tasks fill panels in order.
      - Await `moveend` so subsequent `flyTo` tasks see the new camera.
-3. `TourCallbacks` — add `setView(opts: { layout: ViewLayout }): Promise<void>`.
-4. `src/main.ts` — implement the callback against `ViewportManager.setLayout(...)`.
-5. Fixture: `test-setview-tour.json` exercising `GLOBE → FLAT_4 → FLAT_1 → GLOBE` with four datasets, verifying lockstep camera motion.
+4. `TourCallbacks` — add `setView(opts: { layout: ViewLayout }): Promise<void>`.
+5. `src/main.ts` — implement the callback against `ViewportManager.setLayout(...)`.
+6. Fixture: `test-setview-tour.json` exercising a single-globe → multi-globe → single-globe sequence with 4 datasets, verifying lockstep camera motion and panel assignment order. Exact transitions depend on the verified multi-globe view names.
 
-**Exit criteria**: a legacy SOS tour JSON file containing `setView` tasks plays through the engine without authoring changes, and four datasets loaded after `FLAT_4` land in panels 0–3 rather than clobbering each other.
+**Exit criteria**: a legacy SOS tour JSON file containing `setView` tasks plays through the engine without authoring changes, and four datasets loaded after a 4-panel `setView` land in panels 0–3 rather than clobbering each other.
 
 ---
 
@@ -189,7 +194,8 @@ With the machinery in place, the tour task is a thin executor.
 - **4-panel layout gated to viewport width ≥ 1024px.** Four live MapLibre instances + up to four HLS streams is too heavy for mobile. Below the threshold, the layout picker offers only 1 / 2h / 2v.
 - **Layout state is not persisted.** Reloads reset to single-globe. Layout is intentionally a tour/session-scoped choice; persisting it would surprise users who loaded the app expecting a globe and got a 2×2 grid from last week.
 - **Orbit stays single-view-aware.** The system prompt doesn't mention panels; `viewports.loadDataset()` handles assignment silently. Revisit if users complain Orbit is loading into the "wrong" slot.
-- **`FLAT_2` legacy mapping defaults to side-by-side (`2h`).** New tours can specify `2v` directly if they need stacked.
+- **Multi-globe defaults to side-by-side (`2h`) for the 2-panel layout.** New tours can specify `2v` directly if they need stacked.
+- **Exact legacy multi-globe tour strings need verification before Phase 3.** Placeholder in the plan until confirmed against a reference tour or SOS docs.
 
 ---
 
