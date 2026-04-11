@@ -129,9 +129,9 @@ jobs:
       - run: npm ci
 
       # Phase 1 bootstrap: if `src-tauri/gen/apple/` does not exist on this
-      # branch yet, generate it via `tauri ios init`. The result is committed
-      # back to the branch by a follow-up step on the next push (see below).
-      # On subsequent runs, the existing scaffold is used as-is.
+      # branch yet, generate it via `tauri ios init`. This both validates
+      # that our `tauri.conf.json` generates a clean iOS scaffold and
+      # leaves the scaffold in place for the subsequent Rust lib build.
       - name: Bootstrap iOS scaffold if missing
         run: |
           if [ ! -d "src-tauri/gen/apple" ]; then
@@ -141,5 +141,17 @@ jobs:
             echo "iOS scaffold already exists — skipping init"
           fi
 
-      - name: Build iOS app (debug, simulator)
-        run: npx tauri ios build --debug --target aarch64-sim
+      # Compile-check the Rust lib for both iOS device and simulator targets.
+      # We deliberately do NOT run `tauri ios build` here because that drives
+      # `xcodebuild` against the Tauri-generated Xcode scheme, which lacks
+      # simulator destinations out of the box (the full xcodebuild path will
+      # come back in Phase 6 alongside signed release builds). Cargo check
+      # validates exactly what we care about in Phase 2: that our Rust code
+      # compiles for iOS. Skips signing and scheme configuration entirely.
+      - name: Check Rust compiles for iOS device
+        working-directory: src-tauri
+        run: cargo check --target aarch64-apple-ios --lib
+
+      - name: Check Rust compiles for iOS arm64 simulator
+        working-directory: src-tauri
+        run: cargo check --target aarch64-apple-ios-sim --lib
