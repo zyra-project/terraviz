@@ -1,0 +1,161 @@
+name: Mobile Build
+
+# Triggers mirror desktop.yml — narrow to keep CI fast and LFS bandwidth in
+# check. Mobile compile checks run on main pushes and PRs. Feature branches
+# get build feedback through their PR.
+#
+# iOS runs on macos-latest (Xcode pre-installed, free for public repos).
+# Android runs on ubuntu-latest (Android SDK pre-installed).
+on:
+  push:
+    branches: [main]
+    tags-ignore:
+      - 'v*'
+    paths:
+      - 'src-tauri/**'
+      - 'src/**'
+      - 'public/**'
+      - 'package.json'
+      - 'vite.config.ts'
+      - '.github/workflows/mobile.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src-tauri/**'
+      - 'src/**'
+      - 'public/**'
+      - 'package.json'
+      - 'vite.config.ts'
+      - '.github/workflows/mobile.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android-build:
+    name: Build (Android)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # PR builds compile only — LFS-tracked skybox/specular textures
+          # aren't needed for `--debug` validation. Main pushes pull LFS.
+          lfs: ${{ github.event_name != 'pull_request' }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          # Keep these in sync with src-tauri/gen/android/app/build.gradle.kts
+          # (compileSdk / targetSdk). The runner image pre-installs some of
+          # these, but we install them explicitly so the workflow is
+          # self-sufficient and doesn't silently break when the image changes.
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0 ndk;28.2.13676358'
+
+      - name: Install Rust stable with Android targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-android-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-android-
+
+      - run: npm ci
+
+      - name: Export NDK_HOME
+        run: echo "NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> $GITHUB_ENV
+
+      - name: Build Android app (debug)
+        run: npx tauri android build --debug --apk
+
+      - name: Upload Android APK (main pushes only)
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-android-debug
+          path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          retention-days: 14
+
+  ios-build:
+    name: Build (iOS)
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: ${{ github.event_name != 'pull_request' }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.app || sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Install Rust stable with iOS targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-ios-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-ios-
+
+      - run: npm ci
+
+      # Phase 1 bootstrap: if `src-tauri/gen/apple/` does not exist on this
+      # branch yet, generate it via `tauri ios init`. This both validates
+      # that our `tauri.conf.json` generates a clean iOS scaffold and
+      # leaves the scaffold in place for the subsequent Rust lib build.
+      - name: Bootstrap iOS scaffold if missing
+        run: |
+          if [ ! -d "src-tauri/gen/apple" ]; then
+            echo "::notice::No iOS scaffold found — running 'tauri ios init'"
+            npx tauri ios init
+          else
+            echo "iOS scaffold already exists — skipping init"
+          fi
+
+      # Compile-check the Rust lib for both iOS device and simulator targets.
+      # We deliberately do NOT run `tauri ios build` here because that drives
+      # `xcodebuild` against the Tauri-generated Xcode scheme, which lacks
+      # simulator destinations out of the box (the full xcodebuild path will
+      # come back in Phase 6 alongside signed release builds). Cargo check
+      # validates exactly what we care about in Phase 2: that our Rust code
+      # compiles for iOS. Skips signing and scheme configuration entirely.
+      - name: Check Rust compiles for iOS device
+        working-directory: src-tauri
+        run: cargo check --target aarch64-apple-ios --lib
+
+      - name: Check Rust compiles for iOS arm64 simulator
+        working-directory: src-tauri
+        run: cargo check --target aarch64-apple-ios-sim --lib

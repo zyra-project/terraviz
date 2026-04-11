@@ -15,8 +15,13 @@
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
     "build:qa": "npx tsx scripts/build-qa-index.ts",
+    "tauri": "tauri",
     "dev:desktop": "tauri dev",
-    "build:desktop": "tsc && vite build && tauri build"
+    "build:desktop": "tsc && vite build && tauri build",
+    "dev:ios": "tauri ios dev",
+    "dev:android": "tauri android dev",
+    "build:ios": "tsc && vite build && tauri ios build",
+    "build:android": "tsc && vite build && tauri android build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

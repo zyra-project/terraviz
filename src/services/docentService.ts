@@ -264,7 +264,11 @@ export async function loadConfigWithKey(): Promise<DocentConfig> {
 
 /**
  * Save docent config to localStorage.
- * On Tauri, the API key is stored in the OS keychain instead of localStorage.
+ * On Tauri, the API key is stored in the OS keychain instead of localStorage
+ * — but only if the keychain write succeeds. If the keychain is unavailable
+ * (e.g. Android has no secure storage backend wired up yet), the full config
+ * including the apiKey is stored in localStorage as a plaintext fallback so
+ * the user doesn't lose their key on app restart.
  *
  * @param persistApiKey - When true (e.g. from the settings form), the apiKey
  *   value is written to the keychain even if empty (clearing the stored key).
@@ -272,20 +276,37 @@ export async function loadConfigWithKey(): Promise<DocentConfig> {
  *   preventing programmatic saves (model auto-persist, etc.) from erasing it.
  */
 export function saveConfig(config: DocentConfig, persistApiKey = false): void {
-  try {
-    if (tauriInvoke) {
-      if (persistApiKey || config.apiKey) {
-        tauriInvoke('set_api_key', { key: config.apiKey }).catch(() => {
-          logger.warn('[Docent] Failed to save API key to keychain')
-        })
-      }
-      const stored = { ...config, apiKey: '' }
-      localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(stored))
-    } else {
-      localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config))
+  const writeLocal = (cfg: DocentConfig) => {
+    try {
+      localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(cfg))
+    } catch {
+      // localStorage full or unavailable
     }
-  } catch {
-    // localStorage full or unavailable
+  }
+
+  if (!tauriInvoke) {
+    // Web — everything including apiKey lives in localStorage
+    writeLocal(config)
+    return
+  }
+
+  // Tauri — try the OS keychain first. Only strip apiKey from the
+  // localStorage blob once the keychain write has actually succeeded.
+  if (persistApiKey || config.apiKey) {
+    tauriInvoke('set_api_key', { key: config.apiKey })
+      .then(() => {
+        // Keychain owns the key — localStorage blob omits it
+        writeLocal({ ...config, apiKey: '' })
+      })
+      .catch(() => {
+        // Keychain unavailable (Android stub, or a real failure) — keep
+        // the full config including apiKey in localStorage as a fallback.
+        logger.warn('[Docent] Keychain unavailable, storing apiKey in localStorage')
+        writeLocal(config)
+      })
+  } else {
+    // No apiKey to persist — plain save of everything else
+    writeLocal({ ...config, apiKey: '' })
   }
 }
 

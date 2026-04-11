@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-utils/schema.json",
+  "identifier": "mobile",
+  "description": "Capabilities for iOS and Android builds. HTTPS-only — no localhost or cleartext exceptions, by design. The local-LLM path (Ollama / LM Studio / llama.cpp) is desktop-only; mobile uses Apple Intelligence on iOS and HTTPS cloud providers as fallback. See docs/MOBILE_APP_PLAN.md.",
+  "platforms": ["iOS", "android"],
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://*" }
+      ]
+    }
+  ]
+}

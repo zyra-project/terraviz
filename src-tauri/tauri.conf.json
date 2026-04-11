@@ -58,6 +58,12 @@
       "wix": {
         "upgradeCode": "b5bd2ca8-2976-e36b-ff2b-ae083c8a130a"
       }
+    },
+    "iOS": {
+      "minimumSystemVersion": "17.0"
+    },
+    "android": {
+      "minSdkVersion": 26
     }
   }
 }

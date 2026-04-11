@@ -5,11 +5,17 @@ description = "Interactive Sphere — NASA Science On a Sphere desktop app"
 authors = ["Zyra Project"]
 edition = "2021"
 
+# Library target — required by Android (cdylib) and iOS (staticlib).
+# Desktop binary in src/main.rs links against this lib via `rlib`.
+[lib]
+name = "interactive_sphere_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["devtools"] }
+tauri = { version = "2", features = ["protocol-asset", "devtools"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", features = ["rustls-tls", "stream"], default-features = false }
@@ -20,6 +26,16 @@ base64 = "0.22"
 log = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 futures-util = "0.3"
-keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 tauri-plugin-http = "2"
+
+# Desktop-only dependencies. The keyring crate has no Android backend, and
+# the updater plugin is unsupported on mobile (App Store / Play Store handle
+# updates). See docs/MOBILE_APP_PLAN.md.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 tauri-plugin-updater = "2"
+
+# iOS keeps the real keychain backend (apple-native covers macOS + iOS) but
+# does not get the updater plugin.
+[target.'cfg(target_os = "ios")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
