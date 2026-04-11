@@ -424,11 +424,6 @@
             #playback-controls input[type="range"] {
                 height: 28px;
             }
-
-            #auto-rotate-btn {
-                min-width: 40px;
-                min-height: 40px;
-            }
         }
 
         /* --- Loading screen --- */
@@ -748,31 +743,6 @@
 
         #browse-overlay.collapsed {
             transform: translateX(100%);
-        }
-
-        #browse-toggle {
-            position: absolute;
-            top: 50%;
-            left: 0;
-            transform: translate(-100%, -50%);
-            background: rgba(13, 13, 18, 0.92) !important;
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.12) !important;
-            border-right: none !important;
-            border-radius: 6px 0 0 6px;
-            color: #aaa !important;
-            padding: 0.75rem 0.35rem;
-            cursor: pointer;
-            font-size: 0.85rem;
-            line-height: 1;
-            transition: color 0.15s, background 0.15s;
-            z-index: 501;
-        }
-
-        #browse-toggle:hover {
-            color: #4da6ff !important;
-            background: rgba(30, 30, 40, 0.95) !important;
         }
 
         #browse-inner {
@@ -1488,60 +1458,245 @@
         }
         .dl-mgr-delete:hover { color: #e55; }
 
-        /* --- Map Overlay Controls --- */
+        /* --- Tools menu (collapses Browse + all settings into
+               two small buttons at the bottom-right) --- */
         #map-controls {
             position: absolute;
             bottom: 3.2rem;
             right: 0.75rem;
             display: flex;
-            gap: 0.2rem;
-            padding: 0.3rem;
+            gap: 0.4rem;
+            padding: 0;
             pointer-events: auto;
             z-index: 10;
         }
         #map-controls.hidden { display: none; }
-        #map-controls .map-ctrl-btn {
-            min-width: 28px;
-            height: 28px;
-            padding: 0.2rem 0.45rem;
-            font-size: 0.65rem;
+
+        .tools-menu-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            min-height: 34px;
+            padding: 0.35rem 0.7rem;
+            font: inherit;
+            font-size: 0.72rem;
             font-weight: 500;
             letter-spacing: 0.02em;
-            background: rgba(255, 255, 255, 0.06);
-            border: 1px solid rgba(255, 255, 255, 0.1);
             color: #ccc;
-            border-radius: 6px;
+            background: rgba(13, 13, 18, 0.88);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 999px;
             cursor: pointer;
             transition: background 0.15s, color 0.15s, border-color 0.15s;
             white-space: nowrap;
             line-height: 1;
         }
-        #map-controls .map-ctrl-btn:hover {
-            background: rgba(255, 255, 255, 0.12);
+        .tools-menu-btn:hover {
+            background: rgba(30, 30, 40, 0.95);
             color: #fff;
-            border-color: rgba(77, 166, 255, 0.4);
+            border-color: rgba(77, 166, 255, 0.45);
         }
-        #map-controls .map-ctrl-btn.active {
+        .tools-menu-btn[aria-expanded="true"] {
+            background: rgba(77, 166, 255, 0.18);
             color: #4da6ff;
             border-color: #4da6ff;
         }
-        #map-controls .map-ctrl-btn:focus-visible {
+        .tools-menu-btn:focus-visible {
             outline: 2px solid rgba(77, 166, 255, 0.7);
             outline-offset: 2px;
             box-shadow: 0 0 8px rgba(77, 166, 255, 0.4);
         }
-        /* Vertical separator between tool buttons and layout picker */
-        #map-controls .map-ctrl-sep {
-            width: 1px;
-            align-self: stretch;
-            margin: 0 0.15rem;
-            background: rgba(255, 255, 255, 0.12);
+        .tools-menu-btn-icon {
+            font-size: 0.95rem;
+            line-height: 1;
         }
+        .tools-menu-btn-label {
+            font-size: 0.72rem;
+        }
+        /* Gear-icon button is icon-only — collapse to a circle */
+        .tools-menu-toggle {
+            min-width: 34px;
+            padding: 0.35rem 0.55rem;
+        }
+
+        /* --- Tools popover --- */
+        .tools-menu-popover {
+            position: absolute;
+            bottom: calc(100% + 0.5rem);
+            right: 0;
+            min-width: 240px;
+            max-width: calc(100vw - 1.5rem);
+            padding: 0.75rem;
+            background: rgba(13, 13, 18, 0.94);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 10px;
+            box-shadow: 0 6px 32px rgba(0, 0, 0, 0.45);
+            color: #ddd;
+            font-size: 0.75rem;
+            z-index: 11;
+        }
+        .tools-menu-popover.hidden { display: none; }
+
+        .tools-menu-popover-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+            padding-bottom: 0.4rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .tools-menu-popover-title {
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: #bbb;
+        }
+        .tools-menu-close {
+            min-width: 22px;
+            height: 22px;
+            padding: 0;
+            font-size: 0.85rem;
+            color: #999;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            border-radius: 4px;
+            line-height: 1;
+        }
+        .tools-menu-close:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }
+
+        .tools-menu-section {
+            margin-bottom: 0.75rem;
+        }
+        .tools-menu-section:last-child { margin-bottom: 0; }
+        .tools-menu-section-title {
+            margin: 0 0 0.35rem;
+            padding: 0;
+            font-size: 0.6rem;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #888;
+        }
+
+        .tools-menu-item {
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+            width: 100%;
+            padding: 0.5rem 0.6rem;
+            font: inherit;
+            font-size: 0.75rem;
+            color: #ddd;
+            text-align: left;
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.12s, color 0.12s, border-color 0.12s;
+        }
+        .tools-menu-item:hover {
+            background: rgba(255, 255, 255, 0.06);
+            color: #fff;
+            border-color: rgba(255, 255, 255, 0.08);
+        }
+        .tools-menu-item.active {
+            color: #4da6ff;
+            background: rgba(77, 166, 255, 0.08);
+            border-color: rgba(77, 166, 255, 0.35);
+        }
+        .tools-menu-item:focus-visible {
+            outline: 2px solid rgba(77, 166, 255, 0.7);
+            outline-offset: 2px;
+        }
+        .tools-menu-item-check {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.28);
+            border-radius: 3px;
+            flex-shrink: 0;
+            position: relative;
+        }
+        .tools-menu-item.active .tools-menu-item-check {
+            background: #4da6ff;
+            border-color: #4da6ff;
+        }
+        .tools-menu-item.active .tools-menu-item-check::after {
+            content: '\2713';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 0.7rem;
+            color: #0d0d12;
+            font-weight: 700;
+        }
+        /* Non-toggle items (Clear, Orbit settings…) don't need a check glyph */
+        #tools-menu-clear .tools-menu-item-check,
+        #tools-menu-orbit-settings .tools-menu-item-check {
+            display: none;
+        }
+
+        .tools-menu-layout-row {
+            display: flex;
+            gap: 0.25rem;
+        }
+        .tools-menu-layout-btn {
+            flex: 1;
+            min-width: 0;
+            min-height: 30px;
+            padding: 0.35rem 0.2rem;
+            font: inherit;
+            font-size: 0.7rem;
+            color: #ccc;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.12s, color 0.12s, border-color 0.12s;
+            line-height: 1;
+        }
+        .tools-menu-layout-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            border-color: rgba(77, 166, 255, 0.4);
+        }
+        .tools-menu-layout-btn.active {
+            color: #4da6ff;
+            border-color: #4da6ff;
+            background: rgba(77, 166, 255, 0.12);
+        }
+        .tools-menu-layout-btn:focus-visible {
+            outline: 2px solid rgba(77, 166, 255, 0.7);
+            outline-offset: 2px;
+        }
+
         @media (max-width: 768px) {
-            #map-controls .map-ctrl-btn {
-                min-width: 36px;
-                height: 36px;
-                font-size: 0.75rem;
+            .tools-menu-btn {
+                min-height: 38px;
+                padding: 0.4rem 0.8rem;
+                font-size: 0.78rem;
+            }
+            .tools-menu-toggle {
+                min-width: 38px;
+                padding: 0.4rem 0.6rem;
+            }
+            .tools-menu-popover {
+                min-width: 260px;
+            }
+            .tools-menu-item {
+                padding: 0.6rem 0.7rem;
+                font-size: 0.82rem;
+            }
+            .tools-menu-layout-btn {
+                min-height: 36px;
+                font-size: 0.78rem;
             }
         }
 
@@ -2652,9 +2807,8 @@
         </div>
         <div id="loading-status" role="status">Initializing&hellip;</div>
     </div>
-    <!-- Browse overlay — only shown when no ?dataset= URL param -->
+    <!-- Browse overlay — opened via the Tools menu's Browse button. -->
     <aside id="browse-overlay" class="hidden" aria-label="Dataset browser">
-        <button id="browse-toggle" title="Toggle search panel" aria-label="Open dataset browser" aria-expanded="false">&#9666;</button>
         <div id="browse-inner">
             <div id="browse-header">
                 <h2 class="browse-title">SOS Explorer</h2>
@@ -2708,15 +2862,14 @@
                         <button id="ff-btn" class="transport-btn" title="Fast-forward to end" aria-label="Fast-forward to end">&#x23ED;&#xFE0E;</button>
                         <button id="mute-btn" class="transport-btn" title="Unmute audio" aria-label="Unmute audio" style="margin-left: 0.25rem;">&#x1F507;&#xFE0E;</button>
                         <button id="cc-btn" class="transport-btn hidden" title="Toggle closed captions" aria-label="Toggle closed captions" style="margin-left: 0.1rem; font-size: 0.6rem; font-weight: 700; letter-spacing: 0.03em;">CC</button>
-                        <button id="auto-rotate-btn" class="transport-btn" title="Toggle auto-rotation" aria-label="Toggle auto-rotation" style="margin-left: 0.1rem;">&#x21BB;</button>
                     </div>
                     <input type="range" id="scrubber" min="0" max="1000" value="0" aria-label="Playback position" style="width: 100%; margin: 0;">
                 </div>
 
-                <button id="auto-rotate-standalone" class="transport-btn" title="Toggle auto-rotation" aria-label="Toggle auto-rotation" style="position: absolute; bottom: 0.75rem; right: 2.5rem; pointer-events: auto; min-width: 28px; padding: 0.35rem 0.5rem; font-size: 0.75rem; background: rgba(13, 13, 18, 0.88) !important; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08) !important; border-radius: 6px;">&#x21BB;</button>
-
-                <!-- Map overlay controls — MapLibre only, hidden by default -->
-                <div id="map-controls" class="ui-panel hidden" role="toolbar" aria-label="Map overlay controls"></div>
+                <!-- Tools menu host — holds the Browse + Tools buttons
+                     and the collapsible popover. Populated by
+                     initToolsMenu(). Hidden until the app boots. -->
+                <div id="map-controls" class="hidden" aria-label="Tools and settings"></div>
                 <div id="download-manager" class="hidden" aria-label="Download manager"></div>
 
                 <!-- Tour controls — shown when a tour is playing -->

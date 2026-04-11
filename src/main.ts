@@ -16,8 +16,9 @@ import type { AppState, VideoTextureHandle, TourFile, Dataset } from './types'
 // Extracted modules
 import { showBrowseUI, hideBrowseUI, collapseBrowseUI } from './ui/browseUI'
 import { initDownloadUI } from './ui/downloadUI'
-import { initMapControls, updateMapControlsPosition, syncMapControlState } from './ui/mapControlsUI'
-import { initChatUI, openChat, notifyDatasetChanged, showChatTrigger, hideChatTrigger, closeChat, flushPendingGlobeActions } from './ui/chatUI'
+import { updateMapControlsPosition } from './ui/mapControlsUI'
+import { initToolsMenu, syncToolsMenuState } from './ui/toolsMenuUI'
+import { initChatUI, openChat, openChatSettings, notifyDatasetChanged, showChatTrigger, hideChatTrigger, closeChat, flushPendingGlobeActions } from './ui/chatUI'
 import { initHelpUI, setActiveDataset as setHelpActiveDataset } from './ui/helpUI'
 import {
   createPlaybackState, startPlaybackLoop, stopPlaybackLoop,
@@ -142,9 +143,11 @@ class InteractiveSphere {
       this.panelStates = Array.from({ length: this.viewports.getPanelCount() }, createPanelState)
       const primary = this.viewports.getPrimary()
       if (!primary) throw new Error('Viewport manager failed to create a primary renderer')
-      initMapControls(this.viewports, {
+      initToolsMenu(this.viewports, {
         onSetLayout: (layout) => this.viewports.setLayout(layout),
         onOpenBrowse: () => this.openBrowsePanel(),
+        onOpenOrbitSettings: () => openChatSettings(),
+        announce: (msg) => this.announce(msg),
       })
       initDownloadUI().catch(err => logger.warn('[App] Download UI init failed:', err))
       initHelpUI()
@@ -630,15 +633,11 @@ class InteractiveSphere {
 
   // --- UI helpers ---
 
-  /** Toggle visibility of the playback transport controls and standalone auto-rotate button. */
+  /** Toggle visibility of the playback transport controls. */
   private showPlaybackControls(show: boolean): void {
     const controls = document.getElementById('playback-controls')
-    const standalone = document.getElementById('auto-rotate-standalone')
     if (controls) {
       controls.classList.toggle('hidden', !show)
-    }
-    if (standalone) {
-      standalone.classList.toggle('hidden', show)
     }
     updateMapControlsPosition()
   }
@@ -687,12 +686,6 @@ class InteractiveSphere {
     // set so other UI can react.
     overlay!.classList.remove('collapsed')
     document.body.classList.add('browse-open')
-    const toggle = document.getElementById('browse-toggle')
-    if (toggle) {
-      toggle.innerHTML = '&#9666;'
-      toggle.setAttribute('aria-label', 'Close dataset browser')
-      toggle.setAttribute('aria-expanded', 'true')
-    }
   }
 
   /** Detect WebGL support. If unavailable, display troubleshooting instructions and return false. */
@@ -817,13 +810,7 @@ class InteractiveSphere {
       getDatasets: () => this.appState.datasets,
       getCurrentDataset: () => this.appState.currentDataset,
       announce: (msg) => this.announce(msg),
-      onOpenBrowse: () => {
-        const browseOverlay = document.getElementById('browse-overlay')
-        const browseToggle = document.getElementById('browse-toggle')
-        if (browseOverlay?.classList.contains('collapsed')) {
-          browseToggle?.click()
-        }
-      },
+      onOpenBrowse: () => this.openBrowsePanel(),
     })
   }
 
@@ -1182,28 +1169,12 @@ class InteractiveSphere {
 
   // --- Event listeners ---
 
-  /** Wire up all DOM event listeners: transport controls, keyboard shortcuts, browse toggle, scrubber, auto-rotate, and mute. */
+  /** Wire up all DOM event listeners: transport controls, keyboard shortcuts, scrubber, mute. */
   setupEventListeners(): void {
     document.getElementById('home-btn')?.addEventListener('click', () => this.goHome())
 
-    // Browse panel collapse/expand toggle
-    const browseToggle = document.getElementById('browse-toggle')
-    const browseOverlay = document.getElementById('browse-overlay')
-    if (browseToggle && browseOverlay) {
-      browseToggle.addEventListener('click', () => {
-        const collapsed = browseOverlay.classList.toggle('collapsed')
-        browseToggle.innerHTML = collapsed ? '&#9656;' : '&#9666;'
-        browseToggle.setAttribute('aria-label', collapsed ? 'Open dataset browser' : 'Close dataset browser')
-        browseToggle.setAttribute('aria-expanded', String(!collapsed))
-        this.announce(collapsed ? 'Dataset browser closed' : 'Dataset browser opened')
-        if (collapsed) {
-          browseToggle.focus()
-        } else {
-          const searchInput = document.getElementById('browse-search') as HTMLInputElement | null
-          if (searchInput && !this.isMobile) searchInput.focus()
-        }
-      })
-    }
+    // Browse panel opens via the Tools menu's Browse button (see
+    // openBrowsePanel). No standalone peek-out toggle tab.
 
     // Transport controls — delegate to playback module
     document.getElementById('rewind-btn')?.addEventListener('click', () =>
@@ -1233,22 +1204,7 @@ class InteractiveSphere {
       })
     }
 
-    // Auto-rotate
-    const rotateBtns = [
-      document.getElementById('auto-rotate-btn'),
-      document.getElementById('auto-rotate-standalone')
-    ].filter(Boolean) as HTMLElement[]
-    for (const btn of rotateBtns) {
-      btn.addEventListener('click', () => {
-        if (!this.renderer) return
-        const active = this.renderer.toggleAutoRotate()
-        for (const b of rotateBtns) {
-          b.style.color = active ? '#4da6ff' : '#aaa'
-          b.style.borderColor = active ? '#4da6ff' : '#555'
-        }
-        this.announce(active ? 'Auto-rotation enabled' : 'Auto-rotation disabled')
-      })
-    }
+    // Auto-rotate lives inside the Tools menu now — see toolsMenuUI.ts.
 
     // Scrubber
     const scrubber = document.getElementById('scrubber') as HTMLInputElement
@@ -1367,7 +1323,7 @@ class InteractiveSphere {
       r.toggleLabels?.(false)
       r.toggleBoundaries?.(false)
     }
-    syncMapControlState(false, false)
+    syncToolsMenuState({ labels: false, borders: false, terrain: false, autoRotate: false })
     window.history.pushState({}, '', window.location.pathname)
 
     this.showLoadingScreen('Loading Earth\u2026', 20)

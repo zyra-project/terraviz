@@ -18,7 +18,7 @@ import type {
   PlayAudioTaskParams, PlayVideoTaskParams, ShowImageTaskParams,
   ShowPopupHtmlTaskParams, AddPlacemarkTaskParams,
 } from '../types'
-import { syncMapControlState } from '../ui/mapControlsUI'
+import { syncToolsMenuState } from '../ui/toolsMenuUI'
 import {
   showTourTextBox, hideTourTextBox, hideAllTourTextBoxes, updateTourProgress,
   showTourImage, hideTourImage, hideAllTourImages,
@@ -586,7 +586,7 @@ export class TourEngine {
     const on = state === 'on'
     renderer.toggleBoundaries?.(on)
     renderer.toggleLabels?.(on)
-    syncMapControlState(on, on)
+    syncToolsMenuState({ labels: on, borders: on })
   }
 
   private execWorldBorderObj(params: { worldBorders: 'on' | 'off' }): void {

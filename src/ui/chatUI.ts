@@ -97,6 +97,25 @@ export function openChat(): void {
 }
 
 /**
+ * Open the chat panel and expand the Orbit settings form. Called from
+ * the Tools menu as an external entry point — the chat panel has to
+ * be open for the inline `#chat-settings` form to be visible in the
+ * first place, so we open both in sequence. If settings is already
+ * expanded, this just ensures the chat panel is visible.
+ */
+export function openChatSettings(): void {
+  openChat()
+  if (!settingsOpen) {
+    toggleSettings()
+  } else {
+    populateSettings().catch(err => logger.warn('[Chat] Failed to populate settings:', err))
+  }
+  // Scroll the settings panel into view (it's at the top of the chat body)
+  const panel = document.getElementById('chat-settings')
+  panel?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+}
+
+/**
  * Close the chat panel.
  */
 export function closeChat(): void {

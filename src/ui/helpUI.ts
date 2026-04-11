@@ -65,9 +65,30 @@ function renderGuideHtml(): string {
     <section class="help-guide-section">
       <h3>Exploring datasets</h3>
       <ul>
-        <li>Open the dataset browser from the home button or the right-edge tab.</li>
+        <li>Tap the <strong>Browse</strong> button in the bottom-right to open the dataset list.</li>
         <li>Filter by category or search by keyword to narrow the list.</li>
         <li>Click any card to load that dataset onto the globe.</li>
+        <li>The home button (top-left) returns you to the default Earth view and reopens browse.</li>
+      </ul>
+    </section>
+    <section class="help-guide-section">
+      <h3>Tools &amp; settings</h3>
+      <ul>
+        <li>The gear icon next to Browse opens the <strong>Tools</strong> popover.</li>
+        <li><strong>View</strong> — toggle labels, borders, 3D terrain, or auto-rotation of the globe.</li>
+        <li><strong>Layout</strong> — switch between a single globe or 2–4 synchronised globes that move together but can show different datasets side-by-side (currently gated behind the <code>?setview=</code> URL flag).</li>
+        <li><strong>Clear</strong> — remove any markers or highlighted regions.</li>
+        <li><strong>Orbit settings</strong> — configure the AI docent's endpoint, model, and preferences.</li>
+        <li>Tap outside the popover or press <kbd>Esc</kbd> to close it.</li>
+      </ul>
+    </section>
+    <section class="help-guide-section">
+      <h3>Multi-globe comparisons</h3>
+      <ul>
+        <li>In a multi-panel layout, camera motion syncs across every globe — drag any panel to rotate them all.</li>
+        <li>Each panel has a small numbered button in its top-left corner. Tap one to make it the active (primary) panel.</li>
+        <li>The next dataset you load goes into the active panel. Use the Browse button to pick another dataset for the next panel.</li>
+        <li>Time-series animations sync by <em>real-world date</em>, not video seconds — two datasets with different date ranges still line up correctly during any overlap. A panel whose dataset doesn't cover the current time is dimmed and marked "No data for current time".</li>
       </ul>
     </section>
     <section class="help-guide-section">
@@ -86,12 +107,7 @@ function renderGuideHtml(): string {
         <li>Open the chat panel from the bottom-left trigger or the speech-bubble button in the browse panel.</li>
         <li>Orbit can embed load buttons directly in its replies — click one to jump straight to that dataset.</li>
         <li>Use the thumbs-up / thumbs-down buttons under each reply to rate Orbit's answers.</li>
-      </ul>
-    </section>
-    <section class="help-guide-section">
-      <h3>Map controls</h3>
-      <ul>
-        <li>Toggle labels, boundaries, and 3D terrain from the map controls in the top-left.</li>
+        <li>Configure the AI endpoint, model, and reading level from <strong>Tools → Orbit settings</strong>.</li>
       </ul>
     </section>${downloadsSection}
     <section class="help-guide-section">
