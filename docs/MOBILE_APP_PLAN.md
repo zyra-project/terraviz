@@ -79,10 +79,84 @@ Additive — existing desktop and web scripts unchanged:
 - `rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios`
 - CocoaPods (`gem install cocoapods`)
 
-**Android (any host OS):**
-- Android Studio or `cmdline-tools` + NDK
-- JDK 17
+**Android (any host OS, including Linux):**
+- JDK 17+ (JDK 21 also works)
+- Android SDK: `cmdline-tools`, `platform-tools`, `platforms;android-35`,
+  `build-tools;35.0.1`
+- Android NDK r28c (`28.2.13676358`)
 - `rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android`
+- `ANDROID_HOME` and `NDK_HOME` env vars set
+
+## No-Mac Development Workflow
+
+This project is developed primarily from Linux. The strategy below makes that
+work without owning or renting a Mac:
+
+### Android — fully local on Linux
+
+The entire Android dev loop runs on a Linux box. `tauri android init`,
+`tauri android dev` (with emulator or USB-attached device), `tauri android build`,
+Android Studio for interactive debugging — all native to Linux. No Mac
+involvement at any stage.
+
+This is also why Android comes up first in the local dev rotation: the
+iteration loop is real-time, and we can validate the whole Tauri mobile
+architecture (Rust cfg gates, capability files, asset protocol, MapLibre in
+WebView, the catalog-as-tool refactor) without any cross-platform hassles.
+
+### iOS — free GitHub Actions runners + TestFlight + tunnel-to-device
+
+**Standard `macos-latest` GitHub Actions runners are free, unlimited, for
+public repositories.** This project is public, so the entire iOS CI story
+costs $0 in perpetuity:
+
+- `mobile.yml` runs `tauri ios build --debug` on every PR
+- Release tags build a signed `.ipa` and upload to TestFlight via fastlane
+- Bootstrap `tauri ios init` ran once on a runner; the result was committed
+  back to `src-tauri/gen/apple/`
+
+For everyday iteration on a real iPhone *without* a local Mac, the
+**tunnel-to-device** pattern works:
+
+```
+Linux machine                 Internet                    Real iPhone
+─────────────                 ────────                    ───────────
+npm run dev                                               Tauri shell
+  → vite @ localhost:5173 ─→ cloudflared tunnel ──→ loads HTML/JS
+                                (or ngrok)               from tunnel
+```
+
+1. **Once**: a debug `.ipa` whose Tauri frontend points at a stable tunnel
+   URL is built in CI, installed via TestFlight on a real iPhone.
+2. **Every day**: run `vite dev` locally on Linux, open a tunnel to
+   `localhost:5173`. The iPhone app loads the live frontend over the tunnel.
+3. **Iterate**: edit TypeScript on Linux → save → tunnel pushes → iPhone
+   hot-reloads. Same dev loop as desktop web.
+
+A fresh CI build is only needed when:
+- Rust code in `src-tauri/src/` changes
+- The Apple Intelligence Swift plugin changes
+- `tauri.conf.json` or capability files change
+- A native dependency is added
+
+For 95% of work — UI, MapLibre tweaks, Orbit prompt engineering, dataset
+loader changes — the tunnel covers it. Native code changes go through CI,
+which is slower (5–15 min loop) but free.
+
+### When the lack-of-Mac actually hurts
+
+Phase 4 (Apple Intelligence Tauri plugin) requires iterating on Swift code
+that calls the `FoundationModels` framework. Three options for that phase:
+
+- **CI-driven TDD**: write the plugin with comprehensive Swift unit tests,
+  run in CI on `macos-latest`, never touch a simulator until it works. Free
+  but slow.
+- **Scaleway dedicated Mac mini**: ~€0.10–0.20/hour, billed per minute.
+  ~$5–20 total cost for the whole phase.
+- **Borrow / buy a Mac mini**: $599 one-time if iOS becomes the primary
+  target long-term.
+
+Picking among these is deferred until we actually start Phase 4.
 
 ---
 
@@ -340,20 +414,30 @@ breakpoint, which gives mobile a head start. New work needed:
 
 ## Phased Plan
 
-**Phase 1 — Spike (this branch's follow-up):**
+**Phase 1 — Spike:**
 
-1. `tauri ios init` and `tauri android init`; commit `src-tauri/gen/`
-2. Add iOS/Android sections to `tauri.conf.json` (bundle IDs, orientation, min SDK)
-3. Gate updater plugin and `keychain.rs` Android path with `cfg`
-4. Create `src-tauri/capabilities/mobile.json` (HTTPS only)
-5. Add `dev:ios` / `dev:android` / `build:ios` / `build:android` scripts
-6. Manual smoke test on simulator and a real device (existing iPhone 15 Pro+)
-7. Validate: globe renders, datasets load, asset protocol works
+1. ✅ Add iOS/Android sections to `tauri.conf.json` (bundle IDs, min SDK)
+2. ✅ Gate updater plugin and `keychain.rs` Android path with `cfg`
+3. ✅ Create `src-tauri/capabilities/mobile.json` (HTTPS only)
+4. ✅ Per-target Cargo.toml: keyring/updater are desktop+iOS only
+5. ✅ Add `dev:ios` / `dev:android` / `build:ios` / `build:android` scripts
+6. ✅ Refactor `main.rs` into `lib.rs` + thin `main.rs` (Tauri mobile cdylib pattern)
+7. ✅ `tauri android init` — `src-tauri/gen/android/` committed
+8. ✅ `cargo check --target aarch64-linux-android` passes cleanly from Linux
+9. iOS scaffold (`tauri ios init`) — committed via Phase 2 CI bootstrap, since
+   it requires macOS
+10. Manual smoke test on Android emulator (developer machine, not in CI)
+11. Manual smoke test on real iPhone via TestFlight (after Phase 6)
 
 **Phase 2 — CI compile checks:**
 
-8. New `.github/workflows/mobile.yml` with debug compile on PR
-9. Document the manual dev loop in the project README
+12. ✅ New `.github/workflows/mobile.yml` with two parallel jobs:
+    - `android-build` on `ubuntu-latest`: full Android SDK + NDK + Rust
+      android targets, runs `tauri android build --debug`
+    - `ios-build` on `macos-latest`: iOS targets, bootstraps `tauri ios init`
+      on first run if scaffold missing, runs `tauri ios build --debug`
+13. Both jobs trigger on PRs and main pushes (path-scoped)
+14. Document the manual dev loop in the project README (TODO)
 
 **Phase 3 — Catalog-as-tool refactor (cloud + on-device):**
 
