@@ -17,10 +17,24 @@ html, body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
 }
 
-/* Global utility — must stay in the synchronous <style> block
-   because components depend on it for initial-render state. */
+/* Global utility for hiding elements across components. */
 .hidden {
     display: none !important;
+}
+
+button {
+    background: var(--color-accent-dark);
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    transition: background 0.2s, color 0.15s, border-color 0.15s;
+}
+
+button:hover {
+    background: var(--color-accent-darker);
 }
 
 #app {

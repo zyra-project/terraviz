@@ -177,7 +177,7 @@
     box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
 }
 
-/** Tour overlay container — sits above the globe, captures events. */
+/** Tour overlay container — sits above the globe and lets pointer events pass through. */
 .tour-overlay-container {
     position: absolute;
     inset: 0;

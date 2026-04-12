@@ -4,20 +4,6 @@
  */
 
 /* --- Transport controls --- */
-button {
-    background: var(--color-accent-dark);
-    color: white;
-    border: none;
-    padding: 0.5rem 1rem;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 0.875rem;
-    transition: background 0.2s, color 0.15s, border-color 0.15s;
-}
-
-button:hover {
-    background: var(--color-accent-darker);
-}
 
 .transport-btn {
     min-width: 28px;
@@ -67,16 +53,6 @@ body.browse-open #time-label {
         min-width: 44px;
         min-height: 44px;
         font-size: 1rem;
-    }
-
-    #info-panel {
-        max-width: calc(100vw - 1.5rem);
-    }
-
-    #info-panel.expanded #info-body {
-        max-height: 40vh;
-        -webkit-overflow-scrolling: touch;
-        overflow-y: scroll;
     }
 
     .transport-btn {

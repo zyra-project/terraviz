@@ -76,10 +76,10 @@ src/styles/
   loading.css         ← Loading screen, progress bar, splash
 ```
 
-Each file is imported by its corresponding UI module (e.g.,
-`import '../styles/chat.css'` in `chatUI.ts`). Vite handles bundling
-into a single CSS output — zero runtime cost, full source-level
-modularity.
+The individual stylesheet files are aggregated via `src/styles/index.css`,
+which is imported once from `src/main.ts`. Vite then bundles everything
+into a single CSS output — zero runtime cost, with source-level
+modularity preserved through the split files.
 
 ## Execution Plan
 
