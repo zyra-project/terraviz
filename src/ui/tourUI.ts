@@ -30,6 +30,9 @@ function getLayoutMode(): LayoutMode {
   return 'desktop'
 }
 
+// Tour overlay CSS — imported here so Vite bundles it only when tour UI is used.
+import '../styles/tour.css'
+
 /**
  * Transform SOS overlay dimensions for the current viewport.
  *
@@ -141,7 +144,7 @@ function getOverlayContainer(): HTMLElement {
   if (!container) {
     container = document.createElement('div')
     container.id = 'tour-overlay-container'
-    container.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:600;'
+    container.className = 'tour-overlay-container'
     const ui = document.getElementById('ui')
     if (ui) ui.appendChild(container)
     else document.body.appendChild(container)
@@ -149,25 +152,19 @@ function getOverlayContainer(): HTMLElement {
   return container
 }
 
-/** Build glass-surface CSS for positioned overlays. */
-function glassStyles(xPct: number, yPct: number, widthPct: number, heightPct: number): string {
+/**
+ * Apply the glass-surface class and set dynamic position/size from tour JSON.
+ * The static visual properties (background, blur, border, shadow, animation)
+ * are now in the `.tour-glass` CSS class in tour.css. Only the position and
+ * size — which come from adaptOverlay() and vary per overlay — are set inline.
+ */
+function applyGlassPosition(el: HTMLElement, xPct: number, yPct: number, widthPct: number, heightPct: number): void {
   const { left, bottom, width, height } = adaptOverlay(xPct, yPct, widthPct, heightPct)
-  return `
-    position: absolute;
-    left: ${left}%;
-    bottom: ${bottom}%;
-    width: min(${width}%, calc(100% - ${left}% - 0.5rem));
-    height: min(${height}%, calc(100% - ${bottom}% - 0.5rem));
-    pointer-events: auto;
-    background: rgba(13, 13, 18, 0.88);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 10px;
-    overflow: hidden;
-    animation: tour-box-fadein 0.35s ease;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
-  `
+  el.classList.add('tour-glass')
+  el.style.left = `${left}%`
+  el.style.bottom = `${bottom}%`
+  el.style.width = `min(${width}%, calc(100% - ${left}% - 0.5rem))`
+  el.style.height = `min(${height}%, calc(100% - ${bottom}% - 0.5rem))`
 }
 
 function addCloseButton(el: HTMLElement, onClose: () => void): void {
@@ -214,24 +211,11 @@ export function showTourLegend(legendUrl: string): void {
   const container = getOverlayContainer()
   const wrapper = document.createElement('div')
   wrapper.id = 'tour-legend-float'
-  wrapper.style.cssText = `
-    position: absolute;
-    top: 3rem;
-    left: 0.5rem;
-    pointer-events: auto;
-    background: rgba(13, 13, 18, 0.88);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 8px;
-    padding: 0.3rem;
-    animation: tour-box-fadein 0.3s ease;
-    z-index: 5;
-  `
+  wrapper.className = 'tour-legend'
   const img = document.createElement('img')
   img.src = legendUrl
   img.alt = 'Legend'
-  img.style.cssText = 'max-width: 40vw; max-height: 15vh; display: block; border-radius: 4px; cursor: zoom-in;'
+  img.style.cursor = 'zoom-in'
   // Tap to open the full legend modal (if it exists)
   img.addEventListener('click', () => {
     const thumb = document.querySelector('.info-legend-thumb') as HTMLElement | null
@@ -555,9 +539,8 @@ export function showTourPopup(params: ShowPopupHtmlTaskParams): void {
   const widthPct = params.widthPct ?? 50
   const heightPct = params.heightPct ?? 50
 
-  wrapper.style.cssText = glassStyles(xPct, yPct, widthPct, heightPct) + `
-    padding: 0;
-  `
+  applyGlassPosition(wrapper, xPct, yPct, widthPct, heightPct)
+  wrapper.style.padding = '0'
 
   if (params.url) {
     const iframe = document.createElement('iframe')
@@ -610,13 +593,12 @@ export function showTourQuestion(params: QuestionDisplayParams): void {
   const widthPct = params.widthPct ?? 50
   const heightPct = params.heightPct ?? 60
 
-  wrapper.style.cssText = glassStyles(xPct, yPct, widthPct, heightPct) + `
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 1rem;
-  `
+  applyGlassPosition(wrapper, xPct, yPct, widthPct, heightPct)
+  wrapper.style.display = 'flex'
+  wrapper.style.flexDirection = 'column'
+  wrapper.style.alignItems = 'center'
+  wrapper.style.justifyContent = 'center'
+  wrapper.style.padding = '1rem'
 
   const img = document.createElement('img')
   img.src = params.imgQuestionFilename
