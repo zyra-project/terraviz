@@ -67,6 +67,8 @@ function makeCallbacks(overrides: Partial<TourCallbacks> = {}): TourCallbacks {
   return {
     loadDataset: vi.fn(() => Promise.resolve()),
     unloadAllDatasets: vi.fn(() => Promise.resolve()),
+    unloadDatasetAt: vi.fn(() => Promise.resolve()),
+    setEnvView: vi.fn(() => Promise.resolve()),
     getRenderer: vi.fn(() => renderer),
     togglePlayPause: vi.fn(),
     isPlaying: vi.fn(() => false),
@@ -155,8 +157,7 @@ describe('TourEngine', () => {
       expect(cb.announce).toHaveBeenCalledWith('Tour paused — press play to continue')
 
       // Resume
-      engine.play()
-      await flush()
+      await engine.play()
       await playPromise
 
       expect(engine.state).toBe('stopped')
@@ -225,8 +226,7 @@ describe('TourEngine', () => {
       expect(engine.currentIndex).toBe(2)
 
       // Finish
-      engine.play()
-      await flush()
+      await engine.play()
       await playPromise
       expect(cb.onTourEnd).toHaveBeenCalledOnce()
     })
@@ -261,11 +261,11 @@ describe('TourEngine', () => {
       expect(engine.currentIndex).toBe(1)
       expect(engine.state).toBe('paused')
 
-      // Finish the tour
+      // Finish the tour — resume past the second pause, then let it
+      // run to completion.
       engine.play()
       await flush()
       engine.play()
-      await flush()
       await playPromise
       expect(cb.onTourEnd).toHaveBeenCalledOnce()
     })
@@ -351,7 +351,9 @@ describe('TourEngine', () => {
       ]), cb)
 
       await engine.play()
-      expect(cb.loadDataset).toHaveBeenCalledWith('TEST_123')
+      // Phase 3 extended loadDataset to pass an options object with
+      // the routed slot (defaulting to 0 when no worldIndex).
+      expect(cb.loadDataset).toHaveBeenCalledWith('TEST_123', { slot: 0 })
     })
 
     it('dispatches unloadAllDatasets to callback', async () => {
@@ -516,6 +518,186 @@ describe('TourEngine', () => {
 
       // Should still complete normally
       expect(cb.onTourEnd).toHaveBeenCalledOnce()
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────
+  // Phase 3 — setEnvView, worldIndex routing, unloadDataset
+  // ────────────────────────────────────────────────────────────
+
+  describe('setEnvView', () => {
+    it('parses "1globe" and calls setEnvView callback with layout 1', async () => {
+      const cb = makeCallbacks()
+      const engine = new TourEngine(makeTour([
+        { setEnvView: '1globe' },
+      ]), cb)
+      await engine.play()
+
+      expect(cb.setEnvView).toHaveBeenCalledWith({ layout: '1' })
+    })
+
+    it('parses "2globes" to layout "2h"', async () => {
+      const cb = makeCallbacks()
+      const engine = new TourEngine(makeTour([
+        { setEnvView: '2globes' },
+      ]), cb)
+      await engine.play()
+
+      expect(cb.setEnvView).toHaveBeenCalledWith({ layout: '2h' })
+    })
+
+    it('parses "4globes" to layout "4"', async () => {
+      const cb = makeCallbacks()
+      const engine = new TourEngine(makeTour([
+        { setEnvView: '4globes' },
+      ]), cb)
+      await engine.play()
+
+      expect(cb.setEnvView).toHaveBeenCalledWith({ layout: '4' })
+    })
+
+    it('parses GLOBE / SPHERE aliases case-insensitively', async () => {
+      const cb1 = makeCallbacks()
+      new TourEngine(makeTour([{ setEnvView: 'GLOBE' }]), cb1).play()
+      await flush()
+      expect(cb1.setEnvView).toHaveBeenCalledWith({ layout: '1' })
+
+      const cb2 = makeCallbacks()
+      new TourEngine(makeTour([{ setEnvView: 'sphere' }]), cb2).play()
+      await flush()
+      expect(cb2.setEnvView).toHaveBeenCalledWith({ layout: '1' })
+    })
+
+    it('remaps legacy flat view names to single-globe', async () => {
+      const cb = makeCallbacks()
+      const engine = new TourEngine(makeTour([
+        { setEnvView: 'FLAT_4' },
+      ]), cb)
+      await engine.play()
+
+      expect(cb.setEnvView).toHaveBeenCalledWith({ layout: '1' })
+    })
+
+    it('defaults to single-globe on unknown view names', async () => {
+      const cb = makeCallbacks()
+      const engine = new TourEngine(makeTour([
+        { setEnvView: 'bogus_view_value' },
+      ]), cb)
+      await engine.play()
+
+      expect(cb.setEnvView).toHaveBeenCalledWith({ layout: '1' })
+    })
+  })
+
+  describe('loadDataset with worldIndex routing', () => {
+    it('translates worldIndex 1 to slot 0', async () => {
+      const cb = makeCallbacks()
+      const engine = new TourEngine(makeTour([
+        { loadDataset: { id: 'ID_A', datasetID: 'a', worldIndex: 1 } },
+      ]), cb)
+      await engine.play()
+
+      expect(cb.loadDataset).toHaveBeenCalledWith('ID_A', { slot: 0 })
+    })
+
+    it('translates worldIndex 2 to slot 1', async () => {
+      const cb = makeCallbacks()
+      const engine = new TourEngine(makeTour([
+        { loadDataset: { id: 'ID_B', datasetID: 'b', worldIndex: 2 } },
+      ]), cb)
+      await engine.play()
+
+      expect(cb.loadDataset).toHaveBeenCalledWith('ID_B', { slot: 1 })
+    })
+
+    it('defaults to slot 0 when worldIndex is omitted', async () => {
+      const cb = makeCallbacks()
+      const engine = new TourEngine(makeTour([
+        { loadDataset: { id: 'ID_C' } },
+      ]), cb)
+      await engine.play()
+
+      expect(cb.loadDataset).toHaveBeenCalledWith('ID_C', { slot: 0 })
+    })
+
+    it('clamps negative or zero worldIndex to slot 0', async () => {
+      const cb = makeCallbacks()
+      const engine = new TourEngine(makeTour([
+        { loadDataset: { id: 'ID_D', worldIndex: 0 } },
+        { loadDataset: { id: 'ID_E', worldIndex: -3 } },
+      ]), cb)
+      await engine.play()
+
+      expect(cb.loadDataset).toHaveBeenNthCalledWith(1, 'ID_D', { slot: 0 })
+      expect(cb.loadDataset).toHaveBeenNthCalledWith(2, 'ID_E', { slot: 0 })
+    })
+  })
+
+  describe('unloadDataset by handle', () => {
+    it('looks up a datasetID handle and calls unloadDatasetAt with the recorded slot', async () => {
+      const cb = makeCallbacks()
+      const engine = new TourEngine(makeTour([
+        { loadDataset: { id: 'ID_F', datasetID: 'foo', worldIndex: 2 } },
+        { unloadDataset: 'foo' },
+      ]), cb)
+      await engine.play()
+
+      expect(cb.unloadDatasetAt).toHaveBeenCalledWith(1)
+    })
+
+    it('is a no-op on unknown handles (warns and skips)', async () => {
+      const cb = makeCallbacks()
+      const engine = new TourEngine(makeTour([
+        { unloadDataset: 'never_loaded' },
+      ]), cb)
+      await engine.play()
+
+      expect(cb.unloadDatasetAt).not.toHaveBeenCalled()
+    })
+
+    it('removes the handle from the map after unload so subsequent lookups miss', async () => {
+      const cb = makeCallbacks()
+      const engine = new TourEngine(makeTour([
+        { loadDataset: { id: 'ID_G', datasetID: 'bar', worldIndex: 1 } },
+        { unloadDataset: 'bar' },
+        { unloadDataset: 'bar' }, // second call should be a no-op
+      ]), cb)
+      await engine.play()
+
+      expect(cb.unloadDatasetAt).toHaveBeenCalledTimes(1)
+    })
+
+    it('unloadAllDatasets clears the handle map', async () => {
+      const cb = makeCallbacks()
+      const engine = new TourEngine(makeTour([
+        { loadDataset: { id: 'ID_H', datasetID: 'baz', worldIndex: 1 } },
+        { unloadAllDatasets: '' },
+        { unloadDataset: 'baz' }, // should miss — map was cleared
+      ]), cb)
+      await engine.play()
+
+      expect(cb.unloadAllDatasets).toHaveBeenCalledTimes(1)
+      expect(cb.unloadDatasetAt).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('full setEnvView round-trip sequence', () => {
+    it('exercises the reference tour flow: load → setEnvView 2globes → load into slot 2 → unloadAll → setEnvView 1globe', async () => {
+      const cb = makeCallbacks()
+      const engine = new TourEngine(makeTour([
+        { loadDataset: { id: 'ID_I', datasetID: 'd1', worldIndex: 1 } },
+        { setEnvView: '2globes' },
+        { loadDataset: { id: 'ID_J', datasetID: 'd2', worldIndex: 2 } },
+        { unloadAllDatasets: '' },
+        { setEnvView: '1globe' },
+      ]), cb)
+      await engine.play()
+
+      expect(cb.loadDataset).toHaveBeenNthCalledWith(1, 'ID_I', { slot: 0 })
+      expect(cb.setEnvView).toHaveBeenNthCalledWith(1, { layout: '2h' })
+      expect(cb.loadDataset).toHaveBeenNthCalledWith(2, 'ID_J', { slot: 1 })
+      expect(cb.unloadAllDatasets).toHaveBeenCalledTimes(1)
+      expect(cb.setEnvView).toHaveBeenNthCalledWith(2, { layout: '1' })
     })
   })
 })

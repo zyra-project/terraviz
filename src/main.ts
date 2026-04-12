@@ -446,8 +446,16 @@ class InteractiveSphere {
    * Unlike loadDataset(), this does NOT stop the active tour and does NOT
    * trigger runTourOnLoad — the tour engine is managing the flow.
    */
-  private async loadDatasetForTour(datasetId: string): Promise<void> {
-    logger.debug('[App] loadDatasetForTour:', datasetId)
+  private async loadDatasetForTour(datasetId: string, slot?: number): Promise<void> {
+    const targetSlot = slot ?? this.viewports.getPrimaryIndex()
+    const isPrimarySlot = targetSlot === this.viewports.getPrimaryIndex()
+    const targetRenderer = this.viewports.getRendererAt(targetSlot)
+    logger.debug('[App] loadDatasetForTour:', datasetId, 'slot:', targetSlot)
+
+    if (!targetRenderer) {
+      logger.warn('[App] Tour loadDataset: slot renderer missing:', targetSlot)
+      return
+    }
 
     const dataset = dataService.getDatasetById(datasetId)
     if (!dataset) {
@@ -455,27 +463,33 @@ class InteractiveSphere {
       return
     }
 
-    // Skip re-loading if this dataset is already on the globe
-    if (this.appState.currentDataset?.id === datasetId) {
-      logger.debug('[App] Tour loadDataset: already loaded, skipping:', datasetId)
+    // Skip re-loading if this specific panel already has this dataset
+    if (this.panelStates[targetSlot]?.dataset?.id === datasetId) {
+      logger.debug('[App] Tour loadDataset: already loaded in slot, skipping:', datasetId, targetSlot)
       return
     }
 
-    stopPlaybackLoop(this.playback)
-    this.appState.isPlaying = false
-    resetPlaybackState(this.playback)
+    // Primary slot owns the shared playback state — reset it before
+    // tearing down the previous stream. Non-primary slot loads don't
+    // touch playback at all.
+    if (isPrimarySlot) {
+      stopPlaybackLoop(this.playback)
+      this.appState.isPlaying = false
+      resetPlaybackState(this.playback)
+    }
 
-    // Tear down previous video/HLS on the primary panel
-    this.cleanupPanelVideo()
+    // Tear down the previous video/HLS on THIS slot
+    this.cleanupPanelVideo(targetSlot)
 
-    this.renderer?.removeCloudOverlay()
-    this.renderer?.removeNightLights()
-    this.renderer?.disableSunLighting()
+    targetRenderer.removeCloudOverlay?.()
+    targetRenderer.removeNightLights?.()
+    targetRenderer.disableSunLighting?.()
 
-    this.appState.currentDataset = dataset
-    const tourPrimaryIdx = this.viewports.getPrimaryIndex()
-    if (this.panelStates[tourPrimaryIdx]) {
-      this.panelStates[tourPrimaryIdx].dataset = dataset
+    if (isPrimarySlot) {
+      this.appState.currentDataset = dataset
+    }
+    if (this.panelStates[targetSlot]) {
+      this.panelStates[targetSlot].dataset = dataset
     }
     this.infoDisplayOverride = null
     this.renderInfoPanel()
@@ -486,8 +500,6 @@ class InteractiveSphere {
       document.getElementById('info-panel')?.classList.add('hidden')
     }
 
-    if (!this.renderer) return
-
     // Show playback controls so users can scrub through time-series data
     const tourLoaderCallbacks = {
       showPlaybackControls: (show: boolean) => this.showPlaybackControls(show),
@@ -495,14 +507,20 @@ class InteractiveSphere {
     }
 
     if (dataService.isImageDataset(dataset)) {
-      await loadImageDataset(dataset, this.renderer, this.appState, this.isMobile, tourLoaderCallbacks)
+      await loadImageDataset(
+        dataset, targetRenderer, this.appState, this.isMobile, tourLoaderCallbacks,
+        { isPrimary: isPrimarySlot },
+      )
     } else if (dataService.isVideoDataset(dataset)) {
       const result = await loadVideoDataset(
-        dataset, this.renderer, this.appState, this.isMobile, this.playback, tourLoaderCallbacks
+        dataset, targetRenderer, this.appState, this.isMobile, this.playback, tourLoaderCallbacks,
+        { isPrimary: isPrimarySlot },
       )
-      this.storePanelVideoResult(this.viewports.getPrimaryIndex(), result)
-      this.attachPrimaryVideoSync()
-      this.doStartPlaybackLoop()
+      this.storePanelVideoResult(targetSlot, result)
+      if (isPrimarySlot) {
+        this.attachPrimaryVideoSync()
+        this.doStartPlaybackLoop()
+      }
     }
 
     initLegendForDataset(dataset, loadConfig())
@@ -546,11 +564,17 @@ class InteractiveSphere {
     const tourBaseUrl = resp.url || new URL(dataLink, window.location.href).toString()
 
     this.tourEngine = new TourEngine(tourFile, {
-      loadDataset: async (id) => {
-        await this.loadDatasetForTour(id)
+      loadDataset: async (id, opts) => {
+        await this.loadDatasetForTour(id, opts?.slot)
       },
       unloadAllDatasets: async () => {
         await this.unloadForTour()
+      },
+      unloadDatasetAt: async (slot) => {
+        await this.unloadPanelDataset(slot)
+      },
+      setEnvView: async ({ layout }) => {
+        this.viewports.setLayout(layout)
       },
       getRenderer: () => this.renderer!,
       togglePlayPause: () => {
@@ -1448,6 +1472,57 @@ class InteractiveSphere {
     // Clear every floating legend + info-panel override since no
     // panel has a dataset now.
     this.infoDisplayOverride = null
+    this.refreshPanelLegends()
+    this.renderInfoPanel()
+  }
+
+  /**
+   * Unload a single panel's dataset — video, texture, metadata.
+   * Called by the tour engine's `unloadDataset` task after it
+   * resolves a local `datasetID` handle to a slot. Keeps the rest
+   * of the panels intact, unlike `unloadAllPanels`.
+   *
+   * When the target slot is the primary, also tears down the shared
+   * playback state. Non-primary slots leave the playback UI alone.
+   */
+  private async unloadPanelDataset(slot: number): Promise<void> {
+    const panel = this.panelStates[slot]
+    if (!panel) return
+    const isPrimarySlot = slot === this.viewports.getPrimaryIndex()
+
+    // Clean the video stream, texture, and (if primary) the shared
+    // playback state. cleanupPanelVideo handles both.
+    this.cleanupPanelVideo(slot)
+
+    // Clear the dataset reference and reset the base earth on that
+    // specific panel's renderer so it doesn't keep showing a stale
+    // texture.
+    panel.dataset = null
+    const renderer = this.viewports.getRendererAt(slot)
+    if (renderer) {
+      renderer.removeCloudOverlay?.()
+      renderer.removeNightLights?.()
+      renderer.disableSunLighting?.()
+      try {
+        await renderer.loadDefaultEarthMaterials?.()
+        const sun = getSunPosition(new Date())
+        renderer.enableSunLighting?.(sun.lat, sun.lng)
+      } catch (err) {
+        logger.warn('[App] Earth material reload after unload failed:', err)
+      }
+    }
+
+    // If we just cleared the currently-displayed slot in the info
+    // panel, drop the override so renderInfoPanel picks a new target.
+    if (this.infoDisplayOverride === slot) {
+      this.infoDisplayOverride = null
+    }
+
+    // Reflect the clear in the primary UI if applicable.
+    if (isPrimarySlot) {
+      this.appState.currentDataset = null
+    }
+
     this.refreshPanelLegends()
     this.renderInfoPanel()
   }
