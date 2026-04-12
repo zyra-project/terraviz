@@ -146,6 +146,38 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('search_catalog')
   })
 
+  it('instructs the LLM to call tools silently (no narration)', () => {
+    // Regression: early Phase 3 preview observed the LLM narrating tool
+    // calls in prose ("Here's a search for...") — the prompt now explicitly
+    // forbids this. See PR #27 screenshot discussion for context.
+    const prompt = buildSystemPrompt(datasets, null)
+    expect(prompt).toMatch(/CALL TOOLS SILENTLY/i)
+    expect(prompt).toContain('Do NOT narrate your tool calls')
+  })
+
+  it('requires a <<LOAD:...>> marker for every dataset recommended from tool results', () => {
+    // Regression: the preview showed the LLM listing dataset titles in prose
+    // without load markers, so no Load buttons appeared. The prompt now
+    // spells out that markers are MANDATORY for every title mentioned from
+    // a search_catalog result.
+    const prompt = buildSystemPrompt(datasets, null)
+    expect(prompt).toMatch(/MANDATORY.*<<LOAD:/i)
+  })
+
+  it('restricts the "I do not have a dataset" preface to zero-results only', () => {
+    // Regression: the original prompt told the LLM to prefix fallback
+    // results with "I don't have a dataset for that specific topic, but
+    // here are some related ones" — which the model then used even when
+    // search_catalog returned real (if semantically adjacent) results,
+    // producing self-contradictory output. The prompt now reserves that
+    // phrase for the zero-results case ONLY.
+    const prompt = buildSystemPrompt(datasets, null)
+    // The phrase should still appear (for the true zero-results case)
+    // but the rule should now explicitly restrict it.
+    expect(prompt).toContain('ONLY for the case')
+    expect(prompt).toContain('zero entries')
+  })
+
   it('still includes current dataset context on follow-up conversations', () => {
     // buildSystemPrompt is called per-request; the dataset context reflects
     // whatever is currently loaded on the globe regardless of turn index.
