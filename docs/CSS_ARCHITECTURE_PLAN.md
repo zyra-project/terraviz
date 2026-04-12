@@ -30,7 +30,7 @@ trajectory (web, desktop, iOS, Android):
 |---|---|---|
 | `index.html` `<style>` block | ~2,980 | Everything: chat, browse, playback, tools, info panel, help, download, viewport grid, tour controls, loading screen |
 | `src/ui/tourUI.ts` (inline `cssText`) | ~200+ across 25 assignments | Tour overlays, legends, images, videos, popups, questions |
-| `src/ui/main.ts` (inline `.style`) | ~19 assignments | Loading screen progress bar |
+| `src/main.ts` (inline `.style`) | ~19 assignments | Loading screen progress bar |
 | `src/ui/playbackController.ts` | ~10 assignments | Button states, dynamic positioning |
 | `src/ui/chatUI.ts` | ~7 assignments | Textarea height calculations |
 | `src/ui/mapControlsUI.ts` | 2 assignments | Bottom positioning |
@@ -62,8 +62,7 @@ trajectory (web, desktop, iOS, Android):
 ```
 src/styles/
   tokens.css          ← CSS custom properties (colors, spacing, radii, glass effects)
-  base.css            ← Reset, body, scrollbar, focus-visible, global typography
-  globe.css           ← #globe-container, canvas, coordinate overlay
+  base.css            ← Reset, body, scrollbar, focus-visible, global typography, #globe-container, canvas, coordinate overlay
   chat.css            ← Chat panel, messages, settings, feedback thumbs
   browse.css          ← Browse overlay, dataset cards, category chips, search
   playback.css        ← Playback controls, transport buttons, range slider
@@ -72,7 +71,6 @@ src/styles/
   info-panel.css      ← Dataset info drawer, collapsible sections
   help.css            ← Help modal (desktop) / sheet (mobile)
   download.css        ← Download manager (desktop only)
-  viewport.css        ← Multi-globe CSS grid, panel labels
   loading.css         ← Loading screen, progress bar, splash
 ```
 
