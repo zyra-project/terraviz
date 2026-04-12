@@ -27,6 +27,7 @@ log = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 futures-util = "0.3"
 tauri-plugin-http = "2"
+tauri-plugin-apple-intelligence = { path = "plugins/apple-intelligence" }
 
 # Desktop-only dependencies. The keyring crate has no Android backend, and
 # the updater plugin is unsupported on mobile (App Store / Play Store handle

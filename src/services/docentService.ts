@@ -7,6 +7,7 @@
 
 import type { Dataset, ChatMessage, ChatAction, DocentConfig, LegendCache, MapViewContext, LLMContextSnapshot, ReadingLevel } from '../types'
 import { streamChat, checkAvailability, type AvailabilityResult, type LLMMessage, type LLMContentPart, type LLMToolCall } from './llmProvider'
+import { isAvailable as isAppleIntelligenceAvailable, streamChatLocal } from './appleIntelligenceProvider'
 import { buildSystemPrompt, buildCompressedHistory, getSearchCatalogTool, getLoadDatasetTool, getFlyToTool, getSetTimeTool, getFitBoundsTool, getAddMarkerTool, getToggleLabelsTool, getHighlightRegionTool } from './docentContext'
 import { parseIntent, generateResponse, searchDatasets, evaluateAutoLoad } from './docentEngine'
 import { ensureLoaded as ensureQALoaded, getRelevantQA } from './qaService'
@@ -861,9 +862,18 @@ export async function* processMessage(
       ? { ...cfg, model: CF_VISION_MODEL }
       : cfg
 
+    // Phase 4: check if Apple Intelligence on-device model is available.
+    // When it is, we route through streamChatLocal (Tauri plugin) instead of
+    // streamChat (HTTP). The provider selection is transparent to the rest of
+    // processMessage — both yield the same StreamChunk union.
+    // When it is, we route through streamChatLocal (Tauri plugin) instead of
+    // streamChat (HTTP). The provider selection is transparent to the rest of
+    // processMessage — both yield the same StreamChunk union.
+    const useAppleIntelligence = cfg.model === 'apple-intelligence' && await isAppleIntelligenceAvailable()
+
     const llmContext: LLMContextSnapshot = {
       systemPrompt,
-      model: visionCfg.model,
+      model: useAppleIntelligence ? 'apple-intelligence' : visionCfg.model,
       readingLevel: cfg.readingLevel as ReadingLevel,
       visionEnabled: visionActive,
       fallback: false,
@@ -902,14 +912,18 @@ export async function* processMessage(
           let roundText = ''
 
           logger.info(`[Docent] LLM request (attempt ${attempt}/${MAX_LLM_ATTEMPTS}, round ${round}/${MAX_TOOL_CALL_ROUNDS}):`, {
-            url: `${visionCfg.apiUrl.replace(/\/+$/, '')}/chat/completions`,
-            model: visionCfg.model,
+            provider: useAppleIntelligence ? 'apple-intelligence' : 'openai-compat',
+            url: useAppleIntelligence ? '(on-device)' : `${visionCfg.apiUrl.replace(/\/+$/, '')}/chat/completions`,
+            model: useAppleIntelligence ? 'apple-intelligence' : visionCfg.model,
             messageCount: conversationMessages.length,
             toolCount: tools.length,
             vision: visionActive,
           })
 
-          const stream = streamChat(conversationMessages, tools, visionCfg, visionActive ? { timeoutMs: VISION_TIMEOUT_MS } : undefined)
+          // Phase 4: route to on-device provider when selected, otherwise HTTP
+          const stream = useAppleIntelligence
+            ? streamChatLocal(conversationMessages, tools, visionActive ? { timeoutMs: VISION_TIMEOUT_MS } : undefined)
+            : streamChat(conversationMessages, tools, visionCfg, visionActive ? { timeoutMs: VISION_TIMEOUT_MS } : undefined)
 
           for await (const chunk of stream) {
             switch (chunk.type) {

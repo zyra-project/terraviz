@@ -14,6 +14,7 @@ import { processMessage, loadConfig, loadConfigWithKey, saveConfig, testConnecti
 import { captureGlobeScreenshot } from '../services/screenshotService'
 import { ensureLoaded as ensureQALoaded } from '../services/qaService'
 import { fetchModels } from '../services/llmProvider'
+import { isAvailable as isAppleIntelligenceAvailable } from '../services/appleIntelligenceProvider'
 import { setLogLevel, logger } from '../utils/logger'
 
 // --- Constants ---
@@ -428,6 +429,21 @@ async function refreshModelSelect(apiUrl: string, preferredModel?: string): Prom
     select.appendChild(opt)
   }
   select.disabled = false
+
+  // Phase 4: if Apple Intelligence is available on this device, prepend it
+  // as an option. The model value 'apple-intelligence' is a sentinel that
+  // docentService checks to route through the on-device provider instead
+  // of the HTTP provider.
+  isAppleIntelligenceAvailable().then(available => {
+    if (!available || !select) return
+    // Don't add if already present (e.g. from a previous refresh)
+    if (Array.from(select.options).some(o => o.value === 'apple-intelligence')) return
+    const opt = document.createElement('option')
+    opt.value = 'apple-intelligence'
+    opt.textContent = 'Local (Apple Intelligence)'
+    opt.selected = selected === 'apple-intelligence'
+    select.insertBefore(opt, select.firstChild)
+  }).catch(() => { /* not available, silently skip */ })
 
   // Auto-persist the first model when config has none (e.g. fresh Tauri install)
   if (!selected && models.length > 0) {

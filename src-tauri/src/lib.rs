@@ -34,7 +34,11 @@ pub fn run() {
     // and the binding is never reassigned.
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
-        .plugin(tauri_plugin_http::init());
+        .plugin(tauri_plugin_http::init())
+        // Phase 4: Apple Intelligence on-device LLM. On non-iOS platforms the
+        // plugin's commands return "not available" gracefully; the JS provider
+        // checks availability and falls back to HTTP automatically.
+        .plugin(tauri_plugin_apple_intelligence::init());
 
     // The updater plugin is desktop-only — App Store and Play Store handle
     // updates on iOS and Android. See docs/MOBILE_APP_PLAN.md.
