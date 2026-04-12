@@ -9,7 +9,7 @@ import { MapRenderer } from './services/mapRenderer'
 import { ViewportManager, type ViewLayout } from './services/viewportManager'
 import { HLSService } from './services/hlsService'
 import { dataService } from './services/dataService'
-import { formatDate, videoTimeToDate, dateToVideoTime, isSubDailyPeriod, getSunPosition } from './utils/time'
+import { formatDate, videoTimeToDate, dateToVideoTime, isSubDailyPeriod, getSunPosition, inferDisplayInterval } from './utils/time'
 import { logger } from './utils/logger'
 import type { AppState, VideoTextureHandle, TourFile, Dataset } from './types'
 
@@ -959,23 +959,26 @@ class InteractiveSphere {
    */
   private openBrowsePanel(): void {
     const overlay = document.getElementById('browse-overlay')
-    // If the overlay has never been populated (initial hidden state
-    // in single-view mode when a ?dataset=FOO URL was used), call
-    // showBrowseUI to render it fresh.
-    const needsFirstRender = !overlay || overlay.classList.contains('hidden')
-    if (needsFirstRender) {
+    // Only call showBrowseUI once — it wires event listeners on
+    // category chips, search input, etc. Re-calling it after a
+    // hideBrowseUI() would duplicate those listeners.
+    if (!overlay || overlay.dataset.browseInitialized !== 'true') {
       showBrowseUI(this.appState.datasets, {
         onSelectDataset: (id) => this.selectDatasetFromBrowse(id),
         announce: (msg) => this.announce(msg),
         isMobile: this.isMobile,
         onOpenChat: (query) => this.openChatWithQuery(query),
       })
+      // Mark as initialized so subsequent opens skip showBrowseUI.
+      const el = overlay ?? document.getElementById('browse-overlay')
+      if (el) el.dataset.browseInitialized = 'true'
       return
     }
     // Already rendered — either collapsed or fully visible. Remove
     // the collapsed class either way and ensure `browse-open` is
     // set so other UI can react.
-    overlay!.classList.remove('collapsed')
+    overlay.classList.remove('collapsed')
+    overlay.classList.remove('hidden')
     document.body.classList.add('browse-open')
   }
 
@@ -1256,6 +1259,14 @@ class InteractiveSphere {
       this.showPlaybackControls(true)
       this.showTimeLabel(hasTemporalRange)
       updatePlayButton(newPrimaryPanel!.hlsService!.paused)
+      // Recompute the display interval for the new primary's temporal
+      // range so scrubber snapping and time label formatting are correct.
+      if (hasTemporalRange && newPrimaryPanel!.hlsService) {
+        const start = new Date(newDataset!.startTime!)
+        const end = new Date(newDataset!.endTime!)
+        const videoDuration = newPrimaryPanel!.hlsService!.duration ?? 1
+        this.playback.displayInterval = inferDisplayInterval(start, end, videoDuration)
+      }
       this.attachPrimaryVideoSync()
       this.doStartPlaybackLoop()
     } else {

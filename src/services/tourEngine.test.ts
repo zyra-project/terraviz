@@ -572,13 +572,11 @@ describe('TourEngine', () => {
 
     it('parses GLOBE / SPHERE aliases case-insensitively', async () => {
       const cb1 = makeCallbacks()
-      new TourEngine(makeTour([{ setEnvView: 'GLOBE' }]), cb1).play()
-      await flush()
+      await new TourEngine(makeTour([{ setEnvView: 'GLOBE' }]), cb1).play()
       expect(cb1.setEnvView).toHaveBeenCalledWith({ layout: '1' })
 
       const cb2 = makeCallbacks()
-      new TourEngine(makeTour([{ setEnvView: 'sphere' }]), cb2).play()
-      await flush()
+      await new TourEngine(makeTour([{ setEnvView: 'sphere' }]), cb2).play()
       expect(cb2.setEnvView).toHaveBeenCalledWith({ layout: '1' })
     })
 

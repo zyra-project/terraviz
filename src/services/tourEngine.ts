@@ -685,24 +685,28 @@ export class TourEngine {
   // ── Environment executors ──────────────────────────────────────────
 
   private execDayNight(state: 'on' | 'off'): void {
-    for (const renderer of this.callbacks.getAllRenderers()) {
-      if (state === 'on') {
-        const sun = getSunPosition(new Date())
+    if (state === 'on') {
+      const sun = getSunPosition(new Date())
+      for (const renderer of this.callbacks.getAllRenderers()) {
         renderer.enableSunLighting(sun.lat, sun.lng)
-      } else {
+      }
+    } else {
+      for (const renderer of this.callbacks.getAllRenderers()) {
         renderer.disableSunLighting()
       }
     }
   }
 
   private async execClouds(state: 'on' | 'off'): Promise<void> {
-    const cloudUrl = getCloudTextureUrl()
-    for (const renderer of this.callbacks.getAllRenderers()) {
-      if (state === 'on') {
-        await renderer.loadCloudOverlay(cloudUrl)
-      } else {
+    if (state !== 'on') {
+      for (const renderer of this.callbacks.getAllRenderers()) {
         renderer.removeCloudOverlay()
       }
+      return
+    }
+    const cloudUrl = getCloudTextureUrl()
+    for (const renderer of this.callbacks.getAllRenderers()) {
+      await renderer.loadCloudOverlay(cloudUrl)
     }
   }
 
