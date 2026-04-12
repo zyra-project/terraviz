@@ -46,6 +46,10 @@ export interface ToolsMenuCallbacks {
   onOpenBrowse?: () => void
   /** User clicked Orbit settings — open the chat settings dialog. */
   onOpenOrbitSettings?: () => void
+  /** User toggled dataset info visibility. */
+  onToggleDatasetInfo?: (visible: boolean) => void
+  /** User toggled legend visibility. */
+  onToggleLegend?: (visible: boolean) => void
   /** Announce something for screen readers. */
   announce?: (message: string) => void
 }
@@ -70,7 +74,7 @@ export function initToolsMenu(
   // leaks between invocations.
   isOpen = false
 
-  const { onSetLayout, onOpenBrowse, onOpenOrbitSettings, announce } = callbacks
+  const { onSetLayout, onOpenBrowse, onOpenOrbitSettings, onToggleDatasetInfo, onToggleLegend, announce } = callbacks
 
   // The layout picker is a dev-only affordance until multi-viewport
   // has real per-panel datasets. Show it when the URL carries
@@ -109,6 +113,15 @@ export function initToolsMenu(
         <button type="button" class="tools-menu-item" id="tools-menu-autorotate" aria-pressed="false">
           <span class="tools-menu-item-check" aria-hidden="true"></span>
           <span class="tools-menu-item-label">Auto-rotate</span>
+        </button>
+        <div class="tools-menu-subsep" aria-hidden="true"></div>
+        <button type="button" class="tools-menu-item" id="tools-menu-info" aria-pressed="true">
+          <span class="tools-menu-item-check" aria-hidden="true"></span>
+          <span class="tools-menu-item-label">Dataset info</span>
+        </button>
+        <button type="button" class="tools-menu-item" id="tools-menu-legend" aria-pressed="true">
+          <span class="tools-menu-item-check" aria-hidden="true"></span>
+          <span class="tools-menu-item-label">Legend</span>
         </button>
       </section>
       ${setViewDev ? `
@@ -197,6 +210,8 @@ export function initToolsMenu(
   const bordersBtn = document.getElementById('tools-menu-borders') as HTMLButtonElement
   const terrainBtn = document.getElementById('tools-menu-terrain') as HTMLButtonElement
   const autoRotateBtn = document.getElementById('tools-menu-autorotate') as HTMLButtonElement
+  const infoBtn = document.getElementById('tools-menu-info') as HTMLButtonElement
+  const legendBtn = document.getElementById('tools-menu-legend') as HTMLButtonElement
   const clearBtn = document.getElementById('tools-menu-clear') as HTMLButtonElement
   const orbitSettingsBtn = document.getElementById('tools-menu-orbit-settings') as HTMLButtonElement
 
@@ -238,6 +253,20 @@ export function initToolsMenu(
     const next = primary.toggleAutoRotate()
     setButtonState(autoRotateBtn, next)
     announce?.(next ? 'Auto-rotation enabled' : 'Auto-rotation disabled')
+  })
+
+  infoBtn.addEventListener('click', () => {
+    const next = !infoBtn.classList.contains('active')
+    setButtonState(infoBtn, next)
+    onToggleDatasetInfo?.(next)
+    announce?.(next ? 'Dataset info shown' : 'Dataset info hidden')
+  })
+
+  legendBtn.addEventListener('click', () => {
+    const next = !legendBtn.classList.contains('active')
+    setButtonState(legendBtn, next)
+    onToggleLegend?.(next)
+    announce?.(next ? 'Legend shown' : 'Legend hidden')
   })
 
   clearBtn.addEventListener('click', () => {
@@ -340,15 +369,18 @@ function setButtonState(btn: HTMLElement, active: boolean): void {
 }
 
 /**
- * Sync the Labels / Borders / Terrain / Auto-rotate buttons to an
- * explicit state. Called by main.ts after tours, goHome, or layout
- * changes so the toolbar reflects the actual renderer state.
+ * Sync the toolbar button states to explicit values. Called by
+ * main.ts after tours, goHome, layout changes, or when loading
+ * persisted view preferences so the toolbar reflects the actual
+ * renderer + preferences state.
  */
 export function syncToolsMenuState(state: {
   labels?: boolean
   borders?: boolean
   terrain?: boolean
   autoRotate?: boolean
+  datasetInfo?: boolean
+  legend?: boolean
 }): void {
   if (state.labels !== undefined) {
     const btn = document.getElementById('tools-menu-labels')
@@ -365,6 +397,14 @@ export function syncToolsMenuState(state: {
   if (state.autoRotate !== undefined) {
     const btn = document.getElementById('tools-menu-autorotate')
     if (btn) setButtonState(btn, state.autoRotate)
+  }
+  if (state.datasetInfo !== undefined) {
+    const btn = document.getElementById('tools-menu-info')
+    if (btn) setButtonState(btn, state.datasetInfo)
+  }
+  if (state.legend !== undefined) {
+    const btn = document.getElementById('tools-menu-legend')
+    if (btn) setButtonState(btn, state.legend)
   }
 }
 

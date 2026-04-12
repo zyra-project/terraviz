@@ -500,3 +500,133 @@ describe('ViewportManager.dispose', () => {
     expect(setActiveMapRenderer).toHaveBeenLastCalledWith(null)
   })
 })
+
+// ---------------------------------------------------------------------------
+// setPanelLegend
+// ---------------------------------------------------------------------------
+
+describe('ViewportManager.setPanelLegend', () => {
+  it('creates a .panel-legend button on first call with a legendLink', () => {
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '2h')
+
+    vm.setPanelLegend(0, 'https://example.com/legend.png', { title: 'Chlorophyll' })
+
+    const legend = grid.querySelectorAll('.panel-legend')
+    expect(legend).toHaveLength(1)
+    const img = legend[0].querySelector('img') as HTMLImageElement
+    expect(img.src).toBe('https://example.com/legend.png')
+    expect((legend[0] as HTMLButtonElement).getAttribute('aria-label')).toContain('Chlorophyll')
+    vm.dispose()
+  })
+
+  it('reuses the same element on subsequent calls and updates the src', () => {
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '2h')
+
+    vm.setPanelLegend(0, 'https://example.com/first.png')
+    vm.setPanelLegend(0, 'https://example.com/second.png')
+
+    const legends = grid.querySelectorAll('.panel-legend')
+    expect(legends).toHaveLength(1)
+    const img = legends[0].querySelector('img') as HTMLImageElement
+    expect(img.src).toBe('https://example.com/second.png')
+    vm.dispose()
+  })
+
+  it('hides the legend element when called with null', () => {
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '2h')
+
+    vm.setPanelLegend(0, 'https://example.com/legend.png')
+    const legend = grid.querySelector('.panel-legend') as HTMLElement
+    expect(legend.classList.contains('hidden')).toBe(false)
+
+    vm.setPanelLegend(0, null)
+    expect(legend.classList.contains('hidden')).toBe(true)
+    vm.dispose()
+  })
+
+  it('is a no-op when called with null and no legend exists', () => {
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '2h')
+
+    expect(() => vm.setPanelLegend(0, null)).not.toThrow()
+    expect(grid.querySelectorAll('.panel-legend')).toHaveLength(0)
+    vm.dispose()
+  })
+
+  it('invokes the onClick callback when the legend button is clicked', () => {
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '2h')
+
+    const onClick = vi.fn()
+    vm.setPanelLegend(0, 'https://example.com/legend.png', { onClick })
+
+    const legend = grid.querySelector('.panel-legend') as HTMLButtonElement
+    legend.click()
+    expect(onClick).toHaveBeenCalledTimes(1)
+    vm.dispose()
+  })
+
+  it('uses the latest onClick handler after a second setPanelLegend call', () => {
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '2h')
+
+    const firstHandler = vi.fn()
+    const secondHandler = vi.fn()
+    vm.setPanelLegend(0, 'https://example.com/a.png', { onClick: firstHandler })
+    vm.setPanelLegend(0, 'https://example.com/b.png', { onClick: secondHandler })
+
+    const legend = grid.querySelector('.panel-legend') as HTMLButtonElement
+    legend.click()
+    expect(firstHandler).not.toHaveBeenCalled()
+    expect(secondHandler).toHaveBeenCalledTimes(1)
+    vm.dispose()
+  })
+
+  it('is a no-op for out-of-range slot indices', () => {
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '2h')
+
+    expect(() => vm.setPanelLegend(99, 'https://example.com/legend.png')).not.toThrow()
+    expect(grid.querySelectorAll('.panel-legend')).toHaveLength(0)
+    vm.dispose()
+  })
+
+  it('setAllLegendsVisible(false) hides every rendered legend', () => {
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '4')
+
+    vm.setPanelLegend(0, 'https://example.com/a.png')
+    vm.setPanelLegend(1, 'https://example.com/b.png')
+    vm.setPanelLegend(2, 'https://example.com/c.png')
+
+    vm.setAllLegendsVisible(false)
+    for (const el of grid.querySelectorAll('.panel-legend')) {
+      expect((el as HTMLElement).classList.contains('hidden')).toBe(true)
+    }
+    vm.dispose()
+  })
+
+  it('setAllLegendsVisible(true) shows only legends with a src', () => {
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '4')
+
+    vm.setPanelLegend(0, 'https://example.com/a.png')
+    // Panel 1 has no legend ever set — no element created
+    vm.setAllLegendsVisible(true)
+    const legend0 = grid.querySelectorAll('[data-viewport-index="0"] .panel-legend')[0] as HTMLElement
+    expect(legend0.classList.contains('hidden')).toBe(false)
+    vm.dispose()
+  })
+})

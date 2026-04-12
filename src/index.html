@@ -104,6 +104,63 @@
             opacity: 0.55;
             transition: opacity 0.2s;
         }
+
+        /* Floating dataset legend anchored to the bottom-right of
+           each panel. Visible when:
+             - A dataset with a `legendLink` is loaded in that panel
+             - The Legend toggle in Tools is on
+             - Either the layout is multi-view (each panel owns its
+               legend), OR the dataset info panel is hidden (so the
+               legend needs its own surface in single-view too)
+           The panel that sits in the viewport's bottom-right corner
+           (the last grid cell — panel 1 in single-view, the bottom
+           or right-most panel in multi-view) needs a bigger bottom
+           offset so it clears the Tools bar. `.map-viewport:last-child`
+           matches that panel in every layout because ViewportManager
+           appends panels in top-left-to-bottom-right order. */
+        .panel-legend {
+            position: absolute;
+            right: 0.5rem;
+            bottom: 0.5rem;
+            z-index: 6;
+            padding: 0.4rem;
+            max-width: 180px;
+            max-height: 110px;
+            background: rgba(13, 13, 18, 0.85);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 6px;
+            cursor: zoom-in;
+            pointer-events: auto;
+            transition: border-color 0.15s, background 0.15s;
+        }
+        .panel-legend:hover {
+            background: rgba(13, 13, 18, 0.95);
+            border-color: rgba(77, 166, 255, 0.45);
+        }
+        .panel-legend img {
+            display: block;
+            max-width: 100%;
+            max-height: 102px;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+        }
+        .panel-legend.hidden { display: none; }
+
+        /* Last panel (viewport bottom-right) — the Tools bar sits
+           there too, so lift the legend up to clear it. The Tools
+           bar is ~3.2rem from the bottom when no playback transport
+           is active, so 6rem keeps a visible gap. When playback
+           controls are visible the map-controls bar moves up and
+           JS re-applies the same offset via the data attribute. */
+        .map-viewport:last-child .panel-legend {
+            bottom: 6rem;
+        }
+        body.has-playback .map-viewport:last-child .panel-legend {
+            bottom: 9rem;
+        }
         /* Small pill button in the top-left of each panel. Numbered
            1..N. Click promotes that panel to primary. Hidden entirely
            in single-viewport mode. Positioned above the WebGL canvas
@@ -1676,6 +1733,15 @@
         #tools-menu-clear .tools-menu-item-check,
         #tools-menu-orbit-settings .tools-menu-item-check {
             display: none;
+        }
+
+        /* Thin separator between the view toggles and the
+           dataset-info / legend toggles so the two groups read
+           as related-but-distinct. */
+        .tools-menu-subsep {
+            height: 1px;
+            margin: 0.35rem 0.4rem;
+            background: rgba(255, 255, 255, 0.08);
         }
 
         .tools-menu-layout-row {

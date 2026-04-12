@@ -81,6 +81,9 @@ interface Viewport {
   container: HTMLDivElement
   renderer: MapRenderer
   indicator: HTMLButtonElement
+  /** Floating per-panel legend element — lazily created the first
+   *  time the panel needs one, and toggled via classList thereafter. */
+  legend: HTMLButtonElement | null
   onMove: () => void
 }
 
@@ -233,6 +236,78 @@ export class ViewportManager {
     vp.container.classList.toggle('out-of-range', isOutOfRange)
   }
 
+  /**
+   * Mount, update, or clear the floating legend inside a panel.
+   *
+   * - `legendLink` non-null → render an <img> button showing the
+   *   legend; clicking it invokes `onClick` so callers can open
+   *   their full-size modal. The button is lazily created on first
+   *   call and reused on subsequent calls.
+   * - `legendLink` null → hide the legend element if it exists.
+   *
+   * The visible/hidden toggle is managed via a `.hidden` class so
+   * the DOM + event listener persist across toggles — the caller
+   * doesn't have to re-wire the click handler on every change.
+   */
+  setPanelLegend(
+    slot: number,
+    legendLink: string | null,
+    options: { title?: string; onClick?: () => void } = {},
+  ): void {
+    const vp = this.viewports[slot]
+    if (!vp) return
+
+    if (!legendLink) {
+      if (vp.legend) vp.legend.classList.add('hidden')
+      return
+    }
+
+    if (!vp.legend) {
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'panel-legend'
+      const img = document.createElement('img')
+      img.alt = 'Dataset legend'
+      btn.appendChild(img)
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation()
+        const handler = (vp.legend as HTMLButtonElement & { _onClick?: () => void })._onClick
+        handler?.()
+      })
+      vp.container.appendChild(btn)
+      vp.legend = btn
+    }
+
+    const img = vp.legend.querySelector('img')
+    if (img && img.src !== legendLink) {
+      img.src = legendLink
+    }
+    if (options.title) {
+      vp.legend.title = `${options.title} — tap to enlarge`
+      vp.legend.setAttribute('aria-label', `${options.title} legend — tap to enlarge`)
+    } else {
+      vp.legend.title = 'Dataset legend — tap to enlarge'
+      vp.legend.setAttribute('aria-label', 'Dataset legend — tap to enlarge')
+    }
+    // Stash the current click handler on the element so the single
+    // stable click listener above can dispatch to the latest one.
+    ;(vp.legend as HTMLButtonElement & { _onClick?: () => void })._onClick = options.onClick
+    vp.legend.classList.remove('hidden')
+  }
+
+  /** Show/hide every panel's legend element without changing the
+   *  underlying dataset binding. Used by the Legend toggle in Tools. */
+  setAllLegendsVisible(visible: boolean): void {
+    for (const vp of this.viewports) {
+      if (!vp.legend) continue
+      // Only show when the element has a loaded src — empty panels
+      // shouldn't suddenly flash a legend frame.
+      const img = vp.legend.querySelector('img') as HTMLImageElement | null
+      const hasSrc = !!img?.src
+      vp.legend.classList.toggle('hidden', !visible || !hasSrc)
+    }
+  }
+
   /** Dispose all viewports. */
   dispose(): void {
     for (const vp of this.viewports) {
@@ -312,7 +387,7 @@ export class ViewportManager {
     const onMove = () => this.syncCameras(index)
     renderer.getMap()?.on('move', onMove)
 
-    this.viewports.push({ index, container, renderer, indicator, onMove })
+    this.viewports.push({ index, container, renderer, indicator, legend: null, onMove })
   }
 
   private destroyViewport(vp: Viewport): void {

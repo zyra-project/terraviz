@@ -301,6 +301,66 @@ describe('Tools menu fan-out', () => {
 })
 
 // ---------------------------------------------------------------------------
+// Dataset info + Legend toggles
+// ---------------------------------------------------------------------------
+
+describe('Tools menu dataset info / legend toggles', () => {
+  it('renders Dataset info and Legend items in the View section', () => {
+    const vm = makeViewports(1)
+    initToolsMenu(vm as any)
+
+    expect(document.getElementById('tools-menu-info')).toBeTruthy()
+    expect(document.getElementById('tools-menu-legend')).toBeTruthy()
+  })
+
+  it('calls onToggleDatasetInfo with the new state when clicked', () => {
+    const vm = makeViewports(1)
+    const onToggleDatasetInfo = vi.fn()
+    initToolsMenu(vm as any, { onToggleDatasetInfo })
+
+    const btn = document.getElementById('tools-menu-info') as HTMLButtonElement
+    btn.click()
+    expect(onToggleDatasetInfo).toHaveBeenCalledWith(true)
+
+    btn.click()
+    expect(onToggleDatasetInfo).toHaveBeenLastCalledWith(false)
+  })
+
+  it('calls onToggleLegend with the new state when clicked', () => {
+    const vm = makeViewports(1)
+    const onToggleLegend = vi.fn()
+    initToolsMenu(vm as any, { onToggleLegend })
+
+    const btn = document.getElementById('tools-menu-legend') as HTMLButtonElement
+    btn.click()
+    expect(onToggleLegend).toHaveBeenCalledWith(true)
+  })
+
+  it('syncToolsMenuState applies datasetInfo and legend flags', () => {
+    const vm = makeViewports(1)
+    initToolsMenu(vm as any)
+    syncToolsMenuState({ datasetInfo: true, legend: false })
+
+    const infoBtn = document.getElementById('tools-menu-info')!
+    const legendBtn = document.getElementById('tools-menu-legend')!
+    expect(infoBtn.classList.contains('active')).toBe(true)
+    expect(legendBtn.classList.contains('active')).toBe(false)
+  })
+
+  it('announces the new state for screen readers', () => {
+    const vm = makeViewports(1)
+    const announce = vi.fn()
+    initToolsMenu(vm as any, { announce })
+
+    ;(document.getElementById('tools-menu-info') as HTMLButtonElement).click()
+    expect(announce).toHaveBeenCalledWith('Dataset info shown')
+
+    ;(document.getElementById('tools-menu-legend') as HTMLButtonElement).click()
+    expect(announce).toHaveBeenCalledWith('Legend shown')
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Callbacks
 // ---------------------------------------------------------------------------
 

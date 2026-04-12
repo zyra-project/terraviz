@@ -19,6 +19,7 @@ import { initDownloadUI } from './ui/downloadUI'
 import { updateMapControlsPosition } from './ui/mapControlsUI'
 import { initToolsMenu, syncToolsMenuState, pulseBrowseButton } from './ui/toolsMenuUI'
 import { initChatUI, openChat, openChatSettings, notifyDatasetChanged, showChatTrigger, hideChatTrigger, closeChat, flushPendingGlobeActions } from './ui/chatUI'
+import { loadViewPreferences, saveViewPreferences, type ViewPreferences } from './utils/viewPreferences'
 import { initHelpUI, setActiveDataset as setHelpActiveDataset } from './ui/helpUI'
 import {
   createPlaybackState, startPlaybackLoop, stopPlaybackLoop,
@@ -116,6 +117,9 @@ class InteractiveSphere {
   private tourEngine: TourEngine | null = null
   private tourIsStandalone = false // true when tour was loaded as a tour/json dataset (not runTourOnLoad)
 
+  /** Persisted view preferences: info panel + legend visibility. */
+  private viewPrefs: ViewPreferences = loadViewPreferences()
+
   /**
    * Boot the application: create the WebGL renderer, fetch the dataset
    * catalog, and either load a URL-specified dataset or show the default
@@ -147,7 +151,15 @@ class InteractiveSphere {
         onSetLayout: (layout) => this.viewports.setLayout(layout),
         onOpenBrowse: () => this.openBrowsePanel(),
         onOpenOrbitSettings: () => openChatSettings(),
+        onToggleDatasetInfo: (visible) => this.setDatasetInfoVisible(visible),
+        onToggleLegend: (visible) => this.setLegendVisible(visible),
         announce: (msg) => this.announce(msg),
+      })
+      // Apply persisted view prefs to the toolbar button state now
+      // that the toolbar exists.
+      syncToolsMenuState({
+        datasetInfo: this.viewPrefs.infoPanelVisible,
+        legend: this.viewPrefs.legendVisible,
       })
       initDownloadUI().catch(err => logger.warn('[App] Download UI init failed:', err))
       initHelpUI()
@@ -338,6 +350,10 @@ class InteractiveSphere {
     })
 
     displayDatasetInfo(dataset, this.appState.datasets, (id) => this.loadDataset(id))
+    // Apply info-panel visibility pref + refresh per-panel legends
+    // now that the primary's dataset is recorded.
+    this.applyDatasetInfoVisibility()
+    this.refreshPanelLegends()
 
     if (!this.renderer) throw new Error('Renderer not initialized')
 
@@ -447,6 +463,8 @@ class InteractiveSphere {
       this.panelStates[tourPrimaryIdx].dataset = dataset
     }
     displayDatasetInfo(dataset, this.appState.datasets, (id) => this.loadDataset(id))
+    this.applyDatasetInfoVisibility()
+    this.refreshPanelLegends()
 
     // On small screens, hide the info panel during tours to reduce clutter
     if (window.innerWidth <= 768) {
@@ -664,6 +682,121 @@ class InteractiveSphere {
    *   the right edge so the user can slide the panel back in to pick
    *   datasets for the remaining panels without going through home.
    */
+  /**
+   * Toggle dataset info panel visibility. Persists the choice and
+   * updates the DOM immediately. When the info panel is the only
+   * place showing the legend (single-view with legend prefs on), the
+   * legend moves to a floating element in the primary panel.
+   */
+  private setDatasetInfoVisible(visible: boolean): void {
+    this.viewPrefs.infoPanelVisible = visible
+    saveViewPreferences(this.viewPrefs)
+    this.applyDatasetInfoVisibility()
+    this.refreshPanelLegends()
+  }
+
+  /** Toggle legend visibility. Persists and refreshes per-panel legends. */
+  private setLegendVisible(visible: boolean): void {
+    this.viewPrefs.legendVisible = visible
+    saveViewPreferences(this.viewPrefs)
+    this.refreshPanelLegends()
+    // Also hide/show the in-info-panel legend thumbnail since it
+    // lives inside the info panel body.
+    const legendThumb = document.querySelector('.info-legend-thumb') as HTMLElement | null
+    if (legendThumb) {
+      legendThumb.style.display = visible ? '' : 'none'
+    }
+  }
+
+  /** Apply the current infoPanelVisible preference to the DOM. */
+  private applyDatasetInfoVisibility(): void {
+    const panel = document.getElementById('info-panel')
+    if (!panel) return
+    const hasDataset = !!this.appState.currentDataset
+    // When no dataset is loaded, the info panel is hidden regardless —
+    // the preference only matters when there's content to show.
+    if (!hasDataset) {
+      panel.classList.add('hidden')
+      return
+    }
+    panel.classList.toggle('hidden', !this.viewPrefs.infoPanelVisible)
+  }
+
+  /**
+   * Rebuild the floating per-panel legends from the current
+   * panelStates array + view prefs. Called after any change that
+   * affects whether legends should be visible or which dataset each
+   * panel is showing:
+   *
+   * - Legend toggle flipped
+   * - Info panel toggle flipped (legend may move in/out of the info panel)
+   * - A dataset loaded/unloaded in any panel
+   * - Layout changed (panels added/removed)
+   * - Primary changed (floating legend vs info-panel thumbnail split)
+   */
+  private refreshPanelLegends(): void {
+    const legendOn = this.viewPrefs.legendVisible
+    const infoOn = this.viewPrefs.infoPanelVisible
+    const isMultiView = this.viewports.getPanelCount() > 1
+    const primaryIdx = this.viewports.getPrimaryIndex()
+
+    for (let slot = 0; slot < this.panelStates.length; slot++) {
+      const panel = this.panelStates[slot]
+      const dataset = panel?.dataset ?? null
+      const legendLink = dataset?.legendLink ?? null
+
+      // Decide whether this panel gets a floating legend:
+      // - Off entirely if the Legend toggle is off
+      // - Off if the panel has no dataset or no legendLink
+      // - Off for the primary in single-view mode when the info
+      //   panel is visible (the info panel holds the legend there)
+      // - On otherwise
+      let showFloating = legendOn && !!legendLink
+      if (showFloating && !isMultiView && slot === primaryIdx && infoOn) {
+        showFloating = false
+      }
+
+      if (showFloating && legendLink && dataset) {
+        this.viewports.setPanelLegend(slot, legendLink, {
+          title: dataset.title,
+          onClick: () => this.openLegendModal(legendLink, dataset.title),
+        })
+      } else {
+        this.viewports.setPanelLegend(slot, null)
+      }
+    }
+  }
+
+  /** Open the full-size legend modal for a dataset. Mirrors the
+   *  legend click handler inside datasetLoader's info panel so the
+   *  floating legends and the info-panel thumbnail use the same UI. */
+  private openLegendModal(src: string, title: string): void {
+    let overlay = document.getElementById('legend-modal-overlay')
+    if (!overlay) {
+      overlay = document.createElement('div')
+      overlay.id = 'legend-modal-overlay'
+      overlay.className = 'legend-modal-overlay'
+      overlay.setAttribute('role', 'dialog')
+      overlay.setAttribute('aria-modal', 'true')
+      overlay.innerHTML = `<img class="legend-modal-img" alt="Legend"><button class="legend-modal-close" aria-label="Close legend">&times;</button>`
+      const closeModal = () => overlay!.classList.add('hidden')
+      overlay.querySelector('.legend-modal-close')!.addEventListener('click', (e) => {
+        e.stopPropagation()
+        closeModal()
+      })
+      overlay.addEventListener('click', closeModal)
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !overlay!.classList.contains('hidden')) closeModal()
+      })
+      document.body.appendChild(overlay)
+    }
+    const img = overlay.querySelector('img') as HTMLImageElement
+    img.src = src
+    img.alt = `${title} legend`
+    overlay.setAttribute('aria-label', `${title} legend`)
+    overlay.classList.remove('hidden')
+  }
+
   private dismissBrowseAfterLoad(): void {
     if (this.viewports.getPanelCount() > 1) {
       collapseBrowseUI()
@@ -914,6 +1047,10 @@ class InteractiveSphere {
         }
       }
     }
+    // Layout change can affect whether a panel's legend is a
+    // floating element vs inside the info panel (single-view vs
+    // multi-view rules) — refresh to resolve.
+    this.refreshPanelLegends()
   }
 
   /**
@@ -935,6 +1072,7 @@ class InteractiveSphere {
     this.appState.currentDataset = newDataset
     if (newDataset) {
       displayDatasetInfo(newDataset, this.appState.datasets, (id) => this.loadDataset(id))
+      this.applyDatasetInfoVisibility()
       window.history.replaceState({}, '', `?dataset=${encodeURIComponent(newDataset.id)}`)
       notifyDatasetChanged(newDataset)
       setHelpActiveDataset(newDataset.id)
@@ -947,6 +1085,11 @@ class InteractiveSphere {
       setHelpActiveDataset(null)
       this.renderer?.setCanvasDescription('Interactive 3D globe showing Earth')
     }
+    // Legend placement depends on primary (single-view uses the
+    // info panel's thumbnail for the primary; multi-view always
+    // uses per-panel floating legends). Refresh so the primary's
+    // legend moves to the correct surface.
+    this.refreshPanelLegends()
 
     // Rewire playback controls based on the new primary's video state
     const isVideo = newDataset && dataService.isVideoDataset(newDataset) && newPrimaryPanel?.hlsService
@@ -1177,6 +1320,8 @@ class InteractiveSphere {
     }
     this.appState.isPlaying = false
     resetPlaybackState(this.playback)
+    // Clear every floating legend since no panel has a dataset now.
+    this.refreshPanelLegends()
   }
 
   // --- Event listeners ---
