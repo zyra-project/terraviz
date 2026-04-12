@@ -17,7 +17,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::{
     plugin::{Builder, TauriPlugin},
-    Manager, Runtime,
+    Emitter, Runtime,
 };
 
 // --- Types shared between Rust and JS ---
