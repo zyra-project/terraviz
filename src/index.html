@@ -108,10 +108,17 @@
            1..N. Click promotes that panel to primary. Hidden entirely
            in single-viewport mode. Positioned above the WebGL canvas
            so it receives click events before MapLibre does. */
+        /* Panel indicator (1/2/3/4) pill. Click promotes a non-primary
+           panel. The left offset clears the `#home-btn` that lives in
+           the outer overlay at top-left of the viewport — without
+           this, the indicator on the top-left panel would sit on top
+           of the home button once a dataset is loaded. The primary
+           panel's indicator also has a subtle accent glow so it's
+           easy to find at a glance. */
         .viewport-indicator {
             position: absolute;
             top: 0.5rem;
-            left: 0.5rem;
+            left: 3.75rem;
             z-index: 5;
             min-width: 26px;
             height: 26px;
