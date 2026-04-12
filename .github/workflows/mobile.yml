@@ -99,7 +99,10 @@ jobs:
 
   ios-build:
     name: Build (iOS)
-    runs-on: macos-latest
+    # Phase 4: macos-26 provides Xcode 26 with the iOS 26 SDK, which includes
+    # the Foundation Models framework needed by the apple-intelligence plugin.
+    # Free for public repos, same as macos-latest.
+    runs-on: macos-26
 
     steps:
       - uses: actions/checkout@v4
@@ -110,9 +113,6 @@ jobs:
         with:
           node-version: 20
           cache: npm
-
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_16.app || sudo xcode-select -s /Applications/Xcode.app
 
       - name: Install Rust stable with iOS targets
         uses: dtolnay/rust-toolchain@stable
