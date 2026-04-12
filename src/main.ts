@@ -12,6 +12,7 @@ import { ViewportManager, type ViewLayout } from './services/viewportManager'
 // properties are defined when components reference them via var().
 import './styles/tokens.css'
 import './styles/loading.css'
+import './styles/info-panel.css'
 
 import { HLSService } from './services/hlsService'
 import { dataService } from './services/dataService'
