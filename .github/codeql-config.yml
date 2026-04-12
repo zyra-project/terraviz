@@ -1,0 +1,11 @@
+# CodeQL scanning configuration
+#
+# Excludes auto-generated Tauri mobile scaffolds from analysis. These
+# directories contain template Kotlin/Gradle/Swift code produced by
+# `tauri android init` / `tauri ios init` and are not hand-written
+# application code. CodeQL's Java/Kotlin scanner fails on them because
+# build-time generated files (tauri.settings.gradle, tauri.build.gradle.kts)
+# are gitignored and absent at scan time.
+
+paths-ignore:
+  - src-tauri/gen/**

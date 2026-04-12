@@ -23,8 +23,8 @@ interface ContentPart {
 }
 
 interface ChatMessage {
-  role: 'system' | 'user' | 'assistant'
-  content: string | ContentPart[]
+  role: 'system' | 'user' | 'assistant' | 'tool'
+  content: string | ContentPart[] | null
 }
 
 interface RequestBody {
@@ -36,15 +36,37 @@ interface RequestBody {
 
 // Model mapping: friendly names → Cloudflare AI model IDs
 const MODEL_MAP: Record<string, string> = {
-  'llama-3.1-70b': '@cf/meta/llama-3.1-70b-instruct',
-  'llama-3.1-8b': '@cf/meta/llama-3.1-8b-instruct',
-  'llama-3.2-3b': '@cf/meta/llama-3.2-3b-instruct',
+  'llama-4-scout':        '@cf/meta/llama-4-scout-17b-16e-instruct',
+  'llama-3.3-70b':        '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+  'llama-3.1-70b':        '@cf/meta/llama-3.1-70b-instruct',
+  'llama-3.1-8b':         '@cf/meta/llama-3.1-8b-instruct',
+  'llama-3.2-3b':         '@cf/meta/llama-3.2-3b-instruct',
   'llama-3.2-11b-vision': '@cf/meta/llama-3.2-11b-vision-instruct',
-  default: '@cf/meta/llama-3.1-70b-instruct',
+  default:                '@cf/meta/llama-4-scout-17b-16e-instruct',
 }
 
-// Models that accept image input
-const VISION_MODELS = new Set([
+// Models on Workers AI that support OpenAI-style function calling. When
+// the selected model is in this set, the proxy forwards `tools` to the
+// model instead of stripping them, and routes through `toolStreamShim` so
+// the response tool_calls are wrapped in OpenAI-format SSE chunks.
+const TOOL_CALLING_MODELS = new Set([
+  '@cf/meta/llama-4-scout-17b-16e-instruct',
+  '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+  '@hf/nousresearch/hermes-2-pro-mistral-7b',
+])
+
+// Models that are natively multimodal — they accept OpenAI-style multipart
+// `content` arrays (text + image_url parts) as-is, without the image
+// extraction / license dance the older llama-3.2-11b-vision model needs.
+const NATIVE_MULTIMODAL_MODELS = new Set([
+  '@cf/meta/llama-4-scout-17b-16e-instruct',
+])
+
+// Legacy vision models that need the separate-image-field API + Meta
+// community license acceptance. Kept for users who explicitly select
+// llama-3.2-11b-vision in their config; llama-4-scout supersedes it for
+// the default vision path.
+const LEGACY_VISION_MODELS = new Set([
   '@cf/meta/llama-3.2-11b-vision-instruct',
 ])
 
@@ -61,6 +83,9 @@ function extractImageAndNormalise(
   const textMessages = messages.map(msg => {
     if (typeof msg.content === 'string') {
       return { role: msg.role, content: msg.content }
+    }
+    if (!Array.isArray(msg.content)) {
+      return { role: msg.role, content: '' }
     }
     // Multimodal content array — extract image + concatenate text
     const textParts: string[] = []
@@ -197,33 +222,107 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   // Truncate messages to limit token usage
   const truncated = body.messages.slice(-22) // system + 20 history + user
 
-  // Workers AI does not support tool calling — strip tools from the request so no tool calls
-  // are produced on this path. The client-side local engine yields action cards independently.
-  // Tool-call-driven action cards only work with external OpenAI-compatible providers
-  // (e.g., OpenAI, Ollama) that support the tools/tool_choice API.
-  if (body.tools?.length) {
+  // Strip tools on models that don't support function calling. Tool-call-
+  // driven action cards only work with models listed in TOOL_CALLING_MODELS;
+  // for everything else the client-side local engine yields action cards
+  // independently.
+  const supportsTools = TOOL_CALLING_MODELS.has(cfModel)
+  if (body.tools?.length && !supportsTools) {
     body.tools = undefined
   }
 
-  // For vision models, extract image data and normalise messages to text-only
-  const isVision = VISION_MODELS.has(cfModel)
-  const { image, textMessages } = isVision
-    ? extractImageAndNormalise(truncated)
-    : { image: null, textMessages: truncated.map(m => ({ role: m.role, content: typeof m.content === 'string' ? m.content : m.content.filter(p => p.type === 'text').map(p => p.text ?? '').join('\n') })) }
+  const hasTools = supportsTools && !!body.tools?.length
+  const hasImages = messagesContainImages(truncated)
+  const isLegacyVision = LEGACY_VISION_MODELS.has(cfModel)
+  const isNativeMultimodal = NATIVE_MULTIMODAL_MODELS.has(cfModel)
 
-  // Vision models on Workers AI do not support streaming — always use
-  // non-streaming and, if the client requested streaming, wrap the
-  // complete response in SSE format so the client parser handles it.
   try {
-    if (isVision) {
+    // Legacy vision path — only when the user explicitly selects
+    // llama-3.2-11b-vision. The API shape differs from modern models
+    // (separate image field, license acceptance, no streaming), so it
+    // keeps its own code path.
+    if (isLegacyVision) {
+      const { image, textMessages } = extractImageAndNormalise(truncated)
       if (body.stream) {
         return await visionStreamShim(context.env.AI, cfModel, textMessages, cors, image)
       }
-      // Non-streaming vision path also needs license acceptance
       await ensureLicenseAccepted(context.env.AI, cfModel)
       return await nonStreamResponse(context.env.AI, cfModel, textMessages, cors, image)
     }
 
+    // Modern path: llama-4-scout and other native multimodal / tool-calling
+    // models. If the request includes tools OR images (or both), route
+    // through `toolStreamShim` which calls Workers AI non-streaming and
+    // wraps the complete response — text deltas, tool_calls, or both —
+    // in OpenAI-format SSE chunks. Real streaming is only used for the
+    // plain-text no-tools no-images case so the common path still gets
+    // token-by-token streaming UX.
+    if (hasTools || (hasImages && isNativeMultimodal)) {
+      if (body.stream) {
+        return await toolStreamShim(context.env.AI, cfModel, truncated, body.tools, cors)
+      }
+      // Non-streaming: pass messages through with tools, return standard JSON
+      const wfMessages = truncated.map(m => {
+        const out: Record<string, unknown> = { role: m.role, content: m.content }
+        const anyM = m as unknown as Record<string, unknown>
+        if (anyM.tool_calls) out.tool_calls = anyM.tool_calls
+        if (anyM.tool_call_id) out.tool_call_id = anyM.tool_call_id
+        return out
+      })
+      const inputs: Record<string, unknown> = { messages: wfMessages, max_tokens: DEFAULT_MAX_TOKENS }
+      if (body.tools?.length) inputs.tools = body.tools
+      const result = (await context.env.AI.run(cfModel, inputs)) as {
+        response?: string
+        tool_calls?: Array<{ id?: string; type?: string; function?: { name: string; arguments: unknown }; name?: string; arguments?: Record<string, unknown> }>
+      }
+      const chatId = `chatcmpl-${Date.now()}`
+      // Normalize tool_calls to OpenAI shape (same logic as toolStreamShim)
+      const normalizedToolCalls = result.tool_calls?.map((raw, i) => {
+        const name = raw.function?.name ?? raw.name ?? ''
+        const rawArgs = raw.function?.arguments ?? raw.arguments ?? {}
+        return {
+          id: raw.id ?? `call_${chatId}_${i}`,
+          type: 'function' as const,
+          function: {
+            name,
+            arguments: typeof rawArgs === 'string' ? rawArgs : JSON.stringify(rawArgs),
+          },
+        }
+      })
+      const payload = {
+        id: chatId,
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model: cfModel,
+        choices: [{
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: result.response ?? '',
+            ...(normalizedToolCalls?.length ? { tool_calls: normalizedToolCalls } : {}),
+          },
+          finish_reason: result.tool_calls?.length ? 'tool_calls' : 'stop',
+        }],
+      }
+      return new Response(JSON.stringify(payload), {
+        headers: { ...cors, 'Content-Type': 'application/json' },
+      })
+    }
+
+    // Plain text, no tools, no images: real streaming path (unchanged).
+    // Guard against content: null (assistant tool-call echoes) and
+    // role: 'tool' messages that shouldn't reach this path but might
+    // if supportsTools is false and the client sends stale history.
+    const textMessages = truncated
+      .filter(m => m.role !== 'tool')
+      .map(m => ({
+        role: m.role,
+        content: typeof m.content === 'string'
+          ? m.content
+          : Array.isArray(m.content)
+            ? m.content.filter(p => p.type === 'text').map(p => p.text ?? '').join('\n')
+            : '',
+      }))
     if (body.stream) {
       return await streamResponse(context.env.AI, cfModel, textMessages, cors)
     }
@@ -235,6 +334,23 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       headers: { ...cors, 'Content-Type': 'application/json' },
     })
   }
+}
+
+/**
+ * True if any message in the conversation contains at least one image_url
+ * content part. Text-only messages (string or array of text parts) return
+ * false. Used by the router to decide whether to route to `toolStreamShim`
+ * (which preserves multipart content) or the plain text streaming path.
+ */
+function messagesContainImages(messages: ChatMessage[]): boolean {
+  for (const m of messages) {
+    if (Array.isArray(m.content)) {
+      for (const part of m.content) {
+        if (part.type === 'image_url' && part.image_url?.url) return true
+      }
+    }
+  }
+  return false
 }
 
 // Track which vision models have had their license accepted (per isolate lifetime)
@@ -441,5 +557,142 @@ async function nonStreamResponse(
 
   return new Response(JSON.stringify(payload), {
     headers: { ...cors, 'Content-Type': 'application/json' },
+  })
+}
+
+/**
+ * Unified non-streaming path for native multimodal / tool-calling models.
+ *
+ * Workers AI's streaming SSE format for `tool_calls` is poorly documented,
+ * so this helper calls `ai.run` in non-streaming mode and transforms the
+ * complete response into OpenAI-compatible SSE chunks (content delta +
+ * tool_calls deltas + finish). The client's existing SSE parser handles
+ * these chunks transparently — from its perspective the stream "just
+ * works," it just arrives in one burst instead of token-by-token.
+ *
+ * Handles both response shapes observed on Workers AI:
+ *   - llama-4-scout:  tool_calls entries have {id, type, function: {name, arguments}}
+ *   - llama-3.3-70b:  tool_calls entries have {name, arguments} (no id/type/function wrapper)
+ *
+ * Messages are passed through as-is — including multipart content arrays
+ * with image_url parts, assistant messages with `tool_calls`, and tool-
+ * role messages with `tool_call_id`. Workers AI's native multimodal and
+ * function-calling models accept the OpenAI shape directly.
+ */
+async function toolStreamShim(
+  ai: Env['AI'],
+  model: string,
+  messages: ChatMessage[],
+  tools: unknown[] | undefined,
+  cors: Record<string, string>,
+): Promise<Response> {
+  // Pass through messages as-is, preserving tool_calls and tool_call_id
+  // fields that the client's multi-turn loop adds for tool result round-trips.
+  const wfMessages = messages.map(m => {
+    const out: Record<string, unknown> = {
+      role: m.role,
+      content: m.content,
+    }
+    const anyM = m as unknown as Record<string, unknown>
+    if (anyM.tool_calls) out.tool_calls = anyM.tool_calls
+    if (anyM.tool_call_id) out.tool_call_id = anyM.tool_call_id
+    return out
+  })
+
+  const inputs: Record<string, unknown> = {
+    messages: wfMessages,
+    max_tokens: DEFAULT_MAX_TOKENS,
+  }
+  if (tools?.length) inputs.tools = tools
+
+  type WorkersAIToolCall = {
+    id?: string
+    type?: string
+    function?: { name: string; arguments: unknown }
+    name?: string
+    arguments?: Record<string, unknown>
+  }
+  type WorkersAIResult = {
+    response?: string
+    tool_calls?: WorkersAIToolCall[]
+  }
+
+  let result: WorkersAIResult
+  try {
+    result = (await ai.run(model, inputs)) as WorkersAIResult
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Workers AI error'
+    return new Response(
+      JSON.stringify({ error: { message: msg, type: 'workers_ai_error' } }),
+      { status: 502, headers: { ...cors, 'Content-Type': 'application/json' } },
+    )
+  }
+
+  const chatId = `chatcmpl-${Date.now()}`
+  const created = Math.floor(Date.now() / 1000)
+  const base = { id: chatId, object: 'chat.completion.chunk', created, model }
+  const chunks: string[] = []
+
+  // Text content chunk (if present)
+  if (result.response) {
+    chunks.push(
+      `data: ${JSON.stringify({
+        ...base,
+        choices: [{ index: 0, delta: { content: result.response } }],
+      })}\n\n`,
+    )
+  }
+
+  // Tool call chunks (if present)
+  if (result.tool_calls?.length) {
+    for (let i = 0; i < result.tool_calls.length; i++) {
+      const raw = result.tool_calls[i]
+      // Normalize both response shapes into OpenAI's function-tool-call format
+      const name = raw.function?.name ?? raw.name ?? ''
+      const rawArgs = raw.function?.arguments ?? raw.arguments ?? {}
+      const argsString = typeof rawArgs === 'string' ? rawArgs : JSON.stringify(rawArgs)
+      const id = raw.id ?? `call_${chatId}_${i}`
+      chunks.push(
+        `data: ${JSON.stringify({
+          ...base,
+          choices: [{
+            index: 0,
+            delta: {
+              tool_calls: [{
+                index: i,
+                id,
+                type: 'function',
+                function: {
+                  name,
+                  arguments: argsString,
+                },
+              }],
+            },
+          }],
+        })}\n\n`,
+      )
+    }
+  }
+
+  // Final chunk with finish_reason
+  chunks.push(
+    `data: ${JSON.stringify({
+      ...base,
+      choices: [{
+        index: 0,
+        delta: {},
+        finish_reason: result.tool_calls?.length ? 'tool_calls' : 'stop',
+      }],
+    })}\n\n`,
+  )
+  chunks.push('data: [DONE]\n\n')
+
+  return new Response(chunks.join(''), {
+    headers: {
+      ...cors,
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    },
   })
 }

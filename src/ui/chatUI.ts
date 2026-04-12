@@ -891,7 +891,23 @@ function renderMarkdownLite(html: string): string {
   let inList = false
 
   for (const rawLine of lines) {
-    const line = rawLine.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    let line = rawLine.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    // Convert markdown links [text](url) → clickable <a> (new tab)
+    line = line.replace(
+      /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
+      '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
+    )
+    // Convert bare URLs that aren't already inside an <a> tag. Split on
+    // existing anchors to avoid wrapping URLs that are already linked
+    // (e.g. when the markdown link text itself is a URL).
+    line = line.split(/(<a\s[^>]*>.*?<\/a>)/g).map((segment, i) => {
+      // Odd indices are the captured <a>...</a> groups — pass through
+      if (i % 2 === 1) return segment
+      return segment.replace(
+        /(https?:\/\/[^\s<)]+)/g,
+        '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>',
+      )
+    }).join('')
     const bulletMatch = line.match(/^• (.+)$/)
 
     if (bulletMatch) {

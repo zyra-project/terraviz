@@ -161,6 +161,7 @@ describe('processMessage — LLM path', () => {
       yield {
         type: 'tool_call' as const,
         call: {
+          id: 'call_mock',
           name: 'load_dataset',
           arguments: { dataset_id: 'TEST_001', dataset_title: 'Sea Surface Temperature' },
         },
@@ -197,6 +198,7 @@ describe('processMessage — LLM path', () => {
       yield {
         type: 'tool_call' as const,
         call: {
+          id: 'call_mock',
           name: 'load_dataset',
           arguments: { dataset_id: 'TEST_001', dataset_title: 'Sea Surface Temperature' },
         },
@@ -254,6 +256,119 @@ describe('processMessage — LLM path', () => {
       expect(firstAction).toBeLessThan(firstDelta)
     }
   })
+
+  it('handles multi-round search_catalog tool calls', async () => {
+    // Phase 3 regression test: when the LLM emits a search_catalog tool call,
+    // processMessage should execute the search locally, append assistant + tool
+    // result messages, and call streamChat again so the LLM can incorporate
+    // the search results into its final response.
+    const { streamChat } = await import('./llmProvider')
+    const mockedStream = vi.mocked(streamChat)
+
+    let callCount = 0
+    let round2Messages: any[] | null = null
+    mockedStream.mockImplementation(async function* (msgs) {
+      callCount++
+      if (callCount === 1) {
+        // Round 1: LLM decides to search the catalog
+        yield {
+          type: 'tool_call' as const,
+          call: {
+            id: 'call_search_1',
+            name: 'search_catalog',
+            arguments: { query: 'ocean temperature' },
+          },
+        }
+        yield { type: 'done' as const }
+      } else {
+        // Round 2: LLM has received search results and responds with text
+        // Capture the messages so we can verify tool results were appended
+        round2Messages = [...msgs]
+        yield { type: 'delta' as const, text: 'Here are some ocean datasets.' }
+        yield { type: 'done' as const }
+      }
+    })
+
+    const config: DocentConfig = {
+      apiUrl: 'http://localhost:11434/v1',
+      apiKey: '',
+      model: 'test',
+      enabled: true,
+      readingLevel: 'general',
+      visionEnabled: false,
+    }
+
+    const chunks: DocentStreamChunk[] = []
+    for await (const chunk of processMessage('ocean temperature', [], datasets, null, config)) {
+      chunks.push(chunk)
+    }
+
+    // streamChat should have been called twice (round 1 + round 2)
+    expect(callCount).toBe(2)
+
+    // The second call should include tool result messages in its conversation
+    expect(round2Messages).not.toBeNull()
+    const toolMessages = round2Messages!.filter((m: any) => m.role === 'tool')
+    expect(toolMessages.length).toBeGreaterThanOrEqual(1)
+    // The tool message should reference the search_catalog call ID
+    expect(toolMessages[0].tool_call_id).toBe('call_search_1')
+    // The tool message should contain search results as JSON
+    const toolContent = typeof toolMessages[0].content === 'string'
+      ? toolMessages[0].content
+      : ''
+    expect(toolContent).toContain('Sea Surface Temperature')
+
+    // Final response text from round 2 should be in the yielded chunks
+    const deltas = chunks.filter(c => c.type === 'delta')
+    const fullText = deltas.map(c => (c as { type: 'delta'; text: string }).text).join('')
+    expect(fullText).toContain('ocean datasets')
+
+    // Should end with done, not fallback
+    const doneChunk = chunks.find(c => c.type === 'done') as { type: 'done'; fallback: boolean } | undefined
+    expect(doneChunk?.fallback).toBe(false)
+  })
+})
+
+describe('processMessage — auto-inject Load buttons', () => {
+  it('auto-injects action when LLM mentions a pre-search title without markers', async () => {
+    // Regression test: the auto-inject safety net should emit a load-dataset
+    // action when the LLM mentions a dataset title from the pre-search results
+    // in its prose but doesn't include a <<LOAD:...>> marker for it.
+    const { streamChat } = await import('./llmProvider')
+    const mockedStream = vi.mocked(streamChat)
+
+    // LLM response mentions the dataset by title but NO <<LOAD:...>> marker
+    mockedStream.mockImplementation(async function* () {
+      yield { type: 'delta' as const, text: 'Here is a great dataset: Sea Surface Temperature — it shows global ocean temperatures.' }
+      yield { type: 'done' as const }
+    })
+
+    const config: DocentConfig = {
+      apiUrl: 'http://localhost:11434/v1',
+      apiKey: '',
+      model: 'test',
+      enabled: true,
+      readingLevel: 'general',
+      visionEnabled: false,
+    }
+
+    const chunks: DocentStreamChunk[] = []
+    // Query "sea surface temperature" triggers pre-search which returns
+    // the SST dataset. The LLM mentions it by title but skips the marker.
+    for await (const chunk of processMessage('sea surface temperature', [], datasets, null, config)) {
+      chunks.push(chunk)
+    }
+
+    // The auto-inject should have emitted a load-dataset action for TEST_001
+    const actions = chunks.filter(c => c.type === 'action')
+    const loadActions = actions.filter(c =>
+      (c as { type: 'action'; action: { type: string; datasetId: string } }).action.type === 'load-dataset'
+    )
+    const ids = loadActions.map(c =>
+      (c as { type: 'action'; action: { datasetId: string } }).action.datasetId
+    )
+    expect(ids).toContain('TEST_001')
+  })
 })
 
 describe('processMessage — auto-load', () => {
@@ -289,6 +404,7 @@ describe('processMessage — LLM dataset ID validation', () => {
       yield {
         type: 'tool_call' as const,
         call: {
+          id: 'call_mock',
           name: 'load_dataset',
           arguments: { dataset_id: 'HALLUCINATED_999', dataset_title: 'Fake Dataset' },
         },
@@ -326,6 +442,7 @@ describe('processMessage — LLM dataset ID validation', () => {
       yield {
         type: 'tool_call' as const,
         call: {
+          id: 'call_mock',
           name: 'load_dataset',
           arguments: { dataset_id: 'WRONG_ID', dataset_title: 'Sea Surface Temperature' },
         },
@@ -811,7 +928,7 @@ describe('processMessage — vision mode', () => {
       'data:image/jpeg;base64,abc123',
     )) { /* consume */ }
 
-    expect(capturedConfig.model).toBe('llama-3.2-11b-vision')
+    expect(capturedConfig.model).toBe('llama-4-scout')
   })
 
   it('auto-switches to vision model when apiUrl has trailing slash', async () => {
@@ -839,7 +956,7 @@ describe('processMessage — vision mode', () => {
       'data:image/jpeg;base64,abc123',
     )) { /* consume */ }
 
-    expect(capturedConfig.model).toBe('llama-3.2-11b-vision')
+    expect(capturedConfig.model).toBe('llama-4-scout')
   })
 
   it('does not switch model when using external API URL', async () => {
@@ -1095,7 +1212,7 @@ describe('processMessage — Phase 5 tool calls', () => {
       yield { type: 'delta' as const, text: 'Here is the Amazon Basin.' }
       yield {
         type: 'tool_call' as const,
-        call: { name: 'fit_bounds', arguments: { west: -82, south: -34, east: -34, north: 13, label: 'Amazon Basin' } },
+        call: { id: 'call_mock', name: 'fit_bounds', arguments: { west: -82, south: -34, east: -34, north: 13, label: 'Amazon Basin' } },
       }
       yield { type: 'done' as const }
     })
@@ -1121,7 +1238,7 @@ describe('processMessage — Phase 5 tool calls', () => {
       yield { type: 'delta' as const, text: 'Marker placed.' }
       yield {
         type: 'tool_call' as const,
-        call: { name: 'add_marker', arguments: { lat: 40.0, lng: -105.3, label: 'Boulder' } },
+        call: { id: 'call_mock', name: 'add_marker', arguments: { lat: 40.0, lng: -105.3, label: 'Boulder' } },
       }
       yield { type: 'done' as const }
     })
@@ -1148,7 +1265,7 @@ describe('processMessage — Phase 5 tool calls', () => {
       yield { type: 'delta' as const, text: 'Labels on.' }
       yield {
         type: 'tool_call' as const,
-        call: { name: 'toggle_labels', arguments: { visible: true } },
+        call: { id: 'call_mock', name: 'toggle_labels', arguments: { visible: true } },
       }
       yield { type: 'done' as const }
     })
@@ -1173,7 +1290,7 @@ describe('processMessage — Phase 5 tool calls', () => {
       yield { type: 'delta' as const, text: 'Highlighting Brazil.' }
       yield {
         type: 'tool_call' as const,
-        call: { name: 'highlight_region', arguments: { name: 'Brazil' } },
+        call: { id: 'call_mock', name: 'highlight_region', arguments: { name: 'Brazil' } },
       }
       yield { type: 'done' as const }
     })
@@ -1204,7 +1321,7 @@ describe('processMessage — Phase 5 tool calls', () => {
       yield { type: 'delta' as const, text: 'Custom region.' }
       yield {
         type: 'tool_call' as const,
-        call: { name: 'highlight_region', arguments: { geojson, label: 'Custom' } },
+        call: { id: 'call_mock', name: 'highlight_region', arguments: { geojson, label: 'Custom' } },
       }
       yield { type: 'done' as const }
     })
@@ -1229,7 +1346,7 @@ describe('processMessage — Phase 5 tool calls', () => {
       yield { type: 'delta' as const, text: 'Flying to Colorado.' }
       yield {
         type: 'tool_call' as const,
-        call: { name: 'fly_to', arguments: { place: 'Colorado' } },
+        call: { id: 'call_mock', name: 'fly_to', arguments: { place: 'Colorado' } },
       }
       yield { type: 'done' as const }
     })
@@ -1256,7 +1373,7 @@ describe('processMessage — Phase 5 tool calls', () => {
       yield { type: 'delta' as const, text: 'Hmm.' }
       yield {
         type: 'tool_call' as const,
-        call: { name: 'fly_to', arguments: { place: 'Mordor' } },
+        call: { id: 'call_mock', name: 'fly_to', arguments: { place: 'Mordor' } },
       }
       yield { type: 'done' as const }
     })

@@ -6,8 +6,8 @@
  */
 
 import type { Dataset, ChatMessage, ChatAction, DocentConfig, LegendCache, MapViewContext, LLMContextSnapshot, ReadingLevel } from '../types'
-import { streamChat, checkAvailability, type AvailabilityResult, type LLMMessage, type LLMContentPart } from './llmProvider'
-import { buildSystemPromptForTurn, buildCompressedHistory, getLoadDatasetTool, getFlyToTool, getSetTimeTool, getFitBoundsTool, getAddMarkerTool, getToggleLabelsTool, getHighlightRegionTool } from './docentContext'
+import { streamChat, checkAvailability, type AvailabilityResult, type LLMMessage, type LLMContentPart, type LLMToolCall } from './llmProvider'
+import { buildSystemPrompt, buildCompressedHistory, getSearchCatalogTool, getLoadDatasetTool, getFlyToTool, getSetTimeTool, getFitBoundsTool, getAddMarkerTool, getToggleLabelsTool, getHighlightRegionTool } from './docentContext'
 import { parseIntent, generateResponse, searchDatasets, evaluateAutoLoad } from './docentEngine'
 import { ensureLoaded as ensureQALoaded, getRelevantQA } from './qaService'
 import { resolveRegion, boundsToGeoJSON } from '../data/regions'
@@ -16,8 +16,14 @@ import { logger } from '../utils/logger'
 // --- Constants ---
 const CONFIG_STORAGE_KEY = 'sos-docent-config'
 
-/** The default vision-capable model for Cloudflare Workers AI. */
-const CF_VISION_MODEL = 'llama-3.2-11b-vision'
+/**
+ * Default vision-capable model for Cloudflare Workers AI. `llama-4-scout`
+ * is natively multimodal AND supports function calling, so the eye-icon
+ * screenshot path can now call `search_catalog` alongside the image —
+ * which was impossible with the previous `llama-3.2-11b-vision` fallback
+ * (that model doesn't support tools and has a separate non-OpenAI API).
+ */
+const CF_VISION_MODEL = 'llama-4-scout'
 const VISION_TIMEOUT_MS = 60000
 
 /** Detect localhost dev where the Cloudflare /api proxy may be unavailable. */
@@ -214,6 +220,10 @@ const tauriInvoke: ((cmd: string, args?: Record<string, unknown>) => Promise<unk
 const DEFAULT_CONFIG: DocentConfig = {
   apiUrl: IS_TAURI ? '' : '/api',
   apiKey: '',
+  // Default to llama-3.1-70b on the CF proxy. It reliably follows the
+  // <<LOAD:...>> marker format in prose, which produces inline Load buttons.
+  // llama-4-scout is available via the settings dropdown for users who want
+  // multimodal + tool-calling support, but it doesn't emit markers reliably.
   model: IS_TAURI ? '' : 'llama-3.1-70b',
   enabled: true,
   readingLevel: 'general',
@@ -321,6 +331,67 @@ export function getDefaultConfig(): DocentConfig {
 export { IS_TAURI }
 
 /**
+ * A single dataset summary returned by the `search_catalog` tool. Short
+ * enough that 10 of them fit comfortably within any LLM context window.
+ */
+export interface CatalogSearchResult {
+  id: string
+  title: string
+  categories: string[]
+  description: string
+  isTour?: boolean
+  timeRange?: string
+}
+
+/** Maximum results `search_catalog` will return in a single call. */
+const SEARCH_CATALOG_MAX_LIMIT = 10
+/** Default limit if the LLM doesn't specify one. */
+const SEARCH_CATALOG_DEFAULT_LIMIT = 5
+/** Max description length included in each result (characters). */
+const SEARCH_CATALOG_DESC_LEN = 220
+/** Maximum tool-call rounds per LLM attempt — defensive cap against infinite loops. */
+const MAX_TOOL_CALL_ROUNDS = 5
+
+/**
+ * Execute a `search_catalog` tool call locally. Runs the same keyword
+ * scoring as `docentEngine.searchDatasets` and shapes the result into
+ * compact summaries the LLM can use to recommend datasets.
+ *
+ * Pure function (no I/O) — results depend only on the in-memory catalog.
+ */
+export function executeSearchCatalog(
+  args: Record<string, unknown>,
+  datasets: Dataset[],
+): CatalogSearchResult[] {
+  const query = typeof args.query === 'string' ? args.query.trim() : ''
+  if (!query) return []
+
+  const rawLimit = typeof args.limit === 'number' && Number.isFinite(args.limit)
+    ? args.limit
+    : SEARCH_CATALOG_DEFAULT_LIMIT
+  const limit = Math.max(1, Math.min(SEARCH_CATALOG_MAX_LIMIT, Math.floor(rawLimit)))
+
+  const results = searchDatasets(datasets, query, limit)
+  return results.map(({ dataset: d }) => {
+    const desc = d.enriched?.description ?? d.abstractTxt ?? ''
+    const shortDesc = desc.length > SEARCH_CATALOG_DESC_LEN
+      ? desc.slice(0, SEARCH_CATALOG_DESC_LEN).trim() + '…'
+      : desc
+    const result: CatalogSearchResult = {
+      id: d.id,
+      title: d.title,
+      categories: Object.keys(d.enriched?.categories ?? {}),
+      description: shortDesc,
+    }
+    if (d.format === 'tour/json') result.isTour = true
+    if (d.startTime && d.endTime) {
+      result.timeRange = `${d.startTime} to ${d.endTime}`
+    }
+    return result
+  })
+}
+
+/**
  * Test if the configured LLM is reachable and the model is available.
  */
 export async function testConnection(config: DocentConfig): Promise<AvailabilityResult> {
@@ -366,7 +437,20 @@ export function validateAndCleanText(
     if (datasetIdSet.has(id)) {
       validIds.add(id)
     } else {
-      invalidIds.add(id)
+      // The LLM often puts a dataset TITLE in the marker instead of the
+      // internal ID (e.g. <<LOAD:Sea Level Rise>> instead of
+      // <<LOAD:INTERNAL_SOS_123>>). Check titles as a fallback so the
+      // marker still produces a Load button.
+      const idLower = id.toLowerCase()
+      const byTitle = datasets.find(d => {
+        const tLower = d.title.toLowerCase()
+        return tLower === idLower || tLower.startsWith(idLower) || idLower.startsWith(tLower)
+      })
+      if (byTitle) {
+        validIds.add(byTitle.id)
+      } else {
+        invalidIds.add(id)
+      }
     }
   }
   for (const match of text.matchAll(/\bINTERNAL_[A-Z0-9_]+\b/g)) {
@@ -652,8 +736,13 @@ export async function* processMessage(
     await ensureQALoaded().catch(() => {})
     const qaContext = getRelevantQA(input, currentDataset, datasets, turnIndex)
 
-    const systemPrompt = buildSystemPromptForTurn(
-      datasets, currentDataset, turnIndex, cfg.readingLevel, visionActive,
+    // Phase 3: the system prompt no longer includes the full catalog.
+    // The LLM discovers datasets via the `search_catalog` tool instead.
+    // `turnIndex` is still computed above for `getRelevantQA` (which tunes
+    // its output based on conversation depth), but is NOT passed to the
+    // prompt builder anymore.
+    const systemPrompt = buildSystemPrompt(
+      datasets, currentDataset, cfg.readingLevel, visionActive,
       !visionActive ? legendDescription : null,
       !visionActive ? currentTime : null,
       qaContext || null,
@@ -700,19 +789,71 @@ export async function* processMessage(
       ? `[GLOBE STATE: "${currentDataset.title}" is currently loaded on the globe.${currentTime ? ` Showing: ${currentTime}.` : ''}]\n`
       : '[GLOBE STATE: No dataset is loaded. The globe shows the default Earth view.]\n'
 
+    // Phase 3 discovery: pre-search the catalog locally and inject the top
+    // results into the user message as [RELEVANT DATASETS] context. This is
+    // the primary discovery path — it works on every model regardless of
+    // function-calling support. The system prompt tells the LLM to prefer
+    // these pre-searched results and only call `search_catalog` as a
+    // fallback for follow-up queries on a different topic.
+    //
+    // Strip punctuation and common question/stop words so the scoring in
+    // searchDatasets isn't diluted. "What datasets show sea level rise?" →
+    // search query "sea level rise", which scores well against real titles.
+    const PRE_SEARCH_STOP_WORDS = new Set([
+      'what', 'which', 'show', 'me', 'about', 'tell', 'the', 'a', 'an',
+      'is', 'are', 'do', 'does', 'did', 'can', 'how', 'where', 'when',
+      'why', 'i', 'my', 'your', 'you', 'we', 'us', 'it', 'its', 'of',
+      'in', 'on', 'for', 'to', 'and', 'or', 'with', 'this', 'that',
+      'some', 'any', 'have', 'has', 'there', 'here', 'please', 'thanks',
+      'datasets', 'dataset', 'data', 'find', 'search', 'look', 'give',
+      'want', 'like', 'need', 'related', 'something', 'anything',
+    ])
+    const preSearchQuery = input
+      .replace(/[?!.,;:'"()[\]{}]/g, '')
+      .split(/\s+/)
+      .filter(w => w.length > 1 && !PRE_SEARCH_STOP_WORDS.has(w.toLowerCase()))
+      .join(' ')
+    // Only pre-search for intents that actually need dataset discovery.
+    // Greetings, help, explain-current, and what-is-this don't benefit
+    // from injecting a [RELEVANT DATASETS] block and would just add
+    // noise tokens + risk steering the model toward irrelevant recs.
+    const needsPreSearch = intent.type === 'search' || intent.type === 'category' || intent.type === 'related'
+    const preSearchCatalogResults = needsPreSearch
+      ? executeSearchCatalog({ query: preSearchQuery || input, limit: 5 }, datasets)
+      : []
+
+    let preSearchContext = ''
+    if (preSearchCatalogResults.length > 0) {
+      const lines = preSearchCatalogResults.map(r =>
+        `- ${r.id} | ${r.title}${r.isTour ? ' [Tour]' : ''} | ${r.categories.join(', ')} | ${r.description}`
+      )
+      preSearchContext = `[RELEVANT DATASETS for your query:\n${lines.join('\n')}\nRefer to these by exact title and include <<LOAD:ID>> markers.]\n`
+    }
+
     const userMessage: LLMMessage = visionActive
       ? { role: 'user', content: [
           { type: 'image_url' as const, image_url: { url: screenshotDataUrl! } },
-          { type: 'text' as const, text: statePrefix + visionText },
+          { type: 'text' as const, text: statePrefix + preSearchContext + visionText },
         ] as LLMContentPart[] }
-      : { role: 'user', content: statePrefix + input }
+      : { role: 'user', content: statePrefix + preSearchContext + input }
 
     const llmMessages: LLMMessage[] = [
       { role: 'system' as const, content: systemPrompt },
       ...buildCompressedHistory(history),
       userMessage,
     ]
-    const tools = [getLoadDatasetTool(), getFlyToTool(), getSetTimeTool(), getFitBoundsTool(), getAddMarkerTool(), getToggleLabelsTool(), getHighlightRegionTool()]
+    // search_catalog is first because it's the primary discovery mechanism
+    // now that the catalog is no longer in the system prompt.
+    const tools = [
+      getSearchCatalogTool(),
+      getLoadDatasetTool(),
+      getFlyToTool(),
+      getSetTimeTool(),
+      getFitBoundsTool(),
+      getAddMarkerTool(),
+      getToggleLabelsTool(),
+      getHighlightRegionTool(),
+    ]
 
     // Auto-switch to vision model when using the default CF proxy
     const normalizedUrl = cfg.apiUrl.replace(/\/+$/, '')
@@ -734,161 +875,270 @@ export async function* processMessage(
     for (let attempt = 1; attempt <= MAX_LLM_ATTEMPTS; attempt++) {
       let llmProducedText = false
       let accumulatedText = ''
+      // Phase 3: each attempt maintains its own conversation state that may
+      // grow across multiple streamChat rounds as the LLM calls search_catalog
+      // and we feed the results back.
+      const conversationMessages: LLMMessage[] = [...llmMessages]
+      let attemptErrored = false
+      let round = 0
+      // Track all datasets returned by search_catalog across rounds in this
+      // attempt so we can auto-inject Load buttons for any the LLM mentions
+      // by title but forgets to tag with <<LOAD:...>> markers.
+      // Seed with pre-search results so the auto-inject safety net can match
+      // dataset titles in the LLM's prose even when the model doesn't call
+      // the search_catalog tool. Any tool-call results are appended later.
+      const searchResultsThisAttempt: CatalogSearchResult[] = [...preSearchCatalogResults]
+
       try {
-        logger.info(`[Docent] LLM request (attempt ${attempt}/${MAX_LLM_ATTEMPTS}):`, {
-          url: `${visionCfg.apiUrl.replace(/\/+$/, '')}/chat/completions`,
-          model: visionCfg.model,
-          messageCount: llmMessages.length,
-          toolCount: tools.length,
-          vision: visionActive,
-        })
+        toolLoop: while (round < MAX_TOOL_CALL_ROUNDS) {
+          round++
 
-        const stream = streamChat(llmMessages, tools, visionCfg, visionActive ? { timeoutMs: VISION_TIMEOUT_MS } : undefined)
+          // search_catalog calls that need a tool result message in reply.
+          // Fire-and-forget tool calls (load_dataset, fly_to, etc.) are still
+          // emitted as action chunks immediately and do NOT enter this queue.
+          const pendingSearchCalls: LLMToolCall[] = []
+          // Text produced in this round only — used for the assistant echo
+          // when appending to conversationMessages for the next round.
+          let roundText = ''
 
-        for await (const chunk of stream) {
-          switch (chunk.type) {
-            case 'delta':
-              llmProducedText = true
-              accumulatedText += chunk.text
-              yield { type: 'delta', text: chunk.text }
-              break
+          logger.info(`[Docent] LLM request (attempt ${attempt}/${MAX_LLM_ATTEMPTS}, round ${round}/${MAX_TOOL_CALL_ROUNDS}):`, {
+            url: `${visionCfg.apiUrl.replace(/\/+$/, '')}/chat/completions`,
+            model: visionCfg.model,
+            messageCount: conversationMessages.length,
+            toolCount: tools.length,
+            vision: visionActive,
+          })
 
-            case 'tool_call':
-              if (chunk.call.name === 'load_dataset') {
-                const args = chunk.call.arguments as { dataset_id?: string; dataset_title?: string }
-                let resolvedId: string | undefined
-                let resolvedTitle: string | undefined
+          const stream = streamChat(conversationMessages, tools, visionCfg, visionActive ? { timeoutMs: VISION_TIMEOUT_MS } : undefined)
 
-                if (args.dataset_id) {
-                  const idStr = String(args.dataset_id)
-                  const matchById = datasets.find(d => d.id === idStr)
-                  if (matchById) {
-                    resolvedId = idStr
-                    resolvedTitle = matchById.title
-                  } else {
-                    logger.warn('[Docent] Ignoring tool_call with unknown dataset_id:', idStr)
+          for await (const chunk of stream) {
+            switch (chunk.type) {
+              case 'delta':
+                llmProducedText = true
+                accumulatedText += chunk.text
+                roundText += chunk.text
+                yield { type: 'delta', text: chunk.text }
+                break
+
+              case 'tool_call':
+                if (chunk.call.name === 'search_catalog') {
+                  // Needs a tool result sent back — queue for end of round.
+                  pendingSearchCalls.push(chunk.call)
+                } else if (chunk.call.name === 'load_dataset') {
+                  const args = chunk.call.arguments as { dataset_id?: string; dataset_title?: string }
+                  let resolvedId: string | undefined
+                  let resolvedTitle: string | undefined
+
+                  if (args.dataset_id) {
+                    const idStr = String(args.dataset_id)
+                    const matchById = datasets.find(d => d.id === idStr)
+                    if (matchById) {
+                      resolvedId = idStr
+                      resolvedTitle = matchById.title
+                    } else {
+                      logger.warn('[Docent] Ignoring tool_call with unknown dataset_id:', idStr)
+                    }
                   }
-                }
 
-                // Fallback: resolve by title if ID is missing or invalid
-                if (!resolvedId && args.dataset_title) {
-                  const titleLower = String(args.dataset_title).trim().toLowerCase()
-                  const match = datasets.find(d => d.title.trim().toLowerCase() === titleLower)
-                  if (match) {
-                    resolvedId = match.id
-                    resolvedTitle = match.title
+                  // Fallback: resolve by title if ID is missing or invalid
+                  if (!resolvedId && args.dataset_title) {
+                    const titleLower = String(args.dataset_title).trim().toLowerCase()
+                    const match = datasets.find(d => d.title.trim().toLowerCase() === titleLower)
+                    if (match) {
+                      resolvedId = match.id
+                      resolvedTitle = match.title
+                    }
                   }
-                }
 
-                if (resolvedId && !yieldedIds.has(resolvedId)) {
-                  yieldedIds.add(resolvedId)
-                  yield {
-                    type: 'action',
-                    action: {
-                      type: 'load-dataset',
-                      datasetId: resolvedId,
-                      datasetTitle: resolvedTitle ?? String(args.dataset_title ?? resolvedId),
-                    },
-                  }
-                }
-              } else if (chunk.call.name === 'fly_to') {
-                const args = chunk.call.arguments as { lat?: number; lon?: number; place?: string; altitude?: number }
-                if (typeof args.lat === 'number' && typeof args.lon === 'number') {
-                  yield {
-                    type: 'action',
-                    action: { type: 'fly-to', lat: args.lat, lon: args.lon, altitude: args.altitude },
-                  }
-                } else if (args.place) {
-                  // Resolve place name to coordinates via region lookup
-                  const region = resolveRegion(args.place)
-                  if (region) {
-                    const [west, south, east, north] = region.bounds
-                    // Handle antimeridian-crossing bounds (west > east) by wrapping
-                    const lon = west <= east
-                      ? (west + east) / 2
-                      : ((west + east + 360) / 2) % 360 - (((west + east + 360) / 2) % 360 > 180 ? 360 : 0)
+                  if (resolvedId && !yieldedIds.has(resolvedId)) {
+                    yieldedIds.add(resolvedId)
                     yield {
                       type: 'action',
-                      action: { type: 'fly-to', lat: (south + north) / 2, lon, altitude: args.altitude },
+                      action: {
+                        type: 'load-dataset',
+                        datasetId: resolvedId,
+                        datasetTitle: resolvedTitle ?? String(args.dataset_title ?? resolvedId),
+                      },
+                    }
+                  }
+                } else if (chunk.call.name === 'fly_to') {
+                  const args = chunk.call.arguments as { lat?: number; lon?: number; place?: string; altitude?: number }
+                  if (typeof args.lat === 'number' && typeof args.lon === 'number') {
+                    yield {
+                      type: 'action',
+                      action: { type: 'fly-to', lat: args.lat, lon: args.lon, altitude: args.altitude },
+                    }
+                  } else if (args.place) {
+                    // Resolve place name to coordinates via region lookup
+                    const region = resolveRegion(args.place)
+                    if (region) {
+                      const [west, south, east, north] = region.bounds
+                      // Handle antimeridian-crossing bounds (west > east) by wrapping
+                      const lon = west <= east
+                        ? (west + east) / 2
+                        : ((west + east + 360) / 2) % 360 - (((west + east + 360) / 2) % 360 > 180 ? 360 : 0)
+                      yield {
+                        type: 'action',
+                        action: { type: 'fly-to', lat: (south + north) / 2, lon, altitude: args.altitude },
+                      }
+                    }
+                  }
+                } else if (chunk.call.name === 'set_time') {
+                  const args = chunk.call.arguments as { date?: string }
+                  if (args.date) {
+                    yield {
+                      type: 'action',
+                      action: { type: 'set-time', isoDate: args.date },
+                    }
+                  }
+                } else if (chunk.call.name === 'fit_bounds') {
+                  const args = chunk.call.arguments as { west?: number; south?: number; east?: number; north?: number; label?: string }
+                  if (typeof args.west === 'number' && typeof args.south === 'number' && typeof args.east === 'number' && typeof args.north === 'number') {
+                    yield {
+                      type: 'action',
+                      action: { type: 'fit-bounds', bounds: [args.west, args.south, args.east, args.north], label: args.label },
+                    }
+                  }
+                } else if (chunk.call.name === 'add_marker') {
+                  const args = chunk.call.arguments as { lat?: number; lng?: number; label?: string }
+                  if (typeof args.lat === 'number' && typeof args.lng === 'number') {
+                    yield {
+                      type: 'action',
+                      action: { type: 'add-marker', lat: args.lat, lng: args.lng, label: args.label },
+                    }
+                  }
+                } else if (chunk.call.name === 'toggle_labels') {
+                  const args = chunk.call.arguments as { visible?: boolean }
+                  if (typeof args.visible === 'boolean') {
+                    yield {
+                      type: 'action',
+                      action: { type: 'toggle-labels', visible: args.visible },
+                    }
+                  }
+                } else if (chunk.call.name === 'highlight_region') {
+                  const args = chunk.call.arguments as { geojson?: GeoJSON.GeoJSON; name?: string; label?: string }
+                  if (args.geojson) {
+                    yield {
+                      type: 'action',
+                      action: { type: 'highlight-region', geojson: args.geojson, label: args.label },
+                    }
+                  } else if (args.name) {
+                    // Resolve by name from the region lookup
+                    const region = resolveRegion(args.name)
+                    if (region) {
+                      yield {
+                        type: 'action',
+                        action: { type: 'highlight-region', geojson: boundsToGeoJSON(region.bounds, region.name), label: region.name },
+                      }
+                      yield {
+                        type: 'action',
+                        action: { type: 'fit-bounds', bounds: region.bounds, label: region.name },
+                      }
                     }
                   }
                 }
-              } else if (chunk.call.name === 'set_time') {
-                const args = chunk.call.arguments as { date?: string }
-                if (args.date) {
-                  yield {
-                    type: 'action',
-                    action: { type: 'set-time', isoDate: args.date },
-                  }
-                }
-              } else if (chunk.call.name === 'fit_bounds') {
-                const args = chunk.call.arguments as { west?: number; south?: number; east?: number; north?: number; label?: string }
-                if (typeof args.west === 'number' && typeof args.south === 'number' && typeof args.east === 'number' && typeof args.north === 'number') {
-                  yield {
-                    type: 'action',
-                    action: { type: 'fit-bounds', bounds: [args.west, args.south, args.east, args.north], label: args.label },
-                  }
-                }
-              } else if (chunk.call.name === 'add_marker') {
-                const args = chunk.call.arguments as { lat?: number; lng?: number; label?: string }
-                if (typeof args.lat === 'number' && typeof args.lng === 'number') {
-                  yield {
-                    type: 'action',
-                    action: { type: 'add-marker', lat: args.lat, lng: args.lng, label: args.label },
-                  }
-                }
-              } else if (chunk.call.name === 'toggle_labels') {
-                const args = chunk.call.arguments as { visible?: boolean }
-                if (typeof args.visible === 'boolean') {
-                  yield {
-                    type: 'action',
-                    action: { type: 'toggle-labels', visible: args.visible },
-                  }
-                }
-              } else if (chunk.call.name === 'highlight_region') {
-                const args = chunk.call.arguments as { geojson?: GeoJSON.GeoJSON; name?: string; label?: string }
-                if (args.geojson) {
-                  yield {
-                    type: 'action',
-                    action: { type: 'highlight-region', geojson: args.geojson, label: args.label },
-                  }
-                } else if (args.name) {
-                  // Resolve by name from the region lookup
-                  const region = resolveRegion(args.name)
-                  if (region) {
-                    yield {
-                      type: 'action',
-                      action: { type: 'highlight-region', geojson: boundsToGeoJSON(region.bounds, region.name), label: region.name },
-                    }
-                    yield {
-                      type: 'action',
-                      action: { type: 'fit-bounds', bounds: region.bounds, label: region.name },
-                    }
-                  }
-                }
-              }
-              break
+                break
 
-            case 'error':
-              logger.warn(`[Docent] LLM error (attempt ${attempt}):`, chunk.message)
-              llmProducedText = false
-              break
+              case 'error':
+                logger.warn(`[Docent] LLM error (attempt ${attempt}, round ${round}):`, chunk.message)
+                attemptErrored = true
+                llmProducedText = false
+                break toolLoop
 
-            case 'done':
-              if (llmProducedText) {
-                yield* emitValidatedActions(accumulatedText, datasets, yieldedIds)
-                yield { type: 'done', fallback: false, llmContext }
-                return
-              }
-              logger.warn(`[Docent] LLM stream completed but produced no text (attempt ${attempt})`)
-              break
+              case 'done':
+                // Intentionally do NOT return here — let the inner for-await
+                // finish its iteration so pendingSearchCalls is fully
+                // populated. The end-of-round logic below decides whether to
+                // loop for another streamChat call or exit.
+                break
+            }
+          }
+
+          // Stream finished for this round.
+          if (pendingSearchCalls.length === 0) {
+            // LLM didn't request any catalog searches — this round was the
+            // final one, exit the tool loop.
+            break
+          }
+
+          // LLM requested catalog searches. Execute them locally, append to
+          // the conversation as an assistant-with-tool_calls message
+          // followed by one tool-role message per call, then loop to stream
+          // the LLM's follow-up response.
+          conversationMessages.push({
+            role: 'assistant',
+            content: roundText || null,
+            tool_calls: pendingSearchCalls.map(tc => ({
+              id: tc.id,
+              type: 'function' as const,
+              function: {
+                name: tc.name,
+                arguments: JSON.stringify(tc.arguments),
+              },
+            })),
+          })
+
+          for (const call of pendingSearchCalls) {
+            const results = executeSearchCatalog(call.arguments, datasets)
+            searchResultsThisAttempt.push(...results)
+            logger.info(`[Docent] search_catalog("${String(call.arguments.query ?? '')}") → ${results.length} result(s)`)
+            conversationMessages.push({
+              role: 'tool',
+              tool_call_id: call.id,
+              content: JSON.stringify(results),
+            })
           }
         }
 
-        if (llmProducedText) {
+        if (round >= MAX_TOOL_CALL_ROUNDS) {
+          logger.warn(`[Docent] Hit MAX_TOOL_CALL_ROUNDS (${MAX_TOOL_CALL_ROUNDS}) without natural termination on attempt ${attempt}`)
+        }
+
+        if (!attemptErrored && llmProducedText) {
           yield* emitValidatedActions(accumulatedText, datasets, yieldedIds)
+
+          // Safety net: if the LLM mentioned dataset titles from search_catalog
+          // results in its prose but didn't emit <<LOAD:...>> markers for them,
+          // auto-inject Load buttons. This catches the common failure mode where
+          // the model writes "Sea Level Rise: This dataset..." without the
+          // corresponding marker — the user sees the name but has no button.
+          if (searchResultsThisAttempt.length > 0) {
+            const lowerText = accumulatedText.toLowerCase()
+            for (const sr of searchResultsThisAttempt) {
+              if (yieldedIds.has(sr.id)) continue
+              // Check if the dataset title appears in the prose. Use
+              // bidirectional matching: the model might write a shortened
+              // version of the title ("Sea Level Rise" vs catalog's "Sea
+              // Level Rise: Global Sea Level Change"), or a lengthened
+              // version ("Sea Level Rise 1993-2020" vs catalog's "Sea
+              // Level Rise"). Also check the first segment before a colon
+              // or dash separator as a common truncation point.
+              const titleLower = sr.title.toLowerCase()
+              const titleShort = titleLower.split(/[:\-—]/)[0].trim()
+              if (
+                lowerText.includes(titleLower) ||
+                (titleShort.length >= 8 && lowerText.includes(titleShort))
+              ) {
+                yieldedIds.add(sr.id)
+                logger.info(`[Docent] Auto-injecting Load button for "${sr.title}" (${sr.id}) — title found in prose but no marker emitted`)
+                yield {
+                  type: 'action',
+                  action: {
+                    type: 'load-dataset',
+                    datasetId: sr.id,
+                    datasetTitle: sr.title,
+                  },
+                }
+              }
+            }
+          }
+
           yield { type: 'done', fallback: false, llmContext }
           return
+        }
+
+        if (!attemptErrored) {
+          logger.warn(`[Docent] LLM stream completed but produced no text (attempt ${attempt})`)
         }
       } catch (err) {
         logger.warn(`[Docent] LLM stream failed (attempt ${attempt}):`, err)
