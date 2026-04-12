@@ -145,17 +145,22 @@ jobs:
             echo "iOS scaffold already exists — skipping init"
           fi
 
-      # Compile-check the Rust lib for both iOS device and simulator targets.
-      # We deliberately do NOT run `tauri ios build` here because that drives
-      # `xcodebuild` against the Tauri-generated Xcode scheme, which lacks
-      # simulator destinations out of the box (the full xcodebuild path will
-      # come back in Phase 6 alongside signed release builds). Cargo check
-      # validates exactly what we care about in Phase 2: that our Rust code
-      # compiles for iOS. Skips signing and scheme configuration entirely.
-      - name: Check Rust compiles for iOS device
-        working-directory: src-tauri
-        run: cargo check --target aarch64-apple-ios --lib
+      # Phase 4: now on macos-26 with Xcode 26, try the full tauri ios build
+      # which compiles both Rust AND Swift (including the apple-intelligence
+      # plugin's Foundation Models code). The simulator destination issue that
+      # blocked this on Xcode 16 may be resolved in Xcode 26.
+      # Falls back to cargo check if tauri ios build fails on destinations.
+      - name: Build iOS app (debug, simulator)
+        run: npx tauri ios build --debug --target aarch64-sim
+        continue-on-error: true
+        id: ios-full-build
 
-      - name: Check Rust compiles for iOS arm64 simulator
+      # Fallback: if tauri ios build fails (e.g. Xcode scheme still lacks
+      # simulator destinations), at least validate the Rust side compiles.
+      - name: Fallback — check Rust compiles for iOS
+        if: steps.ios-full-build.outcome == 'failure'
         working-directory: src-tauri
-        run: cargo check --target aarch64-apple-ios-sim --lib
+        run: |
+          echo "::warning::tauri ios build failed — falling back to cargo check (Swift not validated)"
+          cargo check --target aarch64-apple-ios --lib
+          cargo check --target aarch64-apple-ios-sim --lib
