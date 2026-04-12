@@ -90,6 +90,8 @@ class InteractiveSphere {
   /** Listener attached to the primary video for sibling sync. */
   private primaryVideoSyncListeners: Array<{ event: string; handler: EventListener }> = []
   private primaryVideoSyncTarget: HTMLVideoElement | null = null
+  /** Interval ID for the periodic drift-correction timer. */
+  private driftCheckInterval: ReturnType<typeof setInterval> | null = null
 
   /**
    * Convenience getter returning the primary viewport's renderer.
@@ -1272,28 +1274,36 @@ class InteractiveSphere {
   }
 
   /**
-   * Sibling video sync — by real-world date, not by video-seconds.
+   * Sibling video sync — seek-once-then-free-run strategy.
    *
-   * On every primary `timeupdate`/`play`/`pause`/`seeked`:
+   * The previous implementation listened to every `timeupdate` event
+   * (~4 per second) and seeked every sibling's `currentTime` on each
+   * tick. That caused constant decoder interruption (16+ seeks/sec
+   * with 4 panels), manifesting as visible jitter and pauses.
    *
-   *   1. Compute the primary's current real-world date from its
-   *      dataset's temporal range.
-   *   2. For each sibling with a temporal range, reverse-compute the
-   *      sibling's target `currentTime` for that same date.
-   *   3. Seek (tolerating some drift) and mirror play/pause state.
-   *   4. If the date is outside the sibling's range, freeze the
-   *      sibling at the nearest boundary frame, pause it, and mark
-   *      the panel container with `.out-of-range` so CSS can display
-   *      a "No data for current time" ribbon.
+   * New approach:
    *
-   * Siblings without a temporal range (images, or videos lacking
-   * `startTime`/`endTime` metadata) are skipped — nothing to sync.
+   *   - **On play**: seek every sibling to match the primary's
+   *     real-world date, then call `play()` on all of them at once.
+   *     After that, the browser's internal media clock keeps them
+   *     naturally in sync without any seeking.
    *
-   * The naive phase-2 implementation synced by video seconds, which
-   * only produced correct results when both videos happened to have
-   * identical ranges AND identical durations. For any other case it
-   * silently misaligned real-world time, which is the worst kind of
-   * bug for a multi-panel comparison tool.
+   *   - **On pause**: pause all siblings. No seek — they're already
+   *     at the right position from the play-sync.
+   *
+   *   - **On seeked** (user scrubbed the transport): re-compute
+   *     target times, seek siblings, then resume play if the primary
+   *     is playing.
+   *
+   *   - **Periodic drift check** (every 5 seconds): if any sibling
+   *     has drifted more than 1.0s from the primary's date-mapped
+   *     position, seek just that sibling. This catches slow decoder
+   *     drift without the constant-seek jitter. The 1.0s threshold
+   *     is generous — 0.3s was too tight and triggered on normal
+   *     inter-decoder variance.
+   *
+   * This reduces seeking from ~16/sec to essentially 0 during normal
+   * playback, with a soft correction every 5s only when needed.
    */
   private attachPrimaryVideoSync(): void {
     this.detachPrimaryVideoSync()
@@ -1303,15 +1313,21 @@ class InteractiveSphere {
     const primaryVideo = primaryHls?.getVideo?.() ?? null
     if (!primaryVideo) return
 
-    const DRIFT_THRESHOLD_S = 0.3
-
-    const syncSiblings = () => {
+    /**
+     * Seek every sibling to the primary's current date-mapped
+     * position, update out-of-range indicators, and optionally
+     * mirror the primary's play/pause state.
+     *
+     * @param mirrorPlayState If true, also play/pause siblings
+     * to match the primary. On periodic drift checks we skip this
+     * (they're already playing/paused) to avoid re-triggering
+     * play() on videos that are fine.
+     */
+    const seekSiblingsToDate = (mirrorPlayState: boolean) => {
       const pIdx = this.viewports.getPrimaryIndex()
       const pPanel = this.panelStates[pIdx]
       const pDataset = pPanel?.dataset
-      // Compute the primary's current real-world date. If the primary
-      // dataset has no temporal range we can't sync by date — fall
-      // back to just mirroring play/pause without seeking.
+
       let primaryDate: Date | null = null
       if (pDataset?.startTime && pDataset.endTime && primaryVideo.duration > 0) {
         primaryDate = videoTimeToDate(
@@ -1342,62 +1358,124 @@ class InteractiveSphere {
 
           if (position === 'inside') {
             this.viewports.setOutOfRange(i, false)
-            if (Math.abs(sibVideo.currentTime - targetTime) > DRIFT_THRESHOLD_S) {
-              sibVideo.currentTime = targetTime
+            sibVideo.currentTime = targetTime
+            if (mirrorPlayState) {
+              if (primaryVideo.paused && !sibVideo.paused) {
+                sibVideo.pause()
+              } else if (!primaryVideo.paused && sibVideo.paused) {
+                sibVideo.play().catch(() => { /* autoplay blocked */ })
+              }
             }
-            // Mirror primary play/pause
+          } else {
+            this.viewports.setOutOfRange(i, true)
+            sibVideo.currentTime = targetTime
+            if (!sibVideo.paused) sibVideo.pause()
+          }
+        } else {
+          this.viewports.setOutOfRange(i, false)
+          if (mirrorPlayState) {
             if (primaryVideo.paused && !sibVideo.paused) {
               sibVideo.pause()
             } else if (!primaryVideo.paused && sibVideo.paused) {
               sibVideo.play().catch(() => { /* autoplay blocked */ })
             }
-          } else {
-            // Out of range — freeze at the nearest boundary frame and pause
-            this.viewports.setOutOfRange(i, true)
-            if (Math.abs(sibVideo.currentTime - targetTime) > DRIFT_THRESHOLD_S) {
-              sibVideo.currentTime = targetTime
-            }
-            if (!sibVideo.paused) sibVideo.pause()
-          }
-        } else {
-          // Either primary has no temporal range, or sibling has no
-          // temporal range, or the sibling's video isn't a real
-          // time-series. Just mirror play/pause without seeking, and
-          // don't mark it out of range.
-          this.viewports.setOutOfRange(i, false)
-          if (primaryVideo.paused && !sibVideo.paused) {
-            sibVideo.pause()
-          } else if (!primaryVideo.paused && sibVideo.paused) {
-            sibVideo.play().catch(() => { /* autoplay blocked */ })
           }
         }
 
-        // Mark the sibling's texture dirty so the globe repaints
         const sibTex = sibPanel?.videoTexture
         if (sibTex) sibTex.needsUpdate = true
       }
     }
 
-    const events = ['timeupdate', 'play', 'pause', 'seeked']
-    for (const event of events) {
-      primaryVideo.addEventListener(event, syncSiblings)
-      this.primaryVideoSyncListeners.push({ event, handler: syncSiblings as EventListener })
+    /**
+     * Periodic drift correction — only seeks siblings that have
+     * drifted beyond the threshold. Much cheaper than constant-seek
+     * because most of the time no sibling needs correction.
+     */
+    const DRIFT_THRESHOLD_S = 1.0
+    const DRIFT_CHECK_MS = 5000
+
+    const driftCheck = () => {
+      if (primaryVideo.paused) return
+
+      const pIdx = this.viewports.getPrimaryIndex()
+      const pPanel = this.panelStates[pIdx]
+      const pDataset = pPanel?.dataset
+
+      let primaryDate: Date | null = null
+      if (pDataset?.startTime && pDataset.endTime && primaryVideo.duration > 0) {
+        primaryDate = videoTimeToDate(
+          primaryVideo.currentTime,
+          primaryVideo.duration,
+          new Date(pDataset.startTime),
+          new Date(pDataset.endTime),
+        )
+      }
+      if (!primaryDate) return
+
+      for (let i = 0; i < this.panelStates.length; i++) {
+        if (i === pIdx) continue
+        const sibPanel = this.panelStates[i]
+        const sibVideo = sibPanel?.hlsService?.getVideo?.() ?? null
+        if (!sibVideo || sibVideo.readyState < 2 || sibVideo.paused) continue
+
+        const sibDataset = sibPanel?.dataset
+        if (!sibDataset?.startTime || !sibDataset.endTime || sibVideo.duration <= 0) continue
+
+        const { videoTime: targetTime, position } = dateToVideoTime(
+          primaryDate,
+          sibVideo.duration,
+          new Date(sibDataset.startTime),
+          new Date(sibDataset.endTime),
+        )
+
+        if (position === 'inside' && Math.abs(sibVideo.currentTime - targetTime) > DRIFT_THRESHOLD_S) {
+          logger.debug(`[App] Drift correction: panel ${i} off by ${(sibVideo.currentTime - targetTime).toFixed(1)}s`)
+          sibVideo.currentTime = targetTime
+        }
+      }
     }
+
+    // --- Wire event listeners ---
+
+    const onPlay = () => seekSiblingsToDate(true)
+    const onPause = () => {
+      for (let i = 0; i < this.panelStates.length; i++) {
+        if (i === this.viewports.getPrimaryIndex()) continue
+        const sibVideo = this.panelStates[i]?.hlsService?.getVideo?.() ?? null
+        if (sibVideo && !sibVideo.paused) sibVideo.pause()
+      }
+    }
+    const onSeeked = () => seekSiblingsToDate(true)
+
+    primaryVideo.addEventListener('play', onPlay)
+    primaryVideo.addEventListener('pause', onPause)
+    primaryVideo.addEventListener('seeked', onSeeked)
+    this.primaryVideoSyncListeners.push(
+      { event: 'play', handler: onPlay as EventListener },
+      { event: 'pause', handler: onPause as EventListener },
+      { event: 'seeked', handler: onSeeked as EventListener },
+    )
     this.primaryVideoSyncTarget = primaryVideo
 
+    // Start the periodic drift checker
+    this.driftCheckInterval = setInterval(driftCheck, DRIFT_CHECK_MS)
+
     // Run once immediately so siblings reflect the primary's current
-    // state without waiting for the next event.
-    syncSiblings()
+    // state without waiting for a user action.
+    seekSiblingsToDate(true)
   }
 
   /**
-   * Detach all sibling-sync listeners from the previous primary video
-   * and clear any lingering out-of-range state from siblings. Clearing
-   * the out-of-range class is important because the next primary may
-   * have a completely different temporal range — a previously-frozen
-   * sibling might be fully in range under the new primary.
+   * Detach all sibling-sync listeners from the previous primary video,
+   * stop the drift-check timer, and clear any lingering out-of-range
+   * state from siblings.
    */
   private detachPrimaryVideoSync(): void {
+    if (this.driftCheckInterval !== null) {
+      clearInterval(this.driftCheckInterval)
+      this.driftCheckInterval = null
+    }
     const target = this.primaryVideoSyncTarget
     if (target) {
       for (const { event, handler } of this.primaryVideoSyncListeners) {
