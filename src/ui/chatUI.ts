@@ -932,12 +932,17 @@ function updateTriggerForInfoPanel(): void {
   const trigger = document.getElementById('chat-trigger')
   const infoPanel = document.getElementById('info-panel')
   if (!trigger || !infoPanel) return
-  if (infoPanel.classList.contains('expanded')) {
+  // Sit the chat trigger above the info panel whenever it's visible —
+  // not just when expanded. The collapsed state (header + picker row)
+  // still has measurable height that the trigger needs to clear.
+  if (!infoPanel.classList.contains('hidden')) {
     const h = infoPanel.getBoundingClientRect().height
-    trigger.style.bottom = `${h + 12}px`
-  } else {
-    trigger.style.bottom = ''
+    if (h > 0) {
+      trigger.style.bottom = `${h + 12}px`
+      return
+    }
   }
+  trigger.style.bottom = ''
 }
 
 // --- Contextual dataset prompt ---
