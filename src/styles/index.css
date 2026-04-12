@@ -1,0 +1,25 @@
+/**
+ * CSS Entry Point — imports all component stylesheets in the correct order.
+ *
+ * Vite bundles all @import'd files into a single CSS output linked via
+ * <link> in <head>. Order matters for specificity tie-breaking: tokens
+ * first (defines variables), base second (reset + globals), then
+ * components in rough dependency order.
+ *
+ * Import this once in main.ts: `import './styles/index.css'`
+ *
+ * See docs/CSS_ARCHITECTURE_PLAN.md for the architecture rationale.
+ */
+
+@import './tokens.css';
+@import './base.css';
+@import './loading.css';
+@import './info-panel.css';
+@import './playback.css';
+@import './tour.css';
+@import './browse.css';
+@import './accessibility.css';
+@import './download.css';
+@import './tools-menu.css';
+@import './chat.css';
+@import './help.css';

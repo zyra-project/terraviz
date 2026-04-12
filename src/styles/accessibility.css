@@ -1,0 +1,163 @@
+/**
+ * accessibility styles — extracted from index.html <style> block.
+ * See docs/CSS_ARCHITECTURE_PLAN.md Step 3.
+ */
+
+/* --- Accessibility --- */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.skip-link {
+    position: absolute;
+    top: -100%;
+    left: 1rem;
+    z-index: 10000;
+    padding: 0.5rem 1rem;
+    background: var(--color-accent-dark);
+    color: var(--color-text);
+    border-radius: 0 0 6px 6px;
+    text-decoration: none;
+    font-size: 0.875rem;
+    transition: top 0.2s;
+}
+
+.skip-link:focus {
+    top: 0;
+}
+
+/* Focus indicators — frosted-glass design language */
+:focus-visible {
+    outline: 2px solid var(--accent-o70);
+    outline-offset: 2px;
+    box-shadow: 0 0 8px var(--accent-o40);
+}
+
+.transport-btn:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+    box-shadow: 0 0 12px var(--accent-o50);
+}
+
+.browse-card:focus-visible {
+    border-color: rgba(77, 166, 255, 0.6);
+    box-shadow: 0 0 12px var(--accent-o40);
+    outline: none;
+}
+
+.browse-chip:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+}
+
+/* --- Closed caption overlay --- */
+#caption-overlay {
+    display: none;
+    position: absolute;
+    bottom: 5.5rem;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: 80%;
+    text-align: center;
+    font-size: 1.05rem;
+    line-height: 1.45;
+    color: var(--color-text);
+    text-shadow: 0 1px 3px rgba(0,0,0,0.9), 0 0 10px rgba(0,0,0,0.8);
+    background: rgba(0, 0, 0, 0.62);
+    padding: 0.3rem 0.8rem;
+    border-radius: 4px;
+    pointer-events: none;
+    white-space: pre-line;
+}
+
+@media (max-width: 768px) {
+    #browse-overlay {
+        width: 100%;
+        border-left: none;
+    }
+
+    #browse-inner {
+        padding: 1rem 1rem 0;
+    }
+
+    #browse-header {
+        margin-bottom: 0.75rem;
+    }
+
+    .browse-title {
+        font-size: 1.1rem;
+    }
+
+    .browse-subtitle {
+        display: none;
+    }
+
+    .browse-search-wrap {
+        margin-bottom: 0.5rem;
+    }
+
+    /* Horizontal-scroll chip bars — prevent vertical overflow on mobile */
+    #browse-category-bar {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;          /* Firefox */
+        padding-bottom: 0.5rem;
+        /* Fade hints at edges to signal horizontal scroll */
+        mask-image: linear-gradient(to right, transparent 0, black 0.5rem, black calc(100% - 1rem), transparent 100%);
+        -webkit-mask-image: linear-gradient(to right, transparent 0, black 0.5rem, black calc(100% - 1rem), transparent 100%);
+    }
+    #browse-category-bar::-webkit-scrollbar { display: none; }
+
+    #browse-subcategory-bar {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        padding-bottom: 0.5rem;
+        mask-image: linear-gradient(to right, transparent 0, black 0.5rem, black calc(100% - 1rem), transparent 100%);
+        -webkit-mask-image: linear-gradient(to right, transparent 0, black 0.5rem, black calc(100% - 1rem), transparent 100%);
+    }
+    #browse-subcategory-bar::-webkit-scrollbar { display: none; }
+
+    .browse-subchip {
+        padding: 0.3rem 0.65rem;
+    }
+
+    #browse-toolbar {
+        flex-wrap: wrap;
+        margin-bottom: 0.35rem;
+    }
+
+    #browse-grid {
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 0.5rem;
+    }
+
+    .browse-card {
+        padding: 0.625rem;
+    }
+}
+
+/* Portrait phones: stack title above Load button so neither gets squeezed */
+@media (max-width: 600px) and (orientation: portrait) {
+    .browse-card-header {
+        flex-direction: column;
+        gap: 0.35rem;
+    }
+    .browse-card-title {
+        -webkit-line-clamp: 3;
+    }
+    .browse-card-load {
+        align-self: flex-start;
+    }
+}
+

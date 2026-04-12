@@ -8,10 +8,9 @@
 import { MapRenderer } from './services/mapRenderer'
 import { ViewportManager, type ViewLayout } from './services/viewportManager'
 
-// Design tokens — must be imported before any component CSS so custom
-// properties are defined when components reference them via var().
-import './styles/tokens.css'
-import './styles/loading.css'
+// CSS entry point — all component styles imported in dependency order.
+// Vite bundles these into a single <link> in the production build.
+import './styles/index.css'
 
 import { HLSService } from './services/hlsService'
 import { dataService } from './services/dataService'

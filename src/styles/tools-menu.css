@@ -1,0 +1,284 @@
+/**
+ * tools-menu styles — extracted from index.html <style> block.
+ * See docs/CSS_ARCHITECTURE_PLAN.md Step 3.
+ */
+
+/* --- Tools menu (collapses Browse + all settings into
+       two small buttons at the bottom-right) --- */
+#map-controls {
+    position: absolute;
+    bottom: 3.2rem;
+    right: 0.75rem;
+    display: flex;
+    gap: 0.4rem;
+    padding: 0;
+    pointer-events: auto;
+    z-index: 10;
+}
+#map-controls.hidden { display: none; }
+
+.tools-menu-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    min-height: 34px;
+    padding: 0.35rem 0.7rem;
+    font: inherit;
+    font-size: 0.72rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    color: #ccc;
+    background: var(--glass-bg-light);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--white-o12);
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    white-space: nowrap;
+    line-height: 1;
+}
+.tools-menu-btn:hover {
+    background: rgba(30, 30, 40, 0.95);
+    color: var(--color-text);
+    border-color: rgba(77, 166, 255, 0.45);
+}
+.tools-menu-btn[aria-expanded="true"] {
+    background: var(--accent-o18);
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+}
+.tools-menu-btn:focus-visible {
+    outline: 2px solid var(--accent-o70);
+    outline-offset: 2px;
+    box-shadow: 0 0 8px var(--accent-o40);
+}
+
+/* Attention pulse — applied briefly to the Browse button
+   right after init so first-time mobile users notice where
+   datasets live. Two cycles of a radiating halo, then the
+   class is removed by pulseBrowseButton(). Skipped entirely
+   when the user prefers reduced motion. */
+@keyframes tools-menu-pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(77, 166, 255, 0.55);
+        border-color: var(--accent-o70);
+    }
+    70% {
+        box-shadow: 0 0 0 12px var(--accent-o05);
+        border-color: var(--accent-o70);
+    }
+    100% {
+        box-shadow: 0 0 0 0 var(--accent-o05);
+        border-color: var(--white-o12);
+    }
+}
+.tools-menu-btn.pulse-attention {
+    animation: tools-menu-pulse 1.2s ease-out 2;
+}
+@media (prefers-reduced-motion: reduce) {
+    .tools-menu-btn.pulse-attention {
+        animation: none;
+    }
+}
+.tools-menu-btn-icon {
+    font-size: 0.95rem;
+    line-height: 1;
+}
+.tools-menu-btn-label {
+    font-size: 0.72rem;
+}
+/* Gear-icon button is icon-only — collapse to a circle */
+.tools-menu-toggle {
+    min-width: 34px;
+    padding: 0.35rem 0.55rem;
+}
+
+/* --- Tools popover --- */
+.tools-menu-popover {
+    position: absolute;
+    bottom: calc(100% + 0.5rem);
+    right: 0;
+    min-width: 240px;
+    max-width: calc(100vw - 1.5rem);
+    padding: 0.75rem;
+    background: rgba(13, 13, 18, 0.94);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid var(--white-o12);
+    border-radius: 10px;
+    box-shadow: 0 6px 32px rgba(0, 0, 0, 0.45);
+    color: #ddd;
+    font-size: 0.75rem;
+    z-index: 11;
+}
+.tools-menu-popover.hidden { display: none; }
+
+.tools-menu-popover-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--white-o08);
+}
+.tools-menu-popover-title {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-text-secondary);
+}
+.tools-menu-close {
+    min-width: 22px;
+    height: 22px;
+    padding: 0;
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    border-radius: 4px;
+    line-height: 1;
+}
+.tools-menu-close:hover { color: var(--color-text); background: var(--white-o08); }
+
+.tools-menu-section {
+    margin-bottom: 0.75rem;
+}
+.tools-menu-section:last-child { margin-bottom: 0; }
+.tools-menu-section-title {
+    margin: 0 0 0.35rem;
+    padding: 0;
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-text-dim);
+}
+
+.tools-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    width: 100%;
+    padding: 0.5rem 0.6rem;
+    font: inherit;
+    font-size: 0.75rem;
+    color: #ddd;
+    text-align: left;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.tools-menu-item:hover {
+    background: var(--color-surface);
+    color: var(--color-text);
+    border-color: var(--white-o08);
+}
+.tools-menu-item.active {
+    color: var(--color-accent);
+    background: var(--accent-o08);
+    border-color: var(--accent-o35);
+}
+.tools-menu-item:focus-visible {
+    outline: 2px solid var(--accent-o70);
+    outline-offset: 2px;
+}
+.tools-menu-item-check {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    border-radius: 3px;
+    flex-shrink: 0;
+    position: relative;
+}
+.tools-menu-item.active .tools-menu-item-check {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+}
+.tools-menu-item.active .tools-menu-item-check::after {
+    content: '\2713';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 0.7rem;
+    color: var(--color-bg);
+    font-weight: 700;
+}
+/* Non-toggle items (Clear, Orbit settings…) don't need a check glyph */
+#tools-menu-clear .tools-menu-item-check,
+#tools-menu-orbit-settings .tools-menu-item-check {
+    display: none;
+}
+
+/* Thin separator between the view toggles and the
+   dataset-info / legend toggles so the two groups read
+   as related-but-distinct. */
+.tools-menu-subsep {
+    height: 1px;
+    margin: 0.35rem 0.4rem;
+    background: var(--white-o08);
+}
+
+.tools-menu-layout-row {
+    display: flex;
+    gap: 0.25rem;
+}
+.tools-menu-layout-btn {
+    flex: 1;
+    min-width: 0;
+    min-height: 30px;
+    padding: 0.35rem 0.2rem;
+    font: inherit;
+    font-size: 0.7rem;
+    color: #ccc;
+    background: var(--color-surface-alt);
+    border: 1px solid var(--white-o10);
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+    line-height: 1;
+}
+.tools-menu-layout-btn:hover {
+    background: var(--white-o10);
+    color: var(--color-text);
+    border-color: var(--accent-o40);
+}
+.tools-menu-layout-btn.active {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+    background: var(--accent-o12);
+}
+.tools-menu-layout-btn:focus-visible {
+    outline: 2px solid var(--accent-o70);
+    outline-offset: 2px;
+}
+
+@media (max-width: 768px) {
+    .tools-menu-btn {
+        min-height: 38px;
+        padding: 0.4rem 0.8rem;
+        font-size: 0.78rem;
+    }
+    .tools-menu-toggle {
+        min-width: 38px;
+        padding: 0.4rem 0.6rem;
+    }
+    .tools-menu-popover {
+        min-width: 260px;
+    }
+    .tools-menu-item {
+        padding: 0.6rem 0.7rem;
+        font-size: 0.82rem;
+    }
+    .tools-menu-layout-btn {
+        min-height: 36px;
+        font-size: 0.78rem;
+    }
+}
+

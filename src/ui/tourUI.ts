@@ -30,8 +30,6 @@ function getLayoutMode(): LayoutMode {
   return 'desktop'
 }
 
-// Tour overlay CSS — imported here so Vite bundles it only when tour UI is used.
-import '../styles/tour.css'
 
 /**
  * Transform SOS overlay dimensions for the current viewport.
