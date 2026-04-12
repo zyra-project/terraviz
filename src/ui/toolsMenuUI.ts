@@ -303,6 +303,36 @@ export function isToolsMenuOpen(): boolean {
   return isOpen
 }
 
+/**
+ * Briefly pulse the Browse button to draw the user's attention.
+ * Called by main.ts after init on mobile (where the browse panel
+ * starts closed so the globe is visible) so first-time users notice
+ * where datasets live.
+ *
+ * The animation is a gentle halo that radiates outward for ~1.2s
+ * per cycle and runs two cycles total. Tapping the button cancels
+ * the animation immediately so the pulse doesn't keep drawing
+ * attention after the user has already engaged. Respects
+ * `prefers-reduced-motion` — users who've opted out see no
+ * animation, just the button in its normal state.
+ */
+export function pulseBrowseButton(): void {
+  if (typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    return
+  }
+  const btn = document.getElementById('tools-menu-browse')
+  if (!btn) return
+  btn.classList.add('pulse-attention')
+  const clearPulse = () => {
+    btn.classList.remove('pulse-attention')
+    btn.removeEventListener('click', clearPulse)
+  }
+  // Clear when the animation finishes naturally (2 cycles × 1.2s)
+  window.setTimeout(clearPulse, 2600)
+  // Or immediately if the user taps the button before it finishes
+  btn.addEventListener('click', clearPulse, { once: true })
+}
+
 /** Sync a toggle button's `.active` class + aria-pressed to a bool. */
 function setButtonState(btn: HTMLElement, active: boolean): void {
   btn.classList.toggle('active', active)

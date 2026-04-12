@@ -1508,6 +1508,34 @@
             outline-offset: 2px;
             box-shadow: 0 0 8px rgba(77, 166, 255, 0.4);
         }
+
+        /* Attention pulse — applied briefly to the Browse button
+           right after init so first-time mobile users notice where
+           datasets live. Two cycles of a radiating halo, then the
+           class is removed by pulseBrowseButton(). Skipped entirely
+           when the user prefers reduced motion. */
+        @keyframes tools-menu-pulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(77, 166, 255, 0.55);
+                border-color: rgba(77, 166, 255, 0.7);
+            }
+            70% {
+                box-shadow: 0 0 0 12px rgba(77, 166, 255, 0);
+                border-color: rgba(77, 166, 255, 0.7);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(77, 166, 255, 0);
+                border-color: rgba(255, 255, 255, 0.12);
+            }
+        }
+        .tools-menu-btn.pulse-attention {
+            animation: tools-menu-pulse 1.2s ease-out 2;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .tools-menu-btn.pulse-attention {
+                animation: none;
+            }
+        }
         .tools-menu-btn-icon {
             font-size: 0.95rem;
             line-height: 1;

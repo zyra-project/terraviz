@@ -17,7 +17,7 @@ import type { AppState, VideoTextureHandle, TourFile, Dataset } from './types'
 import { showBrowseUI, hideBrowseUI, collapseBrowseUI } from './ui/browseUI'
 import { initDownloadUI } from './ui/downloadUI'
 import { updateMapControlsPosition } from './ui/mapControlsUI'
-import { initToolsMenu, syncToolsMenuState } from './ui/toolsMenuUI'
+import { initToolsMenu, syncToolsMenuState, pulseBrowseButton } from './ui/toolsMenuUI'
 import { initChatUI, openChat, openChatSettings, notifyDatasetChanged, showChatTrigger, hideChatTrigger, closeChat, flushPendingGlobeActions } from './ui/chatUI'
 import { initHelpUI, setActiveDataset as setHelpActiveDataset } from './ui/helpUI'
 import {
@@ -185,7 +185,8 @@ class InteractiveSphere {
         showChatTrigger()
         // In multi-viewport mode, pre-render the browse panel in its
         // collapsed state so users can slide it open to load datasets
-        // into the remaining panels. In single-view mode we don't —
+        // into the remaining panels, and pulse the Browse button so
+        // they notice where to click. In single-view mode we don't —
         // the URL-specified dataset is the only thing the user wanted.
         if (this.viewports.getPanelCount() > 1) {
           showBrowseUI(this.appState.datasets, {
@@ -195,6 +196,7 @@ class InteractiveSphere {
             onOpenChat: (query) => this.openChatWithQuery(query),
           })
           collapseBrowseUI()
+          pulseBrowseButton()
         }
       } else {
         this.setLoadingStatus('Loading Earth textures\u2026', 20)
@@ -223,12 +225,22 @@ class InteractiveSphere {
         }
 
         this.setLoading(false)
+        // Render the browse panel (populates category filters and
+        // dataset cards) then decide whether to leave it visible.
+        // On mobile (≤768px) the panel is full-width and would hide
+        // the globe entirely — start closed on that breakpoint and
+        // pulse the Browse button briefly so users notice where
+        // datasets live. Desktop keeps the existing side-panel UX.
         showBrowseUI(this.appState.datasets, {
           onSelectDataset: (id) => this.selectDatasetFromBrowse(id),
           announce: (msg) => this.announce(msg),
           isMobile: this.isMobile,
           onOpenChat: (query) => this.openChatWithQuery(query),
         })
+        if (window.matchMedia('(max-width: 768px)').matches) {
+          hideBrowseUI()
+        }
+        pulseBrowseButton()
       }
     } catch (error) {
       this.setLoading(false)

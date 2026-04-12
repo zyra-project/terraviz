@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
  * ViewportManager that the menu talks to (getAll, getPrimary).
  */
 
-import { initToolsMenu, syncToolsMenuState, isToolsMenuOpen } from './toolsMenuUI'
+import { initToolsMenu, syncToolsMenuState, isToolsMenuOpen, pulseBrowseButton } from './toolsMenuUI'
 
 // ---------------------------------------------------------------------------
 // Minimal ViewportManager stand-in
@@ -352,6 +352,81 @@ describe('Tools menu callbacks', () => {
 
     ;(document.getElementById('tools-menu-clear') as HTMLButtonElement).click()
     expect(announce).toHaveBeenCalledWith('Markers and highlights cleared')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// pulseBrowseButton
+// ---------------------------------------------------------------------------
+
+describe('pulseBrowseButton', () => {
+  beforeEach(() => {
+    // Ensure matchMedia is stubbed so prefers-reduced-motion returns false
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })) as unknown as typeof window.matchMedia
+  })
+
+  it('adds the pulse-attention class to the Browse button', () => {
+    const vm = makeViewports(1)
+    initToolsMenu(vm as any)
+
+    pulseBrowseButton()
+    const btn = document.getElementById('tools-menu-browse')!
+    expect(btn.classList.contains('pulse-attention')).toBe(true)
+  })
+
+  it('removes the pulse class after the animation duration elapses', () => {
+    vi.useFakeTimers()
+    try {
+      const vm = makeViewports(1)
+      initToolsMenu(vm as any)
+      pulseBrowseButton()
+
+      const btn = document.getElementById('tools-menu-browse')!
+      expect(btn.classList.contains('pulse-attention')).toBe(true)
+
+      vi.advanceTimersByTime(3000)
+      expect(btn.classList.contains('pulse-attention')).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('cancels the pulse immediately when the user clicks the button', () => {
+    const vm = makeViewports(1)
+    initToolsMenu(vm as any)
+    pulseBrowseButton()
+
+    const btn = document.getElementById('tools-menu-browse') as HTMLButtonElement
+    expect(btn.classList.contains('pulse-attention')).toBe(true)
+
+    btn.click()
+    expect(btn.classList.contains('pulse-attention')).toBe(false)
+  })
+
+  it('skips the animation when prefers-reduced-motion is set', () => {
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: query === '(prefers-reduced-motion: reduce)',
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })) as unknown as typeof window.matchMedia
+
+    const vm = makeViewports(1)
+    initToolsMenu(vm as any)
+    pulseBrowseButton()
+
+    const btn = document.getElementById('tools-menu-browse')!
+    expect(btn.classList.contains('pulse-attention')).toBe(false)
+  })
+
+  it('is a no-op when the Browse button is not rendered', () => {
+    // Don't call initToolsMenu — button doesn't exist yet
+    expect(() => pulseBrowseButton()).not.toThrow()
   })
 })
 
