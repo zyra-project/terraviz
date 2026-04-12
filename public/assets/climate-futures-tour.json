@@ -1,0 +1,408 @@
+{
+  "_comment": "Climate Futures — Three Paths to 2100. A tour that highlights the multi-viewport setEnvView capability by showing SSP climate scenarios side-by-side. Exercises 1-globe, 2h, and 4-globe layouts with worldIndex routing, datasetID handles, and unloadDataset. All six SSP datasets used cover the same 2015-2100 window so they animate in temporal lockstep.",
+  "tourTasks": [
+    { "envShowDayNightLighting": "on" },
+    { "envShowClouds": "on" },
+    { "setGlobeRotationRate": 0.3 },
+
+    {"showRect": {
+      "rectID": "welcome",
+      "caption": "Climate Futures\\nThree Paths to 2100\\n\\n<i><color=green>The choices we make over the next decade will shape the planet our grandchildren inherit. This tour uses NOAA's climate models to compare three possible futures — side by side.</color></i>",
+      "captionPos": "center",
+      "fontSize": 22,
+      "fontColor": "white",
+      "isClosable": false,
+      "xPct": 50.0,
+      "yPct": 50.0,
+      "widthPct": 48.0,
+      "heightPct": 45.0,
+      "showBorder": false
+    }},
+    {"pauseForInput": ""},
+    {"hideRect": "welcome"},
+    {"setGlobeRotationRate": 0},
+
+    {"showRect": {
+      "rectID": "ssp-intro",
+      "caption": "Scientists use <i>Shared Socioeconomic Pathways</i> (SSPs) to describe how global choices about energy, economy, and environment could unfold this century. Each SSP is a plausible story of how the world might develop — and what the climate consequences look like.\\n\\n<color=green>We'll focus on three:\\n\\n<color=#4da6ff>SSP1</color>  — \"Sustainability\"\\n    Rapid shift to clean energy. Net-zero by mid-century.\\n\\n<color=#ffcc66>SSP2</color>  — \"Middle of the Road\"\\n    Historical patterns continue. Slow progress.\\n\\n<color=#ff6b4a>SSP5</color>  — \"Fossil-fueled Development\"\\n    Rapid economic growth powered by continued fossil fuel use.</color>",
+      "captionPos": "left",
+      "fontSize": 18,
+      "fontColor": "white",
+      "isClosable": false,
+      "xPct": 50.0,
+      "yPct": 50.0,
+      "widthPct": 55.0,
+      "heightPct": 62.0,
+      "showBorder": false
+    }},
+    {"pauseForInput": ""},
+    {"hideRect": "ssp-intro"},
+
+    {"envShowClouds": "off"},
+    {"envShowDayNightLighting": "off"},
+
+    {"showRect": {
+      "rectID": "baseline-intro",
+      "caption": "Let's start with the \"middle of the road\" scenario — <color=#ffcc66>SSP2</color>. This is roughly where current global policies are pointing us: slow, uneven progress on emissions reductions.\\n\\nWe're looking at projected <i>air temperature change</i> from 2015 to 2100, compared to the 20th century average. <color=green>Red means warmer than the baseline; blue means cooler.</color>",
+      "captionPos": "center",
+      "fontSize": 20,
+      "fontColor": "white",
+      "isClosable": true,
+      "xPct": 50.0,
+      "yPct": 18.0,
+      "widthPct": 60.0,
+      "heightPct": 28.0,
+      "showBorder": false
+    }},
+
+    {"loadDataset": {
+      "id": "INTERNAL_SOS_SSP_GA_45",
+      "datasetID": "ssp2-temp",
+      "worldIndex": 1,
+      "showLegend": true
+    }},
+    {"datasetAnimation": {
+      "animation": "on",
+      "frameRate": "5 fps"
+    }},
+
+    {"pauseForInput": ""},
+    {"hideRect": "baseline-intro"},
+
+    {"showRect": {
+      "rectID": "compare-intro",
+      "caption": "One scenario is hard to interpret alone — is a 2°C warmer world good, bad, or just different? The value comes from <i>comparison</i>.\\n\\nLet's put <color=#4da6ff>SSP1</color> and <color=#ff6b4a>SSP5</color> side by side: the cleanest path vs. the most fossil-fuel-heavy. Watch how the two futures diverge as the decades tick by.",
+      "captionPos": "center",
+      "fontSize": 20,
+      "fontColor": "white",
+      "isClosable": true,
+      "xPct": 50.0,
+      "yPct": 50.0,
+      "widthPct": 55.0,
+      "heightPct": 35.0,
+      "showBorder": false
+    }},
+    {"pauseForInput": ""},
+    {"hideRect": "compare-intro"},
+
+    {"unloadDataset": "ssp2-temp"},
+    {"setEnvView": "2globes"},
+
+    {"loadDataset": {
+      "id": "INTERNAL_SOS_SSP_GA_19",
+      "datasetID": "ssp1-temp",
+      "worldIndex": 1,
+      "showLegend": true
+    }},
+    {"loadDataset": {
+      "id": "INTERNAL_SOS_SSP_GA_85",
+      "datasetID": "ssp5-temp",
+      "worldIndex": 2,
+      "showLegend": true
+    }},
+    {"datasetAnimation": {
+      "animation": "on",
+      "frameRate": "5 fps"
+    }},
+
+    {"showRect": {
+      "rectID": "compare-label-left",
+      "caption": "<color=#4da6ff>SSP1 — Sustainability</color>\\nNet-zero by 2050",
+      "captionPos": "center",
+      "fontSize": 18,
+      "fontColor": "white",
+      "isClosable": false,
+      "xPct": 25.0,
+      "yPct": 12.0,
+      "widthPct": 30.0,
+      "heightPct": 14.0,
+      "showBorder": false
+    }},
+    {"showRect": {
+      "rectID": "compare-label-right",
+      "caption": "<color=#ff6b4a>SSP5 — Fossil-fueled</color>\\nGrowth above mitigation",
+      "captionPos": "center",
+      "fontSize": 18,
+      "fontColor": "white",
+      "isClosable": false,
+      "xPct": 75.0,
+      "yPct": 12.0,
+      "widthPct": 30.0,
+      "heightPct": 14.0,
+      "showBorder": false
+    }},
+
+    {"pauseForInput": ""},
+
+    {"showRect": {
+      "rectID": "compare-takeaway",
+      "caption": "By 2100 the left globe ends up around <color=#4da6ff>+1.5°C</color> above the 20th century baseline. The right globe is pushing <color=#ff6b4a>+4°C or more</color> in some regions — and notice how the warming is uneven. Continents warm faster than oceans. The Arctic warms faster than anywhere else.\\n\\n<i><color=green>That difference — 1.5°C vs 4°C — may sound small. It's the difference between coral reefs surviving and not. It's the difference between a few centimeters of sea level rise and a few meters.</color></i>",
+      "captionPos": "center",
+      "fontSize": 19,
+      "fontColor": "white",
+      "isClosable": true,
+      "xPct": 50.0,
+      "yPct": 50.0,
+      "widthPct": 62.0,
+      "heightPct": 45.0,
+      "showBorder": false
+    }},
+    {"pauseForInput": ""},
+    {"hideRect": "compare-takeaway"},
+    {"hideRect": "compare-label-left"},
+    {"hideRect": "compare-label-right"},
+
+    {"showRect": {
+      "rectID": "four-intro",
+      "caption": "Now let's add the middle path and a <i>consequence</i>. We'll show all three temperature scenarios at once, plus one cascading effect: Arctic sea ice loss under the high-emissions path.",
+      "captionPos": "center",
+      "fontSize": 20,
+      "fontColor": "white",
+      "isClosable": true,
+      "xPct": 50.0,
+      "yPct": 50.0,
+      "widthPct": 55.0,
+      "heightPct": 28.0,
+      "showBorder": false
+    }},
+    {"pauseForInput": ""},
+    {"hideRect": "four-intro"},
+
+    {"unloadDataset": "ssp1-temp"},
+    {"unloadDataset": "ssp5-temp"},
+    {"setEnvView": "4globes"},
+
+    {"loadDataset": {
+      "id": "INTERNAL_SOS_SSP_GA_19",
+      "datasetID": "p1-ssp1",
+      "worldIndex": 1,
+      "showLegend": true
+    }},
+    {"loadDataset": {
+      "id": "INTERNAL_SOS_SSP_GA_45",
+      "datasetID": "p2-ssp2",
+      "worldIndex": 2,
+      "showLegend": true
+    }},
+    {"loadDataset": {
+      "id": "INTERNAL_SOS_SSP_GA_85",
+      "datasetID": "p3-ssp5",
+      "worldIndex": 3,
+      "showLegend": true
+    }},
+    {"loadDataset": {
+      "id": "INTERNAL_SOS_SSP_GI_85",
+      "datasetID": "p4-ice",
+      "worldIndex": 4,
+      "showLegend": true
+    }},
+    {"datasetAnimation": {
+      "animation": "on",
+      "frameRate": "5 fps"
+    }},
+
+    {"showRect": {
+      "rectID": "four-legend",
+      "caption": "<color=#4da6ff>Top-left</color>  SSP1 air temperature\\n<color=#ffcc66>Top-right</color>  SSP2 air temperature\\n<color=#ff6b4a>Bottom-left</color>  SSP5 air temperature\\n<color=#ff6b4a>Bottom-right</color>  SSP5 sea ice concentration",
+      "captionPos": "left",
+      "fontSize": 16,
+      "fontColor": "white",
+      "isClosable": false,
+      "xPct": 50.0,
+      "yPct": 50.0,
+      "widthPct": 36.0,
+      "heightPct": 30.0,
+      "showBorder": false
+    }},
+    {"pauseForInput": ""},
+    {"hideRect": "four-legend"},
+
+    {"showRect": {
+      "rectID": "four-observe",
+      "caption": "Watch the three temperature globes diverge as the century runs. Then look at the bottom-right: the Arctic Ocean in SSP5 becomes <i>ice-free in summer</i> well before 2100.\\n\\n<color=green>This is what \"cascading\" means in climate science. Warm air melts sea ice. Melted ice reveals dark ocean. Dark ocean absorbs more sunlight. That warms the air further. The system amplifies itself.</color>",
+      "captionPos": "center",
+      "fontSize": 18,
+      "fontColor": "white",
+      "isClosable": true,
+      "xPct": 50.0,
+      "yPct": 50.0,
+      "widthPct": 56.0,
+      "heightPct": 40.0,
+      "showBorder": false
+    }},
+    {"pauseForInput": ""},
+    {"hideRect": "four-observe"},
+
+    {"showRect": {
+      "rectID": "variables-intro",
+      "caption": "Temperature is only one variable. Climate models track dozens of them, all coupled together. Let's swap to four different views of the <color=#ff6b4a>same SSP5 scenario</color>, so you can see how the high-emissions future touches every piece of the system.",
+      "captionPos": "center",
+      "fontSize": 19,
+      "fontColor": "white",
+      "isClosable": true,
+      "xPct": 50.0,
+      "yPct": 50.0,
+      "widthPct": 55.0,
+      "heightPct": 30.0,
+      "showBorder": false
+    }},
+    {"pauseForInput": ""},
+    {"hideRect": "variables-intro"},
+
+    {"unloadDataset": "p1-ssp1"},
+    {"unloadDataset": "p2-ssp2"},
+    {"unloadDataset": "p3-ssp5"},
+    {"unloadDataset": "p4-ice"},
+
+    {"loadDataset": {
+      "id": "INTERNAL_SOS_SSP_GA_85",
+      "datasetID": "v1-temp",
+      "worldIndex": 1,
+      "showLegend": true
+    }},
+    {"loadDataset": {
+      "id": "INTERNAL_SOS_SSP_GP_85",
+      "datasetID": "v2-precip",
+      "worldIndex": 2,
+      "showLegend": true
+    }},
+    {"loadDataset": {
+      "id": "INTERNAL_SOS_SSP_GS_85",
+      "datasetID": "v3-sst",
+      "worldIndex": 3,
+      "showLegend": true
+    }},
+    {"loadDataset": {
+      "id": "INTERNAL_SOS_SSP_GI_85",
+      "datasetID": "v4-ice",
+      "worldIndex": 4,
+      "showLegend": true
+    }},
+    {"datasetAnimation": {
+      "animation": "on",
+      "frameRate": "5 fps"
+    }},
+
+    {"showRect": {
+      "rectID": "variables-label",
+      "caption": "<color=#ff6b4a>The SSP5 future, four ways:</color>\\n\\n<color=white>Top-left</color>  Air temperature\\n<color=white>Top-right</color>  Precipitation change\\n<color=white>Bottom-left</color>  Sea surface temperature\\n<color=white>Bottom-right</color>  Sea ice concentration",
+      "captionPos": "left",
+      "fontSize": 16,
+      "fontColor": "white",
+      "isClosable": false,
+      "xPct": 50.0,
+      "yPct": 50.0,
+      "widthPct": 36.0,
+      "heightPct": 32.0,
+      "showBorder": false
+    }},
+    {"pauseForInput": ""},
+    {"hideRect": "variables-label"},
+
+    {"showRect": {
+      "rectID": "variables-observe",
+      "caption": "<i>They're not independent variables.</i> A warmer atmosphere holds more moisture, so precipitation patterns shift. Warmer oceans mean less dissolved oxygen and more powerful hurricanes. Melting sea ice changes ocean circulation, which changes where rain falls on land.\\n\\n<color=green>Every one of these panels is responding to the same underlying driver: how much carbon we put into the atmosphere.</color>",
+      "captionPos": "center",
+      "fontSize": 18,
+      "fontColor": "white",
+      "isClosable": true,
+      "xPct": 50.0,
+      "yPct": 50.0,
+      "widthPct": 56.0,
+      "heightPct": 42.0,
+      "showBorder": false
+    }},
+    {"pauseForInput": ""},
+    {"hideRect": "variables-observe"},
+
+    {"showRect": {
+      "rectID": "hopeful-intro",
+      "caption": "So what does the <color=#4da6ff>SSP1</color> future look like across those same four variables? Let's find out.",
+      "captionPos": "center",
+      "fontSize": 22,
+      "fontColor": "white",
+      "isClosable": true,
+      "xPct": 50.0,
+      "yPct": 50.0,
+      "widthPct": 50.0,
+      "heightPct": 20.0,
+      "showBorder": false
+    }},
+    {"pauseForInput": ""},
+    {"hideRect": "hopeful-intro"},
+
+    {"unloadDataset": "v1-temp"},
+    {"unloadDataset": "v2-precip"},
+    {"unloadDataset": "v3-sst"},
+    {"unloadDataset": "v4-ice"},
+
+    {"loadDataset": {
+      "id": "INTERNAL_SOS_SSP_GA_19",
+      "datasetID": "h1-temp",
+      "worldIndex": 1,
+      "showLegend": true
+    }},
+    {"loadDataset": {
+      "id": "INTERNAL_SOS_SSP_GP_19",
+      "datasetID": "h2-precip",
+      "worldIndex": 2,
+      "showLegend": true
+    }},
+    {"loadDataset": {
+      "id": "INTERNAL_SOS_SSP_GS_19",
+      "datasetID": "h3-sst",
+      "worldIndex": 3,
+      "showLegend": true
+    }},
+    {"loadDataset": {
+      "id": "INTERNAL_SOS_SSP_GI_19",
+      "datasetID": "h4-ice",
+      "worldIndex": 4,
+      "showLegend": true
+    }},
+    {"datasetAnimation": {
+      "animation": "on",
+      "frameRate": "5 fps"
+    }},
+
+    {"showRect": {
+      "rectID": "hopeful-observe",
+      "caption": "Compare this to the scene we just watched. Same four variables. Same time window. <color=#4da6ff>Radically different outcomes.</color>\\n\\nTemperatures stabilize around +1.5°C. Precipitation patterns shift less. Oceans warm less. The Arctic retains its summer sea ice.\\n\\n<i><color=green>This isn't a utopia — the 2100 SSP1 world is still meaningfully warmer than today. But the difference between these two futures, across every variable, is enormous. And the choice between them is still being made, right now, by the decisions of this decade.</color></i>",
+      "captionPos": "center",
+      "fontSize": 18,
+      "fontColor": "white",
+      "isClosable": true,
+      "xPct": 50.0,
+      "yPct": 50.0,
+      "widthPct": 58.0,
+      "heightPct": 50.0,
+      "showBorder": false
+    }},
+    {"pauseForInput": ""},
+    {"hideRect": "hopeful-observe"},
+
+    {"unloadAllDatasets": ""},
+    {"setEnvView": "1globe"},
+
+    {"envShowDayNightLighting": "on"},
+    {"envShowClouds": "on"},
+    {"setGlobeRotationRate": 0.25},
+
+    {"showRect": {
+      "rectID": "closing",
+      "caption": "Climate Futures\\n\\n<i><color=green>These models aren't predictions — they're projections. They answer the question: <color=white>\\\"If the world follows this path, what happens?\\\"</color> The paths themselves are chosen by human decisions.\\n\\nEvery year we don't decarbonize nudges us closer to the right-hand globes. Every year we do, toward the left-hand ones.</color></i>\\n\\n<color=#4da6ff>Data source: NOAA GFDL climate models via Science On a Sphere. SSP framework: Riahi et al, 2017.</color>",
+      "captionPos": "center",
+      "fontSize": 18,
+      "fontColor": "white",
+      "isClosable": false,
+      "xPct": 50.0,
+      "yPct": 50.0,
+      "widthPct": 55.0,
+      "heightPct": 55.0,
+      "showBorder": false
+    }},
+    {"pauseForInput": ""},
+    {"hideRect": "closing"},
+    {"setGlobeRotationRate": 0}
+  ]
+}

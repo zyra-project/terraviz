@@ -87,6 +87,19 @@ export class DataService {
         weight: 50,
         thumbnailLink: '',
       })
+      // Built-in Climate Futures tour — showcases the multi-globe
+      // setEnvView capability with SSP1/SSP2/SSP5 scenarios.
+      rawDatasets.push({
+        id: 'SAMPLE_TOUR_CLIMATE_FUTURES',
+        title: 'Climate Futures — Three Paths to 2100',
+        format: 'tour/json' as const,
+        dataLink: '/assets/climate-futures-tour.json',
+        organization: 'Interactive Sphere',
+        abstractTxt: 'Compare three possible climate futures side by side using NOAA\'s SSP scenario models. Single-globe, two-globe, and four-globe layouts walk through air temperature, precipitation, sea surface temperature, and sea ice concentration across the SSP1 (Sustainability), SSP2 (Middle of the Road), and SSP5 (Fossil-fueled Development) pathways from 2015 to 2100.',
+        tags: ['Tours'],
+        weight: 49,
+        thumbnailLink: '',
+      })
 
       // Filter, sort, and enrich datasets
       const datasets = rawDatasets
