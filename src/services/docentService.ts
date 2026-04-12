@@ -826,6 +826,10 @@ export async function* processMessage(
       const conversationMessages: LLMMessage[] = [...llmMessages]
       let attemptErrored = false
       let round = 0
+      // Track all datasets returned by search_catalog across rounds in this
+      // attempt so we can auto-inject Load buttons for any the LLM mentions
+      // by title but forgets to tag with <<LOAD:...>> markers.
+      const searchResultsThisAttempt: CatalogSearchResult[] = []
 
       try {
         toolLoop: while (round < MAX_TOOL_CALL_ROUNDS) {
@@ -1018,6 +1022,7 @@ export async function* processMessage(
 
           for (const call of pendingSearchCalls) {
             const results = executeSearchCatalog(call.arguments, datasets)
+            searchResultsThisAttempt.push(...results)
             logger.info(`[Docent] search_catalog("${String(call.arguments.query ?? '')}") → ${results.length} result(s)`)
             conversationMessages.push({
               role: 'tool',
@@ -1033,6 +1038,32 @@ export async function* processMessage(
 
         if (!attemptErrored && llmProducedText) {
           yield* emitValidatedActions(accumulatedText, datasets, yieldedIds)
+
+          // Safety net: if the LLM mentioned dataset titles from search_catalog
+          // results in its prose but didn't emit <<LOAD:...>> markers for them,
+          // auto-inject Load buttons. This catches the common failure mode where
+          // the model writes "Sea Level Rise: This dataset..." without the
+          // corresponding marker — the user sees the name but has no button.
+          if (searchResultsThisAttempt.length > 0) {
+            const lowerText = accumulatedText.toLowerCase()
+            for (const sr of searchResultsThisAttempt) {
+              if (yieldedIds.has(sr.id)) continue
+              // Check if the dataset title appears in the prose
+              if (lowerText.includes(sr.title.toLowerCase())) {
+                yieldedIds.add(sr.id)
+                logger.info(`[Docent] Auto-injecting Load button for "${sr.title}" (${sr.id}) — title found in prose but no marker emitted`)
+                yield {
+                  type: 'action',
+                  action: {
+                    type: 'load-dataset',
+                    datasetId: sr.id,
+                    datasetTitle: sr.title,
+                  },
+                }
+              }
+            }
+          }
+
           yield { type: 'done', fallback: false, llmContext }
           return
         }
