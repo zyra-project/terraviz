@@ -149,7 +149,6 @@ export function initToolsMenu(
 
   const browseBtn = document.getElementById('tools-menu-browse') as HTMLButtonElement
   const toggleBtn = document.getElementById('tools-menu-toggle') as HTMLButtonElement
-  const popover = document.getElementById('tools-menu-popover') as HTMLDivElement
   const closeBtn = document.getElementById('tools-menu-close') as HTMLButtonElement
 
   browseBtn.addEventListener('click', (ev) => {

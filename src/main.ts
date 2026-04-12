@@ -730,16 +730,6 @@ class InteractiveSphere {
   }
 
   /**
-   * Decide how to dismiss the browse panel after a dataset loads.
-   *
-   * - Single-viewport mode: full hide — the user has picked their
-   *   dataset and wants an unobstructed view of it. Home button
-   *   brings it back.
-   * - Multi-viewport mode: collapse only — leaves the toggle tab at
-   *   the right edge so the user can slide the panel back in to pick
-   *   datasets for the remaining panels without going through home.
-   */
-  /**
    * Toggle dataset info panel visibility. Persists the choice and
    * updates the DOM immediately. When the info panel is the only
    * place showing the legend (single-view with legend prefs on), the
