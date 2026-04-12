@@ -813,21 +813,10 @@ export async function* processMessage(
       .split(/\s+/)
       .filter(w => w.length > 1 && !PRE_SEARCH_STOP_WORDS.has(w.toLowerCase()))
       .join(' ')
-    const preSearchResults = searchDatasets(datasets, preSearchQuery || input, 5)
-    const preSearchCatalogResults: CatalogSearchResult[] = preSearchResults.map(({ dataset: d }) => {
-      const desc = d.enriched?.description ?? d.abstractTxt ?? ''
-      const shortDesc = desc.length > SEARCH_CATALOG_DESC_LEN
-        ? desc.slice(0, SEARCH_CATALOG_DESC_LEN).trim() + '…'
-        : desc
-      const result: CatalogSearchResult = {
-        id: d.id,
-        title: d.title,
-        categories: Object.keys(d.enriched?.categories ?? {}),
-        description: shortDesc,
-      }
-      if (d.format === 'tour/json') result.isTour = true
-      return result
-    })
+    const preSearchCatalogResults = executeSearchCatalog(
+      { query: preSearchQuery || input, limit: 5 },
+      datasets,
+    )
 
     let preSearchContext = ''
     if (preSearchCatalogResults.length > 0) {

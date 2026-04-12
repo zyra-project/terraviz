@@ -255,7 +255,38 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     // plain-text no-tools no-images case so the common path still gets
     // token-by-token streaming UX.
     if (hasTools || (hasImages && isNativeMultimodal)) {
-      return await toolStreamShim(context.env.AI, cfModel, truncated, body.tools, cors)
+      if (body.stream) {
+        return await toolStreamShim(context.env.AI, cfModel, truncated, body.tools, cors)
+      }
+      // Non-streaming: pass messages through with tools, return standard JSON
+      const wfMessages = truncated.map(m => {
+        const out: Record<string, unknown> = { role: m.role, content: m.content }
+        const anyM = m as unknown as Record<string, unknown>
+        if (anyM.tool_calls) out.tool_calls = anyM.tool_calls
+        if (anyM.tool_call_id) out.tool_call_id = anyM.tool_call_id
+        return out
+      })
+      const inputs: Record<string, unknown> = { messages: wfMessages, max_tokens: DEFAULT_MAX_TOKENS }
+      if (body.tools?.length) inputs.tools = body.tools
+      const result = (await context.env.AI.run(cfModel, inputs)) as { response?: string; tool_calls?: unknown[] }
+      const payload = {
+        id: `chatcmpl-${Date.now()}`,
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model: cfModel,
+        choices: [{
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: result.response ?? '',
+            ...(result.tool_calls?.length ? { tool_calls: result.tool_calls } : {}),
+          },
+          finish_reason: result.tool_calls?.length ? 'tool_calls' : 'stop',
+        }],
+      }
+      return new Response(JSON.stringify(payload), {
+        headers: { ...cors, 'Content-Type': 'application/json' },
+      })
     }
 
     // Plain text, no tools, no images: real streaming path (unchanged)

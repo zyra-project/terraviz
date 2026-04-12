@@ -281,7 +281,7 @@ export type ReadingLevel = 'young-learner' | 'general' | 'in-depth' | 'expert'
 export interface DocentConfig {
   apiUrl: string         // default: '/api'
   apiKey: string         // default: '' (empty = no auth, for Ollama)
-  model: string          // default: 'llama-4-scout'
+  model: string          // default: 'llama-3.1-70b'
   enabled: boolean       // default: true
   readingLevel: ReadingLevel  // default: 'general'
   visionEnabled: boolean // default: false — captures globe screenshot as context

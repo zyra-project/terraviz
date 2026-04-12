@@ -277,7 +277,7 @@ export async function* streamChat(
                 toolCallAccum.set(idx, { id: `call_synth_${nextSyntheticId++}`, name: '', args: '' })
               }
               const accum = toolCallAccum.get(idx)!
-              if (tc.id && !accum.id) accum.id = tc.id
+              if (tc.id && accum.id.startsWith('call_synth_')) accum.id = tc.id
               if (tc.function?.name && !accum.name) accum.name = tc.function.name
               if (tc.function?.arguments) accum.args += tc.function.arguments
             }
