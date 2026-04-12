@@ -795,7 +795,25 @@ export async function* processMessage(
     // regardless of function-calling support. The `search_catalog` tool is
     // kept as an optional upgrade path for models that can use it to refine
     // or do follow-up searches.
-    const preSearchResults = searchDatasets(datasets, input, 5)
+    //
+    // Strip punctuation and common question/stop words so the scoring in
+    // searchDatasets isn't diluted. "What datasets show sea level rise?" →
+    // search query "sea level rise", which scores well against real titles.
+    const PRE_SEARCH_STOP_WORDS = new Set([
+      'what', 'which', 'show', 'me', 'about', 'tell', 'the', 'a', 'an',
+      'is', 'are', 'do', 'does', 'did', 'can', 'how', 'where', 'when',
+      'why', 'i', 'my', 'your', 'you', 'we', 'us', 'it', 'its', 'of',
+      'in', 'on', 'for', 'to', 'and', 'or', 'with', 'this', 'that',
+      'some', 'any', 'have', 'has', 'there', 'here', 'please', 'thanks',
+      'datasets', 'dataset', 'data', 'find', 'search', 'look', 'give',
+      'want', 'like', 'need', 'related', 'something', 'anything',
+    ])
+    const preSearchQuery = input
+      .replace(/[?!.,;:'"()[\]{}]/g, '')
+      .split(/\s+/)
+      .filter(w => w.length > 1 && !PRE_SEARCH_STOP_WORDS.has(w.toLowerCase()))
+      .join(' ')
+    const preSearchResults = searchDatasets(datasets, preSearchQuery || input, 5)
     const preSearchCatalogResults: CatalogSearchResult[] = preSearchResults.map(({ dataset: d }) => {
       const desc = d.enriched?.description ?? d.abstractTxt ?? ''
       const shortDesc = desc.length > SEARCH_CATALOG_DESC_LEN
@@ -1095,8 +1113,19 @@ export async function* processMessage(
             const lowerText = accumulatedText.toLowerCase()
             for (const sr of searchResultsThisAttempt) {
               if (yieldedIds.has(sr.id)) continue
-              // Check if the dataset title appears in the prose
-              if (lowerText.includes(sr.title.toLowerCase())) {
+              // Check if the dataset title appears in the prose. Use
+              // bidirectional matching: the model might write a shortened
+              // version of the title ("Sea Level Rise" vs catalog's "Sea
+              // Level Rise: Global Sea Level Change"), or a lengthened
+              // version ("Sea Level Rise 1993-2020" vs catalog's "Sea
+              // Level Rise"). Also check the first segment before a colon
+              // or dash separator as a common truncation point.
+              const titleLower = sr.title.toLowerCase()
+              const titleShort = titleLower.split(/[:\-—]/)[0].trim()
+              if (
+                lowerText.includes(titleLower) ||
+                (titleShort.length >= 8 && lowerText.includes(titleShort))
+              ) {
                 yieldedIds.add(sr.id)
                 logger.info(`[Docent] Auto-injecting Load button for "${sr.title}" (${sr.id}) — title found in prose but no marker emitted`)
                 yield {
