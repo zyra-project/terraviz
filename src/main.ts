@@ -1184,9 +1184,9 @@ class InteractiveSphere {
       // mid-style-load when this fires. MapLibre queues layer
       // operations internally until the style is ready, so
       // dispatching the toggle now is safe.
-      const labelsActive = document.getElementById('map-ctrl-labels')?.classList.contains('active') ?? false
-      const bordersActive = document.getElementById('map-ctrl-borders')?.classList.contains('active') ?? false
-      const terrainActive = document.getElementById('map-ctrl-terrain')?.classList.contains('active') ?? false
+      const labelsActive = document.getElementById('tools-menu-labels')?.classList.contains('active') ?? false
+      const bordersActive = document.getElementById('tools-menu-borders')?.classList.contains('active') ?? false
+      const terrainActive = document.getElementById('tools-menu-terrain')?.classList.contains('active') ?? false
       for (let i = oldCount; i < newCount; i++) {
         const newRenderer = this.viewports.getRendererAt(i)
         if (!newRenderer) continue
