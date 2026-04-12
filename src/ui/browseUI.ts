@@ -53,6 +53,18 @@ export function showBrowseUI(datasets: Dataset[], callbacks: BrowseCallbacks): v
     helpBtn.dataset.wired = 'true'
   }
 
+  // Wire the in-header close button once (idempotent). Always fully
+  // hides the overlay — the Tools menu's Browse button re-opens it.
+  const closeBtn = document.getElementById('browse-close')
+  if (closeBtn && !closeBtn.dataset.wired) {
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation()
+      hideBrowseUI()
+      callbacks.announce('Dataset browser closed')
+    })
+    closeBtn.dataset.wired = 'true'
+  }
+
   const visible = datasets
     .filter(d => !d.isHidden)
     .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0) || a.title.localeCompare(b.title))
@@ -433,9 +445,23 @@ export function showBrowseUI(datasets: Dataset[], callbacks: BrowseCallbacks): v
   updateDownloadButtons()
 }
 
-/** Hide the browse overlay. */
+/** Hide the browse overlay entirely (aside becomes `display: none`). */
 export function hideBrowseUI(): void {
   const overlay = document.getElementById('browse-overlay')
   overlay?.classList.add('hidden')
+  document.body.classList.remove('browse-open')
+}
+
+/**
+ * Collapse the browse overlay while keeping it rendered so it can be
+ * restored later by removing the `.collapsed` class. Use this in
+ * multi-view mode where the user needs to come back to the browse
+ * panel repeatedly to load datasets into additional panels.
+ */
+export function collapseBrowseUI(): void {
+  const overlay = document.getElementById('browse-overlay')
+  if (!overlay) return
+  overlay.classList.remove('hidden')
+  overlay.classList.add('collapsed')
   document.body.classList.remove('browse-open')
 }

@@ -351,6 +351,13 @@ export type TourTaskDef =
   | { hidePopupHtml: string }
   | { addPlacemark: AddPlacemarkTaskParams }
   | { hidePlacemark: string }
+  | { setEnvView: string }
+  /**
+   * Unload a specific dataset by its local tour handle (the
+   * `datasetID` field on the loadDataset task that introduced it).
+   * Distinct from `unloadAllDatasets`, which wipes every panel.
+   */
+  | { unloadDataset: string }
 
 export interface FlyToTaskParams {
   lat: number
@@ -375,7 +382,23 @@ export interface ShowRectTaskParams {
 }
 
 export interface LoadDatasetTaskParams {
+  /** Catalog dataset ID (e.g. `ID_OMGMDNKQFG`). */
   id: string
+  /**
+   * Local handle the tour uses to refer back to this loaded dataset
+   * in later tasks — typically `unloadDataset`. Scoped to the tour
+   * run, not the catalog. Example: `"dataset3"`. Optional; the tour
+   * engine maintains a `handle → slot` map keyed on this.
+   */
+  datasetID?: string
+  /**
+   * 1-indexed target globe (panel slot). `1` = first globe, `2` =
+   * second globe, etc. Translated to a 0-indexed `slot` when routing
+   * to ViewportManager. Defaults to `1` (the first globe) if omitted
+   * or out of range; out-of-range values are clamped to the last
+   * active panel with a warning.
+   */
+  worldIndex?: number
   /** Additional SOS fields passed through but not required for the web player */
   [key: string]: unknown
 }
@@ -466,11 +489,41 @@ export interface AddPlacemarkTaskParams {
 /** Playback state of the tour engine */
 export type TourState = 'stopped' | 'playing' | 'paused'
 
+/**
+ * Internal layout identifier used by the tour callbacks. Mirrors
+ * `src/services/viewportManager.ts`'s `ViewLayout` — the duplication
+ * keeps the types module free of a direct service-layer import.
+ */
+export type TourViewLayout = '1' | '2h' | '2v' | '4'
+
 /** Callbacks the tour engine uses to drive the app — avoids circular imports */
 export interface TourCallbacks {
-  loadDataset(id: string): Promise<void>
+  /**
+   * Load a dataset, optionally into a specific panel slot. The `slot`
+   * parameter is 0-indexed; when omitted, the tour engine targets
+   * whichever panel is currently primary (matching the existing
+   * single-viewport semantics).
+   */
+  loadDataset(id: string, opts?: { slot?: number }): Promise<void>
   unloadAllDatasets(): Promise<void>
+  /**
+   * Unload the dataset in a specific slot without touching any
+   * others. Used by the tour engine's `unloadDataset` task after
+   * resolving a local `datasetID` handle → slot.
+   */
+  unloadDatasetAt(slot: number): Promise<void>
+  /**
+   * Switch the multi-viewport layout. Called by the tour engine's
+   * `setEnvView` task after parsing the legacy view-name string.
+   */
+  setEnvView(opts: { layout: TourViewLayout }): Promise<void>
   getRenderer(): GlobeRenderer
+  /**
+   * Get every active renderer (one per viewport panel). Used by
+   * environment executors (day/night, clouds, borders) that need
+   * to fan out across all panels, not just the primary.
+   */
+  getAllRenderers(): GlobeRenderer[]
   togglePlayPause(): void
   isPlaying(): boolean
   setPlaybackRate(rate: number): void

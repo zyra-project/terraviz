@@ -18,6 +18,8 @@ A WebGL-based globe that streams environmental data from the [Science On a Spher
 - HLS video streaming via Vimeo proxy with adaptive bitrate, playback controls, and audio
 - Time synchronization with ISO 8601 parsing and scrubber
 - **Orbit** — an AI digital docent that answers questions, explains datasets, and loads them onto the globe by conversation (hybrid LLM + local keyword engine, configurable to any OpenAI-compatible provider)
+- **Multi-globe comparison** — View 2 or 4 synchronised globes side-by-side, each showing a different dataset. Camera motion locks across panels; time-series animations sync by real-world date. Switch layouts from the Tools menu.
+- **Climate Futures tour** — A built-in guided tour comparing SSP1/SSP2/SSP5 climate scenarios across air temperature, precipitation, sea surface temperature, and sea ice concentration using 1, 2, and 4-globe layouts.
 - Collapsible browse panel (desktop sidebar with toggle)
 - Accessible controls (ARIA labels, keyboard navigation)
 - Frosted-glass UI design language (see [STYLE_GUIDE.md](STYLE_GUIDE.md))
@@ -48,6 +50,8 @@ The app is a single-page application built with TypeScript, MapLibre GL JS, and 
 **`hlsService.ts`** manages video streaming. It fetches a manifest from the Vimeo proxy, sets up HLS.js with adaptive bitrate selection, and falls back to direct MP4 if HLS fails. It also detects whether the stream has an audio track.
 
 **`browseUI.ts`** builds the dataset browser panel — the search box, category chips, sub-category filters, sorting, and the scrollable list of expandable dataset cards. When a user selects a dataset, it calls back to `main.ts` to load it.
+
+A collapsible **Tools** menu (wrench icon) provides access to map overlays (labels, borders, terrain), globe layout selection, dataset info/legend toggles, and Orbit AI settings — all in one place.
 
 **`playbackController.ts`** manages video playback state: play/pause toggling, frame stepping, scrubber synchronization, and closed caption loading.
 

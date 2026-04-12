@@ -12,13 +12,14 @@ import { logger } from '../utils/logger'
 import { getCloudTextureUrl } from '../utils/deviceCapability'
 import { getSunPosition } from '../utils/time'
 import type {
-  TourFile, TourTaskDef, TourState, TourCallbacks,
+  TourFile, TourTaskDef, TourState, TourCallbacks, TourViewLayout,
+  LoadDatasetTaskParams,
   FlyToTaskParams, ShowRectTaskParams, DatasetAnimationTaskParams,
   TiltRotateCameraTaskParams, QuestionTaskParams,
   PlayAudioTaskParams, PlayVideoTaskParams, ShowImageTaskParams,
   ShowPopupHtmlTaskParams, AddPlacemarkTaskParams,
 } from '../types'
-import { syncMapControlState } from '../ui/mapControlsUI'
+import { syncToolsMenuState } from '../ui/toolsMenuUI'
 import {
   showTourTextBox, hideTourTextBox, hideAllTourTextBoxes, updateTourProgress,
   showTourImage, hideTourImage, hideAllTourImages,
@@ -32,6 +33,46 @@ import {
 
 // Miles → kilometres
 const MI_TO_KM = 1.60934
+
+/**
+ * Parse a legacy SOS `setEnvView` view-name string into an internal
+ * {@link TourViewLayout}. Case-insensitive; tolerates whitespace.
+ *
+ * Verified legacy values (from a reference tour):
+ *   `1globe`   → single globe
+ *   `2globes`  → two globes
+ *   `4globes`  → four globes (inferred by extrapolation, not yet
+ *               seen in a reference tour — safe to guess)
+ *
+ * Legacy flat-map names (`FLAT`, `FLAT_1`, etc.) all collapse to
+ * single-globe because MapLibre doesn't offer an equal-area
+ * projection that's usable for polar Earth-science data. See
+ * docs/SETVIEW_IMPLEMENTATION_PLAN.md for the rationale.
+ *
+ * Returns `null` for unknown values so the caller can log + default.
+ */
+export function parseSetEnvView(raw: string): TourViewLayout | null {
+  const v = raw.trim().toLowerCase()
+  switch (v) {
+    case '1globe':
+    case 'globe':
+    case 'sphere':
+      return '1'
+    case '2globes':
+      return '2h'
+    case '4globes':
+      return '4'
+    case 'flat':
+    case 'flat_1':
+    case 'flat_2':
+    case 'flat_4':
+      // Legacy single flat map (and its variants). No true flat
+      // projection available — fall back to single-globe.
+      return '1'
+    default:
+      return null
+  }
+}
 
 // SOS altitude values are camera-distance parameters for the Unity renderer,
 // not true orbital altitudes. They need to be scaled down to produce
@@ -77,6 +118,24 @@ export class TourEngine {
   // Set to true when the tour calls setGlobeRotationRate, so cleanup can
   // reset rotation and avoid leaving the globe spinning after the tour ends.
   private rotationRateModified = false
+
+  /**
+   * Per-run map from local `datasetID` handle → the panel slot the
+   * tour loaded that dataset into. Populated by `loadDataset` tasks
+   * that supply a `datasetID`, consumed by `unloadDataset` to find
+   * which slot to clear. Cleared on `unloadAllDatasets`.
+   *
+   * Scoped per TourEngine instance — a fresh tour run starts with
+   * an empty map.
+   */
+  private datasetHandleMap = new Map<string, number>()
+
+  /**
+   * One-shot flag so we only log the "flat view remapped to globe"
+   * deprecation warning once per tour run, even if the tour issues
+   * multiple `setEnvView: "flat_*"` tasks.
+   */
+  private flatDeprecationLogged = false
 
   constructor(tourFile: TourFile, callbacks: TourCallbacks) {
     this.tasks = tourFile.tourTasks
@@ -317,11 +376,17 @@ export class TourEngine {
 
       // Dataset
       case 'loadDataset':
-        return this.execLoadDataset(value as { id: string; showLegend?: boolean })
+        return this.execLoadDataset(value as LoadDatasetTaskParams)
       case 'unloadAllDatasets':
         return this.execUnloadAll()
+      case 'unloadDataset':
+        return this.execUnloadDataset(value as string)
       case 'datasetAnimation':
         return this.execDatasetAnimation(value as DatasetAnimationTaskParams)
+
+      // Multi-viewport layout
+      case 'setEnvView':
+        return this.execSetEnvView(value as string)
 
       // Environment
       case 'envShowDayNightLighting':
@@ -509,8 +574,27 @@ export class TourEngine {
 
   // ── Dataset executors ──────────────────────────────────────────────
 
-  private async execLoadDataset(params: { id: string; showLegend?: boolean; [key: string]: unknown }): Promise<void> {
-    await this.callbacks.loadDataset(params.id)
+  private async execLoadDataset(params: LoadDatasetTaskParams): Promise<void> {
+    // Resolve worldIndex (1-indexed from the tour JSON) to a 0-indexed
+    // slot. Omitted/zero/negative values default to slot 0. Out-of-
+    // range values are clamped to the last active panel so the load
+    // doesn't silently no-op when a tour specifies worldIndex before
+    // the matching setEnvView expands the layout.
+    const raw = typeof params.worldIndex === 'number' ? params.worldIndex : 1
+    const panelCount = this.callbacks.getAllRenderers().length || 1
+    const slot = Math.max(0, Math.min(panelCount - 1, Math.round(raw) - 1))
+    if (Math.round(raw) - 1 >= panelCount) {
+      logger.warn(`[Tour] loadDataset: worldIndex ${raw} exceeds panel count ${panelCount}, clamped to slot ${slot}`)
+    }
+
+    await this.callbacks.loadDataset(params.id, { slot })
+
+    // Record the local handle → slot mapping so a later
+    // unloadDataset task can find this panel again.
+    if (params.datasetID) {
+      this.datasetHandleMap.set(params.datasetID, slot)
+    }
+
     hideTourLegend() // clear any previous legend
 
     if (params.showLegend) {
@@ -533,9 +617,48 @@ export class TourEngine {
     }
   }
 
+  /**
+   * Unload a specific dataset identified by its local tour handle.
+   * Handles are recorded by `loadDataset` tasks that supply a
+   * `datasetID`. If the handle isn't found we log and skip — the
+   * tour author may have typo'd or issued `unloadDataset` before the
+   * matching `loadDataset`.
+   */
+  private async execUnloadDataset(handle: string): Promise<void> {
+    const slot = this.datasetHandleMap.get(handle)
+    if (slot === undefined) {
+      logger.warn('[Tour] unloadDataset: unknown handle', handle)
+      return
+    }
+    await this.callbacks.unloadDatasetAt(slot)
+    this.datasetHandleMap.delete(handle)
+  }
+
   private async execUnloadAll(): Promise<void> {
     hideTourLegend()
+    this.datasetHandleMap.clear()
     await this.callbacks.unloadAllDatasets()
+  }
+
+  /**
+   * Switch the multi-viewport layout in response to a legacy
+   * `setEnvView` task. Parses the view name, logs a one-time
+   * deprecation warning when a legacy flat view is silently
+   * remapped to single-globe, and defaults unknown values to
+   * single-globe so tours don't error on unexpected strings.
+   */
+  private async execSetEnvView(raw: string): Promise<void> {
+    const layout = parseSetEnvView(raw)
+    if (!layout) {
+      logger.warn(`[Tour] setEnvView: unknown view name "${raw}", defaulting to single globe`)
+      await this.callbacks.setEnvView({ layout: '1' })
+      return
+    }
+    if (/^flat/i.test(raw.trim()) && !this.flatDeprecationLogged) {
+      this.flatDeprecationLogged = true
+      logger.info(`[Tour] setEnvView: legacy flat view "${raw}" rendered as single globe (flat projection not supported)`)
+    }
+    await this.callbacks.setEnvView({ layout })
   }
 
   private execDatasetAnimation(params: DatasetAnimationTaskParams): void {
@@ -562,31 +685,40 @@ export class TourEngine {
   // ── Environment executors ──────────────────────────────────────────
 
   private execDayNight(state: 'on' | 'off'): void {
-    const renderer = this.callbacks.getRenderer()
     if (state === 'on') {
       const sun = getSunPosition(new Date())
-      renderer.enableSunLighting(sun.lat, sun.lng)
+      for (const renderer of this.callbacks.getAllRenderers()) {
+        renderer.enableSunLighting(sun.lat, sun.lng)
+      }
     } else {
-      renderer.disableSunLighting()
+      for (const renderer of this.callbacks.getAllRenderers()) {
+        renderer.disableSunLighting()
+      }
     }
   }
 
   private async execClouds(state: 'on' | 'off'): Promise<void> {
-    const renderer = this.callbacks.getRenderer()
-    if (state === 'on') {
-      const cloudUrl = getCloudTextureUrl()
+    if (state !== 'on') {
+      for (const renderer of this.callbacks.getAllRenderers()) {
+        renderer.removeCloudOverlay()
+      }
+      return
+    }
+    const cloudUrl = getCloudTextureUrl()
+    for (const renderer of this.callbacks.getAllRenderers()) {
       await renderer.loadCloudOverlay(cloudUrl)
-    } else {
-      renderer.removeCloudOverlay()
     }
   }
 
   private execWorldBorder(state: 'on' | 'off'): void {
-    const renderer = this.callbacks.getRenderer()
     const on = state === 'on'
-    renderer.toggleBoundaries?.(on)
-    renderer.toggleLabels?.(on)
-    syncMapControlState(on, on)
+    for (const renderer of this.callbacks.getAllRenderers()) {
+      renderer.toggleBoundaries?.(on)
+      // Labels (text place names) are a separate concept from
+      // borders (boundary lines). The legacy SOS "worldBorder"
+      // command controls only the lines, not labels.
+    }
+    syncToolsMenuState({ borders: on })
   }
 
   private execWorldBorderObj(params: { worldBorders: 'on' | 'off' }): void {

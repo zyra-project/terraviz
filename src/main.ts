@@ -6,17 +6,20 @@
  */
 
 import { MapRenderer } from './services/mapRenderer'
+import { ViewportManager, type ViewLayout } from './services/viewportManager'
 import { HLSService } from './services/hlsService'
 import { dataService } from './services/dataService'
-import { formatDate, videoTimeToDate, isSubDailyPeriod, getSunPosition } from './utils/time'
+import { formatDate, videoTimeToDate, dateToVideoTime, isSubDailyPeriod, getSunPosition, inferDisplayInterval } from './utils/time'
 import { logger } from './utils/logger'
-import type { AppState, VideoTextureHandle, TourFile } from './types'
+import type { AppState, VideoTextureHandle, TourFile, Dataset } from './types'
 
 // Extracted modules
-import { showBrowseUI, hideBrowseUI } from './ui/browseUI'
+import { showBrowseUI, hideBrowseUI, collapseBrowseUI } from './ui/browseUI'
 import { initDownloadUI } from './ui/downloadUI'
-import { initMapControls, updateMapControlsPosition, syncMapControlState } from './ui/mapControlsUI'
-import { initChatUI, openChat, notifyDatasetChanged, showChatTrigger, hideChatTrigger, closeChat, flushPendingGlobeActions } from './ui/chatUI'
+import { updateMapControlsPosition } from './ui/mapControlsUI'
+import { initToolsMenu, syncToolsMenuState, syncToolsMenuLayout, pulseBrowseButton } from './ui/toolsMenuUI'
+import { initChatUI, openChat, openChatSettings, notifyDatasetChanged, showChatTrigger, hideChatTrigger, closeChat, flushPendingGlobeActions } from './ui/chatUI'
+import { loadViewPreferences, saveViewPreferences, type ViewPreferences } from './utils/viewPreferences'
 import { initHelpUI, setActiveDataset as setHelpActiveDataset } from './ui/helpUI'
 import {
   createPlaybackState, startPlaybackLoop, stopPlaybackLoop,
@@ -49,6 +52,22 @@ const LOADING_HIDE_DELAY_MS = 300
  * fetches the dataset catalog and either displays the default Earth or
  * loads a dataset specified by the `?dataset=` URL parameter.
  */
+/**
+ * Per-panel dataset + video state. Length is kept in sync with the
+ * viewport count by onLayoutChange callbacks from ViewportManager.
+ * Slot 0 is always the first panel; the primary index (which slot
+ * drives the playback transport UI) lives inside ViewportManager.
+ */
+interface PanelState {
+  dataset: Dataset | null
+  hlsService: HLSService | null
+  videoTexture: VideoTextureHandle | null
+}
+
+function createPanelState(): PanelState {
+  return { dataset: null, hlsService: null, videoTexture: null }
+}
+
 class InteractiveSphere {
   private appState: AppState = {
     datasets: [],
@@ -63,14 +82,60 @@ class InteractiveSphere {
 
   private readonly isMobile = isMobile()
 
-  private renderer: MapRenderer | null = null
-  private hlsService: HLSService | null = null
-  private videoTexture: VideoTextureHandle | null = null
+  private viewports: ViewportManager = new ViewportManager()
+
+  /** Per-panel dataset state (one entry per active viewport). */
+  private panelStates: PanelState[] = []
+
+  /** Listener attached to the primary video for sibling sync. */
+  private primaryVideoSyncListeners: Array<{ event: string; handler: EventListener }> = []
+  private primaryVideoSyncTarget: HTMLVideoElement | null = null
+  /** Interval ID for the periodic drift-correction timer. */
+  private driftCheckInterval: ReturnType<typeof setInterval> | null = null
+
+  /**
+   * Convenience getter returning the primary viewport's renderer.
+   * Most call sites operate on a single "the renderer" for the
+   * primary panel; per-slot operations go through `this.viewports`
+   * and `this.panelStates` directly.
+   */
+  private get renderer(): MapRenderer | null {
+    return this.viewports.getPrimary()
+  }
+
+  /** Primary panel's HLS service, if any. */
+  private get hlsService(): HLSService | null {
+    return this.panelStates[this.viewports.getPrimaryIndex()]?.hlsService ?? null
+  }
+
+  /** Primary panel's video texture, if any. */
+  private get videoTexture(): VideoTextureHandle | null {
+    return this.panelStates[this.viewports.getPrimaryIndex()]?.videoTexture ?? null
+  }
+
   private playback: PlaybackState = createPlaybackState()
   private loadingHideTimer: ReturnType<typeof setTimeout> | null = null
   private loadGeneration = 0 // guards against concurrent dataset loads
   private tourEngine: TourEngine | null = null
   private tourIsStandalone = false // true when tour was loaded as a tour/json dataset (not runTourOnLoad)
+
+  /** Persisted view preferences: info panel + legend visibility. */
+  private viewPrefs: ViewPreferences = loadViewPreferences()
+
+  /**
+   * Which slot's dataset the info panel currently displays.
+   *
+   * - `null` → follow the primary. The info panel re-renders whenever
+   *   the primary changes.
+   * - A slot index → "pinned" to that slot. The user explicitly picked
+   *   a non-primary dataset from the picker dropdown. Resets to null
+   *   whenever the primary changes (via `onViewportPrimaryChange`) so
+   *   a fresh promotion doesn't silently keep pointing at an old slot.
+   */
+  private infoDisplayOverride: number | null = null
+
+  /** True once the info-selector change handler has been wired. */
+  private infoSelectorWired = false
 
   /**
    * Boot the application: create the WebGL renderer, fetch the dataset
@@ -86,19 +151,42 @@ class InteractiveSphere {
 
       const container = document.getElementById('container')
       if (!container) throw new Error('Container element not found')
+      const mapGrid = document.getElementById('map-grid')
+      if (!mapGrid) throw new Error('Map grid element not found')
 
       this.setLoadingStatus('Creating renderer\u2026', 15)
-      this.renderer = new MapRenderer()
-      this.renderer.init(container)
-      initMapControls(this.renderer)
+      const initialLayout = this.getInitialLayoutFromUrl()
+      this.viewports.init(mapGrid, initialLayout, {
+        onLayoutChange: (newCount, oldCount) => this.onViewportLayoutChange(newCount, oldCount),
+        onPrimaryChange: (newIdx, oldIdx) => this.onViewportPrimaryChange(newIdx, oldIdx),
+      })
+      // Parallel per-panel dataset state, one entry per viewport.
+      this.panelStates = Array.from({ length: this.viewports.getPanelCount() }, createPanelState)
+      const primary = this.viewports.getPrimary()
+      if (!primary) throw new Error('Viewport manager failed to create a primary renderer')
+      initToolsMenu(this.viewports, {
+        onSetLayout: (layout) => this.viewports.setLayout(layout),
+        onOpenBrowse: () => this.openBrowsePanel(),
+        onOpenOrbitSettings: () => openChatSettings(),
+        onToggleDatasetInfo: (visible) => this.setDatasetInfoVisible(visible),
+        onToggleLegend: (visible) => this.setLegendVisible(visible),
+        announce: (msg) => this.announce(msg),
+      })
+      // Apply persisted view prefs to the toolbar button state now
+      // that the toolbar exists.
+      syncToolsMenuState({
+        datasetInfo: this.viewPrefs.infoPanelVisible,
+        legend: this.viewPrefs.legendVisible,
+      })
       initDownloadUI().catch(err => logger.warn('[App] Download UI init failed:', err))
       initHelpUI()
-      logger.info('[App] Using MapLibre renderer')
+      logger.info('[App] Using MapLibre renderer (layout: %s)', initialLayout)
 
-      // Wire up lat/lng display
+      // Wire up lat/lng display (bind to primary; secondary panels don't
+      // update the display — it follows the primary's mousemove)
       const latlngEl = document.getElementById('latlng-display')
       if (latlngEl) {
-        this.renderer.setLatLngCallbacks(
+        primary.setLatLngCallbacks(
           (lat: number, lng: number) => {
             const ns = lat >= 0 ? 'N' : 'S'
             const ew = lng >= 0 ? 'E' : 'W'
@@ -124,6 +212,21 @@ class InteractiveSphere {
         await this.loadDataset(datasetId)
         this.setLoading(false)
         showChatTrigger()
+        // In multi-viewport mode, pre-render the browse panel in its
+        // collapsed state so users can slide it open to load datasets
+        // into the remaining panels, and pulse the Browse button so
+        // they notice where to click. In single-view mode we don't —
+        // the URL-specified dataset is the only thing the user wanted.
+        if (this.viewports.getPanelCount() > 1) {
+          showBrowseUI(this.appState.datasets, {
+            onSelectDataset: (id) => this.selectDatasetFromBrowse(id),
+            announce: (msg) => this.announce(msg),
+            isMobile: this.isMobile,
+            onOpenChat: (query) => this.openChatWithQuery(query),
+          })
+          collapseBrowseUI()
+          pulseBrowseButton()
+        }
       } else {
         this.setLoadingStatus('Loading Earth textures\u2026', 20)
         const cloudUrl = CLOUD_TEXTURE_URL
@@ -134,21 +237,39 @@ class InteractiveSphere {
           const combined = earthFraction * EARTH_TEXTURE_WEIGHT + cloudFraction * CLOUD_TEXTURE_WEIGHT
           this.setLoadingStatus('Loading Earth textures\u2026', LOADING_BASE_PROGRESS + Math.round(combined * LOADING_TEXTURE_RANGE))
         }
-        await Promise.all([
-          this.renderer.loadDefaultEarthMaterials((f: number) => { earthFraction = f; updateProgress() }),
-          this.renderer.loadCloudOverlay(cloudUrl, (f: number) => { cloudFraction = f; updateProgress() })
-        ])
-
-        const sun = getSunPosition(new Date())
-        this.renderer.enableSunLighting(sun.lat, sun.lng)
+        // Earth materials are a visual enhancement (day/night, clouds,
+        // specular) — if loading them times out or fails (common in
+        // multi-viewport mode on mobile when 4 WebGL contexts compete
+        // for bandwidth), the base tiles still render fine. Don't let
+        // the failure abort the init flow and block the browse panel.
+        try {
+          await Promise.all([
+            primary.loadDefaultEarthMaterials((f: number) => { earthFraction = f; updateProgress() }),
+            primary.loadCloudOverlay(cloudUrl, (f: number) => { cloudFraction = f; updateProgress() })
+          ])
+          const sun = getSunPosition(new Date())
+          primary.enableSunLighting(sun.lat, sun.lng)
+        } catch (err) {
+          logger.warn('[App] Earth material loading failed — continuing without day/night overlay:', err)
+        }
 
         this.setLoading(false)
+        // Render the browse panel (populates category filters and
+        // dataset cards) then decide whether to leave it visible.
+        // On mobile (≤768px) the panel is full-width and would hide
+        // the globe entirely — start closed on that breakpoint and
+        // pulse the Browse button briefly so users notice where
+        // datasets live. Desktop keeps the existing side-panel UX.
         showBrowseUI(this.appState.datasets, {
           onSelectDataset: (id) => this.selectDatasetFromBrowse(id),
           announce: (msg) => this.announce(msg),
           isMobile: this.isMobile,
           onOpenChat: (query) => this.openChatWithQuery(query),
         })
+        if (window.matchMedia('(max-width: 768px)').matches) {
+          hideBrowseUI()
+        }
+        pulseBrowseButton()
       }
     } catch (error) {
       this.setLoading(false)
@@ -160,6 +281,20 @@ class InteractiveSphere {
   private getDatasetIdFromUrl(): string | null {
     const params = new URLSearchParams(window.location.search)
     return params.get('dataset')
+  }
+
+  /**
+   * Read the initial viewport layout from the `?setview=` query param.
+   * Phase 1 defaults to `'1'` (single globe); the param is a dev flag
+   * for smoke-testing multi-viewport before the layout picker ships.
+   * Unknown values fall back to single-view.
+   */
+  private getInitialLayoutFromUrl(): ViewLayout {
+    const raw = new URLSearchParams(window.location.search).get('setview')
+    if (raw === '1' || raw === '2h' || raw === '2v' || raw === '4') return raw
+    // Legacy shorthand: ?setview=2 → 2h, ?setview=4 → 4
+    if (raw === '2') return '2h'
+    return '1'
   }
 
   /** Fetch the dataset catalog from the data service and store in app state. */
@@ -180,11 +315,10 @@ class InteractiveSphere {
     this.stopTour()
 
     // Tear down the previous video *before* starting the new load so the old
-    // HLS stream stops downloading and the old MediaSource is released.  Two
+    // HLS stream stops downloading and the old MediaSource is released. Two
     // concurrent HLS.js instances fight over bandwidth and can exhaust the
     // browser's MediaSource / SourceBuffer limits, stalling the new load.
-    if (this.videoTexture) { this.videoTexture.dispose(); this.videoTexture = null }
-    if (this.hlsService) { this.hlsService.destroy(); this.hlsService = null }
+    this.cleanupPanelVideo()
 
     this.renderer?.removeCloudOverlay()
     this.renderer?.removeNightLights()
@@ -200,6 +334,9 @@ class InteractiveSphere {
       this.showHomeButton()
       logger.debug('[App] loadDataset complete:', datasetId)
     } catch (error) {
+      // Clear the loading overlay on the primary panel regardless of
+      // whether the load was superseded or genuinely failed.
+      this.viewports.setPanelLoading(this.viewports.getPrimaryIndex(), false)
       if (gen !== this.loadGeneration) {
         logger.debug('[App] loadDataset superseded (error ignored):', datasetId)
         this.cleanupVideo()
@@ -218,6 +355,12 @@ class InteractiveSphere {
     if (!dataset) throw new Error(`Dataset not found: ${datasetId}`)
 
     this.appState.currentDataset = dataset
+    // Record on the primary panel's state so onPrimaryChange later
+    // knows what's loaded where.
+    const primaryIdx = this.viewports.getPrimaryIndex()
+    if (this.panelStates[primaryIdx]) {
+      this.panelStates[primaryIdx].dataset = dataset
+    }
 
     logger.info('[App] Loading dataset:', {
       id: dataset.id,
@@ -226,7 +369,11 @@ class InteractiveSphere {
       hasTimeData: !!(dataset.startTime && dataset.endTime)
     })
 
-    displayDatasetInfo(dataset, this.appState.datasets, (id) => this.loadDataset(id))
+    // Loading a new dataset into the primary resets any picker
+    // override — the user probably wants to see their fresh load.
+    this.infoDisplayOverride = null
+    this.renderInfoPanel()
+    this.refreshPanelLegends()
 
     if (!this.renderer) throw new Error('Renderer not initialized')
 
@@ -235,17 +382,24 @@ class InteractiveSphere {
       showTimeLabel: (show: boolean) => this.showTimeLabel(show),
     }
 
+    // Show a per-panel loading overlay so the user sees "Loading…"
+    // instead of the confusing Blue Marble intermediate state.
+    this.viewports.setPanelLoading(primaryIdx, true, `Loading ${dataset.title}\u2026`)
+
     if (dataset.format === 'tour/json') {
+      this.viewports.setPanelLoading(primaryIdx, false)
       this.tourIsStandalone = true
       await this.startTour(dataset.dataLink, gen)
       return
     } else if (dataService.isImageDataset(dataset)) {
       await loadImageDataset(dataset, this.renderer, this.appState, this.isMobile, loaderCallbacks)
+      this.viewports.setPanelLoading(primaryIdx, false)
       if (gen !== this.loadGeneration) return
     } else if (dataService.isVideoDataset(dataset)) {
       const result = await loadVideoDataset(
         dataset, this.renderer, this.appState, this.isMobile, this.playback, loaderCallbacks
       )
+      this.viewports.setPanelLoading(primaryIdx, false)
       // If a newer load started while we were awaiting, discard these results.
       // Don't dispose videoTexture here — setVideoTexture already placed it on
       // the sphere material, so the next load's setVideoTexture will replace it.
@@ -253,8 +407,8 @@ class InteractiveSphere {
         result.hlsService.destroy()
         return
       }
-      this.hlsService = result.hlsService
-      this.videoTexture = result.videoTexture
+      this.storePanelVideoResult(this.viewports.getPrimaryIndex(), result)
+      this.attachPrimaryVideoSync()
       this.doStartPlaybackLoop()
     } else {
       throw new Error(`Unsupported format: ${dataset.format}`)
@@ -304,8 +458,16 @@ class InteractiveSphere {
    * Unlike loadDataset(), this does NOT stop the active tour and does NOT
    * trigger runTourOnLoad — the tour engine is managing the flow.
    */
-  private async loadDatasetForTour(datasetId: string): Promise<void> {
-    logger.debug('[App] loadDatasetForTour:', datasetId)
+  private async loadDatasetForTour(datasetId: string, slot?: number): Promise<void> {
+    const targetSlot = slot ?? this.viewports.getPrimaryIndex()
+    const isPrimarySlot = targetSlot === this.viewports.getPrimaryIndex()
+    const targetRenderer = this.viewports.getRendererAt(targetSlot)
+    logger.debug('[App] loadDatasetForTour:', datasetId, 'slot:', targetSlot)
+
+    if (!targetRenderer) {
+      logger.warn('[App] Tour loadDataset: slot renderer missing:', targetSlot)
+      return
+    }
 
     const dataset = dataService.getDatasetById(datasetId)
     if (!dataset) {
@@ -313,33 +475,42 @@ class InteractiveSphere {
       return
     }
 
-    // Skip re-loading if this dataset is already on the globe
-    if (this.appState.currentDataset?.id === datasetId) {
-      logger.debug('[App] Tour loadDataset: already loaded, skipping:', datasetId)
+    // Skip re-loading if this specific panel already has this dataset
+    if (this.panelStates[targetSlot]?.dataset?.id === datasetId) {
+      logger.debug('[App] Tour loadDataset: already loaded in slot, skipping:', datasetId, targetSlot)
       return
     }
 
-    stopPlaybackLoop(this.playback)
-    this.appState.isPlaying = false
-    resetPlaybackState(this.playback)
+    // Primary slot owns the shared playback state — reset it before
+    // tearing down the previous stream. Non-primary slot loads don't
+    // touch playback at all.
+    if (isPrimarySlot) {
+      stopPlaybackLoop(this.playback)
+      this.appState.isPlaying = false
+      resetPlaybackState(this.playback)
+    }
 
-    // Tear down previous video/HLS
-    if (this.videoTexture) { this.videoTexture.dispose(); this.videoTexture = null }
-    if (this.hlsService) { this.hlsService.destroy(); this.hlsService = null }
+    // Tear down the previous video/HLS on THIS slot
+    this.cleanupPanelVideo(targetSlot)
 
-    this.renderer?.removeCloudOverlay()
-    this.renderer?.removeNightLights()
-    this.renderer?.disableSunLighting()
+    targetRenderer.removeCloudOverlay?.()
+    targetRenderer.removeNightLights?.()
+    targetRenderer.disableSunLighting?.()
 
-    this.appState.currentDataset = dataset
-    displayDatasetInfo(dataset, this.appState.datasets, (id) => this.loadDataset(id))
+    if (isPrimarySlot) {
+      this.appState.currentDataset = dataset
+    }
+    if (this.panelStates[targetSlot]) {
+      this.panelStates[targetSlot].dataset = dataset
+    }
+    this.infoDisplayOverride = null
+    this.renderInfoPanel()
+    this.refreshPanelLegends()
 
     // On small screens, hide the info panel during tours to reduce clutter
     if (window.innerWidth <= 768) {
       document.getElementById('info-panel')?.classList.add('hidden')
     }
-
-    if (!this.renderer) return
 
     // Show playback controls so users can scrub through time-series data
     const tourLoaderCallbacks = {
@@ -347,24 +518,35 @@ class InteractiveSphere {
       showTimeLabel: (show: boolean) => this.showTimeLabel(show),
     }
 
+    // Per-panel loading indicator so the user sees "Loading…" on the
+    // target globe instead of a confusing Blue Marble intermediate.
+    this.viewports.setPanelLoading(targetSlot, true, `Loading ${dataset.title}\u2026`)
+
     if (dataService.isImageDataset(dataset)) {
-      await loadImageDataset(dataset, this.renderer, this.appState, this.isMobile, tourLoaderCallbacks)
+      await loadImageDataset(
+        dataset, targetRenderer, this.appState, this.isMobile, tourLoaderCallbacks,
+        { isPrimary: isPrimarySlot },
+      )
     } else if (dataService.isVideoDataset(dataset)) {
       const result = await loadVideoDataset(
-        dataset, this.renderer, this.appState, this.isMobile, this.playback, tourLoaderCallbacks
+        dataset, targetRenderer, this.appState, this.isMobile, this.playback, tourLoaderCallbacks,
+        { isPrimary: isPrimarySlot },
       )
-      this.hlsService = result.hlsService
-      this.videoTexture = result.videoTexture
-      this.doStartPlaybackLoop()
+      this.storePanelVideoResult(targetSlot, result)
+      if (isPrimarySlot) {
+        this.attachPrimaryVideoSync()
+        this.doStartPlaybackLoop()
+      }
     }
 
+    this.viewports.setPanelLoading(targetSlot, false)
     initLegendForDataset(dataset, loadConfig())
     // No runTourOnLoad check — the tour engine is in control
   }
 
   /** Reset the globe to default Earth for a tour — like goHome but keeps UI clean (no browse panel). */
   private async unloadForTour(): Promise<void> {
-    this.cleanupVideo()
+    await this.unloadAllPanels()
     clearLegendCache()
     this.appState.currentDataset = null
     this.showPlaybackControls(false)
@@ -399,13 +581,20 @@ class InteractiveSphere {
     const tourBaseUrl = resp.url || new URL(dataLink, window.location.href).toString()
 
     this.tourEngine = new TourEngine(tourFile, {
-      loadDataset: async (id) => {
-        await this.loadDatasetForTour(id)
+      loadDataset: async (id, opts) => {
+        await this.loadDatasetForTour(id, opts?.slot)
       },
       unloadAllDatasets: async () => {
         await this.unloadForTour()
       },
+      unloadDatasetAt: async (slot) => {
+        await this.unloadPanelDataset(slot)
+      },
+      setEnvView: async ({ layout }) => {
+        this.viewports.setLayout(layout)
+      },
       getRenderer: () => this.renderer!,
+      getAllRenderers: () => this.viewports.getAll(),
       togglePlayPause: () => {
         togglePlayPause(this.hlsService, this.appState, (m) => this.announce(m))
       },
@@ -531,17 +720,266 @@ class InteractiveSphere {
 
   // --- UI helpers ---
 
-  /** Toggle visibility of the playback transport controls and standalone auto-rotate button. */
+  /** Toggle visibility of the playback transport controls. */
   private showPlaybackControls(show: boolean): void {
     const controls = document.getElementById('playback-controls')
-    const standalone = document.getElementById('auto-rotate-standalone')
     if (controls) {
       controls.classList.toggle('hidden', !show)
     }
-    if (standalone) {
-      standalone.classList.toggle('hidden', show)
-    }
     updateMapControlsPosition()
+  }
+
+  /**
+   * Toggle dataset info panel visibility. Persists the choice and
+   * updates the DOM immediately. When the info panel is the only
+   * place showing the legend (single-view with legend prefs on), the
+   * legend moves to a floating element in the primary panel.
+   */
+  private setDatasetInfoVisible(visible: boolean): void {
+    this.viewPrefs.infoPanelVisible = visible
+    saveViewPreferences(this.viewPrefs)
+    this.applyDatasetInfoVisibility()
+    this.refreshPanelLegends()
+  }
+
+  /** Toggle legend visibility. Persists and refreshes per-panel legends. */
+  private setLegendVisible(visible: boolean): void {
+    this.viewPrefs.legendVisible = visible
+    saveViewPreferences(this.viewPrefs)
+    this.refreshPanelLegends()
+    // Also hide/show the in-info-panel legend thumbnail since it
+    // lives inside the info panel body.
+    const legendThumb = document.querySelector('.info-legend-thumb') as HTMLElement | null
+    if (legendThumb) {
+      legendThumb.style.display = visible ? '' : 'none'
+    }
+  }
+
+  /** Apply the current infoPanelVisible preference to the DOM. */
+  private applyDatasetInfoVisibility(): void {
+    const panel = document.getElementById('info-panel')
+    if (!panel) return
+    const hasDataset = !!this.appState.currentDataset
+    // When no dataset is loaded, the info panel is hidden regardless —
+    // the preference only matters when there's content to show.
+    if (!hasDataset) {
+      panel.classList.add('hidden')
+      return
+    }
+    panel.classList.toggle('hidden', !this.viewPrefs.infoPanelVisible)
+  }
+
+  /**
+   * Which slot's dataset the info panel is currently displaying —
+   * the override if set, otherwise the primary. Returns -1 if no
+   * panel has a loaded dataset.
+   */
+  private getInfoDisplayIndex(): number {
+    if (
+      this.infoDisplayOverride !== null &&
+      this.panelStates[this.infoDisplayOverride]?.dataset
+    ) {
+      return this.infoDisplayOverride
+    }
+    const primaryIdx = this.viewports.getPrimaryIndex()
+    if (this.panelStates[primaryIdx]?.dataset) return primaryIdx
+    // Fall back to the first slot with a loaded dataset so the info
+    // panel isn't blank when the primary happens to be empty.
+    for (let i = 0; i < this.panelStates.length; i++) {
+      if (this.panelStates[i]?.dataset) return i
+    }
+    return -1
+  }
+
+  /**
+   * Render the info panel for whichever slot `getInfoDisplayIndex`
+   * points at, repopulate the picker dropdown with all loaded
+   * datasets, and show/hide the picker based on how many are loaded.
+   *
+   * Call after: dataset load/unload, primary change, layout change,
+   * info-panel-visibility toggle. Idempotent — safe to call
+   * repeatedly.
+   */
+  private renderInfoPanel(): void {
+    const idx = this.getInfoDisplayIndex()
+    const dataset = idx >= 0 ? this.panelStates[idx]?.dataset ?? null : null
+
+    if (!dataset) {
+      // Nothing to show — hide the whole panel.
+      document.getElementById('info-panel')?.classList.add('hidden')
+      return
+    }
+
+    // Render the currently-selected dataset into the info panel body.
+    displayDatasetInfo(dataset, this.appState.datasets, (id) => this.loadDataset(id))
+
+    // Repopulate the picker with every loaded dataset (in panel order)
+    // and wire the change handler once.
+    const picker = document.getElementById('info-panel-picker')
+    const select = document.getElementById('info-selector') as HTMLSelectElement | null
+    if (!picker || !select) return
+
+    const entries: Array<{ slot: number; label: string }> = []
+    for (let slot = 0; slot < this.panelStates.length; slot++) {
+      const d = this.panelStates[slot]?.dataset
+      if (!d) continue
+      const label = this.panelStates.length > 1
+        ? `Panel ${slot + 1}: ${d.title}`
+        : d.title
+      entries.push({ slot, label })
+    }
+
+    // Only show the picker when there's a choice to make.
+    if (entries.length > 1) {
+      picker.classList.remove('hidden')
+      // Rebuild options only if the set changed — a naive innerHTML
+      // rewrite would lose focus if the user is mid-interaction.
+      const wantSignature = entries.map(e => `${e.slot}:${e.label}`).join('|')
+      if (select.dataset.signature !== wantSignature) {
+        select.innerHTML = ''
+        for (const e of entries) {
+          const opt = document.createElement('option')
+          opt.value = String(e.slot)
+          opt.textContent = e.label
+          select.appendChild(opt)
+        }
+        select.dataset.signature = wantSignature
+      }
+      select.value = String(idx)
+    } else {
+      picker.classList.add('hidden')
+    }
+
+    if (!this.infoSelectorWired) {
+      this.infoSelectorWired = true
+      select.addEventListener('click', (ev) => { ev.stopPropagation() })
+      select.addEventListener('change', () => {
+        const newSlot = parseInt(select.value, 10)
+        if (Number.isFinite(newSlot)) {
+          this.infoDisplayOverride = newSlot
+          this.renderInfoPanel()
+        }
+      })
+    }
+
+    // Now that the body has content, apply the user's visibility
+    // preference — the panel may still be hidden if they toggled it
+    // off in Tools.
+    this.applyDatasetInfoVisibility()
+  }
+
+  /**
+   * Rebuild the floating per-panel legends from the current
+   * panelStates array + view prefs. Called after any change that
+   * affects whether legends should be visible or which dataset each
+   * panel is showing:
+   *
+   * - Legend toggle flipped
+   * - Info panel toggle flipped (legend may move in/out of the info panel)
+   * - A dataset loaded/unloaded in any panel
+   * - Layout changed (panels added/removed)
+   * - Primary changed (floating legend vs info-panel thumbnail split)
+   */
+  private refreshPanelLegends(): void {
+    const legendOn = this.viewPrefs.legendVisible
+    const infoOn = this.viewPrefs.infoPanelVisible
+    const isMultiView = this.viewports.getPanelCount() > 1
+    const primaryIdx = this.viewports.getPrimaryIndex()
+
+    for (let slot = 0; slot < this.panelStates.length; slot++) {
+      const panel = this.panelStates[slot]
+      const dataset = panel?.dataset ?? null
+      const legendLink = dataset?.legendLink ?? null
+
+      // Decide whether this panel gets a floating legend:
+      // - Off entirely if the Legend toggle is off
+      // - Off if the panel has no dataset or no legendLink
+      // - Off for the primary in single-view mode when the info
+      //   panel is visible (the info panel holds the legend there)
+      // - On otherwise
+      let showFloating = legendOn && !!legendLink
+      if (showFloating && !isMultiView && slot === primaryIdx && infoOn) {
+        showFloating = false
+      }
+
+      if (showFloating && legendLink && dataset) {
+        this.viewports.setPanelLegend(slot, legendLink, {
+          title: dataset.title,
+          onClick: () => this.openLegendModal(legendLink, dataset.title),
+        })
+      } else {
+        this.viewports.setPanelLegend(slot, null)
+      }
+    }
+  }
+
+  /** Open the full-size legend modal for a dataset. Mirrors the
+   *  legend click handler inside datasetLoader's info panel so the
+   *  floating legends and the info-panel thumbnail use the same UI. */
+  private openLegendModal(src: string, title: string): void {
+    let overlay = document.getElementById('legend-modal-overlay')
+    if (!overlay) {
+      overlay = document.createElement('div')
+      overlay.id = 'legend-modal-overlay'
+      overlay.className = 'legend-modal-overlay'
+      overlay.setAttribute('role', 'dialog')
+      overlay.setAttribute('aria-modal', 'true')
+      overlay.innerHTML = `<img class="legend-modal-img" alt="Legend"><button class="legend-modal-close" aria-label="Close legend">&times;</button>`
+      const closeModal = () => overlay!.classList.add('hidden')
+      overlay.querySelector('.legend-modal-close')!.addEventListener('click', (e) => {
+        e.stopPropagation()
+        closeModal()
+      })
+      overlay.addEventListener('click', closeModal)
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !overlay!.classList.contains('hidden')) closeModal()
+      })
+      document.body.appendChild(overlay)
+    }
+    const img = overlay.querySelector('img') as HTMLImageElement
+    img.src = src
+    img.alt = `${title} legend`
+    overlay.setAttribute('aria-label', `${title} legend`)
+    overlay.classList.remove('hidden')
+  }
+
+  private dismissBrowseAfterLoad(): void {
+    if (this.viewports.getPanelCount() > 1) {
+      collapseBrowseUI()
+    } else {
+      hideBrowseUI()
+    }
+  }
+
+  /**
+   * Open (or re-open) the dataset browse panel. Called by the
+   * Browse button in the map-controls toolbar. Handles all three
+   * states the panel can be in: hidden (initial), collapsed (after
+   * a previous multi-view load), or already visible (no-op).
+   */
+  private openBrowsePanel(): void {
+    const overlay = document.getElementById('browse-overlay')
+    // Only call showBrowseUI once — it wires event listeners on
+    // category chips, search input, etc. Re-calling it after a
+    // hideBrowseUI() would duplicate those listeners.
+    if (!overlay || overlay.dataset.browseInitialized !== 'true') {
+      showBrowseUI(this.appState.datasets, {
+        onSelectDataset: (id) => this.selectDatasetFromBrowse(id),
+        announce: (msg) => this.announce(msg),
+        isMobile: this.isMobile,
+        onOpenChat: (query) => this.openChatWithQuery(query),
+      })
+      // Mark as initialized so subsequent opens skip showBrowseUI.
+      const el = overlay ?? document.getElementById('browse-overlay')
+      if (el) el.dataset.browseInitialized = 'true'
+      return
+    }
+    // Already rendered — either collapsed or fully visible. Remove
+    // the collapsed class either way and ensure `browse-open` is
+    // set so other UI can react.
+    overlay.classList.remove('collapsed')
+    overlay.classList.remove('hidden')
+    document.body.classList.add('browse-open')
   }
 
   /** Detect WebGL support. If unavailable, display troubleshooting instructions and return false. */
@@ -658,19 +1096,15 @@ class InteractiveSphere {
       onSetTime: (isoDate) => seekToDate(isoDate, this.hlsService, this.appState, this.playback),
       onFitBounds: (bounds, _label) => { this.renderer?.fitBounds(bounds) },
       onAddMarker: (lat, lng, label) => { this.renderer?.addMarker(lat, lng, label) },
-      onToggleLabels: (visible) => { this.renderer?.toggleLabels(visible); this.renderer?.toggleBoundaries(visible) },
+      onToggleLabels: (visible) => {
+        for (const r of this.viewports.getAll()) { r.toggleLabels?.(visible); r.toggleBoundaries?.(visible) }
+      },
       onHighlightRegion: (geojson, _label) => { this.renderer?.highlightRegion(geojson) },
       getMapViewContext: () => this.renderer?.getViewContext() ?? null,
       getDatasets: () => this.appState.datasets,
       getCurrentDataset: () => this.appState.currentDataset,
       announce: (msg) => this.announce(msg),
-      onOpenBrowse: () => {
-        const browseOverlay = document.getElementById('browse-overlay')
-        const browseToggle = document.getElementById('browse-toggle')
-        if (browseOverlay?.classList.contains('collapsed')) {
-          browseToggle?.click()
-        }
-      },
+      onOpenBrowse: () => this.openBrowsePanel(),
     })
   }
 
@@ -692,7 +1126,7 @@ class InteractiveSphere {
   private async selectDatasetFromChat(id: string): Promise<void> {
     const gen = ++this.loadGeneration
     logger.debug('[App] selectDatasetFromChat:', id, 'gen:', gen)
-    hideBrowseUI()
+    this.dismissBrowseAfterLoad()
     this.announce('Loading dataset\u2026')
     this.showLoadingScreen('Loading dataset\u2026', 20)
     window.history.pushState({}, '', `?dataset=${encodeURIComponent(id)}`)
@@ -714,45 +1148,508 @@ class InteractiveSphere {
     }
   }
 
-  /** Dispose the current video texture and HLS service, and reset playback state. */
-  private cleanupVideo(): void {
+  /**
+   * Called by ViewportManager when a setLayout adds/removes panels.
+   * Resizes our parallel panelStates array to match, disposing any
+   * videos in slots that are going away, and seeds newly-created
+   * panels with the current map-controls toolbar state (labels,
+   * borders, terrain) so they start in sync with the primary.
+   */
+  private onViewportLayoutChange(newCount: number, oldCount: number): void {
+    if (newCount < oldCount) {
+      // Tear down slots that are being removed
+      for (let i = newCount; i < oldCount; i++) {
+        const panel = this.panelStates[i]
+        if (!panel) continue
+        if (panel.videoTexture) { panel.videoTexture.dispose() }
+        if (panel.hlsService) { panel.hlsService.destroy() }
+      }
+      this.panelStates.length = newCount
+    } else {
+      // Add fresh empty slots for new panels
+      while (this.panelStates.length < newCount) {
+        this.panelStates.push(createPanelState())
+      }
+      // Seed the new viewports with the current toolbar state so
+      // they visually match the primary's labels/borders/terrain.
+      // We read state from the DOM button classes rather than
+      // querying a renderer, since the new renderers may still be
+      // mid-style-load when this fires. MapLibre queues layer
+      // operations internally until the style is ready, so
+      // dispatching the toggle now is safe.
+      const labelsActive = document.getElementById('tools-menu-labels')?.classList.contains('active') ?? false
+      const bordersActive = document.getElementById('tools-menu-borders')?.classList.contains('active') ?? false
+      const terrainActive = document.getElementById('tools-menu-terrain')?.classList.contains('active') ?? false
+      for (let i = oldCount; i < newCount; i++) {
+        const newRenderer = this.viewports.getRendererAt(i)
+        if (!newRenderer) continue
+        const map = newRenderer.getMap()
+        const applyOverlayState = () => {
+          newRenderer.toggleLabels?.(labelsActive)
+          newRenderer.toggleBoundaries?.(bordersActive)
+          if (terrainActive) newRenderer.toggleTerrain?.(true)
+        }
+        if (map && map.isStyleLoaded()) {
+          applyOverlayState()
+        } else {
+          map?.once('load', applyOverlayState)
+        }
+      }
+    }
+    // Layout change can affect whether a panel's legend is a
+    // floating element vs inside the info panel, and the set of
+    // available datasets in the info-panel picker — refresh both.
+    // Also clear any picker override if the pinned slot just
+    // vanished on a shrink.
+    if (
+      this.infoDisplayOverride !== null &&
+      this.infoDisplayOverride >= newCount
+    ) {
+      this.infoDisplayOverride = null
+    }
+    this.refreshPanelLegends()
+    this.renderInfoPanel()
+    syncToolsMenuLayout(this.viewports.getLayout())
+  }
+
+  /**
+   * Called by ViewportManager when the primary index changes (user
+   * clicked a non-primary panel's indicator badge). Rewires the
+   * singular UI — info panel, playback controls, video sync, URL —
+   * to the new primary's dataset.
+   */
+  private onViewportPrimaryChange(newIndex: number, _oldIndex: number): void {
+    logger.debug('[App] Primary panel changed:', _oldIndex, '→', newIndex)
+    const newPrimaryPanel = this.panelStates[newIndex]
+    const newDataset = newPrimaryPanel?.dataset ?? null
+
+    // Rewire video sync to the new primary's video (if any)
+    this.detachPrimaryVideoSync()
     stopPlaybackLoop(this.playback)
-    if (this.videoTexture) {
-      this.videoTexture.dispose()
-      this.videoTexture = null
+
+    // Update the shared appState + info panel. Promoting a different
+    // panel clears any picker override so the info panel follows the
+    // new primary instead of silently pointing at a stale slot.
+    this.appState.currentDataset = newDataset
+    this.infoDisplayOverride = null
+    if (newDataset) {
+      this.renderInfoPanel()
+      window.history.replaceState({}, '', `?dataset=${encodeURIComponent(newDataset.id)}`)
+      notifyDatasetChanged(newDataset)
+      setHelpActiveDataset(newDataset.id)
+      this.renderer?.setCanvasDescription(`3D globe showing ${newDataset.title}`)
+    } else {
+      const infoPanel = document.getElementById('info-panel')
+      if (infoPanel) infoPanel.classList.add('hidden')
+      window.history.replaceState({}, '', window.location.pathname)
+      notifyDatasetChanged(null)
+      setHelpActiveDataset(null)
+      this.renderer?.setCanvasDescription('Interactive 3D globe showing Earth')
     }
-    if (this.hlsService) {
-      this.hlsService.destroy()
-      this.hlsService = null
+    // Legend placement depends on primary (single-view uses the
+    // info panel's thumbnail for the primary; multi-view always
+    // uses per-panel floating legends). Refresh so the primary's
+    // legend moves to the correct surface.
+    this.refreshPanelLegends()
+
+    // Rewire playback controls based on the new primary's video state
+    const isVideo = newDataset && dataService.isVideoDataset(newDataset) && newPrimaryPanel?.hlsService
+    const hasTemporalRange = Boolean(newDataset?.startTime && newDataset?.endTime)
+    if (isVideo) {
+      this.showPlaybackControls(true)
+      this.showTimeLabel(hasTemporalRange)
+      updatePlayButton(newPrimaryPanel!.hlsService!.paused)
+      // Recompute the display interval for the new primary's temporal
+      // range so scrubber snapping and time label formatting are correct.
+      if (hasTemporalRange && newPrimaryPanel!.hlsService) {
+        const start = new Date(newDataset!.startTime!)
+        const end = new Date(newDataset!.endTime!)
+        const videoDuration = newPrimaryPanel!.hlsService!.duration ?? 1
+        this.playback.displayInterval = inferDisplayInterval(start, end, videoDuration)
+      }
+      this.attachPrimaryVideoSync()
+      this.doStartPlaybackLoop()
+    } else {
+      this.showPlaybackControls(false)
+      if (!hasTemporalRange) {
+        this.showTimeLabel(false)
+      }
     }
+    this.announce(newDataset ? `Active panel: ${newDataset.title}` : `Panel ${newIndex + 1} active`)
+  }
+
+  /**
+   * Store a video-load result into a specific panel's state.
+   * Assumes the slot exists (callers must validate the index).
+   */
+  private storePanelVideoResult(
+    slot: number,
+    result: { hlsService: HLSService; videoTexture: VideoTextureHandle },
+  ): void {
+    const panel = this.panelStates[slot]
+    if (!panel) return
+    panel.hlsService = result.hlsService
+    panel.videoTexture = result.videoTexture
+  }
+
+  /**
+   * Sibling video sync — seek-once-then-free-run strategy.
+   *
+   * The previous implementation listened to every `timeupdate` event
+   * (~4 per second) and seeked every sibling's `currentTime` on each
+   * tick. That caused constant decoder interruption (16+ seeks/sec
+   * with 4 panels), manifesting as visible jitter and pauses.
+   *
+   * New approach:
+   *
+   *   - **On play**: seek every sibling to match the primary's
+   *     real-world date, then call `play()` on all of them at once.
+   *     After that, the browser's internal media clock keeps them
+   *     naturally in sync without any seeking.
+   *
+   *   - **On pause**: pause all siblings. No seek — they're already
+   *     at the right position from the play-sync.
+   *
+   *   - **On seeked** (user scrubbed the transport): re-compute
+   *     target times, seek siblings, then resume play if the primary
+   *     is playing.
+   *
+   *   - **Periodic drift check** (every 5 seconds): if any sibling
+   *     has drifted more than 1.0s from the primary's date-mapped
+   *     position, seek just that sibling. This catches slow decoder
+   *     drift without the constant-seek jitter. The 1.0s threshold
+   *     is generous — 0.3s was too tight and triggered on normal
+   *     inter-decoder variance.
+   *
+   * This reduces seeking from ~16/sec to essentially 0 during normal
+   * playback, with a soft correction every 5s only when needed.
+   */
+  private attachPrimaryVideoSync(): void {
+    this.detachPrimaryVideoSync()
+    const primaryIdx = this.viewports.getPrimaryIndex()
+    const primaryPanel = this.panelStates[primaryIdx]
+    const primaryHls = primaryPanel?.hlsService
+    const primaryVideo = primaryHls?.getVideo?.() ?? null
+    if (!primaryVideo) return
+
+    /**
+     * Seek every sibling to the primary's current date-mapped
+     * position, update out-of-range indicators, and optionally
+     * mirror the primary's play/pause state.
+     *
+     * @param mirrorPlayState If true, also play/pause siblings
+     * to match the primary. On periodic drift checks we skip this
+     * (they're already playing/paused) to avoid re-triggering
+     * play() on videos that are fine.
+     */
+    const seekSiblingsToDate = (mirrorPlayState: boolean) => {
+      const pIdx = this.viewports.getPrimaryIndex()
+      const pPanel = this.panelStates[pIdx]
+      const pDataset = pPanel?.dataset
+
+      let primaryDate: Date | null = null
+      if (pDataset?.startTime && pDataset.endTime && primaryVideo.duration > 0) {
+        primaryDate = videoTimeToDate(
+          primaryVideo.currentTime,
+          primaryVideo.duration,
+          new Date(pDataset.startTime),
+          new Date(pDataset.endTime),
+        )
+      }
+
+      for (let i = 0; i < this.panelStates.length; i++) {
+        if (i === pIdx) continue
+        const sibPanel = this.panelStates[i]
+        const sibHls = sibPanel?.hlsService
+        const sibVideo = sibHls?.getVideo?.() ?? null
+        if (!sibVideo || sibVideo.readyState < 2) continue
+
+        const sibDataset = sibPanel?.dataset
+        const sibHasRange = !!(sibDataset?.startTime && sibDataset.endTime && sibVideo.duration > 0)
+
+        if (primaryDate && sibHasRange) {
+          const { videoTime: targetTime, position } = dateToVideoTime(
+            primaryDate,
+            sibVideo.duration,
+            new Date(sibDataset!.startTime!),
+            new Date(sibDataset!.endTime!),
+          )
+
+          // Match the sibling's playback speed so it advances through
+          // real-world time at the same pace as the primary, even if
+          // the two videos have different durations (e.g. daily vs
+          // weekly frames). Without this, a shorter sibling finishes
+          // its entire date range while the primary is still early in
+          // its timeline, causing constant drift corrections.
+          const primaryRangeMs = new Date(pDataset!.endTime!).getTime() - new Date(pDataset!.startTime!).getTime()
+          const sibRangeMs = new Date(sibDataset!.endTime!).getTime() - new Date(sibDataset!.startTime!).getTime()
+          if (primaryRangeMs > 0 && sibRangeMs > 0) {
+            // rate = (sib video seconds per real-world ms) / (primary video seconds per real-world ms)
+            // Simplifies to: (sibDuration / sibRangeMs) / (primaryDuration / primaryRangeMs)
+            const rate = (sibVideo.duration / sibRangeMs) / (primaryVideo.duration / primaryRangeMs)
+            // Clamp to browser limits (typically 0.0625–16×)
+            sibVideo.playbackRate = Math.max(0.0625, Math.min(16, rate))
+          }
+
+          if (position === 'inside') {
+            this.viewports.setOutOfRange(i, false)
+            sibVideo.currentTime = targetTime
+            if (mirrorPlayState) {
+              if (primaryVideo.paused && !sibVideo.paused) {
+                sibVideo.pause()
+              } else if (!primaryVideo.paused && sibVideo.paused) {
+                sibVideo.play().catch(() => { /* autoplay blocked */ })
+              }
+            }
+          } else {
+            this.viewports.setOutOfRange(i, true)
+            sibVideo.currentTime = targetTime
+            if (!sibVideo.paused) sibVideo.pause()
+          }
+        } else {
+          this.viewports.setOutOfRange(i, false)
+          if (mirrorPlayState) {
+            if (primaryVideo.paused && !sibVideo.paused) {
+              sibVideo.pause()
+            } else if (!primaryVideo.paused && sibVideo.paused) {
+              sibVideo.play().catch(() => { /* autoplay blocked */ })
+            }
+          }
+        }
+
+        const sibTex = sibPanel?.videoTexture
+        if (sibTex) sibTex.needsUpdate = true
+      }
+    }
+
+    /**
+     * Periodic drift correction — only seeks siblings that have
+     * drifted beyond the threshold. Much cheaper than constant-seek
+     * because most of the time no sibling needs correction.
+     */
+    const DRIFT_THRESHOLD_S = 1.0
+    const DRIFT_CHECK_MS = 5000
+
+    const driftCheck = () => {
+      if (primaryVideo.paused) return
+
+      const pIdx = this.viewports.getPrimaryIndex()
+      const pPanel = this.panelStates[pIdx]
+      const pDataset = pPanel?.dataset
+
+      let primaryDate: Date | null = null
+      if (pDataset?.startTime && pDataset.endTime && primaryVideo.duration > 0) {
+        primaryDate = videoTimeToDate(
+          primaryVideo.currentTime,
+          primaryVideo.duration,
+          new Date(pDataset.startTime),
+          new Date(pDataset.endTime),
+        )
+      }
+      if (!primaryDate) return
+
+      for (let i = 0; i < this.panelStates.length; i++) {
+        if (i === pIdx) continue
+        const sibPanel = this.panelStates[i]
+        const sibVideo = sibPanel?.hlsService?.getVideo?.() ?? null
+        if (!sibVideo || sibVideo.readyState < 2 || sibVideo.paused) continue
+
+        const sibDataset = sibPanel?.dataset
+        if (!sibDataset?.startTime || !sibDataset.endTime || sibVideo.duration <= 0) continue
+
+        const { videoTime: targetTime, position } = dateToVideoTime(
+          primaryDate,
+          sibVideo.duration,
+          new Date(sibDataset.startTime),
+          new Date(sibDataset.endTime),
+        )
+
+        if (position === 'inside' && Math.abs(sibVideo.currentTime - targetTime) > DRIFT_THRESHOLD_S) {
+          logger.debug(`[App] Drift correction: panel ${i} off by ${(sibVideo.currentTime - targetTime).toFixed(1)}s`)
+          sibVideo.currentTime = targetTime
+        }
+      }
+    }
+
+    // --- Wire event listeners ---
+
+    const onPlay = () => seekSiblingsToDate(true)
+    const onPause = () => {
+      for (let i = 0; i < this.panelStates.length; i++) {
+        if (i === this.viewports.getPrimaryIndex()) continue
+        const sibVideo = this.panelStates[i]?.hlsService?.getVideo?.() ?? null
+        if (sibVideo && !sibVideo.paused) sibVideo.pause()
+      }
+    }
+    const onSeeked = () => seekSiblingsToDate(true)
+
+    primaryVideo.addEventListener('play', onPlay)
+    primaryVideo.addEventListener('pause', onPause)
+    primaryVideo.addEventListener('seeked', onSeeked)
+    this.primaryVideoSyncListeners.push(
+      { event: 'play', handler: onPlay as EventListener },
+      { event: 'pause', handler: onPause as EventListener },
+      { event: 'seeked', handler: onSeeked as EventListener },
+    )
+    this.primaryVideoSyncTarget = primaryVideo
+
+    // Start the periodic drift checker
+    this.driftCheckInterval = setInterval(driftCheck, DRIFT_CHECK_MS)
+
+    // Run once immediately so siblings reflect the primary's current
+    // state without waiting for a user action.
+    seekSiblingsToDate(true)
+  }
+
+  /**
+   * Detach all sibling-sync listeners from the previous primary video,
+   * stop the drift-check timer, and clear any lingering out-of-range
+   * state from siblings.
+   */
+  private detachPrimaryVideoSync(): void {
+    if (this.driftCheckInterval !== null) {
+      clearInterval(this.driftCheckInterval)
+      this.driftCheckInterval = null
+    }
+    const target = this.primaryVideoSyncTarget
+    if (target) {
+      for (const { event, handler } of this.primaryVideoSyncListeners) {
+        target.removeEventListener(event, handler)
+      }
+    }
+    this.primaryVideoSyncListeners = []
+    this.primaryVideoSyncTarget = null
+    // Reset sibling playback rates to 1.0 so videos don't stay at
+    // the adjusted speed after sync is torn down.
+    for (let i = 0; i < this.panelStates.length; i++) {
+      this.viewports.setOutOfRange(i, false)
+      const sibVideo = this.panelStates[i]?.hlsService?.getVideo?.() ?? null
+      if (sibVideo) sibVideo.playbackRate = 1.0
+    }
+  }
+
+  /**
+   * Dispose the video texture and HLS service for a specific panel.
+   * If `slot` is omitted, operates on the primary panel (common case
+   * for single-viewport flows like goHome / loadDataset teardown).
+   *
+   * When tearing down the primary, also resets the shared playback
+   * state; non-primary slots don't touch that state.
+   */
+  private cleanupPanelVideo(slot?: number): void {
+    const targetSlot = slot ?? this.viewports.getPrimaryIndex()
+    const panel = this.panelStates[targetSlot]
+    if (!panel) return
+
+    const isPrimary = targetSlot === this.viewports.getPrimaryIndex()
+    if (isPrimary) {
+      this.detachPrimaryVideoSync()
+      stopPlaybackLoop(this.playback)
+    }
+
+    if (panel.videoTexture) {
+      panel.videoTexture.dispose()
+      panel.videoTexture = null
+    }
+    if (panel.hlsService) {
+      panel.hlsService.destroy()
+      panel.hlsService = null
+    }
+
+    if (isPrimary) {
+      this.appState.isPlaying = false
+      resetPlaybackState(this.playback)
+    }
+  }
+
+  /**
+   * Legacy alias for `cleanupPanelVideo(primarySlot)`. Kept so
+   * existing call sites that mean "clean up the video that's
+   * currently playing" stay readable.
+   */
+  private cleanupVideo(): void {
+    this.cleanupPanelVideo()
+  }
+
+  /**
+   * Tear down datasets in every panel — used by goHome and unloadForTour.
+   * Clears dataset + hls + video texture per slot and resets shared
+   * Delegates to the per-panel unload path so every slot gets the
+   * same dataset/video teardown AND renderer reset (back to default
+   * Earth materials) behavior.
+   */
+  private async unloadAllPanels(): Promise<void> {
+    this.detachPrimaryVideoSync()
+    stopPlaybackLoop(this.playback)
     this.appState.isPlaying = false
     resetPlaybackState(this.playback)
+    for (let slot = 0; slot < this.panelStates.length; slot++) {
+      await this.unloadPanelDataset(slot)
+    }
+    this.infoDisplayOverride = null
+    this.refreshPanelLegends()
+    this.renderInfoPanel()
+  }
+
+  /**
+   * Unload a single panel's dataset — video, texture, metadata.
+   * Called by the tour engine's `unloadDataset` task after it
+   * resolves a local `datasetID` handle to a slot. Keeps the rest
+   * of the panels intact, unlike `unloadAllPanels`.
+   *
+   * When the target slot is the primary, also tears down the shared
+   * playback state. Non-primary slots leave the playback UI alone.
+   */
+  private async unloadPanelDataset(slot: number): Promise<void> {
+    const panel = this.panelStates[slot]
+    if (!panel) return
+    const isPrimarySlot = slot === this.viewports.getPrimaryIndex()
+
+    // Clean the video stream, texture, and (if primary) the shared
+    // playback state. cleanupPanelVideo handles both.
+    this.cleanupPanelVideo(slot)
+
+    // Clear the dataset reference and reset the base earth on that
+    // specific panel's renderer so it doesn't keep showing a stale
+    // texture.
+    panel.dataset = null
+    const renderer = this.viewports.getRendererAt(slot)
+    if (renderer) {
+      renderer.removeCloudOverlay?.()
+      renderer.removeNightLights?.()
+      renderer.disableSunLighting?.()
+      try {
+        await renderer.loadDefaultEarthMaterials?.()
+        const sun = getSunPosition(new Date())
+        renderer.enableSunLighting?.(sun.lat, sun.lng)
+      } catch (err) {
+        logger.warn('[App] Earth material reload after unload failed:', err)
+      }
+    }
+
+    // If we just cleared the currently-displayed slot in the info
+    // panel, drop the override so renderInfoPanel picks a new target.
+    if (this.infoDisplayOverride === slot) {
+      this.infoDisplayOverride = null
+    }
+
+    // Reflect the clear in the primary UI if applicable.
+    if (isPrimarySlot) {
+      this.appState.currentDataset = null
+    }
+
+    this.refreshPanelLegends()
+    this.renderInfoPanel()
   }
 
   // --- Event listeners ---
 
-  /** Wire up all DOM event listeners: transport controls, keyboard shortcuts, browse toggle, scrubber, auto-rotate, and mute. */
+  /** Wire up all DOM event listeners: transport controls, keyboard shortcuts, scrubber, mute. */
   setupEventListeners(): void {
     document.getElementById('home-btn')?.addEventListener('click', () => this.goHome())
 
-    // Browse panel collapse/expand toggle
-    const browseToggle = document.getElementById('browse-toggle')
-    const browseOverlay = document.getElementById('browse-overlay')
-    if (browseToggle && browseOverlay) {
-      browseToggle.addEventListener('click', () => {
-        const collapsed = browseOverlay.classList.toggle('collapsed')
-        browseToggle.innerHTML = collapsed ? '&#9656;' : '&#9666;'
-        browseToggle.setAttribute('aria-label', collapsed ? 'Open dataset browser' : 'Close dataset browser')
-        browseToggle.setAttribute('aria-expanded', String(!collapsed))
-        this.announce(collapsed ? 'Dataset browser closed' : 'Dataset browser opened')
-        if (collapsed) {
-          browseToggle.focus()
-        } else {
-          const searchInput = document.getElementById('browse-search') as HTMLInputElement | null
-          if (searchInput && !this.isMobile) searchInput.focus()
-        }
-      })
-    }
+    // Browse panel opens via the Tools menu's Browse button (see
+    // openBrowsePanel). No standalone peek-out toggle tab.
 
     // Transport controls — delegate to playback module
     document.getElementById('rewind-btn')?.addEventListener('click', () =>
@@ -782,22 +1679,7 @@ class InteractiveSphere {
       })
     }
 
-    // Auto-rotate
-    const rotateBtns = [
-      document.getElementById('auto-rotate-btn'),
-      document.getElementById('auto-rotate-standalone')
-    ].filter(Boolean) as HTMLElement[]
-    for (const btn of rotateBtns) {
-      btn.addEventListener('click', () => {
-        if (!this.renderer) return
-        const active = this.renderer.toggleAutoRotate()
-        for (const b of rotateBtns) {
-          b.style.color = active ? '#4da6ff' : '#aaa'
-          b.style.borderColor = active ? '#4da6ff' : '#555'
-        }
-        this.announce(active ? 'Auto-rotation enabled' : 'Auto-rotation disabled')
-      })
-    }
+    // Auto-rotate lives inside the Tools menu now — see toolsMenuUI.ts.
 
     // Scrubber
     const scrubber = document.getElementById('scrubber') as HTMLInputElement
@@ -837,7 +1719,7 @@ class InteractiveSphere {
   /** Load a dataset selected via the browse panel, updating URL and shifting focus to playback controls. */
   private async selectDatasetFromBrowse(id: string): Promise<void> {
     const gen = ++this.loadGeneration
-    hideBrowseUI()
+    this.dismissBrowseAfterLoad()
     closeChat()
     this.announce('Loading dataset\u2026')
     this.showLoadingScreen('Loading dataset\u2026', 20)
@@ -899,20 +1781,24 @@ class InteractiveSphere {
     document.getElementById('home-btn')?.classList.add('hidden')
   }
 
-  /** Navigate back to the default Earth view: tear down the current dataset, reload Earth materials, and re-show the browse panel. */
+  /** Navigate back to the default Earth view: tear down every panel's dataset, reload Earth materials, and re-show the browse panel. */
   private async goHome(): Promise<void> {
     this.stopTour()
-    this.cleanupVideo()
+    await this.unloadAllPanels()
     clearLegendCache()
     this.appState.currentDataset = null
     this.showPlaybackControls(false)
     this.showTimeLabel(false)
     document.getElementById('info-panel')?.classList.add('hidden')
     this.hideHomeButton()
-    // Reset overlays that tours may have turned on
-    this.renderer?.toggleLabels?.(false)
-    this.renderer?.toggleBoundaries?.(false)
-    syncMapControlState(false, false)
+    // Reset overlays that tours may have turned on. In multi-view
+    // mode we fan out across every panel so siblings don't keep
+    // stale labels/borders after home.
+    for (const r of this.viewports.getAll()) {
+      r.toggleLabels?.(false)
+      r.toggleBoundaries?.(false)
+    }
+    syncToolsMenuState({ labels: false, borders: false, terrain: false, autoRotate: false })
     window.history.pushState({}, '', window.location.pathname)
 
     this.showLoadingScreen('Loading Earth\u2026', 20)
@@ -955,12 +1841,30 @@ class InteractiveSphere {
     await this.startTour(url, gen)
   }
 
-  /** Clean up all resources: video streams, textures, and the WebGL renderer. */
-  dispose(): void {
-    this.cleanupVideo()
-    if (this.renderer) {
-      this.renderer.dispose()
+  /**
+   * Synchronously release video/HLS resources across all panels
+   * without the async Earth-material reload that `unloadAllPanels`
+   * performs. Used by `dispose()` where the renderers are about to
+   * be torn down and awaiting async work is neither necessary nor
+   * safe.
+   */
+  private teardownAllPanelResources(): void {
+    this.detachPrimaryVideoSync()
+    stopPlaybackLoop(this.playback)
+    this.appState.isPlaying = false
+    resetPlaybackState(this.playback)
+    for (const panel of this.panelStates) {
+      if (panel.videoTexture) { panel.videoTexture.dispose(); panel.videoTexture = null }
+      if (panel.hlsService) { panel.hlsService.destroy(); panel.hlsService = null }
+      panel.dataset = null
     }
+  }
+
+  /** Clean up all resources: video streams, textures, and every viewport renderer. */
+  dispose(): void {
+    this.teardownAllPanelResources()
+    this.viewports.dispose()
+    this.panelStates = []
   }
 }
 

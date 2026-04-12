@@ -1,99 +1,26 @@
 /**
- * Map Controls UI — floating toolbar for MapLibre overlay toggles.
+ * Map Controls positioning helper.
  *
- * Provides direct buttons for labels, boundaries, terrain, and clearing
- * markers/highlights without needing the chat.
+ * The actual toolbar UI lives in `toolsMenuUI.ts` now — this module
+ * just exposes the positioning helper that sits the map-controls
+ * bar above the playback transport when a video is loaded. Kept as a
+ * separate file so callers (main.ts) don't need to pull in the full
+ * tools-menu module just to reposition.
  */
 
-import type { MapRenderer } from '../services/mapRenderer'
-
-/** Show the map controls toolbar and wire events to the MapRenderer.
- *  Idempotent — safe to call multiple times (skips if already initialized). */
-export function initMapControls(renderer: MapRenderer): void {
-  const container = document.getElementById('map-controls')
-  if (!container || container.dataset.initialized) return
-  container.dataset.initialized = 'true'
-
-  // Build the buttons
-  container.innerHTML = `
-    <button type="button" class="map-ctrl-btn" id="map-ctrl-labels" title="Toggle geographic labels" aria-label="Toggle geographic labels" aria-pressed="false">Labels</button>
-    <button type="button" class="map-ctrl-btn" id="map-ctrl-borders" title="Toggle country borders" aria-label="Toggle country borders" aria-pressed="false">Borders</button>
-    <button type="button" class="map-ctrl-btn" id="map-ctrl-terrain" title="Toggle 3D terrain" aria-label="Toggle 3D terrain" aria-pressed="false">Terrain</button>
-    <button type="button" class="map-ctrl-btn" id="map-ctrl-clear" title="Clear markers &amp; highlights" aria-label="Clear markers and highlights">Clear</button>
-  `
-
-  // Show the toolbar
-  container.classList.remove('hidden')
-
-  // Wire toggle buttons
-  const labelsBtn = document.getElementById('map-ctrl-labels')!
-  const bordersBtn = document.getElementById('map-ctrl-borders')!
-  const terrainBtn = document.getElementById('map-ctrl-terrain')!
-  const clearBtn = document.getElementById('map-ctrl-clear')!
-
-  labelsBtn.addEventListener('click', () => {
-    const shown = renderer.toggleLabels()
-    labelsBtn.classList.toggle('active', shown)
-    labelsBtn.setAttribute('aria-pressed', String(shown))
-  })
-
-  bordersBtn.addEventListener('click', () => {
-    const shown = renderer.toggleBoundaries()
-    bordersBtn.classList.toggle('active', shown)
-    bordersBtn.setAttribute('aria-pressed', String(shown))
-  })
-
-  terrainBtn.addEventListener('click', () => {
-    const enabled = renderer.toggleTerrain()
-    terrainBtn.classList.toggle('active', enabled)
-    terrainBtn.setAttribute('aria-pressed', String(enabled))
-  })
-
-  clearBtn.addEventListener('click', () => {
-    renderer.clearMarkers()
-    renderer.clearHighlights()
-  })
-
-  // Re-position on window resize in case playback controls change height
-  const onResize = () => updateMapControlsPosition()
-  window.addEventListener('resize', onResize)
-}
-
 /**
- * Sync map control button states to match the actual renderer state.
- * Call this after tours or goHome change labels/borders/terrain
- * without going through the UI buttons.
- */
-export function syncMapControlState(labels: boolean, borders: boolean): void {
-  const labelsBtn = document.getElementById('map-ctrl-labels')
-  const bordersBtn = document.getElementById('map-ctrl-borders')
-  if (labelsBtn) {
-    labelsBtn.classList.toggle('active', labels)
-    labelsBtn.setAttribute('aria-pressed', String(labels))
-  }
-  if (bordersBtn) {
-    bordersBtn.classList.toggle('active', borders)
-    bordersBtn.setAttribute('aria-pressed', String(borders))
-  }
-}
-
-/**
- * Update the position of the map controls to sit above the playback controls
- * or auto-rotate button, whichever is visible.
+ * Update the bottom offset of the map-controls host so it sits above
+ * the playback controls when a video is loaded. Called from
+ * showPlaybackControls and on window resize.
  */
 export function updateMapControlsPosition(): void {
   const mapControls = document.getElementById('map-controls')
   if (!mapControls || mapControls.classList.contains('hidden')) return
 
   const playback = document.getElementById('playback-controls')
-  const standalone = document.getElementById('auto-rotate-standalone')
-
-  // Calculate offset: sit above whichever bottom-right element is visible
   if (playback && !playback.classList.contains('hidden')) {
     const height = playback.offsetHeight
     mapControls.style.bottom = `${height + 16}px`
-  } else if (standalone && !standalone.classList.contains('hidden')) {
-    mapControls.style.bottom = '3.2rem'
   } else {
     mapControls.style.bottom = '0.75rem'
   }

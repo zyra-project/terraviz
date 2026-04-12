@@ -1,0 +1,71 @@
+{
+  "_comment": "Reference fixture for Phase 3 setEnvView tour support. Derived from a real legacy SOS tour provided by the user. Exercises 1globe→2globes→1globe transitions with worldIndex routing and unloadDataset-by-handle. Image paths and some dataset IDs are placeholders — the engine gracefully logs and skips unknown datasets so the fixture still exercises the task dispatch even without every reference asset present.",
+  "tourTasks": [
+    { "resetCameraAndZoomOut": "" },
+
+    { "loadDataset": {
+      "id": "ID_PLACEHOLDER_A",
+      "datasetID": "dataset1",
+      "worldIndex": 1,
+      "vizName": "image"
+    }},
+    { "pauseForInput": "" },
+    { "unloadDataset": "dataset1" },
+    { "resetCameraAndZoomOut": "" },
+
+    { "loadDataset": {
+      "id": "ID_PLACEHOLDER_B",
+      "datasetID": "dataset2",
+      "worldIndex": 1,
+      "vizName": "image"
+    }},
+    { "pauseForInput": "" },
+    { "unloadDataset": "dataset2" },
+    { "resetCameraAndZoomOut": "" },
+
+    { "setEnvView": "2globes" },
+
+    { "loadDataset": {
+      "id": "ID_PLACEHOLDER_C",
+      "datasetID": "dataset3",
+      "worldIndex": 1,
+      "vizName": "image"
+    }},
+    { "loadDataset": {
+      "id": "ID_PLACEHOLDER_D",
+      "datasetID": "dataset4",
+      "worldIndex": 2,
+      "vizName": "image"
+    }},
+
+    { "datasetAnimation": {
+      "animation": "on",
+      "frameRate": "5 fps"
+    }},
+
+    { "pauseForInput": "" },
+
+    { "unloadAllDatasets": "" },
+
+    { "setEnvView": "1globe" },
+
+    { "loadDataset": {
+      "id": "ID_PLACEHOLDER_E",
+      "datasetID": "dataset5",
+      "worldIndex": 1,
+      "vizName": "image"
+    }},
+    { "setGlobeRotationRate": 0.15 },
+    { "pauseForInput": "" },
+
+    { "setGlobeRotationRate": 0 },
+    { "unloadAllDatasets": "" },
+
+    { "flyTo": {
+      "lat": 40.0,
+      "lon": -75.0,
+      "altmi": 850.0,
+      "animated": true
+    }}
+  ]
+}

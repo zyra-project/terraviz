@@ -275,17 +275,27 @@ function createGlobeStyle(): StyleSpecification {
 }
 
 /**
- * Module-level reference to the currently active MapRenderer instance.
- * Set in init() and cleared in dispose(). Used by screenshotService so
- * screenshot consumers (vision flow, feedback form) can drive a proper
- * triggerRepaint + once('render') cycle rather than fighting the WebGL
- * drawing-buffer preservation quirks on their own.
+ * Module-level reference to the "active" (primary) MapRenderer instance.
+ *
+ * In single-viewport mode this is the only renderer. In multi-viewport mode
+ * (ViewportManager) this points at whichever panel is currently primary.
+ * ViewportManager is responsible for calling setActiveMapRenderer() whenever
+ * the primary changes.
+ *
+ * Used by screenshotService so screenshot consumers (vision flow, feedback
+ * form) can drive a proper triggerRepaint + once('render') cycle rather than
+ * fighting the WebGL drawing-buffer preservation quirks on their own.
  */
 let activeRenderer: MapRenderer | null = null
 
-/** Get the currently active MapRenderer, if any. */
+/** Get the currently active (primary) MapRenderer, if any. */
 export function getActiveMapRenderer(): MapRenderer | null {
   return activeRenderer
+}
+
+/** Set the active (primary) MapRenderer. Called by ViewportManager. */
+export function setActiveMapRenderer(renderer: MapRenderer | null): void {
+  activeRenderer = renderer
 }
 
 /** Max dimension for a captured screenshot — keeps payload small. */
@@ -295,6 +305,7 @@ const SCREENSHOT_MAX_SIZE = 512
 export class MapRenderer implements GlobeRenderer {
   private map: MaplibreMap | null = null
   private container: HTMLElement | null = null
+  private canvasId: string = 'globe-canvas'
   private autoRotateInterval: number | null = null
   private autoRotating = false
   private rotationRate = 1.0 // 1.0 = default (30° per 10s)
@@ -304,11 +315,21 @@ export class MapRenderer implements GlobeRenderer {
 
   /**
    * Initialize the MapLibre map inside the given container element.
-   * The container must already be in the DOM with non-zero dimensions.
+   * The container element is used directly as MapLibre's parent — the
+   * caller is responsible for sizing and placing it in the DOM tree.
+   *
+   * In single-viewport mode (`main.ts`) the container is typically a
+   * dedicated `<div class="map-viewport">` inside `#map-grid`. In
+   * multi-viewport mode ViewportManager creates one such div per
+   * panel. MapRenderer no longer creates its own wrapper.
+   *
+   * @param options.canvasId ID to set on the WebGL canvas element.
+   * Defaults to `'globe-canvas'` for single-viewport backward compat;
+   * ViewportManager passes unique IDs per panel to avoid DOM collisions.
    */
-  init(container: HTMLElement): void {
+  init(container: HTMLElement, options?: { canvasId?: string }): void {
     this.container = container
-    activeRenderer = this
+    this.canvasId = options?.canvasId ?? 'globe-canvas'
 
     // Inject dark popup styles (idempotent — skips if already present)
     if (!document.getElementById('sos-popup-style')) {
@@ -334,22 +355,8 @@ export class MapRenderer implements GlobeRenderer {
       document.head.appendChild(style)
     }
 
-    // MapLibre needs a wrapper div — it manages its own canvas internally.
-    const mapDiv = document.createElement('div')
-    mapDiv.id = 'maplibre-container'
-    mapDiv.style.width = '100%'
-    mapDiv.style.height = '100%'
-    mapDiv.style.background = '#000'
-    // Insert before the #ui div so it sits behind UI overlays in z-order
-    const uiDiv = container.querySelector('#ui')
-    if (uiDiv) {
-      container.insertBefore(mapDiv, uiDiv)
-    } else {
-      container.appendChild(mapDiv)
-    }
-
     this.map = new maplibregl.Map({
-      container: mapDiv,
+      container,
       style: createGlobeStyle(),
       center: DEFAULT_CENTER,
       zoom: DEFAULT_ZOOM,
@@ -393,7 +400,7 @@ export class MapRenderer implements GlobeRenderer {
     const canvas = this.map.getCanvas()
     canvas.setAttribute('role', 'img')
     canvas.setAttribute('aria-label', 'Interactive 3D globe visualization')
-    canvas.id = 'globe-canvas'
+    canvas.id = this.canvasId
 
     // Add earth tile layer (2d — renders below labels), then skybox layer
     // (3d — renders after everything, uses depth test for stars behind globe).
@@ -812,11 +819,16 @@ export class MapRenderer implements GlobeRenderer {
     // Wait for earth layer to be created (it's added on map 'load')
     if (!this.earthLayer) {
       logger.debug('[MapRenderer] loadDefaultEarthMaterials: waiting for earth layer...')
+      // Generous timeout: in multi-viewport mode four maps compete for
+      // bandwidth and the primary's `load` event can take >10s on
+      // mobile Safari. 30s keeps the poll bounded without being
+      // fatal for slow connections.
+      const EARTH_LAYER_TIMEOUT_MS = 30_000
       await new Promise<void>((resolve, reject) => {
         const start = Date.now()
         const check = () => {
           if (this.earthLayer) return resolve()
-          if (!this.map || Date.now() - start > 10_000) {
+          if (!this.map || Date.now() - start > EARTH_LAYER_TIMEOUT_MS) {
             return reject(new Error('[MapRenderer] Timed out waiting for earth layer'))
           }
           setTimeout(check, 50)
@@ -982,16 +994,21 @@ export class MapRenderer implements GlobeRenderer {
 
   // --- Disposal ---
 
-  /** Remove the map and clean up resources. */
+  /**
+   * Remove the map and clean up resources. MapLibre's `map.remove()`
+   * tears down its internal DOM inside the caller-provided container,
+   * but leaves the container element itself intact — ViewportManager
+   * owns the container lifecycle.
+   *
+   * If this was the active (primary) renderer, clears the singleton
+   * slot so screenshotService doesn't hand out a disposed reference.
+   */
   dispose(): void {
     this.stopAutoRotate()
     if (this.map) {
       this.map.remove()
       this.map = null
     }
-    // Remove the wrapper div
-    const mapDiv = this.container?.querySelector('#maplibre-container')
-    if (mapDiv) mapDiv.remove()
     this.container = null
     if (activeRenderer === this) {
       activeRenderer = null

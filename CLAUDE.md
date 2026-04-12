@@ -28,6 +28,7 @@ npm run build:desktop # tsc + vite build + tauri build
 | `src/main.ts` | App entry — boots MapLibre renderer, orchestrates dataset loading |
 | `src/types/index.ts` | All shared types (`Dataset`, `ChatMessage`, `AppState`, `DocentConfig`…) |
 | `src/services/mapRenderer.ts` | MapLibre GL JS globe — GIBS tiles, navigation, markers, terrain |
+| `src/services/viewportManager.ts` | Multi-globe orchestrator — 1/2/4 synchronised MapRenderer instances in a CSS grid, camera lockstep, panel promotion |
 | `src/services/earthTileLayer.ts` | CustomLayerInterface — day/night blend, clouds, specular, sun, skybox |
 | `src/services/dataService.ts` | Fetches SOS catalog, merges enriched metadata, 1-hour cache |
 | `src/services/datasetLoader.ts` | Loads a dataset onto the globe (HLS or image); manages info panel |
@@ -41,8 +42,10 @@ npm run build:desktop # tsc + vite build + tauri build
 | `src/ui/chatUI.ts` | Orbit chat panel — rendering, settings, trigger positioning |
 | `src/ui/browseUI.ts` | Dataset browse/search overlay |
 | `src/ui/downloadUI.ts` | Download manager panel — view/delete cached datasets (desktop only) |
-| `src/ui/mapControlsUI.ts` | Map controls overlay — labels, boundaries, terrain toggles |
+| `src/ui/mapControlsUI.ts` | Map controls positioning helper — keeps the Tools bar above the playback transport |
 | `src/ui/playbackController.ts` | Playback transport controls + portrait-mobile positioning |
+| `src/ui/toolsMenuUI.ts` | Tools popover — Browse button, view toggles (labels, borders, terrain, auto-rotate, info, legend), layout picker, Orbit settings entry point |
+| `src/utils/viewPreferences.ts` | Persists Dataset info + Legend toggle state to localStorage |
 
 ---
 
@@ -118,6 +121,18 @@ Two elements track the info panel height as it animates open:
 | `> 768px` | Desktop |
 | `≤ 768px` | Mobile — panels slide from edges |
 | `≤ 600px` + portrait | Portrait phone — browse card titles on own line; playback controls lift above info panel |
+
+---
+
+## Tours
+
+The tour engine (`src/services/tourEngine.ts`) plays back SOS-format tour JSON files. Each tour is a sequence of tasks executed in order. The following tour tasks are relevant to the multi-globe feature:
+
+| Task | Behaviour |
+|---|---|
+| `setEnvView` | `callbacks.setEnvView()` — switches layout (1globe/2globes/4globes) |
+| `unloadDataset` | `callbacks.unloadDatasetAt()` — unloads a specific dataset by tour handle |
+| `worldIndex` on `loadDataset` | Routes dataset load to a specific panel slot (1-indexed) |
 
 ---
 

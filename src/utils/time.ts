@@ -146,6 +146,48 @@ export function videoTimeToDate(
   return new Date(rawMs)
 }
 
+/**
+ * Map a real-world date to the corresponding video playback time in a
+ * dataset's temporal range — the inverse of {@link videoTimeToDate}.
+ *
+ * Returns an object describing whether the date falls inside the
+ * dataset's range, and the clamped `videoTime` that represents it:
+ *
+ * - `position: 'inside'`  — date is within `[startTime, endTime]`
+ * - `position: 'before'`  — date is before `startTime`; `videoTime` is 0
+ * - `position: 'after'`   — date is after `endTime`;   `videoTime` is clamped to `videoDuration`
+ *
+ * Callers driving multi-panel playback sync use this to seek sibling
+ * videos to match the primary's real-world date, and use the
+ * `position` field to freeze out-of-range panels at their nearest
+ * boundary and mark them visually.
+ */
+export function dateToVideoTime(
+  date: Date,
+  videoDuration: number,
+  startTime: Date,
+  endTime: Date,
+): { videoTime: number; position: 'before' | 'inside' | 'after' } {
+  if (videoDuration <= 0) {
+    return { videoTime: 0, position: 'inside' }
+  }
+  const dateMs = date.getTime()
+  const startMs = startTime.getTime()
+  const endMs = endTime.getTime()
+  if (dateMs < startMs) {
+    return { videoTime: 0, position: 'before' }
+  }
+  if (dateMs > endMs) {
+    return { videoTime: videoDuration, position: 'after' }
+  }
+  const totalMs = endMs - startMs
+  if (totalMs <= 0) {
+    return { videoTime: 0, position: 'inside' }
+  }
+  const fraction = (dateMs - startMs) / totalMs
+  return { videoTime: fraction * videoDuration, position: 'inside' }
+}
+
 /** Standard snap intervals in ascending order of size */
 const SNAP_INTERVALS = [
   { label: '15min', ms: 15 * 60 * 1000 },

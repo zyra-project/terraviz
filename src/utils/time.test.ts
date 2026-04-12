@@ -6,6 +6,7 @@ import {
   calculateFrameDatetime,
   calculateFrameIndex,
   videoTimeToDate,
+  dateToVideoTime,
   inferDisplayInterval,
   getSunPosition,
 } from './time'
@@ -200,6 +201,95 @@ describe('videoTimeToDate', () => {
     // Half-way through a 1-day range = 12 hours → already on a 6h boundary
     const result = videoTimeToDate(50, 100, start, end, snapMs)
     expect(result.getTime() % snapMs).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// dateToVideoTime — the inverse of videoTimeToDate, used by multi-panel
+// playback sync to seek sibling videos to the primary's real-world date.
+// ---------------------------------------------------------------------------
+describe('dateToVideoTime', () => {
+  const start = new Date('2020-01-01T00:00:00Z')
+  const end = new Date('2020-01-02T00:00:00Z') // 1 day
+
+  it('returns videoTime=0 position=inside for the start date', () => {
+    const { videoTime, position } = dateToVideoTime(start, 100, start, end)
+    expect(videoTime).toBe(0)
+    expect(position).toBe('inside')
+  })
+
+  it('returns videoTime=duration position=inside for the end date', () => {
+    const { videoTime, position } = dateToVideoTime(end, 100, start, end)
+    expect(videoTime).toBe(100)
+    expect(position).toBe('inside')
+  })
+
+  it('returns videoTime at half duration for the midpoint date', () => {
+    const mid = new Date('2020-01-01T12:00:00Z')
+    const { videoTime, position } = dateToVideoTime(mid, 100, start, end)
+    expect(videoTime).toBeCloseTo(50)
+    expect(position).toBe('inside')
+  })
+
+  it('round-trips with videoTimeToDate', () => {
+    // Any videoTime in [0, duration] → date → videoTime should be unchanged
+    for (const t of [0, 13.7, 50, 87.3, 100]) {
+      const date = videoTimeToDate(t, 100, start, end)
+      const { videoTime, position } = dateToVideoTime(date, 100, start, end)
+      expect(videoTime).toBeCloseTo(t, 5)
+      expect(position).toBe('inside')
+    }
+  })
+
+  it('returns position=before and videoTime=0 for dates before the range', () => {
+    const before = new Date('2019-12-31T12:00:00Z')
+    const { videoTime, position } = dateToVideoTime(before, 100, start, end)
+    expect(videoTime).toBe(0)
+    expect(position).toBe('before')
+  })
+
+  it('returns position=after and videoTime=duration for dates after the range', () => {
+    const after = new Date('2020-01-03T00:00:00Z')
+    const { videoTime, position } = dateToVideoTime(after, 100, start, end)
+    expect(videoTime).toBe(100)
+    expect(position).toBe('after')
+  })
+
+  it('handles zero-duration video gracefully', () => {
+    const { videoTime, position } = dateToVideoTime(start, 0, start, end)
+    expect(videoTime).toBe(0)
+    expect(position).toBe('inside')
+  })
+
+  it('handles zero-range dataset (start == end) gracefully', () => {
+    const point = new Date('2020-01-01T00:00:00Z')
+    const { videoTime, position } = dateToVideoTime(point, 100, point, point)
+    expect(videoTime).toBe(0)
+    // Date is both the start and the end, not outside, so 'inside'
+    expect(position).toBe('inside')
+  })
+
+  it('handles two datasets with no temporal overlap', () => {
+    // Primary covers 2020, sibling covers 2023. A midpoint date in 2020
+    // (from the primary) should land BEFORE the sibling's range.
+    const sibStart = new Date('2023-01-01T00:00:00Z')
+    const sibEnd = new Date('2023-12-31T00:00:00Z')
+    const primaryMidpoint = new Date('2020-07-01T00:00:00Z')
+    const { videoTime, position } = dateToVideoTime(primaryMidpoint, 100, sibStart, sibEnd)
+    expect(position).toBe('before')
+    expect(videoTime).toBe(0)
+  })
+
+  it('handles partial overlap correctly within the overlap window', () => {
+    // Primary 2020–2022, sibling 2021–2023. A date in 2021 is inside both.
+    const sibStart = new Date('2021-01-01T00:00:00Z')
+    const sibEnd = new Date('2023-01-01T00:00:00Z')
+    // 2021-07-02 is ~25% through the sibling's 2-year range.
+    const inOverlap = new Date('2021-07-02T12:00:00Z')
+    const { videoTime, position } = dateToVideoTime(inOverlap, 100, sibStart, sibEnd)
+    expect(position).toBe('inside')
+    expect(videoTime).toBeGreaterThan(24)
+    expect(videoTime).toBeLessThan(26)
   })
 })
 

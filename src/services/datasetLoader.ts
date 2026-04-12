@@ -42,6 +42,17 @@ export interface DatasetLoaderCallbacks {
   showTimeLabel: (show: boolean) => void
 }
 
+/**
+ * Options controlling which singular UI affordances a load call is
+ * allowed to touch. Non-primary panel loads pass `isPrimary: false`
+ * so they don't clobber the scrubber, mute button, playback controls,
+ * time label, or appState fields that belong to the primary panel.
+ */
+export interface DatasetLoaderOptions {
+  /** Whether this load is targeting the primary viewport. Default `true`. */
+  isPrimary?: boolean
+}
+
 // --- Image loading ---
 
 /** Load an image dataset onto the globe, trying progressively lower resolutions on mobile. */
@@ -51,7 +62,10 @@ export async function loadImageDataset(
   appState: AppState,
   isMobile: boolean,
   callbacks: DatasetLoaderCallbacks,
+  options: DatasetLoaderOptions = {},
 ): Promise<void> {
+  const isPrimary = options.isPrimary ?? true
+
   // Check for offline-cached version first
   const dl = await getDownload(dataset.id)
   let img: HTMLImageElement
@@ -68,15 +82,19 @@ export async function loadImageDataset(
   }
 
   renderer.updateTexture(img)
-  if (dataset.startTime) {
-    const showTime = isSubDailyPeriod(dataset.period)
-    appState.timeLabel = formatDate(new Date(dataset.startTime), showTime)
-    callbacks.showTimeLabel(true)
-  } else {
-    callbacks.showTimeLabel(false)
+
+  // Only the primary drives the singular time label and playback UI.
+  if (isPrimary) {
+    if (dataset.startTime) {
+      const showTime = isSubDailyPeriod(dataset.period)
+      appState.timeLabel = formatDate(new Date(dataset.startTime), showTime)
+      callbacks.showTimeLabel(true)
+    } else {
+      callbacks.showTimeLabel(false)
+    }
+    callbacks.showPlaybackControls(false)
   }
 
-  callbacks.showPlaybackControls(false)
   logger.info(`[App] Image dataset loaded successfully: ${img.src}`)
 }
 
@@ -127,7 +145,9 @@ export async function loadVideoDataset(
   isMobile: boolean,
   playbackState: PlaybackState,
   callbacks: DatasetLoaderCallbacks,
+  options: DatasetLoaderOptions = {},
 ): Promise<{ hlsService: HLSService; videoTexture: VideoTextureHandle }> {
+  const isPrimary = options.isPrimary ?? true
   const hlsService = new HLSService()
   const video = hlsService.createVideo()
 
@@ -173,14 +193,17 @@ export async function loadVideoDataset(
     }
   })
 
-  // Infer display interval from time range + video duration
-  if (dataset.startTime && dataset.endTime) {
-    const start = new Date(dataset.startTime)
-    const end = new Date(dataset.endTime)
-    playbackState.displayInterval = inferDisplayInterval(start, end, video.duration)
-    logger.info('[App] Inferred display interval:', playbackState.displayInterval)
-  } else {
-    playbackState.displayInterval = null
+  // Infer display interval from time range + video duration.
+  // Only the primary panel's load drives the shared playback state.
+  if (isPrimary) {
+    if (dataset.startTime && dataset.endTime) {
+      const start = new Date(dataset.startTime)
+      const end = new Date(dataset.endTime)
+      playbackState.displayInterval = inferDisplayInterval(start, end, video.duration)
+      logger.info('[App] Inferred display interval:', playbackState.displayInterval)
+    } else {
+      playbackState.displayInterval = null
+    }
   }
 
   // Force first frame decode before attaching to the sphere
@@ -199,27 +222,34 @@ export async function loadVideoDataset(
     // Autoplay blocked — texture will update when user presses play
   }
 
-  // Show mute button only when the stream has audio.
-  // Checked after first-frame decode so webkitAudioDecodedByteCount is populated.
-  const muteBtn = document.getElementById('mute-btn') as HTMLElement | null
-  if (muteBtn) {
-    muteBtn.style.display = hlsService.hasAudio ? '' : 'none'
+  // Show mute button only when the stream has audio. Only the primary
+  // drives the singular mute button visibility — non-primary videos
+  // share the same mute control, so skip if we're not primary.
+  // (The primary's hls service always wins the button.)
+  if (isPrimary) {
+    const muteBtn = document.getElementById('mute-btn') as HTMLElement | null
+    if (muteBtn) {
+      muteBtn.style.display = hlsService.hasAudio ? '' : 'none'
+    }
   }
 
   const videoTexture = renderer.setVideoTexture(video)
   videoTexture.needsUpdate = true
 
-  const scrubber = document.getElementById('scrubber') as HTMLInputElement
-  if (scrubber) {
-    scrubber.max = SCRUBBER_MAX
-    scrubber.value = '0'
-  }
+  // Scrubber + playback transport are singular — primary only.
+  if (isPrimary) {
+    const scrubber = document.getElementById('scrubber') as HTMLInputElement
+    if (scrubber) {
+      scrubber.max = SCRUBBER_MAX
+      scrubber.value = '0'
+    }
 
-  callbacks.showPlaybackControls(true)
-  updatePlayButton(true)
+    callbacks.showPlaybackControls(true)
+    updatePlayButton(true)
 
-  if (dataset.closedCaptionLink) {
-    loadCaptions(video, dataset.closedCaptionLink, playbackState)
+    if (dataset.closedCaptionLink) {
+      loadCaptions(video, dataset.closedCaptionLink, playbackState)
+    }
   }
 
   logger.info('[App] Video dataset loaded, duration:', video.duration, 's')
