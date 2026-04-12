@@ -1,6 +1,6 @@
 {
   "name": "interactive-sphere",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "description": "Interactive WebGL globe with adaptive bitrate environmental data streaming",
   "scripts": {
