@@ -1,0 +1,69 @@
+/**
+ * playback styles — extracted from index.html <style> block.
+ * See docs/CSS_ARCHITECTURE_PLAN.md Step 3.
+ */
+
+/* --- Transport controls --- */
+
+.transport-btn {
+    min-width: 28px;
+    padding: 0.3rem 0.4rem;
+    font-size: 0.7rem;
+    line-height: 1;
+    background: var(--color-surface) !important;
+    border: 1px solid var(--white-o10) !important;
+    color: #ccc !important;
+}
+
+.transport-btn:hover {
+    background: var(--white-o12) !important;
+    color: var(--color-text) !important;
+    border-color: var(--accent-o40) !important;
+}
+
+#time-label {
+    font-size: 0.8rem;
+    font-weight: 500;
+    letter-spacing: 0.03em;
+    padding: 0.4rem 0.7rem;
+    position: absolute;
+    top: 0.75rem;
+    /* Clear the help trigger pill (~80px) + gap */
+    right: 6rem;
+    background: var(--glass-bg-light);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--white-o08);
+    border-radius: 6px;
+}
+/* When the browse overlay is open, the help trigger is hidden,
+   so let the time label return to the corner. */
+body.browse-open #time-label {
+    right: 0.75rem;
+}
+
+#home-btn:hover {
+    background: var(--white-o10) !important;
+    color: var(--color-text) !important;
+    border-color: rgba(255,255,255,0.35) !important;
+}
+
+@media (max-width: 768px) {
+    #home-btn {
+        min-width: 44px;
+        min-height: 44px;
+        font-size: 1rem;
+    }
+
+    .transport-btn {
+        min-width: 40px;
+        min-height: 40px;
+        padding: 0.4rem 0.6rem;
+        font-size: 1rem;
+    }
+
+    #playback-controls input[type="range"] {
+        height: 28px;
+    }
+}
+

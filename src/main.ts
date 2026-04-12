@@ -7,6 +7,11 @@
 
 import { MapRenderer } from './services/mapRenderer'
 import { ViewportManager, type ViewLayout } from './services/viewportManager'
+
+// CSS entry point — all component styles imported in dependency order.
+// Vite bundles these into a single <link> in the production build.
+import './styles/index.css'
+
 import { HLSService } from './services/hlsService'
 import { dataService } from './services/dataService'
 import { formatDate, videoTimeToDate, dateToVideoTime, isSubDailyPeriod, getSunPosition, inferDisplayInterval } from './utils/time'

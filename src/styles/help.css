@@ -1,0 +1,450 @@
+/**
+ * help styles — extracted from index.html <style> block.
+ * See docs/CSS_ARCHITECTURE_PLAN.md Step 3.
+ */
+
+/* --- Help panel --- */
+#help-trigger {
+    position: fixed;
+    top: 0.75rem;
+    right: 0.75rem;
+    z-index: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.7rem;
+    background: var(--glass-bg-light);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--white-o08);
+    border-radius: 18px;
+    color: var(--color-text-secondary);
+    font-size: 0.78rem;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+    min-height: 36px;
+    pointer-events: auto;
+    transition: color 0.15s, border-color 0.15s;
+}
+#help-trigger:hover,
+#help-trigger:focus-visible {
+    color: var(--color-text);
+    border-color: var(--white-o20);
+}
+#help-trigger .help-trigger-icon {
+    font-weight: 600;
+    font-size: 0.95rem;
+    line-height: 1;
+}
+body.browse-open #help-trigger {
+    display: none;
+}
+
+#help-trigger-browse {
+    position: absolute;
+    top: 0.25rem;
+    right: 0;
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--color-surface);
+    border: 1px solid var(--white-o12);
+    border-radius: 50%;
+    color: var(--color-text-secondary);
+    font-weight: 600;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+}
+#help-trigger-browse:hover,
+#help-trigger-browse:focus-visible {
+    color: var(--color-text);
+    border-color: rgba(255, 255, 255, 0.25);
+}
+
+/* Close (✕) button in the browse panel header. Matches the
+   help button visually but anchors to the left of it so
+   both sit in the same top-right cluster. */
+#browse-close {
+    position: absolute;
+    top: 0.25rem;
+    right: 2.25rem;
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--color-surface);
+    border: 1px solid var(--white-o12);
+    border-radius: 50%;
+    color: var(--color-text-secondary);
+    font-weight: 600;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+#browse-close:hover,
+#browse-close:focus-visible {
+    color: var(--color-text);
+    background: var(--white-o12);
+    border-color: rgba(255, 255, 255, 0.25);
+}
+
+#help-panel {
+    position: fixed;
+    /* Desktop: centered modal. Tablet/portrait breakpoints
+       override this to anchor the panel to an edge. */
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(640px, calc(100vw - 3rem));
+    max-height: min(80vh, calc(100vh - 4rem));
+    z-index: 650;
+    display: flex;
+    flex-direction: column;
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--white-o08);
+    border-radius: 8px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+    color: var(--color-text);
+    pointer-events: auto;
+    overflow: hidden;
+}
+#help-panel.hidden {
+    display: none;
+}
+
+/* Desktop backdrop — dims the rest of the app behind the
+   centered modal. Hidden at tablet and portrait breakpoints
+   where the panel anchors to an edge instead. */
+#help-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 640;
+    background: rgba(0, 0, 0, 0.5);
+    pointer-events: auto;
+}
+#help-backdrop.hidden {
+    display: none;
+}
+
+#help-header {
+    display: flex;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--color-surface);
+    flex-shrink: 0;
+}
+#help-title {
+    font-size: 0.9rem;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--color-text);
+    flex: 1;
+}
+#help-close {
+    display: none; /* shown only on portrait phones */
+    width: 36px;
+    height: 36px;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid var(--white-o08);
+    border-radius: 4px;
+    color: var(--color-text-secondary);
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+#help-close:hover,
+#help-close:focus-visible {
+    color: var(--color-text);
+    border-color: var(--white-o20);
+}
+
+.help-tablist {
+    display: flex;
+    gap: 0;
+    padding: 0 1rem;
+    border-bottom: 1px solid var(--color-surface);
+    flex-shrink: 0;
+}
+.help-tab {
+    flex: 1;
+    padding: 0.6rem 0.75rem;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--color-text-dim);
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+}
+.help-tab:hover {
+    color: #ccc;
+}
+.help-tab.active,
+.help-tab[aria-selected="true"] {
+    color: var(--color-text);
+    border-bottom-color: var(--color-accent);
+}
+
+.help-tabpanel {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem 1.25rem;
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+.help-tabpanel.hidden {
+    display: none;
+}
+
+.help-guide-section {
+    margin: 0 0 1.25rem;
+}
+.help-guide-section:last-child {
+    margin-bottom: 0;
+}
+.help-guide-section h3 {
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+    margin: 0 0 0.4rem;
+}
+.help-guide-section ul {
+    margin: 0;
+    padding-left: 1.1rem;
+    color: #c8ccd4;
+}
+.help-guide-section li {
+    margin-bottom: 0.25rem;
+}
+.help-guide-section p {
+    margin: 0;
+    color: #c8ccd4;
+}
+.help-guide-section kbd {
+    display: inline-block;
+    padding: 0.1rem 0.4rem;
+    background: var(--white-o08);
+    border: 1px solid var(--white-o15);
+    border-radius: 3px;
+    font-family: inherit;
+    font-size: 0.75rem;
+    color: var(--color-text);
+}
+
+/* Feedback form */
+#help-feedback-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+.help-form-kind {
+    display: flex;
+    gap: 0.5rem;
+    border: none;
+    margin: 0;
+    padding: 0;
+}
+.help-kind-option {
+    position: relative;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem;
+    padding: 0.45rem 0.5rem;
+    background: var(--color-surface-alt);
+    border: 1px solid var(--white-o10);
+    border-radius: 4px;
+    font-size: 0.78rem;
+    color: #c8ccd4;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+.help-kind-option:has(input:checked) {
+    background: var(--accent-o15);
+    border-color: var(--accent-o40);
+    color: var(--color-text);
+}
+.help-kind-option input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+.help-form-label {
+    font-size: 0.75rem;
+    color: var(--color-text-dim);
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    margin-top: 0.25rem;
+}
+#help-feedback-form textarea,
+#help-feedback-form input[type="text"] {
+    width: 100%;
+    padding: 0.55rem 0.65rem;
+    background: var(--color-surface);
+    border: 1px solid var(--white-o12);
+    border-radius: 4px;
+    color: var(--color-text);
+    font-family: inherit;
+    font-size: 0.85rem;
+    box-sizing: border-box;
+    resize: vertical;
+}
+#help-feedback-form textarea:focus,
+#help-feedback-form input[type="text"]:focus {
+    outline: none;
+    border-color: var(--accent-o50);
+}
+.help-form-meta {
+    text-align: right;
+    font-size: 0.7rem;
+    color: var(--color-text-faint);
+    margin-top: -0.35rem;
+}
+.help-form-check {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    color: #c8ccd4;
+    cursor: pointer;
+}
+.help-form-status {
+    min-height: 1.2em;
+    font-size: 0.78rem;
+    color: var(--color-text-dim);
+}
+.help-form-status.error {
+    color: #f28e8e;
+}
+.help-form-status.success {
+    color: var(--color-success-soft);
+}
+.help-form-actions {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 0.25rem;
+}
+.help-btn-primary {
+    padding: 0.5rem 1rem;
+    background: var(--accent-o20);
+    border: 1px solid var(--accent-o40);
+    border-radius: 4px;
+    color: var(--color-text);
+    font-size: 0.82rem;
+    cursor: pointer;
+    min-height: 36px;
+    transition: background 0.15s;
+}
+.help-btn-primary:hover:not(:disabled) {
+    background: var(--accent-o35);
+}
+.help-btn-primary:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+/* Tier 2 — mobile/tablet */
+@media (max-width: 768px) {
+    #help-trigger {
+        padding: 0;
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        justify-content: center;
+    }
+    #help-trigger .help-trigger-label {
+        display: none;
+    }
+    #help-trigger-browse {
+        width: 40px;
+        height: 40px;
+        font-size: 1rem;
+    }
+    #browse-close {
+        right: 3rem;
+        width: 40px;
+        height: 40px;
+        font-size: 1rem;
+    }
+    /* Tablet: revert the desktop centered-modal and anchor
+       the panel to the top-right corner. */
+    #help-panel {
+        top: 3.5rem;
+        left: auto;
+        right: 0.75rem;
+        transform: none;
+        width: calc(100vw - 1.5rem);
+        max-height: 70vh;
+        box-shadow: none;
+    }
+    #help-backdrop {
+        display: none;
+    }
+    #help-feedback-form textarea,
+    #help-feedback-form input[type="text"],
+    .help-btn-primary {
+        min-height: 44px;
+    }
+    /* Clear the 48px circular help trigger */
+    #time-label {
+        right: 4.5rem;
+    }
+}
+
+/* Tier 3 — portrait phone: full-screen sheet */
+@media (max-width: 600px) and (orientation: portrait) {
+    #help-trigger {
+        top: 0.5rem;
+        right: 0.5rem;
+        width: 40px;
+        height: 40px;
+    }
+    /* Clear the 40px help trigger at 0.5rem inset */
+    #time-label {
+        right: 3.5rem;
+        top: 0.5rem;
+    }
+    #help-panel {
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        transform: none;
+        width: 100vw;
+        max-height: none;
+        height: 100dvh;
+        border-radius: 0;
+        border: none;
+        box-shadow: none;
+    }
+    #help-close {
+        display: inline-flex;
+    }
+    .help-tabpanel {
+        flex: 1;
+        overflow-y: auto;
+    }
+    .help-form-actions {
+        position: sticky;
+        bottom: 0;
+        margin: 0 -1.25rem -1rem;
+        padding: 0.75rem 1.25rem;
+        background: var(--glass-bg);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        border-top: 1px solid var(--color-surface);
+    }
+}

@@ -1,0 +1,274 @@
+/**
+ * base styles — extracted from index.html <style> block.
+ * See docs/CSS_ARCHITECTURE_PLAN.md Step 3.
+ */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    width: 100%;
+    height: 100%;
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+}
+
+/* Global utility for hiding elements across components. */
+.hidden {
+    display: none !important;
+}
+
+button {
+    background: var(--color-accent-dark);
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    transition: background 0.2s, color 0.15s, border-color 0.15s;
+}
+
+button:hover {
+    background: var(--color-accent-darker);
+}
+
+#app {
+    width: 100%;
+    height: 100%;
+}
+
+#container {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    overflow: hidden;
+}
+
+canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+}
+
+/* Multi-viewport grid. In single-viewport mode it's just one
+   cell; ViewportManager rewrites grid-template for 1/2h/2v/4
+   layouts. Sits behind #ui in z-order so overlays stay on top. */
+#map-grid {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: grid;
+    grid-template: "a" / 1fr;
+    gap: 1px;
+    background: #000;
+}
+
+.map-viewport {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    background: #000;
+    outline: 1px solid transparent;
+    outline-offset: -1px;
+    transition: outline-color 0.15s;
+}
+.map-viewport.is-primary {
+    outline-color: var(--accent-o50);
+}
+/* A panel whose dataset doesn't cover the primary's current
+   real-world date. The panel still renders the nearest frame
+   (first or last, whichever is closer) but dims the content
+   and shows a "No data for current time" ribbon so the user
+   knows the frozen frame isn't in sync. */
+.map-viewport.out-of-range::after {
+    content: "No data for current time";
+    position: absolute;
+    top: 0.5rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 4;
+    padding: 0.25rem 0.6rem;
+    font-size: 0.65rem;
+    font-weight: 500;
+    letter-spacing: 0.03em;
+    color: var(--color-warning);
+    background: rgba(13, 13, 18, 0.85);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid rgba(255, 204, 102, 0.35);
+    border-radius: 12px;
+    white-space: nowrap;
+    pointer-events: none;
+}
+.map-viewport.out-of-range > .maplibregl-map {
+    opacity: 0.55;
+    transition: opacity 0.2s;
+}
+
+/* Floating dataset legend anchored to the bottom-right of
+   each panel. Visible when:
+     - A dataset with a `legendLink` is loaded in that panel
+     - The Legend toggle in Tools is on
+     - Either the layout is multi-view (each panel owns its
+       legend), OR the dataset info panel is hidden (so the
+       legend needs its own surface in single-view too)
+   The panel that sits in the viewport's bottom-right corner
+   (the last grid cell — panel 1 in single-view, the bottom
+   or right-most panel in multi-view) needs a bigger bottom
+   offset so it clears the Tools bar. `.map-viewport:last-child`
+   matches that panel in every layout because ViewportManager
+   appends panels in top-left-to-bottom-right order. */
+.panel-legend {
+    position: absolute;
+    right: 0.5rem;
+    bottom: 0.5rem;
+    z-index: 6;
+    padding: 0.4rem;
+    max-width: 180px;
+    max-height: 110px;
+    background: rgba(13, 13, 18, 0.85);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--white-o12);
+    border-radius: 6px;
+    cursor: zoom-in;
+    pointer-events: auto;
+    transition: border-color 0.15s, background 0.15s;
+}
+.panel-legend:hover {
+    background: rgba(13, 13, 18, 0.95);
+    border-color: rgba(77, 166, 255, 0.45);
+}
+.panel-legend img {
+    display: block;
+    max-width: 100%;
+    max-height: 102px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+}
+.panel-legend.hidden { display: none; }
+
+/* Per-panel loading overlay. Shown while a dataset is being
+   fetched + decoded into a specific panel so the user sees
+   "loading" instead of a confusing Blue Marble intermediate
+   state. Centered spinner + optional message, translucent
+   dark backdrop so the panel beneath is dimmed but visible. */
+.panel-loading {
+    position: absolute;
+    inset: 0;
+    z-index: 7;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    background: rgba(0, 0, 0, 0.55);
+    pointer-events: none;
+}
+.panel-loading.hidden { display: none; }
+.panel-loading-spinner {
+    width: 28px;
+    height: 28px;
+    border: 3px solid var(--white-o15);
+    border-top-color: var(--color-accent);
+    border-radius: 50%;
+    animation: panel-spin 0.8s linear infinite;
+}
+@keyframes panel-spin {
+    to { transform: rotate(360deg); }
+}
+.panel-loading-label {
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--white-o70);
+    letter-spacing: 0.03em;
+}
+@media (prefers-reduced-motion: reduce) {
+    .panel-loading-spinner { animation: none; }
+}
+
+/* Last panel (viewport bottom-right) — the Tools bar sits
+   there too, so lift the legend up to clear it. 6rem keeps
+   a visible gap above the bar. */
+.map-viewport:last-child .panel-legend {
+    bottom: 6rem;
+}
+/* Small pill button in the top-left of each panel. Numbered
+   1..N. Click promotes that panel to primary. Hidden entirely
+   in single-viewport mode. Positioned above the WebGL canvas
+   so it receives click events before MapLibre does. */
+/* Panel indicator (1/2/3/4) pill. Click promotes a non-primary
+   panel. The left offset clears the `#home-btn` that lives in
+   the outer overlay at top-left of the viewport — without
+   this, the indicator on the top-left panel would sit on top
+   of the home button once a dataset is loaded. The primary
+   panel's indicator also has a subtle accent glow so it's
+   easy to find at a glance. */
+.viewport-indicator {
+    position: absolute;
+    top: 0.5rem;
+    left: 3.75rem;
+    z-index: 5;
+    min-width: 26px;
+    height: 26px;
+    padding: 0 0.5rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    background: rgba(13, 13, 18, 0.82);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--white-o12);
+    color: var(--color-text-secondary);
+    border-radius: 13px;
+    cursor: pointer;
+    pointer-events: auto;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.viewport-indicator:hover {
+    background: var(--glass-bg);
+    color: var(--color-text);
+    border-color: var(--accent-o40);
+}
+.viewport-indicator.is-primary {
+    background: var(--accent-o20);
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+    cursor: default;
+}
+.viewport-indicator:focus-visible {
+    outline: 2px solid var(--accent-o70);
+    outline-offset: 2px;
+}
+
+#ui {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+}
+
+.ui-panel {
+    pointer-events: auto;
+    background: var(--glass-bg-light);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--white-o08);
+    border-radius: 8px;
+    font-size: 0.8rem;
+}
+

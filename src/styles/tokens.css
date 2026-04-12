@@ -1,0 +1,98 @@
+/**
+ * Design Tokens — the single source of truth for the visual language.
+ *
+ * Every repeated design value in the codebase should be a reference to
+ * one of these custom properties. Changing a brand color, adjusting
+ * spacing for a new platform, or tweaking the glass effect is a one-line
+ * edit here instead of a 50-occurrence find-replace.
+ *
+ * Usage: `color: var(--color-accent);` or `border-radius: var(--radius-md);`
+ *
+ * See docs/CSS_ARCHITECTURE_PLAN.md for the full refactoring roadmap.
+ */
+
+:root {
+  /* ── Colors: Accent ─────────────────────────────────────────────── */
+  --color-accent: #4da6ff;
+  --color-accent-hover: #6ab8ff;
+  --color-accent-dark: #0066cc;
+  --color-accent-darker: #0052a3;
+
+  /* ── Colors: Surfaces ───────────────────────────────────────────── */
+  --color-bg: #0d0d12;
+  --color-surface: rgba(255, 255, 255, 0.06);
+  --color-surface-alt: rgba(255, 255, 255, 0.04);
+  --color-surface-hover: rgba(255, 255, 255, 0.12);
+  --color-surface-active: rgba(255, 255, 255, 0.15);
+  --color-surface-border: rgba(255, 255, 255, 0.1);
+  --color-surface-border-subtle: rgba(255, 255, 255, 0.08);
+
+  /* ── Colors: Text ───────────────────────────────────────────────── */
+  --color-text: #e8eaf0;
+  --color-text-secondary: #bbb;
+  --color-text-muted: #999;
+  --color-text-dim: #888;
+  --color-text-faint: #666;
+
+  /* ── Colors: Semantic ───────────────────────────────────────────── */
+  --color-success: #22c55e;
+  --color-success-soft: #6dc96d;
+  --color-error: #ef4444;
+  --color-error-soft: #ff6b6b;
+  --color-warning: #ffcc66;
+
+  /* ── Glass Effect ───────────────────────────────────────────────── */
+  --glass-bg: rgba(13, 13, 18, 0.92);
+  --glass-bg-light: rgba(13, 13, 18, 0.88);
+  --glass-blur: blur(12px);
+  --glass-border: 1px solid var(--color-surface-border-subtle);
+
+  /* ── Radii ──────────────────────────────────────────────────────── */
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-2xl: 12px;
+  --radius-pill: 999px;
+
+  /* ── Spacing (reserved for future use) ──────────────────────────── */
+  /* --space-xs: 4px; */
+  /* --space-sm: 8px; */
+  /* --space-md: 12px; */
+  /* --space-lg: 16px; */
+
+  /* ── Touch Targets ──────────────────────────────────────────────── */
+  --touch-min: 44px;
+
+  /* ── Safe Area (Phase 5 — notched devices) ──────────────────────── */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+
+  /* ── Accent at various opacities (used for focus rings, borders) ── */
+  --accent-o05: rgba(77, 166, 255, 0.05);
+  --accent-o08: rgba(77, 166, 255, 0.08);
+  --accent-o12: rgba(77, 166, 255, 0.12);
+  --accent-o15: rgba(77, 166, 255, 0.15);
+  --accent-o18: rgba(77, 166, 255, 0.18);
+  --accent-o20: rgba(77, 166, 255, 0.2);
+  --accent-o25: rgba(77, 166, 255, 0.25);
+  --accent-o30: rgba(77, 166, 255, 0.3);
+  --accent-o35: rgba(77, 166, 255, 0.35);
+  --accent-o40: rgba(77, 166, 255, 0.4);
+  --accent-o50: rgba(77, 166, 255, 0.5);
+  --accent-o70: rgba(77, 166, 255, 0.7);
+
+  /* ── White at various opacities (surfaces, borders, overlays) ──── */
+  --white-o05: rgba(255, 255, 255, 0.05);
+  --white-o08: rgba(255, 255, 255, 0.08);
+  --white-o10: rgba(255, 255, 255, 0.1);
+  --white-o12: rgba(255, 255, 255, 0.12);
+  --white-o15: rgba(255, 255, 255, 0.15);
+  --white-o20: rgba(255, 255, 255, 0.2);
+  --white-o30: rgba(255, 255, 255, 0.3);
+  --white-o50: rgba(255, 255, 255, 0.5);
+  --white-o70: rgba(255, 255, 255, 0.7);
+}
