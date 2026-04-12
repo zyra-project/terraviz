@@ -437,7 +437,20 @@ export function validateAndCleanText(
     if (datasetIdSet.has(id)) {
       validIds.add(id)
     } else {
-      invalidIds.add(id)
+      // The LLM often puts a dataset TITLE in the marker instead of the
+      // internal ID (e.g. <<LOAD:Sea Level Rise>> instead of
+      // <<LOAD:INTERNAL_SOS_123>>). Check titles as a fallback so the
+      // marker still produces a Load button.
+      const idLower = id.toLowerCase()
+      const byTitle = datasets.find(d => {
+        const tLower = d.title.toLowerCase()
+        return tLower === idLower || tLower.startsWith(idLower) || idLower.startsWith(tLower)
+      })
+      if (byTitle) {
+        validIds.add(byTitle.id)
+      } else {
+        invalidIds.add(id)
+      }
     }
   }
   for (const match of text.matchAll(/\bINTERNAL_[A-Z0-9_]+\b/g)) {
