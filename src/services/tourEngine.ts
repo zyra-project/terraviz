@@ -707,9 +707,11 @@ export class TourEngine {
     const on = state === 'on'
     for (const renderer of this.callbacks.getAllRenderers()) {
       renderer.toggleBoundaries?.(on)
-      renderer.toggleLabels?.(on)
+      // Labels (text place names) are a separate concept from
+      // borders (boundary lines). The legacy SOS "worldBorder"
+      // command controls only the lines, not labels.
     }
-    syncToolsMenuState({ labels: on, borders: on })
+    syncToolsMenuState({ borders: on })
   }
 
   private execWorldBorderObj(params: { worldBorders: 'on' | 'off' }): void {
