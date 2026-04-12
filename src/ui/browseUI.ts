@@ -53,11 +53,8 @@ export function showBrowseUI(datasets: Dataset[], callbacks: BrowseCallbacks): v
     helpBtn.dataset.wired = 'true'
   }
 
-  // Wire the in-header close button once (idempotent). Uses the
-  // same single-view hide / multi-view collapse split as the
-  // post-load dismiss — single-view fully hides, multi-view keeps
-  // the aside in the DOM so scroll position persists. Either way,
-  // the Tools menu's Browse button re-opens it.
+  // Wire the in-header close button once (idempotent). Always fully
+  // hides the overlay — the Tools menu's Browse button re-opens it.
   const closeBtn = document.getElementById('browse-close')
   if (closeBtn && !closeBtn.dataset.wired) {
     closeBtn.addEventListener('click', (e) => {

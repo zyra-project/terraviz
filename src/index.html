@@ -189,16 +189,10 @@
         }
 
         /* Last panel (viewport bottom-right) — the Tools bar sits
-           there too, so lift the legend up to clear it. The Tools
-           bar is ~3.2rem from the bottom when no playback transport
-           is active, so 6rem keeps a visible gap. When playback
-           controls are visible the map-controls bar moves up and
-           JS re-applies the same offset via the data attribute. */
+           there too, so lift the legend up to clear it. 6rem keeps
+           a visible gap above the bar. */
         .map-viewport:last-child .panel-legend {
             bottom: 6rem;
-        }
-        body.has-playback .map-viewport:last-child .panel-legend {
-            bottom: 9rem;
         }
         /* Small pill button in the top-left of each panel. Numbered
            1..N. Click promotes that panel to primary. Hidden entirely

@@ -20,7 +20,7 @@
  *   │  [ ] Borders          │
  *   │  [ ] Terrain          │
  *   │  [ ] Auto-rotate      │
- *   │ Layout                │  ← gated behind ?setview= for now
+ *   │ Layout                │
  *   │  (1) (2↔) (2↕) (4)    │
  *   │ Actions               │
  *   │  [ Clear markers ]    │
