@@ -256,6 +256,77 @@ describe('processMessage — LLM path', () => {
       expect(firstAction).toBeLessThan(firstDelta)
     }
   })
+
+  it('handles multi-round search_catalog tool calls', async () => {
+    // Phase 3 regression test: when the LLM emits a search_catalog tool call,
+    // processMessage should execute the search locally, append assistant + tool
+    // result messages, and call streamChat again so the LLM can incorporate
+    // the search results into its final response.
+    const { streamChat } = await import('./llmProvider')
+    const mockedStream = vi.mocked(streamChat)
+
+    let callCount = 0
+    let round2Messages: any[] | null = null
+    mockedStream.mockImplementation(async function* (msgs) {
+      callCount++
+      if (callCount === 1) {
+        // Round 1: LLM decides to search the catalog
+        yield {
+          type: 'tool_call' as const,
+          call: {
+            id: 'call_search_1',
+            name: 'search_catalog',
+            arguments: { query: 'ocean temperature' },
+          },
+        }
+        yield { type: 'done' as const }
+      } else {
+        // Round 2: LLM has received search results and responds with text
+        // Capture the messages so we can verify tool results were appended
+        round2Messages = [...msgs]
+        yield { type: 'delta' as const, text: 'Here are some ocean datasets.' }
+        yield { type: 'done' as const }
+      }
+    })
+
+    const config: DocentConfig = {
+      apiUrl: 'http://localhost:11434/v1',
+      apiKey: '',
+      model: 'test',
+      enabled: true,
+      readingLevel: 'general',
+      visionEnabled: false,
+    }
+
+    const chunks: DocentStreamChunk[] = []
+    for await (const chunk of processMessage('ocean temperature', [], datasets, null, config)) {
+      chunks.push(chunk)
+    }
+
+    // streamChat should have been called twice (round 1 + round 2)
+    expect(callCount).toBe(2)
+
+    // The second call should include tool result messages in its conversation
+    expect(round2Messages).not.toBeNull()
+    const toolMessages = round2Messages!.filter((m: any) => m.role === 'tool')
+    expect(toolMessages.length).toBeGreaterThanOrEqual(1)
+    // The tool message should reference the search_catalog call ID
+    expect(toolMessages[0].tool_call_id).toBe('call_search_1')
+    // The tool message should contain search results as JSON
+    const toolContent = typeof toolMessages[0].content === 'string'
+      ? toolMessages[0].content
+      : ''
+    expect(toolContent).toContain('Sea Surface Temperature')
+
+    // Final response text from round 2 should be in the yielded chunks
+    const deltas = chunks.filter(c => c.type === 'delta')
+    const fullText = deltas.map(c => (c as { type: 'delta'; text: string }).text).join('')
+    expect(fullText).toContain('ocean datasets')
+
+    // Should end with done, not fallback
+    const doneChunk = chunks.find(c => c.type === 'done') as { type: 'done'; fallback: boolean } | undefined
+    expect(doneChunk?.fallback).toBe(false)
+  })
 })
 
 describe('processMessage — auto-load', () => {

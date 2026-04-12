@@ -215,6 +215,10 @@ export async function* streamChat(
   // Accumulate tool call fragments across chunks. OpenAI streams tool calls
   // in pieces — the id usually arrives in the first delta, the name in the
   // same or next delta, and arguments trickle in across many deltas.
+  // If the provider never sends an id (some OpenAI-compatible servers omit
+  // it), we synthesize a stable fallback so downstream multi-turn tool flows
+  // always have a non-empty tool_call_id.
+  let nextSyntheticId = 0
   const toolCallAccum = new Map<number, { id: string; name: string; args: string }>()
 
   try {
@@ -270,7 +274,7 @@ export async function* streamChat(
             for (const tc of delta.tool_calls) {
               const idx = tc.index ?? 0
               if (!toolCallAccum.has(idx)) {
-                toolCallAccum.set(idx, { id: '', name: '', args: '' })
+                toolCallAccum.set(idx, { id: `call_synth_${nextSyntheticId++}`, name: '', args: '' })
               }
               const accum = toolCallAccum.get(idx)!
               if (tc.id && !accum.id) accum.id = tc.id

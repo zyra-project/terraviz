@@ -365,7 +365,9 @@ export function executeSearchCatalog(
   const query = typeof args.query === 'string' ? args.query.trim() : ''
   if (!query) return []
 
-  const rawLimit = typeof args.limit === 'number' ? args.limit : SEARCH_CATALOG_DEFAULT_LIMIT
+  const rawLimit = typeof args.limit === 'number' && Number.isFinite(args.limit)
+    ? args.limit
+    : SEARCH_CATALOG_DEFAULT_LIMIT
   const limit = Math.max(1, Math.min(SEARCH_CATALOG_MAX_LIMIT, Math.floor(rawLimit)))
 
   const results = searchDatasets(datasets, query, limit)
