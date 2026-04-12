@@ -3,12 +3,11 @@ import type { Dataset, ChatMessage } from '../types'
 import {
   buildCategorySummary,
   buildCurrentDatasetContext,
-  buildDatasetLookup,
   buildSystemPrompt,
-  buildSystemPromptForTurn,
   buildMessageHistory,
   buildCompressedHistory,
   summarizeOlderMessages,
+  getSearchCatalogTool,
   getLoadDatasetTool,
   getFlyToTool,
   getSetTimeTool,
@@ -86,22 +85,33 @@ describe('buildCurrentDatasetContext', () => {
   })
 })
 
-describe('buildDatasetLookup', () => {
-  it('lists datasets with IDs and titles', () => {
-    const lookup = buildDatasetLookup(datasets)
-    expect(lookup).toContain('TEST_001')
-    expect(lookup).toContain('Sea Surface Temperature')
+describe('getSearchCatalogTool', () => {
+  it('returns a function-type tool schema', () => {
+    const tool = getSearchCatalogTool()
+    expect(tool.type).toBe('function')
+    expect(tool.function.name).toBe('search_catalog')
   })
 
-  it('includes all datasets', () => {
-    const lookup = buildDatasetLookup(datasets)
-    const lines = lookup.split('\n').filter(Boolean)
-    expect(lines.length).toBe(datasets.length)
+  it('requires a query parameter', () => {
+    const tool = getSearchCatalogTool()
+    const params = tool.function.parameters as Record<string, unknown>
+    expect(params.required).toEqual(['query'])
+    const props = params.properties as Record<string, { type: string }>
+    expect(props.query.type).toBe('string')
   })
 
-  it('includes category annotations', () => {
-    const lookup = buildDatasetLookup(datasets)
-    expect(lookup).toContain('[Ocean]')
+  it('accepts an optional limit parameter', () => {
+    const tool = getSearchCatalogTool()
+    const params = tool.function.parameters as Record<string, unknown>
+    const props = params.properties as Record<string, { type: string }>
+    expect(props.limit.type).toBe('number')
+  })
+
+  it('description explains catalog-as-tool pattern', () => {
+    const tool = getSearchCatalogTool()
+    // Reviewer-facing reminder that the prompt depends on this tool being
+    // called rather than the catalog being stuffed in the system prompt.
+    expect(tool.function.description).toMatch(/search.*catalog/i)
   })
 })
 
@@ -119,6 +129,59 @@ describe('buildSystemPrompt', () => {
   it('includes current dataset context', () => {
     const prompt = buildSystemPrompt(datasets, makeDataset())
     expect(prompt).toContain('Sea Surface Temperature')
+  })
+
+  it('does NOT stuff the dataset catalog into the prompt', () => {
+    // Phase 3: the full catalog is retrieved via the search_catalog tool,
+    // not embedded in the system prompt. Verify no dataset IDs leak in.
+    const prompt = buildSystemPrompt(datasets, null)
+    expect(prompt).not.toContain('TEST_001')
+    expect(prompt).not.toContain('TEST_002')
+    // And that the old "Dataset Reference" section heading is gone
+    expect(prompt).not.toContain('Dataset Reference')
+  })
+
+  it('instructs the LLM to use search_catalog for recommendations', () => {
+    const prompt = buildSystemPrompt(datasets, null)
+    expect(prompt).toContain('search_catalog')
+  })
+
+  it('still includes current dataset context on follow-up conversations', () => {
+    // buildSystemPrompt is called per-request; the dataset context reflects
+    // whatever is currently loaded on the globe regardless of turn index.
+    const prompt = buildSystemPrompt(datasets, makeDataset())
+    expect(prompt).toContain('Sea Surface Temperature')
+    expect(prompt).toContain('Currently loaded')
+  })
+
+  it('injects no extra instructions for general reading level', () => {
+    const prompt = buildSystemPrompt(datasets, null, 'general')
+    expect(prompt).not.toContain('Reading Level')
+  })
+
+  it('defaults to general when no reading level is specified', () => {
+    const withDefault = buildSystemPrompt(datasets, null)
+    const withGeneral = buildSystemPrompt(datasets, null, 'general')
+    expect(withDefault).toBe(withGeneral)
+  })
+
+  it('injects young-learner instructions', () => {
+    const prompt = buildSystemPrompt(datasets, null, 'young-learner')
+    expect(prompt).toContain('Reading Level: Young Learner')
+    expect(prompt).toContain('curious 10-year-old')
+  })
+
+  it('injects in-depth instructions', () => {
+    const prompt = buildSystemPrompt(datasets, null, 'in-depth')
+    expect(prompt).toContain('Reading Level: In-Depth')
+    expect(prompt).toContain('250 words')
+  })
+
+  it('injects expert instructions that override default word limit', () => {
+    const prompt = buildSystemPrompt(datasets, null, 'expert')
+    expect(prompt).toContain('Reading Level: Expert')
+    expect(prompt).toContain('ignore the default 150-word limit')
+    expect(prompt).toContain('300 words')
   })
 })
 
@@ -148,59 +211,10 @@ describe('buildMessageHistory', () => {
   })
 })
 
-describe('buildSystemPromptForTurn', () => {
-  it('includes dataset lookup on turn 0', () => {
-    const prompt = buildSystemPromptForTurn(datasets, null, 0)
-    expect(prompt).toContain('TEST_001')
-    expect(prompt).toContain('Sea Surface Temperature')
-  })
-
-  it('uses compact dataset lookup on turn >= 1', () => {
-    const prompt = buildSystemPromptForTurn(datasets, null, 1)
-    // Compact lookup still includes IDs and titles
-    expect(prompt).toContain('TEST_001')
-    expect(prompt).toContain('Sea Surface Temperature')
-    // But omits category annotations
-    expect(prompt).not.toContain('[Ocean]')
-    expect(prompt).toContain('compact')
-  })
-
-  it('still includes current dataset context on follow-up turns', () => {
-    const prompt = buildSystemPromptForTurn(datasets, makeDataset(), 3)
-    expect(prompt).toContain('Sea Surface Temperature')
-    expect(prompt).toContain('Currently loaded')
-  })
-
-  it('injects no extra instructions for general reading level', () => {
-    const prompt = buildSystemPromptForTurn(datasets, null, 0, 'general')
-    expect(prompt).not.toContain('Reading Level')
-  })
-
-  it('defaults to general when no reading level is specified', () => {
-    const withDefault = buildSystemPromptForTurn(datasets, null, 0)
-    const withGeneral = buildSystemPromptForTurn(datasets, null, 0, 'general')
-    expect(withDefault).toBe(withGeneral)
-  })
-
-  it('injects young-learner instructions', () => {
-    const prompt = buildSystemPromptForTurn(datasets, null, 0, 'young-learner')
-    expect(prompt).toContain('Reading Level: Young Learner')
-    expect(prompt).toContain('curious 10-year-old')
-  })
-
-  it('injects in-depth instructions', () => {
-    const prompt = buildSystemPromptForTurn(datasets, null, 0, 'in-depth')
-    expect(prompt).toContain('Reading Level: In-Depth')
-    expect(prompt).toContain('250 words')
-  })
-
-  it('injects expert instructions that override default word limit', () => {
-    const prompt = buildSystemPromptForTurn(datasets, null, 0, 'expert')
-    expect(prompt).toContain('Reading Level: Expert')
-    expect(prompt).toContain('ignore the default 150-word limit')
-    expect(prompt).toContain('300 words')
-  })
-})
+// Phase 3: `buildSystemPromptForTurn` was merged into `buildSystemPrompt`
+// — the turn-aware catalog stuffing was replaced with the search_catalog
+// tool. Reading-level and current-dataset tests for the renamed function
+// live in the `buildSystemPrompt` describe block above.
 
 describe('summarizeOlderMessages', () => {
   it('extracts topics from user messages', () => {
@@ -308,35 +322,35 @@ describe('getSetTimeTool', () => {
   })
 })
 
-describe('buildSystemPromptForTurn — globe control tools', () => {
+describe('buildSystemPrompt — globe control tools', () => {
   it('includes fly_to and set_time instructions in system prompt', () => {
-    const prompt = buildSystemPromptForTurn(datasets, null, 0)
+    const prompt = buildSystemPrompt(datasets, null)
     expect(prompt).toContain('fly_to')
     expect(prompt).toContain('set_time')
     expect(prompt).toContain('Globe Control Markers')
   })
 })
 
-describe('buildSystemPromptForTurn — vision mode', () => {
+describe('buildSystemPrompt — vision mode', () => {
   it('includes vision instructions when visionActive is true', () => {
-    const prompt = buildSystemPromptForTurn(datasets, null, 0, 'general', true)
+    const prompt = buildSystemPrompt(datasets, null, 'general', true)
     expect(prompt).toContain('Vision Analysis Mode')
     expect(prompt).toContain('DATA VISUALIZATION')
     expect(prompt).toContain('loaded dataset')
   })
 
   it('omits vision instructions when visionActive is false', () => {
-    const prompt = buildSystemPromptForTurn(datasets, null, 0, 'general', false)
+    const prompt = buildSystemPrompt(datasets, null, 'general', false)
     expect(prompt).not.toContain('Vision Analysis Mode')
   })
 
   it('omits vision instructions by default', () => {
-    const prompt = buildSystemPromptForTurn(datasets, null, 0)
+    const prompt = buildSystemPrompt(datasets, null)
     expect(prompt).not.toContain('Vision Analysis Mode')
   })
 
   it('combines vision with reading level instructions', () => {
-    const prompt = buildSystemPromptForTurn(datasets, null, 0, 'expert', true)
+    const prompt = buildSystemPrompt(datasets, null, 'expert', true)
     expect(prompt).toContain('Vision Analysis Mode')
     expect(prompt).toContain('Reading Level: Expert')
   })
@@ -479,29 +493,29 @@ describe('buildViewContextSection', () => {
 
 // --- Phase 5: System prompt includes new markers ---
 
-describe('buildSystemPromptForTurn — Phase 5 markers', () => {
+describe('buildSystemPrompt — Phase 5 markers', () => {
   it('includes BOUNDS marker instructions', () => {
-    const prompt = buildSystemPromptForTurn(datasets, null, 0)
+    const prompt = buildSystemPrompt(datasets, null)
     expect(prompt).toContain('<<BOUNDS:')
   })
 
   it('includes MARKER marker instructions', () => {
-    const prompt = buildSystemPromptForTurn(datasets, null, 0)
+    const prompt = buildSystemPrompt(datasets, null)
     expect(prompt).toContain('<<MARKER:')
   })
 
   it('includes LABELS marker instructions', () => {
-    const prompt = buildSystemPromptForTurn(datasets, null, 0)
+    const prompt = buildSystemPrompt(datasets, null)
     expect(prompt).toContain('<<LABELS:')
   })
 
   it('includes REGION marker instructions', () => {
-    const prompt = buildSystemPromptForTurn(datasets, null, 0)
+    const prompt = buildSystemPrompt(datasets, null)
     expect(prompt).toContain('<<REGION:')
   })
 
   it('includes geographic context when mapViewContext is provided', () => {
-    const prompt = buildSystemPromptForTurn(datasets, null, 0, 'general', false, null, null, null, {
+    const prompt = buildSystemPrompt(datasets, null, 'general', false, null, null, null, {
       center: { lat: 40.0, lng: -105.3 },
       zoom: 4.5,
       bearing: 0,
@@ -516,7 +530,7 @@ describe('buildSystemPromptForTurn — Phase 5 markers', () => {
   })
 
   it('omits geographic context when mapViewContext is not provided', () => {
-    const prompt = buildSystemPromptForTurn(datasets, null, 0)
+    const prompt = buildSystemPrompt(datasets, null)
     expect(prompt).not.toContain('Geographic Context')
   })
 })

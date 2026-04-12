@@ -54,9 +54,40 @@ export interface LLMImagePart {
 
 export type LLMContentPart = LLMTextPart | LLMImagePart
 
+/**
+ * OpenAI-compatible tool_calls entry on an assistant message. Used when
+ * sending the conversation back to the LLM in a multi-turn tool-calling
+ * flow — the assistant message must echo the tool_calls it emitted so the
+ * subsequent tool-role messages can reference them by id.
+ */
+export interface LLMAssistantToolCall {
+  id: string
+  type: 'function'
+  function: {
+    name: string
+    /** Arguments as a JSON-stringified payload, per the OpenAI spec. */
+    arguments: string
+  }
+}
+
+/**
+ * A single message in the LLM conversation. Supports all four OpenAI roles:
+ *
+ * - `system` / `user` / `assistant` — normal conversation turns
+ * - `assistant` with `tool_calls` — the assistant emitted tool calls
+ * - `tool` with `tool_call_id` — a tool result being fed back to the LLM
+ *
+ * Kept as a single loose interface rather than a discriminated union so
+ * callers that construct simple `{role, content}` messages don't have to
+ * narrow before using them.
+ */
 export interface LLMMessage {
-  role: 'system' | 'user' | 'assistant'
-  content: string | LLMContentPart[]
+  role: 'system' | 'user' | 'assistant' | 'tool'
+  content: string | LLMContentPart[] | null
+  /** Only valid for role: 'assistant'. Present when the model emitted tool calls. */
+  tool_calls?: LLMAssistantToolCall[]
+  /** Only valid for role: 'tool'. References the id of the assistant tool_call being answered. */
+  tool_call_id?: string
 }
 
 export interface LLMTool {
@@ -68,7 +99,13 @@ export interface LLMTool {
   }
 }
 
+/**
+ * A tool call emitted by the model during streaming. Includes the provider-
+ * assigned `id` so callers can send a matching `role: 'tool'` message back
+ * in a subsequent streamChat call to close the loop.
+ */
 export interface LLMToolCall {
+  id: string
   name: string
   arguments: Record<string, unknown>
 }
@@ -175,8 +212,10 @@ export async function* streamChat(
 
   logger.debug('[LLM] Stream content-type:', response.headers?.get('content-type'))
 
-  // Accumulate tool call fragments across chunks
-  const toolCallAccum = new Map<number, { name: string; args: string }>()
+  // Accumulate tool call fragments across chunks. OpenAI streams tool calls
+  // in pieces — the id usually arrives in the first delta, the name in the
+  // same or next delta, and arguments trickle in across many deltas.
+  const toolCallAccum = new Map<number, { id: string; name: string; args: string }>()
 
   try {
     let chunkCount = 0
@@ -203,7 +242,7 @@ export async function* streamChat(
             if (!tc.name) continue
             try {
               const args = JSON.parse(tc.args || '{}')
-              yield { type: 'tool_call', call: { name: tc.name, arguments: args } }
+              yield { type: 'tool_call', call: { id: tc.id, name: tc.name, arguments: args } }
             } catch {
               logger.warn('[LLM] Failed to parse tool call args:', tc.args)
             }
@@ -231,9 +270,10 @@ export async function* streamChat(
             for (const tc of delta.tool_calls) {
               const idx = tc.index ?? 0
               if (!toolCallAccum.has(idx)) {
-                toolCallAccum.set(idx, { name: '', args: '' })
+                toolCallAccum.set(idx, { id: '', name: '', args: '' })
               }
               const accum = toolCallAccum.get(idx)!
+              if (tc.id && !accum.id) accum.id = tc.id
               if (tc.function?.name && !accum.name) accum.name = tc.function.name
               if (tc.function?.arguments) accum.args += tc.function.arguments
             }
@@ -247,7 +287,7 @@ export async function* streamChat(
               if (tc.name) {
                 try {
                   const args = JSON.parse(tc.args || '{}')
-                  yield { type: 'tool_call', call: { name: tc.name, arguments: args } }
+                  yield { type: 'tool_call', call: { id: tc.id, name: tc.name, arguments: args } }
                 } catch {
                   logger.warn('[LLM] Failed to parse tool call args:', tc.args)
                 }
@@ -277,7 +317,7 @@ export async function* streamChat(
     if (tc.name) {
       try {
         const args = JSON.parse(tc.args || '{}')
-        yield { type: 'tool_call', call: { name: tc.name, arguments: args } }
+        yield { type: 'tool_call', call: { id: tc.id, name: tc.name, arguments: args } }
       } catch {
         // skip
       }

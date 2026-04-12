@@ -161,6 +161,7 @@ describe('processMessage — LLM path', () => {
       yield {
         type: 'tool_call' as const,
         call: {
+          id: 'call_mock',
           name: 'load_dataset',
           arguments: { dataset_id: 'TEST_001', dataset_title: 'Sea Surface Temperature' },
         },
@@ -197,6 +198,7 @@ describe('processMessage — LLM path', () => {
       yield {
         type: 'tool_call' as const,
         call: {
+          id: 'call_mock',
           name: 'load_dataset',
           arguments: { dataset_id: 'TEST_001', dataset_title: 'Sea Surface Temperature' },
         },
@@ -289,6 +291,7 @@ describe('processMessage — LLM dataset ID validation', () => {
       yield {
         type: 'tool_call' as const,
         call: {
+          id: 'call_mock',
           name: 'load_dataset',
           arguments: { dataset_id: 'HALLUCINATED_999', dataset_title: 'Fake Dataset' },
         },
@@ -326,6 +329,7 @@ describe('processMessage — LLM dataset ID validation', () => {
       yield {
         type: 'tool_call' as const,
         call: {
+          id: 'call_mock',
           name: 'load_dataset',
           arguments: { dataset_id: 'WRONG_ID', dataset_title: 'Sea Surface Temperature' },
         },
@@ -1095,7 +1099,7 @@ describe('processMessage — Phase 5 tool calls', () => {
       yield { type: 'delta' as const, text: 'Here is the Amazon Basin.' }
       yield {
         type: 'tool_call' as const,
-        call: { name: 'fit_bounds', arguments: { west: -82, south: -34, east: -34, north: 13, label: 'Amazon Basin' } },
+        call: { id: 'call_mock', name: 'fit_bounds', arguments: { west: -82, south: -34, east: -34, north: 13, label: 'Amazon Basin' } },
       }
       yield { type: 'done' as const }
     })
@@ -1121,7 +1125,7 @@ describe('processMessage — Phase 5 tool calls', () => {
       yield { type: 'delta' as const, text: 'Marker placed.' }
       yield {
         type: 'tool_call' as const,
-        call: { name: 'add_marker', arguments: { lat: 40.0, lng: -105.3, label: 'Boulder' } },
+        call: { id: 'call_mock', name: 'add_marker', arguments: { lat: 40.0, lng: -105.3, label: 'Boulder' } },
       }
       yield { type: 'done' as const }
     })
@@ -1148,7 +1152,7 @@ describe('processMessage — Phase 5 tool calls', () => {
       yield { type: 'delta' as const, text: 'Labels on.' }
       yield {
         type: 'tool_call' as const,
-        call: { name: 'toggle_labels', arguments: { visible: true } },
+        call: { id: 'call_mock', name: 'toggle_labels', arguments: { visible: true } },
       }
       yield { type: 'done' as const }
     })
@@ -1173,7 +1177,7 @@ describe('processMessage — Phase 5 tool calls', () => {
       yield { type: 'delta' as const, text: 'Highlighting Brazil.' }
       yield {
         type: 'tool_call' as const,
-        call: { name: 'highlight_region', arguments: { name: 'Brazil' } },
+        call: { id: 'call_mock', name: 'highlight_region', arguments: { name: 'Brazil' } },
       }
       yield { type: 'done' as const }
     })
@@ -1204,7 +1208,7 @@ describe('processMessage — Phase 5 tool calls', () => {
       yield { type: 'delta' as const, text: 'Custom region.' }
       yield {
         type: 'tool_call' as const,
-        call: { name: 'highlight_region', arguments: { geojson, label: 'Custom' } },
+        call: { id: 'call_mock', name: 'highlight_region', arguments: { geojson, label: 'Custom' } },
       }
       yield { type: 'done' as const }
     })
@@ -1229,7 +1233,7 @@ describe('processMessage — Phase 5 tool calls', () => {
       yield { type: 'delta' as const, text: 'Flying to Colorado.' }
       yield {
         type: 'tool_call' as const,
-        call: { name: 'fly_to', arguments: { place: 'Colorado' } },
+        call: { id: 'call_mock', name: 'fly_to', arguments: { place: 'Colorado' } },
       }
       yield { type: 'done' as const }
     })
@@ -1256,7 +1260,7 @@ describe('processMessage — Phase 5 tool calls', () => {
       yield { type: 'delta' as const, text: 'Hmm.' }
       yield {
         type: 'tool_call' as const,
-        call: { name: 'fly_to', arguments: { place: 'Mordor' } },
+        call: { id: 'call_mock', name: 'fly_to', arguments: { place: 'Mordor' } },
       }
       yield { type: 'done' as const }
     })
