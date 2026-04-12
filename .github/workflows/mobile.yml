@@ -145,22 +145,9 @@ jobs:
             echo "iOS scaffold already exists — skipping init"
           fi
 
-      # Phase 4: now on macos-26 with Xcode 26, try the full tauri ios build
-      # which compiles both Rust AND Swift (including the apple-intelligence
-      # plugin's Foundation Models code). The simulator destination issue that
-      # blocked this on Xcode 16 may be resolved in Xcode 26.
-      # Falls back to cargo check if tauri ios build fails on destinations.
+      # Full iOS build: compiles Rust AND Swift (including the apple-
+      # intelligence plugin's Foundation Models code) via xcodebuild.
+      # Validated working on macos-26 with Xcode 26.2 — the simulator
+      # destination issue from Xcode 16 is resolved.
       - name: Build iOS app (debug, simulator)
         run: npx tauri ios build --debug --target aarch64-sim
-        continue-on-error: true
-        id: ios-full-build
-
-      # Fallback: if tauri ios build fails (e.g. Xcode scheme still lacks
-      # simulator destinations), at least validate the Rust side compiles.
-      - name: Fallback — check Rust compiles for iOS
-        if: steps.ios-full-build.outcome == 'failure'
-        working-directory: src-tauri
-        run: |
-          echo "::warning::tauri ios build failed — falling back to cargo check (Swift not validated)"
-          cargo check --target aarch64-apple-ios --lib
-          cargo check --target aarch64-apple-ios-sim --lib

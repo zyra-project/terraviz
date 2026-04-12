@@ -16,7 +16,6 @@
 //   - docs/MOBILE_APP_PLAN.md Phase 4
 
 import Tauri
-import WebKit
 
 #if canImport(FoundationModels)
 import FoundationModels

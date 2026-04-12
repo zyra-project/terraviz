@@ -284,8 +284,10 @@ function serializeMessages(messages: LLMMessage[]): Array<{
 }
 
 /**
- * Convert LLMTool[] to a shape the Swift plugin can translate into
- * Foundation Models `@Generable` tool definitions.
+ * Convert LLMTool[] to a stable plugin-facing shape for forward compatibility.
+ * The current Swift implementation does not consume tools in v1 (Phase 3's
+ * pre-search handles discovery), but we preserve this serialization so the
+ * payload schema is ready if native tool registration is added later.
  */
 function serializeTools(tools: LLMTool[]): Array<{
   name: string

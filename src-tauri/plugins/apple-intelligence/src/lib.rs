@@ -133,17 +133,15 @@ async fn chat<R: Runtime>(
 
     #[cfg(target_os = "ios")]
     {
-        // TODO: delegate to Swift plugin via mobile bridge
-        // The Swift implementation will:
-        // 1. Create a LanguageModelSession with the system prompt from messages[0]
-        // 2. Register tools as @Generable structs
-        // 3. Stream the response, emitting ai-delta events for each token
-        // 4. When a tool call is produced, emit ai-tool-call
-        // 5. On completion, emit ai-done
-        // 6. On error (including .exceededContextWindowSize), emit ai-error
+        // On iOS, Tauri's mobile plugin bridge routes the invoke directly
+        // to AppleIntelligencePlugin.swift's chat() method, which handles
+        // LanguageModelSession creation and event streaming. This Rust
+        // block is a defensive fallback that should not normally execute —
+        // if it does, the Swift plugin failed to register or intercept
+        // the command.
         let _ = app.emit("ai-error", ErrorPayload {
             session_id,
-            message: "Apple Intelligence Swift plugin not yet implemented".to_string(),
+            message: "Apple Intelligence: Swift plugin did not handle this command (bridge error)".to_string(),
         });
         Ok(())
     }
