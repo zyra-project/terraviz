@@ -17,9 +17,10 @@ and the Tokens Studio plugin connected (see Phase 3 in
 8. [Build the Search Bar Component](#8-build-the-search-bar-component)
 9. [Build Category Chip Components](#9-build-category-chip-components)
 10. [Build the Chat Trigger Button](#10-build-the-chat-trigger-button)
-11. [Build the Tools Menu Button](#11-build-the-tools-menu-button)
-12. [Assemble Full Panel Layouts](#12-assemble-full-panel-layouts)
-13. [Keeping Things in Sync](#13-keeping-things-in-sync)
+11. [Build the Browse Button](#11-build-the-browse-button)
+12. [Build the Gear Toggle Button](#12-build-the-gear-toggle-button)
+13. [Assemble Full Panel Layouts](#13-assemble-full-panel-layouts)
+14. [Keeping Things in Sync](#14-keeping-things-in-sync)
 
 ---
 
@@ -350,38 +351,48 @@ Go to the **Components** page.
 
 Go to the **Components** page.
 
-1. Press `F` → set width and height to 44px (apply
-   `component > chat > trigger-height`)
-2. Apply corner radius: 999px (pill shape when expanded) or 50%
-   (circle when collapsed)
-3. Set fill to `glass > bg`
-4. Add stroke: `white-opacity > o12`, 1px
-5. Add Background blur effect: `glass > blur` (12px)
+1. Press `F` → add Auto Layout (`Shift+A`), horizontal, gap ~5px
+2. Set height to `component > chat > trigger-height` (44px)
+3. Apply corner radius: 999px (pill shape)
+4. Set fill to `glass > bg`
+5. Add stroke: `white-opacity > o12`, 1px
+6. Add Background blur effect: `glass > blur` (12px)
+7. Set padding to `0 14px 0 11px` (approximates `0 0.9rem 0 0.7rem`)
+8. Center align children vertically
 
-**Inside:**
+**Inside (left to right):**
 
-1. Press `T`, type "🪐" or a chat icon placeholder
+1. Press `T`, type "💬" (speech balloon — the icon used in the app)
    - Font size: 1.2rem ≈ 19px
-   - Center aligned
+2. Press `T`, type "Ask Orbit"
+   - Font size: 0.75rem ≈ 12px
+   - Weight: Medium (500)
+   - Color: `color > text-secondary`
 
 **Make it a component with variants:**
 
 1. `Ctrl/Cmd + Alt + K` → name it `.chat-trigger`
 2. Add variants:
-   - **State=Default** — pill shape, icon + "Ask Orbit" text label
-     (font size 0.75rem ≈ 12px, weight Medium), border
-     `white-opacity > o12`, text `color > text-secondary`
+   - **State=Default** — pill shape, icon + "Ask Orbit" text label,
+     border `white-opacity > o12`, text `color > text-secondary`
    - **State=Active** — same pill shape, border and text switch to
      `color > accent`, add a subtle glow: drop shadow
      `0 0 12px` with color `accent-opacity > o30`
-   - **State=Collapsed** — circle (width = height = trigger-height),
-     icon only, no text label, border `white-opacity > o12`
+   - **State=Collapsed** — circle (width = height = 44px),
+     icon only, remove text label, border `white-opacity > o12`,
+     corner radius 50%
+
+> **Note:** The 💬 emoji won't change color when you apply a text
+> color token — emoji render as images. The color change on the
+> Active variant only affects the "Ask Orbit" text.
 
 ---
 
-## 11. Build the Tools Menu Button
+## 11. Build the Browse Button
 
-Go to the **Components** page.
+Go to the **Components** page. This is the "Browse" pill that opens
+the dataset browser. It lives in the bottom-right alongside the
+gear toggle.
 
 1. Press `F` → add Auto Layout, horizontal, gap 5px
 2. Set min-height: `component > tools-menu > btn-min-height` (34px)
@@ -391,16 +402,18 @@ Go to the **Components** page.
 6. Add stroke: `white-opacity > o12`, 1px
 7. Add Background blur effect: `glass > blur` (12px)
 
-**Inside:**
+**Inside (left to right):**
 
-1. Press `T`, type "Browse"
+1. Press `T`, type "🗂" (card index dividers — the icon used in the app)
+   - Font size: 0.95rem ≈ 15px
+2. Press `T`, type "Browse"
    - Font size: `component > tools-menu > btn-font-size` (0.72rem ≈ 12px)
    - Color: `#ccc`
    - Weight: Medium (500)
 
 **Make it a component with variants:**
 
-1. `Ctrl/Cmd + Alt + K` → name it `.tools-menu-btn`
+1. `Ctrl/Cmd + Alt + K` → name it `.tools-menu-browse`
 2. Add variants:
    - **State=Default** — as built
    - **State=Hover** — border color `rgba(77, 166, 255, 0.45)`,
@@ -408,15 +421,40 @@ Go to the **Components** page.
    - **State=Expanded** — bg `accent-opacity > o18`,
      text and border `color > accent`
 
-**Gear toggle variant:**
+---
 
-Duplicate the component, remove the text label, set width to
-`component > tools-menu > toggle-min-width` (34px), and use a "⚙"
-glyph. Name it `.tools-menu-toggle`.
+## 12. Build the Gear Toggle Button
+
+Go to the **Components** page. This is the icon-only button next to
+the Browse pill that opens the Tools popover.
+
+1. Press `F` → add Auto Layout, center aligned
+2. Set width and height to `component > tools-menu > toggle-min-width`
+   (34px) — it's a square
+3. Set padding to `6px 9px` (approximates `0.35rem 0.55rem`)
+4. Apply corner radius: `component > tools-menu > btn-radius` (999px)
+5. Set fill to `glass > bg-light`
+6. Add stroke: `white-opacity > o12`, 1px
+7. Add Background blur effect: `glass > blur` (12px)
+
+**Inside:**
+
+1. Press `T`, type "🔧" (wrench — the icon used in the app)
+   - Font size: 0.95rem ≈ 15px
+   - Center aligned
+
+**Make it a component with variants:**
+
+1. `Ctrl/Cmd + Alt + K` → name it `.tools-menu-toggle`
+2. Add variants:
+   - **State=Default** — as built
+   - **State=Hover** — border color `rgba(77, 166, 255, 0.45)`
+   - **State=Expanded** — bg `accent-opacity > o18`,
+     border `color > accent`, icon color `color > accent`
 
 ---
 
-## 12. Assemble Full Panel Layouts
+## 13. Assemble Full Panel Layouts
 
 Go to the **Screens** page. Now that you have all the components,
 you can assemble full layouts.
@@ -452,8 +490,8 @@ the Components page and paste — it automatically becomes an instance.
 **Tools menu (bottom-right, above playback):**
 
 1. Create a frame with Auto Layout, horizontal, gap 6px
-2. Place one `.tools-menu-btn` instance ("Browse")
-3. Place one `.tools-menu-toggle` instance (gear icon)
+2. Place one `.tools-menu-browse` instance (🗂 Browse)
+3. Place one `.tools-menu-toggle` instance (🔧 gear)
 
 **Chat trigger (bottom-left):**
 
@@ -479,7 +517,7 @@ the Components page and paste — it automatically becomes an instance.
 
 ---
 
-## 13. Keeping Things in Sync
+## 14. Keeping Things in Sync
 
 ### When a developer changes a token value
 
