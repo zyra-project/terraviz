@@ -37,7 +37,7 @@
   "plugins": {
     "deep-link": {
       "mobile": [
-        { "host": "sphere.zyra-project.org", "pathPrefix": "/dataset" }
+        { "host": "sphere.zyra-project.org", "pathPrefix": ["/dataset"] }
       ],
       "desktop": {
         "schemes": ["zyra"]
