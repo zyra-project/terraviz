@@ -664,7 +664,7 @@ describe('config management', () => {
   it('returns default config when nothing saved', () => {
     const config = loadConfig()
     expect(config.apiUrl).toBe('/api')
-    expect(config.model).toBe('llama-3.1-70b')
+    expect(config.model).toBe('llama-4-scout')
     expect(config.enabled).toBe(true)
   })
 
@@ -917,7 +917,7 @@ describe('processMessage — vision mode', () => {
     const config: DocentConfig = {
       apiUrl: '/api',
       apiKey: '',
-      model: 'llama-3.1-70b',
+      model: 'llama-4-scout',
       enabled: true,
       readingLevel: 'general',
       visionEnabled: true,
@@ -945,7 +945,7 @@ describe('processMessage — vision mode', () => {
     const config: DocentConfig = {
       apiUrl: '/api/',
       apiKey: '',
-      model: 'llama-3.1-70b',
+      model: 'llama-4-scout',
       enabled: true,
       readingLevel: 'general',
       visionEnabled: true,

@@ -221,11 +221,12 @@ const tauriInvoke: ((cmd: string, args?: Record<string, unknown>) => Promise<unk
 const DEFAULT_CONFIG: DocentConfig = {
   apiUrl: IS_TAURI ? '' : '/api',
   apiKey: '',
-  // Default to llama-3.1-70b on the CF proxy. It reliably follows the
-  // <<LOAD:...>> marker format in prose, which produces inline Load buttons.
-  // llama-4-scout is available via the settings dropdown for users who want
-  // multimodal + tool-calling support, but it doesn't emit markers reliably.
-  model: IS_TAURI ? '' : 'llama-3.1-70b',
+  // Default to llama-4-scout on the CF proxy. It's natively multimodal
+  // (text + images in one model, no vision auto-switch needed) and
+  // supports function calling (tools forwarded via toolStreamShim),
+  // which enables highlight_region, add_marker, fly_to, and other
+  // globe control tools to work on the CF path.
+  model: IS_TAURI ? '' : 'llama-4-scout',
   enabled: true,
   readingLevel: 'general',
   visionEnabled: false,
