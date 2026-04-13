@@ -681,3 +681,33 @@
     }
 }
 
+/* Phone portrait: chat becomes a bottom sheet */
+@media (max-width: 600px) and (orientation: portrait) {
+    #chat-panel {
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100%;
+        max-height: 75vh;
+        border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+        border-bottom: none;
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    #chat-input-area {
+        padding-bottom: 0.5rem;
+    }
+}
+
+
+/* Safe area: push chat UI above the home indicator on notched devices */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+    #chat-trigger {
+        bottom: calc(4rem + env(safe-area-inset-bottom));
+    }
+    #chat-dataset-prompt {
+        bottom: calc(8.25rem + env(safe-area-inset-bottom));
+    }
+    #chat-panel {
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+}

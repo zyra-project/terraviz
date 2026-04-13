@@ -53,6 +53,8 @@ export interface ToolsMenuCallbacks {
   onToggleLegend?: (visible: boolean) => void
   /** Announce something for screen readers. */
   announce?: (message: string) => void
+  /** Get the currently loaded dataset (used by the Share action). */
+  getCurrentDataset: () => { id: string; title: string } | null
 }
 
 /** Open/close state for the popover. Tracked here because DOM tests
@@ -64,7 +66,7 @@ let isOpen = false
  *  driven from tests as well as the app boot path. */
 export function initToolsMenu(
   viewports: ViewportManager,
-  callbacks: ToolsMenuCallbacks = {},
+  callbacks: ToolsMenuCallbacks = { getCurrentDataset: () => null },
 ): void {
   const container = document.getElementById('map-controls')
   if (!container) return
@@ -135,6 +137,10 @@ export function initToolsMenu(
         <button type="button" class="tools-menu-item" id="tools-menu-clear">
           <span class="tools-menu-item-check" aria-hidden="true"></span>
           <span class="tools-menu-item-label">Clear markers &amp; highlights</span>
+        </button>
+        <button type="button" class="tools-menu-item" id="tools-menu-share">
+          <span class="tools-menu-item-check" aria-hidden="true"></span>
+          <span class="tools-menu-item-label">Share dataset&hellip;</span>
         </button>
       </section>
       <section class="tools-menu-section" aria-label="Orbit">
@@ -210,6 +216,7 @@ export function initToolsMenu(
   const infoBtn = document.getElementById('tools-menu-info') as HTMLButtonElement
   const legendBtn = document.getElementById('tools-menu-legend') as HTMLButtonElement
   const clearBtn = document.getElementById('tools-menu-clear') as HTMLButtonElement
+  const shareBtn = document.getElementById('tools-menu-share') as HTMLButtonElement
   const orbitSettingsBtn = document.getElementById('tools-menu-orbit-settings') as HTMLButtonElement
 
   labelsBtn.addEventListener('click', () => {
@@ -272,6 +279,22 @@ export function initToolsMenu(
       ;(r as unknown as { clearHighlights?: () => void }).clearHighlights?.()
     }
     announce?.('Markers and highlights cleared')
+  })
+
+  shareBtn.addEventListener('click', async () => {
+    closePopover()
+    const dataset = callbacks.getCurrentDataset?.()
+    if (!dataset) {
+      announce?.('No dataset loaded to share')
+      return
+    }
+    const { shareDataset, buildDatasetShareUrl } = await import('../services/shareService')
+    const shared = await shareDataset({
+      title: dataset.title,
+      text: `Check out "${dataset.title}" on Interactive Sphere`,
+      url: buildDatasetShareUrl(dataset.id),
+    })
+    if (shared) announce?.('Dataset shared')
   })
 
   orbitSettingsBtn.addEventListener('click', () => {

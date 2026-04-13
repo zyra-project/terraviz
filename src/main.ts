@@ -39,7 +39,14 @@ import {
 import { TourEngine } from './services/tourEngine'
 import { showTourControls, hideTourControls, hideAllTourTextBoxes, hideAllTourImages, hideAllTourVideos, hideAllTourPopups, hideAllTourQuestions } from './ui/tourUI'
 import { initLegendForDataset, clearLegendCache, loadConfig } from './services/docentService'
-import { isMobile, getCloudTextureUrl } from './utils/deviceCapability'
+import { isMobile, IS_MOBILE_NATIVE, getCloudTextureUrl } from './utils/deviceCapability'
+import { initDeepLinks } from './services/deepLinkService'
+
+// Phase 5: set a body class so CSS can target mobile-native adaptations
+// (larger touch targets, bottom sheets, etc.) without JS per-component.
+if (IS_MOBILE_NATIVE) {
+  document.body.classList.add('mobile-native')
+}
 
 // --- App constants ---
 const CLOUD_TEXTURE_URL = getCloudTextureUrl()
@@ -176,6 +183,7 @@ class InteractiveSphere {
         onToggleDatasetInfo: (visible) => this.setDatasetInfoVisible(visible),
         onToggleLegend: (visible) => this.setLegendVisible(visible),
         announce: (msg) => this.announce(msg),
+        getCurrentDataset: () => this.appState.currentDataset ?? null,
       })
       // Apply persisted view prefs to the toolbar button state now
       // that the toolbar exists.
@@ -280,6 +288,13 @@ class InteractiveSphere {
       this.setLoading(false)
       this.setError(error instanceof Error ? error.message : 'Unknown error')
     }
+
+    // Phase 5: listen for deep links unconditionally so the app can
+    // load a dataset when opened from an external URL at any time,
+    // not just when a ?dataset= query param is present at startup.
+    initDeepLinks((id) => {
+      this.loadDataset(id)
+    })
   }
 
   /** Extract the `dataset` query parameter from the current URL. */

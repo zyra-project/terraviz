@@ -448,3 +448,10 @@ body.browse-open #help-trigger {
         border-top: 1px solid var(--color-surface);
     }
 }
+
+/* Safe area: push help panel above the home indicator */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+    #help-panel {
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+}

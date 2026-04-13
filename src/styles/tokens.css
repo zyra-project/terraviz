@@ -62,7 +62,7 @@
   /* --space-md: 12px; */
   /* --space-lg: 16px; */
 
-  /* ── Touch Targets ──────────────────────────────────────────────── */
+  /* ── Touch Targets (44px = Apple HIG / WCAG minimum) ────────────── */
   --touch-min: 44px;
 
   /* ── Safe Area (Phase 5 — notched devices) ──────────────────────── */
@@ -95,4 +95,25 @@
   --white-o30: rgba(255, 255, 255, 0.3);
   --white-o50: rgba(255, 255, 255, 0.5);
   --white-o70: rgba(255, 255, 255, 0.7);
+}
+
+/* ── Mobile-native overrides ──────────────────────────────────────── */
+/* Applied when the Tauri mobile app sets .mobile-native on <body>.
+   Bumps touch targets and adjusts spacing for finger-friendly UX. */
+
+.mobile-native {
+  --touch-min: 48px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+}
+
+/* Apply touch target minimums to interactive elements on mobile */
+.mobile-native button,
+.mobile-native [role="button"],
+.mobile-native select,
+.mobile-native input[type="checkbox"],
+.mobile-native .transport-btn,
+.mobile-native .chat-action-btn {
+  min-width: var(--touch-min);
+  min-height: var(--touch-min);
 }

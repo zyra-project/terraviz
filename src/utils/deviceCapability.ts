@@ -9,6 +9,19 @@ export function isMobile(): boolean {
   )
 }
 
+/**
+ * True when running as a native mobile app (Tauri iOS or Android),
+ * as opposed to the web build or Tauri desktop. Used to gate mobile-
+ * specific UX adaptations (bottom sheets, larger touch targets, etc.)
+ * that shouldn't apply to desktop Tauri or web-on-mobile.
+ */
+export const IS_MOBILE_NATIVE: boolean = (() => {
+  if (typeof window === 'undefined') return false
+  if (!(window as any).__TAURI__) return false
+  // Tauri sets these in the mobile webview's user agent
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+})()
+
 interface NetworkInformation {
   effectiveType?: string
 }
