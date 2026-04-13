@@ -215,3 +215,10 @@
     max-height: 15vh;
     border-radius: 4px;
 }
+
+/* Safe area: push tour controls above the home indicator */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+    #tour-controls {
+        bottom: calc(0.75rem + env(safe-area-inset-bottom));
+    }
+}

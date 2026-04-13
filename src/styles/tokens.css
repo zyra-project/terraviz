@@ -97,35 +97,6 @@
   --white-o70: rgba(255, 255, 255, 0.7);
 }
 
-/* ── Safe area offsets ────────────────────────────────────────────── */
-/* Applied to bottom-positioned UI (tools bar, chat trigger, tour
-   controls, playback) so they clear the home indicator on notched
-   devices. Requires viewport-fit=cover on the <meta viewport> tag. */
-
-@supports (padding-bottom: env(safe-area-inset-bottom)) {
-  #map-controls {
-    bottom: calc(3.2rem + env(safe-area-inset-bottom));
-  }
-  #tour-controls {
-    bottom: calc(0.75rem + env(safe-area-inset-bottom));
-  }
-  #chat-trigger {
-    bottom: calc(4rem + env(safe-area-inset-bottom));
-  }
-  #chat-dataset-prompt {
-    bottom: calc(8.25rem + env(safe-area-inset-bottom));
-  }
-  #chat-panel {
-    padding-bottom: env(safe-area-inset-bottom);
-  }
-  #browse-overlay {
-    padding-bottom: env(safe-area-inset-bottom);
-  }
-  #help-panel {
-    padding-bottom: env(safe-area-inset-bottom);
-  }
-}
-
 /* ── Mobile-native overrides ──────────────────────────────────────── */
 /* Applied when the Tauri mobile app sets .mobile-native on <body>.
    Bumps touch targets and adjusts spacing for finger-friendly UX. */

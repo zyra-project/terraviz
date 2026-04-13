@@ -59,5 +59,6 @@ export async function shareDataset(data: ShareData): Promise<boolean> {
  * Build a shareable URL for a dataset.
  */
 export function buildDatasetShareUrl(datasetId: string): string {
-  return `https://sphere.zyra-project.org/?dataset=${encodeURIComponent(datasetId)}`
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://sphere.zyra-project.org'
+  return `${origin}/dataset/${encodeURIComponent(datasetId)}`
 }

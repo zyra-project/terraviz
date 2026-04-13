@@ -67,8 +67,14 @@ export function parseDatasetFromUrl(url: string): string | null {
     }
 
     // Path-based: https://sphere.zyra-project.org/dataset/INTERNAL_SOS_123
-    const pathMatch = parsed.pathname.match(/\/dataset\/([A-Z0-9_]+)/i)
-    if (pathMatch) return pathMatch[1]
+    // Also match *.interactive-sphere.pages.dev preview deploys
+    const isKnownHost = parsed.hostname === 'sphere.zyra-project.org' ||
+      parsed.hostname.endsWith('.interactive-sphere.pages.dev') ||
+      parsed.hostname === 'localhost'
+    if (isKnownHost) {
+      const pathMatch = parsed.pathname.match(/\/dataset\/([A-Z0-9_]+)/i)
+      if (pathMatch) return pathMatch[1]
+    }
 
     // Query param: ?dataset=INTERNAL_SOS_123 (validated)
     const queryId = parsed.searchParams.get('dataset')

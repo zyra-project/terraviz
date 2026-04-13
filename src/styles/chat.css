@@ -698,3 +698,16 @@
     }
 }
 
+
+/* Safe area: push chat UI above the home indicator on notched devices */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+    #chat-trigger {
+        bottom: calc(4rem + env(safe-area-inset-bottom));
+    }
+    #chat-dataset-prompt {
+        bottom: calc(8.25rem + env(safe-area-inset-bottom));
+    }
+    #chat-panel {
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+}

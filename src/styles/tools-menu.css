@@ -282,3 +282,10 @@
     }
 }
 
+
+/* Safe area: push tools bar above the home indicator on notched devices */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+    #map-controls {
+        bottom: calc(3.2rem + env(safe-area-inset-bottom));
+    }
+}
