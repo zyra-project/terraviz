@@ -368,10 +368,14 @@ Go to the **Components** page.
 
 1. `Ctrl/Cmd + Alt + K` → name it `.chat-trigger`
 2. Add variants:
-   - **State=Default** — circle, icon only
-   - **State=Expanded** — pill shape, icon + "Ask Orbit" text label
-     (font size 0.75rem ≈ 12px, weight Medium)
-   - **State=Active** — border `color > accent`, text `color > accent`
+   - **State=Default** — pill shape, icon + "Ask Orbit" text label
+     (font size 0.75rem ≈ 12px, weight Medium), border
+     `white-opacity > o12`, text `color > text-secondary`
+   - **State=Active** — same pill shape, border and text switch to
+     `color > accent`, add a subtle glow: drop shadow
+     `0 0 12px` with color `accent-opacity > o30`
+   - **State=Collapsed** — circle (width = height = trigger-height),
+     icon only, no text label, border `white-opacity > o12`
 
 ---
 
