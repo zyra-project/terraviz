@@ -309,7 +309,7 @@ describe('Tools menu dataset info / legend toggles', () => {
   it('calls onToggleDatasetInfo with the new state when clicked', () => {
     const vm = makeViewports(1)
     const onToggleDatasetInfo = vi.fn()
-    initToolsMenu(vm as any, { onToggleDatasetInfo })
+    initToolsMenu(vm as any, { onToggleDatasetInfo, getCurrentDataset: () => null })
 
     // Starts active (on), first click turns it off
     const btn = document.getElementById('tools-menu-info') as HTMLButtonElement
@@ -323,7 +323,7 @@ describe('Tools menu dataset info / legend toggles', () => {
   it('calls onToggleLegend with the new state when clicked', () => {
     const vm = makeViewports(1)
     const onToggleLegend = vi.fn()
-    initToolsMenu(vm as any, { onToggleLegend })
+    initToolsMenu(vm as any, { onToggleLegend, getCurrentDataset: () => null })
 
     // Starts active (on), first click turns it off
     const btn = document.getElementById('tools-menu-legend') as HTMLButtonElement
@@ -345,7 +345,7 @@ describe('Tools menu dataset info / legend toggles', () => {
   it('announces the new state for screen readers', () => {
     const vm = makeViewports(1)
     const announce = vi.fn()
-    initToolsMenu(vm as any, { announce })
+    initToolsMenu(vm as any, { announce, getCurrentDataset: () => null })
 
     // Both start active (on), so first click turns them off
     ;(document.getElementById('tools-menu-info') as HTMLButtonElement).click()
@@ -364,7 +364,7 @@ describe('Tools menu callbacks', () => {
   it('calls onOpenBrowse when Browse button is clicked', () => {
     const vm = makeViewports(1)
     const onOpenBrowse = vi.fn()
-    initToolsMenu(vm as any, { onOpenBrowse })
+    initToolsMenu(vm as any, { onOpenBrowse, getCurrentDataset: () => null })
 
     ;(document.getElementById('tools-menu-browse') as HTMLButtonElement).click()
     expect(onOpenBrowse).toHaveBeenCalledTimes(1)
@@ -373,7 +373,7 @@ describe('Tools menu callbacks', () => {
   it('calls onOpenOrbitSettings when Orbit settings button is clicked', () => {
     const vm = makeViewports(1)
     const onOpenOrbitSettings = vi.fn()
-    initToolsMenu(vm as any, { onOpenOrbitSettings })
+    initToolsMenu(vm as any, { onOpenOrbitSettings, getCurrentDataset: () => null })
 
     ;(document.getElementById('tools-menu-toggle') as HTMLButtonElement).click()
     ;(document.getElementById('tools-menu-orbit-settings') as HTMLButtonElement).click()
@@ -386,7 +386,7 @@ describe('Tools menu callbacks', () => {
   it('calls onSetLayout and updates active layout button when picker is used', () => {
     const vm = makeViewports(1)
     const onSetLayout = vi.fn()
-    initToolsMenu(vm as any, { onSetLayout })
+    initToolsMenu(vm as any, { onSetLayout, getCurrentDataset: () => null })
 
     ;(document.getElementById('tools-menu-layout-4') as HTMLButtonElement).click()
 
@@ -400,7 +400,7 @@ describe('Tools menu callbacks', () => {
   it('calls announce on toggles and actions', () => {
     const vm = makeViewports(1)
     const announce = vi.fn()
-    initToolsMenu(vm as any, { announce })
+    initToolsMenu(vm as any, { announce, getCurrentDataset: () => null })
 
     ;(document.getElementById('tools-menu-labels') as HTMLButtonElement).click()
     expect(announce).toHaveBeenCalledWith('Labels on')

@@ -53,8 +53,8 @@ export interface ToolsMenuCallbacks {
   onToggleLegend?: (visible: boolean) => void
   /** Announce something for screen readers. */
   announce?: (message: string) => void
-  /** Get the currently loaded dataset (for share). */
-  getCurrentDataset?: () => { id: string; title: string } | null
+  /** Get the currently loaded dataset (used by the Share action). */
+  getCurrentDataset: () => { id: string; title: string } | null
 }
 
 /** Open/close state for the popover. Tracked here because DOM tests
@@ -66,7 +66,7 @@ let isOpen = false
  *  driven from tests as well as the app boot path. */
 export function initToolsMenu(
   viewports: ViewportManager,
-  callbacks: ToolsMenuCallbacks = {},
+  callbacks: ToolsMenuCallbacks = { getCurrentDataset: () => null },
 ): void {
   const container = document.getElementById('map-controls')
   if (!container) return

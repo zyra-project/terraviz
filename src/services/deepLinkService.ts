@@ -54,16 +54,25 @@ export async function initDeepLinks(
  * - ?dataset=INTERNAL_SOS_123 (query param fallback)
  */
 export function parseDatasetFromUrl(url: string): string | null {
+  const ID_PATTERN = /^[A-Z0-9_]+$/i
+
   try {
     const parsed = new URL(url)
 
-    // Path-based: /dataset/INTERNAL_SOS_123
+    // Custom scheme: zyra://dataset/INTERNAL_SOS_123
+    // new URL('zyra://dataset/ID') sets hostname='dataset', pathname='/ID'
+    if (parsed.protocol === 'zyra:' && parsed.hostname === 'dataset') {
+      const id = parsed.pathname.replace(/^\//, '')
+      if (id && ID_PATTERN.test(id)) return id
+    }
+
+    // Path-based: https://sphere.zyra-project.org/dataset/INTERNAL_SOS_123
     const pathMatch = parsed.pathname.match(/\/dataset\/([A-Z0-9_]+)/i)
     if (pathMatch) return pathMatch[1]
 
-    // Query param: ?dataset=INTERNAL_SOS_123
+    // Query param: ?dataset=INTERNAL_SOS_123 (validated)
     const queryId = parsed.searchParams.get('dataset')
-    if (queryId) return queryId
+    if (queryId && ID_PATTERN.test(queryId)) return queryId
 
     return null
   } catch {

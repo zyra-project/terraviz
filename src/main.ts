@@ -183,6 +183,7 @@ class InteractiveSphere {
         onToggleDatasetInfo: (visible) => this.setDatasetInfoVisible(visible),
         onToggleLegend: (visible) => this.setLegendVisible(visible),
         announce: (msg) => this.announce(msg),
+        getCurrentDataset: () => this.appState.currentDataset ?? null,
       })
       // Apply persisted view prefs to the toolbar button state now
       // that the toolbar exists.
@@ -223,12 +224,6 @@ class InteractiveSphere {
         this.setLoadingStatus('Loading dataset\u2026', 50)
         await this.loadDataset(datasetId)
         this.setLoading(false)
-
-      // Phase 5: listen for deep links (zyra://dataset/ID or app links)
-      // so the app can load a dataset when opened from an external URL.
-      initDeepLinks((id) => {
-        this.loadDataset(id)
-      })
         showChatTrigger()
         // In multi-viewport mode, pre-render the browse panel in its
         // collapsed state so users can slide it open to load datasets
@@ -293,6 +288,13 @@ class InteractiveSphere {
       this.setLoading(false)
       this.setError(error instanceof Error ? error.message : 'Unknown error')
     }
+
+    // Phase 5: listen for deep links unconditionally so the app can
+    // load a dataset when opened from an external URL at any time,
+    // not just when a ?dataset= query param is present at startup.
+    initDeepLinks((id) => {
+      this.loadDataset(id)
+    })
   }
 
   /** Extract the `dataset` query parameter from the current URL. */

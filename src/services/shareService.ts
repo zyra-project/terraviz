@@ -35,11 +35,12 @@ export async function shareDataset(data: ShareData): Promise<boolean> {
       logger.info('[Share] Shared via Web Share API:', data.title)
       return true
     } catch (err) {
-      // User cancelled — not an error
-      if ((err as Error).name !== 'AbortError') {
-        logger.warn('[Share] Web Share API failed:', err)
+      if ((err as Error).name === 'AbortError') {
+        // User cancelled — not an error, don't fall back
+        return false
       }
-      return false
+      // Non-cancel failure — fall through to clipboard
+      logger.warn('[Share] Web Share API failed, trying clipboard:', err)
     }
   }
 
