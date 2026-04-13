@@ -21,10 +21,10 @@
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
-    min-height: 34px;
+    min-height: var(--component-tools-menu-btn-min-height);
     padding: 0.35rem 0.7rem;
     font: inherit;
-    font-size: 0.72rem;
+    font-size: var(--component-tools-menu-btn-font-size);
     font-weight: 500;
     letter-spacing: 0.02em;
     color: #ccc;
@@ -32,7 +32,7 @@
     backdrop-filter: var(--glass-blur);
     -webkit-backdrop-filter: var(--glass-blur);
     border: 1px solid var(--white-o12);
-    border-radius: 999px;
+    border-radius: var(--component-tools-menu-btn-radius);
     cursor: pointer;
     transition: background 0.15s, color 0.15s, border-color 0.15s;
     white-space: nowrap;
@@ -90,7 +90,7 @@
 }
 /* Gear-icon button is icon-only — collapse to a circle */
 .tools-menu-toggle {
-    min-width: 34px;
+    min-width: var(--component-tools-menu-toggle-min-width);
     padding: 0.35rem 0.55rem;
 }
 
@@ -99,14 +99,14 @@
     position: absolute;
     bottom: calc(100% + 0.5rem);
     right: 0;
-    min-width: 240px;
+    min-width: var(--component-tools-menu-popover-min-width);
     max-width: calc(100vw - 1.5rem);
     padding: 0.75rem;
     background: rgba(13, 13, 18, 0.94);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
     border: 1px solid var(--white-o12);
-    border-radius: 10px;
+    border-radius: var(--component-tools-menu-popover-radius);
     box-shadow: 0 6px 32px rgba(0, 0, 0, 0.45);
     color: #ddd;
     font-size: 0.75rem;
@@ -150,8 +150,8 @@
 .tools-menu-section-title {
     margin: 0 0 0.35rem;
     padding: 0;
-    font-size: 0.6rem;
-    font-weight: 600;
+    font-size: var(--component-tools-menu-section-title-size);
+    font-weight: var(--component-tools-menu-section-title-weight);
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--color-text-dim);
@@ -164,12 +164,12 @@
     width: 100%;
     padding: 0.5rem 0.6rem;
     font: inherit;
-    font-size: 0.75rem;
+    font-size: var(--component-tools-menu-item-font-size);
     color: #ddd;
     text-align: left;
     background: transparent;
     border: 1px solid transparent;
-    border-radius: 6px;
+    border-radius: var(--component-tools-menu-item-radius);
     cursor: pointer;
     transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
@@ -232,14 +232,14 @@
 .tools-menu-layout-btn {
     flex: 1;
     min-width: 0;
-    min-height: 30px;
+    min-height: var(--component-tools-menu-layout-btn-min-height);
     padding: 0.35rem 0.2rem;
     font: inherit;
-    font-size: 0.7rem;
+    font-size: var(--component-tools-menu-layout-btn-font-size);
     color: #ccc;
     background: var(--color-surface-alt);
     border: 1px solid var(--white-o10);
-    border-radius: 5px;
+    border-radius: var(--component-tools-menu-layout-btn-radius);
     cursor: pointer;
     transition: background 0.12s, color 0.12s, border-color 0.12s;
     line-height: 1;
@@ -261,24 +261,24 @@
 
 @media (max-width: 768px) {
     .tools-menu-btn {
-        min-height: 38px;
+        min-height: var(--component-tools-menu-btn-min-height);
         padding: 0.4rem 0.8rem;
-        font-size: 0.78rem;
+        font-size: var(--component-tools-menu-btn-font-size);
     }
     .tools-menu-toggle {
-        min-width: 38px;
+        min-width: var(--component-tools-menu-toggle-min-width);
         padding: 0.4rem 0.6rem;
     }
     .tools-menu-popover {
-        min-width: 260px;
+        min-width: var(--component-tools-menu-popover-min-width);
     }
     .tools-menu-item {
         padding: 0.6rem 0.7rem;
-        font-size: 0.82rem;
+        font-size: var(--component-tools-menu-item-font-size);
     }
     .tools-menu-layout-btn {
-        min-height: 36px;
-        font-size: 0.78rem;
+        min-height: var(--component-tools-menu-layout-btn-min-height);
+        font-size: var(--component-tools-menu-layout-btn-font-size);
     }
 }
 

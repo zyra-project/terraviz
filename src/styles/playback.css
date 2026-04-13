@@ -6,9 +6,9 @@
 /* --- Transport controls --- */
 
 .transport-btn {
-    min-width: 28px;
+    min-width: var(--component-playback-transport-btn-min-width);
     padding: 0.3rem 0.4rem;
-    font-size: 0.7rem;
+    font-size: var(--component-playback-transport-btn-font-size);
     line-height: 1;
     background: var(--color-surface) !important;
     border: 1px solid var(--white-o10) !important;
@@ -22,8 +22,8 @@
 }
 
 #time-label {
-    font-size: 0.8rem;
-    font-weight: 500;
+    font-size: var(--component-playback-time-label-font-size);
+    font-weight: var(--component-playback-time-label-font-weight);
     letter-spacing: 0.03em;
     padding: 0.4rem 0.7rem;
     position: absolute;
@@ -34,7 +34,7 @@
     backdrop-filter: var(--glass-blur);
     -webkit-backdrop-filter: var(--glass-blur);
     border: 1px solid var(--white-o08);
-    border-radius: 6px;
+    border-radius: var(--component-playback-time-label-radius);
 }
 /* When the browse overlay is open, the help trigger is hidden,
    so let the time label return to the corner. */
@@ -50,20 +50,20 @@ body.browse-open #time-label {
 
 @media (max-width: 768px) {
     #home-btn {
-        min-width: 44px;
-        min-height: 44px;
-        font-size: 1rem;
+        min-width: var(--component-playback-home-btn-min-width);
+        min-height: var(--component-playback-home-btn-min-height);
+        font-size: var(--component-playback-home-btn-font-size);
     }
 
     .transport-btn {
-        min-width: 40px;
-        min-height: 40px;
+        min-width: var(--component-playback-transport-btn-min-width);
+        min-height: var(--component-playback-transport-btn-min-width);
         padding: 0.4rem 0.6rem;
-        font-size: 1rem;
+        font-size: var(--component-playback-transport-btn-font-size);
     }
 
     #playback-controls input[type="range"] {
-        height: 28px;
+        height: var(--component-playback-range-height);
     }
 }
 

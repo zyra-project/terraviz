@@ -41,7 +41,7 @@
     top: 0;
     right: 0;
     bottom: 0;
-    width: 420px;
+    width: var(--component-browse-panel-width);
     z-index: 500;
     background: var(--glass-bg-light);
     backdrop-filter: var(--glass-blur);
@@ -101,10 +101,10 @@
     width: 100%;
     background: var(--color-surface);
     border: 1px solid var(--white-o12);
-    border-radius: 6px;
+    border-radius: var(--component-browse-search-radius);
     padding: 0.6rem 2rem 0.6rem 0.875rem;
     color: var(--color-text);
-    font-size: 0.875rem;
+    font-size: var(--component-browse-search-size);
     transition: border-color 0.2s;
     box-sizing: border-box;
     font-family: inherit;
@@ -136,8 +136,8 @@
     right: -3rem;
     top: 50%;
     transform: translateY(-50%);
-    width: 36px;
-    height: 36px;
+    width: var(--component-browse-chat-btn-size);
+    height: var(--component-browse-chat-btn-size);
     border-radius: 50%;
     background: var(--glass-bg) !important;
     backdrop-filter: var(--glass-blur);
@@ -184,11 +184,11 @@
 .browse-chip {
     flex-shrink: 0;
     padding: 0.3rem 0.75rem;
-    border-radius: 999px;
+    border-radius: var(--component-browse-chip-radius);
     border: 1px solid var(--white-o15);
     background: var(--white-o05);
     color: #aaa;
-    font-size: 0.7rem;
+    font-size: var(--component-browse-chip-size);
     cursor: pointer;
     transition: background 0.15s, color 0.15s, border-color 0.15s;
     white-space: nowrap;
@@ -291,8 +291,8 @@
     flex: 1;
     overflow-y: auto;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 0.75rem;
+    grid-template-columns: repeat(auto-fill, minmax(var(--component-browse-grid-col-min), 1fr));
+    gap: var(--component-browse-grid-gap);
     padding-bottom: 1.5rem;
     align-content: start;
 }
@@ -300,26 +300,26 @@
 .browse-card {
     background: var(--color-surface-alt);
     border: 1px solid var(--white-o08);
-    border-radius: 8px;
-    padding: 0.875rem;
+    border-radius: var(--component-browse-card-radius);
+    padding: var(--component-browse-card-padding);
     cursor: pointer;
     transition: background 0.15s, border-color 0.15s, transform 0.1s;
     display: flex;
-    gap: 0.75rem;
+    gap: var(--component-browse-card-gap);
 }
 
 .browse-card-thumb {
     flex-shrink: 0;
-    width: 64px;
-    height: 64px;
-    border-radius: 4px;
+    width: var(--component-browse-thumb-size);
+    height: var(--component-browse-thumb-size);
+    border-radius: var(--component-browse-thumb-radius);
     object-fit: cover;
     background: var(--color-surface-alt);
 }
 
 .browse-card.expanded .browse-card-thumb {
-    width: 96px;
-    height: 96px;
+    width: var(--component-browse-thumb-size-expanded);
+    height: var(--component-browse-thumb-size-expanded);
 }
 
 .browse-card-body {
@@ -349,8 +349,8 @@
 }
 
 .browse-card-title {
-    font-size: 0.8rem;
-    font-weight: 600;
+    font-size: var(--component-browse-title-size);
+    font-weight: var(--component-browse-title-weight);
     line-height: 1.3;
     color: var(--color-text);
     flex: 1;
@@ -401,11 +401,11 @@
 }
 
 .browse-card-keyword {
-    font-size: 0.58rem;
+    font-size: var(--component-browse-keyword-size);
     background: var(--accent-o12);
     color: var(--color-accent-hover);
     padding: 0.12rem 0.35rem;
-    border-radius: 3px;
+    border-radius: var(--component-browse-keyword-radius);
     cursor: pointer;
     transition: background 0.15s, color 0.15s;
 }
@@ -459,7 +459,7 @@
 }
 
 .browse-card-desc {
-    font-size: 0.7rem;
+    font-size: var(--component-browse-desc-size);
     color: var(--color-text-muted);
     line-height: 1.4;
     margin: 0;
@@ -498,9 +498,9 @@
         left: 0;
         right: 0;
         bottom: 0;
-        width: 100%;
+        width: var(--component-browse-panel-width);
         height: auto;
-        max-height: 70vh;
+        max-height: var(--component-browse-panel-max-height);
         border-left: none;
         border-top: 1px solid var(--white-o08);
         border-radius: var(--radius-xl) var(--radius-xl) 0 0;
