@@ -39,7 +39,13 @@ import {
 import { TourEngine } from './services/tourEngine'
 import { showTourControls, hideTourControls, hideAllTourTextBoxes, hideAllTourImages, hideAllTourVideos, hideAllTourPopups, hideAllTourQuestions } from './ui/tourUI'
 import { initLegendForDataset, clearLegendCache, loadConfig } from './services/docentService'
-import { isMobile, getCloudTextureUrl } from './utils/deviceCapability'
+import { isMobile, IS_MOBILE_NATIVE, getCloudTextureUrl } from './utils/deviceCapability'
+
+// Phase 5: set a body class so CSS can target mobile-native adaptations
+// (larger touch targets, bottom sheets, etc.) without JS per-component.
+if (IS_MOBILE_NATIVE) {
+  document.body.classList.add('mobile-native')
+}
 
 // --- App constants ---
 const CLOUD_TEXTURE_URL = getCloudTextureUrl()
