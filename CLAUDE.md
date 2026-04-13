@@ -14,12 +14,18 @@ TypeScript SPA built with Vite and MapLibre GL JS. Deployed on Cloudflare Pages 
 
 ```bash
 npm run dev          # dev server (localhost:5173)
-npm run build        # tsc + vite build
+npm run build        # tokens + tsc + vite build
 npm run type-check   # tsc --noEmit (must pass before committing)
 npm run test         # vitest run
+npm run tokens       # regenerate src/styles/tokens.css from tokens/*.json
 npm run dev:desktop  # Tauri dev mode (requires Rust)
 npm run build:desktop # tsc + vite build + tauri build
 ```
+
+> **Note:** `src/styles/tokens.css` is a generated build artifact
+> (gitignored). It is created automatically by `postinstall` after
+> `npm install`, and by `npm run build`. Run `npm run tokens` manually
+> if you edit any file under `tokens/`.
 
 ### Module map
 

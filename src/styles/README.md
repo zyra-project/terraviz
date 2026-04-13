@@ -22,7 +22,7 @@ cost.
 
 | File | What it styles | ~Lines |
 |---|---|---|
-| **tokens.css** | Design tokens — CSS custom properties for colors, spacing, radii, glass effects, safe areas | 95 |
+| **tokens.css** | **Generated** — design tokens (colors, radii, glass, component values). Do not edit directly; edit `tokens/*.json` instead and run `npm run tokens`. | ~120 |
 | **base.css** | Reset, body, `.hidden` utility, global `button`, `#app`, `#container`, globe overlays, `#map-grid` | 255 |
 | **loading.css** | Loading splash screen — globe animation, progress bar, ring spin, status text | 125 |
 | **info-panel.css** | Collapsible dataset info drawer — header, title, toggle, body, legend thumbnail/modal | 225 |
@@ -37,8 +37,17 @@ cost.
 
 ## Design tokens
 
-`tokens.css` defines CSS custom properties that every other file
-references via `var(--token-name)`. Changing a value here propagates
+`tokens.css` is a **generated file** (gitignored). It is built from
+`tokens/global.json` and `tokens/components/*.json` by Style Dictionary
+(`npm run tokens`). The `postinstall` hook runs this automatically
+after `npm install`.
+
+**Do not edit `tokens.css` directly** — your changes will be
+overwritten. Edit the source JSON files under `tokens/` instead.
+See `tokens/README.md` for the full workflow.
+
+The generated CSS custom properties are referenced by every other file
+via `var(--token-name)`. Changing a value in the JSON propagates
 everywhere — no find-and-replace across thousands of lines.
 
 **Categories:**
