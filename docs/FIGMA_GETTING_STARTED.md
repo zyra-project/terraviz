@@ -14,8 +14,12 @@ and the Tokens Studio plugin connected (see Phase 3 in
 5. [Apply Tokens with Tokens Studio](#5-apply-tokens-with-tokens-studio)
 6. [Build Your First Component: Transport Button](#6-build-your-first-component-transport-button)
 7. [Build the Browse Card Component](#7-build-the-browse-card-component)
-8. [Assemble Full Panel Layouts](#8-assemble-full-panel-layouts)
-9. [Keeping Things in Sync](#9-keeping-things-in-sync)
+8. [Build the Search Bar Component](#8-build-the-search-bar-component)
+9. [Build Category Chip Components](#9-build-category-chip-components)
+10. [Build the Chat Trigger Button](#10-build-the-chat-trigger-button)
+11. [Build the Tools Menu Button](#11-build-the-tools-menu-button)
+12. [Assemble Full Panel Layouts](#12-assemble-full-panel-layouts)
+13. [Keeping Things in Sync](#13-keeping-things-in-sync)
 
 ---
 
@@ -266,17 +270,152 @@ This is a more complex component. Go to the **Components** page.
 ### Step 5: Turn into component with variants
 
 1. Select the card → make it a component (`.browse-card`)
-2. Add variants:
-   - **Default** — as built
-   - **Hover** — border `accent-opacity > o40`, bg `white-opacity > o08`
-   - **Expanded** — thumbnail uses `thumb-size-expanded` (96px),
-     description fully visible, extra metadata rows
+2. Add variants (use `Property=Value` naming, e.g., `State=Default`):
+   - **State=Default** — as built
+   - **State=Hover** — border `accent-opacity > o40`, bg `white-opacity > o08`
+   - **State=Expanded** — thumbnail uses `thumb-size-expanded` (96px),
+     turn off text truncation on description, add extra metadata text
+     layers (source, categories)
+
+> **Variant naming:** Figma requires `Property=Value` format.
+> "Default" alone won't work — use "State=Default", "State=Hover", etc.
+
+> **Truncated text:** To set a 2-line clamp on the description in the
+> Default variant, select the text layer → open the text panel →
+> click the `A...` button next to "Truncate text" → set max lines
+> to 2. In the Expanded variant, click `A...` again to toggle
+> truncation off.
+
+> **Font weights:** Tokens Studio may not correctly apply numeric
+> font weights (like `600`) to Figma's text dropdown. Set font
+> weights manually in Figma's text panel instead: `600` = "Semi Bold",
+> `500` = "Medium", `300` = "Light".
 
 ---
 
-## 8. Assemble Full Panel Layouts
+## 8. Build the Search Bar Component
 
-Go to the **Screens** page.
+Go to the **Components** page.
+
+1. Press `F` to create a frame, set width to ~340px (it'll stretch
+   to fill the panel)
+2. Add Auto Layout (`Shift+A`), horizontal
+3. Apply corner radius: `component > browse > search-radius` (6px)
+4. Set fill to `color > surface`
+5. Add a stroke: `white-opacity > o12`, 1px
+
+**Inside the frame:**
+
+1. Press `T` to add a text layer — type "Search datasets..."
+   - Font size: `component > browse > search-size` (0.875rem ≈ 14px)
+   - Color: `color > text-dim` (placeholder color)
+2. Set the text to "Fill container" width so it stretches
+
+**Turn it into a component:**
+
+1. Select the frame → `Ctrl/Cmd + Alt + K`
+2. Name it `.browse-search`
+
+---
+
+## 9. Build Category Chip Components
+
+Go to the **Components** page.
+
+### Category chip
+
+1. Press `F` → add Auto Layout (`Shift+A`), horizontal
+2. Set padding to `5px 12px` (approximates `0.3rem 0.75rem`)
+3. Apply corner radius: `component > browse > chip-radius` (999px — pill shape)
+4. Set fill to `white-opacity > o05`
+5. Add stroke: `white-opacity > o15`, 1px
+
+**Inside:**
+
+1. Press `T`, type "Category"
+   - Font size: `component > browse > chip-size` (0.7rem ≈ 11px)
+   - Color: `#aaa`
+
+**Make it a component with variants:**
+
+1. `Ctrl/Cmd + Alt + K` → name it `.browse-chip`
+2. Add variants:
+   - **State=Default** — as built
+   - **State=Hover** — bg `white-opacity > o10`, text `#ddd`
+   - **State=Active** — bg `color > accent-dark`, text `color > text`
+
+---
+
+## 10. Build the Chat Trigger Button
+
+Go to the **Components** page.
+
+1. Press `F` → set width and height to 44px (apply
+   `component > chat > trigger-height`)
+2. Apply corner radius: 999px (pill shape when expanded) or 50%
+   (circle when collapsed)
+3. Set fill to `glass > bg`
+4. Add stroke: `white-opacity > o12`, 1px
+5. Add Background blur effect: `glass > blur` (12px)
+
+**Inside:**
+
+1. Press `T`, type "🪐" or a chat icon placeholder
+   - Font size: 1.2rem ≈ 19px
+   - Center aligned
+
+**Make it a component with variants:**
+
+1. `Ctrl/Cmd + Alt + K` → name it `.chat-trigger`
+2. Add variants:
+   - **State=Default** — circle, icon only
+   - **State=Expanded** — pill shape, icon + "Ask Orbit" text label
+     (font size 0.75rem ≈ 12px, weight Medium)
+   - **State=Active** — border `color > accent`, text `color > accent`
+
+---
+
+## 11. Build the Tools Menu Button
+
+Go to the **Components** page.
+
+1. Press `F` → add Auto Layout, horizontal, gap 5px
+2. Set min-height: `component > tools-menu > btn-min-height` (34px)
+3. Set padding to `6px 11px` (approximates `0.35rem 0.7rem`)
+4. Apply corner radius: `component > tools-menu > btn-radius` (999px)
+5. Set fill to `glass > bg-light`
+6. Add stroke: `white-opacity > o12`, 1px
+7. Add Background blur effect: `glass > blur` (12px)
+
+**Inside:**
+
+1. Press `T`, type "Browse"
+   - Font size: `component > tools-menu > btn-font-size` (0.72rem ≈ 12px)
+   - Color: `#ccc`
+   - Weight: Medium (500)
+
+**Make it a component with variants:**
+
+1. `Ctrl/Cmd + Alt + K` → name it `.tools-menu-btn`
+2. Add variants:
+   - **State=Default** — as built
+   - **State=Hover** — border color `rgba(77, 166, 255, 0.45)`,
+     text `color > text`
+   - **State=Expanded** — bg `accent-opacity > o18`,
+     text and border `color > accent`
+
+**Gear toggle variant:**
+
+Duplicate the component, remove the text label, set width to
+`component > tools-menu > toggle-min-width` (34px), and use a "⚙"
+glyph. Name it `.tools-menu-toggle`.
+
+---
+
+## 12. Assemble Full Panel Layouts
+
+Go to the **Screens** page. Now that you have all the components,
+you can assemble full layouts.
 
 ### Desktop layout (1440 × 900)
 
@@ -284,28 +423,42 @@ Go to the **Screens** page.
 2. Fill with `color > bg` (the dark background)
 3. Name it "Desktop — Default"
 
-Now place instances of your components:
+Now place **instances** of your components. To place an instance:
+go to **Assets** panel (top-left, next to "Layers"), find the
+component, and drag it onto the canvas. Or copy a component from
+the Components page and paste — it automatically becomes an instance.
 
-1. **Browse panel:** Create a frame on the right side
-   - Width: `component > browse > panel-width` (420px)
-   - Height: fill the viewport
-   - Background: `glass > bg-light`
-   - Inside: place search bar, chips, and a grid of browse card
-     instances
+**Browse panel (right side):**
 
-2. **Playback controls:** Place a row of transport button instances
-   at the bottom-right, with a glass surface background
+1. Create a frame on the right edge, 420px wide × full height
+2. Fill: `glass > bg-light`
+3. Add stroke on left edge: `white-opacity > o08`, 1px
+4. Add Auto Layout, vertical
+5. Inside, place instances of:
+   - `.browse-search` at the top
+   - A row of `.browse-chip` instances below the search
+   - Several `.browse-card` instances in a grid below the chips
 
-3. **Tools menu:** Place the Browse and gear buttons at the bottom-right,
-   above the playback controls
+**Playback controls (bottom-right):**
 
-4. **Chat trigger:** Place in the bottom-left — an instance of the
-   chat trigger button
+1. Create a frame with Auto Layout, horizontal, gap 3px
+2. Apply glass surface properties (fill, blur, stroke, radius)
+3. Place 5-6 `.transport-btn` instances inside (⏮ ⏪ ▶ ⏩ ⏭)
+
+**Tools menu (bottom-right, above playback):**
+
+1. Create a frame with Auto Layout, horizontal, gap 6px
+2. Place one `.tools-menu-btn` instance ("Browse")
+3. Place one `.tools-menu-toggle` instance (gear icon)
+
+**Chat trigger (bottom-left):**
+
+1. Drag a `.chat-trigger` instance to the bottom-left
 
 > **Tip:** You don't need to replicate the globe — just use the dark
 > background. The focus is on the UI chrome.
 
-### Tablet layout (768 × 1024)
+### Tablet layout (768 × 1024) — optional
 
 1. Duplicate the desktop frame (`Ctrl/Cmd + D`)
 2. Resize to 768 × 1024
@@ -313,7 +466,7 @@ Now place instances of your components:
    (larger touch targets, wider popover, etc.)
 4. Name it "Tablet — Default"
 
-### Phone portrait (375 × 812)
+### Phone portrait (375 × 812) — optional
 
 1. Duplicate again, resize to 375 × 812
 2. Browse panel becomes a bottom sheet (partial height from bottom)
@@ -322,7 +475,7 @@ Now place instances of your components:
 
 ---
 
-## 9. Keeping Things in Sync
+## 13. Keeping Things in Sync
 
 ### When a developer changes a token value
 
