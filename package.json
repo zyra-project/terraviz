@@ -9,6 +9,7 @@
     "dev": "vite",
     "build": "npm run tokens && tsc && vite build && typedoc",
     "docs": "typedoc",
+    "docs:tokens": "node tokens/scripts/update-style-guide.mjs",
     "docs:watch": "typedoc --watch",
     "preview": "vite preview",
     "type-check": "tsc --noEmit",

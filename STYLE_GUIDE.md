@@ -12,35 +12,53 @@ This documents the visual design language used across all UI components. All ove
 
 Every panel, button group, label, and overlay uses this base treatment:
 
+<!-- tokens:auto:glass -->
 ```css
-background: rgba(13, 13, 18, 0.88);
+background: rgba(13, 13, 18, 0.92);
 backdrop-filter: blur(12px);
 -webkit-backdrop-filter: blur(12px);
-border: 1px solid rgba(255, 255, 255, 0.08);
-border-radius: 6px;               /* 8px for larger panels */
+border: 1px solid rgba(255, 255, 255, 0.08); /* --color-surface-border-subtle */
+border-radius: 6px;               /* --radius-md; 8px (--radius-lg) for larger panels */
 ```
+<!-- /tokens:auto:glass -->
 
-- **Background**: near-black with 88% opacity — dark enough for legibility, transparent enough to show the globe
-- **Blur**: 12px backdrop blur creates the frosted-glass depth
+- **Background**: near-black with 88–92% opacity — dark enough for legibility, transparent enough to show the globe
+- **Blur**: backdrop blur creates the frosted-glass depth
 - **Border**: very subtle white at 8% opacity — just enough to define edges without drawing attention
 - **Radius**: 6px for small elements (buttons, labels), 8px for panels (info, playback, browse)
 
 ## Color Palette
 
-| Token             | Value                          | Usage                              |
-|--------------------|--------------------------------|------------------------------------|
-| `--surface`        | `rgba(13, 13, 18, 0.88)`      | Panel/element backgrounds          |
-| `--border`         | `rgba(255, 255, 255, 0.08)`   | Default borders                    |
-| `--border-hover`   | `rgba(77, 166, 255, 0.4)`     | Hover/active borders               |
-| `--text-primary`   | `#e8eaf0`                     | Titles, headings                   |
-| `--text-secondary` | `#bbb` / `#ccc`               | Body text, labels                  |
-| `--text-muted`     | `#999` / `#aaa`               | Metadata, timestamps (min 4.5:1 contrast) |
-| `--text-dim`       | `#999`                         | Counts, status text (min 4.5:1 contrast)  |
-| `--accent`         | `#4da6ff`                      | Active states, links, highlights   |
-| `--accent-bg`      | `rgba(77, 166, 255, 0.12)`    | Keyword/tag backgrounds            |
-| `--accent-text`    | `#6ab8ff`                      | Keyword/tag text                   |
-| `--btn-primary`    | `#0066cc`                      | Primary action buttons (Load)      |
-| `--btn-hover`      | `#0052a3`                      | Primary button hover               |
+> Source of truth: `tokens/global.json`
+
+<!-- tokens:auto:colors -->
+| Token | Value | Usage |
+|---|---|---|
+| `--color-accent` | `#4da6ff` | Primary accent — links, active states, focus rings |
+| `--color-accent-hover` | `#6ab8ff` | Accent hover state |
+| `--color-accent-dark` | `#0066cc` | Primary action buttons |
+| `--color-accent-darker` | `#0052a3` | Primary button hover |
+| `--color-bg` | `#0d0d12` | Page background |
+| `--color-surface` | `rgba(255, 255, 255, 0.06)` | Panel/element backgrounds |
+| `--color-surface-alt` | `rgba(255, 255, 255, 0.04)` | Alternate surface (cards) |
+| `--color-surface-hover` | `rgba(255, 255, 255, 0.12)` | Surface hover state |
+| `--color-surface-active` | `rgba(255, 255, 255, 0.15)` | Surface active/pressed state |
+| `--color-surface-border` | `rgba(255, 255, 255, 0.1)` | Default surface borders |
+| `--color-surface-border-subtle` | `rgba(255, 255, 255, 0.08)` | Subtle borders — glass panels |
+| `--color-text` | `#e8eaf0` | Primary text — titles, headings |
+| `--color-text-secondary` | `#bbb` | Body text, labels |
+| `--color-text-muted` | `#999` | Metadata, timestamps (min 4.5:1 contrast) |
+| `--color-text-dim` | `#888` | Counts, status text (min 4.5:1 contrast) |
+| `--color-text-faint` | `#666` | Decorative/disabled text |
+| `--color-success` | `#22c55e` | Success state |
+| `--color-success-soft` | `#6dc96d` | Success state — softer variant |
+| `--color-error` | `#ef4444` | Error state |
+| `--color-error-soft` | `#ff6b6b` | Error state — softer variant |
+| `--color-warning` | `#ffcc66` | Warning state |
+| `--glass-bg` | `rgba(13, 13, 18, 0.92)` | Glass panel background — dark |
+| `--glass-bg-light` | `rgba(13, 13, 18, 0.88)` | Glass panel background — lighter variant |
+| `--glass-blur` | `12px` | Backdrop blur radius for frosted-glass effect |
+<!-- /tokens:auto:colors -->
 
 ## Typography
 
@@ -97,56 +115,118 @@ font-size: 0.58rem–0.6rem;
 
 ## Component Catalog
 
-### Browse Panel (right sidebar)
-- Width: `420px` on desktop, `100%` on mobile
-- Collapsible via toggle tab on left edge
-- `.collapsed` state: `transform: translateX(100%)`
-- Inner content uses `overflow: hidden` (not the panel itself, to allow toggle tab overflow)
+> Source of truth: `tokens/components/*.json`. The tables below are
+> auto-generated from the token JSON files.
+
+<!-- tokens:auto:components -->
+### Browse
+
+| Token | Default | Tablet (≤768px) | Phone Portrait |
+|---|---|---|---|
+| `--component-browse-panel-width` | `420px` | `—` | `100%` |
+| `--component-browse-panel-max-height` | `none` | `—` | `70vh` |
+| `--component-browse-card-padding` | `0.875rem` | `—` | `—` |
+| `--component-browse-card-radius` | `8px` | `—` | `—` |
+| `--component-browse-card-gap` | `0.75rem` | `—` | `—` |
+| `--component-browse-thumb-size` | `64px` | `—` | `—` |
+| `--component-browse-thumb-size-expanded` | `96px` | `—` | `—` |
+| `--component-browse-thumb-radius` | `4px` | `—` | `—` |
+| `--component-browse-grid-col-min` | `260px` | `—` | `—` |
+| `--component-browse-grid-gap` | `0.75rem` | `—` | `—` |
+| `--component-browse-title-size` | `0.8rem` | `—` | `—` |
+| `--component-browse-title-weight` | `600` | `—` | `—` |
+| `--component-browse-desc-size` | `0.7rem` | `—` | `—` |
+| `--component-browse-keyword-size` | `0.58rem` | `—` | `—` |
+| `--component-browse-keyword-radius` | `3px` | `—` | `—` |
+| `--component-browse-chip-size` | `0.7rem` | `—` | `—` |
+| `--component-browse-chip-radius` | `999px` | `—` | `—` |
+| `--component-browse-search-size` | `0.875rem` | `—` | `—` |
+| `--component-browse-search-radius` | `6px` | `—` | `—` |
+| `--component-browse-chat-btn-size` | `36px` | `40px` | `—` |
+
+### Chat
+
+| Token | Default | Tablet (≤768px) | Phone Portrait |
+|---|---|---|---|
+| `--component-chat-panel-width` | `380px` | `calc(100vw - 1.5rem)` | `100%` |
+| `--component-chat-panel-max-height` | `calc(100vh - 8rem)` | `60vh` | `75vh` |
+| `--component-chat-panel-radius` | `10px` | `—` | `—` |
+| `--component-chat-trigger-height` | `44px` | `48px` | `—` |
+| `--component-chat-trigger-width-collapsed` | `44px` | `48px` | `—` |
+| `--component-chat-msg-font-size` | `0.73rem` | `—` | `—` |
+| `--component-chat-msg-line-height` | `1.55` | `—` | `—` |
+| `--component-chat-msg-radius` | `8px` | `—` | `—` |
+| `--component-chat-msg-max-width` | `88%` | `—` | `—` |
+| `--component-chat-input-font-size` | `0.78rem` | `—` | `—` |
+| `--component-chat-input-radius` | `6px` | `—` | `—` |
+| `--component-chat-input-min-height` | `1.8rem` | `—` | `—` |
+| `--component-chat-input-max-height` | `6rem` | `—` | `—` |
+| `--component-chat-send-btn-min-size` | `34px` | `44px` | `—` |
+| `--component-chat-send-btn-radius` | `6px` | `—` | `—` |
+| `--component-chat-header-title-size` | `0.75rem` | `—` | `—` |
+| `--component-chat-header-title-weight` | `600` | `—` | `—` |
+| `--component-chat-suggestion-size` | `0.65rem` | `—` | `—` |
+| `--component-chat-suggestion-radius` | `999px` | `—` | `—` |
+| `--component-chat-action-title-size` | `0.68rem` | `—` | `—` |
+| `--component-chat-action-title-weight` | `600` | `—` | `—` |
+| `--component-chat-action-btn-radius` | `6px` | `—` | `—` |
+
+### Playback
+
+| Token | Default | Tablet (≤768px) |
+|---|---|---|
+| `--component-playback-transport-btn-min-width` | `28px` | `40px` |
+| `--component-playback-transport-btn-font-size` | `0.7rem` | `1rem` |
+| `--component-playback-home-btn-min-width` | `36px` | `44px` |
+| `--component-playback-home-btn-min-height` | `36px` | `44px` |
+| `--component-playback-home-btn-font-size` | `0.85rem` | `1rem` |
+| `--component-playback-time-label-font-size` | `0.8rem` | `—` |
+| `--component-playback-time-label-font-weight` | `500` | `—` |
+| `--component-playback-time-label-radius` | `6px` | `—` |
+| `--component-playback-range-height` | `20px` | `28px` |
+
+### Tools Menu
+
+| Token | Default | Tablet (≤768px) |
+|---|---|---|
+| `--component-tools-menu-btn-min-height` | `34px` | `38px` |
+| `--component-tools-menu-btn-font-size` | `0.72rem` | `0.78rem` |
+| `--component-tools-menu-btn-radius` | `999px` | `—` |
+| `--component-tools-menu-toggle-min-width` | `34px` | `38px` |
+| `--component-tools-menu-popover-min-width` | `240px` | `260px` |
+| `--component-tools-menu-popover-radius` | `10px` | `—` |
+| `--component-tools-menu-item-font-size` | `0.75rem` | `0.82rem` |
+| `--component-tools-menu-item-radius` | `6px` | `—` |
+| `--component-tools-menu-layout-btn-min-height` | `30px` | `36px` |
+| `--component-tools-menu-layout-btn-font-size` | `0.7rem` | `0.78rem` |
+| `--component-tools-menu-layout-btn-radius` | `5px` | `—` |
+| `--component-tools-menu-section-title-size` | `0.6rem` | `—` |
+| `--component-tools-menu-section-title-weight` | `600` | `—` |
+<!-- /tokens:auto:components -->
 
 ### Info Panel (bottom-left)
 - Collapsible drawer with click-to-expand header
 - Max-width: `340px`
 - Expanded body: `max-height: 60vh` with overflow scroll
 
-### Playback Controls (bottom-right)
-- `ui-panel` class for glass surface
-- Inline flex layout, transport buttons in a row
-- Scrubber (range input) below buttons
-
-### Time Label (top-right)
-- Glass surface, `0.8rem` font, `font-weight: 500`
-
 ### Lat/Lng Display (top-left, next to home button)
 - Glass surface, tabular-nums, no pointer events
 
-### Home Button (top-left corner)
-- Glass surface with house glyph (`⌂`)
-- `min-width: 36px`, `min-height: 36px`
+## Border Radii
 
-## Cards (Browse Grid)
+> Source of truth: `tokens/global.json`
 
-```css
-/* Base card */
-background: rgba(255, 255, 255, 0.04);
-border: 1px solid rgba(255, 255, 255, 0.08);
-border-radius: 8px;
-display: flex;                    /* thumbnail left, body right */
-gap: 0.75rem;
-
-/* Hover */
-background: rgba(255, 255, 255, 0.08);
-border-color: rgba(77, 166, 255, 0.4);
-transform: translateY(-1px);
-
-/* Expanded */
-border-color: rgba(77, 166, 255, 0.5);
-grid-column: 1 / -1;             /* span full width */
-```
-
-- **Thumbnail**: `64×64` collapsed, `96×96` expanded, `border-radius: 4px`, `object-fit: cover`
-- **Title**: `0.8rem`, `font-weight: 600`, 2-line clamp (unclamp when expanded)
-- **Categories**: inline tags, `0.6rem`, `rgba(255,255,255,0.06)` bg
-- **Description**: `0.7rem`, 2-line clamp collapsed, full text expanded
+<!-- tokens:auto:radii -->
+| Token | Default | Mobile Native |
+|---|---|---|
+| `--radius-xs` | `3px` | `—` |
+| `--radius-sm` | `4px` | `—` |
+| `--radius-md` | `6px` | `—` |
+| `--radius-lg` | `8px` | `10px` |
+| `--radius-xl` | `10px` | `14px` |
+| `--radius-2xl` | `12px` | `—` |
+| `--radius-pill` | `999px` | `—` |
+<!-- /tokens:auto:radii -->
 
 ## Spacing
 
@@ -156,10 +236,13 @@ grid-column: 1 / -1;             /* span full width */
 
 ## Mobile Adaptations (≤768px)
 
-- Browse panel: full-width, no left border
-- Transport buttons: `min-width: 40px`, `min-height: 40px`, `font-size: 1rem`
-- Home button: `min-width: 44px`, `min-height: 44px`
-- Browse grid: `minmax(150px, 1fr)` columns
+Responsive overrides are managed via token modes. See the tablet
+column in the component tables above for exact values.
+
+- Browse panel: full-width bottom sheet on phone portrait
+- Transport buttons grow for touch targets
+- Home button grows for touch targets
+- Tools menu buttons and popover scale up
 
 ## Animations
 
