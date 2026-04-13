@@ -35,6 +35,7 @@ pub fn run() {
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_deep_link::init())
         // Phase 4: Apple Intelligence on-device LLM. On non-iOS platforms the
         // plugin's commands return "not available" gracefully; the JS provider
         // checks availability and falls back to HTTP automatically.
