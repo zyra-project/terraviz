@@ -8,6 +8,7 @@ dist/
 build/
 *.tsbuildinfo
 src-tauri/target/
+src/styles/tokens.css
 
 # Test / coverage artifacts
 coverage/

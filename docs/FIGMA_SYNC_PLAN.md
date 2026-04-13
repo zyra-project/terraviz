@@ -35,8 +35,8 @@ tokens/
           │                                    │
           ▼                                    │
   src/styles/tokens.css  ◄─── generated ───►  Figma Variables
-  (global + component                        & Components
-   custom properties)
+  (gitignored build artifact;                & Components
+   global + component custom properties)
 ```
 
 **Round-trip flow:**
@@ -411,22 +411,29 @@ read/write the token JSON files in this repository.
 5. Create Figma variable collections:
    - **Global** collection → colors, radii, spacing, glass, touch
    - **Components** collection → per-component design values
-6. Set up modes on each collection:
+6. Set up modes using **Tokens Studio's mode UI** (not native Figma
+   variable modes — those require Figma Professional):
    - Global: "Default", "Mobile Native"
    - Components: "Default", "Tablet", "Phone Portrait", "Mobile Native"
      (only where modes are defined in the JSON)
+   - Designers switch modes in the Tokens Studio plugin panel to
+     preview platform variants
 
-### Phase 4: CI validation (optional)
+### Phase 4: CI build prerequisite
 
-Add a CI check that ensures `tokens.css` stays in sync with the
-token JSON files. This prevents drift if someone edits the CSS
-directly.
+Since `tokens.css` is gitignored, CI must generate it before building
+the app. This replaces the old "drift detection" approach — there is
+no file to drift because it's not in the repo.
 
 **Tasks:**
-- [ ] Add a GitHub Actions step: run `npm run tokens`, then
-      `git diff --exit-code src/styles/tokens.css`
-- [ ] If the diff is non-empty, the check fails with a message:
-      "tokens.css is out of sync — run `npm run tokens` and commit"
+- [ ] Update the CI build workflow to run `npm run tokens` before
+      `npm run build` (or add `tokens` as a `prebuild` script in
+      `package.json`)
+- [ ] Update `CLAUDE.md` key commands section to document that
+      `npm run tokens` is required before `npm run dev`
+- [ ] Add a `"predev": "npm run tokens"` script so `npm run dev`
+      auto-generates tokens before starting Vite
+- [ ] Verify CI passes end-to-end: `npm ci → npm run tokens → npm run build`
 
 ### Phase 5: Figma Code Connect
 
@@ -532,6 +539,67 @@ with `var(--component-{name}-{property})` references and remove
 - [ ] Visual regression check: compare dev server rendering before
       and after migration (should be pixel-identical)
 
+### Phase 7: STYLE_GUIDE.md auto-generated sections
+
+Keep STYLE_GUIDE.md as the human-readable design reference, but inject
+token-derived tables so it stays in sync with the source of truth
+automatically.
+
+**Approach:** A Node script reads the token JSON files and writes
+markdown tables between marker comments in STYLE_GUIDE.md. Hand-written
+prose outside the markers is preserved.
+
+**Marker format:**
+
+```markdown
+## Color Palette
+
+<!-- tokens:auto:colors -->
+| Token | Value | Usage |
+|---|---|---|
+| `--color-accent` | `#4da6ff` | Active states, links, highlights |
+...
+<!-- /tokens:auto:colors -->
+```
+
+**Auto-generated sections:**
+
+| Section | Source | Content |
+|---|---|---|
+| Color Palette | `global.json` → `color.*` | Table of token name, value, `$description` |
+| Spacing Scale | `global.json` → `space.*` | Table of `--space-*` tokens |
+| Border Radii | `global.json` → `radius.*` | Table with default + mobile-native values |
+| Glass Surface | `global.json` → `glass.*` | Background, blur, border values |
+| Component Catalog (each) | `components/*.json` | Table of key dimensions per mode |
+
+**Hand-written sections (preserved as-is):**
+
+- Design Principles
+- Typography (prose + font stack — values can reference tokens)
+- Interactive Buttons (prose describing states)
+- Animations
+- Accessibility (Section 508 / WCAG 2.1 AA)
+- Mobile Adaptations (prose; dimension tables auto-generated)
+
+**Script:** `tokens/scripts/update-style-guide.mjs`
+
+```js
+// Reads tokens/global.json + tokens/components/*.json
+// Finds <!-- tokens:auto:{section} --> markers in STYLE_GUIDE.md
+// Replaces content between markers with generated tables
+// Preserves everything outside markers
+```
+
+**Tasks:**
+- [ ] Add marker comments to STYLE_GUIDE.md for each auto-generated
+      section
+- [ ] Write `tokens/scripts/update-style-guide.mjs`
+- [ ] Add `"docs:tokens": "node tokens/scripts/update-style-guide.mjs"`
+      to `package.json`
+- [ ] Run `npm run docs:tokens` after `npm run tokens` in CI so the
+      style guide is always current in PRs
+- [ ] Verify hand-written prose is untouched after running the script
+
 ## File Changes Summary
 
 | Action | Path | Description |
@@ -542,9 +610,11 @@ with `var(--component-{name}-{property})` references and remove
 | Create | `tokens/formats/multi-mode-css.mjs` | Custom format for mode-aware CSS output |
 | Create | `tokens/$metadata.json` | Tokens Studio metadata (token set order) |
 | Create | `tokens/$themes.json` | Tokens Studio theme definitions |
+| Create | `tokens/scripts/update-style-guide.mjs` | Script to inject token tables into STYLE_GUIDE.md |
 | Create | `figma.config.json` | Figma Code Connect configuration |
 | Create | `figma/*.figma.ts` (9 files) | Per-component Figma ↔ source file mappings |
-| Modify | `src/styles/tokens.css` | Now **generated** — global + component custom properties |
+| Delete | `src/styles/tokens.css` | Removed from git — now a **generated** build artifact (gitignored) |
+| Modify | `.gitignore` | Add `src/styles/tokens.css` |
 | Modify | `src/styles/browse.css` | Replace hardcoded values with `var()` token references |
 | Modify | `src/styles/chat.css` | Replace hardcoded values with `var()` token references |
 | Modify | `src/styles/info-panel.css` | Replace hardcoded values with `var()` token references |
@@ -554,7 +624,8 @@ with `var(--component-{name}-{property})` references and remove
 | Modify | `src/styles/tour.css` | Replace hardcoded values with `var()` token references |
 | Modify | `src/styles/download.css` | Replace hardcoded values with `var()` token references |
 | Modify | `src/styles/loading.css` | Replace hardcoded values with `var()` token references |
-| Modify | `package.json` | Add devDeps + `tokens` script |
+| Modify | `STYLE_GUIDE.md` | Add marker comments for auto-generated sections |
+| Modify | `package.json` | Add devDeps + `tokens` / `docs:tokens` scripts |
 
 ## Dependencies
 
@@ -563,7 +634,7 @@ with `var(--component-{name}-{property})` references and remove
 | `style-dictionary` | `^4.0.0` | Token → CSS build | Free (Apache 2.0) |
 | `@figma/code-connect` | `^1.0.0` | Component ↔ source file links | Free (open source) |
 | Tokens Studio plugin | latest | Figma ↔ Git sync | Free tier |
-| Figma | Free or Pro | Design tool | Free for 1 mode; $15/mo/editor for 4 modes |
+| Figma | Free plan | Design tool | $0 — modes managed via Tokens Studio UI |
 
 ## Risks & Mitigations
 
@@ -573,7 +644,7 @@ with `var(--component-{name}-{property})` references and remove
 | `rgba()` values don't round-trip perfectly through Figma | Slight color shifts | Pin exact values in JSON; Tokens Studio preserves raw values |
 | Composite tokens (`--glass-border`) can't be expressed in W3C format | Manual maintenance | Keep composites as a hand-written appendix in the generated file, or use Style Dictionary references |
 | `env()` safe-area tokens are runtime-only | Can't be in JSON | Append as static lines via a custom Style Dictionary format |
-| Developer edits `tokens.css` directly instead of JSON | Changes overwritten on next build | CI check (Phase 4) catches this; header comment warns "DO NOT EDIT" |
+| Developer edits `tokens.css` directly instead of JSON | Changes lost on next build | File is gitignored so direct edits are never committed; contributors learn the workflow naturally |
 | Too many component custom properties bloat CSS | Larger stylesheet | Only tokenize values that are designer-facing or have responsive overrides (~100 component properties total; negligible impact) |
 | Component CSS migration introduces visual regressions | Broken UI | Migrate one file at a time with visual regression check before and after |
 | Code Connect node URLs unknown until Figma file exists | Placeholder URLs | Phase 5 files use placeholder URLs; update them once the Figma component library is created |
@@ -587,40 +658,57 @@ complete.
 
 ```
 Phase 1a (global tokens)
-    └──▶ Phase 2 (build pipeline) ──▶ Phase 4 (CI)
+    └──▶ Phase 2 (build pipeline) ──▶ Phase 4 (CI prereq)
 Phase 1b (component tokens) ─────────┘
     └──▶ Phase 6 (CSS migration)
 Phase 3 (Tokens Studio) — can start after Phase 1a
 Phase 5 (Code Connect) — independent, can start anytime
+Phase 7 (STYLE_GUIDE auto-update) — after Phase 1a + 1b
 ```
 
 **Recommended order:**
-1. Phase 1a + Phase 2 — get global tokens building first
-2. Phase 3 — verify Figma round-trip works with global tokens
-3. Phase 1b — add component tokens
-4. Phase 6 — migrate component CSS to use token vars
-5. Phase 4 — add CI check once the pipeline is stable
-6. Phase 5 — add Code Connect last (it needs a Figma file to exist)
+1. Phase 1a + Phase 2 — get global tokens building, `tokens.css`
+   gitignored, `npm run tokens` working
+2. Phase 4 — wire up CI/predev scripts so builds don't break
+3. Phase 3 — verify Figma round-trip works with global tokens
+4. Phase 1b — add component tokens
+5. Phase 6 — migrate component CSS to use token vars
+6. Phase 7 — add auto-generated sections to STYLE_GUIDE.md
+7. Phase 5 — add Code Connect last (it needs a Figma file to exist)
 
-## Open Questions
+## Decisions
 
-1. **Should `tokens.css` be gitignored?** Keeping it tracked means the
-   build works without running `npm run tokens` first (simpler for
-   contributors). The CI check in Phase 4 prevents drift.
-2. **Token naming convention** — `--component-browse-panel-width` vs.
-   `--browse-panel-width`? The `component-` prefix avoids collisions
-   with global tokens but is more verbose.
-3. **Figma plan** — Tokens Studio's own mode UI (free) can handle all
-   4 modes. Native Figma variable modes are limited to 1 on free,
-   4 on Professional ($15/mo/editor). Recommend starting with Tokens
-   Studio modes and upgrading only if the native Figma mode switching
-   UX is needed.
-4. **Granularity threshold** — not every hardcoded `0.2rem` gap needs
-   to be a component token. The plan focuses on values documented in
-   STYLE_GUIDE.md and values with responsive overrides. Individual
-   component files may have additional values that could become tokens
-   in future iterations.
-5. **STYLE_GUIDE.md fate** — once component tokens and Code Connect
-   are in place, STYLE_GUIDE.md becomes partially redundant. Should it
-   be kept as human-readable reference, or replaced with a generated
-   doc from the token JSON?
+The following questions have been resolved:
+
+1. **`tokens.css` is gitignored.** It is a build artifact generated by
+   `npm run tokens`. Contributors must run `npm run tokens` (or
+   `npm run build`, which includes it) before the dev server will work.
+   The `npm run tokens` step is documented in CLAUDE.md and README.
+   Phase 4 CI runs `npm run tokens` as a build prerequisite rather than
+   a drift check.
+
+2. **Token naming convention:** `--component-{name}-{property}`. The
+   `component-` prefix avoids collisions with global tokens and makes
+   it clear when inspecting CSS that a property comes from the component
+   token layer vs. the global layer.
+
+3. **Figma free plan.** All modes are managed in Tokens Studio's own
+   mode UI (free tier), not Figma's native variable modes. This keeps
+   the entire pipeline at $0/mo — important for contributor adoption on
+   an open-source project. If a future contributor has Figma Pro, the
+   modes can optionally be promoted to native Figma variable modes, but
+   it is not required.
+
+4. **Granularity threshold:** tokenize values documented in
+   STYLE_GUIDE.md and values with responsive/platform overrides.
+   One-off internal values (a single `0.2rem` gap with no override) stay
+   hardcoded. Additional values can be promoted to tokens in future
+   iterations as needed.
+
+5. **STYLE_GUIDE.md stays as a human-readable document** but is updated
+   to reference the token JSON as the source of truth. Sections that
+   can be auto-generated (color palette table, spacing scale, component
+   dimension tables) are generated by a script (`npm run docs:tokens`)
+   and injected between marker comments. Prose sections (design
+   principles, accessibility guidelines, animation philosophy) stay
+   hand-written. See Phase 7.
