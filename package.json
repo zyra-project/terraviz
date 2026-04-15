@@ -31,7 +31,8 @@
     "axios": "^1.6.0",
     "hls.js": "^1.4.0",
     "html2canvas": "^1.4.1",
-    "maplibre-gl": "^5.21.1"
+    "maplibre-gl": "^5.21.1",
+    "three": "^0.183.2"
   },
   "optionalDependencies": {
     "@rolldown/binding-linux-x64-musl": "^1.0.0-rc.11"
@@ -40,6 +41,7 @@
     "@cloudflare/workers-types": "^4.20260317.1",
     "@tauri-apps/cli": "^2",
     "@types/node": "^20.10.0",
+    "@types/three": "^0.183.1",
     "@vitest/coverage-v8": "^4.1.0",
     "happy-dom": "^20.8.4",
     "sharp": "^0.34.5",

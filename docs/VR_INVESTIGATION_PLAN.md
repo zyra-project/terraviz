@@ -3,17 +3,19 @@
 Feasibility investigation for running Interactive Sphere as an immersive
 web experience on Meta Quest (and other WebXR-capable) headsets.
 
-Status: **scaffolding landed**. A feature-gated "Enter VR" button opens
-a minimal immersive session with a placeholder textured globe. Nothing
-in the 2D experience changes when WebXR is absent.
+Status: **MVP in progress.** Feature-gated "Enter VR" button opens an
+immersive session that renders the currently-loaded HLS video dataset
+onto a globe, with controller-based rotate/zoom and in-VR play/pause.
+The 2D experience is unchanged when WebXR is absent.
 
 ---
 
 ## Goal
 
 Let a visitor on a Meta Quest browser tap **Enter VR** and stand in
-front of the globe in room-scale, then scrub through NOAA SOS datasets
-with head + hand tracking. The existing 2D experience is untouched.
+front of the globe in room-scale, then watch NOAA SOS video datasets
+play immersively with head + hand tracking. The existing 2D experience
+is untouched.
 
 ## Constraints found during exploration
 
@@ -30,34 +32,44 @@ derivative that does not map cleanly onto a unit sphere in world space.
 own scene graph. The 2D MapLibre canvas is hidden while in VR and
 restored on exit.
 
-### 2. No 3D engine dependency exists today
+### 2. Three.js is the right engine, lazy-loaded on first VR entry
 
-`package.json` currently lists four runtime deps — `maplibre-gl`,
-`hls.js`, `axios`, `html2canvas`. Adding Three.js (~600 KB gzipped)
-would nearly double the shipped JS. The investigation deliberately
-avoids it: the scaffold is ~250 lines of vanilla WebGL2, which keeps
-the bundle delta small and lets us reuse patterns from
-`src/services/earthTileLayer.ts` (which already does raw WebGL inside
-MapLibre's `CustomLayerInterface`).
+Initial scaffold used vanilla WebGL2 to avoid a dep. That was the right
+call for "prove the pipeline works" but the wrong call for an MVP that
+needs a live video texture, controller raycasting, and an interactive
+floating HUD — writing all of that from scratch ran into 1500+ LOC.
+Three.js provides every one of those primitives:
 
-If the VR scene grows beyond a textured sphere + video overlay + basic
-hand interaction, we should revisit Three.js. Until then, vanilla WebGL
-keeps the dependency surface honest.
+- `THREE.WebGLRenderer` has native WebXR support (`renderer.xr.enabled`)
+- `THREE.VideoTexture` wraps an `HTMLVideoElement` directly
+- `XRControllerModelFactory` + `THREE.Raycaster` for input
+- `THREE.CanvasTexture` for rendering DOM UI into an in-VR panel
 
-### 3. Texture sources are reusable, projection is not
+Bundle impact is kept off non-VR users via `import('three')` on user
+tap of Enter VR (same lazy-import pattern used for Tauri plugins in
+`src/services/llmProvider.ts`, `downloadService.ts`, `datasetLoader.ts`).
+Only Quest / PCVR / Vision Pro browsers — the ones where feature
+detection already returned `true` — ever fetch the chunk, and the
+chunk is HTTP-cached for subsequent sessions.
 
-- **GIBS raster tiles** (zoom 0–8, Mercator) — used by MapLibre today.
-  Loadable into vanilla WebGL as a `TEXTURE_2D` pyramid, but Mercator
-  distorts near the poles. For VR we want equirectangular samples;
-  either (a) stitch a single 4K equirectangular PNG per dataset server-
-  side, or (b) sample Mercator tiles with a UV-space reprojection in
-  the fragment shader. The scaffold ships with a placeholder
-  (`/assets/Earth_Specular_2K.jpg`) while this decision is deferred.
+### 3. Texture sources
+
 - **HLS video textures** — `HLSService` produces a plain
-  `HTMLVideoElement`. Vanilla WebGL can sample it via `texImage2D` each
-  frame exactly as `earthTileLayer` already does.
-- **Clouds / night lights / specular** — same story as tiles, just a
-  multi-pass shader. Directly portable.
+  `HTMLVideoElement`. The existing element is reused (two consumers:
+  the 2D `earthTileLayer` + the VR `VideoTexture`). The video element
+  keeps playing across the enter/exit VR transition without tearing
+  down the HLS stream.
+- **Base Earth texture** — placeholder = `public/assets/Earth_Specular_2K.jpg`
+  (already in the repo; monochrome but shows landmasses). A proper
+  Blue Marble equirectangular is a Phase 2 polish item. When a video
+  dataset is loaded, the video fills the whole sphere anyway and the
+  base texture isn't visible — which is the main use case.
+- **GIBS raster tiles** — deferred to Phase 2. The 2D app's tile
+  pyramid doesn't port directly to a VR sphere (Mercator ≠ equirect-
+  angular), and pre-stitching equirectangular per dataset is a real
+  piece of work we decided to punt on for MVP.
+- **Clouds / night lights / specular** — Phase 2. Visual polish, not
+  MVP-critical.
 
 ### 4. Security / sandbox
 
@@ -76,105 +88,115 @@ keeps the dependency surface honest.
 ## Architecture
 
 ```
-┌──────────────────────────┐         ┌──────────────────────────┐
-│  2D experience (today)   │         │  VR experience (new)     │
-│                          │         │                          │
-│  MapLibre GL JS canvas   │         │  Dedicated WebGL2 canvas │
-│  ├─ GIBS raster tiles    │         │  ├─ Textured UV-sphere   │
-│  ├─ earthTileLayer.ts    │ ◀── → ─▶│  ├─ XRSession render loop│
-│  ├─ HLS video texture    │ (share  │  ├─ HLS video texture    │
-│  └─ DOM UI overlays      │ assets) │  └─ In-scene UI (TBD)    │
-└──────────────────────────┘         └──────────────────────────┘
-         ▲                                         ▲
-         │                                         │
-         └───── vrUI.ts: Enter VR / Exit VR ───────┘
+┌──────────────────────────┐         ┌──────────────────────────────┐
+│  2D experience (today)   │         │  VR experience (MVP)         │
+│                          │         │                              │
+│  MapLibre GL JS canvas   │         │  Three.js WebGLRenderer      │
+│  ├─ GIBS raster tiles    │         │  ├─ Unit sphere mesh         │
+│  ├─ earthTileLayer.ts    │ ◀── → ─▶│  ├─ VideoTexture (same HLS   │
+│  ├─ HLS video texture    │ (shared │  │    <video> element)       │
+│  └─ DOM UI overlays      │ <video>)│  ├─ Controller raycast →     │
+│                          │         │  │    rotate globe, zoom     │
+│                          │         │  └─ CanvasTexture HUD panel  │
+└──────────────────────────┘         └──────────────────────────────┘
+         ▲                                            ▲
+         │                                            │
+         └────── vrButton.ts: Enter VR / Exit VR ─────┘
 ```
 
 ### New modules
 
 | File | Responsibility |
 |---|---|
-| `src/utils/vrCapability.ts` | Feature detect `navigator.xr` + `immersive-vr` |
-| `src/services/vrSession.ts` | WebXR lifecycle: request session, bind WebGL layer, drive frame loop, end cleanly |
-| `src/services/vrGlobe.ts` | Minimal WebGL2 textured UV-sphere — geometry, shaders, per-frame draw |
-| `src/ui/vrUI.ts` | Enter VR button, gated on capability, talks to vrSession |
-| `src/styles/vr.css` | Button + canvas host styles (matches tokens.css glass surface) |
+| `src/utils/vrCapability.ts` | Feature detect `navigator.xr` + `immersive-vr` (already landed) |
+| `src/services/vrSession.ts` | Lazy-load Three.js, start/end `immersive-vr`, drive the render loop |
+| `src/services/vrScene.ts` | Three.js scene: sphere + base texture + VideoTexture swap |
+| `src/services/vrInteraction.ts` | Controller input — raycast, thumbstick rotate/zoom, trigger play/pause, grip exit |
+| `src/services/vrHud.ts` | Floating HUD panel (CanvasTexture) — play/pause, dataset title, exit button |
+| `src/ui/vrButton.ts` | DOM "Enter VR" button, feature-gated |
+| `src/styles/vr.css` | Button styles, matches tokens.css glass surface |
 
 ### Modified modules
 
 | File | Change |
 |---|---|
-| `src/index.html` | Add `#vr-button` + `#vr-canvas-host` elements |
-| `src/main.ts` | Call `initVrUI()` during boot |
+| `src/index.html` | Add `#vr-enter-btn` host element |
+| `src/main.ts` | Call `initVrButton()`; pass context (getVideo, getDataset, togglePlayPause) |
 | `src/styles/index.css` | `@import './vr.css'` |
+| `package.json` | Add `three` as a runtime dep (lazy-loaded) |
 
-### Rendering pipeline (scaffold)
+### Rendering pipeline
 
-1. `vrUI.initVrUI()` runs during boot. It feature-detects `navigator.xr`
-   and `isSessionSupported('immersive-vr')`. If unsupported, the button
-   stays hidden — zero impact on the 2D app.
-2. On click, `vrSession.enterVr()` requests `immersive-vr` with
-   `local-floor` reference space. It creates a WebGL2 canvas, calls
-   `gl.makeXRCompatible()`, and sets `XRWebGLLayer` as the session's
-   base layer.
-3. Per frame, the session callback receives an `XRFrame`. We get the
-   viewer pose in the reference space, then iterate views (one per
-   eye). Each view provides a viewport, a projection matrix, and the
-   eye's transform. We bind the viewport, pass matrices into
-   `vrGlobe.render()`, and draw.
-4. On exit (user presses the Quest button or the Exit VR UI), the
-   session's `end` event fires; we restore the 2D DOM and release the
-   WebGL resources.
+1. `vrButton.initVrButton()` runs during boot. It calls
+   `isImmersiveVrSupported()`. If unsupported, the button stays hidden
+   and `import('three')` is never scheduled — zero impact on
+   desktop/Tauri/mobile bundle.
+2. On first VR tap, `vrSession.enterVr(ctx)` dynamically imports
+   Three.js, creates a `WebGLRenderer`, enables `renderer.xr`, and
+   calls `renderer.xr.setSession(xrSession)` with a session requested
+   from `navigator.xr.requestSession('immersive-vr', {...})` using
+   `local-floor` as the required reference space.
+3. `vrScene.create(ctx)` builds the scene: a unit sphere at `[0, 1.3,
+   -1.5]` with a `VideoTexture` bound to `ctx.getVideo()`, plus a
+   CanvasTexture HUD at `[0, 0.9, -1.2]`.
+4. `vrInteraction.attach()` listens to `XRInputSource` events —
+   trigger toggles play/pause via `ctx.togglePlayPause()`, grip exits
+   VR, thumbstick on either hand rotates/zooms the globe.
+5. On session end (user presses Quest button, or grip/Exit VR), the
+   `end` event fires; we dispose scene resources, null the renderer,
+   and restore the 2D DOM. The HLS video element keeps playing — the
+   2D MapLibre layer is still bound to it.
 
 ---
 
-## Scaffold scope (this PR)
+## MVP scope (this branch)
 
-What works:
+What must work:
 
 - Feature-gated Enter VR button (hidden on non-XR browsers)
-- `immersive-vr` session start + exit
+- `immersive-vr` session start + exit (grip button, Quest home, or HUD)
 - Stereo rendering at the headset's native resolution
-- Textured UV-sphere placed at `[0, 1.3, -1.5]` in local-floor space
-  (about arm's length in front of and at head height of a seated user)
-- Placeholder texture = `Earth_Specular_2K.jpg`
-- Clean resource teardown on session end
+- Unit sphere showing either the base Earth texture OR the currently
+  loaded video dataset (VideoTexture fed by the same HLS stream as 2D)
+- Controller raycast: point at globe → trigger-hold to rotate, thumb-
+  stick to zoom
+- In-VR HUD: dataset title, play/pause button, exit VR button
+- Clean resource teardown on session end; HLS stream survives intact
 
-What is deliberately out of scope for this first cut:
+Explicitly out of scope for MVP (→ Phase 2+):
 
-- No GIBS tile loading in VR (placeholder texture only)
-- No HLS video textures in VR
-- No hand controllers / ray picking
-- No in-VR UI (browse panel, playback transport) — exit to 2D first
-- No camera sync with the 2D MapLibre view
-
-Those become Phase 2+.
+- GIBS tile pyramid in VR
+- Day/night/cloud/specular composite shaders
+- Browse panel in VR (switch datasets → exit to 2D)
+- 2D ↔ VR camera sync (entering VR always starts from default pose)
+- Orbit chat in VR
+- Tours in VR
 
 ---
 
-## Roadmap after the scaffold
+## Roadmap after MVP
 
-### Phase 2 — real Earth textures
-- Port `earthTileLayer.ts`'s day/night/cloud/specular compositing into
-  `vrGlobe.ts` shaders. Either UV-reproject Mercator tiles in-shader
-  or add a server-side equirectangular export.
-- Share the cloud texture, night-lights, and specular via the existing
-  asset URLs.
+### Phase 2 — visual polish & tile support
+- Port `earthTileLayer.ts`'s day/night/cloud/specular composite into
+  Three.js materials.
+- Tile pyramid: either UV-reproject Mercator in-shader or pre-stitch
+  equirectangular per dataset (open question below).
+- Replace `Earth_Specular_2K.jpg` placeholder with a proper Blue
+  Marble equirectangular base texture.
 
-### Phase 3 — datasets in VR
-- Wire `HLSService` video textures into `vrGlobe` so dataset playback
-  works immersively.
-- Reuse `playbackController` state — no duplicate scrubber.
+### Phase 3 — in-VR dataset switching
+- Floating browse panel rendered as a CanvasTexture with dataset
+  thumbnails.
+- Controller raycast → select → triggers `loadDataset()` without
+  exiting VR.
 
-### Phase 4 — interaction
-- Controller ray picking for fly-to
-- Pinch-to-zoom on hand controllers
-- Orbit chat ("Ask Orbit") as a floating in-VR panel, rendered into a
-  texture from a hidden DOM node
-
-### Phase 5 — camera sync
+### Phase 4 — camera sync
 - Entering VR inherits the current MapLibre view (lat/lng/zoom)
 - Exiting VR writes the last VR camera pose back to MapLibre
+
+### Phase 5 — richer interaction
+- Pinch-gesture hand tracking as an alternative to controllers
+- Orbit chat ("Ask Orbit") as a floating in-VR panel
 
 ---
 
@@ -182,17 +204,15 @@ Those become Phase 2+.
 
 1. **Projection**: UV-reproject Mercator in-shader (adds pole
    distortion handling) vs. ship a pre-stitched equirectangular per
-   dataset (doubles storage but simpler runtime). Pre-stitch is
-   probably the right call for static datasets; UV-reproject for live
-   ones. Answer this before Phase 2.
-2. **Performance**: 72 Hz stereo on Quest 2 means 144 draw calls/sec
-   per layer. MapLibre's tile pyramid walking is not a great fit —
-   simpler to rasterize a single equirectangular texture per frame.
-3. **Accessibility**: Seated vs. standing default? Motion sickness
+   dataset. Answer before Phase 2.
+2. **Comfort**: seated vs. standing default? Motion-sickness
    mitigation (fixed comfort grid, vignette on rotation)?
-4. **Non-Quest headsets**: PCVR via SteamVR browser, PSVR2, Vision
+3. **Non-Quest headsets**: PCVR via SteamVR browser, PSVR2, Vision
    Pro's Safari. All support WebXR; the scaffold should work there
    unmodified but has not been tested.
+4. **Base Earth texture**: ship a baked ~1 MB Blue Marble
+   equirectangular as a static asset for Phase 2, or fetch from a
+   NASA URL at runtime (would need to be CORS-friendly)?
 
 ---
 
@@ -201,7 +221,7 @@ Those become Phase 2+.
 - **Local dev**: `npm run dev`, open Chrome with the
   [WebXR API Emulator](https://chrome.google.com/webstore/detail/webxr-api-emulator/mjddjgeghkdijejnciaefnkjmkafnnje)
   extension. Click Enter VR, use the emulator panel to move the
-  headset.
+  headset + controllers.
 - **On-device**: `npm run build && npm run preview`, expose the host
   over the LAN, open the URL in the Quest browser (needs HTTPS or
   `localhost` — the Quest browser accepts self-signed certs with a
