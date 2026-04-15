@@ -50,14 +50,19 @@ const ZOOM_RATE_PER_SECOND = 2.5
  *   release). Also serves as the stop threshold — inertia ends when
  *   decayed velocity drops below it.
  * - `INERTIA_TIME_CONSTANT`: exponential decay τ in seconds. Velocity
- *   decays to 37 % at 1τ, 13 % at 2τ, 5 % at 3τ. A confident flick at
- *   ~5 rad/s lasts ≈ 3.5 s before stopping.
+ *   decays to 37 % at 1τ, 13 % at 2τ, 5 % at 3τ.
  * - `VELOCITY_SMOOTHING_ALPHA`: how much the per-frame measured
  *   velocity contributes to the running average. Lower = more
  *   smoothing, less jitter, but also more lag in capturing a flick.
+ *
+ * Tuning history:
+ *   - τ=1.5 s, min=0.5 → spins lasted ~3.5 s. On-headset feedback:
+ *     "stops should be a little snappier".
+ *   - τ=0.7 s, min=1.0 → confident flicks last ~1 s, casual drags
+ *     decay almost immediately. Current values.
  */
-const MIN_INERTIA_SPEED = 0.5
-const INERTIA_TIME_CONSTANT = 1.5
+const MIN_INERTIA_SPEED = 1.0
+const INERTIA_TIME_CONSTANT = 0.7
 const VELOCITY_SMOOTHING_ALPHA = 0.4
 
 /**
