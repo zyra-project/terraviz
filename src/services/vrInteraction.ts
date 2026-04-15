@@ -57,11 +57,27 @@ export interface VrInteractionHandle {
   dispose(): void
 }
 
-/** Per-controller state tracked during a trigger-drag. */
+/**
+ * Per-controller state tracked during a trigger-drag.
+ *
+ * We use a "surface-pinned raycast" rotation model rather than a
+ * quaternion-grab. On-headset testing found quaternion-grab (rotate
+ * the globe by the wrist's rotational delta) felt wrong compared to
+ * the 2D MapLibre drag, because purely translating the controller
+ * without twisting the wrist did nothing — and that's how most users
+ * naturally move a pointer.
+ *
+ * Surface-pinned: the world-space vector from the globe center to
+ * the point where the drag started stays pinned under the current
+ * ray. On each frame we compute the rotation needed to map the
+ * grab direction to the current ray-globe intersection direction
+ * and apply it on top of the start quaternion. Feels much closer to
+ * MapLibre's "drag the surface under your cursor" behaviour.
+ */
 interface DragState {
-  /** Controller world-space quaternion at the moment `selectstart` fired. */
-  controllerStartQuat: THREE.Quaternion
-  /** Globe quaternion at the moment `selectstart` fired. */
+  /** Unit vector from globe center to the grabbed surface point at drag start, in world space. */
+  worldGrabDir: THREE.Vector3
+  /** Globe quaternion at the moment `selectstart` fired — rotations compose on top of this. */
   globeStartQuat: THREE.Quaternion
 }
 
@@ -159,17 +175,23 @@ export function createVrInteraction(
 
     if (hit.kind === 'hud') {
       hudArmed[index] = hit.action
-    } else {
-      // Start tracking a globe rotation drag. We record both
-      // quaternions at press time and recompute the globe's
-      // orientation each frame from (currentControllerQ * startQ⁻¹)
-      // composed on top of the starting globe orientation. This
-      // produces a "grab the globe" feel — rotating the wrist
-      // rotates the globe.
-      drags[index] = {
-        controllerStartQuat: controller.getWorldQuaternion(new THREE_.Quaternion()),
-        globeStartQuat: ctx.globe.quaternion.clone(),
-      }
+      return
+    }
+
+    // Globe hit — re-run the intersection so we can grab the
+    // world-space point on the surface. pickHit() already raycasted
+    // so the raycaster is primed; intersectObject is cheap.
+    const hits = raycaster.intersectObject(ctx.globe, false)
+    if (hits.length === 0 || !hits[0].point) return
+
+    const worldGrabDir = hits[0].point
+      .clone()
+      .sub(ctx.globe.position)
+      .normalize()
+
+    drags[index] = {
+      worldGrabDir,
+      globeStartQuat: ctx.globe.quaternion.clone(),
     }
   }
 
@@ -211,24 +233,36 @@ export function createVrInteraction(
     controller.addEventListener('squeezestart', () => onSqueezeStart())
   }
 
-  // Scratch quaternion for drag composition.
-  const currentControllerQ = new THREE_.Quaternion()
+  // Scratch vector + quaternion reused per drag update; avoids per-
+  // frame allocation in the XR hot path.
+  const currentWorldDir = new THREE_.Vector3()
   const deltaQ = new THREE_.Quaternion()
 
   return {
     update(deltaSeconds) {
-      // --- Drag rotation ---
+      // --- Surface-pinned drag rotation ---
       for (let i = 0; i < 2; i++) {
         const drag = drags[i]
         if (!drag) continue
         const controller = controllers[i]
-        controller.getWorldQuaternion(currentControllerQ)
-        // delta = current * startInverse
-        deltaQ
-          .copy(drag.controllerStartQuat)
-          .invert()
-          .premultiply(currentControllerQ)
-        // globe = delta * startGlobe
+        setRaycasterFromController(controller)
+        const hits = raycaster.intersectObject(ctx.globe, false)
+        // If the ray has swung off the globe (fast user motion,
+        // controller pointed at the void) we freeze the current
+        // rotation rather than jumping. Dragging resumes naturally
+        // when the ray lands back on the surface.
+        if (hits.length === 0 || !hits[0].point) continue
+
+        currentWorldDir
+          .copy(hits[0].point)
+          .sub(ctx.globe.position)
+          .normalize()
+
+        // Rotation that maps the original grab direction to where
+        // the ray points now. Applied on top of the start
+        // quaternion so the drag is idempotent — releasing and
+        // re-grabbing doesn't drift.
+        deltaQ.setFromUnitVectors(drag.worldGrabDir, currentWorldDir)
         ctx.globe.quaternion
           .copy(drag.globeStartQuat)
           .premultiply(deltaQ)
