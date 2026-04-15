@@ -174,6 +174,43 @@ Explicitly out of scope for MVP (→ Phase 2+):
 
 ---
 
+## Delivery plan
+
+VR is hard to debug without a headset in hand, so the MVP lands as a
+sequence of small commits rather than one big drop. Each commit
+type-checks and passes tests in isolation; only the final one makes
+the feature reachable from the UI. That keeps blast radius small, makes
+`git bisect` useful if something regresses, and lets individual pieces
+be reverted without rolling back the whole feature.
+
+| # | Commit | What lands | User-reachable? |
+|---|---|---|---|
+| 1 | `vr: scaffold WebXR investigation (Phase 1, not yet wired up)` ✅ | `vrCapability`, initial doc | No |
+| 2 | `vr: revise plan to MVP scope and adopt Three.js (lazy-loaded)` ✅ | Revised plan, `vrScene`, deps | No |
+| 3 | `vr: add vrHud — floating play/pause + title panel` | `vrHud.ts` (CanvasTexture panel, hit regions) | No |
+| 4 | `vr: add vrInteraction — controller raycast + trigger handling` | `vrInteraction.ts` (XRInputSource events) | No |
+| 5 | `vr: add vrSession — lazy-load Three.js + XR lifecycle` | `vrSession.ts` (renderer.xr session management) | No |
+| 6 | `vr: wire Enter VR button into main.ts` | `vrButton.ts`, `vr.css`, `main.ts` + `index.html` edits | **Yes** |
+
+Rationale for incremental over one-shot:
+
+- **Debug triage.** If a Quest tester reports "globe missing" vs.
+  "trigger doesn't fire" vs. "framerate tanks when HUD is visible",
+  we know exactly which commit to suspect.
+- **Revert blast radius.** A CanvasTexture bug that tanks Quest 2
+  framerate can be reverted without losing the rest of the work.
+- **Review surface.** Each module has a distinct concern (scene
+  graph / input handling / UI rendering / lifecycle); reviewing them
+  separately matches how you'd reason about them anyway.
+
+If the final wiring commit introduces an integration issue that
+can't be isolated to an earlier module, we can still revert just
+commit 6 and leave the other modules in place — the app keeps
+working exactly as it did pre-MVP because none of commits 3-5 are
+imported by anything on the hot path.
+
+---
+
 ## Roadmap after MVP
 
 ### Phase 2 — visual polish & tile support
