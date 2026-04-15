@@ -42,6 +42,22 @@ const THUMBSTICK_DEADZONE = 0.15
 const ZOOM_RATE_PER_SECOND = 2.5
 
 /**
+ * Multiplier applied to every rotation delta (single-hand and
+ * two-hand). On-headset feedback called the rotation "slow…
+ * doesn't quite keep up with the controllers". The native rotation
+ * rates are geometry-bound (surface-pinned) or input-bound
+ * (rigid-body): both can produce sub-1:1 globe rotation per unit
+ * of physical motion, which feels sluggish.
+ *
+ * 2.0 doubles the rotation produced per unit of input. Trade-off:
+ * surface-pinning becomes approximate (the grab point drifts under
+ * the ray during fast drags) but the rotation amount feels closer
+ * to the user's expectation of "the globe matches my motion". If
+ * 2.0 still feels slow, try 3.0; if it overshoots, drop to 1.5.
+ */
+const ROTATION_SENSITIVITY = 2.0
+
+/**
  * Inertia parameters — match the 2D MapLibre "flick the globe and it
  * keeps spinning" feel.
  *
@@ -448,6 +464,37 @@ export function createVrInteraction(
   const p0 = new THREE_.Vector3()
   const p1 = new THREE_.Vector3()
 
+  /**
+   * Scale the rotation a quaternion represents by `factor`, in place.
+   * `q` is interpreted as a rotation by angle θ about some axis;
+   * after the call it represents a rotation by `θ * factor` about
+   * the same axis, clamped so the final angle stays within ±π
+   * (Three.js wraps beyond that anyway, but explicit clamping
+   * avoids the visible "snap" wraparound).
+   */
+  function scaleRotationAngle(q: THREE.Quaternion, factor: number): void {
+    // Normalize to the shortest-path representation (w ≥ 0). Both q
+    // and -q encode the same rotation, but axis-angle decomposition
+    // requires the canonical form.
+    if (q.w < 0) {
+      q.x = -q.x
+      q.y = -q.y
+      q.z = -q.z
+      q.w = -q.w
+    }
+    const w = Math.min(1, q.w)
+    const angle = 2 * Math.acos(w)
+    if (angle < 1e-6) return
+    const sinHalf = Math.sin(angle / 2)
+    const ax = q.x / sinHalf
+    const ay = q.y / sinHalf
+    const az = q.z / sinHalf
+    const newAngle = Math.min(Math.PI, angle * factor)
+    const halfNew = newAngle / 2
+    const sinHalfNew = Math.sin(halfNew)
+    q.set(ax * sinHalfNew, ay * sinHalfNew, az * sinHalfNew, Math.cos(halfNew))
+  }
+
   /** Apply the surface-pinned rotation for the active single-drag. */
   function updateSingle(mode: Extract<RotationMode, { kind: 'single' }>): void {
     const controller = controllers[mode.index]
@@ -458,6 +505,7 @@ export function createVrInteraction(
     if (hits.length === 0 || !hits[0].point) return
     currentWorldDir.copy(hits[0].point).sub(ctx.globe.position).normalize()
     deltaQ.setFromUnitVectors(mode.worldGrabDir, currentWorldDir)
+    scaleRotationAngle(deltaQ, ROTATION_SENSITIVITY)
     ctx.globe.quaternion.copy(mode.globeStartQuat).premultiply(deltaQ)
   }
 
@@ -487,6 +535,7 @@ export function createVrInteraction(
     const currentOrientation = computeTwoHandOrientation()
     // delta = current * start⁻¹, then globe = delta * globeStart
     deltaQ.copy(mode.startOrientation).invert().premultiply(currentOrientation)
+    scaleRotationAngle(deltaQ, ROTATION_SENSITIVITY)
     ctx.globe.quaternion.copy(mode.globeStartQuat).premultiply(deltaQ)
   }
 
