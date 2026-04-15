@@ -16,7 +16,7 @@
  */
 
 import type * as THREE from 'three'
-import { createVrScene, type VrSceneHandle } from './vrScene'
+import { createVrScene, type VrSceneHandle, type VrDatasetTexture } from './vrScene'
 import { createVrHud, type VrHudHandle } from './vrHud'
 import { createVrInteraction, type VrInteractionHandle } from './vrInteraction'
 import { logger } from '../utils/logger'
@@ -28,13 +28,19 @@ import { logger } from '../utils/logger'
  * MapLibre / HLSService / viewportManager.
  */
 export interface VrSessionContext {
-  /** Live HLS video element, if a video dataset is loaded. */
-  getVideo(): HTMLVideoElement | null
+  /**
+   * The currently-loaded dataset's surface texture, in whichever
+   * form the 2D app has it: video element for HLS streams, URL for
+   * static image datasets, or null when nothing is loaded.
+   */
+  getDatasetTexture(): VrDatasetTexture | null
   /** Dataset title for the HUD; null/empty → "No dataset loaded". */
   getDatasetTitle(): string | null
-  /** Drives the HUD play/pause icon. */
+  /** True iff a video dataset is loaded — drives the HUD play/pause button visibility. */
+  hasVideoDataset(): boolean
+  /** Drives the HUD play/pause icon. No-op for image datasets. */
   isPlaying(): boolean
-  /** Called when the user taps play/pause in VR. */
+  /** Called when the user taps play/pause in VR. No-op for image datasets. */
   togglePlayPause(): void
   /** Optional — fired after the session ends + resources are torn down. */
   onSessionEnd?: () => void
@@ -62,8 +68,6 @@ interface ActiveSession {
   scene: VrSceneHandle
   hud: VrHudHandle
   interaction: VrInteractionHandle
-  /** Video currently bound as VideoTexture — tracked so we only swap on change. */
-  currentVideo: HTMLVideoElement | null
 }
 
 let active: ActiveSession | null = null
@@ -151,14 +155,13 @@ export async function enterVr(ctx: VrSessionContext): Promise<void> {
   const hud = createVrHud(THREE_)
   scene.scene.add(hud.mesh)
 
-  // Initial HUD state + video (before the first frame, so the first
-  // render already shows real data).
-  const initialVideo = ctx.getVideo()
-  scene.setVideo(initialVideo)
+  // Initial HUD state + texture (before the first frame, so the
+  // first render already shows real data).
+  scene.setTexture(ctx.getDatasetTexture())
   hud.setState({
     datasetTitle: ctx.getDatasetTitle(),
     isPlaying: ctx.isPlaying(),
-    hasVideo: !!initialVideo,
+    hasVideo: ctx.hasVideoDataset(),
   })
 
   const interaction = createVrInteraction(THREE_, {
@@ -191,7 +194,6 @@ export async function enterVr(ctx: VrSessionContext): Promise<void> {
     scene,
     hud,
     interaction,
-    currentVideo: initialVideo,
   }
 
   // --- Render loop ---
@@ -203,21 +205,18 @@ export async function enterVr(ctx: VrSessionContext): Promise<void> {
 
     if (!active) return
 
-    // Swap the VideoTexture if the app switched datasets while
-    // we're in VR. Cheap check (pointer compare); the scene only
-    // rebuilds the texture when it actually changes.
-    const nowVideo = ctx.getVideo()
-    if (nowVideo !== active.currentVideo) {
-      active.scene.setVideo(nowVideo)
-      active.currentVideo = nowVideo
-    }
+    // Swap the dataset texture if the app loaded/changed something
+    // while we're in VR. The scene's setTexture is internally
+    // debounced (compares against its own active key) so polling
+    // every frame is cheap in the steady state.
+    active.scene.setTexture(ctx.getDatasetTexture())
 
     // HUD reflects the latest app state every frame. setState is
     // internally debounced — it only redraws when a field changes.
     active.hud.setState({
       datasetTitle: ctx.getDatasetTitle(),
       isPlaying: ctx.isPlaying(),
-      hasVideo: !!nowVideo,
+      hasVideo: ctx.hasVideoDataset(),
     })
 
     active.interaction.update(delta)

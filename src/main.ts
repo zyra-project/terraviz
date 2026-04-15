@@ -1118,13 +1118,32 @@ class InteractiveSphere {
    * without WebXR, so calling this unconditionally is safe — the
    * Three.js chunk only downloads on devices that advertise
    * `immersive-vr` support (see src/ui/vrButton.ts). VR mode always
-   * uses the primary panel's video; in multi-globe layouts the
+   * uses the primary panel's dataset; in multi-globe layouts the
    * other panels keep rendering in 2D behind the scenes.
+   *
+   * Both image and video datasets are supported: image datasets
+   * resolve to a static URL that vrScene loads via Three.js'
+   * TextureLoader (browser HTTP cache hits when the 2D loader has
+   * already fetched the same URL); video datasets reuse the
+   * existing HLS `<video>` element directly.
    */
   private async initVrButton(): Promise<void> {
     await initVrButton({
-      getVideo: () => this.hlsService?.getVideo() ?? null,
+      getDatasetTexture: () => {
+        const ds = this.appState.currentDataset
+        if (!ds) return null
+        if (dataService.isImageDataset(ds)) {
+          return { kind: 'image', url: ds.dataLink }
+        }
+        const video = this.hlsService?.getVideo()
+        if (video) return { kind: 'video', element: video }
+        return null
+      },
       getDatasetTitle: () => this.appState.currentDataset?.title ?? null,
+      hasVideoDataset: () => {
+        const ds = this.appState.currentDataset
+        return !!ds && dataService.isVideoDataset(ds)
+      },
       isPlaying: () => this.appState.isPlaying,
       togglePlayPause: () => togglePlayPause(
         this.hlsService, this.appState, (m) => this.announce(m),

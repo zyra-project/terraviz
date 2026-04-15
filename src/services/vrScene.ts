@@ -35,6 +35,16 @@ export const MAX_GLOBE_SCALE = 2.5
  */
 const BASE_EARTH_TEXTURE_URL = '/assets/Earth_Specular_2K.jpg'
 
+/**
+ * What's currently driving the globe's surface texture. Mirrors the
+ * 2D dataset model: image datasets (Age of Sea Floor, Bathymetry,
+ * etc.) are static URLs; video datasets stream through HLS into an
+ * `HTMLVideoElement`. Null falls back to the base Earth placeholder.
+ */
+export type VrDatasetTexture =
+  | { readonly kind: 'video'; readonly element: HTMLVideoElement }
+  | { readonly kind: 'image'; readonly url: string }
+
 export interface VrSceneHandle {
   /** The Three.js scene — attach/detach objects (controllers, HUD) here. */
   readonly scene: THREE.Scene
@@ -42,8 +52,14 @@ export interface VrSceneHandle {
   readonly globe: THREE.Mesh
   /** World position the globe is anchored at (constant across session). */
   readonly globeAnchor: THREE.Vector3
-  /** Swap the globe texture between VideoTexture and the base Earth image. Pass null to restore the base. */
-  setVideo(video: HTMLVideoElement | null): void
+  /**
+   * Swap the globe texture. Pass `null` to revert to the base Earth
+   * texture; `{ kind: 'video' }` to stream from an HTMLVideoElement
+   * (live HLS stream); or `{ kind: 'image', url }` to load a static
+   * equirectangular image. Idempotent — repeated calls with an
+   * unchanged spec are no-ops.
+   */
+  setTexture(spec: VrDatasetTexture | null): void
   /** Release every GPU resource. Safe to call multiple times. */
   dispose(): void
 }
@@ -89,38 +105,69 @@ export function createVrScene(THREE_: typeof THREE): VrSceneHandle {
   globe.position.set(GLOBE_POSITION.x, GLOBE_POSITION.y, GLOBE_POSITION.z)
   scene.add(globe)
 
-  let activeVideoTexture: THREE.VideoTexture | null = null
+  // Current dataset texture + a key for change detection. The key
+  // lets vrSession compare cheaply each frame and call setTexture
+  // only when the dataset actually changed.
+  let activeDatasetTexture: THREE.Texture | null = null
+  /** Identifier of the currently-loaded spec — video element identity or image URL. */
+  let activeKey: HTMLVideoElement | string | null = null
 
   return {
     scene,
     globe,
     globeAnchor: globe.position.clone(),
 
-    setVideo(video) {
-      // Dispose any previous video texture — VideoTextures hold a
-      // reference to the HTMLVideoElement and an internal scheduler.
-      if (activeVideoTexture) {
-        activeVideoTexture.dispose()
-        activeVideoTexture = null
+    setTexture(spec) {
+      // Skip if the spec is unchanged — repeated polls from the
+      // session loop are a no-op in the steady state.
+      const nextKey = spec?.kind === 'video' ? spec.element : spec?.kind === 'image' ? spec.url : null
+      if (nextKey === activeKey) return
+
+      // Dispose any previously-loaded dataset texture. VideoTexture
+      // holds a reference to the source <video> element and an
+      // internal update scheduler; image Textures own a GPU buffer.
+      if (activeDatasetTexture) {
+        activeDatasetTexture.dispose()
+        activeDatasetTexture = null
       }
 
-      if (video) {
-        const tex = new THREE_.VideoTexture(video)
+      if (!spec) {
+        material.map = baseEarthTexture
+        activeKey = null
+      } else if (spec.kind === 'video') {
+        const tex = new THREE_.VideoTexture(spec.element)
         tex.colorSpace = THREE_.SRGBColorSpace
         tex.minFilter = THREE_.LinearFilter
         tex.magFilter = THREE_.LinearFilter
-        activeVideoTexture = tex
+        activeDatasetTexture = tex
         material.map = tex
-      } else {
-        material.map = baseEarthTexture
+        activeKey = spec.element
+      } else if (spec.kind === 'image') {
+        // Browser HTTP cache will hit immediately if the 2D loader
+        // already fetched this URL (which is the normal flow —
+        // user loads dataset in 2D, then enters VR). Three.js'
+        // TextureLoader fires async, so the material updates as
+        // soon as the image decodes; the placeholder is visible
+        // for a frame or two.
+        const tex = textureLoader.load(spec.url, () => {
+          // Texture decoded; force a material refresh.
+          material.needsUpdate = true
+        })
+        tex.colorSpace = THREE_.SRGBColorSpace
+        tex.minFilter = THREE_.LinearFilter
+        tex.magFilter = THREE_.LinearFilter
+        activeDatasetTexture = tex
+        material.map = tex
+        activeKey = spec.url
       }
       material.needsUpdate = true
     },
 
     dispose() {
-      if (activeVideoTexture) {
-        activeVideoTexture.dispose()
-        activeVideoTexture = null
+      if (activeDatasetTexture) {
+        activeDatasetTexture.dispose()
+        activeDatasetTexture = null
+        activeKey = null
       }
       baseEarthTexture.dispose()
       material.dispose()
