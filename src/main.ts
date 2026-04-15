@@ -41,6 +41,7 @@ import { showTourControls, hideTourControls, hideAllTourTextBoxes, hideAllTourIm
 import { initLegendForDataset, clearLegendCache, loadConfig } from './services/docentService'
 import { isMobile, IS_MOBILE_NATIVE, getCloudTextureUrl } from './utils/deviceCapability'
 import { initDeepLinks } from './services/deepLinkService'
+import { initVrButton } from './ui/vrButton'
 
 // Phase 5: set a body class so CSS can target mobile-native adaptations
 // (larger touch targets, bottom sheets, etc.) without JS per-component.
@@ -218,6 +219,11 @@ class InteractiveSphere {
 
       // Initialize digital docent chat (available on all views)
       this.initChat()
+
+      // Enter VR button — feature-gated internally; hides itself on
+      // non-WebXR browsers and warm-loads Three.js in the background
+      // on devices that can enter VR.
+      void this.initVrButton()
 
       const datasetId = this.getDatasetIdFromUrl()
       if (datasetId) {
@@ -1105,6 +1111,28 @@ class InteractiveSphere {
       el.textContent = ''
       requestAnimationFrame(() => { el.textContent = message })
     }
+  }
+
+  /**
+   * Wire the Enter VR button. The button hides itself on browsers
+   * without WebXR, so calling this unconditionally is safe — the
+   * Three.js chunk only downloads on devices that advertise
+   * `immersive-vr` support (see src/ui/vrButton.ts). VR mode always
+   * uses the primary panel's video; in multi-globe layouts the
+   * other panels keep rendering in 2D behind the scenes.
+   */
+  private async initVrButton(): Promise<void> {
+    await initVrButton({
+      getVideo: () => this.hlsService?.getVideo() ?? null,
+      getDatasetTitle: () => this.appState.currentDataset?.title ?? null,
+      isPlaying: () => this.appState.isPlaying,
+      togglePlayPause: () => togglePlayPause(
+        this.hlsService, this.appState, (m) => this.announce(m),
+      ),
+      onSessionEnd: () => {
+        this.announce('Exited VR')
+      },
+    })
   }
 
   /** Initialize the Orbit chat panel and wire playback positioning observers. */

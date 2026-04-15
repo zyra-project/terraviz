@@ -192,6 +192,12 @@
                     <button id="error-dismiss" aria-label="Dismiss error">&#x2715;</button>
                 </div>
 
+                <!-- Enter VR — shown only on WebXR-capable browsers. See src/ui/vrButton.ts. -->
+                <button id="vr-enter-btn" class="hidden" type="button" title="Enter immersive VR mode" aria-label="Enter immersive VR mode" aria-hidden="true">
+                    <span class="vr-btn-icon" aria-hidden="true">&#x1F97D;&#xFE0E;</span>
+                    <span class="vr-btn-label">Enter VR</span>
+                </button>
+
                 <!-- Help button and panel -->
                 <button id="help-trigger" type="button" title="Help and feedback" aria-label="Open help and feedback" aria-expanded="false">
                     <span class="help-trigger-icon" aria-hidden="true">?</span>
