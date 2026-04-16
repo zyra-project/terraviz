@@ -245,6 +245,46 @@ buffered, texture decode lag on lower-end Quest hardware.
 - Replace `Earth_Specular_2K.jpg` placeholder with a proper Blue
   Marble equirectangular base texture.
 
+### Phase 2.1 — AR passthrough mode (virtual SOS in your room)
+
+Video passthrough turns the VR experience into something very close
+to visiting a physical Science On a Sphere installation: a virtual
+globe floating in the user's actual room. Low effort, high
+wow-factor, and thematically perfect for the SOS mission.
+
+**Basic version (~1 commit, ~20-30 LOC delta):**
+
+| Module | Change |
+|---|---|
+| `vrSession.ts` | Request `immersive-ar` instead of `immersive-vr` |
+| `vrScene.ts` | Renderer `alpha: true`, remove `scene.background` (transparent pixels → passthrough shows through) |
+| `vrCapability.ts` | Add `isImmersiveArSupported()` check |
+| `vrButton.ts` | Offer both modes or a single button that prefers AR when available |
+
+Everything else — globe mesh, VideoTexture, controller interaction,
+HUD, inertia — stays identical. The globe just floats in the user's
+room instead of a dark void.
+
+**Quest hardware:**
+- Quest 3 / 3S: color passthrough (room looks natural)
+- Quest 2: grayscale passthrough (functional, less immersive)
+- Quest Pro: color passthrough
+- All use the same `immersive-ar` WebXR API
+
+**Polish items (follow-up commits after basic passthrough):**
+
+- **Ground shadow.** A subtle transparent plane with a radial
+  gradient beneath the globe. Helps the globe feel spatially anchored
+  in the room rather than pasted on.
+- **Placement via hit-test.** Instead of a fixed position at
+  `(0, 1.3, -1.5)`, let the user point at a spot in their room and
+  "place" the globe there using the WebXR `hit-test` feature. Very
+  SOS-like — pick where your virtual sphere goes.
+- **Lighting estimation.** WebXR's `lighting-estimation` feature can
+  match virtual lighting to room lighting so the globe's shading
+  responds to the real environment. Optional feature, not widely
+  supported yet — treat as aspirational.
+
 ### Phase 2.5 — multi-globe layout (parity with 2D viewport manager)
 
 The 2D app already supports 1/2/4 synchronised globes via
@@ -332,6 +372,12 @@ rendering leaves less headroom. **Ship 2-globe support first; treat
 4. **Base Earth texture**: ship a baked ~1 MB Blue Marble
    equirectangular as a static asset for Phase 2, or fetch from a
    NASA URL at runtime (would need to be CORS-friendly)?
+5. **AR vs VR button UX** (Phase 2.1): two separate buttons
+   ("Enter VR" / "Enter AR") or one smart button that prefers AR
+   when available and falls back to VR? Single button is simpler
+   but hides the choice; two buttons are noisier but let the user
+   pick. A third option: one button with a small dropdown/toggle
+   for the mode, defaulting to AR on devices that support it.
 
 ---
 
