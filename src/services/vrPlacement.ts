@@ -217,8 +217,15 @@ export function createVrPlacement(
 
   // --- State ---
   let placing = false
-  /** Latest hit position from per-frame hit-test, or null. */
-  let lastHitPosition: THREE.Vector3 | null = null
+  /**
+   * Latest hit position from per-frame hit-test. Single allocated
+   * Vector3 reused each frame via `.copy()` — previous version
+   * re-allocated with `scratch.clone()` every frame during Place
+   * mode, which shows up as GC churn during a long placement
+   * hold. `lastHitValid` tracks whether the stored pose is current.
+   */
+  const lastHitPosition = new THREE_.Vector3()
+  let lastHitValid = false
   /**
    * The raw XR hit-test result from the most recent frame. Kept so
    * vrSession can call `createAnchor()` on it at placement-confirm
@@ -247,7 +254,7 @@ export function createVrPlacement(
       refreshPlaceButtonAppearance()
       if (!active) {
         reticleGroup.visible = false
-        lastHitPosition = null
+        lastHitValid = false
         lastHitResult = null
       }
     },
@@ -264,14 +271,14 @@ export function createVrPlacement(
         // Lost the surface — keep reticle hidden, lastHitPosition
         // stays null so a confirm tap won't place spuriously.
         reticleGroup.visible = false
-        lastHitPosition = null
+        lastHitValid = false
         lastHitResult = null
         return
       }
       const pose = hits[0].getPose(refSpace)
       if (!pose) {
         reticleGroup.visible = false
-        lastHitPosition = null
+        lastHitValid = false
         lastHitResult = null
         return
       }
@@ -285,11 +292,16 @@ export function createVrPlacement(
       )
       reticleGroup.position.copy(scratch)
       reticleGroup.visible = true
-      lastHitPosition = scratch.clone()
+      // Reuse the same Vector3 instead of cloning every frame.
+      lastHitPosition.copy(scratch)
+      lastHitValid = true
     },
 
     getReticlePosition() {
-      return lastHitPosition ? lastHitPosition.clone() : null
+      // Clone here (not per-frame) so callers can safely store the
+      // returned Vector3 without worrying about us mutating it the
+      // next frame. Called once per placement-confirm tap — cheap.
+      return lastHitValid ? lastHitPosition.clone() : null
     },
 
     getLastHitTestResult() {

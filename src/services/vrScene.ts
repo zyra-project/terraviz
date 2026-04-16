@@ -755,6 +755,17 @@ export function createVrScene(
   let activeDatasetTexture: THREE.Texture | null = null
   /** Identity of the currently-loaded spec — element reference for change detection. */
   let activeKey: HTMLVideoElement | HTMLImageElement | null = null
+  /**
+   * Cleanup closure for pending video `seeked` / `playing`
+   * listeners. Set when we attach the one-shot listeners that
+   * promote the VideoTexture from placeholder to visible; cleared
+   * when either listener fires OR when a new dataset takes over OR
+   * on session dispose. Without this, a dataset swap or session
+   * end before the HLS decoder produces its first frame would
+   * leave two listeners attached to the shared `<video>` element
+   * indefinitely (each subsequent enter/exit would stack more).
+   */
+  let cancelPendingVideoListeners: (() => void) | null = null
 
   /**
    * Base diffuse texture once the CDN fetch lands — kept so we can
@@ -833,8 +844,12 @@ export function createVrScene(
     'earth diffuse',
   )
 
-  // Lights — 2K → 4K only. 8K lights would be 256 MB on the GPU
-  // for a detail the user rarely inspects closely.
+  // Lights — 2K → 4K → 8K, mirroring the diffuse tier list. The
+  // 8K tier costs ~256 MB of GPU memory before mipmaps (chunky
+  // for Quest 2) but the progressive loader degrades gracefully:
+  // a failed 8K allocation leaves the 4K tier resident rather
+  // than erroring. See EARTH_LIGHTS_URLS docstring for the full
+  // rationale on why lights matches diffuse at full resolution.
   void loadProgressive(
     EARTH_LIGHTS_URLS,
     tex => {
@@ -879,6 +894,16 @@ export function createVrScene(
       if (activeDatasetTexture) {
         activeDatasetTexture.dispose()
         activeDatasetTexture = null
+      }
+
+      // Cancel any pending video-frame-wait listeners from a
+      // previous spec. If the previous video's `seeked`/`playing`
+      // event never fired (decode still in progress), those
+      // listeners would otherwise leak on the shared <video>
+      // element and accumulate across session entries.
+      if (cancelPendingVideoListeners) {
+        cancelPendingVideoListeners()
+        cancelPendingVideoListeners = null
       }
 
       if (!spec) {
@@ -945,9 +970,15 @@ export function createVrScene(
           // showing a black ball. Swap in the VideoTexture as soon
           // as the forced seek decodes a frame or the user presses
           // play (whichever fires first). { once: true } ensures
-          // each listener self-removes after firing.
+          // each listener self-removes after firing; we ALSO
+          // track a manual cleanup so a dataset swap / dispose
+          // before either event fires doesn't leak the listeners.
           material.map = baseEarthTexture
           const onFrame = () => {
+            // One fired and self-removed; clear our tracker so the
+            // other (which may still be attached) isn't touched by
+            // a later cancel call.
+            cancelPendingVideoListeners = null
             // Guard: dataset may have changed while we waited.
             if (activeKey !== video) return
             material.map = tex
@@ -956,6 +987,10 @@ export function createVrScene(
           }
           video.addEventListener('seeked', onFrame, { once: true })
           video.addEventListener('playing', onFrame, { once: true })
+          cancelPendingVideoListeners = () => {
+            video.removeEventListener('seeked', onFrame)
+            video.removeEventListener('playing', onFrame)
+          }
         }
       } else if (spec.kind === 'image') {
         // The 2D loader already decoded this image (including the
@@ -1062,6 +1097,12 @@ export function createVrScene(
     },
 
     dispose() {
+      // Remove any pending video-frame-wait listeners (session may
+      // end before seeked/playing fires on a paused HLS stream).
+      if (cancelPendingVideoListeners) {
+        cancelPendingVideoListeners()
+        cancelPendingVideoListeners = null
+      }
       if (activeDatasetTexture) {
         activeDatasetTexture.dispose()
         activeDatasetTexture = null

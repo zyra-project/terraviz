@@ -221,30 +221,47 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
   const hud = createVrHud(THREE_)
   scene.scene.add(hud.mesh)
 
-  // --- Spatial placement (AR-only, hit-test optional) ---
-  // Try to set up a viewer-space hit-test source so the user can
-  // anchor the globe to a real surface. Failure is non-fatal — VR
-  // sessions never have hit-test, and even AR can be without it on
-  // older browsers. When unavailable, the Place button stays hidden.
+  // --- Spatial placement (AR-only) + local-floor ref space ---
+  // Two separable capabilities:
+  //
+  //   (a) local-floor reference space — used for resolving ANCHOR
+  //       poses each frame (`frame.getPose(anchor.anchorSpace,
+  //       refSpace)`). An anchor restored from a persistent handle
+  //       needs this even if the user never enters Place mode in
+  //       the current session. Requesting it independently means
+  //       anchor-based placement keeps working on devices that
+  //       expose anchors but not hit-test.
+  //
+  //   (b) hit-test source — used by Place mode to project a
+  //       reticle onto real-world geometry. Optional; older
+  //       browsers may not support it. When unavailable, the
+  //       Place button stays hidden but restored anchors still
+  //       track via (a).
+  //
+  // Both are AR-only; VR sessions have no real-world geometry.
   let hitTestSource: XRHitTestSource | null = null
   let placementRefSpace: XRReferenceSpace | null = null
-  if (isAr && 'requestHitTestSource' in session) {
+  if (isAr) {
     try {
-      const viewerSpace = await session.requestReferenceSpace('viewer')
-      // requestHitTestSource is on the session interface but not in
-      // all type defs; cast to any to invoke it.
-      const reqHts = (session as unknown as {
-        requestHitTestSource?: (init: { space: XRReferenceSpace }) => Promise<XRHitTestSource>
-      }).requestHitTestSource
-      if (reqHts) {
-        hitTestSource = await reqHts.call(session, { space: viewerSpace })
-        // The local-floor reference space is what Three.js uses for
-        // pose resolution; capture it so per-frame hit-test results
-        // come back in the same coordinate system as the globe.
-        placementRefSpace = await session.requestReferenceSpace('local-floor')
-      }
+      placementRefSpace = await session.requestReferenceSpace('local-floor')
     } catch (err) {
-      logger.debug('[VR] hit-test setup failed; spatial placement disabled:', err)
+      logger.debug('[VR] local-floor reference space unavailable:', err)
+    }
+
+    if ('requestHitTestSource' in session) {
+      try {
+        const viewerSpace = await session.requestReferenceSpace('viewer')
+        // requestHitTestSource is on the session interface but not
+        // in all type defs; cast to get a typed handle.
+        const reqHts = (session as unknown as {
+          requestHitTestSource?: (init: { space: XRReferenceSpace }) => Promise<XRHitTestSource>
+        }).requestHitTestSource
+        if (reqHts) {
+          hitTestSource = await reqHts.call(session, { space: viewerSpace })
+        }
+      } catch (err) {
+        logger.debug('[VR] hit-test setup failed; spatial placement disabled:', err)
+      }
     }
   }
   const placement = isAr ? createVrPlacement(THREE_, hitTestSource) : null
