@@ -35,10 +35,12 @@ const PLACE_BUTTON_HEIGHT = 0.06
 const PLACE_BUTTON_CANVAS_SIZE = 256
 
 /**
- * Vertical offset added to the reticle position when placing the
- * globe. The hit-test point is on the surface itself; lifting by
- * GLOBE_RADIUS (0.5 m) puts the globe's centre half a meter above
- * the surface so the visible bottom rests on the table.
+ * Base vertical offset added to the reticle position when placing
+ * the globe at unit scale. The hit-test point is on the surface
+ * itself; lifting by GLOBE_RADIUS (0.5 m) puts the globe's centre
+ * half a metre above the surface so the visible bottom rests on
+ * the table. The actual lift is scaled by the globe's current
+ * uniform scale at placement time — see `liftedPlacementPosition`.
  */
 const PLACE_LIFT_Y = 0.5
 
@@ -319,14 +321,20 @@ export function createVrPlacement(
 /**
  * Compute the world position the globe should occupy when placed at
  * a hit-test point. The hit point is ON the surface; lifting by
- * PLACE_LIFT_Y puts the globe's centre above the surface so the
- * visible bottom rests on top.
+ * `PLACE_LIFT_Y * scale` puts the globe's centre above the surface
+ * so the visible bottom rests on top — the multiplication by scale
+ * is critical because the globe is user-zoomable and a constant
+ * lift would leave a zoomed-up globe floating above the surface
+ * (or a zoomed-down globe sunken into it).
  *
  * Accepts any object with {x, y, z} numeric fields — lets callers
  * pass either a `THREE.Vector3` (placement-confirm callback) or a
  * `DOMPointReadOnly` direct from `anchorPose.transform.position`
  * (per-frame anchor sync) without conversion.
  *
+ * @param scale Current uniform globe scale (e.g. `globe.scale.x`).
+ *   Used to scale the lift so the visible bottom stays on the
+ *   surface at any zoom level.
  * @param out Optional target to write into. Hot paths (per-frame
  *   anchor pose sync) pass the globe's own position vector to
  *   avoid allocation; one-shot paths can omit and get a new one.
@@ -334,9 +342,10 @@ export function createVrPlacement(
 export function liftedPlacementPosition(
   THREE_: typeof THREE,
   hitPosition: { x: number; y: number; z: number },
+  scale: number,
   out?: THREE.Vector3,
 ): THREE.Vector3 {
   const target = out ?? new THREE_.Vector3()
-  target.set(hitPosition.x, hitPosition.y + PLACE_LIFT_Y, hitPosition.z)
+  target.set(hitPosition.x, hitPosition.y + PLACE_LIFT_Y * scale, hitPosition.z)
   return target
 }

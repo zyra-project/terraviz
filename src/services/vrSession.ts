@@ -396,7 +396,7 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
       // succeeds, per-frame anchor-pose tracking will take over
       // the globe's position next frame with no visible jump
       // since the anchor's pose matches the hit point we just set.
-      const target = liftedPlacementPosition(THREE_, hit)
+      const target = liftedPlacementPosition(THREE_, hit, scene.globe.scale.x)
       scene.globe.position.copy(target)
       placement?.setPlacing(false)
 
@@ -492,9 +492,13 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     if (currentAnchor && frame && active.refSpace) {
       const anchorPose = frame.getPose(currentAnchor.anchorSpace, active.refSpace)
       if (anchorPose) {
+        // Lift is scaled by globe's current uniform scale so the
+        // visible bottom stays on the real surface even when the
+        // user has zoomed the globe larger or smaller.
         liftedPlacementPosition(
           THREE_,
           anchorPose.transform.position,
+          active.scene.globe.scale.x,
           active.scene.globe.position,
         )
       }

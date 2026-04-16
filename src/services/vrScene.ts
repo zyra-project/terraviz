@@ -971,6 +971,16 @@ export function createVrScene(
       // normal axis and doesn't matter after the 90° rotation.
       shadow.scale.x = globe.scale.x
       shadow.scale.y = globe.scale.x
+      // Shadow follows the globe's world position — without this
+      // sync the shadow stays at the original GLOBE_POSITION when
+      // the user places the globe on a real surface in AR. Y
+      // offset is scale-aware so the shadow sits just under the
+      // visible bottom at any zoom level.
+      shadow.position.set(
+        globe.position.x,
+        globe.position.y - GLOBE_RADIUS * globe.scale.x - 0.005,
+        globe.position.z,
+      )
 
       // Atmosphere shells follow the globe's position + uniform
       // scale but deliberately NOT its rotation — the atmosphere
