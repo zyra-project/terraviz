@@ -75,14 +75,18 @@ const BASE_EARTH_TEXTURE_URL = '/assets/Earth_Specular_2K.jpg'
  * the GPU samples from pre-filtered levels. Upgrading is always a
  * win when it succeeds.
  *
- * Lights uses 2K + 4K only — night-side detail matters less than
- * day-side, and GPU memory adds up quickly (8K RGBA = 256 MB on
- * the GPU before mipmaps). An 8K lights variant is available at
- * the same URL pattern if we want to opt in later on higher-end
- * headsets.
+ * Lights mirrors diffuse with full 2K → 4K → 8K progression. 8K
+ * RGBA is ~256 MB on the GPU before mipmaps, which is chunky for
+ * Quest 2's VRAM, but: (a) progressive loading means a failed 8K
+ * allocation leaves the 4K tier resident rather than erroring,
+ * (b) Quest 3 / Pro have plenty of headroom, (c) night-side city
+ * detail is exactly the kind of thing users want to lean in and
+ * inspect — coastal city strings, suburban patterns, highway
+ * networks are legible at 8K in a way they aren't at 4K.
  *
- * If any tier URL 404s, progression stops at the previous tier
- * and the visible texture stays at the highest-successful tier.
+ * If any tier URL 404s or fails to allocate, progression stops at
+ * the previous tier and the visible texture stays at the
+ * highest-successful tier.
  */
 const EARTH_TEXTURE_BASE = 'https://d3sik7mbbzunjo.cloudfront.net/terraviz/basemaps'
 const EARTH_DIFFUSE_URLS = [
@@ -93,6 +97,7 @@ const EARTH_DIFFUSE_URLS = [
 const EARTH_LIGHTS_URLS = [
   `${EARTH_TEXTURE_BASE}/earth_lights_2048.jpg`,
   `${EARTH_TEXTURE_BASE}/earth_lights_4096.jpg`,
+  `${EARTH_TEXTURE_BASE}/earth_lights_8192.jpg`,
 ]
 
 // --- Day/night material constants (ported from earthMaterials.ts) ---
