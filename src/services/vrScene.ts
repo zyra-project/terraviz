@@ -987,19 +987,36 @@ export function createVrScene(
       // overkill but cheap; keeping it per-frame avoids a separate
       // throttled timer and guarantees the day/night terminator
       // stays correct if the user lingers in VR.
+      //
+      // Critically: after computing the sun direction in the globe's
+      // LOCAL frame (geographic convention — a fixed direction
+      // relative to the Earth's surface for a given UTC), we apply
+      // the globe's current world-space quaternion to get the
+      // sun's WORLD-SPACE direction. This means when the user
+      // grab-rotates the globe, the sun ROTATES WITH IT — rather
+      // than the globe spinning under a fixed sun.
+      //
+      // Why this matters: a fixed-in-world sun made grab-rotate feel
+      // like scrubbing time (different longitudes moved through the
+      // static terminator). Rotating the sun with the globe makes
+      // grab-rotate feel like orbiting the Earth-Sun system from a
+      // different viewing angle — the terminator stays at the
+      // correct real-world longitudes and you can literally "spin
+      // the sun into view" by rotating the globe. Time stays
+      // current and constant; only the user's viewing angle changes.
       const { lat, lng } = getSunPosition(new Date())
-      const sunDir = sunDirectionFromLatLng(THREE_, lat, lng)
+      const sunLocalDir = sunDirectionFromLatLng(THREE_, lat, lng)
+      const sunDir = sunLocalDir.applyQuaternion(globe.quaternion)
       sunDirUniform.value.copy(sunDir)
       // DirectionalLight convention: light shines FROM its position
       // TOWARD the origin. Place it along the sun direction at some
       // distance so shading matches the shader's uSunDir.
       sunLight.position.copy(sunDir).multiplyScalar(10)
 
-      // Sun sprite + glow (VR only). Positioned at `globe.position +
-      // sunDir * SUN_DISTANCE` so the sun tracks the real subsolar
-      // direction AND translates with the globe when the globe is
-      // placed on a real surface. Hidden in AR mode (sprites are
-      // null in that case).
+      // Sun sprite + glow. Positioned at `globe.position + sunDir *
+      // SUN_DISTANCE` so the sun tracks the real subsolar direction
+      // AND rotates when the user grab-rotates the globe AND
+      // translates when the globe is placed on a real surface.
       if (sunCoreSprite && sunGlowSprite) {
         const worldSunPos = sunDir.clone()
           .multiplyScalar(SUN_DISTANCE)
