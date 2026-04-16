@@ -20,6 +20,7 @@ import { createVrScene, type VrSceneHandle, type VrDatasetTexture } from './vrSc
 import { createVrHud, type VrHudHandle } from './vrHud'
 import { createVrInteraction, type VrInteractionHandle } from './vrInteraction'
 import { createVrLoading, type VrLoadingHandle } from './vrLoading'
+import { createVrPlacement, liftedPlacementPosition, type VrPlacementHandle } from './vrPlacement'
 import { logger } from '../utils/logger'
 
 /**
@@ -71,6 +72,10 @@ interface ActiveSession {
   interaction: VrInteractionHandle
   /** Loading scene shown during entry; null after fade-out + dispose. */
   loading: VrLoadingHandle | null
+  /** AR-only spatial placement (hit-test reticle + Place button). Null when hit-test unavailable. */
+  placement: VrPlacementHandle | null
+  /** Reference space passed to per-frame hit-test resolution. */
+  refSpace: XRReferenceSpace | null
 }
 
 let active: ActiveSession | null = null
@@ -145,10 +150,17 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
   const camera = new THREE_.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 100)
 
   // --- Request the session ---
+  // hit-test is requested as OPTIONAL for AR sessions so the
+  // session still starts on browsers/devices without the feature
+  // — placement just won't be available in that case. Skipped
+  // entirely for VR (no real-world geometry to hit-test against).
+  const optionalFeatures: string[] = []
+  if (isAr) optionalFeatures.push('hit-test')
   let session: XRSession
   try {
     session = await navigator.xr.requestSession(sessionMode, {
       requiredFeatures: ['local-floor'],
+      ...(optionalFeatures.length > 0 ? { optionalFeatures } : {}),
     })
   } catch (err) {
     canvas.remove()
@@ -173,6 +185,44 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
   const scene = createVrScene(THREE_, isAr)
   const hud = createVrHud(THREE_)
   scene.scene.add(hud.mesh)
+
+  // --- Spatial placement (AR-only, hit-test optional) ---
+  // Try to set up a viewer-space hit-test source so the user can
+  // anchor the globe to a real surface. Failure is non-fatal — VR
+  // sessions never have hit-test, and even AR can be without it on
+  // older browsers. When unavailable, the Place button stays hidden.
+  let hitTestSource: XRHitTestSource | null = null
+  let placementRefSpace: XRReferenceSpace | null = null
+  if (isAr && 'requestHitTestSource' in session) {
+    try {
+      const viewerSpace = await session.requestReferenceSpace('viewer')
+      // requestHitTestSource is on the session interface but not in
+      // all type defs; cast to any to invoke it.
+      const reqHts = (session as unknown as {
+        requestHitTestSource?: (init: { space: XRReferenceSpace }) => Promise<XRHitTestSource>
+      }).requestHitTestSource
+      if (reqHts) {
+        hitTestSource = await reqHts.call(session, { space: viewerSpace })
+        // The local-floor reference space is what Three.js uses for
+        // pose resolution; capture it so per-frame hit-test results
+        // come back in the same coordinate system as the globe.
+        placementRefSpace = await session.requestReferenceSpace('local-floor')
+      }
+    } catch (err) {
+      logger.debug('[VR] hit-test setup failed; spatial placement disabled:', err)
+    }
+  }
+  const placement = isAr ? createVrPlacement(THREE_, hitTestSource) : null
+  if (placement) {
+    scene.scene.add(placement.reticleGroup)
+    scene.scene.add(placement.placeButtonMesh)
+    // Reveal the Place button only if we actually have a hit-test
+    // source to back it up. Without one, tapping it would be a
+    // no-op and confusing.
+    if (hitTestSource) {
+      placement.placeButtonMesh.visible = true
+    }
+  }
 
   // --- Loading scene ---
   // Visible from the moment the session starts until the dataset
@@ -243,6 +293,7 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     scene: scene.scene,
     globe: scene.globe,
     hud,
+    placement,
     renderer,
     onHudAction: (action) => {
       if (action === 'play-pause') {
@@ -254,6 +305,19 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
           logger.warn('[VR] session.end() from exit-vr button failed:', err),
         )
       }
+    },
+    onPlaceButton: () => {
+      // Toggle Place mode. Re-tap exits without placing.
+      placement?.setPlacing(!placement.isPlacing())
+    },
+    onPlaceConfirm: () => {
+      const hit = placement?.getReticlePosition()
+      if (!hit) return
+      // Move the globe (and its children — clouds, atmosphere
+      // follows separately via update sync) to the lifted hit point.
+      const target = liftedPlacementPosition(THREE_, hit)
+      scene.globe.position.copy(target)
+      placement?.setPlacing(false)
     },
     onExit: () => {
       void session.end().catch(err =>
@@ -270,16 +334,24 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     hud,
     interaction,
     loading,
+    placement,
+    refSpace: placementRefSpace,
   }
 
   // --- Render loop ---
   let lastTime = performance.now()
-  renderer.setAnimationLoop((time) => {
+  renderer.setAnimationLoop((time, frame) => {
     const now = time || performance.now()
     const delta = Math.min(0.1, (now - lastTime) / 1000)
     lastTime = now
 
     if (!active) return
+
+    // Spatial placement: per-frame hit-test against the room. Only
+    // does work while in Place mode; cheap when idle.
+    if (active.placement && frame && active.refSpace) {
+      active.placement.update(frame, active.refSpace)
+    }
 
     // Swap the dataset texture if the app loaded/changed something
     // while we're in VR. The scene's setTexture is internally
@@ -323,6 +395,11 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     if (a.loading) {
       a.scene.scene.remove(a.loading.group)
       a.loading.dispose()
+    }
+    if (a.placement) {
+      a.scene.scene.remove(a.placement.reticleGroup)
+      a.scene.scene.remove(a.placement.placeButtonMesh)
+      a.placement.dispose()
     }
     a.scene.dispose()
     a.renderer.dispose()

@@ -22,6 +22,7 @@
 import type * as THREE from 'three'
 import type { XRControllerModelFactory } from 'three/examples/jsm/webxr/XRControllerModelFactory.js'
 import type { VrHudAction, VrHudHandle } from './vrHud'
+import type { VrPlacementHandle } from './vrPlacement'
 import { MAX_GLOBE_SCALE, MIN_GLOBE_SCALE } from './vrScene'
 import { logger } from '../utils/logger'
 
@@ -92,9 +93,15 @@ export interface VrInteractionContext {
   scene: THREE.Scene
   globe: THREE.Mesh
   hud: VrHudHandle
+  /** AR-only spatial placement. Null in VR mode or when hit-test isn't available. */
+  placement: VrPlacementHandle | null
   renderer: THREE.WebGLRenderer
   /** Fired when the user taps a HUD button. */
   onHudAction: (action: VrHudAction) => void
+  /** Fired when the user taps the floating Place button — caller toggles Place mode. */
+  onPlaceButton: () => void
+  /** Fired when the user pulls trigger while in Place mode — caller anchors the globe. */
+  onPlaceConfirm: () => void
   /** Fired when the user squeezes the grip — caller ends the session. */
   onExit: () => void
 }
@@ -293,6 +300,8 @@ export function createVrInteraction(
    * button).
    */
   const hudArmed: (VrHudAction | null)[] = [null, null]
+  /** Per-controller "trigger pressed on the Place button" flag (DOM click semantics). */
+  const placeArmed: boolean[] = [false, false]
   /** Current rotation mode — recomputed on every trigger state change. */
   let rotationMode: RotationMode = { kind: 'idle' }
 
@@ -339,6 +348,7 @@ export function createVrInteraction(
    */
   function pickHit(controller: THREE.XRTargetRaySpace):
     | { kind: 'hud'; action: VrHudAction }
+    | { kind: 'place-button' }
     | { kind: 'globe' }
     | null {
     setRaycasterFromController(controller)
@@ -347,6 +357,21 @@ export function createVrInteraction(
     if (hudHits.length > 0 && hudHits[0].uv) {
       const action = ctx.hud.hitTest({ x: hudHits[0].uv.x, y: hudHits[0].uv.y })
       if (action) return { kind: 'hud', action }
+    }
+
+    // Place button (AR-only, hit-test-supported sessions). Same
+    // depth-overrides + renderOrder strategy as the HUD so it
+    // always wins ties with the globe behind it.
+    const place = ctx.placement
+    if (place && place.placeButtonMesh.visible) {
+      const placeHits = raycaster.intersectObject(place.placeButtonMesh, false)
+      if (placeHits.length > 0 && placeHits[0].uv) {
+        const action = place.hitTestButton({
+          x: placeHits[0].uv.x,
+          y: placeHits[0].uv.y,
+        })
+        if (action) return { kind: 'place-button' }
+      }
     }
 
     const globeHits = raycaster.intersectObject(ctx.globe, false)
@@ -478,11 +503,26 @@ export function createVrInteraction(
 
   function onSelectStart(index: 0 | 1): void {
     const controller = controllers[index]
+
+    // Place mode short-circuits everything — trigger anywhere
+    // confirms the placement at whatever the reticle currently
+    // shows. Don't even bother with a raycast; just fire the
+    // confirm callback. Globe-grab is suppressed during Place mode.
+    if (ctx.placement?.isPlacing()) {
+      ctx.onPlaceConfirm()
+      return
+    }
+
     const hit = pickHit(controller)
     if (!hit) return
 
     if (hit.kind === 'hud') {
       hudArmed[index] = hit.action
+      return
+    }
+
+    if (hit.kind === 'place-button') {
+      placeArmed[index] = true
       return
     }
 
@@ -505,6 +545,15 @@ export function createVrInteraction(
         ctx.onHudAction(hudArmed[index]!)
       }
       hudArmed[index] = null
+    }
+    // Place button: same press-and-release-on-same-target click semantics.
+    if (placeArmed[index]) {
+      const controller = controllers[index]
+      const hit = pickHit(controller)
+      if (hit?.kind === 'place-button') {
+        ctx.onPlaceButton()
+      }
+      placeArmed[index] = false
     }
     if (triggersOnGlobe[index]) {
       triggersOnGlobe[index] = false
