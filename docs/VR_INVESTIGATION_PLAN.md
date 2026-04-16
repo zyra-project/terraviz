@@ -404,8 +404,45 @@ and waiting for them to think — feels natural in a spatial context.
 - Long Orbit responses need careful typography on the VR chat panel
   (font size, line height, scroll behaviour on a CanvasTexture).
 
+**Hand tracking — bat the globe with your hands.**
+
+Quest 2/3/Pro all support the WebXR `hand-tracking` optional feature,
+which exposes 25 joint positions per hand each frame. Three.js wraps
+this via `XRHandModelFactory` + `OculusHandModel` (realistic Quest
+hand renders) for visuals, plus raw joint access for interaction.
+
+The interaction goal is physical: just wave your hand at the globe
+and it spins, like batting a beach ball. Implementation:
+
+1. Track key joint positions each frame — index fingertip, middle
+   fingertip, palm centre.
+2. Detect when a joint enters the globe's bounding sphere (cheap
+   sphere-vs-point test against the scaled GLOBE_RADIUS).
+3. On contact, compute the hand's velocity at the contact point
+   (current position − previous position, divided by deltaSeconds).
+4. Apply that velocity as an angular impulse to the globe — feeds
+   directly into the existing `inertia` mode in `vrInteraction.ts`
+   (`{ kind: 'inertia', velocity }`). The flick-to-spin physics
+   already handles decay; hand contact is just a new input source.
+
+Effort: ~150-200 LOC for functional hand tracking + bat physics.
+Another ~100 LOC for polish (visual contact flash on the globe
+surface, palm-grab vs. finger-flick distinction, optional haptic
+feedback if the user is also holding controllers as backup).
+
+Bundle impact: `XRHandModelFactory` + `OculusHandModel` are addon
+modules (similar size to `XRControllerModelFactory`, ~15-20 KB
+gzipped). Lazy-load alongside Three.js. Hand mesh assets fetch
+from a CDN at runtime.
+
+**Quest hardware:** All Quest models support hand tracking, but it
+needs to be enabled in the system settings (Settings → Movement
+Tracking → Hand and Body Tracking). The WebXR feature request is
+optional, so users without it gracefully fall back to controllers.
+
 **Other Phase 5 items:**
-- Pinch-gesture hand tracking as an alternative to controllers
+- Other gesture interactions beyond bat (pinch-and-place, two-handed
+  pinch-zoom replicating the controller version)
 
 ---
 
