@@ -53,12 +53,11 @@ const BASE_EARTH_TEXTURE_URL = '/assets/Earth_Specular_2K.jpg'
  * External CDN URLs for the full Earth day/night textures, in
  * progressive-enhancement tiers.
  *
- * Hosted on the same S3 bucket as the cloud texture (see
- * `getCloudTextureUrl()` in `utils/deviceCapability.ts`). **Not**
- * LFS-tracked — the previous `Earth_Diffuse_6K.jpg` asset was
- * deliberately removed from LFS in commit `34167f2` when the
- * zyra-project account hit 9 GB / 10 GB LFS bandwidth/month.
- * External CDN keeps that problem from recurring.
+ * Hosted on a CloudFront distribution (not Git LFS). The previous
+ * `Earth_Diffuse_6K.jpg` asset was deliberately removed from LFS
+ * in commit `34167f2` when the zyra-project account hit 9 GB /
+ * 10 GB LFS bandwidth/month. CloudFront keeps that problem from
+ * recurring and gives better edge-cached latency than S3 direct.
  *
  * Progressive strategy:
  *   1. 2K loads first (~500 ms on a good connection) → fast first
@@ -78,19 +77,22 @@ const BASE_EARTH_TEXTURE_URL = '/assets/Earth_Specular_2K.jpg'
  *
  * Lights uses 2K + 4K only — night-side detail matters less than
  * day-side, and GPU memory adds up quickly (8K RGBA = 256 MB on
- * the GPU before mipmaps).
+ * the GPU before mipmaps). An 8K lights variant is available at
+ * the same URL pattern if we want to opt in later on higher-end
+ * headsets.
  *
  * If any tier URL 404s, progression stops at the previous tier
  * and the visible texture stays at the highest-successful tier.
  */
+const EARTH_TEXTURE_BASE = 'https://d3sik7mbbzunjo.cloudfront.net/terraviz/basemaps'
 const EARTH_DIFFUSE_URLS = [
-  'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/earth_diffuse_2048.jpg',
-  'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/earth_diffuse_4096.jpg',
-  'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/earth_diffuse_8192.jpg',
+  `${EARTH_TEXTURE_BASE}/earth_diffuse_2048.jpg`,
+  `${EARTH_TEXTURE_BASE}/earth_diffuse_4096.jpg`,
+  `${EARTH_TEXTURE_BASE}/earth_diffuse_8192.jpg`,
 ]
 const EARTH_LIGHTS_URLS = [
-  'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/earth_lights_2048.jpg',
-  'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/earth_lights_4096.jpg',
+  `${EARTH_TEXTURE_BASE}/earth_lights_2048.jpg`,
+  `${EARTH_TEXTURE_BASE}/earth_lights_4096.jpg`,
 ]
 
 // --- Day/night material constants (ported from earthMaterials.ts) ---
