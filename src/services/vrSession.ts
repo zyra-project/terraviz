@@ -179,6 +179,22 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     throw err instanceof Error ? err : new Error(String(err))
   }
 
+  // Lazy-load the controller-model addon alongside Three.js. The
+  // factory fetches per-controller glTF models from a CDN at runtime
+  // (e.g. Quest Touch), so the addon itself is small but enables a
+  // big polish win: users see their actual controllers in VR.
+  //
+  // IMPORTANT: this import must complete before `setTexture`'s
+  // synchronous onReady callback can schedule the loading-scene
+  // fade-out. If we awaited this AFTER setTexture, a cold-cache
+  // download could exceed the fade-out setTimeout's 250 ms delay
+  // — `active` would still be null when the timeout fires and the
+  // loading scene would get stuck visible. Moving the import here
+  // guarantees it's resolved before `active` needs to be set.
+  const { XRControllerModelFactory } = await import(
+    'three/examples/jsm/webxr/XRControllerModelFactory.js'
+  )
+
   // --- Build the scene ---
   // AR mode → transparent background so the passthrough camera feed
   // shows behind everything we render.
@@ -248,6 +264,13 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
   // guaranteed to exist.
   loading.setProgress(0.8, 'Loading dataset\u2026')
   let loadingFinalized = false
+  /**
+   * True once the loading scene has been removed + disposed — by
+   * either the fade-out path or the session-end teardown path.
+   * Guards against double-disposal if both fire (session ends
+   * during fade-out).
+   */
+  let loadingDisposed = false
   scene.setTexture(ctx.getDatasetTexture(), () => {
     // Idempotent — a follow-up texture swap could re-fire this;
     // we only want to drive the fade once per session.
@@ -255,23 +278,26 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     loadingFinalized = true
     loading.setProgress(1.0, 'Ready')
     // Brief pause at 100% so the user perceives completion, then
-    // fade. The 250 ms delay also lets `active` get assigned for
-    // synchronous (image / no-dataset) onReady paths where this
-    // callback runs before the enterImmersive function finishes
-    // wiring everything up.
+    // fade. Work with the captured `loading` + `scene` + `hud`
+    // references rather than `active` here — those exist from the
+    // moment createVrScene/Hud return, whereas `active` is only
+    // populated later in the function and may not be set yet when
+    // the synchronous onReady path fires. Previous version tested
+    // `if (!active) return` here and got stuck on first AR entry
+    // when the controller-factory import exceeded the 250 ms delay.
     setTimeout(() => {
-      // If the user exited between onReady and now, `active` is
-      // null and the end handler already disposed `loading`. Bail.
-      if (!active) return
       void loading.fadeOut().then(() => {
-        // Mid-fade exit path: end handler disposed everything.
-        if (!active) return
-        active.scene.scene.remove(loading.group)
+        // If the session ended mid-fade the end handler already
+        // disposed loading; avoid double-disposing by checking the
+        // flag we set on that path.
+        if (loadingDisposed) return
+        loadingDisposed = true
+        scene.scene.remove(loading.group)
         loading.dispose()
-        active.loading = null
+        if (active) active.loading = null
         // Reveal the real scene now that loading has cleared.
-        active.scene.globe.visible = true
-        active.hud.mesh.visible = true
+        scene.globe.visible = true
+        hud.mesh.visible = true
       })
     }, 250)
   })
@@ -281,14 +307,9 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     hasVideo: ctx.hasVideoDataset(),
   })
 
-  // Lazy-load the controller-model addon alongside Three.js. The
-  // factory fetches per-controller glTF models from a CDN at runtime
-  // (e.g. Quest Touch), so the addon itself is small but enables a
-  // big polish win: users see their actual controllers in VR.
-  const { XRControllerModelFactory } = await import(
-    'three/examples/jsm/webxr/XRControllerModelFactory.js'
-  )
-
+  // XRControllerModelFactory was imported earlier (before scene
+  // construction) so the loading-scene fade-out timing stays
+  // predictable — see the comment at that import.
   const interaction = createVrInteraction(THREE_, XRControllerModelFactory, {
     scene: scene.scene,
     globe: scene.globe,
@@ -391,8 +412,10 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     a.hud.dispose()
     // Loading scene may still be present if the user exited before
     // dataset finished loading. Dispose it explicitly so we don't
-    // leak the canvases + textures.
-    if (a.loading) {
+    // leak the canvases + textures. Flag handshake with the fade-out
+    // path ensures we never double-dispose.
+    if (a.loading && !loadingDisposed) {
+      loadingDisposed = true
       a.scene.scene.remove(a.loading.group)
       a.loading.dispose()
     }
