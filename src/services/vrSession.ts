@@ -21,6 +21,7 @@ import { createVrHud, type VrHudHandle } from './vrHud'
 import { createVrInteraction, type VrInteractionHandle } from './vrInteraction'
 import { createVrLoading, type VrLoadingHandle } from './vrLoading'
 import { createVrPlacement, liftedPlacementPosition, type VrPlacementHandle } from './vrPlacement'
+import { loadPersistedPlacement, savePersistedPlacement } from '../utils/vrPersistence'
 import { logger } from '../utils/logger'
 
 /**
@@ -240,6 +241,20 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     }
   }
 
+  // --- Restore persisted placement (AR only) ---
+  // If the user placed the globe on a real surface in a previous
+  // session, put it back there before the globe is first made
+  // visible — so the reveal happens at the remembered location
+  // rather than the default floating position. Position is in
+  // local-floor coordinates; stable across sessions in the same
+  // Quest room-setup.
+  if (isAr) {
+    const saved = loadPersistedPlacement()
+    if (saved) {
+      scene.globe.position.set(saved.x, saved.y, saved.z)
+    }
+  }
+
   // --- Loading scene ---
   // Visible from the moment the session starts until the dataset
   // texture has a decoded frame on the globe. Hides the real globe
@@ -339,6 +354,8 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
       const target = liftedPlacementPosition(THREE_, hit)
       scene.globe.position.copy(target)
       placement?.setPlacing(false)
+      // Persist so the globe stays in the same spot next session.
+      savePersistedPlacement({ x: target.x, y: target.y, z: target.z })
     },
     onExit: () => {
       void session.end().catch(err =>
