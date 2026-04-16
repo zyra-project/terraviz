@@ -22,6 +22,7 @@
 
 import type * as THREE from 'three'
 import { getSunPosition } from '../utils/time'
+import { getCloudTextureUrl } from '../utils/deviceCapability'
 import { logger } from '../utils/logger'
 
 /**
@@ -110,6 +111,28 @@ const NIGHT_LIGHT_STRENGTH = 0.5
 const ATMOSPHERE_INNER_RADIUS = GLOBE_RADIUS * 1.003
 const ATMOSPHERE_OUTER_RADIUS = GLOBE_RADIUS * 1.012
 const ATMOSPHERE_SEGMENTS = 64
+
+/**
+ * Cloud overlay — a slightly-larger translucent sphere above the
+ * globe surface with a day/night shader patch so clouds dim to
+ * near-black on the night side (otherwise they'd obscure the city
+ * lights underneath).
+ *
+ * Cloud texture is shared with the 2D app via `getCloudTextureUrl()`
+ * from `utils/deviceCapability.ts` — already hosted on the S3
+ * bucket, no new asset needed. Values copied from pre-MapLibre
+ * earthMaterials.ts.
+ */
+const CLOUD_RADIUS = GLOBE_RADIUS * 1.005
+const CLOUD_SEGMENTS = 64
+const CLOUD_OPACITY = 0.9
+/**
+ * Gamma exponent applied when converting luminance → alpha during
+ * the cloud texture preprocessing step. Keeps thin cloud wisps
+ * more transparent than dense formations, which looks more like
+ * real atmosphere than a uniform-alpha wash would.
+ */
+const CLOUD_ALPHA_GAMMA = 0.55
 
 /**
  * Convert the subsolar geographic lat/lng (degrees) into a
@@ -223,6 +246,21 @@ export function createVrScene(
   // Earth material's `onBeforeCompile` patch and the per-frame
   // `update()` which writes the current subsolar direction.
   const sunDirUniform = { value: new THREE_.Vector3(1, 0, 0) }
+
+  // Promise-based image loader used by the Earth CDN progressive
+  // loader, the cloud overlay, and anything else in the scene that
+  // needs a decoded `HTMLImageElement` from a cross-origin URL.
+  // `crossOrigin='anonymous'` is required so the returned image is
+  // CORS-clean — otherwise Canvas2D `getImageData()` throws (used
+  // for the cloud luminance → alpha preprocessing).
+  const loadImage = (url: string): Promise<HTMLImageElement> =>
+    new Promise((resolve, reject) => {
+      const img = new Image()
+      img.crossOrigin = 'anonymous'
+      img.onload = () => resolve(img)
+      img.onerror = () => reject(new Error(`Failed to load ${url}`))
+      img.src = url
+    })
 
   // Load the initial fallback texture (monochrome specular). Serves
   // double duty: the `map` until the diffuse CDN fetch lands, AND
@@ -428,6 +466,105 @@ export function createVrScene(
   atmosphereOuter.position.copy(globe.position)
   scene.add(atmosphereOuter)
 
+  // --- Cloud overlay ---
+  // Slightly-larger translucent sphere above the Earth surface.
+  // Loaded asynchronously from the shared cloud bucket (same URL
+  // the 2D app uses); mesh only appears once the texture decodes
+  // so the scene never shows an opaque white sphere placeholder.
+  //
+  // Direct port from earthMaterials.ts, including the luminance →
+  // alpha preprocessing step: dense clouds stay opaque, thin
+  // wisps see through to the ground. Gives a more atmospheric look
+  // than a uniform-alpha wash would.
+  //
+  // Parented to the globe mesh so the clouds inherit globe
+  // rotation (when the user grabs and spins the planet, clouds
+  // spin with it — clouds are conceptually part of Earth, unlike
+  // the atmosphere which stays fixed relative to the sun).
+  let cloudMesh: THREE.Mesh | null = null
+  ;(async () => {
+    try {
+      const img = await loadImage(getCloudTextureUrl())
+
+      // Convert luminance channel to alpha on an offscreen canvas.
+      // Result: solid white RGB, varying alpha based on brightness
+      // of the source image (with gamma to boost contrast between
+      // wisps and dense cloud cover).
+      const canvas = document.createElement('canvas')
+      canvas.width = img.width
+      canvas.height = img.height
+      const ctx = canvas.getContext('2d')
+      if (!ctx) throw new Error('[VR cloud] 2D canvas context unavailable')
+      ctx.drawImage(img, 0, 0, img.width, img.height)
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+      const data = imageData.data
+      for (let i = 0; i < data.length; i += 4) {
+        const lum = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) / 255
+        const alpha = Math.pow(lum, CLOUD_ALPHA_GAMMA)
+        data[i] = 255
+        data[i + 1] = 255
+        data[i + 2] = 255
+        data[i + 3] = Math.round(alpha * 255)
+      }
+      ctx.putImageData(imageData, 0, 0)
+
+      const cloudTexture = new THREE_.CanvasTexture(canvas)
+      cloudTexture.colorSpace = THREE_.SRGBColorSpace
+
+      const cloudGeometry = new THREE_.SphereGeometry(
+        CLOUD_RADIUS, CLOUD_SEGMENTS, CLOUD_SEGMENTS,
+      )
+      const cloudMaterial = new THREE_.MeshPhongMaterial({
+        map: cloudTexture,
+        transparent: true,
+        depthWrite: false,
+        opacity: CLOUD_OPACITY,
+      })
+
+      // Shader patch: on the night side, darken the cloud diffuse
+      // colour to near-black so city lights beneath remain visible
+      // through the (now-dim) cloud layer. Same smoothstep pattern
+      // as the Earth material's emissive gating, applied to the
+      // diffuse map_fragment chunk instead.
+      cloudMaterial.onBeforeCompile = (shader) => {
+        shader.uniforms.uSunDir = sunDirUniform
+
+        shader.vertexShader = shader.vertexShader.replace(
+          '#include <common>',
+          `#include <common>
+           uniform vec3 uSunDir;
+           varying float vCloudNdotL;`,
+        )
+        shader.vertexShader = shader.vertexShader.replace(
+          '#include <worldpos_vertex>',
+          `#include <worldpos_vertex>
+           vec3 wN = normalize((modelMatrix * vec4(objectNormal, 0.0)).xyz);
+           vCloudNdotL = dot(wN, uSunDir);`,
+        )
+
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <common>',
+          `#include <common>
+           varying float vCloudNdotL;`,
+        )
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <map_fragment>',
+          `#include <map_fragment>
+           float nightMask = smoothstep(0.0, -0.2, vCloudNdotL);
+           diffuseColor.rgb *= mix(vec3(1.0), vec3(0.08), nightMask);`,
+        )
+      }
+
+      cloudMesh = new THREE_.Mesh(cloudGeometry, cloudMaterial)
+      // Child of the globe — inherits position, scale, AND rotation.
+      // Rotation inheritance is intentional: clouds move with Earth's
+      // surface rotation.
+      globe.add(cloudMesh)
+    } catch (err) {
+      logger.warn('[VR] Cloud texture load failed; no cloud overlay:', err)
+    }
+  })()
+
   // --- Ground shadow ---
   // Subtle dark radial gradient on a horizontal plane below the
   // globe. Helps the globe feel spatially anchored — especially in
@@ -503,14 +640,6 @@ export function createVrScene(
   // These URLs 404 gracefully if the bucket isn't populated — the
   // monochrome specular map remains visible and the code behaves
   // correctly regardless of hosting status.
-  const loadImage = (url: string): Promise<HTMLImageElement> =>
-    new Promise((resolve, reject) => {
-      const img = new Image()
-      img.crossOrigin = 'anonymous'
-      img.onload = () => resolve(img)
-      img.onerror = () => reject(new Error(`Failed to load ${url}`))
-      img.src = url
-    })
 
   /**
    * Walk a list of resolution tiers in ascending order, upgrading
@@ -720,6 +849,17 @@ export function createVrScene(
       material.dispose()
       geometry.dispose()
       scene.remove(globe)
+      if (cloudMesh) {
+        // Clouds are a child of globe, so removing globe from scene
+        // already pulled them out of the render graph — but we still
+        // need to free their GPU resources explicitly.
+        ;(cloudMesh.geometry as THREE.BufferGeometry).dispose()
+        const cloudMat = cloudMesh.material as THREE.MeshPhongMaterial
+        cloudMat.map?.dispose()
+        cloudMat.dispose()
+        globe.remove(cloudMesh)
+        cloudMesh = null
+      }
       scene.remove(atmosphereInner)
       scene.remove(atmosphereOuter)
       atmosphereInnerGeometry.dispose()
