@@ -49,7 +49,8 @@ export const MAX_GLOBE_SCALE = 2.5
 const BASE_EARTH_TEXTURE_URL = '/assets/Earth_Specular_2K.jpg'
 
 /**
- * External CDN URLs for the full Earth day/night textures.
+ * External CDN URLs for the full Earth day/night textures, in
+ * progressive-enhancement tiers.
  *
  * Hosted on the same S3 bucket as the cloud texture (see
  * `getCloudTextureUrl()` in `utils/deviceCapability.ts`). **Not**
@@ -58,18 +59,38 @@ const BASE_EARTH_TEXTURE_URL = '/assets/Earth_Specular_2K.jpg'
  * zyra-project account hit 9 GB / 10 GB LFS bandwidth/month.
  * External CDN keeps that problem from recurring.
  *
- * 2K is intentional. At the VR globe's ~40° visible FOV, 2K is
- * perceptually equivalent to 6K; the size saving is ~9×.
+ * Progressive strategy:
+ *   1. 2K loads first (~500 ms on a good connection) → fast first
+ *      render. Arm's-length viewing is visually indistinguishable
+ *      from higher tiers at the Quest's ~40° globe FOV.
+ *   2. 4K then replaces it in the background (~2-3 s) → crisp
+ *      enough for moderate lean-in / zoom.
+ *   3. 8K (diffuse only) replaces 4K (~5-10 s) → the "lean in and
+ *      count the coastlines" tier. Worth having even though most
+ *      users won't see the difference: AR's zoom-and-inspect is
+ *      the killer capability that rewards high-resolution source.
  *
- * If these URLs 404 (e.g. not yet hosted), `loadDayNightTextures`
- * falls back gracefully and the monochrome specular map remains
- * the visible texture — so the code is correct whether or not the
- * bucket is populated.
+ * Automatic mipmap generation (Three.js default for power-of-two
+ * textures) means higher tiers don't hurt distant-view quality —
+ * the GPU samples from pre-filtered levels. Upgrading is always a
+ * win when it succeeds.
+ *
+ * Lights uses 2K + 4K only — night-side detail matters less than
+ * day-side, and GPU memory adds up quickly (8K RGBA = 256 MB on
+ * the GPU before mipmaps).
+ *
+ * If any tier URL 404s, progression stops at the previous tier
+ * and the visible texture stays at the highest-successful tier.
  */
-const EARTH_DIFFUSE_URL =
-  'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/earth_diffuse_2048.jpg'
-const EARTH_LIGHTS_URL =
-  'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/earth_lights_2048.jpg'
+const EARTH_DIFFUSE_URLS = [
+  'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/earth_diffuse_2048.jpg',
+  'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/earth_diffuse_4096.jpg',
+  'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/earth_diffuse_8192.jpg',
+]
+const EARTH_LIGHTS_URLS = [
+  'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/earth_lights_2048.jpg',
+  'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/earth_lights_4096.jpg',
+]
 
 // --- Day/night material constants (ported from earthMaterials.ts) ---
 const EARTH_SHININESS = 40
@@ -341,36 +362,75 @@ export function createVrScene(
       img.src = url
     })
 
-  loadImage(EARTH_DIFFUSE_URL)
-    .then(img => {
-      const tex = new THREE_.Texture(img)
-      tex.colorSpace = THREE_.SRGBColorSpace
-      tex.needsUpdate = true
-      baseDiffuseTexture = tex
-      // Apply only if no dataset has taken over during the fetch.
-      if (activeKey === null) {
-        material.map = tex
-        material.needsUpdate = true
+  /**
+   * Walk a list of resolution tiers in ascending order, upgrading
+   * the texture as each tier lands. On a tier-404 or network error
+   * we stop progression and keep whatever tier most recently
+   * succeeded — so a missing 8K variant still gets you the 4K, and
+   * a bucket that only has 2K still gets you 2K.
+   *
+   * `apply` is called with each tier's texture in turn. It's also
+   * responsible for disposing any previously-applied texture of
+   * the same kind so we don't leak GPU memory when upgrading.
+   */
+  async function loadProgressive(
+    urls: string[],
+    apply: (tex: THREE.Texture) => void,
+    label: string,
+  ): Promise<void> {
+    for (const url of urls) {
+      try {
+        const img = await loadImage(url)
+        const tex = new THREE_.Texture(img)
+        tex.colorSpace = THREE_.SRGBColorSpace
+        tex.needsUpdate = true
+        apply(tex)
+      } catch (err) {
+        logger.warn(`[VR] ${label} tier ${url} failed — stopping progression:`, err)
+        return
       }
-    })
-    .catch(err =>
-      logger.warn('[VR] Earth diffuse CDN fetch failed; keeping specular fallback:', err),
-    )
+    }
+  }
 
-  loadImage(EARTH_LIGHTS_URL)
-    .then(img => {
-      const tex = new THREE_.Texture(img)
-      tex.colorSpace = THREE_.SRGBColorSpace
-      tex.needsUpdate = true
-      lightsTexture = tex
-      if (activeKey === null) {
-        material.emissiveMap = tex
-        material.needsUpdate = true
+  // Diffuse — 2K → 4K → 8K. Each tier replaces the previous;
+  // previous texture disposed so GPU memory doesn't balloon.
+  void loadProgressive(
+    EARTH_DIFFUSE_URLS,
+    tex => {
+      // Swap only if no dataset has taken over during the fetch.
+      if (activeKey !== null) {
+        // Still hold on to the tier so we can restore it when the
+        // dataset clears; the previous-tier reference is now
+        // orphaned and should be disposed.
+        baseDiffuseTexture?.dispose()
+        baseDiffuseTexture = tex
+        return
       }
-    })
-    .catch(err =>
-      logger.warn('[VR] Earth lights CDN fetch failed; no night-side city lights:', err),
-    )
+      baseDiffuseTexture?.dispose()
+      baseDiffuseTexture = tex
+      material.map = tex
+      material.needsUpdate = true
+    },
+    'earth diffuse',
+  )
+
+  // Lights — 2K → 4K only. 8K lights would be 256 MB on the GPU
+  // for a detail the user rarely inspects closely.
+  void loadProgressive(
+    EARTH_LIGHTS_URLS,
+    tex => {
+      if (activeKey !== null) {
+        lightsTexture?.dispose()
+        lightsTexture = tex
+        return
+      }
+      lightsTexture?.dispose()
+      lightsTexture = tex
+      material.emissiveMap = tex
+      material.needsUpdate = true
+    },
+    'earth lights',
+  )
 
   return {
     scene,
