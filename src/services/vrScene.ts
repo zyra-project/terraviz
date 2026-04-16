@@ -86,10 +86,23 @@ export interface VrSceneHandle {
  *
  * Takes the already-imported Three.js module so the lazy-loading
  * decision lives at the call site (`vrSession.ts`).
+ *
+ * @param transparentBackground When true (AR passthrough mode),
+ *   the scene background stays unset so the renderer's clear pixels
+ *   reveal the camera feed behind. When false (VR mode), a dark
+ *   "deep space" background is set so the user is fully immersed.
  */
-export function createVrScene(THREE_: typeof THREE): VrSceneHandle {
+export function createVrScene(
+  THREE_: typeof THREE,
+  transparentBackground = false,
+): VrSceneHandle {
   const scene = new THREE_.Scene()
-  scene.background = new THREE_.Color(0x000814) // deep space blue
+  // For VR, set a dark space-blue background. For AR passthrough,
+  // leave background unset (null) so the renderer clears to
+  // transparent and the camera feed shows through.
+  if (!transparentBackground) {
+    scene.background = new THREE_.Color(0x000814) // deep space blue
+  }
 
   // Ambient + directional. The base specular texture is monochrome
   // and looks dead flat without some shading; a single directional

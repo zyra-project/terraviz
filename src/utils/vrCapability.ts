@@ -45,3 +45,25 @@ export async function isImmersiveVrSupported(): Promise<boolean> {
     return false
   }
 }
+
+/**
+ * Ask the browser whether an `immersive-ar` (passthrough) session
+ * can be started. On Meta Quest, this corresponds to mixed-reality
+ * mode — the camera feed shows behind the WebGL framebuffer's
+ * transparent pixels.
+ *
+ * Quest 2/3/Pro all support this; PCVR + browsers without
+ * passthrough hardware return false. Same error-to-false semantics
+ * as `isImmersiveVrSupported()`.
+ */
+export async function isImmersiveArSupported(): Promise<boolean> {
+  if (!isWebXRAvailable()) return false
+  try {
+    const xr = navigator.xr!
+    const supported = await xr.isSessionSupported('immersive-ar')
+    return !!supported
+  } catch (err) {
+    logger.debug('[VR] isSessionSupported(immersive-ar) threw:', err)
+    return false
+  }
+}

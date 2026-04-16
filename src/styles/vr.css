@@ -1,17 +1,21 @@
 /**
- * Enter VR button — matches the glass-surface language used elsewhere
- * (help-trigger, chat-trigger) but with the accent colour to highlight
- * that tapping it launches a distinct mode. Hidden by default; shown
- * by src/ui/vrButton.ts only after isImmersiveVrSupported() resolves
- * true.
+ * Enter VR / Enter AR buttons — match the glass-surface language used
+ * elsewhere (help-trigger, chat-trigger) but with the accent colour
+ * to highlight that tapping launches a distinct mode. Both hidden by
+ * default; src/ui/vrButton.ts shows whichever modes are supported.
+ *
+ * Layout: AR sits at right: 5rem, VR sits at right: 8.5rem so they
+ * stack right-to-left next to the Help button. On AR-only or VR-only
+ * devices the visible button moves to whichever slot makes the
+ * spacing look right (since CSS can't easily detect "is the other
+ * one hidden", both buttons have their own positions and we accept
+ * a small visual gap when only one is shown).
  */
 
-#vr-enter-btn {
+#vr-enter-btn,
+#vr-enter-ar-btn {
     position: fixed;
     top: 0.75rem;
-    /* Tuck to the left of the help button (which sits at right: 0.75rem
-       with a minimum width around 72 px). */
-    right: 5rem;
     z-index: 600;
     display: inline-flex;
     align-items: center;
@@ -32,36 +36,54 @@
     transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
+/* AR sits closest to Help (which is at right: 0.75rem), VR to its left. */
+#vr-enter-ar-btn {
+    right: 5rem;
+}
+#vr-enter-btn {
+    right: 8.5rem;
+}
+
 #vr-enter-btn:hover,
-#vr-enter-btn:focus-visible {
+#vr-enter-btn:focus-visible,
+#vr-enter-ar-btn:hover,
+#vr-enter-ar-btn:focus-visible {
     background: var(--color-accent);
     color: #fff;
 }
 
-#vr-enter-btn.pending {
+#vr-enter-btn.pending,
+#vr-enter-ar-btn.pending {
     opacity: 0.6;
     cursor: wait;
 }
 
-#vr-enter-btn .vr-btn-icon {
+#vr-enter-btn .vr-btn-icon,
+#vr-enter-ar-btn .vr-btn-icon {
     font-size: 1rem;
     line-height: 1;
 }
 
-/* Respect the app's other mode-style overlays. Hide the button when
-   the browse overlay is open so it doesn't float over that content. */
-body.browse-open #vr-enter-btn {
+/* Respect the app's other mode-style overlays. Hide both buttons when
+   the browse overlay is open so they don't float over that content. */
+body.browse-open #vr-enter-btn,
+body.browse-open #vr-enter-ar-btn {
     display: none;
 }
 
-/* Small screens: drop the text label, keep just the icon so it doesn't
-   crowd out the help button on mobile. */
+/* Small screens: drop the text labels, keep just the icons so they
+   don't crowd out the help button on mobile. AR sits closer to help. */
 @media (max-width: 600px) {
-    #vr-enter-btn {
+    #vr-enter-ar-btn {
         right: 4.25rem;
         padding: 0.4rem 0.55rem;
     }
-    #vr-enter-btn .vr-btn-label {
+    #vr-enter-btn {
+        right: 7rem;
+        padding: 0.4rem 0.55rem;
+    }
+    #vr-enter-btn .vr-btn-label,
+    #vr-enter-ar-btn .vr-btn-label {
         display: none;
     }
 }

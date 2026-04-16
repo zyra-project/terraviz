@@ -80,18 +80,27 @@ export function isVrActive(): boolean {
   return active !== null
 }
 
+/** Which immersive mode to enter. `vr` = full immersive, `ar` = passthrough. */
+export type VrMode = 'vr' | 'ar'
+
 /**
- * Request an `immersive-vr` session, build the Three.js scene,
- * attach controllers, and start the render loop. Rejects if the
- * browser refuses the session (user denied permission, no device,
- * etc.). On success, resolves once the session is fully live — the
- * user will be in VR at that point.
+ * Request an immersive WebXR session (VR or AR passthrough), build
+ * the Three.js scene, attach controllers, and start the render loop.
+ * Rejects if the browser refuses the session (user denied permission,
+ * no device, etc.). On success, resolves once the session is fully
+ * live — the user will be in the headset at that point.
  *
  * Calling while a session is already active is a no-op.
+ *
+ * AR mode (`mode === 'ar'`) requests `immersive-ar` and configures
+ * the renderer + scene for transparent rendering, so the Quest
+ * passthrough camera feed shows behind the floating globe and HUD.
+ * Visually identical to VR mode for everything in the scene; only
+ * the surrounding "void" changes from black to the user's room.
  */
-export async function enterVr(ctx: VrSessionContext): Promise<void> {
+export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promise<void> {
   if (active) {
-    logger.warn('[VR] enterVr called while a session is already active')
+    logger.warn(`[VR] enterImmersive(${mode}) called while a session is already active`)
     return
   }
   if (!navigator.xr) {
@@ -99,6 +108,8 @@ export async function enterVr(ctx: VrSessionContext): Promise<void> {
   }
 
   const THREE_ = await loadThree()
+  const isAr = mode === 'ar'
+  const sessionMode = isAr ? 'immersive-ar' : 'immersive-vr'
 
   // --- Renderer + canvas ---
   // The canvas doesn't display anything while the session is live
@@ -119,7 +130,10 @@ export async function enterVr(ctx: VrSessionContext): Promise<void> {
   const renderer = new THREE_.WebGLRenderer({
     canvas,
     antialias: true,
-    alpha: false,
+    // AR passthrough requires alpha so the framebuffer can clear to
+    // transparent and reveal the camera feed; VR keeps it disabled
+    // for a slight performance edge (one less blend pass per pixel).
+    alpha: isAr,
   })
   renderer.setPixelRatio(window.devicePixelRatio)
   renderer.setSize(window.innerWidth, window.innerHeight)
@@ -133,7 +147,7 @@ export async function enterVr(ctx: VrSessionContext): Promise<void> {
   // --- Request the session ---
   let session: XRSession
   try {
-    session = await navigator.xr.requestSession('immersive-vr', {
+    session = await navigator.xr.requestSession(sessionMode, {
       requiredFeatures: ['local-floor'],
     })
   } catch (err) {
@@ -154,7 +168,9 @@ export async function enterVr(ctx: VrSessionContext): Promise<void> {
   }
 
   // --- Build the scene ---
-  const scene = createVrScene(THREE_)
+  // AR mode → transparent background so the passthrough camera feed
+  // shows behind everything we render.
+  const scene = createVrScene(THREE_, isAr)
   const hud = createVrHud(THREE_)
   scene.scene.add(hud.mesh)
 
@@ -293,8 +309,16 @@ export async function enterVr(ctx: VrSessionContext): Promise<void> {
     ctx.onSessionEnd?.()
   })
 
-  logger.info('[VR] Session started')
+  logger.info(`[VR] ${isAr ? 'AR passthrough' : 'VR'} session started`)
 }
+
+/** Convenience wrapper — request `immersive-vr` (full virtual environment). */
+export const enterVr = (ctx: VrSessionContext): Promise<void> =>
+  enterImmersive('vr', ctx)
+
+/** Convenience wrapper — request `immersive-ar` (passthrough mixed reality). */
+export const enterAr = (ctx: VrSessionContext): Promise<void> =>
+  enterImmersive('ar', ctx)
 
 /**
  * End the current VR session if one is active. Safe to call

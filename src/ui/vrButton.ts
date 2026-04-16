@@ -1,89 +1,118 @@
 /**
- * "Enter VR" button — the only DOM affordance for the VR feature.
+ * "Enter VR" / "Enter AR" buttons — the only DOM affordances for
+ * the immersive feature.
  *
- * Feature-gated: on init, we await {@link isImmersiveVrSupported}
- * and only reveal the button if it resolves true. Browsers without
- * WebXR (desktop, Tauri, mobile Safari) never see the button and
- * never pay the Three.js bundle cost, because clicking is the only
- * thing that triggers `import('three')`.
+ * Feature-gated per mode: each button is independently shown only if
+ * the corresponding session mode is supported. Browsers without
+ * WebXR see neither. Quest 2/3/Pro typically see both. PCVR via
+ * SteamVR sees VR only.
  *
- * The button hides itself for the duration of an active session
- * (nothing to click while in VR, and it'd be confusing if shown
- * on any possible re-entry into the 2D DOM) and re-shows on
- * session end via `onSessionEnd`.
+ * Both buttons hide themselves while a session is active and
+ * re-show on session end via `onSessionEnd`.
  *
  * See {@link file://./../../docs/VR_INVESTIGATION_PLAN.md VR_INVESTIGATION_PLAN.md}.
  */
 
-import { isImmersiveVrSupported } from '../utils/vrCapability'
-import { enterVr, loadThree, type VrSessionContext } from '../services/vrSession'
+import { isImmersiveVrSupported, isImmersiveArSupported } from '../utils/vrCapability'
+import { enterImmersive, loadThree, type VrMode, type VrSessionContext } from '../services/vrSession'
 import { logger } from '../utils/logger'
 
-const BUTTON_ID = 'vr-enter-btn'
+const VR_BUTTON_ID = 'vr-enter-btn'
+const AR_BUTTON_ID = 'vr-enter-ar-btn'
 
 /**
- * Wire the Enter VR button. Safe to call even if the button element
- * is missing from the DOM — logs and no-ops. Safe to call on every
- * boot; idempotent for any given button element.
+ * Wire each button to its corresponding mode. Idempotent for any
+ * given DOM element; safe to call once at boot.
  */
 export async function initVrButton(ctx: VrSessionContext): Promise<void> {
-  const button = document.getElementById(BUTTON_ID) as HTMLButtonElement | null
-  if (!button) {
-    logger.debug('[VR] initVrButton: no #vr-enter-btn element, skipping')
+  const vrButton = document.getElementById(VR_BUTTON_ID) as HTMLButtonElement | null
+  const arButton = document.getElementById(AR_BUTTON_ID) as HTMLButtonElement | null
+
+  if (!vrButton && !arButton) {
+    logger.debug('[VR] initVrButton: no buttons in DOM, skipping')
     return
   }
 
-  // Keep the button hidden while we feature-detect. The DOM default
-  // has the `hidden` class so there's no flicker if detection fails.
-  const supported = await isImmersiveVrSupported()
-  if (!supported) {
-    logger.debug('[VR] Immersive VR not supported — button stays hidden')
+  // Detect each mode in parallel — they're independent calls and
+  // there's no reason to serialize them.
+  const [vrSupported, arSupported] = await Promise.all([
+    vrButton ? isImmersiveVrSupported() : Promise.resolve(false),
+    arButton ? isImmersiveArSupported() : Promise.resolve(false),
+  ])
+
+  if (!vrSupported && !arSupported) {
+    logger.debug('[VR] Neither immersive mode supported — buttons stay hidden')
     return
   }
-
-  button.classList.remove('hidden')
-  button.setAttribute('aria-hidden', 'false')
 
   // Warm-load the Three.js chunk in the background now that we know
-  // the device can enter VR. The first click→session-start becomes
+  // SOMETHING is supported. The first click → session-start becomes
   // near-instant on good connections instead of waiting for the
-  // ~150 KB gzipped download. Safe if the user never taps — it's
-  // just a cached promise.
+  // ~180 KB gzipped download. Safe if the user never taps.
   void loadThree().catch(err =>
     logger.debug('[VR] Three.js prefetch failed (non-fatal):', err),
   )
 
-  const originalCtx: VrSessionContext = {
+  // Build a context wrapper that re-shows whichever buttons are
+  // supported when the session ends. Both buttons hide while a
+  // session is live so the user can't accidentally start a second.
+  function showSupportedButtons(): void {
+    if (vrSupported && vrButton) {
+      vrButton.classList.remove('hidden')
+      vrButton.setAttribute('aria-hidden', 'false')
+    }
+    if (arSupported && arButton) {
+      arButton.classList.remove('hidden')
+      arButton.setAttribute('aria-hidden', 'false')
+    }
+  }
+
+  function hideAllButtons(): void {
+    for (const btn of [vrButton, arButton]) {
+      if (!btn) continue
+      btn.classList.add('hidden')
+      btn.setAttribute('aria-hidden', 'true')
+    }
+  }
+
+  const sessionCtx: VrSessionContext = {
     ...ctx,
     onSessionEnd: () => {
-      // Restore the button when the user comes back out of VR, then
-      // forward to the caller's own onSessionEnd (if any) so it can
-      // do post-session UI work.
-      button.classList.remove('hidden')
-      button.setAttribute('aria-hidden', 'false')
+      showSupportedButtons()
       ctx.onSessionEnd?.()
     },
   }
 
-  button.addEventListener('click', async () => {
-    if (button.classList.contains('pending')) return
-    button.classList.add('pending')
-    button.setAttribute('aria-busy', 'true')
-    try {
-      await enterVr(originalCtx)
-      // Session is live — hide the button so it doesn't overlap
-      // any DOM that might be briefly visible during the transition.
-      button.classList.add('hidden')
-      button.setAttribute('aria-hidden', 'true')
-    } catch (err) {
-      logger.error('[VR] enterVr failed:', err)
-      // Surface a simple user-facing message. A more polished
-      // implementation would route through the app's `#error-message`
-      // banner; for MVP a title tooltip is enough signal.
-      button.title = err instanceof Error ? err.message : 'Failed to enter VR'
-    } finally {
-      button.classList.remove('pending')
-      button.removeAttribute('aria-busy')
-    }
-  })
+  /**
+   * Wire one button to one immersive mode. Single source of truth
+   * for the click → enter → hide / fail handling so VR and AR can't
+   * drift in behaviour.
+   */
+  function wireButton(btn: HTMLButtonElement, mode: VrMode): void {
+    btn.addEventListener('click', async () => {
+      if (btn.classList.contains('pending')) return
+      btn.classList.add('pending')
+      btn.setAttribute('aria-busy', 'true')
+      try {
+        await enterImmersive(mode, sessionCtx)
+        // Session is live — hide both buttons.
+        hideAllButtons()
+      } catch (err) {
+        logger.error(`[VR] enterImmersive(${mode}) failed:`, err)
+        btn.title = err instanceof Error ? err.message : `Failed to enter ${mode.toUpperCase()}`
+      } finally {
+        btn.classList.remove('pending')
+        btn.removeAttribute('aria-busy')
+      }
+    })
+  }
+
+  if (vrSupported && vrButton) {
+    wireButton(vrButton, 'vr')
+  }
+  if (arSupported && arButton) {
+    wireButton(arButton, 'ar')
+  }
+
+  showSupportedButtons()
 }
