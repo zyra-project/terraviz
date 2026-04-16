@@ -222,28 +222,83 @@ imported by anything on the hot path.
 
 ### Phase 2 — visual polish, loading gate & tile support
 
-**VR loading gate.** The MVP has a pragmatic workaround for "no
-decoded frame yet" (forced seek + base-Earth fallback). The real
-answer is a proper loading state that gates VR entry:
+**VR loading gate.** ✅ Shipped. The 3D loading scene
+(src/services/vrLoading.ts) replaces the "brief flash of base
+Earth" workaround with a proper gated entry — rings spin + progress
+bar fills while the dataset texture decodes, then fades out to
+reveal the real globe. Visual language matches the 2D loading
+screen (src/styles/loading.css).
 
-1. User taps Enter VR → VR shows a loading environment (dark room +
-   spinner, or base Earth with a loading overlay).
-2. Gate clears when ALL of: Three.js initialized, XR session live,
-   dataset texture has a decoded frame (video `readyState >= 2` or
-   image element `.complete`).
-3. Scene fades in / transition completes.
+**Visual polish — port the pre-MapLibre Three.js shader.**
 
-This also handles edge cases we haven't hit yet but will: slow
-Three.js chunk download on first entry, HLS stream that hasn't
-buffered, texture decode lag on lower-end Quest hardware.
+The project previously had a full photorealistic day/night Earth
+shader in `src/services/earthMaterials.ts` (564 LOC), removed in
+commit `3911300` when the app locked to MapLibre. That shader is
+**directly portable** back into `vrScene.ts` — it's already
+Three.js-native and covers day/night/clouds/specular/atmosphere via
+`MeshPhongMaterial.onBeforeCompile` patches.
 
-**Visual polish:**
-- Port `earthTileLayer.ts`'s day/night/cloud/specular composite into
-  Three.js materials.
-- Tile pyramid: either UV-reproject Mercator in-shader or pre-stitch
-  equirectangular per dataset (open question below).
-- Replace `Earth_Specular_2K.jpg` placeholder with a proper Blue
-  Marble equirectangular base texture.
+| Feature | Approach |
+|---|---|
+| Diffuse (day Earth) | Equirectangular JPG + MeshPhongMaterial.map |
+| Night lights | Emissive map + shader patch: `smoothstep(0.0, -0.2, N·L)` gates lights to the dark side only |
+| Specular (ocean glint) | Standard Phong specular using `Earth_Specular_2K.jpg` (already in the repo) |
+| Clouds | Separate sphere mesh at radius 1.005, shader patch dims clouds on night side |
+| Atmosphere | Inner + outer rim-fresnel spheres at 1.003 / 1.012 |
+| Sun lighting | DirectionalLight + sun sprite at `getSunPosition()` longitude/latitude |
+| Normal map | Skipped (was historically 224 KB; removed in the LFS cleanup; visual gain marginal over specular) |
+
+Port effort: ~300-400 LOC of adaptation to vrScene.ts — mostly
+copy-paste from the old `earthMaterials.ts` with structural
+changes for the functional scene-handle style (no class).
+
+**Texture hosting — external CDN, not LFS.**
+
+Commits `34167f2` + `e79276f` document the **explicit decision to
+remove the Earth textures from LFS** — the zyra-project account
+was hitting 9 GB / 10 GB LFS bandwidth per month, with
+`Earth_Diffuse_6K.jpg` (7.9 MB) as the leading contributor. Two
+textures removed from LFS at that time:
+
+- `Earth_Diffuse_6K.jpg` — 7.9 MB, removed
+- `Earth_Normal_2K.jpg` — 224 KB, removed (was in precache but
+  referenced by no shader)
+
+The night lights were separately replaced in 2D by a GIBS Black
+Marble framebuffer-capture approach (commit `fd004e4`), which is
+MapLibre-specific and not portable to Three.js.
+
+**Strategy: host Earth textures on the existing external CDN.**
+
+There's already a precedent in `src/utils/deviceCapability.ts`:
+
+```ts
+const CLOUD_TEXTURE_BASE = 'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov'
+// getCloudTextureUrl() → clouds_4096.jpg or clouds_8192.jpg
+```
+
+The cloud texture lives on S3, not in the repo, not in LFS. Same
+pattern for Earth:
+
+- Host `Earth_Diffuse_2K.jpg` (or `4K`) + `Earth_Lights_2K.jpg` on
+  the same bucket.
+- Fetch at runtime via `fetchImageWithProgress`.
+- Browser HTTP cache deduplicates across sessions.
+- Zero LFS bandwidth, zero repo size impact.
+
+Why 2K and not 6K: at the VR globe's visible FOV (~40° fills the
+view at arm's length), 2K is perceptually equivalent to 6K. Storage
+/ download savings are ~9× (1 MB instead of 8).
+
+**Tile pyramid — de-prioritized.**
+
+The original Phase 2 bullet "UV-reproject Mercator in-shader vs.
+pre-stitch equirectangular per dataset" can be deferred. With the
+static equirectangular Blue Marble as the base Earth, the dataset
+VideoTexture / ImageTexture overlay already covers the per-dataset
+variant case (the existing MVP code). GIBS tiles are only needed
+if we want tile-level zoom detail on the base Earth beyond 2K,
+which is a much later polish concern.
 
 ### Phase 2.1 — AR passthrough mode (virtual SOS in your room)
 
