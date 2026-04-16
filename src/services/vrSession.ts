@@ -484,10 +484,20 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
   const placeOffset = new THREE_.Vector3(0, -0.5, 0.15)
   /** Scratch reused per-frame for position math; avoids GC churn. */
   const scratchPos = new THREE_.Vector3()
-  let lastTime = performance.now()
+  // `lastTime` starts null so the very first frame uses its own
+  // timestamp as "previous" and computes a 0-duration delta —
+  // rather than mixing XR's frame timestamp (first callback arg)
+  // with performance.now() from pre-loop init, which can be on a
+  // different clock and produce a huge first delta.
+  let lastTime: number | null = null
   renderer.setAnimationLoop((time, frame) => {
-    const now = time || performance.now()
-    const delta = Math.min(0.1, (now - lastTime) / 1000)
+    // `??` instead of `||` — some XR implementations emit a valid
+    // timestamp of 0 on the very first frame, which `||` would
+    // falsely treat as "no time" and fall back to performance.now(),
+    // mixing clocks.
+    const now = time ?? performance.now()
+    const previousTime = lastTime ?? now
+    const delta = Math.min(0.1, (now - previousTime) / 1000)
     lastTime = now
 
     if (!active) return

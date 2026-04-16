@@ -14,7 +14,14 @@ import {
  * the helpers exist).
  */
 
-const originalNav = navigator
+/**
+ * Capture the original navigator.xr property descriptor BEFORE any
+ * test mutates it. `navigator` is the same object reference across
+ * the entire test suite, so storing `navigator` alone (as previous
+ * code did) and reading `.xr` from it in afterEach would return
+ * whatever the last test wrote — leaking state across files.
+ */
+const originalXrDescriptor = Object.getOwnPropertyDescriptor(navigator, 'xr')
 
 /** Swap navigator.xr to a given value (or remove the property entirely). */
 function setNavXr(xr: unknown): void {
@@ -25,13 +32,15 @@ function setNavXr(xr: unknown): void {
   })
 }
 
-/** Restore navigator to its original state — prevents test leakage. */
+/** Restore navigator.xr to its pre-test state — prevents test leakage. */
 function restoreNav(): void {
-  Object.defineProperty(navigator, 'xr', {
-    value: (originalNav as unknown as { xr?: unknown }).xr,
-    configurable: true,
-    writable: true,
-  })
+  if (originalXrDescriptor) {
+    Object.defineProperty(navigator, 'xr', originalXrDescriptor)
+  } else {
+    // Property never existed on the test-env's navigator; delete so
+    // subsequent tests don't inherit a stale value.
+    delete (navigator as unknown as Record<string, unknown>).xr
+  }
 }
 
 describe('vrCapability', () => {
