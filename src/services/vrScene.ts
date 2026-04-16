@@ -141,6 +141,15 @@ const SUN_GLOW_OPACITY = 0.4
 const SUN_GLOW_TEXTURE_SIZE = 256
 
 /**
+ * How often to recompute the subsolar point (via `getSunPosition`).
+ * The sun moves ~0.25° per minute in longitude; 2 seconds = 0.008°
+ * which is imperceptible. Per-frame re-calculation runs ~90x more
+ * than needed AND allocates a new `Date` object each time, which
+ * profiled as avoidable GC pressure in XR.
+ */
+const SUN_UPDATE_INTERVAL_MS = 2000
+
+/**
  * Cloud overlay — a slightly-larger translucent sphere above the
  * globe surface with a day/night shader patch so clouds dim to
  * near-black on the night side (otherwise they'd obscure the city
@@ -173,10 +182,11 @@ function sunDirectionFromLatLng(
   THREE_: typeof THREE,
   lat: number,
   lng: number,
+  out: THREE.Vector3,
 ): THREE.Vector3 {
   const latRad = (lat * Math.PI) / 180
   const lngRad = (lng * Math.PI) / 180
-  return new THREE_.Vector3(
+  return out.set(
     Math.cos(latRad) * Math.cos(lngRad),
     Math.sin(latRad),
     -Math.cos(latRad) * Math.sin(lngRad),
@@ -274,6 +284,16 @@ export function createVrScene(
   // Earth material's `onBeforeCompile` patch and the per-frame
   // `update()` which writes the current subsolar direction.
   const sunDirUniform = { value: new THREE_.Vector3(1, 0, 0) }
+  // Scratches for the per-frame sun-update path. `sunLocalDirCache`
+  // is refreshed at `SUN_UPDATE_INTERVAL_MS` cadence (subsolar point
+  // moves ~0.25°/min — the cadence is way finer than needed but
+  // cheap). Per-frame we copy it into a scratch, apply the globe's
+  // current rotation, and write into downstream targets — no
+  // allocations in the hot path.
+  const sunLocalDirCache = new THREE_.Vector3(1, 0, 0)
+  const sunDirScratch = new THREE_.Vector3()
+  const sunWorldPosScratch = new THREE_.Vector3()
+  let lastSunUpdateMs = -Infinity
 
   // Promise-based image loader used by the Earth CDN progressive
   // loader, the cloud overlay, and anything else in the scene that
@@ -992,19 +1012,25 @@ export function createVrScene(
       atmosphereInner.scale.copy(globe.scale)
       atmosphereOuter.scale.copy(globe.scale)
 
-      // Refresh sun direction from real UTC time. The subsolar
-      // point moves ~0.25° per minute, so updating every frame is
-      // overkill but cheap; keeping it per-frame avoids a separate
-      // throttled timer and guarantees the day/night terminator
-      // stays correct if the user lingers in VR.
-      //
-      // Critically: after computing the sun direction in the globe's
+      // Refresh the subsolar point on a throttle — it changes
+      // ~0.25°/min, so recomputing every 2 s is more than fast
+      // enough. Gets us out of the per-frame `new Date()` + trig
+      // allocations while still keeping the day/night terminator
+      // current as the user lingers in VR.
+      const nowMs = performance.now()
+      if (nowMs - lastSunUpdateMs > SUN_UPDATE_INTERVAL_MS) {
+        lastSunUpdateMs = nowMs
+        const { lat, lng } = getSunPosition(new Date())
+        sunDirectionFromLatLng(THREE_, lat, lng, sunLocalDirCache)
+      }
+
+      // Critically: after storing the sun direction in the globe's
       // LOCAL frame (geographic convention — a fixed direction
       // relative to the Earth's surface for a given UTC), we apply
       // the globe's current world-space quaternion to get the
-      // sun's WORLD-SPACE direction. This means when the user
-      // grab-rotates the globe, the sun ROTATES WITH IT — rather
-      // than the globe spinning under a fixed sun.
+      // sun's WORLD-SPACE direction each frame. This means when the
+      // user grab-rotates the globe, the sun ROTATES WITH IT —
+      // rather than the globe spinning under a fixed sun.
       //
       // Why this matters: a fixed-in-world sun made grab-rotate feel
       // like scrubbing time (different longitudes moved through the
@@ -1014,25 +1040,24 @@ export function createVrScene(
       // correct real-world longitudes and you can literally "spin
       // the sun into view" by rotating the globe. Time stays
       // current and constant; only the user's viewing angle changes.
-      const { lat, lng } = getSunPosition(new Date())
-      const sunLocalDir = sunDirectionFromLatLng(THREE_, lat, lng)
-      const sunDir = sunLocalDir.applyQuaternion(globe.quaternion)
-      sunDirUniform.value.copy(sunDir)
+      sunDirScratch.copy(sunLocalDirCache).applyQuaternion(globe.quaternion)
+      sunDirUniform.value.copy(sunDirScratch)
       // DirectionalLight convention: light shines FROM its position
       // TOWARD the origin. Place it along the sun direction at some
       // distance so shading matches the shader's uSunDir.
-      sunLight.position.copy(sunDir).multiplyScalar(10)
+      sunLight.position.copy(sunDirScratch).multiplyScalar(10)
 
       // Sun sprite + glow. Positioned at `globe.position + sunDir *
       // SUN_DISTANCE` so the sun tracks the real subsolar direction
       // AND rotates when the user grab-rotates the globe AND
       // translates when the globe is placed on a real surface.
       if (sunCoreSprite && sunGlowSprite) {
-        const worldSunPos = sunDir.clone()
+        sunWorldPosScratch
+          .copy(sunDirScratch)
           .multiplyScalar(SUN_DISTANCE)
           .add(globe.position)
-        sunCoreSprite.position.copy(worldSunPos)
-        sunGlowSprite.position.copy(worldSunPos)
+        sunCoreSprite.position.copy(sunWorldPosScratch)
+        sunGlowSprite.position.copy(sunWorldPosScratch)
       }
     },
 

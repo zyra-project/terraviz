@@ -291,6 +291,8 @@ export function createVrInteraction(
   const scratchQuatB = new THREE_.Quaternion()
   /** Quaternion that computeTwoHandOrientation writes into when called per-frame. */
   const twoHandOrientationScratch = new THREE_.Quaternion()
+  /** Axis scratch for updateInertia — avoids a Vector3 alloc every inertia tick. */
+  const inertiaAxisScratch = new THREE_.Vector3()
 
   // One controller per hand. Three.js assigns indices 0 and 1; the
   // mapping to left/right is set by the platform at runtime. For MVP
@@ -788,7 +790,12 @@ export function createVrInteraction(
       return
     }
     const angle = speed * deltaSeconds
-    deltaQ.setFromAxisAngle(mode.velocity.clone().normalize(), angle)
+    // Normalize into a scratch rather than cloning the velocity —
+    // this function runs every frame during a flick-to-spin, and
+    // mode.velocity is a mutable vector we can't normalize in-place
+    // (that would change its magnitude, which encodes speed).
+    inertiaAxisScratch.copy(mode.velocity).normalize()
+    deltaQ.setFromAxisAngle(inertiaAxisScratch, angle)
     ctx.globe.quaternion.premultiply(deltaQ)
   }
 
