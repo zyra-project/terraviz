@@ -192,15 +192,12 @@
                     <button id="error-dismiss" aria-label="Dismiss error">&#x2715;</button>
                 </div>
 
-                <!-- Enter VR / Enter AR — shown only on WebXR-capable browsers. See src/ui/vrButton.ts.
-                     Quest 2/3/Pro typically show both; PCVR shows only VR; non-XR browsers show neither. -->
+                <!-- Enter immersive mode — shown only on WebXR-capable browsers.
+                     Adapts label + mode based on device support: prefers AR
+                     (Quest 2/3/Pro), falls back to VR (PCVR). See vrButton.ts. -->
                 <button id="vr-enter-btn" class="hidden" type="button" title="Enter immersive VR mode" aria-label="Enter immersive VR mode" aria-hidden="true">
                     <span class="vr-btn-icon" aria-hidden="true">&#x1F97D;&#xFE0E;</span>
                     <span class="vr-btn-label">Enter VR</span>
-                </button>
-                <button id="vr-enter-ar-btn" class="hidden" type="button" title="Enter passthrough AR mode (globe in your room)" aria-label="Enter passthrough AR mode" aria-hidden="true">
-                    <span class="vr-btn-icon" aria-hidden="true">&#x1F30D;&#xFE0E;</span>
-                    <span class="vr-btn-label">Enter AR</span>
                 </button>
 
                 <!-- Help button and panel -->
