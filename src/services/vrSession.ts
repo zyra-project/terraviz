@@ -190,18 +190,34 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
 
   // Initial HUD state + texture. Wait for texture readiness before
   // hiding the loading scene; for video this can take several hundred
-  // ms (the forced seek decode). For images / no dataset it's instant.
+  // ms (the forced seek decode). For images / no dataset the
+  // callback fires synchronously during setTexture — BEFORE `active`
+  // is assigned below, so we can't reference it directly in the
+  // callback. Work with the captured `loading` handle instead and
+  // defer the lifecycle work to a setTimeout where `active` is
+  // guaranteed to exist.
   loading.setProgress(0.8, 'Loading dataset\u2026')
+  let loadingFinalized = false
   scene.setTexture(ctx.getDatasetTexture(), () => {
-    if (!active) return // session already ended
+    // Idempotent — a follow-up texture swap could re-fire this;
+    // we only want to drive the fade once per session.
+    if (loadingFinalized) return
+    loadingFinalized = true
     loading.setProgress(1.0, 'Ready')
-    // Brief pause at 100% so the user perceives completion, then fade.
+    // Brief pause at 100% so the user perceives completion, then
+    // fade. The 250 ms delay also lets `active` get assigned for
+    // synchronous (image / no-dataset) onReady paths where this
+    // callback runs before the enterImmersive function finishes
+    // wiring everything up.
     setTimeout(() => {
-      if (!active || !active.loading) return
-      void active.loading.fadeOut().then(() => {
-        if (!active || !active.loading) return
-        active.scene.scene.remove(active.loading.group)
-        active.loading.dispose()
+      // If the user exited between onReady and now, `active` is
+      // null and the end handler already disposed `loading`. Bail.
+      if (!active) return
+      void loading.fadeOut().then(() => {
+        // Mid-fade exit path: end handler disposed everything.
+        if (!active) return
+        active.scene.scene.remove(loading.group)
+        loading.dispose()
         active.loading = null
         // Reveal the real scene now that loading has cleared.
         active.scene.globe.visible = true
