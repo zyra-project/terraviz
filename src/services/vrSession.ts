@@ -377,6 +377,19 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
   }
 
   // --- Render loop ---
+  //
+  // HUD + Place button follow the globe via these offsets — so when
+  // the user places the globe on a real surface (AR mode), the
+  // controls track underneath it rather than staying at some fixed
+  // spot in mid-air. Large -y offset (more negative than globe
+  // radius) ensures they're clearly BELOW the globe's visible
+  // silhouette even when looking straight at the globe. Small +z
+  // offset pulls them slightly closer to the user than the globe
+  // for comfortable reading.
+  const hudOffset = new THREE_.Vector3(0, -0.65, 0.15)
+  const placeOffset = new THREE_.Vector3(0, -0.5, 0.15)
+  /** Scratch reused per-frame for position math; avoids GC churn. */
+  const scratchPos = new THREE_.Vector3()
   let lastTime = performance.now()
   renderer.setAnimationLoop((time, frame) => {
     const now = time || performance.now()
@@ -411,6 +424,21 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     // scene is still up so the shadow is correct the moment the
     // globe becomes visible.
     active.scene.update()
+
+    // Track HUD + Place button to the globe's current position so
+    // when the user places the globe on a real surface in AR, the
+    // controls go with it rather than floating in mid-air at their
+    // initial spot. Deliberately NOT parented to the globe (would
+    // inherit rotation + wobble with user grab); manual sync via
+    // offset vectors lets us keep position while leaving orientation
+    // globe-independent.
+    scratchPos.copy(active.scene.globe.position).add(hudOffset)
+    active.hud.mesh.position.copy(scratchPos)
+    if (active.placement) {
+      scratchPos.copy(active.scene.globe.position).add(placeOffset)
+      active.placement.placeButtonMesh.position.copy(scratchPos)
+    }
+
     // Drive the loading scene's animation (rings spin, sphere
     // pulses, fade-out tween, progress bar ease) — only while the
     // loading group is still alive.
