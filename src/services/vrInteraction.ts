@@ -121,10 +121,12 @@ export interface VrInteractionHandle {
  *   Lateral controller motion rotates the globe because the grab
  *   point stays pinned under the current ray. Matches MapLibre's
  *   "drag the surface under your cursor" feel.
- * - `two-hand` — both triggers on globe; mobile-style pinch + axis
- *   rotate. Distance between controllers scales the globe; the axis
- *   connecting them rotates it. Captures 5 of 6 DoF; twist around
- *   the connecting axis is deliberately dropped (Phase 4 polish).
+ * - `two-hand` — both triggers on globe; mobile-style pinch +
+ *   rigid-body rotate. Distance between controllers scales the
+ *   globe; orientation is built from the axis between the hands
+ *   plus the average of their up-vectors, giving a full 3-DoF
+ *   rotation that includes wrist-roll / twist around the
+ *   connecting axis. See `computeTwoHandOrientation` for the math.
  *
  * Transitions recapture the baseline so switching modes never
  * introduces drift. Thumbstick zoom is active in `idle` + `single`

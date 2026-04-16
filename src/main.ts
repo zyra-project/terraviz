@@ -225,7 +225,7 @@ class InteractiveSphere {
       // Enter VR button — feature-gated internally; hides itself on
       // non-WebXR browsers and warm-loads Three.js in the background
       // on devices that can enter VR.
-      void this.initVrButton()
+      void this.wireVrButton()
 
       const datasetId = this.getDatasetIdFromUrl()
       if (datasetId) {
@@ -1141,7 +1141,7 @@ class InteractiveSphere {
    * returns), so VR doesn't re-fetch or re-decode the bytes;
    * video datasets reuse the existing HLS `<video>` element.
    */
-  private async initVrButton(): Promise<void> {
+  private async wireVrButton(): Promise<void> {
     await initVrButton({
       getDatasetTexture: () => {
         const ds = this.appState.currentDataset

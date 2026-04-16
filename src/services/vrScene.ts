@@ -215,8 +215,6 @@ export interface VrSceneHandle {
   readonly scene: THREE.Scene
   /** The globe mesh — the caller uses its `rotation` and `scale` for input. */
   readonly globe: THREE.Mesh
-  /** World position the globe is anchored at (constant across session). */
-  readonly globeAnchor: THREE.Vector3
   /**
    * Swap the globe texture. Pass `null` to revert to the base Earth
    * texture; `{ kind: 'video' }` to stream from an HTMLVideoElement
@@ -869,7 +867,6 @@ export function createVrScene(
   return {
     scene,
     globe,
-    globeAnchor: globe.position.clone(),
 
     setTexture(spec, onReady) {
       // Skip texture-swap work if the spec is unchanged — repeated
