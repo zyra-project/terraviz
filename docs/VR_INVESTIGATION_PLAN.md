@@ -675,6 +675,177 @@ optional, so users without it gracefully fall back to controllers.
 
 ---
 
+## AR-native enhancements — beyond mode-agnostic features
+
+The phases above are mostly mode-agnostic — they work in VR and AR
+identically because they're just Three.js scene content. The features
+in this section are different: each one **does something AR does
+better than any other medium**, and several do something AR can do
+that 2D genuinely can't.
+
+Framing question: after the MVP + Phase 2.1 (spatial placement), the
+app is a "VR app that happens to support passthrough". This section
+is what turns it into "a killer AR app that takes advantage of the
+unique platform."
+
+### What makes AR uniquely powerful for SOS
+
+**1. The globe is a physical object in your space.**
+Spatial placement + persistence (Phase 2.1) gets us "globe on my
+kitchen table." What builds on top:
+
+| Enhancement | Status | Why it's killer |
+|---|---|---|
+| Spatial placement on a real surface | Planned (Phase 2.1) | The "this is real to me" moment |
+| Persistent anchors across sessions | Planned (Phase 2.1) | Same globe waiting for you tomorrow |
+| Walk around it | Free (once placed) | Physical perspective change is impossible in 2D |
+| **Scale flexibility — palm-sized to room-sized** | Partial (zoom only) | "Hold the Earth in your hand" → "stand inside a planetarium" — a uniquely AR/VR continuum |
+| Multi-globe in physical space | Planned (Phase 2.5) | Three spheres on your table, walk between them to compare |
+
+**2. The interaction is your body, not a UI.**
+
+| Enhancement | Status | Why it's killer |
+|---|---|---|
+| Hand tracking + bat physics | Planned (Phase 5) | "Throw" the globe to spin it — uniquely physical |
+| Voice docent (Orbit in VR) | Planned (Phase 5) | Ask out loud, get spatial response — like a museum guide |
+| **Touch-to-highlight regions** | Not planned | Literally point a finger at the Atlantic to learn about it |
+| **Two-handed time control** | Not planned | One hand grabs the globe, other hand "pulls" time forward |
+| **Reach-into-globe gestures** | Not planned | Pinch through the surface to peel back a data layer |
+
+**3. The output uses all the sensors.**
+
+| Enhancement | Status | Why it's killer |
+|---|---|---|
+| **Spatial audio narration** | Not planned | Hurricane wind from the storm's direction; docent voice from the HUD's position. Adds a sense. |
+| **Real-time data streaming** | Not planned | "Here's where Hurricane X IS, right now, on your table" |
+| **Capture / share** | Not planned | Record video of the globe in your room → social marketing for SOS itself |
+
+---
+
+### Killer features missing from the current plan
+
+Ranked by impact-per-effort for an AR-first product.
+
+#### 🥇 Spatial audio (~150 LOC)
+
+Three.js has `PositionalAudio` built in. Attach narration to the
+docent panel, weather sounds to the globe surface, ambient ocean
+sounds to the oceans-visible side of the sphere. Adds an entire
+perceptual dimension that 2D literally can't deliver.
+
+Phase 5 mentions Orbit voice output (`SpeechSynthesis`) but doesn't
+cover positional audio specifically. The enhancement: pipe the
+`SpeechSynthesis` output through `THREE.PositionalAudio` attached to
+the docent panel node. The voice comes from where the panel is,
+spatially. Same for dataset-specific ambient audio tracks.
+
+#### 🥇 Spatial annotations / bookmarks (~250 LOC)
+
+Plant virtual labels in space: "Hurricane Katrina, August 28 2005"
+floating above the Gulf, anchored persistently. Authoring (drop pins
+via raycast) + viewing (read the label) + persistence (save anchors
+per dataset, restored on next load). Educationally enormous for the
+museum mission — turns the globe from "thing I look at" into "thing I
+work with."
+
+Depends on Phase 2.1's anchor infrastructure; natural follow-on.
+
+#### 🥈 Capture / share (~100 LOC)
+
+The Quest browser's canvas supports `MediaRecorder` for video
+capture. "Look at the storm on my kitchen table" → 30-second clip
+→ posted to social. Free marketing for both the app and for NOAA
+SOS the program. Low effort, very on-brand.
+
+Implementation: hook `MediaRecorder` up to the renderer canvas's
+captureStream(), save the resulting WebM via a Blob URL, expose a
+"Share" HUD button that triggers a 15-30 s recording.
+
+#### 🥈 Real-time data streaming (~300 LOC + backend)
+
+Many SOS datasets are historical animations. But some — current
+weather, current storm position, current solar activity — could be
+near-real-time. Especially powerful in AR because the present-tense
+framing ("this is happening RIGHT NOW and it's on my table")
+intensifies the spatial presence.
+
+Needs a backend feed or a partnership with NOAA's real-time data
+services. Frontend work is small once the data pipe exists:
+the existing `VrDatasetTexture` image variant already handles
+arbitrary image sources.
+
+#### 🥉 Co-presence / multi-user AR (~600+ LOC, plus backend)
+
+**The biggest, hardest, most transformational enhancement.** Two
+people in the same physical room, both wearing Quests, both seeing
+the same globe at the same anchor position. They can point,
+discuss, interact together. Huge for classrooms, family museum
+visits, guided tours, research collaboration.
+
+Quest supports this via shared spatial anchors — either
+cloud-anchored (via Meta Spatial Anchors API) or locally-beamed
+between devices on the same network. Requires:
+
+- Shared anchor primitive (Meta's API, or a custom solution via
+  local networking + marker-based alignment).
+- State sync for globe rotation, zoom, dataset, playback position
+  — WebRTC data channel or websocket.
+- Participant presence (see the other person's controller or hand
+  avatars in your view).
+
+High effort, but the payoff is a whole new category of use case.
+Worth a dedicated phase eventually — probably after voice + hand
+tracking land, because those give us more natural collaboration
+primitives to sync.
+
+#### 🥉 Layered datasets (~400 LOC)
+
+Show two datasets simultaneously on the same globe (e.g. sea
+surface temperature with cloud cover overlay), each with its own
+opacity slider. Multi-globe (Phase 2.5) gives side-by-side; layered
+gives superimposed. AR's lean-in-to-inspect physicality rewards
+the information density.
+
+Requires:
+- Material multi-map support in `vrScene.ts` (two texture slots +
+  a fragment shader blending them).
+- Per-layer opacity controls in the HUD.
+- Per-layer time-scrubbing if the datasets have different temporal
+  ranges (they usually do).
+
+### Honorable mentions
+
+- **Active tours with spatial cues** — a tour saying "look at the
+  Atlantic" rotates the globe + fires a spatial audio chime from
+  that direction. Polish layer on Phase 3.5; minimal code delta.
+- **Touch-to-highlight via hand tracking** — point your finger at a
+  region, contextual info appears. Phase 5 + hand tracking enables
+  this naturally.
+- **Globe-as-planetarium ceiling** — when scaled large enough, the
+  atmosphere wraps around you. Stretch goal; big wow factor.
+
+---
+
+### The killer-app arc
+
+The minimum set of enhancements that make this **feel like a killer
+AR app** rather than a "VR app with passthrough":
+
+1. **Spatial placement + persistence** (Phase 2.1) — the "this is real to me" moment.
+2. **Spatial audio** — adds the dimension that makes virtual content feel embodied.
+3. **Voice docent + hand tracking** (Phase 5) — natural-modal interaction without needing controllers.
+4. **Annotations / bookmarks** — turns the globe from "thing I look at" into "thing I work with."
+
+Get those four right and the app stops being a neat tech demo and
+becomes an actual SOS exhibit you carry in your headset.
+
+Co-presence is a separate axis — social/educational rather than
+solo-immersive — and worth a dedicated phase eventually. But it's
+complex enough not to be on the critical path for "ship something
+amazing soon."
+
+---
+
 ## Open questions
 
 1. **Projection**: UV-reproject Mercator in-shader (adds pole
