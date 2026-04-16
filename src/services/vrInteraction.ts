@@ -188,6 +188,81 @@ function buildRayLine(THREE_: typeof THREE): THREE.Line {
   return line
 }
 
+/**
+ * Floating button-affordance label sprite that sits above the
+ * controller. Sprites always face the camera, so the text stays
+ * readable no matter how the user holds the controller.
+ *
+ * Phase 2.2 basic version: always-on labels for the three core
+ * inputs, hand-tuned for Quest Touch position. Future polish
+ * (fade-on-idle, mode-sensitive hints, per-controller-type
+ * positioning via XR Input Profiles) is planned — see
+ * VR_INVESTIGATION_PLAN.md.
+ */
+function buildControllerTooltip(THREE_: typeof THREE): THREE.Sprite {
+  const canvas = document.createElement('canvas')
+  canvas.width = 512
+  canvas.height = 256
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('[VR tooltip] 2D canvas context unavailable')
+
+  // Subtle translucent backplate — helps readability against both
+  // dark VR void and bright AR passthrough backgrounds without
+  // dominating the visual.
+  ctx.fillStyle = 'rgba(13, 13, 18, 0.55)'
+  // Rounded-rectangle shape for a polished look. Fall back to
+  // plain rect if the Path2D helper is unavailable.
+  if (typeof ctx.roundRect === 'function') {
+    ctx.beginPath()
+    ctx.roundRect(8, 8, 496, 240, 24)
+    ctx.fill()
+  } else {
+    ctx.fillRect(8, 8, 496, 240)
+  }
+
+  // Thin accent border
+  ctx.strokeStyle = 'rgba(77, 166, 255, 0.45)' // --color-accent
+  ctx.lineWidth = 2
+  if (typeof ctx.roundRect === 'function') {
+    ctx.beginPath()
+    ctx.roundRect(8, 8, 496, 240, 24)
+    ctx.stroke()
+  } else {
+    ctx.strokeRect(8, 8, 496, 240)
+  }
+
+  // Label lines — matching the three input affordances exposed by
+  // vrInteraction today.
+  ctx.fillStyle = '#e8eaf0' // --color-text
+  ctx.font = '500 38px system-ui, -apple-system, sans-serif'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText('Trigger: rotate', 256, 58)
+  ctx.fillText('Grip: exit', 256, 128)
+  ctx.fillText('Thumbstick: zoom', 256, 198)
+
+  const texture = new THREE_.CanvasTexture(canvas)
+  texture.colorSpace = THREE_.SRGBColorSpace
+  texture.minFilter = THREE_.LinearFilter
+  texture.magFilter = THREE_.LinearFilter
+
+  const material = new THREE_.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+  })
+  const sprite = new THREE_.Sprite(material)
+  // 14 cm wide × 7 cm tall (matches 2:1 canvas aspect). Large enough
+  // to read comfortably, small enough to not dominate peripheral view.
+  sprite.scale.set(0.14, 0.07, 1)
+  // 13 cm above the grip — safely clear of the controller body but
+  // still close enough to feel attached.
+  sprite.position.set(0, 0.13, 0)
+  sprite.renderOrder = 12 // above the ray dot (11)
+  return sprite
+}
+
 export function createVrInteraction(
   THREE_: typeof THREE,
   ControllerModelFactory: typeof XRControllerModelFactory,
@@ -457,6 +532,9 @@ export function createVrInteraction(
   // attach the visual model to.
   const grips: THREE.XRGripSpace[] = []
   const dots: THREE.Mesh[] = []
+  // Button-affordance tooltip sprites attached to each grip — tracked
+  // separately so we can dispose their canvases and materials.
+  const tooltips: THREE.Sprite[] = []
 
   for (const i of [0, 1] as const) {
     const controller = ctx.renderer.xr.getController(i) as THREE.XRTargetRaySpace
@@ -474,6 +552,13 @@ export function createVrInteraction(
     grip.add(modelFactory.createControllerModel(grip))
     ctx.scene.add(grip)
     grips.push(grip)
+
+    // Button-affordance tooltip floating above each controller.
+    // Shown on BOTH controllers for symmetry — either hand provides
+    // the same hint regardless of dominance.
+    const tooltip = buildControllerTooltip(THREE_)
+    grip.add(tooltip)
+    tooltips.push(tooltip)
 
     // Intersection dot — small white sphere positioned at the
     // raycast hit point each frame. Hidden when the ray misses.
@@ -758,6 +843,11 @@ export function createVrInteraction(
         // controller-model child + releases its glTF resources via
         // Three.js' standard scene-graph disposal.
         ctx.scene.remove(grips[i])
+      }
+      for (const sprite of tooltips) {
+        const mat = sprite.material as THREE.SpriteMaterial
+        mat.map?.dispose()
+        mat.dispose()
       }
       for (let i = 0; i < dots.length; i++) {
         const dot = dots[i]
