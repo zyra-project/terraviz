@@ -489,6 +489,16 @@ export function createVrScene(
   // spin with it — clouds are conceptually part of Earth, unlike
   // the atmosphere which stays fixed relative to the sun).
   let cloudMesh: THREE.Mesh | null = null
+  /**
+   * Desired cloud visibility — set by setTexture based on whether a
+   * dataset is loaded. Tracked separately from cloudMesh.visible
+   * because the cloud mesh is created asynchronously (after the
+   * cloud texture loads) and setTexture can run before it exists;
+   * the async loader applies this flag to the mesh on creation so
+   * the "dataset loaded before clouds finished fetching" path
+   * doesn't leave clouds inappropriately visible.
+   */
+  let cloudsShouldBeVisible = true
   ;(async () => {
     try {
       const img = await loadImage(getCloudTextureUrl())
@@ -563,6 +573,10 @@ export function createVrScene(
       }
 
       cloudMesh = new THREE_.Mesh(cloudGeometry, cloudMaterial)
+      // Apply the current desired visibility — a dataset may have
+      // been loaded while this async fetch was in flight, in which
+      // case the mesh needs to start hidden.
+      cloudMesh.visible = cloudsShouldBeVisible
       // Child of the globe — inherits position, scale, AND rotation.
       // Rotation inheritance is intentional: clouds move with Earth's
       // surface rotation.
@@ -749,12 +763,20 @@ export function createVrScene(
       }
 
       if (!spec) {
-        // Restore the base Earth — diffuse if CDN loaded, specular
-        // fallback otherwise — AND the night-lights emissive so the
-        // day/night shader becomes visible again.
+        // Restore the full photoreal Earth stack — diffuse if CDN
+        // loaded, specular fallback otherwise; night-lights emissive
+        // gated by the day/night shader; clouds + atmosphere rim.
+        // Anything the user sees while no dataset is loaded is
+        // "Earth as a planet". Dataset-loaded branches below hide
+        // these layers so scientific visualisations aren't
+        // obscured.
         material.map = baseDiffuseTexture ?? baseEarthTexture
         material.emissiveMap = lightsTexture
         material.emissive.setHex(0xffffff)
+        cloudsShouldBeVisible = true
+        if (cloudMesh) cloudMesh.visible = true
+        atmosphereInner.visible = true
+        atmosphereOuter.visible = true
         activeKey = null
         // No dataset to wait for — readiness is immediate.
         onReady?.()
@@ -762,11 +784,20 @@ export function createVrScene(
         const video = spec.element
         activeKey = video
 
-        // Dataset textures cover the entire globe uniformly, so
-        // hide the night-lights emissive — otherwise they'd bleed
-        // ADDITIVELY on top of the dataset's dark regions.
+        // Dataset loaded — hide Earth-specific decoration so the
+        // data isn't obscured:
+        //   - Night-lights emissive (would bleed additively onto
+        //     the dataset's dark regions).
+        //   - Cloud overlay (covers surface features the dataset
+        //     is trying to show).
+        //   - Atmosphere rim glow + sunset terminator (distracting
+        //     around scientific-viz colours).
         material.emissiveMap = null
         material.emissive.setHex(0x000000)
+        cloudsShouldBeVisible = false
+        if (cloudMesh) cloudMesh.visible = false
+        atmosphereInner.visible = false
+        atmosphereOuter.visible = false
 
         // Force the decoder to produce a frame at the current
         // position. Without this, paused HLS streams may have no
@@ -810,10 +841,15 @@ export function createVrScene(
         tex.magFilter = THREE_.LinearFilter
         tex.needsUpdate = true
         activeDatasetTexture = tex
-        // Dataset covers the globe uniformly — disable day/night
-        // emissive gating (same rationale as the video branch).
+        // Hide the full Earth-specific decoration stack when a
+        // dataset takes over the surface — same rationale as the
+        // video branch. Keep the docstring there as the reference.
         material.emissiveMap = null
         material.emissive.setHex(0x000000)
+        cloudsShouldBeVisible = false
+        if (cloudMesh) cloudMesh.visible = false
+        atmosphereInner.visible = false
+        atmosphereOuter.visible = false
         material.map = tex
         activeKey = spec.element
         onReady?.()
