@@ -764,15 +764,17 @@ export function createVrScene(
 
       if (!spec) {
         // Restore the full photoreal Earth stack — diffuse if CDN
-        // loaded, specular fallback otherwise; night-lights emissive
-        // gated by the day/night shader; clouds + atmosphere rim.
-        // Anything the user sees while no dataset is loaded is
-        // "Earth as a planet". Dataset-loaded branches below hide
-        // these layers so scientific visualisations aren't
-        // obscured.
+        // loaded, specular fallback otherwise; specular ocean glint;
+        // night-lights emissive gated by the day/night shader;
+        // clouds + atmosphere rim. Anything the user sees while no
+        // dataset is loaded is "Earth as a planet". Dataset-loaded
+        // branches below hide these layers so scientific
+        // visualisations aren't obscured.
         material.map = baseDiffuseTexture ?? baseEarthTexture
         material.emissiveMap = lightsTexture
         material.emissive.setHex(0xffffff)
+        material.specularMap = specularMapTexture
+        material.specular.setHex(0xaaaaaa)
         cloudsShouldBeVisible = true
         if (cloudMesh) cloudMesh.visible = true
         atmosphereInner.visible = true
@@ -788,12 +790,17 @@ export function createVrScene(
         // data isn't obscured:
         //   - Night-lights emissive (would bleed additively onto
         //     the dataset's dark regions).
+        //   - Specular ocean glint (would add bright highlights
+        //     only over ocean areas of the dataset, creating
+        //     uneven lighting that looks like an artifact).
         //   - Cloud overlay (covers surface features the dataset
         //     is trying to show).
         //   - Atmosphere rim glow + sunset terminator (distracting
         //     around scientific-viz colours).
         material.emissiveMap = null
         material.emissive.setHex(0x000000)
+        material.specularMap = null
+        material.specular.setHex(0x000000)
         cloudsShouldBeVisible = false
         if (cloudMesh) cloudMesh.visible = false
         atmosphereInner.visible = false
@@ -846,6 +853,8 @@ export function createVrScene(
         // video branch. Keep the docstring there as the reference.
         material.emissiveMap = null
         material.emissive.setHex(0x000000)
+        material.specularMap = null
+        material.specular.setHex(0x000000)
         cloudsShouldBeVisible = false
         if (cloudMesh) cloudMesh.visible = false
         atmosphereInner.visible = false
