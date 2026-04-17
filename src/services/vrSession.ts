@@ -36,19 +36,46 @@ import { logger } from '../utils/logger'
  */
 export interface VrSessionContext {
   /**
-   * The currently-loaded dataset's surface texture, in whichever
-   * form the 2D app has it: video element for HLS streams, URL for
-   * static image datasets, or null when nothing is loaded.
+   * The currently-loaded dataset's surface texture for the PRIMARY
+   * panel. Backward-compatible convenience that equals
+   * `getPanelTexture(getPrimaryIndex())`. Kept for single-globe
+   * callers that don't care about the multi-panel model.
    */
   getDatasetTexture(): VrDatasetTexture | null
-  /** Dataset title for the HUD; null/empty → "No dataset loaded". */
+  /** Dataset title for the HUD (primary panel). null/empty → "No dataset loaded". */
   getDatasetTitle(): string | null
-  /** True iff a video dataset is loaded — drives the HUD play/pause button visibility. */
+  /** True iff a video dataset is loaded on the primary — drives the HUD play/pause button visibility. */
   hasVideoDataset(): boolean
-  /** Drives the HUD play/pause icon. No-op for image datasets. */
+  /** Drives the HUD play/pause icon. Reflects the primary panel's state. */
   isPlaying(): boolean
-  /** Called when the user taps play/pause in VR. No-op for image datasets. */
+  /** Called when the user taps play/pause in VR. Toggles the primary's video. */
   togglePlayPause(): void
+
+  // --- Phase 2.5 multi-panel getters ---
+  //
+  // These let vrSession mirror the 2D app's viewport manager
+  // inside VR. When the 2D app is in 2-globe layout, `getPanelCount`
+  // returns 2, each panel has its own texture / title, and one
+  // slot is designated primary (drives the HUD + playback
+  // transport). Hitting a non-primary globe in VR promotes its
+  // slot via `promotePanel` (Phase 2.5 commit 5).
+
+  /** Current number of globe panels (1/2/4). Sourced from the 2D viewport manager. */
+  getPanelCount(): number
+  /** Which slot is currently primary — drives the HUD + singular playback transport. */
+  getPrimaryIndex(): number
+  /** Dataset texture for a specific slot, or null if no dataset loaded in that slot. */
+  getPanelTexture(slot: number): VrDatasetTexture | null
+  /** Dataset title for a specific slot, for per-panel labels; null if no dataset. */
+  getPanelTitle(slot: number): string | null
+  /**
+   * Promote a slot to primary. Called by vrInteraction when the
+   * user taps a non-primary globe. The 2D app's viewportManager
+   * owns the primary-index state; this callback forwards the
+   * change so both sides stay in sync.
+   */
+  promotePanel(slot: number): void
+
   /** Optional — fired after the session ends + resources are torn down. */
   onSessionEnd?: () => void
 }
