@@ -447,6 +447,29 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
   const interaction = createVrInteraction(THREE_, XRControllerModelFactory, {
     scene: scene.scene,
     globe: scene.globe,
+    // Scene slot 0 holds the 2D primary; slots 1..N hold non-primaries
+    // in 2D order, skipping the primary index. Mirror that mapping
+    // when reporting slot indices back to vrInteraction so the
+    // promote callback carries a 2D-space slot number.
+    getAllGlobes: () => scene.allGlobes,
+    getGlobeSlot: (mesh) => {
+      const globes = scene.allGlobes
+      const sceneSlot = globes.indexOf(mesh)
+      if (sceneSlot < 0) return -1
+      const primary = ctx.getPrimaryIndex()
+      if (sceneSlot === 0) return primary
+      // Secondary scene slots 1..N → non-primary panels in 2D order,
+      // skipping the primary. Same mapping as syncSecondaryTextures.
+      const panelCount = ctx.getPanelCount()
+      let walk = 0
+      for (let panelSlot = 0; panelSlot < panelCount; panelSlot++) {
+        if (panelSlot === primary) continue
+        walk++
+        if (walk === sceneSlot) return panelSlot
+      }
+      return -1
+    },
+    getPrimaryIndex: () => ctx.getPrimaryIndex(),
     hud,
     placement,
     renderer,
@@ -514,6 +537,14 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
       void session.end().catch(err =>
         logger.warn('[VR] session.end() from grip failed:', err),
       )
+    },
+    onPromotePanel: (slot) => {
+      // Forward to the hosting app's viewport manager — that's the
+      // source of truth for primary-slot state. Next frame, the
+      // render loop's setPanelCount + syncSecondaryTextures poll
+      // picks up the new primary-index and remaps scene slot 0 to
+      // the newly-promoted panel.
+      ctx.promotePanel(slot)
     },
   })
 

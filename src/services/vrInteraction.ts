@@ -91,7 +91,24 @@ const RAY_LENGTH = 5
 
 export interface VrInteractionContext {
   scene: THREE.Scene
+  /** Primary globe — scene slot 0. Drives rotation + surface-pinned raycast. */
   globe: THREE.Mesh
+  /**
+   * Every globe in the current layout (primary + secondaries). Used by
+   * the raycaster to detect taps on non-primary globes so they can be
+   * promoted. For a 1-globe session this is just `[globe]`. Function
+   * (not a snapshot) so panel-count changes mid-session are reflected
+   * without re-creating the interaction handle.
+   */
+  getAllGlobes: () => THREE.Mesh[]
+  /**
+   * Map a globe mesh back to its 2D-app panel slot index. Returns -1 if
+   * the mesh isn't one of the current globes. Used when the user taps
+   * a non-primary globe to know which slot to promote.
+   */
+  getGlobeSlot: (mesh: THREE.Mesh) => number
+  /** Which slot is currently primary — drives rotation vs. promote decision on tap. */
+  getPrimaryIndex: () => number
   hud: VrHudHandle
   /** AR-only spatial placement. Null in VR mode or when hit-test isn't available. */
   placement: VrPlacementHandle | null
@@ -104,6 +121,13 @@ export interface VrInteractionContext {
   onPlaceConfirm: () => void
   /** Fired when the user squeezes the grip — caller ends the session. */
   onExit: () => void
+  /**
+   * Fired when the user pulls trigger on a non-primary globe. Caller
+   * (main.ts) forwards this to `viewports.setPrimaryIndex(slot)` so
+   * both 2D and VR stay in sync. Never fires for the primary globe —
+   * that always initiates a grab-rotate.
+   */
+  onPromotePanel: (slot: number) => void
 }
 
 export interface VrInteractionHandle {
@@ -318,6 +342,14 @@ export function createVrInteraction(
   const hudArmed: (VrHudAction | null)[] = [null, null]
   /** Per-controller "trigger pressed on the Place button" flag (DOM click semantics). */
   const placeArmed: boolean[] = [false, false]
+  /**
+   * Per-controller slot index of the secondary globe that was pressed
+   * on selectstart — null if no secondary was tapped. Promote fires on
+   * selectend only if the user is still pointing at the same slot,
+   * matching the DOM click contract and letting the user cancel by
+   * sliding off before release.
+   */
+  const secondaryGlobeArmed: (number | null)[] = [null, null]
   /** Current rotation mode — recomputed on every trigger state change. */
   let rotationMode: RotationMode = { kind: 'idle' }
 
@@ -363,11 +395,16 @@ export function createVrInteraction(
    * Resolve what the controller is pointing at. Order matters: the
    * HUD is drawn on top of the globe (renderOrder + depthTest:false)
    * so from the user's visual perspective it should always win ties.
+   *
+   * Globe hits distinguish primary vs. secondary:
+   * - `primary-globe` → initiates grab-rotate
+   * - `secondary-globe` → promotes that slot to primary
    */
   function pickHit(controller: THREE.XRTargetRaySpace):
     | { kind: 'hud'; action: VrHudAction }
     | { kind: 'place-button' }
-    | { kind: 'globe' }
+    | { kind: 'primary-globe' }
+    | { kind: 'secondary-globe'; slot: number }
     | null {
     setRaycasterFromController(controller)
 
@@ -392,9 +429,21 @@ export function createVrInteraction(
       }
     }
 
-    const globeHits = raycaster.intersectObject(ctx.globe, false)
+    // Raycast against every globe in the layout so secondary globes
+    // can be tapped too. `intersectObjects` sorts by distance, so the
+    // nearest-hit globe is always first — this naturally handles the
+    // case where two globes overlap from a given angle.
+    const allGlobes = ctx.getAllGlobes()
+    const globeHits = raycaster.intersectObjects(allGlobes, false)
     if (globeHits.length > 0) {
-      return { kind: 'globe' }
+      const hitMesh = globeHits[0].object as THREE.Mesh
+      const slot = ctx.getGlobeSlot(hitMesh)
+      // Primary-globe hit → rotate. Unknown slot (shouldn't happen)
+      // treated as primary for safety.
+      if (slot < 0 || slot === ctx.getPrimaryIndex()) {
+        return { kind: 'primary-globe' }
+      }
+      return { kind: 'secondary-globe', slot }
     }
 
     return null
@@ -587,9 +636,17 @@ export function createVrInteraction(
       return
     }
 
-    // Globe hit — flip this trigger's rotation bit and let the
-    // reevaluator pick the right mode (single or two-hand based on
-    // the other trigger's state).
+    if (hit.kind === 'secondary-globe') {
+      // Non-primary globe tap — arm for promote on release (DOM
+      // click semantics). No rotation happens on a secondary globe
+      // until it becomes primary, so triggersOnGlobe stays false.
+      secondaryGlobeArmed[index] = hit.slot
+      return
+    }
+
+    // Primary-globe hit — flip this trigger's rotation bit and let
+    // the reevaluator pick the right mode (single or two-hand based
+    // on the other trigger's state).
     triggersOnGlobe[index] = true
     reevaluateRotationMode()
   }
@@ -615,6 +672,18 @@ export function createVrInteraction(
         ctx.onPlaceButton()
       }
       placeArmed[index] = false
+    }
+    // Promote-to-primary: fires only if the user is still pointing
+    // at the same secondary globe they pressed on. Sliding off (onto
+    // a different globe, the HUD, or empty space) cancels the tap.
+    const armedSlot = secondaryGlobeArmed[index]
+    if (armedSlot !== null) {
+      const controller = controllers[index]
+      const hit = pickHit(controller)
+      if (hit?.kind === 'secondary-globe' && hit.slot === armedSlot) {
+        ctx.onPromotePanel(armedSlot)
+      }
+      secondaryGlobeArmed[index] = null
     }
     if (triggersOnGlobe[index]) {
       triggersOnGlobe[index] = false
@@ -863,8 +932,9 @@ export function createVrInteraction(
   function updateRayVisuals(): void {
     // Build the target list once per frame — includes the Place
     // button only when it's visible (avoids spurious hits on an
-    // offscreen / unavailable button).
-    const targets: THREE.Object3D[] = [ctx.globe, ctx.hud.mesh]
+    // offscreen / unavailable button). Also includes every globe
+    // in the layout so the laser dot snaps to secondary globes too.
+    const targets: THREE.Object3D[] = [...ctx.getAllGlobes(), ctx.hud.mesh]
     if (ctx.placement && ctx.placement.placeButtonMesh.visible) {
       targets.push(ctx.placement.placeButtonMesh)
     }
