@@ -291,6 +291,14 @@ export function createVrScene(
   sunLight.position.set(2, 1.5, 1)
   scene.add(sunLight)
 
+  // When a dataset is loaded, the globe must be uniformly lit so the
+  // scientific-viz colours read correctly across the entire sphere.
+  // We add a second ambient at intensity 0 and toggle between
+  // "planet mode" (sunLight on, datasetAmbient off) and "dataset
+  // mode" (sunLight off, datasetAmbient on) in setTexture.
+  const datasetAmbient = new THREE_.AmbientLight(0xffffff, 0)
+  scene.add(datasetAmbient)
+
   // Shader-uniform handle for the sun direction. Shared between the
   // Earth material's `onBeforeCompile` patch and the per-frame
   // `update()` which writes the current subsolar direction.
@@ -1172,6 +1180,10 @@ export function createVrScene(
         if (cloudMesh) cloudMesh.visible = true
         atmosphereInner.visible = true
         atmosphereOuter.visible = true
+        // Planet mode: directional sun for hemisphere lighting +
+        // base ambient for shadow fill.
+        sunLight.intensity = 1.8
+        datasetAmbient.intensity = 0
         activeKey = null
         // No dataset to wait for — readiness is immediate.
         onReady?.()
@@ -1198,6 +1210,10 @@ export function createVrScene(
         if (cloudMesh) cloudMesh.visible = false
         atmosphereInner.visible = false
         atmosphereOuter.visible = false
+        // Dataset mode: kill directional sun so both hemispheres
+        // are uniformly lit; boost ambient so data reads evenly.
+        sunLight.intensity = 0
+        datasetAmbient.intensity = 1.6
 
         // Force the decoder to produce a frame at the current
         // position. Without this, paused HLS streams may have no
@@ -1262,6 +1278,8 @@ export function createVrScene(
         if (cloudMesh) cloudMesh.visible = false
         atmosphereInner.visible = false
         atmosphereOuter.visible = false
+        sunLight.intensity = 0
+        datasetAmbient.intensity = 1.6
         material.map = tex
         activeKey = spec.element
         onReady?.()

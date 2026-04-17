@@ -140,7 +140,9 @@ function syncSecondaryTextures(
   let sceneSlot = 1
   for (let panelSlot = 0; panelSlot < panelCount; panelSlot++) {
     if (panelSlot === primary) continue
-    scene.setSlotTexture(sceneSlot, ctx.getPanelTexture(panelSlot))
+    const tex = ctx.getPanelTexture(panelSlot)
+    logger.debug(`[VR] syncSecondary: panel ${panelSlot} → scene slot ${sceneSlot}, tex=${tex?.kind ?? 'null'}`)
+    scene.setSlotTexture(sceneSlot, tex)
     sceneSlot++
   }
 }
@@ -401,9 +403,13 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
   // commit 5 promotes it — the 2D app's primary-index shifts, and
   // next frame the scene's slot 0 reflects the new primary.
   const initialPanelCount = ctx.getPanelCount()
+  logger.info(`[VR] Panel count from 2D app: ${initialPanelCount}, primary: ${ctx.getPrimaryIndex()}`)
   scene.setPanelCount(initialPanelCount)
+  logger.info(`[VR] allGlobes after setPanelCount: ${scene.allGlobes.length}`)
   syncSecondaryTextures(scene, ctx, initialPanelCount)
-  scene.setTexture(ctx.getDatasetTexture(), () => {
+  const primaryTex = ctx.getDatasetTexture()
+  logger.info(`[VR] Primary texture kind: ${primaryTex?.kind ?? 'null'}`)
+  scene.setTexture(primaryTex, () => {
     // Idempotent — a follow-up texture swap could re-fire this;
     // we only want to drive the fade once per session.
     if (loadingFinalized) return
