@@ -59,6 +59,11 @@ export function initChatUI(cb: ChatCallbacks): void {
   restoreSession()
   wireEvents()
   renderMessages()
+  // Apply the persisted debug-prompt setting now, at boot — not just
+  // when the settings panel is first opened. Otherwise the checkbox
+  // shows as on but the log level stays at the bundle default until
+  // the user toggles the box.
+  setLogLevel(loadConfig().debugPrompt ? 'debug' : null)
   // Collapse trigger to icon-only if user has opened chat before
   if (localStorage.getItem(CHAT_OPENED_KEY)) {
     document.getElementById('chat-trigger')?.classList.add('collapsed')
