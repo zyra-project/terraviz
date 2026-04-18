@@ -82,6 +82,7 @@ function makeCallbacks(overrides: Partial<TourCallbacks> = {}): TourCallbacks {
     setEnvView: vi.fn(() => Promise.resolve()),
     getRenderer: vi.fn(() => renderer),
     getAllRenderers: vi.fn(() => fourRenderers),
+    getPrimarySlot: vi.fn(() => 0),
     togglePlayPause: vi.fn(),
     isPlaying: vi.fn(() => false),
     setPlaybackRate: vi.fn(),
@@ -622,14 +623,28 @@ describe('TourEngine', () => {
       expect(cb.loadDataset).toHaveBeenCalledWith('ID_B', { slot: 1 })
     })
 
-    it('defaults to slot 0 when worldIndex is omitted', async () => {
-      const cb = makeCallbacks()
+    it('defaults to the current primary slot when worldIndex is omitted', async () => {
+      // Simulate the runTourOnLoad case: the user promoted panel 2
+      // and loaded a dataset whose runTourOnLoad chains back into
+      // a tour. The chained loadDataset must stay on the promoted
+      // panel, not silently clobber slot 0.
+      const cb = makeCallbacks({ getPrimarySlot: vi.fn(() => 1) })
       const engine = new TourEngine(makeTour([
         { loadDataset: { id: 'ID_C' } },
       ]), cb)
       await engine.play()
 
-      expect(cb.loadDataset).toHaveBeenCalledWith('ID_C', { slot: 0 })
+      expect(cb.loadDataset).toHaveBeenCalledWith('ID_C', { slot: 1 })
+    })
+
+    it('still defaults to slot 0 when primary is slot 0', async () => {
+      const cb = makeCallbacks({ getPrimarySlot: vi.fn(() => 0) })
+      const engine = new TourEngine(makeTour([
+        { loadDataset: { id: 'ID_C2' } },
+      ]), cb)
+      await engine.play()
+
+      expect(cb.loadDataset).toHaveBeenCalledWith('ID_C2', { slot: 0 })
     })
 
     it('clamps negative or zero worldIndex to slot 0', async () => {

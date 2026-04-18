@@ -576,15 +576,24 @@ export class TourEngine {
 
   private async execLoadDataset(params: LoadDatasetTaskParams): Promise<void> {
     // Resolve worldIndex (1-indexed from the tour JSON) to a 0-indexed
-    // slot. Omitted/zero/negative values default to slot 0. Out-of-
-    // range values are clamped to the last active panel so the load
-    // doesn't silently no-op when a tour specifies worldIndex before
-    // the matching setEnvView expands the layout.
-    const raw = typeof params.worldIndex === 'number' ? params.worldIndex : 1
+    // slot. When omitted, target the current primary panel — this
+    // matches the TourCallbacks contract and, critically, keeps a
+    // `runTourOnLoad` chained load on the panel the user just loaded
+    // into. Previously this defaulted to slot 0 unconditionally,
+    // which meant promoting panel 2 and loading a `runTourOnLoad`
+    // dataset re-wrote panel 1 over the top of whatever was there.
+    // Out-of-range explicit values are clamped to the last active
+    // panel so the load doesn't silently no-op when a tour specifies
+    // worldIndex before the matching setEnvView expands the layout.
     const panelCount = this.callbacks.getAllRenderers().length || 1
-    const slot = Math.max(0, Math.min(panelCount - 1, Math.round(raw) - 1))
-    if (Math.round(raw) - 1 >= panelCount) {
-      logger.warn(`[Tour] loadDataset: worldIndex ${raw} exceeds panel count ${panelCount}, clamped to slot ${slot}`)
+    let slot: number
+    if (typeof params.worldIndex === 'number') {
+      slot = Math.max(0, Math.min(panelCount - 1, Math.round(params.worldIndex) - 1))
+      if (Math.round(params.worldIndex) - 1 >= panelCount) {
+        logger.warn(`[Tour] loadDataset: worldIndex ${params.worldIndex} exceeds panel count ${panelCount}, clamped to slot ${slot}`)
+      }
+    } else {
+      slot = Math.max(0, Math.min(panelCount - 1, this.callbacks.getPrimarySlot()))
     }
 
     await this.callbacks.loadDataset(params.id, { slot })

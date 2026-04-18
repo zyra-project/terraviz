@@ -643,6 +643,7 @@ class InteractiveSphere {
       },
       getRenderer: () => this.renderer!,
       getAllRenderers: () => this.viewports.getAll(),
+      getPrimarySlot: () => this.viewports.getPrimaryIndex(),
       togglePlayPause: () => {
         togglePlayPause(this.hlsService, this.appState, (m) => this.announce(m))
       },

@@ -524,6 +524,15 @@ export interface TourCallbacks {
    * to fan out across all panels, not just the primary.
    */
   getAllRenderers(): GlobeRenderer[]
+  /**
+   * Return the 0-indexed slot that currently owns playback + the
+   * singular UI. Used by `execLoadDataset` so tours that omit
+   * `worldIndex` honor the user's current promoted panel instead
+   * of always clobbering slot 0 — the bug that caused a
+   * `runTourOnLoad` chained load to overwrite panel 1's dataset
+   * after the user had promoted panel 2.
+   */
+  getPrimarySlot(): number
   togglePlayPause(): void
   isPlaying(): boolean
   setPlaybackRate(rate: number): void
