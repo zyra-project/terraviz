@@ -919,19 +919,11 @@ export function createVrInteraction(
    * at buttons feels broken. Run after rotation updates so the dot
    * reflects the current globe orientation.
    */
-  let rayVisualLogOnce = false
   function updateRayVisuals(): void {
     // Build the target list once per frame — includes the Place
     // button only when it's visible (avoids spurious hits on an
     // offscreen / unavailable button). Also includes every globe
     // in the layout so the laser dot snaps to secondary globes too.
-    if (!rayVisualLogOnce) {
-      rayVisualLogOnce = true
-      const allGlobes = ctx.getAllGlobes()
-      logger.info(`[VR] updateRayVisuals first run: ${allGlobes.length} globes, ` +
-        `controller0 pos=(${controllers[0]?.position.x.toFixed(2)},${controllers[0]?.position.y.toFixed(2)},${controllers[0]?.position.z.toFixed(2)}), ` +
-        `controllers in scene: ${controllers.map(c => c.parent != null).join(',')}`)
-    }
     const targets: THREE.Object3D[] = [...ctx.getAllGlobes(), ctx.hud.mesh]
     if (ctx.placement && ctx.placement.placeButtonMesh.visible) {
       targets.push(ctx.placement.placeButtonMesh)
