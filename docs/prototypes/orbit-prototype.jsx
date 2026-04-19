@@ -220,6 +220,7 @@ const mountRef = useRef(null)
 const [stateKey, setStateKey] = useState(‘IDLE’)
 const [paletteKey, setPaletteKey] = useState(‘cyan’)
 const [presetKey, setPresetKey] = useState(‘close’)
+const [eyeMode, setEyeMode] = useState(‘one’) // ‘one’ | ‘two’ — A/B design test
 const [bodyRadius, setBodyRadius] = useState(0.075)
 const [orbitRadius, setOrbitRadius] = useState(0.14)
 const [flightMode, setFlightMode] = useState(‘rest’) // rest | out | atEarth | back
@@ -235,6 +236,7 @@ const [blinkTriggerCount, setBlinkTriggerCount] = useState(0)
 const stateRef           = useRef(stateKey)
 const paletteRef         = useRef(paletteKey)
 const presetKeyRef       = useRef(presetKey)
+const eyeModeRef         = useRef(eyeMode)
 const bodyRadiusRef      = useRef(bodyRadius)
 const orbitRadiusRef     = useRef(orbitRadius)
 const upperLidRef        = useRef(upperLid)
@@ -263,6 +265,7 @@ const [gestureVersion, setGestureVersion] = useState(0) // for UI disabling
 useEffect(() => { stateRef.current = stateKey },                      [stateKey])
 useEffect(() => { paletteRef.current = paletteKey },                  [paletteKey])
 useEffect(() => { presetKeyRef.current = presetKey },                 [presetKey])
+useEffect(() => { eyeModeRef.current = eyeMode },                     [eyeMode])
 useEffect(() => { bodyRadiusRef.current = bodyRadius },               [bodyRadius])
 useEffect(() => { orbitRadiusRef.current = orbitRadius },             [orbitRadius])
 useEffect(() => { upperLidRef.current = upperLid },                   [upperLid])
@@ -562,6 +565,45 @@ const pupil = new THREE.Mesh(new THREE.CircleGeometry(0.008, 48), pupilMat)
 pupil.position.z = bodyRadius + 0.0006
 eyeGroup.add(pupil)
 
+// ---- Two-eye configuration (pair, ~28mm each) ----------------------
+// More mammalian, enables vergence. Each eye has its own Group offset
+// horizontally from head center so gaze rotation happens around each
+// eye's own pivot (not around head center like the single eye).
+// Sizing: disc radius 14mm, centers 22mm off-axis. Keeps 16mm gap
+// between inner edges so they don't fight for pixels.
+const TWO_EYE_OFFSET = 0.022
+const makeSubEye = (xOffset) => {
+  const g = new THREE.Group()
+  g.position.set(xOffset, 0, 0)
+  head.add(g)
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(0.014, 48), eyeFieldMaterial)
+  disc.position.z = bodyRadius + 0.0003
+  g.add(disc)
+  const glow = new THREE.Mesh(new THREE.CircleGeometry(0.0065, 32), pupilGlowMat)
+  glow.position.z = bodyRadius + 0.0005
+  g.add(glow)
+  const pp = new THREE.Mesh(new THREE.CircleGeometry(0.0040, 32), pupilMat)
+  pp.position.z = bodyRadius + 0.0006
+  g.add(pp)
+  return { group: g, disc, glow, pupil: pp }
+}
+const eyeLeft  = makeSubEye(-TWO_EYE_OFFSET)
+const eyeRight = makeSubEye( TWO_EYE_OFFSET)
+
+// Array of all eye components for unified per-frame updates.
+// jitterScale compensates for the smaller pair — same pupilJitter input
+// looks right on both configurations.
+const allEyes = [
+  { group: eyeGroup,       disc: eyeDisc,       glow: pupilGlow,     pupil,                 jitterScale: 1.0  },
+  { group: eyeLeft.group,  disc: eyeLeft.disc,  glow: eyeLeft.glow,  pupil: eyeLeft.pupil,  jitterScale: 0.47 },
+  { group: eyeRight.group, disc: eyeRight.disc, glow: eyeRight.glow, pupil: eyeRight.pupil, jitterScale: 0.47 },
+]
+
+// Initial visibility (re-set every frame from eyeModeRef)
+eyeGroup.visible = (eyeMode === 'one')
+eyeLeft.group.visible  = (eyeMode === 'two')
+eyeRight.group.visible = (eyeMode === 'two')
+
 // ---- Sub-spheres ------------------------------------------------------
 const subMats = []
 const subSpheres = []
@@ -727,9 +769,11 @@ const animate = () => {
     body.geometry.dispose()
     body.geometry = new THREE.IcosahedronGeometry(bodyRadiusRef.current, 4)
     const br = bodyRadiusRef.current
-    eyeDisc.position.z = br + 0.0003
-    pupilGlow.position.z = br + 0.0005
-    pupil.position.z = br + 0.0006
+    allEyes.forEach((e) => {
+      e.disc.position.z  = br + 0.0003
+      e.glow.position.z  = br + 0.0005
+      e.pupil.position.z = br + 0.0006
+    })
   }
   bodyUniforms.uTime.value = time
   earthMat.uniforms.uTime.value = time
@@ -811,8 +855,10 @@ const animate = () => {
   // ---- Pupil pulse (TALKING) + size ---------------------------------
   const pulseMul = s.pupilPulse ? (Math.sin(time * 9.0) * 0.25 + 1.0) : 1.0
   const finalPupilBright = pupilBrightnessRef.current * pulseMul
-  pupil.scale.setScalar(lerp(pupil.scale.x, pupilSizeRef.current, 0.15))
-  pupilGlow.scale.setScalar(pupil.scale.x * 1.12)
+  allEyes.forEach((e) => {
+    e.pupil.scale.setScalar(lerp(e.pupil.scale.x, pupilSizeRef.current, 0.15))
+    e.glow.scale.setScalar(e.pupil.scale.x * 1.12)
+  })
 
   // ---- Blinks -------------------------------------------------------
   if (blinkTriggerRef.current !== lastBlinkTrigger) {
@@ -918,8 +964,21 @@ const animate = () => {
   }
   current.eyeYaw = lerp(current.eyeYaw, tYaw, 0.08)
   current.eyePitch = lerp(current.eyePitch, tPitch, 0.08)
-  eyeGroup.rotation.y = current.eyeYaw
-  eyeGroup.rotation.x = current.eyePitch
+  // Gaze is expressed by MOVING THE PUPIL within its disc, not by
+  // rotating the eye group. Real eyes work this way: the eyeball stays
+  // in its socket; the iris slides across the visible front. For Orbit
+  // this also means the two-eye pair doesn't clip into each other at
+  // extreme gaze angles, and the lid shader's horizontal orientation
+  // stays stable regardless of where Orbit is looking.
+  //
+  // Max pupil excursion is ~47% of each disc's radius so the pupil
+  // stays fully within the eye field.
+
+  // Visibility driven by live ref
+  const twoEyes = eyeModeRef.current === 'two'
+  eyeGroup.visible       = !twoEyes
+  eyeLeft.group.visible  =  twoEyes
+  eyeRight.group.visible =  twoEyes
 
   // Head nod / shake / tilt (disabled during flight AND during gesture head ownership)
   const inFlight = (fm === 'out' || fm === 'back')
@@ -963,10 +1022,26 @@ const animate = () => {
     current.jitterX = lerp(current.jitterX, 0, 0.2)
     current.jitterY = lerp(current.jitterY, 0, 0.2)
   }
-  pupil.position.x = current.jitterX
-  pupil.position.y = current.jitterY
-  pupilGlow.position.x = current.jitterX
-  pupilGlow.position.y = current.jitterY
+  // Pupil position: gaze offset + jitter. Both eyes get identical values
+  // so they track together. Vergence (eye convergence on close targets)
+  // was tried and removed — it made pupils asymmetric when gaze was
+  // off-center, which read as "creepy" rather than "focused." The rule
+  // going forward: eye settings replicate across both eyes unless a
+  // specific state intentionally breaks that (e.g. future Confused
+  // variants could desync if needed).
+  const gazeRangeX = 0.014
+  const gazeRangeY = 0.010
+  const baseGazeX = Math.sin(current.eyeYaw) * gazeRangeX
+  const baseGazeY = -Math.sin(current.eyePitch) * gazeRangeY
+
+  allEyes.forEach((e) => {
+    const gx = baseGazeX * e.jitterScale + current.jitterX * e.jitterScale
+    const gy = baseGazeY * e.jitterScale + current.jitterY * e.jitterScale
+    e.pupil.position.x = gx
+    e.pupil.position.y = gy
+    e.glow.position.x  = gx
+    e.glow.position.y  = gy
+  })
 
   // ---- Sub-sphere positions (relative to Orbit's current world pos) -
   // During flight, force subMode to 'orbit' to keep them behaving sensibly
@@ -1145,6 +1220,13 @@ return () => {
   eyeDisc.geometry.dispose(); eyeFieldMaterial.dispose()
   pupilGlow.geometry.dispose(); pupilGlowMat.dispose()
   pupil.geometry.dispose(); pupilMat.dispose()
+  // Two-eye geometries (materials shared with single-eye, already disposed above)
+  eyeLeft.disc.geometry.dispose()
+  eyeLeft.glow.geometry.dispose()
+  eyeLeft.pupil.geometry.dispose()
+  eyeRight.disc.geometry.dispose()
+  eyeRight.glow.geometry.dispose()
+  eyeRight.pupil.geometry.dispose()
   subSpheres.forEach((s) => { s.geometry.dispose(); s.material.dispose() })
   trails.forEach((t) => { t.geom.dispose(); t.mat.dispose() })
   targetMarker.geometry.dispose(); targetMat.dispose()
@@ -1278,6 +1360,16 @@ cursor: (stateKey === ‘CHATTING’ || stateKey === ‘TALKING’ || stateKey =
           border: `1px solid ${paletteKey === k ? PALETTES[k].accent : '#2a2a38'}`,
         }}>{k}</button>
       ))}
+    </div>
+
+    {/* Eyes A/B — design-validation toggle */}
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', alignItems: 'center' }}>
+      <span style={{ ...labelStyle, minWidth: '60px' }}>Eyes</span>
+      <button onClick={() => setEyeMode('one')} style={btn(eyeMode === 'one')}>One</button>
+      <button onClick={() => setEyeMode('two')} style={btn(eyeMode === 'two')}>Two</button>
+      <span style={{ fontSize: '11px', opacity: 0.45, marginLeft: '4px', fontStyle: 'italic' }}>
+        {eyeMode === 'one' ? 'EVE / BB-8 lineage — iconic, minimalist' : 'mammalian pair — warmer, enables vergence'}
+      </span>
     </div>
 
     <div style={{ height: '1px', background: '#22222e', margin: '2px 0' }} />
