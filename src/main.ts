@@ -1781,6 +1781,15 @@ class InteractiveSphere {
 
   /** Wire up all DOM event listeners: transport controls, keyboard shortcuts, scrubber, mute. */
   setupEventListeners(): void {
+    // Back/forward cache restore (iOS Safari in particular). MapLibre
+    // caches its canvas dimensions; after a bfcache restore the canvas
+    // can be stuck at a stale size and the globe renders in a thin
+    // strip. `persisted === true` only fires for bfcache restores, so
+    // this is cheap on every other navigation.
+    window.addEventListener('pageshow', (event) => {
+      if (event.persisted) this.viewports.resizeAll()
+    })
+
     document.getElementById('home-btn')?.addEventListener('click', () => this.goHome())
 
     // Browse panel opens via the Tools menu's Browse button (see
