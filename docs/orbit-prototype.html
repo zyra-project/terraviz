@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Orbit Character Prototype</title>
+<style>
+  * { margin: 0; padding: 0; }
+  body { background: #0a0a12; overflow: hidden; }
+  canvas { display: block; }
+  #info {
+    position: fixed;
+    bottom: 1rem;
+    left: 1rem;
+    color: rgba(232, 234, 240, 0.6);
+    font: 400 13px/1.5 system-ui, sans-serif;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div id="info">
+  Orbit Character Prototype — drag to orbit camera, scroll to zoom<br>
+  Spacebar: toggle talk mode &nbsp;|&nbsp; P: point gesture &nbsp;|&nbsp; T: thinking
+</div>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.183.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three'
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+
+// --- Scene setup ---
+const renderer = new THREE.WebGLRenderer({ antialias: true })
+renderer.setPixelRatio(window.devicePixelRatio)
+renderer.setSize(window.innerWidth, window.innerHeight)
+renderer.toneMapping = THREE.ACESFilmicToneMapping
+renderer.toneMappingExposure = 1.2
+document.body.appendChild(renderer.domElement)
+
+const scene = new THREE.Scene()
+scene.background = new THREE.Color(0x0a0a14)
+
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.01, 100)
+camera.position.set(0.15, 0.08, 0.25)
+
+const controls = new OrbitControls(camera, renderer.domElement)
+controls.target.set(0, 0, 0)
+controls.enableDamping = true
+controls.dampingFactor = 0.08
+controls.minDistance = 0.1
+controls.maxDistance = 2
+
+// --- Lighting ---
+scene.add(new THREE.AmbientLight(0xffffff, 0.3))
+const keyLight = new THREE.DirectionalLight(0xffffff, 1.2)
+keyLight.position.set(2, 3, 2)
+scene.add(keyLight)
+const rimLight = new THREE.DirectionalLight(0x88ccff, 0.6)
+rimLight.position.set(-2, 1, -1)
+scene.add(rimLight)
+
+// --- Iridescent body material ---
+const iridescentMaterial = new THREE.ShaderMaterial({
+  uniforms: {
+    uTime: { value: 0 },
+    uBaseColor: { value: new THREE.Color(0.95, 0.92, 0.88) },
+    uRimColor1: { value: new THREE.Color(0.3, 0.8, 0.9) },
+    uRimColor2: { value: new THREE.Color(0.4, 0.9, 0.6) },
+  },
+  vertexShader: `
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    varying vec3 vWorldPos;
+    void main() {
+      vec4 worldPos = modelMatrix * vec4(position, 1.0);
+      vWorldPos = worldPos.xyz;
+      vNormal = normalize(normalMatrix * normal);
+      vViewDir = normalize(cameraPosition - worldPos.xyz);
+      gl_Position = projectionMatrix * viewMatrix * worldPos;
+    }
+  `,
+  fragmentShader: `
+    uniform float uTime;
+    uniform vec3 uBaseColor;
+    uniform vec3 uRimColor1;
+    uniform vec3 uRimColor2;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    varying vec3 vWorldPos;
+    void main() {
+      float fresnel = 1.0 - max(dot(vNormal, vViewDir), 0.0);
+      fresnel = pow(fresnel, 2.5);
+      // Shift hue around the rim based on angle + time
+      float angle = atan(vNormal.y, vNormal.x) + uTime * 0.3;
+      float hueShift = sin(angle * 2.0) * 0.5 + 0.5;
+      vec3 rimColor = mix(uRimColor1, uRimColor2, hueShift);
+      // Subtle surface shimmer
+      float shimmer = sin(vWorldPos.x * 40.0 + uTime) *
+                      sin(vWorldPos.y * 40.0 + uTime * 0.7) *
+                      sin(vWorldPos.z * 40.0 + uTime * 1.3);
+      shimmer = shimmer * 0.03 + 1.0;
+      vec3 color = mix(uBaseColor * shimmer, rimColor, fresnel * 0.7);
+      // Soft diffuse from a virtual light above-right
+      float diffuse = max(dot(vNormal, normalize(vec3(0.5, 0.8, 0.3))), 0.0);
+      color *= 0.6 + diffuse * 0.5;
+      // Add rim glow
+      color += rimColor * fresnel * 0.4;
+      gl_FragColor = vec4(color, 1.0);
+    }
+  `,
+})
+
+// --- Body ---
+const BODY_RADIUS = 0.075
+const body = new THREE.Mesh(
+  new THREE.IcosahedronGeometry(BODY_RADIUS, 4),
+  iridescentMaterial,
+)
+scene.add(body)
+
+// --- Eye depression ---
+const eyeGeom = new THREE.SphereGeometry(0.028, 32, 16, 0, Math.PI * 2, 0, Math.PI * 0.5)
+const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0x080810 })
+const eye = new THREE.Mesh(eyeGeom, eyeMaterial)
+eye.rotation.x = Math.PI
+eye.position.set(0, 0, BODY_RADIUS * 0.72)
+body.add(eye)
+
+// --- Pupil ---
+const PUPIL_BASE_RADIUS = 0.012
+const pupilGeom = new THREE.CircleGeometry(PUPIL_BASE_RADIUS, 32)
+const pupilMaterial = new THREE.ShaderMaterial({
+  uniforms: {
+    uColor: { value: new THREE.Color(0.3, 0.85, 0.9) },
+    uBrightness: { value: 0.8 },
+    uGlowFalloff: { value: 2.0 },
+  },
+  vertexShader: `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform vec3 uColor;
+    uniform float uBrightness;
+    uniform float uGlowFalloff;
+    varying vec2 vUv;
+    void main() {
+      float dist = length(vUv - 0.5) * 2.0;
+      float glow = exp(-dist * uGlowFalloff) * uBrightness;
+      float core = smoothstep(0.5, 0.0, dist) * uBrightness;
+      vec3 color = uColor * (glow + core * 1.5);
+      float alpha = glow + core;
+      gl_FragColor = vec4(color, alpha);
+    }
+  `,
+  transparent: true,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+})
+const pupil = new THREE.Mesh(pupilGeom, pupilMaterial)
+pupil.position.set(0, 0, BODY_RADIUS * 0.78)
+body.add(pupil)
+
+// --- Sub-spheres ---
+const SUB_RADIUS = 0.008
+const SUB_ORBIT_RADIUS = 0.11
+const SUB_ORBIT_SPEED = 1.8
+const subSphereMaterial = new THREE.MeshBasicMaterial({
+  color: new THREE.Color(0.3, 0.85, 0.9),
+  transparent: true,
+  opacity: 0.9,
+})
+const subSphereGlowMaterial = new THREE.SpriteMaterial({
+  color: new THREE.Color(0.3, 0.85, 0.9),
+  transparent: true,
+  opacity: 0.3,
+  blending: THREE.AdditiveBlending,
+})
+
+const subSpheres = [0, 1].map((_, i) => {
+  const group = new THREE.Group()
+  const mesh = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(SUB_RADIUS, 2),
+    subSphereMaterial.clone(),
+  )
+  group.add(mesh)
+  const glow = new THREE.Sprite(subSphereMaterial.clone())
+  glow.material = new THREE.SpriteMaterial({
+    color: new THREE.Color(0.3, 0.85, 0.9),
+    transparent: true,
+    opacity: 0.2,
+    blending: THREE.AdditiveBlending,
+  })
+  glow.scale.set(0.03, 0.03, 1)
+  group.add(glow)
+  scene.add(group)
+  return { group, mesh, phase: (i * Math.PI), targetPos: new THREE.Vector3() }
+})
+
+// Trail system
+const TRAIL_LENGTH = 20
+const trailPositions = subSpheres.map(() => {
+  const arr = []
+  for (let i = 0; i < TRAIL_LENGTH; i++) arr.push(new THREE.Vector3())
+  return arr
+})
+const trailLines = subSpheres.map((_, si) => {
+  const geom = new THREE.BufferGeometry()
+  const positions = new Float32Array(TRAIL_LENGTH * 3)
+  geom.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+  const colors = new Float32Array(TRAIL_LENGTH * 4)
+  for (let i = 0; i < TRAIL_LENGTH; i++) {
+    const t = 1 - i / TRAIL_LENGTH
+    colors[i * 4 + 0] = 0.3
+    colors[i * 4 + 1] = 0.85
+    colors[i * 4 + 2] = 0.9
+    colors[i * 4 + 3] = t * 0.4
+  }
+  geom.setAttribute('color', new THREE.BufferAttribute(colors, 4))
+  const mat = new THREE.LineBasicMaterial({
+    vertexColors: true,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  })
+  const line = new THREE.Line(geom, mat)
+  scene.add(line)
+  return { line, geom }
+})
+
+// --- Mini Earth for context ---
+const earthGeom = new THREE.IcosahedronGeometry(0.5, 4)
+const earthMat = new THREE.MeshPhongMaterial({
+  color: 0x2244aa,
+  emissive: 0x112244,
+  emissiveIntensity: 0.2,
+  shininess: 20,
+  transparent: true,
+  opacity: 0.15,
+  wireframe: true,
+})
+const earth = new THREE.Mesh(earthGeom, earthMat)
+earth.position.set(0, -0.6, -0.3)
+scene.add(earth)
+
+// --- State machine ---
+let mode = 'idle' // idle | talk | point | think
+let modeTime = 0
+
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') {
+    e.preventDefault()
+    mode = mode === 'talk' ? 'idle' : 'talk'
+    modeTime = 0
+  } else if (e.code === 'KeyP') {
+    mode = mode === 'point' ? 'idle' : 'point'
+    modeTime = 0
+  } else if (e.code === 'KeyT') {
+    mode = mode === 'think' ? 'idle' : 'think'
+    modeTime = 0
+  }
+})
+
+// --- Animation loop ---
+const clock = new THREE.Clock()
+let trailTimer = 0
+
+function animate() {
+  requestAnimationFrame(animate)
+  const dt = clock.getDelta()
+  const elapsed = clock.getElapsedTime()
+  modeTime += dt
+
+  iridescentMaterial.uniforms.uTime.value = elapsed
+
+  // Gentle body sway
+  body.rotation.x = Math.sin(elapsed * 0.5) * 0.05
+  body.rotation.z = Math.sin(elapsed * 0.7) * 0.03
+  body.position.y = Math.sin(elapsed * 0.8) * 0.003
+
+  // Pupil behavior
+  let pupilBrightness = 0.7
+  let pupilX = 0
+  let pupilY = 0
+  let subSpeed = SUB_ORBIT_SPEED
+  let subOrbitRadius = SUB_ORBIT_RADIUS
+
+  if (mode === 'talk') {
+    // Pulsing pupil, faster sub-spheres
+    pupilBrightness = 0.6 + Math.sin(elapsed * 8) * 0.3 + Math.sin(elapsed * 13) * 0.15
+    subSpeed = SUB_ORBIT_SPEED * 2.5
+    // Slight figure-8 motion for sub-spheres
+    pupilX = Math.sin(elapsed * 2) * 0.002
+    pupilY = Math.cos(elapsed * 3) * 0.001
+  } else if (mode === 'point') {
+    // Look toward target (upper right)
+    pupilX = 0.008
+    pupilY = 0.005
+    pupilBrightness = 1.0
+    subSpeed = SUB_ORBIT_SPEED * 0.5
+  } else if (mode === 'think') {
+    // Slow, clustered sub-spheres, dim pupil
+    pupilBrightness = 0.3 + Math.sin(elapsed * 1.5) * 0.1
+    subSpeed = SUB_ORBIT_SPEED * 0.3
+    subOrbitRadius = SUB_ORBIT_RADIUS * 0.5
+    pupilY = -0.003
+  } else {
+    // Idle — gentle pupil wander
+    pupilX = Math.sin(elapsed * 0.4) * 0.003
+    pupilY = Math.sin(elapsed * 0.6) * 0.002
+  }
+
+  pupilMaterial.uniforms.uBrightness.value += (pupilBrightness - pupilMaterial.uniforms.uBrightness.value) * 5 * dt
+  pupil.position.x += (pupilX - pupil.position.x) * 3 * dt
+  pupil.position.y += (pupilY - pupil.position.y) * 3 * dt
+
+  // Sub-sphere orbits
+  subSpheres.forEach((sub, i) => {
+    sub.phase += subSpeed * dt
+
+    let targetX, targetY, targetZ
+    const currentRadius = subOrbitRadius
+
+    if (mode === 'point' && i === 0 && modeTime > 0.3) {
+      // First sub-sphere breaks orbit and flies to "target"
+      const t = Math.min(1, (modeTime - 0.3) / 0.8)
+      const ease = t * t * (3 - 2 * t) // smoothstep
+      targetX = THREE.MathUtils.lerp(
+        Math.cos(sub.phase) * currentRadius,
+        0.15, ease
+      )
+      targetY = THREE.MathUtils.lerp(
+        Math.sin(sub.phase * 0.7) * currentRadius * 0.3,
+        0.08, ease
+      )
+      targetZ = THREE.MathUtils.lerp(
+        Math.sin(sub.phase) * currentRadius,
+        0.05, ease
+      )
+    } else if (mode === 'think') {
+      // Cluster on one side
+      const clusterAngle = sub.phase * 0.3 + i * 0.4
+      targetX = Math.cos(clusterAngle) * currentRadius * 0.6 - 0.04
+      targetY = Math.sin(clusterAngle) * currentRadius * 0.4 + 0.02
+      targetZ = Math.sin(clusterAngle * 0.5) * currentRadius * 0.3
+    } else {
+      // Normal orbit — tilted ellipse
+      const tilt = i * 0.8 + 0.3
+      targetX = Math.cos(sub.phase) * currentRadius
+      targetY = Math.sin(sub.phase * 0.7 + tilt) * currentRadius * 0.4
+      targetZ = Math.sin(sub.phase) * currentRadius
+    }
+
+    sub.targetPos.set(targetX, targetY, targetZ)
+    sub.group.position.lerp(sub.targetPos, 8 * dt)
+  })
+
+  // Update trails
+  trailTimer += dt
+  if (trailTimer > 0.02) {
+    trailTimer = 0
+    subSpheres.forEach((sub, si) => {
+      const trail = trailPositions[si]
+      for (let i = trail.length - 1; i > 0; i--) {
+        trail[i].copy(trail[i - 1])
+      }
+      trail[0].copy(sub.group.position)
+      const posAttr = trailLines[si].geom.getAttribute('position')
+      for (let i = 0; i < trail.length; i++) {
+        posAttr.setXYZ(i, trail[i].x, trail[i].y, trail[i].z)
+      }
+      posAttr.needsUpdate = true
+    })
+  }
+
+  // Earth rotation
+  earth.rotation.y += dt * 0.1
+
+  controls.update()
+  renderer.render(scene, camera)
+}
+
+animate()
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight
+  camera.updateProjectionMatrix()
+  renderer.setSize(window.innerWidth, window.innerHeight)
+})
+</script>
+</body>
+</html>
