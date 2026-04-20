@@ -113,7 +113,12 @@ function dispatch(controller: OrbitController, data: unknown): void {
       return
     }
     case 'orbit:setReducedMotion': {
-      controller.setReducedMotion(Boolean(msg.reduced))
+      // `Boolean("false") === true` would silently misfire from
+      // stringly-typed callers, so accept a narrow set of truthy /
+      // falsy encodings and warn on anything else.
+      const parsed = parseBoolish(msg.reduced)
+      if (parsed === null) warn('reduced must be boolean / 0 | 1 / "true" | "false"', msg.reduced)
+      else controller.setReducedMotion(parsed)
       return
     }
     case 'orbit:flyToEarth': {
@@ -134,4 +139,22 @@ function dispatch(controller: OrbitController, data: unknown): void {
 
 function warn(label: string, value: unknown): void {
   console.warn(`[Orbit postMessage] ${label}: ${String(value)}`)
+}
+
+/**
+ * Lenient-but-not-sloppy boolean coercion for wire-format booleans.
+ * Accepts native booleans, numeric `0` / `1`, and the strings
+ * `'true'` / `'false'` (case-insensitive). Returns `null` for
+ * anything else so the caller can warn and drop rather than
+ * silently invert the user's intent.
+ */
+function parseBoolish(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value
+  if (value === 1 || value === 0) return value === 1
+  if (typeof value === 'string') {
+    const v = value.toLowerCase()
+    if (v === 'true') return true
+    if (v === 'false') return false
+  }
+  return null
 }

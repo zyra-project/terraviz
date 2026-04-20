@@ -25,14 +25,26 @@ const EYE_MODES: { key: EyeMode; label: string; tag: string }[] = [
   { key: 'two', label: 'Two', tag: 'mammalian pair — warmer, enables vergence' },
 ]
 
-export function initOrbitDebugPanel(controller: OrbitController): void {
+export interface OrbitDebugPanelHandle {
+  /**
+   * Clear any background timers the panel started (gesture-playing
+   * poll, flight-mode poll). Call before re-mounting the panel or
+   * during HMR teardown so timers don't stack. The standalone
+   * /orbit page never tears down in normal flow, but lifecycle
+   * hooks keep the module embedding-friendly.
+   */
+  dispose(): void
+}
+
+export function initOrbitDebugPanel(controller: OrbitController): OrbitDebugPanelHandle {
+  const noop: OrbitDebugPanelHandle = { dispose() {} }
   const panel = document.querySelector<HTMLElement>('.orbit-debug-panel')
   const toggleBtn = document.querySelector<HTMLButtonElement>('.orbit-debug-toggle')
   const stateSelect = document.getElementById('orbit-debug-state') as HTMLSelectElement | null
   const gestureHost = document.getElementById('orbit-debug-gestures')
   const paletteHost = document.getElementById('orbit-debug-palettes')
 
-  if (!panel || !toggleBtn || !stateSelect || !gestureHost || !paletteHost) return
+  if (!panel || !toggleBtn || !stateSelect || !gestureHost || !paletteHost) return noop
 
   populateStateOptions(stateSelect)
   stateSelect.value = controller.getState()
@@ -50,7 +62,7 @@ export function initOrbitDebugPanel(controller: OrbitController): void {
   const homeBtn = document.getElementById('orbit-debug-home') as HTMLButtonElement | null
   if (scaleHost) buildScaleControl(scaleHost, controller)
   if (eyesHost) buildEyesControl(eyesHost, controller)
-  if (flyBtn && homeBtn) wireFlightButtons(flyBtn, homeBtn, controller)
+  const flightIntervalId = (flyBtn && homeBtn) ? wireFlightButtons(flyBtn, homeBtn, controller) : null
 
   toggleBtn.addEventListener('click', () => {
     const collapsed = panel.classList.toggle('is-collapsed')
@@ -62,10 +74,17 @@ export function initOrbitDebugPanel(controller: OrbitController): void {
   // Poll gesture-playing state at a cheap rate so buttons disable
   // while any gesture runs. Gestures are short (≤ 1.8 s), so 10 Hz
   // is plenty and doesn't fight the render loop.
-  setInterval(() => {
+  const gestureIntervalId = window.setInterval(() => {
     const playing = controller.isGesturePlaying()
     for (const btn of gestureButtons) btn.disabled = playing
   }, 100)
+
+  return {
+    dispose(): void {
+      window.clearInterval(gestureIntervalId)
+      if (flightIntervalId !== null) window.clearInterval(flightIntervalId)
+    },
+  }
 }
 
 function populateStateOptions(select: HTMLSelectElement): void {
@@ -167,7 +186,11 @@ function buildEyesControl(host: HTMLElement, controller: OrbitController): void 
   sync()
 }
 
-function wireFlightButtons(flyBtn: HTMLButtonElement, homeBtn: HTMLButtonElement, controller: OrbitController): void {
+function wireFlightButtons(
+  flyBtn: HTMLButtonElement,
+  homeBtn: HTMLButtonElement,
+  controller: OrbitController,
+): number {
   flyBtn.addEventListener('click', () => {
     if (controller.flyToEarth()) announce('Orbit flying to Earth')
   })
@@ -179,7 +202,8 @@ function wireFlightButtons(flyBtn: HTMLButtonElement, homeBtn: HTMLButtonElement
   //   out:    both disabled (in transit)
   //   atEarth: Fly disabled, Home enabled
   //   back:   both disabled
-  setInterval(() => {
+  // Returned interval id is cleared by the panel's dispose handle.
+  return window.setInterval(() => {
     const mode = controller.getFlightMode()
     flyBtn.disabled = mode !== 'rest'
     homeBtn.disabled = mode !== 'atEarth'

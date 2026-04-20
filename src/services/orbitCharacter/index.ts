@@ -28,6 +28,7 @@ import {
   type AnimationState,
 } from './orbitScene'
 import type { EyeMode, PaletteKey, ScaleKey, StateKey, GestureKind } from './orbitTypes'
+import { PALETTES } from './orbitTypes'
 import { STATES } from './orbitStates'
 import { GESTURES, GESTURE_KEYS } from './orbitGestures'
 import {
@@ -156,6 +157,10 @@ export class OrbitController {
   }
 
   setPalette(palette: PaletteKey): void {
+    if (!(palette in PALETTES)) {
+      console.warn(`[Orbit] Unknown palette: ${palette}`)
+      return
+    }
     // Palette swap lands fully in Phase 5 (palettes + pupil tint). The
     // scene update already propagates palette changes per-frame, so
     // storing it here and letting the next updateCharacter() pick it
@@ -250,13 +255,20 @@ export class OrbitController {
     // doesn't double-free Earth geometry/materials.
     this.handles.earth.removeFrom(this.handles.scene)
     this.handles.earth.dispose()
+    // Property-test instead of instanceof — trails render as
+    // THREE.Points, not Mesh, so an `instanceof Mesh` check would
+    // leave trail geometry + shader material on the GPU when the
+    // Orbit page unmounts. Anything with a disposable `geometry` /
+    // `material` (Mesh, Points, Line / Line2, Sprite) is caught.
     this.handles.scene.traverse((obj) => {
-      if (obj instanceof THREE.Mesh) {
-        obj.geometry?.dispose()
-        const mat = obj.material
-        if (Array.isArray(mat)) mat.forEach((m) => m.dispose())
-        else mat?.dispose()
+      const disposable = obj as THREE.Object3D & {
+        geometry?: { dispose?: () => void }
+        material?: { dispose?: () => void } | Array<{ dispose?: () => void }>
       }
+      disposable.geometry?.dispose?.()
+      const mat = disposable.material
+      if (Array.isArray(mat)) mat.forEach((m) => m.dispose?.())
+      else mat?.dispose?.()
     })
   }
 
