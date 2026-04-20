@@ -900,10 +900,13 @@ export function createVrScene(
   // arc positions alongside the primary. Each secondary gets a
   // basic MeshPhongMaterial (no day/night shader patch, no
   // atmosphere, no clouds — those are primary-only decoration).
-  // Secondary-to-primary promotion is handled by vrInteraction;
-  // when the user taps a secondary, the caller swaps which slot
-  // is "primary" in the 2D app's viewportManager, and the VR
-  // scene rebuilds the arc on the next setPanelCount call.
+  // All globes rotate in lockstep — grab-rotate writes to the
+  // primary's quaternion; scene.update() copies it to each
+  // secondary every frame. No tap-to-promote path ships in
+  // Phase 2.5 (see cead66d for the ping-pong-bug rationale).
+  // setPanelCount is the only thing that adds or removes
+  // secondaries; the 2D app's viewportManager is the source of
+  // truth for how many panels are active.
 
   interface SecondaryGlobe {
     mesh: THREE.Mesh
@@ -928,15 +931,24 @@ export function createVrScene(
   const allGlobesArr: THREE.Mesh[] = [globe]
 
   /**
-   * Compute world-space position for slot `i` in an arc of `total`
-   * globes. Slot 0 is always centered when total=1. For total=2+,
-   * globes fan out horizontally with ~1.2m spacing center-to-center
-   * (0.2m gap between 0.5m-radius spheres). All sit at the same
-   * distance from the user (same Z), same height (same Y).
+   * Nominal world-space position for slot `i` in an arc of `total`
+   * globes, if the arc were laid out centered on `GLOBE_POSITION`.
+   * Slots spread horizontally at 1.2 m center-to-center (0.2 m gap
+   * between 0.5 m-radius spheres), same y + z.
+   *
+   * Only used internally by `syncSecondaryPositions()`, which
+   * subtracts `arcPosition(0)` from higher slots to get slot offsets
+   * relative to the primary — the primary's *actual* world position
+   * is authoritative (written by AR anchoring or inherited from
+   * `GLOBE_POSITION`), and the arc is placed as offsets from there.
+   * Net effect: the layout is NOT centered on the primary — on a
+   * 1→2 transition, the primary stays put and the new secondary
+   * fans 1.2 m to its right. Centering by shifting primary on
+   * panel-count changes is future work (needs reconciliation with
+   * AR anchor preservation).
    */
   function arcPosition(i: number, total: number): { x: number; y: number; z: number } {
     if (total <= 1) return GLOBE_POSITION
-    // Spread evenly around the center, each 1.2m apart
     const spacing = GLOBE_RADIUS * 2 + 0.2
     const totalWidth = (total - 1) * spacing
     const x = GLOBE_POSITION.x - totalWidth / 2 + i * spacing
@@ -1003,6 +1015,14 @@ export function createVrScene(
    * (both read from GLOBE_POSITION-relative coords). Scaled by the
    * primary's uniform scale so pinch-zoomed globes widen/narrow
    * their inter-globe gap to match.
+   *
+   * Note: primary stays at its current world position. The arc is
+   * laid out RELATIVE to that position, so on a 1→2 transition
+   * the new secondary fans 1.2 m to the primary's right rather
+   * than both globes sliding to sit ±0.6 m about a common center.
+   * Preserves AR anchoring (the user's placed globe doesn't jump)
+   * at the cost of a slightly rightward-biased layout in
+   * unanchored VR. Centering is follow-up polish.
    */
   const syncSecondaryPositionsScratch = new THREE_.Vector3()
   function syncSecondaryPositions(): void {
@@ -1446,11 +1466,15 @@ export function createVrScene(
       shadowGeometry.dispose()
       shadowMaterial.dispose()
       shadowTexture.dispose()
-      // Dispose all secondary globes.
+      // Dispose all secondary globes and clear the shared
+      // allGlobes array so any lingering references (debug
+      // tooling, a late raycast from an in-flight XR frame) see
+      // an empty layout instead of dangling mesh pointers.
       for (const sg of secondaries) {
         disposeSecondary(sg)
       }
       secondaries.length = 0
+      allGlobesArr.length = 0
     },
   }
 }

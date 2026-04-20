@@ -573,7 +573,7 @@ Commit breakdown:
 | 1 | Plan doc: Phase 2.5 commit breakdown | This table |
 | 2 | `vrScene: support N globes internally` | Internal refactor — single globe → array of globes. All existing code paths use index 0 as primary. No user-visible change when panelCount is 1. |
 | 3 | `VrSessionContext: multi-panel getters` | `getPanelCount()`, `getPrimaryIndex()`, `getPanelTexture(slot)`, `getPanelTitle(slot)` — main.ts wires to existing `viewports` + `panelStates` |
-| 4 | `vrSession: arc layout + per-slot texture sync` | Per-frame poll of panel count + textures. 2-globe arc: globes at `(±0.9, 1.3, -1.5)`, slight inward rotation |
+| 4 | `vrSession: arc layout + per-slot texture sync` | Per-frame poll of panel count + textures. Arc spacing is `GLOBE_RADIUS * 2 + 0.2 = 1.2 m` center-to-center (0.5 m-radius spheres, 0.2 m gap). Primary keeps its current world position (preserves AR anchor); secondaries fan to its right — e.g. panelCount=2 puts the secondary at primary + `(1.2, 0, 0)`. No inward yaw. Centering the arc about the primary is future polish. |
 | 5 | `vrInteraction: lockstep grab-rotate across all globes` | Trigger on any globe starts a surface-pinned rotation; secondaries copy the primary's quaternion each frame so all globes spin together. (The plan originally had tap-to-promote here, but it created a ping-pong loop — tap a secondary → it becomes primary → user's ray now hits the NEW secondary → re-promote on next tap — so the path was ripped out in `cead66d`. A replacement UX goes in a later phase.) |
 | 6 | `vrHud: primary-aware panel indicator strip` | Small dot strip showing panel count with primary highlighted; dataset title reflects primary |
 
