@@ -39,6 +39,16 @@
 import type { ViewportManager, ViewLayout } from '../services/viewportManager'
 import { updateMapControlsPosition } from './mapControlsUI'
 
+/**
+ * Runtime Tauri-shell detection — matches the same `__TAURI__`
+ * sentinel the rest of the code keys off of. Read fresh inside
+ * initToolsMenu rather than cached at module load so tests can
+ * toggle `window.__TAURI__` between cases.
+ */
+function isTauri(): boolean {
+  return typeof window !== 'undefined' && !!(window as unknown as { __TAURI__?: unknown }).__TAURI__
+}
+
 /** Callbacks the tools menu fires out into the rest of the app. */
 export interface ToolsMenuCallbacks {
   /** Multi-viewport: user picked a layout from the picker. */
@@ -76,6 +86,8 @@ export function initToolsMenu(
   // that re-run on hot-reload. Without this the module-level flag
   // leaks between invocations.
   isOpen = false
+
+  const gateMeetOrbit = isTauri()
 
   const { onSetLayout, onOpenBrowse, onOpenOrbitSettings, onToggleDatasetInfo, onToggleLegend, announce } = callbacks
   const currentLayout = viewports.getLayout()
@@ -149,6 +161,11 @@ export function initToolsMenu(
           <span class="tools-menu-item-check" aria-hidden="true"></span>
           <span class="tools-menu-item-label">Orbit settings&hellip;</span>
         </button>
+        ${gateMeetOrbit ? '' : `
+        <a class="tools-menu-item tools-menu-item-link" id="tools-menu-meet-orbit" href="/orbit" target="_blank" rel="noopener">
+          <span class="tools-menu-item-check" aria-hidden="true"></span>
+          <span class="tools-menu-item-label">Meet Orbit&nbsp;&rarr;</span>
+        </a>`}
       </section>
     </div>
   `
@@ -218,6 +235,17 @@ export function initToolsMenu(
   const clearBtn = document.getElementById('tools-menu-clear') as HTMLButtonElement
   const shareBtn = document.getElementById('tools-menu-share') as HTMLButtonElement
   const orbitSettingsBtn = document.getElementById('tools-menu-orbit-settings') as HTMLButtonElement
+  const meetOrbitLink = document.getElementById('tools-menu-meet-orbit') as HTMLAnchorElement | null
+
+  // Meet Orbit is a plain anchor with target="_blank" — native
+  // navigation handles opening the character page. We just close
+  // the popover so the main app goes back to its normal state and
+  // announce for screen readers. No-op when Meet Orbit is gated off
+  // (desktop build).
+  meetOrbitLink?.addEventListener('click', () => {
+    closePopover()
+    announce?.('Opening Orbit character page in new tab')
+  })
 
   labelsBtn.addEventListener('click', () => {
     // Target state is derived from the button class, not from any

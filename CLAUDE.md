@@ -44,10 +44,11 @@ npm run build:desktop # tsc + vite build + tauri build
 | `src/ui/downloadUI.ts` | Download manager panel — view/delete cached datasets (desktop only) |
 | `src/ui/mapControlsUI.ts` | Map controls positioning helper — keeps the Tools bar above the playback transport |
 | `src/ui/playbackController.ts` | Playback transport controls + portrait-mobile positioning |
-| `src/ui/toolsMenuUI.ts` | Tools popover — Browse button, view toggles (labels, borders, terrain, auto-rotate, info, legend), layout picker, Orbit settings entry point |
+| `src/ui/toolsMenuUI.ts` | Tools popover — Browse button, view toggles (labels, borders, terrain, auto-rotate, info, legend), layout picker, Orbit settings entry point, Meet Orbit link (web only) |
 | `src/ui/vrButton.ts` | Enter AR / Enter VR button — feature-gated (hidden on non-WebXR browsers), lazy-loads Three.js on tap |
 | `src/services/vrSession.ts` | WebXR session lifecycle — requests `immersive-ar` or `immersive-vr`, wires renderer.xr, drives the per-frame loop, handles anchor persistence |
-| `src/services/vrScene.ts` | Three.js scene — globe mesh, photoreal Earth stack (diffuse / night lights / specular / atmosphere / clouds / sun / ground shadow), dataset texture swap |
+| `src/services/vrScene.ts` | VR scene framing — background (space blue vs transparent passthrough) + globe placement; delegates the Earth stack to `photorealEarth.ts` |
+| `src/services/photorealEarth.ts` | Reusable photoreal Earth factory — diffuse / night lights / specular / atmosphere / clouds / sun / ground shadow with day/night shading; shared by VR view and Orbit character page |
 | `src/services/vrInteraction.ts` | Controller input — surface-pinned drag, two-hand pinch+rotate, thumbstick zoom, flick-to-spin inertia, raycast hit routing |
 | `src/services/vrHud.ts` | In-VR floating HUD — dataset title + play/pause + exit-VR as a CanvasTexture panel with UV hit regions |
 | `src/services/vrPlacement.ts` | AR spatial placement — reticle + Place button; WebXR hit-test to anchor the globe on a real surface |
@@ -141,11 +142,12 @@ change. Design doc: [`docs/VR_INVESTIGATION_PLAN.md`](docs/VR_INVESTIGATION_PLAN
   re-fetches.
 
 - **Earth-as-planet vs. data-as-surface modes.** When no dataset is
-  loaded, `vrScene.ts` renders the full photoreal Earth stack
-  (diffuse + night lights + specular + atmosphere + clouds + sun +
-  ground shadow + day/night shader gated by real UTC sun position).
-  When a dataset is loaded, all Earth-specific decoration is hidden
-  so the data reads uniformly across the sphere.
+  loaded, `photorealEarth.ts` (wired up by `vrScene.ts`) renders the
+  full photoreal Earth stack (diffuse + night lights + specular +
+  atmosphere + clouds + sun + ground shadow + day/night shader gated
+  by real UTC sun position). When a dataset is loaded, all
+  Earth-specific decoration is hidden so the data reads uniformly
+  across the sphere.
 
 - **Spatial placement (AR only).** `vrPlacement.ts` uses WebXR
   `hit-test` to let the user point at a real-world surface and tap

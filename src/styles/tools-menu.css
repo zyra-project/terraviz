@@ -210,10 +210,24 @@
     color: var(--color-bg);
     font-weight: 700;
 }
-/* Non-toggle items (Clear, Orbit settings…) don't need a check glyph */
+/* Non-toggle items (Clear, Orbit settings…, Meet Orbit) don't need
+ * a check glyph — they're actions/links, not toggles. */
 #tools-menu-clear .tools-menu-item-check,
-#tools-menu-orbit-settings .tools-menu-item-check {
+#tools-menu-orbit-settings .tools-menu-item-check,
+#tools-menu-meet-orbit .tools-menu-item-check {
     display: none;
+}
+
+/* Anchor-as-menu-item (Meet Orbit) — suppress the default link
+ * underline and keep the item's text color inherited from
+ * .tools-menu-item so the hover state looks identical to a button. */
+.tools-menu-item-link,
+.tools-menu-item-link:visited {
+    text-decoration: none;
+    color: #ddd;
+}
+.tools-menu-item-link:hover {
+    color: var(--color-text);
 }
 
 /* Thin separator between the view toggles and the

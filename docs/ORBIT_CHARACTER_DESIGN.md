@@ -4,11 +4,10 @@ Companion document to `VR_INVESTIGATION_PLAN.md` — fleshes out the
 character design for Phase 4 (Orbit avatar). Supersedes the original
 design direction with decisions informed by nine prototype iterations.
 
-**Status:** design committed and prototyped; ready for repo port.
-
-**Reference implementation:** `docs/prototypes/orbit-prototype-v9.jsx`
-(React + Three.js, ~1300 lines, procedural character with full state
-and gesture vocabulary running on Quest-tier shaders.)
+**Status:** design committed, prototyped, and ported. The production
+implementation lives in `src/services/orbitCharacter/` and renders
+at `/orbit`. A self-contained HTML demo (no build step needed) is
+kept at `docs/orbit-prototype.html` for design-review sharing.
 
 -----
 
