@@ -101,14 +101,6 @@ export interface VrInteractionContext {
    * without re-creating the interaction handle.
    */
   getAllGlobes: () => THREE.Mesh[]
-  /**
-   * Map a globe mesh back to its 2D-app panel slot index. Returns -1 if
-   * the mesh isn't one of the current globes. Used when the user taps
-   * a non-primary globe to know which slot to promote.
-   */
-  getGlobeSlot: (mesh: THREE.Mesh) => number
-  /** Which slot is currently primary — drives rotation vs. promote decision on tap. */
-  getPrimaryIndex: () => number
   hud: VrHudHandle
   /** AR-only spatial placement. Null in VR mode or when hit-test isn't available. */
   placement: VrPlacementHandle | null
@@ -121,13 +113,6 @@ export interface VrInteractionContext {
   onPlaceConfirm: () => void
   /** Fired when the user squeezes the grip — caller ends the session. */
   onExit: () => void
-  /**
-   * Fired when the user pulls trigger on a non-primary globe. Caller
-   * (main.ts) forwards this to `viewports.setPrimaryIndex(slot)` so
-   * both 2D and VR stay in sync. Never fires for the primary globe —
-   * that always initiates a grab-rotate.
-   */
-  onPromotePanel: (slot: number) => void
 }
 
 export interface VrInteractionHandle {
@@ -919,20 +904,24 @@ export function createVrInteraction(
    * at buttons feels broken. Run after rotation updates so the dot
    * reflects the current globe orientation.
    */
+  const rayTargets: THREE.Object3D[] = []
   function updateRayVisuals(): void {
-    // Build the target list once per frame — includes the Place
-    // button only when it's visible (avoids spurious hits on an
-    // offscreen / unavailable button). Also includes every globe
-    // in the layout so the laser dot snaps to secondary globes too.
-    const targets: THREE.Object3D[] = [...ctx.getAllGlobes(), ctx.hud.mesh]
+    // Reuse one closure-scoped array, clear-and-push each frame so
+    // we don't allocate at XR frame rate. Includes every globe in
+    // the layout (so the dot snaps to secondaries), the HUD, and
+    // the AR Place button when it's visible.
+    rayTargets.length = 0
+    const allGlobes = ctx.getAllGlobes()
+    for (let i = 0; i < allGlobes.length; i++) rayTargets.push(allGlobes[i])
+    rayTargets.push(ctx.hud.mesh)
     if (ctx.placement && ctx.placement.placeButtonMesh.visible) {
-      targets.push(ctx.placement.placeButtonMesh)
+      rayTargets.push(ctx.placement.placeButtonMesh)
     }
     for (let i = 0; i < 2; i++) {
       const controller = controllers[i]
       setRaycasterFromController(controller)
       // Closest hit across all interactive surfaces wins.
-      const hits = raycaster.intersectObjects(targets, false)
+      const hits = raycaster.intersectObjects(rayTargets, false)
       if (hits.length > 0 && hits[0].point) {
         const distance = hits[0].distance
         // Scale Z so the line ends exactly at the hit. Min clamp

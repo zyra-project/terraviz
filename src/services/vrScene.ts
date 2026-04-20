@@ -914,6 +914,15 @@ export function createVrScene(
   }
 
   const secondaries: SecondaryGlobe[] = []
+  /**
+   * Stable array exposed as `VrSceneHandle.allGlobes` — mutated
+   * (push/pop) by setPanelCount when secondaries are added or
+   * removed. Returning the same reference each access avoids the
+   * per-frame allocation that `[globe, ...secondaries.map(...)]`
+   * would produce; vrInteraction reads this in its raycast and
+   * ray-visuals hot paths.
+   */
+  const allGlobesArr: THREE.Mesh[] = [globe]
 
   /**
    * Compute world-space position for slot `i` in an arc of `total`
@@ -981,23 +990,6 @@ export function createVrScene(
   }
 
   /**
-   * Reposition all globes (primary + secondaries) according to the
-   * arc layout. Called when panel count changes or when we need the
-   * positions refreshed. After the initial placement, secondaries
-   * track the primary via `syncSecondaryPositions()` each frame —
-   * this function only runs on panel-count changes.
-   */
-  function layoutArc(): void {
-    const total = 1 + secondaries.length
-    const pos0 = arcPosition(0, total)
-    globe.position.set(pos0.x, pos0.y, pos0.z)
-    for (let i = 0; i < secondaries.length; i++) {
-      const pos = arcPosition(i + 1, total)
-      secondaries[i].mesh.position.set(pos.x, pos.y, pos.z)
-    }
-  }
-
-  /**
    * Reposition secondaries relative to the primary's current
    * position. When the primary moves (user placed the globe on an
    * AR surface, or an anchor-pose sync wrote into globe.position),
@@ -1030,24 +1022,42 @@ export function createVrScene(
   return {
     scene,
     globe,
-    get allGlobes() {
-      return [globe, ...secondaries.map(s => s.mesh)]
-    },
+    allGlobes: allGlobesArr,
 
     setPanelCount(count) {
       const desired = Math.max(1, Math.min(4, count))
       const neededSecondaries = desired - 1
-      // Add secondaries if we need more
+      // Early-return when the count hasn't changed. vrSession calls
+      // this every frame, so this IS the common case; without the
+      // guard the per-frame syncSecondaryPositions below would run
+      // even in steady state.
+      //
+      // Critically: we DO NOT reposition the primary globe here
+      // (the old layoutArc call did). globe.position is written by
+      // the AR anchor-pose sync and by pinch-zoom-driven placement
+      // adjustments — those writes are authoritative, and a
+      // per-frame reset to GLOBE_POSITION would snap the globe back
+      // to its nominal spot every frame.
+      if (secondaries.length === neededSecondaries) return
+      // Add / remove secondaries until the counts match. Keep
+      // allGlobesArr in sync so consumers see the same array
+      // reference mutated in-place.
       while (secondaries.length < neededSecondaries) {
-        secondaries.push(createSecondaryGlobe())
+        const sg = createSecondaryGlobe()
+        secondaries.push(sg)
+        allGlobesArr.push(sg.mesh)
       }
-      // Remove extras if we need fewer
       while (secondaries.length > neededSecondaries) {
         const sg = secondaries.pop()!
         disposeSecondary(sg)
+        allGlobesArr.pop()
       }
-      // Reposition everyone in the arc layout
-      layoutArc()
+      // Position the new secondaries relative to the primary's
+      // current position. syncSecondaryPositions also runs every
+      // frame in update(), so this first placement just avoids a
+      // one-frame pop at the nominal spot when the secondary is
+      // first created.
+      syncSecondaryPositions()
     },
 
     setSlotTexture(slot, spec, onReady) {

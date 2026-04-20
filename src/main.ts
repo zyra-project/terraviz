@@ -1213,13 +1213,6 @@ class InteractiveSphere {
       getPanelTexture,
       getPanelTitle: (slot: number) =>
         this.panelStates[slot]?.dataset?.title ?? null,
-      promotePanel: (slot: number) => {
-        // Route through viewportManager — that's the source of
-        // truth for primary-slot state; main.ts's own
-        // onViewportPrimaryChange hook then rewires HUD / URL /
-        // playback to match.
-        this.viewports.promoteToPrimary(slot)
-      },
 
       onSessionEnd: () => {
         this.announce('Exited VR')

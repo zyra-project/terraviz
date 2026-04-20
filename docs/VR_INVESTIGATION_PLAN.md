@@ -14,11 +14,12 @@ interaction (surface-pinned drag, two-hand pinch+rotate, thumbstick
 zoom, flick-to-spin inertia), floating HUD, animated 3D loading
 scene. The 2D experience is unchanged when WebXR is absent.
 
-Remaining phases not yet built: multi-globe (2.5), in-VR dataset
-switching (3), VR tours (3.5), 2D↔VR camera sync (4), voice docent
-+ hand tracking (5), AR-native enhancements (spatial audio,
-annotations, capture/share, real-time data, co-presence, layered
-datasets).
+Remaining phases not yet built: in-VR dataset switching (3), VR
+tours (3.5), 2D↔VR camera sync (4), voice docent + hand tracking
+(5), AR-native enhancements (spatial audio, annotations,
+capture/share, real-time data, co-presence, layered datasets).
+4-globe support is a Phase 2.5 stretch (2-globe shipped; 4 gates
+on Quest decoder-budget testing).
 
 ---
 

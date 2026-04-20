@@ -57,8 +57,15 @@ export interface VrSessionContext {
   // inside VR. When the 2D app is in 2-globe layout, `getPanelCount`
   // returns 2, each panel has its own texture / title, and one
   // slot is designated primary (drives the HUD + playback
-  // transport). Hitting a non-primary globe in VR promotes its
-  // slot via `promotePanel` (Phase 2.5 commit 5).
+  // transport). The original Phase 2.5 plan also included a
+  // `promotePanel` hook for tap-to-promote (trigger on a secondary
+  // globe → that slot becomes primary), but the behaviour was
+  // intentionally removed in favour of "grab any globe to rotate,
+  // all spin in lockstep" — the original created a ping-pong loop
+  // where promoting swapped textures underneath the user's ray,
+  // which then promoted again on the next tap. A replacement UX
+  // (long-press, HUD-dot taps, Phase 3 browse panel routing) is
+  // future work; the context surface stays trimmed until then.
 
   /** Current number of globe panels (1/2/4). Sourced from the 2D viewport manager. */
   getPanelCount(): number
@@ -68,13 +75,6 @@ export interface VrSessionContext {
   getPanelTexture(slot: number): VrDatasetTexture | null
   /** Dataset title for a specific slot, for per-panel labels; null if no dataset. */
   getPanelTitle(slot: number): string | null
-  /**
-   * Promote a slot to primary. Called by vrInteraction when the
-   * user taps a non-primary globe. The 2D app's viewportManager
-   * owns the primary-index state; this callback forwards the
-   * change so both sides stay in sync.
-   */
-  promotePanel(slot: number): void
 
   /** Optional — fired after the session ends + resources are torn down. */
   onSessionEnd?: () => void
@@ -450,29 +450,10 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
   const interaction = createVrInteraction(THREE_, XRControllerModelFactory, {
     scene: scene.scene,
     globe: scene.globe,
-    // Scene slot 0 holds the 2D primary; slots 1..N hold non-primaries
-    // in 2D order, skipping the primary index. Mirror that mapping
-    // when reporting slot indices back to vrInteraction so the
-    // promote callback carries a 2D-space slot number.
+    // Raycast target list: primary + every secondary. vrInteraction
+    // treats them uniformly (grab any globe → rotate primary →
+    // scene.update copies the quaternion to all secondaries).
     getAllGlobes: () => scene.allGlobes,
-    getGlobeSlot: (mesh) => {
-      const globes = scene.allGlobes
-      const sceneSlot = globes.indexOf(mesh)
-      if (sceneSlot < 0) return -1
-      const primary = ctx.getPrimaryIndex()
-      if (sceneSlot === 0) return primary
-      // Secondary scene slots 1..N → non-primary panels in 2D order,
-      // skipping the primary. Same mapping as syncSecondaryTextures.
-      const panelCount = ctx.getPanelCount()
-      let walk = 0
-      for (let panelSlot = 0; panelSlot < panelCount; panelSlot++) {
-        if (panelSlot === primary) continue
-        walk++
-        if (walk === sceneSlot) return panelSlot
-      }
-      return -1
-    },
-    getPrimaryIndex: () => ctx.getPrimaryIndex(),
     hud,
     placement,
     renderer,
@@ -540,9 +521,6 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
       void session.end().catch(err =>
         logger.warn('[VR] session.end() from grip failed:', err),
       )
-    },
-    onPromotePanel: (slot) => {
-      ctx.promotePanel(slot)
     },
   })
 
