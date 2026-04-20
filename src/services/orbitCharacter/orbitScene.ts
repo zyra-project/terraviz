@@ -43,6 +43,45 @@ const SUB_RADIUS = 0.009
 const SUB_ORBIT_RADIUS = 0.14
 
 /**
+ * Scale presets were tuned for a moderately wide landscape (≈3:2).
+ * Wider viewports get the preset's vertical FOV as-is — extra
+ * horizontal margin is fine. Narrower viewports preserve horizontal
+ * coverage by scaling vertical FOV up, capped at FOV_MAX_DEGREES to
+ * avoid fish-eye distortion on the globe and character body.
+ */
+const FOV_REFERENCE_ASPECT = 1.5
+
+/**
+ * Hard cap on computed vertical FOV. Past ~85° a perspective camera
+ * introduces noticeable barrel distortion on foreground spheres. On
+ * extreme-portrait viewports at the planetary preset, this cap is
+ * tight — Earth can still clip at the margins. A portrait-reflow
+ * mode (Orbit stacked above Earth instead of beside it) is the
+ * proper fix for that case; tracked as a follow-up.
+ */
+const FOV_MAX_DEGREES = 85
+
+/**
+ * Compute the vertical FOV the camera should use given the current
+ * viewport aspect ratio.
+ *
+ * At `aspect >= FOV_REFERENCE_ASPECT`, return the preset's base
+ * vertical FOV unchanged (the preset was tuned for that aspect).
+ * At narrower aspects, scale vertical FOV up so the horizontal FOV
+ * stays at what the preset produced at the reference aspect — so
+ * content that was in-frame on landscape stays in-frame on portrait.
+ */
+export function computeEffectiveFov(baseVerticalFovDegrees: number, aspect: number): number {
+  if (aspect >= FOV_REFERENCE_ASPECT) return baseVerticalFovDegrees
+  const baseVFovRad = baseVerticalFovDegrees * Math.PI / 180
+  // Horizontal FOV the preset produces at the reference aspect.
+  const targetHFovRad = 2 * Math.atan(FOV_REFERENCE_ASPECT * Math.tan(baseVFovRad / 2))
+  // Vertical FOV needed to produce that horizontal FOV at current aspect.
+  const vFovRad = 2 * Math.atan(Math.tan(targetHFovRad / 2) / aspect)
+  return Math.min(vFovRad * 180 / Math.PI, FOV_MAX_DEGREES)
+}
+
+/**
  * Two-eye rig geometry, lifted from the prototype's design A/B
  * (commit `074ad86`). Each disc is ~half the single-eye disc; the
  * pair sits ±22 mm from head center so the inner edges have a ~16 mm
@@ -312,7 +351,7 @@ export function applyPreset(handles: OrbitSceneHandles, preset: ScaleKey): void 
   handles.earth.addTo(handles.scene)
   handles.camera.position.fromArray(pp.cameraPos)
   handles.camera.lookAt(new THREE.Vector3().fromArray(pp.cameraTarget))
-  handles.camera.fov = pp.fov
+  handles.camera.fov = computeEffectiveFov(pp.fov, handles.camera.aspect)
   handles.camera.updateProjectionMatrix()
   handles.appliedPreset = preset
 }

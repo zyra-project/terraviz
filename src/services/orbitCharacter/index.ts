@@ -19,6 +19,7 @@
 import * as THREE from 'three'
 import {
   buildScene,
+  computeEffectiveFov,
   createAnimationState,
   updateCharacter,
   startGesture,
@@ -264,7 +265,14 @@ export class OrbitController {
     const { clientWidth, clientHeight } = this.container
     if (clientWidth === 0 || clientHeight === 0) return
     this.renderer.setSize(clientWidth, clientHeight, false)
-    this.handles.camera.aspect = clientWidth / clientHeight
+    const aspect = clientWidth / clientHeight
+    this.handles.camera.aspect = aspect
+    // Adaptive vertical FOV: at landscape aspects the preset's fov
+    // reads as designed; at narrower aspects we scale vertical FOV
+    // up so horizontal coverage stays roughly what the preset sees
+    // in landscape. Keeps Orbit + Earth in-frame on portrait phones.
+    const preset = SCALE_PRESETS[this.scalePreset]
+    this.handles.camera.fov = computeEffectiveFov(preset.fov, aspect)
     this.handles.camera.updateProjectionMatrix()
   }
 
