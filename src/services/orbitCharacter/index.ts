@@ -64,9 +64,10 @@ export class OrbitController {
     this.renderer = new THREE.WebGLRenderer({ antialias: true })
     const isMobile = typeof window !== 'undefined'
       && window.matchMedia?.('(max-width: 768px)').matches
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2))
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2)
+    this.renderer.setPixelRatio(pixelRatio)
 
-    this.handles = buildScene(this.palette)
+    this.handles = buildScene({ palette: this.palette, pixelRatio })
     this.anim = createAnimationState(this.palette)
 
     this.resize()

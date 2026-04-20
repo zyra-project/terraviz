@@ -30,6 +30,7 @@ import {
 } from './orbitMaterials'
 import { PALETTES, type PaletteKey, type StateKey } from './orbitTypes'
 import { STATES } from './orbitStates'
+import { buildTrails, updateTrails, type TrailHandle } from './orbitTrails'
 
 const BODY_RADIUS = 0.075
 const SUB_RADIUS = 0.009
@@ -51,9 +52,17 @@ export interface OrbitSceneHandles {
   pupilGlow: THREE.Mesh
   pupilMaterials: PupilMaterials
   subSpheres: THREE.Mesh[]
+  trails: TrailHandle[]
 }
 
-export function buildScene(palette: PaletteKey = 'cyan'): OrbitSceneHandles {
+export interface BuildSceneOptions {
+  palette?: PaletteKey
+  pixelRatio?: number
+}
+
+export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
+  const palette = options.palette ?? 'cyan'
+  const pixelRatio = options.pixelRatio ?? (typeof window !== 'undefined' ? window.devicePixelRatio : 1)
   const scene = new THREE.Scene()
   scene.background = new THREE.Color(0x060810)
 
@@ -119,10 +128,12 @@ export function buildScene(palette: PaletteKey = 'cyan'): OrbitSceneHandles {
     subSpheres.push(mesh)
   }
 
+  const trails = buildTrails(scene, subSpheres, palette, pixelRatio)
+
   return {
     scene, camera, head, body, bodyBundle,
     eyeGroup, eyeBundle, pupil, pupilGlow, pupilMaterials,
-    subSpheres,
+    subSpheres, trails,
   }
 }
 
@@ -496,4 +507,9 @@ export function updateCharacter(
 
     sub.position.set(op.x + relX, op.y + relY, op.z + relZ)
   })
+
+  // ── Trails ────────────────────────────────────────────────────────
+  // Must run after sub-sphere positions finalize so the rolling
+  // buffer writes the actual current position, not last frame's.
+  updateTrails(handles.trails, handles.subSpheres, state, palette)
 }
