@@ -31,8 +31,11 @@ import { STATES } from './orbitStates'
 import { GESTURES, GESTURE_KEYS } from './orbitGestures'
 
 export type { PaletteKey, ScaleKey, StateKey, GestureKind } from './orbitTypes'
+export { PALETTES } from './orbitTypes'
 export { STATES, ALL_STATES, BEHAVIOR_STATES, EMOTION_STATES, GESTURE_STATES } from './orbitStates'
 export { GESTURES, GESTURE_KEYS } from './orbitGestures'
+
+export const PALETTE_KEYS: PaletteKey[] = ['cyan', 'green', 'amber', 'violet']
 
 export interface OrbitControllerOptions {
   container: HTMLElement

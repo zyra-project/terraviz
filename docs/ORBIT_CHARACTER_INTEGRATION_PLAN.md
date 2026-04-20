@@ -13,6 +13,8 @@ eventually drive animation states.
 
 **Status:** Phase 3 shipped (gesture overlay system: Shrug / Wave /
 Beckon / Affirm, with head-ownership rule and pupil-flash blend).
+Palette picker also shipped (all four palettes selectable — the
+machinery was already in place from Phase 2, just needed a UI).
 Phase 4 (flight + scale presets) is next. See the phase table in
 §8 for the full roadmap and where each commit landed.
 
@@ -402,7 +404,7 @@ of specific states.
 | 2  | `orbit: state vocabulary + sub-modes + blinks + trails`                 | `orbitStates`, state dispatch, `orbitTrails`, State select |
 | 3  | `orbit: gesture overlay system + Shrug/Wave/Beckon/Affirm`             | `orbitGestures`, `playGesture`, gesture buttons     |
 | 4  | `orbit: flight + scale presets + wireframe Earth context`              | `orbitFlight`, Fly button, scale control            |
-| 5  | `orbit: palettes + pupil tint blend`                                    | Palette radio group, tint easing                    |
+| 5  | `orbit: palette picker (machinery already shipped in Phase 2)`          | Palette swatch group in debug panel                 |
 | 6  | `orbit: a11y polish — reduced motion, aria-label, announcer`            | `prefers-reduced-motion`, live region wiring        |
 | 7  | `orbit: postMessage bridge + URL-param driver`                          | `window` bridge, URL parser for smoke tests         |
 | 8  | `orbit: Tools-menu entry linking to /orbit`                             | Link into the main app (pretty URL is automatic)    |

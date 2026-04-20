@@ -7,10 +7,11 @@
  * preset; Phase 5 adds the palette radio group.
  */
 
-import type { OrbitController, StateKey, GestureKind } from '../services/orbitCharacter'
+import type { OrbitController, StateKey, GestureKind, PaletteKey } from '../services/orbitCharacter'
 import {
   BEHAVIOR_STATES, EMOTION_STATES, GESTURE_STATES, STATES,
   GESTURE_KEYS, GESTURES,
+  PALETTE_KEYS, PALETTES,
 } from '../services/orbitCharacter'
 
 export function initOrbitDebugPanel(controller: OrbitController): void {
@@ -18,19 +19,19 @@ export function initOrbitDebugPanel(controller: OrbitController): void {
   const toggleBtn = document.querySelector<HTMLButtonElement>('.orbit-debug-toggle')
   const stateSelect = document.getElementById('orbit-debug-state') as HTMLSelectElement | null
   const gestureHost = document.getElementById('orbit-debug-gestures')
-  const paletteOut = document.getElementById('orbit-debug-palette')
+  const paletteHost = document.getElementById('orbit-debug-palettes')
 
-  if (!panel || !toggleBtn || !stateSelect || !gestureHost || !paletteOut) return
+  if (!panel || !toggleBtn || !stateSelect || !gestureHost || !paletteHost) return
 
   populateStateOptions(stateSelect)
   stateSelect.value = controller.getState()
-  paletteOut.textContent = controller.getPalette()
 
   stateSelect.addEventListener('change', () => {
     controller.setState(stateSelect.value as StateKey)
   })
 
   const gestureButtons = buildGestureButtons(gestureHost, controller)
+  buildPaletteSwatches(paletteHost, controller)
 
   toggleBtn.addEventListener('click', () => {
     const collapsed = panel.classList.toggle('is-collapsed')
@@ -65,6 +66,34 @@ function appendGroup(select: HTMLSelectElement, label: string, keys: StateKey[])
     group.appendChild(opt)
   })
   select.appendChild(group)
+}
+
+function buildPaletteSwatches(host: HTMLElement, controller: OrbitController): void {
+  host.innerHTML = ''
+  const updateChecked = () => {
+    const current = controller.getPalette()
+    host.querySelectorAll<HTMLButtonElement>('.orbit-debug-palette').forEach((btn) => {
+      btn.setAttribute('aria-checked', btn.dataset.palette === current ? 'true' : 'false')
+    })
+  }
+  for (const key of PALETTE_KEYS) {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'orbit-debug-palette'
+    btn.dataset.palette = key
+    btn.setAttribute('role', 'radio')
+    btn.setAttribute('aria-label', `${key} palette`)
+    btn.title = key
+    btn.style.setProperty('--swatch', PALETTES[key].accent)
+    btn.appendChild(document.createElement('span'))
+    btn.addEventListener('click', () => {
+      controller.setPalette(key as PaletteKey)
+      updateChecked()
+      announce(`Palette: ${key}`)
+    })
+    host.appendChild(btn)
+  }
+  updateChecked()
 }
 
 function buildGestureButtons(host: HTMLElement, controller: OrbitController): HTMLButtonElement[] {
