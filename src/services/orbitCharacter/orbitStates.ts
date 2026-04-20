@@ -1,10 +1,9 @@
 /**
  * STATES table — the persistent-state vocabulary for the Orbit character.
  *
- * Lifted verbatim from `docs/prototypes/orbit-prototype.jsx` after the
- * smart-quote normalization pass. The 14 tuned states below are the
- * output of nine prototype iterations; do not retune them here without
- * updating the design doc first.
+ * The 14 tuned states below are the output of nine prototype iterations;
+ * do not retune them here without updating the design doc first. The
+ * design doc is the spec of record now that the prototype is gone.
  *
  * See docs/ORBIT_CHARACTER_DESIGN.md §State and gesture catalog.
  */

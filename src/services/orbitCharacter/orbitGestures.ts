@@ -15,8 +15,9 @@
  * gesture ends, state head resumes from rest rather than snapping
  * mid-motion.
  *
- * Lifted verbatim from `docs/prototypes/orbit-prototype.jsx` —
- * the compute functions are tuned and should not be retyped.
+ * The four compute functions below are the output of nine prototype
+ * iterations — retuning any of them should come with a design-doc
+ * update first.
  */
 
 import * as THREE from 'three'

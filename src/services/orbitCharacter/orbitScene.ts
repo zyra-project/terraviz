@@ -1,11 +1,10 @@
 /**
  * Three.js scene + per-frame update for the Orbit character.
  *
- * Lifted from `docs/prototypes/orbit-prototype.jsx` after smart-quote
- * normalization. Preserves the nine-iteration tuning of orbit math,
- * pupil gaze, blink scheduling, and sub-mode dispatch. Phase 2 ships
- * the full STATES vocabulary; gestures (Phase 3), flight (Phase 4),
- * and palette system (Phase 5) come in subsequent commits.
+ * Owns the scene graph (head group with body + eye rigs, sub-spheres,
+ * trails, target marker) and the monolithic `updateCharacter` per-frame
+ * update — order matters, earlier computations feed later ones (e.g.
+ * pupil visibility depends on current blink amount).
  *
  * Scene graph (matches ORBIT_CHARACTER_DESIGN.md §Implementation sketch):
  *   Scene

@@ -1,13 +1,14 @@
 # Orbit Character — Integration Plan
 
 Companion to [`ORBIT_CHARACTER_DESIGN.md`](ORBIT_CHARACTER_DESIGN.md) and
-[`VR_INVESTIGATION_PLAN.md`](VR_INVESTIGATION_PLAN.md). The design doc and
-the nine-iteration React prototype at `docs/prototypes/orbit-prototype.jsx`
-(plus the self-contained demo at `docs/orbit-prototype.html`) established
-the character. This plan covers getting that work into a deployable
-artifact inside this repo — a standalone page viewable on our Cloudflare
-Pages and Tauri builds, with a clean controller API so the docent AI can
-eventually drive animation states.
+[`VR_INVESTIGATION_PLAN.md`](VR_INVESTIGATION_PLAN.md). The design doc
+plus a nine-iteration React prototype (retired from the tree now that
+porting is done; self-contained HTML demo at
+[`docs/orbit-prototype.html`](orbit-prototype.html) kept for design
+review) established the character. This plan covers getting that work
+into a deployable artifact inside this repo — a standalone page viewable
+on our Cloudflare Pages and Tauri builds, with a clean controller API so
+the docent AI can eventually drive animation states.
 
 **Branch:** `claude/orbit-character-integration-plan-p83Jc`
 
@@ -246,30 +247,24 @@ in the top-right; tap to open a full-width drawer. Same pattern as
 
 ## 5. Porting the prototype → first-class modules
 
-The prototype JSX is ~1400 lines; the standalone HTML demo is ~400
-lines. Most of the JSX lifts straight into TypeScript with one
-mechanical pass plus a React-plumbing strip:
+The port is done. This section documents how it happened as a
+historical record. The source prototype (`orbit-prototype.jsx`,
+~1400 lines) is no longer in the tree — the design doc plus the
+shipped code in `src/services/orbitCharacter/` are the spec of
+record now. The self-contained HTML demo at
+`docs/orbit-prototype.html` is kept for design-review sharing.
 
-**Smart-quote normalization.** `docs/prototypes/orbit-prototype.jsx`
-was pasted from a design tool, so its ASCII single quotes are
-actually U+2018 / U+2019 (357 of them, all used as code quotes).
-A one-time `scripts/normalize-orbit-prototype.ts` run replaces them
-with `'`. After that single pass, all 374 `{}`, 811 `()`, and 92
-`[]` balance — the source is structurally valid JS. The remaining
-non-ASCII (`— – “ ” … ° ✦ é ≤ ← →`) lives only inside comments and
-displayed strings and stays as-is.
-
-**What lifts verbatim (~850 LOC, ~60%):** the `STATES` table, the
+**What lifted verbatim (~850 LOC, ~60%):** the `STATES` table, the
 `GESTURES` compute functions with their tuned math, the ~141 lines
 of GLSL shader source (iridescent body, pupil glow, eye-lid
 control, point-sprite trail), the palette table, and the math
 helpers (smoothstep, Bézier, blink scheduling, pupil-tint blend).
-These are the parts the nine iterations actually tuned; we copy
-them byte-for-byte rather than risk retuning.
+These were the parts the nine iterations actually tuned; they were
+copied byte-for-byte rather than retyped.
 
-**What gets a structural rewrite (~550 LOC, ~40%):** 58 React hook
-calls and 50 JSX elements. The translation is mechanical and the
-pattern is uniform:
+**What got a structural rewrite (~550 LOC, ~40%):** 58 React hook
+calls and 50 JSX elements. The translation was mechanical and the
+pattern uniform:
 
 - `useEffect(setup, [])` → class constructor
 - `useRef<THREE.Mesh>()` → instance field

@@ -1,10 +1,10 @@
 /**
  * Materials and shaders for the Orbit character.
  *
- * Lifted from `docs/prototypes/orbit-prototype.jsx` after a one-time
- * ASCII-quote normalization pass. The GLSL is byte-for-byte identical
- * to the prototype so the nine-iteration visual tuning is preserved.
- * See docs/ORBIT_CHARACTER_INTEGRATION_PLAN.md §5.
+ * The iridescent body fresnel, eye-field lid-control shader, pupil
+ * glow, and point-sprite trail GLSL below are the output of nine
+ * prototype iterations. Retuning any of them should come with a
+ * design-doc update first.
  */
 
 import * as THREE from 'three'
