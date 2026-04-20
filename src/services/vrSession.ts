@@ -493,6 +493,10 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
       } else if (action.kind === 'select') {
         ctx.loadDataset(action.datasetId)
         browse.setVisible(false)
+      } else if (action.kind === 'category') {
+        // null = user tapped the active chip → clear filter.
+        // non-null = filter to that category.
+        browse.setCategoryFilter(action.category)
       }
     },
     onHudAction: (action) => {
