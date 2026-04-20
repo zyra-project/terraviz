@@ -61,3 +61,78 @@ export const ALL_STATES: StateKey[] = [
   ...EMOTION_STATES,
   ...GESTURE_STATES,
 ]
+
+// -----------------------------------------------------------------------
+// EXPRESSIONS — procedural squash/stretch parameters per state.
+//
+// Kept separate from STATES on purpose: STATES encodes *motion*
+// (orbit speed, pupil size, lid angles) and is locked pending a
+// design-doc update. EXPRESSIONS encodes *shape* (breathing cadence,
+// melt, hop, gasp, talk pulse) and is additive — every state falls
+// back to EXPRESSION_DEFAULT unless it names an override.
+//
+// Adding a new state only requires (a) extending `StateKey` in
+// orbitTypes.ts and (b) adding the motion row to STATES; omitting
+// it from EXPRESSIONS just means it breathes at the default pace.
+// Adding new fields to ExpressionConfig defaults sanely via the
+// spread in expressionFor, so old entries don't need to be
+// retrofitted. See `docs/ORBIT_CHARACTER_VINYL_REDESIGN.md` §5.
+// -----------------------------------------------------------------------
+
+export interface ExpressionConfig {
+  /** Breath cycles per second. */
+  breathRate: number
+  /** Peak Y-scale offset during breathing. X/Z move inversely. */
+  breathAmp: number
+  /**
+   * Extra X/Z widening for "melted" low-energy states (SLEEPY,
+   * SOLEMN). Added to the X/Z scale on top of the breathing
+   * offset. Leave at 0 for normal states.
+   */
+  meltXZ: number
+  /**
+   * Rhythmic Y hop layered on top of the breathing curve — reads as
+   * "barely contained excitement." Triggered at twice the breath
+   * rate. Use 0 for most states; EXCITED sets a small non-zero amp.
+   */
+  hopAmp: number
+  /**
+   * One-shot spring when entering this state — a sharp Y stretch
+   * followed by a damped oscillation back to rest. Used by
+   * SURPRISED.
+   */
+  surpriseGasp: boolean
+  /**
+   * Pulse sub-sphere scales in time with the pupil pulse. Reads as
+   * the satellites "breathing with the voice." Used by TALKING.
+   */
+  talkPulse: boolean
+}
+
+export const EXPRESSION_DEFAULT: ExpressionConfig = {
+  breathRate: 0.8,
+  breathAmp: 0.012,
+  meltXZ: 0,
+  hopAmp: 0,
+  surpriseGasp: false,
+  talkPulse: false,
+}
+
+/**
+ * Per-state overrides — only list the fields that differ from
+ * EXPRESSION_DEFAULT. Every state not mentioned here gets the
+ * default silently (extensibility requirement).
+ */
+export const EXPRESSIONS: Partial<Record<StateKey, Partial<ExpressionConfig>>> = {
+  SLEEPY:    { breathRate: 0.35, breathAmp: 0.018, meltXZ: 0.025 },
+  SOLEMN:    { breathRate: 0.40, breathAmp: 0.015, meltXZ: 0.018 },
+  EXCITED:   { breathRate: 2.4,  breathAmp: 0.006, hopAmp: 0.010 },
+  SURPRISED: { breathRate: 0.8,  breathAmp: 0.004, surpriseGasp: true },
+  THINKING:  { breathRate: 0.55, breathAmp: 0.014 },
+  TALKING:   { talkPulse: true },
+}
+
+/** Merge the per-state override (if any) with EXPRESSION_DEFAULT. */
+export function expressionFor(state: StateKey): ExpressionConfig {
+  return { ...EXPRESSION_DEFAULT, ...(EXPRESSIONS[state] ?? {}) }
+}

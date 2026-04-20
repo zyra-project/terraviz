@@ -23,13 +23,15 @@ import {
   createBodyMaterial,
   createEyeFieldMaterial,
   createPupilMaterials,
+  createCatchlightMaterial,
+  createSubSphereMaterial,
   type BodyMaterialBundle,
   type EyeFieldMaterialBundle,
   type PupilMaterials,
 } from './orbitMaterials'
 import { createPhotorealEarth, type PhotorealEarthHandle } from '../photorealEarth'
 import { PALETTES, type EyeMode, type PaletteKey, type ScaleKey, type StateKey } from './orbitTypes'
-import { STATES } from './orbitStates'
+import { STATES, expressionFor } from './orbitStates'
 import { buildTrails, updateTrails, type TrailHandle } from './orbitTrails'
 import { GESTURES, type GestureKind, type GestureFrame } from './orbitGestures'
 import {
@@ -39,7 +41,7 @@ import {
 
 const BODY_RADIUS = 0.075
 const SUB_RADIUS = 0.009
-const SUB_ORBIT_RADIUS = 0.14
+const SUB_ORBIT_RADIUS = 0.11
 
 /**
  * Scale presets were tuned for a moderately wide landscape (≈3:2).
@@ -81,29 +83,48 @@ export function computeEffectiveFov(baseVerticalFovDegrees: number, aspect: numb
 }
 
 /**
- * Two-eye rig geometry, lifted from the prototype's design A/B
- * (commit `074ad86`). Each disc is ~half the single-eye disc; the
- * pair sits ±22 mm from head center so the inner edges have a ~16 mm
- * gap that reads as "two distinct eyes" rather than one wide one.
+ * Two-eye rig geometry — vinyl redesign tuning.
  *
- * `EYE_PAIR_JITTER_SCALE` is the ratio of paired-disc radius to
- * single-disc radius (0.014 / 0.030 ≈ 0.47). Pupil excursion +
- * jitter multiply by this so the pupil stays inside the smaller
- * disc at any gaze angle while the un-scaled state-driven yaw /
- * pitch values keep working unchanged.
+ * Eyes sit **lower and wider** on the sphere's face to trigger the
+ * neotenous "cute" proportions that the concept art reads as. Both
+ * discs, glows, and pupils are scaled up from the original spectral
+ * paired-eye rig. See `docs/ORBIT_CHARACTER_VINYL_REDESIGN.md` §Face.
+ *
+ * `EYE_PAIR_JITTER_SCALE` is the ratio of paired-disc radius to the
+ * legacy single-disc radius (0.018 / 0.030 = 0.60). Pupil excursion +
+ * jitter multiply by this so the pupil stays inside the smaller disc
+ * at any gaze angle while the un-scaled state-driven yaw / pitch
+ * values keep working unchanged.
  */
-const EYE_PAIR_OFFSET_X = 0.022
-const EYE_PAIR_DISC_RADIUS = 0.014
-const EYE_PAIR_GLOW_RADIUS = 0.0065
-const EYE_PAIR_PUPIL_RADIUS = 0.0040
-const EYE_PAIR_JITTER_SCALE = 0.47
+const EYE_PAIR_OFFSET_X = 0.028
+const EYE_PAIR_OFFSET_Y = -0.012
+const EYE_PAIR_DISC_RADIUS = 0.018
+const EYE_PAIR_GLOW_RADIUS = 0.0090
+const EYE_PAIR_PUPIL_RADIUS = 0.0055
+const EYE_PAIR_JITTER_SCALE = 0.60
 
 /**
- * One eye in either configuration — the single-mode rig (jitterScale
- * 1.0) or one half of the two-mode pair (jitterScale 0.47). Per-frame
- * pupil writes iterate every rig regardless of which is currently
- * visible so toggling `eyeMode` doesn't snap pupil position; the
- * non-visible rigs just don't render.
+ * Catchlight placement within an eye disc. Two per eye — a larger
+ * primary highlight in the upper-right quadrant, a smaller secondary
+ * in the lower-left. The two-highlight convention is what sells
+ * "wet, alive" eyes in animation rigs; it also gives the subtle
+ * cross-pupil gleam visible in the concept art.
+ */
+const CATCHLIGHT_PRIMARY_OFFSET_X = 0.0020
+const CATCHLIGHT_PRIMARY_OFFSET_Y = 0.0018
+const CATCHLIGHT_PRIMARY_RADIUS = 0.0010
+const CATCHLIGHT_PRIMARY_OPACITY = 0.95
+const CATCHLIGHT_SECONDARY_OFFSET_X = -0.0010
+const CATCHLIGHT_SECONDARY_OFFSET_Y = -0.0008
+const CATCHLIGHT_SECONDARY_RADIUS = 0.0005
+const CATCHLIGHT_SECONDARY_OPACITY = 0.55
+
+/**
+ * One eye in the paired rig. The single-lens configuration is
+ * retired as part of the vinyl redesign (see
+ * `docs/ORBIT_CHARACTER_VINYL_REDESIGN.md` §Face). Per-frame pupil
+ * writes iterate every rig so adding rigs later (e.g. a third
+ * expressive cue) stays one-liner-simple.
  */
 export interface EyeRig {
   group: THREE.Group
@@ -118,21 +139,29 @@ export interface OrbitSceneHandles {
   head: THREE.Group
   body: THREE.Mesh
   bodyBundle: BodyMaterialBundle
-  eyeGroup: THREE.Group
   eyeBundle: EyeFieldMaterialBundle
-  pupil: THREE.Mesh
-  pupilGlow: THREE.Mesh
   pupilMaterials: PupilMaterials
   /**
-   * Every eye rig built into the scene — single-mode at index 0,
-   * paired left/right at indices 1/2. Materials are shared across
-   * rigs (`eyeBundle` for the disc, `pupilMaterials` for pupil +
-   * glow), so palette / lid / opacity writes propagate everywhere
+   * Left + right eye rigs. Materials are shared across rigs
+   * (`eyeBundle` for the disc, `pupilMaterials` for pupil + glow),
+   * so palette / lid / opacity writes propagate everywhere
    * automatically. Per-frame position+scale writes iterate this
-   * list; the visibility flag on `.group` controls rendering.
+   * list.
    */
   eyeRigs: EyeRig[]
   subSpheres: THREE.Mesh[]
+  /**
+   * Per-sub material bundle — same gradient uniforms as the body.
+   * Index aligns with `subSpheres`. Palette-propagate writes walk
+   * both in step.
+   */
+  subBundles: BodyMaterialBundle[]
+  /**
+   * Scene key light. Cast shadows from sub-spheres onto the body
+   * (eclipse cue). Held on the handle so the controller can tweak
+   * intensity or reparent it without touching scene traversal.
+   */
+  keyLight: THREE.DirectionalLight
   trails: TrailHandle[]
   /**
    * Photoreal Earth stack — diffuse + night lights + atmosphere +
@@ -168,11 +197,26 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
   camera.position.fromArray(initial.cameraPos)
   camera.lookAt(new THREE.Vector3().fromArray(initial.cameraTarget))
 
-  // Lights come from the photoreal Earth stack (see below) — it
-  // ships its own ambient + sun directional so day/night terminator
-  // and shader lighting stay in sync. Orbit's body/eye/subs/trails
-  // use custom shaders or MeshBasicMaterial; they ignore scene
-  // lights entirely, so no Orbit-specific fill lights are needed.
+  // Vinyl redesign: the body + sub-spheres use MeshStandardMaterial
+  // which needs scene lighting. We add an ambient (so the shaded
+  // side of Orbit still carries the gradient) and a directional key
+  // that casts shadows. The photoreal Earth ships its own internal
+  // ambient + sun for its own materials; those don't reach Orbit's
+  // meshes because they're parented under the Earth handle's group.
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.55)
+  scene.add(ambientLight)
+  const keyLight = new THREE.DirectionalLight(0xfff6e8, 1.25)
+  keyLight.position.set(0.18, 0.30, 0.45)
+  keyLight.castShadow = true
+  keyLight.shadow.mapSize.set(512, 512)
+  // Tight frustum around the character — ignores Earth, keeps shadow
+  // resolution high where it matters (sub shadows on the face).
+  const shadowCam = keyLight.shadow.camera
+  shadowCam.left = -0.28; shadowCam.right = 0.28
+  shadowCam.top = 0.28; shadowCam.bottom = -0.28
+  shadowCam.near = 0.10; shadowCam.far = 1.20
+  shadowCam.updateProjectionMatrix()
+  scene.add(keyLight)
 
   const head = new THREE.Group()
   scene.add(head)
@@ -182,65 +226,43 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
     new THREE.IcosahedronGeometry(BODY_RADIUS, 4),
     bodyBundle.material,
   )
+  body.castShadow = true
+  body.receiveShadow = true
   head.add(body)
 
-  const eyeGroup = new THREE.Group()
-  head.add(eyeGroup)
-
   const eyeBundle = createEyeFieldMaterial(palette)
-  const eyeDisc = new THREE.Mesh(
-    new THREE.CircleGeometry(0.030, 64),
-    eyeBundle.material,
-  )
-  eyeDisc.position.z = BODY_RADIUS + 0.0003
-  eyeGroup.add(eyeDisc)
-
   const pupilMaterials = createPupilMaterials(palette)
-  const pupilGlow = new THREE.Mesh(
-    new THREE.CircleGeometry(0.014, 48),
-    pupilMaterials.glowMat,
-  )
-  pupilGlow.position.z = BODY_RADIUS + 0.0005
-  eyeGroup.add(pupilGlow)
 
-  const pupil = new THREE.Mesh(
-    new THREE.CircleGeometry(0.008, 48),
-    pupilMaterials.pupilMat,
-  )
-  pupil.position.z = BODY_RADIUS + 0.0006
-  eyeGroup.add(pupil)
+  // Paired eyes — the vinyl redesign's permanent face configuration.
+  // Placed lower (Y offset) and wider (X offset) than the original
+  // rig so the character reads as neotenous and approachable. See
+  // `docs/ORBIT_CHARACTER_VINYL_REDESIGN.md` §Face.
+  const eyeLeft = buildPairedEye(head, eyeBundle, pupilMaterials, -EYE_PAIR_OFFSET_X, EYE_PAIR_OFFSET_Y)
+  const eyeRight = buildPairedEye(head, eyeBundle, pupilMaterials, +EYE_PAIR_OFFSET_X, EYE_PAIR_OFFSET_Y)
 
-  // Paired eye rig — built alongside the single eye so toggling is a
-  // visibility flip, not a rebuild. Materials share with the single
-  // rig (eyeBundle, pupilMaterials) so palette/lid/opacity writes
-  // propagate automatically.
-  const eyeLeft = buildPairedEye(head, eyeBundle, pupilMaterials, -EYE_PAIR_OFFSET_X)
-  const eyeRight = buildPairedEye(head, eyeBundle, pupilMaterials, +EYE_PAIR_OFFSET_X)
-  // Default to the paired-eye config — controller defaults to 'two'.
-  // updateCharacter writes visibility every frame from input.eyeMode,
-  // so this initial state only matters before the first update tick.
-  eyeGroup.visible = false
-  eyeLeft.group.visible = true
-  eyeRight.group.visible = true
-
-  const eyeRigs: EyeRig[] = [
-    { group: eyeGroup, pupil, glow: pupilGlow, jitterScale: 1.0 },
-    eyeLeft,
-    eyeRight,
-  ]
+  const eyeRigs: EyeRig[] = [eyeLeft, eyeRight]
 
   const subSpheres: THREE.Mesh[] = []
+  const subBundles: BodyMaterialBundle[] = []
   for (let i = 0; i < 2; i++) {
-    const mat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(PALETTES[palette].accent),
-    })
+    const bundle = createSubSphereMaterial(palette)
     const mesh = new THREE.Mesh(
       new THREE.IcosahedronGeometry(SUB_RADIUS, 2),
-      mat,
+      bundle.material,
     )
+    mesh.castShadow = true
+    mesh.receiveShadow = false
     mesh.userData.phaseOffset = (i / 2) * Math.PI * 2
+    // Per-sub orbital basis — two distinct crossing ellipses. Stored
+    // once so the per-frame path is a pair of basis * cos/sin adds
+    // with no trig of its own. Tilts diverge (one positive, one
+    // negative) so the orbits read as crossing when viewed head-on.
+    mesh.userData.orbitBasis = i === 0
+      ? makeOrbitBasis(+0.62, 0.0)
+      : makeOrbitBasis(-0.87, Math.PI / 2.3)
     scene.add(mesh)
     subSpheres.push(mesh)
+    subBundles.push(bundle)
   }
 
   const trails = buildTrails(scene, subSpheres, palette, pixelRatio)
@@ -269,9 +291,9 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
 
   return {
     scene, camera, head, body, bodyBundle,
-    eyeGroup, eyeBundle, pupil, pupilGlow, pupilMaterials,
+    eyeBundle, pupilMaterials,
     eyeRigs,
-    subSpheres, trails,
+    subSpheres, subBundles, keyLight, trails,
     earth,
     targetMarker, targetHalo, targetMat, targetHaloMat,
     appliedPreset: initialPreset,
@@ -279,20 +301,38 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
 }
 
 /**
+ * Build an orthonormal basis for a sub-sphere's idle-orbit plane.
+ * `tilt` rotates the plane around the Z axis (so different subs
+ * trace visibly different ellipses); `twist` rotates within that
+ * plane so the two subs aren't phase-synced at t=0.
+ */
+function makeOrbitBasis(tilt: number, twist: number): { u: THREE.Vector3; v: THREE.Vector3 } {
+  // Base basis: X-Z plane. Tilt rotates it around Z. Twist spins
+  // around the plane's normal so t=0 positions differ per sub.
+  const cosT = Math.cos(tilt), sinT = Math.sin(tilt)
+  const cosW = Math.cos(twist), sinW = Math.sin(twist)
+  const u = new THREE.Vector3(cosT * cosW, sinT * cosW, sinW)
+  const v = new THREE.Vector3(-cosT * sinW, -sinT * sinW, cosW)
+  return { u, v }
+}
+
+/**
  * Build one half of the paired-eye configuration. Each side gets its
- * own group with its own disc, glow, and pupil, parented to the head
- * at an X offset so gaze rotation happens around each eye's own
- * pivot. Materials are shared with the single-eye setup so
- * blink / opacity / palette updates are one-write.
+ * own group with disc, glow, pupil, and two catchlights, parented to
+ * the head at an (x, y) offset so gaze rotation happens around each
+ * eye's own pivot. The catchlights sit at fixed positions relative
+ * to the group (NOT the pupil), so they stay put as the pupil
+ * sweeps — which is what sells the "wet, alive" read.
  */
 function buildPairedEye(
   head: THREE.Group,
   eyeBundle: EyeFieldMaterialBundle,
   pupilMaterials: PupilMaterials,
   offsetX: number,
+  offsetY: number,
 ): EyeRig {
   const group = new THREE.Group()
-  group.position.set(offsetX, 0, 0)
+  group.position.set(offsetX, offsetY, 0)
   head.add(group)
   const disc = new THREE.Mesh(
     new THREE.CircleGeometry(EYE_PAIR_DISC_RADIUS, 48),
@@ -312,6 +352,32 @@ function buildPairedEye(
   )
   pupil.position.z = BODY_RADIUS + 0.0006
   group.add(pupil)
+
+  // Primary catchlight — larger, upper-right quadrant of the eye.
+  const catchPrimary = new THREE.Mesh(
+    new THREE.CircleGeometry(CATCHLIGHT_PRIMARY_RADIUS, 16),
+    createCatchlightMaterial(CATCHLIGHT_PRIMARY_OPACITY),
+  )
+  catchPrimary.position.set(
+    CATCHLIGHT_PRIMARY_OFFSET_X,
+    CATCHLIGHT_PRIMARY_OFFSET_Y,
+    BODY_RADIUS + 0.0008,
+  )
+  group.add(catchPrimary)
+  // Secondary catchlight — smaller, lower-left. Animator convention:
+  // two highlights (primary + smaller secondary) reads as "wet" and
+  // adds the approachable gleam called out in the design doc.
+  const catchSecondary = new THREE.Mesh(
+    new THREE.CircleGeometry(CATCHLIGHT_SECONDARY_RADIUS, 12),
+    createCatchlightMaterial(CATCHLIGHT_SECONDARY_OPACITY),
+  )
+  catchSecondary.position.set(
+    CATCHLIGHT_SECONDARY_OFFSET_X,
+    CATCHLIGHT_SECONDARY_OFFSET_Y,
+    BODY_RADIUS + 0.0008,
+  )
+  group.add(catchSecondary)
+
   return { group, pupil, glow, jitterScale: EYE_PAIR_JITTER_SCALE }
 }
 
@@ -391,6 +457,29 @@ export interface AnimationState {
   // Active gesture overlay (null when none playing). startTime is in
   // the controller's `time` clock, not wall-clock.
   activeGesture: { kind: GestureKind; startTime: number } | null
+
+  // ── Squash & stretch state ──────────────────────────────────────
+  /**
+   * Last frame's head position in world space. Used to compute
+   * velocity for the flight smear — we don't want to reach into
+   * `FlightState` because the sway offset is applied on top of the
+   * flight-rest position and we want the full motion vector.
+   */
+  prevHeadPos: THREE.Vector3
+  /** -1 when inactive. `time` when the SURPRISED gasp spring started. */
+  surpriseStart: number
+  /** -1 when inactive. `time` when the arrival squash pulse started. */
+  arrivalSquashStart: number
+  /**
+   * Last frame's `input.state` — used to detect state entry so
+   * `surpriseGasp` fires on the transition INTO SURPRISED, not on
+   * every frame SURPRISED is active.
+   */
+  lastStateKey: StateKey
+  /** Eased body scale — lerps toward the procedural target each frame. */
+  bodyScaleX: number
+  bodyScaleY: number
+  bodyScaleZ: number
 }
 
 export function createAnimationState(palette: PaletteKey = 'cyan'): AnimationState {
@@ -415,6 +504,13 @@ export function createAnimationState(palette: PaletteKey = 'cyan'): AnimationSta
     wanderTimer: 0,
     currentPupilColor: new THREE.Color(PALETTES[palette].accent),
     activeGesture: null,
+    prevHeadPos: new THREE.Vector3(),
+    surpriseStart: -1,
+    arrivalSquashStart: -1,
+    lastStateKey: 'IDLE',
+    bodyScaleX: 1,
+    bodyScaleY: 1,
+    bodyScaleZ: 1,
   }
 }
 
@@ -441,6 +537,12 @@ export interface UpdateInput {
   state: StateKey
   palette: PaletteKey
   scalePreset: ScaleKey
+  /**
+   * Eye configuration — retained in the input shape for API stability
+   * but narrowed to a single literal (`'two'`) by the vinyl redesign.
+   * The field is effectively informational; there is no longer a
+   * per-frame visibility flip.
+   */
   eyeMode: EyeMode
   flight: FlightState
   time: number
@@ -494,15 +596,10 @@ export function updateCharacter(
   anim: AnimationState,
   input: UpdateInput,
 ): void {
-  const { state, palette, scalePreset, eyeMode, flight, time, dt, mouseX, mouseY, reducedMotion } = input
+  const { state, palette, scalePreset, flight, time, dt, mouseX, mouseY, reducedMotion } = input
   const s = STATES[state]
+  const expr = expressionFor(state)
 
-  // Eye-mode visibility: single-rig at index 0, pair at indices 1/2.
-  // Cheap to write every frame and keeps the toggle responsive.
-  const twoEyes = eyeMode === 'two'
-  handles.eyeRigs[0].group.visible = !twoEyes
-  handles.eyeRigs[1].group.visible = twoEyes
-  handles.eyeRigs[2].group.visible = twoEyes
   const p = PALETTES[palette]
   const preset = SCALE_PRESETS[scalePreset]
 
@@ -565,16 +662,22 @@ export function updateCharacter(
     }
   }
 
-  // ── Palette propagation (body + eye-field + sub-spheres) ──────────
+  // ── Palette propagation (vinyl gradient + eye-field lid color) ───
+  // Body + subs share the MeshStandardMaterial gradient pipeline, so
+  // a palette swap just writes the warm/cool anchor pair onto each
+  // bundle's uniforms. The eye-field's `uBodyColor` mirrors `warm`
+  // so lids close to the top-of-face hue without a seam.
+  handles.bodyBundle.uniforms.uWarm.value.set(p.warm)
+  handles.bodyBundle.uniforms.uCool.value.set(p.cool)
   handles.bodyBundle.uniforms.uBaseColor.value.set(p.base)
   handles.bodyBundle.uniforms.uAccentColor.value.set(p.accent)
   handles.bodyBundle.uniforms.uGlowColor.value.set(p.glow)
-  handles.eyeBundle.uniforms.uBodyColor.value.set(p.base)
+  handles.eyeBundle.uniforms.uBodyColor.value.set(p.warm)
   handles.eyeBundle.uniforms.uBodyAccent.value.set(p.accent)
-  handles.subSpheres.forEach((sub) => {
-    const mat = sub.material as THREE.MeshBasicMaterial
-    mat.color.set(p.accent)
-  })
+  for (const bundle of handles.subBundles) {
+    bundle.uniforms.uWarm.value.set(p.warm)
+    bundle.uniforms.uCool.value.set(p.cool)
+  }
   handles.bodyBundle.uniforms.uTime.value = time
 
   // Photoreal Earth drives its own sun direction + atmosphere/
@@ -908,11 +1011,16 @@ export function updateCharacter(
       relY = phaseY
       relZ = 0.02
     } else {
-      // orbit (default)
+      // orbit (default — vinyl redesign: two distinct crossing
+      // ellipses via each sub's precomputed orbital basis). Tight,
+      // steady orbits that read as "satellites" rather than swarm.
+      const basis = sub.userData.orbitBasis as { u: THREE.Vector3; v: THREE.Vector3 }
       const phase = anim.orbitPhaseAccum * 2 + pOff
-      relX = Math.cos(phase) * r
-      relY = Math.sin(phase * 0.7) * r * 0.3
-      relZ = Math.sin(phase) * r
+      const cp = Math.cos(phase) * r
+      const sp = Math.sin(phase) * r
+      relX = basis.u.x * cp + basis.v.x * sp
+      relY = basis.u.y * cp + basis.v.y * sp
+      relZ = basis.u.z * cp + basis.v.z * sp
     }
 
     sub.position.set(op.x + relX, op.y + relY, op.z + relZ)
@@ -922,7 +1030,7 @@ export function updateCharacter(
   // Must run after sub-sphere positions finalize so the rolling
   // buffer writes the actual current position, not last frame's.
   // Flight adds a 0.6 boost so the journey leaves a visible arc.
-  updateTrails(handles.trails, handles.subSpheres, state, palette, inFlight ? 0.6 : 0)
+  updateTrails(handles.trails, handles.subSpheres, state, palette, time, inFlight ? 0.6 : 0)
 
   // ── Target marker (POINTING / PRESENTING) ────────────────────────
   const wantMarker = (state === 'POINTING' || state === 'PRESENTING') && !inFlight ? 1 : 0
@@ -936,4 +1044,105 @@ export function updateCharacter(
   const haloScale = featureScale * (1.0 + Math.sin(time * 2.5) * 0.15)
   handles.targetHalo.scale.setScalar(haloScale)
   handles.targetMarker.scale.setScalar(featureScale)
+
+  // ── Squash & stretch (body + satellite anthropomorphism) ─────────
+  // Runs LAST so nothing overwrites the per-frame scale. Each term
+  // is an orthogonal modifier — breathing is always on; the others
+  // (melt, hop, smear, gasp, arrival, affirm) add to the base. Read
+  // from `expressionFor(state)` so new states auto-inherit sane
+  // defaults (see `docs/ORBIT_CHARACTER_VINYL_REDESIGN.md` §5).
+
+  // Velocity vs. last frame — used by flight smear. Computed before
+  // prevHeadPos is updated.
+  const dx = handles.head.position.x - anim.prevHeadPos.x
+  const dy = handles.head.position.y - anim.prevHeadPos.y
+  const dz = handles.head.position.z - anim.prevHeadPos.z
+  const speed = Math.sqrt(dx * dx + dy * dy + dz * dz) / Math.max(dt, 1e-4)
+  anim.prevHeadPos.copy(handles.head.position)
+
+  // State-entry detection for one-shot gasp. Reset inactive timers
+  // when state changes away from their owners so re-entry re-fires.
+  if (state !== anim.lastStateKey) {
+    if (expr.surpriseGasp && state === 'SURPRISED') {
+      anim.surpriseStart = time
+    }
+    anim.lastStateKey = state
+  }
+  // Arrival pulse: flight just ended this frame. 'rest'/'atEarth'
+  // are the landing modes; we check whether the PREVIOUS frame was
+  // mid-flight by observing `inFlight` above and the current `mode`.
+  // Simpler: when `flight.mode` changes into a landed state AND we
+  // had velocity last frame, trigger the pulse. Done below with
+  // `mode` from updateFlight already computed above.
+  if ((mode === 'rest' || mode === 'atEarth') && anim.arrivalSquashStart < 0 && speed > 0.8) {
+    anim.arrivalSquashStart = time
+  }
+
+  // Breathing — the always-on base.
+  const breathPhase = time * expr.breathRate * Math.PI * 2
+  const yAmp = expr.breathAmp * Math.sin(breathPhase)
+  const hopPhase = breathPhase * 2
+  const hop = expr.hopAmp * Math.max(0, Math.sin(hopPhase))
+  let targetSx = 1 + expr.meltXZ - yAmp * 0.3
+  let targetSy = 1 + yAmp + hop
+  let targetSz = 1 + expr.meltXZ - yAmp * 0.3
+
+  // Flight smear — stretch along Z (approximate motion axis),
+  // squash X/Y. Reduced motion dials it down to keep the frame
+  // honest for vestibular-sensitive viewers.
+  if (inFlight && !reducedMotion) {
+    const k = Math.min(speed * 0.08, 0.28)
+    targetSz *= 1 + k
+    targetSx *= 1 - k * 0.5
+    targetSy *= 1 - k * 0.5
+  }
+
+  // Arrival squash — brief flat pulse after landing.
+  if (anim.arrivalSquashStart >= 0) {
+    const tau = time - anim.arrivalSquashStart
+    if (tau > 0.35) {
+      anim.arrivalSquashStart = -1
+    } else {
+      const env = Math.exp(-10 * tau) * Math.sin(18 * tau)
+      targetSy *= 1 - 0.08 * Math.max(0, env)
+      targetSx *= 1 + 0.05 * Math.max(0, env)
+      targetSz *= 1 + 0.05 * Math.max(0, env)
+    }
+  }
+
+  // Surprise gasp — sharp stretch + damped spring back.
+  if (anim.surpriseStart >= 0) {
+    const tau = time - anim.surpriseStart
+    if (tau > 1.2) {
+      anim.surpriseStart = -1
+    } else if (!reducedMotion) {
+      const env = Math.exp(-5 * tau) * Math.cos(14 * tau)
+      targetSy *= 1 + 0.12 * env
+      targetSx *= 1 - 0.06 * env
+      targetSz *= 1 - 0.06 * env
+    }
+  }
+
+  // Affirm-nod weight — brief squash at the nod's low point.
+  if (anim.activeGesture?.kind === 'affirm') {
+    const gT = (time - anim.activeGesture.startTime) / GESTURES.affirm.duration
+    if (gT > 0.45 && gT < 0.55) {
+      targetSy *= 0.96
+    }
+  }
+
+  anim.bodyScaleX = lerp(anim.bodyScaleX, targetSx, 0.25)
+  anim.bodyScaleY = lerp(anim.bodyScaleY, targetSy, 0.25)
+  anim.bodyScaleZ = lerp(anim.bodyScaleZ, targetSz, 0.25)
+  handles.body.scale.set(anim.bodyScaleX, anim.bodyScaleY, anim.bodyScaleZ)
+
+  // Satellite anthropomorphism — subs pulse with the TALKING voice.
+  if (expr.talkPulse && !reducedMotion) {
+    const subPulse = 1 + 0.15 * Math.sin(time * 9.0)
+    for (const sub of handles.subSpheres) sub.scale.setScalar(subPulse)
+  } else {
+    for (const sub of handles.subSpheres) {
+      sub.scale.setScalar(lerp(sub.scale.x, 1, 0.18))
+    }
+  }
 }

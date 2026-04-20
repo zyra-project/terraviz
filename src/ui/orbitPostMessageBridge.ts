@@ -47,7 +47,10 @@ const STATES_SET = new Set<StateKey>(ALL_STATES)
 const PALETTES_SET = new Set<PaletteKey>(PALETTE_KEYS)
 const GESTURES_SET = new Set<GestureKind>(GESTURE_KEYS)
 const PRESETS_SET = new Set<ScaleKey>(PRESET_KEYS)
-const EYES_SET = new Set<EyeMode>(['one', 'two'])
+// Eye mode is narrowed to 'two' under the vinyl redesign. Kept as a
+// Set so parent windows that still send `orbit:setEyeMode` validate
+// against the same single-value allowlist.
+const EYES_SET = new Set<EyeMode>(['two'])
 
 export interface OrbitBridgeHandle {
   dispose(): void

@@ -20,7 +20,10 @@ const ALLOWED_STATES = new Set<StateKey>(ALL_STATES)
 const ALLOWED_PALETTES = new Set<PaletteKey>(['cyan', 'green', 'amber', 'violet'])
 const ALLOWED_GESTURES = new Set<GestureKind>(GESTURE_KEYS)
 const ALLOWED_PRESETS = new Set<ScaleKey>(PRESET_KEYS)
-const ALLOWED_EYES = new Set<EyeMode>(['one', 'two'])
+// Eye mode is narrowed to 'two' under the vinyl redesign; the URL
+// parameter is accepted for API stability but only the one literal
+// value is valid.
+const ALLOWED_EYES = new Set<EyeMode>(['two'])
 
 interface UrlOverrides {
   state?: StateKey

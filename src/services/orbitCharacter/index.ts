@@ -74,9 +74,10 @@ export class OrbitController {
   private state: StateKey = 'IDLE'
   private palette: PaletteKey
   private scalePreset: ScaleKey = 'close'
-  // Default to the paired-eye configuration — design-validated as the
-  // warmer, more mammalian read; the single inset lens stays available
-  // via `?eyes=one` or the debug-panel toggle.
+  // Paired-eye configuration is permanent under the vinyl redesign
+  // (see `docs/ORBIT_CHARACTER_VINYL_REDESIGN.md` §Face). The field
+  // is kept so callers that invoke `setEyeMode('two')` still work;
+  // any attempt to set another mode is rejected at the setter.
   private eyeMode: EyeMode = 'two'
   /**
    * Mirrors the OS `prefers-reduced-motion` query (initialized in the
@@ -104,6 +105,11 @@ export class OrbitController {
       && window.matchMedia?.('(max-width: 768px)').matches
     const pixelRatio = Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2)
     this.renderer.setPixelRatio(pixelRatio)
+    // Shadow mapping: the vinyl redesign uses sub-sphere shadows on
+    // the body to teach planetary eclipses. Shadow map is small (512)
+    // and frustum is tight around the character — cheap on Quest.
+    this.renderer.shadowMap.enabled = true
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
 
     this.handles = buildScene({ palette: this.palette, pixelRatio, scalePreset: this.scalePreset })
     this.anim = createAnimationState(this.palette)
@@ -190,13 +196,10 @@ export class OrbitController {
   }
 
   setEyeMode(mode: EyeMode): void {
-    if (mode !== 'one' && mode !== 'two') {
+    if (mode !== 'two') {
       console.warn(`[Orbit] Unknown eye mode: ${mode}`)
       return
     }
-    // Visibility flip happens in the per-frame update — no rebuild,
-    // no eased transition (eyes pop). The pair was built upfront in
-    // buildScene so a swap is just toggling group.visible.
     this.eyeMode = mode
   }
 
@@ -322,6 +325,8 @@ export class OrbitController {
       this.anim.nextBlinkTime -= shift
       this.anim.jitterNextTime -= shift
       if (this.anim.activeGesture) this.anim.activeGesture.startTime -= shift
+      if (this.anim.surpriseStart >= 0) this.anim.surpriseStart -= shift
+      if (this.anim.arrivalSquashStart >= 0) this.anim.arrivalSquashStart -= shift
       this.flight.startTime -= shift
     }
     updateCharacter(this.handles, this.anim, {

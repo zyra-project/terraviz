@@ -20,9 +20,12 @@ import {
  * tooltip carries the design lineage detail, the visible label just
  * needs to read at a glance.
  */
+// Single-eye configuration was retired with the vinyl redesign
+// (see `docs/ORBIT_CHARACTER_VINYL_REDESIGN.md` §Face). The control
+// is left as a single-button radio so the panel layout is unchanged
+// and the "eyes" label still communicates the active configuration.
 const EYE_MODES: { key: EyeMode; label: string; tag: string }[] = [
-  { key: 'one', label: 'One', tag: 'EVE / BB-8 lineage — iconic, minimalist' },
-  { key: 'two', label: 'Two', tag: 'mammalian pair — warmer, enables vergence' },
+  { key: 'two', label: 'Two', tag: 'paired eyes — vinyl redesign, permanent' },
 ]
 
 export interface OrbitDebugPanelHandle {
