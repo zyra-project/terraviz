@@ -14,6 +14,7 @@ import {
 } from './services/orbitCharacter'
 import { initOrbitDebugPanel } from './ui/orbitDebugPanel'
 import { initOrbitPerfHud } from './ui/orbitPerfHud'
+import { initOrbitPostMessageBridge } from './ui/orbitPostMessageBridge'
 
 const ALLOWED_STATES = new Set<StateKey>(ALL_STATES)
 const ALLOWED_PALETTES = new Set<PaletteKey>(['cyan', 'green', 'amber', 'violet'])
@@ -97,6 +98,13 @@ function bootstrap(): void {
 
   const hudEl = document.getElementById('orbit-perf-hud')
   if (hudEl) initOrbitPerfHud(hudEl)
+
+  // Bridge so a parent window (iframe host, Electron/Tauri shell,
+  // future docent integration) can drive Orbit via postMessage.
+  // Posts `orbit:ready` to `window.parent` on init if iframed;
+  // listens for `orbit:*` messages to set state / play gestures /
+  // etc. See orbitPostMessageBridge.ts for the protocol.
+  initOrbitPostMessageBridge(controller)
 
   // URL-param gestures fire once on load. Delay until the scene has a
   // frame or two so Beckon's direction vector is computed from a
