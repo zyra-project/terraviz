@@ -525,7 +525,14 @@ export function updateCharacter(
   // ── Active feature target (what POINTING / PRESENTING / BECKON trace) ──
   // At Earth → earth feature on Earth's surface (scales with preset).
   // At chat → the CHAT_FEATURE vector in front of Orbit.
-  const featureIsAtEarth = (mode === 'atEarth' || mode === 'out')
+  //
+  // Close preset is a tabletop composition: Earth already sits right
+  // beside Orbit at chat distance, so "chat-distance feature" and
+  // "Earth feature" refer to the same visible thing. Route gestures
+  // to the Earth surface at close scale regardless of flight mode —
+  // otherwise PRESENTING would trace empty air to Orbit's right
+  // rather than the globe the user is looking at.
+  const featureIsAtEarth = (mode === 'atEarth' || mode === 'out' || scalePreset === 'close')
   if (featureIsAtEarth) {
     featureOf(preset, _tmpEarthFeature)
     _tmpActiveTarget.copy(_tmpEarthFeature)
