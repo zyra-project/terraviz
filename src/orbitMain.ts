@@ -9,25 +9,37 @@
 import './styles/tokens.css'
 import './styles/orbit.css'
 import {
-  OrbitController, ALL_STATES, STATES, GESTURE_KEYS,
-  type StateKey, type PaletteKey, type GestureKind,
+  OrbitController, ALL_STATES, STATES, GESTURE_KEYS, PRESET_KEYS,
+  type StateKey, type PaletteKey, type GestureKind, type ScaleKey,
 } from './services/orbitCharacter'
 import { initOrbitDebugPanel } from './ui/orbitDebugPanel'
 
 const ALLOWED_STATES = new Set<StateKey>(ALL_STATES)
 const ALLOWED_PALETTES = new Set<PaletteKey>(['cyan', 'green', 'amber', 'violet'])
 const ALLOWED_GESTURES = new Set<GestureKind>(GESTURE_KEYS)
+const ALLOWED_PRESETS = new Set<ScaleKey>(PRESET_KEYS)
 
-function readUrlOverrides(): { state?: StateKey; palette?: PaletteKey; gesture?: GestureKind } {
+interface UrlOverrides {
+  state?: StateKey
+  palette?: PaletteKey
+  gesture?: GestureKind
+  preset?: ScaleKey
+  fly?: boolean
+}
+
+function readUrlOverrides(): UrlOverrides {
   if (typeof window === 'undefined') return {}
   const params = new URLSearchParams(window.location.search)
-  const out: { state?: StateKey; palette?: PaletteKey; gesture?: GestureKind } = {}
+  const out: UrlOverrides = {}
   const s = params.get('state')?.toUpperCase()
   if (s && ALLOWED_STATES.has(s as StateKey)) out.state = s as StateKey
   const p = params.get('palette')?.toLowerCase()
   if (p && ALLOWED_PALETTES.has(p as PaletteKey)) out.palette = p as PaletteKey
   const g = params.get('gesture')?.toLowerCase()
   if (g && ALLOWED_GESTURES.has(g as GestureKind)) out.gesture = g as GestureKind
+  const pr = params.get('preset')?.toLowerCase()
+  if (pr && ALLOWED_PRESETS.has(pr as ScaleKey)) out.preset = pr as ScaleKey
+  if (params.get('fly') === '1' || params.get('fly') === 'true') out.fly = true
   return out
 }
 
@@ -64,6 +76,7 @@ function bootstrap(): void {
   })
 
   if (overrides.state) controller.setState(overrides.state)
+  if (overrides.preset) controller.setScalePreset(overrides.preset)
   updateCanvasAriaLabel(controller.getState())
 
   initOrbitDebugPanel(controller)
@@ -73,6 +86,11 @@ function bootstrap(): void {
   // settled head position.
   if (overrides.gesture) {
     setTimeout(() => controller.playGesture(overrides.gesture!), 250)
+  }
+  // ?fly=1 triggers a Fly-to-Earth on load. Useful for demo links
+  // like /orbit?preset=planetary&fly=1 to show the scale lesson.
+  if (overrides.fly) {
+    setTimeout(() => controller.flyToEarth(), 400)
   }
 
   // Expose for console debugging and the eventual postMessage bridge.

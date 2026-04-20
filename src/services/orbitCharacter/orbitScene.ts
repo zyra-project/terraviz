@@ -24,22 +24,24 @@ import {
   createBodyMaterial,
   createEyeFieldMaterial,
   createPupilMaterials,
+  createEarthMaterial,
   type BodyMaterialBundle,
   type EyeFieldMaterialBundle,
   type PupilMaterials,
+  type EarthMaterialBundle,
 } from './orbitMaterials'
-import { PALETTES, type PaletteKey, type StateKey } from './orbitTypes'
+import { PALETTES, type PaletteKey, type ScaleKey, type StateKey } from './orbitTypes'
 import { STATES } from './orbitStates'
 import { buildTrails, updateTrails, type TrailHandle } from './orbitTrails'
 import { GESTURES, type GestureKind, type GestureFrame } from './orbitGestures'
+import {
+  SCALE_PRESETS, CHAT_FEATURE, featureOf, parkingOf, updateFlight,
+  type FlightState,
+} from './orbitFlight'
 
 const BODY_RADIUS = 0.075
 const SUB_RADIUS = 0.009
 const SUB_ORBIT_RADIUS = 0.14
-// Placeholder "feature" the camera/Orbit will eventually point + trace
-// toward (in front of and slightly right of head). Phase 4 replaces
-// this with a real Earth-surface target when flight lands.
-const CHAT_FEATURE = new THREE.Vector3(0.32, -0.03, 0.02)
 
 export interface OrbitSceneHandles {
   scene: THREE.Scene
@@ -54,22 +56,35 @@ export interface OrbitSceneHandles {
   pupilMaterials: PupilMaterials
   subSpheres: THREE.Mesh[]
   trails: TrailHandle[]
+  earth: THREE.Mesh
+  earthBundle: EarthMaterialBundle
+  targetMarker: THREE.Mesh
+  targetHalo: THREE.Mesh
+  targetMat: THREE.MeshBasicMaterial
+  targetHaloMat: THREE.MeshBasicMaterial
+  appliedPreset: ScaleKey
 }
 
 export interface BuildSceneOptions {
   palette?: PaletteKey
   pixelRatio?: number
+  scalePreset?: ScaleKey
 }
 
 export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
   const palette = options.palette ?? 'cyan'
   const pixelRatio = options.pixelRatio ?? (typeof window !== 'undefined' ? window.devicePixelRatio : 1)
+  const initialPreset = options.scalePreset ?? 'close'
+  const initial = SCALE_PRESETS[initialPreset]
   const scene = new THREE.Scene()
   scene.background = new THREE.Color(0x060810)
 
-  const camera = new THREE.PerspectiveCamera(32, 1, 0.05, 40)
-  camera.position.set(0, 0, 1.1)
-  camera.lookAt(0, 0, 0)
+  // Camera framed per preset — close keeps the intimate tabletop feel;
+  // far presets pull back so both Orbit and Earth fit on a 2D screen.
+  // In VR these camera moves drop (Quest handles framing natively).
+  const camera = new THREE.PerspectiveCamera(initial.fov, 1, 0.05, 40)
+  camera.position.fromArray(initial.cameraPos)
+  camera.lookAt(new THREE.Vector3().fromArray(initial.cameraTarget))
 
   scene.add(new THREE.AmbientLight(0xffffff, 0.35))
   const keyLight = new THREE.DirectionalLight(0xffffff, 0.75)
@@ -131,11 +146,55 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
 
   const trails = buildTrails(scene, subSpheres, palette, pixelRatio)
 
+  // Earth — procedural continent shader, sized + placed per preset.
+  // Geometry is rebuilt on preset change (see applyPreset).
+  const earthBundle = createEarthMaterial()
+  const earth = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(initial.earthRadius, 5),
+    earthBundle.material,
+  )
+  earth.position.fromArray(initial.earthCenter)
+  scene.add(earth)
+
+  // Target marker + halo (visible during POINTING / PRESENTING).
+  const targetMat = new THREE.MeshBasicMaterial({
+    color: new THREE.Color(PALETTES[palette].accent),
+    transparent: true, opacity: 0, blending: THREE.AdditiveBlending,
+  })
+  const targetMarker = new THREE.Mesh(new THREE.SphereGeometry(0.0035, 16, 12), targetMat)
+  scene.add(targetMarker)
+  const targetHaloMat = new THREE.MeshBasicMaterial({
+    color: new THREE.Color(PALETTES[palette].accent),
+    transparent: true, opacity: 0, blending: THREE.AdditiveBlending,
+  })
+  const targetHalo = new THREE.Mesh(new THREE.CircleGeometry(0.012, 32), targetHaloMat)
+  scene.add(targetHalo)
+
   return {
     scene, camera, head, body, bodyBundle,
     eyeGroup, eyeBundle, pupil, pupilGlow, pupilMaterials,
     subSpheres, trails,
+    earth, earthBundle,
+    targetMarker, targetHalo, targetMat, targetHaloMat,
+    appliedPreset: initialPreset,
   }
+}
+
+/**
+ * Apply a scale-preset change to an already-built scene. Mutates
+ * Earth geometry + position, camera pos/target/fov, and records the
+ * applied preset on the handles so the controller can detect changes.
+ */
+export function applyPreset(handles: OrbitSceneHandles, preset: ScaleKey): void {
+  const pp = SCALE_PRESETS[preset]
+  handles.earth.geometry.dispose()
+  handles.earth.geometry = new THREE.IcosahedronGeometry(pp.earthRadius, 5)
+  handles.earth.position.fromArray(pp.earthCenter)
+  handles.camera.position.fromArray(pp.cameraPos)
+  handles.camera.lookAt(new THREE.Vector3().fromArray(pp.cameraTarget))
+  handles.camera.fov = pp.fov
+  handles.camera.updateProjectionMatrix()
+  handles.appliedPreset = preset
 }
 
 // -----------------------------------------------------------------------
@@ -223,6 +282,8 @@ export function isGesturePlaying(anim: AnimationState): boolean {
 export interface UpdateInput {
   state: StateKey
   palette: PaletteKey
+  scalePreset: ScaleKey
+  flight: FlightState
   time: number
   dt: number
   mouseX: number // [-1, 1] — normalized pointer x, used by CHATTING/TALKING gaze
@@ -237,7 +298,9 @@ const _tmpStateColor = new THREE.Color()
 const _tmpGestureColor = new THREE.Color()
 const _tmpGazeDir = new THREE.Vector3()
 const _tmpGestureDir = new THREE.Vector3()
-const _chatFeature = new THREE.Vector3(0.32, -0.03, 0.02)
+const _tmpActiveTarget = new THREE.Vector3()
+const _tmpEarthFeature = new THREE.Vector3()
+const _tmpRestPos = new THREE.Vector3()
 
 /**
  * Per-frame update.
@@ -253,9 +316,42 @@ export function updateCharacter(
   anim: AnimationState,
   input: UpdateInput,
 ): void {
-  const { state, palette, time, dt, mouseX, mouseY } = input
+  const { state, palette, scalePreset, flight, time, dt, mouseX, mouseY } = input
   const s = STATES[state]
   const p = PALETTES[palette]
+  const preset = SCALE_PRESETS[scalePreset]
+
+  // ── Preset change detection ───────────────────────────────────────
+  if (handles.appliedPreset !== scalePreset) {
+    applyPreset(handles, scalePreset)
+    // Snap Orbit back to chat — the preset swap is a world mutation,
+    // not a flight. The controller also resets flight.mode to 'rest'.
+  }
+
+  // ── Flight — compute Orbit's rest position in world space ─────────
+  const mode = updateFlight(flight, preset, time, _tmpRestPos)
+  const inFlight = (mode === 'out' || mode === 'back')
+
+  // Body sway on top of rest position
+  const sway = Math.sin(time * 0.7) * 0.004
+  handles.head.position.set(_tmpRestPos.x, _tmpRestPos.y + sway, _tmpRestPos.z)
+
+  // ── Active feature target (what POINTING / PRESENTING / BECKON trace) ──
+  // At Earth → earth feature on Earth's surface (scales with preset).
+  // At chat → the CHAT_FEATURE vector in front of Orbit.
+  const featureIsAtEarth = (mode === 'atEarth' || mode === 'out')
+  if (featureIsAtEarth) {
+    featureOf(preset, _tmpEarthFeature)
+    _tmpActiveTarget.copy(_tmpEarthFeature)
+  } else {
+    _tmpActiveTarget.copy(CHAT_FEATURE)
+  }
+  // featureScale: at Earth, trace radii scale with Earth size so the
+  // oval is proportional to the planet being traced.
+  const featureScale = featureIsAtEarth ? (preset.earthRadius / 0.22) : 1.0
+  handles.targetMarker.position.copy(_tmpActiveTarget)
+  handles.targetHalo.position.copy(_tmpActiveTarget)
+  handles.targetHalo.position.z += 0.0005
 
   // ── Gesture: advance time + compute frame (or end gesture) ────────
   // Done first so later sections (head, pupil, sub-spheres) can read
@@ -267,13 +363,12 @@ export function updateCharacter(
     if (gT >= 1) {
       anim.activeGesture = null
     } else {
-      // Beckon reads the direction to the active target. Phase 3 uses
-      // the chat-distance feature as a placeholder; Phase 4 swaps in
-      // the Earth-surface target when flight lands.
-      _tmpGestureDir.subVectors(_chatFeature, handles.head.position).normalize()
+      // Beckon reads the direction to the active target: CHAT_FEATURE
+      // at chat distance, the Earth-surface feature when at Earth.
+      _tmpGestureDir.subVectors(_tmpActiveTarget, handles.head.position).normalize()
       gestureFrame = g.compute(gT, {
         direction: _tmpGestureDir,
-        featureIsAtEarth: false,
+        featureIsAtEarth,
       })
     }
   }
@@ -289,15 +384,14 @@ export function updateCharacter(
     mat.color.set(p.accent)
   })
   handles.bodyBundle.uniforms.uTime.value = time
+  handles.earthBundle.uniforms.uTime.value = time
 
   // ── Eased "current" values ────────────────────────────────────────
   anim.orbitSpeed = lerp(anim.orbitSpeed, s.orbitSpeed, 0.04)
   const targetRadius = SUB_ORBIT_RADIUS * s.orbitRadiusScale
   anim.subRadius = lerp(anim.subRadius, targetRadius, 0.05)
 
-  // ── Body sway (head position within head group) ───────────────────
-  const sway = Math.sin(time * 0.7) * 0.004
-  handles.body.position.y = sway
+  // ── Body subtle rotation (sway Y now lives in head position) ─────
   handles.body.rotation.x = Math.sin(time * 0.5) * 0.05
   handles.body.rotation.z = Math.sin(time * 0.7) * 0.03
 
@@ -351,9 +445,15 @@ export function updateCharacter(
   handles.pupilMaterials.pupilMat.opacity = sat(finalPupilBright * pupilVis)
   handles.pupilMaterials.glowMat.opacity = sat(0.4 * finalPupilBright * pupilVis)
 
-  // ── Eye gaze (state-specific) ─────────────────────────────────────
+  // ── Eye gaze (flight-aware, then state-specific) ─────────────────
   let tYaw = 0, tPitch = 0
-  switch (state) {
+  if (inFlight) {
+    // Look toward destination so Orbit reads as "heading there."
+    _tmpGazeDir.subVectors(flight.endPos, handles.head.position).normalize()
+    tYaw = Math.atan2(_tmpGazeDir.x, _tmpGazeDir.z)
+    const horiz = Math.sqrt(_tmpGazeDir.x * _tmpGazeDir.x + _tmpGazeDir.z * _tmpGazeDir.z)
+    tPitch = -Math.atan2(_tmpGazeDir.y, horiz)
+  } else switch (state) {
     case 'CHATTING':
     case 'TALKING':
       tYaw = mouseX * 0.55
@@ -365,7 +465,7 @@ export function updateCharacter(
       break
     case 'POINTING':
     case 'PRESENTING': {
-      _tmpGazeDir.subVectors(CHAT_FEATURE, handles.head.position).normalize()
+      _tmpGazeDir.subVectors(_tmpActiveTarget, handles.head.position).normalize()
       tYaw = Math.atan2(_tmpGazeDir.x, _tmpGazeDir.z)
       const horiz = Math.sqrt(_tmpGazeDir.x * _tmpGazeDir.x + _tmpGazeDir.z * _tmpGazeDir.z)
       tPitch = -Math.atan2(_tmpGazeDir.y, horiz)
@@ -431,9 +531,11 @@ export function updateCharacter(
     handles.head.rotation.y = gestureFrame.head.yaw ?? 0
     handles.head.rotation.z = gestureFrame.head.roll ?? 0
   } else {
-    const headPitchTarget = s.head === 'nod' ? Math.sin(time * 5.5) * 0.22 : 0
-    const headYawTarget = s.head === 'shake' ? Math.sin(time * 6.0) * 0.28 : 0
-    const headRollTarget = s.head === 'tilt' ? Math.sin(time * 1.6) * 0.17 : 0
+    // State head motion is disabled during flight — would look
+    // weird mid-arc. Eases to zero so arrival is smooth.
+    const headPitchTarget = (!inFlight && s.head === 'nod') ? Math.sin(time * 5.5) * 0.22 : 0
+    const headYawTarget = (!inFlight && s.head === 'shake') ? Math.sin(time * 6.0) * 0.28 : 0
+    const headRollTarget = (!inFlight && s.head === 'tilt') ? Math.sin(time * 1.6) * 0.17 : 0
     anim.headPitch = lerp(anim.headPitch, headPitchTarget, 0.18)
     anim.headYaw = lerp(anim.headYaw, headYawTarget, 0.18)
     anim.headRoll = lerp(anim.headRoll, headRollTarget, 0.10)
@@ -470,8 +572,10 @@ export function updateCharacter(
   handles.pupilGlow.position.y = handles.pupil.position.y
 
   // ── Sub-sphere positions (gesture overlay or sub-mode dispatch) ──
+  // During flight, force sub-mode to 'orbit' — point/trace/cluster
+  // look chaotic mid-arc.
   anim.orbitPhaseAccum += anim.orbitSpeed * dt
-  const effSubMode = s.subMode
+  const effSubMode = inFlight ? 'orbit' : s.subMode
   handles.subSpheres.forEach((sub, i) => {
     const r = anim.subRadius
     const pOff = sub.userData.phaseOffset as number
@@ -496,7 +600,7 @@ export function updateCharacter(
         if (cycle < 0.25) t = cycle / 0.25
         else if (cycle < 0.65) t = 1.0
         else if (cycle < 0.90) t = 1.0 - (cycle - 0.65) / 0.25
-        sub.position.copy(op).lerp(CHAT_FEATURE, t)
+        sub.position.copy(op).lerp(_tmpActiveTarget, t)
         return
       } else {
         const phase = anim.orbitPhaseAccum * 1.8 + pOff
@@ -507,14 +611,17 @@ export function updateCharacter(
       }
     } else if (effSubMode === 'trace') {
       if (i === 0) {
+        // Lumpy oval around active target; scales with featureScale
+        // so a continent on planetary-preset Earth gets a proportionally
+        // larger trace than one on the tabletop.
         const tp = time * 0.85
         const lobe = 1.0 + Math.sin(tp * 3) * 0.35
-        const rx = 0.055 * lobe
-        const ry = 0.030 * (2.0 - lobe) * 0.6
+        const rx = 0.055 * featureScale * lobe
+        const ry = 0.030 * featureScale * (2.0 - lobe) * 0.6
         sub.position.set(
-          CHAT_FEATURE.x + Math.cos(tp) * rx,
-          CHAT_FEATURE.y + Math.sin(tp) * ry,
-          CHAT_FEATURE.z + Math.sin(tp * 0.5) * 0.005,
+          _tmpActiveTarget.x + Math.cos(tp) * rx,
+          _tmpActiveTarget.y + Math.sin(tp) * ry,
+          _tmpActiveTarget.z + Math.sin(tp * 0.5) * 0.005 * featureScale,
         )
         return
       } else {
@@ -590,5 +697,19 @@ export function updateCharacter(
   // ── Trails ────────────────────────────────────────────────────────
   // Must run after sub-sphere positions finalize so the rolling
   // buffer writes the actual current position, not last frame's.
-  updateTrails(handles.trails, handles.subSpheres, state, palette)
+  // Flight adds a 0.6 boost so the journey leaves a visible arc.
+  updateTrails(handles.trails, handles.subSpheres, state, palette, inFlight ? 0.6 : 0)
+
+  // ── Target marker (POINTING / PRESENTING) ────────────────────────
+  const wantMarker = (state === 'POINTING' || state === 'PRESENTING') && !inFlight ? 1 : 0
+  const markerBase = 0.55 + Math.sin(time * 3.0) * 0.15
+  const haloBase = 0.35 + Math.sin(time * 2.0) * 0.20
+  handles.targetMat.opacity = lerp(handles.targetMat.opacity, wantMarker * markerBase, 0.12)
+  handles.targetHaloMat.opacity = lerp(handles.targetHaloMat.opacity, wantMarker * haloBase, 0.12)
+  handles.targetMat.color.set(p.accent)
+  handles.targetHaloMat.color.set(p.accent)
+  // Halo scales gently for a "pulse" feel, and feature-scales at Earth.
+  const haloScale = featureScale * (1.0 + Math.sin(time * 2.5) * 0.15)
+  handles.targetHalo.scale.setScalar(haloScale)
+  handles.targetMarker.scale.setScalar(featureScale)
 }

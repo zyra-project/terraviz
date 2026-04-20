@@ -7,11 +7,12 @@
  * preset; Phase 5 adds the palette radio group.
  */
 
-import type { OrbitController, StateKey, GestureKind, PaletteKey } from '../services/orbitCharacter'
+import type { OrbitController, StateKey, GestureKind, PaletteKey, ScaleKey } from '../services/orbitCharacter'
 import {
   BEHAVIOR_STATES, EMOTION_STATES, GESTURE_STATES, STATES,
   GESTURE_KEYS, GESTURES,
   PALETTE_KEYS, PALETTES,
+  PRESET_KEYS, SCALE_PRESETS,
 } from '../services/orbitCharacter'
 
 export function initOrbitDebugPanel(controller: OrbitController): void {
@@ -32,6 +33,12 @@ export function initOrbitDebugPanel(controller: OrbitController): void {
 
   const gestureButtons = buildGestureButtons(gestureHost, controller)
   buildPaletteSwatches(paletteHost, controller)
+
+  const scaleHost = document.getElementById('orbit-debug-scales')
+  const flyBtn = document.getElementById('orbit-debug-fly') as HTMLButtonElement | null
+  const homeBtn = document.getElementById('orbit-debug-home') as HTMLButtonElement | null
+  if (scaleHost) buildScaleControl(scaleHost, controller)
+  if (flyBtn && homeBtn) wireFlightButtons(flyBtn, homeBtn, controller)
 
   toggleBtn.addEventListener('click', () => {
     const collapsed = panel.classList.toggle('is-collapsed')
@@ -94,6 +101,53 @@ function buildPaletteSwatches(host: HTMLElement, controller: OrbitController): v
     host.appendChild(btn)
   }
   updateChecked()
+}
+
+function buildScaleControl(host: HTMLElement, controller: OrbitController): void {
+  host.innerHTML = ''
+  const sync = () => {
+    const current = controller.getScalePreset()
+    host.querySelectorAll<HTMLButtonElement>('.orbit-debug-scale').forEach((btn) => {
+      btn.setAttribute('aria-checked', btn.dataset.preset === current ? 'true' : 'false')
+    })
+  }
+  for (const key of PRESET_KEYS) {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'orbit-debug-scale'
+    btn.dataset.preset = key
+    btn.setAttribute('role', 'radio')
+    btn.textContent = SCALE_PRESETS[key].label
+    btn.title = SCALE_PRESETS[key].tag
+    btn.addEventListener('click', () => {
+      controller.setScalePreset(key as ScaleKey)
+      sync()
+      announce(`Scale: ${SCALE_PRESETS[key].label}`)
+    })
+    host.appendChild(btn)
+  }
+  sync()
+}
+
+function wireFlightButtons(flyBtn: HTMLButtonElement, homeBtn: HTMLButtonElement, controller: OrbitController): void {
+  flyBtn.addEventListener('click', () => {
+    if (controller.flyToEarth()) announce('Orbit flying to Earth')
+  })
+  homeBtn.addEventListener('click', () => {
+    if (controller.flyHome()) announce('Orbit returning to chat position')
+  })
+  // Poll flight mode — disable buttons inappropriately for current state.
+  //   rest:   Fly enabled, Home disabled
+  //   out:    both disabled (in transit)
+  //   atEarth: Fly disabled, Home enabled
+  //   back:   both disabled
+  setInterval(() => {
+    const mode = controller.getFlightMode()
+    flyBtn.disabled = mode !== 'rest'
+    homeBtn.disabled = mode !== 'atEarth'
+    flyBtn.setAttribute('aria-disabled', String(flyBtn.disabled))
+    homeBtn.setAttribute('aria-disabled', String(homeBtn.disabled))
+  }, 120)
 }
 
 function buildGestureButtons(host: HTMLElement, controller: OrbitController): HTMLButtonElement[] {

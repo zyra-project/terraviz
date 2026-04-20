@@ -277,6 +277,79 @@ body.orbit-body {
     outline-offset: 2px;
 }
 
+.orbit-debug-scales {
+    display: inline-flex;
+    flex: 0 1 auto;
+    border: 1px solid var(--white-o10);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.orbit-debug-scale {
+    padding: 0.28rem 0.55rem;
+    font: inherit;
+    font-size: 0.62rem;
+    letter-spacing: 0.03em;
+    color: var(--color-text-secondary);
+    background: transparent;
+    border: none;
+    border-left: 1px solid var(--white-o08);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.orbit-debug-scale:first-child { border-left: none; }
+
+.orbit-debug-scale:hover {
+    background: var(--color-surface-hover);
+    color: var(--color-text);
+}
+
+.orbit-debug-scale[aria-checked="true"] {
+    background: var(--accent-o15);
+    color: var(--color-accent);
+}
+
+.orbit-debug-scale:focus-visible {
+    outline: 2px solid var(--accent-o70);
+    outline-offset: -2px;
+}
+
+.orbit-debug-flight-row {
+    justify-content: flex-end;
+    gap: 0.4rem;
+}
+
+.orbit-debug-flight {
+    padding: 0.35rem 0.7rem;
+    font: inherit;
+    font-size: 0.65rem;
+    letter-spacing: 0.03em;
+    color: var(--color-text);
+    background: var(--color-accent-dark);
+    border: 1px solid var(--color-accent);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+}
+
+.orbit-debug-flight:hover:not(:disabled) {
+    background: var(--color-accent-darker);
+}
+
+.orbit-debug-flight:disabled {
+    background: var(--color-surface);
+    color: var(--color-text-muted);
+    border-color: var(--white-o10);
+    cursor: default;
+    opacity: 0.6;
+}
+
+.orbit-debug-flight:focus-visible {
+    outline: 2px solid var(--accent-o70);
+    outline-offset: 2px;
+}
+
 .orbit-debug-hint {
     margin-top: 0.3rem;
     font-size: 0.65rem;

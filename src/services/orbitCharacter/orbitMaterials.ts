@@ -147,3 +147,91 @@ export function createPupilMaterials(palette: PaletteKey = 'cyan'): PupilMateria
     }),
   }
 }
+
+// -----------------------------------------------------------------------
+// Earth — procedural continent shader, no textures. fBm-ish noise via
+// layered sin/cos gives readable continent-like blobs. Not geographically
+// accurate, but "this is a planet" reads at every scale. Self-contained
+// (no texture fetches), runs inside the Quest shader budget.
+// -----------------------------------------------------------------------
+
+export interface EarthMaterialBundle {
+  material: THREE.ShaderMaterial
+  uniforms: {
+    uTime: { value: number }
+    uLightDir: { value: THREE.Vector3 }
+  }
+}
+
+export function createEarthMaterial(): EarthMaterialBundle {
+  const uniforms = {
+    uTime: { value: 0 },
+    uLightDir: { value: new THREE.Vector3(0.6, 0.8, 0.5).normalize() },
+  }
+  const material = new THREE.ShaderMaterial({
+    uniforms,
+    vertexShader: `
+      varying vec3 vNormalW;
+      varying vec3 vPosW;
+      void main() {
+        vec4 worldPos = modelMatrix * vec4(position, 1.0);
+        vPosW = worldPos.xyz;
+        vNormalW = normalize(mat3(modelMatrix) * normal);
+        gl_Position = projectionMatrix * viewMatrix * worldPos;
+      }
+    `,
+    fragmentShader: `
+      varying vec3 vNormalW;
+      varying vec3 vPosW;
+      uniform float uTime;
+      uniform vec3 uLightDir;
+
+      float pseudo3(vec3 p) {
+        float a = sin(p.x * 5.3 + 1.2) * cos(p.y * 4.1 - 0.7) * sin(p.z * 3.7 + 0.4);
+        float b = sin(p.x * 9.7 + 2.4) * cos(p.y * 8.3 + 1.3) * sin(p.z * 7.5 - 0.9) * 0.55;
+        float c = sin(p.x * 17.1 + 4.5) * cos(p.y * 15.2 + 2.1) * sin(p.z * 13.4 + 1.6) * 0.30;
+        float d = sin(p.x * 31.3 + 0.2) * cos(p.y * 27.9 + 3.2) * 0.15;
+        return a + b + c + d;
+      }
+
+      void main() {
+        vec3 n = normalize(vNormalW);
+
+        float land = pseudo3(n * 1.6);
+        float isLand = smoothstep(0.05, 0.22, land);
+
+        vec3 deepOcean   = vec3(0.03, 0.06, 0.13);
+        vec3 shallowSea  = vec3(0.06, 0.14, 0.22);
+        vec3 coast       = vec3(0.14, 0.22, 0.18);
+        vec3 forest      = vec3(0.13, 0.22, 0.10);
+        vec3 savanna     = vec3(0.32, 0.28, 0.14);
+        vec3 desert      = vec3(0.42, 0.35, 0.20);
+
+        float shallow = smoothstep(-0.1, 0.1, land);
+        vec3 oceanCol = mix(deepOcean, shallowSea, shallow);
+
+        float variation = pseudo3(n * 4.5) * 0.5 + 0.5;
+        vec3 landCol = mix(forest, savanna, variation);
+        landCol = mix(landCol, desert, smoothstep(0.6, 0.9, variation) * 0.55);
+
+        float coastBlend = smoothstep(0.04, 0.18, land) * (1.0 - smoothstep(0.18, 0.28, land));
+        landCol = mix(landCol, coast, coastBlend * 0.4);
+
+        vec3 color = mix(oceanCol, landCol, isLand);
+
+        float iceBlend = smoothstep(0.78, 0.90, abs(n.y));
+        color = mix(color, vec3(0.82, 0.88, 0.92), iceBlend);
+
+        float diff = max(0.18, dot(n, normalize(uLightDir)));
+        color *= diff;
+
+        vec3 viewDir = normalize(cameraPosition - vPosW);
+        float fres = pow(1.0 - max(0.0, dot(n, viewDir)), 3.0);
+        color += vec3(0.25, 0.45, 0.70) * fres * 0.35;
+
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `,
+  })
+  return { material, uniforms }
+}

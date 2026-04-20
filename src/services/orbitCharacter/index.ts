@@ -29,11 +29,17 @@ import {
 import type { PaletteKey, ScaleKey, StateKey, GestureKind } from './orbitTypes'
 import { STATES } from './orbitStates'
 import { GESTURES, GESTURE_KEYS } from './orbitGestures'
+import {
+  createFlightState, startFlyToEarth, startFlyHome, resetFlight,
+  SCALE_PRESETS, PRESET_KEYS,
+  type FlightState,
+} from './orbitFlight'
 
 export type { PaletteKey, ScaleKey, StateKey, GestureKind } from './orbitTypes'
 export { PALETTES } from './orbitTypes'
 export { STATES, ALL_STATES, BEHAVIOR_STATES, EMOTION_STATES, GESTURE_STATES } from './orbitStates'
 export { GESTURES, GESTURE_KEYS } from './orbitGestures'
+export { SCALE_PRESETS, PRESET_KEYS } from './orbitFlight'
 
 export const PALETTE_KEYS: PaletteKey[] = ['cyan', 'green', 'amber', 'violet']
 
@@ -56,6 +62,7 @@ export class OrbitController {
   private state: StateKey = 'IDLE'
   private palette: PaletteKey
   private scalePreset: ScaleKey = 'close'
+  private readonly flight: FlightState = createFlightState()
   private time = 0
 
   // Pointer position, normalized to [-1, 1]. CHATTING/TALKING/LISTENING
@@ -74,7 +81,7 @@ export class OrbitController {
     const pixelRatio = Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2)
     this.renderer.setPixelRatio(pixelRatio)
 
-    this.handles = buildScene({ palette: this.palette, pixelRatio })
+    this.handles = buildScene({ palette: this.palette, pixelRatio, scalePreset: this.scalePreset })
     this.anim = createAnimationState(this.palette)
 
     this.resize()
@@ -129,11 +136,34 @@ export class OrbitController {
   }
 
   setScalePreset(preset: ScaleKey): void {
+    if (!(preset in SCALE_PRESETS)) {
+      console.warn(`[Orbit] Unknown scale preset: ${preset}`)
+      return
+    }
+    if (preset === this.scalePreset) return
+    // Preset change cancels any in-flight / at-Earth state — the
+    // world just mutated underneath Orbit. The applyPreset() call in
+    // updateCharacter picks up this.scalePreset change next frame.
+    resetFlight(this.flight)
     this.scalePreset = preset
   }
 
   getScalePreset(): ScaleKey {
     return this.scalePreset
+  }
+
+  flyToEarth(): boolean {
+    return startFlyToEarth(this.flight, SCALE_PRESETS[this.scalePreset], this.time)
+  }
+
+  flyHome(): boolean {
+    return startFlyHome(this.flight, SCALE_PRESETS[this.scalePreset], this.time)
+  }
+
+  /** 'rest' | 'out' | 'atEarth' | 'back' — exposed so the UI can
+   *  reflect the state of the Fly button. */
+  getFlightMode(): FlightState['mode'] {
+    return this.flight.mode
   }
 
   dispose(): void {
@@ -184,6 +214,8 @@ export class OrbitController {
     updateCharacter(this.handles, this.anim, {
       state: this.state,
       palette: this.palette,
+      scalePreset: this.scalePreset,
+      flight: this.flight,
       time: this.time,
       dt,
       mouseX: this.mouseX,

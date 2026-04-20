@@ -11,12 +11,14 @@ eventually drive animation states.
 
 **Branch:** `claude/orbit-character-integration-plan-p83Jc`
 
-**Status:** Phase 3 shipped (gesture overlay system: Shrug / Wave /
-Beckon / Affirm, with head-ownership rule and pupil-flash blend).
-Palette picker also shipped (all four palettes selectable — the
-machinery was already in place from Phase 2, just needed a UI).
-Phase 4 (flight + scale presets) is next. See the phase table in
-§8 for the full roadmap and where each commit landed.
+**Status:** Phase 4 shipped (flight + scale presets + Earth). Orbit
+can fly to Earth along a Bezier arc and back, with three presets
+(Close / Continental / Planetary) that sell the scale lesson: on
+`planetary`, Orbit shrinks to a speck beside a world. Procedural
+Earth shader ports from the prototype as a placeholder; a follow-up
+commit will swap it for the main app's VR Earth stack (photoreal
+diffuse + night lights + atmosphere + clouds + sun). Phase 6
+(a11y polish) is the natural next step. See §8 for the full table.
 
 ---
 
