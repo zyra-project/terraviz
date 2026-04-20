@@ -242,6 +242,39 @@ window.app.appState.datasets.length
 window.app.appState.currentDataset
 ```
 
+### Remote-debugging WebXR on Meta Quest
+
+The immersive AR/VR mode only runs on a real headset, so the browser console
+output has to come from the headset itself. Chrome on the PC can attach to the
+Meta Quest Browser over USB:
+
+1. **Enable Developer Mode on the Quest** — Meta account → Devices → pair the
+   headset → toggle Developer Mode on.
+2. **Install adb + the Quest USB driver** — macOS: `brew install android-platform-tools`,
+   Linux: `apt install android-tools-adb`, Windows: Meta Quest ADB driver.
+3. **Plug the Quest into the PC via USB-C**. Put on the headset and accept the
+   "Allow USB debugging" prompt.
+4. **Verify the device is visible:**
+   ```bash
+   adb devices
+   ```
+5. **Reverse-forward the dev server port** so the Quest can reach it as localhost:
+   ```bash
+   adb reverse tcp:5173 tcp:5173
+   ```
+   (WebXR requires HTTPS or localhost; reverse forwarding keeps you on localhost.)
+6. **Start the dev server** on the PC: `npm run dev`.
+7. **In the Quest browser**, navigate to `http://localhost:5173`.
+8. **On the PC**, open Chrome and visit `chrome://inspect#devices`. Under
+   **Remote Target → Quest**, click **inspect** next to your app's tab.
+9. In the DevTools Console, open the **Default levels** dropdown and check
+   **Verbose** so `logger.debug` lines show up.
+10. Put the headset back on, tap **Enter AR** / **Enter VR**, and return to the
+    PC DevTools Console — the `[VR]` logs will be there.
+
+If you unplug the headset at any point the port forward drops and needs to be
+re-run (step 5). `adb reverse --list` shows active forwards.
+
 ### Common Issues
 
 **"Failed to fetch datasets"**

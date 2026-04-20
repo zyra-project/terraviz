@@ -3,7 +3,7 @@
 Feasibility investigation for running Interactive Sphere as an immersive
 web experience on Meta Quest (and other WebXR-capable) headsets.
 
-Status: **MVP + Phase 2 + Phase 2.1/2.2 shipped.** Feature-gated
+Status: **MVP + Phase 2 + Phase 2.1/2.2 + Phase 2.5 shipped.** Feature-gated
 "Enter AR" / "Enter VR" button opens an immersive WebXR session
 that renders the currently-loaded dataset (or a photoreal
 day/night Earth with atmosphere, clouds, night lights, specular,
@@ -14,11 +14,12 @@ interaction (surface-pinned drag, two-hand pinch+rotate, thumbstick
 zoom, flick-to-spin inertia), floating HUD, animated 3D loading
 scene. The 2D experience is unchanged when WebXR is absent.
 
-Remaining phases not yet built: multi-globe (2.5), in-VR dataset
-switching (3), VR tours (3.5), 2D↔VR camera sync (4), voice docent
-+ hand tracking (5), AR-native enhancements (spatial audio,
-annotations, capture/share, real-time data, co-presence, layered
-datasets).
+Remaining phases not yet built: in-VR dataset switching (3), VR
+tours (3.5), 2D↔VR camera sync (4), voice docent + hand tracking
+(5), AR-native enhancements (spatial audio, annotations,
+capture/share, real-time data, co-presence, layered datasets).
+4-globe support is a Phase 2.5 stretch (2-globe shipped; 4 gates
+on Quest decoder-budget testing).
 
 ---
 
@@ -491,7 +492,7 @@ Index controllers without per-device code.
 Basic version (always-on labels + Quest Touch) is one small commit.
 Polish (fade + toggle + cross-device) follows as separate commits.
 
-### Phase 2.5 — multi-globe layout (parity with 2D viewport manager)
+### Phase 2.5 — multi-globe layout (parity with 2D viewport manager) ✅ *(2-globe arc shipped: per-frame layout sync, lockstep grab-rotate across all globes, HUD panel-indicator strip. Promote-to-primary on non-primary tap was prototyped then ripped out — it caused a ping-pong loop (promote → textures swap under the user's ray → re-promote) — a replacement UX (long-press / HUD-dot taps / Phase 3 browse-panel routing) is future work. 4-globe is a stretch post on-device Quest decoder-budget validation.)*
 
 The 2D app already supports 1/2/4 synchronised globes via
 `src/services/viewportManager.ts` — camera lockstep, a "primary"
@@ -548,6 +549,37 @@ rendering leaves less headroom. **Ship 2-globe support first; treat
 - `attachPrimaryVideoSync` — already does all the hard work of
   keeping sibling videos in time. The VR scene binds VideoTextures
   to already-synced videos, so VR doesn't need its own sync logic.
+
+**Commit sequence (branch: `claude/vr-multi-globe-phase-2.5`):**
+
+Decisions baked in before the first code change:
+
+- **Layout: arc** — matches the 2D side-by-side grid's spiritual
+  model and is the path of least surprise for users who already
+  use the 2-globe view in 2D. Diorama / primary+companions
+  remain as future-polish alternatives.
+- **Sync model: independent rotate + shared time** — each globe
+  can be grabbed and rotated independently, but playback state
+  (play/pause/scrub) affects all. Feels more natural in VR where
+  you can physically look at one globe without the other spinning.
+- **Ship 2-globe first.** 4-globe is documented above as
+  aspirational pending Quest decoder-budget testing; first
+  release validates the architecture at 2 before attempting 4.
+
+Commit breakdown:
+
+| # | Commit | Scope |
+|---|---|---|
+| 1 | Plan doc: Phase 2.5 commit breakdown | This table |
+| 2 | `vrScene: support N globes internally` | Internal refactor — single globe → array of globes. All existing code paths use index 0 as primary. No user-visible change when panelCount is 1. |
+| 3 | `VrSessionContext: multi-panel getters` | `getPanelCount()`, `getPrimaryIndex()`, `getPanelTexture(slot)`, `getPanelTitle(slot)` — main.ts wires to existing `viewports` + `panelStates` |
+| 4 | `vrSession: arc layout + per-slot texture sync` | Per-frame poll of panel count + textures. Arc spacing is `GLOBE_RADIUS * 2 + 0.2 = 1.2 m` center-to-center (0.5 m-radius spheres, 0.2 m gap). Primary keeps its current world position (preserves AR anchor); secondaries fan to its right — e.g. panelCount=2 puts the secondary at primary + `(1.2, 0, 0)`. No inward yaw. Centering the arc about the primary is future polish. |
+| 5 | `vrInteraction: lockstep grab-rotate across all globes` | Trigger on any globe starts a surface-pinned rotation; secondaries copy the primary's quaternion each frame so all globes spin together. (The plan originally had tap-to-promote here, but it created a ping-pong loop — tap a secondary → it becomes primary → user's ray now hits the NEW secondary → re-promote on next tap — so the path was ripped out in `cead66d`. A replacement UX goes in a later phase.) |
+| 6 | `vrHud: primary-aware panel indicator strip` | Small dot strip showing panel count with primary highlighted; dataset title reflects primary |
+
+Commits 2-4 are the "visible 2-globe arc" milestone. 5-6 add
+interaction + UI polish. 4-globe is a stretch commit 7 after
+on-device validation.
 
 ### Phase 3 — in-VR dataset switching
 - Floating browse panel rendered as a CanvasTexture with dataset
@@ -654,11 +686,191 @@ Within Phase 3.5 itself, the work breaks into ~5 commits:
 Each is independently testable on a known tour file (the existing
 `/assets/test-tour.json` is a good fixture).
 
-### Phase 4 — camera sync
-- Entering VR inherits the current MapLibre view (lat/lng/zoom)
-- Exiting VR writes the last VR camera pose back to MapLibre
+### Phase 4 — Orbit Avatar (the docent gets a body)
 
-### Phase 5 — richer interaction & voice-driven Orbit
+The chat assistant "Orbit" is currently a text panel. This phase
+gives it a physical presence: a small animated robot character that
+orbits the Earth, flies up to the user when chatting, and zooms off
+to point-of-interest locations on the globe. The avatar reinforces
+the "museum docent" metaphor and — critically — teaches scale: Orbit
+is a friendly companion at arm's length, then becomes a tiny speck
+circling a continent, making the user *feel* how big Earth is.
+
+**Character design constraints:**
+
+- Small, friendly, non-humanoid (avoids uncanny valley).
+- Satellite / probe / robot aesthetic — thematic with "orbiting
+  Earth" and the name "Orbit".
+- Low poly count (Quest GPU budget) — under 5K triangles.
+- Rigged with a humanoid-compatible skeleton (or simple bone rig)
+  so Mixamo / custom animations work.
+- glTF 2.0 format (Three.js native).
+
+**Model sources (free, animation-ready):**
+
+| Source | License | Notes |
+|---|---|---|
+| Kenney robot pack | CC0 | Simple low-poly bots, perfect aesthetic |
+| Ready Player Me stylized | MIT | Customizable, rigged for Mixamo |
+| Mixamo animation library | Free (Adobe) | Hundreds of animations: hover, fly, wave, point, talk idle |
+| Sketchfab CC-BY robots | CC-BY 4.0 | Several mascot/assistant-style models |
+| Custom satellite/probe | — | Most thematic; ~1 day of Blender work |
+
+**Behaviour state machine:**
+
+```
+                    ┌──────────────────────┐
+                    │     ORBITING         │
+                    │ (idle circuit around │
+                    │  the globe, small)   │
+                    └──────┬───────────────┘
+                           │ user opens chat
+                           ▼
+                    ┌──────────────────────┐
+                    │     APPROACHING      │
+                    │ (flies toward user,  │
+                    │  grows in perspec-   │
+                    │  tive as it nears)   │
+                    └──────┬───────────────┘
+                           │ arrives ~1m from face
+                           ▼
+                    ┌──────────────────────┐
+                    │     CHATTING         │
+                    │ (hovers at arm's     │
+                    │  length, talk anim,  │
+                    │  eye contact)        │
+                    └──────┬───────────────┘
+                           │ LLM mentions a region /
+                           │ user taps "show me"
+                           ▼
+                    ┌──────────────────────┐
+                    │     PRESENTING       │
+                    │ (flies to lat/lng,   │
+                    │  shrinks as it       │
+                    │  recedes, orbits     │
+                    │  the POI, spotlight) │
+                    └──────┬───────────────┘
+                           │ user taps "follow me" →
+                           │ globe auto-rotates to
+                           │ track Orbit's position
+                           │
+                           │ user sends another
+                           │ message / taps Orbit
+                           ▼
+                    ┌──────────────────────┐
+                    │     RETURNING        │
+                    │ (flies back to user, │
+                    │  grows again — the   │
+                    │  scale lesson        │
+                    │  repeats every trip) │
+                    └──────────────────────┘
+```
+
+**Scale design — the key insight:**
+
+The user said: "use Orbit to emphasize the relative size of the
+planet." The scale contrast is the entire point. Design targets:
+
+- **Chatting:** Orbit hovers ~1 m from the user's face, apparent
+  size ~15-20 cm (a third of the 0.5 m globe radius). It feels like
+  a companion — something you could reach out and touch.
+- **Presenting:** Orbit flies to a point on the globe surface. At
+  the globe's scale (0.5 m radius), the flight path is ~1-2 m. Orbit
+  doesn't need to artificially shrink — real perspective handles it.
+  A 15 cm object at 2 m distance subtends ~4.3° vs. ~8.6° at 1 m.
+  The user watches their "companion" become a tiny dot on a
+  continent, and viscerally understands: *that whole landmass is the
+  size of my friend's face.*
+- **Follow me:** A floating button (or Orbit waves a "come look!"
+  gesture) triggers a smooth globe auto-rotate to bring Orbit's
+  current position front-and-center. The user doesn't have to
+  manually search for where Orbit went.
+
+**Flight path math:**
+
+The flight path is a cubic Bézier from camera-relative coords to a
+lat/lng point on the globe surface:
+
+```
+P0 = Orbit's current position (near user)
+P1 = P0 + forward * 0.3  (ease out from user)
+P2 = target + normal * 0.5  (ease into globe surface tangentially)
+P3 = target (lat/lng → 3D point on globe surface)
+```
+
+`getSunPosition` already converts lat/lng → 3D direction; the same
+`sunDirectionFromLatLng` utility gives us the target point.
+`docentContext.ts` has dataset category/location metadata that can
+drive where Orbit flies.
+
+**Integration with existing chat:**
+
+- `docentService` already emits `action` chunks with dataset IDs.
+  Extend to emit `location` hints (lat/lng from enriched metadata)
+  that the avatar system consumes.
+- The LLM system prompt (`docentContext.ts`) can be extended with a
+  `fly_to_location` tool alongside the existing `load_dataset` tool.
+- Chat panel stays as-is (2D overlay or VR CanvasTexture from
+  Phase 5); the avatar is an additive layer, not a replacement.
+
+**2D mode (future, not in initial scope):**
+
+A simplified version could work in 2D: a small animated sprite or
+CSS-animated character that sits near the chat panel, flies across
+the MapLibre canvas to a location, and returns. The 3D model could
+be rendered to a small WebGL overlay or pre-rendered to a sprite
+sheet. Deferred until the VR version proves the concept.
+
+**New modules:**
+
+| Module | Est. LOC | Responsibility |
+|---|---|---|
+| `src/services/vrAvatar.ts` | ~400 | glTF loader, animation mixer, state machine, flight path, scale management |
+| `src/services/vrAvatarAssets.ts` | ~100 | Model URL constants, animation clip names, preload |
+| Extensions to `docentService.ts` | ~50 | Emit location hints from LLM response metadata |
+| Extensions to `docentContext.ts` | ~30 | `fly_to_location` tool definition for the LLM |
+| Extensions to `vrSession.ts` | ~50 | Wire avatar into render loop + chat open/close callbacks |
+
+**Commit sequence (~8 commits):**
+
+| # | Commit | Scope |
+|---|---|---|
+| 1 | Plan doc: Phase 4 breakdown | This section |
+| 2 | `vrAvatar: model loader + idle orbit` | Load glTF, attach to scene, circular orbit path around globe. No interaction yet. |
+| 3 | `vrAvatar: animation mixer` | Idle hover / fly / talk animations via `AnimationMixer`. Crossfade on state change. |
+| 4 | `vrAvatar: approach + return flight` | Bézier flight from orbit → user (chat open) and user → orbit (chat close). |
+| 5 | `vrAvatar: presenting flight` | Fly to lat/lng on globe surface. Globe auto-rotate to track. "Follow me" button. |
+| 6 | `docentService: location hints` | Emit lat/lng from dataset enriched metadata. Avatar consumes in presenting state. |
+| 7 | `vrAvatar: spotlight + gesture` | Subtle glow on globe surface at POI. Point/wave animation at presenting target. |
+| 8 | `vrAvatar: polish + tuning` | Flight speed curves, idle orbit radius, approach distance, animation blend times. |
+
+Commits 2-4 reach the "avatar flies to user and back" milestone.
+5-6 add the "show me" → "follow me" loop. 7-8 are polish.
+
+**Dependencies:**
+
+- Phase 2.5 (multi-globe) should be landed — avatar needs to know
+  which globe to orbit (primary).
+- Phase 5 (voice) is independent — the avatar works with text chat.
+  Voice input is a natural follow-on that makes the avatar feel
+  alive ("talk to Orbit" vs. "type to Orbit"), but the avatar's
+  state machine doesn't depend on it.
+
+**Open questions:**
+
+1. Should Orbit have a speech bubble in 3D space (CanvasTexture
+   floating near its head) in addition to / instead of the chat
+   panel? Adds personality but is harder to read for long responses.
+2. Does Orbit need lip-sync or a simple "mouth open/close" cycle
+   during talk animation? Lip-sync from TTS is possible but complex.
+3. Should Orbit's orbit path respond to the current dataset — e.g.
+   orbiting along the equator for ocean datasets, circling the poles
+   for ice datasets? Cool but potentially distracting.
+4. Model selection: custom satellite probe (most thematic, most
+   work) vs. off-the-shelf Kenney robot (fastest to prototype)?
+   Recommend: prototype with Kenney, swap for a custom model later.
+
+### Phase 5 — richer interaction, voice-driven Orbit & camera sync
 
 **Orbit as a VR docent.** Typing is impractical in VR; voice is
 the natural replacement. The Quest browser is Chromium-based and
@@ -746,6 +958,10 @@ Tracking → Hand and Body Tracking). The WebXR feature request is
 optional, so users without it gracefully fall back to controllers.
 
 **Other Phase 5 items:**
+- **Camera sync:** entering VR inherits the current MapLibre view
+  (lat/lng/zoom → initial globe quaternion); exiting VR writes the
+  last globe orientation back so the 2D view resumes where the user
+  left off.
 - Other gesture interactions beyond bat (pinch-and-place, two-handed
   pinch-zoom replicating the controller version)
 

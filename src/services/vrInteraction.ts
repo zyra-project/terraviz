@@ -91,7 +91,18 @@ const RAY_LENGTH = 5
 
 export interface VrInteractionContext {
   scene: THREE.Scene
+  /** Primary globe — scene slot 0. Drives rotation + surface-pinned raycast. */
   globe: THREE.Mesh
+  /**
+   * Every globe in the current layout (primary + secondaries). Used
+   * for multi-globe hit-testing so grab/rotate picks up whichever
+   * globe the controller is pointing at — the surface-pinned drag
+   * math needs the hit globe's position as the pivot. For a 1-globe
+   * session this is just `[globe]`. Function (not a snapshot) so
+   * panel-count changes mid-session are reflected without
+   * re-creating the interaction handle.
+   */
+  getAllGlobes: () => THREE.Mesh[]
   hud: VrHudHandle
   /** AR-only spatial placement. Null in VR mode or when hit-test isn't available. */
   placement: VrPlacementHandle | null
@@ -138,6 +149,8 @@ type RotationMode =
   | {
       kind: 'single'
       index: 0 | 1
+      /** The specific globe mesh the user grabbed — may be any globe in the arc. */
+      grabbedGlobe: THREE.Mesh
       /** Unit vector from globe center to grabbed surface point, world-space. */
       worldGrabDir: THREE.Vector3
       /** Globe quaternion when the single drag began. */
@@ -318,6 +331,13 @@ export function createVrInteraction(
   const hudArmed: (VrHudAction | null)[] = [null, null]
   /** Per-controller "trigger pressed on the Place button" flag (DOM click semantics). */
   const placeArmed: boolean[] = [false, false]
+  /**
+   * Per-controller reference to the globe mesh that was grabbed on
+   * selectstart. Passed to captureSingleMode so the surface-pinned
+   * rotation math uses the correct globe center — critical when the
+   * user grabs a secondary globe at a different arc position.
+   */
+  const lastGrabbedGlobe: (THREE.Mesh | null)[] = [null, null]
   /** Current rotation mode — recomputed on every trigger state change. */
   let rotationMode: RotationMode = { kind: 'idle' }
 
@@ -363,11 +383,15 @@ export function createVrInteraction(
    * Resolve what the controller is pointing at. Order matters: the
    * HUD is drawn on top of the globe (renderOrder + depthTest:false)
    * so from the user's visual perspective it should always win ties.
+   *
+   * Any globe hit (primary or secondary) returns `'globe'` with the
+   * mesh reference — all globes rotate in lockstep, so grabbing any
+   * of them initiates the same surface-pinned drag.
    */
   function pickHit(controller: THREE.XRTargetRaySpace):
     | { kind: 'hud'; action: VrHudAction }
     | { kind: 'place-button' }
-    | { kind: 'globe' }
+    | { kind: 'globe'; mesh: THREE.Mesh }
     | null {
     setRaycasterFromController(controller)
 
@@ -392,9 +416,14 @@ export function createVrInteraction(
       }
     }
 
-    const globeHits = raycaster.intersectObject(ctx.globe, false)
+    // Raycast against every globe in the layout. All globes rotate
+    // in lockstep (scene.update copies the primary's quaternion to
+    // all secondaries), so we don't need to distinguish which globe
+    // was hit — any grab initiates the same surface-pinned rotation.
+    const allGlobes = ctx.getAllGlobes()
+    const globeHits = raycaster.intersectObjects(allGlobes, false)
     if (globeHits.length > 0) {
-      return { kind: 'globe' }
+      return { kind: 'globe', mesh: globeHits[0].object as THREE.Mesh }
     }
 
     return null
@@ -406,15 +435,23 @@ export function createVrInteraction(
    * (user's aim slipped during a mode transition) we fall back to
    * `idle` and the user can re-grab. Returns the new mode.
    */
-  function captureSingleMode(index: 0 | 1): RotationMode {
+  function captureSingleMode(index: 0 | 1, targetGlobe?: THREE.Mesh): RotationMode {
     const controller = controllers[index]
     setRaycasterFromController(controller)
-    const hits = raycaster.intersectObject(ctx.globe, false)
+    // If a specific globe was identified by pickHit, raycast against
+    // it directly. Otherwise fall back to all globes (e.g. during
+    // mode re-evaluation after the other trigger releases).
+    const globe = targetGlobe ?? ctx.globe
+    const hits = targetGlobe
+      ? raycaster.intersectObject(targetGlobe, false)
+      : raycaster.intersectObjects(ctx.getAllGlobes(), false)
     if (hits.length === 0 || !hits[0].point) return { kind: 'idle' }
+    const hitGlobe = (hits[0].object as THREE.Mesh) ?? globe
     return {
       kind: 'single',
       index,
-      worldGrabDir: hits[0].point.clone().sub(ctx.globe.position).normalize(),
+      grabbedGlobe: hitGlobe,
+      worldGrabDir: hits[0].point.clone().sub(hitGlobe.position).normalize(),
       globeStartQuat: ctx.globe.quaternion.clone(),
     }
   }
@@ -541,11 +578,11 @@ export function createVrInteraction(
       if (rotationMode.kind !== 'two-hand') rotationMode = captureTwoHandMode()
     } else if (g0) {
       if (!(rotationMode.kind === 'single' && rotationMode.index === 0)) {
-        rotationMode = captureSingleMode(0)
+        rotationMode = captureSingleMode(0, lastGrabbedGlobe[0] ?? undefined)
       }
     } else if (g1) {
       if (!(rotationMode.kind === 'single' && rotationMode.index === 1)) {
-        rotationMode = captureSingleMode(1)
+        rotationMode = captureSingleMode(1, lastGrabbedGlobe[1] ?? undefined)
       }
     } else {
       // Releasing the last trigger. If the velocity tracker has a
@@ -587,9 +624,12 @@ export function createVrInteraction(
       return
     }
 
-    // Globe hit — flip this trigger's rotation bit and let the
-    // reevaluator pick the right mode (single or two-hand based on
-    // the other trigger's state).
+    // Any globe hit (primary or secondary) — flip this trigger's
+    // rotation bit and capture which globe was grabbed so the
+    // surface-pinned drag math uses the right center point.
+    // All globes rotate in lockstep (scene.update copies the
+    // primary's quaternion), so grabbing any globe works the same.
+    lastGrabbedGlobe[index] = hit.mesh
     triggersOnGlobe[index] = true
     reevaluateRotationMode()
   }
@@ -618,6 +658,7 @@ export function createVrInteraction(
     }
     if (triggersOnGlobe[index]) {
       triggersOnGlobe[index] = false
+      lastGrabbedGlobe[index] = null
       reevaluateRotationMode()
     }
   }
@@ -731,15 +772,31 @@ export function createVrInteraction(
 
   /** Apply the surface-pinned rotation for the active single-drag. */
   function updateSingle(mode: Extract<RotationMode, { kind: 'single' }>): void {
+    // Guard: the grabbed globe may have been disposed mid-frame if
+    // the 2D app dropped from a 2-globe to a 1-globe layout while
+    // the user had trigger held — scene.setPanelCount pops and
+    // disposes the secondary, leaving our captured reference
+    // dangling. Raycasting against a disposed mesh would throw or
+    // return garbage; cancel the mode back to idle and let the next
+    // frame re-capture on the current geometry.
+    if (!ctx.getAllGlobes().includes(mode.grabbedGlobe)) {
+      rotationMode = { kind: 'idle' }
+      return
+    }
     const controller = controllers[mode.index]
     setRaycasterFromController(controller)
-    const hits = raycaster.intersectObject(ctx.globe, false)
+    // Raycast against the specific globe the user grabbed so the
+    // surface-pinned math stays correct even when the grabbed globe
+    // is a secondary at a different arc position than the primary.
+    const hits = raycaster.intersectObject(mode.grabbedGlobe, false)
     // Ray swung off-globe — freeze rotation until it lands back on
     // the surface. Matches 2D mouse-off-canvas semantics.
     if (hits.length === 0 || !hits[0].point) return
-    currentWorldDir.copy(hits[0].point).sub(ctx.globe.position).normalize()
+    currentWorldDir.copy(hits[0].point).sub(mode.grabbedGlobe.position).normalize()
     deltaQ.setFromUnitVectors(mode.worldGrabDir, currentWorldDir)
     scaleRotationAngle(deltaQ, ROTATION_SENSITIVITY)
+    // Always write to the PRIMARY globe's quaternion — scene.update()
+    // copies it to all secondaries, so the lockstep stays intact.
     ctx.globe.quaternion.copy(mode.globeStartQuat).premultiply(deltaQ)
   }
 
@@ -860,19 +917,31 @@ export function createVrInteraction(
    * at buttons feels broken. Run after rotation updates so the dot
    * reflects the current globe orientation.
    */
+  const rayTargets: THREE.Object3D[] = []
+  /**
+   * One-shot suppression for the updateRayVisuals try/catch. First
+   * exception logs; subsequent exceptions in the same session stay
+   * silent to avoid spamming the Quest browser console at 72–90 Hz
+   * if something unexpectedly goes persistent.
+   */
+  let rayVisualErrorLogged = false
   function updateRayVisuals(): void {
-    // Build the target list once per frame — includes the Place
-    // button only when it's visible (avoids spurious hits on an
-    // offscreen / unavailable button).
-    const targets: THREE.Object3D[] = [ctx.globe, ctx.hud.mesh]
+    // Reuse one closure-scoped array, clear-and-push each frame so
+    // we don't allocate at XR frame rate. Includes every globe in
+    // the layout (so the dot snaps to secondaries), the HUD, and
+    // the AR Place button when it's visible.
+    rayTargets.length = 0
+    const allGlobes = ctx.getAllGlobes()
+    for (let i = 0; i < allGlobes.length; i++) rayTargets.push(allGlobes[i])
+    rayTargets.push(ctx.hud.mesh)
     if (ctx.placement && ctx.placement.placeButtonMesh.visible) {
-      targets.push(ctx.placement.placeButtonMesh)
+      rayTargets.push(ctx.placement.placeButtonMesh)
     }
     for (let i = 0; i < 2; i++) {
       const controller = controllers[i]
       setRaycasterFromController(controller)
       // Closest hit across all interactive surfaces wins.
-      const hits = raycaster.intersectObjects(targets, false)
+      const hits = raycaster.intersectObjects(rayTargets, false)
       if (hits.length > 0 && hits[0].point) {
         const distance = hits[0].distance
         // Scale Z so the line ends exactly at the hit. Min clamp
@@ -948,7 +1017,21 @@ export function createVrInteraction(
 
       // Update the visible laser dot + ray length last so it
       // reflects the current globe position after rotation/scale.
-      updateRayVisuals()
+      // The try/catch is defensive — the grabbed-globe guard in
+      // updateSingle and the stable-array design of
+      // ctx.getAllGlobes() should prevent raycast errors, but a
+      // silent frame-break on an unexpected throw would be worse
+      // than a frame with missing dots. Log once so persistent
+      // failures are visible in the Quest console without spamming
+      // the log at XR frame rate.
+      try {
+        updateRayVisuals()
+      } catch (err) {
+        if (!rayVisualErrorLogged) {
+          rayVisualErrorLogged = true
+          logger.warn('[VR] updateRayVisuals error (further errors suppressed):', err)
+        }
+      }
     },
 
     dispose() {

@@ -42,6 +42,7 @@ import { initLegendForDataset, clearLegendCache, loadConfig } from './services/d
 import { isMobile, IS_MOBILE_NATIVE, getCloudTextureUrl } from './utils/deviceCapability'
 import { initDeepLinks } from './services/deepLinkService'
 import { initVrButton } from './ui/vrButton'
+import type { VrDatasetTexture } from './services/vrScene'
 
 // Phase 5: set a body class so CSS can target mobile-native adaptations
 // (larger touch targets, bottom sheets, etc.) without JS per-component.
@@ -1177,20 +1178,25 @@ class InteractiveSphere {
    * video datasets reuse the existing HLS `<video>` element.
    */
   private async wireVrButton(): Promise<void> {
+    // Shared helper — returns the texture spec for a specific
+    // panel slot by looking at that slot's own panel state (its
+    // dataset + HLS service + decoded image). This is the
+    // multi-panel foundation; the single-panel getters below are
+    // just convenience wrappers that call it for the primary slot.
+    const getPanelTexture = (slot: number): VrDatasetTexture | null => {
+      const panel = this.panelStates[slot]
+      if (!panel?.dataset) return null
+      if (dataService.isImageDataset(panel.dataset)) {
+        return panel.image ? { kind: 'image', element: panel.image } : null
+      }
+      const video = panel.hlsService?.getVideo()
+      return video ? { kind: 'video', element: video } : null
+    }
+
     await initVrButton({
-      getDatasetTexture: () => {
-        const ds = this.appState.currentDataset
-        if (!ds) return null
-        const primaryIdx = this.viewports.getPrimaryIndex()
-        if (dataService.isImageDataset(ds)) {
-          const img = this.panelStates[primaryIdx]?.image
-          if (img) return { kind: 'image', element: img }
-          return null
-        }
-        const video = this.hlsService?.getVideo()
-        if (video) return { kind: 'video', element: video }
-        return null
-      },
+      // Primary-focused convenience getters — equivalent to calling
+      // the panel-slot version with the current primary index.
+      getDatasetTexture: () => getPanelTexture(this.viewports.getPrimaryIndex()),
       getDatasetTitle: () => this.appState.currentDataset?.title ?? null,
       hasVideoDataset: () => {
         const ds = this.appState.currentDataset
@@ -1200,6 +1206,14 @@ class InteractiveSphere {
       togglePlayPause: () => togglePlayPause(
         this.hlsService, this.appState, (m) => this.announce(m),
       ),
+
+      // --- Phase 2.5 multi-panel getters ---
+      getPanelCount: () => this.viewports.getPanelCount(),
+      getPrimaryIndex: () => this.viewports.getPrimaryIndex(),
+      getPanelTexture,
+      getPanelTitle: (slot: number) =>
+        this.panelStates[slot]?.dataset?.title ?? null,
+
       onSessionEnd: () => {
         this.announce('Exited VR')
       },

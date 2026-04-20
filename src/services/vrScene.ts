@@ -213,22 +213,38 @@ export type VrDatasetTexture =
 export interface VrSceneHandle {
   /** The Three.js scene — attach/detach objects (controllers, HUD) here. */
   readonly scene: THREE.Scene
-  /** The globe mesh — the caller uses its `rotation` and `scale` for input. */
+  /** The primary globe mesh — backward-compatible handle. vrInteraction uses this for single-hand drag. */
   readonly globe: THREE.Mesh
   /**
-   * Swap the globe texture. Pass `null` to revert to the base Earth
-   * texture; `{ kind: 'video' }` to stream from an HTMLVideoElement
-   * (live HLS stream); or `{ kind: 'image', element }` to use an
-   * already-decoded HTMLImageElement. Idempotent — repeated calls
-   * with an unchanged spec are no-ops.
+   * All globe meshes including the primary at index 0. Used by
+   * vrInteraction for multi-globe raycast — grab-rotate picks up
+   * whichever globe the controller is pointing at so surface-
+   * pinned math stays correct across the arc. Rotation is always
+   * written to the primary; secondaries copy its quaternion each
+   * frame in scene.update(), so all globes spin in lockstep.
+   */
+  readonly allGlobes: THREE.Mesh[]
+  /**
+   * Set the number of visible globe slots. 1 = primary-only
+   * (default, backward-compatible). 2+ = arc layout with
+   * secondary globes alongside the primary. Creates/destroys
+   * secondary globes as needed; the primary is always slot 0.
+   */
+  setPanelCount(count: number): void
+  /**
+   * Set texture for a specific slot. Slot 0 delegates to the full
+   * primary setTexture (photoreal Earth stack, shader patches,
+   * atmosphere/cloud toggling). Slot > 0 uses a simpler material
+   * swap on secondary globes.
    *
-   * @param onReady Optional callback fired the moment the dataset
-   *   texture is actually visible on the globe (not the placeholder
-   *   base Earth shown during video decode wait). Fires synchronously
-   *   for null specs (instant), images (already decoded), and videos
-   *   that already have a frame buffered. For paused video that
-   *   needs decode time, fires later from the `seeked` or `playing`
-   *   listener.
+   * @param onReady Same semantics as setTexture for slot 0. For
+   *   secondaries, fires immediately for images/null, async for
+   *   video with readyState < 2.
+   */
+  setSlotTexture(slot: number, spec: VrDatasetTexture | null, onReady?: () => void): void
+  /**
+   * Swap the primary globe's texture. Convenience alias for
+   * `setSlotTexture(0, spec, onReady)`.
    */
   setTexture(spec: VrDatasetTexture | null, onReady?: () => void): void
   /**
@@ -277,6 +293,14 @@ export function createVrScene(
   // current UTC time via getSunPosition().
   sunLight.position.set(2, 1.5, 1)
   scene.add(sunLight)
+
+  // When a dataset is loaded, the globe must be uniformly lit so the
+  // scientific-viz colours read correctly across the entire sphere.
+  // We add a second ambient at intensity 0 and toggle between
+  // "planet mode" (sunLight on, datasetAmbient off) and "dataset
+  // mode" (sunLight off, datasetAmbient on) in setTexture.
+  const datasetAmbient = new THREE_.AmbientLight(0xffffff, 0)
+  scene.add(datasetAmbient)
 
   // Shader-uniform handle for the sun direction. Shared between the
   // Earth material's `onBeforeCompile` patch and the per-frame
@@ -567,7 +591,6 @@ export function createVrScene(
       blending: THREE_.AdditiveBlending,
       transparent: true,
       depthWrite: false,
-      depthTest: false,
     })
     sunCoreSprite = new THREE_.Sprite(coreMaterial)
     sunCoreSprite.scale.set(SUN_CORE_SCALE, SUN_CORE_SCALE, 1)
@@ -582,7 +605,6 @@ export function createVrScene(
       blending: THREE_.AdditiveBlending,
       transparent: true,
       depthWrite: false,
-      depthTest: false,
     })
     sunGlowSprite = new THREE_.Sprite(glowMaterial)
     sunGlowSprite.scale.set(SUN_GLOW_SCALE, SUN_GLOW_SCALE, 1)
@@ -838,6 +860,15 @@ export function createVrScene(
       baseDiffuseTexture = tex
       material.map = tex
       material.needsUpdate = true
+      // Upgrade any secondary globes that are still showing the base
+      // Earth (no dataset loaded on their slot) — they were created
+      // with whatever diffuse tier was available at the time.
+      for (const sg of secondaries) {
+        if (sg.activeKey === null) {
+          sg.material.map = tex
+          sg.material.needsUpdate = true
+        }
+      }
     },
     'earth diffuse',
   )
@@ -864,9 +895,269 @@ export function createVrScene(
     'earth lights',
   )
 
+  // --- Secondary globes (Phase 2.5 multi-globe support) ---
+  // When panelCount > 1, additional globe meshes are created at
+  // arc positions alongside the primary. Each secondary gets a
+  // basic MeshPhongMaterial (no day/night shader patch, no
+  // atmosphere, no clouds — those are primary-only decoration).
+  // All globes rotate in lockstep — grab-rotate writes to the
+  // primary's quaternion; scene.update() copies it to each
+  // secondary every frame. No tap-to-promote path ships in
+  // Phase 2.5 (see cead66d for the ping-pong-bug rationale).
+  // setPanelCount is the only thing that adds or removes
+  // secondaries; the 2D app's viewportManager is the source of
+  // truth for how many panels are active.
+
+  interface SecondaryGlobe {
+    mesh: THREE.Mesh
+    material: THREE.MeshPhongMaterial
+    shadow: THREE.Mesh
+    shadowGeom: THREE.PlaneGeometry
+    shadowMat: THREE.MeshBasicMaterial
+    activeKey: HTMLVideoElement | HTMLImageElement | null
+    activeTexture: THREE.Texture | null
+    cancelPendingVideoListeners: (() => void) | null
+  }
+
+  const secondaries: SecondaryGlobe[] = []
+  /**
+   * Stable array exposed as `VrSceneHandle.allGlobes` — mutated
+   * (push/pop) by setPanelCount when secondaries are added or
+   * removed. Returning the same reference each access avoids the
+   * per-frame allocation that `[globe, ...secondaries.map(...)]`
+   * would produce; vrInteraction reads this in its raycast and
+   * ray-visuals hot paths.
+   */
+  const allGlobesArr: THREE.Mesh[] = [globe]
+
+  /**
+   * Nominal world-space position for slot `i` in an arc of `total`
+   * globes, if the arc were laid out centered on `GLOBE_POSITION`.
+   * Slots spread horizontally at 1.2 m center-to-center (0.2 m gap
+   * between 0.5 m-radius spheres), same y + z.
+   *
+   * Only used internally by `syncSecondaryPositions()`, which
+   * subtracts `arcPosition(0)` from higher slots to get slot offsets
+   * relative to the primary — the primary's *actual* world position
+   * is authoritative (written by AR anchoring or inherited from
+   * `GLOBE_POSITION`), and the arc is placed as offsets from there.
+   * Net effect: the layout is NOT centered on the primary — on a
+   * 1→2 transition, the primary stays put and the new secondary
+   * fans 1.2 m to its right. Centering by shifting primary on
+   * panel-count changes is future work (needs reconciliation with
+   * AR anchor preservation).
+   */
+  function arcPosition(i: number, total: number): { x: number; y: number; z: number } {
+    if (total <= 1) return GLOBE_POSITION
+    const spacing = GLOBE_RADIUS * 2 + 0.2
+    const totalWidth = (total - 1) * spacing
+    const x = GLOBE_POSITION.x - totalWidth / 2 + i * spacing
+    return { x, y: GLOBE_POSITION.y, z: GLOBE_POSITION.z }
+  }
+
+  /** Build a simple secondary globe — basic Phong, no shader patches. */
+  function createSecondaryGlobe(): SecondaryGlobe {
+    const mat = new THREE_.MeshPhongMaterial({
+      map: baseDiffuseTexture ?? baseEarthTexture,
+      specular: new THREE_.Color(0x444444),
+      shininess: 30,
+    })
+    const mesh = new THREE_.Mesh(
+      new THREE_.SphereGeometry(GLOBE_RADIUS, 64, 64),
+      mat,
+    )
+    scene.add(mesh)
+
+    // Per-secondary ground shadow (same construction as primary's)
+    const sMat = new THREE_.MeshBasicMaterial({
+      map: shadowTexture,
+      transparent: true,
+      depthWrite: false,
+    })
+    const sGeom = new THREE_.PlaneGeometry(GLOBE_RADIUS * 3, GLOBE_RADIUS * 3)
+    const sMesh = new THREE_.Mesh(sGeom, sMat)
+    sMesh.rotation.x = -Math.PI / 2
+    sMesh.renderOrder = -1
+    scene.add(sMesh)
+
+    return {
+      mesh,
+      material: mat,
+      shadow: sMesh,
+      shadowGeom: sGeom,
+      shadowMat: sMat,
+      activeKey: null,
+      activeTexture: null,
+      cancelPendingVideoListeners: null,
+    }
+  }
+
+  /** Dispose a secondary globe's GPU resources and remove from scene. */
+  function disposeSecondary(sg: SecondaryGlobe): void {
+    if (sg.cancelPendingVideoListeners) sg.cancelPendingVideoListeners()
+    if (sg.activeTexture) sg.activeTexture.dispose()
+    sg.material.dispose()
+    ;(sg.mesh.geometry as THREE.BufferGeometry).dispose()
+    scene.remove(sg.mesh)
+    sg.shadowMat.dispose()
+    sg.shadowGeom.dispose()
+    scene.remove(sg.shadow)
+  }
+
+  /**
+   * Reposition secondaries relative to the primary's current
+   * position. When the primary moves (user placed the globe on an
+   * AR surface, or an anchor-pose sync wrote into globe.position),
+   * the arc must translate with it so the whole layout stays in
+   * view together. Called every frame from update().
+   *
+   * Offset = arc-slot-(i+1) − arc-slot-0 in the nominal layout
+   * (both read from GLOBE_POSITION-relative coords). Scaled by the
+   * primary's uniform scale so pinch-zoomed globes widen/narrow
+   * their inter-globe gap to match.
+   *
+   * Note: primary stays at its current world position. The arc is
+   * laid out RELATIVE to that position, so on a 1→2 transition
+   * the new secondary fans 1.2 m to the primary's right rather
+   * than both globes sliding to sit ±0.6 m about a common center.
+   * Preserves AR anchoring (the user's placed globe doesn't jump)
+   * at the cost of a slightly rightward-biased layout in
+   * unanchored VR. Centering is follow-up polish.
+   */
+  const syncSecondaryPositionsScratch = new THREE_.Vector3()
+  function syncSecondaryPositions(): void {
+    if (secondaries.length === 0) return
+    const total = 1 + secondaries.length
+    const pos0 = arcPosition(0, total)
+    const s = globe.scale.x
+    for (let i = 0; i < secondaries.length; i++) {
+      const pos = arcPosition(i + 1, total)
+      syncSecondaryPositionsScratch.set(
+        (pos.x - pos0.x) * s,
+        (pos.y - pos0.y) * s,
+        (pos.z - pos0.z) * s,
+      )
+      syncSecondaryPositionsScratch.add(globe.position)
+      secondaries[i].mesh.position.copy(syncSecondaryPositionsScratch)
+    }
+  }
+
   return {
     scene,
     globe,
+    allGlobes: allGlobesArr,
+
+    setPanelCount(count) {
+      const desired = Math.max(1, Math.min(4, count))
+      const neededSecondaries = desired - 1
+      // Early-return when the count hasn't changed. vrSession calls
+      // this every frame, so this IS the common case; without the
+      // guard the per-frame syncSecondaryPositions below would run
+      // even in steady state.
+      //
+      // Critically: we DO NOT reposition the primary globe here
+      // (the old layoutArc call did). globe.position is written by
+      // the AR anchor-pose sync and by pinch-zoom-driven placement
+      // adjustments — those writes are authoritative, and a
+      // per-frame reset to GLOBE_POSITION would snap the globe back
+      // to its nominal spot every frame.
+      if (secondaries.length === neededSecondaries) return
+      // Add / remove secondaries until the counts match. Keep
+      // allGlobesArr in sync so consumers see the same array
+      // reference mutated in-place.
+      while (secondaries.length < neededSecondaries) {
+        const sg = createSecondaryGlobe()
+        secondaries.push(sg)
+        allGlobesArr.push(sg.mesh)
+      }
+      while (secondaries.length > neededSecondaries) {
+        const sg = secondaries.pop()!
+        disposeSecondary(sg)
+        allGlobesArr.pop()
+      }
+      // Position the new secondaries relative to the primary's
+      // current position. syncSecondaryPositions also runs every
+      // frame in update(), so this first placement just avoids a
+      // one-frame pop at the nominal spot when the secondary is
+      // first created.
+      syncSecondaryPositions()
+    },
+
+    setSlotTexture(slot, spec, onReady) {
+      if (slot === 0) {
+        // Primary — full photoreal treatment via the existing path
+        this.setTexture(spec, onReady)
+        return
+      }
+      const sgIdx = slot - 1
+      if (sgIdx >= secondaries.length) {
+        onReady?.()
+        return
+      }
+      const sg = secondaries[sgIdx]
+
+      // Change detection — same idempotency as primary
+      const nextKey = spec?.kind === 'video' ? spec.element : spec?.kind === 'image' ? spec.element : null
+      if (nextKey === sg.activeKey) {
+        onReady?.()
+        return
+      }
+      // Cancel any pending video listeners from the previous spec
+      if (sg.cancelPendingVideoListeners) {
+        sg.cancelPendingVideoListeners()
+        sg.cancelPendingVideoListeners = null
+      }
+      if (sg.activeTexture) {
+        sg.activeTexture.dispose()
+        sg.activeTexture = null
+      }
+
+      if (!spec) {
+        sg.material.map = baseDiffuseTexture ?? baseEarthTexture
+        sg.activeKey = null
+        sg.material.needsUpdate = true
+        onReady?.()
+      } else if (spec.kind === 'video') {
+        sg.activeKey = spec.element
+        try { spec.element.currentTime = spec.element.currentTime } catch { /* no-op */ }
+        const tex = new THREE_.VideoTexture(spec.element)
+        tex.colorSpace = THREE_.SRGBColorSpace
+        tex.minFilter = THREE_.LinearFilter
+        tex.magFilter = THREE_.LinearFilter
+        sg.activeTexture = tex
+        if (spec.element.readyState >= 2) {
+          sg.material.map = tex
+          sg.material.needsUpdate = true
+          onReady?.()
+        } else {
+          sg.material.map = baseDiffuseTexture ?? baseEarthTexture
+          const onFrame = () => {
+            sg.cancelPendingVideoListeners = null
+            if (sg.activeKey !== spec.element) return
+            sg.material.map = tex
+            sg.material.needsUpdate = true
+            onReady?.()
+          }
+          spec.element.addEventListener('seeked', onFrame, { once: true })
+          spec.element.addEventListener('playing', onFrame, { once: true })
+          sg.cancelPendingVideoListeners = () => {
+            spec.element.removeEventListener('seeked', onFrame)
+            spec.element.removeEventListener('playing', onFrame)
+          }
+        }
+      } else if (spec.kind === 'image') {
+        const tex = new THREE_.Texture(spec.element)
+        tex.colorSpace = THREE_.SRGBColorSpace
+        tex.minFilter = THREE_.LinearFilter
+        tex.magFilter = THREE_.LinearFilter
+        tex.needsUpdate = true
+        sg.activeTexture = tex
+        sg.material.map = tex
+        sg.activeKey = spec.element
+        sg.material.needsUpdate = true
+        onReady?.()
+      }
+    },
 
     setTexture(spec, onReady) {
       // Skip texture-swap work if the spec is unchanged — repeated
@@ -920,6 +1211,10 @@ export function createVrScene(
         if (cloudMesh) cloudMesh.visible = true
         atmosphereInner.visible = true
         atmosphereOuter.visible = true
+        // Planet mode: directional sun for hemisphere lighting +
+        // base ambient for shadow fill.
+        sunLight.intensity = 1.8
+        datasetAmbient.intensity = 0
         activeKey = null
         // No dataset to wait for — readiness is immediate.
         onReady?.()
@@ -946,6 +1241,10 @@ export function createVrScene(
         if (cloudMesh) cloudMesh.visible = false
         atmosphereInner.visible = false
         atmosphereOuter.visible = false
+        // Dataset mode: kill directional sun so both hemispheres
+        // are uniformly lit; boost ambient so data reads evenly.
+        sunLight.intensity = 0
+        datasetAmbient.intensity = 1.6
 
         // Force the decoder to produce a frame at the current
         // position. Without this, paused HLS streams may have no
@@ -1010,6 +1309,8 @@ export function createVrScene(
         if (cloudMesh) cloudMesh.visible = false
         atmosphereInner.visible = false
         atmosphereOuter.visible = false
+        sunLight.intensity = 0
+        datasetAmbient.intensity = 1.6
         material.map = tex
         activeKey = spec.element
         onReady?.()
@@ -1091,6 +1392,26 @@ export function createVrScene(
         sunCoreSprite.position.copy(sunWorldPosScratch)
         sunGlowSprite.position.copy(sunWorldPosScratch)
       }
+
+      // Secondary globes: position tracks the primary (critical in
+      // AR — when the user anchors the primary to a real surface,
+      // the secondaries must translate with it), rotation + scale
+      // mirror the primary so all globes spin in tandem and
+      // pinch-zoom together. SOS datasets share the same geographic
+      // projection, so locked quaternions keep corresponding lat/lng
+      // lines aligned across the arc.
+      syncSecondaryPositions()
+      for (const sg of secondaries) {
+        sg.mesh.quaternion.copy(globe.quaternion)
+        sg.mesh.scale.copy(globe.scale)
+        const s = sg.mesh.scale.x
+        sg.shadow.scale.set(s, s, 1)
+        sg.shadow.position.set(
+          sg.mesh.position.x,
+          sg.mesh.position.y - GLOBE_RADIUS * s - 0.005,
+          sg.mesh.position.z,
+        )
+      }
     },
 
     dispose() {
@@ -1145,6 +1466,15 @@ export function createVrScene(
       shadowGeometry.dispose()
       shadowMaterial.dispose()
       shadowTexture.dispose()
+      // Dispose all secondary globes and clear the shared
+      // allGlobes array so any lingering references (debug
+      // tooling, a late raycast from an in-flight XR frame) see
+      // an empty layout instead of dangling mesh pointers.
+      for (const sg of secondaries) {
+        disposeSecondary(sg)
+      }
+      secondaries.length = 0
+      allGlobesArr.length = 0
     },
   }
 }

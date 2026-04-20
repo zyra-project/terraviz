@@ -61,6 +61,14 @@ export interface VrHudState {
   isPlaying: boolean
   /** Hides the play/pause button when the loaded dataset is an image (no playback). */
   hasVideo: boolean
+  /**
+   * Number of panels in the 2D layout (1/2/4). When > 1 the HUD renders
+   * a small indicator strip so the user can see how many globes exist
+   * and which one they're currently controlling.
+   */
+  panelCount: number
+  /** Which panel index is primary — drives the highlighted dot in the strip. */
+  primaryIndex: number
 }
 
 export interface VrHudHandle {
@@ -161,6 +169,28 @@ function drawCanvas(
   ctx.moveTo(exCenterX + armLength, exCenterY - armLength)
   ctx.lineTo(exCenterX - armLength, exCenterY + armLength)
   ctx.stroke()
+
+  // --- Top-center: multi-panel indicator strip ---
+  // Tiny dots near the top edge of the HUD, one per panel in the 2D
+  // layout, with the primary drawn in the accent colour and others
+  // dimmed. Omitted entirely when there's only one panel — single-
+  // globe sessions have no use for this affordance.
+  if (state.panelCount > 1) {
+    const dotRadius = 6
+    const dotSpacing = 24
+    const totalWidth = (state.panelCount - 1) * dotSpacing
+    const startX = w / 2 - totalWidth / 2
+    const y = 22
+    for (let i = 0; i < state.panelCount; i++) {
+      const cx = startX + i * dotSpacing
+      ctx.beginPath()
+      ctx.arc(cx, y, dotRadius, 0, Math.PI * 2)
+      ctx.fillStyle = i === state.primaryIndex
+        ? 'rgba(77, 166, 255, 0.95)'
+        : 'rgba(232, 234, 240, 0.35)'
+      ctx.fill()
+    }
+  }
 }
 
 /**
@@ -203,6 +233,8 @@ export function createVrHud(THREE_: typeof THREE): VrHudHandle {
     datasetTitle: null,
     isPlaying: false,
     hasVideo: false,
+    panelCount: 1,
+    primaryIndex: 0,
   }
 
   function redraw() {
@@ -220,7 +252,9 @@ export function createVrHud(THREE_: typeof THREE): VrHudHandle {
       const changed =
         state.datasetTitle !== currentState.datasetTitle ||
         state.isPlaying !== currentState.isPlaying ||
-        state.hasVideo !== currentState.hasVideo
+        state.hasVideo !== currentState.hasVideo ||
+        state.panelCount !== currentState.panelCount ||
+        state.primaryIndex !== currentState.primaryIndex
       if (!changed) return
       currentState = state
       redraw()
