@@ -394,12 +394,13 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
   let fadeTimeoutId: ReturnType<typeof setTimeout> | null = null
   // Mirror the 2D app's viewport layout inside VR. Count=1 is the
   // backward-compatible single-globe path; count=2/4 builds the arc
-  // with secondary globes. Scene slot 0 always holds the 2D app's
-  // *primary* panel (drives the photoreal stack + HUD + loading
-  // fade-out); scene slots 1..N hold the non-primary panels in 2D
-  // order. When the user taps a non-primary globe in VR, Phase 2.5
-  // commit 5 promotes it — the 2D app's primary-index shifts, and
-  // next frame the scene's slot 0 reflects the new primary.
+  // with secondary globes. Scene slot 0 always reflects the 2D app's
+  // *current* primary panel (drives the photoreal stack + HUD +
+  // loading fade-out); scene slots 1..N hold the non-primary panels
+  // in 2D order. VR follows the 2D app's layout in lockstep —
+  // tapping a globe in VR does not, by itself, reorder panels here;
+  // grab-rotate acts on every globe uniformly (see cead66d for why
+  // the original tap-to-promote path was ripped out).
   const initialPanelCount = ctx.getPanelCount()
   logger.info(`[VR] Entering with ${initialPanelCount} panel(s), primary: ${ctx.getPrimaryIndex()}`)
   scene.setPanelCount(initialPanelCount)

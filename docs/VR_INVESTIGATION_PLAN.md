@@ -492,7 +492,7 @@ Index controllers without per-device code.
 Basic version (always-on labels + Quest Touch) is one small commit.
 Polish (fade + toggle + cross-device) follows as separate commits.
 
-### Phase 2.5 — multi-globe layout (parity with 2D viewport manager) ✅ *(2-globe arc shipped: per-frame layout sync, promote-to-primary on non-primary tap, HUD panel-indicator strip; 4-globe is a stretch post on-device validation)*
+### Phase 2.5 — multi-globe layout (parity with 2D viewport manager) ✅ *(2-globe arc shipped: per-frame layout sync, lockstep grab-rotate across all globes, HUD panel-indicator strip. Promote-to-primary on non-primary tap was prototyped then ripped out — it caused a ping-pong loop (promote → textures swap under the user's ray → re-promote) — a replacement UX (long-press / HUD-dot taps / Phase 3 browse-panel routing) is future work. 4-globe is a stretch post on-device Quest decoder-budget validation.)*
 
 The 2D app already supports 1/2/4 synchronised globes via
 `src/services/viewportManager.ts` — camera lockstep, a "primary"
@@ -574,7 +574,7 @@ Commit breakdown:
 | 2 | `vrScene: support N globes internally` | Internal refactor — single globe → array of globes. All existing code paths use index 0 as primary. No user-visible change when panelCount is 1. |
 | 3 | `VrSessionContext: multi-panel getters` | `getPanelCount()`, `getPrimaryIndex()`, `getPanelTexture(slot)`, `getPanelTitle(slot)` — main.ts wires to existing `viewports` + `panelStates` |
 | 4 | `vrSession: arc layout + per-slot texture sync` | Per-frame poll of panel count + textures. 2-globe arc: globes at `(±0.9, 1.3, -1.5)`, slight inward rotation |
-| 5 | `vrInteraction: promote-to-primary` | Trigger on non-primary globe fires `onPromotePanel(slot)` callback; main.ts forwards to `viewports.setPrimaryIndex()` |
+| 5 | `vrInteraction: lockstep grab-rotate across all globes` | Trigger on any globe starts a surface-pinned rotation; secondaries copy the primary's quaternion each frame so all globes spin together. (The plan originally had tap-to-promote here, but it created a ping-pong loop — tap a secondary → it becomes primary → user's ray now hits the NEW secondary → re-promote on next tap — so the path was ripped out in `cead66d`. A replacement UX goes in a later phase.) |
 | 6 | `vrHud: primary-aware panel indicator strip` | Small dot strip showing panel count with primary highlighted; dataset title reflects primary |
 
 Commits 2-4 are the "visible 2-globe arc" milestone. 5-6 add

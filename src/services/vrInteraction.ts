@@ -94,11 +94,13 @@ export interface VrInteractionContext {
   /** Primary globe — scene slot 0. Drives rotation + surface-pinned raycast. */
   globe: THREE.Mesh
   /**
-   * Every globe in the current layout (primary + secondaries). Used by
-   * the raycaster to detect taps on non-primary globes so they can be
-   * promoted. For a 1-globe session this is just `[globe]`. Function
-   * (not a snapshot) so panel-count changes mid-session are reflected
-   * without re-creating the interaction handle.
+   * Every globe in the current layout (primary + secondaries). Used
+   * for multi-globe hit-testing so grab/rotate picks up whichever
+   * globe the controller is pointing at — the surface-pinned drag
+   * math needs the hit globe's position as the pivot. For a 1-globe
+   * session this is just `[globe]`. Function (not a snapshot) so
+   * panel-count changes mid-session are reflected without
+   * re-creating the interaction handle.
    */
   getAllGlobes: () => THREE.Mesh[]
   hud: VrHudHandle
@@ -770,6 +772,17 @@ export function createVrInteraction(
 
   /** Apply the surface-pinned rotation for the active single-drag. */
   function updateSingle(mode: Extract<RotationMode, { kind: 'single' }>): void {
+    // Guard: the grabbed globe may have been disposed mid-frame if
+    // the 2D app dropped from a 2-globe to a 1-globe layout while
+    // the user had trigger held — scene.setPanelCount pops and
+    // disposes the secondary, leaving our captured reference
+    // dangling. Raycasting against a disposed mesh would throw or
+    // return garbage; cancel the mode back to idle and let the next
+    // frame re-capture on the current geometry.
+    if (!ctx.getAllGlobes().includes(mode.grabbedGlobe)) {
+      rotationMode = { kind: 'idle' }
+      return
+    }
     const controller = controllers[mode.index]
     setRaycasterFromController(controller)
     // Raycast against the specific globe the user grabbed so the
@@ -905,6 +918,13 @@ export function createVrInteraction(
    * reflects the current globe orientation.
    */
   const rayTargets: THREE.Object3D[] = []
+  /**
+   * One-shot suppression for the updateRayVisuals try/catch. First
+   * exception logs; subsequent exceptions in the same session stay
+   * silent to avoid spamming the Quest browser console at 72–90 Hz
+   * if something unexpectedly goes persistent.
+   */
+  let rayVisualErrorLogged = false
   function updateRayVisuals(): void {
     // Reuse one closure-scoped array, clear-and-push each frame so
     // we don't allocate at XR frame rate. Includes every globe in
@@ -997,10 +1017,20 @@ export function createVrInteraction(
 
       // Update the visible laser dot + ray length last so it
       // reflects the current globe position after rotation/scale.
+      // The try/catch is defensive — the grabbed-globe guard in
+      // updateSingle and the stable-array design of
+      // ctx.getAllGlobes() should prevent raycast errors, but a
+      // silent frame-break on an unexpected throw would be worse
+      // than a frame with missing dots. Log once so persistent
+      // failures are visible in the Quest console without spamming
+      // the log at XR frame rate.
       try {
         updateRayVisuals()
       } catch (err) {
-        logger.warn('[VR] updateRayVisuals error:', err)
+        if (!rayVisualErrorLogged) {
+          rayVisualErrorLogged = true
+          logger.warn('[VR] updateRayVisuals error (further errors suppressed):', err)
+        }
       }
     },
 

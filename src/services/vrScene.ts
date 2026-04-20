@@ -217,8 +217,11 @@ export interface VrSceneHandle {
   readonly globe: THREE.Mesh
   /**
    * All globe meshes including the primary at index 0. Used by
-   * vrInteraction for multi-globe raycast — any globe can be
-   * hit, and hitting a non-primary promotes it.
+   * vrInteraction for multi-globe raycast — grab-rotate picks up
+   * whichever globe the controller is pointing at so surface-
+   * pinned math stays correct across the arc. Rotation is always
+   * written to the primary; secondaries copy its quaternion each
+   * frame in scene.update(), so all globes spin in lockstep.
    */
   readonly allGlobes: THREE.Mesh[]
   /**
