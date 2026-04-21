@@ -211,6 +211,20 @@ const EYE_STARS_PER_EYE = 3
 const EYE_STAR_RADIUS = 0.00085
 
 /**
+ * Eye shape — slightly taller than wide, matching the reference
+ * concept art (eyes read as anime-style vertical ovals, not
+ * circles). Applied as a Y-scale on the whole eye group at build
+ * time, so disc, bezel, iris, pupil, stars, catchlights, and the
+ * stencil mask all stretch together and stay aligned.
+ *
+ * This is a static build-time scale for now; a natural extension is
+ * per-state animation via `EXPRESSIONS` (e.g. SURPRISED widens the
+ * scale, SLEEPY flattens it). Keeping the scale on the group makes
+ * that a one-line hook when we're ready.
+ */
+const EYE_SHAPE_Y_SCALE = 1.18
+
+/**
  * One eye in the paired rig. The single-lens configuration is
  * retired as part of the vinyl redesign (see
  * `docs/ORBIT_CHARACTER_VINYL_REDESIGN.md` §Face). Per-frame pupil
@@ -705,6 +719,13 @@ function buildPairedEye(
   lowerLid.receiveShadow = true
   lowerLid.renderOrder = 1
   lowerLidPivot.add(lowerLid)
+
+  // Stretch the whole eye group vertically into the slight ellipse
+  // the concept art shows. Disc, bezel torus, iris, pupil field,
+  // stars, catchlights, lid pivots + lid meshes, and the stencil
+  // mask all inherit this scale together — they all stretch in
+  // lockstep so iris/mask alignment holds at any closed rotation.
+  group.scale.set(1, EYE_SHAPE_Y_SCALE, 1)
 
   return {
     group, bezel, pupilGroup,

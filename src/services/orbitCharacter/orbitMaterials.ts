@@ -343,6 +343,14 @@ export function createSocketMaskMaterial(stencilRef: number): THREE.MeshBasicMat
     // setup pass, invisible to the final image.
     colorWrite: false,
     depthWrite: false,
+    // Bypass the depth test entirely so the mask always writes
+    // stencil regardless of what meshes have rendered before it.
+    // The body silhouette sits in front of the recessed socket at
+    // the socket center, so WITHOUT this, mask fragments would be
+    // occluded by the body and stencil would not be written in the
+    // middle of the socket — the clip would fail there and the lid
+    // would leak through.
+    depthTest: false,
   })
   mat.stencilWrite = true
   mat.stencilRef = stencilRef
@@ -359,13 +367,21 @@ export function createSocketMaskMaterial(stencilRef: number): THREE.MeshBasicMat
  * the palette uniforms with the main body bundle so palette swaps
  * propagate correctly; only the stencil flags differ.
  *
+ * **Three.js gotcha:** `stencilWrite` is the master switch for the
+ * entire stencil subsystem on a material — if it's `false`, the GPU
+ * skips both the stencil TEST and WRITE. To make a material read
+ * the stencil buffer without modifying it, we turn `stencilWrite`
+ * ON and set every stencil op (`stencilFail`, `stencilZFail`,
+ * `stencilZPass`) to `KeepStencilOp`. That way the lid tests
+ * against the mask ID but never alters the buffer.
+ *
  * Each eye gets its own lid material instance with its own
  * `stencilRef` so left/right sockets don't cross-contaminate.
  */
 export function createLidMaterial(palette: PaletteKey, stencilRef: number): BodyMaterialBundle {
   const bundle = createBodyMaterial(palette)
   const mat = bundle.material
-  mat.stencilWrite = false
+  mat.stencilWrite = true
   mat.stencilRef = stencilRef
   mat.stencilFunc = THREE.EqualStencilFunc
   mat.stencilFail = THREE.KeepStencilOp
