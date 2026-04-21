@@ -525,15 +525,14 @@ export function createCatchlightMaterial(opacity: number): THREE.ShaderMaterial 
       varying vec2 vUv;
       uniform float uOpacity;
       void main() {
-        // Distance from disc center, 0 at center to 1 at disc edge.
-        // Quadratic falloff (pow exponent 2.2) pushes the bright
-        // zone toward the center so the highlight has a clear
-        // core rather than a uniform wash across the disc.
+        // DIAGNOSTIC — catchlight output tinted bright red so we can
+        // confirm / reject whether the "inner-wedge" artifact is a
+        // catchlight rendering at unexpected scale or position.
         vec2 c = vUv - vec2(0.5);
         float d = length(c) * 2.0;
         if (d >= 1.0) discard;
         float fade = pow(1.0 - d, 2.2);
-        gl_FragColor = vec4(1.0, 1.0, 1.0, uOpacity * fade);
+        gl_FragColor = vec4(1.0, 0.0, 0.0, uOpacity * fade);
       }`,
   })
   // Catchlights ride the pupilGroup so they track gaze. Stencil
