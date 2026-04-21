@@ -1224,14 +1224,11 @@ export function updateCharacter(
     twitchLower = Math.sin(time * 10.5 + 1.7) * 0.030 + Math.sin(time * 17.1 + 0.5) * 0.020
   }
   // Proximity lid soften — cursor close to Orbit opens the lids a
-  // touch (alert attention). The soften is CAPPED at half of the
-  // state's baseline so a low-lid state like IDLE (0.08) can't
-  // wipe its visible lid rim entirely when the cursor is near; the
-  // baseline lid stays readable even at full proximity.
-  //   IDLE   (0.08)  max soften 0.04 → 0.04 at full proximity
-  //   HAPPY  (0.06)  max soften 0.03 → 0.03 at full proximity
-  //   SLEEPY (0.56)  max soften 0.08 → 0.48 at full proximity (still sleepy)
-  const proximitySoften = anim.userProximity * 0.08
+  // touch (alert attention). Small absolute magnitude so a low-lid
+  // state like IDLE (0.18 baseline) keeps a clearly visible rim
+  // even at full proximity. The cap at half of baseline is also
+  // kept as a belt-and-braces safeguard for unusual state values.
+  const proximitySoften = anim.userProximity * 0.03
   const upperSoften = Math.min(proximitySoften, s.upperLid * 0.5)
   const lowerSoften = Math.min(proximitySoften, s.lowerLid * 0.5)
   const upperBase = Math.max(0, s.upperLid - upperSoften) + twitchUpper
@@ -1239,11 +1236,17 @@ export function updateCharacter(
   const effectiveUpper = Math.max(upperBase, blinkAmount)
   const effectiveLower = Math.max(lowerBase, blinkAmount * 0.35)
   // 3-D lid meshes: interpolate pivot rotation between "parked" (out
-  // of frame) and "closed" (covering the socket) by the lid amount.
-  // No shader uniforms involved — the lid's own silhouette and
-  // material occlude the iris naturally.
-  const upperLidRot = lerp(UPPER_LID_PARKED_ROT, UPPER_LID_CLOSED_ROT, effectiveUpper)
-  const lowerLidRot = lerp(LOWER_LID_PARKED_ROT, LOWER_LID_CLOSED_ROT, effectiveLower)
+  // of frame) and "closed" (covering the socket).
+  //
+  // Bias is non-linear (sqrt) so small effectiveLid values produce
+  // meaningful rotation early — a linear lerp maps e.g. lid=0.18 to
+  // only 18 % of the rotation range (still nearly parked, no visible
+  // rim). sqrt(0.18) ≈ 0.42 lands the dome visibly across the top of
+  // the iris at that amount. lid=0 still parks fully (sqrt(0) = 0),
+  // so wide-eyed states like SURPRISED / EXCITED remain lidless.
+  const lidCurve = (x: number): number => Math.sqrt(Math.max(0, x))
+  const upperLidRot = lerp(UPPER_LID_PARKED_ROT, UPPER_LID_CLOSED_ROT, lidCurve(effectiveUpper))
+  const lowerLidRot = lerp(LOWER_LID_PARKED_ROT, LOWER_LID_CLOSED_ROT, lidCurve(effectiveLower))
   for (const rig of handles.eyeRigs) {
     rig.upperLidPivot.rotation.x = lerp(rig.upperLidPivot.rotation.x, upperLidRot, 0.25)
     rig.lowerLidPivot.rotation.x = lerp(rig.lowerLidPivot.rotation.x, lowerLidRot, 0.25)
@@ -1373,8 +1376,8 @@ export function updateCharacter(
     tPitch = lerp(tPitch, ambientPitch, blend)
   }
 
-  anim.eyeYaw = lerp(anim.eyeYaw, tYaw, 0.08)
-  anim.eyePitch = lerp(anim.eyePitch, tPitch, 0.08)
+  anim.eyeYaw = lerp(anim.eyeYaw, tYaw, 0.14)
+  anim.eyePitch = lerp(anim.eyePitch, tPitch, 0.14)
 
   // ── Head motion (nod / shake / tilt per state, or gesture override) ──
   // Head-ownership rule (design doc §Gesture overlay system): when a
@@ -1431,8 +1434,13 @@ export function updateCharacter(
   // eyes would keep the catchlight on the cornea. Ours are anime,
   // so everything below the socket moves together. jitterScale
   // keeps the excursion inside the socket at any gaze angle.
-  const gazeRangeX = 0.010
-  const gazeRangeY = 0.007
+  // Max pupil excursion within the socket. Safe ceiling is
+  // (pupilFieldRadius − pupilDotRadius) = 0.0071. At sin(yaw) ≈ 1
+  // and jitterScale 0.60, `gx = gazeRangeX * 0.60`, so the
+  // practical cap on gazeRangeX is ~0.012. We leave a little slack
+  // so jitter adds on top without the pupil escaping the navy field.
+  const gazeRangeX = 0.018
+  const gazeRangeY = 0.013
   const baseGazeX = Math.sin(anim.eyeYaw) * gazeRangeX
   const baseGazeY = -Math.sin(anim.eyePitch) * gazeRangeY
   for (const rig of handles.eyeRigs) {
