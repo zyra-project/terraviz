@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta name="theme-color" content="#060810" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="robots" content="noindex" />
+    <title>Orbit — Interactive Sphere</title>
+</head>
+<body class="orbit-body">
+    <div id="orbit-root">
+        <div id="orbit-canvas-host" role="img" aria-label="Orbit character, Idle"></div>
+
+        <header class="orbit-topbar">
+            <a href="/" class="orbit-back" aria-label="Back to SOS Explorer">&#x2190;&nbsp;Back</a>
+            <div class="orbit-title">Orbit</div>
+            <span aria-hidden="true" style="width: 1px;"></span>
+        </header>
+
+        <div id="orbit-perf-hud" class="orbit-perf-hud" aria-hidden="true"></div>
+
+        <section class="orbit-debug-panel" aria-label="Orbit debug panel">
+            <div class="orbit-debug-header">
+                <span class="orbit-debug-title">Debug</span>
+                <button class="orbit-debug-toggle" type="button" aria-expanded="true" aria-label="Toggle debug panel">&#x25BE;</button>
+            </div>
+            <div class="orbit-debug-body">
+                <div class="orbit-debug-row">
+                    <label class="orbit-debug-label" for="orbit-debug-state">State</label>
+                    <select class="orbit-debug-select" id="orbit-debug-state" aria-label="Orbit state"></select>
+                </div>
+                <div class="orbit-debug-row">
+                    <span class="orbit-debug-label">Gesture</span>
+                    <div class="orbit-debug-gestures" id="orbit-debug-gestures" role="group" aria-label="Play gesture"></div>
+                </div>
+                <div class="orbit-debug-row">
+                    <span class="orbit-debug-label" id="orbit-debug-palette-label">Palette</span>
+                    <div class="orbit-debug-palettes" id="orbit-debug-palettes" role="radiogroup" aria-labelledby="orbit-debug-palette-label"></div>
+                </div>
+                <div class="orbit-debug-row">
+                    <span class="orbit-debug-label" id="orbit-debug-scale-label">Scale</span>
+                    <div class="orbit-debug-scales" id="orbit-debug-scales" role="radiogroup" aria-labelledby="orbit-debug-scale-label"></div>
+                </div>
+                <div class="orbit-debug-row">
+                    <span class="orbit-debug-label" id="orbit-debug-eyes-label">Eyes</span>
+                    <div class="orbit-debug-eyes" id="orbit-debug-eyes" role="radiogroup" aria-labelledby="orbit-debug-eyes-label"></div>
+                </div>
+                <div class="orbit-debug-row orbit-debug-flight-row">
+                    <button class="orbit-debug-flight" id="orbit-debug-fly" type="button" aria-label="Fly Orbit to Earth">Fly to Earth</button>
+                    <button class="orbit-debug-flight" id="orbit-debug-home" type="button" aria-label="Fly Orbit home">Fly Home</button>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <div id="a11y-announcer" aria-live="polite" aria-atomic="true" class="sr-only"></div>
+
+    <script type="module" src="./orbitMain.ts"></script>
+</body>
+</html>

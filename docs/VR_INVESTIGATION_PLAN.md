@@ -3,7 +3,7 @@
 Feasibility investigation for running Interactive Sphere as an immersive
 web experience on Meta Quest (and other WebXR-capable) headsets.
 
-Status: **MVP + Phase 2 + Phase 2.1/2.2 + Phase 2.5 shipped.** Feature-gated
+Status: **MVP + Phase 2 + Phase 2.1/2.2 + Phase 2.5 + Phase 3 shipped.** Feature-gated
 "Enter AR" / "Enter VR" button opens an immersive WebXR session
 that renders the currently-loaded dataset (or a photoreal
 day/night Earth with atmosphere, clouds, night lights, specular,
@@ -14,12 +14,13 @@ interaction (surface-pinned drag, two-hand pinch+rotate, thumbstick
 zoom, flick-to-spin inertia), floating HUD, animated 3D loading
 scene. The 2D experience is unchanged when WebXR is absent.
 
-Remaining phases not yet built: in-VR dataset switching (3), VR
-tours (3.5), 2D↔VR camera sync (4), voice docent + hand tracking
-(5), AR-native enhancements (spatial audio, annotations,
-capture/share, real-time data, co-presence, layered datasets).
-4-globe support is a Phase 2.5 stretch (2-globe shipped; 4 gates
-on Quest decoder-budget testing).
+Remaining phases not yet built: VR tours (3.5), 2D↔VR camera sync
+(4), voice docent + hand tracking (5), AR-native enhancements
+(spatial audio, annotations, capture/share, real-time data,
+co-presence, layered datasets). 4-globe support is a Phase 2.5
+stretch (2-globe shipped; 4 gates on Quest decoder-budget
+testing). Free-text dataset search is a Phase 3 stretch (category
+chips shipped; keyboard/voice search pending).
 
 ---
 
@@ -581,11 +582,96 @@ Commits 2-4 are the "visible 2-globe arc" milestone. 5-6 add
 interaction + UI polish. 4-globe is a stretch commit 7 after
 on-device validation.
 
-### Phase 3 — in-VR dataset switching
-- Floating browse panel rendered as a CanvasTexture with dataset
-  thumbnails.
-- Controller raycast → select → triggers `loadDataset()` without
-  exiting VR.
+### Phase 3 — in-VR dataset switching ✅ *(shipped: floating CanvasTexture panel at 0.8 × 0.6 m, scrollable card list, controller-raycast card selection, HUD Browse button toggles visibility, single-row category chip filter. Virtual-keyboard free-text search was deferred in favor of chips per the recommendation below; voice search can come with Phase 5.)*
+
+The single biggest UX gap after MVP: the user must exit VR, pick a
+dataset in the 2D browse panel, then re-enter VR. Phase 3 brings a
+floating browse panel into the VR scene so dataset switching happens
+without leaving the headset.
+
+**Design:**
+
+A CanvasTexture panel (~0.8 m × 0.6 m) floating to the right of
+the globe at a comfortable reading distance (~1.2 m from the user).
+The panel renders the dataset catalog in a scrollable list with
+category chips, search, and thumbnails — a simplified mirror of the
+2D `browseUI.ts`.
+
+Controller interaction mirrors the HUD: raycast → UV hit-test →
+semantic actions (scroll, select category, select dataset). Trigger-
+click on a dataset card calls `loadDataset()` through the session
+context, which swaps the globe texture without ending the XR session.
+
+The panel is toggled by a new "Browse" button on the HUD (same UV
+hit-region approach as play/pause and exit). When hidden, no
+CanvasTexture redraws run — zero cost in the steady state.
+
+**Why CanvasTexture (not DOM overlay):**
+
+Quest Browser supports DOM overlay (`optionalFeatures: ['dom-overlay']`)
+which would let us reuse the existing `browseUI.ts` HTML directly.
+Tempting, but:
+
+- DOM overlay is a single flat layer composited on top of the XR
+  content — it doesn't sit in 3D space, can't be pointed at with a
+  controller ray, and can't be spatially placed. It's a HUD, not a
+  panel.
+- The same CanvasTexture infrastructure built here is reused by
+  Phase 3.5 (tour overlays) and Phase 4 (Orbit speech bubbles).
+  Building it once for browse pays for itself immediately.
+
+**New modules:**
+
+| Module | Est. LOC | Responsibility |
+|---|---|---|
+| `src/services/vrBrowse.ts` | ~400 | CanvasTexture panel: catalog rendering, scroll, category filter, search, dataset card tap → load callback |
+| Extensions to `vrHud.ts` | ~30 | "Browse" button region + hit-test |
+| Extensions to `vrInteraction.ts` | ~60 | Browse panel as raycast target, scroll via thumbstick-X when pointing at panel |
+| Extensions to `vrSession.ts` | ~40 | Wire browse panel lifecycle, toggle visibility, pass dataset-load callback |
+| `VrSessionContext` additions | ~20 | `getDatasets()`, `loadDataset(id)` — read from dataService, trigger load via main.ts |
+
+**Commit sequence (~6 commits):**
+
+| # | Commit | Scope |
+|---|---|---|
+| 1 | Plan doc: Phase 3 breakdown | This section |
+| 2 | `vrBrowse: CanvasTexture panel scaffold` | Panel mesh, canvas drawing (title bar, placeholder list), show/hide. No data, no interaction. |
+| 3 | `vrBrowse: dataset catalog rendering` | Wire `getDatasets()` from context, render cards with title + category chip + thumbnail placeholder. Scrollable viewport via canvas clip. |
+| 4 | `vrBrowse: controller interaction` | Add browse panel to raycast targets. UV hit-test for card tap → `loadDataset(id)`. Thumbstick-X scrolls when ray is on the panel. |
+| 5 | `vrHud: Browse button` | New HUD region toggles browse panel visibility. Icon + label. |
+| 6 | `vrBrowse: search + category filter` | Text input via virtual keyboard or predefined category chips. Filter the rendered list. |
+
+Commits 2-4 reach the "functional in-VR browse" milestone. 5 adds
+discoverability (currently user would need to know the browse is
+there). 6 is polish — the full catalog is browsable without
+filtering, just slower.
+
+**Virtual keyboard for search (commit 6):**
+
+Quest Browser provides a system keyboard when an `<input>` is
+focused, but that's DOM-level — we're in CanvasTexture land. Two
+options:
+
+1. **Built-in canvas keyboard** — draw a QWERTY layout on the
+   bottom of the browse panel. Controller raycast types letters.
+   ~200 LOC, self-contained, no platform dependencies.
+2. **Category chips only** — skip free-text search entirely. The
+   2D browse has 12 categories; rendering them as tappable chips
+   is simpler and covers 90 % of the "find a dataset" use case.
+   Full-text search can come later via voice input (Phase 5).
+
+Recommend **option 2** for the initial release — category chips +
+scrollable full catalog covers the use case without the complexity
+of a VR keyboard.
+
+**Thumbnail loading:**
+
+Dataset thumbnails are small JPEG URLs from the enriched metadata.
+Loading them into the CanvasTexture requires `Image()` → `drawImage()`
+on the canvas after `onload`. Thumbnails load asynchronously and the
+canvas redraws as each arrives — same progressive-render pattern as
+a web page loading images. Failed thumbnails show a placeholder
+icon (globe emoji or category color swatch).
 
 ### Phase 3.5 — VR tours (the museum experience)
 

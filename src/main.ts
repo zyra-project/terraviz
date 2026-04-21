@@ -1206,6 +1206,19 @@ class InteractiveSphere {
       togglePlayPause: () => togglePlayPause(
         this.hlsService, this.appState, (m) => this.announce(m),
       ),
+      isMuted: () => {
+        // Read directly off the primary's <video> element —
+        // hlsService sets it muted by default for autoplay
+        // compliance; the 2D mute button (and the new VR HUD mute
+        // button) flip it when the user wants sound.
+        return this.hlsService?.video?.muted ?? true
+      },
+      toggleMute: () => {
+        const video = this.hlsService?.video
+        if (!video) return
+        video.muted = !video.muted
+        this.announce(video.muted ? 'Muted' : 'Unmuted')
+      },
 
       // --- Phase 2.5 multi-panel getters ---
       getPanelCount: () => this.viewports.getPanelCount(),
@@ -1213,6 +1226,39 @@ class InteractiveSphere {
       getPanelTexture,
       getPanelTitle: (slot: number) =>
         this.panelStates[slot]?.dataset?.title ?? null,
+
+      // --- Phase 3 in-VR browse ---
+      getDatasets: () => {
+        return this.appState.datasets
+          .filter(d => dataService.isSupportedDataset(d) && !d.isHidden)
+          .map(d => {
+            // Mirror the 2D browse UI (browseUI.ts line 79-90):
+            // chips are the UNION of enriched.categories keys and
+            // `Dataset.tags`, minus 'Movies' and 'Layers' (those
+            // are internal shape-of-data markers, not user-facing
+            // filters). Without the tags merge, chips like "Tours"
+            // and "Real-Time" — which live exclusively on tags —
+            // never appear.
+            const cats = new Set<string>()
+            if (d.enriched?.categories) {
+              for (const k of Object.keys(d.enriched.categories)) cats.add(k)
+            }
+            if (d.tags) {
+              for (const t of d.tags) cats.add(t)
+            }
+            cats.delete('Movies')
+            cats.delete('Layers')
+            return {
+              id: d.id,
+              title: d.title,
+              categories: Array.from(cats),
+              thumbnailUrl: d.thumbnailLink ?? null,
+            }
+          })
+      },
+      loadDataset: (id: string) => {
+        void this.loadDataset(id)
+      },
 
       onSessionEnd: () => {
         this.announce('Exited VR')
@@ -1780,6 +1826,15 @@ class InteractiveSphere {
 
   /** Wire up all DOM event listeners: transport controls, keyboard shortcuts, scrubber, mute. */
   setupEventListeners(): void {
+    // Back/forward cache restore (iOS Safari in particular). MapLibre
+    // caches its canvas dimensions; after a bfcache restore the canvas
+    // can be stuck at a stale size and the globe renders in a thin
+    // strip. `persisted === true` only fires for bfcache restores, so
+    // this is cheap on every other navigation.
+    window.addEventListener('pageshow', (event) => {
+      if (event.persisted) this.viewports.resizeAll()
+    })
+
     document.getElementById('home-btn')?.addEventListener('click', () => this.goHome())
 
     // Browse panel opens via the Tools menu's Browse button (see

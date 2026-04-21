@@ -11,7 +11,13 @@ export default defineConfig(({ mode }) => ({
     outDir: '../dist',
     emptyOutDir: true,
     sourcemap: true,
-    minify: true
+    minify: true,
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'src/index.html'),
+        orbit: path.resolve(__dirname, 'src/orbit.html'),
+      },
+    },
   },
   server: {
     port: process.env.PORT ? parseInt(process.env.PORT) : 5173,

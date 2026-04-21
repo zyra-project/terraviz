@@ -132,6 +132,59 @@ describe('initToolsMenu', () => {
 })
 
 // ---------------------------------------------------------------------------
+// Meet Orbit link — web-only per integration-plan open question #1.
+// Gated off in Tauri builds (desktop story is VR-embedded Orbit, not a
+// separate viewer page).
+// ---------------------------------------------------------------------------
+
+describe('Meet Orbit link', () => {
+  afterEach(() => {
+    // Always clear the sentinel so one test leaking into the next
+    // can't flip the gate unpredictably.
+    delete (window as unknown as { __TAURI__?: unknown }).__TAURI__
+  })
+
+  it('renders the Meet Orbit link when not running in Tauri', () => {
+    const vm = makeViewports(1)
+    initToolsMenu(vm as any)
+
+    const link = document.getElementById('tools-menu-meet-orbit') as HTMLAnchorElement | null
+    expect(link).toBeTruthy()
+    expect(link!.getAttribute('href')).toBe('/orbit')
+    expect(link!.getAttribute('target')).toBe('_blank')
+    expect(link!.getAttribute('rel')).toBe('noopener')
+  })
+
+  it('omits the Meet Orbit link in Tauri builds', () => {
+    ;(window as unknown as { __TAURI__?: unknown }).__TAURI__ = {}
+    const vm = makeViewports(1)
+    initToolsMenu(vm as any)
+
+    expect(document.getElementById('tools-menu-meet-orbit')).toBeNull()
+    // Sibling Orbit-section entry still renders so the section
+    // doesn't collapse to an empty box.
+    expect(document.getElementById('tools-menu-orbit-settings')).toBeTruthy()
+  })
+
+  it('closes the popover and announces when clicked', () => {
+    const announce = vi.fn()
+    const vm = makeViewports(1)
+    initToolsMenu(vm as any, { getCurrentDataset: () => null, announce })
+
+    // Open the popover so we can observe the close.
+    ;(document.getElementById('tools-menu-toggle') as HTMLButtonElement).click()
+    expect(isToolsMenuOpen()).toBe(true)
+
+    const link = document.getElementById('tools-menu-meet-orbit') as HTMLAnchorElement
+    // jsdom doesn't navigate on anchor click; the handler still runs.
+    link.click()
+
+    expect(isToolsMenuOpen()).toBe(false)
+    expect(announce).toHaveBeenCalledWith('Opening Orbit character page in new tab')
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Open / close
 // ---------------------------------------------------------------------------
 

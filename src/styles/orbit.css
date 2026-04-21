@@ -1,0 +1,470 @@
+/**
+ * Orbit standalone page chrome.
+ *
+ * Reuses the glass-surface tokens from tokens.css and the overall
+ * visual language from STYLE_GUIDE.md. The page is a full-viewport
+ * canvas host with a top bar, a debug panel, and a back link.
+ */
+
+html, body {
+    width: 100%;
+    height: 100%;
+    background: #060810;
+    color: var(--color-text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    overflow: hidden;
+}
+
+body.orbit-body {
+    display: block;
+}
+
+#orbit-root {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+
+#orbit-canvas-host {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+
+#orbit-canvas-host canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+}
+
+/* ── Top bar ─────────────────────────────────────────────────────── */
+
+.orbit-topbar {
+    position: absolute;
+    top: 0.75rem;
+    left: 0.75rem;
+    right: 0.75rem;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    pointer-events: none;
+}
+
+.orbit-back {
+    pointer-events: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.65rem;
+    min-height: 36px;
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+    background: var(--glass-bg-light);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--white-o08);
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.orbit-back:hover,
+.orbit-back:focus-visible {
+    background: var(--color-surface-hover);
+    color: var(--color-text);
+    border-color: var(--accent-o40);
+}
+
+.orbit-title {
+    pointer-events: none;
+    font-size: 0.75rem;
+    font-weight: 300;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--color-text);
+}
+
+/* ── Perf HUD ────────────────────────────────────────────────────── */
+
+/* FPS / heap / uptime counter. Diagnostic aid for long-session drift
+ * — the 2026-04-20 overnight slowdown report motivated building this.
+ * Compact, unobtrusive, pointer-transparent so it never blocks input. */
+.orbit-perf-hud {
+    position: absolute;
+    top: 3.5rem;
+    right: 0.75rem;
+    z-index: 10;
+    padding: 0.25rem 0.55rem;
+    background: var(--glass-bg-light);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--white-o08);
+    border-radius: var(--radius-sm);
+    font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--color-text-secondary);
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0.8;
+}
+
+@media (max-width: 768px) {
+    .orbit-perf-hud {
+        top: 3rem;
+        right: 0.5rem;
+        font-size: 10px;
+    }
+}
+
+/* ── Debug panel ─────────────────────────────────────────────────── */
+
+.orbit-debug-panel {
+    position: absolute;
+    left: 0.75rem;
+    bottom: 0.75rem;
+    z-index: 10;
+    min-width: 240px;
+    max-width: 340px;
+    padding: 0.6rem 0.75rem;
+    background: var(--glass-bg-light);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--white-o08);
+    border-radius: var(--radius-lg);
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+}
+
+.orbit-debug-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.45rem;
+}
+
+.orbit-debug-title {
+    font-weight: 300;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    font-size: 0.65rem;
+    color: var(--color-text);
+}
+
+.orbit-debug-toggle {
+    background: none;
+    border: none;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    font-size: 0.8rem;
+    padding: 0.1rem 0.3rem;
+    line-height: 1;
+}
+
+.orbit-debug-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.orbit-debug-panel.is-collapsed .orbit-debug-body {
+    display: none;
+}
+
+.orbit-debug-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.orbit-debug-label {
+    font-size: 0.65rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+}
+
+.orbit-debug-value {
+    font-size: 0.7rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-text);
+}
+
+.orbit-debug-select {
+    flex: 0 1 auto;
+    min-width: 8rem;
+    max-width: 11rem;
+    padding: 0.3rem 0.45rem;
+    font: inherit;
+    font-size: 0.7rem;
+    color: var(--color-text);
+    background: var(--color-surface);
+    border: 1px solid var(--white-o10);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.orbit-debug-select:hover {
+    background: var(--color-surface-hover);
+    border-color: var(--accent-o40);
+}
+
+.orbit-debug-select:focus-visible {
+    outline: 2px solid var(--accent-o70);
+    outline-offset: 2px;
+}
+
+.orbit-debug-select optgroup {
+    background: #0d0d12;
+    color: var(--color-text-muted);
+    font-weight: 600;
+}
+
+.orbit-debug-select option {
+    background: #0d0d12;
+    color: var(--color-text);
+}
+
+.orbit-debug-gestures {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    justify-content: flex-end;
+    flex: 1 1 auto;
+}
+
+.orbit-debug-gesture {
+    padding: 0.25rem 0.5rem;
+    font: inherit;
+    font-size: 0.65rem;
+    letter-spacing: 0.03em;
+    color: var(--color-text-secondary);
+    background: var(--color-surface);
+    border: 1px solid var(--white-o10);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.orbit-debug-gesture:hover:not(:disabled) {
+    background: var(--color-surface-hover);
+    color: var(--color-text);
+    border-color: var(--accent-o40);
+}
+
+.orbit-debug-gesture:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.orbit-debug-gesture:focus-visible {
+    outline: 2px solid var(--accent-o70);
+    outline-offset: 2px;
+}
+
+.orbit-debug-palettes {
+    display: flex;
+    gap: 0.3rem;
+    flex: 1 1 auto;
+    justify-content: flex-end;
+}
+
+.orbit-debug-palette {
+    width: 1.25rem;
+    height: 1.25rem;
+    padding: 0;
+    border: 1.5px solid var(--white-o15);
+    border-radius: 50%;
+    cursor: pointer;
+    background: transparent;
+    transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+
+.orbit-debug-palette > span {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: var(--swatch, #5cefd7);
+}
+
+.orbit-debug-palette:hover {
+    border-color: var(--accent-o40);
+    transform: translateY(-1px);
+}
+
+.orbit-debug-palette[aria-checked="true"] {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+.orbit-debug-palette:focus-visible {
+    outline: 2px solid var(--accent-o70);
+    outline-offset: 2px;
+}
+
+.orbit-debug-scales {
+    display: inline-flex;
+    flex: 0 1 auto;
+    border: 1px solid var(--white-o10);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.orbit-debug-scale {
+    padding: 0.28rem 0.55rem;
+    font: inherit;
+    font-size: 0.62rem;
+    letter-spacing: 0.03em;
+    color: var(--color-text-secondary);
+    background: transparent;
+    border: none;
+    border-left: 1px solid var(--white-o08);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.orbit-debug-scale:first-child { border-left: none; }
+
+.orbit-debug-scale:hover {
+    background: var(--color-surface-hover);
+    color: var(--color-text);
+}
+
+.orbit-debug-scale[aria-checked="true"] {
+    background: var(--accent-o15);
+    color: var(--color-accent);
+}
+
+.orbit-debug-scale:focus-visible {
+    outline: 2px solid var(--accent-o70);
+    outline-offset: -2px;
+}
+
+/* Eyes A/B segmented control — mirrors .orbit-debug-scales styling. */
+.orbit-debug-eyes {
+    display: inline-flex;
+    flex: 0 1 auto;
+    border: 1px solid var(--white-o10);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.orbit-debug-eye {
+    padding: 0.28rem 0.55rem;
+    font: inherit;
+    font-size: 0.62rem;
+    letter-spacing: 0.03em;
+    color: var(--color-text-secondary);
+    background: transparent;
+    border: none;
+    border-left: 1px solid var(--white-o08);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.orbit-debug-eye:first-child { border-left: none; }
+
+.orbit-debug-eye:hover {
+    background: var(--color-surface-hover);
+    color: var(--color-text);
+}
+
+.orbit-debug-eye[aria-checked="true"] {
+    background: var(--accent-o15);
+    color: var(--color-accent);
+}
+
+.orbit-debug-eye:focus-visible {
+    outline: 2px solid var(--accent-o70);
+    outline-offset: -2px;
+}
+
+.orbit-debug-flight-row {
+    justify-content: flex-end;
+    gap: 0.4rem;
+}
+
+.orbit-debug-flight {
+    padding: 0.35rem 0.7rem;
+    font: inherit;
+    font-size: 0.65rem;
+    letter-spacing: 0.03em;
+    color: var(--color-text);
+    background: var(--color-accent-dark);
+    border: 1px solid var(--color-accent);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+}
+
+.orbit-debug-flight:hover:not(:disabled) {
+    background: var(--color-accent-darker);
+}
+
+.orbit-debug-flight:disabled {
+    background: var(--color-surface);
+    color: var(--color-text-muted);
+    border-color: var(--white-o10);
+    cursor: default;
+    opacity: 0.6;
+}
+
+.orbit-debug-flight:focus-visible {
+    outline: 2px solid var(--accent-o70);
+    outline-offset: 2px;
+}
+
+.orbit-debug-hint {
+    margin-top: 0.3rem;
+    font-size: 0.65rem;
+    color: var(--color-text-muted);
+    line-height: 1.4;
+}
+
+/* ── Focus indicators (matches STYLE_GUIDE) ──────────────────────── */
+
+:focus-visible {
+    outline: 2px solid var(--accent-o70);
+    outline-offset: 2px;
+    box-shadow: 0 0 8px var(--accent-o40);
+}
+
+/* ── Mobile adaptations ──────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+    .orbit-debug-panel {
+        left: 0.5rem;
+        right: 0.5rem;
+        max-width: none;
+    }
+    .orbit-back {
+        min-height: 44px;
+        font-size: 0.85rem;
+    }
+}
+
+/* Reduced-motion callers get a still scene; the controller caps
+   motion internally but we also suppress hover transitions here. */
+@media (prefers-reduced-motion: reduce) {
+    .orbit-back { transition: none; }
+}
+
+/* Screen-reader-only text — used for the state announcer. */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}

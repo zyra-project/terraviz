@@ -18,6 +18,7 @@
 import type * as THREE from 'three'
 import { createVrScene, type VrSceneHandle, type VrDatasetTexture } from './vrScene'
 import { createVrHud, type VrHudHandle } from './vrHud'
+import { createVrBrowse, type VrBrowseHandle } from './vrBrowse'
 import { createVrInteraction, type VrInteractionHandle } from './vrInteraction'
 import { createVrLoading, type VrLoadingHandle } from './vrLoading'
 import { createVrPlacement, liftedPlacementPosition, type VrPlacementHandle } from './vrPlacement'
@@ -50,6 +51,10 @@ export interface VrSessionContext {
   isPlaying(): boolean
   /** Called when the user taps play/pause in VR. Toggles the primary's video. */
   togglePlayPause(): void
+  /** Drives the HUD mute icon variant (speaker vs speaker-slash). */
+  isMuted(): boolean
+  /** Called when the user taps the HUD mute button. Flips `video.muted`. */
+  toggleMute(): void
 
   // --- Phase 2.5 multi-panel getters ---
   //
@@ -76,8 +81,35 @@ export interface VrSessionContext {
   /** Dataset title for a specific slot, for per-panel labels; null if no dataset. */
   getPanelTitle(slot: number): string | null
 
+  // --- Phase 3: in-VR browse ---
+  /** Full dataset catalog for the browse panel. */
+  getDatasets(): VrDatasetEntry[]
+  /** Load a dataset by ID without leaving VR. */
+  loadDataset(id: string): void
+
   /** Optional — fired after the session ends + resources are torn down. */
   onSessionEnd?: () => void
+}
+
+/**
+ * Lightweight dataset descriptor for the VR browse panel. Avoids
+ * importing the full `Dataset` type into the VR modules — they only
+ * need what they render.
+ */
+export interface VrDatasetEntry {
+  id: string
+  title: string
+  /**
+   * Every category/tag this dataset belongs to — union of
+   * `enriched.categories` keys and `Dataset.tags`, matching the 2D
+   * browse UI's chip-building model. Empty when the dataset has
+   * neither. Lets the VR browse panel surface chips like "Tours"
+   * and "Real-Time" that live in `tags`, not just in enriched
+   * categories.
+   */
+  categories: string[]
+  /** Thumbnail URL from the SOS catalog, if available. */
+  thumbnailUrl: string | null
 }
 
 /**
@@ -102,6 +134,8 @@ interface ActiveSession {
   scene: VrSceneHandle
   hud: VrHudHandle
   interaction: VrInteractionHandle
+  /** In-VR dataset browse panel. */
+  browse: VrBrowseHandle
   /** Loading scene shown during entry; null after fade-out + dispose. */
   loading: VrLoadingHandle | null
   /** AR-only spatial placement (hit-test reticle + Place button). Null when hit-test unavailable. */
@@ -269,6 +303,10 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
   const scene = createVrScene(THREE_, isAr)
   const hud = createVrHud(THREE_)
   scene.scene.add(hud.mesh)
+
+  const browse = createVrBrowse(THREE_)
+  browse.setDatasets(ctx.getDatasets())
+  scene.scene.add(browse.mesh)
 
   // --- Spatial placement (AR-only) + local-floor ref space ---
   // Two separable capabilities:
@@ -441,8 +479,10 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     datasetTitle: ctx.getDatasetTitle(),
     isPlaying: ctx.isPlaying(),
     hasVideo: ctx.hasVideoDataset(),
+    isMuted: ctx.isMuted(),
     panelCount: ctx.getPanelCount(),
     primaryIndex: ctx.getPrimaryIndex(),
+    browseOpen: browse.isVisible(),
   })
 
   // XRControllerModelFactory was imported earlier (before scene
@@ -456,11 +496,36 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     // scene.update copies the quaternion to all secondaries).
     getAllGlobes: () => scene.allGlobes,
     hud,
+    browse,
     placement,
     renderer,
+    onBrowseAction: (action) => {
+      if (action.kind === 'close') {
+        browse.setVisible(false)
+      } else if (action.kind === 'select') {
+        ctx.loadDataset(action.datasetId)
+        browse.setVisible(false)
+      } else if (action.kind === 'category') {
+        // null = user tapped the dedicated "All" chip → clear filter.
+        // non-null = filter to that category (re-tapping the
+        // already-active chip re-applies the same filter; no toggle-
+        // off, see VrBrowseAction docstring).
+        browse.setCategoryFilter(action.category)
+      }
+    },
     onHudAction: (action) => {
       if (action === 'play-pause') {
         ctx.togglePlayPause()
+      } else if (action === 'mute') {
+        // Flip the primary video's muted flag. The per-frame
+        // hud.setState pipes ctx.isMuted() back through so the
+        // icon updates on the next redraw.
+        ctx.toggleMute()
+      } else if (action === 'browse') {
+        // Toggle the in-VR dataset browse panel. Its `isVisible`
+        // feeds `hud.setState({ browseOpen })` each frame, so the
+        // next render shows the button in its active-state color.
+        browse.setVisible(!browse.isVisible())
       } else if (action === 'exit-vr') {
         // Programmatic exit — fires the 'end' event, which routes
         // through the same teardown path as headset-initiated exits.
@@ -531,6 +596,7 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     camera,
     scene,
     hud,
+    browse,
     interaction,
     loading,
     placement,
@@ -548,8 +614,31 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
   // silhouette even when looking straight at the globe. Small +z
   // offset pulls them slightly closer to the user than the globe
   // for comfortable reading.
+  /**
+   * Minimal fingerprint to detect "catalog has changed in a way the
+   * browse panel cares about" — the array length plus the number of
+   * entries that carry a category. Captures both the initial
+   * populate (length goes from 0 to N) and the enriched-metadata
+   * arrival (length stable, category-count goes from 0 to N). main.ts
+   * returns a fresh array every call to `getDatasets()`, so we don't
+   * bother with an identity check.
+   */
+  let lastBrowseDatasetsLen = -1
+  let lastBrowseCategoryCount = -1
+  /**
+   * Last wall-clock ms we polled `ctx.getDatasets()`. main.ts rebuilds
+   * the catalog array (filter + map + Set + Array.from) every call,
+   * so we don't want to hit it at XR frame rate. Poll at 1 Hz while
+   * the browse panel is open; skip entirely while it's closed.
+   */
+  let lastBrowseDatasetsPollMs = -Infinity
+  /** True last frame — forces a poll on the frame the panel opens. */
+  let lastBrowseVisible = false
+  const BROWSE_POLL_INTERVAL_MS = 1000
+
   const hudOffset = new THREE_.Vector3(0, -0.65, 0.15)
   const placeOffset = new THREE_.Vector3(0, -0.5, 0.15)
+  const browseOffset = new THREE_.Vector3(0.7, 0, 0.3)
   /** Scratch reused per-frame for position math; avoids GC churn. */
   const scratchPos = new THREE_.Vector3()
   // `lastTime` starts null so the very first frame uses its own
@@ -611,14 +700,48 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     active.scene.setTexture(ctx.getDatasetTexture())
     syncSecondaryTextures(active.scene, ctx, panelCount)
 
+    // Poll the 2D catalog only while the browse panel is open, and
+    // only at 1 Hz once open — main.ts rebuilds the catalog array
+    // (filter + map + Set + Array.from) on every getDatasets() call,
+    // and at XR frame rate (72–90 Hz) that adds up to pointless
+    // per-frame allocation. A 1-second refresh is fast enough for
+    // the user to notice new chips when enriched metadata lands or
+    // the 2D app updates the catalog. Always poll the moment the
+    // panel becomes visible so the first render has fresh data.
+    const browseVisibleNow = active.browse.isVisible()
+    if (browseVisibleNow) {
+      const becameVisible = !lastBrowseVisible
+      const sinceLastPoll = now - lastBrowseDatasetsPollMs
+      if (becameVisible || sinceLastPoll >= BROWSE_POLL_INTERVAL_MS) {
+        lastBrowseDatasetsPollMs = now
+        const currentDatasets = ctx.getDatasets()
+        let categoryCount = 0
+        for (let i = 0; i < currentDatasets.length; i++) {
+          categoryCount += currentDatasets[i].categories.length
+        }
+        if (
+          becameVisible ||
+          currentDatasets.length !== lastBrowseDatasetsLen ||
+          categoryCount !== lastBrowseCategoryCount
+        ) {
+          lastBrowseDatasetsLen = currentDatasets.length
+          lastBrowseCategoryCount = categoryCount
+          active.browse.setDatasets(currentDatasets)
+        }
+      }
+    }
+    lastBrowseVisible = browseVisibleNow
+
     // HUD reflects the latest app state every frame. setState is
     // internally debounced — it only redraws when a field changes.
     active.hud.setState({
       datasetTitle: ctx.getDatasetTitle(),
       isPlaying: ctx.isPlaying(),
       hasVideo: ctx.hasVideoDataset(),
+      isMuted: ctx.isMuted(),
       panelCount,
       primaryIndex: ctx.getPrimaryIndex(),
+      browseOpen: active.browse.isVisible(),
     })
 
     active.interaction.update(delta)
@@ -637,6 +760,10 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     // globe-independent.
     scratchPos.copy(active.scene.globe.position).add(hudOffset)
     active.hud.mesh.position.copy(scratchPos)
+    if (active.browse.isVisible()) {
+      scratchPos.copy(active.scene.globe.position).add(browseOffset)
+      active.browse.mesh.position.copy(scratchPos)
+    }
     if (active.placement) {
       scratchPos.copy(active.scene.globe.position).add(placeOffset)
       active.placement.placeButtonMesh.position.copy(scratchPos)
@@ -658,6 +785,7 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     a.renderer.setAnimationLoop(null)
     a.interaction.dispose()
     a.hud.dispose()
+    a.browse.dispose()
     // If the fade-out setTimeout is still pending, cancel it —
     // otherwise it would fire after the loading handle is disposed
     // and try to run fade-out on stale state.
