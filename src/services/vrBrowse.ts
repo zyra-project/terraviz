@@ -464,9 +464,15 @@ export function createVrBrowse(THREE_: typeof THREE): VrBrowseHandle {
 
     scroll(delta) {
       if (!visible || visibleDatasets.length === 0) return
+      const previousScrollY = scrollY
       scrollY += delta
       clampScroll()
-      redraw()
+      // If the clamped value didn't actually move (user holding the
+      // thumbstick at end-of-list, or list too short to scroll),
+      // skip the canvas repaint. Matters at XR frame rate —
+      // drawCanvas isn't free, and there's no visual change to
+      // justify it.
+      if (scrollY !== previousScrollY) redraw()
     },
 
     hitTest(uv) {
