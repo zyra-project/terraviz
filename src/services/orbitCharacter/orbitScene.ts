@@ -429,20 +429,24 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
   head.add(backlight)
 
   const bodyBundle = createBodyMaterial(palette)
-  // Push the body's depth values slightly away from the camera so
+  // Push the body's depth values strongly away from the camera so
   // co-planar elements in the socket area win the depth test
   // deterministically. Without this, the flat socket disc (sitting
   // at `BODY_RADIUS - 0.0020` in head-local Z) ties the body
   // sphere's forward surface at the nose-bridge rim of each eye
-  // (`body_z ≈ 0.0730`) and the breathing squash nudges the body
-  // ahead — producing a wedge-shaped artifact that oscillates at
-  // breathing frequency. Applied only to this body-material
-  // instance; lid materials (which use a separate clone via
-  // `createLidMaterial`) stay un-offset so they depth-test normally
-  // against the disc when closing.
+  // (`body_z ≈ 0.0730`) and the breathing squash (bodyScaleZ up to
+  // ~1.03 in idle, ~1.37 during flight) nudges the body ahead —
+  // producing a wedge-shaped artifact that oscillates at breathing
+  // frequency. An earlier attempt with `polygonOffsetUnits = 1` was
+  // not enough: the body's scale-driven forward push exceeds what
+  // `units = 1` contributes at this depth range. `units = 8` covers
+  // the flight case comfortably. Applied only to this body-material
+  // instance; lid materials (cloned via `createLidMaterial`) stay
+  // un-offset so they depth-test normally against the disc when
+  // closing.
   bodyBundle.material.polygonOffset = true
-  bodyBundle.material.polygonOffsetFactor = 1
-  bodyBundle.material.polygonOffsetUnits = 1
+  bodyBundle.material.polygonOffsetFactor = 4
+  bodyBundle.material.polygonOffsetUnits = 8
   const body = new THREE.Mesh(
     new THREE.IcosahedronGeometry(BODY_RADIUS, 4),
     bodyBundle.material,
