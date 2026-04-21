@@ -202,32 +202,31 @@ const LOWER_LID_CLOSED_ROT = -Math.PI * 0.40
 
 /**
  * Catchlight placement within the pupil group. Two per eye — a
- * larger primary highlight in the upper-right quadrant, a smaller
- * secondary in the lower-left. The two-highlight convention is what
- * sells "wet, alive" eyes in animation rigs; it also gives the
- * subtle cross-pupil gleam visible in the concept art.
+ * larger primary highlight in the upper-outer quadrant, a smaller
+ * secondary in the lower-outer. Both catchlights are **mirrored
+ * per-eye** so they always sit on the OUTER side of each eye
+ * (away from the face's vertical center); without the mirror, the
+ * two eyes shared the same pupil-local offsets and one eye's
+ * primary would land on the inner side, producing a false
+ * "nose-bridge" cluster of brights between the eyes.
+ *
+ * Reference values below are for the RIGHT eye (offsetX > 0, where
+ * outer = positive local X). `buildPairedEye` derives a per-eye
+ * sign from `offsetX` and flips the X components for the left eye.
  *
  * Catchlights are parented to the gaze-tracking pupil group (with
  * the iris + pupil), so they track the eye's look direction — anime-
  * style rigs handle highlights that way.
- *
- * Positioning pulls the primary slightly inward toward the iris
- * center (vs. the earlier tuning which sat on the pupil field's
- * soft edge and produced a wedge-shaped silhouette where the
- * additive white met the feathered navy). The radius is bumped so
- * the soft-falloff shader has room to bloom without looking like
- * a sticker; segment counts are tripled so the disc silhouette
- * reads round rather than polygonal at small pixel sizes.
  */
 const CATCHLIGHT_PRIMARY_OFFSET_X = 0.0028
 const CATCHLIGHT_PRIMARY_OFFSET_Y = 0.0030
-const CATCHLIGHT_PRIMARY_RADIUS = 0.0030
-const CATCHLIGHT_PRIMARY_OPACITY = 1.0
+const CATCHLIGHT_PRIMARY_RADIUS = 0.0025
+const CATCHLIGHT_PRIMARY_OPACITY = 0.75
 const CATCHLIGHT_PRIMARY_SEGMENTS = 32
-const CATCHLIGHT_SECONDARY_OFFSET_X = -0.0024
+const CATCHLIGHT_SECONDARY_OFFSET_X = 0.0024
 const CATCHLIGHT_SECONDARY_OFFSET_Y = -0.0020
-const CATCHLIGHT_SECONDARY_RADIUS = 0.0014
-const CATCHLIGHT_SECONDARY_OPACITY = 0.85
+const CATCHLIGHT_SECONDARY_RADIUS = 0.0012
+const CATCHLIGHT_SECONDARY_OPACITY = 0.55
 const CATCHLIGHT_SECONDARY_SEGMENTS = 24
 
 /**
@@ -695,16 +694,23 @@ function buildPairedEye(
   pupilDot.position.z = SOCKET_Z_PUPIL_DOT
   pupilGroup.add(pupilDot)
 
-  // Primary catchlight — dominant upper-right gleam. Soft radial
-  // falloff via custom shader; scaling is animated per-frame for
-  // expressive states so the highlight shimmers subtly instead of
-  // sitting static like a decal.
+  // Primary + secondary catchlights. Soft radial falloff via custom
+  // shader; scaling is animated per-frame for expressive states so
+  // the highlight shimmers subtly instead of sitting static like a
+  // decal.
+  //
+  // `catchXSign` mirrors the X component of each catchlight offset
+  // per eye so the primary always lands on the OUTER side of the
+  // face (and the secondary on the lower-outer). Without the mirror,
+  // the two eyes share the same pupil-local offsets and produce a
+  // bright asymmetric "nose-bridge" cluster between the eyes.
+  const catchXSign = offsetX < 0 ? -1 : 1
   const catchPrimary = new THREE.Mesh(
     new THREE.CircleGeometry(CATCHLIGHT_PRIMARY_RADIUS, CATCHLIGHT_PRIMARY_SEGMENTS),
     createCatchlightMaterial(CATCHLIGHT_PRIMARY_OPACITY),
   )
   catchPrimary.position.set(
-    CATCHLIGHT_PRIMARY_OFFSET_X,
+    CATCHLIGHT_PRIMARY_OFFSET_X * catchXSign,
     CATCHLIGHT_PRIMARY_OFFSET_Y,
     SOCKET_Z_CATCHLIGHT,
   )
@@ -714,7 +720,7 @@ function buildPairedEye(
     createCatchlightMaterial(CATCHLIGHT_SECONDARY_OPACITY),
   )
   catchSecondary.position.set(
-    CATCHLIGHT_SECONDARY_OFFSET_X,
+    CATCHLIGHT_SECONDARY_OFFSET_X * catchXSign,
     CATCHLIGHT_SECONDARY_OFFSET_Y,
     SOCKET_Z_CATCHLIGHT + 0.00005,
   )
