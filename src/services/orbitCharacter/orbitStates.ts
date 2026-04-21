@@ -116,6 +116,23 @@ export interface ExpressionConfig {
    * `docs/ORBIT_CHARACTER_VINYL_REDESIGN.md` §4.
    */
   trailIntensity: number
+  /**
+   * Visible trail length in world space — the path distance (in
+   * metres) behind the sub at which the trail fades to zero. Drives
+   * the sparkle shader's `uFadeEnd` uniform. Because alpha is now
+   * distance-based rather than age-based, this controls how long
+   * the trail APPEARS regardless of how fast the sub is moving:
+   *
+   *   - Slow states (IDLE, CHATTING, LISTENING): a long fade
+   *     distance (~0.65 m) so the trail wraps the full orbit
+   *     circumference and reads as a closed sparkle ring.
+   *   - Expressive states (TALKING, POINTING, PRESENTING): medium
+   *     fade so the trail reads as a comet wake, long enough to
+   *     convey direction.
+   *   - Fast states (EXCITED): short fade so the sub doesn't leave
+   *     a "star field" behind at high speed.
+   */
+  trailFadeDistance: number
 }
 
 export const EXPRESSION_DEFAULT: ExpressionConfig = {
@@ -126,6 +143,7 @@ export const EXPRESSION_DEFAULT: ExpressionConfig = {
   surpriseGasp: false,
   talkPulse: false,
   trailIntensity: 0.80,
+  trailFadeDistance: 0.45,
 }
 
 /**
@@ -141,16 +159,25 @@ export const EXPRESSION_DEFAULT: ExpressionConfig = {
  *     0.9–1.2 — trail is a primary visual element in these modes.
  */
 export const EXPRESSIONS: Partial<Record<StateKey, Partial<ExpressionConfig>>> = {
-  SLEEPY:     { breathRate: 0.35, breathAmp: 0.018, meltXZ: 0.025, trailIntensity: 0.25 },
-  SOLEMN:     { breathRate: 0.40, breathAmp: 0.015, meltXZ: 0.018, trailIntensity: 0.35 },
-  EXCITED:    { breathRate: 2.4,  breathAmp: 0.006, hopAmp: 0.010, trailIntensity: 1.15 },
-  SURPRISED:  { breathRate: 0.8,  breathAmp: 0.004, surpriseGasp: true, trailIntensity: 0.90 },
-  THINKING:   { breathRate: 0.55, breathAmp: 0.014, trailIntensity: 0.30 },
-  TALKING:    { talkPulse: true, trailIntensity: 0.95 },
-  HAPPY:      { trailIntensity: 0.95 },
-  CURIOUS:    { trailIntensity: 0.90 },
-  POINTING:   { trailIntensity: 1.10 },
-  PRESENTING: { trailIntensity: 1.10 },
+  // Quiet / slow states — long fade distance so the trail wraps the
+  // full orbit circumference and reads as a closed sparkle ring.
+  IDLE:       { trailFadeDistance: 0.65 },
+  CHATTING:   { trailFadeDistance: 0.65 },
+  LISTENING:  { trailFadeDistance: 0.60 },
+  SLEEPY:     { breathRate: 0.35, breathAmp: 0.018, meltXZ: 0.025, trailIntensity: 0.25, trailFadeDistance: 0.50 },
+  SOLEMN:     { breathRate: 0.40, breathAmp: 0.015, meltXZ: 0.018, trailIntensity: 0.35, trailFadeDistance: 0.50 },
+  THINKING:   { breathRate: 0.55, breathAmp: 0.014, trailIntensity: 0.30, trailFadeDistance: 0.40 },
+  // Expressive — medium fade, trail reads as a comet tail conveying
+  // direction.
+  TALKING:    { talkPulse: true, trailIntensity: 0.95, trailFadeDistance: 0.35 },
+  HAPPY:      { trailIntensity: 0.95, trailFadeDistance: 0.45 },
+  CURIOUS:    { trailIntensity: 0.90, trailFadeDistance: 0.45 },
+  POINTING:   { trailIntensity: 1.10, trailFadeDistance: 0.40 },
+  PRESENTING: { trailIntensity: 1.10, trailFadeDistance: 0.40 },
+  SURPRISED:  { breathRate: 0.8,  breathAmp: 0.004, surpriseGasp: true, trailIntensity: 0.90, trailFadeDistance: 0.30 },
+  // Fast state — short fade so the sub's high speed doesn't paint a
+  // star field behind it.
+  EXCITED:    { breathRate: 2.4,  breathAmp: 0.006, hopAmp: 0.010, trailIntensity: 1.15, trailFadeDistance: 0.22 },
 }
 
 /** Merge the per-state override (if any) with EXPRESSION_DEFAULT. */
