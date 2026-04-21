@@ -105,7 +105,7 @@ export function computeEffectiveFov(baseVerticalFovDegrees: number, aspect: numb
  * values keep working unchanged.
  */
 const EYE_PAIR_OFFSET_X = 0.028
-const EYE_PAIR_OFFSET_Y = -0.012
+const EYE_PAIR_OFFSET_Y = -0.004
 const EYE_PAIR_DISC_RADIUS = 0.018
 
 /**
@@ -152,20 +152,32 @@ const BEZEL_MAJOR_RADIUS = EYE_PAIR_DISC_RADIUS + 0.0010
 const BEZEL_TUBE_RADIUS  = 0.0018
 
 /**
- * Eyelid geometry + pivot placement. Lids are shallow spherical
- * caps (see {@link createLidGeometry}), pivoted just outside the
- * socket so they swing into frame like real lids rather than
- * clamshelling through the eye center. Upper pivot sits above the
- * socket; lower pivot sits below. At rotation 0 the lid is parked
- * out of frame; at LID_CLOSE_ANGLE the cap fully covers the socket.
+ * Eyelid geometry + pivot placement.
+ *
+ * Lids are shallow spherical caps (see {@link createLidGeometry}),
+ * each parented to an `Object3D` pivot. The pivot sits **in the
+ * socket plane** (same Z as the recessed eye-field disc) so the lid
+ * rotates *around the socket rim*, not around a point proud of the
+ * body surface — that was the "creepy mouth shadow" bug from the
+ * earlier tuning pass, where parked lids sat in front of the face
+ * and dropped their own shadow onto the body.
+ *
+ * Rotation interval sweeps through +Z (forward toward camera). At
+ * PARKED the dome leans back-and-up, out of view above the brow;
+ * at CLOSED it leans forward-and-down to cover the eye. The full
+ * sweep is ~155° (-0.3π → +0.6π), with the state's `upperLid` /
+ * `lowerLid` amount interpolating between them — SLEEPY's `0.56`
+ * closure lands with the lid ~half over the eye, as the reference
+ * Cosmic Rest panel shows.
  */
 const LID_RADIUS = EYE_PAIR_DISC_RADIUS * 1.10   // slightly bigger than socket
 const UPPER_LID_PIVOT_Y = +EYE_PAIR_DISC_RADIUS * 0.88
 const LOWER_LID_PIVOT_Y = -EYE_PAIR_DISC_RADIUS * 0.88
-const UPPER_LID_PARKED_ROT = -Math.PI * 0.58      // rotated up, out of view
-const LOWER_LID_PARKED_ROT = +Math.PI * 0.58      // rotated down, out of view
-const UPPER_LID_CLOSED_ROT = -Math.PI * 0.12      // covers socket from above
-const LOWER_LID_CLOSED_ROT = +Math.PI * 0.12      // covers socket from below
+const LID_PIVOT_Z = SOCKET_Z_DISC                 // sits in the socket plane
+const UPPER_LID_PARKED_ROT = -Math.PI * 0.30      // tilted up-and-back, out of view
+const LOWER_LID_PARKED_ROT = +Math.PI * 0.30      // tilted down-and-back, out of view
+const UPPER_LID_CLOSED_ROT = +Math.PI * 0.60      // tilted forward-down, covers eye
+const LOWER_LID_CLOSED_ROT = -Math.PI * 0.60      // tilted forward-up, covers eye
 
 /**
  * Catchlight placement within the pupil group. Two per eye — a
@@ -321,9 +333,16 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
   // that casts shadows. The photoreal Earth ships its own internal
   // ambient + sun for its own materials; those don't reach Orbit's
   // meshes because they're parented under the Earth handle's group.
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.55)
+  // Ambient dialed down + key light bumped up so the body's warm→
+  // cool gradient actually shows. The earlier pass had ambient at
+  // 0.55 which washed the MeshStandardMaterial diffuse out to a
+  // neutral grey; the gradient couldn't fight that much fill. At
+  // 0.35 ambient + 1.6 key light the pink/cool anchors read as
+  // intended and the key light carries the body's form + the bezel
+  // torus rim highlight.
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.35)
   scene.add(ambientLight)
-  const keyLight = new THREE.DirectionalLight(0xfff6e8, 1.25)
+  const keyLight = new THREE.DirectionalLight(0xfff6e8, 1.6)
   keyLight.position.set(0.18, 0.30, 0.45)
   keyLight.castShadow = true
   keyLight.shadow.mapSize.set(512, 512)
@@ -617,32 +636,35 @@ function buildPairedEye(
   pupilGroup.add(catchSecondary)
 
   // Upper + lower lids — shared spherical-cap geometry, shared body
-  // vinyl material. Each lid is parented to a pivot Object3D so the
-  // rotation axis is the hinge (just above/below the socket), not
-  // the lid's own centroid. `castShadow = true` lets the key light
-  // drop a soft crescent onto the iris at partial closure.
+  // vinyl material. Each lid is parented to a pivot Object3D at the
+  // socket-plane Z depth so the rotation axis hinges around the
+  // socket rim, not proud of the body surface.
+  //
+  // `castShadow` is OFF on lids: the earlier pass had it on, and
+  // parked lids sitting just in front of the body dropped shadows
+  // onto the lower face exactly where a mouth would be — the
+  // "creepy smudge" bug. The lid's own pigment + the body's key
+  // light already carry the closed-eye read; a cast shadow from
+  // the lid onto the iris is not worth the false-mouth artifact.
   const upperLidPivot = new THREE.Object3D()
-  upperLidPivot.position.set(0, UPPER_LID_PIVOT_Y, BODY_RADIUS)
+  upperLidPivot.position.set(0, UPPER_LID_PIVOT_Y, LID_PIVOT_Z)
   upperLidPivot.rotation.x = UPPER_LID_PARKED_ROT
   group.add(upperLidPivot)
   const upperLid = new THREE.Mesh(lidGeometry, bodyMaterial)
-  // Lid geometry is a dome opening downward. Position at origin
-  // relative to the pivot; rotation pivots around X, so the dome
-  // swings down and forward to cover the socket.
   upperLid.position.set(0, 0, 0)
-  upperLid.castShadow = true
+  upperLid.castShadow = false
   upperLid.receiveShadow = true
   upperLidPivot.add(upperLid)
 
   const lowerLidPivot = new THREE.Object3D()
-  lowerLidPivot.position.set(0, LOWER_LID_PIVOT_Y, BODY_RADIUS)
+  lowerLidPivot.position.set(0, LOWER_LID_PIVOT_Y, LID_PIVOT_Z)
   lowerLidPivot.rotation.x = LOWER_LID_PARKED_ROT
   group.add(lowerLidPivot)
   const lowerLid = new THREE.Mesh(lidGeometry, bodyMaterial)
   // Lower lid is the same dome rotated 180° around X so it opens
   // UPWARD (toward the socket) — lets both lids share one geometry.
   lowerLid.rotation.x = Math.PI
-  lowerLid.castShadow = true
+  lowerLid.castShadow = false
   lowerLid.receiveShadow = true
   lowerLidPivot.add(lowerLid)
 
