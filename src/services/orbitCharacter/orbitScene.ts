@@ -1451,7 +1451,11 @@ export function updateCharacter(
   // The long trail buffer naturally wraps into a sparkle ring during
   // steady idle orbit; breakaway sub-modes (point/trace/burst) show
   // the same buffer as a comet wake following the sub.
-  updateTrails(handles.trails, handles.subSpheres, state, palette, time, inFlight ? 0.6 : 0)
+  updateTrails(
+    handles.trails, handles.subSpheres,
+    state, anim.activeGesture?.kind ?? null,
+    palette, time, inFlight ? 0.6 : 0,
+  )
 
   // ── Target marker (POINTING / PRESENTING) ────────────────────────
   const wantMarker = (state === 'POINTING' || state === 'PRESENTING') && !inFlight ? 1 : 0

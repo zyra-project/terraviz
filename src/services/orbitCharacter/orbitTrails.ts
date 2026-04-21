@@ -49,7 +49,7 @@
 import * as THREE from 'three'
 import { PALETTES, type PaletteKey } from './orbitTypes'
 import { expressionFor, STATES } from './orbitStates'
-import type { StateKey } from './orbitTypes'
+import type { StateKey, GestureKind } from './orbitTypes'
 
 /**
  * Rolling buffer size. With distance-based alpha the effective
@@ -126,6 +126,15 @@ export interface TrailHandle {
   currentFadeEnd: number
   writeCounter: number
   lastState: StateKey
+  /**
+   * Last frame's active gesture (null when no gesture is playing).
+   * Trail invalidates on both gesture-start (null → kind) and
+   * gesture-end (kind → null) so the sub's pre- and post-gesture
+   * orbit doesn't mix with the gesture's own motion in the trail
+   * buffer — Wave especially produces a muddied sweep when idle
+   * orbit particles are still visible behind the gesture.
+   */
+  lastGestureKind: GestureKind | null
   stateChangeTime: number
 }
 
@@ -175,13 +184,21 @@ export function buildTrails(
         attribute float travelDistance;
         attribute float seed;
         uniform float uPixelRatio;
+        uniform float uHeadDistance;
         varying float vTravelDistance;
         varying float vSeed;
         void main() {
           vTravelDistance = travelDistance;
           vSeed = seed;
+          // Head-zone size boost — particles within uHeadDistance of
+          // the sub render larger, so adjacent additive sprites
+          // overlap into a continuous bright line close to the
+          // satellite. Beyond the head zone, size returns to baseline
+          // and the trail reads as discrete sparkles.
+          float headT = clamp(travelDistance / max(0.0001, uHeadDistance), 0.0, 1.0);
+          float sizeMul = mix(2.2, 1.0, headT);
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = size * uPixelRatio * (0.35 / max(0.001, -mv.z));
+          gl_PointSize = size * uPixelRatio * (0.35 / max(0.001, -mv.z)) * sizeMul;
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: `
@@ -234,6 +251,7 @@ export function buildTrails(
       // first update; '__init' sentinel avoids accidentally matching
       // an actual state key.
       lastState: '__init' as unknown as StateKey,
+      lastGestureKind: null,
       stateChangeTime: -STATE_CHANGE_FADE_DURATION * 2,
     }
   })
@@ -271,6 +289,7 @@ export function updateTrails(
   trails: TrailHandle[],
   subSpheres: THREE.Mesh[],
   state: StateKey,
+  activeGestureKind: GestureKind | null,
   palette: PaletteKey,
   time: number,
   flightBoost = 0,
@@ -281,9 +300,14 @@ export function updateTrails(
   trails.forEach((trail, i) => {
     const sub = subSpheres[i]
 
-    // State change detection — invalidate the existing trail and
-    // record the transition time so intensity fades in cleanly.
-    if (state !== trail.lastState) {
+    // Invalidate on state change OR gesture start/end. Gestures
+    // hijack sub positions for a short duration; without this
+    // invalidation, the sub's pre-gesture orbit trail mixes with
+    // the gesture's own path (Wave is the worst offender — the
+    // right sub sweeps through the residual orbit particles).
+    const stateChanged = state !== trail.lastState
+    const gestureChanged = activeGestureKind !== trail.lastGestureKind
+    if (stateChanged || gestureChanged) {
       for (let j = 0; j < TRAIL_LENGTH; j++) {
         trail.travelDistances[j] = TRAIL_INVALID_DISTANCE
       }
@@ -291,6 +315,7 @@ export function updateTrails(
       trail.prevSubPos.copy(sub.position)
       trail.stateChangeTime = time
       trail.lastState = state
+      trail.lastGestureKind = activeGestureKind
     }
 
     trail.mat.uniforms.uColor.value.set(trailColor)

@@ -52,26 +52,53 @@ export const GESTURES: Record<GestureKind, Gesture> = {
     label: 'Shrug',
     duration: 1.4,
     compute: (t, _ctx) => {
-      // "I don't know" — both sub-spheres rise and spread wide, head tilts
-      // back slightly, subtle side-to-side sway during the held phase.
+      // "I don't know" — sub-spheres trace an ARM-like arc: they
+      // sweep outward and upward along a curved path rather than
+      // sliding in a straight line, then hold at peak, then sweep
+      // back. Head tilts back slightly with a subtle side-to-side
+      // sway during the held phase.
+      //
+      // Path is a quadratic Bezier from rest → control → peak. The
+      // control point sits OUTWARD and UPWARD of the midpoint so
+      // the curve bows up, reading as a shoulder-to-elbow-to-wrist
+      // swing rather than a linear translation.
       const r = 0.14
-      let spread: number, lift: number
-      if (t < 0.25) {
-        const e = smoothstep01(t / 0.25)
-        spread = r * (1.0 + 0.7 * e); lift = 0.07 * e
-      } else if (t < 0.75) {
-        spread = r * 1.7; lift = 0.07
-      } else {
-        const e = smoothstep01((1.0 - t) / 0.25)
-        spread = r * (1.0 + 0.7 * e); lift = 0.07 * e
-      }
+      // `swing` ∈ [0, 1]: 0 at rest, 1 at held peak, 0 at end.
+      let swing: number
+      if (t < 0.25) swing = smoothstep01(t / 0.25)
+      else if (t < 0.75) swing = 1.0
+      else swing = smoothstep01((1.0 - t) / 0.25)
+
+      // Bezier endpoints (absolute values; mirrored on X for the
+      // second sub). REST is close to the body on the right side;
+      // PEAK is spread wide and lifted.
+      const restX = r * 0.20
+      const restY = -r * 0.10
+      const peakX = r * 1.65
+      const peakY = r * 0.45
+      // Control point — pulled UP and slightly OUTWARD from the
+      // midpoint so the curve bows over the top rather than running
+      // in a straight line. This is what gives the motion its arm
+      // swing character.
+      const ctrlX = (restX + peakX) * 0.5 + r * 0.20
+      const ctrlY = (restY + peakY) * 0.5 + r * 0.55
+      // Quadratic Bezier B(s) = (1-s)^2·P0 + 2(1-s)·s·P1 + s^2·P2
+      const s = swing
+      const u = 1 - s
+      const armX = u * u * restX + 2 * u * s * ctrlX + s * s * peakX
+      const armY = u * u * restY + 2 * u * s * ctrlY + s * s * peakY
+      // Small forward-bow on Z so the arms arc toward camera at
+      // peak swing (max at swing=0.5). Gives the motion a third
+      // dimension; reads as natural rather than flat.
+      const armZ = 4 * swing * (1 - swing) * 0.025
+
       const peak = Math.sin(smoothstep01((t - 0.05) / 0.9) * Math.PI)
       const headPitch = -0.14 * peak
       const headYaw = Math.sin(t * Math.PI * 1.8) * 0.08 * peak
       return {
         subSpheres: [
-          { x:  spread, y: lift, z: 0 },
-          { x: -spread, y: lift, z: 0 },
+          { x:  armX, y: armY, z: armZ },
+          { x: -armX, y: armY, z: armZ },
         ],
         head: { pitch: headPitch, yaw: headYaw },
       }
