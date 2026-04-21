@@ -54,6 +54,21 @@ const SUB_RADIUS = 0.009
 const SUB_ORBIT_RADIUS = 0.11
 
 /**
+ * Lift applied to the idle-orbit center, in head-local Y. The two
+ * sub-spheres orbit around `(0, ORBIT_Y_BIAS, 0)` rather than the
+ * head origin, so their full elliptical paths stay above the eye
+ * line and never clip through the bezel / socket. Matches the
+ * reference concept art where the satellites float at/above the top
+ * of Orbit's head, not around the equator.
+ *
+ * The basis tilts (see `makeOrbitBasis`) are kept small so the Y
+ * swing around this bias is limited to roughly `±0.03` — combined
+ * with the bias that puts the orbit minimum at `~0.02`, safely
+ * above the top of the eye socket (~0.017).
+ */
+const ORBIT_Y_BIAS = 0.050
+
+/**
  * Scale presets were tuned for a moderately wide landscape (≈3:2).
  * Wider viewports get the preset's vertical FOV as-is — extra
  * horizontal margin is fine. Narrower viewports preserve horizontal
@@ -445,9 +460,14 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
     // once so the per-frame path is a pair of basis * cos/sin adds
     // with no trig of its own. Tilts diverge (one positive, one
     // negative) so the orbits read as crossing when viewed head-on.
+    // Gentler tilts than the first pass (+0.62 / -0.87): those let
+    // the sub's Y swing as far as ±0.064, which combined with no
+    // orbit lift put the bottom of each ellipse below the eye line.
+    // The smaller angles here cap Y swing at ~±0.028, keeping the
+    // orbit arc inside the `ORBIT_Y_BIAS ± 0.03` band.
     mesh.userData.orbitBasis = i === 0
-      ? makeOrbitBasis(+0.62, 0.0)
-      : makeOrbitBasis(-0.87, Math.PI / 2.3)
+      ? makeOrbitBasis(+0.25, 0.0)
+      : makeOrbitBasis(-0.30, Math.PI / 2.3)
     scene.add(mesh)
     subSpheres.push(mesh)
     subBundles.push(bundle)
@@ -1403,12 +1423,15 @@ export function updateCharacter(
       // orbit (default — vinyl redesign: two distinct crossing
       // ellipses via each sub's precomputed orbital basis). Tight,
       // steady orbits that read as "satellites" rather than swarm.
+      // Orbit center is lifted by `ORBIT_Y_BIAS` so the full ellipse
+      // stays above the eye line — the bottom of each orbit used to
+      // clip through the bezel.
       const basis = sub.userData.orbitBasis as { u: THREE.Vector3; v: THREE.Vector3 }
       const phase = anim.orbitPhaseAccum * 2 + pOff
       const cp = Math.cos(phase) * r
       const sp = Math.sin(phase) * r
       relX = basis.u.x * cp + basis.v.x * sp
-      relY = basis.u.y * cp + basis.v.y * sp
+      relY = basis.u.y * cp + basis.v.y * sp + ORBIT_Y_BIAS
       relZ = basis.u.z * cp + basis.v.z * sp
     }
 
