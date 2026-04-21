@@ -20,6 +20,8 @@ import { createVrScene, type VrSceneHandle, type VrDatasetTexture } from './vrSc
 import { createVrHud, type VrHudHandle } from './vrHud'
 import { createVrBrowse, type VrBrowseHandle } from './vrBrowse'
 import { createVrTourControls, type VrTourControlsHandle } from './vrTourControls'
+import { createVrTourOverlay, type VrTourOverlayHandle } from './vrTourOverlay'
+import { setVrTourOverlaySink } from '../ui/tourUI'
 import { createVrInteraction, type VrInteractionHandle } from './vrInteraction'
 import { createVrLoading, type VrLoadingHandle } from './vrLoading'
 import { createVrPlacement, liftedPlacementPosition, type VrPlacementHandle } from './vrPlacement'
@@ -170,6 +172,8 @@ interface ActiveSession {
   browse: VrBrowseHandle
   /** In-VR tour control strip — visible only while a tour is active. */
   tourControls: VrTourControlsHandle
+  /** In-VR tour overlay manager (text / popup / ... panels). Always present; hosts per-tour overlays. */
+  tourOverlay: VrTourOverlayHandle
   /** Loading scene shown during entry; null after fade-out + dispose. */
   loading: VrLoadingHandle | null
   /** AR-only spatial placement (hit-test reticle + Place button). Null when hit-test unavailable. */
@@ -348,6 +352,21 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
   // flips it on when main.ts reports a running tour.
   const tourControls = createVrTourControls(THREE_)
   scene.scene.add(tourControls.mesh)
+
+  // Tour overlay manager — the parent Group is always in the scene;
+  // individual overlay meshes are added / removed by its show/hide
+  // methods. The sink registered below forwards every DOM overlay
+  // op from `tourUI` into this manager.
+  const tourOverlay = createVrTourOverlay(THREE_)
+  scene.scene.add(tourOverlay.group)
+  setVrTourOverlaySink({
+    showText: (params) => tourOverlay.showText(params),
+    hideText: (id) => tourOverlay.hideOverlay(id),
+    hideAllText: () => tourOverlay.hideAllText(),
+    showPopup: (params) => tourOverlay.showPopup(params),
+    hidePopup: (id) => tourOverlay.hideOverlay(id),
+    hideAllPopups: () => tourOverlay.hideAllPopups(),
+  })
 
   // --- Spatial placement (AR-only) + local-floor ref space ---
   // Two separable capabilities:
@@ -660,6 +679,7 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     hud,
     browse,
     tourControls,
+    tourOverlay,
     interaction,
     loading,
     placement,
@@ -828,6 +848,12 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     // globe becomes visible.
     active.scene.update()
 
+    // Tour overlay pose resolution — world-anchored overlays track
+    // the globe, gaze-follow overlays lerp toward a camera-local
+    // target. No-op when no overlays exist, which is the common
+    // case (most users aren't on a tour).
+    active.tourOverlay.update(active.camera, active.scene.globe.position, delta)
+
     // Track HUD + Place button to the globe's current position so
     // when the user places the globe on a real surface in AR, the
     // controls go with it rather than floating in mid-air at their
@@ -868,6 +894,12 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     a.hud.dispose()
     a.browse.dispose()
     a.tourControls.dispose()
+    // Clear the tourUI sink first so any in-flight `hideAll*` calls
+    // from the tour engine (e.g. tour cleanup fired by stopTour()
+    // during exit) don't land on the about-to-be-disposed manager.
+    setVrTourOverlaySink(null)
+    a.scene.scene.remove(a.tourOverlay.group)
+    a.tourOverlay.dispose()
     // If the fade-out setTimeout is still pending, cancel it —
     // otherwise it would fire after the loading handle is disposed
     // and try to run fade-out on stale state.

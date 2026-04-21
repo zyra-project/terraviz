@@ -18,6 +18,48 @@ import type {
 } from '../types'
 import type { TourEngine } from '../services/tourEngine'
 
+// ── VR tour overlay mirror ──────────────────────────────────────────
+//
+// While a WebXR session is live, the 2D DOM overlays are invisible
+// (hidden behind the headset output) but still rendered — the tour
+// engine doesn't know VR is active, so it calls the same show/hide
+// functions exported from this module. We mirror every call onto an
+// optional `VrTourOverlaySink` so the VR layer can render equivalent
+// CanvasTexture panels in the 3D scene.
+//
+// The sink is set by `vrSession` on session entry and cleared on
+// session end. Mirroring is one-way (DOM → VR) and additive — the
+// DOM overlays keep rendering in the background so the 2D experience
+// resumes seamlessly when the user exits VR mid-tour.
+
+/**
+ * Subset of tour overlay ops mirrored into VR. Methods accept the
+ * same param shapes as the DOM-side show/hide functions below so
+ * wiring is a direct pass-through. Optional fields let the sink
+ * implement overlay kinds incrementally as later Phase 3.5 commits
+ * bring image / video / question variants online.
+ */
+export interface VrTourOverlaySink {
+  showText(params: ShowRectTaskParams): void
+  hideText(rectID: string): void
+  hideAllText(): void
+  showPopup(params: ShowPopupHtmlTaskParams): void
+  hidePopup(popupID: string): void
+  hideAllPopups(): void
+}
+
+let vrOverlaySink: VrTourOverlaySink | null = null
+
+/**
+ * Register (or clear) the VR overlay sink. `vrSession` calls this
+ * with a sink adapter on enter and `null` on exit. Safe to call
+ * when no tour is running — the sink just sits dormant until the
+ * next overlay op.
+ */
+export function setVrTourOverlaySink(sink: VrTourOverlaySink | null): void {
+  vrOverlaySink = sink
+}
+
 // ── Shared helpers ──────────────────────────────────────────────────
 
 /** Viewport layout mode for responsive tour overlays. */
@@ -314,10 +356,17 @@ export function showTourTextBox(params: ShowRectTaskParams): void {
 
   container.appendChild(box)
   textBoxes.add(params.rectID, box)
+  vrOverlaySink?.showText(params)
 }
 
-export function hideTourTextBox(rectID: string): void { textBoxes.remove(rectID) }
-export function hideAllTourTextBoxes(): void { textBoxes.removeAll() }
+export function hideTourTextBox(rectID: string): void {
+  textBoxes.remove(rectID)
+  vrOverlaySink?.hideText(rectID)
+}
+export function hideAllTourTextBoxes(): void {
+  textBoxes.removeAll()
+  vrOverlaySink?.hideAllText()
+}
 
 // ── Image overlays (showImage / hideImage) ───────────────────────────
 
@@ -564,10 +613,17 @@ export function showTourPopup(params: ShowPopupHtmlTaskParams): void {
 
   container.appendChild(wrapper)
   popups.add(params.popupID, wrapper)
+  vrOverlaySink?.showPopup(params)
 }
 
-export function hideTourPopup(popupID: string): void { popups.remove(popupID) }
-export function hideAllTourPopups(): void { popups.removeAll() }
+export function hideTourPopup(popupID: string): void {
+  popups.remove(popupID)
+  vrOverlaySink?.hidePopup(popupID)
+}
+export function hideAllTourPopups(): void {
+  popups.removeAll()
+  vrOverlaySink?.hideAllPopups()
+}
 
 // ── Question overlays ────────────────────────────────────────────────
 

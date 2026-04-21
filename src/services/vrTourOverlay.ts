@@ -31,7 +31,7 @@
  */
 
 import type * as THREE from 'three'
-import type { ShowRectTaskParams } from '../types'
+import type { ShowPopupHtmlTaskParams, ShowRectTaskParams } from '../types'
 
 /**
  * Anchor mode for a single overlay. Controls how the per-frame
@@ -97,9 +97,50 @@ export interface VrTourTextParams
   size?: { width: number; height: number }
 }
 
+/**
+ * Subset of {@link ShowPopupHtmlTaskParams} consumed by the popup
+ * overlay path. The 2D DOM path renders an iframe for `url` popups
+ * (sandboxed; tour-author-controlled `allowScripts`) and an srcdoc-
+ * iframe for `html` popups. Neither translates to a canvas panel —
+ * iframes can't be drawn into a CanvasTexture and third-party
+ * content can't be captured across the cross-origin boundary.
+ *
+ * VR-side strategy (v1): treat popups as extended text panels.
+ *
+ * - `html` payloads are stripped of tags and rendered as plain
+ *   text on a larger panel than `showRect` caption boxes. Most
+ *   SOS popup usage is short descriptive copy; for those, the
+ *   plain-text render reads naturally.
+ * - `url` payloads are unreachable in VR (we can't embed a live
+ *   iframe). The panel shows the URL with a "view in 2D" prompt
+ *   so the user knows exit-and-reopen is how to read it.
+ *
+ * Richer rendering (headless iframe → canvas capture, markdown
+ * parser, image embeds) is layered on as a follow-up once we see
+ * which popup variants in-tree tours actually use.
+ */
+export interface VrTourPopupParams
+  extends Pick<ShowPopupHtmlTaskParams,
+    'popupID' | 'url' | 'html'
+  > {
+  anchor?: VrTourAnchor
+  /** World-space size of the panel. Defaults are larger than text overlays to fit denser content. */
+  size?: { width: number; height: number }
+}
+
+/**
+ * Classification of overlay meshes so per-kind bulk operations
+ * (`hideAllText`, `hideAllPopups`, …) can filter the single
+ * overlay map without maintaining a second per-kind index. Extended
+ * alongside each future overlay type (image/video/question) as
+ * those commits land.
+ */
+export type VrTourOverlayKind = 'text' | 'popup'
+
 /** Every mesh carries its overlay id + mode so per-frame pose resolution is keyed off userData. */
 interface OverlayUserData {
   overlayId: string
+  kind: VrTourOverlayKind
   anchor: VrTourAnchor
   /** World-space offset for `world` mode; zero for `gaze`. Kept materialized to avoid allocations. */
   worldOffset: THREE.Vector3
@@ -118,8 +159,22 @@ interface OverlayUserData {
 export interface VrTourOverlayHandle {
   readonly group: THREE.Group
   showText(params: VrTourTextParams): void
+  /**
+   * Render a tour popup panel. Thin wrapper on the same mesh / canvas
+   * pipeline as `showText` — differences are the default panel size
+   * (larger) and the canvas-drawing routine (prefixes URL popups with
+   * a "view in 2D" prompt when no HTML body is available). The two
+   * overlay kinds share an id space, so you can mix them freely; a
+   * `popupID` and a `rectID` with the same string value would collide
+   * (tour authors don't do this in practice).
+   */
+  showPopup(params: VrTourPopupParams): void
   hideOverlay(id: string): void
   hideAll(): void
+  /** Remove every text overlay; leaves popups, images, videos, questions untouched. */
+  hideAllText(): void
+  /** Remove every popup overlay. */
+  hideAllPopups(): void
   /**
    * Toggle the default anchor mode used when an overlay arrives
    * without an explicit `anchor` hint. Persists until flipped;
@@ -145,6 +200,17 @@ export interface VrTourOverlayHandle {
 /** Default panel world-size — wide enough for a paragraph, tall enough for 4–5 lines. */
 const DEFAULT_PANEL_WIDTH = 0.6
 const DEFAULT_PANEL_HEIGHT = 0.36
+
+/**
+ * Popups get a larger default plane than text overlays — they carry
+ * denser copy (paragraphs, attribution, external-link prompts) and
+ * a wider reading width reduces line-wrap thrash when authors paste
+ * marketing-style blurbs. Not so large they dominate the field of
+ * view next to the globe; matches the footprint of the browse panel
+ * (0.8 × 0.6 m).
+ */
+const POPUP_PANEL_WIDTH = 0.8
+const POPUP_PANEL_HEIGHT = 0.5
 
 /** Canvas pixel dimensions. 5:3 aspect matches the default 0.6 × 0.36 m plane. */
 const CANVAS_WIDTH = 1000
@@ -189,12 +255,10 @@ const GAZE_LERP_RATE = 6.0
  * Strip the SOS caption markup down to plain text. The 2D path
  * (src/ui/tourUI.ts) renders `<i>…</i>` as italic and
  * `<color=…>…</color>` as styled spans via HTML; VR renders onto
- * a canvas, so the scaffold takes the pragmatic route of stripping
- * tags and keeping the text. Italic / colored runs on canvas need
- * segmented drawing (split text into runs with different
- * fillStyle/font) — that's layered on in commit 4 alongside the
- * engine wiring, when we know exactly which markup variants the
- * in-tree tours actually use.
+ * a canvas, so for v1 we strip tags and render plain text. Italic
+ * / colored runs on canvas would need segmented drawing (split
+ * into runs with different fillStyle/font) — worth adding later
+ * if testers flag it, but every in-tree tour reads fine without.
  *
  * The escape sequence `\n` (two characters) is honored as a real
  * newline, matching tour-author expectations.
@@ -206,6 +270,31 @@ function stripCaptionMarkup(raw: string): string {
     .replace(/<\/i>/gi, '')
     .replace(/<color=[^>]+>/gi, '')
     .replace(/<\/color>/gi, '')
+}
+
+/**
+ * Very coarse HTML → plain-text conversion for popup bodies. Strips
+ * tags, collapses whitespace, decodes a handful of common named /
+ * numeric entities. Not a full HTML parser; tour popups in the wild
+ * are short descriptive blurbs, not complex markup. If a popup in
+ * the field shows up mangled, we upgrade to a proper parser then.
+ */
+function htmlToPlainText(raw: string): string {
+  return raw
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<li[^>]*>/gi, '\n• ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(parseInt(code, 10)))
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }
 
 /**
@@ -290,13 +379,29 @@ function sanitizeCaptionColor(raw: string | undefined): string | null {
 }
 
 /**
- * Draw a text overlay into its canvas. Returns the close-button UV
- * rect (or null when not closable) so the caller can stash it in
- * userData for future hit-test wiring (commit 6).
+ * Shared canvas shell used by every text-based overlay type (text,
+ * popup for now — image caption, question prompt once those land).
+ * Paints the glass background + border, wraps + draws the body
+ * text, and adds a close X in the top-right when requested. Returns
+ * the close-button UV rect (null if not closable) so the caller
+ * can stash it in userData for the controller hit-test wired up in
+ * commit 6.
+ *
+ * Decoupled from the caller's param shape so text overlays and
+ * popups can share the same renderer without forcing a
+ * `VrTourTextParams` cast in the popup path.
  */
-function drawText(
+function drawTextPanel(
   ctx: CanvasRenderingContext2D,
-  params: VrTourTextParams,
+  body: string,
+  opts: {
+    fontColor?: string
+    fontSize?: number
+    showBorder?: boolean
+    isClosable?: boolean
+    /** Dimmed secondary line rendered above the body (e.g. "Open in 2D to view"). */
+    header?: string
+  },
 ): { uMin: number; uMax: number; vMin: number; vMax: number } | null {
   const w = CANVAS_WIDTH
   const h = CANVAS_HEIGHT
@@ -305,7 +410,7 @@ function drawText(
   // Background + border — glass surface.
   ctx.fillStyle = BG_COLOR
   fillRoundRect(ctx, 0, 0, w, h, 18)
-  ctx.strokeStyle = params.showBorder ? BORDER_COLOR : BORDER_DIM
+  ctx.strokeStyle = opts.showBorder ? BORDER_COLOR : BORDER_DIM
   ctx.lineWidth = 2
   if (typeof ctx.roundRect === 'function') {
     ctx.beginPath()
@@ -317,31 +422,61 @@ function drawText(
 
   // Body text area. Accounts for the optional close-button column
   // so long lines don't collide with the X.
-  const textColor = sanitizeCaptionColor(params.fontColor) ?? TEXT_COLOR
-  const bodyFontPx = Math.round(params.fontSize ? Math.max(22, Math.min(44, params.fontSize * 0.7)) : 36)
+  const textColor = sanitizeCaptionColor(opts.fontColor) ?? TEXT_COLOR
+  const bodyFontPx = Math.round(opts.fontSize ? Math.max(22, Math.min(44, opts.fontSize * 0.7)) : 36)
   ctx.fillStyle = textColor
   ctx.font = `500 ${bodyFontPx}px system-ui, -apple-system, sans-serif`
   ctx.textBaseline = 'top'
   ctx.textAlign = 'left'
 
   const textLeft = CANVAS_PADDING
-  const textRight = w - CANVAS_PADDING - (params.isClosable ? CLOSE_BUTTON_SIZE : 0)
+  const textRight = w - CANVAS_PADDING - (opts.isClosable ? CLOSE_BUTTON_SIZE : 0)
   const textWidth = textRight - textLeft
-  const lines = wrapText(ctx, stripCaptionMarkup(params.caption), textWidth)
+
+  // Optional dimmed header (used by URL-only popups to hint at the
+  // 2D-only fallback). Rendered smaller and with reduced contrast
+  // so it reads as metadata, not primary content.
+  const headerFontPx = Math.round(bodyFontPx * 0.66)
+  const headerLineHeight = headerFontPx * 1.2
+  let headerLines: string[] = []
+  if (opts.header) {
+    ctx.font = `500 ${headerFontPx}px system-ui, -apple-system, sans-serif`
+    headerLines = wrapText(ctx, opts.header, textWidth)
+  }
+
+  ctx.font = `500 ${bodyFontPx}px system-ui, -apple-system, sans-serif`
+  const bodyLines = wrapText(ctx, body, textWidth)
+
+  const lineHeight = bodyFontPx * 1.3
+  const bodyHeight = bodyLines.length * lineHeight
+  const headerBlockHeight = headerLines.length > 0
+    ? headerLines.length * headerLineHeight + headerLineHeight * 0.6
+    : 0
+  const totalHeight = headerBlockHeight + bodyHeight
 
   // Vertical centering — looks better than top-aligned for short
   // captions that only fill the top third of the panel.
-  const lineHeight = bodyFontPx * 1.3
-  const totalLinesHeight = lines.length * lineHeight
   const textTop = TITLE_BAR_HEIGHT + Math.max(
     CANVAS_PADDING,
-    (h - TITLE_BAR_HEIGHT - totalLinesHeight) / 2,
+    (h - TITLE_BAR_HEIGHT - totalHeight) / 2,
   )
-  for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(lines[i], textLeft, textTop + i * lineHeight)
+
+  // Draw header first so body starts beneath it.
+  if (headerLines.length > 0) {
+    ctx.fillStyle = 'rgba(232, 234, 240, 0.55)'
+    ctx.font = `500 ${headerFontPx}px system-ui, -apple-system, sans-serif`
+    for (let i = 0; i < headerLines.length; i++) {
+      ctx.fillText(headerLines[i], textLeft, textTop + i * headerLineHeight)
+    }
+    ctx.fillStyle = textColor
+    ctx.font = `500 ${bodyFontPx}px system-ui, -apple-system, sans-serif`
+  }
+  const bodyTop = textTop + headerBlockHeight
+  for (let i = 0; i < bodyLines.length; i++) {
+    ctx.fillText(bodyLines[i], textLeft, bodyTop + i * lineHeight)
   }
 
-  if (!params.isClosable) return null
+  if (!opts.isClosable) return null
 
   // Close X in the top-right corner. Pixel geometry tracked so the
   // UV rect we return matches the drawn glyph exactly — the
@@ -412,6 +547,7 @@ export function createVrTourOverlay(THREE_: typeof THREE): VrTourOverlayHandle {
 
   function buildMeshForOverlay(
     id: string,
+    kind: VrTourOverlayKind,
     size: { width: number; height: number },
     anchor: VrTourAnchor,
   ): ManagedOverlay {
@@ -451,6 +587,7 @@ export function createVrTourOverlay(THREE_: typeof THREE): VrTourOverlayHandle {
     )
     const userData: OverlayUserData = {
       overlayId: id,
+      kind,
       anchor,
       worldOffset,
       gazeOffset,
@@ -488,15 +625,64 @@ export function createVrTourOverlay(THREE_: typeof THREE): VrTourOverlayHandle {
 
       const size = params.size ?? { width: DEFAULT_PANEL_WIDTH, height: DEFAULT_PANEL_HEIGHT }
       const anchor = resolveAnchor(params.anchor)
-      const managed = buildMeshForOverlay(params.rectID, size, anchor)
+      const managed = buildMeshForOverlay(params.rectID, 'text', size, anchor)
 
-      const closeUv = drawText(managed.ctx2d, params)
+      const closeUv = drawTextPanel(managed.ctx2d, stripCaptionMarkup(params.caption), {
+        fontColor: params.fontColor,
+        fontSize: params.fontSize,
+        showBorder: params.showBorder,
+        isClosable: params.isClosable,
+      })
       managed.texture.needsUpdate = true
       const ud = managed.mesh.userData as OverlayUserData
       ud.closeUv = closeUv
 
       group.add(managed.mesh)
       overlays.set(params.rectID, managed)
+    },
+
+    showPopup(params) {
+      // Same replace-by-id discipline as showText — tour authors may
+      // re-fire showPopupHtml with the same popupID to refresh
+      // content without an explicit hide first.
+      const existing = overlays.get(params.popupID)
+      if (existing) {
+        disposeOverlay(existing)
+        overlays.delete(params.popupID)
+      }
+
+      const size = params.size ?? { width: POPUP_PANEL_WIDTH, height: POPUP_PANEL_HEIGHT }
+      const anchor = resolveAnchor(params.anchor)
+      const managed = buildMeshForOverlay(params.popupID, 'popup', size, anchor)
+
+      // Three rendering cases:
+      //   1. `html` present — strip tags + render as plain text.
+      //   2. `url` present, no `html` — can't embed a live iframe in
+      //      a CanvasTexture, so show a 2D-fallback prompt with the
+      //      URL itself so the user knows what to revisit.
+      //   3. Neither — author error; show a placeholder so the
+      //      overlay is still visible (easier to spot than silent).
+      let body: string
+      let header: string | undefined
+      if (params.html) {
+        body = htmlToPlainText(params.html)
+      } else if (params.url) {
+        header = 'Open in 2D view to interact with this content'
+        body = params.url
+      } else {
+        body = '(No popup content)'
+      }
+
+      const closeUv = drawTextPanel(managed.ctx2d, body, {
+        isClosable: true,
+        header,
+      })
+      managed.texture.needsUpdate = true
+      const ud = managed.mesh.userData as OverlayUserData
+      ud.closeUv = closeUv
+
+      group.add(managed.mesh)
+      overlays.set(params.popupID, managed)
     },
 
     hideOverlay(id) {
@@ -509,6 +695,31 @@ export function createVrTourOverlay(THREE_: typeof THREE): VrTourOverlayHandle {
     hideAll() {
       for (const managed of overlays.values()) disposeOverlay(managed)
       overlays.clear()
+    },
+
+    hideAllText() {
+      // Two-pass to avoid mutating the map under iteration.
+      const ids: string[] = []
+      for (const [id, managed] of overlays) {
+        if ((managed.mesh.userData as OverlayUserData).kind === 'text') ids.push(id)
+      }
+      for (const id of ids) {
+        const managed = overlays.get(id)
+        if (managed) disposeOverlay(managed)
+        overlays.delete(id)
+      }
+    },
+
+    hideAllPopups() {
+      const ids: string[] = []
+      for (const [id, managed] of overlays) {
+        if ((managed.mesh.userData as OverlayUserData).kind === 'popup') ids.push(id)
+      }
+      for (const id of ids) {
+        const managed = overlays.get(id)
+        if (managed) disposeOverlay(managed)
+        overlays.delete(id)
+      }
     },
 
     setGazeFollowDefault(enabled) {
