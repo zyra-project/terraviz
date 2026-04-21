@@ -345,7 +345,10 @@ export function createPupilMaterials(palette: PaletteKey = 'cyan'): PupilMateria
 
 export function createBezelMaterial(): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({
-    color: 0x1a1620,
+    // DIAGNOSTIC — temporarily bright blue so the user can tell
+    // whether the "inner-wedge" artifacts they see are specular
+    // highlights on the bezel's torus tube. Revert on next commit.
+    color: 0x0088ff,
     roughness: 0.45,
     metalness: 0.0,
   })

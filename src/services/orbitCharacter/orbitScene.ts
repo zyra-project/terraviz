@@ -745,12 +745,14 @@ function buildPairedEye(
   upperLidPivot.position.set(0, UPPER_LID_PIVOT_Y, LID_PIVOT_Z)
   upperLidPivot.rotation.x = UPPER_LID_PARKED_ROT
   group.add(upperLidPivot)
-  // DIAGNOSTIC — lids temporarily rendered in solid bright red so the
-  // user can confirm whether the "inner-wedge" artifacts they're
-  // seeing ARE the lid dome silhouette. Revert on next commit after
-  // confirmation / fix.
-  const diagnosticLidMat = new THREE.MeshBasicMaterial({ color: 0xff0044 })
-  const upperLid = new THREE.Mesh(lidGeometry, diagnosticLidMat)
+  // DIAGNOSTIC — lids restored to normal vinyl material. The red
+  // tint from the previous commit confirmed the lids are NOT the
+  // source of the inner-wedge artifact. Now testing the BEZEL —
+  // hypothesis is that the torus tube's inner-facing surface is
+  // catching a specular highlight from the key light. The bezel
+  // material is tinted bright blue in the scene build so the
+  // wedges' color will tell us whether it's the bezel or not.
+  const upperLid = new THREE.Mesh(lidGeometry, lidMaterial)
   upperLid.position.set(0, LID_MESH_Y_OFFSET, 0)
   upperLid.castShadow = false
   upperLid.receiveShadow = true
@@ -761,7 +763,7 @@ function buildPairedEye(
   lowerLidPivot.position.set(0, LOWER_LID_PIVOT_Y, LID_PIVOT_Z)
   lowerLidPivot.rotation.x = LOWER_LID_PARKED_ROT
   group.add(lowerLidPivot)
-  const lowerLid = new THREE.Mesh(lidGeometry, diagnosticLidMat)
+  const lowerLid = new THREE.Mesh(lidGeometry, lidMaterial)
   // Lower lid mirrors the upper: same geometry, rotated 180° around X
   // so it opens upward. Offset NEGATED vs. the upper lid —
   // Three.js applies mesh.rotation first, then mesh.position, so
