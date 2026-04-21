@@ -54,19 +54,20 @@ const SUB_RADIUS = 0.009
 const SUB_ORBIT_RADIUS = 0.11
 
 /**
- * Lift applied to the idle-orbit center, in head-local Y. The two
- * sub-spheres orbit around `(0, ORBIT_Y_BIAS, 0)` rather than the
- * head origin, so their full elliptical paths stay above the eye
- * line and never clip through the bezel / socket. Matches the
- * reference concept art where the satellites float at/above the top
- * of Orbit's head, not around the equator.
+ * Minimum orbit radius for tight-sub modes (`point` / `trace`).
+ * A sub orbiting at a radius smaller than `BODY_RADIUS` passes
+ * through the body's interior volume, where the body surface
+ * (and the bezel torus sitting just outside it) render in front
+ * of the sub — the sub looks "swallowed" by the character at
+ * parts of its orbit. Clamping the tight-orbit radius above the
+ * body surface + a small margin keeps the sub consistently on
+ * the outside of the body, so depth testing renders it correctly
+ * over the face when it passes in front of the eyes.
  *
- * The basis tilts (see `makeOrbitBasis`) are kept small so the Y
- * swing around this bias is limited to roughly `±0.03` — combined
- * with the bias that puts the orbit minimum at `~0.02`, safely
- * above the top of the eye socket (~0.017).
+ * The sub's own radius (`SUB_RADIUS = 0.009`) is also accounted
+ * for — the sub's silhouette clears the body by a visible margin.
  */
-const ORBIT_Y_BIAS = 0.050
+const SUB_TIGHT_ORBIT_RADIUS = BODY_RADIUS + SUB_RADIUS + 0.008  // = 0.092
 
 /**
  * Scale presets were tuned for a moderately wide landscape (≈3:2).
@@ -460,14 +461,9 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
     // once so the per-frame path is a pair of basis * cos/sin adds
     // with no trig of its own. Tilts diverge (one positive, one
     // negative) so the orbits read as crossing when viewed head-on.
-    // Gentler tilts than the first pass (+0.62 / -0.87): those let
-    // the sub's Y swing as far as ±0.064, which combined with no
-    // orbit lift put the bottom of each ellipse below the eye line.
-    // The smaller angles here cap Y swing at ~±0.028, keeping the
-    // orbit arc inside the `ORBIT_Y_BIAS ± 0.03` band.
     mesh.userData.orbitBasis = i === 0
-      ? makeOrbitBasis(+0.25, 0.0)
-      : makeOrbitBasis(-0.30, Math.PI / 2.3)
+      ? makeOrbitBasis(+0.62, 0.0)
+      : makeOrbitBasis(-0.87, Math.PI / 2.3)
     scene.add(mesh)
     subSpheres.push(mesh)
     subBundles.push(bundle)
@@ -1339,8 +1335,14 @@ export function updateCharacter(
         sub.position.copy(op).lerp(_tmpActiveTarget, t)
         return
       } else {
+        // Sub 1 circles Orbit tightly while sub 0 does the pointing
+        // reach. Radius is clamped to SUB_TIGHT_ORBIT_RADIUS so the
+        // tight orbit stays OUTSIDE the body surface — earlier value
+        // (0.06) put the sub inside the body volume for part of its
+        // orbit, which got it occluded by the body / eye bezel when
+        // it passed in front of the face.
         const phase = anim.orbitPhaseAccum * 1.8 + pOff
-        const tight = 0.06
+        const tight = SUB_TIGHT_ORBIT_RADIUS
         relX = Math.cos(phase) * tight
         relY = Math.sin(phase * 0.7) * tight * 0.3
         relZ = Math.sin(phase) * tight
@@ -1361,8 +1363,11 @@ export function updateCharacter(
         )
         return
       } else {
+        // Sub 1 supports the trace with a tight companion orbit.
+        // Same body-radius clamp as `point` submode — see comment
+        // above.
         const phase = anim.orbitPhaseAccum * 1.0 + pOff
-        const tight = 0.07
+        const tight = SUB_TIGHT_ORBIT_RADIUS
         relX = Math.cos(phase) * tight
         relY = Math.sin(phase * 0.7) * tight * 0.3
         relZ = Math.sin(phase) * tight
@@ -1423,15 +1428,16 @@ export function updateCharacter(
       // orbit (default — vinyl redesign: two distinct crossing
       // ellipses via each sub's precomputed orbital basis). Tight,
       // steady orbits that read as "satellites" rather than swarm.
-      // Orbit center is lifted by `ORBIT_Y_BIAS` so the full ellipse
-      // stays above the eye line — the bottom of each orbit used to
-      // clip through the bezel.
+      // Orbit radius (SUB_ORBIT_RADIUS = 0.11) sits safely outside
+      // BODY_RADIUS (0.075), so depth testing renders subs over the
+      // face when they pass in front of the eyes without clipping
+      // through the body.
       const basis = sub.userData.orbitBasis as { u: THREE.Vector3; v: THREE.Vector3 }
       const phase = anim.orbitPhaseAccum * 2 + pOff
       const cp = Math.cos(phase) * r
       const sp = Math.sin(phase) * r
       relX = basis.u.x * cp + basis.v.x * sp
-      relY = basis.u.y * cp + basis.v.y * sp + ORBIT_Y_BIAS
+      relY = basis.u.y * cp + basis.v.y * sp
       relZ = basis.u.z * cp + basis.v.z * sp
     }
 
