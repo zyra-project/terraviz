@@ -94,6 +94,13 @@ export class OrbitController {
   // gaze tracks this so Orbit's eye follows the user's cursor.
   private mouseX = 0
   private mouseY = 0
+  /**
+   * Controller `time` (post-rebase) at which the pointer last moved.
+   * `time - cursorLastMoveTime` is the cursor-activity metric passed
+   * to `updateCharacter` for gaze-bias decay. Initialized well in
+   * the past so IDLE starts with zero ambient gaze bias.
+   */
+  private cursorLastMoveTime = -100
 
   constructor(options: OrbitControllerOptions) {
     this.container = options.container
@@ -132,6 +139,7 @@ export class OrbitController {
 
     window.addEventListener('resize', this.handleResize)
     this.renderer.domElement.addEventListener('pointermove', this.handlePointerMove)
+    this.renderer.domElement.addEventListener('pointerdown', this.handlePointerDown)
     this.animate()
   }
 
@@ -247,6 +255,7 @@ export class OrbitController {
     cancelAnimationFrame(this.rafId)
     window.removeEventListener('resize', this.handleResize)
     this.renderer.domElement.removeEventListener('pointermove', this.handlePointerMove)
+    this.renderer.domElement.removeEventListener('pointerdown', this.handlePointerDown)
     this.reducedMotionMql?.removeEventListener('change', this.handleReducedMotionChange)
     this.reducedMotionMql = null
     this.renderer.dispose()
@@ -293,6 +302,35 @@ export class OrbitController {
     const rect = this.renderer.domElement.getBoundingClientRect()
     this.mouseX = ((e.clientX - rect.left) / rect.width) * 2 - 1
     this.mouseY = -((e.clientY - rect.top) / rect.height) * 2 + 1
+    this.cursorLastMoveTime = this.time
+  }
+
+  /**
+   * Pointer-down handler for tickle response. Projects Orbit's head
+   * position into NDC, compares to the click position, and fires
+   * the `tickle` gesture if the click lands within the body
+   * silhouette radius. Uses a slightly generous radius so the
+   * gesture fires on a click NEAR Orbit rather than requiring
+   * pixel-perfect placement on the body.
+   */
+  private handlePointerDown = (e: PointerEvent): void => {
+    if (this.disposed) return
+    const rect = this.renderer.domElement.getBoundingClientRect()
+    const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1
+    const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1
+    const headNdc = new THREE.Vector3()
+      .copy(this.handles.head.position)
+      .project(this.handles.camera)
+    const dx = ndcX - headNdc.x
+    const dy = ndcY - headNdc.y
+    const dist = Math.sqrt(dx * dx + dy * dy)
+    // NDC radius that covers Orbit's body silhouette at the close
+    // preset. Close preset fills roughly 0.12 NDC radius; generous
+    // click target a touch bigger.
+    const clickRadius = 0.15
+    if (dist <= clickRadius) {
+      this.playGesture('tickle')
+    }
   }
 
   private resize(): void {
@@ -332,6 +370,7 @@ export class OrbitController {
       if (this.anim.surpriseStart >= 0) this.anim.surpriseStart -= shift
       if (this.anim.arrivalSquashStart >= 0) this.anim.arrivalSquashStart -= shift
       this.flight.startTime -= shift
+      this.cursorLastMoveTime -= shift
     }
     updateCharacter(this.handles, this.anim, {
       state: this.state,
@@ -344,6 +383,7 @@ export class OrbitController {
       mouseX: this.mouseX,
       mouseY: this.mouseY,
       reducedMotion: this.reducedMotion,
+      cursorActivityTime: this.time - this.cursorLastMoveTime,
     })
     this.renderer.render(this.handles.scene, this.handles.camera)
   }

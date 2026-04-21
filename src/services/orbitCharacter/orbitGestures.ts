@@ -22,11 +22,19 @@
 
 import * as THREE from 'three'
 
-export type GestureKind = 'shrug' | 'wave' | 'beckon' | 'affirm'
+export type GestureKind = 'shrug' | 'wave' | 'beckon' | 'affirm' | 'tickle'
 
 export interface GestureContext {
   direction: THREE.Vector3 // unit vector from head to active target
   featureIsAtEarth: boolean
+  /**
+   * When true, the viewer has OS prefers-reduced-motion set. Gestures
+   * that produce rapid repeating motion (Tickle's spiral, Excited
+   * flutters) should dampen their amplitudes / frequencies when this
+   * is active so the motion still reads as the gesture but doesn't
+   * feel overwhelming.
+   */
+  reducedMotion: boolean
 }
 
 export interface GestureFrame {
@@ -230,6 +238,62 @@ export const GESTURES: Record<GestureKind, Gesture> = {
       }
     },
   },
+  tickle: {
+    label: 'Tickle',
+    duration: 1.2,
+    // Pink/warm tint reinforces the playful "tee-hee" register. Warm
+    // without being saturated so it reads as blush rather than alert.
+    trailColor: '#ff9ecb',
+    compute: (t, ctx) => {
+      // Poke response — Orbit giggles. Sub-spheres spiral rapidly
+      // around the head, head wiggles side to side, pupils flash the
+      // same pink as the trail to sell "flustered delight." Under
+      // reduced motion the spiral frequency drops and the head
+      // wiggle is halved so the visual is still present but calmer.
+      const r = 0.14
+      const peak = Math.sin(smoothstep01((t - 0.05) / 0.9) * Math.PI)
+
+      // Spiral — two subs on opposite sides of the orbit, both
+      // rotating. Frequency scales down under reduced motion.
+      const rate = ctx.reducedMotion ? 4.0 : 8.0
+      const phase0 = t * Math.PI * rate
+      const phase1 = phase0 + Math.PI
+      const radius = r * 0.65 * peak
+
+      // Head wiggle — sinusoidal yaw at ~3 Hz. Halved under reduced
+      // motion.
+      const wiggleAmp = ctx.reducedMotion ? 0.05 : 0.11
+      const headYaw = Math.sin(t * Math.PI * 6) * wiggleAmp * peak
+      // Very slight backward pitch — the "shrinking away from the
+      // poke" component.
+      const headPitch = -0.06 * peak
+
+      // Pupil color envelope — flash pink during the middle 70 % of
+      // the gesture, fading in/out at the edges.
+      const flash =
+        t < 0.20 ? smoothstep01(t / 0.20)
+        : t < 0.80 ? 1.0
+        : smoothstep01((1.0 - t) / 0.20)
+
+      return {
+        subSpheres: [
+          {
+            x: Math.cos(phase0) * radius,
+            y: Math.sin(phase0) * radius * 0.6,
+            z: Math.sin(phase0 * 0.7) * radius * 0.4,
+          },
+          {
+            x: Math.cos(phase1) * radius,
+            y: Math.sin(phase1) * radius * 0.6,
+            z: Math.sin(phase1 * 0.7) * radius * 0.4,
+          },
+        ],
+        head: { pitch: headPitch, yaw: headYaw },
+        pupilColor: '#ff9ecb',
+        pupilFlash: flash,
+      }
+    },
+  },
 }
 
-export const GESTURE_KEYS: GestureKind[] = ['shrug', 'wave', 'beckon', 'affirm']
+export const GESTURE_KEYS: GestureKind[] = ['shrug', 'wave', 'beckon', 'affirm', 'tickle']

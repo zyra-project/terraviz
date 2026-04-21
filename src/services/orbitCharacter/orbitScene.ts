@@ -859,6 +859,31 @@ export interface AnimationState {
   bodyScaleX: number
   bodyScaleY: number
   bodyScaleZ: number
+
+  // ── User-presence awareness ──────────────────────────────────────
+  /**
+   * Eased cursor-activity scalar in `[0, 1]`. Ramps up when the
+   * pointer is moving, decays with ~2 s of stillness. Drives ambient
+   * gaze blending — when the user is actively moving the mouse,
+   * Orbit's eyes blend toward cursor tracking regardless of state;
+   * during idle, state-native gaze (wandering, etc.) takes over.
+   */
+  gazeBias: number
+  /**
+   * Eased user-proximity scalar in `[0, 1]`. 0 when the cursor is
+   * far from Orbit's projected screen position, 1 when it's at or
+   * past the body silhouette. Modulates pupil dilation, lid
+   * softening, and recoil. Shares the scalar with VR controller
+   * proximity (same value, driven from a different input source).
+   */
+  userProximity: number
+  /**
+   * Recoil head-position offset in head-local world units, eased
+   * back to zero each frame. Applied on top of flight + sway so
+   * Orbit physically pulls back when the cursor gets very close or
+   * clicks. Kept small (a few mm) — it's ticklishness, not flight.
+   */
+  recoilZ: number
 }
 
 export function createAnimationState(palette: PaletteKey = 'cyan'): AnimationState {
@@ -890,6 +915,9 @@ export function createAnimationState(palette: PaletteKey = 'cyan'): AnimationSta
     bodyScaleX: 1,
     bodyScaleY: 1,
     bodyScaleZ: 1,
+    gazeBias: 0,
+    userProximity: 0,
+    recoilZ: 0,
   }
 }
 
@@ -939,6 +967,14 @@ export interface UpdateInput {
    * dialed back. Driven by `OrbitController.setReducedMotion()`.
    */
   reducedMotion: boolean
+  /**
+   * Seconds since the pointer last moved. Used to decay the
+   * `gazeBias` scalar — when the cursor is active (≤ 0.5 s), ambient
+   * gaze tracks the cursor; after ~2 s of stillness, gaze falls back
+   * to the state's native behavior (wandering, etc.). Driven by
+   * `OrbitController` tracking `pointermove` timestamps.
+   */
+  cursorActivityTime: number
 }
 
 /**
@@ -960,6 +996,32 @@ const _tmpGestureDir = new THREE.Vector3()
 const _tmpActiveTarget = new THREE.Vector3()
 const _tmpEarthFeature = new THREE.Vector3()
 const _tmpRestPos = new THREE.Vector3()
+const _tmpHeadNdc = new THREE.Vector3()
+
+// User-presence tuning constants. Proximity NDC thresholds are in
+// camera-normalized coords; `PROXIMITY_FAR` is the outer edge of
+// the "nearby" zone (beyond = no effect) and `PROXIMITY_BODY` is
+// the cursor-on-body threshold (inside = maxed out proximity).
+const PROXIMITY_FAR = 0.55
+const PROXIMITY_BODY = 0.10
+// Cursor activity decay: full effect up to `ACTIVITY_FULL` seconds
+// after the last move, linearly decaying to 0 over the next
+// `ACTIVITY_FADE` seconds.
+const ACTIVITY_FULL = 0.5
+const ACTIVITY_FADE = 2.0
+// Recoil — only kicks in past this proximity threshold, scales up
+// to a small max offset so the lean-back reads as ticklish flinch,
+// not flight. Max = −2.5 cm in head-local Z (away from camera).
+const RECOIL_TRIGGER = 0.92
+const RECOIL_MAX_Z = -0.025
+// Maximum ambient-gaze blend weight — caps how far cursor tracking
+// can pull a state's native gaze before the state loses its read.
+const AMBIENT_GAZE_MAX_BLEND = 0.65
+// States whose native gaze already tracks the cursor — ambient
+// blend is skipped for these so we don't double-apply.
+const MOUSE_TRACKING_STATES = new Set<StateKey>([
+  'CHATTING', 'TALKING', 'LISTENING',
+])
 
 /**
  * Per-frame update.
@@ -996,6 +1058,36 @@ export function updateCharacter(
   // Body sway on top of rest position
   const sway = Math.sin(time * 0.7) * 0.004
   handles.head.position.set(_tmpRestPos.x, _tmpRestPos.y + sway, _tmpRestPos.z)
+
+  // ── User presence: cursor proximity + gaze bias + recoil ────────
+  // Project Orbit's head position to normalized device coordinates
+  // (x/y in [-1, 1]) and compare to the cursor NDC. Proximity is
+  // 1 when the cursor is at/inside the body silhouette, 0 beyond
+  // PROXIMITY_FAR. Everything here respects reducedMotion — the
+  // tracking stays on (non-vestibular), but startle / recoil are
+  // suppressed.
+  _tmpHeadNdc.copy(handles.head.position).project(handles.camera)
+  const ndcDx = _tmpHeadNdc.x - mouseX
+  const ndcDy = _tmpHeadNdc.y - mouseY
+  const ndcDist = Math.sqrt(ndcDx * ndcDx + ndcDy * ndcDy)
+  const rawProximity = sat(
+    1 - (ndcDist - PROXIMITY_BODY) / (PROXIMITY_FAR - PROXIMITY_BODY)
+  )
+  anim.userProximity = lerp(anim.userProximity, rawProximity, 0.10)
+
+  // Gaze bias — full strength for the first ACTIVITY_FULL seconds
+  // after a cursor move, decaying to 0 over the next ACTIVITY_FADE.
+  const rawBias = sat(1 - (input.cursorActivityTime - ACTIVITY_FULL) / ACTIVITY_FADE)
+  anim.gazeBias = lerp(anim.gazeBias, rawBias, 0.10)
+
+  // Recoil — very close proximity pulls Orbit slightly back from
+  // camera. Suppressed under reducedMotion. Eased back to zero each
+  // frame so a pass-by doesn't leave Orbit stuck backed up.
+  const recoilTarget = (!reducedMotion && anim.userProximity > RECOIL_TRIGGER)
+    ? ((anim.userProximity - RECOIL_TRIGGER) / (1 - RECOIL_TRIGGER)) * RECOIL_MAX_Z
+    : 0
+  anim.recoilZ = lerp(anim.recoilZ, recoilTarget, 0.20)
+  handles.head.position.z += anim.recoilZ
 
   // ── Active feature target (what POINTING / PRESENTING / BECKON trace) ──
   // At Earth → earth feature on Earth's surface (scales with preset).
@@ -1037,6 +1129,7 @@ export function updateCharacter(
       gestureFrame = g.compute(gT, {
         direction: _tmpGestureDir,
         featureIsAtEarth,
+        reducedMotion,
       })
     }
   }
@@ -1095,7 +1188,10 @@ export function updateCharacter(
   // width stays roughly constant. Reduced motion drops the pulse.
   const pulseMul = (s.pupilPulse && !reducedMotion) ? (Math.sin(time * 9.0) * 0.25 + 1.0) : 1.0
   const finalPupilBright = s.pupilBrightness * pulseMul
-  const targetDotScale = s.pupilSize
+  // Proximity dilates the pupil slightly — alert/attentive read when
+  // the user is close. Max +15 % at full proximity.
+  const proximityDilation = 1 + anim.userProximity * 0.15
+  const targetDotScale = s.pupilSize * proximityDilation
   for (const rig of handles.eyeRigs) {
     rig.pupilDot.scale.setScalar(lerp(rig.pupilDot.scale.x, targetDotScale, 0.15))
     rig.irisGlow.scale.setScalar(rig.pupilDot.scale.x * 1.10)
@@ -1127,8 +1223,16 @@ export function updateCharacter(
     twitchUpper = Math.sin(time * 12.0) * 0.030 + Math.sin(time * 19.3 + 1.1) * 0.020
     twitchLower = Math.sin(time * 10.5 + 1.7) * 0.030 + Math.sin(time * 17.1 + 0.5) * 0.020
   }
-  const effectiveUpper = Math.max(s.upperLid + twitchUpper, blinkAmount)
-  const effectiveLower = Math.max(s.lowerLid + twitchLower, blinkAmount * 0.35)
+  // Proximity lid soften — alert attention when the user is close
+  // opens lids slightly without fully overriding state lids. Max
+  // -0.08 of lid coverage each side at full proximity, so a SLEEPY
+  // Orbit still reads as sleepy (0.56 upper → 0.48 at full proximity),
+  // and an IDLE Orbit (0.08 upper → 0.00) opens wider into alert.
+  const lidSoften = anim.userProximity * 0.08
+  const upperBase = Math.max(0, s.upperLid - lidSoften) + twitchUpper
+  const lowerBase = Math.max(0, s.lowerLid - lidSoften) + twitchLower
+  const effectiveUpper = Math.max(upperBase, blinkAmount)
+  const effectiveLower = Math.max(lowerBase, blinkAmount * 0.35)
   // 3-D lid meshes: interpolate pivot rotation between "parked" (out
   // of frame) and "closed" (covering the socket) by the lid amount.
   // No shader uniforms involved — the lid's own silhouette and
@@ -1249,6 +1353,21 @@ export function updateCharacter(
       tPitch = anim.wanderTargetY
     }
   }
+  // Ambient gaze blend — when the cursor is active and the state
+  // doesn't already track the mouse, blend the state's native gaze
+  // toward a cursor-tracking target by `gazeBias`. Blend is capped
+  // at AMBIENT_GAZE_MAX_BLEND so the state's native gaze still has
+  // influence (e.g. THINKING's up-and-left still reads as thought
+  // even while the user is moving the cursor). Flight and gestures
+  // override entirely — no ambient blending during those.
+  if (!inFlight && !gestureFrame && !MOUSE_TRACKING_STATES.has(state)) {
+    const ambientYaw = mouseX * 0.40
+    const ambientPitch = -mouseY * 0.30
+    const blend = anim.gazeBias * AMBIENT_GAZE_MAX_BLEND
+    tYaw = lerp(tYaw, ambientYaw, blend)
+    tPitch = lerp(tPitch, ambientPitch, blend)
+  }
+
   anim.eyeYaw = lerp(anim.eyeYaw, tYaw, 0.08)
   anim.eyePitch = lerp(anim.eyePitch, tPitch, 0.08)
 
