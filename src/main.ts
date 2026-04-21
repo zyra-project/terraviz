@@ -1260,6 +1260,51 @@ class InteractiveSphere {
         void this.loadDataset(id)
       },
 
+      // --- Phase 3.5 in-VR tour controls ---
+      // `tourEngine` is null when no tour is running — the strip
+      // keys off `active: false` in that case and stays hidden.
+      // When a tour is running, state maps 1:1 onto TourEngine's
+      // accessors. Tour actions fan out to the same methods the 2D
+      // `showTourControls` bar wires up.
+      getTourState: () => {
+        const engine = this.tourEngine
+        if (!engine) {
+          return { active: false, isPlaying: false, step: 0, totalSteps: 0 }
+        }
+        return {
+          active: engine.state !== 'stopped',
+          isPlaying: engine.state === 'playing',
+          step: engine.currentIndex,
+          totalSteps: engine.totalSteps,
+        }
+      },
+      tourTogglePlayPause: () => {
+        const engine = this.tourEngine
+        if (!engine) return
+        if (engine.state === 'playing') engine.pause()
+        else void engine.play()
+      },
+      tourPrev: () => {
+        const engine = this.tourEngine
+        if (!engine) return
+        engine.prev()
+        // Matches the 2D next-button behavior (tourUI.onNext): after
+        // navigating, resume playback if the engine paused itself on
+        // a pauseForInput waiting for user input.
+        if (engine.state === 'paused') void engine.play()
+      },
+      tourNext: () => {
+        const engine = this.tourEngine
+        if (!engine) return
+        engine.next()
+        if (engine.state === 'paused') void engine.play()
+      },
+      tourStop: () => {
+        // Routes through stopTour() not engine.stop() so the
+        // standalone-tour "return home" behaviour still runs.
+        this.stopTour()
+      },
+
       onSessionEnd: () => {
         this.announce('Exited VR')
       },

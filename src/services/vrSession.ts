@@ -19,6 +19,7 @@ import type * as THREE from 'three'
 import { createVrScene, type VrSceneHandle, type VrDatasetTexture } from './vrScene'
 import { createVrHud, type VrHudHandle } from './vrHud'
 import { createVrBrowse, type VrBrowseHandle } from './vrBrowse'
+import { createVrTourControls, type VrTourControlsHandle } from './vrTourControls'
 import { createVrInteraction, type VrInteractionHandle } from './vrInteraction'
 import { createVrLoading, type VrLoadingHandle } from './vrLoading'
 import { createVrPlacement, liftedPlacementPosition, type VrPlacementHandle } from './vrPlacement'
@@ -87,8 +88,39 @@ export interface VrSessionContext {
   /** Load a dataset by ID without leaving VR. */
   loadDataset(id: string): void
 
+  // --- Phase 3.5: in-VR tour controls ---
+  /**
+   * Snapshot of the current tour state — the VR session polls this
+   * each frame and updates the in-VR tour-control strip accordingly.
+   * `active` is false when no tour is running; the other fields are
+   * ignored in that case. Callers wire this to `TourEngine.state` /
+   * `.currentIndex` / `.totalSteps` in main.ts.
+   */
+  getTourState(): VrTourState
+  /** Resume or pause the running tour. No-op if no tour is active. */
+  tourTogglePlayPause(): void
+  /** Step the running tour backward one segment. No-op if no tour is active. */
+  tourPrev(): void
+  /** Skip the current task and move to the next. No-op if no tour is active. */
+  tourNext(): void
+  /** Stop the running tour entirely. No-op if no tour is active. */
+  tourStop(): void
+
   /** Optional — fired after the session ends + resources are torn down. */
   onSessionEnd?: () => void
+}
+
+/**
+ * Snapshot consumed by the in-VR tour-control strip. `active` gates
+ * every other field — when false, the strip is hidden and the other
+ * values aren't rendered. A tour that is paused (after `pauseForInput`
+ * or an explicit user pause) is still `active`, just not `isPlaying`.
+ */
+export interface VrTourState {
+  active: boolean
+  isPlaying: boolean
+  step: number
+  totalSteps: number
 }
 
 /**
@@ -136,6 +168,8 @@ interface ActiveSession {
   interaction: VrInteractionHandle
   /** In-VR dataset browse panel. */
   browse: VrBrowseHandle
+  /** In-VR tour control strip — visible only while a tour is active. */
+  tourControls: VrTourControlsHandle
   /** Loading scene shown during entry; null after fade-out + dispose. */
   loading: VrLoadingHandle | null
   /** AR-only spatial placement (hit-test reticle + Place button). Null when hit-test unavailable. */
@@ -307,6 +341,13 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
   const browse = createVrBrowse(THREE_)
   browse.setDatasets(ctx.getDatasets())
   scene.scene.add(browse.mesh)
+
+  // Tour control strip — added to the scene now, hidden until the
+  // per-frame poll sees an active tour. Starts with an "inactive"
+  // state so the mesh is invisible on session start; polling below
+  // flips it on when main.ts reports a running tour.
+  const tourControls = createVrTourControls(THREE_)
+  scene.scene.add(tourControls.mesh)
 
   // --- Spatial placement (AR-only) + local-floor ref space ---
   // Two separable capabilities:
@@ -497,6 +538,7 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     getAllGlobes: () => scene.allGlobes,
     hud,
     browse,
+    tourControls,
     placement,
     renderer,
     onBrowseAction: (action) => {
@@ -511,6 +553,26 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
         // already-active chip re-applies the same filter; no toggle-
         // off, see VrBrowseAction docstring).
         browse.setCategoryFilter(action.category)
+      }
+    },
+    onTourAction: (action) => {
+      // Thin pass-through: the strip's button layout and the tour-
+      // engine's control surface are 1:1, so the VR session doesn't
+      // need to interpret anything here. main.ts owns the engine and
+      // fans these out to TourEngine.play/pause/next/prev/stop.
+      switch (action) {
+        case 'tour-play-pause':
+          ctx.tourTogglePlayPause()
+          break
+        case 'tour-prev':
+          ctx.tourPrev()
+          break
+        case 'tour-next':
+          ctx.tourNext()
+          break
+        case 'tour-stop':
+          ctx.tourStop()
+          break
       }
     },
     onHudAction: (action) => {
@@ -597,6 +659,7 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     scene,
     hud,
     browse,
+    tourControls,
     interaction,
     loading,
     placement,
@@ -639,6 +702,14 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
   const hudOffset = new THREE_.Vector3(0, -0.65, 0.15)
   const placeOffset = new THREE_.Vector3(0, -0.5, 0.15)
   const browseOffset = new THREE_.Vector3(0.7, 0, 0.3)
+  /**
+   * Tour-control strip sits just below the dataset HUD, close
+   * enough to feel like part of the same control cluster. The
+   * HUD itself is at globe + (0, -0.65, 0.15); this offset keeps
+   * the same x/z and adds another ~12 cm of y-drop so the two
+   * panels don't overlap even when the user has zoomed the globe.
+   */
+  const tourControlsOffset = new THREE_.Vector3(0, -0.80, 0.15)
   /** Scratch reused per-frame for position math; avoids GC churn. */
   const scratchPos = new THREE_.Vector3()
   // `lastTime` starts null so the very first frame uses its own
@@ -744,6 +815,12 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
       browseOpen: active.browse.isVisible(),
     })
 
+    // Tour strip mirrors the engine state. Always poll; the strip's
+    // setState is internally debounced, so a per-frame call with an
+    // unchanged state is a cheap equality check. `active` toggling
+    // to false hides the mesh without further work.
+    active.tourControls.setState(ctx.getTourState())
+
     active.interaction.update(delta)
     // Scene-level per-frame sync (e.g. ground shadow scale matching
     // globe zoom). Cheap and always runs even when the loading
@@ -763,6 +840,10 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     if (active.browse.isVisible()) {
       scratchPos.copy(active.scene.globe.position).add(browseOffset)
       active.browse.mesh.position.copy(scratchPos)
+    }
+    if (active.tourControls.isVisible()) {
+      scratchPos.copy(active.scene.globe.position).add(tourControlsOffset)
+      active.tourControls.mesh.position.copy(scratchPos)
     }
     if (active.placement) {
       scratchPos.copy(active.scene.globe.position).add(placeOffset)
@@ -786,6 +867,7 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     a.interaction.dispose()
     a.hud.dispose()
     a.browse.dispose()
+    a.tourControls.dispose()
     // If the fade-out setTimeout is still pending, cancel it —
     // otherwise it would fire after the loading handle is disposed
     // and try to run fade-out on stale state.

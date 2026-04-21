@@ -24,6 +24,7 @@ import type { XRControllerModelFactory } from 'three/examples/jsm/webxr/XRContro
 import type { VrHudAction, VrHudHandle } from './vrHud'
 import type { VrBrowseAction, VrBrowseHandle } from './vrBrowse'
 import type { VrPlacementHandle } from './vrPlacement'
+import type { VrTourControlsAction, VrTourControlsHandle } from './vrTourControls'
 import { MAX_GLOBE_SCALE, MIN_GLOBE_SCALE } from './vrScene'
 import { logger } from '../utils/logger'
 
@@ -123,6 +124,8 @@ export interface VrInteractionContext {
   hud: VrHudHandle
   /** In-VR dataset browse panel. */
   browse: VrBrowseHandle
+  /** In-VR tour control strip — visible only while a tour is active. */
+  tourControls: VrTourControlsHandle
   /** AR-only spatial placement. Null in VR mode or when hit-test isn't available. */
   placement: VrPlacementHandle | null
   renderer: THREE.WebGLRenderer
@@ -130,6 +133,8 @@ export interface VrInteractionContext {
   onHudAction: (action: VrHudAction) => void
   /** Fired when the user interacts with the browse panel (close / select dataset). */
   onBrowseAction: (action: VrBrowseAction) => void
+  /** Fired when the user taps a tour-control button (prev/play-pause/next/stop). */
+  onTourAction: (action: VrTourControlsAction) => void
   /** Fired when the user taps the floating Place button — caller toggles Place mode. */
   onPlaceButton: () => void
   /** Fired when the user pulls trigger while in Place mode — caller anchors the globe. */
@@ -354,6 +359,8 @@ export function createVrInteraction(
   const placeArmed: boolean[] = [false, false]
   /** Per-controller browse action armed on selectstart (DOM click semantics). */
   const browseArmed: (VrBrowseAction | null)[] = [null, null]
+  /** Per-controller tour-control action armed on selectstart (DOM click semantics). */
+  const tourArmed: (VrTourControlsAction | null)[] = [null, null]
   /** Per-controller "ray is currently on the browse panel" — drives thumbstick scroll. */
   const rayOnBrowse: boolean[] = [false, false]
   /**
@@ -417,6 +424,7 @@ export function createVrInteraction(
     | { kind: 'hud'; action: VrHudAction }
     | { kind: 'browse'; action: VrBrowseAction }
     | { kind: 'browse-scroll' }
+    | { kind: 'tour-control'; action: VrTourControlsAction }
     | { kind: 'place-button' }
     | { kind: 'globe'; mesh: THREE.Mesh }
     | null {
@@ -441,6 +449,21 @@ export function createVrInteraction(
         // Ray hit the panel but not a button/card — still counts as
         // a browse hit for scroll purposes.
         return { kind: 'browse-scroll' }
+      }
+    }
+
+    // Tour controls — checked before place button so the strip is
+    // tappable even if the place reticle happens to overlap it in
+    // the user's view. Gated by `isVisible()` so non-tour sessions
+    // skip the extra raycast entirely.
+    if (ctx.tourControls.isVisible()) {
+      const tourHits = raycaster.intersectObject(ctx.tourControls.mesh, false)
+      if (tourHits.length > 0 && tourHits[0].uv) {
+        const action = ctx.tourControls.hitTest({
+          x: tourHits[0].uv.x,
+          y: tourHits[0].uv.y,
+        })
+        if (action) return { kind: 'tour-control', action }
       }
     }
 
@@ -672,6 +695,11 @@ export function createVrInteraction(
       return
     }
 
+    if (hit.kind === 'tour-control') {
+      tourArmed[index] = hit.action
+      return
+    }
+
     if (hit.kind === 'place-button') {
       placeArmed[index] = true
       return
@@ -712,6 +740,15 @@ export function createVrInteraction(
         }
       }
       browseArmed[index] = null
+    }
+    // Tour controls: same press-and-release-on-same-target click semantics.
+    if (tourArmed[index]) {
+      const controller = controllers[index]
+      const hit = pickHit(controller)
+      if (hit?.kind === 'tour-control' && hit.action === tourArmed[index]) {
+        ctx.onTourAction(tourArmed[index]!)
+      }
+      tourArmed[index] = null
     }
     // Place button: same press-and-release-on-same-target click semantics.
     if (placeArmed[index]) {
@@ -1025,6 +1062,9 @@ export function createVrInteraction(
     rayTargets.push(ctx.hud.mesh)
     if (ctx.browse.isVisible()) {
       rayTargets.push(ctx.browse.mesh)
+    }
+    if (ctx.tourControls.isVisible()) {
+      rayTargets.push(ctx.tourControls.mesh)
     }
     if (ctx.placement && ctx.placement.placeButtonMesh.visible) {
       rayTargets.push(ctx.placement.placeButtonMesh)
