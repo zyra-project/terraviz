@@ -82,7 +82,10 @@ export interface BodyMaterialBundle {
   }
 }
 
-export function createBodyMaterial(palette: PaletteKey = 'cyan'): BodyMaterialBundle {
+export function createBodyMaterial(
+  palette: PaletteKey = 'cyan',
+  diagnosticPurple: boolean = false,
+): BodyMaterialBundle {
   const p = PALETTES[palette]
   const uniforms = {
     uTime: { value: 0 },
@@ -127,12 +130,20 @@ export function createBodyMaterial(palette: PaletteKey = 'cyan'): BodyMaterialBu
       )
       .replace(
         'vec4 diffuseColor = vec4( diffuse, opacity );',
-        // Project the object-space position onto the gradient axis.
-        // uAxis points from cool → warm anchor; dot() returns + when
-        // the fragment sits on the warm side. Remap to [0,1], mix.
-        `float orbitG = clamp(dot(vOrbitObjPos, uAxis) / uSpan * 0.5 + 0.5, 0.0, 1.0);
-         vec3 orbitGradient = mix(uCool, uWarm, orbitG);
-         vec4 diffuseColor = vec4( orbitGradient, opacity );`,
+        diagnosticPurple
+          // DIAGNOSTIC — body mesh tinted bright purple. If the
+          // inner-wedge artifact turns purple, the body surface is
+          // somehow rendering in the socket area. Lid material
+          // (createLidMaterial) doesn't pass this flag, so lids keep
+          // their normal vinyl gradient — if the wedge is purple it
+          // uniquely points at the body mesh, not the lid.
+          ? `vec4 diffuseColor = vec4(0.6, 0.0, 0.8, opacity);`
+          // Project the object-space position onto the gradient axis.
+          // uAxis points from cool → warm anchor; dot() returns + when
+          // the fragment sits on the warm side. Remap to [0,1], mix.
+          : `float orbitG = clamp(dot(vOrbitObjPos, uAxis) / uSpan * 0.5 + 0.5, 0.0, 1.0);
+             vec3 orbitGradient = mix(uCool, uWarm, orbitG);
+             vec4 diffuseColor = vec4( orbitGradient, opacity );`,
       )
   }
   return { material, uniforms }
@@ -567,7 +578,14 @@ const BACKLIGHT_COLOR = 0xffd4a0
 
 export function createBacklightMaterial(): BacklightMaterialBundle {
   const uniforms = {
-    uColor: { value: new THREE.Color(BACKLIGHT_COLOR) },
+    // DIAGNOSTIC — backlight halo tinted bright green. The halo is
+    // additive, 3.2× body radius, parented behind the body. If the
+    // body's breathing squash ever leaves a gap where the halo peeks
+    // through near the socket area, the inner-wedge artifact would
+    // inherit this green color and oscillate at breathing frequency
+    // (matches the user's observed symptom). If the wedge goes green,
+    // backlight is the culprit.
+    uColor: { value: new THREE.Color(0x00ff00) },
     uOpacity: { value: 0.42 },
   }
   const material = new THREE.ShaderMaterial({

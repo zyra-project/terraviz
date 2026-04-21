@@ -428,7 +428,15 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
   backlight.position.z = -BODY_RADIUS * 0.8
   head.add(backlight)
 
-  const bodyBundle = createBodyMaterial(palette)
+  // DIAGNOSTIC — body material tinted bright purple (second arg
+  // `diagnosticPurple=true`). The `createLidMaterial` path does NOT
+  // pass this flag, so lids keep their normal vinyl gradient. If the
+  // inner-wedge artifact picks up purple, the body mesh surface is
+  // somehow rendering in the socket area; if it picks up green
+  // (from the simultaneous backlight diagnostic) the backlight halo
+  // is leaking through. Distinct colors so a single screenshot
+  // disambiguates both hypotheses at once.
+  const bodyBundle = createBodyMaterial(palette, true)
   const body = new THREE.Mesh(
     new THREE.IcosahedronGeometry(BODY_RADIUS, 4),
     bodyBundle.material,
