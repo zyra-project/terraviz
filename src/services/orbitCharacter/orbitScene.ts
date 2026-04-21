@@ -1116,8 +1116,19 @@ export function updateCharacter(
       blinkAmount = Math.sin(tri * Math.PI * 0.5)
     }
   }
-  const effectiveUpper = Math.max(s.upperLid, blinkAmount)
-  const effectiveLower = Math.max(s.lowerLid, blinkAmount * 0.35)
+  // Lid twitch — state-specific irregular micro-oscillation added on
+  // top of the state's base lid position. Driven by two out-of-sync
+  // sines so the motion reads as uneven nervous-system twitch rather
+  // than a smooth sine wobble. Used by CONFUSED (half-closed + twitch
+  // is the reference concept art's read for the state). Reduced
+  // motion zeroes the twitch entirely.
+  let twitchUpper = 0, twitchLower = 0
+  if (state === 'CONFUSED' && !reducedMotion) {
+    twitchUpper = Math.sin(time * 12.0) * 0.030 + Math.sin(time * 19.3 + 1.1) * 0.020
+    twitchLower = Math.sin(time * 10.5 + 1.7) * 0.030 + Math.sin(time * 17.1 + 0.5) * 0.020
+  }
+  const effectiveUpper = Math.max(s.upperLid + twitchUpper, blinkAmount)
+  const effectiveLower = Math.max(s.lowerLid + twitchLower, blinkAmount * 0.35)
   // 3-D lid meshes: interpolate pivot rotation between "parked" (out
   // of frame) and "closed" (covering the socket) by the lid amount.
   // No shader uniforms involved — the lid's own silhouette and
