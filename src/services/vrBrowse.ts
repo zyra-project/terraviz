@@ -362,11 +362,13 @@ function drawCanvas(
     }
     ctx.fillText(title, textX, cardY + 14)
 
-    // Category chip inline below title
-    if (ds.category) {
+    // Category line (first category if any — the card only has
+    // room for one at this height). The chip-filter still matches
+    // any of the dataset's categories; this is cosmetic only.
+    if (ds.categories.length > 0) {
       ctx.fillStyle = ACCENT_COLOR
       ctx.font = '400 14px system-ui, -apple-system, sans-serif'
-      ctx.fillText(ds.category, textX, cardY + 44)
+      ctx.fillText(ds.categories[0], textX, cardY + 44)
     }
   }
 
@@ -458,20 +460,23 @@ export function createVrBrowse(THREE_: typeof THREE): VrBrowseHandle {
   /** Rebuild the `visibleDatasets` slice when datasets or filter change. */
   function recomputeFilter(): void {
     visibleDatasets = selectedCategory
-      ? datasets.filter(d => d.category === selectedCategory)
+      ? datasets.filter(d => d.categories.includes(selectedCategory!))
       : datasets
   }
 
-  /** Recompute unique categories in first-appearance order. */
+  /**
+   * Recompute the set of unique categories across the catalog.
+   * Sorted alphabetically so the chip order is stable and matches
+   * the 2D browse UI's behavior. Each dataset may contribute
+   * multiple categories (union of enriched.categories keys and
+   * tags — built in main.ts:getDatasets).
+   */
   function recomputeCategories(): void {
     const seen = new Set<string>()
-    categories = []
     for (const d of datasets) {
-      if (d.category && !seen.has(d.category)) {
-        seen.add(d.category)
-        categories.push(d.category)
-      }
+      for (const c of d.categories) seen.add(c)
     }
+    categories = Array.from(seen).sort()
   }
 
   function clampScroll(): void {

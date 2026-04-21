@@ -99,8 +99,15 @@ export interface VrSessionContext {
 export interface VrDatasetEntry {
   id: string
   title: string
-  /** First category key, if enriched metadata exists. */
-  category: string | null
+  /**
+   * Every category/tag this dataset belongs to — union of
+   * `enriched.categories` keys and `Dataset.tags`, matching the 2D
+   * browse UI's chip-building model. Empty when the dataset has
+   * neither. Lets the VR browse panel surface chips like "Tours"
+   * and "Real-Time" that live in `tags`, not just in enriched
+   * categories.
+   */
+  categories: string[]
   /** Thumbnail URL from the SOS catalog, if available. */
   thumbnailUrl: string | null
 }
@@ -684,13 +691,15 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     // Dataset catalog may have arrived or changed since VR-entry
     // (enriched metadata loads async; the 2D app can also refresh
     // the catalog mid-session). Re-push to the browse panel when
-    // either the catalog length or the number of entries with
-    // category info changes. Cheap — a single pass over the array
-    // per frame, no per-entry allocation.
+    // either the catalog length or the total-categories-across-all-
+    // entries count changes. Cheap — a single pass per frame, no
+    // per-entry allocation. Total category count catches both the
+    // initial populate and the enrichment arrival (where length is
+    // stable but datasets gain categories).
     const currentDatasets = ctx.getDatasets()
     let categoryCount = 0
     for (let i = 0; i < currentDatasets.length; i++) {
-      if (currentDatasets[i].category) categoryCount++
+      categoryCount += currentDatasets[i].categories.length
     }
     if (
       currentDatasets.length !== lastBrowseDatasetsLen ||
