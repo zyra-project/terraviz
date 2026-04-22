@@ -171,24 +171,33 @@ export function createBodyMaterial(palette: PaletteKey = 'cyan'): BodyMaterialBu
       .replace(
         '#include <normal_fragment_maps>',
         // Procedural vinyl-surface normal perturbation. Sampled in
-        // object-space at freq 350 so the body (~0.15 units in
+        // object space at freq 350 so the body (~0.15 units in
         // diameter) shows ~50 noise cells across its visible width.
-        // The offset vector is projected into the tangent plane
-        // (subtract its normal-aligned component) so re-normalizing
-        // only rotates the shading normal — never changes its
-        // length. Magnitude tuned low (0.05) so the grain is just
-        // barely discoverable under raking sunlight without pushing
-        // the read toward "dimpled plastic." Earlier passes at 0.22
+        //
+        // The noise vector is object-space but the `normal` variable
+        // at this point in Three.js's meshphysical shader is
+        // VIEW-space (transformed by `normalMatrix` in the vertex
+        // stage). Mixing spaces would make the bump direction
+        // camera-dependent and produce wobbling shading as the view
+        // changes. Transform the object-space bump to view space via
+        // `normalMatrix` before projecting into the tangent plane;
+        // re-normalizing then only rotates the shading normal —
+        // never changes its length.
+        //
+        // Magnitude tuned low (0.05) so the grain is just barely
+        // discoverable under raking sunlight without pushing the
+        // read toward "dimpled plastic." Earlier passes at 0.22
         // read as a golf-ball; 0.08 was still slightly busy; 0.05
         // is the "you can find it if you look" setting.
         `#include <normal_fragment_maps>
          {
            float orbitFreq = 350.0;
-           vec3 orbitBump = vec3(
+           vec3 orbitBumpObj = vec3(
              orbitValueNoise(vOrbitObjPos * orbitFreq) - 0.5,
              orbitValueNoise(vOrbitObjPos * orbitFreq + vec3(37.0)) - 0.5,
              orbitValueNoise(vOrbitObjPos * orbitFreq + vec3(91.0)) - 0.5
            ) * 0.05;
+           vec3 orbitBump = normalMatrix * orbitBumpObj;
            orbitBump -= dot(orbitBump, normal) * normal;
            normal = normalize(normal + orbitBump);
          }`,

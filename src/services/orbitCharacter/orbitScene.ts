@@ -1829,11 +1829,16 @@ export function updateCharacter(
   const speed = Math.sqrt(dx * dx + dy * dy + dz * dz) / Math.max(dt, 1e-4)
   anim.prevHeadPos.copy(handles.head.position)
 
-  // State-entry detection for one-shot gasp. Reset inactive timers
-  // when state changes away from their owners so re-entry re-fires.
+  // State-entry detection for one-shot gasp, plus cleanup of any
+  // still-running gasp when the user leaves SURPRISED early. Without
+  // the cleanup, `anim.surpriseStart` stays non-negative during the
+  // 1.2 s decay window and the gasp squash/stretch keeps applying in
+  // whatever state Orbit switched into.
   if (state !== anim.lastStateKey) {
     if (expr.surpriseGasp && state === 'SURPRISED') {
       anim.surpriseStart = time
+    } else if (anim.lastStateKey === 'SURPRISED') {
+      anim.surpriseStart = -1
     }
     anim.lastStateKey = state
   }

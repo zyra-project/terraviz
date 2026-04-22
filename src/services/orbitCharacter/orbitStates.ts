@@ -31,10 +31,13 @@ export interface StateConfig {
 // Baseline lid coverage for "open-eye" states. The reference
 // concept art has lids visible at all times except during full shock
 // — zero-lid eyes read as ghostly/vacant without any top or bottom
-// rim. States like IDLE / CHATTING / LISTENING / TALKING get a
-// small symmetric coverage (top + bottom each ~8 %) so the lid
-// silhouette is always part of the face. SURPRISED and EXCITED
-// stay at 0 because those specifically ARE wide-open-eye states
+// rim. States like IDLE / CHATTING / LISTENING / TALKING sit at the
+// tuned open-eye baseline (`upperLid ≈ 0.22–0.28, lowerLid ≈ 0.18–0.22`
+// — see the table below), not a tiny symmetric coverage — the sqrt
+// bias curve in `orbitScene.ts` maps those values to a visible top +
+// bottom lid rim so the silhouette is always part of the face.
+// SURPRISED and EXCITED stay at 0 because those specifically ARE
+// wide-open-eye states
 // (shock / thrill).
 export const STATES: Record<StateKey, StateConfig> = {
   // Behavior —────────────────────────────────────────────────────────

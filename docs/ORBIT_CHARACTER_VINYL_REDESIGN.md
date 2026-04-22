@@ -116,7 +116,7 @@ We match:
 |---|---|---|
 | `EYE_PAIR_OFFSET_X` | `0.022` | `0.028` (wider) |
 | `EYE_PAIR_DISC_RADIUS` | `0.014` | `0.018` (bigger) |
-| Eye group `.position.y` | `0` | `-0.012` (lower) |
+| `EYE_PAIR_OFFSET_Y` | `0` | `0.003` (slight lift; keeps eyes centred rather than drooping) |
 
 ### Recessed socket with 3-D bezel
 
@@ -230,10 +230,16 @@ each frame (factor `0.25`) from `effectiveUpper` / `effectiveLower`
 — which already combines `s.upperLid` + `blinkAmount`. No new state
 plumbing.
 
-**Shadows.** Each lid has `castShadow = true, receiveShadow = true`.
-At partial closure, the key light drops a soft crescent shadow onto
-the iris — the exact cue that sold the 3-D lid read in the concept
-art reference.
+**Shadows.** Each lid has `castShadow = false, receiveShadow = true`.
+Cast-shadow is deliberately OFF on lids: an earlier pass had it on,
+and parked lids sitting just in front of the body dropped a shadow
+onto the lower face right where a mouth would be — a "creepy smudge"
+artifact that broke the stylized toy read. The lid's own pigment
+plus the body's key light already carry the closed-eye read; a cast
+shadow from the lid onto the iris isn't worth the false-mouth
+artifact. Receive-shadow stays ON so sub-sphere shadows can still
+land on the lid surface when they pass between the key light and
+the face.
 
 **Cost.** `SphereGeometry(24, 8, 0, 2π, 0, 0.42π)` = ~130 tris × 4
 lid meshes = **~520 extra triangles**, all sharing one geometry
