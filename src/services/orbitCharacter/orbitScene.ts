@@ -233,14 +233,18 @@ const LOWER_LID_CLOSED_ROT = -Math.PI * 0.40
  * "is-the-lid-opening-or-closing?" flicker during a YES nod plus
  * catchlight occlusion as the upper dome sweeps through the
  * pupil's screen-space position). 1 = lids stay world-aligned,
- * no projection drift, but the head can feel detached from the
- * face at extreme nod angles. 0.8 is the compromise: 80% of the
- * head pitch is cancelled at the lid pivot, leaving only 20%
- * coupling — enough to register that the face is part of the
- * head while still keeping the lid silhouette stable enough that
- * the catchlight stays visible across a full YES nod.
+ * no projection drift at all.
+ *
+ * Moved from 0.8 → 1.0 after the 0.8 pass still let the upper
+ * dome occlude the catchlight at YES-nod peaks. Full counter
+ * guarantees the catchlight stays visible at every head angle.
+ * Trade-off: at extreme nod angles the lids no longer appear to
+ * pitch with the head, which can read as slight head-vs-face
+ * decoupling — but the YES gesture's ±0.22 rad amplitude is small
+ * enough that this effectively just looks like the lids holding
+ * their shape, which is the more important property here.
  */
-const LID_HEAD_COUNTER_FACTOR = 0.8
+const LID_HEAD_COUNTER_FACTOR = 1.0
 
 /**
  * Catchlight placement within the pupil group. One bright "planet"
