@@ -1259,7 +1259,18 @@ export function updateCharacter(
   // scene is lit coherently: body shading, sub shadows, eye glints,
   // Earth terminator — all aligned.
   const sun = handles.earth.sunDir
-  handles.keyLight.position.set(sun.x * 10, sun.y * 10, sun.z * 10)
+  // Place the key light at `sunDir * 0.5` (≈ the original static
+  // position's distance from origin) so the tight shadow-camera
+  // frustum set at build time (near 0.10, far 1.20) still encloses
+  // Orbit. An earlier pass used `* 10` by analogy with the Earth's
+  // own sun light, but that pushed Orbit completely outside the
+  // shadow frustum and silently dropped sub-sphere shadows on the
+  // body — which were one of the character's best "little moons
+  // eclipsing the planet" reads. Distance doesn't affect a
+  // DirectionalLight's illumination (only direction matters), so
+  // 0.5 keeps shadows intact while the sun direction drives the
+  // light and the streak identically.
+  handles.keyLight.position.set(sun.x * 0.5, sun.y * 0.5, sun.z * 0.5)
   // 2-D streak direction: take (sun.x, sun.y) and renormalize. When
   // the sun's Z dominates (sun is roughly along the view axis) this
   // can collapse toward a zero vector; guard with a small epsilon so
