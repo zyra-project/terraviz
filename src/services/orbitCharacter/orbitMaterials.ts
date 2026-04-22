@@ -621,18 +621,16 @@ export function createCatchlightMaterial(opacity: number): THREE.ShaderMaterial 
     },
     transparent: true,
     depthWrite: false,
-    // DIAGNOSTIC — depthTest off, normal blending (not additive).
-    // The previous pass kept additive blending; if the catchlight's
-    // background at head-rotation extremes was already close to
-    // white (e.g. the lid's cream vinyl rendering in front), additive
-    // white produces no visible change (cream + white clamps to
-    // (1,1,1) which still reads as cream against the surrounding
-    // cream). Switching to normal blending with a pure-white fragment
-    // makes the disc fully opaque white — if it still vanishes at
-    // YES/NO extremes, rendering is being culled / clipped somewhere
-    // other than blending (stencil, frustum, scale→0). If it now
-    // stays visible, the issue was additive-vs-cream luminance.
-    depthTest: false,
+    // Default depthTest (true) — opaque lid meshes that geometrically
+    // cover the catchlight at partial lid closure will win the depth
+    // test and clip the catchlight naturally. Using normal blending
+    // instead of additive is what makes the catchlight read as a
+    // pure-white disc whenever it IS rendered; an earlier additive
+    // version over a cream lid background clamped to cream, making
+    // the catchlight look invisible at head-rotation extremes when
+    // the lid partially covered it. Normal + default depth test
+    // gives clean "lid covers catchlight where lid is in front,
+    // pure-white disc shows where it isn't" behavior.
     blending: THREE.NormalBlending,
     vertexShader: `
       varying vec2 vUv;
@@ -660,14 +658,10 @@ export function createCatchlightMaterial(opacity: number): THREE.ShaderMaterial 
         gl_FragColor = vec4(1.0, 1.0, 1.0, uOpacity * alpha);
       }`,
   })
-  // DIAGNOSTIC — stencil clip removed so we can determine whether
-  // the stencil test is what's culling the catchlight at YES/NO
-  // head-rotation extremes. Without this, the catchlight would
-  // normally be bounded to the socket silhouette; during the test
-  // we accept that it may leak slightly past the bezel at extreme
-  // gaze/head angles in exchange for knowing whether stencil was
-  // the culprit.
-  // applyPupilStencilClip(mat)
+  // Catchlights ride the pupilGroup so they track gaze. Stencil
+  // clip keeps them inside the socket silhouette at extreme gaze
+  // angles, matching the rest of the pupil-group meshes.
+  applyPupilStencilClip(mat)
   return mat
 }
 

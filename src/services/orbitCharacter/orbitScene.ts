@@ -1465,47 +1465,16 @@ export function updateCharacter(
   handles.pupilMaterials.pupilDotMat.opacity = sat(pupilVis)
   handles.pupilMaterials.starMat.opacity = sat(0.85 * pupilVis)
   // Catchlight opacity gates on lid closure. The catchlight material
-  // runs with depthTest: false so it's never occluded by the upper
-  // lid's 3-D dome sweeping through its screen position during a
-  // YES-nod peak. In exchange we need this explicit opacity fade so
-  // a genuine blink (or a mostly-closed SLEEPY state) still hides
-  // the catchlight cleanly. Each eye has its own catchlight material
-  // instance (per buildPairedEye), so the write iterates the rigs.
-  const catchTargetOpacity = CATCHLIGHT_PRIMARY_OPACITY * sat(pupilVis)
+  // uses default depthTest, so the opaque lid naturally clips the
+  // catchlight where the lid is geometrically in front; this opacity
+  // gate handles the final approach to a closed eye (SLEEPY /
+  // CONFUSED / a full blink) so the catchlight doesn't remain
+  // visible as a bright spot while the iris behind it is already
+  // fading. Each eye has its own catchlight material instance, so
+  // the write iterates the rigs.
   for (const rig of handles.eyeRigs) {
     const catchMat = rig.catchPrimary.material as THREE.ShaderMaterial
-    catchMat.uniforms.uOpacity.value = catchTargetOpacity
-    // Belt-and-suspenders: also toggle the mesh's `.visible` flag.
-    // Three.js should honor uOpacity alone, but if something (uniform
-    // upload cache, shader caching) is making the GPU-side value
-    // stick at 1.0, `.visible = false` skips the draw call entirely.
-    // If the bright white disc in the eye still appears when this
-    // flag is false, the disc is NOT the catchlight — it's something
-    // else rendering white there (glass dome fresnel / streak,
-    // lighting on the lid, etc.).
-    rig.catchPrimary.visible = catchTargetOpacity > 0.01
-  }
-  // DIAGNOSTIC — log when the lid-closure gate should hide the
-  // catchlight. Throttled to ~2 prints/second so the console
-  // doesn't flood during continuous lid-close frames.
-  const now = time | 0
-  if (pupilVis < 0.1 && now !== (anim as unknown as { _lastCatchLog?: number })._lastCatchLog) {
-    ;(anim as unknown as { _lastCatchLog?: number })._lastCatchLog = now
-    const rig0 = handles.eyeRigs[0]
-    const mat0 = rig0.catchPrimary.material as THREE.ShaderMaterial
-    console.log('[orbit] catchlight fade check', {
-      pupilVis: pupilVis.toFixed(3),
-      catchTargetOpacity: catchTargetOpacity.toFixed(3),
-      matUniformValue: mat0.uniforms.uOpacity.value.toFixed(3),
-      materialType: mat0.type,
-      transparent: mat0.transparent,
-      blending: mat0.blending,
-      depthTest: mat0.depthTest,
-      visible: rig0.catchPrimary.visible,
-      scaleX: rig0.catchPrimary.scale.x.toFixed(3),
-      effectiveUpper: effectiveUpper.toFixed(3),
-      effectiveLower: effectiveLower.toFixed(3),
-    })
+    catchMat.uniforms.uOpacity.value = CATCHLIGHT_PRIMARY_OPACITY * sat(pupilVis)
   }
 
   // ── Eye gaze (flight-aware, then state-specific) ─────────────────
