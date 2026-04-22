@@ -621,21 +621,19 @@ export function createCatchlightMaterial(opacity: number): THREE.ShaderMaterial 
     },
     transparent: true,
     depthWrite: false,
-    // Skip the depth test so the catchlight always renders on top of
-    // whatever is behind it in world space. Without this, head
-    // rotation (YES nod) translates the upper lid's 3-D dome in
-    // world space enough that it starts occluding the catchlight's
-    // screen position — counter-rotating the lid orientation isn't
-    // enough because the pivot still TRANSLATES with head rotation
-    // and drags the dome mesh across the catchlight. The stencil
-    // clip (applyPupilStencilClip) keeps the catchlight bounded to
-    // the socket silhouette, so it can't leak outside the eye even
-    // with depth test off. A lid-closure opacity fade (wired in
-    // updateCharacter) handles the one case this creates a problem
-    // for: a full blink still needs to hide the catchlight, which
-    // now needs explicit opacity gating rather than depth occlusion.
+    // DIAGNOSTIC — depthTest off, normal blending (not additive).
+    // The previous pass kept additive blending; if the catchlight's
+    // background at head-rotation extremes was already close to
+    // white (e.g. the lid's cream vinyl rendering in front), additive
+    // white produces no visible change (cream + white clamps to
+    // (1,1,1) which still reads as cream against the surrounding
+    // cream). Switching to normal blending with a pure-white fragment
+    // makes the disc fully opaque white — if it still vanishes at
+    // YES/NO extremes, rendering is being culled / clipped somewhere
+    // other than blending (stencil, frustum, scale→0). If it now
+    // stays visible, the issue was additive-vs-cream luminance.
     depthTest: false,
-    blending: THREE.AdditiveBlending,
+    blending: THREE.NormalBlending,
     vertexShader: `
       varying vec2 vUv;
       void main() {
