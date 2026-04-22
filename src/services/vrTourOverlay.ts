@@ -31,7 +31,12 @@
  */
 
 import type * as THREE from 'three'
-import type { ShowPopupHtmlTaskParams, ShowRectTaskParams } from '../types'
+import type {
+  PlayVideoTaskParams,
+  ShowImageTaskParams,
+  ShowPopupHtmlTaskParams,
+  ShowRectTaskParams,
+} from '../types'
 
 /**
  * Anchor mode for a single overlay. Controls how the per-frame
@@ -129,13 +134,60 @@ export interface VrTourPopupParams
 }
 
 /**
+ * Subset of {@link ShowImageTaskParams} consumed by the VR image
+ * overlay path. The image is rendered onto a CanvasTexture (not
+ * a raw `THREE.Texture` on its own) so we can composite a caption
+ * below it in the same panel, matching the 2D DOM behaviour.
+ *
+ * The 2D `xPct` / `yPct` / `widthPct` / `heightPct` layout hints
+ * are intentionally dropped — VR uses the overlay manager's anchor
+ * system (world / gaze) instead of the 4K-screen percentage grid
+ * the tour format inherits.
+ */
+export interface VrTourImageParams
+  extends Pick<ShowImageTaskParams,
+    'imageID' | 'filename' | 'caption' | 'fontSize' | 'fontColor' | 'isClosable'
+  > {
+  anchor?: VrTourAnchor
+  /** World-space size of the panel. Defaults to the popup size (0.8 × 0.5 m). */
+  size?: { width: number; height: number }
+}
+
+/**
+ * Subset of {@link PlayVideoTaskParams} consumed by the VR video
+ * overlay path. Crucially, callers pass the already-constructed
+ * `<video>` element rather than a URL — the 2D `tourUI.showTourVideo`
+ * creates and manages the element (autoplay fallback, muted-retry,
+ * playsInline), and VR wraps the SAME element in a
+ * `THREE.VideoTexture` so we don't double-decode the stream or
+ * fight autoplay policy a second time.
+ *
+ * Disposing a VR video overlay releases the VideoTexture but does
+ * NOT touch the element — 2D keeps ownership and will pause / remove
+ * it on its own `hideVideo` path.
+ */
+export interface VrTourVideoParams {
+  /** Overlay id — the 2D path uses the (resolved) filename URL; VR mirrors that. */
+  id: string
+  /** DOM video element owned by the 2D layer. VR wraps it in a VideoTexture. */
+  video: HTMLVideoElement
+  anchor?: VrTourAnchor
+  /**
+   * World-space size of the panel. Defaults to a 16:9 rectangle
+   * (0.8 × 0.45 m). Callers that know the video's intrinsic
+   * aspect can pass a matching size to avoid letterboxing.
+   */
+  size?: { width: number; height: number }
+}
+
+/**
  * Classification of overlay meshes so per-kind bulk operations
  * (`hideAllText`, `hideAllPopups`, …) can filter the single
  * overlay map without maintaining a second per-kind index. Extended
- * alongside each future overlay type (image/video/question) as
- * those commits land.
+ * alongside each future overlay type (question) as those commits
+ * land.
  */
-export type VrTourOverlayKind = 'text' | 'popup'
+export type VrTourOverlayKind = 'text' | 'popup' | 'image' | 'video'
 
 /** Every mesh carries its overlay id + mode so per-frame pose resolution is keyed off userData. */
 interface OverlayUserData {
@@ -169,12 +221,33 @@ export interface VrTourOverlayHandle {
    * (tour authors don't do this in practice).
    */
   showPopup(params: VrTourPopupParams): void
+  /**
+   * Render a tour image panel. The image loads asynchronously; the
+   * mesh is added to the scene immediately (with a placeholder
+   * background) and the texture is repainted once the Image's
+   * `load` event fires. A caption below the image is optional and
+   * rendered into the same CanvasTexture.
+   */
+  showImage(params: VrTourImageParams): void
+  /**
+   * Render a tour video panel using the caller-supplied
+   * `<video>` element (managed by `tourUI.showTourVideo`). VR wraps
+   * the element in a `THREE.VideoTexture`; the element keeps
+   * playing under 2D's control and VR renders whatever frames it
+   * has decoded. No caption support in v1 — SOS tour videos are
+   * primary media content and rarely carry overlay text.
+   */
+  showVideo(params: VrTourVideoParams): void
   hideOverlay(id: string): void
   hideAll(): void
   /** Remove every text overlay; leaves popups, images, videos, questions untouched. */
   hideAllText(): void
   /** Remove every popup overlay. */
   hideAllPopups(): void
+  /** Remove every image overlay. */
+  hideAllImages(): void
+  /** Remove every video overlay. */
+  hideAllVideos(): void
   /**
    * Toggle the default anchor mode used when an overlay arrives
    * without an explicit `anchor` hint. Persists until flipped;
@@ -211,6 +284,23 @@ const DEFAULT_PANEL_HEIGHT = 0.36
  */
 const POPUP_PANEL_WIDTH = 0.8
 const POPUP_PANEL_HEIGHT = 0.5
+
+/**
+ * Image overlay default size — same footprint as popups (both
+ * display a single "rich" content block), slightly taller because
+ * images can be portrait and the extra vertical room reduces
+ * letterbox padding in the common case.
+ */
+const IMAGE_PANEL_WIDTH = 0.8
+const IMAGE_PANEL_HEIGHT = 0.6
+
+/**
+ * Video overlay default size — 16:9 because most SOS tour videos
+ * are YouTube/Vimeo-style landscape. Callers that know a specific
+ * video's aspect ratio can override via {@link VrTourVideoParams.size}.
+ */
+const VIDEO_PANEL_WIDTH = 0.8
+const VIDEO_PANEL_HEIGHT = 0.45
 
 /** Canvas pixel dimensions. 5:3 aspect matches the default 0.6 × 0.36 m plane. */
 const CANVAS_WIDTH = 1000
@@ -508,15 +598,174 @@ function drawTextPanel(
   }
 }
 
+/**
+ * Paint a glass-surface placeholder onto an image overlay's canvas
+ * before the underlying Image has finished loading. Avoids a white
+ * flash between `showImage` and the `onload` callback.
+ */
+function drawImagePlaceholder(ctx: CanvasRenderingContext2D): void {
+  const w = CANVAS_WIDTH
+  const h = CANVAS_HEIGHT
+  ctx.clearRect(0, 0, w, h)
+  ctx.fillStyle = BG_COLOR
+  fillRoundRect(ctx, 0, 0, w, h, 18)
+  ctx.strokeStyle = BORDER_DIM
+  ctx.lineWidth = 2
+  if (typeof ctx.roundRect === 'function') {
+    ctx.beginPath()
+    ctx.roundRect(1, 1, w - 2, h - 2, 17)
+    ctx.stroke()
+  } else {
+    ctx.strokeRect(1, 1, w - 2, h - 2)
+  }
+}
+
+/**
+ * Draw an image + optional caption onto an overlay's canvas. The
+ * image is letterboxed to fit the available area above the caption
+ * (or the full canvas when no caption is supplied). Returns the
+ * close-button UV rect or null — same contract as `drawTextPanel`.
+ */
+function drawImagePanel(
+  ctx: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  opts: {
+    caption?: string
+    fontSize?: number
+    fontColor?: string
+    isClosable?: boolean
+  },
+): { uMin: number; uMax: number; vMin: number; vMax: number } | null {
+  const w = CANVAS_WIDTH
+  const h = CANVAS_HEIGHT
+  ctx.clearRect(0, 0, w, h)
+
+  // Background + border.
+  ctx.fillStyle = BG_COLOR
+  fillRoundRect(ctx, 0, 0, w, h, 18)
+  ctx.strokeStyle = BORDER_DIM
+  ctx.lineWidth = 2
+  if (typeof ctx.roundRect === 'function') {
+    ctx.beginPath()
+    ctx.roundRect(1, 1, w - 2, h - 2, 17)
+    ctx.stroke()
+  } else {
+    ctx.strokeRect(1, 1, w - 2, h - 2)
+  }
+
+  // Reserve caption real estate at the bottom when present — sized
+  // to the wrapped line count so short captions don't consume a
+  // third of the panel for a single line.
+  const textColor = sanitizeCaptionColor(opts.fontColor) ?? TEXT_COLOR
+  const captionFontPx = Math.round(opts.fontSize ? Math.max(20, Math.min(36, opts.fontSize * 0.6)) : 26)
+  const captionLineHeight = captionFontPx * 1.25
+
+  let captionLines: string[] = []
+  let captionBlockHeight = 0
+  if (opts.caption) {
+    ctx.font = `500 ${captionFontPx}px system-ui, -apple-system, sans-serif`
+    const captionMaxWidth = w - CANVAS_PADDING * 2
+    captionLines = wrapText(ctx, stripCaptionMarkup(opts.caption), captionMaxWidth)
+    // Cap at 3 lines — longer captions belong on a text overlay, not
+    // below an image. Last line is ellipsized by wrapText already.
+    if (captionLines.length > 3) captionLines = captionLines.slice(0, 3)
+    captionBlockHeight = captionLines.length * captionLineHeight + CANVAS_PADDING * 0.5
+  }
+
+  // Image region — everything above the caption block, inset by
+  // CANVAS_PADDING. Letterbox the image inside that rect preserving
+  // its aspect ratio.
+  const imgRegionTop = CANVAS_PADDING
+  const imgRegionBottom = h - CANVAS_PADDING - captionBlockHeight
+  const imgRegionLeft = CANVAS_PADDING
+  const imgRegionRight = w - CANVAS_PADDING
+  const regionW = imgRegionRight - imgRegionLeft
+  const regionH = imgRegionBottom - imgRegionTop
+
+  const srcW = image.naturalWidth || 1
+  const srcH = image.naturalHeight || 1
+  const scale = Math.min(regionW / srcW, regionH / srcH)
+  const drawW = srcW * scale
+  const drawH = srcH * scale
+  const drawX = imgRegionLeft + (regionW - drawW) / 2
+  const drawY = imgRegionTop + (regionH - drawH) / 2
+
+  try {
+    ctx.drawImage(image, drawX, drawY, drawW, drawH)
+  } catch {
+    // Cross-origin images can throw here if the server didn't send
+    // CORS headers and the decoder hit a tainted-canvas guard.
+    // Fall through to the placeholder; tour authors using tainted
+    // hosts will see a blank panel + caption rather than a broken
+    // overlay.
+  }
+
+  // Caption text below the image.
+  if (captionLines.length > 0) {
+    ctx.fillStyle = textColor
+    ctx.font = `500 ${captionFontPx}px system-ui, -apple-system, sans-serif`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'top'
+    const captionTop = imgRegionBottom + CANVAS_PADDING * 0.25
+    const cx = w / 2
+    for (let i = 0; i < captionLines.length; i++) {
+      ctx.fillText(captionLines[i], cx, captionTop + i * captionLineHeight)
+    }
+  }
+
+  if (!opts.isClosable) return null
+
+  // Close X — identical geometry to drawTextPanel so hit-test code
+  // (commit 6) can share one UV rect pattern across every overlay
+  // type.
+  const closePxMinX = w - CANVAS_PADDING - CLOSE_BUTTON_SIZE / 2 - CLOSE_BUTTON_MARGIN
+  const closePxMinY = CLOSE_BUTTON_MARGIN
+  const closePxMaxX = closePxMinX + CLOSE_BUTTON_SIZE
+  const closePxMaxY = closePxMinY + CLOSE_BUTTON_SIZE
+  const cx = (closePxMinX + closePxMaxX) / 2
+  const cy = (closePxMinY + closePxMaxY) / 2
+  ctx.strokeStyle = CLOSE_COLOR
+  ctx.lineWidth = 5
+  ctx.lineCap = 'round'
+  const arm = 14
+  ctx.beginPath()
+  ctx.moveTo(cx - arm, cy - arm)
+  ctx.lineTo(cx + arm, cy + arm)
+  ctx.moveTo(cx + arm, cy - arm)
+  ctx.lineTo(cx - arm, cy + arm)
+  ctx.stroke()
+  return {
+    uMin: closePxMinX / w,
+    uMax: closePxMaxX / w,
+    vMin: 1 - closePxMaxY / h,
+    vMax: 1 - closePxMinY / h,
+  }
+}
+
 // ── Per-overlay mesh lifecycle ─────────────────────────────────────
 
 interface ManagedOverlay {
   mesh: THREE.Mesh
-  canvas: HTMLCanvasElement
-  ctx2d: CanvasRenderingContext2D
-  texture: THREE.CanvasTexture
   material: THREE.MeshBasicMaterial
   geometry: THREE.PlaneGeometry
+  /** CanvasTexture for text/popup/image overlays, VideoTexture for video. Disposed on teardown. */
+  texture: THREE.Texture
+  /** Populated for canvas-backed overlays (text/popup/image). null for video. */
+  canvas: HTMLCanvasElement | null
+  ctx2d: CanvasRenderingContext2D | null
+  /**
+   * Populated for video overlays. The element is owned by the 2D
+   * tourUI layer — VR only wraps it in a VideoTexture and must NOT
+   * pause or remove it on dispose.
+   */
+  video: HTMLVideoElement | null
+  /**
+   * Image overlays start an async `Image().src = url` load; if the
+   * overlay is disposed before the load finishes, call this to
+   * detach the listeners and guarantee the stale-load callback
+   * doesn't paint into a disposed canvas. null when not applicable.
+   */
+  cancelImageLoad: (() => void) | null
 }
 
 // ── Factory ────────────────────────────────────────────────────────
@@ -595,14 +844,92 @@ export function createVrTourOverlay(THREE_: typeof THREE): VrTourOverlayHandle {
     }
     mesh.userData = userData
 
-    return { mesh, canvas, ctx2d, texture, material, geometry }
+    return {
+      mesh,
+      material,
+      geometry,
+      texture,
+      canvas,
+      ctx2d,
+      video: null,
+      cancelImageLoad: null,
+    }
+  }
+
+  /**
+   * Build a mesh whose material is backed by a `VideoTexture` wrapping
+   * the caller-supplied `<video>` element. We do NOT dispose the
+   * element on teardown — the 2D `tourUI.showTourVideo` / `hideTourVideo`
+   * path owns its lifecycle. Disposing the VideoTexture releases the
+   * GPU-side decode binding but leaves the element alive so 2D can
+   * pause + remove it on its own schedule.
+   */
+  function buildVideoMeshForOverlay(
+    id: string,
+    size: { width: number; height: number },
+    anchor: VrTourAnchor,
+    video: HTMLVideoElement,
+  ): ManagedOverlay {
+    const texture = new THREE_.VideoTexture(video)
+    texture.colorSpace = THREE_.SRGBColorSpace
+    texture.minFilter = THREE_.LinearFilter
+    texture.magFilter = THREE_.LinearFilter
+
+    const material = new THREE_.MeshBasicMaterial({
+      map: texture,
+      // Video overlays are opaque rectangles — no alpha channel to
+      // blend, and `transparent: true` disables early-z which costs
+      // a measurable frame budget on Quest 2. Keep them opaque.
+      transparent: false,
+      depthTest: false,
+      depthWrite: false,
+    })
+    const geometry = new THREE_.PlaneGeometry(size.width, size.height)
+    const mesh = new THREE_.Mesh(geometry, material)
+    mesh.renderOrder = 8
+
+    const worldOffset = new THREE_.Vector3(
+      anchor.mode === 'world' ? (anchor.offset?.x ?? DEFAULT_WORLD_OFFSET.x) : 0,
+      anchor.mode === 'world' ? (anchor.offset?.y ?? DEFAULT_WORLD_OFFSET.y) : 0,
+      anchor.mode === 'world' ? (anchor.offset?.z ?? DEFAULT_WORLD_OFFSET.z) : 0,
+    )
+    const gazeOffset = new THREE_.Vector3(
+      anchor.mode === 'gaze' ? (anchor.offset?.x ?? DEFAULT_GAZE_OFFSET.x) : 0,
+      anchor.mode === 'gaze' ? (anchor.offset?.y ?? DEFAULT_GAZE_OFFSET.y) : 0,
+      anchor.mode === 'gaze' ? (anchor.offset?.z ?? DEFAULT_GAZE_OFFSET.z) : 0,
+    )
+    const userData: OverlayUserData = {
+      overlayId: id,
+      kind: 'video',
+      anchor,
+      worldOffset,
+      gazeOffset,
+      closeUv: null,
+    }
+    mesh.userData = userData
+
+    return {
+      mesh,
+      material,
+      geometry,
+      texture,
+      canvas: null,
+      ctx2d: null,
+      video,
+      cancelImageLoad: null,
+    }
   }
 
   function disposeOverlay(managed: ManagedOverlay): void {
+    // Cancel any in-flight image decode that would otherwise paint
+    // into a disposed canvas once the stale `onload` fires.
+    if (managed.cancelImageLoad) managed.cancelImageLoad()
     group.remove(managed.mesh)
     managed.texture.dispose()
     managed.material.dispose()
     managed.geometry.dispose()
+    // `managed.video` intentionally NOT touched — 2D owns its
+    // lifecycle and will pause + remove it on its own path.
   }
 
   function resolveAnchor(explicit: VrTourAnchor | undefined): VrTourAnchor {
@@ -627,7 +954,11 @@ export function createVrTourOverlay(THREE_: typeof THREE): VrTourOverlayHandle {
       const anchor = resolveAnchor(params.anchor)
       const managed = buildMeshForOverlay(params.rectID, 'text', size, anchor)
 
-      const closeUv = drawTextPanel(managed.ctx2d, stripCaptionMarkup(params.caption), {
+      // `ctx2d` is non-null for canvas-backed overlays (text/popup/
+      // image) — the builder above populates it. The bang narrows
+      // `ManagedOverlay.ctx2d` from the union that video overlays
+      // forced onto the type.
+      const closeUv = drawTextPanel(managed.ctx2d!, stripCaptionMarkup(params.caption), {
         fontColor: params.fontColor,
         fontSize: params.fontSize,
         showBorder: params.showBorder,
@@ -673,7 +1004,7 @@ export function createVrTourOverlay(THREE_: typeof THREE): VrTourOverlayHandle {
         body = '(No popup content)'
       }
 
-      const closeUv = drawTextPanel(managed.ctx2d, body, {
+      const closeUv = drawTextPanel(managed.ctx2d!, body, {
         isClosable: true,
         header,
       })
@@ -714,6 +1045,107 @@ export function createVrTourOverlay(THREE_: typeof THREE): VrTourOverlayHandle {
       const ids: string[] = []
       for (const [id, managed] of overlays) {
         if ((managed.mesh.userData as OverlayUserData).kind === 'popup') ids.push(id)
+      }
+      for (const id of ids) {
+        const managed = overlays.get(id)
+        if (managed) disposeOverlay(managed)
+        overlays.delete(id)
+      }
+    },
+
+    showImage(params) {
+      // Replace-by-id on re-show, same discipline as showText/showPopup.
+      const existing = overlays.get(params.imageID)
+      if (existing) {
+        disposeOverlay(existing)
+        overlays.delete(params.imageID)
+      }
+
+      const size = params.size ?? { width: IMAGE_PANEL_WIDTH, height: IMAGE_PANEL_HEIGHT }
+      const anchor = resolveAnchor(params.anchor)
+      const managed = buildMeshForOverlay(params.imageID, 'image', size, anchor)
+
+      // Paint a placeholder immediately so the panel is visible
+      // while the PNG/JPG decode is in flight — otherwise the user
+      // would see a one-frame untextured plane.
+      drawImagePlaceholder(managed.ctx2d!)
+      managed.texture.needsUpdate = true
+
+      // Kick the async image load. The `onload` fires on the next
+      // browser task tick at earliest; we cancel the listeners if
+      // the overlay is disposed before then (the hideOverlay path
+      // calls cancelImageLoad, see disposeOverlay).
+      const image = new Image()
+      image.crossOrigin = 'anonymous'
+      image.decoding = 'async'
+
+      const onLoad = () => {
+        // Guard: the overlay may have been replaced or hidden while
+        // the image was decoding. Re-check the map before painting.
+        const current = overlays.get(params.imageID)
+        if (current !== managed) return
+        const closeUv = drawImagePanel(managed.ctx2d!, image, {
+          caption: params.caption,
+          fontSize: params.fontSize,
+          fontColor: params.fontColor,
+          isClosable: params.isClosable,
+        })
+        managed.texture.needsUpdate = true
+        const ud = managed.mesh.userData as OverlayUserData
+        ud.closeUv = closeUv
+      }
+      const onError = () => {
+        // Leave the placeholder in place — it's visible and
+        // non-broken, consistent with how the 2D image overlay
+        // silently hides its wrapper after a load error.
+      }
+
+      image.addEventListener('load', onLoad, { once: true })
+      image.addEventListener('error', onError, { once: true })
+      managed.cancelImageLoad = () => {
+        image.removeEventListener('load', onLoad)
+        image.removeEventListener('error', onError)
+      }
+      image.src = params.filename
+
+      group.add(managed.mesh)
+      overlays.set(params.imageID, managed)
+    },
+
+    showVideo(params) {
+      // Replace-by-id. Reusing the same id with a different <video>
+      // element is supported (though unusual): the old VideoTexture
+      // is disposed and a new one wraps the new element.
+      const existing = overlays.get(params.id)
+      if (existing) {
+        disposeOverlay(existing)
+        overlays.delete(params.id)
+      }
+
+      const size = params.size ?? { width: VIDEO_PANEL_WIDTH, height: VIDEO_PANEL_HEIGHT }
+      const anchor = resolveAnchor(params.anchor)
+      const managed = buildVideoMeshForOverlay(params.id, size, anchor, params.video)
+
+      group.add(managed.mesh)
+      overlays.set(params.id, managed)
+    },
+
+    hideAllImages() {
+      const ids: string[] = []
+      for (const [id, managed] of overlays) {
+        if ((managed.mesh.userData as OverlayUserData).kind === 'image') ids.push(id)
+      }
+      for (const id of ids) {
+        const managed = overlays.get(id)
+        if (managed) disposeOverlay(managed)
+        overlays.delete(id)
+      }
+    },
+
+    hideAllVideos() {
+      const ids: string[] = []
+      for (const [id, managed] of overlays) {
+        if ((managed.mesh.userData as OverlayUserData).kind === 'video') ids.push(id)
       }
       for (const id of ids) {
         const managed = overlays.get(id)

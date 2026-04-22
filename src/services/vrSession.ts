@@ -367,6 +367,15 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     showPopup: (params) => tourOverlay.showPopup(params),
     hidePopup: (id) => tourOverlay.hideOverlay(id),
     hideAllPopups: () => tourOverlay.hideAllPopups(),
+    showImage: (params) => tourOverlay.showImage(params),
+    hideImage: (id) => tourOverlay.hideOverlay(id),
+    hideAllImages: () => tourOverlay.hideAllImages(),
+    showVideo: (_params, video, videoID) => tourOverlay.showVideo({
+      id: videoID,
+      video,
+    }),
+    hideVideo: (id) => tourOverlay.hideOverlay(id),
+    hideAllVideos: () => tourOverlay.hideAllVideos(),
   })
 
   // --- Spatial placement (AR-only) + local-floor ref space ---

@@ -46,6 +46,19 @@ export interface VrTourOverlaySink {
   showPopup(params: ShowPopupHtmlTaskParams): void
   hidePopup(popupID: string): void
   hideAllPopups(): void
+  showImage(params: ShowImageTaskParams): void
+  hideImage(imageID: string): void
+  hideAllImages(): void
+  /**
+   * Shares the DOM `<video>` element the 2D tour layer just
+   * created. VR wraps it in a `THREE.VideoTexture` so both paths
+   * render from the same decoded stream — no double decode, no
+   * second autoplay fight. The video id (second arg) matches the
+   * 2D convention of using the resolved filename URL.
+   */
+  showVideo(params: PlayVideoTaskParams, video: HTMLVideoElement, videoID: string): void
+  hideVideo(videoID: string): void
+  hideAllVideos(): void
 }
 
 let vrOverlaySink: VrTourOverlaySink | null = null
@@ -442,10 +455,17 @@ export function showTourImage(params: ShowImageTaskParams): void {
 
   container.appendChild(wrapper)
   images.add(params.imageID, wrapper)
+  vrOverlaySink?.showImage(params)
 }
 
-export function hideTourImage(imageID: string): void { images.remove(imageID) }
-export function hideAllTourImages(): void { images.removeAll() }
+export function hideTourImage(imageID: string): void {
+  images.remove(imageID)
+  vrOverlaySink?.hideImage(imageID)
+}
+export function hideAllTourImages(): void {
+  images.removeAll()
+  vrOverlaySink?.hideAllImages()
+}
 
 // ── Video overlays (playVideo / hideVideo) ───────────────────────────
 
@@ -555,6 +575,9 @@ export function showTourVideo(params: PlayVideoTaskParams): void {
 
   container.appendChild(wrapper)
   videos.add(videoID, wrapper)
+  // Share the same <video> element with VR so both paths render
+  // from one decoded stream (see VrTourOverlaySink.showVideo doc).
+  vrOverlaySink?.showVideo(params, video, videoID)
 }
 
 export function hideTourVideo(videoID: string): void {
@@ -562,6 +585,7 @@ export function hideTourVideo(videoID: string): void {
   const videoEl = wrapper?.querySelector('video')
   if (videoEl) videoEl.pause()
   videos.remove(videoID)
+  vrOverlaySink?.hideVideo(videoID)
 }
 export function hideAllTourVideos(): void {
   // Pause all videos before removing to stop media playback
@@ -570,6 +594,7 @@ export function hideAllTourVideos(): void {
     if (videoEl) videoEl.pause()
   })
   videos.removeAll()
+  vrOverlaySink?.hideAllVideos()
 }
 
 // ── Popup HTML overlays (showPopupHtml / hidePopupHtml) ──────────────
