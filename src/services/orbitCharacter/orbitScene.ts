@@ -52,7 +52,7 @@ import {
   type FlightState, type ScalePreset,
 } from './orbitFlight'
 
-const BODY_RADIUS = 0.075
+export const BODY_RADIUS = 0.075
 const SUB_RADIUS = 0.009
 const SUB_ORBIT_RADIUS = 0.11
 
@@ -630,6 +630,15 @@ function makeOrbitBasis(tilt: number, twist: number): { u: THREE.Vector3; v: THR
  */
 const _fivePointStarGeometry = createStarGeometry(STAR_FIVE_POINT_RADIUS)
 const _fourPointStarGeometry = createFourPointStarGeometry(STAR_FOUR_POINT_RADIUS)
+// OrbitController.dispose() traverses the scene and calls .dispose()
+// on every geometry it finds. These star geometries are module-level
+// singletons shared across both eyes — if the first controller's
+// traversal disposes them, a second controller instance would render
+// against a dead GPU buffer (stars vanish + WebGL warnings).
+// Overriding dispose to a no-op makes the traversal safe; the shared
+// buffers persist for the lifetime of the page, which is fine.
+_fivePointStarGeometry.dispose = () => {}
+_fourPointStarGeometry.dispose = () => {}
 
 /**
  * Build one half of the paired-eye configuration.
@@ -699,7 +708,11 @@ function buildPairedEye(
     eyeBundle.material,
   )
   disc.position.z = SOCKET_Z_DISC
-  disc.receiveShadow = true
+  // receiveShadow omitted: the socket disc uses a custom ShaderMaterial
+  // (eye-field shader) that doesn't include Three.js shadowmap chunks,
+  // so the flag would be a no-op and misleadingly imply shadows can
+  // land on the disc. Lid shadows aren't part of the design — the
+  // iris fade on lid closure handles "lid covers eye" visually.
   group.add(disc)
 
   // Gaze-tracking pupil group — everything below moves together.

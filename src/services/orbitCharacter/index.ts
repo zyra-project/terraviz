@@ -24,6 +24,7 @@ import {
   updateCharacter,
   startGesture,
   isGesturePlaying,
+  BODY_RADIUS,
   type OrbitSceneHandles,
   type AnimationState,
 } from './orbitScene'
@@ -36,6 +37,7 @@ import {
   SCALE_PRESETS, PRESET_KEYS,
   type FlightState,
 } from './orbitFlight'
+import { logger } from '../../utils/logger'
 
 export type { EyeMode, PaletteKey, ScaleKey, StateKey, GestureKind } from './orbitTypes'
 export { PALETTES } from './orbitTypes'
@@ -114,6 +116,16 @@ export class OrbitController {
   private draggingEarth = false
   private dragLastClientX = 0
   private dragLastClientY = 0
+  // Preallocated scratch objects for drag-rotate. pointermove can fire
+  // at high frequency, so reusing these avoids per-event GC churn from
+  // Quaternion / Vector3 allocation.
+  private readonly _dragYawQuat = new THREE.Quaternion()
+  private readonly _dragPitchQuat = new THREE.Quaternion()
+  private readonly _dragYawAxis = new THREE.Vector3(0, 1, 0)
+  private readonly _dragPitchAxis = new THREE.Vector3(1, 0, 0)
+  // Scratch for projecting the head's world position into NDC when
+  // computing the hit-test radius for tickle clicks.
+  private readonly _headNdc = new THREE.Vector3()
 
   /**
    * Counts the first few `pointermove` events and the first few
@@ -182,7 +194,7 @@ export class OrbitController {
 
   setState(state: StateKey): void {
     if (!(state in STATES)) {
-      console.warn(`[Orbit] Unknown state: ${state}`)
+      logger.warn(`[Orbit] Unknown state: ${state}`)
       return
     }
     if (state === this.state) return
@@ -196,7 +208,7 @@ export class OrbitController {
 
   playGesture(kind: GestureKind): void {
     if (!(kind in GESTURES)) {
-      console.warn(`[Orbit] Unknown gesture: ${kind}`)
+      logger.warn(`[Orbit] Unknown gesture: ${kind}`)
       return
     }
     // startGesture is a no-op if one is already playing; design doc
@@ -211,7 +223,7 @@ export class OrbitController {
 
   setPalette(palette: PaletteKey): void {
     if (!(palette in PALETTES)) {
-      console.warn(`[Orbit] Unknown palette: ${palette}`)
+      logger.warn(`[Orbit] Unknown palette: ${palette}`)
       return
     }
     // Palette swap lands fully in Phase 5 (palettes + pupil tint). The
@@ -227,7 +239,7 @@ export class OrbitController {
 
   setScalePreset(preset: ScaleKey): void {
     if (!(preset in SCALE_PRESETS)) {
-      console.warn(`[Orbit] Unknown scale preset: ${preset}`)
+      logger.warn(`[Orbit] Unknown scale preset: ${preset}`)
       return
     }
     if (preset === this.scalePreset) return
@@ -244,7 +256,7 @@ export class OrbitController {
 
   setEyeMode(mode: EyeMode): void {
     if (mode !== 'two') {
-      console.warn(`[Orbit] Unknown eye mode: ${mode}`)
+      logger.warn(`[Orbit] Unknown eye mode: ${mode}`)
       return
     }
     this.eyeMode = mode
@@ -349,16 +361,12 @@ export class OrbitController {
       // hemisphere" feel the main scene's MapLibre globe has.
       const pxToRad = Math.PI / 300
       const globe = this.handles.earth.globe
-      const qYaw = new THREE.Quaternion().setFromAxisAngle(
-        new THREE.Vector3(0, 1, 0), dx * pxToRad,
-      )
-      const qPitch = new THREE.Quaternion().setFromAxisAngle(
-        new THREE.Vector3(1, 0, 0), dy * pxToRad,
-      )
+      this._dragYawQuat.setFromAxisAngle(this._dragYawAxis, dx * pxToRad)
+      this._dragPitchQuat.setFromAxisAngle(this._dragPitchAxis, dy * pxToRad)
       // Pre-multiply in world space so axes stay world-aligned even
       // after successive rotations. (Post-multiplying would make the
       // rotation axes drift with the globe's current orientation.)
-      globe.quaternion.premultiply(qYaw).premultiply(qPitch)
+      globe.quaternion.premultiply(this._dragYawQuat).premultiply(this._dragPitchQuat)
       return
     }
     // Clamp to [-1, 1] since the pointermove listener is attached to
@@ -377,7 +385,7 @@ export class OrbitController {
     // without us shipping a debug build.
     if (this.pointerMoveLogCount < 5) {
       this.pointerMoveLogCount++
-      console.log(
+      logger.debug(
         `[orbit] pointermove #${this.pointerMoveLogCount}`,
         { mouseX: this.mouseX.toFixed(3), mouseY: this.mouseY.toFixed(3) },
       )
@@ -397,18 +405,23 @@ export class OrbitController {
     const rect = this.renderer.domElement.getBoundingClientRect()
     const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1
     const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1
-    const headNdc = new THREE.Vector3()
-      .copy(this.handles.head.position)
-      .project(this.handles.camera)
-    const dx = ndcX - headNdc.x
-    const dy = ndcY - headNdc.y
+    this._headNdc.copy(this.handles.head.position).project(this.handles.camera)
+    const dx = ndcX - this._headNdc.x
+    const dy = ndcY - this._headNdc.y
     const dist = Math.sqrt(dx * dx + dy * dy)
-    // NDC radius that generously covers Orbit's body silhouette.
-    // At the close preset Orbit occupies roughly 0.12 NDC radius on
-    // a landscape viewport; a 0.22 target makes tickle fire on
-    // anything that visually looks "on the character" without
-    // needing pixel-perfect placement on the body.
-    const clickRadius = 0.22
+    // Derive the tickle hit-test radius from Orbit's actual projected
+    // silhouette rather than a hardcoded NDC constant. At the close
+    // preset Orbit fills a large fraction of the viewport; at
+    // continental / planetary presets the character is much smaller
+    // on screen and a fixed 0.22 would cover empty space. Using the
+    // projected body radius (with 1.8× slack for "clicked near
+    // Orbit" forgiveness) keeps the target appropriately sized at
+    // every zoom level.
+    const cam = this.handles.camera
+    const distToHead = cam.position.distanceTo(this.handles.head.position)
+    const fovRad = (cam.fov * Math.PI) / 180
+    const projectedBodyRadius = BODY_RADIUS / (distToHead * Math.tan(fovRad / 2))
+    const clickRadius = projectedBodyRadius * 1.8
     if (dist <= clickRadius) {
       this.playGesture('tickle')
       return
@@ -501,7 +514,7 @@ export class OrbitController {
     this.frameLogIntervalFrames++
     if (this.frameLogIntervalFrames >= 60) {
       this.frameLogIntervalFrames = 0
-      console.log('[orbit] presence', {
+      logger.debug('[orbit] presence', {
         mouseX: this.mouseX.toFixed(3),
         mouseY: this.mouseY.toFixed(3),
         gazeBias: this.anim.gazeBias.toFixed(2),

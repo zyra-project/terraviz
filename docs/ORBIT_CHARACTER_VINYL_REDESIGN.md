@@ -34,10 +34,10 @@ unchanged.
 |---|---|---|
 | Body material | `ShaderMaterial`, fresnel + iridescent hue shift | `MeshStandardMaterial`, matte vinyl (rough 0.5, metal 0.0), warm-top → cool-bottom gradient (15° diagonal) via `onBeforeCompile` |
 | Face | Single inset lens-eye (EVE / BB-8 lineage) | Two paired eyes only — larger, lower, wider; mammalian neoteny proportions |
-| Eye structure | Flat accent-colored disc | Recessed socket with a 3-D bezel torus, iris ring → navy pupil field (soft-edge) → sparkle stars → black pupil dot → two catchlights, all gaze-tracked |
-| Eye socket | Near-black (`#060810`) flat disc | Recessed into body (Z < BODY_RADIUS), deeper interior color, framed by a matte-charcoal `TorusGeometry` bezel that catches the key light |
-| Eyelids | Shader smoothstep on a flat disc | **3-D spherical-cap meshes** on pivots, sharing the body's vinyl material, cast shadows into the socket |
-| Catchlights | None | Two per eye (primary upper-right, secondary lower-left), parented to gaze-tracking pupil group |
+| Eye structure | Flat accent-colored disc | Socket stack with a 3-D bezel torus, iris ring → navy pupil field (soft-edge) → 3-star sparkle cluster (5-pt centre + two 4-pt flanking) → black pupil dot → one "planet" catchlight (all gaze-tracked), plus a thin glass dome capping the whole eye |
+| Eye socket | Near-black (`#060810`) flat disc | Disc proud of body surface (Z > BODY_RADIUS), deeper interior color, framed by a matte-charcoal `TorusGeometry` bezel that catches the key light |
+| Eyelids | Shader smoothstep on a flat disc | **3-D spherical-cap meshes** on pivots, sharing the body's vinyl material; counter-rotated against head pitch so projection stays stable during YES-nod gestures |
+| Catchlight | None | One solid "planet" highlight per eye in the upper-right of the iris, parented to the gaze-tracking pupil group. Depth-tests against opaque lid geometry so lid closure naturally clips it, with an opacity fade on `pupilVis` for full-close cleanup |
 | Sub-sphere material | `MeshBasicMaterial` (flat accent color) | `MeshStandardMaterial` with the vinyl gradient |
 | Idle orbits | Single shared orbit phase | Two distinct crossing ellipses, tighter radius |
 | Shadows | None | Sub-spheres cast eclipse shadows onto body (educational cue: planetary eclipses) |
@@ -136,7 +136,7 @@ eyeGroup (static, at face offset)
 │   ├── pupilField  Z = BODY_RADIUS - 0.0008   (soft-edge navy, r=0.0096)
 │   ├── stars[3]    Z = BODY_RADIUS - 0.0005   (white 5-point sparkles)
 │   ├── pupilDot    Z = BODY_RADIUS - 0.0004   (near-black, r=0.0025)
-│   └── catchlights Z = BODY_RADIUS - 0.0002   (primary + secondary)
+│   └── catchlight  Z = BODY_RADIUS + 0.0048   (single "planet")
 ├── upperLidPivot  rotates X; carries upper lid cap
 └── lowerLidPivot  rotates X; carries lower lid cap
 ```
@@ -247,22 +247,29 @@ fixed per-eye table so the two eyes read as distinct "star charts"
 but never shimmer between frames. Additive white, shared material
 across both eyes.
 
-### Catchlights (both sizes, bumped)
+### Catchlight ("planet")
 
-Two additive white discs per eye, parented to the gaze-tracking
+A single soft-white disc per eye, parented to the gaze-tracking
 `pupilGroup` (not the static eye group). Big anime-style rigs
 track catchlights with the iris; a floating static highlight reads
-as misaligned parallax under wide gaze. Sizes bumped to pop against
-the expanded navy pupil field:
+as misaligned parallax under wide gaze. Normal blending (not
+additive) so the disc reads as a solid "planet" gleam rather than
+a luminance add that can wash out against a cream-vinyl lid at
+head-rotation extremes.
 
-| | Primary | Secondary |
+| Offset (x, y) | Radius | Opacity |
 |---|---|---|
-| Offset (x, y) | `+0.0035, +0.0038` | `-0.0030, -0.0026` |
-| Radius | `0.0022` | `0.0012` |
-| Opacity | `1.0` | `0.75` |
+| `+0.0034, +0.0034` | `0.00285` | `1.0` (gated per-frame by `pupilVis`) |
 
-The primary catchlight covers ~20 % of the iris radius — the
-dominant upper-right gleam from the concept art.
+Both eyes share identical local offsets (no per-eye mirror) so the
+highlight lands in the same screen-direction on both, consistent
+with a single off-screen light source. The earlier mirror treatment
+inverted the highlight across the face and read as "the two eyes
+don't match." An earlier design also paired this with a secondary
+sparkle in the lower-outer quadrant; that was retired in favor of
+a tighter 3-star sparkle cluster in the lower-inner quadrant (one
+5-pt centre + two smaller 4-pt flanking) — same "planet + stars"
+composition the reference art carries, cleaner to read.
 
 -----
 

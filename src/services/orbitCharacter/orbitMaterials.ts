@@ -599,20 +599,23 @@ export function createFourPointStarGeometry(radius: number): THREE.BufferGeometr
 }
 
 // -----------------------------------------------------------------------
-// Catchlight — static additive-white disc that sits on each eye and
-// stays fixed relative to the eye group as the pupil moves. Two
-// highlights per eye (primary upper-right, secondary lower-left) sell
-// the "wet, alive" read that rigid pupils alone can't.
+// Catchlight — a soft white "planet" highlight on each eye that rides
+// the pupilGroup so it tracks gaze. One per eye (upper-right of the
+// iris); an earlier design used a secondary sparkle in the lower-
+// outer quadrant but it was retired in favor of a tighter 3-star
+// cluster opposite the primary. Sells the "wet, alive" read that
+// rigid pupils alone can't.
 // -----------------------------------------------------------------------
 
 /**
- * Build a catchlight material — additive-white specular highlight
- * with a soft radial falloff (bright core → transparent edge). Reads
- * as a light reflection on the iris rather than a flat white decal
- * stamped onto the eye, which is what a plain `MeshBasicMaterial`
- * produced. Each instance carries its own `uOpacity` uniform so
- * primary / secondary catchlights can have different intensities
- * but share the same shader.
+ * Build a catchlight material — a soft white highlight with a tight
+ * edge feather (see the shader's smoothstep on alpha). Uses normal
+ * blending so the disc paints pure white regardless of what sits
+ * behind it (additive over a cream lid had clamped to cream and
+ * made the catchlight look invisible at head-rotation extremes).
+ * Each instance carries its own `uOpacity` uniform so per-eye
+ * opacity can be animated independently while all instances share
+ * the compiled shader.
  */
 export function createCatchlightMaterial(opacity: number): THREE.ShaderMaterial {
   const mat = new THREE.ShaderMaterial({
