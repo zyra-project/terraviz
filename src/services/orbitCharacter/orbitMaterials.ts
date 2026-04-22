@@ -176,12 +176,11 @@ export function createBodyMaterial(palette: PaletteKey = 'cyan'): BodyMaterialBu
         // The offset vector is projected into the tangent plane
         // (subtract its normal-aligned component) so re-normalizing
         // only rotates the shading normal — never changes its
-        // length. Magnitude tuned for subtlety: an earlier 0.22
-        // read as a golf-ball dimple pattern; 0.08 keeps the grain
-        // discoverable when the sun-driven key light rakes across
-        // the body but doesn't pull the read toward "dimpled
-        // plastic." Push back up toward 0.15 if the effect is too
-        // faint; drop toward 0.04 for near-smooth.
+        // length. Magnitude tuned low (0.05) so the grain is just
+        // barely discoverable under raking sunlight without pushing
+        // the read toward "dimpled plastic." Earlier passes at 0.22
+        // read as a golf-ball; 0.08 was still slightly busy; 0.05
+        // is the "you can find it if you look" setting.
         `#include <normal_fragment_maps>
          {
            float orbitFreq = 350.0;
@@ -189,7 +188,7 @@ export function createBodyMaterial(palette: PaletteKey = 'cyan'): BodyMaterialBu
              orbitValueNoise(vOrbitObjPos * orbitFreq) - 0.5,
              orbitValueNoise(vOrbitObjPos * orbitFreq + vec3(37.0)) - 0.5,
              orbitValueNoise(vOrbitObjPos * orbitFreq + vec3(91.0)) - 0.5
-           ) * 0.08;
+           ) * 0.05;
            orbitBump -= dot(orbitBump, normal) * normal;
            normal = normalize(normal + orbitBump);
          }`,
