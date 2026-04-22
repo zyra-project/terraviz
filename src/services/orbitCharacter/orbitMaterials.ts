@@ -171,23 +171,26 @@ export function createBodyMaterial(palette: PaletteKey = 'cyan'): BodyMaterialBu
       .replace(
         '#include <normal_fragment_maps>',
         // Procedural vinyl-surface normal perturbation. Sampled in
-        // object-space at high frequency (scale 30) so each noise
-        // "cell" is ~BODY_RADIUS/30 wide — fine enough to read as
-        // mold-surface stippling, coarse enough to catch the key
-        // light as tiny highlights rather than grain-noise flicker.
-        // The offset vector is projected into the tangent plane
-        // (subtract its normal-aligned component) so re-normalizing
-        // only rotates the shading normal — never changes its
-        // length — and the perturbation magnitude 0.12 gives a
-        // visible but subtle tilt.
+        // object-space at freq 350 so the body (~0.15 units in
+        // diameter) shows ~50 noise cells across its visible width
+        // — fine enough to read as mold-surface stippling, coarse
+        // enough to catch the key light as visible highlights
+        // rather than dissolving into pixel noise. The offset
+        // vector is projected into the tangent plane (subtract its
+        // normal-aligned component) so re-normalizing only rotates
+        // the shading normal — never changes its length — and the
+        // perturbation magnitude 0.22 gives a visibly discoverable
+        // bump response when the sun-driven key light tracks across
+        // the body. An earlier freq 30 / magnitude 0.12 was too
+        // large-celled and too soft to read as texture.
         `#include <normal_fragment_maps>
          {
-           float orbitFreq = 30.0;
+           float orbitFreq = 350.0;
            vec3 orbitBump = vec3(
              orbitValueNoise(vOrbitObjPos * orbitFreq) - 0.5,
              orbitValueNoise(vOrbitObjPos * orbitFreq + vec3(37.0)) - 0.5,
              orbitValueNoise(vOrbitObjPos * orbitFreq + vec3(91.0)) - 0.5
-           ) * 0.12;
+           ) * 0.22;
            orbitBump -= dot(orbitBump, normal) * normal;
            normal = normalize(normal + orbitBump);
          }`,
