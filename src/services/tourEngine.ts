@@ -490,8 +490,11 @@ export class TourEngine {
         const zoom = Math.log2(6371 * 2 / Math.max(altKm, 1))
         map.jumpTo({ center: [params.lon, params.lat], zoom })
       }
-      // VR path is also "instant" — use a very short duration so the
-      // rotation is visible (no-teleport) but doesn't pace the tour.
+      // VR path snaps the same way the 2D `map.jumpTo` does above —
+      // duration 0 means the first frame after the call slerps all
+      // the way to the target quaternion, so the rotation is
+      // effectively instant with no pacing. Matches the `animated:
+      // false` contract the tour JSON is asking for.
       if (isVrActive()) {
         await flyToOnGlobe(params.lat, params.lon, 0)
       }

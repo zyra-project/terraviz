@@ -54,10 +54,17 @@ export interface VrSessionContext {
    * Formatted time-label string for the current primary dataset —
    * mirrors the 2D `#time-label` overlay (e.g. `"2023-06-15"` or
    * `"2023-06-15 18:00"` for sub-daily). null when the dataset
-   * lacks `startTime` metadata or no dataset is loaded. Polled per
-   * frame; the host's implementation reads `appState.timeLabel`
-   * which is updated by the per-frame playback loop already
-   * driving the 2D label.
+   * lacks `startTime` metadata or no dataset is loaded.
+   *
+   * Polled per XR frame. The host MUST derive the string from the
+   * current playback state (for video datasets, compute from
+   * `video.currentTime`) rather than reusing a cached
+   * `appState.timeLabel` — WebXR pauses `window.requestAnimationFrame`
+   * for the duration of an immersive session, so the 2D
+   * `startPlaybackLoop` that normally updates `appState.timeLabel`
+   * is frozen and any consumer reading that cache sees the value
+   * from the instant VR was entered and stays there forever. See
+   * `main.ts`'s implementation for the expected pattern.
    */
   getDatasetTimeLabel(): string | null
   /** True iff a video dataset is loaded on the primary — drives the HUD play/pause button visibility. */
@@ -689,7 +696,7 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
   })
   hud.setState({
     datasetTitle: ctx.getDatasetTitle(),
-isPlaying: ctx.isPlaying(),
+    isPlaying: ctx.isPlaying(),
     hasVideo: ctx.hasVideoDataset(),
     isMuted: ctx.isMuted(),
     panelCount: ctx.getPanelCount(),
@@ -983,7 +990,7 @@ isPlaying: ctx.isPlaying(),
     // internally debounced — it only redraws when a field changes.
     active.hud.setState({
       datasetTitle: ctx.getDatasetTitle(),
-    isPlaying: ctx.isPlaying(),
+      isPlaying: ctx.isPlaying(),
       hasVideo: ctx.hasVideoDataset(),
       isMuted: ctx.isMuted(),
       panelCount,
@@ -1024,7 +1031,14 @@ isPlaying: ctx.isPlaying(),
     // for v1; a user-grab interrupt is cheap follow-up if requested.
     if (pendingFlyTo) {
       const elapsed = now - pendingFlyTo.startTime
-      const t = Math.min(1, elapsed / pendingFlyTo.durationMs)
+      // Guard the instant-jump case: durationMs = 0 (from
+      // `animated: false` tour tasks) would divide by zero and on
+      // the first frame where elapsed === 0 produce NaN, leaving
+      // the slerp in an undefined state. Collapse to t=1 so the
+      // snap completes on the first tick.
+      const t = pendingFlyTo.durationMs > 0
+        ? Math.min(1, elapsed / pendingFlyTo.durationMs)
+        : 1
       // Ease-in-out cubic — matches MapLibre flyTo's perceived pacing.
       const eased = t < 0.5
         ? 4 * t * t * t

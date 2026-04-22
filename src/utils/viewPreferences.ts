@@ -80,10 +80,36 @@ export function loadViewPreferences(): ViewPreferences {
   }
 }
 
-/** Persist preferences to localStorage. Errors are logged but ignored. */
+/**
+ * Persist preferences to localStorage. Errors are logged but
+ * ignored.
+ *
+ * Field-level-set flags (`bordersVisible`, `gazeFollowOverlays`)
+ * are deliberately NOT written from the incoming blob — they're
+ * re-read from the cache (the source of truth for flags that flow
+ * through `setBordersVisible` / `setGazeFollowOverlays`). Without
+ * this guard, a caller that holds a long-lived `ViewPreferences`
+ * instance from a prior `loadViewPreferences()` — and later
+ * re-saves it after toggling a different field — would clobber
+ * any newer borders/gazeFollow state that was written field-by-
+ * field in between (from the 2D Tools menu button, a tour's
+ * `envShowWorldBorder` task, or future VR toggles).
+ *
+ * Blob callers that legitimately intend to change the shared flags
+ * should use {@link setBordersVisible} / {@link setGazeFollowOverlays}
+ * alongside this save — those setters update both the cache and
+ * localStorage directly and aren't affected by the guard.
+ */
 export function saveViewPreferences(prefs: ViewPreferences): void {
+  const current = ensureCache()
+  const next: ViewPreferences = {
+    ...prefs,
+    bordersVisible: current.bordersVisible,
+    gazeFollowOverlays: current.gazeFollowOverlays,
+  }
+  cache = next
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
   } catch (err) {
     logger.warn('[viewPreferences] Failed to save:', err)
   }

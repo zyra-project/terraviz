@@ -148,12 +148,27 @@ export function createVrBorders(
   mesh.renderOrder = 1
 
   let textureLoadKicked = false
+  /**
+   * True iff this handle has incremented {@link sharedHandleRefCount}
+   * at least once and hasn't yet decremented in dispose. Tracked
+   * separately from `textureLoadKicked` so a failed-then-retried
+   * load doesn't double-count, and a successful-then-disposed
+   * handle decrements exactly once. Without this, a load-failure
+   * path (`textureLoadKicked` reset to false, refcount still up)
+   * would leak the refcount — the shared texture would never
+   * decrement to zero across session cycles and would live in
+   * GPU memory past its useful life.
+   */
+  let refIncremented = false
   let disposed = false
 
   function ensureTextureLoaded(): void {
     if (textureLoadKicked || disposed) return
     textureLoadKicked = true
-    sharedHandleRefCount++
+    if (!refIncremented) {
+      sharedHandleRefCount++
+      refIncremented = true
+    }
     void loadSharedBordersTexture(THREE_).then(
       (tex) => {
         if (disposed) return
@@ -165,6 +180,10 @@ export function createVrBorders(
         // failure rather than showing a broken white sphere. Clear
         // textureLoadKicked so a subsequent setVisible(true) can
         // retry (transient network failure during session entry).
+        // Deliberately do NOT decrement `sharedHandleRefCount` here
+        // — `refIncremented` stays true so dispose() decrements
+        // exactly once, and a retry that succeeds reuses the ref
+        // rather than double-counting.
         textureLoadKicked = false
         mesh.visible = false
       },
@@ -213,7 +232,12 @@ export function createVrBorders(
       disposed = true
       geometry.dispose()
       material.dispose()
-      if (textureLoadKicked) {
+      // Decrement based on `refIncremented` (whether we ever took
+      // a ref) rather than `textureLoadKicked` (current load state):
+      // a load that failed and reset `textureLoadKicked` must still
+      // release its ref here.
+      if (refIncremented) {
+        refIncremented = false
         sharedHandleRefCount = Math.max(0, sharedHandleRefCount - 1)
         // Last consumer out of the process — drop the shared
         // texture so a subsequent cold session starts fresh. This
