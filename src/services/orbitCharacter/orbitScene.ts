@@ -27,6 +27,7 @@ import {
   createStarGeometry,
   createFourPointStarGeometry,
   createGlassDomeMaterial,
+  type GlassDomeMaterialBundle,
   createSubSphereMaterial,
   createBacklightMaterial,
   createBezelMaterial,
@@ -331,6 +332,14 @@ export interface OrbitSceneHandles {
   eyeBundle: EyeFieldMaterialBundle
   pupilMaterials: PupilMaterials
   /**
+   * Shared glass-dome material bundle — one material instance is used
+   * across both eyes so the per-frame sun-direction update writes a
+   * single uniform (not two). Held on the handles so the update
+   * loop in `updateCharacter` can reach it without iterating eye
+   * rigs.
+   */
+  glassDomeBundle: GlassDomeMaterialBundle
+  /**
    * Left + right eye rigs. Materials are shared across rigs
    * (`eyeBundle` for the disc, `pupilMaterials` for pupil + glow),
    * so palette / lid / opacity writes propagate everywhere
@@ -400,18 +409,22 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
   camera.lookAt(new THREE.Vector3().fromArray(initial.cameraTarget))
 
   // Vinyl redesign: the body + sub-spheres use MeshStandardMaterial
-  // which needs scene lighting. We add an ambient (so the shaded
-  // side of Orbit still carries the gradient) and a directional key
-  // that casts shadows. The photoreal Earth ships its own internal
-  // ambient + sun for its own materials; those don't reach Orbit's
-  // meshes because they're parented under the Earth handle's group.
-  // Ambient dialed down + key light bumped up so the body's warm→
-  // cool gradient actually shows. The earlier pass had ambient at
-  // 0.55 which washed the MeshStandardMaterial diffuse out to a
-  // neutral grey; the gradient couldn't fight that much fill. At
-  // 0.35 ambient + 1.6 key light the pink/cool anchors read as
-  // intended and the key light carries the body's form + the bezel
-  // torus rim highlight.
+  // which needs scene lighting. Two lights:
+  //
+  //   • Ambient fill so the shaded side of Orbit still carries the
+  //     gradient. 0.35 is tuned so the MeshStandardMaterial diffuse
+  //     doesn't wash out to grey (0.55 used to; couldn't read the
+  //     palette anchors) while keeping Orbit legible when the sun
+  //     is behind the camera.
+  //
+  //   • A directional "key" light whose position is rewritten each
+  //     frame in `updateCharacter` from the Earth handle's live sun
+  //     direction — so body shading and sub-sphere shadows on the
+  //     face track the real-world subsolar point alongside the
+  //     Earth's day/night terminator. Warm cream tint is retained
+  //     so sunlight on Orbit feels golden regardless of sun angle.
+  //     Initial position is a sensible default for frame 0 before
+  //     the first `updateCharacter` call fires.
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.35)
   scene.add(ambientLight)
   const keyLight = new THREE.DirectionalLight(0xfff6e8, 1.6)
@@ -477,6 +490,12 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
   const bezelMaterial = createBezelMaterial()
   const lidGeometry = createLidGeometry(LID_RADIUS)
 
+  // Glass dome material — one shared instance across both eyes so
+  // the per-frame sun-direction uniform write is a single uniform
+  // upload. The fragment shader's `uStreakDir` is driven in
+  // `updateCharacter` from the Earth handle's live sun direction.
+  const glassDomeBundle = createGlassDomeMaterial()
+
   // Each eye has its own lid material bundle — same vinyl gradient as
   // the body, plus stencil flags keyed to that eye's stencilRef. Held
   // on the handles so palette propagation updates both along with the
@@ -490,10 +509,12 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
   // `docs/ORBIT_CHARACTER_VINYL_REDESIGN.md` §Face.
   const eyeLeft = buildPairedEye(
     head, eyeBundle, pupilMaterials, lidBundleLeft.material, bezelMaterial, lidGeometry,
+    glassDomeBundle.material,
     -EYE_PAIR_OFFSET_X, EYE_PAIR_OFFSET_Y, LEFT_EYE_STENCIL_REF,
   )
   const eyeRight = buildPairedEye(
     head, eyeBundle, pupilMaterials, lidBundleRight.material, bezelMaterial, lidGeometry,
+    glassDomeBundle.material,
     +EYE_PAIR_OFFSET_X, EYE_PAIR_OFFSET_Y, RIGHT_EYE_STENCIL_REF,
   )
 
@@ -549,7 +570,7 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
   return {
     scene, camera, head, body, bodyBundle,
     backlight, backlightBundle,
-    eyeBundle, pupilMaterials,
+    eyeBundle, pupilMaterials, glassDomeBundle,
     eyeRigs,
     subSpheres, subBundles, lidBundles: [lidBundleLeft, lidBundleRight],
     keyLight, trails,
@@ -609,6 +630,7 @@ function buildPairedEye(
   lidMaterial: THREE.Material,
   bezelMaterial: THREE.Material,
   lidGeometry: THREE.BufferGeometry,
+  glassDomeMaterial: THREE.Material,
   offsetX: number,
   offsetY: number,
   stencilRef: number,
@@ -792,7 +814,7 @@ function buildPairedEye(
   // occlude the dome via the depth buffer when closed.
   const glassDome = new THREE.Mesh(
     new THREE.CircleGeometry(GLASS_DOME_RADIUS, 48),
-    createGlassDomeMaterial(),
+    glassDomeMaterial,
   )
   glassDome.position.z = SOCKET_Z_GLASS_DOME
   glassDome.renderOrder = 2
@@ -1218,6 +1240,36 @@ export function updateCharacter(
   // after the initial setup) and the day/night terminator needs
   // frame-accurate world-space sun direction to stay aligned.
   handles.earth.update()
+
+  // Sun-driven lighting for Orbit. The Earth's handle exposes its
+  // live subsolar unit vector via `sunDir`; feed that into:
+  //
+  //   • The orbit key light's position — a DirectionalLight in
+  //     Three.js takes a world-space position and illuminates
+  //     toward its target (origin by default), so placing the
+  //     light at `sunDir * distance` makes it cast FROM the sun's
+  //     direction. Sub-sphere shadows on the body then track the
+  //     real-time sun arc.
+  //   • The glass dome's `uStreakDir` uniform — project the sun's
+  //     world X/Y onto the eye-disc plane, normalize, and write.
+  //     The specular streak on each glass dome rotates to reflect
+  //     the current sun position.
+  //
+  // Both Orbit and Earth read the SAME sun direction, so the whole
+  // scene is lit coherently: body shading, sub shadows, eye glints,
+  // Earth terminator — all aligned.
+  const sun = handles.earth.sunDir
+  handles.keyLight.position.set(sun.x * 10, sun.y * 10, sun.z * 10)
+  // 2-D streak direction: take (sun.x, sun.y) and renormalize. When
+  // the sun's Z dominates (sun is roughly along the view axis) this
+  // can collapse toward a zero vector; guard with a small epsilon so
+  // the streak never inverts direction wildly when the sun is nearly
+  // behind the camera.
+  const sunXY2 = sun.x * sun.x + sun.y * sun.y
+  if (sunXY2 > 1e-6) {
+    const inv = 1 / Math.sqrt(sunXY2)
+    handles.glassDomeBundle.uniforms.uStreakDir.value.set(sun.x * inv, sun.y * inv)
+  }
 
   // ── Eased "current" values ────────────────────────────────────────
   // Reduced motion clamps the orbit speed (only down — slow states

@@ -604,8 +604,30 @@ export function createCatchlightMaterial(opacity: number): THREE.ShaderMaterial 
 // doesn't tilt when the eye moves).
 // -----------------------------------------------------------------------
 
-export function createGlassDomeMaterial(): THREE.ShaderMaterial {
-  return new THREE.ShaderMaterial({
+export interface GlassDomeMaterialBundle {
+  material: THREE.ShaderMaterial
+  uniforms: {
+    /**
+     * 2-D streak direction in eye-disc UV space — unit vector that
+     * the fragment shader uses to place the specular highlight on
+     * the dome. Drive this from the current sun projection (see
+     * per-frame update in orbitScene.ts) so the dome's reflection
+     * tracks real-world lighting.
+     */
+    uStreakDir: { value: THREE.Vector2 }
+  }
+}
+
+export function createGlassDomeMaterial(): GlassDomeMaterialBundle {
+  const uniforms = {
+    // Default direction is upper-left (normalized). The per-frame
+    // update in `updateCharacter` overwrites this every frame from
+    // the Earth handle's sunDir, but this initial value keeps the
+    // streak sensible on the first frame before any update runs.
+    uStreakDir: { value: new THREE.Vector2(-0.7071, 0.7071) },
+  }
+  const material = new THREE.ShaderMaterial({
+    uniforms,
     transparent: true,
     depthWrite: false,
     vertexShader: `
@@ -616,6 +638,7 @@ export function createGlassDomeMaterial(): THREE.ShaderMaterial {
       }`,
     fragmentShader: `
       varying vec2 vUv;
+      uniform vec2 uStreakDir;
       void main() {
         vec2 c = vUv - vec2(0.5);
         float r2 = dot(c, c);
@@ -626,39 +649,33 @@ export function createGlassDomeMaterial(): THREE.ShaderMaterial {
         // Fake dome normal — project the fragment's (x, y) position
         // up onto a unit hemisphere to get a sphere-surface normal.
         // At center r=0 → normal=(0,0,1) (facing camera); at edge r=1
-        // → normal points outward along +X/Y (grazing). Camera is
-        // assumed along +Z for the cap's local frame.
+        // → normal points outward along +X/Y (grazing).
         float h = sqrt(max(0.0, 1.0 - r * r));
-        vec3 N = vec3(c.x * 2.0, c.y * 2.0, h);
 
-        // Fresnel rim. Grazing angles (small N.z) get brighter,
-        // head-on (N.z ~ 1) stays near zero. pow exponent shapes the
-        // thickness of the rim glow.
+        // Fresnel rim. Grazing angles (small h) get brighter, head-on
+        // (h ~ 1) stays near zero.
         float rim = pow(1.0 - h, 2.5);
 
-        // Diagonal specular streak in the upper-left quadrant. Define
-        // a streak direction (unit vector pointing upper-left) and
-        // its perpendicular; a Gaussian across the perpendicular gives
-        // the streak its thin banded profile.
-        //
-        // The streak's "along" coordinate (bandAlong) controls where
-        // along the diagonal the streak exists — a smoothstep window
-        // limits it to the upper-left portion so it doesn't wrap
-        // around the whole dome.
-        vec2 streakDir = vec2(-0.7071, 0.7071);        // upper-left unit
-        vec2 perpDir   = vec2( 0.7071, 0.7071);        // 90° CCW from streakDir
+        // Diagonal specular streak, oriented along uStreakDir. The
+        // perpendicular is streakDir rotated 90 deg CCW, giving a
+        // unit basis for the streak's banded footprint. A Gaussian
+        // across the perp coord makes it thin; a smoothstep window
+        // on the along coord places the streak at a fixed distance
+        // from the disc center in the sun-facing direction.
+        vec2 streakDir = uStreakDir;
+        vec2 perpDir   = vec2(-streakDir.y, streakDir.x);
         float bandPerp  = dot(c, perpDir);
         float bandAlong = dot(c, streakDir);
         float streak = exp(-bandPerp * bandPerp * 600.0);
         streak *= smoothstep(0.05, 0.18, bandAlong) * smoothstep(0.42, 0.25, bandAlong);
 
-        // Compose. Tiny flat base + rim + streak, all under a single
-        // opacity multiplier. Numbers tuned for subtlety — the glass
-        // should be felt, not dominate the eye read.
+        // Compose. Tiny flat base + rim + streak, all fixed-white.
+        // Tuned for subtlety — the glass should be felt, not dominate.
         float alpha = 0.04 + rim * 0.22 + streak * 0.85;
         gl_FragColor = vec4(vec3(1.0), alpha);
       }`,
   })
+  return { material, uniforms }
 }
 
 // -----------------------------------------------------------------------
