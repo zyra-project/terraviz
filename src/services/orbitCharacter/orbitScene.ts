@@ -1475,6 +1475,15 @@ export function updateCharacter(
   for (const rig of handles.eyeRigs) {
     const catchMat = rig.catchPrimary.material as THREE.ShaderMaterial
     catchMat.uniforms.uOpacity.value = catchTargetOpacity
+    // Belt-and-suspenders: also toggle the mesh's `.visible` flag.
+    // Three.js should honor uOpacity alone, but if something (uniform
+    // upload cache, shader caching) is making the GPU-side value
+    // stick at 1.0, `.visible = false` skips the draw call entirely.
+    // If the bright white disc in the eye still appears when this
+    // flag is false, the disc is NOT the catchlight — it's something
+    // else rendering white there (glass dome fresnel / streak,
+    // lighting on the lid, etc.).
+    rig.catchPrimary.visible = catchTargetOpacity > 0.01
   }
   // DIAGNOSTIC — log when the lid-closure gate should hide the
   // catchlight. Throttled to ~2 prints/second so the console
