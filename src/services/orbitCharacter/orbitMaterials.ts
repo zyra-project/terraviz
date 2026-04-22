@@ -671,7 +671,12 @@ export function createGlassDomeMaterial(): GlassDomeMaterialBundle {
 
         // Compose. Tiny flat base + rim + streak, all fixed-white.
         // Tuned for subtlety — the glass should be felt, not dominate.
-        float alpha = 0.04 + rim * 0.22 + streak * 0.85;
+        // Earlier values (rim * 0.22 + streak * 0.85) read as too
+        // hot once the streak started moving with the sun, dialing
+        // attention away from Orbit's face. These multipliers keep
+        // the character of the reflection while letting the eye read
+        // as the dominant element.
+        float alpha = 0.04 + rim * 0.15 + streak * 0.55;
         gl_FragColor = vec4(vec3(1.0), alpha);
       }`,
   })
