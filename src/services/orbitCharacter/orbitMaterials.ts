@@ -172,17 +172,16 @@ export function createBodyMaterial(palette: PaletteKey = 'cyan'): BodyMaterialBu
         '#include <normal_fragment_maps>',
         // Procedural vinyl-surface normal perturbation. Sampled in
         // object-space at freq 350 so the body (~0.15 units in
-        // diameter) shows ~50 noise cells across its visible width
-        // — fine enough to read as mold-surface stippling, coarse
-        // enough to catch the key light as visible highlights
-        // rather than dissolving into pixel noise. The offset
-        // vector is projected into the tangent plane (subtract its
-        // normal-aligned component) so re-normalizing only rotates
-        // the shading normal — never changes its length — and the
-        // perturbation magnitude 0.22 gives a visibly discoverable
-        // bump response when the sun-driven key light tracks across
-        // the body. An earlier freq 30 / magnitude 0.12 was too
-        // large-celled and too soft to read as texture.
+        // diameter) shows ~50 noise cells across its visible width.
+        // The offset vector is projected into the tangent plane
+        // (subtract its normal-aligned component) so re-normalizing
+        // only rotates the shading normal — never changes its
+        // length. Magnitude tuned for subtlety: an earlier 0.22
+        // read as a golf-ball dimple pattern; 0.08 keeps the grain
+        // discoverable when the sun-driven key light rakes across
+        // the body but doesn't pull the read toward "dimpled
+        // plastic." Push back up toward 0.15 if the effect is too
+        // faint; drop toward 0.04 for near-smooth.
         `#include <normal_fragment_maps>
          {
            float orbitFreq = 350.0;
@@ -190,7 +189,7 @@ export function createBodyMaterial(palette: PaletteKey = 'cyan'): BodyMaterialBu
              orbitValueNoise(vOrbitObjPos * orbitFreq) - 0.5,
              orbitValueNoise(vOrbitObjPos * orbitFreq + vec3(37.0)) - 0.5,
              orbitValueNoise(vOrbitObjPos * orbitFreq + vec3(91.0)) - 0.5
-           ) * 0.22;
+           ) * 0.08;
            orbitBump -= dot(orbitBump, normal) * normal;
            normal = normalize(normal + orbitBump);
          }`,
