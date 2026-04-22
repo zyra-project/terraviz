@@ -123,16 +123,90 @@ export function createBodyMaterial(palette: PaletteKey = 'cyan'): BodyMaterialBu
          uniform vec3 uCool;
          uniform float uSpan;
          uniform vec3 uAxis;
-         varying vec3 vOrbitObjPos;`,
+         varying vec3 vOrbitObjPos;
+
+         // Cheap 3-D value noise for procedural vinyl surface detail.
+         // hash → pseudo-random [0,1] from a 3-D lattice cell; noise
+         // trilinearly interpolates hash at the 8 corners of the
+         // surrounding cube with smoothstep easing. Used below to
+         // perturb the shading normal so the matte body reads as
+         // a toy surface with tiny mold irregularities rather than
+         // a perfectly smooth sphere.
+         float orbitHash(vec3 p) {
+           return fract(sin(dot(p, vec3(12.9898, 78.233, 45.543))) * 43758.5453);
+         }
+         float orbitValueNoise(vec3 p) {
+           vec3 i = floor(p);
+           vec3 f = fract(p);
+           f = f * f * (3.0 - 2.0 * f);
+           float n000 = orbitHash(i);
+           float n100 = orbitHash(i + vec3(1.0, 0.0, 0.0));
+           float n010 = orbitHash(i + vec3(0.0, 1.0, 0.0));
+           float n110 = orbitHash(i + vec3(1.0, 1.0, 0.0));
+           float n001 = orbitHash(i + vec3(0.0, 0.0, 1.0));
+           float n101 = orbitHash(i + vec3(1.0, 0.0, 1.0));
+           float n011 = orbitHash(i + vec3(0.0, 1.0, 1.0));
+           float n111 = orbitHash(i + vec3(1.0, 1.0, 1.0));
+           return mix(
+             mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
+             mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y),
+             f.z);
+         }`,
       )
       .replace(
         'vec4 diffuseColor = vec4( diffuse, opacity );',
         // Project the object-space position onto the gradient axis.
-        // uAxis points from cool → warm anchor; dot() returns + when
-        // the fragment sits on the warm side. Remap to [0,1], mix.
+        // uAxis points from cool toward warm; dot() is positive on
+        // the warm side. Remap to [0,1], then push through smoothstep
+        // so the anchor-color zones dominate the body and only a
+        // narrow band at the middle blends — without this curve the
+        // linear midpoint blend read as a washed-out off-white. The
+        // warm / cool hex values in PALETTES are unchanged; this
+        // just reshapes how much of the body shows each.
         `float orbitG = clamp(dot(vOrbitObjPos, uAxis) / uSpan * 0.5 + 0.5, 0.0, 1.0);
-         vec3 orbitGradient = mix(uCool, uWarm, orbitG);
+         float orbitGc = smoothstep(0.15, 0.85, orbitG);
+         vec3 orbitGradient = mix(uCool, uWarm, orbitGc);
          vec4 diffuseColor = vec4( orbitGradient, opacity );`,
+      )
+      .replace(
+        '#include <normal_fragment_maps>',
+        // Procedural vinyl-surface normal perturbation. Sampled in
+        // object-space at high frequency (scale 30) so each noise
+        // "cell" is ~BODY_RADIUS/30 wide — fine enough to read as
+        // mold-surface stippling, coarse enough to catch the key
+        // light as tiny highlights rather than grain-noise flicker.
+        // The offset vector is projected into the tangent plane
+        // (subtract its normal-aligned component) so re-normalizing
+        // only rotates the shading normal — never changes its
+        // length — and the perturbation magnitude 0.12 gives a
+        // visible but subtle tilt.
+        `#include <normal_fragment_maps>
+         {
+           float orbitFreq = 30.0;
+           vec3 orbitBump = vec3(
+             orbitValueNoise(vOrbitObjPos * orbitFreq) - 0.5,
+             orbitValueNoise(vOrbitObjPos * orbitFreq + vec3(37.0)) - 0.5,
+             orbitValueNoise(vOrbitObjPos * orbitFreq + vec3(91.0)) - 0.5
+           ) * 0.12;
+           orbitBump -= dot(orbitBump, normal) * normal;
+           normal = normalize(normal + orbitBump);
+         }`,
+      )
+      .replace(
+        '#include <emissivemap_fragment>',
+        // Subtle fresnel rim — brightens the silhouette at grazing
+        // view angles to suggest soft subsurface scattering through
+        // the vinyl's outer layer. The tint is a cool-neutral so it
+        // reads as "lit-from-within" rather than a specular highlight.
+        // Added to totalEmissiveRadiance (which is how Three.js's
+        // standard shader composites unlit additive contributions)
+        // so it survives tone mapping cleanly and stacks on top of
+        // whatever key-light shading the fragment already has.
+        `#include <emissivemap_fragment>
+         {
+           float orbitFres = pow(1.0 - clamp(dot(normalize(vViewPosition), normal), 0.0, 1.0), 2.5);
+           totalEmissiveRadiance += vec3(0.08, 0.09, 0.11) * orbitFres;
+         }`,
       )
   }
   return { material, uniforms }
