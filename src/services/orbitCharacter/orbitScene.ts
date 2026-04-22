@@ -209,19 +209,14 @@ const UPPER_LID_CLOSED_ROT = +Math.PI * 0.40           // covers socket; stencil
 const LOWER_LID_CLOSED_ROT = -Math.PI * 0.40
 
 /**
- * Catchlight placement within the pupil group. One "planet" per eye
- * — a single bright catchlight in the upper-outer quadrant that
- * sells the "wet, alive" read and, in combination with the sparkle
- * cluster opposite, evokes a planet-and-stars scene inside the eye
- * (reinforces Orbit's cosmic-docent role). Mirrored per-eye so it
- * always lands on the OUTER side of each eye (away from the face's
- * vertical center) — without the mirror, the two eyes share the
- * same pupil-local offset and one eye's highlight lands on the
- * inner side, producing a false "nose-bridge" bright cluster.
- *
- * Reference values below are for the RIGHT eye (offsetX > 0, where
- * outer = positive local X). `buildPairedEye` derives a per-eye
- * sign from `offsetX` and flips the X component for the left eye.
+ * Catchlight placement within the pupil group. One bright "planet"
+ * highlight per eye, positioned upper-right in pupil-local space.
+ * Both eyes use the SAME local offsets (no per-eye mirror) so the
+ * catchlight lands in the same screen-direction for both eyes —
+ * consistent with a single off-screen light source, the anime-
+ * style convention. The older mirror treatment (one catchlight on
+ * each eye's outer side) inverted them relative to the face and
+ * broke the light-from-one-direction read.
  *
  * The catchlight is parented to the gaze-tracking pupil group (with
  * the iris + pupil), so it tracks the eye's look direction — anime-
@@ -229,20 +224,20 @@ const LOWER_LID_CLOSED_ROT = -Math.PI * 0.40
  */
 const CATCHLIGHT_PRIMARY_OFFSET_X = 0.0034
 const CATCHLIGHT_PRIMARY_OFFSET_Y = 0.0034
-const CATCHLIGHT_PRIMARY_RADIUS = 0.0028
+const CATCHLIGHT_PRIMARY_RADIUS = 0.0038
 const CATCHLIGHT_PRIMARY_OPACITY = 1.0
 const CATCHLIGHT_PRIMARY_SEGMENTS = 32
 
 /**
  * Sparkle cluster — three stars arranged horizontally in the
- * lower-inner quadrant of the iris (opposite the primary
- * catchlight). One larger 5-pointer in the middle flanked by two
- * smaller 4-pointers. Together with the "planet" catchlight they
- * read as a tiny starfield inside Orbit's eye. Cluster base
- * position is mirrored per-eye so the cluster always sits on the
- * inner (nose-bridge-facing) side of each eye.
+ * lower-left of the iris (opposite the primary catchlight). One
+ * larger 5-pointer in the middle flanked by two smaller 4-pointers.
+ * Together with the "planet" catchlight they read as a tiny
+ * starfield inside Orbit's eye. Both eyes share the SAME local
+ * offsets so the cluster lands in the same screen-direction for
+ * both eyes, matching the catchlight convention.
  */
-const STAR_CLUSTER_OFFSET_X = -0.0022   // inner side for right eye; mirrored per-eye
+const STAR_CLUSTER_OFFSET_X = -0.0022
 const STAR_CLUSTER_OFFSET_Y = -0.0028
 const STAR_CLUSTER_SPACING  = 0.0020    // horizontal gap between star centers
 const STAR_FIVE_POINT_RADIUS = 0.0011
@@ -611,14 +606,6 @@ function buildPairedEye(
   group.position.set(offsetX, offsetY, 0)
   head.add(group)
 
-  // Mirrors the X component of feature offsets per eye so the
-  // "outer" side of the face is consistently +X for both eyes
-  // (catchlight lands upper-outer; sparkle cluster lands lower-
-  // inner). Without the mirror, features share the same local X
-  // sign and one eye's catchlight lands on the inner side,
-  // producing a false "nose-bridge" bright between the eyes.
-  const catchXSign = offsetX < 0 ? -1 : 1
-
   // Socket stencil mask — invisible disc the size of the socket, drawn
   // BEFORE the lids to write `stencilRef` to the stencil buffer
   // everywhere the socket covers. Lids then test for this ID and only
@@ -689,14 +676,14 @@ function buildPairedEye(
   pupilGroup.add(pupilField)
 
   // Sparkle cluster — three stars in a tight horizontal arrangement
-  // in the lower-inner quadrant of the iris, opposite the "planet"
-  // catchlight. Larger 5-pointer in the middle flanked by two
-  // smaller 4-pointer sparkles. Cluster base position is mirrored
-  // per-eye (inner side for each eye) via `catchXSign`. Tiny
-  // rotation variance on each star so they don't read as a
-  // rubber-stamped line of identical shapes.
+  // in the lower-left of the iris, opposite the "planet" catchlight.
+  // Larger 5-pointer in the middle flanked by two smaller 4-pointer
+  // sparkles. Both eyes share identical local offsets so the cluster
+  // lands in the same screen-direction on both eyes. Tiny rotation
+  // variance on each star so they don't read as a rubber-stamped
+  // line of identical shapes.
   const stars: THREE.Mesh[] = []
-  const clusterX = STAR_CLUSTER_OFFSET_X * catchXSign
+  const clusterX = STAR_CLUSTER_OFFSET_X
   const clusterY = STAR_CLUSTER_OFFSET_Y
   const starSpecs: Array<{ geom: THREE.BufferGeometry; dx: number; rotZ: number }> = [
     { geom: _fourPointStarGeometry, dx: -STAR_CLUSTER_SPACING, rotZ: 0.18 },
@@ -719,18 +706,19 @@ function buildPairedEye(
   pupilDot.position.z = SOCKET_Z_PUPIL_DOT
   pupilGroup.add(pupilDot)
 
-  // Single "planet" catchlight in the upper-outer quadrant. Soft
-  // radial falloff via custom shader; scale is animated per-frame
-  // for expressive states so the highlight shimmers subtly instead
-  // of sitting static like a decal. X offset mirrored per-eye via
-  // `catchXSign` so the highlight consistently lands on the face's
-  // outer side.
+  // Single "planet" catchlight in the upper-right of the iris.
+  // Mostly-solid white core with a thin edge feather (see
+  // createCatchlightMaterial). Scale is animated per-frame for
+  // expressive states so the highlight shimmers subtly instead of
+  // sitting static like a decal. Both eyes share identical local
+  // offsets so the highlight lands in the same screen-direction on
+  // both eyes — consistent with a single off-screen light source.
   const catchPrimary = new THREE.Mesh(
     new THREE.CircleGeometry(CATCHLIGHT_PRIMARY_RADIUS, CATCHLIGHT_PRIMARY_SEGMENTS),
     createCatchlightMaterial(CATCHLIGHT_PRIMARY_OPACITY),
   )
   catchPrimary.position.set(
-    CATCHLIGHT_PRIMARY_OFFSET_X * catchXSign,
+    CATCHLIGHT_PRIMARY_OFFSET_X,
     CATCHLIGHT_PRIMARY_OFFSET_Y,
     SOCKET_Z_CATCHLIGHT,
   )

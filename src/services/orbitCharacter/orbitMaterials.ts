@@ -558,14 +558,17 @@ export function createCatchlightMaterial(opacity: number): THREE.ShaderMaterial 
       uniform float uOpacity;
       void main() {
         // Distance from disc center, 0 at center to 1 at disc edge.
-        // Quadratic falloff (pow exponent 2.2) pushes the bright
-        // zone toward the center so the highlight has a clear
-        // core rather than a uniform wash across the disc.
+        // Mostly-solid white core with a thin smooth edge — reads as
+        // a "planet" catchlight rather than a soft glow. The inner
+        // 80% of the disc is full brightness; only the outer 20%
+        // feathers. Compared to the earlier pow(1.0 - d, 2.2) fade
+        // this keeps the highlight crisp and round like the
+        // reference art rather than diffusing into the iris.
         vec2 c = vUv - vec2(0.5);
         float d = length(c) * 2.0;
         if (d >= 1.0) discard;
-        float fade = pow(1.0 - d, 2.2);
-        gl_FragColor = vec4(1.0, 1.0, 1.0, uOpacity * fade);
+        float alpha = smoothstep(1.0, 0.80, d);
+        gl_FragColor = vec4(1.0, 1.0, 1.0, uOpacity * alpha);
       }`,
   })
   // Catchlights ride the pupilGroup so they track gaze. Stencil
