@@ -318,18 +318,32 @@ export function createPhotorealEarth(
   let disposed = false
 
   // ── Lighting ──────────────────────────────────────────────────────
+  // Two modes, toggled by setTexture:
+  //
+  //   Planet mode (no dataset) — directional `sunLight` casts
+  //     hemisphere shading and drives the day/night terminator
+  //     matching real UTC time; `datasetAmbient` is off.
+  //   Dataset mode — `sunLight` turns off so scientific-viz colors
+  //     read uniformly across both hemispheres without lingering
+  //     day/night shading or specular ocean glint; `datasetAmbient`
+  //     bumps up to a flat fill so the globe isn't black on the
+  //     night side.
+  //
+  // Base `ambientLight` stays low in either mode to prevent total
+  // darkness; the planet-mode sun dominates, the dataset-mode
+  // ambient dominates.
   let ambientLight: THREE.AmbientLight | null = null
   let sunLight: THREE.DirectionalLight | null = null
+  let datasetAmbient: THREE.AmbientLight | null = null
   if (includeLighting) {
-    // Ambient fill so the night side isn't pitch black; main light
-    // is the directional sun, repositioned each frame to track the
-    // current subsolar direction so day/night terminator matches
-    // real UTC time.
     ambientLight = new THREE_.AmbientLight(0xffffff, 0.35)
     objects.push(ambientLight)
     sunLight = new THREE_.DirectionalLight(0xffffff, 1.8)
     sunLight.position.set(2, 1.5, 1)
     objects.push(sunLight)
+    // Off by default (planet mode); setTexture flips the pair.
+    datasetAmbient = new THREE_.AmbientLight(0xffffff, 0)
+    objects.push(datasetAmbient)
   }
 
   // ── Sun-direction state ───────────────────────────────────────────
@@ -597,12 +611,12 @@ export function createPhotorealEarth(
       return tex
     }
 
-    // Sun sprites — additive, no depth WRITE (they shouldn't occlude
-    // anything behind them), but default depth TEST is left ON so
-    // opaque objects in front of the sun (globe, Orbit body) naturally
-    // occlude it. Without the depth test the sun renders on top of
-    // everything and shows through whatever should be in front of it
-    // — matches the VR scene's earlier fix for the same issue.
+    // depthTest stays ON (Three.js default) so the globe's depth
+    // buffer naturally occludes the sprite when the sun is behind
+    // the planet. depthWrite stays OFF because additive-blended
+    // sprites shouldn't clobber depth for anything else. Same fix
+    // landed separately on the VR branch; callers now see
+    // consistent behavior.
     const coreTexture = buildGlowTexture(SUN_GLOW_TEXTURE_SIZE, 0.25, [255, 252, 230], 1.0)
     const coreMaterial = new THREE_.SpriteMaterial({
       map: coreTexture,
@@ -959,6 +973,11 @@ export function createPhotorealEarth(
         if (cloudMesh) cloudMesh.visible = true
         if (atmosphereInner) atmosphereInner.visible = true
         if (atmosphereOuter) atmosphereOuter.visible = true
+        if (sunCoreSprite) sunCoreSprite.visible = true
+        if (sunGlowSprite) sunGlowSprite.visible = true
+        // Planet mode: directional sun on, dataset-fill off.
+        if (sunLight) sunLight.intensity = 1.8
+        if (datasetAmbient) datasetAmbient.intensity = 0
         activeKey = null
         // No dataset to wait for — readiness is immediate.
         onReady?.()
@@ -985,6 +1004,13 @@ export function createPhotorealEarth(
         if (cloudMesh) cloudMesh.visible = false
         if (atmosphereInner) atmosphereInner.visible = false
         if (atmosphereOuter) atmosphereOuter.visible = false
+        if (sunCoreSprite) sunCoreSprite.visible = false
+        if (sunGlowSprite) sunGlowSprite.visible = false
+        // Dataset mode: directional sun off so scientific-viz colors
+        // read uniformly, dataset-fill bumps ambient up so the globe
+        // isn't black on what-used-to-be the night side.
+        if (sunLight) sunLight.intensity = 0
+        if (datasetAmbient) datasetAmbient.intensity = 1.6
 
         // Force the decoder to produce a frame at the current
         // position. Without this, paused HLS streams may have no
@@ -1003,30 +1029,49 @@ export function createPhotorealEarth(
           onReady?.()
         } else {
           // No frame yet — keep the base Earth visible instead of
-          // showing a black ball. Swap in the VideoTexture as soon
-          // as the forced seek decodes a frame or the user presses
-          // play (whichever fires first). { once: true } ensures
-          // each listener self-removes after firing; we ALSO track
-          // a manual cleanup so a dataset swap / dispose before
-          // either event fires doesn't leak the listeners.
+          // showing a black ball. We listen across four events
+          // (loadeddata / canplay / seeked / playing) because any
+          // one of them CAN be the first sign that a frame is
+          // decodable, and HLS + different browsers fire them in
+          // different orders:
+          //
+          //   - 'loadeddata' — media pipeline has decoded the first
+          //     frame (readyState ≥ 2). Should fire shortly after
+          //     load even without play.
+          //   - 'canplay' — ready to play at current playback rate.
+          //   - 'seeked' — our forced seek to current time landed.
+          //   - 'playing' — user (or the play() below) started
+          //     playback.
+          //
+          // We also attempt a `video.play()` to nudge the decoder
+          // in case HLS needs an active pull. Autoplay may be
+          // blocked — we swallow the error and rely on the listener
+          // fallback. `video.muted = true` (set by hlsService) makes
+          // this silent-autoplay-friendly per the browser policies.
           material.map = baseEarthTexture
           const onFrame = () => {
-            // One fired and self-removed; clear our tracker so the
-            // other (which may still be attached) isn't touched by
-            // a later cancel call.
+            cancelPendingVideoListeners?.()
             cancelPendingVideoListeners = null
-            // Guard: dataset may have changed while we waited.
             if (activeKey !== video) return
             material.map = tex
             material.needsUpdate = true
             onReady?.()
           }
+          video.addEventListener('loadeddata', onFrame, { once: true })
+          video.addEventListener('canplay', onFrame, { once: true })
           video.addEventListener('seeked', onFrame, { once: true })
           video.addEventListener('playing', onFrame, { once: true })
           cancelPendingVideoListeners = () => {
+            video.removeEventListener('loadeddata', onFrame)
+            video.removeEventListener('canplay', onFrame)
             video.removeEventListener('seeked', onFrame)
             video.removeEventListener('playing', onFrame)
           }
+          // Nudge the decoder — the caller's user-gesture (browse
+          // panel tap, Enter VR) transitively permits autoplay. If
+          // the policy blocks it anyway, no harm done; the listener
+          // pool above still catches the first frame when it lands.
+          video.play().catch(() => { /* autoplay blocked — fine */ })
         }
       } else if (spec.kind === 'image') {
         // The 2D loader already decoded this image (including the
@@ -1047,6 +1092,11 @@ export function createPhotorealEarth(
         if (cloudMesh) cloudMesh.visible = false
         if (atmosphereInner) atmosphereInner.visible = false
         if (atmosphereOuter) atmosphereOuter.visible = false
+        if (sunCoreSprite) sunCoreSprite.visible = false
+        if (sunGlowSprite) sunGlowSprite.visible = false
+        // Dataset mode lighting — see video branch.
+        if (sunLight) sunLight.intensity = 0
+        if (datasetAmbient) datasetAmbient.intensity = 1.6
         material.map = tex
         activeKey = spec.element
         onReady?.()

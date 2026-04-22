@@ -28,6 +28,22 @@ import { MAX_GLOBE_SCALE, MIN_GLOBE_SCALE } from './vrScene'
 import { logger } from '../utils/logger'
 
 /**
+ * Strict payload-level equality for browse actions. The selectstart
+ * / selectend click semantics require the "armed" action and the
+ * action under the ray at release to match exactly — comparing
+ * `kind` alone would fire the wrong dataset / category if the user
+ * pressed on card A, slid to card B, and released. Kind-only
+ * matching was the original Phase 3 stub; this tightens to per-
+ * variant payload checks. `close` has no payload, so kind is enough.
+ */
+function browseActionsEqual(a: VrBrowseAction, b: VrBrowseAction): boolean {
+  if (a.kind !== b.kind) return false
+  if (a.kind === 'select' && b.kind === 'select') return a.datasetId === b.datasetId
+  if (a.kind === 'category' && b.kind === 'category') return a.category === b.category
+  return true // kind === 'close' — no payload to compare
+}
+
+/**
  * Thumbstick reading below this magnitude is treated as zero. Quest
  * thumbsticks rest slightly off-center; without a deadzone the globe
  * creeps when the user isn't touching anything.
@@ -691,7 +707,7 @@ export function createVrInteraction(
       const hit = pickHit(controller)
       if (hit?.kind === 'browse') {
         const armed = browseArmed[index]!
-        if (armed.kind === hit.action.kind) {
+        if (browseActionsEqual(armed, hit.action)) {
           ctx.onBrowseAction(hit.action)
         }
       }
@@ -780,7 +796,29 @@ export function createVrInteraction(
     controller.addEventListener('selectstart', () => onSelectStart(i))
     controller.addEventListener('selectend', () => onSelectEnd(i))
     controller.addEventListener('squeezestart', () => onSqueezeStart())
+
+    // Stash this controller's XRInputSource on `connected`. Needed
+    // by updateThumbstickZoom, which reads the gamepad — iterating
+    // `session.inputSources` directly would conflate controller
+    // indices with transient-pointer / gaze sources (which don't
+    // have gamepads but still occupy an index in the list), causing
+    // the rayOnBrowse lookup to land on the wrong hand.
+    controller.addEventListener('connected', (ev: { data: XRInputSource }) => {
+      inputSources[i] = ev.data
+    })
+    controller.addEventListener('disconnected', () => {
+      inputSources[i] = null
+    })
   }
+
+  /**
+   * Per-controller XRInputSource, populated on `connected` /
+   * cleared on `disconnected`. Index matches `controllers[i]`, so
+   * inputSources[0] is always the left-hand (or first-connected)
+   * controller — stable across the session even when transient-
+   * pointer / gaze sources come and go.
+   */
+  const inputSources: (XRInputSource | null)[] = [null, null]
 
   // Scratch vectors + quaternion reused every frame; avoids
   // allocation in the XR hot path.
@@ -994,7 +1032,8 @@ export function createVrInteraction(
     for (let i = 0; i < 2; i++) {
       const controller = controllers[i]
       setRaycasterFromController(controller)
-      // Closest hit across all interactive surfaces wins.
+      // Closest hit across all interactive surfaces wins for the
+      // ray-dot position + line length.
       const hits = raycaster.intersectObjects(rayTargets, false)
       if (hits.length > 0 && hits[0].point) {
         const distance = hits[0].distance
@@ -1003,14 +1042,24 @@ export function createVrInteraction(
         rayLines[i].scale.z = Math.max(0.001, distance / RAY_LENGTH)
         dots[i].position.copy(hits[0].point)
         dots[i].visible = true
-        // Track whether each controller's ray is on the browse panel
-        // so thumbstick-Y scrolls the list instead of zooming the globe.
-        rayOnBrowse[i] = hits[0].object === ctx.browse.mesh
       } else {
         rayLines[i].scale.z = 1
         dots[i].visible = false
-        rayOnBrowse[i] = false
       }
+      // rayOnBrowse drives thumbstick-Y → scroll (vs. zoom). Match
+      // `pickHit`'s priority: the browse panel wins over the globe
+      // even if the globe is closer to the camera, so we check
+      // whether browse.mesh is anywhere in the hit list, not just
+      // at position 0. Without this, a ray that crosses both the
+      // panel and a globe behind it would scroll-route incorrectly
+      // (closest hit is globe → rayOnBrowse false → zoom instead of
+      // scroll, mismatching the click-route above).
+      const browseMesh = ctx.browse.mesh
+      let onBrowse = false
+      for (let h = 0; h < hits.length; h++) {
+        if (hits[h].object === browseMesh) { onBrowse = true; break }
+      }
+      rayOnBrowse[i] = onBrowse
     }
   }
 
@@ -1019,30 +1068,33 @@ export function createVrInteraction(
   const BROWSE_SCROLL_SPEED = 400
 
   function updateThumbstickZoom(deltaSeconds: number): void {
-    // The WebXR `inputSources` list is the source of truth for
-    // gamepad axes — Three.js doesn't abstract this for us. Each
-    // Quest controller maps axes [2, 3] to the thumbstick (axes
-    // [0, 1] are the touchpad, which the Quest doesn't have).
+    // Each Quest controller maps axes [2, 3] to the thumbstick
+    // (axes [0, 1] are the touchpad, which the Quest doesn't
+    // have). We iterate our two controllers directly using the
+    // stashed inputSources array rather than `session.inputSources`:
+    // the former is indexed 1:1 with `controllers[i]` / `rayOnBrowse[i]`,
+    // the latter can interleave transient-pointer / gaze sources
+    // that throw off index-based lookups.
     const session = ctx.renderer.xr.getSession()
     if (!session) return
     let zoomAxis = 0
     let scrollAxis = 0
-    let sourceIdx = 0
-    for (const source of session.inputSources) {
-      const gp = source.gamepad
-      if (!gp) { sourceIdx++; continue }
+    for (let i = 0; i < 2; i++) {
+      const source = inputSources[i]
+      const gp = source?.gamepad
+      if (!gp) continue
       const y = gp.axes[3] ?? gp.axes[1] ?? 0
-      if (Math.abs(y) > THUMBSTICK_DEADZONE) {
-        // When this controller's ray is on the browse panel, redirect
-        // its Y axis to scroll instead of zoom.
-        if (rayOnBrowse[sourceIdx]) {
-          if (Math.abs(y) > Math.abs(scrollAxis)) scrollAxis = y
-        } else {
-          const signed = -y
-          if (Math.abs(signed) > Math.abs(zoomAxis)) zoomAxis = signed
-        }
+      if (Math.abs(y) <= THUMBSTICK_DEADZONE) continue
+      // When this controller's ray is on the browse panel, redirect
+      // its Y axis to scroll instead of zoom.
+      if (rayOnBrowse[i]) {
+        if (Math.abs(y) > Math.abs(scrollAxis)) scrollAxis = y
+      } else {
+        // Invert so pushing up → zoom in. Take the strongest signal
+        // across controllers (user might use either hand).
+        const signed = -y
+        if (Math.abs(signed) > Math.abs(zoomAxis)) zoomAxis = signed
       }
-      sourceIdx++
     }
     if (zoomAxis !== 0) {
       const factor = Math.pow(ZOOM_RATE_PER_SECOND, zoomAxis * deltaSeconds)

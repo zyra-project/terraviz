@@ -3,7 +3,7 @@
 Feasibility investigation for running Interactive Sphere as an immersive
 web experience on Meta Quest (and other WebXR-capable) headsets.
 
-Status: **MVP + Phase 2 + Phase 2.1/2.2 + Phase 2.5 shipped.** Feature-gated
+Status: **MVP + Phase 2 + Phase 2.1/2.2 + Phase 2.5 + Phase 3 shipped.** Feature-gated
 "Enter AR" / "Enter VR" button opens an immersive WebXR session
 that renders the currently-loaded dataset (or a photoreal
 day/night Earth with atmosphere, clouds, night lights, specular,
@@ -14,12 +14,13 @@ interaction (surface-pinned drag, two-hand pinch+rotate, thumbstick
 zoom, flick-to-spin inertia), floating HUD, animated 3D loading
 scene. The 2D experience is unchanged when WebXR is absent.
 
-Remaining phases not yet built: in-VR dataset switching (3), VR
-tours (3.5), 2D↔VR camera sync (4), voice docent + hand tracking
-(5), AR-native enhancements (spatial audio, annotations,
-capture/share, real-time data, co-presence, layered datasets).
-4-globe support is a Phase 2.5 stretch (2-globe shipped; 4 gates
-on Quest decoder-budget testing).
+Remaining phases not yet built: VR tours (3.5), 2D↔VR camera sync
+(4), voice docent + hand tracking (5), AR-native enhancements
+(spatial audio, annotations, capture/share, real-time data,
+co-presence, layered datasets). 4-globe support is a Phase 2.5
+stretch (2-globe shipped; 4 gates on Quest decoder-budget
+testing). Free-text dataset search is a Phase 3 stretch (category
+chips shipped; keyboard/voice search pending).
 
 ---
 
@@ -581,7 +582,7 @@ Commits 2-4 are the "visible 2-globe arc" milestone. 5-6 add
 interaction + UI polish. 4-globe is a stretch commit 7 after
 on-device validation.
 
-### Phase 3 — in-VR dataset switching
+### Phase 3 — in-VR dataset switching ✅ *(shipped: floating CanvasTexture panel at 0.8 × 0.6 m, scrollable card list, controller-raycast card selection, HUD Browse button toggles visibility, single-row category chip filter. Virtual-keyboard free-text search was deferred in favor of chips per the recommendation below; voice search can come with Phase 5.)*
 
 The single biggest UX gap after MVP: the user must exit VR, pick a
 dataset in the 2D browse panel, then re-enter VR. Phase 3 brings a

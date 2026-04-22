@@ -1206,6 +1206,19 @@ class InteractiveSphere {
       togglePlayPause: () => togglePlayPause(
         this.hlsService, this.appState, (m) => this.announce(m),
       ),
+      isMuted: () => {
+        // Read directly off the primary's <video> element —
+        // hlsService sets it muted by default for autoplay
+        // compliance; the 2D mute button (and the new VR HUD mute
+        // button) flip it when the user wants sound.
+        return this.hlsService?.video?.muted ?? true
+      },
+      toggleMute: () => {
+        const video = this.hlsService?.video
+        if (!video) return
+        video.muted = !video.muted
+        this.announce(video.muted ? 'Muted' : 'Unmuted')
+      },
 
       // --- Phase 2.5 multi-panel getters ---
       getPanelCount: () => this.viewports.getPanelCount(),
@@ -1218,14 +1231,30 @@ class InteractiveSphere {
       getDatasets: () => {
         return this.appState.datasets
           .filter(d => dataService.isSupportedDataset(d) && !d.isHidden)
-          .map(d => ({
-            id: d.id,
-            title: d.title,
-            category: d.enriched?.categories
-              ? Object.keys(d.enriched.categories)[0] ?? null
-              : null,
-            thumbnailUrl: d.thumbnailLink ?? null,
-          }))
+          .map(d => {
+            // Mirror the 2D browse UI (browseUI.ts line 79-90):
+            // chips are the UNION of enriched.categories keys and
+            // `Dataset.tags`, minus 'Movies' and 'Layers' (those
+            // are internal shape-of-data markers, not user-facing
+            // filters). Without the tags merge, chips like "Tours"
+            // and "Real-Time" — which live exclusively on tags —
+            // never appear.
+            const cats = new Set<string>()
+            if (d.enriched?.categories) {
+              for (const k of Object.keys(d.enriched.categories)) cats.add(k)
+            }
+            if (d.tags) {
+              for (const t of d.tags) cats.add(t)
+            }
+            cats.delete('Movies')
+            cats.delete('Layers')
+            return {
+              id: d.id,
+              title: d.title,
+              categories: Array.from(cats),
+              thumbnailUrl: d.thumbnailLink ?? null,
+            }
+          })
       },
       loadDataset: (id: string) => {
         void this.loadDataset(id)
