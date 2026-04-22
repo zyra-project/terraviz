@@ -1471,9 +1471,32 @@ export function updateCharacter(
   // a genuine blink (or a mostly-closed SLEEPY state) still hides
   // the catchlight cleanly. Each eye has its own catchlight material
   // instance (per buildPairedEye), so the write iterates the rigs.
+  const catchTargetOpacity = CATCHLIGHT_PRIMARY_OPACITY * sat(pupilVis)
   for (const rig of handles.eyeRigs) {
     const catchMat = rig.catchPrimary.material as THREE.ShaderMaterial
-    catchMat.uniforms.uOpacity.value = CATCHLIGHT_PRIMARY_OPACITY * sat(pupilVis)
+    catchMat.uniforms.uOpacity.value = catchTargetOpacity
+  }
+  // DIAGNOSTIC — log when the lid-closure gate should hide the
+  // catchlight. Throttled to ~2 prints/second so the console
+  // doesn't flood during continuous lid-close frames.
+  const now = time | 0
+  if (pupilVis < 0.1 && now !== (anim as unknown as { _lastCatchLog?: number })._lastCatchLog) {
+    ;(anim as unknown as { _lastCatchLog?: number })._lastCatchLog = now
+    const rig0 = handles.eyeRigs[0]
+    const mat0 = rig0.catchPrimary.material as THREE.ShaderMaterial
+    console.log('[orbit] catchlight fade check', {
+      pupilVis: pupilVis.toFixed(3),
+      catchTargetOpacity: catchTargetOpacity.toFixed(3),
+      matUniformValue: mat0.uniforms.uOpacity.value.toFixed(3),
+      materialType: mat0.type,
+      transparent: mat0.transparent,
+      blending: mat0.blending,
+      depthTest: mat0.depthTest,
+      visible: rig0.catchPrimary.visible,
+      scaleX: rig0.catchPrimary.scale.x.toFixed(3),
+      effectiveUpper: effectiveUpper.toFixed(3),
+      effectiveLower: effectiveLower.toFixed(3),
+    })
   }
 
   // ── Eye gaze (flight-aware, then state-specific) ─────────────────
