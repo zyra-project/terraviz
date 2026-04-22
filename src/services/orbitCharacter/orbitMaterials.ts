@@ -491,6 +491,38 @@ export function createStarGeometry(radius: number): THREE.BufferGeometry {
   return geom
 }
 
+/**
+ * Build a four-point sparkle-star geometry — the classic "twinkle"
+ * shape with sharp orthogonal rays and deep concave pinches between
+ * them. Used for the small flanking stars in the iris sparkle
+ * cluster; the bigger 5-pointer sits between them. A tighter inner
+ * ratio (0.22 vs. the 5-pointer's 0.42) gives the rays a visibly
+ * sharper needle profile that reads as "sparkle" rather than just
+ * "star."
+ */
+export function createFourPointStarGeometry(radius: number): THREE.BufferGeometry {
+  const points = 4
+  const inner = radius * 0.22
+  const verts = new Float32Array((1 + 2 * points + 1) * 3)
+  verts[0] = 0; verts[1] = 0; verts[2] = 0
+  for (let i = 0; i <= 2 * points; i++) {
+    const wrapped = i % (2 * points)
+    const r = wrapped % 2 === 0 ? radius : inner
+    const angle = -Math.PI / 2 + (wrapped / (2 * points)) * Math.PI * 2
+    verts[(i + 1) * 3] = Math.cos(angle) * r
+    verts[(i + 1) * 3 + 1] = Math.sin(angle) * r
+    verts[(i + 1) * 3 + 2] = 0
+  }
+  const idx: number[] = []
+  for (let i = 0; i < 2 * points; i++) {
+    idx.push(0, i + 1, i + 2)
+  }
+  const geom = new THREE.BufferGeometry()
+  geom.setAttribute('position', new THREE.BufferAttribute(verts, 3))
+  geom.setIndex(idx)
+  return geom
+}
+
 // -----------------------------------------------------------------------
 // Catchlight — static additive-white disc that sits on each eye and
 // stays fixed relative to the eye group as the pupil moves. Two

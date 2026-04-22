@@ -25,6 +25,7 @@ import {
   createPupilMaterials,
   createCatchlightMaterial,
   createStarGeometry,
+  createFourPointStarGeometry,
   createSubSphereMaterial,
   createBacklightMaterial,
   createBezelMaterial,
@@ -208,43 +209,44 @@ const UPPER_LID_CLOSED_ROT = +Math.PI * 0.40           // covers socket; stencil
 const LOWER_LID_CLOSED_ROT = -Math.PI * 0.40
 
 /**
- * Catchlight placement within the pupil group. Two per eye — a
- * larger primary highlight in the upper-outer quadrant, a smaller
- * secondary in the lower-outer. Both catchlights are **mirrored
- * per-eye** so they always sit on the OUTER side of each eye
- * (away from the face's vertical center); without the mirror, the
- * two eyes shared the same pupil-local offsets and one eye's
- * primary would land on the inner side, producing a false
- * "nose-bridge" cluster of brights between the eyes.
+ * Catchlight placement within the pupil group. One "planet" per eye
+ * — a single bright catchlight in the upper-outer quadrant that
+ * sells the "wet, alive" read and, in combination with the sparkle
+ * cluster opposite, evokes a planet-and-stars scene inside the eye
+ * (reinforces Orbit's cosmic-docent role). Mirrored per-eye so it
+ * always lands on the OUTER side of each eye (away from the face's
+ * vertical center) — without the mirror, the two eyes share the
+ * same pupil-local offset and one eye's highlight lands on the
+ * inner side, producing a false "nose-bridge" bright cluster.
  *
  * Reference values below are for the RIGHT eye (offsetX > 0, where
  * outer = positive local X). `buildPairedEye` derives a per-eye
- * sign from `offsetX` and flips the X components for the left eye.
+ * sign from `offsetX` and flips the X component for the left eye.
  *
- * Catchlights are parented to the gaze-tracking pupil group (with
- * the iris + pupil), so they track the eye's look direction — anime-
+ * The catchlight is parented to the gaze-tracking pupil group (with
+ * the iris + pupil), so it tracks the eye's look direction — anime-
  * style rigs handle highlights that way.
  */
-const CATCHLIGHT_PRIMARY_OFFSET_X = 0.0028
-const CATCHLIGHT_PRIMARY_OFFSET_Y = 0.0030
-const CATCHLIGHT_PRIMARY_RADIUS = 0.0025
-const CATCHLIGHT_PRIMARY_OPACITY = 0.75
+const CATCHLIGHT_PRIMARY_OFFSET_X = 0.0034
+const CATCHLIGHT_PRIMARY_OFFSET_Y = 0.0034
+const CATCHLIGHT_PRIMARY_RADIUS = 0.0028
+const CATCHLIGHT_PRIMARY_OPACITY = 1.0
 const CATCHLIGHT_PRIMARY_SEGMENTS = 32
-const CATCHLIGHT_SECONDARY_OFFSET_X = 0.0024
-const CATCHLIGHT_SECONDARY_OFFSET_Y = -0.0020
-const CATCHLIGHT_SECONDARY_RADIUS = 0.0012
-const CATCHLIGHT_SECONDARY_OPACITY = 0.55
-const CATCHLIGHT_SECONDARY_SEGMENTS = 24
 
 /**
- * Number of tiny white five-point stars scattered inside each eye's
- * pupil field. Position is sampled once at build time (stable per
- * lifetime of the rig) so they stay in the same relative spot —
- * otherwise they'd shimmer around and break the "star chart in the
- * eye" read.
+ * Sparkle cluster — three stars arranged horizontally in the
+ * lower-inner quadrant of the iris (opposite the primary
+ * catchlight). One larger 5-pointer in the middle flanked by two
+ * smaller 4-pointers. Together with the "planet" catchlight they
+ * read as a tiny starfield inside Orbit's eye. Cluster base
+ * position is mirrored per-eye so the cluster always sits on the
+ * inner (nose-bridge-facing) side of each eye.
  */
-const EYE_STARS_PER_EYE = 3
-const EYE_STAR_RADIUS = 0.00085
+const STAR_CLUSTER_OFFSET_X = -0.0022   // inner side for right eye; mirrored per-eye
+const STAR_CLUSTER_OFFSET_Y = -0.0028
+const STAR_CLUSTER_SPACING  = 0.0020    // horizontal gap between star centers
+const STAR_FIVE_POINT_RADIUS = 0.0011
+const STAR_FOUR_POINT_RADIUS = 0.00075
 
 /**
  * Eye shape — slightly taller than wide, matching the reference
@@ -277,7 +279,7 @@ const EYE_SHAPE_Y_SCALE = 1.18
  *   │   ├── pupilField — soft-edge navy, covers iris center
  *   │   ├── stars[]    — tiny white sparkles inside pupil field
  *   │   ├── pupilDot   — near-black center, scales with pupilSize
- *   │   └── catchlights (primary + secondary)
+ *   │   └── catchlight — single "planet" highlight upper-outer
  *   ├── upperLidPivot (hinge above socket, rotates X)
  *   │   └── upperLid  — shared spherical-cap body material
  *   └── lowerLidPivot (hinge below socket, rotates X)
@@ -293,13 +295,12 @@ export interface EyeRig {
   pupilDot: THREE.Mesh
   stars: THREE.Mesh[]
   /**
-   * Primary + secondary catchlights. Held on the rig so the
-   * per-frame update can subtly shimmer their scale during
-   * expressive states (TALKING / EXCITED / SURPRISED) for the
-   * "wet, alive" read without the highlight going static.
+   * Single "planet" catchlight in the upper-outer quadrant. Held on
+   * the rig so the per-frame update can subtly shimmer its scale
+   * during expressive states (TALKING / EXCITED / SURPRISED) for
+   * the "wet, alive" read without the highlight going static.
    */
   catchPrimary: THREE.Mesh
-  catchSecondary: THREE.Mesh
   upperLidPivot: THREE.Object3D
   upperLid: THREE.Mesh
   lowerLidPivot: THREE.Object3D
@@ -483,11 +484,11 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
   // `docs/ORBIT_CHARACTER_VINYL_REDESIGN.md` §Face.
   const eyeLeft = buildPairedEye(
     head, eyeBundle, pupilMaterials, lidBundleLeft.material, bezelMaterial, lidGeometry,
-    -EYE_PAIR_OFFSET_X, EYE_PAIR_OFFSET_Y, EYE_STAR_POSITIONS_LEFT, LEFT_EYE_STENCIL_REF,
+    -EYE_PAIR_OFFSET_X, EYE_PAIR_OFFSET_Y, LEFT_EYE_STENCIL_REF,
   )
   const eyeRight = buildPairedEye(
     head, eyeBundle, pupilMaterials, lidBundleRight.material, bezelMaterial, lidGeometry,
-    +EYE_PAIR_OFFSET_X, EYE_PAIR_OFFSET_Y, EYE_STAR_POSITIONS_RIGHT, RIGHT_EYE_STENCIL_REF,
+    +EYE_PAIR_OFFSET_X, EYE_PAIR_OFFSET_Y, RIGHT_EYE_STENCIL_REF,
   )
 
   const eyeRigs: EyeRig[] = [eyeLeft, eyeRight]
@@ -569,30 +570,13 @@ function makeOrbitBasis(tilt: number, twist: number): { u: THREE.Vector3; v: THR
 }
 
 /**
- * Shared star geometry — a single five-point-star BufferGeometry used
- * for every sparkle sprite on both eyes. Cloning the mesh shares the
- * geometry, so adding/removing stars is cheap and memory stays flat.
- * Disposed with the scene traversal in `OrbitController.dispose`.
+ * Shared star geometries — one 5-point star for the cluster center,
+ * one 4-point sparkle for the flanking pair. All four eye-pair
+ * instances clone these; geometry allocation stays flat. Disposed
+ * with the scene traversal in `OrbitController.dispose`.
  */
-const _starGeometry = createStarGeometry(EYE_STAR_RADIUS)
-
-/**
- * Deterministic per-star placement so the stars don't shift between
- * left and right eye (would look like misaligned parallax) but each
- * eye has a distinct chart (so they don't read as "the same scene
- * twice"). Positions are in iris-local space, clamped inside the
- * pupil field minus a safety margin.
- */
-const EYE_STAR_POSITIONS_LEFT: Array<[number, number]> = [
-  [-0.0028, 0.0012],
-  [ 0.0016, -0.0022],
-  [ 0.0020, 0.0028],
-]
-const EYE_STAR_POSITIONS_RIGHT: Array<[number, number]> = [
-  [ 0.0028, 0.0014],
-  [-0.0018, -0.0020],
-  [-0.0024, 0.0030],
-]
+const _fivePointStarGeometry = createStarGeometry(STAR_FIVE_POINT_RADIUS)
+const _fourPointStarGeometry = createFourPointStarGeometry(STAR_FOUR_POINT_RADIUS)
 
 /**
  * Build one half of the paired-eye configuration.
@@ -621,12 +605,19 @@ function buildPairedEye(
   lidGeometry: THREE.BufferGeometry,
   offsetX: number,
   offsetY: number,
-  starPositions: Array<[number, number]>,
   stencilRef: number,
 ): EyeRig {
   const group = new THREE.Group()
   group.position.set(offsetX, offsetY, 0)
   head.add(group)
+
+  // Mirrors the X component of feature offsets per eye so the
+  // "outer" side of the face is consistently +X for both eyes
+  // (catchlight lands upper-outer; sparkle cluster lands lower-
+  // inner). Without the mirror, features share the same local X
+  // sign and one eye's catchlight lands on the inner side,
+  // producing a false "nose-bridge" bright between the eyes.
+  const catchXSign = offsetX < 0 ? -1 : 1
 
   // Socket stencil mask — invisible disc the size of the socket, drawn
   // BEFORE the lids to write `stencilRef` to the stencil buffer
@@ -697,16 +688,25 @@ function buildPairedEye(
   pupilField.position.z = SOCKET_Z_PUPIL_FIELD
   pupilGroup.add(pupilField)
 
-  // Sparkle stars — tiny white five-point lights inside the pupil
-  // field. Position is per-eye so the two eyes aren't identical.
+  // Sparkle cluster — three stars in a tight horizontal arrangement
+  // in the lower-inner quadrant of the iris, opposite the "planet"
+  // catchlight. Larger 5-pointer in the middle flanked by two
+  // smaller 4-pointer sparkles. Cluster base position is mirrored
+  // per-eye (inner side for each eye) via `catchXSign`. Tiny
+  // rotation variance on each star so they don't read as a
+  // rubber-stamped line of identical shapes.
   const stars: THREE.Mesh[] = []
-  for (let i = 0; i < Math.min(EYE_STARS_PER_EYE, starPositions.length); i++) {
-    const [sx, sy] = starPositions[i]
-    const star = new THREE.Mesh(_starGeometry, pupilMaterials.starMat)
-    star.position.set(sx, sy, SOCKET_Z_STARS)
-    // Tiny per-star rotation variance so they read as "different stars"
-    // rather than a rubber-stamped pattern.
-    star.rotation.z = (i * 0.37) % (Math.PI * 2)
+  const clusterX = STAR_CLUSTER_OFFSET_X * catchXSign
+  const clusterY = STAR_CLUSTER_OFFSET_Y
+  const starSpecs: Array<{ geom: THREE.BufferGeometry; dx: number; rotZ: number }> = [
+    { geom: _fourPointStarGeometry, dx: -STAR_CLUSTER_SPACING, rotZ: 0.18 },
+    { geom: _fivePointStarGeometry, dx: 0,                     rotZ: 0.42 },
+    { geom: _fourPointStarGeometry, dx: +STAR_CLUSTER_SPACING, rotZ: -0.22 },
+  ]
+  for (const spec of starSpecs) {
+    const star = new THREE.Mesh(spec.geom, pupilMaterials.starMat)
+    star.position.set(clusterX + spec.dx, clusterY, SOCKET_Z_STARS)
+    star.rotation.z = spec.rotZ
     pupilGroup.add(star)
     stars.push(star)
   }
@@ -719,17 +719,12 @@ function buildPairedEye(
   pupilDot.position.z = SOCKET_Z_PUPIL_DOT
   pupilGroup.add(pupilDot)
 
-  // Primary + secondary catchlights. Soft radial falloff via custom
-  // shader; scaling is animated per-frame for expressive states so
-  // the highlight shimmers subtly instead of sitting static like a
-  // decal.
-  //
-  // `catchXSign` mirrors the X component of each catchlight offset
-  // per eye so the primary always lands on the OUTER side of the
-  // face (and the secondary on the lower-outer). Without the mirror,
-  // the two eyes share the same pupil-local offsets and produce a
-  // bright asymmetric "nose-bridge" cluster between the eyes.
-  const catchXSign = offsetX < 0 ? -1 : 1
+  // Single "planet" catchlight in the upper-outer quadrant. Soft
+  // radial falloff via custom shader; scale is animated per-frame
+  // for expressive states so the highlight shimmers subtly instead
+  // of sitting static like a decal. X offset mirrored per-eye via
+  // `catchXSign` so the highlight consistently lands on the face's
+  // outer side.
   const catchPrimary = new THREE.Mesh(
     new THREE.CircleGeometry(CATCHLIGHT_PRIMARY_RADIUS, CATCHLIGHT_PRIMARY_SEGMENTS),
     createCatchlightMaterial(CATCHLIGHT_PRIMARY_OPACITY),
@@ -740,16 +735,6 @@ function buildPairedEye(
     SOCKET_Z_CATCHLIGHT,
   )
   pupilGroup.add(catchPrimary)
-  const catchSecondary = new THREE.Mesh(
-    new THREE.CircleGeometry(CATCHLIGHT_SECONDARY_RADIUS, CATCHLIGHT_SECONDARY_SEGMENTS),
-    createCatchlightMaterial(CATCHLIGHT_SECONDARY_OPACITY),
-  )
-  catchSecondary.position.set(
-    CATCHLIGHT_SECONDARY_OFFSET_X * catchXSign,
-    CATCHLIGHT_SECONDARY_OFFSET_Y,
-    SOCKET_Z_CATCHLIGHT + 0.00005,
-  )
-  pupilGroup.add(catchSecondary)
 
   // Upper + lower lids — shared spherical-cap geometry, shared body
   // vinyl material. Each lid is parented to a pivot Object3D at the
@@ -807,7 +792,7 @@ function buildPairedEye(
   return {
     group, bezel, pupilGroup,
     iris, irisGlow, pupilField, pupilDot, stars,
-    catchPrimary, catchSecondary,
+    catchPrimary,
     upperLidPivot, upperLid, lowerLidPivot, lowerLid,
     jitterScale: EYE_PAIR_JITTER_SCALE,
   }
@@ -1259,18 +1244,13 @@ export function updateCharacter(
   const wantsShimmer = (state === 'TALKING' || state === 'EXCITED' || state === 'SURPRISED')
     && !reducedMotion
   if (wantsShimmer) {
-    // ~4 Hz with small amplitude; primary and secondary slightly
-    // out of phase so the two highlights don't pulse in lockstep.
-    const shimmerPrimary = 1 + Math.sin(time * 4.0 * Math.PI * 2) * 0.05
-    const shimmerSecondary = 1 + Math.sin(time * 4.0 * Math.PI * 2 + 1.5) * 0.05
+    const shimmer = 1 + Math.sin(time * 4.0 * Math.PI * 2) * 0.05
     for (const rig of handles.eyeRigs) {
-      rig.catchPrimary.scale.setScalar(shimmerPrimary)
-      rig.catchSecondary.scale.setScalar(shimmerSecondary)
+      rig.catchPrimary.scale.setScalar(shimmer)
     }
   } else {
     for (const rig of handles.eyeRigs) {
       rig.catchPrimary.scale.setScalar(lerp(rig.catchPrimary.scale.x, 1, 0.18))
-      rig.catchSecondary.scale.setScalar(lerp(rig.catchSecondary.scale.x, 1, 0.18))
     }
   }
 
