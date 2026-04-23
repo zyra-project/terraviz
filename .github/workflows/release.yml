@@ -129,9 +129,9 @@ jobs:
         with:
           tauriScript: npx tauri
           tagName: ${{ needs.prepare.outputs.tag || github.ref_name }}
-          releaseName: 'Interactive Sphere ${{ needs.prepare.outputs.tag || github.ref_name }}'
+          releaseName: 'Terraviz ${{ needs.prepare.outputs.tag || github.ref_name }}'
           releaseBody: |
-            See the [full changelog](https://github.com/zyra-project/interactive-sphere/commits/${{ needs.prepare.outputs.tag || github.ref_name }}).
+            See the [full changelog](https://github.com/zyra-project/terraviz/commits/${{ needs.prepare.outputs.tag || github.ref_name }}).
 
             ## Installation
             | Platform | Download |
@@ -158,8 +158,8 @@ jobs:
           # Find the MSI and upload as a stable name
           MSI=$(find src-tauri/target/release/bundle/msi -name '*.msi' | head -1)
           if [ -n "$MSI" ]; then
-            cp "$MSI" "Interactive-Sphere-latest-x64.msi"
-            gh release upload "$TAG" "Interactive-Sphere-latest-x64.msi" --clobber
+            cp "$MSI" "Terraviz-latest-x64.msi"
+            gh release upload "$TAG" "Terraviz-latest-x64.msi" --clobber
           fi
 
       - name: Upload stable download alias
@@ -170,8 +170,8 @@ jobs:
           TAG="${{ needs.prepare.outputs.tag || github.ref_name }}"
           DMG=$(find src-tauri/target/release/bundle/dmg -name '*.dmg' | head -1)
           if [ -n "$DMG" ]; then
-            cp "$DMG" "Interactive-Sphere-latest-aarch64.dmg"
-            gh release upload "$TAG" "Interactive-Sphere-latest-aarch64.dmg" --clobber
+            cp "$DMG" "Terraviz-latest-aarch64.dmg"
+            gh release upload "$TAG" "Terraviz-latest-aarch64.dmg" --clobber
           fi
 
       - name: Upload stable download alias
@@ -182,6 +182,6 @@ jobs:
           TAG="${{ needs.prepare.outputs.tag || github.ref_name }}"
           APPIMAGE=$(find src-tauri/target/release/bundle/appimage -name '*.AppImage' | head -1)
           if [ -n "$APPIMAGE" ]; then
-            cp "$APPIMAGE" "Interactive-Sphere-latest-x64.AppImage"
-            gh release upload "$TAG" "Interactive-Sphere-latest-x64.AppImage" --clobber
+            cp "$APPIMAGE" "Terraviz-latest-x64.AppImage"
+            gh release upload "$TAG" "Terraviz-latest-x64.AppImage" --clobber
           fi

@@ -1,13 +1,13 @@
-# Interactive Sphere
+# Terraviz
 
-[![Live Demo](https://img.shields.io/badge/Live_Demo-sphere.zyra--project.org-4da6ff)](https://sphere.zyra-project.org)
-[![Windows](https://img.shields.io/badge/Download-Windows-0078D4?logo=windows&logoColor=white)](https://github.com/zyra-project/interactive-sphere/releases/latest/download/Interactive-Sphere-latest-x64.msi)
-[![macOS](https://img.shields.io/badge/Download-macOS-000000?logo=apple&logoColor=white)](https://github.com/zyra-project/interactive-sphere/releases/latest/download/Interactive-Sphere-latest-aarch64.dmg)
-[![Linux](https://img.shields.io/badge/Download-Linux-FCC624?logo=linux&logoColor=black)](https://github.com/zyra-project/interactive-sphere/releases/latest/download/Interactive-Sphere-latest-x64.AppImage)
+[![Live Demo](https://img.shields.io/badge/Live_Demo-terraviz.zyra--project.org-4da6ff)](https://terraviz.zyra-project.org)
+[![Windows](https://img.shields.io/badge/Download-Windows-0078D4?logo=windows&logoColor=white)](https://github.com/zyra-project/terraviz/releases/latest/download/Terraviz-latest-x64.msi)
+[![macOS](https://img.shields.io/badge/Download-macOS-000000?logo=apple&logoColor=white)](https://github.com/zyra-project/terraviz/releases/latest/download/Terraviz-latest-aarch64.dmg)
+[![Linux](https://img.shields.io/badge/Download-Linux-FCC624?logo=linux&logoColor=black)](https://github.com/zyra-project/terraviz/releases/latest/download/Terraviz-latest-x64.AppImage)
 
-A WebGL-based globe that streams environmental data from the [Science On a Sphere](https://sos.noaa.gov/) project. Available as a [web app](https://sphere.zyra-project.org) and a native desktop application for Windows, macOS, and Linux.
+A WebGL-based globe that streams environmental data from the [Science On a Sphere](https://sos.noaa.gov/) project. Available as a [web app](https://terraviz.zyra-project.org) and a native desktop application for Windows, macOS, and Linux.
 
-![SOS Explorer interface showing the Earth globe with the dataset browse panel](initial-interface.jpg)
+![Terraviz interface showing the Earth globe with the dataset browse panel](initial-interface.jpg)
 
 ## ✨ Features
 
@@ -128,7 +128,7 @@ npm run build:desktop
 ## 📁 Project Structure
 
 ```
-interactive-sphere/
+terraviz/
 ├── src/                         # Web app (shared by web + desktop)
 │   ├── index.html               #   Single-page app shell
 │   ├── main.ts                  #   App entry point, dataset loading orchestration

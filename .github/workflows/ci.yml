@@ -66,7 +66,7 @@ jobs:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork)
     environment:
       name: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
-      url: ${{ github.ref == 'refs/heads/main' && 'https://sphere.zyra-project.org/' || '' }}
+      url: ${{ github.ref == 'refs/heads/main' && 'https://terraviz.zyra-project.org/' || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -91,7 +91,7 @@ jobs:
           # before the step dies, and `set -o pipefail` keeps the step failing on
           # wrangler errors.
           DEPLOY_LOG=$(mktemp)
-          npx wrangler@3 pages deploy dist/ --project-name interactive-sphere --branch "$BRANCH_NAME" --commit-hash ${{ github.sha }} 2>&1 | tee "$DEPLOY_LOG"
+          npx wrangler@3 pages deploy dist/ --project-name terraviz --branch "$BRANCH_NAME" --commit-hash ${{ github.sha }} 2>&1 | tee "$DEPLOY_LOG"
           # Extract the preview URL from the captured log. `|| true` guards against
           # a grep no-match (which would otherwise kill the step under `bash -e`)
           # while preserving wrangler's real exit code from the pipeline above.

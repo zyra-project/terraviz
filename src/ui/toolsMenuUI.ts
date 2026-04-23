@@ -324,7 +324,7 @@ export function initToolsMenu(
     const { shareDataset, buildDatasetShareUrl } = await import('../services/shareService')
     const shared = await shareDataset({
       title: dataset.title,
-      text: `Check out "${dataset.title}" on Interactive Sphere`,
+      text: `Check out "${dataset.title}" on Terraviz`,
       url: buildDatasetShareUrl(dataset.id),
     })
     if (shared) announce?.('Dataset shared')

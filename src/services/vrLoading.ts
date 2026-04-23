@@ -3,7 +3,7 @@
  *
  * Faithful to the 2D visual language: small dark-blue sphere with a
  * subtle pulse, two concentric rings spinning at different speeds and
- * directions, "SOS Explorer" title + subtitle, thin progress bar,
+ * directions, "Terraviz" title + subtitle, thin progress bar,
  * status text. Replaces the 2D HTML loading screen with a spatial
  * version while the WebXR session is starting up and the dataset
  * texture is decoding.
@@ -78,7 +78,7 @@ export interface VrLoadingHandle {
 }
 
 /**
- * Draw the title canvas. "SOS Explorer" big uppercase + "Science On
+ * Draw the title canvas. "Terraviz" big uppercase + "Science On
  * a Sphere" subtitle in accent — mirrors the 2D headings.
  */
 function drawTitle(ctx: CanvasRenderingContext2D): void {
@@ -89,7 +89,7 @@ function drawTitle(ctx: CanvasRenderingContext2D): void {
   ctx.textBaseline = 'middle'
   // Letter-spacing isn't a Canvas2D property — fake it by drawing
   // each letter with a fixed advance. Matches 2D's letter-spacing: 0.25em.
-  const titleText = 'SOS EXPLORER'
+  const titleText = 'TERRAVIZ'
   const letterSpacingPx = 12
   const letterWidth = ctx.measureText('M').width // approx em width
   const totalWidth = titleText.length * (letterWidth * 0.55 + letterSpacingPx)

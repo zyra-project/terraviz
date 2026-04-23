@@ -1,5 +1,5 @@
 /**
- * Type definitions for Interactive Sphere project
+ * Type definitions for Terraviz project
  */
 
 /**

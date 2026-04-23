@@ -1,13 +1,13 @@
 {
-  "name": "Interactive Sphere",
+  "name": "Terraviz",
   "build": {
     "dockerfile": "../Dockerfile"
   },
   "workspaceFolder": "/app",
   "workspaceMount": "source=${localWorkspaceFolder},target=/app,type=bind,consistency=cached",
   "mounts": [
-    "source=interactive-sphere-node-modules,target=/app/node_modules,type=volume",
-    "source=interactive-sphere-cargo-target,target=/app/src-tauri/target,type=volume"
+    "source=terraviz-node-modules,target=/app/node_modules,type=volume",
+    "source=terraviz-cargo-target,target=/app/src-tauri/target,type=volume"
   ],
   "forwardPorts": [5173],
   "containerEnv": {
