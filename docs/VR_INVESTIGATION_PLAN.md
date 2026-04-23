@@ -673,7 +673,7 @@ canvas redraws as each arrives — same progressive-render pattern as
 a web page loading images. Failed thumbnails show a placeholder
 icon (globe emoji or category color swatch).
 
-### Phase 3.5 — VR tours (the museum experience)
+### Phase 3.5 — VR tours (the museum experience) *(in progress on `claude/vr-tours-phase-3.5`)*
 
 Tours are the killer app for VR Science On a Sphere. A real museum
 SOS installation runs curated, narrated dataset sequences with
@@ -723,25 +723,32 @@ heavy lifting (engine, dataset loading, sync) is reused.
   for Phase 3's browse panel is directly reusable, so doing them
   in sequence is efficient.
 
-**Overlay placement** — design decision:
+**Overlay placement — locked in:** hybrid. World-anchored by
+default (overlays float at fixed positions relative to the
+globe). Tours specify an optional `anchor` in each overlay task
+for specific spatial layouts (e.g. "this graphic should appear
+to the left of the Atlantic"); the per-overlay JSON hint wins
+when present. A `gazeFollowOverlays` preference flips the global
+default to subtitle-style in-front-of-user placement for
+overlays that don't carry an explicit anchor. Shipped in commit
+8 as infrastructure only — the preference is persisted and
+readable from the tour engine / VR session, but no HUD toggle
+binds to it yet. A UI for flipping the default at runtime is a
+follow-up; tour authors can drive per-overlay placement via the
+JSON field today.
 
-Tour overlays in 2D float over the globe canvas at fixed screen
-positions. In VR there's no fixed screen — the user can look
-anywhere. Two options:
-
-1. **World-anchored** — overlays float at fixed positions in the
-   room (e.g. "above the globe", "to the right at chest height").
-   User can look away if they want; overlays stay where they were.
-   More immersive, but the user might miss content if they're not
-   looking that way.
-2. **Gaze-anchored** — overlays follow the user's head with a
-   slight delay, always visible. Like reading subtitles on a
-   movie. Less immersive but ensures content is seen.
-
-Probably **world-anchored by default with an optional gaze-follow
-toggle.** Tours can also specify an anchor in the tour JSON if a
-specific spatial layout matters (e.g. "this graphic should appear
-to the left of the Atlantic"). Hybrid is the right answer.
+**Drag-to-reposition.** Users can grab any world-mode text /
+popup / image overlay with a controller trigger and move it to a
+spot that feels right in the room — panel maintains its initial
+offset from the controller so it "follows" the held-card
+metaphor. Release commits the new position as a
+`customWorldOffset` on the overlay; the panel stays there but
+continues to track the globe if it moves (AR placement). The
+override clears when the overlay is hidden, so a re-show by the
+same id starts at the default again. Video and question
+overlays are excluded from drag — video is content-first, and
+question's answer-button raycast would conflict with a
+grab-to-drag gesture.
 
 **Interactive questions:**
 
@@ -759,18 +766,42 @@ unchanged — no session-specific handling needed. Volume balance
 might want a HUD slider eventually (museum environments vary in
 ambient noise) but a fixed level is fine for v1.
 
-**Effort sequencing:**
+**Commit sequence (branch: `claude/vr-tours-phase-3.5`):**
 
-Within Phase 3.5 itself, the work breaks into ~5 commits:
-1. Tour controls in HUD (extend `vrHud.ts` + state plumbing)
-2. Text + popup overlays as CanvasTexture panels
-3. Image + video overlays
-4. Interactive questions with raycast selection
-5. Multi-globe routing for `setEnvView` / `worldIndex` (depends on
-   Phase 2.5 landed)
+Decisions baked in before the first code change:
 
-Each is independently testable on a known tour file (the existing
-`/assets/test-tour.json` is a good fixture).
+- **Overlay placement:** world-anchored default (see above).
+  Per-overlay tour-JSON anchor hint wins when present. A
+  `gazeFollowOverlays` preference is persisted as a global
+  default flipper but ships without a HUD toggle binding —
+  runtime UI for it is deferred. Drag-to-reposition on world-
+  mode overlays lets users manually place any overlay.
+- **All work lands on one branch,** with mid-cycle pauses after
+  commits 3 / 4 / 6 / 7 for on-device Quest validation before
+  the next commit starts.
+- **Fixtures already in-tree:** `/assets/test-tour.json` (Climate
+  Connections — single-globe, text + image + popup tasks),
+  `/assets/climate-futures-tour.json` (multi-globe `setEnvView`
+  / `worldIndex` coverage), `/assets/test-setenvview-tour.json`
+  (minimal `setEnvView` fixture). No S3 dependency.
+
+Commit breakdown:
+
+| # | Commit | Scope | Test pause? |
+|---|---|---|---|
+| 1 | Plan doc: lock Phase 3.5 decisions + commit breakdown | This section | — |
+| 2 | `vrTourOverlay: CanvasTexture panel scaffold` | Panel mesh + canvas drawing (title, body text, close affordance), show/hide, world-anchor + gaze-follow pose modes. No engine wiring. | — |
+| 3 | `vrTourControls + state plumbing` | New `vrTourControls.ts` module — a small floating strip below the main HUD with prev / play-pause / next / stop buttons + a step counter. Shown only while a tour is active. `VrSessionContext` gains `getTourState()` + tour control callbacks wired to `tourEngine` via main.ts. Kept as a separate mesh (not a vrHud extension) so the dataset HUD's geometry stays untouched. | **Pause** — strip should drive `test-tour.json` from VR even before overlays render |
+| 4 | `vrTourOverlay: text + popup overlays via tourEngine callbacks` | Wire `tourUI`-equivalent callbacks into `tourEngine` host. World-anchor default, gaze-follow when toggled. | **Pause** — `test-tour.json` plays end-to-end with text |
+| 4.5 | `vr: country-borders overlay + envShowWorldBorder wiring` | Inserted after commit 4 to close a gap flagged during testing: data-only datasets like Carbon Tracker / SSP are illegible without a land-vs-ocean reference on the globe. Adds `vrBorders.ts` (transparent-PNG shell at `r × 1.001` on every globe in the arc, lazy-loaded 4K/8K from the existing CloudFront basemaps path), plus a shared `bordersVisible` flag in `viewPreferences.ts` that both the 2D Tools-menu toggle and the tour engine's `execWorldBorder` write to. VR polls the flag per frame and mirrors the state. Generalizes: future VR-side overlays (`envShowClouds`, `envShowDayNightLighting`) can reuse the same shared-flag pattern without per-toggle callback plumbing. | — |
+| 5 | `vrTourOverlay: image + video overlays` | Plane mesh + image/video texture variants driven by overlay task payload. Reuse `fetchImageWithProgress` + HLS plumbing where applicable. | — |
+| 6 | `vrTourOverlay: interactive questions` | CanvasTexture question panel with multiple-choice answer regions; controller raycast + UV hit-test mirrors `vrHud.hitTest(uv)` pattern. Selection fires tour-engine callback. | **Pause** — single-panel tours feature-complete |
+| 7 | `vrTours: multi-globe overlay placement + verify setEnvView / worldIndex routing` | Phase 2.5's per-frame panel-count poll already routes `setEnvView` transitions and `loadDataset { worldIndex }` slot-targeted loads into VR correctly — no new plumbing required. Commit 7's actual work is overlay-placement polish: wide popup / image / question panels at the single-globe default offset (+0.6 x) land inside a 2-globe arc and occlude the secondary. New `setMultiGlobeHint` flag on the overlay manager shifts the default to above the primary when panel count > 1, driven each frame by vrSession based on `ctx.getPanelCount()`. Existing overlays keep their stored offset; tours that hide + re-show across a layout transition pick up the updated placement. | **Pause** — `climate-futures-tour.json` runs across the 2-globe + 4-globe arcs |
+| 8 | `vr(3.5): per-overlay tour-JSON anchor override + gaze-follow preference` | Tour authors can add an `anchor` field to any overlay task (`showRect`, `showPopupHtml`, `showImage`, `playVideo`, `question`) to pin the VR placement explicitly — `{ "mode": "gaze" }` or `{ "mode": "world", "offset": { ... } }`. `viewPreferences.gazeFollowOverlays` persists the global default; per-overlay hints win when present. HUD toggle is deferred to a follow-up (the preference is settable programmatically and via tour JSON, covering the common cases). `test-tour.json` updated with two gaze-follow examples (opening + closing cards) so the feature is on-headset testable without hand-editing JSON. | — |
+
+Commits 2-4 reach the "tour plays with text overlays" milestone.
+5-6 cover the remaining overlay surfaces for single-panel tours.
+7 lifts the work to multi-globe. 8 is UX polish on anchoring.
 
 ### Phase 4 — Orbit Avatar (the docent gets a body)
 

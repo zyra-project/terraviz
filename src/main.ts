@@ -42,6 +42,7 @@ import { initLegendForDataset, clearLegendCache, loadConfig } from './services/d
 import { isMobile, IS_MOBILE_NATIVE, getCloudTextureUrl } from './utils/deviceCapability'
 import { initDeepLinks } from './services/deepLinkService'
 import { initVrButton } from './ui/vrButton'
+import { flyToOnGlobe, isVrActive } from './services/vrSession'
 import type { VrDatasetTexture } from './services/vrScene'
 
 // Phase 5: set a body class so CSS can target mobile-native adaptations
@@ -1198,6 +1199,49 @@ class InteractiveSphere {
       // the panel-slot version with the current primary index.
       getDatasetTexture: () => getPanelTexture(this.viewports.getPrimaryIndex()),
       getDatasetTitle: () => this.appState.currentDataset?.title ?? null,
+      getDatasetTimeLabel: () => {
+        // Compute the label fresh from video.currentTime every call.
+        //
+        // Why not read appState.timeLabel? WebXR pauses
+        // window.requestAnimationFrame while an immersive session
+        // is live, which freezes `startPlaybackLoop` — the
+        // per-frame loop that normally keeps appState.timeLabel
+        // updated. A VR session reading appState.timeLabel would
+        // see the value from the instant the user tapped Enter VR
+        // and stay there forever. Recomputing here makes the
+        // label advance on the XR animation loop instead, and as
+        // a bonus gives us correct pause behaviour for free: a
+        // paused video's currentTime doesn't advance, so the
+        // formatted string stays fixed until playback resumes.
+        const ds = this.appState.currentDataset
+        if (!ds?.startTime) return null
+
+        if (dataService.isVideoDataset(ds)) {
+          const video = this.hlsService?.video
+          if (!video || !ds.endTime) return null
+          // `HTMLVideoElement.duration` is `NaN` until the video's
+          // metadata has loaded — `?? 1` doesn't catch NaN because
+          // it isn't nullish, so the previous check would pass NaN
+          // straight into `videoTimeToDate` and `formatDate` would
+          // render "Invalid Date". Suppress the label entirely
+          // until duration is available; the per-frame poll will
+          // pick it up the first frame after `loadedmetadata`.
+          const duration = this.hlsService?.duration
+          if (!Number.isFinite(duration) || (duration as number) <= 0) return null
+          const start = new Date(ds.startTime)
+          const end = new Date(ds.endTime)
+          const snapMs = this.playback.displayInterval?.intervalMs
+          const currentDate = videoTimeToDate(video.currentTime, duration as number, start, end, snapMs)
+          const showTime = ds.period
+            ? isSubDailyPeriod(ds.period)
+            : (this.playback.displayInterval?.showTime ?? false)
+          return formatDate(currentDate, showTime)
+        }
+
+        // Image dataset — the startTime is the only thing to show.
+        const showTime = ds.period ? isSubDailyPeriod(ds.period) : false
+        return formatDate(new Date(ds.startTime), showTime)
+      },
       hasVideoDataset: () => {
         const ds = this.appState.currentDataset
         return !!ds && dataService.isVideoDataset(ds)
@@ -1260,6 +1304,51 @@ class InteractiveSphere {
         void this.loadDataset(id)
       },
 
+      // --- Phase 3.5 in-VR tour controls ---
+      // `tourEngine` is null when no tour is running — the strip
+      // keys off `active: false` in that case and stays hidden.
+      // When a tour is running, state maps 1:1 onto TourEngine's
+      // accessors. Tour actions fan out to the same methods the 2D
+      // `showTourControls` bar wires up.
+      getTourState: () => {
+        const engine = this.tourEngine
+        if (!engine) {
+          return { active: false, isPlaying: false, step: 0, totalSteps: 0 }
+        }
+        return {
+          active: engine.state !== 'stopped',
+          isPlaying: engine.state === 'playing',
+          step: engine.currentIndex,
+          totalSteps: engine.totalSteps,
+        }
+      },
+      tourTogglePlayPause: () => {
+        const engine = this.tourEngine
+        if (!engine) return
+        if (engine.state === 'playing') engine.pause()
+        else void engine.play()
+      },
+      tourPrev: () => {
+        const engine = this.tourEngine
+        if (!engine) return
+        engine.prev()
+        // Matches the 2D next-button behavior (tourUI.onNext): after
+        // navigating, resume playback if the engine paused itself on
+        // a pauseForInput waiting for user input.
+        if (engine.state === 'paused') void engine.play()
+      },
+      tourNext: () => {
+        const engine = this.tourEngine
+        if (!engine) return
+        engine.next()
+        if (engine.state === 'paused') void engine.play()
+      },
+      tourStop: () => {
+        // Routes through stopTour() not engine.stop() so the
+        // standalone-tour "return home" behaviour still runs.
+        this.stopTour()
+      },
+
       onSessionEnd: () => {
         this.announce('Exited VR')
       },
@@ -1271,7 +1360,14 @@ class InteractiveSphere {
     initPlaybackPositioning()
     initChatUI({
       onLoadDataset: (id) => { void this.selectDatasetFromChat(id) },
-      onFlyTo: (lat, lon, altitude) => { void this.renderer?.flyTo(lat, lon, altitude) },
+      onFlyTo: (lat, lon, altitude) => {
+        void this.renderer?.flyTo(lat, lon, altitude)
+        // Also rotate the VR globe if a session is live. Fire-and-
+        // forget — chat isn't awaiting the settle, and the VR-side
+        // animation runs off the existing render loop regardless
+        // of whether anyone holds the promise.
+        if (isVrActive()) void flyToOnGlobe(lat, lon)
+      },
       onSetTime: (isoDate) => seekToDate(isoDate, this.hlsService, this.appState, this.playback),
       onFitBounds: (bounds, _label) => { this.renderer?.fitBounds(bounds) },
       onAddMarker: (lat, lng, label) => { this.renderer?.addMarker(lat, lng, label) },

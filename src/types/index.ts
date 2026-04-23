@@ -366,6 +366,34 @@ export interface FlyToTaskParams {
   animated: boolean
 }
 
+/**
+ * VR-specific placement override for a tour overlay task.
+ *
+ * Tour overlays default to "world-anchored" in VR — they float
+ * near the globe and billboard toward the user. When the global
+ * preference `gazeFollowOverlays` is set, the default flips to
+ * "gaze-follow" — overlays ride in front of the user's head with
+ * smoothed lerp, subtitle-style.
+ *
+ * This optional field on each overlay task lets a tour author
+ * escape the global default for a specific overlay: pin the
+ * opening title in gaze-follow mode so new visitors never miss
+ * it, pin a region-specific caption world-anchored near a
+ * landmark, or specify a custom offset in metres when the
+ * default placement collides with other scene content. When
+ * absent, the manager's current default is used.
+ *
+ * Interpretation of `offset` is mode-specific:
+ * - `world`: metres in world axes, relative to the primary globe.
+ *   `(0, 0.85, 0)` places the panel directly above the globe.
+ * - `gaze`: metres in camera-local axes. `+x` right, `+y` up,
+ *   `-z` forward (Three.js camera convention).
+ */
+export interface TourOverlayAnchor {
+  mode: 'world' | 'gaze'
+  offset?: { x: number; y: number; z: number }
+}
+
 export interface ShowRectTaskParams {
   rectID: string
   caption: string
@@ -379,6 +407,8 @@ export interface ShowRectTaskParams {
   widthPct: number
   heightPct: number
   showBorder?: boolean
+  /** VR-only placement override. See {@link TourOverlayAnchor}. */
+  anchor?: TourOverlayAnchor
 }
 
 export interface LoadDatasetTaskParams {
@@ -418,6 +448,8 @@ export interface QuestionTaskParams {
   yPct?: number
   widthPct?: number
   heightPct?: number
+  /** VR-only placement override. See {@link TourOverlayAnchor}. */
+  anchor?: TourOverlayAnchor
 }
 
 export interface WorldBorderTaskParams {
@@ -442,6 +474,8 @@ export interface PlayVideoTaskParams {
   yPct?: number
   sizePct?: number
   showControls?: boolean
+  /** VR-only placement override. See {@link TourOverlayAnchor}. */
+  anchor?: TourOverlayAnchor
 }
 
 export interface ShowImageTaskParams {
@@ -459,6 +493,8 @@ export interface ShowImageTaskParams {
   captionPos?: 'center' | 'left' | 'right' | 'top' | 'bottom'
   fontSize?: number
   fontColor?: string
+  /** VR-only placement override. See {@link TourOverlayAnchor}. */
+  anchor?: TourOverlayAnchor
 }
 
 export interface ShowPopupHtmlTaskParams {
@@ -474,6 +510,8 @@ export interface ShowPopupHtmlTaskParams {
    * sandboxed iframe. Defaults to false — only enable for trusted origins.
    */
   allowScripts?: boolean
+  /** VR-only placement override. See {@link TourOverlayAnchor}. */
+  anchor?: TourOverlayAnchor
 }
 
 export interface AddPlacemarkTaskParams {

@@ -16,7 +16,8 @@
       "yPct": 50.0,
       "widthPct": 45.0,
       "heightPct": 45.0,
-      "showBorder": false
+      "showBorder": false,
+      "anchor": { "mode": "gaze" }
     }},
     {"pauseForInput": ""},
     {"hideRect": "welcome"},
@@ -364,7 +365,8 @@
       "yPct": 50.0,
       "widthPct": 45.0,
       "heightPct": 65.0,
-      "showBorder": false
+      "showBorder": false,
+      "anchor": { "mode": "gaze" }
     }},
     {"pauseForInput": ""},
     {"hideRect": "conclusion"},

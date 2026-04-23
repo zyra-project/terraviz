@@ -14,9 +14,148 @@
 
 import type {
   ShowRectTaskParams, ShowImageTaskParams, PlayVideoTaskParams,
-  ShowPopupHtmlTaskParams, QuestionTaskParams,
+  ShowPopupHtmlTaskParams, QuestionTaskParams, TourOverlayAnchor,
 } from '../types'
 import type { TourEngine } from '../services/tourEngine'
+
+// ── VR tour overlay mirror ──────────────────────────────────────────
+//
+// While a WebXR session is live, the 2D DOM overlays are invisible
+// (hidden behind the headset output) but still rendered — the tour
+// engine doesn't know VR is active, so it calls the same show/hide
+// functions exported from this module. We mirror every call onto an
+// optional `VrTourOverlaySink` so the VR layer can render equivalent
+// CanvasTexture panels in the 3D scene.
+//
+// The sink is set by `vrSession` on session entry and cleared on
+// session end. Mirroring is one-way (DOM → VR) and additive — the
+// DOM overlays keep rendering in the background so the 2D experience
+// resumes seamlessly when the user exits VR mid-tour.
+
+/**
+ * Subset of tour overlay ops mirrored into VR. Methods accept the
+ * same param shapes as the DOM-side show/hide functions below so
+ * wiring is a direct pass-through. Optional fields let the sink
+ * implement overlay kinds incrementally as later Phase 3.5 commits
+ * bring image / video / question variants online.
+ */
+export interface VrTourOverlaySink {
+  showText(params: ShowRectTaskParams): void
+  hideText(rectID: string): void
+  hideAllText(): void
+  showPopup(params: ShowPopupHtmlTaskParams): void
+  hidePopup(popupID: string): void
+  hideAllPopups(): void
+  showImage(params: ShowImageTaskParams): void
+  hideImage(imageID: string): void
+  hideAllImages(): void
+  /**
+   * Shares the DOM `<video>` element the 2D tour layer just
+   * created. VR wraps it in a `THREE.VideoTexture` so both paths
+   * render from the same decoded stream — no double decode, no
+   * second autoplay fight. The video id (second arg) matches the
+   * 2D convention of using the resolved filename URL.
+   */
+  showVideo(params: PlayVideoTaskParams, video: HTMLVideoElement, videoID: string): void
+  hideVideo(videoID: string): void
+  hideAllVideos(): void
+  /**
+   * Interactive question overlay. Params are the already-resolved
+   * URLs plus the engine's `onComplete` (already wrapped by
+   * {@link showTourQuestion} to also clean up the 2D DOM when VR's
+   * Continue button fires). `anchor` threads the optional VR
+   * placement override from the tour JSON through to the overlay
+   * manager.
+   */
+  showQuestion(params: {
+    id: string
+    questionImageUrl: string
+    answerImageUrl: string
+    numberOfAnswers: number
+    correctAnswerIndex: number
+    anchor?: TourOverlayAnchor
+    onComplete: () => void
+  }): void
+  hideAllQuestions(): void
+}
+
+let vrOverlaySink: VrTourOverlaySink | null = null
+
+// Active-overlay registries keyed by overlay id. Maintained alongside
+// the DOM-only registries (`textBoxes`, `images`, …) so a VR sink
+// registered mid-tour can be immediately synced with whatever
+// overlays the 2D layer is currently showing — without these, a
+// user who starts a tour in 2D and then taps Enter VR would see an
+// empty scene until the next tour task fires.
+//
+// The DOM registries above store HTML elements only; these store
+// the original task params so we can replay them through the sink
+// verbatim. Each show/hide/hideAll helper below keeps these in
+// lockstep with its DOM counterpart.
+const activeTextOverlays = new Map<string, ShowRectTaskParams>()
+const activePopupOverlays = new Map<string, ShowPopupHtmlTaskParams>()
+const activeImageOverlays = new Map<string, ShowImageTaskParams>()
+interface ActiveVideoOverlay {
+  params: PlayVideoTaskParams
+  video: HTMLVideoElement
+  videoID: string
+}
+const activeVideoOverlays = new Map<string, ActiveVideoOverlay>()
+/**
+ * Question overlay params as the sink expects them (resolved URLs,
+ * wrapped onComplete). Stored post-wrap so replay passes the same
+ * cleanup closure the original registration used. Questions are
+ * single-active — tour engine pauses on a question until answered —
+ * but keyed by id in case a future tour authors one concurrently.
+ */
+type ActiveQuestionSinkParams = Parameters<VrTourOverlaySink['showQuestion']>[0]
+const activeQuestionOverlays = new Map<string, ActiveQuestionSinkParams>()
+
+/**
+ * Replay every currently-visible 2D overlay into the given sink.
+ * Called when `setVrTourOverlaySink` is handed a non-null sink so
+ * the VR scene reflects the active tour step immediately instead
+ * of waiting for a later show/hide transition.
+ *
+ * Safe to call with no active overlays — every Map is checked for
+ * emptiness by iteration. Order matches the categories' creation
+ * order in the module (text → popup → image → video → question),
+ * matching how the sink would receive them from a fresh tour run.
+ */
+function replayActiveVrTourOverlays(sink: VrTourOverlaySink): void {
+  for (const params of activeTextOverlays.values()) {
+    sink.showText(params)
+  }
+  for (const params of activePopupOverlays.values()) {
+    sink.showPopup(params)
+  }
+  for (const params of activeImageOverlays.values()) {
+    sink.showImage(params)
+  }
+  for (const { params, video, videoID } of activeVideoOverlays.values()) {
+    sink.showVideo(params, video, videoID)
+  }
+  for (const params of activeQuestionOverlays.values()) {
+    sink.showQuestion(params)
+  }
+}
+
+/**
+ * Register (or clear) the VR overlay sink. `vrSession` calls this
+ * with a sink adapter on enter and `null` on exit. Safe to call
+ * when no tour is running — the sink just sits dormant until the
+ * next overlay op.
+ *
+ * When a non-null sink is registered while overlays are already
+ * visible in the 2D DOM (the user enters VR mid-tour), the current
+ * overlay set is replayed into the sink so the VR scene is
+ * immediately in sync. Clearing the sink does NOT replay — the
+ * session's existing dispose path already tears down VR meshes.
+ */
+export function setVrTourOverlaySink(sink: VrTourOverlaySink | null): void {
+  vrOverlaySink = sink
+  if (sink) replayActiveVrTourOverlays(sink)
+}
 
 // ── Shared helpers ──────────────────────────────────────────────────
 
@@ -314,10 +453,20 @@ export function showTourTextBox(params: ShowRectTaskParams): void {
 
   container.appendChild(box)
   textBoxes.add(params.rectID, box)
+  activeTextOverlays.set(params.rectID, params)
+  vrOverlaySink?.showText(params)
 }
 
-export function hideTourTextBox(rectID: string): void { textBoxes.remove(rectID) }
-export function hideAllTourTextBoxes(): void { textBoxes.removeAll() }
+export function hideTourTextBox(rectID: string): void {
+  textBoxes.remove(rectID)
+  activeTextOverlays.delete(rectID)
+  vrOverlaySink?.hideText(rectID)
+}
+export function hideAllTourTextBoxes(): void {
+  textBoxes.removeAll()
+  activeTextOverlays.clear()
+  vrOverlaySink?.hideAllText()
+}
 
 // ── Image overlays (showImage / hideImage) ───────────────────────────
 
@@ -393,10 +542,20 @@ export function showTourImage(params: ShowImageTaskParams): void {
 
   container.appendChild(wrapper)
   images.add(params.imageID, wrapper)
+  activeImageOverlays.set(params.imageID, params)
+  vrOverlaySink?.showImage(params)
 }
 
-export function hideTourImage(imageID: string): void { images.remove(imageID) }
-export function hideAllTourImages(): void { images.removeAll() }
+export function hideTourImage(imageID: string): void {
+  images.remove(imageID)
+  activeImageOverlays.delete(imageID)
+  vrOverlaySink?.hideImage(imageID)
+}
+export function hideAllTourImages(): void {
+  images.removeAll()
+  activeImageOverlays.clear()
+  vrOverlaySink?.hideAllImages()
+}
 
 // ── Video overlays (playVideo / hideVideo) ───────────────────────────
 
@@ -506,6 +665,10 @@ export function showTourVideo(params: PlayVideoTaskParams): void {
 
   container.appendChild(wrapper)
   videos.add(videoID, wrapper)
+  activeVideoOverlays.set(videoID, { params, video, videoID })
+  // Share the same <video> element with VR so both paths render
+  // from one decoded stream (see VrTourOverlaySink.showVideo doc).
+  vrOverlaySink?.showVideo(params, video, videoID)
 }
 
 export function hideTourVideo(videoID: string): void {
@@ -513,6 +676,8 @@ export function hideTourVideo(videoID: string): void {
   const videoEl = wrapper?.querySelector('video')
   if (videoEl) videoEl.pause()
   videos.remove(videoID)
+  activeVideoOverlays.delete(videoID)
+  vrOverlaySink?.hideVideo(videoID)
 }
 export function hideAllTourVideos(): void {
   // Pause all videos before removing to stop media playback
@@ -521,6 +686,8 @@ export function hideAllTourVideos(): void {
     if (videoEl) videoEl.pause()
   })
   videos.removeAll()
+  activeVideoOverlays.clear()
+  vrOverlaySink?.hideAllVideos()
 }
 
 // ── Popup HTML overlays (showPopupHtml / hidePopupHtml) ──────────────
@@ -564,10 +731,20 @@ export function showTourPopup(params: ShowPopupHtmlTaskParams): void {
 
   container.appendChild(wrapper)
   popups.add(params.popupID, wrapper)
+  activePopupOverlays.set(params.popupID, params)
+  vrOverlaySink?.showPopup(params)
 }
 
-export function hideTourPopup(popupID: string): void { popups.remove(popupID) }
-export function hideAllTourPopups(): void { popups.removeAll() }
+export function hideTourPopup(popupID: string): void {
+  popups.remove(popupID)
+  activePopupOverlays.delete(popupID)
+  vrOverlaySink?.hidePopup(popupID)
+}
+export function hideAllTourPopups(): void {
+  popups.removeAll()
+  activePopupOverlays.clear()
+  vrOverlaySink?.hideAllPopups()
+}
 
 // ── Question overlays ────────────────────────────────────────────────
 
@@ -650,9 +827,35 @@ export function showTourQuestion(params: QuestionDisplayParams): void {
 
   container.appendChild(wrapper)
   questions.add(params.id, wrapper)
+
+  // Mirror to VR. Wrap `onComplete` so VR's Continue tap also
+  // cleans up the 2D DOM — the 2D `continueBtn` handler above
+  // calls `hideAllTourQuestions` inline; VR's path goes through
+  // this wrapper instead (which mirrors back into VR cleanup).
+  // Build the sink-shape once and stash it in the active registry
+  // so a replay (user enters VR mid-question) re-sends the same
+  // wrapper without double-wrapping the engine's onComplete.
+  const sinkParams: ActiveQuestionSinkParams = {
+    id: params.id,
+    questionImageUrl: params.imgQuestionFilename,
+    answerImageUrl: params.imgAnswerFilename,
+    numberOfAnswers: params.numberOfAnswers,
+    correctAnswerIndex: params.correctAnswerIndex,
+    anchor: params.anchor,
+    onComplete: () => {
+      hideAllTourQuestions()
+      params.onComplete()
+    },
+  }
+  activeQuestionOverlays.set(params.id, sinkParams)
+  vrOverlaySink?.showQuestion(sinkParams)
 }
 
-export function hideAllTourQuestions(): void { questions.removeAll() }
+export function hideAllTourQuestions(): void {
+  questions.removeAll()
+  activeQuestionOverlays.clear()
+  vrOverlaySink?.hideAllQuestions()
+}
 
 // ── Tour controls bar ────────────────────────────────────────────────
 

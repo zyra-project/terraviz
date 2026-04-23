@@ -19,6 +19,10 @@ import type * as THREE from 'three'
 import { createVrScene, type VrSceneHandle, type VrDatasetTexture } from './vrScene'
 import { createVrHud, type VrHudHandle } from './vrHud'
 import { createVrBrowse, type VrBrowseHandle } from './vrBrowse'
+import { createVrTourControls, type VrTourControlsHandle } from './vrTourControls'
+import { createVrTourOverlay, type VrTourOverlayHandle } from './vrTourOverlay'
+import { createVrTimeLabel, type VrTimeLabelHandle } from './vrTimeLabel'
+import { setVrTourOverlaySink } from '../ui/tourUI'
 import { createVrInteraction, type VrInteractionHandle } from './vrInteraction'
 import { createVrLoading, type VrLoadingHandle } from './vrLoading'
 import { createVrPlacement, liftedPlacementPosition, type VrPlacementHandle } from './vrPlacement'
@@ -27,6 +31,7 @@ import {
   loadPersistedAnchorHandle,
   savePersistedAnchorHandle,
 } from '../utils/vrPersistence'
+import { getBordersVisible, getGazeFollowOverlays } from '../utils/viewPreferences'
 import { logger } from '../utils/logger'
 
 /**
@@ -45,6 +50,23 @@ export interface VrSessionContext {
   getDatasetTexture(): VrDatasetTexture | null
   /** Dataset title for the HUD (primary panel). null/empty → "No dataset loaded". */
   getDatasetTitle(): string | null
+  /**
+   * Formatted time-label string for the current primary dataset —
+   * mirrors the 2D `#time-label` overlay (e.g. `"2023-06-15"` or
+   * `"2023-06-15 18:00"` for sub-daily). null when the dataset
+   * lacks `startTime` metadata or no dataset is loaded.
+   *
+   * Polled per XR frame. The host MUST derive the string from the
+   * current playback state (for video datasets, compute from
+   * `video.currentTime`) rather than reusing a cached
+   * `appState.timeLabel` — WebXR pauses `window.requestAnimationFrame`
+   * for the duration of an immersive session, so the 2D
+   * `startPlaybackLoop` that normally updates `appState.timeLabel`
+   * is frozen and any consumer reading that cache sees the value
+   * from the instant VR was entered and stays there forever. See
+   * `main.ts`'s implementation for the expected pattern.
+   */
+  getDatasetTimeLabel(): string | null
   /** True iff a video dataset is loaded on the primary — drives the HUD play/pause button visibility. */
   hasVideoDataset(): boolean
   /** Drives the HUD play/pause icon. Reflects the primary panel's state. */
@@ -87,8 +109,39 @@ export interface VrSessionContext {
   /** Load a dataset by ID without leaving VR. */
   loadDataset(id: string): void
 
+  // --- Phase 3.5: in-VR tour controls ---
+  /**
+   * Snapshot of the current tour state — the VR session polls this
+   * each frame and updates the in-VR tour-control strip accordingly.
+   * `active` is false when no tour is running; the other fields are
+   * ignored in that case. Callers wire this to `TourEngine.state` /
+   * `.currentIndex` / `.totalSteps` in main.ts.
+   */
+  getTourState(): VrTourState
+  /** Resume or pause the running tour. No-op if no tour is active. */
+  tourTogglePlayPause(): void
+  /** Step the running tour backward one segment. No-op if no tour is active. */
+  tourPrev(): void
+  /** Skip the current task and move to the next. No-op if no tour is active. */
+  tourNext(): void
+  /** Stop the running tour entirely. No-op if no tour is active. */
+  tourStop(): void
+
   /** Optional — fired after the session ends + resources are torn down. */
   onSessionEnd?: () => void
+}
+
+/**
+ * Snapshot consumed by the in-VR tour-control strip. `active` gates
+ * every other field — when false, the strip is hidden and the other
+ * values aren't rendered. A tour that is paused (after `pauseForInput`
+ * or an explicit user pause) is still `active`, just not `isPlaying`.
+ */
+export interface VrTourState {
+  active: boolean
+  isPlaying: boolean
+  step: number
+  totalSteps: number
 }
 
 /**
@@ -136,6 +189,12 @@ interface ActiveSession {
   interaction: VrInteractionHandle
   /** In-VR dataset browse panel. */
   browse: VrBrowseHandle
+  /** In-VR tour control strip — visible only while a tour is active. */
+  tourControls: VrTourControlsHandle
+  /** In-VR tour overlay manager (text / popup / ... panels). Always present; hosts per-tour overlays. */
+  tourOverlay: VrTourOverlayHandle
+  /** Floating date readout above the globe for datasets with time metadata. */
+  timeLabel: VrTimeLabelHandle
   /** Loading scene shown during entry; null after fade-out + dispose. */
   loading: VrLoadingHandle | null
   /** AR-only spatial placement (hit-test reticle + Place button). Null when hit-test unavailable. */
@@ -155,6 +214,114 @@ let active: ActiveSession | null = null
 /** True while a VR session is live. */
 export function isVrActive(): boolean {
   return active !== null
+}
+
+/**
+ * In-flight flyTo animation driven by the render loop. The tour
+ * engine awaits the returned promise so the "next" task doesn't run
+ * until the rotation settles. A new `flyToOnGlobe` call while one
+ * is running resolves the previous one and replaces it — the last
+ * call wins.
+ */
+interface PendingFlyTo {
+  startQuat: THREE.Quaternion
+  endQuat: THREE.Quaternion
+  startTime: number
+  durationMs: number
+  resolve: () => void
+}
+let pendingFlyTo: PendingFlyTo | null = null
+
+/**
+ * Default flyTo animation length. Matches `MapRenderer.flyTo`'s
+ * current 2.5 s pacing so tours that run `Promise.all([2D, VR])`
+ * settle at roughly the same instant in both surfaces — the tour
+ * engine awaits the longer of the two, and a mismatched default
+ * would make VR-only sessions feel either abrupt (shorter) or
+ * sluggish (longer) relative to the same tour in 2D.
+ */
+const FLY_TO_DEFAULT_DURATION_MS = 2500
+
+/**
+ * Rotate the VR globe so `(lat, lng)` faces the user's head. No-op
+ * when no VR session is active.
+ *
+ * In 2D, `flyTo` moves the camera to look at a lat/lng. VR can't
+ * move the user's head (WebXR owns the view transform — moving it
+ * would induce motion sickness), so we rotate the globe instead:
+ * the point on the sphere corresponding to `(lat, lng)` rotates to
+ * the surface position closest to the user's current head position.
+ *
+ * Captured at animation start:
+ * - `startQuat`: globe's current orientation.
+ * - `endQuat`: orientation that maps the local unit vector of
+ *   `(lat, lng)` onto the world-space direction from globe center
+ *   to the camera. If the user walks to the other side of the
+ *   globe in AR mode, re-calling `flyToOnGlobe` captures the new
+ *   head position and rotates accordingly.
+ *
+ * Slerp + ease-in-out drives the interpolation each frame until the
+ * duration elapses, at which point the returned promise resolves.
+ * Tour engine's `execFlyTo` awaits both this and the 2D renderer's
+ * `flyTo` via `Promise.all`, so the longer of the two paces the
+ * next task.
+ */
+export async function flyToOnGlobe(
+  lat: number,
+  lng: number,
+  durationMs: number = FLY_TO_DEFAULT_DURATION_MS,
+): Promise<void> {
+  if (!active) return
+  const THREE_ = await loadThree()
+  if (!active) return // session may have ended between await + resume
+
+  // Target direction in world space = unit vector from globe center
+  // to the user's head. `camera.getWorldPosition` accounts for the
+  // XR view matrix, so this is the actual user position in
+  // local-floor coords (not a fixed nominal spot).
+  const camPos = new THREE_.Vector3()
+  active.camera.getWorldPosition(camPos)
+  const worldDir = camPos.clone().sub(active.scene.globe.position).normalize()
+
+  // Local-space target point for (lat, lng). Matches the
+  // convention `photorealEarth.sunDirectionFromLatLng` uses
+  // internally so the orientation lines up with the dataset /
+  // photoreal Earth texture's equirectangular wrap on the sphere
+  // (including the negated Z that Three.js SphereGeometry's
+  // default phiStart introduces).
+  const latRad = (lat * Math.PI) / 180
+  const lngRad = (lng * Math.PI) / 180
+  const localTarget = new THREE_.Vector3(
+    Math.cos(latRad) * Math.cos(lngRad),
+    Math.sin(latRad),
+    -Math.cos(latRad) * Math.sin(lngRad),
+  )
+
+  // Resolve any prior flyTo first so callers that awaited it don't
+  // hang waiting on a superseded animation.
+  if (pendingFlyTo) {
+    const prior = pendingFlyTo
+    pendingFlyTo = null
+    prior.resolve()
+  }
+
+  return new Promise<void>((resolve) => {
+    pendingFlyTo = {
+      startQuat: active!.scene.globe.quaternion.clone(),
+      endQuat: new THREE_.Quaternion().setFromUnitVectors(localTarget, worldDir),
+      startTime: performance.now(),
+      durationMs,
+      resolve,
+    }
+  })
+}
+
+/** Cancel any in-flight flyTo animation — used by session teardown. */
+function cancelFlyTo(): void {
+  if (!pendingFlyTo) return
+  const prior = pendingFlyTo
+  pendingFlyTo = null
+  prior.resolve()
 }
 
 /**
@@ -307,6 +474,61 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
   const browse = createVrBrowse(THREE_)
   browse.setDatasets(ctx.getDatasets())
   scene.scene.add(browse.mesh)
+
+  // Tour control strip — added to the scene now, hidden until the
+  // per-frame poll sees an active tour. Starts with an "inactive"
+  // state so the mesh is invisible on session start; polling below
+  // flips it on when main.ts reports a running tour.
+  const tourControls = createVrTourControls(THREE_)
+  scene.scene.add(tourControls.mesh)
+
+  // Tour overlay manager — the parent Group is always in the scene;
+  // individual overlay meshes are added / removed by its show/hide
+  // methods. The sink registered below forwards every DOM overlay
+  // op from `tourUI` into this manager.
+  const tourOverlay = createVrTourOverlay(THREE_)
+  scene.scene.add(tourOverlay.group)
+
+  // Floating date readout above the globe. Hidden by default;
+  // per-frame setText(ctx.getDatasetTimeLabel()) flips it on when
+  // a time-metadata-bearing dataset is loaded and drives it
+  // forward each XR frame (2D's playback loop is paused during
+  // the session so we can't rely on appState.timeLabel — we
+  // recompute from video.currentTime directly instead).
+  const timeLabel = createVrTimeLabel(THREE_)
+  scene.scene.add(timeLabel.mesh)
+  setVrTourOverlaySink({
+    showText: (params) => tourOverlay.showText(params),
+    hideText: (id) => tourOverlay.hideOverlay(id),
+    hideAllText: () => tourOverlay.hideAllText(),
+    showPopup: (params) => tourOverlay.showPopup(params),
+    hidePopup: (id) => tourOverlay.hideOverlay(id),
+    hideAllPopups: () => tourOverlay.hideAllPopups(),
+    showImage: (params) => tourOverlay.showImage(params),
+    hideImage: (id) => tourOverlay.hideOverlay(id),
+    hideAllImages: () => tourOverlay.hideAllImages(),
+    showVideo: (params, video, videoID) => tourOverlay.showVideo({
+      id: videoID,
+      video,
+      anchor: params.anchor,
+    }),
+    hideVideo: (id) => tourOverlay.hideOverlay(id),
+    hideAllVideos: () => tourOverlay.hideAllVideos(),
+    showQuestion: (params) => tourOverlay.showQuestion({
+      id: params.id,
+      questionImageUrl: params.questionImageUrl,
+      answerImageUrl: params.answerImageUrl,
+      numberOfAnswers: params.numberOfAnswers,
+      correctAnswerIndex: params.correctAnswerIndex,
+      anchor: params.anchor,
+      // `onComplete` was already wrapped by tourUI.showTourQuestion
+      // to call hideAllTourQuestions before resolving the engine
+      // promise — we just pass it through as the VR overlay's
+      // "Continue tap" handler.
+      onContinue: params.onComplete,
+    }),
+    hideAllQuestions: () => tourOverlay.hideAllQuestions(),
+  })
 
   // --- Spatial placement (AR-only) + local-floor ref space ---
   // Two separable capabilities:
@@ -497,6 +719,8 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     getAllGlobes: () => scene.allGlobes,
     hud,
     browse,
+    tourControls,
+    tourOverlay,
     placement,
     renderer,
     onBrowseAction: (action) => {
@@ -511,6 +735,26 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
         // already-active chip re-applies the same filter; no toggle-
         // off, see VrBrowseAction docstring).
         browse.setCategoryFilter(action.category)
+      }
+    },
+    onTourAction: (action) => {
+      // Thin pass-through: the strip's button layout and the tour-
+      // engine's control surface are 1:1, so the VR session doesn't
+      // need to interpret anything here. main.ts owns the engine and
+      // fans these out to TourEngine.play/pause/next/prev/stop.
+      switch (action) {
+        case 'tour-play-pause':
+          ctx.tourTogglePlayPause()
+          break
+        case 'tour-prev':
+          ctx.tourPrev()
+          break
+        case 'tour-next':
+          ctx.tourNext()
+          break
+        case 'tour-stop':
+          ctx.tourStop()
+          break
       }
     },
     onHudAction: (action) => {
@@ -597,6 +841,9 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     scene,
     hud,
     browse,
+    tourControls,
+    tourOverlay,
+    timeLabel,
     interaction,
     loading,
     placement,
@@ -639,8 +886,18 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
   const hudOffset = new THREE_.Vector3(0, -0.65, 0.15)
   const placeOffset = new THREE_.Vector3(0, -0.5, 0.15)
   const browseOffset = new THREE_.Vector3(0.7, 0, 0.3)
+  /**
+   * Tour-control strip sits just below the dataset HUD, close
+   * enough to feel like part of the same control cluster. The
+   * HUD itself is at globe + (0, -0.65, 0.15); this offset keeps
+   * the same x/z and adds another ~12 cm of y-drop so the two
+   * panels don't overlap even when the user has zoomed the globe.
+   */
+  const tourControlsOffset = new THREE_.Vector3(0, -0.80, 0.15)
   /** Scratch reused per-frame for position math; avoids GC churn. */
   const scratchPos = new THREE_.Vector3()
+  /** Scratch vector reused every frame by the billboard-lookAt block below. */
+  const scratchCamPos = new THREE_.Vector3()
   // `lastTime` starts null so the very first frame uses its own
   // timestamp as "previous" and computes a 0-duration delta —
   // rather than mixing XR's frame timestamp (first callback arg)
@@ -744,12 +1001,88 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
       browseOpen: active.browse.isVisible(),
     })
 
+    // Tour strip mirrors the engine state. Always poll; the strip's
+    // setState is internally debounced, so a per-frame call with an
+    // unchanged state is a cheap equality check. `active` toggling
+    // to false hides the mesh without further work.
+    active.tourControls.setState(ctx.getTourState())
+
+    // Time label — recompute from video.currentTime every XR frame
+    // (the 2D playback loop that normally drives appState.timeLabel
+    // is paused while WebXR is active, so we can't read a cached
+    // value). setText is idempotent when the string is unchanged,
+    // so this is cheap in the steady state. Pause behaviour falls
+    // out naturally — a paused video's currentTime doesn't advance.
+    active.timeLabel.setText(ctx.getDatasetTimeLabel())
+    active.timeLabel.update(active.camera, active.scene.globe.position)
+
+    // Borders overlay mirrors the shared view preference. 2D toggles
+    // (Tools menu / tour envShowWorldBorder) write to the same
+    // preference, so the VR globe stays in sync without a dedicated
+    // callback. `scene.setBordersVisible` is internally idempotent.
+    active.scene.setBordersVisible(getBordersVisible())
+
     active.interaction.update(delta)
+
+    // flyTo animation — drives the globe quaternion toward the
+    // captured target each frame. Must run AFTER interaction.update
+    // (which writes user-grab rotations) and BEFORE scene.update
+    // (which propagates the primary's quaternion to secondaries).
+    // A fresh user grab mid-animation will overwrite globe.quaternion,
+    // but the very next frame slerp reads `startQuat` not the current
+    // quat — so flyTo "wins" until the duration elapses. Good enough
+    // for v1; a user-grab interrupt is cheap follow-up if requested.
+    if (pendingFlyTo) {
+      const elapsed = now - pendingFlyTo.startTime
+      // Guard the instant-jump case: durationMs = 0 (from
+      // `animated: false` tour tasks) would divide by zero and on
+      // the first frame where elapsed === 0 produce NaN, leaving
+      // the slerp in an undefined state. Collapse to t=1 so the
+      // snap completes on the first tick.
+      const t = pendingFlyTo.durationMs > 0
+        ? Math.min(1, elapsed / pendingFlyTo.durationMs)
+        : 1
+      // Ease-in-out cubic — matches MapLibre flyTo's perceived pacing.
+      const eased = t < 0.5
+        ? 4 * t * t * t
+        : 1 - Math.pow(-2 * t + 2, 3) / 2
+      active.scene.globe.quaternion.slerpQuaternions(
+        pendingFlyTo.startQuat,
+        pendingFlyTo.endQuat,
+        eased,
+      )
+      if (t >= 1) {
+        const done = pendingFlyTo
+        pendingFlyTo = null
+        done.resolve()
+      }
+    }
+
     // Scene-level per-frame sync (e.g. ground shadow scale matching
     // globe zoom). Cheap and always runs even when the loading
     // scene is still up so the shadow is correct the moment the
     // globe becomes visible.
     active.scene.update()
+
+    // Tour overlay pose resolution — world-anchored overlays track
+    // the globe, gaze-follow overlays lerp toward a camera-local
+    // target. No-op when no overlays exist, which is the common
+    // case (most users aren't on a tour).
+    //
+    // Multi-globe hint shifts NEW overlay default placement above
+    // the primary when an arc is visible — keeps wide popup /
+    // image / question panels from landing between globes and
+    // occluding the sibling data. Idempotent; cheap to call every
+    // frame. Existing overlays keep their stored offset.
+    active.tourOverlay.setMultiGlobeHint(panelCount > 1)
+    // Global default anchor mode — per-overlay `anchor` hints in
+    // the tour JSON still win over this. No runtime UI toggles
+    // this yet; the preference is settable programmatically (or
+    // via a future Tools-menu checkbox) so power users can flip
+    // their default without losing the tour-author's specific
+    // overrides.
+    active.tourOverlay.setGazeFollowDefault(getGazeFollowOverlays())
+    active.tourOverlay.update(active.camera, active.scene.globe.position, delta)
 
     // Track HUD + Place button to the globe's current position so
     // when the user places the globe on a real surface in AR, the
@@ -758,15 +1091,32 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     // inherit rotation + wobble with user grab); manual sync via
     // offset vectors lets us keep position while leaving orientation
     // globe-independent.
+    //
+    // Each panel also billboards toward the camera via lookAt — if
+    // the user walks around a placed globe in AR (or starts from a
+    // non-default standing position), the panel would otherwise
+    // stay facing -z world and end up edge-on to the viewer. Same
+    // pattern as vrTimeLabel above and the tour-overlay's
+    // world-anchor billboard — user always sees panels face-on.
+    active.camera.getWorldPosition(scratchCamPos)
+
     scratchPos.copy(active.scene.globe.position).add(hudOffset)
     active.hud.mesh.position.copy(scratchPos)
+    active.hud.mesh.lookAt(scratchCamPos)
     if (active.browse.isVisible()) {
       scratchPos.copy(active.scene.globe.position).add(browseOffset)
       active.browse.mesh.position.copy(scratchPos)
+      active.browse.mesh.lookAt(scratchCamPos)
+    }
+    if (active.tourControls.isVisible()) {
+      scratchPos.copy(active.scene.globe.position).add(tourControlsOffset)
+      active.tourControls.mesh.position.copy(scratchPos)
+      active.tourControls.mesh.lookAt(scratchCamPos)
     }
     if (active.placement) {
       scratchPos.copy(active.scene.globe.position).add(placeOffset)
       active.placement.placeButtonMesh.position.copy(scratchPos)
+      active.placement.placeButtonMesh.lookAt(scratchCamPos)
     }
 
     // Drive the loading scene's animation (rings spin, sphere
@@ -783,9 +1133,23 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     const a = active
     active = null
     a.renderer.setAnimationLoop(null)
+    // Resolve any in-flight flyTo so awaiting callers don't hang
+    // after the session ends (tour engine's execFlyTo, chat's
+    // onFlyTo handler).
+    cancelFlyTo()
     a.interaction.dispose()
     a.hud.dispose()
     a.browse.dispose()
+    a.scene.scene.remove(a.tourControls.mesh)
+    a.tourControls.dispose()
+    a.scene.scene.remove(a.timeLabel.mesh)
+    a.timeLabel.dispose()
+    // Clear the tourUI sink first so any in-flight `hideAll*` calls
+    // from the tour engine (e.g. tour cleanup fired by stopTour()
+    // during exit) don't land on the about-to-be-disposed manager.
+    setVrTourOverlaySink(null)
+    a.scene.scene.remove(a.tourOverlay.group)
+    a.tourOverlay.dispose()
     // If the fade-out setTimeout is still pending, cancel it —
     // otherwise it would fire after the loading handle is disposed
     // and try to run fade-out on stale state.

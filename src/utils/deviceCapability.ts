@@ -40,3 +40,20 @@ export function getCloudTextureUrl(): string {
     ? `${CLOUD_TEXTURE_BASE}/clouds_4096.jpg`
     : `${CLOUD_TEXTURE_BASE}/clouds_8192.jpg`
 }
+
+/**
+ * Country-borders overlay texture (equirectangular PNG with black
+ * lines on transparent background). Served from the same CloudFront
+ * basemaps path the Earth diffuse / lights textures use
+ * (src/services/photorealEarth.ts). 4K on mobile / standalone VR
+ * headsets (Quest reports as mobile via touch points), 8K on
+ * desktop. Both variants are small (~635 KB) since the lines are
+ * sparse and PNG compresses alpha well; the mobile pick is more
+ * about GPU memory than download.
+ */
+const BORDERS_TEXTURE_BASE = 'https://d3sik7mbbzunjo.cloudfront.net/terraviz/basemaps'
+export function getBordersTextureUrl(): string {
+  return isMobile()
+    ? `${BORDERS_TEXTURE_BASE}/country-borders-black-4096.png`
+    : `${BORDERS_TEXTURE_BASE}/country-borders-black-8192.png`
+}

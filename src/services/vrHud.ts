@@ -204,6 +204,15 @@ function drawCanvas(
   // When no dataset is loaded the MVP has nothing to play, so steer
   // the user back to the 2D browse panel. Dataset switching inside
   // VR is Phase 3 work (see VR_INVESTIGATION_PLAN.md).
+  //
+  // Running date display lives on its own floating panel above the
+  // globe (vrTimeLabel) — not here. Embedding it in the HUD
+  // required the host to feed a per-frame string AND the HUD to
+  // redraw its canvas every frame, which was both wasteful and
+  // indirect. The session/host computes the label string (from
+  // video.currentTime via `VrSessionContext.getDatasetTimeLabel`
+  // in main.ts); vrTimeLabel just renders what it's given and
+  // billboards to face the user.
   const titleText = state.datasetTitle || 'Load a dataset in 2D view first'
   ctx.fillStyle = '#e8eaf0' // --color-text
   ctx.font = '500 54px system-ui, -apple-system, sans-serif'

@@ -34,6 +34,7 @@ import {
   type PhotorealEarthHandle,
   type VrDatasetTexture,
 } from './photorealEarth'
+import { createVrBorders, type VrBordersHandle } from './vrBorders'
 
 export type { VrDatasetTexture } from './photorealEarth'
 
@@ -96,6 +97,17 @@ export interface VrSceneHandle {
    */
   setTexture(spec: VrDatasetTexture | null, onReady?: () => void): void
   /**
+   * Toggle the country/coastline borders overlay on every globe
+   * in the current layout. Shared across all globes so the user
+   * can't accidentally get borders on some slots and not others.
+   * Idempotent — repeated calls with the same value are cheap.
+   *
+   * State comes from `getBordersVisible()` in viewPreferences
+   * (see src/utils/viewPreferences.ts); vrSession polls that
+   * preference each frame and pipes it here.
+   */
+  setBordersVisible(visible: boolean): void
+  /**
    * Per-frame update — delegates to the photoreal Earth handle for
    * sun direction + atmosphere/shadow sync, then propagates the
    * primary's position/rotation/scale to every secondary globe so
@@ -156,6 +168,8 @@ export function createVrScene(
     shadow: THREE.Mesh
     shadowGeom: THREE.PlaneGeometry
     shadowMat: THREE.MeshBasicMaterial
+    /** Per-globe borders shell. Always present; `borders.mesh.visible` gates rendering. */
+    borders: VrBordersHandle
     activeKey: HTMLVideoElement | HTMLImageElement | null
     activeTexture: THREE.Texture | null
     cancelPendingVideoListeners: (() => void) | null
@@ -186,6 +200,24 @@ export function createVrScene(
     tex.magFilter = THREE_.LinearFilter
     return tex
   })()
+
+  // Primary globe borders shell. Always created (cheap when
+  // invisible); the texture stays unloaded until the first
+  // setBordersVisible(true) call, so users who never toggle borders
+  // pay nothing. The shell is a sibling of the globe rather than a
+  // child so we can batch transform updates in one pass next to the
+  // shadow sync in update() — the factory's ground-shadow tracking
+  // already does the same, so the pattern is consistent.
+  const primaryBorders = createVrBorders(THREE_, GLOBE_RADIUS)
+  scene.add(primaryBorders.mesh)
+
+  /**
+   * Session-level borders visibility, applied to the primary and
+   * every secondary. Stored here so newly-created secondaries
+   * inherit the current state without the caller having to re-set
+   * it after every setPanelCount transition.
+   */
+  let bordersVisible = false
 
   const secondaries: SecondaryGlobe[] = []
   /**
@@ -252,12 +284,21 @@ export function createVrScene(
     sMesh.renderOrder = -1
     scene.add(sMesh)
 
+    // Per-secondary borders shell. Inherits the current session
+    // borders-visibility state so a toggle-then-grow transition
+    // shows lines on the new globe without needing a second
+    // setBordersVisible call.
+    const borders = createVrBorders(THREE_, GLOBE_RADIUS)
+    scene.add(borders.mesh)
+    borders.setVisible(bordersVisible)
+
     return {
       mesh,
       material: mat,
       shadow: sMesh,
       shadowGeom: sGeom,
       shadowMat: sMat,
+      borders,
       activeKey: null,
       activeTexture: null,
       cancelPendingVideoListeners: null,
@@ -274,6 +315,8 @@ export function createVrScene(
     sg.shadowMat.dispose()
     sg.shadowGeom.dispose()
     scene.remove(sg.shadow)
+    scene.remove(sg.borders.mesh)
+    sg.borders.dispose()
   }
 
   /**
@@ -443,6 +486,15 @@ export function createVrScene(
       earth.setTexture(spec, onReady)
     },
 
+    setBordersVisible(visible) {
+      // Idempotent — repeated calls with the same value are a cheap
+      // no-op inside the handle (visibility flag comparison).
+      if (bordersVisible === visible) return
+      bordersVisible = visible
+      primaryBorders.setVisible(visible)
+      for (const sg of secondaries) sg.borders.setVisible(visible)
+    },
+
     update() {
       // Factory handles: sun direction refresh (throttled), atmosphere
       // / cloud / shadow follow, sun sprite position, sun light
@@ -450,6 +502,13 @@ export function createVrScene(
       // which we preserve (grab-rotate writes to `globe.quaternion`,
       // not position).
       earth.update()
+
+      // Primary borders shell tracks the primary globe's transform.
+      // Quaternion mirror keeps boundary lines aligned to
+      // landmasses as the user rotates; scale matches pinch-zoom.
+      primaryBorders.setPosition(globe.position.x, globe.position.y, globe.position.z)
+      primaryBorders.setQuaternion(globe.quaternion)
+      primaryBorders.setScale(globe.scale.x)
 
       // Secondary globes: position tracks the primary (critical in
       // AR — when the user anchors the primary to a real surface,
@@ -469,6 +528,9 @@ export function createVrScene(
           sg.mesh.position.y - GLOBE_RADIUS * s - 0.005,
           sg.mesh.position.z,
         )
+        sg.borders.setPosition(sg.mesh.position.x, sg.mesh.position.y, sg.mesh.position.z)
+        sg.borders.setQuaternion(globe.quaternion)
+        sg.borders.setScale(s)
       }
     },
 
@@ -476,6 +538,8 @@ export function createVrScene(
       unsubscribeDiffuse()
       earth.removeFrom(scene)
       earth.dispose()
+      scene.remove(primaryBorders.mesh)
+      primaryBorders.dispose()
       // Dispose all secondary globes and clear the shared
       // allGlobes array so any lingering references (debug
       // tooling, a late raycast from an in-flight XR frame) see

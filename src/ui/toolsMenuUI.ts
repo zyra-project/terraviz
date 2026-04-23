@@ -38,6 +38,7 @@
 
 import type { ViewportManager, ViewLayout } from '../services/viewportManager'
 import { updateMapControlsPosition } from './mapControlsUI'
+import { setBordersVisible } from '../utils/viewPreferences'
 
 /**
  * Runtime Tauri-shell detection — matches the same `__TAURI__`
@@ -261,6 +262,10 @@ export function initToolsMenu(
   bordersBtn.addEventListener('click', () => {
     const next = !bordersBtn.classList.contains('active')
     for (const r of viewports.getAll()) r.toggleBoundaries?.(next)
+    // Mirror to the shared preference so VR's per-frame poll picks
+    // the same state up on its next frame. 2D-only sessions never
+    // hit that getter, so the cost is just a localStorage write.
+    setBordersVisible(next)
     setButtonState(bordersBtn, next)
     announce?.(next ? 'Borders on' : 'Borders off')
   })

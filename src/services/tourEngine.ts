@@ -10,7 +10,9 @@
 
 import { logger } from '../utils/logger'
 import { getCloudTextureUrl } from '../utils/deviceCapability'
+import { setBordersVisible } from '../utils/viewPreferences'
 import { getSunPosition } from '../utils/time'
+import { flyToOnGlobe, isVrActive } from './vrSession'
 import type {
   TourFile, TourTaskDef, TourState, TourCallbacks, TourViewLayout,
   LoadDatasetTaskParams,
@@ -487,10 +489,28 @@ export class TourEngine {
       if (map?.jumpTo) {
         const zoom = Math.log2(6371 * 2 / Math.max(altKm, 1))
         map.jumpTo({ center: [params.lon, params.lat], zoom })
-        return
       }
+      // VR path snaps the same way the 2D `map.jumpTo` does above —
+      // duration 0 means the first frame after the call slerps all
+      // the way to the target quaternion, so the rotation is
+      // effectively instant with no pacing. Matches the `animated:
+      // false` contract the tour JSON is asking for.
+      if (isVrActive()) {
+        await flyToOnGlobe(params.lat, params.lon, 0)
+      }
+      return
     }
-    await renderer.flyTo(params.lat, params.lon, altKm)
+
+    // Animated path: run 2D MapLibre flyTo and the VR globe
+    // rotation in parallel. Promise.all resolves when both settle
+    // so the tour's next task waits on the longer of the two.
+    // VR defaults to this app's configured 2.5 s fly-to duration,
+    // matching MapRenderer.flyTo's easeTo duration (see
+    // FLY_TO_DEFAULT_DURATION_MS in vrSession.ts).
+    await Promise.all([
+      renderer.flyTo(params.lat, params.lon, altKm),
+      isVrActive() ? flyToOnGlobe(params.lat, params.lon) : Promise.resolve(),
+    ])
   }
 
   private async execTiltRotateCamera(params: TiltRotateCameraTaskParams): Promise<void> {
@@ -752,6 +772,11 @@ export class TourEngine {
       // command controls only the lines, not labels.
     }
     syncToolsMenuState({ borders: on })
+    // Mirror to the shared preference so a VR session running
+    // alongside this tour picks up the toggle on its next frame.
+    // In a VR-only (non-tour) session the flag is written by the
+    // Tools-menu button instead.
+    setBordersVisible(on)
   }
 
   private execWorldBorderObj(params: { worldBorders: 'on' | 'off' }): void {
