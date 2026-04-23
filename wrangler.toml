@@ -14,3 +14,24 @@ binding = "FEEDBACK_DB"
 database_name = "sphere-feedback"
 database_id = "78fbe5c3-8e40-4504-b183-155b0069222e"
 migrations_dir = "migrations"
+
+# Analytics Engine dataset for the telemetry event stream.
+# Every datapoint written by functions/api/ingest.ts lands here.
+# Query via the AE SQL API; see docs/ANALYTICS_QUERIES.md (lands
+# with the dashboards in Commit 11).
+[[analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "interactive_sphere_events"
+
+# KV namespace for the runtime telemetry kill switch. The ingest
+# endpoint reads the key `telemetry_enabled` on every request; when
+# set to `disabled` / `false` / `off` / `0`, clients receive 410 Gone
+# and cool down for the rest of the session. Absent or any other
+# value = allow. Flip via `wrangler kv key put` without a redeploy.
+# The namespace ID is populated by `wrangler kv namespace create
+# TELEMETRY_KILL_SWITCH` as a separate step before this binding is
+# first used in production — kept as a placeholder here so the binding
+# declaration stays in source control.
+[[kv_namespaces]]
+binding = "TELEMETRY_KILL_SWITCH"
+id = "PLACEHOLDER_CREATE_WITH_WRANGLER"
