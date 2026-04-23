@@ -10,14 +10,14 @@ export type PaletteKey = 'cyan' | 'green' | 'amber' | 'violet'
 export type ScaleKey = 'close' | 'continental' | 'planetary'
 
 /**
- * Eye configuration — design A/B between an iconic single inset
- * lens-eye (EVE / BB-8 lineage) and a mammalian paired-eye rig that
- * enables vergence cues. Both modes share the same eye-field /
- * pupil shaders and gaze code; only geometry placement and pupil
- * excursion scaling differ. Persisted across page loads via URL
- * param so design reviews can deep-link directly into a config.
+ * Eye configuration — narrowed to a single literal as part of the
+ * vinyl-toy redesign (see `docs/ORBIT_CHARACTER_VINYL_REDESIGN.md`).
+ * The original single-lens configuration read as ominous; the
+ * paired-eye rig is now permanent. The type alias stays so any
+ * lingering external callers still compile; setters just validate
+ * against the one legal value.
  */
-export type EyeMode = 'one' | 'two'
+export type EyeMode = 'two'
 
 // Behavior register — who Orbit is being.
 export type BehaviorState =
@@ -47,11 +47,20 @@ export interface Palette {
   base: string
   accent: string
   glow: string
+  /**
+   * Left side of the vinyl body's horizontal gradient. The four
+   * defaults all read as "soft toy": warm pink / mint / peach /
+   * lavender. Paired with `cool` via `onBeforeCompile` gradient
+   * injection in `createBodyMaterial`.
+   */
+  warm: string
+  /** Right side of the vinyl body's horizontal gradient. */
+  cool: string
 }
 
 export const PALETTES: Record<PaletteKey, Palette> = {
-  cyan:   { base: '#faf5e8', accent: '#5cefd7', glow: '#a8f5e5' },
-  green:  { base: '#faf5e8', accent: '#7eef5c', glow: '#b5f5a0' },
-  amber:  { base: '#fff5e0', accent: '#efb75c', glow: '#f5d8a0' },
-  violet: { base: '#f5f0fa', accent: '#b87cef', glow: '#d4b0f5' },
+  cyan:   { base: '#faf5e8', accent: '#5cefd7', glow: '#a8f5e5', warm: '#f7c9d6', cool: '#c9e6e5' },
+  green:  { base: '#faf5e8', accent: '#7eef5c', glow: '#b5f5a0', warm: '#d6f0c9', cool: '#c9d6f0' },
+  amber:  { base: '#fff5e0', accent: '#efb75c', glow: '#f5d8a0', warm: '#f7d9b8', cool: '#f2e9cf' },
+  violet: { base: '#f5f0fa', accent: '#b87cef', glow: '#d4b0f5', warm: '#e4cdf7', cool: '#f7cde0' },
 }

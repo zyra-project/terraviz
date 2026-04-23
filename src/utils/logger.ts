@@ -49,6 +49,16 @@ function shouldLog(level: LogLevel): boolean {
 
 /** Leveled logger that gates output based on the current log level. */
 export const logger = {
+  /**
+   * True if messages at `level` would be emitted given the current
+   * log level. Use this to skip expensive argument construction
+   * (object allocations, `.toFixed()` strings, JSON.stringify, etc.)
+   * that would otherwise run unconditionally before being thrown
+   * away by the level gate.
+   */
+  isEnabled(level: LogLevel): boolean {
+    return shouldLog(level)
+  },
   /** Log a debug-level message (development only by default). */
   debug(...args: unknown[]): void {
     if (shouldLog('debug')) console.log(...args)

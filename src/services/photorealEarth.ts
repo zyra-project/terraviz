@@ -260,6 +260,16 @@ export interface PhotorealEarthHandle {
    */
   setTexture(spec: VrDatasetTexture | null, onReady?: () => void): void
   /**
+   * Current subsolar unit direction in world space — a reference to
+   * the internal uniform's Vector3, refreshed by `update()` every
+   * ~SUN_UPDATE_INTERVAL_MS to match the real UTC subsolar point.
+   * Callers can read it to drive their own sun-aligned shading
+   * (e.g. Orbit's key light direction + glass-dome specular
+   * streak). Returned object is stable across calls; values are
+   * mutated in place each update.
+   */
+  readonly sunDir: THREE.Vector3
+  /**
    * Per-frame update — refreshes sun direction (throttled to
    * SUN_UPDATE_INTERVAL_MS), syncs atmosphere/shadow position+scale
    * to the globe, repositions the sun sprite + sun light. Cheap;
@@ -604,7 +614,9 @@ export function createPhotorealEarth(
     // depthTest stays ON (Three.js default) so the globe's depth
     // buffer naturally occludes the sprite when the sun is behind
     // the planet. depthWrite stays OFF because additive-blended
-    // sprites shouldn't clobber depth for anything else.
+    // sprites shouldn't clobber depth for anything else. Same fix
+    // landed separately on the VR branch; callers now see
+    // consistent behavior.
     const coreTexture = buildGlowTexture(SUN_GLOW_TEXTURE_SIZE, 0.25, [255, 252, 230], 1.0)
     const coreMaterial = new THREE_.SpriteMaterial({
       map: coreTexture,
@@ -893,6 +905,9 @@ export function createPhotorealEarth(
 
   return {
     globe,
+    get sunDir() {
+      return sunDirUniform.value
+    },
     get baseDiffuseTexture() {
       return baseDiffuseTexture
     },
