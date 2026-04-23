@@ -77,6 +77,19 @@ function loadSharedBordersTexture(THREE_: typeof THREE): Promise<THREE.Texture> 
         tex.minFilter = THREE_.LinearFilter
         tex.magFilter = THREE_.LinearFilter
         tex.anisotropy = 4
+        // Race: if every VrBorders handle was disposed while the
+        // load was in flight, `sharedHandleRefCount` has already
+        // reached 0 and the dispose() path took its cleanup shot
+        // on a null `sharedTexture`. Releasing here prevents the
+        // just-loaded texture from being cached + uploaded to the
+        // GPU for a scene with no consumers; the next session
+        // restart will kick a fresh load.
+        if (sharedHandleRefCount === 0) {
+          tex.dispose()
+          sharedTexturePromise = null
+          resolve(tex)
+          return
+        }
         sharedTexture = tex
         resolve(tex)
       },

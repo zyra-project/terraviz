@@ -1122,6 +1122,15 @@ export function createVrTourOverlay(THREE_: typeof THREE): VrTourOverlayHandle {
   const scratchUp = new THREE_.Vector3()
   const scratchForward = new THREE_.Vector3()
 
+  /**
+   * Reusable result array for {@link VrTourOverlayHandle.getInteractiveMeshes}.
+   * `vrInteraction.update` polls the getter every XR frame (72–90 Hz
+   * on Quest); allocating a fresh array each call adds up to real
+   * GC pressure on standalone headsets. The array is refilled in
+   * place — callers must not retain the reference across frames.
+   */
+  const interactiveMeshesScratch: THREE.Mesh[] = []
+
   function buildMeshForOverlay(
     id: string,
     kind: VrTourOverlayKind,
@@ -1589,13 +1598,17 @@ export function createVrTourOverlay(THREE_: typeof THREE): VrTourOverlayHandle {
     },
 
     getInteractiveMeshes() {
-      const out: THREE.Mesh[] = []
+      // Refills `interactiveMeshesScratch` in place — see the
+      // declaration's comment. Callers (vrInteraction per-frame)
+      // push elements into their own arrays and don't retain this
+      // reference, so in-place mutation is safe.
+      interactiveMeshesScratch.length = 0
       for (const managed of overlays.values()) {
         if ((managed.mesh.userData as OverlayUserData).kind === 'question') {
-          out.push(managed.mesh)
+          interactiveMeshesScratch.push(managed.mesh)
         }
       }
-      return out
+      return interactiveMeshesScratch
     },
 
     hitTestInteractive(mesh, uv) {

@@ -1137,6 +1137,7 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     a.interaction.dispose()
     a.hud.dispose()
     a.browse.dispose()
+    a.scene.scene.remove(a.tourControls.mesh)
     a.tourControls.dispose()
     a.scene.scene.remove(a.timeLabel.mesh)
     a.timeLabel.dispose()
