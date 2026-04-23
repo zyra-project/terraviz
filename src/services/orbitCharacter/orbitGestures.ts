@@ -92,17 +92,21 @@ export const GESTURES: Record<GestureKind, Gesture> = {
 
       // Bezier endpoints (absolute values; mirrored on X for the
       // second sub). REST is close to the body on the right side;
-      // PEAK is spread wide and lifted.
+      // PEAK is spread wide and lifted. Earlier tuning pushed PEAK
+      // so far out (1.65r X) the shoulder read became "arms at
+      // airplane mode"; pulled in to 1.00r X / 0.30r Y so the
+      // shrug lands closer to the body while keeping the same
+      // curved sweep.
       const restX = r * 0.20
       const restY = -r * 0.10
-      const peakX = r * 1.65
-      const peakY = r * 0.45
+      const peakX = r * 1.00
+      const peakY = r * 0.30
       // Control point — pulled UP and slightly OUTWARD from the
       // midpoint so the curve bows over the top rather than running
-      // in a straight line. This is what gives the motion its arm
-      // swing character.
-      const ctrlX = (restX + peakX) * 0.5 + r * 0.20
-      const ctrlY = (restY + peakY) * 0.5 + r * 0.55
+      // in a straight line. Offsets reduced in proportion to the
+      // smaller peak so the bow keeps its relative arm-swing shape.
+      const ctrlX = (restX + peakX) * 0.5 + r * 0.12
+      const ctrlY = (restY + peakY) * 0.5 + r * 0.35
       // Quadratic Bezier B(s) = (1-s)^2·P0 + 2(1-s)·s·P1 + s^2·P2
       const s = swing
       const u = 1 - s
@@ -187,13 +191,20 @@ export const GESTURES: Record<GestureKind, Gesture> = {
       const peak = Math.sin(smoothstep01((t - 0.05) / 0.9) * Math.PI)
       const cycle = Math.sin(t * Math.PI * 2)
       const dir = ctx.direction
-      const extBase = 0.09
-      const extPulse = (0.5 + 0.5 * cycle) * 0.10
+      // Baseline extension raised from 0.09 → 0.16 so the extending
+      // sub sits WELL outside Orbit's body silhouette (body radius
+      // 0.075) at the gesture's peak rather than curling inside it
+      // and getting lost behind the head. Pulse amplitude dialed
+      // back (0.10 → 0.07) now that it rides on the larger
+      // baseline — the curl is still visible but the retract never
+      // pulls the sub back inside the body.
+      const extBase = 0.16
+      const extPulse = (0.5 + 0.5 * cycle) * 0.07
       const extDist = (extBase + extPulse) * peak
       // Arc/curl — Y rises on extend (cycle > 0), dips on pull-back
-      // (cycle < 0). Syncs with the pulse so the motion reads as a
-      // curl rather than a straight extend-retract.
-      const curlY = cycle * 0.035 * peak
+      // (cycle < 0). Bumped slightly (0.035 → 0.045) to keep the
+      // curl read visible at the larger extension distance.
+      const curlY = cycle * 0.045 * peak
       const refDist = r * 0.55
       return {
         subSpheres: [
