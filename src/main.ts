@@ -1219,11 +1219,19 @@ class InteractiveSphere {
         if (dataService.isVideoDataset(ds)) {
           const video = this.hlsService?.video
           if (!video || !ds.endTime) return null
-          const duration = this.hlsService?.duration ?? 1
+          // `HTMLVideoElement.duration` is `NaN` until the video's
+          // metadata has loaded — `?? 1` doesn't catch NaN because
+          // it isn't nullish, so the previous check would pass NaN
+          // straight into `videoTimeToDate` and `formatDate` would
+          // render "Invalid Date". Suppress the label entirely
+          // until duration is available; the per-frame poll will
+          // pick it up the first frame after `loadedmetadata`.
+          const duration = this.hlsService?.duration
+          if (!Number.isFinite(duration) || (duration as number) <= 0) return null
           const start = new Date(ds.startTime)
           const end = new Date(ds.endTime)
           const snapMs = this.playback.displayInterval?.intervalMs
-          const currentDate = videoTimeToDate(video.currentTime, duration, start, end, snapMs)
+          const currentDate = videoTimeToDate(video.currentTime, duration as number, start, end, snapMs)
           const showTime = ds.period
             ? isSubDailyPeriod(ds.period)
             : (this.playback.displayInterval?.showTime ?? false)

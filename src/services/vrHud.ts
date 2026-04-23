@@ -209,8 +209,10 @@ function drawCanvas(
   // globe (vrTimeLabel) — not here. Embedding it in the HUD
   // required the host to feed a per-frame string AND the HUD to
   // redraw its canvas every frame, which was both wasteful and
-  // indirect. The standalone panel computes the label itself from
-  // video.currentTime and billboards to face the user.
+  // indirect. The session/host computes the label string (from
+  // video.currentTime via `VrSessionContext.getDatasetTimeLabel`
+  // in main.ts); vrTimeLabel just renders what it's given and
+  // billboards to face the user.
   const titleText = state.datasetTitle || 'Load a dataset in 2D view first'
   ctx.fillStyle = '#e8eaf0' // --color-text
   ctx.font = '500 54px system-ui, -apple-system, sans-serif'

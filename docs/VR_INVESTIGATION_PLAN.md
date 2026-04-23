@@ -725,14 +725,18 @@ heavy lifting (engine, dataset loading, sync) is reused.
 
 **Overlay placement — locked in:** hybrid. World-anchored by
 default (overlays float at fixed positions in the room — above
-the globe, to the right at chest height) with an optional
-gaze-follow toggle on the HUD that keeps overlays subtitle-style
-in front of the user. Tours can also specify an anchor in the
-tour JSON for specific spatial layouts (e.g. "this graphic
-should appear to the left of the Atlantic"); the per-overlay
-JSON hint wins when present. Ship world-anchor + gaze-follow
-together from day one so the UX is validated end-to-end on device
-rather than retrofitted after the fact.
+the globe, to the right at chest height). Tours specify an
+optional `anchor` in each overlay task for specific spatial
+layouts (e.g. "this graphic should appear to the left of the
+Atlantic"); the per-overlay JSON hint wins when present. A
+`gazeFollowOverlays` preference flips the global default to
+subtitle-style in-front-of-user placement for overlays that
+don't carry an explicit anchor. Shipped in commit 8 as
+infrastructure only — the preference is persisted and readable
+from the tour engine / VR session, but no HUD toggle binds to
+it yet. A UI for flipping the default at runtime is a
+follow-up; tour authors can drive per-overlay placement via the
+JSON field today.
 
 **Interactive questions:**
 

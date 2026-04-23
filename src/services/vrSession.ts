@@ -233,11 +233,14 @@ interface PendingFlyTo {
 let pendingFlyTo: PendingFlyTo | null = null
 
 /**
- * Default flyTo animation length. Matches the 2D MapLibre `flyTo`
- * default duration (`easeTo` pacing, ~1.5 s), so tours that await
- * the camera settle get the same rhythm in VR as in 2D.
+ * Default flyTo animation length. Matches `MapRenderer.flyTo`'s
+ * current 2.5 s pacing so tours that run `Promise.all([2D, VR])`
+ * settle at roughly the same instant in both surfaces — the tour
+ * engine awaits the longer of the two, and a mismatched default
+ * would make VR-only sessions feel either abrupt (shorter) or
+ * sluggish (longer) relative to the same tour in 2D.
  */
-const FLY_TO_DEFAULT_DURATION_MS = 1500
+const FLY_TO_DEFAULT_DURATION_MS = 2500
 
 /**
  * Rotate the VR globe so `(lat, lng)` faces the user's head. No-op
