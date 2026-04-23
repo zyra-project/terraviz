@@ -724,19 +724,31 @@ heavy lifting (engine, dataset loading, sync) is reused.
   in sequence is efficient.
 
 **Overlay placement — locked in:** hybrid. World-anchored by
-default (overlays float at fixed positions in the room — above
-the globe, to the right at chest height). Tours specify an
-optional `anchor` in each overlay task for specific spatial
-layouts (e.g. "this graphic should appear to the left of the
-Atlantic"); the per-overlay JSON hint wins when present. A
-`gazeFollowOverlays` preference flips the global default to
-subtitle-style in-front-of-user placement for overlays that
-don't carry an explicit anchor. Shipped in commit 8 as
-infrastructure only — the preference is persisted and readable
-from the tour engine / VR session, but no HUD toggle binds to
-it yet. A UI for flipping the default at runtime is a
+default (overlays float at fixed positions relative to the
+globe). Tours specify an optional `anchor` in each overlay task
+for specific spatial layouts (e.g. "this graphic should appear
+to the left of the Atlantic"); the per-overlay JSON hint wins
+when present. A `gazeFollowOverlays` preference flips the global
+default to subtitle-style in-front-of-user placement for
+overlays that don't carry an explicit anchor. Shipped in commit
+8 as infrastructure only — the preference is persisted and
+readable from the tour engine / VR session, but no HUD toggle
+binds to it yet. A UI for flipping the default at runtime is a
 follow-up; tour authors can drive per-overlay placement via the
 JSON field today.
+
+**Drag-to-reposition.** Users can grab any world-mode text /
+popup / image overlay with a controller trigger and move it to a
+spot that feels right in the room — panel maintains its initial
+offset from the controller so it "follows" the held-card
+metaphor. Release commits the new position as a
+`customWorldOffset` on the overlay; the panel stays there but
+continues to track the globe if it moves (AR placement). The
+override clears when the overlay is hidden, so a re-show by the
+same id starts at the default again. Video and question
+overlays are excluded from drag — video is content-first, and
+question's answer-button raycast would conflict with a
+grab-to-drag gesture.
 
 **Interactive questions:**
 

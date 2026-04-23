@@ -233,6 +233,15 @@ interface OverlayUserData {
   gazeOffset: THREE.Vector3
   /** Close-button UV rect, or null if the overlay isn't closable. Populated by drawText. */
   closeUv: { uMin: number; uMax: number; vMin: number; vMax: number } | null
+  /**
+   * User-set world-axis offset from the globe, applied instead of
+   * `worldOffset` when non-null. Written by `vrInteraction`'s
+   * drag loop so a dragged panel stays where the user put it
+   * across frames (still tracking the globe if it moves in AR —
+   * the offset is globe-relative). Cleared on hide; a re-show by
+   * the same id starts at the default again.
+   */
+  customWorldOffset: THREE.Vector3 | null
 }
 
 /**
@@ -297,6 +306,25 @@ export interface VrTourOverlayHandle {
    * overlay types in a later commit.
    */
   getInteractiveMeshes(): THREE.Mesh[]
+  /**
+   * Meshes that should be targets for drag-to-reposition. Covers
+   * world-mode text / popup / image overlays — gaze-mode panels
+   * follow the camera by definition, video is content-first, and
+   * questions have their own per-region hit tests (drag would
+   * collide with answer-button taps). Returns a reusable scratch
+   * array refilled in place; callers (vrInteraction per-frame)
+   * push into their own target list the same frame.
+   */
+  getDraggableMeshes(): THREE.Mesh[]
+  /**
+   * Set the world-axis offset-from-globe for a specific overlay,
+   * overriding its default placement. Called by vrInteraction's
+   * drag loop each frame during a drag and once on release. The
+   * overlay keeps this override until `hideOverlay(id)` (or
+   * `hideAll*`) removes the mesh — a subsequent show-by-id starts
+   * at the default again. No-op when the id is unknown.
+   */
+  setOverlayCustomOffset(id: string, offset: THREE.Vector3): void
   /**
    * Translate a raycast intersection (specific mesh + UV) into a
    * semantic action, or null if the hit missed every interactive
@@ -412,12 +440,18 @@ const CLOSE_BUTTON_MARGIN = 10
 
 /**
  * World-anchored default offset from the primary globe for the
- * single-globe case: above-right of the globe at eye level,
- * slightly pulled toward the user so it reads as "floating near
- * the Earth" rather than intersecting it. Matches the spatial
- * feel of the browse panel's offset from the globe.
+ * single-globe case. Sits to the right of the globe at mid-height,
+ * clear of the sphere's surface. Panel center at x = 0.9; with a
+ * 0.6 m-wide default text panel the left edge lands at x = 0.6 m,
+ * past the 0.5 m-radius globe's equator so there's no intersection.
+ *
+ * Earlier iterations used x = 0.6 — mathematically inside the
+ * globe (left edge at 0.3 m), which clipped the panel through the
+ * sphere whenever the dataset texture was opaque. The extra +0.3 m
+ * pushes it cleanly past the globe while still reading as "near"
+ * rather than "beside".
  */
-const DEFAULT_WORLD_OFFSET_SINGLE = { x: 0.6, y: 0.2, z: 0.15 }
+const DEFAULT_WORLD_OFFSET_SINGLE = { x: 0.9, y: 0, z: 0.15 }
 
 /**
  * World-anchored default offset when a multi-globe arc is on
@@ -437,11 +471,16 @@ const DEFAULT_WORLD_OFFSET_MULTI = { x: 0, y: 0.85, z: 0.15 }
 
 /**
  * Gaze-follow default offset in camera-local axes: in front of the
- * user at subtitle distance, a touch below the viewing axis so it
- * doesn't occlude whatever the user is looking at. -z is forward
- * in Three.js camera space.
+ * user at comfortable reading distance, slightly below the viewing
+ * axis so it doesn't occlude whatever the user is looking at. -z
+ * is forward in Three.js camera space.
+ *
+ * Originally 1.4 m — on-headset feedback flagged that as too far
+ * for comfortable reading (text shrinks at distance in a fixed-FoV
+ * display). 0.9 m matches typical book-at-arm's-length reading
+ * distance and makes 36 px body text readable without squinting.
  */
-const DEFAULT_GAZE_OFFSET = { x: 0, y: -0.15, z: -1.4 }
+const DEFAULT_GAZE_OFFSET = { x: 0, y: -0.12, z: -0.9 }
 
 /** Lerp factor for gaze-follow smoothing. 0 = locked rigidly, 1 = no smoothing. Per-second, compounded by delta. */
 const GAZE_LERP_RATE = 6.0
@@ -1130,6 +1169,8 @@ export function createVrTourOverlay(THREE_: typeof THREE): VrTourOverlayHandle {
    * place — callers must not retain the reference across frames.
    */
   const interactiveMeshesScratch: THREE.Mesh[] = []
+  /** Same pattern for drag targets — see `getDraggableMeshes`. */
+  const draggableMeshesScratch: THREE.Mesh[] = []
 
   function buildMeshForOverlay(
     id: string,
@@ -1179,6 +1220,7 @@ export function createVrTourOverlay(THREE_: typeof THREE): VrTourOverlayHandle {
       worldOffset,
       gazeOffset,
       closeUv: null,
+      customWorldOffset: null,
     }
     mesh.userData = userData
 
@@ -1244,6 +1286,7 @@ export function createVrTourOverlay(THREE_: typeof THREE): VrTourOverlayHandle {
       worldOffset,
       gazeOffset,
       closeUv: null,
+      customWorldOffset: null,
     }
     mesh.userData = userData
 
@@ -1611,6 +1654,37 @@ export function createVrTourOverlay(THREE_: typeof THREE): VrTourOverlayHandle {
       return interactiveMeshesScratch
     },
 
+    getDraggableMeshes() {
+      // Same in-place refill contract as getInteractiveMeshes.
+      // Criteria: world-mode AND kind is text/popup/image. Video
+      // stays pinned (content-first, less likely to need repositioning)
+      // and question stays pinned (trigger taps drive answer
+      // selection, can't also mean "grab to drag").
+      draggableMeshesScratch.length = 0
+      for (const managed of overlays.values()) {
+        const ud = managed.mesh.userData as OverlayUserData
+        if (ud.anchor.mode !== 'world') continue
+        if (ud.kind !== 'text' && ud.kind !== 'popup' && ud.kind !== 'image') continue
+        draggableMeshesScratch.push(managed.mesh)
+      }
+      return draggableMeshesScratch
+    },
+
+    setOverlayCustomOffset(id, offset) {
+      const managed = overlays.get(id)
+      if (!managed) return
+      const ud = managed.mesh.userData as OverlayUserData
+      // Mutate the existing Vector3 instead of replacing the
+      // reference — drag updates 90 times/second; allocating
+      // a new Vector3 each call would show up as GC pressure on
+      // standalone headsets.
+      if (ud.customWorldOffset) {
+        ud.customWorldOffset.copy(offset)
+      } else {
+        ud.customWorldOffset = offset.clone()
+      }
+    },
+
     hitTestInteractive(mesh, uv) {
       const ud = mesh.userData as OverlayUserData | undefined
       if (!ud || ud.kind !== 'question') return null
@@ -1708,7 +1782,13 @@ export function createVrTourOverlay(THREE_: typeof THREE): VrTourOverlayHandle {
           // World-anchored: glue position to the globe with the
           // overlay's offset. Billboard toward the camera so text
           // stays readable regardless of where the user stands.
-          scratchTarget.copy(globePosition).add(ud.worldOffset)
+          //
+          // `customWorldOffset` (set by vrInteraction's drag loop
+          // after the user grabs + releases the panel) overrides
+          // the default — panel stays where the user put it but
+          // still tracks the globe if it moves in AR placement.
+          const activeOffset = ud.customWorldOffset ?? ud.worldOffset
+          scratchTarget.copy(globePosition).add(activeOffset)
           managed.mesh.position.copy(scratchTarget)
           managed.mesh.lookAt(scratchCamPos)
         } else {

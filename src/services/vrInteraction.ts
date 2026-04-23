@@ -366,6 +366,36 @@ export function createVrInteraction(
   const tourArmed: (VrTourControlsAction | null)[] = [null, null]
   /** Per-controller tour-overlay interactive action armed on selectstart (question answer / continue). */
   const tourOverlayArmed: (VrTourInteractiveAction | null)[] = [null, null]
+
+  /**
+   * Drag-to-reposition state. Populated on `selectstart` when the
+   * ray hits a world-mode text / popup / image overlay (see
+   * `tourOverlay.getDraggableMeshes`) and cleared on `selectend`.
+   * While active, the per-frame `update` reads the controller's
+   * world pose and writes a new custom offset onto the overlay so
+   * the panel "follows" the controller like a held card.
+   *
+   * Stored offset is in controller-local coords at grab time,
+   * rotated back to world by the current controller quaternion
+   * each frame. That way the panel maintains its initial distance
+   * + angle from the controller — feels natural whether the user
+   * is pushing the panel away, pulling it in, or rotating the
+   * wrist.
+   */
+  type OverlayDragState =
+    | { kind: 'idle' }
+    | {
+        kind: 'overlay'
+        controllerIndex: 0 | 1
+        overlayId: string
+        /** Offset from controller origin to panel center, in controller-local axes, captured at grab. */
+        initialOffsetLocal: THREE.Vector3
+      }
+  let overlayDrag: OverlayDragState = { kind: 'idle' }
+  /** Scratch vectors / quat reused each drag-update frame. */
+  const dragScratchPos = new THREE_.Vector3()
+  const dragScratchQuat = new THREE_.Quaternion()
+  const dragScratchOffset = new THREE_.Vector3()
   /** Per-controller "ray is currently on the browse panel" — drives thumbstick scroll. */
   const rayOnBrowse: boolean[] = [false, false]
   /**
@@ -449,6 +479,7 @@ export function createVrInteraction(
     | { kind: 'browse-scroll' }
     | { kind: 'tour-control'; action: VrTourControlsAction }
     | { kind: 'tour-overlay'; action: VrTourInteractiveAction }
+    | { kind: 'overlay-drag'; overlayId: string; mesh: THREE.Mesh }
     | { kind: 'place-button' }
     | { kind: 'globe'; mesh: THREE.Mesh }
     | null {
@@ -506,6 +537,24 @@ export function createVrInteraction(
           y: overlayHits[0].uv.y,
         })
         if (action) return { kind: 'tour-overlay', action }
+      }
+    }
+
+    // Draggable tour overlay panels (world-mode text / popup /
+    // image). Checked AFTER interactive meshes so a question panel
+    // still routes its answer-button hits first; `getDraggableMeshes`
+    // already excludes questions to prevent overlap. Ordered before
+    // the place button and globes so a trigger on an overlay pans
+    // into drag mode rather than falling through to a globe grab.
+    const draggableMeshes = ctx.tourOverlay.getDraggableMeshes()
+    if (draggableMeshes.length > 0) {
+      const dragHits = raycaster.intersectObjects(draggableMeshes, false)
+      if (dragHits.length > 0) {
+        const hitMesh = dragHits[0].object as THREE.Mesh
+        const overlayId = (hitMesh.userData as { overlayId?: string }).overlayId
+        if (overlayId) {
+          return { kind: 'overlay-drag', overlayId, mesh: hitMesh }
+        }
       }
     }
 
@@ -747,6 +796,33 @@ export function createVrInteraction(
       return
     }
 
+    if (hit.kind === 'overlay-drag') {
+      // Capture the current controller → panel offset in the
+      // controller's local frame. Per-frame `update` applies the
+      // current controller quaternion to this stored offset and
+      // adds the controller world position, so the panel stays at
+      // the same relative place as the user moves/rotates the
+      // controller. Feels like "grabbing" the panel at its current
+      // spot.
+      const controller = controllers[index]
+      controller.getWorldPosition(dragScratchPos)
+      controller.getWorldQuaternion(dragScratchQuat)
+      // offset_local = (panel_world - controller_world) rotated by
+      // inverse-controller. Reuse scratch vectors to avoid GC.
+      dragScratchOffset.copy(hit.mesh.position).sub(dragScratchPos)
+      dragScratchQuat.invert()
+      dragScratchOffset.applyQuaternion(dragScratchQuat)
+      overlayDrag = {
+        kind: 'overlay',
+        controllerIndex: index,
+        overlayId: hit.overlayId,
+        // Clone — scratch is reused next frame, but our stored
+        // offset needs to persist for the life of the drag.
+        initialOffsetLocal: dragScratchOffset.clone(),
+      }
+      return
+    }
+
     if (hit.kind === 'place-button') {
       placeArmed[index] = true
       return
@@ -806,6 +882,14 @@ export function createVrInteraction(
         ctx.tourOverlay.activateInteractive(armed)
       }
       tourOverlayArmed[index] = null
+    }
+    // Overlay drag end — release the held panel. The per-frame
+    // `update` has been writing customWorldOffset via
+    // `setOverlayCustomOffset`, so the panel stays at its last
+    // drag position. No explicit "commit" action — the last
+    // update's offset IS the committed state.
+    if (overlayDrag.kind === 'overlay' && overlayDrag.controllerIndex === index) {
+      overlayDrag = { kind: 'idle' }
     }
     // Place button: same press-and-release-on-same-target click semantics.
     if (placeArmed[index]) {
@@ -1132,6 +1216,14 @@ export function createVrInteraction(
     for (let i = 0; i < overlayTargets.length; i++) {
       rayTargets.push(overlayTargets[i])
     }
+    // Draggable overlays — world-mode text/popup/image. Added to
+    // the ray-target list so the visible laser dot lands on them
+    // like any other UI target; picking + arming happens via
+    // `pickHit` above.
+    const draggableTargets = ctx.tourOverlay.getDraggableMeshes()
+    for (let i = 0; i < draggableTargets.length; i++) {
+      rayTargets.push(draggableTargets[i])
+    }
     if (ctx.placement && ctx.placement.placeButtonMesh.visible) {
       rayTargets.push(ctx.placement.placeButtonMesh)
     }
@@ -1227,6 +1319,28 @@ export function createVrInteraction(
         case 'inertia':
           updateInertia(rotationMode, deltaSeconds)
           break
+      }
+
+      // Overlay drag — writes a new customWorldOffset to the
+      // overlay manager each frame based on the controller's
+      // current pose. tourOverlay.update (called later in
+      // vrSession's render loop) picks it up and positions the
+      // panel; the panel "follows" the controller like a held
+      // card until the user releases the trigger.
+      if (overlayDrag.kind === 'overlay') {
+        const controller = controllers[overlayDrag.controllerIndex]
+        controller.getWorldPosition(dragScratchPos)
+        controller.getWorldQuaternion(dragScratchQuat)
+        // Rotate the stored local offset into world space by the
+        // current controller quaternion, then add controller pos.
+        dragScratchOffset.copy(overlayDrag.initialOffsetLocal).applyQuaternion(dragScratchQuat)
+        dragScratchOffset.add(dragScratchPos)
+        // Now `dragScratchOffset` holds the desired panel world
+        // position. Convert to globe-relative before passing to
+        // setOverlayCustomOffset so the panel continues to track
+        // the globe if it moves in AR placement.
+        dragScratchOffset.sub(ctx.globe.position)
+        ctx.tourOverlay.setOverlayCustomOffset(overlayDrag.overlayId, dragScratchOffset)
       }
 
       // Velocity tracker only runs during user-driven rotation;
