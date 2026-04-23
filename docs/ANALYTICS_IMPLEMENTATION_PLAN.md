@@ -468,6 +468,12 @@ the code and confirm none of these leave the client:
   blob (not shown above to keep the table skim-friendly; add it
   alongside `app_version`). Bump on breaking changes; the Iceberg
   tables read old + new in parallel.
+- **Environment tagging.** The Pages Function injects an
+  `environment` blob (`production` / `preview` / `local`) into every
+  event's `blobs[]` array at ingest time, based on the Cloudflare
+  Pages environment serving the request. Clients never send this
+  field; the server is the source of truth. Dashboards filter on
+  `environment = 'production'` by default.
 
 ### Client — `src/analytics/`
 
@@ -736,36 +742,77 @@ priority — **Blockers** must be resolved in review; everything else
 can be deferred to the implementation PR but should be captured here
 so nothing slips.
 
-### Blockers — decide before coding starts
+### Resolved decisions — locked in during review
 
-#### First-launch experience
+These were Blockers. All resolved:
 
-When a brand-new user opens the app, what do they see, and when does
-the first event fire?
+- **First-launch UX — unified across web and desktop.** Tier defaults
+  to `essential`. A persistent disclosure banner appears on first
+  session and does not dismiss automatically: *"Interactive Sphere
+  reports anonymous usage data. [Learn more](/privacy) · [Settings](#privacy)
+  · [OK]"*. Banner is the same copy on web and desktop. No first-run
+  modal on desktop — the install event is not held to a higher
+  consent bar because the data collected is identical and a
+  persistent banner is a stronger consent surface than a reflex-
+  dismissed modal. Banner impression tracked as
+  `settings_changed key=disclosure_seen` so we can tell whether users
+  are seeing it. F-Droid and other "zero telemetry required" channels
+  build with `VITE_TELEMETRY_ENABLED=false`, handled at compile time
+- **Endpoint: Pages Function.** `functions/api/ingest.ts` alongside
+  the existing feedback endpoints. No separate Worker, no subdomain
+- **Runtime kill switch: Workers KV.** Pages Function reads a KV
+  entry at edge on every request. Flipping the flag returns `410 Gone`
+  to all clients; clients treat 410 as "stop sending for the rest of
+  this session." Flipping is instantaneous across all edge caches
+- **Source maps in production: yes.** The code is open-source on
+  GitHub, so there's nothing to hide, and readable stacks are worth
+  more than pretending otherwise
+- **Dogfooding path: skipped.** No URL-param beta flag, no dev-only
+  cohort. Preview-branch deploys still need to be distinguishable
+  from production for health checks — handled by environment tagging
+  (below), not by a separate dataset
 
-Proposed:
+### Environment tagging (replaces the dedicated-dev-dataset plan)
 
-- **Web, first visit.** Tier defaults to `essential`. A slim,
-  dismissable banner pinned to the bottom of the viewport on first
-  load: *"Interactive Sphere reports anonymous usage data. [Learn
-  more](/privacy) · [Settings](#privacy)"*. The banner's existence
-  does not block any event from firing — essential tier is opt-out,
-  not opt-in. The banner's own impression is tracked as an
-  `settings_changed` event with `key=disclosure_seen`, so we can tell
-  whether users are seeing it
-- **Desktop, first launch.** A proper modal, Firefox-style: *"Help
-  make Interactive Sphere better?"* with three options — *Essential*,
-  *Essential + Research*, *No telemetry* — and a *Learn more* link to
-  `/privacy`. **No events fire before the user clicks.** This is the
-  main web/desktop divergence and it's deliberate: desktop apps are
-  held to a higher first-run-consent bar
-- **Returning users** (either platform): whatever they picked is
-  honored. No prompt, no banner re-show
+Single Analytics Engine dataset. The Pages Function reads its own
+Cloudflare Pages environment at request time and injects an
+`environment` dimension into every event before `writeDataPoint()`.
+Client code doesn't participate — it can't lie about the environment
+and doesn't need to know.
 
-This needs sign-off because it's the one place the two-tier design
-meets the user, and getting it wrong is the kind of thing that
-shows up in a *"your app tracked me before I said yes"* Hacker News
-post.
+```ts
+const environment =
+  context.env.CF_PAGES_BRANCH === 'main' ? 'production'
+  : context.env.CF_PAGES ? 'preview'
+  : 'local'
+```
+
+- `production` — main branch
+- `preview` — preview deploys (feature branches, PR previews)
+- `local` — `wrangler pages dev` on a developer's machine
+
+Queries filter by `environment = 'production'` to exclude preview
+traffic from product dashboards. The Grafana dashboards default to
+production; a variable switch flips them to preview for testing
+changes.
+
+Paired with the client-sent `app_version` blob (from `package.json`
+via a Vite `define`), every event carries enough provenance to
+isolate a specific build on a specific environment — without any
+separate dataset or extra infrastructure.
+
+### Remaining blockers — still need decisions
+
+#### Privacy-policy entry-point audit
+
+*Resolved in the latest revision of `docs/PRIVACY.md`.* The draft now
+covers all entry points: telemetry, general feedback, Orbit ratings
+(with the full conversation-submission description), Orbit chat
+routing (our Cloudflare proxy → Workers AI by default, or a
+user-configured provider), Vision Mode, crash reports, and what
+stays on-device (chat history, API keys in keychain, offline
+datasets, settings). Still needs external legal review — this review
+is not something the engineering team signs off on.
 
 #### Tier-change semantics mid-session
 
