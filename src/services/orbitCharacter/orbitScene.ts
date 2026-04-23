@@ -216,6 +216,23 @@ const GLASS_DOME_RADIUS = BEZEL_MAJOR_RADIUS + BEZEL_TUBE_RADIUS
  */
 const LEFT_EYE_STENCIL_REF = 1
 const RIGHT_EYE_STENCIL_REF = 2
+
+/**
+ * Layer bit used to isolate Orbit's lighting from the Earth stack.
+ * Orbit adds its own AmbientLight + DirectionalLight to the scene;
+ * the photoreal Earth factory adds its own ambient + sun; without
+ * isolation both light sets illuminate both subjects, double-
+ * lighting the Earth (which breaks the photoreal look it was
+ * carefully calibrated for) and cross-tinting Orbit with Earth's
+ * pure-white sun (which washes out the warm-cream key tone the
+ * character was designed around).
+ *
+ * All Orbit-owned meshes + lights get this layer enabled; the
+ * camera also gets it enabled so it still renders Orbit.
+ * Earth's meshes + lights stay on the default layer 0.
+ * Cross-layer light/mesh interaction is then impossible.
+ */
+const ORBIT_LAYER = 1
 const LID_RADIUS = EYE_PAIR_DISC_RADIUS * 1.20        // oversized; stencil clips overflow
 const LID_MESH_Y_OFFSET = -LID_RADIUS * 0.35           // dome center near pivot axis
 const UPPER_LID_PIVOT_Y = +EYE_PAIR_DISC_RADIUS * 0.55 // inside socket, not at the rim
@@ -540,18 +557,29 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
   const lidBundleLeft = createLidMaterial(palette, LEFT_EYE_STENCIL_REF)
   const lidBundleRight = createLidMaterial(palette, RIGHT_EYE_STENCIL_REF)
 
+  // Sparkle-cluster star geometries — one 5-point for the cluster
+  // center, one 4-point for each flanking sparkle. Built per-scene
+  // (not module-level singletons) so normal scene traversal disposal
+  // in OrbitController.dispose() frees the GPU buffers when the
+  // scene tears down; sharing as module-level singletons made the
+  // second controller instance render against disposed buffers if
+  // Orbit was ever mounted / unmounted repeatedly. Allocation cost
+  // is trivial (~12 vertices each).
+  const fivePointStarGeometry = createStarGeometry(STAR_FIVE_POINT_RADIUS)
+  const fourPointStarGeometry = createFourPointStarGeometry(STAR_FOUR_POINT_RADIUS)
+
   // Paired eyes — the vinyl redesign's permanent face configuration.
   // Placed lower (Y offset) and wider (X offset) than the original
   // rig so the character reads as neotenous and approachable. See
   // `docs/ORBIT_CHARACTER_VINYL_REDESIGN.md` §Face.
   const eyeLeft = buildPairedEye(
     head, eyeBundle, pupilMaterials, lidBundleLeft.material, bezelMaterial, lidGeometry,
-    glassDomeBundle.material,
+    glassDomeBundle.material, fivePointStarGeometry, fourPointStarGeometry,
     -EYE_PAIR_OFFSET_X, EYE_PAIR_OFFSET_Y, LEFT_EYE_STENCIL_REF,
   )
   const eyeRight = buildPairedEye(
     head, eyeBundle, pupilMaterials, lidBundleRight.material, bezelMaterial, lidGeometry,
-    glassDomeBundle.material,
+    glassDomeBundle.material, fivePointStarGeometry, fourPointStarGeometry,
     +EYE_PAIR_OFFSET_X, EYE_PAIR_OFFSET_Y, RIGHT_EYE_STENCIL_REF,
   )
 
@@ -604,6 +632,28 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
   const targetHalo = new THREE.Mesh(new THREE.CircleGeometry(0.012, 32), targetHaloMat)
   scene.add(targetHalo)
 
+  // Light isolation via layers. Orbit's ambient + key lights move
+  // onto ORBIT_LAYER; every Orbit-owned mesh moves onto the same
+  // layer only (default 0 disabled). Earth (globe, atmosphere,
+  // clouds, sun sprites) stays on layer 0 with its own lights.
+  // The camera gets both layers enabled so it still renders both
+  // subjects. Cross-layer light-to-mesh interaction is then
+  // impossible: Earth isn't double-lit by Orbit's warm key, and
+  // Orbit isn't cross-tinted by Earth's pure-white sun.
+  camera.layers.enable(ORBIT_LAYER)
+  ambientLight.layers.set(ORBIT_LAYER)
+  keyLight.layers.set(ORBIT_LAYER)
+  // `head` is also the keyLight target, and carries all the face
+  // children (body, bezel, lids, pupil elements, glass dome,
+  // backlight). traverse() walks the subtree so every descendant's
+  // layer gets set in one pass.
+  head.traverse((obj) => obj.layers.set(ORBIT_LAYER))
+  // Subs and target markers are direct scene children — iterate
+  // them explicitly since they're not under `head`.
+  for (const sub of subSpheres) sub.layers.set(ORBIT_LAYER)
+  targetMarker.layers.set(ORBIT_LAYER)
+  targetHalo.layers.set(ORBIT_LAYER)
+
   return {
     scene, camera, head, body, bodyBundle,
     backlight, backlightBundle,
@@ -633,23 +683,6 @@ function makeOrbitBasis(tilt: number, twist: number): { u: THREE.Vector3; v: THR
   return { u, v }
 }
 
-/**
- * Shared star geometries — one 5-point star for the cluster center,
- * one 4-point sparkle for the flanking pair. All four eye-pair
- * instances clone these; geometry allocation stays flat. Disposed
- * with the scene traversal in `OrbitController.dispose`.
- */
-const _fivePointStarGeometry = createStarGeometry(STAR_FIVE_POINT_RADIUS)
-const _fourPointStarGeometry = createFourPointStarGeometry(STAR_FOUR_POINT_RADIUS)
-// OrbitController.dispose() traverses the scene and calls .dispose()
-// on every geometry it finds. These star geometries are module-level
-// singletons shared across both eyes — if the first controller's
-// traversal disposes them, a second controller instance would render
-// against a dead GPU buffer (stars vanish + WebGL warnings).
-// Overriding dispose to a no-op makes the traversal safe; the shared
-// buffers persist for the lifetime of the page, which is fine.
-_fivePointStarGeometry.dispose = () => {}
-_fourPointStarGeometry.dispose = () => {}
 
 /**
  * Build one half of the paired-eye configuration.
@@ -683,6 +716,8 @@ function buildPairedEye(
   bezelMaterial: THREE.Material,
   lidGeometry: THREE.BufferGeometry,
   glassDomeMaterial: THREE.Material,
+  fivePointStarGeometry: THREE.BufferGeometry,
+  fourPointStarGeometry: THREE.BufferGeometry,
   offsetX: number,
   offsetY: number,
   stencilRef: number,
@@ -775,9 +810,9 @@ function buildPairedEye(
   const clusterX = STAR_CLUSTER_OFFSET_X
   const clusterY = STAR_CLUSTER_OFFSET_Y
   const starSpecs: Array<{ geom: THREE.BufferGeometry; dx: number; rotZ: number }> = [
-    { geom: _fourPointStarGeometry, dx: -STAR_CLUSTER_SPACING, rotZ: 0.18 },
-    { geom: _fivePointStarGeometry, dx: 0,                     rotZ: 0.42 },
-    { geom: _fourPointStarGeometry, dx: +STAR_CLUSTER_SPACING, rotZ: -0.22 },
+    { geom: fourPointStarGeometry, dx: -STAR_CLUSTER_SPACING, rotZ: 0.18 },
+    { geom: fivePointStarGeometry, dx: 0,                     rotZ: 0.42 },
+    { geom: fourPointStarGeometry, dx: +STAR_CLUSTER_SPACING, rotZ: -0.22 },
   ]
   for (const spec of starSpecs) {
     const star = new THREE.Mesh(spec.geom, pupilMaterials.starMat)

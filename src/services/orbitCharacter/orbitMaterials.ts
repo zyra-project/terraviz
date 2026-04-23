@@ -501,9 +501,19 @@ export function createSocketMaskMaterial(stencilRef: number): THREE.MeshBasicMat
 
 /**
  * Build a lid material — the body's vinyl gradient pipeline + a
- * stencil test that clips the lid to the socket interior. Shares
- * the palette uniforms with the main body bundle so palette swaps
- * propagate correctly; only the stencil flags differ.
+ * stencil test that clips the lid to the socket interior. Each call
+ * returns a **fresh** bundle with its own MeshStandardMaterial AND
+ * its own uniforms object; the lid does NOT share uniforms with the
+ * main body bundle. This is intentional: Three.js's WebGL uniform
+ * cache keys on the material instance, so giving each stencil-ref'd
+ * lid its own material means the stencil state is per-eye and the
+ * GPU uploads don't step on each other.
+ *
+ * Palette consistency is maintained by `updateCharacter`, which
+ * writes palette values (uWarm, uCool, etc.) to every bundle in
+ * `handles.lidBundles` alongside the body bundle on each palette
+ * change, so the lid gradient tracks the body gradient even though
+ * the uniform objects are separate instances.
  *
  * **Three.js gotcha:** `stencilWrite` is the master switch for the
  * entire stencil subsystem on a material — if it's `false`, the GPU
