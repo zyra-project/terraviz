@@ -22,3 +22,11 @@ export {
   TELEMETRY_CONSOLE_MODE,
   TELEMETRY_SCHEMA_VERSION,
 } from './config'
+
+export {
+  reportError,
+  install as installErrorCapture,
+  uninstall as uninstallErrorCapture,
+  sanitizeMessage,
+  normalizeStack,
+} from './errorCapture'
