@@ -1142,6 +1142,10 @@ const _tmpActiveTarget = new THREE.Vector3()
 const _tmpEarthFeature = new THREE.Vector3()
 const _tmpRestPos = new THREE.Vector3()
 const _tmpHeadNdc = new THREE.Vector3()
+// Scratch Vector3 reused by the THINKING-state cluster submode when
+// rotating sub 0's head-local rest offset by the head's current
+// quaternion (so the Thinker-hand follows head tilt).
+const _tmpSubLocal = new THREE.Vector3()
 
 // User-presence tuning constants. Proximity NDC thresholds are in
 // camera-normalized coords; `PROXIMITY_FAR` is the outer edge of
@@ -1790,19 +1794,33 @@ export function updateCharacter(
       relZ = -0.080 + Math.sin(phase * 0.7) * 0.004
     } else if (effSubMode === 'cluster') {
       // "The Thinker" pose. Sub 0 parks at a fixed fist-under-chin
-      // position in front of and below Orbit's face, with only a
-      // tiny breathing oscillation so it reads as "held in place"
-      // rather than "frozen." Sub 1 drifts slowly above-and-behind
-      // like a thoughtful idea circling the head.
+      // position — expressed in HEAD-LOCAL space and rotated by the
+      // head's quaternion each frame so the hand follows the slow
+      // tilt from `head: 'tilt'`. Pulled closer to the body than the
+      // earlier pass so the pose reads as "hand pressed to face"
+      // rather than "sub hovering nearby." Tiny breathing
+      // oscillation keeps the hand feeling alive, not frozen.
+      // Sub 1 continues to drift slowly above-and-behind the head
+      // (also rotated by head quat) like a thoughtful idea.
       if (i === 0) {
-        relX = -0.045
-        relY = -0.058 + Math.sin(time * 0.9) * 0.0018
-        relZ =  0.085 + Math.sin(time * 0.7 + 1.1) * 0.0012
+        _tmpSubLocal.set(
+          -0.032,
+          -0.048 + Math.sin(time * 0.9) * 0.0015,
+           0.076 + Math.sin(time * 0.7 + 1.1) * 0.0010,
+        ).applyQuaternion(handles.head.quaternion)
+        relX = _tmpSubLocal.x
+        relY = _tmpSubLocal.y
+        relZ = _tmpSubLocal.z
       } else {
         const phase = anim.orbitPhaseAccum * 0.35 + pOff
-        relX =  0.050 + Math.cos(phase) * 0.012
-        relY =  0.055 + Math.sin(phase * 0.6) * 0.008
-        relZ = -0.020 + Math.sin(phase * 0.9) * 0.015
+        _tmpSubLocal.set(
+          0.050 + Math.cos(phase) * 0.012,
+          0.055 + Math.sin(phase * 0.6) * 0.008,
+         -0.020 + Math.sin(phase * 0.9) * 0.015,
+        ).applyQuaternion(handles.head.quaternion)
+        relX = _tmpSubLocal.x
+        relY = _tmpSubLocal.y
+        relZ = _tmpSubLocal.z
       }
     } else if (effSubMode === 'confused') {
       const pace = i === 0 ? 1.35 : 0.72
