@@ -1233,27 +1233,170 @@ The implementation PR (separate, follows plan approval) delivers:
 
 ---
 
-## Rollout order
+## Commit plan
 
-1. **Plan review** (this PR). Approve the schema, the two-tier model,
-   and the draft privacy policy before any code lands.
-2. Types + emitter + config, no call sites wired, compile-flag default
-   `true`. Unit tests for batch / offline queue / tier gating /
-   `session_id` rotation.
-3. Pages Function + Analytics Engine binding. Deploy behind a
-   feature-flag header so only internal clients hit the production
-   dataset until we're happy.
-4. **Privacy policy page** (`public/privacy.html` + `/privacy` route)
-   ships *before* the first real event. Policy first, telemetry
-   second.
-5. Tier A core call sites: `session_start`, `session_end`,
-   `layer_loaded`, `layer_unloaded`, `feedback`. Update `helpUI.ts`
-   Privacy copy and ship the Tools → Privacy UI in the same PR.
-6. Tier A expansion: `camera_settled`, `map_click`, tour events,
-   layout / playback / settings, `perf_sample`, `error`, VR events.
-7. Product-health + spatial-attention dashboards + `ANALYTICS_QUERIES.md`.
-8. Tier B call sites: `dwell`, `orbit_interaction`, `orbit_turn`,
-   `orbit_tool_call`, `orbit_load_followed`, `orbit_correction`,
-   `browse_search`, `vr_interaction`. Ship the opt-in copy alongside.
-9. Research dashboard (Tier-B only, feature-flagged).
-10. Phase 2: Pipelines + R2 / Iceberg. Separate issue, separate branch.
+Work lands on this branch (`claude/analytics-implementation-plan-DF3QM`)
+as a sequence of small, reviewable commits stacked on top of the
+planning commits. Each one is signed-off (`git commit -s`), passes
+`npm run type-check` + `npm run test`, and has a clear acceptance
+check a reviewer can run locally. Bisecting through the sequence
+should be useful — every commit leaves the app working.
+
+A note on the planning commits already on the branch: keep them as
+individual review history, **do not** squash before implementation
+starts. They document the decision process. A final rebase / merge
+strategy for the overall PR can be decided at merge time.
+
+### Phase 1 — Foundations (no user-visible change, no network)
+
+**Commit 1: Types, emitter, config, compile-time flags.**
+
+- New: `src/analytics/{emitter,config,index}.ts`
+- Modified: `src/types/index.ts` (`TelemetryEvent` union, `TelemetryConfig`, `TelemetryTier`)
+- Modified: `vite.config.ts` — adds `VITE_TELEMETRY_ENABLED`, `VITE_TELEMETRY_CONSOLE`, `__APP_VERSION__` defines
+- Tests: batch buffer (20 events or 5 s), tier gate (Off drops, Essential allows A, Research allows A+B), `session_id` rotation per launch, compile-flag dead-code check
+- Acceptance: `import { emit } from '@/analytics'; emit({...})` compiles, console mode logs, no network activity
+- Regression surface: none — nothing is wired yet
+
+**Commit 2: Error capture pipeline.**
+
+- New: `src/analytics/errorCapture.ts` — global handlers, `console.error` / `console.warn` patches (with reentrant guard), sanitizer, deduplicator, `reportError()` helper
+- Fixture-based sanitizer tests: URLs with tokens, emails, UUIDs, long digit runs, file paths, cross-origin `"Script error."` drop, `<external>` frame collapse
+- Acceptance: throw a test error in the browser console; a sanitized event appears in console-mode output, repeats dedup as expected
+- Regression surface: the `console.error` patch — must call original reference for dev visibility; reentrant guard must prevent loops
+
+**Commit 3: Pages Function + Analytics Engine + KV bindings.**
+
+- New: `functions/api/ingest.ts` — Zod schema, origin allowlist, per-IP + per-session rate limit, body-size cap, KV kill-switch read, environment-tag injection, `writeDataPoint()` fan-out
+- Modified: `wrangler.toml` — `[[analytics_engine_datasets]]` + `[[kv_namespaces]]` bindings
+- Tests: miniflare integration — good payload → 204, bad schema → 400, over rate limit → 429, kill switch set → 410, origin mismatch → 403
+- Acceptance: `curl -X POST` against a local `wrangler pages dev` instance produces an AE datapoint (visible via `wrangler tail` + the AE SQL API)
+- Regression surface: existing `/api/feedback` and `/api/general-feedback` functions unaffected (separate file)
+
+### Phase 2 — The consent surface (policy ships before any real event)
+
+**Commit 4: `/privacy` endpoint.**
+
+- New: `public/privacy.html` — static page, inline CSS matching design tokens, print stylesheet, tight CSP, `lang="en"`, skip-link, semantic sectioning, no scripts
+- Modified: `public/_redirects` — explicit `/privacy /privacy.html 200` before the SPA catch-all
+- Modified: `public/site.webmanifest` — `shortcuts` entry pointing at `/privacy`
+- Emitter URL-gate: `src/analytics/emitter.ts` no-ops if `location.pathname === '/privacy'`
+- CI: markdown-to-text parity check between `docs/PRIVACY.md` and `public/privacy.html`
+- Acceptance: `/privacy` renders, passes axe-core accessibility lint, `curl -I /privacy` returns 200, the page itself fires zero events
+- Regression surface: the SPA fallback — verify other non-existent routes still serve `index.html`
+
+**Commit 5: Tools → Privacy UI + disclosure banner.**
+
+- New: `src/ui/privacyUI.ts` — radio group (Essential / Research / Off), read-only session-ID display, `/privacy` link, live-region status
+- Modified: `src/ui/toolsMenuUI.ts` — Privacy entry in the popover
+- Modified: `src/ui/helpUI.ts` — Privacy section rewritten to match policy, link to `/privacy`
+- New: first-session disclosure banner (`src/ui/disclosureBanner.ts`) — persistent until user dismisses, tracked as `settings_changed key=disclosure_seen`
+- Tests: tier-change semantics (Off drops in-flight buffer; Research → Essential stops B immediately; no backfill on Off → On)
+- Acceptance: toggle tiers and observe in console-mode output; banner appears once per device and never again; accessibility keyboard navigation works
+- Regression surface: Tools popover layout; banner z-index and safe-area insets on mobile
+
+### Phase 3 — Turn the pipe on
+
+**Commit 6: Emitter fetch transport.**
+
+- Modified: `src/analytics/emitter.ts` — adds fetch transport (lazy `@tauri-apps/plugin-http` for desktop, `navigator.sendBeacon` on `pagehide`), offline queue persistence to `localStorage['sos-telemetry-queue']` (Tauri only), exponential backoff on repeated 5xx, session-long cooldown on 410
+- Tests: offline-queue round-trip, backoff schedule, 410 cooldown
+- Acceptance: flip `VITE_TELEMETRY_CONSOLE=false` in dev, run the app, observe `/api/ingest` POSTs in DevTools; preview-deploy events carry `environment=preview`
+- Regression surface: `pagehide` handling is platform-finicky — test on iOS Safari specifically
+
+### Phase 4 — Tier A call sites (events start flowing in production)
+
+**Commit 7: Tier A core — session, layer, feedback, basic UI.**
+
+- `src/main.ts` — `session_start` after `app.initialize()`, `session_end` on `pagehide`
+- `src/services/datasetLoader.ts` — `layer_loaded` (with `trigger`), `layer_unloaded` (with `dwell_ms`)
+- `src/services/viewportManager.ts` — `layout_changed`, `viewport_focus`
+- `src/ui/helpUI.ts` — general `feedback` envelope event
+- `src/ui/chatUI.ts` — AI-response `feedback` envelope on thumbs-up/down (rating content still goes to D1 via existing flow; this is the analytics envelope only)
+- `src/ui/toolsMenuUI.ts` — `settings_changed` on each toggle
+- `src/ui/browseUI.ts` — `browse_opened`, `browse_filter`
+- `src/ui/playbackController.ts` — `playback_action`
+- Acceptance: browse a dataset → load → rate → feedback submit produces the expected event sequence in AE within 10 s
+- Regression surface: every modified UI file — watch for accidental emit-in-loop via unsubscribed listeners
+
+**Commit 8: Tier A spatial attention.**
+
+- `src/services/mapRenderer.ts` — `camera_settled` on MapLibre `moveend` (client-throttled ≤ 30/min), `map_click` with 3-decimal lat/lon rounding
+- Acceptance: pan and click the globe; AE query produces a coarse H3-hex heatmap
+- Regression surface: MapLibre move events are chatty — confirm throttle actually throttles
+
+**Commit 9: Tier A tours + VR lifecycle + perf + explicit errors.**
+
+- `src/services/tourEngine.ts` — `tour_started`, `tour_task_fired` (with previous task's dwell), `tour_paused`, `tour_resumed`, `tour_ended`
+- `src/services/vrSession.ts` — `vr_session_started` / `vr_session_ended`
+- `src/services/vrPlacement.ts` — `vr_placement`
+- `src/analytics/emitter.ts` — 60 s rolling FPS sampler emitting one `perf_sample` per active minute
+- All `console.error` sites in `src/services/*.ts` converted to `reportError(category, err)` so they carry a proper `category` instead of collapsing to `console_error`
+- Acceptance: run a tour end-to-end, enter VR, watch expected events land
+- Regression surface: the FPS sampler must not hold the page awake; pause it when the page is hidden
+
+**Commit 10: Tauri Rust panic hook.**
+
+- Modified: `src-tauri/src/main.rs` — `std::panic::set_hook` that emits a `native_panic` payload to the JS side via `app.emit_to()`
+- New: JS listener in `src/analytics/errorCapture.ts` for the `native_panic` event → sanitize → emit `error` with `source=tauri_panic`
+- Acceptance: force a Rust panic in a dev build (a test-only Tauri command); a sanitized event appears in the stream
+- Regression surface: the panic hook must not break existing panic reporting to the Tauri log; call the default hook first
+
+### Phase 5 — Dashboards
+
+**Commit 11: Product-health + spatial-attention dashboards.**
+
+- New: `docs/ANALYTICS_QUERIES.md` — SQL patterns for AE SQL API, example queries, schema reference
+- New: `grafana/` directory with checked-in dashboard JSON (two dashboards)
+- Acceptance: dashboards render live production data; queries filter `environment='production'` by default with a variable switch to preview
+- Regression surface: the AE SQL API is eventually-consistent; dashboards need refresh intervals ≥ 60 s
+
+### Phase 6 — Tier B call sites (opt-in research mode starts flowing)
+
+**Commit 12: Tier B dwell + richer Orbit capture.**
+
+- New: `src/analytics/dwell.ts` — `trackDwell(target)` helper, `visibilitychange` + `pagehide` handling
+- Modified: `src/ui/chatUI.ts` — chat-panel dwell, `orbit_interaction` (message_sent, action_executed), `orbit_correction` (thumbs-down + same-turn rephrase detection + abandoned-turn detection)
+- Modified: `src/ui/browseUI.ts` — browse-panel dwell
+- Modified: `src/services/datasetLoader.ts` — info-panel dwell, dataset dwell, `orbit_load_followed` correlation
+- Modified: `src/services/docentService.ts` — `orbit_interaction:response_complete`, `orbit_turn` (user + assistant sides), `orbit_tool_call` per chunk
+- Acceptance: opt into Research tier; session produces the expected Tier B events; Tier A-only sessions see zero Tier B emission (verify via console mode)
+- Regression surface: Orbit stream handlers — the emit must not block the stream render
+
+**Commit 13: Tier B VR interaction + hashed browse search.**
+
+- Modified: `src/services/vrInteraction.ts` — `vr_interaction` per gesture type, throttled
+- Modified: `src/ui/browseUI.ts` — `browse_search` with client-side SHA-256 hashing (first 12 hex) before emit
+- Acceptance: search produces hashed-query events; identical queries hash identically across sessions
+- Regression surface: the hash is computed via `crypto.subtle.digest` which is async — don't block the input's debounce
+
+### Phase 7 — Documentation + research dashboard
+
+**Commit 14: Research dashboard, ANALYTICS.md, CLAUDE.md.**
+
+- New: `docs/ANALYTICS.md` — user-facing schema reference, endpoint docs, "how to add an event" checklist, schema-evolution process
+- Modified: `grafana/` — research dashboard JSON (Tier-B panels behind a feature flag)
+- Modified: `CLAUDE.md` — module-map rows for `src/analytics/*`, `src/ui/privacyUI.ts`, `functions/api/ingest.ts`; new "Analytics" section summarizing the two-tier model + entry points
+- Acceptance: a reviewer reading only `ANALYTICS.md` + `CLAUDE.md` understands how to add a new event end-to-end without reading the plan
+
+### Out of scope for this branch
+
+Track as follow-up issues, build on separate branches:
+
+- Opt-in per-crash crash-report flow (`/api/crash-report` + D1 table + consent modal)
+- Log-buffer attachment on feedback submissions
+- Phase 2: Pipelines → R2 / Iceberg → Zyra source adapter
+
+### Pre-merge checklist (run before PR → main)
+
+- [ ] All commits signed-off (`git log --format='%(trailers:key=Signed-off-by)' | grep -c '' == commit count`)
+- [ ] `npm run type-check` clean
+- [ ] `npm run test` clean
+- [ ] `npm run build` produces a bundle that passes an axe-core scan of `/privacy`
+- [ ] Preview deploy shows `environment=preview` events in AE
+- [ ] Production deploy shows zero events until KV kill switch is flipped off
+- [ ] `docs/PRIVACY.md` and `public/privacy.html` pass the parity check
+- [ ] `CLAUDE.md` module map updated
+- [ ] One synthetic heartbeat round-trip succeeds end-to-end
+
+---
