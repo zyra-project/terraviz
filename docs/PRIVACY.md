@@ -68,8 +68,12 @@ Small, anonymous events about the health of the app:
 - When you enter or exit VR / AR mode — duration and exit reason,
   approximate frame rate
 - When something goes wrong — a classification of the error (tile
-  fetch, video stream, AI model, uncaught exception). No stack traces,
-  no URLs, no messages
+  fetch, video stream, AI model, uncaught exception, browser-console
+  message, or native crash on desktop), a short sanitized summary of
+  the error class (with URLs, emails, numeric tokens and file paths
+  stripped out before it leaves your device), and a count of
+  repeats. **No raw stack traces, no URLs, no full error messages,
+  no line numbers** at this level
 - When you submit feedback — that you did, and which category (bug,
   feature, other, thumbs-up, thumbs-down). The *content* of your
   feedback is stored separately — see section 4
@@ -97,6 +101,12 @@ If you turn Research mode on, we additionally record:
   ever storing what you actually typed) plus the length and result
   count
 - In VR / AR: gesture types (drag, pinch, zoom, flick) and magnitudes
+- When something goes wrong: a sanitized stack frame list — function
+  names from our own code and from libraries we ship (MapLibre,
+  HLS.js, Three.js), with all URLs, file paths, line numbers, and
+  messages stripped. Enough for us to find and fix the bug, not
+  enough to reconstruct what you were doing. Errors from browser
+  extensions or other sites you visit are dropped entirely
 
 Research mode exists to make the Orbit docent better and to
 contribute to open research on how people explore Earth-observation
@@ -136,6 +146,28 @@ These are design requirements, not aspirations:
 - **Your IP address in the event stream.** Our server sees your IP
   briefly to rate-limit abuse, then discards it — it is never written
   into analytics storage
+
+---
+
+### Crash reports (separate, per-crash consent)
+
+If Interactive Sphere crashes in a way you notice — the globe goes
+blank, the app freezes, or a failure dialog appears — we may ask
+you if you want to send a crash report for *that specific crash*.
+This is a one-time prompt, per crash. Nothing is sent unless you
+tap *Send*.
+
+If you do send a crash report, it includes:
+
+- The classified error information described above
+- A sanitized stack from the crash
+- A buffer of recent error and warning messages from your current
+  session, with the same sanitization applied
+- Any text you optionally type into the "what were you doing?" box
+- A screenshot, only if you opt to attach one
+
+Crash reports go to a separate database from general telemetry and
+are used only for debugging.
 
 ---
 

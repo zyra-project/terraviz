@@ -228,12 +228,179 @@ without storing free text. The full text never leaves the client.
 | Event | Tier | `blobs[]` | `doubles[]` |
 |---|---|---|---|
 | `perf_sample` | A | `event_type`, `surface` (`map`/`vr`), `webgl_renderer_hash` (SHA-256 of `WEBGL_debug_renderer_info`, first 8 hex) | `fps_median_10s`, `frame_time_p95_ms`, `jsheap_mb` (nullable) |
-| `error` | A | `event_type`, `category` (`tile`/`hls`/`llm`/`download`/`uncaught`), `code` (HTTP status or classified enum) | — |
+| `error` | A | `event_type`, `category` (`tile`/`hls`/`llm`/`download`/`vr`/`tour`/`uncaught`/`console`/`native_panic`), `source` (`caught`/`window_error`/`unhandledrejection`/`console_error`/`console_warn`/`tauri_panic`), `code` (HTTP status or classified enum), `message_class` (sanitized first line, ≤ 80 chars) | `count_in_batch` (for deduped repeats) |
+| `error_detail` | **B** | `event_type`, `category`, `source`, `message_class`, `stack_signature` (SHA-256 of normalized stack, first 12 hex), `frames_json` (compact array of `{fn, line}` pairs, function names only, max 10 frames) | `count_in_batch` |
 
-Errors are **classified, never raw**. No stack traces, no URLs, no
-messages — the client maps each failure site to a closed-enum code
-before emitting. Makes error volumes queryable without ever shipping a
-tile URL that contains an auth token.
+Two-tier error model — the same pipeline, two different emission paths:
+
+- **Tier A `error`** is classified and message-normalized but carries
+  no stack. Enough signal to say *"v0.8.2 has a 40× spike in
+  `category=hls`"* and to group by `message_class`, not enough to
+  debug a specific crash. Safe for default-on.
+- **Tier B `error_detail`** carries a sanitized stack frame list plus
+  a stack signature so we can cluster without re-shipping the stack
+  on every occurrence. Function names only, **never URLs / file paths
+  / line-column pairs outside our own bundle**.
+
+### Console and crash capture
+
+Three capture mechanisms feed the error pipeline. All three funnel
+through the same sanitizer + deduplicator before reaching the
+emitter, so the tier gate applies once at the end.
+
+| Mechanism | Catches | `source` | Where it lives |
+|---|---|---|---|
+| `window.addEventListener('error')` | Uncaught sync errors from script | `window_error` | `src/analytics/errorCapture.ts` |
+| `window.addEventListener('unhandledrejection')` | Unhandled promise rejections | `unhandledrejection` | same |
+| `console.error` / `console.warn` monkey-patch | Library-internal errors that log but don't throw (MapLibre, HLS.js, Three.js, Tauri plugins) | `console_error` / `console_warn` | same |
+| Explicit call sites — `reportError(category, err)` | Caught errors that the code wants to report | `caught` | Throughout services — the classification pattern we already planned |
+| Rust `std::panic::set_hook` → `emit_to('native_panic')` | Tauri main-process and webview panics | `tauri_panic` | `src-tauri/src/main.rs` |
+
+#### Sanitization (runs before emission, for both tiers)
+
+Applied in `src/analytics/errorCapture.ts` to every captured error:
+
+1. **URL stripping.** Replace any `https?://[^\s]+` in messages or
+   stack frames with the literal `<url>`. Catches tile URLs with auth
+   tokens, API endpoints, Vimeo CDN URLs
+2. **Email and UUID stripping.** Regex-replace with `<email>` / `<uuid>`
+3. **Long digit runs → `<num>`.** Catches auth codes, timestamps,
+   session tokens that leaked into messages
+4. **File-path normalization.** Strip everything up to `/src/` or
+   `/node_modules/` so only the app-relative path remains. Drop
+   anything ending in `.tauri` or `asset.localhost` (local file
+   server paths)
+5. **Function-name allowlist.** Stack frames outside our own namespace
+   (everything not from `src/`, `@maplibre/*`, `three`, `hls.js`,
+   `@tauri-apps/*`) collapse to a single `<external>` marker.
+   Prevents browser-extension and ad-blocker noise from leaking into
+   the stream
+6. **Message-class derivation.** Take the first line of the error
+   message, apply strips above, truncate to 80 chars. That's
+   `message_class` — the field used for grouping
+7. **Cross-origin "Script error." drop.** Chrome returns the literal
+   string `"Script error."` for cross-origin script errors. These
+   carry no information; drop them at the source
+
+#### Deduplication and rate limits
+
+A single bad build can emit a million errors from one bad render
+loop. Mandatory dedup:
+
+- **In-memory signature cache** per session: key =
+  `category|source|message_class|stack_signature`
+- On repeat: increment a counter, do **not** re-emit
+- Flush cadence: emit the aggregated counter (as `count_in_batch` on
+  the next fresh event of that signature, or as a final
+  `error_summary` on `session_end`)
+- Hard caps per session:
+  - Tier A `error`: ≤ 3 per unique signature, ≤ 30 total
+  - Tier B `error_detail`: ≤ 1 per unique signature, ≤ 10 total
+- Emitter's own internal errors are caught and silently dropped —
+  never recurse
+
+#### Reporter-internal error discipline
+
+The error pipeline is in the privileged path. A bug in the reporter
+must not:
+
+- Loop (reporter's error → captured by reporter → re-emits → loop).
+  Solved by a `reentrant` guard flag around the capture logic
+- Break the app. Wrap all capture in a `try { … } catch { /* drop */ }`
+  outer frame. A broken reporter is silently no-op, never a user-
+  visible exception
+- Leak to console. The monkey-patched `console.error` calls the
+  original reference to print in dev builds; it does not recurse
+  through the capture pipeline
+
+#### What we still don't capture, even in Tier B
+
+- **Raw error messages** beyond the 80-char sanitized `message_class`
+- **Line / column numbers** inside frames — function name + source
+  file only. Line numbers alone are low value and drift every build
+- **`error.cause` chains** beyond one level deep — only the outermost
+  cause's class
+- **DOM element references** attached to errors (React-style
+  component-trace data; we're vanilla TS but this matters if we ever
+  adopt a framework)
+- **`document.cookie`, localStorage, sessionStorage contents** — a
+  common mistake is reporters that "helpfully" include client state.
+  We do not
+- **Orbit prompt text or response bodies** — if an Orbit call throws
+  mid-stream, the error message carries the category only, never the
+  partial response
+- **Browser extension errors.** The function-name allowlist drops
+  them, and we additionally drop any error whose outermost frame
+  resolves to `chrome-extension://`, `moz-extension://`, or
+  `safari-extension://`
+
+#### The opt-in crash report flow — separate from general telemetry
+
+For user-visible crashes — the ones where the globe goes blank or
+the app freezes — the classified event stream is the wrong tool.
+What you want in that moment is a rich, detailed report with user
+context, but under affirmative consent for *that specific crash*.
+
+Firefox and the Tauri ecosystem both solve this with a per-crash
+consent prompt. Proposed flow:
+
+1. A fatal error fires (top-level uncaught, WebGL context loss, HLS
+   terminal error, or a user-surfaced *"something broke"* dialog)
+2. A modal appears: **"Interactive Sphere ran into a problem. Send a
+   crash report?"** with three buttons: *Send*, *Don't send*, *Send
+   with details* (optional textarea, "what were you doing?")
+3. On *Send*: collects the classified event (what Tier A already
+   emits) plus the sanitized stack, plus the last 50 captured
+   `console.error`/`warn` lines from this session, plus the current
+   loaded-dataset IDs. Submits to `/api/crash-report` (a new Pages
+   Function — separate endpoint, separate D1 table, separate
+   retention policy). **Not** sent through the analytics stream
+4. On *Don't send*: drop everything; no stream event
+5. On *Send with details*: same as *Send* but includes the
+   user-provided text and (optionally) a screenshot via the existing
+   `screenshotService`
+
+This model has three advantages:
+
+- **Legal footing**: per-crash consent is unambiguous, works cleanly
+  in GDPR / App Store posture
+- **Signal quality**: users report the crashes that affect them, not
+  every weird extension-induced console.error
+- **Volume control**: naturally rate-limited by how many people hit
+  crashes and hit *Send*
+
+The crash-report endpoint is **not** part of Phase 1 ship scope for
+this analytics work — it's a Phase 1.5 add-on, tracked as a separate
+issue. But the pipeline is designed so that when we build it, the
+same sanitizer + deduplicator feed it; we don't re-invent that logic.
+
+#### Log buffer for feedback attachments
+
+A related but distinct pattern: when a user submits feedback (the
+existing Help → Feedback flow), offer an **"Attach recent log
+messages"** checkbox. If checked, the submission includes the last
+N captured errors/warnings from the in-memory sanitizer's ring
+buffer (Tier-B storage, but Tier-setting-independent because the
+user explicitly attached it).
+
+This lives in the feedback D1 record, not the telemetry stream,
+and reuses the existing `GeneralFeedbackPayload` shape with a new
+optional `logBuffer?: ErrorLogLine[]` field.
+
+#### Source maps
+
+Minified stacks are unreadable. Options:
+
+- **A.** Serve source maps alongside the production bundle. Simple.
+  Exposes source code — but the code is already on GitHub so this is
+  a paper-thin concern. Recommended default
+- **B.** Server-side source-map resolution in the Pages Function.
+  Maps live in R2, never reach the client. More work, zero user benefit
+  for a public OSS project
+
+Recommendation: **A**. The bundle is already inspectable via
+`view-source`, and keeping useful stacks is worth more than
+pretending the code is secret.
 
 ##### Orbit — richer capture (Tier B only)
 
@@ -362,7 +529,9 @@ event in Tier B silently drops if the user is on Tier A.
 | `vr_placement` | A | `src/services/vrPlacement.ts` | On Place-button tap (success + persist flag) |
 | `vr_interaction` | B | `src/services/vrInteraction.ts` | Throttled bucket per gesture type |
 | `perf_sample` | A | `src/analytics/emitter.ts` | 60-second rolling FPS sampler; emit one event per minute active |
-| `error` | A | `src/analytics/emitter.ts` + call sites | Uncaught: global `error` / `unhandledrejection` handler. Classified: call sites map failure → enum before emit |
+| `error` | A | `src/analytics/errorCapture.ts` + call sites | Install global `error`, `unhandledrejection` handlers at boot. Monkey-patch `console.error` / `console.warn`. Classified call sites use `reportError(category, err)` |
+| `error_detail` | B | `src/analytics/errorCapture.ts` | Same capture points as `error`, upgraded output when Tier B is active |
+| `error` (`tauri_panic`) | A | `src-tauri/src/main.rs` | `std::panic::set_hook` → `app.emit_to('native_panic', payload)` → JS handler forwards to emitter |
 | `dwell` (chat / info panel / tools / browse) | B | `src/ui/*.ts` | `trackDwell()` helper — start on open, stop on close/visibilitychange |
 | `orbit_interaction` (message_sent) | B | `src/ui/chatUI.ts` | `handleSend()` after user text is appended to state |
 | `orbit_interaction` (response_complete) | B | `src/services/docentService.ts` | On the `done` stream chunk — carry `duration_ms`, token counts |
@@ -736,6 +905,7 @@ The implementation PR (separate, follows plan approval) delivers:
 - `src/analytics/emitter.ts`
 - `src/analytics/config.ts`
 - `src/analytics/dwell.ts`
+- `src/analytics/errorCapture.ts` — global handlers, `console.*` patch, sanitizer, deduplicator, `reportError()` helper
 - `src/ui/privacyUI.ts`
 - `functions/api/ingest.ts`
 - `public/privacy.html` — static policy page served at `/privacy`
@@ -748,7 +918,8 @@ The implementation PR (separate, follows plan approval) delivers:
 **Modified:**
 
 - `src/types/index.ts` — `TelemetryEvent` union, `TelemetryConfig`
-- `src/main.ts` — emit `session_start`, wire dataset dwell
+- `src/main.ts` — emit `session_start`, wire dataset dwell, install `errorCapture` at boot before any other module runs
+- `src-tauri/src/main.rs` — `std::panic::set_hook` forwarding to JS emitter (Tauri builds only)
 - `src/services/datasetLoader.ts` — emit `layer_loaded`,
   `layer_unloaded`, `orbit_load_followed`, info-panel dwell
 - `src/services/mapRenderer.ts` — emit `camera_settled`, `map_click`
