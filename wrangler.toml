@@ -17,8 +17,16 @@ migrations_dir = "migrations"
 
 # Analytics Engine dataset for the telemetry event stream.
 # Every datapoint written by functions/api/ingest.ts lands here.
-# Query via the AE SQL API; see docs/ANALYTICS_QUERIES.md (lands
-# with the dashboards in Commit 11).
+# Query via the AE SQL API; see docs/ANALYTICS_QUERIES.md.
+#
+# Heads-up: Cloudflare Pages does not auto-pick up bindings from
+# this file — they must be added through the project's
+# Settings → Bindings UI (variable name `ANALYTICS`, dataset
+# `terraviz_events`, attached to both Production and Preview).
+# This declaration is kept in source control because (a) it
+# documents the canonical binding/dataset names, and (b) it works
+# for any future migration to a Workers deploy where wrangler.toml
+# is authoritative.
 [[analytics_engine_datasets]]
 binding = "ANALYTICS"
 dataset = "terraviz_events"
@@ -28,10 +36,24 @@ dataset = "terraviz_events"
 # set to `disabled` / `false` / `off` / `0`, clients receive 410 Gone
 # and cool down for the rest of the session. Absent or any other
 # value = allow. Flip via `wrangler kv key put` without a redeploy.
-# The namespace ID is populated by `wrangler kv namespace create
-# TELEMETRY_KILL_SWITCH` as a separate step before this binding is
-# first used in production — kept as a placeholder here so the binding
-# declaration stays in source control.
-[[kv_namespaces]]
-binding = "TELEMETRY_KILL_SWITCH"
-id = "PLACEHOLDER_CREATE_WITH_WRANGLER"
+#
+# **Bindings for Cloudflare Pages are configured via the dashboard,
+# not this file** — Pages reads its bindings from the project's
+# Settings → Bindings UI. This block is kept commented out as
+# documentation: it shows the binding *name* and the dataset *name*
+# to use when adding the binding through the dashboard, so the
+# function code (`functions/api/ingest.ts`, which reads
+# `context.env.TELEMETRY_KILL_SWITCH`) and the dashboard config
+# stay aligned.
+#
+# To wire the kill switch:
+#   1. `wrangler kv namespace create TELEMETRY_KILL_SWITCH`  (one-off)
+#   2. Workers & Pages → terraviz → Settings → Bindings → Add binding
+#      → KV → variable name `TELEMETRY_KILL_SWITCH`, namespace = the
+#      one created in step 1. Add to both Production and Preview.
+#   3. To activate: `wrangler kv key put telemetry_enabled disabled
+#      --namespace-id=<id>`
+#
+# [[kv_namespaces]]
+# binding = "TELEMETRY_KILL_SWITCH"
+# id = "<populate-after-wrangler-kv-namespace-create>"

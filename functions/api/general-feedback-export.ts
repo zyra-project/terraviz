@@ -24,6 +24,8 @@
  * the base64 data URL string.
  */
 
+import { isInternalRequest } from './ingest'
+
 /**
  * Estimate the decoded byte size of a base64 data URL. The JS string
  * length counts characters, not bytes — and base64 encodes 3 bytes
@@ -38,8 +40,6 @@ function estimateDataUrlBytes(dataUrl: string): number {
   const padding = payload.endsWith('==') ? 2 : payload.endsWith('=') ? 1 : 0
   return Math.floor((payload.length * 3) / 4) - padding
 }
-
-import { isInternalRequest } from './ingest'
 
 interface Env {
   FEEDBACK_DB?: D1Database

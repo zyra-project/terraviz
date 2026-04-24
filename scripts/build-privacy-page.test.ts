@@ -14,10 +14,16 @@
 
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { renderPrivacyPage, stripInternalBlocks } from './build-privacy-page'
 
-const REPO_ROOT = resolve(__dirname, '..')
+// `package.json` declares `"type": "module"`, so `__dirname` is not a
+// runtime global. Vitest happens to inject a compat shim today, but
+// the underlying script (`build-privacy-page.ts`) uses the ESM
+// idiom — match it here so the test works under any runner.
+const HERE = dirname(fileURLToPath(import.meta.url))
+const REPO_ROOT = resolve(HERE, '..')
 const MD_PATH = resolve(REPO_ROOT, 'docs/PRIVACY.md')
 const HTML_PATH = resolve(REPO_ROOT, 'public/privacy.html')
 
