@@ -5,7 +5,7 @@
   "tags": ["terraviz", "analytics", "tier-a", "spatial"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "5m",
   "time": {
     "from": "now-7d",
@@ -38,13 +38,13 @@
       },
       {
         "name": "layer_id",
-        "type": "query",
+        "type": "custom",
         "label": "Layer (dataset)",
-        "datasource": "${DS_INFINITY}",
-        "query": "SELECT DISTINCT blob5 FROM terraviz_events WHERE blob1 = 'camera_settled' AND blob5 != '' ORDER BY blob5",
+        "query": "$__all",
         "current": { "text": "All", "value": "$__all" },
         "multi": false,
-        "includeAll": true
+        "includeAll": true,
+        "description": "Defaults to All. Convert to a query variable in-Grafana once data is flowing — Infinity query: SELECT DISTINCT blob5 FROM terraviz_events WHERE blob1 = 'camera_settled' AND blob5 != '' ORDER BY blob5"
       },
       {
         "name": "DS_INFINITY",
@@ -61,11 +61,22 @@
       "title": "camera_settled heatmap (0.1° bins)",
       "description": "Hex bins of camera-settle locations. Filtered to selected projection and (optionally) layer_id. Coordinates pre-rounded to 3 decimals (~110 m) at the client; bin size here is 0.1° (~11 km at the equator).",
       "gridPos": { "x": 0, "y": 0, "w": 18, "h": 14 },
-      "datasource": "${DS_INFINITY}",
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
       "targets": [
         {
           "refId": "A",
-          "rawSql": "SELECT round(double3, 1) AS lon_bin, round(double2, 1) AS lat_bin, count() AS settles FROM terraviz_events WHERE blob1 = 'camera_settled' AND blob6 IN ($projection) AND blob2 = '$environment' AND blob4 = '$internal' AND ('$layer_id' = '$__all' OR blob5 = '$layer_id') AND timestamp > $__from GROUP BY lat_bin, lon_bin HAVING settles > 5 ORDER BY settles DESC LIMIT 5000"
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/sql",
+          "url_options": {
+            "method": "POST",
+            "data": "SELECT round(double3, 1) AS lon_bin, round(double2, 1) AS lat_bin, count() AS settles FROM terraviz_events WHERE blob1 = 'camera_settled' AND blob6 IN ($projection) AND blob2 = '$environment' AND blob4 = '$internal' AND ('$layer_id' = '$__all' OR blob5 = '$layer_id') AND timestamp > $__from GROUP BY lat_bin, lon_bin HAVING settles > 5 ORDER BY settles DESC LIMIT 5000",
+            "headers": [{ "key": "Content-Type", "value": "text/plain" }]
+          },
+          "parser": "backend",
+          "root_selector": "data"
         }
       ]
     },
@@ -74,11 +85,22 @@
       "type": "stat",
       "title": "Total camera_settled events",
       "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
-      "datasource": "${DS_INFINITY}",
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
       "targets": [
         {
           "refId": "A",
-          "rawSql": "SELECT count() AS settles FROM terraviz_events WHERE blob1 = 'camera_settled' AND blob6 IN ($projection) AND blob2 = '$environment' AND blob4 = '$internal' AND ('$layer_id' = '$__all' OR blob5 = '$layer_id') AND timestamp > $__from"
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/sql",
+          "url_options": {
+            "method": "POST",
+            "data": "SELECT count() AS settles FROM terraviz_events WHERE blob1 = 'camera_settled' AND blob6 IN ($projection) AND blob2 = '$environment' AND blob4 = '$internal' AND ('$layer_id' = '$__all' OR blob5 = '$layer_id') AND timestamp > $__from",
+            "headers": [{ "key": "Content-Type", "value": "text/plain" }]
+          },
+          "parser": "backend",
+          "root_selector": "data"
         }
       ]
     },
@@ -87,11 +109,22 @@
       "type": "stat",
       "title": "Total map_click events",
       "gridPos": { "x": 18, "y": 4, "w": 6, "h": 4 },
-      "datasource": "${DS_INFINITY}",
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
       "targets": [
         {
           "refId": "A",
-          "rawSql": "SELECT count() AS clicks FROM terraviz_events WHERE blob1 = 'map_click' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > $__from"
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/sql",
+          "url_options": {
+            "method": "POST",
+            "data": "SELECT count() AS clicks FROM terraviz_events WHERE blob1 = 'map_click' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > $__from",
+            "headers": [{ "key": "Content-Type", "value": "text/plain" }]
+          },
+          "parser": "backend",
+          "root_selector": "data"
         }
       ]
     },
@@ -101,11 +134,22 @@
       "title": "map_click hit-kind mix",
       "description": "Where on the map users click — bare surface vs marker vs feature vs region overlay.",
       "gridPos": { "x": 18, "y": 8, "w": 6, "h": 6 },
-      "datasource": "${DS_INFINITY}",
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
       "targets": [
         {
           "refId": "A",
-          "rawSql": "SELECT blob6 AS hit_kind, count() AS clicks FROM terraviz_events WHERE blob1 = 'map_click' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > $__from GROUP BY hit_kind ORDER BY clicks DESC"
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/sql",
+          "url_options": {
+            "method": "POST",
+            "data": "SELECT blob6 AS hit_kind, count() AS clicks FROM terraviz_events WHERE blob1 = 'map_click' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > $__from GROUP BY hit_kind ORDER BY clicks DESC",
+            "headers": [{ "key": "Content-Type", "value": "text/plain" }]
+          },
+          "parser": "backend",
+          "root_selector": "data"
         }
       ]
     },
@@ -115,11 +159,22 @@
       "title": "Top viewed regions per dataset",
       "description": "Hex bins of camera_settled + map_click events, scoped to a loaded dataset. Joint attention signal — both 'where users park the camera' and 'where they tap'.",
       "gridPos": { "x": 0, "y": 14, "w": 12, "h": 10 },
-      "datasource": "${DS_INFINITY}",
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
       "targets": [
         {
           "refId": "A",
-          "rawSql": "SELECT blob5 AS layer_id, round(double3, 1) AS lon_bin, round(double2, 1) AS lat_bin, count() AS attention_events FROM terraviz_events WHERE blob1 IN ('camera_settled', 'map_click') AND blob2 = '$environment' AND blob4 = '$internal' AND blob5 != '' AND timestamp > $__from GROUP BY layer_id, lat_bin, lon_bin HAVING attention_events > 10 ORDER BY attention_events DESC LIMIT 200"
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/sql",
+          "url_options": {
+            "method": "POST",
+            "data": "SELECT blob5 AS layer_id, round(double3, 1) AS lon_bin, round(double2, 1) AS lat_bin, count() AS attention_events FROM terraviz_events WHERE blob1 IN ('camera_settled', 'map_click') AND blob2 = '$environment' AND blob4 = '$internal' AND blob5 != '' AND timestamp > $__from GROUP BY layer_id, lat_bin, lon_bin HAVING attention_events > 10 ORDER BY attention_events DESC LIMIT 200",
+            "headers": [{ "key": "Content-Type", "value": "text/plain" }]
+          },
+          "parser": "backend",
+          "root_selector": "data"
         }
       ]
     },
@@ -129,11 +184,22 @@
       "title": "2D vs VR/AR — same dataset",
       "description": "When a dataset is opened in both surfaces, are users navigating to the same regions? Compare camera_settled counts split by projection.",
       "gridPos": { "x": 12, "y": 14, "w": 12, "h": 10 },
-      "datasource": "${DS_INFINITY}",
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
       "targets": [
         {
           "refId": "A",
-          "rawSql": "SELECT blob6 AS projection, blob5 AS layer_id, count() AS settles FROM terraviz_events WHERE blob1 = 'camera_settled' AND blob5 != '' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > $__from GROUP BY projection, layer_id ORDER BY settles DESC LIMIT 50"
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/sql",
+          "url_options": {
+            "method": "POST",
+            "data": "SELECT blob6 AS projection, blob5 AS layer_id, count() AS settles FROM terraviz_events WHERE blob1 = 'camera_settled' AND blob5 != '' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > $__from GROUP BY projection, layer_id ORDER BY settles DESC LIMIT 50",
+            "headers": [{ "key": "Content-Type", "value": "text/plain" }]
+          },
+          "parser": "backend",
+          "root_selector": "data"
         }
       ]
     }
