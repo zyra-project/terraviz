@@ -35,25 +35,23 @@ dataset = "terraviz_events"
 # endpoint reads the key `telemetry_enabled` on every request; when
 # set to `disabled` / `false` / `off` / `0`, clients receive 410 Gone
 # and cool down for the rest of the session. Absent or any other
-# value = allow. Flip via `wrangler kv key put` without a redeploy.
+# value = allow.
 #
-# **Bindings for Cloudflare Pages are configured via the dashboard,
-# not this file** — Pages reads its bindings from the project's
-# Settings → Bindings UI. This block is kept commented out as
-# documentation: it shows the binding *name* and the dataset *name*
-# to use when adding the binding through the dashboard, so the
-# function code (`functions/api/ingest.ts`, which reads
-# `context.env.TELEMETRY_KILL_SWITCH`) and the dashboard config
-# stay aligned.
+# Like the other bindings in this file, **Pages reads its bindings
+# from the dashboard, not this block** — `Settings → Bindings → KV →
+# variable name TELEMETRY_KILL_SWITCH, namespace = the one below`.
+# Kept declared (rather than commented out) so the canonical
+# binding name + namespace ID are visible in source control and so
+# any future Workers deploy where wrangler.toml is authoritative
+# picks it up automatically.
 #
-# To wire the kill switch:
-#   1. `wrangler kv namespace create TELEMETRY_KILL_SWITCH`  (one-off)
-#   2. Workers & Pages → terraviz → Settings → Bindings → Add binding
-#      → KV → variable name `TELEMETRY_KILL_SWITCH`, namespace = the
-#      one created in step 1. Add to both Production and Preview.
-#   3. To activate: `wrangler kv key put telemetry_enabled disabled
-#      --namespace-id=<id>`
-#
-# [[kv_namespaces]]
-# binding = "TELEMETRY_KILL_SWITCH"
-# id = "<populate-after-wrangler-kv-namespace-create>"
+# Operations:
+#   - Activate (clients receive 410):
+#       wrangler kv key put telemetry_enabled disabled \
+#         --namespace-id=9c022b1295314939b76a28769fef6195
+#   - Deactivate (back to normal):
+#       wrangler kv key delete telemetry_enabled \
+#         --namespace-id=9c022b1295314939b76a28769fef6195
+[[kv_namespaces]]
+binding = "TELEMETRY_KILL_SWITCH"
+id = "9c022b1295314939b76a28769fef6195"
