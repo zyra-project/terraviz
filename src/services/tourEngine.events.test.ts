@@ -10,6 +10,36 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+
+// Stub tourUI so showTourQuestion captures its params (for the
+// question-answer tests) and so the other tour-UI helpers used
+// by the engine are no-ops in the unit-test environment.
+let capturedQuestion: Parameters<typeof import('../ui/tourUI').showTourQuestion>[0] | null = null
+vi.mock('../ui/tourUI', () => ({
+  showTourTextBox: vi.fn(),
+  hideTourTextBox: vi.fn(),
+  hideAllTourTextBoxes: vi.fn(),
+  showTourImage: vi.fn(),
+  hideTourImage: vi.fn(),
+  hideAllTourImages: vi.fn(),
+  showTourVideo: vi.fn(),
+  hideTourVideo: vi.fn(),
+  hideAllTourVideos: vi.fn(),
+  showTourPopup: vi.fn(),
+  hideTourPopup: vi.fn(),
+  hideAllTourPopups: vi.fn(),
+  showTourQuestion: vi.fn((params) => {
+    capturedQuestion = params
+  }),
+  hideAllTourQuestions: vi.fn(),
+  showTourControls: vi.fn(),
+  hideTourControls: vi.fn(),
+  updateTourPlayState: vi.fn(),
+  showTourLegend: vi.fn(),
+  hideTourLegend: vi.fn(),
+  updateTourProgress: vi.fn(),
+}))
+
 import { TourEngine } from './tourEngine'
 import { resetForTests, __peek } from '../analytics/emitter'
 import { setTier } from '../analytics/config'
@@ -51,7 +81,8 @@ const META = {
 beforeEach(() => {
   localStorage.clear()
   resetForTests()
-  setTier('essential')
+  setTier('research') // Tier B events need the research tier
+  capturedQuestion = null
 })
 
 afterEach(() => {
@@ -154,6 +185,96 @@ describe('TourEngine — telemetry events', () => {
     const ev = starts[0]
     if (ev.event_type !== 'tour_started') throw new Error('unreachable')
     expect(ev.tour_id).toBe('unknown')
+    engine.stop()
+  })
+})
+
+describe('TourEngine — tour_question_answered', () => {
+  const QUESTION_TOUR: TourFile = {
+    tourTasks: [
+      {
+        question: {
+          id: 'q-arctic-1',
+          imgQuestionFilename: 'q.png',
+          imgAnswerFilename: 'a.png',
+          numberOfAnswers: 4,
+          correctAnswerIndex: 2,
+        },
+      },
+    ],
+  }
+
+  it('emits tour_question_answered with response_ms when the user picks correctly', async () => {
+    const engine = new TourEngine(QUESTION_TOUR, noopCallbacks(), { meta: META })
+    void engine.play()
+    while (!capturedQuestion) await Promise.resolve()
+    capturedQuestion.onAnswered?.(2)
+
+    const evs = __peek().filter((e) => e.event_type === 'tour_question_answered')
+    expect(evs).toHaveLength(1)
+    const ev = evs[0]
+    if (ev.event_type !== 'tour_question_answered') throw new Error('unreachable')
+    expect(ev.tour_id).toBe('tour-test')
+    expect(ev.question_id).toBe('q-arctic-1')
+    expect(ev.task_index).toBe(0)
+    expect(ev.choice_count).toBe(4)
+    expect(ev.chosen_index).toBe(2)
+    expect(ev.correct_index).toBe(2)
+    expect(ev.was_correct).toBe(true)
+    expect(ev.response_ms).toBeGreaterThanOrEqual(0)
+
+    capturedQuestion.onComplete()
+    engine.stop()
+  })
+
+  it('records was_correct=false on a wrong answer', async () => {
+    const engine = new TourEngine(QUESTION_TOUR, noopCallbacks(), { meta: META })
+    void engine.play()
+    while (!capturedQuestion) await Promise.resolve()
+    capturedQuestion.onAnswered?.(0)
+
+    const ev = __peek().find((e) => e.event_type === 'tour_question_answered')
+    if (!ev || ev.event_type !== 'tour_question_answered') throw new Error('unreachable')
+    expect(ev.chosen_index).toBe(0)
+    expect(ev.was_correct).toBe(false)
+
+    capturedQuestion.onComplete()
+    engine.stop()
+  })
+
+  it('dedupes — a second onAnswered call (e.g. VR + 2D both firing) does not double-emit', async () => {
+    const engine = new TourEngine(QUESTION_TOUR, noopCallbacks(), { meta: META })
+    void engine.play()
+    while (!capturedQuestion) await Promise.resolve()
+    capturedQuestion.onAnswered?.(2)
+    capturedQuestion.onAnswered?.(1) // second call should be ignored
+
+    const evs = __peek().filter((e) => e.event_type === 'tour_question_answered')
+    expect(evs).toHaveLength(1)
+    const ev = evs[0]
+    if (ev.event_type !== 'tour_question_answered') throw new Error('unreachable')
+    expect(ev.chosen_index).toBe(2)
+
+    capturedQuestion.onComplete()
+    engine.stop()
+  })
+
+  it('does not emit when the user skips the question (no onAnswered call)', async () => {
+    const engine = new TourEngine(QUESTION_TOUR, noopCallbacks(), { meta: META })
+    void engine.play()
+    while (!capturedQuestion) await Promise.resolve()
+    engine.stop()
+    expect(__peek().filter((e) => e.event_type === 'tour_question_answered')).toHaveLength(0)
+  })
+
+  it('does not emit when the tier is below research', async () => {
+    setTier('essential') // Tier A only — tour_question_answered is Tier B
+    const engine = new TourEngine(QUESTION_TOUR, noopCallbacks(), { meta: META })
+    void engine.play()
+    while (!capturedQuestion) await Promise.resolve()
+    capturedQuestion.onAnswered?.(2)
+    expect(__peek().filter((e) => e.event_type === 'tour_question_answered')).toHaveLength(0)
+    capturedQuestion.onComplete()
     engine.stop()
   })
 })

@@ -121,6 +121,13 @@ If you turn Research mode on, we additionally record:
   ever storing what you actually typed) plus the length and result
   count
 - In VR / AR: gesture types (drag, pinch, zoom, flick) and magnitudes
+- When you answer a tour quiz question — which numbered option you
+  chose, whether it matched the correct answer, and how many
+  milliseconds passed between the question being shown and your
+  click. Questions in our tours are presented as static images
+  authored by the tour writer; we identify each one by an
+  author-set ID and never transmit the question text or image
+  content
 - When something goes wrong: a sanitized stack frame list — function
   names from our own code and from libraries we ship (MapLibre,
   HLS.js, Three.js), with all URLs, file paths, line numbers, and

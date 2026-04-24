@@ -723,12 +723,35 @@ export class TourEngine {
     const questionUrl = this.callbacks.resolveMediaUrl(params.imgQuestionFilename)
     const answerUrl = this.callbacks.resolveMediaUrl(params.imgAnswerFilename)
 
+    // Capture wall-clock so onAnswered can compute response_ms.
+    const shownAt = Date.now()
+    let answeredEmitted = false
+    const onAnswered = (chosenIndex: number): void => {
+      // 2D + VR both call this — dedupe so a user who answers in
+      // VR while the 2D panel is also visible (or vice versa)
+      // produces exactly one telemetry event.
+      if (answeredEmitted) return
+      answeredEmitted = true
+      emit({
+        event_type: 'tour_question_answered',
+        tour_id: this.meta?.tourId ?? 'unknown',
+        question_id: params.id,
+        task_index: this.index,
+        choice_count: params.numberOfAnswers,
+        chosen_index: chosenIndex,
+        correct_index: params.correctAnswerIndex,
+        was_correct: chosenIndex === params.correctAnswerIndex,
+        response_ms: Math.max(0, Date.now() - shownAt),
+      })
+    }
+
     return new Promise<void>(resolve => {
       showTourQuestion({
         ...params,
         imgQuestionFilename: questionUrl,
         imgAnswerFilename: answerUrl,
         onComplete: resolve,
+        onAnswered,
       })
     })
   }

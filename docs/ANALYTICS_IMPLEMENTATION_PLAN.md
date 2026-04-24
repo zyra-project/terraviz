@@ -192,12 +192,26 @@ stories land and which get abandoned.
 | `tour_paused` | A | `event_type`, `tour_id`, `reason` (`user`/`pauseForInput`/`error`) | `task_index` |
 | `tour_resumed` | A | `event_type`, `tour_id` | `task_index`, `pause_ms` |
 | `tour_ended` | A | `event_type`, `tour_id`, `outcome` (`completed`/`abandoned`/`error`) | `task_index`, `duration_ms` |
+| `tour_question_answered` | B | `event_type`, `tour_id`, `question_id` (author-set), `was_correct` | `task_index`, `choice_count`, `chosen_index` (0..N-1), `correct_index` (0..N-1), `response_ms` (shown → answered) |
 
 `task_type` is a closed enum matching the `TourTaskDef` kinds in
 `src/types/index.ts`. `task_dwell_ms` on `tour_task_fired` is the time
 spent on the *previous* task — letting us build a drop-off curve per
 task type (which is where the real insight is: *"half our users bail at
 the third `pauseForInput`"*).
+
+`tour_question_answered` is the only Tier B tour event. Tour quiz
+questions are static images authored into the tour JSON with a
+numbered button row (`numberOfAnswers`) and an author-defined
+correct-answer index. The event captures only the integer answer +
+correctness + millisecond response time + the author-set `question_id`
+— never the question text, the image filename, or any rendered pixels.
+Skipped questions (user navigates next / prev / stop without picking)
+do not emit; the absence of a `tour_question_answered` for a matching
+`tour_task_fired(task_type='question')` in the same session is itself
+the "saw it, didn't engage" signal. The 2D and VR surfaces both call
+through to the same engine callback, which dedupes so a question
+answered while both surfaces are visible emits exactly once.
 
 ##### Tools, playback, UI state
 
@@ -610,6 +624,7 @@ event in Tier B silently drops if the user is on Tier A.
 | `tour_task_fired` | A | `src/services/tourEngine.ts` | Before `execute(task)` dispatch; include previous task's dwell |
 | `tour_paused` / `tour_resumed` | A | `src/services/tourEngine.ts` | `pause()` / `resume()` entry points |
 | `tour_ended` | A | `src/services/tourEngine.ts` | End of sequence, `stop()` call, or error bubble |
+| `tour_question_answered` | B | `src/services/tourEngine.ts` (engine) + `src/ui/tourUI.ts` (2D click) + `src/services/vrTourOverlay.ts` (VR raycast) | `execQuestion` captures `Date.now()` and provides an `onAnswered(chosenIndex)` callback to the question display layer. Both 2D and VR call it; the engine dedupes so the event fires once per question. Skipped questions don't emit |
 | `vr_session_started` | A | `src/services/vrSession.ts` | Right after `setSession()` resolves |
 | `vr_session_ended` | A | `src/services/vrSession.ts` | On session `end` event |
 | `vr_placement` | A | `src/services/vrPlacement.ts` | On Place-button tap (success + persist flag) |

@@ -630,6 +630,7 @@ export const TIER_B_EVENT_TYPES = [
   'browse_search',
   'vr_interaction',
   'error_detail',
+  'tour_question_answered',
 ] as const
 export type TierBEventType = (typeof TIER_B_EVENT_TYPES)[number]
 
@@ -855,6 +856,38 @@ export interface TourEndedEvent extends TelemetryEventBase {
   duration_ms: number
 }
 
+/**
+ * Tier B — emitted when the user answers a tour quiz question.
+ * Skipped questions (user navigates next/prev/stop without picking
+ * an answer) do not emit; the absence of this event for a
+ * `tour_task_fired(task_type='question')` in the same session is
+ * itself a usable "saw it, didn't engage" signal.
+ *
+ * Privacy: questions are presented as static images authored into
+ * the tour JSON; this event carries only integers + a stable
+ * author-set `question_id`. The image filenames, the rendered
+ * question/answer pixels, and any free text are never emitted.
+ */
+export interface TourQuestionAnsweredEvent extends TelemetryEventBase {
+  event_type: 'tour_question_answered'
+  tour_id: string
+  /** Author-set id from `QuestionTaskParams.id`. */
+  question_id: string
+  /** Same task_index space as `tour_task_fired`. */
+  task_index: number
+  /** `numberOfAnswers` from the task definition (typically 2–4). */
+  choice_count: number
+  /** 0..choice_count-1 — which answer button the user clicked. */
+  chosen_index: number
+  /** 0..choice_count-1 — the author-defined correct answer. */
+  correct_index: number
+  /** Derived. Convenience field so dashboards don't need to compare
+   * `chosen_index === correct_index`. */
+  was_correct: boolean
+  /** Wall-clock ms from question shown to button click. */
+  response_ms: number
+}
+
 export interface VrSessionStartedEvent extends TelemetryEventBase {
   event_type: 'vr_session_started'
   mode: VrMode
@@ -1012,6 +1045,7 @@ export type TelemetryEvent =
   | TourPausedEvent
   | TourResumedEvent
   | TourEndedEvent
+  | TourQuestionAnsweredEvent
   | VrSessionStartedEvent
   | VrSessionEndedEvent
   | VrPlacementEvent
