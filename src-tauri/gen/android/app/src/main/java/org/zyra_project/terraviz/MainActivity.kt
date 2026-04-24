@@ -1,4 +1,4 @@
-package org.zyra_project.interactive_sphere
+package org.zyra_project.terraviz
 
 import android.os.Bundle
 import androidx.activity.enableEdgeToEdge
