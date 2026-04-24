@@ -14,7 +14,7 @@ pub use stub::*;
 mod real {
     use keyring::Entry;
 
-    const SERVICE: &str = "org.zyra-project.interactive-sphere";
+    const SERVICE: &str = "org.zyra-project.terraviz";
     const ACCOUNT: &str = "llm-api-key";
 
     /// Read the LLM API key from the OS keychain.

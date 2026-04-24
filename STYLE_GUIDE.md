@@ -1,4 +1,4 @@
-# SOS Explorer — UI Style Guide
+# Terraviz — UI Style Guide
 
 This documents the visual design language used across all UI components. All overlay elements share a consistent frosted-glass aesthetic that lets the globe remain the visual focus.
 

@@ -7,15 +7,15 @@ describe('parseDatasetFromUrl', () => {
   })
 
   it('parses https path-based URLs from production host', () => {
-    expect(parseDatasetFromUrl('https://sphere.zyra-project.org/dataset/INTERNAL_SOS_456')).toBe('INTERNAL_SOS_456')
+    expect(parseDatasetFromUrl('https://terraviz.zyra-project.org/dataset/INTERNAL_SOS_456')).toBe('INTERNAL_SOS_456')
   })
 
   it('parses https path-based URLs from preview deploys', () => {
-    expect(parseDatasetFromUrl('https://my-branch.interactive-sphere.pages.dev/dataset/INTERNAL_SOS_789')).toBe('INTERNAL_SOS_789')
+    expect(parseDatasetFromUrl('https://my-branch.terraviz.pages.dev/dataset/INTERNAL_SOS_789')).toBe('INTERNAL_SOS_789')
   })
 
   it('parses ?dataset= query param from known hosts', () => {
-    expect(parseDatasetFromUrl('https://sphere.zyra-project.org/?dataset=INTERNAL_SOS_100')).toBe('INTERNAL_SOS_100')
+    expect(parseDatasetFromUrl('https://terraviz.zyra-project.org/?dataset=INTERNAL_SOS_100')).toBe('INTERNAL_SOS_100')
   })
 
   it('parses localhost URLs', () => {
@@ -23,7 +23,7 @@ describe('parseDatasetFromUrl', () => {
   })
 
   it('rejects query params with invalid characters', () => {
-    expect(parseDatasetFromUrl('https://sphere.zyra-project.org/?dataset=<script>alert(1)</script>')).toBeNull()
+    expect(parseDatasetFromUrl('https://terraviz.zyra-project.org/?dataset=<script>alert(1)</script>')).toBeNull()
   })
 
   it('rejects unknown hosts for path-based URLs', () => {
@@ -35,7 +35,7 @@ describe('parseDatasetFromUrl', () => {
   })
 
   it('returns null for URLs with no dataset reference', () => {
-    expect(parseDatasetFromUrl('https://sphere.zyra-project.org/')).toBeNull()
+    expect(parseDatasetFromUrl('https://terraviz.zyra-project.org/')).toBeNull()
   })
 
   it('handles bare path strings as fallback', () => {

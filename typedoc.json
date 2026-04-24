@@ -35,14 +35,14 @@
     "src/utils/debounce.ts"
   ],
   "out": "dist/docs",
-  "name": "Interactive Sphere — API Reference",
+  "name": "Terraviz — API Reference",
   "readme": "none",
   "excludePrivate": false,
   "excludeInternal": true,
   "includeVersion": true,
   "navigationLinks": {
-    "Live Site": "https://sphere.zyra-project.org",
-    "GitHub": "https://github.com/zyra-project/interactive-sphere"
+    "Live Site": "https://terraviz.zyra-project.org",
+    "GitHub": "https://github.com/zyra-project/terraviz"
   },
   "categorizeByGroup": true,
   "sort": ["source-order"]

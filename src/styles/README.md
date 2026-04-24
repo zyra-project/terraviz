@@ -1,6 +1,6 @@
 # Styles
 
-This directory contains all CSS for the Interactive Sphere application.
+This directory contains all CSS for the Terraviz application.
 The monolithic `<style>` block that previously lived in `index.html`
 (~2,700 lines) has been decomposed into modular component files with a
 shared design token system.

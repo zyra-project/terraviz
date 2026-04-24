@@ -1,8 +1,8 @@
 /**
- * Deep Link Handler — responds to zyra:// URLs and https://sphere.zyra-project.org/dataset/* links.
+ * Deep Link Handler — responds to zyra:// URLs and https://terraviz.zyra-project.org/dataset/* links.
  *
  * When the app is opened via a deep link like `zyra://dataset/INTERNAL_SOS_123`
- * or `https://sphere.zyra-project.org/dataset/INTERNAL_SOS_123`, this module
+ * or `https://terraviz.zyra-project.org/dataset/INTERNAL_SOS_123`, this module
  * parses the dataset ID and triggers a load.
  *
  * Only active in the Tauri native app. On web, dataset loading is handled
@@ -50,7 +50,7 @@ export async function initDeepLinks(
  *
  * Supports:
  * - zyra://dataset/INTERNAL_SOS_123
- * - https://sphere.zyra-project.org/dataset/INTERNAL_SOS_123
+ * - https://terraviz.zyra-project.org/dataset/INTERNAL_SOS_123
  * - ?dataset=INTERNAL_SOS_123 (query param fallback)
  */
 export function parseDatasetFromUrl(url: string): string | null {
@@ -66,10 +66,10 @@ export function parseDatasetFromUrl(url: string): string | null {
       if (id && ID_PATTERN.test(id)) return id
     }
 
-    // Path-based: https://sphere.zyra-project.org/dataset/INTERNAL_SOS_123
-    // Also match *.interactive-sphere.pages.dev preview deploys
-    const isKnownHost = parsed.hostname === 'sphere.zyra-project.org' ||
-      parsed.hostname.endsWith('.interactive-sphere.pages.dev') ||
+    // Path-based: https://terraviz.zyra-project.org/dataset/INTERNAL_SOS_123
+    // Also match *.terraviz.pages.dev preview deploys
+    const isKnownHost = parsed.hostname === 'terraviz.zyra-project.org' ||
+      parsed.hostname.endsWith('.terraviz.pages.dev') ||
       parsed.hostname === 'localhost'
     if (isKnownHost) {
       const pathMatch = parsed.pathname.match(/\/dataset\/([A-Z0-9_]+)/i)

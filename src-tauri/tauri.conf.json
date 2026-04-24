@@ -1,8 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
-  "productName": "Interactive Sphere",
+  "productName": "Terraviz",
   "version": "0.2.3",
-  "identifier": "org.zyra-project.interactive-sphere",
+  "identifier": "org.zyra-project.terraviz",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:5173",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Interactive Sphere",
+        "title": "Terraviz",
         "width": 1280,
         "height": 900,
         "minWidth": 800,
@@ -38,7 +38,7 @@
     "deep-link": {
       "mobile": [
         {
-          "host": "sphere.zyra-project.org",
+          "host": "terraviz.zyra-project.org",
           "pathPrefix": [
             "/dataset"
           ]
@@ -53,7 +53,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDEyODQ5Njc2QkM4QUNCNjYKUldSbXk0cThkcGFFRWlKWG1OdzAvWEkybU5pZWpqMHpITGlZZytZcEp1T2UzNWpmbkFGUCtFclgK",
       "endpoints": [
-        "https://github.com/zyra-project/interactive-sphere/releases/latest/download/latest.json"
+        "https://github.com/zyra-project/terraviz/releases/latest/download/latest.json"
       ],
       "dialog": true
     }

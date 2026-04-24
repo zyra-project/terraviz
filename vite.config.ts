@@ -28,7 +28,7 @@ export default defineConfig(({ mode }) => ({
     },
     proxy: {
       '/api': {
-        target: 'https://sphere.zyra-project.org',
+        target: 'https://terraviz.zyra-project.org',
         changeOrigin: true,
       },
     },

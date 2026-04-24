@@ -1,4 +1,4 @@
-# Interactive Sphere — Agent Guide
+# Terraviz — Agent Guide
 
 ## Project Overview
 

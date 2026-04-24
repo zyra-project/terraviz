@@ -1,8 +1,8 @@
 {
-  "name": "interactive-sphere",
+  "name": "terraviz",
   "version": "0.2.3",
   "type": "module",
-  "description": "Interactive WebGL globe with adaptive bitrate environmental data streaming",
+  "description": "Terraviz — WebGL globe with adaptive bitrate environmental data streaming",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build && typedoc",
