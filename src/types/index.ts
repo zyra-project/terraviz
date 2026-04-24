@@ -680,7 +680,13 @@ export interface FeedbackEvent extends TelemetryEventBase {
 export interface CameraSettledEvent extends TelemetryEventBase {
   event_type: 'camera_settled'
   slot_index: string
-  projection: 'globe' | 'mercator'
+  /** Projection the user was viewing when the camera settled.
+   * `globe` / `mercator` are MapLibre projections; `vr` is an
+   * immersive-vr session; `ar` is an immersive-ar session. VR/AR
+   * events report the lat/lon under the user's gaze ray onto the
+   * globe and a scale-derived `zoom`; bearing/pitch describe the
+   * head-to-globe orientation. */
+  projection: 'globe' | 'mercator' | 'vr' | 'ar'
   center_lat: number
   center_lon: number
   zoom: number

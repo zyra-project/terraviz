@@ -171,7 +171,7 @@ Heatmaps of "where did people look on Earth" + "what did they click."
 
 | Event | Tier | `blobs[]` | `doubles[]` | Notes |
 |---|---|---|---|---|
-| `camera_settled` | A | `event_type`, `slot_index`, `projection` (`globe`/`mercator`) | `center_lat`, `center_lon`, `zoom`, `bearing`, `pitch` | Fire on MapLibre `moveend`. One event per settle; no mid-flight sampling. Globe-only → the `slot_index` + camera tuple is the heatmap input |
+| `camera_settled` | A | `event_type`, `slot_index`, `projection` (`globe`/`mercator`/`vr`/`ar`) | `center_lat`, `center_lon`, `zoom`, `bearing`, `pitch` | Fire on MapLibre `moveend` for the 2D globe and on VR/AR interaction settle (end of drag / pinch / flick-inertia / thumbstick release) for the immersive view. One event per settle; no mid-flight sampling. In VR/AR, `center_lat`/`center_lon` is the lat/lon of the point on the globe surface under the user's forward gaze ray; `zoom` is derived from the view-to-globe scale; `bearing`/`pitch` describe the head-to-globe orientation. The `projection` field separates 2D vs immersive signal when aggregating |
 | `map_click` | A | `event_type`, `slot_index`, `hit_kind` (`surface`/`marker`/`feature`/`region`), `hit_id` (marker id, nullable) | `lat`, `lon`, `zoom` | Captures attention foci. `lat`/`lon` are rounded to 3 decimals (~110 m) by the client to cap cardinality |
 | `viewport_focus` | A | `event_type`, `slot_index`, `layout` (`1globe`/`2globes`/`4globes`) | — | When the user promotes a panel in multi-globe layout. Cheap focus signal |
 
@@ -448,8 +448,10 @@ the code and confirm none of these leave the client:
 - **Persistent identifiers** — no cookies, no localStorage user IDs.
   The session ID is ephemeral per launch
 - **Precise coordinates** — `map_click` rounds `lat`/`lon` to 3
-  decimals; `camera_settled` bucketing by zoom level provides natural
-  coarsening
+  decimals; `camera_settled` (2D + VR/AR) rounds the reported
+  gaze/center point to 3 decimals (~110 m). VR bearing/pitch are
+  snapped to the nearest degree so head-pose micro-movements don't
+  uniquely fingerprint a session
 
 #### Design notes
 
@@ -462,8 +464,10 @@ the code and confirm none of these leave the client:
 - `app_version` is read from a Vite `define` constant populated from
   `package.json`. Same source the feedback payload uses today.
 - Per-event rate caps at the ingest endpoint: `camera_settled` ≤ 30/min
-  per session, `dwell` ≤ 60/min, others ≤ 10/min. A runaway client
-  gets throttled, not disconnected.
+  per session (same cap for 2D and VR/AR — head pose can sample much
+  faster than MapLibre's `moveend`, so the client-side throttle in
+  the VR interaction module is the effective limit), `dwell` ≤ 60/min,
+  others ≤ 10/min. A runaway client gets throttled, not disconnected.
 - **Schema versioning.** `session_start` carries a `schema_version`
   blob (not shown above to keep the table skim-friendly; add it
   alongside `app_version`). Bump on breaking changes; the Iceberg
@@ -517,8 +521,8 @@ event in Tier B silently drops if the user is on Tier A.
 | `layer_unloaded` | A | `src/services/datasetLoader.ts` + `src/main.ts` | Fire when a slot replaces its dataset or `goHome()` runs. Pair with the stored load timestamp for `dwell_ms` |
 | `feedback` (general) | A | `src/ui/helpUI.ts` | Wrap the existing `submitGeneralFeedback()` call — emit with `status` from the response |
 | `feedback` (ai_response) | A | `src/ui/chatUI.ts` | Inside `submitInlineRating()` alongside the `/api/feedback` POST |
-| `camera_settled` | A | `src/services/mapRenderer.ts` | Hook MapLibre's `moveend` event. Throttle client-side to ≤ 30/min per session |
-| `map_click` | A | `src/services/mapRenderer.ts` | Existing click handler; emit after the hit-test resolves `hit_kind` |
+| `camera_settled` | A | `src/services/mapRenderer.ts` (2D) + `src/services/vrInteraction.ts` (VR/AR) | 2D: hook MapLibre's `moveend` event. VR/AR: fire after interaction settle — end of drag, pinch release, flick-spin inertia decay, thumbstick-zoom release. Derive `center_lat`/`center_lon` from a head-forward gaze ray into the globe sphere (rounded to 3 decimals). Share a single ≤ 30/min per-session throttle across 2D and VR emits |
+| `map_click` | A | `src/services/mapRenderer.ts` | Existing click handler; emit after the hit-test resolves `hit_kind`. VR equivalent is `vr_interaction.gesture=hud_tap` + `vr_placement` — no `map_click` emits from the immersive session |
 | `viewport_focus` | A | `src/services/viewportManager.ts` | On panel promotion in multi-globe layouts |
 | `layout_changed` | A | `src/services/viewportManager.ts` | On `setEnvView()` or layout-picker invocation |
 | `playback_action` | A | `src/ui/playbackController.ts` | Existing play/pause/seek handlers |
@@ -1196,6 +1200,7 @@ The implementation PR (separate, follows plan approval) delivers:
 - `src/analytics/config.ts`
 - `src/analytics/dwell.ts`
 - `src/analytics/errorCapture.ts` — global handlers, `console.*` patch, sanitizer, deduplicator, `reportError()` helper
+- `src/analytics/camera.ts` — `emitCameraSettled()` helper + shared ≤ 30/min throttle used by both 2D (`mapRenderer.ts`) and VR/AR (`vrInteraction.ts`) emits
 - `src/ui/privacyUI.ts`
 - `functions/api/ingest.ts`
 - `public/privacy.html` — static policy page served at `/privacy`
@@ -1212,12 +1217,18 @@ The implementation PR (separate, follows plan approval) delivers:
 - `src-tauri/src/main.rs` — `std::panic::set_hook` forwarding to JS emitter (Tauri builds only)
 - `src/services/datasetLoader.ts` — emit `layer_loaded`,
   `layer_unloaded`, `orbit_load_followed`, info-panel dwell
-- `src/services/mapRenderer.ts` — emit `camera_settled`, `map_click`
+- `src/services/mapRenderer.ts` — emit `camera_settled`
+  (`projection='globe'|'mercator'`), `map_click`
 - `src/services/viewportManager.ts` — emit `layout_changed`,
   `viewport_focus`
 - `src/services/tourEngine.ts` — emit tour events
 - `src/services/vrSession.ts` + `vrPlacement.ts` + `vrInteraction.ts`
-  — emit VR events
+  — emit VR lifecycle / placement / interaction events, plus
+  `camera_settled` (`projection='vr'|'ar'`) from `vrInteraction.ts`
+  on interaction settle
+- `src/analytics/camera.ts` (new) — `emitCameraSettled()` helper
+  shared by 2D + VR call sites so rounding, throttling, and the
+  `projection` tagging live in one place
 - `src/services/docentService.ts` — emit `orbit_interaction`,
   `orbit_turn`, `orbit_tool_call`
 - `src/ui/chatUI.ts` — emit message events, chat dwell,
@@ -1321,11 +1332,13 @@ strategy for the overall PR can be decided at merge time.
 - Acceptance: browse a dataset → load → rate → feedback submit produces the expected event sequence in AE within 10 s
 - Regression surface: every modified UI file — watch for accidental emit-in-loop via unsubscribed listeners
 
-**Commit 8: Tier A spatial attention.**
+**Commit 8: Tier A spatial attention (2D + VR/AR).**
 
-- `src/services/mapRenderer.ts` — `camera_settled` on MapLibre `moveend` (client-throttled ≤ 30/min), `map_click` with 3-decimal lat/lon rounding
-- Acceptance: pan and click the globe; AE query produces a coarse H3-hex heatmap
-- Regression surface: MapLibre move events are chatty — confirm throttle actually throttles
+- `src/services/mapRenderer.ts` — `camera_settled` on MapLibre `moveend` with `projection='globe'|'mercator'` (client-throttled ≤ 30/min), `map_click` with 3-decimal lat/lon rounding
+- `src/services/vrInteraction.ts` — `camera_settled` with `projection='vr'|'ar'` after interaction settle (drag release, pinch release, flick-spin inertia stopped, thumbstick-zoom release). Raycast the head's forward direction against the globe sphere; the hit point → lat/lon rounded to 3 decimals. `zoom` derived from the head-to-globe scale (log2 of relative distance bucketed like a MapLibre zoom level). `bearing`/`pitch` are the globe's rotation relative to the head (snapped to whole degrees). Throttle shares the same ≤ 30/min budget as 2D so a user switching between views can't double up
+- Both paths route through a single `emitCameraSettled()` helper in `src/analytics/camera.ts` so the schema, rounding, and throttle live in one place
+- Acceptance: pan and click the 2D globe (expect `projection='globe'` events); enter VR, drag the globe, release (expect one `projection='vr'` event); AE query joining on `projection` produces a coarse H3-hex heatmap for each surface independently
+- Regression surface: MapLibre `moveend` fires on every wheel tick — confirm the throttle actually throttles. VR end-of-drag is edge-triggered by the controller state transition; re-entering VR shouldn't accumulate stale listeners. The throttle is per-session (not per-projection) so rapid 2D↔VR switching can't bypass it
 
 **Commit 9: Tier A tours + VR lifecycle + perf + explicit errors.**
 
