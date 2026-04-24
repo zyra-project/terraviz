@@ -4,6 +4,7 @@
 [![Windows](https://img.shields.io/badge/Download-Windows-0078D4?logo=windows&logoColor=white)](https://github.com/zyra-project/terraviz/releases/latest/download/Terraviz-latest-x64.msi)
 [![macOS](https://img.shields.io/badge/Download-macOS-000000?logo=apple&logoColor=white)](https://github.com/zyra-project/terraviz/releases/latest/download/Terraviz-latest-aarch64.dmg)
 [![Linux](https://img.shields.io/badge/Download-Linux-FCC624?logo=linux&logoColor=black)](https://github.com/zyra-project/terraviz/releases/latest/download/Terraviz-latest-x64.AppImage)
+[![Privacy](https://img.shields.io/badge/privacy-policy-blue)](docs/PRIVACY.md)
 
 A WebGL-based globe that streams environmental data from the [Science On a Sphere](https://sos.noaa.gov/) project. Available as a [web app](https://terraviz.zyra-project.org) and a native desktop application for Windows, macOS, and Linux.
 
