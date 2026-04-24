@@ -49,6 +49,8 @@ export {
 
 export { initSession, emitSessionEnd } from './session'
 
+export { startDwell, type DwellHandle } from './dwell'
+
 export {
   emitCameraSettled,
   canEmitCameraSettled,

@@ -13,7 +13,13 @@ import {
 import { closeDownloadPanel } from './downloadUI'
 import { toggleHelp } from './helpUI'
 import { escapeHtml, escapeAttr } from './domUtils'
-import { emit } from '../analytics'
+import { emit, startDwell, type DwellHandle } from '../analytics'
+
+/** Tier B dwell handle for the browse overlay — non-null while the
+ * overlay is visible. Started on showBrowseUI when the overlay
+ * transitions from hidden, stopped on hideBrowseUI / collapseBrowseUI.
+ * Tier-gated at emit time so the wiring is unconditional. */
+let browseDwellHandle: DwellHandle | null = null
 
 /** Bucket a result count for the `browse_filter.result_count_bucket`
  * schema — we want coarse buckets so the telemetry can't be used to
@@ -60,6 +66,9 @@ export function showBrowseUI(
   closeDownloadPanel()
   if (wasHidden) {
     emit({ event_type: 'browse_opened', source })
+    if (!browseDwellHandle) {
+      browseDwellHandle = startDwell('browse')
+    }
   }
 
   // Wire the in-header help trigger once (idempotent)
@@ -475,6 +484,10 @@ export function hideBrowseUI(): void {
   const overlay = document.getElementById('browse-overlay')
   overlay?.classList.add('hidden')
   document.body.classList.remove('browse-open')
+  if (browseDwellHandle) {
+    browseDwellHandle.stop()
+    browseDwellHandle = null
+  }
 }
 
 /**
@@ -489,4 +502,11 @@ export function collapseBrowseUI(): void {
   overlay.classList.remove('hidden')
   overlay.classList.add('collapsed')
   document.body.classList.remove('browse-open')
+  // Collapsing hides the overlay from the user's view even though
+  // it stays in the DOM — treat it as a dwell stop so the
+  // "browse panel time" metric reflects user-visible time only.
+  if (browseDwellHandle) {
+    browseDwellHandle.stop()
+    browseDwellHandle = null
+  }
 }
