@@ -1092,18 +1092,24 @@ Pages at `/privacy.html` and at the clean `/privacy` URL.
 /* /index.html 200
 ```
 
-Add an explicit rule *before* the catch-all so `/privacy` never falls
-into the SPA:
+**Do not** add an explicit `/privacy /privacy.html 200` rule. That
+looks like belt-and-braces but it causes a redirect loop on
+Cloudflare Pages: Pages auto-strips `.html` with a 301 redirect
+(`/privacy.html` → `/privacy`), the rewrite rule answers `/privacy`
+with a rewrite to `/privacy.html`, and the cycle repeats until the
+browser gives up. The `/orbit` page hit the same loop earlier in
+the project and was fixed by removing its explicit rule.
 
-```
-/privacy /privacy.html 200
-/docs/* /docs/:splat 200
-/* /index.html 200
-```
+The correct pattern is to rely on Pages' built-in clean-URL
+resolution: drop `public/privacy.html` into the build output (the
+file lives in `public/` and is copied by Vite at build time) and
+Pages will resolve the `/privacy` request to `/privacy.html`
+without any explicit rewrite. Asset resolution runs before
+`_redirects` matching, so the SPA catch-all never sees the request.
 
-Clean URL resolution on Pages should do this anyway, but belt and
-braces — this is a legal URL and we want it to resolve deterministically
-across every edge cache.
+This is the same mechanism that serves `/orbit` → `/orbit.html`
+today (built as a second HTML entry point via
+`vite.config.ts:rollupOptions.input.orbit`).
 
 ### Discoverability — where the link appears
 
@@ -1159,8 +1165,8 @@ This branch is plan + policy draft. Specifically:
 
 The implementation PR (separate, follows plan approval) delivers:
 
-- `public/privacy.html` — the live page
-- `public/_redirects` — explicit `/privacy` rule
+- `public/privacy.html` — the live page (served at `/privacy` via
+  Pages' built-in clean-URL resolution; no `_redirects` rule needed)
 - `public/site.webmanifest` — shortcut entry
 - In-app link wiring in `helpUI.ts`, `privacyUI.ts`, `browseUI.ts`
 - Emitter URL-gate so the policy page emits zero events
@@ -1222,9 +1228,6 @@ The implementation PR (separate, follows plan approval) delivers:
 - `src/ui/helpUI.ts` — emit general `feedback`, rewrite Privacy copy,
   link to `/privacy`
 - `src/ui/toolsMenuUI.ts` — Privacy entry in the Tools popover
-- `public/_redirects` — add an explicit `/privacy /privacy.html 200`
-  rule before the SPA catch-all (belt-and-braces; clean URLs should
-  handle it anyway)
 - `wrangler.toml` — Analytics Engine binding
 - `vite.config.ts` — `VITE_TELEMETRY_ENABLED` define + `__APP_VERSION__`
   constant if not already present
@@ -1277,12 +1280,11 @@ strategy for the overall PR can be decided at merge time.
 
 **Commit 4: `/privacy` endpoint.**
 
-- New: `public/privacy.html` — static page, inline CSS matching design tokens, print stylesheet, tight CSP, `lang="en"`, skip-link, semantic sectioning, no scripts
-- Modified: `public/_redirects` — explicit `/privacy /privacy.html 200` before the SPA catch-all
+- New: `public/privacy.html` — static page, inline CSS matching design tokens, print stylesheet, tight CSP, `lang="en"`, skip-link, semantic sectioning, no scripts. Served at `/privacy` via Cloudflare Pages' built-in clean-URL resolution — same mechanism as `/orbit`. **Do not** add an explicit `_redirects` rule; it creates a redirect loop because Pages auto-strips `.html` with a 301
 - Modified: `public/site.webmanifest` — `shortcuts` entry pointing at `/privacy`
-- Emitter URL-gate: `src/analytics/emitter.ts` no-ops if `location.pathname === '/privacy'`
+- Emitter URL-gate: `src/analytics/emitter.ts` no-ops if `location.pathname === '/privacy'` or `/privacy.html`
 - CI: markdown-to-text parity check between `docs/PRIVACY.md` and `public/privacy.html`
-- Acceptance: `/privacy` renders, passes axe-core accessibility lint, `curl -I /privacy` returns 200, the page itself fires zero events
+- Acceptance: `/privacy` renders, passes axe-core accessibility lint, `curl -I /privacy` returns 200 on a Pages preview deploy, the page itself fires zero events
 - Regression surface: the SPA fallback — verify other non-existent routes still serve `index.html`
 
 **Commit 5: Tools → Privacy UI + disclosure banner.**

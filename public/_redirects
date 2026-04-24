@@ -1,3 +1,2 @@
-/privacy /privacy.html 200
 /docs/* /docs/:splat 200
 /* /index.html 200
