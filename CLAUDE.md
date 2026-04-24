@@ -56,6 +56,18 @@ npm run build:desktop # tsc + vite build + tauri build
 | `src/utils/vrCapability.ts` | Feature detection — `navigator.xr`, `immersive-vr`, `immersive-ar` support |
 | `src/utils/vrPersistence.ts` | WebXR anchor persistent-handle save/load (localStorage) for cross-session placement stability |
 | `src/utils/viewPreferences.ts` | Persists Dataset info + Legend toggle state to localStorage |
+| `src/analytics/emitter.ts` | Telemetry queue + tier gate + batched dispatch + pagehide beacon flush |
+| `src/analytics/transport.ts` | `fetch()` + `sendBeacon()` transport with response classification (ok/retry/permanent) |
+| `src/analytics/config.ts` | `TelemetryTier` persistence (`sos-telemetry-config`); compile-time `TELEMETRY_BUILD_ENABLED` / `TELEMETRY_CONSOLE_MODE` flags |
+| `src/analytics/session.ts` | `session_start` / `session_end` — platform / OS / viewport / aspect / screen / build channel detection |
+| `src/analytics/dwell.ts` | Multi-handle dwell tracker — visibility-paused, pagehide-flushed; called by chat / browse / info / tools UI |
+| `src/analytics/camera.ts` | Shared `emitCameraSettled` with per-minute throttle; called by 2D map renderer + VR/AR session |
+| `src/analytics/perfSampler.ts` | 60s rAF FPS sampler — `perf_sample` event with WebGL renderer hash, p50/p95 frame time, JS heap |
+| `src/analytics/errorCapture.ts` | `window.onerror` + `unhandledrejection` + Tauri `native_panic` listener; sanitizes messages and (Tier B) stacks |
+| `src/analytics/hash.ts` | 12-hex SHA-256 helper for free-text fields (search queries, error stack signatures) |
+| `src/ui/privacyUI.ts` | Tools → Privacy panel — tier picker (off / essential / research), session-id display, what-we-collect explainer |
+| `src/ui/disclosureBanner.ts` | First-launch privacy disclosure banner — shown once per install, dismisses to default Essential tier |
+| `functions/api/ingest.ts` | Cloudflare Pages Function — receives telemetry batches, stamps `event_type` / `environment` / `country` / `internal` server-side, writes to Workers Analytics Engine |
 
 ---
 
@@ -219,6 +231,70 @@ The tour engine (`src/services/tourEngine.ts`) plays back SOS-format tour JSON f
 | `setEnvView` | `callbacks.setEnvView()` — switches layout (1globe/2globes/4globes) |
 | `unloadDataset` | `callbacks.unloadDatasetAt()` — unloads a specific dataset by tour handle |
 | `worldIndex` on `loadDataset` | Routes dataset load to a specific panel slot (1-indexed) |
+
+---
+
+## Analytics
+
+Privacy-first product telemetry. Two-tier consent model with the
+client emitter in `src/analytics/`, server stamping at
+`functions/api/ingest.ts`, storage in Cloudflare Workers Analytics
+Engine, Grafana dashboards under `grafana/dashboards/`.
+
+**Authoritative reference: [`docs/ANALYTICS.md`](docs/ANALYTICS.md).**
+The query/schema reference is [`docs/ANALYTICS_QUERIES.md`](docs/ANALYTICS_QUERIES.md);
+the user-facing privacy policy is [`docs/PRIVACY.md`](docs/PRIVACY.md)
+(generated to `public/privacy.html` by `scripts/build-privacy-page.ts` —
+`npm run build:privacy-page` rebuilds it; `npm run check:privacy-page`
+guards the diff in CI).
+
+### Two tiers
+
+| Tier | Default | Examples |
+|---|---|---|
+| `essential` (Tier A) | on | `session_*`, `layer_*`, `camera_settled`, `map_click`, `playback_action`, `tour_*`, `vr_session_*`, `perf_sample`, `error`, `feedback` |
+| `research` (Tier B) | opt-in | `dwell`, `orbit_*`, `browse_search` (hashed), `vr_interaction` (per gesture, throttled), `error_detail` (sanitized stacks), `tour_question_answered` |
+
+User-controlled in **Tools → Privacy** (`src/ui/privacyUI.ts`).
+First-launch banner in `src/ui/disclosureBanner.ts`. The
+`TIER_B_EVENT_TYPES` tuple in `src/types/index.ts` is the runtime
+gate; adding an event there is the single point that promotes it to
+Research-only.
+
+### Adding a new event
+
+The end-to-end checklist lives in `docs/ANALYTICS.md`. Headlines:
+
+1. Add an interface to `src/types/index.ts`, append to
+   `TelemetryEvent` union, decide tier (`TIER_B_EVENT_TYPES`).
+2. `import { emit } from '../analytics'` and call from the call site.
+3. Throttle if it can fire more than ~30/min — pattern lives in
+   `src/analytics/camera.ts` and `src/services/vrInteraction.ts`.
+4. Hash any free-text via `src/analytics/hash.ts` (12-hex SHA-256).
+5. Add a row to the catalog in `ANALYTICS.md`, a positional layout
+   in `ANALYTICS_QUERIES.md`, a panel in `grafana/dashboards/`, and
+   a test (`*.test.ts` next to the call site).
+
+### Privacy invariants
+
+- No IP storage (only `CF-IPCountry` for country).
+- No User-Agent storage (only bucketed OS / viewport / aspect /
+  screen enums from `src/analytics/session.ts`).
+- Search queries hashed before emit; error messages sanitized
+  (`src/analytics/errorCapture.ts:sanitizeMessage()`).
+- Lat/lon rounded to 3 decimals (~111 m) by
+  `src/analytics/camera.ts` before emit.
+- Session id is in-memory only — rotates every launch, never
+  persisted.
+- Server-side `KILL_TELEMETRY=1` env returns 410 → client cools
+  down for the rest of the session.
+
+### Local dev
+
+- `VITE_TELEMETRY_CONSOLE=true` — log batches to console instead
+  of POSTing.
+- `VITE_TELEMETRY_ENABLED=false` — compile out the emitter
+  entirely (call sites tree-shake).
 
 ---
 

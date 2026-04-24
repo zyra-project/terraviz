@@ -290,8 +290,91 @@ frame list).
 ### Tier B catalog (research mode only)
 
 Tier B events (`dwell`, `orbit_*`, `browse_search`, `vr_interaction`,
-`tour_question_answered`) follow the same alphabetical layout. The
-notable Tier B query target:
+`tour_question_answered`, `error_detail`) follow the same
+alphabetical layout. Per-event positions:
+
+#### `dwell`
+
+| Position | Field |
+|---|---|
+| `blob5` | `view_target` (`chat` / `info` / `browse` / `tools` / `dataset:<id>`) |
+| `double1` | `client_offset_ms` |
+| `double2` | `duration_ms` |
+
+#### `vr_interaction`
+
+| Position | Field |
+|---|---|
+| `blob5` | `gesture` (`drag` / `pinch` / `thumbstick_zoom` / `flick_spin` / `hud_tap`) |
+| `double1` | `client_offset_ms` |
+| `double2` | `magnitude` (rad/s for rotation, log2 for zoom, 1 for hud_tap) |
+
+#### `browse_search`
+
+| Position | Field |
+|---|---|
+| `blob5` | `query_hash` (12 hex chars of SHA-256) |
+| `blob6` | `result_count_bucket` (`0` / `1-10` / `11-50` / `50+`) |
+| `double1` | `client_offset_ms` |
+| `double2` | `query_length` |
+
+#### `orbit_interaction`
+
+> Nullable `duration_ms` / `input_tokens` / `output_tokens` shift
+> later doubles forward when omitted. Filter nullables in queries
+> rather than positionally indexing past them.
+
+| Position | Field |
+|---|---|
+| `blob5` | `interaction` (`message_sent` / `response_complete` / `action_executed` / `settings_changed`) |
+| `blob6` | `model` |
+| `blob7` | `subtype` |
+| `double1` | `client_offset_ms` |
+| `double2` | `duration_ms` (when present) |
+| `double3` | `input_tokens` (when present) |
+| `double4` | `output_tokens` (when present) |
+
+#### `orbit_turn`
+
+| Position | Field |
+|---|---|
+| `blob5` | `finish_reason` (`stop` / `length` / `tool_calls` / `error`) |
+| `blob6` | `model` |
+| `blob7` | `reading_level` |
+| `blob8` | `turn_role` (`user` / `assistant`) |
+| `double1` | `client_offset_ms` |
+| `double2` | `content_length` |
+| `double3` | `duration_ms` |
+| `double4` | `input_tokens` (when present) |
+| `double5` | `output_tokens` (when present) |
+| `double6` | `turn_index` |
+
+#### `orbit_tool_call`
+
+| Position | Field |
+|---|---|
+| `blob5` | `result` (`ok` / `rejected` / `error`) |
+| `blob6` | `tool` |
+| `double1` | `client_offset_ms` |
+| `double2` | `position_in_turn` |
+| `double3` | `turn_index` |
+
+#### `orbit_load_followed`
+
+| Position | Field |
+|---|---|
+| `blob5` | `dataset_id` |
+| `blob6` | `path` (`marker` / `tool_call` / `button_click`) |
+| `double1` | `client_offset_ms` |
+| `double2` | `latency_ms` |
+
+#### `orbit_correction`
+
+| Position | Field |
+|---|---|
+| `blob5` | `signal` (`thumbs_down` / `rephrased_same_turn` / `abandoned_turn`) |
+| `double1` | `client_offset_ms` |
+| `double2` | `turn_index` |
 
 #### `tour_question_answered`
 
@@ -597,10 +680,32 @@ LIMIT 50
 SELECT
   blob5 AS query_hash,
   count() AS searches,
-  avg(double2) AS avg_result_count
+  -- result_count_bucket is a string (`0` / `1-10` / `11-50` / `50+`),
+  -- so we surface the most common bucket per query rather than an
+  -- average.
+  any(blob6) AS result_bucket,
+  avg(double2) AS avg_query_length
 FROM terraviz_events
 WHERE blob1 = 'browse_search'
   AND blob2 = 'production'
+GROUP BY query_hash
+ORDER BY searches DESC
+LIMIT 50
+```
+
+### Searches that return zero results
+
+> Useful for finding gaps in the catalog — what people search for
+> that we don't ship.
+
+```sql
+SELECT
+  blob5 AS query_hash,
+  count() AS searches
+FROM terraviz_events
+WHERE blob1 = 'browse_search'
+  AND blob2 = 'production'
+  AND blob6 = '0'
 GROUP BY query_hash
 ORDER BY searches DESC
 LIMIT 50
@@ -619,6 +724,72 @@ WHERE blob1 = 'dwell'
   AND blob2 = 'production'
 GROUP BY view_target
 ORDER BY samples DESC
+```
+
+### VR interaction mix per gesture
+
+```sql
+SELECT
+  blob5 AS gesture,
+  count() AS gestures,
+  avg(double2) AS avg_magnitude,
+  quantile(0.95)(double2) AS p95_magnitude
+FROM terraviz_events
+WHERE blob1 = 'vr_interaction'
+  AND blob2 = 'production'
+GROUP BY gesture
+ORDER BY gestures DESC
+```
+
+### Orbit follow-through latency
+
+> How long between Orbit recommending a dataset and the user
+> actually loading it. p50 / p95.
+
+```sql
+SELECT
+  blob6 AS path,
+  quantile(0.50)(double2) AS p50_latency_ms,
+  quantile(0.95)(double2) AS p95_latency_ms,
+  count() AS loads
+FROM terraviz_events
+WHERE blob1 = 'orbit_load_followed'
+  AND blob2 = 'production'
+GROUP BY path
+ORDER BY loads DESC
+```
+
+### Orbit correction signal mix
+
+```sql
+SELECT
+  blob5 AS signal,
+  count() AS occurrences
+FROM terraviz_events
+WHERE blob1 = 'orbit_correction'
+  AND blob2 = 'production'
+GROUP BY signal
+ORDER BY occurrences DESC
+```
+
+### Orbit response timing per model
+
+> `duration_ms` is nullable on `orbit_interaction`; filter early so
+> the average doesn't include skipped rows.
+
+```sql
+SELECT
+  blob6 AS model,
+  count() AS responses,
+  quantile(0.50)(double2) AS p50_response_ms,
+  quantile(0.95)(double2) AS p95_response_ms
+FROM terraviz_events
+WHERE blob1 = 'orbit_interaction'
+  AND blob5 = 'response_complete'
+  AND blob2 = 'production'
+  AND double2 > 0
+GROUP BY model
+ORDER BY responses DESC
 ```
 
 ---
