@@ -772,17 +772,18 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
 
     // The lid spherical cap is sized to be CLIPPED by the stencil
     // mask — its parked-open rotation tucks "well back" but still
-    // sweeps the dome through the socket plane, relying on the
-    // stencil to hide everything outside the socket silhouette.
-    // Without that clip the lid's full geometry covers the pupil
-    // stack from any non-axial viewpoint and we just see body-vinyl
-    // skin where the eyes should be. Hide them outright in embedded
-    // mode — the avatar loses blinks but the face is legible. A
-    // shader-based clip on the lid is the proper follow-up; tracked
-    // in the Phase 4 polish list.
+    // sweeps the dome through the socket plane, so without the
+    // stencil clip the lid's full geometry covers the pupil stack.
+    // Replace the stencil clip with a fragment-shader discard against
+    // the socket silhouette: each lid fragment gets transformed into
+    // its eye group's local XY plane and discarded when it falls
+    // outside `EYE_PAIR_DISC_RADIUS`. Per-mesh `onBeforeRender`
+    // refreshes the lid → eye-group transform each frame so the
+    // clip tracks blink rotations correctly. Blinks survive on
+    // hosts where the stencil buffer doesn't (Quest WebXR).
     for (const rig of eyeRigs) {
-      rig.upperLid.visible = false
-      rig.lowerLid.visible = false
+      attachLidSocketClip(rig.upperLid, rig.upperLidPivot, EYE_PAIR_DISC_RADIUS)
+      attachLidSocketClip(rig.lowerLid, rig.lowerLidPivot, EYE_PAIR_DISC_RADIUS)
     }
   }
 
@@ -805,6 +806,111 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
  * trace visibly different ellipses); `twist` rotates within that
  * plane so the two subs aren't phase-synced at t=0.
  */
+
+/**
+ * Wires a fragment-shader socket clip onto a lid mesh so the lid's
+ * spherical cap geometry — which is intentionally oversized so it can
+ * cover the full iris during a blink — gets discarded outside the
+ * socket silhouette without relying on the GPU's stencil buffer.
+ * Used in `disableStencilClip` mode (Quest's WebXR baseLayer didn't
+ * honour `stencil: true` in testing); the standalone `/orbit` page
+ * keeps using stencil clipping where it works.
+ *
+ * Two pieces:
+ *
+ *   1. The lid's MeshStandardMaterial gets its `onBeforeCompile`
+ *      wrapped (the body-vinyl gradient stays first; we layer on top)
+ *      to add `uLidToEyeGroup` (mat4) + `uSocketRadius` (float)
+ *      uniforms and a fragment-side `discard` against the eye-group
+ *      local XY distance from origin.
+ *   2. Each lid mesh's `onBeforeRender` recomposes
+ *      `pivot.matrix * lid.matrix` into the shared material's
+ *      uniform right before that mesh's draw — same uniform across
+ *      both lids of an eye, but Three.js's render path uploads
+ *      uniforms after `onBeforeRender` and before each draw, so the
+ *      per-mesh write takes effect for that mesh's draw.
+ */
+function attachLidSocketClip(
+  lid: THREE.Mesh,
+  pivot: THREE.Object3D,
+  socketRadius: number,
+): void {
+  const mat = lid.material as THREE.MeshStandardMaterial
+  type LidClipUniforms = {
+    uLidToEyeGroup: { value: THREE.Matrix4 }
+    uSocketRadius: { value: number }
+  }
+  const userData = mat.userData as { orbitLidClipUniforms?: LidClipUniforms }
+  let uniforms = userData.orbitLidClipUniforms
+  if (!uniforms) {
+    const fresh: LidClipUniforms = {
+      uLidToEyeGroup: { value: new THREE.Matrix4() },
+      uSocketRadius: { value: socketRadius },
+    }
+    uniforms = fresh
+    userData.orbitLidClipUniforms = fresh
+
+    const prevOnBeforeCompile = mat.onBeforeCompile
+    mat.onBeforeCompile = (shader, renderer) => {
+      // Preserve the body-vinyl gradient + procedural-noise patches
+      // that `createBodyMaterial` already installed.
+      if (prevOnBeforeCompile) prevOnBeforeCompile.call(mat, shader, renderer)
+      // Bind our uniforms last so chained patches can't shadow them.
+      shader.uniforms.uLidToEyeGroup = fresh.uLidToEyeGroup
+      shader.uniforms.uSocketRadius = fresh.uSocketRadius
+
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+           uniform mat4 uLidToEyeGroup;
+           varying vec2 vOrbitSocketXY;`,
+        )
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+           {
+             vec4 orbitEgLocal = uLidToEyeGroup * vec4(position, 1.0);
+             vOrbitSocketXY = orbitEgLocal.xy;
+           }`,
+        )
+
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+           uniform float uSocketRadius;
+           varying vec2 vOrbitSocketXY;`,
+        )
+        .replace(
+          'void main() {',
+          `void main() {
+           if (length(vOrbitSocketXY) > uSocketRadius) discard;`,
+        )
+    }
+    // Tag the program-cache key so Three.js doesn't reuse a non-clipped
+    // compile of this material from another instance.
+    const prevCacheKey = mat.customProgramCacheKey?.bind(mat)
+    mat.customProgramCacheKey = () =>
+      `${prevCacheKey ? prevCacheKey() : ''}|orbitLidSocketClip`
+    mat.needsUpdate = true
+  }
+
+  // Per-mesh transform writer. Composes pivot.matrix × lid.matrix into
+  // the shared material's uniform right before the draw call. The
+  // matrix multiply runs once per lid per frame; cheap. A single
+  // scratch Matrix4 captured in the closure avoids per-frame
+  // allocations.
+  const scratch = new THREE.Matrix4()
+  const captured = uniforms
+  lid.onBeforeRender = () => {
+    pivot.updateMatrix()
+    lid.updateMatrix()
+    scratch.multiplyMatrices(pivot.matrix, lid.matrix)
+    captured.uLidToEyeGroup.value.copy(scratch)
+  }
+}
+
 function makeOrbitBasis(tilt: number, twist: number): { u: THREE.Vector3; v: THREE.Vector3 } {
   // Base basis: X-Z plane. Tilt rotates it around Z. Twist spins
   // around the plane's normal so t=0 positions differ per sub.
