@@ -435,6 +435,16 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     // transparent and reveal the camera feed; VR keeps it disabled
     // for a slight performance edge (one less blend pass per pixel).
     alpha: isAr,
+    // Stencil buffer is required by the orbit avatar's eye rig — the
+    // socket mask writes a per-eye stencilRef and the lids + inner
+    // eye stack (disc / iris / pupil / glassdome) clip against it.
+    // Without a stencil attachment the lid-clipping pass produces
+    // undefined behaviour on most drivers; on Quest the visible
+    // result is bezels-only ("two detached torus rings") while the
+    // inner eye stack drops out entirely. ~9 MB extra per eye on
+    // Quest 3 framebuffers — negligible. Standalone OrbitController
+    // sets the same flag for the same reason.
+    stencil: true,
   })
   renderer.setPixelRatio(window.devicePixelRatio)
   renderer.setSize(window.innerWidth, window.innerHeight)
