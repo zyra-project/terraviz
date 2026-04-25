@@ -239,6 +239,10 @@ export interface VrTourQuestionParams {
   size?: { width: number; height: number }
   /** Fires on Continue tap, after the user has seen the answer. */
   onContinue: () => void
+  /** Fires the moment the user picks an answer in VR. The 2D
+   * sibling fires the same callback through tourUI; the engine
+   * dedupes so telemetry sees one event per question. */
+  onAnswered?: (chosenIndex: number) => void
 }
 
 /**
@@ -1751,6 +1755,10 @@ export function createVrTourOverlay(THREE_: typeof THREE): VrTourOverlayHandle {
         if (!state || state.phase !== 'idle') return
         state.phase = 'selected'
         state.chosenIdx = action.index
+        // Notify the engine for telemetry. The 2D sibling fires
+        // the same callback through tourUI; the engine dedupes
+        // so the event lands once per question.
+        state.params.onAnswered?.(action.index)
         drawQuestionPanel(state.managed.ctx2d!, state)
         state.managed.texture.needsUpdate = true
         // Schedule the reveal. Stored so dispose can cancel it if

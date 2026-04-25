@@ -4,7 +4,12 @@ import path from 'path'
 export default defineConfig({
   test: {
     environment: 'happy-dom',
-    include: ['src/**/*.test.ts', 'src/**/*.spec.ts'],
+    include: [
+      'src/**/*.test.ts',
+      'src/**/*.spec.ts',
+      'functions/**/*.test.ts',
+      'scripts/**/*.test.ts',
+    ],
     globals: true,
     setupFiles: ['./src/test-setup.ts'],
     reporters: ['default', 'junit'],

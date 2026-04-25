@@ -33,6 +33,15 @@
 
 import { MapRenderer, setActiveMapRenderer } from './mapRenderer'
 import { logger } from '../utils/logger'
+import { emit } from '../analytics'
+
+/** Map the internal ViewLayout string into the bucket the analytics
+ * schema understands ('1globe' / '2globes' / '4globes'). */
+function layoutForEvent(layout: ViewLayout): '1globe' | '2globes' | '4globes' {
+  if (layout === '1') return '1globe'
+  if (layout === '4') return '4globes'
+  return '2globes'
+}
 
 /** Viewport layout identifier. */
 export type ViewLayout = '1' | '2h' | '2v' | '4'
@@ -73,6 +82,14 @@ export interface ViewportManagerCallbacks {
    * "the current dataset" (info panel, playback controls, URL, etc.).
    */
   onPrimaryChange?(newIndex: number, oldIndex: number): void
+  /**
+   * Telemetry-only — return the dataset id currently loaded in
+   * the given slot (or null when the panel shows the default
+   * Earth). Forwarded into each MapRenderer at init so
+   * `camera_settled` events can carry `layer_id`. Optional;
+   * absent → MapRenderer reports null layer_id.
+   */
+  getLayerIdForSlot?(slot: number): string | null
 }
 
 /** One panel in the grid. */
@@ -126,7 +143,10 @@ export class ViewportManager {
    * Fires `onLayoutChange` after the panels have been added/removed
    * so callers can resize their parallel per-panel state arrays.
    */
-  setLayout(layout: ViewLayout): void {
+  setLayout(
+    layout: ViewLayout,
+    trigger: 'tools' | 'tour' | 'orbit' = 'tools',
+  ): void {
     if (!this.grid) {
       logger.warn('[ViewportManager] setLayout called before init')
       return
@@ -159,6 +179,12 @@ export class ViewportManager {
     this.refreshActiveRenderer()
     this.refreshPrimaryStyling()
     this.resizeAll()
+
+    emit({
+      event_type: 'layout_changed',
+      layout: layoutForEvent(layout),
+      trigger,
+    })
 
     if (previousCount !== targetCount) {
       this.callbacks.onLayoutChange?.(targetCount, previousCount)
@@ -213,6 +239,11 @@ export class ViewportManager {
     this.primaryIndex = index
     this.refreshActiveRenderer()
     this.refreshPrimaryStyling()
+    emit({
+      event_type: 'viewport_focus',
+      slot_index: String(index),
+      layout: layoutForEvent(this.layout),
+    })
     this.callbacks.onPrimaryChange?.(this.primaryIndex, previous)
   }
 
@@ -375,7 +406,10 @@ export class ViewportManager {
 
     const renderer = new MapRenderer()
     const canvasId = index === 0 ? 'globe-canvas' : `globe-canvas-${index}`
-    renderer.init(container, { canvasId })
+    const getLayerId = this.callbacks.getLayerIdForSlot
+      ? () => this.callbacks.getLayerIdForSlot!(index)
+      : undefined
+    renderer.init(container, { canvasId, slotIndex: index, getLayerId })
 
     // Primary-indicator pill: shown on every panel, numbered 1-based.
     // Click on a non-primary pill promotes that panel to primary. The

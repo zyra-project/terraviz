@@ -32,6 +32,17 @@ import {
   updateTourPlayState,
   showTourLegend, hideTourLegend,
 } from '../ui/tourUI'
+import { emit } from '../analytics'
+
+/** Telemetry context for a tour run. The engine treats this as
+ * opaque metadata used only when constructing analytics events;
+ * it does not affect tour execution. Optional so existing tests
+ * that don't care about analytics can still construct an engine. */
+export interface TourTelemetryMeta {
+  tourId: string
+  tourTitle: string
+  source: 'browse' | 'orbit' | 'deeplink'
+}
 
 // Miles → kilometres
 const MI_TO_KM = 1.60934
@@ -149,14 +160,34 @@ export class TourEngine {
    */
   private anchorSlot: number | null
 
+  /** Telemetry context — captured at construction, used as the
+   * basis for every tour_* event. Null in tests / call sites that
+   * don't supply meta; in that case the events still fire with
+   * `'unknown'` placeholders so the schema stays satisfied. */
+  private meta: TourTelemetryMeta | null
+
+  /** Wall-clock timestamps for tour-event payloads. */
+  private tourStartedAt: number = 0
+  private taskStartedAt: number = 0
+  private pauseStartedAt: number | null = null
+  /** Whether `tour_started` has fired yet. The first play() call
+   * emits it; subsequent play() calls (resume from pause) emit
+   * `tour_resumed` instead. */
+  private startedEmitted = false
+  /** Whether `tour_ended` has already been emitted. Prevents
+   * double-counting when stop() runs as part of natural-end
+   * cleanup. */
+  private endedEmitted = false
+
   constructor(
     tourFile: TourFile,
     callbacks: TourCallbacks,
-    options?: { anchorSlot?: number | null },
+    options?: { anchorSlot?: number | null; meta?: TourTelemetryMeta },
   ) {
     this.tasks = tourFile.tourTasks
     this.callbacks = callbacks
     this.anchorSlot = options?.anchorSlot ?? null
+    this.meta = options?.meta ?? null
   }
 
   get state(): TourState { return this._state }
@@ -171,6 +202,7 @@ export class TourEngine {
       // Resume from a pauseForInput / pauseSeconds
       this._state = 'playing'
       updateTourPlayState(true)
+      this.emitResumed()
       this.resumeResolver()
       this.resumeResolver = null
       return
@@ -178,8 +210,16 @@ export class TourEngine {
 
     if (this._state === 'playing') return
 
+    const wasPaused = this._state === 'paused'
     this._state = 'playing'
     updateTourPlayState(true)
+    if (wasPaused) {
+      this.emitResumed()
+    } else {
+      this.tourStartedAt = Date.now()
+      this.taskStartedAt = this.tourStartedAt
+      this.emitStarted()
+    }
     await this.runLoop()
   }
 
@@ -188,6 +228,8 @@ export class TourEngine {
   pause(): void {
     if (this._state !== 'playing') return
     this._state = 'paused'
+    this.pauseStartedAt = Date.now()
+    this.emitPaused('user')
     updateTourPlayState(false)
   }
 
@@ -289,6 +331,7 @@ export class TourEngine {
       this.resumeResolver()
       this.resumeResolver = null
     }
+    this.emitEnded('abandoned')
     this.cleanup()
   }
 
@@ -336,6 +379,7 @@ export class TourEngine {
       const task = this.tasks[this.index]
       updateTourProgress(this.index, this.tasks.length)
       logger.debug(`[Tour] Step ${this.index + 1}/${this.tasks.length}:`, task)
+      this.emitTaskFired(task)
 
       try {
         await this.executeTask(task)
@@ -358,8 +402,97 @@ export class TourEngine {
     // Reached the end
     logger.info('[Tour] Tour complete')
     this._state = 'stopped'
+    this.emitEnded('completed')
     this.cleanup()
     this.callbacks.onTourEnd()
+  }
+
+  // ── Telemetry helpers ──────────────────────────────────────────────
+
+  /** Emit `tour_started` once per run. The first play() call hits
+   * this; subsequent play() (resume) calls emit `tour_resumed`
+   * instead. */
+  private emitStarted(): void {
+    if (this.startedEmitted) return
+    this.startedEmitted = true
+    emit({
+      event_type: 'tour_started',
+      tour_id: this.meta?.tourId ?? 'unknown',
+      tour_title: this.meta?.tourTitle ?? 'unknown',
+      source: this.meta?.source ?? 'browse',
+      task_count: this.tasks.length,
+    })
+  }
+
+  /** Emit `tour_task_fired` for the task we're about to run, with
+   * the dwell time spent on the previous task. The first task's
+   * `task_dwell_ms` is 0 by definition — the user hasn't dwelled
+   * on anything yet — and dashboards rely on that invariant. Note
+   * `startedEmitted` flips to true *before* the run loop reaches
+   * task 0, so we can't gate on it; key off `task_index === 0`
+   * instead. Resets the per-task clock. */
+  private emitTaskFired(task: TourTaskDef): void {
+    const now = Date.now()
+    const isFirstTask = this.index === 0
+    const dwell = isFirstTask
+      ? 0
+      : this.taskStartedAt > 0
+        ? Math.max(0, now - this.taskStartedAt)
+        : 0
+    this.taskStartedAt = now
+    emit({
+      event_type: 'tour_task_fired',
+      tour_id: this.meta?.tourId ?? 'unknown',
+      task_type: identifyTask(task)[0],
+      task_index: this.index,
+      task_dwell_ms: dwell,
+    })
+  }
+
+  /** Emit `tour_paused`. Caller picks the reason (`'user'` for the
+   * pause button, `'pauseForInput'` for tour-driven pauses, `'error'`
+   * for runtime failures that halt the tour). Caller is responsible
+   * for setting `pauseStartedAt` so the matching `tour_resumed` can
+   * compute `pause_ms`. */
+  private emitPaused(reason: 'user' | 'pauseForInput' | 'error'): void {
+    emit({
+      event_type: 'tour_paused',
+      tour_id: this.meta?.tourId ?? 'unknown',
+      reason,
+      task_index: this.index,
+    })
+  }
+
+  /** Emit `tour_resumed` with the elapsed pause duration. */
+  private emitResumed(): void {
+    const pauseMs = this.pauseStartedAt !== null
+      ? Math.max(0, Date.now() - this.pauseStartedAt)
+      : 0
+    this.pauseStartedAt = null
+    emit({
+      event_type: 'tour_resumed',
+      tour_id: this.meta?.tourId ?? 'unknown',
+      task_index: this.index,
+      pause_ms: pauseMs,
+    })
+  }
+
+  /** Emit `tour_ended`. Coalesced — natural-completion + stop()
+   * during the same run is one event, not two. */
+  private emitEnded(outcome: 'completed' | 'abandoned' | 'error'): void {
+    if (this.endedEmitted) return
+    if (!this.startedEmitted) return
+    this.endedEmitted = true
+    const duration = this.tourStartedAt > 0
+      ? Math.max(0, Date.now() - this.tourStartedAt)
+      : 0
+    emit({
+      event_type: 'tour_ended',
+      tour_id: this.meta?.tourId ?? 'unknown',
+      outcome,
+      task_index: this.index,
+      duration_ms: duration,
+    })
   }
 
   // ── Task dispatch ──────────────────────────────────────────────────
@@ -563,6 +696,8 @@ export class TourEngine {
    */
   private async pauseAndWait(message: string): Promise<void> {
     this._state = 'paused'
+    this.pauseStartedAt = Date.now()
+    this.emitPaused('pauseForInput')
     updateTourPlayState(false)
     this.callbacks.announce(message)
     await new Promise<void>(resolve => { this.resumeResolver = resolve })
@@ -597,12 +732,35 @@ export class TourEngine {
     const questionUrl = this.callbacks.resolveMediaUrl(params.imgQuestionFilename)
     const answerUrl = this.callbacks.resolveMediaUrl(params.imgAnswerFilename)
 
+    // Capture wall-clock so onAnswered can compute response_ms.
+    const shownAt = Date.now()
+    let answeredEmitted = false
+    const onAnswered = (chosenIndex: number): void => {
+      // 2D + VR both call this — dedupe so a user who answers in
+      // VR while the 2D panel is also visible (or vice versa)
+      // produces exactly one telemetry event.
+      if (answeredEmitted) return
+      answeredEmitted = true
+      emit({
+        event_type: 'tour_question_answered',
+        tour_id: this.meta?.tourId ?? 'unknown',
+        question_id: params.id,
+        task_index: this.index,
+        choice_count: params.numberOfAnswers,
+        chosen_index: chosenIndex,
+        correct_index: params.correctAnswerIndex,
+        was_correct: chosenIndex === params.correctAnswerIndex,
+        response_ms: Math.max(0, Date.now() - shownAt),
+      })
+    }
+
     return new Promise<void>(resolve => {
       showTourQuestion({
         ...params,
         imgQuestionFilename: questionUrl,
         imgAnswerFilename: answerUrl,
         onComplete: resolve,
+        onAnswered,
       })
     })
   }

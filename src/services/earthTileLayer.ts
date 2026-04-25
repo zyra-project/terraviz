@@ -25,6 +25,7 @@ import type { Map as MaplibreMap } from 'maplibre-gl'
 import { getSunPosition } from '../utils/time'
 import { logger } from '../utils/logger'
 import { getCloudTextureUrl } from '../utils/deviceCapability'
+import { reportError } from '../analytics'
 
 // --- Texture URLs ---
 const SPECULAR_MAP_URL = '/assets/Earth_Specular_2K.jpg'
@@ -628,7 +629,9 @@ function compileProgram(
   gl.shaderSource(vs, vsSrc)
   gl.compileShader(vs)
   if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
-    logger.error(`[EarthTileLayer] ${label} vertex shader:`, gl.getShaderInfoLog(vs))
+    const info = gl.getShaderInfoLog(vs) ?? ''
+    logger.warn(`[EarthTileLayer] ${label} vertex shader:`, info)
+    reportError('tile', new Error(`${label} vertex shader compile failed: ${info}`))
     return null
   }
 
@@ -636,7 +639,9 @@ function compileProgram(
   gl.shaderSource(fs, fsSrc)
   gl.compileShader(fs)
   if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
-    logger.error(`[EarthTileLayer] ${label} fragment shader:`, gl.getShaderInfoLog(fs))
+    const info = gl.getShaderInfoLog(fs) ?? ''
+    logger.warn(`[EarthTileLayer] ${label} fragment shader:`, info)
+    reportError('tile', new Error(`${label} fragment shader compile failed: ${info}`))
     return null
   }
 
@@ -648,7 +653,9 @@ function compileProgram(
   gl.deleteShader(fs)
 
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-    logger.error(`[EarthTileLayer] ${label} link:`, gl.getProgramInfoLog(prog))
+    const info = gl.getProgramInfoLog(prog) ?? ''
+    logger.warn(`[EarthTileLayer] ${label} link:`, info)
+    reportError('tile', new Error(`${label} program link failed: ${info}`))
     return null
   }
   return prog

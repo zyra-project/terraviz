@@ -6,6 +6,7 @@ import axios from 'axios'
 import type { Dataset, DatasetMetadata, EnrichedMetadata, TimeInfo } from '../types'
 import { parseISO8601Duration } from '../utils/time'
 import { logger } from '../utils/logger'
+import { reportError } from '../analytics'
 
 const METADATA_URL = 'https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/dataset.json'
 const ENRICHED_METADATA_URL = '/assets/sos_dataset_metadata.json'
@@ -114,7 +115,8 @@ export class DataService {
       logger.info(`[DataService] Loaded ${datasets.length} datasets (${enrichedCount} enriched)`)
       return datasets
     } catch (error) {
-      logger.error('[DataService] Failed to fetch datasets:', error)
+      logger.warn('[DataService] Failed to fetch datasets:', error)
+      reportError('download', error)
       throw new Error(`Failed to fetch datasets: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }

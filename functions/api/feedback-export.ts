@@ -2,7 +2,11 @@
  * Cloudflare Pages Function — /api/feedback-export
  *
  * Streams feedback as JSONL for RLHF training data extraction.
- * Protected by bearer token (FEEDBACK_ADMIN_TOKEN env var).
+ *
+ * Auth: Cloudflare Access at the edge (preferred); legacy
+ * `FEEDBACK_ADMIN_TOKEN` bearer-token path kept as a fallback
+ * for `wrangler dev` and break-glass. See
+ * `general-feedback-dashboard.ts` for the full notes.
  *
  * GET /api/feedback-export
  *   ?since=ISO_DATE       — only entries after this date
@@ -28,12 +32,15 @@
  * }
  */
 
+import { isInternalRequest } from './ingest'
+
 interface Env {
   FEEDBACK_DB?: D1Database
   FEEDBACK_ADMIN_TOKEN?: string
 }
 
 function authenticate(request: Request, token?: string): boolean {
+  if (isInternalRequest(request)) return true
   if (!token) return false
   const auth = request.headers.get('Authorization')
   if (!auth) return false

@@ -2,8 +2,12 @@
  * Cloudflare Pages Function — /api/feedback-admin
  *
  * Self-contained admin dashboard page for viewing feedback.
- * Prompts for the admin token, then fetches and renders dashboard data.
- * No build step — serves inline HTML.
+ * Auth happens at the Cloudflare Access edge — by the time the
+ * page renders, the staff member has already been signed in via
+ * SSO. The page calls the dashboard / export / screenshot
+ * endpoints with the same Access session cookie attached
+ * automatically, so no in-page auth is needed. No build step —
+ * serves inline HTML.
  */
 
 export const onRequestGet: PagesFunction = async (context) => {
@@ -161,23 +165,13 @@ export const onRequestGet: PagesFunction = async (context) => {
   </style>
 </head>
 <body>
-  <div class="login-overlay" id="login">
-    <div class="login-box">
-      <h1>Feedback Dashboard</h1>
-      <p>Enter the admin token to view the dashboard</p>
-      <input type="password" id="token-input" placeholder="Admin token" autocomplete="off">
-      <button id="login-btn">Sign in</button>
-      <div class="login-error" id="login-error"></div>
-    </div>
-  </div>
-
-  <div class="dashboard hidden" id="dashboard">
+  <div class="dashboard" id="dashboard">
     <div class="dash-header">
       <h1>Feedback Dashboard</h1>
       <div class="dash-actions">
         <button id="refresh-btn">Refresh</button>
         <button id="export-btn">Export JSONL</button>
-        <button id="logout-btn">Logout</button>
+        <button id="logout-btn">Sign out</button>
       </div>
     </div>
     <div class="tab-bar" role="tablist">
@@ -189,25 +183,22 @@ export const onRequestGet: PagesFunction = async (context) => {
 
   <script>
     const BASE = ${JSON.stringify(baseUrl)};
-    let token = sessionStorage.getItem('feedback-token') || '';
     let activeTab = 'ai';
 
-    // Auto-login if token is stored
-    if (token) { tryLogin(token); }
+    // Auth happens at the Cloudflare Access edge — by the time
+    // this script runs, the staff member is already signed in
+    // and the Access session cookie travels with every fetch
+    // automatically. No bearer token in code.
+    loadDashboard();
 
-    document.getElementById('login-btn').addEventListener('click', () => {
-      const t = document.getElementById('token-input').value.trim();
-      if (t) tryLogin(t);
-    });
-    document.getElementById('token-input').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') document.getElementById('login-btn').click();
-    });
     document.getElementById('refresh-btn').addEventListener('click', () => loadDashboard());
     document.getElementById('logout-btn').addEventListener('click', () => {
-      token = '';
-      sessionStorage.removeItem('feedback-token');
-      document.getElementById('login').classList.remove('hidden');
-      document.getElementById('dashboard').classList.add('hidden');
+      // Cloudflare Access logout URL — invalidates the team-wide
+      // session so visiting any gated app forces re-authentication.
+      // The team subdomain is the same one Access redirected the
+      // user to during sign-in, so a relative /cdn-cgi path works
+      // from any application origin gated by the same team.
+      window.location.href = '/cdn-cgi/access/logout';
     });
     document.getElementById('export-btn').addEventListener('click', exportActiveTab);
 
@@ -233,9 +224,7 @@ export const onRequestGet: PagesFunction = async (context) => {
         const endpoint = activeTab === 'ai'
           ? '/api/feedback-export?include_prompt=true'
           : '/api/general-feedback-export';
-        const res = await fetch(BASE + endpoint, {
-          headers: { 'Authorization': 'Bearer ' + token }
-        });
+        const res = await fetch(BASE + endpoint);
         if (!res.ok) throw new Error('Export failed');
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
@@ -249,32 +238,17 @@ export const onRequestGet: PagesFunction = async (context) => {
       } catch (err) { alert(err.message); }
     }
 
-    async function tryLogin(t) {
-      const err = document.getElementById('login-error');
-      try {
-        const res = await fetch(BASE + '/api/feedback-dashboard', {
-          headers: { 'Authorization': 'Bearer ' + t }
-        });
-        if (res.status === 401) { err.textContent = 'Invalid token'; return; }
-        if (!res.ok) { err.textContent = 'Server error: ' + res.status; return; }
-        token = t;
-        sessionStorage.setItem('feedback-token', t);
-        document.getElementById('login').classList.add('hidden');
-        document.getElementById('dashboard').classList.remove('hidden');
-        const data = await res.json();
-        renderDashboard(data);
-      } catch (e) { err.textContent = 'Connection failed'; }
-    }
-
     async function loadDashboard() {
       document.getElementById('content').innerHTML = '<div class="loading">Loading...</div>';
       const endpoint = activeTab === 'ai'
         ? '/api/feedback-dashboard?days=30&recent=100'
         : '/api/general-feedback-dashboard?days=30&recent=100';
       try {
-        const res = await fetch(BASE + endpoint, {
-          headers: { 'Authorization': 'Bearer ' + token }
-        });
+        const res = await fetch(BASE + endpoint);
+        if (!res.ok) {
+          document.getElementById('content').innerHTML = '<div class="loading">Server error: ' + res.status + '</div>';
+          return;
+        }
         const data = await res.json();
         if (activeTab === 'ai') renderDashboard(data);
         else renderGeneralDashboard(data);
@@ -460,9 +434,8 @@ export const onRequestGet: PagesFunction = async (context) => {
 
       // Lazy-fetch the screenshot
       if (r.hasScreenshot) {
-        fetch(BASE + '/api/general-feedback-screenshot?id=' + encodeURIComponent(r.id), {
-          headers: { 'Authorization': 'Bearer ' + token }
-        }).then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+        fetch(BASE + '/api/general-feedback-screenshot?id=' + encodeURIComponent(r.id))
+          .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
           .then(data => {
             const slot = document.getElementById('detail-screenshot-slot');
             if (!slot || !data.screenshot) return;

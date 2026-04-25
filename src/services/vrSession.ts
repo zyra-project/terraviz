@@ -33,6 +33,21 @@ import {
 } from '../utils/vrPersistence'
 import { getBordersVisible, getGazeFollowOverlays } from '../utils/viewPreferences'
 import { logger } from '../utils/logger'
+import { emit, emitCameraSettled } from '../analytics'
+import type { VrExitReason } from '../types'
+
+/** Coarse device classifier for `vr_session_started.device_class`.
+ * Substring match on the UA — only the bucket leaves this function;
+ * the raw UA is never emitted. Order matters: more-specific
+ * variants come first so `Quest Pro` doesn't fall through to the
+ * generic `Quest` branch. */
+function classifyXrDevice(ua: string): string {
+  if (/Quest\s*Pro/i.test(ua)) return 'quest-pro'
+  if (/Quest/i.test(ua)) return 'quest'
+  if (/Vision/i.test(ua)) return 'vision-pro'
+  if (/Windows|Mac OS X|Macintosh|X11|Linux/i.test(ua)) return 'pcvr'
+  return 'unknown'
+}
 
 /**
  * Contract the hosting app must provide. Pull-based: the session
@@ -50,6 +65,11 @@ export interface VrSessionContext {
   getDatasetTexture(): VrDatasetTexture | null
   /** Dataset title for the HUD (primary panel). null/empty → "No dataset loaded". */
   getDatasetTitle(): string | null
+  /** Dataset id for the primary panel — used by analytics events
+   * fired from inside VR (e.g. `vr_placement.layer_id`). Null when
+   * no dataset is loaded. Telemetry-only: the HUD itself uses
+   * `getDatasetTitle()` for human display. */
+  getDatasetId(): string | null
   /**
    * Formatted time-label string for the current primary dataset —
    * mirrors the 2D `#time-label` overlay (e.g. `"2023-06-15"` or
@@ -373,6 +393,21 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     throw new Error('WebXR is not available in this browser')
   }
 
+  // Wall-clock anchor for `vr_session_started.entry_load_ms` and the
+  // matching `vr_session_ended.duration_ms`. Captured before the
+  // Three.js chunk load so a slow first-time fetch shows up in the
+  // entry-load metric.
+  const entryStartedAtWall = Date.now()
+  const sessionTelemetry: {
+    sessionStartedAtWall: number
+    frames: number
+    exitReason: VrExitReason
+  } = {
+    sessionStartedAtWall: 0,
+    frames: 0,
+    exitReason: 'user',
+  }
+
   const THREE_ = await loadThree()
   const isAr = mode === 'ar'
   const sessionMode = isAr ? 'immersive-ar' : 'immersive-vr'
@@ -442,11 +477,29 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
   try {
     await renderer.xr.setSession(session as unknown as XRSession)
   } catch (err) {
+    sessionTelemetry.exitReason = 'error'
     await session.end().catch(() => { /* already gone */ })
     canvas.remove()
     renderer.dispose()
     throw err instanceof Error ? err : new Error(String(err))
   }
+
+  // The session is bound; emit `vr_session_started` now so
+  // entry_load_ms reflects the user-perceived "tap → in-VR" latency
+  // including the Three.js chunk load + setSession round-trip. The
+  // layer_id snapshot is the dataset loaded at entry time; if the
+  // user loads a different dataset mid-session the
+  // `vr_session_ended` event captures the post-change value.
+  sessionTelemetry.sessionStartedAtWall = Date.now()
+  emit({
+    event_type: 'vr_session_started',
+    mode,
+    device_class: classifyXrDevice(
+      typeof navigator !== 'undefined' ? navigator.userAgent : '',
+    ),
+    entry_load_ms: Math.max(0, sessionTelemetry.sessionStartedAtWall - entryStartedAtWall),
+    layer_id: ctx.getDatasetId(),
+  })
 
   // Lazy-load the controller-model addon alongside Three.js. The
   // factory fetches per-controller glTF models from a CDN at runtime
@@ -710,6 +763,65 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
   // XRControllerModelFactory was imported earlier (before scene
   // construction) so the loading-scene fade-out timing stays
   // predictable — see the comment at that import.
+  const vrProjection: 'vr' | 'ar' = isAr ? 'ar' : 'vr'
+
+  /** Compute the lat/lon under the camera's central forward ray
+   * where it hits the globe, along with the current scale-derived
+   * zoom and head-to-globe orientation. Returns null when the ray
+   * misses the sphere (e.g. user looking away from the globe).
+   * Kept inline so `scene.globe`, `camera`, and `THREE_` stay in
+   * scope without threading them through another helper file. */
+  function captureVrCameraState(): {
+    center_lat: number
+    center_lon: number
+    zoom: number
+    bearing: number
+    pitch: number
+  } | null {
+    const headOrigin = new THREE_.Vector3()
+    const headDir = new THREE_.Vector3(0, 0, -1)
+    camera.getWorldPosition(headOrigin)
+    camera.getWorldDirection(headDir)
+    const ray = new THREE_.Ray(headOrigin, headDir)
+    const sphereCenter = new THREE_.Vector3()
+    scene.globe.getWorldPosition(sphereCenter)
+    const radius = scene.globe.scale.x
+    const sphere = new THREE_.Sphere(sphereCenter, radius)
+    const hit = new THREE_.Vector3()
+    if (!ray.intersectSphere(sphere, hit)) return null
+    // Translate the hit into the globe's local frame, then undo
+    // the globe's rotation so the vector represents the Earth-
+    // fixed point under the user's gaze.
+    const local = hit.clone().sub(sphereCenter).divideScalar(radius)
+    const inverse = scene.globe.quaternion.clone().invert()
+    local.applyQuaternion(inverse)
+    // Spherical coords on a unit sphere. lat = asin(y), lon =
+    // atan2(x, -z) — matches MapLibre's +X east, +Y up, +Z south
+    // convention used by photorealEarth.ts.
+    const lat = (Math.asin(local.y) * 180) / Math.PI
+    const lon = (Math.atan2(local.x, -local.z) * 180) / Math.PI
+    // Derive a MapLibre-comparable zoom from the head-to-globe
+    // distance. A neutral view (scale 1, viewing distance ≈ 3m)
+    // maps to zoom 2 to echo the photo-realistic default. Clamped
+    // to MapLibre's typical 0-20 range for dashboard parity.
+    const viewDistance = headOrigin.distanceTo(sphereCenter)
+    const approxZoom = Math.log2(Math.max(0.1, radius / Math.max(0.1, viewDistance))) + 4
+    const zoom = Math.max(0, Math.min(20, approxZoom))
+    // Decompose globe rotation into bearing (yaw) + pitch. Y-axis
+    // euler in world space represents how far the user has spun
+    // the globe; X-axis represents tilt.
+    const euler = new THREE_.Euler().setFromQuaternion(scene.globe.quaternion, 'YXZ')
+    const bearing = (euler.y * 180) / Math.PI
+    const pitch = (euler.x * 180) / Math.PI
+    return {
+      center_lat: lat,
+      center_lon: lon,
+      zoom,
+      bearing: ((bearing % 360) + 360) % 360,
+      pitch,
+    }
+  }
+
   const interaction = createVrInteraction(THREE_, XRControllerModelFactory, {
     scene: scene.scene,
     globe: scene.globe,
@@ -723,6 +835,16 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     tourOverlay,
     placement,
     renderer,
+    onCameraSettled: () => {
+      const state = captureVrCameraState()
+      if (!state) return
+      emitCameraSettled({
+        slot_index: '0',
+        projection: vrProjection,
+        layer_id: ctx.getDatasetId(),
+        ...state,
+      })
+    },
     onBrowseAction: (action) => {
       if (action.kind === 'close') {
         browse.setVisible(false)
@@ -815,16 +937,29 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
         // browsers may not. Non-fatal if it throws — the anchor
         // still tracks within this session.
         const requestFn = anchor.requestPersistentHandle
-        if (!requestFn) return
-        try {
-          const handle = await requestFn.call(anchor)
-          savePersistedAnchorHandle(handle)
-          logger.info('[VR] Saved persistent placement anchor')
-        } catch (err) {
-          logger.debug('[VR] Anchor persistent handle not available:', err)
+        let persisted = false
+        if (requestFn) {
+          try {
+            const handle = await requestFn.call(anchor)
+            savePersistedAnchorHandle(handle)
+            persisted = true
+            logger.info('[VR] Saved persistent placement anchor')
+          } catch (err) {
+            logger.debug('[VR] Anchor persistent handle not available:', err)
+          }
         }
+        emit({
+          event_type: 'vr_placement',
+          layer_id: ctx.getDatasetId(),
+          persisted,
+        })
       }).catch(err => {
         logger.warn('[VR] Failed to create placement anchor:', err)
+        emit({
+          event_type: 'vr_placement',
+          layer_id: ctx.getDatasetId(),
+          persisted: false,
+        })
       })
     },
     onExit: () => {
@@ -915,6 +1050,7 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     lastTime = now
 
     if (!active) return
+    sessionTelemetry.frames++
 
     // Spatial placement: per-frame hit-test against the room. Only
     // does work while in Place mode; cheap when idle.
@@ -1129,6 +1265,32 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
   // --- Teardown ---
   session.addEventListener('end', () => {
     logger.info('[VR] Session ended, disposing resources')
+
+    // Telemetry: emit `vr_session_ended` once per session, before
+    // any disposal happens so frame counters / timestamps still
+    // exist. mean_fps = total frames / wall-clock duration (a true
+    // arithmetic mean, not a median — the name reflects what we
+    // compute). Null when the session was too short for a
+    // meaningful sample. For per-window medians, the perf_sampler
+    // emits fps_median_10s during the session.
+    if (sessionTelemetry.sessionStartedAtWall > 0) {
+      const durationMs = Math.max(0, Date.now() - sessionTelemetry.sessionStartedAtWall)
+      const meanFps = durationMs >= 1000
+        ? Math.round((sessionTelemetry.frames * 1000) / durationMs)
+        : null
+      emit({
+        event_type: 'vr_session_ended',
+        mode,
+        exit_reason: sessionTelemetry.exitReason,
+        duration_ms: durationMs,
+        mean_fps: meanFps,
+        // Snapshot of the loaded dataset at end-of-session. May
+        // differ from `vr_session_started.layer_id` when the user
+        // loaded something different while in VR.
+        layer_id: ctx.getDatasetId(),
+      })
+    }
+
     if (!active) return
     const a = active
     active = null

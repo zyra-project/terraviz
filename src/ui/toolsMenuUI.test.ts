@@ -579,3 +579,55 @@ describe('syncToolsMenuState', () => {
     expect(document.getElementById('tools-menu-borders')!.classList.contains('active')).toBe(true)
   })
 })
+
+describe('toolsMenuUI — settings_changed telemetry', () => {
+  it('emits settings_changed with key=labels on toggle', async () => {
+    const emitterMod = await import('../analytics/emitter')
+    const { setTier } = await import('../analytics/config')
+    localStorage.clear()
+    emitterMod.resetForTests()
+    setTier('essential')
+
+    const vm = makeViewports(1)
+    initToolsMenu(vm as any)
+
+    const labelsBtn = document.getElementById('tools-menu-labels') as HTMLButtonElement
+    labelsBtn.click()
+
+    const events = emitterMod.__peek()
+    const settings = events.filter((e) => e.event_type === 'settings_changed')
+    expect(settings.length).toBeGreaterThan(0)
+    const last = settings[settings.length - 1]
+    if (last.event_type !== 'settings_changed') throw new Error('unreachable')
+    expect(last.key).toBe('labels')
+    expect(last.value_class).toBe('on')
+  })
+
+  it('emits a different value_class when a toggle is switched off', async () => {
+    const emitterMod = await import('../analytics/emitter')
+    const { setTier } = await import('../analytics/config')
+    localStorage.clear()
+    emitterMod.resetForTests()
+    setTier('essential')
+
+    const vm = makeViewports(1)
+    initToolsMenu(vm as any)
+
+    const bordersBtn = document.getElementById('tools-menu-borders') as HTMLButtonElement
+    bordersBtn.click()
+    bordersBtn.click()
+
+    const events = emitterMod.__peek()
+    const settings = events.filter(
+      (e) => e.event_type === 'settings_changed',
+    )
+    const bordersEvents = settings.filter(
+      (e) => e.event_type === 'settings_changed' && e.key === 'borders',
+    )
+    expect(bordersEvents.length).toBe(2)
+    const [first, second] = bordersEvents
+    if (first.event_type !== 'settings_changed' || second.event_type !== 'settings_changed') throw new Error('unreachable')
+    expect(first.value_class).toBe('on')
+    expect(second.value_class).toBe('off')
+  })
+})

@@ -15,5 +15,13 @@
   ],
   "theme_color": "#1a1a1a",
   "background_color": "#1a1a1a",
-  "display": "standalone"
+  "display": "standalone",
+  "shortcuts": [
+    {
+      "name": "Privacy Policy",
+      "short_name": "Privacy",
+      "description": "Read what Terraviz collects and how to turn it off",
+      "url": "/privacy"
+    }
+  ]
 }

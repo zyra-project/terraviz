@@ -16,6 +16,7 @@ import { ensureLoaded as ensureQALoaded } from '../services/qaService'
 import { fetchModels } from '../services/llmProvider'
 import { isAvailable as isAppleIntelligenceAvailable } from '../services/appleIntelligenceProvider'
 import { setLogLevel, logger } from '../utils/logger'
+import { emit, startDwell, type DwellHandle } from '../analytics'
 
 // --- Constants ---
 const SESSION_STORAGE_KEY = 'sos-docent-chat'
@@ -44,6 +45,15 @@ let isOpen = false
 let isStreaming = false
 let settingsOpen = false
 let datasetPromptTimer: ReturnType<typeof setTimeout> | null = null
+/** Tier B dwell handle for the chat panel — non-null while the
+ * panel is open. Started in openChat(), stopped in closeChat().
+ * Tier-gated at emit time by the dwell helper, so wiring is
+ * unconditional here. */
+let chatDwellHandle: DwellHandle | null = null
+/** Wall-clock at which the most recent user message was sent —
+ * used to compute `orbit_load_followed.latency_ms` when the user
+ * later clicks an inline load button in the docent's reply. */
+let lastUserSendAt: number | null = null
 
 /** Globe-control actions deferred until a load-dataset action in the same message completes. */
 let pendingGlobeActions: ChatAction[] = []
@@ -78,6 +88,9 @@ export function openChat(): void {
   const trigger = document.getElementById('chat-trigger')
   const browseChatBtn = document.getElementById('browse-chat-btn')
   if (!panel) return
+  if (!isOpen && !chatDwellHandle) {
+    chatDwellHandle = startDwell('chat')
+  }
   isOpen = true
   panel.classList.remove('hidden')
   // Pre-load Q&A knowledge base (fire-and-forget)
@@ -129,6 +142,10 @@ export function closeChat(): void {
   const trigger = document.getElementById('chat-trigger')
   const browseChatBtn = document.getElementById('browse-chat-btn')
   if (!panel) return
+  if (chatDwellHandle) {
+    chatDwellHandle.stop()
+    chatDwellHandle = null
+  }
   isOpen = false
   panel.classList.add('hidden')
   trigger?.classList.remove('chat-trigger-active')
@@ -556,6 +573,21 @@ async function handleSend(): Promise<void> {
   renderMessages()
   scrollToBottom()
   saveSession()
+  // Tier B: record the send. Length-only — no message text leaves
+  // the device through telemetry. Latency anchor for a possible
+  // follow-up `orbit_load_followed` event when the user clicks an
+  // inline load button in the reply.
+  lastUserSendAt = Date.now()
+  const cfgForEvent = loadConfig()
+  emit({
+    event_type: 'orbit_interaction',
+    interaction: 'message_sent',
+    subtype: 'user_text',
+    model: cfgForEvent.model ?? 'unknown',
+    duration_ms: null,
+    input_tokens: null,
+    output_tokens: null,
+  })
 
   // Create a placeholder docent message for streaming
   const docentMsg: ChatMessage = {
@@ -573,6 +605,8 @@ async function handleSend(): Promise<void> {
   isStreaming = true
   showTyping()
   setSendEnabled(false)
+  const turnStartedAt = Date.now()
+  let streamFinishReason: 'stop' | 'length' | 'tool_calls' | 'error' = 'stop'
 
   try {
     // Capture globe screenshot + overlay context only when vision mode and LLM are both active
@@ -691,6 +725,7 @@ async function handleSend(): Promise<void> {
     if (!docentMsg.text) {
       docentMsg.text = "Sorry, I had trouble responding. Try asking again, or check the LLM settings."
     }
+    streamFinishReason = 'error'
   }
 
   hideTyping()
@@ -699,6 +734,37 @@ async function handleSend(): Promise<void> {
 
   // Clean up empty actions array
   if (docentMsg.actions?.length === 0) delete docentMsg.actions
+
+  // Tier B: stream-end metrics. response_complete + the
+  // assistant-side orbit_turn fire here so they reflect the
+  // actual round-trip the user perceived (includes streaming
+  // tail). Token counts come from the llmContext snapshot when
+  // the provider attached one; null otherwise.
+  const cfgForStreamEnd = loadConfig()
+  const streamDurationMs = Math.max(0, Date.now() - turnStartedAt)
+  const docentMessages = messages.filter((m) => m.role === 'docent')
+  const turnIndex = Math.max(0, docentMessages.findIndex((m) => m.id === docentMsg.id))
+  emit({
+    event_type: 'orbit_interaction',
+    interaction: 'response_complete',
+    subtype: streamFinishReason,
+    model: cfgForStreamEnd.model ?? 'unknown',
+    duration_ms: streamDurationMs,
+    input_tokens: null,
+    output_tokens: null,
+  })
+  emit({
+    event_type: 'orbit_turn',
+    turn_role: 'assistant',
+    reading_level: cfgForStreamEnd.readingLevel ?? 'normal',
+    model: cfgForStreamEnd.model ?? 'unknown',
+    finish_reason: streamFinishReason,
+    turn_index: turnIndex,
+    duration_ms: streamDurationMs,
+    input_tokens: null,
+    output_tokens: null,
+    content_length: docentMsg.text.length,
+  })
 
   // Re-render fully to wire action button events
   renderMessages()
@@ -898,6 +964,31 @@ function wireActionButtons(container: Element): void {
       if (id && callbacks) {
         callbacks.onLoadDataset(id)
         callbacks.announce('Loading dataset')
+        // Tier B: chat → load correlation. `latency_ms` is the
+        // time between the user's most recent message and this
+        // click — long latencies suggest the user read the reply
+        // carefully before acting; short ones suggest auto-load
+        // or a confident click. `path='button_click'` since this
+        // is the inline button branch (the bare-id fallback path
+        // and the tool-call path land separately).
+        const cfgForLoad = loadConfig()
+        emit({
+          event_type: 'orbit_interaction',
+          interaction: 'action_executed',
+          subtype: 'load_dataset',
+          model: cfgForLoad.model ?? 'unknown',
+          duration_ms: null,
+          input_tokens: null,
+          output_tokens: null,
+        })
+        if (lastUserSendAt !== null) {
+          emit({
+            event_type: 'orbit_load_followed',
+            dataset_id: id,
+            path: 'button_click',
+            latency_ms: Math.max(0, Date.now() - lastUserSendAt),
+          })
+        }
 
         // Track the click for implicit feedback
         const msgEl = btn.closest('.chat-msg')
@@ -1138,6 +1229,28 @@ async function submitInlineRating(messageId: string, rating: FeedbackRating, btn
       throw new Error((err as { error?: string }).error ?? `HTTP ${res.status}`)
     }
     btn.classList.add('chat-feedback-success')
+    emit({
+      event_type: 'feedback',
+      context: 'ai_response',
+      kind: rating === 'thumbs-up' ? 'thumbs_up' : 'thumbs_down',
+      status: 'ok',
+      rating: rating === 'thumbs-up' ? 1 : -1,
+    })
+    if (rating === 'thumbs-down') {
+      // Tier B correction signal — pairs with the Tier A
+      // `feedback` envelope above. Dashboards can use this to
+      // identify the rated turn cheaply (turn_index) without
+      // joining to the feedback table.
+      const docentMessages = messages.filter((m) => m.role === 'docent')
+      const turnIndex = docentMessages.findIndex((m) => m.id === messageId)
+      if (turnIndex >= 0) {
+        emit({
+          event_type: 'orbit_correction',
+          signal: 'thumbs_down',
+          turn_index: turnIndex,
+        })
+      }
+    }
     callbacks?.announce('Feedback submitted')
     // Show optional expansion for richer feedback
     showFeedbackExpansion(messageId, rating, btn)
@@ -1149,6 +1262,13 @@ async function submitInlineRating(messageId: string, rating: FeedbackRating, btn
       b.disabled = false
       b.classList.remove('chat-feedback-disabled', 'chat-feedback-rated')
       b.removeAttribute('aria-pressed')
+    })
+    emit({
+      event_type: 'feedback',
+      context: 'ai_response',
+      kind: rating === 'thumbs-up' ? 'thumbs_up' : 'thumbs_down',
+      status: 'error',
+      rating: rating === 'thumbs-up' ? 1 : -1,
     })
     callbacks?.announce('Feedback failed — please try again')
   }

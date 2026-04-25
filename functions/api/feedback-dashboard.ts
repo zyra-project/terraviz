@@ -2,12 +2,18 @@
  * Cloudflare Pages Function — /api/feedback-dashboard
  *
  * Admin endpoint for viewing feedback summary stats.
- * Protected by bearer token (FEEDBACK_ADMIN_TOKEN env var).
+ *
+ * Auth: Cloudflare Access at the edge (preferred); legacy
+ * `FEEDBACK_ADMIN_TOKEN` bearer-token path kept as a fallback
+ * for `wrangler dev` and break-glass. See
+ * `general-feedback-dashboard.ts` for the full notes.
  *
  * GET /api/feedback-dashboard
  *   ?days=30    — lookback window (default 30, max 365)
  *   ?recent=50  — number of recent entries (default 50, max 200)
  */
+
+import { isInternalRequest } from './ingest'
 
 interface Env {
   FEEDBACK_DB?: D1Database
@@ -43,6 +49,7 @@ function corsHeaders(origin?: string | null): Record<string, string> {
 }
 
 function authenticate(request: Request, token?: string): boolean {
+  if (isInternalRequest(request)) return true
   if (!token) return false
   const auth = request.headers.get('Authorization')
   if (!auth) return false

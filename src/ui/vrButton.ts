@@ -24,6 +24,7 @@
 
 import { isImmersiveVrSupported, isImmersiveArSupported } from '../utils/vrCapability'
 import { enterImmersive, loadThree, type VrMode, type VrSessionContext } from '../services/vrSession'
+import { pauseForVrEntry, resumeForVrExit, TELEMETRY_BUILD_ENABLED } from '../analytics'
 import { logger } from '../utils/logger'
 
 const BUTTON_ID = 'vr-enter-btn'
@@ -102,6 +103,11 @@ export async function initVrButton(ctx: VrSessionContext): Promise<void> {
     if (button.classList.contains('pending')) return
     button.classList.add('pending')
     button.setAttribute('aria-busy', 'true')
+    // Hand the GPU off to the immersive surface — pause the 2D
+    // perf sampler so the two surfaces don't double-count median
+    // FPS. The session's own teardown resumes it via the
+    // onSessionEnd callback wired in main.ts.
+    if (TELEMETRY_BUILD_ENABLED) pauseForVrEntry()
     try {
       await enterImmersive(mode, sessionCtx)
       // Session is live — hide the button so it doesn't overlap any
@@ -109,6 +115,9 @@ export async function initVrButton(ctx: VrSessionContext): Promise<void> {
       button.classList.add('hidden')
       button.setAttribute('aria-hidden', 'true')
     } catch (err) {
+      // Entry failed — resume sampling immediately so we don't
+      // strand the sampler in the paused state.
+      if (TELEMETRY_BUILD_ENABLED) resumeForVrExit()
       logger.error(`[VR] enterImmersive(${mode}) failed:`, err)
       // Surface a simple user-facing message via the title tooltip;
       // a polished version would route through the app's

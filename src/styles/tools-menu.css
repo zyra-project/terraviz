@@ -214,7 +214,8 @@
  * a check glyph — they're actions/links, not toggles. */
 #tools-menu-clear .tools-menu-item-check,
 #tools-menu-orbit-settings .tools-menu-item-check,
-#tools-menu-meet-orbit .tools-menu-item-check {
+#tools-menu-meet-orbit .tools-menu-item-check,
+#tools-menu-privacy .tools-menu-item-check {
     display: none;
 }
 

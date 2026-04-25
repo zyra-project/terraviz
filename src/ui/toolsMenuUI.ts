@@ -38,7 +38,18 @@
 
 import type { ViewportManager, ViewLayout } from '../services/viewportManager'
 import { updateMapControlsPosition } from './mapControlsUI'
+import { openPrivacyUI } from './privacyUI'
+import { emit } from '../analytics'
 import { setBordersVisible } from '../utils/viewPreferences'
+
+/** Fire a `settings_changed` event for a toggle/action in the Tools
+ * popover. `key` is the logical name (labels / borders / etc.) and
+ * `value_class` is a short label describing the new value — for
+ * booleans this is "on" / "off", for categorical values it's the
+ * value itself. Never carries user data. */
+function emitSetting(key: string, valueClass: string): void {
+  emit({ event_type: 'settings_changed', key, value_class: valueClass })
+}
 
 /**
  * Runtime Tauri-shell detection — matches the same `__TAURI__`
@@ -168,6 +179,13 @@ export function initToolsMenu(
           <span class="tools-menu-item-label">Meet Orbit&nbsp;&rarr;</span>
         </a>`}
       </section>
+      <section class="tools-menu-section" aria-label="Privacy">
+        <h4 class="tools-menu-section-title">Privacy</h4>
+        <button type="button" class="tools-menu-item" id="tools-menu-privacy">
+          <span class="tools-menu-item-check" aria-hidden="true"></span>
+          <span class="tools-menu-item-label">Privacy settings&hellip;</span>
+        </button>
+      </section>
     </div>
   `
 
@@ -256,6 +274,7 @@ export function initToolsMenu(
     const next = !labelsBtn.classList.contains('active')
     for (const r of viewports.getAll()) r.toggleLabels?.(next)
     setButtonState(labelsBtn, next)
+    emitSetting('labels', next ? 'on' : 'off')
     announce?.(next ? 'Labels on' : 'Labels off')
   })
 
@@ -267,6 +286,7 @@ export function initToolsMenu(
     // hit that getter, so the cost is just a localStorage write.
     setBordersVisible(next)
     setButtonState(bordersBtn, next)
+    emitSetting('borders', next ? 'on' : 'off')
     announce?.(next ? 'Borders on' : 'Borders off')
   })
 
@@ -278,6 +298,7 @@ export function initToolsMenu(
       ;(r as unknown as { toggleTerrain?: (v: boolean) => void }).toggleTerrain?.(next)
     }
     setButtonState(terrainBtn, next)
+    emitSetting('terrain', next ? 'on' : 'off')
     announce?.(next ? '3D terrain on' : '3D terrain off')
   })
 
@@ -289,6 +310,7 @@ export function initToolsMenu(
     if (!primary) return
     const next = primary.toggleAutoRotate()
     setButtonState(autoRotateBtn, next)
+    emitSetting('auto_rotate', next ? 'on' : 'off')
     announce?.(next ? 'Auto-rotation enabled' : 'Auto-rotation disabled')
   })
 
@@ -296,6 +318,7 @@ export function initToolsMenu(
     const next = !infoBtn.classList.contains('active')
     setButtonState(infoBtn, next)
     onToggleDatasetInfo?.(next)
+    emitSetting('dataset_info', next ? 'on' : 'off')
     announce?.(next ? 'Dataset info shown' : 'Dataset info hidden')
   })
 
@@ -303,6 +326,7 @@ export function initToolsMenu(
     const next = !legendBtn.classList.contains('active')
     setButtonState(legendBtn, next)
     onToggleLegend?.(next)
+    emitSetting('legend', next ? 'on' : 'off')
     announce?.(next ? 'Legend shown' : 'Legend hidden')
   })
 
@@ -333,6 +357,13 @@ export function initToolsMenu(
   orbitSettingsBtn.addEventListener('click', () => {
     closePopover()
     onOpenOrbitSettings?.()
+  })
+
+  const privacyBtn = document.getElementById('tools-menu-privacy') as HTMLButtonElement | null
+  privacyBtn?.addEventListener('click', () => {
+    closePopover()
+    openPrivacyUI(privacyBtn)
+    announce?.('Privacy settings opened')
   })
 
   // --- Layout picker (dev flag only) ---

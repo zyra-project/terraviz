@@ -6,10 +6,15 @@
  * small — screenshots are fetched on demand when an admin opens a
  * detail panel.
  *
- * Protected by bearer token (FEEDBACK_ADMIN_TOKEN env var).
+ * Auth: Cloudflare Access at the edge (preferred); legacy
+ * `FEEDBACK_ADMIN_TOKEN` bearer-token path kept as a fallback
+ * for `wrangler dev` and break-glass. See
+ * `general-feedback-dashboard.ts` for the full notes.
  *
  * GET /api/general-feedback-screenshot?id=123
  */
+
+import { isInternalRequest } from './ingest'
 
 interface Env {
   FEEDBACK_DB?: D1Database
@@ -17,6 +22,7 @@ interface Env {
 }
 
 function authenticate(request: Request, token?: string): boolean {
+  if (isInternalRequest(request)) return true
   if (!token) return false
   const auth = request.headers.get('Authorization')
   if (!auth) return false

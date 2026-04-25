@@ -14,6 +14,14 @@ import { escapeHtml, escapeAttr } from '../ui/domUtils'
 import { closeChat } from '../ui/chatUI'
 import type { PlaybackState } from '../ui/playbackController'
 import { updatePlayButton, loadCaptions } from '../ui/playbackController'
+import { startDwell, type DwellHandle } from '../analytics'
+
+/** Tier B dwell handle for the info panel — non-null while the
+ * panel is expanded (collapsed = user can't read the body so it
+ * doesn't count). One handle per displayed dataset; rebuilt on
+ * dataset change. Tier-gated at emit time, wiring is unconditional. */
+let infoPanelDwellHandle: DwellHandle | null = null
+let infoPanelDwellDatasetId: string | null = null
 
 const IS_TAURI = !!(window as any).__TAURI__
 
@@ -271,6 +279,16 @@ export function displayDatasetInfo(
   const infoHeader = document.getElementById('info-header')
   if (!infoPanel || !infoTitle || !infoBody || !infoHeader) return
 
+  // If the panel is showing a different dataset from the one whose
+  // dwell we're currently tracking, close out the previous dwell
+  // before re-rendering. The new dataset's dwell starts fresh on
+  // the next expand click.
+  if (infoPanelDwellHandle && infoPanelDwellDatasetId !== dataset.id) {
+    infoPanelDwellHandle.stop()
+    infoPanelDwellHandle = null
+    infoPanelDwellDatasetId = null
+  }
+
   const e = dataset.enriched
 
   infoTitle.textContent = dataset.title
@@ -396,6 +414,20 @@ export function displayDatasetInfo(
     infoHeader.setAttribute('aria-expanded', String(expanded))
     // Close chat when expanding info — both can't be tall at the same time
     if (expanded) closeChat()
+    // Tier B dwell — track time the panel is actually expanded
+    // (collapsed reduces it to a one-line header, no body
+    // reading is possible). Targets `dataset:<id>` so dashboards
+    // can split per-dataset reading time without reaching for the
+    // session-scoped layer_loaded join.
+    if (expanded) {
+      if (infoPanelDwellHandle) infoPanelDwellHandle.stop()
+      infoPanelDwellHandle = startDwell(`dataset:${dataset.id}`)
+      infoPanelDwellDatasetId = dataset.id
+    } else if (infoPanelDwellHandle) {
+      infoPanelDwellHandle.stop()
+      infoPanelDwellHandle = null
+      infoPanelDwellDatasetId = null
+    }
   }
   infoHeader.onclick = toggleInfoPanel
   infoHeader.addEventListener('keydown', (e) => {

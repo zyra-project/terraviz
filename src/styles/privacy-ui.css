@@ -1,0 +1,287 @@
+/**
+ * Privacy UI styles — the Tools → Privacy settings dialog and the
+ * first-launch disclosure banner. Both surfaces use the same token
+ * palette as the rest of the app (see tokens.css).
+ */
+
+/* --- Privacy settings dialog --- */
+
+.privacy-ui-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+    z-index: 900;
+}
+.privacy-ui-backdrop.hidden { display: none; }
+
+.privacy-ui-panel {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(480px, calc(100vw - 2rem));
+    max-height: calc(100vh - 2rem);
+    overflow-y: auto;
+    padding: 1.25rem 1.4rem 1.1rem;
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: var(--glass-border);
+    border-radius: var(--radius-xl);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+    color: var(--color-text);
+    font-size: 0.85rem;
+    line-height: 1.45;
+    z-index: 901;
+}
+.privacy-ui-panel.hidden { display: none; }
+
+.privacy-ui-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+}
+.privacy-ui-header h2 {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: var(--color-text);
+}
+.privacy-ui-close {
+    min-width: 28px;
+    height: 28px;
+    padding: 0;
+    font-size: 0.95rem;
+    color: var(--color-text-muted);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    line-height: 1;
+}
+.privacy-ui-close:hover {
+    color: var(--color-text);
+    background: var(--white-o08);
+    border-color: var(--white-o12);
+}
+.privacy-ui-close:focus-visible {
+    outline: 2px solid var(--accent-o70);
+    outline-offset: 2px;
+}
+
+.privacy-ui-desc {
+    margin: 0 0 0.85rem;
+    color: var(--color-text-secondary);
+    font-size: 0.8rem;
+}
+
+/* Radio group — each tier is a full-width clickable card. */
+.privacy-ui-tiers {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin: 0 0 0.9rem;
+    padding: 0;
+    border: 0;
+}
+.privacy-ui-tier {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding: 0.6rem 0.7rem;
+    background: var(--color-surface-alt);
+    border: 1px solid var(--color-surface-border-subtle);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+}
+.privacy-ui-tier:hover {
+    background: var(--color-surface);
+    border-color: var(--color-surface-border);
+}
+.privacy-ui-tier input[type="radio"] {
+    margin-top: 0.2rem;
+    accent-color: var(--color-accent);
+    flex-shrink: 0;
+}
+.privacy-ui-tier:has(input:checked) {
+    background: var(--accent-o08);
+    border-color: var(--accent-o35);
+}
+.privacy-ui-tier:focus-within {
+    outline: 2px solid var(--accent-o70);
+    outline-offset: 2px;
+}
+.privacy-ui-tier-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+.privacy-ui-tier-label {
+    font-weight: 600;
+    color: var(--color-text);
+}
+.privacy-ui-tier-desc {
+    font-size: 0.78rem;
+    color: var(--color-text-secondary);
+}
+
+/* Meta block: session ID + policy link. */
+.privacy-ui-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--color-surface-border-subtle);
+}
+.privacy-ui-session {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 0.6rem;
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+}
+.privacy-ui-session-label {
+    font-weight: 600;
+    color: var(--color-text);
+}
+.privacy-ui-session-id {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.72rem;
+    padding: 0.1rem 0.35rem;
+    background: var(--color-surface);
+    border: 1px solid var(--color-surface-border-subtle);
+    border-radius: var(--radius-sm);
+    color: var(--color-text);
+    overflow-wrap: anywhere;
+}
+.privacy-ui-session-hint {
+    font-size: 0.7rem;
+    color: var(--color-text-muted);
+}
+.privacy-ui-policy-link {
+    color: var(--color-accent);
+    text-decoration: none;
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+.privacy-ui-policy-link:hover {
+    color: var(--color-accent-hover);
+    text-decoration: underline;
+}
+.privacy-ui-policy-link:focus-visible {
+    outline: 2px solid var(--accent-o70);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+}
+
+.privacy-ui-status {
+    margin-top: 0.5rem;
+    min-height: 1.2em;
+    font-size: 0.75rem;
+    color: var(--color-success-soft);
+}
+
+/* --- Disclosure banner --- */
+
+.disclosure-banner {
+    position: fixed;
+    top: calc(0.5rem + var(--safe-top));
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: min(640px, calc(100vw - 1rem));
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem 0.9rem;
+    padding: 0.7rem 1rem;
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: var(--glass-border);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+    color: var(--color-text);
+    font-size: 0.8rem;
+    line-height: 1.45;
+    z-index: 850;
+}
+
+.disclosure-banner-text {
+    margin: 0;
+    flex: 1 1 260px;
+    color: var(--color-text-secondary);
+}
+
+.disclosure-banner-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.disclosure-banner-btn {
+    min-height: 32px;
+    padding: 0.35rem 0.7rem;
+    font: inherit;
+    font-size: 0.78rem;
+    font-weight: 500;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.disclosure-banner-btn:focus-visible {
+    outline: 2px solid var(--accent-o70);
+    outline-offset: 2px;
+}
+
+.disclosure-banner-btn-secondary {
+    background: var(--color-surface);
+    color: var(--color-text);
+    border: 1px solid var(--color-surface-border);
+}
+.disclosure-banner-btn-secondary:hover {
+    background: var(--color-surface-hover);
+    border-color: var(--accent-o35);
+}
+
+.disclosure-banner-btn-primary {
+    background: var(--color-accent-dark);
+    color: var(--color-text);
+    border: 1px solid var(--color-accent-dark);
+}
+.disclosure-banner-btn-primary:hover {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+}
+
+.disclosure-banner-link {
+    color: var(--color-accent);
+    text-decoration: none;
+    font-size: 0.78rem;
+    font-weight: 500;
+}
+.disclosure-banner-link:hover { text-decoration: underline; }
+.disclosure-banner-link:focus-visible {
+    outline: 2px solid var(--accent-o70);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+}
+
+@media (max-width: 600px) {
+    .disclosure-banner {
+        left: 0.5rem;
+        right: 0.5rem;
+        transform: none;
+        max-width: none;
+    }
+    .disclosure-banner-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
+}

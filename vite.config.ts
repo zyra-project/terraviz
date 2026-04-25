@@ -1,9 +1,27 @@
 import { defineConfig } from 'vite'
 import path from 'path'
+import { readFileSync } from 'fs'
+
+const pkg = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8')) as {
+  version: string
+}
+
+/** Validate and normalize the build-channel env var so a typo
+ * doesn't leak a bespoke string into `session_start.build_channel`. */
+function resolveBuildChannel(): 'public' | 'internal' | 'canary' {
+  const raw = process.env.VITE_BUILD_CHANNEL
+  if (raw === 'internal' || raw === 'canary') return raw
+  return 'public'
+}
 
 export default defineConfig(({ mode }) => ({
   define: {
     __BUNDLED_DEV__: JSON.stringify(mode !== 'production'),
+    __APP_VERSION__: JSON.stringify(pkg.version),
+    // Baked in at build time. Internal / canary bundles are tagged
+    // so dashboards can filter them out of public-user rollups
+    // without needing IP-based allowlists. Default `'public'`.
+    __BUILD_CHANNEL__: JSON.stringify(resolveBuildChannel()),
   },
   root: './src',
   publicDir: '../public',

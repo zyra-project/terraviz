@@ -14,3 +14,44 @@ binding = "FEEDBACK_DB"
 database_name = "sphere-feedback"
 database_id = "78fbe5c3-8e40-4504-b183-155b0069222e"
 migrations_dir = "migrations"
+
+# Analytics Engine dataset for the telemetry event stream.
+# Every datapoint written by functions/api/ingest.ts lands here.
+# Query via the AE SQL API; see docs/ANALYTICS_QUERIES.md.
+#
+# Heads-up: Cloudflare Pages does not auto-pick up bindings from
+# this file — they must be added through the project's
+# Settings → Bindings UI (variable name `ANALYTICS`, dataset
+# `terraviz_events`, attached to both Production and Preview).
+# This declaration is kept in source control because (a) it
+# documents the canonical binding/dataset names, and (b) it works
+# for any future migration to a Workers deploy where wrangler.toml
+# is authoritative.
+[[analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "terraviz_events"
+
+# KV namespace for the runtime telemetry kill switch. The ingest
+# endpoint reads the key `telemetry_enabled` on every request; when
+# set to `disabled` / `false` / `off` / `0`, clients receive 410 Gone
+# and cool down for the rest of the session. Absent or any other
+# value = allow.
+#
+# Like the other bindings in this file, **Pages reads its bindings
+# from the dashboard, not this block** — `Settings → Bindings → KV →
+# variable name TELEMETRY_KILL_SWITCH, namespace = the one below`.
+# Kept declared (rather than commented out) so the canonical
+# binding name + namespace ID are visible in source control and so
+# any future Workers deploy where wrangler.toml is authoritative
+# picks it up automatically.
+#
+# Operations:
+#   - Activate (clients receive 410):
+#       wrangler kv key put telemetry_enabled disabled \
+#         --namespace-id=9c022b1295314939b76a28769fef6195
+#   - Deactivate (back to normal):
+#       wrangler kv key delete telemetry_enabled \
+#         --namespace-id=9c022b1295314939b76a28769fef6195
+[[kv_namespaces]]
+binding = "TELEMETRY_KILL_SWITCH"
+id = "9c022b1295314939b76a28769fef6195"

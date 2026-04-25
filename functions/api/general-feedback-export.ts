@@ -5,7 +5,10 @@
  * requests, other). Companion to /api/feedback-export which ships
  * JSONL for RLHF training data on the AI feedback table.
  *
- * Protected by bearer token (FEEDBACK_ADMIN_TOKEN env var).
+ * Auth: Cloudflare Access at the edge (preferred); legacy
+ * `FEEDBACK_ADMIN_TOKEN` bearer-token path kept as a fallback
+ * for `wrangler dev` and break-glass. See
+ * `general-feedback-dashboard.ts` for the full notes.
  *
  * GET /api/general-feedback-export
  *   ?since=ISO_DATE       — only entries after this date
@@ -20,6 +23,8 @@
  * is an estimate of the decoded image byte size, not the length of
  * the base64 data URL string.
  */
+
+import { isInternalRequest } from './ingest'
 
 /**
  * Estimate the decoded byte size of a base64 data URL. The JS string
@@ -42,6 +47,7 @@ interface Env {
 }
 
 function authenticate(request: Request, token?: string): boolean {
+  if (isInternalRequest(request)) return true
   if (!token) return false
   const auth = request.headers.get('Authorization')
   if (!auth) return false

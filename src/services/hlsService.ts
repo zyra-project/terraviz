@@ -4,6 +4,7 @@
 
 import Hls from 'hls.js'
 import { logger } from '../utils/logger'
+import { reportError } from '../analytics'
 
 export interface VideoProxyFile {
   quality: string
@@ -128,7 +129,8 @@ export class HLSService {
 
         this.hls.on(Hls.Events.ERROR, (_event, data) => {
           if (data.fatal) {
-            logger.error('[HLS] Fatal error:', data.type, data.details)
+            logger.warn('[HLS] Fatal error:', data.type, data.details)
+            reportError('hls', new Error(`${data.type}: ${data.details}`))
             if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
               if (networkRecoveries < MAX_RECOVERIES) {
                 networkRecoveries++

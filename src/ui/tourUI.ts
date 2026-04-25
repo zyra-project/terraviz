@@ -75,6 +75,10 @@ export interface VrTourOverlaySink {
     correctAnswerIndex: number
     anchor?: TourOverlayAnchor
     onComplete: () => void
+    /** Telemetry hook — fires the moment the user picks an answer
+     * in VR. The 2D sibling fires the same hook through tourUI;
+     * the engine dedupes so the event lands once per question. */
+    onAnswered?: (chosenIndex: number) => void
   }): void
   hideAllQuestions(): void
 }
@@ -754,6 +758,12 @@ interface QuestionDisplayParams extends QuestionTaskParams {
   imgAnswerFilename: string
   /** Called when the user completes the question */
   onComplete: () => void
+  /** Called the moment the user picks an answer (before the
+   * 1.5 s reveal animation + Continue button). Optional; the
+   * tour engine wires it for telemetry. The 2D and VR surfaces
+   * both call it through to the engine, which dedupes so the
+   * event fires exactly once per question. */
+  onAnswered?: (chosenIndex: number) => void
 }
 
 export function showTourQuestion(params: QuestionDisplayParams): void {
@@ -795,6 +805,10 @@ export function showTourQuestion(params: QuestionDisplayParams): void {
       btnRow.querySelectorAll('button').forEach(b => {
         (b as HTMLButtonElement).disabled = true
       })
+      // Notify the engine for telemetry — fires once per question
+      // regardless of which surface the user answered on (engine
+      // dedupes; VR's activate handler also calls through).
+      params.onAnswered?.(i)
 
       if (i === params.correctAnswerIndex) {
         btn.classList.add('tour-question-correct')
@@ -842,6 +856,7 @@ export function showTourQuestion(params: QuestionDisplayParams): void {
     numberOfAnswers: params.numberOfAnswers,
     correctAnswerIndex: params.correctAnswerIndex,
     anchor: params.anchor,
+    onAnswered: params.onAnswered,
     onComplete: () => {
       hideAllTourQuestions()
       params.onComplete()

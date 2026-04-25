@@ -28,6 +28,49 @@ import type { VrTourControlsAction, VrTourControlsHandle } from './vrTourControl
 import type { VrTourInteractiveAction, VrTourOverlayHandle } from './vrTourOverlay'
 import { MAX_GLOBE_SCALE, MIN_GLOBE_SCALE } from './vrScene'
 import { logger } from '../utils/logger'
+import { emit } from '../analytics'
+import type { VrGesture } from '../types'
+
+/** Per-gesture rate cap. Tier B `vr_interaction` events fire once
+ * per discrete gesture (drag release, pinch release, flick start,
+ * thumbstick-zoom release, hud tap), but a user with twitchy
+ * controllers can produce many in quick succession. Cap each
+ * gesture type independently so a flurry of one type doesn't
+ * starve the others off the wire. */
+export const VR_INTERACTION_MAX_PER_MINUTE = 30
+const VR_INTERACTION_WINDOW_MS = 60_000
+const vrInteractionTimes = new Map<VrGesture, number[]>()
+
+/** Emit a `vr_interaction` event if the per-gesture throttle
+ * permits. Magnitude semantics vary per gesture (see emit sites)
+ * but always rounded to 2 decimals so the wire stays narrow.
+ *
+ * Exported for tests; production callers should reach for it via
+ * the gesture-specific emit sites in this file. */
+export function emitVrInteraction(gesture: VrGesture, magnitude: number): void {
+  const now = Date.now()
+  let times = vrInteractionTimes.get(gesture)
+  if (!times) {
+    times = []
+    vrInteractionTimes.set(gesture, times)
+  }
+  // Drop expired entries from the front of the window.
+  const cutoff = now - VR_INTERACTION_WINDOW_MS
+  while (times.length > 0 && times[0] < cutoff) times.shift()
+  if (times.length >= VR_INTERACTION_MAX_PER_MINUTE) return
+  times.push(now)
+  emit({
+    event_type: 'vr_interaction',
+    gesture,
+    magnitude: Math.round(magnitude * 100) / 100,
+  })
+}
+
+/** Test-only — clears the throttle state so consecutive tests
+ * don't leak emit counts between cases. */
+export function __resetVrInteractionThrottleForTests(): void {
+  vrInteractionTimes.clear()
+}
 
 /**
  * Strict payload-level equality for browse actions. The selectstart
@@ -144,6 +187,15 @@ export interface VrInteractionContext {
   onPlaceConfirm: () => void
   /** Fired when the user squeezes the grip — caller ends the session. */
   onExit: () => void
+  /**
+   * Fired when globe manipulation settles: trigger-drag release
+   * (to idle, not inertia), two-hand pinch release, flick-inertia
+   * decay stop, or thumbstick-zoom release. Caller computes the
+   * gaze-to-globe lat/lon and emits `camera_settled` with
+   * `projection='vr'|'ar'`. The per-session throttle in
+   * `analytics/camera.ts` rate-limits the emit across 2D + VR.
+   */
+  onCameraSettled?: () => void
 }
 
 export interface VrInteractionHandle {
@@ -729,6 +781,10 @@ export function createVrInteraction(
   function reevaluateRotationMode(): void {
     const wasRotating =
       rotationMode.kind === 'single' || rotationMode.kind === 'two-hand'
+    // Capture the SPECIFIC kind before the assignment below
+    // overwrites it — needed to tag the Tier B vr_interaction event
+    // with the right gesture (drag vs pinch).
+    const wasTwoHand = rotationMode.kind === 'two-hand'
     const g0 = triggersOnGlobe[0]
     const g1 = triggersOnGlobe[1]
     if (g0 && g1) {
@@ -745,13 +801,30 @@ export function createVrInteraction(
       // Releasing the last trigger. If the velocity tracker has a
       // significant signal, transition to inertia rather than
       // idle so the spin continues with decay.
-      if (wasRotating && velocityTracker.velocity.length() > MIN_INERTIA_SPEED) {
+      const releaseSpeed = velocityTracker.velocity.length()
+      if (wasRotating && releaseSpeed > MIN_INERTIA_SPEED) {
         rotationMode = {
           kind: 'inertia',
           velocity: velocityTracker.velocity.clone(),
         }
+        // Tier B: flick-to-spin started. Magnitude is the
+        // initial angular speed in rad/s — surfaces "casual
+        // tap" vs "vigorous flick" without leaking head pose.
+        emitVrInteraction('flick_spin', releaseSpeed)
       } else {
         rotationMode = { kind: 'idle' }
+        // Transitioned straight from rotating to idle — the user let
+        // go without enough velocity for inertia. That's a settle.
+        // Inertia → idle settles are emitted from the per-frame
+        // update loop instead (when velocity decays below threshold).
+        if (wasRotating) {
+          ctx.onCameraSettled?.()
+          // Tier B: rotation gesture released without a flick.
+          // Magnitude is the velocity-tracker speed at release
+          // (rad/s) rounded to 2 decimals — small for careful
+          // panning, large for fast turns.
+          emitVrInteraction(wasTwoHand ? 'pinch' : 'drag', releaseSpeed)
+        }
       }
     }
   }
@@ -848,6 +921,9 @@ export function createVrInteraction(
       // and cancelled.
       if (hit?.kind === 'hud' && hit.action === hudArmed[index]) {
         ctx.onHudAction(hudArmed[index]!)
+        // Tier B: HUD button activated. Magnitude is always 1 —
+        // the event is presence/absence, not intensity.
+        emitVrInteraction('hud_tap', 1)
       }
       hudArmed[index] = null
     }
@@ -1112,6 +1188,9 @@ export function createVrInteraction(
     const speed = mode.velocity.length()
     if (speed < MIN_INERTIA_SPEED) {
       rotationMode = { kind: 'idle' }
+      // Flick-inertia has decayed to a stop — the globe is now
+      // settled at wherever the spin left it.
+      ctx.onCameraSettled?.()
       return
     }
     const angle = speed * deltaSeconds
@@ -1295,15 +1374,50 @@ export function createVrInteraction(
       }
     }
     if (zoomAxis !== 0) {
+      // Capture the start-of-gesture scale on the rising edge so
+      // the matching release can report a magnitude that means
+      // "scale ratio over the whole gesture", not "ratio for the
+      // last frame". Approximate log-ratio is the privacy-friendly
+      // choice — small fractional values for small zooms,
+      // ±1 / ±2 for an order-of-magnitude change.
+      if (!wasZoomingThumbstick) {
+        zoomGestureStartScale = ctx.globe.scale.x
+      }
       const factor = Math.pow(ZOOM_RATE_PER_SECOND, zoomAxis * deltaSeconds)
       const next = ctx.globe.scale.x * factor
       const clamped = Math.max(MIN_GLOBE_SCALE, Math.min(MAX_GLOBE_SCALE, next))
       ctx.globe.scale.setScalar(clamped)
+      wasZoomingThumbstick = true
+    } else if (wasZoomingThumbstick) {
+      // Thumbstick was pushing zoom last frame and returned to
+      // neutral this frame — the user let go and the globe scale
+      // is now settled.
+      wasZoomingThumbstick = false
+      ctx.onCameraSettled?.()
+      // Tier B: thumbstick zoom released. Magnitude is the log2
+      // ratio over the whole gesture: +1 = doubled, -1 = halved,
+      // 0 = unchanged. Bounded by the MIN/MAX globe scale clamp
+      // so it can't run away.
+      const endScale = ctx.globe.scale.x
+      if (zoomGestureStartScale > 0 && endScale > 0) {
+        const log2Ratio = Math.log2(endScale / zoomGestureStartScale)
+        emitVrInteraction('thumbstick_zoom', log2Ratio)
+      }
+      zoomGestureStartScale = 0
     }
     if (scrollAxis !== 0) {
       ctx.browse.scroll(scrollAxis * BROWSE_SCROLL_SPEED * deltaSeconds)
     }
   }
+  /** Edge-triggered flag for thumbstick-zoom settle. Set true while
+   * zoom axis is non-zero; flipping back to false fires one
+   * `onCameraSettled` callback. */
+  let wasZoomingThumbstick = false
+  /** Globe scale at the moment the user started a thumbstick-zoom
+   * gesture. Captured on the rising edge so the matching release
+   * can report a magnitude that means "ratio over the whole
+   * gesture", not "ratio for the last frame". */
+  let zoomGestureStartScale = 0
 
   return {
     update(deltaSeconds) {

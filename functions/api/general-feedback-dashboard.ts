@@ -5,12 +5,21 @@
  * (bug reports, feature requests, other). Sibling to
  * /api/feedback-dashboard which covers the AI response ratings.
  *
- * Protected by bearer token (FEEDBACK_ADMIN_TOKEN env var).
+ * Auth: Cloudflare Access at the edge (preferred). Sign-in
+ * happens once per session via the Access policy on this path;
+ * the function reads `Cf-Access-Authenticated-User-Email` to
+ * confirm staff identity. The legacy `FEEDBACK_ADMIN_TOKEN`
+ * bearer-token path is kept as an optional fallback for
+ * `wrangler dev` (where Access doesn't run) and as break-glass
+ * if the Access policy is ever misconfigured. Removing the env
+ * var disables the bearer path entirely.
  *
  * GET /api/general-feedback-dashboard
  *   ?days=30    — lookback window (default 30, max 365)
  *   ?recent=100 — number of recent entries (default 100, max 200)
  */
+
+import { isInternalRequest } from './ingest'
 
 interface Env {
   FEEDBACK_DB?: D1Database
@@ -46,6 +55,12 @@ function corsHeaders(origin?: string | null): Record<string, string> {
 }
 
 function authenticate(request: Request, token?: string): boolean {
+  // Cloudflare Access — production path. The edge attaches the
+  // SSO identity header on requests that match the Access policy.
+  if (isInternalRequest(request)) return true
+  // Bearer token — local-dev / break-glass fallback. Only enabled
+  // when FEEDBACK_ADMIN_TOKEN is set in env. Removing the env var
+  // makes Access the only auth path.
   if (!token) return false
   const auth = request.headers.get('Authorization')
   if (!auth) return false
