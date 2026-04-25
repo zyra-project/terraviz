@@ -14,6 +14,21 @@ import {
   PALETTE_KEYS, PALETTES,
   PRESET_KEYS, SCALE_PRESETS,
 } from '../services/orbitCharacter'
+import { OrbitDocentBridge } from '../services/orbitDocentBridge'
+import type { ChatAction } from '../types'
+
+/**
+ * Stand-in dataset payload for the docent demo buttons. The bridge
+ * doesn't read any field beyond the discriminator on action chunks
+ * (it only triggers a beckon / affirm gesture), so a synthetic action
+ * is enough to exercise the wiring without coupling to real catalog
+ * data.
+ */
+const DEMO_ACTION: ChatAction = {
+  type: 'load-dataset',
+  datasetId: 'INTERNAL_DEMO',
+  datasetTitle: 'Demo dataset',
+}
 
 export interface OrbitDebugPanelHandle {
   /**
@@ -52,6 +67,17 @@ export function initOrbitDebugPanel(controller: OrbitController): OrbitDebugPane
   if (scaleHost) buildScaleControl(scaleHost, controller)
   const flightIntervalId = (flyBtn && homeBtn) ? wireFlightButtons(flyBtn, homeBtn, controller) : null
 
+  // Docent stream simulator. The bridge is wired straight to the live
+  // controller — clicking through the buttons drives the same state /
+  // gesture transitions the real docent will trigger from VR / 2D
+  // companion hosts later, so designers can preview each transition
+  // without spinning up the LLM stack. The bridge holds no DOM /
+  // network references; it's safe to keep alive for the page's
+  // lifetime and dispose alongside the panel.
+  const docentBridge = new OrbitDocentBridge(controller)
+  const docentHost = document.getElementById('orbit-debug-docent')
+  if (docentHost) buildDocentSteps(docentHost, docentBridge)
+
   toggleBtn.addEventListener('click', () => {
     const collapsed = panel.classList.toggle('is-collapsed')
     toggleBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true')
@@ -71,6 +97,7 @@ export function initOrbitDebugPanel(controller: OrbitController): OrbitDebugPane
     dispose(): void {
       window.clearInterval(gestureIntervalId)
       if (flightIntervalId !== null) window.clearInterval(flightIntervalId)
+      docentBridge.dispose()
     },
   }
 }
@@ -191,6 +218,75 @@ function buildGestureButtons(host: HTMLElement, controller: OrbitController): HT
     buttons.push(btn)
   }
   return buttons
+}
+
+/**
+ * Step buttons that drive the {@link OrbitDocentBridge} as if a real
+ * docent stream were arriving. Each button invokes one bridge entry
+ * point — Submit kicks the LISTENING / THINKING flow; Delta lands
+ * the first-token transition; Done ✓ / Done ✗ settle the avatar
+ * into CHATTING (with or without the brief CONFUSED detour). Visuals
+ * reuse the gesture-button class so the row reads as part of the
+ * same affordance vocabulary as the rest of the debug panel.
+ */
+function buildDocentSteps(host: HTMLElement, bridge: OrbitDocentBridge): void {
+  host.innerHTML = ''
+  const steps: { label: string; ariaLabel: string; run: () => void; announce: string }[] = [
+    {
+      label: 'Submit',
+      ariaLabel: 'Simulate user submit',
+      run: () => bridge.onUserSubmit(),
+      announce: 'Docent: user submit',
+    },
+    {
+      label: 'Delta',
+      ariaLabel: 'Simulate first delta chunk',
+      run: () => bridge.onChunk({ type: 'delta', text: '…' }),
+      announce: 'Docent: delta chunk',
+    },
+    {
+      label: 'Action',
+      ariaLabel: 'Simulate action chunk',
+      run: () => bridge.onChunk({ type: 'action', action: DEMO_ACTION }),
+      announce: 'Docent: action chunk',
+    },
+    {
+      label: 'Auto-load',
+      ariaLabel: 'Simulate auto-load chunk',
+      run: () => bridge.onChunk({ type: 'auto-load', action: DEMO_ACTION, alternatives: [] }),
+      announce: 'Docent: auto-load chunk',
+    },
+    {
+      label: 'Done ✓',
+      ariaLabel: 'Simulate done chunk (LLM)',
+      run: () => bridge.onChunk({ type: 'done', fallback: false }),
+      announce: 'Docent: done',
+    },
+    {
+      label: 'Done ✗',
+      ariaLabel: 'Simulate done chunk with fallback',
+      run: () => bridge.onChunk({ type: 'done', fallback: true }),
+      announce: 'Docent: done (fallback)',
+    },
+    {
+      label: 'Abort',
+      ariaLabel: 'Simulate stream abort',
+      run: () => bridge.onAbort(),
+      announce: 'Docent: abort',
+    },
+  ]
+  for (const step of steps) {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'orbit-debug-gesture'
+    btn.textContent = step.label
+    btn.setAttribute('aria-label', step.ariaLabel)
+    btn.addEventListener('click', () => {
+      step.run()
+      announce(step.announce)
+    })
+    host.appendChild(btn)
+  }
 }
 
 function announce(msg: string): void {
