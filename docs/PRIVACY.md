@@ -8,6 +8,10 @@ privacy policy that ships at [`/privacy`](https://terraviz.pages.dev/privacy).
 Needs legal review before release. See
 [`ANALYTICS_IMPLEMENTATION_PLAN.md`](ANALYTICS_IMPLEMENTATION_PLAN.md)
 for the technical design this policy describes.
+
+For the entropy budget and quasi-identifier analysis backing
+the claims in this policy, see
+[`PRIVACY_ANALYSIS.md`](PRIVACY_ANALYSIS.md).
 <!-- /internal-only -->
 
 Last updated: **draft**
