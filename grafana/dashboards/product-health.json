@@ -2,10 +2,14 @@
   "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/public/api/spec/dashboard.json",
   "title": "Terraviz — Product Health",
   "uid": "terraviz-product-health",
-  "tags": ["terraviz", "analytics", "tier-a"],
+  "tags": [
+    "terraviz",
+    "analytics",
+    "tier-a"
+  ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 4,
+  "version": 5,
   "refresh": "5m",
   "time": {
     "from": "now-7d",
@@ -18,14 +22,20 @@
         "type": "custom",
         "label": "Environment",
         "query": "production,preview,local",
-        "current": { "text": "production", "value": "production" }
+        "current": {
+          "text": "production",
+          "value": "production"
+        }
       },
       {
         "name": "internal",
         "type": "custom",
         "label": "Internal staff?",
         "query": "false,true",
-        "current": { "text": "false", "value": "false" }
+        "current": {
+          "text": "false",
+          "value": "false"
+        }
       },
       {
         "name": "DS_INFINITY",
@@ -41,12 +51,23 @@
       "type": "timeseries",
       "title": "Sessions per day",
       "description": "Distinct session_id per day. Filtered to $environment, excludes internal staff when $internal=false.",
-      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
-      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
           "type": "json",
           "source": "url",
           "format": "table",
@@ -54,10 +75,27 @@
           "url_options": {
             "method": "POST",
             "data": "SELECT toStartOfDay(timestamp) AS day, count(DISTINCT index1) AS sessions FROM terraviz_events WHERE blob1 = 'session_start' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY day ORDER BY day",
-            "headers": [{ "key": "Content-Type", "value": "text/plain" }]
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
           },
           "parser": "backend",
-          "root_selector": "data"
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "day",
+              "text": "day",
+              "type": "timestamp"
+            },
+            {
+              "selector": "sessions",
+              "text": "sessions",
+              "type": "number"
+            }
+          ]
         }
       ]
     },
@@ -66,12 +104,23 @@
       "type": "barchart",
       "title": "Platform × OS breakdown",
       "description": "Distinct sessions, grouped by platform (web/desktop/mobile) and os family.",
-      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
-      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
           "type": "json",
           "source": "url",
           "format": "table",
@@ -79,10 +128,32 @@
           "url_options": {
             "method": "POST",
             "data": "SELECT blob10 AS platform, blob9 AS os, count(DISTINCT index1) AS sessions FROM terraviz_events WHERE blob1 = 'session_start' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY platform, os ORDER BY sessions DESC",
-            "headers": [{ "key": "Content-Type", "value": "text/plain" }]
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
           },
           "parser": "backend",
-          "root_selector": "data"
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "platform",
+              "text": "platform",
+              "type": "string"
+            },
+            {
+              "selector": "os",
+              "text": "os",
+              "type": "string"
+            },
+            {
+              "selector": "sessions",
+              "text": "sessions",
+              "type": "number"
+            }
+          ]
         }
       ]
     },
@@ -91,12 +162,23 @@
       "type": "table",
       "title": "Layer load p95 — top 25 datasets",
       "description": "p50 and p95 load time per dataset, network/HLS only (cache hits excluded).",
-      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 10 },
-      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 10
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
           "type": "json",
           "source": "url",
           "format": "table",
@@ -104,10 +186,37 @@
           "url_options": {
             "method": "POST",
             "data": "SELECT blob5 AS layer_id, quantile(0.50)(double2) AS p50_ms, quantile(0.95)(double2) AS p95_ms, count() AS load_count FROM terraviz_events WHERE blob1 = 'layer_loaded' AND blob2 = '$environment' AND blob4 = '$internal' AND blob6 != 'cache' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY layer_id HAVING load_count > 10 ORDER BY p95_ms DESC LIMIT 25",
-            "headers": [{ "key": "Content-Type", "value": "text/plain" }]
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
           },
           "parser": "backend",
-          "root_selector": "data"
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "layer_id",
+              "text": "layer_id",
+              "type": "string"
+            },
+            {
+              "selector": "p50_ms",
+              "text": "p50_ms",
+              "type": "number"
+            },
+            {
+              "selector": "p95_ms",
+              "text": "p95_ms",
+              "type": "number"
+            },
+            {
+              "selector": "load_count",
+              "text": "load_count",
+              "type": "number"
+            }
+          ]
         }
       ]
     },
@@ -116,12 +225,23 @@
       "type": "piechart",
       "title": "Load source mix",
       "description": "How layers were loaded — network fetch vs local cache vs HLS vs raw image.",
-      "gridPos": { "x": 12, "y": 8, "w": 6, "h": 10 },
-      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 6,
+        "h": 10
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
           "type": "json",
           "source": "url",
           "format": "table",
@@ -129,10 +249,27 @@
           "url_options": {
             "method": "POST",
             "data": "SELECT blob6 AS source, count() AS loads FROM terraviz_events WHERE blob1 = 'layer_loaded' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY source ORDER BY loads DESC",
-            "headers": [{ "key": "Content-Type", "value": "text/plain" }]
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
           },
           "parser": "backend",
-          "root_selector": "data"
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "source",
+              "text": "source",
+              "type": "string"
+            },
+            {
+              "selector": "loads",
+              "text": "loads",
+              "type": "number"
+            }
+          ]
         }
       ]
     },
@@ -141,12 +278,23 @@
       "type": "stat",
       "title": "Errors per session (last 24h)",
       "description": "Total error events divided by distinct session count. Production-only; staff sessions excluded.",
-      "gridPos": { "x": 18, "y": 8, "w": 6, "h": 5 },
-      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+      "gridPos": {
+        "x": 18,
+        "y": 8,
+        "w": 6,
+        "h": 5
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
           "type": "json",
           "source": "url",
           "format": "table",
@@ -154,10 +302,22 @@
           "url_options": {
             "method": "POST",
             "data": "WITH s AS (SELECT count(DISTINCT index1) AS n FROM terraviz_events WHERE blob1 = 'session_start' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > NOW() - INTERVAL '1' DAY), e AS (SELECT count() AS n FROM terraviz_events WHERE blob1 = 'error' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > NOW() - INTERVAL '1' DAY) SELECT e.n / s.n AS errors_per_session FROM s, e",
-            "headers": [{ "key": "Content-Type", "value": "text/plain" }]
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
           },
           "parser": "backend",
-          "root_selector": "data"
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "errors_per_session",
+              "text": "errors_per_session",
+              "type": "number"
+            }
+          ]
         }
       ]
     },
@@ -166,12 +326,23 @@
       "type": "barchart",
       "title": "Errors by category × source",
       "description": "Last 7 days of error events, grouped by classified category and originating source.",
-      "gridPos": { "x": 18, "y": 13, "w": 6, "h": 5 },
-      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+      "gridPos": {
+        "x": 18,
+        "y": 13,
+        "w": 6,
+        "h": 5
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
           "type": "json",
           "source": "url",
           "format": "table",
@@ -179,10 +350,32 @@
           "url_options": {
             "method": "POST",
             "data": "SELECT blob5 AS category, blob8 AS source, count() AS occurrences FROM terraviz_events WHERE blob1 = 'error' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY category, source ORDER BY occurrences DESC",
-            "headers": [{ "key": "Content-Type", "value": "text/plain" }]
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
           },
           "parser": "backend",
-          "root_selector": "data"
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "category",
+              "text": "category",
+              "type": "string"
+            },
+            {
+              "selector": "source",
+              "text": "source",
+              "type": "string"
+            },
+            {
+              "selector": "occurrences",
+              "text": "occurrences",
+              "type": "number"
+            }
+          ]
         }
       ]
     },
@@ -191,12 +384,23 @@
       "type": "timeseries",
       "title": "2D map FPS over time (median, by GPU bucket)",
       "description": "Per-hour median fps from the perfSampler, split by webgl_renderer_hash. Top buckets reveal whether a GPU class is regressing.",
-      "gridPos": { "x": 0, "y": 18, "w": 12, "h": 8 },
-      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+      "gridPos": {
+        "x": 0,
+        "y": 18,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
           "type": "json",
           "source": "url",
           "format": "table",
@@ -204,10 +408,32 @@
           "url_options": {
             "method": "POST",
             "data": "SELECT toStartOfHour(timestamp) AS hour, blob6 AS gpu_bucket, quantile(0.50)(double2) AS median_fps FROM terraviz_events WHERE blob1 = 'perf_sample' AND blob5 = 'map' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY hour, gpu_bucket ORDER BY hour",
-            "headers": [{ "key": "Content-Type", "value": "text/plain" }]
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
           },
           "parser": "backend",
-          "root_selector": "data"
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "hour",
+              "text": "hour",
+              "type": "timestamp"
+            },
+            {
+              "selector": "gpu_bucket",
+              "text": "gpu_bucket",
+              "type": "string"
+            },
+            {
+              "selector": "median_fps",
+              "text": "median_fps",
+              "type": "number"
+            }
+          ]
         }
       ]
     },
@@ -216,12 +442,23 @@
       "type": "table",
       "title": "VR sessions — funnel + end-of-session FPS",
       "description": "Per device_class × mode: count, average entry-load latency, p50 of mean_fps at session end. mean_fps is the arithmetic mean over the whole session; for in-session medians query perf_sample.",
-      "gridPos": { "x": 12, "y": 18, "w": 12, "h": 8 },
-      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+      "gridPos": {
+        "x": 12,
+        "y": 18,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
           "type": "json",
           "source": "url",
           "format": "table",
@@ -229,10 +466,42 @@
           "url_options": {
             "method": "POST",
             "data": "SELECT blob6 AS device_class, blob7 AS mode, count() AS sessions, avg(double2) AS avg_entry_load_ms, quantile(0.50)(double3) AS p50_session_mean_fps FROM terraviz_events WHERE blob1 = 'vr_session_ended' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY device_class, mode ORDER BY sessions DESC",
-            "headers": [{ "key": "Content-Type", "value": "text/plain" }]
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
           },
           "parser": "backend",
-          "root_selector": "data"
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "device_class",
+              "text": "device_class",
+              "type": "string"
+            },
+            {
+              "selector": "mode",
+              "text": "mode",
+              "type": "string"
+            },
+            {
+              "selector": "sessions",
+              "text": "sessions",
+              "type": "number"
+            },
+            {
+              "selector": "avg_entry_load_ms",
+              "text": "avg_entry_load_ms",
+              "type": "number"
+            },
+            {
+              "selector": "p50_session_mean_fps",
+              "text": "p50_session_mean_fps",
+              "type": "number"
+            }
+          ]
         }
       ]
     },
@@ -241,12 +510,23 @@
       "type": "table",
       "title": "Tour completion rates",
       "description": "Started vs completed counts per tour_id; outcome='abandoned' / 'error' both excluded from completes.",
-      "gridPos": { "x": 0, "y": 26, "w": 12, "h": 8 },
-      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+      "gridPos": {
+        "x": 0,
+        "y": 26,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
           "type": "json",
           "source": "url",
           "format": "table",
@@ -254,10 +534,37 @@
           "url_options": {
             "method": "POST",
             "data": "WITH starts AS (SELECT blob6 AS tour_id, count() AS n FROM terraviz_events WHERE blob1 = 'tour_started' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY tour_id), completes AS (SELECT blob6 AS tour_id, count() AS n FROM terraviz_events WHERE blob1 = 'tour_ended' AND blob5 = 'completed' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY tour_id) SELECT starts.tour_id, starts.n AS starts, COALESCE(completes.n, 0) AS completes, COALESCE(completes.n, 0) / starts.n AS completion_rate FROM starts LEFT JOIN completes ON starts.tour_id = completes.tour_id ORDER BY starts DESC",
-            "headers": [{ "key": "Content-Type", "value": "text/plain" }]
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
           },
           "parser": "backend",
-          "root_selector": "data"
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "tour_id",
+              "text": "tour_id",
+              "type": "string"
+            },
+            {
+              "selector": "starts",
+              "text": "starts",
+              "type": "number"
+            },
+            {
+              "selector": "completes",
+              "text": "completes",
+              "type": "number"
+            },
+            {
+              "selector": "completion_rate",
+              "text": "completion_rate",
+              "type": "number"
+            }
+          ]
         }
       ]
     },
@@ -266,12 +573,23 @@
       "type": "table",
       "title": "Country breakdown (top 20)",
       "description": "Distinct sessions per country (2-letter ISO from CF-IPCountry). 'XX' (Tor / unknown) excluded.",
-      "gridPos": { "x": 12, "y": 26, "w": 12, "h": 8 },
-      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+      "gridPos": {
+        "x": 12,
+        "y": 26,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
           "type": "json",
           "source": "url",
           "format": "table",
@@ -279,10 +597,27 @@
           "url_options": {
             "method": "POST",
             "data": "SELECT blob3 AS country, count(DISTINCT index1) AS sessions FROM terraviz_events WHERE blob1 = 'session_start' AND blob2 = '$environment' AND blob4 = '$internal' AND blob3 != 'XX' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY country ORDER BY sessions DESC LIMIT 20",
-            "headers": [{ "key": "Content-Type", "value": "text/plain" }]
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
           },
           "parser": "backend",
-          "root_selector": "data"
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "country",
+              "text": "country",
+              "type": "string"
+            },
+            {
+              "selector": "sessions",
+              "text": "sessions",
+              "type": "number"
+            }
+          ]
         }
       ]
     }

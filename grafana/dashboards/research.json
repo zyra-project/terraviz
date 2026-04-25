@@ -2,10 +2,15 @@
   "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/public/api/spec/dashboard.json",
   "title": "Terraviz — Research (Tier B)",
   "uid": "terraviz-research",
-  "tags": ["terraviz", "analytics", "tier-b", "research"],
+  "tags": [
+    "terraviz",
+    "analytics",
+    "tier-b",
+    "research"
+  ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 5,
+  "version": 6,
   "refresh": "5m",
   "time": {
     "from": "now-30d",
@@ -18,7 +23,10 @@
         "type": "custom",
         "label": "Environment",
         "query": "production,preview,local",
-        "current": { "text": "production", "value": "production" }
+        "current": {
+          "text": "production",
+          "value": "production"
+        }
       },
       {
         "name": "DS_INFINITY",
@@ -33,7 +41,12 @@
       "id": 1,
       "type": "text",
       "title": "About this dashboard",
-      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 4 },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 4
+      },
       "options": {
         "mode": "markdown",
         "content": "**Tier B / research mode only.** These panels surface data captured when a user has explicitly opted into Research mode under Tools → Privacy. All call sites are wired (Commits 9.5 + 12 + 13). Empty panels in a fresh deployment likely mean nobody on this environment has opted in yet.\n\nSee `docs/ANALYTICS.md` for the schema and `docs/ANALYTICS_QUERIES.md` for the full set of Tier B query patterns."
@@ -44,12 +57,23 @@
       "type": "table",
       "title": "Tour quiz — worst-answered questions",
       "description": "Author-set question_id, ordered by lowest correctness rate. Helps tour authors see where learners struggle.",
-      "gridPos": { "x": 0, "y": 4, "w": 24, "h": 10 },
-      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 24,
+        "h": 10
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
           "type": "json",
           "source": "url",
           "format": "table",
@@ -57,10 +81,42 @@
           "url_options": {
             "method": "POST",
             "data": "SELECT blob6 AS tour_id, blob5 AS question_id, count() AS attempts, sum(if(blob7 = 'true', 1, 0)) / count() AS correctness_rate, avg(double5) AS avg_response_ms FROM terraviz_events WHERE blob1 = 'tour_question_answered' AND blob2 = '$environment' AND blob4 = 'false' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY tour_id, question_id HAVING attempts > 5 ORDER BY correctness_rate ASC LIMIT 50",
-            "headers": [{ "key": "Content-Type", "value": "text/plain" }]
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
           },
           "parser": "backend",
-          "root_selector": "data"
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "tour_id",
+              "text": "tour_id",
+              "type": "string"
+            },
+            {
+              "selector": "question_id",
+              "text": "question_id",
+              "type": "string"
+            },
+            {
+              "selector": "attempts",
+              "text": "attempts",
+              "type": "number"
+            },
+            {
+              "selector": "correctness_rate",
+              "text": "correctness_rate",
+              "type": "number"
+            },
+            {
+              "selector": "avg_response_ms",
+              "text": "avg_response_ms",
+              "type": "number"
+            }
+          ]
         }
       ]
     },
@@ -69,12 +125,23 @@
       "type": "table",
       "title": "Browse search — top hashed queries",
       "description": "SHA-256 prefix (12 hex). The same query always hashes the same way; we never see the words. result_bucket is the most common result count for each hash.",
-      "gridPos": { "x": 0, "y": 14, "w": 12, "h": 10 },
-      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 12,
+        "h": 10
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
           "type": "json",
           "source": "url",
           "format": "table",
@@ -82,10 +149,37 @@
           "url_options": {
             "method": "POST",
             "data": "SELECT blob5 AS query_hash, count() AS searches, any(blob6) AS result_bucket, avg(double2) AS avg_query_length FROM terraviz_events WHERE blob1 = 'browse_search' AND blob2 = '$environment' AND blob4 = 'false' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY query_hash ORDER BY searches DESC LIMIT 50",
-            "headers": [{ "key": "Content-Type", "value": "text/plain" }]
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
           },
           "parser": "backend",
-          "root_selector": "data"
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "query_hash",
+              "text": "query_hash",
+              "type": "string"
+            },
+            {
+              "selector": "searches",
+              "text": "searches",
+              "type": "number"
+            },
+            {
+              "selector": "result_bucket",
+              "text": "result_bucket",
+              "type": "string"
+            },
+            {
+              "selector": "avg_query_length",
+              "text": "avg_query_length",
+              "type": "number"
+            }
+          ]
         }
       ]
     },
@@ -94,12 +188,23 @@
       "type": "table",
       "title": "Browse search — zero-result queries",
       "description": "Hashed queries that returned no datasets. Useful for catalog-gap analysis: what people search for that we don't ship.",
-      "gridPos": { "x": 12, "y": 14, "w": 12, "h": 10 },
-      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+      "gridPos": {
+        "x": 12,
+        "y": 14,
+        "w": 12,
+        "h": 10
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
           "type": "json",
           "source": "url",
           "format": "table",
@@ -107,10 +212,27 @@
           "url_options": {
             "method": "POST",
             "data": "SELECT blob5 AS query_hash, count() AS searches FROM terraviz_events WHERE blob1 = 'browse_search' AND blob2 = '$environment' AND blob4 = 'false' AND blob6 = '0' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY query_hash ORDER BY searches DESC LIMIT 50",
-            "headers": [{ "key": "Content-Type", "value": "text/plain" }]
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
           },
           "parser": "backend",
-          "root_selector": "data"
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "query_hash",
+              "text": "query_hash",
+              "type": "string"
+            },
+            {
+              "selector": "searches",
+              "text": "searches",
+              "type": "number"
+            }
+          ]
         }
       ]
     },
@@ -119,12 +241,23 @@
       "type": "table",
       "title": "Panel dwell time distribution",
       "description": "How long users dwell on each panel (chat, info, browse, tools, individual datasets) — p50 + p95.",
-      "gridPos": { "x": 0, "y": 24, "w": 12, "h": 10 },
-      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 10
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
           "type": "json",
           "source": "url",
           "format": "table",
@@ -132,10 +265,37 @@
           "url_options": {
             "method": "POST",
             "data": "SELECT blob5 AS view_target, quantile(0.50)(double2) AS p50_ms, quantile(0.95)(double2) AS p95_ms, count() AS samples FROM terraviz_events WHERE blob1 = 'dwell' AND blob2 = '$environment' AND blob4 = 'false' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY view_target ORDER BY samples DESC",
-            "headers": [{ "key": "Content-Type", "value": "text/plain" }]
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
           },
           "parser": "backend",
-          "root_selector": "data"
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "view_target",
+              "text": "view_target",
+              "type": "string"
+            },
+            {
+              "selector": "p50_ms",
+              "text": "p50_ms",
+              "type": "number"
+            },
+            {
+              "selector": "p95_ms",
+              "text": "p95_ms",
+              "type": "number"
+            },
+            {
+              "selector": "samples",
+              "text": "samples",
+              "type": "number"
+            }
+          ]
         }
       ]
     },
@@ -144,12 +304,23 @@
       "type": "table",
       "title": "VR interaction mix per gesture",
       "description": "Which gestures carry the bulk of VR navigation? Magnitude semantics vary by gesture (rad/s for drag/pinch/flick, log2 ratio for thumbstick zoom, 1.0 for hud_tap) — read the bars per gesture, not across.",
-      "gridPos": { "x": 12, "y": 24, "w": 12, "h": 10 },
-      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 10
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
           "type": "json",
           "source": "url",
           "format": "table",
@@ -157,10 +328,37 @@
           "url_options": {
             "method": "POST",
             "data": "SELECT blob5 AS gesture, count() AS gestures, avg(double2) AS avg_magnitude, quantile(0.95)(double2) AS p95_magnitude FROM terraviz_events WHERE blob1 = 'vr_interaction' AND blob2 = '$environment' AND blob4 = 'false' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY gesture ORDER BY gestures DESC",
-            "headers": [{ "key": "Content-Type", "value": "text/plain" }]
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
           },
           "parser": "backend",
-          "root_selector": "data"
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "gesture",
+              "text": "gesture",
+              "type": "string"
+            },
+            {
+              "selector": "gestures",
+              "text": "gestures",
+              "type": "number"
+            },
+            {
+              "selector": "avg_magnitude",
+              "text": "avg_magnitude",
+              "type": "number"
+            },
+            {
+              "selector": "p95_magnitude",
+              "text": "p95_magnitude",
+              "type": "number"
+            }
+          ]
         }
       ]
     },
@@ -169,12 +367,23 @@
       "type": "table",
       "title": "Orbit follow-through latency by path",
       "description": "Time between Orbit emitting a load suggestion (marker / tool_call / button_click) and the user actually loading the dataset. Lower numbers = more decisive recommendations.",
-      "gridPos": { "x": 0, "y": 34, "w": 12, "h": 10 },
-      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+      "gridPos": {
+        "x": 0,
+        "y": 34,
+        "w": 12,
+        "h": 10
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
           "type": "json",
           "source": "url",
           "format": "table",
@@ -182,10 +391,37 @@
           "url_options": {
             "method": "POST",
             "data": "SELECT blob6 AS path, count() AS loads, quantile(0.50)(double2) AS p50_latency_ms, quantile(0.95)(double2) AS p95_latency_ms FROM terraviz_events WHERE blob1 = 'orbit_load_followed' AND blob2 = '$environment' AND blob4 = 'false' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY path ORDER BY loads DESC",
-            "headers": [{ "key": "Content-Type", "value": "text/plain" }]
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
           },
           "parser": "backend",
-          "root_selector": "data"
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "path",
+              "text": "path",
+              "type": "string"
+            },
+            {
+              "selector": "loads",
+              "text": "loads",
+              "type": "number"
+            },
+            {
+              "selector": "p50_latency_ms",
+              "text": "p50_latency_ms",
+              "type": "number"
+            },
+            {
+              "selector": "p95_latency_ms",
+              "text": "p95_latency_ms",
+              "type": "number"
+            }
+          ]
         }
       ]
     },
@@ -194,12 +430,23 @@
       "type": "table",
       "title": "Orbit correction signals",
       "description": "thumbs_down = explicit user feedback; rephrased_same_turn = user edited and resent without acting on the assistant; abandoned_turn = user closed Orbit mid-turn. All are negative quality signals.",
-      "gridPos": { "x": 12, "y": 34, "w": 12, "h": 10 },
-      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+      "gridPos": {
+        "x": 12,
+        "y": 34,
+        "w": 12,
+        "h": 10
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
           "type": "json",
           "source": "url",
           "format": "table",
@@ -207,10 +454,27 @@
           "url_options": {
             "method": "POST",
             "data": "SELECT blob5 AS signal, count() AS occurrences FROM terraviz_events WHERE blob1 = 'orbit_correction' AND blob2 = '$environment' AND blob4 = 'false' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY signal ORDER BY occurrences DESC",
-            "headers": [{ "key": "Content-Type", "value": "text/plain" }]
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
           },
           "parser": "backend",
-          "root_selector": "data"
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "signal",
+              "text": "signal",
+              "type": "string"
+            },
+            {
+              "selector": "occurrences",
+              "text": "occurrences",
+              "type": "number"
+            }
+          ]
         }
       ]
     },
@@ -219,12 +483,23 @@
       "type": "table",
       "title": "Orbit response timing per model",
       "description": "End-to-end response latency for Orbit. duration_ms is nullable on orbit_interaction — the WHERE clause filters out skipped rows so the average is meaningful.",
-      "gridPos": { "x": 0, "y": 44, "w": 12, "h": 10 },
-      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+      "gridPos": {
+        "x": 0,
+        "y": 44,
+        "w": 12,
+        "h": 10
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
           "type": "json",
           "source": "url",
           "format": "table",
@@ -232,10 +507,37 @@
           "url_options": {
             "method": "POST",
             "data": "SELECT blob6 AS model, count() AS responses, quantile(0.50)(double2) AS p50_response_ms, quantile(0.95)(double2) AS p95_response_ms FROM terraviz_events WHERE blob1 = 'orbit_interaction' AND blob5 = 'response_complete' AND blob2 = '$environment' AND blob4 = 'false' AND double2 > 0 AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY model ORDER BY responses DESC",
-            "headers": [{ "key": "Content-Type", "value": "text/plain" }]
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
           },
           "parser": "backend",
-          "root_selector": "data"
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "model",
+              "text": "model",
+              "type": "string"
+            },
+            {
+              "selector": "responses",
+              "text": "responses",
+              "type": "number"
+            },
+            {
+              "selector": "p50_response_ms",
+              "text": "p50_response_ms",
+              "type": "number"
+            },
+            {
+              "selector": "p95_response_ms",
+              "text": "p95_response_ms",
+              "type": "number"
+            }
+          ]
         }
       ]
     },
@@ -244,12 +546,23 @@
       "type": "table",
       "title": "Orbit turn outcome mix (assistant side)",
       "description": "How LLM turns end. `length` truncations and `error` finishes are quality red flags worth investigating; `tool_calls` indicates the model is exercising the load_dataset tool path.",
-      "gridPos": { "x": 12, "y": 44, "w": 12, "h": 10 },
-      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+      "gridPos": {
+        "x": 12,
+        "y": 44,
+        "w": 12,
+        "h": 10
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}" },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
           "type": "json",
           "source": "url",
           "format": "table",
@@ -257,10 +570,32 @@
           "url_options": {
             "method": "POST",
             "data": "SELECT blob6 AS model, blob5 AS finish_reason, count() AS turns FROM terraviz_events WHERE blob1 = 'orbit_turn' AND blob8 = 'assistant' AND blob2 = '$environment' AND blob4 = 'false' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY model, finish_reason ORDER BY turns DESC",
-            "headers": [{ "key": "Content-Type", "value": "text/plain" }]
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
           },
           "parser": "backend",
-          "root_selector": "data"
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "model",
+              "text": "model",
+              "type": "string"
+            },
+            {
+              "selector": "finish_reason",
+              "text": "finish_reason",
+              "type": "string"
+            },
+            {
+              "selector": "turns",
+              "text": "turns",
+              "type": "number"
+            }
+          ]
         }
       ]
     }
