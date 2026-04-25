@@ -7,8 +7,13 @@
  *
  * Auth: Cloudflare Access at the edge (preferred); legacy
  * `FEEDBACK_ADMIN_TOKEN` bearer-token path kept as a fallback
- * for `wrangler dev` and break-glass. See
- * `general-feedback-dashboard.ts` for the full notes.
+ * for `wrangler dev` and break-glass.
+ *
+ * The web admin UI no longer calls this path directly — the
+ * dashboard at `/api/feedback-admin` proxies the same export
+ * via `?action=general-export` so a single Access destination
+ * covers every admin operation. This route remains for direct
+ * scripting and break-glass.
  *
  * GET /api/general-feedback-export
  *   ?since=ISO_DATE       — only entries after this date
@@ -25,21 +30,7 @@
  */
 
 import { isInternalRequest } from './ingest'
-
-/**
- * Estimate the decoded byte size of a base64 data URL. The JS string
- * length counts characters, not bytes — and base64 encodes 3 bytes
- * per 4 characters of payload. Strip the `data:...;base64,` prefix
- * first so we only count the encoded payload.
- */
-function estimateDataUrlBytes(dataUrl: string): number {
-  if (!dataUrl) return 0
-  const commaIdx = dataUrl.indexOf(',')
-  const payload = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl
-  // Each '=' padding char represents 1 fewer decoded byte.
-  const padding = payload.endsWith('==') ? 2 : payload.endsWith('=') ? 1 : 0
-  return Math.floor((payload.length * 3) / 4) - padding
-}
+import { streamGeneralExport } from './_feedback-helpers'
 
 interface Env {
   FEEDBACK_DB?: D1Database
@@ -53,20 +44,6 @@ function authenticate(request: Request, token?: string): boolean {
   if (!auth) return false
   const bearer = auth.replace(/^Bearer\s+/i, '')
   return bearer === token
-}
-
-/**
- * Escape a value for inclusion in a CSV cell per RFC 4180:
- * if the value contains a comma, double-quote, or line break, wrap
- * it in double quotes and double up any embedded double quotes.
- */
-function csvEscape(value: unknown): string {
-  if (value == null) return ''
-  const s = String(value)
-  if (/[",\r\n]/.test(s)) {
-    return `"${s.replace(/"/g, '""')}"`
-  }
-  return s
 }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
@@ -88,92 +65,10 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const url = new URL(context.request.url)
   const since = url.searchParams.get('since')
   const kind = url.searchParams.get('kind')
-  const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') ?? '10000') || 10000, 1), 50_000)
-
-  const conditions: string[] = []
-  const bindings: unknown[] = []
-
-  if (since) {
-    conditions.push('created_at >= ?')
-    bindings.push(since)
-  }
-  if (kind === 'bug' || kind === 'feature' || kind === 'other') {
-    conditions.push('kind = ?')
-    bindings.push(kind)
-  }
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+  const limit = parseInt(url.searchParams.get('limit') ?? '10000') || 10000
 
   try {
-    // Select everything we need to produce CSV columns. We still pull
-    // the screenshot so we can emit its length without an extra query —
-    // but we drop it before writing the row to the output stream.
-    const stmt = db.prepare(
-      `SELECT id, kind, message, contact, url, user_agent, app_version,
-              platform, dataset_id, screenshot, created_at
-      FROM general_feedback
-      ${where}
-      ORDER BY created_at ASC
-      LIMIT ?`,
-    )
-    bindings.push(limit)
-    const result = await stmt.bind(...bindings).all<{
-      id: number
-      kind: string
-      message: string
-      contact: string
-      url: string
-      user_agent: string
-      app_version: string
-      platform: string
-      dataset_id: string | null
-      screenshot: string
-      created_at: string
-    }>()
-
-    const encoder = new TextEncoder()
-    const rows = result.results
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        const header = [
-          'id',
-          'kind',
-          'created_at',
-          'platform',
-          'dataset_id',
-          'url',
-          'contact',
-          'app_version',
-          'user_agent',
-          'has_screenshot',
-          'screenshot_bytes',
-          'message',
-        ].join(',') + '\r\n'
-        controller.enqueue(encoder.encode(header))
-
-        for (const row of rows) {
-          const hasScreenshot = !!row.screenshot
-          const screenshotBytes = hasScreenshot ? estimateDataUrlBytes(row.screenshot) : 0
-          const line = [
-            csvEscape(row.id),
-            csvEscape(row.kind),
-            csvEscape(row.created_at),
-            csvEscape(row.platform),
-            csvEscape(row.dataset_id ?? ''),
-            csvEscape(row.url),
-            csvEscape(row.contact),
-            csvEscape(row.app_version),
-            csvEscape(row.user_agent),
-            csvEscape(hasScreenshot ? 'true' : 'false'),
-            csvEscape(screenshotBytes),
-            csvEscape(row.message),
-          ].join(',') + '\r\n'
-          controller.enqueue(encoder.encode(line))
-        }
-        controller.close()
-      },
-    })
-
+    const stream = await streamGeneralExport(db, { since, kind, limit })
     return new Response(stream, {
       headers: {
         'Content-Type': 'text/csv; charset=utf-8',

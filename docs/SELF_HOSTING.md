@@ -214,19 +214,25 @@ application → Self-hosted**.
 
 ### 5b. Admin endpoints — Allow-only policy
 
-Single application protecting all admin paths:
+Single application protecting the admin dashboard:
 - **Application name**: `Terraviz Admin`
-- **Destinations**: add each admin path to the `terraviz.pages.dev`
-  domain AND your custom domain:
-  - `api/feedback-admin`
-  - `api/feedback-dashboard`
-  - `api/feedback-export`
-  - `api/general-feedback-dashboard`
-  - `api/general-feedback-export`
-  - `api/general-feedback-screenshot`
+- **Destinations**: add `api/feedback-admin` to the
+  `terraviz.pages.dev` domain AND your custom domain.
+  The dashboard at this path also dispatches all dashboard /
+  export / screenshot data through `?action=…` query parameters,
+  so a single destination is enough to gate every admin
+  operation.
 - **Policies**: one policy, **Action: Allow**, **Include →
   Emails ending in → `your-org.org`** (or whatever pattern matches
   your team)
+
+> The legacy stand-alone routes (`api/feedback-dashboard`,
+> `api/feedback-export`, and the three `api/general-feedback-*`
+> paths) still exist for direct scripting / break-glass under the
+> `FEEDBACK_ADMIN_TOKEN` bearer fallback. If you also want them
+> behind Access (so anyone hitting them in a browser is forced
+> through SSO too), add them as destinations on the same app.
+> Otherwise leave them off — the dashboard UI never touches them.
 
 > ⚠️ **Use "Emails ending in", not "Emails".** The "Emails"
 > selector requires exact-match against a single address. "Emails

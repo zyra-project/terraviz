@@ -8,13 +8,19 @@
  *
  * Auth: Cloudflare Access at the edge (preferred); legacy
  * `FEEDBACK_ADMIN_TOKEN` bearer-token path kept as a fallback
- * for `wrangler dev` and break-glass. See
- * `general-feedback-dashboard.ts` for the full notes.
+ * for `wrangler dev` and break-glass.
+ *
+ * The web admin UI no longer calls this path directly — the
+ * dashboard at `/api/feedback-admin` proxies the same payload
+ * via `?action=screenshot&id=N` so a single Access destination
+ * covers every admin operation. This route remains for direct
+ * scripting and break-glass.
  *
  * GET /api/general-feedback-screenshot?id=123
  */
 
 import { isInternalRequest } from './ingest'
+import { fetchScreenshot } from './_feedback-helpers'
 
 interface Env {
   FEEDBACK_DB?: D1Database
@@ -57,21 +63,14 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   }
 
   try {
-    const row = await db.prepare(
-      'SELECT screenshot FROM general_feedback WHERE id = ?',
-    ).bind(id).first<{ screenshot: string }>()
-
-    if (!row) {
+    const result = await fetchScreenshot(db, id)
+    if (!result) {
       return new Response(JSON.stringify({ error: 'Not found' }), {
         status: 404,
         headers: { 'Content-Type': 'application/json' },
       })
     }
-
-    return new Response(JSON.stringify({
-      id,
-      screenshot: row.screenshot || '',
-    }), {
+    return new Response(JSON.stringify(result), {
       headers: { 'Content-Type': 'application/json' },
     })
   } catch (err) {
