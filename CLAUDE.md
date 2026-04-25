@@ -10,6 +10,11 @@
 
 TypeScript SPA built with Vite and MapLibre GL JS. Deployed on Cloudflare Pages (web) and packaged as a native desktop app with Tauri v2 (Windows, macOS, Linux). No runtime framework — vanilla TS with a few focused libraries (MapLibre GL JS, HLS.js).
 
+> Forking to deploy your own instance? See
+> [`docs/SELF_HOSTING.md`](docs/SELF_HOSTING.md) for the
+> end-to-end Cloudflare setup walkthrough (Pages, D1, AE, KV,
+> Access, optional Grafana).
+
 ### Key commands
 
 ```bash
@@ -263,7 +268,9 @@ Research-only.
 
 ### Adding a new event
 
-The end-to-end checklist lives in `docs/ANALYTICS.md`. Headlines:
+The full walkthrough + reviewer checklist lives in
+[`docs/ANALYTICS_CONTRIBUTING.md`](docs/ANALYTICS_CONTRIBUTING.md).
+Headlines:
 
 1. Add an interface to `src/types/index.ts`, append to
    `TelemetryEvent` union, decide tier (`TIER_B_EVENT_TYPES`).
@@ -274,6 +281,18 @@ The end-to-end checklist lives in `docs/ANALYTICS.md`. Headlines:
 5. Add a row to the catalog in `ANALYTICS.md`, a positional layout
    in `ANALYTICS_QUERIES.md`, a panel in `grafana/dashboards/`, and
    a test (`*.test.ts` next to the call site).
+
+### Reviewing analytics changes
+
+When reviewing a PR (your own or someone else's) that touches
+`src/analytics/**`, `functions/api/ingest.ts`, the `TelemetryEvent`
+union in `src/types/index.ts`, or any `emit({ event_type: ... })`
+call site, run through the **Reviewer checklist** section of
+[`docs/ANALYTICS_CONTRIBUTING.md`](docs/ANALYTICS_CONTRIBUTING.md)
+explicitly. The checklist covers schema, tier choice, the eight
+privacy invariants, throttling, tests, and documentation. Flag
+any item you can't positively confirm; block on missing tier-gate
+or missing hashing/sanitization of free-text fields.
 
 ### Privacy invariants
 

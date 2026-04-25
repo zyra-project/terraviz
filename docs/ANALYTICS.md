@@ -11,6 +11,12 @@ production data, or audit the privacy posture.
 > - [`ANALYTICS_QUERIES.md`](ANALYTICS_QUERIES.md) — the full schema
 >   reference (per-event blob/double positions) plus a library of
 >   sample SQL for Grafana panels.
+> - [`ANALYTICS_CONTRIBUTING.md`](ANALYTICS_CONTRIBUTING.md) — the
+>   "I want to add a new event" walkthrough plus the privacy review
+>   checklist. **Required reading before opening a PR that touches
+>   `src/analytics/**` or any `emit({ event_type: ... })` call site.**
+> - [`SELF_HOSTING.md`](SELF_HOSTING.md) — for forks deploying their
+>   own Terraviz instance on Cloudflare Pages.
 > - [`ANALYTICS_IMPLEMENTATION_PLAN.md`](ANALYTICS_IMPLEMENTATION_PLAN.md)
 >   — the design history (14-commit rollout). Useful as historical
 >   context; not authoritative for the current schema — that role

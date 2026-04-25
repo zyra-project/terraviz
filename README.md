@@ -315,6 +315,10 @@ See **[ROADMAP.md](ROADMAP.md)** for the web app roadmap and **[docs/DESKTOP_APP
 ## 📚 Key Files to Review
 
 - **[ROADMAP.md](ROADMAP.md)** - Prioritized web app roadmap
+- **[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md)** - Deploy your own Terraviz instance on Cloudflare Pages (Pages, D1, AE, KV, Access, Grafana)
+- **[docs/ANALYTICS.md](docs/ANALYTICS.md)** - Analytics pipeline reference (schema, privacy posture, how to add events)
+- **[docs/ANALYTICS_CONTRIBUTING.md](docs/ANALYTICS_CONTRIBUTING.md)** - Contributor + reviewer guide for analytics changes (privacy invariants, review checklist)
+- **[docs/PRIVACY.md](docs/PRIVACY.md)** - User-facing privacy policy
 - **[docs/DESKTOP_APP_PLAN.md](docs/DESKTOP_APP_PLAN.md)** - Desktop app architecture and phases
 - **[STYLE_GUIDE.md](STYLE_GUIDE.md)** - UI design language (colors, surfaces, components)
 - **[CLAUDE.md](CLAUDE.md)** - Codebase instructions for AI-assisted development
