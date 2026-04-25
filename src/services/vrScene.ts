@@ -389,12 +389,11 @@ export function createVrScene(
    * unanchored VR. Centering is follow-up polish.
    */
   const syncSecondaryPositionsScratch = new THREE_.Vector3()
-  // Scratch vectors for the avatar's per-frame face-the-user lookAt.
+  // Scratch vector for the avatar's per-frame face-the-user lookAt.
   // Allocated once and reused — the WebXR render loop is hot, and a
-  // pair of Vector3 allocations per frame is the kind of GC-thrash
-  // worth avoiding in a render loop targeting Quest's mobile GPU.
+  // Vector3 allocation per frame is the kind of GC-thrash worth
+  // avoiding in a render loop targeting Quest's mobile GPU.
   const _avatarLookCamera = new THREE_.Vector3()
-  const _avatarLookMirror = new THREE_.Vector3()
   function syncSecondaryPositions(): void {
     if (secondaries.length === 0) return
     const total = 1 + secondaries.length
@@ -610,18 +609,21 @@ export function createVrScene(
         globe.position.z + sinPhase * orbitRadius * tiltCos,
       )
       // Face the user, not the globe. The avatar's "front" (where the
-      // eyes face) is the +Z axis of its head subtree — the standalone
-      // /orbit page parks the camera at +Z so the face reads
-      // correctly. lookAt() instead points the object's -Z at the
-      // target, so to put +Z toward the camera we mirror the camera's
-      // world position through the avatar and lookAt the mirror point.
-      // Keeping the face turned toward the user during idle keeps
-      // Orbit legible from any orbit phase; turning toward the globe
-      // is reserved for PRESENTING (later commit) where the
-      // gaze-at-target is intentional.
+      // eyes face) is its local +Z axis — the standalone /orbit page
+      // parks the camera at +Z so the face reads correctly. For
+      // Object3D (non-camera, non-light), Three.js's lookAt aims the
+      // object's +Z at the target (the source flips the eye/target
+      // arguments to Matrix4.lookAt — see three/src/core/Object3D.js).
+      // So a direct lookAt(camera world position) is correct: an
+      // earlier "mirror through the avatar" attempt assumed the
+      // camera convention (-Z faces target) and ended up rotating
+      // Orbit 180° away from the user. Keeping the face turned
+      // toward the user during idle keeps Orbit legible from any
+      // orbit phase; turning toward the globe is reserved for
+      // PRESENTING (later commit), where the gaze-at-target is
+      // intentional and accompanied by a beckon / point gesture.
       camera.getWorldPosition(_avatarLookCamera)
-      _avatarLookMirror.copy(avatar.group.position).multiplyScalar(2).sub(_avatarLookCamera)
-      avatar.group.lookAt(_avatarLookMirror)
+      avatar.group.lookAt(_avatarLookCamera)
 
       // Camera layer enable — idempotent (single bitwise OR per
       // frame). Done in update() so the host doesn't have to
