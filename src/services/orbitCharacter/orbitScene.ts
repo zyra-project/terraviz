@@ -609,8 +609,9 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
   body.receiveShadow = true
   head.add(body)
 
+  const skipStencilClip = options.disableStencilClip === true
   const eyeBundle = createEyeFieldMaterial(palette)
-  const pupilMaterials = createPupilMaterials(palette)
+  const pupilMaterials = createPupilMaterials(palette, skipStencilClip)
   // Bezel material + lid geometry are shared across both eyes — one
   // allocation, two instances. Held on the handles so dispose walks
   // them once via the scene traversal.
@@ -627,8 +628,8 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
   // the body, plus stencil flags keyed to that eye's stencilRef. Held
   // on the handles so palette propagation updates both along with the
   // body + subs.
-  const lidBundleLeft = createLidMaterial(palette, LEFT_EYE_STENCIL_REF)
-  const lidBundleRight = createLidMaterial(palette, RIGHT_EYE_STENCIL_REF)
+  const lidBundleLeft = createLidMaterial(palette, LEFT_EYE_STENCIL_REF, skipStencilClip)
+  const lidBundleRight = createLidMaterial(palette, RIGHT_EYE_STENCIL_REF, skipStencilClip)
 
   // Sparkle-cluster star geometries — one 5-point for the cluster
   // center, one 4-point for each flanking sparkle. Built per-scene
@@ -648,12 +649,12 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
   const eyeLeft = buildPairedEye(
     head, eyeBundle, pupilMaterials, lidBundleLeft.material, bezelMaterial, lidGeometry,
     glassDomeBundle.material, fivePointStarGeometry, fourPointStarGeometry,
-    -EYE_PAIR_OFFSET_X, EYE_PAIR_OFFSET_Y, LEFT_EYE_STENCIL_REF,
+    -EYE_PAIR_OFFSET_X, EYE_PAIR_OFFSET_Y, LEFT_EYE_STENCIL_REF, skipStencilClip,
   )
   const eyeRight = buildPairedEye(
     head, eyeBundle, pupilMaterials, lidBundleRight.material, bezelMaterial, lidGeometry,
     glassDomeBundle.material, fivePointStarGeometry, fourPointStarGeometry,
-    +EYE_PAIR_OFFSET_X, EYE_PAIR_OFFSET_Y, RIGHT_EYE_STENCIL_REF,
+    +EYE_PAIR_OFFSET_X, EYE_PAIR_OFFSET_Y, RIGHT_EYE_STENCIL_REF, skipStencilClip,
   )
 
   const eyeRigs: EyeRig[] = [eyeLeft, eyeRight]
@@ -739,64 +740,17 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
   targetMarker.layers.set(ORBIT_LAYER)
   targetHalo.layers.set(ORBIT_LAYER)
 
-  if (options.disableStencilClip) {
-    // Walk the container looking for any material with stencilWrite
-    // enabled and turn it off. Hits the socket mask (now a dead
-    // pass — `colorWrite: false` keeps it invisible), the lid
-    // materials, and the five pupil-group materials. Materials that
-    // never opt into stencil (eye field, body, bezel, glass dome,
-    // sub-spheres, trails, backlight, target marker / halo) are
-    // skipped because the predicate doesn't match.
-    //
-    // Belt + suspenders: also force `stencilFunc = AlwaysStencilFunc`
-    // on every material we touch, in case Three.js's WebXR render
-    // path leaves a stale stencil-test state from an adjacent draw
-    // call. With Always + write-off the test cannot discard a
-    // fragment regardless of buffer contents.
-    let disabledCount = 0
-    const disabledNames: string[] = []
-    scene.traverse((obj) => {
-      const disposable = obj as THREE.Object3D & {
-        material?: THREE.Material | THREE.Material[]
-        name?: string
-      }
-      const m = disposable.material
-      const disable = (mat: THREE.Material): void => {
-        if (!mat.stencilWrite) return
-        mat.stencilWrite = false
-        mat.stencilFunc = THREE.AlwaysStencilFunc
-        mat.needsUpdate = true
-        disabledCount++
-        disabledNames.push(`${obj.type}${disposable.name ? `:${disposable.name}` : ''} (${mat.type})`)
-      }
-      if (Array.isArray(m)) {
-        for (const mat of m) disable(mat)
-      } else if (m) {
-        disable(m)
-      }
-    })
-    // Diagnostic — look for this in Meta Browser DevTools when verifying
-    // the embedded-mode workaround is taking effect on a tester's Quest.
-    // Should report ≥ 9 disabled materials (2 socket masks + 2 lids +
-    // 5 pupil-group + 2 catchlights = 11 total, with shared materials
-    // counted once across their visits).
-    // eslint-disable-next-line no-console
-    console.info('[OrbitAvatar] disableStencilClip pass', {
-      disabledCount,
-      sample: disabledNames.slice(0, 6),
-    })
-
-    // The lid spherical cap is sized to be CLIPPED by the stencil
-    // mask — its parked-open rotation tucks "well back" but still
-    // sweeps the dome through the socket plane, so without the
-    // stencil clip the lid's full geometry covers the pupil stack.
-    // Replace the stencil clip with a fragment-shader discard against
-    // the socket silhouette: each lid fragment gets transformed into
-    // its eye group's local XY plane and discarded when it falls
-    // outside `EYE_PAIR_DISC_RADIUS`. Per-mesh `onBeforeRender`
-    // refreshes the lid → eye-group transform each frame so the
-    // clip tracks blink rotations correctly. Blinks survive on
-    // hosts where the stencil buffer doesn't (Quest WebXR).
+  if (skipStencilClip) {
+    // Stencil-free materials don't clip the lid spherical cap — its
+    // parked-open rotation sweeps the dome through the socket plane
+    // and the oversized geometry would cover the pupil stack
+    // otherwise. Replace the stencil clip with a fragment-shader
+    // discard against the socket silhouette: each lid fragment gets
+    // transformed into its eye group's local XY plane and discarded
+    // when it falls outside `EYE_PAIR_DISC_RADIUS`. Per-mesh
+    // `onBeforeRender` refreshes the lid → eye-group transform each
+    // frame so the clip tracks blink rotations correctly. Blinks
+    // survive on hosts where the stencil buffer doesn't (Quest WebXR).
     for (const rig of eyeRigs) {
       attachLidSocketClip(rig.upperLid, rig.upperLidPivot, EYE_PAIR_DISC_RADIUS)
       attachLidSocketClip(rig.lowerLid, rig.lowerLidPivot, EYE_PAIR_DISC_RADIUS)
@@ -975,6 +929,10 @@ function buildPairedEye(
   offsetX: number,
   offsetY: number,
   stencilRef: number,
+  /** Skip stencil writes on the socket mask + stencil clip on the per-eye
+   *  catchlight. Mirrors the pupil-group skip flag — see
+   *  `createPupilMaterials`. */
+  skipStencilClip = false,
 ): EyeRig {
   const group = new THREE.Group()
   group.position.set(offsetX, offsetY, 0)
@@ -988,7 +946,7 @@ function buildPairedEye(
   // this pass to run ahead of the lid passes within the same frame.
   const socketMask = new THREE.Mesh(
     new THREE.CircleGeometry(EYE_PAIR_DISC_RADIUS, 48),
-    createSocketMaskMaterial(stencilRef),
+    createSocketMaskMaterial(stencilRef, skipStencilClip),
   )
   socketMask.position.z = SOCKET_Z_DISC
   socketMask.renderOrder = -2
@@ -1093,7 +1051,7 @@ function buildPairedEye(
   // both eyes — consistent with a single off-screen light source.
   const catchPrimary = new THREE.Mesh(
     new THREE.CircleGeometry(CATCHLIGHT_PRIMARY_RADIUS, CATCHLIGHT_PRIMARY_SEGMENTS),
-    createCatchlightMaterial(CATCHLIGHT_PRIMARY_OPACITY),
+    createCatchlightMaterial(CATCHLIGHT_PRIMARY_OPACITY, skipStencilClip),
   )
   catchPrimary.position.set(
     CATCHLIGHT_PRIMARY_OFFSET_X,

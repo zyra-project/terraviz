@@ -372,7 +372,19 @@ function applyPupilStencilClip(mat: THREE.Material): void {
   mat.stencilZPass = THREE.KeepStencilOp
 }
 
-export function createPupilMaterials(palette: PaletteKey = 'cyan'): PupilMaterials {
+export function createPupilMaterials(
+  palette: PaletteKey = 'cyan',
+  /**
+   * When true, skip {@link applyPupilStencilClip} on every pupil-group
+   * material so they render without depending on the stencil buffer.
+   * Used by `OrbitAvatarNode` in embedded mode for hosts where the
+   * stencil attachment isn't reliable (Quest's WebXR baseLayer in
+   * testing). Pupil-group meshes sit tightly within the socket and
+   * never extend outside, so the clip is purely defensive — dropping
+   * it has no visible effect on the open-eye render.
+   */
+  skipStencilClip = false,
+): PupilMaterials {
   const accent = new THREE.Color(PALETTES[palette].accent)
   const pupilFieldUniforms = {
     uColor: { value: new THREE.Color(PUPIL_FIELD_COLOR) },
@@ -424,11 +436,13 @@ export function createPupilMaterials(palette: PaletteKey = 'cyan'): PupilMateria
   // stencil mask — otherwise gaze excursion lets the iris / pupil
   // field escape past the bezel rim when Orbit looks toward an eye's
   // outer corner.
-  applyPupilStencilClip(irisMat)
-  applyPupilStencilClip(irisGlowMat)
-  applyPupilStencilClip(pupilFieldMat)
-  applyPupilStencilClip(pupilDotMat)
-  applyPupilStencilClip(starMat)
+  if (!skipStencilClip) {
+    applyPupilStencilClip(irisMat)
+    applyPupilStencilClip(irisGlowMat)
+    applyPupilStencilClip(pupilFieldMat)
+    applyPupilStencilClip(pupilDotMat)
+    applyPupilStencilClip(starMat)
+  }
   return {
     irisMat, irisGlowMat,
     pupilFieldMat, pupilFieldUniforms,
@@ -475,7 +489,17 @@ export function createBezelMaterial(): THREE.MeshStandardMaterial {
  * covers. Does not write color or depth — the mask is purely a
  * stencil-setup pass.
  */
-export function createSocketMaskMaterial(stencilRef: number): THREE.MeshBasicMaterial {
+export function createSocketMaskMaterial(
+  stencilRef: number,
+  /**
+   * When true, the socket mask is built without stencil writes — the
+   * mesh becomes a true no-op (still invisible via `colorWrite: false`,
+   * still depth-test-disabled). Used in embedded mode where nothing
+   * downstream tests the stencil buffer anyway, so writing to it would
+   * be wasted work.
+   */
+  skipStencilWrite = false,
+): THREE.MeshBasicMaterial {
   const mat = new THREE.MeshBasicMaterial({
     // Don't touch color or depth — the mask is purely a stencil
     // setup pass, invisible to the final image.
@@ -490,12 +514,14 @@ export function createSocketMaskMaterial(stencilRef: number): THREE.MeshBasicMat
     // would leak through.
     depthTest: false,
   })
-  mat.stencilWrite = true
-  mat.stencilRef = stencilRef
-  mat.stencilFunc = THREE.AlwaysStencilFunc
-  mat.stencilZPass = THREE.ReplaceStencilOp
-  mat.stencilFail = THREE.KeepStencilOp
-  mat.stencilZFail = THREE.KeepStencilOp
+  if (!skipStencilWrite) {
+    mat.stencilWrite = true
+    mat.stencilRef = stencilRef
+    mat.stencilFunc = THREE.AlwaysStencilFunc
+    mat.stencilZPass = THREE.ReplaceStencilOp
+    mat.stencilFail = THREE.KeepStencilOp
+    mat.stencilZFail = THREE.KeepStencilOp
+  }
   return mat
 }
 
@@ -526,15 +552,28 @@ export function createSocketMaskMaterial(stencilRef: number): THREE.MeshBasicMat
  * Each eye gets its own lid material instance with its own
  * `stencilRef` so left/right sockets don't cross-contaminate.
  */
-export function createLidMaterial(palette: PaletteKey, stencilRef: number): BodyMaterialBundle {
+export function createLidMaterial(
+  palette: PaletteKey,
+  stencilRef: number,
+  /**
+   * When true, the lid material is built without stencil settings.
+   * The host (`OrbitAvatarNode` in embedded mode) is expected to pair
+   * this with a shader-based socket clip via `attachLidSocketClip` so
+   * the spherical-cap geometry still gets clipped to the socket
+   * silhouette without relying on a stencil buffer.
+   */
+  skipStencilClip = false,
+): BodyMaterialBundle {
   const bundle = createBodyMaterial(palette)
-  const mat = bundle.material
-  mat.stencilWrite = true
-  mat.stencilRef = stencilRef
-  mat.stencilFunc = THREE.EqualStencilFunc
-  mat.stencilFail = THREE.KeepStencilOp
-  mat.stencilZFail = THREE.KeepStencilOp
-  mat.stencilZPass = THREE.KeepStencilOp
+  if (!skipStencilClip) {
+    const mat = bundle.material
+    mat.stencilWrite = true
+    mat.stencilRef = stencilRef
+    mat.stencilFunc = THREE.EqualStencilFunc
+    mat.stencilFail = THREE.KeepStencilOp
+    mat.stencilZFail = THREE.KeepStencilOp
+    mat.stencilZPass = THREE.KeepStencilOp
+  }
   return bundle
 }
 
@@ -646,7 +685,11 @@ export function createFourPointStarGeometry(radius: number): THREE.BufferGeometr
  * opacity can be animated independently while all instances share
  * the compiled shader.
  */
-export function createCatchlightMaterial(opacity: number): THREE.ShaderMaterial {
+export function createCatchlightMaterial(
+  opacity: number,
+  /** Skip the pupil-group stencil clip — see `createPupilMaterials`. */
+  skipStencilClip = false,
+): THREE.ShaderMaterial {
   const mat = new THREE.ShaderMaterial({
     uniforms: {
       uOpacity: { value: opacity },
@@ -693,7 +736,7 @@ export function createCatchlightMaterial(opacity: number): THREE.ShaderMaterial 
   // Catchlights ride the pupilGroup so they track gaze. Stencil
   // clip keeps them inside the socket silhouette at extreme gaze
   // angles, matching the rest of the pupil-group meshes.
-  applyPupilStencilClip(mat)
+  if (!skipStencilClip) applyPupilStencilClip(mat)
   return mat
 }
 
