@@ -360,8 +360,21 @@ export interface EyeRig {
 }
 
 export interface OrbitSceneHandles {
-  scene: THREE.Scene
-  camera: THREE.PerspectiveCamera
+  /**
+   * Container for all character objects — a {@link THREE.Scene} in
+   * standalone mode (the `/orbit` page) or a {@link THREE.Group} in
+   * embedded mode (mounted into a host scene by VR / 2D companion via
+   * {@link OrbitAvatarNode}). Scene-only methods (background, fog,
+   * environment) are touched by `buildScene` standalone branch only;
+   * everything else (`add` / `remove` / `traverse`) works on both.
+   */
+  scene: THREE.Object3D
+  /**
+   * Internal camera, present only in standalone mode. Embedded mode
+   * relies on the host's camera passed via {@link UpdateInput.camera}
+   * each frame.
+   */
+  camera: THREE.PerspectiveCamera | null
   head: THREE.Group
   body: THREE.Mesh
   bodyBundle: BodyMaterialBundle
@@ -422,8 +435,12 @@ export interface OrbitSceneHandles {
    * Photoreal Earth stack — diffuse + night lights + atmosphere +
    * clouds + sun, shared with the VR view. Rebuilt on scale-preset
    * change (new radius + position) via {@link applyPreset}.
+   *
+   * Present in standalone mode; `null` in embedded mode (the host
+   * supplies its own globe and feeds the avatar a sun direction via
+   * {@link UpdateInput.sunDir}).
    */
-  earth: PhotorealEarthHandle
+  earth: PhotorealEarthHandle | null
   targetMarker: THREE.Mesh
   targetHalo: THREE.Mesh
   targetMat: THREE.MeshBasicMaterial
@@ -431,10 +448,28 @@ export interface OrbitSceneHandles {
   appliedPreset: ScaleKey
 }
 
+/**
+ * Construction modes for {@link buildScene}.
+ *
+ * - `'standalone'` (default) — used by the `/orbit` page. Builds a
+ *   self-contained {@link THREE.Scene} with sky background, internal
+ *   {@link THREE.PerspectiveCamera} framed per scale preset, and the
+ *   photoreal Earth stack as a sibling of the character.
+ *
+ * - `'embedded'` — used by {@link OrbitAvatarNode} when mounting the
+ *   character into a host scene (VR, future 2D companion). The handle's
+ *   `scene` field becomes a {@link THREE.Group} (no background, no
+ *   camera, no Earth) that the host parents into its own scene graph.
+ *   The host supplies its own camera and sun direction per frame via
+ *   {@link UpdateInput.camera} + {@link UpdateInput.sunDir}.
+ */
+export type BuildSceneMode = 'standalone' | 'embedded'
+
 export interface BuildSceneOptions {
   palette?: PaletteKey
   pixelRatio?: number
   scalePreset?: ScaleKey
+  mode?: BuildSceneMode
 }
 
 export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
@@ -442,15 +477,28 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
   const pixelRatio = options.pixelRatio ?? (typeof window !== 'undefined' ? window.devicePixelRatio : 1)
   const initialPreset = options.scalePreset ?? 'close'
   const initial = SCALE_PRESETS[initialPreset]
-  const scene = new THREE.Scene()
-  scene.background = new THREE.Color(0x060810)
+  const mode: BuildSceneMode = options.mode ?? 'standalone'
+  // Container is a Scene in standalone mode (so we can set background +
+  // attach Earth as a sibling) and a Group in embedded mode (so the
+  // host can parent the avatar into its own Scene without dragging in
+  // a duplicate background or fog). Both are Object3D, so .add /
+  // .remove / .traverse work identically below.
+  const scene: THREE.Object3D = mode === 'standalone' ? new THREE.Scene() : new THREE.Group()
+  if (mode === 'standalone') {
+    (scene as THREE.Scene).background = new THREE.Color(0x060810)
+  }
 
   // Camera framed per preset — close keeps the intimate tabletop feel;
   // far presets pull back so both Orbit and Earth fit on a 2D screen.
-  // In VR these camera moves drop (Quest handles framing natively).
-  const camera = new THREE.PerspectiveCamera(initial.fov, 1, 0.05, 40)
-  camera.position.fromArray(initial.cameraPos)
-  camera.lookAt(new THREE.Vector3().fromArray(initial.cameraTarget))
+  // Embedded mode skips this — the host (VR / 2D companion) supplies
+  // its own camera per frame via `UpdateInput.camera`.
+  const camera: THREE.PerspectiveCamera | null = mode === 'standalone'
+    ? new THREE.PerspectiveCamera(initial.fov, 1, 0.05, 40)
+    : null
+  if (camera) {
+    camera.position.fromArray(initial.cameraPos)
+    camera.lookAt(new THREE.Vector3().fromArray(initial.cameraTarget))
+  }
 
   // Vinyl redesign: the body + sub-spheres use MeshStandardMaterial
   // which needs scene lighting. Two lights:
@@ -615,8 +663,14 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
   // from the preset; ground shadow omitted (multiple presets at
   // different positions, a single shadow plane doesn't help).
   // Rebuilt on preset change (see applyPreset).
-  const earth = buildEarth(initial)
-  earth.addTo(scene)
+  //
+  // Embedded mode skips Earth entirely — the host already has a globe
+  // (VR's primary photoreal globe; the 2D companion's host-rendered
+  // map). The host feeds the avatar a sun direction per frame via
+  // `UpdateInput.sunDir` so body / sub-shadow shading still tracks
+  // the real subsolar point.
+  const earth: PhotorealEarthHandle | null = mode === 'standalone' ? buildEarth(initial) : null
+  earth?.addTo(scene)
 
   // Target marker + halo (visible during POINTING / PRESENTING).
   const targetMat = new THREE.MeshBasicMaterial({
@@ -640,7 +694,13 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
   // subjects. Cross-layer light-to-mesh interaction is then
   // impossible: Earth isn't double-lit by Orbit's warm key, and
   // Orbit isn't cross-tinted by Earth's pure-white sun.
-  camera.layers.enable(ORBIT_LAYER)
+  // Embedded mode: the host's camera doesn't have ORBIT_LAYER enabled
+  // yet — the host (e.g. vrSession.ts) opts in by calling
+  // `camera.layers.enable(ORBIT_LAYER)` once after mounting the avatar.
+  // Lights and meshes still go on ORBIT_LAYER below so cross-layer
+  // light pollution between the avatar and the host's Earth is
+  // impossible regardless of who sets up the camera.
+  camera?.layers.enable(ORBIT_LAYER)
   ambientLight.layers.set(ORBIT_LAYER)
   keyLight.layers.set(ORBIT_LAYER)
   // `head` is also the keyLight target, and carries all the face
@@ -969,14 +1029,24 @@ function buildEarth(preset: ScalePreset): PhotorealEarthHandle {
  */
 export function applyPreset(handles: OrbitSceneHandles, preset: ScaleKey): void {
   const pp = SCALE_PRESETS[preset]
-  handles.earth.removeFrom(handles.scene)
-  handles.earth.dispose()
-  handles.earth = buildEarth(pp)
-  handles.earth.addTo(handles.scene)
-  handles.camera.position.fromArray(pp.cameraPos)
-  handles.camera.lookAt(new THREE.Vector3().fromArray(pp.cameraTarget))
-  handles.camera.fov = computeEffectiveFov(pp.fov, handles.camera.aspect)
-  handles.camera.updateProjectionMatrix()
+  // Embedded mode never owns an Earth or camera — the host frames the
+  // shot and renders its own globe — so the preset swap reduces to
+  // "remember the new key." Flight math (`flyToEarth` / `flyHome`) and
+  // feature targeting (`featureOf` / `parkingOf`) still consult the
+  // preset in `updateCharacter`, so the value matters even when there's
+  // no internal Earth to rebuild.
+  if (handles.earth) {
+    handles.earth.removeFrom(handles.scene)
+    handles.earth.dispose()
+    handles.earth = buildEarth(pp)
+    handles.earth.addTo(handles.scene)
+  }
+  if (handles.camera) {
+    handles.camera.position.fromArray(pp.cameraPos)
+    handles.camera.lookAt(new THREE.Vector3().fromArray(pp.cameraTarget))
+    handles.camera.fov = computeEffectiveFov(pp.fov, handles.camera.aspect)
+    handles.camera.updateProjectionMatrix()
+  }
   handles.appliedPreset = preset
 }
 
@@ -1155,7 +1225,34 @@ export interface UpdateInput {
    * `OrbitController` tracking `pointermove` timestamps.
    */
   cursorActivityTime: number
+  /**
+   * Camera used for proximity NDC projection (gaze + recoil response).
+   * Standalone callers omit this and `updateCharacter` falls back to
+   * `handles.camera`. Embedded callers (VR, 2D companion) MUST pass
+   * the host's camera each frame — `handles.camera` is null in
+   * embedded mode.
+   */
+  camera?: THREE.Camera
+  /**
+   * World-space unit vector pointing toward the sun. Drives the
+   * key-light position and the eye-dome streak direction. Standalone
+   * callers omit this and `updateCharacter` reads from
+   * `handles.earth.sunDir` (which is updated outside this call —
+   * see {@link OrbitController.animate}). Embedded callers MUST pass
+   * a sun direction; `handles.earth` is null in embedded mode.
+   */
+  sunDir?: THREE.Vector3
 }
+
+/**
+ * Fallback sun direction used when neither `input.sunDir` nor
+ * `handles.earth.sunDir` is available — points roughly toward the
+ * upper-right so body shading still reads, even before the host has
+ * computed a real subsolar direction. Should never actually be hit
+ * in production; the well-formed call paths always supply one or
+ * the other.
+ */
+const _defaultSunDir = new THREE.Vector3(0.36, 0.59, 0.72).normalize()
 
 /**
  * Sub-sphere orbit-speed ceiling under reduced motion. 0.5 matches
@@ -1250,21 +1347,36 @@ export function updateCharacter(
   // PROXIMITY_FAR. Everything here respects reducedMotion — the
   // tracking stays on (non-vestibular), but startle / recoil are
   // suppressed.
-  _tmpHeadNdc.copy(handles.head.position).project(handles.camera)
-  // NDC X and Y are not isotropic in pixel space when aspect != 1 —
-  // a horizontal 1.0-wide NDC span covers `aspect × viewportHeight`
-  // pixels while vertical covers `viewportHeight`. Multiply the
-  // horizontal delta by aspect before the Euclidean distance so
-  // PROXIMITY_* thresholds correspond to the same on-screen
-  // distance at any canvas shape.
-  const proximityAspect = handles.camera.aspect > 0 ? handles.camera.aspect : 1
-  const ndcDx = (_tmpHeadNdc.x - mouseX) * proximityAspect
-  const ndcDy = _tmpHeadNdc.y - mouseY
-  const ndcDist = Math.sqrt(ndcDx * ndcDx + ndcDy * ndcDy)
-  const rawProximity = sat(
-    1 - (ndcDist - PROXIMITY_BODY) / (PROXIMITY_FAR - PROXIMITY_BODY)
-  )
-  anim.userProximity = lerp(anim.userProximity, rawProximity, 0.10)
+  // Resolve the active camera once: input takes precedence (embedded
+  // mode passes the host's camera every frame); standalone falls back
+  // to `handles.camera`. If neither is present we skip the proximity /
+  // recoil block entirely — gaze + jitter still run further down, the
+  // character just won't react to the cursor's on-screen position.
+  const activeCamera = (input.camera ?? handles.camera) ?? null
+  if (activeCamera) {
+    _tmpHeadNdc.copy(handles.head.position).project(activeCamera)
+    // NDC X and Y are not isotropic in pixel space when aspect != 1 —
+    // a horizontal 1.0-wide NDC span covers `aspect × viewportHeight`
+    // pixels while vertical covers `viewportHeight`. Multiply the
+    // horizontal delta by aspect before the Euclidean distance so
+    // PROXIMITY_* thresholds correspond to the same on-screen
+    // distance at any canvas shape. PerspectiveCamera carries
+    // `aspect` as a known number; ArrayCamera (XR) does not, so
+    // narrow before reading and fall back to 1 otherwise.
+    const camAspect = (activeCamera as THREE.PerspectiveCamera).aspect
+    const proximityAspect = (typeof camAspect === 'number' && camAspect > 0) ? camAspect : 1
+    const ndcDx = (_tmpHeadNdc.x - mouseX) * proximityAspect
+    const ndcDy = _tmpHeadNdc.y - mouseY
+    const ndcDist = Math.sqrt(ndcDx * ndcDx + ndcDy * ndcDy)
+    const rawProximity = sat(
+      1 - (ndcDist - PROXIMITY_BODY) / (PROXIMITY_FAR - PROXIMITY_BODY)
+    )
+    anim.userProximity = lerp(anim.userProximity, rawProximity, 0.10)
+  }
+  // Gaze bias and recoil read `anim.userProximity` / `anim.gazeBias`
+  // — both eased state, so they keep working even when no camera was
+  // available this frame (proximity stays at its previous value, or
+  // 0 from the initial AnimationState; recoil naturally idles at 0).
 
   // Gaze bias — full strength for the first ACTIVITY_FULL seconds
   // after a cursor move, decaying to 0 over the next ACTIVITY_FADE.
@@ -1350,12 +1462,6 @@ export function updateCharacter(
   }
   handles.bodyBundle.uniforms.uTime.value = time
 
-  // Photoreal Earth drives its own sun direction + atmosphere/
-  // shadow follow each frame. It's cheap (no per-frame allocations
-  // after the initial setup) and the day/night terminator needs
-  // frame-accurate world-space sun direction to stay aligned.
-  handles.earth.update()
-
   // Sun-driven lighting for Orbit. The Earth's handle exposes its
   // live subsolar unit vector via `sunDir`; feed that into:
   //
@@ -1372,8 +1478,12 @@ export function updateCharacter(
   //
   // Both Orbit and Earth read the SAME sun direction, so the whole
   // scene is lit coherently: body shading, sub shadows, eye glints,
-  // Earth terminator — all aligned.
-  const sun = handles.earth.sunDir
+  // Earth terminator — all aligned. Resolution order: explicit input
+  // (embedded mode — host's globe drives the avatar) → handles.earth
+  // (standalone mode — internal photoreal Earth) → static fallback
+  // (defensive; the well-formed call paths always supply one or the
+  // other).
+  const sun = input.sunDir ?? handles.earth?.sunDir ?? _defaultSunDir
   // Place the key light at `head + sunDir * 0.5`. The 0.5 offset
   // keeps the light within the shadow camera's tight frustum
   // (near 0.10, far 1.20 from the light's own position), and

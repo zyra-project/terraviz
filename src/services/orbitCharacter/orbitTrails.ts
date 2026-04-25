@@ -166,7 +166,11 @@ export interface TrailHandle {
 }
 
 export function buildTrails(
-  scene: THREE.Scene,
+  // Widened from THREE.Scene to Object3D so the embedded `OrbitAvatarNode`
+  // can pass the avatar's container Group. The function only calls
+  // `scene.add(points)` below, which is an Object3D method, so the
+  // wider type is functionally equivalent for the standalone caller.
+  scene: THREE.Object3D,
   subSpheres: THREE.Mesh[],
   palette: PaletteKey,
   pixelRatio: number,

@@ -241,9 +241,15 @@ export interface PhotorealEarthHandle {
    * to the supplied scene. Cloud mesh attaches itself to `globe`
    * (which is in this list) once its async texture finishes loading.
    */
-  addTo(scene: THREE.Scene): void
+  // Parameter widened from `THREE.Scene` to `Object3D` so embedded
+  // callers — `OrbitAvatarNode`'s standalone-mode wrapper, the
+  // standalone `/orbit` page's Scene, and `vrScene.ts`'s host
+  // Scene — can all pass through one signature. The implementation
+  // only uses `Object3D.add` / `Object3D.remove`, so widening is
+  // a no-op for existing Scene callers.
+  addTo(scene: THREE.Object3D): void
   /** Remove every owned object from the scene. Pair with addTo. */
-  removeFrom(scene: THREE.Scene): void
+  removeFrom(scene: THREE.Object3D): void
   /**
    * Swap the globe surface texture. Pass `null` to revert to the
    * full photoreal Earth stack; `{ kind: 'video' }` to stream from

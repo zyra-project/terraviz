@@ -44,6 +44,12 @@ export { PALETTES } from './orbitTypes'
 export { STATES, ALL_STATES, BEHAVIOR_STATES, EMOTION_STATES, GESTURE_STATES } from './orbitStates'
 export { GESTURES, GESTURE_KEYS } from './orbitGestures'
 export { SCALE_PRESETS, PRESET_KEYS } from './orbitFlight'
+export { OrbitAvatarNode } from './orbitAvatarNode'
+export type {
+  OrbitAvatarNodeOptions,
+  OrbitAvatarUpdateContext,
+} from './orbitAvatarNode'
+export type { BuildSceneMode } from './orbitScene'
 
 export const PALETTE_KEYS: PaletteKey[] = ['cyan', 'green', 'amber', 'violet']
 
@@ -162,7 +168,19 @@ export class OrbitController {
     this.renderer.shadowMap.enabled = true
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
 
-    this.handles = buildScene({ palette: this.palette, pixelRatio, scalePreset: this.scalePreset })
+    // Standalone mode — internal Scene with sky background, internal
+    // PerspectiveCamera framed per scale preset, and the photoreal
+    // Earth as a sibling of the character. Embedded mode (used by
+    // OrbitAvatarNode for VR / 2D companion) skips all three; this
+    // controller relies on them being non-null and uses non-null
+    // assertions on `handles.scene` / `handles.camera` / `handles.earth`
+    // accordingly.
+    this.handles = buildScene({
+      palette: this.palette,
+      pixelRatio,
+      scalePreset: this.scalePreset,
+      mode: 'standalone',
+    })
     this.anim = createAnimationState(this.palette)
 
     // Subscribe to OS prefers-reduced-motion. Keeping the MQL on the
@@ -328,8 +346,8 @@ export class OrbitController {
     // then dispose — that way the traversal only touches Orbit's own
     // meshes (body, eye rigs, sub-spheres, trails, markers) and
     // doesn't double-free Earth geometry/materials.
-    this.handles.earth.removeFrom(this.handles.scene)
-    this.handles.earth.dispose()
+    this.handles.earth!.removeFrom(this.handles.scene)
+    this.handles.earth!.dispose()
     // Property-test instead of instanceof — trails render as
     // THREE.Points, not Mesh, so an `instanceof Mesh` check would
     // leave trail geometry + shader material on the GPU when the
@@ -371,7 +389,7 @@ export class OrbitController {
       // matching the "one swipe across the screen rotates a
       // hemisphere" feel the main scene's MapLibre globe has.
       const pxToRad = Math.PI / 300
-      const globe = this.handles.earth.globe
+      const globe = this.handles.earth!.globe
       this._dragYawQuat.setFromAxisAngle(this._dragYawAxis, dx * pxToRad)
       this._dragPitchQuat.setFromAxisAngle(this._dragPitchAxis, dy * pxToRad)
       // Pre-multiply in world space so axes stay world-aligned even
@@ -416,7 +434,7 @@ export class OrbitController {
     const rect = this.renderer.domElement.getBoundingClientRect()
     const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1
     const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1
-    const cam = this.handles.camera
+    const cam = this.handles.camera!
     // Project the head and a point offset from it by the current
     // scaled body radius along the camera's world-space right axis.
     // The NDC delta between those two projections IS the projected
@@ -488,14 +506,15 @@ export class OrbitController {
     if (clientWidth === 0 || clientHeight === 0) return
     this.renderer.setSize(clientWidth, clientHeight, false)
     const aspect = clientWidth / clientHeight
-    this.handles.camera.aspect = aspect
+    const cam = this.handles.camera!
+    cam.aspect = aspect
     // Adaptive vertical FOV: at landscape aspects the preset's fov
     // reads as designed; at narrower aspects we scale vertical FOV
     // up so horizontal coverage stays roughly what the preset sees
     // in landscape. Keeps Orbit + Earth in-frame on portrait phones.
     const preset = SCALE_PRESETS[this.scalePreset]
-    this.handles.camera.fov = computeEffectiveFov(preset.fov, aspect)
-    this.handles.camera.updateProjectionMatrix()
+    cam.fov = computeEffectiveFov(preset.fov, aspect)
+    cam.updateProjectionMatrix()
   }
 
   private animate = (): void => {
@@ -531,6 +550,15 @@ export class OrbitController {
         trail.stateChangeTime -= shift
       }
     }
+    // Photoreal Earth drives its own sun direction + atmosphere /
+    // shadow follow each frame. Hoisted out of `updateCharacter`
+    // (where it used to live) so the embedded `OrbitAvatarNode` —
+    // which has no internal Earth — can share the same
+    // `updateCharacter` body with the standalone path. Cheap (no
+    // per-frame allocations after construction) and the day / night
+    // terminator needs frame-accurate world-space sun direction to
+    // stay aligned with Orbit's body shading and sub-sphere shadows.
+    this.handles.earth?.update()
     updateCharacter(this.handles, this.anim, {
       state: this.state,
       palette: this.palette,
@@ -558,6 +586,6 @@ export class OrbitController {
         cursorIdle: (this.time - this.cursorLastMoveTime).toFixed(2),
       })
     }
-    this.renderer.render(this.handles.scene, this.handles.camera)
+    this.renderer.render(this.handles.scene, this.handles.camera!)
   }
 }
