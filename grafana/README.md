@@ -79,21 +79,26 @@ All three dashboards expect:
 |---|---|---|
 | `$environment` | `production` | Filters `blob2 = $environment`. Switch to `preview` to verify staging. |
 | `$internal` | `false` | Filters `blob4 = $internal` (set to `true` to see staff sessions). Tier B dashboard hard-codes `false` since Research mode is opt-in by external users only. |
-| `$timeRange` | dashboard-specific | Built-in Grafana time range, applied to `WHERE timestamp > fromUnixTimestamp64Milli($__from)`. |
+| `$timeRange` | dashboard-specific | Built-in Grafana time range, applied to `WHERE timestamp > toDateTime(intDiv($__from, 1000))`. |
 
 > ⚠️ **AE timestamp comparison gotcha.** Grafana's `$__from` macro
 > expands to a Unix epoch in milliseconds (e.g. `1776485031962`).
 > Cloudflare AE's `timestamp` column is a `DateTime` — comparing
 > `timestamp > <millisecond-int>` directly returns **422
-> Unprocessable Entity** because AE rejects the type mismatch
-> (it treats the int as seconds → year ~58000, no rows ever match,
-> but instead of returning 0 rows AE 422s). Always wrap the macro
-> in `fromUnixTimestamp64Milli()` so the comparison happens
-> between two `DateTime64`-typed values:
+> Unprocessable Entity** because AE rejects the type mismatch.
+>
+> Cloudflare AE supports a *subset* of ClickHouse's SQL functions —
+> `fromUnixTimestamp64Milli` is NOT in the subset (returns
+> `unknown function call`). The portable construction is:
 >
 > ```sql
-> WHERE timestamp > fromUnixTimestamp64Milli($__from)
+> WHERE timestamp > toDateTime(intDiv($__from, 1000))
 > ```
+>
+> `intDiv($__from, 1000)` converts ms → seconds (integer division),
+> then `toDateTime(seconds)` produces a `DateTime` value
+> comparable to `timestamp`. Both functions are documented in CF
+> AE's supported function list.
 >
 > Literal `NOW() - INTERVAL '7' DAY` style queries (used in
 > `ANALYTICS_QUERIES.md` examples) don't have this issue —
@@ -119,7 +124,7 @@ Every target uses Infinity's POST-JSON shape:
   "url": "/sql",
   "url_options": {
     "method": "POST",
-    "data": "<SQL goes here, can reference $environment / $internal / fromUnixTimestamp64Milli($__from)>",
+    "data": "<SQL goes here, can reference $environment / $internal / toDateTime(intDiv($__from, 1000))>",
     "headers": [{ "key": "Content-Type", "value": "text/plain" }]
   },
   "parser": "backend",

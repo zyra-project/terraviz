@@ -5,7 +5,7 @@
   "tags": ["terraviz", "analytics", "tier-a", "spatial"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 3,
+  "version": 4,
   "refresh": "5m",
   "time": {
     "from": "now-7d",
@@ -72,7 +72,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT round(double3, 1) AS lon_bin, round(double2, 1) AS lat_bin, count() AS settles FROM terraviz_events WHERE blob1 = 'camera_settled' AND blob6 IN ($projection) AND blob2 = '$environment' AND blob4 = '$internal' AND ('$layer_id' = '$__all' OR blob5 = '$layer_id') AND timestamp > fromUnixTimestamp64Milli($__from) GROUP BY lat_bin, lon_bin HAVING settles > 5 ORDER BY settles DESC LIMIT 5000",
+            "data": "SELECT round(double3, 1) AS lon_bin, round(double2, 1) AS lat_bin, count() AS settles FROM terraviz_events WHERE blob1 = 'camera_settled' AND blob6 IN ($projection) AND blob2 = '$environment' AND blob4 = '$internal' AND ('$layer_id' = '$__all' OR blob5 = '$layer_id') AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY lat_bin, lon_bin HAVING settles > 5 ORDER BY settles DESC LIMIT 5000",
             "headers": [{ "key": "Content-Type", "value": "text/plain" }]
           },
           "parser": "backend",
@@ -96,7 +96,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT count() AS settles FROM terraviz_events WHERE blob1 = 'camera_settled' AND blob6 IN ($projection) AND blob2 = '$environment' AND blob4 = '$internal' AND ('$layer_id' = '$__all' OR blob5 = '$layer_id') AND timestamp > fromUnixTimestamp64Milli($__from)",
+            "data": "SELECT count() AS settles FROM terraviz_events WHERE blob1 = 'camera_settled' AND blob6 IN ($projection) AND blob2 = '$environment' AND blob4 = '$internal' AND ('$layer_id' = '$__all' OR blob5 = '$layer_id') AND timestamp > toDateTime(intDiv($__from, 1000))",
             "headers": [{ "key": "Content-Type", "value": "text/plain" }]
           },
           "parser": "backend",
@@ -120,7 +120,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT count() AS clicks FROM terraviz_events WHERE blob1 = 'map_click' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > fromUnixTimestamp64Milli($__from)",
+            "data": "SELECT count() AS clicks FROM terraviz_events WHERE blob1 = 'map_click' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000))",
             "headers": [{ "key": "Content-Type", "value": "text/plain" }]
           },
           "parser": "backend",
@@ -145,7 +145,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT blob6 AS hit_kind, count() AS clicks FROM terraviz_events WHERE blob1 = 'map_click' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > fromUnixTimestamp64Milli($__from) GROUP BY hit_kind ORDER BY clicks DESC",
+            "data": "SELECT blob6 AS hit_kind, count() AS clicks FROM terraviz_events WHERE blob1 = 'map_click' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY hit_kind ORDER BY clicks DESC",
             "headers": [{ "key": "Content-Type", "value": "text/plain" }]
           },
           "parser": "backend",
@@ -170,7 +170,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT blob5 AS layer_id, round(double3, 1) AS lon_bin, round(double2, 1) AS lat_bin, count() AS attention_events FROM terraviz_events WHERE blob1 IN ('camera_settled', 'map_click') AND blob2 = '$environment' AND blob4 = '$internal' AND blob5 != '' AND timestamp > fromUnixTimestamp64Milli($__from) GROUP BY layer_id, lat_bin, lon_bin HAVING attention_events > 10 ORDER BY attention_events DESC LIMIT 200",
+            "data": "SELECT blob5 AS layer_id, round(double3, 1) AS lon_bin, round(double2, 1) AS lat_bin, count() AS attention_events FROM terraviz_events WHERE blob1 IN ('camera_settled', 'map_click') AND blob2 = '$environment' AND blob4 = '$internal' AND blob5 != '' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY layer_id, lat_bin, lon_bin HAVING attention_events > 10 ORDER BY attention_events DESC LIMIT 200",
             "headers": [{ "key": "Content-Type", "value": "text/plain" }]
           },
           "parser": "backend",
@@ -195,7 +195,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT blob6 AS projection, blob5 AS layer_id, count() AS settles FROM terraviz_events WHERE blob1 = 'camera_settled' AND blob5 != '' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > fromUnixTimestamp64Milli($__from) GROUP BY projection, layer_id ORDER BY settles DESC LIMIT 50",
+            "data": "SELECT blob6 AS projection, blob5 AS layer_id, count() AS settles FROM terraviz_events WHERE blob1 = 'camera_settled' AND blob5 != '' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY projection, layer_id ORDER BY settles DESC LIMIT 50",
             "headers": [{ "key": "Content-Type", "value": "text/plain" }]
           },
           "parser": "backend",

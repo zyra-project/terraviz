@@ -5,7 +5,7 @@
   "tags": ["terraviz", "analytics", "tier-a"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 3,
+  "version": 4,
   "refresh": "5m",
   "time": {
     "from": "now-7d",
@@ -53,7 +53,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT toStartOfDay(timestamp) AS day, count(DISTINCT index1) AS sessions FROM terraviz_events WHERE blob1 = 'session_start' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > fromUnixTimestamp64Milli($__from) GROUP BY day ORDER BY day",
+            "data": "SELECT toStartOfDay(timestamp) AS day, count(DISTINCT index1) AS sessions FROM terraviz_events WHERE blob1 = 'session_start' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY day ORDER BY day",
             "headers": [{ "key": "Content-Type", "value": "text/plain" }]
           },
           "parser": "backend",
@@ -78,7 +78,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT blob10 AS platform, blob9 AS os, count(DISTINCT index1) AS sessions FROM terraviz_events WHERE blob1 = 'session_start' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > fromUnixTimestamp64Milli($__from) GROUP BY platform, os ORDER BY sessions DESC",
+            "data": "SELECT blob10 AS platform, blob9 AS os, count(DISTINCT index1) AS sessions FROM terraviz_events WHERE blob1 = 'session_start' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY platform, os ORDER BY sessions DESC",
             "headers": [{ "key": "Content-Type", "value": "text/plain" }]
           },
           "parser": "backend",
@@ -103,7 +103,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT blob5 AS layer_id, quantile(0.50)(double2) AS p50_ms, quantile(0.95)(double2) AS p95_ms, count() AS load_count FROM terraviz_events WHERE blob1 = 'layer_loaded' AND blob2 = '$environment' AND blob4 = '$internal' AND blob6 != 'cache' AND timestamp > fromUnixTimestamp64Milli($__from) GROUP BY layer_id HAVING load_count > 10 ORDER BY p95_ms DESC LIMIT 25",
+            "data": "SELECT blob5 AS layer_id, quantile(0.50)(double2) AS p50_ms, quantile(0.95)(double2) AS p95_ms, count() AS load_count FROM terraviz_events WHERE blob1 = 'layer_loaded' AND blob2 = '$environment' AND blob4 = '$internal' AND blob6 != 'cache' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY layer_id HAVING load_count > 10 ORDER BY p95_ms DESC LIMIT 25",
             "headers": [{ "key": "Content-Type", "value": "text/plain" }]
           },
           "parser": "backend",
@@ -128,7 +128,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT blob6 AS source, count() AS loads FROM terraviz_events WHERE blob1 = 'layer_loaded' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > fromUnixTimestamp64Milli($__from) GROUP BY source ORDER BY loads DESC",
+            "data": "SELECT blob6 AS source, count() AS loads FROM terraviz_events WHERE blob1 = 'layer_loaded' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY source ORDER BY loads DESC",
             "headers": [{ "key": "Content-Type", "value": "text/plain" }]
           },
           "parser": "backend",
@@ -178,7 +178,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT blob5 AS category, blob8 AS source, count() AS occurrences FROM terraviz_events WHERE blob1 = 'error' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > fromUnixTimestamp64Milli($__from) GROUP BY category, source ORDER BY occurrences DESC",
+            "data": "SELECT blob5 AS category, blob8 AS source, count() AS occurrences FROM terraviz_events WHERE blob1 = 'error' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY category, source ORDER BY occurrences DESC",
             "headers": [{ "key": "Content-Type", "value": "text/plain" }]
           },
           "parser": "backend",
@@ -203,7 +203,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT toStartOfHour(timestamp) AS hour, blob6 AS gpu_bucket, quantile(0.50)(double2) AS median_fps FROM terraviz_events WHERE blob1 = 'perf_sample' AND blob5 = 'map' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > fromUnixTimestamp64Milli($__from) GROUP BY hour, gpu_bucket ORDER BY hour",
+            "data": "SELECT toStartOfHour(timestamp) AS hour, blob6 AS gpu_bucket, quantile(0.50)(double2) AS median_fps FROM terraviz_events WHERE blob1 = 'perf_sample' AND blob5 = 'map' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY hour, gpu_bucket ORDER BY hour",
             "headers": [{ "key": "Content-Type", "value": "text/plain" }]
           },
           "parser": "backend",
@@ -228,7 +228,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT blob6 AS device_class, blob7 AS mode, count() AS sessions, avg(double2) AS avg_entry_load_ms, quantile(0.50)(double3) AS p50_session_mean_fps FROM terraviz_events WHERE blob1 = 'vr_session_ended' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > fromUnixTimestamp64Milli($__from) GROUP BY device_class, mode ORDER BY sessions DESC",
+            "data": "SELECT blob6 AS device_class, blob7 AS mode, count() AS sessions, avg(double2) AS avg_entry_load_ms, quantile(0.50)(double3) AS p50_session_mean_fps FROM terraviz_events WHERE blob1 = 'vr_session_ended' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY device_class, mode ORDER BY sessions DESC",
             "headers": [{ "key": "Content-Type", "value": "text/plain" }]
           },
           "parser": "backend",
@@ -253,7 +253,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "WITH starts AS (SELECT blob6 AS tour_id, count() AS n FROM terraviz_events WHERE blob1 = 'tour_started' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > fromUnixTimestamp64Milli($__from) GROUP BY tour_id), completes AS (SELECT blob6 AS tour_id, count() AS n FROM terraviz_events WHERE blob1 = 'tour_ended' AND blob5 = 'completed' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > fromUnixTimestamp64Milli($__from) GROUP BY tour_id) SELECT starts.tour_id, starts.n AS starts, COALESCE(completes.n, 0) AS completes, COALESCE(completes.n, 0) / starts.n AS completion_rate FROM starts LEFT JOIN completes ON starts.tour_id = completes.tour_id ORDER BY starts DESC",
+            "data": "WITH starts AS (SELECT blob6 AS tour_id, count() AS n FROM terraviz_events WHERE blob1 = 'tour_started' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY tour_id), completes AS (SELECT blob6 AS tour_id, count() AS n FROM terraviz_events WHERE blob1 = 'tour_ended' AND blob5 = 'completed' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY tour_id) SELECT starts.tour_id, starts.n AS starts, COALESCE(completes.n, 0) AS completes, COALESCE(completes.n, 0) / starts.n AS completion_rate FROM starts LEFT JOIN completes ON starts.tour_id = completes.tour_id ORDER BY starts DESC",
             "headers": [{ "key": "Content-Type", "value": "text/plain" }]
           },
           "parser": "backend",
@@ -278,7 +278,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT blob3 AS country, count(DISTINCT index1) AS sessions FROM terraviz_events WHERE blob1 = 'session_start' AND blob2 = '$environment' AND blob4 = '$internal' AND blob3 != 'XX' AND timestamp > fromUnixTimestamp64Milli($__from) GROUP BY country ORDER BY sessions DESC LIMIT 20",
+            "data": "SELECT blob3 AS country, count(DISTINCT index1) AS sessions FROM terraviz_events WHERE blob1 = 'session_start' AND blob2 = '$environment' AND blob4 = '$internal' AND blob3 != 'XX' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY country ORDER BY sessions DESC LIMIT 20",
             "headers": [{ "key": "Content-Type", "value": "text/plain" }]
           },
           "parser": "backend",

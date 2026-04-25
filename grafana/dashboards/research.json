@@ -5,7 +5,7 @@
   "tags": ["terraviz", "analytics", "tier-b", "research"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 4,
+  "version": 5,
   "refresh": "5m",
   "time": {
     "from": "now-30d",
@@ -56,7 +56,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT blob6 AS tour_id, blob5 AS question_id, count() AS attempts, sum(if(blob7 = 'true', 1, 0)) / count() AS correctness_rate, avg(double5) AS avg_response_ms FROM terraviz_events WHERE blob1 = 'tour_question_answered' AND blob2 = '$environment' AND blob4 = 'false' AND timestamp > fromUnixTimestamp64Milli($__from) GROUP BY tour_id, question_id HAVING attempts > 5 ORDER BY correctness_rate ASC LIMIT 50",
+            "data": "SELECT blob6 AS tour_id, blob5 AS question_id, count() AS attempts, sum(if(blob7 = 'true', 1, 0)) / count() AS correctness_rate, avg(double5) AS avg_response_ms FROM terraviz_events WHERE blob1 = 'tour_question_answered' AND blob2 = '$environment' AND blob4 = 'false' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY tour_id, question_id HAVING attempts > 5 ORDER BY correctness_rate ASC LIMIT 50",
             "headers": [{ "key": "Content-Type", "value": "text/plain" }]
           },
           "parser": "backend",
@@ -81,7 +81,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT blob5 AS query_hash, count() AS searches, any(blob6) AS result_bucket, avg(double2) AS avg_query_length FROM terraviz_events WHERE blob1 = 'browse_search' AND blob2 = '$environment' AND blob4 = 'false' AND timestamp > fromUnixTimestamp64Milli($__from) GROUP BY query_hash ORDER BY searches DESC LIMIT 50",
+            "data": "SELECT blob5 AS query_hash, count() AS searches, any(blob6) AS result_bucket, avg(double2) AS avg_query_length FROM terraviz_events WHERE blob1 = 'browse_search' AND blob2 = '$environment' AND blob4 = 'false' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY query_hash ORDER BY searches DESC LIMIT 50",
             "headers": [{ "key": "Content-Type", "value": "text/plain" }]
           },
           "parser": "backend",
@@ -106,7 +106,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT blob5 AS query_hash, count() AS searches FROM terraviz_events WHERE blob1 = 'browse_search' AND blob2 = '$environment' AND blob4 = 'false' AND blob6 = '0' AND timestamp > fromUnixTimestamp64Milli($__from) GROUP BY query_hash ORDER BY searches DESC LIMIT 50",
+            "data": "SELECT blob5 AS query_hash, count() AS searches FROM terraviz_events WHERE blob1 = 'browse_search' AND blob2 = '$environment' AND blob4 = 'false' AND blob6 = '0' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY query_hash ORDER BY searches DESC LIMIT 50",
             "headers": [{ "key": "Content-Type", "value": "text/plain" }]
           },
           "parser": "backend",
@@ -131,7 +131,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT blob5 AS view_target, quantile(0.50)(double2) AS p50_ms, quantile(0.95)(double2) AS p95_ms, count() AS samples FROM terraviz_events WHERE blob1 = 'dwell' AND blob2 = '$environment' AND blob4 = 'false' AND timestamp > fromUnixTimestamp64Milli($__from) GROUP BY view_target ORDER BY samples DESC",
+            "data": "SELECT blob5 AS view_target, quantile(0.50)(double2) AS p50_ms, quantile(0.95)(double2) AS p95_ms, count() AS samples FROM terraviz_events WHERE blob1 = 'dwell' AND blob2 = '$environment' AND blob4 = 'false' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY view_target ORDER BY samples DESC",
             "headers": [{ "key": "Content-Type", "value": "text/plain" }]
           },
           "parser": "backend",
@@ -156,7 +156,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT blob5 AS gesture, count() AS gestures, avg(double2) AS avg_magnitude, quantile(0.95)(double2) AS p95_magnitude FROM terraviz_events WHERE blob1 = 'vr_interaction' AND blob2 = '$environment' AND blob4 = 'false' AND timestamp > fromUnixTimestamp64Milli($__from) GROUP BY gesture ORDER BY gestures DESC",
+            "data": "SELECT blob5 AS gesture, count() AS gestures, avg(double2) AS avg_magnitude, quantile(0.95)(double2) AS p95_magnitude FROM terraviz_events WHERE blob1 = 'vr_interaction' AND blob2 = '$environment' AND blob4 = 'false' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY gesture ORDER BY gestures DESC",
             "headers": [{ "key": "Content-Type", "value": "text/plain" }]
           },
           "parser": "backend",
@@ -181,7 +181,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT blob6 AS path, count() AS loads, quantile(0.50)(double2) AS p50_latency_ms, quantile(0.95)(double2) AS p95_latency_ms FROM terraviz_events WHERE blob1 = 'orbit_load_followed' AND blob2 = '$environment' AND blob4 = 'false' AND timestamp > fromUnixTimestamp64Milli($__from) GROUP BY path ORDER BY loads DESC",
+            "data": "SELECT blob6 AS path, count() AS loads, quantile(0.50)(double2) AS p50_latency_ms, quantile(0.95)(double2) AS p95_latency_ms FROM terraviz_events WHERE blob1 = 'orbit_load_followed' AND blob2 = '$environment' AND blob4 = 'false' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY path ORDER BY loads DESC",
             "headers": [{ "key": "Content-Type", "value": "text/plain" }]
           },
           "parser": "backend",
@@ -206,7 +206,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT blob5 AS signal, count() AS occurrences FROM terraviz_events WHERE blob1 = 'orbit_correction' AND blob2 = '$environment' AND blob4 = 'false' AND timestamp > fromUnixTimestamp64Milli($__from) GROUP BY signal ORDER BY occurrences DESC",
+            "data": "SELECT blob5 AS signal, count() AS occurrences FROM terraviz_events WHERE blob1 = 'orbit_correction' AND blob2 = '$environment' AND blob4 = 'false' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY signal ORDER BY occurrences DESC",
             "headers": [{ "key": "Content-Type", "value": "text/plain" }]
           },
           "parser": "backend",
@@ -231,7 +231,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT blob6 AS model, count() AS responses, quantile(0.50)(double2) AS p50_response_ms, quantile(0.95)(double2) AS p95_response_ms FROM terraviz_events WHERE blob1 = 'orbit_interaction' AND blob5 = 'response_complete' AND blob2 = '$environment' AND blob4 = 'false' AND double2 > 0 AND timestamp > fromUnixTimestamp64Milli($__from) GROUP BY model ORDER BY responses DESC",
+            "data": "SELECT blob6 AS model, count() AS responses, quantile(0.50)(double2) AS p50_response_ms, quantile(0.95)(double2) AS p95_response_ms FROM terraviz_events WHERE blob1 = 'orbit_interaction' AND blob5 = 'response_complete' AND blob2 = '$environment' AND blob4 = 'false' AND double2 > 0 AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY model ORDER BY responses DESC",
             "headers": [{ "key": "Content-Type", "value": "text/plain" }]
           },
           "parser": "backend",
@@ -256,7 +256,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT blob6 AS model, blob5 AS finish_reason, count() AS turns FROM terraviz_events WHERE blob1 = 'orbit_turn' AND blob8 = 'assistant' AND blob2 = '$environment' AND blob4 = 'false' AND timestamp > fromUnixTimestamp64Milli($__from) GROUP BY model, finish_reason ORDER BY turns DESC",
+            "data": "SELECT blob6 AS model, blob5 AS finish_reason, count() AS turns FROM terraviz_events WHERE blob1 = 'orbit_turn' AND blob8 = 'assistant' AND blob2 = '$environment' AND blob4 = 'false' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY model, finish_reason ORDER BY turns DESC",
             "headers": [{ "key": "Content-Type", "value": "text/plain" }]
           },
           "parser": "backend",
