@@ -5,14 +5,15 @@
  * (bug reports, feature requests, other). Sibling to
  * /api/feedback-dashboard which covers the AI response ratings.
  *
- * Auth: Cloudflare Access at the edge (preferred). Sign-in
- * happens once per session via the Access policy on this path;
- * the function reads `Cf-Access-Authenticated-User-Email` to
- * confirm staff identity. The legacy `FEEDBACK_ADMIN_TOKEN`
- * bearer-token path is kept as an optional fallback for
- * `wrangler dev` (where Access doesn't run) and as break-glass
- * if the Access policy is ever misconfigured. Removing the env
- * var disables the bearer path entirely.
+ * Auth: Cloudflare Access at the edge (preferred); legacy
+ * `FEEDBACK_ADMIN_TOKEN` bearer-token path kept as a fallback
+ * for `wrangler dev` and break-glass.
+ *
+ * The web admin UI no longer calls this path directly — the
+ * dashboard at `/api/feedback-admin` proxies the same data via
+ * `?action=general-dashboard` so a single Access destination
+ * covers every admin operation. This route remains for direct
+ * scripting and as a break-glass path.
  *
  * GET /api/general-feedback-dashboard
  *   ?days=30    — lookback window (default 30, max 365)
@@ -20,6 +21,7 @@
  */
 
 import { isInternalRequest } from './ingest'
+import { fetchGeneralDashboard } from './_feedback-helpers'
 
 interface Env {
   FEEDBACK_DB?: D1Database
@@ -55,12 +57,7 @@ function corsHeaders(origin?: string | null): Record<string, string> {
 }
 
 function authenticate(request: Request, token?: string): boolean {
-  // Cloudflare Access — production path. The edge attaches the
-  // SSO identity header on requests that match the Access policy.
   if (isInternalRequest(request)) return true
-  // Bearer token — local-dev / break-glass fallback. Only enabled
-  // when FEEDBACK_ADMIN_TOKEN is set in env. Removing the env var
-  // makes Access the only auth path.
   if (!token) return false
   const auth = request.headers.get('Authorization')
   if (!auth) return false
@@ -102,73 +99,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const recentLimit = Math.min(Math.max(parseInt(url.searchParams.get('recent') ?? '100') || 100, 1), 200)
 
   try {
-    // Totals by kind
-    const totals = await db.prepare(
-      `SELECT
-        COUNT(*) as total,
-        SUM(CASE WHEN kind = 'bug' THEN 1 ELSE 0 END) as bugs,
-        SUM(CASE WHEN kind = 'feature' THEN 1 ELSE 0 END) as features,
-        SUM(CASE WHEN kind = 'other' THEN 1 ELSE 0 END) as other
-      FROM general_feedback`,
-    ).first<{ total: number; bugs: number; features: number; other: number }>()
-
-    // Submissions by day over the lookback window
-    const sinceDate = new Date(Date.now() - days * 86_400_000).toISOString()
-    const byDay = await db.prepare(
-      `SELECT
-        DATE(created_at) as date,
-        SUM(CASE WHEN kind = 'bug' THEN 1 ELSE 0 END) as bugs,
-        SUM(CASE WHEN kind = 'feature' THEN 1 ELSE 0 END) as features,
-        SUM(CASE WHEN kind = 'other' THEN 1 ELSE 0 END) as other
-      FROM general_feedback
-      WHERE created_at >= ?
-      GROUP BY DATE(created_at)
-      ORDER BY date DESC`,
-    ).bind(sinceDate).all<{ date: string; bugs: number; features: number; other: number }>()
-
-    // Recent entries — the screenshot column is intentionally NOT
-    // selected here. Data URLs can be up to 200KB each, so inlining
-    // them in a 100-row list response can produce multi-megabyte
-    // payloads. The admin UI fetches screenshots on demand via
-    // /api/general-feedback-screenshot?id=X when the user opens a
-    // detail panel. Report length()+presence instead so reviewers
-    // can still see which rows have an image attached.
-    const recent = await db.prepare(
-      `SELECT id, kind, message, contact, url, user_agent, app_version,
-              platform, dataset_id, created_at,
-              length(screenshot) as screenshot_length
-      FROM general_feedback
-      ORDER BY created_at DESC
-      LIMIT ?`,
-    ).bind(recentLimit).all<{
-      id: number
-      kind: string
-      message: string
-      contact: string
-      url: string
-      user_agent: string
-      app_version: string
-      platform: string
-      dataset_id: string | null
-      created_at: string
-      screenshot_length: number
-    }>()
-
-    return new Response(JSON.stringify({
-      totalCount: totals?.total ?? 0,
-      bugCount: totals?.bugs ?? 0,
-      featureCount: totals?.features ?? 0,
-      otherCount: totals?.other ?? 0,
-      byDay: byDay.results,
-      recentFeedback: recent.results.map(r => {
-        const { screenshot_length, ...rest } = r
-        return {
-          ...rest,
-          hasScreenshot: (screenshot_length ?? 0) > 0,
-          screenshotLength: screenshot_length ?? 0,
-        }
-      }),
-    }), { headers: jsonHeaders })
+    const data = await fetchGeneralDashboard(db, days, recentLimit)
+    return new Response(JSON.stringify(data), { headers: jsonHeaders })
   } catch (err) {
     console.error('General feedback dashboard query failed:', err)
     return new Response(JSON.stringify({ error: 'Query failed' }), {
