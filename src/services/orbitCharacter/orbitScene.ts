@@ -820,10 +820,38 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
         depthTest: false,
         depthWrite: false,
       })
+      // Pupil field — dark navy disc that covers the iris centre.
+      // Switched from the shared ShaderMaterial (with smoothstep edge
+      // feather) to a fresh per-rig MeshBasicMaterial because the
+      // shared-instance uniform writes (`pupilFieldUniforms.uOpacity
+      // .value = sat(pupilVis)` per frame from updateCharacter) were
+      // evidently not surviving Quest's WebXR render path — same
+      // failure mode as the shared iris material had before its
+      // own per-rig replacement.  The hard-edge circle reads
+      // slightly different from the standalone /orbit page (no
+      // feathered iris/pupil transition) but is plainly visible.
+      rig.pupilField.material = new THREE.MeshBasicMaterial({
+        color: 0x1a2040, // PUPIL_FIELD_COLOR mirrored from orbitMaterials.ts
+        transparent: true,
+        opacity: 0.95,
+        depthTest: false,
+        depthWrite: false,
+      })
       rig.pupilDot.material = new THREE.MeshBasicMaterial({
         color: 0x05080e, // PUPIL_DOT_COLOR mirrored from orbitMaterials.ts
         transparent: true,
         opacity: 1.0,
+        depthTest: false,
+        depthWrite: false,
+      })
+      // Catchlight — white "planet" highlight at upper-right of the
+      // iris. Original uses a custom fragment shader for a feathered
+      // edge; for embedded mode a flat white disc is plainly visible
+      // and the soft edge is lost-but-acceptable polish.
+      rig.catchPrimary.material = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.95,
         depthTest: false,
         depthWrite: false,
       })
