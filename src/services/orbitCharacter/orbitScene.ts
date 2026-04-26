@@ -856,6 +856,25 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
         depthWrite: false,
       })
       for (const star of rig.stars) star.material = starMatFresh
+
+      // DIAGNOSTIC: tint the lids bright magenta-pink to confirm
+      // they're rendering on Quest. The user reports "no eyelids"
+      // but also "catchlight occasionally vanishes" — the latter is
+      // exactly the symptom of an opaque lid sweeping over the
+      // catchlight during a blink, which means the lid IS rendering
+      // but blending with the body's skin colour. If the lids show
+      // up in this bright tint, that confirms the theory and the
+      // next pass restores the body palette. If they're still
+      // invisible, the lid mesh itself is being dropped and we
+      // need to dig into the lidBundle shared-material situation.
+      const lidDiag = new THREE.MeshBasicMaterial({
+        color: 0xff66cc,
+        // No transparent flag — opaque rendering, default depth
+        // test, default depth write — matches the lid material's
+        // standalone behaviour aside from the colour swap.
+      })
+      rig.upperLid.material = lidDiag
+      rig.lowerLid.material = lidDiag
     }
   }
 
