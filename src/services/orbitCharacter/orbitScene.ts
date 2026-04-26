@@ -741,21 +741,20 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
   targetHalo.layers.set(ORBIT_LAYER)
 
   if (skipStencilClip) {
-    // Stencil-free materials don't clip the lid spherical cap — its
-    // parked-open rotation sweeps the dome through the socket plane
-    // and the oversized geometry would cover the pupil stack
-    // otherwise. Replace the stencil clip with a fragment-shader
-    // discard against the socket silhouette: each lid fragment gets
-    // transformed into its eye group's local XY plane and discarded
-    // when it falls outside `EYE_PAIR_DISC_RADIUS`. Per-mesh
-    // `onBeforeRender` refreshes the lid → eye-group transform each
-    // frame so the clip tracks blink rotations correctly. Blinks
-    // survive on hosts where the stencil buffer doesn't (Quest WebXR).
-    for (const rig of eyeRigs) {
-      attachLidSocketClip(rig.upperLid, rig.upperLidPivot, EYE_PAIR_DISC_RADIUS)
-      attachLidSocketClip(rig.lowerLid, rig.lowerLidPivot, EYE_PAIR_DISC_RADIUS)
-    }
-
+    // Stencil-free lid materials don't have a clip on their oversized
+    // spherical-cap geometry — its parked-open rotation can sweep
+    // slightly past the bezel rim. An earlier attempt
+    // (`attachLidSocketClip`) wrapped the lid material's
+    // onBeforeCompile to inject a fragment-shader discard against
+    // the eye-group's local XY socket disc; on Quest the lids ended
+    // up missing entirely (the shader patch likely failed to
+    // compile silently — DevTools-less debugging on-headset can't
+    // distinguish "patch fails" from "discard discards everything").
+    // The bezel torus + glass dome cover most of the over-extending
+    // arc visually, so for now we skip the shader clip and accept
+    // the small over-extension. A geometry-level fix (rebuild the
+    // lid as a partial cap shape that physically can't extend past
+    // the socket) is the proper follow-up.
     // Pupil-group meshes need extra hand-holding in embedded mode
     // (Quest WebXR). On-Quest A/B testing showed a synthetic disc
     // mounted in pupilGroup with `transparent + depthTest:false +
@@ -805,11 +804,23 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
         mesh.frustumCulled = false
         mesh.renderOrder = 50
       }
+      // Re-enable depth testing on the fresh per-rig materials.
+      // The original depth-disable workaround was added when we
+      // thought depth was the root cause of the "black eyes" symptom;
+      // the on-Quest A/B'd diag (bc5233e) confirmed otherwise — the
+      // real culprit was the SHARED material being mutated per-frame
+      // (`pupilMaterials.irisMat.opacity = sat(pupilVis)` and similar
+      // writes from updateCharacter weren't surviving Quest's WebXR
+      // path on shared instances). With per-rig fresh materials the
+      // mutation pressure is gone, and depth testing should work
+      // again — keeping the body's polygonOffset push doing its job
+      // and letting the planet correctly occlude Orbit's eyes when
+      // the avatar passes behind the globe. depthWrite stays off so
+      // the transparent pass doesn't conflict among the iris stack.
       rig.iris.material = new THREE.MeshBasicMaterial({
         color: new THREE.Color(accent),
         transparent: true,
         opacity: 1.0,
-        depthTest: false,
         depthWrite: false,
       })
       rig.irisGlow.material = new THREE.MeshBasicMaterial({
@@ -817,42 +828,24 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
         transparent: true,
         opacity: 0.35,
         blending: THREE.AdditiveBlending,
-        depthTest: false,
         depthWrite: false,
       })
-      // Pupil field — dark navy disc that covers the iris centre.
-      // Switched from the shared ShaderMaterial (with smoothstep edge
-      // feather) to a fresh per-rig MeshBasicMaterial because the
-      // shared-instance uniform writes (`pupilFieldUniforms.uOpacity
-      // .value = sat(pupilVis)` per frame from updateCharacter) were
-      // evidently not surviving Quest's WebXR render path — same
-      // failure mode as the shared iris material had before its
-      // own per-rig replacement.  The hard-edge circle reads
-      // slightly different from the standalone /orbit page (no
-      // feathered iris/pupil transition) but is plainly visible.
       rig.pupilField.material = new THREE.MeshBasicMaterial({
-        color: 0x1a2040, // PUPIL_FIELD_COLOR mirrored from orbitMaterials.ts
+        color: 0x1a2040, // PUPIL_FIELD_COLOR
         transparent: true,
         opacity: 0.95,
-        depthTest: false,
         depthWrite: false,
       })
       rig.pupilDot.material = new THREE.MeshBasicMaterial({
-        color: 0x05080e, // PUPIL_DOT_COLOR mirrored from orbitMaterials.ts
+        color: 0x05080e, // PUPIL_DOT_COLOR
         transparent: true,
         opacity: 1.0,
-        depthTest: false,
         depthWrite: false,
       })
-      // Catchlight — white "planet" highlight at upper-right of the
-      // iris. Original uses a custom fragment shader for a feathered
-      // edge; for embedded mode a flat white disc is plainly visible
-      // and the soft edge is lost-but-acceptable polish.
       rig.catchPrimary.material = new THREE.MeshBasicMaterial({
         color: 0xffffff,
         transparent: true,
         opacity: 0.95,
-        depthTest: false,
         depthWrite: false,
       })
       const starMatFresh = new THREE.MeshBasicMaterial({
@@ -860,7 +853,6 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
         transparent: true,
         opacity: 0.85,
         blending: THREE.AdditiveBlending,
-        depthTest: false,
         depthWrite: false,
       })
       for (const star of rig.stars) star.material = starMatFresh
