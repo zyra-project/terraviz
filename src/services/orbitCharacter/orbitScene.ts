@@ -779,6 +779,22 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
     // Each mesh keeps its own renderOrder write so future polish
     // (e.g. bumping the catchlight above the pupil dot) stays a
     // single-line change.
+    //
+    // Also replace each pupil-group mesh's material with a FRESH
+    // per-mesh MeshBasicMaterial — `updateCharacter` writes the
+    // shared `pupilMaterials.*` instances per frame (color +
+    // opacity), and on-Quest the iris stayed black even after every
+    // mesh + material flag matched the visible diag. The only
+    // remaining difference: the diag had a unique never-mutated
+    // material, while the iris material is shared and animated. This
+    // pass swaps in a static colour matching the IDLE-state palette
+    // accent, locking the eye expressivity (no color tints, no
+    // opacity blink fade) until we can identify why per-frame writes
+    // to the shared material aren't surviving the WebXR render path.
+    // Tracked as Phase 4 polish: re-enable animation by wiring
+    // updateCharacter writes into per-rig material instances on
+    // embedded mode.
+    const accent = PALETTES[palette].accent
     for (const rig of eyeRigs) {
       const pupilMeshes: THREE.Mesh[] = [
         rig.irisGlow, rig.iris, rig.pupilField,
@@ -789,6 +805,37 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
         mesh.frustumCulled = false
         mesh.renderOrder = 50
       }
+      rig.iris.material = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(accent),
+        transparent: true,
+        opacity: 1.0,
+        depthTest: false,
+        depthWrite: false,
+      })
+      rig.irisGlow.material = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(accent),
+        transparent: true,
+        opacity: 0.35,
+        blending: THREE.AdditiveBlending,
+        depthTest: false,
+        depthWrite: false,
+      })
+      rig.pupilDot.material = new THREE.MeshBasicMaterial({
+        color: 0x05080e, // PUPIL_DOT_COLOR mirrored from orbitMaterials.ts
+        transparent: true,
+        opacity: 1.0,
+        depthTest: false,
+        depthWrite: false,
+      })
+      const starMatFresh = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.85,
+        blending: THREE.AdditiveBlending,
+        depthTest: false,
+        depthWrite: false,
+      })
+      for (const star of rig.stars) star.material = starMatFresh
     }
   }
 
