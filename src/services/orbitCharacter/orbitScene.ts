@@ -755,6 +755,32 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
       attachLidSocketClip(rig.upperLid, rig.upperLidPivot, EYE_PAIR_DISC_RADIUS)
       attachLidSocketClip(rig.lowerLid, rig.lowerLidPivot, EYE_PAIR_DISC_RADIUS)
     }
+
+    // DIAGNOSTIC (Phase 4 commit 4 on-Quest debugging): add an
+    // unmissable bright-red opaque circle to each eye's pupilGroup at
+    // the iris position. If this is visible on Quest, the pupilGroup
+    // is being rendered correctly and the existing iris/pupil/star
+    // materials have some other reason for not showing (transparency
+    // sort, color, opacity, depth). If it's NOT visible, the entire
+    // pupilGroup is being culled or hidden for a reason upstream of
+    // any material setting. Either answer narrows the search by an
+    // order of magnitude. Marked here so it can be ripped out cleanly
+    // once the eye render is solved.
+    const diagMat = new THREE.MeshBasicMaterial({
+      color: 0xff0033,
+      depthTest: false,
+      depthWrite: false,
+    })
+    for (const rig of eyeRigs) {
+      const diag = new THREE.Mesh(
+        new THREE.CircleGeometry(EYE_PAIR_DISC_RADIUS * 0.7, 32),
+        diagMat,
+      )
+      diag.position.z = SOCKET_Z_BEZEL + 0.0001 // in front of the bezel — can't be hidden
+      diag.renderOrder = 100                   // drawn after everything in the eye stack
+      diag.layers.set(ORBIT_LAYER)
+      rig.pupilGroup.add(diag)
+    }
   }
 
   return {
