@@ -372,6 +372,27 @@ function applyPupilStencilClip(mat: THREE.Material): void {
   mat.stencilZPass = THREE.KeepStencilOp
 }
 
+/**
+ * Embedded-mode (`OrbitAvatarNode` in WebXR / 2D companion) depth
+ * override for pupil-group + catchlight materials. Disables the
+ * depth test and depth write so the pupil-group draws unconditionally
+ * regardless of what the body's depth pass wrote in the same screen-
+ * space pixels. Standalone rendering relies on `polygonOffsetUnits`
+ * on the body to keep the depth test winnable; on Quest's WebXR
+ * render path that offset evidently isn't enough, and an on-Quest
+ * A/B confirmed the pupil group renders correctly with depth
+ * checks disabled.
+ *
+ * The pupil-group meshes are already ordered along +Z (iris glow →
+ * iris → pupil field → stars → pupil dot → catchlight), so dropping
+ * depth testing doesn't introduce any visual artifacts — the back-
+ * to-front draw order encodes the desired stacking already.
+ */
+function applyEmbeddedDepthOverride(mat: THREE.Material): void {
+  mat.depthTest = false
+  mat.depthWrite = false
+}
+
 export function createPupilMaterials(
   palette: PaletteKey = 'cyan',
   /**
@@ -442,6 +463,29 @@ export function createPupilMaterials(
     applyPupilStencilClip(pupilFieldMat)
     applyPupilStencilClip(pupilDotMat)
     applyPupilStencilClip(starMat)
+  } else {
+    // Embedded-mode rendering fix (Quest WebXR). The pupil-group
+    // meshes sit on the +Z side of the body sphere, exactly where the
+    // body's surface casts depth in the same screen-space pixels.
+    // Standalone rendering relies on `polygonOffsetUnits = 8` on the
+    // body to push body depth back enough that the pupil group wins
+    // the depth test. That offset evidently isn't sufficient (or
+    // isn't honoured) inside Three.js's WebXR render path on Quest —
+    // an on-Quest A/B with a transparent + depthTest:false diag in
+    // the same pupilGroup confirmed the pattern: stop testing depth
+    // and the meshes render correctly. depthWrite:false is paired so
+    // the pupil-group passes don't write incorrect depth that would
+    // affect later draws (catchlight, glass dome).
+    //
+    // No visual cost: the pupil group is positioned tightly inside
+    // the socket and its draw order (back-to-front along Z) is
+    // already correct via the SOCKET_Z_* layout, so explicit depth
+    // testing was redundant.
+    applyEmbeddedDepthOverride(irisMat)
+    applyEmbeddedDepthOverride(irisGlowMat)
+    applyEmbeddedDepthOverride(pupilFieldMat)
+    applyEmbeddedDepthOverride(pupilDotMat)
+    applyEmbeddedDepthOverride(starMat)
   }
   return {
     irisMat, irisGlowMat,
@@ -736,7 +780,11 @@ export function createCatchlightMaterial(
   // Catchlights ride the pupilGroup so they track gaze. Stencil
   // clip keeps them inside the socket silhouette at extreme gaze
   // angles, matching the rest of the pupil-group meshes.
-  if (!skipStencilClip) applyPupilStencilClip(mat)
+  if (!skipStencilClip) {
+    applyPupilStencilClip(mat)
+  } else {
+    applyEmbeddedDepthOverride(mat)
+  }
   return mat
 }
 
