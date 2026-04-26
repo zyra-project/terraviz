@@ -867,14 +867,32 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
       // next pass restores the body palette. If they're still
       // invisible, the lid mesh itself is being dropped and we
       // need to dig into the lidBundle shared-material situation.
+      //
+      // First magenta diag (4902c3e) showed nothing — even the
+      // bright colour wasn't visible. Adding two defensive overrides
+      // to that test:
+      //
+      //   - side = DoubleSide. The lid is a partial spherical cap
+      //     whose convex face may end up pointing AWAY from the
+      //     camera at the parked-open rotation (-π/2 around X);
+      //     with the default FrontSide culling, the camera-facing
+      //     concave side would be culled invisible. DoubleSide
+      //     renders both sides, ruling out face-winding as the
+      //     cause.
+      //   - frustumCulled = false on each lid mesh. The lid's
+      //     spherical-cap bounding sphere may be computed at
+      //     construction and not updated as the pivot rotates per
+      //     frame; if the world-bounding-sphere check excludes the
+      //     lid from WebXR's per-eye visible set, frustumCulled
+      //     overrides it.
       const lidDiag = new THREE.MeshBasicMaterial({
         color: 0xff66cc,
-        // No transparent flag — opaque rendering, default depth
-        // test, default depth write — matches the lid material's
-        // standalone behaviour aside from the colour swap.
+        side: THREE.DoubleSide,
       })
       rig.upperLid.material = lidDiag
       rig.lowerLid.material = lidDiag
+      rig.upperLid.frustumCulled = false
+      rig.lowerLid.frustumCulled = false
     }
   }
 
