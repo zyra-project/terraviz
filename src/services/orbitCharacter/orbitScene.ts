@@ -934,6 +934,29 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
       // slightly less neotenous, more circular) but rules in/out
       // the scale-rotation interaction.
       rig.group.scale.set(1, 1, 1)
+
+      // e70bec3 didn't fix lids — uniform-scale eye_group still
+      // doesn't render the lid through the pivot chain. Final
+      // diagnostic: reparent the lid mesh DIRECTLY to head, at the
+      // cyan bypass position with identity rotation. If this
+      // renders, the upperLidPivot itself (rotation, hierarchy
+      // depth, or some other property of being a child of pivot)
+      // is the cause. Loses the blink animation entirely for this
+      // diag — tracked as Phase 4 polish.
+      const lidPos = new THREE.Vector3(0, EYE_PAIR_DISC_RADIUS * 0.55, BODY_RADIUS + 0.0030)
+      lidPos.x += rig.group.position.x // ±EYE_PAIR_OFFSET_X
+      const reparent = (lid: THREE.Mesh) => {
+        lid.removeFromParent()
+        head.add(lid)
+        lid.position.copy(lidPos)
+        lid.quaternion.identity()
+        lid.scale.set(1, 1, 1)
+        lid.castShadow = false
+        lid.receiveShadow = false
+        lid.layers.set(ORBIT_LAYER)
+      }
+      reparent(rig.upperLid)
+      reparent(rig.lowerLid)
     }
   }
 
