@@ -10,7 +10,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 5,
+  "version": 6,
   "refresh": "5m",
   "time": {
     "from": "now-7d",
@@ -100,7 +100,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT round(double3, 1) AS lon_bin, round(double2, 1) AS lat_bin, count() AS settles FROM terraviz_events WHERE blob1 = 'camera_settled' AND blob6 IN ($projection) AND blob2 = '$environment' AND blob4 = '$internal' AND ('$layer_id' = '$__all' OR blob5 = '$layer_id') AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY lat_bin, lon_bin HAVING settles > 5 ORDER BY settles DESC LIMIT 5000",
+            "data": "SELECT round(double3, 1) AS lon_bin, round(double2, 1) AS lat_bin, count() AS settles FROM terraviz_events WHERE blob1 = 'camera_settled' AND blob6 IN (${projection:singlequote}) AND blob2 = '$environment' AND blob4 = '$internal' AND ('$layer_id' = '$__all' OR blob5 = '$layer_id') AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY lat_bin, lon_bin HAVING settles > 5 ORDER BY settles DESC LIMIT 5000",
             "headers": [
               {
                 "key": "Content-Type",
@@ -157,7 +157,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT count() AS settles FROM terraviz_events WHERE blob1 = 'camera_settled' AND blob6 IN ($projection) AND blob2 = '$environment' AND blob4 = '$internal' AND ('$layer_id' = '$__all' OR blob5 = '$layer_id') AND timestamp > toDateTime(intDiv($__from, 1000))",
+            "data": "SELECT count() AS settles FROM terraviz_events WHERE blob1 = 'camera_settled' AND blob6 IN (${projection:singlequote}) AND blob2 = '$environment' AND blob4 = '$internal' AND ('$layer_id' = '$__all' OR blob5 = '$layer_id') AND timestamp > toDateTime(intDiv($__from, 1000))",
             "headers": [
               {
                 "key": "Content-Type",
