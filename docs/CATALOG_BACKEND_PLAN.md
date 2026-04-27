@@ -183,6 +183,71 @@ the same origin.
   creator, and asset uploader. Loaded only when `/publish` is
   navigated to, lazy-imported (same pattern as Three.js for VR).
 
+### STAC alignment
+
+A catalog protocol that ignores the existing scientific-data
+ecosystem will be siloed by default. The relevant standards:
+
+- **STAC** (SpatioTemporal Asset Catalog) — the de facto JSON
+  schema for spatial-temporal datasets. Has Items, Collections,
+  Catalogs, plus standard extensions for projection, scientific
+  citation, and versioning. Static-catalog mode is essentially
+  what the federation feed already does.
+- **DCAT** — W3C dataset metadata vocabulary, RDF-flavoured.
+  Reasonable for publishing alongside STAC; not a primary fit.
+- **schema.org/Dataset** — what Google Dataset Search consumes.
+  Trivial to emit as JSON-LD on dataset pages; ~30 lines.
+
+**Decision: Terraviz's wire `Dataset` is a STAC Item profile.** Not
+strict STAC (we keep our existing fields users already depend on)
+but a valid STAC Item when projected through a small mapping.
+Concretely:
+
+- Required STAC fields are populated or computed:
+  - `type: "Feature"`, `stac_version: "1.0.0"`
+  - `id`, `bbox`, `geometry` (default global bbox for
+    full-globe equirectangular datasets)
+  - `properties.datetime` from `start_time` (or
+    `start_datetime` / `end_datetime` for ranges)
+  - `assets[]` from the existing `data_ref` / `thumbnail_ref` /
+    `legend_ref` / `caption_ref` / `sphere_thumbnail_ref` set
+  - `links[]` with `self`, `parent` (the catalog),
+    `derived_from` (federation: the origin node)
+- Terraviz-specific fields live under a namespaced extension:
+  `properties.terraviz:weight`, `properties.terraviz:run_tour_on_load`,
+  `properties.terraviz:has_alpha`, etc. STAC's extension model
+  encourages this.
+- The catalog response (`/api/v1/catalog`) is also valid STAC: a
+  Collection with `links[]` pointing to each Item. Federation
+  feed responses are signed STAC Collections.
+- A `schema.org/Dataset` JSON-LD block ships in the
+  publisher-portal-rendered dataset detail page (cheap SEO win,
+  enables Google Dataset Search indexing).
+
+**Tradeoff accepted:** the wire shape gains some required fields
+(`type`, `stac_version`, `bbox`, `geometry`, `properties.datetime`,
+`assets`, `links`). The frontend currently consumes a flat shape;
+the plan keeps the flat shape available via a mapping layer
+(`stacToTerravizDataset()`) so `dataService.ts` doesn't need
+restructuring on day one. New consumers (federation peers, third-
+party tools) can read STAC directly.
+
+**What this buys us:**
+- Out-of-the-box interoperability with PySTAC, stac-fastapi, QGIS,
+  and the broader earth-observation tooling ecosystem.
+- A real answer to "how does my dataset show up in Google Dataset
+  Search."
+- The federation protocol becomes a STAC API extension rather than
+  a bespoke thing — easier to explain, easier to onboard peers.
+
+**What we are not doing:**
+- Full STAC API conformance (search, filter, transactions). The
+  read endpoints will be STAC-shaped; the publisher API stays
+  Terraviz-native.
+- Adopting STAC's `Collection` hierarchy as the *primary* model.
+  Datasets are flat; "collections" are a derived view (categories,
+  tour groupings).
+
 ---
 
 ## Data model (D1)
@@ -256,6 +321,19 @@ CREATE TABLE datasets (
   has_alpha          INTEGER NOT NULL DEFAULT 0,
   alpha_encoding     TEXT,                    -- null | native_vp9 | native_hevc | packed_below | packed_right
   primary_codec      TEXT,                    -- h264 | hevc | vp9 | av1 — informational; renditions are the source of truth
+
+  -- License & attribution. SPDX identifier for machine-readable
+  -- terms; free-text statement for licenses without an SPDX entry
+  -- (most government data falls here). Attribution propagates
+  -- through federation — a peer mirroring this dataset is bound
+  -- by the same terms and must surface attribution_text to its users.
+  license_spdx       TEXT,                    -- SPDX identifier (e.g., "CC-BY-4.0", "CC0-1.0")
+  license_url        TEXT,                    -- canonical license URL
+  license_statement  TEXT,                    -- free-text fallback (NOAA, "U.S. Government Work", etc.)
+  attribution_text   TEXT,                    -- one-line credit shown next to the dataset
+  rights_holder      TEXT,                    -- copyright holder; null for public-domain works
+  doi                TEXT,                    -- optional persistent identifier
+  citation_text      TEXT,                    -- optional preformatted citation (BibTeX-friendly)
 
   schema_version     INTEGER NOT NULL DEFAULT 1,
   created_at         TEXT NOT NULL,
@@ -1186,6 +1264,37 @@ the local federated cache, then calls the peer's
 *not* the local node's. Data stays at home; the subscriber just
 points its player at the peer's signed URL.
 
+### License & attribution propagation
+
+A dataset's license follows it across federation. The
+`federated_datasets.payload_json` cache stores the full Dataset
+including `license_spdx`, `license_url`, `license_statement`,
+`attribution_text`, `rights_holder`, `doi`, and `citation_text`.
+A subscriber:
+
+- Renders the attribution next to the dataset in browse cards,
+  the info panel, and any tour playback view (no exceptions —
+  this is what makes the system safe to use for CC-BY content).
+- Refuses to display datasets without a license declaration when
+  the operator's policy is "require licenses" (a federation
+  setting). Default policy is "permissive" — show with an
+  "unspecified license" warning — to ease migration.
+- Surfaces `license_spdx` and `attribution_text` in the embed
+  snippet and citation export so attribution survives the dataset
+  leaving the application.
+
+Per-peer policy (`federation_peers.policy`) extends with
+`require_license` and `allowed_license_spdx` (allowlist of
+acceptable SPDX IDs). A peer publishing CC-BY content can subscribe
+to peers that publish public-domain content without inheriting
+license-incompatibility headaches.
+
+For datasets without an SPDX-listed license (most U.S. government
+work — "U.S. Government Work" isn't an SPDX identifier),
+`license_statement` carries the human-readable terms and
+`license_spdx` is null. The frontend treats null SPDX as "see
+license_statement" and shows the statement verbatim.
+
 ### Failure modes the protocol has to survive
 
 | Failure | Behaviour |
@@ -1485,6 +1594,189 @@ the backend has no notion of "policy" beyond what each row says.
 
 ---
 
+## Threat model & secrets management
+
+The plan introduces three new identities that didn't exist before
+(node, peer, publisher) and three new privileged surfaces (publisher
+API, federation API, asset upload). Each is a place a careful
+review will probe; spelling out the threats and mitigations now
+keeps Phase 1 from shipping with surprises.
+
+### Actors & trust boundaries
+
+| Actor | Authenticates as | Trust level |
+|---|---|---|
+| Anonymous web visitor | Nothing | Read-only access to `visibility=public` content. |
+| Federation peer | HMAC over per-peer `shared_secret` | Reads what its grants allow. May not write. |
+| Publisher (staff) | Cloudflare Access cookie | Writes to own datasets / tours; reads audit log. |
+| Publisher (community, Phase 6) | OIDC subject | Same as staff but moderation-gated. |
+| Node operator | Wrangler / Pages dashboard | Full DB + binding access. Out of band. |
+| Cloudflare | Platform | Unconditionally trusted; if Cloudflare is compromised, so is everything. |
+
+### Threats and mitigations
+
+#### Server-side request forgery via publisher input
+
+Publisher-supplied URLs (`websiteLink`, `dataset_related.related_url`,
+`legend_ref` if scheme is `url:`) flow into server-side fetches
+during enrichment, asset probing, and the legend-image proxy at
+`/api/legend`. Without validation an attacker can pivot to internal
+services.
+
+**Mitigations:** every server-side fetch passes through a single
+`safeFetch()` helper that:
+- Resolves the hostname before the request and rejects RFC-1918,
+  loopback, link-local, and `0.0.0.0/8` ranges (the existing
+  `/api/legend` does this; codify it).
+- Rejects redirects to such ranges (re-resolve on each hop).
+- Caps response size and timeout.
+- Has no access to D1/KV/R2 bindings — runs in a subworker or via
+  `fetch()` with the bindings stripped.
+
+#### Cross-site scripting via publisher markdown
+
+Dataset abstracts and tour overlay HTML accept user input that the
+frontend renders. The current app already renders some HTML in
+tour `popupHTML` and `addPlacemark` — the plan widens the input
+surface.
+
+**Mitigations:** `abstract` is rendered as Markdown through a
+sanitizer (DOMPurify or equivalent) with a small allowlist
+(headings, paragraphs, links, code, images). `popupHTML` /
+`tourOverlayHTML` go through the same sanitizer. Raw HTML upload
+in tours is forbidden in Phase 1 — only the sanitised path. Phase
+3+ may add a `trusted: true` flag on staff-published tours that
+relaxes the sanitizer; it does not relax for community publishers.
+
+#### Replay & clock-skew attacks on federation
+
+The 5-minute timestamp window narrows but does not eliminate
+replay. A peer can re-send a captured request inside the window
+and re-trigger any non-idempotent operation.
+
+**Mitigations:** every signed request carries a `nonce` (random
+ULID); the receiver stores `(peer_id, nonce)` in KV with a
+6-minute TTL and rejects duplicates. Federation reads are
+idempotent by construction; the nonce primarily defends webhook
+endpoints.
+
+#### Compromised peer secret
+
+A peer's `shared_secret` could leak from their D1 backup, their
+ops repo, or their browser if mis-handled.
+
+**Mitigations:** secrets are HMAC keys, not signing keys — losing
+one lets the attacker read what the peer could read, not write to
+us. Per-peer `last_sync_at` and request-rate metrics surface
+anomalies; an "unusually heavy sync" alert surfaces in the
+operator UI. The `POST /api/v1/publish/peers/{id}/rotate-secret`
+endpoint lets an operator invalidate the old secret without
+tearing down the subscription.
+
+#### Hostile peer floods catalog with bogus datasets
+
+An accepted peer can return a million-item feed.
+
+**Mitigations:** per-peer item-count cap (default 10k), enforced at
+sync time; beyond the cap, the sync errors and requires operator
+unblock. Per-peer storage cap on `federated_datasets`. A "block
+peer + purge cache" admin action.
+
+#### Compromised publisher account
+
+An attacker who phishes a publisher's Access session can publish,
+retract, or grant.
+
+**Mitigations:** every privileged action writes to `audit_events`
+with the actor email; per-publisher rate limit (Phase 3) on
+publish/grant operations; a "review recent activity" page in the
+publisher portal so a real publisher notices unauthorized changes;
+publisher portal sessions inherit Access's idle-timeout. Hard
+revoke is available via the operator workflow described in
+Authorization.
+
+#### Restricted-asset URL leakage
+
+A signed Stream / R2 URL handed to one user could be shared.
+
+**Mitigations:** TTL is short (5 min); URLs are minted per-request
+not cached; `Cache-Control: private, no-store` on manifest
+responses; for high-sensitivity datasets a per-session token can
+be required (Phase 5+).
+
+#### Federation tombstone forgery
+
+A peer who can MITM the connection could forge a tombstone for a
+dataset they want suppressed.
+
+**Mitigations:** every federation response is Ed25519-signed by
+the peer's pinned public key; tombstones are only honoured when
+the signature verifies. TLS provides transport confidentiality on
+top.
+
+### Secrets management
+
+Where each secret lives and how it rotates:
+
+| Secret | Stored where | Rotation |
+|---|---|---|
+| Node Ed25519 private key | Wrangler secret (`NODE_SIGNING_KEY`); never in D1 | Manual; advertise overlap window in well-known doc; subscribers re-pin on next handshake. |
+| Per-peer `shared_secret` (us → them) | D1 `federation_peers.shared_secret`, encrypted with `PEER_SECRET_KEK` (Wrangler secret) | `POST /api/v1/publish/peers/{id}/rotate-secret`; old + new accepted for a short window. |
+| Per-peer `shared_secret` (them → us) | D1 `federation_subscribers.shared_secret`, same KEK | Same. |
+| Stream signing key | Wrangler secret (`STREAM_SIGNING_KEY`) | Cloudflare-managed rotation; we accept the new key. |
+| R2 access key (for presigning) | Wrangler secret (`R2_ACCESS_KEY` / `R2_SECRET`) | Manual; rotate quarterly. |
+| LLM API key | Already-existing pattern (Wrangler secret server-side, OS keychain on Tauri) | Out of scope here. |
+| Bootstrap handshake codes | KV with 10-min TTL | One-time use. |
+
+The "encrypt at rest in D1 with a KEK" pattern is the only
+non-obvious bit: D1 contents are visible to anyone with binding
+access (which is anyone who can deploy a Pages Function). A KEK in
+Wrangler secrets means a rogue PR adding a `console.log` doesn't
+exfiltrate every peer's HMAC key. The KEK itself rotates by
+re-encrypting the column.
+
+### Abuse, moderation, and takedowns
+
+Federation + community publishing is a content-distribution system.
+Without a moderation story it will eventually be used for things
+nobody wants distributed.
+
+- Every well-known doc carries an `abuse_contact` email. Required
+  field; deployments without one do not federate.
+- Per-publisher rate limit on publish actions (Phase 3) — a stolen
+  account can't dump 10,000 datasets in an hour.
+- Per-peer rate limit on federation reads — a hostile subscriber
+  can't scrape the catalog for free indefinitely.
+- The operator UI in the publisher portal exposes:
+  - "Block peer" (status → blocked, purge `federated_datasets`).
+  - "Retract dataset" (soft delete, tombstone propagates).
+  - "Suspend publisher" (sessions invalidated, drafts kept).
+  - "Audit recent activity" (filter `audit_events`).
+- Phase 6 community publishing requires a written content policy
+  and a moderation queue: drafts from non-staff publishers land
+  in `status='pending'` and a staff member approves before the
+  row becomes federation-visible.
+- DMCA-style takedowns: an operator-facing form that records the
+  notice, retracts the dataset, and writes an audit row; the
+  retraction propagates through normal federation tombstones. The
+  abuse_contact endpoint is the inbound channel.
+
+### What this section deliberately does not solve
+
+- **Sybil resistance among peers.** A bad actor can spin up 10
+  nodes, subscribe to each other, and create a federation echo
+  chamber. We rely on operator vetting at handshake-approval
+  time.
+- **End-to-end encryption.** Restricted assets are accessible to
+  Cloudflare and to the operator's ops team. Anyone whose threat
+  model excludes the platform needs a different system.
+- **Provable deletion.** "Retract" propagates via tombstones, but
+  a hostile peer can refuse to evict its cache. Detection is
+  possible (re-fetch and confirm the row is gone); enforcement is
+  not.
+
+---
+
 ## Cloud-portability layer
 
 Cloudflare is the target for v1. The plan stays portable by routing
@@ -1735,6 +2027,145 @@ Phases 1, 3, 4, 5 entirely on Workers Paid ($5/mo) with no
 Stream, no Cloudflare Images, and no Access seats over 50.**
 Phase 2 is where money starts mattering, and only when the node
 has its own video assets to host.
+
+---
+
+## Local development
+
+The plan is unbuildable without an answer to "how do I run the
+catalog backend on my laptop." Cloudflare Pages Functions, D1,
+KV, R2, Stream, and Queues all have local-emulation stories of
+varying maturity; the plan picks one path and commits to it.
+
+### Stack
+
+- **Wrangler** (`wrangler pages dev`) is the runner. It loads the
+  Pages config, spins up a local Miniflare instance, and serves
+  Functions at `localhost:8788`.
+- **D1 local mode** (`wrangler d1 ... --local`) gives a real
+  SQLite file under `.wrangler/`. The same migration files apply
+  to local and remote.
+- **KV local** is in-memory in Miniflare; ephemeral by design,
+  fine for development.
+- **R2 local** is on-disk under `.wrangler/`; persists across
+  restarts.
+- **Stream** has no local emulation. Local dev uses a static
+  `.m3u8` served from R2 (or `public/`) and a `MOCK_STREAM=true`
+  flag that makes the manifest endpoint return a fixed URL
+  instead of a Stream signed playback URL.
+- **Queues** also has no production-quality local emulation; the
+  job-queue interface ships an `InMemoryJobQueue` for dev that
+  runs jobs synchronously in the same Worker. Federation sync
+  in dev is a manual `npm run sync-peers` invocation rather
+  than a scheduled cron.
+- **Workers AI** in dev: the Cloudflare AI binding works against
+  the production endpoint with a free quota; tests stub it.
+
+### Repo layout for the new code
+
+```
+functions/api/v1/
+  catalog.ts
+  datasets/[id].ts
+  datasets/[id]/manifest.ts
+  federation/...
+  publish/...
+  _lib/                          # the portability interfaces
+  _routes/                       # thin wrappers binding env to handlers
+
+migrations/
+  catalog/
+    0001_init.sql
+    0002_renditions.sql
+    ...
+
+scripts/
+  seed-catalog.ts                # imports SOS catalog → local D1
+  generate-fixtures.ts           # canned dataset rows for tests
+  sync-peers.ts                  # manual federation pull (dev only)
+  rotate-peer-secret.ts          # ops helper
+
+src/services/
+  ...                            # frontend-only, unchanged
+```
+
+### Contributor entry points
+
+```bash
+npm run dev:backend     # wrangler pages dev with all local bindings
+npm run dev             # vite dev server (existing) — proxies /api/* to :8788
+npm run db:migrate      # wrangler d1 migrations apply terraviz --local
+npm run db:seed         # node scripts/seed-catalog.ts (writes to local D1)
+npm run db:reset        # rm .wrangler/state/v3/d1/* && db:migrate && db:seed
+npm run test            # vitest run (existing, plus new backend tests)
+npm run test:federation # contract tests — spins up two Wranglers, peers them
+```
+
+The frontend dev workflow stays as it is today (`npm run dev` →
+Vite dev server). Vite proxies `/api/*` to the local Wrangler at
+`:8788` via a `vite.config.ts` proxy entry; production resolves
+the same paths to Pages Functions on the same origin. The desktop
+app uses `localhost:8788` during dev and the deployed origin in
+production.
+
+### Seed data
+
+`scripts/seed-catalog.ts` is the same importer described in the
+data model section, restricted to a configurable subset (default:
+20 representative datasets across video, image, and tour types).
+Subset keeps `db:seed` fast and avoids hammering the public S3 in
+CI. A `--full` flag pulls the entire ~600-item catalog when a
+contributor needs realistic load.
+
+`scripts/generate-fixtures.ts` produces deterministic test data:
+fixed ULIDs, fixed timestamps, fixed signatures. Used by federation
+contract tests and unit tests.
+
+### Testing strategy
+
+- **Unit** — Vitest, colocated `*.test.ts`. Pure logic
+  (canonicalization, signature verification, manifest assembly,
+  visibility resolution).
+- **Integration** — Vitest with Miniflare. A handler is invoked
+  with a real local D1, real local KV, real local R2; assertions
+  check both the response and the side effects in storage.
+- **Contract (federation)** — `npm run test:federation` boots two
+  Miniflare instances on different ports, runs a handshake, runs
+  a sync, asserts that catalog state on the subscriber matches a
+  golden snapshot. This is the test that catches protocol
+  regressions across versions.
+- **End-to-end** — Playwright against the running stack: publish a
+  dataset, browse the catalog, load the dataset on the globe.
+  Only for high-value flows; not a replacement for integration
+  tests.
+- **Load** — `k6` script targeting the local `/api/v1/catalog`
+  with a seeded ~600-dataset DB; verifies p95 latency budget
+  before merging changes that touch the hot path.
+
+### CI/CD
+
+- **Per-PR.** Lint, type-check, unit + integration, build the
+  frontend bundle, run migrations against an ephemeral local D1
+  to catch SQL errors. Federation contract test runs on PRs that
+  touch `functions/api/v1/federation/**`.
+- **Preview deploys.** Pages already creates a preview URL per
+  PR. Migrations applied to a preview D1 (per-branch DB) so a
+  schema change can be exercised against real Cloudflare runtime
+  before merge.
+- **Production.** On merge to `main`, migrations apply to the
+  production D1 *before* the new Pages build is promoted, so a
+  rollback can revert the bundle without leaving D1 mid-migration.
+  Migrations are forward-only; rollbacks are forward-fix migrations.
+
+### Conventions
+
+- One commit per migration, with the migration file in the same
+  commit as the code that depends on it.
+- `schema_version` bumps in a separate commit so its diff is the
+  one place to audit shape changes.
+- Federation protocol changes go through a separate `protocol/`
+  changelog file (in addition to git history) so peer operators
+  can subscribe to it.
 
 ---
 
