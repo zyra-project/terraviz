@@ -936,6 +936,7 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
       })
       const offsetX = rig.group.position.x // ±EYE_PAIR_OFFSET_X
       const offsetY = rig.group.position.y // EYE_PAIR_OFFSET_Y
+      const lidAxis = new THREE.Vector3(1, 0, 0)
       const reparent = (lid: THREE.Mesh, pivot: THREE.Object3D, pivotY: number) => {
         lid.material = lidMatFresh
         lid.removeFromParent()
@@ -944,6 +945,18 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
         lid.castShadow = false
         lid.receiveShadow = false
         lid.layers.set(ORBIT_LAYER)
+        // Last commit (91b593d) wrote `lid.rotation.x = angle` and
+        // produced no visible lids again. The diag from 1f44c32 had
+        // `lid.quaternion.identity()` (no rotation) and rendered
+        // fine, so the differentiator is "rotation present" vs.
+        // "rotation absent." Three.js applies Euler rotations via
+        // `Object3D.rotation` through an `Euler` proxy that updates
+        // the quaternion lazily via `_onChangeCallback` — there's
+        // documented past edge-case behaviour around exactly ±π/2
+        // (gimbal lock territory in some Euler orders). Switch to
+        // explicit `setFromAxisAngle` quaternion to bypass the
+        // Euler proxy entirely. If lids appear with this, the
+        // `rotation.x = angle` write was hitting that edge case.
         lid.onBeforeRender = () => {
           const angle = pivot.rotation.x
           const cosA = Math.cos(angle)
@@ -953,7 +966,7 @@ export function buildScene(options: BuildSceneOptions = {}): OrbitSceneHandles {
             offsetY + pivotY + LID_MESH_Y_OFFSET * cosA,
             LID_PIVOT_Z + LID_MESH_Y_OFFSET * sinA,
           )
-          lid.rotation.set(angle, 0, 0)
+          lid.quaternion.setFromAxisAngle(lidAxis, angle)
         }
       }
       reparent(rig.upperLid, rig.upperLidPivot, UPPER_LID_PIVOT_Y)
