@@ -16,8 +16,10 @@
 > scope here.
 >
 > **Authoritative sources.** The schema lives in
-> `src/types/index.ts` (the `TelemetryEvent` discriminated union,
-> lines 596–1067). The runtime gate lives in
+> `src/types/index.ts` — the `TelemetryEvent` discriminated
+> union and its constituent event interfaces span the
+> "Telemetry" section (~lines 596–1067; the union declaration
+> itself is at ~line 1032). The runtime gate lives in
 > `src/analytics/emitter.ts:tierGate()`. The server-side stamping
 > lives in `functions/api/ingest.ts:onRequestPost()`. Where this
 > document and any other doc disagree, the source code wins.
@@ -122,14 +124,14 @@ Per-field budget:
 
 | Field | Bucket count | Max bits (`log₂ k`) | Effective bits (skewed) | Source line |
 |---|---|---|---|---|
-| `platform` | 3 (web/desktop/mobile) | 1.58 | ~0.8 (web dominates) | types.ts:639 |
-| `os` | 6 | 2.58 | ~2.0 | types.ts:640, session.ts:148 |
+| `platform` | 3 (web/desktop/mobile) | 1.58 | ~0.8 (web dominates) | src/types/index.ts:639 |
+| `os` | 6 | 2.58 | ~2.0 | src/types/index.ts:640, session.ts:148 |
 | `locale` | ~200 BCP-47 tags | ~7.6 | ~4.0 (en-US ~50%) | session.ts:181 |
-| `viewport_class` | 5 (xs–xl) | 2.32 | ~2.0 | types.ts:641, session.ts:187 |
-| `aspect_class` | 6 | 2.58 | ~2.2 | types.ts:646, session.ts:201 |
-| `screen_class` | 5 | 2.32 | ~2.0 | types.ts:649, session.ts:218 |
-| `vr_capable` | 4 | 2.0 | ~0.5 (`none` ≈ 95%) | types.ts:656 |
-| `build_channel` | 3 | 1.58 | ~0.05 (`public` ≫ rest) | types.ts:655 |
+| `viewport_class` | 5 (xs–xl) | 2.32 | ~2.0 | src/types/index.ts:641, session.ts:187 |
+| `aspect_class` | 6 | 2.58 | ~2.2 | src/types/index.ts:646, session.ts:201 |
+| `screen_class` | 5 | 2.32 | ~2.0 | src/types/index.ts:649, session.ts:218 |
+| `vr_capable` | 4 | 2.0 | ~0.5 (`none` ≈ 95%) | src/types/index.ts:656 |
+| `build_channel` | 3 | 1.58 | ~0.05 (`public` ≫ rest) | src/types/index.ts:655 |
 | `app_version` | ~5–10 active | ~2.5 | ~2.0 | session.ts:121 |
 | `schema_version` | 1–2 active | ~1.0 | ~0.2 | session.ts:66 |
 | **server-stamped `country`** | 250 ISO codes | ~7.96 | ~5.5 (US/EU skew) | ingest.ts:206 |
@@ -211,7 +213,7 @@ exploration patterns. See §3 and §9.
 
 `perf_sample.webgl_renderer_hash` is the first 8 hex chars
 (32 bits) of SHA-256 over the `WEBGL_debug_renderer_info`
-string (`types.ts:929`). The pre-image is a finite, well-known
+string (`src/types/index.ts:929`). The pre-image is a finite, well-known
 set: there are perhaps a few hundred distinct GPU strings in
 common circulation. 32 bits of hash space is ample to separate
 them, and an adversary with the AE dataset and a list of
@@ -824,7 +826,7 @@ parties unwilling to extend that trust.
 
 ### 9g. `device_class` on VR session events is a free string
 
-`VrSessionStartedEvent.device_class` (`types.ts:894`) is
+`VrSessionStartedEvent.device_class` (`src/types/index.ts:894`) is
 typed as `string`, not an enum. The intent at the call site
 is to bucket — "Quest 3", "Vision Pro", etc. — but the type
 does not enforce a closed list. A future call site that
@@ -853,7 +855,7 @@ trivially singling-out.
 
 ### 9j. `settings_changed.key` is open-namespace
 
-`SettingsChangedEvent.key` is a string (`types.ts:805`). The
+`SettingsChangedEvent.key` is a string (`src/types/index.ts:805`). The
 call sites use a fixed enum in practice but the type does
 not enforce it. A future call site that passes user input
 into `key` would emit free text. Same shape of risk as 9g.
