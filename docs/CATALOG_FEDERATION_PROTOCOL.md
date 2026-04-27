@@ -209,3 +209,156 @@ We considered all three:
 A small JSON-over-HTTP protocol with Ed25519 signatures and HMAC
 auth is the smallest thing that handles the requirements and stays
 within the Cloudflare runtime without a third-party dependency.
+
+## Peer discovery
+
+Pairwise out-of-band URL exchange works for the first dozen peers
+and stops working past that. The protocol grows two optional
+discovery layers — an opt-in directory and a manifest of "peers I
+already trust" — without making either mandatory.
+
+### The opt-in directory
+
+A directory is itself a Terraviz node (or a tiny standalone
+service that speaks the same protocol) whose only job is to list
+member nodes. A node opts in by:
+
+1. Registering its `base_url` and well-known doc with the
+   directory operator.
+2. Receiving a directory entry in the directory's
+   `/api/v1/directory` listing:
+   ```jsonc
+   {
+     "directory_version": 1,
+     "name": "SOS Network Directory",
+     "operator": "...",
+     "members": [
+       {
+         "node_id": "01HW...",
+         "display_name": "NOAA SOS",
+         "base_url": "https://sos.noaa.example",
+         "tags": ["earth-observation", "education"],
+         "joined_at": "2026-04-01T..."
+       },
+       ...
+     ]
+   }
+   ```
+3. Other nodes browsing the directory can subscribe to any
+   member through the normal handshake flow.
+
+The directory is a *discovery* tool, not an *authority*. Listing
+in a directory does not auto-grant subscriptions, does not
+verify identities, and does not propagate revocations. A
+directory operator that goes rogue can mislead browsers but can
+not actually subscribe anyone to anyone.
+
+Multiple directories can exist; nodes can be listed in many or
+none. A registry is "approval by the operator who runs it" —
+nothing more. The plan does not propose running an official
+directory; that's an ecosystem decision.
+
+### Peer-of-peer browsing
+
+Any active peer's catalog is, by virtue of federation, a list of
+nodes that peer trusts. A subscriber can present these to its
+operator as suggested next subscriptions:
+
+```
+GET /api/v1/federation/feed → returns datasets …
+                              each dataset.origin_node points
+                              at a base_url the peer trusts
+```
+
+The publisher portal's "suggested peers" panel deduplicates
+across all current peers, sorts by appearance frequency, and
+surfaces the top candidates as one-click handshake targets. This
+gives the network organic discovery without any central registry.
+
+### What peer discovery deliberately does not solve
+
+- **Identity verification.** Two nodes claiming the same
+  `display_name` or even the same `base_url` (DNS hijack) are not
+  distinguished. The handshake's public-key pin is the only
+  identity guarantee, and it's pinned at first-handshake time.
+- **Search.** The directory lists nodes; finding a *dataset*
+  across the network is a separate problem (federate first, then
+  search locally, until catalog volume forces a real cross-node
+  search index).
+- **Reputation.** No upvotes, no scores, no "verified" badges. A
+  node operator vouching for a peer is the human-judgement layer.
+
+## Protocol versioning
+
+The protocol is going to change. The plan accepts this and
+specifies how change propagates without coordinated upgrades.
+
+### Version numbers in three places
+
+| Field | What it means | Bumped when |
+|---|---|---|
+| URL prefix `/api/v1/...` | Major protocol version. New URL prefix means none of the old shapes apply. | A breaking change that can't be expressed additively. |
+| `schema_version` in payload | Content shape of `Dataset` / `Tour`. | Adding a field that older subscribers can ignore = no bump. Changing semantics or removing a field = bump. |
+| `protocol_capabilities[]` in well-known | Optional features (e.g., `webhook-push`, `tile-resolution`, `vectorize-search`). | A peer advertises a new capability; subscribers opt in. |
+
+### Negotiation
+
+The well-known document advertises:
+
+```jsonc
+{
+  ...
+  "protocol_versions_supported": ["v1"],
+  "schema_versions_supported": [1, 2],
+  "capabilities": ["webhook-push", "tile-resolution"]
+}
+```
+
+A subscriber picks the highest mutually-supported protocol
+version and schema version at handshake time and pins them in
+its `federation_peers` row. Renegotiation is an explicit
+operator action, not automatic.
+
+### Breaking changes
+
+When a new major protocol version ships:
+
+1. The new version is published at `/api/v2/...` alongside the
+   existing `/api/v1/...`. Both endpoints serve the same data.
+2. The well-known doc adds `v2` to `protocol_versions_supported`.
+3. Subscribers re-handshake at their convenience to upgrade.
+4. After a stated deprecation window (minimum 12 months),
+   `/api/v1/` returns 410 and the well-known doc drops `v1`.
+
+This means the plan commits to running both old and new
+endpoints during the overlap window — a bounded but real
+maintenance cost.
+
+### Schema-version evolution within a major version
+
+Additive changes within a major version are the common case:
+
+- Add a new optional column / field — same `schema_version`,
+  older subscribers ignore the field.
+- Add a new required column — bump `schema_version`. Older
+  subscribers refuse items that have it (logged, not crashed).
+- Change semantics of an existing field — bump `schema_version`.
+  Treat as a breaking change for any consumer that relies on the
+  old semantics.
+- Remove a field — bump `schema_version` *and* keep the field
+  populated for one prior version cycle so subscribers have time
+  to read at the new version.
+
+Every `schema_version` bump ships with a row in
+`docs/protocol/CHANGELOG.md` describing the change in
+human-readable terms. Peer operators subscribe to that file
+through git history.
+
+### Protocol conformance test
+
+The federation contract test (described in
+[`CATALOG_BACKEND_DEVELOPMENT.md`](CATALOG_BACKEND_DEVELOPMENT.md))
+tests two Wrangler instances against each combination of
+`(protocol_version, schema_version)` in the support matrix. A
+PR that breaks the matrix has to either expand the matrix
+explicitly or fail.
