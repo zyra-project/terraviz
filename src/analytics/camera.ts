@@ -36,7 +36,8 @@ interface CameraSettledParams {
   bearing: number
   pitch: number
   /** Optional dataset id loaded in the slot at the moment the
-   * camera settled. Forwarded verbatim to the event. */
+   * camera settled. Forwarded verbatim to the event; falsy values
+   * become `''` so the wire-side `layer_id` is always a string. */
   layer_id?: string | null
 }
 
@@ -96,7 +97,7 @@ export function emitCameraSettled(params: CameraSettledParams): boolean {
     zoom: round(params.zoom, 2),
     bearing: Math.round(params.bearing),
     pitch: Math.round(params.pitch),
-    layer_id: params.layer_id ?? null,
+    layer_id: params.layer_id ?? '',
   })
   return true
 }

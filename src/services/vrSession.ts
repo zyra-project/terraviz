@@ -498,7 +498,7 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
       typeof navigator !== 'undefined' ? navigator.userAgent : '',
     ),
     entry_load_ms: Math.max(0, sessionTelemetry.sessionStartedAtWall - entryStartedAtWall),
-    layer_id: ctx.getDatasetId(),
+    layer_id: ctx.getDatasetId() ?? '',
   })
 
   // Lazy-load the controller-model addon alongside Three.js. The
@@ -841,7 +841,7 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
       emitCameraSettled({
         slot_index: '0',
         projection: vrProjection,
-        layer_id: ctx.getDatasetId(),
+        layer_id: ctx.getDatasetId() ?? '',
         ...state,
       })
     },
@@ -950,14 +950,14 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
         }
         emit({
           event_type: 'vr_placement',
-          layer_id: ctx.getDatasetId(),
+          layer_id: ctx.getDatasetId() ?? '',
           persisted,
         })
       }).catch(err => {
         logger.warn('[VR] Failed to create placement anchor:', err)
         emit({
           event_type: 'vr_placement',
-          layer_id: ctx.getDatasetId(),
+          layer_id: ctx.getDatasetId() ?? '',
           persisted: false,
         })
       })
@@ -1270,14 +1270,15 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     // any disposal happens so frame counters / timestamps still
     // exist. mean_fps = total frames / wall-clock duration (a true
     // arithmetic mean, not a median — the name reflects what we
-    // compute). Null when the session was too short for a
-    // meaningful sample. For per-window medians, the perf_sampler
-    // emits fps_median_10s during the session.
+    // compute). 0 when the session was too short for a meaningful
+    // sample; dashboards filter `mean_fps > 0` to exclude these.
+    // For per-window medians, the perf_sampler emits
+    // fps_median_10s during the session.
     if (sessionTelemetry.sessionStartedAtWall > 0) {
       const durationMs = Math.max(0, Date.now() - sessionTelemetry.sessionStartedAtWall)
       const meanFps = durationMs >= 1000
         ? Math.round((sessionTelemetry.frames * 1000) / durationMs)
-        : null
+        : 0
       emit({
         event_type: 'vr_session_ended',
         mode,
@@ -1287,7 +1288,7 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
         // Snapshot of the loaded dataset at end-of-session. May
         // differ from `vr_session_started.layer_id` when the user
         // loaded something different while in VR.
-        layer_id: ctx.getDatasetId(),
+        layer_id: ctx.getDatasetId() ?? '',
       })
     }
 

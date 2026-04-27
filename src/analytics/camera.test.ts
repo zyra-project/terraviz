@@ -68,8 +68,9 @@ describe('emitCameraSettled — payload shape', () => {
     expect(e.zoom).toBe(4.12)
     expect(e.bearing).toBe(46)
     expect(e.pitch).toBe(12)
-    // layer_id defaults to null when caller doesn't supply one.
-    expect(e.layer_id).toBeNull()
+    // layer_id defaults to '' when caller doesn't supply one — see
+    // ingest.ts toDataPoint comment on positional-encoding stability.
+    expect(e.layer_id).toBe('')
   })
 
   it('forwards a supplied layer_id verbatim', () => {
@@ -88,7 +89,7 @@ describe('emitCameraSettled — payload shape', () => {
     expect(ev.layer_id).toBe('INTERNAL_SOS_42')
   })
 
-  it('coerces an explicit undefined layer_id to null', () => {
+  it('coerces an explicit undefined layer_id to empty string', () => {
     emitCameraSettled({
       slot_index: '0',
       projection: 'vr',
@@ -101,7 +102,7 @@ describe('emitCameraSettled — payload shape', () => {
     })
     const ev = __peek()[0]
     if (ev.event_type !== 'camera_settled') throw new Error('unreachable')
-    expect(ev.layer_id).toBeNull()
+    expect(ev.layer_id).toBe('')
   })
 
   it.each(['globe', 'mercator', 'vr', 'ar'] as const)(

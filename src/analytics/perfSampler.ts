@@ -242,11 +242,12 @@ function quantile(sortedAsc: number[], q: number): number {
 }
 
 /** Read a Chromium-only memory metric when available. Other engines
- * return `null`; the schema accepts that. */
-function jsHeapMb(): number | null {
-  if (typeof performance === 'undefined') return null
+ * return `0` (the schema requires a number); dashboards filter
+ * `jsheap_mb > 0` to exclude unsupported browsers. */
+function jsHeapMb(): number {
+  if (typeof performance === 'undefined') return 0
   const mem = (performance as unknown as { memory?: { usedJSHeapSize?: number } }).memory
-  if (!mem || typeof mem.usedJSHeapSize !== 'number') return null
+  if (!mem || typeof mem.usedJSHeapSize !== 'number') return 0
   return Math.round(mem.usedJSHeapSize / (1024 * 1024))
 }
 

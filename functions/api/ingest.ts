@@ -159,7 +159,14 @@ function isValidEvent(event: unknown): event is TelemetryEvent {
 
   for (const [key, value] of Object.entries(e)) {
     if (key === 'event_type') continue
-    if (value === null) continue
+    // Reject `null` on the wire — it confuses the positional blob /
+    // double encoding in `toDataPoint` (a skipped field shifts every
+    // subsequent field up one position, breaking dashboards that pin
+    // queries to specific blob/double indexes). Clients should emit
+    // `''` for empty strings and `0` (or another sentinel) for empty
+    // numbers; see `CameraSettledEvent.layer_id` for the canonical
+    // example.
+    if (value === null) return false
     const t = typeof value
     if (t === 'string') {
       if ((value as string).length > MAX_STRING_FIELD_LEN) return false
@@ -168,7 +175,7 @@ function isValidEvent(event: unknown): event is TelemetryEvent {
     } else if (t === 'boolean') {
       // OK
     } else {
-      // Objects, arrays, functions, symbols — rejected
+      // Objects, arrays, functions, symbols, undefined — rejected
       return false
     }
   }
@@ -264,7 +271,16 @@ async function isKillSwitchOn(env: Env): Promise<boolean> {
  *           staff identity present on the request)
  * Subsequent blobs and doubles are the event's own string / number
  * fields in alphabetical order. Query patterns that rely on blob
- * positions live in docs/ANALYTICS_QUERIES.md. */
+ * positions live in docs/ANALYTICS_QUERIES.md.
+ *
+ * Position-stability invariant: every event of a given `event_type`
+ * MUST contribute the same set of keys, otherwise a missing field
+ * shifts every subsequent field up by one position and breaks
+ * dashboards that pin queries to specific indexes. Enforced by:
+ *   - TS types declare every field as required (no `?:`).
+ *   - `null` is rejected at `isValidEvent` (clients emit `''`/`0`
+ *     sentinels for absent values).
+ *   - `undefined` is also rejected here for belt-and-suspenders. */
 export function toDataPoint(
   event: TelemetryEvent,
   sessionId: string,
@@ -287,6 +303,9 @@ export function toDataPoint(
 
   for (const key of keys) {
     const value = record[key]
+    // Validation already rejects null and undefined; this guard
+    // keeps the function safe if it's ever called from a path that
+    // bypasses validation.
     if (value === null || value === undefined) continue
     const t = typeof value
     if (t === 'string') {

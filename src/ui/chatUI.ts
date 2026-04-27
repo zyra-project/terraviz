@@ -584,9 +584,9 @@ async function handleSend(): Promise<void> {
     interaction: 'message_sent',
     subtype: 'user_text',
     model: cfgForEvent.model ?? 'unknown',
-    duration_ms: null,
-    input_tokens: null,
-    output_tokens: null,
+    duration_ms: 0,
+    input_tokens: 0,
+    output_tokens: 0,
   })
 
   // Create a placeholder docent message for streaming
@@ -750,8 +750,8 @@ async function handleSend(): Promise<void> {
     subtype: streamFinishReason,
     model: cfgForStreamEnd.model ?? 'unknown',
     duration_ms: streamDurationMs,
-    input_tokens: null,
-    output_tokens: null,
+    input_tokens: 0,
+    output_tokens: 0,
   })
   emit({
     event_type: 'orbit_turn',
@@ -761,8 +761,8 @@ async function handleSend(): Promise<void> {
     finish_reason: streamFinishReason,
     turn_index: turnIndex,
     duration_ms: streamDurationMs,
-    input_tokens: null,
-    output_tokens: null,
+    input_tokens: 0,
+    output_tokens: 0,
     content_length: docentMsg.text.length,
   })
 
@@ -977,9 +977,9 @@ function wireActionButtons(container: Element): void {
           interaction: 'action_executed',
           subtype: 'load_dataset',
           model: cfgForLoad.model ?? 'unknown',
-          duration_ms: null,
-          input_tokens: null,
-          output_tokens: null,
+          duration_ms: 0,
+          input_tokens: 0,
+          output_tokens: 0,
         })
         if (lastUserSendAt !== null) {
           emit({

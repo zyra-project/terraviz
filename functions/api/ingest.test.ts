@@ -266,7 +266,7 @@ describe('toDataPoint', () => {
     expect(dp.blobs!.filter((b) => b === 'true').length).toBeGreaterThanOrEqual(1)
   })
 
-  it('skips null and undefined fields entirely', () => {
+  it('skips null and undefined fields entirely (defense-in-depth — validation rejects them upstream)', () => {
     const event = {
       event_type: 'vr_session_ended',
       mode: 'vr',
@@ -278,6 +278,51 @@ describe('toDataPoint', () => {
     // null mean_fps should not appear anywhere
     expect(dp.doubles!.includes(NaN)).toBe(false)
     expect(dp.blobs!.includes('null')).toBe(false)
+  })
+
+  it('keeps blob/double positions stable across camera_settled events with empty optional fields', () => {
+    // Regression: when `layer_id` was nullable + skipped at encoding,
+    // a camera_settled event without a loaded dataset shifted every
+    // subsequent blob up one position, so the spatial-attention
+    // dashboard's `blob6 IN ('globe',...)` filter matched zero rows.
+    // Empty-string sentinels keep positions identical to the
+    // dataset-loaded case.
+    const withDataset = {
+      event_type: 'camera_settled',
+      slot_index: '0',
+      projection: 'globe',
+      layer_id: 'INTERNAL_SOS_HURRICANE_KATRINA',
+      center_lat: 29.95,
+      center_lon: -90.07,
+      zoom: 4,
+      bearing: 0,
+      pitch: 0,
+    } as unknown as TelemetryEvent
+    const withoutDataset = {
+      event_type: 'camera_settled',
+      slot_index: '0',
+      projection: 'globe',
+      layer_id: '',
+      center_lat: 29.95,
+      center_lon: -90.07,
+      zoom: 4,
+      bearing: 0,
+      pitch: 0,
+    } as unknown as TelemetryEvent
+    const a = toDataPoint(withDataset, 'sess', 'production', 'US', false)
+    const b = toDataPoint(withoutDataset, 'sess', 'production', 'US', false)
+    // Same length and same per-position type — the only difference
+    // should be the layer_id value (blob5).
+    expect(a.blobs!.length).toBe(b.blobs!.length)
+    expect(a.doubles!.length).toBe(b.doubles!.length)
+    // blob6 is `projection` in both, regardless of whether layer_id
+    // is populated.
+    expect(a.blobs![5]).toBe('globe')
+    expect(b.blobs![5]).toBe('globe')
+    // double3 is `center_lon` in both (alphabetical order: bearing,
+    // center_lat, center_lon, pitch, zoom).
+    expect(a.doubles![2]).toBe(-90.07)
+    expect(b.doubles![2]).toBe(-90.07)
   })
 
   it('orders per-event string fields alphabetically after the four server blobs', () => {
@@ -548,6 +593,17 @@ describe('onRequestPost — rejections', () => {
     // Number.isFinite guard via an explicit encode bypass.
     const ctx = makeCtx({
       body: `{"session_id":"sess","events":[{"event_type":"layer_loaded","load_ms":1e400}]}`,
+    })
+    const res = await onRequestPost(ctx)
+    expect(res.status).toBe(400)
+  })
+
+  it('rejects null event field values with 400 (positional encoding requires non-null)', async () => {
+    const ctx = makeCtx({
+      body: JSON.stringify({
+        session_id: 'sess',
+        events: [{ event_type: 'camera_settled', layer_id: null }],
+      }),
     })
     const res = await onRequestPost(ctx)
     expect(res.status).toBe(400)

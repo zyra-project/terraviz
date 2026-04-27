@@ -53,6 +53,14 @@ positional schema. The first four `blobs[]` are server-stamped
 > within that filter) so a future schema addition doesn't silently
 > change column meaning.
 
+> **Null on the wire is forbidden.** Clients emit `''` for empty
+> strings and `0` for empty numbers; the ingest function rejects
+> events containing `null` field values with 400. Otherwise a
+> skipped field would shift every subsequent field up one position
+> within the same `event_type`, so dashboards that pin to specific
+> blob/double indexes would see column meanings flip depending on
+> which optional fields a particular event populated.
+
 ---
 
 ## Boilerplate
@@ -157,7 +165,7 @@ the four server-stamped blobs. Order is alphabetical by field name
 
 | Position | Field |
 |---|---|
-| `blob5` | `layer_id` (nullable — empty string when no dataset loaded) |
+| `blob5` | `layer_id` (empty string `''` when no dataset loaded — never null) |
 | `blob6` | `projection` (`globe` / `mercator` / `vr` / `ar`) |
 | `blob7` | `slot_index` |
 | `double1` | `bearing` (degrees, integer-rounded) |
@@ -171,7 +179,7 @@ the four server-stamped blobs. Order is alphabetical by field name
 
 | Position | Field |
 |---|---|
-| `blob5` | `hit_id` (nullable) |
+| `blob5` | `hit_id` (empty string `''` for bare-surface clicks — never null) |
 | `blob6` | `hit_kind` (`surface` / `marker` / `feature` / `region`) |
 | `blob7` | `slot_index` |
 | `double1` | `client_offset_ms` |
@@ -258,7 +266,7 @@ Position | Started | Ended
 
 | Position | Field |
 |---|---|
-| `blob5` | `layer_id` (nullable) |
+| `blob5` | `layer_id` (empty string `''` when no dataset loaded — never null) |
 | `blob6` | `persisted` (`true` / `false`) |
 | `double1` | `client_offset_ms` |
 
