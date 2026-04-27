@@ -8,6 +8,9 @@ production data, or audit the privacy posture.
 > - [`PRIVACY.md`](PRIVACY.md) — the user-facing privacy policy. Single
 >   source of truth for what we promise; everything in this file must
 >   match it.
+> - [`PRIVACY_ANALYSIS.md`](PRIVACY_ANALYSIS.md) — quantitative
+>   reviewer-facing analysis. For the entropy budget and
+>   quasi-identifier analysis behind the privacy posture, see this file.
 > - [`ANALYTICS_QUERIES.md`](ANALYTICS_QUERIES.md) — the full schema
 >   reference (per-event blob/double positions) plus a library of
 >   sample SQL for Grafana panels.
