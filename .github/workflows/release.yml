@@ -63,10 +63,58 @@ jobs:
           git tag "v${{ github.event.inputs.version }}" 2>/dev/null || echo "Tag already exists, reusing"
           git push origin "${{ github.event.inputs.branch }}" --tags 2>/dev/null || echo "Tag already pushed"
 
+  # --- Create the release once before the matrix dispatches ---
+  # Without this, all three matrix legs run tauri-action's
+  # "look up release by tag" check concurrently, all miss, and
+  # each creates its own draft for the same tag — producing
+  # duplicate drafts with one platform's bundles in each. This
+  # job creates (or reuses, on re-run) a single release and
+  # passes its id into the matrix.
+  create-release:
+    needs: [prepare]
+    if: always() && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.resolve.outputs.release_id }}
+    env:
+      TAG: ${{ needs.prepare.outputs.tag || github.ref_name }}
+      DRAFT: ${{ github.event.inputs.draft || 'true' }}
+    steps:
+      - name: Resolve or create release
+        id: resolve
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = process.env.TAG
+            let release
+            try {
+              const { data } = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag,
+              })
+              release = data
+              core.info(`Reusing existing release ${release.id} for ${tag}`)
+            } catch (e) {
+              if (e.status !== 404) throw e
+              const { data } = await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: tag,
+                name: `Terraviz ${tag}`,
+                body: `See the [full changelog](https://github.com/${context.repo.owner}/${context.repo.repo}/commits/${tag}).`,
+                draft: process.env.DRAFT === 'true',
+                prerelease: false,
+              })
+              release = data
+              core.info(`Created release ${release.id} for ${tag}`)
+            }
+            core.setOutput('release_id', release.id)
+
   # --- Build and upload to GitHub Release ---
   build-and-release:
-    if: always() && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
-    needs: [prepare]
+    if: always() && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped') && needs.create-release.result == 'success'
+    needs: [prepare, create-release]
     strategy:
       fail-fast: false
       matrix:
@@ -128,21 +176,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tauriScript: npx tauri
-          tagName: ${{ needs.prepare.outputs.tag || github.ref_name }}
-          releaseName: 'Terraviz ${{ needs.prepare.outputs.tag || github.ref_name }}'
-          releaseBody: |
-            See the [full changelog](https://github.com/zyra-project/terraviz/commits/${{ needs.prepare.outputs.tag || github.ref_name }}).
-
-            ## Installation
-            | Platform | Download |
-            |---|---|
-            | Windows | `.msi` (recommended) or `.exe` (NSIS) |
-            | macOS | `.dmg` |
-            | Linux | `.AppImage` (portable) or `.deb` (Debian/Ubuntu) |
-
-            ## Auto-Updates
-            Existing installations will receive this update automatically on next launch.
-          releaseDraft: ${{ github.event.inputs.draft || 'true' }}
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           prerelease: false
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
