@@ -36,8 +36,9 @@ interface CameraSettledParams {
   bearing: number
   pitch: number
   /** Optional dataset id loaded in the slot at the moment the
-   * camera settled. Forwarded verbatim to the event; falsy values
-   * become `''` so the wire-side `layer_id` is always a string. */
+   * camera settled. Forwarded verbatim to the event; nullish
+   * values become `''` so the wire-side `layer_id` is always a
+   * string. */
   layer_id?: string | null
 }
 

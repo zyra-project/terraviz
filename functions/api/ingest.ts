@@ -276,11 +276,22 @@ async function isKillSwitchOn(env: Env): Promise<boolean> {
  * Position-stability invariant: every event of a given `event_type`
  * MUST contribute the same set of keys, otherwise a missing field
  * shifts every subsequent field up by one position and breaks
- * dashboards that pin queries to specific indexes. Enforced by:
- *   - TS types declare every field as required (no `?:`).
- *   - `null` is rejected at `isValidEvent` (clients emit `''`/`0`
- *     sentinels for absent values).
- *   - `undefined` is also rejected here for belt-and-suspenders. */
+ * dashboards that pin queries to specific indexes. Maintained by:
+ *   - Per-event interfaces in `src/types/index.ts` declare their
+ *     own fields as required, with `''`/`0` sentinels emitted at
+ *     call sites when a value is absent (e.g. `layer_id: ''`).
+ *   - `TelemetryEventBase.client_offset_ms` is optional in source
+ *     but is always stamped by `emit()` before the event leaves
+ *     the client, so it's effectively present on every datapoint.
+ *   - `SessionStartEvent.resumed` is the one remaining optional
+ *     field; it sorts after `platform` alphabetically, so the
+ *     blob5..blob10 positions used by dashboards are stable
+ *     whether `resumed` is present or not. Adding any new
+ *     optional field that sorts earlier would break this — see
+ *     `ANALYTICS_CONTRIBUTING.md`.
+ *   - `null` is rejected at `isValidEvent` (clients emit
+ *     sentinels, never `null`).
+ *   - `undefined` is skipped here for belt-and-suspenders. */
 export function toDataPoint(
   event: TelemetryEvent,
   sessionId: string,

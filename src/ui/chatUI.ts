@@ -739,7 +739,9 @@ async function handleSend(): Promise<void> {
   // assistant-side orbit_turn fire here so they reflect the
   // actual round-trip the user perceived (includes streaming
   // tail). Token counts come from the llmContext snapshot when
-  // the provider attached one; null otherwise.
+  // the provider attached one; `0` otherwise (the wire-stable
+  // sentinel — dashboards filter `input_tokens > 0` to scope to
+  // billable traffic).
   const cfgForStreamEnd = loadConfig()
   const streamDurationMs = Math.max(0, Date.now() - turnStartedAt)
   const docentMessages = messages.filter((m) => m.role === 'docent')
