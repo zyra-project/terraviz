@@ -227,7 +227,9 @@ CREATE TABLE datasets (
   organization       TEXT,
   format             TEXT NOT NULL,           -- video/mp4, image/png, tour/json, ...
   data_ref           TEXT NOT NULL,           -- internal handle: stream:<uid>, r2:<key>, url:<url>
-  thumbnail_ref      TEXT,
+  thumbnail_ref           TEXT,                -- flat 16:9 / 4:3 card image
+  sphere_thumbnail_ref    TEXT,                -- 2:1 equirectangular for mini-globe rendering
+  sphere_thumbnail_ref_lg TEXT,                -- optional 1024x512 for hero use
   legend_ref         TEXT,
   caption_ref        TEXT,
   website_link       TEXT,
@@ -837,6 +839,165 @@ manifest endpoint can fall back to serving the original from R2 and
 omit the variants array; the frontend handles that case by using
 the fallback URL.
 
+### Sphere thumbnails (2:1 equirectangular)
+
+A flat thumbnail card is the obvious choice for a 2D browse list,
+but a Terraviz dataset is fundamentally spherical — a 16:9 still
+flattens away the property that makes it interesting. The plan
+ships a second thumbnail variant alongside the flat one: a small
+2:1 equirectangular texture that can be wrapped onto a low-cost
+mini-globe in the UI.
+
+Use cases this unlocks:
+
+- **Rotating sphere on each browse card.** Hover (or auto-rotate)
+  spins a small globe with the dataset's actual texture, so the
+  card preview reads as "the dataset," not "a screenshot of a
+  globe." Fits the existing `browseUI.ts` card layout with no
+  layout change.
+- **Network graph of datasets.** A force-directed layout where
+  each dataset is a small sphere and edges are shared categories
+  / keywords / tours. Acts as a visual table of contents for the
+  catalog and works well as a federation explorer ("see how peer
+  X's datasets connect to yours").
+- **Federated peer overview.** A peer's well-known endpoint
+  could surface a "constellation" of its datasets at a glance
+  without pulling the full catalog.
+- **Tour preview ribbons.** A horizontal strip of mini-globes,
+  one per dataset the tour visits, rendered in playback order.
+- **Empty-state and loading hero.** A slowly rotating sphere of
+  a curated dataset is a much warmer placeholder than a spinner.
+
+#### Asset shape
+
+| Property | Value |
+|---|---|
+| Aspect | 2:1 equirectangular (matches Terraviz's full-globe textures) |
+| Default size | 512 × 256 (≈40 KB WebP, ≈100 KB JPEG) |
+| Optional larger | 1024 × 512 for hero use, opt-in per dataset |
+| Format | WebP primary, JPEG fallback for older webviews |
+| Color | sRGB / 8-bit always (HDR is wasted on a thumbnail) |
+| No alpha | Even for transparent datasets, the sphere thumbnail composites against the dataset's natural background |
+
+#### Generation pipeline
+
+Generated at upload time, never by the publisher manually:
+
+| Source | Method |
+|---|---|
+| Video dataset | First-frame extract via Stream's thumbnail API at t = duration / 4 (avoids title cards), downscaled to 512×256, WebP+JPEG. |
+| Image dataset | Downsample the canonical original through Cloudflare Images to 512×256 with `fit=fill` (the image is already 2:1 in practice for SOS data; assert and warn otherwise). |
+| Tour | Sphere-thumb of the tour's first `loadDataset` target, with a small "play" badge composited corner. |
+| Tiled raster | Composite the lowest-zoom-level tiles into a single 512×256 image at ingest. |
+
+The asset-complete handler runs the generation as part of the
+existing transcode/upload finalization step — no separate publisher
+action required. A "regenerate sphere thumbnail" button in the
+publisher portal handles the rare case where the auto-pick frame
+is unrepresentative (mid-fade, all-black, etc.).
+
+#### Storage & serving
+
+Lives at a predictable R2 key alongside the flat thumbnail:
+
+```
+datasets/{id}/sphere-thumbnail.webp
+datasets/{id}/sphere-thumbnail.jpg
+datasets/{id}/sphere-thumbnail-1024.webp   (optional larger)
+```
+
+Public-visibility datasets serve through R2's public URL +
+Cloudflare cache (long-TTL, immutable filename via content hash on
+upload — the row stores the full key). Restricted datasets serve
+via a presigned URL from the manifest endpoint, same pattern as
+the rest of the asset stack.
+
+#### Catalog response
+
+A new field on `Dataset` on the wire:
+
+```jsonc
+{
+  "thumbnailLink": ".../thumbnail.jpg",          // existing flat
+  "sphereThumbnailLink": ".../sphere-thumbnail.webp",
+  "sphereThumbnailLinkLarge": null               // present only if generated
+}
+```
+
+The flat `thumbnailLink` stays the default for any caller that
+doesn't ask for the spherical one, so existing federation peers
+running an older client see no change.
+
+#### Frontend rendering
+
+A `MiniSphere` component lives in `src/ui/miniSphere.ts`, built on
+the existing photoreal-Earth factory in
+`src/services/photorealEarth.ts` but stripped to:
+
+- One sphere geometry (shared instance across all mini-spheres on
+  a page).
+- One material per sphere with the equirectangular thumb as a
+  texture.
+- Optional auto-rotate (`y` axis, slow constant rate).
+- Optional pointer-driven rotate while the cursor is over the card.
+- No atmosphere, no clouds, no day/night shader, no sun.
+
+Three.js is already lazy-loaded for VR; the same chunk powers
+mini-spheres. The chunk is loaded the first time a view that
+contains mini-spheres is rendered — browse cards, network graph,
+or tour ribbon — and stays warm afterwards.
+
+#### Performance budget
+
+Naïve "one WebGL canvas per card" doesn't scale past a few dozen
+spheres. The plan's strategy:
+
+- **Browse list (≤ ~30 visible at once):** one shared
+  `WebGLRenderer` rendering into a single canvas that overlays
+  the card grid via absolute positioning, with per-sphere
+  scissor regions. Same renderer, N sub-viewports, vastly fewer
+  GPU contexts than N canvases.
+- **Network graph (50–500 nodes):** instanced rendering of one
+  sphere geometry, with the per-sphere texture either:
+  - sampled from a CSS-style "texture atlas" (a single 4Kx4K
+    WebP with each dataset's 256x128 thumb tiled in), or
+  - a `THREE.DataArrayTexture` of equirectangular tiles indexed
+    per instance. The atlas approach is the simpler default.
+- **Off-viewport / paused tab:** rAF stops when the tab is
+  hidden (the page already does this for the main globe);
+  mini-spheres inherit the pause for free.
+- **Low-end fallback:** devices without WebGL2, or those that
+  fail the existing capability probe, render the flat thumbnail
+  unchanged. The component never crashes a browse view.
+
+The overall rule: a hundred mini-spheres should cost less than
+the main globe. If they don't, drop to the atlas billboard mode
+(pre-render each sphere to a 256x256 canvas once and treat it as
+a regular `<img>`) — visually similar at small sizes, almost free
+to render in bulk.
+
+#### Network-graph view (defer the *design*, enable the *capability*)
+
+The catalog backend's job here is to make the asset cheaply
+available; the actual graph view is a separate piece of UI work
+worth its own short plan. What the catalog provides:
+
+- The `sphereThumbnailLink` field, populated for every dataset.
+- An optional `/api/v1/catalog/graph` endpoint (Phase 4) that
+  returns a slim payload — `{ id, sphereThumbnailLink, edges: [...] }`
+  with edges derived from shared keywords, categories, and tour
+  co-occurrence. Pre-computed on publish, cached in KV. Lets a
+  client render a graph without pulling full catalog records for
+  every node.
+- Federation: a peer's mini-spheres come along for the ride in
+  the federated catalog response. A network graph that spans
+  peers visualises the federation itself — which is exactly the
+  "constellation of nodes" mental model the user asked for.
+
+The graph view's own design (layout algorithm, interaction model,
+which edge predicates are exposed as filters) can land later
+without re-touching the backend.
+
 ### Thumbnails, legends, captions
 
 All small assets land in a single R2 bucket (`terraviz-assets`)
@@ -1187,6 +1348,13 @@ visible in the codebase today, the candidates are:
   when federation is real.
 - **Tour playlist / season.** Group tours into a series. Trivial
   schema (`tour_collections`); ship in Phase 4 if there's demand.
+- **Catalog network-graph view.** Force-directed graph of
+  datasets-as-mini-spheres connected by shared keywords,
+  categories, and tour co-occurrence. Reads the
+  `/api/v1/catalog/graph` endpoint described in the asset
+  pipeline. Doubles as a federation explorer when the graph
+  spans peers. Phase 4 — design lives in its own plan once the
+  sphere-thumbnail asset is in place.
 - **Authoring API for non-web tools.** The publisher API is REST
   already, so a CLI (`terraviz publish`) is straightforward.
   Useful for batch jobs and CI-driven dataset updates from
