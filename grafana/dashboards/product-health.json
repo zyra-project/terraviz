@@ -9,7 +9,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 5,
+  "version": 6,
   "refresh": "5m",
   "time": {
     "from": "now-7d",
@@ -441,7 +441,7 @@
       "id": 8,
       "type": "table",
       "title": "VR sessions — funnel + end-of-session FPS",
-      "description": "Per device_class × mode: count, average entry-load latency, p50 of mean_fps at session end. mean_fps is the arithmetic mean over the whole session; for in-session medians query perf_sample.",
+      "description": "Per device_class × mode: count, average entry-load latency, p50 of mean_fps at session end. `device_class` and `entry_load_ms` only exist on vr_session_started; `mean_fps` only exists on vr_session_ended; we LEFT JOIN the two events on session_id so a started session that hasn't ended yet still appears with a null fps. mean_fps is the arithmetic mean over the whole session; for in-session medians query perf_sample.",
       "gridPos": {
         "x": 12,
         "y": 18,
@@ -465,7 +465,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT blob6 AS device_class, blob7 AS mode, count() AS sessions, avg(double2) AS avg_entry_load_ms, quantile(0.50)(double3) AS p50_session_mean_fps FROM terraviz_events WHERE blob1 = 'vr_session_ended' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY device_class, mode ORDER BY sessions DESC",
+            "data": "WITH started AS (SELECT index1 AS session_id, blob5 AS device_class, blob7 AS mode, double2 AS entry_load_ms FROM terraviz_events WHERE blob1 = 'vr_session_started' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000))), ended AS (SELECT index1 AS session_id, double3 AS mean_fps FROM terraviz_events WHERE blob1 = 'vr_session_ended' AND blob2 = '$environment' AND blob4 = '$internal' AND double3 > 0 AND timestamp > toDateTime(intDiv($__from, 1000))) SELECT started.device_class, started.mode, count() AS sessions, avg(started.entry_load_ms) AS avg_entry_load_ms, quantile(0.50)(ended.mean_fps) AS p50_session_mean_fps FROM started LEFT JOIN ended ON started.session_id = ended.session_id GROUP BY started.device_class, started.mode ORDER BY sessions DESC",
             "headers": [
               {
                 "key": "Content-Type",

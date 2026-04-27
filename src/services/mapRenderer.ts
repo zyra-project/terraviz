@@ -420,7 +420,7 @@ export class MapRenderer implements GlobeRenderer {
         zoom: this.map.getZoom(),
         bearing: this.map.getBearing(),
         pitch: this.map.getPitch(),
-        layer_id: this.getLayerId?.() ?? null,
+        layer_id: this.getLayerId?.() ?? '',
       })
     })
 
@@ -440,7 +440,7 @@ export class MapRenderer implements GlobeRenderer {
         event_type: 'map_click',
         slot_index: String(this.slotIndex),
         hit_kind: hitKind,
-        hit_id: top?.id != null ? String(top.id) : null,
+        hit_id: top?.id != null ? String(top.id) : '',
         lat: Math.round(e.lngLat.lat * 1000) / 1000,
         lon: Math.round(e.lngLat.lng * 1000) / 1000,
         zoom: Math.round(this.map!.getZoom() * 100) / 100,

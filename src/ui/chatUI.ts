@@ -584,9 +584,9 @@ async function handleSend(): Promise<void> {
     interaction: 'message_sent',
     subtype: 'user_text',
     model: cfgForEvent.model ?? 'unknown',
-    duration_ms: null,
-    input_tokens: null,
-    output_tokens: null,
+    duration_ms: 0,
+    input_tokens: 0,
+    output_tokens: 0,
   })
 
   // Create a placeholder docent message for streaming
@@ -738,8 +738,12 @@ async function handleSend(): Promise<void> {
   // Tier B: stream-end metrics. response_complete + the
   // assistant-side orbit_turn fire here so they reflect the
   // actual round-trip the user perceived (includes streaming
-  // tail). Token counts come from the llmContext snapshot when
-  // the provider attached one; null otherwise.
+  // tail). Token counts are emitted as `0` because llmProvider
+  // doesn't yet surface usage data from OpenAI-compatible
+  // providers — TODO: capture `usage.prompt_tokens` /
+  // `completion_tokens` from the final SSE chunk and thread them
+  // through to here so dashboards' `input_tokens > 0` filter
+  // gains real signal.
   const cfgForStreamEnd = loadConfig()
   const streamDurationMs = Math.max(0, Date.now() - turnStartedAt)
   const docentMessages = messages.filter((m) => m.role === 'docent')
@@ -750,8 +754,8 @@ async function handleSend(): Promise<void> {
     subtype: streamFinishReason,
     model: cfgForStreamEnd.model ?? 'unknown',
     duration_ms: streamDurationMs,
-    input_tokens: null,
-    output_tokens: null,
+    input_tokens: 0,
+    output_tokens: 0,
   })
   emit({
     event_type: 'orbit_turn',
@@ -761,8 +765,8 @@ async function handleSend(): Promise<void> {
     finish_reason: streamFinishReason,
     turn_index: turnIndex,
     duration_ms: streamDurationMs,
-    input_tokens: null,
-    output_tokens: null,
+    input_tokens: 0,
+    output_tokens: 0,
     content_length: docentMsg.text.length,
   })
 
@@ -977,9 +981,9 @@ function wireActionButtons(container: Element): void {
           interaction: 'action_executed',
           subtype: 'load_dataset',
           model: cfgForLoad.model ?? 'unknown',
-          duration_ms: null,
-          input_tokens: null,
-          output_tokens: null,
+          duration_ms: 0,
+          input_tokens: 0,
+          output_tokens: 0,
         })
         if (lastUserSendAt !== null) {
           emit({

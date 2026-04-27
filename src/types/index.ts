@@ -764,17 +764,20 @@ export interface CameraSettledEvent extends TelemetryEventBase {
   bearing: number
   pitch: number
   /** Dataset currently loaded in the slot at the moment the camera
-   * settled. Null when the panel is showing the default Earth.
-   * Lets dashboards split spatial-attention heatmaps by dataset
-   * without a session-scoped join against `layer_loaded`. */
-  layer_id?: string | null
+   * settled. Empty string when the panel is showing the default
+   * Earth. Required and non-null so blob positions stay stable in
+   * Analytics Engine — see comment on `toDataPoint`. */
+  layer_id: string
 }
 
 export interface MapClickEvent extends TelemetryEventBase {
   event_type: 'map_click'
   slot_index: string
   hit_kind: 'surface' | 'marker' | 'feature' | 'region'
-  hit_id: string | null
+  /** Empty string when the click landed on a bare surface with no
+   * marker / feature / region id. See `toDataPoint` for why we
+   * avoid `null` on the wire. */
+  hit_id: string
   lat: number
   lon: number
   zoom: number
@@ -894,10 +897,10 @@ export interface VrSessionStartedEvent extends TelemetryEventBase {
   device_class: string
   entry_load_ms: number
   /** Dataset loaded in the primary panel at the moment the user
-   * entered VR. Null when entering with the default Earth view.
-   * Snapshot — a load that happens later in the session is
+   * entered VR. Empty string when entering with the default Earth
+   * view. Snapshot — a load that happens later in the session is
    * captured separately by the next `layer_loaded` event. */
-  layer_id?: string | null
+  layer_id: string
 }
 
 export interface VrSessionEndedEvent extends TelemetryEventBase {
@@ -907,19 +910,21 @@ export interface VrSessionEndedEvent extends TelemetryEventBase {
   duration_ms: number
   /** End-of-session arithmetic mean of FPS over the whole session
    * (`total frames / wall-clock duration`). For per-window medians
-   * during the session, see `perf_sample.fps_median_10s`. Null when
-   * the session was too short for a meaningful sample (< 1 s). */
-  mean_fps: number | null
+   * during the session, see `perf_sample.fps_median_10s`. `0` when
+   * the session was too short for a meaningful sample (< 1 s) —
+   * dashboards filter `mean_fps > 0` to exclude these. */
+  mean_fps: number
   /** Dataset loaded in the primary panel at the moment the session
    * ended. May differ from `vr_session_started.layer_id` if the
-   * user loaded a different dataset mid-session. Null when the
-   * session ended on the default Earth view. */
-  layer_id?: string | null
+   * user loaded a different dataset mid-session. Empty string
+   * when the session ended on the default Earth view. */
+  layer_id: string
 }
 
 export interface VrPlacementEvent extends TelemetryEventBase {
   event_type: 'vr_placement'
-  layer_id: string | null
+  /** Empty string when no dataset was loaded at placement time. */
+  layer_id: string
   persisted: boolean
 }
 
@@ -930,7 +935,10 @@ export interface PerfSampleEvent extends TelemetryEventBase {
   webgl_renderer_hash: string
   fps_median_10s: number
   frame_time_p95_ms: number
-  jsheap_mb: number | null
+  /** `0` when `performance.memory` is unavailable (non-Chromium).
+   * Dashboards filter `jsheap_mb > 0` to exclude unsupported
+   * browsers from the distribution. */
+  jsheap_mb: number
 }
 
 export interface ErrorEvent extends TelemetryEventBase {
@@ -960,9 +968,15 @@ export interface OrbitInteractionEvent extends TelemetryEventBase {
   interaction: OrbitInteractionKind
   subtype: string
   model: string
-  duration_ms: number | null
-  input_tokens: number | null
-  output_tokens: number | null
+  /** `0` when the interaction has no measurable duration (e.g.
+   * synchronous click). Dashboards filter `duration_ms > 0` to
+   * isolate timed interactions. */
+  duration_ms: number
+  /** `0` when token counts aren't reported by the LLM provider.
+   * Dashboards filter `input_tokens > 0` to scope to billable
+   * traffic. */
+  input_tokens: number
+  output_tokens: number
 }
 
 export interface OrbitTurnEvent extends TelemetryEventBase {
@@ -973,8 +987,11 @@ export interface OrbitTurnEvent extends TelemetryEventBase {
   finish_reason: 'stop' | 'length' | 'tool_calls' | 'error'
   turn_index: number
   duration_ms: number
-  input_tokens: number | null
-  output_tokens: number | null
+  /** `0` when token counts aren't reported by the LLM provider.
+   * Dashboards filter `input_tokens > 0` to scope to billable
+   * traffic. */
+  input_tokens: number
+  output_tokens: number
   content_length: number
 }
 
