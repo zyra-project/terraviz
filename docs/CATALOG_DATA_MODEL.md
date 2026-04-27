@@ -304,3 +304,238 @@ Vimeo links are preserved verbatim in `data_ref` as `vimeo:<id>` and
 resolved by the manifest endpoint (see
 [`CATALOG_ASSETS_PIPELINE.md`](CATALOG_ASSETS_PIPELINE.md)), so
 cutover doesn't require uploading anything to Stream on day one.
+
+## Schema migration tooling
+
+D1 ships its own migration runner; the question is how we wrap it
+so a contributor can move forward and back safely, and so a
+production rollout doesn't leave the schema in a half-applied
+state.
+
+### File layout
+
+```
+migrations/catalog/
+  0001_init.sql                  -- node_identity, datasets (Phase-1 columns)
+  0002_renditions.sql            -- dataset_renditions + indexes
+  0003_federation.sql            -- federation_peers, federated_datasets, ...
+  0004_publishers.sql            -- publishers, dataset_grants, audit_events
+  0005_license_columns.sql       -- license_*, attribution_*, doi, citation_text
+  0006_media_intrinsics.sql      -- width/height/color_space/.../alpha_encoding
+  ...
+```
+
+Each migration is forward-only. Numeric prefix is monotonic and
+gap-free; `wrangler d1 migrations apply` is the runner.
+
+### Forward-only with paired down-migrations
+
+D1 has no built-in down-migration story and the Cloudflare runtime
+never runs them. The plan inverts the usual approach: every
+backward-incompatible change ships as a *pair* of forward
+migrations, with the old schema kept readable until consumers
+migrate.
+
+```
+0010_add_thingy.sql              -- adds new column / table / index
+0011_dual_write_thingy.sql       -- code starts dual-writing
+... [N releases, code reads from new shape] ...
+0023_drop_old_thingy.sql         -- removes legacy column / table
+```
+
+Rollbacks are *forward-fix migrations*, not reverts: if `0011`
+breaks, you ship `0012_revert_thingy_dual_write.sql`. This
+matches how every long-lived production database actually
+handles schema change.
+
+### CI gates
+
+- **Per-PR.** A workflow spins up an ephemeral local D1, applies
+  every migration in order, then applies the new migrations. Fails
+  if any SQL is invalid or non-idempotent.
+- **Schema diff.** A second workflow dumps the resulting schema
+  and diffs against a checked-in `migrations/catalog/SCHEMA.sql`
+  snapshot. Schema changes require updating the snapshot in the
+  same PR — the diff is the review artefact.
+- **Federation contract test** (in
+  [`CATALOG_FEDERATION_PROTOCOL.md`](CATALOG_FEDERATION_PROTOCOL.md))
+  runs the migrated schema against the previous protocol version
+  to catch wire-shape regressions.
+
+### Production rollout
+
+Migrations apply to production D1 *before* the new Pages bundle
+is promoted, so a bundle rollback can revert the code without
+leaving D1 mid-migration. Concretely the deploy workflow is:
+
+1. `wrangler d1 migrations apply terraviz` against production D1.
+2. Pages bundle promotion (instant; serves new + old SQL).
+3. (Verify.)
+4. Subsequent migration that drops legacy columns, only after
+   every running bundle has been the new one for > 24h.
+
+The "old code reads new schema" invariant in step 2 is the
+reason for the dual-write pattern in step 0010/0011 above.
+
+## Dataset revisions
+
+Reanalysis, model updates, and corrected datasets force a
+question that a single `datasets` row can't answer: is this a new
+dataset or version 2 of an existing one? Both choices have valid
+use cases.
+
+### Two revision modes
+
+| Mode | Behaviour | When to use |
+|---|---|---|
+| **In-place edit** | `UPDATE datasets SET ... WHERE id = ?`. `updated_at` bumps; `published_at` unchanged. Subscribers re-fetch on next sync. | Typo fixes, abstract rewording, license corrections. |
+| **Versioned revision** | New row with new `id`, same `lineage_id`, `revision_of` pointing at the previous row. Both rows visible until the older is retracted. | Reanalysis, methodology change, time-range extension, anything a citation should distinguish. |
+
+The schema accommodates both:
+
+```sql
+ALTER TABLE datasets ADD COLUMN lineage_id   TEXT;  -- ULID, shared across revisions
+ALTER TABLE datasets ADD COLUMN revision_of  TEXT;  -- previous datasets.id, nullable
+ALTER TABLE datasets ADD COLUMN revision_num INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE datasets ADD COLUMN revision_note TEXT; -- short human-readable changelog
+CREATE INDEX idx_datasets_lineage ON datasets(lineage_id, revision_num);
+```
+
+For an in-place edit, `lineage_id = id` and `revision_num = 1`
+for the life of the row.
+
+For a versioned revision, the publisher portal:
+1. Clones the previous row (new ULID), copies fields.
+2. Sets `lineage_id` to the previous row's `lineage_id`,
+   `revision_of` to the previous row's `id`, increments
+   `revision_num`.
+3. Lets the publisher edit and re-upload assets.
+4. On publish, optionally retracts the previous revision (the
+   default for time-series data, opt-out for cases where past
+   versions stay citable).
+
+### Federation behaviour
+
+- Subscribers receive each revision as its own dataset (different
+  `id`). `lineage_id` and `revision_of` come along in the
+  payload.
+- Browse UI groups by `lineage_id` and shows only the latest
+  non-retracted revision by default; an "older revisions" expander
+  shows the rest.
+- Tours pin to a specific `id`; if that `id` is retracted, the
+  tour either upgrades to the latest revision (default) or refuses
+  to play (opt-in stricter mode).
+- The audit log records every clone-for-revision, so an external
+  citation pointing at a retracted revision is still traceable.
+
+### Citation implications
+
+Versioned revisions are the right substrate for DOIs (next
+section): each revision can carry its own DOI without conflating
+"the dataset" with "the dataset as it existed in March 2026."
+
+## Persistent identifiers
+
+Local ULIDs are stable within a node but lose meaning if the
+node moves, rebrands, or dies. Real scientific use needs
+identifiers that survive infrastructure changes.
+
+### Default: stable HTTPS URIs
+
+The minimum-viable persistent identifier is the canonical URL of
+the dataset on its origin node:
+
+```
+https://terraviz.example.org/datasets/{slug}
+```
+
+`slug` is publisher-chosen, unique, and not reused on retract.
+The frontend serves a stable HTML page at this URL with
+`schema.org/Dataset` JSON-LD embedded so search engines and
+reference managers can resolve it.
+
+This is enough for casual citation but breaks if the node moves.
+
+### Tier 1 upgrade: DOIs via DataCite
+
+For nodes that want real persistence, the publisher portal can
+register a DOI per dataset (or per revision) through DataCite.
+Cost: a DataCite membership ($) and an HTTPS URL that DataCite
+can resolve to.
+
+Schema is already in place: `datasets.doi` carries the DOI string
+when one is registered. The publisher portal exposes a "Register
+DOI" action that:
+
+1. Builds the DataCite metadata payload from the dataset row +
+   developers + license + lineage info.
+2. Posts to DataCite's REST API.
+3. Stores the returned DOI in `doi` and writes an audit row.
+
+The DOI resolves to the canonical URL on the origin node;
+moving the node means redirecting that URL or updating the
+DataCite entry, both of which are operator actions that the DOI
+machinery is designed for.
+
+### Tier 2 upgrade: ARK identifiers
+
+For institutions that prefer ARKs (free, no central registrar),
+the same mechanism works against an ARK NAAN. The schema
+accommodates this without change; the publisher portal grows a
+second "Register ARK" action.
+
+### Federation behaviour
+
+Persistent identifiers travel with the dataset payload. A peer
+mirroring a dataset displays the DOI / ARK alongside the local
+node URL but never claims the identifier as its own; the
+canonical URL points at the origin node, not the mirror.
+
+## Backup & disaster recovery
+
+A node losing its D1 is a real failure mode. R2 has versioning;
+D1 has point-in-time recovery. The plan specifies what gets
+turned on and what "recovery" actually means.
+
+### What gets backed up
+
+| Asset class | Backup mechanism | Retention |
+|---|---|---|
+| D1 catalog | Cloudflare D1 point-in-time recovery (Time Travel) | 30 days on Workers Paid (the default; matches the cost section). |
+| D1 nightly export | `wrangler d1 export` to a versioned R2 key (`backups/d1/{date}.sql.gz`) | 90 days, automated cron. |
+| R2 assets | R2 object versioning on the asset bucket | Infinite for currently-published rows; lifecycle rule deletes versions of retracted assets after 90 days. |
+| R2 nightly index | A nightly `R2 ls` snapshot to `backups/r2-index/{date}.json.gz` | 90 days. |
+| Stream videos | Cloudflare-managed (no per-video backup; loss is permanent if Stream loses it). For datasets that warrant bulletproof backup, the original is also kept in R2. | Indefinite at operator's discretion. |
+| Wrangler secrets | Documented out-of-band in the operator's password manager | Operator responsibility. |
+
+### Recovery scenarios
+
+| Failure | Recovery |
+|---|---|
+| Bad migration corrupts a row | D1 Time Travel — restore the table to a point pre-migration; replay any non-corrupting writes from the audit log. |
+| D1 database deleted | Restore from the most recent nightly `wrangler d1 export`; replay audit-log writes since the export. |
+| R2 asset deleted | R2 versioning makes this idempotent: undelete the version. |
+| R2 bucket deleted | Restore from R2 backup index + Stream + a re-import of any external originals. Some loss likely. |
+| Cloudflare account compromise | Out of scope; operator must restore identity and revoke all tokens before any of the above. |
+| Node permanently lost | Federated mirrors retain *metadata* for every public dataset they synced. They do not retain assets. A new node can re-bootstrap the catalog by inheriting from a federated mirror, but the asset bytes are gone unless the originals are still reachable. This is the strongest argument for keeping originals in R2 alongside Stream. |
+
+### Recovery testing
+
+Quarterly: an operator walks through a recovery drill against a
+preview environment — restore D1 from last night's export, point
+the preview Pages deploy at it, verify catalog reads, federation
+sync, and one signed-asset playback. The drill writes an entry to
+an `ops/recovery-drills.md` log so the procedure is exercised
+before it is needed.
+
+### What this section deliberately does not solve
+
+- **Geographic redundancy beyond what Cloudflare provides.** D1
+  is a single-region store with replicas managed by Cloudflare;
+  R2 is multi-region by default. A multi-cloud DR setup (D1
+  shadowing into Postgres + R2 shadowing into S3) is possible
+  through the cloud-portability interfaces but is its own
+  project.
+- **Continuous off-platform replication.** The nightly snapshot
+  is the floor; sub-day RPO requires a streaming replication
+  setup that's out of scope for Phase 1.
