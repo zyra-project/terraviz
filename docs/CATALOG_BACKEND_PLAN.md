@@ -1473,6 +1473,19 @@ visible in the codebase today, the candidates are:
 
 ## Authorization & per-dataset sharing
 
+This section covers the **read side**: who can see a dataset's
+metadata, resolve a playable manifest, and have it surfaced through
+federation. The complementary **write side** — who can author,
+edit, submit, approve, retract, or hard-delete a dataset — lives in
+[`CATALOG_PUBLISHING_TOOLS.md`](CATALOG_PUBLISHING_TOOLS.md) under
+"Publisher identity & roles" and the capability matrix there. The
+two read-side and write-side grant tables are deliberately
+distinct: `dataset_grants` (here) controls viewing,
+`dataset_collaborators` (in
+[`CATALOG_DATA_MODEL.md`](CATALOG_DATA_MODEL.md)) controls editing.
+Conflating them would couple federation peer access to publisher
+identity, which we explicitly do not want.
+
 Visibility is a property of the dataset row plus a set of grants.
 The combination determines who can see metadata, who can resolve a
 playable manifest, and what the federation feed exposes to a given
