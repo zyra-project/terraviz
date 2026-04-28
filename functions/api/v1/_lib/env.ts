@@ -36,4 +36,35 @@ export interface CatalogEnv {
    * the federation feed lands in Phase 4.
    */
   NODE_ID_PRIVATE_KEY_PEM?: string
+  /**
+   * Cloudflare Access team subdomain (e.g.
+   * `zyra-project.cloudflareaccess.com`). The publisher-API
+   * middleware fetches the team's JWKS from
+   * `https://<team>/cdn-cgi/access/certs` to verify the
+   * `Cf-Access-Jwt-Assertion` header on every request.
+   */
+  ACCESS_TEAM_DOMAIN?: string
+  /**
+   * Application audience tag (the hex string the Cloudflare
+   * dashboard shows next to each Access Application). The middleware
+   * rejects JWTs whose `aud` claim does not include this value, so
+   * a token minted for a different application of the same team
+   * cannot be replayed against `/api/v1/publish/**`.
+   */
+  ACCESS_AUD?: string
+  /**
+   * `"true"` skips Access verification in local dev and JIT-provisions
+   * a staff publisher keyed off `DEV_PUBLISHER_EMAIL`. The middleware
+   * refuses to honour this flag against a non-loopback hostname so a
+   * misconfigured production deploy cannot accidentally open the
+   * publisher API to the world.
+   */
+  DEV_BYPASS_ACCESS?: string
+  /**
+   * Email used by the dev-bypass JIT publisher row. Defaults to
+   * `dev@localhost`. Stamping the operator's real email is handy
+   * if you are testing publish-flow audit events locally and want
+   * the rows attributed to the right human.
+   */
+  DEV_PUBLISHER_EMAIL?: string
 }
