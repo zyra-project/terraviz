@@ -38,5 +38,12 @@ yarn-error.log*
 # Runtime
 .turbo/
 
+# Wrangler local state — Miniflare D1/KV/R2/Queues volumes generated
+# by `wrangler pages dev` and `wrangler d1 ... --local`. Per-contributor,
+# never committed.
+.wrangler/
+.dev.vars
+.dev.vars.local
+
 # Test / coverage artifacts
 coverage/

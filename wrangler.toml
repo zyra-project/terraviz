@@ -15,6 +15,26 @@ database_name = "sphere-feedback"
 database_id = "78fbe5c3-8e40-4504-b183-155b0069222e"
 migrations_dir = "migrations"
 
+# Catalog backend (Phase 1a onward) — datasets, tours, publishers,
+# audit_events. Same physical D1 instance as FEEDBACK_DB above
+# (per CATALOG_BACKEND_PLAN.md "Cloudflare service mapping": "Same
+# DB instance as FEEDBACK_DB, separate tables"); the second binding
+# exists so the catalog migrations live under their own directory
+# and can be applied independently with
+# `wrangler d1 migrations apply CATALOG_DB`.
+#
+# Like the other bindings here, **Pages reads its bindings from the
+# dashboard, not this file** — adding the binding in source control
+# documents the canonical name + directory and makes a future
+# Workers-deploy migration mechanical. Wire it under
+# Settings → Bindings → D1 → variable name CATALOG_DB → database
+# `sphere-feedback`.
+[[d1_databases]]
+binding = "CATALOG_DB"
+database_name = "sphere-feedback"
+database_id = "78fbe5c3-8e40-4504-b183-155b0069222e"
+migrations_dir = "migrations/catalog"
+
 # Analytics Engine dataset for the telemetry event stream.
 # Every datapoint written by functions/api/ingest.ts lands here.
 # Query via the AE SQL API; see docs/ANALYTICS_QUERIES.md.
