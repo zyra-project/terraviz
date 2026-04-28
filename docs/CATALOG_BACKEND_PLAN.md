@@ -1326,6 +1326,109 @@ within the Cloudflare runtime without a third-party dependency.
 
 ---
 
+## Docent integration
+
+The docent (Orbit) is a frontend feature, but its integration with
+the catalog backend is shaped enough to be worth pinning down here.
+The implementation today bakes the entire catalog into the system
+prompt on every turn (see `src/services/docentContext.ts`). That
+doesn't survive federation, where the merged catalog can be ten
+times the local one. The Phase 1b refactor moves discovery from
+prompt-stuffing to function calling against a vector index.
+
+### Tool surface
+
+Three tools the LLM is given:
+
+- **`load_dataset(id, world_index?)`** — Already exists. Loads a
+  dataset onto the globe (or a specific globe slot in multi-globe
+  layout). The inline `<<LOAD:...>>` marker syntax is preserved as
+  a fallback for providers that don't support function calling.
+- **`search_datasets(query, filters?, limit?)`** — New. Vector
+  similarity search over the catalog index. Returns
+  `[{ id, title, abstract_snippet, categories, peer_id }]`.
+  Filters cover category, peer (`'local'` or a peer ID), and
+  time range. The LLM calls this whenever it needs to find
+  datasets matching the user's intent.
+- **`list_featured_datasets(limit?)`** — New. Returns a small
+  operator-curated list, used for cold-start "what should I look
+  at?" conversations where the user has not yet expressed intent.
+  Curation lives in a `featured_datasets` table maintained by
+  the publisher portal; no algorithmic guessing.
+
+### Vector index
+
+- **Backend.** Cloudflare Vectorize, a managed vector DB on the
+  same Cloudflare account. No external dependency.
+- **Embedding model.** `@cf/baai/bge-base-en-v1.5` from Workers
+  AI — 768-dim, English-tuned, free quota for in-account use.
+  Larger models (`bge-large-en-v1.5`, 1024-dim) are available if
+  retrieval quality testing argues for them; storage and embed
+  cost scale linearly with dimensions.
+- **Document shape.** Each dataset embeds
+  `title + abstract + categories.join(' ') + keywords.join(' ')`
+  as a single document. Re-embedded whenever any of those fields
+  changes; the dataset row carries an `embedding_version INTEGER`
+  column tracking model version, so a cron can re-embed
+  everything on a model upgrade.
+- **Index keys.** `dataset_id` (ULID) is the Vectorize key.
+- **Index metadata.** `{ peer_id, category, time_range_start,
+  time_range_end, visibility, schema_version }` — used for
+  filtering at query time without round-tripping to D1.
+
+### Indexing pipeline
+
+A Queue consumer drives embedding work. Triggers:
+
+- **Publish.** Asset-complete handler enqueues an embed job after
+  successful publication.
+- **Update.** Patch handler enqueues an embed job if any of the
+  embedded fields changed.
+- **Retract.** Retraction handler enqueues a vector-delete job.
+- **Hard delete.** Same shape as retract; vector deletion is
+  permanent.
+- **Federation sync.** Federated datasets ingested by the sync
+  cron enqueue embed jobs on the local node. Their `peer_id`
+  metadata makes them filterable / excludable at query time.
+
+The job runs idempotently — three updates in a minute queue
+three jobs but the index ends up consistent with the latest
+state. Failed embeds retry with exponential backoff; a stuck
+dataset surfaces in the publisher-portal history view as an
+`embed_failed` audit event.
+
+### Per-peer inclusion in the docent
+
+Federated datasets are embedded into the local Vectorize index by
+default at sync time, but the search-tool handler filters them
+out unless the operator has flipped
+`federation_peers.include_in_docent` to `1`. The default is `0` —
+operators must explicitly opt a peer in before that peer's content
+reaches the docent's recommendations.
+
+This matches the `asset_proxy_policy` precedent: be conservative
+about including someone else's content in operator-controlled
+surfaces, and surface a clear knob for the operator to flip when
+they trust the peer's curation.
+
+### What changes in the frontend
+
+`docentContext.buildSystemPromptForTurn()` simplifies dramatically.
+The turn-aware logic for "full catalog turn 0, compact turn ≥1"
+goes away entirely. The system prompt becomes a stable static
+thing: docent persona + tool descriptions + light instruction on
+when to call which tool.
+
+Per-turn token cost on the LLM drops from "a few KB of catalog"
+to "a kilobyte of tool descriptions" — a material saving on
+every conversation, regardless of catalog size.
+
+The local engine fallback (`docentEngine.ts`) is unchanged — it's
+keyword-based, doesn't need embeddings, and remains the
+offline / LLM-disabled path.
+
+---
+
 ## Publishing tools
 
 The publisher portal lives behind Cloudflare Access at `/publish`
