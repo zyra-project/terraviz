@@ -3,6 +3,9 @@
   "version": "0.3.1",
   "type": "module",
   "description": "Terraviz — WebGL globe with adaptive bitrate environmental data streaming",
+  "bin": {
+    "terraviz": "./bin/terraviz.cjs"
+  },
   "scripts": {
     "predev": "npm run build:privacy-page",
     "dev": "vite",
@@ -11,7 +14,8 @@
     "docs": "typedoc",
     "docs:watch": "typedoc --watch",
     "preview": "vite preview",
-    "type-check": "tsc --noEmit",
+    "type-check": "tsc --noEmit && tsc --noEmit -p cli/tsconfig.json",
+    "terraviz": "tsx cli/terraviz.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
