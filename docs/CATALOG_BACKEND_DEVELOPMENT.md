@@ -212,6 +212,97 @@ contributor needs realistic load.
 fixed ULIDs, fixed timestamps, fixed signatures. Used by federation
 contract tests and unit tests.
 
+## Local debugging
+
+The dev stack runs in Miniflare; debugging mostly means knowing
+where to look and which Wrangler subcommand surfaces what.
+
+### Logs
+
+- **Miniflare console output.** The `npm run dev:backend` terminal
+  prints request lines, `console.log` output, and binding-level
+  errors. This is the first place to look for any non-trivial
+  issue.
+- **`wrangler pages deployment tail --local`.** Tail-style streaming
+  of the same logs in a more grep-able shape. Useful when the dev
+  terminal is busy and you want a clean filterable stream in
+  another window.
+- **Frontend → backend correlation.** Every Pages Function
+  response carries an `X-Request-Id` header (ULID); the frontend
+  exposes the most recent one as `window.__lastRequestId` in the
+  browser console. Pasting that into the Miniflare log finds the
+  matching server-side line.
+
+### Inspecting local state
+
+| Resource | Inspect with | Notes |
+|---|---|---|
+| **D1** | `npx wrangler d1 execute terraviz --local --command "SELECT ..."` | Operates on the same `.wrangler/state/v3/d1/` file `db:migrate` and `db:seed` use. |
+| **KV** | `npx wrangler kv key list --binding=CATALOG_KV --local` (and `... key get`) | KV is in-memory in Miniflare — restart the stack and KV is empty. |
+| **R2** | `npx wrangler r2 object list terraviz-assets --local` (and `... object get`) | R2 lives on disk under `.wrangler/state/v3/r2/` and persists across restarts. |
+| **Queues** | None directly | The `InMemoryJobQueue` interface dumps queued jobs to stderr at shutdown; for ad-hoc inspection, set `JOB_QUEUE_LOG=true` in `.dev.vars` to get a per-enqueue log line. |
+
+A common pattern: a request fails with a 500. Find the request id
+in the response, grep the Miniflare log for the matching line,
+note the failed query, run that query directly against the local
+D1 to reproduce. Faster than a debugger most of the time.
+
+### Attaching a debugger
+
+Miniflare runs Workers in a node-compatible context; Wrangler
+supports `--inspect` to expose a Chrome DevTools / Node inspector
+port:
+
+```bash
+npm run dev:backend -- --inspect=9229
+```
+
+Open `chrome://inspect` (or use the VS Code "Attach to Node"
+launch target) and connect. Breakpoints in the TypeScript sources
+work once Wrangler's source-map mode is on (default). The
+`functions/api/v1/_lib/` directory is the most useful place to
+break — every route delegates the actual logic there, so a single
+breakpoint on the appropriate handler catches the request no
+matter which route surfaced it.
+
+### Common gotchas
+
+- **Port 8788 already in use.** Wrangler refuses to start;
+  another Wrangler instance from a different repo is the usual
+  culprit. Either kill the other one or pass `--port=8789` to
+  `npm run dev:backend`. The Vite proxy hardcodes 8788; if you
+  change the port, also set `VITE_BACKEND_PORT=8789` for the Vite
+  process.
+- **Schema drift after `git pull`.** A migration arrived with the
+  pull but `.wrangler/state` still holds the old schema. Symptom
+  is queries failing on missing columns. Fix is `npm run db:reset`.
+- **CORS in local mode.** The Pages Function returns
+  `Access-Control-Allow-Origin: http://localhost:5173` for the
+  Vite dev server. Serve the frontend on a different port and
+  you must set `FRONTEND_ORIGIN` in `.dev.vars`. Tauri webviews
+  bypass CORS entirely — desktop dev never sees this.
+- **`MOCK_STREAM` flips silently.** Setting `MOCK_STREAM=true`
+  requires a Wrangler restart to pick up; the binding is read
+  once at startup. Symptom is a manifest endpoint returning real
+  Stream URLs locally despite the mock flag being set in `.dev.vars`.
+- **D1 file locking.** Running two `wrangler` commands against the
+  same local D1 simultaneously can produce `SQLITE_BUSY`. Wait
+  for the dev server to finish a request before running ad-hoc
+  queries, or use a separate scratch DB for exploration.
+- **Stale `.wrangler/state` between branches.** Switching branches
+  with different schemas without resetting state leaves you in
+  an undefined hybrid. `npm run db:reset` is cheap; do it on
+  branch switches.
+
+### Local federation testing
+
+`npm run sync-peers` runs the same logic the production cron does,
+but synchronously and on demand — useful when you have one local
+node and want to pull from a peer at will. The two-instance
+"contract test" pattern (two Wranglers on different ports,
+peered, syncing, asserting state) lives in Testing strategy
+below as a worked example.
+
 ## Testing strategy
 
 - **Unit** — Vitest, colocated `*.test.ts`. Pure logic
