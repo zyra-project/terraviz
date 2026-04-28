@@ -663,14 +663,122 @@ milestone in which each endpoint becomes available.
 
 ### Versioning & deprecation
 
-- The route prefix is the version. Breaking changes ship at
-  `/api/v2/`; `/v1/` keeps responding with the v1 shape until every
-  declared peer has moved.
-- `schema_version` inside the payload is the *content* version. The
-  v1 route can return `schema_version=1` or `schema_version=2`
-  documents; consumers introspect the field and adapt or refuse.
-- The well-known document advertises the highest supported
-  `schema_version` so peers can negotiate before a sync.
+The catalog backend has **two independent versioning axes**, and
+keeping them straight matters because they answer different
+questions and bump on different schedules:
+
+- **URL prefix** (`/api/v1/`, `/api/v2/`) — the *shape* of the
+  request/response envelope. Bumped only for breaking changes
+  that can't be expressed additively.
+- **Payload `schema_version`** — the *content* shape inside an
+  envelope (e.g., what fields a `Dataset` carries). Bumped when
+  fields are added with required semantics, when existing fields
+  change meaning, or when a field is removed; **not bumped** for
+  purely additive optional fields older clients can ignore.
+
+The federation protocol layers on a third axis,
+`protocol_version`, which is documented in
+[`CATALOG_FEDERATION_PROTOCOL.md`](CATALOG_FEDERATION_PROTOCOL.md)
+and is independent of the publisher / public-read API
+versioning. A node can speak (`url=v1`, `schema=2`,
+`protocol=1`) to peers and (`url=v1`, `schema=2`) to its own
+desktop clients without contradiction.
+
+#### Promotion to a new URL version (v1 → v2)
+
+Bumping the URL prefix is the heavyweight move and is
+deliberately rare. The expected sequence:
+
+1. **Deprecation announce.** A specific `/v1/` endpoint starts
+   emitting a `Sunset` header
+   (`Sunset: Mon, 01 Jan 2027 00:00:00 GMT`) and a `Deprecation`
+   header alongside its normal response. Both are RFC-standard
+   ([RFC 8594](https://www.rfc-editor.org/rfc/rfc8594) for
+   `Sunset`, [draft-ietf-httpapi-deprecation-header](https://datatracker.ietf.org/doc/draft-ietf-httpapi-deprecation-header/)
+   for `Deprecation`). The `/api/v1/` discovery endpoint also
+   adds a `deprecations: [{ path, sunset_date, replacement }]`
+   array to its response so machine clients (CLI, federation
+   peers) see the change without having to inspect every
+   response.
+2. **Overlap window.** Both `/v1/` and `/v2/` serve in parallel
+   for **at least 90 days**, the minimum we commit to. Practical
+   overlap is "until the slowest peer moves." A federation peer
+   that hasn't moved by the sunset date gets a
+   `federation_peer_stale` audit event and its sync starts
+   warning in the publisher portal; the peer's syncs do not
+   stop functioning.
+3. **Sunset.** The deprecated endpoint returns
+   `410 Gone` with a body pointing at the v2 replacement. The
+   well-known document drops the old endpoint from its
+   advertisement.
+
+`/v2/` exists side-by-side with `/v1/` from the moment the
+breakage is real; we never reuse a `/v1/` URL with a different
+shape, and we never delete `/v1/` while peers we know about
+still depend on it.
+
+#### Schema-version bump within a URL version
+
+A `schema_version` bump is the lightweight everyday move. Three
+flavours exist:
+
+- **Additive (no bump).** New optional field added; older
+  clients ignore it; serialiser emits the field; no version
+  change.
+- **Additive-but-meaningful (bump in the federation feed,
+  not in the public read).** New required field that older
+  *federation* subscribers can't safely ignore. The federation
+  feed bumps `schema_version` so old subscribers refuse the
+  payload (per the failure-modes table in
+  [`CATALOG_FEDERATION_PROTOCOL.md`](CATALOG_FEDERATION_PROTOCOL.md));
+  the public read API stays compatible by serving older
+  clients a default for the new field.
+- **Breaking.** A field changes meaning or disappears. This is
+  what triggers a URL bump above; we do not change shape
+  silently within a URL version.
+
+The well-known document advertises the highest supported
+`schema_version` for each role
+(`schema_versions_supported_public: [1, 2]`,
+`schema_versions_supported_federation: [1, 2]`,
+`schema_versions_supported_publish: [1]`). Each axis can move
+independently — the public read can be ahead of the publisher
+API or vice versa.
+
+#### CLI compatibility behaviour
+
+The `terraviz` CLI hits the well-known document on first call
+to a node and pins the result for the session. On any
+subsequent request that returns:
+
+- `200` with `Sunset`/`Deprecation` headers — the CLI prints a
+  warning to stderr (`"this CLI version targets a deprecated
+  endpoint; sunset 2027-01-01; consider upgrading"`) and
+  proceeds normally. A `--quiet` flag suppresses the warning
+  for scripted use.
+- `410 Gone` — the CLI errors out with exit code 6 and a
+  message pointing at the upgrade path. Scripts and CI runners
+  branch on the exit code; humans get the friendly message.
+- An unknown `schema_version` in a response — the CLI errors
+  out with exit code 2 (validation error envelope) and points
+  at the well-known doc's supported-versions list, suggesting
+  a CLI upgrade.
+
+The CLI itself also advertises its supported version range to
+the server via a `Terraviz-Client-Version` header so
+operators can spot stale CLI usage in Workers Logs (e.g., "all
+publishers from $org are still on CLI 1.x; we should plan a
+1.x deprecation").
+
+#### Why two URL versions never live indefinitely
+
+A side-by-side `/v1/` and `/v2/` is a maintenance tax — every
+bug fix has to land in both, every test runs twice. The 90-day
+overlap is a floor for politeness, not a ceiling for
+sustainment. Once peer telemetry shows nothing on `/v1/` for a
+full week, the sunset timer starts running for real. The
+discipline is "make the breaking change cheap enough that we
+do it on schedule rather than letting versions stack up."
 
 ### Rate limiting & abuse
 
