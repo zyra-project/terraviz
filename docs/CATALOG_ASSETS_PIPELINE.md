@@ -225,3 +225,95 @@ The catalog backend's job is to *not preclude* these capabilities.
 Reserving the schema fields, the manifest structure, and the
 `data_ref` scheme namespaces in Phase 2 means the renderer work
 in Phase 4–5 is purely client-side.
+
+## Image datasets (R2 + Cloudflare Images)
+
+Most "image" datasets are huge equirectangular PNGs (4096+ wide).
+The current pattern is a manual `_4096`/`_2048`/`_1024` suffix that
+the client probes in order. That works but bakes assumptions into
+the dataset URL.
+
+The new flow:
+
+1. Publisher uploads a single high-res original to R2 via a presigned
+   PUT.
+2. The asset-complete handler optionally registers the image with
+   Cloudflare Images, which serves resolution variants on demand.
+3. `/api/v1/datasets/{id}/manifest` returns a JSON object describing
+   the variants:
+   ```jsonc
+   {
+     "kind": "image",
+     "variants": [
+       { "width": 4096, "url": "..." },
+       { "width": 2048, "url": "..." },
+       { "width": 1024, "url": "..." }
+     ],
+     "fallback": "..."
+   }
+   ```
+4. The frontend keeps its existing "try larger first, back off on
+   failure" behaviour but reads from `variants` instead of
+   string-mangling the URL.
+
+For self-hosted nodes that don't enable Cloudflare Images, the
+manifest endpoint can fall back to serving the original from R2 and
+omit the variants array; the frontend handles that case by using
+the fallback URL.
+
+## Sphere thumbnails (2:1 equirectangular)
+
+A flat thumbnail card is the obvious choice for a 2D browse list,
+but a Terraviz dataset is fundamentally spherical — a 16:9 still
+flattens away the property that makes it interesting. The plan
+ships a second thumbnail variant alongside the flat one: a small
+2:1 equirectangular texture that can be wrapped onto a low-cost
+mini-globe in the UI.
+
+Use cases this unlocks:
+
+- **Rotating sphere on each browse card.** Hover (or auto-rotate)
+  spins a small globe with the dataset's actual texture, so the
+  card preview reads as "the dataset," not "a screenshot of a
+  globe." Fits the existing `browseUI.ts` card layout with no
+  layout change.
+- **Network graph of datasets.** A force-directed layout where
+  each dataset is a small sphere and edges are shared categories
+  / keywords / tours. Acts as a visual table of contents for the
+  catalog and works well as a federation explorer ("see how peer
+  X's datasets connect to yours").
+- **Federated peer overview.** A peer's well-known endpoint
+  could surface a "constellation" of its datasets at a glance
+  without pulling the full catalog.
+- **Tour preview ribbons.** A horizontal strip of mini-globes,
+  one per dataset the tour visits, rendered in playback order.
+- **Empty-state and loading hero.** A slowly rotating sphere of
+  a curated dataset is a much warmer placeholder than a spinner.
+
+### Asset shape
+
+| Property | Value |
+|---|---|
+| Aspect | 2:1 equirectangular (matches Terraviz's full-globe textures) |
+| Default size | 512 × 256 (≈40 KB WebP, ≈100 KB JPEG) |
+| Optional larger | 1024 × 512 for hero use, opt-in per dataset |
+| Format | WebP primary, JPEG fallback for older webviews |
+| Color | sRGB / 8-bit always (HDR is wasted on a thumbnail) |
+| No alpha | Even for transparent datasets, the sphere thumbnail composites against the dataset's natural background |
+
+### Generation pipeline
+
+Generated at upload time, never by the publisher manually:
+
+| Source | Method |
+|---|---|
+| Video dataset | First-frame extract via Stream's thumbnail API at t = duration / 4 (avoids title cards), downscaled to 512×256, WebP+JPEG. |
+| Image dataset | Downsample the canonical original through Cloudflare Images to 512×256 with `fit=fill` (the image is already 2:1 in practice for SOS data; assert and warn otherwise). |
+| Tour | Sphere-thumb of the tour's first `loadDataset` target, with a small "play" badge composited corner. |
+| Tiled raster | Composite the lowest-zoom-level tiles into a single 512×256 image at ingest. |
+
+The asset-complete handler runs the generation as part of the
+existing transcode/upload finalization step — no separate publisher
+action required. A "regenerate sphere thumbnail" button in the
+publisher portal handles the rare case where the auto-pick frame
+is unrepresentative (mid-fade, all-black, etc.).
