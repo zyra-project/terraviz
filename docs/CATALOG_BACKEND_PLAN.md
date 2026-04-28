@@ -2295,6 +2295,172 @@ has its own video assets to host.
 
 ---
 
+## Backend telemetry
+
+The catalog backend emits its own operational metrics into
+Workers Analytics Engine, distinct from the user-facing product
+telemetry described in [`docs/ANALYTICS.md`](ANALYTICS.md).
+Operational metrics exist for the operator running the node, not
+for product research; they're never gated by Tier A / Tier B
+consent and never carry user identity.
+
+### Event schema
+
+All backend events share a common envelope written to the
+`terraviz_backend_events` AE dataset:
+
+| Field | Type | Notes |
+|---|---|---|
+| `event_type` | string | One of the types below. |
+| `timestamp` | timestamp | UTC, server-stamped. |
+| `node_id` | string | The deploying node's ULID. |
+| `route` | string | The handler that fired the event (`catalog`, `manifest`, `peer-proxy`, `federation/feed`, …). |
+| `status` | int | HTTP response status. |
+| `duration_ms` | float | Wall-clock for the handler. |
+
+Per-event-type fields layered on top:
+
+#### `request`
+
+Fired on every API request after the response has been written.
+The cheapest event type and the highest-volume.
+
+| Field | Notes |
+|---|---|
+| `method` | HTTP method. |
+| `cf_country` | `CF-IPCountry`; never the IP itself. |
+| `cf_colo` | The Cloudflare colo that served the request. |
+| `auth_kind` | `anonymous \| access_cookie \| service_token \| federation_hmac`. |
+
+#### `db_query`
+
+Fired for D1 queries that exceed a threshold (default 50 ms).
+Low-volume by design.
+
+| Field | Notes |
+|---|---|
+| `query_label` | Hand-named, never the raw SQL. (`catalog_list_public`, `manifest_resolve_stream_ref`, …) |
+| `rows_returned` | Result count. |
+| `cache_hit` | Whether the answer came from KV before reaching D1. |
+
+#### `embed_job`
+
+Fired by the embedding pipeline.
+
+| Field | Notes |
+|---|---|
+| `dataset_id` | Which row was being embedded. |
+| `outcome` | `succeeded \| skipped \| failed \| retried`. |
+| `model` | Embedding model identifier (`bge-base-en-v1.5`). |
+
+#### `embed_failed`
+
+Fired only when an embed job exhausts retries. Surfaces in the
+publisher portal's per-dataset history view.
+
+| Field | Notes |
+|---|---|
+| `dataset_id` | Which row failed. |
+| `model` | Model attempted. |
+| `error_class` | Sanitized class (`quota_exceeded \| timeout \| validation \| unknown`). |
+
+#### `federation_sync`
+
+Fired at the end of each peer-sync cron iteration.
+
+| Field | Notes |
+|---|---|
+| `peer_id` | Which peer was synced. |
+| `outcome` | `succeeded \| signature_failed \| schema_skew \| unreachable \| timeout`. |
+| `items_added` | Count. |
+| `items_updated` | Count. |
+| `tombstones_applied` | Count. |
+
+#### `federation_integrity_failure`
+
+Fired when a mirrored asset's `content_digest` doesn't match the
+peer's signed claim. The event the production-debugging playbook
+in
+[`CATALOG_BACKEND_DEVELOPMENT.md`](CATALOG_BACKEND_DEVELOPMENT.md)
+keys on for incident triage.
+
+| Field | Notes |
+|---|---|
+| `peer_id` | Which peer's asset failed. |
+| `dataset_id` | Which dataset. |
+| `expected_digest` | The signed claim. |
+| `actual_digest` | What we computed. |
+
+#### `peer_proxy`
+
+Fired on every `/api/v1/peer-proxy/...` request.
+
+| Field | Notes |
+|---|---|
+| `peer_id` | Source peer. |
+| `dataset_id` | Which dataset. |
+| `policy` | The `asset_proxy_policy` in effect at request time. |
+| `cache` | `hit \| miss \| streaming`. |
+| `bytes_sent` | Response body size. |
+
+### Storage and retention
+
+- **Workers Analytics Engine** holds events for the platform
+  default (currently 92 days). AE retention is the source of
+  truth; queries against older data require export.
+- **R2 export** (Phase 5+) — operators with longer retention
+  needs can configure a daily export job that writes the
+  previous day's events to a JSONL file in R2. Not Phase 1
+  scope; the schema makes the export trivial when it lands.
+
+### Grafana dashboards
+
+The dashboards under `grafana/dashboards/catalog-backend-*`
+query AE directly. Initial panel set lands in Phase 1b:
+
+- **Request rate by route** — line chart, p50 / p95 / p99
+  latency overlays.
+- **D1 slow queries** — table of the top 10 `query_label`s by
+  total time.
+- **Federation sync health** — per-peer last-success
+  timestamp, queue depth, integrity-failure count.
+- **Embedding pipeline** — queue depth, success rate, top
+  `embed_failed` reasons.
+- **Peer-proxy traffic** — per-peer bytes served, cache-hit
+  ratio, top error codes.
+
+A second dashboard for the operator's home node ("am I about to
+hit a Workers Paid quota?") composes these into a single status
+view.
+
+### Privacy invariants for backend events
+
+The eight privacy invariants from
+[`docs/ANALYTICS.md`](ANALYTICS.md) apply, with three additions
+specific to backend telemetry:
+
+- **No raw query strings.** `query_label` is a hand-named
+  identifier, never the raw SQL or query body.
+- **No raw error messages or stack traces.** `error_class` is
+  a sanitized enum, not free text.
+- **No publisher identity** in `request` events. The
+  `auth_kind` field distinguishes anonymous from authenticated
+  callers; the publisher's identity stays in `audit_events`,
+  which has a different access model — only the operator
+  reads it, never product research.
+
+### Tier classification
+
+Backend telemetry is **always-on operational metric**, not Tier
+A or Tier B. It's never gated by user consent because it
+doesn't observe users — it observes the node itself. The
+existing `KILL_TELEMETRY=1` server-side env still suppresses
+backend events alongside product events for kill-switch
+parity; the client-side tier setting has no effect on backend
+telemetry because clients don't see it.
+
+---
+
 ## Local development
 
 The plan is unbuildable without an answer to "how do I run the
