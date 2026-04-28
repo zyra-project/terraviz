@@ -19,4 +19,12 @@ export interface CatalogEnv {
   CATALOG_DB?: D1Database
   /** KV namespace caching the rendered catalog response. */
   CATALOG_KV?: KVNamespace
+  /**
+   * Override for the upstream Vimeo proxy used by the manifest
+   * endpoint to resolve `vimeo:` `data_ref` values. Defaults to the
+   * production proxy when unset; tests stub it via a mock fetch.
+   * Phase 2 retires this field once Cloudflare Stream takes over
+   * video hosting.
+   */
+  VIDEO_PROXY_BASE?: string
 }
