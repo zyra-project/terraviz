@@ -155,7 +155,17 @@ minimum a contributor needs to know.
   in dev is a manual `npm run sync-peers` invocation rather
   than a scheduled cron.
 - **Workers AI** in dev: the Cloudflare AI binding works against
-  the production endpoint with a free quota; tests stub it.
+  the production endpoint with a free quota; tests stub it. Used
+  for docent search embeddings from Phase 1b onward
+  (`@cf/baai/bge-base-en-v1.5`).
+- **Vectorize** (Phase 1b onward) has no local emulation. Dev
+  uses an `InMemoryVectorIndex` shim that does cosine similarity
+  in TypeScript over the seeded dataset embeddings; quality is
+  identical to the production index for the small seeded corpus,
+  it's just slow at scale. Tests run against the shim. Set
+  `MOCK_VECTORIZE=true` in `.dev.vars` to opt out and target the
+  remote Vectorize index instead (rare; the shim covers the
+  contributor case).
 
 ## Repo layout for the new code
 

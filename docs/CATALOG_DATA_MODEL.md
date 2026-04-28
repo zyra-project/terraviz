@@ -94,6 +94,12 @@ CREATE TABLE datasets (
   doi                TEXT,                    -- optional persistent identifier
   citation_text      TEXT,                    -- optional preformatted citation (BibTeX-friendly)
 
+  -- Docent search index tracking (Phase 1b). Null until the
+  -- embedding pipeline has run for this row. Updated by the
+  -- queue consumer after a successful upsert to Vectorize. See
+  -- "Docent integration" in CATALOG_BACKEND_PLAN.md.
+  embedding_version  INTEGER,                 -- model version (1 = bge-base-en-v1.5, 768-dim)
+
   schema_version     INTEGER NOT NULL DEFAULT 1,
   created_at         TEXT NOT NULL,
   updated_at         TEXT NOT NULL,
@@ -224,6 +230,10 @@ CREATE TABLE federation_peers (
                                               -- metadata_only | proxy_lazy | proxy_cached | mirror_eager
                                               -- Asset-side: how desktop downloads of this peer's content are served.
                                               -- See "Offline (Tauri) compatibility" → "Federated datasets" in CATALOG_ASSETS_PIPELINE.md.
+  include_in_docent  INTEGER NOT NULL DEFAULT 0,
+                                              -- 0 = peer's datasets excluded from docent search results;
+                                              -- 1 = included. Default off — operators must explicitly opt in.
+                                              -- See "Docent integration" in CATALOG_BACKEND_PLAN.md.
   sync_interval_minutes INTEGER NOT NULL DEFAULT 15,
                                               -- subscriber-controlled pull cadence; see "Sync protocol" in CATALOG_FEDERATION_PROTOCOL.md
   last_sync_at       TEXT,
@@ -382,6 +392,23 @@ CREATE TABLE deleted_datasets (
   deleted_by  TEXT NOT NULL,                  -- publishers.id
   reason      TEXT NOT NULL                   -- free text captured at deletion
 );
+
+-- Operator-curated cold-start list for the docent's
+-- list_featured_datasets tool. The docent calls this when the
+-- user has not yet expressed intent ("what should I look at?")
+-- so it doesn't have a query for the vector index. Curation is
+-- explicit — no algorithmic guessing, no popularity-from-analytics.
+-- Phase 1b. See "Docent integration" in CATALOG_BACKEND_PLAN.md.
+CREATE TABLE featured_datasets (
+  dataset_id   TEXT PRIMARY KEY,
+  position     INTEGER NOT NULL,              -- display order; lower = higher
+  added_by     TEXT NOT NULL,                 -- publishers.id
+  added_at     TEXT NOT NULL,
+  FOREIGN KEY (dataset_id) REFERENCES datasets(id) ON DELETE CASCADE,
+  FOREIGN KEY (added_by)   REFERENCES publishers(id)
+);
+
+CREATE INDEX idx_featured_datasets_position ON featured_datasets(position);
 ```
 
 ## Migration from the existing public catalog

@@ -2392,13 +2392,29 @@ catalog publishes" pattern works without human intervention.
   Stream as appropriate), polls for transcode/processing
   completion, computes and confirms the content digest, then
   submits the publish request.
+- **Docent search modernization** (see "Docent integration"
+  earlier in this document):
+  - Cloudflare Vectorize binding added.
+  - Workers AI binding added (`@cf/baai/bge-base-en-v1.5`).
+  - `featured_datasets` table populated by an admin UI in the
+    publisher portal.
+  - Queue consumer drives embedding work on
+    publish / update / retract. `embedding_version` populated
+    on each row.
+  - `search_datasets` and `list_featured_datasets` tool
+    handlers wired to the existing publisher / docent stack.
+  - Frontend `docentContext.buildSystemPromptForTurn()`
+    refactored to a static prompt; the catalog dump removed.
+    `docentService.ts` exposes the new tools to the LLM.
 
 **Exit criteria:** Vimeo proxy can be turned off without
 breaking the public deployment; desktop downloads continue to
 function; a Zyra-style scheduled pipeline can run
 `terraviz publish dataset.yaml`, upload a new visualization,
 and have it appear in the public catalog without human
-intervention.
+intervention; the docent answers "show me ocean datasets" by
+calling `search_datasets` rather than receiving the catalog
+in its prompt.
 
 ### Phase 2 — *Retired number*
 
@@ -2479,7 +2495,7 @@ it disappear.
 | Phase | Scope | Risk |
 |---|---|---|
 | 1a | ~10 read routes + ~6 publisher routes, 1 D1 migration, Access service-token auth, CLI metadata commands, frontend swap | Low-medium — read paths well-understood; service-token auth is new |
-| 1b | Stream binding, R2 presigned uploads, image variants, sphere thumbnails, manifest with integrity, Vimeo backfill, CLI asset upload | Medium — Stream is new; backfill bandwidth costs need a budget |
+| 1b | Stream binding, R2 presigned uploads, image variants, sphere thumbnails, manifest with integrity, Vimeo backfill, CLI asset upload, Vectorize + Workers AI bindings, embedding pipeline, docent search/list tools, docentContext refactor | Medium — Stream is new; backfill bandwidth costs need a budget; docent search adds a new managed dependency (Vectorize) but it's well-trodden territory |
 | 3 | Publisher portal UI on top of an already-working API | Low-medium — long form work, but the API contract is fixed before this phase starts |
 | 4 | Federation protocol + sync + UI | Medium-high — protocol design has compounding consequences |
 | 5 | Grants, signed URLs, revocation | Medium — security-sensitive; needs review |
