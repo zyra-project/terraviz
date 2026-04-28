@@ -19,6 +19,7 @@
     "build:qa": "npx tsx scripts/build-qa-index.ts",
     "build:privacy-page": "npx tsx scripts/build-privacy-page.ts",
     "check:privacy-page": "npx tsx scripts/build-privacy-page.ts --check",
+    "dev:functions": "wrangler pages dev public --ip 0.0.0.0 --port 8788",
     "db:migrate": "wrangler d1 migrations apply CATALOG_DB --local",
     "db:seed": "tsx scripts/seed-catalog.ts",
     "db:reset": "rm -rf .wrangler/state/v3/d1 && npm run db:migrate && npm run db:seed",
