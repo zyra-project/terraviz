@@ -2529,28 +2529,17 @@ in the course of writing this plan have been removed; the git
 history under `docs/CATALOG_*` captures the resolutions for
 anyone who wants to see the path the decisions took.
 
-1. **Where does Orbit (the LLM docent) sit relative to
-   federated catalogs?** The system prompt builder currently
-   assumes a flat catalog; including federated items expands the
-   prompt. Cap by relevance, rotate per turn, or expose a
-   per-peer "include in docent" toggle?
-2. **Out-of-Stream encoding host.** Beyond-4K HLS and
+1. **Out-of-Stream encoding host.** Beyond-4K HLS and
    packed-alpha variants need an encoder Stream won't run for
    us. Options: GitHub Actions ffmpeg job, a long-running
    self-hosted runner, or a separate Worker calling out to a
    transcoding API (Mux / Coconut / Bitmovin). The data model is
    the same in every case; the operator burden differs a lot.
-3. **Default codec ladder per dataset.** Always emit
+2. **Default codec ladder per dataset.** Always emit
    H.264 + HEVC + AV1, or only H.264 by default and let the
    publisher opt into the heavier codecs? Storage cost vs.
    playback quality tradeoff; needs a number from a few
    representative datasets before deciding.
-4. **Layer compositor scope.** Transparent video makes single-
-   globe layering feasible, but the multi-globe layout already
-   solves "compare two datasets." Is layered compositing a
-   *replacement* for multi-globe (one globe, N stacked layers)
-   or an *additional* mode (still N globes, but each can stack)?
-   The renderer change is simpler if it's the latter.
 
 ---
 
