@@ -46,6 +46,58 @@ that loads the draft against the live globe. Same renderer, same
 playback, same chat — the publisher sees exactly what users will
 see, but the catalog row is still `published_at IS NULL`.
 
+### Validation rules
+
+The form validates client-side for fast feedback and re-validates
+server-side as the source of truth — a CLI or any direct API
+client can't be trusted to have run the browser checks, and the
+plan deliberately leaves the door open to non-portal authoring
+(the "Authoring API" bullet later in this document).
+
+| Field | Server-side rule | Client-side hint |
+|---|---|---|
+| Title | 3 ≤ length ≤ 200 chars; trim whitespace; reject control characters | Live char counter; warn at 180. |
+| Slug | regex `^[a-z][a-z0-9-]{2,63}$`; unique on `datasets.slug`; not in reserved-slug list (`api`, `publish`, `assets`, `tours`, `well-known`, `admin`) | Auto-derived from title with a debounced collision check; manual edit unlocks the field. |
+| Abstract | length ≤ 8000 chars; markdown allow-list (no raw HTML, no script-equivalent tags) | Char counter; live render preview. |
+| Organization | length ≤ 100 chars | Autocomplete from prior values across this org. |
+| Format | enum (`video/mp4`, `image/png`, `image/jpeg`, `image/webp`, `tour/json`) | Set automatically by the asset uploader from MIME-sniff; manual override behind an "advanced" toggle. |
+| Data asset | mime ∈ format allowlist; size ≤ 10 GB (Stream upload ceiling); for image, recorded into `width`/`height` | Pre-upload mime check; inline preview after upload. |
+| Thumbnail | image/* with dimensions ≥ 256×256, ≤ 4096×4096; aspect ≈ 16:9 (warn if outside ±10%) | Crop tool offered when uploaded image's aspect is off. |
+| Legend | image/* same dimension caps as thumbnail; aspect free | — |
+| Closed captions | text/vtt only; size ≤ 1 MB; at least one cue parses | VTT parser runs in browser; surfaces line numbers on syntax error. |
+| Categories | each ≤ 80 chars; max 6 per dataset | Chip removal at 6; suggest from existing values. |
+| Keywords / tags | each ≤ 40 chars; lowercase normalized; max 20 per dataset | Suggest from existing values; warn on near-duplicate (Levenshtein ≤ 2). |
+| Time range | ISO 8601 strings; `start_time ≤ end_time`; both-or-neither set | Date picker with range linkage. |
+| Period | ISO 8601 duration (`P1D`, `PT1H`, …) | Picker emits the canonical form. |
+| Run tour on load | `tours.id` exists; tour visibility ≤ dataset visibility (don't auto-load a private tour from a public dataset) | Picker filtered to compatible tours. |
+| Visibility | enum (`public` \| `federated` \| `restricted` \| `private`) | Default is `public` for staff publishers; community publishers default to `private` and explicit-promote. |
+| Developers | each: name ≤ 200 chars, role ∈ (`data` \| `visualization`), affiliation URL well-formed | At least one row required for a non-trivial publish. |
+| Related datasets | URL well-formed; title ≤ 200 chars | — |
+| License | Either `license_spdx` ∈ SPDX list or `license_statement` non-empty | Picker shows common licenses; advanced mode for free-text. |
+
+Server enforcement runs in the publisher API handler *before* any
+write to D1 or R2. Validation errors return a 400 with a JSON body
+of `{ errors: [{ field, code, message }] }`; the form binds these
+to the corresponding inputs and surfaces them inline. The same
+shape is consumed by the (later) authoring CLI.
+
+Two cross-cutting policies sit on top of the per-field rules:
+
+- **Required-vs-recommended split.** Required fields block save
+  entirely; recommended fields show a warning banner ("This
+  dataset has no abstract — add one before publishing for better
+  discoverability") but allow draft persistence. Phase 3 required:
+  title, slug, format, data asset, visibility, license. Everything
+  else is recommended.
+- **No partial publishes.** A dataset row's `published_at` only
+  flips non-NULL when *all* required fields validate AND the
+  asset upload has completed AND the asset's `content_digest`
+  matches the publisher's claimed digest (see "Asset integrity &
+  verification" in
+  [`CATALOG_ASSETS_PIPELINE.md`](CATALOG_ASSETS_PIPELINE.md)).
+  Failure at any step keeps the row in draft state with no
+  half-published intermediate.
+
 ## Tour creator
 
 This is the larger subproject. Goal: a publisher records a
