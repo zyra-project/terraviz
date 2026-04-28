@@ -44,9 +44,18 @@ export default defineConfig(({ mode }) => ({
     watch: {
       usePolling: !!process.env.CHOKIDAR_USEPOLLING
     },
+    // The dev server proxies `/api/*` to a backend so the frontend
+    // can run against either:
+    //   - the production catalog (default), or
+    //   - a locally running `wrangler pages dev` at :8788, by setting
+    //     `VITE_DEV_API_TARGET=http://localhost:8788` in `.env.local`
+    //     before running `npm run dev`.
+    // The two-port split keeps Vite's HMR-friendly :5173 separate
+    // from Wrangler's Functions runtime; same-origin from the
+    // browser's perspective via this proxy.
     proxy: {
       '/api': {
-        target: 'https://terraviz.zyra-project.org',
+        target: process.env.VITE_DEV_API_TARGET ?? 'https://terraviz.zyra-project.org',
         changeOrigin: true,
       },
     },
