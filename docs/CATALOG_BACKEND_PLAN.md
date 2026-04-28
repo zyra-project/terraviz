@@ -2330,12 +2330,7 @@ in the course of writing this plan have been removed; the git
 history under `docs/CATALOG_*` captures the resolutions for
 anyone who wants to see the path the decisions took.
 
-1. **D1 vs. R2 for tour JSON.** Tours are <50 KB JSON. Storing
-   the full JSON in a D1 column is simpler (no presign, no extra
-   round trip) but couples query results to potentially-large
-   blobs. R2 keeps the catalog row lean. Default is R2; revisit
-   if it adds meaningful latency.
-2. **Whether to ship a CLI in Phase 1 or wait.** A
+1. **Whether to ship a CLI in Phase 1 or wait.** A
    `terraviz publish dataset.yaml` CLI would make the seed
    importer redundant and gives partner orgs a path that doesn't
    require the portal. The validation contract in
@@ -2343,16 +2338,11 @@ anyone who wants to see the path the decisions took.
    is already CLI-shaped (same 400 error envelope), so the
    surface is paid for; the question is build/release plumbing
    cost (~1 week) versus Phase-1 scope budget.
-3. **Federation cadence default.** 15 minutes is a guess. Some
+2. **Federation cadence default.** 15 minutes is a guess. Some
    peers will want hourly; some will want webhooks-only. Should
    the default be configurable per-peer at handshake time, or
    per-node?
-4. **Backwards compatibility for the public reference deploy.**
-   `terraviz.app` currently fronts the SOS catalog. After Phase
-   2 it could still serve the same data, but the upstream URL
-   becomes Stream instead of Vimeo. Is there a constituency that
-   pins to the Vimeo URL externally and would break?
-5. **Desktop offline caching of federated datasets.** The
+3. **Desktop offline caching of federated datasets.** The
    asset-pipeline mirror flow defines how a federation peer
    verifies and stores mirrored bytes; the desktop app's existing
    download manager doesn't yet have a story for downloading
@@ -2363,38 +2353,34 @@ anyone who wants to see the path the decisions took.
    inherits the integrity flow for free; direct-from-peer means
    the desktop app must implement
    `content_digest` verification itself).
-6. **Where does Orbit (the LLM docent) sit relative to
+4. **Where does Orbit (the LLM docent) sit relative to
    federated catalogs?** The system prompt builder currently
    assumes a flat catalog; including federated items expands the
    prompt. Cap by relevance, rotate per turn, or expose a
    per-peer "include in docent" toggle?
-7. **Cloudflare Stream's signed URL TTL minimum.** 5 minutes is
+5. **Cloudflare Stream's signed URL TTL minimum.** 5 minutes is
    the assumed value used throughout this plan and the
    production-debugging playbook in
    [`CATALOG_BACKEND_DEVELOPMENT.md`](CATALOG_BACKEND_DEVELOPMENT.md);
    verify against Stream documentation and adjust manifest cache
    headers accordingly.
-8. **Out-of-Stream encoding host.** Beyond-4K HLS and
+6. **Out-of-Stream encoding host.** Beyond-4K HLS and
    packed-alpha variants need an encoder Stream won't run for
    us. Options: GitHub Actions ffmpeg job, a long-running
    self-hosted runner, or a separate Worker calling out to a
    transcoding API (Mux / Coconut / Bitmovin). The data model is
    the same in every case; the operator burden differs a lot.
-9. **Default codec ladder per dataset.** Always emit
+7. **Default codec ladder per dataset.** Always emit
    H.264 + HEVC + AV1, or only H.264 by default and let the
    publisher opt into the heavier codecs? Storage cost vs.
    playback quality tradeoff; needs a number from a few
    representative datasets before deciding.
-10. **Layer compositor scope.** Transparent video makes single-
-    globe layering feasible, but the multi-globe layout already
-    solves "compare two datasets." Is layered compositing a
-    *replacement* for multi-globe (one globe, N stacked layers)
-    or an *additional* mode (still N globes, but each can stack)?
-    The renderer change is simpler if it's the latter.
-11. **Cron-only federation peer ceiling.** "≤ ~20 peers" is a
-    rough estimate based on Cron Trigger CPU budgets; needs
-    measurement against a realistic peer mix before being
-    documented as a hard limit.
+8. **Layer compositor scope.** Transparent video makes single-
+   globe layering feasible, but the multi-globe layout already
+   solves "compare two datasets." Is layered compositing a
+   *replacement* for multi-globe (one globe, N stacked layers)
+   or an *additional* mode (still N globes, but each can stack)?
+   The renderer change is simpler if it's the latter.
 
 ---
 

@@ -201,6 +201,7 @@ license_statement" and shows the statement verbatim.
 | Hostile peer floods with bogus datasets | Per-peer item-count cap (configurable, default 10k). Beyond it, syncs degrade to error and require operator unblock. |
 | Subscriber's clock is skewed | Signed timestamps + 5-minute window; persistent failure surfaces a "check your clock" alert. |
 | Peer retracts a dataset after publishing | Tombstone delivered next sync; subscriber removes it. The window where a stale subscriber still has the metadata is bounded by sync cadence. |
+| Subscriber count exceeds the cron-only ceiling | The Cloudflare Cron Trigger CPU budget caps how many peers a single node can sync per cycle; the working assumption is **≤ 20 peers** at the default 15-minute cadence. Exceeding it surfaces as cron timeouts in the audit log; remediation is either lengthen the cadence (per-peer config) or move that peer to webhook-driven sync. The hard limit is empirical and should be measured against a realistic peer mix before being treated as a fixed number. |
 
 ## Why not ActivityPub / Atom / OAI-PMH?
 
