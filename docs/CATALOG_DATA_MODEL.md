@@ -97,6 +97,14 @@ CREATE TABLE datasets (
   schema_version     INTEGER NOT NULL DEFAULT 1,
   created_at         TEXT NOT NULL,
   updated_at         TEXT NOT NULL,
+
+  -- Review-queue lifecycle (Phase 6 only; all NULL in Phase 3).
+  -- See "Review queue" in CATALOG_PUBLISHING_TOOLS.md.
+  submitted_at       TEXT,                    -- stamped when a community publisher submits a draft for review
+  approved_at        TEXT,                    -- stamped by reviewer; clears submitted_at on publish
+  rejected_at        TEXT,                    -- stamped by reviewer; resets to draft state and clears submitted_at
+  rejected_reason    TEXT,                    -- reviewer's free-text rejection reason
+
   published_at       TEXT,
   retracted_at       TEXT,
   publisher_id       TEXT,
@@ -261,20 +269,41 @@ CREATE TABLE federation_subscribers (
 ## Publishing & access tables
 
 ```sql
--- Publisher accounts. Identified by Cloudflare Access email today;
--- (Phase 3+) extend with an OIDC subject for community publishers.
+-- Institutional groupings. Nullable on publishers in Phase 3
+-- (single-org deploy, equivalent to "every Access user is admin");
+-- populated from Phase 6 onward when community publishers from
+-- multiple institutions can coexist. The require_review flag is
+-- the per-org gate for the review-queue workflow described in
+-- CATALOG_PUBLISHING_TOOLS.md.
+CREATE TABLE orgs (
+  id               TEXT PRIMARY KEY,           -- ULID
+  name             TEXT NOT NULL,
+  display_name     TEXT NOT NULL,
+  require_review   INTEGER NOT NULL DEFAULT 0, -- review-queue gate (Phase 6)
+  created_at       TEXT NOT NULL
+);
+
+-- Publisher accounts. Identified by Cloudflare Access email in
+-- Phase 3; (Phase 6) extend with an OIDC subject for community
+-- publishers. is_admin is the gate for sensitive node-wide actions
+-- (peer management, hard delete, node-wide audit log read).
+-- See "Publisher identity & roles" in CATALOG_PUBLISHING_TOOLS.md.
 CREATE TABLE publishers (
   id              TEXT PRIMARY KEY,
   email           TEXT NOT NULL UNIQUE,
   display_name    TEXT NOT NULL,
   affiliation     TEXT,
+  org_id          TEXT,                       -- nullable in Phase 3; FK to orgs(id) from Phase 6
   role            TEXT NOT NULL,              -- staff | community | readonly
+  is_admin        INTEGER NOT NULL DEFAULT 0, -- staff sub-role; first staff row on a fresh deploy is auto-promoted
   status          TEXT NOT NULL,              -- pending | active | suspended
-  created_at      TEXT NOT NULL
+  created_at      TEXT NOT NULL,
+  FOREIGN KEY (org_id) REFERENCES orgs(id)
 );
 
--- Per-dataset, per-peer share grants. Phase 3.
--- A row here means: grantee X is allowed to see dataset Y.
+-- Per-dataset, per-peer share grants. Phase 5.
+-- READ-side: a row here means grantee X is allowed to SEE dataset Y.
+-- Distinct from dataset_collaborators (write-side) below.
 CREATE TABLE dataset_grants (
   dataset_id   TEXT NOT NULL,
   grantee_kind TEXT NOT NULL,                 -- 'peer' | 'all_federated' | 'public'
@@ -286,8 +315,40 @@ CREATE TABLE dataset_grants (
   FOREIGN KEY (dataset_id) REFERENCES datasets(id) ON DELETE CASCADE
 );
 
+-- Per-dataset write-side collaboration grants. Phase 6.
+-- A row here means: publisher X may EDIT or REVIEW dataset Y.
+-- Distinct from dataset_grants (read-side) above.
+-- See "Cross-publisher collaboration" in CATALOG_PUBLISHING_TOOLS.md.
+CREATE TABLE dataset_collaborators (
+  dataset_id   TEXT NOT NULL,
+  publisher_id TEXT NOT NULL,
+  permission   TEXT NOT NULL,                 -- editor | reviewer
+  invited_by   TEXT NOT NULL,                 -- publishers.id
+  invited_at   TEXT NOT NULL,
+  accepted_at  TEXT,                          -- null until invitee accepts
+  revoked_at   TEXT,
+  PRIMARY KEY (dataset_id, publisher_id),
+  FOREIGN KEY (dataset_id)   REFERENCES datasets(id) ON DELETE CASCADE,
+  FOREIGN KEY (publisher_id) REFERENCES publishers(id),
+  FOREIGN KEY (invited_by)   REFERENCES publishers(id)
+);
+
+-- Review-queue comment thread per dataset. Append-only; comments
+-- are not edited in place (mirrors audit_events). Phase 6.
+CREATE TABLE dataset_review_comments (
+  id           TEXT PRIMARY KEY,              -- ULID
+  dataset_id   TEXT NOT NULL,
+  reviewer_id  TEXT NOT NULL,                 -- publishers.id
+  body         TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  FOREIGN KEY (dataset_id)  REFERENCES datasets(id) ON DELETE CASCADE,
+  FOREIGN KEY (reviewer_id) REFERENCES publishers(id)
+);
+
+CREATE INDEX idx_review_comments_dataset ON dataset_review_comments(dataset_id, created_at);
+
 -- Append-only audit log. Every publish, retract, grant, revoke,
--- subscription accept, and ingest webhook lands here.
+-- subscription accept, ingest webhook, and hard-delete lands here.
 CREATE TABLE audit_events (
   id              TEXT PRIMARY KEY,           -- ULID
   actor_kind      TEXT NOT NULL,              -- publisher | peer | system
@@ -300,6 +361,19 @@ CREATE TABLE audit_events (
 );
 
 CREATE INDEX idx_audit_subject ON audit_events(subject_kind, subject_id, created_at);
+
+-- Permanent stub for hard-deleted datasets. Used for legal /
+-- safety takedowns where the bytes need to be unreachable without
+-- the 90-day retraction grace. The body of the dataset is
+-- deliberately not retained — only ULID + who + when + why. The
+-- corresponding audit_events row carries the cross-reference.
+-- See "Retraction & deletion" in CATALOG_PUBLISHING_TOOLS.md.
+CREATE TABLE deleted_datasets (
+  id          TEXT PRIMARY KEY,               -- former datasets.id
+  deleted_at  TEXT NOT NULL,
+  deleted_by  TEXT NOT NULL,                  -- publishers.id
+  reason      TEXT NOT NULL                   -- free text captured at deletion
+);
 ```
 
 ## Migration from the existing public catalog
