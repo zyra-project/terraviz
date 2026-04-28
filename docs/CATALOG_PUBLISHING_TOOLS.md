@@ -287,6 +287,107 @@ The capability matrix above applies — invited editors get the
 "community (invited)" column, invited reviewers get a subset
 limited to read + comment + approve.
 
+## Review queue (Phase 6)
+
+An optional review-queue mode, configured per-org via a
+`require_review BOOLEAN` flag on the orgs table. When the flag is
+on:
+
+- Community publishers' drafts can be saved freely but cannot
+  transition to `published_at` directly.
+- Submitting a draft stamps `submitted_at` on the dataset row and
+  routes the dataset to a per-org review queue.
+- A staff publisher (or an assigned reviewer) reviews, may
+  comment, and either approves (stamps `approved_at`) or rejects
+  (stamps `rejected_at` with a reason; resets to draft state and
+  clears `submitted_at`).
+- An approved draft can be published by the owner or any staff;
+  publishing stamps `published_at` and clears `submitted_at`,
+  `approved_at`, and `rejected_at`.
+
+Three columns extend the `datasets` table for this flow:
+`submitted_at`, `approved_at`, `rejected_at`. All three are NULL
+in the Phase 3 staff-only flow; the review-queue logic is
+purely additive — Phase 3 routes that read or write the
+`datasets` table never touch the review columns.
+
+The review queue is a UI surface in the portal: a "Pending
+review" tab listing submitted drafts grouped by org, with filters
+by submitter, submission date, and review state. Review comments
+live in a `dataset_review_comments` table (id, dataset_id,
+reviewer_id, body, created_at) — append-only; comments are not
+edited in place, mirroring how audit events work.
+
+Reviewers are assigned in two ways: org admins can pre-assign
+specific publishers to review specific submitters' work
+(typical institutional pattern), or a submission with no
+assignment falls into the org's general queue and any
+review-eligible publisher (staff or readonly) can pick it up.
+Self-review is rejected — a publisher cannot approve a draft
+they authored, even if they have the role to.
+
+## Retraction & deletion
+
+Retraction is a soft state: the row stays, `retracted_at` is
+stamped, the federation feed emits a tombstone, and the asset
+lifecycle table in
+[`CATALOG_ASSETS_PIPELINE.md`](CATALOG_ASSETS_PIPELINE.md) takes
+over (90-day grace, then asset cleanup, row stays as a
+tombstone). Retraction is the typical action a publisher takes
+when content is wrong, outdated, or otherwise needs to disappear.
+
+Hard deletion is rare and reserved for legal / safety scenarios:
+takedown notices, accidentally-published private data,
+regulatory removal orders. Only admin staff can hard-delete; the
+action is always logged with the requester's identity, the
+requester's free-text reason captured at the time, and a small
+permanent record in a `deleted_datasets` table holding only the
+ULID, the deletion timestamp, the deleter, and the reason — the
+row body is not retained, deliberately.
+
+For federation: a hard-deleted row emits a tombstone like
+retraction does, but the tombstone is permanent (no grace period,
+no `data_ref` resolution). Peers receive the tombstone on next
+sync and remove their mirror; the audit_events row at the
+deleting node records what happened in case a federated peer
+later asks why a dataset disappeared.
+
+The "retract → 90-day grace → asset cleanup" path handles >99% of
+real cases; the hard-delete path exists for the cases where
+"the bytes need to be unreachable in 24 hours, not 90 days."
+Both paths surface in the publisher portal's history panel
+(see below) so a reviewer can verify what was done and when.
+
+## Audit trail in the portal
+
+The `audit_events` table described in the main backend plan is
+the substrate; the portal renders it in two places:
+
+- **Per-dataset history panel.** Inside each dataset's edit view,
+  a collapsible panel shows the row's lifecycle: created, edited
+  (with changed-fields summary derived from `metadata_json`),
+  submitted, approved, published, granted, revoked, retracted.
+  Filterable by actor and time range. This is the answer to
+  "did peer X get this dataset before I retracted it?" — grant
+  and retraction events are both there, ordered by ULID.
+- **Node-wide activity feed (admin only).** A reverse-chronological
+  feed of every audit event across the node, useful for "what's
+  happening on my deploy?" and incident review. Backed by the
+  same query, just unfiltered. Pagination via the
+  `audit_events.id` (ULID) cursor.
+
+The panel is the answer to several otherwise-awkward questions:
+"who edited this title last week?" (edit events with
+changed-fields), "did this review approval happen before or
+after the integrity check failed?" (events are interleaved by
+ULID, which is time-ordered), "did the right peer get notified
+of a hard delete?" (federation-fanout events appear next to the
+deletion event).
+
+Phase 3 ships the per-dataset panel; Phase 6 adds the node-wide
+feed once there are non-staff actors generating events worth
+filtering across.
+
 ## Other tools that round out the experience
 
 The user asked what else makes Terraviz "complete." From the gaps
