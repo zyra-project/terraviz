@@ -33,7 +33,7 @@
  */
 
 import { generateKeyPairSync } from 'node:crypto'
-import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { findCatalogD1File } from './lib/d1-local.ts'
@@ -105,6 +105,18 @@ function writeDevVars(privateB64: string): void {
   const before = existsSync(DEV_VARS_PATH) ? readFileSync(DEV_VARS_PATH, 'utf-8') : ''
   const after = upsertDevVar(before, 'NODE_ID_PRIVATE_KEY_PEM', privateB64)
   writeFileSync(DEV_VARS_PATH, after, { mode: 0o600 })
+  // `mode` on `writeFileSync` only takes effect when creating a new
+  // file; an existing `.dev.vars` keeps whatever permissions it had.
+  // Since this file carries a long-lived Ed25519 private key, force
+  // 0600 explicitly on every run so a re-keygen tightens perms even
+  // if the file was originally written with a looser umask.
+  try {
+    chmodSync(DEV_VARS_PATH, 0o600)
+  } catch {
+    // Best-effort: chmod can fail on Windows / mounted filesystems
+    // that don't honor POSIX modes. The file's contents are correct
+    // either way; this is just defense in depth.
+  }
 }
 
 function writePublicKeyFile(publicWire: string): void {
