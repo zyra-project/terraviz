@@ -51,6 +51,19 @@ import {
   markAssetUploadCompleted,
   markAssetUploadFailed,
 } from '../../../../../_lib/asset-uploads'
+import {
+  type JobQueue,
+  WaitUntilJobQueue,
+} from '../../../../../_lib/job-queue'
+import {
+  generateSphereThumbnail,
+  type SphereThumbnailJobPayload,
+} from '../../../../../_lib/sphere-thumbnail-job'
+
+/** Test injection point — middleware/tests can pre-populate `context.data.jobQueue`. */
+interface CompleteContextData extends PublisherData {
+  jobQueue?: JobQueue
+}
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
 
@@ -187,6 +200,25 @@ export const onRequestPost: PagesFunction<CatalogEnv, keyof RouteParams> = async
     .first<DatasetRow>()
   if (updated?.published_at && !updated.retracted_at) {
     await invalidateSnapshot(context.env)
+  }
+
+  // Kick off sphere-thumbnail generation when the source asset is
+  // the kind we know how to render from: the primary `data` ref or
+  // a publisher-supplied `thumbnail`. The job runs against the
+  // request's `ctx.waitUntil` so the response goes back without
+  // blocking.
+  if (upload.kind === 'data' || upload.kind === 'thumbnail') {
+    const queue = (context.data as unknown as CompleteContextData).jobQueue
+      ?? new WaitUntilJobQueue(context.env, context.waitUntil.bind(context))
+    const payload: SphereThumbnailJobPayload = {
+      dataset_id: datasetId,
+      source_ref: upload.target_ref,
+    }
+    await queue.enqueue<SphereThumbnailJobPayload>(
+      'sphere_thumbnail',
+      (env, p) => generateSphereThumbnail(env as CatalogEnv, p),
+      payload,
+    )
   }
 
   return new Response(

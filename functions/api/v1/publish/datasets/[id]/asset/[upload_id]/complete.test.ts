@@ -23,6 +23,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { onRequestPost as completeHandler } from './complete'
 import { asD1, makeKV, seedFixtures } from '../../../../../_lib/test-helpers'
 import type { PublisherRow } from '../../../../../_lib/publisher-store'
+import { CapturingJobQueue } from '../../../../../_lib/job-queue'
 
 const STAFF: PublisherRow = {
   id: 'PUB-STAFF',
@@ -119,13 +120,21 @@ function ctx(opts: {
   datasetId: string
   uploadId: string
   publisher?: PublisherRow
+  jobQueue?: CapturingJobQueue
 }) {
   const url = `https://localhost/api/v1/publish/datasets/${opts.datasetId}/asset/${opts.uploadId}/complete`
+  // Default to a CapturingJobQueue so tests that don't care about
+  // the sphere-thumbnail enqueue path don't run the job
+  // eagerly (which would require every fixture to wire up a fake
+  // R2 binding even when the test isn't about R2). The dedicated
+  // enqueue-wiring tests pass an explicit queue and assert on its
+  // records.
+  const jobQueue = opts.jobQueue ?? new CapturingJobQueue()
   return {
     request: new Request(url, { method: 'POST' }),
     env: opts.env,
     params: { id: opts.datasetId, upload_id: opts.uploadId },
-    data: { publisher: opts.publisher ?? STAFF },
+    data: { publisher: opts.publisher ?? STAFF, jobQueue },
     waitUntil: () => {},
     passThroughOnException: () => {},
     next: async () => new Response(null),
@@ -520,5 +529,89 @@ describe('POST .../asset/{upload_id}/complete — refusals', () => {
     const res = await completeHandler(ctx({ env, datasetId, uploadId: 'UP-FAIL' }))
     expect(res.status).toBe(409)
     expect((await readJson<{ error: string }>(res)).error).toBe('upload_failed')
+  })
+})
+
+describe('POST .../asset/{upload_id}/complete — sphere thumbnail enqueue', () => {
+  it('enqueues a sphere_thumbnail job when a `data` upload completes', async () => {
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: true })
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      CATALOG_R2: makeBucket(HELLO_BYTES.buffer as ArrayBuffer),
+    }
+    const queue = new CapturingJobQueue()
+    insertPending(sqlite, {
+      uploadId: 'UP-DATA',
+      datasetId,
+      kind: 'data',
+      target: 'r2',
+      target_ref: `r2:datasets/${datasetId}/by-digest/sha256/${SHA64_HELLO}/asset.png`,
+      mime: 'image/png',
+      claimed_digest: HELLO_DIGEST,
+    })
+    const res = await completeHandler(
+      ctx({ env, datasetId, uploadId: 'UP-DATA', jobQueue: queue }),
+    )
+    expect(res.status).toBe(200)
+    expect(queue.records).toHaveLength(1)
+    expect(queue.records[0].name).toBe('sphere_thumbnail')
+    expect(queue.records[0].payload).toEqual({
+      dataset_id: datasetId,
+      source_ref: `r2:datasets/${datasetId}/by-digest/sha256/${SHA64_HELLO}/asset.png`,
+    })
+  })
+
+  it('enqueues a sphere_thumbnail job when a `thumbnail` upload completes', async () => {
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: true })
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      CATALOG_R2: makeBucket(HELLO_BYTES.buffer as ArrayBuffer),
+    }
+    const queue = new CapturingJobQueue()
+    insertPending(sqlite, {
+      uploadId: 'UP-THUMB',
+      datasetId,
+      kind: 'thumbnail',
+      target: 'r2',
+      target_ref: `r2:datasets/${datasetId}/by-digest/sha256/${SHA64_HELLO}/thumbnail.png`,
+      mime: 'image/png',
+      claimed_digest: HELLO_DIGEST,
+    })
+    const res = await completeHandler(
+      ctx({ env, datasetId, uploadId: 'UP-THUMB', jobQueue: queue }),
+    )
+    expect(res.status).toBe(200)
+    expect(queue.records).toHaveLength(1)
+    expect(queue.records[0].payload).toMatchObject({ dataset_id: datasetId })
+  })
+
+  it('does NOT enqueue for caption / legend / sphere_thumbnail kinds', async () => {
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: true })
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      CATALOG_R2: makeBucket(HELLO_BYTES.buffer as ArrayBuffer),
+    }
+    for (const kind of ['caption', 'legend', 'sphere_thumbnail'] as const) {
+      const queue = new CapturingJobQueue()
+      const uploadId = `UP-${kind}`
+      const ext = kind === 'caption' ? 'vtt' : kind === 'sphere_thumbnail' ? 'webp' : 'png'
+      const mime =
+        kind === 'caption' ? 'text/vtt' : kind === 'sphere_thumbnail' ? 'image/webp' : 'image/png'
+      insertPending(sqlite, {
+        uploadId,
+        datasetId,
+        kind,
+        target: 'r2',
+        target_ref: `r2:datasets/${datasetId}/by-digest/sha256/${SHA64_HELLO}/${kind}.${ext}`,
+        mime,
+        claimed_digest: HELLO_DIGEST,
+      })
+      const res = await completeHandler(ctx({ env, datasetId, uploadId, jobQueue: queue }))
+      expect(res.status).toBe(200)
+      expect(queue.records).toHaveLength(0)
+    }
   })
 })

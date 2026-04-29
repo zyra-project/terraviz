@@ -146,4 +146,16 @@ export interface CatalogEnv {
    * walkthrough works without a Cloudflare Stream subscription.
    */
   MOCK_STREAM?: string
+  /**
+   * Origin used by the sphere-thumbnail generation pipeline to
+   * issue Cloudflare Images URL transformations against image
+   * datasets (Phase 1b). When set, image-source thumbnails are
+   * resized via `${CF_IMAGES_RESIZE_BASE}/cdn-cgi/image/fit=fill,...`.
+   * When unset, the job falls back to the source bytes (the
+   * publisher portal's regenerate button (Phase 3) handles the
+   * unrepresentative case manually). Stream-source thumbnails
+   * always go through Stream's own thumbnail API and never consult
+   * this var.
+   */
+  CF_IMAGES_RESIZE_BASE?: string
 }
