@@ -57,6 +57,7 @@
     "@cloudflare/workers-types": "^4.20260317.1",
     "@tauri-apps/cli": "^2",
     "@types/better-sqlite3": "^7.6.13",
+    "@types/geojson": "^7946.0.16",
     "@types/node": "^20.10.0",
     "@types/three": "^0.183.1",
     "@vitest/coverage-v8": "^4.1.0",
