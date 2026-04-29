@@ -89,6 +89,20 @@ describe('publish/tours', () => {
     expect(res.headers.get('location')).toBe(`/api/v1/publish/tours/${body.tour.id}`)
   })
 
+  it('POST 503 identity_missing when node_identity has not been provisioned', async () => {
+    const { env, sqlite } = setupEnv()
+    sqlite.prepare('DELETE FROM node_identity').run()
+    const res = await onRequestPost(
+      ctx({
+        env,
+        method: 'POST',
+        body: { title: 'My Tour', tour_json_ref: 'r2:tours/x.json' },
+      }),
+    )
+    expect(res.status).toBe(503)
+    expect((await readJson<{ error: string }>(res)).error).toBe('identity_missing')
+  })
+
   it('POST 400 when tour_json_ref is missing', async () => {
     const { env } = setupEnv()
     const res = await onRequestPost(

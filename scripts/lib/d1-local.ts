@@ -65,5 +65,18 @@ export function findCatalogD1File(): string | null {
 
   if (candidates.length === 0) return null
   candidates.sort((a, b) => b.size - a.size)
+  if (candidates.length > 1) {
+    // Multiple sqlite files carry the catalog schema — likely
+    // both FEEDBACK_DB and CATALOG_DB have had migrations applied.
+    // The size heuristic picks the larger file (the one with the
+    // most rows) on the assumption it's the canonical CATALOG_DB,
+    // but warn the operator so they can verify by hand if the
+    // wrong one was chosen.
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[d1-local] Found ${candidates.length} candidate D1 files; picking the largest:\n` +
+        candidates.map(c => `  ${c.path} (${c.size} bytes)`).join('\n'),
+    )
+  }
   return candidates[0].path
 }

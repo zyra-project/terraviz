@@ -8,6 +8,7 @@
 
 import type { CatalogEnv } from '../_lib/env'
 import type { PublisherData } from './_middleware'
+import { getNodeIdentity } from '../_lib/catalog-store'
 import { createTour } from '../_lib/tour-mutations'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
@@ -21,6 +22,18 @@ function jsonError(status: number, error: string, message: string): Response {
 
 export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
   const publisher = (context.data as unknown as PublisherData).publisher
+  // See publish/datasets.ts — the createTour SQL embeds the
+  // node_identity row id as `origin_node`, so a fresh deploy that
+  // hasn't run `gen:node-key` would crash with a NOT NULL error.
+  // Surface as 503 identity_missing instead.
+  const identity = await getNodeIdentity(context.env.CATALOG_DB!)
+  if (!identity) {
+    return jsonError(
+      503,
+      'identity_missing',
+      'Node identity has not been provisioned. Run `npm run gen:node-key`.',
+    )
+  }
   let body: unknown
   try {
     body = await context.request.json()

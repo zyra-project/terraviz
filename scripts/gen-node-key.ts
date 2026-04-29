@@ -58,13 +58,17 @@ export function generateNodeKey(): KeyPairBlobs {
   const pkcs8Der = privateKey.export({ format: 'der', type: 'pkcs8' }) as Buffer
   const spkiDer = publicKey.export({ format: 'der', type: 'spki' }) as Buffer
 
-  // Ed25519 SPKI header is 12 bytes; the trailing 32 bytes are the
-  // raw public key. Strip the header so the wire format matches the
-  // existing `ed25519:<b64>` convention used by federation peers.
-  const rawPublic = spkiDer.subarray(spkiDer.length - 32)
-  if (rawPublic.length !== 32) {
+  // Ed25519 SPKI is exactly 44 bytes: a 12-byte algorithm-identifier
+  // header followed by the 32-byte raw key. Validate the total
+  // length BEFORE slicing; the previous check (`rawPublic.length !==
+  // 32`) was dead code because subarray(-32) always yields 32 bytes,
+  // so an unexpected SPKI layout would silently produce a corrupt
+  // key. Strip the header so the wire format matches the existing
+  // `ed25519:<b64>` convention used by federation peers.
+  if (spkiDer.length !== 44) {
     throw new Error(`Unexpected SPKI length: ${spkiDer.length} (need 44 for Ed25519)`)
   }
+  const rawPublic = spkiDer.subarray(spkiDer.length - 32)
 
   const privateB64 = pkcs8Der.toString('base64')
   const publicB64 = rawPublic.toString('base64')

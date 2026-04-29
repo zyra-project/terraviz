@@ -5,20 +5,21 @@
  *
  * The dev doc's "integration" tier wants Miniflare with real
  * bindings; the cheaper "unit" tier wraps a sync better-sqlite3
- * handle in a D1-shaped façade. The façade is intentionally
- * narrow — only the methods catalog-store and snapshot use:
+ * handle in a D1-shaped façade. The façade implements the methods
+ * the catalog-store, snapshot, mutations, and middleware reach for:
  *   - D1Database.prepare(sql) → D1PreparedStatement
  *   - D1PreparedStatement.bind(...args) → D1PreparedStatement
- *   - D1PreparedStatement.all<T>() → { results: T[] }
  *   - D1PreparedStatement.first<T>() → T | null
+ *   - D1PreparedStatement.all<T>() → { results: T[] }
+ *   - D1PreparedStatement.run() → D1Response (writes, returns
+ *                                   `lastInsertRowid` + `changes`)
+ *   - D1PreparedStatement.raw<T>() → T[][]  (decoration tests)
  *
- * Production D1 has more on its surface (`run()`, `raw()`,
- * `batch()`, `exec()`, `dump()`); the adapter doesn't need them
- * for Phase 1a reads. Commit F's writes will need `run()`; the
- * adapter grows then.
- *
- * The KV shim mirrors the same shape: a Map-backed get/put/delete
- * sufficient for the snapshot module's needs.
+ * Production D1 also exposes `batch()`, `exec()`, and `dump()`;
+ * the catalog backend doesn't use those yet, so the façade
+ * doesn't either. The KV shim mirrors the same approach: a
+ * Map-backed get/put/delete sufficient for the snapshot module's
+ * needs.
  */
 
 import Database from 'better-sqlite3'

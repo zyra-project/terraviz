@@ -108,6 +108,20 @@ describe('POST /api/v1/publish/datasets', () => {
     expect(body.errors.length).toBeGreaterThan(0)
   })
 
+  it('returns 503 identity_missing when node_identity has not been provisioned', async () => {
+    const { env, sqlite } = setupEnv()
+    sqlite.prepare('DELETE FROM node_identity').run()
+    const res = await onRequestPost(
+      ctxWithPublisher({
+        env,
+        method: 'POST',
+        body: { title: 'Hello world', format: 'video/mp4' },
+      }),
+    )
+    expect(res.status).toBe(503)
+    expect((await readJson<{ error: string }>(res)).error).toBe('identity_missing')
+  })
+
   it('returns 400 invalid_json on a non-JSON body', async () => {
     const { env } = setupEnv()
     const ctx = ctxWithPublisher({ env, method: 'POST' })
