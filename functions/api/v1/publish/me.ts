@@ -13,7 +13,7 @@ import type { PublisherData } from './_middleware'
 const CONTENT_TYPE = 'application/json; charset=utf-8'
 
 export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
-  const publisher = (context.data as PublisherData).publisher
+  const publisher = (context.data as unknown as PublisherData).publisher
   return new Response(
     JSON.stringify({
       id: publisher.id,

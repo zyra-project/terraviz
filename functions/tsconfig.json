@@ -3,10 +3,27 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "lib": ["ES2022"],
-    "types": ["@cloudflare/workers-types"],
+    // DOM lib is needed because shared types in src/types/index.ts
+    // reference HTMLCanvasElement / HTMLImageElement / etc. on the
+    // frontend side; the runtime Functions code never touches those
+    // names but the type-only imports flow through.
+    "lib": ["ES2022", "DOM"],
+    // Workers runtime + node + better-sqlite3 (D1 fake in tests).
+    // Loading node types alongside workers-types is intentional: the
+    // production Functions never `require('node:fs')` (the deploy
+    // would fail), but the tests reach into scripts/lib for the
+    // migration helper and need both surfaces to type-check.
+    "types": ["@cloudflare/workers-types", "node", "geojson"],
     "strict": true,
-    "noEmit": true
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true
   },
-  "include": ["."]
+  "include": [
+    "**/*.ts",
+    "../scripts/lib/**/*.ts",
+    "../src/types/index.ts"
+  ],
+  "exclude": ["../node_modules", "../dist"]
 }

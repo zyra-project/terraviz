@@ -35,7 +35,7 @@ function pickId(context: Parameters<PagesFunction<CatalogEnv, 'id'>>[0]): string
 }
 
 export const onRequestGet: PagesFunction<CatalogEnv, 'id'> = async context => {
-  const publisher = (context.data as PublisherData).publisher
+  const publisher = (context.data as unknown as PublisherData).publisher
   const id = pickId(context)
   if (!id) return jsonError(400, 'invalid_request', 'Missing dataset id.')
   const row = await getDatasetForPublisher(context.env.CATALOG_DB!, publisher, id)
@@ -47,7 +47,7 @@ export const onRequestGet: PagesFunction<CatalogEnv, 'id'> = async context => {
 }
 
 export const onRequestPut: PagesFunction<CatalogEnv, 'id'> = async context => {
-  const publisher = (context.data as PublisherData).publisher
+  const publisher = (context.data as unknown as PublisherData).publisher
   const id = pickId(context)
   if (!id) return jsonError(400, 'invalid_request', 'Missing dataset id.')
   const existing = await getDatasetForPublisher(context.env.CATALOG_DB!, publisher, id)

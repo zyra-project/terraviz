@@ -20,7 +20,7 @@ function jsonError(status: number, error: string, message: string): Response {
 }
 
 export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
-  const publisher = (context.data as PublisherData).publisher
+  const publisher = (context.data as unknown as PublisherData).publisher
   let body: unknown
   try {
     body = await context.request.json()

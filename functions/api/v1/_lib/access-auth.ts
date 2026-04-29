@@ -123,7 +123,11 @@ async function verifySignature(
   )
   const data = new TextEncoder().encode(`${headerB64}.${payloadB64}`)
   const sig = base64urlDecode(signatureB64)
-  return crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, sig, data)
+  // TS 5.7+ distinguishes ArrayBuffer from ArrayBufferLike; the
+  // workers-types `crypto.subtle.verify` signature wants a strict
+  // BufferSource. Casting the Uint8Array (whose internal buffer is
+  // ArrayBufferLike) is safe — runtime accepts both.
+  return crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, sig as BufferSource, data as BufferSource)
 }
 
 interface JwtClaims {

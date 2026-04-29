@@ -69,15 +69,29 @@ async function renderCatalog(
     // catalog with a placeholder identity rather than 503'ing the
     // public read path — the operator may still want browse to
     // work even before the well-known doc is ready.
+    //
+    // Derive the etag from the same canonical seed the populated
+    // path uses so two requests with no rows always produce the
+    // same etag (a conditional GET with a matching If-None-Match
+    // really is up-to-date). The previous hardcoded `"empty"` etag
+    // paired with a fresh `generated_at` per render violated the
+    // ETag contract: same etag, different bytes.
+    const seed = JSON.stringify({
+      schema_version: 1,
+      cursor: null,
+      datasets: [] as WireDataset[],
+      tombstones: [] as string[],
+    })
+    const etag = await computeEtag(seed)
     const empty: CatalogResponseBody = {
       schema_version: 1,
       generated_at: new Date().toISOString(),
-      etag: '"empty"',
+      etag,
       cursor: null,
       datasets: [],
       tombstones: [],
     }
-    return { body: JSON.stringify(empty), contentType: CONTENT_TYPE, etag: empty.etag }
+    return { body: JSON.stringify(empty), contentType: CONTENT_TYPE, etag }
   }
 
   const rows: DatasetRow[] = await listPublicDatasets(db, options)

@@ -121,6 +121,6 @@ export const onRequest: PagesFunction<CatalogEnv> = async context => {
   }
 
   // Stash the row so route handlers can authorise without re-querying D1.
-  ;(context.data as PublisherData).publisher = publisher
+  ;(context.data as unknown as PublisherData).publisher = publisher
   return context.next()
 }

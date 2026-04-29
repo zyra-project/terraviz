@@ -27,7 +27,7 @@ function pickId(p: string | string[] | undefined): string | null {
 }
 
 export const onRequestGet: PagesFunction<CatalogEnv, 'id'> = async context => {
-  const publisher = (context.data as PublisherData).publisher
+  const publisher = (context.data as unknown as PublisherData).publisher
   const id = pickId(context.params.id)
   if (!id) return jsonError(400, 'invalid_request', 'Missing tour id.')
   const row = await getTourForPublisher(context.env.CATALOG_DB!, publisher, id)
@@ -39,7 +39,7 @@ export const onRequestGet: PagesFunction<CatalogEnv, 'id'> = async context => {
 }
 
 export const onRequestPut: PagesFunction<CatalogEnv, 'id'> = async context => {
-  const publisher = (context.data as PublisherData).publisher
+  const publisher = (context.data as unknown as PublisherData).publisher
   const id = pickId(context.params.id)
   if (!id) return jsonError(400, 'invalid_request', 'Missing tour id.')
   const existing = await getTourForPublisher(context.env.CATALOG_DB!, publisher, id)

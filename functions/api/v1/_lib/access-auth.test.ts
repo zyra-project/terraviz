@@ -82,14 +82,14 @@ async function signJwt(
   return `${headerB64}.${payloadB64}.${base64urlBytes(sigBytes)}`
 }
 
-function makeFetchStub(jwks: { keys: JsonWebKey[] }) {
-  return vi.fn(async (input: RequestInfo) => {
+function makeFetchStub(jwks: { keys: JsonWebKey[] }): typeof fetch {
+  return vi.fn(async (input: unknown) => {
     expect(String(input)).toBe(`https://${TEAM}/cdn-cgi/access/certs`)
     return new Response(JSON.stringify(jwks), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     })
-  })
+  }) as unknown as typeof fetch
 }
 
 beforeAll(async () => {

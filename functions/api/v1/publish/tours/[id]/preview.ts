@@ -25,7 +25,7 @@ function jsonError(status: number, error: string, message: string): Response {
 }
 
 export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
-  const publisher = (context.data as PublisherData).publisher
+  const publisher = (context.data as unknown as PublisherData).publisher
   const idParam = context.params.id
   const id = Array.isArray(idParam) ? idParam[0] : idParam
   if (!id) return jsonError(400, 'invalid_request', 'Missing tour id.')

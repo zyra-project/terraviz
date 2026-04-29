@@ -40,9 +40,11 @@ export interface SnapshotPayload {
 }
 
 /**
- * SHA-256 of the body, base64url-encoded and truncated to 16 chars.
- * 64 bits of entropy is plenty for a content-derived ETag — the
- * collision risk on a single-row catalog is negligible.
+ * SHA-256 of the body, base64url-encoded and truncated to 22 chars
+ * (~132 bits of entropy). Plenty for a content-derived ETag — the
+ * collision risk on a real-world catalog is negligible. The
+ * shorter form keeps the response header tidy without sacrificing
+ * uniqueness.
  */
 export async function computeEtag(body: string): Promise<string> {
   const bytes = new TextEncoder().encode(body)

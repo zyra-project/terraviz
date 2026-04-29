@@ -39,7 +39,7 @@ function validationFailure(errors: unknown[], status = 400): Response {
 }
 
 export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
-  const publisher = (context.data as PublisherData).publisher
+  const publisher = (context.data as unknown as PublisherData).publisher
   const url = new URL(context.request.url)
 
   const statusParam = url.searchParams.get('status')
@@ -72,7 +72,7 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
 }
 
 export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
-  const publisher = (context.data as PublisherData).publisher
+  const publisher = (context.data as unknown as PublisherData).publisher
   let body: unknown
   try {
     body = await context.request.json()
