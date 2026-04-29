@@ -253,10 +253,136 @@ describe('GET /api/v1/datasets/{id}/manifest', () => {
     expect(body.variants.map(v => v.width)).toEqual([4096, 2048, 1024])
   })
 
-  it('returns 501 for not-yet-implemented data_ref schemes', async () => {
+  it('resolves a stream: data_ref to a video manifest with the HLS playback URL', async () => {
     const sqlite = seedFixtures({ count: 1 })
     sqlite
-      .prepare(`UPDATE datasets SET data_ref = 'stream:abcdef' WHERE slug = 'dataset-0'`)
+      .prepare(
+        `UPDATE datasets SET data_ref = 'stream:abc123', format = 'video/mp4'
+         WHERE slug = 'dataset-0'`,
+      )
+      .run()
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: makeKV(),
+      STREAM_CUSTOMER_SUBDOMAIN: 'customer-real.cloudflarestream.com',
+    }
+    const ctx = makeCtx<'id'>({ env, params: { id: 'DS000AAAAAAAAAAAAAAAAAAAAA' } })
+    const res = await onRequestGet(ctx)
+    expect(res.status).toBe(200)
+    const body = await readJson<{ kind: string; hls: string; files: unknown[] }>(res)
+    expect(body.kind).toBe('video')
+    expect(body.hls).toBe('https://customer-real.cloudflarestream.com/abc123/manifest/video.m3u8')
+    expect(body.files).toEqual([])
+  })
+
+  it('returns 503 stream_unconfigured when stream: data_ref but no subdomain configured', async () => {
+    const sqlite = seedFixtures({ count: 1 })
+    sqlite
+      .prepare(
+        `UPDATE datasets SET data_ref = 'stream:abc123', format = 'video/mp4'
+         WHERE slug = 'dataset-0'`,
+      )
+      .run()
+    const env = { CATALOG_DB: asD1(sqlite), CATALOG_KV: makeKV() }
+    const ctx = makeCtx<'id'>({ env, params: { id: 'DS000AAAAAAAAAAAAAAAAAAAAA' } })
+    const res = await onRequestGet(ctx)
+    expect(res.status).toBe(503)
+    expect((await readJson<{ error: string }>(res)).error).toBe('stream_unconfigured')
+  })
+
+  it('returns 400 data_ref_format_mismatch when stream: paired with a non-video format', async () => {
+    const sqlite = seedFixtures({ count: 1 })
+    sqlite
+      .prepare(
+        `UPDATE datasets SET data_ref = 'stream:abc123', format = 'image/png'
+         WHERE slug = 'dataset-0'`,
+      )
+      .run()
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: makeKV(),
+      STREAM_CUSTOMER_SUBDOMAIN: 'customer-real.cloudflarestream.com',
+    }
+    const ctx = makeCtx<'id'>({ env, params: { id: 'DS000AAAAAAAAAAAAAAAAAAAAA' } })
+    const res = await onRequestGet(ctx)
+    expect(res.status).toBe(400)
+    expect((await readJson<{ error: string }>(res)).error).toBe('data_ref_format_mismatch')
+  })
+
+  it('resolves an r2: data_ref + image format to Cloudflare Images variants when configured', async () => {
+    const sqlite = seedFixtures({ count: 1 })
+    sqlite
+      .prepare(
+        `UPDATE datasets SET data_ref = ?, format = 'image/png'
+         WHERE slug = 'dataset-0'`,
+      )
+      .run(`r2:datasets/DS000AAAAAAAAAAAAAAAAAAAAA/by-digest/sha256/abc/asset.png`)
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: makeKV(),
+      CF_IMAGES_RESIZE_BASE: 'https://images.example.com',
+      CATALOG_R2_BUCKET: 'terraviz-assets',
+      R2_PUBLIC_BASE: 'https://assets.example.com',
+    }
+    const ctx = makeCtx<'id'>({ env, params: { id: 'DS000AAAAAAAAAAAAAAAAAAAAA' } })
+    const res = await onRequestGet(ctx)
+    expect(res.status).toBe(200)
+    const body = await readJson<{
+      kind: string
+      variants: Array<{ width: number; url: string }>
+      fallback: string
+    }>(res)
+    expect(body.kind).toBe('image')
+    expect(body.variants.map(v => v.width)).toEqual([4096, 2048, 1024])
+    expect(body.variants[0].url).toContain(
+      'images.example.com/cdn-cgi/image/fit=scale-down,width=4096',
+    )
+    expect(body.fallback).toBe(
+      'https://assets.example.com/datasets/DS000AAAAAAAAAAAAAAAAAAAAA/by-digest/sha256/abc/asset.png',
+    )
+  })
+
+  it('resolves an r2: image without Cloudflare Images to a single-fallback manifest', async () => {
+    const sqlite = seedFixtures({ count: 1 })
+    sqlite
+      .prepare(
+        `UPDATE datasets SET data_ref = 'r2:datasets/x/asset.png', format = 'image/png'
+         WHERE slug = 'dataset-0'`,
+      )
+      .run()
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: makeKV(),
+      MOCK_R2: 'true',
+    }
+    const ctx = makeCtx<'id'>({ env, params: { id: 'DS000AAAAAAAAAAAAAAAAAAAAA' } })
+    const res = await onRequestGet(ctx)
+    expect(res.status).toBe(200)
+    const body = await readJson<{ kind: string; variants: unknown[]; fallback: string }>(res)
+    expect(body.kind).toBe('image')
+    expect(body.variants).toEqual([])
+    expect(body.fallback).toContain('mock-r2.localhost/terraviz-assets/datasets/x/asset.png')
+  })
+
+  it('returns 503 r2_unconfigured when no R2 read-URL source is set', async () => {
+    const sqlite = seedFixtures({ count: 1 })
+    sqlite
+      .prepare(
+        `UPDATE datasets SET data_ref = 'r2:datasets/x/asset.png', format = 'image/png'
+         WHERE slug = 'dataset-0'`,
+      )
+      .run()
+    const env = { CATALOG_DB: asD1(sqlite), CATALOG_KV: makeKV() }
+    const ctx = makeCtx<'id'>({ env, params: { id: 'DS000AAAAAAAAAAAAAAAAAAAAA' } })
+    const res = await onRequestGet(ctx)
+    expect(res.status).toBe(503)
+    expect((await readJson<{ error: string }>(res)).error).toBe('r2_unconfigured')
+  })
+
+  it('returns 501 for peer: data_ref schemes (Phase 4)', async () => {
+    const sqlite = seedFixtures({ count: 1 })
+    sqlite
+      .prepare(`UPDATE datasets SET data_ref = 'peer:NODE001/DS999' WHERE slug = 'dataset-0'`)
       .run()
     const env = { CATALOG_DB: asD1(sqlite), CATALOG_KV: makeKV() }
     const ctx = makeCtx<'id'>({ env, params: { id: 'DS000AAAAAAAAAAAAAAAAAAAAA' } })

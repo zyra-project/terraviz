@@ -115,6 +115,17 @@ export interface CatalogEnv {
   /** R2 S3 secret access key — Wrangler secret in production. */
   R2_SECRET_ACCESS_KEY?: string
   /**
+   * Public-readable origin for the R2 bucket — e.g.
+   * `https://assets.terraviz.example.com` for a custom-domain
+   * mapping, or the bucket's public-access URL. Used by the
+   * manifest endpoint to construct image/file URLs that the
+   * frontend can fetch unauthenticated. When unset, the manifest
+   * falls back to MOCK_R2 (dev) or the S3 endpoint
+   * (public buckets). Restricted-bucket presigned-GET semantics
+   * land in Phase 4 federation work.
+   */
+  R2_PUBLIC_BASE?: string
+  /**
    * `"true"` makes the asset-init handler emit deterministic
    * `https://mock-r2.localhost/...` URLs instead of real presigned
    * ones, so the contributor walkthrough works without an R2 S3

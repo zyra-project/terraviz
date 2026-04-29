@@ -37,6 +37,8 @@
 
 import { CatalogEnv } from '../../_lib/env'
 import { getNodeIdentity, getPublicDataset } from '../../_lib/catalog-store'
+import { isConfigurationError } from '../../_lib/errors'
+import { streamPlaybackUrl } from '../../_lib/stream-store'
 import { computeEtag } from '../../_lib/snapshot'
 
 const CACHE_CONTROL = 'public, max-age=300, stale-while-revalidate=600'
@@ -222,9 +224,95 @@ export async function resolveManifest(
     }
   }
 
-  // Phase-2+ schemes: stream:, r2:, peer:. Catalog rows for these
-  // shouldn't exist in Phase 1a, but if a self-hosted contributor
-  // hand-edits the DB they get a clear 501 rather than a hang.
+  // Phase 1b schemes: `stream:<uid>` (Cloudflare Stream HLS) and
+  // `r2:<key>` (R2-served images / direct files). Both land via the
+  // upload pipeline in `POST .../asset` + `/complete`.
+  if (parsed.scheme === 'stream') {
+    if (!isVideo) {
+      return {
+        error: {
+          status: 400,
+          code: 'data_ref_format_mismatch',
+          message: `Dataset ${row.id} has a stream: data_ref but a non-video format (${row.format}).`,
+        },
+      }
+    }
+    let hls: string
+    try {
+      hls = streamPlaybackUrl(env, parsed.value)
+    } catch (err) {
+      if (isConfigurationError(err)) {
+        return {
+          error: { status: 503, code: 'stream_unconfigured', message: err.message },
+        }
+      }
+      throw err
+    }
+    return {
+      manifest: {
+        kind: 'video',
+        id: row.id,
+        title: '',
+        duration: 0,
+        hls,
+        // Restricted-bucket / signed-MP4 fallback is a Phase 4
+        // federation concern; the public HLS URL is enough for the
+        // existing `hlsService.ts` to play the asset on Phase 1b.
+        files: [],
+      },
+    }
+  }
+
+  if (parsed.scheme === 'r2') {
+    const url = r2ReadUrl(env, parsed.value)
+    if (!url) {
+      return {
+        error: {
+          status: 503,
+          code: 'r2_unconfigured',
+          message:
+            'R2 read URL cannot be constructed — set CF_IMAGES_RESIZE_BASE for public-image ' +
+            'transformations, R2_PUBLIC_BASE for a public-bucket origin, or MOCK_R2=true for ' +
+            'local development.',
+        },
+      }
+    }
+    if (isImage) {
+      const base = env.CF_IMAGES_RESIZE_BASE?.trim()
+      const bucket = env.CATALOG_R2_BUCKET?.trim() || 'terraviz-assets'
+      if (base) {
+        const variants = [4096, 2048, 1024].map(width => ({
+          width,
+          url: `${base.replace(/\/$/, '')}/cdn-cgi/image/fit=scale-down,width=${width},format=auto/${bucket}/${encodeKey(parsed.value)}`,
+        }))
+        return { manifest: { kind: 'image', variants, fallback: url } }
+      }
+      // No Cloudflare Images transformations — emit a single-variant
+      // manifest pointing at the direct R2 URL. The frontend's
+      // progressive-resolution probe falls through to fallback.
+      return { manifest: { kind: 'image', variants: [], fallback: url } }
+    }
+    if (isVideo) {
+      // Non-Stream video sitting on R2 (rare in 1b — Stream is the
+      // default — but possible for the >4K HLS-on-R2 path described
+      // in `CATALOG_ASSETS_PIPELINE.md` "Resolution tiers"). Emit a
+      // single-file manifest pointing at the direct URL.
+      return { manifest: externalVideoManifest(row.id, url, row.format) }
+    }
+    if (row.format === 'tour/json' || row.format === 'application/json') {
+      return { manifest: externalVideoManifest(row.id, url, row.format) }
+    }
+    return {
+      error: {
+        status: 415,
+        code: 'unsupported_format',
+        message: `Dataset ${row.id} has format ${row.format} which is not yet served by the manifest endpoint.`,
+      },
+    }
+  }
+
+  // `peer:` (federation) lands in Phase 4. Hand-edited rows with
+  // unknown schemes get a clear 501 rather than a hang.
   return {
     error: {
       status: 501,
@@ -232,6 +320,46 @@ export async function resolveManifest(
       message: `data_ref scheme "${parsed.scheme}" is not implemented in this release.`,
     },
   }
+}
+
+/**
+ * Encode an R2 key for inclusion in a URL path. Slashes are
+ * preserved (they're path separators in R2 keys); everything else
+ * goes through `encodeURIComponent`.
+ */
+function encodeKey(key: string): string {
+  return key.split('/').map(encodeURIComponent).join('/')
+}
+
+/**
+ * Build a publicly-readable URL for an R2 object. Tries, in order:
+ *   1. `R2_PUBLIC_BASE` — operator-configured custom-domain origin
+ *      (e.g. `https://assets.terraviz.example.com`).
+ *   2. `MOCK_R2=true` — local-dev stub host the test suite
+ *      asserts against.
+ *   3. `R2_S3_ENDPOINT` — direct path-style S3 URL; only resolves
+ *      to readable bytes for buckets with public access enabled.
+ * Returns null when none of those apply — caller surfaces a 503.
+ *
+ * Restricted-bucket presigned-GET semantics are a Phase 4
+ * federation concern; the manifest endpoint here serves the
+ * happy-path public read.
+ */
+function r2ReadUrl(env: CatalogEnv, key: string): string | null {
+  const bucket = env.CATALOG_R2_BUCKET?.trim() || 'terraviz-assets'
+  const path = encodeKey(key)
+  const publicBase = env.R2_PUBLIC_BASE?.trim()
+  if (publicBase) {
+    return `${publicBase.replace(/\/$/, '')}/${path}`
+  }
+  if (env.MOCK_R2 === 'true') {
+    return `https://mock-r2.localhost/${bucket}/${path}`
+  }
+  const endpoint = env.R2_S3_ENDPOINT?.trim()
+  if (endpoint) {
+    return `${endpoint.replace(/\/$/, '')}/${bucket}/${path}`
+  }
+  return null
 }
 
 export const onRequestGet: PagesFunction<CatalogEnv, 'id'> = async context => {
