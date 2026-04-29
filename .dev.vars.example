@@ -85,6 +85,16 @@ MOCK_R2=true
 # R2_ACCESS_KEY_ID=
 # R2_SECRET_ACCESS_KEY=
 
+# Public-readable origin for the R2 bucket. Used by the manifest
+# endpoint to construct image / file URLs the frontend can fetch
+# unauthenticated. Most operators set this to a custom-domain
+# mapping (e.g. https://assets.terraviz.example.com); the bucket's
+# native public URL also works. When unset, the manifest falls back
+# to MOCK_R2 (dev) or R2_S3_ENDPOINT (only resolves for buckets
+# with public access enabled). Restricted-bucket presigned-GET
+# semantics are a Phase 4 federation concern.
+# R2_PUBLIC_BASE=https://assets.terraviz.example.com
+
 # Bucket name override. Defaults to `terraviz-assets`, matching
 # `wrangler.toml`. Only set this if a fork picks a different name.
 # CATALOG_R2_BUCKET=terraviz-assets
