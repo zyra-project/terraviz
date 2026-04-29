@@ -289,6 +289,16 @@ interface InitAssetEnvelope {
     key: string
   }
   expires_at: string
+  /**
+   * `true` when the server is running with `MOCK_R2=true` /
+   * `MOCK_STREAM=true` for this target — no real bytes need to
+   * be transferred (the mint URL is unreachable). The CLI honors
+   * this flag by skipping the byte upload entirely; `/complete`
+   * trusts the publisher's claimed digest as ground truth on the
+   * server side. Optional for backwards compatibility with
+   * pre-1b/I servers.
+   */
+  mock?: boolean
 }
 
 interface CompleteEnvelope {
@@ -380,14 +390,22 @@ export async function runUpload(ctx: CommandContext): Promise<number> {
     return 1
   }
 
-  const upload = await ctx.client.uploadBytes(target, url, headers, bytes, mime, basename(path))
-  if (!upload.ok) {
-    ctx.stderr.write(
-      `Upload failed (${upload.status})${upload.message ? `: ${upload.message}` : ''}\n`,
-    )
-    return 1
+  if (env.mock) {
+    // Server is in MOCK_R2 / MOCK_STREAM mode — the mint URL is a
+    // stub (mock-r2.localhost / mock-stream.localhost) that doesn't
+    // accept real bytes. Skip the PUT/POST entirely; `/complete`
+    // will trust our claimed digest as ground truth.
+    ctx.stdout.write(`  mock mode — skipping byte upload.\n`)
+  } else {
+    const upload = await ctx.client.uploadBytes(target, url, headers, bytes, mime, basename(path))
+    if (!upload.ok) {
+      ctx.stderr.write(
+        `Upload failed (${upload.status})${upload.message ? `: ${upload.message}` : ''}\n`,
+      )
+      return 1
+    }
+    ctx.stdout.write(`  bytes uploaded.\n`)
   }
-  ctx.stdout.write(`  bytes uploaded.\n`)
 
   // Poll /complete. Stream returns 202 transcode_in_progress while
   // the asset is transcoding; everything else is a one-shot.

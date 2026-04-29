@@ -114,6 +114,14 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
   const target = chooseTarget(kind, mime)
   const uploadId = newUlid()
   const now = new Date().toISOString()
+  // Whether this upload is in mock mode — used by the CLI / portal
+  // to skip the actual byte transit (the mock URLs aren't reachable)
+  // and by `/complete` to short-circuit digest verification (no
+  // bytes were ever uploaded). Mirrors the existing Stream-mock
+  // behaviour: the publisher's claimed digest becomes ground truth.
+  const mock =
+    (target === 'r2' && context.env.MOCK_R2 === 'true') ||
+    (target === 'stream' && context.env.MOCK_STREAM === 'true')
 
   // Mint the upload URL + target_ref. Errors from the storage helpers
   // (R2 unconfigured, Stream API failure, etc.) become 503s — we don't
@@ -143,6 +151,7 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
         target: 'stream',
         stream: { upload_url: mint.upload_url, stream_uid: mint.stream_uid },
         expires_at: mint.expires_at,
+        mock,
       }
     } else {
       const ext = extForMime(mime)
@@ -173,6 +182,7 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
           key: presigned.key,
         },
         expires_at: presigned.expires_at,
+        mock,
       }
     }
   } catch (err) {
@@ -200,6 +210,14 @@ interface AssetInitResponse {
   stream?: { upload_url: string; stream_uid: string }
   r2?: { method: 'PUT'; url: string; headers: Record<string, string>; key: string }
   expires_at: string
+  /**
+   * `true` when MOCK_R2 / MOCK_STREAM is set for this target. The
+   * mint URL is reachable only as a string (mock-r2.localhost
+   * doesn't accept real bytes); the CLI / portal honour this flag
+   * by skipping the upload step, and `/complete` honours it by
+   * trusting the publisher's claimed digest as ground truth.
+   */
+  mock: boolean
 }
 
 /** Re-export for symmetry with the rest of the routes — keeps import sites tidy. */

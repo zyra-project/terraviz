@@ -42,6 +42,7 @@ import type { CatalogEnv } from '../../../../../_lib/env'
 import type { PublisherData } from '../../../../_middleware'
 import type { DatasetRow } from '../../../../../_lib/catalog-store'
 import { getDatasetForPublisher } from '../../../../../_lib/dataset-mutations'
+import { isLoopbackHost } from '../../../../../_lib/loopback'
 import { invalidateSnapshot } from '../../../../../_lib/snapshot'
 import { verifyContentDigest } from '../../../../../_lib/r2-store'
 import { getTranscodeStatus } from '../../../../../_lib/stream-store'
@@ -129,34 +130,54 @@ export const onRequestPost: PagesFunction<CatalogEnv, keyof RouteParams> = async
     if (!upload.target_ref.startsWith('r2:')) {
       return jsonError(500, 'malformed_target_ref', `Upload ${uploadId} has an unparseable target_ref.`)
     }
-    const key = upload.target_ref.slice('r2:'.length)
-    const verification = await verifyContentDigest(context.env, key, upload.claimed_digest)
-    if (!verification.ok) {
-      const now = new Date().toISOString()
-      switch (verification.reason) {
-        case 'binding_missing':
-          return jsonError(503, 'r2_binding_missing', 'CATALOG_R2 binding is not configured on this deployment.')
-        case 'malformed_claim':
-          // Should never reach here — the init handler validates the
-          // claim shape — but defending against direct row writes.
-          await markAssetUploadFailed(context.env.CATALOG_DB!, uploadId, 'malformed_claim', now)
-          return jsonError(409, 'malformed_claim', 'Stored content_digest claim is malformed.')
-        case 'missing':
-          await markAssetUploadFailed(context.env.CATALOG_DB!, uploadId, 'asset_missing', now)
-          return jsonError(
-            409,
-            'asset_missing',
-            `Object at ${key} is not present in R2. The publisher likely never uploaded the bytes; mint a fresh upload to retry.`,
-          )
-        case 'mismatch':
-          await markAssetUploadFailed(context.env.CATALOG_DB!, uploadId, 'digest_mismatch', now)
-          return jsonError(409, 'digest_mismatch', 'Recomputed digest does not match the claim.', {
-            claimed: verification.claimed,
-            actual: verification.actual,
-          })
+    // Mock mode: no real bytes were written (the publisher's PUT
+    // went to mock-r2.localhost), so binding-based verification
+    // would always 404. Trust the publisher's claimed digest, same
+    // bargain we make for Stream uploads in production. Refuses to
+    // honour MOCK_R2=true on a non-loopback hostname so a
+    // misconfigured production deploy can't silently accept forged
+    // claims — defense in depth, identical to the dev-bypass
+    // middleware's loopback check.
+    if (context.env.MOCK_R2 === 'true') {
+      const url = new URL(context.request.url)
+      if (!isLoopbackHost(url.hostname)) {
+        return jsonError(
+          500,
+          'mock_r2_unsafe',
+          `MOCK_R2=true refuses to honor a non-loopback hostname (got "${url.hostname}").`,
+        )
       }
+      verifiedDigest = upload.claimed_digest
+    } else {
+      const key = upload.target_ref.slice('r2:'.length)
+      const verification = await verifyContentDigest(context.env, key, upload.claimed_digest)
+      if (!verification.ok) {
+        const now = new Date().toISOString()
+        switch (verification.reason) {
+          case 'binding_missing':
+            return jsonError(503, 'r2_binding_missing', 'CATALOG_R2 binding is not configured on this deployment.')
+          case 'malformed_claim':
+            // Should never reach here — the init handler validates the
+            // claim shape — but defending against direct row writes.
+            await markAssetUploadFailed(context.env.CATALOG_DB!, uploadId, 'malformed_claim', now)
+            return jsonError(409, 'malformed_claim', 'Stored content_digest claim is malformed.')
+          case 'missing':
+            await markAssetUploadFailed(context.env.CATALOG_DB!, uploadId, 'asset_missing', now)
+            return jsonError(
+              409,
+              'asset_missing',
+              `Object at ${key} is not present in R2. The publisher likely never uploaded the bytes; mint a fresh upload to retry.`,
+            )
+          case 'mismatch':
+            await markAssetUploadFailed(context.env.CATALOG_DB!, uploadId, 'digest_mismatch', now)
+            return jsonError(409, 'digest_mismatch', 'Recomputed digest does not match the claim.', {
+              claimed: verification.claimed,
+              actual: verification.actual,
+            })
+        }
+      }
+      verifiedDigest = verification.digest
     }
-    verifiedDigest = verification.digest
   } else if (upload.target === 'stream') {
     if (!upload.target_ref.startsWith('stream:')) {
       return jsonError(500, 'malformed_target_ref', `Upload ${uploadId} has an unparseable target_ref.`)

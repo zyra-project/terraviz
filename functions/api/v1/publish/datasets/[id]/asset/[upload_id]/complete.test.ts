@@ -532,6 +532,67 @@ describe('POST .../asset/{upload_id}/complete — refusals', () => {
   })
 })
 
+describe('POST .../asset/{upload_id}/complete — MOCK_R2 short-circuit', () => {
+  it('trusts the claim and skips bucket read when MOCK_R2=true', async () => {
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: true })
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      // No CATALOG_R2 binding — the mock path must not consult it.
+      MOCK_R2: 'true',
+    }
+    insertPending(sqlite, {
+      uploadId: 'UP-MOCK',
+      datasetId,
+      kind: 'thumbnail',
+      target: 'r2',
+      target_ref: `r2:datasets/${datasetId}/by-digest/sha256/${SHA64_HELLO}/thumbnail.png`,
+      mime: 'image/png',
+      claimed_digest: HELLO_DIGEST,
+    })
+    const res = await completeHandler(ctx({ env, datasetId, uploadId: 'UP-MOCK' }))
+    expect(res.status).toBe(200)
+    const body = await readJson<{ verified_digest: string }>(res)
+    expect(body.verified_digest).toBe(HELLO_DIGEST)
+
+    const dataset = sqlite
+      .prepare(`SELECT thumbnail_ref, auxiliary_digests FROM datasets WHERE id = ?`)
+      .get(datasetId) as { thumbnail_ref: string; auxiliary_digests: string }
+    expect(dataset.thumbnail_ref).toContain('thumbnail.png')
+    const aux = JSON.parse(dataset.auxiliary_digests) as Record<string, string>
+    expect(aux.thumbnail).toBe(HELLO_DIGEST)
+  })
+
+  it('refuses MOCK_R2=true on a non-loopback hostname', async () => {
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: true })
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      MOCK_R2: 'true',
+    }
+    insertPending(sqlite, {
+      uploadId: 'UP-MOCK-PROD',
+      datasetId,
+      kind: 'thumbnail',
+      target: 'r2',
+      target_ref: `r2:datasets/${datasetId}/by-digest/sha256/${SHA64_HELLO}/thumbnail.png`,
+      mime: 'image/png',
+      claimed_digest: HELLO_DIGEST,
+    })
+    // Override the request URL hostname so it's not loopback.
+    const url = `https://terraviz.example.com/api/v1/publish/datasets/${datasetId}/asset/UP-MOCK-PROD/complete`
+    const baseCtx = ctx({ env, datasetId, uploadId: 'UP-MOCK-PROD' })
+    const prodCtx = {
+      ...baseCtx,
+      request: new Request(url, { method: 'POST' }),
+    } as Parameters<typeof completeHandler>[0]
+    const res = await completeHandler(prodCtx)
+    expect(res.status).toBe(500)
+    const body = await readJson<{ error: string }>(res)
+    expect(body.error).toBe('mock_r2_unsafe')
+  })
+})
+
 describe('POST .../asset/{upload_id}/complete — sphere thumbnail enqueue', () => {
   it('enqueues a sphere_thumbnail job when a `data` upload completes', async () => {
     const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: true })

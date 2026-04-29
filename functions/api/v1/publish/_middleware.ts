@@ -33,6 +33,7 @@
 
 import { CatalogEnv } from '../_lib/env'
 import { verifyAccessJwt, type AccessIdentity } from '../_lib/access-auth'
+import { isLoopbackHost } from '../_lib/loopback'
 import {
   getOrCreatePublisher,
   type PublisherRow,
@@ -49,12 +50,6 @@ function jsonError(status: number, error: string, message: string): Response {
     status,
     headers: { 'Content-Type': CONTENT_TYPE },
   })
-}
-
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1'])
-
-function isLoopback(hostname: string): boolean {
-  return LOOPBACK_HOSTS.has(hostname) || hostname.endsWith('.localhost')
 }
 
 export const onRequest: PagesFunction<CatalogEnv> = async context => {
@@ -82,7 +77,7 @@ export const onRequest: PagesFunction<CatalogEnv> = async context => {
 
   if (devBypass) {
     const url = new URL(context.request.url)
-    if (!isLoopback(url.hostname)) {
+    if (!isLoopbackHost(url.hostname)) {
       return jsonError(
         500,
         'dev_bypass_unsafe',

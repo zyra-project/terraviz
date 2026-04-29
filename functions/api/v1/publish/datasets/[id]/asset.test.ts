@@ -363,3 +363,84 @@ describe('POST /api/v1/publish/datasets/{id}/asset — config errors', () => {
     expect((await readJson<{ error: string }>(res)).error).toBe('r2_unconfigured')
   })
 })
+
+describe('POST /api/v1/publish/datasets/{id}/asset — mock flag', () => {
+  it('stamps mock=true on R2 uploads when MOCK_R2 is set', async () => {
+    const { env, datasetId } = setupEnv()
+    const res = await assetInit(
+      ctx({
+        env,
+        datasetId,
+        body: {
+          kind: 'thumbnail',
+          mime: 'image/png',
+          size: 1234,
+          content_digest: HAPPY_DIGEST,
+        },
+      }),
+    )
+    expect(res.status).toBe(201)
+    const body = await readJson<{ mock: boolean }>(res)
+    expect(body.mock).toBe(true)
+  })
+
+  it('stamps mock=true on Stream uploads when MOCK_STREAM is set', async () => {
+    const { env, datasetId } = setupEnv()
+    const res = await assetInit(
+      ctx({
+        env,
+        datasetId,
+        body: {
+          kind: 'data',
+          mime: 'video/mp4',
+          size: 50_000,
+          content_digest: HAPPY_DIGEST,
+        },
+      }),
+    )
+    expect(res.status).toBe(201)
+    const body = await readJson<{ mock: boolean }>(res)
+    expect(body.mock).toBe(true)
+  })
+
+  it('stamps mock=false when only one half of the pair is mocked', async () => {
+    // R2 mock, Stream not mocked — Stream upload reports mock=false.
+    const { env, datasetId } = setupEnv({ MOCK_STREAM: undefined })
+    delete (env as Record<string, unknown>).MOCK_STREAM
+    // Provide real-ish Stream credentials so the helper doesn't 503.
+    Object.assign(env, {
+      STREAM_ACCOUNT_ID: 'acct',
+      STREAM_API_TOKEN: 'tok',
+      STREAM_CUSTOMER_SUBDOMAIN: 'customer-real.cloudflarestream.com',
+    })
+    // Patch global fetch — mintDirectUploadUrl will reach for it.
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          success: true,
+          result: { uploadURL: 'https://upload.cloudflarestream.com/abc', uid: 'abc' },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      )) as unknown as typeof fetch
+    try {
+      const res = await assetInit(
+        ctx({
+          env,
+          datasetId,
+          body: {
+            kind: 'data',
+            mime: 'video/mp4',
+            size: 50_000,
+            content_digest: HAPPY_DIGEST,
+          },
+        }),
+      )
+      expect(res.status).toBe(201)
+      const body = await readJson<{ mock: boolean }>(res)
+      expect(body.mock).toBe(false)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+})

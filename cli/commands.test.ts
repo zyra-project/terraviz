@@ -595,6 +595,50 @@ describe('runUpload', () => {
     expect(stderr.text()).toContain('Upload failed')
     expect(stderr.text()).toContain('403')
   })
+
+  it('skips uploadBytes entirely when the server flags mock=true', async () => {
+    const initFn = vi.fn(
+      (_id: string, _body: unknown) =>
+        Promise.resolve({
+          ok: true as const,
+          status: 200,
+          body: {
+            upload_id: 'UP1',
+            kind: 'thumbnail',
+            target: 'r2' as const,
+            r2: {
+              method: 'PUT' as const,
+              url: 'https://mock-r2.localhost/k',
+              headers: { 'Content-Type': 'image/png' },
+              key: 'k',
+            },
+            expires_at: '2026-04-29T13:00:00Z',
+            mock: true,
+          },
+        }),
+    )
+    const uploadFn = vi.fn(() => Promise.resolve({ ok: true, status: 200 }))
+    const completeFn = vi.fn(() =>
+      Promise.resolve({
+        ok: true as const,
+        status: 200,
+        body: { dataset: { id: 'DS1' }, verified_digest: 'sha256:xyz' },
+      }),
+    )
+    const client = fakeClient({
+      initAssetUpload: initFn,
+      uploadBytes: uploadFn,
+      completeAssetUpload: completeFn,
+    })
+    const { ctx, stdout } = makeCtx(['DS1', 'thumbnail', '/tmp/t.png'], [], client, {
+      '/tmp/t.png': 'fake',
+    })
+    expect(await runUpload(ctx)).toBe(0)
+    expect(uploadFn).not.toHaveBeenCalled()
+    expect(completeFn).toHaveBeenCalledOnce()
+    expect(stdout.text()).toContain('mock mode')
+    expect(stdout.text()).toContain('completed')
+  })
 })
 
 describe('runHelp', () => {
