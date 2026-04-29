@@ -2611,7 +2611,7 @@ src/services/
 ### Contributor entry points
 
 ```bash
-npm run dev:backend          # wrangler pages dev with all local bindings
+npm run dev:functions          # wrangler pages dev with all local bindings
 npm run dev                  # vite dev server (existing) — proxies /api/* to :8788
 npm run db:migrate           # wrangler d1 migrations apply CATALOG_DB --local
 npm run db:seed              # tsx scripts/seed-catalog.ts (writes to local D1)

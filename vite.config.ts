@@ -7,9 +7,11 @@ const pkg = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'ut
 }
 
 /** Validate and normalize the build-channel env var so a typo
- * doesn't leak a bespoke string into `session_start.build_channel`. */
-function resolveBuildChannel(): 'public' | 'internal' | 'canary' {
-  const raw = process.env.VITE_BUILD_CHANNEL
+ * doesn't leak a bespoke string into `session_start.build_channel`.
+ * Reads from the merged env object so .env.local + shell env
+ * follow the same precedence as every other VITE_* knob. */
+function resolveBuildChannel(env: Record<string, string>): 'public' | 'internal' | 'canary' {
+  const raw = process.env.VITE_BUILD_CHANNEL ?? env.VITE_BUILD_CHANNEL
   if (raw === 'internal' || raw === 'canary') return raw
   return 'public'
 }
@@ -31,7 +33,7 @@ export default defineConfig(({ mode }) => {
       // Baked in at build time. Internal / canary bundles are tagged
       // so dashboards can filter them out of public-user rollups
       // without needing IP-based allowlists. Default `'public'`.
-      __BUILD_CHANNEL__: JSON.stringify(resolveBuildChannel()),
+      __BUILD_CHANNEL__: JSON.stringify(resolveBuildChannel(env)),
     },
     root: './src',
     publicDir: '../public',

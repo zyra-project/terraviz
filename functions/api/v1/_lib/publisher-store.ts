@@ -30,6 +30,7 @@
  */
 
 import type { AccessIdentity } from './access-auth'
+import { newUlid } from './ulid'
 
 export interface PublisherRow {
   id: string
@@ -51,30 +52,6 @@ export interface ProvisionOptions {
    * default.
    */
   devBypass?: boolean
-}
-
-/**
- * Generate a 26-char ULID. Uses webcrypto so the function is
- * Cloudflare-Workers-safe; the time prefix gives the row a roughly-
- * insertion-order id that's still globally unique across nodes.
- */
-function newUlid(): string {
-  const alphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
-  let timeStr = ''
-  let t = BigInt(Date.now())
-  for (let i = 0; i < 10; i++) {
-    timeStr = alphabet[Number(t & 31n)] + timeStr
-    t >>= 5n
-  }
-  const rand = crypto.getRandomValues(new Uint8Array(10))
-  let r = 0n
-  for (const b of rand) r = (r << 8n) | BigInt(b)
-  let randStr = ''
-  for (let i = 0; i < 16; i++) {
-    randStr = alphabet[Number(r & 31n)] + randStr
-    r >>= 5n
-  }
-  return timeStr + randStr
 }
 
 function provisioningDefaults(
@@ -139,5 +116,3 @@ export async function getOrCreatePublisher(
   return row
 }
 
-/** Internal: re-export the ULID generator for tests. */
-export const __testing = { newUlid }

@@ -116,7 +116,7 @@ come from these sources:
 | `DEV_BYPASS_ACCESS` | Set to `true` for local dev. Skips Cloudflare Access verification for `/api/v1/publish/**` and JIT-mints a staff publisher row keyed off `DEV_PUBLISHER_EMAIL`. Refused on non-loopback hostnames. | Phase 1a |
 | `DEV_PUBLISHER_EMAIL` | Whatever email you want the dev-bypass publisher row to carry. Defaults to `dev@localhost`. | Phase 1a |
 | `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` | Cloudflare dashboard → Zero Trust → Access → Applications. Only needed when `DEV_BYPASS_ACCESS` is unset; production deploys must set both. | Phase 1a (prod) |
-| `PREVIEW_SIGNING_KEY` | HMAC-SHA-256 secret for preview tokens. A deterministic dev-only fallback applies when unset; production deploys should set a real value via `npx wrangler pages secret put PREVIEW_SIGNING_KEY`. | Phase 1a (prod) |
+| `PREVIEW_SIGNING_KEY` | HMAC-SHA-256 secret for preview tokens. **Required in production** — the preview endpoints fail closed (503 `preview_unconfigured`) when this is unset, rather than falling back to a guessable constant. A deterministic dev secret applies only when `DEV_BYPASS_ACCESS=true` (which is itself refused on non-loopback hostnames). Set the real value via `npx wrangler pages secret put PREVIEW_SIGNING_KEY` on the production deployment. | Phase 1a (prod) |
 | `VIDEO_PROXY_BASE` | Override the upstream Vimeo proxy. Defaults to the production proxy when unset. | Phase 1a |
 | `MOCK_STREAM` | Set `true` for development; bypasses Stream's playback URL signing so you do not need a Stream account locally. | Phase 1b+ |
 | `STREAM_ACCOUNT_ID` / `STREAM_API_TOKEN` | Cloudflare dashboard → Stream. Only needed for Phase 1b+ asset uploads. | Phase 1b |
@@ -264,7 +264,7 @@ src/services/
 ## Contributor entry points
 
 ```bash
-npm run dev:backend          # wrangler pages dev with all local bindings
+npm run dev:functions          # wrangler pages dev with all local bindings
 npm run dev                  # vite dev server (existing) — proxies /api/* to :8788
 npm run db:migrate           # wrangler d1 migrations apply CATALOG_DB --local
 npm run db:seed              # tsx scripts/seed-catalog.ts (writes to local D1)
@@ -302,7 +302,7 @@ where to look and which Wrangler subcommand surfaces what.
 
 ### Logs
 
-- **Miniflare console output.** The `npm run dev:backend` terminal
+- **Miniflare console output.** The `npm run dev:functions` terminal
   prints request lines, `console.log` output, and binding-level
   errors. This is the first place to look for any non-trivial
   issue.
@@ -337,7 +337,7 @@ supports `--inspect` to expose a Chrome DevTools / Node inspector
 port:
 
 ```bash
-npm run dev:backend -- --inspect=9229
+npm run dev:functions -- --inspect=9229
 ```
 
 Open `chrome://inspect` (or use the VS Code "Attach to Node"
@@ -353,7 +353,7 @@ matter which route surfaced it.
 - **Port 8788 already in use.** Wrangler refuses to start;
   another Wrangler instance from a different repo is the usual
   culprit. Either kill the other one or pass `--port=8789` to
-  `npm run dev:backend`. The Vite proxy hardcodes 8788; if you
+  `npm run dev:functions`. The Vite proxy hardcodes 8788; if you
   change the port, also set `VITE_BACKEND_PORT=8789` for the Vite
   process.
 - **Schema drift after `git pull`.** A migration arrived with the

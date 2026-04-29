@@ -10,21 +10,30 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { __testing, getOrCreatePublisher } from './publisher-store'
+import { getOrCreatePublisher } from './publisher-store'
+import { newUlid } from './ulid'
 import { asD1, seedFixtures } from './test-helpers'
 
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
 
 describe('newUlid', () => {
   it('produces a 26-char Crockford-base32 string', () => {
-    const id = __testing.newUlid()
+    const id = newUlid()
     expect(id).toHaveLength(26)
     for (const ch of id) expect(ALPHABET).toContain(ch)
   })
 
   it('is monotonic-ish across calls', () => {
-    const a = __testing.newUlid()
-    const b = __testing.newUlid()
+    const a = newUlid()
+    const b = newUlid()
+    expect(a).not.toBe(b)
+  })
+
+  it('respects an explicit timestamp for the prefix', () => {
+    const a = newUlid(0)
+    const b = newUlid(0)
+    // Same time prefix; random suffix differs.
+    expect(a.slice(0, 10)).toBe(b.slice(0, 10))
     expect(a).not.toBe(b)
   })
 })
