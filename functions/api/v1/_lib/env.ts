@@ -122,4 +122,28 @@ export interface CatalogEnv {
    * use the `CATALOG_R2` binding regardless.
    */
   MOCK_R2?: string
+  /**
+   * Cloudflare account id that owns the Stream subscription.
+   * Required for the video upload + transcode-status endpoints
+   * (Phase 1b). Local dev with `MOCK_STREAM=true` does not need it.
+   */
+  STREAM_ACCOUNT_ID?: string
+  /**
+   * Stream API token (`Stream: Edit` permission). Wrangler secret
+   * in production. Local dev with `MOCK_STREAM=true` does not
+   * need it.
+   */
+  STREAM_API_TOKEN?: string
+  /**
+   * Customer subdomain printed in the Stream dashboard, e.g.
+   * `customer-abc123.cloudflarestream.com`. Used to build the
+   * public HLS playback URL the manifest endpoint serves.
+   */
+  STREAM_CUSTOMER_SUBDOMAIN?: string
+  /**
+   * `"true"` makes the Stream helpers return deterministic stub
+   * upload URLs / uids / transcode statuses so the contributor
+   * walkthrough works without a Cloudflare Stream subscription.
+   */
+  MOCK_STREAM?: string
 }
