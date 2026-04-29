@@ -45,30 +45,63 @@ git clone https://github.com/zyra-project/terraviz
 cd terraviz
 npm install
 
-# 2. Wrangler login (browser-based; opens once).
-npx wrangler login
+# 2. Generate the node-identity keypair. Writes the private half to
+#    .dev.vars (created if missing) and updates node_identity once
+#    the local DB is seeded in step 3.
+npm run gen:node-key
 
-# 3. Copy the dev-vars template and fill in the placeholders.
+# 3. Reset the local D1: applies migrations, seeds ~20 SOS rows
+#    (use `db:reset --full` to import the entire upstream catalog).
+npm run db:reset
+
+# 4. Configure the dev-bypass for the publisher API. Skips Access
+#    verification for localhost-only runs.
 cp .dev.vars.example .dev.vars
-# Edit .dev.vars — see "Required dev vars" below.
-
-# 4. Create the local D1 database, run migrations, seed data.
-npm run db:migrate
-npm run db:seed
+# Open .dev.vars and ensure DEV_BYPASS_ACCESS=true is uncommented.
 
 # 5. Run the backend.
-npm run dev:backend     # in one terminal — Wrangler at :8788
-npm run dev             # in another — Vite at :5173
+npm run dev:functions     # pane 1 — Wrangler at :8788 with --ip 0.0.0.0
+npm run dev               # pane 2 — Vite at :5173
+# Dev-container contributors: set VITE_HOST=0.0.0.0 in .env.local
+# so the host browser can reach Vite. See "Dev-container caveats"
+# below.
 
 # 6. Verify.
 curl http://localhost:8788/api/v1/catalog | jq '.datasets | length'
 # → 20 (the seed importer's default subset)
+
+curl http://localhost:8788/.well-known/terraviz.json | jq .public_key
+# → "ed25519:<base64>" matching node-public-key.txt
+
+curl http://localhost:8788/api/v1/publish/me | jq .role
+# → "staff" (DEV_BYPASS_ACCESS is honoring the loopback hostname)
 ```
 
-If step 6 prints `20`, you have a working backend. The frontend at
-`http://localhost:5173` reads from the local backend automatically
-when `VITE_CATALOG_SOURCE=node` is set; the default Vite config
-handles the proxy.
+If steps 6's three calls all return the expected shape, you have
+a working backend. To run the SPA against this local node instead
+of the SOS-S3 source:
+
+```bash
+cp .env.example .env.local
+# Open .env.local and uncomment:
+#   VITE_CATALOG_SOURCE=node
+#   VITE_DEV_API_TARGET=http://localhost:8788
+# Restart `npm run dev` so Vite re-reads the env file.
+```
+
+The browse panel should then show the seeded ~20 datasets pulled
+from `/api/v1/catalog` instead of the upstream SOS catalog.
+
+### Dev-container caveats
+
+If you are running inside a Docker / VS Code dev container, three
+extra knobs make the browser-from-host story work:
+
+| Symptom | Setting | Where |
+|---|---|---|
+| Curl times out from inside the container despite "Ready on http://localhost:8788" | `npm run dev:functions` already sets `--ip 0.0.0.0` | scripts |
+| Browser at `http://localhost:5173` spins / can't connect | `VITE_HOST=0.0.0.0` | `.env.local` |
+| HMR WebSocket fails repeatedly with `[vite] connecting...` | `VITE_HMR_CLIENT_PORT=5173` (or the host-side forwarded port) | `.env.local` |
 
 ### Required dev vars
 
@@ -79,30 +112,47 @@ come from these sources:
 
 | Key | Where to get it | Needed in |
 |---|---|---|
-| `NODE_ID_PRIVATE_KEY_PEM` | Generate with `npm run gen:node-key` (Phase 1 ships this script); writes both `.dev.vars` and a public-key file you can paste into the well-known doc | Phase 1 |
-| `MOCK_STREAM` | Set `true` for development; bypasses Stream's playback URL signing so you do not need a Stream account locally | Phase 1+ |
-| `STREAM_ACCOUNT_ID` / `STREAM_API_TOKEN` | Cloudflare dashboard → Stream. Only needed for Phase 1b+ work (asset uploads); with `MOCK_STREAM=true` they can stay unset | Phase 1b |
-| `LLM_API_KEY` | Existing — your Orbit LLM provider key, only relevant if you will exercise the chat path locally | n/a |
-| `KILL_TELEMETRY` | Set `1` to disable analytics ingestion locally — you almost certainly want this | n/a |
+| `NODE_ID_PRIVATE_KEY_PEM` | Generate with `npm run gen:node-key`; writes both `.dev.vars` and `node-public-key.txt`. Updates `node_identity.public_key` in the local D1 in the same step. | Phase 1a |
+| `DEV_BYPASS_ACCESS` | Set to `true` for local dev. Skips Cloudflare Access verification for `/api/v1/publish/**` and JIT-mints a staff publisher row keyed off `DEV_PUBLISHER_EMAIL`. Refused on non-loopback hostnames. | Phase 1a |
+| `DEV_PUBLISHER_EMAIL` | Whatever email you want the dev-bypass publisher row to carry. Defaults to `dev@localhost`. | Phase 1a |
+| `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` | Cloudflare dashboard → Zero Trust → Access → Applications. Only needed when `DEV_BYPASS_ACCESS` is unset; production deploys must set both. | Phase 1a (prod) |
+| `PREVIEW_SIGNING_KEY` | HMAC-SHA-256 secret for preview tokens. **Required in production** — the preview endpoints fail closed (503 `preview_unconfigured`) when this is unset. A deterministic dev fallback exists, but it requires *both* `DEV_BYPASS_ACCESS=true` *and* `ALLOW_DEV_PREVIEW_FALLBACK=true` to activate (the doubled gate keeps a production misconfig from accepting forged tokens via the anonymous preview consumer, which lives outside the publish middleware). Set the real value via `npx wrangler pages secret put PREVIEW_SIGNING_KEY` on the production deployment. | Phase 1a (prod) |
+| `ALLOW_DEV_PREVIEW_FALLBACK` | `true` to opt into the deterministic dev preview-signing secret. Only honored when `DEV_BYPASS_ACCESS=true` is also set. | Phase 1a (dev only) |
+| `VIDEO_PROXY_BASE` | Override the upstream Vimeo proxy. Defaults to the production proxy when unset. | Phase 1a |
+| `MOCK_STREAM` | Set `true` for development; bypasses Stream's playback URL signing so you do not need a Stream account locally. | Phase 1b+ |
+| `STREAM_ACCOUNT_ID` / `STREAM_API_TOKEN` | Cloudflare dashboard → Stream. Only needed for Phase 1b+ asset uploads. | Phase 1b |
+| `KILL_TELEMETRY` | Set `1` to disable analytics ingestion locally — almost always what you want during dev. | n/a |
 
-Phase-1 contributors realistically only need `NODE_ID_PRIVATE_KEY_PEM`
-+ `MOCK_STREAM=true` + `KILL_TELEMETRY=1`. The rest can stay
-unset.
+Phase-1a contributors realistically only need `NODE_ID_PRIVATE_KEY_PEM`,
+`DEV_BYPASS_ACCESS=true`, and `KILL_TELEMETRY=1`. Everything else
+stays unset until the corresponding feature lands.
 
 ### What "good" looks like
 
 After the checklist runs clean, you should be able to:
 
-- Run `npm run test` and see the existing suite pass. (Day zero
-  has no catalog-backend tests yet — they arrive with Phase 1.)
+- Run `npm run test` and see the suite pass — including the
+  catalog-backend tests under `functions/api/v1/**` and the CLI
+  tests under `cli/**` (1100+ tests as of Phase 1a).
 - Run `npm run db:reset` and have the seed re-apply cleanly (no
   schema drift between migrations and `.wrangler/state`).
-- Open `http://localhost:8788/.well-known/terraviz.json` and see a
-  document signed with the keypair you generated in step 3.
+- Open `http://localhost:8788/.well-known/terraviz.json` and see
+  the node-identity document carrying the public key you minted in
+  step 2.
 - See a Wrangler startup line that reads
-  `Listening on http://localhost:8788` with every binding (D1, KV,
-  R2) reporting `ready` (Stream prints `MOCK_STREAM` instead of
-  `ready` when mocked, which is expected).
+  `Ready on http://localhost:8788` with `CATALOG_DB`, `CATALOG_KV`,
+  `FEEDBACK_DB`, and the analytics + AI bindings all listed
+  (Stream prints `MOCK_STREAM` instead of a real binding when
+  mocked, which is expected through Phase 1b).
+- Round-trip a draft via the CLI:
+  ```bash
+  echo '{"title":"From CLI","format":"video/mp4",
+        "data_ref":"vimeo:1107911993","license_spdx":"CC-BY-4.0"}' \
+    > /tmp/m.json
+  npm run terraviz -- --server http://localhost:8788 \
+    --insecure-local publish /tmp/m.json
+  ```
+  → "Created draft …" then "Published … (timestamp)".
 
 If any of these fail, the troubleshooting matrix in "Local
 debugging" below lists the common causes.
@@ -112,8 +162,15 @@ debugging" below lists the common causes.
 Most contributors never touch this. You only need it if you are
 preparing a deploy environment, not running locally:
 
-- A D1 database created via `wrangler d1 create terraviz` (or via
-  the dashboard); copy the `database_id` into `wrangler.toml`.
+- A D1 database. The reference deploy reuses the existing
+  `sphere-feedback` D1 (same `database_id`, separate tables) and
+  binds it twice — `FEEDBACK_DB` for the existing rows and
+  `CATALOG_DB` for the catalog tables — so the catalog and feedback
+  share one D1 quota. A fork that prefers a clean separation can
+  `wrangler d1 create terraviz-catalog` and point only the
+  `CATALOG_DB` binding at the new database. Either way, copy the
+  `database_id` into `wrangler.toml`'s `[[d1_databases]]` block for
+  `CATALOG_DB`.
 - A KV namespace and an R2 bucket — same dashboard / CLI flow,
   bindings declared in `wrangler.toml`.
 - A Stream account on the same Cloudflare account if you will
@@ -182,11 +239,21 @@ functions/api/v1/
 migrations/
   catalog/
     0001_init.sql
-    0002_renditions.sql
+    0002_decoration.sql
+    0003_renditions.sql
+    0004_tours.sql
+    0005_publishers_audit.sql
     ...
+  catalog-schema.sql             # post-migration snapshot, regenerated by
+                                 #   `npm run db:dump-schema`. Sits one level
+                                 #   above migrations/catalog/ so wrangler does
+                                 #   not pick it up as a migration.
 
 scripts/
   seed-catalog.ts                # imports SOS catalog → local D1
+  refresh-sos-snapshot.ts        # re-pulls public/assets/sos-dataset-list.json
+  dump-catalog-schema.ts         # regenerates migrations/catalog-schema.sql
+  lib/d1-local.ts                # locates the local D1 sqlite file
   generate-fixtures.ts           # canned dataset rows for tests
   sync-peers.ts                  # manual federation pull (dev only)
   rotate-peer-secret.ts          # ops helper
@@ -198,13 +265,15 @@ src/services/
 ## Contributor entry points
 
 ```bash
-npm run dev:backend     # wrangler pages dev with all local bindings
-npm run dev             # vite dev server (existing) — proxies /api/* to :8788
-npm run db:migrate      # wrangler d1 migrations apply terraviz --local
-npm run db:seed         # node scripts/seed-catalog.ts (writes to local D1)
-npm run db:reset        # rm .wrangler/state/v3/d1/* && db:migrate && db:seed
-npm run test            # vitest run (existing, plus new backend tests)
-npm run test:federation # contract tests — spins up two Wranglers, peers them
+npm run dev:functions          # wrangler pages dev with all local bindings
+npm run dev                  # vite dev server (existing) — proxies /api/* to :8788
+npm run db:migrate           # wrangler d1 migrations apply CATALOG_DB --local
+npm run db:seed              # tsx scripts/seed-catalog.ts (writes to local D1)
+npm run db:reset             # rm .wrangler/state/v3/d1 && db:migrate && db:seed
+npm run db:dump-schema       # regenerate migrations/catalog-schema.sql snapshot
+npm run refresh:sos-snapshot # re-pull public/assets/sos-dataset-list.json from upstream S3
+npm run test                 # vitest run (existing, plus new backend tests)
+npm run test:federation      # contract tests — spins up two Wranglers, peers them
 ```
 
 The frontend dev workflow stays as it is today (`npm run dev` →
@@ -234,7 +303,7 @@ where to look and which Wrangler subcommand surfaces what.
 
 ### Logs
 
-- **Miniflare console output.** The `npm run dev:backend` terminal
+- **Miniflare console output.** The `npm run dev:functions` terminal
   prints request lines, `console.log` output, and binding-level
   errors. This is the first place to look for any non-trivial
   issue.
@@ -252,7 +321,7 @@ where to look and which Wrangler subcommand surfaces what.
 
 | Resource | Inspect with | Notes |
 |---|---|---|
-| **D1** | `npx wrangler d1 execute terraviz --local --command "SELECT ..."` | Operates on the same `.wrangler/state/v3/d1/` file `db:migrate` and `db:seed` use. |
+| **D1** | `npx wrangler d1 execute CATALOG_DB --local --command "SELECT ..."` | Operates on the same `.wrangler/state/v3/d1/` file `db:migrate` and `db:seed` use. |
 | **KV** | `npx wrangler kv key list --binding=CATALOG_KV --local` (and `... key get`) | KV is in-memory in Miniflare — restart the stack and KV is empty. |
 | **R2** | `npx wrangler r2 object list terraviz-assets --local` (and `... object get`) | R2 lives on disk under `.wrangler/state/v3/r2/` and persists across restarts. |
 | **Queues** | None directly | The `InMemoryJobQueue` interface dumps queued jobs to stderr at shutdown; for ad-hoc inspection, set `JOB_QUEUE_LOG=true` in `.dev.vars` to get a per-enqueue log line. |
@@ -269,7 +338,7 @@ supports `--inspect` to expose a Chrome DevTools / Node inspector
 port:
 
 ```bash
-npm run dev:backend -- --inspect=9229
+npm run dev:functions -- --inspect=9229
 ```
 
 Open `chrome://inspect` (or use the VS Code "Attach to Node"
@@ -285,7 +354,7 @@ matter which route surfaced it.
 - **Port 8788 already in use.** Wrangler refuses to start;
   another Wrangler instance from a different repo is the usual
   culprit. Either kill the other one or pass `--port=8789` to
-  `npm run dev:backend`. The Vite proxy hardcodes 8788; if you
+  `npm run dev:functions`. The Vite proxy hardcodes 8788; if you
   change the port, also set `VITE_BACKEND_PORT=8789` for the Vite
   process.
 - **Schema drift after `git pull`.** A migration arrived with the
@@ -515,11 +584,11 @@ playbooks for the failure modes that actually happen.
 
 | Resource | Inspect with | Notes |
 |---|---|---|
-| **D1** | `npx wrangler d1 execute terraviz --remote --command "..."` | Read-only queries are safe; never run schema-mutating SQL ad-hoc — use a migration. |
+| **D1** | `npx wrangler d1 execute CATALOG_DB --remote --command "..."` | Read-only queries are safe; never run schema-mutating SQL ad-hoc — use a migration. |
 | **KV** | `npx wrangler kv key list --binding=CATALOG_KV --remote` (and `... key get`) | KV reads are billed per call; an audit script that lists every key is fine, fetching every value isn't. |
 | **R2** | `npx wrangler r2 object list terraviz-assets --remote` (and `... object get`) | Free reads up to standard tier limits; bulk download via wrangler is rate-limited and expensive. |
 | **Stream** | Cloudflare dashboard → Stream → list videos | The `uid` from the dataset row's `data_ref` is searchable directly. |
-| **Audit log** | `wrangler d1 execute --remote 'SELECT * FROM audit_events WHERE subject_id = ? ORDER BY id DESC LIMIT 50'` | The subject-keyed timeline is the answer to most "what happened to dataset X" incidents. |
+| **Audit log** | `wrangler d1 execute CATALOG_DB --remote 'SELECT * FROM audit_events WHERE subject_id = ? ORDER BY id DESC LIMIT 50'` | The subject-keyed timeline is the answer to most "what happened to dataset X" incidents. |
 
 The `audit_events` table is the centrepiece of production
 incident response. Every meaningful state change (publish,
@@ -558,7 +627,7 @@ audit_events rows."
 - **D1 latency spikes.** Workers AE's `db_query_duration`
   distribution shows whether it's a specific query or a global
   slowdown. Specific query: pull the EXPLAIN plan via
-  `wrangler d1 execute --remote 'EXPLAIN QUERY PLAN ...'` and
+  `wrangler d1 execute CATALOG_DB --remote 'EXPLAIN QUERY PLAN ...'` and
   look for missing indexes (the catalog hot path is heavily
   index-driven; a missing index after a schema change is the
   most common cause). Global slowdown: check Cloudflare's D1

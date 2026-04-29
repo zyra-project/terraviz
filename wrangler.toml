@@ -15,6 +15,26 @@ database_name = "sphere-feedback"
 database_id = "78fbe5c3-8e40-4504-b183-155b0069222e"
 migrations_dir = "migrations"
 
+# Catalog backend (Phase 1a onward) — datasets, tours, publishers,
+# audit_events. Same physical D1 instance as FEEDBACK_DB above
+# (per CATALOG_BACKEND_PLAN.md "Cloudflare service mapping": "Same
+# DB instance as FEEDBACK_DB, separate tables"); the second binding
+# exists so the catalog migrations live under their own directory
+# and can be applied independently with
+# `wrangler d1 migrations apply CATALOG_DB`.
+#
+# Like the other bindings here, **Pages reads its bindings from the
+# dashboard, not this file** — adding the binding in source control
+# documents the canonical name + directory and makes a future
+# Workers-deploy migration mechanical. Wire it under
+# Settings → Bindings → D1 → variable name CATALOG_DB → database
+# `sphere-feedback`.
+[[d1_databases]]
+binding = "CATALOG_DB"
+database_name = "sphere-feedback"
+database_id = "78fbe5c3-8e40-4504-b183-155b0069222e"
+migrations_dir = "migrations/catalog"
+
 # Analytics Engine dataset for the telemetry event stream.
 # Every datapoint written by functions/api/ingest.ts lands here.
 # Query via the AE SQL API; see docs/ANALYTICS_QUERIES.md.
@@ -55,3 +75,22 @@ dataset = "terraviz_events"
 [[kv_namespaces]]
 binding = "TELEMETRY_KILL_SWITCH"
 id = "9c022b1295314939b76a28769fef6195"
+
+# KV namespace for the catalog read API's hot-path snapshot cache.
+# `functions/api/v1/catalog.ts` lazily renders the public catalog
+# response and caches it under a single key keyed by ETag. Cache is
+# invalidated on every publish / retract (wired in Commit F).
+# Without this snapshot, `/api/v1/catalog` would issue ~5 D1 queries
+# per browse-page load and burn the 5 M-row-reads/day free-tier
+# budget — see "Free-tier viability" in CATALOG_BACKEND_PLAN.md.
+#
+# Binding name only; the namespace ID is a placeholder and must be
+# replaced with the operator's real namespace before deploy. Local
+# Wrangler doesn't validate the ID — it provisions an in-memory KV
+# under `.wrangler/state/v3/kv/<id>/` regardless. Pages reads the
+# binding from the dashboard, not this file: wire it under
+# Settings → Bindings → KV → variable name CATALOG_KV → namespace
+# created via `wrangler kv namespace create CATALOG_KV`.
+[[kv_namespaces]]
+binding = "CATALOG_KV"
+id = "00000000000000000000000000000000"

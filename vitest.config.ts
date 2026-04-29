@@ -9,6 +9,7 @@ export default defineConfig({
       'src/**/*.spec.ts',
       'functions/**/*.test.ts',
       'scripts/**/*.test.ts',
+      'cli/**/*.test.ts',
     ],
     globals: true,
     setupFiles: ['./src/test-setup.ts'],

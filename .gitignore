@@ -38,5 +38,20 @@ yarn-error.log*
 # Runtime
 .turbo/
 
+# Wrangler local state — Miniflare D1/KV/R2/Queues volumes generated
+# by `wrangler pages dev` and `wrangler d1 ... --local`. Per-contributor,
+# never committed.
+.wrangler/
+.dev.vars
+.dev.vars.local
+# Vite reads `.env.local` at the repo root (envDir override in
+# vite.config.ts). Per-developer values; never committed.
+.env.local
+.env.*.local
+# Output of `npm run gen:node-key`; the wire-format public key is
+# also persisted in node_identity.public_key, so this file is just
+# a convenience for paste-into-portal flows.
+node-public-key.txt
+
 # Test / coverage artifacts
 coverage/

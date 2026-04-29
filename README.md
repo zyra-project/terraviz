@@ -126,6 +126,46 @@ npm run preview
 npm run build:desktop
 ```
 
+### Option 4: Catalog backend (Phase 1a)
+
+The same repo also ships a node-hosted catalog backend that the
+SPA can read from instead of the SOS S3 source. Designed for forks
+that want to operate their own dataset catalog. Self-contained — no
+extra services required for local development.
+
+```bash
+# 1. Generate the node identity keypair (one-time per clone).
+npm run gen:node-key
+
+# 2. Reset the local D1 (apply migrations + seed ~20 SOS rows).
+npm run db:reset
+
+# 3. Configure the publisher-API dev bypass.
+cp .dev.vars.example .dev.vars
+# Edit .dev.vars to keep DEV_BYPASS_ACCESS=true.
+
+# 4. Start the Pages Functions runtime in pane 1.
+npm run dev:functions
+# → Ready on http://localhost:8788
+
+# 5. (Optional) Run the SPA against the local backend.
+cp .env.example .env.local
+# Edit .env.local to enable VITE_CATALOG_SOURCE=node and
+# VITE_DEV_API_TARGET=http://localhost:8788. Dev-container
+# contributors should also set VITE_HOST=0.0.0.0.
+npm run dev    # in pane 2
+
+# 6. Verify.
+curl http://localhost:8788/api/v1/catalog | jq '.datasets | length'
+# → 20
+```
+
+The full developer walkthrough — bindings, data model, and the
+publishing CLI — lives in
+[docs/CATALOG_BACKEND_DEVELOPMENT.md](docs/CATALOG_BACKEND_DEVELOPMENT.md);
+the architectural plan is
+[docs/CATALOG_BACKEND_PLAN.md](docs/CATALOG_BACKEND_PLAN.md).
+
 ## 📁 Project Structure
 
 ```
