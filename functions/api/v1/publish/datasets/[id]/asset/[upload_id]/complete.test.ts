@@ -149,6 +149,36 @@ async function readJson<T>(res: Response): Promise<T> {
 const HELLO_BYTES = new TextEncoder().encode('hello world')
 
 describe('POST .../asset/{upload_id}/complete — R2 happy paths', () => {
+  it('atomically applies the dataset row and marks upload completed', async () => {
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: true })
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      CATALOG_R2: makeBucket(HELLO_BYTES.buffer as ArrayBuffer),
+    }
+    insertPending(sqlite, {
+      uploadId: 'UP-ATOMIC',
+      datasetId,
+      kind: 'thumbnail',
+      target: 'r2',
+      target_ref: `r2:datasets/${datasetId}/by-digest/sha256/${SHA64_HELLO}/thumbnail.png`,
+      mime: 'image/png',
+      claimed_digest: HELLO_DIGEST,
+    })
+    const res = await completeHandler(ctx({ env, datasetId, uploadId: 'UP-ATOMIC' }))
+    expect(res.status).toBe(200)
+    // Both updates landed: dataset row has new ref + upload row is completed.
+    const dataset = sqlite
+      .prepare(`SELECT thumbnail_ref FROM datasets WHERE id = ?`)
+      .get(datasetId) as { thumbnail_ref: string }
+    const upload = sqlite
+      .prepare(`SELECT status, completed_at FROM asset_uploads WHERE id = ?`)
+      .get('UP-ATOMIC') as { status: string; completed_at: string }
+    expect(dataset.thumbnail_ref).toContain('thumbnail.png')
+    expect(upload.status).toBe('completed')
+    expect(typeof upload.completed_at).toBe('string')
+  })
+
   it('flips data_ref + content_digest for an R2 image data upload', async () => {
     const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: true })
     const env = {

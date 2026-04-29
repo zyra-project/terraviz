@@ -9,7 +9,7 @@
  * directly against these handlers with a stubbed fetch.
  */
 
-import { readFileSync } from 'node:fs'
+import { createReadStream, readFileSync, statSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { basename, extname } from 'node:path'
 import type { TerravizClient } from './lib/client'
@@ -311,6 +311,39 @@ interface CompleteEnvelope {
 const TRANSCODE_RETRY_MAX = 30 // ~ 5 minutes total at 10 s spacing
 const TRANSCODE_RETRY_DELAY_MS = 10_000
 
+/**
+ * Hard cap on what the CLI will read into memory for the upload
+ * body. Server-side validation allows up to 10 GB for `data`
+ * videos; pulling 10 GB into memory in a Node process is asking
+ * for OOMs and unbounded latency. The first cut of the CLI
+ * (Phase 1b) buffers; streaming / TUS-resumable uploads are a
+ * Phase 3 / Phase 4 follow-on. Until that ships we fail fast at a
+ * size where a bog-standard host has comfortable headroom.
+ */
+const CLI_INMEMORY_UPLOAD_LIMIT = 256 * 1024 * 1024 // 256 MB
+
+function formatBytes(n: number): string {
+  if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`
+  if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(0)} MB`
+  if (n >= 1024) return `${(n / 1024).toFixed(0)} KB`
+  return `${n} B`
+}
+
+/**
+ * Stream-hash a file via `fs.createReadStream` + `crypto.createHash`.
+ * Memory footprint is one chunk (~64 KB) regardless of file size, so
+ * it's safe even for the multi-GB video assets we cap above.
+ */
+function streamingHash(path: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256')
+    const stream = createReadStream(path)
+    stream.on('error', reject)
+    stream.on('data', chunk => hash.update(chunk as Buffer))
+    stream.on('end', () => resolve(hash.digest('hex')))
+  })
+}
+
 export async function runUpload(ctx: CommandContext): Promise<number> {
   const datasetId = ctx.args.positional[0]
   const kind = ctx.args.positional[1]
@@ -338,28 +371,55 @@ export async function runUpload(ctx: CommandContext): Promise<number> {
     return 2
   }
 
-  // Read + hash. For 1b we read the whole file into memory — the
-  // simplest path that round-trips bytes correctly through both
-  // backends; the publisher portal (Phase 3) and a future
-  // resumable-tus path are where the streaming hash earns its
-  // keep. The publisher API caps `data` uploads at 10 GB which is
-  // enforced server-side regardless of how the CLI reads the file.
-  const reader = ctx.readFile ?? ((p: string) => readFileSync(p, 'utf-8'))
+  // Hash via streaming SHA-256 so a multi-GB video doesn't load into
+  // memory just to be hashed. The upload body still buffers (see
+  // CLI_INMEMORY_UPLOAD_LIMIT below) — TUS-resumable streaming
+  // uploads are a Phase 3 publisher-portal / Phase 4 federation
+  // concern. Until then, fail fast with a clear message before
+  // OOM-ing the host.
   let bytes: Uint8Array
+  let size: number
+  let digest: string
   if (ctx.readFile) {
-    // Test mode — readFile returns a string.
-    bytes = new TextEncoder().encode(reader(path))
+    // Test mode — readFile returns a string. Hash the materialised
+    // bytes the same way to keep the test surface small.
+    bytes = new TextEncoder().encode(ctx.readFile(path))
+    size = bytes.byteLength
+    digest = 'sha256:' + createHash('sha256').update(bytes).digest('hex')
   } else {
+    let stat
+    try {
+      stat = statSync(path)
+    } catch (e) {
+      ctx.stderr.write(`Could not stat ${path}: ${e instanceof Error ? e.message : e}\n`)
+      return 2
+    }
+    if (stat.size > CLI_INMEMORY_UPLOAD_LIMIT) {
+      ctx.stderr.write(
+        `${path} is ${formatBytes(stat.size)}; the CLI currently uploads via an in-memory ` +
+          `buffer capped at ${formatBytes(CLI_INMEMORY_UPLOAD_LIMIT)}. ` +
+          `Streaming / TUS-resumable uploads are a future-phase follow-on; until then, please ` +
+          `upload large assets via the publisher portal (Phase 3) or split the asset.\n`,
+      )
+      return 5
+    }
+    // Stream-hash first so we never need to hold the whole file
+    // twice (once as Buffer, once as the hash input). Then read
+    // into memory for the upload body — within the cap above.
+    try {
+      digest = 'sha256:' + (await streamingHash(path))
+    } catch (e) {
+      ctx.stderr.write(`Could not hash ${path}: ${e instanceof Error ? e.message : e}\n`)
+      return 2
+    }
     try {
       bytes = readFileSync(path) as unknown as Uint8Array
     } catch (e) {
       ctx.stderr.write(`Could not read ${path}: ${e instanceof Error ? e.message : e}\n`)
       return 2
     }
+    size = bytes.byteLength
   }
-
-  const size = bytes.byteLength
-  const digest = 'sha256:' + createHash('sha256').update(bytes).digest('hex')
 
   ctx.stdout.write(
     `Uploading ${path} (${size} bytes) → ${datasetId} as ${kind}.\n` +

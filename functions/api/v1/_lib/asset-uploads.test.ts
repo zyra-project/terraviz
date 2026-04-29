@@ -328,6 +328,77 @@ describe('applyAssetToDataset — atomic json_set merge', () => {
     expect(row.thumbnail_ref).toContain('thumbnail.png')
   })
 
+  it('clears source_digest when an R2 data upload completes', async () => {
+    const { d1, sqlite } = makeDb()
+    const datasetId = 'DS001AAAAAAAAAAAAAAAAAAAAA'
+    // Pre-existing source_digest from a prior Stream-backed upload.
+    sqlite
+      .prepare(`UPDATE datasets SET source_digest = ? WHERE id = ?`)
+      .run('sha256:stalefromstream', datasetId)
+    const { applyAssetToDataset } = await import('./asset-uploads')
+    await applyAssetToDataset(
+      d1,
+      datasetId,
+      {
+        id: 'UP-DATA',
+        dataset_id: datasetId,
+        publisher_id: 'PUB001',
+        kind: 'data',
+        target: 'r2',
+        target_ref: `r2:datasets/${datasetId}/by-digest/sha256/${SHA64}/asset.png`,
+        mime: 'image/png',
+        declared_size: 1234,
+        claimed_digest: HAPPY_DIGEST,
+        status: 'pending',
+        failure_reason: null,
+        created_at: '2026-04-29T12:00:00.000Z',
+        completed_at: null,
+      },
+      HAPPY_DIGEST,
+      '2026-04-29T12:01:00.000Z',
+    )
+    const row = sqlite
+      .prepare(`SELECT content_digest, source_digest FROM datasets WHERE id = ?`)
+      .get(datasetId) as { content_digest: string; source_digest: string | null }
+    expect(row.content_digest).toBe(HAPPY_DIGEST)
+    expect(row.source_digest).toBeNull()
+  })
+
+  it('clears content_digest when a Stream data upload completes', async () => {
+    const { d1, sqlite } = makeDb()
+    const datasetId = 'DS001AAAAAAAAAAAAAAAAAAAAA'
+    sqlite
+      .prepare(`UPDATE datasets SET content_digest = ? WHERE id = ?`)
+      .run('sha256:stalefromr2', datasetId)
+    const { applyAssetToDataset } = await import('./asset-uploads')
+    await applyAssetToDataset(
+      d1,
+      datasetId,
+      {
+        id: 'UP-DATA-STREAM',
+        dataset_id: datasetId,
+        publisher_id: 'PUB001',
+        kind: 'data',
+        target: 'stream',
+        target_ref: 'stream:abc123',
+        mime: 'video/mp4',
+        declared_size: 1234,
+        claimed_digest: HAPPY_DIGEST,
+        status: 'pending',
+        failure_reason: null,
+        created_at: '2026-04-29T12:00:00.000Z',
+        completed_at: null,
+      },
+      HAPPY_DIGEST,
+      '2026-04-29T12:01:00.000Z',
+    )
+    const row = sqlite
+      .prepare(`SELECT content_digest, source_digest FROM datasets WHERE id = ?`)
+      .get(datasetId) as { content_digest: string | null; source_digest: string }
+    expect(row.source_digest).toBe(HAPPY_DIGEST)
+    expect(row.content_digest).toBeNull()
+  })
+
   it('initialises auxiliary_digests from null without crashing', async () => {
     const { d1, sqlite } = makeDb()
     const datasetId = 'DS001AAAAAAAAAAAAAAAAAAAAA'

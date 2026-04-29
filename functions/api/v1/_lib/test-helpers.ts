@@ -39,6 +39,14 @@ export interface FakeD1Bindings {
 export function asD1(db: Database.Database): D1Database & FakeD1Bindings {
   function wrapStmt(sql: string, binds: unknown[] = []): D1PreparedStatement {
     return {
+      // `__sql` / `__binds` are intentionally exposed on the
+      // statement object so the `batch` shim below can re-execute
+      // the prepared statement inside a synchronous transaction
+      // (better-sqlite3's transaction wrapper). Production D1
+      // exposes no such backdoor, but tests have always squinted
+      // through the façade.
+      __sql: sql,
+      __binds: binds,
       bind(...values: unknown[]) {
         return wrapStmt(sql, [...binds, ...values])
       },
@@ -77,8 +85,38 @@ export function asD1(db: Database.Database): D1Database & FakeD1Bindings {
     } as unknown as D1PreparedStatement
   }
 
+  // `batch` runs prepared statements in a single transaction so a
+  // mid-batch failure rolls everything back — matching D1's
+  // documented behaviour. Tests that exercise the
+  // `applyAssetAndMarkCompleted` helper rely on this shim.
+  async function batch(statements: D1PreparedStatement[]): Promise<D1Response[]> {
+    const tx = db.transaction(() => {
+      const results: D1Response[] = []
+      for (const stmt of statements) {
+        const internal = stmt as unknown as { __sql: string; __binds: unknown[] }
+        const prepared = db.prepare(internal.__sql)
+        const info = internal.__binds.length
+          ? prepared.run(...internal.__binds)
+          : prepared.run()
+        results.push({
+          success: true,
+          meta: {
+            duration: 0,
+            last_row_id: Number(info.lastInsertRowid),
+            changes: info.changes,
+            served_by: 'fake',
+            changed_db: info.changes > 0,
+          },
+        } as unknown as D1Response)
+      }
+      return results
+    })
+    return tx()
+  }
+
   return {
     prepare: (sql: string) => wrapStmt(sql),
+    batch,
     raw: () => db,
   } as unknown as D1Database & FakeD1Bindings
 }

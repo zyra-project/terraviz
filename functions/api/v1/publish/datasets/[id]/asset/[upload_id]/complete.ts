@@ -48,9 +48,8 @@ import { invalidateSnapshot } from '../../../../../_lib/snapshot'
 import { verifyContentDigest } from '../../../../../_lib/r2-store'
 import { getTranscodeStatus } from '../../../../../_lib/stream-store'
 import {
-  applyAssetToDataset,
+  applyAssetAndMarkCompleted,
   getAssetUpload,
-  markAssetUploadCompleted,
   markAssetUploadFailed,
 } from '../../../../../_lib/asset-uploads'
 import {
@@ -269,9 +268,18 @@ export const onRequestPost: PagesFunction<CatalogEnv, keyof RouteParams> = async
   }
 
   // ----- Apply to the dataset row + mark the upload complete -----
+  // Atomic via `db.batch` so the dataset row and the upload row can
+  // never end up in disagreement (e.g. dataset has the new ref but
+  // the upload row still reads 'pending', which would let a retry
+  // re-fire the sphere-thumbnail enqueue + KV invalidation).
   const now = new Date().toISOString()
-  await applyAssetToDataset(context.env.CATALOG_DB!, datasetId, upload, verifiedDigest, now)
-  await markAssetUploadCompleted(context.env.CATALOG_DB!, uploadId, now)
+  await applyAssetAndMarkCompleted(
+    context.env.CATALOG_DB!,
+    datasetId,
+    upload,
+    verifiedDigest,
+    now,
+  )
 
   // Read the updated row so we can return it + decide whether the
   // public catalog snapshot needs invalidation.

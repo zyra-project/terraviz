@@ -315,12 +315,17 @@ export async function markAssetUploadFailed(
  * Flip the appropriate `*_ref` (and digest) column on the
  * `datasets` row for a successfully-verified upload.
  *
- *   - `data` over R2:     data_ref + content_digest
- *   - `data` over Stream: data_ref + source_digest (master-playlist
- *                         hash for content_digest is a Phase 4
- *                         manifest concern; Stream's bytes are
- *                         opaque so we trust the claim)
+ *   - `data` over R2:     data_ref + content_digest, clears source_digest
+ *   - `data` over Stream: data_ref + source_digest, clears content_digest
+ *                         (master-playlist hash for content_digest is a
+ *                          Phase 4 manifest concern; Stream's bytes are
+ *                          opaque so we trust the claim)
  *   - everything else:    *_ref + auxiliary_digests JSON merge
+ *
+ * Mutual exclusion of `content_digest` / `source_digest` keeps the
+ * digest semantics unambiguous: a dataset whose `data_ref` flips
+ * R2→Stream (or the reverse) doesn't end up with stale residue from
+ * the previous backend in the inactive column.
  *
  * For auxiliary assets the JSON merge is done atomically inside the
  * UPDATE via SQLite's `json_set(coalesce(...), '$.<key>', ?)`. This
@@ -330,8 +335,8 @@ export async function markAssetUploadFailed(
  * pattern lost keys under that race.
  *
  * Does not invalidate the KV snapshot or stamp the asset_uploads
- * row — both happen in the route handler so the audit ordering is
- * one place.
+ * row — `applyAssetAndMarkCompleted` below batches both into a
+ * single D1 transaction.
  */
 export async function applyAssetToDataset(
   db: D1Database,
@@ -340,27 +345,75 @@ export async function applyAssetToDataset(
   verifiedDigest: string,
   now: string,
 ): Promise<void> {
+  await buildApplyAssetStatement(db, datasetId, upload, verifiedDigest, now).run()
+}
+
+/**
+ * Apply the asset to the dataset row and mark the upload row
+ * `completed` as a single D1 transaction (`db.batch`). If either
+ * statement fails, both roll back — the dataset and upload rows
+ * never end up in disagreement (e.g., dataset has the new ref but
+ * upload still says `pending`, which would let a retry re-fire
+ * side-effects like the sphere-thumbnail enqueue).
+ *
+ * The mark-completed UPDATE keeps its `WHERE status = 'pending'`
+ * guard so a duplicate /complete call inside a tight retry window
+ * is still a no-op (idempotent).
+ */
+export async function applyAssetAndMarkCompleted(
+  db: D1Database,
+  datasetId: string,
+  upload: AssetUploadRow,
+  verifiedDigest: string,
+  now: string,
+): Promise<void> {
+  await db.batch([
+    buildApplyAssetStatement(db, datasetId, upload, verifiedDigest, now),
+    db
+      .prepare(
+        `UPDATE asset_uploads
+           SET status = 'completed', completed_at = ?, failure_reason = NULL
+         WHERE id = ? AND status = 'pending'`,
+      )
+      .bind(now, upload.id),
+  ])
+}
+
+/**
+ * Build (but do not execute) the `UPDATE datasets` statement for a
+ * verified upload. Returns a prepared+bound D1PreparedStatement so
+ * callers can either run it directly or include it in a batch.
+ */
+function buildApplyAssetStatement(
+  db: D1Database,
+  datasetId: string,
+  upload: AssetUploadRow,
+  verifiedDigest: string,
+  now: string,
+): D1PreparedStatement {
   if (upload.kind === 'data') {
     if (upload.target === 'stream') {
-      await db
+      return db
         .prepare(
           `UPDATE datasets
-             SET data_ref = ?, source_digest = ?, updated_at = ?
+             SET data_ref = ?,
+                 source_digest = ?,
+                 content_digest = NULL,
+                 updated_at = ?
            WHERE id = ?`,
         )
         .bind(upload.target_ref, verifiedDigest, now, datasetId)
-        .run()
-    } else {
-      await db
-        .prepare(
-          `UPDATE datasets
-             SET data_ref = ?, content_digest = ?, updated_at = ?
-           WHERE id = ?`,
-        )
-        .bind(upload.target_ref, verifiedDigest, now, datasetId)
-        .run()
     }
-    return
+    return db
+      .prepare(
+        `UPDATE datasets
+           SET data_ref = ?,
+               content_digest = ?,
+               source_digest = NULL,
+               updated_at = ?
+         WHERE id = ?`,
+      )
+      .bind(upload.target_ref, verifiedDigest, now, datasetId)
   }
 
   // Auxiliary asset — stamp `*_ref` + atomically merge into the
@@ -369,7 +422,7 @@ export async function applyAssetToDataset(
   // template-interpolating them into the SQL is safe.
   const refColumn = AUX_REF_COLUMN[upload.kind]
   const jsonPath = `$.${AUX_DIGEST_KEY[upload.kind]}`
-  await db
+  return db
     .prepare(
       `UPDATE datasets
          SET ${refColumn} = ?,
@@ -378,7 +431,6 @@ export async function applyAssetToDataset(
        WHERE id = ?`,
     )
     .bind(upload.target_ref, verifiedDigest, now, datasetId)
-    .run()
 }
 
 const AUX_REF_COLUMN: Record<Exclude<AssetKind, 'data'>, string> = {
