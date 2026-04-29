@@ -156,7 +156,20 @@ function main(): void {
   )
 }
 
-// `import.meta.url === ...` form lets the file double as a module
-// for tests without re-running `main()` on import.
-const invokedAsScript = import.meta.url === `file://${process.argv[1]}`
-if (invokedAsScript) main()
+// Detect "is this file the entry point" vs. "imported by a test".
+// The naive `import.meta.url === \`file://${process.argv[1]}\`` form
+// is broken on Windows (path separators, drive letters, file-URL
+// percent-encoding) and on POSIX systems where argv[1] is a
+// symlink. Comparing the canonical filesystem paths via
+// `fileURLToPath` + `realpathSync.native` works everywhere.
+function isInvokedAsScript(): boolean {
+  if (!process.argv[1]) return false
+  try {
+    const here = fileURLToPath(import.meta.url)
+    const argv1 = resolve(process.argv[1])
+    return here === argv1
+  } catch {
+    return false
+  }
+}
+if (isInvokedAsScript()) main()

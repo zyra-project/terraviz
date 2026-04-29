@@ -200,12 +200,27 @@ export async function loadVideoDataset(
   } else {
     let manifest: VideoProxyResponse
     if (isManifestUrl(dataset.dataLink)) {
-      // Node-mode: fetch the manifest envelope directly. Backend
-      // shape matches `VideoProxyResponse` (sans `dash`) so the
-      // downstream HLS code path is unchanged.
+      // Node-mode: fetch the manifest envelope directly. The backend
+      // (`functions/api/v1/datasets/[id]/manifest.ts`) returns a
+      // shape that's structurally identical to `VideoProxyResponse`
+      // for the fields the HLS path actually consumes (`hls`,
+      // `files[]`, `duration`, `title`, `id`) MINUS `dash` and
+      // PLUS a `kind: 'video' | 'image'` discriminator. Validate
+      // `kind` first so an image dataset routed to the video loader
+      // fails fast with a clear error rather than throwing at
+      // `manifest.files.find(...)` later.
       const res = await fetch(dataset.dataLink, { headers: { Accept: 'application/json' } })
       if (!res.ok) throw new Error(`Manifest fetch failed: ${res.status} ${res.statusText}`)
-      manifest = (await res.json()) as VideoProxyResponse
+      const envelope = (await res.json()) as Omit<VideoProxyResponse, 'dash'> & {
+        kind: 'video' | 'image'
+      }
+      if (envelope.kind !== 'video') {
+        throw new Error(`Expected a video manifest; got kind=${envelope.kind}.`)
+      }
+      // Backfill `dash` so the type matches downstream consumers
+      // that only read it via index-access; HLS.js never looks at
+      // it, the desktop offline path doesn't either.
+      manifest = { ...envelope, dash: '' }
     } else {
       const vimeoId = dataService.extractVimeoId(dataset.dataLink)
       if (!vimeoId) throw new Error(`Could not extract Vimeo ID from: ${dataset.dataLink}`)

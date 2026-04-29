@@ -48,6 +48,11 @@ import {
 
 const CACHE_CONTROL = 'public, max-age=60, stale-while-revalidate=300'
 const CONTENT_TYPE = 'application/json; charset=utf-8'
+// Stable timestamp used in the empty-catalog body so the response
+// bytes are a pure function of dataset state. The unix epoch is a
+// recognisable "no rows yet" sentinel; the populated path replaces
+// it with the latest `updated_at`.
+const EMPTY_GENERATED_AT = '1970-01-01T00:00:00.000Z'
 
 interface CatalogResponseBody {
   schema_version: number
@@ -72,10 +77,11 @@ async function renderCatalog(
     //
     // Derive the etag from the same canonical seed the populated
     // path uses so two requests with no rows always produce the
-    // same etag (a conditional GET with a matching If-None-Match
-    // really is up-to-date). The previous hardcoded `"empty"` etag
-    // paired with a fresh `generated_at` per render violated the
-    // ETag contract: same etag, different bytes.
+    // same etag, AND pin `generated_at` to a fixed empty-state
+    // sentinel so identical state also produces identical body
+    // bytes. The previous hardcoded `"empty"` etag paired with a
+    // fresh `Date.now()` `generated_at` violated the ETag contract:
+    // same etag, different bytes across rebuilds.
     const seed = JSON.stringify({
       schema_version: 1,
       cursor: null,
@@ -85,7 +91,7 @@ async function renderCatalog(
     const etag = await computeEtag(seed)
     const empty: CatalogResponseBody = {
       schema_version: 1,
-      generated_at: new Date().toISOString(),
+      generated_at: EMPTY_GENERATED_AT,
       etag,
       cursor: null,
       datasets: [],
@@ -109,6 +115,14 @@ async function renderCatalog(
   // tail) and then bake it into the JSON. Identical D1 contents
   // therefore produce identical etags across renders, so 304s
   // continue to work after a snapshot rebuild.
+  //
+  // `generated_at` is pinned to `cursor` (the latest `updated_at`
+  // across the result set) rather than `Date.now()`. Two
+  // semantically: `generated_at` is "this view is as of T", and
+  // when nothing has changed since the last render T is the
+  // freshest dataset's update time. Mechanically: it makes the
+  // body bytes a pure function of the dataset state, so the etag
+  // really does identify the bytes you'd send back.
   const cursor = maxUpdatedAt(rows)
   const etagSeed = JSON.stringify({
     schema_version: 1,
@@ -119,7 +133,7 @@ async function renderCatalog(
   const etag = await computeEtag(etagSeed)
   const body: CatalogResponseBody = {
     schema_version: 1,
-    generated_at: new Date().toISOString(),
+    generated_at: cursor ?? EMPTY_GENERATED_AT,
     etag,
     cursor,
     datasets,

@@ -86,6 +86,27 @@ describe('GET /api/v1/catalog', () => {
     expect(ds.tags).toEqual(['demo'])
     // Cursor stamps the latest updated_at across the result set.
     expect(body.cursor).toBe('2026-01-03T00:00:00.000Z')
+    // generated_at mirrors cursor so the body bytes are a pure
+    // function of dataset state — same content, same response
+    // bytes, so the ETag really does identify the bytes you get
+    // back.
+    expect(body.generated_at).toBe(body.cursor)
+  })
+
+  it('produces byte-identical bodies across rebuilds when state is unchanged', async () => {
+    // Regression: an earlier draft baked a fresh `Date.now()` into
+    // `generated_at` on every render, even though the etag seed
+    // excluded it. Two rebuilds with no row changes therefore
+    // produced different body bytes with the same ETag — a
+    // contract violation. Pin both texts to verify they match.
+    const sqlite = seedFixtures({ count: 2 })
+    const env = { CATALOG_DB: asD1(sqlite), CATALOG_KV: makeKV() }
+
+    const first = await renderCatalog(env)
+    // Bypass the snapshot cache by re-rendering directly.
+    const second = await renderCatalog(env)
+    expect(second.body).toBe(first.body)
+    expect(second.etag).toBe(first.etag)
   })
 
   it('returns an empty catalog when no node_identity exists', async () => {
