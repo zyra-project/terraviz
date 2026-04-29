@@ -51,7 +51,14 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
   const url = new URL(context.request.url)
   const limitRaw = url.searchParams.get('limit')
   const limit = limitRaw ? Number(limitRaw) : undefined
-  if (limitRaw && (!Number.isFinite(limit) || limit! < 1)) {
+  // Must be a positive integer literal — `1.5` and `1e2` both pass
+  // `Number.isFinite` but aren't what the operator typed; require
+  // base-10 digits + `Number.isInteger` to keep D1's LIMIT clause
+  // reading exactly what the URL said.
+  if (
+    limitRaw &&
+    (!/^[0-9]+$/.test(limitRaw) || !Number.isFinite(limit) || !Number.isInteger(limit) || limit! < 1)
+  ) {
     return jsonError(400, 'invalid_limit', '?limit= must be a positive integer.')
   }
   const featured = await listFeaturedDatasets(context.env.CATALOG_DB!, { limit })

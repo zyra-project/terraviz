@@ -281,10 +281,11 @@ function normaliseNow(input: number | Date | undefined): Date {
 }
 
 /**
- * Deterministic mock UID derived from a clock — base32 of the ms
- * timestamp, padded to a 32-char fixed length so it looks like a
- * real Stream uid (32-hex). Different clock → different uid; same
- * clock → same uid (which is exactly what the test fixtures want).
+ * Deterministic mock UID derived from a clock — hex encoding of
+ * the ms timestamp, padded to a 32-char fixed length so it looks
+ * like a real Stream uid (32-hex). Different clock → different
+ * uid; same clock → same uid (which is exactly what the test
+ * fixtures want).
  */
 function mockUid(now: Date): string {
   const ms = now.getTime().toString(16).padStart(12, '0')

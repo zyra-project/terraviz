@@ -366,8 +366,11 @@ export async function runUpload(ctx: CommandContext): Promise<number> {
       `  digest: ${digest}\n`,
   )
 
+  // `kind` was validated against `UPLOAD_KINDS` above, so it's
+  // safe to widen the string into the AssetKind union the client
+  // method expects.
   const init = await ctx.client.initAssetUpload<InitAssetEnvelope>(datasetId, {
-    kind: kind as 'data',
+    kind: kind as 'data' | 'thumbnail' | 'legend' | 'caption' | 'sphere_thumbnail',
     mime,
     size,
     content_digest: digest,

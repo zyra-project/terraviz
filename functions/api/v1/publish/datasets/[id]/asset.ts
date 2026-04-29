@@ -42,6 +42,7 @@
 import type { CatalogEnv } from '../../../_lib/env'
 import type { PublisherData } from '../../_middleware'
 import { getDatasetForPublisher } from '../../../_lib/dataset-mutations'
+import { isLoopbackHost } from '../../../_lib/loopback'
 import {
   buildAssetKey,
   presignPut,
@@ -122,6 +123,24 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
   const mock =
     (target === 'r2' && context.env.MOCK_R2 === 'true') ||
     (target === 'stream' && context.env.MOCK_STREAM === 'true')
+
+  // Defense in depth: refuse mock mode on a non-loopback hostname.
+  // A misconfigured production deploy with `MOCK_R2=true` /
+  // `MOCK_STREAM=true` left on could otherwise mint stub upload
+  // URLs and accept them at /complete without any real bytes. Same
+  // pattern as the publish middleware's `DEV_BYPASS_ACCESS` check.
+  if (mock) {
+    const url = new URL(context.request.url)
+    if (!isLoopbackHost(url.hostname)) {
+      const flag = target === 'stream' ? 'mock_stream_unsafe' : 'mock_r2_unsafe'
+      const envVar = target === 'stream' ? 'MOCK_STREAM' : 'MOCK_R2'
+      return jsonError(
+        500,
+        flag,
+        `${envVar}=true refuses to honor a non-loopback hostname (got "${url.hostname}").`,
+      )
+    }
+  }
 
   // Mint the upload URL + target_ref. Errors from the storage helpers
   // (R2 unconfigured, Stream API failure, etc.) become 503s — we don't

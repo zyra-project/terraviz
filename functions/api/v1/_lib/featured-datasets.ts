@@ -53,6 +53,12 @@ export type AddOutcome =
  * Add a dataset to the featured list. Refuses non-existent datasets
  * (404), and refuses if the dataset is already featured (409 — the
  * caller should PUT to update position instead).
+ *
+ * Race-safe: two concurrent first-adds for the same dataset both
+ * pass the existence check, but only one wins the
+ * `ON CONFLICT(dataset_id) DO NOTHING` insert; the loser detects
+ * `changes === 0` and returns a clean 409 instead of letting the
+ * UNIQUE constraint surface as a 500.
  */
 export async function addFeaturedDataset(
   db: D1Database,
@@ -73,11 +79,17 @@ export async function addFeaturedDataset(
     }
   }
 
-  const existing = await db
-    .prepare(`SELECT dataset_id FROM featured_datasets WHERE dataset_id = ?`)
-    .bind(input.dataset_id)
-    .first<{ dataset_id: string }>()
-  if (existing) {
+  const result = await db
+    .prepare(
+      `INSERT INTO featured_datasets (dataset_id, position, added_by, added_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(dataset_id) DO NOTHING`,
+    )
+    .bind(input.dataset_id, input.position, publisher.id, now)
+    .run()
+
+  const changes = (result.meta as { changes?: number } | undefined)?.changes ?? 0
+  if (changes === 0) {
     return {
       ok: false,
       status: 409,
@@ -85,14 +97,6 @@ export async function addFeaturedDataset(
       message: `Dataset ${input.dataset_id} is already in the featured list. Use PUT to update its position.`,
     }
   }
-
-  await db
-    .prepare(
-      `INSERT INTO featured_datasets (dataset_id, position, added_by, added_at)
-       VALUES (?, ?, ?, ?)`,
-    )
-    .bind(input.dataset_id, input.position, publisher.id, now)
-    .run()
 
   return {
     ok: true,

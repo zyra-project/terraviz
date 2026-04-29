@@ -108,9 +108,14 @@ export const onRequestPost: PagesFunction<CatalogEnv, keyof RouteParams> = async
   }
 
   if (upload.status === 'completed') {
-    // Idempotent retry — the row was already applied. Surface the
-    // current dataset so the caller has an up-to-date view.
-    return new Response(JSON.stringify({ dataset, upload, idempotent: true }), {
+    // Idempotent retry — the row was already applied. Re-read the
+    // dataset so the caller sees the latest persisted state — the
+    // initial load happens before the upload-status check, so it
+    // misses any background mutations (e.g. sphere-thumbnail
+    // generation against the just-applied asset) that landed since.
+    const currentDataset =
+      (await getDatasetForPublisher(context.env.CATALOG_DB!, publisher, datasetId)) ?? dataset
+    return new Response(JSON.stringify({ dataset: currentDataset, upload, idempotent: true }), {
       status: 200,
       headers: { 'Content-Type': CONTENT_TYPE, 'Cache-Control': 'private, no-store' },
     })
@@ -181,6 +186,21 @@ export const onRequestPost: PagesFunction<CatalogEnv, keyof RouteParams> = async
   } else if (upload.target === 'stream') {
     if (!upload.target_ref.startsWith('stream:')) {
       return jsonError(500, 'malformed_target_ref', `Upload ${uploadId} has an unparseable target_ref.`)
+    }
+    // Defense-in-depth parallel to MOCK_R2 above: in mock mode,
+    // `getTranscodeStatus` reports `ready` without contacting Stream,
+    // so a misconfigured production deploy could "complete" video
+    // uploads without any real Stream asset existing. Refuse on any
+    // non-loopback hostname.
+    if (context.env.MOCK_STREAM === 'true') {
+      const url = new URL(context.request.url)
+      if (!isLoopbackHost(url.hostname)) {
+        return jsonError(
+          500,
+          'mock_stream_unsafe',
+          `MOCK_STREAM=true refuses to honor a non-loopback hostname (got "${url.hostname}").`,
+        )
+      }
     }
     const uid = upload.target_ref.slice('stream:'.length)
     let status

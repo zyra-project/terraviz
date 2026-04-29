@@ -258,6 +258,14 @@ describe('generateSphereThumbnail — error paths', () => {
     ).rejects.toThrow(/CATALOG_R2 binding/)
   })
 
+  it('throws when CATALOG_DB is not bound', async () => {
+    const { bucket } = makeBucket()
+    const env = { CATALOG_R2: bucket } // no CATALOG_DB
+    await expect(
+      generateSphereThumbnail(env, { dataset_id: 'DS001', source_ref: 'stream:abc' }),
+    ).rejects.toThrow(/CATALOG_DB binding/)
+  })
+
   it('preserves prior auxiliary_digests entries on merge', async () => {
     const { sqlite, datasetId } = setupDb()
     sqlite

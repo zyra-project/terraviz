@@ -86,6 +86,9 @@ export async function generateSphereThumbnail(
   if (!env.CATALOG_R2) {
     throw new Error('CATALOG_R2 binding is required to persist sphere thumbnails.')
   }
+  if (!env.CATALOG_DB) {
+    throw new Error('CATALOG_DB binding is required to stamp the sphere thumbnail row.')
+  }
 
   const sourceUrl = pickSourceUrl(env, payload.source_ref)
   if (!sourceUrl) return null
@@ -112,7 +115,7 @@ export async function generateSphereThumbnail(
   const size = bytes.byteLength
   const sphereRef = `r2:${r2Key}`
 
-  await env.CATALOG_DB!
+  await env.CATALOG_DB
     .prepare(
       `UPDATE datasets
          SET sphere_thumbnail_ref = ?,
@@ -123,7 +126,7 @@ export async function generateSphereThumbnail(
     .bind(
       sphereRef,
       mergeAuxDigests(
-        await readAuxDigests(env.CATALOG_DB!, payload.dataset_id),
+        await readAuxDigests(env.CATALOG_DB, payload.dataset_id),
         'sphere_thumbnail',
         digest,
       ),

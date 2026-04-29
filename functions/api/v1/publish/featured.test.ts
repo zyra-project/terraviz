@@ -123,10 +123,20 @@ describe('GET /api/v1/publish/featured', () => {
 
   it('rejects an invalid limit', async () => {
     const { env } = setupEnv()
+    for (const bad of ['0', '-1', '1.5', '1e2', 'abc', '1abc']) {
+      const res = await featuredGet(
+        ctx({ env, url: `https://localhost/api/v1/publish/featured?limit=${bad}` }),
+      )
+      expect(res.status, `?limit=${bad} should reject`).toBe(400)
+    }
+  })
+
+  it('accepts a positive integer limit', async () => {
+    const { env } = setupEnv()
     const res = await featuredGet(
-      ctx({ env, url: 'https://localhost/api/v1/publish/featured?limit=0' }),
+      ctx({ env, url: 'https://localhost/api/v1/publish/featured?limit=10' }),
     )
-    expect(res.status).toBe(400)
+    expect(res.status).toBe(200)
   })
 })
 

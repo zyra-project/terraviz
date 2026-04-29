@@ -403,6 +403,62 @@ describe('POST /api/v1/publish/datasets/{id}/asset — mock flag', () => {
     expect(body.mock).toBe(true)
   })
 
+  it('refuses MOCK_R2=true on a non-loopback hostname', async () => {
+    const { env, datasetId } = setupEnv()
+    const baseCtx = ctx({
+      env,
+      datasetId,
+      body: {
+        kind: 'thumbnail',
+        mime: 'image/png',
+        size: 1234,
+        content_digest: HAPPY_DIGEST,
+      },
+    })
+    const prodCtx = {
+      ...baseCtx,
+      request: new Request(
+        `https://terraviz.example.com/api/v1/publish/datasets/${datasetId}/asset`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            kind: 'thumbnail',
+            mime: 'image/png',
+            size: 1234,
+            content_digest: HAPPY_DIGEST,
+          }),
+        },
+      ),
+    } as Parameters<typeof assetInit>[0]
+    const res = await assetInit(prodCtx)
+    expect(res.status).toBe(500)
+    expect((await readJson<{ error: string }>(res)).error).toBe('mock_r2_unsafe')
+  })
+
+  it('refuses MOCK_STREAM=true on a non-loopback hostname', async () => {
+    const { env, datasetId } = setupEnv()
+    const prodCtx = {
+      ...ctx({ env, datasetId, body: {} }),
+      request: new Request(
+        `https://terraviz.example.com/api/v1/publish/datasets/${datasetId}/asset`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            kind: 'data',
+            mime: 'video/mp4',
+            size: 50_000,
+            content_digest: HAPPY_DIGEST,
+          }),
+        },
+      ),
+    } as Parameters<typeof assetInit>[0]
+    const res = await assetInit(prodCtx)
+    expect(res.status).toBe(500)
+    expect((await readJson<{ error: string }>(res)).error).toBe('mock_stream_unsafe')
+  })
+
   it('stamps mock=false when only one half of the pair is mocked', async () => {
     // R2 mock, Stream not mocked — Stream upload reports mock=false.
     const { env, datasetId } = setupEnv({ MOCK_STREAM: undefined })

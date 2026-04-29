@@ -505,6 +505,43 @@ describe('POST .../asset/{upload_id}/complete — refusals', () => {
     expect(body.idempotent).toBe(true)
   })
 
+  it('idempotent path re-reads the dataset so background mutations are reflected', async () => {
+    const { sqlite, datasetId, kv } = setupEnv()
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      CATALOG_R2: makeBucket(HELLO_BYTES.buffer as ArrayBuffer),
+    }
+    insertPending(sqlite, {
+      uploadId: 'UP-IDEMP',
+      datasetId,
+      kind: 'thumbnail',
+      target: 'r2',
+      target_ref: `r2:datasets/${datasetId}/by-digest/sha256/${SHA64_HELLO}/thumbnail.png`,
+      mime: 'image/png',
+      claimed_digest: HELLO_DIGEST,
+    })
+    sqlite
+      .prepare(`UPDATE asset_uploads SET status = 'completed', completed_at = ? WHERE id = ?`)
+      .run('2026-04-29T12:00:00.000Z', 'UP-IDEMP')
+    // Simulate a background mutation that landed AFTER the original
+    // /complete returned: a sphere-thumbnail job stamped a new
+    // sphere_thumbnail_ref. The second /complete call must reflect it.
+    sqlite
+      .prepare(
+        `UPDATE datasets SET sphere_thumbnail_ref = ?, updated_at = ? WHERE id = ?`,
+      )
+      .run('r2:datasets/x/sphere-thumbnail.jpg', '2026-04-29T12:05:00.000Z', datasetId)
+    const res = await completeHandler(ctx({ env, datasetId, uploadId: 'UP-IDEMP' }))
+    expect(res.status).toBe(200)
+    const body = await readJson<{
+      idempotent: boolean
+      dataset: { sphere_thumbnail_ref: string }
+    }>(res)
+    expect(body.idempotent).toBe(true)
+    expect(body.dataset.sphere_thumbnail_ref).toBe('r2:datasets/x/sphere-thumbnail.jpg')
+  })
+
   it('returns 409 upload_failed when re-called on a failed row', async () => {
     const { sqlite, datasetId, kv } = setupEnv()
     const env = {
@@ -561,6 +598,34 @@ describe('POST .../asset/{upload_id}/complete — MOCK_R2 short-circuit', () => 
     expect(dataset.thumbnail_ref).toContain('thumbnail.png')
     const aux = JSON.parse(dataset.auxiliary_digests) as Record<string, string>
     expect(aux.thumbnail).toBe(HELLO_DIGEST)
+  })
+
+  it('refuses MOCK_STREAM=true on a non-loopback hostname', async () => {
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: true })
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      MOCK_STREAM: 'true',
+    }
+    insertPending(sqlite, {
+      uploadId: 'UP-MOCK-STREAM-PROD',
+      datasetId,
+      kind: 'data',
+      target: 'stream',
+      target_ref: 'stream:abc',
+      mime: 'video/mp4',
+      claimed_digest: OTHER_DIGEST,
+    })
+    const url = `https://terraviz.example.com/api/v1/publish/datasets/${datasetId}/asset/UP-MOCK-STREAM-PROD/complete`
+    const baseCtx = ctx({ env, datasetId, uploadId: 'UP-MOCK-STREAM-PROD' })
+    const prodCtx = {
+      ...baseCtx,
+      request: new Request(url, { method: 'POST' }),
+    } as Parameters<typeof completeHandler>[0]
+    const res = await completeHandler(prodCtx)
+    expect(res.status).toBe(500)
+    const body = await readJson<{ error: string }>(res)
+    expect(body.error).toBe('mock_stream_unsafe')
   })
 
   it('refuses MOCK_R2=true on a non-loopback hostname', async () => {

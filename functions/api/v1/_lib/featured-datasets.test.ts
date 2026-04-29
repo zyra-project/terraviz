@@ -140,6 +140,32 @@ describe('addFeaturedDataset', () => {
     if (result.ok) return
     expect(result.status).toBe(404)
   })
+
+  it('handles a concurrent-add race via ON CONFLICT (no UNIQUE 500)', async () => {
+    const { sqlite, d1 } = setupDb()
+    const id = 'DS000' + 'A'.repeat(21)
+    // Simulate the race by pre-inserting the row directly, then
+    // invoking addFeaturedDataset. The function's existence-check
+    // could pass concurrently with another writer; this test
+    // validates the loser branch returns a clean 409 instead of
+    // letting the UNIQUE constraint trigger a 500.
+    sqlite
+      .prepare(
+        `INSERT INTO featured_datasets (dataset_id, position, added_by, added_at)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(id, 1, STAFF.id, '2026-04-29T12:00:00.000Z')
+    const result = await addFeaturedDataset(d1, STAFF, { dataset_id: id, position: 5 })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(409)
+    expect(result.error).toBe('already_featured')
+    // Position is unchanged — the loser MUST NOT overwrite the winner.
+    const row = sqlite
+      .prepare(`SELECT position FROM featured_datasets WHERE dataset_id = ?`)
+      .get(id) as { position: number }
+    expect(row.position).toBe(1)
+  })
 })
 
 describe('updateFeaturedPosition', () => {

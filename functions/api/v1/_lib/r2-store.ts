@@ -201,8 +201,20 @@ function normaliseNow(input: number | Date | undefined): Date {
 }
 
 /**
- * Read the object at `key` via the R2 binding, stream-hash it with
- * SHA-256, and compare against `claimedDigest` (`sha256:<hex>`).
+ * Read the object at `key` via the R2 binding, hash it with SHA-256,
+ * and compare against `claimedDigest` (`sha256:<hex>`).
+ *
+ * Implementation note: this currently buffers the entire object via
+ * `arrayBuffer()` before hashing. The Workers runtime exposes
+ * `crypto.subtle.digest` only on a complete `BufferSource`; there is
+ * no streaming digest API in Web Crypto, so the alternative would be
+ * a hand-rolled / wasm SHA-256 chained off the object body's
+ * `ReadableStream`. The 100 MB image cap and 10 MB sphere-thumbnail
+ * cap from `asset-uploads.ts` keep the in-memory footprint bounded
+ * within Workers' memory budget; videos go to Stream and never reach
+ * this path. A future "Layered visualisation" follow-on that raises
+ * caps for very large image assets should land a streaming hash at
+ * the same time.
  *
  * Returns:
  *   - `{ ok: true, digest, size }` on match.
