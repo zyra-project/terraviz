@@ -18,7 +18,7 @@
  * verification land in Phase 1b.
  */
 
-import type { PublisherRow } from './publisher-store'
+import { type PublisherRow, isPrivileged } from './publisher-store'
 import type { DatasetRow } from './catalog-store'
 import { invalidateSnapshot } from './snapshot'
 import type { CatalogEnv } from './env'
@@ -42,14 +42,6 @@ export interface DraftCreateFailure {
   errors: ValidationError[]
 }
 export type DraftCreateOutcome = DraftCreateResult | DraftCreateFailure
-
-function isPrivileged(publisher: PublisherRow): boolean {
-  return (
-    publisher.is_admin === 1 ||
-    publisher.role === 'staff' ||
-    publisher.role === 'service'
-  )
-}
 
 /**
  * Apply the role-aware visibility predicate to an existing query.

@@ -167,6 +167,15 @@ CREATE TABLE datasets (
   FOREIGN KEY (publisher_id) REFERENCES publishers(id)
 );
 
+CREATE TABLE featured_datasets (
+  dataset_id   TEXT PRIMARY KEY,
+  position     INTEGER NOT NULL,             -- display order; lower = higher
+  added_by     TEXT NOT NULL,                -- publishers.id
+  added_at     TEXT NOT NULL,
+  FOREIGN KEY (dataset_id) REFERENCES datasets(id) ON DELETE CASCADE,
+  FOREIGN KEY (added_by)   REFERENCES publishers(id)
+);
+
 CREATE TABLE node_identity (
   node_id            TEXT PRIMARY KEY,        -- ULID, generated at install
   display_name       TEXT NOT NULL,
@@ -220,4 +229,5 @@ CREATE INDEX idx_audit_subject ON audit_events(subject_kind, subject_id, created
 CREATE INDEX idx_datasets_publisher  ON datasets(publisher_id);
 CREATE INDEX idx_datasets_updated_at ON datasets(updated_at);
 CREATE INDEX idx_datasets_visibility ON datasets(visibility, is_hidden, retracted_at);
+CREATE INDEX idx_featured_datasets_position ON featured_datasets(position);
 CREATE INDEX idx_renditions_dataset ON dataset_renditions(dataset_id);

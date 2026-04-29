@@ -126,3 +126,22 @@ export async function getOrCreatePublisher(
   return persisted ?? row
 }
 
+/**
+ * Privileged callers see all rows and can mutate operator-scoped
+ * resources (featured-list, peer config, hard delete). The role
+ * table:
+ *   - `staff` and `service` are privileged.
+ *   - `is_admin = 1` is privileged regardless of role (used by
+ *     `DEV_BYPASS_ACCESS=true` and by future admin-promotion).
+ *   - `community` is unprivileged.
+ *
+ * Read-side scoping in `dataset-mutations.ts` consults this; the
+ * featured-datasets routes consult it for write-side gating.
+ */
+export function isPrivileged(publisher: PublisherRow): boolean {
+  return (
+    publisher.is_admin === 1 ||
+    publisher.role === 'staff' ||
+    publisher.role === 'service'
+  )
+}

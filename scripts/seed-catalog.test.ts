@@ -37,6 +37,7 @@ const EXPECTED_TABLES = [
   'dataset_renditions',
   'dataset_tags',
   'datasets',
+  'featured_datasets',
   'node_identity',
   'publishers',
   'tour_dataset_refs',
@@ -49,6 +50,7 @@ const EXPECTED_INDEXES = [
   'idx_datasets_publisher',
   'idx_datasets_updated_at',
   'idx_datasets_visibility',
+  'idx_featured_datasets_position',
   'idx_renditions_dataset',
 ]
 
