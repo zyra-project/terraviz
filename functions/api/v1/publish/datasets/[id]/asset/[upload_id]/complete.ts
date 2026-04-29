@@ -239,10 +239,16 @@ export const onRequestPost: PagesFunction<CatalogEnv, keyof RouteParams> = async
       )
     }
     if (status.state === 'error') {
+      // `failure_reason` is documented as a stable machine-readable
+      // code (per `migrations/catalog/0006_asset_uploads.sql`), so
+      // store the canonical `transcode_error` regardless of how
+      // verbose Stream's reason text is. The detail still flows
+      // through the API response message so the publisher / CLI
+      // can surface it for debugging.
       const now = new Date().toISOString()
-      const reason = status.errors?.join(', ') || 'transcode_error'
-      await markAssetUploadFailed(context.env.CATALOG_DB!, uploadId, reason, now)
-      return jsonError(409, 'transcode_error', `Stream transcoding failed: ${reason}`)
+      const detail = status.errors?.join(', ') || 'unknown'
+      await markAssetUploadFailed(context.env.CATALOG_DB!, uploadId, 'transcode_error', now)
+      return jsonError(409, 'transcode_error', `Stream transcoding failed: ${detail}`)
     }
     // ready — trust the publisher's claimed digest (source-of-truth
     // hash); see `CATALOG_ASSETS_PIPELINE.md` "Stream assets:

@@ -86,6 +86,19 @@ function chooseTarget(kind: AssetKind, mime: string): 'r2' | 'stream' {
   return 'r2'
 }
 
+/**
+ * For `kind='data'`, the upload's mime must match the dataset's
+ * declared `format` so the catalog row stays internally consistent.
+ * Tour datasets are the one cross-bucket case: the row says
+ * `tour/json`; the upload's actual HTTP content-type is
+ * `application/json`.
+ */
+function mimeMatchesFormat(mime: string, format: string): boolean {
+  if (mime === format) return true
+  if (format === 'tour/json' && mime === 'application/json') return true
+  return false
+}
+
 export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
   const publisher = (context.data as unknown as PublisherData).publisher
   const id = pickId(context)
@@ -112,6 +125,28 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
     })
   }
   const { kind, mime, size, content_digest } = validated.value
+
+  // For `data` uploads, the mime must match the dataset's declared
+  // `format` — otherwise we'd commit a `data_ref` to bytes whose
+  // type contradicts the catalog row, breaking manifest resolution
+  // for downstream consumers. `tour/json` ↔ `application/json` is
+  // the one cross-bucket equivalence we honour (the row says
+  // `tour/json`; the upload's HTTP content-type is the standard
+  // `application/json`).
+  if (kind === 'data' && !mimeMatchesFormat(mime, existing.format)) {
+    return new Response(
+      JSON.stringify({
+        errors: [
+          {
+            field: 'mime',
+            code: 'mime_format_mismatch',
+            message: `Upload mime "${mime}" does not match dataset format "${existing.format}". Update the dataset's format first if you intend to change the asset type.`,
+          },
+        ],
+      }),
+      { status: 400, headers: { 'Content-Type': CONTENT_TYPE } },
+    )
+  }
 
   const target = chooseTarget(kind, mime)
   const uploadId = newUlid()

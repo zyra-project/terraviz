@@ -299,9 +299,12 @@ export async function resolveManifest(
       // single-file manifest pointing at the direct URL.
       return { manifest: externalVideoManifest(row.id, url, row.format) }
     }
-    if (row.format === 'tour/json' || row.format === 'application/json') {
-      return { manifest: externalVideoManifest(row.id, url, row.format) }
-    }
+    // Tour / JSON assets need a manifest discriminator that isn't
+    // `video|image` (the existing `Manifest` union here). Adding a
+    // `kind: 'file'` shape is a wider frontend change — the tour
+    // engine fetches `tour_json_ref` directly, not via /manifest —
+    // so for Phase 1b we surface 415 and let a Phase 3 publisher-
+    // portal commit add the new kind alongside the consumer.
     return {
       error: {
         status: 415,

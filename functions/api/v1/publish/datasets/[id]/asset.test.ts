@@ -363,6 +363,64 @@ describe('POST /api/v1/publish/datasets/{id}/asset — config errors', () => {
     expect((await readJson<{ error: string }>(res)).error).toBe('r2_unconfigured')
   })
 
+  it('returns 400 mime_format_mismatch when data upload mime contradicts dataset format', async () => {
+    const { env, datasetId } = setupEnv()
+    // Seeded dataset has format='video/mp4'; uploading data with image/png is contradictory.
+    const res = await assetInit(
+      ctx({
+        env,
+        datasetId,
+        body: {
+          kind: 'data',
+          mime: 'image/png',
+          size: 1234,
+          content_digest: HAPPY_DIGEST,
+        },
+      }),
+    )
+    expect(res.status).toBe(400)
+    const body = await readJson<{ errors: Array<{ field: string; code: string }> }>(res)
+    expect(body.errors[0]).toMatchObject({ field: 'mime', code: 'mime_format_mismatch' })
+  })
+
+  it('accepts application/json upload for a tour/json dataset', async () => {
+    const { env, sqlite, datasetId } = setupEnv()
+    sqlite
+      .prepare(`UPDATE datasets SET format = 'tour/json' WHERE id = ?`)
+      .run(datasetId)
+    const res = await assetInit(
+      ctx({
+        env,
+        datasetId,
+        body: {
+          kind: 'data',
+          mime: 'application/json',
+          size: 1234,
+          content_digest: HAPPY_DIGEST,
+        },
+      }),
+    )
+    expect(res.status).toBe(201)
+  })
+
+  it('does NOT enforce mime===format for non-data kinds', async () => {
+    const { env, datasetId } = setupEnv()
+    // Dataset format='video/mp4'; uploading a thumbnail should still go through.
+    const res = await assetInit(
+      ctx({
+        env,
+        datasetId,
+        body: {
+          kind: 'thumbnail',
+          mime: 'image/png',
+          size: 1234,
+          content_digest: HAPPY_DIGEST,
+        },
+      }),
+    )
+    expect(res.status).toBe(201)
+  })
+
   it('returns 502 stream_upstream_error when Stream API errors out (configured)', async () => {
     const { env, datasetId } = setupEnv({ MOCK_STREAM: undefined })
     delete (env as Record<string, unknown>).MOCK_STREAM

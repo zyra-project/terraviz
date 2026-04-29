@@ -379,6 +379,25 @@ describe('GET /api/v1/datasets/{id}/manifest', () => {
     expect((await readJson<{ error: string }>(res)).error).toBe('r2_unconfigured')
   })
 
+  it('returns 415 unsupported_format for r2: tour/json datasets (Phase 3)', async () => {
+    const sqlite = seedFixtures({ count: 1 })
+    sqlite
+      .prepare(
+        `UPDATE datasets SET data_ref = 'r2:tours/x/tour.json', format = 'tour/json'
+         WHERE slug = 'dataset-0'`,
+      )
+      .run()
+    const env = { CATALOG_DB: asD1(sqlite), CATALOG_KV: makeKV(), MOCK_R2: 'true' }
+    const ctx = makeCtx<'id'>({ env, params: { id: 'DS000AAAAAAAAAAAAAAAAAAAAA' } })
+    const res = await onRequestGet(ctx)
+    // Tour engines fetch tour_json_ref directly, not via /manifest;
+    // adding a `kind: 'file'` shape is a wider frontend change so
+    // we surface 415 explicitly rather than emit a video-shaped
+    // manifest that would mislead clients.
+    expect(res.status).toBe(415)
+    expect((await readJson<{ error: string }>(res)).error).toBe('unsupported_format')
+  })
+
   it('returns 501 for peer: data_ref schemes (Phase 4)', async () => {
     const sqlite = seedFixtures({ count: 1 })
     sqlite

@@ -458,12 +458,18 @@ describe('POST .../asset/{upload_id}/complete — Stream', () => {
       })
       const res = await completeHandler(ctx({ env, datasetId, uploadId: 'UP-STREAM-ERR' }))
       expect(res.status).toBe(409)
-      expect((await readJson<{ error: string }>(res)).error).toBe('transcode_error')
+      const body = await readJson<{ error: string; message: string }>(res)
+      expect(body.error).toBe('transcode_error')
+      // The verbose Stream-side reason text flows through the API
+      // response message …
+      expect(body.message).toContain('codec_unsupported')
+      // … but `failure_reason` on the row stays a stable machine-
+      // readable code so audit / retry logic can branch on it.
       const row = sqlite
         .prepare(`SELECT status, failure_reason FROM asset_uploads WHERE id = ?`)
         .get('UP-STREAM-ERR') as { status: string; failure_reason: string }
       expect(row.status).toBe('failed')
-      expect(row.failure_reason).toBe('codec_unsupported')
+      expect(row.failure_reason).toBe('transcode_error')
     } finally {
       globalThis.fetch = originalFetch
     }
