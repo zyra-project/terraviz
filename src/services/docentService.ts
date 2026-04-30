@@ -582,6 +582,16 @@ function resolveMarkerToDataset(
   if (datasetIdSet.has(id)) return id
   if (id.length === 0) return null
 
+  // Phase 1d/U — legacy_id fallback. Tour files and LLM responses
+  // sometimes carry the row's bulk-import provenance id (e.g.
+  // `INTERNAL_SOS_768`) instead of the post-cutover ULID. Resolve
+  // those to the dataset's primary id before falling through to the
+  // title-overlap heuristics; mirrors `dataService.getDatasetById`'s
+  // legacyId fallback. The caller rewrites the marker payload to
+  // `dataset.id` so the chat UI's marker round-trip works.
+  const byLegacy = datasets.find(d => d.legacyId === id)
+  if (byLegacy) return byLegacy
+
   const idLower = id.toLowerCase()
 
   // Existing exact / startsWith bidirectional fallback.
@@ -682,7 +692,16 @@ export function validateAndCleanText(
     if (datasetIdSet.has(id)) {
       validIds.add(id)
     } else {
-      invalidIds.add(id)
+      // Phase 1d/U — same legacy_id fallback the marker path uses.
+      // Bare `INTERNAL_SOS_*` mentions in prose now rewrite to the
+      // canonical ULID via legacyId match, mirroring resolveMarkerToDataset.
+      const byLegacy = datasets.find(d => d.legacyId === id)
+      if (byLegacy) {
+        validIds.add(byLegacy.id)
+        markerRewrites.set(id, byLegacy.id)
+      } else {
+        invalidIds.add(id)
+      }
     }
   }
 

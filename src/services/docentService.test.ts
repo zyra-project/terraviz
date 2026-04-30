@@ -615,6 +615,47 @@ describe('validateAndCleanText', () => {
     expect(invalidIds.size).toBe(0)
   })
 
+  it('resolves <<LOAD:legacy_id>> to the canonical ULID via legacyId fallback (1d/U)', () => {
+    // Post-cutover the catalog's primary id is a ULID, but tour
+    // files and LLM responses sometimes carry the row's bulk-import
+    // provenance id (e.g. INTERNAL_SOS_768). The marker validator
+    // should resolve those rather than stripping them, mirroring
+    // the dataService.getDatasetById fallback added in 1d/T.
+    const ds = [
+      makeDataset({
+        id: '01KQFFCEE4Q7NQGJNFB0Z042MC',
+        legacyId: 'INTERNAL_SOS_768',
+        title: 'Hurricane Season - 2024',
+      }),
+    ]
+    const text = 'Here you go.\n<<LOAD:INTERNAL_SOS_768>>\n'
+    const { cleanedText, validIds, invalidIds } = validateAndCleanText(text, ds)
+    expect(invalidIds.size).toBe(0)
+    expect(validIds.has('01KQFFCEE4Q7NQGJNFB0Z042MC')).toBe(true)
+    // The marker payload gets rewritten to the canonical ULID so
+    // the chat UI's [[LOAD:...]] round-trip stays consistent.
+    expect(cleanedText).toContain('<<LOAD:01KQFFCEE4Q7NQGJNFB0Z042MC>>')
+    expect(cleanedText).not.toContain('INTERNAL_SOS_768')
+  })
+
+  it('resolves bare INTERNAL_* mentions in prose via legacyId fallback (1d/U)', () => {
+    // The bare-INTERNAL pattern at the bottom of validateAndCleanText
+    // also gains the legacyId fallback so an LLM that mentions a
+    // legacy id outside a marker still resolves to the right
+    // dataset.
+    const ds = [
+      makeDataset({
+        id: '01KQFFCEE4Q7NQGJNFB0Z042MC',
+        legacyId: 'INTERNAL_SOS_768',
+        title: 'Hurricane Season - 2024',
+      }),
+    ]
+    const text = 'See INTERNAL_SOS_768 for more.\n'
+    const { validIds, invalidIds } = validateAndCleanText(text, ds)
+    expect(invalidIds.size).toBe(0)
+    expect(validIds.has('01KQFFCEE4Q7NQGJNFB0Z042MC')).toBe(true)
+  })
+
   it('extracts <<FLY:lat,lon>> markers', () => {
     const text = 'Let me show you the Gulf.\n<<FLY:29.0,-89.0>>\nHere it is.'
     const { cleanedText, globeActions } = validateAndCleanText(text, datasets)
