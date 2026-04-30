@@ -127,14 +127,19 @@ come from these sources:
 | `R2_PUBLIC_BASE` | Public-readable origin the manifest endpoint emits for `r2:` data_refs (custom-domain mapping like `https://assets.terraviz.example.com` or the bucket's native public URL). Without this, the manifest falls back to `MOCK_R2` (dev) or the S3 endpoint (public buckets only); restricted-bucket presigned-GET semantics are a Phase 4 follow-on. | Phase 1b (prod) |
 | `CATALOG_R2_BUCKET` | Bucket name override; defaults to `terraviz-assets` to match `wrangler.toml`. Only set this if a fork picks a different name. | Phase 1b |
 | `CF_IMAGES_RESIZE_BASE` | Origin used by the sphere-thumbnail pipeline to resize R2 image sources via Cloudflare Images URL transformations. When unset, the job falls back to fetching the source bytes directly. The publisher portal's "regenerate sphere thumbnail" button (Phase 3) lets a publisher provide a hand-cropped version manually. | Phase 1b |
+| `MOCK_VECTORIZE` | `.dev.vars.example` sets this to `true` by default. Swaps the Vectorize binding for an in-memory store keyed off the env object; the mock implements cosine similarity + the docent's filter operator subset (`$eq` / `$ne` / `$in` / `$nin`), so a multi-step "publish three datasets, search for the closest one" walk works without a real Vectorize index. Helpers raise `ConfigurationError` on a deploy with neither real binding nor mock flag. | Phase 1c |
+| `MOCK_AI` | `.dev.vars.example` sets this to `true` by default. The embedding helper returns a deterministic 768-dim feature-hashed vector instead of calling Workers AI; vocabulary overlap drives cosine similarity so the mock walks behave like real embeddings at a coarse level. Same fail-closed surface as `MOCK_VECTORIZE`. | Phase 1c |
 | `KILL_TELEMETRY` | Set `1` to disable analytics ingestion locally — almost always what you want during dev. | n/a |
 
 Phase-1a contributors realistically only need `NODE_ID_PRIVATE_KEY_PEM`,
 `DEV_BYPASS_ACCESS=true`, and `KILL_TELEMETRY=1`. Phase 1b adds
 `MOCK_STREAM=true` + `MOCK_R2=true` (both set by the example
-template), nothing else. The real `STREAM_*` / `R2_*` env vars stay
-unset locally because the contributor walkthrough is mock-mode-only —
-production deploys configure them via `wrangler pages secret put`.
+template), nothing else. Phase 1c adds `MOCK_VECTORIZE=true` +
+`MOCK_AI=true` (also set by the example template). The real
+`STREAM_*` / `R2_*` env vars and the real Vectorize / Workers AI
+bindings stay unset locally because the contributor walkthrough is
+mock-mode-only — production deploys configure them via
+`wrangler pages secret put` and the dashboard's Bindings UI.
 
 ### What "good" looks like
 
@@ -183,6 +188,66 @@ After the checklist runs clean, you should be able to:
   ```
   → "completed", then `terraviz get $ID` shows `thumbnail_ref`
   populated with `r2:datasets/<id>/by-digest/sha256/.../thumbnail.png`.
+- (Phase 1c) Round-trip the docent's search path end-to-end against
+  the mocked Vectorize + Workers AI bindings. Publish a few topical
+  drafts, then hit the public search endpoint and verify the
+  closest one ranks first:
+  ```bash
+  # Publish three drafts with distinguishing keywords. The
+  # publisher route's WaitUntilJobQueue runs the embed_dataset job
+  # against MOCK_AI / MOCK_VECTORIZE on the same isolate, so the
+  # vectors land before the next request.
+  for topic in hurricane volcano ocean; do
+    cat > /tmp/${topic}.json <<EOF
+  {"title":"${topic^} Demo","format":"video/mp4",
+   "data_ref":"vimeo:1","license_spdx":"CC-BY-4.0",
+   "abstract":"A short demo dataset about ${topic}s.",
+   "keywords":["${topic}","demo"]}
+  EOF
+    npm run terraviz -- --server http://localhost:8788 \
+      --insecure-local publish /tmp/${topic}.json
+  done
+
+  # Semantic search. The mock embedder is bag-of-words-ish, so a
+  # query sharing tokens with the publisher's text scores highest.
+  curl -s 'http://localhost:8788/api/v1/search?q=hurricane&limit=3' \
+    | jq '.datasets[] | {id, title, score}'
+  ```
+  → the "Hurricane Demo" row leads, with the other two trailing.
+  The response includes `id`, `title`, `abstract_snippet`,
+  `categories`, `peer_id` (`"local"` for own-node rows), and the
+  cosine `score`.
+- (Phase 1c) Featured-list endpoint:
+  ```bash
+  # Curl the public read — empty until you curate via the publisher
+  # API.
+  curl -s http://localhost:8788/api/v1/featured | jq
+
+  # Pin one of the rows to the featured list (staff-only mutation,
+  # dev-bypass mints a staff session).
+  curl -s -X POST -H 'Content-Type: application/json' \
+    -d "{\"dataset_id\":\"$ID\",\"position\":0}" \
+    http://localhost:8788/api/v1/publish/featured | jq
+
+  # Re-curl — the dataset now appears in the docent-shaped payload
+  # (id, title, abstract_snippet, thumbnail_url, categories,
+  # position).
+  curl -s http://localhost:8788/api/v1/featured | jq
+  ```
+- (Phase 1c) Verify the docent path end-to-end against the mocked
+  backend:
+  ```bash
+  # Open the dev frontend.
+  npm run dev
+  ```
+  Open `http://localhost:5173`, click the Orbit chat trigger, ask
+  "Show me datasets about hurricanes." The chat panel's network
+  tab should show a request to `/api/v1/search?q=hurricane` (the
+  docent's `search_datasets` tool); the response feeds back into
+  the LLM round which then proposes the seeded dataset with a
+  `<<LOAD:...>>` marker. Asking "What's interesting?" with no
+  topic triggers `list_featured_datasets` against
+  `/api/v1/featured` instead.
 
 If any of these fail, the troubleshooting matrix in "Local
 debugging" below lists the common causes.
@@ -224,6 +289,26 @@ preparing a deploy environment, not running locally:
   local user's email, and the CLI accepts a
   `TERRAVIZ_INSECURE_LOCAL=1` flag that skips service-token
   validation when targeting `localhost:8788`.
+- (Phase 1c) A Cloudflare Vectorize index for the docent search
+  surface. Provision once per deploy:
+  ```bash
+  wrangler vectorize create terraviz-datasets \
+    --dimensions=768 --metric=cosine
+  wrangler vectorize create-metadata-index terraviz-datasets \
+    --property-name=peer_id --type=string
+  wrangler vectorize create-metadata-index terraviz-datasets \
+    --property-name=category --type=string
+  wrangler vectorize create-metadata-index terraviz-datasets \
+    --property-name=visibility --type=string
+  ```
+  Then bind it under Settings → Bindings → Vectorize → variable
+  name `CATALOG_VECTORIZE` → index `terraviz-datasets`. The dim
+  count + metric must match the `@cf/baai/bge-base-en-v1.5` model
+  the embedding pipeline uses (768-dim, cosine); see
+  `_lib/embeddings.ts` for the `EMBEDDING_MODEL_VERSION` constant
+  that pins the (model × text shape × pooling) tuple. The
+  Workers AI binding (`AI`) is already provisioned for the
+  analytics + chat path; the embedding pipeline reuses it.
 
 The self-hosting walkthrough at
 [`docs/SELF_HOSTING.md`](SELF_HOSTING.md) is the more thorough
