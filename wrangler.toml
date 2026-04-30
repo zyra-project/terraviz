@@ -123,3 +123,35 @@ id = "00000000000000000000000000000000"
 [[r2_buckets]]
 binding = "CATALOG_R2"
 bucket_name = "terraviz-assets"
+
+# Vectorize index for the docent's semantic search, Phase 1c
+# onward. Holds 768-dim embeddings — one per published dataset —
+# produced from `@cf/baai/bge-base-en-v1.5` against the canonical
+# embedding text built in `functions/api/v1/_lib/embeddings.ts`.
+# `_lib/vectorize-store.ts` is the only Workers-side consumer:
+# `upsertEmbedding` on publish/update, `deleteEmbedding` on retract,
+# `queryEmbedding` from the public `/api/v1/search?q=` endpoint and
+# the docent's `search_datasets` tool path.
+#
+# The Vectorize index itself is provisioned out-of-band via:
+#
+#   wrangler vectorize create terraviz-datasets \
+#     --dimensions=768 --metric=cosine
+#   wrangler vectorize create-metadata-index terraviz-datasets \
+#     --property-name=peer_id --type=string
+#   wrangler vectorize create-metadata-index terraviz-datasets \
+#     --property-name=category --type=string
+#   wrangler vectorize create-metadata-index terraviz-datasets \
+#     --property-name=visibility --type=string
+#
+# The contributor walkthrough does NOT need a real index: setting
+# `MOCK_VECTORIZE=true` in `.dev.vars` swaps the binding for an
+# in-memory mock that implements cosine similarity end-to-end. See
+# `docs/CATALOG_BACKEND_DEVELOPMENT.md` for the full setup.
+#
+# Pages reads the binding from the dashboard, not this file: wire it
+# under Settings → Bindings → Vectorize → variable name
+# CATALOG_VECTORIZE → index `terraviz-datasets`.
+[[vectorize]]
+binding = "CATALOG_VECTORIZE"
+index_name = "terraviz-datasets"

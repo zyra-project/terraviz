@@ -31,6 +31,87 @@ import {
   type DatasetDraftBody,
   type ValidationError,
 } from './validators'
+import type { JobQueue } from './job-queue'
+import {
+  embedDatasetJob,
+  type EmbedDatasetEnv,
+  type EmbedDatasetJobPayload,
+} from './embed-dataset-job'
+import { deleteEmbedding } from './vectorize-store'
+
+/**
+ * Optional dependencies the mutation functions accept so the route
+ * layer can wire post-response background work (`WaitUntilJobQueue`)
+ * and tests can inject a `CapturingJobQueue` to assert on enqueue
+ * shape without exercising the job body.
+ *
+ * `jobQueue` carries the embed / delete-embedding work for Phase 1c.
+ * When omitted, mutations run their D1 + KV side effects only;
+ * embedding work is silently skipped. That keeps the existing
+ * pre-1c test surface working unchanged and makes the integration
+ * opt-in at the route layer.
+ */
+export interface MutationDeps {
+  jobQueue?: JobQueue
+}
+
+/** Job-queue task name for embed work. Stable across phases. */
+export const EMBED_JOB_NAME = 'embed_dataset'
+
+/** Job-queue task name for vector deletion. */
+export const DELETE_EMBEDDING_JOB_NAME = 'delete_dataset_embedding'
+
+interface DeleteEmbeddingJobPayload {
+  dataset_id: string
+}
+
+/**
+ * Whether the embed pipeline has the bindings (or mock flags) it
+ * needs to do its work. When false, the enqueue helpers return
+ * early without scheduling a job — a deploy that hasn't wired
+ * Vectorize / Workers AI yet keeps publishing and retracting
+ * normally, with only the docent's search surface degraded.
+ *
+ * Exported for the route layer's test injection point and for
+ * future operator-side health-check endpoints.
+ */
+export function isEmbedConfigured(env: CatalogEnv): boolean {
+  const haveAi = env.AI != null || env.MOCK_AI === 'true'
+  const haveVec = env.CATALOG_VECTORIZE != null || env.MOCK_VECTORIZE === 'true'
+  return haveAi && haveVec
+}
+
+async function enqueueEmbed(
+  deps: MutationDeps,
+  env: CatalogEnv,
+  datasetId: string,
+): Promise<void> {
+  if (!deps.jobQueue) return
+  if (!isEmbedConfigured(env)) return
+  await deps.jobQueue.enqueue<EmbedDatasetJobPayload>(
+    EMBED_JOB_NAME,
+    (jobEnv, payload) => embedDatasetJob(jobEnv as EmbedDatasetEnv, payload),
+    { dataset_id: datasetId },
+  )
+}
+
+async function enqueueDeleteEmbedding(
+  deps: MutationDeps,
+  env: CatalogEnv,
+  datasetId: string,
+): Promise<void> {
+  if (!deps.jobQueue) return
+  // Vector deletion needs only the Vectorize binding; AI is irrelevant
+  // here. Still gate on the binding so a Vectorize-less deploy doesn't
+  // log a ConfigurationError on every retract.
+  const haveVec = env.CATALOG_VECTORIZE != null || env.MOCK_VECTORIZE === 'true'
+  if (!haveVec) return
+  await deps.jobQueue.enqueue<DeleteEmbeddingJobPayload>(
+    DELETE_EMBEDDING_JOB_NAME,
+    (jobEnv, payload) => deleteEmbedding(jobEnv as CatalogEnv, payload.dataset_id),
+    { dataset_id: datasetId },
+  )
+}
 
 export interface DraftCreateResult {
   ok: true
@@ -273,6 +354,7 @@ export async function updateDataset(
   publisher: PublisherRow,
   id: string,
   body: DatasetDraftBody,
+  deps: MutationDeps = {},
 ): Promise<DraftCreateOutcome> {
   const errors = validateDraftUpdate(body)
   if (errors.length) return { ok: false, status: 400, errors }
@@ -333,12 +415,18 @@ export async function updateDataset(
 
   // If the row is currently published, mutating it changes what
   // public consumers see — invalidate the snapshot so the next
-  // `/api/v1/catalog` read sees the change.
+  // `/api/v1/catalog` read sees the change, and re-embed so the
+  // docent's vector index reflects the new title / abstract /
+  // categories / keywords / organization. Drafts are not embedded;
+  // they're not searchable until publish.
   const after = await db
     .prepare('SELECT * FROM datasets WHERE id = ?')
     .bind(id)
     .first<DatasetRow>()
-  if (after?.published_at && !after.retracted_at) await invalidateSnapshot(env)
+  if (after?.published_at && !after.retracted_at) {
+    await invalidateSnapshot(env)
+    await enqueueEmbed(deps, env, id)
+  }
   return { ok: true, dataset: after! }
 }
 
@@ -351,6 +439,7 @@ export async function updateDataset(
 export async function publishDataset(
   env: CatalogEnv,
   id: string,
+  deps: MutationDeps = {},
 ): Promise<DraftCreateOutcome> {
   const db = env.CATALOG_DB!
   const row = await db
@@ -385,6 +474,9 @@ export async function publishDataset(
     .bind(now, now, id)
     .run()
   await invalidateSnapshot(env)
+  // Publication makes the row searchable — embed it so the docent's
+  // vector index covers it on the next search.
+  await enqueueEmbed(deps, env, id)
 
   const after = await db
     .prepare('SELECT * FROM datasets WHERE id = ?')
@@ -393,7 +485,11 @@ export async function publishDataset(
   return { ok: true, dataset: after! }
 }
 
-export async function retractDataset(env: CatalogEnv, id: string): Promise<DraftCreateOutcome> {
+export async function retractDataset(
+  env: CatalogEnv,
+  id: string,
+  deps: MutationDeps = {},
+): Promise<DraftCreateOutcome> {
   const db = env.CATALOG_DB!
   const row = await db
     .prepare('SELECT * FROM datasets WHERE id = ?')
@@ -412,6 +508,11 @@ export async function retractDataset(env: CatalogEnv, id: string): Promise<Draft
     .bind(now, now, id)
     .run()
   await invalidateSnapshot(env)
+  // Drop the row from the docent's vector index so retracted
+  // datasets don't surface in search results. Idempotent at the
+  // helper level — re-retracting an already-deleted vector is a
+  // no-op.
+  await enqueueDeleteEmbedding(deps, env, id)
   const after = await db
     .prepare('SELECT * FROM datasets WHERE id = ?')
     .bind(id)

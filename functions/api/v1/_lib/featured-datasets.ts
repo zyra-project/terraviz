@@ -14,6 +14,10 @@
  */
 
 import type { PublisherRow } from './publisher-store'
+import type { DatasetRow, DecorationRows } from './catalog-store'
+import { getDecorations } from './catalog-store'
+import { resolveAssetRef } from './r2-public-url'
+import type { CatalogEnv } from './env'
 
 export interface FeaturedRow {
   dataset_id: string
@@ -153,4 +157,141 @@ export function validatePosition(value: unknown): { ok: true; position: number }
     return { ok: false, message: 'position must be between 0 and 1_000_000.' }
   }
   return { ok: true, position: value }
+}
+
+// ---------------------------------------------------------------------------
+// Docent-shaped read surface
+//
+// `listFeaturedDatasets` above returns the curation rows (id +
+// position + provenance). The docent's `list_featured_datasets`
+// tool wants something different: a small payload it can suggest
+// in chat — id + title + abstract_snippet + thumbnail_url +
+// categories. The two surfaces share the curation table; only the
+// shape they return differs.
+//
+// The hydration drops featured rows whose dataset is currently
+// retracted / hidden / un-published / non-public — the curation
+// row stays put for the publisher portal to manage, but the
+// docent does not surface tombstones to the user.
+// ---------------------------------------------------------------------------
+
+/** Max characters in `abstract_snippet`. Matches `search-datasets.ts`. */
+const FEATURED_ABSTRACT_SNIPPET_MAX = 280
+
+/** Default page size when the caller does not specify a limit. */
+export const FEATURED_DOCENT_DEFAULT_LIMIT = 6
+
+/** Hard ceiling on the docent surface so the LLM payload stays small. */
+export const FEATURED_DOCENT_MAX_LIMIT = 24
+
+export interface FeaturedDatasetHit {
+  id: string
+  title: string
+  abstract_snippet: string
+  /**
+   * Equirectangular sphere thumbnail when one exists, else the
+   * dataset's flat thumbnail, else null. The docent UI prefers the
+   * sphere variant for its mini-globe rendering.
+   */
+  thumbnail_url: string | null
+  categories: string[]
+  /** Curation order — lower is higher in the list. */
+  position: number
+}
+
+export interface FeaturedDocentResult {
+  datasets: FeaturedDatasetHit[]
+}
+
+/**
+ * Read the operator's featured set in display order, hydrate each
+ * row to the docent payload shape, and drop anything that isn't
+ * currently visible to the public catalog. Used by the public
+ * `/api/v1/featured` endpoint and (via that URL) by the docent's
+ * `list_featured_datasets` tool.
+ */
+export async function listFeaturedForDocent(
+  env: CatalogEnv,
+  options: { limit?: number } = {},
+): Promise<FeaturedDocentResult> {
+  if (!env.CATALOG_DB) return { datasets: [] }
+  const db = env.CATALOG_DB
+
+  const limit = clampDocentLimit(options.limit)
+
+  // Fetch a few extra curation rows so dropping un-visible datasets
+  // doesn't shrink the page below `limit` when the operator has
+  // featured a row that's currently retracted. Cap on the raw read
+  // is twice the requested limit (or 50, whichever is smaller) —
+  // beyond that the publisher portal needs to clean up stale picks.
+  const rawCap = Math.min(limit * 2, 50)
+  const featured = await listFeaturedDatasets(db, { limit: rawCap })
+  if (featured.length === 0) return { datasets: [] }
+
+  const ids = featured.map(r => r.dataset_id)
+  const placeholders = ids.map(() => '?').join(',')
+  const rowResult = await db
+    .prepare(
+      `SELECT * FROM datasets
+        WHERE id IN (${placeholders})
+          AND visibility = 'public'
+          AND is_hidden = 0
+          AND retracted_at IS NULL
+          AND published_at IS NOT NULL`,
+    )
+    .bind(...ids)
+    .all<DatasetRow>()
+  const rowMap = new Map<string, DatasetRow>()
+  for (const r of rowResult.results ?? []) rowMap.set(r.id, r)
+
+  const decorationMap = await getDecorations(db, ids)
+
+  const datasets: FeaturedDatasetHit[] = []
+  for (const f of featured) {
+    if (datasets.length >= limit) break
+    const row = rowMap.get(f.dataset_id)
+    if (!row) continue
+    const decorations =
+      decorationMap.get(f.dataset_id) ??
+      ({ tags: [], categories: [], keywords: [], developers: [], related: [] } as DecorationRows)
+    datasets.push({
+      id: row.id,
+      title: row.title,
+      abstract_snippet: snippetFor(row.abstract),
+      thumbnail_url: pickThumbnailUrl(env, row),
+      categories: extractCategoryValues(decorations),
+      position: f.position,
+    })
+  }
+
+  return { datasets }
+}
+
+function clampDocentLimit(limit: number | undefined): number {
+  if (limit == null || !Number.isFinite(limit)) return FEATURED_DOCENT_DEFAULT_LIMIT
+  if (limit < 1) return 1
+  return Math.min(Math.floor(limit), FEATURED_DOCENT_MAX_LIMIT)
+}
+
+function snippetFor(abstract: string | null): string {
+  if (!abstract) return ''
+  const collapsed = abstract.replace(/\s+/g, ' ').trim()
+  if (collapsed.length <= FEATURED_ABSTRACT_SNIPPET_MAX) return collapsed
+  return collapsed.slice(0, FEATURED_ABSTRACT_SNIPPET_MAX - 1).trimEnd() + '…'
+}
+
+function pickThumbnailUrl(env: CatalogEnv, row: DatasetRow): string | null {
+  // Prefer the sphere variant — the docent's mini-globe widget is
+  // the visual receiver. Fall back to the flat thumbnail (legacy
+  // SOS rows + un-regenerated datasets) when the sphere is missing.
+  return resolveAssetRef(env, row.sphere_thumbnail_ref) ?? resolveAssetRef(env, row.thumbnail_ref)
+}
+
+function extractCategoryValues(decorations: DecorationRows): string[] {
+  const seen = new Set<string>()
+  for (const c of decorations.categories) {
+    const v = c.value.trim()
+    if (v) seen.add(v)
+  }
+  return [...seen]
 }

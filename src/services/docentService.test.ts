@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { Dataset, ChatMessage, DocentConfig } from '../types'
-import { processMessage, loadConfig, saveConfig, getDefaultConfig, validateAndCleanText, captureViewContext, readCurrentTime } from './docentService'
+import { processMessage, loadConfig, saveConfig, getDefaultConfig, validateAndCleanText, captureViewContext, readCurrentTime, executeSearchDatasets, executeListFeaturedDatasets } from './docentService'
 import type { DocentStreamChunk } from './docentService'
 
 vi.mock('./llmProvider', () => ({
@@ -503,6 +503,85 @@ describe('validateAndCleanText', () => {
     const { cleanedText, validIds } = validateAndCleanText(text, ds)
     expect(cleanedText).toContain('INTERNAL_SST_001')
     expect(validIds.has('INTERNAL_SST_001')).toBe(true)
+  })
+
+  // -------------------------------------------------------------
+  // Phase 1c — title-overlap fallback (catalog(1c/N))
+  // -------------------------------------------------------------
+
+  it('resolves a marker whose contents are a near-title via token overlap', () => {
+    // Real failure mode from PR #59: the LLM put a title-shaped
+    // payload in the marker that didn't share a prefix with the
+    // catalog title. Token-overlap rescues it.
+    const ds = [
+      makeDataset({ id: 'INTERNAL_SOS_42', title: 'Sea Ice Extent (Arctic 1979-2020)' }),
+      makeDataset({ id: 'INTERNAL_SOS_99', title: 'Wildfire Smoke Tracking' }),
+    ]
+    const text = 'Take a look at this one.\n<<LOAD:Arctic Sea Ice Extent>>\nIt covers 1979 onward.'
+    const { cleanedText, validIds, invalidIds } = validateAndCleanText(text, ds)
+    expect(validIds.has('INTERNAL_SOS_42')).toBe(true)
+    expect(invalidIds.size).toBe(0)
+    // The marker contents get rewritten to the canonical id so the
+    // chat UI's [[LOAD:...]] roundtrip in conversation history sees
+    // a stable payload.
+    expect(cleanedText).toContain('<<LOAD:INTERNAL_SOS_42>>')
+    expect(cleanedText).not.toContain('Arctic Sea Ice Extent>>')
+  })
+
+  it('strips when the overlap is ambiguous (tie at the top)', () => {
+    // Two datasets share an equal token overlap on a marker that
+    // is NOT a prefix of either title — better strip than load the
+    // wrong dataset. The marker word order is shuffled so the
+    // existing startsWith rescue can't resolve it first.
+    const ds = [
+      makeDataset({ id: 'INTERNAL_A', title: 'Atlantic Sea Surface Temperature Anomaly' }),
+      makeDataset({ id: 'INTERNAL_B', title: 'Pacific Sea Surface Temperature Anomaly' }),
+    ]
+    const text = '<<LOAD:Surface Temperature Anomaly Sea>>\n'
+    const { invalidIds } = validateAndCleanText(text, ds)
+    expect(invalidIds.has('Surface Temperature Anomaly Sea')).toBe(true)
+  })
+
+  it('strips when the marker has fewer than 2 content tokens', () => {
+    // `idTokens.size < 2` short-circuit. "Specific" is one content
+    // token (the rest are stop words / under length); not enough
+    // for a confident match.
+    const ds = [makeDataset({ id: 'INTERNAL_X', title: 'Some Specific Climate Reanalysis Project' })]
+    const text = '<<LOAD:specific>>\n'
+    const { invalidIds } = validateAndCleanText(text, ds)
+    expect(invalidIds.has('specific')).toBe(true)
+  })
+
+  it('strips when the marker has 2+ tokens but overlap is below the 3-shared-tokens floor', () => {
+    // Two distinct content tokens, only one shared with the catalog
+    // title — falls below the ≥ 3 floor.
+    const ds = [makeDataset({ id: 'INTERNAL_X', title: 'Volcanic Eruption Plume Tracking 2010' })]
+    const text = '<<LOAD:Aurora Borealis Volcanic>>\n'
+    const { invalidIds } = validateAndCleanText(text, ds)
+    expect(invalidIds.has('Aurora Borealis Volcanic')).toBe(true)
+  })
+
+  it('strips when the marker is mostly stop words (token-overlap rescue must not fire on noise)', () => {
+    const ds = [makeDataset({ id: 'INTERNAL_X', title: 'Global Earth Data Visualization' })]
+    const text = '<<LOAD:Global Data>>\n'
+    const { invalidIds } = validateAndCleanText(text, ds)
+    // "global" and "data" are both stop words for the matcher, so
+    // the marker has zero content tokens and falls through to invalid.
+    expect(invalidIds.has('Global Data')).toBe(true)
+  })
+
+  it('strips malformed single-bracket marker shapes too', () => {
+    // Regression for Copilot review on PR #59: the strip regex
+    // had tightened to `<<LOAD:...>>` while the collect regex
+    // remained tolerant `<?<LOAD:...>>?`. Single-bracket variants
+    // got classified as invalid yet stayed visible in the prose.
+    const ds = [makeDataset()]
+    const text = 'Try this <LOAD:UNKNOWN_ID> here.\nAnd this <<LOAD:OTHER>.'
+    const { cleanedText, invalidIds } = validateAndCleanText(text, ds)
+    expect(invalidIds.has('UNKNOWN_ID')).toBe(true)
+    expect(invalidIds.has('OTHER')).toBe(true)
+    // Both malformed markers must be removed from prose.
+    expect(cleanedText).not.toContain('LOAD:')
   })
 
   it('returns empty invalidIds when all IDs are valid', () => {
@@ -1444,5 +1523,254 @@ describe('processMessage — rewrite for Phase 5 markers', () => {
     const rewrite = chunks.find(c => c.type === 'rewrite') as { type: 'rewrite'; text: string } | undefined
     expect(rewrite).toBeDefined()
     expect(rewrite!.text).not.toContain('REGION')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Phase 1c — backend discovery tools
+// ---------------------------------------------------------------------------
+
+const baseConfig: DocentConfig = {
+  apiUrl: '/api',
+  apiKey: '',
+  model: 'test',
+  enabled: true,
+  readingLevel: 'general',
+  visionEnabled: false,
+}
+
+describe('executeSearchDatasets', () => {
+  it('returns empty for blank query without hitting the network', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    const result = await executeSearchDatasets({ query: '   ' }, baseConfig)
+    expect(result).toEqual({ datasets: [] })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('returns empty when apiUrl is unset', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    const result = await executeSearchDatasets(
+      { query: 'hurricane' },
+      { ...baseConfig, apiUrl: '' },
+    )
+    expect(result).toEqual({ datasets: [] })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('hits /api/v1/search?q= with the right params and surfaces the dataset list', async () => {
+    const datasetsResp = [
+      { id: 'DS001', title: 'Atlantic Hurricane Tracks', abstract_snippet: 'A.', categories: ['Atmosphere'], peer_id: 'local', score: 0.91 },
+    ]
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ datasets: datasetsResp }), { status: 200 }))
+
+    const result = await executeSearchDatasets({ query: 'hurricane', limit: 7 }, baseConfig)
+    expect(result.datasets).toEqual(datasetsResp)
+
+    const url = new URL(fetchSpy.mock.calls[0][0] as string)
+    expect(url.pathname).toBe('/api/v1/search')
+    expect(url.searchParams.get('q')).toBe('hurricane')
+    expect(url.searchParams.get('limit')).toBe('7')
+  })
+
+  it('clamps limit to the route-layer max (50)', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ datasets: [] }), { status: 200 }))
+
+    await executeSearchDatasets({ query: 'hurricane', limit: 9999 }, baseConfig)
+    const url = new URL(fetchSpy.mock.calls[0][0] as string)
+    expect(url.searchParams.get('limit')).toBe('50')
+  })
+
+  it('soft-degrades to empty on non-OK response', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('upstream', { status: 500 }))
+    const result = await executeSearchDatasets({ query: 'hurricane' }, baseConfig)
+    expect(result).toEqual({ datasets: [] })
+  })
+
+  it('soft-degrades to empty on fetch throw', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network down'))
+    const result = await executeSearchDatasets({ query: 'hurricane' }, baseConfig)
+    expect(result).toEqual({ datasets: [] })
+  })
+
+  it('treats a degraded response as an empty dataset list (the LLM moves on)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ datasets: [], degraded: 'unconfigured' }), { status: 200 }),
+    )
+    const result = await executeSearchDatasets({ query: 'hurricane' }, baseConfig)
+    expect(result.datasets).toEqual([])
+  })
+})
+
+describe('executeListFeaturedDatasets', () => {
+  it('hits /api/v1/featured with the limit param', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ datasets: [] }), { status: 200 }))
+
+    await executeListFeaturedDatasets({ limit: 4 }, baseConfig)
+    const url = new URL(fetchSpy.mock.calls[0][0] as string)
+    expect(url.pathname).toBe('/api/v1/featured')
+    expect(url.searchParams.get('limit')).toBe('4')
+  })
+
+  it('defaults limit to 6 when none is supplied', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ datasets: [] }), { status: 200 }))
+
+    await executeListFeaturedDatasets({}, baseConfig)
+    const url = new URL(fetchSpy.mock.calls[0][0] as string)
+    expect(url.searchParams.get('limit')).toBe('6')
+  })
+
+  it('caps limit at 24', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ datasets: [] }), { status: 200 }))
+
+    await executeListFeaturedDatasets({ limit: 200 }, baseConfig)
+    const url = new URL(fetchSpy.mock.calls[0][0] as string)
+    expect(url.searchParams.get('limit')).toBe('24')
+  })
+
+  it('soft-degrades to empty on fetch error', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('boom'))
+    const result = await executeListFeaturedDatasets({}, baseConfig)
+    expect(result).toEqual({ datasets: [] })
+  })
+
+  it('targets the same-origin /api base regardless of config.apiUrl (LLM endpoint)', async () => {
+    // Regression for Copilot review on PR #59: `config.apiUrl` is
+    // the LLM chat-completions endpoint (often `https://api.openai.com/v1`
+    // or `http://localhost:11434/v1`); the catalog backend lives at
+    // the app origin. The pre-fix code did
+    // `${config.apiUrl}/v1/featured`, hitting `…/v1/v1/featured` and
+    // 404-ing on every call.
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ datasets: [] }), { status: 200 }))
+
+    const llmConfig: DocentConfig = {
+      ...baseConfig,
+      apiUrl: 'https://api.openai.com/v1',
+    }
+    await executeListFeaturedDatasets({}, llmConfig)
+    const url = new URL(fetchSpy.mock.calls[0][0] as string)
+    // Path is `/api/v1/featured` regardless of the LLM endpoint.
+    expect(url.pathname).toBe('/api/v1/featured')
+    // Host is the app origin (window.location), NOT api.openai.com.
+    expect(url.host).not.toBe('api.openai.com')
+  })
+})
+
+describe('executeSearchDatasets — catalog URL is decoupled from LLM apiUrl', () => {
+  it('always targets /api/v1/search regardless of LLM endpoint', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ datasets: [] }), { status: 200 }))
+
+    const llmConfig: DocentConfig = {
+      ...baseConfig,
+      apiUrl: 'http://localhost:11434/v1', // Ollama-style endpoint
+    }
+    await executeSearchDatasets({ query: 'hurricane' }, llmConfig)
+    const url = new URL(fetchSpy.mock.calls[0][0] as string)
+    expect(url.pathname).toBe('/api/v1/search')
+    expect(url.host).not.toBe('localhost:11434')
+  })
+})
+
+describe('processMessage — backend tool round-trip', () => {
+  it('feeds a search_datasets tool result back to the LLM on the next round', async () => {
+    const { streamChat } = await import('./llmProvider')
+    const mockedStream = vi.mocked(streamChat)
+
+    let callCount = 0
+    let round2Messages: any[] | null = null
+    mockedStream.mockImplementation(async function* (msgs) {
+      callCount++
+      if (callCount === 1) {
+        yield {
+          type: 'tool_call' as const,
+          call: {
+            id: 'call_search_dat_1',
+            name: 'search_datasets',
+            arguments: { query: 'hurricane' },
+          },
+        }
+        yield { type: 'done' as const }
+      } else {
+        round2Messages = [...msgs]
+        yield { type: 'delta' as const, text: 'Here are some matching datasets.' }
+        yield { type: 'done' as const }
+      }
+    })
+
+    const datasetsResp = [
+      { id: 'DS_HURR', title: 'Atlantic Hurricane Tracks', abstract_snippet: 'A.', categories: ['Atmosphere'], peer_id: 'local', score: 0.9 },
+    ]
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ datasets: datasetsResp }), { status: 200 }),
+    )
+
+    const chunks: DocentStreamChunk[] = []
+    for await (const chunk of processMessage('hurricane', [], datasets, null, baseConfig)) {
+      chunks.push(chunk)
+    }
+
+    expect(callCount).toBe(2)
+    expect(round2Messages).not.toBeNull()
+    const toolMsg = round2Messages!.find((m: any) => m.role === 'tool')
+    expect(toolMsg).toBeDefined()
+    expect(toolMsg.tool_call_id).toBe('call_search_dat_1')
+    const content = typeof toolMsg.content === 'string' ? toolMsg.content : ''
+    expect(content).toContain('Atlantic Hurricane Tracks')
+  })
+
+  it('feeds a list_featured_datasets tool result back to the LLM', async () => {
+    const { streamChat } = await import('./llmProvider')
+    const mockedStream = vi.mocked(streamChat)
+
+    let callCount = 0
+    let round2Messages: any[] | null = null
+    mockedStream.mockImplementation(async function* (msgs) {
+      callCount++
+      if (callCount === 1) {
+        yield {
+          type: 'tool_call' as const,
+          call: {
+            id: 'call_feat_1',
+            name: 'list_featured_datasets',
+            arguments: { limit: 3 },
+          },
+        }
+        yield { type: 'done' as const }
+      } else {
+        round2Messages = [...msgs]
+        yield { type: 'delta' as const, text: 'Featured today.' }
+        yield { type: 'done' as const }
+      }
+    })
+
+    const featuredResp = [
+      { id: 'DS_FEAT', title: 'Climate Reanalysis 2024', abstract_snippet: 'F.', thumbnail_url: null, categories: ['Climate'], position: 0 },
+    ]
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ datasets: featuredResp }), { status: 200 }),
+    )
+
+    const chunks: DocentStreamChunk[] = []
+    for await (const chunk of processMessage('show me something interesting', [], datasets, null, baseConfig)) {
+      chunks.push(chunk)
+    }
+
+    expect(callCount).toBe(2)
+    const toolMsg = round2Messages!.find((m: any) => m.role === 'tool')
+    expect(toolMsg.tool_call_id).toBe('call_feat_1')
+    expect(toolMsg.content).toContain('Climate Reanalysis 2024')
   })
 })

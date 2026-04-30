@@ -173,4 +173,36 @@ export interface CatalogEnv {
    * this var.
    */
   CF_IMAGES_RESIZE_BASE?: string
+  /**
+   * Vectorize index binding for the docent's semantic search
+   * surface (Phase 1c). Wired in the Cloudflare dashboard under
+   * Settings → Bindings → Vectorize → variable name
+   * CATALOG_VECTORIZE, pointing at the `terraviz-datasets` index
+   * (768-dim, cosine — matches `@cf/baai/bge-base-en-v1.5`).
+   * `_lib/vectorize-store.ts` is the only consumer; routes never
+   * touch the binding directly.
+   */
+  CATALOG_VECTORIZE?: Vectorize
+  /**
+   * `"true"` swaps the Vectorize binding for an in-memory mock so
+   * the contributor walkthrough works without a real Vectorize
+   * index. The mock implements cosine similarity and the docent's
+   * filter operator subset, so a multi-step "publish three datasets,
+   * search for the closest one" walk works end to end.
+   */
+  MOCK_VECTORIZE?: string
+  /**
+   * Workers AI binding for dataset embeddings (Phase 1c). Already
+   * provisioned at the project level for the Orbit chat path; the
+   * embedding pipeline reuses the same binding. `_lib/embeddings.ts`
+   * is the only consumer; routes never touch it directly.
+   */
+  AI?: Ai
+  /**
+   * `"true"` swaps the Workers AI binding for a deterministic
+   * feature-hashing mock so the contributor walkthrough does not
+   * burn AI quota and works without an account. Pairs with
+   * `MOCK_VECTORIZE=true` for the full mocked docent path.
+   */
+  MOCK_AI?: string
 }

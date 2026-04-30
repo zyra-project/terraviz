@@ -18,6 +18,12 @@ import {
   getDatasetForPublisher,
   updateDataset,
 } from '../../_lib/dataset-mutations'
+import { type JobQueue, WaitUntilJobQueue } from '../../_lib/job-queue'
+
+/** Test injection point — middleware/tests can pre-populate `context.data.jobQueue`. */
+interface UpdateContextData extends PublisherData {
+  jobQueue?: JobQueue
+}
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
 
@@ -63,7 +69,16 @@ export const onRequestPut: PagesFunction<CatalogEnv, 'id'> = async context => {
     return jsonError(400, 'invalid_body', 'Request body must be an object.')
   }
 
-  const result = await updateDataset(context.env, publisher, id, body as Record<string, unknown>)
+  const jobQueue =
+    (context.data as unknown as UpdateContextData).jobQueue ??
+    new WaitUntilJobQueue(context.env, context.waitUntil.bind(context))
+  const result = await updateDataset(
+    context.env,
+    publisher,
+    id,
+    body as Record<string, unknown>,
+    { jobQueue },
+  )
   if (!result.ok) {
     return new Response(JSON.stringify({ errors: result.errors }), {
       status: result.status,

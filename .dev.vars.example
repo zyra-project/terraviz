@@ -105,3 +105,45 @@ MOCK_R2=true
 # publisher portal's "regenerate sphere thumbnail" button (Phase 3)
 # lets a publisher provide a hand-cropped version manually).
 # CF_IMAGES_RESIZE_BASE=https://images.example.com
+
+# --- Docent search (Phase 1c) -------------------------------------
+# The docent's `search_datasets` and `list_featured_datasets` tools
+# (and the public /api/v1/search?q= + /api/v1/featured endpoints)
+# are backed by Cloudflare Vectorize for vector storage and
+# Workers AI's `@cf/baai/bge-base-en-v1.5` for the 768-dim
+# embeddings. Local dev defaults to MOCK mode for both so the
+# contributor walkthrough works without a Vectorize index or AI
+# quota burn.
+#
+# The mock embedder is a deterministic feature-hashing function
+# (FNV-1a per token, ±1 contribution at a hash-derived index,
+# L2-normalised). It biases shared-vocabulary texts closer in
+# cosine similarity than unrelated ones, so a "publish three
+# datasets, search for the closest one" walk in the dev server
+# actually shows meaningful ranking — not just static stub results.
+# The mock vector store implements the same `$eq` / `$ne` / `$in`
+# / `$nin` filter operators the real binding does.
+#
+# Both flags fall back to `ConfigurationError` if the deploy is
+# missing the real binding AND the mock flag, so a production
+# misconfig surfaces as a clear 503 rather than silently no-oping.
+MOCK_AI=true
+MOCK_VECTORIZE=true
+
+# Real Vectorize bindings come from the wrangler.toml block —
+# Pages reads bindings from the dashboard, not .dev.vars. Wire
+# the index under Settings → Bindings → Vectorize → variable name
+# CATALOG_VECTORIZE → index `terraviz-datasets`. The index itself
+# is provisioned out-of-band:
+#
+#   wrangler vectorize create terraviz-datasets \
+#     --dimensions=768 --metric=cosine
+#   wrangler vectorize create-metadata-index terraviz-datasets \
+#     --property-name=peer_id --type=string
+#   wrangler vectorize create-metadata-index terraviz-datasets \
+#     --property-name=category --type=string
+#   wrangler vectorize create-metadata-index terraviz-datasets \
+#     --property-name=visibility --type=string
+#
+# The `AI` binding (Workers AI) is already in wrangler.toml from
+# the analytics + chat path; no extra setup required.

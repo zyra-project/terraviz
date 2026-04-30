@@ -14,6 +14,12 @@ import {
   getDatasetForPublisher,
   retractDataset,
 } from '../../../_lib/dataset-mutations'
+import { type JobQueue, WaitUntilJobQueue } from '../../../_lib/job-queue'
+
+/** Test injection point — middleware/tests can pre-populate `context.data.jobQueue`. */
+interface RetractContextData extends PublisherData {
+  jobQueue?: JobQueue
+}
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
 
@@ -33,7 +39,10 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
   const existing = await getDatasetForPublisher(context.env.CATALOG_DB!, publisher, id)
   if (!existing) return jsonError(404, 'not_found', `Dataset ${id} not found.`)
 
-  const result = await retractDataset(context.env, id)
+  const jobQueue =
+    (context.data as unknown as RetractContextData).jobQueue ??
+    new WaitUntilJobQueue(context.env, context.waitUntil.bind(context))
+  const result = await retractDataset(context.env, id, { jobQueue })
   if (!result.ok) {
     return new Response(JSON.stringify({ errors: result.errors }), {
       status: result.status,

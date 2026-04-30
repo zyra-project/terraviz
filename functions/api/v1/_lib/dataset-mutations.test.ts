@@ -18,14 +18,20 @@ import { describe, expect, it } from 'vitest'
 import type { PublisherRow } from './publisher-store'
 import {
   createDataset,
+  DELETE_EMBEDDING_JOB_NAME,
+  EMBED_JOB_NAME,
   getDatasetForPublisher,
+  isEmbedConfigured,
   listDatasetsForPublisher,
   publishDataset,
   retractDataset,
   updateDataset,
 } from './dataset-mutations'
 import { asD1, makeKV, seedFixtures } from './test-helpers'
+import { CapturingJobQueue, SyncJobQueue } from './job-queue'
 import { SNAPSHOT_KEY } from './snapshot'
+import { __clearMockStore, queryEmbedding, type VectorizeEnv } from './vectorize-store'
+import { embedDatasetText } from './embeddings'
 
 const STAFF: PublisherRow = {
   id: 'PUB-STAFF',
@@ -256,5 +262,240 @@ describe('retractDataset', () => {
     if (!result.ok) return
     expect(result.dataset.retracted_at).not.toBeNull()
     expect(await kv.get(SNAPSHOT_KEY)).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Phase 1c — embed / delete-embedding enqueue integration
+//
+// Covers the wiring layer between the mutation paths and the embed
+// pipeline. The job body itself is tested in
+// `embed-dataset-job.test.ts`; here we just assert that:
+//
+//   - publishDataset enqueues `embed_dataset` for the new row
+//   - updateDataset enqueues `embed_dataset` only when the row is
+//     currently published (drafts stay un-embedded — they aren't
+//     searchable)
+//   - retractDataset enqueues `delete_dataset_embedding`
+//   - all three skip the enqueue silently when no jobQueue is passed
+//   - all three skip the enqueue silently when the env has neither
+//     real bindings nor mock flags (`isEmbedConfigured` / Vectorize-
+//     only-for-delete gate) — keeps a Vectorize-less deploy from
+//     logging ConfigurationError on every publish/retract
+//   - the SyncJobQueue + MOCK_AI + MOCK_VECTORIZE path round-trips
+//     all the way to a queryable Vectorize match (smoke test that
+//     the integration actually delivers the docent's search index)
+// ---------------------------------------------------------------------------
+
+function setupEmbedEnv() {
+  const base = setupEnv()
+  const env = {
+    ...base.env,
+    MOCK_AI: 'true',
+    MOCK_VECTORIZE: 'true',
+  } as typeof base.env & { MOCK_AI: string; MOCK_VECTORIZE: string }
+  __clearMockStore(env as VectorizeEnv)
+  return { ...base, env }
+}
+
+describe('isEmbedConfigured', () => {
+  it('is false when neither AI nor MOCK_AI is set', () => {
+    expect(isEmbedConfigured({ MOCK_VECTORIZE: 'true' })).toBe(false)
+  })
+  it('is false when neither CATALOG_VECTORIZE nor MOCK_VECTORIZE is set', () => {
+    expect(isEmbedConfigured({ MOCK_AI: 'true' })).toBe(false)
+  })
+  it('is true when both mock flags are set', () => {
+    expect(isEmbedConfigured({ MOCK_AI: 'true', MOCK_VECTORIZE: 'true' })).toBe(true)
+  })
+  it('is true when both real bindings are set', () => {
+    expect(
+      isEmbedConfigured({
+        AI: {} as unknown as Ai,
+        CATALOG_VECTORIZE: {} as unknown as Vectorize,
+      }),
+    ).toBe(true)
+  })
+})
+
+describe('publishDataset — embed enqueue', () => {
+  it('enqueues `embed_dataset` for the new row when the queue is provided + env is configured', async () => {
+    const { env } = setupEmbedEnv()
+    const created = await createDataset(env, STAFF, {
+      title: 'Hurricane Tracks',
+      format: 'video/mp4',
+      data_ref: 'vimeo:1',
+      license_spdx: 'CC-BY-4.0',
+    })
+    if (!created.ok) throw new Error('seed')
+
+    const queue = new CapturingJobQueue()
+    const result = await publishDataset(env, created.dataset.id, { jobQueue: queue })
+    expect(result.ok).toBe(true)
+    expect(queue.records).toEqual([
+      { name: EMBED_JOB_NAME, payload: { dataset_id: created.dataset.id } },
+    ])
+  })
+
+  it('skips enqueue when no jobQueue is provided', async () => {
+    const { env } = setupEmbedEnv()
+    const created = await createDataset(env, STAFF, {
+      title: 'No queue',
+      format: 'video/mp4',
+      data_ref: 'vimeo:1',
+      license_spdx: 'CC-BY-4.0',
+    })
+    if (!created.ok) throw new Error('seed')
+
+    const result = await publishDataset(env, created.dataset.id)
+    expect(result.ok).toBe(true) // no throw, no queue.
+  })
+
+  it('skips enqueue when env has neither real bindings nor mock flags', async () => {
+    const { env } = setupEnv() // no MOCK_AI / MOCK_VECTORIZE
+    const created = await createDataset(env, STAFF, {
+      title: 'Unconfigured',
+      format: 'video/mp4',
+      data_ref: 'vimeo:1',
+      license_spdx: 'CC-BY-4.0',
+    })
+    if (!created.ok) throw new Error('seed')
+
+    const queue = new CapturingJobQueue()
+    await publishDataset(env, created.dataset.id, { jobQueue: queue })
+    expect(queue.records).toEqual([])
+  })
+
+  it('SyncJobQueue path round-trips to a queryable Vectorize match', async () => {
+    const { env } = setupEmbedEnv()
+    const created = await createDataset(env, STAFF, {
+      title: 'Atlantic Hurricane Tracks',
+      format: 'video/mp4',
+      data_ref: 'vimeo:1',
+      license_spdx: 'CC-BY-4.0',
+      keywords: ['hurricane', 'atlantic', 'storm'],
+      categories: { Theme: ['Atmosphere'] },
+    })
+    if (!created.ok) throw new Error('seed')
+
+    const queue = new SyncJobQueue(env)
+    const result = await publishDataset(env, created.dataset.id, { jobQueue: queue })
+    expect(result.ok).toBe(true)
+
+    // Vector landed; a query against the same vocabulary finds it.
+    const queryVec = await embedDatasetText(env, 'hurricane storm atlantic')
+    const matches = await queryEmbedding(env, queryVec, { limit: 5 })
+    expect(matches.find(m => m.dataset_id === created.dataset.id)).toBeDefined()
+  })
+})
+
+describe('updateDataset — embed enqueue', () => {
+  it('does NOT enqueue when updating an unpublished draft', async () => {
+    const { env } = setupEmbedEnv()
+    const created = await createDataset(env, STAFF, {
+      title: 'Draft only',
+      format: 'video/mp4',
+    })
+    if (!created.ok) throw new Error('seed')
+
+    const queue = new CapturingJobQueue()
+    await updateDataset(env, STAFF, created.dataset.id, { title: 'Renamed' }, { jobQueue: queue })
+    expect(queue.records).toEqual([])
+  })
+
+  it('enqueues `embed_dataset` when updating a currently-published row', async () => {
+    const { env } = setupEmbedEnv()
+    const created = await createDataset(env, STAFF, {
+      title: 'Published',
+      format: 'video/mp4',
+      data_ref: 'vimeo:1',
+      license_spdx: 'CC-BY-4.0',
+    })
+    if (!created.ok) throw new Error('seed')
+    await publishDataset(env, created.dataset.id) // un-queued
+
+    const queue = new CapturingJobQueue()
+    await updateDataset(env, STAFF, created.dataset.id, { title: 'Renamed' }, { jobQueue: queue })
+    expect(queue.records).toEqual([
+      { name: EMBED_JOB_NAME, payload: { dataset_id: created.dataset.id } },
+    ])
+  })
+
+  it('does NOT enqueue when updating a retracted row', async () => {
+    const { env } = setupEmbedEnv()
+    const created = await createDataset(env, STAFF, {
+      title: 'Will retract',
+      format: 'video/mp4',
+      data_ref: 'vimeo:1',
+      license_spdx: 'CC-BY-4.0',
+    })
+    if (!created.ok) throw new Error('seed')
+    await publishDataset(env, created.dataset.id)
+    await retractDataset(env, created.dataset.id)
+
+    const queue = new CapturingJobQueue()
+    await updateDataset(env, STAFF, created.dataset.id, { title: 'Tomb' }, { jobQueue: queue })
+    expect(queue.records).toEqual([])
+  })
+})
+
+describe('retractDataset — delete-embedding enqueue', () => {
+  it('enqueues `delete_dataset_embedding` for the retracted id', async () => {
+    const { env } = setupEmbedEnv()
+    const created = await createDataset(env, STAFF, {
+      title: 'Retract me',
+      format: 'video/mp4',
+      data_ref: 'vimeo:1',
+      license_spdx: 'CC-BY-4.0',
+    })
+    if (!created.ok) throw new Error('seed')
+    await publishDataset(env, created.dataset.id)
+
+    const queue = new CapturingJobQueue()
+    await retractDataset(env, created.dataset.id, { jobQueue: queue })
+    expect(queue.records).toEqual([
+      { name: DELETE_EMBEDDING_JOB_NAME, payload: { dataset_id: created.dataset.id } },
+    ])
+  })
+
+  it('skips enqueue when env has no Vectorize binding and no MOCK_VECTORIZE', async () => {
+    const { env } = setupEnv() // unconfigured
+    const created = await createDataset(env, STAFF, {
+      title: 'Unconfigured retract',
+      format: 'video/mp4',
+      data_ref: 'vimeo:1',
+      license_spdx: 'CC-BY-4.0',
+    })
+    if (!created.ok) throw new Error('seed')
+    await publishDataset(env, created.dataset.id)
+
+    const queue = new CapturingJobQueue()
+    await retractDataset(env, created.dataset.id, { jobQueue: queue })
+    expect(queue.records).toEqual([])
+  })
+
+  it('SyncJobQueue path actually drops the vector from Vectorize', async () => {
+    const { env } = setupEmbedEnv()
+    const created = await createDataset(env, STAFF, {
+      title: 'Round-trip retract',
+      format: 'video/mp4',
+      data_ref: 'vimeo:1',
+      license_spdx: 'CC-BY-4.0',
+      keywords: ['volcano', 'lava', 'eruption'],
+    })
+    if (!created.ok) throw new Error('seed')
+
+    const queue = new SyncJobQueue(env)
+    await publishDataset(env, created.dataset.id, { jobQueue: queue })
+
+    const queryVec = await embedDatasetText(env, 'volcano lava eruption')
+    expect(
+      (await queryEmbedding(env, queryVec)).find(m => m.dataset_id === created.dataset.id),
+    ).toBeDefined()
+
+    await retractDataset(env, created.dataset.id, { jobQueue: queue })
+    expect(
+      (await queryEmbedding(env, queryVec)).find(m => m.dataset_id === created.dataset.id),
+    ).toBeUndefined()
   })
 })

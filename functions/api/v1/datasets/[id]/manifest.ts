@@ -40,6 +40,7 @@ import { getNodeIdentity, getPublicDataset } from '../../_lib/catalog-store'
 import { isConfigurationError } from '../../_lib/errors'
 import { streamPlaybackUrl } from '../../_lib/stream-store'
 import { computeEtag } from '../../_lib/snapshot'
+import { encodeR2Key, resolveR2PublicUrl } from '../../_lib/r2-public-url'
 
 const CACHE_CONTROL = 'public, max-age=300, stale-while-revalidate=600'
 const CONTENT_TYPE = 'application/json; charset=utf-8'
@@ -264,7 +265,7 @@ export async function resolveManifest(
   }
 
   if (parsed.scheme === 'r2') {
-    const url = r2ReadUrl(env, parsed.value)
+    const url = resolveR2PublicUrl(env, parsed.value)
     if (!url) {
       return {
         error: {
@@ -283,7 +284,7 @@ export async function resolveManifest(
       if (base) {
         const variants = [4096, 2048, 1024].map(width => ({
           width,
-          url: `${base.replace(/\/$/, '')}/cdn-cgi/image/fit=scale-down,width=${width},format=auto/${bucket}/${encodeKey(parsed.value)}`,
+          url: `${base.replace(/\/$/, '')}/cdn-cgi/image/fit=scale-down,width=${width},format=auto/${bucket}/${encodeR2Key(parsed.value)}`,
         }))
         return { manifest: { kind: 'image', variants, fallback: url } }
       }
@@ -325,45 +326,9 @@ export async function resolveManifest(
   }
 }
 
-/**
- * Encode an R2 key for inclusion in a URL path. Slashes are
- * preserved (they're path separators in R2 keys); everything else
- * goes through `encodeURIComponent`.
- */
-function encodeKey(key: string): string {
-  return key.split('/').map(encodeURIComponent).join('/')
-}
-
-/**
- * Build a publicly-readable URL for an R2 object. Tries, in order:
- *   1. `R2_PUBLIC_BASE` — operator-configured custom-domain origin
- *      (e.g. `https://assets.terraviz.example.com`).
- *   2. `MOCK_R2=true` — local-dev stub host the test suite
- *      asserts against.
- *   3. `R2_S3_ENDPOINT` — direct path-style S3 URL; only resolves
- *      to readable bytes for buckets with public access enabled.
- * Returns null when none of those apply — caller surfaces a 503.
- *
- * Restricted-bucket presigned-GET semantics are a Phase 4
- * federation concern; the manifest endpoint here serves the
- * happy-path public read.
- */
-function r2ReadUrl(env: CatalogEnv, key: string): string | null {
-  const bucket = env.CATALOG_R2_BUCKET?.trim() || 'terraviz-assets'
-  const path = encodeKey(key)
-  const publicBase = env.R2_PUBLIC_BASE?.trim()
-  if (publicBase) {
-    return `${publicBase.replace(/\/$/, '')}/${path}`
-  }
-  if (env.MOCK_R2 === 'true') {
-    return `https://mock-r2.localhost/${bucket}/${path}`
-  }
-  const endpoint = env.R2_S3_ENDPOINT?.trim()
-  if (endpoint) {
-    return `${endpoint.replace(/\/$/, '')}/${bucket}/${path}`
-  }
-  return null
-}
+// R2 public-URL resolution moved to `_lib/r2-public-url.ts` so the
+// docent's featured-list helper can share it. Imported above as
+// `resolveR2PublicUrl`.
 
 export const onRequestGet: PagesFunction<CatalogEnv, 'id'> = async context => {
   const idParam = context.params.id
