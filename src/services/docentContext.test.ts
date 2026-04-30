@@ -326,6 +326,25 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toMatch(/empty.*fall back to.*search_catalog/i)
     expect(prompt).toMatch(/never invent.*titles or IDs|never guess/i)
   })
+
+  it('forbids inventing "related" dataset names without a fresh tool call', () => {
+    // Real reply seen on PR #59 / catalog(1c/M):
+    //   > Here are some related datasets:
+    //   > This one shows sea ice extent in the Arctic.
+    //   > Another option is
+    //   > which shows ocean color data...
+    // The first dataset was real (tool result, valid chip). The
+    // "related" suggestions were fabricated — the LLM mentioned
+    // dataset names it remembered from training-time knowledge,
+    // markers got stripped, sentences turned into half-formed
+    // prose. Guard the explicit instruction not to do this.
+    const prompt = buildSystemPrompt(datasets, null)
+    // The strict rule must call out related/similar datasets explicitly.
+    expect(prompt).toMatch(/no exceptions for.*related/i)
+    // The Guidelines line that originally said "Suggest related datasets
+    // when relevant" must now require a tool call.
+    expect(prompt).toMatch(/related.*MUST call a discovery tool first|must call.*discovery tool/i)
+  })
 })
 
 describe('buildMessageHistory', () => {
