@@ -9,6 +9,17 @@
  * deliberately a separate JS file so a global install
  * (`npm install -g .`) works on Windows + macOS + Linux without
  * relying on `.ts` shebang support.
+ *
+ * Argv shape: global flags (`--server`, `--insecure-local`, etc.)
+ * may appear before OR after the subcommand. The dispatcher runs
+ * `parseArgs` on the full argv and reads the subcommand off the
+ * first positional, so both
+ *   `terraviz --insecure-local publish foo.json`
+ * and
+ *   `terraviz publish foo.json --insecure-local`
+ * are equivalent. This matches how the older 1a/1b/1c contributor
+ * docs phrased the invocations and what most operators reach for
+ * by reflex.
  */
 
 import { TerravizClient } from './lib/client'
@@ -17,7 +28,6 @@ import { parseArgs, getString, getBool } from './lib/args'
 import {
   HELP_TEXT,
   runGet,
-  runHelp,
   runList,
   runMe,
   runPreview,
@@ -31,13 +41,27 @@ import {
 import { runImportSnapshot } from './import-snapshot'
 
 async function main(argv: string[]): Promise<number> {
-  if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h' || argv[0] === 'help') {
+  // Bare `-h` short flag — parseArgs only knows about `--`, so handle
+  // the short form here before delegating.
+  if (argv.includes('-h')) {
     process.stdout.write(HELP_TEXT)
     return 0
   }
 
-  const [command, ...rest] = argv
-  const parsed = parseArgs(rest)
+  const parsed = parseArgs(argv)
+  const command = parsed.positional[0]
+  const remainingPositionals = parsed.positional.slice(1)
+
+  if (
+    argv.length === 0 ||
+    !command ||
+    command === 'help' ||
+    parsed.options.help === true
+  ) {
+    process.stdout.write(HELP_TEXT)
+    return 0
+  }
+
   const config = resolveConfig({
     flagServer: getString(parsed.options, 'server'),
     flagInsecureLocal: getBool(parsed.options, 'insecure-local'),
@@ -48,7 +72,7 @@ async function main(argv: string[]): Promise<number> {
 
   const ctx: CommandContext = {
     client,
-    args: parsed,
+    args: { positional: remainingPositionals, options: parsed.options },
     stdout: process.stdout,
     stderr: process.stderr,
   }
@@ -74,10 +98,6 @@ async function main(argv: string[]): Promise<number> {
       return runTour(ctx)
     case 'import-snapshot':
       return runImportSnapshot(ctx)
-    case 'help':
-    case '--help':
-    case '-h':
-      return runHelp(ctx)
     default:
       process.stderr.write(`Unknown command: ${command}\n\nRun \`terraviz help\` for usage.\n`)
       return 2
