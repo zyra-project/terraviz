@@ -215,6 +215,30 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toMatch(/MANDATORY.*<<LOAD:/i)
   })
 
+  it('uses placeholder marker payloads in the example, not real legacy IDs (1d/S)', () => {
+    // Real failure observed post-1d cutover: the example used
+    // `<<LOAD:INTERNAL_SOS_5>>` and `<<LOAD:INTERNAL_SOS_12>>` as
+    // illustrative IDs. Smaller LLMs mimicked the example prose
+    // verbatim — emitting markers with `INTERNAL_SOS_5` /
+    // `INTERNAL_SOS_12` regardless of what search_datasets actually
+    // returned. The post-cutover catalog uses ULIDs as `id`, so the
+    // anti-hallucination guard stripped those markers and the user
+    // saw prose without chips:
+    //   [Docent] Stripped hallucinated dataset IDs:
+    //     ["INTERNAL_SOS_5", "INTERNAL_SOS_12"]
+    //
+    // Fix: the example uses obvious placeholder names that aren't
+    // valid ID format in either world (ULID or legacy SOS), so an
+    // LLM that copies them verbatim produces a chip we strip with a
+    // warning rather than a chip that silently disappears looking
+    // like a real ID.
+    const prompt = buildSystemPrompt(datasets, null)
+    expect(prompt).not.toMatch(/<<LOAD:INTERNAL_SOS_\d+>>/)
+    expect(prompt).not.toMatch(/<<LOAD:INTERNAL_SOS_5>>/)
+    // Sanity: the example still demonstrates marker placement.
+    expect(prompt).toMatch(/<<LOAD:[A-Z_]+_FROM_TOOL_RESULT>>/)
+  })
+
   it('restricts the "I do not have a dataset" preface to zero-results only', () => {
     // Regression: the original prompt told the LLM to prefix fallback
     // results with "I don't have a dataset for that specific topic, but
