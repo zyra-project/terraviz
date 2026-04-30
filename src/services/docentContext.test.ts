@@ -299,16 +299,32 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toMatch(/cold[- ]start|where to start|something interesting/i)
   })
 
-  it('flags search_datasets as the preferred / primary discovery tool', () => {
-    // Section ordering matters: the LLM scans top-down and tends to
-    // pick the first-listed tool. Verify search_datasets appears
-    // before search_catalog in the prompt.
+  it('lists search_catalog as the default discovery tool until backend cutover', () => {
+    // Phase 1c rollback (catalog(1c/L)): production deploys without
+    // a provisioned Vectorize index were seeing the LLM pick
+    // search_datasets first, get an empty result, and hallucinate
+    // IDs that the marker validator strips — so Load chips
+    // disappeared from prose. Until the cutover, the prompt has
+    // search_catalog listed before search_datasets so the LLM
+    // defaults to the in-memory legacy catalog (valid IDs, real
+    // results). Once Vectorize is provisioned in production, swap
+    // the order back as part of the cutover.
     const prompt = buildSystemPrompt(datasets, null)
-    const searchDatasetsAt = prompt.indexOf('search_datasets')
     const searchCatalogAt = prompt.indexOf('search_catalog')
-    expect(searchDatasetsAt).toBeGreaterThan(-1)
+    const searchDatasetsAt = prompt.indexOf('search_datasets')
     expect(searchCatalogAt).toBeGreaterThan(-1)
-    expect(searchDatasetsAt).toBeLessThan(searchCatalogAt)
+    expect(searchDatasetsAt).toBeGreaterThan(-1)
+    expect(searchCatalogAt).toBeLessThan(searchDatasetsAt)
+  })
+
+  it('tells the LLM to fall back to search_catalog when search_datasets returns empty', () => {
+    // Critical anti-hallucination guard: production has Vectorize
+    // unwired, so search_datasets returns `{datasets: [],
+    // degraded: 'unconfigured'}`. Without an explicit fallback
+    // instruction, some models invent IDs from training data.
+    const prompt = buildSystemPrompt(datasets, null)
+    expect(prompt).toMatch(/empty.*fall back to.*search_catalog/i)
+    expect(prompt).toMatch(/never invent.*titles or IDs|never guess/i)
   })
 })
 

@@ -964,15 +964,20 @@ export async function* processMessage(
       ...buildCompressedHistory(history),
       userMessage,
     ]
-    // search_datasets is first as the preferred (Phase 1c) discovery
-    // mechanism — semantic vector search over the node catalog backend.
-    // list_featured_datasets covers cold-start "what should I look at?"
-    // prompts. search_catalog stays as a legacy keyword fallback for
-    // self-hosters who haven't wired the backend yet.
+    // search_catalog runs first because it scans the in-memory legacy
+    // catalog and always returns valid IDs the marker validator
+    // recognises. search_datasets / list_featured_datasets are wired
+    // up but listed AFTER — they hit the node catalog backend, which
+    // may not be provisioned yet on a given deploy. If the LLM picks
+    // the new tools first and gets an empty result, it sometimes
+    // hallucinates IDs that get stripped by validateAndCleanText
+    // (Load chips disappear from prose). Putting search_catalog first
+    // restores the pre-1c default; once Vectorize is provisioned in
+    // production, swap the order back as part of the cutover.
     const tools = [
+      getSearchCatalogTool(),
       getSearchDatasetsTool(),
       getListFeaturedDatasetsTool(),
-      getSearchCatalogTool(),
       getLoadDatasetTool(),
       getFlyToTool(),
       getSetTimeTool(),
