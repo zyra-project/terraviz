@@ -600,7 +600,7 @@ export async function reindexDataset(
   publisher: PublisherRow,
   id: string,
   deps: MutationDeps = {},
-): Promise<DraftCreateOutcome | { ok: false; status: 503; errors: ValidationError[] }> {
+): Promise<DraftCreateOutcome> {
   const row = await getDatasetForPublisher(env.CATALOG_DB!, publisher, id)
   if (!row) {
     return {
