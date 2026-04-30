@@ -185,11 +185,22 @@ function fakeClient(opts: FakeClientOptions = {}): { client: TerravizClient; han
 
   const reindexDataset = vi.fn(async (id: string) => {
     if (opts.reindexFailFor?.has(id)) {
+      // Mirror the real route's response shape: top-level `error`
+      // collapsed from `errors[0].code` for the unstructured-error
+      // path, but the structured `errors[]` array is what the route
+      // actually returns. The CLI must print both so operators see
+      // the field/code/message tuple.
       return {
         ok: false as const,
         status: 503,
-        error: 'embed_unconfigured',
-        message: 'bindings missing',
+        error: 'http_error',
+        errors: [
+          {
+            field: 'embed',
+            code: 'embed_unconfigured',
+            message: 'Embed bindings are not configured.',
+          },
+        ],
       }
     }
     return {
@@ -410,6 +421,10 @@ describe('runImportSnapshot --reindex', () => {
     expect(code).toBe(1)
     expect(handles.reindexDataset).toHaveBeenCalledTimes(2)
     expect(err.text()).toContain('[DS-B] reindex failed (503)')
+    // Structured errors[] array surfaces field/code/message
+    // (catalog(1d/M)) — without this an embed_unconfigured 503
+    // collapses to "http_error" with no actionable detail.
+    expect(err.text()).toContain('embed: embed_unconfigured')
     expect(out.text()).toContain('reindexed:             1')
     expect(out.text()).toContain('failed:                1')
   })

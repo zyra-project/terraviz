@@ -192,6 +192,11 @@ async function runReindexAll(ctx: CommandContext, dryRun: boolean): Promise<numb
           (result.message ? ` — ${result.message}` : '') +
           '\n',
       )
+      if (result.errors?.length) {
+        for (const e of result.errors) {
+          ctx.stderr.write(`    ${e.field}: ${e.code} — ${e.message}\n`)
+        }
+      }
       continue
     }
     succeeded++
