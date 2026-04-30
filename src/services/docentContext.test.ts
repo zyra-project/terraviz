@@ -299,22 +299,20 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toMatch(/cold[- ]start|where to start|something interesting/i)
   })
 
-  it('lists search_catalog as the default discovery tool until backend cutover', () => {
-    // Phase 1c rollback (catalog(1c/L)): production deploys without
-    // a provisioned Vectorize index were seeing the LLM pick
-    // search_datasets first, get an empty result, and hallucinate
-    // IDs that the marker validator strips — so Load chips
-    // disappeared from prose. Until the cutover, the prompt has
-    // search_catalog listed before search_datasets so the LLM
-    // defaults to the in-memory legacy catalog (valid IDs, real
-    // results). Once Vectorize is provisioned in production, swap
-    // the order back as part of the cutover.
+  it('lists search_datasets as the primary discovery tool, search_catalog as the fallback (post-1d cutover)', () => {
+    // Phase 1d/E flips the ordering set by 1c/L: with the catalog
+    // backend provisioned and the SOS snapshot imported,
+    // search_datasets is the default and search_catalog is the
+    // empty-result fallback for self-hosters who haven't wired
+    // Vectorize. Reverting this test alongside docentService.ts
+    // and docentContext.ts is what a single git revert of the
+    // cutover commit produces.
     const prompt = buildSystemPrompt(datasets, null)
     const searchCatalogAt = prompt.indexOf('search_catalog')
     const searchDatasetsAt = prompt.indexOf('search_datasets')
     expect(searchCatalogAt).toBeGreaterThan(-1)
     expect(searchDatasetsAt).toBeGreaterThan(-1)
-    expect(searchCatalogAt).toBeLessThan(searchDatasetsAt)
+    expect(searchDatasetsAt).toBeLessThan(searchCatalogAt)
   })
 
   it('tells the LLM to fall back to search_catalog when search_datasets returns empty', () => {

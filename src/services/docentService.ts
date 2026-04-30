@@ -1078,20 +1078,27 @@ export async function* processMessage(
       ...buildCompressedHistory(history),
       userMessage,
     ]
-    // search_catalog runs first because it scans the in-memory legacy
-    // catalog and always returns valid IDs the marker validator
-    // recognises. search_datasets / list_featured_datasets are wired
-    // up but listed AFTER — they hit the node catalog backend, which
-    // may not be provisioned yet on a given deploy. If the LLM picks
-    // the new tools first and gets an empty result, it sometimes
-    // hallucinates IDs that get stripped by validateAndCleanText
-    // (Load chips disappear from prose). Putting search_catalog first
-    // restores the pre-1c default; once Vectorize is provisioned in
-    // production, swap the order back as part of the cutover.
+    // Tool ordering — Phase 1d cutover (catalog(1d/E)).
+    //
+    // search_datasets ranks first now that the catalog backend is
+    // provisioned and the SOS snapshot has been imported (1d/B).
+    // Semantic vector search is the primary discovery tool; the
+    // empty-result fallback to search_catalog stays in the prompt
+    // for self-hosting deploys that haven't wired Vectorize yet.
+    // list_featured_datasets is the cold-start path. search_catalog
+    // (legacy in-memory keyword scan) stays in the tool list as a
+    // graceful-degradation fallback, but is no longer the default.
+    //
+    // 1c/L pinned search_catalog first to avoid the
+    // unwired-Vectorize hallucination path; with the cutover in
+    // place that mitigation is unnecessary. A regression here —
+    // empty Vectorize, search_datasets first — would surface as
+    // missing Load chips and is reverted by `git revert` of this
+    // commit.
     const tools = [
-      getSearchCatalogTool(),
       getSearchDatasetsTool(),
       getListFeaturedDatasetsTool(),
+      getSearchCatalogTool(),
       getLoadDatasetTool(),
       getFlyToTool(),
       getSetTimeTool(),
