@@ -384,7 +384,7 @@ export function getSearchDatasetsTool(): LLMTool {
     type: 'function',
     function: {
       name: 'search_datasets',
-      description: 'Semantic vector search over the node catalog. Embeds the query via Workers AI, queries Cloudflare Vectorize, returns the top matching datasets ranked by cosine similarity. Use this as the PRIMARY discovery tool when the user has expressed a topic or question — it understands meaning, not just keywords (e.g. "show me how oceans are warming" matches sea-surface-temperature datasets even without keyword overlap). Returns up to `limit` results, each with `id`, `title`, `abstract_snippet`, `categories`, `peer_id`, and `score`.',
+      description: 'Semantic vector search over the node catalog. Embeds the query via Workers AI, queries Cloudflare Vectorize, returns the top matching datasets ranked by cosine similarity. Available on deploys with Vectorize provisioned; on deploys without it, this tool returns an empty array and you should fall back to `search_catalog`. Useful when you have a topical query and want meaning-based matching rather than keyword overlap (e.g. "show me how oceans are warming" matches sea-surface-temperature datasets even without keyword overlap). Returns up to `limit` results, each with `id`, `title`, `abstract_snippet`, `categories`, `peer_id`, and `score`.',
       parameters: {
         type: 'object',
         properties: {

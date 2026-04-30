@@ -570,6 +570,20 @@ describe('validateAndCleanText', () => {
     expect(invalidIds.has('Global Data')).toBe(true)
   })
 
+  it('strips malformed single-bracket marker shapes too', () => {
+    // Regression for Copilot review on PR #59: the strip regex
+    // had tightened to `<<LOAD:...>>` while the collect regex
+    // remained tolerant `<?<LOAD:...>>?`. Single-bracket variants
+    // got classified as invalid yet stayed visible in the prose.
+    const ds = [makeDataset()]
+    const text = 'Try this <LOAD:UNKNOWN_ID> here.\nAnd this <<LOAD:OTHER>.'
+    const { cleanedText, invalidIds } = validateAndCleanText(text, ds)
+    expect(invalidIds.has('UNKNOWN_ID')).toBe(true)
+    expect(invalidIds.has('OTHER')).toBe(true)
+    // Both malformed markers must be removed from prose.
+    expect(cleanedText).not.toContain('LOAD:')
+  })
+
   it('returns empty invalidIds when all IDs are valid', () => {
     const text = 'No dataset references here, just plain text.'
     const { cleanedText, invalidIds } = validateAndCleanText(text, datasets)
@@ -1627,6 +1641,46 @@ describe('executeListFeaturedDatasets', () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('boom'))
     const result = await executeListFeaturedDatasets({}, baseConfig)
     expect(result).toEqual({ datasets: [] })
+  })
+
+  it('targets the same-origin /api base regardless of config.apiUrl (LLM endpoint)', async () => {
+    // Regression for Copilot review on PR #59: `config.apiUrl` is
+    // the LLM chat-completions endpoint (often `https://api.openai.com/v1`
+    // or `http://localhost:11434/v1`); the catalog backend lives at
+    // the app origin. The pre-fix code did
+    // `${config.apiUrl}/v1/featured`, hitting `…/v1/v1/featured` and
+    // 404-ing on every call.
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ datasets: [] }), { status: 200 }))
+
+    const llmConfig: DocentConfig = {
+      ...baseConfig,
+      apiUrl: 'https://api.openai.com/v1',
+    }
+    await executeListFeaturedDatasets({}, llmConfig)
+    const url = new URL(fetchSpy.mock.calls[0][0] as string)
+    // Path is `/api/v1/featured` regardless of the LLM endpoint.
+    expect(url.pathname).toBe('/api/v1/featured')
+    // Host is the app origin (window.location), NOT api.openai.com.
+    expect(url.host).not.toBe('api.openai.com')
+  })
+})
+
+describe('executeSearchDatasets — catalog URL is decoupled from LLM apiUrl', () => {
+  it('always targets /api/v1/search regardless of LLM endpoint', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ datasets: [] }), { status: 200 }))
+
+    const llmConfig: DocentConfig = {
+      ...baseConfig,
+      apiUrl: 'http://localhost:11434/v1', // Ollama-style endpoint
+    }
+    await executeSearchDatasets({ query: 'hurricane' }, llmConfig)
+    const url = new URL(fetchSpy.mock.calls[0][0] as string)
+    expect(url.pathname).toBe('/api/v1/search')
+    expect(url.host).not.toBe('localhost:11434')
   })
 })
 

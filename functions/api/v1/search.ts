@@ -107,19 +107,30 @@ function parseRequest(url: URL): ParsedRequest | { error: string; message: strin
   // Default peer_id to 'local' so federated peers are excluded
   // unless an operator explicitly opts in. The helper translates
   // 'local' to the configured node id before forwarding to
-  // Vectorize. A `peer_id=` URL param with an empty value is
-  // treated the same as omitting the param —
-  // `url.searchParams.get('peer_id')` returns `''` for that case,
-  // which is falsy and falls through to the default.
+  // Vectorize. Canonicalise once here (NFC + trim, but preserve
+  // case — node ids are case-sensitive in Vectorize metadata) so
+  // the cache key and the downstream filter use the exact same
+  // value. A missing, empty, or whitespace-only `peer_id` is
+  // treated the same as omitting the param and falls through to
+  // the default — without this, `?peer_id=%20PEER_X%20` would
+  // compute a result with a space-padded filter (matching nothing)
+  // but cache it under the same key as `?peer_id=PEER_X`,
+  // serving the corrupt result back on the next correct request.
   const peerIdRaw = url.searchParams.get('peer_id')
-  const peer_id = peerIdRaw && peerIdRaw.length > 0 ? peerIdRaw : 'local'
+  const peerIdCanonical = peerIdRaw?.normalize('NFC').trim()
+  const peer_id = peerIdCanonical && peerIdCanonical.length > 0 ? peerIdCanonical : 'local'
 
   // `category` is similarly canonicalised here so the cache key and
   // the downstream filter agree. The Vectorize filter helper also
   // lowercases defensively, but doing it once up-front keeps the
-  // post/pre cache surface symmetric.
+  // post/pre cache surface symmetric. An explicitly-empty
+  // `?category=` (or `?category=%20%20`) is collapsed to
+  // `undefined` so it lands in the same cache slot as the
+  // omitted-param form (both are "no category filter" downstream).
   const categoryRaw = url.searchParams.get('category')
-  const category = categoryRaw ? categoryRaw.normalize('NFC').trim().toLowerCase() : undefined
+  const categoryCanonical =
+    categoryRaw != null ? categoryRaw.normalize('NFC').trim().toLowerCase() : undefined
+  const category = categoryCanonical && categoryCanonical.length > 0 ? categoryCanonical : undefined
 
   return { q, limit, category, peer_id }
 }
@@ -127,12 +138,13 @@ function parseRequest(url: URL): ParsedRequest | { error: string; message: strin
 /**
  * Stable cache key for the (query, limit, filters) tuple.
  *
- * `q` and `category` are already canonicalised by `parseRequest`
- * (lowercase + NFC + trim) so the same canonical form drives both
- * the cache key here AND the downstream embed/query call — that's
- * the only way the "trivial variants share a cache slot" promise
- * is actually true content-addressing. If a future change adds
- * extra canonicalisation, do it in `parseRequest` and not here.
+ * Every input field is already canonicalised by `parseRequest`
+ * (NFC + trim, plus lowercase for case-insensitive fields) so the
+ * same canonical form drives both the cache key here AND the
+ * downstream embed/query call — that's the only way the "trivial
+ * variants share a cache slot" promise is actually true
+ * content-addressing. If a future change adds extra
+ * canonicalisation, do it in `parseRequest` and not here.
  *
  * `peer_id` keeps its case — node ids are case-sensitive in
  * Vectorize metadata + D1 filtering, so two differently-cased peer
@@ -144,7 +156,7 @@ async function cacheKeyFor(parsed: ParsedRequest): Promise<string> {
     q: parsed.q,
     l: parsed.limit,
     c: parsed.category ?? null,
-    p: parsed.peer_id.normalize('NFC').trim(),
+    p: parsed.peer_id,
   })
   const bytes = new TextEncoder().encode(canonical)
   const digest = await crypto.subtle.digest('SHA-256', bytes)

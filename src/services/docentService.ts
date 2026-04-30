@@ -439,10 +439,25 @@ const SEARCH_DATASETS_MAX_LIMIT = 50
 const LIST_FEATURED_DEFAULT_LIMIT = 6
 const LIST_FEATURED_MAX_LIMIT = 24
 
-/** Trim trailing slashes so URL concatenation stays clean. */
-function normaliseApiBase(apiUrl: string): string {
-  return apiUrl.replace(/\/+$/, '')
-}
+/**
+ * Catalog backend base URL. Always relative — the catalog
+ * endpoints live at the app origin (Cloudflare Pages Functions),
+ * NOT at the LLM provider's URL. We deliberately do NOT route
+ * through `config.apiUrl` because that's the chat-completions
+ * endpoint and frequently points at OpenAI / Ollama / LM Studio
+ * (`https://api.openai.com/v1`, `http://localhost:11434/v1`, …);
+ * appending `/v1/search` to those would yield `…/v1/v1/search`,
+ * 404 on every call, and silently break the docent's discovery
+ * tools for anyone not using the bundled Cloudflare proxy.
+ *
+ * In Tauri contexts where the app runs from a `tauri://localhost/`
+ * origin with no Pages backend, `fetch('/api/v1/search')` resolves
+ * relative to that origin and 404s; `executeSearchDatasets` /
+ * `executeListFeaturedDatasets` catch the error and return
+ * `{ datasets: [] }`, falling through to the legacy in-process
+ * `search_catalog` tool — same effective behaviour as pre-1c.
+ */
+const CATALOG_API_BASE = '/api'
 
 /**
  * Execute a `search_datasets` tool call against the node catalog
@@ -462,7 +477,7 @@ export async function executeSearchDatasets(
   const limitArg = typeof args.limit === 'number' && Number.isFinite(args.limit) ? args.limit : SEARCH_DATASETS_DEFAULT_LIMIT
   const limit = Math.max(1, Math.min(SEARCH_DATASETS_MAX_LIMIT, Math.floor(limitArg)))
 
-  const url = new URL(`${normaliseApiBase(config.apiUrl)}/v1/search`, window.location.origin)
+  const url = new URL(`${CATALOG_API_BASE}/v1/search`, window.location.origin)
   url.searchParams.set('q', query)
   url.searchParams.set('limit', String(limit))
 
@@ -496,7 +511,7 @@ export async function executeListFeaturedDatasets(
   const limitArg = typeof args.limit === 'number' && Number.isFinite(args.limit) ? args.limit : LIST_FEATURED_DEFAULT_LIMIT
   const limit = Math.max(1, Math.min(LIST_FEATURED_MAX_LIMIT, Math.floor(limitArg)))
 
-  const url = new URL(`${normaliseApiBase(config.apiUrl)}/v1/featured`, window.location.origin)
+  const url = new URL(`${CATALOG_API_BASE}/v1/featured`, window.location.origin)
   url.searchParams.set('limit', String(limit))
 
   try {
@@ -777,7 +792,14 @@ export function validateAndCleanText(
   // [[LOAD:...]]-roundtrip stores the marker in conversation
   // history; without rewriting, a follow-up turn would see the
   // title-shaped payload again and have to re-resolve it.
-  let cleanedText = text.replace(/<<LOAD:([^>]+)>>(\n?)/g, (match, id, trailing) => {
+  //
+  // The regex matches the same tolerant shape as the collect loop
+  // above (`<?<LOAD:...>>?`) — small LLMs occasionally emit
+  // single-bracket variants `<LOAD:ID>` or `<<LOAD:ID>` and we
+  // collected those into `invalidIds`. Use the matched markers in
+  // the rewrite step too, otherwise malformed shapes would be
+  // classified as invalid yet stay visible in the prose.
+  let cleanedText = text.replace(/<?<LOAD:([^>]+)>>?(\n?)/g, (match, id, trailing) => {
     const trimmedId = id.trim()
     if (invalidIds.has(trimmedId)) return ''
     const canonicalId = markerRewrites.get(trimmedId)

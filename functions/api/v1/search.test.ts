@@ -192,6 +192,53 @@ describe('GET /api/v1/search', () => {
     expect(kv?._store.size).toBe(1)
   })
 
+  it('whitespace-padded peer_id shares a cache slot with the trimmed form', async () => {
+    // Regression for Copilot review on PR #59: peer_id was trimmed
+    // for the cache key but not for the downstream filter, so
+    // `?peer_id=%20PEER_X%20` would compute a result with a
+    // space-padded filter (matching nothing) yet cache it under the
+    // same key as `?peer_id=PEER_X`. Subsequent correct requests
+    // would get the corrupt result back as a HIT.
+    const { env, kv } = setup()
+    await index(env, ['DS_HURR'])
+    await onRequestGet(
+      makeCtx({ env, url: 'https://t/api/v1/search?q=hurricane&peer_id=PEER_X' }),
+    )
+    await onRequestGet(
+      makeCtx({ env, url: 'https://t/api/v1/search?q=hurricane&peer_id=%20PEER_X%20' }),
+    )
+    expect(kv?._store.size).toBe(1)
+  })
+
+  it('empty-after-trim peer_id falls through to default', async () => {
+    // `?peer_id=` and `?peer_id=%20%20` should both behave like the
+    // omitted-param form (default to 'local'), and share its slot.
+    const { env, kv } = setup()
+    await index(env, ['DS_HURR'])
+    await onRequestGet(makeCtx({ env, url: 'https://t/api/v1/search?q=hurricane' }))
+    await onRequestGet(makeCtx({ env, url: 'https://t/api/v1/search?q=hurricane&peer_id=' }))
+    await onRequestGet(
+      makeCtx({ env, url: 'https://t/api/v1/search?q=hurricane&peer_id=%20%20' }),
+    )
+    expect(kv?._store.size).toBe(1)
+  })
+
+  it('empty-after-trim category shares a cache slot with the omitted-param form', async () => {
+    // Regression for Copilot review on PR #59: an explicit
+    // `?category=` (or all whitespace) used to produce `''` after
+    // canonicalisation, falling into a different cache slot than
+    // omitting the param even though both produced "no category
+    // filter" downstream.
+    const { env, kv } = setup()
+    await index(env, ['DS_HURR'])
+    await onRequestGet(makeCtx({ env, url: 'https://t/api/v1/search?q=hurricane' }))
+    await onRequestGet(makeCtx({ env, url: 'https://t/api/v1/search?q=hurricane&category=' }))
+    await onRequestGet(
+      makeCtx({ env, url: 'https://t/api/v1/search?q=hurricane&category=%20%20' }),
+    )
+    expect(kv?._store.size).toBe(1)
+  })
+
   it('canonicalises whitespace + case so trivial query variants share a cache slot', async () => {
     const { env, kv } = setup()
     await index(env, ['DS_HURR'])
