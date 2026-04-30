@@ -421,9 +421,9 @@ describe('runImportSnapshot --reindex', () => {
     expect(code).toBe(1)
     expect(handles.reindexDataset).toHaveBeenCalledTimes(2)
     expect(err.text()).toContain('[DS-B] reindex failed (503)')
-    // Structured errors[] array surfaces field/code/message
-    // (catalog(1d/M)) — without this an embed_unconfigured 503
-    // collapses to "http_error" with no actionable detail.
+    // Structured errors[] array surfaces field/code/message —
+    // without this an embed_unconfigured 503 collapses to
+    // "http_error" with no actionable detail.
     expect(err.text()).toContain('embed: embed_unconfigured')
     expect(out.text()).toContain('reindexed:             1')
     expect(out.text()).toContain('failed:                1')

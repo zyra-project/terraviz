@@ -48,10 +48,11 @@ describe('deriveSlug', () => {
   })
 
   it('prefixes `dataset-` when the title leads with a digit (1d/J)', () => {
-    // The 1d SOS bulk import surfaced this — `validateDraftCreate`
-    // accepts a digit-leading slug but `validateForPublish` doesn't.
-    // The fix is here so the publisher API's auto-derived slug is
-    // always publish-ready.
+    // The 1d SOS bulk import surfaced this — drafts can omit `slug`,
+    // so the publisher API derives one later from the title via
+    // `deriveSlug`. The fix is here so the auto-derived slug is
+    // always publish-ready, even when the title starts with a digit
+    // (the validator's SLUG_RE requires a leading [a-z]).
     expect(__internal.deriveSlug('360 Media - National Marine Sanctuaries'))
       .toBe('dataset-360-media-national-marine-sanctuaries')
     expect(__internal.deriveSlug('120 Years of Earthquakes'))
