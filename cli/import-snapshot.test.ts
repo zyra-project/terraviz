@@ -111,18 +111,27 @@ function fakeClient(opts: FakeClientOptions = {}): { client: TerravizClient; han
   const existing = opts.existing ?? []
   let createCounter = 0
 
-  const list = vi.fn(async () => ({
-    ok: true as const,
-    status: 200,
-    body: {
-      datasets: existing.map(e => ({
-        id: e.id,
-        legacy_id: e.legacy_id,
-        published_at: e.published_at ?? '2026-04-30T00:00:00.000Z',
-      })),
-      next_cursor: null,
-    },
-  }))
+  const list = vi.fn(async (query: { status?: string } = {}) => {
+    const filtered = existing.filter(e => {
+      const publishedAt = e.published_at === undefined ? '2026-04-30T00:00:00.000Z' : e.published_at
+      if (query.status === 'published') return publishedAt != null
+      if (query.status === 'draft') return publishedAt == null
+      return true
+    })
+    return {
+      ok: true as const,
+      status: 200,
+      body: {
+        datasets: filtered.map(e => ({
+          id: e.id,
+          legacy_id: e.legacy_id,
+          published_at:
+            e.published_at === undefined ? '2026-04-30T00:00:00.000Z' : e.published_at,
+        })),
+        next_cursor: null,
+      },
+    }
+  })
 
   const createDataset = vi.fn(async (body: Record<string, unknown>) => {
     const legacy = body.legacy_id as string | undefined
@@ -274,6 +283,34 @@ describe('runImportSnapshot', () => {
     expect(body.legacy_id).toBe('INTERNAL_SOS_770')
     expect(out.text()).toContain('already imported:      1')
     expect(out.text()).toContain('imported:              1')
+  })
+
+  it('builds the idempotency index from published rows only (1d/L)', async () => {
+    // The list call that builds the legacy_id index passes
+    // ?status=published so a stuck draft from a prior failed run
+    // gets re-attempted (and surfaces the unique-constraint 409 from
+    // createDataset) rather than being silently skipped as
+    // "already imported".
+    const { client, handles } = fakeClient({
+      existing: [
+        // Stuck draft — same legacy_id as the snapshot's first row,
+        // published_at: null. Pre-1d/L this would be indexed and the
+        // row silently skipped on re-run; post-1d/L the importer
+        // tries again and the create-fail surfaces it.
+        { id: 'DS-STUCK', legacy_id: 'INTERNAL_SOS_768', published_at: null },
+      ],
+      createConflictFor: new Set(['INTERNAL_SOS_768']),
+    })
+    const { ctx, out, err } = makeCtx(client)
+    const code = await runImportSnapshot(ctx)
+    expect(handles.list.mock.calls[0][0]).toMatchObject({ status: 'published' })
+    // Both snapshot ok-rows are attempted (the draft isn't counted
+    // as already-imported); INTERNAL_SOS_768 hits the 409.
+    expect(handles.createDataset).toHaveBeenCalledTimes(2)
+    expect(code).toBe(1)
+    expect(err.text()).toContain('[INTERNAL_SOS_768] create failed (409)')
+    expect(out.text()).toContain('already imported:      0')
+    expect(out.text()).toContain('failed (create):       1')
   })
 
   it('returns exit code 1 when a create fails with 409 and surfaces the error', async () => {

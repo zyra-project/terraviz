@@ -84,8 +84,20 @@ function readJson<T>(ctx: CommandContext, path: string): T {
 
 /**
  * Page through the publisher API to build a legacy_id → dataset_id
- * index. Returns null on the first non-OK list response so the
- * caller can surface a structured failure.
+ * index of *published* rows. Returns null on the first non-OK list
+ * response so the caller can surface a structured failure.
+ *
+ * The status filter matters for resume-after-failure semantics. If
+ * a prior import created a draft with `legacy_id = X` but failed to
+ * publish, that draft persists in the catalog as legacy_id-keyed
+ * but unpublished. Including drafts in the index would cause the
+ * next import-snapshot run to silently skip the row as
+ * "already imported" — yet the draft is stuck and the operator
+ * never sees the chip in the SPA. By filtering to status=published
+ * the importer surfaces the 409 from createDataset on the next
+ * run instead, which prints the existing draft id and gives the
+ * operator something actionable to clean up (raised by the 1d/L
+ * Copilot review).
  */
 async function buildLegacyIdIndex(
   ctx: CommandContext,
@@ -96,6 +108,7 @@ async function buildLegacyIdIndex(
   // dataset-mutations.ts:169) so we don't try to ask for more.
   do {
     const result = await ctx.client.list<DatasetListEnvelope>({
+      status: 'published',
       limit: LIST_PAGE_LIMIT,
       cursor,
     })

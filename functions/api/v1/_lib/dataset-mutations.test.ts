@@ -144,6 +144,24 @@ describe('createDataset', () => {
     expect(second.errors[0].code).toBe('conflict')
     expect(second.errors[0].message).toContain(first.dataset.id)
   })
+
+  it('rejects legacy_id from a non-privileged publisher with 403 (1d/L)', async () => {
+    // Cross-tenant existence leak guard: legacy_id is bulk-import
+    // provenance metadata, and allowing community publishers to set
+    // it would let them probe whether a given legacy_id exists in a
+    // staff-owned row via the 409 conflict path.
+    const { env } = setupEnv()
+    const result = await createDataset(env, COMMUNITY, {
+      title: 'Sneaky import',
+      format: 'video/mp4',
+      legacy_id: 'INTERNAL_SOS_99',
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(403)
+    expect(result.errors[0].field).toBe('legacy_id')
+    expect(result.errors[0].code).toBe('forbidden')
+  })
 })
 
 describe('listDatasetsForPublisher', () => {
@@ -239,6 +257,63 @@ describe('updateDataset', () => {
 
     await updateDataset(env, STAFF, created.dataset.id, { title: 'Renamed' })
     expect(await kv.get(SNAPSHOT_KEY)).toBeNull()
+  })
+
+  it('rejects legacy_id update from a non-privileged publisher with 403 (1d/L)', async () => {
+    const { env } = setupEnv()
+    const created = await createDataset(env, COMMUNITY, {
+      title: 'Community draft',
+      format: 'video/mp4',
+    })
+    if (!created.ok) throw new Error('seed')
+    const result = await updateDataset(env, COMMUNITY, created.dataset.id, {
+      legacy_id: 'INTERNAL_SOS_99',
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(403)
+    expect(result.errors[0].field).toBe('legacy_id')
+    expect(result.errors[0].code).toBe('forbidden')
+  })
+
+  it('rejects a duplicate legacy_id update with a structured 409 (1d/L)', async () => {
+    const { env } = setupEnv()
+    const a = await createDataset(env, STAFF, {
+      title: 'Holds the legacy_id',
+      format: 'video/mp4',
+      legacy_id: 'INTERNAL_SOS_77',
+    })
+    const b = await createDataset(env, STAFF, {
+      title: 'Wants to take it',
+      format: 'video/mp4',
+    })
+    if (!a.ok || !b.ok) throw new Error('seed')
+    const result = await updateDataset(env, STAFF, b.dataset.id, {
+      legacy_id: 'INTERNAL_SOS_77',
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(409)
+    expect(result.errors[0].field).toBe('legacy_id')
+    expect(result.errors[0].code).toBe('conflict')
+    expect(result.errors[0].message).toContain(a.dataset.id)
+  })
+
+  it('allows a row to update its own legacy_id to itself (no-op write)', async () => {
+    // Sanity: the conflict pre-check must exclude the row being
+    // updated from the "in use elsewhere" lookup, otherwise an
+    // operator re-saving the same row would 409 against itself.
+    const { env } = setupEnv()
+    const created = await createDataset(env, STAFF, {
+      title: 'Self-update',
+      format: 'video/mp4',
+      legacy_id: 'INTERNAL_SOS_88',
+    })
+    if (!created.ok) throw new Error('seed')
+    const result = await updateDataset(env, STAFF, created.dataset.id, {
+      legacy_id: 'INTERNAL_SOS_88',
+    })
+    expect(result.ok).toBe(true)
   })
 })
 

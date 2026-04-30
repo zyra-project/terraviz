@@ -267,6 +267,35 @@ async function replaceDecorations(
 }
 
 /**
+ * Gate the `legacy_id` field to privileged callers (staff / service
+ * tokens). The field is bulk-import provenance metadata; community
+ * publishers have no legitimate use case for setting it, and
+ * allowing it would leak existence of out-of-scope rows through
+ * the unique-constraint conflict path (the 409 message includes
+ * the existing dataset id). Returns a 403 outcome when an
+ * unprivileged caller tries to set it; returns null when the
+ * caller is allowed to proceed.
+ */
+function checkLegacyIdAllowed(
+  publisher: PublisherRow,
+  body: DatasetDraftBody,
+): DraftCreateFailure | null {
+  if (body.legacy_id === undefined) return null
+  if (isPrivileged(publisher)) return null
+  return {
+    ok: false,
+    status: 403,
+    errors: [
+      {
+        field: 'legacy_id',
+        code: 'forbidden',
+        message: 'legacy_id may only be set by privileged publishers (staff / service token).',
+      },
+    ],
+  }
+}
+
+/**
  * Insert a new draft dataset. Returns either the inserted row
  * (`ok: true`) or a 4xx outcome with validation errors.
  */
@@ -278,6 +307,9 @@ export async function createDataset(
   const errors = validateDraftCreate(body)
   if (errors.length) return { ok: false, status: 400, errors }
 
+  const legacyIdGate = checkLegacyIdAllowed(publisher, body)
+  if (legacyIdGate) return legacyIdGate
+
   const db = env.CATALOG_DB!
   const desiredSlug = body.slug ?? deriveSlug(body.title!)
   const slug = await ensureUniqueSlug(db, desiredSlug)
@@ -288,7 +320,10 @@ export async function createDataset(
   // The unique partial index on `legacy_id` (migration 0008) means
   // a duplicate import would surface as a SQLite UNIQUE-constraint
   // failure. Pre-check so the importer gets a structured 409 with
-  // the existing row's id rather than an opaque write error.
+  // the existing row's id rather than an opaque write error. Only
+  // staff reach this branch (the privilege gate above blocks
+  // community callers), so the existing-id surfaced in the message
+  // isn't a cross-tenant existence leak.
   if (body.legacy_id) {
     const existing = await db
       .prepare('SELECT id FROM datasets WHERE legacy_id = ? LIMIT 1')
@@ -383,6 +418,10 @@ export async function updateDataset(
 ): Promise<DraftCreateOutcome> {
   const errors = validateDraftUpdate(body)
   if (errors.length) return { ok: false, status: 400, errors }
+
+  const legacyIdGate = checkLegacyIdAllowed(publisher, body)
+  if (legacyIdGate) return legacyIdGate
+
   const db = env.CATALOG_DB!
 
   const sets: string[] = []
@@ -415,7 +454,33 @@ export async function updateDataset(
   if (body.rights_holder !== undefined) set('rights_holder', body.rights_holder)
   if (body.doi !== undefined) set('doi', body.doi)
   if (body.citation_text !== undefined) set('citation_text', body.citation_text)
-  if (body.legacy_id !== undefined) set('legacy_id', body.legacy_id)
+
+  // Pre-check the legacy_id partial unique index, mirroring the
+  // createDataset path. Without this pre-check a duplicate value
+  // would surface as a SQLite UNIQUE-constraint failure inside the
+  // UPDATE, which the route layer would currently wrap as an
+  // unstructured 500. Privilege-gated upstream by
+  // checkLegacyIdAllowed.
+  if (body.legacy_id !== undefined) {
+    const conflict = await db
+      .prepare('SELECT id FROM datasets WHERE legacy_id = ? AND id != ? LIMIT 1')
+      .bind(body.legacy_id, id)
+      .first<{ id: string }>()
+    if (conflict) {
+      return {
+        ok: false,
+        status: 409,
+        errors: [
+          {
+            field: 'legacy_id',
+            code: 'conflict',
+            message: `legacy_id "${body.legacy_id}" is already imported as ${conflict.id}.`,
+          },
+        ],
+      }
+    }
+    set('legacy_id', body.legacy_id)
+  }
 
   if (body.slug !== undefined) {
     const unique = await ensureUniqueSlug(db, body.slug!, id)
