@@ -14,6 +14,7 @@
 import { describe, expect, it } from 'vitest'
 import { freshMigratedDb } from '../../../../scripts/lib/catalog-migrations'
 import { asD1 } from './test-helpers'
+import type { CatalogEnv } from './env'
 import {
   addFeaturedDataset,
   FEATURED_DOCENT_DEFAULT_LIMIT,
@@ -225,8 +226,6 @@ describe('validatePosition', () => {
 // ---------------------------------------------------------------------------
 // Docent-shaped read surface (Phase 1c)
 // ---------------------------------------------------------------------------
-
-import type { CatalogEnv } from './env'
 
 /**
  * Like `setupDb` above but the seeded datasets are PUBLISHED so the

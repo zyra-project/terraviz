@@ -71,16 +71,25 @@ interface ParsedRequest {
 }
 
 function parseRequest(url: URL): ParsedRequest | { error: string; message: string } {
-  const q = url.searchParams.get('q')
-  if (!q || q.trim().length === 0) {
+  const qRaw = url.searchParams.get('q')
+  if (!qRaw || qRaw.trim().length === 0) {
     return { error: 'invalid_request', message: 'Missing required query parameter `q`.' }
   }
-  if (q.length > MAX_QUERY_LENGTH) {
+  if (qRaw.length > MAX_QUERY_LENGTH) {
     return {
       error: 'invalid_request',
       message: `Query parameter \`q\` is too long (max ${MAX_QUERY_LENGTH} chars).`,
     }
   }
+  // Canonicalise `q` once at parse time and use the same value for
+  // both the cache key and the embed call. Without this, `q=Hurricane`
+  // and `q=hurricane` would share a cache slot (the cache key
+  // canonicalises) but compute distinct embeddings (the embedder sees
+  // the raw URL value), so whichever request misses first ends up
+  // caching its result for the other — content-addressing violation.
+  // Lowercasing is conservative for English BGE which is largely
+  // case-insensitive at the token level.
+  const q = qRaw.normalize('NFC').trim().toLowerCase()
 
   const limitRaw = url.searchParams.get('limit')
   let limit = 10
@@ -98,34 +107,43 @@ function parseRequest(url: URL): ParsedRequest | { error: string; message: strin
   // Default peer_id to 'local' so federated peers are excluded
   // unless an operator explicitly opts in. The helper translates
   // 'local' to the configured node id before forwarding to
-  // Vectorize. An explicit empty string in the URL is also
-  // treated as "use the default" — `URLSearchParams.get('')`
-  // returns `''` which is falsy here.
+  // Vectorize. A `peer_id=` URL param with an empty value is
+  // treated the same as omitting the param —
+  // `url.searchParams.get('peer_id')` returns `''` for that case,
+  // which is falsy and falls through to the default.
   const peerIdRaw = url.searchParams.get('peer_id')
   const peer_id = peerIdRaw && peerIdRaw.length > 0 ? peerIdRaw : 'local'
 
-  return {
-    q,
-    limit,
-    category: url.searchParams.get('category') ?? undefined,
-    peer_id,
-  }
+  // `category` is similarly canonicalised here so the cache key and
+  // the downstream filter agree. The Vectorize filter helper also
+  // lowercases defensively, but doing it once up-front keeps the
+  // post/pre cache surface symmetric.
+  const categoryRaw = url.searchParams.get('category')
+  const category = categoryRaw ? categoryRaw.normalize('NFC').trim().toLowerCase() : undefined
+
+  return { q, limit, category, peer_id }
 }
 
 /**
  * Stable cache key for the (query, limit, filters) tuple.
- * Canonicalises whitespace and case for `q` and `category` so trivial
- * variants share a cache slot. `peer_id` keeps its case — node ids
- * are case-sensitive in Vectorize metadata + D1 filtering, so two
- * differently-cased peer ids must NOT collapse into the same cache
- * slot (otherwise `peer_id=PEER_X` would serve `peer_id=peer_x`'s
- * results back).
+ *
+ * `q` and `category` are already canonicalised by `parseRequest`
+ * (lowercase + NFC + trim) so the same canonical form drives both
+ * the cache key here AND the downstream embed/query call — that's
+ * the only way the "trivial variants share a cache slot" promise
+ * is actually true content-addressing. If a future change adds
+ * extra canonicalisation, do it in `parseRequest` and not here.
+ *
+ * `peer_id` keeps its case — node ids are case-sensitive in
+ * Vectorize metadata + D1 filtering, so two differently-cased peer
+ * ids must NOT collapse into the same cache slot (otherwise
+ * `peer_id=PEER_X` would serve `peer_id=peer_x`'s results back).
  */
 async function cacheKeyFor(parsed: ParsedRequest): Promise<string> {
   const canonical = JSON.stringify({
-    q: parsed.q.normalize('NFC').trim().toLowerCase(),
+    q: parsed.q,
     l: parsed.limit,
-    c: parsed.category?.normalize('NFC').trim().toLowerCase() ?? null,
+    c: parsed.category ?? null,
     p: parsed.peer_id.normalize('NFC').trim(),
   })
   const bytes = new TextEncoder().encode(canonical)
