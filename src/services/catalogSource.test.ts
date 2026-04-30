@@ -12,19 +12,19 @@ describe('getCatalogSource', () => {
     }
   })
 
-  it('defaults to legacy', () => {
+  it('defaults to node (post-1d/G cutover)', () => {
     delete (import.meta.env as Record<string, string>).VITE_CATALOG_SOURCE
-    expect(getCatalogSource()).toBe('legacy')
-  })
-
-  it('returns "node" only for the exact string', () => {
-    ;(import.meta.env as Record<string, string>).VITE_CATALOG_SOURCE = 'node'
     expect(getCatalogSource()).toBe('node')
   })
 
-  it('falls back to legacy on an unknown value', () => {
-    ;(import.meta.env as Record<string, string>).VITE_CATALOG_SOURCE = 'wat'
+  it('returns "legacy" only for the exact string', () => {
+    ;(import.meta.env as Record<string, string>).VITE_CATALOG_SOURCE = 'legacy'
     expect(getCatalogSource()).toBe('legacy')
+  })
+
+  it('falls back to node on an unknown value', () => {
+    ;(import.meta.env as Record<string, string>).VITE_CATALOG_SOURCE = 'wat'
+    expect(getCatalogSource()).toBe('node')
   })
 })
 

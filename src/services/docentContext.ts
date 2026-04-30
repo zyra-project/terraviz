@@ -107,20 +107,22 @@ Respond at a professional/graduate science level. Use precise scientific termino
  * The prompt is static with respect to the catalog — it does NOT enumerate
  * datasets, count them, or summarise their categories from the in-memory
  * `datasets` array. Discovery happens through three tools the LLM picks
- * from at runtime:
+ * from at runtime, in this priority order (post-1d cutover):
  *
- *   - `search_datasets` (Phase 1c, preferred) — semantic vector search over
- *     the node catalog backend (Cloudflare Vectorize + Workers AI).
- *   - `list_featured_datasets` (Phase 1c) — operator-curated list for
- *     cold-start "what should I look at?" conversations.
- *   - `search_catalog` (legacy, in-process) — keyword scan over the in-memory
- *     dataset list. Stays as a fallback for self-hosters who haven't wired
- *     the backend yet.
+ *   - `search_datasets` (primary) — semantic vector search over the node
+ *     catalog backend (Cloudflare Vectorize + Workers AI). Default
+ *     discovery tool whenever the user has expressed a topic.
+ *   - `list_featured_datasets` — operator-curated list for cold-start
+ *     "what should I look at?" conversations (no query).
+ *   - `search_catalog` (legacy fallback) — keyword scan over the in-memory
+ *     dataset list. Used when `search_datasets` returns empty (typically
+ *     a self-hosting deploy that hasn't provisioned Vectorize yet) so
+ *     the LLM never has to invent dataset titles from training-time
+ *     knowledge.
  *
- * The pre-search `[RELEVANT DATASETS]` block injected by `docentService` on
- * dataset-discovery intents continues to short-circuit tool calls when the
- * scoring confidence is high; the tools are the path used when the
- * pre-search misses or the user asks a follow-up.
+ * The pre-search `[RELEVANT DATASETS]` injection (Phase 1c rollback)
+ * was retired in catalog(1d/F); discovery is now exclusively via the
+ * tools above.
  *
  * `datasets` is still passed in for the (currently unused) categorySummary
  * helper that other surfaces consume; the prompt itself ignores it.
@@ -144,7 +146,7 @@ Your role is to be a warm, knowledgeable guide. You help visitors explore and un
 IMPORTANT: All datasets are GLOBAL — they cover the entire Earth, rendered on a 3D sphere. The user's current view only shows one side of the globe, but the data extends everywhere. Never say a dataset "only shows" one region or "doesn't cover" a location. The user can rotate the globe or use <<FLY:...>> to view any part of the world.
 
 ## STRICT RULES — FOLLOW EXACTLY
-1. NEVER mention a dataset by name or ID unless it appears in one of these sources: a \`search_catalog\` / \`search_datasets\` / \`list_featured_datasets\` tool result, the [RELEVANT DATASETS] section of the user's message, or the Current View section (for the currently loaded dataset). Do not invent, guess, or paraphrase dataset titles. **NO EXCEPTIONS for "related" datasets, "similar" datasets, "another option", or anything else** — if you want to suggest a related dataset, you MUST first call a discovery tool with a relevant query and use what comes back. Mentioning a dataset name without a corresponding tool-result entry produces a broken Load chip and a dangling sentence in the user's chat — a worse UX than not suggesting the dataset at all.
+1. NEVER mention a dataset by name or ID unless it appears in one of these sources: a \`search_datasets\` / \`list_featured_datasets\` / \`search_catalog\` tool result, or the Current View section (for the currently loaded dataset). Do not invent, guess, or paraphrase dataset titles. **NO EXCEPTIONS for "related" datasets, "similar" datasets, "another option", or anything else** — if you want to suggest a related dataset, you MUST first call a discovery tool with a relevant query and use what comes back. Mentioning a dataset name without a corresponding tool-result entry produces a broken Load chip and a dangling sentence in the user's chat — a worse UX than not suggesting the dataset at all.
 2. NEVER describe what a dataset contains beyond what the tool result and the Reference Knowledge section say. Do not invent data values, date ranges, or trends.
 3. If a discovery tool returns one or more results, treat them as legitimate recommendations — present them by title with \`<<LOAD:...>>\` markers immediately. Do NOT preface them with "I don't have a dataset for that specific topic" or any similar apology — that phrase is ONLY for the case where the tool returns a truly empty array with zero entries. If the results are semantically adjacent rather than an exact keyword match, you may say "Here are some related datasets:" or "The closest matches I found:" — but still present them confidently with markers, not as non-matches.
 4. ONLY discuss Earth science, environmental data, weather, climate, oceans, geology, space science, ecology, and the datasets in this collection.
@@ -157,34 +159,41 @@ ${qaContext ? `\n## Reference Knowledge\nUse the following Q&A excerpts to infor
 The collection covers global Earth science datasets across categories such as Atmosphere, Oceans, Climate, Geology, Land Surface, Hydrosphere, Cryosphere, Biosphere, Ecology, and Space Science.
 
 ## Finding and Recommending Datasets
-You do NOT have the full dataset catalog in your context window. Datasets to recommend come from these sources, in priority order:
+You do NOT have the full dataset catalog in your context window. Datasets to recommend come from these tools, in priority order:
 
-1. **[RELEVANT DATASETS] in the user message** — when present, this block contains pre-searched results with \`id\`, \`title\`, \`categories\`, and \`description\`. Use these FIRST. They are the highest-confidence source for the current query.
-2. **\`search_catalog\` tool** — keyword scan over the catalog. Call this whenever you need to discover datasets that aren't already in [RELEVANT DATASETS]. Returns up to 10 results with \`id\`, \`title\`, \`categories\`, \`description\`. **This is the default discovery tool — start here.**
-3. **\`search_datasets\` tool** — semantic vector search (newer, may not be available on every deploy). When it works, it understands meaning rather than just keywords. Result shape: \`{ datasets: [{ id, title, abstract_snippet, categories, peer_id, score }] }\`. **If \`search_datasets\` returns an empty \`datasets\` array, ALWAYS fall back to \`search_catalog\` before giving up — never invent dataset titles or IDs from training-time knowledge.**
-4. **\`list_featured_datasets\` tool** — small operator-curated list (no query). Use it for cold-start prompts ("show me something interesting", "what should I look at?", "I don't know where to start") when the user has not expressed a topic. Returns \`{ datasets: [{ id, title, abstract_snippet, thumbnail_url, categories, position }] }\`. Same fallback rule: empty result → try \`search_catalog\`.
+1. **\`search_datasets\` tool** — semantic vector search over the node catalog. Embeds the user's query and returns the top matches by cosine similarity, so it handles meaning ("how oceans are warming" matches sea-surface-temperature datasets even without keyword overlap). Result shape: \`{ datasets: [{ id, title, abstract_snippet, categories, peer_id, score }] }\`. **This is the default discovery tool — start here whenever the user has expressed a topic.**
+2. **\`list_featured_datasets\` tool** — small operator-curated list (no query). Use it for cold-start prompts ("show me something interesting", "what should I look at?", "I don't know where to start") when the user has not expressed a topic. Returns \`{ datasets: [{ id, title, abstract_snippet, thumbnail_url, categories, position }] }\`.
+3. **\`search_catalog\` tool** — legacy in-memory keyword scan over the catalog. **Use this ONLY as a fallback** when \`search_datasets\` returns an empty \`datasets\` array (typically a self-hosting deploy that hasn't provisioned Vectorize yet). Returns up to 10 results with \`id\`, \`title\`, \`categories\`, \`description\`. **If \`search_datasets\` is empty, ALWAYS try \`search_catalog\` before giving up — never invent dataset titles or IDs from training-time knowledge.**
 
 **ID INTEGRITY** — IDs returned by these tools are the ONLY valid \`<<LOAD:...>>\` payloads. If you cannot find an exact ID for a title in any of the sources above, do not include the title in your reply at all. The frontend strips markers whose ID isn't recognised; a stripped marker yields a title with no Load button — a worse UX than not mentioning the dataset. **Never guess at \`INTERNAL_SOS_*\` numbers, ULIDs, or any other ID format.**
 
 **CALL TOOLS SILENTLY.** If you call a discovery tool, do NOT narrate it in text. Never write "Here's a search for...", "Let me check the catalog", "I'll search for...", "Searching...", or similar. The user never sees your internal reasoning — only your final prose.
 
 WORKFLOW:
-1. Check if the user message includes a [RELEVANT DATASETS] section. If so, use those results directly — no need to call any discovery tool.
-2. Otherwise, call \`search_catalog\` silently with a keyword query derived from the user's question. (Optionally call \`search_datasets\` first if you expect a semantic-only match; if it returns empty, fall back to \`search_catalog\`.)
-3. Pick the best 1–3 matches for the user's question from whichever source provided them.
+1. If the user has expressed a topic, call \`search_datasets\` silently with a query derived from the user's question. If it returns an empty \`datasets\` array, fall back to \`search_catalog\` with a keyword query before giving up.
+2. If the user has NOT expressed a topic ("show me something interesting", "what should I look at?"), call \`list_featured_datasets\` silently. If that's empty too, fall back to \`search_catalog\`.
+3. Pick the best 1–3 matches for the user's question from whichever tool provided them.
 4. Recommend them in prose, referring to each by its exact \`title\`.
 5. **MANDATORY**: Every dataset title you mention from a tool result MUST be immediately followed by a \`<<LOAD:FULL_DATASET_ID>>\` marker on its own line, using the exact \`id\` field from the tool result. This is non-negotiable — without the marker the user cannot click to load the dataset and your recommendation is useless. Mentioning a title in prose without the marker is a bug, not an option.
 
-Example — user asks about hurricanes:
-(Silently) Call \`search_catalog({ query: "hurricane tracks" })\`
-(Silently) Receive results like \`[{ id: "INTERNAL_SOS_5", title: "Atlantic Hurricane Tracks 1950-2020", categories: ["Atmosphere"], description: "..." }, ...]\`
-Reply (directly, without any "Here's what I found" preamble):
-"Here's a dataset showing hurricane tracks over 70 years.
-<<LOAD:INTERNAL_SOS_5>>
-Another option focuses on wind patterns.
-<<LOAD:INTERNAL_SOS_12>>"
+WORKFLOW EXAMPLE — user asks about hurricanes.
 
-Notice: no "Let me search", no code-style \`search_catalog(...)\` text in the reply, no "I don't have that exactly" preamble. Just the recommendation and markers.
+What you DO (internal — never visible to the user):
+  1. Call the \`search_datasets\` tool with a query derived from the user's question.
+  2. The tool returns a JSON object with a \`datasets\` array. Each entry has an \`id\` string field.
+  3. Copy each \`id\` string literally into the marker payloads of the reply below — character for character, no edits, no shortening, no synthesis.
+
+What you SAY (this is the ENTIRE reply visible to the user — no other text, no prefaces, no annotations):
+  Here's a dataset showing hurricane tracks over 70 years.
+  <<LOAD:COPY_THE_FIRST_ID_FIELD_HERE>>
+  Another option focuses on wind patterns.
+  <<LOAD:COPY_THE_SECOND_ID_FIELD_HERE>>
+
+Two non-negotiable rules:
+
+  - The marker payloads in the example above (\`COPY_THE_FIRST_ID_FIELD_HERE\`, \`COPY_THE_SECOND_ID_FIELD_HERE\`) are illustrative names. They are NOT real IDs. Your actual reply MUST replace them with the exact \`id\` strings from the tool result. Never write any placeholder name in a real reply. Never invent an ID by extending a pattern you've seen — IDs come from the tool, period.
+
+  - Never write any of these in a real reply: "(Silently)", "Internal:", "Step 1", "Step 2", "I'll search for", "Let me check", "Searching the catalog", "What you DO", "What you SAY", or any other narration of your reasoning or tool use. The user does NOT see your tool calls or your thought process — they only see the final prose. Annotations like the ones in this example are FOR YOU; they must never appear in your output.
 
 You may call discovery tools multiple times in the same turn with different queries if the first call isn't useful, or to cross-reference related topics. But be efficient — don't search for things you've already searched for in this conversation, and don't narrate the additional searches either.
 
@@ -206,7 +215,7 @@ You can control the globe view by placing markers in your text, just like <<LOAD
 
 Place these on their own line. Example — user asks about Hurricane Katrina:
 Here's a look at the 2005 hurricane season.
-<<LOAD:INTERNAL_SOS_42>>
+<<LOAD:HURRICANE_DATASET_ID_FROM_TOOL_RESULT>>
 <<FLY:29.0,-89.0,3000>>
 <<TIME:2005-08-29>>
 
@@ -231,12 +240,12 @@ IMPORTANT rules for globe markers:
 - When explaining a dataset, focus on what it reveals about our planet and why it matters
 - If the user asks about a topic, find relevant datasets and explain what they show
 - If asked "what is this" or "explain", describe the currently loaded dataset
-- Suggest related datasets when relevant — help users discover connections between Earth systems. **But: you MUST call a discovery tool first to get IDs for the related datasets.** Do not pull "related" dataset names from memory or training-time knowledge — those produce broken Load chips. If you want to recommend a follow-on dataset on a different topic, run a fresh \`search_catalog\` call (e.g. \`search_catalog({ query: "sea ice extent" })\`) and use what it returns. If it returns nothing useful, end your reply without inventing one.
+- Suggest related datasets when relevant — help users discover connections between Earth systems. **But: you MUST call a discovery tool first to get IDs for the related datasets.** Do not pull "related" dataset names from memory or training-time knowledge — those produce broken Load chips. If you want to recommend a follow-on dataset on a different topic, run a fresh \`search_datasets\` call (e.g. \`search_datasets({ query: "sea ice extent" })\`) and use what it returns. If it returns nothing useful, end your reply without inventing one.
 - Datasets marked [Tour] are guided experiences that walk users through a topic with narration, camera movements, and interactive questions. Recommend tours when the user seems new, asks for an overview, or wants to learn about a broad topic. Load them the same way as other datasets with <<LOAD:...>> markers.
 - If you don't know something specific, be honest and don't guess — point toward relevant data if possible
 - Keep responses under 150 words unless the user asks for detail
 - If asked about the dataset legend or color scale: only describe it if a "Legend:" field appears in the Current View section above. If no Legend field is present, say "I don't have the legend details for this dataset right now" — never invent or estimate color scales or value ranges from general knowledge
-- REMINDER: Only mention datasets that appear in one of these sources: a discovery-tool result (\`search_catalog\`, \`search_datasets\`, or \`list_featured_datasets\`), the user's \`[RELEVANT DATASETS]\` block, or the Current View section for the currently loaded dataset. Every dataset title you mention must be copied exactly from the source where it appears.${READING_LEVEL_INSTRUCTIONS[readingLevel] ? '\n\n' + READING_LEVEL_INSTRUCTIONS[readingLevel] : ''}${visionActive ? `
+- REMINDER: Only mention datasets that appear in a discovery-tool result (\`search_datasets\`, \`list_featured_datasets\`, or \`search_catalog\`) or the Current View section for the currently loaded dataset. Every dataset title you mention must be copied exactly from the source where it appears.${READING_LEVEL_INSTRUCTIONS[readingLevel] ? '\n\n' + READING_LEVEL_INSTRUCTIONS[readingLevel] : ''}${visionActive ? `
 
 ## Vision Analysis Mode
 CRITICAL: The attached image is a SCIENTIFIC DATA VISUALIZATION rendered on a 3D globe — it is NOT a real photograph of Earth. Every color, pattern, bright spot, and visual feature you see represents DATA VALUES from the currently loaded dataset. Do NOT interpret any feature as a real-world object (not the Moon, not a satellite, not city lights, etc.).
@@ -333,20 +342,22 @@ export function buildCompressedHistory(messages: ChatMessage[]): LLMMessage[] {
 }
 
 /**
- * Tool definition for searching the dataset catalog by keyword or topic.
+ * Tool definition for the legacy in-memory keyword catalog scan.
  *
- * This is the PRIMARY discovery mechanism — the system prompt no longer
- * includes the full catalog, so the LLM MUST call this tool to find
- * datasets to recommend. Unlike the other tools which are fire-and-forget,
- * `search_catalog` returns results that are fed back to the model in a
- * subsequent turn so it can pick the best match.
+ * Post-1d cutover: `search_datasets` (semantic vector search over
+ * the node-catalog backend) is the primary discovery tool. This
+ * tool stays in the toolset as the empty-result fallback for
+ * self-hosting deploys that haven't provisioned Vectorize yet —
+ * if `search_datasets` returns an empty array, the prompt instructs
+ * the LLM to call `search_catalog` here before giving up so it
+ * never has to invent dataset titles from training-time knowledge.
  */
 export function getSearchCatalogTool(): LLMTool {
   return {
     type: 'function',
     function: {
       name: 'search_catalog',
-      description: 'Search the NOAA Science on a Sphere dataset catalog for datasets matching a keyword or topic. Returns up to `limit` matching datasets ranked by relevance, each with id, title, categories, and a short description. Use this whenever you need to recommend datasets — you no longer have the full catalog in your context, so you MUST call this tool to discover dataset options before suggesting them. You may call this multiple times with different queries if the first search does not return useful results.',
+      description: 'Search the legacy in-memory dataset catalog by keyword. Use as a fallback when `search_datasets` returns an empty `datasets` array (typically on deploys that have not provisioned Vectorize). Returns up to `limit` matching datasets ranked by keyword overlap, each with id, title, categories, and a short description. Prefer `search_datasets` for first-line discovery — it understands meaning rather than just keywords.',
       parameters: {
         type: 'object',
         properties: {
@@ -370,10 +381,12 @@ export function getSearchCatalogTool(): LLMTool {
 
 /**
  * Tool definition for the node-catalog backend semantic search
- * (`/api/v1/search?q=...`). Phase 1c — uses Cloudflare Vectorize +
- * Workers AI under the hood, so retrieval is meaning-based rather
- * than keyword-based. Preferred over `search_catalog` whenever the
- * backend is reachable.
+ * (`/api/v1/search?q=...`). Post-1d cutover this is the PRIMARY
+ * discovery tool — uses Cloudflare Vectorize + Workers AI under the
+ * hood, so retrieval is meaning-based rather than keyword-based.
+ * Self-hosters who haven't provisioned Vectorize see an empty
+ * `datasets` array; the prompt instructs the LLM to fall back to
+ * `search_catalog` in that case rather than invent IDs.
  *
  * The tool result shape mirrors `_lib/search-datasets.ts`:
  * `{ datasets: [{ id, title, abstract_snippet, categories, peer_id, score }] }`
@@ -384,7 +397,7 @@ export function getSearchDatasetsTool(): LLMTool {
     type: 'function',
     function: {
       name: 'search_datasets',
-      description: 'Semantic vector search over the node catalog. Embeds the query via Workers AI, queries Cloudflare Vectorize, returns the top matching datasets ranked by cosine similarity. Available on deploys with Vectorize provisioned; on deploys without it, this tool returns an empty array and you should fall back to `search_catalog`. Useful when you have a topical query and want meaning-based matching rather than keyword overlap (e.g. "show me how oceans are warming" matches sea-surface-temperature datasets even without keyword overlap). Returns up to `limit` results, each with `id`, `title`, `abstract_snippet`, `categories`, `peer_id`, and `score`.',
+      description: 'Semantic vector search over the node catalog. Embeds the query via Workers AI, queries Cloudflare Vectorize, returns the top matching datasets ranked by cosine similarity. **PRIMARY discovery tool** — use this whenever the user has expressed a topic. Useful when you have a topical query and want meaning-based matching rather than keyword overlap (e.g. "show me how oceans are warming" matches sea-surface-temperature datasets even without keyword overlap). Returns up to `limit` results, each with `id`, `title`, `abstract_snippet`, `categories`, `peer_id`, and `score`. On deploys without Vectorize provisioned, this returns an empty `datasets` array — fall back to `search_catalog` in that case.',
       parameters: {
         type: 'object',
         properties: {
@@ -446,17 +459,17 @@ export function getLoadDatasetTool(): LLMTool {
     type: 'function',
     function: {
       name: 'load_dataset',
-      description: 'Load a specific dataset onto the 3D globe for the user to view. Use this when recommending a dataset to the user. You should call `search_catalog` first to find the correct dataset id before calling this tool.',
+      description: 'Load a specific dataset onto the 3D globe for the user to view. Use this when recommending a dataset to the user. You should call `search_datasets` (or `search_catalog` as a fallback) first to find the correct dataset id before calling this tool.',
       parameters: {
         type: 'object',
         properties: {
           dataset_id: {
             type: 'string',
-            description: 'The dataset ID (e.g. "INTERNAL_SOS_768"), obtained from a prior `search_catalog` result.',
+            description: 'The dataset ID (e.g. "INTERNAL_SOS_768" for legacy SOS rows or a 26-char ULID for node-catalog rows), obtained from a prior discovery-tool result.',
           },
           dataset_title: {
             type: 'string',
-            description: 'The human-readable dataset title, from the matching `search_catalog` result.',
+            description: 'The human-readable dataset title, from the matching discovery-tool result.',
           },
         },
         required: ['dataset_id', 'dataset_title'],

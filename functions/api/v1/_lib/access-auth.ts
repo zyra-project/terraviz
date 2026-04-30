@@ -188,13 +188,29 @@ export async function verifyAccessJwt(
   if (claims.iss !== expectedIss) return null
   const aud = Array.isArray(claims.aud) ? claims.aud : claims.aud ? [claims.aud] : []
   if (!aud.includes(env.ACCESS_AUD)) return null
-  if (typeof claims.sub !== 'string' || !claims.sub) return null
 
   const isService = claims.type === 'app'
+  // Cloudflare service-token JWTs emit `sub` as an empty string and
+  // carry the token's identifier in `common_name` (the Client ID
+  // such as `843feb...d30ef0f.access`). User-login JWTs are the
+  // opposite: `sub` is populated, `common_name` is absent. Pick
+  // whichever durable identifier the JWT actually carries before
+  // checking presence so a real service-token request doesn't get
+  // rejected for an empty sub. Surfaced by the first production
+  // service-token call against the publisher API in 1d.
+  const subject =
+    claims.sub && claims.sub.length > 0
+      ? claims.sub
+      : isService && typeof claims.common_name === 'string' && claims.common_name.length > 0
+        ? claims.common_name
+        : null
+  if (!subject) return null
+
   // Service tokens may not carry an email; synthesize one keyed on
-  // the sub so the publishers row has a stable unique identifier.
-  const email = claims.email ?? (isService ? `${claims.sub}@service.local` : null)
+  // the resolved subject so the publishers row has a stable unique
+  // identifier.
+  const email = claims.email ?? (isService ? `${subject}@service.local` : null)
   if (!email) return null
 
-  return { email, sub: claims.sub, type: isService ? 'service' : 'user' }
+  return { email, sub: subject, type: isService ? 'service' : 'user' }
 }

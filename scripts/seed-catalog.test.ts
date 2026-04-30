@@ -47,6 +47,7 @@ const EXPECTED_TABLES = [
 const EXPECTED_INDEXES = [
   'idx_asset_uploads_dataset',
   'idx_audit_subject',
+  'idx_datasets_legacy_id',
   'idx_datasets_publisher',
   'idx_datasets_updated_at',
   'idx_datasets_visibility',

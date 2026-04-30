@@ -144,4 +144,39 @@ describe('DataService — node-mode', () => {
     await svc.fetchDatasets()
     expect(fetchStub).toHaveBeenCalledTimes(1)
   })
+
+  it('preserves legacyId from the wire shape and falls back on lookup (1d/T)', async () => {
+    // Tour files and other long-lived references hard-code SOS
+    // legacy IDs (e.g. INTERNAL_SOS_768); post-cutover the catalog's
+    // primary `id` is a ULID. The dataService maps the wire
+    // `legacyId` field through and `getDatasetById` consults it as
+    // a fallback so tours keep resolving without rewrites.
+    vi.stubGlobal(
+      'fetch',
+      mockNodeCatalog([
+        {
+          id: '01KQFFCEE4Q7NQGJNFB0Z042MC',
+          legacyId: 'INTERNAL_SOS_768',
+          title: 'Hurricane Season - 2024',
+          format: 'video/mp4',
+          dataLink: '/api/v1/datasets/01KQFFCEE4Q7NQGJNFB0Z042MC/manifest',
+        },
+      ]),
+    )
+    const svc = new DataService()
+    const datasets = await svc.fetchDatasets()
+    const hurricane = datasets.find(d => d.id === '01KQFFCEE4Q7NQGJNFB0Z042MC')
+    expect(hurricane?.legacyId).toBe('INTERNAL_SOS_768')
+
+    // Direct ULID lookup still works.
+    expect(svc.getDatasetById('01KQFFCEE4Q7NQGJNFB0Z042MC')?.id).toBe(
+      '01KQFFCEE4Q7NQGJNFB0Z042MC',
+    )
+    // Legacy-ID lookup resolves to the same row via the fallback.
+    expect(svc.getDatasetById('INTERNAL_SOS_768')?.id).toBe(
+      '01KQFFCEE4Q7NQGJNFB0Z042MC',
+    )
+    // Unknown id still misses.
+    expect(svc.getDatasetById('NONEXISTENT')).toBeUndefined()
+  })
 })

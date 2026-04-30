@@ -163,7 +163,7 @@ CREATE TABLE datasets (
 
   published_at       TEXT,
   retracted_at       TEXT,
-  publisher_id       TEXT,
+  publisher_id       TEXT, legacy_id TEXT,
   FOREIGN KEY (publisher_id) REFERENCES publishers(id)
 );
 
@@ -226,6 +226,9 @@ CREATE TABLE tours (
 
 CREATE INDEX idx_asset_uploads_dataset ON asset_uploads(dataset_id, created_at);
 CREATE INDEX idx_audit_subject ON audit_events(subject_kind, subject_id, created_at);
+CREATE UNIQUE INDEX idx_datasets_legacy_id
+  ON datasets(legacy_id)
+  WHERE legacy_id IS NOT NULL;
 CREATE INDEX idx_datasets_publisher  ON datasets(publisher_id);
 CREATE INDEX idx_datasets_updated_at ON datasets(updated_at);
 CREATE INDEX idx_datasets_visibility ON datasets(visibility, is_hidden, retracted_at);

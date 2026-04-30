@@ -162,6 +162,56 @@ describe('verifyAccessJwt', () => {
     })
   })
 
+  it('falls back to common_name when a service-token JWT carries an empty sub (1d/Q)', async () => {
+    // Real Cloudflare service-token JWTs (observed in production
+    // against the publisher API) emit `sub: ""` and put the token's
+    // identifier in `common_name` (the Client ID like
+    // `843feb...d30ef0f.access`). The original middleware required
+    // a non-empty sub and rejected every real service-token call.
+    // The fallback here uses common_name as the durable identifier
+    // when sub is empty.
+    const env = makeEnv()
+    const fetchStub = makeFetchStub({ keys: [key.publicJwk] })
+    const now = Math.floor(Date.now() / 1000)
+    const token = await signJwt({
+      iss: `https://${TEAM}`,
+      aud: AUD,
+      sub: '',
+      type: 'app',
+      common_name: '843feb721faf3071b4b43e890d30ef0f.access',
+      iat: now,
+      exp: now + 600,
+    })
+
+    const id = await verifyAccessJwt(token, env, { fetchImpl: fetchStub })
+    expect(id).toEqual({
+      email: '843feb721faf3071b4b43e890d30ef0f.access@service.local',
+      sub: '843feb721faf3071b4b43e890d30ef0f.access',
+      type: 'service',
+    })
+  })
+
+  it('still rejects user-type JWTs with empty sub (no common_name fallback)', async () => {
+    // The fallback only kicks in for service tokens. A user-login
+    // JWT with an empty sub is malformed and should be rejected
+    // even if it carries some other identifier.
+    const env = makeEnv()
+    const fetchStub = makeFetchStub({ keys: [key.publicJwk] })
+    const now = Math.floor(Date.now() / 1000)
+    const token = await signJwt({
+      iss: `https://${TEAM}`,
+      aud: AUD,
+      sub: '',
+      email: 'alice@example.com',
+      common_name: 'should-not-be-used',
+      iat: now,
+      exp: now + 600,
+    })
+
+    const id = await verifyAccessJwt(token, env, { fetchImpl: fetchStub })
+    expect(id).toBeNull()
+  })
+
   it('rejects an expired JWT', async () => {
     const env = makeEnv()
     const fetchStub = makeFetchStub({ keys: [key.publicJwk] })

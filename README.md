@@ -150,9 +150,10 @@ npm run dev:functions
 
 # 5. (Optional) Run the SPA against the local backend.
 cp .env.example .env.local
-# Edit .env.local to enable VITE_CATALOG_SOURCE=node and
-# VITE_DEV_API_TARGET=http://localhost:8788. Dev-container
-# contributors should also set VITE_HOST=0.0.0.0.
+# Edit .env.local to set VITE_DEV_API_TARGET=http://localhost:8788
+# (the SPA defaults to VITE_CATALOG_SOURCE=node post-1d cutover —
+# set VITE_CATALOG_SOURCE=legacy to fall back to the SOS S3 path).
+# Dev-container contributors should also set VITE_HOST=0.0.0.0.
 npm run dev    # in pane 2
 
 # 6. Verify.

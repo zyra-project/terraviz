@@ -46,6 +46,30 @@ describe('deriveSlug', () => {
     expect(__internal.deriveSlug('Hurricane Helene 2024')).toBe('hurricane-helene-2024')
     expect(__internal.deriveSlug('  --Polar--  Vortex--  ')).toBe('polar-vortex')
   })
+
+  it('prefixes `dataset-` when the title leads with a digit (1d/J)', () => {
+    // The 1d SOS bulk import surfaced this — drafts can omit `slug`,
+    // so the publisher API derives one later from the title via
+    // `deriveSlug`. The fix is here so the auto-derived slug is
+    // always publish-ready, even when the title starts with a digit
+    // (the validator's SLUG_RE requires a leading [a-z]).
+    expect(__internal.deriveSlug('360 Media - National Marine Sanctuaries'))
+      .toBe('dataset-360-media-national-marine-sanctuaries')
+    expect(__internal.deriveSlug('120 Years of Earthquakes'))
+      .toBe('dataset-120-years-of-earthquakes')
+  })
+
+  it('falls back to `dataset` when the title contains no slug-able chars', () => {
+    expect(__internal.deriveSlug('---')).toBe('dataset')
+    expect(__internal.deriveSlug('   ')).toBe('dataset')
+  })
+
+  it('respects the 64-char cap even with the dataset- prefix', () => {
+    const slug = __internal.deriveSlug('9' + 'a'.repeat(80))
+    expect(slug.length).toBeLessThanOrEqual(64)
+    expect(slug.startsWith('dataset-')).toBe(true)
+    expect(slug.endsWith('-')).toBe(false)
+  })
 })
 
 describe('validateDraftCreate', () => {
@@ -113,6 +137,37 @@ describe('validateDraftCreate', () => {
       end_time: '2026-01-01T00:00:00.000Z',
     })
     expect(errs.some(e => e.field === 'end_time' && e.code === 'before_start')).toBe(true)
+  })
+
+  it('accepts a legacy_id under 100 chars for bulk-imported rows', () => {
+    expect(
+      validateDraftCreate({
+        title: 'Hurricane Helene',
+        format: 'video/mp4',
+        legacy_id: 'INTERNAL_SOS_768',
+      }),
+    ).toEqual([])
+  })
+
+  it('rejects an over-long legacy_id', () => {
+    const errs = validateDraftCreate({
+      title: 'X',
+      format: 'video/mp4',
+      legacy_id: 'L'.repeat(101),
+    })
+    expect(errs.some(e => e.field === 'legacy_id' && e.code === 'too_long')).toBe(true)
+  })
+
+  it('rejects an empty / whitespace-only legacy_id (1d/O)', () => {
+    // Pre-1d/O an empty string slipped past the createDataset 409
+    // pre-check (which truthy-checks `body.legacy_id`) and only
+    // failed at the SQLite UNIQUE-index level — opaque to the CLI.
+    // Validator-level rejection keeps the mutation layer's
+    // truthy-check honest.
+    const empty = validateDraftCreate({ title: 'X', format: 'video/mp4', legacy_id: '' })
+    expect(empty.some(e => e.field === 'legacy_id' && e.code === 'too_short')).toBe(true)
+    const ws = validateDraftCreate({ title: 'X', format: 'video/mp4', legacy_id: '   ' })
+    expect(ws.some(e => e.field === 'legacy_id' && e.code === 'too_short')).toBe(true)
   })
 })
 

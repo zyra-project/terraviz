@@ -29,6 +29,31 @@ describe('parseArgs', () => {
     expect(r.positional).toEqual(['cmd', '--not-a-flag'])
     expect(r.options).toEqual({})
   })
+
+  // The terraviz dispatcher reads the subcommand off `positional[0]`,
+  // which means global flags can appear before OR after the
+  // subcommand and the resulting parse is the same. These two cases
+  // pin that equivalence so a future `commander`-like rewrite can't
+  // silently break either ordering.
+  it('flags before the subcommand land in options, subcommand stays positional[0]', () => {
+    const r = parseArgs(['--insecure-local', '--server', 'http://x', 'import-snapshot', '--dry-run'])
+    expect(r.positional).toEqual(['import-snapshot'])
+    expect(r.options).toEqual({
+      'insecure-local': true,
+      server: 'http://x',
+      'dry-run': true,
+    })
+  })
+
+  it('flags after the subcommand produce the same parse', () => {
+    const r = parseArgs(['import-snapshot', '--insecure-local', '--server', 'http://x', '--dry-run'])
+    expect(r.positional).toEqual(['import-snapshot'])
+    expect(r.options).toEqual({
+      'insecure-local': true,
+      server: 'http://x',
+      'dry-run': true,
+    })
+  })
 })
 
 describe('helpers', () => {

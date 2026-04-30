@@ -248,9 +248,127 @@ After the checklist runs clean, you should be able to:
   `<<LOAD:...>>` marker. Asking "What's interesting?" with no
   topic triggers `list_featured_datasets` against
   `/api/v1/featured` instead.
+- (Phase 1d) Bulk-import the legacy SOS catalog and verify the
+  docent answers from real datasets. This is the cutover step —
+  with the catalog populated, `search_datasets` (the post-1d
+  default tool) finds real rows and the frontend's
+  `VITE_CATALOG_SOURCE=node` default points at the same backend.
+  Always walk the dry-run first so you can see what will land:
+  ```bash
+  # Plan only — no writes. Prints a per-reason skip breakdown
+  # (unsupported_format for KML / DDS / TLE rows, duplicate_id
+  # for the upstream catalog's repeated SOS ids).
+  npm run terraviz -- --server http://localhost:8788 \
+    --insecure-local import-snapshot --dry-run
+
+  # Apply. Each row goes through POST /publish/datasets +
+  # POST /publish/datasets/{id}/publish; the Phase 1c/D embed
+  # enqueue fires per publish, so by the end the Vectorize
+  # index covers the catalog. Paced at ~5 rows/sec to stay under
+  # Workers AI quota; ~600 rows takes a few minutes.
+  npm run terraviz -- --server http://localhost:8788 \
+    --insecure-local import-snapshot
+
+  # Re-running is a no-op except for new snapshot rows — the
+  # legacy_id column on `datasets` is the idempotency key.
+  npm run terraviz -- --server http://localhost:8788 \
+    --insecure-local import-snapshot
+  ```
+  → first dry-run reports `new rows to publish: <N>`; first apply
+  reports `imported: <N>`; the second apply reports
+  `already imported: <N>` and `imported: 0`.
+
+  Then verify the docent answers from the real catalog:
+  ```bash
+  npm run dev
+  ```
+  Open `http://localhost:5173`, ask "Show me datasets about
+  hurricanes". The chat panel's network tab shows
+  `/api/v1/search?q=hurricane`; the response feeds the LLM,
+  which proposes a real SOS row by title with a `<<LOAD:...>>`
+  marker. Click the chip — the dataset loads via
+  `/api/v1/datasets/{id}/manifest`, exercising the importer's
+  `vimeo:` / `url:` data_ref pass-through end-to-end.
+
+- (Phase 1d, operator) Backfill the Vectorize index for a catalog
+  that was already populated before Vectorize was wired up, or
+  roll out a future model-version bump:
+  ```bash
+  # Plan only — prints the count of published rows that would be
+  # re-enqueued.
+  npm run terraviz -- --server http://localhost:8788 \
+    --insecure-local import-snapshot --reindex --dry-run
+
+  # Apply.
+  npm run terraviz -- --server http://localhost:8788 \
+    --insecure-local import-snapshot --reindex
+  ```
+  Each row hits `POST /publish/datasets/{id}/reindex`, paced at
+  the same ~5 rows/sec. The route returns 503
+  `embed_unconfigured` if Workers AI / Vectorize bindings are
+  missing — fix the bindings before re-running.
+
+#### Cutover rollback recipe
+
+The Phase 1d cutover (commits 1d/E, 1d/F, 1d/G) is reversible
+without schema or data changes. If a regression surfaces in
+production:
+
+- **Frontend regression** (browse UI / docent UI broken under the
+  node catalog) — set `VITE_CATALOG_SOURCE=legacy` in the Pages
+  build env and redeploy. The SPA falls back to the SOS S3 path
+  immediately; the catalog backend keeps running for
+  CLI / API consumers.
+- **Docent regression** (LLM stops returning chips, or invents
+  dataset titles) — `git revert` the cutover commits in their own
+  PR. The three commits are independent reverts: 1d/E (tool
+  ordering), 1d/F (pre-search injection), 1d/G (frontend default).
+  Reverting just F restores the `[RELEVANT DATASETS]` injection;
+  reverting just E flips the tool list back to search_catalog-first.
+- **Catalog data regression** — the imported rows stay published
+  through any of the above rollbacks. To remove them, retract via
+  `terraviz retract <id>` (per row) or wipe the catalog tables
+  via `npm run db:reset`. The `legacy_id` column means a future
+  re-import is a clean no-op against rows that are still
+  published.
 
 If any of these fail, the troubleshooting matrix in "Local
 debugging" below lists the common causes.
+
+#### Docent model floor
+
+The docent's chat quality is bounded by the configured LLM. The
+post-1d cutover relies on the model **calling `search_datasets`
+and copying ID strings verbatim** from the tool result — both
+behaviours that mid-tier models (≤17B) execute unreliably:
+
+- **Tool-call short-circuiting.** Smaller models often answer
+  knowledge questions ("What are hurricanes?") from training data
+  without calling discovery tools, so chat replies come back as
+  prose without Load chips.
+- **ULID confabulation.** Models that recognise ULID-shaped
+  strings (`01...26-char base32`) frequently regenerate plausible
+  ones rather than copying the literal id from the tool result.
+  The `validateAndCleanText` safety net (1c/M) strips those, so
+  the user sees the dataset title in prose with no chip — the
+  chat is correct but mute.
+
+What works in practice:
+
+| LLM | Tool-calling reliability | Notes |
+|---|---|---|
+| `@cf/meta/llama-3.1-70b-instruct` | High | Production default. |
+| `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | High | Faster, marginal quality drop. |
+| `@cf/meta/llama-3.1-8b-instruct` | Marginal | Good prose, ULID confabulation common. |
+| `@cf/meta/llama-4-scout` | Marginal | Tool-calling works on clear discovery prompts; ULID copying unreliable. |
+| Anything ≤8B | Unreliable | Docent works as a chat surface but Load chips rarely render. |
+
+The configured model is set per-deploy under
+**Orbit panel → ⚙ Settings → Model**. Operators investigating a
+"chat replies but no chips" report should check the model first
+before looking for code-side bugs — the Phase 1d safety nets
+silently strip everything an under-capable model would have
+broken anyway.
 
 ### Account-level setup (production-leaning)
 
@@ -309,6 +427,30 @@ preparing a deploy environment, not running locally:
   that pins the (model × text shape × pooling) tuple. The
   Workers AI binding (`AI`) is already provisioned for the
   analytics + chat path; the embedding pipeline reuses it.
+- (Phase 1d) Import the legacy SOS catalog so the deployment has
+  rows to surface. With Vectorize bound and the publisher API
+  reachable, run the bulk importer once per fresh deploy:
+  ```bash
+  # Always dry-run first.
+  npm run terraviz -- --server https://terraviz.example.org \
+    --client-id "$CF_ACCESS_CLIENT_ID" \
+    --client-secret "$CF_ACCESS_CLIENT_SECRET" \
+    import-snapshot --dry-run
+
+  # Apply. The embed pipeline fires per publish, so by the end
+  # the Vectorize index covers the catalog and the docent's
+  # search_datasets tool returns useful results.
+  npm run terraviz -- --server https://terraviz.example.org \
+    --client-id "$CF_ACCESS_CLIENT_ID" \
+    --client-secret "$CF_ACCESS_CLIENT_SECRET" \
+    import-snapshot
+  ```
+  The importer is idempotent — re-running is a no-op on rows
+  already imported (the `legacy_id` column on `datasets` is the
+  key). For an existing catalog where Vectorize was bound after
+  the rows were published, the same CLI binary handles the
+  backfill via `--reindex`. The "What good looks like" section
+  has the per-step verification.
 
 The self-hosting walkthrough at
 [`docs/SELF_HOSTING.md`](SELF_HOSTING.md) is the more thorough

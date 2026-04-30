@@ -215,6 +215,49 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toMatch(/MANDATORY.*<<LOAD:/i)
   })
 
+  it('uses placeholder marker payloads in the example, not real legacy IDs (1d/S)', () => {
+    // Real failure observed post-1d cutover: the example used
+    // `<<LOAD:INTERNAL_SOS_5>>` and `<<LOAD:INTERNAL_SOS_12>>` as
+    // illustrative IDs. Smaller LLMs mimicked the example prose
+    // verbatim — emitting markers with `INTERNAL_SOS_5` /
+    // `INTERNAL_SOS_12` regardless of what search_datasets actually
+    // returned. Fix: the example uses obvious placeholder names
+    // that aren't valid ID format in either world (ULID or legacy
+    // SOS).
+    const prompt = buildSystemPrompt(datasets, null)
+    expect(prompt).not.toMatch(/<<LOAD:INTERNAL_SOS_\d+>>/)
+    expect(prompt).not.toMatch(/<<LOAD:INTERNAL_SOS_5>>/)
+    // Sanity: the example still demonstrates marker placement.
+    expect(prompt).toMatch(/<<LOAD:COPY_THE_/)
+  })
+
+  it('does not contain any "(Silently)" annotation or ULID-prefix substring (1d/W)', () => {
+    // Two failures observed on llama-3.1-70b after 1d/S:
+    //
+    //   1. "(Silently) Call search_datasets" leaked verbatim into
+    //      the user-visible reply — the model treated the
+    //      "(Silently)" prefix as text to emit, not as a meta-
+    //      instruction.
+    //   2. The example contained the substring `01KQFFCE` as part
+    //      of a placeholder ULID; the model copied it as a literal
+    //      ID and then incremented the prefix to fabricate
+    //      additional ULIDs (`01KQFFCG`, `01KQFFCH`).
+    //
+    // 1d/W rewrites the example with a structural "What you DO /
+    // What you SAY" divider (no narrate-able prefix words) and
+    // placeholders that don't share any prefix with real ULIDs.
+    const prompt = buildSystemPrompt(datasets, null)
+    // The phrase appears once in the don't-list (mention), but
+    // never as a leading annotation (use). Pre-1d/W the example
+    // had `(Silently) Call search_datasets(...)` and
+    // `(Silently) Receive results...`; the model copied it.
+    expect(prompt).not.toMatch(/\(Silently\) (Call|Receive)/)
+    // No ULID-prefix substring the model could mimic — real
+    // post-cutover ULIDs start with `01K...`. Anything that looks
+    // like a real ULID inside the prompt is a mimicry hazard.
+    expect(prompt).not.toMatch(/01K[A-Z0-9]{3,}/)
+  })
+
   it('restricts the "I do not have a dataset" preface to zero-results only', () => {
     // Regression: the original prompt told the LLM to prefix fallback
     // results with "I don't have a dataset for that specific topic, but
@@ -299,22 +342,20 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toMatch(/cold[- ]start|where to start|something interesting/i)
   })
 
-  it('lists search_catalog as the default discovery tool until backend cutover', () => {
-    // Phase 1c rollback (catalog(1c/L)): production deploys without
-    // a provisioned Vectorize index were seeing the LLM pick
-    // search_datasets first, get an empty result, and hallucinate
-    // IDs that the marker validator strips — so Load chips
-    // disappeared from prose. Until the cutover, the prompt has
-    // search_catalog listed before search_datasets so the LLM
-    // defaults to the in-memory legacy catalog (valid IDs, real
-    // results). Once Vectorize is provisioned in production, swap
-    // the order back as part of the cutover.
+  it('lists search_datasets as the primary discovery tool, search_catalog as the fallback (post-1d cutover)', () => {
+    // Phase 1d/E flips the ordering set by 1c/L: with the catalog
+    // backend provisioned and the SOS snapshot imported,
+    // search_datasets is the default and search_catalog is the
+    // empty-result fallback for self-hosters who haven't wired
+    // Vectorize. Reverting this test alongside docentService.ts
+    // and docentContext.ts is what a single git revert of the
+    // cutover commit produces.
     const prompt = buildSystemPrompt(datasets, null)
     const searchCatalogAt = prompt.indexOf('search_catalog')
     const searchDatasetsAt = prompt.indexOf('search_datasets')
     expect(searchCatalogAt).toBeGreaterThan(-1)
     expect(searchDatasetsAt).toBeGreaterThan(-1)
-    expect(searchCatalogAt).toBeLessThan(searchDatasetsAt)
+    expect(searchDatasetsAt).toBeLessThan(searchCatalogAt)
   })
 
   it('tells the LLM to fall back to search_catalog when search_datasets returns empty', () => {

@@ -24,6 +24,7 @@ import {
   isEmbedConfigured,
   listDatasetsForPublisher,
   publishDataset,
+  reindexDataset,
   retractDataset,
   updateDataset,
 } from './dataset-mutations'
@@ -108,6 +109,58 @@ describe('createDataset', () => {
       expect(a.dataset.slug).toBe('same-title')
       expect(b.dataset.slug).toBe('same-title-2')
     }
+  })
+
+  it('persists legacy_id and surfaces it on the returned row', async () => {
+    const { env } = setupEnv()
+    const result = await createDataset(env, STAFF, {
+      title: 'Imported Row',
+      format: 'video/mp4',
+      legacy_id: 'INTERNAL_SOS_42',
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.dataset.legacy_id).toBe('INTERNAL_SOS_42')
+  })
+
+  it('rejects a duplicate legacy_id with a structured 409', async () => {
+    const { env } = setupEnv()
+    const first = await createDataset(env, STAFF, {
+      title: 'First Import',
+      format: 'video/mp4',
+      legacy_id: 'INTERNAL_SOS_99',
+    })
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+    const second = await createDataset(env, STAFF, {
+      title: 'Second Import (same source row)',
+      format: 'video/mp4',
+      legacy_id: 'INTERNAL_SOS_99',
+    })
+    expect(second.ok).toBe(false)
+    if (second.ok) return
+    expect(second.status).toBe(409)
+    expect(second.errors[0].field).toBe('legacy_id')
+    expect(second.errors[0].code).toBe('conflict')
+    expect(second.errors[0].message).toContain(first.dataset.id)
+  })
+
+  it('rejects legacy_id from a non-privileged publisher with 403 (1d/L)', async () => {
+    // Cross-tenant existence leak guard: legacy_id is bulk-import
+    // provenance metadata, and allowing community publishers to set
+    // it would let them probe whether a given legacy_id exists in a
+    // staff-owned row via the 409 conflict path.
+    const { env } = setupEnv()
+    const result = await createDataset(env, COMMUNITY, {
+      title: 'Sneaky import',
+      format: 'video/mp4',
+      legacy_id: 'INTERNAL_SOS_99',
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(403)
+    expect(result.errors[0].field).toBe('legacy_id')
+    expect(result.errors[0].code).toBe('forbidden')
   })
 })
 
@@ -204,6 +257,63 @@ describe('updateDataset', () => {
 
     await updateDataset(env, STAFF, created.dataset.id, { title: 'Renamed' })
     expect(await kv.get(SNAPSHOT_KEY)).toBeNull()
+  })
+
+  it('rejects legacy_id update from a non-privileged publisher with 403 (1d/L)', async () => {
+    const { env } = setupEnv()
+    const created = await createDataset(env, COMMUNITY, {
+      title: 'Community draft',
+      format: 'video/mp4',
+    })
+    if (!created.ok) throw new Error('seed')
+    const result = await updateDataset(env, COMMUNITY, created.dataset.id, {
+      legacy_id: 'INTERNAL_SOS_99',
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(403)
+    expect(result.errors[0].field).toBe('legacy_id')
+    expect(result.errors[0].code).toBe('forbidden')
+  })
+
+  it('rejects a duplicate legacy_id update with a structured 409 (1d/L)', async () => {
+    const { env } = setupEnv()
+    const a = await createDataset(env, STAFF, {
+      title: 'Holds the legacy_id',
+      format: 'video/mp4',
+      legacy_id: 'INTERNAL_SOS_77',
+    })
+    const b = await createDataset(env, STAFF, {
+      title: 'Wants to take it',
+      format: 'video/mp4',
+    })
+    if (!a.ok || !b.ok) throw new Error('seed')
+    const result = await updateDataset(env, STAFF, b.dataset.id, {
+      legacy_id: 'INTERNAL_SOS_77',
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(409)
+    expect(result.errors[0].field).toBe('legacy_id')
+    expect(result.errors[0].code).toBe('conflict')
+    expect(result.errors[0].message).toContain(a.dataset.id)
+  })
+
+  it('allows a row to update its own legacy_id to itself (no-op write)', async () => {
+    // Sanity: the conflict pre-check must exclude the row being
+    // updated from the "in use elsewhere" lookup, otherwise an
+    // operator re-saving the same row would 409 against itself.
+    const { env } = setupEnv()
+    const created = await createDataset(env, STAFF, {
+      title: 'Self-update',
+      format: 'video/mp4',
+      legacy_id: 'INTERNAL_SOS_88',
+    })
+    if (!created.ok) throw new Error('seed')
+    const result = await updateDataset(env, STAFF, created.dataset.id, {
+      legacy_id: 'INTERNAL_SOS_88',
+    })
+    expect(result.ok).toBe(true)
   })
 })
 
@@ -497,5 +607,92 @@ describe('retractDataset — delete-embedding enqueue', () => {
     expect(
       (await queryEmbedding(env, queryVec)).find(m => m.dataset_id === created.dataset.id),
     ).toBeUndefined()
+  })
+})
+
+describe('reindexDataset — bulk re-embed entry point (1d/D)', () => {
+  it('enqueues `embed_dataset` for a published row when env is configured', async () => {
+    const { env } = setupEmbedEnv()
+    const created = await createDataset(env, STAFF, {
+      title: 'Reindex Me',
+      format: 'video/mp4',
+      data_ref: 'vimeo:1',
+      license_spdx: 'CC-BY-4.0',
+    })
+    if (!created.ok) throw new Error('seed')
+    await publishDataset(env, created.dataset.id)
+
+    const queue = new CapturingJobQueue()
+    const result = await reindexDataset(env, STAFF, created.dataset.id, { jobQueue: queue })
+    expect(result.ok).toBe(true)
+    expect(queue.records).toEqual([
+      { name: EMBED_JOB_NAME, payload: { dataset_id: created.dataset.id } },
+    ])
+  })
+
+  it('returns 404 when the dataset is not visible to the caller', async () => {
+    const { env } = setupEmbedEnv()
+    const result = await reindexDataset(env, STAFF, 'NONEXISTENT', {})
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(404)
+    expect(result.errors[0].code).toBe('not_found')
+  })
+
+  it('returns 409 not_published when the row is still a draft', async () => {
+    const { env } = setupEmbedEnv()
+    const created = await createDataset(env, STAFF, {
+      title: 'Draft only',
+      format: 'video/mp4',
+    })
+    if (!created.ok) throw new Error('seed')
+
+    const queue = new CapturingJobQueue()
+    const result = await reindexDataset(env, STAFF, created.dataset.id, { jobQueue: queue })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(409)
+    expect(result.errors[0].code).toBe('not_published')
+    expect(queue.records).toEqual([])
+  })
+
+  it('returns 409 not_published when the row has been retracted', async () => {
+    const { env } = setupEmbedEnv()
+    const created = await createDataset(env, STAFF, {
+      title: 'Retract first',
+      format: 'video/mp4',
+      data_ref: 'vimeo:1',
+      license_spdx: 'CC-BY-4.0',
+    })
+    if (!created.ok) throw new Error('seed')
+    await publishDataset(env, created.dataset.id)
+    await retractDataset(env, created.dataset.id)
+
+    const queue = new CapturingJobQueue()
+    const result = await reindexDataset(env, STAFF, created.dataset.id, { jobQueue: queue })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(409)
+    expect(queue.records).toEqual([])
+  })
+
+  it('returns 503 embed_unconfigured when neither bindings nor mock flags are set', async () => {
+    const { env } = setupEnv() // no MOCK_AI / MOCK_VECTORIZE
+    const created = await createDataset(env, STAFF, {
+      title: 'Pre-vectorize publish',
+      format: 'video/mp4',
+      data_ref: 'vimeo:1',
+      license_spdx: 'CC-BY-4.0',
+    })
+    if (!created.ok) throw new Error('seed')
+    await publishDataset(env, created.dataset.id)
+
+    const queue = new CapturingJobQueue()
+    const result = await reindexDataset(env, STAFF, created.dataset.id, { jobQueue: queue })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(503)
+    expect(result.errors[0].code).toBe('embed_unconfigured')
+    expect(queue.records).toEqual([])
   })
 })

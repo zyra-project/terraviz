@@ -12,6 +12,15 @@ export type DatasetFormat = 'video/mp4' | 'image/png' | 'image/jpg' | 'images/jp
  */
 export interface Dataset {
   id: string
+  /**
+   * Bulk-import provenance set by Phase 1d's `terraviz import-snapshot`
+   * to the SOS snapshot's internal id (e.g. `INTERNAL_SOS_768`).
+   * `getDatasetById` falls back to matching this field when a primary
+   * `id` lookup misses, so tour files and other long-lived references
+   * keyed off the legacy SOS IDs continue to resolve against
+   * post-cutover ULID-keyed rows.
+   */
+  legacyId?: string
   title: string
   format: DatasetFormat
   dataLink: string

@@ -330,17 +330,43 @@ describe('processMessage — LLM path', () => {
 })
 
 describe('processMessage — auto-inject Load buttons', () => {
-  it('auto-injects action when LLM mentions a pre-search title without markers', async () => {
-    // Regression test: the auto-inject safety net should emit a load-dataset
-    // action when the LLM mentions a dataset title from the pre-search results
-    // in its prose but doesn't include a <<LOAD:...>> marker for it.
+  it('auto-injects action when LLM mentions a tool-result title without markers', async () => {
+    // Regression test: when the LLM calls a discovery tool, gets a
+    // result, and then mentions a dataset title from that result in
+    // prose without an accompanying <<LOAD:...>> marker, the
+    // auto-inject safety net should emit a load-dataset action. This
+    // catches the failure mode where small models drop markers under
+    // pressure but still recommend the right dataset.
+    //
+    // Pre-1d/F this test seeded `searchResultsThisAttempt` via the
+    // [RELEVANT DATASETS] pre-search injection; with that injection
+    // removed the seed has to come from a tool call instead.
     const { streamChat } = await import('./llmProvider')
     const mockedStream = vi.mocked(streamChat)
 
-    // LLM response mentions the dataset by title but NO <<LOAD:...>> marker
+    let callCount = 0
     mockedStream.mockImplementation(async function* () {
-      yield { type: 'delta' as const, text: 'Here is a great dataset: Sea Surface Temperature — it shows global ocean temperatures.' }
-      yield { type: 'done' as const }
+      callCount++
+      if (callCount === 1) {
+        // Round 1: LLM calls search_catalog to discover the SST dataset.
+        yield {
+          type: 'tool_call' as const,
+          call: {
+            id: 'call_search_1',
+            name: 'search_catalog',
+            arguments: { query: 'sea surface temperature' },
+          },
+        }
+        yield { type: 'done' as const }
+      } else {
+        // Round 2: LLM has the search result and mentions the dataset
+        // by title but forgets the <<LOAD:...>> marker.
+        yield {
+          type: 'delta' as const,
+          text: 'Here is a great dataset: Sea Surface Temperature — it shows global ocean temperatures.',
+        }
+        yield { type: 'done' as const }
+      }
     })
 
     const config: DocentConfig = {
@@ -353,8 +379,6 @@ describe('processMessage — auto-inject Load buttons', () => {
     }
 
     const chunks: DocentStreamChunk[] = []
-    // Query "sea surface temperature" triggers pre-search which returns
-    // the SST dataset. The LLM mentions it by title but skips the marker.
     for await (const chunk of processMessage('sea surface temperature', [], datasets, null, config)) {
       chunks.push(chunk)
     }
@@ -589,6 +613,47 @@ describe('validateAndCleanText', () => {
     const { cleanedText, invalidIds } = validateAndCleanText(text, datasets)
     expect(cleanedText).toBe(text)
     expect(invalidIds.size).toBe(0)
+  })
+
+  it('resolves <<LOAD:legacy_id>> to the canonical ULID via legacyId fallback (1d/U)', () => {
+    // Post-cutover the catalog's primary id is a ULID, but tour
+    // files and LLM responses sometimes carry the row's bulk-import
+    // provenance id (e.g. INTERNAL_SOS_768). The marker validator
+    // should resolve those rather than stripping them, mirroring
+    // the dataService.getDatasetById fallback added in 1d/T.
+    const ds = [
+      makeDataset({
+        id: '01KQFFCEE4Q7NQGJNFB0Z042MC',
+        legacyId: 'INTERNAL_SOS_768',
+        title: 'Hurricane Season - 2024',
+      }),
+    ]
+    const text = 'Here you go.\n<<LOAD:INTERNAL_SOS_768>>\n'
+    const { cleanedText, validIds, invalidIds } = validateAndCleanText(text, ds)
+    expect(invalidIds.size).toBe(0)
+    expect(validIds.has('01KQFFCEE4Q7NQGJNFB0Z042MC')).toBe(true)
+    // The marker payload gets rewritten to the canonical ULID so
+    // the chat UI's [[LOAD:...]] round-trip stays consistent.
+    expect(cleanedText).toContain('<<LOAD:01KQFFCEE4Q7NQGJNFB0Z042MC>>')
+    expect(cleanedText).not.toContain('INTERNAL_SOS_768')
+  })
+
+  it('resolves bare INTERNAL_* mentions in prose via legacyId fallback (1d/U)', () => {
+    // The bare-INTERNAL pattern at the bottom of validateAndCleanText
+    // also gains the legacyId fallback so an LLM that mentions a
+    // legacy id outside a marker still resolves to the right
+    // dataset.
+    const ds = [
+      makeDataset({
+        id: '01KQFFCEE4Q7NQGJNFB0Z042MC',
+        legacyId: 'INTERNAL_SOS_768',
+        title: 'Hurricane Season - 2024',
+      }),
+    ]
+    const text = 'See INTERNAL_SOS_768 for more.\n'
+    const { validIds, invalidIds } = validateAndCleanText(text, ds)
+    expect(invalidIds.size).toBe(0)
+    expect(validIds.has('01KQFFCEE4Q7NQGJNFB0Z042MC')).toBe(true)
   })
 
   it('extracts <<FLY:lat,lon>> markers', () => {

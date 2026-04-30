@@ -150,6 +150,19 @@ export class TerravizClient {
     )
   }
 
+  /**
+   * Re-enqueue the embed job for an already-published dataset. Used
+   * by `terraviz import-snapshot --reindex` (Phase 1d/D) to backfill
+   * the Vectorize index after an operator wires up the bindings, or
+   * to roll out a future model-version bump as a one-off pass.
+   */
+  reindexDataset<T = unknown>(id: string): Promise<Result<T>> {
+    return this.request<T>(
+      'POST',
+      `/api/v1/publish/datasets/${encodeURIComponent(id)}/reindex`,
+    )
+  }
+
   previewDataset<T = unknown>(
     id: string,
     options: { ttl_seconds?: number } = {},

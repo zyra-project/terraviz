@@ -51,6 +51,12 @@ export interface DatasetRow {
   published_at: string | null
   retracted_at: string | null
   publisher_id: string | null
+  /**
+   * Idempotency key for upstream-imported rows (e.g. the Phase 1d
+   * SOS bulk import populates this with the snapshot's
+   * `INTERNAL_SOS_*` id). NULL for publisher-created drafts.
+   */
+  legacy_id: string | null
 }
 
 export interface DecorationRows {
@@ -141,6 +147,17 @@ export async function getPublicDataset(
 }
 
 /**
+ * D1 caps bind variables per prepared statement at 100, so the
+ * decoration fetch chunks the dataset id list before running each
+ * IN-clause query. 80 leaves comfortable headroom; queries within
+ * a chunk still run concurrently across the five decoration
+ * tables. The Phase 1d SOS bulk import (~190 rows) is the first
+ * real workload that crossed the limit; pre-1d nobody had enough
+ * published rows to surface the cliff.
+ */
+const D1_BIND_BATCH = 80
+
+/**
  * Fetch every decoration row for a set of dataset ids in batch
  * queries. Used by the list endpoint to avoid the N+1 trap of
  * one-row-per-dataset fetches across five tables.
@@ -150,65 +167,64 @@ export async function getDecorations(
   datasetIds: string[],
 ): Promise<Map<string, DecorationRows>> {
   if (datasetIds.length === 0) return new Map()
-  const placeholders = datasetIds.map(() => '?').join(',')
 
-  const [tagRes, catRes, kwRes, devRes, relRes] = await Promise.all([
-    db
-      .prepare(`SELECT dataset_id, tag FROM dataset_tags WHERE dataset_id IN (${placeholders})`)
-      .bind(...datasetIds)
-      .all<{ dataset_id: string; tag: string }>(),
-    db
-      .prepare(
-        `SELECT dataset_id, facet, value FROM dataset_categories
-         WHERE dataset_id IN (${placeholders})`,
-      )
-      .bind(...datasetIds)
-      .all<{ dataset_id: string; facet: string; value: string }>(),
-    db
-      .prepare(
-        `SELECT dataset_id, keyword FROM dataset_keywords
-         WHERE dataset_id IN (${placeholders})`,
-      )
-      .bind(...datasetIds)
-      .all<{ dataset_id: string; keyword: string }>(),
-    db
-      .prepare(
-        `SELECT dataset_id, role, name, affiliation_url FROM dataset_developers
-         WHERE dataset_id IN (${placeholders})`,
-      )
-      .bind(...datasetIds)
-      .all<{
-        dataset_id: string
-        role: string
-        name: string
-        affiliation_url: string | null
-      }>(),
-    db
-      .prepare(
-        `SELECT dataset_id, related_title, related_url FROM dataset_related
-         WHERE dataset_id IN (${placeholders})`,
-      )
-      .bind(...datasetIds)
-      .all<{ dataset_id: string; related_title: string; related_url: string }>(),
+  async function chunkedSelect<T>(template: (placeholders: string) => string): Promise<T[]> {
+    const out: T[] = []
+    for (let i = 0; i < datasetIds.length; i += D1_BIND_BATCH) {
+      const chunk = datasetIds.slice(i, i + D1_BIND_BATCH)
+      const placeholders = chunk.map(() => '?').join(',')
+      const res = await db
+        .prepare(template(placeholders))
+        .bind(...chunk)
+        .all<T>()
+      if (res.results) out.push(...res.results)
+    }
+    return out
+  }
+
+  const [tagRows, catRows, kwRows, devRows, relRows] = await Promise.all([
+    chunkedSelect<{ dataset_id: string; tag: string }>(
+      ph => `SELECT dataset_id, tag FROM dataset_tags WHERE dataset_id IN (${ph})`,
+    ),
+    chunkedSelect<{ dataset_id: string; facet: string; value: string }>(
+      ph =>
+        `SELECT dataset_id, facet, value FROM dataset_categories WHERE dataset_id IN (${ph})`,
+    ),
+    chunkedSelect<{ dataset_id: string; keyword: string }>(
+      ph => `SELECT dataset_id, keyword FROM dataset_keywords WHERE dataset_id IN (${ph})`,
+    ),
+    chunkedSelect<{
+      dataset_id: string
+      role: string
+      name: string
+      affiliation_url: string | null
+    }>(
+      ph =>
+        `SELECT dataset_id, role, name, affiliation_url FROM dataset_developers WHERE dataset_id IN (${ph})`,
+    ),
+    chunkedSelect<{ dataset_id: string; related_title: string; related_url: string }>(
+      ph =>
+        `SELECT dataset_id, related_title, related_url FROM dataset_related WHERE dataset_id IN (${ph})`,
+    ),
   ])
 
   const map = new Map<string, DecorationRows>()
   for (const id of datasetIds) {
     map.set(id, { tags: [], categories: [], keywords: [], developers: [], related: [] })
   }
-  for (const r of tagRes.results ?? []) map.get(r.dataset_id)!.tags.push(r.tag)
-  for (const r of catRes.results ?? []) {
+  for (const r of tagRows) map.get(r.dataset_id)!.tags.push(r.tag)
+  for (const r of catRows) {
     map.get(r.dataset_id)!.categories.push({ facet: r.facet, value: r.value })
   }
-  for (const r of kwRes.results ?? []) map.get(r.dataset_id)!.keywords.push(r.keyword)
-  for (const r of devRes.results ?? []) {
+  for (const r of kwRows) map.get(r.dataset_id)!.keywords.push(r.keyword)
+  for (const r of devRows) {
     map.get(r.dataset_id)!.developers.push({
       role: r.role,
       name: r.name,
       affiliation_url: r.affiliation_url,
     })
   }
-  for (const r of relRes.results ?? []) {
+  for (const r of relRows) {
     map.get(r.dataset_id)!.related.push({
       related_title: r.related_title,
       related_url: r.related_url,

@@ -582,6 +582,16 @@ function resolveMarkerToDataset(
   if (datasetIdSet.has(id)) return id
   if (id.length === 0) return null
 
+  // Phase 1d/U — legacy_id fallback. Tour files and LLM responses
+  // sometimes carry the row's bulk-import provenance id (e.g.
+  // `INTERNAL_SOS_768`) instead of the post-cutover ULID. Resolve
+  // those to the dataset's primary id before falling through to the
+  // title-overlap heuristics; mirrors `dataService.getDatasetById`'s
+  // legacyId fallback. The caller rewrites the marker payload to
+  // `dataset.id` so the chat UI's marker round-trip works.
+  const byLegacy = datasets.find(d => d.legacyId === id)
+  if (byLegacy) return byLegacy
+
   const idLower = id.toLowerCase()
 
   // Existing exact / startsWith bidirectional fallback.
@@ -682,7 +692,16 @@ export function validateAndCleanText(
     if (datasetIdSet.has(id)) {
       validIds.add(id)
     } else {
-      invalidIds.add(id)
+      // Phase 1d/U — same legacy_id fallback the marker path uses.
+      // Bare `INTERNAL_SOS_*` mentions in prose now rewrite to the
+      // canonical ULID via legacyId match, mirroring resolveMarkerToDataset.
+      const byLegacy = datasets.find(d => d.legacyId === id)
+      if (byLegacy) {
+        validIds.add(byLegacy.id)
+        markerRewrites.set(id, byLegacy.id)
+      } else {
+        invalidIds.add(id)
+      }
     }
   }
 
@@ -1025,73 +1044,51 @@ export async function* processMessage(
       ? `[GLOBE STATE: "${currentDataset.title}" is currently loaded on the globe.${currentTime ? ` Showing: ${currentTime}.` : ''}]\n`
       : '[GLOBE STATE: No dataset is loaded. The globe shows the default Earth view.]\n'
 
-    // Phase 3 discovery: pre-search the catalog locally and inject the top
-    // results into the user message as [RELEVANT DATASETS] context. This is
-    // the primary discovery path — it works on every model regardless of
-    // function-calling support. The system prompt tells the LLM to prefer
-    // these pre-searched results and only call `search_catalog` as a
-    // fallback for follow-up queries on a different topic.
-    //
-    // Strip punctuation and common question/stop words so the scoring in
-    // searchDatasets isn't diluted. "What datasets show sea level rise?" →
-    // search query "sea level rise", which scores well against real titles.
-    const PRE_SEARCH_STOP_WORDS = new Set([
-      'what', 'which', 'show', 'me', 'about', 'tell', 'the', 'a', 'an',
-      'is', 'are', 'do', 'does', 'did', 'can', 'how', 'where', 'when',
-      'why', 'i', 'my', 'your', 'you', 'we', 'us', 'it', 'its', 'of',
-      'in', 'on', 'for', 'to', 'and', 'or', 'with', 'this', 'that',
-      'some', 'any', 'have', 'has', 'there', 'here', 'please', 'thanks',
-      'datasets', 'dataset', 'data', 'find', 'search', 'look', 'give',
-      'want', 'like', 'need', 'related', 'something', 'anything',
-    ])
-    const preSearchQuery = input
-      .replace(/[?!.,;:'"()[\]{}]/g, '')
-      .split(/\s+/)
-      .filter(w => w.length > 1 && !PRE_SEARCH_STOP_WORDS.has(w.toLowerCase()))
-      .join(' ')
-    // Only pre-search for intents that actually need dataset discovery.
-    // Greetings, help, explain-current, and what-is-this don't benefit
-    // from injecting a [RELEVANT DATASETS] block and would just add
-    // noise tokens + risk steering the model toward irrelevant recs.
-    const needsPreSearch = intent.type === 'search' || intent.type === 'category' || intent.type === 'related'
-    const preSearchCatalogResults = needsPreSearch
-      ? executeSearchCatalog({ query: preSearchQuery || input, limit: 5 }, datasets)
-      : []
-
-    let preSearchContext = ''
-    if (preSearchCatalogResults.length > 0) {
-      const lines = preSearchCatalogResults.map(r =>
-        `- ${r.id} | ${r.title}${r.isTour ? ' [Tour]' : ''} | ${r.categories.join(', ')} | ${r.description}`
-      )
-      preSearchContext = `[RELEVANT DATASETS for your query:\n${lines.join('\n')}\nRefer to these by exact title and include <<LOAD:ID>> markers.]\n`
-    }
-
+    // Pre-search injection retired in catalog(1d/F). The
+    // [RELEVANT DATASETS] block was the bridge during the
+    // unwired-Vectorize rollback (Phase 1c/L); with the cutover
+    // in place the docent's primary discovery path is the
+    // search_datasets tool, with search_catalog as the
+    // empty-result fallback. Removing the injection drops a
+    // recurring per-turn token cost and avoids steering the LLM
+    // toward in-memory keyword matches when the semantic search
+    // would do better. Reverting this commit puts the seeding
+    // logic back without any other changes — that's the
+    // soft-rollback path the brief calls out as one of the
+    // cutover guarantees.
     const userMessage: LLMMessage = visionActive
       ? { role: 'user', content: [
           { type: 'image_url' as const, image_url: { url: screenshotDataUrl! } },
-          { type: 'text' as const, text: statePrefix + preSearchContext + visionText },
+          { type: 'text' as const, text: statePrefix + visionText },
         ] as LLMContentPart[] }
-      : { role: 'user', content: statePrefix + preSearchContext + input }
+      : { role: 'user', content: statePrefix + input }
 
     const llmMessages: LLMMessage[] = [
       { role: 'system' as const, content: systemPrompt },
       ...buildCompressedHistory(history),
       userMessage,
     ]
-    // search_catalog runs first because it scans the in-memory legacy
-    // catalog and always returns valid IDs the marker validator
-    // recognises. search_datasets / list_featured_datasets are wired
-    // up but listed AFTER — they hit the node catalog backend, which
-    // may not be provisioned yet on a given deploy. If the LLM picks
-    // the new tools first and gets an empty result, it sometimes
-    // hallucinates IDs that get stripped by validateAndCleanText
-    // (Load chips disappear from prose). Putting search_catalog first
-    // restores the pre-1c default; once Vectorize is provisioned in
-    // production, swap the order back as part of the cutover.
+    // Tool ordering — Phase 1d cutover (catalog(1d/E)).
+    //
+    // search_datasets ranks first now that the catalog backend is
+    // provisioned and the SOS snapshot has been imported (1d/B).
+    // Semantic vector search is the primary discovery tool; the
+    // empty-result fallback to search_catalog stays in the prompt
+    // for self-hosting deploys that haven't wired Vectorize yet.
+    // list_featured_datasets is the cold-start path. search_catalog
+    // (legacy in-memory keyword scan) stays in the tool list as a
+    // graceful-degradation fallback, but is no longer the default.
+    //
+    // 1c/L pinned search_catalog first to avoid the
+    // unwired-Vectorize hallucination path; with the cutover in
+    // place that mitigation is unnecessary. A regression here —
+    // empty Vectorize, search_datasets first — would surface as
+    // missing Load chips and is reverted by `git revert` of this
+    // commit.
     const tools = [
-      getSearchCatalogTool(),
       getSearchDatasetsTool(),
       getListFeaturedDatasetsTool(),
+      getSearchCatalogTool(),
       getLoadDatasetTool(),
       getFlyToTool(),
       getSetTimeTool(),
@@ -1136,13 +1133,14 @@ export async function* processMessage(
       // Track all datasets returned by discovery tools across rounds in
       // this attempt so we can auto-inject Load buttons for any the LLM
       // mentions by title but forgets to tag with <<LOAD:...>> markers.
-      // Seed with pre-search results so the auto-inject safety net can
-      // match dataset titles in the LLM's prose even when the model
-      // doesn't call any discovery tool. Any tool-call results are
-      // appended later — both legacy `search_catalog` results and Phase
-      // 1c `search_datasets` / `list_featured_datasets` results land
-      // here, normalised to the same minimal shape (id + title).
-      const searchResultsThisAttempt: CatalogSearchResult[] = [...preSearchCatalogResults]
+      // Tool-call results land here, normalised to the same minimal
+      // shape (id + title) — `search_datasets`, `list_featured_datasets`,
+      // and the legacy `search_catalog` fallback all feed in.
+      // catalog(1d/F) dropped the pre-search seed; an LLM that never
+      // calls a discovery tool now has nothing to auto-inject for,
+      // which is fine — the system prompt makes calling a discovery
+      // tool the explicit prerequisite for mentioning a dataset.
+      const searchResultsThisAttempt: CatalogSearchResult[] = []
 
       try {
         toolLoop: while (round < MAX_TOOL_CALL_ROUNDS) {
