@@ -390,6 +390,57 @@ describe('searchDatasets — hydration filters', () => {
     const result = await searchDatasets(env, { query: 'hurricane' })
     expect(result.datasets).toEqual([])
   })
+
+  it('does not let private vectors consume topK slots that public hits could fill', async () => {
+    // Regression for Copilot review on PR #59: the embed job stores
+    // `visibility` in vector metadata, but searchDatasets used to
+    // filter only at the D1 hydration step. With a `limit` of 2,
+    // a closer-scoring private vector at rank 1 would consume a
+    // topK slot, get dropped at hydration, and the response would
+    // be missing a public match that exists further down the
+    // ranking. The Vectorize filter now includes
+    // `visibility: 'public'` so private vectors don't even compete.
+    //
+    // Construct a scenario where a private dataset would outrank
+    // public ones if visibility weren't filtered at the Vectorize
+    // layer: identical keyword set across all three.
+    const db = seed([
+      {
+        id: 'PRIVATE_HURR',
+        title: 'Private Hurricane Tracks',
+        abstract: 'Private.',
+        visibility: 'private',
+        keywords: ['hurricane', 'storm', 'atlantic'],
+      },
+      {
+        id: 'PUBLIC_HURR_A',
+        title: 'Public Hurricane A',
+        abstract: 'Public A.',
+        keywords: ['hurricane', 'storm'],
+      },
+      {
+        id: 'PUBLIC_HURR_B',
+        title: 'Public Hurricane B',
+        abstract: 'Public B.',
+        keywords: ['hurricane'],
+      },
+    ])
+    const env = freshEnv(db)
+    await indexAll(env, ['PRIVATE_HURR', 'PUBLIC_HURR_A', 'PUBLIC_HURR_B'])
+
+    // limit=2: under the bug, top-2 includes the private row and
+    // one public; hydration drops the private; result has 1 entry.
+    // After the fix: top-2 are both public; result has 2 entries.
+    const result = await searchDatasets(env, {
+      query: 'hurricane storm atlantic',
+      limit: 2,
+    })
+    const ids = result.datasets.map(d => d.id).sort()
+    expect(ids).toContain('PUBLIC_HURR_A')
+    expect(ids).toContain('PUBLIC_HURR_B')
+    expect(ids).not.toContain('PRIVATE_HURR')
+    expect(result.datasets).toHaveLength(2)
+  })
 })
 
 describe('searchDatasets — limit', () => {

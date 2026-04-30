@@ -138,8 +138,19 @@ export async function searchDatasets(
   // pre-`gen:node-key`). Falling through with no filter would
   // broaden the search to all peers — exactly the opposite of
   // local-only — so short-circuit to an empty result instead.
-  const filter = await buildVectorizeFilter(env, options.filters)
-  if (filter === 'unresolvable') return { datasets: [] }
+  const baseFilter = await buildVectorizeFilter(env, options.filters)
+  if (baseFilter === 'unresolvable') return { datasets: [] }
+
+  // This helper backs a public-only search surface. Always constrain
+  // the vector query itself to `visibility: 'public'` so private and
+  // unlisted vectors don't take topK slots only to be dropped at
+  // hydration — that would shrink the result below `limit` even when
+  // more public matches exist further down the ranking. The
+  // hydration step still filters defensively, but the load-bearing
+  // filter is here.
+  const filter: VectorizeVectorMetadataFilter = baseFilter
+    ? ({ ...(baseFilter as Record<string, unknown>), visibility: 'public' } as unknown as VectorizeVectorMetadataFilter)
+    : ({ visibility: 'public' } as unknown as VectorizeVectorMetadataFilter)
 
   const queryVec = await embedDatasetText(env, query)
   const matches = await queryEmbedding(env, queryVec, { limit, filter })
