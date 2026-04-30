@@ -505,6 +505,71 @@ describe('validateAndCleanText', () => {
     expect(validIds.has('INTERNAL_SST_001')).toBe(true)
   })
 
+  // -------------------------------------------------------------
+  // Phase 1c — title-overlap fallback (catalog(1c/N))
+  // -------------------------------------------------------------
+
+  it('resolves a marker whose contents are a near-title via token overlap', () => {
+    // Real failure mode from PR #59: the LLM put a title-shaped
+    // payload in the marker that didn't share a prefix with the
+    // catalog title. Token-overlap rescues it.
+    const ds = [
+      makeDataset({ id: 'INTERNAL_SOS_42', title: 'Sea Ice Extent (Arctic 1979-2020)' }),
+      makeDataset({ id: 'INTERNAL_SOS_99', title: 'Wildfire Smoke Tracking' }),
+    ]
+    const text = 'Take a look at this one.\n<<LOAD:Arctic Sea Ice Extent>>\nIt covers 1979 onward.'
+    const { cleanedText, validIds, invalidIds } = validateAndCleanText(text, ds)
+    expect(validIds.has('INTERNAL_SOS_42')).toBe(true)
+    expect(invalidIds.size).toBe(0)
+    // The marker contents get rewritten to the canonical id so the
+    // chat UI's [[LOAD:...]] roundtrip in conversation history sees
+    // a stable payload.
+    expect(cleanedText).toContain('<<LOAD:INTERNAL_SOS_42>>')
+    expect(cleanedText).not.toContain('Arctic Sea Ice Extent>>')
+  })
+
+  it('strips when the overlap is ambiguous (tie at the top)', () => {
+    // Two datasets share an equal token overlap on a marker that
+    // is NOT a prefix of either title — better strip than load the
+    // wrong dataset. The marker word order is shuffled so the
+    // existing startsWith rescue can't resolve it first.
+    const ds = [
+      makeDataset({ id: 'INTERNAL_A', title: 'Atlantic Sea Surface Temperature Anomaly' }),
+      makeDataset({ id: 'INTERNAL_B', title: 'Pacific Sea Surface Temperature Anomaly' }),
+    ]
+    const text = '<<LOAD:Surface Temperature Anomaly Sea>>\n'
+    const { invalidIds } = validateAndCleanText(text, ds)
+    expect(invalidIds.has('Surface Temperature Anomaly Sea')).toBe(true)
+  })
+
+  it('strips when the marker has fewer than 2 content tokens', () => {
+    // `idTokens.size < 2` short-circuit. "Specific" is one content
+    // token (the rest are stop words / under length); not enough
+    // for a confident match.
+    const ds = [makeDataset({ id: 'INTERNAL_X', title: 'Some Specific Climate Reanalysis Project' })]
+    const text = '<<LOAD:specific>>\n'
+    const { invalidIds } = validateAndCleanText(text, ds)
+    expect(invalidIds.has('specific')).toBe(true)
+  })
+
+  it('strips when the marker has 2+ tokens but overlap is below the 3-shared-tokens floor', () => {
+    // Two distinct content tokens, only one shared with the catalog
+    // title — falls below the ≥ 3 floor.
+    const ds = [makeDataset({ id: 'INTERNAL_X', title: 'Volcanic Eruption Plume Tracking 2010' })]
+    const text = '<<LOAD:Aurora Borealis Volcanic>>\n'
+    const { invalidIds } = validateAndCleanText(text, ds)
+    expect(invalidIds.has('Aurora Borealis Volcanic')).toBe(true)
+  })
+
+  it('strips when the marker is mostly stop words (token-overlap rescue must not fire on noise)', () => {
+    const ds = [makeDataset({ id: 'INTERNAL_X', title: 'Global Earth Data Visualization' })]
+    const text = '<<LOAD:Global Data>>\n'
+    const { invalidIds } = validateAndCleanText(text, ds)
+    // "global" and "data" are both stop words for the matcher, so
+    // the marker has zero content tokens and falls through to invalid.
+    expect(invalidIds.has('Global Data')).toBe(true)
+  })
+
   it('returns empty invalidIds when all IDs are valid', () => {
     const text = 'No dataset references here, just plain text.'
     const { cleanedText, invalidIds } = validateAndCleanText(text, datasets)

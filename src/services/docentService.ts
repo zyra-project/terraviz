@@ -537,6 +537,93 @@ export type ExtractedGlobeAction =
   | { type: 'highlight-region'; geojson: GeoJSON.GeoJSON; label: string; bounds: [number, number, number, number] }
 
 /**
+ * Try to resolve the contents of a `<<LOAD:...>>` marker to a real
+ * dataset. The LLM is supposed to put an `id` in there, but in
+ * practice it often puts a title instead — sometimes verbatim from
+ * a tool result, sometimes a slightly-massaged version
+ * ("Arctic Sea Ice Extent" vs the catalog's
+ * "Sea Ice Extent (Arctic 1979-2020)"). The chip pipeline punishes
+ * any miss by stripping the marker entirely, so we resolve as
+ * generously as we can without crossing into "load the wrong
+ * dataset" territory.
+ *
+ * Resolution order:
+ *   1. Exact id (post-`trim`).
+ *   2. Title exact / startsWith bidirectional — original behaviour.
+ *   3. Token-overlap fallback: split both into content words, drop
+ *      stop words and stems shorter than 3 chars, count shared
+ *      tokens. Resolve if the best dataset's overlap is unambiguous
+ *      AND covers ≥ 60% of the marker's content words AND has
+ *      ≥ 3 shared content words. The "unambiguous" gate forbids
+ *      a tie at the top — better a stripped chip than the wrong
+ *      dataset loaded.
+ */
+function resolveMarkerToDataset(
+  rawId: string,
+  datasetIdSet: Set<string>,
+  datasets: Dataset[],
+): Dataset | string | null {
+  const id = rawId.trim()
+  if (datasetIdSet.has(id)) return id
+  if (id.length === 0) return null
+
+  const idLower = id.toLowerCase()
+
+  // Existing exact / startsWith bidirectional fallback.
+  const byTitle = datasets.find(d => {
+    const tLower = d.title.toLowerCase()
+    return tLower === idLower || tLower.startsWith(idLower) || idLower.startsWith(tLower)
+  })
+  if (byTitle) return byTitle
+
+  // Token-overlap fallback.
+  const idTokens = tokeniseTitle(idLower)
+  if (idTokens.size < 2) return null
+
+  let best: { dataset: Dataset; overlap: number } | null = null
+  let bestIsAmbiguous = false
+  for (const d of datasets) {
+    const titleTokens = tokeniseTitle(d.title.toLowerCase())
+    if (titleTokens.size === 0) continue
+    let overlap = 0
+    for (const t of idTokens) if (titleTokens.has(t)) overlap++
+    if (overlap === 0) continue
+    if (best === null || overlap > best.overlap) {
+      best = { dataset: d, overlap }
+      bestIsAmbiguous = false
+    } else if (overlap === best.overlap && d.id !== best.dataset.id) {
+      bestIsAmbiguous = true
+    }
+  }
+
+  if (!best || bestIsAmbiguous) return null
+  if (best.overlap < 3) return null
+  if (best.overlap / idTokens.size < 0.6) return null
+
+  return best.dataset
+}
+
+/**
+ * Stop words for the title-overlap matcher. Domain-generic words
+ * ("data", "dataset", "global") show up in many titles and must not
+ * drive a match by themselves.
+ */
+const TITLE_TOKEN_STOP_WORDS = new Set([
+  'the', 'and', 'for', 'with', 'from', 'into', 'over', 'this', 'that', 'are',
+  'data', 'datasets', 'dataset', 'global', 'world', 'earth',
+])
+
+function tokeniseTitle(s: string): Set<string> {
+  const out = new Set<string>()
+  for (const raw of s.split(/[^a-z0-9]+/)) {
+    if (raw.length < 3) continue
+    if (TITLE_TOKEN_STOP_WORDS.has(raw)) continue
+    out.add(raw)
+  }
+  return out
+}
+
+/**
  * Validate dataset IDs found in LLM text against the catalog.
  * Also extracts <<FLY:...>> and <<TIME:...>> inline markers
  * (and bare `fly_to:` / `set_time:` fallback patterns).
@@ -552,27 +639,25 @@ export function validateAndCleanText(
   const invalidIds = new Set<string>()
   const globeActions: ExtractedGlobeAction[] = []
   const datasetIdSet = new Set(datasets.map(d => d.id))
+  // When the title-overlap fallback rescues a marker, remember the
+  // mapping so the strip step downstream can rewrite the marker to
+  // the canonical id (rather than leaving the LLM's title-shaped
+  // payload in there, which would break the chat UI's [[LOAD:...]]
+  // round-trip when history is replayed).
+  const markerRewrites = new Map<string, string>()
 
   // Collect all referenced IDs for validation
   for (const match of text.matchAll(/<?<LOAD:([^>]+)>>?/g)) {
     const id = match[1].trim()
-    if (datasetIdSet.has(id)) {
-      validIds.add(id)
+    const resolved = resolveMarkerToDataset(id, datasetIdSet, datasets)
+    if (typeof resolved === 'string') {
+      validIds.add(resolved)
+    } else if (resolved) {
+      // Title or token-overlap match.
+      validIds.add(resolved.id)
+      if (id !== resolved.id) markerRewrites.set(id, resolved.id)
     } else {
-      // The LLM often puts a dataset TITLE in the marker instead of the
-      // internal ID (e.g. <<LOAD:Sea Level Rise>> instead of
-      // <<LOAD:INTERNAL_SOS_123>>). Check titles as a fallback so the
-      // marker still produces a Load button.
-      const idLower = id.toLowerCase()
-      const byTitle = datasets.find(d => {
-        const tLower = d.title.toLowerCase()
-        return tLower === idLower || tLower.startsWith(idLower) || idLower.startsWith(tLower)
-      })
-      if (byTitle) {
-        validIds.add(byTitle.id)
-      } else {
-        invalidIds.add(id)
-      }
+      invalidIds.add(id)
     }
   }
   for (const match of text.matchAll(/\bINTERNAL_[A-Z0-9_]+\b/g)) {
@@ -686,10 +771,17 @@ export function validateAndCleanText(
     }
   }
 
-  // Strip invalid <<LOAD:ID>> markers
-  let cleanedText = text.replace(/<?<LOAD:([^>]+)>>?\n?/g, (match, id) => {
+  // Strip invalid <<LOAD:ID>> markers, and rewrite resolved-via-
+  // fallback markers (where the LLM put a title in the marker
+  // contents) so the marker carries the canonical id. The chat UI's
+  // [[LOAD:...]]-roundtrip stores the marker in conversation
+  // history; without rewriting, a follow-up turn would see the
+  // title-shaped payload again and have to re-resolve it.
+  let cleanedText = text.replace(/<<LOAD:([^>]+)>>(\n?)/g, (match, id, trailing) => {
     const trimmedId = id.trim()
     if (invalidIds.has(trimmedId)) return ''
+    const canonicalId = markerRewrites.get(trimmedId)
+    if (canonicalId) return `<<LOAD:${canonicalId}>>${trailing}`
     return match
   })
 
