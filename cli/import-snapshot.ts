@@ -309,6 +309,11 @@ export async function runImportSnapshot(ctx: CommandContext): Promise<number> {
           (published.message ? ` — ${published.message}` : '') +
           '\n',
       )
+      if (published.errors?.length) {
+        for (const e of published.errors) {
+          ctx.stderr.write(`    ${e.field}: ${e.code} — ${e.message}\n`)
+        }
+      }
       continue
     }
     counts.imported++

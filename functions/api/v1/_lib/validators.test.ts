@@ -46,6 +46,29 @@ describe('deriveSlug', () => {
     expect(__internal.deriveSlug('Hurricane Helene 2024')).toBe('hurricane-helene-2024')
     expect(__internal.deriveSlug('  --Polar--  Vortex--  ')).toBe('polar-vortex')
   })
+
+  it('prefixes `dataset-` when the title leads with a digit (1d/J)', () => {
+    // The 1d SOS bulk import surfaced this — `validateDraftCreate`
+    // accepts a digit-leading slug but `validateForPublish` doesn't.
+    // The fix is here so the publisher API's auto-derived slug is
+    // always publish-ready.
+    expect(__internal.deriveSlug('360 Media - National Marine Sanctuaries'))
+      .toBe('dataset-360-media-national-marine-sanctuaries')
+    expect(__internal.deriveSlug('120 Years of Earthquakes'))
+      .toBe('dataset-120-years-of-earthquakes')
+  })
+
+  it('falls back to `dataset` when the title contains no slug-able chars', () => {
+    expect(__internal.deriveSlug('---')).toBe('dataset')
+    expect(__internal.deriveSlug('   ')).toBe('dataset')
+  })
+
+  it('respects the 64-char cap even with the dataset- prefix', () => {
+    const slug = __internal.deriveSlug('9' + 'a'.repeat(80))
+    expect(slug.length).toBeLessThanOrEqual(64)
+    expect(slug.startsWith('dataset-')).toBe(true)
+    expect(slug.endsWith('-')).toBe(false)
+  })
 })
 
 describe('validateDraftCreate', () => {
