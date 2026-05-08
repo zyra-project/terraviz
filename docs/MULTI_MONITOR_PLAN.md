@@ -1,0 +1,982 @@
+# Multi-Monitor Output Plan — installation-grade displays
+
+Feasibility plan for driving one or more secondary display
+surfaces from Terraviz: a control window on the operator's
+primary monitor and one or more borderless fullscreen output
+windows on adjacent monitors, each rendering an equirectangular
+projection of the live globe state suitable for an LED sphere or
+similar 2:1-input device.
+
+Status: **draft for review.** Nothing implemented; this document
+exists to align scope and architecture before any code lands.
+
+The motivating use cases are concrete and somewhat narrow:
+
+1. **Science On a Sphere–style LED globe.** The control window
+   shows the normal interactive UI; a second window outputs the
+   currently-loaded globe state as a 2:1 equirectangular image,
+   designed to be re-wrapped around the physical sphere's pixel
+   grid.
+2. **Planetarium domes.** Multiple projectors, each fed by a
+   slice of the data — typically fisheye or pre-warped
+   rectilinear sub-frames.
+3. **Lecture / kiosk dual-display.** A presenter drives the
+   control window on a podium screen while the audience sees a
+   mirrored output on a wall-sized TV.
+
+Use case (1) is the v1 target. Use cases (2) and (3) are
+designed-for-but-deferred — the window-management plumbing built
+for v1 admits both as additive phases with no rework of v1 code.
+
+---
+
+## Goal
+
+Let an operator running Terraviz desktop on a workstation with
+multiple monitors:
+
+- Pick a target monitor and click **"Add output"**.
+- Choose an output mode (v1: equirectangular SOS).
+- See a borderless fullscreen window appear on that monitor
+  that mirrors the *composited globe state* of the control
+  window's primary panel — including the active dataset, any
+  stacked data layers, the day/night base Earth, and the live
+  playback position.
+- Have that output stay synchronized as the operator switches
+  datasets, plays/pauses, scrubs, or runs a tour.
+- Tear down the output cleanly without affecting the control
+  window or any other output.
+
+The control window's UX is **untouched**. Operators who never
+open Tools → Outputs see no behavioural change.
+
+## Constraints found during exploration
+
+### 1. The source asset is not the right thing to display
+
+A first-pass design considered shipping the dataset's raw
+2:1 equirectangular asset (`<img>` or `<video>`) full-frame to
+the output window — the SOS catalog is *almost* entirely
+authored in 2:1 equirectangular, and `mapRenderer.updateTexture`
+(line 856) and `setVideoTexture` (line 875) confirm the
+expected projection. The shortcut works for the trivially-easy
+case but breaks for everything realistic:
+
+- **Non-global datasets.** Datasets with a CONUS or other
+  regional bounding box are not 2:1 — they're a strip that the
+  globe places at a specific lat/lon range. Shipped raw, the
+  output sphere shows the strip stretched across its entire
+  surface in the wrong place.
+- **Composited overlays.** Country borders, gridlines, place
+  markers, multi-globe sync indicators — none of these exist
+  in the source asset. They exist only as a composite in the
+  control window's render output.
+- **Multi-layer stacks.** When an operator loads a base layer
+  (e.g. SST) plus a foreground layer (e.g. cyclone tracks), the
+  output needs the composite, not just the base.
+
+**Implication:** the output window must produce its own
+equirectangular composite. The source asset alone is
+insufficient.
+
+### 2. MapLibre cannot natively render an equirectangular projection
+
+MapLibre owns its WebGL context, projection matrices, and tile
+rendering pipeline. Its globe projection is a Mercator
+derivative deformed to a sphere on the GPU; it does not expose
+"render this scene to a 2:1 equirectangular framebuffer" as an
+operation. Three rejected alternatives:
+
+| Approach | Why rejected |
+|---|---|
+| **Capture the control window's WebGL canvas + inverse-warp** | Operator's camera only sees one hemisphere at a time. The far side of the globe is unrecoverable from the capture. Fundamental. |
+| **Run six MapLibre instances at cubemap angles, then convert** | MapLibre is heavy; six concurrent instances will not fit in workstation GPU memory at LED-sphere resolutions, and MapLibre's globe projection still distorts each face. |
+| **Server-side render via headless Chrome / Cloudflare** | Latency-incompatible with live video playback; doubles the rendering cost on shared infrastructure; doesn't solve the projection problem either. |
+
+The accepted approach is to run a **parallel headless Three.js
+scene** in the output window itself, mirroring the control
+window's globe state, and render that scene directly to a 2:1
+equirectangular framebuffer via a single fragment-shader pass.
+
+Three.js was already chosen for the VR system (`vrSession.ts`
++ `vrScene.ts`), and the `photorealEarth.ts` factory already
+produces a fully composited Earth sphere (diffuse, night
+lights, specular, atmosphere, clouds, sun) used by both VR and
+the Orbit character page. The output system reuses that
+factory directly. We add:
+
+- A dataset-texture overlay layer (already done by `vrScene.ts`
+  on top of `photorealEarth`).
+- A multi-layer stack support for overlapping datasets (new —
+  semi-transparent sphere shells at radii 1.000, 1.001, 1.002,
+  …).
+- An equirectangular render-to-texture pass (new — single
+  fragment shader; ~80 LOC).
+
+### 3. Equirectangular RTT is one shader pass, not a cubemap
+
+The naive "360 camera at the center" framing translates to two
+flavors:
+
+- **Cubemap-from-center → equi convert.** Render six cube faces
+  from a camera at the globe's center looking outward at the
+  inside surface, then sample the cubemap at every (lon, lat)
+  to produce equirectangular. Two passes, six render-target
+  switches, pole stretching artifacts where cubemap pixels are
+  smeared.
+- **Direct equirectangular RTT.** Skip the cubemap entirely.
+  For each output pixel `(u,v) ∈ [0,1]²`, compute the world
+  direction `(lon, lat) = (u·2π − π, v·π − π/2)`, raycast that
+  direction *from a configurable camera position* (default
+  `(0,0,0)` — the sphere center) against the sphere stack,
+  sample each layer's composited texture at the hit point. One
+  pass, native 2:1 output, no pole artifacts. The camera
+  position is a shader uniform; v1 pins it to the origin but
+  Phase 2+ uses a non-zero offset to implement zoom — see
+  §3.5.
+
+Direct RTT wins on every axis. The shader is well-known
+(equirectangular projections are textbook) and only ~80 LOC of
+GLSL. We commit to direct RTT for v1 and never build the
+cubemap path.
+
+### 4. The shared `<video>` element trick from VR doesn't carry over
+
+In VR, the same `HLSService.video` element is consumed by both
+MapLibre's `VideoTexture` and Three.js's `VideoTexture` —
+identical decoder, perfect sync, zero extra bandwidth. That
+pattern works because both consumers share the same DOM
+document.
+
+A second Tauri webview window has its **own DOM, own JS
+context, own decoder, and own video element**. We cannot
+literally pass the primary's `<video>` to the output window.
+
+For v1: the output window receives the dataset URL from the
+control window via Tauri events, creates its own `HLSService`,
+and decodes independently. The control window broadcasts
+`currentTime` and `paused` once per second; the output window
+re-syncs if its decoder drifts more than 200 ms. Drift is
+typically <100 ms in practice — imperceptible on an LED sphere
+where each pixel covers a non-trivial physical area.
+
+A future Phase 5 polish (see Roadmap) could introduce a shared
+GPU texture handle to eliminate the second decoder. We don't
+need it for v1.
+
+### 5. Tauri capabilities are scoped to the main window today
+
+`src-tauri/capabilities/default.json` declares:
+
+```json
+"windows": ["main"],
+```
+
+Output windows are new labels — `output-1`, `output-2`, etc. —
+and won't inherit `default`'s permissions unless we either:
+
+- Broaden `windows` to `["main", "output-*"]` (glob supported in
+  Tauri capabilities), or
+- Author a separate, narrower capability file
+  (`capabilities/output.json`) that grants only what the output
+  window actually needs (window controls, http for HLS, no
+  filesystem, no keychain).
+
+The narrower capability is the right choice — output windows
+have no reason to read the keychain or invoke download
+commands, and giving them no surface area limits the blast
+radius if a malicious dataset URL ever exploits the output
+webview. See §5 ("MVP scope") for the exact permission set.
+
+### 6. Tauri's window-creation API is JS-side
+
+Tauri v2 exposes `WebviewWindow.new(label, options)` from
+`@tauri-apps/api/webviewWindow`. We don't need to touch Rust at
+all to create output windows in v1 — the control window's TS
+service spawns and tears them down via this API, and IPC events
+flow via `getCurrent().emit(...)` (JS side, window-to-window).
+
+Already-granted Tauri permissions cover the required ops:
+
+- `core:window:default` — create / destroy / show / hide
+- `core:window:allow-set-fullscreen` — borderless fullscreen
+- `core:window:allow-set-size` — explicit size for non-fullscreen
+- `core:window:allow-set-position` — pin to monitor X/Y
+- `core:window:allow-available-monitors` — enumerate monitors
+- `core:window:allow-current-monitor` — detect which monitor
+
+### 7. Vite multi-entry build
+
+The output window loads a separate HTML page (`output.html`)
+so its JS bundle is decoupled from the heavy main app — no
+MapLibre, no UI shell, no Orbit, no analytics emitter (until
+we decide what to do about telemetry, see Open Questions).
+Vite supports this via `rollupOptions.input` with multiple
+entries.
+
+The output bundle's runtime dependency is **Three.js** (lazy-
+loaded, same chunk that VR already pulls — HTTP-cached from
+the user's first VR session if any). Estimated bundle:
+
+- Output entry shell (HTML, CSS, protocol handler): ~10 KB gz
+- Three.js core: ~150 KB gz (already lazy-chunked for VR)
+- `photorealEarth.ts` + new equirect shader: ~30 KB gz
+- HLS.js (lazy-loaded only for video datasets): ~80 KB gz
+
+For an SOS install that only ever shows video datasets, the
+output process holds ~270 KB of JS resident. Workstation-class
+hardware, completely fine.
+
+### 8. Web fallback is constrained but nice-to-have
+
+`window.open()` in a browser is subject to popup blockers,
+the Fullscreen API on a popped window has historically been
+flaky across browsers, and `BroadcastChannel` is the pragmatic
+IPC channel between same-origin browser windows.
+
+V1 ships **desktop-only**. The architecture is designed so a
+web implementation could replace the Tauri window/IPC layer
+with `window.open()` + `BroadcastChannel` later without
+touching the output rendering code. See Phase 5.
+
+---
+
+## Architecture
+
+```
+┌────────────────────────────────────────┐    ┌──────────────────────────────────┐
+│ Control window (existing main app)     │    │ Output window (output.html)      │
+│                                        │    │                                  │
+│ MapLibre canvas + DOM UI               │    │ Three.js WebGLRenderer (headless)│
+│  └─ ViewportManager (1/2/4 globes)     │    │  ┌────────────────────────────┐  │
+│  └─ datasetLoader.{loadImage,loadVideo}│    │  │ photorealEarth sphere      │  │
+│                                        │    │  │  + dataset texture overlay │  │
+│ + new MultiOutputManager service       │    │  │  + multi-layer shells      │  │
+│  ├─ enumerate monitors                 │ ──>│  └────────────────────────────┘  │
+│  ├─ spawn/destroy WebviewWindow        │evt │             │                    │
+│  ├─ broadcast globe state diff         │    │             ▼                    │
+│  └─ persist last-used config           │    │  ┌────────────────────────────┐  │
+│                                        │    │  │ Equirect RTT shader pass   │  │
+│ + new outputUI panel in Tools menu     │    │  │  (single fragment shader,  │  │
+│                                        │    │  │   2:1 framebuffer)         │  │
+│                                        │    │  └────────────────────────────┘  │
+│                                        │    │             │                    │
+│                                        │    │             ▼                    │
+│                                        │    │  Full-bleed <canvas> at 2:1      │
+└────────────────────────────────────────┘    └──────────────────────────────────┘
+                  │                                          ▲
+                  └──── Tauri events (window→window) ────────┘
+                       (state diffs, ~1 msg per state change)
+```
+
+### Globe state — what gets mirrored
+
+The control window's `MultiOutputManager` maintains a
+serialisable snapshot of "what the primary panel is showing,"
+broadcast as a diff whenever it changes. v1 captures:
+
+| Field | Source | Update trigger |
+|---|---|---|
+| `dataset.id`, `dataset.url` | `datasetLoader` | dataset load / unload |
+| `dataset.kind` (image / video) | `datasetLoader` | dataset load |
+| `dataset.bbox` (or `null` for global) | enriched dataset metadata | dataset load |
+| `playback.currentTime` | `playbackController` | per-second tick (video only) |
+| `playback.paused` | `playbackController` | play / pause action |
+| `layers[]` (stacked-layer ids and z-order) | new `layerStack` state in `main.ts` | layer add / remove / reorder |
+| `time.simulationDate` | playback engine | date label tick |
+| `view.dayNight` (toggle on/off) | Tools menu | toggle change |
+| `view.cameraOffset` (Vector3) | Manager (computed) | always `(0,0,0)` in v1; Phase 2+ derived from operator's MapLibre camera when "Track operator camera" is enabled — see §3.5 |
+
+**Not** mirrored to the SOS output in v1: the operator's
+camera position (zoom/pan/bearing). The SOS output is always a
+full equirectangular unwrap of the *whole* sphere — a physical
+LED sphere is a 1:1 surface representation of Earth, and
+zooming the source would stretch a region of Earth over the
+whole physical sphere, breaking geography for visitors. The
+control window keeps its own independent camera as today.
+
+The shader is forward-compatible with off-center camera modes,
+though — see §3.5 ("Off-center camera as zoom") below. Phase 2
+(dome / fisheye) and Phase 4 (presenter / mirrored) will use
+the same shader with a non-zero offset uniform to optionally
+track the operator's zoom.
+
+### New modules
+
+| File | Responsibility |
+|---|---|
+| `src/services/multiOutput/manager.ts` | `MultiOutputManager` — singleton: enumerates monitors, spawns/destroys output windows, builds and broadcasts globe-state diffs, persists config |
+| `src/services/multiOutput/protocol.ts` | Shared TS types for control↔output IPC events. Imported by both bundles. Single source of truth for the state schema above. |
+| `src/services/multiOutput/stateAggregator.ts` | Subscribes to dataset / playback / layer / time / view events, builds the state snapshot, emits diffs |
+| `src/ui/outputUI.ts` | Tools → Outputs panel — list current outputs, "Add output" button, per-output config menu (monitor, mode, debug overlay) |
+| `output/main.ts` | Output window entry. Creates Three.js renderer, builds `photorealEarth` scene + dataset overlay + layer stack, runs equirect RTT each frame, displays to a full-bleed canvas |
+| `output/equirectRtt.ts` | Equirectangular render-to-texture pass — single fragment shader, raycasts from a configurable camera offset (default origin) at every (lon, lat) of the output framebuffer. Forward-compat with off-center "zoom" modes (§3.5). |
+| `output/datasetMirror.ts` | Output-side companion to control-window `datasetLoader` — given a `dataset.url` + `dataset.kind` + `dataset.bbox`, builds a Three.js texture (image or HLS-driven VideoTexture) and a UV transform |
+| `output/layerStack.ts` | Builds and updates the multi-shell sphere stack from the layers state diff |
+| `output/output.html` + `output/output.css` | Output window markup and styling — black body, no cursor, full-bleed canvas |
+| `src-tauri/capabilities/output.json` | Narrow capability set scoped to `output-*` window labels: HTTP for HLS / image fetch, window controls, no filesystem, no keychain, no IPC commands |
+
+### Modified modules
+
+| File | Change |
+|---|---|
+| `src/main.ts` | Boot `MultiOutputManager`; wire it to dataset / playback / layer events |
+| `src/services/datasetLoader.ts` | Emit a `dataset:loaded` event the manager subscribes to |
+| `src/ui/playbackController.ts` | Forward play / pause / scrubber events to the state aggregator |
+| `src/ui/toolsMenuUI.ts` | Add "Outputs" entry that opens the new Outputs panel |
+| `src-tauri/capabilities/default.json` | No change |
+| `vite.config.ts` | Add `rollupOptions.input` with `main` and `output` entries |
+| `package.json` | No new runtime deps for v1 (Three.js already a runtime dep for VR) |
+
+### Boot flow (v1, SOS equirectangular mode)
+
+1. Control window boots normally. `MultiOutputManager.init()`
+   reads `localStorage.sos-multi-output-config`. If empty (first
+   launch, or user has never enabled outputs), it does nothing —
+   no monitor enumeration, no IPC, zero overhead.
+2. User opens **Tools → Outputs → Add output**. The panel calls
+   `monitor.availableMonitors()` and presents a picker (label +
+   resolution + position diagram). User picks a monitor and a
+   mode (v1: only "SOS Equirectangular" available).
+3. Manager calls `WebviewWindow.new('output-1', {...})` with
+   `decorations: false`, `fullscreen: true`,
+   `position: { x, y }` (the chosen monitor's top-left), and a
+   navigation URL pointing at the bundled `output.html`. Tauri
+   creates the window on the target monitor.
+4. Output window boots `output/main.ts`. Page renders a black
+   background. Lazy-imports Three.js. Builds `photorealEarth`
+   into a hidden scene. Allocates a 2:1 framebuffer at the
+   target resolution (e.g. 4096×2048 for an 8K LED sphere).
+5. Output emits `output_ready` so the manager knows it's
+   listening. Manager replies with a full state snapshot.
+6. Output applies the snapshot: loads the dataset texture via
+   `datasetMirror`, builds the layer stack via `layerStack`,
+   sets playback to the broadcast `currentTime`. Begins
+   rendering the equirect RTT each frame and presenting it
+   to the canvas.
+7. Done.
+
+### Per-state-change flow
+
+State diffs are broadcast on change, not on a polling clock:
+
+- **Dataset load** → manager broadcasts `{ dataset: { id,
+  url, kind, bbox } }`. Output's `datasetMirror` swaps the
+  sphere overlay texture; for video, it tears down the old
+  HLS instance and starts a new one.
+- **Layer add / remove / reorder** → manager broadcasts the
+  full ordered `layers[]` array (small enough that diffing
+  is overkill). Output's `layerStack` rebuilds the shell
+  stack accordingly.
+- **Play / pause / seek** → manager broadcasts the discrete
+  event. Output's video element pipes through.
+- **Per-second timecode** → manager broadcasts
+  `{ playback: { currentTime, paused } }`. Output applies
+  the drift-correction logic from §2.4.
+- **Day/night toggle** → manager broadcasts the new state.
+  Output flips the photoreal Earth's day/night shader uniform.
+- **Output close** → output emits `output_closed` (or the
+  manager observes the WebviewWindow close event). Manager
+  drops the record.
+
+The output **does not** request state on its own initiative
+after `output_ready`. The control window is the single source
+of truth.
+
+### Per-frame flow inside the output window
+
+1. Read latest state snapshot (most-recent-wins; older queued
+   diffs are coalesced).
+2. If `dataset.kind === 'video'` and a video element exists,
+   call `videoTexture.needsUpdate = true`.
+3. Update the photoreal Earth's sun position from
+   `time.simulationDate` (uses existing `getSunPosition()`
+   helper from `utils/time.ts`).
+4. Render the sphere stack to the equirectangular framebuffer
+   with the current `uCameraOffset` uniform (always `vec3(0)`
+   in v1).
+5. Blit the framebuffer to the visible canvas (single
+   `gl.blitFramebuffer` call, GPU-local — no CPU readback).
+
+Frame rate target: 30 fps for video datasets, 1 Hz for static
+images (don't redraw what hasn't changed). The render loop is
+a `requestAnimationFrame` driver that early-outs on a
+"nothing changed" check.
+
+### Off-center camera as zoom (forward-compat, not used in v1)
+
+The naive equirect RTT shader puts the conceptual "360 camera"
+at the exact center of the sphere — every (u, v) of the output
+maps to a unique unit-direction, every direction hits the sphere
+at one point, and the result is a uniform equirectangular
+projection.
+
+If we move the camera to an offset position `o` (with `|o| < 1`
+so it stays inside the sphere), the mapping becomes non-uniform.
+For each output pixel, we ray-march from `o` along
+`dir(u, v)` until the unit sphere is hit, then sample at the
+hit point. Surface points on the side the camera moved toward
+subtend larger angles → they take up more of the 2:1 frame.
+The result is a continuously-warped equirectangular,
+perceptually equivalent to "zooming into" the region the
+camera moved toward. The far hemisphere shrinks but does not
+clip — it just gets smaller.
+
+This is six extra lines of GLSL and one `uniform vec3
+uCameraOffset`. We add it from day one for forward-compat,
+even though v1 always pins `uCameraOffset = vec3(0)`:
+
+| Mode | Camera offset | Reason |
+|---|---|---|
+| **SOS LED sphere** (v1) | Always `(0,0,0)` | The physical LED sphere is a 1:1 surface representation of Earth. Zooming the source would stretch a region across the whole physical sphere, breaking geography for visitors. |
+| **Dome / fisheye** (Phase 2) | Optional, operator toggle | A dome shows whatever the operator wants the audience to see. Tracking the control camera's zoom lets the dome "zoom into CONUS" during a hurricane segment. |
+| **Presenter** (Phase 4) | Track operator camera | Audience sees what the presenter is looking at. |
+
+When the offset *is* enabled (Phase 2+), the manager translates
+the control window's MapLibre camera into a sphere offset:
+
+```ts
+// Pseudocode — Phase 2 mapping, not v1
+const lat = camera.center.lat
+const lon = camera.center.lng
+const zoomFactor = Math.min(1 - 1 / (camera.zoom + 1), 0.85)
+const dir = sphericalToCartesian(lat, lon)
+state.view.cameraOffset = dir.multiplyScalar(zoomFactor)
+```
+
+The 0.85 cap prevents the camera from approaching the sphere
+surface, where the warp becomes degenerate.
+
+V1 ships without exposing this — the shader uniform exists,
+the state field exists in the protocol, but the manager pins
+it to zero and the Outputs panel offers no toggle for it.
+
+### Asset resolution rules (control window picks the URL)
+
+The control window's `datasetLoader` already understands
+variant ladders for both image (`_4096`, `_2048`, `_1024`
+suffixes or manifest envelopes) and video (HLS manifest from
+`/api/v1/datasets/{id}/manifest` or the Vimeo proxy). The
+output's URL is chosen by the *output window* given its
+target monitor's resolution:
+
+| Output framebuffer | Image variant | Video variant |
+|---|---|---|
+| ≥ 8192 wide | manifest top, fallback 4096 | 4K HLS level |
+| 4096–8191 | 4096 | 4K HLS level |
+| 2048–4095 | 2048 | 1080p HLS level |
+| < 2048 wide | 1024 | 720p HLS level |
+
+The output framebuffer is independent of the operator's
+monitor — a 1080p preview monitor can host an output rendered
+at 4096×2048 and downsampled to display, useful for "preview
+what an SOS sphere will see" workflows.
+
+### Persistence
+
+`localStorage['sos-multi-output-config']` (control window only):
+
+```ts
+interface PersistedOutputConfig {
+  outputs: Array<{
+    label: string             // 'output-1' | 'output-2' | …
+    monitorName: string       // OS-reported name; matched on next boot
+    mode: 'sos-equirect'      // future: 'fisheye' | 'mirrored' | …
+    framebufferSize: { width: number; height: number } // e.g. 4096×2048
+    debugOverlay: boolean
+  }>
+  autoRestoreOnLaunch: boolean // default false; opt-in
+}
+```
+
+On launch, if `autoRestoreOnLaunch === true`, the manager waits
+for the OS to report monitors (~50 ms after boot), tries to
+match each persisted output to a current monitor by name, and
+recreates the windows. If the monitor is gone (laptop unplugged
+from a kiosk dock), the entry is logged and the window is
+skipped — not silently moved to a different monitor.
+
+---
+
+## MVP scope (v1, this branch)
+
+What must work:
+
+- **Tools → Outputs panel** with a monitor picker and an "Add
+  output" button. One mode available: SOS Equirectangular.
+- **Borderless fullscreen output windows** on user-chosen
+  monitors. Multiple simultaneous outputs supported (each on a
+  distinct monitor; cap at 4).
+- **Equirectangular composite render.** Output runs a parallel
+  Three.js scene with `photorealEarth` + the active dataset
+  overlay + the multi-layer stack, renders to a 2:1
+  framebuffer at the configured resolution.
+- **Multi-layer stack support.** When the operator stacks
+  multiple datasets in the control window's primary panel,
+  the output mirrors the same z-ordered shell stack. (v1
+  reuses the control window's existing layer state — adding
+  per-layer opacity controls is out of scope; we surface what
+  the operator already configured.)
+- **Sync.** Output swaps when control window changes dataset.
+  Output's video transport stays within ~200 ms of the control
+  window's via periodic broadcast. Play/pause/seek are
+  honored.
+- **Per-output config in the Tools panel:** rename, change
+  framebuffer resolution (1024² / 2048² / 4096² / 8192²),
+  toggle debug overlay (shows current dataset id, sync delta,
+  fps in the corner — useful for installation calibration),
+  close.
+- **Optional persistence.** A "Restore outputs on launch"
+  checkbox. Off by default.
+- **Clean teardown.** Closing an output disposes the Three.js
+  scene, the HLS instance, and the framebuffer; manager
+  removes the record.
+- **Audio is muted on every output window.** The control
+  window is the single audio source.
+- **Cursor hidden** on the output webview after a brief idle.
+
+Explicitly out of scope for v1 (→ Phase 2+):
+
+- **Country borders / political lines on the output.** Vector-
+  layer rendering on the sphere is its own design problem
+  (line geometry on a sphere shell, fed from MapLibre's vector
+  tile sources or a static GeoJSON). Phase 2 polish.
+- **Place labels** on the output (Phase 2; harder than borders
+  because text-along-curve sprite atlasing is real work).
+- **Pass-through fast-path** for trivially-global single-asset
+  cases. Always render through the Three.js scene in v1; one
+  code path is easier to test. Add only if profiling
+  identifies it as worth the second code path (Phase 5).
+- Fisheye / dome projection (Phase 2; reuses the same scene,
+  changes only the projection shader).
+- Multi-projector edge-blended array (Phase 3).
+- Mirrored / cloned mode that captures the control window's
+  rendered globe (Phase 4).
+- Web fallback via `window.open()` / `BroadcastChannel`
+  (Phase 5).
+- Color-management / ICC profile awareness (Phase 5).
+- Shared-GPU texture for sub-frame video sync (Phase 5).
+- Output-window analytics. v1 emits no telemetry from the
+  output window. Existing control-window events
+  (`layer_loaded`, `playback_action`) are sufficient. See
+  Open Questions §3.
+- Per-output panel routing in multi-globe layouts. The MVP
+  wires every output to whichever panel is currently primary.
+  Promote-to-primary in the control window swaps what the
+  output shows. Per-output fixed-slot binding is Phase 3.
+
+---
+
+## Delivery plan
+
+A multi-window feature is hard to debug from a single repo
+checkout — the operator may not realize an output is
+misbehaving until they're standing in front of the LED sphere.
+So MVP lands as a sequence of small commits, each independently
+type-checked and tested, with the user-reachable wiring last.
+That keeps `git bisect` useful and lets specific pieces revert
+without rolling the whole feature back.
+
+| # | Commit | What lands | User-reachable? |
+|---|---|---|---|
+| 1 | `multi-output: scaffold plan + protocol types` | This doc, `multiOutput/protocol.ts` | No |
+| 2 | `multi-output: equirect RTT shader (unit tests + visual fixture)` | `output/equirectRtt.ts` and a tiny test page that loads a known sphere texture and verifies the shader produces the expected equirectangular pixels. Lands as a standalone module; not yet wired up. | No |
+| 3 | `multi-output: output window entry + Three.js scene scaffold` | `output/main.ts`, `output/datasetMirror.ts`, `output/output.html`, `output/output.css`, Vite multi-entry config. Output bundle builds; loadable as a static page; renders a default photoreal Earth with no dataset, no IPC. | No |
+| 4 | `multi-output: layer stack + dataset overlay` | `output/layerStack.ts`. Static fixture page can now load a fake dataset + fake layer stack and render it. Still no IPC. | No |
+| 5 | `multi-output: narrow Tauri capability for output-* windows` | `capabilities/output.json` granting only http + window controls. | No |
+| 6 | `multi-output: state aggregator + protocol implementation` | `multiOutput/manager.ts`, `multiOutput/stateAggregator.ts`. Manager constructible but not yet instantiated. | No |
+| 7 | `multi-output: emit dataset:loaded + layer events from main.ts` | Refactor of `datasetLoader` and `main.ts` to fire events the aggregator can subscribe to. Today's `panelStates` consumers keep working. | No |
+| 8 | `multi-output: wire MultiOutputManager into main.ts boot` | Manager instantiated; subscribes to events. No UI to spawn windows yet, so still invisible. | No |
+| 9 | `multi-output: add Tools → Outputs panel` | `outputUI.ts`, Tools menu entry. **First user-reachable commit.** Operator can add and remove SOS equirectangular outputs. | **Yes** |
+| 10 | `multi-output: persist + restore outputs across launches` | localStorage config, opt-in restore on boot, monitor-name matching. | Yes (additive) |
+| 11 | `multi-output: per-output debug overlay + framebuffer resolution picker` | Resolution picker in panel, debug HUD with dataset id, sync delta, and fps. | Yes (additive) |
+
+**Backout plan.** Reverting commit 9 leaves all the plumbing in
+place (manager, output bundle, capability) but removes the
+operator's ability to spawn windows. Control window behaviour
+is unchanged from pre-feature. Reverting commits 6-8 removes
+the manager itself — everything else still type-checks because
+nothing on the hot path imports from `multiOutput/`. Reverting
+commits 2-4 removes the output bundle — the unused build
+artifacts disappear; nothing else changes.
+
+**Acceptance for each commit:**
+
+- `npm run type-check` passes.
+- `npm run test` passes. New unit tests for `equirectRtt`
+  (visual fixture comparing output pixels to a known-good
+  reference at low resolution), `stateAggregator` (event
+  → diff), `layerStack` (state → scene-graph mutation).
+- `npm run build` produces both `dist/index.html` and
+  `dist/output.html`.
+- For commit 9, manual smoke on a dual-monitor Linux box:
+  add an output, load a CONUS-bbox dataset to verify the
+  bbox UV mapping is correct, load a video dataset to verify
+  HLS sync.
+- For commit 10, additionally verify persistence by quitting
+  and relaunching with restore enabled.
+
+---
+
+## Roadmap after MVP
+
+### Phase 2 — fisheye / dome projection + vector overlays + camera tracking
+
+The Three.js scene built for v1 already contains a fully
+composited sphere. Producing fisheye output is a one-shader
+change — swap `equirectRtt.ts` for `fisheyeRtt.ts` with a
+different `(u,v) → direction` mapping. ~50 LOC, no architecture
+change.
+
+This is also the natural phase to expose the **off-center
+camera offset** (§3.5) as a per-output toggle. A dome operator
+can enable "Track operator camera" so the dome zooms wherever
+the operator zooms on the control globe — a hurricane segment
+that calls for a CONUS-level closeup is one click. The state
+field and shader uniform already exist from v1; Phase 2 just
+adds the Outputs panel toggle, the lat/lon → offset mapping,
+and a smoothing filter so the dome doesn't jitter as the
+operator pans.
+
+In the same phase, country borders + gridlines on the sphere.
+Approach: pull the existing MapLibre vector borders source,
+project the line geometry onto a Three.js sphere shell at
+radius 1.0005, render alongside the photoreal Earth. ~300 LOC.
+
+Place labels (text-along-curve) is harder; ship-conditional on
+demand.
+
+Estimated effort: ~700 LOC across fisheye shader + vector
+overlay layer + per-output mode picker UI + camera-tracking
+toggle.
+
+### Phase 3 — multi-projector array (edge-blended walls / domes)
+
+Drives N output windows, each rendering a distinct sub-region
+of a larger virtual canvas, with optional edge blending in
+overlap zones. Used by:
+
+- Multi-projector planetarium domes (each projector covers
+  ~60° of the sky)
+- Video walls (rectangular grid of monitors)
+- Curved LED installations beyond the SOS sphere format
+
+Architecture additions:
+
+- **Per-output sub-region** — extend the output config with
+  `{ srcRect, dstRect, blendMask }`.
+- **Per-output fixed-slot binding** — opt out of "follow
+  primary" and pin to a specific multi-globe slot. (The MVP
+  manager already knows the slot index; this just exposes it
+  in the UI.)
+- **Blend mask authoring tool** — small calibration page
+  where the operator drags blend curves on each output until
+  the seam disappears. Saved per-monitor.
+- **Per-output color correction** — 1D LUT per output for
+  projector gamma matching.
+
+This is genuinely ambitious and overlaps with what purpose-
+built planetarium drivers do. **Gated on real-world demand**,
+not a speculative build.
+
+### Phase 4 — mirrored / cloned mode
+
+Captures the control window's currently-rendered globe
+(whatever the operator is looking at — pan, zoom, multi-globe,
+tour state) and shows it on a secondary monitor. Useful for
+lectures.
+
+Two implementations, picked by the operator:
+
+- **`captureStream` mode.** `canvas.captureStream()` from
+  MapLibre's WebGL canvas; output renders the resulting
+  `MediaStreamTrack` via a `<video>` element. Pixel-perfect
+  match to the operator's view including all DOM-overlay
+  chrome (info panel, browse panel, etc.) — which is great
+  for "pure mirror" lectures and bad for "show the data
+  cleanly to the audience."
+- **Parallel-render mode.** Reuses the v1 Three.js scene
+  with `view.cameraOffset` set to follow the operator's
+  MapLibre pan/zoom (the same mechanism Phase 2 introduces
+  for domes — see §3.5). The audience sees the same Earth
+  region and zoom level the operator sees, but cleanly
+  rendered without UI chrome.
+
+`output.html` switches on the `mode` field; both modes coexist
+and reuse the v1 plumbing.
+
+### Phase 5 — polish + web fallback
+
+- **Web `window.open()` fallback.** Replace `WebviewWindow.new`
+  with `window.open()` and Tauri events with `BroadcastChannel`
+  for the web build. Output rendering code is unchanged.
+- **Per-output audio.** Allow exactly one output to be the
+  audio source instead of forcing the control window. Useful
+  for kiosks where the LED sphere has speakers.
+- **Color management.** ICC profile per output, simple 1D
+  LUTs.
+- **Shared-GPU texture for sub-frame sync.** Custom Tauri
+  plugin if field experience demands it.
+- **Pass-through fast-path** for trivially-global cases.
+  Worth implementing if profiling shows the Three.js render
+  is the bottleneck.
+- **Telemetry.** Decide what (if anything) the output window
+  emits.
+- **Output-side dataset overlay.** Optional title card / data
+  attribution shown briefly on dataset change, like SOS does
+  natively.
+
+---
+
+## Tradeoffs and rejected alternatives
+
+### Why not just use OS-level monitor mirroring?
+
+OSes already mirror displays. For the dual-monitor lecture
+case (Phase 4), the operator could just set "duplicate
+displays" in the OS and skip Terraviz entirely. We're not
+solving that case in v1.
+
+For SOS, OS mirroring fails for two reasons:
+
+- It mirrors the **rendered control UI**, not the globe state.
+  The LED sphere driver gets the chrome, info panel, browse
+  panel, Orbit chat, etc.
+- It can't produce a 2:1 equirectangular projection of the
+  globe. The signal is whatever projection MapLibre is
+  rendering.
+
+Output windows produce a clean equirectangular composite of
+the globe state alone. That is the entire reason for the
+feature.
+
+### Why a parallel renderer instead of capturing the control window?
+
+Two reasons:
+
+- **The far hemisphere is unrecoverable from a capture.** The
+  operator's MapLibre camera shows one face of the globe at a
+  time. An LED sphere needs the whole surface. A capture-and-
+  inverse-warp pipeline would only ever fill half the output;
+  the other half would be undefined or interpolated garbage.
+- **MapLibre's globe projection is Mercator-derived.** Even if
+  we had the full sphere visible, inverting "what would
+  equirectangular look like at every (lon, lat)?" from a
+  Mercator-deformed render is sampling-noisy and pole-broken.
+
+A parallel scene that renders the **same data** in the
+**right projection** is straightforward by comparison.
+
+### Why one HLS decoder per output instead of one shared?
+
+The browser's `<video>` element is the cheapest, most battle-
+tested way to drive an HLS stream. Two `<video>` elements in
+two webviews each holding their own decoder is *fine*. The
+cost is bandwidth duplication (mitigated by HTTP cache on
+manifest + segment URLs) and double GPU decode pressure
+(mitigated by the workstation-class GPU target).
+
+We considered exposing the primary decoder's frames via
+`MediaStreamTrack` from `captureStream()` and sending that to
+the output window. That would halve decode cost. But it
+introduces a frame-rate negotiation problem (which window's
+rAF wins?), a pixel-format question (what color space?), and
+a stream-lifecycle problem (what happens if the source video
+re-loads mid-stream?). For v1 — where SOS sync at 200 ms is
+fine — independent decoders are simpler and reliable.
+
+Phase 5 may revisit this with a custom Tauri plugin that
+exposes a true shared GPU texture handle, eliminating the
+second decode entirely.
+
+### Why a separate output bundle vs. reusing the main bundle?
+
+Three reasons:
+
+- **Bundle size.** The main bundle is ~600 KB gzipped
+  (MapLibre alone is most of that). The output window does
+  not need MapLibre, the UI shell, Orbit, deep-link, or
+  analytics. Shipping the same bundle twice doubles the
+  webview memory footprint per output.
+- **Lifecycle simplicity.** The main bundle has a lot of
+  globally-stateful initialization (analytics, deep-link,
+  tile preloader). Re-running all of that in the output
+  window is pointless and surfaces test-only init paths.
+- **Capability narrowing.** A separate bundle with no `invoke`
+  calls except the ones it actually uses lets us declare a
+  much narrower Tauri capability for `output-*` windows.
+
+The cost is having two TS entry points and a small amount of
+code shared between them (`multiOutput/protocol.ts` is the
+only shared module). Acceptable.
+
+### Why direct equirect RTT instead of cubemap-and-convert?
+
+Both produce equivalent output for our use case. Direct RTT
+wins on:
+
+- **Pole quality.** Cubemap pole pixels are stretched across
+  thousands of equirect pixels at the top and bottom rows;
+  direct RTT samples the sphere at the actual pole each time.
+- **GPU work.** One render pass to one framebuffer vs. six
+  passes to six render targets followed by a conversion pass.
+- **Code volume.** ~80 LOC of shader vs. ~200 LOC for cubemap
+  setup + per-face camera matrices + conversion shader.
+
+The only argument for cubemap is "we already have a cubemap
+renderer somewhere" — which we don't. Direct RTT.
+
+---
+
+## Non-goals
+
+- **Live screen capture for streaming** (Twitch / OBS / Zoom).
+  Different problem space; users already have OBS for that.
+- **Remote-display / screen-sharing protocols** (RDP, VNC).
+  We're driving local monitors connected to the workstation.
+- **Multi-machine distributed rendering.** A planetarium with
+  one workstation per projector, networked via NTP. Different
+  architecture. Phase 3 multi-projector array assumes all
+  outputs on one workstation.
+- **Hot-plug detection.** If the operator unplugs a monitor
+  while an output is showing on it, Tauri / OS will close the
+  window. We catch the close event and update the panel; we
+  don't try to "follow" the output to another monitor. Don't
+  do clever auto-reroute.
+- **Live editing of the asset on its way to the output**
+  (e.g. "show only the equator band" or "rotate by 30°").
+  Future work.
+- **Country borders, gridlines, or labels in v1.** They live
+  in MapLibre's vector layer pipeline and need a parallel
+  implementation in Three.js. Phase 2.
+- **Operator's camera position mirrored to the output.** The
+  output is always a full equirectangular unwrap; it does not
+  zoom or pan with the control window's camera.
+
+---
+
+## Open questions
+
+1. **Tauri window stacking on Linux.** Some compositors
+   (sway, certain GNOME setups) treat fullscreen popups
+   differently than Windows / macOS. Need to test on at
+   least one Wayland and one X11 setup before declaring v1
+   done.
+2. **What to do when the operator opens an output but no
+   dataset is loaded?** Default: render the photoreal Earth
+   with day/night and atmosphere — a "live Earth" idle state.
+   The same scene is already running; just don't add a
+   dataset overlay. Free.
+3. **Telemetry.** Does the output window emit `output_opened`,
+   `output_closed`, `output_sync_drift_p95`, `output_fps_p50`
+   events for installation health monitoring? Tier A or
+   Tier B? Needs a separate analytics pass — see
+   `docs/ANALYTICS_CONTRIBUTING.md`'s reviewer checklist.
+   **Default until decided: emit nothing from the output
+   window. Emit `output_added` / `output_removed` from the
+   control window only, Tier A.**
+4. **Input on the output window.** Today, mouse/keyboard go
+   to whichever window has focus. Should clicks on the
+   output window pass through to the control window, eat the
+   event silently, or do something else? v1 default: eat all
+   input silently.
+5. **Screen-saver / display-sleep prevention.** SOS
+   installations expect to run for hours; OS screen savers
+   should not kick in. Tauri has no cross-platform "wake
+   lock" API today; we'd either need a per-OS Rust shim or
+   document that the operator should disable screen savers
+   in their OS settings. Defer to Phase 5.
+6. **Tour integration depth.** Tours fire `setEnvView` to
+   change the control window's layout. Should tours be able
+   to fire `setOutput` to add or remove output windows?
+   Powerful for museum kiosks but a larger surface area. v1
+   says no — tours don't touch outputs.
+7. **CONUS-bbox UV transform exactness.** The MapLibre globe
+   places non-global rasters using a known UV transform that
+   accounts for the dataset's projection (typically EPSG:4326
+   or EPSG:3857). The Three.js output must match exactly or
+   the output sphere shows the data shifted relative to what
+   the operator sees on screen. Acceptance criterion:
+   side-by-side a CONUS-bbox dataset on the control globe
+   and on the output, verify alignment to ≤1 px at 4K. The
+   test fixture for commit 2 should include a CONUS-bbox
+   reference rendering.
+8. **Multi-layer z-fighting.** Stacked sphere shells at radii
+   1.000 / 1.001 / 1.002 may z-fight on some GPUs at 4K+
+   render targets. Mitigation: render order + `depthWrite:
+   false` on overlays. Verify on at least one Intel iGPU and
+   one AMD discrete GPU.
+
+---
+
+## Risks
+
+- **Driver-specific quirks.** SOS LED spheres ship with
+  proprietary drivers that may expect a specific signal
+  format. We're producing standard HDMI / DisplayPort
+  borderless fullscreen at the chosen resolution. Should be
+  compatible with anything that takes a 2:1 input, but the
+  first real installation will surface edge cases we can't
+  predict from the lab.
+- **Tauri webview process limits.** Tauri spins up a webview
+  process per window. On Windows with WebView2, each window
+  is its own process; macOS with WKWebView may share. Memory
+  scales linearly. Realistic ceiling: 4-6 outputs per
+  workstation. We cap at 4 in v1.
+- **GPU memory pressure.** Each output holds: a 4K sphere
+  texture (or two for multi-layer), a 4K equirect
+  framebuffer, plus Three.js scene resources. At 4 outputs
+  that's ~1 GB of GPU memory. Workstation GPUs handle it;
+  the cap matters.
+- **HLS decode pressure.** 4 simultaneous 4K HLS decodes is a
+  lot. Most discrete GPUs handle it; integrated GPUs might
+  not. The Tools panel should warn if the user adds a 4th
+  output, citing hardware requirements.
+- **Operator confusion.** "Where did my video go?" is a real
+  question if a user accidentally triggers fullscreen on the
+  primary monitor. Borderless fullscreen output windows must
+  always go to a *non-primary* monitor and refuse to spawn
+  if only one monitor is connected. The Add Output button is
+  hidden in single-monitor mode.
+
+---
+
+## Cross-references
+
+- `docs/VR_INVESTIGATION_PLAN.md` — voice / structure
+  reference; also the canonical home of the photoreal Earth
+  factory, equirectangular base Earth texture hosting
+  strategy, and the Three.js lazy-load pattern. The output
+  bundle reuses the same Three.js chunk and the same
+  `photorealEarth.ts` factory.
+- `docs/DESKTOP_APP_PLAN.md` — Tauri capabilities, plugin
+  patterns, and lazy-load conventions.
+- `docs/SETVIEW_IMPLEMENTATION_PLAN.md` — multi-globe layout
+  state model; informs how output panels can later route to
+  non-primary slots (Phase 3).
+- `docs/ANALYTICS_CONTRIBUTING.md` — must-read before adding
+  any output-window events (Open Questions §3).
+
+---
+
+## Appendix: example output config
+
+```ts
+const outputs: PersistedOutputConfig = {
+  outputs: [
+    {
+      label: 'output-1',
+      monitorName: 'DELL-SOS-DRIVER',
+      mode: 'sos-equirect',
+      framebufferSize: { width: 4096, height: 2048 },
+      debugOverlay: false,
+    },
+  ],
+  autoRestoreOnLaunch: true,
+}
+```
+
+A multi-projector planetarium would extend the schema
+post-Phase 3 with a `srcRect` / `dstRect` / `blendMask` triple
+per output. The v1 schema is forward-compatible: new modes
+add new fields; the parser ignores unknown fields.
