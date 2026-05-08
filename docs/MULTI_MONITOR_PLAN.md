@@ -155,10 +155,13 @@ literally pass the primary's `<video>` to the output window.
 For v1: the output window receives the dataset URL from the
 control window via Tauri events, creates its own `HLSService`,
 and decodes independently. The control window broadcasts
-`currentTime` and `paused` once per second; the output window
-re-syncs if its decoder drifts more than 200 ms. Drift is
-typically <100 ms in practice — imperceptible on an LED sphere
-where each pixel covers a non-trivial physical area.
+`currentTime` and `paused` once per second; the output runs a
+three-region correction algorithm (tolerance / soft `playbackRate`
+nudge / hard seek with hysteresis) — see §3 "Playback sync
+algorithm" for the exact thresholds, transitions, and edge
+cases. Drift is typically <100 ms in practice — imperceptible
+on an LED sphere where each pixel covers a non-trivial physical
+area.
 
 A future Phase 5 polish (see Roadmap) could introduce a shared
 GPU texture handle to eliminate the second decoder. We don't
@@ -377,7 +380,8 @@ State diffs are broadcast on change, not on a polling clock:
   event. Output's video element pipes through.
 - **Per-second timecode** → manager broadcasts
   `{ playback: { currentTime, paused } }`. Output applies
-  the drift-correction logic from §2.4.
+  the drift-correction algorithm — see "Playback sync
+  algorithm" below.
 - **Day/night toggle** → manager broadcasts the new state.
   Output flips the photoreal Earth's day/night shader uniform.
 - **Output close** → output emits `output_closed` (or the
@@ -408,6 +412,110 @@ Frame rate target: 30 fps for video datasets, 1 Hz for static
 images (don't redraw what hasn't changed). The render loop is
 a `requestAnimationFrame` driver that early-outs on a
 "nothing changed" check.
+
+### Playback sync algorithm
+
+The output's local `<video>` element drives the texture and
+decodes independently of the control window's video (see
+"§1 constraint #4" above — separate webview, separate DOM,
+separate decoder). We
+have to keep it within ~200 ms of the broadcast `currentTime`
+without making the correction itself perceptible. A hard
+`videoEl.currentTime = ...` reseek every second would jitter
+the texture; an unbounded soft `playbackRate` adjustment would
+take minutes to converge from a multi-second drift.
+
+The compromise is a three-region algorithm with hysteresis,
+applied each time a `{ playback: { currentTime, paused } }`
+diff arrives (~1 Hz):
+
+```ts
+// Pseudocode in output/datasetMirror.ts, called per playback diff.
+const local = videoEl.currentTime
+const drift = local - broadcast.currentTime  // +ahead, -behind
+const abs = Math.abs(drift)
+
+if (paused) {
+  if (!videoEl.paused) videoEl.pause()
+  return                               // suspend correction while paused
+}
+if (videoEl.paused) videoEl.play()     // unpause if needed
+
+if (abs >= HARD_SEEK_THRESHOLD) {       // 2.0 s
+  videoEl.currentTime = broadcast.currentTime
+  videoEl.playbackRate = 1.0
+  state.correcting = false
+  return
+}
+
+if (state.correcting) {
+  // Inner band: drift converged; release the rate adjustment.
+  if (abs < INNER_HYSTERESIS) {        // 50 ms
+    videoEl.playbackRate = 1.0
+    state.correcting = false
+  }
+  return
+}
+
+if (abs >= OUTER_HYSTERESIS) {          // 100 ms
+  // Soft nudge: 5 % rate change in the catch-up direction.
+  videoEl.playbackRate = drift > 0 ? 0.95 : 1.05
+  state.correcting = true
+}
+```
+
+Three regions:
+
+| Region | Drift | Action |
+|---|---|---|
+| **Tolerance** | < 100 ms | No action — within decoder jitter and below perceptual threshold |
+| **Soft nudge** | 100 ms – 2 s | `playbackRate = 0.95` (ahead) / `1.05` (behind). Held until drift drops below 50 ms (inner hysteresis), then `playbackRate = 1.0` |
+| **Hard seek** | ≥ 2 s | `videoEl.currentTime = broadcast.currentTime`. Visible jump but the alternative (soft catch-up at 5 %/s for >40 s) is worse |
+
+The hysteresis pair (100 ms enter, 50 ms exit) prevents
+flapping between the tolerance band and soft-nudge region. The
+5 % rate cap is below the perceptual threshold for most
+viewers — speech intelligibility is the most sensitive cue and
+typically tolerates ±6-10 %; video alone tolerates more.
+Convergence time scales with starting drift: 100 ms → 2 s,
+1 s → 20 s, both well under the 2 s hard-seek threshold.
+
+**State changes that bypass the algorithm:**
+
+- **Operator pauses** (`paused` flips to true) → `videoEl.pause()`
+  immediately. Drift correction suspended until unpause.
+- **Operator seeks** (the playback diff carries a discontinuity
+  in `currentTime` — detected as `|local - broadcast| > 5 s`
+  while operator was already in the tolerance band on the
+  previous tick) → hard seek to broadcast `currentTime`,
+  reset rate.
+- **Dataset change** → tear down the HLS instance, start a
+  new one; sync to broadcast `currentTime` once `'canplay'`
+  fires.
+- **HLS buffering / stall** (`videoEl.readyState < 3`) →
+  freeze drift state; resume correction once `readyState >= 3`.
+  Avoids spurious "behind" drift readings during stalls.
+
+**What's not the algorithm's job:**
+
+- A/V sync within a single decoder — the browser's `<video>`
+  handles that. We only correct between decoders.
+- Cross-output coherence — outputs A and B both sync to the
+  control window, not to each other. Worst case they're each
+  100 ms off the control window in opposite directions, so
+  200 ms apart. Acceptable on physically-separated outputs;
+  if it ever isn't (twin-LED-sphere installation), Phase 5's
+  shared-GPU-texture work eliminates the second decoder.
+
+Constants live in `output/datasetMirror.ts` as named
+exports for tests:
+
+```ts
+export const TOLERANCE_MS = 100
+export const HARD_SEEK_THRESHOLD_MS = 2000
+export const INNER_HYSTERESIS_MS = 50
+export const SOFT_NUDGE_RATE = 0.05  // ±5 %
+```
 
 ### LED sphere zoom + split (matches existing SOS behavior)
 
@@ -737,7 +845,11 @@ is not affected.
 - `npm run test` passes. New unit tests for `equirectRtt`
   (visual fixture comparing output pixels to a known-good
   reference at low resolution), `stateAggregator` (event
-  → diff), `layerStack` (state → scene-graph mutation).
+  → diff), `layerStack` (state → scene-graph mutation), and
+  `datasetMirror` sync-correction state machine (each region
+  transition, each hysteresis bound, pause/unpause, and the
+  hard-seek discontinuity case — see §3 "Playback sync
+  algorithm").
 - `npm run build` produces both `dist/index.html` and
   `dist/output.html`.
 - For commit 9, manual smoke on a dual-monitor Linux box:
