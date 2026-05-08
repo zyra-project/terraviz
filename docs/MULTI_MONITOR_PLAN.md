@@ -320,7 +320,7 @@ two-way binding.
 | `output/datasetMirror.ts` | Output-side companion to control-window `datasetLoader` — given a `dataset.url` + `dataset.kind` + `dataset.bbox`, builds a Three.js texture (image or HLS-driven VideoTexture) and a UV transform. Owns the playback sync state machine (see "Playback sync algorithm") and the HLS fatal-error retry loop (3× exponential backoff, freeze last good frame during retry — see "Failure recovery") |
 | `output/layerStack.ts` | Builds and updates the multi-shell sphere stack from the layers state diff |
 | `output/output.html` + `output/output.css` | Output window markup and styling — black body, no cursor, full-bleed canvas |
-| `src-tauri/capabilities/output.json` | Narrow capability set scoped to `output-*` window labels: HTTP for HLS / image fetch, window controls, no filesystem, no keychain, no IPC commands |
+| `src-tauri/capabilities/output.json` | Narrow capability scoped to `output-*` window labels. Allows: event listen / unlisten / emit / emit-to (IPC with manager); window current-monitor / is-decorated / is-fullscreen / set-fullscreen / set-decorations / close; HTTP fetch on `https://*` only with localhost explicitly denied. Excludes: `core:default`, `core:window:default`, window creation, updater, filesystem, asset protocol, shell, dialog, clipboard, all Tauri command `invoke`. Full enumeration + rationale in §3 "Output capability spec". |
 
 ### Modified modules
 
@@ -895,6 +895,115 @@ recreates the windows. If the monitor is gone (laptop unplugged
 from a kiosk dock), the entry is logged and the window is
 skipped — not silently moved to a different monitor.
 
+### Output capability spec
+
+`src-tauri/capabilities/output.json` is a new capability file
+scoped to the `output-*` window label glob. Its purpose is
+defense in depth: even if the output window is compromised
+(an XSS via a malicious dataset URL, a Three.js shader bug,
+a webview vulnerability), the blast radius is bounded to
+network fetch + minimal window controls. No filesystem,
+no keychain, no Tauri commands, no ability to spawn more
+windows.
+
+Full enumeration:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-utils/schema.json",
+  "identifier": "output",
+  "description": "Capability scoped to output-* windows. Narrowed for security: network fetch for streaming + minimal window controls + IPC listen/emit only. No filesystem, no keychain, no window creation, no shell, no updater, no localhost HTTP.",
+  "platforms": ["macOS", "windows", "linux"],
+  "windows": ["output-*"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:event:allow-emit",
+    "core:event:allow-emit-to",
+
+    "core:window:allow-current-monitor",
+    "core:window:allow-is-decorated",
+    "core:window:allow-is-fullscreen",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-set-decorations",
+    "core:window:allow-close",
+
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://*" }
+      ],
+      "deny": [
+        { "url": "http://localhost:*" },
+        { "url": "http://127.0.0.1:*" }
+      ]
+    }
+  ]
+}
+```
+
+**What's allowed and why:**
+
+| Permission | Why the output needs it |
+|---|---|
+| `core:event:allow-listen` / `unlisten` | Receive state diffs from the manager |
+| `core:event:allow-emit` / `emit-to` | Send `output_ready`, `output_health_check`, `output_dataset_stalled`, `output_gpu_recovered`, `output_closing` back to the manager |
+| `core:window:allow-current-monitor` | Output reports its monitor identity at boot so the manager can match it to the persisted config |
+| `core:window:allow-is-decorated` / `is-fullscreen` | F11 toggle reads current state to decide direction |
+| `core:window:allow-set-fullscreen` / `set-decorations` | F11 toggle (per §3.6) writes new state |
+| `core:window:allow-close` | Output participates in graceful shutdown — emits `output_closing` then closes itself |
+| `http:default` with `https://*` | HLS manifest + segment fetch, image variant fetch from CDN/proxy origins |
+
+**What's deliberately *excluded* and why:**
+
+| Excluded | Reason |
+|---|---|
+| `core:default` | Grants `invoke` to all Tauri commands (download_manager, keychain, tile_cache, asset protocol). Output never invokes commands; all coordination flows through events. |
+| `core:window:default` | Includes `set-size` / `set-position`. Output's geometry is set by the manager at spawn and shouldn't change at runtime — drift would unsync the LED-sphere placement. |
+| `core:webview:allow-create-webview-window` | Output cannot spawn more windows. Only the manager (in the main window) creates output windows. |
+| `updater:default` | Auto-update is a main-window concern — Tauri restarts the app on update, taking outputs down with it. |
+| `core:fs:*`, `core:path:*` | Output streams from the network. No need to read local files — the bundled `output.html` is loaded from the asset protocol scope of the main bundle, not via fs APIs. |
+| `core:shell:*`, `core:dialog:*`, `core:clipboard:*` | None apply to a render-only surface. |
+| Asset protocol scope (`asset.localhost`) | Output doesn't need to load locally-cached datasets. The control window does (offline downloads → output via the asset protocol on the main window only). For an output window to render a downloaded dataset, the manager broadcasts the `asset.localhost` URL and the output fetches it via HTTP — denied by the explicit deny on localhost below. **Implication: offline downloads are control-window-only in v1; outputs require network.** Phase 5 polish if installations need it. |
+| `http://localhost:*`, `http://127.0.0.1:*` | Explicit deny. The only legitimate localhost use case in `default.json` is local LLM servers (Ollama, LM Studio, llama.cpp), which the output never talks to. The deny is documentation-as-code for security review: outputs cannot phone home to anything on the operator's machine. |
+
+**IPC event direction.** The manager-→output direction uses
+`emit_to('output-N', ...)` from the main window. The
+output→manager direction uses `emit('output_event', ...)`
+which the main window listens for. Both directions are
+covered by the permissions above. The output **cannot**
+emit-to another output window — doing so requires a window
+label match against the capability's `windows: ["output-*"]`,
+which only matches the emitter's own window or
+broadcasts to all listeners. Inter-output IPC is not a
+v1 requirement (per the failure-recovery non-goal "cross-
+output coherence" — outputs sync independently to control).
+
+**Asset protocol scope on the main bundle is unchanged.**
+The existing `tauri.conf.json` scope of `$APPDATA/**` and
+`$APPLOCALDATA/**` for downloaded datasets stays — the
+control window's `datasetLoader` continues to use it. The
+output window doesn't have access to the asset protocol at
+all (no `core:default`, no explicit scope grant), so any
+attempt to load `asset.localhost/...` URLs from the output
+fails closed.
+
+**Security review checklist for `output.json` (PR-time):**
+
+- [ ] No `core:default` (broad; would grant `invoke`)
+- [ ] No `core:window:default` (broad; would grant set-size/set-position)
+- [ ] No `*:allow-create-webview-window` (output cannot spawn windows)
+- [ ] No `updater:*` (main-window concern)
+- [ ] No `core:fs:*` / `core:path:*` (output streams from network only)
+- [ ] No `core:shell:*` / `core:dialog:*` / `core:clipboard:*`
+- [ ] HTTP allow is `https://*` only — no `http://*`, no localhost
+- [ ] Localhost is in `deny`, not just absent from `allow`
+- [ ] `windows: ["output-*"]` glob is exact — not `["*"]`
+- [ ] Each event name in the protocol is symmetric: if the
+      manager emits it, the output's listen call uses the same
+      string; if the output emits it, the manager's listen
+      uses the same string. No emit-without-listen wildcards.
+
 ---
 
 ## MVP scope (v1, this branch)
@@ -1035,12 +1144,12 @@ state-mirroring path (commits 1–12) keeps working.
   algorithm").
 - `npm run build` produces both `dist/index.html` and
   `dist/output.html`.
-- For commit 9, manual smoke on a dual-monitor Linux box:
-  add an output, load a CONUS-bbox dataset to verify the
-  bbox UV mapping is correct, load a video dataset to verify
-  HLS sync.
-- For commit 10, additionally verify persistence by quitting
-  and relaunching with restore enabled.
+- For commits 9, 10, 11, 12, and 13, run the manual
+  qualification steps from **Appendix B: smoke-test
+  checklist** end-to-end on the dual-monitor Linux
+  workstation. Acceptance gate per commit is the section
+  bearing that commit's number; subsequent commits inherit
+  the prior commit's coverage and add their own steps.
 
 ---
 
@@ -1412,7 +1521,7 @@ renderer somewhere" — which we don't. Direct RTT.
 
 ---
 
-## Appendix: example output config
+## Appendix A: example output config
 
 ```ts
 const outputs: PersistedOutputConfig = {
@@ -1422,6 +1531,8 @@ const outputs: PersistedOutputConfig = {
       monitorName: 'DELL-SOS-DRIVER',
       mode: 'sos-equirect',
       framebufferSize: { width: 4096, height: 2048 },
+      trackOperatorCamera: true,   // see §3.5
+      split: false,                // see §3.5
       debugOverlay: false,
     },
   ],
@@ -1433,3 +1544,215 @@ A multi-projector planetarium would extend the schema
 post-Phase 3 with a `srcRect` / `dstRect` / `blendMask` triple
 per output. The v1 schema is forward-compatible: new modes
 add new fields; the parser ignores unknown fields.
+
+---
+
+## Appendix B: smoke-test checklist
+
+Manual qualification steps for the user-reachable commits.
+Runs on a dual-monitor Linux workstation (primary 1080p, the
+operator's main display; secondary 4096×2048 or simulated via
+RandR / Wayland output, the LED-sphere stand-in). Cross-
+platform parity should also be checked on Windows and macOS
+before declaring v1 release-ready, but Linux is the install
+target so it gates the qualification.
+
+Acceptance: every numbered step passes. No errors in the
+manager log. Sync delta p95 < 200 ms (read off the debug
+overlay added in commit 11). Failure-recovery actions emit
+exactly one `output_failure` Tier A telemetry event per
+occurrence (verify via `VITE_TELEMETRY_CONSOLE=true`).
+
+### Commit 9 — Tools → Outputs panel (first user-reachable)
+
+**Pre-flight:**
+
+1. Both monitors connected; `npm run build:desktop` artifact
+   launched (or `npm run dev:desktop` for iteration).
+2. Telemetry tier set to Essential (default).
+3. Console open via F12 on the control window for log inspection.
+
+**Panel basics:**
+
+4. Tools menu shows an "Outputs" entry.
+5. Outputs panel opens; lists both monitors with name,
+   resolution, position diagram. Primary clearly marked.
+6. **Single-monitor guard.** Disconnect the secondary monitor.
+   Add Output button is hidden / disabled. Reconnect:
+   the button reappears.
+
+**Spawning an output:**
+
+7. Click Add Output → pick the secondary → Confirm. The output
+   window appears within ~1 s, fullscreen on the secondary,
+   black until ready. No title bar, no menu bar, no cursor.
+8. Output renders the photoreal Earth idle state (no dataset
+   loaded yet) with day/night and atmosphere.
+9. The Outputs panel lists the new output with health badge:
+   healthy.
+
+**Global video dataset:**
+
+10. In the control window, load a global HLS video dataset
+    (e.g. SST). The output mirrors within ~1 s of the load
+    completing on control.
+11. Play / pause / scrub on the control window: each action
+    propagates to the output within 200 ms p95 (verify via
+    debug overlay sync delta in commit 11; for commit 9 just
+    eyeball that play/pause feels synchronous).
+12. Let the video play for 60 s. Open the output's debug
+    overlay (commit 11) — sync delta should remain ≤ 200 ms
+    p95 with no visible drift on the LED-sphere mock.
+
+**CONUS-bbox image dataset (Open Question 7):**
+
+13. Load a CONUS-bbox image dataset (e.g. a NEXRAD radar
+    composite or a hurricane snapshot). The bbox overlay on
+    the control globe and on the output sphere align to ≤1 px
+    at 4K — verify by visual side-by-side using the test
+    fixture from commit 2.
+
+**Multi-layer:**
+
+14. With the SST base loaded, add a foreground layer (e.g.
+    cyclone tracks). Output renders both with the correct
+    z-order (cyclone tracks sit on top).
+
+**Camera tracking + split:**
+
+15. **Track operator camera ON (default).** In the control
+    window, zoom in on a hurricane (~zoom level 5). The
+    output's equirect should show the AOI filling more of
+    the sphere; the antipode should compress visibly. Pan
+    around — the tracking should follow with ≤30 ms lag.
+16. **Track operator camera OFF.** Toggle off in the per-
+    output config. The output snaps back to a uniform 1:1
+    equirect regardless of where the operator pans.
+17. **Split sphere ON.** Toggle on. The current AOI now
+    appears at U=0.25 and U=0.75 of the equirect (visible
+    as two copies of the area of focus). Toggle off:
+    returns to single AOI.
+
+**Teardown:**
+
+18. Close the output via the panel's close button. Window
+    destroys cleanly within ~500 ms; record removed from
+    the panel; no orphans visible in the console (no
+    "WebviewWindow already exists" errors on next spawn).
+
+### Commit 10 — persistence
+
+19. With one output running, opt in to "Restore outputs
+    on launch" in the panel.
+20. Quit the app. Relaunch. The output spawns on the same
+    monitor at the same `{x, y}` with the same `mode`,
+    `framebufferSize`, `trackOperatorCamera`, `split`,
+    `debugOverlay` settings.
+21. Disconnect the secondary monitor. Quit. Relaunch. The
+    persisted output is logged as "monitor not found" and
+    skipped — not silently moved to the primary. Outputs
+    panel shows the entry as "disconnected" / re-spawnable
+    once the monitor returns.
+
+### Commit 11 — debug overlay + framebuffer resolution picker
+
+22. Toggle "Debug overlay" on for the running output. HUD
+    appears in a corner showing dataset id, sync delta (ms),
+    and fps. Numbers update at ~2 Hz.
+23. Change the output's framebuffer resolution from
+    4096×2048 to 8192×4096 via the panel. The output rebuilds
+    its framebuffer; debug overlay reports the new
+    resolution; fps may drop (expected on the secondary's
+    GPU).
+24. Change back to 1024×512 — for "preview the LED sphere
+    on a 1080p monitor" workflow. Output downsamples cleanly
+    to the 1080p secondary.
+
+### Commit 12 — fullscreen + kiosk
+
+25. Tools → Fullscreen on the control window. Title bar
+    disappears, window goes fullscreen on the primary. Tools
+    menu still accessible. Toggle off — title bar returns.
+26. Quit, relaunch — control window remembers its previous
+    fullscreen state.
+27. F11 on the control window: same toggle behaviour.
+28. F11 on an output window: title bar appears (escape
+    hatch). F11 again: title bar disappears.
+29. **Kiosk launch.** Quit. Launch with `--kiosk` (or
+    `TERRAVIZ_KIOSK=1` env). Control window is fullscreen +
+    decorationless from first paint. Cmd/Ctrl+Q exits cleanly.
+30. **Cursor auto-hide.** With control window fullscreen,
+    leave the mouse stationary for 4 s. Cursor disappears.
+    Move the mouse — cursor reappears immediately.
+
+### Commit 13 — failure recovery
+
+For each case, verify exactly one `output_failure` Tier A
+telemetry event fires (visible in the console batch when
+`VITE_TELEMETRY_CONSOLE=true`).
+
+31. **Output crash.** Kill the output's webview process via
+    OS task manager / `kill -9 <pid>`. Control window shows
+    toast "Output {label} crashed — removed" within ~2 s.
+    Record gone from the Outputs panel. Telemetry event
+    `kind: 'crash'` fired.
+32. **Crash storm guard.** Spawn an output, kill its process,
+    re-add, kill again, re-add, kill again — all within
+    60 s. The 4th Add Output attempt for that monitor is
+    refused with a toast "Monitor {name} unstable; not
+    re-adding this session." Counter resets after relaunch.
+33. **HLS stream failure.** Block the HLS endpoint via
+    `iptables` or pull the network cable mid-playback. The
+    output's texture freezes on the last good frame within
+    ~1 s. Status badge transitions: healthy → retrying (after
+    1st backoff) → stalled (after 3 retries, ~7 s). Restore
+    the connection. Operator manually reloads the dataset:
+    output recovers; badge clears.
+34. **IPC silence (manager pause).** Pause the control
+    window's main JS thread via Chrome devtools' debugger
+    "Pause" button for 10 s. Output enters stale state
+    after 5 s (no audience-visible change; last good content
+    keeps rendering). Outputs panel shows the stale badge.
+    Resume the debugger: stale badge clears within 5 s.
+35. **Manager crash + reattach.** With an output running,
+    `kill -9` the control window's PID. The output keeps
+    rendering. Relaunch the control window: manager boot
+    scan finds the orphan, reattaches via `output_reattach_
+    ping`, sends fresh state snapshot. Output badge in the
+    re-loaded panel returns to healthy. The audience sees
+    no interruption.
+36. **GPU context loss.** Open Chromium devtools on the
+    output (F12 in dev mode), Performance → Settings →
+    enable "Disable WebGL". The canvas goes black; output
+    state shows `gpu_context_lost`. Re-enable WebGL: scene
+    rebuilds within ~3 s (texture re-fetch + shader
+    re-compile). For platform-driver tests, use
+    `chrome://gpu` → "Force GPU restart" instead of the
+    devtools toggle.
+37. **GPU loss timeout.** Disable WebGL and leave it
+    disabled for 35 s. After 30 s, output records itself as
+    unrecoverable; manager removes it. Operator manually
+    re-adds.
+38. **Monitor unplug.** With an output running on the
+    secondary, disconnect the cable. Toast appears within
+    ~2 s ("Monitor {name} disconnected"). Wait 60 s. Outputs
+    panel shows close prompt. Reconnect: monitor returns,
+    output position restored to persisted `{x, y}`,
+    close-prompt cleared.
+
+### Cross-platform parity
+
+39. Repeat steps 4–18 (basic happy path) on a Windows
+    workstation. Same outcomes. Particular attention to
+    WebView2's separate-process model under crash storm.
+40. Repeat steps 4–18 on macOS. Particular attention to
+    WKWebView's process-sharing model and macOS auto-move
+    on monitor unplug.
+
+### Notes on automation
+
+Steps 4–24 (happy-path commits 9–11) are good candidates
+for Playwright-driven automation against the Tauri test
+harness once the panel ships. Failure-recovery cases
+(31–38) involve OS-level kills and network manipulation —
+keep them manual for v1.
