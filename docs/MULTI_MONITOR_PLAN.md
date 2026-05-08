@@ -639,9 +639,16 @@ and a smoothing filter so the dome doesn't jitter as the
 operator pans.
 
 In the same phase, country borders + gridlines on the sphere.
-Approach: pull the existing MapLibre vector borders source,
-project the line geometry onto a Three.js sphere shell at
+Committed approach: pull the existing MapLibre vector borders
+source, build a Three.js `LineSegments` mesh from the resulting
+GeoJSON-equivalent line geometry, drape it on a sphere shell at
 radius 1.0005, render alongside the photoreal Earth. ~300 LOC.
+
+Rejected alternative: pre-rendering borders to an equirectangular
+raster overlay PNG. Cheaper at runtime but doesn't support
+zoom-aware label thinning, dynamic styling, or per-dataset
+highlight overlays — all of which become natural extensions
+once line geometry is in place.
 
 Place labels (text-along-curve) is harder; ship-conditional on
 demand.
