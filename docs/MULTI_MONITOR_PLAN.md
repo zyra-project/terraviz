@@ -311,13 +311,13 @@ two-way binding.
 
 | File | Responsibility |
 |---|---|
-| `src/services/multiOutput/manager.ts` | `MultiOutputManager` — singleton: enumerates monitors, spawns/destroys output windows, builds and broadcasts globe-state diffs, persists config |
+| `src/services/multiOutput/manager.ts` | `MultiOutputManager` — singleton: enumerates monitors, spawns/destroys output windows, builds and broadcasts globe-state diffs, persists config, monitors output health (crash detection, IPC heartbeats, monitor-unplug 2 s poll, boot scan for orphaned `output-*` windows after a control-window crash — see "Failure recovery") |
 | `src/services/multiOutput/protocol.ts` | Shared TS types for control↔output IPC events. Imported by both bundles. Single source of truth for the state schema above. |
 | `src/services/multiOutput/stateAggregator.ts` | Subscribes to dataset / playback / layer / time / view events, builds the state snapshot, emits diffs |
-| `src/ui/outputUI.ts` | Tools → Outputs panel — list current outputs, "Add output" button, per-output config menu (monitor, mode, "Track operator camera" toggle, "Split sphere" toggle, debug overlay) |
-| `output/main.ts` | Output window entry. Creates Three.js renderer, builds `photorealEarth` scene + dataset overlay + layer stack, runs equirect RTT each frame, displays to a full-bleed canvas |
+| `src/ui/outputUI.ts` | Tools → Outputs panel — list current outputs, "Add output" button, per-output config menu (monitor, mode, "Track operator camera" toggle, "Split sphere" toggle, debug overlay), per-output health badge (healthy / stale / stalled / monitor-missing — see "Failure recovery") |
+| `output/main.ts` | Output window entry. Creates Three.js renderer, builds `photorealEarth` scene + dataset overlay + layer stack, runs equirect RTT each frame, displays to a full-bleed canvas. Wires `webglcontextlost` / `webglcontextrestored` listeners and an IPC-silence watchdog (5 s tolerance, stale state thereafter — see "Failure recovery") |
 | `output/equirectRtt.ts` | Equirectangular render-to-texture pass — single fragment shader. Raycasts from a configurable camera offset (`uCameraOffset`, derived from the operator's MapLibre camera by default; see §3.5) at every (lon, lat) of the output framebuffer. Supports split mode (`uSplit`) that mirrors the area of focus to the antipodal hemisphere of the LED sphere. |
-| `output/datasetMirror.ts` | Output-side companion to control-window `datasetLoader` — given a `dataset.url` + `dataset.kind` + `dataset.bbox`, builds a Three.js texture (image or HLS-driven VideoTexture) and a UV transform |
+| `output/datasetMirror.ts` | Output-side companion to control-window `datasetLoader` — given a `dataset.url` + `dataset.kind` + `dataset.bbox`, builds a Three.js texture (image or HLS-driven VideoTexture) and a UV transform. Owns the playback sync state machine (see "Playback sync algorithm") and the HLS fatal-error retry loop (3× exponential backoff, freeze last good frame during retry — see "Failure recovery") |
 | `output/layerStack.ts` | Builds and updates the multi-shell sphere stack from the layers state diff |
 | `output/output.html` + `output/output.css` | Output window markup and styling — black body, no cursor, full-bleed canvas |
 | `src-tauri/capabilities/output.json` | Narrow capability set scoped to `output-*` window labels: HTTP for HLS / image fetch, window controls, no filesystem, no keychain, no IPC commands |
@@ -330,6 +330,7 @@ two-way binding.
 | `src/services/datasetLoader.ts` | Emit a `dataset:loaded` event the manager subscribes to |
 | `src/services/mapRenderer.ts` | Emit a debounced `camera:moved` event with `{ lng, lat, zoom }` so the manager can derive `view.cameraOffset` for outputs that track operator camera |
 | `src/ui/playbackController.ts` | Forward play / pause / scrubber events to the state aggregator |
+| `src/analytics/errorCapture.ts` | Add a sanitized `output_failure` Tier A event path consumed by the manager — `{ label, kind, retries }` per occurrence (see "Failure recovery" §3) |
 | `src/ui/toolsMenuUI.ts` | Add "Outputs" entry that opens the new Outputs panel; add a "Fullscreen" toggle that calls `getCurrentWindow().setFullscreen()` + `setDecorations()` and persists to localStorage (see §3.6) |
 | `src-tauri/src/main.rs` | Parse `--kiosk` argv flag and `TERRAVIZ_KIOSK=1` env var in `setup()`; apply fullscreen + decorationless before first paint when set (see §3.6) |
 | `src-tauri/capabilities/default.json` | Add `core:window:allow-set-decorations` (`core:window:allow-set-fullscreen` is already granted; `set-decorations` is not in the default set and is required so the runtime fullscreen toggle can also drop the title bar) |
@@ -516,6 +517,181 @@ export const HARD_SEEK_THRESHOLD_MS = 2000
 export const INNER_HYSTERESIS_MS = 50
 export const SOFT_NUDGE_RATE = 0.05  // ±5 %
 ```
+
+### Failure recovery
+
+Multi-window installations run for hours in production. The
+plan must define what happens when something goes wrong —
+otherwise an LED-sphere installation degrades silently the
+first time a network blip or driver hiccup occurs.
+
+Six failure modes are designed for in v1. Common pattern:
+**preserve the last good visible state, surface the failure
+in the Outputs panel, never auto-recover beyond bounded
+retries.** Auto-respawn is rejected as a default — it masks
+recurring crashes and obscures installation health.
+
+#### 1. Output webview crashes
+
+**Detection.** Manager listens for `WebviewWindow` close
+events. A crash arrives as a `WindowEvent::Destroyed`
+without a corresponding `output_closing` graceful-shutdown
+ping; the absence of the ping distinguishes crashes from
+operator-initiated close.
+
+**Recovery.** Manager removes the output record, logs the
+crash with timestamp and last-known dataset, and shows a
+toast in the control window: "Output {label} crashed —
+removed." Operator can manually re-add via Tools → Outputs.
+**No auto-respawn in v1.**
+
+**Crash storm guard.** If the same monitor sees 3 crashes
+within 60 s, manager refuses to spawn outputs on that
+monitor for the rest of the session and logs a hardware /
+driver suspicion. Counter resets at next launch.
+
+#### 2. HLS stream errors
+
+**Detection.** HLS.js fires `Hls.Events.ERROR` with
+`fatal: true`. The output's `datasetMirror` listens.
+
+**Recovery.** Tear down the HLS instance, wait
+exponential backoff (1 s, 2 s, 4 s), rebuild from the
+same URL. Up to 3 attempts. **The texture freezes on the
+last good frame during retry** — the LED sphere shows the
+most recent imagery rather than going black.
+
+After 3 failures: keep the texture frozen, emit
+`output_dataset_stalled` to the manager. Manager surfaces
+a status badge on that output in the Outputs panel.
+Operator must manually reload the dataset (which triggers
+a fresh HLS instance via the normal dataset-change path).
+
+Non-fatal HLS errors (single-segment 404, transient 5xx)
+are handled by HLS.js itself and never reach this layer.
+
+#### 3. IPC channel goes silent
+
+**Detection.** Output expects a state diff at least every
+2 s during normal operation (the per-second timecode is
+the floor). 5 s with no message → output enters **stale
+state**.
+
+**Recovery.** Output keeps rendering from its last known
+state. The audience sees the last good content, frozen at
+that moment. The Outputs panel shows a "stale" badge so
+the operator knows the link is degraded.
+
+If silence persists for 60 s with no manager response to
+the output's `output_health_check` pings, the output
+considers itself orphaned. **It does not self-destruct —
+the LED sphere keeps showing content for any visitor
+mid-session.** It just stops trying to phone home and waits.
+
+When the manager comes back (reload, control-window
+relaunch, network restored), the manager finds existing
+`output-*` windows via `WebviewWindow.getAll()` at boot,
+re-establishes IPC with each, and sends a fresh state
+snapshot. Output exits stale state on receipt and resumes
+normal rendering.
+
+#### 4. Monitor unplugged mid-session
+
+**Detection.** Manager polls `monitor.availableMonitors()`
+at 2 s intervals (Tauri's monitor-change event API isn't
+universal across platforms). A monitor disappearing while
+an output is bound to it triggers the recovery path.
+
+**Recovery.** Don't auto-destroy. The OS handles where the
+window goes (macOS auto-moves to the remaining display;
+Windows leaves the window attached to the phantom display
+until reconnect; Linux is compositor-dependent — see Open
+Question 1). Manager logs the event and shows a toast:
+"Monitor {name} disconnected. Output {label}'s display is
+unavailable."
+
+After 60 s gone, manager surfaces a confirmation in the
+Outputs panel: "Output {label}'s monitor is gone. Close
+output?" — manual action only. On reconnect, manager
+detects the monitor reappearing, moves the window back to
+the persisted `{ x, y }` of that monitor (matched by
+`monitorName`), and clears the toast.
+
+#### 5. GPU context loss
+
+**Detection.** Output's canvas listens for
+`webglcontextlost` and `webglcontextrestored`. Triggers
+include driver crash, OS sleep / wake, GPU hot-reset
+under memory pressure.
+
+**Recovery.** On `webglcontextlost`:
+`event.preventDefault()` to allow restoration; mark
+output state as `gpu_context_lost`. The texture and
+framebuffer are gone; output renders nothing until
+restored.
+
+On `webglcontextrestored`: rebuild the Three.js scene
+from scratch (textures, framebuffer, sphere stack) using
+the fresh state snapshot the manager re-pushes. Same code
+path as boot, just without recreating the window. Output
+emits `output_gpu_recovered` to the manager for
+installation logging.
+
+If `webglcontextrestored` doesn't fire within 30 s (some
+drivers don't recover): log + remove the output record;
+operator manually re-adds.
+
+#### 6. Manager / control window crash with outputs alive
+
+**Detection.** Outputs detect this via case 3 (IPC
+silence). When the operator relaunches, the manager runs
+its boot scan path.
+
+**Recovery (manager side at boot).** Before normal init
+finishes, manager calls `WebviewWindow.getAll()` and finds
+any `output-*` labeled windows that survived the control
+window's death. For each:
+
+- Send `output_reattach_ping`. If response within 5 s:
+  re-establish IPC, send fresh snapshot, output exits
+  stale state.
+- If no response: assume dead, destroy via `webview.close()`,
+  remove any orphaned record.
+
+This makes control-window restart non-destructive for the
+LED-sphere audience: the imagery stays on screen, refreshes
+once the operator's relaunch completes.
+
+#### Summary
+
+| Failure | Detection | Auto-recovery | Audience-visible? | Operator-visible? |
+|---|---|---|---|---|
+| Output crash | Window destroy w/o graceful close | None | Output goes black | Toast + log; can re-add manually |
+| HLS stream error | `Hls.Events.ERROR fatal:true` | 3× backoff retry (1, 2, 4 s) | Frozen last good frame during retry | Status badge; manual reload after retries exhausted |
+| IPC silence | 5 s no diff | Render from last state indefinitely | Last good content stays visible | Stale badge in Outputs panel |
+| Monitor unplug | 2 s `availableMonitors()` poll | None (OS handles window placement) | OS-dependent (auto-move or phantom) | Toast; close prompt after 60 s |
+| GPU context loss | `webglcontextlost` event | Rebuild scene on restore (30 s timeout) | Black until restore | Recovery event logged |
+| Manager crash w/ outputs alive | Output IPC silence + manager boot scan | Reattach via `getAll()` boot scan | Last good content stays visible | Toast on reconnect |
+
+#### Policy summary
+
+- **Bounded auto-recovery only.** 3 retries / 30-60 s
+  timeouts. Beyond that, escalate to the operator. Avoids
+  flapping installations that mask deeper issues.
+- **Audience-visible vs operator-visible separation.** The
+  audience never sees a manager- or IPC-side failure —
+  only output-side failures (crash, GPU loss) affect the
+  LED sphere directly. Manager and IPC failures preserve
+  last good state.
+- **All failures route through `errorCapture.ts`** with a
+  stable signature so installation health can be tracked.
+  Hashed for privacy where stack traces are involved (Tier
+  B if Open Question 3 closes that way).
+- **One control-window telemetry event per failure**:
+  `output_failure` Tier A with `{ label, kind, retries }`.
+  Output windows themselves emit nothing (matches §10
+  default and §3.6 capture-clean policy — no hidden
+  network from the LED-sphere surface).
 
 ### LED sphere zoom + split (matches existing SOS behavior)
 
@@ -825,6 +1001,7 @@ without rolling the whole feature back.
 | 10 | `multi-output: persist + restore outputs across launches` | localStorage config, opt-in restore on boot, monitor-name matching. | Yes (additive) |
 | 11 | `multi-output: per-output debug overlay + framebuffer resolution picker` | Resolution picker in panel, debug HUD with dataset id, sync delta, and fps. | Yes (additive) |
 | 12 | `multi-output: fullscreen toggle + kiosk launch + F11 on every window` | `Tools → Fullscreen` toggle in `toolsMenuUI.ts` (persisted), F11 keydown handler on control + output windows, `--kiosk` argv parse and `TERRAVIZ_KIOSK=1` env var read in `src-tauri/src/main.rs` applying fullscreen + decorationless before first paint, `core:window:allow-set-decorations` added to `capabilities/default.json`, 3-second idle cursor-hide on the control window when fullscreen. See §3.6. | Yes (additive) |
+| 13 | `multi-output: failure recovery — crashes, stalls, GPU loss, monitor unplug` | Manager gains crash detection (no-graceful-close window destroy → toast + record removal), 3-strikes-per-monitor crash storm guard, 2 s `availableMonitors()` poll for unplug detection, `getAll()` boot scan to reattach orphaned `output-*` windows after a control-window crash. Output gains `webglcontextlost` / `webglcontextrestored` listeners with full scene rebuild, IPC-silence watchdog (5 s → stale state, 60 s → orphan), HLS fatal-error retry (3× backoff with frozen last-good-frame). Outputs panel renders per-output health badges (healthy / stale / stalled / monitor-missing). `errorCapture.ts` gains an `output_failure` Tier A event. See §3 "Failure recovery". | Yes (additive) |
 
 **Backout plan.** Reverting commit 9 leaves all the plumbing in
 place (manager, output bundle, capability) but removes the
@@ -837,7 +1014,13 @@ artifacts disappear; nothing else changes. Reverting commit 12
 removes the control-window fullscreen toggle, F11 handler, and
 kiosk flag; output windows remain fullscreen + decorationless
 because that's wired in commit 3 — the LED-sphere capture path
-is not affected.
+is not affected. Reverting commit 13 takes the install back to
+"happy-path only": failures fall through to default browser /
+Tauri behavior (output goes black on HLS fatal, a crashed
+output leaves a stale record, GPU context loss freezes the
+canvas). Acceptable to ship without if a hard deadline forces
+it; not acceptable for an unattended installation. The basic
+state-mirroring path (commits 1–12) keeps working.
 
 **Acceptance for each commit:**
 
@@ -1116,7 +1299,10 @@ renderer somewhere" — which we don't. Direct RTT.
    (sway, certain GNOME setups) treat fullscreen popups
    differently than Windows / macOS. Need to test on at
    least one Wayland and one X11 setup before declaring v1
-   done.
+   done. The monitor-unplug failure case (§3 "Failure
+   recovery", case 4) also varies by compositor — pin down
+   the actual behavior on the target install platforms as
+   part of the same test pass.
 2. **What to do when the operator opens an output but no
    dataset is loaded?** Default: render the photoreal Earth
    with day/night and atmosphere — a "live Earth" idle state.
@@ -1193,6 +1379,18 @@ renderer somewhere" — which we don't. Direct RTT.
   always go to a *non-primary* monitor and refuse to spawn
   if only one monitor is connected. The Add Output button is
   hidden in single-monitor mode.
+- **Silent installation degradation.** A long-running install
+  that hits a network blip, driver hiccup, or monitor-cable
+  jiggle could degrade silently if failure paths aren't
+  designed in. Mitigated by §3 "Failure recovery" — bounded
+  retries, last-good-frame freezing during HLS retry, IPC
+  staleness surfacing, GPU context loss recovery, control-
+  window crash reattachment via boot scan. Risk remaining:
+  a class of failure we haven't anticipated reaches the
+  audience as a black or stale screen with no operator
+  notification. Mitigation: every failure path emits an
+  `output_failure` Tier A telemetry event, observable in
+  Grafana dashboards for installation operators.
 
 ---
 
