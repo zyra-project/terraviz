@@ -314,10 +314,10 @@ two-way binding.
 | `src/services/multiOutput/manager.ts` | `MultiOutputManager` — singleton: enumerates monitors, spawns/destroys output windows, builds and broadcasts globe-state diffs, persists config, monitors output health (crash detection, IPC heartbeats, monitor-unplug 2 s poll, boot scan for orphaned `output-*` windows after a control-window crash — see "Failure recovery") |
 | `src/services/multiOutput/protocol.ts` | Shared TS types for control↔output IPC events. Imported by both bundles. Single source of truth for the state schema above. |
 | `src/services/multiOutput/stateAggregator.ts` | Subscribes to dataset / playback / layer / time / view events, builds the state snapshot, emits diffs |
-| `src/ui/outputUI.ts` | Tools → Outputs panel — list current outputs, "Add output" button, per-output config menu (monitor, mode, "Track operator camera" toggle, "Split sphere" toggle, debug overlay), per-output health badge (healthy / stale / stalled / monitor-missing — see "Failure recovery") |
+| `src/ui/outputUI.ts` | Tools → Outputs panel — list current outputs, "Add output" button, per-output config menu (monitor, mode, "Track operator camera" toggle, "Split sphere" toggle, "Rotation offset (°)" numeric + slider, "Calibration" submenu with test-pattern selector, debug overlay), per-output health badge (healthy / stale / stalled / monitor-missing — see "Failure recovery") |
 | `output/main.ts` | Output window entry. Creates Three.js renderer, builds `photorealEarth` scene + dataset overlay + layer stack, runs equirect RTT each frame, displays to a full-bleed canvas. Wires `webglcontextlost` / `webglcontextrestored` listeners and an IPC-silence watchdog (5 s tolerance, stale state thereafter — see "Failure recovery") |
-| `output/equirectRtt.ts` | Equirectangular render-to-texture pass — single fragment shader. Raycasts from a configurable camera offset (`uCameraOffset`, derived from the operator's MapLibre camera by default; see §3.5) at every (lon, lat) of the output framebuffer. Supports split mode (`uSplit`) that mirrors the area of focus to the antipodal hemisphere of the LED sphere. |
-| `output/datasetMirror.ts` | Output-side companion to control-window `datasetLoader` — given a `dataset.url` + `dataset.kind` + `dataset.bbox`, builds a Three.js texture (image or HLS-driven VideoTexture) and a UV transform. Owns the playback sync state machine (see "Playback sync algorithm") and the HLS fatal-error retry loop (3× exponential backoff, freeze last good frame during retry — see "Failure recovery") |
+| `output/equirectRtt.ts` | Equirectangular render-to-texture pass — single fragment shader. Applies the per-output `uRotationOffsetRad` longitude rotation first (see "Calibration tooling"), then raycasts from a configurable camera offset (`uCameraOffset`, derived from the operator's MapLibre camera by default; see §3.5) at every (lon, lat) of the output framebuffer. Supports split mode (`uSplit`) that mirrors the area of focus to the antipodal hemisphere of the LED sphere. |
+| `output/datasetMirror.ts` | Output-side companion to control-window `datasetLoader` — given a `dataset.url` + `dataset.kind` + `dataset.bbox`, builds a Three.js texture (image or HLS-driven VideoTexture) and a UV transform. Owns the playback sync state machine (see "Playback sync algorithm") and the HLS fatal-error retry loop (3× exponential backoff, freeze last good frame during retry — see "Failure recovery"). Recognises the `__terraviz_calibration__` sentinel dataset id and renders a procedural test pattern (~80 lines of GLSL) instead of fetching content (see "Calibration tooling") |
 | `output/layerStack.ts` | Builds and updates the multi-shell sphere stack from the layers state diff |
 | `output/output.html` + `output/output.css` | Output window markup and styling — black body, no cursor, full-bleed canvas |
 | `src-tauri/capabilities/output.json` | Narrow capability scoped to `output-*` window labels. Allows: event listen / unlisten / emit / emit-to (IPC with manager); window current-monitor / is-decorated / is-fullscreen / set-fullscreen / set-decorations / close; HTTP fetch on `https://*` only with localhost explicitly denied. Excludes: `core:default`, `core:window:default`, window creation, updater, filesystem, asset protocol, shell, dialog, clipboard, all Tauri command `invoke`. Full enumeration + rationale in §3 "Output capability spec". |
@@ -330,7 +330,8 @@ two-way binding.
 | `src/services/datasetLoader.ts` | Emit a `dataset:loaded` event the manager subscribes to |
 | `src/services/mapRenderer.ts` | Emit a debounced `camera:moved` event with `{ lng, lat, zoom }` so the manager can derive `view.cameraOffset` for outputs that track operator camera |
 | `src/ui/playbackController.ts` | Forward play / pause / scrubber events to the state aggregator |
-| `src/analytics/errorCapture.ts` | Add a sanitized `output_failure` Tier A event path consumed by the manager — `{ label, kind, retries }` per occurrence (see "Failure recovery" §3) |
+| `src/types/index.ts` | Add `OutputAddedEvent` / `OutputRemovedEvent` / `OutputFailureEvent` interfaces; append to the `TelemetryEvent` union; tier choice is essential — none belong in `TIER_B_EVENT_TYPES` (see "Telemetry" decision in Open Questions §3) |
+| `src/analytics/perfSampler.ts` | When outputs are active, extend the existing 60 s `perf_sample` event with `output_count` and `sync_delta_p95_ms` fields (no new event type) |
 | `src/ui/toolsMenuUI.ts` | Add "Outputs" entry that opens the new Outputs panel; add a "Fullscreen" toggle that calls `getCurrentWindow().setFullscreen()` + `setDecorations()` and persists to localStorage (see §3.6) |
 | `src-tauri/src/main.rs` | Parse `--kiosk` argv flag and `TERRAVIZ_KIOSK=1` env var in `setup()`; apply fullscreen + decorationless before first paint when set (see §3.6) |
 | `src-tauri/capabilities/default.json` | Add `core:window:allow-set-decorations` (`core:window:allow-set-fullscreen` is already granted; `set-decorations` is not in the default set and is required so the runtime fullscreen toggle can also drop the title bar) |
@@ -683,15 +684,22 @@ once the operator's relaunch completes.
   only output-side failures (crash, GPU loss) affect the
   LED sphere directly. Manager and IPC failures preserve
   last good state.
-- **All failures route through `errorCapture.ts`** with a
-  stable signature so installation health can be tracked.
-  Hashed for privacy where stack traces are involved (Tier
-  B if Open Question 3 closes that way).
-- **One control-window telemetry event per failure**:
-  `output_failure` Tier A with `{ label, kind, retries }`.
-  Output windows themselves emit nothing (matches §10
-  default and §3.6 capture-clean policy — no hidden
-  network from the LED-sphere surface).
+- **One control-window Tier A telemetry event per failure**:
+  `output_failure` with `{ kind, retries, recovered }` —
+  fired via `src/analytics/emitter.ts`, **not** through
+  `errorCapture.ts` (no stack trace, no free text, no
+  sanitisation needed). Categorical fields only. Bounded
+  retry attempts collapse into a single event. Output
+  windows themselves emit nothing — matches §3.6
+  capture-clean policy. See Open Question 3 (decided) for
+  the full schema.
+- **Unhandled errors** thrown inside the output window
+  (a Three.js bug, a thrown promise rejection) hit the
+  output's local console only — `errorCapture.ts` is not
+  installed in output bundles. Operators debugging an
+  installation issue use F12 on the affected output to
+  read the console; aggregated installation health rolls
+  up to the control window's `output_failure` events.
 
 ### LED sphere zoom + split (matches existing SOS behavior)
 
@@ -882,6 +890,7 @@ interface PersistedOutputConfig {
     framebufferSize: { width: number; height: number } // e.g. 4096×2048
     trackOperatorCamera: boolean // default true; see §3.5
     split: boolean              // default false; see §3.5
+    rotationOffsetDeg: number   // default 0; longitude offset for sphere alignment, see "Calibration"
     debugOverlay: boolean
   }>
   autoRestoreOnLaunch: boolean // default false; opt-in
@@ -1004,6 +1013,161 @@ fails closed.
       string; if the output emits it, the manager's listen
       uses the same string. No emit-without-listen wildcards.
 
+### Calibration tooling
+
+Commissioning an LED-sphere installation requires more than
+"point output at monitor and hope." Two calibration
+primitives ship in v1.
+
+#### 1. Test pattern pseudo-dataset
+
+Selectable from the per-output config menu under a
+"Calibration" submenu, alongside the regular dataset list.
+**Not a fetched asset** — rendered shader-side so it works
+identically on every output regardless of network state.
+
+The pattern is a single multi-purpose target rendered into
+the equirect framebuffer:
+
+- **8-step grayscale ramp** along the equator (0 % to 100 %
+  in 12.5 % increments) — for brightness / contrast / gamma
+  calibration. Each step is a 22.5°-wide longitudinal band.
+- **RGB color bars** at lat = ±30° — saturated red, green,
+  blue, cyan, magenta, yellow at 100 % — for white-point
+  and gamut spot-check.
+- **Lat / lon graticule** at 30° intervals, with the equator
+  and prime meridian rendered 2 px wide and color-coded
+  (equator yellow, prime meridian cyan) for orientation.
+- **Crosshair markers** at (0, 0), (±90, 0), (180, 0),
+  (0, ±90) — eight named anchor points operators can
+  reference when calling out alignment errors.
+- **Label strings** at each pole reading "N" and "S" — for
+  detecting a sphere wired upside-down.
+- **Resolution counter** in the upper-right of the equirect
+  frame: dynamically rendered text showing current
+  `framebufferSize` (e.g. "4096 × 2048"). Shifts with
+  framebuffer changes — confirms that the resolution
+  picker actually applied.
+
+Operator workflow: pick Calibration → Test Pattern. The
+output replaces dataset content with the pattern. Track-
+operator-camera + split + rotation offset all still apply,
+so the operator can verify those primitives by zooming in
+on the control globe and watching how the pattern
+distributes across the LED sphere.
+
+Implementation: `output/datasetMirror.ts` recognises a
+sentinel dataset id (`__terraviz_calibration__`). When that
+id arrives in a state diff, the mirror builds a procedural
+texture in a Three.js `WebGLRenderTarget` driven by a single
+fragment shader (~80 lines of GLSL). No `<video>`, no HLS,
+no network. The pattern recomputes only when
+`framebufferSize` changes.
+
+#### 2. Per-output rotation offset
+
+LED spheres are physical objects. Some installations
+mechanically rotate the sphere relative to canonical 0°
+prime meridian — the sphere's "north pole pin" doesn't
+align with celestial north, or the operator wants the
+prime meridian to face the museum's main entrance.
+
+`rotationOffsetDeg`: a per-output float in `[0, 360)` (in
+the persisted config, see "Persistence") that's added to
+every longitude lookup in the equirect RTT shader before
+the camera-offset math runs. Operationally:
+
+```glsl
+// In equirectRtt.frag — applied before the cameraOffset ray-march.
+float lon = (uv.x - 0.5) * 6.2831853;          // [-π, π]
+lon = mod(lon + uRotationOffsetRad, 6.2831853); // shift, wrap
+// ...continue with normal cameraOffset ray-march from lon, lat
+```
+
+UI: a numeric input + slider in the per-output config menu,
+labelled "Rotation offset (°)". 0.1° granularity. Defaults
+to 0; persisted with the rest of the output config.
+
+Operator workflow: load the test pattern. Note where the
+prime meridian lands on the physical sphere. Adjust
+`rotationOffsetDeg` until the prime meridian aligns with
+the desired physical reference (e.g. the museum entrance).
+Save. Once calibrated, leave it alone — it's a per-
+installation constant, not per-session.
+
+The protocol carries the offset in `view.rotationOffsetDeg`
+alongside `cameraOffset` and `split`. It's a per-output
+flag, not a globally-broadcast view field — different
+outputs on different spheres need different offsets.
+
+### Tour engine interaction
+
+Tours (`src/services/tourEngine.ts`) operate on the control
+window's globe state — datasets, layouts, view, time. Each
+tour task fires a callback that mutates control-window
+state, which the state aggregator picks up and broadcasts to
+outputs via the normal state-diff path. **Outputs require
+no tour-aware code.**
+
+Concretely:
+
+- `setEnvView` swaps the multi-globe layout (1 / 2 / 4
+  globes). The state aggregator detects the primary panel
+  changing, broadcasts the new dataset / layers / view to
+  outputs. The output's `datasetMirror` swaps texture; the
+  layer stack rebuilds. ~1 s visible transition on the LED
+  sphere.
+- `unloadDatasetAt(slot)` clears a panel. If the cleared
+  panel was primary, outputs receive a dataset-unload diff
+  and revert to the photoreal Earth idle state.
+- `loadDataset` with a `worldIndex` routes the load to a
+  specific panel slot. If that slot is primary, outputs
+  pick up the new dataset; if not, outputs are unaffected
+  (panel routing in v1 is "follow primary" — see §5).
+
+**No `setOutput` tour task in v1.** Tours don't directly
+spawn / close / configure output windows. That's a Phase 4
+feature gated on real demand from museum installations
+that want choreographed multi-display sequences. Until
+then, tours and outputs are decoupled by design — outputs
+mirror the operator's primary panel, whether that panel
+is being driven by the operator manually or by a tour.
+
+**Rapid layout swaps.** If a tour fires `setEnvView`
+multiple times within a few seconds (a "stress test" tour
+for QA, or a poorly-authored tour), the manager's
+broadcast debouncing (~30 ms) coalesces; outputs see the
+final state, not every intermediate step. No flicker on
+the LED sphere from tour churn.
+
+### VR / AR coexistence
+
+The output windows and the WebXR immersive mode (§ "VR / AR"
+in CLAUDE.md) are independent paths. Both use Three.js but
+in entirely separate scenes:
+
+- **VR session** (`vrSession.ts`) creates a Three.js renderer
+  on the control window's DOM, attached to `renderer.xr`.
+  Lifecycle bound to the WebXR session.
+- **Each output window** has its own DOM, own Three.js
+  renderer, own scene built from `photorealEarth.ts`.
+
+There's no shared GL context, no shared scene graph, no
+event coupling. Three.js loads as a single lazy chunk that
+both code paths reuse — bundle is unaffected.
+
+If the operator enters VR while outputs are running:
+outputs continue rendering on their own windows, the VR
+session takes over the control window. MapLibre keeps
+running too (per §VR architecture, "Two renderers, one
+DOM"). All three paths run concurrently.
+
+The shared-`<video>`-element trick from VR (see §1
+constraint #4) does not extend to outputs. Each output
+runs its own decoder (per §3 "Playback sync algorithm").
+A future Phase 5 shared-GPU-texture path could unify all
+three consumers, but it's not a v1 concern.
+
 ---
 
 ## MVP scope (v1, this branch)
@@ -1110,7 +1274,8 @@ without rolling the whole feature back.
 | 10 | `multi-output: persist + restore outputs across launches` | localStorage config, opt-in restore on boot, monitor-name matching. | Yes (additive) |
 | 11 | `multi-output: per-output debug overlay + framebuffer resolution picker` | Resolution picker in panel, debug HUD with dataset id, sync delta, and fps. | Yes (additive) |
 | 12 | `multi-output: fullscreen toggle + kiosk launch + F11 on every window` | `Tools → Fullscreen` toggle in `toolsMenuUI.ts` (persisted), F11 keydown handler on control + output windows, `--kiosk` argv parse and `TERRAVIZ_KIOSK=1` env var read in `src-tauri/src/main.rs` applying fullscreen + decorationless before first paint, `core:window:allow-set-decorations` added to `capabilities/default.json`, 3-second idle cursor-hide on the control window when fullscreen. See §3.6. | Yes (additive) |
-| 13 | `multi-output: failure recovery — crashes, stalls, GPU loss, monitor unplug` | Manager gains crash detection (no-graceful-close window destroy → toast + record removal), 3-strikes-per-monitor crash storm guard, 2 s `availableMonitors()` poll for unplug detection, `getAll()` boot scan to reattach orphaned `output-*` windows after a control-window crash. Output gains `webglcontextlost` / `webglcontextrestored` listeners with full scene rebuild, IPC-silence watchdog (5 s → stale state, 60 s → orphan), HLS fatal-error retry (3× backoff with frozen last-good-frame). Outputs panel renders per-output health badges (healthy / stale / stalled / monitor-missing). `errorCapture.ts` gains an `output_failure` Tier A event. See §3 "Failure recovery". | Yes (additive) |
+| 13 | `multi-output: failure recovery — crashes, stalls, GPU loss, monitor unplug` | Manager gains crash detection (no-graceful-close window destroy → toast + record removal), 3-strikes-per-monitor crash storm guard, 2 s `availableMonitors()` poll for unplug detection, `getAll()` boot scan to reattach orphaned `output-*` windows after a control-window crash. Output gains `webglcontextlost` / `webglcontextrestored` listeners with full scene rebuild, IPC-silence watchdog (5 s → stale state, 60 s → orphan), HLS fatal-error retry (3× backoff with frozen last-good-frame). Outputs panel renders per-output health badges (healthy / stale / stalled / monitor-missing). New Tier A `output_failure` event fired from manager via `analytics/emitter.ts` with `{ kind, retries, recovered }` (Open Question 3 decided). See §3 "Failure recovery". | Yes (additive) |
+| 14 | `multi-output: calibration tooling — test pattern + rotation offset` | `output/datasetMirror.ts` recognises the `__terraviz_calibration__` sentinel id and renders a procedural test pattern (8-step grayscale ramp at the equator, RGB color bars at lat ±30°, lat/lon graticule with color-coded equator + prime meridian, named anchor crosshairs, N/S pole labels, live resolution counter — ~80 LOC GLSL). `output/equirectRtt.ts` adds the `uRotationOffsetRad` longitude rotation applied before the camera-offset ray-march. `outputUI.ts` adds the per-output "Rotation offset (°)" numeric + slider and a "Calibration" submenu. Persisted config gains `rotationOffsetDeg`. See §3 "Calibration tooling". | Yes (additive) |
 
 **Backout plan.** Reverting commit 9 leaves all the plumbing in
 place (manager, output bundle, capability) but removes the
@@ -1129,7 +1294,14 @@ Tauri behavior (output goes black on HLS fatal, a crashed
 output leaves a stale record, GPU context loss freezes the
 canvas). Acceptable to ship without if a hard deadline forces
 it; not acceptable for an unattended installation. The basic
-state-mirroring path (commits 1–12) keeps working.
+state-mirroring path (commits 1–12) keeps working. Reverting
+commit 14 takes calibration off the table — operators
+commissioning a new LED sphere lose the test-pattern
+calibration aid and the per-installation rotation offset
+goes unread by the shader. The persisted `rotationOffsetDeg`
+field stays in localStorage as inert data; if commit 14
+lands again later, existing values are picked up
+automatically. The basic state-mirroring path is unaffected.
 
 **Acceptance for each commit:**
 
@@ -1264,8 +1436,6 @@ and reuse the v1 plumbing.
 - **Pass-through fast-path** for trivially-global cases.
   Worth implementing if profiling shows the Three.js render
   is the bottleneck.
-- **Telemetry.** Decide what (if anything) the output window
-  emits.
 - **Output-side dataset overlay.** Optional title card / data
   attribution shown briefly on dataset change, like SOS does
   natively.
@@ -1417,14 +1587,41 @@ renderer somewhere" — which we don't. Direct RTT.
    with day/night and atmosphere — a "live Earth" idle state.
    The same scene is already running; just don't add a
    dataset overlay. Free.
-3. **Telemetry.** Does the output window emit `output_opened`,
-   `output_closed`, `output_sync_drift_p95`, `output_fps_p50`
-   events for installation health monitoring? Tier A or
-   Tier B? Needs a separate analytics pass — see
-   `docs/ANALYTICS_CONTRIBUTING.md`'s reviewer checklist.
-   **Default until decided: emit nothing from the output
-   window. Emit `output_added` / `output_removed` from the
-   control window only, Tier A.**
+3. **Telemetry — DECIDED.** The output window itself emits
+   nothing. Telemetry from a capture-clean LED-sphere
+   surface would also be a capture-clean policy violation
+   (§3.6) — outputs phone nothing home. Three new events
+   ship from the **control window**, all Tier A:
+
+   - `output_added` — fields: `mode` (`'sos-equirect'`),
+     `framebuffer_bucket` (`'1k' | '2k' | '4k' | '8k'`
+     bucketed to avoid identifying exact resolutions),
+     `monitor_index` (0 = primary, 1+ = secondaries — never
+     the OS-reported monitor name).
+   - `output_removed` — fields: `mode`, `reason`
+     (`'operator-close' | 'crash' | 'monitor-gone' |
+     'gpu-loss-timeout' | 'rejected-by-storm-guard'`).
+   - `output_failure` — fields: `kind`
+     (`'crash' | 'hls-stalled' | 'ipc-silence' | 'gpu-loss' |
+     'monitor-unplug'`), `retries` (number of recovery
+     attempts before this event fired), `recovered` (boolean
+     — true if the output continued, false if escalated to
+     operator). One event per occurrence; bounded retry
+     attempts collapse into a single event with `retries`
+     populated.
+
+   Plus a per-minute extension to the existing `perf_sample`
+   on the control window: when outputs are active, the
+   sample includes `output_count` and `sync_delta_p95_ms`
+   (95th percentile of `local - broadcast` over the sample
+   window). No new event type, just additional fields on a
+   tier-A event that already ships. Per
+   `docs/ANALYTICS_CONTRIBUTING.md`'s reviewer checklist:
+   none of these new fields require hashing (no free-text)
+   or sanitisation; tier choice is essential because
+   installation health is the primary motivation; throttling
+   is built into the event semantics (one per discrete
+   action, no continuous emit).
 4. **Input on the output window.** Today, mouse/keyboard go
    to whichever window has focus. Should clicks on the
    output window pass through to the control window, eat the
@@ -1436,11 +1633,16 @@ renderer somewhere" — which we don't. Direct RTT.
    lock" API today; we'd either need a per-OS Rust shim or
    document that the operator should disable screen savers
    in their OS settings. Defer to Phase 5.
-6. **Tour integration depth.** Tours fire `setEnvView` to
-   change the control window's layout. Should tours be able
-   to fire `setOutput` to add or remove output windows?
-   Powerful for museum kiosks but a larger surface area. v1
-   says no — tours don't touch outputs.
+6. **Tour integration depth — DECIDED.** Tours mutate the
+   control window's globe state; outputs mirror that state
+   via the normal state-diff path. **No tour-aware code in
+   outputs.** The full reasoning + behavior matrix lives in
+   §3 "Tour engine interaction" — tldr: `setEnvView` /
+   `unloadDatasetAt` / `loadDataset(worldIndex)` reach outputs
+   indirectly because they change which dataset / layers /
+   view the primary panel is showing. Direct tour-→output
+   tasks (a hypothetical `setOutput`) are deferred to Phase 4
+   gated on real museum-kiosk demand.
 7. **CONUS-bbox UV transform exactness.** The MapLibre globe
    places non-global rasters using a known UV transform that
    accounts for the dataset's projection (typically EPSG:4326
@@ -1533,6 +1735,7 @@ const outputs: PersistedOutputConfig = {
       framebufferSize: { width: 4096, height: 2048 },
       trackOperatorCamera: true,   // see §3.5
       split: false,                // see §3.5
+      rotationOffsetDeg: 0,        // see §3 "Calibration tooling"
       debugOverlay: false,
     },
   ],
@@ -1740,19 +1943,65 @@ telemetry event fires (visible in the console batch when
     output position restored to persisted `{x, y}`,
     close-prompt cleared.
 
+### Commit 14 — calibration tooling
+
+39. **Test pattern.** Open the per-output config →
+    Calibration → Test Pattern. Output replaces dataset
+    content with the calibration pattern. Verify visually:
+    grayscale ramp at the equator (8 distinct steps,
+    monotonically increasing brightness), RGB color bars at
+    lat ±30°, lat/lon graticule with yellow equator + cyan
+    prime meridian, named anchor crosshairs at
+    (0,0)/(±90,0)/(180,0)/(0,±90), N/S labels at the poles,
+    resolution counter in the upper-right corner showing
+    the current `framebufferSize`.
+40. **Pattern + framebuffer change.** With the pattern
+    active, switch framebuffer resolution from 4096×2048
+    to 2048×1024 via the resolution picker. The resolution
+    counter updates within ~500 ms. Pattern remains
+    visually correct (no broken text, no z-fighting).
+41. **Pattern + camera tracking.** With the pattern
+    active and Track Operator Camera ON, zoom in on the
+    control globe at lon=0/lat=0. The center crosshair
+    fills more of the LED-sphere mock; the antipodal "
+    180,0" crosshair compresses on the other side. Confirms
+    that camera tracking applies to the pattern just like
+    a regular dataset.
+42. **Pattern + split.** Toggle Split Sphere ON. The
+    crosshair at (0,0) appears twice on the equirect
+    (U=0.25 and U=0.75), confirming split mode applies.
+43. **Rotation offset.** With the pattern still active,
+    set Rotation offset to 90°. The prime meridian (cyan
+    line) shifts 90° westward on the LED-sphere mock —
+    the line that previously sat at U=0.5 now sits at
+    U=0.25. Confirms the longitudinal rotation is applied
+    correctly. Reset to 0°.
+44. **Rotation offset persistence.** Set offset to 45°,
+    quit, relaunch with auto-restore on. Output spawns
+    with offset already at 45°; pattern reflects it
+    immediately at first paint (no flash of unrotated
+    state).
+45. **Pattern off.** Pick a real dataset from the
+    Calibration → Off (or pick any normal dataset).
+    Output reverts to the dataset; pattern shader is
+    unloaded. No memory leak (verify GPU memory is at the
+    same level as before commit 14's pattern was loaded
+    via `chrome://gpu` on the output's webview).
+
 ### Cross-platform parity
 
-39. Repeat steps 4–18 (basic happy path) on a Windows
+46. Repeat steps 4–18 (basic happy path) on a Windows
     workstation. Same outcomes. Particular attention to
     WebView2's separate-process model under crash storm.
-40. Repeat steps 4–18 on macOS. Particular attention to
+47. Repeat steps 4–18 on macOS. Particular attention to
     WKWebView's process-sharing model and macOS auto-move
     on monitor unplug.
 
 ### Notes on automation
 
-Steps 4–24 (happy-path commits 9–11) are good candidates
-for Playwright-driven automation against the Tauri test
+Steps 4–24 (happy-path commits 9–11) and steps 39–45
+(commit 14 calibration) are good candidates for
+Playwright-driven automation against the Tauri test
 harness once the panel ships. Failure-recovery cases
 (31–38) involve OS-level kills and network manipulation —
 keep them manual for v1.
