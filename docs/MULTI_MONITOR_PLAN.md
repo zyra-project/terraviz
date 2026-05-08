@@ -327,8 +327,9 @@ two-way binding.
 | `src/services/datasetLoader.ts` | Emit a `dataset:loaded` event the manager subscribes to |
 | `src/services/mapRenderer.ts` | Emit a debounced `camera:moved` event with `{ lng, lat, zoom }` so the manager can derive `view.cameraOffset` for outputs that track operator camera |
 | `src/ui/playbackController.ts` | Forward play / pause / scrubber events to the state aggregator |
-| `src/ui/toolsMenuUI.ts` | Add "Outputs" entry that opens the new Outputs panel |
-| `src-tauri/capabilities/default.json` | No change |
+| `src/ui/toolsMenuUI.ts` | Add "Outputs" entry that opens the new Outputs panel; add a "Fullscreen" toggle that calls `getCurrentWindow().setFullscreen()` + `setDecorations()` and persists to localStorage (see §3.6) |
+| `src-tauri/src/main.rs` | Parse `--kiosk` argv flag and `TERRAVIZ_KIOSK=1` env var in `setup()`; apply fullscreen + decorationless before first paint when set (see §3.6) |
+| `src-tauri/capabilities/default.json` | Add `core:window:allow-set-decorations` (`core:window:allow-set-fullscreen` is already granted; `set-decorations` is not in the default set and is required so the runtime fullscreen toggle can also drop the title bar) |
 | `vite.config.ts` | Add `rollupOptions.input` with `main` and `output` entries |
 | `package.json` | No new runtime deps for v1 (Three.js already a runtime dep for VR) |
 
@@ -496,6 +497,73 @@ Per-mode defaults:
 | **Dome / fisheye** (Phase 2) | Default on | N/A (single-audience surface) | Smoothing filter added in Phase 2 to avoid jitter as the operator pans. |
 | **Presenter / mirrored** (Phase 4) | Always on | No | Audience sees exactly what the presenter is looking at; split would confuse a flat-screen audience. |
 
+### Fullscreen, decorationless, and kiosk modes
+
+The application title bar and window border leak into any signal
+that captures a monitor as input — a common installation pattern
+where the operator's machine drives an SOS sphere, projector, or
+LED wall over an HDMI capture card. v1 ships four mechanisms so
+every window can present a clean fullscreen surface:
+
+1. **Output windows: always fullscreen + decorationless.**
+   Spawned with `WebviewWindow.new('output-N', { decorations:
+   false, fullscreen: true, ... })` (see §3 boot flow step 3).
+   No non-fullscreen output mode exists. The cursor is hidden
+   after a brief idle (already in §5 MVP). This is the primary
+   capture-source surface; nothing further needs to change to
+   feed an external display system.
+
+2. **Control window: optional fullscreen toggle.**
+   `Tools → Display → Fullscreen` in `toolsMenuUI.ts`, plus an
+   F11 keyboard shortcut on the control window itself. Calls
+   `getCurrentWindow().setFullscreen(next)` and
+   `getCurrentWindow().setDecorations(!next)` together so the
+   title bar disappears with the chrome. Persists to
+   `localStorage['sos-control-fullscreen']` so the state
+   survives relaunch — a one-time toggle for an operator who
+   uses the control display itself as a capture source.
+
+3. **Kiosk-launch flag.** `--kiosk` CLI argument parsed in
+   `src-tauri/src/main.rs` and an equivalent
+   `TERRAVIZ_KIOSK=1` environment variable. Either path causes
+   `tauri::Builder::default().setup()` to apply
+   `set_fullscreen(true)` + `set_decorations(false)` on the
+   main window before the first paint. Useful for unattended
+   installations: drop a `.desktop` autostart entry, the app
+   launches straight into the final state on boot. Exit via
+   Cmd/Ctrl+Q (already wired) or by SIGTERM from the
+   installation's process supervisor.
+
+4. **F11 on every window.** Both control and output windows
+   wire a global keydown handler that intercepts F11 and
+   toggles `getCurrentWindow().setFullscreen(...)`. Output
+   windows already start fullscreen, so F11 there is the
+   "show me the title bar so I can drag the window" escape
+   hatch operators sometimes need during calibration. Web
+   build (no Tauri) falls back to the standard Fullscreen API
+   (`document.documentElement.requestFullscreen()`), which
+   covers the same use case for browser-based deployments
+   where the user is using browser-source capture (OBS,
+   vMix) rather than a hardware HDMI capture.
+
+**Cursor handling in fullscreen:** the control window adds a
+3-second idle-then-hide rule when it goes fullscreen (CSS
+`cursor: none` after `setTimeout`, restored on `mousemove`).
+Output windows already hide the cursor entirely per §5. This
+matters for capture: a stationary cursor in the corner of the
+captured signal is exactly the kind of artifact operators are
+trying to avoid.
+
+**Why not just rely on OS-level fullscreen (`F11` on the
+browser, "Use as Display" on macOS, etc.)?** Two reasons.
+First, the Tauri webview on Linux doesn't always honor the
+browser-style `requestFullscreen` cleanly — explicit
+`setFullscreen(true)` from Rust is more reliable across
+distros. Second, kiosk-launch from a `.desktop` autostart
+entry can't drive a runtime keystroke; it needs a flag the
+binary reads at startup. The four mechanisms above cover the
+union of operator workflows we've seen.
+
 ### Asset resolution rules (control window picks the URL)
 
 The control window's `datasetLoader` already understands
@@ -584,6 +652,14 @@ What must work:
 - **Audio is muted on every output window.** The control
   window is the single audio source.
 - **Cursor hidden** on the output webview after a brief idle.
+- **Fullscreen + kiosk surfaces.** Output windows always
+  launch fullscreen + decorationless. The control window
+  gains a Tools → Fullscreen toggle (persisted to
+  localStorage), an F11 shortcut on every window, and a
+  `--kiosk` CLI flag (also `TERRAVIZ_KIOSK=1`) that boots the
+  control window fullscreen + decorationless before the
+  first paint. Cursor auto-hides after 3 s of idle in
+  fullscreen. See §3.6.
 
 Explicitly out of scope for v1 (→ Phase 2+):
 
@@ -640,6 +716,7 @@ without rolling the whole feature back.
 | 9 | `multi-output: add Tools → Outputs panel` | `outputUI.ts`, Tools menu entry. **First user-reachable commit.** Operator can add and remove SOS equirectangular outputs. | **Yes** |
 | 10 | `multi-output: persist + restore outputs across launches` | localStorage config, opt-in restore on boot, monitor-name matching. | Yes (additive) |
 | 11 | `multi-output: per-output debug overlay + framebuffer resolution picker` | Resolution picker in panel, debug HUD with dataset id, sync delta, and fps. | Yes (additive) |
+| 12 | `multi-output: fullscreen toggle + kiosk launch + F11 on every window` | `Tools → Fullscreen` toggle in `toolsMenuUI.ts` (persisted), F11 keydown handler on control + output windows, `--kiosk` argv parse and `TERRAVIZ_KIOSK=1` env var read in `src-tauri/src/main.rs` applying fullscreen + decorationless before first paint, `core:window:allow-set-decorations` added to `capabilities/default.json`, 3-second idle cursor-hide on the control window when fullscreen. See §3.6. | Yes (additive) |
 
 **Backout plan.** Reverting commit 9 leaves all the plumbing in
 place (manager, output bundle, capability) but removes the
@@ -648,7 +725,11 @@ is unchanged from pre-feature. Reverting commits 6-8 removes
 the manager itself — everything else still type-checks because
 nothing on the hot path imports from `multiOutput/`. Reverting
 commits 2-4 removes the output bundle — the unused build
-artifacts disappear; nothing else changes.
+artifacts disappear; nothing else changes. Reverting commit 12
+removes the control-window fullscreen toggle, F11 handler, and
+kiosk flag; output windows remain fullscreen + decorationless
+because that's wired in commit 3 — the LED-sphere capture path
+is not affected.
 
 **Acceptance for each commit:**
 
