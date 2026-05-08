@@ -285,21 +285,24 @@ broadcast as a diff whenever it changes. v1 captures:
 | `layers[]` (stacked-layer ids and z-order) | new `layerStack` state in `main.ts` | layer add / remove / reorder |
 | `time.simulationDate` | playback engine | date label tick |
 | `view.dayNight` (toggle on/off) | Tools menu | toggle change |
-| `view.cameraOffset` (Vector3) | Manager (computed) | always `(0,0,0)` in v1; Phase 2+ derived from operator's MapLibre camera when "Track operator camera" is enabled — see §3.5 |
+| `view.cameraOffset` (Vector3) | Manager (computed from MapLibre camera) | default-on for SOS LED sphere outputs in v1; can be disabled per output. Pinned to `(0,0,0)` when tracking is off, which produces a uniform 1:1 equirectangular unwrap. See §3.5. |
+| `view.split` (boolean) | Outputs panel toggle | per-output flag. When on, the area of focus is mirrored to the opposite hemisphere of the physical LED sphere — matches existing SOS sphere-split behavior. See §3.5. |
 
-**Not** mirrored to the SOS output in v1: the operator's
-camera position (zoom/pan/bearing). The SOS output is always a
-full equirectangular unwrap of the *whole* sphere — a physical
-LED sphere is a 1:1 surface representation of Earth, and
-zooming the source would stretch a region of Earth over the
-whole physical sphere, breaking geography for visitors. The
-control window keeps its own independent camera as today.
+The SOS output **does** track the operator's MapLibre camera
+by default in v1: zooming in the control window concentrates
+pixels around the area of focus on the LED sphere, the rest
+of the globe compresses on the antipodal side. This is the
+expected operator workflow on existing SOS installations and
+visitors read it intuitively — see §3.5 for the math and the
+per-mode defaults table. An operator who wants the LED sphere
+to remain a 1:1 representation regardless of where they pan
+the control window flips the per-output "Track operator
+camera" toggle off; the cameraOffset pins to zero and the
+output renders a uniform equirect.
 
-The shader is forward-compatible with off-center camera modes,
-though — see §3.5 ("Off-center camera as zoom") below. Phase 2
-(dome / fisheye) and Phase 4 (presenter / mirrored) will use
-the same shader with a non-zero offset uniform to optionally
-track the operator's zoom.
+The control window keeps its own independent MapLibre camera
+as today — `cameraOffset` is a derived broadcast, not a
+two-way binding.
 
 ### New modules
 
@@ -308,9 +311,9 @@ track the operator's zoom.
 | `src/services/multiOutput/manager.ts` | `MultiOutputManager` — singleton: enumerates monitors, spawns/destroys output windows, builds and broadcasts globe-state diffs, persists config |
 | `src/services/multiOutput/protocol.ts` | Shared TS types for control↔output IPC events. Imported by both bundles. Single source of truth for the state schema above. |
 | `src/services/multiOutput/stateAggregator.ts` | Subscribes to dataset / playback / layer / time / view events, builds the state snapshot, emits diffs |
-| `src/ui/outputUI.ts` | Tools → Outputs panel — list current outputs, "Add output" button, per-output config menu (monitor, mode, debug overlay) |
+| `src/ui/outputUI.ts` | Tools → Outputs panel — list current outputs, "Add output" button, per-output config menu (monitor, mode, "Track operator camera" toggle, "Split sphere" toggle, debug overlay) |
 | `output/main.ts` | Output window entry. Creates Three.js renderer, builds `photorealEarth` scene + dataset overlay + layer stack, runs equirect RTT each frame, displays to a full-bleed canvas |
-| `output/equirectRtt.ts` | Equirectangular render-to-texture pass — single fragment shader, raycasts from a configurable camera offset (default origin) at every (lon, lat) of the output framebuffer. Forward-compat with off-center "zoom" modes (§3.5). |
+| `output/equirectRtt.ts` | Equirectangular render-to-texture pass — single fragment shader. Raycasts from a configurable camera offset (`uCameraOffset`, derived from the operator's MapLibre camera by default; see §3.5) at every (lon, lat) of the output framebuffer. Supports split mode (`uSplit`) that mirrors the area of focus to the antipodal hemisphere of the LED sphere. |
 | `output/datasetMirror.ts` | Output-side companion to control-window `datasetLoader` — given a `dataset.url` + `dataset.kind` + `dataset.bbox`, builds a Three.js texture (image or HLS-driven VideoTexture) and a UV transform |
 | `output/layerStack.ts` | Builds and updates the multi-shell sphere stack from the layers state diff |
 | `output/output.html` + `output/output.css` | Output window markup and styling — black body, no cursor, full-bleed canvas |
@@ -320,8 +323,9 @@ track the operator's zoom.
 
 | File | Change |
 |---|---|
-| `src/main.ts` | Boot `MultiOutputManager`; wire it to dataset / playback / layer events |
+| `src/main.ts` | Boot `MultiOutputManager`; wire it to dataset / playback / layer / **camera** events |
 | `src/services/datasetLoader.ts` | Emit a `dataset:loaded` event the manager subscribes to |
+| `src/services/mapRenderer.ts` | Emit a debounced `camera:moved` event with `{ lng, lat, zoom }` so the manager can derive `view.cameraOffset` for outputs that track operator camera |
 | `src/ui/playbackController.ts` | Forward play / pause / scrubber events to the state aggregator |
 | `src/ui/toolsMenuUI.ts` | Add "Outputs" entry that opens the new Outputs panel |
 | `src-tauri/capabilities/default.json` | No change |
@@ -393,8 +397,9 @@ of truth.
    `time.simulationDate` (uses existing `getSunPosition()`
    helper from `utils/time.ts`).
 4. Render the sphere stack to the equirectangular framebuffer
-   with the current `uCameraOffset` uniform (always `vec3(0)`
-   in v1).
+   with the current `uCameraOffset` uniform (derived from the
+   operator's MapLibre camera when "Track operator camera" is
+   on for this output; `vec3(0)` when off) and `uSplit` flag.
 5. Blit the framebuffer to the visible canvas (single
    `gl.blitFramebuffer` call, GPU-local — no CPU readback).
 
@@ -403,13 +408,15 @@ images (don't redraw what hasn't changed). The render loop is
 a `requestAnimationFrame` driver that early-outs on a
 "nothing changed" check.
 
-### Off-center camera as zoom (forward-compat, not used in v1)
+### LED sphere zoom + split (matches existing SOS behavior)
 
 The naive equirect RTT shader puts the conceptual "360 camera"
 at the exact center of the sphere — every (u, v) of the output
 maps to a unique unit-direction, every direction hits the sphere
 at one point, and the result is a uniform equirectangular
-projection.
+projection. That's the **unzoomed** state: the operator's
+control camera at default zoom, full Earth wrapped 1:1 around
+the LED sphere.
 
 If we move the camera to an offset position `o` (with `|o| < 1`
 so it stays inside the sphere), the mapping becomes non-uniform.
@@ -422,21 +429,23 @@ perceptually equivalent to "zooming into" the region the
 camera moved toward. The far hemisphere shrinks but does not
 clip — it just gets smaller.
 
-This is six extra lines of GLSL and one `uniform vec3
-uCameraOffset`. We add it from day one for forward-compat,
-even though v1 always pins `uCameraOffset = vec3(0)`:
+**This is the expected behavior on the LED sphere**, and it
+matches what the existing SOS ecosystem has done for over a
+decade: when the operator zooms in on a hurricane, the area
+of interest fills more of the physical sphere while the
+antipode compresses. Visitors walking around the sphere read
+it intuitively — the "interesting bit" is bigger because the
+camera moved closer to it.
 
-| Mode | Camera offset | Reason |
-|---|---|---|
-| **SOS LED sphere** (v1) | Always `(0,0,0)` | The physical LED sphere is a 1:1 surface representation of Earth. Zooming the source would stretch a region across the whole physical sphere, breaking geography for visitors. |
-| **Dome / fisheye** (Phase 2) | Optional, operator toggle | A dome shows whatever the operator wants the audience to see. Tracking the control camera's zoom lets the dome "zoom into CONUS" during a hurricane segment. |
-| **Presenter** (Phase 4) | Track operator camera | Audience sees what the presenter is looking at. |
-
-When the offset *is* enabled (Phase 2+), the manager translates
-the control window's MapLibre camera into a sphere offset:
+This makes off-center camera the **primary** mode for v1, not a
+forward-compat hook. The shader takes a `uniform vec3
+uCameraOffset`, the manager derives it from the operator's
+MapLibre camera, and the Outputs panel exposes a "Track operator
+camera" toggle that defaults **on** for SOS LED sphere outputs.
 
 ```ts
-// Pseudocode — Phase 2 mapping, not v1
+// V1 mapping — manager → output state, evaluated each frame the
+// operator's MapLibre camera changes (debounced ~30 ms).
 const lat = camera.center.lat
 const lon = camera.center.lng
 const zoomFactor = Math.min(1 - 1 / (camera.zoom + 1), 0.85)
@@ -445,11 +454,47 @@ state.view.cameraOffset = dir.multiplyScalar(zoomFactor)
 ```
 
 The 0.85 cap prevents the camera from approaching the sphere
-surface, where the warp becomes degenerate.
+surface, where the warp becomes degenerate (a single source
+texel would smear across most of the LED sphere).
 
-V1 ships without exposing this — the shader uniform exists,
-the state field exists in the protocol, but the manager pins
-it to zero and the Outputs panel offers no toggle for it.
+**Split mode.** Existing SOS spheres also expose a "split"
+option that mirrors the zoomed area of focus to the opposite
+hemisphere of the physical sphere — visitors standing on either
+side of the LED sphere see the same hurricane, weather pattern,
+or feature without having to walk around it. We match that.
+
+Conceptually: render the off-center equirect at half longitudinal
+width, then tile it twice across the output frame so the area of
+focus ends up at U=0.25 and U=0.75 of the equirect, which the LED
+sphere wraps to two longitudes 180° apart on its physical surface.
+
+Implementation: one extra `uniform bool uSplit`. In the fragment
+shader, when split is on, fold the input U coordinate via
+`u_fold = fract(u * 2.0)` and feed `u_fold` into the same
+ray-march. ~6 lines of GLSL on top of the off-center camera.
+
+```ts
+// Protocol additions to view state (see §3 'what gets mirrored').
+view: {
+  dayNight: boolean
+  // Operator-camera tracking. Default on for sos-equirect mode
+  // in v1; can be disabled per output for "always-1:1 globe"
+  // idle displays.
+  cameraOffset: { x: number; y: number; z: number }   // |o| ≤ 0.85
+  // Mirror the area of focus to the antipodal hemisphere of the
+  // LED sphere. Default off; toggled per output in the Outputs
+  // panel.
+  split: boolean
+}
+```
+
+Per-mode defaults:
+
+| Mode | Track operator camera | Split available | Notes |
+|---|---|---|---|
+| **SOS LED sphere** (v1) | Default **on** | Yes | Matches existing SOS sphere behavior. Operator can disable tracking for "always-1:1 globe" idle displays. |
+| **Dome / fisheye** (Phase 2) | Default on | N/A (single-audience surface) | Smoothing filter added in Phase 2 to avoid jitter as the operator pans. |
+| **Presenter / mirrored** (Phase 4) | Always on | No | Audience sees exactly what the presenter is looking at; split would confuse a flat-screen audience. |
 
 ### Asset resolution rules (control window picks the URL)
 
@@ -483,6 +528,8 @@ interface PersistedOutputConfig {
     monitorName: string       // OS-reported name; matched on next boot
     mode: 'sos-equirect'      // future: 'fisheye' | 'mirrored' | …
     framebufferSize: { width: number; height: number } // e.g. 4096×2048
+    trackOperatorCamera: boolean // default true; see §3.5
+    split: boolean              // default false; see §3.5
     debugOverlay: boolean
   }>
   autoRestoreOnLaunch: boolean // default false; opt-in
@@ -523,9 +570,12 @@ What must work:
   honored.
 - **Per-output config in the Tools panel:** rename, change
   framebuffer resolution (1024² / 2048² / 4096² / 8192²),
-  toggle debug overlay (shows current dataset id, sync delta,
-  fps in the corner — useful for installation calibration),
-  close.
+  toggle "Track operator camera" (default on; off pins the
+  output to a uniform 1:1 equirect — see §3.5), toggle "Split
+  sphere" (default off; mirrors the area of focus to the
+  antipodal LED-sphere hemisphere — see §3.5), toggle debug
+  overlay (shows current dataset id, sync delta, fps in the
+  corner — useful for installation calibration), close.
 - **Optional persistence.** A "Restore outputs on launch"
   checkbox. Off by default.
 - **Clean teardown.** Closing an output disposes the Three.js
@@ -620,7 +670,7 @@ artifacts disappear; nothing else changes.
 
 ## Roadmap after MVP
 
-### Phase 2 — fisheye / dome projection + vector overlays + camera tracking
+### Phase 2 — fisheye / dome projection + vector overlays + dome camera-tracking polish
 
 The Three.js scene built for v1 already contains a fully
 composited sphere. Producing fisheye output is a one-shader
@@ -628,15 +678,14 @@ change — swap `equirectRtt.ts` for `fisheyeRtt.ts` with a
 different `(u,v) → direction` mapping. ~50 LOC, no architecture
 change.
 
-This is also the natural phase to expose the **off-center
-camera offset** (§3.5) as a per-output toggle. A dome operator
-can enable "Track operator camera" so the dome zooms wherever
-the operator zooms on the control globe — a hurricane segment
-that calls for a CONUS-level closeup is one click. The state
-field and shader uniform already exist from v1; Phase 2 just
-adds the Outputs panel toggle, the lat/lon → offset mapping,
-and a smoothing filter so the dome doesn't jitter as the
-operator pans.
+The off-center camera plumbing (§3.5) already exists from v1
+— the LED sphere uses it as its primary mode — so the dome
+gets it for free. Phase 2's add is a **smoothing filter** on
+the dome's `cameraOffset` so it doesn't jitter as the operator
+pans (the LED sphere's physical inertia hides this; a flat
+dome doesn't). Likely a 200 ms critically-damped spring on
+the lat/lon target, with a configurable cap on angular
+velocity. ~30 LOC.
 
 In the same phase, country borders + gridlines on the sphere.
 Committed approach: pull the existing MapLibre vector borders
@@ -654,8 +703,8 @@ Place labels (text-along-curve) is harder; ship-conditional on
 demand.
 
 Estimated effort: ~700 LOC across fisheye shader + vector
-overlay layer + per-output mode picker UI + camera-tracking
-toggle.
+overlay layer + per-output mode picker UI + dome smoothing
+filter.
 
 ### Phase 3 — multi-projector array (edge-blended walls / domes)
 
@@ -703,11 +752,14 @@ Two implementations, picked by the operator:
   for "pure mirror" lectures and bad for "show the data
   cleanly to the audience."
 - **Parallel-render mode.** Reuses the v1 Three.js scene
-  with `view.cameraOffset` set to follow the operator's
-  MapLibre pan/zoom (the same mechanism Phase 2 introduces
-  for domes — see §3.5). The audience sees the same Earth
-  region and zoom level the operator sees, but cleanly
-  rendered without UI chrome.
+  with `view.cameraOffset` already following the operator's
+  MapLibre pan/zoom (same mechanism the LED sphere uses in
+  v1 — see §3.5). The audience sees the same Earth region
+  and zoom level the operator sees, but cleanly rendered
+  without UI chrome. Phase 4's add over v1 is just the
+  flat-screen projection (replace the sphere unwrap with a
+  perspective camera) plus a config-time setting that pins
+  `split = false` regardless of operator preference.
 
 `output.html` switches on the `mode` field; both modes coexist
 and reuse the v1 plumbing.
@@ -856,9 +908,12 @@ renderer somewhere" — which we don't. Direct RTT.
 - **Country borders, gridlines, or labels in v1.** They live
   in MapLibre's vector layer pipeline and need a parallel
   implementation in Three.js. Phase 2.
-- **Operator's camera position mirrored to the output.** The
-  output is always a full equirectangular unwrap; it does not
-  zoom or pan with the control window's camera.
+- **Smoothing on the broadcast cameraOffset.** v1 debounces
+  the operator's MapLibre camera at ~30 ms but doesn't
+  critically-damp the trajectory — visible mainly on flat
+  dome / projector outputs (Phase 2 polish, see §7). The LED
+  sphere's physical surface and visitor viewing distance
+  conceal it.
 
 ---
 
