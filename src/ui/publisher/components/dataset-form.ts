@@ -818,6 +818,16 @@ interface RenderContext {
   sleep: (ms: number) => Promise<void>
   navigate: (url: string) => void
   routerNavigate: (path: string) => void
+  /** Shared lifecycle token for the form mount. `disposed` flips
+   *  to true exactly once — when ROUTE_CHANGE_START_EVENT fires —
+   *  and stays true. All renders within a single form mount share
+   *  this object reference, so a deferred callback bound during
+   *  render N (e.g. the asset-uploader's onUploaded) sees the
+   *  same flip even after render N+1 has supplanted it. The
+   *  listener that flips this lives in `renderDatasetForm` so
+   *  it's bound once per mount, not once per re-render. PR #112
+   *  followup — dataset-form.ts:disposed race. */
+  lifecycle: { disposed: boolean }
 }
 
 function renderForm(
@@ -1014,8 +1024,12 @@ function renderForm(
           // (which can take minutes for a multi-GB video). Without
           // this guard, the deferred callback would call update()
           // or mutate #dataset-data-ref on the next page's DOM.
-          // PR #112 followup — dataset-form.ts:onUploaded race.
-          if (disposed) return
+          // `ctx.lifecycle` is the shared per-mount token — flips
+          // only on route navigation, not on internal re-renders,
+          // so an upload in flight across input changes still
+          // resolves correctly. PR #112 followup —
+          // dataset-form.ts:disposed race.
+          if (ctx.lifecycle.disposed) return
           // On a direct upload (image), the server already wrote
           // `data_ref` to the row. Mirror the field-state so a
           // subsequent form save doesn't clobber it with an empty
@@ -1136,29 +1150,20 @@ function renderForm(
   shell.appendChild(form)
   content.replaceChildren(shell)
 
-  // Track whether this form mount is still the active page so
-  // deferred callbacks (notably the asset-uploader's onUploaded,
-  // which can fire after a multi-minute upload completes) don't
-  // clobber the next page's DOM if the user navigated away while
-  // the upload was in flight. The router fires
-  // ROUTE_CHANGE_START_EVENT before the destination handler
-  // renders into `content`; from that moment any update() or
-  // post-upload DOM mutation from this form mount is unsafe.
-  // The listener detaches itself the moment it fires (so we don't
-  // accumulate one listener per form visit — PR #112 followup
-  // fixed the original leak), and update() also detaches it
-  // before re-rendering (which immediately re-binds a fresh
-  // listener on the new mount).
-  let disposed = false
-  const onRouteStart = (): void => {
-    disposed = true
-    window.removeEventListener(ROUTE_CHANGE_START_EVENT, onRouteStart)
-  }
-  window.addEventListener(ROUTE_CHANGE_START_EVENT, onRouteStart)
-
+  // Internal re-render. The lifecycle/disposed bookkeeping lives
+  // ONE level up (in `renderDatasetForm`), so this function just
+  // checks the shared flag and re-renders. Internal re-renders
+  // (input changes, save-in-progress repaints) do NOT dispose
+  // the lifecycle — only route navigation does. That way, an
+  // onSubmit handler bound during render N can still call its
+  // captured update() after the server responds, and the
+  // update() will paint errors / success states into render N+1.
+  // The asset-uploader's onUploaded closure (which captures
+  // ctx) sees the same lifecycle and bails only on a true
+  // navigation, never on a sibling re-render. PR #112 followup —
+  // dataset-form.ts:disposed race.
   function update(): void {
-    if (disposed) return
-    window.removeEventListener(ROUTE_CHANGE_START_EVENT, onRouteStart)
+    if (ctx.lifecycle.disposed) return
     renderForm(content, state, ctx)
   }
 
@@ -1365,6 +1370,21 @@ export function renderDatasetForm(
     options.initialKeywords ?? [],
     options.initialTags ?? [],
   )
+  // One lifecycle token per form mount, shared across every
+  // renderForm call (internal re-renders included). Flipped to
+  // disposed=true exactly once — when the router fires
+  // ROUTE_CHANGE_START_EVENT — and stays flipped. Asset-uploader
+  // onUploaded callbacks and any other deferred work check this
+  // before mutating the DOM. The listener self-detaches on fire
+  // so we don't leak one per form visit. PR #112 followup —
+  // dataset-form.ts:disposed race.
+  const lifecycle: { disposed: boolean } = { disposed: false }
+  const onRouteStart = (): void => {
+    lifecycle.disposed = true
+    window.removeEventListener(ROUTE_CHANGE_START_EVENT, onRouteStart)
+  }
+  window.addEventListener(ROUTE_CHANGE_START_EVENT, onRouteStart)
+
   renderForm(content, state, {
     mode: options.mode,
     datasetId: options.initial?.id ?? null,
@@ -1381,5 +1401,6 @@ export function renderDatasetForm(
       (path => {
         window.location.href = path
       }),
+    lifecycle,
   })
 }
