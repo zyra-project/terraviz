@@ -182,6 +182,33 @@ describe('POST .../transcode-complete — happy path', () => {
     expect(row.transcoding).toBeNull()
   })
 
+  it('marks the asset_uploads row completed (durable backstop for /complete mark-failure)', async () => {
+    // PR #112 followup — /asset/.../complete's
+    // markVideoUploadCompleted step can fail transiently after
+    // dispatch succeeds, leaving the upload row stuck `pending`.
+    // /transcode-complete re-marks it here so the post-workflow
+    // state is always upload.status='completed', and any retry
+    // of /complete hits the top-of-handler idempotent branch
+    // cleanly. Closes the attack vector that required the
+    // earlier `alreadyCompleted` recovery branch in /complete
+    // (which the publisher could forge via a planted data_ref).
+    const { sqlite, datasetId, uploadId, env } = setupEnv()
+    // Simulate the stuck-pending state: /asset/.../complete
+    // ran its dispatch but the mark step never landed.
+    sqlite
+      .prepare(`UPDATE asset_uploads SET status = 'pending', completed_at = NULL WHERE id = ?`)
+      .run(uploadId)
+    const res = await transcodeComplete(
+      ctx({ env, datasetId, body: { upload_id: uploadId, source_digest: DEFAULT_SOURCE_DIGEST } }),
+    )
+    expect(res.status).toBe(200)
+    const row = sqlite
+      .prepare(`SELECT status, completed_at FROM asset_uploads WHERE id = ?`)
+      .get(uploadId) as { status: string; completed_at: string | null }
+    expect(row.status).toBe('completed')
+    expect(row.completed_at).not.toBeNull()
+  })
+
   it('writes an audit_events row tagged transcode_complete with the upload_id', async () => {
     const { sqlite, datasetId, uploadId, env } = setupEnv()
     await transcodeComplete(ctx({ env, datasetId, body: { upload_id: uploadId, source_digest: DEFAULT_SOURCE_DIGEST } }))

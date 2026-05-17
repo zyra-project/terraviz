@@ -55,7 +55,7 @@ import type { CatalogEnv } from '../../../_lib/env'
 import type { PublisherData } from '../../_middleware'
 import type { DatasetRow } from '../../../_lib/catalog-store'
 import { writeDatasetAudit } from '../../../_lib/audit-store'
-import { clearTranscoding, getAssetUpload } from '../../../_lib/asset-uploads'
+import { clearTranscoding, getAssetUpload, markVideoUploadCompleted } from '../../../_lib/asset-uploads'
 import { invalidateSnapshot } from '../../../_lib/snapshot'
 import { buildVideoBundleMasterKey, isVideoSourceKey } from '../../../_lib/r2-store'
 
@@ -214,6 +214,17 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
         'to clear it). Refusing to apply — a newer upload has taken over.',
     )
   }
+
+  // Also mark the asset_uploads row completed. The /asset/.../complete
+  // route already does this after dispatch succeeds, but that step can
+  // fail (transient D1 error, request abort) leaving the upload row
+  // stuck `pending`. Re-marking here is the durable backstop: by the
+  // time /transcode-complete runs, the dispatch has demonstrably
+  // succeeded (the workflow is calling back), so the upload row's
+  // `pending` state is just bookkeeping debt. PR #112 followup —
+  // closes the alreadyCompleted recovery vector by making
+  // `upload.status` the only signal a retry of /complete needs.
+  await markVideoUploadCompleted(db, validated.upload_id, now)
 
   // Refresh the row so the response carries the latest state.
   const updated = await db

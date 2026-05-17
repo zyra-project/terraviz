@@ -436,61 +436,38 @@ export const onRequestPost: PagesFunction<CatalogEnv, keyof RouteParams> = async
     }
 
     // Post-dispatch recovery: if a prior /complete for THIS
-    // upload already stamped + dispatched but failed at the
-    // markVideoUploadCompleted step (network blip, transient
-    // D1 error), the asset_uploads row stays `pending` and the
-    // top-of-handler idempotent branch (which keys on
-    // status='completed') doesn't fire. Without the recovery
-    // check below, the retry would re-stamp (a no-op) and
-    // **re-dispatch the workflow** — duplicate runs that the
-    // /transcode-complete handler can only reject after the
-    // fact via the active-upload-id mismatch guard. PR #112
-    // followup — complete.ts:486.
+    // upload already stamped + dispatched but its final
+    // markVideoUploadCompleted step failed (transient D1 error,
+    // request abort), the asset_uploads row stays `pending` and
+    // the top-of-handler idempotent branch doesn't fire on
+    // retry. Without this branch the retry would re-stamp (a
+    // no-op for the same upload) and **re-dispatch the
+    // workflow** — duplicate runs. PR #112 followup —
+    // complete.ts:486.
     //
-    // Two states reach this branch:
-    //
-    //   1. transcoding=1 + active=uploadId — the dispatch fired
-    //      and the workflow is still running. Just complete the
-    //      mark step and return `transcoding: true`.
-    //
-    //   2. transcoding=NULL + data_ref points at this upload's
-    //      master.m3u8 — the workflow already finished and
-    //      /transcode-complete cleared the row. We're cleaning
-    //      up after a mark step that died mid-flight. Return
-    //      `transcoding: false` so the client knows the bundle
-    //      is live.
-    //
-    // Both branches just mark + return; neither re-fires the
-    // dispatch. The rare double-failure case (stamp succeeded,
-    // dispatch failed, revert also failed) leaves the row in
-    // state #1 with no workflow running and requires operator
-    // intervention to clear via /transcode-complete or a manual
-    // D1 update — that's an operator alert, not a retry hazard.
-    // Exact equality against the constructed expected ref —
-    // matches both dataset id AND upload id, so a manually-edited
-    // data_ref pointing at a different dataset's bundle (the
-    // generic dataset PUT path doesn't forbid raw `r2:videos/...`
-    // values, only the `transcoding` column) can't accidentally
-    // pass the recovery check. The earlier suffix-only match
-    // (`/${uploadId}/master.m3u8`) would have done so, which
-    // Copilot flagged as a "mark upload completed without ever
-    // dispatching the transcode" hazard. PR #112 followup —
-    // complete.ts (suffix → strict-equality).
-    //
-    // Built via string concatenation rather than
-    // `buildVideoBundleMasterKey()` because that helper
-    // strict-validates uploadId as a 26-char ULID and would throw
-    // on the legacy short-id test fixtures elsewhere in this
-    // suite. The state check shouldn't reject a row purely on id
-    // shape; production upload ids are full ULIDs, the test
-    // fixtures for *this* branch use full ULIDs too, and any other
-    // upload-id shape simply won't match a real `data_ref` value.
-    const expectedCompletedRef = `r2:videos/${datasetId}/${uploadId}/master.m3u8`
+    // The trigger is narrow on purpose: `transcoding=1 AND
+    // active_transcode_upload_id = uploadId`. That state can
+    // only have been produced by *this* upload's prior stamp
+    // (the SQL clears both in lockstep), so a caller cannot
+    // forge it the way they could a `data_ref` match. An
+    // earlier broader check that also recovered on
+    // `data_ref === r2:videos/{datasetId}/{uploadId}/master.m3u8`
+    // was removed: that ref is editable via the generic PUT
+    // path *before* `transcoding=1` is stamped (the data_ref
+    // mutation guard in /AE only fires on a transcoding row),
+    // so a caller could mint an upload, plant the predicted
+    // ref, hit /complete, and get the upload marked completed
+    // without ever dispatching the workflow. The post-
+    // /transcode-complete mark-failure case that branch was
+    // meant to handle is now covered by markVideoUploadCompleted
+    // being called from /transcode-complete itself (3pd-followup/
+    // AI on transcode-complete.ts), so by the time the workflow
+    // callback lands the upload row is already `completed` and
+    // any /complete retry hits the top-of-handler idempotent
+    // branch cleanly.
     const alreadyStamped =
       dataset.transcoding === 1 && dataset.active_transcode_upload_id === uploadId
-    const alreadyCompleted =
-      !dataset.transcoding && dataset.data_ref === expectedCompletedRef
-    if (alreadyStamped || alreadyCompleted) {
+    if (alreadyStamped) {
       await markVideoUploadCompleted(context.env.CATALOG_DB!, uploadId, now)
       const refreshed = await context.env.CATALOG_DB!
         .prepare(`SELECT * FROM datasets WHERE id = ?`)
@@ -501,11 +478,11 @@ export const onRequestPost: PagesFunction<CatalogEnv, keyof RouteParams> = async
           dataset: refreshed ?? dataset,
           upload: { ...upload, status: 'completed', completed_at: now },
           verified_digest: verifiedDigest,
-          transcoding: alreadyStamped,
+          transcoding: true,
           recovered: true,
         }),
         {
-          status: alreadyStamped ? 202 : 200,
+          status: 202,
           headers: { 'Content-Type': CONTENT_TYPE, 'Cache-Control': 'private, no-store' },
         },
       )
