@@ -585,6 +585,65 @@ describe('renderDatasetDetailPage', () => {
     expect(publish?.disabled).toBe(false)
   })
 
+  it('tears down the poll loop and renders not-found when the dataset is deleted mid-transcode', async () => {
+    // PR #112 followup — the earlier shape treated every
+    // non-session error from a poll tick as transient. A
+    // dataset deleted mid-transcode would leave the UI
+    // showing the stale "Transcoding…" badge forever, with
+    // the poll loop hammering the 404'd endpoint every 5 s.
+    const transcodingRow = dataset({ published_at: null, transcoding: 1 })
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(detailResponse(transcodingRow))
+      // Second tick: row deleted out from under the page.
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: 'not_found' }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+    await renderDatasetDetailPage(mount, '01ABC', {
+      fetchFn: fetchFn as unknown as typeof fetch,
+      sleep: () => Promise.resolve(),
+      transcodePollIntervalMs: 0,
+    })
+    // The second fetch landed: the poll tick hit 404, the
+    // loop tore down, and the page renders the not-found
+    // error card. The transcoding badge is gone.
+    for (let i = 0; i < 20; i++) await Promise.resolve()
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+    expect(mount.querySelector('.publisher-badge-transcoding')).toBeNull()
+    expect(mount.textContent).toContain('Dataset not found')
+  })
+
+  it('tears down the poll loop on a session error before rendering the session card', async () => {
+    // PR #112 followup — the session-error branch used to
+    // return without calling stopTranscodePolling, leaving
+    // the AbortController + routechange listener registered
+    // for this mount until some later navigation cleaned up.
+    // The fix is symmetric with the not_found case.
+    const transcodingRow = dataset({ published_at: null, transcoding: 1 })
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(detailResponse(transcodingRow))
+      // Second tick: session expired.
+      .mockResolvedValueOnce(
+        new Response('', { status: 401 }),
+      )
+    await renderDatasetDetailPage(mount, '01ABC', {
+      fetchFn: fetchFn as unknown as typeof fetch,
+      sleep: () => Promise.resolve(),
+      transcodePollIntervalMs: 0,
+    })
+    // Let the poll tick land + the session-error path run.
+    for (let i = 0; i < 20; i++) await Promise.resolve()
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+    // No more fetches even if the loop's sleep promise
+    // resolves later — the loop was aborted.
+    for (let i = 0; i < 20; i++) await Promise.resolve()
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+  })
+
   it('aborts the transcode poller when the router fires a routechange away from this page', async () => {
     // The router replaces the children of `content` rather than
     // swapping the element itself, so without a routechange

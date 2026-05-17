@@ -715,15 +715,35 @@ async function runTranscodePollLoop(
     })
     if (signal.aborted) return
     if (!result.ok) {
-      // Transient errors don't tear down the page — they just
-      // pause the polling for one cycle. Session errors hand
-      // through to the shared handler.
+      // Terminal errors (session expired, dataset gone, publisher
+      // lost access) tear the poll loop down and render the
+      // matching error card — leaving the loop running would just
+      // hammer the failed endpoint every 5 s and never recover.
+      // PR #112 followup — the earlier shape returned on session
+      // error without calling stopTranscodePolling, leaving the
+      // AbortController and route-change listener registered for
+      // this mount, and treated not_found as transient (looping
+      // forever on a deleted row).
       if (result.kind === 'session') {
         if (handleSessionError({ navigate: options.navigate }) === 'show-error') {
+          stopTranscodePolling(content)
           renderError(content, 'session')
           return
         }
+        // handleSessionError didn't say "show error" → it
+        // already navigated. Stop the loop so it doesn't keep
+        // running against whatever page replaced us.
+        stopTranscodePolling(content)
+        return
       }
+      if (result.kind === 'not_found') {
+        stopTranscodePolling(content)
+        renderError(content, 'not_found')
+        return
+      }
+      // Genuinely transient (network blip, 5xx) — pause for one
+      // cycle and try again. The next loop iteration's sleep
+      // handles the back-off.
       continue
     }
     // paint() reads the fresh `transcoding` flag and either
