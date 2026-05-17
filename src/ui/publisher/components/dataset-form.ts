@@ -1137,13 +1137,15 @@ function renderForm(
   // ROUTE_CHANGE_START_EVENT before the destination handler
   // renders into `content`; from that moment any update() or
   // post-upload DOM mutation from this form mount is unsafe.
-  // The listener is wired per-renderForm-call and detached by
-  // update() before it re-renders (which immediately re-binds a
-  // fresh listener on the new mount). PR #112 followup —
-  // dataset-form.ts:onUploaded race.
+  // The listener detaches itself the moment it fires (so we don't
+  // accumulate one listener per form visit — PR #112 followup
+  // fixed the original leak), and update() also detaches it
+  // before re-rendering (which immediately re-binds a fresh
+  // listener on the new mount).
   let disposed = false
   const onRouteStart = (): void => {
     disposed = true
+    window.removeEventListener(ROUTE_CHANGE_START_EVENT, onRouteStart)
   }
   window.addEventListener(ROUTE_CHANGE_START_EVENT, onRouteStart)
 
