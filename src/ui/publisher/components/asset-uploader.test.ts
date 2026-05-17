@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { renderAssetUploader } from './asset-uploader'
+import { hashFileSha256, renderAssetUploader } from './asset-uploader'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -195,6 +195,60 @@ describe('renderAssetUploader', () => {
     })
   })
 
+  it('normalizes image/jpg → image/jpeg before mint so the server allowlist matches', async () => {
+    // PR #112 followup — a few legacy browsers stamp
+    // `image/jpg` on JPEG files. mimeAcceptedForFormat accepts
+    // both as matching a JPEG-format dataset, but the server's
+    // /asset init allowlist only takes the canonical
+    // `image/jpeg`. The client now normalises before sending so
+    // the gate and the request body agree, avoiding the
+    // "passes client validation, fails at mint" dead-end.
+    const onUploaded = vi.fn()
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            upload_id: 'UP-JPG',
+            kind: 'data',
+            target: 'r2',
+            r2: { method: 'PUT', url: 'https://r2.example/put', headers: {}, key: 'k' },
+            expires_at: 'soon',
+            mock: false,
+          },
+          201,
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ dataset: { data_ref: 'r2:datasets/X/by-digest/.../asset.jpg' } }),
+      )
+
+    mount.appendChild(
+      renderAssetUploader({
+        datasetId: '01AAAAAAAAAAAAAAAAAAAAAAAA',
+        format: 'image/jpeg',
+        onUploaded,
+        hashFn: async () => 'sha256:' + 'c'.repeat(64),
+        fetchFn: fetchFn as unknown as typeof fetch,
+        xhrFactory: fakeXhrFactory(),
+      }),
+    )
+
+    pickFile(mount, 'image/jpg', 'mock-jpeg-bytes')
+    for (let i = 0; i < 8; i++) await new Promise(r => setTimeout(r, 0))
+
+    // Mint call body uses image/jpeg (the canonical form), not
+    // the file's reported image/jpg.
+    const mintCall = fetchFn.mock.calls[0]
+    const mintBody = JSON.parse(mintCall[1].body as string) as { mime: string }
+    expect(mintBody.mime).toBe('image/jpeg')
+    // And the upload succeeded end-to-end (direct outcome).
+    expect(onUploaded).toHaveBeenCalledWith({
+      mode: 'direct',
+      dataRef: 'r2:datasets/X/by-digest/.../asset.jpg',
+    })
+  })
+
   it('skips the XHR PUT when the mint response is mock=true', async () => {
     const xhrFactory = vi.fn(fakeXhrFactory())
     const onUploaded = vi.fn()
@@ -233,5 +287,58 @@ describe('renderAssetUploader', () => {
 
     expect(xhrFactory).not.toHaveBeenCalled()
     expect(onUploaded).toHaveBeenCalled()
+  })
+})
+
+describe('hashFileSha256', () => {
+  // PR #112 followup — the upload-flow tests all inject `hashFn`,
+  // so the real `@noble/hashes` dynamic imports and the chunked
+  // hashing loop never run under test. A wrong package subpath
+  // (the `sha2.js` / `utils.js` shape is package-specific) would
+  // only surface in the browser when a publisher picks a file.
+  // These tests exercise the real implementation.
+
+  it('matches a Web Crypto reference digest for a small file', async () => {
+    // 'hello world' has a well-known SHA-256 hash:
+    //   b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9
+    const file = new File([new TextEncoder().encode('hello world')], 'hello.txt', {
+      type: 'text/plain',
+    })
+    const digest = await hashFileSha256(file)
+    expect(digest).toBe(
+      'sha256:b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9',
+    )
+  })
+
+  it('matches a Web Crypto reference digest for the empty file', async () => {
+    // Empty-input SHA-256 is one of the most-cited test vectors;
+    // the chunked loop should skip its body entirely and still
+    // return the correct digest of zero bytes.
+    const file = new File([new Uint8Array(0)], 'empty.bin', { type: 'application/octet-stream' })
+    const digest = await hashFileSha256(file)
+    expect(digest).toBe(
+      'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+    )
+  })
+
+  it('handles files larger than the chunk boundary (chunked loop coverage)', async () => {
+    // The hasher accumulates across `slice → arrayBuffer →
+    // update` iterations. A file bigger than the chunk size
+    // exercises that path; a one-shot hash of the same bytes
+    // should match (validated against the streaming hash itself
+    // by re-running on a single-blob File of the same bytes).
+    const bytes = new Uint8Array(8 * 1024 * 1024 + 17) // 8 MB + slop
+    // Deterministic non-zero payload so we're not hashing all
+    // zeros (which is degenerate for some hash implementations).
+    for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 31 + 7) & 0xff
+    const bigFile = new File([bytes], 'big.bin', { type: 'application/octet-stream' })
+    const digest = await hashFileSha256(bigFile)
+    // Cross-check via the platform's Web Crypto: the digest of
+    // the same bytes should match regardless of chunking.
+    const ref = await crypto.subtle.digest('SHA-256', bytes.slice().buffer)
+    const refHex = Array.from(new Uint8Array(ref))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('')
+    expect(digest).toBe(`sha256:${refHex}`)
   })
 })

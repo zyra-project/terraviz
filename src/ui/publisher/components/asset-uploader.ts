@@ -291,7 +291,19 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
     // extension before checking — otherwise valid uploads
     // fail at the client gate before the server can speak.
     // Fix for PR #112 Copilot #3.
-    const effectiveMime = file.type || mimeFromFilename(file.name)
+    //
+    // `image/jpg` → `image/jpeg` normalization: a few legacy
+    // browsers / OS file managers stamp `image/jpg` on JPEG
+    // files. `mimeAcceptedForFormat` recognises both as
+    // matching a JPEG-format dataset, but the server's
+    // /asset init allowlist only accepts the canonical
+    // `image/jpeg`. Without normalisation here the client
+    // gate passes and the server then 400s at mint time —
+    // confusing dead-end UX. Normalise to the canonical form
+    // before either the gate check or the request body so
+    // both halves agree. PR #112 followup.
+    const rawMime = file.type || mimeFromFilename(file.name)
+    const effectiveMime = rawMime === 'image/jpg' ? 'image/jpeg' : rawMime
     if (!mimeAcceptedForFormat(effectiveMime, options.format)) {
       state = {
         ...INITIAL,

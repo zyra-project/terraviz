@@ -118,9 +118,15 @@ export interface DatasetRow {
    * each other (see migration 0012). NULL when `transcoding` is
    * NULL. Migration 0012. */
   active_transcode_upload_id: string | null
-  /** SHA-256 of the asset's *delivered bytes* — for an HLS bundle
-   * this is the hash of the master.m3u8 + variant manifests +
-   * segments concatenated in canonical order. NULL when the row
+  /** SHA-256 of the asset's *delivered bytes*. Carried for
+   * single-blob assets (R2 images, captions, legends) where one
+   * hash describes the whole object. Always NULL for HLS bundles:
+   * those are many segment files plus variant manifests, and the
+   * pipeline tracks per-segment integrity via the master manifest
+   * rather than a single bundle-wide hash. `clearTranscoding`
+   * (`asset-uploads.ts`) explicitly NULLs this column when a
+   * video transcode lands, atomically with the `data_ref` swap
+   * (PR #112 followup — 3pd-followup/Z). Also NULL when the row
    * predates Phase 1b content-digest verification or when the
    * pipeline trusts an upstream-provided source digest instead.
    * Phase 1b. */

@@ -554,6 +554,37 @@ GitHub Actions workflow that runs ffmpeg against the 4K / 1080p /
 of the repo or any commit access — it fires via the
 `repository_dispatch` event, which is a pure event API.
 
+**R2 bucket CORS policy (REQUIRED for the browser uploader).**
+The asset-uploader performs a cross-origin XHR PUT directly to
+the presigned R2 URL with a `Content-Type` header. Without a CORS
+policy permitting your portal origin for `PUT` and exposing the
+`ETag` response header, browsers reject the upload before R2
+sees it — the portal will spin on "Uploading…" then fail with an
+opaque CORS error.
+
+Configure on the bucket (Cloudflare dashboard → R2 → your
+bucket → Settings → CORS policy). For a deploy at
+`https://terraviz.your-org.org`:
+
+```json
+[
+  {
+    "AllowedOrigins": ["https://terraviz.your-org.org"],
+    "AllowedMethods": ["PUT", "GET", "HEAD"],
+    "AllowedHeaders": ["Content-Type"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+Add a second entry with `"AllowedOrigins": ["http://localhost:5173"]`
+if you want the dev server to upload too. Public-read for assets
+the SPA fetches at runtime (sphere thumbnails, image data_refs)
+is a separate concern — that uses the public R2 URL via the
+`r2.dev` subdomain or your zone, and CORS for those reads is
+inherited from the bucket's public access settings.
+
 The Pages-side wiring you need (Settings → Bindings):
 
 | Binding | Value |
