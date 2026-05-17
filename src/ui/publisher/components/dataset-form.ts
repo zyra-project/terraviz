@@ -950,15 +950,22 @@ function renderForm(
   // off to the asset uploader (3pd/C); the manual ref input stays
   // available for the non-upload paths (legacy / external).
   if (ctx.mode === 'edit' && ctx.datasetId && ctx.isTranscoding) {
-    // Row is currently mid-transcode — the parent detail page is
-    // polling and will navigate the publisher back here once the
-    // workflow finishes. Replace both the uploader and the
-    // manual ref input with a read-only notice so the publisher
-    // doesn't try to start a second upload (which the server-side
-    // `transcoding_in_progress` guard would 409 anyway) or paste
-    // a manual ref into a row whose data_ref is about to be
-    // overwritten by /transcode-complete. Mirrors the publish-
-    // button gate on the detail page.
+    // Row is currently mid-transcode. The detail page has the
+    // 5-second poller (it auto-refreshes when transcoding
+    // clears); the edit page intentionally does NOT — an
+    // editor who lands here mid-transcode has to reload or
+    // navigate back to the detail page to see the completed
+    // state. Replace both the uploader and the manual ref
+    // input with a read-only notice so the publisher doesn't
+    // try to start a second upload (which the server-side
+    // `transcoding_in_progress` guard would 409 anyway) or
+    // paste a manual ref into a row whose data_ref is about
+    // to be overwritten by /transcode-complete (the data_ref
+    // mutation guard added in /AE would 409 the save). Adding
+    // a poller here is a candidate follow-up if editor-mid-
+    // transcode turns out to be a common workflow; today's
+    // assumption is that it's a corner case worth a static
+    // notice + a reload prompt rather than another poll loop.
     const refDisplay = document.createElement('div')
     refDisplay.className = 'publisher-field'
     const refLabel = document.createElement('span')

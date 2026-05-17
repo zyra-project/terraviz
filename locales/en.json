@@ -419,7 +419,7 @@
   "publisher.datasetForm.section.identity": "Identity",
   "publisher.datasetForm.section.licensing": "Licensing & attribution",
   "publisher.datasetForm.section.timeRange": "Time range",
-  "publisher.datasetForm.transcoding.notice": "A video transcode is in progress for this row. Wait for the workflow to finish (the detail page polls every five seconds and refreshes when it completes) before changing the data reference.",
+  "publisher.datasetForm.transcoding.notice": "A video transcode is in progress for this row. Reload this page or open the dataset's detail view to see when it finishes — typically 1–10 minutes depending on the source length. Changes to the data reference can't be saved while a transcode is running.",
   "publisher.datasetForm.visibility.federated": "Federated",
   "publisher.datasetForm.visibility.private": "Private",
   "publisher.datasetForm.visibility.public": "Public",

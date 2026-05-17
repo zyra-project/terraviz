@@ -39,10 +39,17 @@ import {
   type PublisherSendResult,
 } from '../api'
 
-/** Result of a finished upload. `mode='direct'` means data_ref is
- *  set on the row already; `mode='transcoding'` means a video
- *  transcode is in flight and the parent should kick off the
- *  3pd/D status polling. */
+/** Result of a finished upload. `mode='direct'` means data_ref
+ *  is set on the row already; `mode='transcoding'` means a
+ *  video transcode is in flight. The parent's responsibility
+ *  on a transcoding outcome is just to re-render so its UI
+ *  surface (the dataset form's manual data_ref input / Save
+ *  button, the detail page's lifecycle controls) reflects the
+ *  new state. Live status polling happens on the detail page
+ *  (3pd/D, `startTranscodePolling` in
+ *  `src/ui/publisher/pages/dataset-detail.ts`); the edit page
+ *  does not poll, so an editor mid-transcode sees the
+ *  read-only notice until they navigate away or reload. */
 export type AssetUploadOutcome =
   | { mode: 'direct'; dataRef: string }
   | { mode: 'transcoding' }
