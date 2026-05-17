@@ -25,6 +25,7 @@ import {
   type PublisherValidationError,
 } from '../api'
 import { buildErrorCard, type ErrorCardDetails } from '../components/error-card'
+import { ROUTE_CHANGE_START_EVENT, type RouteChangeDetail } from '../router'
 import type {
   DatasetDetailResponse,
   PublisherDatasetDetail,
@@ -42,6 +43,10 @@ export interface DatasetDetailPageOptions {
   /** Confirmation prompt. Defaults to `window.confirm`; tests
    *  override to skip / auto-confirm without a real dialog. */
   confirmFn?: (message: string) => boolean
+  /** Transcode poll cadence in ms. Defaults to 5000; tests
+   *  override to a small value so the polling loop completes
+   *  inside a vitest run. */
+  transcodePollIntervalMs?: number
 }
 
 /** Kind of lifecycle-flip action the detail page can dispatch. */
@@ -102,6 +107,11 @@ interface HeaderHooks {
    *  The page hands this through to `dispatchAction` so the
    *  re-fetch / re-render loop has access to options + content. */
   onAction?: (action: LifecycleAction) => void
+  /** Dispatched when the publisher clicks the Preview button.
+   *  The page mints a preview token and surfaces the resulting
+   *  URL — the SPA consumer for `?preview=...` is a follow-up
+   *  piece of work in `dataService.ts`. */
+  onPreview?: () => void
 }
 
 function renderHeader(d: PublisherDatasetDetail, hooks: HeaderHooks): HTMLElement {
@@ -127,7 +137,20 @@ function renderHeader(d: PublisherDatasetDetail, hooks: HeaderHooks): HTMLElemen
       : status === 'published'
         ? t('publisher.datasets.status.published')
         : t('publisher.datasets.status.retracted')
+
   titleRow.appendChild(badge)
+
+  // Transcoding badge — shown when 3pd's video upload has fired a
+  // dispatch but the workflow hasn't finished yet. Renders inline
+  // next to the lifecycle badge so the publisher sees both states
+  // at a glance ("Draft" + "Transcoding…"). The badge disappears
+  // automatically when the row's `transcoding` flag clears.
+  if (d.transcoding) {
+    const transcodingBadge = document.createElement('span')
+    transcodingBadge.className = 'publisher-badge publisher-badge-transcoding'
+    transcodingBadge.textContent = t('publisher.datasetDetail.transcoding.badge')
+    titleRow.appendChild(transcodingBadge)
+  }
 
   const editHref = `/publish/datasets/${encodeURIComponent(d.id)}/edit`
   const editLink = document.createElement('a')
@@ -154,14 +177,45 @@ function renderHeader(d: PublisherDatasetDetail, hooks: HeaderHooks): HTMLElemen
   }
   titleRow.appendChild(editLink)
 
+  // Preview button — mints a 15-minute signed token and surfaces
+  // the backend's anonymous preview URL
+  // (`/api/v1/datasets/{id}/preview/{token}`) so the publisher
+  // can share an unpublished draft for review. That endpoint
+  // returns the dataset's metadata as JSON (`{ dataset: row }`),
+  // not the asset bytes — useful for a reviewer who can fetch
+  // metadata directly; the SPA-side `?preview=<token>&dataset=
+  // <id>` consumer that renders the globe with full playback
+  // context is a Phase 3pe deliverable. Hidden while transcoding
+  // (data_ref is empty so there'd be nothing to preview). See
+  // `dispatchPreview` below for the rationale.
+  if (!d.transcoding) {
+    const previewBtn = document.createElement('button')
+    previewBtn.type = 'button'
+    previewBtn.className =
+      'publisher-button publisher-button-secondary publisher-detail-preview'
+    previewBtn.textContent = t('publisher.datasetDetail.action.preview')
+    previewBtn.addEventListener('click', () => {
+      hooks.onPreview?.()
+    })
+    titleRow.appendChild(previewBtn)
+  }
+
   // Drafts and retracted rows surface a "Publish" affordance;
   // published rows surface "Retract". The route handlers accept
   // re-publishing a retracted row (it clears retracted_at and
   // re-stamps published_at) so the same button does double duty.
+  //
+  // While a row is transcoding (Phase 3pd video upload in flight)
+  // the Publish button is gated: data_ref is empty until the GHA
+  // workflow finishes, so the publish-readiness validator would
+  // reject anyway. Disabling here gives the publisher a clearer
+  // signal than "submit-then-error."
   if (status === 'published') {
     titleRow.appendChild(renderActionButton('retract', hooks.onAction))
   } else {
-    titleRow.appendChild(renderActionButton('publish', hooks.onAction))
+    titleRow.appendChild(
+      renderActionButton('publish', hooks.onAction, { disabled: !!d.transcoding }),
+    )
   }
 
   header.appendChild(titleRow)
@@ -177,6 +231,7 @@ function renderHeader(d: PublisherDatasetDetail, hooks: HeaderHooks): HTMLElemen
 function renderActionButton(
   action: LifecycleAction,
   onAction: ((action: LifecycleAction) => void) | undefined,
+  opts: { disabled?: boolean } = {},
 ): HTMLButtonElement {
   const btn = document.createElement('button')
   btn.type = 'button'
@@ -188,8 +243,12 @@ function renderActionButton(
     action === 'publish'
       ? t('publisher.datasetDetail.action.publish')
       : t('publisher.datasetDetail.action.retract')
+  if (opts.disabled) {
+    btn.disabled = true
+    btn.title = t('publisher.datasetDetail.action.publishDisabledTranscoding')
+  }
   btn.addEventListener('click', () => {
-    if (!onAction) return
+    if (!onAction || btn.disabled) return
     onAction(action)
   })
   return btn
@@ -546,6 +605,9 @@ function paint(
     onAction: action => {
       void dispatchAction(content, id, action, options)
     },
+    onPreview: () => {
+      void dispatchPreview(content, id, options)
+    },
   }
   renderDetail(
     content,
@@ -555,6 +617,405 @@ function paint(
     hooks,
     actionError,
   )
+  // Start (or restart) transcode polling if the row is still
+  // transcoding. Stop any running poller if it isn't. The
+  // start helper is idempotent — it cancels any prior poller
+  // bound to this mount before starting a new one.
+  if (data.dataset.transcoding) {
+    startTranscodePolling(content, id, options)
+  } else {
+    stopTranscodePolling(content)
+  }
+}
+
+/** Tracks the in-flight poll loop per mount element so a route
+ *  change (or a successful poll completing) cancels the prior
+ *  loop cleanly. WeakMap so detached mounts don't pin the
+ *  AbortController in memory. */
+const activeTranscodePolls = new WeakMap<HTMLElement, AbortController>()
+
+/** Tracks the routechange listener bound to each mount so it can
+ *  be detached when the loop ends (or another mount supersedes
+ *  this one). The router replaces the page-shell DOM under
+ *  `content` rather than swapping the element itself, so the
+ *  WeakMap-keyed AbortController above doesn't naturally
+ *  invalidate on navigation; this listener is the bridge. */
+const activeTranscodeRouteListeners = new WeakMap<
+  HTMLElement,
+  (event: Event) => void
+>()
+
+/** Default polling cadence — matches what the asset-pipeline doc
+ *  promises the publisher ("Whole loop takes 1–10 minutes ... the
+ *  detail page polls every 5 s"). */
+const TRANSCODE_POLL_INTERVAL_MS = 5000
+
+/** The path the poller is "watching." Any routechange event whose
+ *  detail.path differs from this aborts the loop. Compared by
+ *  equality after `decodeURIComponent`-ing both sides — the
+ *  router stores the raw `location.pathname`, but ids in
+ *  Crockford base32 are URL-safe so the round-trip is a no-op. */
+function detailPathFor(id: string): string {
+  return `/publish/datasets/${encodeURIComponent(id)}`
+}
+
+function startTranscodePolling(
+  content: HTMLElement,
+  id: string,
+  options: DatasetDetailPageOptions,
+): void {
+  // Cancel any prior loop on this mount — paint() re-runs on every
+  // poll tick and we'd otherwise stack one new AbortController per
+  // tick.
+  stopTranscodePolling(content)
+  const controller = new AbortController()
+  activeTranscodePolls.set(content, controller)
+
+  // Cancel the loop if the router navigates away from our path.
+  // Listen on the *start* event (fired before the destination
+  // handler runs) — listening on ROUTE_CHANGE_EVENT (fired after
+  // the handler resolves) leaves a race window where a poll tick
+  // can land between the new page rendering and the listener
+  // tearing the loop down, and the tick's `paint(content, ...)`
+  // clobbers the freshly-mounted DOM. PR #112 followup —
+  // dataset-detail.ts:682.
+  const watchedPath = detailPathFor(id)
+  const onRouteChange = (event: Event): void => {
+    const detail = (event as CustomEvent<RouteChangeDetail>).detail
+    if (!detail || detail.path !== watchedPath) {
+      stopTranscodePolling(content)
+    }
+  }
+  window.addEventListener(ROUTE_CHANGE_START_EVENT, onRouteChange)
+  activeTranscodeRouteListeners.set(content, onRouteChange)
+
+  void runTranscodePollLoop(content, id, options, controller.signal)
+}
+
+function stopTranscodePolling(content: HTMLElement): void {
+  activeTranscodePolls.get(content)?.abort()
+  activeTranscodePolls.delete(content)
+  const listener = activeTranscodeRouteListeners.get(content)
+  if (listener) {
+    window.removeEventListener(ROUTE_CHANGE_START_EVENT, listener)
+    activeTranscodeRouteListeners.delete(content)
+  }
+}
+
+async function runTranscodePollLoop(
+  content: HTMLElement,
+  id: string,
+  options: DatasetDetailPageOptions,
+  signal: AbortSignal,
+): Promise<void> {
+  const sleep = options.sleep ?? defaultSleep
+  while (!signal.aborted) {
+    await sleep(options.transcodePollIntervalMs ?? TRANSCODE_POLL_INTERVAL_MS)
+    if (signal.aborted) return
+    const result = await publisherGet<DatasetDetailResponse>(endpoint(id), {
+      fetchFn: options.fetchFn,
+      sleep: options.sleep,
+    })
+    if (signal.aborted) return
+    if (!result.ok) {
+      // Terminal errors (session expired, dataset gone, publisher
+      // lost access) tear the poll loop down and render the
+      // matching error card — leaving the loop running would just
+      // hammer the failed endpoint every 5 s and never recover.
+      // PR #112 followup — the earlier shape returned on session
+      // error without calling stopTranscodePolling, leaving the
+      // AbortController and route-change listener registered for
+      // this mount, and treated not_found as transient (looping
+      // forever on a deleted row).
+      if (result.kind === 'session') {
+        if (handleSessionError({ navigate: options.navigate }) === 'show-error') {
+          stopTranscodePolling(content)
+          renderError(content, 'session')
+          return
+        }
+        // handleSessionError didn't say "show error" → it
+        // already navigated. Stop the loop so it doesn't keep
+        // running against whatever page replaced us.
+        stopTranscodePolling(content)
+        return
+      }
+      if (result.kind === 'not_found') {
+        stopTranscodePolling(content)
+        renderError(content, 'not_found')
+        return
+      }
+      // Genuinely transient (network blip, 5xx) — pause for one
+      // cycle and try again. The next loop iteration's sleep
+      // handles the back-off.
+      continue
+    }
+    // paint() reads the fresh `transcoding` flag and either
+    // restarts this loop (still transcoding) or stops it (cleared).
+    paint(content, id, result.data, options, null)
+    if (!result.data.dataset.transcoding) return
+  }
+}
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+/**
+ * Mint a preview token + surface the resulting consumer URL in a
+ * lightweight modal so the publisher can copy/share it. The
+ * underlying endpoint (POST .../preview) has shipped since Phase
+ * 1b; 3pd/E just wires the UI.
+ *
+ * The modal surfaces the backend-returned
+ * `/api/v1/datasets/{id}/preview/{token}` URL — an
+ * anonymous-read endpoint that returns the dataset's metadata
+ * as JSON (`{ dataset: row }`), not the asset bytes. It's the
+ * useful primitive a technical reviewer can poke directly
+ * today; the SPA-side `/?preview=<token>&dataset=<id>`
+ * consumer that opens the globe with full playback context is
+ * a Phase 3pe deliverable; the swap back to the SPA shape
+ * should land in the same commit that wires up the receiver
+ * so the link is never simultaneously
+ * visible-and-broken. PR #112 followup —
+ * dataset-detail.ts:807.
+ */
+async function dispatchPreview(
+  content: HTMLElement,
+  id: string,
+  options: DatasetDetailPageOptions,
+): Promise<void> {
+  // Same lifecycle protection the transcode poll loop uses
+  // (3pd-followup/T): the preview-token POST is async, and if
+  // the publisher clicks Preview then navigates away before it
+  // resolves, the eventual `openPreviewModal` / `paint` /
+  // `renderError` would mutate the next page's DOM. The router
+  // fires ROUTE_CHANGE_START_EVENT before the destination
+  // handler renders into `content`; from that moment any DOM
+  // mutation here is unsafe. PR #112 followup — dispatchPreview
+  // route-change race.
+  let disposed = false
+  const onRouteStart = (): void => {
+    disposed = true
+    window.removeEventListener(ROUTE_CHANGE_START_EVENT, onRouteStart)
+  }
+  window.addEventListener(ROUTE_CHANGE_START_EVENT, onRouteStart)
+  try {
+    const result = await publisherSend<{ token: string; url: string; expires_in: number }>(
+      `${endpoint(id)}/preview`,
+      {},
+      { fetchFn: options.fetchFn, sleep: options.sleep },
+    )
+    if (disposed) return
+    if (!result.ok) {
+      if (result.kind === 'session') {
+        if (handleSessionError({ navigate: options.navigate }) === 'show-error') {
+          if (!disposed) renderError(content, 'session')
+        }
+        return
+      }
+      // Surface as an inline banner — same path as the dispatch
+      // action handler so the publisher sees a consistent error
+      // pattern across every detail-page button.
+      const errorMessage = actionErrorMessage(result.kind)
+      const fresh = await publisherGet<DatasetDetailResponse>(endpoint(id), {
+        fetchFn: options.fetchFn,
+        sleep: options.sleep,
+      })
+      if (disposed) return
+      if (fresh.ok) {
+        paint(content, id, fresh.data, options, errorMessage)
+        return
+      }
+      // If the refetch itself fails too, fall back to the static
+      // error card so the publisher sees *something* rather than
+      // the button silently doing nothing. Fix for PR #112
+      // Copilot #7. (Parallels the `dispatchAction` fallback for
+      // the same case.)
+      if (fresh.kind === 'session') {
+        if (handleSessionError({ navigate: options.navigate }) === 'show-error') {
+          if (!disposed) renderError(content, 'session')
+        }
+        return
+      }
+      renderError(content, fresh.kind)
+      return
+    }
+    // Use the API URL the backend hands us — that's an
+    // anonymous-read endpoint that returns the dataset metadata
+    // as JSON. Not a visual preview (no globe context, no
+    // playback controls), but a usable primitive a reviewer can
+    // fetch today. The earlier `/?preview=<token>&dataset=<id>`
+    // shape assumed an SPA-side consumer that hasn't shipped yet
+    // (slated for Phase 3pe), so publishers were copying a link
+    // that silently dropped its query string on the floor.
+    // PR #112 followup — dataset-detail.ts:807. When the SPA
+    // consumer lands, swap back to the SPA-style URL in the same
+    // commit that wires up the receiver so the link is never
+    // simultaneously visible-and-broken.
+    openPreviewModal(content, result.data.url, result.data.expires_in)
+  } finally {
+    window.removeEventListener(ROUTE_CHANGE_START_EVENT, onRouteStart)
+  }
+}
+
+/**
+ * Lightweight modal showing the preview URL + a Copy button.
+ * Plain DOM rather than a portal-wide modal manager — this is
+ * the first / only modal in the portal and inventing the
+ * infrastructure for one-off use isn't worth it.
+ */
+function openPreviewModal(
+  content: HTMLElement,
+  url: string,
+  expiresIn: number,
+): void {
+  // Capture the originating focus target FIRST, before we mount
+  // the modal — otherwise the urlInput.focus() at the bottom of
+  // this function would have already moved document.activeElement
+  // into the (about-to-be-removed) modal, and "restore on close"
+  // would target the urlInput rather than the Preview button
+  // that opened the dialog. Fix for PR #112 Copilot #1.
+  const previouslyFocused = document.activeElement as HTMLElement | null
+
+  // Tear down any existing modal (re-clicking Preview while one
+  // is open should refresh, not stack).
+  content.querySelector('.publisher-modal-backdrop')?.remove()
+
+  const backdrop = document.createElement('div')
+  backdrop.className = 'publisher-modal-backdrop'
+  backdrop.addEventListener('click', e => {
+    if (e.target === backdrop) backdrop.remove()
+  })
+
+  const modal = document.createElement('div')
+  modal.className = 'publisher-modal publisher-glass'
+  // ARIA dialog semantics — screen readers announce the role
+  // change + the labelled heading, and `aria-modal=true` tells
+  // them the rest of the page is inert while this is open.
+  // Fix for PR #112 Copilot #4.
+  modal.setAttribute('role', 'dialog')
+  modal.setAttribute('aria-modal', 'true')
+  const headingId = 'publisher-modal-heading-preview'
+  modal.setAttribute('aria-labelledby', headingId)
+  // Escape key dismisses, matching dialog conventions.
+  const escListener = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') backdrop.remove()
+  }
+  document.addEventListener('keydown', escListener)
+  // Remove the listener when the backdrop is detached so we
+  // don't leak handlers across modal lifecycles.
+  const cleanup = new MutationObserver(() => {
+    if (!document.contains(backdrop)) {
+      document.removeEventListener('keydown', escListener)
+      cleanup.disconnect()
+    }
+  })
+  cleanup.observe(document.body, { childList: true, subtree: true })
+
+  const heading = document.createElement('h2')
+  heading.id = headingId
+  heading.className = 'publisher-modal-heading'
+  heading.textContent = t('publisher.datasetDetail.preview.heading')
+  modal.appendChild(heading)
+
+  const body = document.createElement('p')
+  body.className = 'publisher-modal-body'
+  body.textContent = t('publisher.datasetDetail.preview.body', {
+    minutes: String(Math.round(expiresIn / 60)),
+  })
+  modal.appendChild(body)
+
+  // Read-only input so the publisher can select + copy by hand
+  // even on browsers without a working `navigator.clipboard`.
+  // The aria-label is essential — screen-reader users entering
+  // the dialog would otherwise encounter an unlabeled text box,
+  // even though it's the primary content to copy. PR #112
+  // followup — dataset-detail.ts:urlInput a11y.
+  const urlInput = document.createElement('input')
+  urlInput.type = 'text'
+  urlInput.className = 'publisher-modal-url'
+  urlInput.readOnly = true
+  urlInput.value = new URL(url, window.location.origin).toString()
+  urlInput.setAttribute('aria-label', t('publisher.datasetDetail.preview.urlAriaLabel'))
+  modal.appendChild(urlInput)
+
+  const actions = document.createElement('div')
+  actions.className = 'publisher-modal-actions'
+
+  const copyBtn = document.createElement('button')
+  copyBtn.type = 'button'
+  copyBtn.className = 'publisher-button publisher-button-primary'
+  copyBtn.textContent = t('publisher.datasetDetail.preview.copy')
+  copyBtn.addEventListener('click', () => {
+    // `navigator.clipboard?.writeText()` with `?.then().catch()`
+    // chains short-circuits silently when clipboard is undefined
+    // (older Firefox, HTTP origins, locked-down browsers). Check
+    // explicitly so the keep-selected fallback always runs.
+    // Fix for PR #112 Copilot #6.
+    if (!navigator.clipboard) {
+      urlInput.select()
+      return
+    }
+    void navigator.clipboard
+      .writeText(urlInput.value)
+      .then(() => {
+        copyBtn.textContent = t('publisher.datasetDetail.preview.copied')
+      })
+      .catch(() => {
+        urlInput.select()
+      })
+  })
+  actions.appendChild(copyBtn)
+
+  const closeBtn = document.createElement('button')
+  closeBtn.type = 'button'
+  closeBtn.className = 'publisher-button publisher-button-secondary'
+  closeBtn.textContent = t('publisher.datasetDetail.preview.close')
+  closeBtn.addEventListener('click', () => backdrop.remove())
+  actions.appendChild(closeBtn)
+
+  modal.appendChild(actions)
+  backdrop.appendChild(modal)
+  content.appendChild(backdrop)
+  urlInput.focus()
+  urlInput.select()
+
+  // Focus trap — claim `aria-modal=true` honestly by keeping
+  // keyboard focus inside the dialog while it's open. Without
+  // this a Tab from the last button drops the user into
+  // page-behind-the-modal controls. Fix for PR #112 Copilot #8.
+  // The `previouslyFocused` capture happens at the very top of
+  // this function, before the urlInput.focus() call below
+  // moves the active element into the dialog.
+  const focusables: HTMLElement[] = [urlInput, copyBtn, closeBtn]
+  const trapListener = (event: KeyboardEvent): void => {
+    if (event.key !== 'Tab') return
+    const current = document.activeElement
+    const idx = focusables.findIndex(el => el === current)
+    if (event.shiftKey) {
+      // Shift-Tab from the first → wrap to last.
+      if (idx <= 0) {
+        event.preventDefault()
+        focusables[focusables.length - 1].focus()
+      }
+    } else {
+      // Tab from the last → wrap to first.
+      if (idx === focusables.length - 1) {
+        event.preventDefault()
+        focusables[0].focus()
+      }
+    }
+  }
+  modal.addEventListener('keydown', trapListener)
+  // Restore focus on close. Same MutationObserver as the
+  // escape-listener cleanup above; piggy-back on it.
+  const restoreObserver = new MutationObserver(() => {
+    if (!document.contains(backdrop)) {
+      previouslyFocused?.focus?.()
+      restoreObserver.disconnect()
+    }
+  })
+  restoreObserver.observe(document.body, { childList: true, subtree: true })
 }
 
 /**

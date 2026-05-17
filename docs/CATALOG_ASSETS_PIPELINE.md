@@ -7,49 +7,223 @@ the manifest response that ties them together. Companion to
 referenced from
 [`CATALOG_DATA_MODEL.md`](CATALOG_DATA_MODEL.md).
 
+> **Status: Cloudflare Stream removed.** Earlier drafts of this
+> doc named Stream as the video backend. Live testing in Phase 2/3
+> exposed Stream's standard-plan 1080p rendition ceiling, which is
+> insufficient for the 4K spherical content the SPA renders. Phase 3
+> shipped a CLI-driven R2 + ffmpeg migration ([`cli/migrate-r2-hls.ts`](../cli/migrate-r2-hls.ts))
+> that's now the canonical pipeline. Sub-phase 3pd takes the same
+> pipeline and drives it from the publisher portal instead of the
+> operator's CLI. References to `stream:` below are kept for
+> historical context; no row in the catalog currently uses it.
+
 The catalog stores *references*, not bytes. A `data_ref` value is one
 of:
 
-| Scheme | Example | Resolved by `/manifest` to |
-|---|---|---|
-| `stream:` | `stream:abcdef0123` | Cloudflare Stream HLS URL (signed if non-public) |
-| `r2:` | `r2:datasets/01HX.../map.png` | Cloudflare Images variant URL or signed R2 URL |
-| `vimeo:` | `vimeo:123456789` | Existing video-proxy.zyra-project.org URL (cutover bridge only) |
-| `url:` | `url:https://noaa.example/...` | Pass-through to external URL (legacy NOAA imagery) |
-| `peer:` | `peer:01HW.../01HX...` | Federated. Resolves via the peer's `/api/v1/federation/feed/manifest/{id}` |
+| Scheme | Example | Resolved by `/manifest` to | Status |
+|---|---|---|---|
+| `r2:` | `r2:videos/01HX.../01YH.../master.m3u8` or `r2:datasets/01HX.../by-digest/sha256/{hex}/asset.png` | Public R2 URL (signed for restricted visibility) | **Current.** Everything new lands here. |
+| `vimeo:` | `vimeo:123456789` | Existing video-proxy.zyra-project.org URL | Legacy. Phase 3's `migrate-r2-hls` converts rows to `r2:` as they're re-encoded. |
+| `url:` | `url:https://noaa.example/...` | Pass-through to external URL | Legacy NOAA imagery only. |
+| `peer:` | `peer:01HW.../01HX...` | Federated — resolves via the peer's `/api/v1/federation/feed/manifest/{id}` | Phase 4. |
+| `stream:` | (none) | (none) | **Deprecated** — never reached production. Kept reserved so an importer parsing old docs doesn't 500 on the prefix. |
 
 The reference scheme keeps the catalog row stable while assets move
-between backends. A dataset uploaded as a Vimeo link, later
-re-encoded into Stream, swaps `data_ref` from `vimeo:...` to
-`stream:...` without any client-visible change.
+between backends. A row first published as `vimeo:` and later
+re-encoded to R2 HLS swaps `data_ref` from `vimeo:...` to
+`r2:videos/{id}/{upload_id}/master.m3u8` without any client-visible change.
 
-## Video pipeline (Cloudflare Stream)
+## Video pipeline (R2 + GitHub Actions — current)
 
-Stream replaces every Vimeo responsibility we currently rely on:
+The pipeline lives in two halves: the **transcoder** (proven and
+operator-driven via `cli/migrate-r2-hls.ts`), and the **trigger**
+(3pd's contribution — letting a publisher kick off the same
+transcode from the portal instead of running the CLI by hand).
 
-| Need | Vimeo today | Stream replacement |
+> **Future work — image-sequence input.** The publisher portal
+> currently accepts a single MP4 as the video source. Many
+> catalog datasets originate as numbered frames (one PNG per
+> simulation step / model output / animation frame), and
+> ffmpeg accepts image sequences as readily as MP4 files —
+> the pipeline change is bounded. Design sketched in
+> [`CATALOG_IMAGE_SEQUENCE_PLAN.md`](CATALOG_IMAGE_SEQUENCE_PLAN.md);
+> tracking issue
+> [zyra-project/terraviz#114](https://github.com/zyra-project/terraviz/issues/114).
+> Lands as Phase 3pe; depends on 3pd merging first.
+
+### What ffmpeg actually produces
+
+Three renditions at the 2:1 spherical aspect the SPA's globe
+texturing needs:
+
+| Rendition | Size | Bitrate target |
 |---|---|---|
-| Upload | Manual via Vimeo UI | `POST /api/v1/publish/datasets/{id}/asset` returns a Stream direct-upload URL; browser uploads straight to Stream. |
-| Transcoding | Vimeo internal | Stream auto-transcodes to HLS + DASH ladder. |
-| Playback URL | Vimeo proxy | `https://customer-<id>.cloudflarestream.com/<uid>/manifest/video.m3u8` for public; signed JWT for restricted. |
-| ABR bitrate ladder | Vimeo presets | Stream presets (matches our existing 360p/720p/1080p tiers). |
-| Captions | Existing `closedCaptionLink` | Stream native VTT track upload, or keep external VTT in R2 (the `caption_ref` column accepts either). |
-| Thumbnails | Manual | Stream auto-thumbnail at 0s; publisher can override via UI. |
+| 4K | 4096 × 2048 | ~25 Mbps |
+| 1080p | 2160 × 1080 | ~5 Mbps |
+| 720p | 1440 × 720 | ~2 Mbps |
 
-`hlsService.ts` is unchanged — it still consumes an HLS manifest URL
-and an optional MP4 fallback. `datasetLoader.ts` swaps its current
-`fetch('https://video-proxy.zyra-project.org/...')` for
-`fetch('/api/v1/datasets/{id}/manifest')`. Same JSON shape minus
-`dash` (we don't use it) and minus `files[]` for restricted videos
-where signed-URL semantics make a long-lived MP4 link a leak.
+H.264 main profile, AAC 192kbps audio, **6-second VOD segments**.
+The bundle is laid out under `r2:videos/{dataset_id}/{upload_id}/`:
+
+```
+videos/{dataset_id}/{upload_id}/master.m3u8        # the variant playlist consumed by hls.js
+videos/{dataset_id}/{upload_id}/4k/index.m3u8      # per-rendition media playlist
+videos/{dataset_id}/{upload_id}/4k/seg000.ts ...   # segments
+videos/{dataset_id}/{upload_id}/1080p/index.m3u8
+videos/{dataset_id}/{upload_id}/1080p/seg000.ts ...
+videos/{dataset_id}/{upload_id}/720p/index.m3u8
+videos/{dataset_id}/{upload_id}/720p/seg000.ts ...
+```
+
+The `{upload_id}` segment is the asset_uploads row ULID — versioning
+by upload means a re-upload to an already-published row lands its
+new bundle at a fresh prefix without overwriting the bytes a public
+client is mid-playback against; `/transcode-complete` swaps
+`data_ref` atomically when the new bundle is fully written. The
+older bundle continues to serve until the swap (and stays in R2
+until a future lifecycle pass cleans it up).
+
+`data_ref` points at `master.m3u8`; the existing `hlsService.ts`
+takes it from there and adaptively picks the rendition.
+
+### How a portal upload triggers a transcode
+
+Five hops from publisher click to playable row:
+
+1. **Presigned PUT.** The publisher selects an MP4 in the portal's
+   uploader. The form requests
+   `POST /api/v1/publish/datasets/{id}/asset` with
+   `{ kind: 'data', mime: 'video/mp4', size, content_digest }`.
+   The handler validates the shape, mints an R2 presigned PUT URL
+   pointing at `uploads/{dataset_id}/{upload_id}/source.mp4`
+   (per-upload prefix so a re-upload to a row that's already
+   transcoding doesn't overwrite the source bytes the prior
+   workflow may still be reading), valid for the kind-specific
+   TTL (`R2_PUT_TTL_VIDEO_SECONDS = 2 h` for video sources,
+   `R2_PUT_TTL_SECONDS = 15 min` for images and aux assets —
+   the 2 h ceiling covers the `MAX_BYTES_DATA = 10 GB` cap on a
+   typical residential uplink), and returns
+   `{ upload_id, target: 'r2', r2: { method, url, headers, key }, expires_at, mock }`.
+
+2. **Direct upload.** The browser PUTs the MP4 straight to R2 over
+   the presigned URL. No proxy through a Worker — that would mean
+   streaming the bytes through Cloudflare's 100 MB request-body
+   limit, which kills any video larger than a phone clip.
+
+3. **Repository dispatch.** Once the PUT resolves 200, the portal
+   POSTs `POST /api/v1/publish/datasets/{id}/asset/{upload_id}/complete`
+   (no body). The Worker:
+
+   - Looks up the asset_uploads row and verifies it belongs to
+     this dataset.
+   - **For video sources:** HEAD-checks that the R2 object
+     exists (size + Last-Modified, no body read — the Workers
+     128 MB memory cap can't accommodate `arrayBuffer()`-ing a
+     multi-GB MP4), then **trusts the publisher's claimed
+     SHA-256 digest**. The GHA runner re-hashes the bytes via
+     Node's streaming `crypto.createHash` before invoking
+     ffmpeg, so a tampered upload still surfaces — as the
+     runner's exit-code-2 + stuck `transcoding=1` rather than
+     a synchronous 409 here. Same security model the Stream
+     path used pre-3pd ("trust the claim until the workflow
+     completes").
+   - **For non-video uploads:** the Worker recomputes SHA-256
+     over the full R2 object (the existing 100 MB image / 1 MB
+     caption caps stay comfortable for `arrayBuffer()`) and
+     409s on `digest_mismatch`.
+   - Stamps the row as `transcoding=1` (a new column added in
+     migration 0011) and binds it to the specific upload via
+     `active_transcode_upload_id` (added in migration 0012 — the
+     overlap-rejection and stale-callback guards in
+     `/asset/.../complete` and `/transcode-complete` both key
+     off this column). For drafts also clears `data_ref` to
+     empty string; for published rows leaves `data_ref` pointing
+     at the existing HLS bundle so public playback continues
+     uninterrupted while the new bundle transcodes.
+   - Calls `POST https://api.github.com/repos/{owner}/{repo}/dispatches`
+     with `event_type: 'transcode-hls'` and
+     `client_payload: { dataset_id, upload_id, source_key, source_digest }`,
+     using a PAT stored as the `GITHUB_DISPATCH_TOKEN`
+     Cloudflare secret.
+
+   The repo `git log` stays untouched — `repository_dispatch` is a
+   pure event API, no push, no PR, no branch.
+
+4. **GHA runs ffmpeg.** The workflow at
+   `.github/workflows/transcode-hls.yml` listens on
+   `on: repository_dispatch: types: [transcode-hls]`. It:
+
+   - Checks out the repo (so it can reuse `cli/lib/ffmpeg-hls.ts`
+     and `cli/lib/r2-upload.ts`).
+   - Installs ffmpeg from the GHA runner's package manager.
+   - Reads the source MP4 from R2 using S3-compatible credentials
+     (`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` as GitHub Actions
+     repo secrets).
+   - Runs the existing `encodeHls` helper.
+   - Uploads the bundle via `uploadHlsBundle` to a per-upload
+     prefix: `videos/{dataset_id}/{upload_id}/`. Versioning by
+     upload_id keeps a re-upload to an already-published row
+     from overwriting bytes a public client is mid-playback
+     against; the swap below is atomic.
+   - POSTs `/api/v1/publish/datasets/{id}/transcode-complete`
+     with `{ upload_id, source_digest }`, authenticated by the
+     Cloudflare Access service token
+     (`CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` GHA
+     secrets, provisioned as a `role=service` publisher). The
+     route constructs `data_ref` server-side from the route id
+     + upload id, flips it, and clears `transcoding`.
+
+5. **Portal picks up the change.** The detail page polls
+   `GET /api/v1/publish/datasets/{id}` every 5 s while
+   `transcoding=true`. When the column flips, the polling stops
+   and the badge swaps from "Transcoding…" to whatever lifecycle
+   the row's at (typically still Draft — the publisher needs to
+   click Publish separately).
+
+Whole loop takes 1–10 minutes depending on source length. The
+publisher can navigate away during transcoding; the next visit to
+the detail page picks up wherever it is.
+
+### Cost model
+
+GHA free tier: 2000 CI-minutes/month for public repos.
+Conservative estimate from `migrate-r2-hls.ts` calibration: a 5-min
+1080p source encodes in ~3 min on the `ubuntu-22.04` runner. Even
+at 50 uploads/month with average 5-min sources that's 150
+CI-minutes — well under the free tier ceiling. Workers Paid usage
+on the trigger side is negligible (one POST to GitHub per upload).
+R2 **storage** dominates the R2 line item — R2 has zero egress
+fees, so playback / download traffic doesn't add to the bill.
+At 4K @ ~25 Mbps the ladder lands ~250 MB per minute of source,
+billed monthly until manually deleted. R2 also charges per-
+operation (class A/class B) fees but a small-volume deploy
+sits well under the free-operation ceiling.
+
+### Why GitHub Actions and not a Worker
+
+Workers Cron + a queue could theoretically drive ffmpeg via WASM,
+but:
+
+- ffmpeg-wasm is a 10×–20× slowdown vs native, which turns a 3-min
+  transcode into 30–60 min — past Workers' 30-min execution cap
+  on the Unbound model.
+- The native ffmpeg binary the CLI already uses is ~80 MB; way
+  past the Worker bundle size limit.
+
+GHA gives us a real ffmpeg binary on a 7 GB RAM, 2-core runner,
+free for our workload size, and no new infrastructure to manage.
+The trade-off is the upload→playable lag, which we surface in the
+"Transcoding…" badge.
 
 ### Cutover bridge
 
 For Phase 1 a `vimeo:` `data_ref` resolves through the existing
 proxy unchanged, so cutover is a one-line frontend change with no
-asset re-uploads. Phase 2 ships the publisher-portal upload path
-and a backfill job that pulls each Vimeo source into Stream and
-flips the `data_ref`.
+asset re-uploads. Phase 3 ships the CLI-driven `migrate-r2-hls`
+backfill that pulls each Vimeo source into R2 HLS and flips the
+`data_ref` to `r2:videos/.../master.m3u8`. 3pd takes the same
+pipeline and exposes it through the portal so publishers can drive
+it themselves on new uploads.
 
 ## Beyond 4K, HDR, and transparency
 

@@ -1,0 +1,44 @@
+-- 0011_transcoding.sql — Phase 3pd — async video transcode state.
+--
+-- The publisher portal's video-upload flow lands the source MP4 in
+-- R2 at `uploads/{dataset_id}/{upload_id}/source.mp4` (per-upload
+-- prefix so a re-upload to a still-transcoding row doesn't
+-- overwrite source bytes the prior workflow may still be reading)
+-- and fires a GitHub repository_dispatch that runs ffmpeg in a
+-- GitHub Actions runner.
+-- Once the workflow finishes encoding the 4K / 1080p / 720p 2:1
+-- spherical HLS ladder + writes it back to R2 under
+-- `videos/{dataset_id}/{upload_id}/`, the workflow POSTs
+-- `POST /api/v1/publish/datasets/{id}/transcode-complete` on the
+-- publisher API. That route constructs the bundle's `data_ref`
+-- server-side from the route id + the workflow's `upload_id`,
+-- flips it on the row, and clears this column.
+--
+-- Why a dedicated column rather than reusing asset_uploads.status
+-- or a derived check on `data_ref`:
+--
+--   - The portal needs to render a "Transcoding…" badge on the
+--     detail page without joining to asset_uploads on every read.
+--   - A dataset can publish without ever transcoding (an image
+--     row, a tour, an existing `r2:` video that's already encoded).
+--     The column starts NULL and stays NULL for those.
+--   - The publish-readiness validator (validateForPublish in
+--     `_lib/validators.ts`) wants a single cheap read to gate the
+--     publish button: "if transcoding is set, the row isn't
+--     publishable yet."
+--
+-- Lifecycle: the column starts NULL on every row. The video upload
+-- /complete handler sets it to 1 when it fires the dispatch. The
+-- GHA workflow's row PATCH clears it back to NULL (or 0; the
+-- nullable INTEGER column treats both as "not transcoding"). If
+-- the workflow fails, the column stays 1 until an operator
+-- intervenes — the failure surface lives in the GHA UI for now,
+-- with a Phase 4 follow-up to push transcode failures into
+-- audit_events for in-portal display.
+--
+-- No new indexes — the column is read with the row, never queried
+-- independently. A "rows currently transcoding" admin view would
+-- benefit from one, but that's deferred until we have multiple
+-- concurrent transcodes per node.
+
+ALTER TABLE datasets ADD COLUMN transcoding INTEGER;

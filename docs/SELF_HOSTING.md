@@ -546,7 +546,222 @@ different env vars / flags:
 - `verify-deploy` reads `--server` (or `TERRAVIZ_SERVER`); change
   it to point the HTTP smoke-test at a different deploy URL.
 
-### 8e. Next steps
+### 8e. Video transcode pipeline (R2 + GitHub Actions)
+
+The publisher portal's video uploads (Phase 3pd) hand off to a
+GitHub Actions workflow that runs ffmpeg against the 4K / 1080p /
+720p 2:1 spherical HLS ladder. The workflow doesn't need a fork
+of the repo or any commit access — it fires via the
+`repository_dispatch` event, which is a pure event API.
+
+**R2 bucket CORS policy (REQUIRED for the browser uploader).**
+The asset-uploader performs a cross-origin XHR PUT directly to
+the presigned R2 URL with a `Content-Type` header. Without a CORS
+policy permitting your portal origin for `PUT` and exposing the
+`ETag` response header, browsers reject the upload before R2
+sees it — the portal will spin on "Uploading…" then fail with an
+opaque CORS error.
+
+Configure on the bucket (Cloudflare dashboard → R2 → your
+bucket → Settings → CORS policy). For a deploy at
+`https://terraviz.your-org.org`:
+
+```json
+[
+  {
+    "AllowedOrigins": ["https://terraviz.your-org.org"],
+    "AllowedMethods": ["PUT", "GET", "HEAD"],
+    "AllowedHeaders": ["Content-Type"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+Add a second entry with `"AllowedOrigins": ["http://localhost:5173"]`
+if you want the dev server to upload too. Public-read for assets
+the SPA fetches at runtime (sphere thumbnails, image data_refs)
+is a separate concern — that uses the public R2 URL via the
+`r2.dev` subdomain or your zone, and CORS for those reads is
+inherited from the bucket's public access settings.
+
+The Pages-side wiring you need (Settings → Bindings):
+
+| Binding | Value |
+|---|---|
+| `GITHUB_OWNER` | `zyra-project` (or your fork's owner) |
+| `GITHUB_REPO` | `terraviz` (or your fork's name) |
+| `GITHUB_DISPATCH_TOKEN` | GitHub PAT with `repo` scope on the repo above. Wrangler **secret**, not a plaintext env. |
+
+The GitHub-side wiring (repo Settings → Secrets and variables →
+Actions → Repository secrets):
+
+| Secret | What it carries |
+|---|---|
+| `R2_S3_ENDPOINT` | Same value as the Pages `R2_S3_ENDPOINT` env. |
+| `R2_ACCESS_KEY_ID` | R2 S3 access-key id with read+write on the assets bucket. Same key the publisher API uses for digest verification is fine. |
+| `R2_SECRET_ACCESS_KEY` | The matching secret. |
+| `CATALOG_R2_BUCKET` | Optional bucket-name override. Defaults to `terraviz-assets`. |
+| `TERRAVIZ_SERVER` | Base URL of the Pages deploy (e.g. `https://terraviz.app`). The workflow POSTs `<server>/api/v1/publish/datasets/{id}/transcode-complete` at the end of the run; the route constructs `data_ref` server-side from the route id + the workflow-supplied `upload_id` and clears `transcoding`. |
+| `CF_ACCESS_CLIENT_ID` | Cloudflare Access **service token** id. The token is provisioned via Zero Trust → Access → Service Auth. The publisher API JIT-provisions it as `role='service'` on first use; the `/transcode-complete` route accepts that role explicitly. |
+| `CF_ACCESS_CLIENT_SECRET` | The matching secret. |
+
+Both halves are required. A misconfigured deploy fails closed:
+
+- Missing `GITHUB_DISPATCH_TOKEN` on Pages → `/asset/complete`
+  returns 503 `github_dispatch_unconfigured` on a video upload.
+  The publisher sees an inline error; the source bytes stay in
+  R2 and the upload can be retried after you fix the binding.
+- Missing R2 / Access secrets on GitHub → the workflow's
+  pipeline step exits non-zero with a stage-specific code (2
+  download, 3 encode, 4 upload, 5 PATCH). The dataset row
+  stays flagged `transcoding=1` and bound to the original upload
+  via `active_transcode_upload_id`. The "Transcoding…" badge
+  in the portal stays visible — that's the operator's signal
+  something needs attention.
+
+  **Recovery is operator-only:** the `/asset/.../complete`
+  route refuses a *different* upload while `transcoding=1` and
+  the active-upload binding is still set (the
+  `transcoding_in_progress` guard added in 3pd-followup/C), so
+  the publisher cannot recover by re-uploading. Clear the row
+  first via D1 — `UPDATE datasets SET transcoding = NULL,
+  active_transcode_upload_id = NULL WHERE id = '…'` — and *then*
+  the publisher can mint a fresh upload. Same operator
+  intervention applies to the WAF-challenge case below: the
+  bundle exists in R2 but the row is stuck, so either re-issue
+  the transcode-complete POST by hand (with the right Access
+  service-token headers) or clear the row and re-upload.
+
+**WAF skip rule for the transcode-complete callback.** Cloudflare
+Access service tokens (`CF-Access-Client-Id` /
+`CF-Access-Client-Secret`) bypass Access but **not** Bot Fight
+Mode, the Cloudflare Managed Ruleset, or any custom WAF rule. If
+your zone has any of those active — Bot Fight Mode is on by
+default on the Free plan and up — the GHA runner's final POST to
+`/api/v1/publish/datasets/{id}/transcode-complete` gets served a
+`Just a moment...` JS-challenge interstitial at the edge and
+never reaches the publisher Worker. ffmpeg finishes, the HLS
+bundle lands in R2, and then the runner exits non-zero at stage
+5 (PATCH failure) with the challenge HTML in the body. The
+dataset row stays flagged `transcoding=1`.
+
+The fix is **two rules** that together cover both layers
+Cloudflare runs at: a WAF Custom Rule for the WAF stack, and
+(on Free plans, or any zone with plain Bot Fight Mode enabled)
+a Configuration Rule that overrides the zone-wide Bot Fight Mode
+toggle for this one path. Both are gated on the Access
+service-token header so the exemption only fires for legitimate
+service-token traffic.
+
+**Step 1 — WAF Custom Rule (covers Managed Ruleset, custom rules,
+Super Bot Fight Mode on Pro+, Browser Integrity Check, Security
+Level):**
+
+1. Security → WAF → Custom rules → Create rule.
+2. Name it something like `transcode-complete service token skip`.
+3. Field expression (use the Edit expression view):
+   ```
+   (starts_with(http.request.uri.path, "/api/v1/publish/")
+     and ends_with(http.request.uri.path, "/transcode-complete")
+     and len(http.request.headers["cf-access-client-id"][0]) > 0)
+   ```
+4. Action: **Skip**. Tick:
+   - All remaining custom rules
+   - All managed rules
+   - All Super Bot Fight Mode Rules (Pro+; inert on Free)
+   - Browser Integrity Check (under "More components to skip")
+   - Security Level (under "More components to skip")
+5. Deploy.
+
+**Step 2 — Plain Bot Fight Mode on Free / Pro plans.**
+
+The WAF Custom Rule's Skip action's "All Super Bot Fight Mode
+Rules" covers SBFM (Pro+ feature) but NOT plain Bot Fight Mode,
+which on Free / Pro runs as a zone-wide toggle at a different
+layer. Cloudflare's per-path rule types — WAF Custom Rules,
+Configuration Rules, Page Rules — none of them expose Bot
+Fight Mode as a per-path override on Free. (Older Cloudflare
+docs implied Configuration Rules could; current dashboard
+reality is that Bot Fight Mode isn't in the override list on
+Free zones.)
+
+Three options:
+
+1. **Disable Bot Fight Mode zone-wide.** Security → Bots →
+   Configure → toggle Bot Fight Mode Off. Loses BFM protection
+   across the zone, but for a small publisher portal where
+   authenticated traffic dominates and the public SPA is
+   served from cache, BFM adds little marginal protection over
+   the layers already in place (Cloudflare Access for the
+   portal, role-gated routes for service tokens, the WAF
+   Custom Rule from Step 1 for the WAF stack). This is the
+   recommended path for Free-plan deploys.
+
+2. **Upgrade to Pro and rely on SBFM.** Pro replaces BFM with
+   Super Bot Fight Mode, which IS skippable from the WAF
+   Custom Rule in Step 1 (the "All Super Bot Fight Mode Rules"
+   checkbox). Only worthwhile if you have other reasons to
+   upgrade.
+
+3. **Live with manual operator recovery.** Leave BFM on,
+   accept that workflow callbacks will sometimes fail with
+   the JS challenge interstitial, and have an operator
+   manually trigger `/transcode-complete` from a browser
+   session (which has a valid Access cookie and so isn't
+   challenged) whenever it does. Tractable for low-volume
+   deploys but bad ergonomics.
+
+Whichever option you pick, the Step 1 WAF Custom Rule still
+covers the rest of the security stack — Managed Ruleset, custom
+rules, SBFM on Pro+, Browser Integrity Check, Security Level —
+and is gated on the `cf-access-client-id` header so it only
+applies to legitimate service-token traffic. Safe because (a)
+only requests carrying a service-token id can match, (b)
+Cloudflare Access still validates the token after the
+exemption — a forged header without the matching secret can't
+actually authenticate, and (c) the `/transcode-complete` route
+handler enforces `role='service'` independently before mutating
+the row.
+
+**Verifying which rule is firing.** If the workflow still 403s
+after deploying both, check Security → Events. The event row
+names the specific check that fired. Match it back to the rule
+layer:
+
+| Event "Service" column says | Fixed by |
+|---|---|
+| `Bot fight mode` (Free/Pro plain BFM) | Step 2 (disable BFM zone-wide on Free; upgrade to Pro for SBFM; or live-with-manual-recovery) |
+| `Managed challenge` from a Managed Ruleset rule | WAF Custom Rule (Step 1), "All managed rules" |
+| `Super Bot Fight Mode` (Pro+) | WAF Custom Rule, "All Super Bot Fight Mode Rules" |
+| `Browser Integrity Check` | WAF Custom Rule, "Browser Integrity Check" |
+| `Security level` | WAF Custom Rule, "Security Level" |
+
+The CLI emits a specific operator-actionable error when it
+detects the challenge response, so a future occurrence of this
+failure surfaces in the GHA log as a one-line pointer at this
+section rather than as a 30-KB blob of obfuscated HTML.
+
+**Mock mode for local development.** Set `MOCK_GITHUB_DISPATCH=true`
+in `.dev.vars` to skip the dispatch call entirely; the dataset
+row still gets stamped `transcoding=1` so you can exercise the
+portal's polling surface without a real GHA workflow. The
+publisher API refuses `MOCK_GITHUB_DISPATCH=true` on a
+non-loopback hostname — same defense-in-depth pattern `MOCK_R2`
+and `MOCK_STREAM` use.
+
+**Cost model.** GitHub Actions free tier: 2000 CI-minutes/month
+for public repos. A 5-minute 1080p source encodes in ~3 minutes
+on the `ubuntu-22.04` runner. At 50 uploads/month with average
+5-minute sources that's 150 CI-minutes — well under the ceiling.
+R2 **storage** is the dominant ongoing R2 cost (egress is
+zero-rated): at 4K @ ~25 Mbps the ladder lands ~250 MB per
+minute of source content, billed monthly until manually
+deleted. R2 also charges per-operation (class A / class B)
+fees — a 50-MP4-per-month deploy is well below the
+free-operation ceiling, so storage is what to watch.
+
+### 8f. Next steps
 
 - Wire up the orbit-cost dashboard alongside the existing three
   (Phase 7 above).
@@ -562,7 +777,7 @@ different env vars / flags:
   flips `status='active'` to allow publishing.
 - Enable the publisher portal browser flow (next subsection).
 
-### 8f. Publisher portal browser flow (Phase 3pa onward)
+### 8g. Publisher portal browser flow (Phase 3pa onward)
 
 Phase 1a wired Cloudflare Access to protect the publisher *API*
 (`/api/v1/publish/**`) — that's the service-token / programmatic
@@ -620,7 +835,7 @@ sees the "Your session has expired. Refresh to sign in again."
 error card and cannot exercise any write surface. The Access app
 is the right belt-and-suspenders, not a safety prerequisite.
 
-**Trusted-domain auto-promotion.** Once §8f's Access app is
+**Trusted-domain auto-promotion.** Once §8g's Access app is
 wired and you sign into the portal for the first time, the
 publisher middleware JIT-provisions a row for your email. The
 default classification for an Access user login is
@@ -666,7 +881,7 @@ embed Access's login UI in our own page). So the portal can
 but it can't *complete* the sign-in itself.
 
 The Refresh button on the error card is the working escape
-hatch: once you've wired this §8f Access app, refreshing the
+hatch: once you've wired this §8g Access app, refreshing the
 portal page triggers Access at top-level navigation time, the
 user signs in, Access redirects back to `/publish/me`, the
 portal loads with the cookie present, and the next fetch
@@ -793,7 +1008,7 @@ WHERE email = 'you@your-org.org';
 
 Then verify with `GET /api/v1/publish/me` — `role` should
 report `staff` (or `community` / `pending` if your email
-domain isn't in `TRUSTED_PUBLISHER_DOMAINS`; see §8f).
+domain isn't in `TRUSTED_PUBLISHER_DOMAINS`; see §8g).
 
 ---
 

@@ -81,6 +81,11 @@ interface PendingUploadOptions {
   mime: string
   claimed_digest: string
   publisherId?: string
+  /** Optional. Defaults to `HELLO_BYTES.byteLength` so the
+   *  size-check (added in 3pd-followup/O for video sources)
+   *  agrees with the canonical R2 fixture content. Tests that
+   *  exercise the size-mismatch failure path override this. */
+  declared_size?: number
 }
 
 function insertPending(sqlite: ReturnType<typeof seedFixtures>, opts: PendingUploadOptions) {
@@ -100,7 +105,7 @@ function insertPending(sqlite: ReturnType<typeof seedFixtures>, opts: PendingUpl
       opts.target,
       opts.target_ref,
       opts.mime,
-      1234,
+      opts.declared_size ?? HELLO_BYTES.byteLength,
       opts.claimed_digest,
       '2026-04-29T12:00:00.000Z',
     )
@@ -111,6 +116,13 @@ function makeBucket(content: ArrayBuffer | null): R2Bucket {
     get: async (_key: string) => {
       if (!content) return null
       return { arrayBuffer: async () => content } as unknown as R2ObjectBody
+    },
+    // HEAD-only response — `verifyObjectExists` in r2-store.ts
+    // uses this for the video-source path (avoids reading the
+    // body, which can be up to 10 GB).
+    head: async (_key: string) => {
+      if (!content) return null
+      return { size: content.byteLength } as unknown as R2Object
     },
   } as unknown as R2Bucket
 }
@@ -181,6 +193,10 @@ describe('POST .../asset/{upload_id}/complete — R2 happy paths', () => {
 
   it('flips data_ref + content_digest for an R2 image data upload', async () => {
     const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: true })
+    // Align the dataset's declared format with what this test
+    // uploads — the /AZ format-revalidation guard refuses a
+    // `data` upload whose mime doesn't match dataset.format.
+    sqlite.prepare(`UPDATE datasets SET format = 'image/png' WHERE id = ?`).run(datasetId)
     const env = {
       CATALOG_DB: asD1(sqlite),
       CATALOG_KV: kv,
@@ -656,6 +672,274 @@ describe('POST .../asset/{upload_id}/complete — refusals', () => {
     expect(body.dataset.sphere_thumbnail_ref).toBe('r2:datasets/x/sphere-thumbnail.jpg')
   })
 
+  it('idempotent retry reports transcoding state for a still-transcoding video upload', async () => {
+    // PR #112 Copilot followup: when /complete is retried for a
+    // video upload whose row already says status='completed' but
+    // the GHA workflow hasn't fired /transcode-complete yet, the
+    // idempotent branch must report `transcoding: true` so the
+    // asset-uploader UI routes through the 'done-transcoding'
+    // stage instead of 'done-direct'. Without this the form
+    // would mis-paint as a finished direct upload and clear the
+    // "Transcoding…" badge prematurely.
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: false })
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      CATALOG_R2: makeBucket(HELLO_BYTES.buffer as ArrayBuffer),
+    }
+    const uploadId = `UP-VID-${'X'.repeat(20)}`
+    insertPending(sqlite, {
+      uploadId,
+      datasetId,
+      kind: 'data',
+      target: 'r2',
+      target_ref: `r2:uploads/${datasetId}/${uploadId}/source.mp4`,
+      mime: 'video/mp4',
+      claimed_digest: HELLO_DIGEST,
+    })
+    // Mirror the steady state the first /complete leaves behind:
+    // upload row completed + dataset row stamped transcoding.
+    sqlite
+      .prepare(`UPDATE asset_uploads SET status = 'completed', completed_at = ? WHERE id = ?`)
+      .run('2026-04-29T12:00:00.000Z', uploadId)
+    sqlite
+      .prepare(
+        `UPDATE datasets
+           SET transcoding = 1, active_transcode_upload_id = ?, source_digest = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(uploadId, HELLO_DIGEST, '2026-04-29T12:00:00.000Z', datasetId)
+
+    const res = await completeHandler(ctx({ env, datasetId, uploadId }))
+    expect(res.status).toBe(200)
+    const body = await readJson<{
+      idempotent: boolean
+      transcoding: boolean
+      dataset: { transcoding: number | null }
+    }>(res)
+    expect(body.idempotent).toBe(true)
+    expect(body.transcoding).toBe(true)
+    expect(body.dataset.transcoding).toBe(1)
+  })
+
+  it('idempotent retry reports transcoding=false once the workflow has cleared the row', async () => {
+    // Companion to the test above: after /transcode-complete
+    // runs, the dataset row's transcoding column is NULL/0 and
+    // data_ref points at the master.m3u8. A /complete retry now
+    // should report `transcoding: false` so the uploader knows
+    // the bundle is live and routes to the 'done-direct' stage
+    // (or whatever the parent treats as "finished"). The strict
+    // boolean — not `undefined` — keeps the client's
+    // `=== true` check consistent across response shapes.
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: false })
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      CATALOG_R2: makeBucket(HELLO_BYTES.buffer as ArrayBuffer),
+    }
+    const uploadId = `UP-VID-${'Y'.repeat(20)}`
+    insertPending(sqlite, {
+      uploadId,
+      datasetId,
+      kind: 'data',
+      target: 'r2',
+      target_ref: `r2:uploads/${datasetId}/${uploadId}/source.mp4`,
+      mime: 'video/mp4',
+      claimed_digest: HELLO_DIGEST,
+    })
+    sqlite
+      .prepare(`UPDATE asset_uploads SET status = 'completed', completed_at = ? WHERE id = ?`)
+      .run('2026-04-29T12:00:00.000Z', uploadId)
+    // Workflow already completed: transcoding cleared, data_ref
+    // updated to point at the HLS bundle.
+    sqlite
+      .prepare(
+        `UPDATE datasets
+           SET transcoding = NULL,
+               active_transcode_upload_id = NULL,
+               data_ref = ?,
+               updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(
+        `r2:videos/${datasetId}/${uploadId}/master.m3u8`,
+        '2026-04-29T12:30:00.000Z',
+        datasetId,
+      )
+
+    const res = await completeHandler(ctx({ env, datasetId, uploadId }))
+    expect(res.status).toBe(200)
+    const body = await readJson<{ idempotent: boolean; transcoding: boolean }>(res)
+    expect(body.idempotent).toBe(true)
+    expect(body.transcoding).toBe(false)
+  })
+
+  it('retries on a stamped-but-pending row by re-dispatching (no false recovery)', async () => {
+    // PR #112 followup: an earlier `alreadyStamped` recovery
+    // branch short-circuited a retry of /complete when the row
+    // was already `transcoding=1 + active=this upload`,
+    // marking the upload completed without re-dispatching.
+    // Copilot pointed out the failure mode that branch couldn't
+    // distinguish: the exact same row state can be produced by
+    // "stamp succeeded, dispatch failed, revert ALSO failed" —
+    // in which case there's no workflow running and the
+    // shortcut would permanently strand the row. Without a
+    // durable "dispatch succeeded" marker the row state is
+    // ambiguous, so the recovery branch is gone and the retry
+    // path falls through to a fresh stamp + dispatch. The
+    // workflow is idempotent (deterministic ffmpeg keyed on
+    // source bytes + upload_id), so a duplicate run is bounded
+    // cost; a stranded row is not.
+    //
+    // The fixture has no GITHUB_TOKEN, so a fall-through to
+    // dispatch 503s. The 503 is the proof point that the route
+    // attempted to re-dispatch (the desired behavior) rather
+    // than recovering with a false "marked completed" via the
+    // removed shortcut.
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: false })
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      CATALOG_R2: makeBucket(HELLO_BYTES.buffer as ArrayBuffer),
+      // No GITHUB_TOKEN — re-dispatch will 503.
+    }
+    const uploadId = 'Z'.repeat(26)
+    insertPending(sqlite, {
+      uploadId,
+      datasetId,
+      kind: 'data',
+      target: 'r2',
+      target_ref: `r2:uploads/${datasetId}/${uploadId}/source.mp4`,
+      mime: 'video/mp4',
+      claimed_digest: HELLO_DIGEST,
+    })
+    sqlite
+      .prepare(
+        `UPDATE datasets
+           SET transcoding = 1, active_transcode_upload_id = ?, source_digest = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(uploadId, HELLO_DIGEST, '2026-04-29T12:00:00.000Z', datasetId)
+
+    const res = await completeHandler(ctx({ env, datasetId, uploadId }))
+    // The route did NOT short-circuit with `recovered: true`.
+    // It re-stamped (a no-op on the same upload), attempted
+    // dispatch, and 503d on missing GitHub config.
+    expect(res.status).toBe(503)
+    const body = await readJson<{ error: string }>(res)
+    expect(body.error).toBe('github_dispatch_unconfigured')
+    // Upload row stays pending — no false-completed marking.
+    const row = sqlite
+      .prepare(`SELECT status FROM asset_uploads WHERE id = ?`)
+      .get(uploadId) as { status: string }
+    expect(row.status).toBe('pending')
+  })
+
+  it('does NOT recover via a planted data_ref alone (attack vector closed)', async () => {
+    // PR #112 followup — the earlier `alreadyCompleted`
+    // recovery branch matched any `transcoding=NULL +
+    // data_ref === r2:videos/{datasetId}/{uploadId}/master.m3u8`
+    // row, including data_refs the publisher planted via the
+    // generic dataset PUT path before transcoding=1 was stamped
+    // (AE's mutation guard only fires on transcoding rows).
+    // The attack:
+    //   1. mint upload via /asset
+    //   2. plant data_ref = r2:videos/{id}/{uploadId}/master.m3u8
+    //      via PUT /datasets/{id} (transcoding still NULL, so no
+    //      guard rejects)
+    //   3. call /complete: alreadyCompleted matches, upload
+    //      marked completed without ever dispatching
+    // The branch is now gone — only the alreadyStamped path
+    // (transcoding=1 + active=uploadId, a state the publisher
+    // can't forge via PUT) recovers without dispatching.
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: false })
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      CATALOG_R2: makeBucket(HELLO_BYTES.buffer as ArrayBuffer),
+      // No GITHUB_TOKEN — a fall-through to dispatch would 503.
+      // The 503 + still-pending upload row proves the attack
+      // was rejected (no recovery, no upload marked completed).
+    }
+    const uploadId = 'W'.repeat(26)
+    insertPending(sqlite, {
+      uploadId,
+      datasetId,
+      kind: 'data',
+      target: 'r2',
+      target_ref: `r2:uploads/${datasetId}/${uploadId}/source.mp4`,
+      mime: 'video/mp4',
+      claimed_digest: HELLO_DIGEST,
+    })
+    // Plant the predicted master.m3u8 data_ref without ever
+    // running the workflow. transcoding stays NULL.
+    sqlite
+      .prepare(`UPDATE datasets SET data_ref = ? WHERE id = ?`)
+      .run(`r2:videos/${datasetId}/${uploadId}/master.m3u8`, datasetId)
+
+    const res = await completeHandler(ctx({ env, datasetId, uploadId }))
+    // Falls through to the normal stamp+dispatch flow, then
+    // 503s on the absent GitHub config. The upload row stays
+    // pending — no false-recovery marking.
+    expect(res.status).toBe(503)
+    const body = await readJson<{ error: string }>(res)
+    expect(body.error).toBe('github_dispatch_unconfigured')
+    const row = sqlite
+      .prepare(`SELECT status FROM asset_uploads WHERE id = ?`)
+      .get(uploadId) as { status: string }
+    expect(row.status).toBe('pending')
+  })
+
+  it('returns 409 when the dataset format was changed between mint and complete', async () => {
+    // PR #112 followup — closes the gap where a publisher mints
+    // a video/mp4 upload, PUTs the dataset's format to image/png
+    // before /complete (allowed because the row isn't yet
+    // `transcoding=1`, so /AE's format guard doesn't fire), then
+    // calls /complete. Without this re-check the route would
+    // dispatch a video transcode that eventually writes an HLS
+    // data_ref into a row that now declares image format.
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: false })
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      CATALOG_R2: makeBucket(HELLO_BYTES.buffer as ArrayBuffer),
+      MOCK_GITHUB_DISPATCH: 'true',
+    }
+    const uploadId = 'Y'.repeat(26)
+    insertPending(sqlite, {
+      uploadId,
+      datasetId,
+      kind: 'data',
+      target: 'r2',
+      target_ref: `r2:uploads/${datasetId}/${uploadId}/source.mp4`,
+      mime: 'video/mp4',
+      claimed_digest: HELLO_DIGEST,
+    })
+    // Publisher mutated format BETWEEN mint and complete.
+    sqlite.prepare(`UPDATE datasets SET format = 'image/png' WHERE id = ?`).run(datasetId)
+
+    const res = await completeHandler(ctx({ env, datasetId, uploadId }))
+    expect(res.status).toBe(409)
+    const body = await readJson<{ errors: Array<{ field: string; code: string }> }>(res)
+    expect(body.errors[0]).toMatchObject({
+      field: 'format',
+      code: 'mime_format_mismatch',
+    })
+    // The dataset row wasn't stamped — we caught the mismatch
+    // before the stamp/dispatch step.
+    const row = sqlite
+      .prepare(`SELECT transcoding, data_ref FROM datasets WHERE id = ?`)
+      .get(datasetId) as { transcoding: number | null; data_ref: string }
+    expect(row.transcoding).toBeNull()
+    // The upload row stays pending — operator can mint a fresh
+    // upload (matching the new format) without the prior one
+    // appearing "completed" in the audit trail.
+    const upload = sqlite
+      .prepare(`SELECT status FROM asset_uploads WHERE id = ?`)
+      .get(uploadId) as { status: string }
+    expect(upload.status).toBe('pending')
+  })
+
   it('fails closed with 500 unknown_target when upload.target is corrupted', async () => {
     const { sqlite, datasetId, kv } = setupEnv()
     const env = {
@@ -825,6 +1109,9 @@ describe('POST .../asset/{upload_id}/complete — MOCK_R2 short-circuit', () => 
 describe('POST .../asset/{upload_id}/complete — sphere thumbnail enqueue', () => {
   it('enqueues a sphere_thumbnail job when a `data` upload completes', async () => {
     const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: true })
+    // Match fixture format to upload mime — see /AZ test note
+    // above re: the format-revalidation guard at /complete.
+    sqlite.prepare(`UPDATE datasets SET format = 'image/png' WHERE id = ?`).run(datasetId)
     const env = {
       CATALOG_DB: asD1(sqlite),
       CATALOG_KV: kv,
@@ -903,5 +1190,481 @@ describe('POST .../asset/{upload_id}/complete — sphere thumbnail enqueue', () 
       expect(res.status).toBe(200)
       expect(queue.records).toHaveLength(0)
     }
+  })
+})
+
+describe('POST .../asset/{upload_id}/complete — video transcode dispatch (3pd)', () => {
+  it('on a draft, stamps transcoding=1, clears data_ref, returns 202', async () => {
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: false })
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      // Loopback host on the request URL so the mock-r2 short-circuit
+      // is allowed (digest trusts the claim; no real bucket needed).
+      MOCK_R2: 'true',
+      MOCK_GITHUB_DISPATCH: 'true',
+    }
+    insertPending(sqlite, {
+      uploadId: 'UP-VIDEO',
+      datasetId,
+      kind: 'data',
+      target: 'r2',
+      target_ref: `r2:uploads/${datasetId}/${'X'.repeat(26)}/source.mp4`,
+      mime: 'video/mp4',
+      claimed_digest: HELLO_DIGEST,
+    })
+
+    const res = await completeHandler(ctx({ env, datasetId, uploadId: 'UP-VIDEO' }))
+
+    // 202 because the transcode is still in flight — the row isn't
+    // "ready" yet, even though the upload bytes are. data_ref stays
+    // empty until the GHA workflow PATCHes it back; the publisher's
+    // detail page surfaces a "Transcoding…" badge in the meantime.
+    expect(res.status).toBe(202)
+    const body = await readJson<{
+      dataset: { data_ref: string; transcoding: number | null; source_digest: string }
+      transcoding: boolean
+    }>(res)
+    expect(body.transcoding).toBe(true)
+    expect(body.dataset.data_ref).toBe('')
+    expect(body.dataset.transcoding).toBe(1)
+    // source_digest carries the claim so the workflow can re-verify
+    // before kicking off ffmpeg.
+    expect(body.dataset.source_digest).toBe(HELLO_DIGEST)
+
+    // Persisted state matches the response.
+    const row = sqlite
+      .prepare(`SELECT data_ref, transcoding, source_digest FROM datasets WHERE id = ?`)
+      .get(datasetId) as { data_ref: string; transcoding: number; source_digest: string }
+    expect(row.data_ref).toBe('')
+    expect(row.transcoding).toBe(1)
+    expect(row.source_digest).toBe(HELLO_DIGEST)
+
+    // The asset_uploads row is marked completed — the upload step
+    // itself succeeded; the transcode is a separate, async concern.
+    const upload = sqlite
+      .prepare(`SELECT status, completed_at FROM asset_uploads WHERE id = ?`)
+      .get('UP-VIDEO') as { status: string; completed_at: string }
+    expect(upload.status).toBe('completed')
+    expect(typeof upload.completed_at).toBe('string')
+  })
+
+  it('verifies via HEAD (not arrayBuffer) when the source is a video upload', async () => {
+    // The arrayBuffer-based digest recompute would blow the
+    // Workers 128 MB memory cap on a real video upload (cap is
+    // 10 GB). Phase 3pd review fix: the /complete handler does
+    // a HEAD-style existence check on the source key and trusts
+    // the publisher's claimed digest. The transcode runner
+    // re-hashes the bytes via Node's streaming
+    // crypto.createHash before encoding, so a tampered upload
+    // surfaces there.
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: false })
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      // Real R2 binding (no MOCK_R2) so the verify path is
+      // exercised end-to-end. The bucket returns HEAD-only —
+      // get() never gets called on the video-source branch.
+      CATALOG_R2: makeBucket(new ArrayBuffer(8)), // size=8, irrelevant content
+      MOCK_GITHUB_DISPATCH: 'true',
+    }
+    insertPending(sqlite, {
+      uploadId: 'UP-VIDEO-HEAD',
+      datasetId,
+      kind: 'data',
+      target: 'r2',
+      target_ref: `r2:uploads/${datasetId}/${'X'.repeat(26)}/source.mp4`,
+      mime: 'video/mp4',
+      claimed_digest: HELLO_DIGEST,
+      // Bucket fixture is an 8-byte ArrayBuffer — match
+      // declared_size so the truncation guard
+      // (3pd-followup/O) doesn't reject this case.
+      declared_size: 8,
+    })
+    const res = await completeHandler(ctx({ env, datasetId, uploadId: 'UP-VIDEO-HEAD' }))
+    expect(res.status).toBe(202)
+  })
+
+  it('returns 409 size_mismatch when the HEAD size differs from declared_size', async () => {
+    // PR #112 Copilot followup (complete.ts:216): a connection-
+    // dropped PUT that lands a partial source.mp4 in R2 would
+    // previously pass the existence check, stamp the row as
+    // transcoding, fire the GHA dispatch, and only fail in the
+    // runner's streaming digest recompute — leaving the row
+    // stuck `transcoding=1` until operator cleanup. The
+    // truncation guard catches the mismatch up front and the
+    // upload row is marked `failed` with `size_mismatch` so the
+    // publisher can mint a fresh upload.
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: false })
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      // Bucket holds 8 bytes; declared_size below is 100. The
+      // size check should surface that as 409 size_mismatch.
+      CATALOG_R2: makeBucket(new ArrayBuffer(8)),
+      MOCK_GITHUB_DISPATCH: 'true',
+    }
+    insertPending(sqlite, {
+      uploadId: 'UP-VIDEO-TRUNC',
+      datasetId,
+      kind: 'data',
+      target: 'r2',
+      target_ref: `r2:uploads/${datasetId}/${'X'.repeat(26)}/source.mp4`,
+      mime: 'video/mp4',
+      claimed_digest: HELLO_DIGEST,
+      declared_size: 100,
+    })
+    const res = await completeHandler(ctx({ env, datasetId, uploadId: 'UP-VIDEO-TRUNC' }))
+    expect(res.status).toBe(409)
+    const body = await readJson<{
+      error: string
+      declared: number
+      actual: number
+    }>(res)
+    expect(body.error).toBe('size_mismatch')
+    expect(body.declared).toBe(100)
+    expect(body.actual).toBe(8)
+    // The upload row is marked failed so a retry can't paper
+    // over a truncated PUT.
+    const row = sqlite
+      .prepare(`SELECT status, failure_reason FROM asset_uploads WHERE id = ?`)
+      .get('UP-VIDEO-TRUNC') as { status: string; failure_reason: string }
+    expect(row.status).toBe('failed')
+    expect(row.failure_reason).toBe('size_mismatch')
+    // The dataset row was NOT stamped — we caught the truncation
+    // before reaching the stamp/dispatch step.
+    const dsRow = sqlite
+      .prepare(`SELECT transcoding FROM datasets WHERE id = ?`)
+      .get(datasetId) as { transcoding: number | null }
+    expect(dsRow.transcoding).toBeNull()
+  })
+
+  it('returns 409 asset_missing when the source object is absent from R2', async () => {
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: false })
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      CATALOG_R2: makeBucket(null), // HEAD returns null → missing
+      MOCK_GITHUB_DISPATCH: 'true',
+    }
+    insertPending(sqlite, {
+      uploadId: 'UP-VIDEO-MISS',
+      datasetId,
+      kind: 'data',
+      target: 'r2',
+      target_ref: `r2:uploads/${datasetId}/${'X'.repeat(26)}/source.mp4`,
+      mime: 'video/mp4',
+      claimed_digest: HELLO_DIGEST,
+    })
+    const res = await completeHandler(ctx({ env, datasetId, uploadId: 'UP-VIDEO-MISS' }))
+    expect(res.status).toBe(409)
+    expect((await readJson<{ error: string }>(res)).error).toBe('asset_missing')
+  })
+
+  it('on a published row, preserves the existing data_ref while transcoding=1 (fix #2)', async () => {
+    // Published rows must keep serving their existing HLS bundle
+    // until the workflow completes — clearing data_ref would
+    // break public playback the moment the upload finalises.
+    // Phase 3pd review fix.
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: true })
+    const existingDataRef = `r2:videos/${datasetId}/PRIOR-UPLOAD/master.m3u8`
+    sqlite
+      .prepare(`UPDATE datasets SET data_ref = ? WHERE id = ?`)
+      .run(existingDataRef, datasetId)
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      MOCK_R2: 'true',
+      MOCK_GITHUB_DISPATCH: 'true',
+    }
+    insertPending(sqlite, {
+      uploadId: 'UP-PUB',
+      datasetId,
+      kind: 'data',
+      target: 'r2',
+      target_ref: `r2:uploads/${datasetId}/${'X'.repeat(26)}/source.mp4`,
+      mime: 'video/mp4',
+      claimed_digest: HELLO_DIGEST,
+    })
+
+    const res = await completeHandler(ctx({ env, datasetId, uploadId: 'UP-PUB' }))
+    expect(res.status).toBe(202)
+
+    const row = sqlite
+      .prepare(`SELECT data_ref, transcoding FROM datasets WHERE id = ?`)
+      .get(datasetId) as { data_ref: string; transcoding: number }
+    // data_ref kept pointing at the prior bundle so public manifest
+    // resolution keeps working through the transcode window.
+    expect(row.data_ref).toBe(existingDataRef)
+    expect(row.transcoding).toBe(1)
+  })
+
+  it('reverts the transcoding stamp when dispatch fails after persist (fix #9)', async () => {
+    // Persist-before-dispatch ordering: when the dispatch step
+    // throws after we've already stamped transcoding=1, the
+    // handler runs a compensating UPDATE so the row goes back
+    // to its prior state — otherwise the publisher would see a
+    // stuck "Transcoding…" badge with no workflow actually
+    // running.
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: true })
+    const priorDataRef = `r2:videos/${datasetId}/PRIOR/master.m3u8`
+    sqlite
+      .prepare(`UPDATE datasets SET data_ref = ? WHERE id = ?`)
+      .run(priorDataRef, datasetId)
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      MOCK_R2: 'true',
+      // No GitHub config + no mock → dispatchTranscode throws
+      // ConfigurationError. The handler maps that to 503 and
+      // runs the compensating revert.
+    }
+    insertPending(sqlite, {
+      uploadId: 'UP-VIDEO-FAIL',
+      datasetId,
+      kind: 'data',
+      target: 'r2',
+      target_ref: `r2:uploads/${datasetId}/${'X'.repeat(26)}/source.mp4`,
+      mime: 'video/mp4',
+      claimed_digest: HELLO_DIGEST,
+    })
+    const res = await completeHandler(ctx({ env, datasetId, uploadId: 'UP-VIDEO-FAIL' }))
+    expect(res.status).toBe(503)
+    expect((await readJson<{ error: string }>(res)).error).toBe(
+      'github_dispatch_unconfigured',
+    )
+
+    // The row reverted to its prior state — transcoding NULL,
+    // data_ref restored, source_digest cleared.
+    const row = sqlite
+      .prepare(
+        `SELECT data_ref, transcoding, source_digest FROM datasets WHERE id = ?`,
+      )
+      .get(datasetId) as {
+      data_ref: string
+      transcoding: number | null
+      source_digest: string | null
+    }
+    expect(row.transcoding).toBeNull()
+    expect(row.data_ref).toBe(priorDataRef)
+    expect(row.source_digest).toBeNull()
+
+    // The asset_upload row stayed `pending` so the publisher
+    // can retry /complete after the operator fixes the config.
+    const upload = sqlite
+      .prepare(`SELECT status FROM asset_uploads WHERE id = ?`)
+      .get('UP-VIDEO-FAIL') as { status: string }
+    expect(upload.status).toBe('pending')
+  })
+
+  it('returns 503 github_dispatch_unconfigured when neither real config nor mock is set', async () => {
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: false })
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      MOCK_R2: 'true',
+      // Intentionally no MOCK_GITHUB_DISPATCH, no GITHUB_OWNER/REPO/TOKEN.
+    }
+    insertPending(sqlite, {
+      uploadId: 'UP-VIDEO-503',
+      datasetId,
+      kind: 'data',
+      target: 'r2',
+      target_ref: `r2:uploads/${datasetId}/${'X'.repeat(26)}/source.mp4`,
+      mime: 'video/mp4',
+      claimed_digest: HELLO_DIGEST,
+    })
+
+    const res = await completeHandler(ctx({ env, datasetId, uploadId: 'UP-VIDEO-503' }))
+    expect(res.status).toBe(503)
+    expect((await readJson<{ error: string }>(res)).error).toBe('github_dispatch_unconfigured')
+
+    // Critical: the dataset row is NOT modified on dispatch failure,
+    // and the upload row stays `pending` so the publisher can retry
+    // `/complete` after the operator fixes the GitHub config. Without
+    // this, a misconfigured deploy would burn the upload window and
+    // force a fresh upload mint.
+    const row = sqlite
+      .prepare(`SELECT data_ref, transcoding FROM datasets WHERE id = ?`)
+      .get(datasetId) as { data_ref: string | null; transcoding: number | null }
+    expect(row.transcoding).toBeNull()
+    const upload = sqlite
+      .prepare(`SELECT status FROM asset_uploads WHERE id = ?`)
+      .get('UP-VIDEO-503') as { status: string }
+    expect(upload.status).toBe('pending')
+  })
+
+  it('returns 409 transcoding_in_progress when the row already owns a different active upload', async () => {
+    // Migration 0012 — refusing the second dispatch is the
+    // server-side counterpart to the dataset-form edit-mode
+    // gate. Without it, two overlapping /complete calls would
+    // both stamp transcoding=1 and fire two parallel GHA
+    // workflows that race their /transcode-complete callbacks.
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: false })
+    // Pre-stamp the row as if a prior upload (UP-PRIOR) already
+    // dispatched its workflow.
+    sqlite
+      .prepare(
+        `UPDATE datasets
+           SET transcoding = 1,
+               active_transcode_upload_id = 'UP-PRIOR',
+               source_digest = ?
+         WHERE id = ?`,
+      )
+      .run(HELLO_DIGEST, datasetId)
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      MOCK_R2: 'true',
+      MOCK_GITHUB_DISPATCH: 'true',
+    }
+    insertPending(sqlite, {
+      uploadId: 'UP-OVERLAP',
+      datasetId,
+      kind: 'data',
+      target: 'r2',
+      target_ref: `r2:uploads/${datasetId}/${'X'.repeat(26)}/source.mp4`,
+      mime: 'video/mp4',
+      claimed_digest: HELLO_DIGEST,
+    })
+    const res = await completeHandler(ctx({ env, datasetId, uploadId: 'UP-OVERLAP' }))
+    expect(res.status).toBe(409)
+    const body = await readJson<{ error: string; message: string }>(res)
+    expect(body.error).toBe('transcoding_in_progress')
+    expect(body.message).toContain('UP-PRIOR')
+    // The blocking row's binding is unchanged — the second
+    // upload's /complete call doesn't get to overwrite it.
+    const row = sqlite
+      .prepare(`SELECT active_transcode_upload_id FROM datasets WHERE id = ?`)
+      .get(datasetId) as { active_transcode_upload_id: string }
+    expect(row.active_transcode_upload_id).toBe('UP-PRIOR')
+    // The newer upload row stays pending so a retry (after the
+    // prior workflow finishes or an operator clears the row)
+    // can complete cleanly.
+    const upload = sqlite
+      .prepare(`SELECT status FROM asset_uploads WHERE id = ?`)
+      .get('UP-OVERLAP') as { status: string }
+    expect(upload.status).toBe('pending')
+  })
+
+  it('returns 409 transcoding_in_progress on a corrupted transcoding=1 + NULL active row', async () => {
+    // PR #112 followup — the earlier overlap guard only
+    // rejected when `active_transcode_upload_id` was populated.
+    // A row stamped before migration 0012 (or left in this
+    // shape by a partial manual edit) would fall through the
+    // guard, the new upload would re-stamp, and a second
+    // workflow could run alongside whatever workflow left the
+    // row stuck. The corrupted-state path now refuses with the
+    // same envelope but a clearer operator-action message.
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: false })
+    sqlite
+      .prepare(
+        `UPDATE datasets
+           SET transcoding = 1,
+               active_transcode_upload_id = NULL,
+               source_digest = ?
+         WHERE id = ?`,
+      )
+      .run(HELLO_DIGEST, datasetId)
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      MOCK_R2: 'true',
+      MOCK_GITHUB_DISPATCH: 'true',
+    }
+    insertPending(sqlite, {
+      uploadId: 'UP-STUCK-RECOVERY',
+      datasetId,
+      kind: 'data',
+      target: 'r2',
+      target_ref: `r2:uploads/${datasetId}/${'X'.repeat(26)}/source.mp4`,
+      mime: 'video/mp4',
+      claimed_digest: HELLO_DIGEST,
+    })
+    const res = await completeHandler(ctx({ env, datasetId, uploadId: 'UP-STUCK-RECOVERY' }))
+    expect(res.status).toBe(409)
+    const body = await readJson<{ error: string; message: string }>(res)
+    expect(body.error).toBe('transcoding_in_progress')
+    // Message explicitly cites the corrupted state + operator-
+    // action SQL so the publisher knows this is operator
+    // territory, not just "wait a bit."
+    expect(body.message).toContain('inconsistent state')
+    expect(body.message).toContain('UPDATE datasets')
+    // The corrupted row is untouched — no second stamp landed.
+    const row = sqlite
+      .prepare(`SELECT transcoding, active_transcode_upload_id FROM datasets WHERE id = ?`)
+      .get(datasetId) as { transcoding: number | null; active_transcode_upload_id: string | null }
+    expect(row.transcoding).toBe(1)
+    expect(row.active_transcode_upload_id).toBeNull()
+  })
+
+  it('binds active_transcode_upload_id to the upload id when stamping transcoding', async () => {
+    // The /transcode-complete handler verifies the callback's
+    // upload_id matches `datasets.active_transcode_upload_id`,
+    // so this stamp is what makes the per-upload guard work.
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: false })
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      MOCK_R2: 'true',
+      MOCK_GITHUB_DISPATCH: 'true',
+    }
+    insertPending(sqlite, {
+      uploadId: 'UP-BIND',
+      datasetId,
+      kind: 'data',
+      target: 'r2',
+      target_ref: `r2:uploads/${datasetId}/${'X'.repeat(26)}/source.mp4`,
+      mime: 'video/mp4',
+      claimed_digest: HELLO_DIGEST,
+    })
+    const res = await completeHandler(ctx({ env, datasetId, uploadId: 'UP-BIND' }))
+    expect(res.status).toBe(202)
+    const row = sqlite
+      .prepare(`SELECT transcoding, active_transcode_upload_id FROM datasets WHERE id = ?`)
+      .get(datasetId) as {
+      transcoding: number
+      active_transcode_upload_id: string
+    }
+    expect(row.transcoding).toBe(1)
+    expect(row.active_transcode_upload_id).toBe('UP-BIND')
+  })
+
+  it('refuses MOCK_GITHUB_DISPATCH=true on a non-loopback hostname', async () => {
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: false })
+    // Don't enable MOCK_R2 — it has its own non-loopback refusal
+    // that would fire before the github-dispatch check we want to
+    // exercise here. Use a real R2 binding instead so digest
+    // verification passes on the real path.
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      CATALOG_R2: makeBucket(HELLO_BYTES.buffer as ArrayBuffer),
+      MOCK_GITHUB_DISPATCH: 'true',
+    }
+    insertPending(sqlite, {
+      uploadId: 'UP-VIDEO-PROD',
+      datasetId,
+      kind: 'data',
+      target: 'r2',
+      target_ref: `r2:uploads/${datasetId}/${'X'.repeat(26)}/source.mp4`,
+      mime: 'video/mp4',
+      claimed_digest: HELLO_DIGEST,
+    })
+
+    // Hit the handler with a production-hostname URL to trigger the
+    // mock-on-non-loopback refusal. Same defense-in-depth pattern as
+    // MOCK_R2 / MOCK_STREAM.
+    const baseCtx = ctx({ env, datasetId, uploadId: 'UP-VIDEO-PROD' })
+    const prodCtx = {
+      ...baseCtx,
+      request: new Request(
+        `https://terraviz.example.com/api/v1/publish/datasets/${datasetId}/asset/UP-VIDEO-PROD/complete`,
+        { method: 'POST' },
+      ),
+    } as typeof baseCtx
+    const res = await completeHandler(prodCtx)
+    expect(res.status).toBe(500)
+    expect((await readJson<{ error: string }>(res)).error).toBe('mock_github_dispatch_unsafe')
   })
 })

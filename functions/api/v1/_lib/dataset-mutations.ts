@@ -466,6 +466,90 @@ export async function updateDataset(
 
   const db = env.CATALOG_DB!
 
+  // Asset-coupled field guard: refuse `format` or `data_ref`
+  // mutations while the row is mid-transcode. Without these an
+  // editor could
+  //   • swap `video/mp4` → `image/png` and end up with the
+  //     workflow's eventual HLS data_ref contradicting the new
+  //     format, or
+  //   • paste a manual `vimeo:` / `url:` / `r2:videos/...`
+  //     value into data_ref that the workflow's
+  //     /transcode-complete callback will overwrite as soon as
+  //     it finishes (and which any /publish or /preview hit
+  //     between the manual edit and the callback would
+  //     transiently surface).
+  // The dataset form's UI gate already prevents both through
+  // the supported path (the format radio is disabled in /W,
+  // the data_ref input is replaced by a read-only notice in /Q),
+  // but the server is the authoritative check — a direct API
+  // call could otherwise bypass the UI. Both rejections share
+  // the same 409 envelope so the client treats them uniformly.
+  // PR #112 followup — dataset-form.ts:937 (server-side
+  // companion) + dataset-mutations.ts (data_ref extension).
+  // Capture once and reuse for both the JS pre-check below and
+  // the SQL-level atomic guard further down. Without this, the
+  // pre-check would SELECT and the UPDATE would not know which
+  // fields were "value-actually-changing" vs same-value
+  // submissions (the form re-serializes every field on save,
+  // including format/data_ref, so a save that doesn't touch
+  // those fields still has them in the body).
+  const guardableFieldsInBody =
+    body.format !== undefined || body.data_ref !== undefined
+  let currentForGuard:
+    | { format: string; data_ref: string; transcoding: number | null }
+    | null = null
+  if (guardableFieldsInBody) {
+    currentForGuard =
+      (await db
+        .prepare('SELECT format, data_ref, transcoding FROM datasets WHERE id = ?')
+        .bind(id)
+        .first<{ format: string; data_ref: string; transcoding: number | null }>()) ?? null
+  }
+  const formatChanges =
+    body.format !== undefined && currentForGuard !== null && body.format !== currentForGuard.format
+  const dataRefChanges =
+    body.data_ref !== undefined &&
+    currentForGuard !== null &&
+    body.data_ref !== currentForGuard.data_ref
+
+  if (currentForGuard?.transcoding === 1) {
+    if (formatChanges) {
+      return {
+        ok: false,
+        status: 409,
+        errors: [
+          {
+            field: 'format',
+            code: 'transcoding_in_progress',
+            message:
+              'Cannot change format while a video transcode is in flight — ' +
+              'the workflow will write a video data_ref into this row when it ' +
+              'finishes, which would contradict the new format. Wait for the ' +
+              '"Transcoding…" badge to clear, then update format.',
+          },
+        ],
+      }
+    }
+    if (dataRefChanges) {
+      return {
+        ok: false,
+        status: 409,
+        errors: [
+          {
+            field: 'data_ref',
+            code: 'transcoding_in_progress',
+            message:
+              'Cannot change data_ref while a video transcode is in flight — ' +
+              'the workflow will overwrite it with the new HLS bundle path ' +
+              'when it finishes, and a /publish or /preview hit before that ' +
+              'callback would transiently surface the manual value. Wait for ' +
+              'the "Transcoding…" badge to clear, then update data_ref.',
+          },
+        ],
+      }
+    }
+  }
+
   const sets: string[] = []
   const binds: unknown[] = []
   function set(col: string, v: unknown): void {
@@ -556,11 +640,61 @@ export async function updateDataset(
 
   set('updated_at', new Date().toISOString())
 
+  // SQL-level atomic guard for the format/data_ref check above.
+  // The JS pre-check fails fast with a clear error message in
+  // the common case, but is TOCTOU-vulnerable: between its
+  // SELECT and this UPDATE, a concurrent /asset/{upload}/complete
+  // could stamp `transcoding=1`, and the UPDATE would still
+  // apply the format/data_ref change. Scoping the UPDATE itself
+  // to `(transcoding IS NULL OR transcoding = 0)` when those
+  // fields are in the body closes the window — the SQL engine
+  // evaluates the WHERE clause atomically with the SET. PR #112
+  // followup — dataset-mutations.ts (TOCTOU on format/data_ref
+  // guard). On 0 rows affected, return the same 409 envelope
+  // the JS check produces so the client treats the two paths
+  // uniformly.
+  // The atomic guard only fires when format/data_ref are
+  // ACTUALLY changing (different from the row's current value).
+  // Submitting the same value as a no-op shouldn't trip the
+  // guard — the form re-serializes every field on save, so a
+  // save that doesn't touch format/data_ref still has them in
+  // the body.
+  const needsTranscodingGuard = formatChanges || dataRefChanges
+  let whereSql = 'WHERE id = ?'
+  if (needsTranscodingGuard) {
+    whereSql += ' AND (transcoding IS NULL OR transcoding = 0)'
+  }
+
   if (sets.length) {
-    await db
-      .prepare(`UPDATE datasets SET ${sets.join(', ')} WHERE id = ?`)
+    const result = await db
+      .prepare(`UPDATE datasets SET ${sets.join(', ')} ${whereSql}`)
       .bind(...binds, id)
       .run()
+    if (needsTranscodingGuard && (result.meta?.changes ?? 0) === 0) {
+      // The JS pre-check passed but the UPDATE filtered the row
+      // out — a concurrent stamp landed between SELECT and
+      // UPDATE. Surface the same field-level 409 as the pre-
+      // check so the client renders the same per-field message.
+      // We don't know which of format / data_ref the publisher
+      // tried to change, so attribute to whichever was in the
+      // body (format wins if both).
+      const field = body.format !== undefined ? 'format' : 'data_ref'
+      return {
+        ok: false,
+        status: 409,
+        errors: [
+          {
+            field,
+            code: 'transcoding_in_progress',
+            message:
+              `Cannot change ${field} while a video transcode is in flight — ` +
+              `a concurrent upload stamped the row between the freshness check ` +
+              `and the apply step. Wait for the "Transcoding…" badge to clear, ` +
+              `then retry.`,
+          },
+        ],
+      }
+    }
   }
   await replaceDecorations(db, id, body)
 
@@ -602,6 +736,33 @@ export async function publishDataset(
       ok: false,
       status: 404,
       errors: [{ field: 'id', code: 'not_found', message: `Dataset ${id} not found.` }],
+    }
+  }
+
+  // Refuse to publish a row whose video source is still being
+  // transcoded. The detail page's UI gate already disables the
+  // Publish button while `transcoding=1`, but a direct API
+  // POST or a CLI call could bypass that — this server-side
+  // check is the authoritative gate. For a row whose
+  // `data_ref` is already pointing at a playable bundle (the
+  // re-upload case on a published / retracted row), publishing
+  // mid-transcode would also point public clients at the OLD
+  // bundle even though the row's metadata is mid-flip; cleaner
+  // to require the transcode to finish first.
+  if (row.transcoding) {
+    return {
+      ok: false,
+      status: 409,
+      errors: [
+        {
+          field: 'transcoding',
+          code: 'transcoding_in_progress',
+          message:
+            'Cannot publish while a video transcode is in flight. ' +
+            'Wait for the workflow to finish and the "Transcoding…" ' +
+            'badge to clear, then publish.',
+        },
+      ],
     }
   }
 

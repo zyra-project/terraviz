@@ -101,6 +101,43 @@ export interface DatasetRow {
    * Zero rows use this in the current SOS snapshot; persisted for
    * future publishers whose imagery uses inverted Y conventions. */
   is_flipped_in_y: number | null
+  /** Boolean (0/1) flag set by the video-upload /complete handler
+   * when a `source.mp4` lands in R2 and a GHA transcode dispatch
+   * fires (Phase 3pd). The workflow clears the flag and writes
+   * `data_ref = r2:videos/{id}/{upload_id}/master.m3u8` (per-
+   * upload-versioned so a re-upload doesn't clobber a still-
+   * playing bundle) when the HLS bundle is ready. The portal
+   * renders a "Transcoding…" badge and gates the publish button
+   * while this is set. NULL on every other row. Migration 0011. */
+  transcoding: number | null
+  /** ULID of the asset_uploads row whose GHA workflow currently
+   * owns the row's transcoding stamp. Set in lockstep with
+   * `transcoding=1` by the /asset/.../complete handler; verified
+   * by /transcode-complete before applying the workflow's callback
+   * so two overlapping uploads can't race their PATCHes against
+   * each other (see migration 0012). NULL when `transcoding` is
+   * NULL. Migration 0012. */
+  active_transcode_upload_id: string | null
+  /** SHA-256 of the asset's *delivered bytes*. Carried for
+   * single-blob assets (R2 images, captions, legends) where one
+   * hash describes the whole object. Always NULL for HLS bundles:
+   * those are many segment files plus variant manifests, and the
+   * pipeline tracks per-segment integrity via the master manifest
+   * rather than a single bundle-wide hash. `clearTranscoding`
+   * (`asset-uploads.ts`) explicitly NULLs this column when a
+   * video transcode lands, atomically with the `data_ref` swap
+   * (PR #112 followup — 3pd-followup/Z). Also NULL when the row
+   * predates Phase 1b content-digest verification or when the
+   * pipeline trusts an upstream-provided source digest instead.
+   * Phase 1b. */
+  content_digest: string | null
+  /** SHA-256 of the publisher's *source upload* (the MP4 they
+   * dropped into the portal uploader, before any transcoding).
+   * Set at /asset/{upload_id}/complete time and round-trips into
+   * the GHA workflow's repository_dispatch payload so the runner
+   * can re-verify before encoding. NULL on rows that never went
+   * through the source-upload flow. */
+  source_digest: string | null
 }
 
 export interface DecorationRows {

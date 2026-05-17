@@ -65,6 +65,10 @@ function fakeRow(overrides: Partial<DatasetRow> = {}): DatasetRow {
     radius_mi: null,
     lon_origin: null,
     is_flipped_in_y: null,
+    transcoding: null,
+    active_transcode_upload_id: null,
+    content_digest: null,
+    source_digest: null,
     ...overrides,
   }
 }

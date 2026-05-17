@@ -46,8 +46,10 @@ import { isConfigurationError } from '../../../_lib/errors'
 import { isLoopbackHost } from '../../../_lib/loopback'
 import {
   buildAssetKey,
+  buildVideoSourceKey,
   presignPut,
   R2_PUT_TTL_SECONDS,
+  R2_PUT_TTL_VIDEO_SECONDS,
   type AssetKind,
 } from '../../../_lib/r2-store'
 import {
@@ -77,13 +79,30 @@ function pickId(context: Parameters<PagesFunction<CatalogEnv, 'id'>>[0]): string
 }
 
 /**
- * Decide which backend an `(kind, mime)` pair lands in. Video data
- * goes to Stream so we get transcoding + ABR for free; everything
- * else goes to R2 under a content-addressed key.
+ * Decide which backend an `(kind, mime)` pair lands in. Phase 3pd
+ * collapsed the two-backend split: Cloudflare Stream is gone, R2
+ * is the only target. Video data still gets a special key layout
+ * (see `buildVideoSourceKey` in `r2-store.ts`) so the GHA transcode
+ * workflow can find the source at a predictable path, but the
+ * upload mechanism is the same presigned PUT.
+ *
+ * The function signature still returns the union type so
+ * downstream code paths can be torn out incrementally — the Stream
+ * branch in `complete.ts` and `stream-store.ts` is now dead code
+ * waiting for a follow-up cleanup PR.
  */
-function chooseTarget(kind: AssetKind, mime: string): 'r2' | 'stream' {
-  if (kind === 'data' && mime === 'video/mp4') return 'stream'
+function chooseTarget(_kind: AssetKind, _mime: string): 'r2' | 'stream' {
   return 'r2'
+}
+
+/**
+ * Should this `(kind, mime)` upload land at the video-source key
+ * for the GHA transcode workflow to pick up, or at a regular
+ * content-addressed asset key? Video data is the one case that
+ * goes through the async transcode pipeline.
+ */
+function isVideoSourceUpload(kind: AssetKind, mime: string): boolean {
+  return kind === 'data' && mime === 'video/mp4'
 }
 
 /**
@@ -93,7 +112,7 @@ function chooseTarget(kind: AssetKind, mime: string): 'r2' | 'stream' {
  * `tour/json`; the upload's actual HTTP content-type is
  * `application/json`.
  */
-function mimeMatchesFormat(mime: string, format: string): boolean {
+export function mimeMatchesFormat(mime: string, format: string): boolean {
   if (mime === format) return true
   if (format === 'tour/json' && mime === 'application/json') return true
   return false
@@ -145,6 +164,31 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
         ],
       }),
       { status: 400, headers: { 'Content-Type': CONTENT_TYPE } },
+    )
+  }
+
+  // Refuse to mint a fresh video-source upload while the row is
+  // already transcoding. The overlap-guard in
+  // /asset/{upload_id}/complete would 409 the same case later,
+  // but a 2-hour presigned PUT URL paired with the 10 GB
+  // MAX_BYTES_DATA cap means a publisher (or stale edit-page
+  // tab) could waste a multi-GB upload before learning the row
+  // is locked. Failing fast at mint time saves the bandwidth.
+  // PR #112 followup — asset.ts:pre-mint-transcoding-check.
+  //
+  // Scope is video-only — image and aux uploads don't go through
+  // the transcoding lifecycle, so a parallel image upload during
+  // a video transcode is harmless.
+  if (isVideoSourceUpload(kind, mime) && existing.transcoding) {
+    return jsonError(
+      409,
+      'transcoding_in_progress',
+      `Dataset ${id} is already transcoding ` +
+        (existing.active_transcode_upload_id
+          ? `upload ${existing.active_transcode_upload_id}`
+          : `(no active upload binding — corrupted state, contact an operator)`) +
+        `. Wait for the workflow to finish (the "Transcoding…" badge on the detail ` +
+        `page will clear when it does) before starting a new upload.`,
     )
   }
 
@@ -209,10 +253,32 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
         mock,
       }
     } else {
+      // Video data uploads land at the predictable
+      // `uploads/{dataset_id}/{upload_id}/source.mp4` key so the
+      // GHA transcode workflow can find them via the
+      // `client_payload.source_key` passed in the
+      // repository_dispatch fired at /complete time. Per-upload
+      // prefix keeps a re-upload to a still-transcoding row from
+      // overwriting the source bytes the prior workflow may still
+      // be reading. Every other asset kind keeps the content-
+      // addressed `datasets/{id}/by-digest/...` scheme that lets
+      // revisions land at a new path without invalidating any
+      // existing cache.
       const ext = extForMime(mime)
       const hex = content_digest.slice('sha256:'.length)
-      const key = buildAssetKey(id, kind, hex, ext)
-      const presigned = await presignPut(context.env, key, { contentType: mime })
+      const isVideo = isVideoSourceUpload(kind, mime)
+      const key = isVideo
+        ? buildVideoSourceKey(id, uploadId)
+        : buildAssetKey(id, kind, hex, ext)
+      // Video sources get the extended TTL — `R2_PUT_TTL_SECONDS`
+      // (15 min) is fine for image / aux uploads but too short
+      // for the 10 GB MAX_BYTES_DATA ceiling on residential
+      // uplinks. PR #112 followup — the prior default expired
+      // multi-GB uploads mid-transfer.
+      const presigned = await presignPut(context.env, key, {
+        contentType: mime,
+        ttlSeconds: isVideo ? R2_PUT_TTL_VIDEO_SECONDS : undefined,
+      })
       const targetRef = `r2:${key}`
       await insertAssetUpload(context.env.CATALOG_DB!, {
         id: uploadId,
@@ -282,5 +348,6 @@ interface AssetInitResponse {
 /** Re-export for symmetry with the rest of the routes — keeps import sites tidy. */
 export const TTLS = {
   R2_PUT_TTL_SECONDS,
+  R2_PUT_TTL_VIDEO_SECONDS,
   STREAM_DIRECT_UPLOAD_TTL_SECONDS,
 }

@@ -227,4 +227,35 @@ export interface CatalogEnv {
    * `MOCK_VECTORIZE=true` for the full mocked docent path.
    */
   MOCK_AI?: string
+  /**
+   * GitHub repository owner that hosts the transcode workflow
+   * (e.g. `zyra-project`). Used by the video-upload /complete
+   * handler (Phase 3pd) to fire a `repository_dispatch` after the
+   * source MP4 lands in R2. Local dev with `MOCK_GITHUB_DISPATCH=true`
+   * does not need it.
+   */
+  GITHUB_OWNER?: string
+  /**
+   * GitHub repository name (e.g. `terraviz`). Paired with
+   * `GITHUB_OWNER` to build the dispatch URL. Same mock-mode
+   * exemption applies.
+   */
+  GITHUB_REPO?: string
+  /**
+   * Personal Access Token (or GitHub App installation token) with
+   * `repo` scope on `{GITHUB_OWNER}/{GITHUB_REPO}` — needed for the
+   * `POST /repos/.../dispatches` REST call. Wrangler secret in
+   * production; the token never leaves the Worker (the GHA runner
+   * uses its own checkout-only `GITHUB_TOKEN`, which is a different
+   * credential).
+   */
+  GITHUB_DISPATCH_TOKEN?: string
+  /**
+   * `"true"` makes the github-dispatch helper short-circuit without
+   * contacting api.github.com. The /complete handler still stamps
+   * the dataset row `transcoding = 1` so the portal can exercise
+   * the polling surface end-to-end against a deploy without a real
+   * GHA workflow wired up. Refused on non-loopback hostnames.
+   */
+  MOCK_GITHUB_DISPATCH?: string
 }

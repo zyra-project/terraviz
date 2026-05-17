@@ -380,6 +380,242 @@ export async function applyAssetAndMarkCompleted(
 }
 
 /**
+ * Just the dataset-row half of the video-source finalisation —
+ * stamp `transcoding=1`, record the publisher's `source_digest`,
+ * and conditionally clear `data_ref` for drafts. Used by the
+ * /complete handler's "persist before dispatch" ordering so the
+ * dispatch fires against a row whose state already matches what
+ * the workflow expects. The asset_uploads row stays `pending`
+ * and gets flipped to `completed` only after the dispatch is
+ * confirmed (see `markVideoUploadCompleted` below).
+ *
+ * Conditional WHERE clause is the atomic counterpart to the
+ * route's JS-level overlap check: stamp only if the row isn't
+ * already bound to a *different* upload's transcode. Without
+ * the SQL guard, two concurrent /complete calls could both
+ * pass the JS check (each reading a transcoding=NULL row),
+ * both UPDATE, and both dispatch — the later UPDATE wins
+ * `active_transcode_upload_id` but the earlier workflow has
+ * already been launched and becomes a stale/orphan run
+ * (PR #112 followup — asset-uploads.ts:407). Returns
+ * rows-affected; 0 means a concurrent upload won the race and
+ * the caller should surface 409 `transcoding_in_progress`.
+ *
+ * `content_digest` clearing mirrors `data_ref`'s conditional
+ * shape: drafts clear immediately (no public consumer reading
+ * the old digest); published rows preserve the existing
+ * digest *during* the transcode window so the row's integrity
+ * metadata still describes the bundle public clients are
+ * actively serving. `clearTranscoding` does the atomic
+ * data_ref-swap-plus-digest-clear when /transcode-complete
+ * lands — at that point the new HLS bundle is live and the
+ * old digest no longer applies. PR #112 followup —
+ * asset-uploads.ts:404 (the prior unconditional clear left
+ * published rows without integrity metadata during a 1–10
+ * minute window where public clients were still reading the
+ * old bundle).
+ */
+export async function stampTranscodingForVideoSource(
+  db: D1Database,
+  datasetId: string,
+  upload: AssetUploadRow,
+  now: string,
+): Promise<number> {
+  // SQL guard mirrors the route's JS-level overlap check:
+  //   • non-transcoding row → stamp (transcoding IS NULL or 0;
+  //     both are idle states per the migration / type comments,
+  //     so the guard treats them equivalently via
+  //     `COALESCE(transcoding, 0) = 0`. The earlier
+  //     `transcoding IS NULL` clause missed rows whose column
+  //     happens to be 0 — those would falsely look like a
+  //     concurrent transcode and the UPDATE would refuse a
+  //     legitimate fresh stamp. PR #112 followup.)
+  //   • same-upload retry → stamp (active = upload.id matches)
+  //   • transcoding=1 + active=otherUpload → 0 rows changed
+  //   • transcoding=1 + active=NULL → 0 rows changed (the
+  //     route's JS check now rejects this case as a corrupted
+  //     state requiring operator cleanup; the WHERE clause is
+  //     the matching atomic-level defense). The earlier
+  //     `active_transcode_upload_id IS NULL OR = ?` clause
+  //     allowed a stamp to take over a stuck transcoding=1 row,
+  //     which could start a second workflow alongside whatever
+  //     workflow left the row in that shape. PR #112 followup.
+  const result = await db
+    .prepare(
+      `UPDATE datasets
+         SET transcoding = 1,
+             active_transcode_upload_id = ?,
+             data_ref = CASE WHEN published_at IS NULL THEN '' ELSE data_ref END,
+             source_digest = ?,
+             content_digest = CASE WHEN published_at IS NULL THEN NULL ELSE content_digest END,
+             updated_at = ?
+       WHERE id = ?
+         AND (COALESCE(transcoding, 0) = 0 OR active_transcode_upload_id = ?)`,
+    )
+    .bind(upload.id, upload.claimed_digest, now, datasetId, upload.id)
+    .run()
+  return result.meta?.changes ?? 0
+}
+
+/**
+ * Mark just the asset_uploads row as completed. The companion
+ * dataset-row stamp lives in `stampTranscodingForVideoSource`
+ * above; the two are split so the /complete handler can persist
+ * the dataset state, fire the external dispatch, and then mark
+ * the upload completed only after the dispatch confirms.
+ *
+ * The `WHERE status = 'pending'` guard makes this idempotent
+ * against a retry in the same way `applyAssetAndMarkCompleted`
+ * is — a duplicate /complete call inside a tight retry window
+ * is a no-op rather than a double-update.
+ */
+export async function markVideoUploadCompleted(
+  db: D1Database,
+  uploadId: string,
+  now: string,
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE asset_uploads
+         SET status = 'completed', completed_at = ?, failure_reason = NULL
+       WHERE id = ? AND status = 'pending'`,
+    )
+    .bind(now, uploadId)
+    .run()
+}
+
+/** Snapshot of the digest columns we capture before stamping
+ *  a transcode, so a dispatch failure can restore the row's
+ *  prior integrity metadata losslessly. Per-column null is
+ *  the same value SQLite would write — a row that genuinely
+ *  had no `content_digest` before the stamp gets that NULL
+ *  preserved through the revert. */
+export interface TranscodingStampSnapshot {
+  data_ref: string
+  content_digest: string | null
+  source_digest: string | null
+}
+
+/**
+ * Compensating update for the dispatch-failure path: revert the
+ * transcoding stamp set by `stampTranscodingForVideoSource` so
+ * the row goes back to the state it was in before /complete
+ * was called. Best-effort — if this UPDATE itself fails, the
+ * row stays stuck `transcoding=1` and an operator has to clear
+ * it by hand. Failed compensation is logged at the call site so
+ * `wrangler tail` shows it.
+ *
+ * Scoped to `AND active_transcode_upload_id = ?` so the revert
+ * is a no-op when another upload has already re-stamped the row
+ * in the gap between our stamp and our dispatch-failure handler.
+ * Without that clause the revert would wipe the newer upload's
+ * in-flight state (PR #112 followup — race window Copilot
+ * flagged on complete.ts:405). Returns the number of rows
+ * affected; a 0 means we lost the race and should log it (the
+ * other upload now owns the row and our retry on the original
+ * upload is a stale operation).
+ *
+ * Restores all three columns the stamp mutated: `data_ref`,
+ * `content_digest`, and `source_digest`. The earlier shape
+ * (data_ref restored, source_digest unconditionally cleared,
+ * content_digest untouched) was lossy on draft rows whose
+ * prior asset carried integrity metadata — the stamp cleared
+ * content_digest (drafts wipe the digest along with data_ref),
+ * and the revert had no way to bring it back. PR #112
+ * followup — asset-uploads.ts:revertTranscodingStamp scope.
+ */
+export async function revertTranscodingStamp(
+  db: D1Database,
+  datasetId: string,
+  upload: AssetUploadRow,
+  prior: TranscodingStampSnapshot,
+  now: string,
+): Promise<number> {
+  const result = await db
+    .prepare(
+      `UPDATE datasets
+         SET transcoding = NULL,
+             active_transcode_upload_id = NULL,
+             data_ref = ?,
+             content_digest = ?,
+             source_digest = ?,
+             updated_at = ?
+       WHERE id = ? AND active_transcode_upload_id = ?`,
+    )
+    .bind(
+      prior.data_ref,
+      prior.content_digest,
+      prior.source_digest,
+      now,
+      datasetId,
+      upload.id,
+    )
+    .run()
+  // upload row may still be pending (we hadn't marked it yet);
+  // leave the status alone so a retry works.
+  return result.meta?.changes ?? 0
+}
+
+/**
+ * Called by the GHA transcode workflow when the HLS bundle is
+ * written to R2. Flips `data_ref` to the master.m3u8 path and
+ * clears `transcoding`. The dataset row never sees `data_ref`
+ * set while `transcoding=1` (which would lie to the manifest
+ * endpoint) — the single UPDATE atomically swaps both columns.
+ *
+ * Reached via `POST /api/v1/publish/datasets/{id}/transcode-complete`
+ * — a dedicated route added in 3pd/A-fix specifically because
+ * the generic dataset PUT path refuses the `transcoding` field
+ * by design (server-managed column). The workflow authenticates
+ * with a `role=service` Cloudflare Access service token; the
+ * route constructs `data_ref` server-side from the route id +
+ * upload_id so the workflow can't accidentally point the row
+ * at another dataset's bundle.
+ *
+ * Scoped to `AND active_transcode_upload_id = ?` so the route's
+ * explicit upload-id check at the top of the handler is matched
+ * by an atomic guard at the UPDATE itself — closes the TOCTOU
+ * window where a *different* /asset/{...}/complete could swap
+ * `active_transcode_upload_id` to a newer upload between the
+ * route's SELECT and this UPDATE (PR #112 followup —
+ * transcode-complete.ts:178). Returns rows-affected; the caller
+ * uses 0 as a "lost the race, refuse to apply" signal and
+ * surfaces it as 409 stale.
+ */
+export async function clearTranscoding(
+  db: D1Database,
+  datasetId: string,
+  uploadId: string,
+  dataRef: string,
+  now: string,
+): Promise<number> {
+  // `content_digest = NULL` here is the atomic counterpart to
+  // the *conditional* clear in `stampTranscodingForVideoSource`:
+  // we hold the published-row's old digest during the
+  // transcode window so its integrity metadata still describes
+  // the in-flight bundle, then drop it in the same UPDATE that
+  // swaps data_ref to the new HLS master.m3u8. HLS bundles
+  // don't carry a single content_digest (the bundle is many
+  // segment files; integrity is per-segment via the master
+  // manifest), so the cleared column is the correct steady
+  // state for a post-/transcode-complete row. PR #112
+  // followup — asset-uploads.ts:491.
+  const result = await db
+    .prepare(
+      `UPDATE datasets
+         SET transcoding = NULL,
+             active_transcode_upload_id = NULL,
+             data_ref = ?,
+             content_digest = NULL,
+             updated_at = ?
+       WHERE id = ? AND active_transcode_upload_id = ?`,
+    )
+    .bind(dataRef, now, datasetId, uploadId)
+    .run()
+  return result.meta?.changes ?? 0
+}
+
+/**
  * Build (but do not execute) the `UPDATE datasets` statement for a
  * verified upload. Returns a prepared+bound D1PreparedStatement so
  * callers can either run it directly or include it in a batch.

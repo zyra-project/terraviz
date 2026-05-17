@@ -11,7 +11,8 @@
  *      `client_payload`).
  *   2. Pull the source MP4 from R2 via the S3-compatible API into a
  *      per-run workdir. The publisher's portal upload already
- *      landed at `uploads/{id}/source.mp4`; we read it back here.
+ *      landed at `uploads/{dataset_id}/{upload_id}/source.mp4`;
+ *      we read it back here.
  *   3. Re-verify the source digest. Mismatch → fail fast; the
  *      caller's claim was wrong or the R2 object was tampered.
  *   4. `encodeHls` against the 4K + 1080p + 720p 2:1 spherical
@@ -81,9 +82,7 @@ import {
   createWriteStream,
   existsSync,
   mkdirSync,
-  readFileSync,
   rmSync,
-  statSync,
 } from 'node:fs'
 import { join } from 'node:path'
 import { AwsClient } from 'aws4fetch'
@@ -123,9 +122,16 @@ export function parseArgs(argv: readonly string[]): Args | { error: string } {
     return { error: `--upload-id must be a ULID (26 base32 chars); got ${uploadId ?? '(missing)'}` }
   }
   const sourceKey = get('source-key')
-  if (!sourceKey || !sourceKey.startsWith('uploads/') || !sourceKey.endsWith('/source.mp4')) {
+  // Match the full shape and pin the embedded ids to the route
+  // arguments. The prior prefix/suffix-only check accepted
+  // arbitrary middle segments (e.g. the obsolete one-level
+  // `uploads/{dataset_id}/source.mp4`) and didn't notice when
+  // a misrouted dispatch carried a key for a different dataset
+  // or upload. PR #112 Copilot 3pd-followup.
+  const expectedSourceKey = `uploads/${datasetId}/${uploadId}/source.mp4`
+  if (!sourceKey || sourceKey !== expectedSourceKey) {
     return {
-      error: `--source-key must look like uploads/{id}/source.mp4; got ${sourceKey ?? '(missing)'}`,
+      error: `--source-key must equal ${expectedSourceKey}; got ${sourceKey ?? '(missing)'}`,
     }
   }
   const sourceDigest = get('source-digest')
@@ -206,7 +212,27 @@ async function downloadFromR2(
   return { digest: `sha256:${hash.digest('hex')}`, bytes }
 }
 
-async function postTranscodeComplete(
+/**
+ * Detect Cloudflare's WAF managed-challenge interstitial in a
+ * response we got back from `transcode-complete`. Access service
+ * tokens bypass Cloudflare Access but NOT Bot Fight Mode / WAF
+ * managed rules — when the WAF challenges a runner request, the
+ * response is a `Just a moment...` HTML page with a `_cf_chl_opt`
+ * JS blob, served at the edge before the request ever reaches the
+ * publisher Worker. Without this detection the failure dumps ~30
+ * KB of obfuscated challenge HTML into the GHA log; with it the
+ * operator sees a one-line pointer at the SELF_HOSTING WAF rule.
+ */
+export function isCloudflareChallenge(contentType: string | null, body: string): boolean {
+  if (!contentType || !contentType.toLowerCase().includes('text/html')) return false
+  // Both markers appear in every Cloudflare challenge variant
+  // (managed / interactive / JS). The publisher API only ever
+  // returns application/json, so any HTML body carrying either
+  // marker is definitionally an edge intercept.
+  return body.includes('_cf_chl_opt') || body.includes('challenge-platform')
+}
+
+export async function postTranscodeComplete(
   server: ServerEnv,
   datasetId: string,
   uploadId: string,
@@ -230,7 +256,80 @@ async function postTranscodeComplete(
   })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
+    if (isCloudflareChallenge(res.headers.get('content-type'), body)) {
+      let zone = 'unknown'
+      try {
+        zone = new URL(url).hostname
+      } catch {
+        /* keep the fallback */
+      }
+      throw new Error(
+        `transcode-complete blocked by Cloudflare's WAF managed challenge ` +
+          `(status ${res.status}, zone ${zone}). Access service tokens bypass ` +
+          `Access but not Bot Fight Mode / WAF managed rules, so the request ` +
+          `never reached the publisher Worker. Fix: add a WAF Skip custom rule ` +
+          `for /api/v1/publish/* requests carrying the cf-access-client-id ` +
+          `header — see docs/SELF_HOSTING.md §8e "WAF skip rule for the ` +
+          `transcode-complete callback" for the exact rule.`,
+      )
+    }
     throw new Error(`transcode-complete returned ${res.status}: ${body}`)
+  }
+
+  // 2xx is necessary but not sufficient. A Pages deploy that
+  // doesn't have the /transcode-complete route handler returns
+  // the SPA's index.html with status 200 for any unmatched API
+  // path — exactly what the CLI was trusting as success. Verify
+  // the response is JSON with the row payload the route is
+  // supposed to return; if it's HTML (or anything other shape),
+  // the workflow is talking to the wrong deploy. PR #112
+  // followup — caught after a smoke-test "transcoding cleared"
+  // log lied because the workflow was hitting a main-branch
+  // deploy that predated this PR's route handler.
+  const contentType = res.headers.get('content-type') ?? ''
+  const body = await res.text().catch(() => '')
+  if (!contentType.toLowerCase().includes('application/json')) {
+    let zone = 'unknown'
+    try {
+      zone = new URL(url).hostname
+    } catch {
+      /* keep the fallback */
+    }
+    const snippet = body.slice(0, 200).replace(/\s+/g, ' ').trim()
+    throw new Error(
+      `transcode-complete returned a 2xx response with non-JSON content-type ` +
+        `"${contentType}" from ${zone}. The route handler did not run — most ` +
+        `likely the Pages deploy at this hostname does not have the ` +
+        `/transcode-complete function file yet (the deploy is on a branch ` +
+        `that predates the publisher transcode pipeline). Check that ` +
+        `TERRAVIZ_SERVER points at a deploy that includes the publisher API ` +
+        `routes. Body preview: ${snippet}`,
+    )
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch (err) {
+    throw new Error(
+      `transcode-complete returned 2xx with Content-Type ${contentType} but ` +
+        `the body is not parseable JSON: ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
+  // The success response always carries a `dataset` field (either
+  // the freshly-cleared row or, on idempotent retry, the
+  // already-cleared row). Either shape proves the route ran.
+  // `typeof null === 'object'` in JS so the null case needs an
+  // explicit guard.
+  const dataset =
+    typeof parsed === 'object' && parsed !== null
+      ? (parsed as { dataset?: unknown }).dataset
+      : undefined
+  if (typeof dataset !== 'object' || dataset === null) {
+    throw new Error(
+      `transcode-complete returned 2xx JSON but the body shape doesn't match ` +
+        `the route's contract (expected { dataset: {...}, ... }). The deploy ` +
+        `may be serving a different route handler. Body: ${body.slice(0, 200)}`,
+    )
   }
 }
 
@@ -359,9 +458,3 @@ const invokedDirectly =
 if (invokedDirectly) {
   void main().then(code => process.exit(code))
 }
-
-// `readFileSync` + `statSync` are imported for the side-effect of
-// keeping the `fs` import line valid when future maintenance trims
-// unused helpers; the digest path uses streaming reads, not these.
-void readFileSync
-void statSync

@@ -29,8 +29,10 @@ import {
 import { buildErrorCard, type ErrorCardDetails } from './error-card'
 import { attachToolbar, renderMarkdownToolbar } from './markdown-toolbar'
 import { renderChipInput } from './chip-input'
+import { renderAssetUploader } from './asset-uploader'
 import { renderMarkdown } from '../../../services/markdownRenderer'
 import type { PublisherDatasetDetail } from '../types'
+import { ROUTE_CHANGE_START_EVENT } from '../router'
 
 export type DatasetFormMode = 'create' | 'edit'
 
@@ -373,6 +375,12 @@ function radioGroup(opts: {
   required: boolean
   error: PublisherValidationError | null
   onChange: (v: string) => void
+  /** Renders the fieldset with `disabled` set on every input so
+   *  the user can't change the selection. Used by the format
+   *  field while a transcode is in flight — the server-side
+   *  guard would 409 the change anyway, and disabling here is a
+   *  clearer signal than "submit-then-error". PR #112 followup. */
+  disabled?: boolean
 }): HTMLElement {
   const fieldset = document.createElement('fieldset')
   fieldset.className = 'publisher-form-fieldset'
@@ -403,6 +411,7 @@ function radioGroup(opts: {
     radio.name = opts.name
     radio.value = o.value
     radio.checked = o.value === opts.value
+    if (opts.disabled) radio.disabled = true
     radio.addEventListener('change', () => opts.onChange(o.value))
     wrap.appendChild(radio)
 
@@ -797,10 +806,47 @@ interface RenderContext {
   /** Existing dataset id (edit mode). Used to build the PUT URL
    *  and the post-save back-navigation target. */
   datasetId: string | null
+  /** True when the row is currently mid-transcode (the parent
+   *  detail page is also polling). The form swaps the asset
+   *  uploader + manual ref input for a read-only notice — the
+   *  server-side `transcoding_in_progress` guard would refuse a
+   *  second /asset/.../complete dispatch anyway, but disabling
+   *  the affordance here gives the publisher a clearer signal
+   *  than "submit-then-error". */
+  isTranscoding: boolean
   fetchFn: typeof fetch
   sleep: (ms: number) => Promise<void>
   navigate: (url: string) => void
   routerNavigate: (path: string) => void
+  /** Shared lifecycle token for the form mount. `disposed` flips
+   *  to true exactly once — when ROUTE_CHANGE_START_EVENT fires —
+   *  and stays true. All renders within a single form mount share
+   *  this object reference, so a deferred callback bound during
+   *  render N (e.g. the asset-uploader's onUploaded) sees the
+   *  same flip even after render N+1 has supplanted it. The
+   *  listener that flips this lives in `renderDatasetForm` so
+   *  it's bound once per mount, not once per re-render. PR #112
+   *  followup — dataset-form.ts:disposed race.
+   *
+   *  `uploader` caches the asset-uploader DOM element across
+   *  renderForm calls so a parent re-render (input change,
+   *  save-in-progress repaint) doesn't tear down an in-flight
+   *  upload. Without this, the uploader's internal `state`
+   *  closure variables (XHR controller, progress, mid-flight
+   *  promise chain) all keep running on a detached element
+   *  while a fresh idle uploader mounts in the new DOM — and
+   *  the publisher sees "Choose a file" even though an upload
+   *  is still progressing in the background, with no way to
+   *  see its progress or cancel. `uploaderFormat` records the
+   *  format the cached uploader was constructed for; a format
+   *  change forces a fresh uploader (its mime-acceptance logic
+   *  is set at construction time). PR #112 followup —
+   *  dataset-form.ts:asset uploader subtree preservation. */
+  lifecycle: {
+    disposed: boolean
+    uploader?: HTMLElement
+    uploaderFormat?: string
+  }
 }
 
 function renderForm(
@@ -896,6 +942,13 @@ function renderForm(
       value: state.format,
       required: true,
       error: findError(state.errors, 'format'),
+      // Format is asset-coupled: changing it mid-transcode would
+      // leave the row's declared format contradicting the HLS
+      // data_ref the workflow is about to write. The server
+      // rejects the change with 409 `transcoding_in_progress`;
+      // disabling here is the publisher-friendly counterpart.
+      // PR #112 followup — dataset-form.ts:937.
+      disabled: ctx.mode === 'edit' && ctx.datasetId !== null && ctx.isTranscoding,
       onChange: v => {
         state.format = v
         update()
@@ -918,24 +971,182 @@ function renderForm(
     }),
   )
 
-  // data_ref is required by `validateForPublish` server-side
-  // but draft-saveable empty. Interim manual input until the
-  // 3pd asset uploader replaces it. Placeholder shows the four
-  // accepted shapes so the publisher doesn't have to guess.
-  identityCard.appendChild(
-    inputField({
-      id: 'dataset-data-ref',
-      labelKey: 'publisher.datasetForm.field.dataRef',
-      required: false,
-      value: state.dataRef,
-      placeholder: t('publisher.datasetForm.placeholder.dataRef'),
-      helpKey: 'publisher.datasetForm.help.dataRef',
-      error: findError(state.errors, 'data_ref'),
-      onChange: v => {
-        state.dataRef = v
-      },
-    }),
-  )
+  // data_ref is required by `validateForPublish` server-side but
+  // draft-saveable empty. In create mode the dataset id doesn't
+  // exist yet — the uploader needs an id to scope its
+  // /asset endpoint against — so we keep the manual ref input as
+  // a fallback for `vimeo:` / external URLs. In edit mode we hand
+  // off to the asset uploader (3pd/C); the manual ref input stays
+  // available for the non-upload paths (legacy / external).
+  if (ctx.mode === 'edit' && ctx.datasetId && ctx.isTranscoding) {
+    // Row is currently mid-transcode. The detail page has the
+    // 5-second poller (it auto-refreshes when transcoding
+    // clears); the edit page intentionally does NOT — an
+    // editor who lands here mid-transcode has to reload or
+    // navigate back to the detail page to see the completed
+    // state. Replace both the uploader and the manual ref
+    // input with a read-only notice so the publisher doesn't
+    // try to start a second upload (which the server-side
+    // `transcoding_in_progress` guard would 409 anyway) or
+    // paste a manual ref into a row whose data_ref is about
+    // to be overwritten by /transcode-complete (the data_ref
+    // mutation guard added in /AE would 409 the save). Adding
+    // a poller here is a candidate follow-up if editor-mid-
+    // transcode turns out to be a common workflow; today's
+    // assumption is that it's a corner case worth a static
+    // notice + a reload prompt rather than another poll loop.
+    //
+    // Clear the cached uploader: this branch doesn't mount one,
+    // so the cached element (if any from a prior render) is
+    // about to be unreachable. The uploader's in-flight state,
+    // if any, has already arrived at this branch via
+    // ctx.isTranscoding = true — its work is done.
+    ctx.lifecycle.uploader = undefined
+    ctx.lifecycle.uploaderFormat = undefined
+    const refDisplay = document.createElement('div')
+    refDisplay.className = 'publisher-field'
+    const refLabel = document.createElement('span')
+    refLabel.className = 'publisher-field-label'
+    refLabel.textContent = t('publisher.datasetForm.field.dataRef')
+    refDisplay.appendChild(refLabel)
+    const notice = document.createElement('p')
+    notice.className = 'publisher-form-notice'
+    notice.setAttribute('role', 'status')
+    notice.textContent = t('publisher.datasetForm.transcoding.notice')
+    refDisplay.appendChild(notice)
+    if (state.dataRef) {
+      const current = document.createElement('p')
+      current.className = 'publisher-asset-uploader-current'
+      current.textContent = state.dataRef
+      refDisplay.appendChild(current)
+    }
+    identityCard.appendChild(refDisplay)
+  } else if (ctx.mode === 'edit' && ctx.datasetId) {
+    // Edit mode mounts BOTH the guided uploader and the manual
+    // text input. The uploader covers the "I have an MP4 / PNG
+    // on my disk" case; the manual input covers the
+    // "swap to a `vimeo:` legacy URL or paste an existing
+    // `r2:videos/...` ref" case, which the uploader can't
+    // express (its flow always uploads bytes). Fix for PR #112
+    // Copilot #5 — the prior single-uploader layout left
+    // editors no way to change a `vimeo:` / `url:` /
+    // already-transcoded `r2:` ref short of round-tripping
+    // through the API.
+    const uploaderWrap = document.createElement('div')
+    uploaderWrap.className = 'publisher-field'
+    const label = document.createElement('span')
+    label.className = 'publisher-field-label'
+    label.textContent = t('publisher.datasetForm.field.dataRef')
+    uploaderWrap.appendChild(label)
+    // Reuse the previously-mounted uploader DOM across renders
+    // when the format is unchanged. This preserves the
+    // uploader's internal state (in-flight XHR, progress,
+    // mid-flight promise chain) so a parent re-render — e.g.
+    // the publisher edits the title while a multi-GB upload is
+    // progressing — doesn't tear down the upload UI. Format
+    // changes still recreate the uploader: its mime-acceptance
+    // logic is set at construction time, and a publisher
+    // switching format mid-upload is a meaningful state
+    // change. PR #112 followup — dataset-form.ts:asset uploader
+    // subtree preservation.
+    if (ctx.lifecycle.uploader && ctx.lifecycle.uploaderFormat === state.format) {
+      uploaderWrap.appendChild(ctx.lifecycle.uploader)
+    } else {
+      const uploaderEl = renderAssetUploader({
+        datasetId: ctx.datasetId,
+        format: state.format,
+        currentDataRef: state.dataRef || null,
+        navigate: ctx.navigate,
+        fetchFn: ctx.fetchFn,
+        sleep: ctx.sleep,
+        onUploaded: outcome => {
+          // Bail if the user navigated away during the upload
+          // (which can take minutes for a multi-GB video). Without
+          // this guard, the deferred callback would call update()
+          // or mutate #dataset-data-ref on the next page's DOM.
+          // `ctx.lifecycle` is the shared per-mount token — flips
+          // only on route navigation, not on internal re-renders,
+          // so an upload in flight across input changes still
+          // resolves correctly. PR #112 followup —
+          // dataset-form.ts:disposed race.
+          if (ctx.lifecycle.disposed) return
+          // On a direct upload (image), the server already wrote
+          // `data_ref` to the row. Mirror the field-state so a
+          // subsequent form save doesn't clobber it with an empty
+          // string. On a video upload the server stamped
+          // `transcoding=1` and cleared data_ref — flip
+          // `ctx.isTranscoding` and rerender so the manual ref
+          // input + Save button are replaced with the read-only
+          // transcoding notice. Without the rerender the publisher
+          // could type a fresh data_ref into the still-mounted
+          // manual input and Save would clobber the in-flight
+          // transcode's eventual master.m3u8 — PR #112 followup
+          // (dataset-form.ts:1007).
+          if (outcome.mode === 'direct') {
+            state.dataRef = outcome.dataRef
+            // Reflect the new ref in the manual input below so
+            // the publisher sees what the row now points at.
+            const manual = content.querySelector<HTMLInputElement>('#dataset-data-ref')
+            if (manual) manual.value = outcome.dataRef
+            // The uploader's job is done — drop the cache so a
+            // future format change or new upload starts fresh.
+            ctx.lifecycle.uploader = undefined
+            ctx.lifecycle.uploaderFormat = undefined
+          } else {
+            state.dataRef = ''
+            ctx.isTranscoding = true
+            // Cache cleared by the isTranscoding branch on next
+            // render (transcoding-locked branch doesn't mount
+            // an uploader at all); the in-flight upload's
+            // completion has already arrived here.
+            ctx.lifecycle.uploader = undefined
+            ctx.lifecycle.uploaderFormat = undefined
+            update()
+          }
+        },
+      })
+      ctx.lifecycle.uploader = uploaderEl
+      ctx.lifecycle.uploaderFormat = state.format
+      uploaderWrap.appendChild(uploaderEl)
+    }
+    identityCard.appendChild(uploaderWrap)
+    // Manual ref input — for editors who want to swap to a
+    // legacy `vimeo:` / `url:` ref or paste an already-encoded
+    // `r2:videos/...` value without re-uploading bytes.
+    identityCard.appendChild(
+      inputField({
+        id: 'dataset-data-ref',
+        labelKey: 'publisher.datasetForm.field.dataRefManual',
+        required: false,
+        value: state.dataRef,
+        placeholder: t('publisher.datasetForm.placeholder.dataRef'),
+        helpKey: 'publisher.datasetForm.help.dataRefManual',
+        error: findError(state.errors, 'data_ref'),
+        onChange: v => {
+          state.dataRef = v
+        },
+      }),
+    )
+  } else {
+    // Create-mode fallback — the publisher can still paste a
+    // `vimeo:` ref or an external URL by hand. Once the draft
+    // saves and they navigate to the edit page, the uploader
+    // shows up.
+    identityCard.appendChild(
+      inputField({
+        id: 'dataset-data-ref',
+        labelKey: 'publisher.datasetForm.field.dataRef',
+        required: false,
+        value: state.dataRef,
+        placeholder: t('publisher.datasetForm.placeholder.dataRef'),
+        helpKey: 'publisher.datasetForm.help.dataRef',
+        error: findError(state.errors, 'data_ref'),
+        onChange: v => {
+          state.dataRef = v
+        },
+      }),
+    )
+  }
 
   identityCard.appendChild(
     inputField({
@@ -992,7 +1203,20 @@ function renderForm(
   shell.appendChild(form)
   content.replaceChildren(shell)
 
+  // Internal re-render. The lifecycle/disposed bookkeeping lives
+  // ONE level up (in `renderDatasetForm`), so this function just
+  // checks the shared flag and re-renders. Internal re-renders
+  // (input changes, save-in-progress repaints) do NOT dispose
+  // the lifecycle — only route navigation does. That way, an
+  // onSubmit handler bound during render N can still call its
+  // captured update() after the server responds, and the
+  // update() will paint errors / success states into render N+1.
+  // The asset-uploader's onUploaded closure (which captures
+  // ctx) sees the same lifecycle and bails only on a true
+  // navigation, never on a sibling re-render. PR #112 followup —
+  // dataset-form.ts:disposed race.
   function update(): void {
+    if (ctx.lifecycle.disposed) return
     renderForm(content, state, ctx)
   }
 
@@ -1199,9 +1423,25 @@ export function renderDatasetForm(
     options.initialKeywords ?? [],
     options.initialTags ?? [],
   )
+  // One lifecycle token per form mount, shared across every
+  // renderForm call (internal re-renders included). Flipped to
+  // disposed=true exactly once — when the router fires
+  // ROUTE_CHANGE_START_EVENT — and stays flipped. Asset-uploader
+  // onUploaded callbacks and any other deferred work check this
+  // before mutating the DOM. The listener self-detaches on fire
+  // so we don't leak one per form visit. PR #112 followup —
+  // dataset-form.ts:disposed race.
+  const lifecycle: { disposed: boolean } = { disposed: false }
+  const onRouteStart = (): void => {
+    lifecycle.disposed = true
+    window.removeEventListener(ROUTE_CHANGE_START_EVENT, onRouteStart)
+  }
+  window.addEventListener(ROUTE_CHANGE_START_EVENT, onRouteStart)
+
   renderForm(content, state, {
     mode: options.mode,
     datasetId: options.initial?.id ?? null,
+    isTranscoding: !!options.initial?.transcoding,
     fetchFn: options.fetchFn ?? globalThis.fetch,
     sleep: options.sleep ?? (ms => new Promise(r => setTimeout(r, ms))),
     navigate:
@@ -1214,5 +1454,6 @@ export function renderDatasetForm(
       (path => {
         window.location.href = path
       }),
+    lifecycle,
   })
 }

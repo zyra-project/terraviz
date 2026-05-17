@@ -737,6 +737,137 @@
   outline: 0;
 }
 
+/* Asset uploader (3pd/C). Three visual rows — current ref,
+   file input, status — plus an inline progress bar that's
+   only mounted while an upload is in flight. */
+.publisher-asset-uploader {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: var(--white-o05, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--white-o12, rgba(255, 255, 255, 0.12));
+  border-radius: 6px;
+}
+
+.publisher-asset-uploader-current {
+  margin: 0;
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: baseline;
+  font-size: 0.875rem;
+}
+
+.publisher-asset-uploader-current-label {
+  color: var(--color-text-muted, #999999);
+}
+
+.publisher-asset-uploader-current-value {
+  word-break: break-all;
+}
+
+.publisher-asset-uploader-input-row {
+  display: flex;
+  align-items: center;
+}
+
+.publisher-asset-uploader-input {
+  font: inherit;
+  color: var(--color-text, #e8eaf0);
+}
+
+.publisher-asset-uploader-status {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary, #bbbbbb);
+}
+
+.publisher-asset-uploader-status-error {
+  color: #ffd1d1;
+}
+
+.publisher-asset-uploader-status-done-direct,
+.publisher-asset-uploader-status-done-transcoding {
+  color: #c8e8d4;
+}
+
+.publisher-asset-uploader-progress {
+  width: 100%;
+  height: 0.5rem;
+}
+
+.publisher-asset-uploader-error-details {
+  font-size: 0.8125rem;
+  color: var(--color-text-muted, #999999);
+}
+
+.publisher-asset-uploader-error-details pre {
+  margin: 0.25rem 0 0;
+  padding: 0.5rem;
+  background: var(--black-o20, rgba(0, 0, 0, 0.2));
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.75rem;
+}
+
+/* Modal for the Preview link surface (3pd/E). Backdrop dims the
+   detail page and centres the modal. Plain DOM — there's no other
+   modal in the portal yet, so a portal-wide manager would be
+   premature. */
+.publisher-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 1rem;
+}
+
+.publisher-modal {
+  max-width: 32rem;
+  width: 100%;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border-radius: 8px;
+}
+
+.publisher-modal-heading {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.publisher-modal-body {
+  margin: 0;
+  color: var(--color-text-secondary, #bbbbbb);
+  font-size: 0.875rem;
+}
+
+.publisher-modal-url {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: var(--black-o20, rgba(0, 0, 0, 0.2));
+  border: 1px solid var(--white-o12, rgba(255, 255, 255, 0.12));
+  border-radius: 4px;
+  color: var(--color-text, #e8eaf0);
+  font-family: monospace;
+  font-size: 0.8125rem;
+  box-sizing: border-box;
+}
+
+.publisher-modal-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 0.5rem;
+}
+
 .publisher-shell h1 {
   font-size: 1.5rem;
   font-weight: 600;
@@ -829,6 +960,35 @@
 .publisher-badge-status[data-status='pending'] {
   background: rgba(255, 200, 120, 0.18);
   color: #ffe1a8;
+}
+
+/* Transcoding badge — used by the detail page while a 3pd video
+   upload's GHA workflow is in flight. Yellow tone to distinguish
+   from the lifecycle badge's green/red/grey, with a subtle
+   pulsing background to convey "in progress". The animation is
+   disabled when the user prefers reduced motion (Copilot #5);
+   the steady tinted background is enough to communicate the
+   state without the pulse. */
+.publisher-badge-transcoding {
+  background: rgba(255, 198, 88, 0.18);
+  border: 1px solid rgba(255, 198, 88, 0.32);
+  color: #ffd88a;
+  animation: publisher-transcoding-pulse 2s ease-in-out infinite;
+}
+
+@keyframes publisher-transcoding-pulse {
+  0%, 100% {
+    background: rgba(255, 198, 88, 0.18);
+  }
+  50% {
+    background: rgba(255, 198, 88, 0.32);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .publisher-badge-transcoding {
+    animation: none;
+  }
 }
 
 .publisher-badge-status[data-status='suspended'] {

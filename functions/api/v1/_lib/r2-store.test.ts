@@ -25,6 +25,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildAssetKey,
+  isVideoSourceKey,
   MOCK_R2_HOST,
   presignPut,
   R2_PUT_TTL_SECONDS,
@@ -71,6 +72,43 @@ describe('buildAssetKey', () => {
     expect(() => buildAssetKey('DS001', 'data', SHA64_A, '')).toThrow(/1-8 lowercase/)
     expect(() => buildAssetKey('DS001', 'data', SHA64_A, 'MP4')).toThrow(/1-8 lowercase/)
     expect(() => buildAssetKey('DS001', 'data', SHA64_A, 'too-long-ext')).toThrow(/1-8 lowercase/)
+  })
+})
+
+describe('isVideoSourceKey', () => {
+  // Both segments must be valid Crockford ULIDs (the alphabet
+  // excludes I, L, O, U). 'X' is in V-Z so X×26 is a legal ULID
+  // shape; '0' through '9' and the rest of the alphabet round
+  // out the test fixtures below.
+  const DS = '01HXAAAAAAAAAAAAAAAAAAAAAA'
+  const UP = '01HYAAAAAAAAAAAAAAAAAAAAAA'
+
+  it('accepts the canonical uploads/{ULID}/{ULID}/source.mp4 shape', () => {
+    expect(isVideoSourceKey(`uploads/${DS}/${UP}/source.mp4`)).toBe(true)
+  })
+
+  it('rejects the obsolete one-level uploads/{ULID}/source.mp4 shape', () => {
+    // Pre-3pd-review3/A wrote source MP4s at the dataset-only
+    // path. Accepting that here would let isVideoSourceKey()
+    // route a malformed asset_uploads row down the video-source
+    // dispatch branch even though no /asset handler ever produces
+    // such a key. PR #112 Copilot 3pd-followup.
+    expect(isVideoSourceKey(`uploads/${DS}/source.mp4`)).toBe(false)
+  })
+
+  it('rejects shapes whose path segments aren’t ULIDs', () => {
+    expect(isVideoSourceKey('uploads/not-a-ulid/01HYAAAAAAAAAAAAAAAAAAAAAA/source.mp4')).toBe(false)
+    expect(isVideoSourceKey(`uploads/${DS}/not-a-ulid/source.mp4`)).toBe(false)
+  })
+
+  it('rejects deeper paths and adjacent filenames', () => {
+    expect(isVideoSourceKey(`uploads/${DS}/${UP}/sub/source.mp4`)).toBe(false)
+    expect(isVideoSourceKey(`uploads/${DS}/${UP}/source.mov`)).toBe(false)
+  })
+
+  it('rejects keys outside the uploads/ namespace', () => {
+    expect(isVideoSourceKey(`datasets/${DS}/by-digest/sha256/abc/asset.mp4`)).toBe(false)
+    expect(isVideoSourceKey(`videos/${DS}/${UP}/master.m3u8`)).toBe(false)
   })
 })
 

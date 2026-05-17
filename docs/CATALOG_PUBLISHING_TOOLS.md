@@ -273,17 +273,77 @@ can refuse a tour newer than it understands.
 
 ## Asset uploader
 
-A reusable component used by both the dataset and tour forms:
+A reusable component used by both the dataset and tour forms.
+**Cloudflare Stream is no longer in the picture** — Phase 3 cut over
+to a pure R2 + GitHub Actions pipeline; the full design lives in
+[`CATALOG_ASSETS_PIPELINE.md`](CATALOG_ASSETS_PIPELINE.md) §"Video
+pipeline (R2 + GitHub Actions — current)".
 
-- Drag-drop or click-to-browse.
-- Detects MIME type, picks the right upload target (Stream vs. R2).
-- Shows progress, retries on transient failure, emits a
-  completion event with the final `data_ref`.
-- For video: polls Stream's transcode-status endpoint; only flips
-  to "ready" when HLS is playable.
-- For image: optional client-side downsample preview before upload
-  so a publisher knows roughly what the 2048-wide variant will
-  look like.
+> **Future work — image-sequence input.** A planned sub-phase
+> (3pe) extends this uploader to accept a stack of individual
+> frames (PNG / JPEG / WebP) as the source for a video dataset,
+> for the many cases where publishers have numbered frames on
+> disk but no MP4. Design in
+> [`CATALOG_IMAGE_SEQUENCE_PLAN.md`](CATALOG_IMAGE_SEQUENCE_PLAN.md);
+> tracking issue
+> [zyra-project/terraviz#114](https://github.com/zyra-project/terraviz/issues/114).
+
+Behavior:
+
+- Click-to-browse file input (no drag-drop wire-up shipped —
+  the input is a standard `<input type="file">`; adding HTML5
+  drag-drop listeners is a small follow-up tracked separately).
+- Detects MIME type and picks the right target — **everything goes
+  to R2**; the only thing the kind decides is what happens *after*
+  the PUT.
+- Shows progress (XHR upload events feed a `<progress>`) and emits
+  a completion event with the final `data_ref`. Surfaces stage-
+  specific errors (mint / upload / finalize) through an inline
+  status line + a `<details>` disclosure for the raw API code;
+  the publisher can retry by re-picking the file (no automatic
+  retry loop today — that's a follow-up).
+- **Image** (`image/png` / `image/jpeg` / `image/webp`): the
+  presigned PUT lands the image at
+  `r2:datasets/{id}/by-digest/sha256/{hex}/asset.{ext}`
+  (content-addressed within the dataset's prefix — the digest
+  in the path is the same value `content_digest` carries on
+  the dataset row, so re-uploading byte-identical bytes to
+  the same dataset lands the same R2 object instead of a
+  duplicate. Cross-dataset dedup is NOT what this layout
+  does — the dataset id is part of the key, so different
+  datasets carry independent copies of identical bytes).
+  The finalize step writes `data_ref` directly — no transcode.
+  (A client-side downsample preview before upload — so the
+  publisher sees roughly what the 2048-wide variant will look
+  like — was an early sketch but isn't in the shipped uploader;
+  candidate follow-up if publishers ask for it.)
+- **Video** (`video/mp4`): the presigned PUT lands the MP4 at
+  `r2:uploads/{id}/{upload_id}/source.mp4` (per-upload prefix
+  so a re-upload to a still-transcoding row doesn't overwrite
+  the source bytes the prior workflow may still be reading).
+  The finalize step fires a
+  GitHub `repository_dispatch` and stamps the row
+  `transcoding=true`. The form returns control to the publisher
+  immediately; the detail page polls every 5 s until `transcoding`
+  flips back to false and `data_ref` resolves to
+  `r2:videos/{id}/{upload_id}/master.m3u8` (versioned per upload
+  so a re-upload to a published row doesn't overwrite the
+  bundle the public manifest is still serving). Whole loop is
+  1–10 minutes depending on source length.
+
+### Sub-phase 3pd breakdown
+
+Same `3p<letter>` convention 3pa–3pc used. Each sub-commit ships
+something demoable on its own.
+
+| Sub-phase | Demoable result | Notes |
+|---|---|---|
+| **3pd/A** — Presigned PUT + finalize endpoints | `POST /api/v1/publish/datasets/{id}/asset` (mint presigned URL) and `POST /api/v1/publish/datasets/{id}/asset/{upload_id}/complete` (verify + dispatch). The complete handler also stamps `transcoding=1` on the row and fires the GitHub `repository_dispatch`. A separate `POST /api/v1/publish/datasets/{id}/transcode-complete` route is what the GHA workflow calls back to clear `transcoding` and set `data_ref` to the new HLS bundle. Migration 0011 adds the `transcoding` boolean; migration 0012 adds `active_transcode_upload_id` to bind a transcoding row to the specific upload that started it (the overlap-rejection guard and the stale-callback guard both key off this column). No portal UI yet. | Worker side complete; tested via `curl` + a manual repository_dispatch. |
+| **3pd/B** — GHA workflow | `.github/workflows/transcode-hls.yml` listens on `repository_dispatch: types: [transcode-hls]`, runs the existing `cli/lib/ffmpeg-hls.ts` + `cli/lib/r2-upload.ts` via `cli/transcode-from-dispatch.ts`, then POSTs `/transcode-complete` on the publisher API with the workflow's Access service-token headers. | Reuses the proven Phase 3 transcoder code path. New GHA repo secrets: `R2_S3_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `TERRAVIZ_SERVER`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET`. New Pages bindings: `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_DISPATCH_TOKEN`. |
+| **3pd/C** — Portal uploader | Click-to-browse file picker in the dataset form, mounted alongside the 3pc/F-fix2 manual `data_ref` input. XHR upload-progress events drive an inline `<progress>` bar; stage-specific errors (mint / upload / finalize) surface in a status line + a `<details>` disclosure. Failed uploads keep the file picker enabled so the publisher can retry by re-picking the file. No transparent retry — every failure surfaces in the status line and the publisher has to re-pick the file to retry. | The manual ref input stays so legacy `vimeo:` / `url:` references can still be set without re-uploading bytes. Same FormState slot, two parallel input surfaces. |
+| **3pd/D** — Transcoding status | Static "Transcoding…" badge on the detail page when `transcoding=true`. Detail-page polling every 5 s, stops when `transcoding=false`. (Elapsed-time display is a candidate follow-up, not currently shipped.) | Stops automatically when the row reaches a terminal state. Reuses the existing detail-page render loop. |
+| **3pd/E** — Preview button | "Preview" button on the detail page mints a token via `POST .../preview`. The modal surfaces the backend's anonymous-read URL (`/api/v1/datasets/{id}/preview/{token}`), which returns the dataset's metadata as JSON (`{ dataset: row }`). Useful as a primitive for a reviewer who can fetch metadata directly; the SPA-side `/?preview=...` consumer that renders the globe with full playback context is a Phase 3pe deliverable. | Closes the read → upload → preview → publish loop for the publisher portal. |
+| **3pd/F** — CHANGELOG + SELF_HOSTING walkthrough | Operator-facing summary of the new bindings, the GHA secrets, and the migration order. | Same pattern 3pc/G followed. |
 
 ## Preview pipeline
 
@@ -350,10 +410,11 @@ format:      video/mp4
 visibility:  public
 
 asset:
-  # Local file (Phase 1b uploads to Stream / R2 automatically)…
+  # Local file (uploads to R2 + triggers the HLS transcode)…
   file:       ./renders/sst-anomaly-2026-04.mp4
-  # …or an existing data_ref the catalog should point at:
-  # ref:      stream:abc123def456
+  # …or an existing data_ref the catalog should point at
+  # (per-upload path: r2:videos/{dataset_id}/{upload_id}/master.m3u8):
+  # ref:      r2:videos/01HX.../01YH.../master.m3u8
 
 categories:  [Ocean, Climate]
 keywords:    [sst, anomaly, monthly]

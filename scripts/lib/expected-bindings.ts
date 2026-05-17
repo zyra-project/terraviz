@@ -215,4 +215,38 @@ export const EXPECTED_BINDINGS: ExpectedBinding[] = [
       'R2 S3-API secret access key. Paired with R2_ACCESS_KEY_ID; shown once ' +
       'at token mint time.',
   },
+
+  // ── GitHub Actions transcode dispatch (Phase 3pd) ─────────────
+  // Wired into asset/{upload_id}/complete via
+  // functions/api/v1/_lib/github-dispatch.ts. Without these, the
+  // publisher API's video-upload finalisation 503s with
+  // `github_dispatch_unconfigured`. The matching GHA repo secrets
+  // (R2 + Access creds for the workflow runner) live on the
+  // GitHub side; see SELF_HOSTING.md §8e.
+  {
+    name: 'GITHUB_OWNER',
+    type: 'plaintext',
+    environments: BOTH,
+    hint:
+      'Repo owner that hosts the transcode-hls workflow (e.g. zyra-project). ' +
+      'Paired with GITHUB_REPO + GITHUB_DISPATCH_TOKEN to build the ' +
+      'repository_dispatch URL.',
+  },
+  {
+    name: 'GITHUB_REPO',
+    type: 'plaintext',
+    environments: BOTH,
+    hint:
+      'Repo name that hosts the transcode-hls workflow (e.g. terraviz). ' +
+      'See GITHUB_OWNER.',
+  },
+  {
+    name: 'GITHUB_DISPATCH_TOKEN',
+    type: 'secret',
+    environments: BOTH,
+    hint:
+      'GitHub fine-grained PAT (Contents: write on the workflow repo) or ' +
+      'classic PAT with `repo` scope. Used by /asset/.../complete to fire ' +
+      'the transcode-hls repository_dispatch on a video upload.',
+  },
 ]

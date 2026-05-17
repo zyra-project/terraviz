@@ -395,6 +395,419 @@ describe('renderDatasetDetailPage', () => {
     )
   })
 
+  it('renders a Preview button on a non-transcoding row', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(detailResponse(dataset()))
+    await renderDatasetDetailPage(mount, '01ABC', {
+      fetchFn: fetchFn as unknown as typeof fetch,
+    })
+    expect(mount.querySelector('.publisher-detail-preview')?.textContent).toBe('Preview')
+  })
+
+  it('hides the Preview button while transcoding', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(detailResponse(dataset({ transcoding: 1, published_at: null })))
+    await renderDatasetDetailPage(mount, '01ABC', {
+      fetchFn: fetchFn as unknown as typeof fetch,
+      sleep: () => new Promise(() => {}),
+    })
+    expect(mount.querySelector('.publisher-detail-preview')).toBeNull()
+  })
+
+  it('restores focus to the Preview button on close (fix #1)', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(detailResponse(dataset()))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ token: 'T', url: '/x', expires_in: 60 }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+    await renderDatasetDetailPage(mount, '01ABC', {
+      fetchFn: fetchFn as unknown as typeof fetch,
+    })
+    const previewBtn = mount.querySelector<HTMLButtonElement>('.publisher-detail-preview')!
+    previewBtn.focus()
+    expect(document.activeElement).toBe(previewBtn)
+    previewBtn.click()
+    for (let i = 0; i < 8; i++) await Promise.resolve()
+    // Modal opened, focus moved into the URL input.
+    const urlField = mount.querySelector<HTMLInputElement>('.publisher-modal-url')
+    expect(document.activeElement).toBe(urlField)
+    // Close → focus returns to the Preview button (not the
+    // now-detached URL input). Without the fix the
+    // `previouslyFocused` capture would have happened AFTER
+    // `urlInput.focus()` and pointed at the URL field, so
+    // the restore would attempt to focus an element that
+    // had already been removed.
+    const closeBtn = Array.from(
+      mount.querySelectorAll<HTMLButtonElement>('.publisher-modal .publisher-button'),
+    ).find(b => b.textContent === 'Close')!
+    closeBtn.click()
+    // MutationObserver runs in microtask queue; tick a few
+    // times to let it fire.
+    for (let i = 0; i < 8; i++) await Promise.resolve()
+    expect(document.activeElement).toBe(previewBtn)
+  })
+
+  it('preview modal carries dialog ARIA semantics', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(detailResponse(dataset()))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ token: 'T', url: '/x', expires_in: 60 }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+    await renderDatasetDetailPage(mount, '01ABC', {
+      fetchFn: fetchFn as unknown as typeof fetch,
+    })
+    mount.querySelector<HTMLButtonElement>('.publisher-detail-preview')!.click()
+    for (let i = 0; i < 8; i++) await Promise.resolve()
+    const modal = mount.querySelector<HTMLElement>('.publisher-modal')!
+    expect(modal.getAttribute('role')).toBe('dialog')
+    expect(modal.getAttribute('aria-modal')).toBe('true')
+    const labelledBy = modal.getAttribute('aria-labelledby')
+    expect(labelledBy).toBeTruthy()
+    const heading = modal.querySelector(`#${labelledBy}`)
+    expect(heading?.textContent).toBe('Preview link ready')
+  })
+
+  it('opens a modal with the preview URL when Preview is clicked', async () => {
+    const fetchFn = vi
+      .fn()
+      // initial GET
+      .mockResolvedValueOnce(detailResponse(dataset()))
+      // POST preview → token
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            token: 'PREVIEW-TOKEN-ABC',
+            url: '/api/v1/datasets/01ABC/preview/PREVIEW-TOKEN-ABC',
+            expires_in: 900,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+    await renderDatasetDetailPage(mount, '01AAAAAAAAAAAAAAAAAAAAAAAA', {
+      fetchFn: fetchFn as unknown as typeof fetch,
+    })
+    mount.querySelector<HTMLButtonElement>('.publisher-detail-preview')!.click()
+    // microtask + a tick for the publisherSend promise + a tick for paint
+    for (let i = 0; i < 8; i++) await Promise.resolve()
+    expect(mount.querySelector('.publisher-modal')).not.toBeNull()
+    const urlField = mount.querySelector<HTMLInputElement>('.publisher-modal-url')
+    // Modal renders the API URL the backend returns (the
+    // SPA-side `/?preview=<token>&dataset=<id>` consumer is a
+    // Phase 3pe deliverable; until then the link points
+    // directly at the signed-asset endpoint so it actually
+    // works when copied). PR #112 followup —
+    // dataset-detail.ts:807.
+    expect(urlField?.value).toContain('/api/v1/datasets/01ABC/preview/PREVIEW-TOKEN-ABC')
+    expect(urlField?.value).not.toContain('?preview=')
+  })
+
+  it('does NOT open the preview modal if the user navigates away while the token POST is in flight', async () => {
+    // PR #112 followup — dispatchPreview's async POST can
+    // resolve after the user has navigated to a different
+    // page. Without the ROUTE_CHANGE_START_EVENT guard, the
+    // modal would mount on top of the next page's DOM (same
+    // shape as the transcode poll-loop race /T fixed).
+    let resolvePreview: (r: Response) => void = () => {}
+    const previewPromise = new Promise<Response>(resolve => {
+      resolvePreview = resolve
+    })
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(detailResponse(dataset()))
+      .mockReturnValueOnce(previewPromise)
+    await renderDatasetDetailPage(mount, '01AAAAAAAAAAAAAAAAAAAAAAAA', {
+      fetchFn: fetchFn as unknown as typeof fetch,
+    })
+    mount.querySelector<HTMLButtonElement>('.publisher-detail-preview')!.click()
+    // Promise dispatched, awaiting the preview response. User
+    // navigates away — the router fires the start event before
+    // the destination handler renders into `content`.
+    window.dispatchEvent(
+      new CustomEvent('publisher:routechange:start', {
+        detail: { path: '/publish/datasets' },
+      }),
+    )
+    // Plant a sentinel marker simulating the next page rendering
+    // into the same mount, then resolve the in-flight preview
+    // POST. The deferred dispatchPreview should bail without
+    // clobbering the sentinel.
+    mount.replaceChildren(
+      Object.assign(document.createElement('div'), {
+        className: 'sentinel-next-page',
+        textContent: 'next page content',
+      }),
+    )
+    resolvePreview(
+      new Response(
+        JSON.stringify({
+          token: 'PREVIEW-TOKEN-LATE',
+          url: '/api/v1/datasets/01ABC/preview/PREVIEW-TOKEN-LATE',
+          expires_in: 900,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+    for (let i = 0; i < 8; i++) await Promise.resolve()
+    // Sentinel survives — the late preview response didn't
+    // open a modal over it.
+    expect(mount.querySelector('.sentinel-next-page')).not.toBeNull()
+    expect(mount.querySelector('.publisher-modal')).toBeNull()
+  })
+
+  it('closes the preview modal on Close click', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(detailResponse(dataset()))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ token: 'T', url: '/x', expires_in: 60 }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+    await renderDatasetDetailPage(mount, '01ABC', {
+      fetchFn: fetchFn as unknown as typeof fetch,
+    })
+    mount.querySelector<HTMLButtonElement>('.publisher-detail-preview')!.click()
+    for (let i = 0; i < 8; i++) await Promise.resolve()
+    expect(mount.querySelector('.publisher-modal')).not.toBeNull()
+    const closeBtn = Array.from(
+      mount.querySelectorAll<HTMLButtonElement>('.publisher-modal .publisher-button'),
+    ).find(b => b.textContent === 'Close')!
+    closeBtn.click()
+    expect(mount.querySelector('.publisher-modal')).toBeNull()
+  })
+
+  it('renders a Transcoding badge when transcoding=1', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(detailResponse(dataset({ published_at: null, transcoding: 1 })))
+    await renderDatasetDetailPage(mount, '01ABC', {
+      fetchFn: fetchFn as unknown as typeof fetch,
+      // Disable polling so the test doesn't hang on the loop.
+      sleep: () => new Promise(() => {}),
+    })
+    expect(mount.querySelector('.publisher-badge-transcoding')?.textContent).toBe(
+      'Transcoding…',
+    )
+  })
+
+  it('disables Publish while transcoding', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(detailResponse(dataset({ published_at: null, transcoding: 1 })))
+    await renderDatasetDetailPage(mount, '01ABC', {
+      fetchFn: fetchFn as unknown as typeof fetch,
+      sleep: () => new Promise(() => {}),
+    })
+    const publish = mount.querySelector<HTMLButtonElement>('.publisher-detail-publish')
+    expect(publish?.disabled).toBe(true)
+  })
+
+  it('polls the detail endpoint while transcoding and stops when it clears', async () => {
+    const transcodingRow = dataset({ published_at: null, transcoding: 1 })
+    const finishedRow = dataset({ published_at: null, transcoding: null })
+    const fetchFn = vi
+      .fn()
+      // initial GET → transcoding
+      .mockResolvedValueOnce(detailResponse(transcodingRow))
+      // first poll → still transcoding
+      .mockResolvedValueOnce(detailResponse(transcodingRow))
+      // second poll → done
+      .mockResolvedValueOnce(detailResponse(finishedRow))
+    await renderDatasetDetailPage(mount, '01ABC', {
+      fetchFn: fetchFn as unknown as typeof fetch,
+      // Resolve immediately so the loop ticks without real timers.
+      sleep: () => Promise.resolve(),
+      transcodePollIntervalMs: 0,
+    })
+    // Let the loop run a few microtask ticks.
+    for (let i = 0; i < 20; i++) await Promise.resolve()
+    // Three GETs total: initial + 2 polls. The badge should be gone
+    // and the Publish button enabled after the second poll lands.
+    expect(fetchFn).toHaveBeenCalledTimes(3)
+    expect(mount.querySelector('.publisher-badge-transcoding')).toBeNull()
+    const publish = mount.querySelector<HTMLButtonElement>('.publisher-detail-publish')
+    expect(publish?.disabled).toBe(false)
+  })
+
+  it('tears down the poll loop and renders not-found when the dataset is deleted mid-transcode', async () => {
+    // PR #112 followup — the earlier shape treated every
+    // non-session error from a poll tick as transient. A
+    // dataset deleted mid-transcode would leave the UI
+    // showing the stale "Transcoding…" badge forever, with
+    // the poll loop hammering the 404'd endpoint every 5 s.
+    const transcodingRow = dataset({ published_at: null, transcoding: 1 })
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(detailResponse(transcodingRow))
+      // Second tick: row deleted out from under the page.
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: 'not_found' }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+    await renderDatasetDetailPage(mount, '01ABC', {
+      fetchFn: fetchFn as unknown as typeof fetch,
+      sleep: () => Promise.resolve(),
+      transcodePollIntervalMs: 0,
+    })
+    // The second fetch landed: the poll tick hit 404, the
+    // loop tore down, and the page renders the not-found
+    // error card. The transcoding badge is gone.
+    for (let i = 0; i < 20; i++) await Promise.resolve()
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+    expect(mount.querySelector('.publisher-badge-transcoding')).toBeNull()
+    expect(mount.textContent).toContain('Dataset not found')
+  })
+
+  it('tears down the poll loop on a session error before rendering the session card', async () => {
+    // PR #112 followup — the session-error branch used to
+    // return without calling stopTranscodePolling, leaving
+    // the AbortController + routechange listener registered
+    // for this mount until some later navigation cleaned up.
+    // The fix is symmetric with the not_found case.
+    const transcodingRow = dataset({ published_at: null, transcoding: 1 })
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(detailResponse(transcodingRow))
+      // Second tick: session expired.
+      .mockResolvedValueOnce(
+        new Response('', { status: 401 }),
+      )
+    await renderDatasetDetailPage(mount, '01ABC', {
+      fetchFn: fetchFn as unknown as typeof fetch,
+      sleep: () => Promise.resolve(),
+      transcodePollIntervalMs: 0,
+    })
+    // Let the poll tick land + the session-error path run.
+    for (let i = 0; i < 20; i++) await Promise.resolve()
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+    // No more fetches even if the loop's sleep promise
+    // resolves later — the loop was aborted.
+    for (let i = 0; i < 20; i++) await Promise.resolve()
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+  })
+
+  it('aborts the transcode poller when the router fires a routechange away from this page', async () => {
+    // The router replaces the children of `content` rather than
+    // swapping the element itself, so without a routechange
+    // listener the poll loop would keep ticking after the user
+    // navigated away and stomp on whatever page replaced it.
+    // Migration 0012 / PR #112 Copilot.
+    const transcodingRow = dataset({ published_at: null, transcoding: 1 })
+    const fetchFn = vi.fn().mockResolvedValue(detailResponse(transcodingRow))
+    const sleepResolvers: Array<() => void> = []
+    const sleep = (): Promise<void> =>
+      new Promise<void>(resolve => {
+        sleepResolvers.push(resolve)
+      })
+    await renderDatasetDetailPage(mount, '01ABC', {
+      fetchFn: fetchFn as unknown as typeof fetch,
+      sleep,
+      transcodePollIntervalMs: 1,
+    })
+    // Initial GET ran; the loop is now sleeping inside our
+    // controllable promise. Fire a routechange to a different
+    // path — the listener should abort the controller.
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    window.dispatchEvent(
+      new CustomEvent('publisher:routechange:start', { detail: { path: '/publish/datasets' } }),
+    )
+    // Resolve the in-flight sleep so the loop wakes up. After
+    // resuming it should observe the aborted signal and exit
+    // without firing the poll fetch.
+    sleepResolvers[0]?.()
+    for (let i = 0; i < 20; i++) await Promise.resolve()
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+
+  it('aborts the transcode poller on routechange:start (before the destination handler renders)', async () => {
+    // Regression test for the race the previous test couldn't
+    // catch: the router fires `publisher:routechange:start`
+    // *before* the destination route handler runs, so the loop
+    // tears down before the new page can mount into `content`.
+    // Without this, a poll tick scheduled between the new page
+    // rendering and the (post-handler) `routechange` end event
+    // would `paint(content, ...)` over the freshly-mounted DOM.
+    // PR #112 followup — dataset-detail.ts:682.
+    //
+    // The check: dispatch routechange:start, paint() a sentinel
+    // marker into content (simulating the destination page
+    // rendering into the same mount), resolve the in-flight
+    // sleep so the loop wakes up — it must NOT replace our
+    // sentinel.
+    const transcodingRow = dataset({ published_at: null, transcoding: 1 })
+    const fetchFn = vi.fn().mockResolvedValue(detailResponse(transcodingRow))
+    const sleepResolvers: Array<() => void> = []
+    const sleep = (): Promise<void> =>
+      new Promise<void>(resolve => {
+        sleepResolvers.push(resolve)
+      })
+    await renderDatasetDetailPage(mount, '01ABC', {
+      fetchFn: fetchFn as unknown as typeof fetch,
+      sleep,
+      transcodePollIntervalMs: 1,
+    })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    // Step 1: fire routechange:start as the router would.
+    window.dispatchEvent(
+      new CustomEvent('publisher:routechange:start', {
+        detail: { path: '/publish/datasets' },
+      }),
+    )
+    // Step 2: the new page renders into the same content mount.
+    mount.replaceChildren(Object.assign(document.createElement('div'), {
+      className: 'sentinel-new-page',
+      textContent: 'new page content',
+    }))
+    // Step 3: resolve the in-flight sleep so the loop wakes up.
+    // The aborted controller should make it exit without
+    // refetching or repainting.
+    sleepResolvers[0]?.()
+    for (let i = 0; i < 20; i++) await Promise.resolve()
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    // The sentinel is still there — the loop did NOT paint over it.
+    expect(mount.querySelector('.sentinel-new-page')).not.toBeNull()
+  })
+
+  it('keeps the transcode poller running across a routechange that lands on the same path', async () => {
+    // The listener should only abort on a path mismatch — a
+    // popstate that re-fires the same path (e.g. user clicks
+    // a same-page anchor) shouldn't kill the poll loop.
+    const transcodingRow = dataset({ published_at: null, transcoding: 1 })
+    const finishedRow = dataset({ published_at: null, transcoding: null })
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(detailResponse(transcodingRow))
+      .mockResolvedValueOnce(detailResponse(finishedRow))
+    await renderDatasetDetailPage(mount, '01ABC', {
+      fetchFn: fetchFn as unknown as typeof fetch,
+      sleep: () => Promise.resolve(),
+      transcodePollIntervalMs: 0,
+    })
+    // Routechange that says "we're still here" — listener should
+    // be a no-op.
+    window.dispatchEvent(
+      new CustomEvent('publisher:routechange:start', {
+        detail: { path: '/publish/datasets/01ABC' },
+      }),
+    )
+    for (let i = 0; i < 20; i++) await Promise.resolve()
+    // Initial GET + at least one poll — the poller continued past
+    // the same-path routechange and hit the finishedRow on the
+    // next tick.
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+  })
+
   it('renders the retracted-state badge for a retracted row', async () => {
     const fetchFn = vi
       .fn()

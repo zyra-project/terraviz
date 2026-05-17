@@ -302,39 +302,56 @@ export async function publisherSend<T>(
   if (res.status === 401) return { ok: false, kind: 'session' }
   if (res.status === 404) return { ok: false, kind: 'not_found' }
 
-  if (res.status === 400) {
-    // The publisher API envelope is `{ errors: [...] }` for 400.
-    // Fall back to a single synthetic error if the body is
-    // unparseable so the caller still has *something* to render.
+  if (res.status === 400 || res.status === 409) {
+    // The publisher API uses `{ errors: [{ field, code, message }] }`
+    // for both 400 (validation) and a subset of 409 conflicts that
+    // are still field-shaped (e.g., publish-while-transcoding —
+    // dataset-mutations.ts returns a `transcoding` field error
+    // because the publish blocker IS the row's transcoding state).
+    // Falling through to the generic `kind: 'server'` branch for
+    // 409 would lose the per-field message and surface a generic
+    // toast — PR #112 followup (dataset-mutations.ts:632).
+    //
+    // A 409 without an `errors: [...]` envelope (the simple
+    // `{ error, message }` shape used by transcode_upload_mismatch
+    // and friends) falls through to the generic server-error path
+    // so the caller still sees the status and body.
+    let body: { errors?: PublisherValidationError[] } | null = null
     try {
-      const body = (await res.json()) as { errors?: PublisherValidationError[] }
-      const errors = Array.isArray(body.errors) ? body.errors : []
-      return {
-        ok: false,
-        kind: 'validation',
-        errors:
-          errors.length > 0
-            ? errors
-            : [
-                {
-                  field: '_root',
-                  code: 'invalid',
-                  message: t('publisher.api.fallbackError.validationFailed'),
-                },
-              ],
-      }
+      body = (await res.json()) as { errors?: PublisherValidationError[] }
     } catch {
+      body = null
+    }
+    const errors = body && Array.isArray(body.errors) ? body.errors : []
+    if (errors.length > 0) {
+      return { ok: false, kind: 'validation', errors }
+    }
+    if (res.status === 409) {
+      // 409 with no field-level envelope — generic conflict.
+      // Re-serialize the parsed body so the caller can read
+      // `{ error, message }` from it.
       return {
         ok: false,
-        kind: 'validation',
-        errors: [
-          {
-            field: '_root',
-            code: 'invalid',
-            message: t('publisher.api.fallbackError.invalidJson'),
-          },
-        ],
+        kind: 'server',
+        status: 409,
+        body: body ? JSON.stringify(body) : '',
       }
+    }
+    // 400 fallback — synthesize a validation error so the form
+    // still has something to render even when the response body
+    // is missing or malformed.
+    return {
+      ok: false,
+      kind: 'validation',
+      errors: [
+        {
+          field: '_root',
+          code: 'invalid',
+          message: body
+            ? t('publisher.api.fallbackError.validationFailed')
+            : t('publisher.api.fallbackError.invalidJson'),
+        },
+      ],
     }
   }
 

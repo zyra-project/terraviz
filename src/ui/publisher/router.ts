@@ -23,6 +23,16 @@
 import { logger } from '../../utils/logger'
 
 export const ROUTE_CHANGE_EVENT = 'publisher:routechange'
+/** Dispatched at the *start* of a route transition, before the
+ *  destination handler runs. Subscribers (e.g. the dataset-
+ *  detail polling loop) use this to tear down side effects on
+ *  the outgoing page before the incoming page renders into the
+ *  same mount element. Compare with `ROUTE_CHANGE_EVENT` which
+ *  fires *after* the handler resolves — too late to cancel
+ *  in-flight work that could clobber the new page's DOM.
+ *  PR #112 followup — route-change race on
+ *  dataset-detail.ts:682. */
+export const ROUTE_CHANGE_START_EVENT = 'publisher:routechange:start'
 
 export interface RouteChangeDetail {
   path: string
@@ -116,6 +126,18 @@ export class PublisherRouter {
   /** Dispatch the current `location.pathname` to its route handler. */
   async dispatch(): Promise<void> {
     const path = window.location.pathname
+    // Fire the *start* event before the handler runs so listeners
+    // can tear down in-flight side effects (e.g. the dataset-
+    // detail polling loop) before the destination page mounts
+    // into the same content element. The `end` event below fires
+    // after the handler resolves — that's the topbar's cue to
+    // refresh active-tab state, but it's too late to cancel
+    // racing paint() calls from the outgoing page.
+    window.dispatchEvent(
+      new CustomEvent<RouteChangeDetail>(ROUTE_CHANGE_START_EVENT, {
+        detail: { path },
+      }),
+    )
     let handled = false
     for (const route of this.routes) {
       const params = matchRoute(route.pattern, path)

@@ -1,0 +1,52 @@
+-- 0012_active_transcode_upload_id.sql — Phase 3pd-followup —
+-- bind the active transcode to a specific asset_uploads row.
+--
+-- Migration 0011 added `transcoding INTEGER` so the portal could
+-- render a "Transcoding…" badge while a video upload's GHA
+-- workflow ran. Live PR #112 review surfaced two concurrency
+-- holes that `transcoding` alone can't close:
+--
+--   1. /asset/{upload_id}/complete on a row that's ALREADY
+--      `transcoding=1` for a different upload silently re-stamps
+--      and dispatches a second workflow. Two ffmpeg runs race
+--      to land bundles at different per-upload R2 prefixes;
+--      whichever workflow's /transcode-complete callback wins
+--      flips `data_ref`, with the loser left orphaned (or worse,
+--      flipping the ref out from under the winner if the order
+--      reverses on retry).
+--
+--   2. /transcode-complete uses `source_digest` as the only
+--      "is this callback for the currently-in-flight upload?"
+--      gate. Two uploads of the same MP4 produce identical
+--      digests, so the older workflow's callback can pass the
+--      check and clear `transcoding` against the newer upload's
+--      bundle.
+--
+-- Adding `active_transcode_upload_id TEXT` lets both endpoints
+-- bind their decisions to a specific asset_uploads row:
+--
+--   - /asset/{upload_id}/complete refuses to re-stamp the row
+--     if `active_transcode_upload_id` is already set to a
+--     DIFFERENT upload (idempotent retries on the same upload
+--     pass through to the existing dispatch path).
+--   - /transcode-complete verifies the callback's `upload_id`
+--     matches `active_transcode_upload_id` before clearing the
+--     row — the old "by source_digest" check stays as
+--     defense-in-depth.
+--
+-- Lifecycle parallels `transcoding`: starts NULL, set by the
+-- /complete handler when the dispatch fires, cleared back to
+-- NULL by /transcode-complete (or by the dispatch-failure
+-- compensating revert) at the same moment `transcoding` is
+-- cleared. Indices are unnecessary — the column is read with
+-- the row, never queried independently.
+--
+-- The column has no foreign-key constraint to `asset_uploads`.
+-- Adding one would force ON DELETE behaviour to be specified,
+-- and the asset_uploads row's lifecycle (it stays around for
+-- audit purposes after the dataset row's transcode finishes)
+-- doesn't naturally cascade-or-restrict either way. Treating
+-- this column as a documented soft reference matches the
+-- pattern `audit_events.subject_id` already uses.
+
+ALTER TABLE datasets ADD COLUMN active_transcode_upload_id TEXT;

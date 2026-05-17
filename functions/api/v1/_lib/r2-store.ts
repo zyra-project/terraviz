@@ -69,11 +69,136 @@ export type AssetKind =
   | 'caption'
   | 'sphere_thumbnail'
 
-/** Default presigned-PUT TTL — matches the publisher portal upload window. */
+/** Default presigned-PUT TTL — matches the publisher portal
+ *  upload window for image / aux uploads (≤ ~256 MB, finish in
+ *  seconds to a few minutes on a typical residential uplink). */
 export const R2_PUT_TTL_SECONDS = 15 * 60
+
+/** Extended presigned-PUT TTL for video sources. Source MP4s
+ *  can be up to `MAX_BYTES_DATA` (10 GB); on a typical
+ *  residential uplink (~25 Mbps) a 10 GB upload takes ~55
+ *  minutes, plus headroom for slower links + retries. Two hours
+ *  matches R2's maximum presigned-URL TTL (S3 v4 signatures cap
+ *  at one week, but R2's binding wraps a shorter ceiling) and
+ *  is what the asset-uploader budgets for. PR #112 followup —
+ *  asset.ts:presigned-TTL (the prior 15-min default expired
+ *  multi-GB uploads mid-transfer on slower links). */
+export const R2_PUT_TTL_VIDEO_SECONDS = 2 * 60 * 60
 
 /** Mock-mode host. Tests assert URLs against this constant. */
 export const MOCK_R2_HOST = 'https://mock-r2.localhost'
+
+/**
+ * R2 key prefix the GHA transcode workflow watches for source
+ * MP4 uploads (Phase 3pd). Lives outside the content-addressed
+ * `datasets/{id}/by-digest/...` scheme because the workflow
+ * doesn't know the digest in advance — only the dataset id and
+ * upload id, both of which travel through the
+ * `repository_dispatch` payload (see
+ * `TranscodeDispatchPayload` in `github-dispatch.ts`). Scoping
+ * by upload_id (not just dataset_id) means a re-upload to a
+ * row that's already published lands at a fresh prefix instead
+ * of overwriting the source bytes the prior workflow may still
+ * be reading. See `buildVideoSourceKey` below for the full
+ * `uploads/{dataset_id}/{upload_id}/source.mp4` shape.
+ */
+export const VIDEO_SOURCE_KEY_PREFIX = 'uploads'
+
+/**
+ * Build the R2 key for a video source upload that's destined for
+ * transcoding. `r2:uploads/{dataset_id}/{upload_id}/source.mp4`.
+ * Used only for `kind='data'` + `mime='video/mp4'` uploads in
+ * Phase 3pd; every other asset kind uses the content-addressed
+ * `buildAssetKey` helper above.
+ *
+ * Scoping by upload_id (not just dataset_id) avoids the race
+ * Copilot #9 flagged: a publisher re-uploading the same dataset
+ * before the first transcode completes would otherwise overwrite
+ * the source MP4 the workflow is about to download, leaving the
+ * first upload stuck with a digest mismatch. The asset_uploads
+ * row's ULID is the natural version slot — each mint gets a
+ * fresh upload_id and a fresh source key.
+ */
+export function buildVideoSourceKey(datasetId: string, uploadId: string): string {
+  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(datasetId)) {
+    throw new Error(
+      `buildVideoSourceKey: datasetId must be a ULID (26 base32 chars), got "${datasetId}"`,
+    )
+  }
+  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(uploadId)) {
+    throw new Error(
+      `buildVideoSourceKey: uploadId must be a ULID (26 base32 chars), got "${uploadId}"`,
+    )
+  }
+  return `${VIDEO_SOURCE_KEY_PREFIX}/${datasetId}/${uploadId}/source.mp4`
+}
+
+/**
+ * Does an R2 key look like a video-source upload destined for the
+ * transcode workflow? The /complete handler uses this to branch
+ * between "write data_ref and finish" and "fire dispatch + stamp
+ * transcoding=1". Matches the
+ * `uploads/{dataset_id}/{upload_id}/source.mp4` shape exactly —
+ * both ids must be ULIDs, the filename must be source.mp4, and
+ * there must be nothing else between. PR #112 Copilot
+ * 3pd-followup — the prior prefix-and-suffix-only check would
+ * accept any `uploads/<anything>/source.mp4`, including the
+ * obsolete one-level layout (`uploads/{dataset_id}/source.mp4`)
+ * that pre-3pd-review3/A wrote, plus arbitrary deeper paths a
+ * malformed asset_uploads row could surface.
+ */
+const VIDEO_SOURCE_KEY_PATTERN = new RegExp(
+  `^${VIDEO_SOURCE_KEY_PREFIX}/[0-9A-HJKMNP-TV-Z]{26}/[0-9A-HJKMNP-TV-Z]{26}/source\\.mp4$`,
+)
+
+export function isVideoSourceKey(key: string): boolean {
+  return VIDEO_SOURCE_KEY_PATTERN.test(key)
+}
+
+/**
+ * R2 key prefix for transcoded HLS bundles, scoped per
+ * dataset + upload (Phase 3pd review fix #2 / #15). The
+ * upload-scoping is what lets a re-upload to an already-
+ * published row land its new bundle at a fresh prefix
+ * without overwriting the bytes a public client is mid-
+ * playback against. The `/transcode-complete` route swaps
+ * `data_ref` atomically once the workflow finishes writing
+ * the new bundle; the old bundle continues to serve until
+ * the swap.
+ */
+export const VIDEO_BUNDLE_KEY_PREFIX = 'videos'
+
+/**
+ * Build the R2 key for the master playlist of a transcoded HLS
+ * bundle: `videos/{datasetId}/{uploadId}/master.m3u8`. The
+ * workflow uploads its bundle under
+ * `videos/{datasetId}/{uploadId}/` and the publisher API stores
+ * the master path as `data_ref`. Versioning per upload_id (the
+ * asset_uploads row ULID) means concurrent transcodes against
+ * the same dataset land in distinct prefixes; the
+ * `/transcode-complete` route picks the right one by looking up
+ * the upload row.
+ */
+export function buildVideoBundleMasterKey(datasetId: string, uploadId: string): string {
+  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(datasetId)) {
+    throw new Error(
+      `buildVideoBundleMasterKey: datasetId must be a ULID (26 base32 chars), got "${datasetId}"`,
+    )
+  }
+  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(uploadId)) {
+    throw new Error(
+      `buildVideoBundleMasterKey: uploadId must be a ULID (26 base32 chars), got "${uploadId}"`,
+    )
+  }
+  return `${VIDEO_BUNDLE_KEY_PREFIX}/${datasetId}/${uploadId}/master.m3u8`
+}
+
+/** Same as `buildVideoBundleMasterKey` but returns the directory
+ *  prefix (no `/master.m3u8` tail). Used by the workflow runner
+ *  to scope its `uploadHlsBundle` call to a per-upload prefix. */
+export function buildVideoBundlePrefix(datasetId: string, uploadId: string): string {
+  return `${VIDEO_BUNDLE_KEY_PREFIX}/${datasetId}/${uploadId}`
+}
 
 /**
  * Build a content-addressed R2 key per `CATALOG_ASSETS_PIPELINE.md`
@@ -252,6 +377,40 @@ export async function verifyContentDigest(
     return { ok: false, reason: 'mismatch', actual, claimed: claimedDigest }
   }
   return { ok: true, digest: actual, size: buffer.byteLength }
+}
+
+/**
+ * Existence-only verification: HEAD the R2 object, return its
+ * recorded size, but **don't read the body**. Used by the
+ * video-source /complete path where the source MP4 can be up to
+ * 10 GB — pulling it through `arrayBuffer()` would blow past the
+ * Workers 128 MB memory cap. The transcode runner re-hashes the
+ * source via Node's streaming `crypto.createHash` before kicking
+ * off ffmpeg, so a tampered upload still surfaces as the
+ * runner's exit-code-2 + stuck `transcoding=1` rather than
+ * silently encoding bad bytes.
+ *
+ * Returns:
+ *   - `{ ok: true, size }` when the object exists. Size is the
+ *     bytes R2 has recorded for it (operator can sanity-check
+ *     against the publisher's `declared_size`).
+ *   - `{ ok: false, reason: 'missing' }` if not present.
+ *   - `{ ok: false, reason: 'binding_missing' }` if CATALOG_R2
+ *     isn't wired.
+ */
+export type ExistenceVerification =
+  | { ok: true; size: number }
+  | { ok: false; reason: 'missing' }
+  | { ok: false; reason: 'binding_missing' }
+
+export async function verifyObjectExists(
+  env: R2Env,
+  key: string,
+): Promise<ExistenceVerification> {
+  if (!env.CATALOG_R2) return { ok: false, reason: 'binding_missing' }
+  const head = await env.CATALOG_R2.head(key)
+  if (!head) return { ok: false, reason: 'missing' }
+  return { ok: true, size: head.size }
 }
 
 function parseSha256Claim(claim: string): string | null {

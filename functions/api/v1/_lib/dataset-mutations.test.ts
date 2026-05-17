@@ -330,6 +330,156 @@ describe('updateDataset', () => {
     })
     expect(result.ok).toBe(true)
   })
+
+  it('rejects format mutation while the row is mid-transcode', async () => {
+    // PR #112 followup — server-side companion to the form's
+    // disabled format radio. Without this guard, a direct PUT
+    // bypassing the UI could swap `video/mp4` → `image/png`
+    // while the GHA workflow is still running; the eventual
+    // /transcode-complete callback would then write an HLS
+    // data_ref into a row that now declares an image format.
+    const { env } = setupEnv()
+    const created = await createDataset(env, STAFF, {
+      title: 'Transcoding row',
+      format: 'video/mp4',
+    })
+    if (!created.ok) throw new Error('seed')
+    // Stamp the row as if /asset/.../complete had fired.
+    env.CATALOG_DB!
+      .prepare(`UPDATE datasets SET transcoding = 1 WHERE id = ?`)
+      .bind(created.dataset.id)
+      .run()
+    const result = await updateDataset(env, STAFF, created.dataset.id, {
+      format: 'image/png',
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(409)
+    expect(result.errors?.[0]).toMatchObject({
+      field: 'format',
+      code: 'transcoding_in_progress',
+    })
+  })
+
+  it('allows non-asset-coupled mutations while transcoding (title, abstract)', async () => {
+    // The guard is narrow: only `format` is locked. Editors
+    // should still be able to fix typos in the title / abstract
+    // / organization while the transcode runs.
+    const { env } = setupEnv()
+    const created = await createDataset(env, STAFF, {
+      title: 'Transcoding row',
+      format: 'video/mp4',
+    })
+    if (!created.ok) throw new Error('seed')
+    env.CATALOG_DB!
+      .prepare(`UPDATE datasets SET transcoding = 1 WHERE id = ?`)
+      .bind(created.dataset.id)
+      .run()
+    const result = await updateDataset(env, STAFF, created.dataset.id, {
+      title: 'Renamed during transcode',
+      abstract: 'Updated abstract',
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.dataset.title).toBe('Renamed during transcode')
+  })
+
+  it('allows format updates after transcoding clears', async () => {
+    // Symmetric: once the workflow finishes and clears
+    // `transcoding`, the format field is fair game again.
+    const { env } = setupEnv()
+    const created = await createDataset(env, STAFF, {
+      title: 'Done transcoding',
+      format: 'video/mp4',
+    })
+    if (!created.ok) throw new Error('seed')
+    // No transcoding stamp on this row — same as the post-
+    // /transcode-complete steady state.
+    const result = await updateDataset(env, STAFF, created.dataset.id, {
+      format: 'image/png',
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.dataset.format).toBe('image/png')
+  })
+
+  it('rejects data_ref mutation while the row is mid-transcode', async () => {
+    // PR #112 followup — companion to the format guard. The
+    // workflow's /transcode-complete callback will overwrite
+    // data_ref with the new HLS bundle path; letting a manual
+    // edit through in the meantime opens the same race the UI
+    // avoids by hiding the manual data_ref input during
+    // transcoding (3pd-followup/Q).
+    const { env } = setupEnv()
+    const created = await createDataset(env, STAFF, {
+      title: 'Transcoding row',
+      format: 'video/mp4',
+      data_ref: 'r2:videos/old/master.m3u8',
+    })
+    if (!created.ok) throw new Error('seed')
+    env.CATALOG_DB!
+      .prepare(`UPDATE datasets SET transcoding = 1 WHERE id = ?`)
+      .bind(created.dataset.id)
+      .run()
+    const result = await updateDataset(env, STAFF, created.dataset.id, {
+      data_ref: 'vimeo:9999',
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(409)
+    expect(result.errors?.[0]).toMatchObject({
+      field: 'data_ref',
+      code: 'transcoding_in_progress',
+    })
+  })
+
+  it('treats a same-value data_ref submission as a no-op even while transcoding', async () => {
+    // Edge case parallel to the same-value format case: the
+    // form re-submits data_ref on every save. While transcoding,
+    // the row's data_ref might be the preserved published-row
+    // value or an empty draft value; either way a submission
+    // matching the stored value should fall through cleanly.
+    const { env } = setupEnv()
+    const created = await createDataset(env, STAFF, {
+      title: 'Transcoding row',
+      format: 'video/mp4',
+      data_ref: 'r2:videos/old/master.m3u8',
+    })
+    if (!created.ok) throw new Error('seed')
+    env.CATALOG_DB!
+      .prepare(`UPDATE datasets SET transcoding = 1 WHERE id = ?`)
+      .bind(created.dataset.id)
+      .run()
+    const result = await updateDataset(env, STAFF, created.dataset.id, {
+      title: 'Renamed',
+      data_ref: 'r2:videos/old/master.m3u8', // same as current
+    })
+    expect(result.ok).toBe(true)
+  })
+
+  it('treats a same-value format submission as a no-op even while transcoding', async () => {
+    // Important edge case: the form re-submits the current
+    // value of every field on save, including format. While
+    // transcoding, that current value matches the row's value,
+    // so we shouldn't reject the PUT just because `format` is
+    // present in the body — only reject when it actually
+    // changes.
+    const { env } = setupEnv()
+    const created = await createDataset(env, STAFF, {
+      title: 'Transcoding row',
+      format: 'video/mp4',
+    })
+    if (!created.ok) throw new Error('seed')
+    env.CATALOG_DB!
+      .prepare(`UPDATE datasets SET transcoding = 1 WHERE id = ?`)
+      .bind(created.dataset.id)
+      .run()
+    const result = await updateDataset(env, STAFF, created.dataset.id, {
+      title: 'Renamed',
+      format: 'video/mp4', // same as current
+    })
+    expect(result.ok).toBe(true)
+  })
 })
 
 describe('publishDataset', () => {

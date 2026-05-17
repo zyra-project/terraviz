@@ -20,9 +20,16 @@ on:
   repository_dispatch:
     types: [transcode-hls]
 
-# Cap concurrent runs per dataset so a publisher re-uploading the
-# same video in quick succession doesn't race two encodes against
-# the same R2 prefix. Different datasets transcode in parallel.
+# Cap concurrent runs per dataset to one. The /asset/.../complete
+# handler's `transcoding_in_progress` guard (migration 0012)
+# already refuses overlapping dispatches at the API surface, so
+# in normal operation only one workflow per dataset is in flight
+# at a time. This block is belt-and-suspenders against pathological
+# cases where the row is reset out of band (operator clears
+# `transcoding`, then a fresh upload fires before the prior
+# workflow finishes) — cancelling the older run avoids two
+# encoders racing to land bundles at different per-upload R2
+# prefixes. Different datasets transcode in parallel.
 concurrency:
   group: transcode-hls-${{ github.event.client_payload.dataset_id }}
   cancel-in-progress: true

@@ -219,6 +219,65 @@ describe('publisherSend', () => {
     }
   })
 
+  it('parses 409 with errors envelope as validation (publish-while-transcoding)', async () => {
+    // PR #112 followup: the /publish endpoint returns 409 with
+    // a field-level `{ errors: [{ field: 'transcoding', ... }] }`
+    // envelope when the row is mid-transcode. The client needs
+    // to surface that as a per-field error so the form renders a
+    // precise message rather than a generic toast.
+    const errorsBody = {
+      errors: [
+        {
+          field: 'transcoding',
+          code: 'transcoding_in_progress',
+          message:
+            'Cannot publish while a video transcode is in flight. Wait for it to finish.',
+        },
+      ],
+    }
+    const fetchFn = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(errorsBody), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    const result = await publisherSend('/api/v1/publish/datasets/01XYZ/publish', {}, { fetchFn })
+    expect(result).toEqual({
+      ok: false,
+      kind: 'validation',
+      errors: errorsBody.errors,
+    })
+  })
+
+  it('returns kind: server for 409 without errors envelope (transcode_upload_mismatch)', async () => {
+    // The other 409 envelope: `{ error, message }` from
+    // jsonError(). Should fall through to the generic
+    // server-error shape so the caller can read the simple
+    // envelope without misclassifying as a validation failure.
+    const conflictBody = {
+      error: 'transcode_upload_mismatch',
+      message: 'Active transcode is bound to a different upload.',
+    }
+    const fetchFn = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(conflictBody), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    const result = await publisherSend(
+      '/api/v1/publish/datasets/01XYZ/transcode-complete',
+      {},
+      { fetchFn },
+    )
+    expect(result.ok).toBe(false)
+    if (!result.ok && result.kind === 'server') {
+      expect(result.status).toBe(409)
+      expect(result.body).toContain('transcode_upload_mismatch')
+    } else {
+      expect.fail('expected kind: server for 409 without errors envelope')
+    }
+  })
+
   it('returns kind: session on 401', async () => {
     const fetchFn = vi.fn().mockResolvedValue(new Response('', { status: 401 }))
     const result = await publisherSend('/api/v1/publish/datasets', {}, { fetchFn })

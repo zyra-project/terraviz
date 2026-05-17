@@ -293,6 +293,44 @@ describe('POST /api/v1/publish/datasets/{id}/publish', () => {
     expect(body.error).toBe('not_found')
     expect(body.message).toMatch(/not found/i)
   })
+
+  it('returns 409 transcoding_in_progress when the row is still transcoding', async () => {
+    // The detail-page UI disables Publish while transcoding,
+    // but the server gate is what makes it actually enforceable —
+    // a direct API POST or CLI call could otherwise publish a row
+    // mid-transcode and the workflow's later PATCH would
+    // overwrite the still-good `data_ref` with the half-baked
+    // new one. Phase 3pd review fix #1.
+    const { env } = await seedReady()
+    const body = await readJson<{ dataset: { id: string } }>(
+      await onRequestPost(
+        ctxWithPublisher({
+          env,
+          method: 'POST',
+          body: {
+            title: 'Mid-transcode',
+            format: 'video/mp4',
+            data_ref: 'r2:videos/old/master.m3u8',
+            license_spdx: 'CC-BY-4.0',
+          },
+        }),
+      ),
+    )
+    // Stamp the row directly to transcoding=1; this models the
+    // state /asset/complete left it in after firing the dispatch.
+    ;(
+      env.CATALOG_DB as unknown as { prepare: (q: string) => { bind: (...a: unknown[]) => { run: () => void } } }
+    )
+      .prepare('UPDATE datasets SET transcoding = 1 WHERE id = ?')
+      .bind(body.dataset.id)
+      .run()
+    const res = await datasetPublish(
+      ctxWithPublisher<'id'>({ env, method: 'POST', params: { id: body.dataset.id } }),
+    )
+    expect(res.status).toBe(409)
+    const errBody = await readJson<{ errors: Array<{ code: string }> }>(res)
+    expect(errBody.errors[0].code).toBe('transcoding_in_progress')
+  })
 })
 
 describe('POST /api/v1/publish/datasets/{id}/reindex', () => {
