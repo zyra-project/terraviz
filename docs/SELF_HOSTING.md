@@ -674,29 +674,51 @@ Level):**
    - Security Level (under "More components to skip")
 5. Deploy.
 
-**Step 2 — Configuration Rule (Free plan especially: covers plain
-Bot Fight Mode, which Step 1's Skip action CANNOT reach):**
+**Step 2 — Plain Bot Fight Mode on Free / Pro plans.**
 
 The WAF Custom Rule's Skip action's "All Super Bot Fight Mode
-Rules" only covers SBFM (Pro+ feature). Plain Bot Fight Mode
-on Free/Pro is a zone-wide toggle at a different layer and isn't
-skippable from a WAF Custom Rule. Use a Configuration Rule
-instead — that rule type CAN override Bot Fight Mode on a
-per-path basis.
+Rules" covers SBFM (Pro+ feature) but NOT plain Bot Fight Mode,
+which on Free / Pro runs as a zone-wide toggle at a different
+layer. Cloudflare's per-path rule types — WAF Custom Rules,
+Configuration Rules, Page Rules — none of them expose Bot
+Fight Mode as a per-path override on Free. (Older Cloudflare
+docs implied Configuration Rules could; current dashboard
+reality is that Bot Fight Mode isn't in the override list on
+Free zones.)
 
-1. Rules → Configuration Rules → Create rule. (Note: "Rules"
-   is a top-level zone nav item, separate from "Security →
-   Security rules.")
-2. Name it something like `transcode-complete bot fight mode
-   override`.
-3. Same field expression as Step 1.
-4. Under **"Then the settings are"**, scroll to find **Bot
-   Fight Mode** and toggle it **Off**.
-5. Deploy.
+Three options:
 
-Both rules use the same `cf-access-client-id` header gate. Safe
-because (a) only requests carrying a service-token id can match,
-(b) Cloudflare Access still validates the token after the
+1. **Disable Bot Fight Mode zone-wide.** Security → Bots →
+   Configure → toggle Bot Fight Mode Off. Loses BFM protection
+   across the zone, but for a small publisher portal where
+   authenticated traffic dominates and the public SPA is
+   served from cache, BFM adds little marginal protection over
+   the layers already in place (Cloudflare Access for the
+   portal, role-gated routes for service tokens, the WAF
+   Custom Rule from Step 1 for the WAF stack). This is the
+   recommended path for Free-plan deploys.
+
+2. **Upgrade to Pro and rely on SBFM.** Pro replaces BFM with
+   Super Bot Fight Mode, which IS skippable from the WAF
+   Custom Rule in Step 1 (the "All Super Bot Fight Mode Rules"
+   checkbox). Only worthwhile if you have other reasons to
+   upgrade.
+
+3. **Live with manual operator recovery.** Leave BFM on,
+   accept that workflow callbacks will sometimes fail with
+   the JS challenge interstitial, and have an operator
+   manually trigger `/transcode-complete` from a browser
+   session (which has a valid Access cookie and so isn't
+   challenged) whenever it does. Tractable for low-volume
+   deploys but bad ergonomics.
+
+Whichever option you pick, the Step 1 WAF Custom Rule still
+covers the rest of the security stack — Managed Ruleset, custom
+rules, SBFM on Pro+, Browser Integrity Check, Security Level —
+and is gated on the `cf-access-client-id` header so it only
+applies to legitimate service-token traffic. Safe because (a)
+only requests carrying a service-token id can match, (b)
+Cloudflare Access still validates the token after the
 exemption — a forged header without the matching secret can't
 actually authenticate, and (c) the `/transcode-complete` route
 handler enforces `role='service'` independently before mutating
@@ -709,7 +731,7 @@ layer:
 
 | Event "Service" column says | Fixed by |
 |---|---|
-| `Bot fight mode` (Free/Pro plain BFM) | Configuration Rule (Step 2) |
+| `Bot fight mode` (Free/Pro plain BFM) | Step 2 (disable BFM zone-wide on Free; upgrade to Pro for SBFM; or live-with-manual-recovery) |
 | `Managed challenge` from a Managed Ruleset rule | WAF Custom Rule (Step 1), "All managed rules" |
 | `Super Bot Fight Mode` (Pro+) | WAF Custom Rule, "All Super Bot Fight Mode Rules" |
 | `Browser Integrity Check` | WAF Custom Rule, "Browser Integrity Check" |
