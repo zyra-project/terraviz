@@ -103,9 +103,13 @@ off. Apply them in order before deploying the publisher API.
   already taken over the binding) and the upload stays
   `pending` so the publisher can retry after the operator
   fixes config.
-- Six new env vars (`GITHUB_OWNER`, `GITHUB_REPO`,
-  `GITHUB_DISPATCH_TOKEN`, plus three `MOCK_*` variants) wired
-  into `CatalogEnv`.
+- Four new env vars in `CatalogEnv`: `GITHUB_OWNER`,
+  `GITHUB_REPO`, `GITHUB_DISPATCH_TOKEN` (production wiring for
+  the GHA dispatch), plus `MOCK_GITHUB_DISPATCH` (the dev/test
+  short-circuit). `MOCK_R2` and `MOCK_STREAM` already existed
+  pre-3pd and stay unchanged — they're listed in
+  `CatalogEnv` for completeness, but operators don't add them
+  for this phase.
 
 **3pd/A-fix — `POST /api/v1/publish/datasets/{id}/transcode-complete`.**
 The endpoint the workflow POSTs back through to clear

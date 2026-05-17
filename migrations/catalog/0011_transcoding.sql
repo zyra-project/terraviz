@@ -1,8 +1,11 @@
 -- 0011_transcoding.sql — Phase 3pd — async video transcode state.
 --
 -- The publisher portal's video-upload flow lands the source MP4 in
--- R2 at `uploads/{dataset_id}/source.mp4` and fires a GitHub
--- repository_dispatch that runs ffmpeg in a GitHub Actions runner.
+-- R2 at `uploads/{dataset_id}/{upload_id}/source.mp4` (per-upload
+-- prefix so a re-upload to a still-transcoding row doesn't
+-- overwrite source bytes the prior workflow may still be reading)
+-- and fires a GitHub repository_dispatch that runs ffmpeg in a
+-- GitHub Actions runner.
 -- Once the workflow finishes encoding the 4K / 1080p / 720p 2:1
 -- spherical HLS ladder + writes it back to R2 under
 -- `videos/{dataset_id}/{upload_id}/`, the workflow POSTs
