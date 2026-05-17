@@ -178,13 +178,16 @@ function renderHeader(d: PublisherDatasetDetail, hooks: HeaderHooks): HTMLElemen
   titleRow.appendChild(editLink)
 
   // Preview button — mints a 15-minute signed token and surfaces
-  // the backend-returned signed-asset URL
+  // the backend's anonymous preview URL
   // (`/api/v1/datasets/{id}/preview/{token}`) so the publisher
-  // can share an unpublished draft for review. Hidden while
-  // transcoding (data_ref is empty so there'd be nothing to
-  // preview). The richer SPA-side `?preview=<token>&dataset=<id>`
-  // consumer is a Phase 3pe deliverable — see `dispatchPreview`
-  // below for the rationale.
+  // can share an unpublished draft for review. That endpoint
+  // returns the dataset's metadata as JSON (`{ dataset: row }`),
+  // not the asset bytes — useful for a reviewer who can fetch
+  // metadata directly; the SPA-side `?preview=<token>&dataset=
+  // <id>` consumer that renders the globe with full playback
+  // context is a Phase 3pe deliverable. Hidden while transcoding
+  // (data_ref is empty so there'd be nothing to preview). See
+  // `dispatchPreview` below for the rationale.
   if (!d.transcoding) {
     const previewBtn = document.createElement('button')
     previewBtn.type = 'button'
@@ -764,13 +767,15 @@ function defaultSleep(ms: number): Promise<void> {
  * 1b; 3pd/E just wires the UI.
  *
  * The modal surfaces the backend-returned
- * `/api/v1/datasets/{id}/preview/{token}` URL — the
- * signed-asset endpoint that serves the HLS manifest (video)
- * or image bytes (image) directly. The richer SPA-side
- * `/?preview=<token>&dataset=<id>` consumer (full globe context
- * + playback controls) is a Phase 3pe deliverable; the swap
- * back to the SPA shape should land in the same commit that
- * wires up the receiver so the link is never simultaneously
+ * `/api/v1/datasets/{id}/preview/{token}` URL — an
+ * anonymous-read endpoint that returns the dataset's metadata
+ * as JSON (`{ dataset: row }`), not the asset bytes. It's the
+ * useful primitive a technical reviewer can poke directly
+ * today; the SPA-side `/?preview=<token>&dataset=<id>`
+ * consumer that opens the globe with full playback context is
+ * a Phase 3pe deliverable; the swap back to the SPA shape
+ * should land in the same commit that wires up the receiver
+ * so the link is never simultaneously
  * visible-and-broken. PR #112 followup —
  * dataset-detail.ts:807.
  */
@@ -817,12 +822,14 @@ async function dispatchPreview(
     renderError(content, fresh.kind)
     return
   }
-  // Use the API URL the backend hands us — that returns the raw
-  // signed asset (HLS master.m3u8, image bytes, etc.) and works
-  // today. The earlier `/?preview=<token>&dataset=<id>` shape
-  // assumed an SPA-side consumer that hasn't shipped yet (slated
-  // for Phase 3pe), so publishers were copying a link that
-  // silently dropped its query string on the floor.
+  // Use the API URL the backend hands us — that's an
+  // anonymous-read endpoint that returns the dataset metadata
+  // as JSON. Not a visual preview (no globe context, no
+  // playback controls), but a usable primitive a reviewer can
+  // fetch today. The earlier `/?preview=<token>&dataset=<id>`
+  // shape assumed an SPA-side consumer that hasn't shipped yet
+  // (slated for Phase 3pe), so publishers were copying a link
+  // that silently dropped its query string on the floor.
   // PR #112 followup — dataset-detail.ts:807. When the SPA
   // consumer lands, swap back to the SPA-style URL in the same
   // commit that wires up the receiver so the link is never
