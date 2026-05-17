@@ -52,6 +52,7 @@ import {
 } from '../../../../../_lib/r2-store'
 import { getTranscodeStatus } from '../../../../../_lib/stream-store'
 import { dispatchTranscode } from '../../../../../_lib/github-dispatch'
+import { mimeMatchesFormat } from '../../asset'
 import {
   applyAssetAndMarkCompleted,
   getAssetUpload,
@@ -154,6 +155,44 @@ export const onRequestPost: PagesFunction<CatalogEnv, keyof RouteParams> = async
       409,
       'upload_failed',
       `Upload ${uploadId} previously failed (${upload.failure_reason ?? 'unknown'}). Mint a fresh upload to retry.`,
+    )
+  }
+
+  // Re-verify upload.mime still matches dataset.format. The
+  // /asset mint route already checked this at mint time, but
+  // updateDataset accepts a format mutation as long as the row
+  // isn't currently `transcoding=1`. Between mint and /complete
+  // the publisher could PUT a fresh format:
+  //
+  //   1. POST /asset { kind: 'data', mime: 'video/mp4' } → mint OK
+  //   2. PUT /datasets/{id} { format: 'image/png' } → accepted
+  //      (the row isn't transcoding yet, so /AE's data_ref/format
+  //      guard doesn't fire)
+  //   3. POST /asset/{upload_id}/complete → currently stamps a
+  //      video transcode + dispatches the workflow, which will
+  //      eventually write an HLS data_ref into a row that now
+  //      declares image format
+  //
+  // Re-checking here closes the gap. The error envelope mirrors
+  // the mint-time `mime_format_mismatch` shape so the client
+  // already knows how to render it. PR #112 followup —
+  // complete.ts:format-revalidation.
+  if (upload.kind === 'data' && !mimeMatchesFormat(upload.mime, dataset.format)) {
+    return new Response(
+      JSON.stringify({
+        errors: [
+          {
+            field: 'format',
+            code: 'mime_format_mismatch',
+            message:
+              `Upload ${uploadId} was minted for mime "${upload.mime}" but the dataset ` +
+              `format is now "${dataset.format}". The format was changed between mint and ` +
+              `complete; mint a fresh upload that matches the current format, or revert ` +
+              `the format change first.`,
+          },
+        ],
+      }),
+      { status: 409, headers: { 'Content-Type': CONTENT_TYPE } },
     )
   }
 

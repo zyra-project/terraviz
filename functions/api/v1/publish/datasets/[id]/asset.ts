@@ -112,7 +112,7 @@ function isVideoSourceUpload(kind: AssetKind, mime: string): boolean {
  * `tour/json`; the upload's actual HTTP content-type is
  * `application/json`.
  */
-function mimeMatchesFormat(mime: string, format: string): boolean {
+export function mimeMatchesFormat(mime: string, format: string): boolean {
   if (mime === format) return true
   if (format === 'tour/json' && mime === 'application/json') return true
   return false

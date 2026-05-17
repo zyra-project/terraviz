@@ -193,6 +193,10 @@ describe('POST .../asset/{upload_id}/complete — R2 happy paths', () => {
 
   it('flips data_ref + content_digest for an R2 image data upload', async () => {
     const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: true })
+    // Align the dataset's declared format with what this test
+    // uploads — the /AZ format-revalidation guard refuses a
+    // `data` upload whose mime doesn't match dataset.format.
+    sqlite.prepare(`UPDATE datasets SET format = 'image/png' WHERE id = ?`).run(datasetId)
     const env = {
       CATALOG_DB: asD1(sqlite),
       CATALOG_KV: kv,
@@ -886,6 +890,56 @@ describe('POST .../asset/{upload_id}/complete — refusals', () => {
     expect(row.status).toBe('pending')
   })
 
+  it('returns 409 when the dataset format was changed between mint and complete', async () => {
+    // PR #112 followup — closes the gap where a publisher mints
+    // a video/mp4 upload, PUTs the dataset's format to image/png
+    // before /complete (allowed because the row isn't yet
+    // `transcoding=1`, so /AE's format guard doesn't fire), then
+    // calls /complete. Without this re-check the route would
+    // dispatch a video transcode that eventually writes an HLS
+    // data_ref into a row that now declares image format.
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: false })
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      CATALOG_R2: makeBucket(HELLO_BYTES.buffer as ArrayBuffer),
+      MOCK_GITHUB_DISPATCH: 'true',
+    }
+    const uploadId = 'Y'.repeat(26)
+    insertPending(sqlite, {
+      uploadId,
+      datasetId,
+      kind: 'data',
+      target: 'r2',
+      target_ref: `r2:uploads/${datasetId}/${uploadId}/source.mp4`,
+      mime: 'video/mp4',
+      claimed_digest: HELLO_DIGEST,
+    })
+    // Publisher mutated format BETWEEN mint and complete.
+    sqlite.prepare(`UPDATE datasets SET format = 'image/png' WHERE id = ?`).run(datasetId)
+
+    const res = await completeHandler(ctx({ env, datasetId, uploadId }))
+    expect(res.status).toBe(409)
+    const body = await readJson<{ errors: Array<{ field: string; code: string }> }>(res)
+    expect(body.errors[0]).toMatchObject({
+      field: 'format',
+      code: 'mime_format_mismatch',
+    })
+    // The dataset row wasn't stamped — we caught the mismatch
+    // before the stamp/dispatch step.
+    const row = sqlite
+      .prepare(`SELECT transcoding, data_ref FROM datasets WHERE id = ?`)
+      .get(datasetId) as { transcoding: number | null; data_ref: string }
+    expect(row.transcoding).toBeNull()
+    // The upload row stays pending — operator can mint a fresh
+    // upload (matching the new format) without the prior one
+    // appearing "completed" in the audit trail.
+    const upload = sqlite
+      .prepare(`SELECT status FROM asset_uploads WHERE id = ?`)
+      .get(uploadId) as { status: string }
+    expect(upload.status).toBe('pending')
+  })
+
   it('fails closed with 500 unknown_target when upload.target is corrupted', async () => {
     const { sqlite, datasetId, kv } = setupEnv()
     const env = {
@@ -1055,6 +1109,9 @@ describe('POST .../asset/{upload_id}/complete — MOCK_R2 short-circuit', () => 
 describe('POST .../asset/{upload_id}/complete — sphere thumbnail enqueue', () => {
   it('enqueues a sphere_thumbnail job when a `data` upload completes', async () => {
     const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: true })
+    // Match fixture format to upload mime — see /AZ test note
+    // above re: the format-revalidation guard at /complete.
+    sqlite.prepare(`UPDATE datasets SET format = 'image/png' WHERE id = ?`).run(datasetId)
     const env = {
       CATALOG_DB: asD1(sqlite),
       CATALOG_KV: kv,
