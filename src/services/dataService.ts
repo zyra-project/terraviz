@@ -555,6 +555,13 @@ export class DataService {
    * the loader. If a dataset with the same id is already cached,
    * it's replaced — the preview row is fresher than whatever the
    * catalog snapshot held.
+   *
+   * Non-mutating: we swap `this.cache.datasets` for a freshly
+   * constructed array rather than `unshift`/index-assigning into
+   * the existing one. `fetchDatasets` returns the cache's array
+   * by reference, and `main.ts:loadDatasets` stores that reference
+   * on `appState.datasets`; mutating in-place would leak the
+   * draft into the public-catalog snapshot the browse panel reads.
    */
   injectDataset(dataset: Dataset): void {
     if (!this.cache) {
@@ -563,9 +570,11 @@ export class DataService {
     }
     const idx = this.cache.datasets.findIndex(d => d.id === dataset.id)
     if (idx >= 0) {
-      this.cache.datasets[idx] = dataset
+      const next = this.cache.datasets.slice()
+      next[idx] = dataset
+      this.cache.datasets = next
     } else {
-      this.cache.datasets.unshift(dataset)
+      this.cache.datasets = [dataset, ...this.cache.datasets]
     }
   }
 }

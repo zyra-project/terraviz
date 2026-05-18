@@ -162,4 +162,39 @@ describe('DataService.injectDataset', () => {
     svc.injectDataset(fixture('DS_Z', 99))
     expect(svc.getDatasetById('DS_Z')?.weight).toBe(99)
   })
+
+  it('does not mutate the array returned by a prior fetchDatasets call', async () => {
+    // main.ts:loadDatasets does `appState.datasets = await fetchDatasets()`
+    // and treats that array as the public-catalog snapshot. If
+    // injectDataset mutated `cache.datasets` in-place, the draft
+    // would leak into the snapshot and surface in the browse panel.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            datasets: [
+              {
+                id: 'PUB1',
+                title: 'Published 1',
+                format: 'video/mp4',
+                dataLink: '/x/PUB1',
+                weight: 10,
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ) as unknown as typeof fetch,
+    )
+    const svc = new DataService()
+    const snapshot = await svc.fetchDatasets()
+    const beforeLen = snapshot.length
+    svc.injectDataset(fixture('DRAFT', 99))
+    expect(snapshot.length).toBe(beforeLen)
+    expect(snapshot.some(d => d.id === 'DRAFT')).toBe(false)
+    // And the cache itself still finds the injected row.
+    expect(svc.getDatasetById('DRAFT')?.id).toBe('DRAFT')
+    vi.unstubAllGlobals()
+  })
 })
