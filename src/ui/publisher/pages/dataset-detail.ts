@@ -178,16 +178,13 @@ function renderHeader(d: PublisherDatasetDetail, hooks: HeaderHooks): HTMLElemen
   titleRow.appendChild(editLink)
 
   // Preview button — mints a 15-minute signed token and surfaces
-  // the backend's anonymous preview URL
-  // (`/api/v1/datasets/{id}/preview/{token}`) so the publisher
-  // can share an unpublished draft for review. That endpoint
-  // returns the dataset's metadata as JSON (`{ dataset: row }`),
-  // not the asset bytes — useful for a reviewer who can fetch
-  // metadata directly; the SPA-side `?preview=<token>&dataset=
-  // <id>` consumer that renders the globe with full playback
-  // context is a Phase 3pe deliverable. Hidden while transcoding
-  // (data_ref is empty so there'd be nothing to preview). See
-  // `dispatchPreview` below for the rationale.
+  // the SPA-side `/?preview=<token>&dataset=<id>` URL so the
+  // publisher can share an unpublished draft as a live globe
+  // rendering. The SPA consumer (3pe/C) fetches the wire-shape
+  // metadata + the token-gated manifest sibling, then runs the
+  // dataset through the regular loader path. Hidden while
+  // transcoding (data_ref is empty so there'd be nothing to
+  // render). See `dispatchPreview` below for the rationale.
   if (!d.transcoding) {
     const previewBtn = document.createElement('button')
     previewBtn.type = 'button'
@@ -761,23 +758,18 @@ function defaultSleep(ms: number): Promise<void> {
 }
 
 /**
- * Mint a preview token + surface the resulting consumer URL in a
+ * Mint a preview token + surface the resulting SPA URL in a
  * lightweight modal so the publisher can copy/share it. The
- * underlying endpoint (POST .../preview) has shipped since Phase
- * 1b; 3pd/E just wires the UI.
- *
- * The modal surfaces the backend-returned
- * `/api/v1/datasets/{id}/preview/{token}` URL — an
- * anonymous-read endpoint that returns the dataset's metadata
- * as JSON (`{ dataset: row }`), not the asset bytes. It's the
- * useful primitive a technical reviewer can poke directly
- * today; the SPA-side `/?preview=<token>&dataset=<id>`
- * consumer that opens the globe with full playback context is
- * a Phase 3pe deliverable; the swap back to the SPA shape
- * should land in the same commit that wires up the receiver
- * so the link is never simultaneously
- * visible-and-broken. PR #112 followup —
- * dataset-detail.ts:807.
+ * underlying mint endpoint (POST .../preview) has shipped since
+ * Phase 1b; 3pd/E wired the modal; 3pe/D swapped the surfaced
+ * URL from the backend's anonymous-read JSON endpoint to the
+ * SPA-side `/?preview=<token>&dataset=<id>` consumer that opens
+ * the draft as a live globe rendering (the receiver landed in
+ * 3pe/C). Pre-3pe/D the modal copy mentioned "metadata as JSON"
+ * — that link is still mintable directly via curl against the
+ * preview metadata route, but the user-facing affordance is now
+ * the SPA URL because that's what a publisher actually wants to
+ * share with a reviewer.
  */
 async function dispatchPreview(
   content: HTMLElement,
@@ -840,19 +832,17 @@ async function dispatchPreview(
       renderError(content, fresh.kind)
       return
     }
-    // Use the API URL the backend hands us — that's an
-    // anonymous-read endpoint that returns the dataset metadata
-    // as JSON. Not a visual preview (no globe context, no
-    // playback controls), but a usable primitive a reviewer can
-    // fetch today. The earlier `/?preview=<token>&dataset=<id>`
-    // shape assumed an SPA-side consumer that hasn't shipped yet
-    // (slated for Phase 3pe), so publishers were copying a link
-    // that silently dropped its query string on the floor.
-    // PR #112 followup — dataset-detail.ts:807. When the SPA
-    // consumer lands, swap back to the SPA-style URL in the same
-    // commit that wires up the receiver so the link is never
-    // simultaneously visible-and-broken.
-    openPreviewModal(content, result.data.url, result.data.expires_in)
+    // Surface the SPA-side `/?preview=<token>&dataset=<id>` URL
+    // so the publisher can paste it into a review thread and the
+    // reviewer lands directly on a live globe rendering of the
+    // draft. The backend's anonymous-read JSON endpoint
+    // (`result.data.url`) still works for curl-driven reviewers
+    // — they can paste the SPA URL into a browser or copy the
+    // token segment for an API call — but the modal's default
+    // affordance is the SPA URL because that's what publishers
+    // actually want to share.
+    const spaUrl = `/?preview=${encodeURIComponent(result.data.token)}&dataset=${encodeURIComponent(id)}`
+    openPreviewModal(content, spaUrl, result.data.expires_in)
   } finally {
     window.removeEventListener(ROUTE_CHANGE_START_EVENT, onRouteStart)
   }

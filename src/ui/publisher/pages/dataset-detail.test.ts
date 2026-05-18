@@ -499,14 +499,14 @@ describe('renderDatasetDetailPage', () => {
     for (let i = 0; i < 8; i++) await Promise.resolve()
     expect(mount.querySelector('.publisher-modal')).not.toBeNull()
     const urlField = mount.querySelector<HTMLInputElement>('.publisher-modal-url')
-    // Modal renders the API URL the backend returns (the
-    // SPA-side `/?preview=<token>&dataset=<id>` consumer is a
-    // Phase 3pe deliverable; until then the link points
-    // directly at the signed-asset endpoint so it actually
-    // works when copied). PR #112 followup —
-    // dataset-detail.ts:807.
-    expect(urlField?.value).toContain('/api/v1/datasets/01ABC/preview/PREVIEW-TOKEN-ABC')
-    expect(urlField?.value).not.toContain('?preview=')
+    // 3pe/D — modal renders the SPA-side
+    // `/?preview=<token>&dataset=<id>` URL so the reviewer lands
+    // on the live globe rendering of the draft. The token is
+    // url-encoded; the dataset id is taken from the page's id
+    // parameter, not the backend's `url` field.
+    expect(urlField?.value).toContain('?preview=PREVIEW-TOKEN-ABC')
+    expect(urlField?.value).toContain('&dataset=01AAAAAAAAAAAAAAAAAAAAAAAA')
+    expect(urlField?.value).not.toContain('/preview/PREVIEW-TOKEN-ABC')
   })
 
   it('does NOT open the preview modal if the user navigates away while the token POST is in flight', async () => {

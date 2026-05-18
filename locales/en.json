@@ -346,7 +346,7 @@
   "publisher.datasetDetail.field.websiteLink": "Website",
   "publisher.datasetDetail.loading": "Loading dataset…",
   "publisher.datasetDetail.notFound": "Dataset not found. It may have been deleted, or you may not have access.",
-  "publisher.datasetDetail.preview.body": "This link returns the draft's metadata as a signed JSON response for the next {minutes} minutes. Anyone with the link can fetch it until it expires. A visual SPA preview (the link rendered as a draft globe) ships in a follow-up phase; today the link is most useful for a reviewer who can fetch the dataset metadata directly.",
+  "publisher.datasetDetail.preview.body": "This link opens the draft as a live globe rendering for the next {minutes} minutes. Anyone with the link can view the draft until it expires.",
   "publisher.datasetDetail.preview.close": "Close",
   "publisher.datasetDetail.preview.copied": "Copied!",
   "publisher.datasetDetail.preview.copy": "Copy link",
