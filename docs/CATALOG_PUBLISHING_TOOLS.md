@@ -24,11 +24,15 @@ sub-phase (see [`CATALOG_BACKEND_PLAN.md`](CATALOG_BACKEND_PLAN.md)
 §"Phase 3 — Publisher portal (staff)" → "Sub-phase execution
 plan").
 
-Phase 3 sub-phases are tagged `3pa`–`3pg` in commit prefixes,
+Phase 3 sub-phases are tagged `3pa`–`3ph` in commit prefixes,
 CHANGELOG entries, and the table referenced above. The
 `p`-qualified letters keep the portal work distinct from the
 unrelated R2 + HLS video-pipeline sub-phases that already claimed
-the bare `3a`–`3h` slots in `git log`. Prep work that ships
+the bare `3a`–`3h` slots in `git log`. The `3pe` slot was
+originally penciled in for the tour creator; the SPA-side
+`?preview=` consumer that finishes the 3pd upload loop landed
+under that letter instead and shifted tour creator / bulk
+import / webhook fan-out down a step. Prep work that ships
 before the first sub-phase uses `3-pre/<letter>`. See the
 backend-plan section for the full explanation.
 
@@ -280,10 +284,11 @@ to a pure R2 + GitHub Actions pipeline; the full design lives in
 pipeline (R2 + GitHub Actions — current)".
 
 > **Future work — image-sequence input.** A planned sub-phase
-> (3pe) extends this uploader to accept a stack of individual
-> frames (PNG / JPEG / WebP) as the source for a video dataset,
-> for the many cases where publishers have numbered frames on
-> disk but no MP4. Design in
+> (originally drafted under the 3pe slot, now scheduled after
+> 3pf tour creator) extends this uploader to accept a stack of
+> individual frames (PNG / JPEG / WebP) as the source for a
+> video dataset, for the many cases where publishers have
+> numbered frames on disk but no MP4. Design in
 > [`CATALOG_IMAGE_SEQUENCE_PLAN.md`](CATALOG_IMAGE_SEQUENCE_PLAN.md);
 > tracking issue
 > [zyra-project/terraviz#114](https://github.com/zyra-project/terraviz/issues/114).
@@ -342,17 +347,47 @@ something demoable on its own.
 | **3pd/B** — GHA workflow | `.github/workflows/transcode-hls.yml` listens on `repository_dispatch: types: [transcode-hls]`, runs the existing `cli/lib/ffmpeg-hls.ts` + `cli/lib/r2-upload.ts` via `cli/transcode-from-dispatch.ts`, then POSTs `/transcode-complete` on the publisher API with the workflow's Access service-token headers. | Reuses the proven Phase 3 transcoder code path. New GHA repo secrets: `R2_S3_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `TERRAVIZ_SERVER`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET`. New Pages bindings: `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_DISPATCH_TOKEN`. |
 | **3pd/C** — Portal uploader | Click-to-browse file picker in the dataset form, mounted alongside the 3pc/F-fix2 manual `data_ref` input. XHR upload-progress events drive an inline `<progress>` bar; stage-specific errors (mint / upload / finalize) surface in a status line + a `<details>` disclosure. Failed uploads keep the file picker enabled so the publisher can retry by re-picking the file. No transparent retry — every failure surfaces in the status line and the publisher has to re-pick the file to retry. | The manual ref input stays so legacy `vimeo:` / `url:` references can still be set without re-uploading bytes. Same FormState slot, two parallel input surfaces. |
 | **3pd/D** — Transcoding status | Static "Transcoding…" badge on the detail page when `transcoding=true`. Detail-page polling every 5 s, stops when `transcoding=false`. (Elapsed-time display is a candidate follow-up, not currently shipped.) | Stops automatically when the row reaches a terminal state. Reuses the existing detail-page render loop. |
-| **3pd/E** — Preview button | "Preview" button on the detail page mints a token via `POST .../preview`. The modal surfaces the backend's anonymous-read URL (`/api/v1/datasets/{id}/preview/{token}`), which returns the dataset's metadata as JSON (`{ dataset: row }`). Useful as a primitive for a reviewer who can fetch metadata directly; the SPA-side `/?preview=...` consumer that renders the globe with full playback context is a Phase 3pe deliverable. | Closes the read → upload → preview → publish loop for the publisher portal. |
+| **3pd/E** — Preview button | "Preview" button on the detail page mints a token via `POST .../preview`. The modal initially surfaced the backend's anonymous-read URL (`/api/v1/datasets/{id}/preview/{token}`), which returns the dataset's metadata as JSON; the SPA-side `/?preview=<token>&dataset=<id>` consumer that renders the globe with full playback context lands in **Phase 3pe** below, at which point the modal swaps to the SPA URL. | Closes the read → upload → preview → publish loop for the publisher portal. |
 | **3pd/F** — CHANGELOG + SELF_HOSTING walkthrough | Operator-facing summary of the new bindings, the GHA secrets, and the migration order. | Same pattern 3pc/G followed. |
+
+### Sub-phase 3pe breakdown
+
+The follow-up that closes the 3pd preview loop. Phase 3pd shipped
+the mint button + a modal copying the backend's anonymous-read
+JSON URL; 3pe lands the SPA receiver so that URL renders the
+draft as a live globe, then swaps the modal to surface the SPA
+URL instead.
+
+| Sub-phase | Demoable result | Notes |
+|---|---|---|
+| **3pe/A** — Preview manifest endpoint | `GET /api/v1/datasets/{id}/preview/{token}/manifest` — token-gated sibling of the public manifest endpoint. Same auth envelope as the metadata route (`invalid_token`, `token_id_mismatch`, `preview_unconfigured`). Skips the public route's `published_at IS NOT NULL` filter so drafts are actually playable. Cache-Control `private, no-store` since drafts mutate during the publish loop. | Reuses `resolveManifest` from the public module so wire shape stays identical across the two paths. |
+| **3pe/B** — Preview metadata wire shape | Anonymous preview endpoint (`[token].ts`) switches from `{ dataset: DatasetRow }` (raw D1 columns) to `{ dataset: WireDataset }` via `serializeDataset`, with `dataLink` rewritten to the 3pe/A manifest sibling. The SPA's existing `hlsService` / `loadImageDataset` paths then consume a draft unchanged. | Drops the curl-debugging convenience of `data_ref` on the wire — operators who want it can hit `/api/v1/publish/datasets/{id}` from inside Access. |
+| **3pe/C** — SPA receiver | `main.ts` boot flow detects `?preview=<token>&dataset=<id>` before the regular `?dataset=` branch, fetches the wire row via `dataService.fetchPreviewDataset`, injects via `dataService.injectDataset`, then delegates to `loadDataset(id, 'url')`. Typed `PreviewFetchError` codes drive a specific error overlay (`invalid_token`, `not_found`, …). `isManifestUrl` regex extended to match the preview sibling so no preview-mode logic leaks into the loader. | `appState.datasets` stays as the public catalog snapshot — the browse panel still shows what a logged-out visitor sees; only the active globe carries the draft. |
+| **3pe/D** — Portal modal surfaces SPA URL | `dispatchPreview` in `dataset-detail.ts` builds `/?preview=<token>&dataset=<id>` from the response token + the page's `id` param, passes that to `openPreviewModal` instead of the backend's `result.data.url`. Body copy in `publisher.datasetDetail.preview.body` updated to drop the "ships in a follow-up phase" qualifier. | Backend's `url` field still returned unchanged — `curl`-driven reviewers can still poke the metadata route directly. |
 
 ## Preview pipeline
 
 Drafts are unlisted but loadable by id with a short-lived signed
 token issued by `POST /api/v1/publish/datasets/{id}/preview`. The
-token allows exactly one dataset (or one tour) and expires in 30
-minutes. The frontend reads it from a `?preview=...` query param,
-calls `/api/v1/publish/datasets/{id}` (rather than the public route)
-to fetch the draft, and renders normally.
+token allows exactly one dataset (or one tour) and defaults to
+15 minutes (max 24h via the `ttl_seconds` request field). The
+SPA reads the token from a `?preview=...` query param paired
+with `?dataset=...`, calls the anonymous-read
+`/api/v1/datasets/{id}/preview/{token}` (3pe/B) to fetch the
+wire-shape draft, injects it into the dataService cache, and
+runs the regular loader path. Video / image playback follows
+`dataLink`, which the preview endpoint rewrites to the
+token-gated manifest sibling
+(`/api/v1/datasets/{id}/preview/{token}/manifest`, 3pe/A) so
+unpublished bytes resolve under the same token.
+
+> Earlier drafts of this section described the SPA hitting the
+> publisher endpoint (`/api/v1/publish/datasets/{id}`) with the
+> Access cookie. That design never shipped — it doesn't work for
+> reviewers who don't have an Access account on the operator's
+> deployment. The anonymous-read + HMAC-token shape lets any
+> reviewer the publisher shares a link with load the draft for
+> the token's TTL, with no auth setup on the reviewer's side.
 
 ## Authoring CLI
 

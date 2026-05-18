@@ -16,6 +16,65 @@ referenced in [`README.md`](README.md).
 
 ---
 
+## Phase 3pe — SPA-side `?preview=` consumer
+
+**Branch:** `claude/review-publisher-dashboard-M6Lry`
+**Commits:** 3pe/A through 3pe/E.
+
+Closes the preview loop opened in 3pd/E. The publisher portal
+already minted a 15-minute HMAC token + the modal copy promised
+"a visual SPA preview … ships in a follow-up phase". This phase
+ships that consumer.
+
+**3pe/A — Token-gated preview manifest endpoint.**
+`GET /api/v1/datasets/{id}/preview/{token}/manifest` — sibling of
+the public manifest endpoint, skips the
+`published_at IS NOT NULL` filter so a draft is actually playable
+under a valid token. Same auth envelope as the metadata-only
+preview route (`invalid_token`, `token_id_mismatch`,
+`preview_unconfigured`). Cache-Control: `private, no-store`
+since drafts mutate during the publish loop.
+
+**3pe/B — Preview metadata returns wire shape.** The anonymous
+preview metadata endpoint
+(`/api/v1/datasets/{id}/preview/{token}`) used to return the raw
+`DatasetRow` shape — useful for a `curl`-wielding reviewer but
+not consumable by the SPA which expects the
+`{ dataset: WireDataset }` shape `/api/v1/catalog` emits. Swap to
+the serialized form via `serializeDataset`, with one
+preview-specific tweak: rewrite `dataLink` from the public
+manifest URL to the 3pe/A sibling. The SPA's existing
+`hlsService` / image-loader paths then consume the draft
+unchanged.
+
+**3pe/C — SPA receiver.** `main.ts` boot flow detects
+`?preview=<token>&dataset=<id>` *before* the regular `?dataset=`
+path, fetches the wire-shape preview row, injects it into
+`dataService` cache, and delegates to `loadDataset(id, 'url')`.
+On failure a typed `PreviewFetchError` carries the server's
+`error` code so the boot-time error overlay can render a
+specific message. `appState.datasets` stays as the public
+catalog snapshot — only the active globe carries the draft.
+`isManifestUrl` regex extended to recognise the preview sibling
+so no preview-mode awareness leaks into the dataset loader.
+
+**3pe/D — Portal modal surfaces SPA URL.** The dataset-detail
+modal swaps the copied URL from the backend's anonymous-read
+JSON endpoint to the SPA-route
+`/?preview=<token>&dataset=<id>`. The reviewer pastes the link
+into a browser and lands on a live globe rendering of the draft.
+Modal body copy updated to match.
+
+**Operator notes.** No new bindings, no new secrets, no
+migrations. `PREVIEW_SIGNING_KEY` (set in 1b) gates both preview
+endpoints. The wire-shape change on the metadata endpoint
+removes a debugging convenience (`curl | jq .dataset.data_ref`
+no longer surfaces the raw D1 column) — operators who want that
+shape can still hit
+`/api/v1/publish/datasets/{id}` from inside Access.
+
+---
+
 ## Phase 3pd — Asset uploader + transcode pipeline (R2 + GHA)
 
 **Branch:** `claude/catalog-publisher-portal-phase-3pd` (PR #112)
