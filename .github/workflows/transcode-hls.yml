@@ -62,12 +62,18 @@ jobs:
         # and quote the expansions so the shell parser never sees
         # the raw payload string.
         env:
+          PAYLOAD_KIND: ${{ github.event.client_payload.kind }}
           PAYLOAD_DATASET_ID: ${{ github.event.client_payload.dataset_id }}
           PAYLOAD_UPLOAD_ID: ${{ github.event.client_payload.upload_id }}
           PAYLOAD_SOURCE_KEY: ${{ github.event.client_payload.source_key }}
           PAYLOAD_SOURCE_DIGEST: ${{ github.event.client_payload.source_digest }}
+          PAYLOAD_FRAME_COUNT: ${{ github.event.client_payload.frame_count }}
+          PAYLOAD_EXTENSION: ${{ github.event.client_payload.extension }}
         run: |
           set -e
+          # Default `kind` to `video` so legacy dispatches that
+          # predate Phase 3pf (no `kind` field) keep running unchanged.
+          : "${PAYLOAD_KIND:=video}"
           if [ -z "$PAYLOAD_DATASET_ID" ]; then
             echo "::error::client_payload.dataset_id is missing"
             exit 1
@@ -76,12 +82,26 @@ jobs:
             echo "::error::client_payload.upload_id is missing"
             exit 1
           fi
-          if [ -z "$PAYLOAD_SOURCE_KEY" ]; then
-            echo "::error::client_payload.source_key is missing"
-            exit 1
-          fi
           if [ -z "$PAYLOAD_SOURCE_DIGEST" ]; then
             echo "::error::client_payload.source_digest is missing"
+            exit 1
+          fi
+          if [ "$PAYLOAD_KIND" = "video" ]; then
+            if [ -z "$PAYLOAD_SOURCE_KEY" ]; then
+              echo "::error::client_payload.source_key is missing for kind=video"
+              exit 1
+            fi
+          elif [ "$PAYLOAD_KIND" = "frames" ]; then
+            if [ -z "$PAYLOAD_FRAME_COUNT" ]; then
+              echo "::error::client_payload.frame_count is missing for kind=frames"
+              exit 1
+            fi
+            if [ -z "$PAYLOAD_EXTENSION" ]; then
+              echo "::error::client_payload.extension is missing for kind=frames"
+              exit 1
+            fi
+          else
+            echo "::error::client_payload.kind must be 'video' or 'frames' (got '$PAYLOAD_KIND')"
             exit 1
           fi
 
@@ -130,18 +150,38 @@ jobs:
           # rationale as the validation step above — quoted env
           # expansions can't be escaped by metacharacters in the
           # payload).
+          PAYLOAD_KIND: ${{ github.event.client_payload.kind }}
           PAYLOAD_DATASET_ID: ${{ github.event.client_payload.dataset_id }}
           PAYLOAD_UPLOAD_ID: ${{ github.event.client_payload.upload_id }}
           PAYLOAD_SOURCE_KEY: ${{ github.event.client_payload.source_key }}
           PAYLOAD_SOURCE_DIGEST: ${{ github.event.client_payload.source_digest }}
+          PAYLOAD_FRAME_COUNT: ${{ github.event.client_payload.frame_count }}
+          PAYLOAD_EXTENSION: ${{ github.event.client_payload.extension }}
         run: |
           set -e
-          npx tsx cli/transcode-from-dispatch.ts \
-            --dataset-id="$PAYLOAD_DATASET_ID" \
-            --upload-id="$PAYLOAD_UPLOAD_ID" \
-            --source-key="$PAYLOAD_SOURCE_KEY" \
-            --source-digest="$PAYLOAD_SOURCE_DIGEST" \
-            --cleanup-on-failure
+          : "${PAYLOAD_KIND:=video}"
+          # Two argv shapes: the legacy MP4 path passes
+          # --source-key; the image-sequence path (Phase 3pf)
+          # passes --source-kind=frames + --frame-count +
+          # --frame-extension. The runner's parseArgs validates
+          # whichever set arrived.
+          if [ "$PAYLOAD_KIND" = "frames" ]; then
+            npx tsx cli/transcode-from-dispatch.ts \
+              --dataset-id="$PAYLOAD_DATASET_ID" \
+              --upload-id="$PAYLOAD_UPLOAD_ID" \
+              --source-kind=frames \
+              --frame-count="$PAYLOAD_FRAME_COUNT" \
+              --frame-extension="$PAYLOAD_EXTENSION" \
+              --source-digest="$PAYLOAD_SOURCE_DIGEST" \
+              --cleanup-on-failure
+          else
+            npx tsx cli/transcode-from-dispatch.ts \
+              --dataset-id="$PAYLOAD_DATASET_ID" \
+              --upload-id="$PAYLOAD_UPLOAD_ID" \
+              --source-key="$PAYLOAD_SOURCE_KEY" \
+              --source-digest="$PAYLOAD_SOURCE_DIGEST" \
+              --cleanup-on-failure
+          fi
 
       - name: Summarise outcome
         if: always()

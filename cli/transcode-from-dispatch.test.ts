@@ -38,10 +38,14 @@ describe('parseArgs', () => {
     if ('error' in r) return
     expect(r.datasetId).toBe(GOOD_DS)
     expect(r.uploadId).toBe(GOOD_UP)
-    expect(r.sourceKey).toBe(GOOD_KEY)
     expect(r.sourceDigest).toBe(GOOD_DIGEST)
     expect(r.workdir).toBe(`/tmp/terraviz-transcode/${GOOD_DS}-${GOOD_UP}`)
     expect(r.cleanupOnFailure).toBe(false)
+    // Default source-kind is 'video' — the existing GHA workflow
+    // doesn't carry `--source-kind` for legacy MP4 dispatches.
+    expect(r.sourceKind).toBe('video')
+    if (r.sourceKind !== 'video') return
+    expect(r.sourceKey).toBe(GOOD_KEY)
   })
 
   it('rejects a malformed dataset id', () => {
@@ -154,6 +158,76 @@ describe('parseArgs', () => {
     if ('error' in r) throw new Error(r.error)
     expect(r.workdir).toBe('/var/transcode')
     expect(r.cleanupOnFailure).toBe(true)
+  })
+
+  // Phase 3pf image-sequence dispatch shape.
+
+  it('parses --source-kind=frames with frame-count + frame-extension', () => {
+    const r = parseArgs([
+      `--dataset-id=${GOOD_DS}`,
+      `--upload-id=${GOOD_UP}`,
+      `--source-kind=frames`,
+      `--frame-count=240`,
+      `--frame-extension=png`,
+      `--source-digest=${GOOD_DIGEST}`,
+    ])
+    if ('error' in r) throw new Error(r.error)
+    expect(r.sourceKind).toBe('frames')
+    if (r.sourceKind !== 'frames') return
+    expect(r.frameCount).toBe(240)
+    expect(r.frameExtension).toBe('png')
+    // No --source-key required on the frames path — the runner
+    // reconstructs the per-frame keys from datasetId + uploadId
+    // + frameCount + frameExtension.
+  })
+
+  it('rejects an out-of-range frame-count', () => {
+    const r = parseArgs([
+      `--dataset-id=${GOOD_DS}`,
+      `--upload-id=${GOOD_UP}`,
+      `--source-kind=frames`,
+      `--frame-count=10001`,
+      `--frame-extension=png`,
+      `--source-digest=${GOOD_DIGEST}`,
+    ])
+    expect('error' in r).toBe(true)
+    if ('error' in r) expect(r.error).toMatch(/frame-count/)
+  })
+
+  it('rejects a frame-extension outside the allowlist', () => {
+    const r = parseArgs([
+      `--dataset-id=${GOOD_DS}`,
+      `--upload-id=${GOOD_UP}`,
+      `--source-kind=frames`,
+      `--frame-count=240`,
+      `--frame-extension=tiff`,
+      `--source-digest=${GOOD_DIGEST}`,
+    ])
+    expect('error' in r).toBe(true)
+    if ('error' in r) expect(r.error).toMatch(/frame-extension/)
+  })
+
+  it('rejects an unknown source-kind value', () => {
+    const r = parseArgs([
+      `--dataset-id=${GOOD_DS}`,
+      `--upload-id=${GOOD_UP}`,
+      `--source-kind=hologram`,
+      `--source-digest=${GOOD_DIGEST}`,
+    ])
+    expect('error' in r).toBe(true)
+    if ('error' in r) expect(r.error).toMatch(/source-kind/)
+  })
+
+  it('still requires --source-key on the default video path', () => {
+    // No --source-kind given → defaults to 'video' → --source-key
+    // becomes mandatory. The frames path skips this requirement.
+    const r = parseArgs([
+      `--dataset-id=${GOOD_DS}`,
+      `--upload-id=${GOOD_UP}`,
+      `--source-digest=${GOOD_DIGEST}`,
+    ])
+    expect('error' in r).toBe(true)
+    if ('error' in r) expect(r.error).toMatch(/source-key/)
   })
 })
 

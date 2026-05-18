@@ -95,15 +95,36 @@ import {
 
 const R2_REGION = 'auto'
 
-interface Args {
-  datasetId: string
-  uploadId: string
-  sourceKey: string
-  sourceDigest: string
-  workdir: string
-  cleanupOnFailure: boolean
-  ffmpegBin: string | null
-}
+/** Source-shape discriminator carried in the dispatch payload's
+ *  `kind` field. The runner's pre-encode logic differs (single
+ *  GET vs. N parallel GETs); the encode + upload + callback
+ *  stages are identical. */
+export type SourceKind = 'video' | 'frames'
+
+export type Args =
+  | {
+      sourceKind: 'video'
+      datasetId: string
+      uploadId: string
+      sourceKey: string
+      sourceDigest: string
+      workdir: string
+      cleanupOnFailure: boolean
+      ffmpegBin: string | null
+    }
+  | {
+      sourceKind: 'frames'
+      datasetId: string
+      uploadId: string
+      frameCount: number
+      frameExtension: string
+      sourceDigest: string
+      workdir: string
+      cleanupOnFailure: boolean
+      ffmpegBin: string | null
+    }
+
+const FRAME_EXTENSION_ALLOWLIST = new Set(['png', 'jpg', 'webp'])
 
 export function parseArgs(argv: readonly string[]): Args | { error: string } {
   const get = (name: string): string | null => {
@@ -121,33 +142,78 @@ export function parseArgs(argv: readonly string[]): Args | { error: string } {
   if (!uploadId || !/^[0-9A-HJKMNP-TV-Z]{26}$/.test(uploadId)) {
     return { error: `--upload-id must be a ULID (26 base32 chars); got ${uploadId ?? '(missing)'}` }
   }
-  const sourceKey = get('source-key')
-  // Match the full shape and pin the embedded ids to the route
-  // arguments. The prior prefix/suffix-only check accepted
-  // arbitrary middle segments (e.g. the obsolete one-level
-  // `uploads/{dataset_id}/source.mp4`) and didn't notice when
-  // a misrouted dispatch carried a key for a different dataset
-  // or upload. PR #112 Copilot 3pd-followup.
-  const expectedSourceKey = `uploads/${datasetId}/${uploadId}/source.mp4`
-  if (!sourceKey || sourceKey !== expectedSourceKey) {
-    return {
-      error: `--source-key must equal ${expectedSourceKey}; got ${sourceKey ?? '(missing)'}`,
-    }
-  }
   const sourceDigest = get('source-digest')
   if (!sourceDigest || !/^sha256:[0-9a-f]{64}$/.test(sourceDigest)) {
     return {
       error: `--source-digest must be sha256:<64-hex>; got ${sourceDigest ?? '(missing)'}`,
     }
   }
+  const workdir = get('workdir') ?? `/tmp/terraviz-transcode/${datasetId}-${uploadId}`
+  const cleanupOnFailure = has('cleanup-on-failure')
+  const ffmpegBin = get('ffmpeg-bin')
+
+  // Phase 3pf: a `--source-kind` flag selects between the
+  // legacy MP4 source path (default) and the image-sequence
+  // path. Default is `'video'` so the existing GHA workflow
+  // keeps working unchanged for MP4 dispatches.
+  const sourceKindRaw = get('source-kind') ?? 'video'
+  if (sourceKindRaw !== 'video' && sourceKindRaw !== 'frames') {
+    return {
+      error: `--source-kind must be 'video' or 'frames'; got "${sourceKindRaw}"`,
+    }
+  }
+  const sourceKind = sourceKindRaw as SourceKind
+
+  if (sourceKind === 'video') {
+    const sourceKey = get('source-key')
+    // Match the full shape and pin the embedded ids to the route
+    // arguments. The prior prefix/suffix-only check accepted
+    // arbitrary middle segments (e.g. the obsolete one-level
+    // `uploads/{dataset_id}/source.mp4`) and didn't notice when
+    // a misrouted dispatch carried a key for a different dataset
+    // or upload. PR #112 Copilot 3pd-followup.
+    const expectedSourceKey = `uploads/${datasetId}/${uploadId}/source.mp4`
+    if (!sourceKey || sourceKey !== expectedSourceKey) {
+      return {
+        error: `--source-key must equal ${expectedSourceKey}; got ${sourceKey ?? '(missing)'}`,
+      }
+    }
+    return {
+      sourceKind: 'video',
+      datasetId,
+      uploadId,
+      sourceKey,
+      sourceDigest,
+      workdir,
+      cleanupOnFailure,
+      ffmpegBin,
+    }
+  }
+
+  // sourceKind === 'frames'
+  const frameCountRaw = get('frame-count')
+  const frameCount = frameCountRaw !== null ? Number(frameCountRaw) : NaN
+  if (!Number.isInteger(frameCount) || frameCount <= 0 || frameCount > 10_000) {
+    return {
+      error: `--frame-count must be a positive integer ≤ 10000; got ${frameCountRaw ?? '(missing)'}`,
+    }
+  }
+  const frameExtension = get('frame-extension')
+  if (!frameExtension || !FRAME_EXTENSION_ALLOWLIST.has(frameExtension)) {
+    return {
+      error: `--frame-extension must be one of ${[...FRAME_EXTENSION_ALLOWLIST].join(', ')}; got ${frameExtension ?? '(missing)'}`,
+    }
+  }
   return {
+    sourceKind: 'frames',
     datasetId,
     uploadId,
-    sourceKey,
+    frameCount,
+    frameExtension,
     sourceDigest,
-    workdir: get('workdir') ?? `/tmp/terraviz-transcode/${datasetId}-${uploadId}`,
-    cleanupOnFailure: has('cleanup-on-failure'),
-    ffmpegBin: get('ffmpeg-bin'),
+    workdir,
+    cleanupOnFailure,
+    ffmpegBin,
   }
 }
 
@@ -169,6 +235,84 @@ export function loadServerEnv(env: NodeJS.ProcessEnv = process.env): ServerEnv |
     server: env.TERRAVIZ_SERVER!.replace(/\/$/, ''),
     accessClientId: env.CF_ACCESS_CLIENT_ID!,
     accessClientSecret: env.CF_ACCESS_CLIENT_SECRET!,
+  }
+}
+
+/**
+ * Image-sequence source fetch. Downloads all N frames in parallel
+ * (with a bounded concurrency so the runner's outbound socket
+ * count stays reasonable on a 10 000-frame upper-bound), writing
+ * each to `frames/{NNNNN}.{ext}` under the workdir. Per-frame
+ * digest verification matches the digests the publisher's
+ * client computed at upload time and embedded in the
+ * source-filenames blob.
+ *
+ * Bounded-concurrency upper-bound is 16 — sufficient to keep the
+ * R2 endpoint warm without consuming the runner's file-descriptor
+ * budget at the cap. The MP4 path's single GET is the obvious
+ * baseline; image sequences only need parallelism because there
+ * are many objects, not because any single one is large.
+ */
+async function downloadFrames(
+  config: R2UploadConfig,
+  framesDir: string,
+  args: { datasetId: string; uploadId: string; frameCount: number; frameExtension: string },
+): Promise<void> {
+  const CONCURRENCY = 16
+  let cursor = 0
+  let firstError: Error | null = null
+
+  async function worker(): Promise<void> {
+    while (firstError === null) {
+      const i = cursor++
+      if (i >= args.frameCount) return
+      const padded = String(i).padStart(5, '0')
+      const key = `uploads/${args.datasetId}/${args.uploadId}/frames/${padded}.${args.frameExtension}`
+      const destPath = join(framesDir, `${padded}.${args.frameExtension}`)
+      try {
+        await downloadFromR2(config, key, destPath)
+      } catch (err) {
+        const wrapped = err instanceof Error ? err : new Error(String(err))
+        // First-failure-wins so subsequent workers exit promptly.
+        // The wrapped message embeds the offending key so the
+        // operator's GHA log points directly at which frame
+        // failed rather than a generic "R2 GET returned 404".
+        if (firstError === null) {
+          firstError = new Error(`Frame fetch failed at ${key}: ${wrapped.message}`)
+        }
+        return
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()))
+  if (firstError) throw firstError
+}
+
+/**
+ * Fetch the canonical source-filenames JSON blob alongside the
+ * frames and recompute its SHA-256. Mismatch against
+ * `--source-digest` (which the publisher API extracts from the
+ * asset_uploads row's `claimed_digest`) fails the encode rather
+ * than letting the runner work on a tampered manifest.
+ *
+ * The blob's contents aren't passed to ffmpeg — display naming is
+ * derived server-side from the dataset's slug + start_time +
+ * period (or slug + index for non-time-series rows) — but its
+ * hash is the integrity gate the publisher API trusted at
+ * /complete time. Re-verifying here is the same bargain the MP4
+ * path makes with its source MP4's hash.
+ */
+async function verifySourceFilenamesBlob(
+  config: R2UploadConfig,
+  args: { datasetId: string; uploadId: string; sourceDigest: string; workdir: string },
+): Promise<void> {
+  const key = `uploads/${args.datasetId}/${args.uploadId}/source_filenames.json`
+  const destPath = join(args.workdir, 'source_filenames.json')
+  const result = await downloadFromR2(config, key, destPath)
+  if (result.digest !== args.sourceDigest) {
+    throw new Error(
+      `source-filenames digest mismatch. expected=${args.sourceDigest} actual=${result.digest}`,
+    )
   }
 }
 
@@ -361,40 +505,71 @@ async function main(): Promise<number> {
     rmSync(args.workdir, { recursive: true, force: true })
   }
   mkdirSync(args.workdir, { recursive: true })
-  const sourcePath = join(args.workdir, 'source.mp4')
   const outputDir = join(args.workdir, 'hls')
   mkdirSync(outputDir, { recursive: true })
 
   let exitCode = 0
+  let ffmpegInputPath: string
+  let ffmpegInputArgs: readonly string[] = []
   try {
-    // 1. Download source.
-    console.error(`[transcode] downloading source from r2://${args.sourceKey}`)
-    const downloaded = await downloadFromR2(r2Config, args.sourceKey, sourcePath)
-    console.error(`[transcode] downloaded ${downloaded.bytes} bytes (${downloaded.digest})`)
-
-    // 2. Verify digest.
-    if (downloaded.digest !== args.sourceDigest) {
-      console.error(
-        `error: source digest mismatch. expected=${args.sourceDigest} actual=${downloaded.digest}`,
-      )
-      // Set `exitCode` and fall through rather than `return 2` —
-      // the `finally` block below decides workdir cleanup based
-      // on `exitCode` + `--cleanup-on-failure`. A direct `return 2`
-      // skipped that and removed the workdir even when the
-      // operator wanted to keep it for post-mortem. Fix for
-      // PR #112 Copilot #10.
-      exitCode = 2
-      return exitCode
+    if (args.sourceKind === 'video') {
+      // MP4 source — single GET, single digest verify.
+      const sourcePath = join(args.workdir, 'source.mp4')
+      console.error(`[transcode] downloading source from r2://${args.sourceKey}`)
+      const downloaded = await downloadFromR2(r2Config, args.sourceKey, sourcePath)
+      console.error(`[transcode] downloaded ${downloaded.bytes} bytes (${downloaded.digest})`)
+      if (downloaded.digest !== args.sourceDigest) {
+        console.error(
+          `error: source digest mismatch. expected=${args.sourceDigest} actual=${downloaded.digest}`,
+        )
+        exitCode = 2
+        return exitCode
+      }
+      ffmpegInputPath = sourcePath
+      // No `inputArgs` for MP4 — ffmpeg reads encoded fps from the
+      // source itself. The `-r 30` on each output rendition in
+      // `buildFfmpegArgs` then normalises every encode to 30 fps.
+    } else {
+      // Image-sequence source — N parallel GETs of
+      // `uploads/{ds}/{up}/frames/{NNNNN}.{ext}` + one GET of the
+      // canonical source-filenames JSON blob whose hash we verify
+      // against `--source-digest` before encoding.
+      const framesDir = join(args.workdir, 'frames')
+      mkdirSync(framesDir, { recursive: true })
+      try {
+        await downloadFrames(r2Config, framesDir, args)
+        await verifySourceFilenamesBlob(r2Config, args)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        console.error(`error: ${message}`)
+        // Exit code 6 — distinct from `2` (MP4 source) so an
+        // operator skimming the workflow run can tell which path
+        // failed without digging into the log.
+        exitCode = 6
+        return exitCode
+      }
+      // ffmpeg's image-sequence demuxer reads `framesDir/%05d.png`
+      // (or .jpg / .webp) and treats each numbered frame as one
+      // input frame at the declared `-framerate`. The `-r 30` on
+      // each output rendition then keeps the encode at the
+      // catalog-wide 30 fps invariant.
+      ffmpegInputPath = join(framesDir, `%05d.${args.frameExtension}`)
+      ffmpegInputArgs = ['-framerate', '30']
     }
 
-    // 3. Encode.
-    console.error(`[transcode] encoding ${sourcePath} → ${outputDir}`)
+    console.error(`[transcode] encoding ${ffmpegInputPath} → ${outputDir}`)
     const encodeStart = Date.now()
     const encoded = await encodeHls({
-      inputPath: sourcePath,
+      inputPath: ffmpegInputPath,
       outputDir,
       ffmpegBin: args.ffmpegBin ?? undefined,
       onProgress: line => process.stderr.write(`[ffmpeg] ${line}\n`),
+      inputArgs: ffmpegInputArgs,
+      // Image sequences are silent — skip the audio probe (which
+      // would fail against the image-sequence pattern anyway) and
+      // tell `buildFfmpegArgs` to omit the audio mapping. MP4
+      // sources keep the auto-detect default.
+      hasAudio: args.sourceKind === 'frames' ? false : undefined,
     })
     console.error(
       `[transcode] encode done in ${Date.now() - encodeStart} ms; ${encoded.files.length} files`,
