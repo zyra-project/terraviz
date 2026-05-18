@@ -195,7 +195,31 @@ export async function listPublicDatasets(
   options: { since?: string } = {},
 ): Promise<DatasetRow[]> {
   const { since } = options
-  const where = ['visibility = ?', 'is_hidden = 0', 'retracted_at IS NULL']
+  // The four conditions together define "this row is something
+  // the public SPA / federation should see":
+  //   - visibility = 'public': not federated-only or private
+  //   - is_hidden = 0: operator hasn't suppressed it
+  //   - retracted_at IS NULL: not retracted post-publish
+  //   - published_at IS NOT NULL: actually published, not a draft
+  // The fourth condition is what was missing — the schema's
+  // `visibility` column defaults to 'public', so a draft created
+  // with no explicit visibility setting still has visibility='public'
+  // and would leak into the public catalog until publish/retract.
+  // Both the public snapshot endpoint (`/api/v1/catalog`) and
+  // the federation feed (Phase 4) key off this function, so the
+  // fix is applied here once. The publisher portal's drafts tab
+  // is a separate path: it queries the publisher-scoped
+  // `listDatasetsForPublisher` in `dataset-mutations.ts`, which
+  // has its own visibility model (drafts + published owned by
+  // the caller). Found during a production smoke test where a
+  // draft "Test 1" appeared alongside published datasets in the
+  // SPA's browse panel.
+  const where = [
+    'visibility = ?',
+    'is_hidden = 0',
+    'retracted_at IS NULL',
+    'published_at IS NOT NULL',
+  ]
   const binds: unknown[] = ['public']
   if (since) {
     where.push('updated_at > ?')
@@ -221,6 +245,7 @@ export async function getPublicDataset(
       `SELECT * FROM datasets
        WHERE id = ? AND visibility = 'public'
          AND is_hidden = 0 AND retracted_at IS NULL
+         AND published_at IS NOT NULL
        LIMIT 1`,
     )
     .bind(id)

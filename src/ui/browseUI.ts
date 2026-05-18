@@ -16,6 +16,7 @@ import { escapeHtml, escapeAttr } from './domUtils'
 import { emit, startDwell, hashQuery, type DwellHandle } from '../analytics'
 import { plural, t } from '../i18n'
 import { formatDate, formatNumber } from '../i18n/format'
+import { renderMarkdown } from '../services/markdownRenderer'
 
 /** Tier B dwell handle for the browse overlay — non-null while the
  * overlay is visible. Started on showBrowseUI when the overlay
@@ -41,6 +42,28 @@ export { escapeHtml, escapeAttr }
 const CARD_DESCRIPTION_MAX_LENGTH = 120
 const MAX_CARD_CATEGORIES = 3
 const MAX_CARD_KEYWORDS = 12
+
+/**
+ * Strip HTML tags from a rendered-markdown string via a detached
+ * element's `textContent`. The result is safe to truncate at an
+ * arbitrary character offset without leaving a half-open tag.
+ * Used for the card-preview teaser. Empty input returns ''. The
+ * DOM operation is offline — the element is never attached, so
+ * no layout / style work runs.
+ *
+ * Takes already-rendered HTML rather than markdown source so the
+ * caller can render the markdown once and pass the result to
+ * both the full-description rendering and this helper. `renderCards()`
+ * re-runs on every keystroke during search; rendering the
+ * markdown twice per card was wasted parse + sanitize work on
+ * every keystroke.
+ */
+function htmlToPlainText(html: string | null | undefined): string {
+  if (!html) return ''
+  const tmp = document.createElement('div')
+  tmp.innerHTML = html
+  return (tmp.textContent ?? '').replace(/\s+/g, ' ').trim()
+}
 const SEARCH_FOCUS_DELAY_MS = 200
 /** Debounce window between the last keystroke and the
  * `browse_search` Tier B emit. 400 ms feels right for a search-as-you
@@ -438,7 +461,36 @@ export function showBrowseUI(
     grid.innerHTML = filtered.map(d => {
       const cats = d.enriched?.categories ? Object.keys(d.enriched.categories).slice(0, MAX_CARD_CATEGORIES) : []
       const rawDesc = d.enriched?.description ?? d.abstractTxt ?? ''
-      const shortDesc = rawDesc.length > CARD_DESCRIPTION_MAX_LENGTH ? rawDesc.substring(0, CARD_DESCRIPTION_MAX_LENGTH).trim() + '\u2026' : rawDesc
+      // The description field is publisher-authored markdown (the
+      // dataset form's abstract editor produces markdown source).
+      // The card has two surfaces:
+      //   - short preview: a truncated single-line teaser. Markdown
+      //     symbols (**, *, _, `, #, etc.) just clutter the snippet
+      //     and a mid-token truncation could leave a literal `**` or
+      //     unclosed link in the visible text, so the preview shows
+      //     the markdown rendered to a plain text version with the
+      //     formatting stripped.
+      //   - full description (revealed on card expand): proper
+      //     rendered markdown so the publisher's formatting actually
+      //     shows up. Goes through the same sanitized renderer the
+      //     publisher portal's preview uses, so the XSS surface is
+      //     identical.
+      // Found during a production smoke test where a published
+      // dataset's "**test**" abstract appeared as literal asterisks
+      // on the browse card.
+      //
+      // Render the markdown ONCE and derive both surfaces from
+      // the result. `renderCards()` re-runs on every keystroke
+      // during search, and the previous shape ran the parser +
+      // sanitizer twice per card per render (once for the full
+      // HTML, once inside `markdownToPlainText` for the teaser) \u2014
+      // wasted parse + sanitize work on every keystroke. PR #115
+      // Copilot review.
+      const fullDescRendered = renderMarkdown(rawDesc)
+      const plainDesc = htmlToPlainText(fullDescRendered)
+      const shortDesc = plainDesc.length > CARD_DESCRIPTION_MAX_LENGTH
+        ? plainDesc.substring(0, CARD_DESCRIPTION_MAX_LENGTH).trim() + '\u2026'
+        : plainDesc
 
       const catsHtml = cats.length
         ? `<div class="browse-card-cats">${cats.map(c => `<span class="browse-card-cat">${escapeHtml(c)}</span>`).join('')}</div>`
@@ -447,8 +499,8 @@ export function showBrowseUI(
         ? `<p class="browse-card-desc">${escapeHtml(shortDesc)}</p>`
         : ''
 
-      const fullDescHtml = rawDesc
-        ? `<div class="browse-card-full-desc">${escapeHtml(rawDesc)}</div>`
+      const fullDescHtml = fullDescRendered
+        ? `<div class="browse-card-full-desc">${fullDescRendered}</div>`
         : ''
       const org = d.organization
       const dev = d.enriched?.datasetDeveloper?.name
@@ -525,7 +577,16 @@ export function showBrowseUI(
           handleDownloadClick(dlBtn, visible)
           return
         }
-        if ((e.target as HTMLElement).tagName === 'A') return
+        // Markdown-rendered descriptions can contain links with
+        // nested inline elements (`<a><strong>label</strong></a>`
+        // from `[**label**](url)`). The literal `tagName === 'A'`
+        // check missed clicks on the inner `<strong>`/`<em>`, so
+        // a click on bold text inside a link still toggled the
+        // card. `closest('a')` walks up from the click target to
+        // the nearest anchor ancestor — catches every shape of
+        // nested-element click within a link. PR #115 Copilot
+        // review.
+        if ((e.target as HTMLElement).closest('a')) return
         // Clickable keywords — filter by the clicked keyword
         const kwEl = (e.target as HTMLElement).closest('.browse-card-keyword') as HTMLElement | null
         if (kwEl?.dataset.keyword && searchInput) {
