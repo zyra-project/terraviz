@@ -1,37 +1,59 @@
 /**
  * GET /api/v1/datasets/{id}/preview/{token}
  *
- * Anonymous endpoint that returns a draft (or any other unpublished)
- * dataset row when the embedded HMAC-signed preview token verifies
- * and matches the path's `id`. The route lives outside `/publish/`
- * so it doesn't go through the Access middleware — the publisher
- * issues the token from inside Access, then shares the resulting
- * URL with collaborators or the SPA's preview iframe.
+ * Anonymous endpoint that returns a draft (or any other
+ * unpublished) dataset in the wire shape when the embedded
+ * HMAC-signed preview token verifies and matches the path's `id`.
+ * The route lives outside `/publish/` so it doesn't go through
+ * the Access middleware — the publisher issues the token from
+ * inside Access, then shares the resulting URL with collaborators
+ * or the SPA's `?preview=` consumer.
+ *
+ * Response body: `{ dataset: WireDataset }` — the same shape the
+ * public catalog endpoints emit, with one preview-specific tweak:
+ * `dataLink` points at the token-gated manifest sibling
+ * (`/api/v1/datasets/{id}/preview/{token}/manifest`) instead of
+ * the public one. The SPA's existing manifest-fetch path
+ * (`hlsService.ts` / `loadImageDataset`) then renders the draft
+ * unchanged. Pre-3pe this endpoint returned the raw `DatasetRow`
+ * shape — useful for a reviewer with `curl` but not for the SPA;
+ * the swap to wire shape is what makes the ?preview= consumer
+ * actually work.
  *
  * Failure modes (`{ error, message }`):
  *   - 503 binding_missing — CATALOG_DB not bound.
+ *   - 503 identity_missing — node_identity row missing.
+ *   - 503 preview_unconfigured — PREVIEW_SIGNING_KEY not set.
  *   - 401 invalid_token — token mangled, expired, or signed with
  *     the wrong secret.
  *   - 401 token_id_mismatch — token's `id` claim doesn't match the
- *     URL path; rejects shuffled-token attacks where a leaked token
- *     for one dataset is used to read another.
+ *     URL path; rejects shuffled-token attacks where a leaked
+ *     token for one dataset is used to read another.
  *   - 404 not_found — token verifies but the row is gone.
- *
- * The response body is the same shape as the authenticated single-
- * dataset endpoint (`{ dataset: DatasetRow }`) so the frontend's
- * preview iframe consumes either with the same code path.
  */
 
 import type { CatalogEnv } from '../../../_lib/env'
 import { resolveSigningSecret, verifyPreviewToken } from '../../../_lib/preview-token'
-import type { DatasetRow } from '../../../_lib/catalog-store'
+import {
+  type DatasetRow,
+  getDecorations,
+  getNodeIdentity,
+} from '../../../_lib/catalog-store'
+import { serializeDataset } from '../../../_lib/dataset-serializer'
+import { makeDataRefResolver } from '../../../_lib/data-ref-resolver'
+import { resolveAssetRefStrict } from '../../../_lib/r2-public-url'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
+// Errors are explicitly non-cacheable: RFC 9111 lets intermediaries
+// heuristically cache 4xx/5xx without an explicit directive. With a
+// 15-minute token TTL, a cached 401 right before mint can make a
+// freshly issued token appear invalid.
+const NO_STORE = 'private, no-store'
 
 function jsonError(status: number, error: string, message: string): Response {
   return new Response(JSON.stringify({ error, message }), {
     status,
-    headers: { 'Content-Type': CONTENT_TYPE },
+    headers: { 'Content-Type': CONTENT_TYPE, 'Cache-Control': NO_STORE },
   })
 }
 
@@ -78,14 +100,43 @@ export const onRequestGet: PagesFunction<CatalogEnv, Params> = async context => 
     )
   }
 
-  const row = await context.env.CATALOG_DB.prepare(
-    'SELECT * FROM datasets WHERE id = ? LIMIT 1',
-  )
-    .bind(id)
-    .first<DatasetRow>()
+  const db = context.env.CATALOG_DB
+  const [identity, row] = await Promise.all([
+    getNodeIdentity(db),
+    db
+      .prepare('SELECT * FROM datasets WHERE id = ? LIMIT 1')
+      .bind(id)
+      .first<DatasetRow>(),
+  ])
+  if (!identity) {
+    return jsonError(
+      503,
+      'identity_missing',
+      'Node identity has not been provisioned. Run `npm run gen:node-key`.',
+    )
+  }
   if (!row) return jsonError(404, 'not_found', `Dataset ${id} not found.`)
 
-  return new Response(JSON.stringify({ dataset: row }), {
+  const decorations = await getDecorations(db, [id])
+  const resolveDataRef = makeDataRefResolver(context.env)
+  const assetResolver = (ref: string | null | undefined) =>
+    resolveAssetRefStrict(context.env, ref)
+  const dataset = serializeDataset(
+    row,
+    decorations.get(id)!,
+    identity,
+    resolveDataRef,
+    assetResolver,
+  )
+  // Public-route dataLink (`/api/v1/datasets/{id}/manifest`) refuses
+  // unpublished rows; swap in the token-gated sibling so the SPA's
+  // existing hlsService / image-load paths reach a working manifest
+  // for a draft. Tour datasets ignore dataLink (the tour engine
+  // consumes tourJsonUrl directly), so the rewrite is a no-op for
+  // them but harmless.
+  dataset.dataLink = `/api/v1/datasets/${id}/preview/${token}/manifest`
+
+  return new Response(JSON.stringify({ dataset }), {
     status: 200,
     headers: { 'Content-Type': CONTENT_TYPE, 'Cache-Control': 'private, no-store' },
   })

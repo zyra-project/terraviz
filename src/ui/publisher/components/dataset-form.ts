@@ -1286,9 +1286,23 @@ function renderForm(
 
     if (result.ok) {
       clearWarmupFlag()
-      ctx.routerNavigate(
-        `/publish/datasets/${encodeURIComponent(result.data.dataset.id)}`,
-      )
+      // On create, send the publisher straight to the edit page
+      // (which mounts the asset uploader) rather than the read-only
+      // detail page. The structural reason the uploader can't live
+      // on /new is that the asset-init endpoint is scoped by
+      // dataset id — there's no row to attach the upload to yet.
+      // Navigating to detail then forcing an Edit click is two
+      // extra clicks of friction; jumping to /edit lets the
+      // publisher pick a file as their next action, which is
+      // almost certainly what they want after Save Draft on a
+      // greenfield row. Edit-mode saves keep the existing
+      // navigate-to-detail behavior — the publisher was already
+      // editing, the natural next step is to review.
+      const id = encodeURIComponent(result.data.dataset.id)
+      const target = ctx.mode === 'create'
+        ? `/publish/datasets/${id}/edit`
+        : `/publish/datasets/${id}`
+      ctx.routerNavigate(target)
       return
     }
     if (result.kind === 'validation') {

@@ -194,10 +194,20 @@ describe('isManifestUrl', () => {
     ).toBe(true)
   })
 
+  it('matches the token-gated preview manifest sibling', () => {
+    // Lets the SPA's `?preview=` consumer route a draft's manifest
+    // through the same hlsService / loadImageDataset path as a
+    // published dataset.
+    expect(
+      isManifestUrl('/api/v1/datasets/DS001/preview/abc.def/manifest'),
+    ).toBe(true)
+  })
+
   it('does not match other URLs', () => {
     expect(isManifestUrl('/api/v1/catalog')).toBe(false)
     expect(isManifestUrl('https://video-proxy.example/video/123')).toBe(false)
     expect(isManifestUrl('/api/v1/datasets/DS001')).toBe(false)
+    expect(isManifestUrl('/api/v1/datasets/DS001/preview/abc.def')).toBe(false)
     expect(isManifestUrl('/assets/test-tour.json')).toBe(false)
     expect(isManifestUrl('')).toBe(false)
   })

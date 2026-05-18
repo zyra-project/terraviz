@@ -58,6 +58,9 @@ describe('GET /api/v1/datasets/{id}/preview/{token}', () => {
     const res = await onRequestGet(ctx)
     expect(res.status).toBe(401)
     expect((await readJson<{ error: string }>(res)).error).toBe('invalid_token')
+    // Errors must be non-cacheable so a token issued seconds after
+    // an earlier 401 doesn't get masked by an intermediary cache.
+    expect(res.headers.get('cache-control')).toContain('no-store')
   })
 
   it('returns 401 token_id_mismatch when the path id and token id differ', async () => {
@@ -73,7 +76,7 @@ describe('GET /api/v1/datasets/{id}/preview/{token}', () => {
     expect((await readJson<{ error: string }>(res)).error).toBe('token_id_mismatch')
   })
 
-  it('returns the dataset row for a matching token', async () => {
+  it('returns the wire dataset shape with a token-gated manifest link', async () => {
     const { env } = setupEnv()
     const token = await issuePreviewToken(SECRET, {
       kind: 'dataset',
@@ -83,9 +86,44 @@ describe('GET /api/v1/datasets/{id}/preview/{token}', () => {
     const ctx = makeCtx<'id' | 'token'>({ env, params: { id: ID, token } })
     const res = await onRequestGet(ctx)
     expect(res.status).toBe(200)
-    const body = await readJson<{ dataset: { id: string; title: string } }>(res)
+    const body = await readJson<{
+      dataset: {
+        id: string
+        title: string
+        format: string
+        dataLink: string
+        abstractTxt?: string
+        originNode: string
+      }
+    }>(res)
+    // Wire shape: typed fields renamed from the D1 columns, not the
+    // raw DatasetRow. Verify the publicly-visible ones the SPA
+    // actually consumes.
     expect(body.dataset.id).toBe(ID)
     expect(body.dataset.title).toBe('Test Dataset 0')
+    expect(body.dataset.format).toBe('video/mp4')
+    expect(body.dataset.abstractTxt).toBe('Abstract for dataset 0')
+    expect(body.dataset.originNode).toBe('NODE000')
+    // dataLink is the token-gated manifest URL — public manifest
+    // refuses drafts, so swapping to the preview sibling is what
+    // makes the ?preview= consumer playable.
+    expect(body.dataset.dataLink).toBe(
+      `/api/v1/datasets/${ID}/preview/${token}/manifest`,
+    )
+  })
+
+  it('returns 503 identity_missing when node_identity is not provisioned', async () => {
+    const { env, sqlite } = setupEnv()
+    sqlite.prepare('DELETE FROM node_identity').run()
+    const token = await issuePreviewToken(SECRET, {
+      kind: 'dataset',
+      id: ID,
+      publisher_id: 'PUB1',
+    })
+    const ctx = makeCtx<'id' | 'token'>({ env, params: { id: ID, token } })
+    const res = await onRequestGet(ctx)
+    expect(res.status).toBe(503)
+    expect((await readJson<{ error: string }>(res)).error).toBe('identity_missing')
   })
 
   it('returns 404 when the row was deleted after the token was minted', async () => {

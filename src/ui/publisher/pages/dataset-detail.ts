@@ -178,16 +178,13 @@ function renderHeader(d: PublisherDatasetDetail, hooks: HeaderHooks): HTMLElemen
   titleRow.appendChild(editLink)
 
   // Preview button — mints a 15-minute signed token and surfaces
-  // the backend's anonymous preview URL
-  // (`/api/v1/datasets/{id}/preview/{token}`) so the publisher
-  // can share an unpublished draft for review. That endpoint
-  // returns the dataset's metadata as JSON (`{ dataset: row }`),
-  // not the asset bytes — useful for a reviewer who can fetch
-  // metadata directly; the SPA-side `?preview=<token>&dataset=
-  // <id>` consumer that renders the globe with full playback
-  // context is a Phase 3pe deliverable. Hidden while transcoding
-  // (data_ref is empty so there'd be nothing to preview). See
-  // `dispatchPreview` below for the rationale.
+  // the SPA-side `/?preview=<token>&dataset=<id>` URL so the
+  // publisher can share an unpublished draft as a live globe
+  // rendering. The SPA consumer (3pe/C) fetches the wire-shape
+  // metadata + the token-gated manifest sibling, then runs the
+  // dataset through the regular loader path. Hidden while
+  // transcoding (data_ref is empty so there'd be nothing to
+  // render). See `dispatchPreview` below for the rationale.
   if (!d.transcoding) {
     const previewBtn = document.createElement('button')
     previewBtn.type = 'button'
@@ -761,23 +758,18 @@ function defaultSleep(ms: number): Promise<void> {
 }
 
 /**
- * Mint a preview token + surface the resulting consumer URL in a
+ * Mint a preview token + surface the resulting SPA URL in a
  * lightweight modal so the publisher can copy/share it. The
- * underlying endpoint (POST .../preview) has shipped since Phase
- * 1b; 3pd/E just wires the UI.
- *
- * The modal surfaces the backend-returned
- * `/api/v1/datasets/{id}/preview/{token}` URL — an
- * anonymous-read endpoint that returns the dataset's metadata
- * as JSON (`{ dataset: row }`), not the asset bytes. It's the
- * useful primitive a technical reviewer can poke directly
- * today; the SPA-side `/?preview=<token>&dataset=<id>`
- * consumer that opens the globe with full playback context is
- * a Phase 3pe deliverable; the swap back to the SPA shape
- * should land in the same commit that wires up the receiver
- * so the link is never simultaneously
- * visible-and-broken. PR #112 followup —
- * dataset-detail.ts:807.
+ * underlying mint endpoint (POST .../preview) has shipped since
+ * Phase 1b; 3pd/E wired the modal; 3pe/D swapped the surfaced
+ * URL from the backend's anonymous-read JSON endpoint to the
+ * SPA-side `/?preview=<token>&dataset=<id>` consumer that opens
+ * the draft as a live globe rendering (the receiver landed in
+ * 3pe/C). Pre-3pe/D the modal copy mentioned "metadata as JSON"
+ * — that link is still mintable directly via curl against the
+ * preview metadata route, but the user-facing affordance is now
+ * the SPA URL because that's what a publisher actually wants to
+ * share with a reviewer.
  */
 async function dispatchPreview(
   content: HTMLElement,
@@ -816,7 +808,7 @@ async function dispatchPreview(
       // Surface as an inline banner — same path as the dispatch
       // action handler so the publisher sees a consistent error
       // pattern across every detail-page button.
-      const errorMessage = actionErrorMessage(result.kind)
+      const errorMessage = actionErrorMessage(result)
       const fresh = await publisherGet<DatasetDetailResponse>(endpoint(id), {
         fetchFn: options.fetchFn,
         sleep: options.sleep,
@@ -840,19 +832,17 @@ async function dispatchPreview(
       renderError(content, fresh.kind)
       return
     }
-    // Use the API URL the backend hands us — that's an
-    // anonymous-read endpoint that returns the dataset metadata
-    // as JSON. Not a visual preview (no globe context, no
-    // playback controls), but a usable primitive a reviewer can
-    // fetch today. The earlier `/?preview=<token>&dataset=<id>`
-    // shape assumed an SPA-side consumer that hasn't shipped yet
-    // (slated for Phase 3pe), so publishers were copying a link
-    // that silently dropped its query string on the floor.
-    // PR #112 followup — dataset-detail.ts:807. When the SPA
-    // consumer lands, swap back to the SPA-style URL in the same
-    // commit that wires up the receiver so the link is never
-    // simultaneously visible-and-broken.
-    openPreviewModal(content, result.data.url, result.data.expires_in)
+    // Surface the SPA-side `/?preview=<token>&dataset=<id>` URL
+    // so the publisher can paste it into a review thread and the
+    // reviewer lands directly on a live globe rendering of the
+    // draft. The backend's anonymous-read JSON endpoint
+    // (`result.data.url`) still works for curl-driven reviewers
+    // — they can paste the SPA URL into a browser or copy the
+    // token segment for an API call — but the modal's default
+    // affordance is the SPA URL because that's what publishers
+    // actually want to share.
+    const spaUrl = `/?preview=${encodeURIComponent(result.data.token)}&dataset=${encodeURIComponent(id)}`
+    openPreviewModal(content, spaUrl, result.data.expires_in)
   } finally {
     window.removeEventListener(ROUTE_CHANGE_START_EVENT, onRouteStart)
   }
@@ -1065,7 +1055,7 @@ async function dispatchAction(
   const errorMessage =
     result.kind === 'validation'
       ? formatValidationErrors(result.errors)
-      : actionErrorMessage(result.kind)
+      : actionErrorMessage(result)
   const fresh = await publisherGet<DatasetDetailResponse>(endpoint(id), {
     fetchFn: options.fetchFn,
     sleep: options.sleep,
@@ -1084,10 +1074,68 @@ async function dispatchAction(
   renderError(content, fresh.kind)
 }
 
-function actionErrorMessage(kind: 'validation' | 'network' | 'server' | 'not_found'): string {
-  if (kind === 'network') return t('publisher.datasetDetail.action.error.network')
-  if (kind === 'validation') return t('publisher.datasetDetail.action.error.validation')
-  if (kind === 'not_found') return t('publisher.datasetDetail.notFound')
+/**
+ * Map a `publisherSend` failure result to a user-facing message.
+ *
+ * Accepts the full result (not just `kind`) so the `server` branch
+ * can surface the HTTP status + the server's typed `error` code
+ * from the body — which is exactly the info a publisher needs to
+ * diagnose a misconfigured deployment (e.g. a `503` carrying
+ * `preview_unconfigured` tells the operator their binding table
+ * is missing `PREVIEW_SIGNING_KEY` on the Preview environment).
+ * Before 3pe-review/D the `server` case silently fell through to
+ * the network message, which made misconfig look like a flaky
+ * connection.
+ */
+/**
+ * Shape we accept from `publisherSend` failure results. Matches
+ * api.ts's `PublisherSendResult` minus the success case; we keep
+ * `session` in the union for assignment compatibility even though
+ * every caller guards against it earlier with a redirect-back to
+ * Access — that's why a 'session' branch silently falls through
+ * to the generic network message rather than throwing.
+ */
+type ActionErrorResult =
+  | { kind: 'network' | 'session' | 'not_found' }
+  | { kind: 'validation' }
+  | { kind: 'server'; status?: number; body?: string }
+
+function actionErrorMessage(result: ActionErrorResult): string {
+  // Check 'server' first so TS narrows the variant cleanly — the
+  // combined `'network' | 'session' | 'not_found'` literal union
+  // in the sibling variant trips up TS's narrowing if we eliminate
+  // the others first.
+  if (result.kind === 'server') {
+    // Compose a detail string from whatever we have. The publisher
+    // API's typed envelope is `{ error: <code>, message: <text> }`,
+    // so parse the body and prefer the terse stable `error` code
+    // over the variable human message. Falls back to the raw
+    // status when the body isn't JSON. Surfacing the code here
+    // (e.g. `503: preview_unconfigured`) is what makes
+    // misconfigured deployments diagnosable from the portal
+    // without DevTools — fix for the symptom that drove
+    // 3pe-review/D, where `preview_unconfigured` was masked as a
+    // generic "Couldn't reach the server" message.
+    const status = result.status ?? '5xx'
+    let detail = String(status)
+    if (result.body) {
+      try {
+        const parsed = JSON.parse(result.body) as { error?: unknown }
+        if (typeof parsed.error === 'string' && parsed.error.length > 0) {
+          detail = `${status}: ${parsed.error}`
+        }
+      } catch {
+        // Non-JSON body — leave detail as just the status code.
+      }
+    }
+    return t('publisher.datasetDetail.action.error.server', { detail })
+  }
+  if (result.kind === 'validation') return t('publisher.datasetDetail.action.error.validation')
+  if (result.kind === 'not_found') return t('publisher.datasetDetail.notFound')
+  // 'network' or 'session' both surface as the network message —
+  // callers guard 'session' before reaching here, but keep the
+  // fallback so a future caller that forgets the guard doesn't
+  // produce a blank banner.
   return t('publisher.datasetDetail.action.error.network')
 }
 

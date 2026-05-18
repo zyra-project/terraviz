@@ -215,7 +215,14 @@ describe('renderDatasetNewPage', () => {
     expect(sentBody.slug).toBe('my-custom')
   })
 
-  it('navigates to the detail page on success', async () => {
+  it('navigates to the edit page on success so the publisher can upload', async () => {
+    // On create the form jumps straight to /edit rather than the
+    // read-only detail page. The detail page would force the
+    // publisher to click Edit before the asset uploader appears,
+    // which is two clicks of pure friction immediately after
+    // saving — and the next user action is almost certainly to
+    // upload bytes. Edit-mode saves keep the original navigate-to-
+    // detail behavior; see dataset-form.ts:routerNavigate.
     const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ dataset: { id: 'NEW01' } }))
     const routerNavigate = vi.fn()
     renderDatasetNewPage(mount, {
@@ -228,7 +235,7 @@ describe('renderDatasetNewPage', () => {
     await new Promise(r => setTimeout(r, 0))
     await new Promise(r => setTimeout(r, 0))
 
-    expect(routerNavigate).toHaveBeenCalledWith('/publish/datasets/NEW01')
+    expect(routerNavigate).toHaveBeenCalledWith('/publish/datasets/NEW01/edit')
   })
 
   it('renders per-field error messages on a 400 validation response', async () => {

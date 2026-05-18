@@ -74,6 +74,53 @@ interface WireDataset {
 }
 
 /**
+ * Map a `WireDataset` from `/api/v1/catalog` (or the token-gated
+ * preview consumer) into the frontend's `Dataset` shape. The two
+ * shapes are mostly the same — `WireDataset` is the additive
+ * superset documented in CATALOG_BACKEND_PLAN.md — so this is a
+ * field-rename layer rather than a real conversion. Kept as a
+ * named helper so both the catalog fetch and the preview path
+ * stay in lockstep when new wire fields land.
+ */
+function wireToDataset(d: WireDataset): Dataset {
+  return {
+    id: d.id,
+    legacyId: d.legacyId,
+    title: d.title,
+    format: d.format as DatasetFormat,
+    dataLink: d.dataLink,
+    organization: d.organization,
+    abstractTxt: d.abstractTxt,
+    thumbnailLink: d.thumbnailLink,
+    legendLink: d.legendLink,
+    closedCaptionLink: d.closedCaptionLink,
+    websiteLink: d.websiteLink,
+    startTime: d.startTime,
+    endTime: d.endTime,
+    period: d.period,
+    weight: d.weight,
+    isHidden: d.isHidden,
+    runTourOnLoad: d.runTourOnLoad,
+    tags: d.tags,
+    enriched: d.enriched,
+    tourJsonUrl: d.tourJsonUrl,
+  }
+}
+
+/**
+ * Error class for the SPA-side `?preview=` consumer. Carries the
+ * server's typed error code (`invalid_token`, `token_id_mismatch`,
+ * `not_found`, `preview_unconfigured`, …) so the caller can map
+ * to a user-facing message without parsing the raw response body.
+ */
+export class PreviewFetchError extends Error {
+  constructor(public readonly code: string, message: string) {
+    super(message)
+    this.name = 'PreviewFetchError'
+  }
+}
+
+/**
  * Built-in tour datasets shared by the SOS-source and node-source
  * paths. Pulled out as a function so both call sites get identical
  * rows; once these are publishable as real `tours/json` rows we can
@@ -241,28 +288,7 @@ export class DataService {
       throw new Error('Node catalog: unexpected response shape (missing datasets[]).')
     }
 
-    const fromNode: Dataset[] = body.datasets.map(d => ({
-      id: d.id,
-      legacyId: d.legacyId,
-      title: d.title,
-      format: d.format as DatasetFormat,
-      dataLink: d.dataLink,
-      organization: d.organization,
-      abstractTxt: d.abstractTxt,
-      thumbnailLink: d.thumbnailLink,
-      legendLink: d.legendLink,
-      closedCaptionLink: d.closedCaptionLink,
-      websiteLink: d.websiteLink,
-      startTime: d.startTime,
-      endTime: d.endTime,
-      period: d.period,
-      weight: d.weight,
-      isHidden: d.isHidden,
-      runTourOnLoad: d.runTourOnLoad,
-      tags: d.tags,
-      enriched: d.enriched,
-      tourJsonUrl: d.tourJsonUrl,
-    }))
+    const fromNode: Dataset[] = body.datasets.map(wireToDataset)
 
     fromNode.push(...sampleTourBuiltins())
 
@@ -485,6 +511,71 @@ export class DataService {
     this.cache = null
     this.cacheTime = 0
     this.enrichedMap = null
+  }
+
+  /**
+   * Fetch a draft (or any other unpublished) dataset via the
+   * token-gated preview endpoint and map it into the frontend's
+   * `Dataset` shape. The endpoint returns the same `WireDataset`
+   * shape `/api/v1/catalog` does, with `dataLink` already
+   * rewritten to the token-gated manifest sibling, so the rest of
+   * the loader (HLS / image) consumes it unchanged.
+   *
+   * Throws `PreviewFetchError` for any non-2xx response so the
+   * boot path can surface a typed error overlay instead of a
+   * generic "failed to load".
+   */
+  async fetchPreviewDataset(datasetId: string, token: string): Promise<Dataset> {
+    const url = `/api/v1/datasets/${encodeURIComponent(datasetId)}/preview/${encodeURIComponent(token)}`
+    const res = await apiFetch(url, { headers: { Accept: 'application/json' } })
+    if (!res.ok) {
+      let code = `http_${res.status}`
+      let message = res.statusText || 'Preview fetch failed'
+      try {
+        const errBody = (await res.json()) as { error?: string; message?: string }
+        if (errBody && typeof errBody.error === 'string') code = errBody.error
+        if (errBody && typeof errBody.message === 'string') message = errBody.message
+      } catch {
+        // Non-JSON body — keep the http_<status> code + statusText.
+      }
+      throw new PreviewFetchError(code, message)
+    }
+    const body = (await res.json()) as { dataset: WireDataset }
+    if (!body?.dataset) {
+      throw new PreviewFetchError('invalid_body', 'Preview response missing dataset.')
+    }
+    return normaliseSourceFormat(wireToDataset(body.dataset))
+  }
+
+  /**
+   * Add a dataset to the cache so subsequent `getDatasetById`
+   * lookups (and the dataset loader) find it. Used by the
+   * `?preview=` boot path to surface a draft alongside the
+   * regular catalog without baking preview-mode awareness into
+   * the loader. If a dataset with the same id is already cached,
+   * it's replaced — the preview row is fresher than whatever the
+   * catalog snapshot held.
+   *
+   * Non-mutating: we swap `this.cache.datasets` for a freshly
+   * constructed array rather than `unshift`/index-assigning into
+   * the existing one. `fetchDatasets` returns the cache's array
+   * by reference, and `main.ts:loadDatasets` stores that reference
+   * on `appState.datasets`; mutating in-place would leak the
+   * draft into the public-catalog snapshot the browse panel reads.
+   */
+  injectDataset(dataset: Dataset): void {
+    if (!this.cache) {
+      this.cache = { datasets: [dataset] }
+      return
+    }
+    const idx = this.cache.datasets.findIndex(d => d.id === dataset.id)
+    if (idx >= 0) {
+      const next = this.cache.datasets.slice()
+      next[idx] = dataset
+      this.cache.datasets = next
+    } else {
+      this.cache.datasets = [dataset, ...this.cache.datasets]
+    }
   }
 }
 

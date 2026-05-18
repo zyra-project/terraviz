@@ -38,9 +38,14 @@ export function getCatalogSource(): CatalogSource {
  * to fetch the manifest envelope or treat the link as a direct
  * asset URL (the sample tours' `/assets/test-tour.json` paths, or
  * any legacy URL the SOS source still hands us).
+ *
+ * Accepts both the public manifest URL and the token-gated preview
+ * sibling (`.../preview/{token}/manifest`) so a draft dataset
+ * loaded via the SPA's `?preview=` consumer (3pe/B) routes through
+ * the same manifest-fetch path as a published one.
  */
 export function isManifestUrl(dataLink: string): boolean {
-  return /^\/api\/v\d+\/datasets\/[^/]+\/manifest$/.test(dataLink)
+  return /^\/api\/v\d+\/datasets\/[^/]+(?:\/preview\/[^/]+)?\/manifest$/.test(dataLink)
 }
 
 /**

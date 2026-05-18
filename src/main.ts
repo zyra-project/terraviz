@@ -13,7 +13,7 @@ import { ViewportManager, type ViewLayout } from './services/viewportManager'
 import './styles/index.css'
 
 import { HLSService } from './services/hlsService'
-import { dataService } from './services/dataService'
+import { dataService, PreviewFetchError } from './services/dataService'
 import { formatDate, videoTimeToDate, dateToVideoTime, isSubDailyPeriod, getSunPosition, inferDisplayInterval } from './utils/time'
 import { logger } from './utils/logger'
 import type { AppState, VideoTextureHandle, TourFile, Dataset } from './types'
@@ -119,6 +119,32 @@ function triggerToTourSource(
   if (trigger === 'orbit') return 'orbit'
   if (trigger === 'url') return 'deeplink'
   return 'browse'
+}
+
+/**
+ * Map a `PreviewFetchError` code to a user-facing message for the
+ * boot-time error overlay. The codes mirror the typed envelopes on
+ * the server preview endpoints (`functions/api/v1/datasets/[id]/
+ * preview/[token].ts` and its `/manifest` sibling). Anything we
+ * don't recognise falls through to a generic message so a new code
+ * landing server-side doesn't surface as an empty banner.
+ */
+function previewErrorMessage(code: string): string {
+  switch (code) {
+    case 'invalid_token':
+      return 'This preview link is invalid or has expired. Ask the publisher to mint a new one.'
+    case 'token_id_mismatch':
+      return 'This preview link is for a different dataset. Ask the publisher to mint a new one.'
+    case 'not_found':
+      return 'The dataset this preview points at no longer exists.'
+    case 'preview_unconfigured':
+      return 'Preview links are not configured on this deployment.'
+    case 'binding_missing':
+    case 'identity_missing':
+      return 'The catalog backend is unavailable. Try again in a moment.'
+    default:
+      return 'Could not load this preview.'
+  }
 }
 
 class InteractiveSphere {
@@ -276,7 +302,52 @@ class InteractiveSphere {
       // on devices that can enter VR.
       void this.wireVrButton()
 
-      const datasetId = this.getDatasetIdFromUrl()
+      // Preview deeplink: `?preview=<token>&dataset=<id>` lands a
+      // draft dataset on the globe by fetching the token-gated
+      // metadata + manifest endpoints (3pe/A + 3pe/B). The boot
+      // flow runs *after* loadDatasets so the regular catalog is
+      // still populated \u2014 the preview row is injected alongside,
+      // not in place of, the public catalog. On error we surface
+      // a typed message via setError and fall through to the
+      // empty-globe path so the visitor isn't left staring at a
+      // blank loading overlay with no globe and no browse panel.
+      // Falling through bypasses the `?dataset=` branch below
+      // because that id won't be in the public catalog (it's the
+      // draft we just failed to fetch) \u2014 re-attempting it would
+      // overwrite our typed preview error with a generic
+      // "Dataset not found".
+      const previewParams = this.getPreviewParamsFromUrl()
+      let previewFailed = false
+      if (previewParams) {
+        this.setLoadingStatus('Loading preview\u2026', 50)
+        try {
+          const preview = await dataService.fetchPreviewDataset(
+            previewParams.datasetId,
+            previewParams.token,
+          )
+          // Inject into the dataService cache so the existing
+          // loadDataset path (which resolves by id via
+          // getDatasetById) finds the draft. appState.datasets is
+          // left as the public catalog snapshot \u2014 the browse panel
+          // continues to show what an unauthenticated visitor
+          // would see; only the active globe shows the draft.
+          dataService.injectDataset(preview)
+          await this.loadDataset(preview.id, 'url')
+          this.setLoading(false)
+          this.runUrlLoadUiSync()
+          return
+        } catch (err) {
+          const message = err instanceof PreviewFetchError
+            ? previewErrorMessage(err.code)
+            : err instanceof Error
+              ? err.message
+              : 'Failed to load preview.'
+          this.setError(message)
+          previewFailed = true
+        }
+      }
+
+      const datasetId = previewFailed ? null : this.getDatasetIdFromUrl()
       if (datasetId) {
         this.setLoadingStatus('Loading dataset\u2026', 50)
         await this.loadDataset(datasetId, 'url')
@@ -425,6 +496,21 @@ class InteractiveSphere {
   private getDatasetIdFromUrl(): string | null {
     const params = new URLSearchParams(window.location.search)
     return params.get('dataset')
+  }
+
+  /**
+   * Extract `?preview=<token>&dataset=<id>` from the current URL.
+   * Returns null when either is missing — both are required for the
+   * preview consumer to know what to fetch and which token to
+   * present. Short-circuits early so the regular `?dataset=` path
+   * (without a token) keeps working unchanged.
+   */
+  private getPreviewParamsFromUrl(): { token: string; datasetId: string } | null {
+    const params = new URLSearchParams(window.location.search)
+    const token = params.get('preview')
+    const datasetId = params.get('dataset')
+    if (!token || !datasetId) return null
+    return { token, datasetId }
   }
 
   /**
