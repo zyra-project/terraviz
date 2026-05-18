@@ -289,6 +289,37 @@ describe('showBrowseUI', () => {
     const searchEl = document.getElementById('browse-search') as HTMLInputElement
     expect(searchEl.placeholder).toBe('Search 3 datasets\u2026')
   })
+
+  it('renders the abstract markdown as HTML in the full description and as plain text in the short preview', () => {
+    // Smoke-test regression: a dataset published with the
+    // abstract "This is a **test**." rendered as literal
+    // asterisks on the card because `browseUI.ts` ran the
+    // abstract through `escapeHtml` for both the short preview
+    // and the full description. The full description now runs
+    // through the same sanitized markdown renderer the
+    // publisher portal uses; the short preview strips the
+    // markdown to plain text so the truncation cut doesn't
+    // leave a half-open `**`.
+    setupBrowseDOM()
+    const datasets = [
+      makeDataset({
+        id: 'md-test',
+        title: 'Markdown abstract',
+        enriched: { description: 'This is a **bold** word.' },
+      }),
+    ]
+    showBrowseUI(datasets, makeCallbacks())
+
+    // Short preview: plain text, no asterisks.
+    const shortDesc = document.querySelector('.browse-card-desc')
+    expect(shortDesc?.textContent).toBe('This is a bold word.')
+    expect(shortDesc?.innerHTML).not.toContain('**')
+    expect(shortDesc?.innerHTML).not.toContain('<strong>')
+
+    // Full description: rendered HTML with a real <strong> tag.
+    const fullDesc = document.querySelector('.browse-card-full-desc')
+    expect(fullDesc?.querySelector('strong')?.textContent).toBe('bold')
+  })
 })
 
 // ---------------------------------------------------------------------------
