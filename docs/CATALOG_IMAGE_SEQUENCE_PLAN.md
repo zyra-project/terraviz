@@ -284,8 +284,13 @@ The runner gains an image-sequence input branch in
    is fixed at 30.
 2. Download all N frames from R2 (concurrent with a small queue —
    ~10 parallel S3 GETs is comfortable on the runner; same shape
-   as the browser upload queue), validating each frame's SHA-256
-   against the manifest as it lands.
+   as the browser upload queue). The integrity gate is the
+   source-filenames JSON blob's hash (`verifySourceFilenamesBlob`
+   below) — the blob carries every frame's claimed digest, so an
+   unforged blob is sufficient proof that the publisher's
+   manifest hasn't been tampered with. Per-frame re-hashing
+   would only protect against a "R2 returned different bytes
+   than were PUT" failure mode and isn't currently performed.
 3. Invoke ffmpeg with:
    ```
    ffmpeg \

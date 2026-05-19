@@ -253,10 +253,21 @@ export function loadServerEnv(env: NodeJS.ProcessEnv = process.env): ServerEnv |
  * Image-sequence source fetch. Downloads all N frames in parallel
  * (with a bounded concurrency so the runner's outbound socket
  * count stays reasonable on a 10 000-frame upper-bound), writing
- * each to `frames/{NNNNN}.{ext}` under the workdir. Per-frame
- * digest verification matches the digests the publisher's
- * client computed at upload time and embedded in the
- * source-filenames blob.
+ * each to `frames/{NNNNN}.{ext}` under the workdir.
+ *
+ * **Per-frame digest verification is intentionally NOT performed
+ * here.** The integrity gate is the source-filenames JSON blob's
+ * hash — `verifySourceFilenamesBlob` (called separately by the
+ * caller) re-hashes the canonical JSON the publisher's client
+ * built from the per-frame digests and compares against the
+ * dispatch payload's `source_digest`. Since the blob carries
+ * every frame's claimed digest, an unforged blob is sufficient
+ * proof that the publisher's manifest hasn't been tampered with;
+ * re-hashing each frame's bytes here would only protect against
+ * a separate "R2 returned different bytes than were PUT" failure
+ * mode that no observed Cloudflare R2 incident covers. The MP4
+ * path makes the same bargain with its source MP4's claimed
+ * digest (re-hashed once, not per-byte-range).
  *
  * Bounded-concurrency upper-bound is 16 — sufficient to keep the
  * R2 endpoint warm without consuming the runner's file-descriptor

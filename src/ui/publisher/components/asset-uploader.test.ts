@@ -510,6 +510,77 @@ describe('renderAssetUploader — frames tab (3pf/D)', () => {
     // always go through the transcode pipeline).
     expect(onUploaded).toHaveBeenCalledWith({ mode: 'transcoding' })
   })
+
+  it('retries a transient source-filenames blob PUT failure', async () => {
+    // 3pf-review/C — the prior shape threw on the first non-2xx
+    // and left the asset_uploads row stuck `'pending'` with every
+    // frame already in R2. Two retries with short backoffs absorb
+    // a network blip.
+    const fetchSpy = vi
+      .fn()
+      // /asset response
+      .mockResolvedValueOnce(
+        jsonResponse({
+          upload_id: '01UPLOADAAAAAAAAAAAAAAAAAA',
+          kind: 'data',
+          target: 'r2',
+          frames: [
+            {
+              filename: 'frame_001.png',
+              index: 0,
+              method: 'PUT',
+              url: 'https://r2.test/frames/00000.png',
+              headers: {},
+              key: 'uploads/X/Y/frames/00000.png',
+            },
+          ],
+          source_filenames: {
+            method: 'PUT',
+            url: 'https://r2.test/source_filenames.json',
+            headers: {},
+            key: 'uploads/X/Y/source_filenames.json',
+          },
+          expires_at: '2026-01-01T00:00:00.000Z',
+          mock: false,
+        }),
+      )
+      // First blob PUT: 503 (transient)
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      // Second blob PUT: succeeds
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      // /complete response → transcoding=true
+      .mockResolvedValueOnce(
+        jsonResponse({ dataset: { data_ref: '' }, transcoding: true }),
+      )
+
+    const onUploaded = vi.fn()
+    mount.appendChild(
+      renderAssetUploader({
+        datasetId: '01AAAAAAAAAAAAAAAAAAAAAAAA',
+        format: 'video/mp4',
+        onUploaded,
+        fetchFn: fetchSpy as unknown as typeof fetch,
+        xhrFactory: fakeXhrFactory(),
+        hashFn: async () => `sha256:${'a'.repeat(64)}`,
+        // Skip the retry backoff so the test doesn't time-bound.
+        sleep: () => Promise.resolve(),
+      }),
+    )
+    clickFramesTab(mount)
+    pickFrames(mount, [
+      new File(['a'.repeat(100)], 'frame_001.png', { type: 'image/png' }),
+    ])
+    const startBtn = Array.from(mount.querySelectorAll('button')).find(b =>
+      b.textContent?.includes('Upload 1'),
+    )!
+    startBtn.click()
+    for (let i = 0; i < 16; i++) await new Promise(r => setTimeout(r, 0))
+
+    // 4 calls: /asset + first blob PUT (failed) + second blob PUT
+    // (succeeded) + /complete.
+    expect(fetchSpy).toHaveBeenCalledTimes(4)
+    expect(onUploaded).toHaveBeenCalledWith({ mode: 'transcoding' })
+  })
 })
 
 describe('hashFileSha256', () => {

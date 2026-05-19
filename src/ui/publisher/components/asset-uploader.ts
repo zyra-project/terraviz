@@ -734,6 +734,16 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
               },
               options.xhrFactory,
             )
+            // Stage-guard: a sibling worker may have failed and
+            // transitioned `framesState` into `'error'` while this
+            // PUT was mid-flight (`runBoundedQueue`'s
+            // first-failure-wins only stops workers BETWEEN
+            // iterations; the await above can still resolve after
+            // the error transition). Mutating `current` / `progress`
+            // on top of the error state would surface as a stale
+            // counter overwriting the error banner, so skip the
+            // update unless the stage is still 'uploading'.
+            if (framesState.stage !== 'uploading') return
             framesState = {
               ...framesState,
               current: framesState.current + 1,
@@ -750,16 +760,40 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
         // so tests can capture the request without touching the
         // network, mirroring how `publisherSend` resolves its
         // fetch implementation.
+        //
+        // Retry on transient failure: if this PUT fails after
+        // every frame has already landed, the publisher is in a
+        // strictly worse spot than a frame failure — the frames
+        // are sitting in R2, the asset_uploads row is still
+        // `'pending'`, and re-picking files mints a fresh
+        // upload_id leaving the prior frames orphaned. Two
+        // retries with short backoffs absorb a network blip;
+        // beyond that we surface the error and the publisher's
+        // recovery is re-pick (the orphan-frames cost is bounded
+        // by the per-upload R2 prefix's lifecycle policy).
         const blob = new Blob([sourceFilenamesJson], { type: 'application/json' })
         const blobFetch = options.fetchFn ?? globalThis.fetch
-        const blobRes = await blobFetch(init.source_filenames.url, {
-          method: init.source_filenames.method,
-          headers: init.source_filenames.headers,
-          body: blob,
-        })
-        if (!blobRes.ok) {
-          throw new Error(`source-filenames PUT returned ${blobRes.status}`)
+        const blobSleep = options.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)))
+        let blobErr: Error | null = null
+        for (let attempt = 0; attempt < 3; attempt++) {
+          blobErr = null
+          try {
+            const blobRes = await blobFetch(init.source_filenames.url, {
+              method: init.source_filenames.method,
+              headers: init.source_filenames.headers,
+              body: blob,
+            })
+            if (blobRes.ok) {
+              blobErr = null
+              break
+            }
+            blobErr = new Error(`source-filenames PUT returned ${blobRes.status}`)
+          } catch (err) {
+            blobErr = err instanceof Error ? err : new Error(String(err))
+          }
+          if (attempt < 2) await blobSleep(200 * (attempt + 1))
         }
+        if (blobErr) throw blobErr
       }
 
       // 5. Finalize.
