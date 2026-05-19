@@ -303,12 +303,18 @@ export function validateImageSequenceInit(
     })
     return { ok: false, errors }
   }
+  // Cap + emptiness are sanity bounds, not soft suggestions —
+  // early-return BEFORE the O(N) per-frame loop below so a
+  // hostile client can't trigger a 1 000 000-iteration
+  // validation pass with a single request. Phase 3pf-review/E —
+  // Copilot discussion_r3263124264.
   if (body.frames.length === 0) {
     errors.push({
       field: 'frames',
       code: 'frames_empty',
       message: 'frames must contain at least one entry.',
     })
+    return { ok: false, errors }
   }
   if (body.frames.length > MAX_IMAGE_SEQUENCE_FRAMES) {
     errors.push({
@@ -316,6 +322,7 @@ export function validateImageSequenceInit(
       code: 'frames_too_many',
       message: `frames count ${body.frames.length} exceeds the cap of ${MAX_IMAGE_SEQUENCE_FRAMES}.`,
     })
+    return { ok: false, errors }
   }
 
   // Per-frame validation. Each error references the offending
@@ -797,6 +804,20 @@ export async function stampTranscodingForFrameSource(
   frameSourceFilenamesRef: string,
   now: string,
 ): Promise<number> {
+  // The three `frame_*` columns are wrapped in the same
+  // `published_at IS NULL` guard as `data_ref` / `content_digest`
+  // so a re-upload of an already-published image-sequence row
+  // doesn't surface a mid-transcode inconsistency: data_ref still
+  // points at the OLD HLS bundle (preserved by the CASE above)
+  // while the frame metadata would otherwise jump to the NEW
+  // upload's prefix. The Phase 3pg `/frames` exposure layer reads
+  // these columns to build `urlTemplate` — letting them diverge
+  // from data_ref through the transcode window would surface a
+  // stale view to consumers. /transcode-complete swaps all six
+  // (data_ref, content_digest, source_digest, frame_count,
+  // frame_extension, frame_source_filenames_ref) atomically when
+  // the bundle is ready. Phase 3pf-review/E — Copilot
+  // discussion suppressed-confidence #3.
   const result = await db
     .prepare(
       `UPDATE datasets
@@ -805,9 +826,9 @@ export async function stampTranscodingForFrameSource(
              data_ref = CASE WHEN published_at IS NULL THEN '' ELSE data_ref END,
              source_digest = ?,
              content_digest = CASE WHEN published_at IS NULL THEN NULL ELSE content_digest END,
-             frame_count = ?,
-             frame_extension = ?,
-             frame_source_filenames_ref = ?,
+             frame_count = CASE WHEN published_at IS NULL THEN ? ELSE frame_count END,
+             frame_extension = CASE WHEN published_at IS NULL THEN ? ELSE frame_extension END,
+             frame_source_filenames_ref = CASE WHEN published_at IS NULL THEN ? ELSE frame_source_filenames_ref END,
              updated_at = ?
        WHERE id = ?
          AND (COALESCE(transcoding, 0) = 0 OR active_transcode_upload_id = ?)`,
@@ -977,12 +998,26 @@ export async function revertTranscodingStamp(
  * uses 0 as a "lost the race, refuse to apply" signal and
  * surfaces it as 409 stale.
  */
+/** Frame-source-specific metadata that swaps atomically with
+ *  `data_ref` when /transcode-complete clears the transcode.
+ *  All three columns mirror the values `stampTranscodingForFrameSource`
+ *  wrote to the row on a draft, or were withheld pending the swap
+ *  on a re-upload of a published row (see the guard comment on
+ *  the stamp function). NULL when the upload is MP4-source.
+ *  Phase 3pf-review/E — Copilot suppressed-confidence #3. */
+export interface FrameSourceCompleteFields {
+  frame_count: number
+  frame_extension: string
+  frame_source_filenames_ref: string
+}
+
 export async function clearTranscoding(
   db: D1Database,
   datasetId: string,
   uploadId: string,
   dataRef: string,
   now: string,
+  frameSource: FrameSourceCompleteFields | null = null,
 ): Promise<number> {
   // `content_digest = NULL` here is the atomic counterpart to
   // the *conditional* clear in `stampTranscodingForVideoSource`:
@@ -995,6 +1030,42 @@ export async function clearTranscoding(
   // manifest), so the cleared column is the correct steady
   // state for a post-/transcode-complete row. PR #112
   // followup — asset-uploads.ts:491.
+  //
+  // For frame-source uploads the three `frame_*` columns swap
+  // atomically alongside `data_ref` — `stampTranscodingForFrameSource`
+  // deliberately HELD their prior values on a published-row
+  // re-upload so a mid-transcode `/frames` read wouldn't surface
+  // a stale view; this UPDATE is where they actually transition
+  // to the new upload's values. The companion stamp wrote them
+  // unconditionally on drafts (where there's no prior published
+  // state to preserve), so on the draft path this UPDATE is just
+  // re-asserting the same values.
+  if (frameSource) {
+    const result = await db
+      .prepare(
+        `UPDATE datasets
+           SET transcoding = NULL,
+               active_transcode_upload_id = NULL,
+               data_ref = ?,
+               content_digest = NULL,
+               frame_count = ?,
+               frame_extension = ?,
+               frame_source_filenames_ref = ?,
+               updated_at = ?
+         WHERE id = ? AND active_transcode_upload_id = ?`,
+      )
+      .bind(
+        dataRef,
+        frameSource.frame_count,
+        frameSource.frame_extension,
+        frameSource.frame_source_filenames_ref,
+        now,
+        datasetId,
+        uploadId,
+      )
+      .run()
+    return result.meta?.changes ?? 0
+  }
   const result = await db
     .prepare(
       `UPDATE datasets

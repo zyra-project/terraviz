@@ -444,6 +444,14 @@ async function handleImageSequenceInit(
   // tour uses the manual `data_ref` field. The error envelope
   // mirrors `mime_format_mismatch` from the single-file path so
   // the client renders one code path for both shapes.
+  //
+  // Status is 400 here (mint-time "body rejected against current
+  // state") and 409 at the matching check in /complete (apply-time
+  // "dataset state changed between mint and complete"). The two
+  // status codes are deliberately different — they describe
+  // semantically different scenarios — but the `code` + `field`
+  // are shared so a client that switches on `code` handles both
+  // uniformly. Phase 3pf-review/E — Copilot discussion_r3263124301.
   if (existing.format !== 'video/mp4') {
     return new Response(
       JSON.stringify({

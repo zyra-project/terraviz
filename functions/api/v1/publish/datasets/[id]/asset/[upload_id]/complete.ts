@@ -767,6 +767,19 @@ async function handleFrameSourceComplete(
   }
 
   const frameCount = upload.frame_count as number
+  // `extension` is recomputed from `upload.mime` rather than
+  // stored on the asset_uploads row. This relies on `extForMime`
+  // being stable across the mint → complete window: if a future
+  // change ever flipped `image/jpeg` from `jpg` to `jpeg`, an
+  // upload minted before the change but completed after would
+  // HEAD the wrong keys (the bytes landed at `jpg`-suffixed
+  // keys; the new mapping would look for `jpeg`-suffixed ones).
+  // The mapping is intentionally well-known + stable (it mirrors
+  // the canonical Web MIME ↔ extension associations), so the
+  // risk is low. If we ever need to mutate it, add a
+  // `frame_extension` column to asset_uploads in a migration so
+  // the mint-time value is the source of truth. Phase 3pf-review/E
+  // — Copilot discussion_r3263124313.
   const extension = extForMime(upload.mime)
 
   // Concurrency guard — same logic as the MP4 path. A row already
@@ -806,6 +819,20 @@ async function handleFrameSourceComplete(
   // missing object fails the upload — the publisher's PUTs either
   // didn't all land or didn't reach R2 at all.
   if (!mockR2) {
+    // Pre-check the R2 binding once before issuing N+1 parallel
+    // HEADs. The prior shape ran every HEAD against a missing
+    // binding before the first one's `'binding_missing'` reason
+    // surfaced as 503 — that's ~10001 amplified errors in the
+    // request log at the 10 000-frame cap for what's a single
+    // operator misconfiguration. Phase 3pf-review/E —
+    // Copilot suppressed-confidence #4.
+    if (!context.env.CATALOG_R2) {
+      return jsonError(
+        503,
+        'r2_binding_missing',
+        'CATALOG_R2 binding is not configured on this deployment.',
+      )
+    }
     const frameKeys = Array.from({ length: frameCount }, (_, i) =>
       buildFrameKey(datasetId, uploadId, i, extension),
     )
