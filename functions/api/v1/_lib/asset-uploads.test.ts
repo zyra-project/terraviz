@@ -212,7 +212,15 @@ describe('validateImageSequenceInit', () => {
       size: 4_000_000,
     }))
     const size = frames.reduce((sum, f) => sum + f.size, 0)
-    return { kind: 'data', mime, frames, size }
+    return {
+      kind: 'data',
+      mime,
+      frames,
+      size,
+      // Validator now owns the digest's shape check — every
+      // happy-path body needs a well-formed value to pass.
+      source_filenames_digest: `sha256:${'f'.repeat(64)}`,
+    }
   }
 
   it('accepts a happy-path body and surfaces totals + extension', () => {
@@ -350,6 +358,44 @@ describe('validateImageSequenceInit', () => {
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.errors.some(e => e.code === 'size_sum_mismatch')).toBe(true)
+  })
+
+  it('rejects a missing or malformed source_filenames_digest', () => {
+    // Validator owns the field's shape check (3pf-review/A) so the
+    // route handler's mint step never runs against a malformed
+    // claim. The MAX_TOTAL_BYTES sum + this digest gate are the
+    // last two body-shape pre-conditions a successful mint depends
+    // on.
+    const missing = happyBody(2)
+    delete missing.source_filenames_digest
+    const missingResult = validateImageSequenceInit(missing)
+    expect(missingResult.ok).toBe(false)
+    if (missingResult.ok) return
+    expect(
+      missingResult.errors.some(
+        e => e.field === 'source_filenames_digest' && e.code === 'invalid_digest',
+      ),
+    ).toBe(true)
+
+    const malformed = happyBody(2)
+    malformed.source_filenames_digest = 'not-a-digest'
+    const malformedResult = validateImageSequenceInit(malformed)
+    expect(malformedResult.ok).toBe(false)
+    if (malformedResult.ok) return
+    expect(
+      malformedResult.errors.some(
+        e => e.field === 'source_filenames_digest' && e.code === 'invalid_digest',
+      ),
+    ).toBe(true)
+  })
+
+  it('surfaces the validated source-filenames digest on the success path', () => {
+    const body = happyBody(2)
+    body.source_filenames_digest = `sha256:${'b'.repeat(64)}`
+    const result = validateImageSequenceInit(body)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.sourceFilenamesDigest).toBe(`sha256:${'b'.repeat(64)}`)
   })
 
   it('suppresses the sum-mismatch report when per-frame size errors are the root cause', () => {

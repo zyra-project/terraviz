@@ -299,6 +299,7 @@
   "publisher.assetUploader.frames.startUpload": "Upload {count} frame(s)",
   "publisher.assetUploader.frames.tooFew": "Pick at least one frame.",
   "publisher.assetUploader.frames.tooMany": "Pick at most {max} frames.",
+  "publisher.assetUploader.frames.totalSizeExceeded": "Aggregate size {actual} exceeds the {max} cap.",
   "publisher.assetUploader.frames.unsupportedMime": "Frames must be PNG, JPEG, or WebP. Picked file type: {actual}.",
   "publisher.assetUploader.frames.uploadingProgress": "Uploading frame {current}/{total}…",
   "publisher.assetUploader.mimeMismatch": "Picked file type ({actual}) doesn't match the dataset's declared format ({expected}). Change the dataset's format first, or pick a matching file.",

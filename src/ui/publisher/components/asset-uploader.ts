@@ -162,6 +162,14 @@ const FRAME_MIME_ALLOWLIST: ReadonlySet<string> = new Set([
  *  lives in `docs/CATALOG_IMAGE_SEQUENCE_PLAN.md` §Open Q4. */
 const MAX_FRAMES = 10_000
 
+/** Aggregate-size cap mirrors `SIZE_IMAGE_SEQUENCE_TOTAL` on the
+ *  publisher API (10 GB). Enforced client-side as well as
+ *  server-side so a publisher who drags in tens of GB of high-res
+ *  PNGs gets a fail-fast rejection before the ~100 s in-browser
+ *  hash budget burns. The two values must agree — if a future
+ *  change raises the server cap, raise this constant too. */
+const MAX_TOTAL_BYTES = 10 * 1024 * 1024 * 1024
+
 /** Bounded concurrency for the per-frame PUT pool. 5 matches the
  *  Phase 3pf plan recommendation — high enough that R2's edge
  *  parallelises the writes, low enough that a typical residential
@@ -186,6 +194,13 @@ interface FramesState {
   stage: FramesStage
   /** Picked + lexicographically-sorted files. Cleared on retry. */
   files: File[]
+  /** Resolved per-frame MIME (`image/png` / `image/jpeg` /
+   *  `image/webp`). Computed once in `handleFramesPicked` from
+   *  the first file's `type` (or filename fallback) and asserted
+   *  to match every subsequent file — so the run path uses a
+   *  verified value rather than re-deriving on a potentially
+   *  empty array. */
+  mime: string
   /** 1-based progress counter for `hashing` / `uploading` stages. */
   current: number
   /** Aggregate progress fraction 0..1 for the visible `<progress>`. */
@@ -196,6 +211,7 @@ interface FramesState {
 const INITIAL_FRAMES: FramesState = {
   stage: 'idle',
   files: [],
+  mime: '',
   current: 0,
   progress: 0,
 }
@@ -586,6 +602,23 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
         return
       }
     }
+    // Aggregate-size cap mirrors the server's
+    // `SIZE_IMAGE_SEQUENCE_TOTAL` (10 GB) so a publisher who picks
+    // tens of GB of high-res PNGs fails fast rather than waiting
+    // out the in-browser hash budget before the server rejects.
+    const totalBytes = picked.reduce((sum, f) => sum + f.size, 0)
+    if (totalBytes > MAX_TOTAL_BYTES) {
+      framesState = {
+        ...INITIAL_FRAMES,
+        stage: 'error',
+        errorDetail: t('publisher.assetUploader.frames.totalSizeExceeded', {
+          actual: formatBytes(totalBytes),
+          max: formatBytes(MAX_TOTAL_BYTES),
+        }),
+      }
+      paint()
+      return
+    }
     // Lexicographic sort by filename. Deterministic encode order
     // for the typical `frame_00001.png … frame_99999.png` shape;
     // the manual-order textarea is a deferred follow-up for
@@ -595,6 +628,7 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
       ...INITIAL_FRAMES,
       stage: 'picked',
       files: sorted,
+      mime: firstMime,
     }
     paint()
   }
@@ -655,7 +689,13 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
         `/api/v1/publish/datasets/${encodeURIComponent(options.datasetId)}/asset`,
         {
           kind: 'data',
-          mime: frameDigests.length > 0 ? files[0].type || mimeFromFilename(files[0].name) : 'image/png',
+          // Use the mime resolved + asserted-uniform during
+          // handleFramesPicked, not a re-derivation from
+          // files[0].type — by here we already know every file's
+          // mime matches and is in the allowlist. (The prior
+          // fallback to `'image/png'` could mask an invariant
+          // violation by sending a wrong mime to the server.)
+          mime: framesState.mime,
           frames: frameDigests,
           size: totalSize,
           source_filenames_digest: sourceFilenamesDigest,

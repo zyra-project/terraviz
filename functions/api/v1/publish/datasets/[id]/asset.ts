@@ -435,7 +435,7 @@ async function handleImageSequenceInit(
       headers: { 'Content-Type': CONTENT_TYPE },
     })
   }
-  const { mime, extension, frames, totalSize } = validated.value
+  const { mime, extension, frames, totalSize, sourceFilenamesDigest } = validated.value
 
   // Image-sequence sources always encode to a video HLS bundle —
   // the dataset row's `format` therefore has to be `video/mp4`.
@@ -550,6 +550,20 @@ async function handleImageSequenceInit(
   // running ffmpeg, so a tampered manifest fails the workflow
   // rather than the publisher API.
   //
+  // **Digest trust model.** The publisher's client computes
+  // `sourceFilenamesDigest` BEFORE PUTing the actual blob — there is
+  // no enforcement here that the bytes which subsequently land at
+  // the source-filenames presigned URL hash to the declared value.
+  // A buggy or hostile client could PUT bytes that don't match;
+  // `verifySourceFilenamesBlob` in `cli/transcode-from-dispatch.ts`
+  // catches the mismatch by re-hashing the blob inside the GHA
+  // runner before encoding (same bargain the MP4 path makes with
+  // the source MP4's claimed digest). This is intentional — the
+  // alternative (Worker-side re-hash) wouldn't help because the
+  // PUT goes directly to R2 and the Worker never sees the bytes
+  // anyway. The indirection (publisher hashes JSON → PUTs JSON →
+  // runner re-hashes JSON) is what makes the trust boundary work.
+  //
   // We trust the parent body's claimed total `size` was already
   // cross-checked against the sum of `frames[*].size` by the
   // validator, so `declared_size` is the validated `totalSize`.
@@ -559,26 +573,6 @@ async function handleImageSequenceInit(
   // frames live under. /complete reconstructs the per-frame keys
   // from `dataset_id + upload_id + frame_count + extension`.
   const targetRef = `r2:${buildFrameSequencePrefix(id, uploadId)}`
-  const sourceFilenamesDigest = typeof body.source_filenames_digest === 'string'
-    ? body.source_filenames_digest
-    : null
-  if (!sourceFilenamesDigest || !/^sha256:[0-9a-f]{64}$/.test(sourceFilenamesDigest)) {
-    return new Response(
-      JSON.stringify({
-        errors: [
-          {
-            field: 'source_filenames_digest',
-            code: 'invalid_digest',
-            message:
-              'source_filenames_digest must be sha256:<64 lowercase hex chars>. The client ' +
-              'computes it from the canonical JSON of {filename, index} entries so the GHA ' +
-              "runner can re-verify the manifest's contents before encoding.",
-          },
-        ],
-      }),
-      { status: 400, headers: { 'Content-Type': CONTENT_TYPE } },
-    )
-  }
   await insertAssetUpload(context.env.CATALOG_DB!, {
     id: uploadId,
     dataset_id: id,
@@ -599,9 +593,11 @@ async function handleImageSequenceInit(
     target: 'r2',
     frames: frameMints,
     source_filenames: sourceFilenamesMint,
-    expires_at: frameMints[0]?.headers && frameMints.length > 0
-      ? new Date(Date.now() + R2_PUT_TTL_VIDEO_SECONDS * 1000).toISOString()
-      : new Date(Date.now() + R2_PUT_TTL_SECONDS * 1000).toISOString(),
+    // `validateImageSequenceInit` rejects empty `frames` arrays
+    // before we reach here, so the frame-tier video TTL applies
+    // unconditionally — every presigned PUT in the response uses
+    // the same expiry.
+    expires_at: new Date(Date.now() + R2_PUT_TTL_VIDEO_SECONDS * 1000).toISOString(),
     mock,
   }
 

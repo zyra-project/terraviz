@@ -172,6 +172,13 @@ export interface ImageSequenceInitBody {
    *  the array totals — declared mismatch fails the request. */
   size?: unknown
   frames?: unknown
+  /** SHA-256 of the canonical source-filenames JSON the publisher
+   *  PUTs alongside the frames. The GHA runner re-hashes that
+   *  blob and compares — see `verifySourceFilenamesBlob` in
+   *  `cli/transcode-from-dispatch.ts`. The validator owns this
+   *  field's shape check so the route handler's mint step never
+   *  runs against a malformed claim. */
+  source_filenames_digest?: unknown
 }
 
 /** One entry in the `frames` array passed by the client. */
@@ -192,6 +199,10 @@ export interface ValidatedImageSequenceInit {
    *  is the array index; the per-frame R2 key embeds that index. */
   frames: ImageSequenceFrameInit[]
   totalSize: number
+  /** Validated `sha256:<64-hex>` digest of the canonical
+   *  source-filenames JSON blob. Stored on the asset_uploads row's
+   *  `claimed_digest`; the runner re-verifies before encoding. */
+  sourceFilenamesDigest: string
 }
 
 /**
@@ -401,6 +412,26 @@ export function validateImageSequenceInit(
     })
   }
 
+  // `source_filenames_digest` is the SHA-256 of the canonical
+  // source-filenames JSON blob the publisher PUTs alongside the
+  // frames. Owning it here keeps the route handler's mint step
+  // from running against a malformed claim (N + 1 SigV4
+  // computations before a 400 was the prior shape) and makes the
+  // validator the single source of truth for the body's shape.
+  if (
+    typeof body.source_filenames_digest !== 'string' ||
+    !/^sha256:[0-9a-f]{64}$/.test(body.source_filenames_digest)
+  ) {
+    errors.push({
+      field: 'source_filenames_digest',
+      code: 'invalid_digest',
+      message:
+        'source_filenames_digest must be sha256:<64 lowercase hex chars>. The client ' +
+        'computes it from the canonical JSON of {filename, index} entries so the GHA ' +
+        "runner can re-verify the manifest's contents before encoding.",
+    })
+  }
+
   if (errors.length) return { ok: false, errors }
   // Non-null narrowing — `mime` is set above on the success path
   // because the validator returns early on shape errors; the
@@ -413,6 +444,7 @@ export function validateImageSequenceInit(
       extension: extForMime(mime!),
       frames: validatedFrames,
       totalSize,
+      sourceFilenamesDigest: body.source_filenames_digest as string,
     },
   }
 }
