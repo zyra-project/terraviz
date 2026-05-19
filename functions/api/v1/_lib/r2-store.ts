@@ -256,9 +256,15 @@ export function buildFrameSequencePrefix(datasetId: string, uploadId: string): s
  * alongside the frames (not inside `frames/`) so a list against
  * `buildFrameSequencePrefix` enumerates only the frames themselves.
  *
- * The blob carries an array shaped `[{ index, originalFilename }, ...]`
- * with one entry per frame in encode order. The frames-as-data
- * exposure work (Phase 3pg) surfaces these as `originalFilename`
+ * The blob carries an array shaped `[{ index, filename, digest }, ...]`
+ * with one entry per frame in encode order. `index` is the
+ * zero-based position and matches the encoded `frames/{NNNNN}` key;
+ * `filename` preserves the publisher's on-disk name; `digest` is
+ * the `sha256:<hex>` of the frame bytes PUT to R2, used by the
+ * transcode runner to verify each frame against what the publisher
+ * signed off on (see `cli/transcode-from-dispatch.ts`).
+ *
+ * The frames-as-data exposure work (Phase 3pg) surfaces `filename`
  * on `/frames` responses so consumers that need to map back to the
  * publisher's on-disk convention (downstream pipelines, federated
  * mirrors) can do so. Display naming in the UI uses a derived

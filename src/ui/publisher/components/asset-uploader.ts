@@ -475,9 +475,13 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
       frag.appendChild(current)
     }
 
-    // Multi-file picker — `multiple` attribute lets the publisher
-    // select an entire directory of frames in one go. Same
-    // disabled-while-busy rule as the single-file picker.
+    // Multi-file picker — `multiple` lets the publisher select
+    // many frames at once via their OS file picker (Shift-click
+    // or Cmd/Ctrl-click). It does NOT enable folder picking;
+    // that requires the non-standard `webkitdirectory` attribute,
+    // which is uneven across browsers (notably mobile Safari) so
+    // we rely on multi-select instead. Same disabled-while-busy
+    // rule as the single-file picker.
     const inputRow = document.createElement('div')
     inputRow.className = 'publisher-asset-uploader-input-row'
     const inputId = FRAMES_INPUT_ID

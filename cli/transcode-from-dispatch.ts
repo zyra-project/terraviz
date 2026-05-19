@@ -298,6 +298,21 @@ async function verifySourceFilenamesBlob(
     ) {
       throw new Error(`source-filenames[${i}] is malformed: ${JSON.stringify(entry)}`)
     }
+    // The blob is canonical encode order — each entry's `index`
+    // field must be a non-negative integer that matches its
+    // array position. Validating here makes the positional
+    // lookup in `downloadFrames` trustworthy: if `index === i`
+    // for every entry, then `manifest[i]` is guaranteed to be
+    // the entry for frame `i` and every index is unique. Without
+    // this check, a manifest with shuffled entries (or duplicate
+    // / missing indexes) would verify each frame's digest
+    // against the wrong declared hash.
+    const entryIndex = (entry as Record<string, unknown>).index as number
+    if (!Number.isInteger(entryIndex) || entryIndex !== i) {
+      throw new Error(
+        `source-filenames[${i}].index=${entryIndex} does not match array position`,
+      )
+    }
     return entry as SourceFilenameEntry
   })
 }
@@ -346,10 +361,20 @@ async function downloadFrames(
       const destPath = join(framesDir, `${padded}.${args.frameExtension}`)
       try {
         const result = await downloadFromR2(config, key, destPath)
-        const expected = manifest[i].digest
-        if (result.digest !== expected) {
+        // `verifySourceFilenamesBlob` enforces `entry.index === i`
+        // for every entry, so positional lookup is the entry
+        // for frame `i`. Re-assert here so a future refactor
+        // that loosens the verify step can't silently desync
+        // the digest check from the frame being downloaded.
+        const entry = manifest[i]
+        if (entry.index !== i) {
           throw new Error(
-            `digest mismatch (expected=${expected} actual=${result.digest})`,
+            `manifest entry index ${entry.index} does not match frame position ${i}`,
+          )
+        }
+        if (result.digest !== entry.digest) {
+          throw new Error(
+            `digest mismatch (expected=${entry.digest} actual=${result.digest})`,
           )
         }
       } catch (err) {
