@@ -693,7 +693,7 @@ export async function applyAssetAndMarkCompleted(
  * dispatch fires against a row whose state already matches what
  * the workflow expects. The asset_uploads row stays `pending`
  * and gets flipped to `completed` only after the dispatch is
- * confirmed (see `markVideoUploadCompleted` below).
+ * confirmed (see `markTranscodingUploadCompleted` below).
  *
  * Conditional WHERE clause is the atomic counterpart to the
  * route's JS-level overlap check: stamp only if the row isn't
@@ -828,17 +828,24 @@ export async function stampTranscodingForFrameSource(
 
 /**
  * Mark just the asset_uploads row as completed. The companion
- * dataset-row stamp lives in `stampTranscodingForVideoSource`
- * above; the two are split so the /complete handler can persist
- * the dataset state, fire the external dispatch, and then mark
- * the upload completed only after the dispatch confirms.
+ * dataset-row stamp lives in `stampTranscodingForVideoSource` /
+ * `stampTranscodingForFrameSource`; the three are split so the
+ * /complete handler can persist the dataset state, fire the
+ * external dispatch, and then mark the upload completed only
+ * after the dispatch confirms.
+ *
+ * Both source kinds (MP4 + image-sequence) share this helper —
+ * the upload-row schema is identical and the lifecycle invariant
+ * is the same. The earlier `markTranscodingUploadCompleted` name read
+ * as MP4-specific and misled readers tracing the frame-source
+ * flow; renamed in 3pf-review/B.
  *
  * The `WHERE status = 'pending'` guard makes this idempotent
  * against a retry in the same way `applyAssetAndMarkCompleted`
  * is — a duplicate /complete call inside a tight retry window
  * is a no-op rather than a double-update.
  */
-export async function markVideoUploadCompleted(
+export async function markTranscodingUploadCompleted(
   db: D1Database,
   uploadId: string,
   now: string,

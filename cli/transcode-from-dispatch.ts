@@ -86,7 +86,7 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { AwsClient } from 'aws4fetch'
-import { encodeHls } from './lib/ffmpeg-hls'
+import { encodeHls, OUTPUT_FRAME_RATE } from './lib/ffmpeg-hls'
 import {
   uploadHlsBundle,
   loadR2ConfigFromEnv,
@@ -193,6 +193,17 @@ export function parseArgs(argv: readonly string[]): Args | { error: string } {
   // sourceKind === 'frames'
   const frameCountRaw = get('frame-count')
   const frameCount = frameCountRaw !== null ? Number(frameCountRaw) : NaN
+  // Cap is duplicated from `MAX_IMAGE_SEQUENCE_FRAMES` in
+  // `functions/api/v1/_lib/asset-uploads.ts` — keep the two in
+  // lockstep. Importing the publisher API constant into the CLI
+  // would cross the Worker / Node module-resolution boundary
+  // (Workers can't import the CLI; the CLI's `tsx` runner can't
+  // straightforwardly load the Pages-Functions module graph
+  // either), so the canonical definition lives server-side and
+  // this comment + the rationale doc in
+  // `CATALOG_IMAGE_SEQUENCE_PLAN.md` §Open Q4 is the cross-ref.
+  // If a future change raises (or lowers) the cap on one side,
+  // grep for `10_000` across both files and update both.
   if (!Number.isInteger(frameCount) || frameCount <= 0 || frameCount > 10_000) {
     return {
       error: `--frame-count must be a positive integer ≤ 10000; got ${frameCountRaw ?? '(missing)'}`,
@@ -554,7 +565,7 @@ async function main(): Promise<number> {
       // each output rendition then keeps the encode at the
       // catalog-wide 30 fps invariant.
       ffmpegInputPath = join(framesDir, `%05d.${args.frameExtension}`)
-      ffmpegInputArgs = ['-framerate', '30']
+      ffmpegInputArgs = ['-framerate', String(OUTPUT_FRAME_RATE)]
     }
 
     console.error(`[transcode] encoding ${ffmpegInputPath} → ${outputDir}`)

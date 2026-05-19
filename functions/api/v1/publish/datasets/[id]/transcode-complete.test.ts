@@ -184,7 +184,7 @@ describe('POST .../transcode-complete — happy path', () => {
 
   it('marks the asset_uploads row completed (durable backstop for /complete mark-failure)', async () => {
     // PR #112 followup — /asset/.../complete's
-    // markVideoUploadCompleted step can fail transiently after
+    // markTranscodingUploadCompleted step can fail transiently after
     // dispatch succeeds, leaving the upload row stuck `pending`.
     // /transcode-complete re-marks it here so the post-workflow
     // state is always upload.status='completed', and any retry
@@ -425,7 +425,7 @@ describe('POST .../transcode-complete — refusals', () => {
       )
     // Also seed the asset_uploads row as `pending` — simulating
     // the gap where clearTranscoding committed but the original
-    // markVideoUploadCompleted step failed. The idempotent
+    // markTranscodingUploadCompleted step failed. The idempotent
     // branch should catch this up before returning so a
     // subsequent /asset/.../complete retry doesn't re-stamp the
     // row and re-dispatch the workflow. PR #112 followup —

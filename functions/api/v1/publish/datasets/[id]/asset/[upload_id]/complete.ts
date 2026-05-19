@@ -60,7 +60,7 @@ import {
   extForMime,
   getAssetUpload,
   markAssetUploadFailed,
-  markVideoUploadCompleted,
+  markTranscodingUploadCompleted,
   revertTranscodingStamp,
   stampTranscodingForFrameSource,
   stampTranscodingForVideoSource,
@@ -512,7 +512,7 @@ export const onRequestPost: PagesFunction<CatalogEnv, keyof RouteParams> = async
     // row was already in the `transcoding=1 +
     // active_transcode_upload_id = uploadId` state. That branch
     // was meant to absorb the case "stamp succeeded, dispatch
-    // succeeded, markVideoUploadCompleted failed transiently"
+    // succeeded, markTranscodingUploadCompleted failed transiently"
     // without firing a duplicate dispatch. PR #112 followup
     // pointed out that the same row state can ALSO be produced
     // by "stamp succeeded, dispatch failed, revertTranscodingStamp
@@ -636,7 +636,7 @@ export const onRequestPost: PagesFunction<CatalogEnv, keyof RouteParams> = async
     //    succeeded. A later /complete retry on the same upload
     //    would now read status='completed' and short-circuit
     //    cleanly via the idempotent branch above.
-    await markVideoUploadCompleted(context.env.CATALOG_DB!, uploadId, now)
+    await markTranscodingUploadCompleted(context.env.CATALOG_DB!, uploadId, now)
 
     const updatedAfterDispatch = await context.env.CATALOG_DB!
       .prepare(`SELECT * FROM datasets WHERE id = ?`)
@@ -946,7 +946,7 @@ async function handleFrameSourceComplete(
     return jsonError(502, 'github_dispatch_upstream_error', message)
   }
 
-  await markVideoUploadCompleted(context.env.CATALOG_DB!, uploadId, now)
+  await markTranscodingUploadCompleted(context.env.CATALOG_DB!, uploadId, now)
 
   const updatedAfterDispatch = await context.env.CATALOG_DB!
     .prepare(`SELECT * FROM datasets WHERE id = ?`)

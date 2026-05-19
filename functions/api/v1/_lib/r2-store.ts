@@ -105,6 +105,25 @@ export const MOCK_R2_HOST = 'https://mock-r2.localhost'
 export const VIDEO_SOURCE_KEY_PREFIX = 'uploads'
 
 /**
+ * Throw if `value` isn't a Crockford-ULID-shaped string (26 base32
+ * chars from the `0-9A-HJKMNP-TV-Z` alphabet). The dataset_id /
+ * upload_id arguments to every key-building helper are
+ * canonically ULIDs minted by `newUlid()`; rejecting any other
+ * shape fails fast on a misrouted call rather than letting an
+ * arbitrary string land in an R2 key path. `label` is the
+ * argument name surfaced in the error so a stack trace points
+ * at the offending parameter.
+ */
+const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/
+function assertUlid(label: string, value: string): void {
+  if (!ULID_PATTERN.test(value)) {
+    throw new Error(
+      `${label} must be a ULID (26 base32 chars), got "${value}"`,
+    )
+  }
+}
+
+/**
  * Build the R2 key for a video source upload that's destined for
  * transcoding. `r2:uploads/{dataset_id}/{upload_id}/source.mp4`.
  * Used only for `kind='data'` + `mime='video/mp4'` uploads in
@@ -120,16 +139,8 @@ export const VIDEO_SOURCE_KEY_PREFIX = 'uploads'
  * fresh upload_id and a fresh source key.
  */
 export function buildVideoSourceKey(datasetId: string, uploadId: string): string {
-  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(datasetId)) {
-    throw new Error(
-      `buildVideoSourceKey: datasetId must be a ULID (26 base32 chars), got "${datasetId}"`,
-    )
-  }
-  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(uploadId)) {
-    throw new Error(
-      `buildVideoSourceKey: uploadId must be a ULID (26 base32 chars), got "${uploadId}"`,
-    )
-  }
+  assertUlid('buildVideoSourceKey: datasetId', datasetId)
+  assertUlid('buildVideoSourceKey: uploadId', uploadId)
   return `${VIDEO_SOURCE_KEY_PREFIX}/${datasetId}/${uploadId}/source.mp4`
 }
 
@@ -189,16 +200,8 @@ export function buildFrameKey(
   index: number,
   ext: string,
 ): string {
-  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(datasetId)) {
-    throw new Error(
-      `buildFrameKey: datasetId must be a ULID (26 base32 chars), got "${datasetId}"`,
-    )
-  }
-  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(uploadId)) {
-    throw new Error(
-      `buildFrameKey: uploadId must be a ULID (26 base32 chars), got "${uploadId}"`,
-    )
-  }
+  assertUlid('buildFrameKey: datasetId', datasetId)
+  assertUlid('buildFrameKey: uploadId', uploadId)
   if (!Number.isInteger(index) || index < 0 || index > 99999) {
     throw new Error(
       `buildFrameKey: index must be an integer in [0, 99999], got ${index}`,
@@ -241,16 +244,8 @@ export function isFrameKey(key: string): boolean {
  *  returns exactly the per-frame objects without picking up the
  *  sibling `source_filenames.json` blob. */
 export function buildFrameSequencePrefix(datasetId: string, uploadId: string): string {
-  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(datasetId)) {
-    throw new Error(
-      `buildFrameSequencePrefix: datasetId must be a ULID (26 base32 chars), got "${datasetId}"`,
-    )
-  }
-  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(uploadId)) {
-    throw new Error(
-      `buildFrameSequencePrefix: uploadId must be a ULID (26 base32 chars), got "${uploadId}"`,
-    )
-  }
+  assertUlid('buildFrameSequencePrefix: datasetId', datasetId)
+  assertUlid('buildFrameSequencePrefix: uploadId', uploadId)
   return `${VIDEO_SOURCE_KEY_PREFIX}/${datasetId}/${uploadId}/frames/`
 }
 
@@ -272,16 +267,8 @@ export function buildFrameSequencePrefix(datasetId: string, uploadId: string): s
  * rationale.
  */
 export function buildFrameSourceFilenamesKey(datasetId: string, uploadId: string): string {
-  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(datasetId)) {
-    throw new Error(
-      `buildFrameSourceFilenamesKey: datasetId must be a ULID (26 base32 chars), got "${datasetId}"`,
-    )
-  }
-  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(uploadId)) {
-    throw new Error(
-      `buildFrameSourceFilenamesKey: uploadId must be a ULID (26 base32 chars), got "${uploadId}"`,
-    )
-  }
+  assertUlid('buildFrameSourceFilenamesKey: datasetId', datasetId)
+  assertUlid('buildFrameSourceFilenamesKey: uploadId', uploadId)
   return `${VIDEO_SOURCE_KEY_PREFIX}/${datasetId}/${uploadId}/source_filenames.json`
 }
 
@@ -310,16 +297,8 @@ export const VIDEO_BUNDLE_KEY_PREFIX = 'videos'
  * the upload row.
  */
 export function buildVideoBundleMasterKey(datasetId: string, uploadId: string): string {
-  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(datasetId)) {
-    throw new Error(
-      `buildVideoBundleMasterKey: datasetId must be a ULID (26 base32 chars), got "${datasetId}"`,
-    )
-  }
-  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(uploadId)) {
-    throw new Error(
-      `buildVideoBundleMasterKey: uploadId must be a ULID (26 base32 chars), got "${uploadId}"`,
-    )
-  }
+  assertUlid('buildVideoBundleMasterKey: datasetId', datasetId)
+  assertUlid('buildVideoBundleMasterKey: uploadId', uploadId)
   return `${VIDEO_BUNDLE_KEY_PREFIX}/${datasetId}/${uploadId}/master.m3u8`
 }
 

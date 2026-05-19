@@ -55,7 +55,7 @@ import type { CatalogEnv } from '../../../_lib/env'
 import type { PublisherData } from '../../_middleware'
 import type { DatasetRow } from '../../../_lib/catalog-store'
 import { writeDatasetAudit } from '../../../_lib/audit-store'
-import { clearTranscoding, getAssetUpload, markVideoUploadCompleted } from '../../../_lib/asset-uploads'
+import { clearTranscoding, getAssetUpload, markTranscodingUploadCompleted } from '../../../_lib/asset-uploads'
 import { invalidateSnapshot } from '../../../_lib/snapshot'
 import { buildVideoBundleMasterKey, isVideoSourceKey } from '../../../_lib/r2-store'
 
@@ -162,7 +162,7 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
       // dataset row (clearTranscoding) but failed to mark the
       // upload (transient D1 error after the first UPDATE). The
       // workflow's retry then lands here — without the catch-up
-      // markVideoUploadCompleted, the upload row stays `pending`
+      // markTranscodingUploadCompleted, the upload row stays `pending`
       // and a later /asset/.../complete retry on the same upload
       // would re-stamp transcoding=1 and dispatch another
       // workflow. The mark step is itself idempotent
@@ -170,7 +170,7 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
       // completed row is a no-op. PR #112 followup —
       // transcode-complete.ts:idempotent-skips-mark.
       const now = new Date().toISOString()
-      await markVideoUploadCompleted(db, validated.upload_id, now)
+      await markTranscodingUploadCompleted(db, validated.upload_id, now)
       return new Response(
         JSON.stringify({ dataset: existing, idempotent: true }),
         {
@@ -275,7 +275,7 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
   // `pending` state is just bookkeeping debt. PR #112 followup —
   // closes the alreadyCompleted recovery vector by making
   // `upload.status` the only signal a retry of /complete needs.
-  await markVideoUploadCompleted(db, validated.upload_id, now)
+  await markTranscodingUploadCompleted(db, validated.upload_id, now)
 
   // Refresh the row so the response carries the latest state.
   const updated = await db

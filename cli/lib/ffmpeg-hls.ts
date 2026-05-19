@@ -94,6 +94,20 @@ export const DEFAULT_SEGMENT_SECONDS = 6
 export const DEFAULT_AUDIO_BITRATE_KBPS = 192
 export const MASTER_PLAYLIST_NAME = 'master.m3u8'
 
+/**
+ * Catalog-wide output frame rate. The tour engine's `frameRate`
+ * task in `src/services/tourEngine.ts:execDatasetAnimation`
+ * hard-codes 30 fps as the assumed source rate when computing
+ * playback rate as `requestedFps / 30`; encoding everything at
+ * 30 fps keeps that math correct by construction for any source
+ * (MP4 OR image-sequence). The image-sequence path also passes
+ * `-framerate 30` on the input side via the runner's
+ * `inputArgs`. Both halves use this constant so a future change
+ * (e.g. raising to 60 fps to match a future tour-engine update)
+ * is a one-line edit.
+ */
+export const OUTPUT_FRAME_RATE = 30
+
 /** Bytes of FFmpeg stderr to retain for error reporting. The
  * accumulator below trims itself once total bytes exceeds 2 ×
  * this value so memory is bounded regardless of encode duration. */
@@ -248,9 +262,9 @@ export function buildFfmpegArgs(
     // requested. With `-r 30` on the output side, the
     // `-keyint_min` / `-g` math (segmentSeconds × 30) below is
     // now correct by construction rather than by assumption.
-    args.push(`-r:v:${i}`, '30')
-    args.push(`-keyint_min:v:${i}`, String(segmentSeconds * 30))
-    args.push(`-g:v:${i}`, String(segmentSeconds * 30))
+    args.push(`-r:v:${i}`, String(OUTPUT_FRAME_RATE))
+    args.push(`-keyint_min:v:${i}`, String(segmentSeconds * OUTPUT_FRAME_RATE))
+    args.push(`-g:v:${i}`, String(segmentSeconds * OUTPUT_FRAME_RATE))
     args.push(`-sc_threshold:v:${i}`, '0')
   }
 
