@@ -205,18 +205,14 @@ export interface ValidatedImageSequenceInit {
   sourceFilenamesDigest: string
 }
 
-/**
- * Frame-count cap. Covers ~5.5 minutes of 30 fps content or ~1.1
- * years of hourly timeseries data, while keeping the in-browser
- * SHA-256 hash budget (~10 ms per frame on a typical laptop) and
- * the `POST /asset` response size (~1 KB presigned URL per frame,
- * ~10 MB JSON at the cap) both bounded. See
- * `docs/CATALOG_IMAGE_SEQUENCE_PLAN.md` §Open questions Q4 for the
- * rationale. The `buildFrameKey` helper hard-bounds at 99 999 via
- * its five-digit index format, so this cap is the binding
- * constraint.
- */
-export const MAX_IMAGE_SEQUENCE_FRAMES = 10_000
+// Frame-count cap is shared with the GHA runner + portal
+// uploader via a single source of truth in
+// `cli/lib/image-sequence-constants.ts`. Re-exported here so
+// existing call sites that import from this module keep working
+// without churning their import paths. Phase 3pf-review/F —
+// Copilot discussion_r3263124306.
+import { MAX_IMAGE_SEQUENCE_FRAMES } from '../../../../src/types/image-sequence-constants'
+export { MAX_IMAGE_SEQUENCE_FRAMES }
 
 /** Aggregate-size cap on an image-sequence upload. Same 10 GB
  *  ceiling as the MP4-source path — the runner's GHA budget is

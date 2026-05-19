@@ -23,7 +23,8 @@
   "include": [
     "**/*.ts",
     "../scripts/lib/**/*.ts",
-    "../src/types/index.ts"
+    "../src/types/index.ts",
+    "../src/types/image-sequence-constants.ts"
   ],
   "exclude": ["../node_modules", "../dist"]
 }

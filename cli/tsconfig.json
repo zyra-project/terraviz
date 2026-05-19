@@ -12,5 +12,5 @@
     "resolveJsonModule": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["."]
+  "include": [".", "../src/types/image-sequence-constants.ts"]
 }

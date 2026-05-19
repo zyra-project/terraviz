@@ -87,6 +87,7 @@ import {
 import { join } from 'node:path'
 import { AwsClient } from 'aws4fetch'
 import { encodeHls, OUTPUT_FRAME_RATE } from './lib/ffmpeg-hls'
+import { MAX_IMAGE_SEQUENCE_FRAMES } from '../src/types/image-sequence-constants'
 import {
   uploadHlsBundle,
   loadR2ConfigFromEnv,
@@ -193,20 +194,13 @@ export function parseArgs(argv: readonly string[]): Args | { error: string } {
   // sourceKind === 'frames'
   const frameCountRaw = get('frame-count')
   const frameCount = frameCountRaw !== null ? Number(frameCountRaw) : NaN
-  // Cap is duplicated from `MAX_IMAGE_SEQUENCE_FRAMES` in
-  // `functions/api/v1/_lib/asset-uploads.ts` — keep the two in
-  // lockstep. Importing the publisher API constant into the CLI
-  // would cross the Worker / Node module-resolution boundary
-  // (Workers can't import the CLI; the CLI's `tsx` runner can't
-  // straightforwardly load the Pages-Functions module graph
-  // either), so the canonical definition lives server-side and
-  // this comment + the rationale doc in
-  // `CATALOG_IMAGE_SEQUENCE_PLAN.md` §Open Q4 is the cross-ref.
-  // If a future change raises (or lowers) the cap on one side,
-  // grep for `10_000` across both files and update both.
-  if (!Number.isInteger(frameCount) || frameCount <= 0 || frameCount > 10_000) {
+  if (
+    !Number.isInteger(frameCount) ||
+    frameCount <= 0 ||
+    frameCount > MAX_IMAGE_SEQUENCE_FRAMES
+  ) {
     return {
-      error: `--frame-count must be a positive integer ≤ 10000; got ${frameCountRaw ?? '(missing)'}`,
+      error: `--frame-count must be a positive integer ≤ ${MAX_IMAGE_SEQUENCE_FRAMES}; got ${frameCountRaw ?? '(missing)'}`,
     }
   }
   const frameExtension = get('frame-extension')

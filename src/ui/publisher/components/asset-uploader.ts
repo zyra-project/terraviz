@@ -32,6 +32,7 @@
  */
 
 import { t, type MessageKey } from '../../../i18n'
+import { MAX_IMAGE_SEQUENCE_FRAMES as MAX_FRAMES } from '../../../types/image-sequence-constants'
 import {
   clearWarmupFlag,
   handleSessionError,
@@ -157,10 +158,11 @@ const FRAME_MIME_ALLOWLIST: ReadonlySet<string> = new Set([
   'image/webp',
 ])
 
-/** Frame-count cap mirrors `MAX_IMAGE_SEQUENCE_FRAMES` on the
- *  publisher API. The hash budget + JSON-response-size discussion
- *  lives in `docs/CATALOG_IMAGE_SEQUENCE_PLAN.md` §Open Q4. */
-const MAX_FRAMES = 10_000
+/** Frame-count cap is the single source of truth from
+ *  `cli/lib/image-sequence-constants.ts` (imported at the top of
+ *  this file). The hash budget + JSON-response-size discussion
+ *  lives in `docs/CATALOG_IMAGE_SEQUENCE_PLAN.md` §Open Q4.
+ *  Phase 3pf-review/F — Copilot discussion_r3263124306. */
 
 /** Aggregate-size cap mirrors `SIZE_IMAGE_SEQUENCE_TOTAL` on the
  *  publisher API (10 GB). Enforced client-side as well as
@@ -271,13 +273,39 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
   let activeTab: UploaderTab = 'video'
   const tabsEnabled = options.format === 'video/mp4'
 
+  // Stable ids used to wire the tab buttons to their tabpanel via
+  // ARIA. Per-instance unique enough that two uploaders mounted
+  // on the same page (vanishingly rare but cheap to protect
+  // against) don't collide. Phase 3pf-review/F — Copilot
+  // discussion_r3263124279.
+  const TAB_VIDEO_ID = `dataset-asset-tab-video-${Math.random().toString(36).slice(2, 8)}`
+  const TAB_FRAMES_ID = `dataset-asset-tab-frames-${Math.random().toString(36).slice(2, 8)}`
+  const PANEL_VIDEO_ID = `${TAB_VIDEO_ID}-panel`
+  const PANEL_FRAMES_ID = `${TAB_FRAMES_ID}-panel`
+
   function paint(): void {
     const frag = document.createDocumentFragment()
     if (tabsEnabled) {
       frag.appendChild(buildTabStrip())
     }
     if (tabsEnabled && activeTab === 'frames') {
-      frag.appendChild(buildFramesBody(framesState))
+      const panel = buildFramesBody(framesState)
+      // Wrap in a tabpanel-roled container so the panel announces
+      // its tab parentage to screen readers.
+      const wrapper = document.createElement('div')
+      wrapper.id = PANEL_FRAMES_ID
+      wrapper.setAttribute('role', 'tabpanel')
+      wrapper.setAttribute('aria-labelledby', TAB_FRAMES_ID)
+      wrapper.appendChild(panel)
+      frag.appendChild(wrapper)
+    } else if (tabsEnabled) {
+      const panel = buildBody(state)
+      const wrapper = document.createElement('div')
+      wrapper.id = PANEL_VIDEO_ID
+      wrapper.setAttribute('role', 'tabpanel')
+      wrapper.setAttribute('aria-labelledby', TAB_VIDEO_ID)
+      wrapper.appendChild(panel)
+      frag.appendChild(wrapper)
     } else {
       frag.appendChild(buildBody(state))
     }
@@ -291,11 +319,16 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
     for (const tab of ['video', 'frames'] as UploaderTab[]) {
       const btn = document.createElement('button')
       btn.type = 'button'
+      btn.id = tab === 'video' ? TAB_VIDEO_ID : TAB_FRAMES_ID
       btn.className =
         'publisher-asset-uploader-tab' +
         (activeTab === tab ? ' publisher-asset-uploader-tab-active' : '')
       btn.setAttribute('role', 'tab')
       btn.setAttribute('aria-selected', activeTab === tab ? 'true' : 'false')
+      btn.setAttribute(
+        'aria-controls',
+        tab === 'video' ? PANEL_VIDEO_ID : PANEL_FRAMES_ID,
+      )
       btn.textContent = t(
         tab === 'video'
           ? 'publisher.assetUploader.tab.video'
