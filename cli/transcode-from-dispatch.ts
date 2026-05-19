@@ -249,25 +249,77 @@ export function loadServerEnv(env: NodeJS.ProcessEnv = process.env): ServerEnv |
   }
 }
 
+/** One entry in the source-filenames JSON manifest. Mirrors the
+ *  shape the publisher's client builds in `asset-uploader.ts`'s
+ *  `runFrameSequence` — `{index, filename, digest}` for each
+ *  frame. */
+interface SourceFilenameEntry {
+  index: number
+  filename: string
+  digest: string
+}
+
+/**
+ * Fetch the canonical source-filenames JSON blob, recompute its
+ * SHA-256, compare against the dispatch payload's `source_digest`,
+ * and return the parsed manifest so the per-frame downloader can
+ * verify each frame against its declared digest.
+ *
+ * The two-step verification (blob hash + per-frame hash) is what
+ * makes the trust chain real: the blob hash proves the manifest
+ * itself wasn't tampered with after the publisher signed off; the
+ * per-frame check proves the bytes R2 hands us match the
+ * publisher's hash of the bytes they PUT. Without the per-frame
+ * step, the in-browser SHA-256 work the publisher did during
+ * upload would be wasted (the runner has nothing to verify
+ * against). Phase 3pf-review/D — Copilot
+ * discussion_r3263124234.
+ */
+async function verifySourceFilenamesBlob(
+  config: R2UploadConfig,
+  args: { datasetId: string; uploadId: string; sourceDigest: string; workdir: string },
+): Promise<SourceFilenameEntry[]> {
+  const key = `uploads/${args.datasetId}/${args.uploadId}/source_filenames.json`
+  const destPath = join(args.workdir, 'source_filenames.json')
+  const result = await downloadFromR2(config, key, destPath)
+  if (result.digest !== args.sourceDigest) {
+    throw new Error(
+      `source-filenames digest mismatch. expected=${args.sourceDigest} actual=${result.digest}`,
+    )
+  }
+  const text = await import('node:fs/promises').then(fs => fs.readFile(destPath, 'utf-8'))
+  const parsed = JSON.parse(text) as unknown
+  if (!Array.isArray(parsed)) {
+    throw new Error('source-filenames JSON is not an array')
+  }
+  return parsed.map((entry, i) => {
+    if (
+      !entry ||
+      typeof entry !== 'object' ||
+      typeof (entry as Record<string, unknown>).index !== 'number' ||
+      typeof (entry as Record<string, unknown>).filename !== 'string' ||
+      typeof (entry as Record<string, unknown>).digest !== 'string' ||
+      !/^sha256:[0-9a-f]{64}$/.test((entry as Record<string, unknown>).digest as string)
+    ) {
+      throw new Error(`source-filenames[${i}] is malformed: ${JSON.stringify(entry)}`)
+    }
+    return entry as SourceFilenameEntry
+  })
+}
+
 /**
  * Image-sequence source fetch. Downloads all N frames in parallel
  * (with a bounded concurrency so the runner's outbound socket
  * count stays reasonable on a 10 000-frame upper-bound), writing
  * each to `frames/{NNNNN}.{ext}` under the workdir.
  *
- * **Per-frame digest verification is intentionally NOT performed
- * here.** The integrity gate is the source-filenames JSON blob's
- * hash — `verifySourceFilenamesBlob` (called separately by the
- * caller) re-hashes the canonical JSON the publisher's client
- * built from the per-frame digests and compares against the
- * dispatch payload's `source_digest`. Since the blob carries
- * every frame's claimed digest, an unforged blob is sufficient
- * proof that the publisher's manifest hasn't been tampered with;
- * re-hashing each frame's bytes here would only protect against
- * a separate "R2 returned different bytes than were PUT" failure
- * mode that no observed Cloudflare R2 incident covers. The MP4
- * path makes the same bargain with its source MP4's claimed
- * digest (re-hashed once, not per-byte-range).
+ * Each downloaded frame is re-hashed via the streaming SHA-256
+ * inside `downloadFromR2` and the result compared against the
+ * declared digest from the canonical source-filenames manifest
+ * (which the runner has already verified via
+ * `verifySourceFilenamesBlob`). Mismatch on any frame fails the
+ * whole encode — the GHA workflow exits with code 6 and the
+ * dataset row stays `transcoding=1` for operator review.
  *
  * Bounded-concurrency upper-bound is 16 — sufficient to keep the
  * R2 endpoint warm without consuming the runner's file-descriptor
@@ -279,7 +331,13 @@ async function downloadFrames(
   config: R2UploadConfig,
   framesDir: string,
   args: { datasetId: string; uploadId: string; frameCount: number; frameExtension: string },
+  manifest: SourceFilenameEntry[],
 ): Promise<void> {
+  if (manifest.length !== args.frameCount) {
+    throw new Error(
+      `source-filenames manifest length ${manifest.length} does not match dispatch frame_count ${args.frameCount}`,
+    )
+  }
   const CONCURRENCY = 16
   let cursor = 0
   let firstError: Error | null = null
@@ -292,7 +350,13 @@ async function downloadFrames(
       const key = `uploads/${args.datasetId}/${args.uploadId}/frames/${padded}.${args.frameExtension}`
       const destPath = join(framesDir, `${padded}.${args.frameExtension}`)
       try {
-        await downloadFromR2(config, key, destPath)
+        const result = await downloadFromR2(config, key, destPath)
+        const expected = manifest[i].digest
+        if (result.digest !== expected) {
+          throw new Error(
+            `digest mismatch (expected=${expected} actual=${result.digest})`,
+          )
+        }
       } catch (err) {
         const wrapped = err instanceof Error ? err : new Error(String(err))
         // First-failure-wins so subsequent workers exit promptly.
@@ -308,34 +372,6 @@ async function downloadFrames(
   }
   await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()))
   if (firstError) throw firstError
-}
-
-/**
- * Fetch the canonical source-filenames JSON blob alongside the
- * frames and recompute its SHA-256. Mismatch against
- * `--source-digest` (which the publisher API extracts from the
- * asset_uploads row's `claimed_digest`) fails the encode rather
- * than letting the runner work on a tampered manifest.
- *
- * The blob's contents aren't passed to ffmpeg — display naming is
- * derived server-side from the dataset's slug + start_time +
- * period (or slug + index for non-time-series rows) — but its
- * hash is the integrity gate the publisher API trusted at
- * /complete time. Re-verifying here is the same bargain the MP4
- * path makes with its source MP4's hash.
- */
-async function verifySourceFilenamesBlob(
-  config: R2UploadConfig,
-  args: { datasetId: string; uploadId: string; sourceDigest: string; workdir: string },
-): Promise<void> {
-  const key = `uploads/${args.datasetId}/${args.uploadId}/source_filenames.json`
-  const destPath = join(args.workdir, 'source_filenames.json')
-  const result = await downloadFromR2(config, key, destPath)
-  if (result.digest !== args.sourceDigest) {
-    throw new Error(
-      `source-filenames digest mismatch. expected=${args.sourceDigest} actual=${result.digest}`,
-    )
-  }
 }
 
 async function downloadFromR2(
@@ -559,8 +595,18 @@ async function main(): Promise<number> {
       const framesDir = join(args.workdir, 'frames')
       mkdirSync(framesDir, { recursive: true })
       try {
-        await downloadFrames(r2Config, framesDir, args)
-        await verifySourceFilenamesBlob(r2Config, args)
+        // Fetch + verify the manifest FIRST so we have the
+        // per-frame digests to compare against during each frame
+        // download. Order matters: verifying frames before the
+        // manifest means we'd trust whatever digests the publisher
+        // claims for the bytes the publisher just PUT, which is
+        // tautological. Verifying the manifest first (against the
+        // dispatch payload's source_digest, which the publisher
+        // API extracted from the asset_uploads row's
+        // claimed_digest) gives us a trusted set of claims to
+        // compare against.
+        const manifest = await verifySourceFilenamesBlob(r2Config, args)
+        await downloadFrames(r2Config, framesDir, args, manifest)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         console.error(`error: ${message}`)

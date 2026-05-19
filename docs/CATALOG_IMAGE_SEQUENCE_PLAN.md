@@ -282,15 +282,22 @@ The runner gains an image-sequence input branch in
    reconstructed prefix when `--source-kind=frames`. No
    `--frame-rate` flag — see §UX sketch above for why output fps
    is fixed at 30.
-2. Download all N frames from R2 (concurrent with a small queue —
+2. Fetch + verify the canonical source-filenames JSON manifest
+   FIRST (`verifySourceFilenamesBlob`). The manifest is an array
+   of `{index, filename, digest}` entries the publisher built
+   client-side from each frame's SHA-256; the dispatch payload's
+   `source_digest` is the hash of that JSON. Re-hashing the blob
+   on the runner side confirms the manifest itself wasn't
+   tampered with after the publisher signed off, which gives us
+   a trusted set of per-frame digests to compare against during
+   the per-frame download.
+3. Download all N frames from R2 (concurrent with a small queue —
    ~10 parallel S3 GETs is comfortable on the runner; same shape
-   as the browser upload queue). The integrity gate is the
-   source-filenames JSON blob's hash (`verifySourceFilenamesBlob`
-   below) — the blob carries every frame's claimed digest, so an
-   unforged blob is sufficient proof that the publisher's
-   manifest hasn't been tampered with. Per-frame re-hashing
-   would only protect against a "R2 returned different bytes
-   than were PUT" failure mode and isn't currently performed.
+   as the browser upload queue). Each frame is re-hashed in the
+   download stream and compared against its declared digest from
+   the manifest. Mismatch fails the whole encode (exit code 6).
+   The two-step verification (blob hash + per-frame hash) is what
+   makes the trust chain end-to-end real.
 3. Invoke ffmpeg with:
    ```
    ffmpeg \

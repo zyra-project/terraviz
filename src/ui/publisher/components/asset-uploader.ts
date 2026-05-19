@@ -674,9 +674,20 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
       //    minimal whitespace so server-side hash agrees with the
       //    client hash bit-for-bit. The shape is documented at
       //    `docs/CATALOG_IMAGE_SEQUENCE_PLAN.md` §"Frames as data".
+      //    Each entry carries the per-frame `digest` so the GHA
+      //    runner can re-hash every downloaded frame and compare —
+      //    without the digest in the canonical JSON, the per-frame
+      //    SHA-256 work we just did in the browser would be wasted
+      //    (the runner would have no claim to verify against).
+      //    The runner's `verifySourceFilenamesBlob` re-hashes the
+      //    whole JSON to confirm the manifest itself is untampered;
+      //    `downloadFrames` then verifies each frame against its
+      //    declared digest. Phase 3pf-review/D — Copilot
+      //    discussion_r3263124234.
       const sourceFilenames = frameDigests.map((f, index) => ({
         index,
         filename: f.filename,
+        digest: f.digest,
       }))
       const sourceFilenamesJson = JSON.stringify(sourceFilenames)
       const sourceFilenamesDigest = await sha256OfString(sourceFilenamesJson)
