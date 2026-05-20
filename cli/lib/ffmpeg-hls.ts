@@ -55,7 +55,7 @@
 
 import { spawn as nodeSpawn, type ChildProcessByStdio } from 'node:child_process'
 import { existsSync, mkdirSync, statSync, readdirSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { join, relative, dirname } from 'node:path'
 import type { Readable, Writable } from 'node:stream'
 
 /** Type-narrowed spawn that returns a process with streamable
@@ -331,16 +331,29 @@ export function buildFfmpegArgs(
  * playlist.
  */
 export async function encodeHls(options: EncodeHlsOptions): Promise<EncodedHls> {
-  // `inputPath` accepts either a local file path or an http(s)
-  // URL — ffmpeg reads both. The pre-flight existence check only
-  // applies to local paths; URLs are validated by ffmpeg at fetch
-  // time (a 4xx/5xx upstream surfaces as a non-zero exit + stderr
-  // tail, which already produces a clean FfmpegError).
-  //
-  // The Phase 3 migrate-r2-hls subcommand passes the video-proxy's
-  // MP4 URL directly here so ffmpeg streams it without an
-  // intermediate disk write.
-  if (!isHttpUrl(options.inputPath) && !existsSync(options.inputPath)) {
+  // `inputPath` accepts three shapes:
+  //   1. A local file path (MP4 source) — pre-flight `existsSync`.
+  //   2. An http(s) URL (migrate-r2-hls subcommand streams the
+  //      video-proxy's MP4 directly) — validated by ffmpeg at
+  //      fetch time; a 4xx/5xx surfaces as a non-zero exit +
+  //      stderr tail through the FfmpegError path.
+  //   3. An ffmpeg printf pattern like `frames/%05d.png` (image-
+  //      sequence demuxer, Phase 3pf). The pattern itself isn't a
+  //      real file; instead we check that the parent directory
+  //      exists and contains at least one entry. ffmpeg will
+  //      surface a clean error if the entries don't match the
+  //      pattern's numbering.
+  if (isHttpUrl(options.inputPath)) {
+    // URL — defer validation to ffmpeg.
+  } else if (isFfmpegPattern(options.inputPath)) {
+    const patternDir = dirname(options.inputPath)
+    if (!existsSync(patternDir)) {
+      throw new Error(`encodeHls: input pattern directory ${patternDir} does not exist`)
+    }
+    if (readdirSync(patternDir).length === 0) {
+      throw new Error(`encodeHls: input pattern directory ${patternDir} is empty`)
+    }
+  } else if (!existsSync(options.inputPath)) {
     throw new Error(`encodeHls: input ${options.inputPath} does not exist`)
   }
   mkdirSync(options.outputDir, { recursive: true })
@@ -477,6 +490,17 @@ export async function encodeHls(options: EncodeHlsOptions): Promise<EncodedHls> 
       })
     })
   })
+}
+
+/** True when `inputPath` is an ffmpeg printf-style numbered
+ * pattern like `frames/%05d.png` — matches `%d`, `%05d`, etc.
+ * Patterns are how the image2 demuxer reads a numbered sequence
+ * as a single input; they aren't real files, so the pre-flight
+ * existence check in `encodeHls` has to look at the parent
+ * directory instead.
+ */
+function isFfmpegPattern(inputPath: string): boolean {
+  return /%\d*d/.test(inputPath)
 }
 
 /** True when `inputPath` is an http(s) URL ffmpeg will fetch

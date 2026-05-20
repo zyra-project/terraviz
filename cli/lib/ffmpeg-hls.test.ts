@@ -362,6 +362,84 @@ describe('encodeHls', () => {
     }
   })
 
+  it('accepts an ffmpeg printf pattern when the parent directory has at least one file', async () => {
+    // Phase 3pf image-sequence path — `cli/transcode-from-dispatch.ts`
+    // hands ffmpeg a pattern like `frames/%05d.png` so the image2
+    // demuxer consumes the numbered sequence as a single input.
+    // The literal pattern is never a real file, so the old
+    // `existsSync(inputPath)` guard rejected the encode before
+    // ffmpeg ran (live failure surfaced post-merge of PR #117).
+    const tmp = mkdtempSync(join(tmpdir(), 'ffhls-'))
+    try {
+      const framesDir = join(tmp, 'frames')
+      const outputDir = join(tmp, 'out')
+      // Seed the directory with one frame so the pre-flight
+      // `readdirSync` check sees at least one entry. ffmpeg itself
+      // would fail loudly on a missing pattern match — the
+      // pre-flight only catches the obvious empty-dir case.
+      const { mkdirSync: nodeMkdirSync } = await import('node:fs')
+      nodeMkdirSync(framesDir, { recursive: true })
+      nodeMkdirSync(outputDir, { recursive: true })
+      writeFileSync(join(framesDir, '00000.png'), 'fake-png')
+      const child = makeFakeChild()
+      let capturedArgs: readonly string[] | null = null
+      const spawnImpl = vi.fn((_cmd: string, args: readonly string[]) => {
+        capturedArgs = args
+        setTimeout(() => {
+          writeFileSync(join(outputDir, MASTER_PLAYLIST_NAME), '#EXTM3U\n')
+          child.emit('close', 0, null)
+        }, 0)
+        return child as unknown as ReturnType<typeof import('node:child_process').spawn>
+      })
+      const patternPath = join(framesDir, '%05d.png')
+      await encodeHls({
+        inputPath: patternPath,
+        outputDir,
+        spawnImpl: spawnImpl as unknown as Parameters<typeof encodeHls>[0]['spawnImpl'],
+        hasAudio: false,
+      })
+      expect(spawnImpl).toHaveBeenCalledOnce()
+      expect(capturedArgs).not.toBeNull()
+      const iIdx = (capturedArgs as unknown as string[]).indexOf('-i')
+      expect((capturedArgs as unknown as string[])[iIdx + 1]).toBe(patternPath)
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses an ffmpeg printf pattern whose parent directory is empty', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'ffhls-'))
+    try {
+      const framesDir = join(tmp, 'frames')
+      const { mkdirSync: nodeMkdirSync } = await import('node:fs')
+      nodeMkdirSync(framesDir, { recursive: true })
+      // No frames written — pre-flight should reject before spawn.
+      const spawnImpl = vi.fn()
+      await expect(
+        encodeHls({
+          inputPath: join(framesDir, '%05d.png'),
+          outputDir: join(tmp, 'out'),
+          spawnImpl: spawnImpl as unknown as Parameters<typeof encodeHls>[0]['spawnImpl'],
+        }),
+      ).rejects.toThrow(/is empty/)
+      expect(spawnImpl).not.toHaveBeenCalled()
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses an ffmpeg printf pattern whose parent directory does not exist', async () => {
+    const spawnImpl = vi.fn()
+    await expect(
+      encodeHls({
+        inputPath: '/nonexistent-dir/%05d.png',
+        outputDir: '/tmp/whatever',
+        spawnImpl: spawnImpl as unknown as Parameters<typeof encodeHls>[0]['spawnImpl'],
+      }),
+    ).rejects.toThrow(/does not exist/)
+    expect(spawnImpl).not.toHaveBeenCalled()
+  })
+
   it('matches the URL check case-insensitively (HTTP:// works too)', async () => {
     const tmp = mkdtempSync(join(tmpdir(), 'ffhls-'))
     try {
