@@ -29,6 +29,7 @@ import {
   buildFrameSequencePrefix,
   buildFrameSourceFilenamesKey,
   isFrameKey,
+  isFrameSequencePrefix,
   isVideoSourceKey,
   MOCK_R2_HOST,
   presignPut,
@@ -182,6 +183,36 @@ describe('isFrameKey', () => {
   it('rejects keys outside the uploads/ namespace', () => {
     expect(isFrameKey(`videos/${DS}/${UP}/frames/00000.png`)).toBe(false)
     expect(isFrameKey(`datasets/${DS}/frames/00000.png`)).toBe(false)
+  })
+})
+
+describe('isFrameSequencePrefix', () => {
+  const DS = '01HXAAAAAAAAAAAAAAAAAAAAAA'
+  const UP = '01HYAAAAAAAAAAAAAAAAAAAAAA'
+
+  it('accepts the canonical uploads/{ULID}/{ULID}/frames/ shape', () => {
+    expect(isFrameSequencePrefix(`uploads/${DS}/${UP}/frames/`)).toBe(true)
+  })
+
+  it('requires the trailing slash so a typo against a sibling prefix fails closed', () => {
+    expect(isFrameSequencePrefix(`uploads/${DS}/${UP}/frames`)).toBe(false)
+  })
+
+  it('rejects the MP4 source layout', () => {
+    expect(isFrameSequencePrefix(`uploads/${DS}/${UP}/source.mp4`)).toBe(false)
+  })
+
+  it('rejects a per-frame key (predicate is for the prefix only)', () => {
+    expect(isFrameSequencePrefix(`uploads/${DS}/${UP}/frames/00000.png`)).toBe(false)
+  })
+
+  it('rejects non-ULID id segments', () => {
+    expect(isFrameSequencePrefix(`uploads/short/${UP}/frames/`)).toBe(false)
+    expect(isFrameSequencePrefix(`uploads/${DS}/short/frames/`)).toBe(false)
+  })
+
+  it('rejects keys outside the uploads/ namespace', () => {
+    expect(isFrameSequencePrefix(`videos/${DS}/${UP}/frames/`)).toBe(false)
   })
 })
 
