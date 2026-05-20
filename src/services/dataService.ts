@@ -71,6 +71,16 @@ interface WireDataset {
    * back to `dataLink`.
    */
   tourJsonUrl?: string
+  /**
+   * Phase 3pg/A — image-sequence frame envelope, populated only
+   * for rows transcoded from a frames upload. Older clients ignore
+   * this and continue to play the HLS bundle via `dataLink`.
+   */
+  frames?: {
+    count: number
+    urlTemplate: string
+    framesDigest?: string
+  }
 }
 
 /**
@@ -104,6 +114,7 @@ function wireToDataset(d: WireDataset): Dataset {
     tags: d.tags,
     enriched: d.enriched,
     tourJsonUrl: d.tourJsonUrl,
+    frames: d.frames,
   }
 }
 

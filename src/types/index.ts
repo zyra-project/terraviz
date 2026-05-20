@@ -117,6 +117,34 @@ export interface Dataset {
 
   // Enriched metadata (from sos_dataset_metadata.json cross-reference)
   enriched?: EnrichedMetadata
+
+  /**
+   * Image-sequence frame envelope — set only for rows that were
+   * transcoded from a frames upload (Phase 3pg/A). Carries the
+   * frame count, a per-frame URL template (`{index}` is the token
+   * consumers substitute with the zero-padded 5-digit frame
+   * number), and the publisher-signed `framesDigest` of the
+   * canonical source-filenames blob. Older clients ignore this
+   * field; sequence rows still play as a regular HLS video via
+   * `dataLink`.
+   */
+  frames?: DatasetFrames
+}
+
+/**
+ * Image-sequence frame envelope on `Dataset` (Phase 3pg/A). Mirrors
+ * `WireDatasetFrames` from `functions/api/v1/_lib/dataset-serializer.ts`.
+ * Consumers compute frame N's timestamp as
+ * `startTime + period × index` for time-series rows, and render
+ * display names as `{slug}_{YYYYMMDDTHHMMSSZ}.{ext}` (time-series)
+ * or `{slug}_frame_{NNNNN}.{ext}` (pure-sequence) — same
+ * convention the `/api/v1/datasets/{id}/frames` endpoint
+ * server-renders for `displayName`.
+ */
+export interface DatasetFrames {
+  count: number
+  urlTemplate: string
+  framesDigest?: string
 }
 
 /** Probing metadata recovered from the SOS snapshot. Pixel
