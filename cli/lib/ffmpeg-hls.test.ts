@@ -61,6 +61,8 @@ describe('buildFfmpegArgs', () => {
       expect(args[args.indexOf(`-c:v:${i}`) + 1]).toBe('libx264')
       expect(args).toContain(`-profile:v:${i}`)
       expect(args[args.indexOf(`-profile:v:${i}`) + 1]).toBe('main')
+      expect(args).toContain(`-pix_fmt:v:${i}`)
+      expect(args[args.indexOf(`-pix_fmt:v:${i}`) + 1]).toBe('yuv420p')
       expect(args).toContain(`-crf:v:${i}`)
       expect(args[args.indexOf(`-crf:v:${i}`) + 1]).toBe(String(r.crf))
       expect(args).toContain(`-maxrate:v:${i}`)

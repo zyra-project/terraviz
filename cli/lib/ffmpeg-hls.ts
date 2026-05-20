@@ -245,6 +245,14 @@ export function buildFfmpegArgs(
     args.push('-map', `[v${i}]`)
     args.push(`-c:v:${i}`, 'libx264')
     args.push(`-profile:v:${i}`, 'main')
+    // Force 4:2:0 8-bit chroma. PNG image-sequence sources
+    // (Phase 3pf) often carry palette / 4:4:4 content that x264
+    // would otherwise inherit, which `-profile main` rejects with
+    // "main profile doesn't support 4:4:4". MP4 sources are
+    // already 4:2:0 so this is a no-op for them. yuv420p is the
+    // HLS-on-iOS baseline; bumping to higher profiles to keep
+    // 4:4:4 would break legacy Safari clients.
+    args.push(`-pix_fmt:v:${i}`, 'yuv420p')
     args.push(`-preset:v:${i}`, 'slow')
     args.push(`-crf:v:${i}`, String(r.crf))
     args.push(`-maxrate:v:${i}`, `${r.maxBitrateKbps}k`)
