@@ -68,6 +68,13 @@ function setupEnv(opts: {
   uploadTargetRef?: string
   /** Override the seeded upload's `kind`. */
   uploadKind?: 'data' | 'thumbnail'
+  /** Override the seeded upload's `mime`. Frames uploads use
+   *  `image/png` etc. instead of `video/mp4`. */
+  uploadMime?: string
+  /** Set the seeded upload's `frame_count` column. Triggers the
+   *  frames-source completion branch in `transcode-complete`
+   *  (Phase 3pf). MP4 sources leave this NULL. */
+  uploadFrameCount?: number | null
   /** Override the seeded `datasets.active_transcode_upload_id`.
    *  Defaults to UPLOAD_ID. Pass another ULID to simulate a
    *  superseding upload, or `null` to simulate a pre-0012 row. */
@@ -111,8 +118,8 @@ function setupEnv(opts: {
         `INSERT INTO asset_uploads
            (id, dataset_id, publisher_id, kind, target, target_ref, mime,
             declared_size, claimed_digest, status, failure_reason,
-            created_at, completed_at)
-         VALUES (?, ?, ?, ?, 'r2', ?, 'video/mp4', 1000, ?, 'completed', NULL, ?, ?)`,
+            created_at, completed_at, frame_count)
+         VALUES (?, ?, ?, ?, 'r2', ?, ?, 1000, ?, 'completed', NULL, ?, ?, ?)`,
       )
       .run(
         UPLOAD_ID,
@@ -120,9 +127,11 @@ function setupEnv(opts: {
         STAFF_ADMIN.id,
         opts.uploadKind ?? 'data',
         opts.uploadTargetRef ?? `r2:uploads/${DATASET_ID}/${UPLOAD_ID}/source.mp4`,
+        opts.uploadMime ?? 'video/mp4',
         sourceDigest,
         '2026-04-29T12:00:00.000Z',
         '2026-04-29T12:01:00.000Z',
+        opts.uploadFrameCount ?? null,
       )
   }
   return {
@@ -234,6 +243,48 @@ describe('POST .../transcode-complete — happy path', () => {
       'content_digest',
     ])
     expect(meta.upload_id).toBe(uploadId)
+  })
+
+  it('accepts an image-sequence upload (target_ref points at frames/ prefix)', async () => {
+    // Phase 3pf — the frames source completion path. The upload
+    // row's `target_ref` is the `uploads/{ds}/{up}/frames/`
+    // prefix (vs. MP4's `source.mp4` filename), and `frame_count`
+    // is non-NULL. The handler must accept both shapes and pass
+    // the `frame_count` + `frame_extension` + filenames-ref to
+    // `clearTranscoding` so the dataset row's frame_* columns
+    // swap atomically with `data_ref`. First live retry of a
+    // frames dispatch surfaced this — the pre-fix guard rejected
+    // the upload as `upload_kind_mismatch` because
+    // `isVideoSourceKey('uploads/.../frames/')` is false.
+    const { sqlite, datasetId, uploadId, env } = setupEnv({
+      uploadTargetRef: `r2:uploads/${DATASET_ID}/${UPLOAD_ID}/frames/`,
+      uploadMime: 'image/png',
+      uploadFrameCount: 5,
+    })
+    const res = await transcodeComplete(
+      ctx({ env, datasetId, body: { upload_id: uploadId, source_digest: DEFAULT_SOURCE_DIGEST } }),
+    )
+    expect(res.status).toBe(200)
+    const row = sqlite
+      .prepare(
+        `SELECT data_ref, transcoding, frame_count, frame_extension,
+                frame_source_filenames_ref
+           FROM datasets WHERE id = ?`,
+      )
+      .get(datasetId) as {
+      data_ref: string
+      transcoding: number | null
+      frame_count: number | null
+      frame_extension: string | null
+      frame_source_filenames_ref: string | null
+    }
+    expect(row.data_ref).toBe(`r2:videos/${datasetId}/${uploadId}/master.m3u8`)
+    expect(row.transcoding).toBeNull()
+    expect(row.frame_count).toBe(5)
+    expect(row.frame_extension).toBe('png')
+    expect(row.frame_source_filenames_ref).toBe(
+      `r2:uploads/${datasetId}/${uploadId}/source_filenames.json`,
+    )
   })
 
   it('accepts a matching source_digest belt-and-suspenders check', async () => {

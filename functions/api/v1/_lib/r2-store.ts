@@ -250,6 +250,26 @@ export function buildFrameSequencePrefix(datasetId: string, uploadId: string): s
 }
 
 /**
+ * Does an R2 key match the shape `buildFrameSequencePrefix` produces?
+ * `uploads/{ULID}/{ULID}/frames/` — both ids must be ULIDs, the
+ * trailing `/frames/` literal must be present.
+ *
+ * Used by /transcode-complete to recognise an image-sequence upload
+ * the same way `isVideoSourceKey` recognises an MP4 source. The
+ * asset_uploads row's `target_ref` for a frames upload holds this
+ * prefix (init code sets `r2:${buildFrameSequencePrefix(...)}`), so
+ * the completion handler can branch on key shape rather than having
+ * a separate endpoint for the two paths.
+ */
+const FRAME_SEQUENCE_PREFIX_PATTERN = new RegExp(
+  `^${VIDEO_SOURCE_KEY_PREFIX}/[0-9A-HJKMNP-TV-Z]{26}/[0-9A-HJKMNP-TV-Z]{26}/frames/$`,
+)
+
+export function isFrameSequencePrefix(key: string): boolean {
+  return FRAME_SEQUENCE_PREFIX_PATTERN.test(key)
+}
+
+/**
  * R2 key for the auxiliary JSON blob that records the publisher's
  * original per-frame filenames in encode order:
  * `uploads/{dataset_id}/{upload_id}/source_filenames.json`. Lives

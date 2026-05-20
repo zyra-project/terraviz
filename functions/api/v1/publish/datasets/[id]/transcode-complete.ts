@@ -66,6 +66,7 @@ import { invalidateSnapshot } from '../../../_lib/snapshot'
 import {
   buildFrameSourceFilenamesKey,
   buildVideoBundleMasterKey,
+  isFrameSequencePrefix,
   isVideoSourceKey,
 } from '../../../_lib/r2-store'
 
@@ -200,8 +201,10 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
   // Look up the upload row. Two things to verify: (a) the upload
   // belongs to *this* dataset, defending against a workflow that
   // dispatched on dataset A trying to PATCH dataset B; (b) the
-  // upload was a video source (not a thumbnail or some other
-  // kind that happened to share the upload_id namespace).
+  // upload was a transcode source — either an MP4 (target_ref
+  // points at a `source.mp4` key) or an image-sequence (target_ref
+  // points at the `frames/` prefix). Anything else with the same
+  // upload_id namespace (thumbnails, future asset kinds) is refused.
   const upload = await getAssetUpload(db, validated.upload_id)
   if (!upload || upload.dataset_id !== id) {
     return jsonError(
@@ -213,11 +216,14 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
   const targetKey = upload.target_ref.startsWith('r2:')
     ? upload.target_ref.slice('r2:'.length)
     : ''
-  if (upload.kind !== 'data' || !isVideoSourceKey(targetKey)) {
+  const isTranscodeSource =
+    upload.kind === 'data' &&
+    (isVideoSourceKey(targetKey) || isFrameSequencePrefix(targetKey))
+  if (!isTranscodeSource) {
     return jsonError(
       409,
       'upload_kind_mismatch',
-      `Upload ${validated.upload_id} is not a video source (kind=${upload.kind}, target=${upload.target_ref}).`,
+      `Upload ${validated.upload_id} is not a transcode source (kind=${upload.kind}, target=${upload.target_ref}).`,
     )
   }
 
