@@ -1857,23 +1857,43 @@ class InteractiveSphere {
       logger.warn('[App] loadFrameFromChat: no primary renderer; cannot render frame')
       return
     }
-    // Match the normal `loadDataset` teardown so the globe's
-    // day/night / city-lights / atmosphere / cloud overlay are
-    // hidden before the frame texture lands — otherwise the
-    // single frame renders with those effects layered on top of
-    // it, which doesn't match how any other dataset displays. The
-    // primary loadDataset call orders these as: cloud overlay →
-    // night lights → sun lighting; mirror that order so a future
-    // shared helper can replace both call sites uniformly.
+    // Mirror the normal `loadDataset` teardown order:
+    //   1. Stop playback + drop any active HLS / video texture on
+    //      the primary slot — otherwise a frame-load while a video
+    //      is playing leaves the playback loop running and the
+    //      HLS service downloading segments behind a hidden video
+    //      element. The time label would also keep ticking against
+    //      a dataset that's no longer displayed. Phase 3pg-review/D
+    //      — Copilot discussion_r3277695258.
+    //   2. Hide the visual overlays the regular dataset-load path
+    //      hides (cloud / day-night / sun). Phase 3pg-fix —
+    //      pass-1 follow-up.
+    //   3. Explicitly hide the playback transport + time label.
+    //      The `loaderCallbacks` below run AFTER `loadImageDataset`
+    //      decides what to show, so the loader-callback path can't
+    //      reliably tear down state already visible from a prior
+    //      video load. Calling these directly before the load is
+    //      what matches the normal flow's
+    //      `if (!isImageDataset) showPlaybackControls(true)`
+    //      logic — image datasets explicitly hide them, and frame
+    //      loads are image datasets. Phase 3pg-review/D — Copilot
+    //      discussion_r3277695282.
+    stopPlaybackLoop(this.playback)
+    this.appState.isPlaying = false
+    resetPlaybackState(this.playback)
+    this.cleanupPanelVideo()
     primary.removeCloudOverlay?.()
     primary.removeNightLights?.()
     primary.disableSunLighting?.()
-    // Single frames are still images — keep the playback transport
-    // hidden and the time label off (the parent sequence's playback
-    // UI would be misleading on a one-off image).
+    this.showPlaybackControls(false)
+    this.showTimeLabel(false)
+    // The loader callbacks stay as no-ops because the show/hide
+    // decisions are now made above; if a future loader change
+    // starts calling them mid-load they'd be the wrong side of
+    // the teardown. Match the rest of the no-op image paths.
     const loaderCallbacks = {
-      showPlaybackControls: (_show: boolean) => { /* no-op for frame loads */ },
-      showTimeLabel: (_show: boolean) => { /* no-op for frame loads */ },
+      showPlaybackControls: (_show: boolean) => { /* handled above */ },
+      showTimeLabel: (_show: boolean) => { /* handled above */ },
     }
     try {
       // `directImageUrl: true` skips the loader's legacy `_4096` /
