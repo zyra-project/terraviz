@@ -153,6 +153,98 @@ export async function runGet(ctx: CommandContext): Promise<number> {
   return 0
 }
 
+// --- frames (Phase 3pg/E) -----------------------------------------
+
+/**
+ * Dispatch `terraviz frames <sub> ...`. Subcommands are `list` and
+ * `get`; everything else surfaces as the usage line. Kept as a
+ * sibling of the top-level dispatcher (rather than a flat command)
+ * because the two operations share enough scaffolding — argument
+ * shape, the public-endpoint base path, the streaming-JSON
+ * output pipeline — that grouping reads more naturally than
+ * `terraviz frames-list` / `terraviz frames-get`.
+ */
+export async function runFrames(ctx: CommandContext): Promise<number> {
+  const sub = ctx.args.positional[0]
+  if (!sub) {
+    ctx.stderr.write('Usage: terraviz frames <list|get> ...\n')
+    return 2
+  }
+  const subCtx: CommandContext = {
+    ...ctx,
+    args: {
+      positional: ctx.args.positional.slice(1),
+      options: ctx.args.options,
+    },
+  }
+  switch (sub) {
+    case 'list':
+      return runFramesList(subCtx)
+    case 'get':
+      return runFramesGet(subCtx)
+    default:
+      ctx.stderr.write(`Unknown frames subcommand: ${sub}\nUsage: terraviz frames <list|get> ...\n`)
+      return 2
+  }
+}
+
+async function runFramesList(ctx: CommandContext): Promise<number> {
+  const id = ctx.args.positional[0]
+  if (!id) {
+    ctx.stderr.write('Usage: terraviz frames list <id> [--limit=N] [--cursor=X] [--at=ISO] [--from=ISO --to=ISO]\n')
+    return 2
+  }
+  // `--from` + `--to` come as a pair — surface the partial-supply
+  // case here so the server's 400 doesn't surprise an operator
+  // who typo'd one of the flags.
+  const from = getString(ctx.args.options, 'from')
+  const to = getString(ctx.args.options, 'to')
+  if ((from && !to) || (!from && to)) {
+    ctx.stderr.write('--from and --to must be supplied together.\n')
+    return 2
+  }
+  const result = await ctx.client.framesList(id, {
+    limit: getNumber(ctx.args.options, 'limit'),
+    cursor: getString(ctx.args.options, 'cursor'),
+    at: getString(ctx.args.options, 'at'),
+    from,
+    to,
+  })
+  if (!result.ok) return emitFailure(ctx, result.status, result.error, result.message)
+  jsonOut(ctx, result.body)
+  return 0
+}
+
+async function runFramesGet(ctx: CommandContext): Promise<number> {
+  const id = ctx.args.positional[0]
+  const indexRaw = ctx.args.positional[1]
+  if (!id || indexRaw == null) {
+    ctx.stderr.write('Usage: terraviz frames get <id> <index>\n')
+    return 2
+  }
+  // The server already validates digit-only base-10 strictly via
+  // `/^\d+$/`. We mirror the same rule client-side so a typo'd
+  // `frames get DS 3e2` fails with a usage error rather than an
+  // opaque 400 from the wire.
+  if (!/^\d+$/.test(indexRaw)) {
+    ctx.stderr.write('index must be a non-negative base-10 integer.\n')
+    return 2
+  }
+  const index = parseInt(indexRaw, 10)
+  const result = await ctx.client.framesGet(id, index)
+  if (!result.ok) return emitFailure(ctx, result.status, result.error, result.message)
+  // Write the URL on stdout followed by a newline so the typical
+  // pipeline (`xargs -n1 curl -O`) sees one URL per line. The
+  // RFC 9530 Content-Digest is informational only — emit it on
+  // stderr so it doesn't pollute the pipe but stays visible to a
+  // human watching the terminal.
+  ctx.stdout.write(`${result.body.url}\n`)
+  if (result.body.contentDigest) {
+    ctx.stderr.write(`Content-Digest: ${result.body.contentDigest}\n`)
+  }
+  return 0
+}
+
 // --- publish (create + flip to published) -------------------------
 
 export async function runPublish(ctx: CommandContext): Promise<number> {
@@ -764,6 +856,28 @@ Commands:
                                       slice of the migration's Grafana
                                       telemetry to roll back a specific
                                       subset.
+
+  frames list <id> [--limit=N] [--cursor=X] [--at=ISO]
+              [--from=ISO --to=ISO]
+                                      List the frames of an image-sequence
+                                      dataset. Streams the public-API JSON
+                                      response (count + per-frame rows with
+                                      index / displayName / originalFilename /
+                                      timestamp / contentDigest / url + an
+                                      optional cursor). Pipe into
+                                      \`jq -r '.frames[].url' | xargs -n1 curl -O\`
+                                      for a bulk fetch. \`--at\` returns the
+                                      single closest frame and wins over
+                                      \`--from\`/\`--to\`.
+
+  frames get <id> <index>             Print the per-frame R2 URL for one
+                                      frame of an image-sequence dataset.
+                                      Uses the 302 redirect from
+                                      /api/v1/datasets/{id}/frames/{index}
+                                      under the hood; stdout is just the
+                                      Location target so the typical
+                                      pipeline is
+                                      \`terraviz frames get DS 47 | xargs curl -O\`.
 
 Global flags:
   --server <url>                      Server base URL (default https://terraviz.app)

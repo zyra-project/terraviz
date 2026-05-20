@@ -238,4 +238,92 @@ describe('TerravizClient', () => {
     expect(result.status).toBe(403)
     expect(result.message).toContain('SignatureDoesNotMatch')
   })
+
+  describe('frames (3pg/E)', () => {
+    it('framesList builds the public URL with passthrough query params', async () => {
+      const { fetchImpl, calls } = recordingFetch(
+        () => new Response(JSON.stringify({ datasetId: 'DS', count: 0, frames: [], cursor: null }), { status: 200 }),
+      )
+      const client = new TerravizClient(baseConfig, { fetchImpl })
+      const r = await client.framesList('DS_SEQ', {
+        limit: 25,
+        cursor: '12',
+        at: '2026-05-16T03:00:00Z',
+      })
+      expect(r.ok).toBe(true)
+      const callUrl = new URL(calls[0].url)
+      expect(callUrl.pathname).toBe('/api/v1/datasets/DS_SEQ/frames')
+      expect(callUrl.searchParams.get('limit')).toBe('25')
+      expect(callUrl.searchParams.get('cursor')).toBe('12')
+      expect(callUrl.searchParams.get('at')).toBe('2026-05-16T03:00:00Z')
+    })
+
+    it('framesList omits query params that are unset', async () => {
+      const { fetchImpl, calls } = recordingFetch(
+        () => new Response(JSON.stringify({ datasetId: 'DS', count: 0, frames: [] }), { status: 200 }),
+      )
+      const client = new TerravizClient(baseConfig, { fetchImpl })
+      await client.framesList('DS_SEQ', {})
+      const callUrl = new URL(calls[0].url)
+      // No `?` means no query at all.
+      expect(callUrl.search).toBe('')
+    })
+
+    it('framesGet returns the Location header on a 302', async () => {
+      // The endpoint serves a 302; the client must not follow it
+      // (we want the URL itself, not the bytes), and the response
+      // body is empty.
+      const { fetchImpl, calls } = recordingFetch(
+        () =>
+          new Response(null, {
+            status: 302,
+            headers: {
+              Location: 'https://assets.test/uploads/DS/UP/frames/00003.png',
+              'Content-Digest': 'sha-256=:AAAA:',
+            },
+          }),
+      )
+      const client = new TerravizClient(baseConfig, { fetchImpl })
+      const r = await client.framesGet('DS_SEQ', 3)
+      expect(r.ok).toBe(true)
+      if (r.ok) {
+        expect(r.body.url).toBe('https://assets.test/uploads/DS/UP/frames/00003.png')
+        expect(r.body.contentDigest).toBe('sha-256=:AAAA:')
+      }
+      expect(calls[0].url).toContain('/api/v1/datasets/DS_SEQ/frames/3')
+    })
+
+    it('framesGet maps a 404 to an error envelope', async () => {
+      const { fetchImpl } = recordingFetch(
+        () =>
+          new Response(
+            JSON.stringify({
+              error: 'frame_index_out_of_range',
+              message: 'Dataset DS_SEQ has frames 0..4; got 99.',
+            }),
+            { status: 404 },
+          ),
+      )
+      const client = new TerravizClient(baseConfig, { fetchImpl })
+      const r = await client.framesGet('DS_SEQ', 99)
+      expect(r.ok).toBe(false)
+      if (!r.ok) {
+        expect(r.status).toBe(404)
+        expect(r.error).toBe('frame_index_out_of_range')
+      }
+    })
+
+    it('framesGet surfaces an invalid_response when 302 is missing Location', async () => {
+      // Defence-in-depth: an upstream bug that 302s without a
+      // Location header should fail closed with a typed error
+      // rather than crash the caller dereferencing null.
+      const { fetchImpl } = recordingFetch(
+        () => new Response(null, { status: 302 }),
+      )
+      const client = new TerravizClient(baseConfig, { fetchImpl })
+      const r = await client.framesGet('DS_SEQ', 0)
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.error).toBe('invalid_response')
+    })
+  })
 })

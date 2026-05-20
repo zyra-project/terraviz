@@ -27,6 +27,7 @@ import { resolveConfig } from './lib/config'
 import { parseArgs, getString, getBool } from './lib/args'
 import {
   HELP_TEXT,
+  runFrames,
   runGet,
   runList,
   runMe,
@@ -104,6 +105,8 @@ async function main(argv: string[]): Promise<number> {
       return runUpload(ctx)
     case 'tour':
       return runTour(ctx)
+    case 'frames':
+      return runFrames(ctx)
     case 'import-snapshot':
       return runImportSnapshot(ctx)
     case 'verify-deploy':
