@@ -293,6 +293,133 @@ describe('mountTourAuthoringDock (tour/A)', () => {
     expect(label).toContain('on')
   })
 
+  describe('additional captures (tour/F)', () => {
+    it('captures tiltRotateCamera from current pitch + bearing', () => {
+      mountTourAuthoringDock('new', {
+        getMapView: () => makeView({ pitch: 35, bearing: 120 }),
+        getCurrentDataset: () => null,
+        onDiscard: () => {},
+      })
+      document
+        .querySelector<HTMLButtonElement>('[data-action="capture-tilt"]')!
+        .click()
+      const label = document.querySelector('.tour-authoring-task-label')?.textContent ?? ''
+      expect(label).toContain('Tilt 35')
+      expect(label).toContain('rotate 120')
+    })
+
+    it('captures resetCameraZoomOut and resetCameraAndZoomOut', () => {
+      mountTourAuthoringDock('new', {
+        getMapView: () => makeView(),
+        getCurrentDataset: () => null,
+        onDiscard: () => {},
+      })
+      document
+        .querySelector<HTMLButtonElement>('[data-action="capture-reset-zoom"]')!
+        .click()
+      document
+        .querySelector<HTMLButtonElement>('[data-action="capture-reset-and-zoom"]')!
+        .click()
+      const labels = Array.from(document.querySelectorAll('.tour-authoring-task-label')).map(
+        el => el.textContent ?? '',
+      )
+      expect(labels).toEqual(['Reset zoom', 'Reset camera + zoom'])
+    })
+
+    it('captures enableTourPlayer / tourPlayerWindow toggles', () => {
+      mountTourAuthoringDock('new', {
+        getMapView: () => makeView(),
+        getCurrentDataset: () => null,
+        onDiscard: () => {},
+      })
+      document
+        .querySelector<HTMLButtonElement>(
+          '[data-action="env"][data-task="enableTourPlayer"][data-state="on"]',
+        )!
+        .click()
+      document
+        .querySelector<HTMLButtonElement>(
+          '[data-action="env"][data-task="tourPlayerWindow"][data-state="off"]',
+        )!
+        .click()
+      const labels = Array.from(document.querySelectorAll('.tour-authoring-task-label')).map(
+        el => el.textContent ?? '',
+      )
+      expect(labels[0]).toContain('Tour player')
+      expect(labels[0]).toContain('on')
+      expect(labels[1]).toContain('Player window')
+      expect(labels[1]).toContain('off')
+    })
+
+    it('auto-assigns sequential dataset handles on captureCurrentDataset', () => {
+      mountTourAuthoringDock('new', {
+        getMapView: () => makeView(),
+        getCurrentDataset: () => makeDataset({ id: 'DS_A' }),
+        onDiscard: () => {},
+      })
+      const btn = document.querySelector<HTMLButtonElement>(
+        '[data-action="capture-dataset"]',
+      )!
+      btn.click()
+      btn.click()
+      btn.click()
+      // Labels are "Load dataset → DS_A" three times; check the
+      // underlying state via the editor JSON to confirm handles.
+      const editBtns = document.querySelectorAll<HTMLButtonElement>(
+        '[data-action="edit-task"]',
+      )
+      editBtns[0].click()
+      const json = JSON.parse(
+        document.querySelector<HTMLTextAreaElement>(
+          '.tour-authoring-task-editor-input',
+        )!.value,
+      )
+      expect(json.loadDataset.datasetID).toBe('dataset1')
+      document
+        .querySelector<HTMLButtonElement>('[data-action="cancel-edit"]')!
+        .click()
+      editBtns[2].click()
+      const json3 = JSON.parse(
+        document.querySelector<HTMLTextAreaElement>(
+          '.tour-authoring-task-editor-input',
+        )!.value,
+      )
+      expect(json3.loadDataset.datasetID).toBe('dataset3')
+    })
+
+    it('renders the unload-by-handle dropdown only after a dataset capture', () => {
+      mountTourAuthoringDock('new', {
+        getMapView: () => makeView(),
+        getCurrentDataset: () => makeDataset({ id: 'DS_A' }),
+        onDiscard: () => {},
+      })
+      // Empty state → no dropdown.
+      expect(
+        document.querySelector('#tour-authoring-unload-handle-select'),
+      ).toBeNull()
+      // Capture a dataset → dropdown appears with one handle.
+      document
+        .querySelector<HTMLButtonElement>('[data-action="capture-dataset"]')!
+        .click()
+      const select = document.querySelector<HTMLSelectElement>(
+        '#tour-authoring-unload-handle-select',
+      )!
+      expect(select).toBeTruthy()
+      const options = Array.from(select.options).map(o => o.value)
+      expect(options).toEqual(['dataset1'])
+      // Click + Unload by handle → captures unloadDataset for the
+      // selected handle.
+      document
+        .querySelector<HTMLButtonElement>('[data-action="capture-unload-handle"]')!
+        .click()
+      const labels = Array.from(document.querySelectorAll('.tour-authoring-task-label')).map(
+        el => el.textContent ?? '',
+      )
+      expect(labels[1]).toContain('Unload dataset')
+      expect(labels[1]).toContain('dataset1')
+    })
+  })
+
   describe('task editor (tour/D)', () => {
     function dock() {
       return mountTourAuthoringDock('new', {

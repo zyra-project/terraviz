@@ -160,9 +160,16 @@ export function mountTourAuthoringDock(
         <button type="button" class="tour-authoring-action" data-action="capture-camera">
           ${escapeHtml(t('tour.dock.action.captureCamera'))}
         </button>
+        <button type="button" class="tour-authoring-action" data-action="capture-tilt">
+          ${escapeHtml(t('tour.dock.action.captureTilt'))}
+        </button>
         <button type="button" class="tour-authoring-action" data-action="capture-dataset">
           ${escapeHtml(t('tour.dock.action.captureDataset'))}
         </button>
+        <div class="tour-authoring-dock-chiprow">
+          <button type="button" class="tour-authoring-chip" data-action="capture-reset-zoom">${escapeHtml(t('tour.dock.action.resetZoom'))}</button>
+          <button type="button" class="tour-authoring-chip" data-action="capture-reset-and-zoom">${escapeHtml(t('tour.dock.action.resetAndZoom'))}</button>
+        </div>
       </div>
       <div class="tour-authoring-dock-group">
         <span class="tour-authoring-dock-group-label">${escapeHtml(t('tour.dock.group.layout'))}</span>
@@ -200,6 +207,12 @@ export function mountTourAuthoringDock(
           <button type="button" class="tour-authoring-chip" data-action="capture-loop">${escapeHtml(t('tour.dock.loop.add'))}</button>
           <button type="button" class="tour-authoring-chip" data-action="capture-unload-all">${escapeHtml(t('tour.dock.unloadAll.add'))}</button>
         </div>
+        ${renderUnloadByHandleRow()}
+      </div>
+      <div class="tour-authoring-dock-group">
+        <span class="tour-authoring-dock-group-label">${escapeHtml(t('tour.dock.group.player'))}</span>
+        ${renderEnvRow('enableTourPlayer', 'tour.dock.player.enable')}
+        ${renderEnvRow('tourPlayerWindow', 'tour.dock.player.window')}
       </div>
       <ol class="tour-authoring-task-list" aria-label="${escapeAttr(t('tour.dock.taskList.aria'))}">
         ${state.tasks.length === 0
@@ -216,6 +229,23 @@ export function mountTourAuthoringDock(
         <span class="tour-authoring-dock-envrow-label">${escapeHtml(t(labelKey))}</span>
         <button type="button" class="tour-authoring-chip" data-action="env" data-task="${taskKey}" data-state="on">${escapeHtml(t('tour.dock.env.on'))}</button>
         <button type="button" class="tour-authoring-chip" data-action="env" data-task="${taskKey}" data-state="off">${escapeHtml(t('tour.dock.env.off'))}</button>
+      </div>
+    `
+  }
+
+  /** Phase 3pt/F — unload-by-handle dropdown. Only renders when
+   *  at least one `loadDataset` task has been captured with a
+   *  handle; an empty list would offer the user a no-op chip. */
+  function renderUnloadByHandleRow(): string {
+    const handles = collectDatasetHandles(state.tasks)
+    if (handles.length === 0) return ''
+    return `
+      <div class="tour-authoring-dock-inputrow">
+        <select class="tour-authoring-input" id="${UNLOAD_HANDLE_SELECT_ID}"
+                aria-label="${escapeAttr(t('tour.dock.unload.handle.aria'))}">
+          ${handles.map(h => `<option value="${escapeAttr(h)}">${escapeHtml(h)}</option>`).join('')}
+        </select>
+        <button type="button" class="tour-authoring-chip" data-action="capture-unload-handle">${escapeHtml(t('tour.dock.unload.handle.add'))}</button>
       </div>
     `
   }
@@ -268,7 +298,9 @@ export function mountTourAuthoringDock(
       ?.addEventListener('click', () => pushCaptured(captureCameraStep(callbacks)))
     root
       .querySelector<HTMLButtonElement>('[data-action="capture-dataset"]')
-      ?.addEventListener('click', () => pushCaptured(captureCurrentDataset(callbacks)))
+      ?.addEventListener('click', () =>
+        pushCaptured(captureCurrentDataset(callbacks, state.tasks)),
+      )
     root
       .querySelectorAll<HTMLButtonElement>('[data-action="layout"]')
       .forEach(btn => {
@@ -316,6 +348,26 @@ export function mountTourAuthoringDock(
     root
       .querySelector<HTMLButtonElement>('[data-action="capture-unload-all"]')
       ?.addEventListener('click', () => pushCaptured({ unloadAllDatasets: '' }))
+
+    // Phase 3pt/F — additional simple captures.
+    root
+      .querySelector<HTMLButtonElement>('[data-action="capture-tilt"]')
+      ?.addEventListener('click', () => pushCaptured(captureTiltRotate(callbacks)))
+    root
+      .querySelector<HTMLButtonElement>('[data-action="capture-reset-zoom"]')
+      ?.addEventListener('click', () => pushCaptured({ resetCameraZoomOut: '' }))
+    root
+      .querySelector<HTMLButtonElement>('[data-action="capture-reset-and-zoom"]')
+      ?.addEventListener('click', () => pushCaptured({ resetCameraAndZoomOut: '' }))
+    root
+      .querySelector<HTMLButtonElement>('[data-action="capture-unload-handle"]')
+      ?.addEventListener('click', () => {
+        const select = root.querySelector<HTMLSelectElement>(
+          `#${UNLOAD_HANDLE_SELECT_ID}`,
+        )
+        if (!select || !select.value) return
+        pushCaptured({ unloadDataset: select.value })
+      })
 
     // Phase 3pt/D — task-row controls. Per-row click handlers for
     // edit / delete / save / cancel; delegated drag handlers on
@@ -465,6 +517,7 @@ function autosaveStatusLabel(status: AutosaveStatus): string {
  *  predictable if a test mounts more than one). */
 const ROTATION_INPUT_ID = 'tour-authoring-rotation-input'
 const PAUSE_INPUT_ID = 'tour-authoring-pause-input'
+const UNLOAD_HANDLE_SELECT_ID = 'tour-authoring-unload-handle-select'
 
 /** Discriminating union of the env-toggle task keys the dock can
  *  emit. Phase 3pt/B; tour/C extends with more `envShow*` task
@@ -475,6 +528,8 @@ type EnvToggleKey =
   | 'envShowStars'
   | 'envShowWorldBorder'
   | 'envShowEarth'
+  | 'enableTourPlayer'
+  | 'tourPlayerWindow'
 
 type EnvLabelKey =
   | 'env.dayNight'
@@ -482,6 +537,8 @@ type EnvLabelKey =
   | 'env.stars'
   | 'env.borders'
   | 'env.earth'
+  | 'tour.dock.player.enable'
+  | 'tour.dock.player.window'
 
 /** Phase 3pt/B — build an env-toggle task. Keyed on the dock's
  *  `data-task` attribute so each chip button stays declarative.
@@ -499,6 +556,32 @@ function buildEnvTask(key: EnvToggleKey, value: 'on' | 'off'): TourTaskDef {
       return { envShowWorldBorder: value }
     case 'envShowEarth':
       return { envShowEarth: value }
+    case 'enableTourPlayer':
+      return { enableTourPlayer: value }
+    case 'tourPlayerWindow':
+      return { tourPlayerWindow: value }
+  }
+}
+
+/**
+ * Phase 3pt/F — capture the current tilt + bearing as a
+ * `tiltRotateCamera` task. The map's `bearing` is the rotation
+ * (around the Z axis, 0 = north up) and `pitch` is the tilt
+ * (0 = top-down). Animated defaults true, matching how
+ * captureCameraStep handles the flyTo case.
+ */
+function captureTiltRotate(callbacks: TourAuthoringCallbacks): TourTaskDef | null {
+  const view = callbacks.getMapView()
+  if (!view) {
+    logger.warn('[tourAuthoring] capture-tilt: no view context available')
+    return null
+  }
+  return {
+    tiltRotateCamera: {
+      tilt: roundTo(view.pitch, 1),
+      rotate: roundTo(view.bearing, 1),
+      animated: true,
+    },
   }
 }
 
@@ -506,19 +589,62 @@ function buildEnvTask(key: EnvToggleKey, value: 'on' | 'off'): TourTaskDef {
  * Phase 3pt/B — record a `loadDataset` task for the currently-
  * loaded primary-panel dataset. Returns null when no dataset is
  * loaded (typical at session start) so the button no-ops rather
- * than emitting a useless `{ id: '' }` task. The capture mirrors
- * the SOS authoring tool's "Add current dataset" gesture, which
- * is the dominant tour-creation workflow — a publisher loads a
- * dataset, finds the view they like, captures both.
+ * than emitting a useless `{ id: '' }` task.
+ *
+ * Phase 3pt/F — auto-assigns a local `datasetID` handle so
+ * subsequent `unloadDataset` captures have something to
+ * reference. Handles count sequentially across the existing
+ * captured tasks (e.g. `dataset1`, `dataset2`, ...) so the
+ * publisher doesn't have to name them. The catalog `id` lives
+ * in `params.id`; the local handle in `params.datasetID`.
  */
-function captureCurrentDataset(callbacks: TourAuthoringCallbacks): TourTaskDef | null {
+function captureCurrentDataset(
+  callbacks: TourAuthoringCallbacks,
+  existingTasks: TourTaskDef[],
+): TourTaskDef | null {
   const dataset = callbacks.getCurrentDataset()
   if (!dataset) {
     logger.warn('[tourAuthoring] capture-dataset: no current dataset on the primary panel')
     return null
   }
-  const params: LoadDatasetTaskParams = { id: dataset.id }
+  const handle = nextDatasetHandle(existingTasks)
+  const params: LoadDatasetTaskParams = { id: dataset.id, datasetID: handle }
   return { loadDataset: params }
+}
+
+/** Generate the next sequential `dataset{N}` handle by scanning
+ *  the captured tasks. Phase 3pt/F. */
+function nextDatasetHandle(existingTasks: TourTaskDef[]): string {
+  let highest = 0
+  for (const task of existingTasks) {
+    if ('loadDataset' in task) {
+      const id = task.loadDataset.datasetID
+      if (typeof id === 'string') {
+        const match = /^dataset(\d+)$/.exec(id)
+        if (match) {
+          const n = parseInt(match[1], 10)
+          if (n > highest) highest = n
+        }
+      }
+    }
+  }
+  return `dataset${highest + 1}`
+}
+
+/** List the local-handle strings emitted by `loadDataset` tasks
+ *  in the current state. Used by the unload-by-handle dropdown
+ *  so the publisher only sees handles that actually exist. */
+function collectDatasetHandles(tasks: TourTaskDef[]): string[] {
+  const out: string[] = []
+  for (const task of tasks) {
+    if ('loadDataset' in task) {
+      const id = task.loadDataset.datasetID
+      if (typeof id === 'string' && id.length > 0 && !out.includes(id)) {
+        out.push(id)
+      }
+    }
+  }
+  return out
 }
 
 /**
@@ -653,6 +779,25 @@ function describeTask(task: TourTaskDef): string {
   }
   if ('unloadAllDatasets' in task) {
     return t('tour.task.unloadAll')
+  }
+  if ('unloadDataset' in task) {
+    return t('tour.task.unload.handle', { handle: task.unloadDataset })
+  }
+  if ('tiltRotateCamera' in task) {
+    const p = task.tiltRotateCamera
+    return t('tour.task.tiltRotate.summary', { tilt: p.tilt, rotate: p.rotate })
+  }
+  if ('resetCameraZoomOut' in task) {
+    return t('tour.task.resetZoom')
+  }
+  if ('resetCameraAndZoomOut' in task) {
+    return t('tour.task.resetAndZoom')
+  }
+  if ('enableTourPlayer' in task) {
+    return t('tour.task.player.enable', { state: task.enableTourPlayer })
+  }
+  if ('tourPlayerWindow' in task) {
+    return t('tour.task.player.window', { state: task.tourPlayerWindow })
   }
   // Unknown task shape — fall back to the JSON key. Future
   // sub-phases extend this switch as more captures land.
