@@ -16,6 +16,157 @@ referenced in [`README.md`](README.md).
 
 ---
 
+## Phase 3pt — Publisher tour creator
+
+**Branch:** `claude/publisher-tour-creator`
+**Commits:** tour/A through tour/G.
+
+Replaces the `/publish/tours` placeholder with a working tour
+authoring flow. Publisher clicks **New tour** in the
+dashboard, lands on the SPA in tour-authoring mode, captures
+camera positions / dataset loads / overlays / timing through
+a floating dock, edits via drag-reorder + click-to-edit, and
+the draft autosaves to R2 + the `tours` row. Publishing
+snapshots the draft to an immutable
+`tours/{id}/published/{publish_id}.json` key and flips the
+row's `published_at`.
+
+The backend + types + engine for tours were already in place
+from Phase 1a–1b — the gap was purely the publisher UI; this
+phase fills it.
+
+**tour/A — Authoring dock + camera capture + tour list shell.**
+New `src/ui/tourAuthoring/` module: `state.ts` (in-memory
+state + reducers), `dock.ts` (floating dock UI), `index.ts`
+(`?tourEdit=` URL-param detection + idempotent
+mount/dispose). `main.ts` boot flow gains
+`initTourAuthoring()`; the dock attaches top-right when the
+URL signals authoring mode. First working capture:
+`+ Add camera step` reads the primary renderer's view
+context, inverts `tourEngine.execFlyTo`'s zoom math to
+produce an SOS-conformant `altmi`, and appends a `flyTo`
+task. `/publish/tours` page replaces the 3pe placeholder.
+
+**tour/B — Dataset / layout / environment / rotation
+captures.** `+ Add current dataset` records a `loadDataset`
+task for the primary panel's current dataset. **Layout**
+chips (1 / 2 / 4 globes) → `setEnvView`. **Environment**
+rows for day/night, clouds, stars, borders, each with on /
+off chips → matching `envShow*` tasks. **Rotation rate**
+(deg/sec) input + chip → `setGlobeRotationRate`.
+
+**tour/C — Flow control + envShowEarth.** `+ Pause`
+(seconds input), `+ Pause for input`, `+ Loop to start`,
+`+ Unload all datasets` — the SOS-tour task set most
+narratives reach for. Fifth env-toggle row (**Earth:
+on / off**) covers `envShowEarth` for tours that hide the
+planet entirely.
+
+**tour/D — Task editor: drag-reorder, delete, click-to-edit
+JSON.** Each task row gains a drag handle (☰), edit (✎),
+and delete (×) control. HTML5 drag-and-drop reorders.
+Click ✎ expands an inline JSON textarea with Save / Cancel
+— a universal escape hatch for any task type (per-task-type
+typed mini-forms are a polish follow-up). `parseEditorJson`
+intentionally validates only the single-key-object shape;
+per-task-key validation is the engine's job at run-time,
+keeping the editor decoupled from `TourTaskDef`'s churning
+discriminated-union surface.
+
+**tour/E — Backend persistence + autosave + reopen.** Three
+new endpoints:
+
+  - `POST /api/v1/publish/tours/draft` — mints a fresh draft
+    row + writes an empty `{"tourTasks":[]}` blob at
+    `tours/{id}/draft.json` in R2. Bypasses the standard
+    `tour_json_ref` validator (which requires a non-empty
+    ref) by computing the ref server-side from the new ULID.
+  - `PUT /api/v1/publish/tours/{id}/json` — overwrite the
+    draft blob. Validates body has a `tourTasks` array;
+    per-task strict validation stays with the engine.
+  - `GET /api/v1/publish/tours/{id}/json` — read the draft
+    blob for re-opening. Cold start (row but no blob)
+    degrades to an empty TourFile.
+
+Client-side: `src/ui/tourAuthoring/autosave.ts` is a
+debounced (30 s) autosave with a recursive `scheduleNext`
+chain that serializes saves (one in flight at a time, latest
+pending payload wins). Status flips `idle → saving → saved`
+(or `error`); the dock surfaces it next to the title.
+Promotes `'new'` → real ULID after the first POST /draft and
+rewrites the URL via `history.replaceState` so a reload
+reopens the same draft.
+
+**tour/F — Tilt / reset / player / unload-by-handle
+captures.** Five additional simple captures that close the
+gap to the SOS-tour task set most publishers reach for in
+practice: `tiltRotateCamera` from current pitch + bearing,
+`resetCameraZoomOut` / `resetCameraAndZoomOut`,
+`enableTourPlayer` / `tourPlayerWindow` on/off toggles, and
+`unloadDataset` by handle. `loadDataset` captures now
+auto-assign sequential `dataset1` / `dataset2` / … handles
+so `unloadDataset` has something concrete to reference.
+Total captured-task types: 18.
+
+**tour/G — Publish flow + real tour list.** Two more backend
+endpoints:
+
+  - `GET /api/v1/publish/tours` — list the publisher's tours
+    with cursor pagination (ULID `id < ?` for stable order
+    against fresh inserts).
+  - `POST /api/v1/publish/tours/{id}/publish` — snapshot the
+    draft to immutable
+    `tours/{id}/published/{publish_id}.json`, flip
+    `tour_json_ref` to that path, stamp `published_at`. Old
+    published bundles aren't deleted — federation subscribers
+    may still hold the prior ref; immutability keeps those
+    references valid.
+
+The dock gains a green **Publish** button in the header
+that flushes the autosave queue first (so the snapshot
+matches the publisher's latest capture), then POSTs
+/publish. Status flows through `idle → publishing →
+published` (or `error`). The `/publish/tours` page is
+rewritten to fetch via `GET /publish/tours` and render rows
+in the same table shape `datasets.ts` uses.
+
+**Reviewer iterations.** One Copilot review pass during the
+PR generated seven actionable comments; landed as
+`tour-review/A`. Notable hardening:
+
+  - Autosave-race fix: pre-fix code fired `doSave()` from the
+    debounced callback even when a previous save was still
+    in-flight, racing two PUTs that could land out of order.
+    Replaced with a recursive `scheduleNext` chain + a
+    serialization regression test.
+  - Per-mount input ids: constant `tour-authoring-…-input`
+    strings would break `<label for="…">` association if a
+    second dock ever coexisted; counter-suffix per mount
+    keeps each instance's labels well-formed.
+  - Editor-validation comment updated to match actual
+    behaviour (single-key-shape check; per-key validation
+    delegated to the engine).
+  - `draft.ts` "atomic call" claim reworded — the R2 write
+    and D1 insert are sequential against two different
+    Cloudflare services; the cleanup path on partial failure
+    is documented.
+
+**Not in this PR (deferred).**
+
+  - **Preview** ("Play from here") — would run `tourEngine`
+    against the current draft from any task index. Needs
+    callback-bag integration with the SPA's existing tour-
+    playback path; deferred to a follow-up branch.
+  - **Rich-UI captures**: overlay drag-to-place, click-on-
+    globe placemark, audio/video file pickers, question form.
+    The JSON editor (tour/D) is the universal escape hatch
+    for these task types until typed mini-forms ship.
+  - **Delete tour from the dashboard** — the list page shows
+    Edit only today; a follow-up adds Delete + Retract
+    buttons.
+
+---
+
 ## Phase 3pg — Image-sequence frames exposure
 
 **Branch:** `claude/catalog-3pg-frames-exposure`
