@@ -11,6 +11,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   HELP_TEXT,
+  runFrames,
   runGet,
   runHelp,
   runList,
@@ -82,6 +83,33 @@ function fakeClient(
       ok({ dataset: { id: 'DS1' }, verified_digest: 'sha256:abc' }),
     ),
     uploadBytes: vi.fn(() => Promise.resolve({ ok: true, status: 200 })),
+    framesList: vi.fn(() =>
+      ok({
+        datasetId: 'DS1',
+        count: 3,
+        frames: [
+          {
+            index: 0,
+            displayName: 's_frame_00000.png',
+            originalFilename: 'a.png',
+            timestamp: null,
+            contentDigest: 'sha256:' + 'a'.repeat(64),
+            url: 'https://assets.test/uploads/DS1/UP1/frames/00000.png',
+          },
+        ],
+        cursor: null,
+      }),
+    ),
+    framesGet: vi.fn(() =>
+      Promise.resolve({
+        ok: true as const,
+        status: 302,
+        body: {
+          url: 'https://assets.test/uploads/DS1/UP1/frames/00003.png',
+          contentDigest: 'sha-256=:AAAA:',
+        },
+      }),
+    ),
     ...overrides,
   } as unknown as TerravizClient
   return stub
@@ -646,5 +674,146 @@ describe('runHelp', () => {
     const { ctx, stdout } = makeCtx([])
     expect(runHelp(ctx)).toBe(0)
     expect(stdout.text()).toBe(HELP_TEXT)
+  })
+})
+
+describe('runFrames — list (3pg/E)', () => {
+  it('errors out when no subcommand is supplied', async () => {
+    const { ctx, stderr } = makeCtx([])
+    expect(await runFrames(ctx)).toBe(2)
+    expect(stderr.text()).toContain('Usage')
+  })
+
+  it('errors out for an unknown subcommand', async () => {
+    const { ctx, stderr } = makeCtx(['banana'])
+    expect(await runFrames(ctx)).toBe(2)
+    expect(stderr.text()).toContain('Unknown frames subcommand')
+  })
+
+  it('errors out when `list` is called without a dataset id', async () => {
+    const { ctx, stderr } = makeCtx(['list'])
+    expect(await runFrames(ctx)).toBe(2)
+    expect(stderr.text()).toContain('Usage: terraviz frames list')
+  })
+
+  it('passes pagination + filter options through to the client', async () => {
+    const client = fakeClient()
+    const { ctx, stdout } = makeCtx(
+      ['list', 'DS_SEQ'],
+      ['--limit=50', '--cursor=12', '--at=2026-05-16T03:00:00Z'],
+      client,
+    )
+    expect(await runFrames(ctx)).toBe(0)
+    expect(client.framesList).toHaveBeenCalledWith('DS_SEQ', {
+      limit: 50,
+      cursor: '12',
+      at: '2026-05-16T03:00:00Z',
+      from: undefined,
+      to: undefined,
+    })
+    // Output is the JSON response body.
+    const out = JSON.parse(stdout.text())
+    expect(out.datasetId).toBe('DS1')
+    expect(out.frames).toHaveLength(1)
+  })
+
+  it('passes ?from + ?to together', async () => {
+    const client = fakeClient()
+    const { ctx } = makeCtx(
+      ['list', 'DS_SEQ'],
+      ['--from=2026-05-16T00:00:00Z', '--to=2026-05-16T06:00:00Z'],
+      client,
+    )
+    expect(await runFrames(ctx)).toBe(0)
+    expect(client.framesList).toHaveBeenCalledWith('DS_SEQ', {
+      limit: undefined,
+      cursor: undefined,
+      at: undefined,
+      from: '2026-05-16T00:00:00Z',
+      to: '2026-05-16T06:00:00Z',
+    })
+  })
+
+  it('rejects partial supply of --from / --to client-side', async () => {
+    // Mirrors the server's `invalid_range` 400 — surface it as a
+    // usage error before the network roundtrip so a typo'd flag
+    // doesn't look like a server issue.
+    const client = fakeClient()
+    const { ctx, stderr } = makeCtx(
+      ['list', 'DS_SEQ'],
+      ['--from=2026-05-16T00:00:00Z'],
+      client,
+    )
+    expect(await runFrames(ctx)).toBe(2)
+    expect(stderr.text()).toContain('--from and --to must be supplied together')
+    expect(client.framesList).not.toHaveBeenCalled()
+  })
+
+  it('surfaces server errors via emitFailure', async () => {
+    const client = fakeClient({
+      framesList: vi.fn(() =>
+        Promise.resolve({
+          ok: false as const,
+          status: 404,
+          error: 'not_a_frame_sequence',
+          message: 'Dataset DS_SEQ has no image-sequence frames.',
+        }),
+      ),
+    })
+    const { ctx, stderr } = makeCtx(['list', 'DS_SEQ'], [], client)
+    expect(await runFrames(ctx)).not.toBe(0)
+    expect(stderr.text()).toContain('not_a_frame_sequence')
+  })
+})
+
+describe('runFrames — get (3pg/E)', () => {
+  it('errors out when id or index is missing', async () => {
+    const { ctx: a } = makeCtx(['get'])
+    expect(await runFrames(a)).toBe(2)
+    const { ctx: b } = makeCtx(['get', 'DS_SEQ'])
+    expect(await runFrames(b)).toBe(2)
+  })
+
+  it('rejects non-canonical index forms client-side', async () => {
+    // Mirrors the server's strict `/^\d+$/` validation. Saves a
+    // round-trip on the obvious typos.
+    const client = fakeClient()
+    for (const bad of ['3e2', '0x10', '3.0', '+3', '-1', 'banana', ' 3 ']) {
+      const { ctx } = makeCtx(['get', 'DS_SEQ', bad], [], client)
+      expect(await runFrames(ctx), `variant ${JSON.stringify(bad)}`).toBe(2)
+    }
+    expect(client.framesGet).not.toHaveBeenCalled()
+  })
+
+  it('prints the redirect URL on stdout and the digest on stderr', async () => {
+    const client = fakeClient()
+    const { ctx, stdout, stderr } = makeCtx(['get', 'DS_SEQ', '3'], [], client)
+    expect(await runFrames(ctx)).toBe(0)
+    expect(client.framesGet).toHaveBeenCalledWith('DS_SEQ', 3)
+    expect(stdout.text()).toBe('https://assets.test/uploads/DS1/UP1/frames/00003.png\n')
+    expect(stderr.text()).toContain('Content-Digest: sha-256=:AAAA:')
+  })
+
+  it('accepts padded indexes', async () => {
+    const client = fakeClient()
+    const { ctx } = makeCtx(['get', 'DS_SEQ', '00003'], [], client)
+    expect(await runFrames(ctx)).toBe(0)
+    expect(client.framesGet).toHaveBeenCalledWith('DS_SEQ', 3)
+  })
+
+  it('surfaces 404 frame_index_out_of_range via emitFailure', async () => {
+    const client = fakeClient({
+      framesGet: vi.fn(() =>
+        Promise.resolve({
+          ok: false as const,
+          status: 404,
+          error: 'frame_index_out_of_range',
+          message: 'Dataset DS_SEQ has frames 0..4; got 99.',
+        }),
+      ),
+    })
+    const { ctx, stderr } = makeCtx(['get', 'DS_SEQ', '99'], [], client)
+    expect(await runFrames(ctx)).not.toBe(0)
+    expect(stderr.text()).toContain('frame_index_out_of_range')
   })
 })

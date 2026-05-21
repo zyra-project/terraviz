@@ -16,6 +16,7 @@ import { escapeHtml, escapeAttr } from './domUtils'
 import { emit, startDwell, hashQuery, type DwellHandle } from '../analytics'
 import { plural, t } from '../i18n'
 import { formatDate, formatNumber } from '../i18n/format'
+import { parseIsoDurationMs } from '../utils/frames'
 import { renderMarkdown } from '../services/markdownRenderer'
 
 /** Tier B dwell handle for the browse overlay — non-null while the
@@ -63,6 +64,89 @@ function htmlToPlainText(html: string | null | undefined): string {
   const tmp = document.createElement('div')
   tmp.innerHTML = html
   return (tmp.textContent ?? '').replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * Phase 3pg/D — render a one-line "frame timeline" for an image-
+ * sequence dataset's browse card. Shows the frame count + first /
+ * last timestamps + a "closest to now" marker on a thin horizontal
+ * track. Returns an empty string for non-sequence rows so the
+ * caller can unconditionally interpolate the result.
+ *
+ * Display rule:
+ *   - Pure-sequence rows (no `period`) → just the frame count;
+ *     no track, since there's no time axis to scrub.
+ *   - Time-series rows (parseable `startTime` + `period`) →
+ *     count + first / last labels + the track + the `now` dot
+ *     clamped to [0%, 100%]. The clamp keeps datasets whose
+ *     time window has elapsed from rendering the dot off-screen.
+ *
+ * The DOM is a tiny SVG so it scales cleanly across browse-card
+ * widths without media-query gymnastics. No click handler — the
+ * scrubber is purely informational in v1; a future commit can
+ * wire the click position back through `loadFrameFromChat` or a
+ * sibling `loadFrameFromBrowse` callback.
+ */
+function renderFrameScrubber(d: Dataset): string {
+  const frames = d.frames
+  if (!frames || frames.count <= 0) return ''
+  const countLabel = formatNumber(frames.count)
+  // Pure-sequence (no period) — show count only.
+  if (!d.startTime || !d.period) {
+    return `<div class="browse-card-scrubber browse-card-scrubber-pure">${escapeHtml(t('browse.card.scrubber.framesOnly', { count: countLabel }))}</div>`
+  }
+  const periodMs = parseIsoDurationMs(d.period)
+  const startMs = Date.parse(d.startTime)
+  if (periodMs == null || periodMs <= 0 || Number.isNaN(startMs)) {
+    // Parse failed — degrade to the pure-sequence label rather
+    // than rendering a broken track.
+    return `<div class="browse-card-scrubber browse-card-scrubber-pure">${escapeHtml(t('browse.card.scrubber.framesOnly', { count: countLabel }))}</div>`
+  }
+  const endMs = startMs + periodMs * frames.count
+  const nowMs = Date.now()
+  // Clamp the "now" position to [0, 1]. The label below the track
+  // distinguishes the three cases (before / inside / after the
+  // window) so users can tell whether the marker is meaningful.
+  const rawPos = (nowMs - startMs) / (endMs - startMs)
+  const pos = Math.max(0, Math.min(1, rawPos))
+  const posPct = (pos * 100).toFixed(1)
+  const inWindow = nowMs >= startMs && nowMs < endMs
+  const nowLabel = inWindow
+    ? t('browse.card.scrubber.now')
+    : nowMs < startMs
+      ? t('browse.card.scrubber.beforeStart')
+      : t('browse.card.scrubber.afterEnd')
+  // Raw formatted strings here — `t(...)` interpolates them into
+  // the localised template, and the single `escapeAttr` on the
+  // resulting aria-label below handles attribute-context encoding
+  // exactly once. Escaping the inputs first would double-encode
+  // entities (e.g. `&` → `&amp;` → `&amp;amp;`) and corrupt the
+  // screen-reader label. Phase 3pg-review/E — Copilot
+  // discussion_r3282216335.
+  const startLabel = formatDate(d.startTime)
+  // Last frame's timestamp (not `end_time`) — `period × (count - 1)`
+  // is the moment of the final frame; `period × count` is one
+  // period past the last frame and used only as the right edge of
+  // the scrub track.
+  const lastFrameIso = new Date(startMs + periodMs * (frames.count - 1)).toISOString()
+  const endLabel = formatDate(lastFrameIso)
+  return `
+    <div class="browse-card-scrubber" role="img" aria-label="${escapeAttr(
+      t('browse.card.scrubber.aria', { count: countLabel, start: startLabel, end: endLabel }),
+    )}">
+      <div class="browse-card-scrubber-label">
+        <span class="browse-card-scrubber-count">${escapeHtml(t('browse.card.scrubber.frames', { count: countLabel }))}</span>
+        <span class="browse-card-scrubber-now">${escapeHtml(nowLabel)}</span>
+      </div>
+      <svg class="browse-card-scrubber-track" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true">
+        <rect x="0" y="2" width="100" height="2" rx="1" class="browse-card-scrubber-bar"></rect>
+        <circle cx="${posPct}" cy="3" r="1.6" class="browse-card-scrubber-dot${inWindow ? '' : ' browse-card-scrubber-dot-outside'}"></circle>
+      </svg>
+      <div class="browse-card-scrubber-ends">
+        <span>${escapeHtml(formatDate(d.startTime))}</span>
+        <span>${escapeHtml(formatDate(lastFrameIso))}</span>
+      </div>
+    </div>`
 }
 const SEARCH_FOCUS_DELAY_MS = 200
 /** Debounce window between the last keystroke and the
@@ -517,6 +601,13 @@ export function showBrowseUI(
       if (dev) metaHtml += `<div class="browse-card-meta"><strong>${escapeHtml(t('browse.card.meta.datasetDeveloper'))}</strong> ${escapeHtml(dev)}</div>`
       if (visDev) metaHtml += `<div class="browse-card-meta"><strong>${escapeHtml(t('browse.card.meta.visualization'))}</strong> ${escapeHtml(visDev)}</div>`
       if (timeRange) metaHtml += `<div class="browse-card-meta"><strong>${escapeHtml(t('browse.card.meta.timeRange'))}</strong> ${timeRange}</div>`
+      // Phase 3pg/D — date scrubber for image-sequence rows. Renders
+      // a thin horizontal track showing the frame timeline with a
+      // "closest-to-now" marker. Pure visualization; clicking is a
+      // follow-up (would route through Orbit's load-frame path or a
+      // future per-card load-at-time action).
+      const scrubberHtml = renderFrameScrubber(d)
+      if (scrubberHtml) metaHtml += scrubberHtml
       if (dateAdded) metaHtml += `<div class="browse-card-meta"><strong>${escapeHtml(t('browse.card.meta.added'))}</strong> ${escapeHtml(dateAdded)}</div>`
       if (catalogUrl) metaHtml += `<div class="browse-card-meta"><a href="${escapeAttr(catalogUrl)}" target="_blank" rel="noopener" style="color: #4da6ff; text-decoration: none; font-size: 0.65rem;">${escapeHtml(t('browse.card.catalogLink'))}</a></div>`
 

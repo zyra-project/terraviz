@@ -8,12 +8,13 @@
 import type { Dataset, ChatMessage, ChatAction, DocentConfig, LegendCache, MapViewContext, LLMContextSnapshot, ReadingLevel } from '../types'
 import { streamChat, checkAvailability, type AvailabilityResult, type LLMMessage, type LLMContentPart, type LLMToolCall } from './llmProvider'
 import { isAvailable as isAppleIntelligenceAvailable, streamChatLocal } from './appleIntelligenceProvider'
-import { buildSystemPrompt, buildCompressedHistory, buildLanguageReminderMessage, getSearchCatalogTool, getSearchDatasetsTool, getListFeaturedDatasetsTool, getLoadDatasetTool, getFlyToTool, getSetTimeTool, getFitBoundsTool, getAddMarkerTool, getToggleLabelsTool, getHighlightRegionTool } from './docentContext'
+import { buildSystemPrompt, buildCompressedHistory, buildLanguageReminderMessage, getSearchCatalogTool, getSearchDatasetsTool, getListFeaturedDatasetsTool, getLoadDatasetTool, getLoadFrameTool, getFlyToTool, getSetTimeTool, getFitBoundsTool, getAddMarkerTool, getToggleLabelsTool, getHighlightRegionTool } from './docentContext'
 import { parseIntent, generateResponse, searchDatasets, evaluateAutoLoad } from './docentEngine'
 import { clearDegraded as clearDegradedState, markDegraded as markDegradedState } from './docentDegradedState'
 import { apiFetch } from './catalogSource'
 import { ensureLoaded as ensureQALoaded, getRelevantQA } from './qaService'
 import { resolveRegion, boundsToGeoJSON } from '../data/regions'
+import { resolveFrameQuery } from '../utils/frames'
 import { logger } from '../utils/logger'
 import { t } from '../i18n'
 
@@ -346,6 +347,10 @@ export interface CatalogSearchResult {
   description: string
   isTour?: boolean
   timeRange?: string
+  /** Phase 3pg/C — image-sequence indicator. Present only on
+   *  frames-source rows; the LLM uses this to decide whether
+   *  `<<LOAD_FRAME:...>>` is applicable for the row. */
+  frames?: { count: number; startTime?: string; period?: string }
 }
 
 /** Maximum results `search_catalog` will return in a single call. */
@@ -391,6 +396,13 @@ export function executeSearchCatalog(
     if (d.format === 'tour/json') result.isTour = true
     if (d.startTime && d.endTime) {
       result.timeRange = `${d.startTime} to ${d.endTime}`
+    }
+    if (d.frames) {
+      result.frames = {
+        count: d.frames.count,
+        ...(d.startTime ? { startTime: d.startTime } : {}),
+        ...(d.period ? { period: d.period } : {}),
+      }
     }
     return result
   })
@@ -683,6 +695,11 @@ export type ExtractedGlobeAction =
   | { type: 'add-marker'; lat: number; lng: number; label?: string }
   | { type: 'toggle-labels'; visible: boolean }
   | { type: 'highlight-region'; geojson: GeoJSON.GeoJSON; label: string; bounds: [number, number, number, number] }
+  /** Phase 3pg/C — single-frame load from an image-sequence dataset.
+   *  `frameQuery` is the verbatim payload from the marker; client-
+   *  side resolution happens in `resolveFrameQuery` against the
+   *  dataset's `frames` envelope. */
+  | { type: 'load-frame'; datasetId: string; datasetTitle: string; frameQuery: string; displayName: string }
 
 /**
  * Try to resolve the contents of a `<<LOAD:...>>` marker to a real
@@ -978,6 +995,46 @@ export function validateAndCleanText(
     }
   }
 
+  // Extract <<LOAD_FRAME:DATASET_ID:query>> markers (Phase 3pg/C).
+  // `DATASET_ID` must be a known sequence dataset (with a `.frames`
+  // envelope, set by Phase 3pg/A). `query` is anything the
+  // resolver accepts: `latest` / `first`, `index=N`, a bare
+  // integer, or an ISO 8601 timestamp. Markers whose dataset is
+  // unknown or isn't a sequence row are silently dropped — same
+  // policy as <<LOAD:...>> markers with hallucinated IDs.
+  for (const match of text.matchAll(/<?<LOAD_FRAME:\s*([^:>]+):\s*([^>]+?)\s*>>?/g)) {
+    const datasetId = match[1].trim()
+    const frameQuery = match[2].trim()
+    // Exact id first, then case-insensitive — matches the same
+    // permissive policy `<<LOAD:...>>` markers use, since small
+    // LLMs sometimes lowercase ULIDs or emit a legacyId variant.
+    // Title-based fallback isn't safe here because the marker uses
+    // `:` as the id↔query separator — a title with a colon would
+    // confuse the parser.
+    let dataset = datasets.find(d => d.id === datasetId)
+    if (!dataset) {
+      const lower = datasetId.toLowerCase()
+      dataset = datasets.find(
+        d => d.id.toLowerCase() === lower || (d.legacyId && d.legacyId.toLowerCase() === lower),
+      )
+    }
+    if (!dataset || !dataset.frames) {
+      // Unknown / non-sequence — fall through to the strip step
+      // below, which will remove the literal marker from the
+      // displayed text.
+      continue
+    }
+    const resolved = resolveFrameQuery(dataset, frameQuery)
+    if (!resolved) continue
+    globeActions.push({
+      type: 'load-frame',
+      datasetId: dataset.id,
+      datasetTitle: dataset.title,
+      frameQuery,
+      displayName: resolved.displayName,
+    })
+  }
+
   // Extract <<FLY:lat,lon[,alt]>> markers
   for (const match of text.matchAll(/<?<FLY:\s*([-\d.]+)\s*,\s*([-\d.]+)(?:\s*,\s*([-\d.]+))?\s*>>?\n?/g)) {
     const lat = parseFloat(match[1])
@@ -1112,6 +1169,9 @@ export function validateAndCleanText(
     return id
   })
 
+  // Strip <<LOAD_FRAME:...>> markers from displayed text — the
+  // action chunk emission below carries the frame load forward.
+  cleanedText = cleanedText.replace(/<?<LOAD_FRAME:[^>]+>>?\n?/g, '')
   // Strip <<FLY:...>>, <<TIME:...>>, <<BOUNDS:...>>, <<MARKER:...>>, <<LABELS:...>> markers from displayed text
   cleanedText = cleanedText.replace(/<?<FLY:[^>]+>>?\n?/g, '')
   cleanedText = cleanedText.replace(/<?<TIME:[^>]+>>?\n?/g, '')
@@ -1194,6 +1254,17 @@ async function* emitValidatedActions(
       // Highlight the region and navigate to it
       yield { type: 'action', action: { type: 'highlight-region', geojson: ga.geojson, label: ga.label } }
       yield { type: 'action', action: { type: 'fit-bounds', bounds: ga.bounds, label: ga.label } }
+    } else if (ga.type === 'load-frame') {
+      yield {
+        type: 'action',
+        action: {
+          type: 'load-frame',
+          datasetId: ga.datasetId,
+          datasetTitle: ga.datasetTitle,
+          frameQuery: ga.frameQuery,
+          displayName: ga.displayName,
+        },
+      }
     }
   }
 }
@@ -1468,6 +1539,7 @@ export async function* processMessage(
       getListFeaturedDatasetsTool(),
       getSearchCatalogTool(),
       getLoadDatasetTool(),
+      getLoadFrameTool(),
       getFlyToTool(),
       getSetTimeTool(),
       getFitBoundsTool(),
@@ -1604,6 +1676,39 @@ export async function* processMessage(
                         datasetId: resolvedId,
                         datasetTitle: resolvedTitle ?? String(args.dataset_title ?? resolvedId),
                       },
+                    }
+                  }
+                } else if (chunk.call.name === 'load_frame') {
+                  // Phase 3pg/C — tool-call sibling of the
+                  // <<LOAD_FRAME:...>> marker path. Same resolution
+                  // policy: unknown dataset_id or non-sequence row
+                  // silently drops the call rather than emitting a
+                  // broken button.
+                  const args = chunk.call.arguments as {
+                    dataset_id?: string
+                    dataset_title?: string
+                    query?: string
+                  }
+                  const idStr = String(args.dataset_id ?? '')
+                  const dataset = datasets.find(d => d.id === idStr)
+                  if (!dataset || !dataset.frames) {
+                    logger.warn('[Docent] Ignoring load_frame with unknown / non-sequence dataset_id:', idStr)
+                  } else if (!args.query) {
+                    logger.warn('[Docent] Ignoring load_frame with empty query for dataset:', idStr)
+                  } else {
+                    const query = String(args.query)
+                    const resolved = resolveFrameQuery(dataset, query)
+                    if (resolved) {
+                      yield {
+                        type: 'action',
+                        action: {
+                          type: 'load-frame',
+                          datasetId: dataset.id,
+                          datasetTitle: dataset.title,
+                          frameQuery: query,
+                          displayName: resolved.displayName,
+                        },
+                      }
                     }
                   }
                 } else if (chunk.call.name === 'fly_to') {

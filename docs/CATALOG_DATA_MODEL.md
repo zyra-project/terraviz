@@ -81,6 +81,17 @@ CREATE TABLE datasets (
   alpha_encoding     TEXT,                    -- null | native_vp9 | native_hevc | packed_below | packed_right
   primary_codec      TEXT,                    -- h264 | hevc | vp9 | av1 — informational; renditions are the source of truth
 
+  -- Image-sequence ingest metadata (Phase 3pf migrations 0013 / 0014).
+  -- All three columns land atomically via `clearTranscoding`; a mixed-
+  -- null state would indicate a hand-edit and is refused by the
+  -- wire-shape predicates that emit the frame surface (the
+  -- `WireDataset.frames` envelope and the `/frames` endpoints). NULL
+  -- on every MP4-source row; non-NULL trio marks the row as a
+  -- frame sequence the Phase 3pg consumer APIs can address.
+  frame_count               INTEGER,           -- number of frames in the latest transcoded sequence
+  frame_extension           TEXT,              -- `png` | `jpg` | `jpeg` | `webp` (matches buildFrameKey's [a-z0-9]+ rule)
+  frame_source_filenames_ref TEXT,             -- r2: key of source_filenames.json; same upload_id as data_ref's master.m3u8
+
   -- License & attribution. SPDX identifier for machine-readable
   -- terms; free-text statement for licenses without an SPDX entry
   -- (most government data falls here). Attribution propagates

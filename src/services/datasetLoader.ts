@@ -61,6 +61,17 @@ export interface DatasetLoaderCallbacks {
 export interface DatasetLoaderOptions {
   /** Whether this load is targeting the primary viewport. Default `true`. */
   isPrimary?: boolean
+  /**
+   * Phase 3pg/C — skip the legacy `_4096` / `_2048` / `_1024`
+   * suffix-probing pass for image datasets. Set to `true` when
+   * the caller knows the `dataLink` resolves to a single specific
+   * image (the per-frame URL from `WireDataset.frames.urlTemplate`,
+   * or any other directly-addressable image) so the loader doesn't
+   * burn three network round-trips on 404s before falling back to
+   * the actual URL. No effect on video datasets or on rows whose
+   * `dataLink` is the manifest endpoint.
+   */
+  directImageUrl?: boolean
 }
 
 // --- Image loading ---
@@ -75,6 +86,7 @@ export async function loadImageDataset(
   options: DatasetLoaderOptions = {},
 ): Promise<HTMLImageElement> {
   const isPrimary = options.isPrimary ?? true
+  const directImageUrl = options.directImageUrl ?? false
 
   // Check for offline-cached version first
   const dl = await getDownload(dataset.id)
@@ -85,10 +97,10 @@ export async function loadImageDataset(
       logger.info(`[App] Loading image from offline cache: ${localPath}`)
       img = await tryLoadImage([await localFileUrl(localPath)])
     } else {
-      img = await loadImageFromNetwork(dataset, isMobile)
+      img = await loadImageFromNetwork(dataset, isMobile, directImageUrl)
     }
   } else {
-    img = await loadImageFromNetwork(dataset, isMobile)
+    img = await loadImageFromNetwork(dataset, isMobile, directImageUrl)
   }
 
   renderer.updateTexture(img, overlayOptionsFromDataset(dataset))
@@ -113,6 +125,7 @@ export async function loadImageDataset(
 async function loadImageFromNetwork(
   dataset: Dataset,
   isMobile: boolean,
+  directImageUrl = false,
 ): Promise<HTMLImageElement> {
   // Node-mode: dataLink is `/api/v1/datasets/{id}/manifest`. The
   // manifest envelope already lists every variant; just fetch it,
@@ -137,6 +150,16 @@ async function loadImageFromNetwork(
     const candidates = (skipLargest ? sorted.slice(1) : sorted).map(v => v.url)
     candidates.push(manifest.fallback)
     return tryLoadImage(candidates)
+  }
+
+  // Direct-image path (Phase 3pg/C frame loads): caller knows the
+  // URL points at a single specific image, so skip the legacy
+  // `_4096` / `_2048` / `_1024` suffix probing. Each suffix would
+  // 404 against a per-frame R2 URL, adding three round-trips and
+  // a noisy console of failed image loads before the actual URL
+  // resolves.
+  if (directImageUrl) {
+    return tryLoadImage([dataset.dataLink])
   }
 
   // Legacy / direct-asset path: mangle the suffix as before.

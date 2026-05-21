@@ -41,7 +41,7 @@ import {
 } from '../../../_lib/catalog-store'
 import { serializeDataset } from '../../../_lib/dataset-serializer'
 import { makeDataRefResolver } from '../../../_lib/data-ref-resolver'
-import { resolveAssetRefStrict } from '../../../_lib/r2-public-url'
+import { buildFramesUrlTemplate, resolveAssetRefStrict } from '../../../_lib/r2-public-url'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
 // Errors are explicitly non-cacheable: RFC 9111 lets intermediaries
@@ -121,12 +121,15 @@ export const onRequestGet: PagesFunction<CatalogEnv, Params> = async context => 
   const resolveDataRef = makeDataRefResolver(context.env)
   const assetResolver = (ref: string | null | undefined) =>
     resolveAssetRefStrict(context.env, ref)
+  const framesResolver = (ref: string, ext: string) =>
+    buildFramesUrlTemplate(context.env, ref, ext)
   const dataset = serializeDataset(
     row,
     decorations.get(id)!,
     identity,
     resolveDataRef,
     assetResolver,
+    framesResolver,
   )
   // Public-route dataLink (`/api/v1/datasets/{id}/manifest`) refuses
   // unpublished rows; swap in the token-gated sibling so the SPA's

@@ -458,3 +458,118 @@ describe('serializeDataset — asset-ref resolution (3b/N)', () => {
     expect(wire.thumbnailLink).toBe(r2Thumbnail)
   })
 })
+
+describe('serializeDataset — frames envelope (3pg/A)', () => {
+  const DS = '01HXAAAAAAAAAAAAAAAAAAAAAA'
+  const UP = '01HYAAAAAAAAAAAAAAAAAAAAAA'
+  const FRAMES_REF = `r2:uploads/${DS}/${UP}/source_filenames.json`
+  const TEMPLATE = `https://assets.test/uploads/${DS}/${UP}/frames/{index}.png`
+  const stubFramesResolver = (ref: string, ext: string) =>
+    ref === FRAMES_REF && ext === 'png' ? TEMPLATE : null
+
+  it('omits frames when frame_count is null (legacy video / non-sequence row)', () => {
+    const wire = serializeDataset(
+      fakeRow(),
+      emptyDecoration,
+      fakeIdentity,
+      undefined,
+      undefined,
+      stubFramesResolver,
+    )
+    expect(wire.frames).toBeUndefined()
+  })
+
+  it('populates frames when frame_count, frame_extension, and ref are all set', () => {
+    const wire = serializeDataset(
+      fakeRow({
+        id: DS,
+        format: 'video/mp4',
+        frame_count: 240,
+        frame_extension: 'png',
+        frame_source_filenames_ref: FRAMES_REF,
+        source_digest: 'sha256:' + 'a'.repeat(64),
+      }),
+      emptyDecoration,
+      fakeIdentity,
+      undefined,
+      undefined,
+      stubFramesResolver,
+    )
+    expect(wire.frames).toEqual({
+      count: 240,
+      urlTemplate: TEMPLATE,
+      framesDigest: 'sha256:' + 'a'.repeat(64),
+    })
+  })
+
+  it('omits framesDigest when source_digest is null but still emits the envelope', () => {
+    // Pre-3pf rows that get retroactively flagged could plausibly
+    // arrive here without source_digest; the envelope is still
+    // useful for the per-frame URL template.
+    const wire = serializeDataset(
+      fakeRow({
+        frame_count: 5,
+        frame_extension: 'png',
+        frame_source_filenames_ref: FRAMES_REF,
+        source_digest: null,
+      }),
+      emptyDecoration,
+      fakeIdentity,
+      undefined,
+      undefined,
+      stubFramesResolver,
+    )
+    expect(wire.frames).toEqual({ count: 5, urlTemplate: TEMPLATE })
+  })
+
+  it('omits frames when no resolver is supplied (legacy call sites pre-3pg)', () => {
+    // Backwards compat: every test fixture in this file that pre-
+    // dates 3pg/A skips the resolver arg. A frames row with no
+    // resolver passed must NOT throw or emit a partial envelope.
+    const wire = serializeDataset(
+      fakeRow({
+        frame_count: 5,
+        frame_extension: 'png',
+        frame_source_filenames_ref: FRAMES_REF,
+      }),
+      emptyDecoration,
+      fakeIdentity,
+    )
+    expect(wire.frames).toBeUndefined()
+  })
+
+  it('omits frames when the resolver returns null (R2_PUBLIC_BASE unbound)', () => {
+    const wire = serializeDataset(
+      fakeRow({
+        frame_count: 5,
+        frame_extension: 'png',
+        frame_source_filenames_ref: FRAMES_REF,
+      }),
+      emptyDecoration,
+      fakeIdentity,
+      undefined,
+      undefined,
+      () => null,
+    )
+    expect(wire.frames).toBeUndefined()
+  })
+
+  it('omits frames when frame_extension is null even with a non-null count', () => {
+    // The schema requires the three columns to land atomically via
+    // clearTranscoding; a row with mixed nulls would indicate a
+    // hand-edit. Refuse to emit a partial envelope.
+    const wire = serializeDataset(
+      fakeRow({
+        frame_count: 5,
+        frame_extension: null,
+        frame_source_filenames_ref: FRAMES_REF,
+      }),
+      emptyDecoration,
+      fakeIdentity,
+      undefined,
+      undefined,
+      stubFramesResolver,
+    )
+    expect(wire.frames).toBeUndefined()
+  })
+})

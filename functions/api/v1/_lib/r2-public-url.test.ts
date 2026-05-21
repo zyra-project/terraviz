@@ -17,6 +17,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  buildFramesUrlTemplate,
   encodeR2Key,
   resolveAssetRef,
   resolveAssetRefStrict,
@@ -197,5 +198,78 @@ describe('resolveAssetRefStrict (3b/O)', () => {
 describe('encodeR2Key', () => {
   it('encodes special chars but preserves slashes', () => {
     expect(encodeR2Key('a/b c/d?e')).toBe('a/b%20c/d%3Fe')
+  })
+})
+
+describe('buildFramesUrlTemplate (3pg/A)', () => {
+  const DS = '01HXAAAAAAAAAAAAAAAAAAAAAA'
+  const UP = '01HYAAAAAAAAAAAAAAAAAAAAAA'
+  const REF = `r2:uploads/${DS}/${UP}/source_filenames.json`
+  const PUBLIC_BASE = 'https://assets.terraviz.example.com'
+
+  it('builds a public URL template with a literal {index} token', () => {
+    const env = { R2_PUBLIC_BASE: PUBLIC_BASE } as CatalogEnv
+    const template = buildFramesUrlTemplate(env, REF, 'png')
+    expect(template).toBe(
+      `${PUBLIC_BASE}/uploads/${DS}/${UP}/frames/{index}.png`,
+    )
+  })
+
+  it('preserves the {index} braces literally (no URL encoding)', () => {
+    // `encodeURIComponent('{')` is `%7B` — the whole point of the
+    // sentinel-and-swap pattern is that consumers can do
+    // `template.replace('{index}', padded)` without URL-decoding.
+    const env = { R2_PUBLIC_BASE: PUBLIC_BASE } as CatalogEnv
+    const template = buildFramesUrlTemplate(env, REF, 'jpg')!
+    expect(template).toContain('{index}')
+    expect(template).not.toContain('%7B')
+    expect(template).not.toContain('%7D')
+  })
+
+  it('falls through MOCK_R2 when R2_PUBLIC_BASE is unset', () => {
+    const env = { MOCK_R2: 'true', CATALOG_R2_BUCKET: 'bkt' } as CatalogEnv
+    const template = buildFramesUrlTemplate(env, REF, 'webp')
+    expect(template).toBe(
+      `https://mock-r2.localhost/bkt/uploads/${DS}/${UP}/frames/{index}.webp`,
+    )
+  })
+
+  it('returns null when neither R2_PUBLIC_BASE nor MOCK_R2 is set', () => {
+    // Mirrors the resolveR2HlsPublicUrl policy — a missing public
+    // base surfaces as a wire-field omission rather than a URL that
+    // 403s on the SPA. The strict variant is what catches the
+    // misconfig before publishing the wire shape.
+    const env = {} as CatalogEnv
+    expect(buildFramesUrlTemplate(env, REF, 'png')).toBeNull()
+  })
+
+  it('returns null when the source-filenames ref shape is wrong', () => {
+    const env = { R2_PUBLIC_BASE: PUBLIC_BASE } as CatalogEnv
+    // Missing `r2:` scheme.
+    expect(
+      buildFramesUrlTemplate(env, `uploads/${DS}/${UP}/source_filenames.json`, 'png'),
+    ).toBeNull()
+    // Wrong filename.
+    expect(
+      buildFramesUrlTemplate(env, `r2:uploads/${DS}/${UP}/index.json`, 'png'),
+    ).toBeNull()
+    // Non-ULID dataset id.
+    expect(
+      buildFramesUrlTemplate(env, `r2:uploads/short/${UP}/source_filenames.json`, 'png'),
+    ).toBeNull()
+    // Non-ULID upload id.
+    expect(
+      buildFramesUrlTemplate(env, `r2:uploads/${DS}/short/source_filenames.json`, 'png'),
+    ).toBeNull()
+  })
+
+  it('rejects extensions outside the [a-z0-9]+ allowlist', () => {
+    const env = { R2_PUBLIC_BASE: PUBLIC_BASE } as CatalogEnv
+    // Empty.
+    expect(buildFramesUrlTemplate(env, REF, '')).toBeNull()
+    // Uppercase or path traversal would otherwise produce a URL
+    // that lands at the wrong R2 key.
+    expect(buildFramesUrlTemplate(env, REF, 'PNG')).toBeNull()
+    expect(buildFramesUrlTemplate(env, REF, '../etc/passwd')).toBeNull()
   })
 })

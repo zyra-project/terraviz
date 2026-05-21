@@ -24,7 +24,8 @@ import { describe, expect, it } from 'vitest'
 import Database from 'better-sqlite3'
 import { freshMigratedDb } from '../../../../scripts/lib/catalog-migrations'
 import { asD1 } from './test-helpers'
-import { searchDatasets, type SearchDatasetsEnv } from './search-datasets'
+import { rowOverlapsTimeRange, searchDatasets, type SearchDatasetsEnv } from './search-datasets'
+import type { DatasetRow } from './catalog-store'
 import { embedDatasetJob } from './embed-dataset-job'
 import {
   __clearMockStore,
@@ -482,5 +483,217 @@ describe('searchDatasets — limit', () => {
 
     const result = await searchDatasets(env, { query: 'hurricane', limit: 9999 })
     expect(result.datasets.length).toBeLessThanOrEqual(VECTORIZE_MAX_TOP_K)
+  })
+})
+
+describe('rowOverlapsTimeRange (3pg/D)', () => {
+  // Pure function — no DB / env required. Tests every shape the
+  // overlap predicate has to handle: sequence rows, legacy
+  // start/end rows, missing-time rows, edge cases at the
+  // window boundaries.
+  function row(overrides: Partial<DatasetRow>): DatasetRow {
+    return {
+      id: 'X',
+      slug: 'x',
+      origin_node: 'NODE',
+      title: 'T',
+      abstract: null,
+      organization: null,
+      format: 'video/mp4',
+      data_ref: 'url:https://x',
+      thumbnail_ref: null,
+      sphere_thumbnail_ref: null,
+      sphere_thumbnail_ref_lg: null,
+      legend_ref: null,
+      caption_ref: null,
+      website_link: null,
+      start_time: null,
+      end_time: null,
+      period: null,
+      weight: 0,
+      visibility: 'public',
+      is_hidden: 0,
+      run_tour_on_load: null,
+      license_spdx: null,
+      license_url: null,
+      license_statement: null,
+      attribution_text: null,
+      rights_holder: null,
+      doi: null,
+      citation_text: null,
+      schema_version: 1,
+      created_at: TS,
+      updated_at: TS,
+      published_at: TS,
+      retracted_at: null,
+      publisher_id: null,
+      legacy_id: null,
+      color_table_ref: null,
+      probing_info: null,
+      bbox_n: null,
+      bbox_s: null,
+      bbox_w: null,
+      bbox_e: null,
+      celestial_body: null,
+      radius_mi: null,
+      lon_origin: null,
+      is_flipped_in_y: null,
+      transcoding: null,
+      active_transcode_upload_id: null,
+      frame_count: null,
+      frame_extension: null,
+      frame_source_filenames_ref: null,
+      content_digest: null,
+      source_digest: null,
+      ...overrides,
+    }
+  }
+  const sequenceRow = row({
+    frame_count: 24,
+    frame_extension: 'png',
+    frame_source_filenames_ref: 'r2:uploads/.../source_filenames.json',
+    start_time: '2026-05-16T00:00:00.000Z',
+    period: 'PT1H',
+  })
+
+  it('sequence row: overlaps when the requested window touches the series', () => {
+    const fromMs = Date.parse('2026-05-16T05:00:00Z')
+    const toMs = Date.parse('2026-05-16T08:00:00Z')
+    expect(rowOverlapsTimeRange(sequenceRow, fromMs, toMs)).toBe(true)
+  })
+
+  it('sequence row: window entirely before the series → no overlap', () => {
+    const fromMs = Date.parse('2026-05-15T00:00:00Z')
+    const toMs = Date.parse('2026-05-15T12:00:00Z')
+    expect(rowOverlapsTimeRange(sequenceRow, fromMs, toMs)).toBe(false)
+  })
+
+  it('sequence row: window entirely after the series → no overlap', () => {
+    // Series ends at 2026-05-17T00:00:00Z (24 hourly frames from 16-05).
+    const fromMs = Date.parse('2026-05-17T00:00:00Z')
+    const toMs = Date.parse('2026-05-17T06:00:00Z')
+    expect(rowOverlapsTimeRange(sequenceRow, fromMs, toMs)).toBe(false)
+  })
+
+  it('non-sequence row: overlaps when [start_time, end_time] overlaps the window', () => {
+    const legacy = row({ start_time: '2020-01-01T00:00:00Z', end_time: '2021-01-01T00:00:00Z' })
+    expect(
+      rowOverlapsTimeRange(legacy, Date.parse('2020-06-01Z'), Date.parse('2020-07-01Z')),
+    ).toBe(true)
+  })
+
+  it('non-sequence row: end_time is inclusive (closed-closed)', () => {
+    const legacy = row({ start_time: '2020-01-01T00:00:00Z', end_time: '2021-01-01T00:00:00Z' })
+    // Query starts exactly at end_time — should still overlap (closed).
+    expect(
+      rowOverlapsTimeRange(legacy, Date.parse('2021-01-01Z'), Date.parse('2021-01-02Z')),
+    ).toBe(true)
+  })
+
+  it('row with no usable time metadata → no overlap (dropped from filter results)', () => {
+    expect(rowOverlapsTimeRange(row({}), 0, 1)).toBe(false)
+  })
+
+  it('row with start_time but no end_time and no period → no overlap', () => {
+    // Half-defined time data isn't enough to compute a window;
+    // drop the row rather than fabricating a zero-width range.
+    expect(
+      rowOverlapsTimeRange(row({ start_time: '2020-01-01Z' }), 0, Date.parse('2030-01-01Z')),
+    ).toBe(false)
+  })
+
+  it('sequence row with malformed period → falls through to no overlap', () => {
+    const broken = row({
+      ...sequenceRow,
+      period: 'not-a-duration',
+      end_time: null,
+    })
+    expect(rowOverlapsTimeRange(broken, 0, Date.parse('2030-01-01Z'))).toBe(false)
+  })
+})
+
+describe('searchDatasets — frames indicator (3pg-review/B)', () => {
+  // Predicate must require all three frame columns in lockstep —
+  // matches the serializer + endpoint policy so the LLM doesn't
+  // see a `frames` hint that would then fail on /frames or get
+  // omitted from `WireDataset.frames`. Copilot
+  // discussion_r3277221713.
+  function seedFramedRow(updates: {
+    frame_count: number | null
+    frame_extension: string | null
+    frame_source_filenames_ref: string | null
+  }): Database.Database {
+    const db = seed([
+      {
+        id: 'DS_SEQ',
+        title: 'Daily SST Anomaly',
+        abstract: 'Hourly SST frames.',
+        categories: ['Ocean'],
+        keywords: ['ssta'],
+      },
+    ])
+    db.prepare(
+      `UPDATE datasets
+          SET frame_count = ?, frame_extension = ?,
+              frame_source_filenames_ref = ?,
+              start_time = '2026-05-16T00:00:00.000Z',
+              period = 'PT1H'
+        WHERE id = 'DS_SEQ'`,
+    ).run(updates.frame_count, updates.frame_extension, updates.frame_source_filenames_ref)
+    return db
+  }
+
+  it('surfaces hit.frames when all three columns are set', async () => {
+    const db = seedFramedRow({
+      frame_count: 24,
+      frame_extension: 'png',
+      frame_source_filenames_ref:
+        'r2:uploads/01HXAAAAAAAAAAAAAAAAAAAAAA/01HYAAAAAAAAAAAAAAAAAAAAAA/source_filenames.json',
+    })
+    const env = freshEnv(db)
+    await indexAll(env, ['DS_SEQ'])
+    const result = await searchDatasets(env, { query: 'ssta' })
+    expect(result.datasets[0].frames).toEqual({
+      count: 24,
+      startTime: '2026-05-16T00:00:00.000Z',
+      period: 'PT1H',
+    })
+  })
+
+  it('omits hit.frames when frame_extension is null (partial-null row)', async () => {
+    const db = seedFramedRow({
+      frame_count: 24,
+      frame_extension: null,
+      frame_source_filenames_ref:
+        'r2:uploads/01HXAAAAAAAAAAAAAAAAAAAAAA/01HYAAAAAAAAAAAAAAAAAAAAAA/source_filenames.json',
+    })
+    const env = freshEnv(db)
+    await indexAll(env, ['DS_SEQ'])
+    const result = await searchDatasets(env, { query: 'ssta' })
+    expect(result.datasets[0].frames).toBeUndefined()
+  })
+
+  it('omits hit.frames when frame_source_filenames_ref is null', async () => {
+    const db = seedFramedRow({
+      frame_count: 24,
+      frame_extension: 'png',
+      frame_source_filenames_ref: null,
+    })
+    const env = freshEnv(db)
+    await indexAll(env, ['DS_SEQ'])
+    const result = await searchDatasets(env, { query: 'ssta' })
+    expect(result.datasets[0].frames).toBeUndefined()
+  })
+
+  it('omits hit.frames for non-frames (MP4-source) rows', async () => {
+    const db = seedFramedRow({
+      frame_count: null,
+      frame_extension: null,
+      frame_source_filenames_ref: null,
+    })
+    const env = freshEnv(db)
+    await indexAll(env, ['DS_SEQ'])
+    const result = await searchDatasets(env, { query: 'ssta' })
+    expect(result.datasets[0].frames).toBeUndefined()
   })
 })

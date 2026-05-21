@@ -63,6 +63,7 @@ import { initVrButton } from './ui/vrButton'
 import { flyToOnGlobe, isVrActive } from './services/vrSession'
 import type { VrDatasetTexture } from './services/vrScene'
 import { overlayOptionsFromDataset } from './services/datasetOverlayOptions'
+import { resolveFrameQuery } from './utils/frames'
 import { bootstrapI18n } from './i18n/bootstrap'
 
 // Phase 5: set a body class so CSS can target mobile-native adaptations
@@ -129,6 +130,31 @@ function triggerToTourSource(
  * don't recognise falls through to a generic message so a new code
  * landing server-side doesn't surface as an empty banner.
  */
+/**
+ * Phase 3pg/C — derive an image MIME type from a frame URL's
+ * extension. The server allows `png` / `jpg` / `jpeg` / `webp`
+ * frame sequences (per `buildFrameKey`'s `[a-z0-9]+` extension
+ * rule), so the synthetic single-frame dataset built by
+ * `loadFrameFromChat` needs a `format` that matches the actual
+ * bytes the URL points at. Falls back to `image/png` for
+ * unknown extensions — same shape the per-frame HEAD handler
+ * uses for the `Content-Type` header.
+ */
+function mimeForFrameUrl(url: string): string {
+  const ext = /\.([a-z0-9]+)(?:\?|#|$)/i.exec(url)?.[1]?.toLowerCase()
+  switch (ext) {
+    case 'png':
+      return 'image/png'
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg'
+    case 'webp':
+      return 'image/webp'
+    default:
+      return 'image/png'
+  }
+}
+
 function previewErrorMessage(code: string): string {
   switch (code) {
     case 'invalid_token':
@@ -1726,6 +1752,7 @@ class InteractiveSphere {
     initPlaybackPositioning()
     initChatUI({
       onLoadDataset: (id) => { void this.selectDatasetFromChat(id) },
+      onLoadFrame: (id, frameQuery) => { void this.loadFrameFromChat(id, frameQuery) },
       onFlyTo: (lat, lon, altitude) => {
         void this.renderer?.flyTo(lat, lon, altitude)
         // Also rotate the VR globe if a session is live. Fire-and-
@@ -1767,6 +1794,130 @@ class InteractiveSphere {
   /** Load a dataset selected via the chat panel, updating URL and notifying chat of the change. */
   /** Orbit-driven dataset load. Tags the layer_loaded trigger so we
    * can tell chat-initiated loads apart from browse/url/tour. */
+  /**
+   * Phase 3pg/C — resolve a frame query against the parent
+   * sequence dataset and load the resulting image. Falls back to
+   * loading the parent dataset (HLS) if the row has no frames
+   * envelope, so the user always gets something useful even if
+   * the LLM emitted a load_frame against a non-sequence row.
+   *
+   * The frame is rendered as a one-off image overlay on the
+   * globe — same code path the existing image-dataset loader
+   * uses. The parent sequence is not modified; clicking a
+   * different frame later re-renders against the same dataset
+   * row.
+   */
+  private async loadFrameFromChat(datasetId: string, frameQuery: string): Promise<void> {
+    const dataset = this.appState.datasets.find(d => d.id === datasetId)
+    if (!dataset) {
+      logger.warn('[App] loadFrameFromChat: unknown dataset', datasetId)
+      return
+    }
+    if (!dataset.frames) {
+      // Non-sequence row — chat UI shouldn't have emitted a
+      // load-frame for this, but defend against a stale catalog /
+      // race between manifest refresh and click.
+      logger.warn('[App] loadFrameFromChat: dataset has no frames envelope; falling back to dataset load.')
+      void this.selectDatasetFromChat(datasetId)
+      return
+    }
+    const resolved = resolveFrameQuery(dataset, frameQuery)
+    if (!resolved) {
+      logger.warn('[App] loadFrameFromChat: could not resolve frame query', { datasetId, frameQuery })
+      return
+    }
+    this.announce(`Loading frame: ${resolved.displayName}`)
+    // Build a synthetic single-frame dataset off the parent's
+    // metadata. Format is `image/*` so the loader picks the image
+    // render path (rather than HLS). Title carries the display
+    // name so the info panel reads cleanly.
+    //
+    // Derive the format from the resolved URL's extension rather
+    // than hard-coding `image/png` — the server allows `jpg` /
+    // `webp` sequences too and bakes the extension into
+    // `frames.urlTemplate`. A hard-coded PNG would mislead any
+    // downstream logic that branches on `dataset.format`. Phase
+    // 3pg-review/C — Copilot discussion_r3277396472.
+    const format = mimeForFrameUrl(resolved.url)
+    const frameDataset: Dataset = {
+      ...dataset,
+      id: `${dataset.id}#frame=${resolved.index}`,
+      title: `${dataset.title} — ${resolved.displayName}`,
+      format: format as Dataset['format'],
+      dataLink: resolved.url,
+      // Drop the parent's time controls; a single frame is a
+      // still image, not a playback target.
+      startTime: undefined,
+      endTime: undefined,
+      period: undefined,
+      frames: undefined,
+    }
+    const primary = this.viewports.getPrimary()
+    if (!primary) {
+      logger.warn('[App] loadFrameFromChat: no primary renderer; cannot render frame')
+      return
+    }
+    // Mirror the normal `loadDataset` teardown order:
+    //   1. Stop playback + drop any active HLS / video texture on
+    //      the primary slot — otherwise a frame-load while a video
+    //      is playing leaves the playback loop running and the
+    //      HLS service downloading segments behind a hidden video
+    //      element. The time label would also keep ticking against
+    //      a dataset that's no longer displayed. Phase 3pg-review/D
+    //      — Copilot discussion_r3277695258.
+    //   2. Hide the visual overlays the regular dataset-load path
+    //      hides (cloud / day-night / sun). Phase 3pg-fix —
+    //      pass-1 follow-up.
+    //   3. Explicitly hide the playback transport + time label.
+    //      The `loaderCallbacks` below run AFTER `loadImageDataset`
+    //      decides what to show, so the loader-callback path can't
+    //      reliably tear down state already visible from a prior
+    //      video load. Calling these directly before the load is
+    //      what matches the normal flow's
+    //      `if (!isImageDataset) showPlaybackControls(true)`
+    //      logic — image datasets explicitly hide them, and frame
+    //      loads are image datasets. Phase 3pg-review/D — Copilot
+    //      discussion_r3277695282.
+    stopPlaybackLoop(this.playback)
+    this.appState.isPlaying = false
+    resetPlaybackState(this.playback)
+    this.cleanupPanelVideo()
+    primary.removeCloudOverlay?.()
+    primary.removeNightLights?.()
+    primary.disableSunLighting?.()
+    this.showPlaybackControls(false)
+    this.showTimeLabel(false)
+    // The loader callbacks stay as no-ops because the show/hide
+    // decisions are now made above; if a future loader change
+    // starts calling them mid-load they'd be the wrong side of
+    // the teardown. Match the rest of the no-op image paths.
+    const loaderCallbacks = {
+      showPlaybackControls: (_show: boolean) => { /* handled above */ },
+      showTimeLabel: (_show: boolean) => { /* handled above */ },
+    }
+    try {
+      // `directImageUrl: true` skips the loader's legacy `_4096` /
+      // `_2048` / `_1024` resolution-suffix probing — those would
+      // 404 against a per-frame R2 URL, adding three failed round-
+      // trips before the actual URL resolves. Phase 3pg/C — Copilot
+      // discussion_r3277041026.
+      await loadImageDataset(
+        frameDataset,
+        primary,
+        this.appState,
+        this.isMobile,
+        loaderCallbacks,
+        { directImageUrl: true },
+      )
+      this.appState.currentDataset = frameDataset
+      notifyDatasetChanged(frameDataset)
+      this.announce(`Loaded frame: ${resolved.displayName}`)
+    } catch (err) {
+      logger.error('[App] loadFrameFromChat failed:', err)
+      this.announce('Failed to load frame.')
+    }
+  }
+
   private async selectDatasetFromChat(id: string): Promise<void> {
     const gen = ++this.loadGeneration
     logger.debug('[App] selectDatasetFromChat:', id, 'gen:', gen)

@@ -8,18 +8,24 @@ documents the MP4-input video pipeline) and
 [`CATALOG_PUBLISHING_TOOLS.md`](CATALOG_PUBLISHING_TOOLS.md) (which
 documents the publisher portal); UX conventions inherited from both.
 
-> **Status: ingest shipped (Phase 3pf); exposure scheduled
-> (Phase 3pg).** The ingest half (3pf/A through 3pf/E)
-> implements §"Phase 1 — Batch image-sequence upload" below.
-> Publishers can drag a directory of frames into the portal
-> uploader, the GHA runner encodes the resulting bundle at
-> 30 fps, and the dataset becomes playable like any other video
-> dataset. The exposure half (§"Frames as data" — `/frames`
-> endpoints, Orbit `<<LOAD_FRAME:...>>` marker, search
-> time-range filter, browse date scrubber, CLI commands) is
-> Phase 3pg, scheduled after 3pf bakes for a release cycle.
-> Tracking issue:
+> **Status: shipped (Phase 3pf + 3pg).** Both halves of the plan
+> are live. The ingest half (3pf/A–E) implements §"Phase 1 —
+> Batch image-sequence upload" — publishers drag a directory of
+> frames into the portal uploader, the GHA runner encodes the
+> bundle at 30 fps, and the dataset becomes playable like any
+> other video dataset. The exposure half (3pg/A–F) implements
+> §"Frames as data" — the `WireDataset.frames` envelope, the
+> public `/frames` + `/frames/{index}` endpoints, the Orbit
+> `<<LOAD_FRAME:...>>` marker + `load_frame` function tool, the
+> `?time_range=ISO/ISO` search filter, the browse date scrubber,
+> and the `terraviz frames list / get` CLI commands. Tracking
+> issue:
 > [zyra-project/terraviz#114](https://github.com/zyra-project/terraviz/issues/114).
+> Restricted-visibility frames (presigned-prefix path),
+> click-to-load on the browse scrubber, and the
+> `[RELEVANT DATASETS]` pre-search injection block surfacing
+> the `frames` indicator are deferred follow-ups — see the
+> CHANGELOG's Phase 3pg entry for the full not-included list.
 
 ---
 

@@ -184,6 +184,72 @@ the local federated cache, then calls the peer's
 *not* the local node's. Data stays at home; the subscriber just
 points its player at the peer's signed URL.
 
+## Image-sequence frames across peers
+
+Image-sequence rows (Phase 3pf ingest → Phase 3pg exposure) ride
+the existing feed protocol unchanged. The `WireDataset.frames`
+envelope is part of the dataset payload, so a subscriber sees
+the count + URL template + frames-digest as soon as it pulls the
+parent row:
+
+```json
+{
+  "id": "01HX...",
+  "title": "Daily SST Anomaly",
+  "format": "video/mp4",
+  "dataLink": "/api/v1/datasets/01HX.../manifest",
+  "startTime": "2026-05-16T00:00:00Z",
+  "period": "PT1H",
+  "frames": {
+    "count": 24,
+    "urlTemplate": "https://peer.example/uploads/.../frames/{index}.png",
+    "framesDigest": "sha256:..."
+  }
+}
+```
+
+`urlTemplate` resolves to the **origin node's** public R2 surface —
+data stays at home, same policy the HLS bundle uses. A subscriber
+that wants to address individual frames hits the origin's
+`/api/v1/datasets/{remote_id}/frames` and
+`/api/v1/datasets/{remote_id}/frames/{index}` endpoints directly,
+identifying the origin via the `peer:<peer_id>:<remote_id>` id
+shape the rest of the federation surface uses.
+
+What a subscriber typically does with sequence rows:
+
+- **Browse / search.** No change — the row appears in the feed,
+  the SPA renders the same date scrubber, search supports
+  `?time_range=ISO/ISO` against the peer's locally-cached `start_time`
+  + `period` + `frame_count` without round-tripping to the origin.
+- **Per-frame fetch.** A peer that wants offline copies or a
+  bulk export pipes
+  `terraviz --server=https://peer.example frames list <remote_id>`
+  through `jq -r '.frames[].url' | xargs curl -O`. The
+  `framesDigest` (sha256 of the canonical source-filenames blob)
+  lets the subscriber detect re-uploads without comparing every
+  per-frame URL.
+- **Orbit `<<LOAD_FRAME:...>>`** markers work the same way across
+  federation: the LLM emits the canonical id (the local
+  `peer:<peer_id>:<remote_id>` shape), and the client routes to
+  the origin's public `/frames/{index}` redirect for the actual
+  bytes.
+
+There is no separate signed `/frames` feed. The frames surface
+inherits the parent dataset's visibility — a `restricted` row
+that travels via the signed manifest path stays restricted at
+the origin's `/frames` endpoint too, and presigned-prefix
+support for restricted-row frames is a follow-on once the rest
+of the restricted-visibility plumbing lands. Public sequence
+rows are addressable by any subscriber without further
+coordination.
+
+A subscriber's local Vectorize index treats the `frames`
+envelope the same as the rest of the row — no separate per-frame
+indexing. The structured `?time_range=ISO/ISO` filter on the
+search endpoint operates against `start_time + period × frame_count`
+locally without re-querying the origin.
+
 ## License & attribution propagation
 
 A dataset's license follows it across federation. The

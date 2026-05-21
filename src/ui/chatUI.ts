@@ -52,6 +52,16 @@ export interface ChatCallbacks {
   getCurrentDataset: () => Dataset | null
   announce: (message: string) => void
   onOpenBrowse?: () => void
+  /**
+   * Phase 3pg/C — load a single frame from an image-sequence
+   * dataset. `frameQuery` is the verbatim payload from the
+   * `<<LOAD_FRAME:DATASET_ID:query>>` marker; the host resolves it
+   * via `resolveFrameQuery` (or by calling the `/frames` endpoint)
+   * before rendering. Optional — chat UIs running against a host
+   * that doesn't ship the frame loader can leave it unbound, in
+   * which case frame-load buttons silently no-op.
+   */
+  onLoadFrame?: (datasetId: string, frameQuery: string) => void
 }
 
 let callbacks: ChatCallbacks | null = null
@@ -1017,8 +1027,16 @@ function renderChatText(
   text: string,
   actions?: ChatAction[],
 ): { html: string; inlinedIds: Set<string> } {
-  // Strip raw markers that appear during streaming (all action types)
-  let clean = text.replace(/<?<LOAD:[^>]+>>?\n?/g, '')
+  // Strip raw markers that appear during streaming (all action types).
+  // LOAD_FRAME must come before LOAD (the LOAD regex requires `:`
+  // right after `LOAD` so it wouldn't match `<<LOAD_FRAME:...>>` —
+  // verified — but stripping LOAD_FRAME first keeps the order
+  // intent-obvious for future readers). Phase 3pg-review/C —
+  // Copilot discussion_r3277396454: the LOAD_FRAME marker was
+  // visibly flickering in the transcript during stream because
+  // the renderer hadn't been taught to strip it yet.
+  let clean = text.replace(/<?<LOAD_FRAME:[^>]+>>?\n?/g, '')
+  clean = clean.replace(/<?<LOAD:[^>]+>>?\n?/g, '')
   clean = clean.replace(/<?<FLY:[^>]+>>?\n?/g, '')
   clean = clean.replace(/<?<TIME:[^>]+>>?\n?/g, '')
   clean = clean.replace(/<?<BOUNDS:[^>]+>>?\n?/g, '')
@@ -1098,6 +1116,13 @@ function renderActions(actions: ChatAction[]): string {
       const highlighted = t('chat.action.highlighted', { label })
       return `<span class="chat-action-status" aria-label="${escapeAttr(highlighted)}">${escapeHtml(highlighted)}</span>`
     }
+    if (a.type === 'load-frame') {
+      // Phase 3pg/C — single-frame load button. Display name is
+      // pre-derived server-side (or by `resolveFrameQuery` on the
+      // SPA side); render it verbatim so all consumers agree on
+      // the label.
+      return `<button class="chat-action-btn chat-action-frame" data-dataset-id="${escapeAttr(a.datasetId)}" data-frame-query="${escapeAttr(a.frameQuery)}" aria-label="${escapeAttr(t('chat.action.loadFrame.aria', { name: a.displayName }))}"><span class="chat-action-title">${escapeHtml(a.displayName)}</span> <span class="chat-action-load">${escapeHtml(t('chat.action.loadFrame'))}</span></button>`
+    }
     return ''
   }).join('')
   const loadActions = actions.filter(a => a.type === 'load-dataset')
@@ -1112,6 +1137,29 @@ function wireActionButtons(container: Element): void {
   container.querySelectorAll<HTMLElement>('.chat-action-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const id = btn.dataset.datasetId
+      // Phase 3pg/C — frame-load buttons carry a `data-frame-query`
+      // attribute and route through `onLoadFrame` instead. The
+      // analytics + dataset-load bookkeeping below stays on the
+      // load-dataset path; frame loads don't unload the parent
+      // sequence so the "remove action card after load" behaviour
+      // would also be wrong for them.
+      //
+      // The frame-query branch is exclusive: if `data-frame-query`
+      // is set, we never fall through to `onLoadDataset` even when
+      // `callbacks.onLoadFrame` is unbound. The fallback would load
+      // the whole sequence — surprising behaviour the user didn't
+      // ask for. Unbound `onLoadFrame` is a host-side opt-out
+      // (e.g. a chat consumer that doesn't ship the frame loader);
+      // the right answer is a quiet no-op, matching the doc comment
+      // on `ChatCallbacks.onLoadFrame`.
+      const frameQuery = btn.dataset.frameQuery
+      if (id && frameQuery !== undefined) {
+        if (callbacks?.onLoadFrame) {
+          callbacks.onLoadFrame(id, frameQuery)
+          callbacks.announce(t('chat.announce.loadingFrame'))
+        }
+        return
+      }
       if (id && callbacks) {
         callbacks.onLoadDataset(id)
         callbacks.announce(t('chat.announce.loading'))

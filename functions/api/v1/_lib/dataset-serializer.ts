@@ -124,6 +124,45 @@ export interface WireDataset {
    * `dataLink` and 415 — the new shape is additive and opt-in.
    */
   tourJsonUrl?: string
+  /**
+   * Image-sequence frame surface — populated only when the row was
+   * transcoded from an image-sequence upload (Phase 3pg/A). The
+   * envelope is the minimum any consumer needs to enumerate or
+   * address individual frames:
+   *
+   *   - `count` is the post-transcode frame count.
+   *   - `urlTemplate` is the public per-frame URL with a literal
+   *     `{index}` token consumers substitute with the zero-padded
+   *     5-digit frame number. The extension is baked into the
+   *     template so the consumer doesn't need a separate field.
+   *   - `framesDigest` (optional) is the SHA-256 of the canonical
+   *     source-filenames blob — the same hash the publisher signed
+   *     off on during ingest. A consumer that wants a cache-
+   *     invalidation signal can compare templates instead; the
+   *     per-upload prefix in `urlTemplate` changes on every re-
+   *     upload, so the two carry the same "is this the same source
+   *     set" answer.
+   *
+   * Time origin and step live on the parent `WireDataset`
+   * (`startTime` + `period`); consumers compute frame N's
+   * timestamp as `startTime + period × index`. Display naming
+   * (`{slug}_{timestamp}.{ext}` for time-series, `{slug}_frame_{NNNNN}.{ext}`
+   * for pure-sequence rows) is server-rendered by the `/frames`
+   * endpoint Phase 3pg/B ships — clients that want it can apply
+   * the same rule locally without an extra round-trip.
+   */
+  frames?: WireDatasetFrames
+}
+
+/**
+ * Image-sequence frame envelope on `WireDataset` (Phase 3pg/A).
+ * See the field comment on `WireDataset.frames` for the rationale
+ * behind each member.
+ */
+export interface WireDatasetFrames {
+  count: number
+  urlTemplate: string
+  framesDigest?: string
 }
 
 /**
@@ -153,6 +192,23 @@ export type DataRefResolver = (dataRef: string) => string | null
  * or the SPA receives unrenderable `r2:` strings.
  */
 export type AssetRefResolver = (ref: string | null | undefined) => string | null
+
+/**
+ * Pluggable callback that returns the public per-frame URL template
+ * for an image-sequence upload (Phase 3pg/A). Takes the row's
+ * `frame_source_filenames_ref` (the canonical ULID-pair container)
+ * and the row's `frame_extension`, returns a URL with a literal
+ * `{index}` token consumers substitute with the zero-padded 5-digit
+ * frame number. Lives outside the serializer for the same reason
+ * `DataRefResolver` does — keeps the serializer free of env
+ * bindings; call sites close over what they have on hand. Returns
+ * null when R2 public-base resolution falls through, mirroring
+ * `AssetRefResolver`'s shape.
+ */
+export type FramesUrlTemplateResolver = (
+  frameSourceFilenamesRef: string,
+  frameExtension: string,
+) => string | null
 
 function nonNull<T>(v: T | null | undefined): T | undefined {
   return v == null ? undefined : v
@@ -245,6 +301,7 @@ export function serializeDataset(
   identity: NodeIdentityRow,
   resolveDataRef?: DataRefResolver,
   resolveAssetRef?: AssetRefResolver,
+  resolveFramesUrlTemplate?: FramesUrlTemplateResolver,
 ): WireDataset {
   // Auxiliary asset URLs may be either:
   //   - bare https:// (pre-Phase-3b: NOAA CloudFront), or
@@ -330,6 +387,46 @@ export function serializeDataset(
   if (row.format === 'tour/json' && resolveDataRef) {
     const tourUrl = resolveDataRef(row.data_ref)
     if (tourUrl) wire.tourJsonUrl = tourUrl
+  }
+
+  // Image-sequence frame envelope. Phase 3pg/A — populated only
+  // when:
+  //   - `frame_count` is non-null (transcode landed, so the frame
+  //     surface is consistent with the active `data_ref`);
+  //   - `frame_extension` and `frame_source_filenames_ref` are
+  //     also populated (clearTranscoding swaps them atomically with
+  //     `data_ref` — any drift would indicate a hand-edited row);
+  //   - the resolver is supplied AND returns a non-null template
+  //     (no `R2_PUBLIC_BASE` binding → no frames surface yet, same
+  //     fail-quiet shape `resolveAssetRefStrict` uses for the
+  //     thumbnail / legend fields).
+  //
+  // The `source_digest` column carries the SHA-256 of the
+  // canonical source-filenames blob for frames uploads (the
+  // publisher-signed hash that the runner verifies during
+  // download). Surfacing it as `framesDigest` lets consumers
+  // cache the enumeration and notice re-uploads — though the
+  // template-comparison shortcut is usually enough since the
+  // per-upload prefix in `urlTemplate` also changes on every
+  // re-upload.
+  if (
+    row.frame_count != null &&
+    row.frame_extension != null &&
+    row.frame_source_filenames_ref != null &&
+    resolveFramesUrlTemplate
+  ) {
+    const urlTemplate = resolveFramesUrlTemplate(
+      row.frame_source_filenames_ref,
+      row.frame_extension,
+    )
+    if (urlTemplate) {
+      const frames: WireDatasetFrames = {
+        count: row.frame_count,
+        urlTemplate,
+      }
+      if (row.source_digest) frames.framesDigest = row.source_digest
+      wire.frames = frames
+    }
   }
 
   // Enriched fields go under `enriched` to mirror the existing

@@ -45,6 +45,7 @@ import {
   getNodeIdentity,
 } from './catalog-store'
 import { embedDatasetText, type EmbeddingEnv } from './embeddings'
+import { parseIsoDuration } from './iso-duration'
 import { isWorkersAiQuotaError } from '../../_lib/workers-ai-error'
 import {
   queryEmbedding,
@@ -69,6 +70,21 @@ export interface SearchDatasetsHit {
   peer_id: string
   /** Cosine similarity score from Vectorize. Higher = more similar. */
   score: number
+  /**
+   * Image-sequence indicator (Phase 3pg/C). Present only when the
+   * row was transcoded from a frames upload; carries the count
+   * plus the time origin / period so Orbit's LLM can decide
+   * whether `<<LOAD_FRAME:...>>` makes sense and pick a reasonable
+   * timestamp / index from the conversation. Omitted entirely for
+   * MP4-source rows — older clients ignore the field, and an
+   * LLM that doesn't see it falls back to the regular
+   * `<<LOAD:...>>` marker for whole-sequence playback.
+   */
+  frames?: {
+    count: number
+    startTime?: string
+    period?: string
+  }
 }
 
 export interface SearchDatasetsFilters {
@@ -80,6 +96,25 @@ export interface SearchDatasetsFilters {
    * explicitly is how a future federation-aware caller opts in.
    */
   peer_id?: string
+  /**
+   * Phase 3pg/D — restrict hits to datasets whose time window
+   * overlaps the requested `[fromMs, toMs]` range (milliseconds
+   * since epoch). The overlap is computed per row:
+   *
+   *   - sequence rows (frames + start_time + period): the window
+   *     is `[start_time, start_time + period × frame_count)`;
+   *   - non-sequence rows: the window is `[start_time, end_time]`
+   *     (legacy SOS shape — both columns must be set);
+   *   - rows with no time metadata: dropped from the result when
+   *     `time_range` is set.
+   *
+   * Filtering happens post-hydration: the Vectorize query and D1
+   * lookup are unchanged; the hits are pruned before they're
+   * mapped to the wire shape. Cheaper than threading a SQL `WHERE`
+   * for a v1 implementation, and avoids re-querying when the
+   * filter result set is empty.
+   */
+  time_range?: { fromMs: number; toMs: number }
 }
 
 export interface SearchDatasetsOptions {
@@ -189,11 +224,16 @@ export async function searchDatasets(
 
   // Preserve Vectorize's score-sorted order; drop hits whose row no
   // longer exists or is no longer published (a retract that happened
-  // between the indexing job and now).
+  // between the indexing job and now). Phase 3pg/D — also drop hits
+  // whose time window doesn't overlap the requested `time_range`
+  // filter, evaluated post-hydration so the Vectorize/D1 work is
+  // unchanged when the filter isn't supplied.
+  const timeRange = options.filters?.time_range
   const datasets: SearchDatasetsHit[] = []
   for (const match of matches) {
     const row = rowMap.get(match.dataset_id)
     if (!row) continue
+    if (timeRange && !rowOverlapsTimeRange(row, timeRange.fromMs, timeRange.toMs)) continue
     const decorations =
       decorationMap.get(match.dataset_id) ??
       ({ tags: [], categories: [], keywords: [], developers: [], related: [] } as DecorationRows)
@@ -272,7 +312,7 @@ function toHit(
   localNodeId: string | null,
   metadata: DatasetVectorMetadata | undefined,
 ): SearchDatasetsHit {
-  return {
+  const hit: SearchDatasetsHit = {
     id: row.id,
     title: row.title,
     abstract_snippet: snippet(row.abstract),
@@ -280,6 +320,26 @@ function toHit(
     peer_id: derivePeerId(row.origin_node, localNodeId, metadata),
     score,
   }
+  // Frame surface predicate matches the wire serializer
+  // (`dataset-serializer.ts`) and the `/frames` endpoints: all
+  // three columns must be set in lockstep, since `clearTranscoding`
+  // writes them atomically. Surfacing `hit.frames` on a partially-
+  // null row would advertise a frame surface that
+  // `WireDataset.frames` / `/frames` would then refuse — confusing
+  // for the LLM and any other consumer. Phase 3pg-review/B —
+  // Copilot discussion_r3277221713.
+  if (
+    row.frame_count != null &&
+    row.frame_extension != null &&
+    row.frame_source_filenames_ref != null
+  ) {
+    hit.frames = {
+      count: row.frame_count,
+      ...(row.start_time ? { startTime: row.start_time } : {}),
+      ...(row.period ? { period: row.period } : {}),
+    }
+  }
+  return hit
 }
 
 function extractCategories(decorations: DecorationRows): string[] {
@@ -309,4 +369,59 @@ function derivePeerId(
   void metadata
   if (localNodeId && originNode === localNodeId) return LOCAL_PEER_ALIAS
   return originNode
+}
+
+/**
+ * Phase 3pg/D — does the dataset row's time window overlap the
+ * requested `[fromMs, toMs]` interval? Used by `searchDatasets`
+ * to filter `?time_range=ISO/ISO` query results. Two row shapes:
+ *
+ *   - Sequence row (all three frame columns set + start_time +
+ *     parseable period): window is `[start_time,
+ *     start_time + period × frame_count)`.
+ *   - Non-sequence row (no frames, but `start_time` + `end_time`
+ *     set): window is `[start_time, end_time]` (closed-closed —
+ *     legacy SOS rows treat both ends as inclusive).
+ *
+ * Rows with no usable time metadata return false — a publisher
+ * who hasn't set a time range can't meaningfully overlap a query.
+ * That matches the plan's "drops out when `time_range` is set"
+ * stance and keeps the filter behaviour deterministic.
+ *
+ * Half-open vs closed-closed: the sequence window is half-open at
+ * the upper end because frame N's timestamp is
+ * `start_time + period × N`, and the (N+1)-th frame doesn't exist.
+ * The non-sequence range is closed-closed because the catalog's
+ * end_time semantically includes that moment (e.g. "1979-01-01 to
+ * 2020-01-01" should match a query containing 2020-01-01). Both
+ * conventions match the way `/frames?at=` and the docent's TIME
+ * marker treat the same column.
+ */
+export function rowOverlapsTimeRange(
+  row: DatasetRow,
+  fromMs: number,
+  toMs: number,
+): boolean {
+  if (
+    row.frame_count != null &&
+    row.frame_extension != null &&
+    row.frame_source_filenames_ref != null &&
+    row.start_time &&
+    row.period
+  ) {
+    const startMs = Date.parse(row.start_time)
+    const periodMs = parseIsoDuration(row.period)
+    if (!Number.isNaN(startMs) && periodMs != null && periodMs > 0) {
+      const endMsExclusive = startMs + periodMs * row.frame_count
+      return fromMs < endMsExclusive && toMs >= startMs
+    }
+  }
+  if (row.start_time && row.end_time) {
+    const startMs = Date.parse(row.start_time)
+    const endMs = Date.parse(row.end_time)
+    if (!Number.isNaN(startMs) && !Number.isNaN(endMs)) {
+      return fromMs <= endMs && toMs >= startMs
+    }
+  }
+  return false
 }

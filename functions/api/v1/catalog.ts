@@ -41,7 +41,7 @@ import {
 } from './_lib/catalog-store'
 import { serializeDataset, maxUpdatedAt, type WireDataset } from './_lib/dataset-serializer'
 import { makeDataRefResolver } from './_lib/data-ref-resolver'
-import { resolveAssetRefStrict } from './_lib/r2-public-url'
+import { buildFramesUrlTemplate, resolveAssetRefStrict } from './_lib/r2-public-url'
 import {
   buildAndCacheSnapshot,
   computeEtag,
@@ -116,8 +116,16 @@ async function renderCatalog(
   // a URL that 403s on the SPA. Same policy as the manifest
   // endpoint's HLS branch (commit 3/P).
   const assetResolver = (ref: string | null | undefined) => resolveAssetRefStrict(env, ref)
+  const framesResolver = (ref: string, ext: string) => buildFramesUrlTemplate(env, ref, ext)
   const datasets = rows.map(r =>
-    serializeDataset(r, decorationMap.get(r.id)!, identity, resolveDataRef, assetResolver),
+    serializeDataset(
+      r,
+      decorationMap.get(r.id)!,
+      identity,
+      resolveDataRef,
+      assetResolver,
+      framesResolver,
+    ),
   )
 
   // The etag stamped in the response header MUST equal the one

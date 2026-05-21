@@ -16,6 +16,160 @@ referenced in [`README.md`](README.md).
 
 ---
 
+## Phase 3pg — Image-sequence frames exposure
+
+**Branch:** `claude/catalog-3pg-frames-exposure`
+**Commits:** 3pg/A through 3pg/F.
+
+Promotes the image-sequence frame metadata Phase 3pf ingest
+landed (`frame_count`, `frame_extension`,
+`frame_source_filenames_ref` on every sequence row) into
+first-class catalog surfaces. Where 3pf gave publishers a way
+to upload frames and consumers an HLS playback, 3pg lets the
+SPA, the docent, federated peers, and the `terraviz` CLI
+address individual frames by index or by time. The schema
+work shipped in 3pf so 3pg is back-fill-free — every sequence
+row captured during 3pf already carries everything the new
+consumers need.
+
+**3pg/A — `WireDataset.frames` manifest envelope.** The
+serializer (`functions/api/v1/_lib/dataset-serializer.ts`)
+emits a new `frames` field on sequence rows: `count`,
+`urlTemplate` (with a literal `{index}` token consumers
+substitute with the zero-padded 5-digit frame number), and
+optional `framesDigest` (SHA-256 of the canonical source-
+filenames blob — the same hash the publisher signed off on
+during ingest). `buildFramesUrlTemplate` in
+`r2-public-url.ts` preserves the `{index}` braces through
+URL encoding via a sentinel-and-swap so consumers can do
+`template.replace('{index}', padded)` without URL-decoding.
+Backwards-compat: older clients ignore the new field.
+
+**3pg/B — `/frames` + `/frames/{index}` endpoints.** Three
+public routes under `/api/v1/datasets/{id}/`:
+
+- `GET /frames` — paginated frame list with
+  `{index, displayName, originalFilename, timestamp,
+  contentDigest, url}` per row. `?limit=N` (default 100,
+  max 1000), `?cursor=N` pagination; `?at=ISO` returns the
+  single closest frame; `?from=ISO&to=ISO` filters by an
+  inclusive time window. Display names follow
+  `{slug}_{YYYYMMDDTHHMMSSZ}.{ext}` for time-series rows and
+  `{slug}_frame_{NNNNN}.{ext}` for pure-sequence rows.
+- `GET /frames/{frameIndex}` — 302 to the per-frame R2 URL.
+  Accepts padded or unpadded indexes (strict `/^\d+$/`).
+  RFC 9530 `Content-Digest` header set from the manifest.
+- `HEAD /frames/{frameIndex}` — body-less, returns
+  `Content-Digest` + `Content-Type` + `X-Frame-Url`.
+
+New `functions/api/v1/_lib/iso-duration.ts` parses the
+catalog's `period` column shapes; new
+`frames-manifest.ts` reads the canonical source-filenames
+JSON blob, renders display names, and provides the
+index↔timestamp arithmetic that powers `?at` / `?from` /
+`?to`. Visibility honors the same public-only filter as
+`/datasets/{id}`; restricted-row presigning is a follow-up.
+
+**3pg/C — Orbit `<<LOAD_FRAME:...>>` marker + `load_frame`
+tool.** Two wire formats accepted (both yield the same
+`load-frame` chat action): inline
+`<<LOAD_FRAME:DATASET_ID:query>>` markers (where query is
+an ISO timestamp, `index=N`, a bare integer, or `latest` /
+`first`) and a function-calling `load_frame(dataset_id,
+dataset_title, query)` tool. `validateAndCleanText`
+extracts the marker against the dataset's `frames` envelope
+and resolves via the shared `resolveFrameQuery` helper
+(`src/utils/frames.ts`); the chat UI renders the action as
+a button labelled with the derived display name. Click
+routes through a new `ChatCallbacks.onLoadFrame(id,
+frameQuery)` callback into `loadFrameFromChat` in
+`main.ts`, which builds a synthetic single-frame `Dataset`
+(MIME derived from the URL extension — `png` / `jpg` /
+`webp`) and routes through the existing `loadImageDataset`
+pipeline with a new `directImageUrl` loader option that
+bypasses the legacy `_4096` / `_2048` / `_1024` resolution-
+suffix probing. The chat parser is case-insensitive on the
+id and supports a `legacyId` fallback for LLMs that echo
+the legacy SOS ids. LLM discoverability: search results
+(`SearchDatasetsHit`, `CatalogSearchResult`) carry an
+optional `frames` indicator (`count` + `startTime` +
+`period`) so the model can decide whether `load_frame`
+makes sense for a given row. Frame-load buttons no longer
+fall back to `onLoadDataset` when the host hasn't wired the
+callback — the surprising "load the whole sequence on
+click" behaviour is replaced with a quiet no-op matching
+the doc comment.
+
+**3pg/D — Time-range search filter + browse date scrubber.**
+The public search endpoint accepts `?time_range=ISO/ISO`.
+A new `rowOverlapsTimeRange(row, fromMs, toMs)` predicate
+filters hits whose `[start_time, start_time + period ×
+frame_count)` window (sequence rows) or `[start_time,
+end_time]` window (legacy rows) doesn't overlap the
+requested interval. The filter is applied post-hydration so
+the Vectorize / D1 work is unchanged when the filter isn't
+supplied. `time_range` participates in the KV cache key via
+the parsed `[fromMs, toMs]` tuple so trivial timestamp
+variants collapse cleanly. Browse cards on sequence rows
+render a thin SVG timeline with frame count, first / last
+timestamps, and a "closest to now" marker that fades when
+"now" falls outside the series. Click-to-load on the
+scrubber is a follow-up.
+
+**3pg/E — `terraviz frames list / get` CLI commands.**
+`terraviz frames list <id> [--limit=N] [--cursor=X]
+[--at=ISO] [--from=ISO --to=ISO]` streams the
+`/frames` JSON response; pipe through `jq -r
+'.frames[].url' | xargs -n1 curl -O` for a bulk fetch.
+`terraviz frames get <id> <index>` prints the per-frame R2
+URL on stdout (the RFC 9530 Content-Digest goes to stderr,
+informational only) so `xargs curl -O` works for one-shot
+fetches. Index validation mirrors the server's strict
+`/^\d+$/`; `--from` / `--to` must be paired. Hits the
+public endpoints — auth headers attach when configured but
+are not required for public sequence rows.
+
+**3pg/F — Operator docs.** This entry, plus a new
+`CATALOG_DATA_MODEL.md` block on the three frame columns
+and a new `CATALOG_FEDERATION_PROTOCOL.md` section
+("Image-sequence frames across peers") describing how
+federated subscribers see and consume the frame surface.
+
+**Reviewer iterations.** Three Copilot review passes
+generated 14 actionable comments across the lifetime of
+the PR; each landed as a `3pg-review/<letter>:` commit
+(see the PR for the full pass-by-pass triage). Notable
+hardening:
+
+- `?from`/`?to` windows that fall entirely outside a
+  parseable time series now return 200 with `frames: []`
+  instead of 400 `not_a_time_series`.
+- `r2_unconfigured` (deployment) is now distinct from
+  `invalid_frame_metadata` (row data corruption) so an
+  operator chasing the error code knows where to look.
+- `frameIndex` parsing is strict base-10 digits — rejects
+  `3e2` / `0x10` / `3.0` / leading sign / whitespace.
+- `<<LOAD_FRAME:DATASET_ID:query>>` marker matches the id
+  case-insensitively and via `legacyId`.
+- `frame_count <= 0` (corrupt row, partial ingest) fails
+  closed in `resolveFrameQuery` rather than emitting an
+  invalid `frames/-0001.png` URL.
+- The streaming chat clean-up strips `<<LOAD_FRAME:...>>`
+  markers from the transcript so they don't flicker
+  before the action button renders.
+- Frame loads now mirror the normal dataset-load
+  teardown (cloud overlay + day/night + sun lighting all
+  hidden before the frame texture lands).
+
+**Not in this PR (follow-ups).**
+- Restricted-visibility frames (presigned-prefix path).
+- Click-to-load on the browse scrubber dot.
+- `[RELEVANT DATASETS]` pre-search injection block
+  surfacing the `frames` indicator (today only
+  `search_datasets` / `search_catalog` hits carry it).
+
+---
+
 ## Phase 3pf — Image-sequence upload ingest
 
 **Branch:** `claude/image-sequence-upload`

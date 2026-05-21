@@ -68,6 +68,8 @@ interface ParsedRequest {
   category: string | undefined
   /** Always populated — defaults to 'local' when the URL omits the param. */
   peer_id: string
+  /** Phase 3pg/D — `[fromMs, toMs]` parsed from `?time_range=ISO/ISO`. */
+  time_range: { fromMs: number; toMs: number } | undefined
 }
 
 function parseRequest(url: URL): ParsedRequest | { error: string; message: string } {
@@ -138,7 +140,45 @@ function parseRequest(url: URL): ParsedRequest | { error: string; message: strin
     categoryRaw != null ? categoryRaw.normalize('NFC').trim().toLowerCase() : undefined
   const category = categoryCanonical && categoryCanonical.length > 0 ? categoryCanonical : undefined
 
-  return { q, limit, category, peer_id }
+  // Phase 3pg/D — `?time_range=ISO/ISO`. The two halves are joined
+  // by a literal `/`, matching the ISO 8601 interval shape (no
+  // duration form yet — `ISO/duration` and `duration/ISO` parse
+  // cleanly per the spec, but we're scoped to start+end intervals
+  // for v1). Missing the slash, missing either half, or either
+  // half failing to parse all yield `invalid_request` so callers
+  // get an actionable error rather than silently dropping the
+  // filter.
+  const timeRangeRaw = url.searchParams.get('time_range')
+  let time_range: ParsedRequest['time_range']
+  if (timeRangeRaw != null) {
+    const slash = timeRangeRaw.indexOf('/')
+    if (slash <= 0 || slash === timeRangeRaw.length - 1) {
+      return {
+        error: 'invalid_request',
+        message: 'Query parameter `time_range` must be `ISO_FROM/ISO_TO`.',
+      }
+    }
+    const fromRaw = timeRangeRaw.slice(0, slash).trim()
+    const toRaw = timeRangeRaw.slice(slash + 1).trim()
+    const fromMs = Date.parse(fromRaw)
+    const toMs = Date.parse(toRaw)
+    if (Number.isNaN(fromMs) || Number.isNaN(toMs)) {
+      return {
+        error: 'invalid_request',
+        message:
+          'Query parameter `time_range` must be `ISO_FROM/ISO_TO` with both halves parseable as ISO 8601 timestamps.',
+      }
+    }
+    if (toMs < fromMs) {
+      return {
+        error: 'invalid_request',
+        message: 'Query parameter `time_range`\'s `ISO_TO` must not precede `ISO_FROM`.',
+      }
+    }
+    time_range = { fromMs, toMs }
+  }
+
+  return { q, limit, category, peer_id, time_range }
 }
 
 /**
@@ -163,6 +203,12 @@ async function cacheKeyFor(parsed: ParsedRequest): Promise<string> {
     l: parsed.limit,
     c: parsed.category ?? null,
     p: parsed.peer_id,
+    // Phase 3pg/D — `time_range` participates in the cache key
+    // because two queries differing only in the filter return
+    // different hit sets. Use the parsed numeric ms (not the raw
+    // URL value) so `2026-05-16/2026-05-17` and
+    // `2026-05-16T00:00:00Z/2026-05-17T00:00:00Z` cache together.
+    t: parsed.time_range ? [parsed.time_range.fromMs, parsed.time_range.toMs] : null,
   })
   const bytes = new TextEncoder().encode(canonical)
   const digest = await crypto.subtle.digest('SHA-256', bytes)
@@ -213,6 +259,7 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
     filters: {
       category: parsed.category,
       peer_id: parsed.peer_id,
+      time_range: parsed.time_range,
     },
   })
 

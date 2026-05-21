@@ -42,6 +42,12 @@ export interface Dataset {
    * post-cutover ULID-keyed rows.
    */
   legacyId?: string
+  /**
+   * URL-safe slug (`sea-ice-extent`, `ssta`) — drives display naming
+   * for the Phase 3pg image-sequence frame buttons. The catalog
+   * always sets a slug; older SOS-source rows may omit it.
+   */
+  slug?: string
   title: string
   format: DatasetFormat
   dataLink: string
@@ -117,6 +123,34 @@ export interface Dataset {
 
   // Enriched metadata (from sos_dataset_metadata.json cross-reference)
   enriched?: EnrichedMetadata
+
+  /**
+   * Image-sequence frame envelope — set only for rows that were
+   * transcoded from a frames upload (Phase 3pg/A). Carries the
+   * frame count, a per-frame URL template (`{index}` is the token
+   * consumers substitute with the zero-padded 5-digit frame
+   * number), and the publisher-signed `framesDigest` of the
+   * canonical source-filenames blob. Older clients ignore this
+   * field; sequence rows still play as a regular HLS video via
+   * `dataLink`.
+   */
+  frames?: DatasetFrames
+}
+
+/**
+ * Image-sequence frame envelope on `Dataset` (Phase 3pg/A). Mirrors
+ * `WireDatasetFrames` from `functions/api/v1/_lib/dataset-serializer.ts`.
+ * Consumers compute frame N's timestamp as
+ * `startTime + period × index` for time-series rows, and render
+ * display names as `{slug}_{YYYYMMDDTHHMMSSZ}.{ext}` (time-series)
+ * or `{slug}_frame_{NNNNN}.{ext}` (pure-sequence) — same
+ * convention the `/api/v1/datasets/{id}/frames` endpoint
+ * server-renders for `displayName`.
+ */
+export interface DatasetFrames {
+  count: number
+  urlTemplate: string
+  framesDigest?: string
 }
 
 /** Probing metadata recovered from the SOS snapshot. Pixel
@@ -333,6 +367,26 @@ export type ChatAction =
   | { type: 'add-marker'; lat: number; lng: number; label?: string }
   | { type: 'toggle-labels'; visible: boolean }
   | { type: 'highlight-region'; geojson: GeoJSON.GeoJSON; label?: string }
+  /**
+   * Load a single frame from a Phase 3pg image-sequence dataset.
+   * `frameQuery` is the verbatim payload from the LLM's
+   * `<<LOAD_FRAME:DATASET_ID:query>>` marker — one of:
+   *   - an ISO 8601 timestamp like `2026-05-16T12:00:00Z`,
+   *   - `index=N` (zero-based, where N is in [0, frame_count)),
+   *   - `latest` / `first` (resolved by the client against the
+   *     dataset's `frame_count`).
+   * `displayName` is the chat-UI-ready button label, derived using
+   * the dataset's `slug` + the resolved frame timestamp / index.
+   * Servers/clients render it consistently per the `/frames`
+   * endpoint convention; clients can also compute it locally.
+   */
+  | {
+      type: 'load-frame'
+      datasetId: string
+      datasetTitle: string
+      frameQuery: string
+      displayName: string
+    }
 
 /**
  * Snapshot of the LLM context used to generate an AI response.

@@ -144,3 +144,79 @@ export function resolveAssetRefStrict(
   }
   return ref
 }
+
+/**
+ * Has the operator bound an R2 public-read origin?
+ *
+ * Returns true when either `R2_PUBLIC_BASE` is set (production
+ * custom domain) or `MOCK_R2=true` is set (local dev). The
+ * `R2_S3_ENDPOINT` fallback that `resolveR2PublicUrl` honours
+ * isn't counted — assets surfaced through the strict variants
+ * (image / HLS / frames) won't resolve to readable bytes through
+ * the S3 endpoint on a typical non-public-bucket production
+ * setup, so it doesn't satisfy "configured" for those surfaces.
+ *
+ * Phase 3pg-review/B — Copilot discussion_r3277221658 /
+ * discussion_r3277221688. Lets handlers distinguish "deployment
+ * misconfig" (return `r2_unconfigured`) from "row data is bad"
+ * (return `invalid_frame_metadata`) when `buildFramesUrlTemplate`
+ * returns null.
+ */
+export function isR2PublicConfigured(env: CatalogEnv): boolean {
+  return !!(env.R2_PUBLIC_BASE?.trim() || env.MOCK_R2 === 'true')
+}
+
+/**
+ * Frame-source-filenames-ref shape produced by `clearTranscoding`:
+ * `r2:uploads/{datasetId}/{uploadId}/source_filenames.json`. Phase
+ * 3pg/A extracts the `{uploadId}` from this to build per-frame URL
+ * templates without threading the upload_id through a separate
+ * column — the source-filenames ref already locks in which upload's
+ * frames are live, so it's the single source of truth for "which
+ * frames live alongside this dataset row right now".
+ */
+const FRAME_SOURCE_FILENAMES_REF_PATTERN =
+  /^r2:uploads\/([0-9A-HJKMNP-TV-Z]{26})\/([0-9A-HJKMNP-TV-Z]{26})\/source_filenames\.json$/
+
+/**
+ * Build the per-frame URL template that `WireDataset.frames.urlTemplate`
+ * surfaces. The literal `{index}` token survives URL encoding so
+ * consumers can substitute the zero-padded frame number directly:
+ *
+ *     const url = template.replace('{index}', String(i).padStart(5, '0'))
+ *
+ * Returns null when R2 public-base resolution falls through (same
+ * shape `resolveR2HlsPublicUrl` uses — operator must bind
+ * `R2_PUBLIC_BASE` or set `MOCK_R2=true` for the template to be
+ * well-defined). Also returns null when the supplied
+ * `frame_source_filenames_ref` doesn't match the canonical shape —
+ * a row whose ref column got truncated or hand-edited can't be
+ * mapped back to its frames, and silently returning null is safer
+ * than emitting a template that points at a non-existent prefix.
+ *
+ * The `{index}` token is preserved by splitting the key at the
+ * filename: the prefix portion is URL-encoded through `encodeR2Key`,
+ * then `{index}.{ext}` is appended verbatim. `{` and `}` would
+ * otherwise become `%7B` / `%7D` under `encodeURIComponent`,
+ * forcing every consumer to URL-decode before substituting.
+ */
+export function buildFramesUrlTemplate(
+  env: CatalogEnv,
+  frameSourceFilenamesRef: string,
+  frameExtension: string,
+): string | null {
+  const match = FRAME_SOURCE_FILENAMES_REF_PATTERN.exec(frameSourceFilenamesRef)
+  if (!match) return null
+  if (!/^[a-z0-9]+$/.test(frameExtension)) return null
+  const [, datasetId, uploadId] = match
+  // Resolve a sentinel prefix to leverage the existing public-base
+  // selection logic; then swap the sentinel for the `{index}` token
+  // so the surviving URL carries it literally. The sentinel
+  // (`__FRAMES_INDEX_TOKEN__`) is reserved per project convention —
+  // matches `[A-Z_]+` so a future migration can grep-and-rename if
+  // the token shape ever changes.
+  const sentinelKey = `uploads/${datasetId}/${uploadId}/frames/__FRAMES_INDEX_TOKEN__.${frameExtension}`
+  const resolved = resolveR2HlsPublicUrl(env, sentinelKey)
+  if (!resolved) return null
+  return resolved.replace('__FRAMES_INDEX_TOKEN__', '{index}')
+}
