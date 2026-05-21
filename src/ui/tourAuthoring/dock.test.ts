@@ -215,6 +215,84 @@ describe('mountTourAuthoringDock (tour/A)', () => {
     expect(document.querySelectorAll('.tour-authoring-task')).toHaveLength(0)
   })
 
+  it('captures pauseSeconds when the pause input is valid', () => {
+    // Phase 3pt/C — flow-control captures.
+    mountTourAuthoringDock('new', {
+      getMapView: () => makeView(),
+      getCurrentDataset: () => null,
+      onDiscard: () => {},
+    })
+    const input = document.querySelector<HTMLInputElement>(
+      '#tour-authoring-pause-input',
+    )!
+    input.value = '3'
+    document
+      .querySelector<HTMLButtonElement>('[data-action="capture-pause-seconds"]')!
+      .click()
+    const label = document.querySelector('.tour-authoring-task-label')?.textContent ?? ''
+    expect(label).toContain('Pause 3')
+  })
+
+  it('refuses pauseSeconds for 0 / negative / blank input', () => {
+    mountTourAuthoringDock('new', {
+      getMapView: () => makeView(),
+      getCurrentDataset: () => null,
+      onDiscard: () => {},
+    })
+    const input = document.querySelector<HTMLInputElement>(
+      '#tour-authoring-pause-input',
+    )!
+    const btn = document.querySelector<HTMLButtonElement>(
+      '[data-action="capture-pause-seconds"]',
+    )!
+    for (const value of ['', '0', '-1']) {
+      input.value = value
+      btn.click()
+    }
+    expect(document.querySelectorAll('.tour-authoring-task')).toHaveLength(0)
+  })
+
+  it('captures pauseForInput / loopToBeginning / unloadAllDatasets buttons', () => {
+    mountTourAuthoringDock('new', {
+      getMapView: () => makeView(),
+      getCurrentDataset: () => null,
+      onDiscard: () => {},
+    })
+    document
+      .querySelector<HTMLButtonElement>('[data-action="capture-pause-input"]')!
+      .click()
+    document.querySelector<HTMLButtonElement>('[data-action="capture-loop"]')!.click()
+    document
+      .querySelector<HTMLButtonElement>('[data-action="capture-unload-all"]')!
+      .click()
+    const labels = Array.from(document.querySelectorAll('.tour-authoring-task-label')).map(
+      el => el.textContent ?? '',
+    )
+    expect(labels).toEqual([
+      'Pause for input',
+      'Loop to beginning',
+      'Unload all datasets',
+    ])
+  })
+
+  it('renders the env.earth toggle alongside the other env rows', () => {
+    // Earth visibility (`envShowEarth`) was added in tour/C alongside
+    // the existing day-night / clouds / stars / borders rows.
+    mountTourAuthoringDock('new', {
+      getMapView: () => makeView(),
+      getCurrentDataset: () => null,
+      onDiscard: () => {},
+    })
+    document
+      .querySelector<HTMLButtonElement>(
+        '[data-action="env"][data-task="envShowEarth"][data-state="on"]',
+      )!
+      .click()
+    const label = document.querySelector('.tour-authoring-task-label')?.textContent ?? ''
+    expect(label).toContain('Earth')
+    expect(label).toContain('on')
+  })
+
   it('captures altmi from zoom (higher zoom → lower altitude)', () => {
     // Inverse of `execFlyTo`'s zoom math in `tourEngine.ts`:
     //   altKm = (6371 × 2) / 2^zoom

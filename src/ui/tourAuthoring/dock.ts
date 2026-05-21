@@ -114,6 +114,7 @@ export function mountTourAuthoringDock(
       </div>
       <div class="tour-authoring-dock-group">
         <span class="tour-authoring-dock-group-label">${escapeHtml(t('tour.dock.group.env'))}</span>
+        ${renderEnvRow('envShowEarth', 'env.earth')}
         ${renderEnvRow('envShowDayNightLighting', 'env.dayNight')}
         ${renderEnvRow('envShowClouds', 'env.clouds')}
         ${renderEnvRow('envShowStars', 'env.stars')}
@@ -125,6 +126,19 @@ export function mountTourAuthoringDock(
           <input id="${ROTATION_INPUT_ID}" class="tour-authoring-input" type="number" step="0.1" min="-10" max="10"
                  value="1" aria-label="${escapeAttr(t('tour.dock.rotation.input.aria'))}">
           <button type="button" class="tour-authoring-chip" data-action="capture-rotation">${escapeHtml(t('tour.dock.rotation.add'))}</button>
+        </div>
+      </div>
+      <div class="tour-authoring-dock-group">
+        <label class="tour-authoring-dock-group-label" for="${PAUSE_INPUT_ID}">${escapeHtml(t('tour.dock.group.flow'))}</label>
+        <div class="tour-authoring-dock-inputrow">
+          <input id="${PAUSE_INPUT_ID}" class="tour-authoring-input" type="number" step="0.5" min="0" max="600"
+                 value="5" aria-label="${escapeAttr(t('tour.dock.pause.seconds.aria'))}">
+          <button type="button" class="tour-authoring-chip" data-action="capture-pause-seconds">${escapeHtml(t('tour.dock.pause.seconds.add'))}</button>
+        </div>
+        <div class="tour-authoring-dock-chiprow">
+          <button type="button" class="tour-authoring-chip" data-action="capture-pause-input">${escapeHtml(t('tour.dock.pause.input.add'))}</button>
+          <button type="button" class="tour-authoring-chip" data-action="capture-loop">${escapeHtml(t('tour.dock.loop.add'))}</button>
+          <button type="button" class="tour-authoring-chip" data-action="capture-unload-all">${escapeHtml(t('tour.dock.unloadAll.add'))}</button>
         </div>
       </div>
       <ol class="tour-authoring-task-list" aria-label="${escapeAttr(t('tour.dock.taskList.aria'))}">
@@ -194,6 +208,26 @@ export function mountTourAuthoringDock(
         // Defensive — `<input type=number>` returns '' for blank.
         if (Number.isFinite(value)) pushCaptured({ setGlobeRotationRate: value })
       })
+    root
+      .querySelector<HTMLButtonElement>('[data-action="capture-pause-seconds"]')
+      ?.addEventListener('click', () => {
+        const input = root.querySelector<HTMLInputElement>(`#${PAUSE_INPUT_ID}`)
+        if (!input) return
+        const value = parseFloat(input.value)
+        // Negative or zero pauses don't make sense — the runtime
+        // would skip them, but keeping invalid tasks out of the
+        // file keeps the post-3pt/D editor cleaner.
+        if (Number.isFinite(value) && value > 0) pushCaptured({ pauseSeconds: value })
+      })
+    root
+      .querySelector<HTMLButtonElement>('[data-action="capture-pause-input"]')
+      ?.addEventListener('click', () => pushCaptured({ pauseForInput: '' }))
+    root
+      .querySelector<HTMLButtonElement>('[data-action="capture-loop"]')
+      ?.addEventListener('click', () => pushCaptured({ loopToBeginning: '' }))
+    root
+      .querySelector<HTMLButtonElement>('[data-action="capture-unload-all"]')
+      ?.addEventListener('click', () => pushCaptured({ unloadAllDatasets: '' }))
   }
 
   render()
@@ -204,11 +238,12 @@ export function mountTourAuthoringDock(
   }
 }
 
-/** Unique input id keeps the `<label for="...">` association valid
+/** Unique input ids keep the `<label for="...">` association valid
  *  even when multiple docks coexist (which the singleton guard in
  *  `index.ts` should prevent, but defending here keeps the page
  *  predictable if a test mounts more than one). */
 const ROTATION_INPUT_ID = 'tour-authoring-rotation-input'
+const PAUSE_INPUT_ID = 'tour-authoring-pause-input'
 
 /** Discriminating union of the env-toggle task keys the dock can
  *  emit. Phase 3pt/B; tour/C extends with more `envShow*` task
@@ -218,12 +253,14 @@ type EnvToggleKey =
   | 'envShowClouds'
   | 'envShowStars'
   | 'envShowWorldBorder'
+  | 'envShowEarth'
 
 type EnvLabelKey =
   | 'env.dayNight'
   | 'env.clouds'
   | 'env.stars'
   | 'env.borders'
+  | 'env.earth'
 
 /** Phase 3pt/B — build an env-toggle task. Keyed on the dock's
  *  `data-task` attribute so each chip button stays declarative.
@@ -239,6 +276,8 @@ function buildEnvTask(key: EnvToggleKey, value: 'on' | 'off'): TourTaskDef {
       return { envShowStars: value }
     case 'envShowWorldBorder':
       return { envShowWorldBorder: value }
+    case 'envShowEarth':
+      return { envShowEarth: value }
   }
 }
 
@@ -342,8 +381,23 @@ function describeTask(task: TourTaskDef): string {
   if ('envShowWorldBorder' in task) {
     return t('tour.task.env.borders', { state: task.envShowWorldBorder })
   }
+  if ('envShowEarth' in task) {
+    return t('tour.task.env.earth', { state: task.envShowEarth })
+  }
   if ('setGlobeRotationRate' in task) {
     return t('tour.task.rotation.summary', { rate: task.setGlobeRotationRate })
+  }
+  if ('pauseSeconds' in task) {
+    return t('tour.task.pause.seconds', { seconds: task.pauseSeconds })
+  }
+  if ('pauseForInput' in task) {
+    return t('tour.task.pause.input')
+  }
+  if ('loopToBeginning' in task) {
+    return t('tour.task.loop')
+  }
+  if ('unloadAllDatasets' in task) {
+    return t('tour.task.unloadAll')
   }
   // Unknown task shape — fall back to the JSON key. Future
   // sub-phases extend this switch as more captures land.
