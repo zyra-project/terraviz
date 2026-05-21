@@ -139,7 +139,10 @@ export async function* streamChatLocal(
 
   // Generate a unique session ID so we can filter events from concurrent
   // sessions (defensive — in practice only one chat streams at a time).
-  const sessionId = `ai_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  // Uses `crypto.randomUUID()` (available in all Tauri webviews) rather
+  // than `Math.random()` so the ID isn't predictable from a colluding
+  // page running in the same context.
+  const sessionId = `ai_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`
   const timeoutMs = options?.timeoutMs ?? 60000
 
   // Set up a promise-based queue: events push chunks, the generator pulls them.

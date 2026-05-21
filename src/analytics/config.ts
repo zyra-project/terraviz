@@ -73,14 +73,30 @@ export function setTier(tier: TelemetryTier): void {
   saveConfig({ tier })
 }
 
-/** Generate a fresh session ID. `crypto.randomUUID()` is the primary;
- * a Math.random-based fallback covers environments without crypto
- * (older test harnesses, extremely stripped-down builds). */
+/** Generate a fresh session ID.
+ *
+ * Uses `crypto.randomUUID()` when available (all supported browsers
+ * and Workers runtimes), and falls back to `crypto.getRandomValues()`
+ * for the handful of environments that have the Crypto interface
+ * but not the `randomUUID()` helper (very old Safari, some shims).
+ * Both paths are CSPRNG-backed — never `Math.random()`, which CodeQL
+ * correctly flags as predictable. */
 export function generateSessionId(): string {
   const cryptoApi = (globalThis as { crypto?: Crypto }).crypto
   if (cryptoApi && typeof cryptoApi.randomUUID === 'function') {
     return cryptoApi.randomUUID()
   }
-  const rand = (n: number) => Math.floor(Math.random() * n).toString(16)
-  return `${rand(0xffffffff)}-${rand(0xffff)}-4${rand(0xfff)}-${rand(0xffff)}-${rand(0xffffffff)}${rand(0xffff)}`
+  if (cryptoApi && typeof cryptoApi.getRandomValues === 'function') {
+    // RFC 4122 v4 UUID assembled from 16 CSPRNG bytes.
+    const bytes = cryptoApi.getRandomValues(new Uint8Array(16))
+    bytes[6] = (bytes[6] & 0x0f) | 0x40 // version 4
+    bytes[8] = (bytes[8] & 0x3f) | 0x80 // variant 10
+    const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('')
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+  }
+  // No Crypto interface at all (extremely stripped-down test harness).
+  // Throw rather than silently emitting predictable IDs — analytics is
+  // not safety-critical, but a session id from Math.random is worse
+  // than a hard failure that surfaces in CI.
+  throw new Error('generateSessionId: no Web Crypto available in this environment')
 }
