@@ -543,25 +543,42 @@ function stripCaptionMarkup(raw: string): string {
 }
 
 /**
- * Very coarse HTML → plain-text conversion for popup bodies. Strips
- * tags, collapses whitespace, decodes a handful of common named /
- * numeric entities. Not a full HTML parser; tour popups in the wild
- * are short descriptive blurbs, not complex markup. If a popup in
- * the field shows up mangled, we upgrade to a proper parser then.
+ * HTML → plain text for popup bodies, used to render text-only
+ * variants of authored popup HTML onto a canvas.
+ *
+ * Earlier this was a chain of `String.prototype.replace` calls — a
+ * `<[^>]+>` tag-stripper followed by entity decoders. CodeQL flagged
+ * two problems with that approach and both were real:
+ *
+ *  1. *Incomplete multi-character sanitization*: nested tag-shaped
+ *     payloads like `<sc<script>ript>` survive a single pass of the
+ *     regex (the inner match removes `<script>` and leaves the outer
+ *     `<script>` reconstituted).
+ *  2. *Double escaping/unescaping*: decoding `&amp;` before the named
+ *     entities means `&amp;lt;` round-trips into a literal `<`, which
+ *     the canvas then renders as the actual character.
+ *
+ * `DOMParser` resolves both: it parses tags structurally (no regex
+ * ambiguity, nested malformed tags collapse correctly) and decodes
+ * each entity exactly once. Scripts and `<img>` requests do not fire
+ * for `parseFromString('...', 'text/html')`, so it's safe to feed
+ * untrusted markup through.
+ *
+ * Structural newlines (`<br>`, `</p>`, `<li>`) are pre-injected as
+ * plain text before parsing so the resulting document's
+ * `textContent` preserves visible line breaks. The pre-pass uses
+ * tag-name-anchored patterns (not a generic `<[^>]+>`), so the
+ * sanitization-bypass class above doesn't apply — any tag-shaped
+ * residue is handled by DOMParser, not by these regexes.
  */
 function htmlToPlainText(raw: string): string {
-  return raw
+  const withBreaks = raw
     .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n\n')
-    .replace(/<li[^>]*>/gi, '\n• ')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(parseInt(code, 10)))
+    .replace(/<\/p\s*>/gi, '\n\n')
+    .replace(/<li\b[^>]*>/gi, '\n• ')
+  const doc = new DOMParser().parseFromString(withBreaks, 'text/html')
+  const text = doc.body.textContent ?? ''
+  return text
     .replace(/[ \t]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
