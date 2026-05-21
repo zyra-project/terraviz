@@ -44,7 +44,7 @@ import type { PublisherData } from '../../_middleware'
 import type { DatasetRow } from '../../../_lib/catalog-store'
 import type { PublisherRow } from '../../../_lib/publisher-store'
 import { getDatasetForPublisher } from '../../../_lib/dataset-mutations'
-import { isConfigurationError } from '../../../_lib/errors'
+import { isConfigurationError, safeErrorReason } from '../../../_lib/errors'
 import { isLoopbackHost } from '../../../_lib/loopback'
 import {
   FRAME_OPERATION_CONCURRENCY,
@@ -331,15 +331,18 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
       }
     }
   } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err)
     // Distinguish missing-credentials (operator must fix the deploy)
     // from upstream-service failures (transient, may succeed on retry).
+    // `safeErrorReason` preserves our typed-error messages but redacts
+    // arbitrary thrown values to a generic fallback so internal paths
+    // / SDK stack content can't leak — CodeQL "Information exposure
+    // through a stack trace" guard.
     if (isConfigurationError(err)) {
       const code = target === 'stream' ? 'stream_unconfigured' : 'r2_unconfigured'
-      return jsonError(503, code, reason)
+      return jsonError(503, code, safeErrorReason(err, 'Upload backend is not configured.'))
     }
     const code = target === 'stream' ? 'stream_upstream_error' : 'r2_upstream_error'
-    return jsonError(502, code, reason)
+    return jsonError(502, code, safeErrorReason(err, 'Upload backend returned an error.'))
   }
 
   return new Response(JSON.stringify(response), {
@@ -555,11 +558,10 @@ async function handleImageSequenceInit(
       key: fnPresigned.key,
     }
   } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err)
     if (isConfigurationError(err)) {
-      return jsonError(503, 'r2_unconfigured', reason)
+      return jsonError(503, 'r2_unconfigured', safeErrorReason(err, 'R2 binding is not configured.'))
     }
-    return jsonError(502, 'r2_upstream_error', reason)
+    return jsonError(502, 'r2_upstream_error', safeErrorReason(err, 'R2 returned an error.'))
   }
 
   // Single asset_uploads row covers the whole sequence. The

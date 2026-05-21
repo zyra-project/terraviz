@@ -42,7 +42,7 @@ import type { CatalogEnv } from '../../../../../_lib/env'
 import type { PublisherData } from '../../../../_middleware'
 import type { DatasetRow } from '../../../../../_lib/catalog-store'
 import { getDatasetForPublisher } from '../../../../../_lib/dataset-mutations'
-import { isConfigurationError, isUpstreamError } from '../../../../../_lib/errors'
+import { isConfigurationError, isUpstreamError, safeErrorReason } from '../../../../../_lib/errors'
 import { isLoopbackHost } from '../../../../../_lib/loopback'
 import {
   FRAME_OPERATION_CONCURRENCY,
@@ -347,9 +347,8 @@ export const onRequestPost: PagesFunction<CatalogEnv, keyof RouteParams> = async
     try {
       status = await getTranscodeStatus(context.env, uid)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
       if (isConfigurationError(err)) {
-        return jsonError(503, 'stream_unconfigured', message)
+        return jsonError(503, 'stream_unconfigured', safeErrorReason(err, 'Stream backend is not configured.'))
       }
       // Stream returned 404 → the uid we minted at /asset isn't
       // present. Either the publisher's POST never reached Stream
@@ -369,7 +368,7 @@ export const onRequestPost: PagesFunction<CatalogEnv, keyof RouteParams> = async
           `Stream asset "${uid}" could not be found. Mint a fresh upload to retry.`,
         )
       }
-      return jsonError(502, 'stream_upstream_error', message)
+      return jsonError(502, 'stream_upstream_error', safeErrorReason(err, 'Stream returned an error.'))
     }
     if (status.state === 'pending' || status.state === 'processing') {
       return jsonError(
@@ -629,11 +628,10 @@ export const onRequestPost: PagesFunction<CatalogEnv, keyof RouteParams> = async
           revertErr,
         )
       }
-      const message = err instanceof Error ? err.message : String(err)
       if (isConfigurationError(err)) {
-        return jsonError(503, 'github_dispatch_unconfigured', message)
+        return jsonError(503, 'github_dispatch_unconfigured', safeErrorReason(err, 'GitHub dispatch is not configured.'))
       }
-      return jsonError(502, 'github_dispatch_upstream_error', message)
+      return jsonError(502, 'github_dispatch_upstream_error', safeErrorReason(err, 'GitHub dispatch failed.'))
     }
 
     // 3. Mark the upload row completed only after the dispatch
@@ -979,11 +977,10 @@ async function handleFrameSourceComplete(
         revertErr,
       )
     }
-    const message = err instanceof Error ? err.message : String(err)
     if (isConfigurationError(err)) {
-      return jsonError(503, 'github_dispatch_unconfigured', message)
+      return jsonError(503, 'github_dispatch_unconfigured', safeErrorReason(err, 'GitHub dispatch is not configured.'))
     }
-    return jsonError(502, 'github_dispatch_upstream_error', message)
+    return jsonError(502, 'github_dispatch_upstream_error', safeErrorReason(err, 'GitHub dispatch failed.'))
   }
 
   await markTranscodingUploadCompleted(context.env.CATALOG_DB!, uploadId, now)

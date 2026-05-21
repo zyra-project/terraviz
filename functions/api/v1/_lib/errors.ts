@@ -36,3 +36,35 @@ export function isConfigurationError(err: unknown): err is ConfigurationError {
 export function isUpstreamError(err: unknown): err is UpstreamError {
   return err instanceof Error && (err as { kind?: string }).kind === 'upstream'
 }
+
+/**
+ * Reduce an arbitrary `unknown` error into a safe string to return
+ * over the wire.
+ *
+ *  • `ConfigurationError` and `UpstreamError` are constructed by our
+ *    own code (`r2-store.ts`, `stream-store.ts`, etc.), so their
+ *    `.message` is operator-authored and intentionally informative
+ *    (e.g. "CATALOG_R2 binding missing"). The message is preserved
+ *    after a light scrub (newline-collapse + 256-char cap) — enough
+ *    to defeat stack-trace inclusion while keeping codes readable
+ *    for the publisher CLI.
+ *  • Any other thrown value (an SDK error, a JSON parse failure, a
+ *    raw `TypeError` from a destructure) is logged server-side via
+ *    `console.error` so wrangler tail still surfaces it, and the
+ *    caller receives only the generic `fallback`. This is the case
+ *    CodeQL's "Information exposure through a stack trace" rule
+ *    fires on: `err.message` from an arbitrary `unknown` is exactly
+ *    where internal paths, bucket names, or stack frames can leak.
+ */
+const MAX_REASON_LEN = 256
+function scrub(message: string): string {
+  return message.replace(/\s+/g, ' ').trim().slice(0, MAX_REASON_LEN)
+}
+
+export function safeErrorReason(err: unknown, fallback: string): string {
+  if (isConfigurationError(err) || isUpstreamError(err)) {
+    return scrub(err.message) || fallback
+  }
+  console.error('[errors] unexpected error reduced to fallback message:', err)
+  return fallback
+}
