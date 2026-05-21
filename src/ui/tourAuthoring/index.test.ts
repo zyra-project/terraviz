@@ -33,6 +33,7 @@ describe('initTourAuthoring (tour/A)', () => {
     window.history.replaceState({}, '', '/')
     const handle = initTourAuthoring({
       getMapView: () => null,
+      getCurrentDataset: () => null,
       onDiscard: () => {},
     })
     expect(handle).toBeNull()
@@ -43,6 +44,7 @@ describe('initTourAuthoring (tour/A)', () => {
     window.history.replaceState({}, '', '/?tourEdit=new')
     const handle = initTourAuthoring({
       getMapView: () => null,
+      getCurrentDataset: () => null,
       onDiscard: () => {},
     })
     expect(handle).not.toBeNull()
@@ -53,10 +55,12 @@ describe('initTourAuthoring (tour/A)', () => {
     window.history.replaceState({}, '', '/?tourEdit=new')
     const first = initTourAuthoring({
       getMapView: () => null,
+      getCurrentDataset: () => null,
       onDiscard: () => {},
     })
     const second = initTourAuthoring({
       getMapView: () => null,
+      getCurrentDataset: () => null,
       onDiscard: () => {},
     })
     expect(second).toBe(first)
@@ -69,6 +73,7 @@ describe('initTourAuthoring (tour/A)', () => {
     const onDiscard = vi.fn()
     initTourAuthoring({
       getMapView: () => null,
+      getCurrentDataset: () => null,
       onDiscard,
     })
     document.querySelector<HTMLButtonElement>('.tour-authoring-dock-close')!.click()

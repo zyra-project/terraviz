@@ -22,11 +22,16 @@
 import { t } from '../../i18n'
 import { escapeAttr, escapeHtml } from '../domUtils'
 import { logger } from '../../utils/logger'
-import type { FlyToTaskParams, MapViewContext, TourTaskDef } from '../../types'
+import type {
+  Dataset,
+  FlyToTaskParams,
+  LoadDatasetTaskParams,
+  MapViewContext,
+  TourTaskDef,
+} from '../../types'
 import {
   appendTask,
   createEmptyState,
-  type TourAuthoringState,
 } from './state'
 
 /**
@@ -37,7 +42,18 @@ import {
  *     routes back to /publish/tours
  */
 export interface TourAuthoringCallbacks {
+  /** Current map view — used by the camera-step capture. */
   getMapView: () => MapViewContext | null
+  /**
+   * Phase 3pt/B — current primary-panel dataset, if any. Used by
+   * the "Add current dataset" capture to record a `loadDataset`
+   * task. Returns null when the primary panel is empty (no dataset
+   * loaded yet) — the button no-ops in that case, same defensive
+   * shape `getMapView` uses.
+   */
+  getCurrentDataset: () => Dataset | null
+  /** User wants out — host clears the URL param and routes to
+   *  /publish/tours. */
   onDiscard: () => void
 }
 
@@ -68,6 +84,12 @@ export function mountTourAuthoringDock(
   document.body.appendChild(root)
 
   function render(): void {
+    // Capture buttons grouped by intent — the simple stack at the
+    // top (camera + dataset), the layout row (1/2/4 globes), the
+    // environment toggles (day/night / clouds / stars / borders,
+    // each with on+off), and the rotation-rate input. Phase 3pt/D
+    // ships drag-to-reorder + click-to-edit on the task list; for
+    // now the list is render-only.
     root.innerHTML = `
       <div class="tour-authoring-dock-header">
         <span class="tour-authoring-dock-title">${escapeHtml(t('tour.dock.title'))}</span>
@@ -78,6 +100,32 @@ export function mountTourAuthoringDock(
         <button type="button" class="tour-authoring-action" data-action="capture-camera">
           ${escapeHtml(t('tour.dock.action.captureCamera'))}
         </button>
+        <button type="button" class="tour-authoring-action" data-action="capture-dataset">
+          ${escapeHtml(t('tour.dock.action.captureDataset'))}
+        </button>
+      </div>
+      <div class="tour-authoring-dock-group">
+        <span class="tour-authoring-dock-group-label">${escapeHtml(t('tour.dock.group.layout'))}</span>
+        <div class="tour-authoring-dock-chiprow">
+          <button type="button" class="tour-authoring-chip" data-action="layout" data-view="1globe">${escapeHtml(t('tour.dock.layout.1'))}</button>
+          <button type="button" class="tour-authoring-chip" data-action="layout" data-view="2globes">${escapeHtml(t('tour.dock.layout.2'))}</button>
+          <button type="button" class="tour-authoring-chip" data-action="layout" data-view="4globes">${escapeHtml(t('tour.dock.layout.4'))}</button>
+        </div>
+      </div>
+      <div class="tour-authoring-dock-group">
+        <span class="tour-authoring-dock-group-label">${escapeHtml(t('tour.dock.group.env'))}</span>
+        ${renderEnvRow('envShowDayNightLighting', 'env.dayNight')}
+        ${renderEnvRow('envShowClouds', 'env.clouds')}
+        ${renderEnvRow('envShowStars', 'env.stars')}
+        ${renderEnvRow('envShowWorldBorder', 'env.borders')}
+      </div>
+      <div class="tour-authoring-dock-group">
+        <label class="tour-authoring-dock-group-label" for="${ROTATION_INPUT_ID}">${escapeHtml(t('tour.dock.group.rotation'))}</label>
+        <div class="tour-authoring-dock-inputrow">
+          <input id="${ROTATION_INPUT_ID}" class="tour-authoring-input" type="number" step="0.1" min="-10" max="10"
+                 value="1" aria-label="${escapeAttr(t('tour.dock.rotation.input.aria'))}">
+          <button type="button" class="tour-authoring-chip" data-action="capture-rotation">${escapeHtml(t('tour.dock.rotation.add'))}</button>
+        </div>
       </div>
       <ol class="tour-authoring-task-list" aria-label="${escapeAttr(t('tour.dock.taskList.aria'))}">
         ${state.tasks.length === 0
@@ -93,17 +141,58 @@ export function mountTourAuthoringDock(
     wireButtons()
   }
 
+  function renderEnvRow(taskKey: EnvToggleKey, labelKey: EnvLabelKey): string {
+    return `
+      <div class="tour-authoring-dock-envrow">
+        <span class="tour-authoring-dock-envrow-label">${escapeHtml(t(labelKey))}</span>
+        <button type="button" class="tour-authoring-chip" data-action="env" data-task="${taskKey}" data-state="on">${escapeHtml(t('tour.dock.env.on'))}</button>
+        <button type="button" class="tour-authoring-chip" data-action="env" data-task="${taskKey}" data-state="off">${escapeHtml(t('tour.dock.env.off'))}</button>
+      </div>
+    `
+  }
+
+  function pushCaptured(task: TourTaskDef | null): void {
+    if (!task) return
+    state = appendTask(state, task)
+    render()
+  }
+
   function wireButtons(): void {
     root.querySelector('.tour-authoring-dock-close')?.addEventListener('click', () => {
       callbacks.onDiscard()
     })
     root
       .querySelector<HTMLButtonElement>('[data-action="capture-camera"]')
+      ?.addEventListener('click', () => pushCaptured(captureCameraStep(callbacks)))
+    root
+      .querySelector<HTMLButtonElement>('[data-action="capture-dataset"]')
+      ?.addEventListener('click', () => pushCaptured(captureCurrentDataset(callbacks)))
+    root
+      .querySelectorAll<HTMLButtonElement>('[data-action="layout"]')
+      .forEach(btn => {
+        btn.addEventListener('click', () => {
+          const view = btn.dataset.view
+          if (view) pushCaptured({ setEnvView: view })
+        })
+      })
+    root
+      .querySelectorAll<HTMLButtonElement>('[data-action="env"]')
+      .forEach(btn => {
+        btn.addEventListener('click', () => {
+          const taskKey = btn.dataset.task as EnvToggleKey | undefined
+          const value = btn.dataset.state as 'on' | 'off' | undefined
+          if (!taskKey || !value) return
+          pushCaptured(buildEnvTask(taskKey, value))
+        })
+      })
+    root
+      .querySelector<HTMLButtonElement>('[data-action="capture-rotation"]')
       ?.addEventListener('click', () => {
-        const captured = captureCameraStep(callbacks)
-        if (!captured) return
-        state = appendTask(state, captured)
-        render()
+        const input = root.querySelector<HTMLInputElement>(`#${ROTATION_INPUT_ID}`)
+        if (!input) return
+        const value = parseFloat(input.value)
+        // Defensive — `<input type=number>` returns '' for blank.
+        if (Number.isFinite(value)) pushCaptured({ setGlobeRotationRate: value })
       })
   }
 
@@ -113,6 +202,63 @@ export function mountTourAuthoringDock(
       root.remove()
     },
   }
+}
+
+/** Unique input id keeps the `<label for="...">` association valid
+ *  even when multiple docks coexist (which the singleton guard in
+ *  `index.ts` should prevent, but defending here keeps the page
+ *  predictable if a test mounts more than one). */
+const ROTATION_INPUT_ID = 'tour-authoring-rotation-input'
+
+/** Discriminating union of the env-toggle task keys the dock can
+ *  emit. Phase 3pt/B; tour/C extends with more `envShow*` task
+ *  shapes (alpha for clouds, etc.) and richer overlay captures. */
+type EnvToggleKey =
+  | 'envShowDayNightLighting'
+  | 'envShowClouds'
+  | 'envShowStars'
+  | 'envShowWorldBorder'
+
+type EnvLabelKey =
+  | 'env.dayNight'
+  | 'env.clouds'
+  | 'env.stars'
+  | 'env.borders'
+
+/** Phase 3pt/B — build an env-toggle task. Keyed on the dock's
+ *  `data-task` attribute so each chip button stays declarative.
+ *  Switch (rather than direct object construction) keeps TS's
+ *  discriminated-union checker happy without an `as` cast. */
+function buildEnvTask(key: EnvToggleKey, value: 'on' | 'off'): TourTaskDef {
+  switch (key) {
+    case 'envShowDayNightLighting':
+      return { envShowDayNightLighting: value }
+    case 'envShowClouds':
+      return { envShowClouds: value }
+    case 'envShowStars':
+      return { envShowStars: value }
+    case 'envShowWorldBorder':
+      return { envShowWorldBorder: value }
+  }
+}
+
+/**
+ * Phase 3pt/B — record a `loadDataset` task for the currently-
+ * loaded primary-panel dataset. Returns null when no dataset is
+ * loaded (typical at session start) so the button no-ops rather
+ * than emitting a useless `{ id: '' }` task. The capture mirrors
+ * the SOS authoring tool's "Add current dataset" gesture, which
+ * is the dominant tour-creation workflow — a publisher loads a
+ * dataset, finds the view they like, captures both.
+ */
+function captureCurrentDataset(callbacks: TourAuthoringCallbacks): TourTaskDef | null {
+  const dataset = callbacks.getCurrentDataset()
+  if (!dataset) {
+    logger.warn('[tourAuthoring] capture-dataset: no current dataset on the primary panel')
+    return null
+  }
+  const params: LoadDatasetTaskParams = { id: dataset.id }
+  return { loadDataset: params }
 }
 
 /**
@@ -173,6 +319,31 @@ function describeTask(task: TourTaskDef): string {
   if ('flyTo' in task) {
     const p = task.flyTo
     return t('tour.task.flyTo.summary', { lat: p.lat, lon: p.lon, altmi: p.altmi })
+  }
+  if ('loadDataset' in task) {
+    // Title isn't on the task (the engine resolves id → dataset
+    // at run-time). Show the id so the publisher can spot the
+    // task — tour/D's editor will fetch the dataset row for a
+    // richer label.
+    return t('tour.task.loadDataset.summary', { id: task.loadDataset.id })
+  }
+  if ('setEnvView' in task) {
+    return t('tour.task.setEnvView.summary', { view: task.setEnvView })
+  }
+  if ('envShowDayNightLighting' in task) {
+    return t('tour.task.env.dayNight', { state: task.envShowDayNightLighting })
+  }
+  if ('envShowClouds' in task) {
+    return t('tour.task.env.clouds', { state: task.envShowClouds })
+  }
+  if ('envShowStars' in task) {
+    return t('tour.task.env.stars', { state: task.envShowStars })
+  }
+  if ('envShowWorldBorder' in task) {
+    return t('tour.task.env.borders', { state: task.envShowWorldBorder })
+  }
+  if ('setGlobeRotationRate' in task) {
+    return t('tour.task.rotation.summary', { rate: task.setGlobeRotationRate })
   }
   // Unknown task shape — fall back to the JSON key. Future
   // sub-phases extend this switch as more captures land.

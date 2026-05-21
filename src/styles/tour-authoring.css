@@ -117,3 +117,79 @@
     font-size: 0.72rem;
     text-align: center;
 }
+
+/* Phase 3pt/B — grouped capture rows. Each `dock-group` holds a
+ * short heading + a row (chips) or input. Matches the dense
+ * compact-control aesthetic of the SOS authoring tool. */
+.tour-authoring-dock-group {
+    margin-block-end: 0.55rem;
+    padding-block-start: 0.45rem;
+    border-block-start: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.tour-authoring-dock-group-label {
+    display: block;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #8b94a4;
+    margin-block-end: 0.3rem;
+}
+
+.tour-authoring-dock-chiprow {
+    display: flex;
+    gap: 0.3rem;
+    flex-wrap: wrap;
+}
+
+.tour-authoring-dock-envrow {
+    display: flex;
+    gap: 0.3rem;
+    align-items: center;
+    margin-block-end: 0.25rem;
+}
+
+.tour-authoring-dock-envrow-label {
+    flex: 1;
+    font-size: 0.74rem;
+    color: #c8d0dc;
+}
+
+.tour-authoring-chip {
+    background: rgba(255, 255, 255, 0.08);
+    color: #e8eef6;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.35rem;
+    padding: 0.22rem 0.55rem;
+    cursor: pointer;
+    font-size: 0.72rem;
+    line-height: 1.2;
+}
+
+.tour-authoring-chip:hover,
+.tour-authoring-chip:focus-visible {
+    background: rgba(77, 166, 255, 0.22);
+    border-color: rgba(77, 166, 255, 0.38);
+}
+
+.tour-authoring-dock-inputrow {
+    display: flex;
+    gap: 0.3rem;
+    align-items: center;
+}
+
+.tour-authoring-input {
+    flex: 1;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #e8eef6;
+    border-radius: 0.3rem;
+    padding: 0.25rem 0.4rem;
+    font-size: 0.74rem;
+    min-inline-size: 0;
+}
+
+.tour-authoring-input:focus-visible {
+    outline: 1px solid rgba(77, 166, 255, 0.6);
+    outline-offset: 0;
+}

@@ -1794,6 +1794,7 @@ class InteractiveSphere {
   private initTourAuthoring(): void {
     initTourAuthoring({
       getMapView: () => this.renderer?.getViewContext() ?? null,
+      getCurrentDataset: () => this.appState.currentDataset,
       onDiscard: () => {
         // Clear the query string and go to the publisher portal's
         // tour list. Using `location.assign` so the back-button
