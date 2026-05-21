@@ -33,6 +33,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Build-only workflow — no release creation here (release.yml owns
+# that). tauri-action only needs read access; GITHUB_TOKEN is passed
+# for API rate-limiting, not for writes.
+permissions:
+  contents: read
+
 jobs:
   desktop-build:
     strategy:

@@ -33,6 +33,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Build-only workflow — Android/iOS compile validation only,
+# no release creation. Read-only GITHUB_TOKEN is sufficient.
+permissions:
+  contents: read
+
 jobs:
   android-build:
     name: Build (Android)

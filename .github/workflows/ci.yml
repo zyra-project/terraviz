@@ -10,6 +10,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Default to read-only on the GITHUB_TOKEN; the deploy job uses
+# Cloudflare API credentials (not GITHUB_TOKEN), so no write scopes
+# are required. CodeQL flags workflows without an explicit
+# `permissions:` block as a hardening miss.
+permissions:
+  contents: read
+
 jobs:
   type-check:
     name: Type Check

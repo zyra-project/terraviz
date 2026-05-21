@@ -26,6 +26,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Deploy uses Cloudflare API credentials, not GITHUB_TOKEN. Default
+# the GITHUB_TOKEN to read-only — addresses CodeQL "workflow does
+# not contain permissions" hardening.
+permissions:
+  contents: read
+
 jobs:
   drift-check:
     # Re-runs the poster build script and fails if
