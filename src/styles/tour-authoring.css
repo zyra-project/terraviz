@@ -66,12 +66,72 @@
     color: rgba(255, 255, 255, 0.4);
 }
 
-.tour-authoring-dock-title-errormsg {
+/* Phase 3pt-review/C-D — inline error for metadata saves
+   (title / description / visibility). One shared surface so the
+   publisher doesn't get three competing error boxes. */
+.tour-authoring-dock-metadata-errormsg {
     color: #ff8a8a;
     font-size: 0.7rem;
     padding-block: 0.2rem 0.4rem;
     padding-inline: 0.1rem;
     line-height: 1.3;
+}
+
+/* Phase 3pt-review/D — description + visibility row under the
+   dock header. Stacked block so the textarea can grow without
+   shoving the visibility chip off-edge on a narrow dock. */
+.tour-authoring-dock-metadata {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin-block-end: 0.5rem;
+}
+
+.tour-authoring-dock-description {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.3rem;
+    color: #fff;
+    font-size: 0.75rem;
+    padding: 0.3rem 0.45rem;
+    font-family: inherit;
+    resize: vertical;
+    min-block-size: 2.4rem;
+}
+
+.tour-authoring-dock-description:hover,
+.tour-authoring-dock-description:focus-visible {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
+    outline: none;
+}
+
+.tour-authoring-dock-description::placeholder {
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.tour-authoring-dock-visibility-label {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.7rem;
+    color: #b8c0cc;
+}
+
+.tour-authoring-dock-visibility {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.3rem;
+    color: #fff;
+    font-size: 0.7rem;
+    padding: 0.2rem 0.35rem;
+}
+
+.tour-authoring-dock-visibility:focus-visible {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
+    outline: none;
 }
 
 .tour-authoring-dock-close {

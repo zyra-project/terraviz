@@ -106,12 +106,16 @@ export function mountTourAuthoringDock(
   // Phase 3pt-review/C — rename UI. `titleValue` mirrors the
   // input's text and is the only source of truth while the
   // publisher is typing (re-renders preserve it via the same
-  // pattern editorBuffer uses for the JSON editor). `titleSaveTimer`
-  // debounces the PUT round-trip; `titleSaveError` surfaces a
-  // failed save as inline text under the input.
+  // pattern editorBuffer uses for the JSON editor).
+  // `metadataSaveTimer` debounces the PUT round-trip;
+  // `metadataSaveError` surfaces a failed save as inline text
+  // under the input. Phase 3pt-review/D extends this to also
+  // cover description + visibility, all bundled into one PUT.
   let titleValue = ''
-  let titleSaveError = ''
-  let titleSaveTimer: ReturnType<typeof setTimeout> | null = null
+  let descriptionValue = ''
+  let visibilityValue: 'public' | 'federated' | 'restricted' | 'private' = 'public'
+  let metadataSaveError = ''
+  let metadataSaveTimer: ReturnType<typeof setTimeout> | null = null
   // Phase 3pt-review/A — per-mount input ids so duplicate-id
   // label associations can't happen if a second dock ever
   // coexists.
@@ -208,35 +212,43 @@ export function mountTourAuthoringDock(
         ? result.tourFile.tourTasks
         : []
       state = { ...state, tasks }
-      // Phase 3pt-review/C — seed the title input with the
-      // persisted name so the publisher can rename it.
+      // Phase 3pt-review/C-D — seed every metadata field the
+      // dock surfaces so the publisher can read + edit the
+      // values currently persisted on the row.
       titleValue = result.tour?.title ?? ''
+      descriptionValue = result.tour?.description ?? ''
+      const v = result.tour?.visibility
+      if (v === 'public' || v === 'federated' || v === 'restricted' || v === 'private') {
+        visibilityValue = v
+      }
       autosaveStatus = 'saved'
       render()
     })
   }
 
   /**
-   * Phase 3pt-review/C — debounced title PUT. The title lives
-   * in the D1 row, not the R2 TourFile, so renames go through
-   * a separate endpoint from the autosave loop. For a `'new'`
-   * tour we first need the autosave manager to mint the row;
-   * we trigger that via `requestSave` + `flush`, then PUT the
-   * title onto the resolved id.
+   * Phase 3pt-review/C-D — debounced metadata PUT. Title /
+   * description / visibility all live in the D1 `tours` row
+   * (the R2 TourFile carries only `tourTasks`), so we PUT them
+   * together to /publish/tours/{id}. For a `'new'` tour we
+   * first need the autosave manager to mint the row; we trigger
+   * that via `requestSave` + `flush`, then PUT onto the
+   * resolved id.
    *
    * Server-side `validateTitle` requires ≥3 chars after trim;
    * we mirror that here so the round-trip doesn't fire on
-   * obviously-invalid input. Stricter validation (control
-   * chars) is delegated — the server's message lands in
-   * `titleSaveError` on failure.
+   * obviously-invalid input. Description + visibility have
+   * looser rules (optional ≤8000-char string, fixed enum) so
+   * the server's verdict is the source of truth — its message
+   * lands in `metadataSaveError` on failure.
    */
-  async function persistTitle(): Promise<void> {
-    const trimmed = titleValue.trim()
-    if (trimmed.length < 3) {
+  async function persistMetadata(): Promise<void> {
+    const trimmedTitle = titleValue.trim()
+    if (trimmedTitle.length < 3) {
       // Below the server's minimum — bail without a round-trip
-      // and clear any prior error so the input doesn't look stuck.
-      if (titleSaveError) {
-        titleSaveError = ''
+      // and clear any prior error so the inputs don't look stuck.
+      if (metadataSaveError) {
+        metadataSaveError = ''
         render()
       }
       return
@@ -251,23 +263,27 @@ export function mountTourAuthoringDock(
       // already showing the error; don't double-surface.
       return
     }
-    const result = await updateTourMetadata(id, { title: trimmed })
+    const result = await updateTourMetadata(id, {
+      title: trimmedTitle,
+      description: descriptionValue,
+      visibility: visibilityValue,
+    })
     if ('error' in result) {
-      titleSaveError = result.error
+      metadataSaveError = result.error
       render()
       return
     }
-    if (titleSaveError) {
-      titleSaveError = ''
+    if (metadataSaveError) {
+      metadataSaveError = ''
       render()
     }
   }
 
-  function scheduleTitleSave(): void {
-    if (titleSaveTimer !== null) clearTimeout(titleSaveTimer)
-    titleSaveTimer = setTimeout(() => {
-      titleSaveTimer = null
-      void persistTitle()
+  function scheduleMetadataSave(): void {
+    if (metadataSaveTimer !== null) clearTimeout(metadataSaveTimer)
+    metadataSaveTimer = setTimeout(() => {
+      metadataSaveTimer = null
+      void persistMetadata()
     }, 800)
   }
 
@@ -279,19 +295,24 @@ export function mountTourAuthoringDock(
     // ships drag-to-reorder + click-to-edit on the task list; for
     // now the list is render-only.
     //
-    // Phase 3pt-review/C — restore focus + selection on the title
-    // input across re-renders. Without this an autosave-status
-    // flip during typing would yank focus mid-keystroke.
+    // Phase 3pt-review/C-D — restore focus + selection on any
+    // metadata field across re-renders, keyed by `data-dock-field`.
+    // Without this, an autosave-status flip during typing would
+    // yank focus mid-keystroke.
     const active = document.activeElement
-    const titleWasFocused =
-      active instanceof HTMLInputElement &&
-      active.classList.contains('tour-authoring-dock-title-input')
-    const titleSelectionStart = titleWasFocused ? (active.selectionStart ?? 0) : 0
-    const titleSelectionEnd = titleWasFocused ? (active.selectionEnd ?? 0) : 0
+    const focusedField =
+      active instanceof HTMLElement ? active.dataset.dockField ?? null : null
+    let cursorStart = 0
+    let cursorEnd = 0
+    if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
+      cursorStart = active.selectionStart ?? 0
+      cursorEnd = active.selectionEnd ?? 0
+    }
     root.innerHTML = `
       <div class="tour-authoring-dock-header">
         <span class="tour-authoring-dock-title">${escapeHtml(t('tour.dock.title'))}</span>
         <input type="text" class="tour-authoring-dock-title-input"
+               data-dock-field="title"
                value="${escapeAttr(titleValue)}"
                maxlength="200"
                placeholder="${escapeAttr(t('tour.dock.titleInput.placeholder'))}"
@@ -308,8 +329,27 @@ export function mountTourAuthoringDock(
         <button type="button" class="tour-authoring-dock-close"
                 aria-label="${escapeAttr(t('tour.dock.discard.aria'))}">×</button>
       </div>
-      ${titleSaveError
-        ? `<div class="tour-authoring-dock-title-errormsg" role="alert">${escapeHtml(titleSaveError)}</div>`
+      <div class="tour-authoring-dock-metadata">
+        <textarea class="tour-authoring-dock-description"
+                  data-dock-field="description"
+                  rows="2"
+                  maxlength="8000"
+                  placeholder="${escapeAttr(t('tour.dock.description.placeholder'))}"
+                  aria-label="${escapeAttr(t('tour.dock.description.aria'))}">${escapeHtml(descriptionValue)}</textarea>
+        <label class="tour-authoring-dock-visibility-label">
+          <span>${escapeHtml(t('tour.dock.visibility.label'))}</span>
+          <select class="tour-authoring-dock-visibility"
+                  data-dock-field="visibility"
+                  aria-label="${escapeAttr(t('tour.dock.visibility.aria'))}">
+            <option value="public" ${visibilityValue === 'public' ? 'selected' : ''}>${escapeHtml(t('tour.dock.visibility.public'))}</option>
+            <option value="federated" ${visibilityValue === 'federated' ? 'selected' : ''}>${escapeHtml(t('tour.dock.visibility.federated'))}</option>
+            <option value="restricted" ${visibilityValue === 'restricted' ? 'selected' : ''}>${escapeHtml(t('tour.dock.visibility.restricted'))}</option>
+            <option value="private" ${visibilityValue === 'private' ? 'selected' : ''}>${escapeHtml(t('tour.dock.visibility.private'))}</option>
+          </select>
+        </label>
+      </div>
+      ${metadataSaveError
+        ? `<div class="tour-authoring-dock-metadata-errormsg" role="alert">${escapeHtml(metadataSaveError)}</div>`
         : ''}
       ${publishStatus === 'error' && publishError
         ? `<div class="tour-authoring-dock-publish-errormsg" role="alert">${escapeHtml(publishError)}</div>`
@@ -378,17 +418,30 @@ export function mountTourAuthoringDock(
           : state.tasks.map((task, i) => renderTaskRow(task, i)).join('')}
       </ol>
     `
+    // Some implementations (happy-dom included) don't honour the
+    // inline `selected` attribute on <option> elements built via
+    // innerHTML, so set the select's value imperatively. Real
+    // browsers handle either path; this is just belt-and-braces.
+    const visSelect = root.querySelector<HTMLSelectElement>(
+      '.tour-authoring-dock-visibility',
+    )
+    if (visSelect) visSelect.value = visibilityValue
     wireButtons()
-    // Phase 3pt-review/C — restore focus + selection on the
-    // title input so a re-render during typing doesn't yank
-    // the caret out from under the publisher.
-    if (titleWasFocused) {
-      const input = root.querySelector<HTMLInputElement>(
-        '.tour-authoring-dock-title-input',
+    // Phase 3pt-review/C-D — restore focus + selection on the
+    // previously-focused metadata field so a re-render during
+    // typing doesn't yank the caret out from under the publisher.
+    if (focusedField) {
+      const restored = root.querySelector<HTMLElement>(
+        `[data-dock-field="${focusedField}"]`,
       )
-      if (input) {
-        input.focus()
-        input.setSelectionRange(titleSelectionStart, titleSelectionEnd)
+      if (restored) {
+        restored.focus()
+        if (
+          restored instanceof HTMLInputElement ||
+          restored instanceof HTMLTextAreaElement
+        ) {
+          restored.setSelectionRange(cursorStart, cursorEnd)
+        }
       }
     }
   }
@@ -473,7 +526,22 @@ export function mountTourAuthoringDock(
       .querySelector<HTMLInputElement>('.tour-authoring-dock-title-input')
       ?.addEventListener('input', e => {
         titleValue = (e.target as HTMLInputElement).value
-        scheduleTitleSave()
+        scheduleMetadataSave()
+      })
+    root
+      .querySelector<HTMLTextAreaElement>('.tour-authoring-dock-description')
+      ?.addEventListener('input', e => {
+        descriptionValue = (e.target as HTMLTextAreaElement).value
+        scheduleMetadataSave()
+      })
+    root
+      .querySelector<HTMLSelectElement>('.tour-authoring-dock-visibility')
+      ?.addEventListener('change', e => {
+        const v = (e.target as HTMLSelectElement).value
+        if (v === 'public' || v === 'federated' || v === 'restricted' || v === 'private') {
+          visibilityValue = v
+          scheduleMetadataSave()
+        }
       })
     root
       .querySelector<HTMLButtonElement>('[data-action="publish"]')
@@ -686,10 +754,10 @@ export function mountTourAuthoringDock(
       // typically calls dispose on Discard or navigation. We
       // fire-and-forget; a network failure here can't be
       // surfaced through the UI since we're tearing it down.
-      if (titleSaveTimer !== null) {
-        clearTimeout(titleSaveTimer)
-        titleSaveTimer = null
-        void persistTitle()
+      if (metadataSaveTimer !== null) {
+        clearTimeout(metadataSaveTimer)
+        metadataSaveTimer = null
+        void persistMetadata()
       }
       void autosave.flush()
       root.remove()

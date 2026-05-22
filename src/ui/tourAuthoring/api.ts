@@ -15,13 +15,20 @@
 import { publisherGet, publisherSend } from '../publisher/api'
 import type { TourFile } from '../../types'
 
-/** Subset of the `tours` row shape the dock cares about. */
+/** Subset of the `tours` row shape the dock cares about.
+ *  `description` / `visibility` / `thumbnail_ref` are optional
+ *  here because some endpoints (createDraftTour, publishTour)
+ *  only echo back the rename-relevant subset; the row itself
+ *  always has them. */
 export interface TourSummary {
   id: string
   slug: string
   title: string
   tour_json_ref: string
   updated_at: string
+  description?: string | null
+  visibility?: string
+  thumbnail_ref?: string | null
 }
 
 export async function createDraftTour(opts?: {

@@ -850,7 +850,7 @@ describe('mountTourAuthoringDock (tour/A)', () => {
       for (let i = 0; i < 5; i++) await Promise.resolve()
       expect(updateSpy).toHaveBeenCalledWith(
         '01HXCCCCCCCCCCCCCCCCCCCCCC',
-        { title: 'New name' },
+        { title: 'New name', description: '', visibility: 'public' },
       )
     })
 
@@ -895,7 +895,7 @@ describe('mountTourAuthoringDock (tour/A)', () => {
       expect(updateSpy).toHaveBeenCalledTimes(1)
       expect(updateSpy).toHaveBeenCalledWith(
         '01HXDDDDDDDDDDDDDDDDDDDDDD',
-        { title: 'Hurricane Tour 2025' },
+        { title: 'Hurricane Tour 2025', description: '', visibility: 'public' },
       )
     })
 
@@ -974,7 +974,7 @@ describe('mountTourAuthoringDock (tour/A)', () => {
       expect(createSpy).toHaveBeenCalled()
       expect(updateSpy).toHaveBeenCalledWith(
         '01HXFFFFFFFFFFFFFFFFFFFFFF',
-        { title: 'Hurricane Tour' },
+        { title: 'Hurricane Tour', description: '', visibility: 'public' },
       )
     })
 
@@ -1007,8 +1007,192 @@ describe('mountTourAuthoringDock (tour/A)', () => {
       vi.advanceTimersByTime(1000)
       vi.useRealTimers()
       for (let i = 0; i < 5; i++) await Promise.resolve()
-      const errorDiv = document.querySelector('.tour-authoring-dock-title-errormsg')
+      const errorDiv = document.querySelector('.tour-authoring-dock-metadata-errormsg')
       expect(errorDiv?.textContent).toContain('Server error (500)')
+    })
+  })
+
+  describe('tour-review/D — description + visibility', () => {
+    it('renders a description textarea + visibility select in the dock', () => {
+      mountTourAuthoringDock('new', {
+        getMapView: () => makeView(),
+        getCurrentDataset: () => null,
+        onDiscard: () => {},
+      })
+      const desc = document.querySelector<HTMLTextAreaElement>(
+        '.tour-authoring-dock-description',
+      )
+      expect(desc).toBeTruthy()
+      expect(desc!.placeholder).toBe('Describe what this tour shows')
+      expect(desc!.getAttribute('aria-label')).toBe('Tour description')
+      expect(desc!.maxLength).toBe(8000)
+      const vis = document.querySelector<HTMLSelectElement>(
+        '.tour-authoring-dock-visibility',
+      )
+      expect(vis).toBeTruthy()
+      const optionValues = Array.from(vis!.options).map(o => o.value)
+      expect(optionValues).toEqual(['public', 'federated', 'restricted', 'private'])
+      expect(vis!.value).toBe('public')
+    })
+
+    it('seeds description + visibility from fetchTourJson when re-opening', async () => {
+      vi.spyOn(tourApi, 'fetchTourJson').mockResolvedValue({
+        tour: {
+          id: '01HXHHHHHHHHHHHHHHHHHHHHHH',
+          slug: 's',
+          title: 'Existing tour',
+          tour_json_ref: 'r',
+          updated_at: '2026-05-21T20:30:00.000Z',
+          description: 'Tour of the great hurricanes of 2025.',
+          visibility: 'restricted',
+        },
+        tourFile: { tourTasks: [] },
+      })
+      mountTourAuthoringDock('01HXHHHHHHHHHHHHHHHHHHHHHH', {
+        getMapView: () => makeView(),
+        getCurrentDataset: () => null,
+        onDiscard: () => {},
+      })
+      for (let i = 0; i < 5; i++) await Promise.resolve()
+      const desc = document.querySelector<HTMLTextAreaElement>(
+        '.tour-authoring-dock-description',
+      )!
+      const vis = document.querySelector<HTMLSelectElement>(
+        '.tour-authoring-dock-visibility',
+      )!
+      expect(desc.value).toBe('Tour of the great hurricanes of 2025.')
+      expect(vis.value).toBe('restricted')
+    })
+
+    it('PUTs the full metadata bundle when description changes', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      vi.spyOn(tourApi, 'fetchTourJson').mockResolvedValue({
+        tour: {
+          id: '01HXIIIIIIIIIIIIIIIIIIIIII',
+          slug: 's',
+          title: 'My tour',
+          tour_json_ref: 'r',
+          updated_at: '2026-05-21T20:30:00.000Z',
+          description: '',
+          visibility: 'public',
+        },
+        tourFile: { tourTasks: [] },
+      })
+      const updateSpy = vi.spyOn(tourApi, 'updateTourMetadata').mockResolvedValue({
+        tour: {
+          id: '01HXIIIIIIIIIIIIIIIIIIIIII',
+          slug: 's',
+          title: 'My tour',
+          tour_json_ref: 'r',
+          updated_at: '2026-05-21T20:30:05.000Z',
+        },
+      })
+      mountTourAuthoringDock('01HXIIIIIIIIIIIIIIIIIIIIII', {
+        getMapView: () => makeView(),
+        getCurrentDataset: () => null,
+        onDiscard: () => {},
+      })
+      for (let i = 0; i < 5; i++) await Promise.resolve()
+      const desc = document.querySelector<HTMLTextAreaElement>(
+        '.tour-authoring-dock-description',
+      )!
+      desc.value = 'A 5-step flyover.'
+      desc.dispatchEvent(new Event('input', { bubbles: true }))
+      vi.advanceTimersByTime(1000)
+      vi.useRealTimers()
+      for (let i = 0; i < 5; i++) await Promise.resolve()
+      expect(updateSpy).toHaveBeenCalledWith(
+        '01HXIIIIIIIIIIIIIIIIIIIIII',
+        {
+          title: 'My tour',
+          description: 'A 5-step flyover.',
+          visibility: 'public',
+        },
+      )
+    })
+
+    it('PUTs the bundle when visibility changes via the select', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      vi.spyOn(tourApi, 'fetchTourJson').mockResolvedValue({
+        tour: {
+          id: '01HXJJJJJJJJJJJJJJJJJJJJJJ',
+          slug: 's',
+          title: 'Existing',
+          tour_json_ref: 'r',
+          updated_at: '2026-05-21T20:30:00.000Z',
+          description: 'Some text',
+          visibility: 'public',
+        },
+        tourFile: { tourTasks: [] },
+      })
+      const updateSpy = vi.spyOn(tourApi, 'updateTourMetadata').mockResolvedValue({
+        tour: {
+          id: '01HXJJJJJJJJJJJJJJJJJJJJJJ',
+          slug: 's',
+          title: 'Existing',
+          tour_json_ref: 'r',
+          updated_at: '2026-05-21T20:30:05.000Z',
+        },
+      })
+      mountTourAuthoringDock('01HXJJJJJJJJJJJJJJJJJJJJJJ', {
+        getMapView: () => makeView(),
+        getCurrentDataset: () => null,
+        onDiscard: () => {},
+      })
+      for (let i = 0; i < 5; i++) await Promise.resolve()
+      const vis = document.querySelector<HTMLSelectElement>(
+        '.tour-authoring-dock-visibility',
+      )!
+      vis.value = 'private'
+      vis.dispatchEvent(new Event('change', { bubbles: true }))
+      vi.advanceTimersByTime(1000)
+      vi.useRealTimers()
+      for (let i = 0; i < 5; i++) await Promise.resolve()
+      expect(updateSpy).toHaveBeenCalledWith(
+        '01HXJJJJJJJJJJJJJJJJJJJJJJ',
+        {
+          title: 'Existing',
+          description: 'Some text',
+          visibility: 'private',
+        },
+      )
+    })
+
+    it('ignores unknown visibility values from the select', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      vi.spyOn(tourApi, 'fetchTourJson').mockResolvedValue({
+        tour: {
+          id: '01HXKKKKKKKKKKKKKKKKKKKKKK',
+          slug: 's',
+          title: 'Existing',
+          tour_json_ref: 'r',
+          updated_at: '2026-05-21T20:30:00.000Z',
+          description: '',
+          visibility: 'public',
+        },
+        tourFile: { tourTasks: [] },
+      })
+      const updateSpy = vi.spyOn(tourApi, 'updateTourMetadata')
+      mountTourAuthoringDock('01HXKKKKKKKKKKKKKKKKKKKKKK', {
+        getMapView: () => makeView(),
+        getCurrentDataset: () => null,
+        onDiscard: () => {},
+      })
+      for (let i = 0; i < 5; i++) await Promise.resolve()
+      const vis = document.querySelector<HTMLSelectElement>(
+        '.tour-authoring-dock-visibility',
+      )!
+      // Force an option value the dock doesn't recognise — the
+      // dock should refuse to schedule a save.
+      const opt = document.createElement('option')
+      opt.value = 'classified'
+      vis.add(opt)
+      vis.value = 'classified'
+      vis.dispatchEvent(new Event('change', { bubbles: true }))
+      vi.advanceTimersByTime(1000)
+      vi.useRealTimers()
+      for (let i = 0; i < 5; i++) await Promise.resolve()
+      expect(updateSpy).not.toHaveBeenCalled()
     })
   })
 

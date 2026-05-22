@@ -192,6 +192,23 @@ header. Re-renders during typing preserve caret position + focus
 via the same `activeElement` + `selectionStart/End` round-trip
 that browsers use for form-restore.
 
+**tour-review/D — description + visibility.** The `tours` D1 row
+already carries `description` and `visibility` columns from
+Phase 1a but the dock surfaced neither. Two new fields land under
+the header: a description textarea (≤8000 chars, matching
+`validateOptionalString`'s server cap) and a visibility select
+(public / federated / restricted / private). Editing any of
+title / description / visibility fires the same debounced
+metadata-save loop — the PUT body bundles all three so the
+server-side `validateTitle` requirement is satisfied even when
+only the description changed. Focus restoration now keys off
+`data-dock-field` rather than the title-input-specific selector,
+so the caret stays put across re-renders in any of the three
+fields. Thumbnail upload and a public tour-discovery endpoint
+stay deferred — they need their own backend routes (presign +
+complete; `GET /api/v1/tours` + FTS), tracked as follow-up
+issues so they don't bloat this PR further.
+
 **Not in this PR (deferred).**
 
   - **Preview** ("Play from here") — would run `tourEngine`
