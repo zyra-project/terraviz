@@ -280,6 +280,44 @@ integration with the SPA's tour-playback path. Now wired:
 capture, the callback firing with the right TourFile, the
 no-tasks click no-op, and the missing-callback safe fall-back.
 
+**tour-review/H — Copilot pass-4 (5 comments).** Fifth review
+pass surfaced one real validation hole plus four doc /
+consistency issues:
+
+  - `createDraftTour` accepted any caller-supplied `title`
+    override without the same `validateTitle` rules
+    `createTour` / `updateTour` apply. A draft created with
+    `{ title: "ab" }` or a 250-char string would land a row
+    the rename PUT couldn't recover. Now mirrors the rule
+    (≥3 chars after trim, ≤200 chars, no control chars) and
+    returns a 400 validation envelope on failure. Return type
+    widened from `TourCreateResult` to `TourMutationOutcome`;
+    `draft.ts` POST handler now branches on `result.ok` and
+    propagates errors via the standard publisher envelope.
+  - Corrected the misleading comment in `createDraftTour`
+    about R2-binding fallback: pre-fix it claimed "the autosave
+    PUT will create the object on first save" with no binding,
+    but `writeTourDraftJson` returns `503 binding_missing`
+    when `CATALOG_R2` is unbound. The unbound branch exists
+    only for unit tests / smoke checks; production must bind.
+  - Same fix in the `draft.ts` docblock — clarified the actual
+    partial-state recovery paths (orphan blob = harmless;
+    row-without-blob = `readTourDraftJson` treats missing blob
+    as empty tour, autosave PUT writes for real iff R2 bound).
+  - `renderToursPage` now delegates `kind: 'session'` failures
+    to the shared `handleSessionError` helper (auto-warmup
+    redirect on fresh tabs, explicit sign-in card on retry)
+    and calls `clearWarmupFlag()` on the first successful list
+    — same pattern `datasets.ts` uses. Pre-fix an expired
+    session on `/publish/tours` showed a confusing inline
+    "Session expired" message instead of the helpful redirect.
+  - `<th>` elements in the tours table now carry `scope="col"`
+    for screen-reader column-header announcement, matching the
+    datasets table.
+
+3 new tests cover the validation rejection, the session
+delegation, and the `scope="col"` assertion.
+
   - **Rich-UI captures**: overlay drag-to-place, click-on-
     globe placemark, audio/video file pickers, question form.
     The JSON editor (tour/D) is the universal escape hatch

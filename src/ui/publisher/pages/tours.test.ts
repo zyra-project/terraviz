@@ -111,6 +111,43 @@ describe('renderToursPage (tour/A → /G)', () => {
     )
   })
 
+  it('delegates session errors to the shared warmup handler', async () => {
+    // Phase 3pt-review/H — mirrors the /publish/datasets pattern.
+    // A `kind: 'session'` from listTours triggers the auto-warmup
+    // redirect via `handleSessionError`; the page deliberately
+    // renders nothing afterwards because the navigation has
+    // already unmounted it. Copilot discussion_r3291171442.
+    window.history.replaceState(null, '', '/publish/tours')
+    sessionStorage.clear()
+    const content = document.createElement('div')
+    const navigate = vi.fn()
+    await renderToursPage(content, {
+      navigate,
+      createDraft: vi.fn(),
+      listFn: vi.fn(async () => ({
+        error: 'Session expired — please sign in again',
+        kind: 'session' as const,
+      })),
+    })
+    expect(navigate).toHaveBeenCalledOnce()
+    expect(content.querySelector('.publisher-empty')).toBeNull()
+  })
+
+  it('marks table headers with scope="col" for screen-reader navigation', async () => {
+    const content = document.createElement('div')
+    await renderToursPage(content, {
+      navigate: () => {},
+      createDraft: vi.fn(),
+      listFn: vi.fn(async () => ({
+        tours: [makeTour({ id: '01HX01' })],
+        next_cursor: null,
+      })),
+    })
+    const ths = content.querySelectorAll('thead th')
+    expect(ths.length).toBeGreaterThan(0)
+    ths.forEach(th => expect(th.getAttribute('scope')).toBe('col'))
+  })
+
   it('clears prior content (idempotent re-render)', async () => {
     const content = document.createElement('div')
     content.innerHTML = '<div class="stale">stale</div>'

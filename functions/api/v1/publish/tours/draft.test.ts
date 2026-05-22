@@ -128,6 +128,20 @@ describe('POST /api/v1/publish/tours/draft (tour/E)', () => {
     expect(body.tour.slug).toBe('hurricane-tour')
   })
 
+  it('returns 400 with validation errors when the title override is too short', async () => {
+    // Phase 3pt-review/H — pre-fix the draft endpoint accepted
+    // any caller-supplied title, even strings the rename PUT
+    // (validateTitle) would refuse later. Now mirrored so the
+    // draft row can never be created in a state the renames
+    // can't recover. Copilot discussion_r3291171383.
+    const { env } = setupEnv()
+    const res = await onRequestPost(ctx({ env, body: { title: 'ab' } }))
+    expect(res.status).toBe(400)
+    const body = await readJson<{ errors: Array<{ field: string; code: string }> }>(res)
+    expect(body.errors[0]?.field).toBe('title')
+    expect(body.errors[0]?.code).toBe('too_short')
+  })
+
   it('returns 400 on malformed JSON body', async () => {
     const { env } = setupEnv()
     const ctxObj = ctx({ env })

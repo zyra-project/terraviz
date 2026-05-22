@@ -8,13 +8,25 @@
  * POST to /tours with the ref, this endpoint does both in one
  * server request. The R2 write and the D1 insert happen
  * sequentially against two different Cloudflare services, so
- * the operation is not transactionally atomic across them —
- * a failure mid-flow leaves either the row or the blob, but
- * not both. The cleanup path is benign (the row's tour_json_ref
- * still points at the would-be blob; the next PUT to
- * /tours/{id}/json creates it on first save). Returns the new
- * `tour` row so the dock can navigate to `/?tourEdit=<id>`
- * immediately. Phase 3pt-review/A — Copilot
+ * the operation is not transactionally atomic across them — a
+ * failure mid-flow leaves either the row or the blob, but not
+ * both. Partial-state recovery depends on which half landed:
+ *
+ *   - Blob written but row insert failed: orphan blob; harmless
+ *     (no row references it; eventual R2 lifecycle cleanup).
+ *   - Row inserted but blob write failed: the row's
+ *     `tour_json_ref` still points at the (missing) draft key;
+ *     `GET /api/v1/publish/tours/{id}/json` recovers gracefully
+ *     by treating the missing blob as an empty tour file
+ *     (`readTourDraftJson` returns `{tourTasks:[]}`), and the
+ *     next PUT to `/api/v1/publish/tours/{id}/json` writes the
+ *     blob for real — provided `CATALOG_R2` is bound. With the
+ *     binding missing, that PUT returns `503 binding_missing`,
+ *     so production deploys must bind the bucket. Phase
+ *     3pt-review/H — Copilot discussion_r3291171425.
+ *
+ * Returns the new `tour` row so the dock can navigate to
+ * `/?tourEdit=<id>` immediately. Phase 3pt-review/A — Copilot
  * discussion_r3284321902.
  *
  * Authorization: same as `POST /api/v1/publish/tours` — any
@@ -22,10 +34,11 @@
  * unauthenticated requests).
  *
  * Body is optional; pass `{ "title": "..." }` to override the
- * auto-derived placeholder. The validator on the parent
- * `POST /tours` route requires a non-empty title; this
- * endpoint generates one server-side so the publisher can
- * skip the input entirely.
+ * auto-derived placeholder. Caller-supplied titles run through
+ * the same `validateTitle` rules `createTour` / `updateTour`
+ * use (≥3 chars, ≤200 chars, no control chars) and return a
+ * 400 validation envelope on failure. Omit the title to use
+ * the server-generated `Untitled tour <suffix>` placeholder.
  */
 
 import type { CatalogEnv } from '../../_lib/env'
@@ -56,6 +69,12 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
     }
   }
   const result = await createDraftTour(context.env, publisher, { title: body.title })
+  if (!result.ok) {
+    return new Response(JSON.stringify({ errors: result.errors }), {
+      status: result.status,
+      headers: { 'Content-Type': CONTENT_TYPE },
+    })
+  }
   return new Response(JSON.stringify({ tour: result.tour }), {
     status: 201,
     headers: {

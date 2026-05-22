@@ -9,6 +9,7 @@
  */
 
 import { t } from '../../../i18n'
+import { clearWarmupFlag, handleSessionError } from '../api'
 import {
   createDraftTour,
   deleteTour,
@@ -49,9 +50,24 @@ export async function renderToursPage(
 
   const result = await list({ limit: 50 })
   if ('error' in result) {
+    // Phase 3pt-review/H — mirror the datasets / dataset-detail
+    // page pattern: a 401/403 session error means the publisher
+    // either needs the Access warmup redirect (handleSessionError
+    // returns 'redirecting' and walks them to the access bounce)
+    // or the explicit sign-in card ('show-error'). Other failures
+    // get the generic error shell. Copilot discussion_r3291171442.
+    if (result.kind === 'session') {
+      if (handleSessionError({ navigate }) === 'navigating') return
+      content.replaceChildren(buildErrorShell(result.error))
+      return
+    }
     content.replaceChildren(buildErrorShell(result.error))
     return
   }
+  // Clear the warmup retry flag on first successful list — same
+  // signal datasets.ts uses to short-circuit subsequent warmup
+  // redirects within the session.
+  clearWarmupFlag()
 
   content.replaceChildren(buildShell(result.tours, navigate, createDraft, del, confirmFn))
 }
@@ -169,6 +185,11 @@ function buildTable(
     'publisher.tours.col.actions',
   ] as const) {
     const th = document.createElement('th')
+    // Phase 3pt-review/H — scope="col" so screen readers
+    // announce the column header when navigating each row,
+    // matching what /publish/datasets does. Copilot
+    // discussion_r3291171458.
+    th.scope = 'col'
     th.textContent = t(key)
     headRow.appendChild(th)
   }

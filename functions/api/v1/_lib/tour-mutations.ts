@@ -103,7 +103,19 @@ export async function createDraftTour(
   env: CatalogEnv,
   publisher: PublisherRow,
   overrides: { title?: string } = {},
-): Promise<TourCreateResult> {
+): Promise<TourMutationOutcome> {
+  // Phase 3pt-review/H — validate a caller-supplied title against
+  // the same rules `createTour` / `updateTour` apply (≥3 chars
+  // after trim, ≤200 chars, no control chars). Pre-fix, a draft
+  // POST with `{ title: "  " }` or `{ title: "<200 chars" }` would
+  // accept whatever the caller sent, drift the row into a state
+  // the rename PUT would refuse, and confuse the UI. We skip the
+  // check when no title is provided (the auto-derived placeholder
+  // is always valid). Copilot discussion_r3291171383.
+  if (overrides.title !== undefined) {
+    const errors = validateTourDraft({ title: overrides.title })
+    if (errors.length) return { ok: false, status: 400, errors }
+  }
   const db = env.CATALOG_DB!
   const id = newUlid()
   const title = overrides.title?.trim() || `Untitled tour ${id.slice(-6)}`
@@ -111,11 +123,15 @@ export async function createDraftTour(
   const now = new Date().toISOString()
   const ref = tourDraftR2Ref(id)
   // Seed the R2 blob with an empty tour file so a GET on the
-  // ref returns valid JSON even before the first autosave.
-  // The bucket is optional in the env (a local-dev deploy
-  // without R2 still works for non-tour features); skip the
-  // write when the binding is missing — the autosave PUT will
-  // create the object on first save.
+  // ref returns valid JSON even before the first autosave. The
+  // bucket is optional only in the sense that the row insert
+  // still succeeds without it; a deploy without CATALOG_R2
+  // bound will accept the draft create but every follow-up
+  // /publish/tours/{id}/json PUT will fail with
+  // `503 binding_missing`. Production deploys must bind the
+  // bucket — this branch keeps unit tests + smoke checks
+  // running against a partial env. Phase 3pt-review/H —
+  // Copilot discussion_r3291171409.
   if (env.CATALOG_R2) {
     const emptyTour = JSON.stringify({ tourTasks: [] })
     await env.CATALOG_R2.put(tourDraftR2Key(id), emptyTour, {
