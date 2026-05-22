@@ -2,13 +2,11 @@
 
 > **Status: draft for review.** Synthesised from the Google Doc
 > ["TerraViz (Zyra Sphere) > Web Catalog"](https://docs.google.com/document/d/1ohA6KRsiawDNYF2q8NJWwVLfLEJ5utsHUqxpBewqDgk/edit?usp=drivesdk)
-> (last modified 2026-05-21), which collects feature requests
-> from Adrian, Beth, and Hilary scoping TerraViz as a catalog
-> replacement for the SOS website.
->
-> Branch: `claude/web-catalog-features-plan`.
+> (last modified 2026-05-22), which collects feature requests
+> from Adrian, Beth, Eric, and Hilary scoping TerraViz as a 
+> catalog replacement for the SOS website.
 
-The Google Doc gathers 17 requests across three reviewers. This
+The Google Doc gathers 17 requests across four reviewers. This
 plan triages each request against the current codebase, groups
 the work into shippable phases, and flags the items that depend
 on the in-flight `CATALOG_BACKEND_PLAN.md` work before they can
