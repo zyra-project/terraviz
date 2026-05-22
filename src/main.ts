@@ -55,6 +55,7 @@ import { showTourControls, hideTourControls, hideAllTourTextBoxes, hideAllTourIm
 import { initLegendForDataset, clearLegendCache, loadConfig } from './services/docentService'
 import { isMobile, IS_MOBILE_NATIVE, getCloudTextureUrl } from './utils/deviceCapability'
 import { initDeepLinks } from './services/deepLinkService'
+import { getCatalogMode } from './utils/catalogMode'
 import {
   applyPosterDeepLinks,
   parseInitialLayout,
@@ -252,6 +253,16 @@ class InteractiveSphere {
       this.setLoading(true)
       this.setLoadingStatus('Starting up\u2026', 5)
 
+      // Catalog mode (`?catalog=true`) inverts the default surface:
+      // the dataset browser becomes primary and the globe stays
+      // hidden until selection. Apply the body class before any UI
+      // renders so the CSS surface decision (full-width browse vs.
+      // overlay browse) is made on the first paint, not after a
+      // flash of the globe-first layout. See
+      // `docs/WEB_CATALOG_FEATURES_PLAN.md` \u00a73.
+      const catalogModeActive = getCatalogMode()
+      if (catalogModeActive) document.body.classList.add('catalog-mode')
+
       if (!this.checkWebGLSupport()) return
 
       const container = document.getElementById('container')
@@ -394,6 +405,31 @@ class InteractiveSphere {
           collapseBrowseUI()
           pulseBrowseButton()
         }
+      } else if (catalogModeActive) {
+        // Catalog-mode no-dataset boot: the browse panel is the
+        // primary surface and the globe stays hidden until the
+        // visitor picks a dataset. Skip the Earth-textures load
+        // since nothing is going to show them; the regular
+        // dataset-load path runs them on demand when the visitor
+        // exits catalog mode by selecting something.
+        //
+        // `catalog-empty` is the CSS hook for "globe hidden,
+        // browse full-surface"; it stays set until the first
+        // dataset loads (cleared in `selectDatasetFromBrowse`).
+        // `catalog-mode` stays set as long as the URL carries
+        // `?catalog=true`, even after a dataset is loaded, so
+        // the catalog\u2194sphere tab control (\u00a73.2) can find it.
+        document.body.classList.add('catalog-empty')
+        this.setLoading(false)
+        showBrowseUI(this.appState.datasets, {
+          onSelectDataset: (id) => this.selectDatasetFromBrowse(id),
+          announce: (msg) => this.announce(msg),
+          isMobile: this.isMobile,
+          onOpenChat: (query) => this.openChatWithQuery(query),
+        })
+        // No collapse, no hide, no pulse \u2014 the browse panel is
+        // the visible surface, not an overlay competing with the
+        // globe for attention.
       } else {
         this.setLoadingStatus('Loading Earth textures\u2026', 20)
         const cloudUrl = CLOUD_TEXTURE_URL
@@ -2544,7 +2580,21 @@ class InteractiveSphere {
     closeChat()
     this.announce('Loading dataset\u2026')
     this.showLoadingScreen('Loading dataset\u2026', 20)
-    window.history.pushState({}, '', `?dataset=${encodeURIComponent(id)}`)
+    // Preserve `?catalog=true` across the dataset-load URL transition
+    // so the catalog↔sphere tab control (Phase 1 §3.2) can offer a
+    // "back to catalog" affordance. The body class stays set so CSS
+    // continues to recognise the catalog-mode surface; the regular
+    // load flow swaps the visible browse panel for the globe via
+    // `dismissBrowseAfterLoad()`.
+    const nextParams = new URLSearchParams()
+    if (getCatalogMode()) nextParams.set('catalog', 'true')
+    nextParams.set('dataset', id)
+    window.history.pushState({}, '', `?${nextParams.toString()}`)
+    // The globe is now the active surface — drop the
+    // `catalog-empty` flag so CSS reveals `#container`.
+    // `catalog-mode` stays set so the upcoming tab control can
+    // route back.
+    document.body.classList.remove('catalog-empty')
     await this.loadDataset(id, 'orbit')
     if (gen !== this.loadGeneration) return // a newer load superseded this one
     this.setLoading(false)

@@ -583,3 +583,63 @@
         overflow-y: auto;
     }
 }
+
+/* --- Catalog mode (`?catalog=true`) ---------------------------
+   Phase 1 §3.1 of `docs/WEB_CATALOG_FEATURES_PLAN.md`.
+
+   `body.catalog-mode` is set whenever the URL carries
+   `?catalog=true`. `body.catalog-empty` is the stricter state:
+   catalog mode AND no dataset has been loaded yet. In the empty
+   state the browse panel becomes the entire surface and the
+   globe canvas is hidden (`visibility: hidden`, not `display:
+   none`, so the GL context stays alive and a subsequent dataset
+   load doesn't pay a re-init cost).
+
+   Selecting a dataset clears `catalog-empty` — the globe takes
+   over — but `catalog-mode` stays set so the upcoming catalog↔
+   sphere tab control (§3.2) can route back. */
+
+body.catalog-empty #map-grid {
+    visibility: hidden;
+}
+
+body.catalog-empty #browse-overlay {
+    inset-inline-start: 0;
+    inset-inline-end: 0;
+    width: 100%;
+    background: var(--color-bg, #0a0a0a);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-inline-start: none;
+}
+
+/* The browse-overlay close button assumes there's a globe to fall
+   back to. In catalog-empty mode there isn't one, so hide it
+   until §3.2 introduces the catalog↔sphere tab control. */
+body.catalog-empty #browse-close {
+    display: none;
+}
+
+/* The floating top-left "browse datasets" button (#home-btn) and
+   the tools menu (#map-controls) are positioned over the globe.
+   With the globe hidden they're orphaned chrome — suppress them
+   in catalog-empty until the tab control re-introduces a deliberate
+   path back to the globe. */
+body.catalog-empty #home-btn,
+body.catalog-empty #map-controls {
+    display: none;
+}
+
+/* Phone portrait: the existing bottom-sheet rule for #browse-overlay
+   pins it to the bottom edge — override back to a full-viewport
+   surface when we're the only thing on screen. */
+@media (max-width: 600px) and (orientation: portrait) {
+    body.catalog-empty #browse-overlay {
+        top: 0 !important;
+        bottom: 0;
+        height: 100vh;
+        max-height: 100vh;
+        border-radius: 0;
+        border-top: none;
+    }
+}
