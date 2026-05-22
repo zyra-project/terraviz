@@ -499,14 +499,17 @@ The infrastructure exists. The user-visible gap is:
 ## 6. Phase 4 — Filters & search
 
 **Theme.** Reach parity with the SOS catalog's filter surface,
-plus an optional **Graph view** (§6.7) that exposes
-co-occurrence structure the chip rail can't.
+plus two optional view-modes — **Graph** (§6.7) for
+co-occurrence structure and **Timeline** (§6.8) for temporal
+coverage — neither of which the chip rail can answer.
 
-**Estimated size.** ~2–3 weeks. Splits into two coordinated
-PRs — chip rail + predicate engine first (§6.1–§6.6), graph
-view second (§6.7), since the latter consumes the former.
-Also delivers the "all SOS datasets" widening (#10) — see
-§6.4.
+**Estimated size.** ~3 weeks. Splits into three coordinated
+PRs — chip rail + predicate engine first (§6.1–§6.6), then
+Graph view (§6.7), then Timeline view (§6.8), since both
+view-modes consume the predicate engine. Graph and Timeline
+share a facet-group colour palette so they read as one visual
+system. Also delivers the "all SOS datasets" widening (#10) —
+see §6.4.
 
 ### 6.1 Filter inventory
 
@@ -817,6 +820,128 @@ panning session doesn't flood the queue.
   Use cytoscape's incremental-layout mode (animate node
   positions, don't re-seed the simulation) so the user
   retains spatial memory.
+
+### 6.8 Timeline view
+
+**Theme.** A third browse view-mode — alongside the card grid
+and Graph (§6.7) — that renders each dataset as a horizontal
+bar across a shared time axis, with a green dot at the right
+end for datasets that update in real time. Inspired by the
+**GSL Depot Explorer "Timeline" tab** shared in review, where
+each row is a dataset and the bar extent is its temporal
+coverage. The screenshot uses the same facet-group colours as
+the Graph view, so Graph and Timeline read as one visual
+system.
+
+**Why a third view.** Cards answer *what's in the catalog*;
+Graph answers *what relates to what*; Timeline answers *when*.
+TerraViz's `startTime` / `endTime` audit (§1.4) confirms
+populated coverage from year 0 through current for climate
+reconstructions and into the future for forecast datasets —
+the temporal span is a genuine axis worth its own surface.
+
+**Estimated size.** ~3–5 days on top of the Graph view. Same
+pattern: opt-in view toggle, lazy-loaded library, shares the
+predicate engine.
+
+**Data model.** One row per dataset in the current filter
+result set:
+
+| Element | Source |
+|---|---|
+| Row x-extent | `startTime` → `endTime` from the dataset row. Real-time datasets have `endTime` = "now" (rendered as an open-ended bar terminating at the right edge of the visible window). |
+| Row colour | Inherits the primary facet group hue (§6.7 palette) — visual continuity with Graph view. |
+| Real-time marker | Green dot on the trailing edge when `tags` includes `Real-Time` (10 datasets in the audit) **or** the dataset's `endTime` is within the last 24 h. The latter catches real-time datasets that aren't tagged. |
+| Row label | Dataset title (left-aligned, fixed-width gutter). |
+
+**Interactions.**
+
+- **Click row** → open the info panel, same path the card
+  grid uses.
+- **Hover row** → tooltip with title, exact start/end dates,
+  and the real-time status.
+- **Brush a time range on the axis** → updates the
+  `dataCoverageYearRange` filter via the same `toggleFacet`
+  mutation Graph view uses. Two-way bound with the Time-group
+  range slider in the chip rail — drag the brush, the slider
+  follows; drag the slider, the brush follows.
+- **Sort selector** (reused from card grid: Relevance / Size
+  / Name / Newest / Oldest) → re-orders rows. Default: sort
+  by `startTime` ascending (oldest at top) so the catalog's
+  historical depth is the first thing the eye sees.
+
+**Scale management.** 520 rows is fine with vertical scroll
+(the screenshot shows ~30 at a time). Two affordances tame
+density past that:
+
+- **Row height** adapts to the result set: ~24 px when there
+  are ≤ 100 rows, dense-pack 12 px when more. Labels truncate
+  at the gutter; hover surfaces the full title.
+- **Axis zoom**: scroll-wheel or pinch on the axis re-scales
+  the time domain. Default span: tightest range that fits all
+  visible rows.
+
+**Library choice.** Two realistic paths, neither obvious:
+
+| Library | Bundle (gzipped) | Fit |
+|---|---|---|
+| [vis-timeline](https://visjs.github.io/vis-timeline/) | ~150 KB | Drop-in horizontal timeline with brush, zoom, drag built-in. Heaviest option but ships the most behaviour out of the box. |
+| Custom d3-axis + SVG rows | ~30 KB (`d3-scale` + `d3-axis` + `d3-brush`) | Same primitives the chip-rail year-range slider already needs; the actual row rendering is one `<rect>` per dataset. Slightly more code to maintain but a much smaller payload. **Recommended.** |
+
+Recommend the **custom d3-axis path** — vis-timeline is a fine
+library but pays a 5× bundle for behaviour we can write in
+~150 lines. Same lazy-import pattern as Graph view; the
+library only chunks when the user toggles into Timeline.
+
+**Mobile.** Falls back to the card grid below the existing
+≤ 768px breakpoint, same as Graph. A 6-inch portrait viewport
+can't show enough horizontal range for the bars to be
+informative; the view-mode toggle is hidden in that layout.
+
+**Files touched.**
+
+| File | Change |
+|---|---|
+| `src/ui/browseUI.ts` | Extend `viewMode` from `'cards' \| 'graph'` to `'cards' \| 'graph' \| 'timeline'`; toggle control adds a third segment. |
+| `src/ui/catalogTimelineUI.ts` | **New.** Lazy-loaded entry; owns the SVG, axis, brush, row rendering. |
+| `src/services/catalogTimeline.ts` | **New.** Pure transform — `buildTimeline(datasets, filterState) → { rows, domain }`. Reuses `datasetFilter.ts` predicates. |
+| `src/services/datasetFilter.ts` | Already exports `toggleFacet` (added in §6.7); the brush handler reuses it for the `dataCoverageYearRange` mutation. |
+| `src/styles/browse.css` | Timeline container, row hover, real-time marker. |
+| `locales/en.json` | View-mode label (`browse.viewMode.timeline`), tooltip strings, real-time legend, brush instructions. |
+| `package.json` | Add `d3-scale`, `d3-axis`, `d3-brush` (or vis-timeline if the custom path is rejected at review). |
+
+**Analytics.** Mirror Graph view's events:
+`catalog_view_mode_changed` already covers the toggle.
+`catalog_timeline_brush_applied` (Tier B, throttled to
+per-minute aggregates) captures the brush-as-filter
+interaction since it's a genuinely new filter surface, not
+just a representation of an existing one.
+
+**Risks.**
+
+- **Real-time detection.** The `Real-Time` tag is curated,
+  not derived — so a dataset with current `endTime` but
+  without the tag would miss the green dot. The 24 h
+  fallback in the data-model row above is the mitigation;
+  worth confirming with Beth / SOS whether the tag is
+  authoritative.
+- **Future-dated forecasts.** Some datasets have `endTime`
+  in the future (model forecast horizons). The axis must
+  extend past "now" to render them honestly; the green-dot
+  rule keys off the *current real-time status*, not whether
+  `endTime > now`.
+- **Long historical bars.** Climate reconstructions span
+  year 0 → present; severe-weather case studies span a few
+  hours. Both should be readable on one axis. Solution:
+  log-or-piecewise axis is **rejected** — it lies about
+  duration. Use a linear axis with the recommended initial
+  zoom range, and rely on user zoom for fine detail at the
+  recent end.
+- **Brush ↔ slider drift.** Two controls editing the same
+  state need a single mutation path. The §6.7 contract —
+  `toggleFacet(state, 'dataCoverageYearRange', [start, end])`
+  — already covers this; both controls bind to the same
+  reducer.
 
 ---
 
@@ -1145,7 +1270,7 @@ sequencing and avoid mid-phase rework.
 | 1 | Catalog-first UX | 1–1.5 weeks | Open question #1 |
 | 2 | Info panel completeness | 3–5 days | none |
 | 3 | Playback fidelity | ~1 week | Open question #3 |
-| 4 | Filters & search + all-SOS widening + Graph view | 2–3 weeks (chip rail + predicate engine, then Graph view §6.7) | Open question #7 (NGSS metadata) for SOS-parity facets; baseline + graph ship without it |
+| 4 | Filters & search + all-SOS widening + Graph + Timeline views | ~3 weeks (chip rail + predicate engine, then Graph §6.7, then Timeline §6.8) | Open question #7 (NGSS metadata) for SOS-parity facets; baseline + graph + timeline ship without it |
 | 5 | UI polish & shader | ~2 weeks | Open question #4, #6 |
 | 6 | Playlists + zip downloads | ~3–4 weeks | Open question #5 |
 | — | High-fidelity assets for SOS-only datasets | — | Federation track (`CATALOG_BACKEND_PLAN.md`) |
