@@ -41,18 +41,19 @@
     color: #fff;
 }
 
-/* Phase 3pt-review/C — rename input in the dock header. */
+/* Phase 3pt-review/C — rename input. Phase 3pt-review/F moved it
+   out of the header (cramped: heading + status + publish + close
+   were already competing for the row) into its own line at the
+   top of the metadata block, sized to fill the dock width. */
 .tour-authoring-dock-title-input {
-    flex: 1;
-    min-inline-size: 0;
-    margin-inline-start: 0.5rem;
-    margin-inline-end: 0.4rem;
+    inline-size: 100%;
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 0.3rem;
     color: #fff;
-    font-size: 0.78rem;
-    padding: 0.2rem 0.45rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    padding: 0.3rem 0.5rem;
 }
 
 .tour-authoring-dock-title-input:hover,
@@ -146,13 +147,15 @@
 }
 
 /* Phase 3pt/E — autosave status badge in the header.
-   Phase 3pt-review/C — title input now stretches the header,
-   so the status no longer needs `flex: 1` to push the publish
-   button right. */
+   Phase 3pt-review/F — restored `flex: 1` after the title input
+   moved out of the header row; status now pushes the publish
+   button to the trailing edge. */
 .tour-authoring-dock-status {
     font-size: 0.65rem;
     padding: 0.1rem 0.4rem;
     border-radius: 0.3rem;
+    margin-inline-start: 0.5rem;
+    flex: 1;
     text-align: end;
     color: #8b94a4;
 }

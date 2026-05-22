@@ -8,6 +8,7 @@
  */
 
 import { logger } from '../../utils/logger'
+import { collapseBrowseUI } from '../browseUI'
 import {
   mountTourAuthoringDock,
   type TourAuthoringCallbacks,
@@ -45,6 +46,14 @@ export function initTourAuthoring(
     logger.warn('[tourAuthoring] initTourAuthoring called while a dock is already mounted; ignoring.')
     return activeHandle
   }
+  // Phase 3pt-review/F — collapse the browse overlay so the
+  // dock isn't obscured at boot, and flip the body class that
+  // hides `#help-trigger` (otherwise it sits z-index:600 over
+  // the dock's z-index:50, covering the top-right corner). The
+  // overlay stays in the DOM — the publisher can re-open it to
+  // load a dataset for a `loadDataset` capture.
+  collapseBrowseUI()
+  document.body.classList.add('tour-authoring-open')
   // Wrap the host's `onDiscard` so the singleton is cleared on
   // exit. The host's onDiscard typically navigates away from
   // `?tourEdit=`, which would trip the re-mount guard above on
@@ -56,6 +65,7 @@ export function initTourAuthoring(
       try {
         hostOnDiscard()
       } finally {
+        document.body.classList.remove('tour-authoring-open')
         if (activeHandle) {
           activeHandle.dispose()
           activeHandle = null
@@ -69,6 +79,7 @@ export function initTourAuthoring(
 
 /** Tear-down for tests / hot-reload. */
 export function teardownTourAuthoring(): void {
+  document.body.classList.remove('tour-authoring-open')
   if (activeHandle) {
     activeHandle.dispose()
     activeHandle = null

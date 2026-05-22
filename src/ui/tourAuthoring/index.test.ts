@@ -83,4 +83,58 @@ describe('initTourAuthoring (tour/A)', () => {
     // hitting the already-mounted guard.
     expect(document.querySelector('.tour-authoring-dock')).toBeNull()
   })
+
+  it('adds body.tour-authoring-open while the dock is mounted', () => {
+    window.history.replaceState({}, '', '/?tourEdit=new')
+    initTourAuthoring({
+      getMapView: () => null,
+      getCurrentDataset: () => null,
+      onDiscard: () => {},
+    })
+    // CSS uses this body class to hide #help-trigger so it stops
+    // overlapping the dock at top-right (z-index:600 vs the
+    // dock's z-index:50).
+    expect(document.body.classList.contains('tour-authoring-open')).toBe(true)
+  })
+
+  it('clears body.tour-authoring-open on discard', () => {
+    window.history.replaceState({}, '', '/?tourEdit=new')
+    initTourAuthoring({
+      getMapView: () => null,
+      getCurrentDataset: () => null,
+      onDiscard: () => {},
+    })
+    document.querySelector<HTMLButtonElement>('.tour-authoring-dock-close')!.click()
+    expect(document.body.classList.contains('tour-authoring-open')).toBe(false)
+  })
+
+  it('clears body.tour-authoring-open on teardown', () => {
+    window.history.replaceState({}, '', '/?tourEdit=new')
+    initTourAuthoring({
+      getMapView: () => null,
+      getCurrentDataset: () => null,
+      onDiscard: () => {},
+    })
+    teardownTourAuthoring()
+    expect(document.body.classList.contains('tour-authoring-open')).toBe(false)
+  })
+
+  it('collapses the browse overlay when mounting so the dock is visible', () => {
+    window.history.replaceState({}, '', '/?tourEdit=new')
+    // Seed a browse overlay in the open state, mimicking the
+    // post-boot SPA where browse opened automatically because no
+    // dataset is loaded.
+    const overlay = document.createElement('div')
+    overlay.id = 'browse-overlay'
+    document.body.appendChild(overlay)
+    document.body.classList.add('browse-open')
+    initTourAuthoring({
+      getMapView: () => null,
+      getCurrentDataset: () => null,
+      onDiscard: () => {},
+    })
+    expect(overlay.classList.contains('collapsed')).toBe(true)
+    expect(document.body.classList.contains('browse-open')).toBe(false)
+    overlay.remove()
+  })
 })

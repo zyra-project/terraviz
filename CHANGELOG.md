@@ -228,6 +228,31 @@ Copilot review pass surfaced three follow-ups:
   - Removed a duplicate doc block above `nextDockInputIds` — two
     consecutive comments said the same thing.
 
+**tour-review/F — dock layout pass.** First publisher dogfood
+session surfaced three layout issues:
+
+  - **Title input was almost invisible.** It shared the header
+    row with the heading + autosave badge + Publish + close — at
+    18rem dock width there wasn't enough horizontal space. Moved
+    the input out of the header into the metadata block at full
+    width, with a larger font matching its role as the primary
+    label for the tour.
+  - **Help button overlapped the dock.** `#help-trigger` is
+    z-index 600 top-right; the dock is z-index 50 same corner.
+    Added a `body.tour-authoring-open` class that hides
+    `#help-trigger` (same pattern `body.browse-open` already
+    uses). The body class flips on mount + clears on discard /
+    teardown.
+  - **Browse overlay obscured the dock at boot.** When the URL
+    carries `?tourEdit=` the SPA still auto-opens browse because
+    no dataset is loaded. `initTourAuthoring` now calls
+    `collapseBrowseUI()` so the dock is visible immediately; the
+    overlay stays in the DOM so the publisher can re-open it to
+    grab a dataset for a `loadDataset` capture.
+
+Tests cover the body-class toggle (mount / discard / teardown)
+and the browse-collapse behaviour.
+
   - **Preview** ("Play from here") — would run `tourEngine`
     against the current draft from any task index. Needs
     callback-bag integration with the SPA's existing tour-

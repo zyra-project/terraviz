@@ -318,12 +318,6 @@ export function mountTourAuthoringDock(
     root.innerHTML = `
       <div class="tour-authoring-dock-header">
         <span class="tour-authoring-dock-title">${escapeHtml(t('tour.dock.title'))}</span>
-        <input type="text" class="tour-authoring-dock-title-input"
-               data-dock-field="title"
-               value="${escapeAttr(titleValue)}"
-               maxlength="200"
-               placeholder="${escapeAttr(t('tour.dock.titleInput.placeholder'))}"
-               aria-label="${escapeAttr(t('tour.dock.titleInput.aria'))}">
         <span class="tour-authoring-dock-status tour-authoring-dock-status-${autosaveStatus}"
               role="status"
               aria-live="polite"
@@ -337,6 +331,12 @@ export function mountTourAuthoringDock(
                 aria-label="${escapeAttr(t('tour.dock.discard.aria'))}">×</button>
       </div>
       <div class="tour-authoring-dock-metadata">
+        <input type="text" class="tour-authoring-dock-title-input"
+               data-dock-field="title"
+               value="${escapeAttr(titleValue)}"
+               maxlength="200"
+               placeholder="${escapeAttr(t('tour.dock.titleInput.placeholder'))}"
+               aria-label="${escapeAttr(t('tour.dock.titleInput.aria'))}">
         <textarea class="tour-authoring-dock-description"
                   data-dock-field="description"
                   rows="2"
