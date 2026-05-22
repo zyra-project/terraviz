@@ -135,6 +135,25 @@ export interface Dataset {
    * `dataLink`.
    */
   frames?: DatasetFrames
+
+  /**
+   * Which SOS catalog surface(s) this dataset is published on.
+   * Sourced from the enriched metadata's `available_for` array.
+   * Phase 4 §6.4 from `docs/WEB_CATALOG_FEATURES_PLAN.md`.
+   *
+   * - `'Explorer'` — only in the SOSx subset (the live-catalog
+   *   datasets TerraViz has always rendered).
+   * - `'SOS'` — only in the broader SOS catalog. Synthesised by
+   *   `dataService` from the enriched metadata file when there's
+   *   no live-catalog entry to pair with; plays back at
+   *   `movie_preview` quality rather than the SOSx Vimeo HLS.
+   * - `'Both'` — listed on both surfaces. Live-catalog entry is
+   *   the source of truth for the `dataLink`; enriched entry
+   *   carries the rest.
+   *
+   * Omitted on rows where the enriched lookup didn't match.
+   */
+  availableFor?: 'Explorer' | 'SOS' | 'Both'
 }
 
 /**

@@ -34,6 +34,116 @@ interface RawEnrichedEntry {
   dataset_developer?: { name?: string; affiliation_url?: string }
   vis_developer?: { name?: string; affiliation_url?: string }
   related_datasets?: Array<{ title: string; url: string }>
+  /** Catalog surfaces this dataset is published on — `["SOS"]`,
+   *  `["Explorer"]`, or `["SOS","Explorer"]`. Phase 4 §6.4 keys
+   *  the `availableFor` tag and the SOS-only synthesis path off
+   *  this field. */
+  available_for?: string[]
+  /** Lower-fidelity preview URL — used as `dataLink` for the
+   *  synthesised SOS-only datasets (§6.4). Plays back from the
+   *  SOS-public CloudFront origin rather than the SOSx Vimeo HLS. */
+  movie_preview?: string
+  /** Thumbnail URL — used as `thumbnailLink` for synthesised
+   *  SOS-only datasets. */
+  thumbnail_image?: string
+}
+
+/** Synthesised dataset ID prefix for entries that exist only in the
+ *  enriched metadata (SOS-only). The prefix keeps them out of the
+ *  `INTERNAL_SOS_*` legacy ID space and the ULID namespace, so a
+ *  malformed lookup against a synthesised ID never collides with a
+ *  real catalog row. */
+const SOS_ONLY_ID_PREFIX = 'SOS_ONLY_'
+
+/**
+ * Derive the `availableFor` tag from an enriched entry's
+ * `available_for` array. Returns `undefined` when the entry
+ * lacks the field (legacy enriched data); callers default to
+ * `'Explorer'` for live-catalog rows in that case.
+ *
+ * Exported so tests can pin the mapping without instantiating
+ * the full {@link DataService}.
+ */
+export function deriveAvailableFor(
+  available_for: string[] | undefined,
+): 'Explorer' | 'SOS' | 'Both' | undefined {
+  if (!available_for || available_for.length === 0) return undefined
+  const sos = available_for.includes('SOS')
+  const explorer = available_for.includes('Explorer')
+  if (sos && explorer) return 'Both'
+  if (sos) return 'SOS'
+  if (explorer) return 'Explorer'
+  return undefined
+}
+
+/**
+ * Synthesise `Dataset` rows for entries that exist only in the
+ * broader SOS catalog (the enriched metadata file) and have no
+ * live-catalog counterpart. Phase 4 §6.4 from the catalog
+ * features plan.
+ *
+ * `existingTitleKeys` is the set of normalized titles already
+ * represented in the live catalog; entries with a matching key
+ * are skipped so we don't duplicate the SOSx subset. Returns a
+ * list of `Dataset` records suitable for merging alongside the
+ * live catalog — each carries `availableFor: 'SOS'` so consumers
+ * can filter them in/out independently.
+ *
+ * Synthesis maps:
+ *
+ *   movie_preview     →  dataLink
+ *   thumbnail_image   →  thumbnailLink
+ *   description       →  abstractTxt
+ *   dataset_developer →  organization
+ *   keywords          →  tags  (also via the enrichedMap)
+ *   url               →  websiteLink
+ *
+ * Entries without a `movie_preview` URL are skipped — without a
+ * playable asset there's nothing to load on click.
+ *
+ * `normalizeTitle` is injected so the function stays pure (no
+ * implicit `this` binding) and tests can use any matching
+ * normaliser.
+ */
+export function synthesizeSosOnlyDatasets(
+  enrichedEntries: RawEnrichedEntry[],
+  existingTitleKeys: ReadonlySet<string>,
+  normalizeTitle: (title: string) => string,
+): Dataset[] {
+  const synthesized: Dataset[] = []
+  let counter = 0
+
+  for (const entry of enrichedEntries) {
+    if (!entry.title || !entry.movie_preview) continue
+    const availableFor = deriveAvailableFor(entry.available_for)
+    // Only synthesise pure SOS-only rows — Both and Explorer
+    // entries are already covered by the live catalog merge.
+    if (availableFor !== 'SOS') continue
+
+    const titleKey = normalizeTitle(entry.title)
+    if (existingTitleKeys.has(titleKey)) continue
+
+    counter += 1
+    const dataset: Dataset = {
+      id: `${SOS_ONLY_ID_PREFIX}${counter}`,
+      title: entry.title,
+      format: 'video/mp4',
+      dataLink: entry.movie_preview,
+      thumbnailLink: entry.thumbnail_image,
+      abstractTxt: entry.description,
+      organization: entry.dataset_developer?.name,
+      tags: entry.keywords,
+      websiteLink: entry.url,
+      availableFor: 'SOS',
+      // No live-catalog provenance, no weight signal — sort to
+      // the bottom of catalog-weight-ordered listings until
+      // explicit relevance signals layer on.
+      weight: 0,
+    }
+    synthesized.push(dataset)
+  }
+
+  return synthesized
 }
 
 /**
@@ -201,6 +311,12 @@ export class DataService {
   private cacheTime: number = 0
   private readonly CACHE_DURATION = 60 * 60 * 1000 // 1 hour
   private enrichedMap: Map<string, EnrichedMetadata> | null = null
+  /** Parallel map of normalized titles → raw `available_for` array
+   *  from the enriched file. Kept separate from `enrichedMap`
+   *  because `EnrichedMetadata` doesn't carry the field (it's a
+   *  data-source artefact, not a renderable metadata field).
+   *  Phase 4 §6.4. */
+  private rawAvailableForMap: Map<string, string[]> | null = null
 
   /**
    * Fetch all datasets. Branches on `VITE_CATALOG_SOURCE`:
@@ -255,10 +371,22 @@ export class DataService {
       )
 
       // Filter, sort, and enrich datasets
-      const datasets = rawDatasets
+      const liveDatasets = rawDatasets
         .filter(d => !d.isHidden && !HIDDEN_TOUR_IDS.has(d.id) && this.isSupportedDataset(d))
         .sort((a, b) => (b.weight || 0) - (a.weight || 0))
         .map(d => this.enrichDataset(d))
+
+      // Phase 4 §6.4 — synthesise rows for entries that exist only
+      // in the broader SOS catalog. They carry `availableFor: 'SOS'`
+      // so downstream UI (Phase 4 chip rail) can filter them in/out
+      // independently. The synthesis is unconditional here — gating
+      // happens at the consumer (browse UI default-excludes them
+      // until the toggle lands) so no user-visible regression today.
+      const liveTitleKeys = new Set(liveDatasets.map(d => this.normalizeTitle(d.title)))
+      const sosOnlyDatasets = this.synthesizeSosOnlyDatasets(enrichedData, liveTitleKeys)
+        .map(d => this.enrichDataset(d))
+
+      const datasets = [...liveDatasets, ...sosOnlyDatasets]
 
       this.cache = { datasets }
       this.cacheTime = now
@@ -340,13 +468,21 @@ export class DataService {
   }
 
   /**
-   * Build a lookup map from enriched metadata, keyed by normalized title
+   * Build a lookup map from enriched metadata, keyed by normalized
+   * title. Also populates `rawAvailableForMap` so the live-catalog
+   * merge can tag rows with `availableFor` without re-walking the
+   * raw entries. Phase 4 §6.4.
    */
   private buildEnrichedMap(entries: RawEnrichedEntry[]): Map<string, EnrichedMetadata> {
     const map = new Map<string, EnrichedMetadata>()
+    const availableForMap = new Map<string, string[]>()
 
     for (const entry of entries) {
       if (!entry.title) continue
+      const key = this.normalizeTitle(entry.title)
+      if (entry.available_for && entry.available_for.length > 0) {
+        availableForMap.set(key, entry.available_for)
+      }
 
       const enriched: EnrichedMetadata = {}
 
@@ -375,27 +511,61 @@ export class DataService {
       if (entry.date_added) enriched.dateAdded = entry.date_added
       if (entry.url) enriched.catalogUrl = entry.url
 
-      const key = this.normalizeTitle(entry.title)
       map.set(key, enriched)
     }
 
+    this.rawAvailableForMap = availableForMap
     return map
   }
 
   /**
-   * Try to find enriched metadata for a dataset by title matching
+   * Derive the `availableFor` tag from an enriched entry's
+   * `available_for` array. Returns `undefined` when the entry
+   * lacks the field (legacy enriched data); callers default to
+   * `'Explorer'` for live-catalog rows in that case.
+   */
+  private deriveAvailableFor(
+    available_for: string[] | undefined,
+  ): 'Explorer' | 'SOS' | 'Both' | undefined {
+    return deriveAvailableFor(available_for)
+  }
+
+  /** Internal-class shim that delegates to the module-level
+   *  {@link synthesizeSosOnlyDatasets}. Kept as a method so the
+   *  fetch path reads naturally; the implementation lives at
+   *  module scope so tests can exercise it without standing up
+   *  the whole class. */
+  private synthesizeSosOnlyDatasets(
+    enrichedEntries: RawEnrichedEntry[],
+    existingTitleKeys: ReadonlySet<string>,
+  ): Dataset[] {
+    return synthesizeSosOnlyDatasets(enrichedEntries, existingTitleKeys, (title) =>
+      this.normalizeTitle(title),
+    )
+  }
+
+  /**
+   * Try to find enriched metadata for a dataset by title matching.
+   * Sets `availableFor` from the enriched lookup when the entry's
+   * `available_for` array is populated, defaulting to `'Explorer'`
+   * for any live-catalog row (those are SOSx-subset by definition,
+   * even if the enriched data is missing). Synthesised SOS-only
+   * rows set their own `availableFor` and never flow through here.
    */
   private enrichDataset(dataset: Dataset): Dataset {
-    if (!this.enrichedMap) return dataset
+    if (!this.enrichedMap) {
+      return { ...dataset, availableFor: dataset.availableFor ?? 'Explorer' }
+    }
 
     const normalized = this.normalizeTitle(dataset.title)
     const enriched = this.enrichedMap.get(normalized)
+    const rawAvailableFor = this.rawAvailableForMap?.get(normalized)
+    const availableFor = this.deriveAvailableFor(rawAvailableFor) ?? 'Explorer'
 
     if (enriched) {
-      return { ...dataset, enriched }
+      return { ...dataset, enriched, availableFor }
     }
-
-    return dataset
+    return { ...dataset, availableFor }
   }
 
   /**
@@ -525,6 +695,7 @@ export class DataService {
     this.cache = null
     this.cacheTime = 0
     this.enrichedMap = null
+    this.rawAvailableForMap = null
   }
 
   /**

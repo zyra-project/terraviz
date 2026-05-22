@@ -1,6 +1,14 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { dataService, HIDDEN_TOUR_IDS, normaliseSourceFormat } from './dataService'
+import {
+  dataService,
+  deriveAvailableFor,
+  HIDDEN_TOUR_IDS,
+  normaliseSourceFormat,
+  synthesizeSosOnlyDatasets,
+} from './dataService'
 import type { Dataset } from '../types'
+
+const lowerTitle = (t: string): string => t.toLowerCase().trim()
 
 // Helper to build a minimal Dataset
 function makeDataset(overrides: Partial<Dataset> = {}): Dataset {
@@ -184,6 +192,115 @@ describe('DataService.getDatasetById', () => {
   it('returns undefined when cache is empty', () => {
     dataService.clearCache()
     expect(dataService.getDatasetById('any-id')).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Phase 4 §6.4 — SOS-only data widening
+// ---------------------------------------------------------------------------
+
+describe('deriveAvailableFor', () => {
+  it('returns undefined for missing or empty arrays', () => {
+    expect(deriveAvailableFor(undefined)).toBeUndefined()
+    expect(deriveAvailableFor([])).toBeUndefined()
+  })
+
+  it('maps ["SOS"] only to "SOS"', () => {
+    expect(deriveAvailableFor(['SOS'])).toBe('SOS')
+  })
+
+  it('maps ["Explorer"] only to "Explorer"', () => {
+    expect(deriveAvailableFor(['Explorer'])).toBe('Explorer')
+  })
+
+  it('maps both surfaces to "Both"', () => {
+    expect(deriveAvailableFor(['SOS', 'Explorer'])).toBe('Both')
+    expect(deriveAvailableFor(['Explorer', 'SOS'])).toBe('Both')
+  })
+
+  it('ignores unrecognised values when neither flag is present', () => {
+    expect(deriveAvailableFor(['Mars'])).toBeUndefined()
+  })
+})
+
+describe('synthesizeSosOnlyDatasets', () => {
+  it('synthesises a Dataset for an SOS-only entry with movie_preview', () => {
+    const synthesised = synthesizeSosOnlyDatasets(
+      [
+        {
+          title: 'Tsunami Wave Heights',
+          description: 'A reconstruction of tsunami wave heights.',
+          available_for: ['SOS'],
+          movie_preview: 'https://sos.noaa.gov/videos/tsunami.mov',
+          thumbnail_image: 'https://sos.noaa.gov/thumb/tsunami.jpg',
+          dataset_developer: { name: 'NOAA NCEI' },
+          keywords: ['tsunami', 'ocean'],
+          url: 'https://sos.noaa.gov/catalog/tsunami',
+        },
+      ],
+      new Set(),
+      lowerTitle,
+    )
+    expect(synthesised).toHaveLength(1)
+    const ds = synthesised[0]
+    expect(ds.id).toMatch(/^SOS_ONLY_/)
+    expect(ds.title).toBe('Tsunami Wave Heights')
+    expect(ds.format).toBe('video/mp4')
+    expect(ds.dataLink).toBe('https://sos.noaa.gov/videos/tsunami.mov')
+    expect(ds.thumbnailLink).toBe('https://sos.noaa.gov/thumb/tsunami.jpg')
+    expect(ds.abstractTxt).toBe('A reconstruction of tsunami wave heights.')
+    expect(ds.organization).toBe('NOAA NCEI')
+    expect(ds.tags).toEqual(['tsunami', 'ocean'])
+    expect(ds.websiteLink).toBe('https://sos.noaa.gov/catalog/tsunami')
+    expect(ds.availableFor).toBe('SOS')
+  })
+
+  it('skips entries that lack a movie_preview URL', () => {
+    expect(
+      synthesizeSosOnlyDatasets(
+        [{ title: 'No Preview', available_for: ['SOS'] }],
+        new Set(),
+        lowerTitle,
+      ),
+    ).toEqual([])
+  })
+
+  it('skips entries marked "Explorer" or "Both" (already in live catalog)', () => {
+    const entries = [
+      { title: 'Explorer Only', available_for: ['Explorer'], movie_preview: 'x' },
+      { title: 'Both', available_for: ['SOS', 'Explorer'], movie_preview: 'x' },
+      { title: 'SOS Only', available_for: ['SOS'], movie_preview: 'x' },
+    ]
+    const synthesised = synthesizeSosOnlyDatasets(entries, new Set(), lowerTitle)
+    expect(synthesised.map((d) => d.title)).toEqual(['SOS Only'])
+  })
+
+  it('de-dupes against the existing live-catalog title keys', () => {
+    const synthesised = synthesizeSosOnlyDatasets(
+      [{ title: 'Sea Ice', available_for: ['SOS'], movie_preview: 'x' }],
+      new Set([lowerTitle('Sea Ice')]),
+      lowerTitle,
+    )
+    expect(synthesised).toEqual([])
+  })
+
+  it('assigns monotonically-increasing IDs', () => {
+    const entries = [
+      { title: 'A', available_for: ['SOS'], movie_preview: 'a' },
+      { title: 'B', available_for: ['SOS'], movie_preview: 'b' },
+      { title: 'C', available_for: ['SOS'], movie_preview: 'c' },
+    ]
+    const synthesised = synthesizeSosOnlyDatasets(entries, new Set(), lowerTitle)
+    expect(synthesised.map((d) => d.id)).toEqual(['SOS_ONLY_1', 'SOS_ONLY_2', 'SOS_ONLY_3'])
+  })
+
+  it('returns synthesised rows tagged with weight 0', () => {
+    const synthesised = synthesizeSosOnlyDatasets(
+      [{ title: 'A', available_for: ['SOS'], movie_preview: 'a' }],
+      new Set(),
+      lowerTitle,
+    )
+    expect(synthesised[0].weight).toBe(0)
   })
 })
 
