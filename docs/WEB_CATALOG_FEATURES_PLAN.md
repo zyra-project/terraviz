@@ -498,10 +498,15 @@ The infrastructure exists. The user-visible gap is:
 
 ## 6. Phase 4 — Filters & search
 
-**Theme.** Reach parity with the SOS catalog's filter surface.
+**Theme.** Reach parity with the SOS catalog's filter surface,
+plus an optional **Graph view** (§6.7) that exposes
+co-occurrence structure the chip rail can't.
 
-**Estimated size.** ~1–2 weeks. Also delivers the
-"all SOS datasets" widening (#10) — see §6.4.
+**Estimated size.** ~2–3 weeks. Splits into two coordinated
+PRs — chip rail + predicate engine first (§6.1–§6.6), graph
+view second (§6.7), since the latter consumes the former.
+Also delivers the "all SOS datasets" widening (#10) — see
+§6.4.
 
 ### 6.1 Filter inventory
 
@@ -686,6 +691,132 @@ existence and metadata of the long tail.
 - **Catalog size.** Today's 204 datasets means filtering is
   effectively instant. The new 520-entry catalog is still
   small enough for client-side filtering with no indexing.
+
+### 6.7 Graph view
+
+**Theme.** A second browse view-mode — alongside the card
+grid — that renders the catalog as a network of facet values
+and keywords, with edges weighted by co-occurrence across
+datasets. Inspired by the **GSL "Depot Explorer"** catalog
+shared in review, which surfaces ~120 weather datasets as a
+hub-and-spoke graph centred on a chosen facet (e.g.
+*meteorology* with 50 matching datasets and 184 connections
+fanning out to *severe weather*, *radar*, *high-resolution*,
+*model output*, …).
+
+**Why this is worth the extra surface.** A 520-dataset card
+grid scrolls; a graph reveals **co-occurrence structure** —
+which keywords cluster, which categories overlap, which
+datasets sit at the intersection of two facets. That's a
+genuinely new question the chip rail can't answer.
+
+**Estimated size.** ~3–5 days on top of the chip filter work
+in §6.5. Lands in Phase 4 as an opt-in view toggle, not a
+default.
+
+**Data model.** Three node types, two edge types:
+
+| Element | Source |
+|---|---|
+| Facet-value node | `(facet, value)` from §6.1's grouped filters — e.g. `Category:Atmosphere`, `Format:Video`, `Theme:Climate` (once metadata lands). |
+| Keyword node | `enriched.keywords` entries — only surfaced when the user expands a facet-value cluster (see *Scale management*). |
+| Dataset node | One per row in the **current filter result set** — the graph reflects whatever the chip rail has narrowed to. |
+| Membership edge | dataset ↔ facet-value / keyword. Drives the radial layout. |
+| Co-occurrence edge | facet-value ↔ facet-value, weighted by how many datasets carry both. Drives the cluster proximity. |
+
+**Interactions.**
+
+- **Click facet-value node** → toggle that facet into the
+  chip rail (same predicate engine — single source of truth
+  for filter state).
+- **Click dataset node** → open the info panel, exactly the
+  same path the card grid uses.
+- **Double-click facet-value node** → "centre" the graph on
+  that node — the screenshot's hub-and-spoke layout, with the
+  centred node enlarged and the rest of the graph
+  redistributed around it.
+- **Hover** → tooltip with dataset count and the top three
+  co-occurring facets.
+- **Search box** (top, reused from the card grid) → filters
+  both views identically.
+
+**Scale management.** At 520 datasets × 723 keywords the full
+graph is too dense to read. The default cluster collapses
+keywords into their parent facet-value node and shows only
+facet-value ↔ facet-value edges; a node's expand control
+unfurls the keyword children on demand. A "minimum edge
+weight" slider (default 2) hides singleton co-occurrences. The
+GSL screenshot shows ~120 datasets with this exact pattern —
+the central hub plus radial keyword chips — and it stays
+legible.
+
+**Library choice.** Two realistic options:
+
+| Library | Bundle (gzipped) | Rendering | Fit |
+|---|---|---|---|
+| [cytoscape.js](https://js.cytoscape.org/) | ~70 KB | SVG / Canvas | Native filter API, force-directed layouts, dataset-scale (520 nodes + ~1500 edges) is comfortable, broad browser support. **Recommended.** |
+| [sigma.js](https://www.sigmajs.org/) | ~50 KB (+ graphology ~30 KB) | WebGL | Scales to 10k+ nodes; overkill for v1 but the right choice if the catalog grows past ~2k datasets. |
+
+Recommend cytoscape.js for v1 with the same **lazy-import
+pattern** Three.js uses in `vrSession.ts` — the library
+chunks only when the user toggles into Graph view, so the
+default-card-grid path pays nothing.
+
+**Colour palette.** Each facet group from §6.1 owns one hue
+(Category & content / Format & medium / Time / Quality &
+availability / Education & curation). Nodes inherit the hue
+of their parent facet; dataset nodes are neutral grey. The
+palette lives in `tokens/global.json` so chips, graph nodes,
+and federated peer facets (§1.6) share one source of truth.
+
+**Mobile.** Falls back to the card grid below the existing
+≤ 768px breakpoint. A 6-inch viewport with a force-directed
+graph and pinch-zoom is unusable in practice. The view-mode
+toggle is hidden in mobile layouts.
+
+**Files touched.**
+
+| File | Change |
+|---|---|
+| `src/ui/browseUI.ts` | Add `viewMode: 'cards' \| 'graph'` state + toggle control; lazy-mount the graph component on first toggle. |
+| `src/ui/catalogGraphUI.ts` | **New.** Lazy-loaded entry; instantiates cytoscape.js, owns the canvas, wires click/hover handlers. |
+| `src/services/catalogGraph.ts` | **New.** Pure transform — `buildGraph(datasets, filterState) → { nodes, edges }`. Reuses `datasetFilter.ts` predicates. |
+| `src/services/datasetFilter.ts` | Export a `toggleFacet(state, facet, value)` helper so graph clicks and chip clicks share one mutation path. |
+| `src/styles/browse.css` | View-mode toggle styling; graph container; tooltip. |
+| `tokens/global.json` | New `--facet-color-*` tokens per group. |
+| `locales/en.json` | View-mode labels (`browse.viewMode.cards`, `.graph`), tooltip labels, expand/collapse, edge-weight slider. |
+| `package.json` | Add `cytoscape` as a dependency. |
+
+**Analytics.** New events to coordinate with
+[`docs/ANALYTICS_CONTRIBUTING.md`](ANALYTICS_CONTRIBUTING.md):
+`catalog_view_mode_changed` (Tier A, fires on toggle),
+`catalog_graph_node_clicked` (Tier B, free-text values
+hashed). Throttle the latter to per-minute aggregates so a
+panning session doesn't flood the queue.
+
+**Risks.**
+
+- **Library size.** ~70 KB gzipped for cytoscape.js. Lazy
+  loading keeps it off the default path, but anyone who
+  *uses* the graph pays that cost. Measure on cold-start
+  via existing `perf_sample` before declaring done.
+- **Touch / hover affordances.** Hover is a desktop
+  primitive; mobile-tablet users on >768px viewports need
+  a tap-to-tooltip variant. Worth a dedicated pass.
+- **Accessibility.** A network graph is fundamentally
+  visual. The card-grid view remains the canonical surface;
+  the graph is augmentation, not replacement. Screen-reader
+  users continue to use the card grid (which already meets
+  the existing a11y baseline).
+- **Federation extensibility.** When peer-advertised facets
+  surface (§1.6), the palette must extend dynamically. Keep
+  the colour-token map keyed by facet name, not hardcoded to
+  the v1 group set.
+- **Graph thrash on filter change.** Re-laying out a
+  force-directed graph on every chip toggle is jarring.
+  Use cytoscape's incremental-layout mode (animate node
+  positions, don't re-seed the simulation) so the user
+  retains spatial memory.
 
 ---
 
@@ -1014,7 +1145,7 @@ sequencing and avoid mid-phase rework.
 | 1 | Catalog-first UX | 1–1.5 weeks | Open question #1 |
 | 2 | Info panel completeness | 3–5 days | none |
 | 3 | Playback fidelity | ~1 week | Open question #3 |
-| 4 | Filters & search + all-SOS widening | 1–2 weeks (baseline) | Open question #7 (NGSS metadata) for SOS-parity facets; baseline ships without it |
+| 4 | Filters & search + all-SOS widening + Graph view | 2–3 weeks (chip rail + predicate engine, then Graph view §6.7) | Open question #7 (NGSS metadata) for SOS-parity facets; baseline + graph ship without it |
 | 5 | UI polish & shader | ~2 weeks | Open question #4, #6 |
 | 6 | Playlists + zip downloads | ~3–4 weeks | Open question #5 |
 | — | High-fidelity assets for SOS-only datasets | — | Federation track (`CATALOG_BACKEND_PLAN.md`) |
