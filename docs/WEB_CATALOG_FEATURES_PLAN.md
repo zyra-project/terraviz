@@ -207,7 +207,7 @@ To keep the branch scoped, the following are explicitly **out**:
 - Backend work on the catalog node — this plan assumes the
   current `dataService.ts` data source is fixed for now.
   Federation-quality high-fidelity assets for the 415 SOS-only
-  datasets remain on the federation track (§9.1).
+  datasets remain on the federation track (§10.1).
 - VR / AR changes — the doc is explicit that catalog work is
   the scope.
 - Localisation of net-new strings is **not** a non-goal — every
@@ -273,7 +273,7 @@ optionally loaded via `?dataset=<id>`." The new entry path is:
    unchanged. Direct globe entry for embeds and shared links.
 4. `/` (no params) → **open question** for requesters:
    should the default landing experience be globe-first
-   (today) or catalog-first (new)? See §10.
+   (today) or catalog-first (new)? See §11.
 
 `deepLinkService.ts` already parses `?dataset=`. The same
 pattern adds a `getCatalogMode()` reader; `main.ts` orchestrates
@@ -668,7 +668,7 @@ metadata file, each with a `movie_preview` URL.
 
 **Honest tradeoff.** SOS-only datasets play back at preview
 quality, not the same Vimeo HLS adaptive bitrate the SOSx
-subset enjoys. The federation track (§9.1) is the path to
+subset enjoys. The federation track (§10.1) is the path to
 first-class assets — this phase merely surfaces the
 existence and metadata of the long tail.
 
@@ -963,7 +963,7 @@ toolkit. The motivating context is forward-looking — most of
 today's SOSx catalog is global, but **non-global data is the
 trajectory**: the 415 SOS-only datasets in the audit
 (§1.4) include regional model outputs and case studies;
-federation (§9.1) brings in regional partner datasets
+federation (§10.1) brings in regional partner datasets
 (Arctic-focused peers, CIMSS, regional reanalyses); and the
 catalog backend plan reserves space for non-global formats.
 Shipping Map view now means the surface exists when the data
@@ -1332,9 +1332,210 @@ Zip downloads:
 
 ---
 
-## 9. Deferred / dependent
+## 9. Phase 7 — Engagement & continuity
 
-### 9.1 High-fidelity assets for SOS-only datasets
+**Theme.** The catalog should feel alive and reward returning
+visitors. TerraViz is a window onto a living Earth; the
+browse surface should read that way too. Four
+independently-shippable features chosen from a broader
+brainstorm; the deferred ideas live in §9.5 *Future
+engagement ideas* and may graduate into Phase 8+ if any cluster
+gains traction.
+
+**Estimated size.** ~2 weeks. Four small PRs, any of which can
+ship in isolation.
+
+### 9.1 "Right now" hero panel
+
+**Theme.** When something is happening — active hurricane,
+ongoing wildfire complex, aurora forecast, eclipse this week —
+surface it as a pinned hero card above the chip rail. The 10
+real-time-tagged datasets stop being a tag and become a
+homepage.
+
+**Hero candidate.** Either:
+
+- An auto-derived candidate: dataset whose `tags` include
+  `Real-Time` AND whose `endTime` is within the last 24 h.
+- A curator-set override via a small static
+  `featured-now.json` file with a mandatory `window: { start,
+  end }` field so the override expires automatically and the
+  panel doesn't go stale. The override beats the auto-derived
+  pick when both apply.
+
+**Empty state.** When nothing is actively newsworthy, the
+hero panel hides entirely. *"Nothing happening today"* reads
+worse than no panel; the catalog should not perform
+liveliness it doesn't have.
+
+**Files touched.**
+
+| File | Change |
+|---|---|
+| `src/services/heroService.ts` | **New.** Picks the hero candidate (override → auto-derived → null). |
+| `public/featured-now.json` | **New.** Curator override file. Schema: `{ datasetId, window: { start, end }, headline? }`. |
+| `src/ui/heroPanelUI.ts` | **New.** Mounts above the chip rail in catalog mode only. |
+| `src/ui/browseUI.ts` | Wire the hero panel into the catalog-mode surface from §3.1. |
+| `locales/en.json` | Hero heading, "happening now" label, dismiss aria-label. |
+
+### 9.2 Visit memory
+
+**Theme.** localStorage-backed visit log. "Continue exploring"
+row, "new since your last visit" badge — Netflix's
+continue-watching paradigm, no account needed.
+
+**Data model.**
+
+- `terraviz.visits.v1` — `{ [datasetId]: { firstVisit, lastVisit, viewSeconds } }`. LRU-evicted at 200 entries to bound storage.
+- `terraviz.lastSession` — ISO timestamp of the previous session end. Written on pagehide alongside the existing analytics flush.
+
+**Interactions.**
+
+- **Continue exploring row** in the cards-mode surface when
+  `visits` has ≥ 3 entries; shows the 3 most recently visited
+  datasets, leftmost.
+- **New-since-last-visit badge** on the browse trigger — count
+  of catalog entries whose `dateAdded > lastSession`.
+- **Recently viewed chip** in the Time facet group (§6.1) so
+  the visit history is filterable, not just a hero row.
+
+**Privacy.** Visit memory is local-only — never sent
+server-side. Existing analytics covers aggregate visit
+signals; the per-user log is exclusively a client
+convenience. Document in §1.7 non-goals and in the Privacy
+panel (`src/ui/privacyUI.ts`).
+
+**Files touched.**
+
+| File | Change |
+|---|---|
+| `src/services/visitMemory.ts` | **New.** Persistence + queries; LRU + pagehide-flush. |
+| `src/services/datasetLoader.ts` | Increment visit counter on info-panel open. |
+| `src/ui/browseUI.ts` | Continue-exploring row; new-since badge on the trigger; Recently-viewed chip. |
+| `locales/en.json` | Row heading, badge tooltip, chip label. |
+
+### 9.3 Proactive Orbit greeting
+
+**Theme.** Orbit greets returning users with what's new and a
+tour offer. The hybrid LLM + local-fallback architecture
+already supports a turn-0 greeting; this is wiring, not new
+infrastructure.
+
+**Trigger.**
+
+- Catalog mode only (not globe mode — the greeting belongs
+  on a conversational surface, not on top of a dataset the
+  user is actively playing).
+- On open: if `terraviz.lastSession` exists AND `now -
+  lastSession > 24 h`, fire Orbit's opening turn with a
+  returning-user context block prepended to the system prompt.
+
+**System prompt addition.** `docentContext.buildSystemPromptForTurn()`
+gains a returning-user block when triggered:
+
+```
+You are greeting a returning visitor. Context:
+  Last visited: 2026-05-15 (N days ago)
+  New datasets since: 4 (titles: …)
+  Recently viewed by user: 3 (titles: …)
+Keep the greeting one short paragraph + an offer (tour, new dataset, return to last). Do not list everything; pick one or two highlights.
+```
+
+**Cost discipline.** Turn-0 with the richer context costs
+more per session. Mitigations: (a) gate strictly to catalog
+mode; (b) skip the greeting when the LLM is unconfigured (the
+local-engine fallback isn't a good fit for proactive
+greetings — it would feel canned).
+
+**One-time disclosure.** First time the greeting fires, append
+a small footnote: *"Orbit remembers what you've explored
+locally. Manage in Tools → Privacy."* Reuses the existing
+first-launch disclosure pattern from `disclosureBanner.ts`.
+
+**Files touched.**
+
+| File | Change |
+|---|---|
+| `src/services/docentContext.ts` | Returning-user block builder; gated by trigger conditions. |
+| `src/services/docentService.ts` | New `triggerOpeningTurn()` for catalog-mode entry; replaces today's pure-reactive flow. |
+| `src/ui/chatUI.ts` | Render the opening message with the one-time-disclosure footnote. |
+| `locales/en.json` | Disclosure footnote, "view privacy" link label. |
+
+### 9.4 Compare mode
+
+**Theme.** Climate data is uniquely visual when *compared* —
+2010 sea ice vs 2020 sea ice, hurricane forecast vs observed
+track, day-side vs night-side. Multi-globe (1/2/4) layouts are
+already wired in `viewportManager.ts`; compare mode is the UX
+that makes the comparison easy to discover and start.
+
+**Entry point.** "Compare with…" button in the info panel.
+Click opens a picker with three tabs:
+
+1. **Category sibling** — top 3 matches from the §4.2 related-
+   dataset algorithm.
+2. **Temporal counterpart** — same category, different decade
+   (e.g. current dataset is 2020 sea ice → suggest 2010 / 2000
+   / 1990 / 1980 sea ice). Driven by `enriched.dateAdded` +
+   shared category.
+3. **Pick another** — searchable catalog picker. Falls back
+   to the standard browse when no candidate auto-suggests.
+
+**On confirm.**
+
+- `viewportManager.setEnvView('2globes')` — already
+  implemented for tours.
+- Current dataset stays in slot 1; chosen pair goes to slot 2.
+- A persistent compare strip docks above the playback
+  controller: dataset titles side-by-side, sync-time toggle
+  (default on), close-compare button.
+
+**Sync semantics.** Tour engine's `worldIndex` task already
+routes per-globe playback. Compare-mode time sync is the
+simpler case (lockstep across both globes). When the two
+datasets have different durations, sync to the *shorter*
+duration's progress fraction so the visual narrative aligns.
+
+**Shareable.** A compared pair gets a deep-link extension:
+`?dataset=A&compare=B`. Reuses the existing
+`deepLinkService.ts` pattern.
+
+**Files touched.**
+
+| File | Change |
+|---|---|
+| `src/ui/comparisonControlsUI.ts` | **New.** Pairing picker; compare strip above playback. |
+| `src/services/datasetLoader.ts` | New `enterCompareMode(otherId)` entry point; delegates to viewportManager. |
+| `src/services/viewportManager.ts` | Small lockstep refinement — fraction-of-duration sync mode in addition to absolute-time sync. |
+| `src/services/deepLinkService.ts` | Encode/decode `?compare=` param. |
+| `src/services/datasetLoader.ts` | Compare button in the info panel; gated to datasets with a discoverable sibling/counterpart. |
+| `locales/en.json` | Picker tab labels, sync toggle, strip text. |
+
+### 9.5 Future engagement ideas
+
+Captured here for traceability; not committed to this plan.
+Any that gain traction graduate into Phase 8+ via individual
+issues. The broader home for community input on these is
+either a single GitHub Discussion ("Catalog engagement &
+stickiness") or per-idea issues — operator's call (see
+this PR's thread).
+
+- **"On this day" historical hook** — anniversaries, record-event dates, narrative pretexts for revisiting datasets each return.
+- **Saved searches with growth badges** — name a filter combo; count badge appears when matches grow on next visit. Turns the catalog from destination into subscription.
+- **Onboarding-as-conversation** — Orbit asks "what brings you here — teaching, research, curiosity?" on first visit; pre-filters the catalog.
+- **Natural-language catalog query** — wire the chip-rail predicate engine into Orbit so *"show me real-time atmosphere over North America from the last decade"* routes through structured filter state.
+- **Public collections (curator-led playlists)** — extension of Phase 6 playlists with a publish affordance; backend storage piggybacks on the federation schema.
+- **Shareable annotated views** — region pin + caption + camera state + timestamp → permalink. Casual sibling to tours.
+- **Surprise me button** — random-dataset draw biased toward unvisited + featured; one of the highest-engagement primitives in browse-heavy apps.
+- **NGSS lesson bundles** — auto-curated lesson packages once NGSS metadata lands (Open Question #7). Sticky for the educator audience.
+- **Sonification / ambient mode** — temperature time-series → tone, ocean currents → spatialised audio. Optional, easy to ignore, the kind of thing that gets screenshotted and shared.
+- **Achievement-style progress** — *not* recommended unless explicitly requested. Easy to overplay; risks turning a science catalog into FarmVille.
+
+---
+
+## 10. Deferred / dependent
+
+### 10.1 High-fidelity assets for SOS-only datasets
 
 The 415 SOS-only datasets surfaced in Phase 4 (§6.4) play back
 at `movie_preview` quality, not the Vimeo HLS adaptive bitrate
@@ -1347,14 +1548,7 @@ Phase 4 surfaces the metadata; the catalog backend plan
 surfaces the data. This plan owns the former and explicitly
 defers the latter.
 
-### 9.2 Region / bounding-box filter
-
-Listed in §6.1 as deferred. The filter itself is feasible;
-the UI surface conflicts with catalog mode's hidden-globe
-default. A "show a small inline map for region picking"
-component is realistic but warrants its own design pass.
-
-### 9.3 Audio narration playback
+### 10.2 Audio narration playback
 
 Mentioned only obliquely in the doc (Beth's "notable
 features"), but tours sometimes include narration. Out of
@@ -1362,7 +1556,7 @@ scope here; flag for future planning.
 
 ---
 
-## 10. Open questions for the requesters
+## 11. Open questions for the requesters
 
 Before starting Phase 1, get answers to these — they affect
 sequencing and avoid mid-phase rework.
@@ -1431,7 +1625,7 @@ sequencing and avoid mid-phase rework.
 
 ---
 
-## 11. Sequencing summary
+## 12. Sequencing summary
 
 | Phase | Title | Estimated size | Gate |
 |---|---|---|---|
@@ -1441,8 +1635,10 @@ sequencing and avoid mid-phase rework.
 | 4 | Filters & search + all-SOS widening + Graph + Timeline + Map views | ~3.5 weeks (chip rail + predicate engine, then Graph §6.7, then Timeline §6.8, then Map §6.9) | Open question #7 (NGSS metadata) for SOS-parity facets; all four view-modes ship without it |
 | 5 | UI polish & shader | ~2 weeks | Open question #4, #6 |
 | 6 | Playlists + zip downloads | ~3–4 weeks | Open question #5 |
+| 7 | Engagement & continuity (Right-now hero + visit memory + proactive Orbit + compare mode) | ~2 weeks | None — all four pieces layer on existing primitives |
 | — | High-fidelity assets for SOS-only datasets | — | Federation track (`CATALOG_BACKEND_PLAN.md`) |
 | — | Federation facet protocol | — | Open question #8 → resolved decision in `federation-scoping.md` |
+| — | Future engagement ideas (§9.5) | — | Backlog — graduate via individual issues as traction accrues |
 
 Phases 1, 2, and 3 are the highest leverage and can land in
 roughly three weeks combined. They address every request from
@@ -1452,11 +1648,13 @@ delivers the baseline filter surface and the "all SOS
 datasets" widening together (at preview quality); SOS-parity
 filters (Theme + NGSS bundle) layer on top once Open Question
 #7 is answered. Phases 5–6 layer on; each is independently
-shippable.
+shippable. Phase 7 reorients the catalog from *archive* to
+*living surface* — none of its pieces blocks the others, so
+any of the four can ship out-of-order if priorities shift.
 
 ---
 
-## 12. Cross-references
+## 13. Cross-references
 
 - [`docs/CATALOG_BACKEND_PLAN.md`](CATALOG_BACKEND_PLAN.md)
   — federation track that gates request #10.
