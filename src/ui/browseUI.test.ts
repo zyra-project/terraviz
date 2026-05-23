@@ -67,11 +67,10 @@ function makeDataset(overrides: Partial<Dataset> = {}): Dataset {
 function setupBrowseDOM(): void {
   document.body.innerHTML = `
     <div id="browse-overlay" class="hidden">
-      <div id="browse-category-bar"></div>
-      <div id="browse-subcategory-bar"></div>
+      <input id="browse-search" type="text">
+      <button id="browse-search-clear" class="hidden"></button>
+      <div id="browse-filter-rail"></div>
       <div id="browse-toolbar">
-        <input id="browse-search" type="text">
-        <button id="browse-search-clear" class="hidden"></button>
         <div id="browse-sort"></div>
       </div>
       <div id="browse-count"></div>
@@ -127,19 +126,17 @@ describe('showBrowseUI', () => {
     // guards keep the wiring idempotent so each click fires
     // exactly one handler — and emits exactly one browse_filter
     // event — no matter how many times the panel has been re-shown.
+    //
+    // Phase 4 §6.5 — the chip rail is driven by the `tags` field
+    // rather than `enriched.categories`, so the test fixture
+    // tags the rows accordingly.
     localStorage.clear()
     resetForTests()
     setTier('research')
 
     const datasets = [
-      makeDataset({
-        id: 'a', title: 'A',
-        enriched: { categories: { 'Atmosphere': ['Temperature'] } },
-      }),
-      makeDataset({
-        id: 'b', title: 'B',
-        enriched: { categories: { 'Ocean': ['Currents'] } },
-      }),
+      makeDataset({ id: 'a', title: 'A', tags: ['Air'] }),
+      makeDataset({ id: 'b', title: 'B', tags: ['Water'] }),
     ]
 
     showBrowseUI(datasets, makeCallbacks())
@@ -148,9 +145,9 @@ describe('showBrowseUI', () => {
 
     // Click a category chip once — the click handler should fire
     // exactly once even though showBrowseUI ran three times.
-    const atmoChip = Array.from(document.querySelectorAll('.browse-chip'))
-      .find(el => el.textContent === 'Atmosphere') as HTMLElement
-    atmoChip.click()
+    const airChip = Array.from(document.querySelectorAll('.browse-chip'))
+      .find(el => el.textContent === 'Air') as HTMLElement
+    airChip.click()
 
     const filterEvents = __peek().filter((e) => e.event_type === 'browse_filter')
     expect(filterEvents).toHaveLength(1)
@@ -188,25 +185,28 @@ describe('showBrowseUI', () => {
     expect(card.getAttribute('aria-label')).toBe('Ocean Temp')
   })
 
-  it('renders category chips including "All"', () => {
+  it('renders multi-select category chips from the tags field (no "All" sentinel)', () => {
+    // Phase 4 §6.5 — the chip rail moved from single-select with
+    // an "All" sentinel (where empty selection meant "show
+    // everything") to multi-select where the same default is
+    // expressed by no chip being active. Chips are driven by the
+    // SOS `tags` taxonomy per §6.1, not by the hierarchical
+    // `enriched.categories` field.
     const datasets = [
-      makeDataset({
-        id: 'ds-1', title: 'A',
-        enriched: { categories: { 'Atmosphere': ['Temperature'] } },
-      }),
-      makeDataset({
-        id: 'ds-2', title: 'B',
-        enriched: { categories: { 'Ocean': ['Currents'] } },
-      }),
+      makeDataset({ id: 'ds-1', title: 'A', tags: ['Air'] }),
+      makeDataset({ id: 'ds-2', title: 'B', tags: ['Water'] }),
     ]
 
     showBrowseUI(datasets, makeCallbacks())
 
     const chips = document.querySelectorAll('.browse-chip')
     const labels = Array.from(chips).map(c => c.textContent)
-    expect(labels).toContain('All')
-    expect(labels).toContain('Atmosphere')
-    expect(labels).toContain('Ocean')
+    expect(labels).not.toContain('All')
+    expect(labels).toContain('Air')
+    expect(labels).toContain('Water')
+    // No chip is active in the default state.
+    const active = Array.from(chips).filter(c => c.classList.contains('active'))
+    expect(active).toHaveLength(0)
   })
 
   it('sorts datasets by weight then title in relevance mode', () => {
@@ -288,6 +288,108 @@ describe('showBrowseUI', () => {
 
     const searchEl = document.getElementById('browse-search') as HTMLInputElement
     expect(searchEl.placeholder).toBe('Search 3 datasets\u2026')
+  })
+
+  it('chip clicks accumulate into a multi-select facet (OR within the group)', () => {
+    // Phase 4 §6.5 — multi-select. Clicking Air then Water shows
+    // both Air-tagged AND Water-tagged datasets; clicking Air
+    // again removes only Air, leaving Water alone.
+    const datasets = [
+      makeDataset({ id: 'a', title: 'Air row', tags: ['Air'] }),
+      makeDataset({ id: 'w', title: 'Water row', tags: ['Water'] }),
+      makeDataset({ id: 'l', title: 'Land row', tags: ['Land'] }),
+    ]
+    showBrowseUI(datasets, makeCallbacks())
+
+    const findChip = (label: string) =>
+      Array.from(document.querySelectorAll('.browse-chip'))
+        .find(el => el.textContent === label) as HTMLElement
+
+    findChip('Air').click()
+    expect(findChip('Air').getAttribute('aria-pressed')).toBe('true')
+    let titles = Array.from(document.querySelectorAll('.browse-card-title'))
+      .map(el => el.textContent)
+    expect(titles).toEqual(['Air row'])
+
+    findChip('Water').click()
+    titles = Array.from(document.querySelectorAll('.browse-card-title'))
+      .map(el => el.textContent)
+    expect(titles.sort()).toEqual(['Air row', 'Water row'])
+
+    // Toggle Air off — should leave Water as the only chip and
+    // only Water-row in the results.
+    findChip('Air').click()
+    expect(findChip('Air').getAttribute('aria-pressed')).toBe('false')
+    expect(findChip('Water').getAttribute('aria-pressed')).toBe('true')
+    titles = Array.from(document.querySelectorAll('.browse-card-title'))
+      .map(el => el.textContent)
+    expect(titles).toEqual(['Water row'])
+  })
+
+  it('boolean toggle chip filters datasets without the matching field', () => {
+    // Has-captions toggle — should show only rows whose
+    // closedCaptionLink is non-empty.
+    const datasets = [
+      makeDataset({ id: 'cc', title: 'With captions', closedCaptionLink: 'https://x/cc.srt' }),
+      makeDataset({ id: 'no', title: 'No captions' }),
+    ]
+    showBrowseUI(datasets, makeCallbacks())
+
+    const toggle = document.querySelector('[data-facet="hasCaptions"]') as HTMLElement
+    expect(toggle).not.toBeNull()
+    toggle.click()
+
+    const titles = Array.from(document.querySelectorAll('.browse-card-title'))
+      .map(el => el.textContent)
+    expect(titles).toEqual(['With captions'])
+  })
+
+  it('SOS-only datasets are excluded by default and revealed by the include-SOS toggle', () => {
+    // Phase 4 §6.4 — SOS source quality toggle defaults off so
+    // today's surface doesn't grow without user consent. Flipping
+    // it reveals the synthesised preview-quality rows.
+    const datasets = [
+      makeDataset({ id: 'x', title: 'Explorer row', availableFor: 'Explorer' }),
+      makeDataset({ id: 's', title: 'SOS row', availableFor: 'SOS' }),
+    ]
+    showBrowseUI(datasets, makeCallbacks())
+
+    let titles = Array.from(document.querySelectorAll('.browse-card-title'))
+      .map(el => el.textContent)
+    expect(titles).toEqual(['Explorer row'])
+
+    const toggle = document.querySelector('[data-facet="includeSos"]') as HTMLElement
+    expect(toggle).not.toBeNull()
+    toggle.click()
+
+    titles = Array.from(document.querySelectorAll('.browse-card-title'))
+      .map(el => el.textContent)
+    expect(titles.sort()).toEqual(['Explorer row', 'SOS row'])
+  })
+
+  it('clear-all button resets the filter state and surfaces only when something is active', () => {
+    const datasets = [
+      makeDataset({ id: 'a', title: 'A', tags: ['Air'] }),
+      makeDataset({ id: 'w', title: 'W', tags: ['Water'] }),
+    ]
+    showBrowseUI(datasets, makeCallbacks())
+
+    // Default: no clear-all visible.
+    expect(document.getElementById('browse-filter-clear')).toBeNull()
+
+    // Activate a filter — the clear button appears.
+    const airChip = Array.from(document.querySelectorAll('.browse-chip'))
+      .find(el => el.textContent === 'Air') as HTMLElement
+    airChip.click()
+    const clearBtn = document.getElementById('browse-filter-clear') as HTMLElement
+    expect(clearBtn).not.toBeNull()
+
+    clearBtn.click()
+    expect(document.getElementById('browse-filter-clear')).toBeNull()
+    // All chips inactive again.
+    const active = Array.from(document.querySelectorAll('.browse-chip'))
+      .filter(c => c.classList.contains('active'))
+    expect(active).toHaveLength(0)
   })
 
   it('renders the abstract markdown as HTML in the full description and as plain text in the short preview', () => {

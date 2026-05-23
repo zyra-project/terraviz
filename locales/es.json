@@ -24,8 +24,6 @@
   "browse.download.downloaded.title": "Descargado ({size})",
   "browse.download.downloading.title": "Descargando…",
   "browse.download.title": "Descargar para uso sin conexión",
-  "browse.filter.category.aria": "Filtrar por categoría",
-  "browse.filter.subcategory.aria": "Filtrar por subcategoría",
   "browse.noResults": "Ningún conjunto coincide con tu búsqueda.",
   "browse.overlay.aria": "Explorador de conjuntos de datos",
   "browse.search.clear.aria": "Borrar búsqueda",

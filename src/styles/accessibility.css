@@ -109,31 +109,24 @@
         margin-bottom: 0.5rem;
     }
 
-    /* Horizontal-scroll chip bars — prevent vertical overflow on mobile */
-    #browse-category-bar {
+    /* Horizontal-scroll chip rows — prevent vertical overflow on mobile
+       (Phase 4 §6.5 chip rail). Each typed-group row scrolls
+       independently so a long Category list doesn't push the
+       Format chips off-screen. */
+    .browse-chip-row,
+    .browse-toggle-row {
         flex-wrap: nowrap;
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
         scrollbar-width: none;          /* Firefox */
-        padding-bottom: 0.5rem;
         /* Fade hints at edges to signal horizontal scroll */
         mask-image: linear-gradient(to right, transparent 0, black 0.5rem, black calc(100% - 1rem), transparent 100%);
         -webkit-mask-image: linear-gradient(to right, transparent 0, black 0.5rem, black calc(100% - 1rem), transparent 100%);
     }
-    #browse-category-bar::-webkit-scrollbar { display: none; }
+    .browse-chip-row::-webkit-scrollbar,
+    .browse-toggle-row::-webkit-scrollbar { display: none; }
 
-    #browse-subcategory-bar {
-        flex-wrap: nowrap;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-        scrollbar-width: none;
-        padding-bottom: 0.5rem;
-        mask-image: linear-gradient(to right, transparent 0, black 0.5rem, black calc(100% - 1rem), transparent 100%);
-        -webkit-mask-image: linear-gradient(to right, transparent 0, black 0.5rem, black calc(100% - 1rem), transparent 100%);
-    }
-    #browse-subcategory-bar::-webkit-scrollbar { display: none; }
-
-    .browse-subchip {
+    .browse-toggle-chip {
         padding: 0.3rem 0.65rem;
     }
 
