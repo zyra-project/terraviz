@@ -50,7 +50,7 @@ import {
 import {
   loadImageDataset, loadVideoDataset, displayDatasetInfo,
 } from './services/datasetLoader'
-import { TourEngine } from './services/tourEngine'
+import { TourEngine, type TourTelemetryMeta } from './services/tourEngine'
 import { showTourControls, hideTourControls, hideAllTourTextBoxes, hideAllTourImages, hideAllTourVideos, hideAllTourPopups, hideAllTourQuestions } from './ui/tourUI'
 import { initLegendForDataset, clearLegendCache, loadConfig } from './services/docentService'
 import { isMobile, IS_MOBILE_NATIVE, getCloudTextureUrl } from './utils/deviceCapability'
@@ -231,11 +231,6 @@ class InteractiveSphere {
   private loadGeneration = 0 // guards against concurrent dataset loads
   private tourEngine: TourEngine | null = null
   private tourIsStandalone = false // true when tour was loaded as a tour/json dataset (not runTourOnLoad)
-  /** Phase 3pt-review/I — blob URL currently driving a preview
-   *  tour. Tracked so `stopTour` / `endTour` can revoke it and
-   *  avoid the per-preview URL leak Copilot flagged in
-   *  discussion_r3291446451. Null when no preview is active. */
-  private previewBlobUrl: string | null = null
 
   /** Persisted view preferences: info panel + legend visibility. */
   private viewPrefs: ViewPreferences = loadViewPreferences()
@@ -1012,7 +1007,7 @@ class InteractiveSphere {
     dataLink: string,
     gen: number,
     anchorSlot: number | null = null,
-    meta?: { tourId: string; tourTitle: string; source: 'browse' | 'orbit' | 'deeplink' },
+    meta?: TourTelemetryMeta,
   ): Promise<void> {
     // Stop any previous tour
     this.stopTour()
@@ -1027,7 +1022,27 @@ class InteractiveSphere {
     // This handles redirects and ensures relative URLs work even when dataLink
     // is a relative path (e.g. /assets/test-tour.json).
     const tourBaseUrl = resp.url || new URL(dataLink, window.location.href).toString()
+    this.runTourFromFile(tourFile, tourBaseUrl, anchorSlot, meta)
+  }
 
+  /**
+   * Phase 3pt-review/J — shared engine + chrome startup, factored
+   * out of `startTour` so `playInlineTour` can skip the fetch
+   * round-trip. The original blob-URL approach tripped CSP in
+   * Firefox (the page can't `fetch()` a `blob:` of itself when
+   * `connect-src` doesn't list blob:), so preview now hands the
+   * in-memory TourFile straight to the engine. Standalone tours
+   * (`startTour` from a URL) still go through the fetch path so
+   * `tourBaseUrl` is the real response URL for relative-media-
+   * path resolution; preview passes `window.location.href` since
+   * draft tours shouldn't carry relative paths.
+   */
+  private runTourFromFile(
+    tourFile: TourFile,
+    tourBaseUrl: string,
+    anchorSlot: number | null = null,
+    meta?: TourTelemetryMeta,
+  ): void {
     this.tourEngine = new TourEngine(tourFile, {
       loadDataset: async (id, opts) => {
         await this.loadDatasetForTour(id, opts?.slot)
@@ -1084,7 +1099,6 @@ class InteractiveSphere {
     this.cleanupTourOverlays()
     this.tourEngine = null
     this.tourIsStandalone = false
-    this.revokePreviewBlobUrl()
     this.announce('Tour ended')
 
     if (wasStandalone) {
@@ -1104,18 +1118,6 @@ class InteractiveSphere {
       this.tourIsStandalone = false
       this.cleanupTourOverlays()
       this.restorePostTourUI()
-    }
-    // Always revoke — `stopTour` is also the abort path during
-    // a reload, and an unrevoked blob URL outlives the engine.
-    this.revokePreviewBlobUrl()
-  }
-
-  /** Phase 3pt-review/I — release the preview blob URL minted by
-   *  `playInlineTour`. Safe to call when no preview is active. */
-  private revokePreviewBlobUrl(): void {
-    if (this.previewBlobUrl !== null) {
-      URL.revokeObjectURL(this.previewBlobUrl)
-      this.previewBlobUrl = null
     }
   }
 
@@ -1997,33 +1999,49 @@ class InteractiveSphere {
         window.location.assign('/publish/tours')
       },
       onPreview: (tourFile) => {
-        void this.playInlineTour(tourFile)
+        this.playInlineTour(tourFile)
       },
     })
   }
 
   /**
    * Phase 3pt-review/G — preview the in-memory tour draft.
-   * Wraps the TourFile in a blob URL and routes through the
-   * existing `startTour` path. The publisher's authoring dock
-   * stays mounted; the existing tour player chrome handles
-   * Stop. Phase 3pt-review/I — the blob URL is tracked on the
-   * App so `stopTour` / `endTour` can revoke it. Pre-fix the
-   * URL was leaked for the lifetime of the tab; repeated
-   * previews would accumulate (small JSON blobs, but the leak
-   * is real). Copilot discussion_r3291446451.
+   * Pre-fix (review/G + /I) this wrapped the TourFile in a
+   * blob URL and routed through `playTour`, but Firefox + a
+   * strict `connect-src` CSP refuses to let the page `fetch()`
+   * a `blob:` of itself ("Content at ... may not load data
+   * from blob:..."). The fetch was pure overhead anyway — the
+   * TourFile is already in memory. Now hands the file straight
+   * to `runTourFromFile`, which is the post-fetch half of the
+   * old `startTour`. Standalone (`playTour`) still fetches
+   * because it gets a real URL and needs `tourBaseUrl` for
+   * relative-media-path resolution. Phase 3pt-review/J —
+   * follow-up after the published bundle hit the CSP bug in
+   * the wild.
+   *
+   * Preview is deliberately NOT standalone: `endTour` calls
+   * `goHome()` for standalone tours, which would strip
+   * `?tourEdit=` from the URL and unmount the dock when a
+   * preview finishes naturally. Bumping `loadGeneration`
+   * matches the supersede-in-flight-loads behaviour from the
+   * old `playTour` (the previous call ran
+   * `++this.loadGeneration` before `startTour`; we replicate
+   * it here so a dataset load in flight when Preview fires
+   * can't land mid-tour and clobber state). Copilot
+   * discussion_r3293605064.
    */
-  async playInlineTour(tourFile: TourFile): Promise<void> {
-    // Revoke any prior preview URL before minting the next so
-    // back-to-back previews don't stack.
-    if (this.previewBlobUrl !== null) {
-      URL.revokeObjectURL(this.previewBlobUrl)
-      this.previewBlobUrl = null
-    }
-    const blob = new Blob([JSON.stringify(tourFile)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    this.previewBlobUrl = url
-    await this.playTour(url)
+  playInlineTour(tourFile: TourFile): void {
+    this.stopTour()
+    // Defensive — `stopTour` only clears `tourIsStandalone` when
+    // `this.tourEngine` is non-null. If a `playTour` is mid-fetch
+    // (engine not yet created), the flag from that call would
+    // leak into the preview and trip the goHome branch in
+    // `endTour`. The loadGeneration bump below supersedes the
+    // in-flight fetch, but we still need to clear the flag the
+    // bumped fetch already set. Copilot discussion_r3293611214.
+    this.tourIsStandalone = false
+    ++this.loadGeneration
+    this.runTourFromFile(tourFile, window.location.href)
   }
 
   /** Open the chat panel and optionally pre-fill the input with a query string. */
