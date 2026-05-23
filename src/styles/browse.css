@@ -642,6 +642,30 @@ body.catalog-empty #map-controls {
         border-radius: 0;
         border-top: none;
     }
+
+    /* The bottom-sheet variant caps the grid at `70vh - 10rem` so
+       it doesn't overflow the sheet's max-height. In catalog-empty
+       the overlay covers the full viewport, so the grid should
+       fill the remaining space below the header / search / chips
+       / toolbar — `max-height: none` lets flex distribute it. */
+    body.catalog-empty #browse-grid {
+        max-height: none;
+    }
+
+    /* Drop the large TERRAVIZ title in catalog-empty mode — on a
+       narrow viewport it competes with the centered catalog↔
+       sphere tabs and the right-side help button for the top
+       row. The page URL + browser tab title already identify the
+       app; the `.browse-subtitle` ("Browse environmental
+       datasets…") stays as the framing line. */
+    body.catalog-empty #browse-header .browse-title {
+        display: none;
+    }
+    body.catalog-empty #browse-header {
+        /* Push the subtitle (and everything below) clear of the
+           fixed-position catalog tabs at top: 0.5rem. */
+        padding-top: 2.5rem;
+    }
 }
 
 /* --- Catalog ↔ Sphere tab control (§3.2) --------------------------
