@@ -16,6 +16,32 @@ referenced in [`README.md`](README.md).
 
 ---
 
+## Phase 3pt-fix — Tour preview CSP fix
+
+**Branch:** `claude/tour-preview-blob-fix`
+
+Post-merge bug from Phase 3pt. The Preview button (tour-review/G)
+created a `blob:` URL from the in-memory TourFile and routed it
+through the existing fetch-based `startTour` path. Firefox + the
+deployed `connect-src` CSP refused the round-trip:
+
+    Security Error: Content at https://… may not load data from
+    blob:https://…
+
+The fetch was pure overhead — the TourFile was already in memory.
+Extracted `runTourFromFile(tourFile, tourBaseUrl, …)` from
+`startTour` and had `playInlineTour` call it directly with
+`window.location.href` as the base URL. Draft tours don't carry
+relative media paths in practice, so the synthetic base is safe.
+Side-effects:
+
+  - `playInlineTour` is now synchronous (no fetch to await).
+  - The `previewBlobUrl` field + `revokePreviewBlobUrl` helper
+    from tour-review/I are gone — there's no URL to leak.
+  - `startTour` (used by `playTour` / runTourOnLoad / chained
+    tours from the docent) still fetches because it gets a real
+    URL and needs `resp.url` for relative-path resolution.
+
 ## Phase 3pt — Publisher tour creator
 
 **Branch:** `claude/publisher-tour-creator`
