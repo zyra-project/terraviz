@@ -26,14 +26,21 @@ import { parseIsoDurationMs } from '../utils/frames'
 import { renderMarkdown } from '../services/markdownRenderer'
 import {
   BASELINE_RESOLVERS,
+  PERIOD_RESOLVER,
   filterDatasets,
   formatToBucket,
+  mergeFilterStates,
+  parseSearchQuery,
   setFacet,
   toggleFacet,
   type FacetPredicate,
   type FilterState,
   type FormatBucket,
 } from '../services/datasetFilter'
+import {
+  applyFilterStateToUrl,
+  readFilterStateFromUrl,
+} from '../utils/catalogFilters'
 
 /** Tier B dwell handle for the browse overlay — non-null while the
  * overlay is visible. Started on showBrowseUI when the overlay
@@ -442,11 +449,38 @@ export function showBrowseUI(
 
   type SortKey = 'relevance' | 'newest' | 'az'
   let activeSort: SortKey = 'relevance'
+  // The raw search-box string — both free text and any
+  // `category:foo` / `format:bar` / `period:yearly` prefixes the
+  // user has typed. `parseSearchQuery` splits it into the free-
+  // text rest and a {@link FilterState} overlay merged onto chip
+  // state at filter time (§6.2).
   let searchQuery = ''
-  // Filter state — single source of truth driving the engine. The
-  // rail render, range inputs, and card render all read from here;
-  // every mutation goes through `applyState` so the UI stays in sync.
+  // Chip / range / toggle state — separate from search-prefix
+  // overlay so a search like `category:Water hurricane` doesn't
+  // visually light up the Water chip (the prefix is a parallel
+  // input, not a chip mutation). Both feed `filterDatasets` via
+  // mergeFilterStates so the predicate semantics stay identical.
   let filterState: FilterState = {}
+
+  // Boot from URL — restore filter chips + search query from
+  // ?cat=…&q=… so a shared catalog link reproduces the filter
+  // surface. URL params we don't recognise are ignored
+  // (forward-compat). Search query case is preserved through
+  // the round-trip so `category:Water` from a shared link
+  // still matches the canonical `Water` tag.
+  const initialUrlState = readFilterStateFromUrl()
+  if (Object.keys(initialUrlState.state).length > 0) {
+    filterState = initialUrlState.state
+  }
+  if (initialUrlState.searchQuery) {
+    searchQuery = initialUrlState.searchQuery
+  }
+
+  // Resolvers passed to the engine — baseline §6.1 set plus the
+  // search-only `period:` resolver so `period:yearly` actually
+  // filters. Hoisted to module-local once for the lifetime of
+  // this overlay instance; rebuilding per render is wasted work.
+  const resolvers = { ...BASELINE_RESOLVERS, period: PERIOD_RESOLVER }
 
   // ----- Filter rail render -----
 
@@ -623,16 +657,36 @@ export function showBrowseUI(
     }, BROWSE_SEARCH_DEBOUNCE_MS)
   }
   if (searchInput) {
+    if (searchQuery && !searchInput.value) {
+      // Restore the search box from URL on boot. Lowercasing
+      // happens on the way in via the URL decode; the input
+      // value uses the lowercased form so the user can edit
+      // from where they left off.
+      searchInput.value = searchQuery
+      updateSearchClear()
+    }
     if (!searchInput.dataset.wired) {
       searchInput.addEventListener('input', () => {
         const value = searchInput.value
-        searchQuery = value.trim().toLowerCase()
+        // Preserve case so prefix-search values match canonical
+        // chip values (`category:Water` vs `Water` tag). The
+        // engine's matchesSearchQuery lowercases internally for
+        // the free-text path, so the case of the stored query
+        // doesn't affect substring matching.
+        searchQuery = value.trim()
         updateSearchClear()
         renderCards()
         // Clear-all affordance visibility depends on searchQuery
         // too — re-render the rail so the button appears/hides.
         renderRail()
-        scheduleSearchEmit(searchQuery)
+        // Analytics hash continues on the lowercased form so a
+        // dashboard slicing by query_hash continues to bucket
+        // "Hurricane" and "hurricane" together (no regression).
+        scheduleSearchEmit(searchQuery.toLowerCase())
+        // Persist on every keystroke so a refreshed page restores
+        // the in-progress search. Cheap — applyFilterStateToUrl
+        // bails out when the encoded URL hasn't changed.
+        applyFilterStateToUrl(filterState, searchQuery)
       })
       searchInput.dataset.wired = 'true'
     }
@@ -651,6 +705,7 @@ export function showBrowseUI(
       if (searchEmitTimer != null) clearTimeout(searchEmitTimer)
       searchEmitTimer = null
       searchEmitToken++
+      applyFilterStateToUrl(filterState, searchQuery)
     })
     searchClear.dataset.wired = 'true'
   }
@@ -740,7 +795,7 @@ export function showBrowseUI(
     filterState = next
     if (queryChanged) {
       searchQuery = nextQuery
-      if (searchInput && searchInput.value.trim().toLowerCase() !== nextQuery) {
+      if (searchInput && searchInput.value.trim() !== nextQuery) {
         searchInput.value = nextQuery
         updateSearchClear()
       }
@@ -748,6 +803,10 @@ export function showBrowseUI(
     renderRail()
     renderCards()
     emitFilterChange(previous, next)
+    // History.replaceState per §6.3 — chip clicks shouldn't clog
+    // the back button, but a shared link should reproduce the
+    // filter surface.
+    applyFilterStateToUrl(filterState, searchQuery)
   }
 
   /**
@@ -778,7 +837,16 @@ export function showBrowseUI(
     const countEl = document.getElementById('browse-count')
     if (!grid) return
 
-    const filtered = filterDatasets(allDatasets, filterState, searchQuery, BASELINE_RESOLVERS)
+    // §6.2 — parse `category:foo` / `format:bar` / `period:yearly`
+    // tokens out of the search box. The remaining free text drives
+    // the substring match; the prefix overlay AND-combines with the
+    // chip-rail state. Chip state stays the visual source of truth
+    // — the overlay never lights up chips, which matches a power-
+    // user's mental model that prefix search is "extra" rather
+    // than "synced".
+    const parsed = parseSearchQuery(searchQuery)
+    const effectiveState = mergeFilterStates(filterState, parsed.prefixes)
+    const filtered = filterDatasets(allDatasets, effectiveState, parsed.freeText, resolvers)
 
     // Sort applies after filter. Relevance preserves the input
     // order (catalog weight + title from the initial sort above);
@@ -919,10 +987,11 @@ export function showBrowseUI(
         if (kwEl?.dataset.keyword && searchInput) {
           e.stopPropagation()
           searchInput.value = kwEl.dataset.keyword
-          searchQuery = kwEl.dataset.keyword.trim().toLowerCase()
+          searchQuery = kwEl.dataset.keyword.trim()
           updateSearchClear()
           renderCards()
           renderRail()
+          applyFilterStateToUrl(filterState, searchQuery)
           return
         }
         toggleExpand()
@@ -936,10 +1005,11 @@ export function showBrowseUI(
             e.preventDefault()
             e.stopPropagation()
             searchInput.value = kwEl.dataset.keyword
-            searchQuery = kwEl.dataset.keyword.trim().toLowerCase()
+            searchQuery = kwEl.dataset.keyword.trim()
             updateSearchClear()
             renderCards()
             renderRail()
+            applyFilterStateToUrl(filterState, searchQuery)
             return
           }
           e.preventDefault()

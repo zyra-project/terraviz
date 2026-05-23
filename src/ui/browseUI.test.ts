@@ -94,6 +94,11 @@ function makeCallbacks(overrides: Partial<BrowseCallbacks> = {}): BrowseCallback
 describe('showBrowseUI', () => {
   beforeEach(() => {
     setupBrowseDOM()
+    // Reset URL between tests — the chip rail boots from
+    // window.location.search via readFilterStateFromUrl(), so a
+    // URL written by one test would leak chip / search state
+    // into the next.
+    window.history.replaceState(null, '', '/')
   })
 
   it('removes hidden class from overlay', () => {
@@ -367,6 +372,98 @@ describe('showBrowseUI', () => {
     expect(titles.sort()).toEqual(['Explorer row', 'SOS row'])
   })
 
+  it('honours search-prefix syntax (category:Water hurricane)', () => {
+    // §6.2 — `category:Water` filters by tag without lighting up
+    // the Water chip (prefix is a parallel overlay, not a chip
+    // mutation), and the remaining "hurricane" word substring-
+    // matches the title/description.
+    const datasets = [
+      makeDataset({ id: 'wh', title: 'Hurricane in Water', tags: ['Water'] }),
+      makeDataset({ id: 'ah', title: 'Hurricane in Air', tags: ['Air'] }),
+      makeDataset({ id: 'w', title: 'Just Water', tags: ['Water'] }),
+    ]
+    showBrowseUI(datasets, makeCallbacks())
+
+    const input = document.getElementById('browse-search') as HTMLInputElement
+    input.value = 'category:Water hurricane'
+    input.dispatchEvent(new Event('input'))
+
+    const titles = Array.from(document.querySelectorAll('.browse-card-title'))
+      .map(el => el.textContent)
+    expect(titles).toEqual(['Hurricane in Water'])
+
+    // Chip state isn't mutated — Water chip stays inactive.
+    const water = Array.from(document.querySelectorAll('.browse-chip'))
+      .find(c => c.textContent === 'Water') as HTMLElement
+    expect(water.getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('honours period: prefix mapping (yearly → P1Y)', () => {
+    const datasets = [
+      makeDataset({ id: 'y', title: 'Yearly dataset', tags: ['Air'], period: 'P1Y' }),
+      makeDataset({ id: 'm', title: 'Monthly dataset', tags: ['Air'], period: 'P1M' }),
+    ]
+    showBrowseUI(datasets, makeCallbacks())
+
+    const input = document.getElementById('browse-search') as HTMLInputElement
+    input.value = 'period:yearly'
+    input.dispatchEvent(new Event('input'))
+
+    const titles = Array.from(document.querySelectorAll('.browse-card-title'))
+      .map(el => el.textContent)
+    expect(titles).toEqual(['Yearly dataset'])
+  })
+
+  it('persists chip + search state to the URL via history.replaceState', () => {
+    // Reset URL — the previous test in the file may have left
+    // params on it through happy-dom's persistent location.
+    window.history.replaceState(null, '', '/?catalog=true')
+    const datasets = [
+      makeDataset({ id: 'a', title: 'A', tags: ['Air'] }),
+      makeDataset({ id: 'w', title: 'W', tags: ['Water'] }),
+    ]
+    showBrowseUI(datasets, makeCallbacks())
+
+    const airChip = Array.from(document.querySelectorAll('.browse-chip'))
+      .find(el => el.textContent === 'Air') as HTMLElement
+    airChip.click()
+
+    // Verify the URL reflects the active chip + that unrelated
+    // params (catalog=true) survive.
+    expect(window.location.search).toContain('catalog=true')
+    expect(window.location.search).toContain('cat=Air')
+
+    // Type into the search box — URL also gets the `q=` param.
+    const input = document.getElementById('browse-search') as HTMLInputElement
+    input.value = 'storm'
+    input.dispatchEvent(new Event('input'))
+    expect(window.location.search).toContain('q=storm')
+  })
+
+  it('boots from URL — restores chip + search state on showBrowseUI', () => {
+    window.history.replaceState(null, '', '/?catalog=true&cat=Water&q=ocean')
+    const datasets = [
+      makeDataset({ id: 'a', title: 'Air row', tags: ['Air'] }),
+      makeDataset({ id: 'wo', title: 'Ocean Water', tags: ['Water'] }),
+      makeDataset({ id: 'w', title: 'Plain Water', tags: ['Water'] }),
+    ]
+    showBrowseUI(datasets, makeCallbacks())
+
+    // Search box value comes back from the URL.
+    const input = document.getElementById('browse-search') as HTMLInputElement
+    expect(input.value).toBe('ocean')
+
+    // Water chip is active, Air is not.
+    const water = Array.from(document.querySelectorAll('.browse-chip'))
+      .find(c => c.textContent === 'Water') as HTMLElement
+    expect(water.getAttribute('aria-pressed')).toBe('true')
+
+    // Visible cards reflect both the chip filter and the search.
+    const titles = Array.from(document.querySelectorAll('.browse-card-title'))
+      .map(el => el.textContent)
+    expect(titles).toEqual(['Ocean Water'])
+  })
+
   it('clear-all button resets the filter state and surfaces only when something is active', () => {
     const datasets = [
       makeDataset({ id: 'a', title: 'A', tags: ['Air'] }),
@@ -516,6 +613,7 @@ async function flushMicrotasks(): Promise<void> {
 describe('showBrowseUI — browse_search emit', () => {
   beforeEach(() => {
     setupBrowseDOM()
+    window.history.replaceState(null, '', '/')
     localStorage.clear()
     resetForTests()
     setTier('research')
