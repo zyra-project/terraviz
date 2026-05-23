@@ -17,6 +17,8 @@ import { closeChat } from '../ui/chatUI'
 import type { PlaybackState } from '../ui/playbackController'
 import { updatePlayButton, loadCaptions } from '../ui/playbackController'
 import { startDwell, type DwellHandle } from '../analytics'
+import { recommendRelated, normalizeTitle as normalizeRelatedTitle } from './relatedDatasets'
+import { t, tAttr } from '../i18n'
 
 /** Tier B dwell handle for the info panel — non-null while the
  * panel is expanded (collapsed = user can't read the body so it
@@ -282,11 +284,17 @@ export async function loadVideoDataset(
 
   // Infer display interval from time range + video duration.
   // Only the primary panel's load drives the shared playback state.
+  // Pass `period` and `frames.count` so the cadence matches the
+  // imagery rather than the ms-per-frame estimate — fixes the
+  // climate-dataset label-crawl bug (Plan §5.1).
   if (isPrimary) {
     if (dataset.startTime && dataset.endTime) {
       const start = new Date(dataset.startTime)
       const end = new Date(dataset.endTime)
-      playbackState.displayInterval = inferDisplayInterval(start, end, video.duration)
+      playbackState.displayInterval = inferDisplayInterval(start, end, video.duration, {
+        period: dataset.period,
+        frameCount: dataset.frames?.count,
+      })
       logger.info('[App] Inferred display interval:', playbackState.displayInterval)
     } else {
       playbackState.displayInterval = null
@@ -345,6 +353,82 @@ export async function loadVideoDataset(
 
 // --- Dataset info panel ---
 
+/**
+ * Trim a description to the panel's collapsed-state cap, snapping
+ * to the last sentence boundary so the ellipsis lands at a clean
+ * stopping point. The full text remains available for the expand
+ * affordance.
+ */
+function truncateDescription(text: string): string {
+  if (text.length <= DESCRIPTION_MAX_LENGTH) return text
+  const cut = text.lastIndexOf('.', DESCRIPTION_MAX_LENGTH)
+  return text.substring(0, cut > DESCRIPTION_MIN_CUT ? cut + 1 : DESCRIPTION_MAX_LENGTH) + '…'
+}
+
+/**
+ * Render one row of the Credits section. The value is wrapped in
+ * an external link when `affiliationUrl` is present so the
+ * affiliation institution is reachable in one click — the SOS
+ * catalog itself does the same.
+ */
+function renderCreditRow(label: string, value: string, affiliationUrl?: string): string {
+  const valueHtml = affiliationUrl
+    ? `<a href="${escapeAttr(affiliationUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(value)}</a>`
+    : escapeHtml(value)
+  return `<div class="info-credit-row">`
+    + `<dt class="info-credit-label">${escapeHtml(label)}</dt>`
+    + `<dd class="info-credit-value">${valueHtml}</dd>`
+    + `</div>`
+}
+
+/**
+ * Build the related-datasets section. Combines the manually-curated
+ * `EnrichedMetadata.relatedDatasets` (rendered first, in author
+ * order) with algorithmic recommendations from `relatedDatasets.ts`
+ * filling in up to the §4.2 cap. Returns an empty string when
+ * nothing surfaces.
+ *
+ * Manual entries that don't resolve to a catalog row render as
+ * grayed-out text (off-catalog references — preserved from the
+ * pre-§4.2 behaviour so a curator's notes about external context
+ * still show). Algorithmic recommendations always resolve, so they
+ * always render as live links.
+ */
+function renderRelatedDatasetsHtml(target: Dataset, datasets: Dataset[]): string {
+  const manual = target.enriched?.relatedDatasets ?? []
+  const manualLinks: Array<{ label: string; match: Dataset | null }> = manual.map((rd) => {
+    const wanted = normalizeRelatedTitle(rd.title)
+    const match = datasets.find((d) => normalizeRelatedTitle(d.title) === wanted) ?? null
+    return { label: rd.title, match }
+  })
+
+  const manualIds = new Set<string>()
+  const manualTitles = new Set<string>()
+  for (const entry of manualLinks) {
+    if (entry.match) manualIds.add(entry.match.id)
+    manualTitles.add(normalizeRelatedTitle(entry.label))
+  }
+
+  const algorithmic = recommendRelated(target, datasets, manualIds, manualTitles)
+
+  if (manualLinks.length === 0 && algorithmic.length === 0) return ''
+
+  let html = `<p class="info-section-label">${escapeHtml(t('infoPanel.relatedDatasets'))}</p>`
+  html += `<ul class="info-related">`
+  for (const entry of manualLinks) {
+    if (entry.match) {
+      html += `<li><a href="?dataset=${encodeURIComponent(entry.match.id)}" data-dataset-id="${escapeAttr(entry.match.id)}">${escapeHtml(entry.label)}</a></li>`
+    } else {
+      html += `<li><span class="info-related-offcatalog">${escapeHtml(entry.label)}</span></li>`
+    }
+  }
+  for (const candidate of algorithmic) {
+    html += `<li><a href="?dataset=${encodeURIComponent(candidate.id)}" data-dataset-id="${escapeAttr(candidate.id)}">${escapeHtml(candidate.title)}</a></li>`
+  }
+  html += `</ul>`
+  return html
+}
+
 /** Populate and display the dataset info panel with metadata, legend, related datasets, and event wiring. */
 export function displayDatasetInfo(
   dataset: Dataset,
@@ -373,19 +457,33 @@ export function displayDatasetInfo(
 
   let html = ''
 
-  const source = e?.datasetDeveloper?.name || dataset.organization
-  if (source) {
-    html += `<p class="info-source">${source}</p>`
+  // Top-of-panel source line — the organisation that owns / produced
+  // the data, as a labelled row. Datasets where only `organization`
+  // is populated still surface it; datasets where neither is set
+  // omit the row entirely.
+  if (dataset.organization) {
+    html += `<p class="info-source">${escapeHtml(dataset.organization)}</p>`
   }
 
+  // Description with show-more/show-less. The collapsed form is the
+  // same 600-char snippet the panel has rendered for years; the
+  // expanded form is the full text, scrollable inside the panel
+  // body. `data-collapsed`/`data-full` carry the two variants so
+  // the toggle handler can swap without re-rendering from source.
   const description = e?.description || dataset.abstractTxt
   if (description) {
-    let text = description
-    if (text.length > DESCRIPTION_MAX_LENGTH) {
-      const cut = text.lastIndexOf('.', DESCRIPTION_MAX_LENGTH)
-      text = text.substring(0, cut > DESCRIPTION_MIN_CUT ? cut + 1 : DESCRIPTION_MAX_LENGTH) + '…'
+    const collapsed = truncateDescription(description)
+    const isTruncated = collapsed !== description
+    if (isTruncated) {
+      html += `<div class="info-description-wrap" data-truncated="true">`
+      html += `<p class="info-description"`
+        + ` data-collapsed="${escapeAttr(collapsed)}"`
+        + ` data-full="${escapeAttr(description)}">${escapeHtml(collapsed)}</p>`
+      html += `<button type="button" class="info-description-toggle" aria-expanded="false">${escapeHtml(t('infoPanel.description.showMore'))}</button>`
+      html += `</div>`
+    } else {
+      html += `<p class="info-description">${escapeHtml(description)}</p>`
     }
-    html += `<p class="info-description">${text}</p>`
   }
 
   if (dataset.legendLink) {
@@ -394,7 +492,7 @@ export function displayDatasetInfo(
 
   if (e?.categories) {
     const cats = Object.entries(e.categories)
-      .map(([group, subs]) => subs.length ? `${group}: ${subs.join(', ')}` : group)
+      .map(([group, subs]) => subs.length ? `${escapeHtml(group)}: ${subs.map(escapeHtml).join(', ')}` : escapeHtml(group))
     html += `<p class="info-categories">${cats.join(' · ')}</p>`
   }
 
@@ -402,31 +500,75 @@ export function displayDatasetInfo(
   if (keywords && keywords.length > 0) {
     html += `<div class="info-keywords">`
     keywords.forEach(kw => {
-      html += `<span class="info-keyword">${kw}</span>`
+      html += `<span class="info-keyword">${escapeHtml(kw)}</span>`
     })
     html += `</div>`
   }
 
-  if (e?.relatedDatasets && e.relatedDatasets.length > 0) {
-    html += `<p class="info-section-label">Related Datasets</p>`
-    html += `<ul class="info-related">`
-    e.relatedDatasets.forEach(rd => {
-      const match = datasets.find(d =>
-        d.title.toLowerCase().replace(/\s*\(movie\)\s*/g, '').trim() ===
-        rd.title.toLowerCase().trim()
-      )
-      if (match) {
-        html += `<li><a href="?dataset=${encodeURIComponent(match.id)}" data-dataset-id="${match.id}">${rd.title}</a></li>`
-      } else {
-        html += `<li><span style="color: #777; font-size: 0.7rem;">${rd.title}</span></li>`
-      }
-    })
-    html += `</ul>`
+  // "Captions available" indicator — disambiguates "this dataset
+  // has no captions" from "captions failed to load" (Plan §5.2).
+  // The CC button on the transport only appears after a successful
+  // SRT fetch; this badge surfaces the *intent* unconditionally.
+  if (dataset.closedCaptionLink) {
+    html += `<p class="info-captions-badge">`
+    html += `<span class="info-captions-badge-glyph" aria-hidden="true">CC</span>`
+    html += escapeHtml(t('infoPanel.captionsAvailable'))
+    html += `</p>`
   }
 
+  // --- Credits section — Phase 2 §4.1 -----------------------------
+  // Each row is independently conditional; the section header only
+  // renders if at least one row will follow it. Affiliation URLs
+  // wrap the name in an external link when present.
+  const creditRows: string[] = []
+  if (e?.datasetDeveloper?.name) {
+    creditRows.push(renderCreditRow(
+      t('infoPanel.developedBy'),
+      e.datasetDeveloper.name,
+      e.datasetDeveloper.affiliationUrl,
+    ))
+  }
+  if (e?.visDeveloper?.name) {
+    creditRows.push(renderCreditRow(
+      t('infoPanel.visualizationBy'),
+      e.visDeveloper.name,
+      e.visDeveloper.affiliationUrl,
+    ))
+  }
+  if (e?.dateAdded) {
+    creditRows.push(renderCreditRow(t('infoPanel.dateAdded'), e.dateAdded))
+  }
+  if (creditRows.length > 0) {
+    html += `<p class="info-section-label">${escapeHtml(t('infoPanel.section.credits'))}</p>`
+    html += `<dl class="info-credits">${creditRows.join('')}</dl>`
+  }
+
+  // --- Related datasets — manual entries first, then algorithmic
+  // recommendations to fill the list up to the §4.2 cap. ----------
+  const relatedHtml = renderRelatedDatasetsHtml(dataset, datasets)
+  if (relatedHtml) html += relatedHtml
+
+  // --- Thumbnail + download link — Phase 2 §4.3 -------------------
+  // Only when a separate thumbnail asset exists. The download link
+  // is a plain `<a download>` — works on web today; the Tauri
+  // download service path layers on in Phase 6 (§4.5 risk).
+  if (dataset.thumbnailLink) {
+    html += `<a href="${escapeAttr(dataset.thumbnailLink)}"`
+      + ` download`
+      + ` target="_blank" rel="noopener noreferrer"`
+      + ` class="info-thumbnail-download"`
+      + ` aria-label="${tAttr('infoPanel.thumbnail.download')}">`
+    html += `<img src="${escapeAttr(dataset.thumbnailLink)}"`
+      + ` alt="${escapeAttr(t('infoPanel.thumbnail.alt', { title: dataset.title }))}"`
+      + ` class="info-thumbnail">`
+    html += `<span class="info-thumbnail-download-label">${escapeHtml(t('infoPanel.thumbnail.download'))}</span>`
+    html += `</a>`
+  }
+
+  // --- External catalog link --------------------------------------
   if (e?.catalogUrl) {
-    html += `<p class="info-section-label">Source</p>`
-    html += `<a href="${e.catalogUrl}" target="_blank" rel="noopener" class="info-catalog-link">View on NOAA SOS →</a>`
+    html += `<p class="info-section-label">${escapeHtml(t('infoPanel.section.links'))}</p>`
+    html += `<a href="${escapeAttr(e.catalogUrl)}" target="_blank" rel="noopener noreferrer" class="info-catalog-link">${escapeHtml(t('infoPanel.catalogLink'))}</a>`
   }
 
   infoBody.innerHTML = html
@@ -474,17 +616,46 @@ export function displayDatasetInfo(
     })
   }
 
-  // Wire up related dataset links to load in-place
+  // Wire up related dataset links to load in-place. The URL update
+  // preserves any existing `?catalog=true` flag (Phase 1 §3.2) so
+  // a related-link click while in catalog mode keeps the
+  // catalog↔sphere tab control visible — same contract as
+  // `selectDatasetFromBrowse` in main.ts.
   infoBody.querySelectorAll('a[data-dataset-id]').forEach(link => {
     link.addEventListener('click', (ev) => {
       ev.preventDefault()
       const id = (link as HTMLElement).dataset.datasetId
       if (id) {
-        window.history.pushState({}, '', `?dataset=${encodeURIComponent(id)}`)
+        const params = new URLSearchParams(window.location.search)
+        params.set('dataset', id)
+        window.history.pushState({}, '', `?${params.toString()}`)
         onLoadDataset(id)
       }
     })
   })
+
+  // Wire up the description show-more / show-less toggle.
+  const descWrap = infoBody.querySelector('.info-description-wrap[data-truncated="true"]') as HTMLElement | null
+  if (descWrap) {
+    const descEl = descWrap.querySelector('.info-description') as HTMLElement | null
+    const toggleBtn = descWrap.querySelector('.info-description-toggle') as HTMLButtonElement | null
+    if (descEl && toggleBtn) {
+      const collapsed = descEl.dataset.collapsed ?? ''
+      const full = descEl.dataset.full ?? ''
+      toggleBtn.addEventListener('click', () => {
+        const expanded = toggleBtn.getAttribute('aria-expanded') === 'true'
+        if (expanded) {
+          descEl.textContent = collapsed
+          toggleBtn.setAttribute('aria-expanded', 'false')
+          toggleBtn.textContent = t('infoPanel.description.showMore')
+        } else {
+          descEl.textContent = full
+          toggleBtn.setAttribute('aria-expanded', 'true')
+          toggleBtn.textContent = t('infoPanel.description.showLess')
+        }
+      })
+    }
+  }
 
   // Toggle expand/collapse on header click or keyboard
   const toggleInfoPanel = () => {

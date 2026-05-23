@@ -43,7 +43,8 @@
     color: var(--color-text);
     border-color: rgba(77, 166, 255, 0.45);
 }
-.tools-menu-btn[aria-expanded="true"] {
+.tools-menu-btn[aria-expanded="true"],
+.tools-menu-btn[aria-pressed="true"] {
     background: var(--accent-o18);
     color: var(--color-accent);
     border-color: var(--color-accent);

@@ -58,7 +58,11 @@
     outline-offset: 1px;
 }
 
-/* --- Closed caption overlay --- */
+/* --- Closed caption overlay ---
+   Plan §5.2 — match the SOS native player's caption styling:
+   higher-contrast black surface, white text, larger floor on small
+   screens. Uses `clamp()` for the font-size so the overlay reads
+   on a 1080p TV embed as well as a 5-inch phone in portrait. */
 #caption-overlay {
     display: none;
     position: absolute;
@@ -67,12 +71,13 @@
     transform: translateX(-50%);
     max-width: 80%;
     text-align: center;
-    font-size: 1.05rem;
+    font-size: clamp(1rem, 1.8vw, 1.4rem);
     line-height: 1.45;
-    color: var(--color-text);
+    color: #fff;
+    font-weight: 500;
     text-shadow: 0 1px 3px rgba(0,0,0,0.9), 0 0 10px rgba(0,0,0,0.8);
-    background: rgba(0, 0, 0, 0.62);
-    padding: 0.3rem 0.8rem;
+    background: rgba(0, 0, 0, 0.85);
+    padding: 0.35rem 0.9rem;
     border-radius: 4px;
     pointer-events: none;
     white-space: pre-line;

@@ -242,7 +242,7 @@ without storing free text. The full text never leaves the client.
 | Event | Tier | `blobs[]` | `doubles[]` |
 |---|---|---|---|
 | `perf_sample` | A | `event_type`, `surface` (`map`/`vr`), `webgl_renderer_hash` (SHA-256 of `WEBGL_debug_renderer_info`, first 8 hex) | `fps_median_10s`, `frame_time_p95_ms`, `jsheap_mb` (nullable) |
-| `error` | A | `event_type`, `category` (`tile`/`hls`/`llm`/`download`/`vr`/`tour`/`uncaught`/`console`/`native_panic`), `source` (`caught`/`window_error`/`unhandledrejection`/`console_error`/`console_warn`/`tauri_panic`), `code` (HTTP status or classified enum), `message_class` (sanitized first line, ≤ 80 chars) | `count_in_batch` (for deduped repeats) |
+| `error` | A | `event_type`, `category` (`tile`/`hls`/`llm`/`download`/`vr`/`tour`/`caption`/`uncaught`/`console`/`native_panic`), `source` (`caught`/`window_error`/`unhandledrejection`/`console_error`/`console_warn`/`tauri_panic`), `code` (HTTP status or classified enum), `message_class` (sanitized first line, ≤ 80 chars) | `count_in_batch` (for deduped repeats) |
 | `error_detail` | **B** | `event_type`, `category`, `source`, `message_class`, `stack_signature` (SHA-256 of normalized stack, first 12 hex), `frames_json` (compact array of `{fn, line}` pairs, function names only, max 10 frames) | `count_in_batch` |
 
 Two-tier error model — the same pipeline, two different emission paths:

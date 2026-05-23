@@ -102,6 +102,50 @@ describe('initToolsMenu', () => {
     expect(isToolsMenuOpen()).toBe(false)
   })
 
+  it('renders the fullscreen button alongside Browse and Tools', () => {
+    const vm = makeViewports(1)
+    initToolsMenu(vm as any)
+
+    const fullscreenBtn = document.getElementById('tools-menu-fullscreen')!
+    expect(fullscreenBtn).toBeTruthy()
+    // Initial state: not pressed (we're not in fullscreen at boot).
+    expect(fullscreenBtn.getAttribute('aria-pressed')).toBe('false')
+    // The title and aria-label both surface "Enter fullscreen" so
+    // tooltip and screen-reader name agree.
+    expect(fullscreenBtn.getAttribute('title')).toBe('Enter fullscreen')
+    expect(fullscreenBtn.getAttribute('aria-label')).toBe('Enter fullscreen')
+  })
+
+  it('updates the fullscreen button label on fullscreenchange', () => {
+    const vm = makeViewports(1)
+    initToolsMenu(vm as any)
+
+    // Simulate the document going fullscreen by spoofing
+    // `fullscreenElement` and dispatching the event the button
+    // listens for. happy-dom doesn't implement the Fullscreen API
+    // natively, so this lets us exercise the sync function
+    // without driving an actual fullscreen transition.
+    Object.defineProperty(document, 'fullscreenElement', {
+      configurable: true,
+      get: () => document.documentElement,
+    })
+    document.dispatchEvent(new Event('fullscreenchange'))
+
+    const btn = document.getElementById('tools-menu-fullscreen')!
+    expect(btn.getAttribute('aria-pressed')).toBe('true')
+    expect(btn.getAttribute('title')).toBe('Exit fullscreen')
+    expect(btn.getAttribute('aria-label')).toBe('Exit fullscreen')
+
+    // And back again.
+    Object.defineProperty(document, 'fullscreenElement', {
+      configurable: true,
+      get: () => null,
+    })
+    document.dispatchEvent(new Event('fullscreenchange'))
+    expect(btn.getAttribute('aria-pressed')).toBe('false')
+    expect(btn.getAttribute('title')).toBe('Enter fullscreen')
+  })
+
   it('renders View section with labels/borders/terrain/auto-rotate', () => {
     const vm = makeViewports(1)
     initToolsMenu(vm as any)

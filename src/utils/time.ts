@@ -188,7 +188,13 @@ export function dateToVideoTime(
   return { videoTime: fraction * videoDuration, position: 'inside' }
 }
 
-/** Standard snap intervals in ascending order of size */
+/** Standard snap intervals in ascending order of size. The list
+ *  extends past 1 month into seasonal and yearly steps — Phase 3
+ *  fix for the climate-dataset bug Beth + Hilary flagged, where
+ *  a 30-frame / 30-year dataset's `msPerFrame` (~1 year) used to
+ *  fall off the top of this list and clamp to 1M, giving 12 label
+ *  ticks per image. See `docs/WEB_CATALOG_FEATURES_PLAN.md` §5.1. */
+const ONE_DAY_MS = 24 * 60 * 60 * 1000
 const SNAP_INTERVALS = [
   { label: '15min', ms: 15 * 60 * 1000 },
   { label: '30min', ms: 30 * 60 * 1000 },
@@ -196,27 +202,92 @@ const SNAP_INTERVALS = [
   { label: '3h',    ms: 3 * 60 * 60 * 1000 },
   { label: '6h',    ms: 6 * 60 * 60 * 1000 },
   { label: '12h',   ms: 12 * 60 * 60 * 1000 },
-  { label: '1d',    ms: 24 * 60 * 60 * 1000 },
-  { label: '1w',    ms: 7 * 24 * 60 * 60 * 1000 },
-  { label: '1M',    ms: DAYS_PER_MONTH_APPROX * 24 * 60 * 60 * 1000 },
+  { label: '1d',    ms: ONE_DAY_MS },
+  { label: '1w',    ms: 7 * ONE_DAY_MS },
+  { label: '1M',    ms: DAYS_PER_MONTH_APPROX * ONE_DAY_MS },
+  { label: '3M',    ms: 3 * DAYS_PER_MONTH_APPROX * ONE_DAY_MS },
+  { label: '6M',    ms: 6 * DAYS_PER_MONTH_APPROX * ONE_DAY_MS },
+  { label: '1Y',    ms: DAYS_PER_YEAR_APPROX * ONE_DAY_MS },
+  { label: '5Y',    ms: 5 * DAYS_PER_YEAR_APPROX * ONE_DAY_MS },
+  { label: '10Y',   ms: 10 * DAYS_PER_YEAR_APPROX * ONE_DAY_MS },
 ]
 
+/** Optional extras when inferring a display interval — both come
+ *  from the dataset row itself, so callers that have the dataset
+ *  in hand can pass them to get an imagery-accurate cadence. */
+export interface DisplayIntervalOptions {
+  /** ISO 8601 duration from `Dataset.period` — e.g. `P1Y`, `P1M`,
+   *  `PT6H`. When parseable, the returned interval matches it
+   *  exactly so the label cadence and the imagery cadence agree. */
+  period?: string
+  /** Exact frame count from the Phase 3pg `Dataset.frames.count`
+   *  field (image-sequence rows). When present, the interval is
+   *  derived from the total range and the frame count — the
+   *  cleanest possible cadence since no inference is involved. */
+  frameCount?: number
+  /** Video FPS for the fallback ms-per-frame inference path.
+   *  Ignored when `period` or `frameCount` resolves the cadence. */
+  fps?: number
+}
+
 /**
- * Infer a display interval from the dataset time range and video duration.
- * Returns the interval in milliseconds and whether time-of-day should be shown.
+ * Infer a display interval from the dataset time range and video
+ * duration. Returns the interval in milliseconds and whether
+ * time-of-day should be shown alongside the date.
+ *
+ * Cadence resolution order — best signal wins:
+ *
+ *   1. **Frame count** (Phase 3pg image-sequence rows).
+ *      `(endTime − startTime) / (frameCount − 1)` is exact.
+ *   2. **Period** (`Dataset.period`, ISO 8601 duration).
+ *      Parsed via {@link parseISO8601Duration}; matches the
+ *      curator's stated imagery cadence.
+ *   3. **`videoDuration` × `fps`** fallback — picks the smallest
+ *      snap interval ≥ `msPerFrame`. The list now extends to
+ *      `10Y` so multi-decade climate datasets land on a sensible
+ *      cadence instead of clamping to `1M`.
+ *
+ * Backward-compatible signature — the fourth arg accepts the
+ * legacy `fps: number` form as well as the new options object,
+ * so existing call sites don't need to change to get the snap-
+ * list extension. New call sites pass an options object to
+ * activate the period / frameCount paths.
  */
 export function inferDisplayInterval(
   startTime: Date,
   endTime: Date,
   videoDuration: number,
-  fps = 30
+  fpsOrOptions: number | DisplayIntervalOptions = 30,
 ): { intervalMs: number; showTime: boolean } {
+  const opts: DisplayIntervalOptions = typeof fpsOrOptions === 'number'
+    ? { fps: fpsOrOptions }
+    : fpsOrOptions
+  const fps = opts.fps ?? 30
   const totalMs = endTime.getTime() - startTime.getTime()
-  const totalFrames = videoDuration * fps
-  const msPerFrame = totalMs / totalFrames
 
-  // Pick the smallest snap interval that is >= msPerFrame
-  // so each step visibly advances the label
+  // 1. Phase 3pg: exact frame count — divide the range.
+  if (opts.frameCount && opts.frameCount > 1 && totalMs > 0) {
+    const intervalMs = totalMs / (opts.frameCount - 1)
+    return { intervalMs, showTime: intervalMs < ONE_DAY_MS }
+  }
+
+  // 2. Period field — convert ISO 8601 duration to ms.
+  if (opts.period) {
+    try {
+      const parsed = parseISO8601Duration(opts.period)
+      if (typeof parsed === 'object' && 'days' in parsed && parsed.days > 0) {
+        const intervalMs = parsed.days * ONE_DAY_MS
+        return { intervalMs, showTime: intervalMs < ONE_DAY_MS }
+      }
+    } catch {
+      // Period was malformed — fall through to the legacy path.
+    }
+  }
+
+  // 3. Fallback — smallest snap interval ≥ msPerFrame.
+  const totalFrames = videoDuration * fps
+  const msPerFrame = totalFrames > 0 ? totalMs / totalFrames : 0
+
   let chosen = SNAP_INTERVALS[SNAP_INTERVALS.length - 1]
   for (const snap of SNAP_INTERVALS) {
     if (snap.ms >= msPerFrame) {
@@ -225,8 +296,7 @@ export function inferDisplayInterval(
     }
   }
 
-  const showTime = chosen.ms < 24 * 60 * 60 * 1000
-  return { intervalMs: chosen.ms, showTime }
+  return { intervalMs: chosen.ms, showTime: chosen.ms < ONE_DAY_MS }
 }
 
 /**

@@ -135,6 +135,30 @@ export interface Dataset {
    * `dataLink`.
    */
   frames?: DatasetFrames
+
+  /**
+   * Which SOS catalog surface(s) this dataset is published on.
+   * Sourced from the enriched metadata's `available_for` array.
+   * Phase 4 §6.4 from `docs/WEB_CATALOG_FEATURES_PLAN.md`.
+   *
+   * - `'Explorer'` — only in the SOSx subset (the live-catalog
+   *   datasets TerraViz has always rendered).
+   * - `'SOS'` — only in the broader SOS catalog. Synthesised by
+   *   `dataService` from the enriched metadata file when there's
+   *   no live-catalog entry to pair with; plays back at
+   *   `movie_preview` quality rather than the SOSx Vimeo HLS.
+   * - `'Both'` — listed on both surfaces. Live-catalog entry is
+   *   the source of truth for the `dataLink`; enriched entry
+   *   carries the rest.
+   *
+   * Set by `DataService.enrichDataset` on every live-catalog row,
+   * defaulting to `'Explorer'` when no enriched match is found
+   * (live catalog is SOSx-subset by definition). Synthesised SOS-
+   * only rows set `'SOS'` themselves. The field is optional on the
+   * type so wire-shape consumers (`WireDataset`) can elide it; in
+   * the running app every row from `fetchDatasets()` has it set.
+   */
+  availableFor?: 'Explorer' | 'SOS' | 'Both'
 }
 
 /**
@@ -893,7 +917,7 @@ export type VrMode = 'ar' | 'vr'
 export type VrExitReason = 'user' | 'error' | 'session_lost'
 export type VrGesture = 'drag' | 'pinch' | 'thumbstick_zoom' | 'flick_spin' | 'hud_tap'
 export type ErrorCategory =
-  | 'tile' | 'hls' | 'llm' | 'download' | 'vr' | 'tour'
+  | 'tile' | 'hls' | 'llm' | 'download' | 'vr' | 'tour' | 'caption'
   | 'uncaught' | 'console' | 'native_panic'
 export type ErrorSource =
   | 'caught' | 'window_error' | 'unhandledrejection'

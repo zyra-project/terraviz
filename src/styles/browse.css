@@ -583,3 +583,164 @@
         overflow-y: auto;
     }
 }
+
+/* --- Catalog mode (`?catalog=true`) ---------------------------
+   Phase 1 §3.1 of `docs/WEB_CATALOG_FEATURES_PLAN.md`.
+
+   `body.catalog-mode` is set whenever the URL carries
+   `?catalog=true`. `body.catalog-empty` is the stricter state:
+   catalog mode AND no dataset has been loaded yet. In the empty
+   state the browse panel becomes the entire surface and the
+   globe canvas is hidden (`visibility: hidden`, not `display:
+   none`, so the GL context stays alive and a subsequent dataset
+   load doesn't pay a re-init cost).
+
+   Selecting a dataset clears `catalog-empty` — the globe takes
+   over — but `catalog-mode` stays set so the upcoming catalog↔
+   sphere tab control (§3.2) can route back. */
+
+body.catalog-empty #map-grid {
+    visibility: hidden;
+}
+
+body.catalog-empty #browse-overlay {
+    inset-inline-start: 0;
+    inset-inline-end: 0;
+    width: 100%;
+    background: var(--color-bg, #0a0a0a);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-inline-start: none;
+}
+
+/* The browse-overlay close button assumes there's a globe to fall
+   back to. In catalog-empty mode there isn't one, so hide it
+   until §3.2 introduces the catalog↔sphere tab control. */
+body.catalog-empty #browse-close {
+    display: none;
+}
+
+/* The floating top-left "browse datasets" button (#home-btn) and
+   the tools menu (#map-controls) are positioned over the globe.
+   With the globe hidden they're orphaned chrome — suppress them
+   in catalog-empty until the tab control re-introduces a deliberate
+   path back to the globe. */
+body.catalog-empty #home-btn,
+body.catalog-empty #map-controls {
+    display: none;
+}
+
+/* Phone portrait: the existing bottom-sheet rule for #browse-overlay
+   pins it to the bottom edge — override back to a full-viewport
+   surface when we're the only thing on screen. */
+@media (max-width: 600px) and (orientation: portrait) {
+    body.catalog-empty #browse-overlay {
+        top: 0 !important;
+        bottom: 0;
+        height: 100vh;
+        max-height: 100vh;
+        border-radius: 0;
+        border-top: none;
+    }
+
+    /* The bottom-sheet variant caps the grid at `70vh - 10rem` so
+       it doesn't overflow the sheet's max-height. In catalog-empty
+       the overlay covers the full viewport, so the grid should
+       fill the remaining space below the header / search / chips
+       / toolbar — `max-height: none` lets flex distribute it. */
+    body.catalog-empty #browse-grid {
+        max-height: none;
+    }
+
+    /* Drop the large TERRAVIZ title in catalog-empty mode — on a
+       narrow viewport it competes with the centered catalog↔
+       sphere tabs and the right-side help button for the top
+       row. The page URL + browser tab title already identify the
+       app; the `.browse-subtitle` ("Browse environmental
+       datasets…") stays as the framing line. */
+    body.catalog-empty #browse-header .browse-title {
+        display: none;
+    }
+    body.catalog-empty #browse-header {
+        /* Push the subtitle (and everything below) clear of the
+           fixed-position catalog tabs at top: 0.5rem. */
+        padding-top: 2.5rem;
+    }
+}
+
+/* --- Catalog ↔ Sphere tab control (§3.2) --------------------------
+   A two-state segmented control that round-trips visitors between
+   the dataset browser and the loaded globe view. Only rendered
+   visible while in catalog mode (driven by JS via the `hidden`
+   class). The browse overlay's z-index is 500; the tabs sit above
+   it at 600 so the Catalog tab is reachable while the browse
+   panel is full-surface. */
+
+.catalog-tabs {
+    position: fixed;
+    top: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 600;
+    display: inline-flex;
+    gap: 0;
+    padding: 0.25rem;
+    background: var(--glass-bg-light);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--white-o12);
+    border-radius: 999px;
+    pointer-events: auto;
+}
+
+.catalog-tabs.hidden {
+    display: none;
+}
+
+.catalog-tab {
+    appearance: none;
+    background: transparent;
+    border: none;
+    color: var(--color-text-secondary);
+    font-size: 0.8rem;
+    font-weight: 500;
+    letter-spacing: 0.03em;
+    padding: 0.4rem 1rem;
+    border-radius: 999px;
+    cursor: pointer;
+    min-height: 36px;
+    min-width: 80px;
+    transition: background 0.15s, color 0.15s;
+}
+
+.catalog-tab:hover,
+.catalog-tab:focus-visible {
+    color: var(--color-text);
+    background: var(--white-o08);
+    outline: none;
+}
+
+.catalog-tab.active {
+    background: var(--color-accent, var(--white-o15));
+    color: var(--color-bg, #0a0a0a);
+}
+
+.catalog-tab.active:hover,
+.catalog-tab.active:focus-visible {
+    background: var(--color-accent, var(--white-o15));
+    color: var(--color-bg, #0a0a0a);
+    filter: brightness(1.1);
+}
+
+/* Phone portrait: shrink the control so it doesn't dominate the
+   already-tight top bar. */
+@media (max-width: 600px) and (orientation: portrait) {
+    .catalog-tabs {
+        top: 0.5rem;
+    }
+    .catalog-tab {
+        font-size: 0.7rem;
+        padding: 0.35rem 0.75rem;
+        min-width: 64px;
+    }
+}

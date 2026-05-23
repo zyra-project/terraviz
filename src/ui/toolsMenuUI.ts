@@ -62,6 +62,54 @@ function emitSetting(key: string, valueClass: string): void {
   emit({ event_type: 'settings_changed', key, value_class: valueClass })
 }
 
+/** True when the browser is currently rendering some element
+ *  fullscreen. Wraps `document.fullscreenElement` (which some
+ *  test environments leave as `undefined` rather than `null`) so
+ *  the rest of the file doesn't have to repeat the falsy check. */
+function isFullscreen(): boolean {
+  return Boolean(document.fullscreenElement)
+}
+
+/** Toggle the document into / out of fullscreen via the standard
+ *  Fullscreen API. Errors (autoplay-policy denial, browser
+ *  feature-policy block) are swallowed silently — the button keeps
+ *  its current state and the `fullscreenchange` event never fires,
+ *  so `syncFullscreenButton` doesn't have anything to do. */
+async function toggleFullscreen(): Promise<void> {
+  try {
+    if (isFullscreen()) {
+      await document.exitFullscreen()
+    } else {
+      await document.documentElement.requestFullscreen()
+    }
+  } catch {
+    // Silent — the request was denied (autoplay policy, top-level
+    // browsing context, Permissions Policy) and the icon stays
+    // where it was.
+  }
+}
+
+/** Mirror the current fullscreen state into the toolbar button's
+ *  icon, tooltip, ARIA label, and `aria-pressed`. Called once at
+ *  init and again whenever `fullscreenchange` fires. */
+function syncFullscreenButton(): void {
+  const btn = document.getElementById('tools-menu-fullscreen')
+  if (!btn) return
+  const on = isFullscreen()
+  const label = on
+    ? t('mapControls.fullscreen.exit')
+    : t('mapControls.fullscreen.enter')
+  btn.setAttribute('title', label)
+  btn.setAttribute('aria-label', label)
+  btn.setAttribute('aria-pressed', on ? 'true' : 'false')
+  // The glyph (U+26F6 SQUARED FOUR CORNERS, text style) stays the
+  // same in both states — the active background + aria-pressed +
+  // accessible label convey the transition. Pairing it with a
+  // distinct "exit fullscreen" glyph would require choosing one of
+  // the ambiguous diagonal-arrow codepoints, none of which read as
+  // clearly as a label change.
+}
+
 /**
  * Runtime Tauri-shell detection — matches the same `__TAURI__`
  * sentinel the rest of the code keys off of. Read fresh inside
@@ -156,6 +204,9 @@ export function initToolsMenu(
     </button>
     <button type="button" class="tools-menu-btn tools-menu-toggle" id="tools-menu-toggle" title="${tAttr('tools.toggle.aria')}" aria-label="${tAttr('tools.toggle.aria')}" aria-expanded="false" aria-haspopup="true">
       <span class="tools-menu-btn-icon" aria-hidden="true">&#x1F527;&#xFE0E;</span>
+    </button>
+    <button type="button" class="tools-menu-btn tools-menu-fullscreen" id="tools-menu-fullscreen" title="${tAttr('mapControls.fullscreen.enter')}" aria-label="${tAttr('mapControls.fullscreen.enter')}" aria-pressed="false">
+      <span class="tools-menu-btn-icon" aria-hidden="true">&#x26F6;&#xFE0E;</span>
     </button>
     <div id="tools-menu-popover" class="tools-menu-popover hidden" role="dialog" aria-modal="false" aria-label="${tAttr('tools.toggle.aria')}">
       <div class="tools-menu-popover-header">
@@ -269,6 +320,25 @@ export function initToolsMenu(
     ev.stopPropagation()
     closePopover()
   })
+
+  // Fullscreen toggle — Plan §3.3. Uses the Fullscreen API,
+  // which Tauri's webview honours (the
+  // `core:window:allow-set-fullscreen` capability is granted in
+  // capabilities/default.json, so no fallback to the native
+  // window API is required). `fullscreenchange` keeps the icon /
+  // label in sync when the visitor exits via Escape or the
+  // browser chrome.
+  const fullscreenBtn = document.getElementById('tools-menu-fullscreen') as HTMLButtonElement | null
+  fullscreenBtn?.addEventListener('click', (ev) => {
+    ev.stopPropagation()
+    closePopover()
+    void toggleFullscreen()
+  })
+  if (!document.body.dataset.toolsMenuFullscreenWired) {
+    document.body.dataset.toolsMenuFullscreenWired = 'true'
+    document.addEventListener('fullscreenchange', syncFullscreenButton)
+  }
+  syncFullscreenButton()
 
   // Outside click closes the popover. We look up #map-controls
   // inside the handler rather than closing over the `container`

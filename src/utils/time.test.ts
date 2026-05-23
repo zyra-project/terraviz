@@ -320,6 +320,75 @@ describe('inferDisplayInterval', () => {
     const { showTime } = inferDisplayInterval(start, end, 60, 1)
     expect(showTime).toBe(false)
   })
+
+  // -------------------------------------------------------------
+  // Phase 3 §5.1 — frame/label sync fix
+  // -------------------------------------------------------------
+
+  it('uses Phase 3pg frameCount when available for exact cadence', () => {
+    // 30 frames spanning 30 years → 1 year per frame, exactly.
+    const start = new Date('1990-01-01T00:00:00Z')
+    const end = new Date('2020-01-01T00:00:00Z')
+    const { intervalMs, showTime } = inferDisplayInterval(start, end, 60, { frameCount: 30 })
+    const oneYearMs = 365.25 * 24 * 60 * 60 * 1000
+    // Calendar years vary slightly; allow a small tolerance for
+    // leap days.
+    expect(intervalMs).toBeGreaterThan(oneYearMs * 0.99)
+    expect(intervalMs).toBeLessThan(oneYearMs * 1.05)
+    expect(showTime).toBe(false)
+  })
+
+  it('uses period when no frameCount is provided (P1Y → yearly)', () => {
+    const start = new Date('1990-01-01T00:00:00Z')
+    const end = new Date('2020-01-01T00:00:00Z')
+    const { intervalMs, showTime } = inferDisplayInterval(start, end, 60, { period: 'P1Y' })
+    const oneYearMs = 365.25 * 24 * 60 * 60 * 1000
+    expect(intervalMs).toBeCloseTo(oneYearMs, -3) // within ~1s
+    expect(showTime).toBe(false)
+  })
+
+  it('uses period for sub-daily cadences (PT6H → 6 hours)', () => {
+    const start = new Date('2020-01-01T00:00:00Z')
+    const end = new Date('2020-01-08T00:00:00Z')
+    const { intervalMs, showTime } = inferDisplayInterval(start, end, 60, { period: 'PT6H' })
+    expect(intervalMs).toBe(6 * 60 * 60 * 1000)
+    expect(showTime).toBe(true)
+  })
+
+  it('falls through to the legacy snap path when period is unparseable', () => {
+    // Garbage period — the function should swallow the parse error
+    // and pick a snap interval from the legacy ms-per-frame
+    // computation instead of throwing.
+    const start = new Date('2020-01-01T00:00:00Z')
+    const end = new Date('2020-01-01T01:00:00Z')
+    const { intervalMs } = inferDisplayInterval(start, end, 60, { period: 'not-a-duration', fps: 30 })
+    expect(intervalMs).toBe(15 * 60 * 1000)
+  })
+
+  it('prefers frameCount over period when both are provided', () => {
+    const start = new Date('1990-01-01T00:00:00Z')
+    const end = new Date('2020-01-01T00:00:00Z')
+    const { intervalMs } = inferDisplayInterval(start, end, 60, {
+      frameCount: 60,    // 30 years / 60 frames = 6 months per frame
+      period: 'P1Y',     // claims yearly — frameCount wins
+    })
+    const sixMonthsMs = 6 * 30.44 * 24 * 60 * 60 * 1000
+    expect(intervalMs).toBeGreaterThan(sixMonthsMs * 0.9)
+    expect(intervalMs).toBeLessThan(sixMonthsMs * 1.1)
+  })
+
+  it('snap list now extends past 1 month for multi-year ranges', () => {
+    // The bug Beth + Hilary flagged: a 30-frame / 30-year dataset
+    // used to clamp to 1M because the snap list topped out there,
+    // giving 12 label ticks per imagery frame. With the extended
+    // list, msPerFrame ~ 1 year now lands on the 1Y snap.
+    const start = new Date('1990-01-01T00:00:00Z')
+    const end = new Date('2020-01-01T00:00:00Z')
+    // 30s video at 1 fps = 30 frames → msPerFrame = 1 year.
+    const { intervalMs } = inferDisplayInterval(start, end, 30, 1)
+    const oneMonthMs = 30.44 * 24 * 60 * 60 * 1000
+    expect(intervalMs).toBeGreaterThan(oneMonthMs)
+  })
 })
 
 // ---------------------------------------------------------------------------

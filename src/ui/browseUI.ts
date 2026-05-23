@@ -225,8 +225,13 @@ export function showBrowseUI(
     closeBtn.dataset.wired = 'true'
   }
 
+  // Default exclusion of SOS-only synthesised rows (Phase 4 §6.4).
+  // The chip rail toggle (a follow-up commit) will let visitors
+  // opt in to see all 520 datasets including the
+  // `movie_preview`-quality SOS-only set; until then the browse
+  // surface matches the previous 204-dataset SOSx subset.
   const visible = datasets
-    .filter(d => !d.isHidden)
+    .filter(d => !d.isHidden && d.availableFor !== 'SOS')
     .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0) || a.title.localeCompare(b.title))
 
   // Update search placeholder with actual count
