@@ -27,6 +27,7 @@ import { renderDatasetsPage } from './pages/datasets'
 import { renderDatasetDetailPage } from './pages/dataset-detail'
 import { renderDatasetEditPage } from './pages/dataset-edit'
 import { renderDatasetNewPage } from './pages/dataset-new'
+import { renderToursPage } from './pages/tours'
 import { renderTopbar } from './components/topbar'
 import '../../styles/publisher.css'
 
@@ -184,7 +185,9 @@ function datasetEditPage(
 }
 
 function toursPage(mount: HTMLElement): RouteHandler {
-  return () => renderPlaceholder(mount, t('publisher.section.tours'), '3pe')
+  // Phase 3pt/A introduced the landing page; tour/G upgrades it
+  // to a real list backed by GET /api/v1/publish/tours.
+  return () => void renderToursPage(mount)
 }
 
 function importPage(mount: HTMLElement): RouteHandler {

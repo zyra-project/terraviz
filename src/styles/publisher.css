@@ -1073,3 +1073,70 @@
   outline: 2px solid var(--white-o20, rgba(255, 255, 255, 0.2));
   outline-offset: 2px;
 }
+
+/* Phase 3pt/A — `/publish/tours` landing page styles. */
+.publisher-tour-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  margin-block-end: 0.5rem;
+}
+
+.publisher-tour-new-btn {
+  flex-shrink: 0;
+}
+
+.publisher-tour-intro {
+  color: var(--color-text-muted, #aaa);
+  margin-block: 0 1rem;
+  font-size: 0.85rem;
+}
+
+.publisher-tour-empty-hint {
+  color: var(--color-text-muted, #aaa);
+  font-size: 0.8rem;
+  margin-block-start: 0.5rem;
+}
+
+.publisher-tour-new-error {
+  color: #ff8a8a;
+  font-size: 0.75rem;
+  margin-block-start: 0.5rem;
+}
+
+/* Phase 3pt/G — Delete (×) button on tour list rows. */
+.publisher-row-action {
+  margin-inline-end: 0.5rem;
+}
+
+.publisher-row-delete {
+  background: transparent;
+  border: 1px solid rgba(255, 138, 138, 0.4);
+  color: #ff8a8a;
+  border-radius: 0.25rem;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.publisher-row-delete:hover,
+.publisher-row-delete:focus-visible {
+  background: rgba(255, 138, 138, 0.12);
+}
+
+.publisher-row-delete:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.publisher-row-action-status {
+  display: inline-block;
+  margin-inline-start: 0.4rem;
+  font-size: 0.7rem;
+  color: var(--color-text-muted, #aaa);
+}
+
+.publisher-row-action-status-error {
+  color: #ff8a8a;
+}

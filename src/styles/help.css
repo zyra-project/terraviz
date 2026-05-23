@@ -36,7 +36,8 @@
     font-size: 0.95rem;
     line-height: 1;
 }
-body.browse-open #help-trigger {
+body.browse-open #help-trigger,
+body.tour-authoring-open #help-trigger {
     display: none;
 }
 

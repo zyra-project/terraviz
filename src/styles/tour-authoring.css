@@ -1,0 +1,471 @@
+/*
+ * Tour-authoring dock — Phase 3pt/A. Floats over the SPA chrome
+ * when the URL carries `?tourEdit=`. The dock is fixed top-right
+ * on desktop / portrait phones; mobile-landscape collapses to a
+ * narrower column on the right edge.
+ *
+ * Visual language matches the existing glass-surface overlays
+ * (chat panel, info panel) so it doesn't feel like a bolt-on.
+ * Logical-axis properties so RTL flips clean.
+ */
+
+.tour-authoring-dock {
+    position: fixed;
+    inset-block-start: 1rem;
+    inset-inline-end: 1rem;
+    z-index: 50;
+    inline-size: 18rem;
+    max-inline-size: calc(100vw - 2rem);
+    max-block-size: calc(100vh - 2rem);
+    overflow-y: auto;
+    padding: 0.75rem 1rem 1rem;
+    border-radius: 0.65rem;
+    background: rgba(20, 28, 40, 0.92);
+    backdrop-filter: blur(12px);
+    color: #e8eef6;
+    font-size: 0.8rem;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.tour-authoring-dock-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-block-end: 0.5rem;
+}
+
+.tour-authoring-dock-title {
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: #fff;
+}
+
+/* Phase 3pt-review/C — rename input. Phase 3pt-review/F moved it
+   out of the header (cramped: heading + status + publish + close
+   were already competing for the row) into its own line at the
+   top of the metadata block, sized to fill the dock width. */
+.tour-authoring-dock-title-input {
+    inline-size: 100%;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.3rem;
+    color: #fff;
+    font-size: 0.85rem;
+    font-weight: 500;
+    padding: 0.3rem 0.5rem;
+}
+
+.tour-authoring-dock-title-input:hover,
+.tour-authoring-dock-title-input:focus-visible {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
+    outline: none;
+}
+
+.tour-authoring-dock-title-input::placeholder {
+    color: rgba(255, 255, 255, 0.4);
+}
+
+/* Phase 3pt-review/C-D — inline error for metadata saves
+   (title / description / visibility). One shared surface so the
+   publisher doesn't get three competing error boxes. */
+.tour-authoring-dock-metadata-errormsg {
+    color: #ff8a8a;
+    font-size: 0.7rem;
+    padding-block: 0.2rem 0.4rem;
+    padding-inline: 0.1rem;
+    line-height: 1.3;
+}
+
+/* Phase 3pt-review/D — description + visibility row under the
+   dock header. Stacked block so the textarea can grow without
+   shoving the visibility chip off-edge on a narrow dock. */
+.tour-authoring-dock-metadata {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin-block-end: 0.5rem;
+}
+
+.tour-authoring-dock-description {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.3rem;
+    color: #fff;
+    font-size: 0.75rem;
+    padding: 0.3rem 0.45rem;
+    font-family: inherit;
+    resize: vertical;
+    min-block-size: 2.4rem;
+}
+
+.tour-authoring-dock-description:hover,
+.tour-authoring-dock-description:focus-visible {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
+    outline: none;
+}
+
+.tour-authoring-dock-description::placeholder {
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.tour-authoring-dock-visibility-label {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.7rem;
+    color: #b8c0cc;
+}
+
+.tour-authoring-dock-visibility {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.3rem;
+    color: #fff;
+    font-size: 0.7rem;
+    padding: 0.2rem 0.35rem;
+}
+
+.tour-authoring-dock-visibility:focus-visible {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
+    outline: none;
+}
+
+.tour-authoring-dock-close {
+    background: transparent;
+    border: none;
+    color: #b8c0cc;
+    font-size: 1.25rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0.1rem 0.4rem;
+    border-radius: 0.3rem;
+}
+
+/* Phase 3pt/E — autosave status badge in the header.
+   Phase 3pt-review/F — restored `flex: 1` after the title input
+   moved out of the header row; status now pushes the publish
+   button to the trailing edge. */
+.tour-authoring-dock-status {
+    font-size: 0.65rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 0.3rem;
+    margin-inline-start: 0.5rem;
+    flex: 1;
+    text-align: end;
+    color: #8b94a4;
+}
+
+.tour-authoring-dock-status-saving {
+    color: #d8b06b;
+}
+
+.tour-authoring-dock-status-saved {
+    color: #79c98a;
+}
+
+.tour-authoring-dock-status-error {
+    color: #ff8a8a;
+}
+
+/* Phase 3pt-review/G — preview button in the dock header.
+   Blue chip to distinguish from the green Publish button. */
+.tour-authoring-dock-preview {
+    background: rgba(77, 166, 255, 0.18);
+    border: 1px solid rgba(77, 166, 255, 0.4);
+    color: #d6eaff;
+    border-radius: 0.35rem;
+    padding: 0.18rem 0.55rem;
+    font-size: 0.7rem;
+    cursor: pointer;
+    margin-inline-end: 0.35rem;
+}
+
+.tour-authoring-dock-preview:hover,
+.tour-authoring-dock-preview:focus-visible {
+    background: rgba(77, 166, 255, 0.32);
+}
+
+.tour-authoring-dock-preview:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+}
+
+/* Phase 3pt/G — publish button in the dock header. */
+.tour-authoring-dock-publish {
+    background: rgba(121, 201, 138, 0.18);
+    border: 1px solid rgba(121, 201, 138, 0.4);
+    color: #d6f1dd;
+    border-radius: 0.35rem;
+    padding: 0.18rem 0.55rem;
+    font-size: 0.7rem;
+    cursor: pointer;
+    margin-inline-end: 0.4rem;
+}
+
+.tour-authoring-dock-publish:hover,
+.tour-authoring-dock-publish:focus-visible {
+    background: rgba(121, 201, 138, 0.32);
+}
+
+.tour-authoring-dock-publish:disabled {
+    cursor: progress;
+    opacity: 0.7;
+}
+
+/* Phase 3pt-review/B — surfaced publish error.
+   Copilot discussion_r3284513432. */
+.tour-authoring-dock-publish-errormsg {
+    color: #ff8a8a;
+    font-size: 0.7rem;
+    padding-block: 0.25rem 0.5rem;
+    padding-inline: 0.1rem;
+    line-height: 1.3;
+    border-block-start: 1px solid rgba(255, 138, 138, 0.25);
+    margin-block-end: 0.3rem;
+}
+
+.tour-authoring-dock-close:hover,
+.tour-authoring-dock-close:focus-visible {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.tour-authoring-dock-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin-block-end: 0.65rem;
+}
+
+.tour-authoring-action {
+    background: rgba(77, 166, 255, 0.18);
+    color: #e8eef6;
+    border: 1px solid rgba(77, 166, 255, 0.35);
+    border-radius: 0.35rem;
+    padding: 0.4rem 0.6rem;
+    text-align: start;
+    cursor: pointer;
+    font-size: 0.78rem;
+}
+
+.tour-authoring-action:hover,
+.tour-authoring-action:focus-visible {
+    background: rgba(77, 166, 255, 0.32);
+}
+
+.tour-authoring-task-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    border-block-start: 1px solid rgba(255, 255, 255, 0.08);
+    padding-block-start: 0.5rem;
+    max-block-size: 14rem;
+    overflow-y: auto;
+}
+
+.tour-authoring-task {
+    display: flex;
+    gap: 0.4rem;
+    align-items: baseline;
+    padding-block: 0.2rem;
+    font-size: 0.72rem;
+    color: #c8d0dc;
+}
+
+.tour-authoring-task-index {
+    color: #8b94a4;
+    flex-shrink: 0;
+    inline-size: 1.4rem;
+}
+
+.tour-authoring-task-label {
+    word-break: break-word;
+}
+
+.tour-authoring-task-empty {
+    padding-block: 0.5rem;
+    color: #8b94a4;
+    font-style: italic;
+    font-size: 0.72rem;
+    text-align: center;
+}
+
+/* Phase 3pt/D — task-row controls (drag handle, edit / delete
+ * buttons, inline JSON editor). Layout uses flex so the label
+ * stays left-aligned and the buttons cluster on the inline end. */
+.tour-authoring-task {
+    align-items: center;
+    cursor: grab;
+}
+
+.tour-authoring-task[draggable="true"]:active {
+    cursor: grabbing;
+}
+
+.tour-authoring-task-dragging {
+    opacity: 0.4;
+}
+
+.tour-authoring-task-handle {
+    color: #8b94a4;
+    flex-shrink: 0;
+    inline-size: 0.9rem;
+    font-size: 0.7rem;
+    user-select: none;
+    line-height: 1;
+}
+
+.tour-authoring-task-label {
+    flex: 1;
+}
+
+.tour-authoring-task-btn {
+    background: transparent;
+    border: none;
+    color: #8b94a4;
+    cursor: pointer;
+    font-size: 0.8rem;
+    line-height: 1;
+    padding: 0.1rem 0.35rem;
+    border-radius: 0.25rem;
+    flex-shrink: 0;
+}
+
+.tour-authoring-task-btn:hover,
+.tour-authoring-task-btn:focus-visible {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.tour-authoring-task-editing {
+    background: rgba(77, 166, 255, 0.06);
+    border-radius: 0.3rem;
+    padding-block: 0.25rem;
+}
+
+.tour-authoring-task-editor {
+    flex-basis: 100%;
+    margin-block-start: 0.4rem;
+    padding-inline-start: 1.4rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.tour-authoring-task-editor-input {
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #e8eef6;
+    border-radius: 0.3rem;
+    padding: 0.4rem 0.5rem;
+    font-family: var(--font-mono, monospace);
+    font-size: 0.7rem;
+    min-block-size: 6rem;
+    resize: vertical;
+}
+
+.tour-authoring-task-editor-input:focus-visible {
+    outline: 1px solid rgba(77, 166, 255, 0.6);
+    outline-offset: 0;
+}
+
+.tour-authoring-task-editor-actions {
+    display: flex;
+    gap: 0.3rem;
+    align-items: center;
+    justify-content: flex-end;
+}
+
+.tour-authoring-task-editor-error {
+    flex: 1;
+    color: #ff8a8a;
+    font-size: 0.7rem;
+    line-height: 1.3;
+    text-align: start;
+    display: none;
+}
+
+.tour-authoring-task-editor-error-visible {
+    display: block;
+}
+
+/* Phase 3pt/B — grouped capture rows. Each `dock-group` holds a
+ * short heading + a row (chips) or input. Matches the dense
+ * compact-control aesthetic of the SOS authoring tool. */
+.tour-authoring-dock-group {
+    margin-block-end: 0.55rem;
+    padding-block-start: 0.45rem;
+    border-block-start: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.tour-authoring-dock-group-label {
+    display: block;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #8b94a4;
+    margin-block-end: 0.3rem;
+}
+
+.tour-authoring-dock-chiprow {
+    display: flex;
+    gap: 0.3rem;
+    flex-wrap: wrap;
+}
+
+.tour-authoring-dock-envrow {
+    display: flex;
+    gap: 0.3rem;
+    align-items: center;
+    margin-block-end: 0.25rem;
+}
+
+.tour-authoring-dock-envrow-label {
+    flex: 1;
+    font-size: 0.74rem;
+    color: #c8d0dc;
+}
+
+.tour-authoring-chip {
+    background: rgba(255, 255, 255, 0.08);
+    color: #e8eef6;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.35rem;
+    padding: 0.22rem 0.55rem;
+    cursor: pointer;
+    font-size: 0.72rem;
+    line-height: 1.2;
+}
+
+.tour-authoring-chip:hover,
+.tour-authoring-chip:focus-visible {
+    background: rgba(77, 166, 255, 0.22);
+    border-color: rgba(77, 166, 255, 0.38);
+}
+
+.tour-authoring-dock-inputrow {
+    display: flex;
+    gap: 0.3rem;
+    align-items: center;
+}
+
+.tour-authoring-input {
+    flex: 1;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #e8eef6;
+    border-radius: 0.3rem;
+    padding: 0.25rem 0.4rem;
+    font-size: 0.74rem;
+    min-inline-size: 0;
+}
+
+.tour-authoring-input:focus-visible {
+    outline: 1px solid rgba(77, 166, 255, 0.6);
+    outline-offset: 0;
+}

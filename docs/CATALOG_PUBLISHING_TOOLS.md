@@ -235,6 +235,24 @@ Two cross-cutting policies sit on top of the per-field rules:
 
 ## Tour creator
 
+> **Status: capture + edit + persist shipped (Phase 3pt/A–G).**
+> The publisher portal's `/publish/tours` page lists existing
+> tours; the "New tour" button mints a draft and opens the
+> SPA in authoring mode (`/?tourEdit=<id>`). The floating dock
+> captures 18 task kinds across six groups (primary, layout,
+> environment, rotation, flow, player), supports drag-to-
+> reorder + click-to-edit + delete, and autosaves to R2 every
+> 30 s. The dock's **Publish** button snapshots the draft to
+> an immutable `tours/{id}/published/{publish_id}.json` key.
+>
+> Deferred: "Play from here" preview, rich-UI captures
+> (overlay drag-to-place, click-on-globe placemark, audio /
+> video file pickers, question form), and soft-retract for
+> published tours (Phase 4 federation gesture). The JSON
+> editor remains the universal escape hatch for any task
+> type the typed captures don't cover yet. Delete (hard) is
+> wired today — click × on a tour list row.
+
 This is the larger subproject. Goal: a publisher records a
 sequence of camera positions, dataset loads, overlay shows, and
 narration without writing JSON.

@@ -64,6 +64,7 @@ import { flyToOnGlobe, isVrActive } from './services/vrSession'
 import type { VrDatasetTexture } from './services/vrScene'
 import { overlayOptionsFromDataset } from './services/datasetOverlayOptions'
 import { resolveFrameQuery } from './utils/frames'
+import { initTourAuthoring } from './ui/tourAuthoring'
 import { bootstrapI18n } from './i18n/bootstrap'
 
 // Phase 5: set a body class so CSS can target mobile-native adaptations
@@ -223,6 +224,11 @@ class InteractiveSphere {
   private loadGeneration = 0 // guards against concurrent dataset loads
   private tourEngine: TourEngine | null = null
   private tourIsStandalone = false // true when tour was loaded as a tour/json dataset (not runTourOnLoad)
+  /** Phase 3pt-review/I — blob URL currently driving a preview
+   *  tour. Tracked so `stopTour` / `endTour` can revoke it and
+   *  avoid the per-preview URL leak Copilot flagged in
+   *  discussion_r3291446451. Null when no preview is active. */
+  private previewBlobUrl: string | null = null
 
   /** Persisted view preferences: info panel + legend visibility. */
   private viewPrefs: ViewPreferences = loadViewPreferences()
@@ -322,6 +328,11 @@ class InteractiveSphere {
 
       // Initialize digital docent chat (available on all views)
       this.initChat()
+
+      // Tour-authoring dock — mounts only when the URL carries
+      // `?tourEdit=<id>`. Phase 3pt/A. Idempotent; the dock owns
+      // its own DOM and dispose lifecycle.
+      this.initTourAuthoring()
 
       // Enter VR button — feature-gated internally; hides itself on
       // non-WebXR browsers and warm-loads Three.js in the background
@@ -988,6 +999,7 @@ class InteractiveSphere {
     this.cleanupTourOverlays()
     this.tourEngine = null
     this.tourIsStandalone = false
+    this.revokePreviewBlobUrl()
     this.announce('Tour ended')
 
     if (wasStandalone) {
@@ -1007,6 +1019,18 @@ class InteractiveSphere {
       this.tourIsStandalone = false
       this.cleanupTourOverlays()
       this.restorePostTourUI()
+    }
+    // Always revoke — `stopTour` is also the abort path during
+    // a reload, and an unrevoked blob URL outlives the engine.
+    this.revokePreviewBlobUrl()
+  }
+
+  /** Phase 3pt-review/I — release the preview blob URL minted by
+   *  `playInlineTour`. Safe to call when no preview is active. */
+  private revokePreviewBlobUrl(): void {
+    if (this.previewBlobUrl !== null) {
+      URL.revokeObjectURL(this.previewBlobUrl)
+      this.previewBlobUrl = null
     }
   }
 
@@ -1775,6 +1799,55 @@ class InteractiveSphere {
       announce: (msg) => this.announce(msg),
       onOpenBrowse: () => this.openBrowsePanel(),
     })
+  }
+
+  /**
+   * Phase 3pt/A — mount the tour-authoring dock when the URL
+   * carries `?tourEdit=<id>` (or `=new` for a fresh draft).
+   * No-op on regular page loads. The dock reads from the primary
+   * renderer's view context to compose camera-step tasks; its
+   * "Discard" button strips the URL param and routes back to
+   * the publisher tour list.
+   */
+  private initTourAuthoring(): void {
+    initTourAuthoring({
+      getMapView: () => this.renderer?.getViewContext() ?? null,
+      getCurrentDataset: () => this.appState.currentDataset,
+      onDiscard: () => {
+        // Clear the query string and go to the publisher portal's
+        // tour list. Using `location.assign` so the back-button
+        // history stays clean (a tour-edit URL bouncing in the
+        // history is more confusing than the simple linear path).
+        window.location.assign('/publish/tours')
+      },
+      onPreview: (tourFile) => {
+        void this.playInlineTour(tourFile)
+      },
+    })
+  }
+
+  /**
+   * Phase 3pt-review/G — preview the in-memory tour draft.
+   * Wraps the TourFile in a blob URL and routes through the
+   * existing `startTour` path. The publisher's authoring dock
+   * stays mounted; the existing tour player chrome handles
+   * Stop. Phase 3pt-review/I — the blob URL is tracked on the
+   * App so `stopTour` / `endTour` can revoke it. Pre-fix the
+   * URL was leaked for the lifetime of the tab; repeated
+   * previews would accumulate (small JSON blobs, but the leak
+   * is real). Copilot discussion_r3291446451.
+   */
+  async playInlineTour(tourFile: TourFile): Promise<void> {
+    // Revoke any prior preview URL before minting the next so
+    // back-to-back previews don't stack.
+    if (this.previewBlobUrl !== null) {
+      URL.revokeObjectURL(this.previewBlobUrl)
+      this.previewBlobUrl = null
+    }
+    const blob = new Blob([JSON.stringify(tourFile)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    this.previewBlobUrl = url
+    await this.playTour(url)
   }
 
   /** Open the chat panel and optionally pre-fill the input with a query string. */

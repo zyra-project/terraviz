@@ -1,16 +1,19 @@
 /**
  * /api/v1/publish/tours/{id}
  *
- * GET → Single tour body, role-aware visibility filter.
- * PUT → Patch metadata. Same authorisation.
- *
- * Asset uploads + the full SOS-format tour JSON validation are
- * Phase 1b; the row-shape is what this endpoint serves.
+ *   GET → Single tour body, role-aware visibility filter.
+ *   PUT → Patch metadata. Same authorisation.
+ *   DELETE → Hard-delete the row + best-effort drop the draft
+ *     R2 blob (Phase 3pt/G). Published immutable snapshots
+ *     under `tours/{id}/published/{publish_id}.json` are NOT
+ *     removed — federation subscribers may still hold those
+ *     refs. Phase 4 federation lands a soft-retract gesture
+ *     that supersedes this for published tours.
  */
 
 import type { CatalogEnv } from '../../_lib/env'
 import type { PublisherData } from '../_middleware'
-import { getTourForPublisher, updateTour } from '../../_lib/tour-mutations'
+import { deleteTour, getTourForPublisher, updateTour } from '../../_lib/tour-mutations'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
 
@@ -64,5 +67,17 @@ export const onRequestPut: PagesFunction<CatalogEnv, 'id'> = async context => {
   return new Response(JSON.stringify({ tour: result.tour }), {
     status: 200,
     headers: { 'Content-Type': CONTENT_TYPE, 'Cache-Control': 'private, no-store' },
+  })
+}
+
+export const onRequestDelete: PagesFunction<CatalogEnv, 'id'> = async context => {
+  const publisher = (context.data as unknown as PublisherData).publisher
+  const id = pickId(context.params.id)
+  if (!id) return jsonError(400, 'invalid_request', 'Missing tour id.')
+  const result = await deleteTour(context.env, publisher, id)
+  if (!result.ok) return jsonError(result.status, result.error, result.message)
+  return new Response(JSON.stringify({ deleted_id: result.deleted_id }), {
+    status: 200,
+    headers: { 'Content-Type': CONTENT_TYPE },
   })
 }

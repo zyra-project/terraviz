@@ -9,8 +9,8 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { onRequestPost } from './tours'
-import { onRequestGet as tourGet, onRequestPut as tourPut } from './tours/[id]'
+import { onRequestGet as toursList, onRequestPost } from './tours'
+import { onRequestDelete as tourDelete, onRequestGet as tourGet, onRequestPut as tourPut } from './tours/[id]'
 import { onRequestPost as tourPreview } from './tours/[id]/preview'
 import { asD1, makeKV, seedFixtures } from '../_lib/test-helpers'
 import type { PublisherRow } from '../_lib/publisher-store'
@@ -149,5 +149,165 @@ describe('publish/tours', () => {
     expect(res.status).toBe(200)
     const body = await readJson<{ token: string; url: string }>(res)
     expect(body.url).toBe(`/api/v1/tours/${id}/preview/${body.token}`)
+  })
+})
+
+describe('GET /api/v1/publish/tours (tour/G)', () => {
+  it('returns an empty list when no tours exist', async () => {
+    const { env } = setupEnv()
+    const res = await toursList(
+      ctx({ env, method: 'GET', url: 'https://localhost/api/v1/publish/tours' }),
+    )
+    expect(res.status).toBe(200)
+    const body = await readJson<{ tours: unknown[]; next_cursor: string | null }>(res)
+    expect(body.tours).toEqual([])
+    expect(body.next_cursor).toBeNull()
+  })
+
+  it('returns the publisher’s tours in reverse-id order', async () => {
+    const { env } = setupEnv()
+    // Create three tours by POSTing the create endpoint. Sleep
+    // 2 ms between creates so each ULID's time prefix is
+    // distinct — without that, two ULIDs minted in the same
+    // millisecond would have random tails that break
+    // lexicographic ordering.
+    const ids: string[] = []
+    for (const title of ['First tour', 'Second tour', 'Third tour']) {
+      const res = await onRequestPost(
+        ctx({
+          env,
+          method: 'POST',
+          body: { title, tour_json_ref: 'r2:tours/seed.json' },
+        }),
+      )
+      ids.push((await readJson<{ tour: { id: string } }>(res)).tour.id)
+      await new Promise(r => setTimeout(r, 2))
+    }
+    const res = await toursList(
+      ctx({ env, method: 'GET', url: 'https://localhost/api/v1/publish/tours' }),
+    )
+    expect(res.status).toBe(200)
+    const body = await readJson<{ tours: Array<{ id: string; title: string }> }>(res)
+    expect(body.tours).toHaveLength(3)
+    // ULIDs are lexicographic in creation order; DESC = newest first.
+    expect(body.tours.map(t => t.title)).toEqual(['Third tour', 'Second tour', 'First tour'])
+  })
+
+  it('paginates via next_cursor when over the limit', async () => {
+    const { env } = setupEnv()
+    for (let i = 0; i < 5; i++) {
+      await onRequestPost(
+        ctx({
+          env,
+          method: 'POST',
+          body: { title: `Tour ${i}`, tour_json_ref: 'r2:tours/seed.json' },
+        }),
+      )
+      await new Promise(r => setTimeout(r, 2))
+    }
+    const first = await toursList(
+      ctx({
+        env,
+        method: 'GET',
+        url: 'https://localhost/api/v1/publish/tours?limit=2',
+      }),
+    )
+    const firstBody = await readJson<{
+      tours: Array<{ id: string }>
+      next_cursor: string | null
+    }>(first)
+    expect(firstBody.tours).toHaveLength(2)
+    expect(firstBody.next_cursor).toBeTruthy()
+    const second = await toursList(
+      ctx({
+        env,
+        method: 'GET',
+        url: `https://localhost/api/v1/publish/tours?limit=2&cursor=${firstBody.next_cursor}`,
+      }),
+    )
+    const secondBody = await readJson<{
+      tours: Array<{ id: string }>
+      next_cursor: string | null
+    }>(second)
+    expect(secondBody.tours).toHaveLength(2)
+    // Pages don't overlap.
+    expect(
+      firstBody.tours.some(t => secondBody.tours.some(s => s.id === t.id)),
+    ).toBe(false)
+  })
+
+  it('rejects bad limit values', async () => {
+    const { env } = setupEnv()
+    for (const bad of ['0', '-1', 'abc', '1e2', '10.0']) {
+      const res = await toursList(
+        ctx({
+          env,
+          method: 'GET',
+          url: `https://localhost/api/v1/publish/tours?limit=${bad}`,
+        }),
+      )
+      expect(res.status, `limit=${bad}`).toBe(400)
+    }
+  })
+})
+
+describe('DELETE /api/v1/publish/tours/{id} (tour/G)', () => {
+  it('removes the row + drops the row from subsequent list reads', async () => {
+    const { env, sqlite } = setupEnv()
+    // Create a tour to delete.
+    const created = await onRequestPost(
+      ctx({
+        env,
+        method: 'POST',
+        body: { title: 'To delete', tour_json_ref: 'r2:tours/seed.json' },
+      }),
+    )
+    const id = (await readJson<{ tour: { id: string } }>(created)).tour.id
+    const res = await tourDelete(
+      ctx<'id'>({ env, method: 'DELETE', params: { id } }),
+    )
+    expect(res.status).toBe(200)
+    const body = await readJson<{ deleted_id: string }>(res)
+    expect(body.deleted_id).toBe(id)
+    // Row is gone from D1.
+    const row = sqlite
+      .prepare('SELECT id FROM tours WHERE id = ?')
+      .get(id)
+    expect(row).toBeUndefined()
+  })
+
+  it('returns 404 for an unknown id', async () => {
+    const { env } = setupEnv()
+    const res = await tourDelete(
+      ctx<'id'>({
+        env,
+        method: 'DELETE',
+        params: { id: '01HXAAAAAAAAAAAAAAAAAAAAAA' },
+      }),
+    )
+    expect(res.status).toBe(404)
+  })
+
+  it('succeeds when CATALOG_R2 is unbound (best-effort blob delete)', async () => {
+    // No R2 binding — the row should still be deleted from D1
+    // and the response should be 200. Orphaned blobs are
+    // harmless until a cleanup job runs.
+    const { env, sqlite } = setupEnv()
+    delete (env as { CATALOG_R2?: unknown }).CATALOG_R2
+    const created = await onRequestPost(
+      ctx({
+        env,
+        method: 'POST',
+        body: { title: 'No-R2 delete', tour_json_ref: 'r2:tours/seed.json' },
+      }),
+    )
+    const id = (await readJson<{ tour: { id: string } }>(created)).tour.id
+    const res = await tourDelete(
+      ctx<'id'>({ env, method: 'DELETE', params: { id } }),
+    )
+    expect(res.status).toBe(200)
+    expect(
+      sqlite.prepare('SELECT id FROM tours WHERE id = ?').get(id),
+    ).toBeUndefined()
   })
 })

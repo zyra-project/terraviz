@@ -1,23 +1,60 @@
 /**
- * POST /api/v1/publish/tours — create a tour.
+ * /api/v1/publish/tours — tour collection endpoint.
  *
- * Phase 1a accepts any non-empty `tour_json_ref` (the CLI feeds in
- * a URL or R2 key it constructed out-of-band). Phase 1b adds the
- * direct-upload pipeline that returns a real `r2:<key>` ref.
+ *   POST → create a tour (Phase 1a). Accepts any non-empty
+ *     `tour_json_ref` (CLI feeds in a URL or R2 key); Phase 1b
+ *     adds the direct-upload pipeline that returns a real
+ *     `r2:<key>` ref. Phase 3pt/E adds a sibling /tours/draft
+ *     endpoint that bypasses the ref requirement for the
+ *     publisher-portal "New tour" flow.
+ *
+ *   GET → list the publisher's tours (Phase 3pt/G). Honours the
+ *     same role-aware visibility as the per-id GET — staff /
+ *     admin / service see every tour; community publishers see
+ *     their own. Cursor pagination via `id < ?` so the list
+ *     stays stable when fresh tours land at the top.
  */
 
 import type { CatalogEnv } from '../_lib/env'
 import type { PublisherData } from './_middleware'
 import { getNodeIdentity } from '../_lib/catalog-store'
-import { createTour } from '../_lib/tour-mutations'
+import { createTour, listToursForPublisher } from '../_lib/tour-mutations'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
+const DEFAULT_LIMIT = 50
+const MAX_LIMIT = 200
 
 function jsonError(status: number, error: string, message: string): Response {
   return new Response(JSON.stringify({ error, message }), {
     status,
     headers: { 'Content-Type': CONTENT_TYPE },
   })
+}
+
+export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
+  const publisher = (context.data as unknown as PublisherData).publisher
+  const url = new URL(context.request.url)
+  const limitRaw = url.searchParams.get('limit')
+  let limit = DEFAULT_LIMIT
+  if (limitRaw != null) {
+    if (!/^\d+$/.test(limitRaw)) {
+      return jsonError(400, 'invalid_request', `limit must be a base-10 integer in [1, ${MAX_LIMIT}].`)
+    }
+    const n = parseInt(limitRaw, 10)
+    if (n < 1 || n > MAX_LIMIT) {
+      return jsonError(400, 'invalid_request', `limit must be a base-10 integer in [1, ${MAX_LIMIT}].`)
+    }
+    limit = n
+  }
+  const cursor = url.searchParams.get('cursor') ?? undefined
+  const result = await listToursForPublisher(context.env, publisher, { limit, cursor })
+  return new Response(
+    JSON.stringify({ tours: result.tours, next_cursor: result.next_cursor }),
+    {
+      status: 200,
+      headers: { 'Content-Type': CONTENT_TYPE, 'Cache-Control': 'private, no-store' },
+    },
+  )
 }
 
 export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
