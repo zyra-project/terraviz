@@ -298,10 +298,11 @@ class InteractiveSphere {
         getCurrentDataset: () => this.appState.currentDataset ?? null,
       })
       // Catalog ↔ sphere tab control — only becomes visible when
-      // `?catalog=true` is in the URL (see syncCatalogTabsForUrl
-      // below). The control is mounted unconditionally so the
-      // popstate handler can show/hide it without re-wiring on
-      // every history navigation.
+      // `?catalog=true` is in the URL (see the show/hide calls in
+      // the boot branches further below and in
+      // `wireCatalogModePopstate` for history navigation). The
+      // control is mounted unconditionally so the popstate handler
+      // can flip its visibility without re-wiring listeners.
       initCatalogTabs({
         onSelectCatalog: () => this.enterCatalogTab(),
         onSelectSphere: () => this.enterSphereTab(),

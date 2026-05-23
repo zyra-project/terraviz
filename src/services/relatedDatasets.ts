@@ -147,10 +147,14 @@ function countOverlap(a: ReadonlySet<string>, b: ReadonlySet<string>): number {
 
 /**
  * Normalize a title for matching against manually-curated
- * related-dataset entries. Mirrors the existing
- * `datasetLoader.ts` rule that strips a trailing "(Movie)"
- * marker and lowercases, so a manual title "Sea Ice" matches a
- * catalog row titled "Sea Ice (Movie)".
+ * related-dataset entries. Mirrors the existing `datasetLoader.ts`
+ * rule that strips any `(movie)` marker (case-insensitive) and
+ * lowercases, so a manual title "Sea Ice" matches a catalog row
+ * titled "Sea Ice (Movie)". The match is intentionally non-
+ * anchored — a handful of SOS rows carry the marker mid-title
+ * (e.g. "Sea Ice (Movie) — Climate Loop"), and stripping any
+ * occurrence keeps the legacy normaliser in `dataService.ts`
+ * (which uses the same global regex) in lockstep with this one.
  */
 export function normalizeTitle(title: string): string {
   return title.toLowerCase().replace(/\s*\(movie\)\s*/g, '').trim()

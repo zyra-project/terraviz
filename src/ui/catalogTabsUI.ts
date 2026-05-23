@@ -19,7 +19,7 @@
  */
 
 import { t, tAttr } from '../i18n'
-import { escapeAttr } from './domUtils'
+import { escapeHtml } from './domUtils'
 
 export interface CatalogTabsCallbacks {
   /** User clicked the Catalog tab — open the browse panel and
@@ -48,24 +48,27 @@ export function initCatalogTabs(callbacks: CatalogTabsCallbacks): void {
   const host = document.createElement('div')
   host.id = HOST_ID
   host.className = 'catalog-tabs hidden'
-  host.setAttribute('role', 'tablist')
+  // ARIA: this is a two-state segmented control, not a true tab
+  // pattern — there's no separate tabpanel element to control and
+  // no arrow-key navigation between siblings. Use `role="group"` +
+  // `aria-pressed` on each button, which is the WAI-ARIA pattern
+  // for toggle-button groups. (Earlier draft used `role="tablist"`
+  // / `role="tab"` / `aria-controls` without matching tabpanels —
+  // caught by review, fixed here.)
+  host.setAttribute('role', 'group')
   host.setAttribute('aria-label', tAttr('catalogTabs.aria'))
   host.innerHTML = `
     <button type="button"
             id="catalog-tab-catalog"
             class="catalog-tab"
-            role="tab"
-            aria-selected="true"
-            aria-controls="${escapeAttr(HOST_ID)}-panel-catalog">
-      ${escapeAttr(t('catalogTabs.catalog'))}
+            aria-pressed="true">
+      ${escapeHtml(t('catalogTabs.catalog'))}
     </button>
     <button type="button"
             id="catalog-tab-sphere"
             class="catalog-tab"
-            role="tab"
-            aria-selected="false"
-            aria-controls="${escapeAttr(HOST_ID)}-panel-sphere">
-      ${escapeAttr(t('catalogTabs.sphere'))}
+            aria-pressed="false">
+      ${escapeHtml(t('catalogTabs.sphere'))}
     </button>
   `
 
@@ -93,7 +96,7 @@ export function hideCatalogTabs(): void {
 
 /**
  * Update which tab is visually active. Active = highlighted +
- * `aria-selected=true`; inactive = subdued + `aria-selected=false`.
+ * `aria-pressed=true`; inactive = subdued + `aria-pressed=false`.
  *
  * Caller decides which tab reflects the current state — typically
  * Catalog when the browse panel is the primary surface, Sphere
@@ -107,7 +110,7 @@ export function setActiveCatalogTab(tab: 'catalog' | 'sphere'): void {
   if (!catalogBtn || !sphereBtn) return
   const catalogActive = tab === 'catalog'
   catalogBtn.classList.toggle('active', catalogActive)
-  catalogBtn.setAttribute('aria-selected', catalogActive ? 'true' : 'false')
+  catalogBtn.setAttribute('aria-pressed', catalogActive ? 'true' : 'false')
   sphereBtn.classList.toggle('active', !catalogActive)
-  sphereBtn.setAttribute('aria-selected', !catalogActive ? 'true' : 'false')
+  sphereBtn.setAttribute('aria-pressed', !catalogActive ? 'true' : 'false')
 }
