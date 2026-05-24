@@ -221,6 +221,40 @@ the four server-stamped blobs. Order is alphabetical by field name
 | `blob6` | — | `result_count_bucket` |
 | `double1` | `client_offset_ms` | `client_offset_ms` |
 
+### `catalog_view_mode_changed` (Tier A)
+
+Fires every time the user toggles between Cards / Graph / (later)
+Timeline / Map. `from` carries the previous view-mode so a dashboard
+can read pivot direction (Cards → Graph vs. Graph → Cards) without
+window-functioning over a series.
+
+Positional layout — blobs are sorted alphabetically by field name
+(see `toDataPoint` in `functions/api/ingest.ts`).
+
+| Position | Field |
+|---|---|
+| `blob5` | `from` (`cards` / `graph` / `timeline` / `map`) |
+| `blob6` | `result_count_bucket` |
+| `blob7` | `view_mode` (the destination mode) |
+| `double1` | `client_offset_ms` |
+
+### `catalog_graph_node_clicked` (Tier B)
+
+Fires on Graph view node clicks (Phase 4 §6.7). Throttled to ≤30/min
+per session (same budget pattern as `camera_settled`). `value_hash` is
+the SHA-256 12-hex of the lowercased node value — counts unique
+distinct clicks without exposing the value itself, mirroring
+`browse_search.query_hash`.
+
+Positional layout — alphabetical.
+
+| Position | Field |
+|---|---|
+| `blob5` | `facet` (facet name for facet-value nodes; `'keyword'` for keyword nodes; `''` for dataset nodes) |
+| `blob6` | `node_kind` (`facet-value` / `keyword` / `dataset`) |
+| `blob7` | `value_hash` |
+| `double1` | `client_offset_ms` |
+
 ### `tour_started` (Tier A)
 
 | Position | Field |

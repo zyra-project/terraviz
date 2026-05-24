@@ -117,7 +117,7 @@ must be corrected.
 | `viewport_focus` / `layout_changed` | A | `src/services/viewportManager.ts` |
 | `playback_action` | A | `src/ui/playbackController.ts` |
 | `settings_changed` | A | `src/ui/toolsMenuUI.ts`, `src/ui/privacyUI.ts` |
-| `browse_opened` / `browse_filter` | A | `src/ui/browseUI.ts` |
+| `browse_opened` / `browse_filter` / `catalog_view_mode_changed` | A | `src/ui/browseUI.ts` |
 | `tour_started` / `tour_task_fired` / `tour_paused` / `tour_resumed` / `tour_ended` | A | `src/services/tourEngine.ts` |
 | `vr_session_started` / `vr_session_ended` / `vr_placement` | A | `src/services/vrSession.ts`, `src/services/vrPlacement.ts` |
 | `perf_sample` | A | `src/analytics/perfSampler.ts` |
@@ -126,6 +126,7 @@ must be corrected.
 | `dwell` | **B** | `src/analytics/dwell.ts` (panel + dataset dwell, called by chat / browse / info / tools UI) |
 | `orbit_interaction` / `orbit_turn` / `orbit_tool_call` / `orbit_load_followed` / `orbit_correction` | **B** | `src/ui/chatUI.ts`, `src/services/docentService.ts`, `src/services/datasetLoader.ts` |
 | `browse_search` | **B** | `src/ui/browseUI.ts` (debounced + hashed) |
+| `catalog_graph_node_clicked` | **B** | `src/ui/catalogGraphUI.ts` (per-minute throttled + hashed values) |
 | `vr_interaction` | **B** | `src/services/vrInteraction.ts` (per-gesture, throttled) |
 | `error_detail` | **B** | `src/analytics/errorCapture.ts` (adds sanitized stack) |
 | `tour_question_answered` | **B** | `src/services/tourEngine.ts` |

@@ -912,6 +912,7 @@ export const TIER_B_EVENT_TYPES = [
   'orbit_load_followed',
   'orbit_correction',
   'browse_search',
+  'catalog_graph_node_clicked',
   'vr_interaction',
   'error_detail',
   'tour_question_answered',
@@ -1102,6 +1103,24 @@ export interface BrowseOpenedEvent extends TelemetryEventBase {
 export interface BrowseFilterEvent extends TelemetryEventBase {
   event_type: 'browse_filter'
   category: string
+  result_count_bucket: '0' | '1-10' | '11-50' | '50+'
+}
+
+/**
+ * Catalog view-mode toggle (Phase 4 §6.7+). Fires when the user
+ * switches the browse overlay between the card grid, the network
+ * graph, the upcoming Timeline view (§6.8), and the upcoming Map
+ * view (§6.9). Tier A — the choice is a pure UI preference and
+ * carries no free-text payload. `from` records what the user just
+ * came from so the dashboard can read both stickiness and
+ * direction of pivots.
+ */
+export interface CatalogViewModeChangedEvent extends TelemetryEventBase {
+  event_type: 'catalog_view_mode_changed'
+  view_mode: 'cards' | 'graph' | 'timeline' | 'map'
+  from: 'cards' | 'graph' | 'timeline' | 'map'
+  /** Bucketed dataset count visible at the moment of toggle — useful
+   *  for "did the user pivot to Graph because Cards was overwhelming?". */
   result_count_bucket: '0' | '1-10' | '11-50' | '50+'
 }
 
@@ -1601,6 +1620,32 @@ export interface BrowseSearchEvent extends TelemetryEventBase {
   query_length: number
 }
 
+/**
+ * Catalog Graph view node interaction (Phase 4 §6.7). Fires when
+ * the user clicks a node in the Graph view. Tier B — node values
+ * (Category names, keyword values, dataset IDs) are free-text by
+ * the privacy posture's definition, so `value_hash` carries a
+ * SHA-256 prefix rather than the value itself. Throttled to
+ * ≤30/min via the same rolling-window pattern as `camera_settled`
+ * so an aggressive panning session can't flood the queue.
+ *
+ * `node_kind` and `facet` are low-cardinality enums (3 × ~10
+ * facets) so they're safe to emit verbatim — they tell the
+ * dashboard "user clicked a Category facet-value node" without
+ * revealing which one.
+ */
+export interface CatalogGraphNodeClickedEvent extends TelemetryEventBase {
+  event_type: 'catalog_graph_node_clicked'
+  node_kind: 'facet-value' | 'keyword' | 'dataset'
+  /** Facet name for facet-value nodes; `'keyword'` for keyword
+   *  nodes; `''` for dataset nodes. */
+  facet: string
+  /** First 12 hex of SHA-256 of the lowercased value (facet value /
+   *  keyword / dataset id). Privacy-friendly count of distinct
+   *  clicks without exposing the value itself. */
+  value_hash: string
+}
+
 export interface VrInteractionEvent extends TelemetryEventBase {
   event_type: 'vr_interaction'
   gesture: VrGesture
@@ -1661,6 +1706,7 @@ export type TelemetryEvent =
   | SettingsChangedEvent
   | BrowseOpenedEvent
   | BrowseFilterEvent
+  | CatalogViewModeChangedEvent
   | TourStartedEvent
   | TourTaskFiredEvent
   | TourPausedEvent
@@ -1686,5 +1732,6 @@ export type TelemetryEvent =
   | OrbitLoadFollowedEvent
   | OrbitCorrectionEvent
   | BrowseSearchEvent
+  | CatalogGraphNodeClickedEvent
   | VrInteractionEvent
   | ErrorDetailEvent
