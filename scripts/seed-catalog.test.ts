@@ -53,6 +53,7 @@ const EXPECTED_INDEXES = [
   'idx_datasets_visibility',
   'idx_featured_datasets_position',
   'idx_renditions_dataset',
+  'idx_tours_visibility',
 ]
 
 describe('catalog migrations', () => {
