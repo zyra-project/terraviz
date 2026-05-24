@@ -661,15 +661,216 @@
     color: var(--color-text-secondary);
 }
 
+/* Timeline view container — Phase 4 §6.8. Sized to fill the same
+   space the card grid uses; d3-axis + d3-brush + SVG rows mount
+   inside. Hidden when another view-mode is active. The time axis
+   reads left → right even in RTL locales (calendar time is a
+   universal left-to-right convention; flipping it would surprise
+   the reader who expects past on the left). */
+#browse-timeline {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+#browse-timeline.hidden {
+    display: none;
+}
+.browse-timeline-host {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.browse-timeline-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.4rem 0.6rem;
+    background: var(--color-surface-alt);
+    border: 1px solid var(--white-o08);
+    border-radius: 6px;
+    font-size: 0.65rem;
+    color: var(--color-text-dim);
+    flex-wrap: wrap;
+}
+.browse-timeline-legend {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.6rem;
+    color: var(--color-text-muted);
+}
+.browse-timeline-legend-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-inline-end: 0.15rem;
+}
+.browse-timeline-legend-dot-coverage {
+    background: var(--facet-color-category-content);
+}
+.browse-timeline-legend-dot-realtime {
+    background: var(--color-success);
+}
+.browse-timeline-brush-summary {
+    margin-inline-start: auto;
+    font-size: 0.6rem;
+    color: var(--color-text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+.browse-timeline-brush-clear {
+    padding: 0.2rem 0.55rem;
+    border-radius: 4px;
+    border: 1px solid var(--white-o10);
+    background: var(--color-surface-alt);
+    color: var(--color-text-secondary);
+    font-size: 0.6rem;
+    cursor: pointer;
+    font-family: inherit;
+}
+.browse-timeline-brush-clear.hidden {
+    display: none;
+}
+.browse-timeline-brush-clear:hover {
+    background: var(--white-o08);
+    color: var(--color-text);
+}
+.browse-timeline-brush-clear:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+}
+.browse-timeline-chart {
+    flex: 1;
+    min-height: 320px;
+    background: var(--color-surface-alt);
+    border: 1px solid var(--white-o08);
+    border-radius: 6px;
+    overflow: auto;
+    position: relative;
+}
+.browse-timeline-chart.hidden {
+    display: none;
+}
+.browse-timeline-axis {
+    position: sticky;
+    inset-block-start: 0;
+    background: var(--color-bg);
+    z-index: 2;
+    border-block-end: 1px solid var(--white-o08);
+}
+.browse-timeline-axis-svg {
+    display: block;
+}
+.browse-timeline-axis-ticks text {
+    fill: var(--color-text-muted);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+}
+.browse-timeline-axis-ticks .domain,
+.browse-timeline-axis-ticks line {
+    stroke: var(--white-o15);
+}
+/* Brush selection — uses the time-facet amber so the brush reads
+   as a Time-group affordance, matching the chip-rail's typed-group
+   colour scheme. */
+.browse-timeline-brush .selection {
+    fill: var(--facet-color-time);
+    fill-opacity: 0.2;
+    stroke: var(--facet-color-time);
+    stroke-width: 1;
+}
+.browse-timeline-brush .handle {
+    fill: var(--facet-color-time);
+    fill-opacity: 0.5;
+}
+.browse-timeline-brush .overlay {
+    cursor: crosshair;
+}
+.browse-timeline-now-marker {
+    stroke: var(--color-text-muted);
+    stroke-width: 1;
+    stroke-dasharray: 2 2;
+    opacity: 0.6;
+}
+.browse-timeline-rows-wrap {
+    /* Sits below the sticky axis inside the scrollable chart. */
+}
+.browse-timeline-rows-svg {
+    display: block;
+}
+.browse-timeline-row {
+    cursor: pointer;
+}
+.browse-timeline-row:hover .browse-timeline-bar {
+    fill-opacity: 1;
+}
+.browse-timeline-row:focus-visible {
+    outline: none;
+}
+.browse-timeline-row:focus-visible .browse-timeline-bar {
+    stroke: var(--color-accent);
+    stroke-width: 1.5;
+}
+.browse-timeline-row-label {
+    fill: var(--color-text-secondary);
+    font-size: 11px;
+    pointer-events: none;
+}
+.browse-timeline-row:hover .browse-timeline-row-label {
+    fill: var(--color-text);
+}
+.browse-timeline-bar {
+    fill: var(--facet-color-category-content);
+    fill-opacity: 0.75;
+    rx: 2;
+}
+.browse-timeline-bar[data-group="format-medium"] {
+    fill: var(--facet-color-format-medium);
+}
+.browse-timeline-bar[data-group="time"] {
+    fill: var(--facet-color-time);
+}
+.browse-timeline-bar[data-group="quality-availability"] {
+    fill: var(--facet-color-quality-availability);
+}
+.browse-timeline-realtime-marker {
+    fill: var(--color-success);
+    stroke: var(--color-bg);
+    stroke-width: 1;
+}
+.browse-timeline-empty {
+    padding: 1.5rem;
+    text-align: center;
+    color: var(--color-text-muted);
+    font-size: 0.75rem;
+}
+.browse-timeline-empty.hidden {
+    display: none;
+}
+.browse-timeline-footnote {
+    padding: 0.5rem 0.7rem;
+    color: var(--color-text-muted);
+    font-size: 0.65rem;
+    font-style: italic;
+    border-block-start: 1px solid var(--white-o08);
+}
+.browse-timeline-footnote.hidden {
+    display: none;
+}
+
 /* Mobile: hide the view-mode toggle entirely. The JS also handles
    this via the matchMedia('(max-width: 768px)') listener in
    browseUI.ts, but the CSS guarantees the toggle stays hidden
    before initialisation finishes. We deliberately do NOT hide
-   #browse-graph here: the JS forces viewMode='cards' when the
-   viewport narrows, which sets the grid visible. A CSS rule that
-   hid the graph independently would race the JS and produce a
-   blank overlay when the user resized from desktop→narrow with
-   Graph view active. */
+   #browse-graph / #browse-timeline here: the JS forces
+   viewMode='cards' when the viewport narrows, which sets the grid
+   visible. A CSS rule that hid the alternative views independently
+   would race the JS and produce a blank overlay when the user
+   resized from desktop→narrow with Graph or Timeline active. */
 @media (max-width: 768px) {
     #browse-view-mode {
         display: none;
