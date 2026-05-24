@@ -560,21 +560,6 @@
     opacity: 1;
 }
 
-.browse-graph-min-weight {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-}
-.browse-graph-min-weight-input {
-    width: 100px;
-    accent-color: var(--color-accent);
-}
-.browse-graph-min-weight-value {
-    min-width: 1.5em;
-    text-align: end;
-    color: var(--color-text);
-    font-variant-numeric: tabular-nums;
-}
 .browse-graph-recenter {
     padding: 0.2rem 0.55rem;
     border-radius: 4px;

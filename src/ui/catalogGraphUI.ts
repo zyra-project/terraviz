@@ -37,10 +37,6 @@ import { escapeHtml, escapeAttr } from './domUtils'
 import { t } from '../i18n'
 import { formatNumber } from '../i18n/format'
 
-/** Default minimum co-occurrence edge weight. Matches the §6.7
- *  scale-management guidance — singleton co-occurrences clutter
- *  without adding information. */
-const DEFAULT_MIN_EDGE_WEIGHT = 2
 /** Top-N keywords each Category cluster auto-radiates when no
  *  explicit expansion is in effect. Tuned to ~5-8 per the GSL
  *  Depot Explorer reference: dense enough to read the hub-and-
@@ -237,15 +233,6 @@ export function createCatalogGraph(
              aria-label="${escapeAttr(t('browse.graph.showFormat.aria'))}" />
       <span>${escapeHtml(t('browse.graph.showFormat.label'))}</span>
     </label>
-    <label class="browse-graph-min-weight" aria-label="${escapeAttr(t('browse.graph.minWeight.aria'))}">
-      <span class="browse-graph-min-weight-label">${escapeHtml(t('browse.graph.minWeight.label'))}</span>
-      <input type="range"
-             class="browse-graph-min-weight-input"
-             min="1" max="10" step="1"
-             value="${DEFAULT_MIN_EDGE_WEIGHT}"
-             aria-valuemin="1" aria-valuemax="10" aria-valuenow="${DEFAULT_MIN_EDGE_WEIGHT}" />
-      <span class="browse-graph-min-weight-value" aria-hidden="true">${DEFAULT_MIN_EDGE_WEIGHT}</span>
-    </label>
     <button type="button"
             class="browse-graph-recenter"
             aria-label="${escapeAttr(t('browse.graph.recenter.aria'))}">
@@ -286,7 +273,6 @@ export function createCatalogGraph(
   let cy: Core | null = null
   let lastGraph: Graph | null = null
   let lastInput: CatalogGraphUpdate | null = null
-  let minEdgeWeight = DEFAULT_MIN_EDGE_WEIGHT
   let showFormat = false
   const expandedKeywordParents = new Set<string>()
   // Rolling timestamps for node-click throttling. Matches the
@@ -300,7 +286,13 @@ export function createCatalogGraph(
       lastInput.filterState,
       lastInput.searchQuery,
       {
-        minEdgeWeight,
+        // minEdgeWeight intentionally omitted — the service's
+        // default (2) suppresses singleton co-occurrences, which
+        // is the only behaviour we want. The slider that exposed
+        // this option was removed (PR #137 review) because the
+        // catalog's 4×11 Category↔Format grid produces
+        // high-weight edges where the 1→10 range barely changed
+        // density.
         expandedKeywordParents,
         autoExpandKeywordsPerCluster: DEFAULT_AUTO_EXPAND_PER_CLUSTER,
         includeFormatNodes: showFormat,
@@ -536,16 +528,6 @@ export function createCatalogGraph(
   }
 
   // --- Toolbar wiring ---
-  const slider = toolbar.querySelector('.browse-graph-min-weight-input') as HTMLInputElement | null
-  const sliderValue = toolbar.querySelector('.browse-graph-min-weight-value') as HTMLElement | null
-  slider?.addEventListener('input', () => {
-    const next = Math.max(1, Math.min(10, Math.round(Number(slider.value))))
-    if (!Number.isFinite(next) || next === minEdgeWeight) return
-    minEdgeWeight = next
-    if (sliderValue) sliderValue.textContent = String(next)
-    slider.setAttribute('aria-valuenow', String(next))
-    rebuild()
-  })
   toolbar.querySelector('.browse-graph-recenter')?.addEventListener('click', () => {
     cy?.fit(undefined, 40)
   })

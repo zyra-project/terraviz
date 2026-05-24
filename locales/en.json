@@ -64,8 +64,6 @@
   "browse.graph.legend.keyword": "Keyword",
   "browse.graph.loadError": "Could not load the graph view.",
   "browse.graph.loading": "Loading graph view…",
-  "browse.graph.minWeight.aria": "Minimum co-occurrence edge weight",
-  "browse.graph.minWeight.label": "Min edge weight",
   "browse.graph.recenter": "Recenter",
   "browse.graph.recenter.aria": "Recenter the graph view",
   "browse.graph.region.aria": "Catalog graph view — {count} datasets, {edgeCount} connections",
