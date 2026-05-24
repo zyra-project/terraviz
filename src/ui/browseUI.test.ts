@@ -1042,17 +1042,69 @@ describe('view-mode toggle', () => {
     expect(timelineBtn.getAttribute('aria-pressed')).toBe('false')
   })
 
-  it('hides the view-mode toggle on mobile and falls back to Cards', () => {
+  it('hides the view-mode toggle on portrait mobile and falls back to Cards', () => {
     setupBrowseDOM()
-    // Even with `graph` persisted, mobile must render only Cards.
+    // Even with `graph` persisted, portrait mobile must render only
+    // Cards. Stub matchMedia so the gate's orientation half also
+    // matches (`isMobile=true` alone no longer suffices since the
+    // PR #138 landscape parity change — Tauri/mobile in landscape
+    // is allowed; only portrait gates back).
     localStorage.setItem(VIEW_MODE_KEY, 'graph')
-    showBrowseUI([makeDataset({ id: 'a', tags: ['Air'] })], makeCallbacks({ isMobile: true }))
-    const bar = document.getElementById('browse-view-mode')!
-    expect(bar.classList.contains('hidden')).toBe(true)
-    expect(bar.querySelectorAll('.browse-view-mode-btn')).toHaveLength(0)
-    // Grid remains the active surface; graph container stays hidden.
-    expect(document.getElementById('browse-grid')!.classList.contains('hidden')).toBe(false)
-    expect(document.getElementById('browse-graph')!.classList.contains('hidden')).toBe(true)
+    const originalMatchMedia = window.matchMedia
+    window.matchMedia = ((query: string) => ({
+      media: query,
+      matches: query.includes('orientation: portrait'),
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(() => false),
+    })) as unknown as typeof window.matchMedia
+    try {
+      showBrowseUI([makeDataset({ id: 'a', tags: ['Air'] })], makeCallbacks({ isMobile: true }))
+      const bar = document.getElementById('browse-view-mode')!
+      expect(bar.classList.contains('hidden')).toBe(true)
+      expect(bar.querySelectorAll('.browse-view-mode-btn')).toHaveLength(0)
+      // Grid remains the active surface; graph container stays hidden.
+      expect(document.getElementById('browse-grid')!.classList.contains('hidden')).toBe(false)
+      expect(document.getElementById('browse-graph')!.classList.contains('hidden')).toBe(true)
+    } finally {
+      window.matchMedia = originalMatchMedia
+    }
+  })
+
+  it('shows the view-mode toggle on landscape mobile so Graph + Timeline are reachable', () => {
+    // PR #138 review follow-up: landscape feature parity. A phone in
+    // landscape (e.g. 667×375 iPhone SE) clears the portrait-only
+    // gate so a user testing from their phone can still toggle into
+    // Graph and Timeline. Vertical space is tight but the surfaces
+    // are usable for smoke testing — explicit goal of the change.
+    setupBrowseDOM()
+    localStorage.setItem(VIEW_MODE_KEY, 'graph')
+    const originalMatchMedia = window.matchMedia
+    window.matchMedia = ((query: string) => ({
+      media: query,
+      // Landscape — neither portrait-only nor the compound narrow+portrait
+      // query matches.
+      matches: false,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(() => false),
+    })) as unknown as typeof window.matchMedia
+    try {
+      showBrowseUI([makeDataset({ id: 'a', tags: ['Air'] })], makeCallbacks({ isMobile: true }))
+      const bar = document.getElementById('browse-view-mode')!
+      expect(bar.classList.contains('hidden')).toBe(false)
+      // All three buttons render and Graph is active (restored from storage).
+      expect(bar.querySelectorAll('.browse-view-mode-btn')).toHaveLength(3)
+      expect(bar.querySelector('[data-view-mode="graph"]')!.getAttribute('aria-pressed')).toBe('true')
+    } finally {
+      window.matchMedia = originalMatchMedia
+    }
   })
 
   it('falls back to Cards when window.matchMedia reports a narrow viewport even if callbacks.isMobile=false', () => {

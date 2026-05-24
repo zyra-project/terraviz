@@ -665,20 +665,40 @@ export function showBrowseUI(
 
   type SortKey = 'relevance' | 'newest' | 'az'
   let activeSort: SortKey = 'relevance'
-  // Live narrow-viewport check. Graph view is unusable below 768px
-  // (force-directed layout + pinch-zoom on a 6-inch screen), so the
-  // toggle hides and the view forces back to Cards. Earlier shape
-  // gated on `callbacks.isMobile` alone — a boot-time flag — which
-  // desynced from the rendered layout the moment the user resized
-  // across the breakpoint on desktop. matchMedia gives a live
-  // signal; we union it with `callbacks.isMobile` so the Tauri
-  // mobile shell (no DOM resize) still gets the right default.
+  // Live narrow-viewport check. Graph + Timeline views need
+  // horizontal room (force-directed layout / time bars span the
+  // available width), AND vertical room for the chip rail sitting
+  // above them — both of which a portrait phone runs out of.
+  //
+  // The gate is portrait-only: below 768px wide AND in portrait,
+  // hide the toggle and force Cards. A phone in landscape (e.g.
+  // 667 × 375 SE, 852 × 393 iPhone 15) clears the gate so a user
+  // testing from a phone can still reach the non-Cards surfaces.
+  // Vertical space is tight in phone landscape — Timeline shows
+  // only ~10–15 rows at the comfortable height and the Graph's
+  // canvas is cramped — but the views are usable for smoke
+  // testing, which is the explicit goal of allowing them here.
+  //
+  // matchMedia gives a live signal that re-fires on both width
+  // changes (resize) AND orientation changes (rotate). We union
+  // with `callbacks.isMobile` (Tauri's boot-time flag), gated on
+  // portrait via a second matchMedia so a Tauri mobile user in
+  // landscape doesn't get force-funnelled back to Cards either.
   const narrowVpQuery = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-    ? window.matchMedia('(max-width: 768px)')
+    ? window.matchMedia('(max-width: 768px) and (orientation: portrait)')
+    : null
+  const portraitOnlyQuery = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia('(orientation: portrait)')
     : null
   const isNarrowViewport = (): boolean => {
     if (narrowVpQuery?.matches) return true
-    return callbacks.isMobile
+    // Tauri mobile shell — `callbacks.isMobile` alone would gate
+    // away even in landscape. Require portrait too so the
+    // landscape parity holds across both delivery surfaces.
+    if (callbacks.isMobile) {
+      return portraitOnlyQuery?.matches ?? true
+    }
+    return false
   }
   // View-mode (§6.7). Initial value falls back to Cards when the
   // viewport is currently narrow so a `viewMode='graph'` left in
