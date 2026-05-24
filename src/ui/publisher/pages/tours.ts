@@ -14,6 +14,7 @@ import {
   createDraftTour,
   deleteTour,
   listTours,
+  retractTour,
   type TourListItem,
 } from '../../tourAuthoring/api'
 
@@ -28,6 +29,8 @@ export interface ToursPageOptions {
   listFn?: typeof listTours
   /** Override the DELETE /publish/tours/{id} API call — tests inject a stub. */
   deleteFn?: typeof deleteTour
+  /** Override the POST /publish/tours/{id}/retract API call — tests inject a stub. */
+  retractFn?: typeof retractTour
   /** Confirmation hook — defaults to `window.confirm`. Tests
    *  inject a stub that auto-accepts or auto-cancels. */
   confirm?: (message: string) => boolean
@@ -43,6 +46,7 @@ export async function renderToursPage(
   const createDraft = options.createDraft ?? createDraftTour
   const list = options.listFn ?? listTours
   const del = options.deleteFn ?? deleteTour
+  const retract = options.retractFn ?? retractTour
   const confirmFn = options.confirm ?? ((msg: string) => window.confirm(msg))
 
   // Loading state first so the page doesn't blank-flash.
@@ -71,7 +75,9 @@ export async function renderToursPage(
   // redirects within the session.
   clearWarmupFlag()
 
-  content.replaceChildren(buildShell(result.tours, navigate, createDraft, del, confirmFn))
+  content.replaceChildren(
+    buildShell(result.tours, navigate, createDraft, del, retract, confirmFn),
+  )
 }
 
 function buildLoadingShell(): HTMLElement {
@@ -102,6 +108,7 @@ function buildShell(
   navigate: (url: string) => void,
   createDraft: typeof createDraftTour,
   del: typeof deleteTour,
+  retract: typeof retractTour,
   confirmFn: (message: string) => boolean,
 ): HTMLElement {
   const shell = document.createElement('main')
@@ -163,7 +170,7 @@ function buildShell(
     return shell
   }
 
-  shell.appendChild(buildTable(tours, navigate, del, confirmFn))
+  shell.appendChild(buildTable(tours, navigate, del, retract, confirmFn))
   return shell
 }
 
@@ -171,6 +178,7 @@ function buildTable(
   tours: TourListItem[],
   navigate: (url: string) => void,
   del: typeof deleteTour,
+  retract: typeof retractTour,
   confirmFn: (message: string) => boolean,
 ): HTMLElement {
   const wrap = document.createElement('div')
@@ -200,7 +208,7 @@ function buildTable(
 
   const tbody = document.createElement('tbody')
   for (const tour of tours) {
-    tbody.appendChild(buildRow(tour, navigate, del, confirmFn))
+    tbody.appendChild(buildRow(tour, navigate, del, retract, confirmFn))
   }
   table.appendChild(tbody)
 
@@ -212,6 +220,7 @@ function buildRow(
   tour: TourListItem,
   navigate: (url: string) => void,
   del: typeof deleteTour,
+  retract: typeof retractTour,
   confirmFn: (message: string) => boolean,
 ): HTMLElement {
   const tr = document.createElement('tr')
@@ -229,12 +238,25 @@ function buildRow(
   titleCell.appendChild(titleLink)
   tr.appendChild(titleCell)
 
+  // Phase 3pt/G follow-up — three-way status. A retracted row
+  // keeps `published_at` set (history) and adds `retracted_at`;
+  // it should read as "Retracted" in the list so the publisher
+  // can tell at a glance that the row is not in the public
+  // surface anymore.
+  const statusKind: 'retracted' | 'published' | 'draft' = tour.retracted_at
+    ? 'retracted'
+    : tour.published_at
+      ? 'published'
+      : 'draft'
   const statusCell = document.createElement('td')
   const badge = document.createElement('span')
-  badge.className = `publisher-badge publisher-badge-status publisher-badge-${tour.published_at ? 'published' : 'draft'}`
-  badge.textContent = t(
-    tour.published_at ? 'publisher.tours.status.published' : 'publisher.tours.status.draft',
-  )
+  badge.className = `publisher-badge publisher-badge-status publisher-badge-${statusKind}`
+  badge.textContent =
+    statusKind === 'retracted'
+      ? t('publisher.tours.status.retracted')
+      : statusKind === 'published'
+        ? t('publisher.tours.status.published')
+        : t('publisher.tours.status.draft')
   statusCell.appendChild(badge)
   tr.appendChild(statusCell)
 
@@ -254,6 +276,50 @@ function buildRow(
     navigate(`/?tourEdit=${encodeURIComponent(tour.id)}`)
   })
   actionsCell.appendChild(editLink)
+
+  // Phase 3pt/G follow-up — Retract button. Only shown for
+  // currently-published rows (published_at set, retracted_at
+  // null). Re-publishing a retracted row brings it back, so
+  // the Publish gesture itself (in the dock) is the inverse
+  // — no separate "republish from list" affordance.
+  if (tour.published_at && !tour.retracted_at) {
+    const retractBtn = document.createElement('button')
+    retractBtn.type = 'button'
+    retractBtn.className = 'publisher-row-action publisher-row-retract'
+    retractBtn.textContent = t('publisher.tours.action.retract')
+    retractBtn.setAttribute(
+      'aria-label',
+      t('publisher.tours.action.retract.aria', { title: tour.title }),
+    )
+    const retractStatus = document.createElement('span')
+    retractStatus.className = 'publisher-row-action-status'
+    retractBtn.addEventListener('click', () => {
+      const confirmed = confirmFn(
+        t('publisher.tours.retract.confirm', { title: tour.title }),
+      )
+      if (!confirmed) return
+      retractBtn.disabled = true
+      retractStatus.textContent = ''
+      void retract(tour.id).then(result => {
+        if ('error' in result) {
+          retractBtn.disabled = false
+          retractStatus.textContent = result.error
+          retractStatus.classList.add('publisher-row-action-status-error')
+          return
+        }
+        // Replace the row in place — re-fetching the whole list
+        // for one change is overkill, and the badge + button
+        // visibility are the only DOM updates needed. Match the
+        // delete-button pattern of inline mutation.
+        badge.className = 'publisher-badge publisher-badge-status publisher-badge-retracted'
+        badge.textContent = t('publisher.tours.status.retracted')
+        retractBtn.remove()
+        retractStatus.remove()
+      })
+    })
+    actionsCell.appendChild(retractBtn)
+    actionsCell.appendChild(retractStatus)
+  }
 
   // Phase 3pt/G — Delete (×) button. Confirms first; on
   // success removes the row from the DOM rather than re-

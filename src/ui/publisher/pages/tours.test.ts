@@ -13,6 +13,7 @@ function makeTour(overrides: Partial<TourListItem> = {}): TourListItem {
     visibility: 'public',
     updated_at: '2026-05-21T12:00:00.000Z',
     published_at: null,
+    retracted_at: null,
     publisher_id: 'PUB-STAFF',
     ...overrides,
   }
@@ -232,6 +233,165 @@ describe('renderToursPage (tour/A → /G)', () => {
         content.querySelector('.publisher-row-action-status')?.textContent,
       ).toContain('Server error')
       expect(deleteBtn.disabled).toBe(false)
+    })
+  })
+
+  describe('Retract (tour/G follow-up)', () => {
+    it('shows a Retract button only on currently-published rows', async () => {
+      const content = document.createElement('div')
+      await renderToursPage(content, {
+        navigate: () => {},
+        createDraft: vi.fn(),
+        listFn: vi.fn(async () => ({
+          tours: [
+            makeTour({ id: '01HX_DRAFT', title: 'Draft only' }),
+            makeTour({
+              id: '01HX_PUB',
+              title: 'Published',
+              published_at: '2026-05-22T00:00:00Z',
+            }),
+            makeTour({
+              id: '01HX_RETR',
+              title: 'Already retracted',
+              published_at: '2026-05-22T00:00:00Z',
+              retracted_at: '2026-05-22T01:00:00Z',
+            }),
+          ],
+          next_cursor: null,
+        })),
+      })
+      const rows = content.querySelectorAll('tbody tr')
+      expect(rows[0].querySelector('.publisher-row-retract')).toBeNull()
+      expect(rows[1].querySelector('.publisher-row-retract')).not.toBeNull()
+      expect(rows[2].querySelector('.publisher-row-retract')).toBeNull()
+    })
+
+    it('renders the Retracted status badge for retracted rows', async () => {
+      const content = document.createElement('div')
+      await renderToursPage(content, {
+        navigate: () => {},
+        createDraft: vi.fn(),
+        listFn: vi.fn(async () => ({
+          tours: [
+            makeTour({
+              id: '01HX_RETR',
+              title: 'Retracted tour',
+              published_at: '2026-05-22T00:00:00Z',
+              retracted_at: '2026-05-22T01:00:00Z',
+            }),
+          ],
+          next_cursor: null,
+        })),
+      })
+      const badge = content.querySelector('.publisher-badge-retracted')
+      expect(badge).not.toBeNull()
+      expect(badge?.textContent).toBe('Retracted')
+    })
+
+    it('confirms first, then POSTs and flips the row to Retracted on success', async () => {
+      const content = document.createElement('div')
+      const retractFn = vi.fn(async () => ({
+        tour: {
+          id: '01HX_PUB',
+          slug: 'p',
+          title: 'Published',
+          tour_json_ref: 'r2:tours/01HX_PUB/published/01HY.json',
+          updated_at: '2026-05-22T02:00:00.000Z',
+        },
+      }))
+      const confirm = vi.fn<(message: string) => boolean>(() => true)
+      await renderToursPage(content, {
+        navigate: () => {},
+        createDraft: vi.fn(),
+        listFn: vi.fn(async () => ({
+          tours: [
+            makeTour({
+              id: '01HX_PUB',
+              title: 'Published',
+              published_at: '2026-05-22T00:00:00Z',
+            }),
+          ],
+          next_cursor: null,
+        })),
+        retractFn,
+        confirm,
+      })
+      const retractBtn = content.querySelector<HTMLButtonElement>(
+        '.publisher-row-retract',
+      )!
+      retractBtn.click()
+      expect(confirm).toHaveBeenCalledOnce()
+      expect(confirm.mock.calls[0]?.[0]).toContain('Published')
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(retractFn).toHaveBeenCalledWith('01HX_PUB')
+      // Row still present.
+      expect(content.querySelectorAll('tbody tr')).toHaveLength(1)
+      // Status flipped to Retracted.
+      const badge = content.querySelector('.publisher-badge-retracted')
+      expect(badge?.textContent).toBe('Retracted')
+      // Retract button is gone.
+      expect(content.querySelector('.publisher-row-retract')).toBeNull()
+    })
+
+    it('does not retract when the publisher cancels the confirm', async () => {
+      const content = document.createElement('div')
+      const retractFn = vi.fn()
+      await renderToursPage(content, {
+        navigate: () => {},
+        createDraft: vi.fn(),
+        listFn: vi.fn(async () => ({
+          tours: [
+            makeTour({
+              id: '01HX_PUB',
+              published_at: '2026-05-22T00:00:00Z',
+            }),
+          ],
+          next_cursor: null,
+        })),
+        retractFn,
+        confirm: () => false,
+      })
+      content.querySelector<HTMLButtonElement>('.publisher-row-retract')!.click()
+      await Promise.resolve()
+      expect(retractFn).not.toHaveBeenCalled()
+      // Still showing Published.
+      expect(
+        content.querySelector('.publisher-badge-published')?.textContent,
+      ).toBe('Published')
+    })
+
+    it('surfaces a server error inline and leaves the row published', async () => {
+      const content = document.createElement('div')
+      const retractFn = vi.fn(async () => ({ error: 'Server error (500)' }))
+      await renderToursPage(content, {
+        navigate: () => {},
+        createDraft: vi.fn(),
+        listFn: vi.fn(async () => ({
+          tours: [
+            makeTour({
+              id: '01HX_PUB',
+              published_at: '2026-05-22T00:00:00Z',
+            }),
+          ],
+          next_cursor: null,
+        })),
+        retractFn,
+        confirm: () => true,
+      })
+      const retractBtn = content.querySelector<HTMLButtonElement>(
+        '.publisher-row-retract',
+      )!
+      retractBtn.click()
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(
+        content.querySelector('.publisher-row-retract ~ .publisher-row-action-status')
+          ?.textContent,
+      ).toContain('Server error')
+      expect(retractBtn.disabled).toBe(false)
+      // Still Published.
+      expect(content.querySelector('.publisher-badge-published')).not.toBeNull()
     })
   })
 })

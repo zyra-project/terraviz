@@ -15,13 +15,22 @@ import { DataService } from './dataService'
 
 const ORIGINAL_SOURCE = import.meta.env.VITE_CATALOG_SOURCE
 
-function mockNodeCatalog(datasets: unknown[]) {
+function mockNodeCatalog(datasets: unknown[], tours: unknown[] = []) {
   return vi.fn(async (input: RequestInfo | URL | string) => {
-    expect(String(input)).toBe('/api/v1/catalog')
-    return new Response(JSON.stringify({ datasets }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    })
+    const url = String(input)
+    if (url === '/api/v1/catalog') {
+      return new Response(JSON.stringify({ datasets }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    if (url === '/api/v1/tours') {
+      return new Response(JSON.stringify({ tours }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    throw new Error(`Unexpected fetch URL: ${url}`)
   }) as unknown as typeof fetch
 }
 
@@ -87,6 +96,60 @@ describe('DataService — node-mode', () => {
     expect(ids).toContain('SAMPLE_TOUR_CLIMATE_FUTURES')
   })
 
+  it('merges publisher tours from /api/v1/tours into the dataset list', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockNodeCatalog(
+        [],
+        [
+          {
+            id: '01HXPUB000000000000000001',
+            slug: 'hurricane-tour',
+            title: 'Hurricane Tour',
+            description: 'A guided look at hurricane formation.',
+            tour_json_url: 'https://r2.example.com/tours/01HX/published/01HY.json',
+            thumbnail_url: 'https://r2.example.com/tours/01HX/thumb.jpg',
+            visibility: 'public',
+            schema_version: 1,
+            created_at: '2026-05-01T00:00:00.000Z',
+            updated_at: '2026-05-01T00:00:00.000Z',
+            published_at: '2026-05-01T00:00:00.000Z',
+            origin_node: 'NODE000',
+          },
+        ],
+      ),
+    )
+    const svc = new DataService()
+    const datasets = await svc.fetchDatasets()
+    const tour = datasets.find(d => d.id === '01HXPUB000000000000000001')
+    expect(tour).toBeDefined()
+    expect(tour!.format).toBe('tour/json')
+    expect(tour!.title).toBe('Hurricane Tour')
+    expect(tour!.tourJsonUrl).toBe(
+      'https://r2.example.com/tours/01HX/published/01HY.json',
+    )
+    expect(tour!.tags).toEqual(['Tours'])
+  })
+
+  it('tolerates a tours-endpoint failure and still returns datasets', async () => {
+    const fetchStub = vi.fn(async (input: RequestInfo | URL | string) => {
+      const url = String(input)
+      if (url === '/api/v1/catalog') {
+        return new Response(JSON.stringify({ datasets: [] }), { status: 200 })
+      }
+      if (url === '/api/v1/tours') {
+        return new Response('boom', { status: 500 })
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`)
+    }) as unknown as typeof fetch
+    vi.stubGlobal('fetch', fetchStub)
+    const svc = new DataService()
+    // No throw — the dataset path is intact even though tours
+    // failed. Sample tours still injected.
+    const datasets = await svc.fetchDatasets()
+    expect(datasets.map(d => d.id)).toContain('SAMPLE_TOUR')
+  })
+
   it('filters hidden datasets and HIDDEN_TOUR_IDS', async () => {
     vi.stubGlobal(
       'fetch',
@@ -142,7 +205,12 @@ describe('DataService — node-mode', () => {
     const svc = new DataService()
     await svc.fetchDatasets()
     await svc.fetchDatasets()
-    expect(fetchStub).toHaveBeenCalledTimes(1)
+    // Phase 3pt/G follow-up — node mode now hits two endpoints
+    // per fetch (catalog + tours). The cache wraps the merged
+    // result so the second fetchDatasets should re-hit neither.
+    expect(fetchStub).toHaveBeenCalledTimes(2)
+    expect(fetchStub).toHaveBeenNthCalledWith(1, '/api/v1/catalog', expect.anything())
+    expect(fetchStub).toHaveBeenNthCalledWith(2, '/api/v1/tours', expect.anything())
   })
 
   it('preserves legacyId from the wire shape and falls back on lookup (1d/T)', async () => {

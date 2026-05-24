@@ -996,6 +996,27 @@
   color: #ffc6c6;
 }
 
+/* Phase 3pt/G follow-up — tour-list lifecycle badges. The
+   class-name pattern (`publisher-badge-published` etc.) is
+   what `src/ui/publisher/pages/tours.ts` emits; dataset rows
+   use the `data-status` attribute via `dataset-detail.ts`.
+   Map the same tones either way: draft → pending amber,
+   published → active green, retracted → suspended red. */
+.publisher-badge-draft {
+  background: rgba(255, 200, 120, 0.18);
+  color: #ffe1a8;
+}
+
+.publisher-badge-published {
+  background: rgba(120, 200, 140, 0.18);
+  color: #c4ecc9;
+}
+
+.publisher-badge-retracted {
+  background: rgba(255, 120, 120, 0.18);
+  color: #ffc6c6;
+}
+
 /* --- Loading + error states --- */
 
 .publisher-loading {

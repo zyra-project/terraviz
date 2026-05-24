@@ -90,6 +90,11 @@ export interface TourListItem extends TourSummary {
   thumbnail_ref: string | null
   visibility: string
   published_at: string | null
+  /** Set when the publisher has taken a published tour off the
+   *  public list without deleting it. A row with both
+   *  `published_at` and `retracted_at` populated displays as
+   *  "Retracted"; the publisher can republish to lift it back. */
+  retracted_at: string | null
   publisher_id: string | null
 }
 
@@ -128,6 +133,29 @@ export async function publishTour(
 ): Promise<{ tour: TourSummary; publish_id: string } | { error: string }> {
   const result = await publisherSend<{ tour: TourSummary; publish_id: string }>(
     `/api/v1/publish/tours/${encodeURIComponent(id)}/publish`,
+    {},
+    { method: 'POST', fetchFn: opts?.fetchFn },
+  )
+  if (!result.ok) {
+    return { error: errorLabel(result) }
+  }
+  return result.data
+}
+
+/**
+ * Phase 3pt/G follow-up — retract a published tour. Server
+ * stamps `retracted_at` on the row; the immutable R2 snapshot
+ * is left in place so federation peers can still resolve
+ * cached refs and a republish lifts the row back into the
+ * public list. The publisher list keeps the row, but with a
+ * "Retracted" status badge.
+ */
+export async function retractTour(
+  id: string,
+  opts?: { fetchFn?: typeof fetch },
+): Promise<{ tour: TourSummary } | { error: string }> {
+  const result = await publisherSend<{ tour: TourSummary }>(
+    `/api/v1/publish/tours/${encodeURIComponent(id)}/retract`,
     {},
     { method: 'POST', fetchFn: opts?.fetchFn },
   )
