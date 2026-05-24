@@ -227,15 +227,26 @@ describe('BASELINE_RESOLVERS.hasCaptions', () => {
 describe('BASELINE_RESOLVERS.hasTour', () => {
   const resolve = BASELINE_RESOLVERS.hasTour
 
-  it('matches when runTourOnLoad is a non-empty string', () => {
+  it('matches datasets whose format is `tour/json` (publisher tours, SOS tour files)', () => {
     expect(
-      resolve({ kind: 'boolean', value: true }, makeDataset({ runTourOnLoad: 'tour-id' })),
+      resolve({ kind: 'boolean', value: true }, makeDataset({ format: 'tour/json' })),
     ).toBe(true)
   })
 
-  it('excludes datasets with empty or missing tour reference', () => {
+  it('excludes video / image / other formats regardless of runTourOnLoad', () => {
+    // PR #137: the original resolver tested runTourOnLoad, which
+    // the publisher pipeline overloaded to mean "auto-play on
+    // load" rather than "this is a curated tour". A video
+    // dataset with runTourOnLoad set must NOT pass — that's the
+    // bug the resolver change fixes.
     expect(
-      resolve({ kind: 'boolean', value: true }, makeDataset({ runTourOnLoad: undefined })),
+      resolve(
+        { kind: 'boolean', value: true },
+        makeDataset({ format: 'video/mp4', runTourOnLoad: 'some-tour-id' }),
+      ),
+    ).toBe(false)
+    expect(
+      resolve({ kind: 'boolean', value: true }, makeDataset({ format: 'image/jpeg' })),
     ).toBe(false)
   })
 })

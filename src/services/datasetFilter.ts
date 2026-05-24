@@ -255,13 +255,23 @@ export const BASELINE_RESOLVERS: Readonly<Record<string, FacetResolver>> = {
   },
 
   /**
-   * Has tour — boolean toggle. Datasets that auto-launch a tour
-   * on load carry `runTourOnLoad`; the 11 tour-equipped rows in
-   * today's catalog all surface through this toggle.
+  /**
+   * Has tour — boolean toggle. Surfaces datasets whose `format` is
+   * `tour/json`, i.e. publisher Tours and SOS tour files with a
+   * curated task sequence (camera moves, narration, dataset
+   * orchestration).
+   *
+   * The original shape of this resolver tested `runTourOnLoad`,
+   * which the publisher pipeline now sets on most imported rows
+   * to mean "auto-play on load" rather than "this is a curated
+   * tour". That overload made the toggle effectively a no-op
+   * (it surfaced almost the entire catalog). Filtering on the
+   * format string instead aligns the chip's behaviour with what
+   * the label promises — see PR #137 discussion.
    */
   hasTour: (predicate, dataset) => {
     if (predicate.kind !== 'boolean') return false
-    return typeof dataset.runTourOnLoad === 'string' && dataset.runTourOnLoad.length > 0
+    return dataset.format === 'tour/json'
   },
 
   /**
