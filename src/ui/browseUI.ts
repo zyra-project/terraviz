@@ -85,14 +85,23 @@ type ViewMode = 'cards' | 'graph' | 'timeline' | 'map'
  *  Versioned so a future schema change can ignore stale shapes. */
 const VIEW_MODE_STORAGE_KEY = 'sos-browse-view-mode.v1'
 
-/** Read the persisted view mode, falling back to `'cards'`. SSR-safe.
- *  An unknown string (left over from an older schema) collapses to
- *  Cards rather than crashing the rail. */
+/**
+ * Read the persisted view mode, falling back to `'cards'`. SSR-safe.
+ *
+ * Only `'graph'` is accepted from storage today — `'timeline'` and
+ * `'map'` are reserved for §6.8/§6.9 but the UI doesn't render
+ * those buttons yet, so a stale `'timeline'` entry from a future
+ * build (or a manual localStorage edit) would leave both Cards
+ * and Graph buttons with `aria-pressed="false"` and the user
+ * stranded without an active state. Normalising unknown modes to
+ * `'cards'` keeps the toggle's active state always meaningful.
+ * When §6.8/§6.9 ship, extend the allowed list here.
+ */
 function loadViewMode(): ViewMode {
   if (typeof window === 'undefined') return 'cards'
   try {
     const raw = window.localStorage.getItem(VIEW_MODE_STORAGE_KEY)
-    if (raw === 'graph' || raw === 'timeline' || raw === 'map') return raw
+    if (raw === 'graph') return 'graph'
     return 'cards'
   } catch {
     return 'cards'

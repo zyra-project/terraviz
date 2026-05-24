@@ -71,10 +71,12 @@ function setupBrowseDOM(): void {
       <button id="browse-search-clear" class="hidden"></button>
       <div id="browse-filter-rail"></div>
       <div id="browse-toolbar">
+        <div id="browse-view-mode"></div>
         <div id="browse-sort"></div>
       </div>
       <div id="browse-count"></div>
       <div id="browse-grid"></div>
+      <div id="browse-graph" class="hidden"></div>
     </div>
   `
 }
@@ -935,5 +937,142 @@ describe('hideBrowseUI', () => {
   it('does not throw when overlay is missing', () => {
     document.body.innerHTML = ''
     expect(() => hideBrowseUI()).not.toThrow()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// View-mode toggle (Cards / Graph) — Phase 4 §6.7
+//
+// Covers persistence, mobile-hidden fallback, and the
+// `catalog_view_mode_changed` emit. Doesn't exercise the cytoscape
+// mount itself — that lives behind a lazy `import('./catalogGraphUI')`
+// and a real cytoscape instance needs a layout engine that
+// happy-dom can't run. We assert on the toggle's DOM contract +
+// telemetry, and trust the cytoscape side to be exercised in a
+// real browser smoke test.
+// ---------------------------------------------------------------------------
+describe('view-mode toggle', () => {
+  const VIEW_MODE_KEY = 'sos-browse-view-mode.v1'
+
+  beforeEach(() => {
+    localStorage.clear()
+    resetForTests()
+    setTier('research')
+    // Reset URL — the chip rail boots from `window.location.search`
+    // via `readFilterStateFromUrl()`, so a `?cat=…&q=…` written by
+    // an earlier test would silently filter our fixture datasets to
+    // empty here and the result_count_bucket assertion would see 0
+    // cards rather than 2.
+    window.history.replaceState(null, '', '/')
+  })
+
+  afterEach(() => {
+    localStorage.clear()
+    window.history.replaceState(null, '', '/')
+  })
+
+  it('renders Cards + Graph buttons when not mobile, with Cards active by default', () => {
+    setupBrowseDOM()
+    showBrowseUI([makeDataset({ id: 'a', tags: ['Air'] })], makeCallbacks())
+    const bar = document.getElementById('browse-view-mode')!
+    const buttons = bar.querySelectorAll<HTMLButtonElement>('.browse-view-mode-btn')
+    expect(buttons).toHaveLength(2)
+    const cardsBtn = bar.querySelector('[data-view-mode="cards"]')!
+    const graphBtn = bar.querySelector('[data-view-mode="graph"]')!
+    expect(cardsBtn.getAttribute('aria-pressed')).toBe('true')
+    expect(graphBtn.getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('hides the view-mode toggle on mobile and falls back to Cards', () => {
+    setupBrowseDOM()
+    // Even with `graph` persisted, mobile must render only Cards.
+    localStorage.setItem(VIEW_MODE_KEY, 'graph')
+    showBrowseUI([makeDataset({ id: 'a', tags: ['Air'] })], makeCallbacks({ isMobile: true }))
+    const bar = document.getElementById('browse-view-mode')!
+    expect(bar.classList.contains('hidden')).toBe(true)
+    expect(bar.querySelectorAll('.browse-view-mode-btn')).toHaveLength(0)
+    // Grid remains the active surface; graph container stays hidden.
+    expect(document.getElementById('browse-grid')!.classList.contains('hidden')).toBe(false)
+    expect(document.getElementById('browse-graph')!.classList.contains('hidden')).toBe(true)
+  })
+
+  it('restores `graph` from localStorage and marks Graph button active', () => {
+    setupBrowseDOM()
+    localStorage.setItem(VIEW_MODE_KEY, 'graph')
+    showBrowseUI([makeDataset({ id: 'a', tags: ['Air'] })], makeCallbacks())
+    const bar = document.getElementById('browse-view-mode')!
+    expect(bar.querySelector('[data-view-mode="graph"]')!.getAttribute('aria-pressed')).toBe('true')
+    expect(bar.querySelector('[data-view-mode="cards"]')!.getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('normalises stale future view-modes (timeline/map) back to Cards', () => {
+    // §6.8 Timeline / §6.9 Map aren't shipped yet. A stale entry
+    // in localStorage (manual edit / future build / shared
+    // session) must not leave both buttons un-pressed and the
+    // user stranded without an active state. The full assertion
+    // chain: stored = `timeline`, but UI lands on Cards.
+    setupBrowseDOM()
+    localStorage.setItem(VIEW_MODE_KEY, 'timeline')
+    showBrowseUI([makeDataset({ id: 'a', tags: ['Air'] })], makeCallbacks())
+    const bar = document.getElementById('browse-view-mode')!
+    expect(bar.querySelector('[data-view-mode="cards"]')!.getAttribute('aria-pressed')).toBe('true')
+    expect(bar.querySelector('[data-view-mode="graph"]')!.getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('persists the choice to localStorage on toggle', () => {
+    setupBrowseDOM()
+    showBrowseUI([makeDataset({ id: 'a', tags: ['Air'] })], makeCallbacks())
+    expect(localStorage.getItem(VIEW_MODE_KEY)).toBeNull()
+    const graphBtn = document.querySelector<HTMLElement>('[data-view-mode="graph"]')!
+    graphBtn.click()
+    expect(localStorage.getItem(VIEW_MODE_KEY)).toBe('graph')
+  })
+
+  it('updates aria-pressed when the user toggles', () => {
+    setupBrowseDOM()
+    showBrowseUI([makeDataset({ id: 'a', tags: ['Air'] })], makeCallbacks())
+    // The toggle's click handler rebuilds the bar's innerHTML
+    // via renderViewModeBar(), so the original button references
+    // become detached. Re-query after the click to read the live
+    // state.
+    document.querySelector<HTMLElement>('[data-view-mode="graph"]')!.click()
+    const cardsBtn = document.querySelector<HTMLElement>('[data-view-mode="cards"]')!
+    const graphBtn = document.querySelector<HTMLElement>('[data-view-mode="graph"]')!
+    expect(graphBtn.getAttribute('aria-pressed')).toBe('true')
+    expect(cardsBtn.getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('ignores a click on the already-active button (no duplicate emit, no churn)', () => {
+    setupBrowseDOM()
+    showBrowseUI([makeDataset({ id: 'a', tags: ['Air'] })], makeCallbacks())
+    const cardsBtn = document.querySelector<HTMLElement>('[data-view-mode="cards"]')!
+    cardsBtn.click()
+    // No catalog_view_mode_changed event should have fired because
+    // the user clicked the surface they were already on.
+    const events = __peek().filter(e => e.event_type === 'catalog_view_mode_changed')
+    expect(events).toHaveLength(0)
+  })
+
+  it('emits catalog_view_mode_changed on toggle with previous + destination + count bucket', () => {
+    setupBrowseDOM()
+    showBrowseUI(
+      [
+        makeDataset({ id: 'a', tags: ['Air'] }),
+        makeDataset({ id: 'b', tags: ['Water'] }),
+      ],
+      makeCallbacks(),
+    )
+    document.querySelector<HTMLElement>('[data-view-mode="graph"]')!.click()
+    const events = __peek().filter(e => e.event_type === 'catalog_view_mode_changed')
+    expect(events).toHaveLength(1)
+    const evt = events[0] as {
+      event_type: string
+      view_mode: string
+      from: string
+      result_count_bucket: string
+    }
+    expect(evt.view_mode).toBe('graph')
+    expect(evt.from).toBe('cards')
+    expect(evt.result_count_bucket).toBe('1-10') // 2 visible cards
   })
 })

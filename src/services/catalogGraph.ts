@@ -174,20 +174,22 @@ export interface BuildGraphOptions {
   /**
    * Auto-expand the top-N most-populated keywords under EVERY
    * Category facet-value cluster, in addition to anything listed
-   * in `expandedKeywordParents`. Zero (the default) leaves
-   * keyword expansion entirely to explicit user gestures —
-   * matches the original §6.7 "collapse keywords by default"
-   * scale rule.
+   * in `expandedKeywordParents`.
    *
-   * Reflects the GSL Depot Explorer reference layout: each
-   * Category hub auto-radiates its top keywords so the user can
-   * skim co-occurrence structure without clicking into every
-   * cluster individually. Capped per-cluster (not globally) so
-   * a sparsely-populated Category still surfaces its top few
-   * keywords. Keywords whose normalised value matches the
-   * parent's tag are suppressed (the tag-fallback path in the
-   * keyword resolver duplicates the tag into the keyword set;
-   * we don't want "Water" radiating "Water" back to itself).
+   * Service-level default is `0` (off) — callers that don't pass
+   * the option get the original §6.7 "collapse keywords by
+   * default" behaviour. The shipped Graph view UI overrides this
+   * to `6` per PR #137 feedback, which moved the surface closer
+   * to the GSL Depot Explorer reference (each Category hub
+   * auto-radiates its top keywords so the user can skim
+   * co-occurrence structure without clicking into every cluster).
+   *
+   * Capped per-cluster (not globally) so a sparsely-populated
+   * Category still surfaces its top few keywords. Keywords whose
+   * normalised value matches the parent's tag are suppressed
+   * (the tag-fallback path in the keyword resolver duplicates the
+   * tag into the keyword set; we don't want "Water" radiating
+   * "Water" back to itself).
    */
   autoExpandKeywordsPerCluster?: number
   /**

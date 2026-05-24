@@ -357,9 +357,10 @@ export function createCatalogGraph(
       })
       // Re-run cola in incremental mode — node positions stay put,
       // newly-added nodes find a spot, and the simulation relaxes
-      // around the diff. Cola's `infinite: true` keeps the
-      // simulation alive after layout completes so drag gestures
-      // continue to ripple through the rest of the graph.
+      // around the diff. The drag-to-follow feel comes from a
+      // separate `grab`-triggered re-run in `wireCyEvents` (cola
+      // here runs in finite mode; `infinite: true` was dropped in
+      // 1bc6d79 because it was fighting wheel-zoom).
       startColaLayout(cy, false)
     } else {
       cy = cytoscape({
