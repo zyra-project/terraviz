@@ -464,6 +464,93 @@ describe('showBrowseUI', () => {
     expect(titles).toEqual(['Ocean Water'])
   })
 
+  it('renders typed-group sections as collapsible accordions with sane defaults', () => {
+    // Per the user's feedback in PR review — the filter rail was
+    // taking too much screen real estate. Each typed group is
+    // now an accordion: Category & content opens by default,
+    // others collapse to save vertical space, and each section's
+    // open/collapsed state persists across sessions.
+    localStorage.removeItem('sos-browse-section-open.v1')
+    showBrowseUI([makeDataset({ tags: ['Air'] })], makeCallbacks())
+
+    const sections = document.querySelectorAll('.browse-filter-section')
+    expect(sections.length).toBe(4)
+    const findSection = (group: string) =>
+      document.querySelector(`.browse-filter-section[data-group="${group}"]`) as HTMLElement
+
+    // Default: category open; format, time, quality collapsed.
+    expect(findSection('category').classList.contains('collapsed')).toBe(false)
+    expect(findSection('format').classList.contains('collapsed')).toBe(true)
+    expect(findSection('time').classList.contains('collapsed')).toBe(true)
+    expect(findSection('quality').classList.contains('collapsed')).toBe(true)
+
+    // Header click toggles the section open/closed and updates
+    // aria-expanded — the canonical accessibility signal.
+    const formatHeader = findSection('format').querySelector('.browse-filter-section-header') as HTMLElement
+    expect(formatHeader.getAttribute('aria-expanded')).toBe('false')
+    formatHeader.click()
+    expect(findSection('format').classList.contains('collapsed')).toBe(false)
+    expect(
+      (findSection('format').querySelector('.browse-filter-section-header') as HTMLElement)
+        .getAttribute('aria-expanded'),
+    ).toBe('true')
+
+    // Persistence — the next call to showBrowseUI reads the same
+    // localStorage and keeps Format open.
+    const stored = JSON.parse(localStorage.getItem('sos-browse-section-open.v1') ?? '{}')
+    expect(stored.format).toBe(true)
+  })
+
+  it('auto-expands a collapsed section when its facet has active filters', () => {
+    // A shared URL deep-link that activates a hasCaptions chip
+    // would otherwise hide the active chip behind the collapsed
+    // Quality section — surprising on a shared link. The auto-
+    // expand rule forces the section open when its facet is
+    // active at boot.
+    localStorage.removeItem('sos-browse-section-open.v1')
+    window.history.replaceState(null, '', '/?cc=1')
+    showBrowseUI([makeDataset({ closedCaptionLink: 'https://x' })], makeCallbacks())
+
+    const quality = document.querySelector('.browse-filter-section[data-group="quality"]') as HTMLElement
+    expect(quality.classList.contains('collapsed')).toBe(false)
+  })
+
+  it('shows an active-filter badge in the section header when chips are set', () => {
+    // Even when a section is collapsed, the user needs to see
+    // "there's something filtered here". The badge surfaces the
+    // active count next to the title.
+    localStorage.removeItem('sos-browse-section-open.v1')
+    showBrowseUI(
+      [
+        makeDataset({ id: 'a', title: 'A', tags: ['Air'] }),
+        makeDataset({ id: 'w', title: 'W', tags: ['Water'] }),
+      ],
+      makeCallbacks(),
+    )
+
+    // Toggle Air on — the Category section now has 1 active chip.
+    const airChip = Array.from(document.querySelectorAll('.browse-chip'))
+      .find(el => el.textContent === 'Air') as HTMLElement
+    airChip.click()
+
+    const categoryHeader = document.querySelector(
+      '.browse-filter-section[data-group="category"] .browse-filter-section-header',
+    ) as HTMLElement
+    const badge = categoryHeader.querySelector('.browse-filter-section-badge')
+    expect(badge).not.toBeNull()
+    expect(badge!.textContent).toBe('1')
+
+    // Toggle Water on — badge updates to 2.
+    const waterChip = Array.from(document.querySelectorAll('.browse-chip'))
+      .find(el => el.textContent === 'Water') as HTMLElement
+    waterChip.click()
+    expect(
+      document.querySelector(
+        '.browse-filter-section[data-group="category"] .browse-filter-section-badge',
+      )!.textContent,
+    ).toBe('2')
+  })
+
   it('clear-all button resets the filter state and surfaces only when something is active', () => {
     const datasets = [
       makeDataset({ id: 'a', title: 'A', tags: ['Air'] }),

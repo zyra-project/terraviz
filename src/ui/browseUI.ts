@@ -317,6 +317,149 @@ function collectTagOptions(datasets: readonly Dataset[]): ChipOption[] {
 }
 
 /**
+ * The four typed-group section keys. Listed in §6.1's display
+ * order; the accordion state map is keyed off these strings.
+ */
+type SectionKey = 'category' | 'format' | 'time' | 'quality'
+const SECTION_KEYS: readonly SectionKey[] = ['category', 'format', 'time', 'quality']
+
+/** Section open/collapsed state. Persisted to localStorage so the
+ *  user's expand/collapse choices stick across sessions. */
+type SectionOpenState = Record<SectionKey, boolean>
+
+/** localStorage key holding the SectionOpenState JSON blob.
+ *  Versioned suffix so a future schema change can ignore stale
+ *  shapes without crashing the rail. */
+const SECTION_OPEN_STORAGE_KEY = 'sos-browse-section-open.v1'
+
+/**
+ * Default open/collapsed state for each typed group on first
+ * visit. Category & content opens because it's the highest-
+ * frequency surface; the rest collapse to save vertical space
+ * per the user's accordion request. Active filters auto-expand
+ * their section so a shared URL or prefix-search never leaves
+ * filtered state hidden — that logic lives in
+ * {@link computeSectionOpenState}.
+ */
+const SECTION_OPEN_DEFAULT: SectionOpenState = {
+  category: true,
+  format: false,
+  time: false,
+  quality: false,
+}
+
+/**
+ * Load the persisted section open/collapsed map. Returns the
+ * default when localStorage is unavailable or the stored value
+ * is unparseable / from a previous schema. SSR-safe — guards on
+ * `typeof window`.
+ */
+function loadSectionOpenState(): SectionOpenState {
+  if (typeof window === 'undefined') return { ...SECTION_OPEN_DEFAULT }
+  try {
+    const raw = window.localStorage.getItem(SECTION_OPEN_STORAGE_KEY)
+    if (!raw) return { ...SECTION_OPEN_DEFAULT }
+    const parsed = JSON.parse(raw) as Partial<SectionOpenState>
+    const result: SectionOpenState = { ...SECTION_OPEN_DEFAULT }
+    for (const key of SECTION_KEYS) {
+      if (typeof parsed[key] === 'boolean') result[key] = parsed[key] as boolean
+    }
+    return result
+  } catch {
+    return { ...SECTION_OPEN_DEFAULT }
+  }
+}
+
+/** Persist the section open/collapsed state. Best-effort — swallow
+ *  storage failures (private-mode browsers, quota exceeded) so the
+ *  rail keeps working. */
+function saveSectionOpenState(state: SectionOpenState): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(SECTION_OPEN_STORAGE_KEY, JSON.stringify(state))
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Count active facet predicates within a section. Used both to
+ * decide whether to auto-expand a collapsed section and to render
+ * the badge in the section header (so a collapsed section still
+ * signals "you have something filtered here").
+ *
+ *  - multi-select  → `values.length`
+ *  - boolean       → 1 when present
+ *  - range         → 1 when min or max is set
+ *  - bbox          → 1 when present
+ */
+function countSectionActive(section: SectionKey, state: FilterState): number {
+  const facets = SECTION_FACETS[section]
+  let count = 0
+  for (const facet of facets) {
+    const predicate = state[facet]
+    if (predicate == null) continue
+    if (predicate.kind === 'multi-select') count += predicate.values.length
+    else if (predicate.kind === 'boolean') count += 1
+    else if (predicate.kind === 'range') {
+      if (predicate.min != null || predicate.max != null) count += 1
+    } else if (predicate.kind === 'bbox') count += 1
+  }
+  return count
+}
+
+/** Map from typed-group section to the facets it owns. Single
+ *  source of truth for the section ↔ facet association. */
+const SECTION_FACETS: Readonly<Record<SectionKey, readonly string[]>> = {
+  category: ['category'],
+  format: ['format'],
+  time: ['dateAdded', 'dataCoverageYear'],
+  quality: ['hasCaptions', 'hasTour', 'includeSos'],
+}
+
+/**
+ * Merge the persisted open state with the auto-expand rule:
+ * sections whose facets are active are forced open, since hiding
+ * filtered chips behind a collapsed header would surprise the
+ * user (especially on a shared link). The user can still
+ * collapse the section by clicking the header — the auto-expand
+ * only applies when reading from persistence, not after the user
+ * has explicitly toggled.
+ */
+function computeSectionOpenState(
+  persisted: SectionOpenState,
+  filterState: FilterState,
+): SectionOpenState {
+  const result = { ...persisted }
+  for (const section of SECTION_KEYS) {
+    if (countSectionActive(section, filterState) > 0) result[section] = true
+  }
+  return result
+}
+
+/**
+ * Render an accordion-style section header. Clickable button with
+ * a `▸`/`▾` indicator and an `aria-expanded` state. Includes an
+ * active-filter badge when the section has chips set so a
+ * collapsed section still signals filtered state. The arrow
+ * indicator is hardcoded — it's a visual glyph, not a label, and
+ * doesn't need to flip in RTL (RTL accordion conventions still
+ * use `▸`/`▾` going down rather than `◂`/`▾`).
+ */
+function renderSectionHeader(
+  section: SectionKey,
+  title: string,
+  isOpen: boolean,
+  activeCount: number,
+): string {
+  const badge = activeCount > 0
+    ? ` <span class="browse-filter-section-badge">${escapeHtml(formatNumber(activeCount))}</span>`
+    : ''
+  const indicator = isOpen ? '▾' : '▸'
+  return `<button type="button" class="browse-filter-section-header" data-section="${escapeAttr(section)}" aria-expanded="${isOpen}"><span class="browse-filter-section-indicator" aria-hidden="true">${indicator}</span><span class="browse-filter-section-title">${escapeHtml(title)}</span>${badge}</button>`
+}
+
+/**
  * Year bounds for the date-added and data-coverage range inputs.
  * Lowest year + highest year across the visible catalog. Used to
  * seed the input `min`/`max` attributes so the range inputs don't
@@ -482,6 +625,18 @@ export function showBrowseUI(
   // this overlay instance; rebuilding per render is wasted work.
   const resolvers = { ...BASELINE_RESOLVERS, period: PERIOD_RESOLVER }
 
+  // Accordion section open/collapsed state — persisted to
+  // localStorage so the user's expand/collapse choices stick
+  // across sessions. The user explicitly asked for an accordion
+  // to save screen real estate; defaults open Category & content
+  // and collapse the other three groups. Sections with active
+  // facets auto-expand at boot so a shared URL or prefix-search
+  // never leaves filtered chips hidden.
+  let sectionOpen: SectionOpenState = computeSectionOpenState(
+    loadSectionOpenState(),
+    filterState,
+  )
+
   // ----- Filter rail render -----
 
   const rail = document.getElementById('browse-filter-rail')
@@ -507,63 +662,86 @@ export function showBrowseUI(
 
     const sections: string[] = []
 
+    /** Wrap a section's body in the accordion shell — clickable
+     *  header + collapsible body. The body is rendered even when
+     *  collapsed so values stay in the DOM (input state survives
+     *  toggling the section closed and re-opening), and CSS
+     *  `display: none` hides them when `aria-expanded="false"`. */
+    const wrapSection = (
+      key: SectionKey,
+      title: string,
+      bodyHtml: string,
+    ): string => {
+      const isOpen = sectionOpen[key]
+      const activeCount = countSectionActive(key, filterState)
+      const header = renderSectionHeader(key, title, isOpen, activeCount)
+      return `<div class="browse-filter-section${isOpen ? '' : ' collapsed'}" data-group="${escapeAttr(key)}">${header}<div class="browse-filter-section-body">${bodyHtml}</div></div>`
+    }
+
     // Category & content
-    sections.push(`<div class="browse-filter-section" data-group="category"><div class="browse-filter-group-heading">${escapeHtml(t('browse.filter.group.category'))}</div>`)
-    sections.push(renderChipGroup(
+    sections.push(wrapSection(
       'category',
-      t('browse.filter.tags.label'),
-      tagOptions,
-      categoryActive,
-      t('browse.filter.tags.aria'),
+      t('browse.filter.group.category'),
+      renderChipGroup(
+        'category',
+        t('browse.filter.tags.label'),
+        tagOptions,
+        categoryActive,
+        t('browse.filter.tags.aria'),
+      ),
     ))
-    sections.push(`</div>`)
 
     // Format & medium
-    sections.push(`<div class="browse-filter-section" data-group="format"><div class="browse-filter-group-heading">${escapeHtml(t('browse.filter.group.format'))}</div>`)
-    sections.push(renderChipGroup(
+    sections.push(wrapSection(
       'format',
-      t('browse.filter.format.label'),
-      formatOptions,
-      formatActive,
-      t('browse.filter.format.aria'),
+      t('browse.filter.group.format'),
+      renderChipGroup(
+        'format',
+        t('browse.filter.format.label'),
+        formatOptions,
+        formatActive,
+        t('browse.filter.format.aria'),
+      ),
     ))
-    sections.push(`</div>`)
 
     // Time
-    sections.push(`<div class="browse-filter-section" data-group="time"><div class="browse-filter-group-heading">${escapeHtml(t('browse.filter.group.time'))}</div>`)
-    sections.push(renderRangeInputs(
-      'dateAdded',
-      t('browse.filter.dateAdded.label'),
-      t('browse.filter.dateAdded.fromLabel'),
-      t('browse.filter.dateAdded.toLabel'),
-      filterState.dateAdded,
-      dateAddedBounds,
+    sections.push(wrapSection(
+      'time',
+      t('browse.filter.group.time'),
+      renderRangeInputs(
+        'dateAdded',
+        t('browse.filter.dateAdded.label'),
+        t('browse.filter.dateAdded.fromLabel'),
+        t('browse.filter.dateAdded.toLabel'),
+        filterState.dateAdded,
+        dateAddedBounds,
+      ) + renderRangeInputs(
+        'dataCoverageYear',
+        t('browse.filter.dataCoverage.label'),
+        t('browse.filter.dataCoverage.fromLabel'),
+        t('browse.filter.dataCoverage.toLabel'),
+        filterState.dataCoverageYear,
+        coverageBounds,
+      ),
     ))
-    sections.push(renderRangeInputs(
-      'dataCoverageYear',
-      t('browse.filter.dataCoverage.label'),
-      t('browse.filter.dataCoverage.fromLabel'),
-      t('browse.filter.dataCoverage.toLabel'),
-      filterState.dataCoverageYear,
-      coverageBounds,
-    ))
-    sections.push(`</div>`)
 
     // Quality & availability
-    sections.push(`<div class="browse-filter-section" data-group="quality"><div class="browse-filter-group-heading">${escapeHtml(t('browse.filter.group.quality'))}</div>`)
-    sections.push(`<div class="browse-toggle-row">`)
-    sections.push(renderBooleanChip('hasCaptions', t('browse.filter.hasCaptions.label'), hasCaptions))
-    sections.push(renderBooleanChip('hasTour', t('browse.filter.hasTour.label'), hasTour))
+    const qualityChips: string[] = []
+    qualityChips.push(renderBooleanChip('hasCaptions', t('browse.filter.hasCaptions.label'), hasCaptions))
+    qualityChips.push(renderBooleanChip('hasTour', t('browse.filter.hasTour.label'), hasTour))
     if (sosOnlyCount > 0) {
-      sections.push(renderBooleanChip(
+      qualityChips.push(renderBooleanChip(
         'includeSos',
         t('browse.filter.includeSos.label'),
         includeSos,
         t('browse.filter.includeSos.help', { count: formatNumber(sosOnlyCount) }),
       ))
     }
-    sections.push(`</div>`)
-    sections.push(`</div>`)
+    sections.push(wrapSection(
+      'quality',
+      t('browse.filter.group.quality'),
+      `<div class="browse-toggle-row">${qualityChips.join('')}</div>`,
+    ))
 
     // Clear-all affordance — surfaces only when there's something
     // to clear, so the rail isn't visually noisy in the default
@@ -585,6 +763,20 @@ export function showBrowseUI(
       if (target.closest('#browse-filter-clear')) {
         e.preventDefault()
         applyState({}, '')
+        return
+      }
+      // Accordion section header — toggle open/collapsed. Marked
+      // before the [data-facet] match so a header click doesn't
+      // also fire as a chip click (headers carry no data-facet
+      // anyway, but the early-return pattern is clearer).
+      const sectionHeader = target.closest('.browse-filter-section-header') as HTMLElement | null
+      if (sectionHeader) {
+        e.preventDefault()
+        const key = sectionHeader.dataset.section as SectionKey | undefined
+        if (!key) return
+        sectionOpen = { ...sectionOpen, [key]: !sectionOpen[key] }
+        saveSectionOpenState(sectionOpen)
+        renderRail()
         return
       }
       const chip = target.closest('[data-facet]') as HTMLElement | null

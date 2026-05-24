@@ -197,12 +197,77 @@
     gap: 0.35rem;
 }
 
-.browse-filter-group-heading {
+/* Accordion section header — clickable button that toggles the
+   body's visibility. Per-section open/collapsed state persists
+   in localStorage. Active facets render an inline badge so a
+   collapsed section still signals "you have filters set here". */
+.browse-filter-section-header {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    width: 100%;
+    padding: 0.25rem 0.1rem;
+    background: transparent;
+    border: none;
+    color: var(--color-text-muted);
+    font-family: inherit;
     font-size: 0.6rem;
     font-weight: 600;
-    color: var(--color-text-muted);
     letter-spacing: 0.08em;
     text-transform: uppercase;
+    text-align: start;
+    cursor: pointer;
+    border-radius: 0.25rem;
+}
+
+.browse-filter-section-header:hover {
+    color: var(--color-text);
+    background: var(--white-o05);
+}
+
+.browse-filter-section-header:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+}
+
+.browse-filter-section-indicator {
+    display: inline-block;
+    width: 0.7rem;
+    font-size: 0.55rem;
+    text-align: center;
+    color: var(--color-text-muted);
+}
+
+.browse-filter-section-header:hover .browse-filter-section-indicator {
+    color: var(--color-text);
+}
+
+.browse-filter-section-title {
+    flex: 1;
+}
+
+.browse-filter-section-badge {
+    flex-shrink: 0;
+    min-width: 1.1rem;
+    padding: 0.05rem 0.4rem;
+    border-radius: 999px;
+    background: var(--color-accent-dark);
+    color: var(--color-text);
+    font-size: 0.55rem;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+    text-align: center;
+}
+
+.browse-filter-section-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.browse-filter-section.collapsed .browse-filter-section-body {
+    display: none;
 }
 
 .browse-filter-group {
