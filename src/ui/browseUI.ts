@@ -41,6 +41,7 @@ import {
   applyFilterStateToUrl,
   readFilterStateFromUrl,
 } from '../utils/catalogFilters'
+import type { CatalogGraphController } from './catalogGraphUI'
 
 /** Tier B dwell handle for the browse overlay — non-null while the
  * overlay is visible. Started on showBrowseUI when the overlay
@@ -70,6 +71,43 @@ const MAX_CARD_KEYWORDS = 12
 /** The fixed order of format buckets in the Format chip group. Other
  *  comes last because it's the catch-all. */
 const FORMAT_BUCKETS: readonly FormatBucket[] = ['video', 'image', 'tour', 'other']
+
+/**
+ * Catalog view-mode (Phase 4 §6.7+). Cards is the baseline grid;
+ * Graph is the §6.7 network view. The string union is intentionally
+ * forward-compat with §6.8 Timeline and §6.9 Map so the same toggle
+ * pattern extends without a type rewrite — those entries don't ship
+ * here, only `'cards'` and `'graph'` are rendered as buttons.
+ */
+type ViewMode = 'cards' | 'graph' | 'timeline' | 'map'
+
+/** localStorage key holding the user's selected view mode.
+ *  Versioned so a future schema change can ignore stale shapes. */
+const VIEW_MODE_STORAGE_KEY = 'sos-browse-view-mode.v1'
+
+/** Read the persisted view mode, falling back to `'cards'`. SSR-safe.
+ *  An unknown string (left over from an older schema) collapses to
+ *  Cards rather than crashing the rail. */
+function loadViewMode(): ViewMode {
+  if (typeof window === 'undefined') return 'cards'
+  try {
+    const raw = window.localStorage.getItem(VIEW_MODE_STORAGE_KEY)
+    if (raw === 'graph' || raw === 'timeline' || raw === 'map') return raw
+    return 'cards'
+  } catch {
+    return 'cards'
+  }
+}
+
+/** Persist the view mode. Best-effort — silent on storage failure. */
+function saveViewMode(mode: ViewMode): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode)
+  } catch {
+    /* ignore */
+  }
+}
 
 /**
  * Strip HTML tags from a rendered-markdown string via a detached
@@ -592,6 +630,17 @@ export function showBrowseUI(
 
   type SortKey = 'relevance' | 'newest' | 'az'
   let activeSort: SortKey = 'relevance'
+  // View-mode (§6.7). Hidden on mobile — a force-directed graph on
+  // a 6-inch viewport is unusable; the toggle simply never renders
+  // there and Cards remains the only view. Boot persists from
+  // localStorage; a stored `'graph'` on a phone gracefully falls
+  // back to Cards because the toggle won't surface to flip it.
+  let viewMode: ViewMode = callbacks.isMobile ? 'cards' : loadViewMode()
+  // Lazy-mounted graph controller — populated on first toggle into
+  // Graph view. Module-loaded once per overlay instance; the
+  // controller itself handles re-renders on filter changes.
+  let graphController: CatalogGraphController | null = null
+  let graphLoadPromise: Promise<CatalogGraphController | null> | null = null
   // The raw search-box string — both free text and any
   // `category:foo` / `format:bar` / `period:yearly` prefixes the
   // user has typed. `parseSearchQuery` splits it into the free-
@@ -953,6 +1002,127 @@ export function showBrowseUI(
     }
   }
 
+  // ----- View-mode toggle (§6.7) — hidden on mobile -----
+
+  const viewModeBar = document.getElementById('browse-view-mode')
+  const graphContainer = document.getElementById('browse-graph')
+  const gridContainer = document.getElementById('browse-grid')
+
+  /** Render the segmented Cards/Graph control. Hidden entirely on
+   *  mobile so a phone never sees a graph option. */
+  function renderViewModeBar(): void {
+    if (!viewModeBar) return
+    if (callbacks.isMobile) {
+      viewModeBar.classList.add('hidden')
+      viewModeBar.setAttribute('aria-hidden', 'true')
+      viewModeBar.innerHTML = ''
+      return
+    }
+    viewModeBar.classList.remove('hidden')
+    viewModeBar.removeAttribute('aria-hidden')
+    const options: Array<{ key: 'cards' | 'graph'; label: string; aria: string }> = [
+      { key: 'cards', label: t('browse.viewMode.cards'), aria: t('browse.viewMode.cards.aria') },
+      { key: 'graph', label: t('browse.viewMode.graph'), aria: t('browse.viewMode.graph.aria') },
+    ]
+    viewModeBar.innerHTML = options
+      .map(o => {
+        const active = o.key === viewMode
+        return `<button type="button" class="browse-view-mode-btn${active ? ' active' : ''}" data-view-mode="${o.key}" aria-pressed="${active}" aria-label="${escapeAttr(o.aria)}">${escapeHtml(o.label)}</button>`
+      })
+      .join('')
+  }
+
+  /**
+   * Apply the active view-mode to the DOM — show one container,
+   * hide the other. On first activation of Graph view this also
+   * lazy-imports `catalogGraphUI`, instantiates the controller,
+   * and asks it to render. Subsequent activations just show the
+   * existing canvas and ask the controller to refresh.
+   *
+   * `mountIfNeeded` defaults to true so the boot path mounts the
+   * graph when `viewMode` restores from localStorage as `'graph'`.
+   * Filter-change paths can pass `false` to skip the dynamic
+   * import when the graph isn't visible.
+   */
+  async function applyViewMode(mountIfNeeded: boolean = true): Promise<void> {
+    if (!gridContainer || !graphContainer) return
+    if (viewMode === 'graph') {
+      gridContainer.classList.add('hidden')
+      gridContainer.setAttribute('aria-hidden', 'true')
+      graphContainer.classList.remove('hidden')
+      graphContainer.removeAttribute('aria-hidden')
+      if (mountIfNeeded) await ensureGraphMounted()
+      const parsed = parseSearchQuery(searchQuery)
+      const effectiveState = mergeFilterStates(filterState, parsed.prefixes)
+      graphController?.update({
+        datasets: allDatasets,
+        filterState: effectiveState,
+        searchQuery: parsed.freeText,
+      })
+    } else {
+      graphContainer.classList.add('hidden')
+      graphContainer.setAttribute('aria-hidden', 'true')
+      gridContainer.classList.remove('hidden')
+      gridContainer.removeAttribute('aria-hidden')
+    }
+  }
+
+  /**
+   * Lazy-import `catalogGraphUI` on first activation. Mirrors the
+   * Three.js pattern in `vrSession.ts` — cytoscape is ~70 KB
+   * gzipped and only users who toggle into Graph view pay that
+   * cost. On import failure (network blip, bundle stripped) the
+   * graph container shows an inline error and the controller stays
+   * null so subsequent toggles can retry.
+   */
+  async function ensureGraphMounted(): Promise<void> {
+    if (graphController || !graphContainer) return
+    if (graphLoadPromise) {
+      await graphLoadPromise
+      return
+    }
+    graphContainer.innerHTML = `<div class="browse-graph-status" role="status">${escapeHtml(t('browse.graph.loading'))}</div>`
+    graphLoadPromise = import('./catalogGraphUI')
+      .then(({ createCatalogGraph }) => {
+        graphContainer.innerHTML = ''
+        graphController = createCatalogGraph(graphContainer, {
+          onToggleFacet: (facet, value) => {
+            applyState(toggleFacet(filterState, facet, value), searchQuery)
+          },
+          onSelectDataset: callbacks.onSelectDataset,
+        })
+        return graphController
+      })
+      .catch((err) => {
+        console.error('[browse] failed to load Graph view', err)
+        graphContainer.innerHTML = `<div class="browse-graph-status browse-graph-status-error" role="alert">${escapeHtml(t('browse.graph.loadError'))}</div>`
+        return null
+      })
+    await graphLoadPromise
+  }
+
+  if (viewModeBar && !viewModeBar.dataset.wired) {
+    viewModeBar.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest('.browse-view-mode-btn') as HTMLElement | null
+      if (!btn || !btn.dataset.viewMode) return
+      const next = btn.dataset.viewMode as 'cards' | 'graph'
+      if (next === viewMode) return
+      const previous = viewMode
+      viewMode = next
+      saveViewMode(viewMode)
+      renderViewModeBar()
+      const cardCount = document.querySelectorAll('#browse-grid .browse-card').length
+      emit({
+        event_type: 'catalog_view_mode_changed',
+        view_mode: viewMode,
+        from: previous,
+        result_count_bucket: bucketResultCount(cardCount),
+      })
+      void applyViewMode()
+    })
+    viewModeBar.dataset.wired = 'true'
+  }
+
   // ----- Download buttons (unchanged from previous shape) -----
 
   const updateDownloadButtons = async () => {
@@ -1016,6 +1186,20 @@ export function showBrowseUI(
     }
     renderRail()
     renderCards()
+    // Graph view re-renders only when it's the active surface — no
+    // sense paying cytoscape's layout cost for an off-screen canvas.
+    // The controller's update() uses cytoscape's incremental layout
+    // so node positions animate rather than re-seeding the
+    // simulation (the §6.7 "graph thrash" risk).
+    if (viewMode === 'graph' && graphController) {
+      const parsed = parseSearchQuery(searchQuery)
+      const effectiveState = mergeFilterStates(filterState, parsed.prefixes)
+      graphController.update({
+        datasets: allDatasets,
+        filterState: effectiveState,
+        searchQuery: parsed.freeText,
+      })
+    }
     emitFilterChange(previous, next)
     // History.replaceState per §6.3 — chip clicks shouldn't clog
     // the back button, but a shared link should reproduce the
@@ -1236,6 +1420,13 @@ export function showBrowseUI(
   // Initial render
   renderRail()
   renderCards()
+  renderViewModeBar()
+  // Restore the persisted view mode — if Graph was the last
+  // surface the user had open, lazy-import on this boot path so
+  // the canvas is ready when they look at it. The grid is also
+  // hidden behind .hidden so we don't have a moment of layout
+  // flicker.
+  void applyViewMode()
   updateDownloadButtons()
 
   // Mark the overlay as initialized so subsequent show requests
