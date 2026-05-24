@@ -69,6 +69,8 @@
   "browse.graph.recenter": "Recenter",
   "browse.graph.recenter.aria": "Recenter the graph view",
   "browse.graph.region.aria": "Catalog graph view — {count} datasets, {edgeCount} connections",
+  "browse.graph.showFormat.aria": "Show format-bucket nodes in the graph",
+  "browse.graph.showFormat.label": "Show formats",
   "browse.graph.tooltip.coOccurrence": "Top co-occurring: {neighbours}",
   "browse.graph.tooltip.datasetCount": "{count} datasets",
   "browse.noResults": "No datasets match your search.",

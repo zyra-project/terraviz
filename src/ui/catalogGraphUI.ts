@@ -15,6 +15,7 @@
 
 import cytoscape from 'cytoscape'
 import type { Core, ElementDefinition, NodeSingular, EventObject } from 'cytoscape'
+import cola from 'cytoscape-cola'
 
 import {
   buildGraph,
@@ -22,6 +23,10 @@ import {
   type Graph,
   type GraphNode,
 } from '../services/catalogGraph'
+
+// Register the cola layout extension once per page load. Idempotent
+// against repeated imports — cytoscape ignores duplicate registrations.
+cytoscape.use(cola)
 import {
   type FilterState,
 } from '../services/datasetFilter'
@@ -36,6 +41,11 @@ import { formatNumber } from '../i18n/format'
  *  scale-management guidance — singleton co-occurrences clutter
  *  without adding information. */
 const DEFAULT_MIN_EDGE_WEIGHT = 2
+/** Top-N keywords each Category cluster auto-radiates when no
+ *  explicit expansion is in effect. Tuned to ~5-8 per the GSL
+ *  Depot Explorer reference: dense enough to read the hub-and-
+ *  spoke structure, sparse enough to keep the canvas legible. */
+const DEFAULT_AUTO_EXPAND_PER_CLUSTER = 6
 /** Per-minute throttle budget for `catalog_graph_node_clicked` —
  *  matches `camera_settled`'s budget so an aggressive user can't
  *  flood the queue from either surface. The 60 s rolling window
@@ -122,6 +132,69 @@ function resolveTokens(): ResolvedTokens {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Cola layout (continuous force-directed)
+// ---------------------------------------------------------------------------
+
+/**
+ * Cola layout options shared by the initial layout and every
+ * subsequent rebuild. `infinite: true` keeps the simulation alive
+ * after the initial settle so dragging a node ripples through the
+ * graph (other nodes follow naturally). `edgeLength` is keyed by
+ * edge kind:
+ *
+ *   - co-occurrence edges → longer (the Category and Format hubs
+ *     should sit apart so the visual hierarchy reads)
+ *   - membership edges    → shorter (dataset nodes hug their hub)
+ *
+ * `randomize` is true only on first instantiation; subsequent
+ * rebuild calls reuse positions so chip-toggle thrashes don't
+ * re-seed the simulation (the §6.7 "graph thrash" risk).
+ *
+ * Typed `unknown` because cytoscape-cola's options aren't on
+ * `cytoscape.LayoutOptions` and we don't ship type defs for the
+ * extension. The cast to `cytoscape.LayoutOptions` happens at the
+ * call site since cytoscape's typings treat layout options as
+ * extension-defined `Record<string, unknown>`-ish.
+ */
+function colaLayoutOptions(randomize: boolean): cytoscape.LayoutOptions {
+  return {
+    name: 'cola',
+    animate: true,
+    refresh: 1,
+    maxSimulationTime: 2000,
+    ungrabifyWhileSimulating: false,
+    fit: randomize,
+    padding: 30,
+    randomize,
+    avoidOverlap: true,
+    handleDisconnected: true,
+    nodeSpacing: 8,
+    infinite: true,
+    edgeLength: (edge: { data: (key: string) => unknown }) => {
+      const kind = edge.data('kind')
+      if (kind === 'co-occurrence') return 160
+      return 60
+    },
+  } as unknown as cytoscape.LayoutOptions
+}
+
+/** Stop any previous cola layout and start a new one. Cola
+ *  `infinite: true` keeps the simulation registered; without
+ *  stopping first you'd accumulate multiple parallel simulations
+ *  on every rebuild. */
+function startColaLayout(instance: Core, randomize: boolean): void {
+  // Cytoscape's typings expose a generic `stop()` on layouts but
+  // the typing surface for in-flight layouts is anaemic. Cast.
+  type LayoutHandle = ReturnType<Core['layout']> & { stop?: () => void }
+  const prev = (instance as Core & { _colaLayout?: LayoutHandle })._colaLayout
+  if (prev?.stop) {
+    try { prev.stop() } catch { /* layout already torn down */ }
+  }
+  const layout = instance.layout(colaLayoutOptions(randomize))
+  ;(instance as Core & { _colaLayout?: LayoutHandle })._colaLayout = layout as LayoutHandle
+  layout.run()
+}
 
 // ---------------------------------------------------------------------------
 // Module entry — instantiate and return a controller
@@ -151,6 +224,12 @@ export function createCatalogGraph(
   const toolbar = document.createElement('div')
   toolbar.className = 'browse-graph-toolbar'
   toolbar.innerHTML = `
+    <label class="browse-graph-show-format">
+      <input type="checkbox"
+             class="browse-graph-show-format-input"
+             aria-label="${escapeAttr(t('browse.graph.showFormat.aria'))}" />
+      <span>${escapeHtml(t('browse.graph.showFormat.label'))}</span>
+    </label>
     <label class="browse-graph-min-weight" aria-label="${escapeAttr(t('browse.graph.minWeight.aria'))}">
       <span class="browse-graph-min-weight-label">${escapeHtml(t('browse.graph.minWeight.label'))}</span>
       <input type="range"
@@ -167,7 +246,7 @@ export function createCatalogGraph(
     </button>
     <div class="browse-graph-legend" aria-hidden="true">
       <span class="browse-graph-legend-dot browse-graph-legend-dot-category"></span>${escapeHtml(t('browse.graph.legend.category'))}
-      <span class="browse-graph-legend-dot browse-graph-legend-dot-format"></span>${escapeHtml(t('browse.graph.legend.format'))}
+      <span class="browse-graph-legend-dot browse-graph-legend-dot-format browse-graph-legend-dot-format-toggle"></span>${escapeHtml(t('browse.graph.legend.format'))}
       <span class="browse-graph-legend-dot browse-graph-legend-dot-keyword"></span>${escapeHtml(t('browse.graph.legend.keyword'))}
       <span class="browse-graph-legend-dot browse-graph-legend-dot-dataset"></span>${escapeHtml(t('browse.graph.legend.dataset'))}
     </div>
@@ -201,6 +280,7 @@ export function createCatalogGraph(
   let lastGraph: Graph | null = null
   let lastInput: CatalogGraphUpdate | null = null
   let minEdgeWeight = DEFAULT_MIN_EDGE_WEIGHT
+  let showFormat = false
   const expandedKeywordParents = new Set<string>()
   // Rolling timestamps for node-click throttling. Matches the
   // pattern in `src/analytics/camera.ts`.
@@ -215,6 +295,8 @@ export function createCatalogGraph(
       {
         minEdgeWeight,
         expandedKeywordParents,
+        autoExpandKeywordsPerCluster: DEFAULT_AUTO_EXPAND_PER_CLUSTER,
+        includeFormatNodes: showFormat,
       },
     )
     lastGraph = graph
@@ -268,22 +350,20 @@ export function createCatalogGraph(
           }
         }
       })
-      // Run a light incremental layout that respects existing
-      // positions rather than re-seeding the force-directed
-      // simulation from scratch.
-      cy.layout({
-        name: 'cose',
-        animate: true,
-        animationDuration: 300,
-        randomize: false,
-        fit: false,
-      } as cytoscape.LayoutOptions).run()
+      // Re-run cola in incremental mode — node positions stay put,
+      // newly-added nodes find a spot, and the simulation relaxes
+      // around the diff. Cola's `infinite: true` keeps the
+      // simulation alive after layout completes so drag gestures
+      // continue to ripple through the rest of the graph.
+      startColaLayout(cy, false)
     } else {
       cy = cytoscape({
         container: canvas,
         elements,
         style: buildCytoscapeStyle(resolveTokens()),
-        layout: { name: 'cose', animate: true, animationDuration: 500, randomize: true, fit: true },
+        // First layout — let cola randomize positions for an initial
+        // settle; subsequent updates reuse positions.
+        layout: colaLayoutOptions(true),
         wheelSensitivity: 0.3,
         minZoom: 0.2,
         maxZoom: 3,
@@ -437,6 +517,16 @@ export function createCatalogGraph(
   })
   toolbar.querySelector('.browse-graph-recenter')?.addEventListener('click', () => {
     cy?.fit(undefined, 40)
+  })
+
+  // --- Show-format toggle ---
+  const showFormatInput = toolbar.querySelector(
+    '.browse-graph-show-format-input',
+  ) as HTMLInputElement | null
+  showFormatInput?.addEventListener('change', () => {
+    showFormat = !!showFormatInput.checked
+    host.classList.toggle('browse-graph-host-show-format', showFormat)
+    rebuild()
   })
 
   return {

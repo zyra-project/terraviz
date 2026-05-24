@@ -538,6 +538,28 @@
     color: var(--color-text-dim);
     flex-wrap: wrap;
 }
+.browse-graph-show-format {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    cursor: pointer;
+    user-select: none;
+}
+.browse-graph-show-format-input {
+    accent-color: var(--color-accent);
+    margin: 0;
+}
+
+/* Format legend swatch is dimmed when the toggle is off — same
+   visual treatment the keyword swatch uses for "available, not
+   currently rendered". */
+.browse-graph-legend-dot-format-toggle {
+    opacity: 0.35;
+}
+.browse-graph-host-show-format .browse-graph-legend-dot-format-toggle {
+    opacity: 1;
+}
+
 .browse-graph-min-weight {
     display: flex;
     align-items: center;
