@@ -46,12 +46,17 @@
             </div>
             <div id="browse-filter-rail" role="region" aria-label="Filter datasets" data-i18n-aria-label="browse.filter.rail.aria"></div>
             <div id="browse-toolbar">
+                <button id="browse-filters-btn" class="browse-filters-btn" type="button" aria-expanded="false" aria-controls="browse-filter-rail" data-i18n-aria-label="browse.filters.toggle.aria">
+                    <span class="browse-filters-btn-label" data-i18n="browse.filters.toggle.label">Filters</span><span class="browse-filters-btn-badge hidden" aria-hidden="true">0</span>
+                </button>
                 <div id="browse-count" aria-live="polite"></div>
-                <div id="browse-view-mode" role="group" aria-label="Switch between card grid and graph view" data-i18n-aria-label="browse.viewMode.aria"></div>
+                <div id="browse-active-filters" class="empty" role="region" aria-label="Active filters" data-i18n-aria-label="browse.activeFilters.aria"></div>
+                <div id="browse-view-mode" role="group" aria-label="Switch between card grid, graph, and timeline views" data-i18n-aria-label="browse.viewMode.aria"></div>
                 <div id="browse-sort" role="group" aria-label="Sort datasets" data-i18n-aria-label="browse.sort.aria"></div>
             </div>
             <div id="browse-grid" role="list"></div>
             <div id="browse-graph" class="hidden" aria-hidden="true"></div>
+            <div id="browse-timeline" class="hidden" aria-hidden="true"></div>
         </div>
     </aside>
 

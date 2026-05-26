@@ -255,6 +255,25 @@ Positional layout — alphabetical.
 | `blob7` | `value_hash` |
 | `double1` | `client_offset_ms` |
 
+### `catalog_timeline_brush_applied` (Tier B)
+
+Fires on Timeline view brush gestures (Phase 4 §6.8). The user has
+dragged on the time axis to commit a `dataCoverageYear` range
+filter. Throttled to ≤30/min per session (same budget shape as
+`camera_settled` and `catalog_graph_node_clicked`). Payload is
+integer years only — the brush carries no free-text, so no hash
+field is needed.
+
+Positional layout — fields sorted alphabetically (per `toDataPoint`):
+all three are numeric, so they fill `double1` / `double2` / `double3`
+in alphabetical order of the field name.
+
+| Position | Field |
+|---|---|
+| `double1` | `client_offset_ms` |
+| `double2` | `end_year` |
+| `double3` | `start_year` |
+
 ### `tour_started` (Tier A)
 
 | Position | Field |

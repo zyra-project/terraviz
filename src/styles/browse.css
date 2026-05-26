@@ -74,6 +74,12 @@
     padding: 1.5rem 1.5rem 0;
     box-sizing: border-box;
     overflow: hidden;
+    /* `position: relative` so the filter-drawer rail (positioned
+       absolute when small-screen + non-Cards + open) anchors here
+       rather than escaping to the viewport. The drawer's `top` is
+       computed in JS from the toolbar's offsetTop+height — see
+       `setFilterDrawerOpen` in browseUI.ts. */
+    position: relative;
 }
 
 #browse-header {
@@ -97,6 +103,26 @@
     margin-top: 0.2rem;
     opacity: 0.8;
     letter-spacing: 0.05em;
+}
+
+/* View-aware chrome — Graph and Timeline want every vertical pixel
+   for their canvas. Hide the decorative subtitle and shrink the
+   title margin so the chip rail / canvas can claim the reclaimed
+   space (~50-80 px saved). The body class is set by
+   `applyViewMode` in `browseUI.ts`; Cards keeps the full welcome
+   chrome unchanged. */
+body.browse-view-graph #browse-header,
+body.browse-view-timeline #browse-header {
+    margin-bottom: 0.5rem;
+}
+body.browse-view-graph .browse-subtitle,
+body.browse-view-timeline .browse-subtitle {
+    display: none;
+}
+body.browse-view-graph .browse-title,
+body.browse-view-timeline .browse-title {
+    font-size: 1rem;
+    letter-spacing: 0.12em;
 }
 
 .browse-search-wrap {
@@ -182,11 +208,19 @@
     background: var(--white-o08);
 }
 
-/* Filter rail — typed-group chip layout (Phase 4 §6.1/§6.5). */
+/* Filter rail — typed-group chip layout (Phase 4 §6.1/§6.5).
+   Grid-based so all four section headers can sit on one row when
+   collapsed (a ~50-80px vertical win over the previous flex
+   column where each header claimed a row of its own). An
+   expanded section spans every column so its chip body has full
+   width to render in; collapsed siblings tuck into the remaining
+   row above or below via auto-placement. The clear-all wrapper
+   also spans the full width so it doesn't get marooned in one
+   grid cell. */
 #browse-filter-rail {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.35rem 0.75rem;
     flex-shrink: 0;
     padding-bottom: 0.75rem;
 }
@@ -195,6 +229,25 @@
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
+    min-width: 0;
+}
+
+.browse-filter-section:not(.collapsed) {
+    grid-column: 1 / -1;
+}
+
+.browse-filter-clear-wrap {
+    grid-column: 1 / -1;
+}
+
+/* Below tablet width the four-column row stops fitting; collapse
+   back to a single column so each header gets its own row again.
+   The breakpoint sits a touch above the mobile gate (768 px) so
+   tablets in portrait still get the compact row. */
+@media (max-width: 600px) {
+    #browse-filter-rail {
+        grid-template-columns: 1fr;
+    }
 }
 
 /* Accordion section header — clickable button that toggles the
@@ -424,6 +477,138 @@
     color: var(--color-text-muted);
     letter-spacing: 0.05em;
     white-space: nowrap;
+}
+
+/* Filters drawer toggle — hidden by default; only the small-screen
+   non-Cards media query reveals it. The badge sits inside the
+   button so a glance shows the active-filter count even when the
+   rail itself is collapsed behind the drawer. */
+.browse-filters-btn {
+    display: none;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.25rem 0.55rem;
+    border-radius: 4px;
+    border: 1px solid var(--white-o15);
+    background: var(--color-surface-alt);
+    color: var(--color-text-secondary);
+    font-size: 0.6rem;
+    font-family: inherit;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.browse-filters-btn:hover {
+    background: var(--white-o08);
+    color: var(--color-text);
+}
+.browse-filters-btn:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+}
+#browse-overlay.filter-drawer-open .browse-filters-btn {
+    background: var(--accent-o15);
+    border-color: var(--accent-o40);
+    color: var(--color-accent);
+}
+.browse-filters-btn-badge {
+    display: inline-block;
+    min-width: 1.1rem;
+    padding: 0 0.3rem;
+    border-radius: 999px;
+    background: var(--color-accent);
+    color: var(--color-bg);
+    font-size: 0.55rem;
+    font-weight: 600;
+    line-height: 1.2;
+    text-align: center;
+}
+.browse-filters-btn-badge.hidden {
+    display: none;
+}
+
+/* Active-filter chip strip — hidden by default. CSS reveals it
+   when the drawer-mode media query AND the strip carries chips.
+   Each chip mirrors the chip-rail's `.browse-chip.active` look so
+   it visually reads as a removed filter (× hint at the trailing
+   edge). */
+#browse-active-filters {
+    display: none;
+    flex: 1;
+    min-width: 0;
+    gap: 0.3rem;
+    align-items: center;
+    overflow-x: auto;
+    scrollbar-width: thin;
+}
+.browse-active-filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.15rem 0.45rem;
+    border-radius: 999px;
+    border: 1px solid var(--accent-o40);
+    background: var(--accent-o15);
+    color: var(--color-accent);
+    font-size: 0.6rem;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.browse-active-filter-chip:hover {
+    background: var(--accent-o30);
+}
+.browse-active-filter-chip:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+}
+.browse-active-filter-chip-x {
+    color: var(--color-text-secondary);
+    font-size: 0.7rem;
+    line-height: 1;
+}
+
+/* ----- Drawer mode (small screens, Graph + Timeline only) -----
+   Below 1024px wide AND on a non-Cards view, the inline chip rail
+   is hidden behind a "Filters" button to reclaim vertical space
+   for the canvas. Active filters surface as removable chips in
+   the toolbar so the user still sees what's filtered. Cards keeps
+   the inline rail at every breakpoint — discovery via filter chips
+   is the Cards UX. */
+@media (max-width: 1024px) {
+    body.browse-view-graph .browse-filters-btn,
+    body.browse-view-timeline .browse-filters-btn {
+        display: inline-flex;
+    }
+    body.browse-view-graph #browse-active-filters:not(.empty),
+    body.browse-view-timeline #browse-active-filters:not(.empty) {
+        display: flex;
+    }
+    body.browse-view-graph #browse-filter-rail,
+    body.browse-view-timeline #browse-filter-rail {
+        display: none;
+    }
+    body.browse-view-graph #browse-overlay.filter-drawer-open #browse-filter-rail,
+    body.browse-view-timeline #browse-overlay.filter-drawer-open #browse-filter-rail {
+        display: grid;
+        position: absolute;
+        /* `--browse-drawer-top` is set inline by JS from the
+           toolbar's measured offset; fallback covers the rare
+           case where the measurement hasn't run yet. */
+        top: var(--browse-drawer-top, 9.5rem);
+        inset-inline: 1.5rem;
+        z-index: 50;
+        padding: 0.75rem;
+        background: var(--glass-bg);
+        border: 1px solid var(--white-o15);
+        border-radius: 8px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        max-height: calc(100% - var(--browse-drawer-top, 9.5rem) - 1.5rem);
+        overflow-y: auto;
+    }
 }
 #browse-sort {
     display: flex;
@@ -661,15 +846,253 @@
     color: var(--color-text-secondary);
 }
 
+/* Timeline view container — Phase 4 §6.8. Sized to fill the same
+   space the card grid uses; d3-axis + d3-brush + SVG rows mount
+   inside. Hidden when another view-mode is active. The time axis
+   reads left → right even in RTL locales (calendar time is a
+   universal left-to-right convention; flipping it would surprise
+   the reader who expects past on the left). */
+#browse-timeline {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+#browse-timeline.hidden {
+    display: none;
+}
+.browse-timeline-host {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.browse-timeline-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.4rem 0.6rem;
+    background: var(--color-surface-alt);
+    border: 1px solid var(--white-o08);
+    border-radius: 6px;
+    font-size: 0.65rem;
+    color: var(--color-text-dim);
+    flex-wrap: wrap;
+}
+.browse-timeline-legend {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.6rem;
+    color: var(--color-text-muted);
+}
+.browse-timeline-legend-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-inline-end: 0.15rem;
+}
+.browse-timeline-legend-dot-coverage {
+    background: var(--facet-color-category-content);
+}
+.browse-timeline-legend-dot-realtime {
+    background: var(--color-success);
+}
+.browse-timeline-brush-summary {
+    margin-inline-start: auto;
+    font-size: 0.6rem;
+    color: var(--color-text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+.browse-timeline-brush-clear {
+    padding: 0.2rem 0.55rem;
+    border-radius: 4px;
+    border: 1px solid var(--white-o10);
+    background: var(--color-surface-alt);
+    color: var(--color-text-secondary);
+    font-size: 0.6rem;
+    cursor: pointer;
+    font-family: inherit;
+}
+.browse-timeline-brush-clear.hidden {
+    display: none;
+}
+.browse-timeline-brush-clear:hover {
+    background: var(--white-o08);
+    color: var(--color-text);
+}
+.browse-timeline-brush-clear:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+}
+.browse-timeline-chart {
+    flex: 1;
+    min-height: 320px;
+    background: var(--color-surface-alt);
+    border: 1px solid var(--white-o08);
+    border-radius: 6px;
+    overflow: auto;
+    position: relative;
+}
+.browse-timeline-chart.hidden {
+    display: none;
+}
+.browse-timeline-axis {
+    position: sticky;
+    inset-block-start: 0;
+    background: var(--color-bg);
+    z-index: 2;
+    border-block-end: 1px solid var(--white-o08);
+}
+.browse-timeline-axis-svg {
+    display: block;
+}
+.browse-timeline-axis-ticks text {
+    fill: var(--color-text-muted);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+}
+.browse-timeline-axis-ticks .domain,
+.browse-timeline-axis-ticks line {
+    stroke: var(--white-o15);
+}
+/* Brush band — the d3-brush `.overlay` rect is the interactive
+   surface. We give it a low-opacity amber fill and a dashed
+   inset border so the band reads as a distinct interactive zone
+   (PR #138 review: users didn't realise it was draggable). The
+   hint label inside the band — "↔ Drag to filter by year" —
+   reinforces the affordance and fades out once a selection
+   exists. Hover state nudges the fill a touch brighter for
+   feedback. */
+.browse-timeline-brush .overlay {
+    fill: var(--facet-color-time);
+    fill-opacity: 0.06;
+    stroke: var(--facet-color-time);
+    stroke-opacity: 0.35;
+    stroke-width: 1;
+    stroke-dasharray: 3 3;
+    cursor: crosshair;
+    transition: fill-opacity 0.15s, stroke-opacity 0.15s;
+}
+.browse-timeline-brush:hover .overlay {
+    fill-opacity: 0.12;
+    stroke-opacity: 0.55;
+}
+.browse-timeline-axis-svg.browse-timeline-has-brush .browse-timeline-brush .overlay {
+    /* Selection rect is the affordance from now on — quiet the
+       overlay's outline so the selection reads clearly. */
+    fill-opacity: 0;
+    stroke-opacity: 0;
+}
+.browse-timeline-brush-hint {
+    fill: var(--facet-color-time);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    opacity: 0.7;
+    pointer-events: none;
+    transition: opacity 0.15s;
+}
+.browse-timeline-axis-svg.browse-timeline-has-brush .browse-timeline-brush-hint {
+    opacity: 0;
+}
+/* Brush selection — uses the time-facet amber so the brush reads
+   as a Time-group affordance, matching the chip-rail's typed-group
+   colour scheme. */
+.browse-timeline-brush .selection {
+    fill: var(--facet-color-time);
+    fill-opacity: 0.25;
+    stroke: var(--facet-color-time);
+    stroke-width: 1;
+}
+.browse-timeline-brush .handle {
+    fill: var(--facet-color-time);
+    fill-opacity: 0.7;
+}
+.browse-timeline-now-marker {
+    stroke: var(--color-text-muted);
+    stroke-width: 1;
+    stroke-dasharray: 2 2;
+    opacity: 0.6;
+}
+.browse-timeline-rows-wrap {
+    /* Sits below the sticky axis inside the scrollable chart. */
+}
+.browse-timeline-rows-svg {
+    display: block;
+}
+.browse-timeline-row {
+    cursor: pointer;
+}
+.browse-timeline-row:hover .browse-timeline-bar {
+    fill-opacity: 1;
+}
+.browse-timeline-row:focus-visible {
+    outline: none;
+}
+.browse-timeline-row:focus-visible .browse-timeline-bar {
+    stroke: var(--color-accent);
+    stroke-width: 1.5;
+}
+.browse-timeline-row-label {
+    fill: var(--color-text-secondary);
+    font-size: 11px;
+    pointer-events: none;
+}
+.browse-timeline-row:hover .browse-timeline-row-label {
+    fill: var(--color-text);
+}
+.browse-timeline-bar {
+    fill: var(--facet-color-category-content);
+    fill-opacity: 0.75;
+    rx: 2;
+}
+.browse-timeline-bar[data-group="format-medium"] {
+    fill: var(--facet-color-format-medium);
+}
+.browse-timeline-bar[data-group="time"] {
+    fill: var(--facet-color-time);
+}
+.browse-timeline-bar[data-group="quality-availability"] {
+    fill: var(--facet-color-quality-availability);
+}
+.browse-timeline-realtime-marker {
+    fill: var(--color-success);
+    stroke: var(--color-bg);
+    stroke-width: 1;
+}
+.browse-timeline-empty {
+    padding: 1.5rem;
+    text-align: center;
+    color: var(--color-text-muted);
+    font-size: 0.75rem;
+}
+.browse-timeline-empty.hidden {
+    display: none;
+}
+.browse-timeline-footnote {
+    padding: 0.5rem 0.7rem;
+    color: var(--color-text-muted);
+    font-size: 0.65rem;
+    font-style: italic;
+    border-block-start: 1px solid var(--white-o08);
+}
+.browse-timeline-footnote.hidden {
+    display: none;
+}
+
 /* Mobile: hide the view-mode toggle entirely. The JS also handles
    this via the matchMedia('(max-width: 768px)') listener in
    browseUI.ts, but the CSS guarantees the toggle stays hidden
    before initialisation finishes. We deliberately do NOT hide
-   #browse-graph here: the JS forces viewMode='cards' when the
-   viewport narrows, which sets the grid visible. A CSS rule that
-   hid the graph independently would race the JS and produce a
-   blank overlay when the user resized from desktop→narrow with
-   Graph view active. */
+   #browse-graph / #browse-timeline here: the JS forces
+   viewMode='cards' when the viewport narrows, which sets the grid
+   visible. A CSS rule that hid the alternative views independently
+   would race the JS and produce a blank overlay when the user
+   resized from desktop→narrow with Graph or Timeline active. */
 @media (max-width: 768px) {
     #browse-view-mode {
         display: none;

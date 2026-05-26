@@ -75,6 +75,7 @@ const KNOWN_EVENT_TYPES: ReadonlySet<string> = new Set([
   'dwell', 'orbit_interaction', 'orbit_turn', 'orbit_tool_call',
   'orbit_load_followed', 'orbit_correction', 'browse_search',
   'catalog_graph_node_clicked',
+  'catalog_timeline_brush_applied',
   'vr_interaction', 'error_detail',
   'publisher_portal_loaded', 'publisher_action',
   'publisher_validation_failed',

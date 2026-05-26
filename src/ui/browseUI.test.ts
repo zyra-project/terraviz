@@ -39,6 +39,23 @@ vi.mock('./catalogGraphUI', () => ({
   })),
 }))
 
+// Mock the Timeline view's lazy-loaded UI module (§6.8). Same shape
+// + reasoning as the graph mock above — d3-scale + d3-axis + d3-brush
+// don't need to actually mount for the boot / toggle / persistence /
+// analytics assertions in this suite. Stubbing keeps the dynamic
+// import synchronous and the chunk small under coverage.
+const timelineMockHandles = vi.hoisted(() => ({
+  update: vi.fn(),
+  destroy: vi.fn(),
+  createCatalogTimeline: vi.fn(),
+}))
+vi.mock('./catalogTimelineUI', () => ({
+  createCatalogTimeline: timelineMockHandles.createCatalogTimeline.mockImplementation(() => ({
+    update: timelineMockHandles.update,
+    destroy: timelineMockHandles.destroy,
+  })),
+}))
+
 // ---------------------------------------------------------------------------
 // escapeHtml / escapeAttr
 // ---------------------------------------------------------------------------
@@ -98,12 +115,15 @@ function setupBrowseDOM(): void {
       <button id="browse-search-clear" class="hidden"></button>
       <div id="browse-filter-rail"></div>
       <div id="browse-toolbar">
+        <button id="browse-filters-btn" class="hidden" aria-expanded="false"><span class="browse-filters-btn-label">Filters</span><span class="browse-filters-btn-badge hidden">0</span></button>
+        <div id="browse-count"></div>
+        <div id="browse-active-filters" class="hidden"></div>
         <div id="browse-view-mode"></div>
         <div id="browse-sort"></div>
       </div>
-      <div id="browse-count"></div>
       <div id="browse-grid"></div>
       <div id="browse-graph" class="hidden"></div>
+      <div id="browse-timeline" class="hidden"></div>
     </div>
   `
 }
@@ -1010,29 +1030,83 @@ describe('view-mode toggle', () => {
     window.history.replaceState(null, '', '/')
   })
 
-  it('renders Cards + Graph buttons when not mobile, with Cards active by default', () => {
+  it('renders Cards + Graph + Timeline buttons when not mobile, with Cards active by default', () => {
     setupBrowseDOM()
     showBrowseUI([makeDataset({ id: 'a', tags: ['Air'] })], makeCallbacks())
     const bar = document.getElementById('browse-view-mode')!
     const buttons = bar.querySelectorAll<HTMLButtonElement>('.browse-view-mode-btn')
-    expect(buttons).toHaveLength(2)
+    expect(buttons).toHaveLength(3)
     const cardsBtn = bar.querySelector('[data-view-mode="cards"]')!
     const graphBtn = bar.querySelector('[data-view-mode="graph"]')!
+    const timelineBtn = bar.querySelector('[data-view-mode="timeline"]')!
     expect(cardsBtn.getAttribute('aria-pressed')).toBe('true')
     expect(graphBtn.getAttribute('aria-pressed')).toBe('false')
+    expect(timelineBtn.getAttribute('aria-pressed')).toBe('false')
   })
 
-  it('hides the view-mode toggle on mobile and falls back to Cards', () => {
+  it('hides the view-mode toggle on portrait mobile and falls back to Cards', () => {
     setupBrowseDOM()
-    // Even with `graph` persisted, mobile must render only Cards.
+    // Even with `graph` persisted, portrait mobile must render only
+    // Cards. Stub matchMedia so the gate's orientation half also
+    // matches (`isMobile=true` alone no longer suffices since the
+    // PR #138 landscape parity change — Tauri/mobile in landscape
+    // is allowed; only portrait gates back).
     localStorage.setItem(VIEW_MODE_KEY, 'graph')
-    showBrowseUI([makeDataset({ id: 'a', tags: ['Air'] })], makeCallbacks({ isMobile: true }))
-    const bar = document.getElementById('browse-view-mode')!
-    expect(bar.classList.contains('hidden')).toBe(true)
-    expect(bar.querySelectorAll('.browse-view-mode-btn')).toHaveLength(0)
-    // Grid remains the active surface; graph container stays hidden.
-    expect(document.getElementById('browse-grid')!.classList.contains('hidden')).toBe(false)
-    expect(document.getElementById('browse-graph')!.classList.contains('hidden')).toBe(true)
+    const originalMatchMedia = window.matchMedia
+    window.matchMedia = ((query: string) => ({
+      media: query,
+      matches: query.includes('orientation: portrait'),
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(() => false),
+    })) as unknown as typeof window.matchMedia
+    try {
+      showBrowseUI([makeDataset({ id: 'a', tags: ['Air'] })], makeCallbacks({ isMobile: true }))
+      const bar = document.getElementById('browse-view-mode')!
+      expect(bar.classList.contains('hidden')).toBe(true)
+      expect(bar.querySelectorAll('.browse-view-mode-btn')).toHaveLength(0)
+      // Grid remains the active surface; graph container stays hidden.
+      expect(document.getElementById('browse-grid')!.classList.contains('hidden')).toBe(false)
+      expect(document.getElementById('browse-graph')!.classList.contains('hidden')).toBe(true)
+    } finally {
+      window.matchMedia = originalMatchMedia
+    }
+  })
+
+  it('shows the view-mode toggle on landscape mobile so Graph + Timeline are reachable', () => {
+    // PR #138 review follow-up: landscape feature parity. A phone in
+    // landscape (e.g. 667×375 iPhone SE) clears the portrait-only
+    // gate so a user testing from their phone can still toggle into
+    // Graph and Timeline. Vertical space is tight but the surfaces
+    // are usable for smoke testing — explicit goal of the change.
+    setupBrowseDOM()
+    localStorage.setItem(VIEW_MODE_KEY, 'graph')
+    const originalMatchMedia = window.matchMedia
+    window.matchMedia = ((query: string) => ({
+      media: query,
+      // Landscape — neither portrait-only nor the compound narrow+portrait
+      // query matches.
+      matches: false,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(() => false),
+    })) as unknown as typeof window.matchMedia
+    try {
+      showBrowseUI([makeDataset({ id: 'a', tags: ['Air'] })], makeCallbacks({ isMobile: true }))
+      const bar = document.getElementById('browse-view-mode')!
+      expect(bar.classList.contains('hidden')).toBe(false)
+      // All three buttons render and Graph is active (restored from storage).
+      expect(bar.querySelectorAll('.browse-view-mode-btn')).toHaveLength(3)
+      expect(bar.querySelector('[data-view-mode="graph"]')!.getAttribute('aria-pressed')).toBe('true')
+    } finally {
+      window.matchMedia = originalMatchMedia
+    }
   })
 
   it('falls back to Cards when window.matchMedia reports a narrow viewport even if callbacks.isMobile=false', () => {
@@ -1079,18 +1153,29 @@ describe('view-mode toggle', () => {
     expect(bar.querySelector('[data-view-mode="cards"]')!.getAttribute('aria-pressed')).toBe('false')
   })
 
-  it('normalises stale future view-modes (timeline/map) back to Cards', () => {
-    // §6.8 Timeline / §6.9 Map aren't shipped yet. A stale entry
-    // in localStorage (manual edit / future build / shared
-    // session) must not leave both buttons un-pressed and the
-    // user stranded without an active state. The full assertion
-    // chain: stored = `timeline`, but UI lands on Cards.
+  it('restores `timeline` from localStorage and marks Timeline button active', () => {
     setupBrowseDOM()
     localStorage.setItem(VIEW_MODE_KEY, 'timeline')
     showBrowseUI([makeDataset({ id: 'a', tags: ['Air'] })], makeCallbacks())
     const bar = document.getElementById('browse-view-mode')!
+    expect(bar.querySelector('[data-view-mode="timeline"]')!.getAttribute('aria-pressed')).toBe('true')
+    expect(bar.querySelector('[data-view-mode="cards"]')!.getAttribute('aria-pressed')).toBe('false')
+    expect(bar.querySelector('[data-view-mode="graph"]')!.getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('normalises stale future view-modes (map) back to Cards', () => {
+    // §6.9 Map isn't shipped yet. A stale entry in localStorage
+    // (manual edit / future build / shared session) must not leave
+    // every button un-pressed and the user stranded without an
+    // active state. The full assertion chain: stored = `map`, but
+    // UI lands on Cards.
+    setupBrowseDOM()
+    localStorage.setItem(VIEW_MODE_KEY, 'map')
+    showBrowseUI([makeDataset({ id: 'a', tags: ['Air'] })], makeCallbacks())
+    const bar = document.getElementById('browse-view-mode')!
     expect(bar.querySelector('[data-view-mode="cards"]')!.getAttribute('aria-pressed')).toBe('true')
     expect(bar.querySelector('[data-view-mode="graph"]')!.getAttribute('aria-pressed')).toBe('false')
+    expect(bar.querySelector('[data-view-mode="timeline"]')!.getAttribute('aria-pressed')).toBe('false')
   })
 
   it('persists the choice to localStorage on toggle', () => {
@@ -1217,5 +1302,138 @@ describe('view-mode toggle', () => {
       kind: 'multi-select',
       values: ['Air'],
     })
+  })
+})
+
+describe('active-filter chip strip + drawer (§6.8 follow-up)', () => {
+  beforeEach(async () => {
+    await new Promise<void>(resolve => setTimeout(resolve, 50))
+    localStorage.clear()
+    resetForTests()
+    setTier('research')
+    window.history.replaceState(null, '', '/')
+  })
+
+  afterEach(async () => {
+    await new Promise<void>(resolve => setTimeout(resolve, 50))
+    localStorage.clear()
+    window.history.replaceState(null, '', '/')
+  })
+
+  it('renders one chip per active multi-select value with a removal handler', () => {
+    setupBrowseDOM()
+    showBrowseUI(
+      [
+        makeDataset({ id: 'a', tags: ['Air'] }),
+        makeDataset({ id: 'b', tags: ['Water'] }),
+      ],
+      makeCallbacks(),
+    )
+    // Activate two Category chips via the rail. The rail re-renders
+    // its innerHTML on every applyState, so chip references must be
+    // re-queried between clicks (the old DOM node is detached and
+    // its click is a no-op against the delegated rail listener).
+    const findChip = (label: string): HTMLElement =>
+      Array.from(document.querySelectorAll<HTMLElement>('.browse-chip'))
+        .find(c => c.textContent === label)!
+    findChip('Air').click()
+    findChip('Water').click()
+
+    const strip = document.getElementById('browse-active-filters')!
+    const active = strip.querySelectorAll<HTMLElement>('.browse-active-filter-chip')
+    expect(active).toHaveLength(2)
+    // Strip carries Air + Water as separate removable chips.
+    const labels = Array.from(active).map(c => c.textContent?.replace('×', '').trim())
+    expect(labels).toContain('Air')
+    expect(labels).toContain('Water')
+  })
+
+  it('removes the predicate when an active-filter chip is clicked', () => {
+    setupBrowseDOM()
+    showBrowseUI([makeDataset({ id: 'a', tags: ['Air'] })], makeCallbacks())
+    const airChip = Array.from(document.querySelectorAll<HTMLElement>('.browse-chip'))
+      .find(c => c.textContent === 'Air')!
+    airChip.click()
+
+    const strip = document.getElementById('browse-active-filters')!
+    expect(strip.querySelectorAll('.browse-active-filter-chip')).toHaveLength(1)
+
+    // Click the active-filter chip → predicate cleared.
+    const removeChip = strip.querySelector<HTMLElement>('.browse-active-filter-chip')!
+    removeChip.click()
+    expect(strip.querySelectorAll('.browse-active-filter-chip')).toHaveLength(0)
+    // Underlying chip rail re-renders inactive.
+    const airChipAfter = Array.from(document.querySelectorAll<HTMLElement>('.browse-chip'))
+      .find(c => c.textContent === 'Air')!
+    expect(airChipAfter.getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('shows the Filters button active-count badge with the live filter total', () => {
+    setupBrowseDOM()
+    showBrowseUI(
+      [
+        makeDataset({ id: 'a', tags: ['Air'] }),
+        makeDataset({ id: 'b', tags: ['Water'] }),
+      ],
+      makeCallbacks(),
+    )
+    const badge = document.querySelector<HTMLElement>('.browse-filters-btn-badge')!
+    // No filters yet → badge hidden.
+    expect(badge.classList.contains('hidden')).toBe(true)
+
+    // Re-query the rail between clicks — the rail's innerHTML is
+    // rebuilt on every applyState, so the post-Air Water chip is a
+    // different DOM node than the pre-Air one.
+    const findChip = (label: string): HTMLElement =>
+      Array.from(document.querySelectorAll<HTMLElement>('.browse-chip'))
+        .find(c => c.textContent === label)!
+    findChip('Air').click()
+    findChip('Water').click()
+
+    expect(badge.classList.contains('hidden')).toBe(false)
+    expect(badge.textContent).toBe('2')
+  })
+
+  it('toggles `filter-drawer-open` on the overlay when Filters button is clicked', () => {
+    setupBrowseDOM()
+    showBrowseUI([makeDataset({ id: 'a', tags: ['Air'] })], makeCallbacks())
+    const overlay = document.getElementById('browse-overlay')!
+    const filtersBtn = document.getElementById('browse-filters-btn') as HTMLButtonElement
+    expect(overlay.classList.contains('filter-drawer-open')).toBe(false)
+    expect(filtersBtn.getAttribute('aria-expanded')).toBe('false')
+
+    filtersBtn.click()
+    expect(overlay.classList.contains('filter-drawer-open')).toBe(true)
+    expect(filtersBtn.getAttribute('aria-expanded')).toBe('true')
+
+    filtersBtn.click()
+    expect(overlay.classList.contains('filter-drawer-open')).toBe(false)
+    expect(filtersBtn.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('closes the drawer on Escape', () => {
+    setupBrowseDOM()
+    showBrowseUI([makeDataset({ id: 'a', tags: ['Air'] })], makeCallbacks())
+    const overlay = document.getElementById('browse-overlay')!
+    const filtersBtn = document.getElementById('browse-filters-btn') as HTMLButtonElement
+    filtersBtn.click()
+    expect(overlay.classList.contains('filter-drawer-open')).toBe(true)
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(overlay.classList.contains('filter-drawer-open')).toBe(false)
+  })
+
+  it('closes the drawer when view-mode switches back to Cards', () => {
+    setupBrowseDOM()
+    localStorage.setItem('sos-browse-view-mode.v1', 'graph')
+    showBrowseUI([makeDataset({ id: 'a', tags: ['Air'] })], makeCallbacks())
+    const overlay = document.getElementById('browse-overlay')!
+    const filtersBtn = document.getElementById('browse-filters-btn') as HTMLButtonElement
+    filtersBtn.click()
+    expect(overlay.classList.contains('filter-drawer-open')).toBe(true)
+
+    // Toggle back to Cards — drawer doesn't apply to Cards view.
+    document.querySelector<HTMLElement>('[data-view-mode="cards"]')!.click()
+    expect(overlay.classList.contains('filter-drawer-open')).toBe(false)
   })
 })

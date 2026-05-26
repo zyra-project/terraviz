@@ -913,6 +913,7 @@ export const TIER_B_EVENT_TYPES = [
   'orbit_correction',
   'browse_search',
   'catalog_graph_node_clicked',
+  'catalog_timeline_brush_applied',
   'vr_interaction',
   'error_detail',
   'tour_question_answered',
@@ -1646,6 +1647,30 @@ export interface CatalogGraphNodeClickedEvent extends TelemetryEventBase {
   value_hash: string
 }
 
+/**
+ * Catalog Timeline view brush gesture (Phase 4 §6.8). Fires when
+ * the user commits a brush selection on the time axis, which
+ * writes a `dataCoverageYear` range predicate via the same
+ * `setFacet` mutation path the chip rail's range inputs use.
+ * Tier B because — like Graph node clicks — it captures a
+ * filter-shaping signal that's deeper than the chip rail's
+ * coarse "user filtered" event, and the dashboard's question
+ * here is investigative ("which date ranges do users actually
+ * brush?") rather than operator-critical.
+ *
+ * Throttled to ≤30 / minute per session by the rolling-window
+ * pattern in `src/analytics/camera.ts`, same shared budget as
+ * `catalog_graph_node_clicked`. Payload is integers only — the
+ * brush carries no free text, so no `*_hash` field is needed.
+ */
+export interface CatalogTimelineBrushAppliedEvent extends TelemetryEventBase {
+  event_type: 'catalog_timeline_brush_applied'
+  /** Inclusive start year of the brushed range. */
+  start_year: number
+  /** Inclusive end year of the brushed range. */
+  end_year: number
+}
+
 export interface VrInteractionEvent extends TelemetryEventBase {
   event_type: 'vr_interaction'
   gesture: VrGesture
@@ -1733,5 +1758,6 @@ export type TelemetryEvent =
   | OrbitCorrectionEvent
   | BrowseSearchEvent
   | CatalogGraphNodeClickedEvent
+  | CatalogTimelineBrushAppliedEvent
   | VrInteractionEvent
   | ErrorDetailEvent

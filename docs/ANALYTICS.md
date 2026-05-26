@@ -127,6 +127,7 @@ must be corrected.
 | `orbit_interaction` / `orbit_turn` / `orbit_tool_call` / `orbit_load_followed` / `orbit_correction` | **B** | `src/ui/chatUI.ts`, `src/services/docentService.ts`, `src/services/datasetLoader.ts` |
 | `browse_search` | **B** | `src/ui/browseUI.ts` (debounced + hashed) |
 | `catalog_graph_node_clicked` | **B** | `src/ui/catalogGraphUI.ts` (per-minute throttled + hashed values) |
+| `catalog_timeline_brush_applied` | **B** | `src/ui/catalogTimelineUI.ts` (per-minute throttled, numeric-only payload) |
 | `vr_interaction` | **B** | `src/services/vrInteraction.ts` (per-gesture, throttled) |
 | `error_detail` | **B** | `src/analytics/errorCapture.ts` (adds sanitized stack) |
 | `tour_question_answered` | **B** | `src/services/tourEngine.ts` |
