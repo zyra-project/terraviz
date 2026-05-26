@@ -288,14 +288,17 @@ export function createCatalogTimeline(
         callbacks.onBrushChange(null)
         return
       }
-      // Use floor for min and ceil for max so a deliberate single-
-      // year drag (e.g. all within 2020) yields `{min: 2020, max:
-      // 2021}` — a representable inclusive range against the
-      // `dataCoverageYear` resolver — rather than collapsing to
-      // `maxYear === minYear` and clearing.
+      // The `dataCoverageYear` predicate is INCLUSIVE on both ends
+      // (see the `range` overlap test in datasetFilter.ts), so a
+      // drag from xScale(2020) to xScale(2021) — visually covering
+      // year 2020 — must produce `{min: 2020, max: 2020}`, not
+      // `{min: 2020, max: 2021}` (which would widen to 2020+2021).
+      // Floor the left edge; ceil-then-subtract-1 the right edge.
+      // A degenerate drag inside a single year (x0, x1 both inside
+      // 2020) still survives — floor=2020, ceil-1=2020.
       const minYear = Math.floor(xScale.invert(x0))
-      const maxYear = Math.ceil(xScale.invert(x1))
-      if (maxYear <= minYear) {
+      const maxYear = Math.ceil(xScale.invert(x1)) - 1
+      if (maxYear < minYear) {
         callbacks.onBrushChange(null)
         return
       }
@@ -358,8 +361,27 @@ export function createCatalogTimeline(
       // Even when the canvas is empty, show the undated footnote
       // (if any) so the user understands why nothing is rendering.
       updateFootnote(timeline)
-      brushClearBtn.classList.add('hidden')
-      brushSummary.textContent = ''
+      // Keep the brush summary + clear-range affordance visible
+      // when an active range predicate caused the empty state. A
+      // user who brushed too narrowly (e.g. 1970–1980 against a
+      // catalog whose visible rows all post-date 2000) needs the
+      // most direct escape hatch — without the clear button they'd
+      // have to navigate to Cards view to drop the filter. The
+      // brush canvas itself stays hidden; just the toolbar
+      // affordance persists.
+      const rangePredicate = lastInput.filterState.dataCoverageYear
+      if (rangePredicate?.kind === 'range' && (rangePredicate.min != null || rangePredicate.max != null)) {
+        const min = rangePredicate.min ?? rangePredicate.max!
+        const max = rangePredicate.max ?? rangePredicate.min!
+        brushSummary.textContent = t('browse.timeline.brush.summary', {
+          start: formatNumber(Math.min(min, max)),
+          end: formatNumber(Math.max(min, max)),
+        })
+        brushClearBtn.classList.remove('hidden')
+      } else {
+        brushSummary.textContent = ''
+        brushClearBtn.classList.add('hidden')
+      }
       return
     }
     empty.classList.add('hidden')
@@ -390,14 +412,21 @@ export function createCatalogTimeline(
       .attr('x', GUTTER_PX + AXIS_HPADDING_PX + chartWidth / 2)
       .attr('y', BRUSH_HEIGHT_PX / 2)
 
-    // Choose tick count based on chart width — d3-axis honours
-    // `ticks(n)` as a hint, not a hard count. Roughly one tick
-    // per 80 px keeps labels from colliding at most viewport
-    // widths; we also format ticks as integer years.
+    // Generate explicit integer-year tick values so a sub-year
+    // domain (or a fractional d3 tick generation) doesn't render
+    // duplicate "2024 | 2024" labels rounded from 2023.8 + 2024.2.
+    // Aim for ~one tick per 80 px; step up to whole-year multiples
+    // when the domain is too wide to fit all years.
     const tickCount = Math.max(2, Math.floor(chartWidth / 80))
+    const tickMin = Math.ceil(domain.min)
+    const tickMax = Math.floor(domain.max)
+    const yearSpan = Math.max(1, tickMax - tickMin)
+    const tickStep = Math.max(1, Math.ceil(yearSpan / tickCount))
+    const tickValues: number[] = []
+    for (let y = tickMin; y <= tickMax; y += tickStep) tickValues.push(y)
     const axisRender = axisBottom(xScale)
-      .ticks(tickCount)
-      .tickFormat((d) => formatNumber(Math.round(d as number)))
+      .tickValues(tickValues)
+      .tickFormat((d) => formatNumber(d as number))
     axisGroup.call(axisRender as never)
 
     // Brush extent — the brush is drawn over the axis band only,
@@ -493,10 +522,16 @@ export function createCatalogTimeline(
 
     merged.attr('transform', (_d, i) => `translate(0, ${i * rowHeight})`)
     merged.attr('aria-label', (d) =>
+      // Floor both ends — inclusive-year semantics, the same the
+      // predicate engine uses for `dataCoverageYear`. A row whose
+      // data runs 2020.1 → 2024.8 reads as "coverage 2020 to 2024"
+      // (truthful — the data exists in 2020 and in 2024, just not
+      // throughout either). Rounding 2024.8 → 2025 would announce
+      // a year of coverage that doesn't exist.
       t('browse.timeline.row.aria', {
         title: d.title,
-        start: formatNumber(Math.round(d.start)),
-        end: formatNumber(Math.round(d.end)),
+        start: formatNumber(Math.floor(d.start)),
+        end: formatNumber(Math.floor(d.end)),
       }),
     )
 
@@ -570,9 +605,13 @@ export function createCatalogTimeline(
       // predicate of 1850–2100 against a visible domain of
       // 1900–2050, the brush draws 1900–2050 and the summary should
       // say the same to avoid the visual vs. text disagreement.
+      // Floor both ends — inclusive-year semantics. The clamped
+      // values may be fractional after `Math.max(domain.min, ...)`
+      // pulls them onto a fractional domain edge; rounding would
+      // announce a year that the data doesn't actually start in.
       brushSummary.textContent = t('browse.timeline.brush.summary', {
-        start: formatNumber(Math.round(clampedMin)),
-        end: formatNumber(Math.round(clampedMax)),
+        start: formatNumber(Math.floor(clampedMin)),
+        end: formatNumber(Math.floor(clampedMax)),
       })
       brushClearBtn.classList.remove('hidden')
       // Hide the "↔ Drag to filter by year" hint — the selection
