@@ -62,6 +62,7 @@ export const FACET_URL_KEYS: Readonly<Record<string, string>> = {
   hasCaptions: 'cc',
   hasTour: 'tour',
   includeSos: 'sos',
+  geographicRegion: 'gr',
 }
 
 /** Reverse lookup. Built once at module load. */
@@ -87,13 +88,9 @@ const URL_KEY_TO_FACET: Readonly<Record<string, string>> = Object.fromEntries(
  *    get a param.
  *  - `range` → `min-max` (`da=2018-2024`). Half-open ranges
  *    encode as `2018-` or `-2024`. Both bounds absent → no param.
- *
- * The §6.9 Map view's `bbox` predicate isn't encoded yet — it
- * lands alongside the `geographicRegion` facet in the Map view
- * PR (new URL key + decoder added there). The engine's
- * {@link FacetPredicate} union carries the `bbox` shape today
- * so the type surface stays forward-compat without dead URL
- * code in this module.
+ *  - `bbox` → `n,s,e,w` (`gr=40,10,30,-10`) — §6.9 Map view's
+ *    geographicRegion predicate. Bounds round to 3 decimals
+ *    (~111 m at the equator) for compact shared links.
  *
  * Unknown facet keys (e.g. peer facets a future client knows
  * about but this one doesn't) are dropped on encode. Decode is
@@ -136,10 +133,14 @@ function encodePredicate(predicate: FacetPredicate): string | null {
       return `${min}-${max}`
     }
     case 'bbox':
-      // §6.9 Map view will register a `geographicRegion` URL key
-      // and wire encoding here. Until then the bbox predicate has
-      // no URL representation and is dropped on encode.
-      return null
+      // §6.9 Map view — `geographicRegion` round-trips as
+      // `gr=n,s,e,w`. Bounds round to 3 decimals (~111 m at the
+      // equator) — same precision `camera.ts` uses for lat/lon —
+      // so shared links don't leak high-precision drag positions
+      // and the URL stays compact for chip-rail shares.
+      return [predicate.n, predicate.s, predicate.e, predicate.w]
+        .map(v => String(Math.round(v * 1000) / 1000))
+        .join(',')
   }
 }
 
@@ -202,6 +203,19 @@ function decodePredicate(facet: string, raw: string): FacetPredicate | null {
       return { kind: 'boolean', value: true }
     }
     return null
+  }
+  // Geographic region — `gr=n,s,e,w`. Four signed decimals,
+  // comma-separated, in the canonical NSEW order (matches the
+  // FacetPredicate's bbox shape). Malformed entries (wrong arity,
+  // non-finite numbers) decode to null so a hand-edited URL never
+  // wedges the page.
+  if (facet === 'geographicRegion') {
+    const parts = raw.split(',')
+    if (parts.length !== 4) return null
+    const [n, s, e, w] = parts.map(p => Number(p))
+    if (!Number.isFinite(n) || !Number.isFinite(s)) return null
+    if (!Number.isFinite(e) || !Number.isFinite(w)) return null
+    return { kind: 'bbox', n, s, e, w }
   }
   // Multi-select facets — comma-separated. Empty segments
   // (`cat=,Water`) are dropped so a trailing comma doesn't create
