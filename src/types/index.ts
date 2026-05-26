@@ -92,15 +92,23 @@ export interface Dataset {
 
   /** Geographic bounding box (NSWE in degrees) for the dataset's
    * spatial extent. Phase 3d promoted from `bounding_variables`
-   * JSON to typed columns. Omitted when the catalog row's bbox
-   * columns aren't populated — NOT a signal of "regional vs
-   * global" extent. A row with all four corners set to
-   * `{n:90, s:-90, w:-180, e:180}` is still emitted (~26 of the
-   * 27 populated SOS rows do exactly that). The SPA's Phase 3e
-   * regional-projection feature can short-circuit at render
-   * time when it sees a worldwide box; otherwise it wraps the
-   * dataset texture to the named region rather than stretching
-   * it across the entire globe. */
+   * JSON to typed columns.
+   *
+   * **Defaults to worldwide at the SPA layer** when the wire
+   * shape carries no bbox (see `wireToDataset` /
+   * `synthesizeSosOnlyDatasets` in `dataService.ts`). Wire-side
+   * the field is still optional — D1's `bbox_*` columns are
+   * NULL for the majority of rows today — but every Dataset
+   * record handed to UI code carries a populated bbox so the
+   * Phase 4 §6.9 Map view can show every dataset's spatial
+   * extent without a "missing" branch. Publishers should set
+   * a regional bbox when applicable; the default acknowledges
+   * that the SOS catalog is overwhelmingly global today.
+   *
+   * A worldwide box (`{n:90, s:-90, w:-180, e:180}`) is the
+   * "global" sentinel the Map view's hide-globals toggle keys
+   * off; the SPA's regional-projection feature also
+   * short-circuits at render time when it sees worldwide. */
   boundingBox?: { n: number; s: number; w: number; e: number }
 
   /** Celestial body the dataset visualises. Omitted == Earth.

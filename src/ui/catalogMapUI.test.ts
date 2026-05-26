@@ -180,7 +180,11 @@ describe('createCatalogMap', () => {
     controller.destroy()
   })
 
-  it('toggling include-global surfaces global bboxes', async () => {
+  it('toggling include-global surfaces global bboxes when a regional bbox exists alongside', async () => {
+    // With at least one regional bbox present, the auto-flip
+    // safety-net does NOT fire (`bboxes.length > 0` after the
+    // default `includeGlobal: false` render). The user-driven
+    // toggle then takes over.
     const { createCatalogMap } = await import('./catalogMapUI')
     const host = document.getElementById('host')!
     const controller = createCatalogMap(host, {
@@ -189,22 +193,53 @@ describe('createCatalogMap', () => {
     })
     controller.update({
       datasets: [
+        makeDataset({ id: 'regional', boundingBox: { n: 30, s: -30, e: 60, w: -60 } }),
         makeDataset({ id: 'global', boundingBox: { n: 90, s: -90, e: 180, w: -180 } }),
       ],
       filterState: {},
       searchQuery: '',
     })
     for (const h of mapStub.handlers.load ?? []) h()
-    // Default — global hidden, source carries an empty collection.
+    // Default — global hidden, regional visible.
     const first = mapStub.setData.mock.calls.at(-1)?.[0] as { features: unknown[] }
-    expect(first.features).toHaveLength(0)
+    expect(first.features).toHaveLength(1)
 
-    // Toggle on — global surfaces.
+    // Toggle on — both surface.
     const checkbox = host.querySelector<HTMLInputElement>('.browse-map-include-global-input')!
     checkbox.checked = true
     checkbox.dispatchEvent(new Event('change'))
     const second = mapStub.setData.mock.calls.at(-1)?.[0] as { features: unknown[] }
-    expect(second.features).toHaveLength(1)
+    expect(second.features).toHaveLength(2)
+    controller.destroy()
+  })
+
+  it('auto-flips include-global on first render when every match is global (v1 catalog-shape concession)', async () => {
+    // The SOS catalog is overwhelmingly worldwide today; defaulting
+    // `includeGlobal: false` would produce a blank canvas on first
+    // open. The controller's one-shot auto-flip surfaces the global
+    // bboxes instead, so the user immediately sees a populated map.
+    const { createCatalogMap } = await import('./catalogMapUI')
+    const host = document.getElementById('host')!
+    const controller = createCatalogMap(host, {
+      onRegionChange: vi.fn(),
+      onPreviewDataset: vi.fn(),
+    })
+    controller.update({
+      datasets: [
+        makeDataset({ id: 'g1', boundingBox: { n: 90, s: -90, e: 180, w: -180 } }),
+        makeDataset({ id: 'g2', boundingBox: { n: 90, s: -90, e: 180, w: -180 } }),
+      ],
+      filterState: {},
+      searchQuery: '',
+    })
+    for (const h of mapStub.handlers.load ?? []) h()
+    // Auto-flipped — both global bboxes surfaced.
+    const last = mapStub.setData.mock.calls.at(-1)?.[0] as { features: unknown[] }
+    expect(last.features).toHaveLength(2)
+    // The checkbox state reflects the auto-flip so the user can
+    // see (and reverse) what happened.
+    const checkbox = host.querySelector<HTMLInputElement>('.browse-map-include-global-input')!
+    expect(checkbox.checked).toBe(true)
     controller.destroy()
   })
 

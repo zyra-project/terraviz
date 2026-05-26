@@ -279,6 +279,24 @@ export function createCatalogMap(
   let includeGlobal = false
   let drawMode = false
   let lastRendered: CatalogMap | null = null
+  /**
+   * One-shot auto-flip flag. When the controller first renders
+   * and finds that *every* visible dataset has been suppressed
+   * by `includeGlobal: false` (i.e. the catalog has only global
+   * bboxes today and no regional ones), we flip the toggle on
+   * so the canvas isn't empty on first open. This is a v1 reality
+   * concession — the SOS catalog is overwhelmingly worldwide and
+   * `wireToDataset` defaults missing bboxes to global, so the
+   * default `includeGlobal: false` would produce a blank Map
+   * surface for every user until publishers start adding regional
+   * bboxes.
+   *
+   * Tracked so we only auto-flip once per mount: a deliberate
+   * user-toggle back to "include global off" must stick across
+   * subsequent rebuilds (chip-rail clicks etc.) without us
+   * flipping it back on.
+   */
+  let hasAutoFlippedGlobal = false
   // Rolling timestamps for the per-minute draw-emit throttle. Same
   // shape as `camera.ts` and `catalogTimelineUI.ts`.
   const drawEmits: number[] = []
@@ -561,12 +579,37 @@ export function createCatalogMap(
 
   function rebuild(): void {
     if (!lastInput || !mapReady) return
-    const result = buildMap(
+    let result = buildMap(
       lastInput.datasets,
       lastInput.filterState,
       lastInput.searchQuery,
       { includeGlobal },
     )
+
+    // Auto-flip Include global on first render if the catalog has
+    // only global bboxes and the user is about to see an empty
+    // canvas. `bboxes.length === 0 && hiddenGlobalCount > 0`
+    // implies `regionalCount === 0` (any regional row would have
+    // surfaced even with includeGlobal=false), which is the v1
+    // catalog-shape we're working around. One-shot: a user who
+    // deliberately toggles back to "off" stays off.
+    if (
+      !hasAutoFlippedGlobal
+      && !includeGlobal
+      && result.bboxes.length === 0
+      && result.hiddenGlobalCount > 0
+    ) {
+      hasAutoFlippedGlobal = true
+      includeGlobal = true
+      includeGlobalInput.checked = true
+      result = buildMap(
+        lastInput.datasets,
+        lastInput.filterState,
+        lastInput.searchQuery,
+        { includeGlobal },
+      )
+    }
+
     lastRendered = result
 
     // Refresh the canvas's aria-label with the live overlay count
@@ -583,6 +626,19 @@ export function createCatalogMap(
     if (result.bboxes.length === 0) {
       empty.classList.remove('hidden')
       canvas.classList.add('hidden')
+      // The empty-state message differentiates the three reasons
+      // the canvas can be empty: (a) user filters excluded
+      // everything, (b) all matches lack geographic coverage,
+      // (c) all matches are global and the user toggled them off.
+      // Without this split the message would always read as if
+      // the chip rail were the culprit (the original v1 wording).
+      if (result.undatedCount > 0 && result.hiddenGlobalCount === 0) {
+        empty.textContent = t('browse.map.empty.allUndated')
+      } else if (result.hiddenGlobalCount > 0 && result.undatedCount === 0) {
+        empty.textContent = t('browse.map.empty.allGlobalHidden')
+      } else {
+        empty.textContent = t('browse.map.empty')
+      }
       updateFootnote(result)
       // The geographicRegion predicate may have caused the empty
       // state — keep the clear-region affordance visible so the

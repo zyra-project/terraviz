@@ -81,6 +81,8 @@
   "browse.map.draw.aria": "Toggle draw-rectangle mode — drag to filter datasets by geographic region",
   "browse.map.draw.label": "Draw region",
   "browse.map.empty": "No datasets match the current filters — adjust the chip rail to see the map.",
+  "browse.map.empty.allGlobalHidden": "All matching datasets are global — toggle Include global to surface them.",
+  "browse.map.empty.allUndated": "None of the matching datasets carry geographic coverage — switch to Cards to see them.",
   "browse.map.hiddenGlobalFootnote.one": "1 global dataset hidden — toggle “Include global” to surface it.",
   "browse.map.hiddenGlobalFootnote.other": "{count} global datasets hidden — toggle “Include global” to surface them.",
   "browse.map.includeGlobal.label": "Include global",

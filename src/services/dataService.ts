@@ -172,6 +172,12 @@ export function synthesizeSosOnlyDatasets(
       tags: entry.keywords,
       websiteLink: entry.url,
       availableFor: 'SOS',
+      // Worldwide bbox by default — synthesised SOS-only rows
+      // have no spatial-extent source data, and the SOS catalog
+      // is overwhelmingly global (see GLOBAL_BBOX docstring on
+      // `wireToDataset`). Keeping the default in lockstep so
+      // SPA-side `Dataset.boundingBox` is always populated.
+      boundingBox: { n: 90, s: -90, w: -180, e: 180 },
       // No live-catalog provenance, no weight signal — sort to
       // the bottom of catalog-weight-ordered listings until
       // explicit relevance signals layer on.
@@ -213,6 +219,31 @@ interface WireDataset {
   tags?: string[]
   enriched?: EnrichedMetadata
   /**
+   * Geographic bounding box (NSWE in degrees) for the dataset's
+   * spatial extent. Phase 3d typed-column promotion (see the
+   * backend serializer's docstring); the SPA's regional-projection
+   * feature reads this at render time. Missing on rows whose
+   * `bbox_*` D1 columns are NULL — `wireToDataset` defaults those
+   * to worldwide so the SPA-side `Dataset.boundingBox` is always
+   * populated. Phase 4 §6.9 Map view depends on every dataset
+   * carrying *some* bbox so the include-global toggle has a
+   * complete view of the catalog.
+   */
+  boundingBox?: { n: number; s: number; w: number; e: number }
+  /** Celestial body the dataset visualises. Omitted == Earth.
+   *  Non-Earth values (Mars / Moon / Sun / Jupiter / …) cue the
+   *  SPA's Phase 3e base-texture swap. */
+  celestialBody?: string
+  /** Radius of the celestial body in miles, when non-Earth. */
+  radiusMi?: number
+  /** Globe longitude rotation reference in degrees. Omitted == 0
+   *  (prime-meridian-centered); ±180 is dateline-centered (Pacific-
+   *  focused datasets). */
+  lonOrigin?: number
+  /** Image Y-axis flip flag for datasets with inverted Y conventions.
+   *  Omitted == false. */
+  isFlippedInY?: boolean
+  /**
    * Set by the node-catalog serializer for tour rows: the resolved
    * URL the tour engine fetches the tour document from. Bypasses
    * the manifest endpoint (which 415s tour formats). Older catalog
@@ -241,6 +272,25 @@ interface WireDataset {
  * named helper so both the catalog fetch and the preview path
  * stay in lockstep when new wire fields land.
  */
+/**
+ * Default geographic bounding box for SPA-side datasets that
+ * arrive on the wire without one. The SOS catalog is overwhelmingly
+ * worldwide (sea surface temperature, atmospheric reanalysis,
+ * satellite imagery — all global by design); only a handful of
+ * regional datasets (specific hurricane basins, named-region
+ * studies) carry a narrower bbox today. Defaulting to worldwide
+ * at the SPA boundary makes the spatial extent explicit on every
+ * `Dataset` record so the §6.9 Map view's include-global toggle
+ * sees the complete catalog, rather than the ~95% of rows whose
+ * `bbox_*` D1 columns are still NULL falling out of the Map
+ * surface entirely.
+ *
+ * Publishers should set a regional bbox when applicable — the
+ * default acknowledges the current data-shape reality without
+ * blocking a future where bboxes are populated row-by-row.
+ */
+const GLOBAL_BBOX = { n: 90, s: -90, w: -180, e: 180 } as const
+
 function wireToDataset(d: WireDataset): Dataset {
   return {
     id: d.id,
@@ -263,6 +313,17 @@ function wireToDataset(d: WireDataset): Dataset {
     runTourOnLoad: d.runTourOnLoad,
     tags: d.tags,
     enriched: d.enriched,
+    // Phase 3d typed metadata — propagate boundingBox /
+    // celestialBody / lonOrigin / isFlippedInY from the wire so
+    // the SPA's regional-projection feature + the §6.9 Map view
+    // see them. boundingBox defaults to worldwide (see
+    // GLOBAL_BBOX docstring) so the Map's spatial-extent
+    // surface is complete even before publishers populate the
+    // D1 bbox columns.
+    boundingBox: d.boundingBox ?? { ...GLOBAL_BBOX },
+    celestialBody: d.celestialBody,
+    lonOrigin: d.lonOrigin,
+    isFlippedInY: d.isFlippedInY,
     tourJsonUrl: d.tourJsonUrl,
     frames: d.frames,
   }
