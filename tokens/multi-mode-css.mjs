@@ -67,14 +67,44 @@ function getModeValue(token, mode) {
 }
 
 /**
- * Format a CSS value. The glass blur token stores "12px" but the
- * CSS custom property uses "blur(12px)".
+ * Wrap every Nrem / Npx number in a token value with
+ * `calc(... * var(--ui-scale))` so every dimension token honours
+ * the user-controlled UI-scale knob (§7.1). Numbers equal to zero
+ * are skipped (0 * anything = 0). Decorative 1px / 2px hairlines
+ * have no token-level escape today; if one is added later, opt it
+ * out of this wrap explicitly.
+ */
+function wrapDimensionsWithUiScale(value) {
+  return String(value).replace(
+    /(?<![\w.-])(-?\d+(?:\.\d+)?)(rem|px)\b/g,
+    (match, num, unit) => {
+      const n = Number(num);
+      if (!Number.isFinite(n) || n === 0) return match;
+      return `calc(${num}${unit} * var(--ui-scale))`;
+    },
+  );
+}
+
+/**
+ * Format a CSS value. Three special cases:
+ *   - `--glass-blur` wraps the px value inside a blur() function
+ *     filter, since the CSS custom property is consumed as the
+ *     argument to backdrop-filter / filter.
+ *   - `--ui-scale` is the scale knob itself; it must not wrap its
+ *     own value (would self-reference) and stays unitless.
+ *   - Every other token routes rem/px values through the
+ *     UI-scale calc wrapper above so var(--component-foo) sites
+ *     scale automatically.
  */
 function formatCSSValue(name, value) {
-  if (name === '--glass-blur') {
-    return `blur(${value})`;
+  if (name === '--ui-scale') {
+    return value;
   }
-  return value;
+  const scaled = wrapDimensionsWithUiScale(value);
+  if (name === '--glass-blur') {
+    return `blur(${scaled})`;
+  }
+  return scaled;
 }
 
 export default {
