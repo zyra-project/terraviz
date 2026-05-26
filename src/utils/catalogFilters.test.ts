@@ -206,6 +206,15 @@ describe('encode/decode round-trip', () => {
     expect(decodeFilterState(new URLSearchParams('gr=10,20,30')).state).toEqual({})
     // Non-numeric corner.
     expect(decodeFilterState(new URLSearchParams('gr=10,foo,30,40')).state).toEqual({})
+    // Empty segment — `Number('')` is `0`, so without an explicit
+    // empty-check the decoder would silently treat `gr=10,,30,40`
+    // as `{n:10, s:0, e:30, w:40}` and the user wouldn't know
+    // their hand-edited URL was malformed.
+    expect(decodeFilterState(new URLSearchParams('gr=10,,30,40')).state).toEqual({})
+    expect(decodeFilterState(new URLSearchParams('gr=,20,30,40')).state).toEqual({})
+    expect(decodeFilterState(new URLSearchParams('gr=10,20,30,')).state).toEqual({})
+    // Whitespace-only segments — same as empty after trim.
+    expect(decodeFilterState(new URLSearchParams('gr=10, ,30,40')).state).toEqual({})
   })
 
   it('rounds geographicRegion bounds to 3 decimals on encode', () => {

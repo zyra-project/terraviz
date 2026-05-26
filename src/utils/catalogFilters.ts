@@ -207,11 +207,14 @@ function decodePredicate(facet: string, raw: string): FacetPredicate | null {
   // Geographic region — `gr=n,s,e,w`. Four signed decimals,
   // comma-separated, in the canonical NSEW order (matches the
   // FacetPredicate's bbox shape). Malformed entries (wrong arity,
-  // non-finite numbers) decode to null so a hand-edited URL never
-  // wedges the page.
+  // empty segments, non-finite numbers) decode to null so a
+  // hand-edited URL never wedges the page — explicitly reject
+  // empty segments (`gr=10,,30,40`) because `Number('')` is `0`,
+  // which would silently coerce the omission to a value.
   if (facet === 'geographicRegion') {
-    const parts = raw.split(',')
+    const parts = raw.split(',').map(p => p.trim())
     if (parts.length !== 4) return null
+    if (parts.some(p => p.length === 0)) return null
     const [n, s, e, w] = parts.map(p => Number(p))
     if (!Number.isFinite(n) || !Number.isFinite(s)) return null
     if (!Number.isFinite(e) || !Number.isFinite(w)) return null
