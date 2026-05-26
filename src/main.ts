@@ -73,6 +73,19 @@ import { overlayOptionsFromDataset } from './services/datasetOverlayOptions'
 import { resolveFrameQuery } from './utils/frames'
 import { initTourAuthoring } from './ui/tourAuthoring'
 import { bootstrapI18n } from './i18n/bootstrap'
+import { initUiScale } from './services/uiScaleService'
+
+// Apply the persisted UI-scale to `:root` at module-evaluation
+// time — before DOMContentLoaded, before any UI renders, before
+// the loading screen's first paint cycle completes. Waiting for
+// the DOMContentLoaded handler would let the loading screen
+// paint once at `--ui-scale: 1` and then snap to the user's
+// preset, producing a visible flash on every reload for visitors
+// who pick a non-default size. Module-eval is the earliest hook
+// the bundle gives us short of an inline <script> in <head>.
+// SSR-safe (the service no-ops when `document` is undefined).
+// See docs/WEB_CATALOG_FEATURES_PLAN.md §7.1.
+initUiScale()
 
 // Phase 5: set a body class so CSS can target mobile-native adaptations
 // (larger touch targets, bottom sheets, etc.) without JS per-component.

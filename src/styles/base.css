@@ -26,10 +26,10 @@ button {
     background: var(--color-accent-dark);
     color: white;
     border: none;
-    padding: 0.5rem 1rem;
-    border-radius: 6px;
+    padding: calc(0.5rem * var(--ui-scale)) calc(1rem * var(--ui-scale));
+    border-radius: calc(6px * var(--ui-scale));
     cursor: pointer;
-    font-size: 0.875rem;
+    font-size: calc(0.875rem * var(--ui-scale));
     transition: background 0.2s, color 0.15s, border-color 0.15s;
 }
 
@@ -94,12 +94,12 @@ canvas {
 .map-viewport.out-of-range::after {
     content: "No data for current time";
     position: absolute;
-    top: 0.5rem;
+    top: calc(0.5rem * var(--ui-scale));
     left: 50%;
     transform: translateX(-50%);
     z-index: 4;
-    padding: 0.25rem 0.6rem;
-    font-size: 0.65rem;
+    padding: calc(0.25rem * var(--ui-scale)) calc(0.6rem * var(--ui-scale));
+    font-size: calc(0.65rem * var(--ui-scale));
     font-weight: 500;
     letter-spacing: 0.03em;
     color: var(--color-warning);
@@ -107,7 +107,7 @@ canvas {
     backdrop-filter: var(--glass-blur);
     -webkit-backdrop-filter: var(--glass-blur);
     border: 1px solid rgba(255, 204, 102, 0.35);
-    border-radius: 12px;
+    border-radius: calc(12px * var(--ui-scale));
     white-space: nowrap;
     pointer-events: none;
 }
@@ -131,17 +131,17 @@ canvas {
    appends panels in top-left-to-bottom-right order. */
 .panel-legend {
     position: absolute;
-    inset-inline-end: 0.5rem;
-    bottom: 0.5rem;
+    inset-inline-end: calc(0.5rem * var(--ui-scale));
+    bottom: calc(0.5rem * var(--ui-scale));
     z-index: 6;
-    padding: 0.4rem;
-    max-width: 180px;
-    max-height: 110px;
+    padding: calc(0.4rem * var(--ui-scale));
+    max-width: calc(180px * var(--ui-scale));
+    max-height: calc(110px * var(--ui-scale));
     background: rgba(13, 13, 18, 0.85);
     backdrop-filter: var(--glass-blur);
     -webkit-backdrop-filter: var(--glass-blur);
     border: 1px solid var(--white-o12);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--ui-scale));
     cursor: zoom-in;
     pointer-events: auto;
     transition: border-color 0.15s, background 0.15s;
@@ -153,7 +153,7 @@ canvas {
 .panel-legend img {
     display: block;
     max-width: 100%;
-    max-height: 102px;
+    max-height: calc(102px * var(--ui-scale));
     width: auto;
     height: auto;
     object-fit: contain;
@@ -173,14 +173,14 @@ canvas {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 0.6rem;
+    gap: calc(0.6rem * var(--ui-scale));
     background: rgba(0, 0, 0, 0.55);
     pointer-events: none;
 }
 .panel-loading.hidden { display: none; }
 .panel-loading-spinner {
-    width: 28px;
-    height: 28px;
+    width: calc(28px * var(--ui-scale));
+    height: calc(28px * var(--ui-scale));
     border: 3px solid var(--white-o15);
     border-top-color: var(--color-accent);
     border-radius: 50%;
@@ -190,7 +190,7 @@ canvas {
     to { transform: rotate(360deg); }
 }
 .panel-loading-label {
-    font-size: 0.7rem;
+    font-size: calc(0.7rem * var(--ui-scale));
     font-weight: 500;
     color: var(--white-o70);
     letter-spacing: 0.03em;
@@ -203,7 +203,7 @@ canvas {
    there too, so lift the legend up to clear it. 6rem keeps
    a visible gap above the bar. */
 .map-viewport:last-child .panel-legend {
-    bottom: 6rem;
+    bottom: calc(6rem * var(--ui-scale));
 }
 /* Small pill button in the top-left of each panel. Numbered
    1..N. Click promotes that panel to primary. Hidden entirely
@@ -218,13 +218,13 @@ canvas {
    easy to find at a glance. */
 .viewport-indicator {
     position: absolute;
-    top: 0.5rem;
-    inset-inline-start: 3.75rem;
+    top: calc(0.5rem * var(--ui-scale));
+    inset-inline-start: calc(3.75rem * var(--ui-scale));
     z-index: 5;
-    min-width: 26px;
-    height: 26px;
-    padding: 0 0.5rem;
-    font-size: 0.7rem;
+    min-width: calc(26px * var(--ui-scale));
+    height: calc(26px * var(--ui-scale));
+    padding: 0 calc(0.5rem * var(--ui-scale));
+    font-size: calc(0.7rem * var(--ui-scale));
     font-weight: 600;
     font-variant-numeric: tabular-nums;
     background: rgba(13, 13, 18, 0.82);
@@ -232,7 +232,7 @@ canvas {
     -webkit-backdrop-filter: var(--glass-blur);
     border: 1px solid var(--white-o12);
     color: var(--color-text-secondary);
-    border-radius: 13px;
+    border-radius: calc(13px * var(--ui-scale));
     cursor: pointer;
     pointer-events: auto;
     transition: background 0.15s, color 0.15s, border-color 0.15s;
@@ -268,7 +268,7 @@ canvas {
     backdrop-filter: var(--glass-blur);
     -webkit-backdrop-filter: var(--glass-blur);
     border: 1px solid var(--white-o08);
-    border-radius: 8px;
-    font-size: 0.8rem;
+    border-radius: calc(8px * var(--ui-scale));
+    font-size: calc(0.8rem * var(--ui-scale));
 }
 

@@ -6,9 +6,9 @@
 /* --- Info panel as collapsible drawer --- */
 #info-panel {
     position: absolute;
-    bottom: 0.75rem;
-    inset-inline-start: 0.75rem;
-    max-width: 340px;
+    bottom: calc(0.75rem * var(--ui-scale));
+    inset-inline-start: calc(0.75rem * var(--ui-scale));
+    max-width: calc(340px * var(--ui-scale));
     transition: max-height 0.3s ease;
     overflow: hidden;
 }
@@ -17,20 +17,20 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0.5rem 0.75rem;
+    padding: calc(0.5rem * var(--ui-scale)) calc(0.75rem * var(--ui-scale));
     cursor: pointer;
-    gap: 0.5rem;
+    gap: calc(0.5rem * var(--ui-scale));
     user-select: none;
 }
 
 #info-header:hover {
     background: var(--white-o05);
-    border-radius: 8px;
+    border-radius: calc(8px * var(--ui-scale));
 }
 
 #info-title {
     font-weight: 600;
-    font-size: 0.8rem;
+    font-size: calc(0.8rem * var(--ui-scale));
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -38,7 +38,7 @@
 }
 
 #info-toggle {
-    font-size: 0.65rem;
+    font-size: calc(0.65rem * var(--ui-scale));
     color: var(--color-text-muted);
     flex-shrink: 0;
 }
@@ -50,20 +50,20 @@
    on the <select> don't bubble up to the header (which would
    otherwise toggle the collapse state). */
 #info-panel-picker {
-    padding: 0 0.75rem 0.4rem;
+    padding: 0 calc(0.75rem * var(--ui-scale)) calc(0.4rem * var(--ui-scale));
     border-top: 1px solid var(--color-surface);
-    padding-top: 0.4rem;
+    padding-top: calc(0.4rem * var(--ui-scale));
 }
 #info-panel-picker.hidden { display: none; }
 #info-selector {
     width: 100%;
-    padding: 0.3rem 0.5rem;
+    padding: calc(0.3rem * var(--ui-scale)) calc(0.5rem * var(--ui-scale));
     font: inherit;
-    font-size: 0.72rem;
+    font-size: calc(0.72rem * var(--ui-scale));
     color: #ddd;
     background: var(--color-surface);
     border: 1px solid var(--white-o12);
-    border-radius: 5px;
+    border-radius: calc(5px * var(--ui-scale));
     cursor: pointer;
 }
 #info-selector:hover {
@@ -83,13 +83,13 @@
     max-height: 0;
     overflow: hidden;
     transition: max-height 0.3s ease, padding 0.3s ease;
-    padding: 0 0.75rem;
+    padding: 0 calc(0.75rem * var(--ui-scale));
 }
 
 #info-panel.expanded #info-body {
     max-height: 60vh;
     overflow-y: auto;
-    padding: 0 0.75rem 0.75rem;
+    padding: 0 calc(0.75rem * var(--ui-scale)) calc(0.75rem * var(--ui-scale));
 }
 
 #info-panel.expanded #info-toggle {
@@ -97,46 +97,46 @@
 }
 
 .info-source {
-    font-size: 0.7rem;
+    font-size: calc(0.7rem * var(--ui-scale));
     color: #aaa;
-    margin-top: 0.25rem;
+    margin-top: calc(0.25rem * var(--ui-scale));
 }
 
 .info-description {
-    font-size: 0.75rem;
+    font-size: calc(0.75rem * var(--ui-scale));
     line-height: 1.5;
-    margin-top: 0.5rem;
+    margin-top: calc(0.5rem * var(--ui-scale));
     color: #ddd;
 }
 
 .info-categories {
-    font-size: 0.65rem;
+    font-size: calc(0.65rem * var(--ui-scale));
     color: var(--color-text-muted);
-    margin-top: 0.5rem;
+    margin-top: calc(0.5rem * var(--ui-scale));
 }
 
 .info-keywords {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.2rem;
-    margin-top: 0.5rem;
+    gap: calc(0.2rem * var(--ui-scale));
+    margin-top: calc(0.5rem * var(--ui-scale));
 }
 
 .info-keyword {
     background: var(--accent-o12);
     color: var(--color-accent-hover);
-    padding: 0.15rem 0.35rem;
-    border-radius: 3px;
-    font-size: 0.6rem;
+    padding: calc(0.15rem * var(--ui-scale)) calc(0.35rem * var(--ui-scale));
+    border-radius: calc(3px * var(--ui-scale));
+    font-size: calc(0.6rem * var(--ui-scale));
 }
 
 .info-section-label {
-    font-size: 0.6rem;
+    font-size: calc(0.6rem * var(--ui-scale));
     text-transform: uppercase;
     letter-spacing: 0.5px;
     color: var(--color-text-muted);
-    margin-top: 0.75rem;
-    margin-bottom: 0.25rem;
+    margin-top: calc(0.75rem * var(--ui-scale));
+    margin-bottom: calc(0.25rem * var(--ui-scale));
 }
 
 .info-related {
@@ -146,13 +146,13 @@
 }
 
 .info-related li {
-    margin-bottom: 0.2rem;
+    margin-bottom: calc(0.2rem * var(--ui-scale));
 }
 
 .info-related a, .info-catalog-link {
     color: var(--color-accent);
     text-decoration: none;
-    font-size: 0.7rem;
+    font-size: calc(0.7rem * var(--ui-scale));
     cursor: pointer;
 }
 
@@ -167,7 +167,7 @@
    render emitted. */
 .info-related-offcatalog {
     color: var(--color-text-muted);
-    font-size: 0.7rem;
+    font-size: calc(0.7rem * var(--ui-scale));
 }
 
 /* --- Captions-available badge (Phase 3 §5.2) -------------------
@@ -179,9 +179,9 @@
 .info-captions-badge {
     display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
-    margin-top: 0.5rem;
-    font-size: 0.7rem;
+    gap: calc(0.4rem * var(--ui-scale));
+    margin-top: calc(0.5rem * var(--ui-scale));
+    font-size: calc(0.7rem * var(--ui-scale));
     color: var(--color-text-secondary);
 }
 .info-captions-badge-glyph {
@@ -189,14 +189,14 @@
     align-items: center;
     justify-content: center;
     min-width: 2em;
-    padding: 0.05rem 0.3rem;
-    font-size: 0.6rem;
+    padding: calc(0.05rem * var(--ui-scale)) calc(0.3rem * var(--ui-scale));
+    font-size: calc(0.6rem * var(--ui-scale));
     font-weight: 700;
     letter-spacing: 0.04em;
     color: var(--color-text);
     background: var(--white-o12);
     border: 1px solid var(--white-o12);
-    border-radius: 3px;
+    border-radius: calc(3px * var(--ui-scale));
 }
 
 /* --- Description show-more / show-less (Phase 2 §4.1) ----------
@@ -207,7 +207,7 @@
    marker so the wiring code can find the right elements without
    a global selector race. */
 .info-description-wrap {
-    margin-top: 0.5rem;
+    margin-top: calc(0.5rem * var(--ui-scale));
 }
 .info-description-wrap .info-description {
     margin-top: 0;
@@ -218,8 +218,8 @@
     border: none;
     color: var(--color-accent);
     cursor: pointer;
-    font-size: 0.7rem;
-    margin-top: 0.25rem;
+    font-size: calc(0.7rem * var(--ui-scale));
+    margin-top: calc(0.25rem * var(--ui-scale));
     padding: 0;
     text-decoration: underline;
 }
@@ -239,9 +239,9 @@
     padding: 0;
     display: grid;
     grid-template-columns: max-content 1fr;
-    column-gap: 0.6rem;
-    row-gap: 0.2rem;
-    font-size: 0.7rem;
+    column-gap: calc(0.6rem * var(--ui-scale));
+    row-gap: calc(0.2rem * var(--ui-scale));
+    font-size: calc(0.7rem * var(--ui-scale));
 }
 .info-credit-row {
     display: contents;
@@ -272,7 +272,7 @@
    on the link's underline (which the image suppresses). */
 .info-thumbnail-download {
     display: block;
-    margin-top: 0.6rem;
+    margin-top: calc(0.6rem * var(--ui-scale));
     text-decoration: none;
     color: var(--color-text);
     position: relative;
@@ -280,13 +280,13 @@
 .info-thumbnail {
     display: block;
     width: 100%;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--ui-scale));
     background: var(--color-surface-alt);
 }
 .info-thumbnail-download-label {
     display: inline-block;
-    margin-top: 0.25rem;
-    font-size: 0.65rem;
+    margin-top: calc(0.25rem * var(--ui-scale));
+    font-size: calc(0.65rem * var(--ui-scale));
     color: var(--color-accent);
     text-decoration: underline;
 }
@@ -297,10 +297,10 @@
 
 .info-legend-thumb {
     width: 100%;
-    max-height: 120px;
+    max-height: calc(120px * var(--ui-scale));
     object-fit: contain;
-    border-radius: 4px;
-    margin: 0.5rem 0;
+    border-radius: calc(4px * var(--ui-scale));
+    margin: calc(0.5rem * var(--ui-scale)) 0;
     cursor: zoom-in;
     background: rgba(255,255,255,0.06);
 }
@@ -323,19 +323,19 @@
     max-width: 90vw;
     max-height: 90vh;
     object-fit: contain;
-    border-radius: 6px;
+    border-radius: calc(6px * var(--ui-scale));
     box-shadow: 0 4px 40px rgba(0,0,0,0.6);
 }
 .legend-modal-close {
     position: absolute;
-    top: 1rem;
-    inset-inline-end: 1rem;
+    top: calc(1rem * var(--ui-scale));
+    inset-inline-end: calc(1rem * var(--ui-scale));
     background: rgba(255,255,255,0.15);
     border: 1px solid rgba(255,255,255,0.3);
     color: var(--color-text);
-    font-size: 1.5rem;
-    width: 2.5rem;
-    height: 2.5rem;
+    font-size: calc(1.5rem * var(--ui-scale));
+    width: calc(2.5rem * var(--ui-scale));
+    height: calc(2.5rem * var(--ui-scale));
     border-radius: 50%;
     cursor: pointer;
     display: flex;
@@ -352,7 +352,7 @@
 /* Responsive — tablet/mobile */
 @media (max-width: 768px) {
     #info-panel {
-        max-width: calc(100vw - 1.5rem);
+        max-width: calc(100vw - calc(1.5rem * var(--ui-scale)));
     }
 
     #info-panel.expanded #info-body {

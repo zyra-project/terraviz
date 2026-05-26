@@ -19,14 +19,14 @@
 .skip-link {
     position: absolute;
     top: -100%;
-    inset-inline-start: 1rem;
+    inset-inline-start: calc(1rem * var(--ui-scale));
     z-index: 10000;
-    padding: 0.5rem 1rem;
+    padding: calc(0.5rem * var(--ui-scale)) calc(1rem * var(--ui-scale));
     background: var(--color-accent-dark);
     color: var(--color-text);
-    border-radius: 0 0 6px 6px;
+    border-radius: 0 0 calc(6px * var(--ui-scale)) calc(6px * var(--ui-scale));
     text-decoration: none;
-    font-size: 0.875rem;
+    font-size: calc(0.875rem * var(--ui-scale));
     transition: top 0.2s;
 }
 
@@ -66,19 +66,19 @@
 #caption-overlay {
     display: none;
     position: absolute;
-    bottom: 5.5rem;
+    bottom: calc(5.5rem * var(--ui-scale));
     left: 50%;
     transform: translateX(-50%);
     max-width: 80%;
     text-align: center;
-    font-size: clamp(1rem, 1.8vw, 1.4rem);
+    font-size: clamp(calc(1rem * var(--ui-scale)), 1.8vw, calc(1.4rem * var(--ui-scale)));
     line-height: 1.45;
     color: #fff;
     font-weight: 500;
     text-shadow: 0 1px 3px rgba(0,0,0,0.9), 0 0 10px rgba(0,0,0,0.8);
     background: rgba(0, 0, 0, 0.85);
-    padding: 0.35rem 0.9rem;
-    border-radius: 4px;
+    padding: calc(0.35rem * var(--ui-scale)) calc(0.9rem * var(--ui-scale));
+    border-radius: calc(4px * var(--ui-scale));
     pointer-events: none;
     white-space: pre-line;
 }
@@ -90,15 +90,15 @@
     }
 
     #browse-inner {
-        padding: 1rem 1rem 0;
+        padding: calc(1rem * var(--ui-scale)) calc(1rem * var(--ui-scale)) 0;
     }
 
     #browse-header {
-        margin-bottom: 0.75rem;
+        margin-bottom: calc(0.75rem * var(--ui-scale));
     }
 
     .browse-title {
-        font-size: 1.1rem;
+        font-size: calc(1.1rem * var(--ui-scale));
     }
 
     .browse-subtitle {
@@ -106,7 +106,7 @@
     }
 
     .browse-search-wrap {
-        margin-bottom: 0.5rem;
+        margin-bottom: calc(0.5rem * var(--ui-scale));
     }
 
     /* Horizontal-scroll chip rows — prevent vertical overflow on mobile
@@ -127,21 +127,21 @@
     .browse-toggle-row::-webkit-scrollbar { display: none; }
 
     .browse-toggle-chip {
-        padding: 0.3rem 0.65rem;
+        padding: calc(0.3rem * var(--ui-scale)) calc(0.65rem * var(--ui-scale));
     }
 
     #browse-toolbar {
         flex-wrap: wrap;
-        margin-bottom: 0.35rem;
+        margin-bottom: calc(0.35rem * var(--ui-scale));
     }
 
     #browse-grid {
         grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-        gap: 0.5rem;
+        gap: calc(0.5rem * var(--ui-scale));
     }
 
     .browse-card {
-        padding: 0.625rem;
+        padding: calc(0.625rem * var(--ui-scale));
     }
 }
 
@@ -149,7 +149,7 @@
 @media (max-width: 600px) and (orientation: portrait) {
     .browse-card-header {
         flex-direction: column;
-        gap: 0.35rem;
+        gap: calc(0.35rem * var(--ui-scale));
     }
     .browse-card-title {
         -webkit-line-clamp: 3;

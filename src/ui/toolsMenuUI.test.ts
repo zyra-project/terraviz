@@ -700,3 +700,105 @@ describe('toolsMenuUI — settings_changed telemetry', () => {
     expect(second.value_class).toBe('off')
   })
 })
+
+// ---------------------------------------------------------------------------
+// UI-size preset radio (§7.1)
+//
+// Three buttons (Compact / Default / Comfortable) wired to
+// uiScaleService. The service mutates `:root` + localStorage; the UI
+// only mirrors active state across the three buttons.
+// ---------------------------------------------------------------------------
+
+describe('Tools menu UI-size radio', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    document.documentElement.style.removeProperty('--ui-scale')
+  })
+
+  it('renders the three preset buttons inside a radiogroup', () => {
+    const vm = makeViewports(1)
+    initToolsMenu(vm as any)
+
+    const compact = document.getElementById('tools-menu-uiscale-compact')!
+    const def = document.getElementById('tools-menu-uiscale-default')!
+    const comfy = document.getElementById('tools-menu-uiscale-comfortable')!
+    expect(compact).toBeTruthy()
+    expect(def).toBeTruthy()
+    expect(comfy).toBeTruthy()
+    // Default is the persisted-empty fall-through, so it's active.
+    expect(def.classList.contains('active')).toBe(true)
+    expect(compact.classList.contains('active')).toBe(false)
+    expect(comfy.classList.contains('active')).toBe(false)
+    // aria-pressed mirrors the active class — same pattern as the
+    // sibling layout-picker.
+    expect(def.getAttribute('aria-pressed')).toBe('true')
+    expect(compact.getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('writes localStorage + :root + flips active when a preset is clicked', () => {
+    const vm = makeViewports(1)
+    initToolsMenu(vm as any)
+
+    const comfy = document.getElementById('tools-menu-uiscale-comfortable') as HTMLButtonElement
+    comfy.click()
+
+    expect(comfy.classList.contains('active')).toBe(true)
+    expect(comfy.getAttribute('aria-pressed')).toBe('true')
+    const def = document.getElementById('tools-menu-uiscale-default')!
+    expect(def.classList.contains('active')).toBe(false)
+    expect(def.getAttribute('aria-pressed')).toBe('false')
+    expect(localStorage.getItem('sos-ui-scale.v1')).toBe('1.5')
+    expect(document.documentElement.style.getPropertyValue('--ui-scale')).toBe('1.5')
+  })
+
+  it('reflects a persisted compact preset at boot', () => {
+    localStorage.setItem('sos-ui-scale.v1', '0.85')
+    const vm = makeViewports(1)
+    initToolsMenu(vm as any)
+
+    const compact = document.getElementById('tools-menu-uiscale-compact')!
+    expect(compact.classList.contains('active')).toBe(true)
+    expect(document.getElementById('tools-menu-uiscale-default')!.classList.contains('active')).toBe(false)
+  })
+
+  it('falls back to the nearest preset for non-preset persisted values', () => {
+    // A forker shipping VITE_DEFAULT_UI_SCALE=0.9, or a localStorage
+    // entry hand-edited mid-session, sits between Compact and
+    // Default. The radiogroup must never paint with zero
+    // selections — nearestPreset() picks Compact (0.9 is closer
+    // to 0.85 than to 1.0).
+    localStorage.setItem('sos-ui-scale.v1', '0.9')
+    const vm = makeViewports(1)
+    initToolsMenu(vm as any)
+
+    const compact = document.getElementById('tools-menu-uiscale-compact')!
+    const def = document.getElementById('tools-menu-uiscale-default')!
+    const comfy = document.getElementById('tools-menu-uiscale-comfortable')!
+    expect(compact.classList.contains('active')).toBe(true)
+    expect(def.classList.contains('active')).toBe(false)
+    expect(comfy.classList.contains('active')).toBe(false)
+  })
+
+  it('announces and emits settings_changed when a preset is picked', async () => {
+    const emitterMod = await import('../analytics/emitter')
+    const { setTier } = await import('../analytics/config')
+    emitterMod.resetForTests()
+    setTier('essential')
+
+    const announce = vi.fn()
+    const vm = makeViewports(1)
+    initToolsMenu(vm as any, { getCurrentDataset: () => null, announce })
+
+    const compact = document.getElementById('tools-menu-uiscale-compact') as HTMLButtonElement
+    compact.click()
+
+    expect(announce).toHaveBeenCalledWith('UI size: Compact')
+
+    const events = emitterMod.__peek()
+    const settings = events.filter((e) => e.event_type === 'settings_changed' && e.key === 'ui_scale')
+    expect(settings.length).toBe(1)
+    const last = settings[0]
+    if (last.event_type !== 'settings_changed') throw new Error('unreachable')
+    expect(last.value_class).toBe('compact')
+  })
+})

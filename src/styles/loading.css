@@ -27,20 +27,20 @@
 
 .loading-globe {
     position: relative;
-    width: 88px;
-    height: 88px;
-    margin-bottom: 2rem;
+    width: calc(88px * var(--ui-scale));
+    height: calc(88px * var(--ui-scale));
+    margin-bottom: calc(2rem * var(--ui-scale));
 }
 
 .loading-globe-inner {
-    width: 64px;
-    height: 64px;
+    width: calc(64px * var(--ui-scale));
+    height: calc(64px * var(--ui-scale));
     border-radius: 50%;
     background: radial-gradient(circle at 35% 35%, #1e3a6e, #08111f);
     box-shadow: 0 0 40px rgba(30, 80, 200, 0.35), inset 0 0 24px rgba(0, 10, 40, 0.9);
     position: absolute;
-    top: 12px;
-    inset-inline-start: 12px;
+    top: calc(12px * var(--ui-scale));
+    inset-inline-start: calc(12px * var(--ui-scale));
     animation: globe-pulse 2.4s ease-in-out infinite;
 }
 
@@ -48,8 +48,8 @@
     position: absolute;
     top: 0;
     inset-inline-start: 0;
-    width: 88px;
-    height: 88px;
+    width: calc(88px * var(--ui-scale));
+    height: calc(88px * var(--ui-scale));
     border-radius: 50%;
     border: 1.5px solid transparent;
     border-top-color: var(--color-accent);
@@ -59,10 +59,10 @@
 
 .loading-ring-2 {
     position: absolute;
-    top: 8px;
-    inset-inline-start: 8px;
-    width: 72px;
-    height: 72px;
+    top: calc(8px * var(--ui-scale));
+    inset-inline-start: calc(8px * var(--ui-scale));
+    width: calc(72px * var(--ui-scale));
+    height: calc(72px * var(--ui-scale));
     border-radius: 50%;
     border: 1px solid transparent;
     border-bottom-color: var(--accent-o40);
@@ -80,30 +80,30 @@
 }
 
 .loading-title {
-    font-size: 1.4rem;
+    font-size: calc(1.4rem * var(--ui-scale));
     font-weight: 300;
     letter-spacing: 0.25em;
     color: var(--color-text);
-    margin-bottom: 0.4rem;
+    margin-bottom: calc(0.4rem * var(--ui-scale));
     text-transform: uppercase;
 }
 
 .loading-subtitle {
-    font-size: 0.65rem;
+    font-size: calc(0.65rem * var(--ui-scale));
     color: var(--color-accent);
     letter-spacing: 0.2em;
     text-transform: uppercase;
-    margin-bottom: 2.5rem;
+    margin-bottom: calc(2.5rem * var(--ui-scale));
     opacity: 0.8;
 }
 
 .loading-progress-track {
-    width: 180px;
-    height: 1.5px;
+    width: calc(180px * var(--ui-scale));
+    height: calc(1.5px * var(--ui-scale));
     background: var(--white-o08);
     border-radius: 1px;
     overflow: hidden;
-    margin-bottom: 1.25rem;
+    margin-bottom: calc(1.25rem * var(--ui-scale));
 }
 
 .loading-progress-fill {
@@ -116,7 +116,7 @@
 }
 
 #loading-status {
-    font-size: 0.7rem;
+    font-size: calc(0.7rem * var(--ui-scale));
     color: var(--color-text-muted);
     letter-spacing: 0.08em;
     min-height: 1.2em;

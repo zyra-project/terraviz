@@ -11,6 +11,11 @@ interface ImportMetaEnv {
   /** When `'true'`, the emitter logs batches to `console.debug`
    * instead of sending them. Default on in `npm run dev`. */
   readonly VITE_TELEMETRY_CONSOLE?: string
+  /** Build-time override for the initial UI scale (§7.1). Used by
+   *  the SOS deployment to ship `1.5` as the first-launch default
+   *  for the kiosk audience. Falls back to `1.0` when unset.
+   *  Anything outside the [0.5, 2.0] band is rejected. */
+  readonly VITE_DEFAULT_UI_SCALE?: string
 }
 
 interface ImportMeta {

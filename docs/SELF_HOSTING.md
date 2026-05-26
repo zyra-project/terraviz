@@ -78,6 +78,14 @@ GitHub/GitLab and watches for pushes.
    - `VITE_BUILD_CHANNEL=public` (or `internal` for staff
      dogfood, `canary` for a staged rollout)
    - `VITE_TELEMETRY_ENABLED=true`
+   - **Optional** `VITE_DEFAULT_UI_SCALE=1.5` — sets the
+     first-launch UI size for visitors who have never picked
+     a preset. The SOS deployment uses `1.5` to ship a
+     comfortable size for its kiosk audience; default
+     installs leave it unset and boot at `1.0`. Accepted
+     values land in [0.5, 2.0]; anything outside that
+     collapses to `1.0`. A visitor's later choice in
+     Tools → Display always wins over the env default.
 5. **Save and Deploy**
 
 The first deploy will succeed but most backend features won't work

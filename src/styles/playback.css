@@ -7,7 +7,7 @@
 
 .transport-btn {
     min-width: var(--component-playback-transport-btn-min-width);
-    padding: 0.3rem 0.4rem;
+    padding: calc(0.3rem * var(--ui-scale)) calc(0.4rem * var(--ui-scale));
     font-size: var(--component-playback-transport-btn-font-size);
     line-height: 1;
     background: var(--color-surface) !important;
@@ -25,11 +25,11 @@
     font-size: var(--component-playback-time-label-font-size);
     font-weight: var(--component-playback-time-label-font-weight);
     letter-spacing: 0.03em;
-    padding: 0.4rem 0.7rem;
+    padding: calc(0.4rem * var(--ui-scale)) calc(0.7rem * var(--ui-scale));
     position: absolute;
-    top: 0.75rem;
+    top: calc(0.75rem * var(--ui-scale));
     /* Clear the help trigger pill (~80px) + gap */
-    inset-inline-end: 6rem;
+    inset-inline-end: calc(6rem * var(--ui-scale));
     background: var(--glass-bg-light);
     backdrop-filter: var(--glass-blur);
     -webkit-backdrop-filter: var(--glass-blur);
@@ -39,7 +39,7 @@
 /* When the browse overlay is open, the help trigger is hidden,
    so let the time label return to the corner. */
 body.browse-open #time-label {
-    inset-inline-end: 0.75rem;
+    inset-inline-end: calc(0.75rem * var(--ui-scale));
 }
 
 #home-btn:hover {
@@ -58,7 +58,7 @@ body.browse-open #time-label {
     .transport-btn {
         min-width: var(--component-playback-transport-btn-min-width);
         min-height: var(--component-playback-transport-btn-min-width);
-        padding: 0.4rem 0.6rem;
+        padding: calc(0.4rem * var(--ui-scale)) calc(0.6rem * var(--ui-scale));
         font-size: var(--component-playback-transport-btn-font-size);
     }
 

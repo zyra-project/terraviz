@@ -185,6 +185,13 @@
       }
     }
   },
+  "ui": {
+    "scale": {
+      "$value": "1",
+      "$type": "number",
+      "$description": "Master UI-size multiplier (§7.1). 1 = default, 1.5 = comfortable, 0.85 = compact. Every other dimension token wraps its value in calc(... * var(--ui-scale)) so user-controllable sizes flow through this single knob. Persisted in localStorage by uiScaleService."
+    }
+  },
   "accent-opacity": {
     "o05": { "$value": "rgba(77, 166, 255, 0.05)", "$type": "color" },
     "o08": { "$value": "rgba(77, 166, 255, 0.08)", "$type": "color" },
