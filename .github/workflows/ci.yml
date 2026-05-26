@@ -67,6 +67,14 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+        env:
+          # SOS deployment ships 1.5 (§7.1) as the first-launch UI
+          # size for its kiosk audience. Set as a GitHub Variable
+          # (Settings → Environments → production → Variables);
+          # unset evaluates to '' which uiScaleService rejects and
+          # falls through to 1.0, so non-production builds boot at
+          # the universal default.
+          VITE_DEFAULT_UI_SCALE: ${{ vars.VITE_DEFAULT_UI_SCALE }}
       - uses: actions/upload-artifact@v4
         with:
           name: dist
@@ -91,6 +99,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+        env:
+          # Same passthrough as the build job above — the deploy
+          # job re-runs the build so the production bundle carries
+          # the production-environment Variables (1.5 for the SOS
+          # deploy, '' / 1.0 for preview).
+          VITE_DEFAULT_UI_SCALE: ${{ vars.VITE_DEFAULT_UI_SCALE }}
       - name: Deploy
         id: deploy
         run: |
