@@ -24,9 +24,29 @@ import type { CustomLayerInterface } from 'maplibre-gl'
 import type { Map as MaplibreMap } from 'maplibre-gl'
 import { getSunPosition } from '../utils/time'
 import { logger } from '../utils/logger'
-import { getCloudTextureUrl } from '../utils/deviceCapability'
+import { getCloudTextureUrl, isMobile } from '../utils/deviceCapability'
 import { reportError } from '../analytics'
 import type { DatasetOverlayOptions } from '../types'
+import {
+  ATMOSPHERE_GLSL_CONSTANTS,
+  ATMOSPHERE_GLSL_DENSITY,
+  ATMOSPHERE_GLSL_PHASE,
+  ATMOSPHERE_GLSL_INTERSECT,
+  ATMOSPHERE_GLSL_TONEMAP,
+  ATMOSPHERE_STEPS_HIGH,
+  ATMOSPHERE_STEPS_MOBILE,
+  ATMOSPHERE_RADIUS_FACTOR,
+  PLANET_RADIUS_KM,
+  buildAtmosphereRaymarchGlsl,
+} from './atmosphereConstants'
+import { computeTransmittanceLut } from './atmosphereLut'
+
+// Pick step counts once at module load. The shader source is a
+// top-level constant in this file (compiled when the layer is
+// first added to a map), so this matches the lifetime of the
+// program. If the user resizes a desktop browser to phone width
+// the shader doesn't re-compile — fine for this build's audience.
+const ATMOSPHERE_STEPS = isMobile() ? ATMOSPHERE_STEPS_MOBILE : ATMOSPHERE_STEPS_HIGH
 
 // --- Texture URLs ---
 const SPECULAR_MAP_URL = '/assets/Earth_Specular_2K.jpg'
@@ -34,7 +54,7 @@ const CLOUD_TEXTURE_URL = getCloudTextureUrl()
 
 // --- Rendering constants (matched to earthMaterials.ts) ---
 const NIGHT_LIGHT_STRENGTH = 0.5
-const NIGHT_DARKENING = 0.03 // how dark the night side gets (before city lights)
+const NIGHT_DARKENING = 0.01 // how dark the night side gets (before city lights)
 const CLOUD_RADIUS = 1.005   // slightly above globe surface
 const CLOUD_OPACITY = 0.65
 const CLOUD_ALPHA_GAMMA = 1.8
@@ -42,6 +62,13 @@ const CLOUD_NIGHT_DARKENING = 0.08
 const SPECULAR_SHININESS = 40.0
 const SPECULAR_STRENGTH = 0.6
 const STAR_BRIGHTNESS = 0.2
+/**
+ * Multiplier on the raymarched scattering colour before additive
+ * blend. The raymarch produces HDR values that ACES compresses to
+ * [0,1]; this knob lets us dial down the limb glow without changing
+ * the physical model. 1.0 = full strength.
+ */
+const ATMOSPHERE_INTENSITY = 1.0
 const SKYBOX_FACES = ['px', 'nx', 'py', 'ny', 'pz', 'nz'] as const
 const SKYBOX_URL_BASE = '/assets/skybox/'
 
@@ -96,6 +123,94 @@ function invertMat4(out: Float32Array, m: ArrayLike<number>): boolean {
   out[10]=(a30*b04-a31*b02+a33*b00)*det;out[11]=(a21*b02-a20*b04-a23*b00)*det
   out[12]=(a11*b07-a10*b09-a12*b06)*det;out[13]=(a00*b09-a01*b07+a02*b06)*det
   out[14]=(a31*b01-a30*b03-a32*b00)*det;out[15]=(a20*b03-a21*b01+a22*b00)*det
+  return true
+}
+
+// --- Camera position extraction ---
+//
+// MapLibre exposes the projection-view matrix (`uMatrix`) but no
+// direct camera position. For Tier-2 raymarching we need the camera
+// position in the same ECEF unit-sphere coordinate frame as the
+// rendered globe so the ray geometry is correct at any zoom level.
+//
+// Method: two view rays through clip space (one centred, one
+// off-axis) meet at the camera for a perspective projection. We
+// invert `uMatrix`, project two pairs of clip-space points through
+// it to get four world-space points, then find the closest point on
+// the two world-space lines — that point is the camera.
+
+const _invMatrixScratch = new Float32Array(16)
+const _projScratch1 = new Float32Array(3)
+const _projScratch2 = new Float32Array(3)
+const _projScratch3 = new Float32Array(3)
+const _projScratch4 = new Float32Array(3)
+
+function unprojectClip(
+  invM: Float32Array, x: number, y: number, z: number, out: Float32Array,
+): boolean {
+  const w = invM[3] * x + invM[7] * y + invM[11] * z + invM[15]
+  // Near-zero w means the clip-space point sits on the projective
+  // infinity plane (camera origin under perspective). Bail rather
+  // than produce ±Inf / NaN that would propagate into uniforms.
+  if (Math.abs(w) < 1e-10) return false
+  const iw = 1 / w
+  out[0] = (invM[0] * x + invM[4] * y + invM[8] * z + invM[12]) * iw
+  out[1] = (invM[1] * x + invM[5] * y + invM[9] * z + invM[13]) * iw
+  out[2] = (invM[2] * x + invM[6] * y + invM[10] * z + invM[14]) * iw
+  return true
+}
+
+/**
+ * Camera position in the world-space coord frame `matrix` projects
+ * from. For MapLibre's globe view that's ECEF unit-sphere coords
+ * (planet radius = 1). Caller scales to km if needed.
+ *
+ * Writes into `out` and returns `true` on success. Returns `false`
+ * (without touching `out`) if the matrix is singular, any
+ * unprojection lands on the projective-infinity plane, or the two
+ * world-space rays are parallel — caller must skip the atmosphere
+ * pass in that case. Falling back to (0, 0, 0) would put the
+ * raymarch's ray origin at the planet centre, which produces
+ * extreme artifacts rather than a clean degradation.
+ */
+function computeCameraWorldPosFromMatrix(
+  matrix: ArrayLike<number>, out: [number, number, number],
+): boolean {
+  if (!invertMat4(_invMatrixScratch, matrix)) return false
+  if (
+    !unprojectClip(_invMatrixScratch, 0,   0, -1, _projScratch1) ||
+    !unprojectClip(_invMatrixScratch, 0,   0,  1, _projScratch2) ||
+    !unprojectClip(_invMatrixScratch, 0.5, 0, -1, _projScratch3) ||
+    !unprojectClip(_invMatrixScratch, 0.5, 0,  1, _projScratch4)
+  ) {
+    return false
+  }
+
+  const d1x = _projScratch2[0] - _projScratch1[0]
+  const d1y = _projScratch2[1] - _projScratch1[1]
+  const d1z = _projScratch2[2] - _projScratch1[2]
+  const d2x = _projScratch4[0] - _projScratch3[0]
+  const d2y = _projScratch4[1] - _projScratch3[1]
+  const d2z = _projScratch4[2] - _projScratch3[2]
+  const ex = _projScratch3[0] - _projScratch1[0]
+  const ey = _projScratch3[1] - _projScratch1[1]
+  const ez = _projScratch3[2] - _projScratch1[2]
+
+  const d1d1 = d1x * d1x + d1y * d1y + d1z * d1z
+  const d1d2 = d1x * d2x + d1y * d2y + d1z * d2z
+  const d2d2 = d2x * d2x + d2y * d2y + d2z * d2z
+  const ed1 = ex * d1x + ey * d1y + ez * d1z
+  const ed2 = ex * d2x + ey * d2y + ez * d2z
+  const denom = d1d1 * d2d2 - d1d2 * d1d2
+
+  // Parallel rays (orthographic projection) — no perspective
+  // convergence point, no camera position to extract.
+  if (Math.abs(denom) < 1e-10) return false
+
+  const t = (ed1 * d2d2 - ed2 * d1d2) / denom
+  out[0] = _projScratch1[0] + t * d1x
+  out[1] = _projScratch1[1] + t * d1y
+  out[2] = _projScratch1[2] + t * d1z
   return true
 }
 
@@ -337,6 +452,11 @@ const specularFragSrc = `#version 300 es
   uniform float uShininess;
   uniform float uStrength;
   uniform float uCloudAlphaGamma;
+  // 1.0 at zoom levels where the cloud pass renders clouds, fading
+  // to 0 as the cloud pass fades. Without this the cloud mask
+  // still suppresses sun glint at high zoom — clouds disappear
+  // visually but their "shadow" stays on the water surface.
+  uniform float uCloudZoomFade;
   in vec3 vNormal;
   in vec2 vUV;
   out vec4 fragColor;
@@ -357,16 +477,95 @@ const specularFragSrc = `#version 300 es
     // Mask by specular map (bright = water/shiny, dark = land/matte)
     float specMask = texture(uSpecMap, vUV).r;
 
-    // Reduce glint under clouds — sample cloud density
+    // Reduce glint under clouds — sample cloud density, gated by
+    // the same zoom-fade the cloud pass uses so the mask matches
+    // what's actually visible.
     vec4 cloudSample = texture(uCloudMask, vUV);
     float cloudLum = dot(cloudSample.rgb, vec3(0.299, 0.587, 0.114));
-    float cloudDensity = pow(cloudLum, uCloudAlphaGamma);
+    float cloudDensity = pow(cloudLum, uCloudAlphaGamma) * uCloudZoomFade;
     spec *= specMask * uStrength * (1.0 - cloudDensity);
 
     // Additive: white highlight
     fragColor = vec4(vec3(spec), 1.0);
   }
 `
+
+// Pass 5: additive blend — atmospheric scattering halo around the globe.
+// Tier-2 bounded raymarch matching `photorealEarth.ts` and the article's
+// "rendering planets" case. The shell mesh sits at exactly the
+// atmosphere boundary (`ATMOSPHERE_RADIUS_FACTOR ≈ 1.0157` from the
+// shared constants) so every front-face fragment is the camera-side
+// entry point for that pixel's ray, and the raymarch in the fragment
+// shader integrates inward.
+const atmosphereVertSrc = `#version 300 es
+  layout(location = 0) in vec3 aPosition;
+  uniform mat4 uMatrix;
+  uniform float uRadiusScale;
+  // Fragment world position in km (planet at origin, radius 6371).
+  // aPosition * uRadiusScale is in ECEF unit-sphere units; scaling
+  // to km lines up with the constants in the shared GLSL block so
+  // density / extinction math is dimensionally clean.
+  out vec3 vWorldPositionKm;
+
+  void main() {
+    vec3 unit = aPosition * uRadiusScale;
+    vWorldPositionKm = unit * ${PLANET_RADIUS_KM.toFixed(1)};
+    gl_Position = uMatrix * vec4(unit, 1.0);
+  }
+`
+
+// GLSL 3.00 ES sampleTransmittanceLut helper. The shared raymarch
+// declares the function; we define it ahead of the raymarch
+// injection. The photorealEarth.ts (Three.js, GLSL 1.00) path
+// defines an equivalent helper using texture2D() instead.
+const atmosphereLutSamplerHelper = /* glsl */ `
+  uniform sampler2D uTransmittanceLut;
+  vec3 sampleTransmittanceLut(vec3 samplePos, vec3 sunDir) {
+    float altitude = length(samplePos) - PLANET_RADIUS;
+    float mu = dot(normalize(samplePos), sunDir);
+    vec2 lutUV = vec2(
+      mu * 0.5 + 0.5,
+      clamp(altitude / ATMOSPHERE_HEIGHT, 0.0, 1.0)
+    );
+    return texture(uTransmittanceLut, lutUV).rgb;
+  }
+`
+
+const atmosphereFragSrc = `#version 300 es
+  precision highp float;
+  uniform vec3 uSunDir;
+  uniform vec3 uCameraPosKm;
+  uniform float uIntensity;
+  in vec3 vWorldPositionKm;
+  out vec4 fragColor;
+  ${ATMOSPHERE_GLSL_CONSTANTS}
+  ${ATMOSPHERE_GLSL_DENSITY}
+  ${ATMOSPHERE_GLSL_PHASE}
+  ${ATMOSPHERE_GLSL_INTERSECT}
+  ${ATMOSPHERE_GLSL_TONEMAP}
+  ${atmosphereLutSamplerHelper}
+  ${buildAtmosphereRaymarchGlsl(ATMOSPHERE_STEPS)}
+
+  void main() {
+    vec3 rayDir = normalize(vWorldPositionKm - uCameraPosKm);
+    // result.rgb = HDR in-scattered light; result.a = view
+    // transmittance scalar. Composition is article-style:
+    // framebuffer becomes  scattered + bg × viewTrans
+    // via blendFunc(ONE, SRC_ALPHA) in the render call.
+    vec4 result = computeAtmosphereScattering(uCameraPosKm, rayDir, uSunDir);
+    fragColor = vec4(acesFilm(result.rgb) * uIntensity, result.a);
+  }
+`
+
+interface AtmosphereProgram {
+  program: WebGLProgram
+  matrixLoc: WebGLUniformLocation | null
+  radiusScaleLoc: WebGLUniformLocation | null
+  sunDirLoc: WebGLUniformLocation | null
+  cameraPosKmLoc: WebGLUniformLocation | null
+  intensityLoc: WebGLUniformLocation | null
+  transmittanceLutLoc: WebGLUniformLocation | null
+}
 
 // Skybox: full-screen pass that samples cubemap faces based on camera rotation
 const skyboxVertSrc = `#version 300 es
@@ -722,6 +921,7 @@ interface SpecularProgram extends DayNightProgram {
   shininessLoc: WebGLUniformLocation | null
   strengthLoc: WebGLUniformLocation | null
   cloudAlphaGammaLoc: WebGLUniformLocation | null
+  cloudZoomFadeLoc: WebGLUniformLocation | null
 }
 
 interface CloudsProgram extends DayNightProgram {
@@ -818,6 +1018,7 @@ export function createEarthTileLayer(): EarthTileLayerControl {
   let lights: LightsProgram | null = null
   let specular: SpecularProgram | null = null
   let clouds: CloudsProgram | null = null
+  let atmosphere: AtmosphereProgram | null = null
   let vao: WebGLVertexArrayObject | null = null
   let indexCount = 0
   let captureTex: WebGLTexture | null = null
@@ -838,6 +1039,7 @@ export function createEarthTileLayer(): EarthTileLayerControl {
   // captured but the rendering ignores them — pure plumbing.
   let datasetOptions: DatasetOverlayOptions | null = null
   let forceVideoUpdate = false
+  let transmittanceLutTex: WebGLTexture | null = null
   let skyboxProg: WebGLProgram | null = null
   let skyboxInvProjLoc: WebGLUniformLocation | null = null
   let skyboxCameraLoc: WebGLUniformLocation | null = null
@@ -854,6 +1056,11 @@ export function createEarthTileLayer(): EarthTileLayerControl {
   let sunDir: [number, number, number] = [1, 0, 0]
   let sunOverride: { lat: number; lng: number } | null = null
   let visible = true
+
+  // Scratch buffer reused each frame by the atmosphere pass to derive
+  // the camera position in ECEF unit-sphere coords. Lives in closure
+  // scope so per-frame work doesn't allocate.
+  const cameraEcefScratch: [number, number, number] = [0, 0, 0]
 
   // Terrain-aware radius scale — inflates effects sphere to cover exaggerated terrain.
   // Max Earth elevation ~8848m / 6371km radius ≈ 0.00139 normalized.
@@ -1014,7 +1221,38 @@ export function createEarthTileLayer(): EarthTileLayerControl {
           shininessLoc: gl2.getUniformLocation(specularProg, 'uShininess'),
           strengthLoc: gl2.getUniformLocation(specularProg, 'uStrength'),
           cloudAlphaGammaLoc: gl2.getUniformLocation(specularProg, 'uCloudAlphaGamma'),
+          cloudZoomFadeLoc: gl2.getUniformLocation(specularProg, 'uCloudZoomFade'),
         }
+      }
+
+      const atmosphereProg = compileProgram(gl2, atmosphereVertSrc, atmosphereFragSrc, 'atmosphere')
+      if (atmosphereProg) {
+        atmosphere = {
+          program: atmosphereProg,
+          matrixLoc: gl2.getUniformLocation(atmosphereProg, 'uMatrix'),
+          radiusScaleLoc: gl2.getUniformLocation(atmosphereProg, 'uRadiusScale'),
+          sunDirLoc: gl2.getUniformLocation(atmosphereProg, 'uSunDir'),
+          cameraPosKmLoc: gl2.getUniformLocation(atmosphereProg, 'uCameraPosKm'),
+          intensityLoc: gl2.getUniformLocation(atmosphereProg, 'uIntensity'),
+          transmittanceLutLoc: gl2.getUniformLocation(atmosphereProg, 'uTransmittanceLut'),
+        }
+      }
+
+      // --- Build the transmittance LUT and upload as a texture ---
+      // CPU-side compute keeps this independent of MapLibre's render
+      // lifecycle. Tens-of-ms one-time cost on app start.
+      {
+        const lut = computeTransmittanceLut()
+        transmittanceLutTex = gl2.createTexture()
+        gl2.bindTexture(gl2.TEXTURE_2D, transmittanceLutTex)
+        gl2.texImage2D(
+          gl2.TEXTURE_2D, 0, gl2.RGBA, lut.width, lut.height, 0,
+          gl2.RGBA, gl2.UNSIGNED_BYTE, lut.pixels,
+        )
+        gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MIN_FILTER, gl2.LINEAR)
+        gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MAG_FILTER, gl2.LINEAR)
+        gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_S, gl2.CLAMP_TO_EDGE)
+        gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_T, gl2.CLAMP_TO_EDGE)
       }
 
       // --- Generate sphere geometry ---
@@ -1235,6 +1473,15 @@ export function createEarthTileLayer(): EarthTileLayerControl {
         gl2.drawElements(gl2.TRIANGLES, indexCount, gl2.UNSIGNED_SHORT, 0)
       }
 
+      // Cloud zoom-fade: fully visible at zoom ≤3, fully gone at
+      // zoom ≥6. Both the cloud pass (pass 4) and the specular
+      // pass's cloud-mask gating (pass 3) use the same value so the
+      // glint-suppression mask vanishes alongside the clouds it
+      // models — otherwise high zoom shows cloud-shaped patches of
+      // missing glint over water.
+      const zoom = mapRef?.getZoom() ?? 0
+      const cloudZoomFade = 1.0 - Math.max(0, Math.min(1, (zoom - 3) / 3))
+
       // --- Pass 3: Additive blend — specular sun glint on water ---
       if (specular && specTexReady && mapRef) {
         gl2.blendFunc(gl2.ONE, gl2.ONE) // additive
@@ -1265,6 +1512,7 @@ export function createEarthTileLayer(): EarthTileLayerControl {
         gl2.bindTexture(gl2.TEXTURE_2D, cloudTex)
         gl2.uniform1i(specular.cloudMaskLoc, 1)
         gl2.uniform1f(specular.cloudAlphaGammaLoc, CLOUD_ALPHA_GAMMA)
+        gl2.uniform1f(specular.cloudZoomFadeLoc, cloudZoomFade)
 
         gl2.drawElements(gl2.TRIANGLES, indexCount, gl2.UNSIGNED_SHORT, 0)
       }
@@ -1274,10 +1522,6 @@ export function createEarthTileLayer(): EarthTileLayerControl {
         // Standard alpha blend: clouds over existing content
         gl2.blendFunc(gl2.SRC_ALPHA, gl2.ONE_MINUS_SRC_ALPHA)
 
-        // Fade clouds: fully visible at zoom ≤3, fully gone at zoom ≥6
-        const zoom = mapRef?.getZoom() ?? 0
-        const zoomFade = 1.0 - Math.max(0, Math.min(1, (zoom - 3) / 3))
-
         gl2.useProgram(clouds.program)
         gl2.uniformMatrix4fv(clouds.matrixLoc, false, matrix)
         gl2.uniform3f(clouds.sunDirLoc, sunDir[0], sunDir[1], sunDir[2])
@@ -1285,11 +1529,72 @@ export function createEarthTileLayer(): EarthTileLayerControl {
         gl2.uniform1f(clouds.opacityLoc, CLOUD_OPACITY)
         gl2.uniform1f(clouds.alphaGammaLoc, CLOUD_ALPHA_GAMMA)
         gl2.uniform1f(clouds.nightDarkeningLoc, CLOUD_NIGHT_DARKENING)
-        gl2.uniform1f(clouds.zoomFadeLoc, zoomFade)
+        gl2.uniform1f(clouds.zoomFadeLoc, cloudZoomFade)
 
         gl2.activeTexture(gl2.TEXTURE0)
         gl2.bindTexture(gl2.TEXTURE_2D, cloudTex)
         gl2.uniform1i(clouds.cloudTexLoc, 0)
+
+        gl2.drawElements(gl2.TRIANGLES, indexCount, gl2.UNSIGNED_SHORT, 0)
+      }
+
+      // --- Pass 5: Additive blend — atmospheric scattering halo ---
+      // Rendered last so the limb glow sits in front of clouds,
+      // matching the article's render order and photorealEarth.ts.
+      // Tier-2 bounded raymarch: the shell mesh is the atmosphere
+      // ceiling; each front-face fragment is the camera-side entry
+      // point of that pixel's ray, and the shader integrates inward
+      // through Rayleigh + Mie + ozone densities.
+      // Camera position derived from the projection matrix so the
+      // raymarch ray geometry is correct at any zoom level. ECEF
+      // unit-sphere coords scaled to km for the shader. Skip the
+      // atmosphere pass entirely on failure rather than placing the
+      // camera at (0, 0, 0) — the raymarch would treat that as the
+      // planet centre and produce extreme artifacts.
+      if (
+        atmosphere && mapRef &&
+        computeCameraWorldPosFromMatrix(matrix, cameraEcefScratch)
+      ) {
+        // Article-style composition (Tier 3.5 fix):
+        //   result = src.rgb × 1 + dst.rgb × src.alpha
+        //         = scattered + bg × viewTransmittance
+        // The fragment writes ACES-tonemapped scattered light in
+        // RGB and the scalar view transmittance in alpha. With this
+        // blend func the framebuffer is BOTH brightened by the
+        // scattered light AND dimmed by the path-length-dependent
+        // viewTrans — without the dimming term the atmosphere pass
+        // washed out the planet face at noon viewing.
+        gl2.blendFunc(gl2.ONE, gl2.SRC_ALPHA)
+
+        const cx = cameraEcefScratch[0] * PLANET_RADIUS_KM
+        const cy = cameraEcefScratch[1] * PLANET_RADIUS_KM
+        const cz = cameraEcefScratch[2] * PLANET_RADIUS_KM
+
+        // Cull selection. The shell mesh has outward-facing normals,
+        // so from OUTSIDE the shell the front (camera-facing) side
+        // is what we want — default BACK culling. From INSIDE the
+        // shell (high zoom, camera within the atmosphere), front
+        // faces point away from the camera and BACK culling would
+        // hide the atmosphere entirely; switching to FRONT culling
+        // renders the inner surface that's actually visible.
+        const shellRadiusEcef = terrainRadiusScale * ATMOSPHERE_RADIUS_FACTOR
+        const cameraDistEcefSq =
+          cameraEcefScratch[0] * cameraEcefScratch[0] +
+          cameraEcefScratch[1] * cameraEcefScratch[1] +
+          cameraEcefScratch[2] * cameraEcefScratch[2]
+        const cameraInsideShell = cameraDistEcefSq < shellRadiusEcef * shellRadiusEcef
+        gl2.cullFace(cameraInsideShell ? gl2.FRONT : gl2.BACK)
+
+        gl2.useProgram(atmosphere.program)
+        gl2.uniformMatrix4fv(atmosphere.matrixLoc, false, matrix)
+        gl2.uniform1f(atmosphere.radiusScaleLoc, terrainRadiusScale * ATMOSPHERE_RADIUS_FACTOR)
+        gl2.uniform3f(atmosphere.sunDirLoc, sunDir[0], sunDir[1], sunDir[2])
+        gl2.uniform3f(atmosphere.cameraPosKmLoc, cx, cy, cz)
+        gl2.uniform1f(atmosphere.intensityLoc, ATMOSPHERE_INTENSITY)
+
+        gl2.activeTexture(gl2.TEXTURE0)
+        gl2.bindTexture(gl2.TEXTURE_2D, transmittanceLutTex)
+        gl2.uniform1i(atmosphere.transmittanceLutLoc, 0)
 
         gl2.drawElements(gl2.TRIANGLES, indexCount, gl2.UNSIGNED_SHORT, 0)
       }
@@ -1309,11 +1614,13 @@ export function createEarthTileLayer(): EarthTileLayerControl {
       if (lights) gl2.deleteProgram(lights.program)
       if (specular) gl2.deleteProgram(specular.program)
       if (clouds) gl2.deleteProgram(clouds.program)
+      if (atmosphere) gl2.deleteProgram(atmosphere.program)
       if (vao) gl2.deleteVertexArray(vao)
       if (captureTex) gl2.deleteTexture(captureTex)
       if (specTex) gl2.deleteTexture(specTex)
       if (cloudTex) gl2.deleteTexture(cloudTex)
       if (datasetTex) gl2.deleteTexture(datasetTex)
+      if (transmittanceLutTex) gl2.deleteTexture(transmittanceLutTex)
     },
   }
 

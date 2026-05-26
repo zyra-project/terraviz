@@ -2,8 +2,16 @@
  * Device capability detection for adaptive performance tuning.
  */
 
-/** True when the viewport is narrow (≤768px) or the device supports touch input. */
+/**
+ * True when the viewport is narrow (≤768px) or the device supports
+ * touch input. Returns `false` in non-browser contexts (SSR, tests
+ * loaded without jsdom, build-time tooling) so callers that import
+ * this module at top level — e.g. `earthTileLayer.ts` reads it both
+ * via `getCloudTextureUrl()` and the atmosphere step-tier pick —
+ * don't blow up before any code runs.
+ */
 export function isMobile(): boolean {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false
   return (
     window.innerWidth <= 768 || navigator.maxTouchPoints > 0
   )
