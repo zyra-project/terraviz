@@ -264,6 +264,128 @@ describe('BASELINE_RESOLVERS.includeSos', () => {
   })
 })
 
+describe('BASELINE_RESOLVERS.geographicRegion', () => {
+  const resolve = BASELINE_RESOLVERS.geographicRegion
+
+  it('matches when the dataset bbox overlaps the predicate bbox', () => {
+    expect(
+      resolve(
+        { kind: 'bbox', n: 40, s: 0, e: 30, w: -10 },
+        makeDataset({ boundingBox: { n: 20, s: -10, e: 0, w: -20 } }),
+      ),
+    ).toBe(true)
+  })
+
+  it('matches when the bboxes share only an edge (inclusive)', () => {
+    // Touching but not overlapping in the interior is still "in
+    // contact"; a user who brushes a coast deserves a hit on the
+    // coast-line dataset. The dataCoverageYear resolver uses the
+    // same inclusive convention.
+    expect(
+      resolve(
+        { kind: 'bbox', n: 50, s: 20, e: 0, w: -30 },
+        makeDataset({ boundingBox: { n: 20, s: 0, e: 10, w: 0 } }),
+      ),
+    ).toBe(true)
+  })
+
+  it('rejects when the dataset bbox is entirely north of the predicate', () => {
+    expect(
+      resolve(
+        { kind: 'bbox', n: 10, s: -10, e: 10, w: -10 },
+        makeDataset({ boundingBox: { n: 40, s: 20, e: 10, w: -10 } }),
+      ),
+    ).toBe(false)
+  })
+
+  it('rejects when the dataset bbox is entirely east of the predicate', () => {
+    expect(
+      resolve(
+        { kind: 'bbox', n: 10, s: -10, e: 10, w: -10 },
+        makeDataset({ boundingBox: { n: 10, s: -10, e: 90, w: 60 } }),
+      ),
+    ).toBe(false)
+  })
+
+  it('matches when the predicate fully contains the dataset bbox', () => {
+    expect(
+      resolve(
+        { kind: 'bbox', n: 90, s: -90, e: 180, w: -180 },
+        makeDataset({ boundingBox: { n: 20, s: -10, e: 30, w: 0 } }),
+      ),
+    ).toBe(true)
+  })
+
+  it('matches when the dataset bbox fully contains the predicate', () => {
+    expect(
+      resolve(
+        { kind: 'bbox', n: 5, s: -5, e: 5, w: -5 },
+        makeDataset({ boundingBox: { n: 90, s: -90, e: 180, w: -180 } }),
+      ),
+    ).toBe(true)
+  })
+
+  it('handles antimeridian-crossing dataset bboxes', () => {
+    // Dataset bbox wraps east through the dateline from 170° to -170°.
+    // A predicate at longitude 175 should match (lies inside the wrap);
+    // a predicate at longitude 0 should not (outside the wrap).
+    expect(
+      resolve(
+        { kind: 'bbox', n: 40, s: -40, e: 178, w: 172 },
+        makeDataset({ boundingBox: { n: 30, s: -30, e: -170, w: 170 } }),
+      ),
+    ).toBe(true)
+    expect(
+      resolve(
+        { kind: 'bbox', n: 40, s: -40, e: 5, w: -5 },
+        makeDataset({ boundingBox: { n: 30, s: -30, e: -170, w: 170 } }),
+      ),
+    ).toBe(false)
+  })
+
+  it('handles antimeridian-crossing predicate bboxes', () => {
+    expect(
+      resolve(
+        { kind: 'bbox', n: 30, s: -30, e: -170, w: 170 },
+        makeDataset({ boundingBox: { n: 40, s: -40, e: 178, w: 172 } }),
+      ),
+    ).toBe(true)
+  })
+
+  it('rejects datasets without boundingBox', () => {
+    expect(
+      resolve(
+        { kind: 'bbox', n: 40, s: 0, e: 30, w: -10 },
+        makeDataset({ boundingBox: undefined }),
+      ),
+    ).toBe(false)
+  })
+
+  it('rejects non-bbox predicates', () => {
+    expect(
+      resolve(
+        { kind: 'multi-select', values: ['x'] },
+        makeDataset({ boundingBox: { n: 10, s: 0, e: 10, w: 0 } }),
+      ),
+    ).toBe(false)
+  })
+
+  it('rejects datasets with malformed bbox (NaN corner or n < s)', () => {
+    expect(
+      resolve(
+        { kind: 'bbox', n: 90, s: -90, e: 180, w: -180 },
+        makeDataset({ boundingBox: { n: NaN, s: 0, e: 10, w: 0 } }),
+      ),
+    ).toBe(false)
+    expect(
+      resolve(
+        { kind: 'bbox', n: 90, s: -90, e: 180, w: -180 },
+        makeDataset({ boundingBox: { n: -45, s: 45, e: 10, w: 0 } }),
+      ),
+    ).toBe(false)
+  })
+})
+
 describe('matchesSearchQuery', () => {
   it('matches against title, description, keywords, tags, and category names', () => {
     const d = makeDataset({

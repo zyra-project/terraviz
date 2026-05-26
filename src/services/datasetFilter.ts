@@ -282,6 +282,68 @@ export const BASELINE_RESOLVERS: Readonly<Record<string, FacetResolver>> = {
    * present because the user has explicitly asked for everything.
    */
   includeSos: (predicate) => predicate.kind === 'boolean',
+
+  /**
+   * Geographic region — bbox intersection against `Dataset.boundingBox`.
+   * Phase 4 §6.9 of `docs/WEB_CATALOG_FEATURES_PLAN.md`. The Map
+   * view's draw-rectangle gesture writes this predicate via
+   * `setFacet('geographicRegion', { kind: 'bbox', n, s, e, w })`;
+   * the chip rail surfaces it as a removable "Region X°–Y°" chip
+   * through the existing active-filter strip renderer.
+   *
+   * Semantics: a dataset matches when its bbox overlaps the
+   * predicate's bbox on BOTH the latitude AND the longitude axis.
+   * Two intervals overlap iff each starts before the other ends —
+   * the same overlap test the `dataCoverageYear` resolver uses for
+   * time intervals. Rows without `boundingBox` fail the predicate;
+   * the Map view's UI hides them anyway (per `catalogMap.ts`) but
+   * the resolver enforces the same exclusion so chip-rail
+   * filtering stays consistent across Card / Graph / Timeline.
+   *
+   * Antimeridian handling: longitudes that cross the dateline are
+   * encoded as `w > e` (e.g. `{w: 170, e: -170}` meaning "wrap east
+   * through 180° to -170°"). The resolver normalises both sides to
+   * a positive 0..360 form so the overlap test works on the
+   * wrapped span. A predicate that doesn't cross the dateline
+   * matches a dataset whose bbox does iff either segment of the
+   * wrapped dataset bbox overlaps the predicate — checked by
+   * splitting the wrapped dataset bbox at 180° and overlap-testing
+   * each half.
+   */
+  geographicRegion: (predicate, dataset) => {
+    if (predicate.kind !== 'bbox') return false
+    const bb = dataset.boundingBox
+    if (!bb) return false
+    if (!Number.isFinite(bb.n) || !Number.isFinite(bb.s)) return false
+    if (!Number.isFinite(bb.e) || !Number.isFinite(bb.w)) return false
+    // Latitude axis — naturally ordered, no wrap to worry about.
+    // A flipped dataset bbox (n < s) is invalid; bail.
+    if (bb.n < bb.s) return false
+    const predN = Math.max(predicate.n, predicate.s)
+    const predS = Math.min(predicate.n, predicate.s)
+    if (bb.n < predS) return false
+    if (bb.s > predN) return false
+    // Longitude axis — handle the antimeridian. Build each side's
+    // longitude segments, splitting any wrapped bbox at ±180°. A
+    // standard (non-crossing) bbox is one segment `[w, e]`; a
+    // crossing bbox is two segments `[w, 180]` and `[-180, e]`.
+    const datasetSegments = bb.w <= bb.e
+      ? [[bb.w, bb.e] as [number, number]]
+      : [[bb.w, 180] as [number, number], [-180, bb.e] as [number, number]]
+    const predSegments = predicate.w <= predicate.e
+      ? [[predicate.w, predicate.e] as [number, number]]
+      : [[predicate.w, 180] as [number, number], [-180, predicate.e] as [number, number]]
+    for (const [aw, ae] of datasetSegments) {
+      for (const [pw, pe] of predSegments) {
+        // Two longitude intervals overlap iff each starts before
+        // the other ends. Inclusive on both ends — a shared edge
+        // counts as overlap (a coast-line predicate touching a
+        // coast-line bbox is meaningful).
+        if (aw <= pe && pw <= ae) return true
+      }
+    }
+    return false
+  },
 }
 
 // ---------------------------------------------------------------------------
