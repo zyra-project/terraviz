@@ -76,6 +76,8 @@
   "browse.graph.showFormat.label": "Show formats",
   "browse.graph.tooltip.coOccurrence": "Top co-occurring: {neighbours}",
   "browse.graph.tooltip.viewDetails": "Click to view details",
+  "browse.map.banner.allGlobal.one": "1 dataset shown — it covers the entire globe. Most SOS datasets are worldwide today; regional bounding boxes will appear as distinct rectangles as publishers add them.",
+  "browse.map.banner.allGlobal.other": "{count} datasets shown — all cover the entire globe. Most SOS datasets are worldwide today; regional bounding boxes will appear as distinct rectangles as publishers add them.",
   "browse.map.clearRegion.aria": "Clear the drawn region filter",
   "browse.map.clearRegion.label": "Clear region",
   "browse.map.draw.aria": "Toggle draw-rectangle mode — drag to filter datasets by geographic region",

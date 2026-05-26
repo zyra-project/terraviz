@@ -1206,6 +1206,26 @@ body.browse-view-map .browse-title {
     outline: 2px solid var(--color-accent);
     outline-offset: 1px;
 }
+/* Explanation banner — surfaces above the canvas when every
+   visible bbox is global, so the user reads "this view shows
+   worldwide datasets" instead of mistaking a near-uniform
+   coverage wash for a render bug. Sits between the toolbar and
+   the canvas, intentionally subtle (no border) so it doesn't
+   compete with the data. */
+.browse-map-banner {
+    padding: 0.5rem 0.7rem;
+    color: var(--color-text-secondary);
+    font-size: 0.65rem;
+    line-height: 1.45;
+    background: var(--accent-o15);
+    border-inline-start: 2px solid var(--color-accent);
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+.browse-map-banner.hidden {
+    display: none;
+}
+
 .browse-map-canvas {
     flex: 1;
     min-height: 320px;

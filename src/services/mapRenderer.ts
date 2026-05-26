@@ -514,11 +514,32 @@ export class MapRenderer implements GlobeRenderer {
     // (3d — renders after everything, uses depth test for stars behind globe).
     // Move label layers above the earth tile layer so they aren't darkened.
     this.map.on('load', () => {
-      logger.info('[MapRenderer] Map loaded with globe projection')
+      logger.info(`[MapRenderer] Map loaded with ${this.projection} projection`)
 
       // Collapse the compact attribution control so it doesn't cover the auto-rotate button
       const attrib = container.querySelector('.maplibregl-ctrl-attrib.maplibregl-compact')
       attrib?.classList.remove('maplibregl-compact-show')
+
+      // The earth tile layer (day/night sphere shader, atmospheric
+      // glow) and the skybox are 3D effects designed for globe
+      // projection — they paint a textured Earth sphere + a
+      // starfield over the basemap. In mercator they'd draw the
+      // sphere on top of the flat raster tiles and obliterate the
+      // basemap; the §6.9 catalog Map view explicitly wants the
+      // raw flat GIBS composite as its basemap. Skipping the
+      // custom layers entirely in mercator keeps the surface a
+      // clean Blue/Black Marble raster — which is what the Map
+      // view's bbox overlays need to read against.
+      if (this.projection === 'mercator') {
+        // Preload still runs so the GIBS HTTP cache warms for the
+        // main globe even when the Map view mounts first.
+        if (isMobile()) {
+          this.map!.once('idle', () => preloadLowZoomTiles())
+        } else {
+          preloadLowZoomTiles()
+        }
+        return
+      }
 
       this.earthLayer = createEarthTileLayer()
 

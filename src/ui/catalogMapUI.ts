@@ -219,6 +219,19 @@ export function createCatalogMap(
   tooltip.className = 'browse-map-tooltip hidden'
   tooltip.setAttribute('role', 'tooltip')
 
+  /**
+   * Explanatory banner that surfaces above the canvas when the
+   * visible result set is dominated by global bboxes. The SOS
+   * catalog today is overwhelmingly worldwide (sea-surface temp,
+   * atmospheric reanalysis, satellite imagery), so a Map view
+   * without context would look broken — "what am I supposed to
+   * see?" The banner names the situation so the user understands
+   * the (near-)uniform colour wash is data shape, not a render bug.
+   */
+  const banner = document.createElement('div')
+  banner.className = 'browse-map-banner hidden'
+  banner.setAttribute('role', 'note')
+
   const empty = document.createElement('div')
   empty.className = 'browse-map-empty hidden'
   empty.setAttribute('role', 'status')
@@ -229,6 +242,7 @@ export function createCatalogMap(
   footnote.setAttribute('role', 'note')
 
   host.appendChild(toolbar)
+  host.appendChild(banner)
   host.appendChild(canvas)
   // Tooltip is appended INSIDE the canvas wrapper so its
   // `position: absolute` coordinates resolve against the canvas
@@ -338,28 +352,45 @@ export function createCatalogMap(
     })
     // Fill layer — translucent teal matching the Graph + Timeline
     // category-content hue, so all three view-modes share one
-    // visual taxonomy. Real-time rows get an amber accent via the
-    // separate outline layer below.
+    // visual taxonomy. Real-time rows get a green accent via the
+    // third layer.
+    //
+    // Global bboxes use a near-transparent fill (0.015) so a stack
+    // of N world-rectangles compounds to a barely-visible wash
+    // instead of an opaque teal cage that obliterates the
+    // basemap. The fill stays present (not filtered out) so
+    // click+hover still hit-test on globals — clicking anywhere
+    // inside a global bbox surfaces its tooltip / preview.
+    // Regional bboxes use the normal 0.22 fill so they read as
+    // distinct rectangles against the basemap.
     map.addLayer({
       id: BBOX_FILL_LAYER_ID,
       type: 'fill',
       source: BBOX_SOURCE_ID,
       paint: {
         'fill-color': cssVar('--facet-color-category-content', '#5cc8c8'),
-        'fill-opacity': 0.18,
+        'fill-opacity': ['case', ['==', ['get', 'global'], true], 0.015, 0.22],
       },
     })
-    // Outline layer — sharper border so overlapping bboxes still
-    // read as distinct rectangles. Slightly brighter than the
-    // fill so it reads as an edge rather than just a darker fill.
+    // Outline layer — sharper border on every bbox (regional AND
+    // global) so the user always reads a frame around the covered
+    // area, even when the fill is suppressed for globals. Lower
+    // opacity for globals so a stack of 20+ world-rectangles
+    // doesn't blur the basemap into a teal cage.
     map.addLayer({
       id: BBOX_OUTLINE_LAYER_ID,
       type: 'line',
       source: BBOX_SOURCE_ID,
       paint: {
         'line-color': cssVar('--facet-color-category-content', '#5cc8c8'),
-        'line-width': 1.5,
-        'line-opacity': 0.85,
+        // Global outlines are noticeably thinner + dimmer than
+        // regional ones — a stack of N coincident world-rectangle
+        // outlines at full weight would still draw a thick teal
+        // border around the whole canvas. The data-driven `case`
+        // expression keys off the `global` feature property the
+        // pure transform stamps on each overlay.
+        'line-width': ['case', ['==', ['get', 'global'], true], 0.6, 1.5],
+        'line-opacity': ['case', ['==', ['get', 'global'], true], 0.25, 0.85],
       },
     })
     // Real-time accent — green border on the subset of bboxes
@@ -638,6 +669,11 @@ export function createCatalogMap(
     if (result.bboxes.length === 0) {
       empty.classList.remove('hidden')
       canvas.classList.add('hidden')
+      // The all-global banner is meaningless when nothing is
+      // rendered; clear it so it doesn't linger from a previous
+      // populated rebuild.
+      banner.classList.add('hidden')
+      banner.textContent = ''
       // The empty-state message differentiates the three reasons
       // the canvas can be empty: (a) user filters excluded
       // everything, (b) all matches lack geographic coverage,
@@ -676,6 +712,29 @@ export function createCatalogMap(
     const features = result.bboxes.map(bboxToPolygon)
     const source = map.getSource(BBOX_SOURCE_ID) as GeoJSONSource | undefined
     source?.setData({ type: 'FeatureCollection', features })
+
+    // Banner: surface an explanation when every visible bbox is
+    // global. Without context the user sees a (near-)uniform
+    // teal wash across the canvas and assumes the Map view is
+    // broken; the banner names the data shape so the user
+    // understands they're looking at "20 worldwide datasets"
+    // rather than a render bug.
+    const globalCount = result.bboxes.filter(b => b.global).length
+    const regionalCount = result.bboxes.length - globalCount
+    if (globalCount > 0 && regionalCount === 0) {
+      banner.classList.remove('hidden')
+      banner.textContent = plural(
+        globalCount,
+        {
+          one: 'browse.map.banner.allGlobal.one',
+          other: 'browse.map.banner.allGlobal.other',
+        },
+        { count: formatNumber(globalCount) },
+      )
+    } else {
+      banner.classList.add('hidden')
+      banner.textContent = ''
+    }
 
     updateFootnote(result)
     syncClearRegionButton(lastInput.filterState)
