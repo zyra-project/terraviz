@@ -55,10 +55,18 @@ const ATMOSPHERE_STEPS = isMobile() ? ATMOSPHERE_STEPS_MOBILE : ATMOSPHERE_STEPS
 // --- Texture URLs ---
 const SPECULAR_MAP_URL = '/assets/Earth_Specular_2K.jpg'
 // §7.2 normal-map asset. Tangent-space encoding (R/G/B = X/Y/Z of
-// the surface normal in [0,255]), equirectangular projection. The
-// loader fails gracefully if the file is absent — the bump pass
-// won't render at all rather than producing a flat-shaded artifact.
-const NORMAL_MAP_URL = '/assets/earth_normal_2K.png'
+// the surface normal in [0,255]), equirectangular projection,
+// 8192×4096. Hosted on the same CloudFront + S3 path the VR
+// diffuse / lights tiers use (see EARTH_TEXTURE_BASE in
+// photorealEarth.ts) — same `metadata.sosexplorer.gov` bucket
+// fronted by CloudFront. The loader fails gracefully if the file
+// is absent so a fresh-stack deploy without the asset uploaded
+// still boots; the bump pass simply doesn't render. A future
+// optimisation could mirror the photorealEarth progressive tier
+// (2048 → 4096 → 8192) for bandwidth-constrained clients; today
+// we ship a single tier behind a requestIdleCallback to keep the
+// first-paint budget unchanged.
+const NORMAL_MAP_URL = 'https://d3sik7mbbzunjo.cloudfront.net/terraviz/basemaps/earth_normal_8192.jpg'
 const CLOUD_TEXTURE_URL = getCloudTextureUrl()
 
 // --- Rendering constants (matched to earthMaterials.ts) ---
@@ -1621,11 +1629,13 @@ export function createEarthTileLayer(): EarthTileLayerControl {
         : setTimeout(loadSpecularMap, 200)
 
       // --- Load normal-map texture (§7.2) — graceful when missing ---
-      // The asset (`/assets/earth_normal_2K.png`) is sourced by an
-      // operator and uploaded to the repo; if it isn't present we
-      // skip the bump pass entirely rather than render a flat-shaded
-      // artifact. Same deferred-load pattern as the specular map
-      // above so the initial-tile-bandwidth budget isn't shared.
+      // The asset (`earth_normal_2048.jpg`) lives on the same
+      // CloudFront-fronted S3 bucket as the VR diffuse / lights
+      // tiers; URL above. If the file isn't present we skip the bump
+      // pass entirely rather than render a flat-shaded artifact.
+      // Deferred via requestIdleCallback so the initial-tile-bandwidth
+      // budget isn't shared. Also runs AFTER the specular map's load
+      // window so the two large CDN fetches don't race.
       bumpTex = gl2.createTexture()
       gl2.bindTexture(gl2.TEXTURE_2D, bumpTex)
       // Flat-normal placeholder so a sampler bind before the load
