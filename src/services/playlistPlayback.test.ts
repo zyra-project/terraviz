@@ -211,20 +211,47 @@ describe('skipNext / skipPrev / skipTo', () => {
 })
 
 describe('tour deferral', () => {
-  it('does not start the timer for a tour-bearing entry', async () => {
+  it('pins the entry while a tour is running, even past durationSec', async () => {
     const h = setupHarness({ tourFor: ['A'] })
     play(makePlaylist([['A', 5], ['B', 5]]))
     await vi.waitFor(() => expect(getActive()?.waitingForTour).toBe(true))
-    // Even after 60 s — far past the 5 s durationSec — we stay on A.
+    // The timer fires at 5 s but must defer because waitingForTour is
+    // still true. 60 s later we're still on A — only notifyTourEnded
+    // can release us.
     await vi.advanceTimersByTimeAsync(60_000)
     expect(h.loadDataset).toHaveBeenCalledTimes(1)
     expect(getActive()?.index).toBe(0)
   })
 
-  it('notifyTourEnded advances to the next entry', async () => {
+  it('tour ending before durationSec keeps the entry until the timer fires', async () => {
+    const h = setupHarness({ tourFor: ['A'] })
+    play(makePlaylist([['A', 10], ['B', 10]]))
+    await vi.waitFor(() => expect(getActive()?.waitingForTour).toBe(true))
+    // Tour ends quickly at t=2s. The user typed 10 s — honor that
+    // as the floor; don't advance just because the tour finished.
+    await vi.advanceTimersByTimeAsync(2_000)
+    notifyTourEnded()
+    expect(getActive()?.waitingForTour).toBe(false)
+    // 5 s later — still well within the 10 s window — we stay on A.
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(h.loadDataset).toHaveBeenCalledTimes(1)
+    expect(getActive()?.index).toBe(0)
+    // After the full 10 s elapses, the timer fires and advances.
+    await vi.advanceTimersByTimeAsync(3_500)
+    await vi.waitFor(() => expect(h.loadDataset).toHaveBeenCalledWith('B'))
+    expect(getActive()?.index).toBe(1)
+  })
+
+  it('tour ending after durationSec advances immediately on tour-end', async () => {
     const h = setupHarness({ tourFor: ['A'] })
     play(makePlaylist([['A', 5], ['B', 5]]))
     await vi.waitFor(() => expect(getActive()?.waitingForTour).toBe(true))
+    // Timer fires at t=5s but defers because the tour is still going.
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(h.loadDataset).toHaveBeenCalledTimes(1)
+    expect(getActive()?.index).toBe(0)
+    // Tour completes at t=20s — both signals satisfied, advance now.
+    await vi.advanceTimersByTimeAsync(15_000)
     notifyTourEnded()
     await vi.waitFor(() => expect(h.loadDataset).toHaveBeenCalledWith('B'))
     expect(getActive()?.index).toBe(1)

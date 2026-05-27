@@ -57,7 +57,10 @@ export interface PlaylistPlaybackState {
    *  time for the current entry. */
   paused: boolean
   /** True when a tour is running for the current entry. The
-   *  advance timer is suspended in this state. */
+   *  advance timer still runs concurrently, but if it fires while
+   *  a tour is pending we mark `timerExpiredDuringTour` instead
+   *  of advancing — the plan says we must wait for the tour to
+   *  finish before moving on. */
   waitingForTour: boolean
 }
 
@@ -70,6 +73,12 @@ let timerStartedAt = 0
 /** Remaining ms when paused — restored on resume. `null` when no
  *  pause is in flight. */
 let remainingMs: number | null = null
+/** Set to true if the per-entry advance timer fires while
+ *  `waitingForTour` is still true. We can't advance yet — the
+ *  plan says wait for the tour — but when the tour ends we need
+ *  to know to advance immediately rather than letting the user
+ *  sit on a frozen entry. Cleared on every entry transition. */
+let timerExpiredDuringTour = false
 
 const CHANGE_EVENT = 'sos-playlist-playback:change'
 const target: EventTarget = typeof window === 'undefined' ? new EventTarget() : window
@@ -144,6 +153,7 @@ export function skipNext(): void {
   }
   active.index = next
   active.waitingForTour = false
+  timerExpiredDuringTour = false
   remainingMs = null
   clearTimer()
   notify()
@@ -156,6 +166,7 @@ export function skipPrev(): void {
   if (active.index === 0) return
   active.index -= 1
   active.waitingForTour = false
+  timerExpiredDuringTour = false
   remainingMs = null
   clearTimer()
   notify()
@@ -170,6 +181,7 @@ export function skipTo(index: number): void {
   if (clamped === active.index) return
   active.index = clamped
   active.waitingForTour = false
+  timerExpiredDuringTour = false
   remainingMs = null
   clearTimer()
   notify()
@@ -183,6 +195,7 @@ export function stop(): void {
   if (!active) return
   active = null
   remainingMs = null
+  timerExpiredDuringTour = false
   clearTimer()
   notify()
 }
@@ -210,11 +223,17 @@ export function notifyTourEnded(): void {
   if (!active || !active.waitingForTour) return
   active.waitingForTour = false
   notify()
-  // The plan: "waits for it to finish before advancing." Advance
-  // immediately rather than running the per-entry timer post-tour —
-  // the user already watched the tour, sitting on the post-tour
-  // still frame for another 30 s is anticlimactic.
-  skipNext()
+  // Resolve the race with the per-entry timer:
+  //   - If the timer already expired while the tour was running,
+  //     advance now (the user has watched at least durationSec +
+  //     the rest of the tour, fulfilling both signals).
+  //   - Otherwise the timer is still ticking — let it run out and
+  //     advance then. The user gets the full per-entry duration
+  //     even when the tour wraps up early.
+  if (timerExpiredDuringTour) {
+    timerExpiredDuringTour = false
+    skipNext()
+  }
 }
 
 /** Subscribe to active-state changes (play/pause/advance/stop). */
@@ -256,18 +275,22 @@ async function loadCurrentEntry(): Promise<void> {
   if (active !== snapshot) return
   if (snapshot.index !== snapshot.playlist.datasets.indexOf(entry)) return
   // If the load failed, the tour we were speculatively waiting for
-  // will never start — release the wait flag and fall through to the
-  // normal timer so the playlist advances on its per-entry duration
-  // rather than hanging on a tour that won't fire.
+  // will never start — release the wait flag so the timer can
+  // advance the playlist on its per-entry duration.
   if (loadFailed && snapshot.waitingForTour) {
     snapshot.waitingForTour = false
     notify()
   }
-  // After the load resolves, decide what to do next:
-  //  - Tour-bearing entry: wait for `notifyTourEnded()`.
-  //  - Paused: record remaining time but don't arm the timer.
-  //  - Otherwise: arm the per-entry advance timer.
-  if (snapshot.waitingForTour) return
+  // Always arm the per-entry timer, even for tour-bearing entries.
+  // The timer + tour-end race resolves in armTimer's callback:
+  //   timer fires, no tour pending → advance
+  //   timer fires, tour still running → mark expired, wait
+  //   tour ends, timer not yet expired → just clear waitingForTour
+  //   tour ends, timer already expired → advance
+  // This honors the user's durationSec as a floor while still
+  // letting a long tour push the advance later, per the plan's
+  // "waits for it to finish before advancing."
+  timerExpiredDuringTour = false
   if (snapshot.paused) {
     remainingMs = currentDurationMs()
     return
@@ -280,6 +303,13 @@ function armTimer(ms: number): void {
   timerStartedAt = Date.now()
   advanceTimer = setTimeout(() => {
     advanceTimer = null
+    // If a tour is still running on the current entry, defer the
+    // advance — we record that the timer expired so the tour-end
+    // path can advance immediately when it fires.
+    if (active?.waitingForTour) {
+      timerExpiredDuringTour = true
+      return
+    }
     skipNext()
   }, ms)
 }
@@ -316,4 +346,5 @@ export function resetPlaylistPlaybackForTests(): void {
   active = null
   remainingMs = null
   timerStartedAt = 0
+  timerExpiredDuringTour = false
 }
