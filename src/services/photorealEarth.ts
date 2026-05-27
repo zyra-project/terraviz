@@ -117,6 +117,18 @@ const EARTH_LIGHTS_URLS = [
   `${EARTH_TEXTURE_BASE}/earth_lights_4096.jpg`,
   `${EARTH_TEXTURE_BASE}/earth_lights_8192.jpg`,
 ]
+// §7.2 normal-map tiers — mirrors the 2D earthTileLayer ladder
+// (NORMAL_MAP_URLS there) and the diffuse / lights pattern above.
+// Same CloudFront-fronted bucket, ascending order; loadProgressive
+// halts at the first failure and the last successful tier stays
+// applied. MeshPhongMaterial has a built-in `normalMap` slot, so
+// nothing about the shader patch needs to change — only the
+// material binding + `normalScale` driven by shaderSettingsService.
+const EARTH_NORMAL_URLS = [
+  `${EARTH_TEXTURE_BASE}/earth_normal_2048.jpg`,
+  `${EARTH_TEXTURE_BASE}/earth_normal_4096.jpg`,
+  `${EARTH_TEXTURE_BASE}/earth_normal_8192.jpg`,
+]
 
 const EARTH_SHININESS = 40
 const NIGHT_LIGHT_STRENGTH = 0.5
@@ -642,8 +654,25 @@ export function createPhotorealEarth(
   }
   setSpecularFromSettings()
 
+  // §7.2 normal-map intensity. MeshPhongMaterial scales the
+  // sampled tangent-space normal by `normalScale` before perturbing
+  // the surface normal, so this is the canonical knob — a value
+  // of (0, 0) collapses to flat-shaded, (1, 1) is the asset's
+  // authored depth, anything in between dials it. We mirror the
+  // shaderSettingsService.bumpStrength scalar onto both axes so
+  // VR + 2D bump intensity track each other. `material.normalMap`
+  // gets bound by the progressive loader below once a tier lands;
+  // until then this is a no-op (MeshPhong skips its normal-map
+  // chunks when the slot is null).
+  function setBumpFromSettings() {
+    const s = getShaderSettings().bumpStrength
+    material.normalScale.set(s, s)
+  }
+  setBumpFromSettings()
+
   const unsubscribeShaderSettings = onShaderSettingsChange(() => {
     setSpecularFromSettings()
+    setBumpFromSettings()
     contrastUniform.value = getShaderSettings().contrast
     saturationUniform.value = getShaderSettings().saturation
   })
@@ -1070,6 +1099,16 @@ export function createPhotorealEarth(
    * keep the effect disabled in that case.
    */
   let lightsTexture: THREE.Texture | null = null
+  /**
+   * Normal-map texture once the CDN fetch lands — kept so dispose()
+   * can free the GPU memory. The MeshPhongMaterial's built-in
+   * `normalMap` slot drives the bump shading; intensity is set via
+   * `material.normalScale` from shaderSettingsService.bumpStrength.
+   * Stays null while pending or failed; the material falls back to
+   * un-perturbed shading in that case (MeshPhong skips the normal-
+   * map chunks when `material.normalMap` is null).
+   */
+  let normalTexture: THREE.Texture | null = null
 
   /**
    * Push `options` into the four overlay uniforms (bbox / lonOrigin /
@@ -1206,6 +1245,32 @@ export function createPhotorealEarth(
       material.needsUpdate = true
     },
     'earth lights',
+  )
+
+  // Normal map — 2K → 4K → 8K. Mirrors the 2D earthTileLayer
+  // ladder so a Tools-menu specular pick + bump tuner-page slide
+  // produces a consistent look across the MapLibre globe and the
+  // VR / Orbit Three.js sphere. material.needsUpdate is required
+  // on first bind because MeshPhongMaterial only compiles its
+  // normal-map shader chunks when the slot transitions from null
+  // to non-null — subsequent tier swaps are texImage uploads and
+  // don't need a re-compile.
+  void loadProgressive(
+    EARTH_NORMAL_URLS,
+    tex => {
+      const isFirstBind = material.normalMap == null
+      // Normal maps stay in linear space — they encode geometry,
+      // not perceptual colour, so SRGBColorSpace (the default
+      // loadProgressive applies) would gamma-correct slopes
+      // incorrectly. NoColorSpace tells Three.js to leave the
+      // sampled bytes alone.
+      tex.colorSpace = THREE_.NoColorSpace
+      normalTexture?.dispose()
+      normalTexture = tex
+      material.normalMap = tex
+      if (isFirstBind) material.needsUpdate = true
+    },
+    'earth normal',
   )
 
   return {
@@ -1529,6 +1594,7 @@ export function createPhotorealEarth(
       specularMapTexture.dispose()
       baseDiffuseTexture?.dispose()
       lightsTexture?.dispose()
+      normalTexture?.dispose()
       material.dispose()
       geometry.dispose()
       if (cloudMesh) {
