@@ -55,18 +55,25 @@ const ATMOSPHERE_STEPS = isMobile() ? ATMOSPHERE_STEPS_MOBILE : ATMOSPHERE_STEPS
 // --- Texture URLs ---
 const SPECULAR_MAP_URL = '/assets/Earth_Specular_2K.jpg'
 // §7.2 normal-map asset. Tangent-space encoding (R/G/B = X/Y/Z of
-// the surface normal in [0,255]), equirectangular projection,
-// 8192×4096. Hosted on the same CloudFront + S3 path the VR
-// diffuse / lights tiers use (see EARTH_TEXTURE_BASE in
-// photorealEarth.ts) — same `metadata.sosexplorer.gov` bucket
-// fronted by CloudFront. The loader fails gracefully if the file
-// is absent so a fresh-stack deploy without the asset uploaded
-// still boots; the bump pass simply doesn't render. A future
-// optimisation could mirror the photorealEarth progressive tier
-// (2048 → 4096 → 8192) for bandwidth-constrained clients; today
-// we ship a single tier behind a requestIdleCallback to keep the
-// first-paint budget unchanged.
-const NORMAL_MAP_URL = 'https://d3sik7mbbzunjo.cloudfront.net/terraviz/basemaps/earth_normal_8192.jpg'
+// the surface normal in [0,255]), equirectangular projection.
+// Hosted on the same CloudFront + S3 path the VR diffuse / lights
+// tiers use (see EARTH_TEXTURE_BASE in photorealEarth.ts) — same
+// `metadata.sosexplorer.gov` bucket fronted by CloudFront.
+//
+// Tiers walked in ascending order, mirroring the existing
+// `loadProgressive` ladder for the diffuse / night-lights maps:
+// each successful tier replaces the bound texture (re-uploads via
+// texImage2D into the same `bumpTex` handle, so no GPU object
+// churn), regenerates mipmaps, and triggers a repaint. On a 404
+// or network error, progression stops and the most recently
+// loaded tier stays applied — so a fresh stack with only the 8K
+// uploaded still works, and a bandwidth-constrained client that
+// times out fetching 4K keeps the 2K bump it already has.
+const NORMAL_MAP_URLS = [
+  'https://d3sik7mbbzunjo.cloudfront.net/terraviz/basemaps/earth_normal_2048.jpg',
+  'https://d3sik7mbbzunjo.cloudfront.net/terraviz/basemaps/earth_normal_4096.jpg',
+  'https://d3sik7mbbzunjo.cloudfront.net/terraviz/basemaps/earth_normal_8192.jpg',
+]
 const CLOUD_TEXTURE_URL = getCloudTextureUrl()
 
 // --- Rendering constants (matched to earthMaterials.ts) ---
@@ -1655,30 +1662,54 @@ export function createEarthTileLayer(): EarthTileLayerControl {
       gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.RGB8, 1, 1, 0, gl2.RGB, gl2.UNSIGNED_BYTE,
         new Uint8Array([128, 128, 255]))
 
-      const loadNormalMap = () => {
-        if (disposed) return
-        const normalImg = new Image()
-        normalImg.crossOrigin = 'anonymous'
-        normalImg.onload = () => {
-          if (disposed) return
-          gl2.bindTexture(gl2.TEXTURE_2D, bumpTex)
-          // Sized RGB8 internal format — see the placeholder above.
-          gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.RGB8, gl2.RGB, gl2.UNSIGNED_BYTE, normalImg)
-          gl2.generateMipmap(gl2.TEXTURE_2D)
-          gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MIN_FILTER, gl2.LINEAR_MIPMAP_LINEAR)
-          gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MAG_FILTER, gl2.LINEAR)
-          gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_S, gl2.REPEAT)
-          gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_T, gl2.CLAMP_TO_EDGE)
-          bumpTexReady = true
-          _map.triggerRepaint()
-          logger.info('[EarthTileLayer] Normal map loaded (%dx%d)', normalImg.width, normalImg.height)
+      // Progressive normal-map tier walker. Mirrors the photorealEarth
+      // `loadProgressive` shape: ascending tiers, each successful
+      // upload replaces the previous, repaint after every step, halt
+      // on the first failure (stale lower tier stays applied). Sequential
+      // rather than parallel so a slow 8K fetch doesn't starve the 2K
+      // first-bump frame.
+      const loadNormalMapTier = (url: string): Promise<boolean> => {
+        return new Promise((resolve) => {
+          if (disposed) return resolve(false)
+          const normalImg = new Image()
+          normalImg.crossOrigin = 'anonymous'
+          normalImg.onload = () => {
+            if (disposed) return resolve(false)
+            gl2.bindTexture(gl2.TEXTURE_2D, bumpTex)
+            // Sized RGB8 internal format — see the placeholder above.
+            gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.RGB8, gl2.RGB, gl2.UNSIGNED_BYTE, normalImg)
+            gl2.generateMipmap(gl2.TEXTURE_2D)
+            gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MIN_FILTER, gl2.LINEAR_MIPMAP_LINEAR)
+            gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MAG_FILTER, gl2.LINEAR)
+            gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_S, gl2.REPEAT)
+            gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_T, gl2.CLAMP_TO_EDGE)
+            bumpTexReady = true
+            _map.triggerRepaint()
+            logger.info('[EarthTileLayer] Normal map tier loaded (%dx%d)', normalImg.width, normalImg.height)
+            resolve(true)
+          }
+          normalImg.onerror = () => resolve(false)
+          normalImg.src = url
+        })
+      }
+      const loadNormalMap = async () => {
+        for (const url of NORMAL_MAP_URLS) {
+          const ok = await loadNormalMapTier(url)
+          if (!ok) {
+            // First failure halts progression — whatever tier
+            // most recently succeeded stays applied. Logged at
+            // info because a missing higher tier is expected
+            // (operator may not have uploaded 4K / 8K yet) and
+            // a missing 2K just disables bump shading until an
+            // asset shows up.
+            if (!bumpTexReady) {
+              logger.info('[EarthTileLayer] Normal map not available; bump shading disabled')
+            } else {
+              logger.info('[EarthTileLayer] Normal map progression halted; staying at the last successful tier')
+            }
+            return
+          }
         }
-        normalImg.onerror = () => {
-          // Expected when the asset hasn't been provided yet. Logged
-          // at info-level since this is a known optional asset.
-          logger.info('[EarthTileLayer] Normal map not available; bump shading disabled')
-        }
-        normalImg.src = NORMAL_MAP_URL
       }
       typeof requestIdleCallback !== 'undefined'
         ? requestIdleCallback(loadNormalMap, { timeout: 1500 })
