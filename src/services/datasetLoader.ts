@@ -18,6 +18,7 @@ import type { PlaybackState } from '../ui/playbackController'
 import { updatePlayButton, loadCaptions } from '../ui/playbackController'
 import { startDwell, type DwellHandle } from '../analytics'
 import { recommendRelated, normalizeTitle as normalizeRelatedTitle } from './relatedDatasets'
+import { openAddToPlaylistPopover } from '../ui/playlistUI'
 import { t, tAttr } from '../i18n'
 
 /** Tier B dwell handle for the info panel — non-null while the
@@ -465,6 +466,16 @@ export function displayDatasetInfo(
     html += `<p class="info-source">${escapeHtml(dataset.organization)}</p>`
   }
 
+  // "Add to playlist" affordance — §8.1. Renders right under the
+  // source line so it's visible without scrolling. `data-dataset-
+  // id` is what the popover anchor handler reads to know which
+  // dataset to attach.
+  html += `<button type="button" class="add-to-playlist-btn info-add-to-playlist"`
+    + ` data-dataset-id="${escapeAttr(dataset.id)}"`
+    + ` aria-label="${escapeAttr(t('playlist.action.addToPlaylist.aria', { title: dataset.title }))}">`
+    + escapeHtml(t('playlist.action.addToPlaylist'))
+    + `</button>`
+
   // Description with show-more/show-less. The collapsed form is the
   // same 600-char snippet the panel has rendered for years; the
   // expanded form is the full text, scrollable inside the panel
@@ -573,6 +584,18 @@ export function displayDatasetInfo(
 
   infoBody.innerHTML = html
   infoPanel.classList.remove('hidden')
+
+  // Wire the Add-to-playlist button to open the popover anchored
+  // under the button itself. The popover module handles its own
+  // outside-click / Escape close.
+  const addBtn = infoBody.querySelector<HTMLButtonElement>('.info-add-to-playlist')
+  if (addBtn) {
+    addBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation()
+      const id = addBtn.dataset.datasetId
+      if (id) openAddToPlaylistPopover(id, addBtn)
+    })
+  }
 
   // Wire up legend thumbnail to open modal
   const legendThumb = infoBody.querySelector('.info-legend-thumb') as HTMLElement | null

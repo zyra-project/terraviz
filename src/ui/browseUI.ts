@@ -18,6 +18,7 @@ import {
 } from '../services/downloadService'
 import { closeDownloadPanel } from './downloadUI'
 import { toggleHelp } from './helpUI'
+import { openAddToPlaylistPopover } from './playlistUI'
 import { escapeHtml, escapeAttr } from './domUtils'
 import { emit, startDwell, hashQuery, type DwellHandle } from '../analytics'
 import { plural, t } from '../i18n'
@@ -1882,11 +1883,20 @@ export function showBrowseUI(
         ? `<button class="browse-card-download" data-id="${escapeAttr(d.id)}" aria-label="${escapeAttr(t('browse.download.aria', { title: d.title }))}" title="${escapeAttr(t('browse.download.title'))}">&#8615;</button>`
         : ''
 
+      // "+" glyph reads as "add" without needing an icon font; the
+      // aria-label carries the dataset title for screen readers.
+      const playlistAddBtn = `<button class="add-to-playlist-btn browse-card-add-to-playlist"`
+        + ` data-dataset-id="${escapeAttr(d.id)}"`
+        + ` aria-label="${escapeAttr(t('playlist.action.addToPlaylist.aria', { title: d.title }))}"`
+        + ` title="${escapeAttr(t('playlist.action.addToPlaylist'))}"`
+        + `>+</button>`
+
       return `<div class="browse-card" data-id="${escapeAttr(d.id)}" role="listitem" tabindex="0" aria-label="${escapeAttr(d.title)}" aria-expanded="false">
           ${thumbHtml}
           <div class="browse-card-body">
             <div class="browse-card-header">
               <span class="browse-card-title">${escapeHtml(d.title)}</span>
+              ${playlistAddBtn}
               ${downloadBtn}
               <button class="browse-card-load" data-id="${escapeAttr(d.id)}" aria-label="${escapeAttr(t('browse.card.load.aria', { title: d.title }))}">${escapeHtml(t('browse.card.load'))}</button>
             </div>
@@ -1925,6 +1935,13 @@ export function showBrowseUI(
         if (dlBtn) {
           e.stopPropagation()
           handleDownloadClick(dlBtn, allDatasets)
+          return
+        }
+        const addBtn = (e.target as HTMLElement).closest('.browse-card-add-to-playlist') as HTMLButtonElement | null
+        if (addBtn) {
+          e.stopPropagation()
+          const id = addBtn.dataset.datasetId
+          if (id) openAddToPlaylistPopover(id, addBtn)
           return
         }
         if ((e.target as HTMLElement).closest('a')) return
