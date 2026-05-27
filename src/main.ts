@@ -1127,7 +1127,13 @@ class InteractiveSphere {
         if (this.hlsService) this.hlsService.playbackRate = rate
       },
       onTourEnd: () => this.endTour(),
-      onStop: () => this.stopTour(),
+      onStop: () => {
+        // User-initiated stop. Release a playlist that was waiting
+        // for this tour to finish so it advances on the per-entry
+        // timer rather than hanging in waitingForTour state.
+        this.stopTour()
+        notifyPlaylistTourEnded()
+      },
       announce: (msg) => this.announce(msg),
       resolveMediaUrl: (filename) => {
         try {
@@ -1138,7 +1144,10 @@ class InteractiveSphere {
       },
     }, { anchorSlot, meta })
 
-    showTourControls(this.tourEngine, () => this.stopTour())
+    showTourControls(this.tourEngine, () => {
+      this.stopTour()
+      notifyPlaylistTourEnded()
+    })
     this.showPlaybackControls(false)
     hideBrowseUI()
     closeChat()
