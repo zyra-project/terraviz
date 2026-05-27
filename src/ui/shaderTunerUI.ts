@@ -76,7 +76,15 @@ function mountTuner(): void {
   host.id = HOST_ID
   applyHostStyles(host)
   host.innerHTML = buildPanelHtml()
-  document.body.appendChild(host)
+  // Prefer the dedicated `#ui` overlay container (pointer-events:
+  // none with opt-in `pointer-events: auto` on its panels — see
+  // base.css) so the tuner stacks naturally with browse/chat/etc.
+  // and doesn't intercept clicks meant for the map. Fall back to
+  // <body> if the SPA shell hasn't built #ui yet (very early
+  // ?tune=shader load), where the inline `pointer-events: auto` on
+  // the host element keeps it interactive.
+  const ui = document.getElementById('ui')
+  ;(ui ?? document.body).appendChild(host)
   wireSliders(host)
   wireCopyButton(host)
   // External changes (Tools-menu specular click, programmatic

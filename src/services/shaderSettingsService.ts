@@ -181,8 +181,11 @@ export function matchSpecularPreset(value: number): SpecularPreset | null {
 /**
  * Tuner-only setter — writes a freeform value to any of the
  * shader uniforms. Does NOT persist (the tuner is a dev surface;
- * shipping requires editing SHADER_DEFAULTS above). Clamps to the
- * uniform's safe band; out-of-range input is a no-op.
+ * shipping requires editing SHADER_DEFAULTS above). Out-of-band
+ * input (outside the per-uniform TUNER_BANDS range, NaN, or
+ * non-numeric) is rejected as a no-op — the live snapshot stays
+ * on its previous value rather than silently snapping to the
+ * band edge. See `validateInBand` for the rationale.
  */
 export function setTunerValue(
   key: keyof ShaderSettings,

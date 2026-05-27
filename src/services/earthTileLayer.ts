@@ -1648,9 +1648,12 @@ export function createEarthTileLayer(): EarthTileLayerControl {
       gl2.bindTexture(gl2.TEXTURE_2D, bumpTex)
       // Flat-normal placeholder so a sampler bind before the load
       // completes returns a well-defined value. Never actually
-      // sampled — the pass is gated on bumpTexReady.
-      gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.RGBA, 1, 1, 0, gl2.RGBA, gl2.UNSIGNED_BYTE,
-        new Uint8Array([128, 128, 255, 255]))
+      // sampled — the pass is gated on bumpTexReady. RGB8 (not
+      // RGBA8) matches the real upload below; the shader only
+      // touches `.rgb` so the alpha channel was just costing
+      // ~25% extra VRAM (≈32 MB at 8192×4096).
+      gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.RGB8, 1, 1, 0, gl2.RGB, gl2.UNSIGNED_BYTE,
+        new Uint8Array([128, 128, 255]))
 
       const loadNormalMap = () => {
         if (disposed) return
@@ -1659,7 +1662,8 @@ export function createEarthTileLayer(): EarthTileLayerControl {
         normalImg.onload = () => {
           if (disposed) return
           gl2.bindTexture(gl2.TEXTURE_2D, bumpTex)
-          gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.RGBA, gl2.RGBA, gl2.UNSIGNED_BYTE, normalImg)
+          // Sized RGB8 internal format — see the placeholder above.
+          gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.RGB8, gl2.RGB, gl2.UNSIGNED_BYTE, normalImg)
           gl2.generateMipmap(gl2.TEXTURE_2D)
           gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MIN_FILTER, gl2.LINEAR_MIPMAP_LINEAR)
           gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MAG_FILTER, gl2.LINEAR)
