@@ -1,0 +1,213 @@
+/**
+ * zip-download styles — §8.2 web-only zip-download dialog.
+ *
+ * Floating panel (NOT modal). z-index 1200 — above the browse
+ * overlay (500), playlist manager (1000), Add-to-playlist popover
+ * (1100); below the error banner (9000).
+ *
+ * Logical inline-axis properties throughout so RTL layouts flip
+ * correctly. Sizing scales off `--ui-scale` (the §7.1 token) to
+ * match the rest of the floating-panel chrome.
+ */
+
+#zip-download-dialog {
+    position: fixed;
+    bottom: calc(5.5rem * var(--ui-scale));
+    inset-inline-end: calc(0.75rem * var(--ui-scale));
+    width: calc(360px * var(--ui-scale));
+    max-width: calc(100vw - 1.5rem);
+    max-height: calc(70vh);
+    overflow-y: auto;
+    background: rgba(15, 15, 20, 0.94);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--white-o08);
+    border-radius: calc(10px * var(--ui-scale));
+    padding: calc(0.75rem * var(--ui-scale));
+    z-index: 1200;
+    pointer-events: auto;
+    color: #ddd;
+    font-size: calc(0.7rem * var(--ui-scale));
+}
+#zip-download-dialog.hidden { display: none; }
+
+.zip-dl-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-block-end: calc(0.4rem * var(--ui-scale));
+}
+.zip-dl-title {
+    font-size: calc(0.8rem * var(--ui-scale));
+    font-weight: 600;
+    color: #eee;
+}
+.zip-dl-close {
+    background: none;
+    border: none;
+    color: var(--color-text-faint);
+    cursor: pointer;
+    font-size: calc(0.85rem * var(--ui-scale));
+    padding: calc(0.2rem * var(--ui-scale));
+    line-height: 1;
+}
+.zip-dl-close:hover { color: #fff; }
+
+.zip-dl-dataset {
+    font-size: calc(0.72rem * var(--ui-scale));
+    font-weight: 500;
+    color: #eee;
+    margin-block: 0 calc(0.3rem * var(--ui-scale));
+    line-height: 1.3;
+}
+.zip-dl-source-note {
+    font-size: calc(0.55rem * var(--ui-scale));
+    color: var(--color-text-dim);
+    margin-block: 0 calc(0.55rem * var(--ui-scale));
+    line-height: 1.45;
+}
+
+.zip-dl-loading {
+    font-size: calc(0.65rem * var(--ui-scale));
+    color: var(--color-text-faint);
+    text-align: center;
+    padding: calc(1rem * var(--ui-scale)) 0;
+}
+
+.zip-dl-assets {
+    display: flex;
+    flex-direction: column;
+    gap: calc(0.25rem * var(--ui-scale));
+    margin-block: calc(0.5rem * var(--ui-scale));
+}
+.zip-dl-asset-row {
+    display: flex;
+    align-items: center;
+    gap: calc(0.5rem * var(--ui-scale));
+    padding-block: calc(0.2rem * var(--ui-scale));
+    padding-inline: calc(0.3rem * var(--ui-scale));
+    border-radius: calc(3px * var(--ui-scale));
+    cursor: pointer;
+    line-height: 1.2;
+}
+.zip-dl-asset-row:hover { background: var(--white-o05); }
+.zip-dl-asset-row.disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+.zip-dl-asset-row input[type="checkbox"] {
+    flex-shrink: 0;
+    cursor: pointer;
+    accent-color: var(--color-accent, #4a8);
+}
+.zip-dl-asset-name {
+    flex: 1;
+    min-width: 0;
+    color: #eee;
+    font-size: calc(0.68rem * var(--ui-scale));
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.zip-dl-asset-size {
+    flex-shrink: 0;
+    color: var(--color-text-faint);
+    font-size: calc(0.55rem * var(--ui-scale));
+    white-space: nowrap;
+}
+
+.zip-dl-size {
+    font-size: calc(0.65rem * var(--ui-scale));
+    color: #ddd;
+    margin-block: calc(0.4rem * var(--ui-scale));
+    text-align: end;
+}
+.zip-dl-size.over-warn { color: #e6a04a; }
+.zip-dl-size.over-cap { color: #e64a4a; }
+
+.zip-dl-warning {
+    font-size: calc(0.6rem * var(--ui-scale));
+    color: #e6a04a;
+    background: rgba(230, 160, 74, 0.08);
+    border-inline-start: 2px solid #e6a04a;
+    padding: calc(0.4rem * var(--ui-scale)) calc(0.55rem * var(--ui-scale));
+    border-radius: calc(3px * var(--ui-scale));
+    margin-block-end: calc(0.4rem * var(--ui-scale));
+    line-height: 1.4;
+}
+.zip-dl-size.over-cap + .zip-dl-warning {
+    color: #e64a4a;
+    background: rgba(230, 74, 74, 0.08);
+    border-inline-start-color: #e64a4a;
+}
+
+.zip-dl-error {
+    font-size: calc(0.65rem * var(--ui-scale));
+    color: #e64a4a;
+    background: rgba(230, 74, 74, 0.08);
+    border-inline-start: 2px solid #e64a4a;
+    padding: calc(0.4rem * var(--ui-scale)) calc(0.55rem * var(--ui-scale));
+    border-radius: calc(3px * var(--ui-scale));
+    margin-block: calc(0.4rem * var(--ui-scale));
+    line-height: 1.4;
+}
+
+.zip-dl-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: calc(0.4rem * var(--ui-scale));
+    margin-block-start: calc(0.5rem * var(--ui-scale));
+}
+.zip-dl-btn-primary,
+.zip-dl-btn-secondary {
+    padding: calc(0.4rem * var(--ui-scale)) calc(0.8rem * var(--ui-scale));
+    font-size: calc(0.65rem * var(--ui-scale));
+    border: 1px solid var(--white-o08);
+    border-radius: calc(4px * var(--ui-scale));
+    cursor: pointer;
+    line-height: 1;
+}
+.zip-dl-btn-primary {
+    background: var(--color-accent, #4a8);
+    color: #fff;
+}
+.zip-dl-btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
+.zip-dl-btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+.zip-dl-btn-secondary {
+    background: var(--white-o05);
+    color: #ccc;
+}
+.zip-dl-btn-secondary:hover { background: var(--white-o08); color: #fff; }
+
+.zip-dl-progress {
+    margin-block: calc(0.55rem * var(--ui-scale));
+}
+.zip-dl-progress-bar {
+    width: 100%;
+    height: calc(0.4rem * var(--ui-scale));
+    background: var(--white-o05);
+    border-radius: calc(2px * var(--ui-scale));
+    overflow: hidden;
+}
+.zip-dl-progress-fill {
+    height: 100%;
+    background: var(--color-accent, #4a8);
+    transition: width 0.15s linear;
+}
+.zip-dl-progress-label {
+    font-size: calc(0.55rem * var(--ui-scale));
+    color: var(--color-text-dim);
+    margin-block-start: calc(0.2rem * var(--ui-scale));
+    text-align: center;
+}
+
+/* Portrait phone: anchor the dialog with a bit more margin from the
+ * playback transport so it doesn't crowd the controls. */
+@media (max-width: 600px) and (orientation: portrait) {
+    #zip-download-dialog {
+        bottom: calc(6.5rem * var(--ui-scale));
+        inset-inline-end: calc(0.5rem * var(--ui-scale));
+        inset-inline-start: calc(0.5rem * var(--ui-scale));
+        width: auto;
+    }
+}
