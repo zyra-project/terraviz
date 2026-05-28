@@ -21,6 +21,14 @@ import type { AppState, VideoTextureHandle, TourFile, Dataset } from './types'
 // Extracted modules
 import { showBrowseUI, hideBrowseUI, collapseBrowseUI, notifyBrowseOpened } from './ui/browseUI'
 import { initDownloadUI } from './ui/downloadUI'
+import { initPlaylistUI } from './ui/playlistUI'
+import {
+  getActive as getActivePlaylistPlayback,
+  initPlaylistPlayback,
+  notifyTourEnded as notifyPlaylistTourEnded,
+  onPlaybackChange as onPlaylistPlaybackChange,
+  skipNext as skipNextPlaylistEntry,
+} from './services/playlistPlayback'
 import { updateMapControlsPosition } from './ui/mapControlsUI'
 import { initToolsMenu, syncToolsMenuState, syncToolsMenuLayout, pulseBrowseButton } from './ui/toolsMenuUI'
 import { openCreditsPanel } from './ui/creditsPanel'
@@ -344,6 +352,31 @@ class InteractiveSphere {
       })
       initDownloadUI().catch(err => logger.warn('[App] Download UI init failed:', err))
       initHelpUI()
+      // Playlists — mount the manager panel host and wire the
+      // playback state machine to the regular loadDataset flow.
+      // hasTourOnLoad probes dataset metadata so the playback
+      // module can defer its auto-advance timer while a tour is
+      // running. notifyPlaylistTourEnded fires from endTour() below.
+      initPlaylistUI({ announce: (msg) => this.announce(msg) })
+      initPlaylistPlayback({
+        loadDataset: async (id) => {
+          await this.loadDataset(id, 'url')
+        },
+        hasTourOnLoad: (id) => {
+          const dataset = dataService.getDatasetById(id)
+          return !!dataset?.runTourOnLoad
+        },
+      })
+      // Toggle the transport "Skip to next playlist item" button as
+      // a playlist becomes active / inactive. Lives at boot so the
+      // listener survives every dataset swap.
+      const syncPlaylistNextBtn = () => {
+        const btn = document.getElementById('playlist-next-btn')
+        if (!btn) return
+        btn.classList.toggle('hidden', !getActivePlaylistPlayback())
+      }
+      onPlaylistPlaybackChange(syncPlaylistNextBtn)
+      syncPlaylistNextBtn()
       // First-session privacy disclosure. No-ops on every launch
       // after the user dismisses it.
       showDisclosureBannerIfNeeded()
@@ -1094,7 +1127,13 @@ class InteractiveSphere {
         if (this.hlsService) this.hlsService.playbackRate = rate
       },
       onTourEnd: () => this.endTour(),
-      onStop: () => this.stopTour(),
+      onStop: () => {
+        // User-initiated stop. Release a playlist that was waiting
+        // for this tour to finish so it advances on the per-entry
+        // timer rather than hanging in waitingForTour state.
+        this.stopTour()
+        notifyPlaylistTourEnded()
+      },
       announce: (msg) => this.announce(msg),
       resolveMediaUrl: (filename) => {
         try {
@@ -1105,7 +1144,10 @@ class InteractiveSphere {
       },
     }, { anchorSlot, meta })
 
-    showTourControls(this.tourEngine, () => this.stopTour())
+    showTourControls(this.tourEngine, () => {
+      this.stopTour()
+      notifyPlaylistTourEnded()
+    })
     this.showPlaybackControls(false)
     hideBrowseUI()
     closeChat()
@@ -1135,6 +1177,10 @@ class InteractiveSphere {
       // runTourOnLoad tour — stay on the current dataset, restore playback UI
       this.restorePostTourUI()
     }
+    // Playlist auto-advance — if a playlist entry was waiting for
+    // the tour to finish, advance to the next entry. No-op when
+    // the tour wasn't triggered from a playlist.
+    notifyPlaylistTourEnded()
   }
 
   /** Stop any active tour without triggering goHome. */
@@ -2782,6 +2828,12 @@ class InteractiveSphere {
     document.getElementById('ff-btn')?.addEventListener('click', () => {
       fastForward(this.hlsService, this.appState, this.playback, (m) => this.announce(m))
       this.emitPlaybackAction('seek')
+    })
+    // "Next in playlist" — only visible while a playlist is active
+    // (see the onPlaybackChange wiring in init above). Bypasses the
+    // per-entry timer and the tour-deferral wait alike.
+    document.getElementById('playlist-next-btn')?.addEventListener('click', () => {
+      skipNextPlaylistEntry()
     })
     document.getElementById('cc-btn')?.addEventListener('click', () =>
       toggleCaptions(this.playback))

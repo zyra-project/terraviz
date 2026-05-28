@@ -1,0 +1,480 @@
+/**
+ * playlist styles — manager panel + add-to-playlist popover for
+ * the §8.1 user-curated playlists feature.
+ *
+ * Uses logical inline-axis properties throughout so RTL layouts
+ * flip correctly. Sizing scales off `--ui-scale` (the §7.1 token)
+ * to match the rest of the floating-panel chrome.
+ */
+
+/* --- Playlist Manager Panel --- */
+#playlist-manager {
+    position: fixed;
+    bottom: calc(5.5rem * var(--ui-scale));
+    inset-inline-end: calc(0.75rem * var(--ui-scale));
+    width: calc(360px * var(--ui-scale));
+    max-height: calc(70vh);
+    overflow-y: auto;
+    background: rgba(15, 15, 20, 0.94);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--white-o08);
+    border-radius: calc(10px * var(--ui-scale));
+    padding: calc(0.75rem * var(--ui-scale));
+    /* Browse overlay sits at 500 and the catalog tabs strip at 600;
+     * the manager needs to render above both so it can be opened
+     * while the browse panel is visible. Below the error banner's
+     * 9000 so a hard error still wins. */
+    z-index: 1000;
+    pointer-events: auto;
+    color: #ddd;
+    font-size: calc(0.7rem * var(--ui-scale));
+}
+#playlist-manager.hidden { display: none; }
+
+.pl-mgr-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-block-end: calc(0.4rem * var(--ui-scale));
+}
+.pl-mgr-title {
+    font-size: calc(0.8rem * var(--ui-scale));
+    font-weight: 600;
+    color: #eee;
+}
+.pl-mgr-close {
+    background: none;
+    border: none;
+    color: var(--color-text-faint);
+    cursor: pointer;
+    font-size: calc(0.85rem * var(--ui-scale));
+    padding: calc(0.2rem * var(--ui-scale));
+    line-height: 1;
+}
+.pl-mgr-close:hover { color: #fff; }
+
+.pl-mgr-warning {
+    font-size: calc(0.55rem * var(--ui-scale));
+    color: var(--color-text-dim);
+    margin-block: 0 calc(0.5rem * var(--ui-scale));
+    line-height: 1.4;
+}
+
+.pl-mgr-actions {
+    display: flex;
+    gap: calc(0.4rem * var(--ui-scale));
+    flex-wrap: wrap;
+    margin-block-end: calc(0.6rem * var(--ui-scale));
+}
+.pl-mgr-btn {
+    padding: calc(0.3rem * var(--ui-scale)) calc(0.55rem * var(--ui-scale));
+    font-size: calc(0.6rem * var(--ui-scale));
+    background: var(--color-accent, #4a8);
+    border: 1px solid var(--white-o08);
+    color: #fff;
+    border-radius: calc(4px * var(--ui-scale));
+    cursor: pointer;
+    line-height: 1;
+}
+.pl-mgr-btn:hover { filter: brightness(1.1); }
+.pl-mgr-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.pl-mgr-btn-secondary {
+    background: var(--white-o05);
+    color: #ccc;
+}
+
+.pl-mgr-empty {
+    font-size: calc(0.65rem * var(--ui-scale));
+    color: var(--color-text-faint);
+    text-align: center;
+    padding: calc(1.2rem * var(--ui-scale)) 0;
+}
+
+.pl-mgr-search {
+    margin-block-end: calc(0.5rem * var(--ui-scale));
+}
+.pl-mgr-search-input {
+    width: 100%;
+    background: var(--white-o05);
+    border: 1px solid var(--white-o08);
+    color: #ddd;
+    padding: calc(0.35rem * var(--ui-scale)) calc(0.55rem * var(--ui-scale));
+    border-radius: calc(5px * var(--ui-scale));
+    font-size: calc(0.65rem * var(--ui-scale));
+    line-height: 1.2;
+    box-sizing: border-box;
+}
+.pl-mgr-search-input::placeholder {
+    color: var(--color-text-faint);
+}
+.pl-mgr-search-input:focus-visible {
+    outline: 2px solid var(--color-accent, #4a8);
+    outline-offset: 0;
+    border-color: transparent;
+}
+
+.pl-mgr-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+.pl-mgr-row {
+    border-top: 1px solid var(--white-o05);
+    padding-block: calc(0.5rem * var(--ui-scale));
+}
+.pl-mgr-row.active {
+    background: rgba(100, 200, 100, 0.04);
+}
+.pl-mgr-row:first-child { border-top: none; }
+
+.pl-mgr-row-header {
+    display: flex;
+    align-items: center;
+    gap: calc(0.4rem * var(--ui-scale));
+    margin-block-end: calc(0.3rem * var(--ui-scale));
+}
+.pl-mgr-row-play {
+    flex-shrink: 0;
+    background: var(--color-accent, #4a8);
+    border: none;
+    color: #fff;
+    font-size: calc(0.7rem * var(--ui-scale));
+    cursor: pointer;
+    padding: calc(0.2rem * var(--ui-scale)) calc(0.4rem * var(--ui-scale));
+    border-radius: calc(3px * var(--ui-scale));
+    line-height: 1;
+}
+.pl-mgr-row-play:hover { filter: brightness(1.1); }
+.pl-mgr-row-play:disabled { opacity: 0.4; cursor: not-allowed; }
+.pl-mgr-row-play.active { background: #c44; }
+
+.pl-mgr-row-toggle {
+    flex: 1;
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: calc(0.35rem * var(--ui-scale));
+    text-align: start;
+    background: none;
+    border: none;
+    color: #eee;
+    font-size: calc(0.72rem * var(--ui-scale));
+    font-weight: 500;
+    cursor: pointer;
+    padding: calc(0.2rem * var(--ui-scale));
+    border-radius: calc(3px * var(--ui-scale));
+}
+.pl-mgr-row-toggle:hover { background: var(--white-o05); }
+.pl-mgr-row-chevron {
+    color: var(--color-text-faint);
+    font-size: calc(0.6rem * var(--ui-scale));
+    line-height: 1;
+    flex-shrink: 0;
+}
+.pl-mgr-row-name-text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.pl-mgr-row-rename {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: var(--color-text-faint);
+    cursor: pointer;
+    font-size: calc(0.7rem * var(--ui-scale));
+    padding: calc(0.2rem * var(--ui-scale));
+    line-height: 1;
+}
+.pl-mgr-row-rename:hover { color: #fff; }
+
+.pl-mgr-row-count {
+    font-size: calc(0.55rem * var(--ui-scale));
+    color: var(--color-text-dim);
+    white-space: nowrap;
+}
+
+.pl-mgr-row-delete {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: var(--color-text-faint);
+    cursor: pointer;
+    font-size: calc(0.75rem * var(--ui-scale));
+    padding: calc(0.2rem * var(--ui-scale));
+    line-height: 1;
+}
+.pl-mgr-row-delete:hover { color: #e55; }
+
+.pl-mgr-entries {
+    list-style: none;
+    padding-inline-start: calc(0.5rem * var(--ui-scale));
+    margin: 0;
+}
+.pl-mgr-entry {
+    display: flex;
+    align-items: center;
+    gap: calc(0.3rem * var(--ui-scale));
+    padding-block: calc(0.2rem * var(--ui-scale));
+    font-size: calc(0.6rem * var(--ui-scale));
+}
+.pl-mgr-entry-title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #ccc;
+}
+.pl-mgr-entry-duration-field {
+    display: inline-flex;
+    align-items: center;
+    gap: calc(0.25rem * var(--ui-scale));
+    flex-shrink: 0;
+    color: var(--color-text-dim);
+    font-size: calc(0.55rem * var(--ui-scale));
+    line-height: 1;
+    letter-spacing: 0.01em;
+}
+.pl-mgr-entry-duration-prefix,
+.pl-mgr-entry-duration-suffix {
+    white-space: nowrap;
+}
+.pl-mgr-entry-duration {
+    width: calc(40px * var(--ui-scale));
+    background: var(--white-o05);
+    border: 1px solid var(--white-o08);
+    color: #ddd;
+    padding: calc(0.15rem * var(--ui-scale)) calc(0.25rem * var(--ui-scale));
+    border-radius: calc(3px * var(--ui-scale));
+    font-size: calc(0.55rem * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+    text-align: end;
+}
+.pl-mgr-entry-move,
+.pl-mgr-entry-remove {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: var(--color-text-faint);
+    cursor: pointer;
+    font-size: calc(0.55rem * var(--ui-scale));
+    padding: calc(0.15rem * var(--ui-scale));
+    line-height: 1;
+}
+.pl-mgr-entry-move:hover,
+.pl-mgr-entry-remove:hover { color: #fff; }
+.pl-mgr-entry-move:disabled { opacity: 0.3; cursor: not-allowed; }
+.pl-mgr-entry-remove:hover { color: #e55; }
+.pl-mgr-entry-empty {
+    font-size: calc(0.55rem * var(--ui-scale));
+    color: var(--color-text-faint);
+    padding-block: calc(0.3rem * var(--ui-scale));
+    list-style: none;
+}
+
+.pl-mgr-row-loop,
+.pl-mgr-entry-pause {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: calc(20px * var(--ui-scale));
+    padding-inline: calc(0.3rem * var(--ui-scale));
+    border-radius: calc(3px * var(--ui-scale));
+    color: var(--color-text-faint);
+    border: 1px solid var(--white-o08);
+    cursor: pointer;
+    font-size: calc(0.55rem * var(--ui-scale));
+    line-height: 1;
+    gap: calc(0.2rem * var(--ui-scale));
+}
+.pl-mgr-row-loop > span:first-of-type,
+.pl-mgr-entry-pause > span:first-of-type {
+    font-size: calc(0.7rem * var(--ui-scale));
+}
+.pl-mgr-toggle-label {
+    font-size: calc(0.55rem * var(--ui-scale));
+    line-height: 1;
+    letter-spacing: 0.01em;
+}
+.pl-mgr-row-loop:hover,
+.pl-mgr-entry-pause:hover {
+    color: #fff;
+    background: var(--white-o05);
+}
+.pl-mgr-row-loop-input,
+.pl-mgr-entry-pause-input {
+    /* Hide the native checkbox — the visible state lives in the
+     * parent label's background / glyph color (see :has below). */
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+    width: 1px;
+    height: 1px;
+}
+.pl-mgr-row-loop:has(.pl-mgr-row-loop-input:checked),
+.pl-mgr-entry-pause:has(.pl-mgr-entry-pause-input:checked) {
+    color: var(--color-accent, #4a8);
+    background: rgba(100, 200, 100, 0.12);
+}
+.pl-mgr-row-loop:has(.pl-mgr-row-loop-input:focus-visible),
+.pl-mgr-entry-pause:has(.pl-mgr-entry-pause-input:focus-visible) {
+    outline: 2px solid var(--color-accent, #4a8);
+    outline-offset: 1px;
+}
+
+/* --- "Click to continue" floating prompt --- */
+#playlist-continue-prompt {
+    position: fixed;
+    bottom: calc(6.5rem * var(--ui-scale));
+    inset-inline-start: 50%;
+    transform: translateX(-50%);
+    display: inline-flex;
+    align-items: center;
+    gap: calc(0.45rem * var(--ui-scale));
+    padding: calc(0.55rem * var(--ui-scale)) calc(0.95rem * var(--ui-scale));
+    background: var(--color-accent, #4a8);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: calc(999px * var(--ui-scale));
+    font-size: calc(0.8rem * var(--ui-scale));
+    font-weight: 600;
+    cursor: pointer;
+    z-index: 60;
+    pointer-events: auto;
+    box-shadow: 0 calc(4px * var(--ui-scale)) calc(20px * var(--ui-scale)) rgba(0, 0, 0, 0.4);
+    animation: pl-continue-pulse 2s ease-in-out infinite;
+}
+#playlist-continue-prompt.hidden { display: none; }
+#playlist-continue-prompt:hover {
+    filter: brightness(1.15);
+}
+:root[dir="rtl"] #playlist-continue-prompt {
+    transform: translateX(50%);
+}
+.pl-continue-icon {
+    font-size: calc(1rem * var(--ui-scale));
+    line-height: 1;
+}
+.pl-continue-label {
+    line-height: 1;
+}
+@keyframes pl-continue-pulse {
+    0%, 100% { box-shadow: 0 calc(4px * var(--ui-scale)) calc(20px * var(--ui-scale)) rgba(0, 0, 0, 0.4); }
+    50%      { box-shadow: 0 calc(4px * var(--ui-scale)) calc(20px * var(--ui-scale)) rgba(0, 0, 0, 0.4),
+                           0 0 0 calc(8px * var(--ui-scale)) rgba(100, 200, 100, 0.18); }
+}
+@media (prefers-reduced-motion: reduce) {
+    #playlist-continue-prompt { animation: none; }
+}
+
+/* --- Add-to-playlist popover --- */
+#playlist-add-popover {
+    position: fixed;
+    width: calc(220px * var(--ui-scale));
+    max-height: calc(280px * var(--ui-scale));
+    overflow-y: auto;
+    background: rgba(15, 15, 20, 0.96);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--white-o08);
+    border-radius: calc(8px * var(--ui-scale));
+    padding: calc(0.4rem * var(--ui-scale));
+    /* Above the manager (1000) and the browse-overlay (500) so the
+     * popover can be triggered from a browse card without rendering
+     * behind the panel. */
+    z-index: 1100;
+    pointer-events: auto;
+    color: #ddd;
+    font-size: calc(0.65rem * var(--ui-scale));
+}
+#playlist-add-popover.hidden { display: none; }
+.pl-add-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-block-end: calc(0.3rem * var(--ui-scale));
+    border-block-end: 1px solid var(--white-o05);
+    margin-block-end: calc(0.3rem * var(--ui-scale));
+}
+.pl-add-title {
+    font-size: calc(0.7rem * var(--ui-scale));
+    font-weight: 600;
+}
+.pl-add-close {
+    background: none;
+    border: none;
+    color: var(--color-text-faint);
+    cursor: pointer;
+    font-size: calc(0.7rem * var(--ui-scale));
+    line-height: 1;
+}
+.pl-add-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+.pl-add-option {
+    width: 100%;
+    text-align: start;
+    background: none;
+    border: none;
+    color: #ddd;
+    padding: calc(0.3rem * var(--ui-scale)) calc(0.4rem * var(--ui-scale));
+    cursor: pointer;
+    border-radius: calc(4px * var(--ui-scale));
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: calc(0.4rem * var(--ui-scale));
+    font-size: calc(0.65rem * var(--ui-scale));
+}
+.pl-add-option:hover { background: var(--white-o05); }
+.pl-add-option-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.pl-add-option-check {
+    color: var(--color-success-soft);
+}
+.pl-add-empty {
+    font-size: calc(0.6rem * var(--ui-scale));
+    color: var(--color-text-faint);
+    padding-block: calc(0.4rem * var(--ui-scale));
+    list-style: none;
+    text-align: center;
+}
+.pl-add-new {
+    width: 100%;
+    margin-block-start: calc(0.3rem * var(--ui-scale));
+    padding: calc(0.35rem * var(--ui-scale));
+    background: var(--white-o05);
+    border: 1px solid var(--white-o08);
+    color: #ddd;
+    border-radius: calc(4px * var(--ui-scale));
+    cursor: pointer;
+    font-size: calc(0.6rem * var(--ui-scale));
+}
+.pl-add-new:hover { background: var(--white-o08); }
+
+/* --- Browse card / info panel "add to playlist" trigger --- */
+.add-to-playlist-btn {
+    flex-shrink: 0;
+    background: var(--white-o05);
+    border: 1px solid var(--white-o08);
+    color: #ccc;
+    padding: calc(0.2rem * var(--ui-scale)) calc(0.45rem * var(--ui-scale));
+    border-radius: calc(4px * var(--ui-scale));
+    font-size: calc(0.6rem * var(--ui-scale));
+    line-height: 1;
+    cursor: pointer;
+}
+.add-to-playlist-btn:hover {
+    background: var(--white-o08);
+    color: #fff;
+}

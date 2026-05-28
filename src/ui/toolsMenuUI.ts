@@ -39,6 +39,7 @@
 import type { ViewportManager, ViewLayout } from '../services/viewportManager'
 import { updateMapControlsPosition } from './mapControlsUI'
 import { openPrivacyUI } from './privacyUI'
+import { openPlaylistManager } from './playlistUI'
 import { emit } from '../analytics'
 import { setBordersVisible } from '../utils/viewPreferences'
 import {
@@ -318,6 +319,13 @@ export function initToolsMenu(
           <span class="tools-menu-item-label">${tHtml('tools.actions.share')}</span>
         </button>
       </section>
+      <section class="tools-menu-section" aria-label="${tAttr('tools.section.playlists.aria')}">
+        <h4 class="tools-menu-section-title">${tHtml('tools.section.playlists')}</h4>
+        <button type="button" class="tools-menu-item" id="tools-menu-playlists">
+          <span class="tools-menu-item-check" aria-hidden="true"></span>
+          <span class="tools-menu-item-label">${tHtml('tools.actions.playlists')}</span>
+        </button>
+      </section>
       <section class="tools-menu-section" aria-label="${tAttr('tools.section.orbit.aria')}">
         <h4 class="tools-menu-section-title">${tHtml('tools.section.orbit')}</h4>
         <button type="button" class="tools-menu-item" id="tools-menu-orbit-settings">
@@ -588,6 +596,12 @@ export function initToolsMenu(
   orbitSettingsBtn.addEventListener('click', () => {
     closePopover()
     onOpenOrbitSettings?.()
+  })
+
+  const playlistsBtn = document.getElementById('tools-menu-playlists') as HTMLButtonElement | null
+  playlistsBtn?.addEventListener('click', () => {
+    closePopover()
+    openPlaylistManager()
   })
 
   // Credits button is only rendered when `onOpenCredits` is wired
