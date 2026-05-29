@@ -1072,6 +1072,74 @@ operator-config gap this section closes.
 
 ---
 
+## Phase 9 — Desktop app fork (only if you ship it)
+
+The web deploy above is self-contained. If you also intend to ship
+the Tauri desktop app under your own brand, three upstream-pinned
+values need changing — skip this entire phase for a web-only fork.
+
+### 9a. Tauri updater endpoint + signing key
+
+`src-tauri/tauri.conf.json` hardcodes the auto-update feed and the
+public half of the upstream signing key:
+
+```jsonc
+"updater": {
+  "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6…",          // upstream's key
+  "endpoints": [
+    "https://github.com/zyra-project/terraviz/releases/latest/download/latest.json"
+  ]
+}
+```
+
+A fork that builds desktop binaries must:
+
+1. Generate its own key:
+   `npm run tauri signer generate -- -w "<password>"`.
+2. Paste the **public** key into `tauri.conf.json` `pubkey`.
+3. Change `endpoints` to your fork's releases:
+   `https://github.com/<your-org>/<repo>/releases/latest/download/latest.json`.
+4. Set the repo secrets `TAURI_SIGNING_PRIVATE_KEY` and
+   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (consumed by `release.yml`
+   and `desktop.yml`).
+
+If you leave the upstream pubkey/endpoint, your users' apps will
+poll the **upstream** release feed and reject any update you sign
+with a different key.
+
+### 9b. macOS notarization (optional)
+
+`release.yml` signs + notarizes macOS builds only when the six
+`APPLE_*` secrets are present
+(`APPLE_DEVELOPER_ID_CERTIFICATE_BASE64`,
+`APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`,
+`APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`). Without them the
+build still succeeds but ships unsigned — macOS users hit the
+Gatekeeper "damaged" warning until they bypass it.
+
+### 9c. `VITE_API_ORIGIN` for desktop API calls
+
+Desktop builds can't serve relative `/api/` paths (the webview
+origin is `tauri://localhost`), so `src/services/catalogSource.ts`
+rewrites them to an absolute origin — defaulting to
+`https://terraviz.zyra-project.org`. Set the **build-time** env var
+`VITE_API_ORIGIN=https://terraviz.your-org.org` so your desktop app
+talks to **your** backend instead of upstream's. (Web builds ignore
+this — they're already same-origin.)
+
+### 9d. Weblate (translation sync)
+
+`sync-weblate.yml` calls `npm run sync:weblate`, which defaults to
+the upstream Weblate project (`hosted.weblate.org`, project
+`terraviz`, component `app-locales`) and needs a `WEBLATE_TOKEN`
+secret. A fork that doesn't run its own translation pipeline should
+disable this workflow; otherwise it fails on every push to `main`
+for lack of the token. To run your own, set `WEBLATE_TOKEN` and
+override `WEBLATE_URL` / `WEBLATE_PROJECT` / `WEBLATE_COMPONENT` in
+the workflow.
+
+---
+
 ## Common failure modes
 
 ### `/api/ingest` returns 204 but nothing lands in AE
