@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { parseDatasetFromUrl } from './deepLinkService'
 
 describe('parseDatasetFromUrl', () => {
@@ -44,5 +44,35 @@ describe('parseDatasetFromUrl', () => {
 
   it('returns null for empty string', () => {
     expect(parseDatasetFromUrl('')).toBeNull()
+  })
+
+  // Node independence: a fork serving its own domain must recognise
+  // its own /dataset/<id> deep links. The host allowlist derives the
+  // configured host from VITE_API_ORIGIN, so no code edit is needed.
+  describe('forked node host (VITE_API_ORIGIN)', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs()
+    })
+
+    it("recognises the fork's own configured host", () => {
+      vi.stubEnv('VITE_API_ORIGIN', 'https://terraviz.acme-corp.org')
+      expect(
+        parseDatasetFromUrl('https://terraviz.acme-corp.org/dataset/INTERNAL_SOS_321'),
+      ).toBe('INTERNAL_SOS_321')
+      expect(
+        parseDatasetFromUrl('https://terraviz.acme-corp.org/?dataset=INTERNAL_SOS_322'),
+      ).toBe('INTERNAL_SOS_322')
+    })
+
+    it("recognises the fork's own *.pages.dev preview deploys", () => {
+      expect(
+        parseDatasetFromUrl('https://acme-terraviz.pages.dev/dataset/INTERNAL_SOS_654'),
+      ).toBe('INTERNAL_SOS_654')
+    })
+
+    it('still rejects unrelated hosts', () => {
+      vi.stubEnv('VITE_API_ORIGIN', 'https://terraviz.acme-corp.org')
+      expect(parseDatasetFromUrl('https://evil.com/dataset/INTERNAL_SOS_1')).toBeNull()
+    })
   })
 })

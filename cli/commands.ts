@@ -711,6 +711,20 @@ Commands:
   tour update <id> <metadata.json>    Patch tour metadata
   tour preview <id> [--ttl=<seconds>] Mint a short-lived preview URL
 
+  init-node --display-name=<name> --base-url=<url> [--contact=<email>]
+            [--description=<text>]
+            [--public-key=<ed25519:...> | --public-key-file=<path>]
+                                      Provision (or update) this node's identity
+                                      row on the deploy. Run ONCE before
+                                      import-snapshot / publishing — a fresh
+                                      remote deploy has an empty node_identity
+                                      table, which 503s /.well-known and fails
+                                      every publish on origin_node. Reads
+                                      node-public-key.txt (from gen-node-key) by
+                                      default; the key is required on first
+                                      provision. Needs an admin or service-token
+                                      auth (the same token import-snapshot uses).
+
   import-snapshot [--list=<path>] [--enriched=<path>] [--dry-run]
                                       One-shot bulk import of the legacy SOS
                                       catalog snapshot. Idempotent — re-running

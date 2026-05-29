@@ -60,6 +60,7 @@ import {
   getShaderSettings,
   onShaderSettingsChange,
 } from './shaderSettingsService'
+import { EARTH_ASSET_BASE } from '../config/endpoints'
 
 /** Default radius if `options.radius` is omitted — matches the VR view. */
 const DEFAULT_RADIUS = 0.5
@@ -106,7 +107,9 @@ const BASE_EARTH_TEXTURE_URL = '/assets/Earth_Specular_2K.jpg'
  * the previous tier and the visible texture stays at the highest
  * tier that succeeded.
  */
-const EARTH_TEXTURE_BASE = 'https://d3sik7mbbzunjo.cloudfront.net/terraviz/basemaps'
+// Resolved from `VITE_EARTH_ASSET_BASE` (see src/config/endpoints.ts)
+// so a fork can serve the basemap textures from its own host.
+const EARTH_TEXTURE_BASE = EARTH_ASSET_BASE
 const EARTH_DIFFUSE_URLS = [
   `${EARTH_TEXTURE_BASE}/earth_diffuse_2048.jpg`,
   `${EARTH_TEXTURE_BASE}/earth_diffuse_4096.jpg`,

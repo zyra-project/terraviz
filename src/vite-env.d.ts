@@ -16,6 +16,22 @@ interface ImportMetaEnv {
    *  for the kiosk audience. Falls back to `1.0` when unset.
    *  Anything outside the [0.5, 2.0] band is rejected. */
   readonly VITE_DEFAULT_UI_SCALE?: string
+  /** Catalog source: `'node'` (this node's own backend, default) or
+   *  `'legacy'` (the SOS snapshot). See `src/services/catalogSource.ts`. */
+  readonly VITE_CATALOG_SOURCE?: string
+  /** Absolute API origin for desktop (Tauri) builds, which can't use
+   *  relative `/api/` paths. Set to your node's domain for an
+   *  independent fork. See `src/services/catalogSource.ts`. */
+  readonly VITE_API_ORIGIN?: string
+  /** Override the video proxy that resolves legacy `vimeo:` dataset
+   *  refs. See `src/config/endpoints.ts`. */
+  readonly VITE_VIDEO_PROXY_BASE?: string
+  /** Override the caption (`.srt`) CORS proxy. See
+   *  `src/config/endpoints.ts`. */
+  readonly VITE_CAPTION_PROXY_BASE?: string
+  /** Override the Earth basemap-texture host (diffuse / lights /
+   *  normal / borders). See `src/config/endpoints.ts`. */
+  readonly VITE_EARTH_ASSET_BASE?: string
 }
 
 interface ImportMeta {

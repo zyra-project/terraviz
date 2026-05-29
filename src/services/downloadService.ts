@@ -21,10 +21,9 @@ import { dataService } from './dataService'
 import { apiFetch, isManifestUrl } from './catalogSource'
 import { proxyCaptionUrl } from '../utils/captionProxy'
 import { logger } from '../utils/logger'
+import { VIDEO_PROXY_BASE } from '../config/endpoints'
 
 const IS_TAURI = !!(window as any).__TAURI__
-
-const VIDEO_PROXY_BASE = 'https://video-proxy.zyra-project.org/video'
 
 // Hostnames whose URLs we trust as "publisher original" — the
 // Cloudflare Pages origin and any zyra-project.org subdomain we

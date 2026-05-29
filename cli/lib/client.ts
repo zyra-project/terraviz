@@ -102,6 +102,24 @@ export class TerravizClient {
     return this.request<T>('GET', '/api/v1/publish/me')
   }
 
+  /** Read this node's identity row (or `{ identity: null }` on a
+   *  fresh deploy). Backs `terraviz init-node`'s idempotency check. */
+  getNodeIdentity<T = unknown>(): Promise<Result<T>> {
+    return this.request<T>('GET', '/api/v1/publish/node-identity')
+  }
+
+  /** Provision / update this node's identity row. Backs
+   *  `terraviz init-node`. */
+  setNodeIdentity<T = unknown>(body: {
+    display_name: string
+    base_url: string
+    description?: string | null
+    contact_email?: string | null
+    public_key?: string
+  }): Promise<Result<T>> {
+    return this.request<T>('PUT', '/api/v1/publish/node-identity', body)
+  }
+
   list<T = unknown>(query: {
     status?: 'draft' | 'published' | 'retracted'
     limit?: number

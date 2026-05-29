@@ -14,9 +14,12 @@
  * URL like `https://attacker.example/sos.noaa.gov/foo.srt` would
  * have been routed through the proxy too, even though it's not a
  * NOAA URL. Parsing via `URL` and matching on hostname closes that.
+ *
+ * The proxy base is `VITE_CAPTION_PROXY_BASE`-overridable (see
+ * `src/config/endpoints.ts`) so a fork can run its own caption proxy.
  */
 
-const CAPTION_PROXY = 'https://video-proxy.zyra-project.org/captions'
+import { CAPTION_PROXY_BASE } from '../config/endpoints'
 
 /** True when `url` is a well-formed http(s) URL whose hostname is
  * `sos.noaa.gov` or a subdomain. Returns false for any parse error
@@ -39,6 +42,6 @@ export function isSosNoaaCaptionUrl(url: string): boolean {
  * Non-NOAA URLs are returned unchanged. */
 export function proxyCaptionUrl(url: string): string {
   return isSosNoaaCaptionUrl(url)
-    ? `${CAPTION_PROXY}?url=${encodeURIComponent(url)}`
+    ? `${CAPTION_PROXY_BASE}?url=${encodeURIComponent(url)}`
     : url
 }

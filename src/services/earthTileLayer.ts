@@ -44,6 +44,7 @@ import {
   buildAtmosphereRaymarchGlsl,
 } from './atmosphereConstants'
 import { computeTransmittanceLut } from './atmosphereLut'
+import { EARTH_ASSET_BASE } from '../config/endpoints'
 
 // Pick step counts once at module load. The shader source is a
 // top-level constant in this file (compiled when the layer is
@@ -70,9 +71,9 @@ const SPECULAR_MAP_URL = '/assets/Earth_Specular_2K.jpg'
 // uploaded still works, and a bandwidth-constrained client that
 // times out fetching 4K keeps the 2K bump it already has.
 const NORMAL_MAP_URLS = [
-  'https://d3sik7mbbzunjo.cloudfront.net/terraviz/basemaps/earth_normal_2048.jpg',
-  'https://d3sik7mbbzunjo.cloudfront.net/terraviz/basemaps/earth_normal_4096.jpg',
-  'https://d3sik7mbbzunjo.cloudfront.net/terraviz/basemaps/earth_normal_8192.jpg',
+  `${EARTH_ASSET_BASE}/earth_normal_2048.jpg`,
+  `${EARTH_ASSET_BASE}/earth_normal_4096.jpg`,
+  `${EARTH_ASSET_BASE}/earth_normal_8192.jpg`,
 ]
 const CLOUD_TEXTURE_URL = getCloudTextureUrl()
 
