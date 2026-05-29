@@ -170,6 +170,31 @@ GitHub/GitLab and watches for pushes.
 The first deploy will succeed but most backend features won't work
 yet — that's normal. We wire them up in phases below.
 
+> ⚠️ **Pick one deploy path — dashboard Git integration *or* the
+> `ci.yml` GitHub Action, not both.** The repo's
+> `.github/workflows/ci.yml` has a `deploy` job that runs
+> `wrangler pages deploy dist/ --project-name terraviz` on every
+> push to `main`, and `poster.yml` does the same for
+> `terraviz-poster`. On a fresh fork these jobs are wired for the
+> upstream project and will either **fail** (no `CLOUDFLARE_API_TOKEN`
+> / `CLOUDFLARE_ACCOUNT_ID` secret) or, with secrets present,
+> deploy to the **wrong project name**. They also pin the
+> production environment URL to `https://terraviz.zyra-project.org/`.
+>
+> If you use the dashboard "Connect to Git" auto-build above (the
+> simplest path), **delete or disable the `deploy` job in `ci.yml`
+> and `poster.yml`** so you don't get duplicate/competing deploys —
+> keep the `type-check` / `unit-tests` / `build` jobs, which are
+> fork-safe and need no secrets.
+>
+> If instead you prefer the GitHub Action to deploy (Direct Upload),
+> keep the `deploy` job but: (a) set the `CLOUDFLARE_API_TOKEN` and
+> `CLOUDFLARE_ACCOUNT_ID` repo secrets, (b) change every
+> `--project-name terraviz` / `terraviz-poster` to your project
+> names, and (c) update the hardcoded environment URL — then skip
+> the dashboard Git connection so the two paths don't race the same
+> project + commit hash.
+
 ### 2c. Custom domain
 
 Pages → your project → **Custom domains → Set up a custom
