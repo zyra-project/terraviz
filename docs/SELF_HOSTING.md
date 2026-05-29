@@ -55,6 +55,85 @@ video dataset before continuing.
 
 ---
 
+## Phase 1.5 — Fork-specific code & config you must change
+
+Most of the deployment is driven by Cloudflare dashboard bindings
+and env vars (Phases 2–8). But a handful of values are **baked into
+source** and point at the upstream project. None of them break a
+web deploy's same-origin API calls — those use relative `/api/`
+paths and resolve against your own domain automatically — but they
+*do* leave your fork silently dependent on upstream infrastructure,
+or (in the case of `wrangler.toml`) pointed at the **wrong
+database**. Walk this list before your first production deploy.
+
+### `wrangler.toml` carries upstream resource IDs ⚠️
+
+`wrangler.toml` ships the upstream project's **real** D1 database ID
+and KV namespace ID:
+
+| Line | Binding | Value in repo | Action |
+|---|---|---|---|
+| `database_id` (FEEDBACK_DB) | D1 | `78fbe5c3-…` (upstream) | Replace with the ID from your own `wrangler d1 create` (Phase 3a). |
+| `database_id` (CATALOG_DB) | D1 | `78fbe5c3-…` (upstream) | Same physical DB as FEEDBACK_DB — use the **same** new ID. |
+| `id` (TELEMETRY_KILL_SWITCH) | KV | `9c022b12…` (upstream) | Replace with your `wrangler kv namespace create` ID (Phase 3d). |
+| `id` (CATALOG_KV) | KV | `0000…0000` (placeholder) | Replace with your CATALOG_KV namespace ID (Phase 8a). |
+
+This matters because the migration commands in **Phase 3a** and
+**Phase 8b.5** run `wrangler d1 migrations apply sphere-feedback
+--config wrangler.toml`, which resolves the target database through
+the `database_id` in this file. **If you leave the upstream ID in
+place, you are aiming your migrations at a database you don't own**
+(it will fail on auth at best). Update `wrangler.toml` immediately
+after `wrangler d1 create` in Phase 3a, before any
+`migrations apply`. Pages reads its live bindings from the dashboard
+regardless, but the wrangler CLI commands in this guide read
+`wrangler.toml`.
+
+The resource *names* (`sphere-feedback`, `terraviz_events`,
+`terraviz-assets`, `terraviz-datasets`) are yours to keep or rename;
+if you rename, keep the dashboard binding + the override env vars
+(`CATALOG_R2_BUCKET`, etc.) in sync.
+
+### Hardcoded upstream services (no env override — code edit required)
+
+These are read at runtime by the **client** bundle, so a Pages env
+var can't redirect them — you have to edit the source if you want
+off upstream infra:
+
+| What | Where | Default | Impact if unchanged |
+|---|---|---|---|
+| **Video / caption proxy** | `src/services/hlsService.ts`, `src/services/downloadService.ts`, `src/utils/captionProxy.ts` | `https://video-proxy.zyra-project.org` | Every `vimeo:` dataset (the entire SOS video catalog) streams through **upstream's** proxy. Works today, but it's their bandwidth and their uptime. The server-side manifest endpoint honors a `VIDEO_PROXY_BASE` env var; the client constants do not. |
+| **Earth basemap textures** | `src/services/photorealEarth.ts`, `src/services/earthTileLayer.ts`, `src/utils/deviceCapability.ts` | `https://d3sik7mbbzunjo.cloudfront.net/terraviz/basemaps` | The photoreal Earth (VR + Orbit character) and the normal/border-map overlays load from **upstream's CloudFront**. If they ever rotate that bucket, your fork's Earth stack breaks. Mirror the assets to your own bucket/CDN and update the constant to be fully independent. |
+
+The SOS catalog metadata snapshot
+(`s3.…/metadata.sosexplorer.gov/dataset.json` in
+`src/services/dataService.ts`) and the NASA GIBS tile base are
+public NOAA/NASA data sources — fine to keep pointing upstream;
+they aren't Terraviz-owned.
+
+### Branding / identity references (cosmetic, change at leisure)
+
+- `src/ui/creditsPanel.ts` and `docs/PRIVACY.md` link to
+  `github.com/zyra-project/terraviz`. After editing `PRIVACY.md`,
+  run `npm run build:privacy-page` to regenerate
+  `public/privacy.html` (CI's `check:privacy-page` enforces the
+  diff).
+- `src/services/deepLinkService.ts` (~line 71) allowlists
+  `terraviz.zyra-project.org` and `*.terraviz.pages.dev` for deep
+  links — add your own hostname so shared `/dataset/<id>` links
+  resolve.
+- `cli/lib/config.ts` `DEFAULT_SERVER` is `https://terraviz.app`;
+  override per-invocation with `--server` (the doc already does) or
+  edit the default.
+
+### Desktop app (only if you ship Tauri builds)
+
+If you build the desktop app, see the dedicated notes in
+[Phase 9 below](#phase-9--desktop-app-fork-only-if-you-ship-it).
+A web-only Cloudflare fork can ignore this.
+
+---
+
 ## Phase 2 — Cloudflare Pages project
 
 ### 2a. Push your fork to GitHub
