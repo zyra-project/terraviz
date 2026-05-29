@@ -135,6 +135,18 @@ describe('PUT /api/v1/publish/node-identity', () => {
     expect(body.errors.some((e: any) => e.field === 'base_url')).toBe(true)
   })
 
+  it('caps base_url length like the other string fields', async () => {
+    const db = freshDb()
+    const huge = 'https://x.example.org/' + 'a'.repeat(3000)
+    const res = await onRequestPut(
+      putCtx(db, ADMIN, { display_name: 'X', base_url: huge, public_key: VALID_KEY }),
+    )
+    expect(res.status).toBe(400)
+    const body = await bodyOf(res)
+    expect(body.errors.some((e: any) => e.field === 'base_url' && e.code === 'too_long')).toBe(true)
+    expect((db.prepare('SELECT count(*) c FROM node_identity').get() as any).c).toBe(0)
+  })
+
   it('rejects a malformed public_key (wrong prefix / not 32 bytes)', async () => {
     const db = freshDb()
     for (const bad of ['abc123', 'ed25519:abc123', 'ed25519:' + Buffer.alloc(16).toString('base64')]) {

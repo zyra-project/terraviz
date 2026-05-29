@@ -693,13 +693,13 @@ of this writing the directory runs through
 `0016_node_identity_singleton.sql`).
 
 A per-migration canary is whether that file's columns exist. For the
-newest at time of writing (`0015`):
+newest at time of writing (`0016`):
 
 ```sql
-SELECT name FROM pragma_table_info('tours') WHERE name = 'retracted_at';
+SELECT name FROM pragma_table_info('node_identity') WHERE name = 'singleton';
 ```
 
-One row = `0015` is in; zero rows = it (and likely later files)
+One row = `0016` is in; zero rows = it (and likely later files)
 isn't. The same shape works for any migration — substitute the
 table and column it adds.
 

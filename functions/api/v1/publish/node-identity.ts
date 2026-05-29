@@ -126,6 +126,8 @@ export const onRequestPut: PagesFunction<CatalogEnv> = async context => {
   const base_url = typeof b.base_url === 'string' ? b.base_url.trim() : ''
   if (!base_url) {
     errors.push({ field: 'base_url', code: 'required', message: 'base_url is required.' })
+  } else if (base_url.length > MAX_FIELD_LEN) {
+    errors.push({ field: 'base_url', code: 'too_long', message: `base_url exceeds ${MAX_FIELD_LEN} chars.` })
   } else {
     try {
       const u = new URL(base_url)
