@@ -94,22 +94,34 @@ The resource *names* (`sphere-feedback`, `terraviz_events`,
 if you rename, keep the dashboard binding + the override env vars
 (`CATALOG_R2_BUCKET`, etc.) in sync.
 
-### Hardcoded upstream services (no env override — code edit required)
+### Upstream-hosted services — set these for an independent node
 
-These are read at runtime by the **client** bundle, so a Pages env
-var can't redirect them — you have to edit the source if you want
-off upstream infra:
+Two runtime dependencies were historically hardcoded to the
+upstream node's infrastructure. They are now resolved from
+**build-time `VITE_*` env vars** (centralised in
+[`src/config/endpoints.ts`](../src/config/endpoints.ts)), defaulting
+to the upstream URLs so an unconfigured demo fork still works. For a
+node that must stand on its own, set these in Pages → Settings →
+Environment variables (build) **and host the proxy / assets
+yourself**:
 
-| What | Where | Default | Impact if unchanged |
+| Env var | Default | What it is | To be independent |
 |---|---|---|---|
-| **Video / caption proxy** | `src/services/hlsService.ts`, `src/services/downloadService.ts`, `src/utils/captionProxy.ts` | `https://video-proxy.zyra-project.org` | Every `vimeo:` dataset (the entire SOS video catalog) streams through **upstream's** proxy. Works today, but it's their bandwidth and their uptime. The server-side manifest endpoint honors a `VIDEO_PROXY_BASE` env var; the client constants do not. |
-| **Earth basemap textures** | `src/services/photorealEarth.ts`, `src/services/earthTileLayer.ts`, `src/utils/deviceCapability.ts` | `https://d3sik7mbbzunjo.cloudfront.net/terraviz/basemaps` | The photoreal Earth (VR + Orbit character) and the normal/border-map overlays load from **upstream's CloudFront**. If they ever rotate that bucket, your fork's Earth stack breaks. Mirror the assets to your own bucket/CDN and update the constant to be fully independent. |
+| `VITE_VIDEO_PROXY_BASE` | `https://video-proxy.zyra-project.org/video` | Resolves legacy `vimeo:` dataset refs (the SOS video catalog) into HLS/MP4. | Run your own proxy worker and point this at it. (The server-side manifest endpoint already honors `VIDEO_PROXY_BASE` — this is its client-side twin.) Datasets you publish to R2/Stream via the catalog backend don't use it at all. |
+| `VITE_CAPTION_PROXY_BASE` | `https://video-proxy.zyra-project.org/captions` | CORS shim for `sos.noaa.gov` caption `.srt` files. | Same proxy, `/captions` path. |
+| `VITE_EARTH_ASSET_BASE` | `https://d3sik7mbbzunjo.cloudfront.net/terraviz/basemaps` | Earth basemap textures (diffuse / night lights / normal / borders) for the photoreal Earth (VR + Orbit) and 2D globe overlays. | Mirror the texture files to your own bucket/CDN and point this at it. |
+
+If you leave the defaults, your node **functions** but depends on
+upstream's uptime and bandwidth for video playback and the photoreal
+Earth — fine for a quick demo, not for a node meant to run
+independently.
 
 The SOS catalog metadata snapshot
 (`s3.…/metadata.sosexplorer.gov/dataset.json` in
-`src/services/dataService.ts`) and the NASA GIBS tile base are
-public NOAA/NASA data sources — fine to keep pointing upstream;
-they aren't Terraviz-owned.
+`src/services/dataService.ts`), the cloud-texture bucket, and the
+NASA GIBS tile base are third-party **public data sources** shared by
+all nodes — not upstream-Terraviz infrastructure — so they stay
+pointed at NOAA/NASA and need no change.
 
 ### Branding / identity references (cosmetic, change at leisure)
 
@@ -118,13 +130,15 @@ they aren't Terraviz-owned.
   run `npm run build:privacy-page` to regenerate
   `public/privacy.html` (CI's `check:privacy-page` enforces the
   diff).
-- `src/services/deepLinkService.ts` (~line 71) allowlists
-  `terraviz.zyra-project.org` and `*.terraviz.pages.dev` for deep
-  links — add your own hostname so shared `/dataset/<id>` links
-  resolve.
-- `cli/lib/config.ts` `DEFAULT_SERVER` is `https://terraviz.app`;
-  override per-invocation with `--server` (the doc already does) or
-  edit the default.
+- **Deep links resolve automatically** — `parseDatasetFromUrl`
+  recognises your node's own host (derived from `VITE_API_ORIGIN`)
+  plus any `*.pages.dev` preview and `localhost`, so shared
+  `/dataset/<id>` links work on your domain with no edit. (Set
+  `VITE_API_ORIGIN` if you ship desktop builds — see Phase 9.)
+- The `terraviz` **CLI** defaults its server to `https://terraviz.app`
+  but is already independence-ready: override per-invocation with
+  `--server`, the `TERRAVIZ_SERVER` env var, or a persisted
+  `~/.terraviz/config.json`. No edit required.
 
 ### Desktop app (only if you ship Tauri builds)
 
@@ -1125,7 +1139,11 @@ rewrites them to an absolute origin — defaulting to
 `https://terraviz.zyra-project.org`. Set the **build-time** env var
 `VITE_API_ORIGIN=https://terraviz.your-org.org` so your desktop app
 talks to **your** backend instead of upstream's. (Web builds ignore
-this — they're already same-origin.)
+this for API routing — they're already same-origin.)
+
+This same value also drives deep-link host recognition
+(`parseDatasetFromUrl`), so setting it makes your node accept its
+own `/dataset/<id>` links on both web and desktop.
 
 ### 9d. Weblate (translation sync)
 
