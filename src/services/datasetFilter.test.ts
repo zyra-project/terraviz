@@ -6,6 +6,7 @@ import {
   extractYear,
   filterDatasets,
   formatToBucket,
+  makeRecentlyViewedResolver,
   matchesSearchQuery,
   mergeFilterStates,
   parseSearchQuery,
@@ -261,6 +262,31 @@ describe('BASELINE_RESOLVERS.includeSos', () => {
   it('returns false for non-boolean predicates (defensive)', () => {
     const resolve = BASELINE_RESOLVERS.includeSos
     expect(resolve({ kind: 'multi-select', values: ['x'] }, makeDataset({}))).toBe(false)
+  })
+})
+
+describe('makeRecentlyViewedResolver', () => {
+  it('matches datasets whose id is in the visited set', () => {
+    const resolve = makeRecentlyViewedResolver(new Set(['test-1']))
+    expect(resolve({ kind: 'boolean', value: true }, makeDataset({ id: 'test-1' }))).toBe(true)
+    expect(resolve({ kind: 'boolean', value: true }, makeDataset({ id: 'other' }))).toBe(false)
+  })
+
+  it('returns false for non-boolean predicates (defensive)', () => {
+    const resolve = makeRecentlyViewedResolver(new Set(['test-1']))
+    expect(resolve({ kind: 'multi-select', values: ['x'] }, makeDataset({ id: 'test-1' }))).toBe(false)
+  })
+
+  it('matches nothing for an empty visited set', () => {
+    const resolve = makeRecentlyViewedResolver(new Set())
+    expect(resolve({ kind: 'boolean', value: true }, makeDataset({ id: 'test-1' }))).toBe(false)
+  })
+
+  it('composes onto BASELINE_RESOLVERS for filterDatasets', () => {
+    const datasets = [makeDataset({ id: 'a' }), makeDataset({ id: 'b' })]
+    const resolvers = { ...BASELINE_RESOLVERS, recentlyViewed: makeRecentlyViewedResolver(new Set(['b'])) }
+    const out = filterDatasets(datasets, { recentlyViewed: { kind: 'boolean', value: true } }, '', resolvers)
+    expect(out.map(d => d.id)).toEqual(['b'])
   })
 })
 

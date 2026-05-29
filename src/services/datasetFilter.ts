@@ -348,6 +348,26 @@ export const BASELINE_RESOLVERS: Readonly<Record<string, FacetResolver>> = {
   },
 }
 
+/**
+ * Build a resolver for the `recentlyViewed` boolean facet (§9.2).
+ * Closes over the set of dataset ids the user has visited so the
+ * predicate stays "datasetId in visits" while this module stays pure
+ * (no localStorage import — the caller in `browseUI.ts` reads
+ * `visitMemory.getVisitedIds()` and passes the set in, composing the
+ * resolver onto {@link BASELINE_RESOLVERS}).
+ *
+ * The predicate's mere presence (a boolean toggle) is the signal; a
+ * dataset matches when its id is in `visitedIds`. An empty set matches
+ * nothing — but the chip itself is hidden when there's no visit
+ * history, so that degenerate state isn't reachable from the UI.
+ */
+export function makeRecentlyViewedResolver(visitedIds: ReadonlySet<string>): FacetResolver {
+  return (predicate, dataset) => {
+    if (predicate.kind !== 'boolean') return false
+    return visitedIds.has(dataset.id)
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Free-text search
 // ---------------------------------------------------------------------------

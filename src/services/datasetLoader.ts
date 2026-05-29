@@ -17,6 +17,7 @@ import { closeChat } from '../ui/chatUI'
 import type { PlaybackState } from '../ui/playbackController'
 import { updatePlayButton, loadCaptions } from '../ui/playbackController'
 import { startDwell, type DwellHandle } from '../analytics'
+import { recordVisit, addViewSeconds } from './visitMemory'
 import { recommendRelated, normalizeTitle as normalizeRelatedTitle } from './relatedDatasets'
 import { openAddToPlaylistPopover } from '../ui/playlistUI'
 import { openDownloadDialog } from '../ui/downloadDialogUI'
@@ -28,6 +29,30 @@ import { t, tAttr } from '../i18n'
  * dataset change. Tier-gated at emit time, wiring is unconditional. */
 let infoPanelDwellHandle: DwellHandle | null = null
 let infoPanelDwellDatasetId: string | null = null
+
+/**
+ * Stop the active info-panel dwell handle and credit its elapsed
+ * (visibility-paused) time to visit memory's `viewSeconds` for the
+ * dataset it was tracking. Phase 7 §9.2 piggybacks on the dwell
+ * handle's lifecycle rather than running a parallel timer, so the
+ * "only count while the document is visible" semantics come for free
+ * (dwell pauses on tab-hide). Idempotent — a null handle is a no-op.
+ *
+ * Note: the dwell helper's own `pagehide` drain bypasses this wrapper,
+ * so a session that ends with the panel still expanded loses that
+ * final open segment's `viewSeconds`. That's an acceptable rounding
+ * loss for a convenience cache; every collapse / dataset-change /
+ * panel-rebuild commits cleanly.
+ */
+function commitInfoPanelDwell(): void {
+  if (!infoPanelDwellHandle) return
+  if (infoPanelDwellDatasetId) {
+    addViewSeconds(infoPanelDwellDatasetId, infoPanelDwellHandle.elapsed() / 1000)
+  }
+  infoPanelDwellHandle.stop()
+  infoPanelDwellHandle = null
+  infoPanelDwellDatasetId = null
+}
 
 const IS_TAURI = !!(window as any).__TAURI__
 
@@ -448,9 +473,7 @@ export function displayDatasetInfo(
   // before re-rendering. The new dataset's dwell starts fresh on
   // the next expand click.
   if (infoPanelDwellHandle && infoPanelDwellDatasetId !== dataset.id) {
-    infoPanelDwellHandle.stop()
-    infoPanelDwellHandle = null
-    infoPanelDwellDatasetId = null
+    commitInfoPanelDwell()
   }
 
   const e = dataset.enriched
@@ -720,13 +743,14 @@ export function displayDatasetInfo(
     // can split per-dataset reading time without reaching for the
     // session-scoped layer_loaded join.
     if (expanded) {
-      if (infoPanelDwellHandle) infoPanelDwellHandle.stop()
+      if (infoPanelDwellHandle) commitInfoPanelDwell()
       infoPanelDwellHandle = startDwell(`dataset:${dataset.id}`)
       infoPanelDwellDatasetId = dataset.id
+      // §9.2 — record the open as a visit. viewSeconds accrues
+      // separately when the dwell handle is committed on close.
+      recordVisit(dataset.id)
     } else if (infoPanelDwellHandle) {
-      infoPanelDwellHandle.stop()
-      infoPanelDwellHandle = null
-      infoPanelDwellDatasetId = null
+      commitInfoPanelDwell()
     }
   }
   infoHeader.onclick = toggleInfoPanel

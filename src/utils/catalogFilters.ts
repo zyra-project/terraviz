@@ -63,6 +63,7 @@ export const FACET_URL_KEYS: Readonly<Record<string, string>> = {
   hasTour: 'tour',
   includeSos: 'sos',
   geographicRegion: 'gr',
+  recentlyViewed: 'rv',
 }
 
 /** Reverse lookup. Built once at module load. */
@@ -198,7 +199,7 @@ function decodePredicate(facet: string, raw: string): FacetPredicate | null {
   // `true` (defensive, for hand-typed URLs). Anything else
   // (including `0`, `false`, `on`, `yes`) is dropped so a typo
   // can't silently enable the toggle.
-  if (facet === 'hasCaptions' || facet === 'hasTour' || facet === 'includeSos') {
+  if (facet === 'hasCaptions' || facet === 'hasTour' || facet === 'includeSos' || facet === 'recentlyViewed') {
     if (raw === '1' || raw.toLowerCase() === 'true') {
       return { kind: 'boolean', value: true }
     }

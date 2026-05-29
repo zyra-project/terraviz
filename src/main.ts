@@ -19,7 +19,7 @@ import { logger } from './utils/logger'
 import type { AppState, VideoTextureHandle, TourFile, Dataset } from './types'
 
 // Extracted modules
-import { showBrowseUI, hideBrowseUI, collapseBrowseUI, notifyBrowseOpened } from './ui/browseUI'
+import { showBrowseUI, hideBrowseUI, collapseBrowseUI, notifyBrowseOpened, refreshBrowseNewSinceBadge } from './ui/browseUI'
 import { initDownloadUI } from './ui/downloadUI'
 import { initDownloadDialogUI } from './ui/downloadDialogUI'
 import { initPlaylistUI } from './ui/playlistUI'
@@ -64,6 +64,7 @@ import { showTourControls, hideTourControls, hideAllTourTextBoxes, hideAllTourIm
 import { initLegendForDataset, clearLegendCache, loadConfig } from './services/docentService'
 import { isMobile, IS_MOBILE_NATIVE, getCloudTextureUrl } from './utils/deviceCapability'
 import { initDeepLinks } from './services/deepLinkService'
+import { writeLastSession } from './services/visitMemory'
 import { getCatalogMode, setCatalogMode } from './utils/catalogMode'
 import {
   hideCatalogTabs,
@@ -711,6 +712,11 @@ class InteractiveSphere {
   private async loadDatasets(): Promise<void> {
     const datasets = await dataService.fetchDatasets()
     this.appState.datasets = datasets
+    // §9.2 — once the catalog is in hand, light the "new since your
+    // last visit" badge on the Browse trigger if anything was added
+    // after the previous session ended. No-op on a first-ever visit
+    // (no stored lastSession) — fail-closed in countNewSince.
+    refreshBrowseNewSinceBadge(datasets)
   }
 
   /** Load a dataset by ID onto the globe, tearing down any previous video stream first. Uses a generation counter to safely ignore superseded loads. */
@@ -3136,6 +3142,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     void initSession()
     startPerfSampler()
   }
+
+  // §9.2 — stamp the session-end timestamp on pagehide so the next
+  // visit can compute "new since your last visit" and (Phase 7 §9.3)
+  // the returning-user Orbit greeting trigger. This is a synchronous
+  // localStorage write, which is permitted from `pagehide` (unlike
+  // sendBeacon); it rides alongside the analytics session_end flush
+  // but is independent of the telemetry build flag — visit memory is
+  // a local convenience cache, never sent server-side.
+  window.addEventListener('pagehide', () => writeLastSession())
 
   // Non-blocking update check after app is ready
   checkForUpdates()
