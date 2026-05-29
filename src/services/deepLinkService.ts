@@ -10,8 +10,25 @@
  */
 
 import { logger } from '../utils/logger'
+import { getApiOrigin } from './catalogSource'
 
 const IS_TAURI = typeof window !== 'undefined' && !!(window as any).__TAURI__
+
+/**
+ * Hostname this node serves under, derived from the configured API
+ * origin (`VITE_API_ORIGIN`, defaulting to the upstream production
+ * host). A fork that sets `VITE_API_ORIGIN` to its own domain gets
+ * its own `/dataset/<id>` deep links recognised automatically — no
+ * code edit needed for node independence. Resolved lazily so tests
+ * can stub the env / window between cases.
+ */
+function configuredHost(): string | null {
+  try {
+    return new URL(getApiOrigin()).hostname.toLowerCase()
+  } catch {
+    return null
+  }
+}
 
 /**
  * Initialize deep link listening. Call once at app startup.
@@ -66,11 +83,17 @@ export function parseDatasetFromUrl(url: string): string | null {
       if (id && ID_PATTERN.test(id)) return id
     }
 
-    // Path-based: https://terraviz.zyra-project.org/dataset/INTERNAL_SOS_123
-    // Also match *.terraviz.pages.dev preview deploys
-    const isKnownHost = parsed.hostname === 'terraviz.zyra-project.org' ||
-      parsed.hostname.endsWith('.terraviz.pages.dev') ||
-      parsed.hostname === 'localhost'
+    // Path-based: https://<this-node>/dataset/INTERNAL_SOS_123
+    // Accept this node's own configured host (VITE_API_ORIGIN), the
+    // upstream production host, *.pages.dev preview deploys, and
+    // localhost. The configured-host check is what makes a fork's
+    // own deep links resolve without a code edit.
+    const host = parsed.hostname.toLowerCase()
+    const ownHost = configuredHost()
+    const isKnownHost = (ownHost !== null && host === ownHost) ||
+      host === 'terraviz.zyra-project.org' ||
+      host.endsWith('.pages.dev') ||
+      host === 'localhost'
     if (isKnownHost) {
       const pathMatch = parsed.pathname.match(/\/dataset\/([A-Z0-9_]+)/i)
       if (pathMatch) return pathMatch[1]

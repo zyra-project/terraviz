@@ -52,6 +52,7 @@ const EXPECTED_INDEXES = [
   'idx_datasets_updated_at',
   'idx_datasets_visibility',
   'idx_featured_datasets_position',
+  'idx_node_identity_singleton',
   'idx_renditions_dataset',
   'idx_tours_visibility',
 ]

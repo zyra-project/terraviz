@@ -85,7 +85,7 @@ function isTauri(): boolean {
  * non-http(s) values fall back to `DEFAULT_API_ORIGIN` rather
  * than throwing, so a typo can't take desktop builds offline.
  */
-function getApiOrigin(): string {
+export function getApiOrigin(): string {
   const override = (import.meta.env.VITE_API_ORIGIN as string | undefined)?.trim()
   if (!override) return DEFAULT_API_ORIGIN
   try {

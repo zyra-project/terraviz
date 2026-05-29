@@ -40,6 +40,7 @@ import {
   type CommandContext,
 } from './commands'
 import { runImportSnapshot } from './import-snapshot'
+import { runInitNode } from './init-node'
 import { runVerifyDeploy } from './verify-deploy'
 import { runMigrateR2Hls } from './migrate-r2-hls'
 import { runRollbackR2Hls } from './rollback-r2-hls'
@@ -107,6 +108,8 @@ async function main(argv: string[]): Promise<number> {
       return runTour(ctx)
     case 'frames':
       return runFrames(ctx)
+    case 'init-node':
+      return runInitNode(ctx)
     case 'import-snapshot':
       return runImportSnapshot(ctx)
     case 'verify-deploy':

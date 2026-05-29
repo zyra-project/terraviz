@@ -55,6 +55,161 @@ video dataset before continuing.
 
 ---
 
+## Phase 1.5 — Fork-specific code & config you must change
+
+Most of the deployment is driven by Cloudflare dashboard bindings
+and env vars (Phases 2–8). But a handful of values are **baked into
+source** and point at the upstream project. None of them break a
+web deploy's same-origin API calls — those use relative `/api/`
+paths and resolve against your own domain automatically — but they
+*do* leave your fork silently dependent on upstream infrastructure,
+or (in the case of `wrangler.toml`) pointed at the **wrong
+database**. Walk this list before your first production deploy.
+
+### `wrangler.toml` carries upstream resource IDs ⚠️
+
+`wrangler.toml` ships the upstream project's **real** D1 database ID
+and KV namespace ID:
+
+| Line | Binding | Value in repo | Action |
+|---|---|---|---|
+| `database_id` (FEEDBACK_DB) | D1 | `78fbe5c3-…` (upstream) | Replace with the ID from your own `wrangler d1 create` (Phase 3a). |
+| `database_id` (CATALOG_DB) | D1 | `78fbe5c3-…` (upstream) | Same physical DB as FEEDBACK_DB — use the **same** new ID. |
+| `id` (TELEMETRY_KILL_SWITCH) | KV | `9c022b12…` (upstream) | Replace with your `wrangler kv namespace create` ID (Phase 3d). |
+| `id` (CATALOG_KV) | KV | `0000…0000` (placeholder) | Replace with your CATALOG_KV namespace ID (Phase 8a). |
+
+This matters because the migration commands in **Phase 3a** and
+**Phase 8b.5** run `wrangler d1 migrations apply sphere-feedback
+--config wrangler.toml`, which resolves the target database through
+the `database_id` in this file. **If you leave the upstream ID in
+place, you are aiming your migrations at a database you don't own**
+(it will fail on auth at best). Update `wrangler.toml` immediately
+after `wrangler d1 create` in Phase 3a, before any
+`migrations apply`. Pages reads its live bindings from the dashboard
+regardless, but the wrangler CLI commands in this guide read
+`wrangler.toml`.
+
+The resource *names* (`sphere-feedback`, `terraviz_events`,
+`terraviz-assets`, `terraviz-datasets`) are yours to keep or rename;
+if you rename, keep the dashboard binding + the override env vars
+(`CATALOG_R2_BUCKET`, etc.) in sync.
+
+### Upstream-hosted services — when they matter for an independent node
+
+A few runtime dependencies were historically hardcoded to the
+upstream node's infrastructure. They are now resolved from
+**build-time `VITE_*` env vars** (centralised in
+[`src/config/endpoints.ts`](../src/config/endpoints.ts)), defaulting
+to the upstream URLs so an unconfigured demo fork still works.
+
+> **Most new nodes can ignore the two proxies entirely.** The video
+> and caption proxies only serve **legacy SOS catalog data**
+> (`vimeo:` data_refs and `sos.noaa.gov` captions). A node only ever
+> has those refs if it deliberately runs `terraviz import-snapshot`
+> to mirror the upstream SOS catalog. **Content you add through the
+> publisher interface is transcoded to your own R2 / Cloudflare
+> Stream** (`r2:` / `stream:` data_refs) and never touches either
+> proxy. So a publisher-based node is independent of the proxies out
+> of the box — leave the defaults; they simply never fire.
+
+The one knob that *does* affect every node is the Earth basemap
+texture host. Set these in Pages → Settings → Environment variables
+(build):
+
+| Env var | Default | What it is | When you need to change it |
+|---|---|---|---|
+| `VITE_EARTH_ASSET_BASE` | `https://d3sik7mbbzunjo.cloudfront.net/terraviz/basemaps` | Earth basemap textures (diffuse / night lights / normal / borders) for the photoreal Earth (VR + Orbit) and 2D globe overlays — loaded by **every** node. | **Recommended for any independent node.** Mirror the texture files (plain static `.jpg`/`.png`) to your own bucket/CDN and point this at it. |
+| `VITE_VIDEO_PROXY_BASE` | `https://video-proxy.zyra-project.org/video` | Resolves **legacy SOS** `vimeo:` data_refs into HLS/MP4. | Only if you mirror the SOS catalog (`import-snapshot`) **and** want video independent of upstream. The proxy worker is not in this repo — you'd run your own. Not needed for publisher-based nodes. |
+| `VITE_CAPTION_PROXY_BASE` | `https://video-proxy.zyra-project.org/captions` | CORS shim for **legacy SOS** `sos.noaa.gov` caption `.srt` files. | Same as above — SOS-mirror only. Publisher-uploaded captions live in your R2. |
+
+If you mirror the SOS catalog and leave the proxy defaults, video
+playback for those rows depends on upstream's uptime/bandwidth —
+fine for a demo, not for a node meant to run independently. The
+Earth textures depend on upstream's CDN for **every** node until you
+set `VITE_EARTH_ASSET_BASE`.
+
+The SOS catalog metadata snapshot
+(`s3.…/metadata.sosexplorer.gov/dataset.json` in
+`src/services/dataService.ts`), the cloud-texture bucket, and the
+NASA GIBS tile base are third-party **public data sources** shared by
+all nodes — not upstream-Terraviz infrastructure — so they stay
+pointed at NOAA/NASA and need no change.
+
+### Branding / identity references (cosmetic, change at leisure)
+
+- `src/ui/creditsPanel.ts` and `docs/PRIVACY.md` link to
+  `github.com/zyra-project/terraviz`. After editing `PRIVACY.md`,
+  run `npm run build:privacy-page` to regenerate
+  `public/privacy.html` (CI's `check:privacy-page` enforces the
+  diff).
+- **Deep links resolve automatically** — `parseDatasetFromUrl`
+  recognises your node's own host (derived from `VITE_API_ORIGIN`)
+  plus any `*.pages.dev` preview and `localhost`, so shared
+  `/dataset/<id>` links work on your domain with no edit. (Set
+  `VITE_API_ORIGIN` if you ship desktop builds — see Phase 9.)
+- The `terraviz` **CLI** defaults its server to `https://terraviz.app`
+  but is already independence-ready: override per-invocation with
+  `--server`, the `TERRAVIZ_SERVER` env var, or a persisted
+  `~/.terraviz/config.json`. No edit required.
+
+### Desktop app (only if you ship Tauri builds)
+
+If you build the desktop app, see the dedicated notes in
+[Phase 9 below](#phase-9--desktop-app-fork-only-if-you-ship-it).
+A web-only Cloudflare fork can ignore this.
+
+---
+
+## Phase 1.6 — CI/CD on your fork (GitHub Actions)
+
+The `.github/workflows/*.yml` files travel with the code when you
+fork, but **the things that make them run do not**. GitHub never
+copies secrets, variables, or environments to a fork, and on a
+fork created via the GitHub "Fork" button **Actions are disabled
+until you turn them on**. Settle this before your first push so you
+aren't debugging empty-secret failures.
+
+### Three things GitHub does not carry over
+
+1. **Workflow enablement.** Forked repos land with Actions disabled.
+   Go to the **Actions** tab → enable workflows. Scheduled
+   workflows (here, `codeql.yml` runs on a `schedule:`) stay off
+   until you do. (If you instead created a *fresh* repo in your org
+   and `git push`-ed the code, Actions are on by default — but the
+   next two points still apply.)
+2. **Secrets and variables.** Every `secrets.*` / `vars.*`
+   reference is empty until you recreate it under **Settings →
+   Secrets and variables → Actions**.
+3. **Environments.** The deploy jobs reference the `production`,
+   `preview`, `poster-production`, and `poster-preview`
+   environments. Recreate them (Settings → Environments) or disable
+   the jobs that use them.
+
+> A PR opened *from* a fork never receives secrets (GitHub security
+> policy), so fork-PR runs are compile-only by design. Pushes to
+> your own `main` are what exercise the secret-gated jobs.
+
+### What each workflow needs (and what's safe to drop)
+
+| Workflow | Secrets / vars / env it needs | Disable / ignore if… |
+|---|---|---|
+| `ci.yml` — type-check / unit-tests / build | none (auto `GITHUB_TOKEN`) | **keep** — fork-safe, no setup |
+| `ci.yml` — **deploy** job | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`; optional `vars.VITE_DEFAULT_UI_SCALE`; envs `production`/`preview`; **+ rename the `--project-name terraviz`** | you deploy via the Pages dashboard Git integration (then delete this job — see Phase 2) |
+| `poster.yml` | same Cloudflare secrets; envs `poster-production`/`poster-preview`; **+ rename `terraviz-poster`** | you don't ship the poster sub-site |
+| `transcode-hls.yml` | `R2_S3_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `CATALOG_R2_BUCKET`, `TERRAVIZ_SERVER`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` (details in §8e) | you don't use publisher video uploads |
+| `release.yml` / `desktop.yml` | `TAURI_SIGNING_PRIVATE_KEY` (+ `_PASSWORD`), 6× `APPLE_*` (Phase 9) | web-only fork |
+| `sync-weblate.yml` | `WEBLATE_TOKEN` (Phase 9d) | you don't run your own translation pipeline |
+| `codeql.yml`, `mobile.yml` | none | **keep** — fork-safe |
+
+The per-workflow detail lives in the phases referenced above; this
+table is the one-glance checklist so nothing is silently missing.
+Minimum to get a green pipeline on a web-only fork: keep the
+fork-safe jobs, set the two `CLOUDFLARE_*` secrets (or remove the
+deploy job), and disable/delete `transcode-hls.yml`, `release.yml`,
+`desktop.yml`, and `sync-weblate.yml` until you need them.
+
+---
+
 ## Phase 2 — Cloudflare Pages project
 
 ### 2a. Push your fork to GitHub
@@ -90,6 +245,31 @@ GitHub/GitLab and watches for pushes.
 
 The first deploy will succeed but most backend features won't work
 yet — that's normal. We wire them up in phases below.
+
+> ⚠️ **Pick one deploy path — dashboard Git integration *or* the
+> `ci.yml` GitHub Action, not both.** The repo's
+> `.github/workflows/ci.yml` has a `deploy` job that runs
+> `wrangler pages deploy dist/ --project-name terraviz` on every
+> push to `main`, and `poster.yml` does the same for
+> `terraviz-poster`. On a fresh fork these jobs are wired for the
+> upstream project and will either **fail** (no `CLOUDFLARE_API_TOKEN`
+> / `CLOUDFLARE_ACCOUNT_ID` secret) or, with secrets present,
+> deploy to the **wrong project name**. They also pin the
+> production environment URL to `https://terraviz.zyra-project.org/`.
+>
+> If you use the dashboard "Connect to Git" auto-build above (the
+> simplest path), **delete or disable the `deploy` job in `ci.yml`
+> and `poster.yml`** so you don't get duplicate/competing deploys —
+> keep the `type-check` / `unit-tests` / `build` jobs, which are
+> fork-safe and need no secrets.
+>
+> If instead you prefer the GitHub Action to deploy (Direct Upload),
+> keep the `deploy` job but: (a) set the `CLOUDFLARE_API_TOKEN` and
+> `CLOUDFLARE_ACCOUNT_ID` repo secrets, (b) change every
+> `--project-name terraviz` / `terraviz-poster` to your project
+> names, and (c) update the hardcoded environment URL — then skip
+> the dashboard Git connection so the two paths don't race the same
+> project + commit hash.
 
 ### 2c. Custom domain
 
@@ -187,37 +367,68 @@ the latest one. After the redeploy:
 
 ---
 
-## Phase 4 — LLM proxy (optional, enables Orbit chat)
+## Phase 4 — Orbit chat (optional)
 
-Two paths, depending on what LLM you want to use:
+> **Corrected 2026-05.** Earlier revisions of this section described
+> an `LLM_PROVIDER_URL` / `LLM_PROVIDER_KEY` server-side proxy at
+> `functions/api/[[route]].ts`. **That proxy does not exist in the
+> codebase** and those env vars are read by nothing. Orbit's default
+> LLM path is Cloudflare Workers AI, wired through the `AI` binding —
+> there is no external API key to inject. The accurate setup is
+> below.
 
-### 4a. Cloudflare AI Gateway (recommended)
+### 4a. Default path — Cloudflare Workers AI (recommended, zero extra config)
 
-1. Cloudflare dashboard → AI → AI Gateway → **Create Gateway**
-2. Get your gateway URL: `https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/openai`
-3. Pages → Settings → Environment variables (Production):
-   - `LLM_PROVIDER_URL` = the gateway URL above
-   - `LLM_PROVIDER_KEY` = your OpenAI/Anthropic/etc. API key
-4. Redeploy
+Orbit's chat backend is `functions/api/chat/completions.ts`, which
+calls the **`AI`** (Workers AI) binding directly and streams an
+OpenAI-shaped SSE response. `functions/api/models.ts` backs the
+"Test Connection" button. Both rely only on the `AI` binding you
+already wired in **Phase 3b** — once that's attached to Production
+and Preview and you've redeployed, Orbit works with no further
+configuration.
 
-The `functions/api/[[route]].ts` proxy injects the key server-side
-so it never reaches the browser bundle.
+The SPA defaults its Orbit `apiUrl` to the relative `/api`, so on a
+web deploy every chat request is same-origin against your own Pages
+Functions. No API key reaches (or needs to reach) the browser
+bundle, because the default model runs on Cloudflare's edge.
 
-### 4b. Direct API (simpler but key-handling needs care)
+Model selection lives in `MODEL_MAP` inside
+`functions/api/chat/completions.ts` (Llama 3.x / Llama 4 Scout
+variants); the "Reduced functionality" quota guard described in
+Phase 8b kicks in when the Workers AI free-tier neuron budget is
+exhausted.
 
-Same as above without the gateway hop. Set `LLM_PROVIDER_URL` to
-the provider's API endpoint directly.
+> AI Gateway note: the `AI.run()` call accepts a `gateway` option,
+> but the current code does **not** pass one — routing Workers AI
+> through an AI Gateway (for caching / analytics / rate limits) is a
+> code change, not a binding or env var. Don't expect the gateway
+> URL from older docs to do anything on its own.
+
+### 4b. External OpenAI-compatible provider (per-client only)
+
+There is **no server-side proxy** for third-party providers. To
+point Orbit at OpenAI, an OpenAI-compatible gateway, or a hosted
+model, set the **API URL + API key in the running app** under
+Tools → Orbit Settings. On web this is stored in `localStorage`;
+on the Tauri desktop app the key goes to the OS keychain.
+
+Because the key lives in the client, this path is appropriate for a
+single operator's own browser or a desktop install — **not** for a
+shared public deployment, where every visitor would either need
+their own key or share one embedded in their local storage. For a
+public site, stay on the Workers AI path (4a).
 
 ### 4c. Local LLM (Ollama / LM Studio / llama.cpp)
 
-For development only — Pages can't reach `localhost`. Configure in
-the running app via Tools → Orbit Settings → API URL:
+Same client-side mechanism as 4b — Pages can't reach `localhost`,
+so this is a dev / desktop convenience. Configure in the app via
+Tools → Orbit Settings → API URL:
 - Ollama: `http://localhost:11434/v1`
 - LM Studio: `http://localhost:1234/v1`
 - llama.cpp: `http://localhost:8080/v1`
 
-The Tauri desktop app uses the same mechanism but routes through
-the Tauri HTTP plugin to bypass webview CORS.
+The Tauri desktop app routes these through the Tauri HTTP plugin to
+bypass webview CORS.
 
 ---
 
@@ -391,6 +602,9 @@ conceptual framing and points operators at the right tools.
 | `PREVIEW_SIGNING_KEY` | Secret | HMAC-SHA-256 secret for preview-token signing. Without it the preview endpoints fail closed. | The CLI's `terraviz preview` command. |
 | `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` | Plaintext | Cloudflare Access app credentials for `/api/v1/publish/**`. Without them the publisher middleware 503s with `access_unconfigured`. | Publisher API access. |
 | `TRUSTED_PUBLISHER_DOMAINS` | Plaintext (optional) | Comma-separated email domains whose verified Access user logins JIT-provision as `staff/active/admin=1` instead of the default `community/pending`. Required for single-org deploys where the operator IS the publisher (otherwise SSO sign-in lands the operator at `pending` and locks them out of their own deploy). Match is exact, case-insensitive, no subdomain wildcarding. Service tokens are unaffected. | Single-org publisher portal access (Phase 3pa onward). |
+| `R2_PUBLIC_BASE` | Plaintext | Public origin for the catalog R2 bucket (e.g. `https://assets.terraviz.your-org.org`). The manifest endpoint and SPA build playable HLS / image / tour-asset URLs from this. Bind the domain under R2 → bucket → Settings → Connect Domain first. **Not optional for the audit** (see note below). | Serving any R2-hosted asset (Phase 3 onward). |
+| `R2_S3_ENDPOINT` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | Secret | R2 S3-API credentials for server-side presigned PUT minting and digest verification. Minted at R2 → Manage R2 API Tokens (Read+Write on the bucket). The same three values are also consumed shell-side by the migration CLIs and the transcode workflow. | Browser/CLI asset uploads. |
+| `GITHUB_OWNER` / `GITHUB_REPO` / `GITHUB_DISPATCH_TOKEN` | Plaintext / Plaintext / Secret | Point the video-transcode `repository_dispatch` at **your fork** (e.g. `your-org` / `terraviz`). Token is a PAT with `repo`/Contents:write on that repo. Without them video uploads 503 `github_dispatch_unconfigured`. | Video transcode (§8e). |
 
 Every binding must be wired into **both Production and Preview
 environments** in the dashboard. The most common cutover mistake
@@ -398,6 +612,18 @@ is "works on preview, breaks on production" (or vice versa) from
 forgetting the per-environment toggle. The `npm run
 check:pages-bindings` audit (Phase 1f/B) catches this
 automatically — see step 8d below.
+
+> **The audit's source of truth is
+> [`scripts/lib/expected-bindings.ts`](../scripts/lib/expected-bindings.ts),
+> not this table.** It also asserts the Phase 3 analytics/feedback
+> bindings (`FEEDBACK_DB`, `ANALYTICS`, `TELEMETRY_KILL_SWITCH`) in
+> both environments. So `check:pages-bindings` will report
+> `R2_PUBLIC_BASE` and the R2 / GitHub-dispatch entries above as
+> `MISSING` on a deploy that wired only the rows the older table
+> listed — that's expected, not a false positive. Wire the full set
+> (or, if you genuinely don't run uploads/transcode yet, prune the
+> corresponding entries from `expected-bindings.ts` so the audit
+> reflects your deploy's actual surface).
 
 ### 8b. Workers Paid is recommended, not optional
 
@@ -458,15 +684,24 @@ the tracker directly:
 SELECT name, applied_at FROM d1_migrations ORDER BY id;
 ```
 
-A canary for the most recent migration (`0010_non_global_metadata.sql`)
-is whether the new columns exist:
+The authoritative "is everything applied?" check is the
+`wrangler d1 migrations list` command above — it diffs the whole
+`migrations/catalog/` directory against the remote tracker, so it
+stays correct as the directory grows. **Don't hard-code "the latest
+migration is NNNN" anywhere** — the count climbs every release (as
+of this writing the directory runs through
+`0016_node_identity_singleton.sql`).
+
+A per-migration canary is whether that file's columns exist. For the
+newest at time of writing (`0016`):
 
 ```sql
-SELECT name FROM pragma_table_info('datasets')
- WHERE name IN ('bbox_n', 'celestial_body', 'lon_origin');
+SELECT name FROM pragma_table_info('node_identity') WHERE name = 'singleton';
 ```
 
-Three rows = 0010 is in; zero rows = it isn't.
+One row = `0016` is in; zero rows = it (and likely later files)
+isn't. The same shape works for any migration — substitute the
+table and column it adds.
 
 **Dashboard fallback for applying.** If `wrangler` isn't
 installed where you're deploying from, you can paste each
@@ -484,6 +719,86 @@ re-run the same file:
 INSERT INTO d1_migrations (name, applied_at)
 VALUES ('0010_non_global_metadata.sql', CURRENT_TIMESTAMP);
 ```
+
+### 8b.6. Provision the node identity row (remote) ⚠️ required before publishing
+
+The migrations **create** the `node_identity` table but do not
+populate it, and the seed paths are local-only:
+`npm run db:seed` writes through `better-sqlite3` to the
+`.wrangler/` SQLite file, and `npm run gen:node-key` only updates
+the **local** D1's `public_key`. **Neither touches remote D1.** So
+immediately after applying migrations to your production database,
+`node_identity` is empty — and that breaks two things:
+
+- `GET /.well-known/terraviz.json` returns **503
+  `identity_missing`** (its error text says "Run
+  `npm run gen:node-key`", which is misleading — that script doesn't
+  write remote D1).
+- **Every publish and `import-snapshot` row fails.** Dataset inserts
+  set `origin_node` via `(SELECT node_id FROM node_identity LIMIT 1)`,
+  and `datasets.origin_node` is `NOT NULL` — an empty identity table
+  makes that subquery `NULL` and the insert aborts on the constraint.
+
+So provision the row **once**, before §8c. Two ways:
+
+**Recommended — `terraviz init-node`.** Writes the row through the
+publisher API, so it needs only the Cloudflare Access service token
+you already use for `import-snapshot` — no `wrangler` / direct D1
+access, and it works on an empty table (the publisher middleware
+only depends on the `publishers` table). It accepts an admin user or
+a service token.
+
+1. Generate the keypair and set the private-key secret:
+   ```bash
+   npm run gen:node-key
+   # writes node-public-key.txt (the `ed25519:...` line) and prints
+   # the `wrangler pages secret put NODE_ID_PRIVATE_KEY_PEM` step
+   ```
+   Set `NODE_ID_PRIVATE_KEY_PEM` as instructed (both Production and
+   Preview).
+2. Provision the identity with **your node's real values** (not the
+   dev defaults `db:seed` uses — `'Terraviz (dev)'` /
+   `http://localhost:8788`). `init-node` reads `node-public-key.txt`
+   automatically:
+   ```bash
+   npm run terraviz -- init-node \
+     --server https://your-domain \
+     --client-id $CF_ACCESS_CLIENT_ID \
+     --client-secret $CF_ACCESS_CLIENT_SECRET \
+     --display-name "Terraviz — Your Org" \
+     --base-url https://terraviz.your-org.org \
+     --contact ops@your-org.org
+   ```
+   It's idempotent: re-running updates the row in place (preserving
+   `node_id` so existing `origin_node` references stay valid) and
+   keeps the existing key unless you pass a new `--public-key`.
+3. Verify — hit `https://your-domain/.well-known/terraviz.json`; it
+   should return 200 with your identity instead of 503. (`terraviz
+   verify-deploy`'s node-identity check covers this too.)
+
+**Fallback — raw D1 (`wrangler` only).** If you'd rather not mint a
+service token yet, write the row directly:
+
+```bash
+wrangler d1 execute sphere-feedback --remote --config wrangler.toml \
+  --command "INSERT INTO node_identity
+    (node_id, display_name, base_url, description, contact_email, public_key, created_at)
+    VALUES (
+      lower(hex(randomblob(16))),
+      'Terraviz — Your Org',
+      'https://terraviz.your-org.org',
+      'Your org''s Terraviz node.',
+      'ops@your-org.org',
+      'ed25519:PASTE_FROM_node-public-key.txt',
+      strftime('%Y-%m-%dT%H:%M:%fZ','now')
+    )"
+```
+
+> If you later rotate the key with `npm run gen:node-key`, push the
+> new public key to remote D1 too — `npm run terraviz -- init-node
+> … --public-key ed25519:…` (or the `wrangler d1 execute … UPDATE
+> node_identity SET public_key=…` equivalent). The script only
+> updates your local copy.
 
 ### 8c. Run the snapshot import
 
@@ -922,6 +1237,78 @@ operator-config gap this section closes.
 
 ---
 
+## Phase 9 — Desktop app fork (only if you ship it)
+
+The web deploy above is self-contained. If you also intend to ship
+the Tauri desktop app under your own brand, three upstream-pinned
+values need changing — skip this entire phase for a web-only fork.
+
+### 9a. Tauri updater endpoint + signing key
+
+`src-tauri/tauri.conf.json` hardcodes the auto-update feed and the
+public half of the upstream signing key:
+
+```jsonc
+"updater": {
+  "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6…",          // upstream's key
+  "endpoints": [
+    "https://github.com/zyra-project/terraviz/releases/latest/download/latest.json"
+  ]
+}
+```
+
+A fork that builds desktop binaries must:
+
+1. Generate its own key:
+   `npm run tauri signer generate -- -w "<password>"`.
+2. Paste the **public** key into `tauri.conf.json` `pubkey`.
+3. Change `endpoints` to your fork's releases:
+   `https://github.com/<your-org>/<repo>/releases/latest/download/latest.json`.
+4. Set the repo secrets `TAURI_SIGNING_PRIVATE_KEY` and
+   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (consumed by `release.yml`
+   and `desktop.yml`).
+
+If you leave the upstream pubkey/endpoint, your users' apps will
+poll the **upstream** release feed and reject any update you sign
+with a different key.
+
+### 9b. macOS notarization (optional)
+
+`release.yml` signs + notarizes macOS builds only when the six
+`APPLE_*` secrets are present
+(`APPLE_DEVELOPER_ID_CERTIFICATE_BASE64`,
+`APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`,
+`APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`). Without them the
+build still succeeds but ships unsigned — macOS users hit the
+Gatekeeper "damaged" warning until they bypass it.
+
+### 9c. `VITE_API_ORIGIN` for desktop API calls
+
+Desktop builds can't serve relative `/api/` paths (the webview
+origin is `tauri://localhost`), so `src/services/catalogSource.ts`
+rewrites them to an absolute origin — defaulting to
+`https://terraviz.zyra-project.org`. Set the **build-time** env var
+`VITE_API_ORIGIN=https://terraviz.your-org.org` so your desktop app
+talks to **your** backend instead of upstream's. (Web builds ignore
+this for API routing — they're already same-origin.)
+
+This same value also drives deep-link host recognition
+(`parseDatasetFromUrl`), so setting it makes your node accept its
+own `/dataset/<id>` links on both web and desktop.
+
+### 9d. Weblate (translation sync)
+
+`sync-weblate.yml` calls `npm run sync:weblate`, which defaults to
+the upstream Weblate project (`hosted.weblate.org`, project
+`terraviz`, component `app-locales`) and needs a `WEBLATE_TOKEN`
+secret. A fork that doesn't run its own translation pipeline should
+disable this workflow; otherwise it fails on every push to `main`
+for lack of the token. To run your own, set `WEBLATE_TOKEN` and
+override `WEBLATE_URL` / `WEBLATE_PROJECT` / `WEBLATE_COMPONENT` in
+the workflow.
+
+---
+
 ## Common failure modes
 
 ### `/api/ingest` returns 204 but nothing lands in AE
@@ -987,6 +1374,18 @@ the Preview tab (or vice versa). Confirm with `npm run
 check:pages-bindings`; if the `MISSING` row says one environment
 has them and the other doesn't, that's the per-environment
 toggle gotcha from Phase 8a.
+
+### `/.well-known/terraviz.json` 503s, or publishing fails on `origin_node`
+
+The remote `node_identity` table is empty — you applied the
+catalog migrations but never provisioned the identity row.
+Symptoms: `/.well-known/terraviz.json` returns
+503 `identity_missing`, and any publish / `import-snapshot` row
+fails (the dataset insert's `origin_node` subquery returns `NULL`
+against a `NOT NULL` column). The local `db:seed` / `gen:node-key`
+paths do **not** write remote D1. Fix: provision the row per
+**§8b.6** before importing. (The 503's "Run `npm run gen:node-key`"
+hint is misleading — that script only updates your local copy.)
 
 ### Docent suggestions stop showing dataset chips after working briefly
 
@@ -1057,6 +1456,27 @@ domain isn't in `TRUSTED_PUBLISHER_DOMAINS`; see §8g).
 - Open a few `feedback` events yourself with the in-app form so
   you can confirm the admin dashboard at `/api/feedback-admin`
   actually loads behind Access.
+- **Add a Content-Security-Policy.** The app ships **no CSP** in the
+  repo — `src/index.html` has no `<meta>` policy and `public/_headers`
+  sets `X-Content-Type-Options` / `Referrer-Policy` /
+  `Permissions-Policy` but no CSP. The upstream production deploy
+  enforces a strict `connect-src` CSP **at the Cloudflare edge**
+  (dashboard / Transform Rules), so it is **not inherited by a
+  fork**. Your node functions without one, but you should add your
+  own — either an edge rule or a `Content-Security-Policy` line in
+  `public/_headers`. A working starting point needs to allow your
+  own origin plus the external origins the app talks to:
+  - `connect-src`: `'self'`, your video/caption proxy
+    (`VITE_VIDEO_PROXY_BASE` host), `gibs.earthdata.nasa.gov`,
+    `s3.dualstack.us-east-1.amazonaws.com` (SOS snapshot), and your
+    R2 public host if set.
+  - `img-src` / `media-src`: `'self'` `data:` `blob:`, your Earth-asset
+    host (`VITE_EARTH_ASSET_BASE`), the SOS/CloudFront asset hosts,
+    and your R2 public host.
+  - Note the app uses `blob:` (preview tours, screenshots) — omitting
+    it from `connect-src` reproduces the "may not load data from
+    blob:" bug the code comments reference. Test playback, VR, and a
+    tour before locking it down.
 
 If you find something broken or under-documented, please open an
 issue against the upstream repo — half of this doc was written

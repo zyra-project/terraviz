@@ -397,7 +397,7 @@ When you find issues, note:
 - **Presentation poster**: https://poster.terraviz.zyra-project.org — scrollable companion to the [`zyra`](https://noaa-gsl.github.io/zyra/poster/), [`depot-explorer`](https://noaa-gsl.github.io/depot-explorer/), and [`zyra-editor`](https://zyra-project.github.io/zyra-editor/) posters; covers the architecture, AI docent, immersive WebXR, multi-platform delivery, federated catalog, and analytics pipeline. Source under [`poster/`](poster/).
 - **SOS Project**: https://sos.noaa.gov/
 - **Dataset Metadata**: https://s3.dualstack.us-east-1.amazonaws.com/metadata.sosexplorer.gov/dataset.json
-- **Video Proxy**: https://video-proxy.zyra-project.org/video/{VIMEO_ID}
+- **Video Proxy** (legacy SOS `vimeo:` refs only; override per-fork via `VITE_VIDEO_PROXY_BASE`): https://video-proxy.zyra-project.org/video/{VIMEO_ID}
 - **MapLibre GL JS Docs**: https://maplibre.org/maplibre-gl-js/docs/
 - **NASA GIBS**: https://nasa-gibs.github.io/gibs-api-docs/
 - **HLS.js Docs**: https://hlsjs.readthedocs.io/

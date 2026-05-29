@@ -16,6 +16,8 @@
  * mechanical refactor.
  */
 
+import { newUlid } from './ulid'
+
 export interface DatasetRow {
   id: string
   slug: string
@@ -189,6 +191,89 @@ export async function getNodeIdentity(db: D1Database): Promise<NodeIdentityRow |
        FROM node_identity LIMIT 1`,
     )
     .first<NodeIdentityRow>()
+}
+
+export interface NodeIdentityInput {
+  display_name: string
+  base_url: string
+  description?: string | null
+  contact_email?: string | null
+  /** Required on first provision (the column is NOT NULL). On an
+   *  update, omit to keep the existing key. */
+  public_key?: string
+}
+
+/**
+ * Provision or update the single `node_identity` row.
+ *
+ * Migrations create the table but never seed it, and the local
+ * `db:seed` / `gen:node-key` paths only touch the on-disk dev D1 —
+ * so on a remote deploy this row has to be created out-of-band
+ * before `/.well-known/terraviz.json` resolves and before any
+ * publish (dataset inserts read `node_id` from here for the
+ * NOT NULL `origin_node`). This is the server-side primitive behind
+ * the `terraviz init-node` CLI command.
+ *
+ * Idempotent: an existing row is updated in place and its
+ * `node_id` / `created_at` are preserved, so dataset `origin_node`
+ * references stay valid. `public_key` is only overwritten when a new
+ * one is supplied. A fresh provision requires `public_key` (the
+ * column is NOT NULL); the caller validates and surfaces a typed
+ * error before reaching here.
+ */
+export async function upsertNodeIdentity(
+  db: D1Database,
+  input: NodeIdentityInput,
+): Promise<NodeIdentityRow> {
+  const existing = await getNodeIdentity(db)
+  if (existing) {
+    await db
+      .prepare(
+        `UPDATE node_identity
+           SET display_name = ?, base_url = ?, description = ?,
+               contact_email = ?, public_key = ?
+         WHERE node_id = ?`,
+      )
+      .bind(
+        input.display_name,
+        input.base_url,
+        input.description ?? null,
+        input.contact_email ?? null,
+        input.public_key ?? existing.public_key,
+        existing.node_id,
+      )
+      .run()
+  } else {
+    if (!input.public_key) {
+      throw new Error('public_key is required to provision a new node_identity row')
+    }
+    // Guard the insert against a concurrent first-time provision:
+    // only insert when the table is still empty. The `singleton`
+    // UNIQUE index (migration 0016) is the hard backstop; this
+    // `WHERE NOT EXISTS` keeps the idempotent re-run path graceful
+    // (a racing second call inserts nothing and falls through to
+    // return the winning row below) instead of throwing.
+    await db
+      .prepare(
+        `INSERT INTO node_identity
+           (node_id, display_name, base_url, description, contact_email, public_key, created_at)
+         SELECT ?, ?, ?, ?, ?, ?, ?
+         WHERE NOT EXISTS (SELECT 1 FROM node_identity)`,
+      )
+      .bind(
+        newUlid(),
+        input.display_name,
+        input.base_url,
+        input.description ?? null,
+        input.contact_email ?? null,
+        input.public_key,
+        new Date().toISOString(),
+      )
+      .run()
+  }
+  const row = await getNodeIdentity(db)
+  if (!row) throw new Error('node_identity upsert did not produce a row')
+  return row
 }
 
 /**

@@ -184,7 +184,7 @@ CREATE TABLE node_identity (
   contact_email      TEXT,
   public_key         TEXT NOT NULL,           -- Ed25519, base64
   created_at         TEXT NOT NULL
-);
+, singleton INTEGER NOT NULL DEFAULT 1);
 
 CREATE TABLE publishers (
   id              TEXT PRIMARY KEY,           -- ULID
@@ -233,5 +233,6 @@ CREATE INDEX idx_datasets_publisher  ON datasets(publisher_id);
 CREATE INDEX idx_datasets_updated_at ON datasets(updated_at);
 CREATE INDEX idx_datasets_visibility ON datasets(visibility, is_hidden, retracted_at);
 CREATE INDEX idx_featured_datasets_position ON featured_datasets(position);
+CREATE UNIQUE INDEX idx_node_identity_singleton ON node_identity(singleton);
 CREATE INDEX idx_renditions_dataset ON dataset_renditions(dataset_id);
 CREATE INDEX idx_tours_visibility ON tours(visibility, retracted_at, published_at);

@@ -463,7 +463,7 @@ or missing hashing/sanitization of free-text fields.
 ## Deployment
 
 ### Web
-Cloudflare Pages. `functions/api/[[route]].ts` is a Cloudflare Function that proxies LLM API requests server-side so the API key is never in the client bundle.
+Cloudflare Pages. Orbit's default LLM path is Cloudflare Workers AI: `functions/api/chat/completions.ts` runs the `AI` binding edge-side and streams an OpenAI-shaped SSE response (no external API key in the client bundle), with `functions/api/models.ts` backing the "Test Connection" button. External OpenAI-compatible providers are configured client-side only (Tools → Orbit Settings; localStorage / desktop keychain) — there is no server-side `LLM_PROVIDER_*` proxy.
 
 ### Desktop
 Tauri v2. Three CI/CD workflows:
