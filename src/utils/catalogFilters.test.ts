@@ -52,6 +52,14 @@ describe('encodeFilterState', () => {
     expect(params.get('sos')).toBe('1')
   })
 
+  it('round-trips the recentlyViewed boolean facet (§9.2)', () => {
+    const state: FilterState = { recentlyViewed: { kind: 'boolean', value: true } }
+    const params = encodeFilterState(state, '')
+    expect(params.get('rv')).toBe('1')
+    const decoded = decodeFilterState(new URLSearchParams(params.toString()))
+    expect(decoded.state.recentlyViewed).toEqual({ kind: 'boolean', value: true })
+  })
+
   it('encodes range facets as min-max', () => {
     const state: FilterState = {
       dateAdded: { kind: 'range', min: 2018, max: 2024 },

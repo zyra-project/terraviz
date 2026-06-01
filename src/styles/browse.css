@@ -1821,3 +1821,94 @@ body.catalog-empty #map-controls {
         min-width: calc(64px * var(--ui-scale));
     }
 }
+
+/* ---------------------------------------------------------------------------
+   §9.2 Visit memory — Continue-exploring row + new-since badge.
+   Logical inline-axis properties throughout so the row flips in RTL.
+   --------------------------------------------------------------------------- */
+
+.browse-continue {
+    margin-block-end: calc(1rem * var(--ui-scale));
+}
+
+.browse-continue-heading {
+    margin: 0 0 calc(0.5rem * var(--ui-scale));
+    font-size: calc(0.8rem * var(--ui-scale));
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--color-text-secondary);
+}
+
+.browse-continue-row {
+    display: flex;
+    gap: calc(0.6rem * var(--ui-scale));
+    overflow-x: auto;
+    padding-block-end: calc(0.25rem * var(--ui-scale));
+}
+
+.browse-continue-card {
+    display: flex;
+    align-items: center;
+    gap: calc(0.5rem * var(--ui-scale));
+    flex: 0 0 auto;
+    max-inline-size: calc(220px * var(--ui-scale));
+    padding: calc(0.45rem * var(--ui-scale)) calc(0.7rem * var(--ui-scale));
+    background: var(--color-surface-alt);
+    border: 1px solid var(--white-o08);
+    border-radius: calc(8px * var(--ui-scale));
+    color: var(--color-text);
+    cursor: pointer;
+    text-align: start;
+    transition: background 0.15s, border-color 0.15s, transform 0.1s;
+    min-height: max(44px, calc(44px * var(--ui-scale)));
+}
+
+.browse-continue-card:hover,
+.browse-continue-card:focus-visible {
+    background: var(--white-o15);
+    border-color: var(--white-o30);
+}
+
+.browse-continue-card-thumb {
+    flex-shrink: 0;
+    inline-size: calc(32px * var(--ui-scale));
+    block-size: calc(32px * var(--ui-scale));
+    border-radius: calc(4px * var(--ui-scale));
+    object-fit: cover;
+    background: var(--color-surface-alt);
+}
+
+.browse-continue-card-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: calc(0.8rem * var(--ui-scale));
+}
+
+/* New-since badge — a small accent pill overlaid on the Browse
+   trigger's corner. The trigger button positions it via the badge's
+   absolute placement; the button is already a positioned flex
+   container in the tools menu. */
+.tools-menu-browse {
+    position: relative;
+}
+
+.browse-new-badge {
+    position: absolute;
+    inset-block-start: calc(-4px * var(--ui-scale));
+    inset-inline-end: calc(-4px * var(--ui-scale));
+    min-inline-size: calc(16px * var(--ui-scale));
+    block-size: calc(16px * var(--ui-scale));
+    padding-inline: calc(4px * var(--ui-scale));
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: calc(8px * var(--ui-scale));
+    background: var(--color-accent);
+    color: #fff;
+    font-size: calc(0.65rem * var(--ui-scale));
+    font-weight: 700;
+    line-height: 1;
+    pointer-events: none;
+}

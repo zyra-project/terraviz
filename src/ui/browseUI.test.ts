@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { escapeHtml, escapeAttr, showBrowseUI, hideBrowseUI, notifyBrowseOpened, type BrowseCallbacks } from './browseUI'
+import { escapeHtml, escapeAttr, showBrowseUI, hideBrowseUI, notifyBrowseOpened, refreshBrowseNewSinceBadge, type BrowseCallbacks } from './browseUI'
+import { recordVisit, resetVisitsForTests, LAST_SESSION_STORAGE_KEY } from '../services/visitMemory'
 import type { Dataset } from '../types'
 import { resetForTests, __peek } from '../analytics/emitter'
 import { setTier } from '../analytics/config'
@@ -139,6 +140,7 @@ function setupBrowseDOM(): void {
         <div id="browse-view-mode"></div>
         <div id="browse-sort"></div>
       </div>
+      <div id="browse-continue" class="hidden"></div>
       <div id="browse-grid"></div>
       <div id="browse-graph" class="hidden"></div>
       <div id="browse-timeline" class="hidden"></div>
@@ -1479,5 +1481,101 @@ describe('active-filter chip strip + drawer (§6.8 follow-up)', () => {
     // Toggle back to Cards — drawer doesn't apply to Cards view.
     document.querySelector<HTMLElement>('[data-view-mode="cards"]')!.click()
     expect(overlay.classList.contains('filter-drawer-open')).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// §9.2 Visit memory — Continue-exploring row, Recently-viewed chip,
+// new-since badge.
+// ---------------------------------------------------------------------------
+describe('§9.2 visit memory surfaces', () => {
+  beforeEach(() => {
+    setupBrowseDOM()
+    window.history.replaceState(null, '', '/')
+    localStorage.clear()
+    resetVisitsForTests()
+  })
+
+  afterEach(() => {
+    localStorage.clear()
+    resetVisitsForTests()
+  })
+
+  const cat = [
+    makeDataset({ id: 'a', title: 'Alpha', tags: ['Air'] }),
+    makeDataset({ id: 'b', title: 'Bravo', tags: ['Air'] }),
+    makeDataset({ id: 'c', title: 'Charlie', tags: ['Air'] }),
+    makeDataset({ id: 'd', title: 'Delta', tags: ['Air'] }),
+  ]
+
+  it('shows the Continue-exploring row once there are ≥3 resolvable visits', () => {
+    recordVisit('a')
+    recordVisit('b')
+    recordVisit('c')
+    showBrowseUI(cat, makeCallbacks())
+    const host = document.getElementById('browse-continue')!
+    expect(host.classList.contains('hidden')).toBe(false)
+    const cards = host.querySelectorAll('.browse-continue-card')
+    expect(cards).toHaveLength(3)
+    // Newest-first ordering: c, b, a.
+    expect(Array.from(cards).map(c => (c as HTMLElement).dataset.id)).toEqual(['c', 'b', 'a'])
+  })
+
+  it('hides the Continue-exploring row below the 3-visit gate', () => {
+    recordVisit('a')
+    recordVisit('b')
+    showBrowseUI(cat, makeCallbacks())
+    expect(document.getElementById('browse-continue')!.classList.contains('hidden')).toBe(true)
+  })
+
+  it('a Continue-exploring card click loads the dataset', () => {
+    recordVisit('a')
+    recordVisit('b')
+    recordVisit('c')
+    const cbs = makeCallbacks()
+    showBrowseUI(cat, cbs)
+    const card = document.querySelector('.browse-continue-card[data-id="c"]') as HTMLElement
+    card.click()
+    expect(cbs.onSelectDataset).toHaveBeenCalledWith('c')
+  })
+
+  it('renders the Recently-viewed chip only when there is visit history', () => {
+    showBrowseUI(cat, makeCallbacks())
+    expect(document.querySelector('[data-facet="recentlyViewed"]')).toBeNull()
+    // Fresh DOM resets the browseInitialized gate so the rail
+    // re-renders with the now-non-empty visit history.
+    setupBrowseDOM()
+    recordVisit('a')
+    showBrowseUI(cat, makeCallbacks())
+    expect(document.querySelector('[data-facet="recentlyViewed"]')).not.toBeNull()
+  })
+
+  it('the Recently-viewed chip filters the grid to visited rows', () => {
+    recordVisit('a')
+    recordVisit('c')
+    showBrowseUI(cat, makeCallbacks())
+    const chip = document.querySelector('[data-facet="recentlyViewed"]') as HTMLElement
+    chip.click()
+    const ids = Array.from(document.querySelectorAll('#browse-grid .browse-card'))
+      .map(c => (c as HTMLElement).dataset.id)
+      .sort()
+    expect(ids).toEqual(['a', 'c'])
+  })
+
+  it('refreshBrowseNewSinceBadge lights the badge when rows are newer than lastSession', () => {
+    document.body.innerHTML = '<button id="tools-menu-browse"></button>'
+    localStorage.setItem(LAST_SESSION_STORAGE_KEY, '2026-02-01T00:00:00.000Z')
+    refreshBrowseNewSinceBadge([
+      makeDataset({ id: 'x', enriched: { dateAdded: '2026-03-01' } }),
+      makeDataset({ id: 'y', enriched: { dateAdded: '2026-01-01' } }),
+    ])
+    const badge = document.querySelector('#tools-menu-browse .browse-new-badge')
+    expect(badge?.textContent).toBe('1')
+  })
+
+  it('refreshBrowseNewSinceBadge clears the badge on a first-ever visit (no lastSession)', () => {
+    document.body.innerHTML = '<button id="tools-menu-browse"><span class="browse-new-badge">9</span></button>'
+    refreshBrowseNewSinceBadge([makeDataset({ id: 'x', enriched: { dateAdded: '2026-03-01' } })])
+    expect(document.querySelector('#tools-menu-browse .browse-new-badge')).toBeNull()
   })
 })

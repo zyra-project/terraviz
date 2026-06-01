@@ -97,6 +97,7 @@ function buildPanel(): HTMLElement {
         </div>
         <a class="privacy-ui-policy-link" href="/privacy" target="_blank" rel="noopener">${tHtml('privacy.policyLink')}</a>
       </div>
+      <p class="privacy-ui-localnote">${tHtml('privacy.localNote.visitMemory')}</p>
       <div id="privacy-ui-status" class="privacy-ui-status" role="status" aria-live="polite"></div>
     </section>
   `

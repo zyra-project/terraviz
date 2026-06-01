@@ -355,6 +355,11 @@ profiling.
 - On desktop, any offline datasets you download (kept in the app's
   local data folder until you delete them)
 - Your telemetry mode preference
+- **Visit memory** — the datasets you've opened, and roughly how
+  long you spent reading each one. This powers the "Continue
+  exploring" row and the "new since your last visit" badge in the
+  catalog. It is stored only in your browser (localStorage) and is
+  **never sent to our servers**. Clearing site data removes it.
 
 ---
 
