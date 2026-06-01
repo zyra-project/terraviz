@@ -39,11 +39,12 @@ AR/VR headset. SOS-format tours import unchanged and the catalog seeds
 from the SOS dataset library, so your existing work carries over.
 
 This hands-on breakout focuses on what that means for the SOS community.
-Run your own node, publish your own datasets, and have them surface
-across a federated network of peers — your data stays on your hardware,
-no museum partnership or platform handoff required. We'll also demo
-Orbit, an AI docent that loads datasets by conversation (and can run
-offline on a local model), plus side-by-side multi-globe comparison.
+At /publish you fill out a metadata form, upload image stacks or video,
+record a guided tour by flying the camera, and build playlists — then
+run your own node so your datasets surface across a federated network of
+peers, with your data staying on your hardware. We'll also demo Orbit, an
+AI docent that loads datasets by conversation (and can run offline on a
+local model), plus side-by-side multi-globe comparison.
 
 Open the app on your own phone and follow along. We'll close with a group
 discussion: what would you publish to a globe of your own, and where does
@@ -73,11 +74,13 @@ several workshop goals: extending SOS reach beyond the sphere room
 and keep their own data — a concrete path to the community/belonging
 objective and a candidate direction for future NOAA support of SOS.
 
-To be transparent about maturity: streaming the SOS catalog, SOS-format
-tour import, multi-globe, Orbit, and immersive AR/VR are live today, and
-self-hosting a node is documented (SELF_HOSTING.md). The one-click
-publisher portal and authoring CLI are the next milestone rather than
-shipped, and I'll frame them as the roadmap they are.
+To be transparent about maturity: everything I'll demo is live today, not
+a mockup — streaming the SOS catalog, SOS-format tour import, multi-globe,
+Orbit, immersive AR/VR, and the full publishing stack at /publish
+(metadata form, image-stack and video upload, tour recorder, playlist
+editor) plus a companion authoring CLI. Self-hosting a node is documented
+(SELF_HOSTING.md); cross-node peer federation is the part still maturing,
+so I'll present the wider peer network as the direction it's heading.
 
 The core demo is browser-only and needs nothing more than screen share
 with audio and a stable connection; everything else (VR, desktop) is
@@ -101,7 +104,7 @@ before submission; one proposal per presentation)._
 |---|---|---|
 | 0:00–1:30 | Hook | Open terraviz.zyra-project.org live; invite attendees to open it too. "SOS lives in museums — TerraViz puts it on every screen, and lets any site publish to every screen." |
 | 1:30–4:30 | Your SOS work carries over | Stream a familiar SOS dataset; show an SOS-format tour importing unchanged; the catalog seeds from the SOS library. |
-| 4:30–9:30 | Publish & federate | The federation pitch: run your own node, publish your own datasets, peers surface your rows — data stays on your hardware. Self-host is real today; publisher portal/CLI is the roadmap. "NOAA's data is the seed, not the ceiling." |
+| 4:30–9:30 | Publish your own data (live) | Walk the live /publish portal — metadata form, image-stack/video upload, tour recorder, playlist editor — then run your own node so peers surface your rows; data stays on your hardware. Cross-node federation is the maturing edge. "NOAA's data is the seed, not the ceiling." |
 | 9:30–13:30 | Orbit, the AI docent | Ask Orbit a question; it explains the science and loads the dataset by conversation. Note the offline/local-LLM option. (Workshop's AI-in-the-catalog goal.) |
 | 13:30–16:30 | Versatility showcase | Multi-globe comparison (SSP1 vs. SSP5), one codebase across web/desktop/mobile, and an optional VR/AR cameo on a headset. |
 | 16:30–25:00 | Polls + group discussion | See interactivity plan below. |
