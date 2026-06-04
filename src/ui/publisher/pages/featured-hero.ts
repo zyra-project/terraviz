@@ -87,7 +87,7 @@ export async function renderFeaturedHeroPage(
   options: FeaturedHeroPageOptions = {},
 ): Promise<void> {
   const fetchFn = options.fetchFn
-  mount.replaceChildren(el('p', { className: 'publisher-loading', textContent: t('publisher.hero.loading') }))
+  mount.replaceChildren(shell(el('p', { className: 'publisher-loading', textContent: t('publisher.hero.loading') })))
 
   const [meRes, datasetsRes, heroRes] = await Promise.all([
     publisherGet<MeResponse>(ME_ENDPOINT, { fetchFn }),
@@ -95,28 +95,47 @@ export async function renderFeaturedHeroPage(
     publisherGet<HeroResponse>(HERO_PUBLIC_ENDPOINT, { fetchFn }),
   ])
 
-  if (!meRes.ok) {
-    if (meRes.kind === 'session') {
+  // Any of the three fetches failing is a page-level error — render
+  // the error card rather than a partially-functional form (an empty
+  // picker or a wrongly-cleared "no current pin" would mislead the
+  // curator). `me` first so an auth gap surfaces the sign-in path.
+  for (const res of [meRes, datasetsRes, heroRes]) {
+    if (res.ok) continue
+    if (res.kind === 'session') {
       if (handleSessionError({ navigate: options.navigate }) === 'navigating') return
     }
-    mount.replaceChildren(buildErrorCard(meRes.kind === 'session' ? 'session' : 'server'))
+    mount.replaceChildren(shell(buildErrorCard(res.kind === 'session' ? 'session' : 'server')))
     return
   }
+  // After the guard above, all three are ok — narrow the types.
+  if (!meRes.ok || !datasetsRes.ok || !heroRes.ok) return
 
   if (!clientIsPrivileged(meRes.data)) {
     mount.replaceChildren(
-      card(
-        heading(t('publisher.hero.title')),
-        el('p', { className: 'publisher-hero-restricted', textContent: t('publisher.hero.restricted') }),
+      shell(
+        card(
+          heading(t('publisher.hero.title')),
+          el('p', { className: 'publisher-hero-restricted', textContent: t('publisher.hero.restricted') }),
+        ),
       ),
     )
     return
   }
 
-  const datasets = datasetsRes.ok ? datasetsRes.data.datasets : []
-  const currentHero = heroRes.ok ? heroRes.data.hero : null
+  renderForm(mount, {
+    datasets: datasetsRes.data.datasets,
+    currentHero: heroRes.data.hero,
+    fetchFn,
+    navigate: options.navigate,
+  })
+}
 
-  renderForm(mount, { datasets, currentHero, fetchFn, navigate: options.navigate })
+/** Wrap page content in the portal's `<main class="publisher-shell">`
+ *  landmark, matching the other portal pages (see index.ts). */
+function shell(...children: HTMLElement[]): HTMLElement {
+  const m = el('main', { className: 'publisher-shell' })
+  for (const c of children) m.append(c)
+  return m
 }
 
 interface FormState {
@@ -196,11 +215,16 @@ function renderForm(mount: HTMLElement, state: FormState): void {
   // ----- Buttons -----
   const setBtn = el('button', { type: 'button', className: 'publisher-btn publisher-btn-primary', textContent: t('publisher.hero.set') })
   const clearBtn = el('button', { type: 'button', className: 'publisher-btn', textContent: t('publisher.hero.clear') })
-  clearBtn.disabled = !currentHero
+  // Track whether a pin actually exists server-side, updated only on
+  // a confirmed Set/Clear. Clear is enabled iff there's a real pin —
+  // not derived from the (locally-mutable) select value, which would
+  // wrongly enable Clear after a failed Set or a fresh selection.
+  let hasPin = !!currentHero
+  clearBtn.disabled = !hasPin
 
   const setBusy = (busy: boolean): void => {
     setBtn.disabled = busy
-    clearBtn.disabled = busy || (!currentHero && !select.value)
+    clearBtn.disabled = busy || !hasPin
   }
 
   setBtn.addEventListener('click', () => {
@@ -224,12 +248,13 @@ function renderForm(mount: HTMLElement, state: FormState): void {
       { dataset_id: datasetId, window: { start: startIso, end: endIso }, ...(headline ? { headline } : {}) },
       { method: 'PUT', fetchFn: state.fetchFn },
     ).then(res => {
-      setBusy(false)
       if (res.ok) {
+        hasPin = true
+        setBusy(false)
         status.textContent = t('publisher.hero.saved')
-        clearBtn.disabled = false
         return
       }
+      setBusy(false)
       handleWriteError(res, status, state.navigate)
     })
   })
@@ -238,15 +263,16 @@ function renderForm(mount: HTMLElement, state: FormState): void {
     status.textContent = ''
     setBusy(true)
     void publisherSend<unknown>(HERO_WRITE_ENDPOINT, null, { method: 'DELETE', fetchFn: state.fetchFn }).then(res => {
-      setBusy(false)
       if (res.ok || (!res.ok && res.kind === 'not_found')) {
+        hasPin = false
+        setBusy(false)
         status.textContent = t('publisher.hero.cleared')
         select.value = ''
         headlineInput.value = ''
         updatePreview()
-        clearBtn.disabled = true
         return
       }
+      setBusy(false)
       handleWriteError(res, status, state.navigate)
     })
   })
@@ -266,7 +292,7 @@ function renderForm(mount: HTMLElement, state: FormState): void {
     el('div', { className: 'publisher-hero-actions' }, [setBtn, clearBtn]),
     status,
   )
-  mount.replaceChildren(form)
+  mount.replaceChildren(shell(form))
 }
 
 function handleWriteError(

@@ -1514,7 +1514,7 @@ export interface PublisherPortalLoadedEvent extends TelemetryEventBase {
    * routes the publisher portal doesn't define (typo'd URLs,
    * stale bookmarks); the router's notFound handler still emits
    * this event because the visit counts toward portal usage. */
-  route: 'me' | 'datasets' | 'tours' | 'import' | 'unknown'
+  route: 'me' | 'datasets' | 'tours' | 'featured_hero' | 'import' | 'unknown'
 }
 
 /**

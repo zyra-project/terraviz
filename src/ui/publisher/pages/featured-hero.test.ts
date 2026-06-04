@@ -118,4 +118,47 @@ describe('renderFeaturedHeroPage', () => {
     expect(delCall).toBeTruthy()
     expect(mount.querySelector('.publisher-hero-status')?.textContent).toBe('Hero cleared.')
   })
+
+  it('mounts inside a publisher-shell main landmark', async () => {
+    await renderFeaturedHeroPage(mount, { fetchFn: mockFetch(baseRoutes()) })
+    expect(mount.querySelector('main.publisher-shell')).not.toBeNull()
+    // The restricted path also gets the landmark.
+    const r = baseRoutes()
+    r['/api/v1/publish/me'] = { body: { role: 'community', is_admin: false } }
+    mount.replaceChildren()
+    await renderFeaturedHeroPage(mount, { fetchFn: mockFetch(r) })
+    expect(mount.querySelector('main.publisher-shell')).not.toBeNull()
+  })
+
+  it('renders an error card (no form) when a required fetch fails', async () => {
+    const routes = baseRoutes()
+    routes['/api/v1/publish/datasets'] = { status: 500 }
+    await renderFeaturedHeroPage(mount, { fetchFn: mockFetch(routes) })
+    expect(mount.querySelector('.publisher-hero-select')).toBeNull()
+    expect(mount.querySelector('main.publisher-shell')).not.toBeNull()
+  })
+
+  it('keeps Clear disabled after a failed Set (no pin exists)', async () => {
+    const routes = baseRoutes() // hero: null → no pin
+    routes['PUT /api/v1/publish/featured-hero'] = { status: 500 }
+    await renderFeaturedHeroPage(mount, { fetchFn: mockFetch(routes) })
+    const clearBtn = mount.querySelector('.publisher-btn:not(.publisher-btn-primary)') as HTMLButtonElement
+    expect(clearBtn.disabled).toBe(true)
+    ;(mount.querySelector('.publisher-hero-select') as HTMLSelectElement).value = DS
+    ;(mount.querySelector('.publisher-btn-primary') as HTMLButtonElement).click()
+    await flush()
+    expect(clearBtn.disabled).toBe(true) // failed Set must not enable Clear
+  })
+
+  it('enables Clear after a successful Set', async () => {
+    const routes = baseRoutes()
+    routes['PUT /api/v1/publish/featured-hero'] = { body: { hero: { datasetId: DS, window: { start: '', end: '' } } } }
+    await renderFeaturedHeroPage(mount, { fetchFn: mockFetch(routes) })
+    const clearBtn = mount.querySelector('.publisher-btn:not(.publisher-btn-primary)') as HTMLButtonElement
+    expect(clearBtn.disabled).toBe(true)
+    ;(mount.querySelector('.publisher-hero-select') as HTMLSelectElement).value = DS
+    ;(mount.querySelector('.publisher-btn-primary') as HTMLButtonElement).click()
+    await flush()
+    expect(clearBtn.disabled).toBe(false)
+  })
 })

@@ -5,24 +5,27 @@
  *
  * Selection pipeline, highest priority first:
  *
- *   1. Curator override — a valid, in-window entry in the static
- *      `public/featured-now.json` file whose `datasetId` resolves to
- *      a visible catalog row.
+ *   1. Curator override — resolved BACKEND-FIRST: the operator-writable
+ *      `/api/v1/featured-hero` endpoint is consulted first, and only
+ *      when it has no pin (or is unreachable / not deployed) does the
+ *      static `public/featured-now.json` file apply as the fallback
+ *      floor for static-only deploys. The chosen override must be
+ *      in-window and resolve to a visible catalog row.
  *   2. Auto-derived — a real-time-tagged dataset whose `endTime` is
  *      within the last 24 h (the freshest one wins).
  *   3. null — nothing newsworthy. The panel hides entirely; the
  *      catalog never performs liveliness it doesn't have.
  *
- * The override file's `window: { start, end }` is MANDATORY. An
- * override with no window (or a malformed / expired / not-yet-active
- * window) is ignored and the pipeline falls through to auto-derived.
- * This is deliberate: operators must set an end date so a pinned hero
- * can't silently go stale. The file is a plain static asset updated
- * via PR — there is no CMS, admin endpoint, or KV binding.
+ * The override's `window: { start, end }` is MANDATORY for both
+ * sources. An override with no window (or a malformed / expired /
+ * not-yet-active window) is ignored and the pipeline falls through to
+ * auto-derived. This is deliberate: operators must set an end date so
+ * a pinned hero can't silently go stale.
  *
  * Pure-ish module: no DOM, no analytics, no localStorage. The only
- * side effect is a polite fetch of the override file, cached in-memory
- * for {@link OVERRIDE_CACHE_MS}.
+ * side effects are polite fetches of the backend endpoint (cached for
+ * {@link BACKEND_CACHE_MS}) and the static file (cached for
+ * {@link OVERRIDE_CACHE_MS}).
  */
 
 import type { Dataset } from '../types'

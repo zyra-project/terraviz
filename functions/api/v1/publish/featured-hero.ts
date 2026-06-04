@@ -5,7 +5,9 @@
  * PUT    → Set (upsert) the singleton hero override. Body:
  *          `{ dataset_id, window: { start, end }, headline? }`. The
  *          activation window is mandatory (§9.1). 404 if the dataset
- *          doesn't exist; 422 `{ errors }` for body problems.
+ *          doesn't exist; 400 `{ errors }` for body problems (matches
+ *          the rest of the publisher API + the portal client's
+ *          validation-error parsing).
  * DELETE → Clear the hero override. Idempotent — 204 whether a pin
  *          was set or not.
  *
