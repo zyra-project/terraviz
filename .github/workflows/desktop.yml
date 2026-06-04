@@ -63,7 +63,7 @@ jobs:
       # to cut bandwidth roughly in half across the 3-platform
       # matrix. Main-branch pushes still pull LFS because they
       # produce real signed bundles that ship those assets.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           lfs: ${{ github.event_name != 'pull_request' }}
 

@@ -42,7 +42,7 @@ jobs:
     name: Drift guard (build_poster.py)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Re-render poster/index.html
         run: python3 poster/scripts/build_poster.py
       - name: Fail if rendered output drifted
@@ -72,7 +72,7 @@ jobs:
       name: ${{ github.ref == 'refs/heads/main' && 'poster-production' || 'poster-preview' }}
       url: ${{ steps.deploy.outputs.url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # Resolve Git LFS objects so binary assets (screenshots,
           # logos, QR codes, etc.) ship as their real bytes, not as
