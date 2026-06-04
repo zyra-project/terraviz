@@ -38,6 +38,8 @@ export type AuditAction =
   | 'dataset.update'
   | 'dataset.publish'
   | 'dataset.retract'
+  | 'hero.set'
+  | 'hero.clear'
 
 export interface AuditEventInput {
   actor_kind: AuditActorKind

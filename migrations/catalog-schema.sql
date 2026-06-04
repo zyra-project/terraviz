@@ -176,6 +176,18 @@ CREATE TABLE featured_datasets (
   FOREIGN KEY (added_by)   REFERENCES publishers(id)
 );
 
+CREATE TABLE hero_override (
+  id           INTEGER PRIMARY KEY CHECK (id = 1),  -- singleton row
+  dataset_id   TEXT NOT NULL,
+  window_start TEXT NOT NULL,            -- ISO 8601, mandatory (§9.1)
+  window_end   TEXT NOT NULL,            -- ISO 8601, mandatory
+  headline     TEXT,                     -- optional curator headline
+  set_by       TEXT NOT NULL,            -- publishers.id (audit)
+  set_at       TEXT NOT NULL,            -- ISO 8601
+  FOREIGN KEY (dataset_id) REFERENCES datasets(id) ON DELETE CASCADE,
+  FOREIGN KEY (set_by)     REFERENCES publishers(id)
+);
+
 CREATE TABLE node_identity (
   node_id            TEXT PRIMARY KEY,        -- ULID, generated at install
   display_name       TEXT NOT NULL,

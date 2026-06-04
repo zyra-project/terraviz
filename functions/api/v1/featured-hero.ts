@@ -26,11 +26,10 @@
  */
 
 import type { CatalogEnv } from './_lib/env'
-import { getHeroOverride, toPublicHero } from './_lib/hero-override-store'
+import { getHeroOverride, toPublicHero, HERO_CACHE_KEY } from './_lib/hero-override-store'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
 const CACHE_TTL_SECONDS = 60
-export const HERO_CACHE_KEY = 'hero:v1'
 
 function jsonError(status: number, error: string, message: string): Response {
   return new Response(JSON.stringify({ error, message }), {

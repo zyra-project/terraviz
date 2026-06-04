@@ -38,6 +38,7 @@ const EXPECTED_TABLES = [
   'dataset_tags',
   'datasets',
   'featured_datasets',
+  'hero_override',
   'node_identity',
   'publishers',
   'tour_dataset_refs',

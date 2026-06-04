@@ -22,6 +22,22 @@ import type { PublisherRow } from './publisher-store'
  *  stored payload bounded; the UI truncates visually anyway. */
 export const HERO_HEADLINE_MAX_LEN = 120
 
+/** KV key the public `GET /api/v1/featured-hero` caches under. Shared
+ *  with the write routes so a set/clear can bust it for immediate
+ *  effect (the 60 s TTL is the backstop). */
+export const HERO_CACHE_KEY = 'hero:v1'
+
+/** Best-effort bust of the public hero cache after a write. Swallows
+ *  errors — a missed bust just means the change waits out the TTL. */
+export async function bustHeroCache(kv: KVNamespace | undefined): Promise<void> {
+  if (!kv) return
+  try {
+    await kv.delete(HERO_CACHE_KEY)
+  } catch {
+    // TTL is the backstop.
+  }
+}
+
 /** The `hero_override` row as stored. */
 export interface HeroOverrideRow {
   dataset_id: string
