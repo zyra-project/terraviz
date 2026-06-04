@@ -151,3 +151,69 @@ describe('getHeroCandidate', () => {
     expect(res?.dataset.id).toBe('rt')
   })
 })
+
+describe('getHeroCandidate — backend read-through', () => {
+  const recent = new Date(NOW - 60 * 60 * 1000).toISOString()
+  const realtime = ds('rt', { tags: [REAL_TIME_TAG], endTime: recent })
+  const activeWindow = { start: '2026-05-01', end: '2026-07-01' }
+  const expiredWindow = { start: '2026-01-01', end: '2026-02-01' }
+
+  /** Route fetch by URL so the backend endpoint and the static file
+   *  can return different payloads. */
+  function stubRouted(routes: {
+    backend?: { ok?: boolean; body?: unknown }
+    file?: { ok?: boolean; body?: unknown }
+  }): void {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: unknown) => {
+        const isBackend = String(url).includes('featured-hero')
+        const r = isBackend ? routes.backend : routes.file
+        if (!r) return Promise.resolve({ ok: false, json: async () => ({}) })
+        return Promise.resolve({ ok: r.ok ?? true, json: async () => r.body })
+      }),
+    )
+  }
+
+  it('backend override wins over the static file', async () => {
+    stubRouted({
+      backend: { body: { hero: { datasetId: 'feat', window: activeWindow, headline: 'Backend' } } },
+      file: { body: { datasetId: 'other', window: activeWindow } },
+    })
+    const res = await getHeroCandidate([ds('feat'), ds('other'), realtime], { now: NOW })
+    expect(res).toMatchObject({ source: 'override', headline: 'Backend' })
+    expect(res?.dataset.id).toBe('feat')
+  })
+
+  it('falls back to the static file when the backend has no pin', async () => {
+    stubRouted({
+      backend: { body: { hero: null } },
+      file: { body: { datasetId: 'feat', window: activeWindow } },
+    })
+    const res = await getHeroCandidate([ds('feat')], { now: NOW })
+    expect(res?.dataset.id).toBe('feat')
+    expect(res?.source).toBe('override')
+  })
+
+  it('falls back to the static file when the backend is unreachable (503)', async () => {
+    stubRouted({
+      backend: { ok: false },
+      file: { body: { datasetId: 'feat', window: activeWindow } },
+    })
+    const res = await getHeroCandidate([ds('feat')], { now: NOW })
+    expect(res?.dataset.id).toBe('feat')
+  })
+
+  it('an expired backend pin is authoritative — does not consult the file', async () => {
+    // Backend has a pin (expired); file has an active pin. Because the
+    // backend is authoritative when set, the expired pin falls through
+    // to auto-derive rather than to the file.
+    stubRouted({
+      backend: { body: { hero: { datasetId: 'feat', window: expiredWindow } } },
+      file: { body: { datasetId: 'feat', window: activeWindow } },
+    })
+    const res = await getHeroCandidate([ds('feat'), realtime], { now: NOW })
+    expect(res?.source).toBe('auto')
+    expect(res?.dataset.id).toBe('rt')
+  })
+})

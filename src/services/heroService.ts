@@ -37,6 +37,12 @@ export const AUTO_DERIVE_WINDOW_MS = 24 * 60 * 60 * 1000
  *  catalog opens cheap without serving a stale override for long. */
 export const OVERRIDE_CACHE_MS = 5 * 60 * 1000
 
+/** In-memory cache lifetime for the backend hero endpoint. Shorter
+ *  than the static-file cache (60 s vs 5 min) because the whole point
+ *  of the admin store is a seconds-not-minutes "Right now" loop —
+ *  matches the endpoint's own KV TTL. */
+export const BACKEND_CACHE_MS = 60 * 1000
+
 /** The `Real-Time` tag that flags a dataset as auto-derive-eligible. */
 export const REAL_TIME_TAG = 'Real-Time'
 
@@ -47,6 +53,16 @@ function overrideUrl(): string {
     ? import.meta.env.BASE_URL
     : '/'
   return `${base}featured-now.json`
+}
+
+/** The publisher-backend hero endpoint (Phase A of the hero-admin
+ *  track). Operator-writable; read first, with the static file as the
+ *  fallback floor for static-only deploys. */
+function backendUrl(): string {
+  const base = typeof import.meta !== 'undefined' && import.meta.env?.BASE_URL
+    ? import.meta.env.BASE_URL
+    : '/'
+  return `${base}api/v1/featured-hero`
 }
 
 /** The mandatory activation window on a curator override. */
@@ -81,15 +97,29 @@ let overrideCache: { value: HeroOverride | null; fetchedAt: number } = {
   fetchedAt: 0,
 }
 
+/** In-memory cache for the backend hero endpoint. Separate from the
+ *  static-file cache (shorter TTL). */
+let backendCache: { value: HeroOverride | null; fetchedAt: number } = {
+  value: null,
+  fetchedAt: 0,
+}
+
 /**
  * Resolve the hero candidate for `datasets`. Returns null when
  * nothing qualifies (the UI hides the panel). `now` is injectable
  * for tests; defaults to the wall clock.
  *
- * The override fetch is best-effort — a missing or malformed file
- * falls through to auto-derived rather than throwing, so a deploy
- * without `featured-now.json` (or with a hand-broken one) degrades to
- * the auto pipeline instead of breaking the catalog.
+ * Override resolution is **backend-first, static-file-fallback**: the
+ * operator-writable `/api/v1/featured-hero` endpoint is consulted
+ * first, and only when it has no override (or is unreachable / not
+ * deployed) does the static `featured-now.json` apply. The endpoint is
+ * authoritative when it has a pin — the file is a floor for
+ * static-only deploys, not a second curation layer to merge.
+ *
+ * Every fetch is best-effort — a missing/malformed source falls
+ * through to the next, so a deploy without the backend (or without
+ * the file) degrades to the auto pipeline instead of breaking the
+ * catalog.
  */
 export async function getHeroCandidate(
   datasets: readonly Dataset[],
@@ -97,7 +127,8 @@ export async function getHeroCandidate(
 ): Promise<HeroCandidate | null> {
   const now = opts.now ?? Date.now()
 
-  const override = await fetchOverride(opts.signal)
+  const override =
+    (await fetchBackendOverride(opts.signal)) ?? (await fetchOverride(opts.signal))
   if (override) {
     const inWindow = windowIsActive(override.window, now)
     if (inWindow) {
@@ -195,7 +226,39 @@ async function fetchOverride(signal?: AbortSignal): Promise<HeroOverride | null>
   }
 }
 
-/** Test-only — clear the override cache so the next call re-fetches. */
+/**
+ * Fetch + cache the backend hero override. Returns null on any
+ * non-success (no pin set, missing `CATALOG_DB` → 503, network error,
+ * malformed body) so the caller falls through to the static file. The
+ * endpoint returns `{ hero: { datasetId, window, headline? } | null }`;
+ * the raw override is re-sanitised here defensively.
+ */
+async function fetchBackendOverride(signal?: AbortSignal): Promise<HeroOverride | null> {
+  const fresh = Date.now() - backendCache.fetchedAt < BACKEND_CACHE_MS
+  if (fresh && backendCache.fetchedAt !== 0) return backendCache.value
+  try {
+    const res = await fetch(backendUrl(), { signal })
+    if (!res.ok) {
+      backendCache = { value: null, fetchedAt: Date.now() }
+      return null
+    }
+    const parsed = (await res.json()) as { hero?: unknown }
+    const value = sanitizeOverride(parsed?.hero)
+    backendCache = { value, fetchedAt: Date.now() }
+    return value
+  } catch (err) {
+    // AbortError is expected when the catalog closes mid-fetch — don't
+    // poison the cache with it, just bail.
+    if ((err as { name?: string })?.name !== 'AbortError') {
+      logger.warn('[hero] Failed to fetch /api/v1/featured-hero:', err)
+      backendCache = { value: null, fetchedAt: Date.now() }
+    }
+    return null
+  }
+}
+
+/** Test-only — clear both override caches so the next call re-fetches. */
 export function resetHeroCacheForTests(): void {
   overrideCache = { value: null, fetchedAt: 0 }
+  backendCache = { value: null, fetchedAt: 0 }
 }
