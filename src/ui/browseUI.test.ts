@@ -1394,6 +1394,19 @@ describe('active-filter chip strip + drawer (§6.8 follow-up)', () => {
     expect(labels).toContain('Water')
   })
 
+  it('labels the recentlyViewed boolean facet with its localized string, not the raw key', () => {
+    setupBrowseDOM()
+    resetVisitsForTests()
+    recordVisit('a')
+    showBrowseUI([makeDataset({ id: 'a', tags: ['Air'] })], makeCallbacks())
+    ;(document.querySelector('[data-facet="recentlyViewed"]') as HTMLElement).click()
+    const strip = document.getElementById('browse-active-filters')!
+    const chip = strip.querySelector<HTMLElement>('.browse-active-filter-chip')!
+    const label = chip.textContent?.replace('×', '').trim()
+    expect(label).toBe('Recently viewed')
+    expect(label).not.toBe('recentlyViewed')
+  })
+
   it('removes the predicate when an active-filter chip is clicked', () => {
     setupBrowseDOM()
     showBrowseUI([makeDataset({ id: 'a', tags: ['Air'] })], makeCallbacks())

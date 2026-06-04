@@ -2285,6 +2285,7 @@ function booleanFacetLabel(facet: string): string {
     case 'hasCaptions': return t('browse.filter.hasCaptions.label')
     case 'hasTour': return t('browse.filter.hasTour.label')
     case 'includeSos': return t('browse.filter.includeSos.label')
+    case 'recentlyViewed': return t('browse.filter.recentlyViewed.label')
     default: return facet
   }
 }
