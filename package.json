@@ -83,7 +83,7 @@
     "@types/d3-scale": "^4.0.9",
     "@types/d3-selection": "^3.0.11",
     "@types/geojson": "^7946.0.16",
-    "@types/node": "^20.10.0",
+    "@types/node": "^25.9.1",
     "@types/three": "^0.183.1",
     "@vitest/coverage-v8": "^4.1.0",
     "better-sqlite3": "^11.10.0",
