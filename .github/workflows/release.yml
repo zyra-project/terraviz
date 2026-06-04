@@ -82,7 +82,7 @@ jobs:
     steps:
       - name: Resolve or create release
         id: resolve
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const tag = process.env.TAG
