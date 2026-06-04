@@ -50,7 +50,7 @@ jobs:
           # aren't needed for `--debug` validation. Main pushes pull LFS.
           lfs: ${{ github.event_name != 'pull_request' }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -130,7 +130,7 @@ jobs:
         with:
           lfs: ${{ github.event_name != 'pull_request' }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm

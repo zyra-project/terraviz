@@ -79,7 +79,7 @@ jobs:
           # 131-byte pointer files. Mirrors ci.yml's SPA deploy.
           lfs: true
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
 
