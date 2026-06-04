@@ -64,7 +64,7 @@ import { showTourControls, hideTourControls, hideAllTourTextBoxes, hideAllTourIm
 import { initLegendForDataset, clearLegendCache, loadConfig } from './services/docentService'
 import { isMobile, IS_MOBILE_NATIVE, getCloudTextureUrl } from './utils/deviceCapability'
 import { initDeepLinks } from './services/deepLinkService'
-import { writeLastSession } from './services/visitMemory'
+import { recordVisit, writeLastSession } from './services/visitMemory'
 import { getCatalogMode, setCatalogMode } from './utils/catalogMode'
 import {
   hideCatalogTabs,
@@ -784,6 +784,18 @@ class InteractiveSphere {
   ): Promise<void> {
     const dataset = dataService.getDatasetById(datasetId)
     if (!dataset) throw new Error(`Dataset not found: ${datasetId}`)
+
+    // §9.2 — count a user-initiated open as a visit for the
+    // Continue-exploring row. Tours never reach this path (they go
+    // through loadDatasetForTour), so they're excluded for free.
+    // Playlist auto-advance shares the 'url' trigger with deep links,
+    // so exclude it explicitly: an auto-advanced dataset isn't a
+    // deliberate "I opened this" signal. viewSeconds still accrues
+    // separately from info-panel reading time (datasetLoader).
+    const isPlaylistAutoAdvance = trigger === 'url' && getActivePlaylistPlayback() != null
+    if (!isPlaylistAutoAdvance) {
+      recordVisit(dataset.id)
+    }
 
     // Pin the target slot + its renderer once, at the very start. Both
     // must stay fixed for the lifetime of this call — the awaits below

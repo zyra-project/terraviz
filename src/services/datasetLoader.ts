@@ -17,7 +17,7 @@ import { closeChat } from '../ui/chatUI'
 import type { PlaybackState } from '../ui/playbackController'
 import { updatePlayButton, loadCaptions } from '../ui/playbackController'
 import { startDwell, type DwellHandle } from '../analytics'
-import { recordVisit, addViewSeconds } from './visitMemory'
+import { addViewSeconds } from './visitMemory'
 import { recommendRelated, normalizeTitle as normalizeRelatedTitle } from './relatedDatasets'
 import { openAddToPlaylistPopover } from '../ui/playlistUI'
 import { openDownloadDialog } from '../ui/downloadDialogUI'
@@ -746,9 +746,9 @@ export function displayDatasetInfo(
       if (infoPanelDwellHandle) commitInfoPanelDwell()
       infoPanelDwellHandle = startDwell(`dataset:${dataset.id}`)
       infoPanelDwellDatasetId = dataset.id
-      // §9.2 — record the open as a visit. viewSeconds accrues
-      // separately when the dwell handle is committed on close.
-      recordVisit(dataset.id)
+      // §9.2 — the visit itself is recorded at dataset-load time (see
+      // main.ts displayDataset). Expanding the info panel only accrues
+      // viewSeconds, committed when the dwell handle closes.
     } else if (infoPanelDwellHandle) {
       commitInfoPanelDwell()
     }
