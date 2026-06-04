@@ -1578,4 +1578,19 @@ describe('§9.2 visit memory surfaces', () => {
     refreshBrowseNewSinceBadge([makeDataset({ id: 'x', enriched: { dateAdded: '2026-03-01' } })])
     expect(document.querySelector('#tools-menu-browse .browse-new-badge')).toBeNull()
   })
+
+  it('restores the default Browse label when the badge clears (no stale aria-label)', () => {
+    document.body.innerHTML = '<button id="tools-menu-browse"></button>'
+    const btn = document.getElementById('tools-menu-browse')!
+    // Light the badge (count 1) — the button takes the "{n} new" label.
+    localStorage.setItem(LAST_SESSION_STORAGE_KEY, '2026-02-01T00:00:00.000Z')
+    refreshBrowseNewSinceBadge([makeDataset({ id: 'x', enriched: { dateAdded: '2026-03-01' } })])
+    const newLabel = btn.getAttribute('aria-label')
+    expect(newLabel).toContain('1')
+    // Clearing (no lastSession) must reset the label, not leave it stale.
+    localStorage.removeItem(LAST_SESSION_STORAGE_KEY)
+    refreshBrowseNewSinceBadge([makeDataset({ id: 'x', enriched: { dateAdded: '2026-03-01' } })])
+    expect(btn.getAttribute('aria-label')).not.toBe(newLabel)
+    expect(btn.getAttribute('title')).toBe(btn.getAttribute('aria-label'))
+  })
 })

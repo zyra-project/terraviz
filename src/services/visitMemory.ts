@@ -54,8 +54,11 @@ export interface VisitEntry {
    *  and LRU eviction. */
   lastVisit: string
   /** Total visible reading time accrued across every session, in
-   *  whole seconds. Accumulates — opening the same dataset in two
-   *  sessions sums both dwell durations. */
+   *  seconds. May be fractional — durations come from the dwell
+   *  handle's millisecond `elapsed()` divided by 1000, and are
+   *  summed rather than rounded per-add so repeated short reads
+   *  don't lose precision to rounding. Consumers that want a whole
+   *  number should round at the point of display. */
   viewSeconds: number
 }
 

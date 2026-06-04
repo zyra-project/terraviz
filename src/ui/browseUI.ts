@@ -94,9 +94,15 @@ export function refreshBrowseNewSinceBadge(datasets: readonly Dataset[]): void {
   if (!btn) return
   const count = countNewSince(datasets, getLastSession())
   const existing = btn.querySelector('.browse-new-badge')
+  // The default accessible name for the Browse trigger — restored
+  // whenever the badge clears so the button can't keep announcing a
+  // stale "{n} new since your last visit" from a prior non-zero run.
+  const defaultLabel = t('tools.browse.aria')
   if (count <= 0) {
     existing?.remove()
     btn.removeAttribute('data-new-since')
+    btn.setAttribute('aria-label', defaultLabel)
+    btn.setAttribute('title', defaultLabel)
     return
   }
   const label = t('browse.newSince.badge', { count: formatNumber(count) })
