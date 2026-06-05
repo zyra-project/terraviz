@@ -227,8 +227,10 @@ yet — that's normal. We wire them up in the steps below.
 > `terraviz-poster`. On a fresh fork these jobs are wired for the
 > upstream project and will either **fail** (no `CLOUDFLARE_API_TOKEN`
 > / `CLOUDFLARE_ACCOUNT_ID` secret) or, with secrets present,
-> deploy to the **wrong project name**. They also pin the
-> production environment URL to `https://terraviz.zyra-project.org/`.
+> deploy to the **wrong project name**. The production
+> environment URL shown in GitHub's Deployments UI is sourced
+> from the `TERRAVIZ_SERVER` **Variable** (Settings → Variables) —
+> unset on a fresh fork, it renders no link, which is harmless.
 >
 > If you use the dashboard "Connect to Git" auto-build above (the
 > simplest path), **delete or disable the `deploy` job in `ci.yml`
@@ -240,9 +242,13 @@ yet — that's normal. We wire them up in the steps below.
 > keep the `deploy` job but: (a) set the `CLOUDFLARE_API_TOKEN` and
 > `CLOUDFLARE_ACCOUNT_ID` repo secrets, (b) change every
 > `--project-name terraviz` / `terraviz-poster` to your project
-> names, and (c) update the hardcoded environment URL — then skip
-> the dashboard Git connection so the two paths don't race the same
-> project + commit hash.
+> names, and (c) set the `TERRAVIZ_SERVER` **Variable** to your
+> production hostname (e.g. `https://terraviz.your-org.org`) so the
+> Deployments link points at your site — note this is a *Variable*,
+> not the `TERRAVIZ_SERVER` secret used by `transcode-hls.yml`,
+> because the `secrets` context isn't allowed in `environment.url`.
+> Then skip the dashboard Git connection so the two paths don't race
+> the same project + commit hash.
 
 ### 4c. Custom domain
 

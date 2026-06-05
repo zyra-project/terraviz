@@ -10,6 +10,7 @@
  */
 
 import { logger } from '../utils/logger'
+import { getApiOrigin } from './catalogSource'
 
 export interface ShareData {
   title: string
@@ -59,6 +60,9 @@ export async function shareDataset(data: ShareData): Promise<boolean> {
  * Build a shareable URL for a dataset.
  */
 export function buildDatasetShareUrl(datasetId: string): string {
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://terraviz.zyra-project.org'
+  // Prefer the live page origin; fall back to the configured API
+  // origin (VITE_API_ORIGIN, defaulting upstream) when `window` is
+  // absent (SSR / tests) so a fork's share links carry its own host.
+  const origin = typeof window !== 'undefined' ? window.location.origin : getApiOrigin()
   return `${origin}/dataset/${encodeURIComponent(datasetId)}`
 }

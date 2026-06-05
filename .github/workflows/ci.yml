@@ -88,7 +88,17 @@ jobs:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork)
     environment:
       name: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
-      url: ${{ github.ref == 'refs/heads/main' && 'https://terraviz.zyra-project.org/' || '' }}
+      # Production URL shown in GitHub's Deployments UI / the PR
+      # "deployed" badge. Cosmetic only — does not affect where
+      # wrangler deploys (that's --project-name below). Sourced from
+      # the TERRAVIZ_SERVER *Variable* so forks pick up their own
+      # hostname without editing this file. NOTE: the `secrets` context
+      # is not available in `environment.url` (GitHub rejects it), so
+      # this must be a Variable (Settings → Variables, repo or the
+      # `production` Environment), not the secret transcode-hls.yml
+      # reads. Set it to the same value, e.g. https://terraviz.test.gsl.noaa.gov.
+      # Unset → '' (no link rendered).
+      url: ${{ github.ref == 'refs/heads/main' && vars.TERRAVIZ_SERVER || '' }}
     steps:
       - uses: actions/checkout@v4
         with:

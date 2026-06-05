@@ -18,7 +18,7 @@
 
 import type { Dataset } from '../types'
 import { dataService } from './dataService'
-import { apiFetch, isManifestUrl } from './catalogSource'
+import { apiFetch, isManifestUrl, getApiOrigin } from './catalogSource'
 import { proxyCaptionUrl } from '../utils/captionProxy'
 import { logger } from '../utils/logger'
 import { VIDEO_PROXY_BASE } from '../config/endpoints'
@@ -26,22 +26,57 @@ import { VIDEO_PROXY_BASE } from '../config/endpoints'
 const IS_TAURI = !!(window as any).__TAURI__
 
 // Hostnames whose URLs we trust as "publisher original" — the
-// Cloudflare Pages origin and any zyra-project.org subdomain we
-// operate (R2 public buckets bound to custom domains, image
-// transformations served from the main origin, etc.). Subdomains
-// match by suffix. A URL served from any other host falls back to
-// `external` rather than being mislabelled as a publisher source.
+// Cloudflare Pages origin and any subdomain of an operated domain
+// (R2 public buckets bound to custom domains, image transformations
+// served from the main origin, etc.). Subdomains match by suffix. A
+// URL served from any other host falls back to `external` rather
+// than being mislabelled as a publisher source.
+//
+// This static list holds the upstream production domain; a fork's
+// own host is added dynamically by `publisherHosts()` below, so a
+// self-hosted node serving assets from a subdomain of its own domain
+// classifies them as `publisher` without a code edit.
 //
 // Intentionally NOT including the bare `r2.dev` apex — a `*.r2.dev`
 // suffix match would classify every third-party R2 public bucket as
 // our publisher source. Production R2 assets are served via custom
-// domains under `*.zyra-project.org`; the default `*.r2.dev` URL
+// domains under the operated domain; the default `*.r2.dev` URL
 // shouldn't appear in our manifests, and if it does it should
 // classify as `external` until someone explicitly adds the specific
 // bucket subdomain here.
 const PUBLISHER_HOSTS = [
   'zyra-project.org',
 ]
+
+// Loopback / pseudo-hosts that must never be trusted as a publisher
+// suffix: they never appear in a manifest, and a local-dev
+// `VITE_API_ORIGIN=http://localhost:...` would otherwise classify
+// every loopback URL as a publisher source.
+function isLoopbackHost(host: string): boolean {
+  return !host || host === 'localhost' || host.endsWith('.localhost')
+}
+
+// The set of trusted publisher hosts for the running node: the
+// static upstream domain(s) above plus this node's own host. The
+// own-host is derived from the configured API origin (desktop /
+// `VITE_API_ORIGIN`) and, on web, the live page origin — whichever
+// resolves. `localhost` / Tauri webview pseudo-hosts are skipped
+// (see `isLoopbackHost`): they never appear in a manifest and only
+// add noise.
+function publisherHosts(): string[] {
+  const hosts = [...PUBLISHER_HOSTS]
+  try {
+    const apiHost = new URL(getApiOrigin()).hostname.toLowerCase()
+    if (!isLoopbackHost(apiHost)) hosts.push(apiHost)
+  } catch {
+    // getApiOrigin always returns a valid origin, but guard anyway.
+  }
+  if (typeof window !== 'undefined' && window.location?.hostname) {
+    const pageHost = window.location.hostname.toLowerCase()
+    if (!isLoopbackHost(pageHost)) hosts.push(pageHost)
+  }
+  return hosts
+}
 
 // Use Tauri's CORS-free fetch for HEAD probes when available.
 const tauriFetchReady: Promise<typeof globalThis.fetch | null> = IS_TAURI
@@ -218,7 +253,7 @@ export function classifySourceOfTruth(url: string): SourceOfTruth {
   if (host === 'sos.noaa.gov' || host.endsWith('.sos.noaa.gov')) {
     return 'sos'
   }
-  for (const publisher of PUBLISHER_HOSTS) {
+  for (const publisher of publisherHosts()) {
     if (host === publisher || host.endsWith(`.${publisher}`)) return 'publisher'
   }
   return 'external'
