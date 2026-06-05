@@ -1201,12 +1201,15 @@
   color-scheme: dark;
 }
 /* Belt-and-suspenders for the dropdown list: Chrome/Firefox honor
-   option color + background, giving readable contrast even where the
-   color-scheme hint is ignored. A solid (not translucent) background
-   is required so the popup doesn't composite over white. */
+   option color + background. Use SOLID hex literals, not the theme
+   tokens — the portal loads the main app's tokens.css, where
+   --color-surface is a *translucent* near-white overlay
+   (rgba(255,255,255,0.06)) meant to sit on dark surfaces. As an
+   <option> background it composites over the browser's popup and
+   reads white, which was the bug. A solid dark value is unambiguous. */
 .publisher-hero-select option {
-  color: var(--color-text, #f4f7fa);
-  background-color: var(--color-surface, #161b24);
+  color: #f4f7fa;
+  background-color: #161b24;
 }
 .publisher-hero-input:focus-visible,
 .publisher-hero-select:focus-visible {
