@@ -8,7 +8,7 @@
 import type { Dataset, ChatMessage, ChatAction, DocentConfig, LegendCache, MapViewContext, LLMContextSnapshot, ReadingLevel } from '../types'
 import { streamChat, checkAvailability, type AvailabilityResult, type LLMMessage, type LLMContentPart, type LLMToolCall } from './llmProvider'
 import { isAvailable as isAppleIntelligenceAvailable, streamChatLocal } from './appleIntelligenceProvider'
-import { buildSystemPrompt, buildCompressedHistory, buildLanguageReminderMessage, getSearchCatalogTool, getSearchDatasetsTool, getListFeaturedDatasetsTool, getLoadDatasetTool, getLoadFrameTool, getFlyToTool, getSetTimeTool, getFitBoundsTool, getAddMarkerTool, getToggleLabelsTool, getHighlightRegionTool } from './docentContext'
+import { buildSystemPrompt, buildReturningUserBlock, buildCompressedHistory, buildLanguageReminderMessage, getSearchCatalogTool, getSearchDatasetsTool, getListFeaturedDatasetsTool, getLoadDatasetTool, getLoadFrameTool, getFlyToTool, getSetTimeTool, getFitBoundsTool, getAddMarkerTool, getToggleLabelsTool, getHighlightRegionTool, type ReturningUserContext } from './docentContext'
 import { parseIntent, generateResponse, searchDatasets, evaluateAutoLoad } from './docentEngine'
 import { clearDegraded as clearDegradedState, markDegraded as markDegradedState } from './docentDegradedState'
 import { apiFetch } from './catalogSource'
@@ -1269,6 +1269,59 @@ async function* emitValidatedActions(
   }
 }
 
+/** Session guard so the proactive greeting fires at most once per
+ *  launch, no matter how many times catalog mode is (re)opened. */
+let openingTurnFired = false
+
+/** Test-only — reset the once-per-session opening-turn guard. */
+export function resetOpeningTurnForTests(): void {
+  openingTurnFired = false
+}
+
+/** Synthetic instruction that drives the §9.3 opening turn. Never
+ *  shown to the user — the actual greeting wording (and its language)
+ *  comes from the LLM, steered by the returning-user block in the
+ *  system prompt. */
+// i18n-exempt: internal LLM prompt, not user-visible UI text.
+const OPENING_TURN_INSTRUCTION =
+  'Greet me — I just reopened the catalog. Use the returning-visitor context in your system prompt.'
+
+/**
+ * Fire Orbit's proactive opening turn for a returning visitor (§9.3).
+ * Idempotent within a session (refuses to re-trigger). Yields the same
+ * {@link DocentStreamChunk} union as {@link processMessage} so the chat
+ * UI renders it identically to a reply.
+ *
+ * Skips entirely (yields nothing) when the LLM is unconfigured — the
+ * local-engine fallback isn't a good fit for a proactive greeting (it
+ * would feel canned). The caller should also gate on the trigger
+ * conditions (catalog mode + lastSession > 24 h); this guard is the
+ * last line of defence + the once-per-session latch.
+ */
+export async function* triggerOpeningTurn(
+  opts: { datasets: Dataset[]; returning: ReturningUserContext; config?: DocentConfig },
+): AsyncGenerator<DocentStreamChunk> {
+  if (openingTurnFired) return
+  const cfg = opts.config ?? await loadConfigWithKey()
+  if (!cfg.enabled || !cfg.apiUrl) return // skip when LLM unconfigured
+  openingTurnFired = true
+  const block = buildReturningUserBlock(opts.returning)
+  // Delegate to processMessage so the greeting reuses the full LLM
+  // path (streaming, discovery tools, marker → load-chip extraction).
+  // Empty history → turn 0; no current dataset (catalog mode).
+  yield* processMessage(
+    OPENING_TURN_INSTRUCTION,
+    [],
+    opts.datasets,
+    null,
+    cfg,
+    null,
+    undefined,
+    undefined,
+    block,
+  )
+}
+
 export async function* processMessage(
   input: string,
   history: ChatMessage[],
@@ -1278,6 +1331,7 @@ export async function* processMessage(
   screenshotDataUrl?: string | null,
   viewContext?: string,
   mapViewContext?: MapViewContext | null,
+  returningUserBlock?: string | null,
 ): AsyncGenerator<DocentStreamChunk> {
   const cfg = config ?? await loadConfigWithKey()
 
@@ -1353,6 +1407,7 @@ export async function* processMessage(
       !visionActive ? currentTime : null,
       qaContext || null,
       mapViewContext,
+      returningUserBlock ?? null,
     )
 
     if (cfg.debugPrompt) {

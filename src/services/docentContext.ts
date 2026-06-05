@@ -135,6 +135,42 @@ Respond at a professional/graduate science level. Use precise scientific termino
  * `datasets` is still passed in for the (currently unused) categorySummary
  * helper that other surfaces consume; the prompt itself ignores it.
  */
+/** Context for a returning-visitor greeting (§9.3). All fields come
+ *  from local visit memory — never sent server-side except as this
+ *  prompt block to the configured LLM. */
+export interface ReturningUserContext {
+  /** Whole days since the previous session end. */
+  daysSince: number
+  /** Titles of catalog datasets added since the last visit (capped). */
+  newSinceTitles: readonly string[]
+  /** Titles of datasets the user recently opened (capped). */
+  recentTitles: readonly string[]
+}
+
+/**
+ * Build the returning-user context block prepended to the turn-0
+ * system prompt when the §9.3 greeting trigger fires. Pure string
+ * builder — the caller decides whether to include it (cost discipline:
+ * don't compose it when the trigger doesn't fire). Lines with no data
+ * are omitted so the LLM isn't told "New datasets since: 0".
+ */
+export function buildReturningUserBlock(ctx: ReturningUserContext): string {
+  const lines: string[] = ['You are greeting a returning visitor. Context:']
+  lines.push(`  Last visited: about ${ctx.daysSince} day${ctx.daysSince === 1 ? '' : 's'} ago`)
+  if (ctx.newSinceTitles.length > 0) {
+    lines.push(`  New datasets since their last visit: ${ctx.newSinceTitles.length} (e.g. ${ctx.newSinceTitles.join('; ')})`)
+  }
+  if (ctx.recentTitles.length > 0) {
+    lines.push(`  Recently viewed by this user: ${ctx.recentTitles.join('; ')}`)
+  }
+  lines.push(
+    'Open with one short, warm paragraph welcoming them back, then offer ONE or TWO concrete next steps (a new dataset to try, returning to something they viewed, or a guided tour). ' +
+    'Do not list everything — pick a highlight. ' +
+    'When you name a dataset, you MUST still confirm its id via a discovery tool (or the [RELEVANT DATASETS] block) before emitting a <<LOAD:...>> marker — the titles above are context, not valid ids.',
+  )
+  return lines.join('\n')
+}
+
 export function buildSystemPrompt(
   _datasets: Dataset[],
   currentDataset: Dataset | null,
@@ -144,6 +180,7 @@ export function buildSystemPrompt(
   currentTime?: string | null,
   qaContext?: string | null,
   mapViewContext?: Parameters<typeof buildViewContextSection>[0],
+  returningUserBlock?: string | null,
 ): string {
   const currentContext = buildCurrentDatasetContext(currentDataset, legendDescription, currentTime)
   const languagePreface = buildLanguagePreface()
@@ -152,7 +189,7 @@ export function buildSystemPrompt(
   return `${languagePreface}You are Orbit, a Digital Docent for Science on a Sphere — an interactive 3D globe that visualizes Earth science datasets from NOAA.
 
 Your role is to be a warm, knowledgeable guide. You help visitors explore and understand environmental data by explaining what they're seeing and recommending relevant datasets to load onto the globe.
-
+${returningUserBlock ? `\n${returningUserBlock}\n` : ''}
 IMPORTANT: All datasets are GLOBAL — they cover the entire Earth, rendered on a 3D sphere. The user's current view only shows one side of the globe, but the data extends everywhere. Never say a dataset "only shows" one region or "doesn't cover" a location. The user can rotate the globe or use <<FLY:...>> to view any part of the world.
 
 ## STRICT RULES — FOLLOW EXACTLY

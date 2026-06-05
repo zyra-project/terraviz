@@ -10,7 +10,8 @@ import type { ChatMessage, ChatAction, ChatSession, DocentConfig, MapViewContext
 import type { Dataset } from '../types'
 import { escapeHtml, escapeAttr } from './domUtils'
 import { createMessageId } from '../services/docentEngine'
-import { processMessage, loadConfig, loadConfigWithKey, saveConfig, testConnection, getDefaultConfig, isLocalDev, IS_TAURI, captureViewContext } from '../services/docentService'
+import { processMessage, triggerOpeningTurn, loadConfig, loadConfigWithKey, saveConfig, testConnection, getDefaultConfig, isLocalDev, IS_TAURI, captureViewContext } from '../services/docentService'
+import type { ReturningUserContext } from '../services/docentContext'
 import {
   getDegradedReason,
   subscribe as subscribeDegraded,
@@ -362,6 +363,8 @@ function restoreSession(): void {
     if (raw) {
       const session: ChatSession = JSON.parse(raw)
       messages = session.messages ?? []
+    } else {
+      messages = []
     }
   } catch {
     messages = []
@@ -910,6 +913,101 @@ async function handleSend(): Promise<void> {
   callbacks.announce(t('chat.announce.docentResponded'))
 }
 
+/** localStorage flag — set after the first proactive greeting shows
+ *  its disclosure footnote, so subsequent greetings omit it (§9.3). */
+const GREETING_DISCLOSED_KEY = 'sos-orbit-greeting-disclosed.v1'
+
+function greetingAlreadyDisclosed(): boolean {
+  try {
+    return localStorage.getItem(GREETING_DISCLOSED_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function markGreetingDisclosed(): void {
+  try {
+    localStorage.setItem(GREETING_DISCLOSED_KEY, '1')
+  } catch {
+    /* private mode / quota — degrade by re-showing the footnote */
+  }
+}
+
+/**
+ * §9.3 — play Orbit's proactive returning-user greeting: open the chat
+ * and stream a turn-0 message (no user input). No-ops when the LLM is
+ * unconfigured (so we don't open an empty panel), when a conversation
+ * is already underway, or when a stream is in flight. The one-time
+ * disclosure footnote attaches to the first greeting only.
+ */
+export async function playReturningGreeting(returning: ReturningUserContext): Promise<void> {
+  if (!callbacks || isStreaming) return
+  // Don't inject a greeting into an existing conversation, and skip
+  // when the LLM is unconfigured (the local engine would feel canned).
+  if (messages.some((m) => m.role === 'user')) return
+  const cfg = loadConfig()
+  if (!cfg.enabled || !cfg.apiUrl) return
+
+  openChat()
+  const docentMsg: ChatMessage = {
+    id: createMessageId(),
+    role: 'docent',
+    text: '',
+    actions: [],
+    timestamp: Date.now(),
+  }
+  messages.push(docentMsg)
+  isStreaming = true
+  showTyping()
+  setSendEnabled(false)
+
+  try {
+    const stream = triggerOpeningTurn({ datasets: callbacks.getDatasets(), returning })
+    let firstChunk = true
+    for await (const chunk of stream) {
+      if (firstChunk && chunk.type !== 'done') {
+        hideTyping()
+        firstChunk = false
+      }
+      if (chunk.type === 'delta') {
+        docentMsg.text += chunk.text
+        updateStreamingMessage(docentMsg)
+        scrollToBottom()
+      } else if (chunk.type === 'action' && chunk.action.type === 'load-dataset') {
+        if (!docentMsg.actions) docentMsg.actions = []
+        docentMsg.actions.push(chunk.action)
+        updateStreamingMessage(docentMsg)
+        scrollToBottom()
+      }
+      // Greeting ignores auto-load / globe-control actions — it should
+      // offer, not act, and no dataset is loaded in catalog mode.
+    }
+  } catch (err) {
+    logger.warn('[chat] returning-user greeting failed:', err)
+  }
+
+  hideTyping()
+  isStreaming = false
+  setSendEnabled(true)
+  if (docentMsg.actions?.length === 0) delete docentMsg.actions
+
+  // Nothing came back (e.g. LLM error / empty stream) — drop the blank
+  // placeholder rather than leave an empty bubble.
+  if (!docentMsg.text && !docentMsg.actions?.length) {
+    messages = messages.filter((m) => m.id !== docentMsg.id)
+    renderMessages()
+    return
+  }
+
+  if (!greetingAlreadyDisclosed()) {
+    docentMsg.disclosureFootnote = true
+    markGreetingDisclosed()
+  }
+  renderMessages()
+  scrollToBottom()
+  saveSession()
+}
+
 function setSendEnabled(enabled: boolean): void {
   const btn = document.getElementById('chat-send') as HTMLButtonElement | null
   if (btn) btn.disabled = !enabled
@@ -976,10 +1074,17 @@ function renderMessage(msg: ChatMessage): string {
          <button class="chat-feedback-btn" data-feedback="thumbs-down" data-msg-id="${escapeAttr(msg.id)}" aria-label="${escapeAttr(thumbsDownLabel)}" aria-pressed="false" title="${escapeAttr(thumbsDownLabel)}">&#x1F44E;&#xFE0E;</button>
        </div>`
     : ''
+  // §9.3 — one-time disclosure footnote under the first proactive
+  // returning-user greeting. `t(...)` keeps it localized; the privacy
+  // link points at the same surface as the Tools → Privacy panel.
+  const disclosureHtml = msg.disclosureFootnote
+    ? `<div class="chat-disclosure-footnote">${escapeHtml(t('chat.greeting.disclosure'))} <a href="/privacy" target="_blank" rel="noopener">${escapeHtml(t('chat.greeting.disclosure.link'))}</a></div>`
+    : ''
   return `<div class="chat-msg ${roleClass}" data-msg-id="${escapeAttr(msg.id)}">
     <div class="chat-msg-text">${textHtml}</div>
     ${feedbackHtml}
     ${actionsHtml}
+    ${disclosureHtml}
   </div>`
 }
 

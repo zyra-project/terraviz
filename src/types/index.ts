@@ -455,6 +455,10 @@ export interface ChatMessage {
   timestamp: number
   /** LLM context that produced this response (docent messages only, in-memory only) */
   llmContext?: LLMContextSnapshot
+  /** §9.3 — when true, render the one-time "Orbit remembers locally"
+   *  disclosure footnote under this message (the first proactive
+   *  returning-user greeting only). */
+  disclosureFootnote?: boolean
 }
 
 /**

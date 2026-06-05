@@ -8,6 +8,7 @@ import {
   clearChat,
   notifyDatasetChanged,
   submitFeedback,
+  playReturningGreeting,
 } from './chatUI'
 import type { ChatCallbacks } from './chatUI'
 import {
@@ -21,6 +22,7 @@ vi.mock('../services/docentService', async (importOriginal) => {
   return {
     ...actual,
     processMessage: vi.fn(),
+    triggerOpeningTurn: vi.fn(),
   }
 })
 
@@ -909,5 +911,52 @@ describe('feedback mechanism', () => {
     })
 
     fetchSpy.mockRestore()
+  })
+})
+
+describe('playReturningGreeting (§9.3)', () => {
+  it('opens the chat, streams the greeting, and shows the one-time disclosure footnote', async () => {
+    const { triggerOpeningTurn } = await import('../services/docentService')
+    vi.mocked(triggerOpeningTurn).mockImplementation(async function* () {
+      yield { type: 'delta' as const, text: 'Welcome back!' }
+      yield { type: 'done' as const, fallback: false }
+    })
+    const cb = makeCallbacks()
+    initChatUI(cb)
+    await playReturningGreeting({ daysSince: 2, newSinceTitles: [], recentTitles: [] })
+
+    const msgs = getMessages()
+    expect(msgs).toHaveLength(1)
+    expect(msgs[0].role).toBe('docent')
+    expect(msgs[0].text).toBe('Welcome back!')
+    expect(msgs[0].disclosureFootnote).toBe(true)
+    expect(document.getElementById('chat-panel')?.classList.contains('hidden')).toBe(false)
+    expect(document.querySelector('.chat-disclosure-footnote')).not.toBeNull()
+  })
+
+  it('omits the disclosure footnote once it has been shown before', async () => {
+    localStorage.setItem('sos-orbit-greeting-disclosed.v1', '1')
+    const { triggerOpeningTurn } = await import('../services/docentService')
+    vi.mocked(triggerOpeningTurn).mockImplementation(async function* () {
+      yield { type: 'delta' as const, text: 'Hello again.' }
+      yield { type: 'done' as const, fallback: false }
+    })
+    const cb = makeCallbacks()
+    initChatUI(cb)
+    await playReturningGreeting({ daysSince: 5, newSinceTitles: [], recentTitles: [] })
+
+    expect(getMessages()[0].disclosureFootnote).toBeUndefined()
+    expect(document.querySelector('.chat-disclosure-footnote')).toBeNull()
+  })
+
+  it('drops the placeholder when the greeting stream yields nothing', async () => {
+    const { triggerOpeningTurn } = await import('../services/docentService')
+    // eslint-disable-next-line require-yield
+    vi.mocked(triggerOpeningTurn).mockImplementation(async function* () { /* nothing */ })
+    const cb = makeCallbacks()
+    initChatUI(cb)
+    await playReturningGreeting({ daysSince: 2, newSinceTitles: [], recentTitles: [] })
+
+    expect(getMessages()).toHaveLength(0)
   })
 })

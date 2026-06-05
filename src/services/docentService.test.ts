@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { Dataset, ChatMessage, DocentConfig } from '../types'
-import { processMessage, loadConfig, saveConfig, getDefaultConfig, validateAndCleanText, captureViewContext, readCurrentTime, executeSearchDatasets, executeListFeaturedDatasets, clearPreSearchCache } from './docentService'
+import { processMessage, triggerOpeningTurn, resetOpeningTurnForTests, loadConfig, saveConfig, getDefaultConfig, validateAndCleanText, captureViewContext, readCurrentTime, executeSearchDatasets, executeListFeaturedDatasets, clearPreSearchCache } from './docentService'
 import { getDegradedReason, resetForTests as resetDegradedForTests } from './docentDegradedState'
 import type { DocentStreamChunk } from './docentService'
 
@@ -2558,5 +2558,67 @@ describe('processMessage — backend tool round-trip', () => {
     const toolMsg = round2Messages!.find((m: any) => m.role === 'tool')
     expect(toolMsg.tool_call_id).toBe('call_feat_1')
     expect(toolMsg.content).toContain('Climate Reanalysis 2024')
+  })
+})
+
+describe('triggerOpeningTurn (§9.3 returning-user greeting)', () => {
+  const returning = {
+    daysSince: 3,
+    newSinceTitles: ['Wildfire Tracker'],
+    recentTitles: ['Sea Surface Temperature'],
+  }
+  const enabledConfig: DocentConfig = {
+    apiUrl: 'http://localhost:11434/v1',
+    apiKey: '',
+    model: 'test',
+    enabled: true,
+    readingLevel: 'general',
+    visionEnabled: false,
+  }
+
+  beforeEach(() => resetOpeningTurnForTests())
+
+  it('yields nothing when the LLM is unconfigured', async () => {
+    const chunks: DocentStreamChunk[] = []
+    for await (const c of triggerOpeningTurn({ datasets, returning, config: disabledConfig })) {
+      chunks.push(c)
+    }
+    expect(chunks).toEqual([])
+  })
+
+  it('streams a greeting and refuses to re-fire within the session', async () => {
+    const { streamChat } = await import('./llmProvider')
+    vi.mocked(streamChat).mockImplementation(async function* () {
+      yield { type: 'delta' as const, text: 'Welcome back!' }
+      yield { type: 'done' as const }
+    })
+
+    const first: DocentStreamChunk[] = []
+    for await (const c of triggerOpeningTurn({ datasets, returning, config: enabledConfig })) {
+      first.push(c)
+    }
+    const text = first.filter(c => c.type === 'delta').map(c => (c as { text: string }).text).join('')
+    expect(text).toContain('Welcome back!')
+
+    // Second call this session is a no-op (idempotent latch).
+    const second: DocentStreamChunk[] = []
+    for await (const c of triggerOpeningTurn({ datasets, returning, config: enabledConfig })) {
+      second.push(c)
+    }
+    expect(second).toEqual([])
+  })
+
+  it('injects the returning-user block into the system prompt', async () => {
+    const { streamChat } = await import('./llmProvider')
+    let captured: Array<{ role: string; content: unknown }> | null = null
+    vi.mocked(streamChat).mockImplementation(async function* (messages: Array<{ role: string; content: unknown }>) {
+      captured = messages
+      yield { type: 'delta' as const, text: 'Hi' }
+      yield { type: 'done' as const }
+    })
+    for await (const _c of triggerOpeningTurn({ datasets, returning, config: enabledConfig })) { /* drain */ }
+    const system = captured!.find(m => m.role === 'system')
+    expect(String(system?.content)).toContain('returning visitor')
+    expect(String(system?.content)).toContain('Wildfire Tracker')
   })
 })

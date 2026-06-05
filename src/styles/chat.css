@@ -731,3 +731,20 @@
         padding-bottom: env(safe-area-inset-bottom);
     }
 }
+
+/* §9.3 — one-time disclosure footnote under the first proactive
+   returning-user greeting. Muted + small so it reads as a footnote,
+   not part of Orbit's message. */
+.chat-disclosure-footnote {
+    margin-top: calc(0.4rem * var(--ui-scale));
+    font-size: calc(0.7rem * var(--ui-scale));
+    color: var(--color-text-muted);
+    line-height: 1.4;
+}
+.chat-disclosure-footnote a {
+    color: var(--color-accent);
+    text-decoration: none;
+}
+.chat-disclosure-footnote a:hover {
+    text-decoration: underline;
+}
