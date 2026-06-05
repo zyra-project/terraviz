@@ -105,35 +105,46 @@ jobs:
           # the production-environment Variables (1.5 for the SOS
           # deploy, '' / 1.0 for preview).
           VITE_DEFAULT_UI_SCALE: ${{ vars.VITE_DEFAULT_UI_SCALE }}
-      # Apply pending D1 migrations to the REMOTE catalog before the new
+      # Apply pending CATALOG_DB migrations to the REMOTE before the new
       # Functions go live, so additive schema (new tables/columns) is
       # present when the new code lands. `wrangler d1 migrations apply`
       # is idempotent — it tracks applied files in `d1_migrations` and
       # only runs pending ones, so re-running every deploy is a no-op
       # when current.
       #
+      # CATALOG_DB only. We deliberately do NOT auto-apply FEEDBACK_DB:
+      # its migrations_dir is the repo-root `migrations/`, which also
+      # holds the generated `catalog-schema.sql` *snapshot* — wrangler
+      # would treat that snapshot as a feedback "migration" and try to
+      # create catalog tables in the feedback DB. CATALOG_DB's dir is
+      # `migrations/catalog/` (no snapshot), so it's clean. The two
+      # bindings point at the same physical D1, so the catalog
+      # migrations are all the catalog backend / hero feature needs.
+      # Feedback-DB schema changes are rare and applied by hand
+      # (docs/SELF_HOSTING.md Step 5).
+      #
       # Gated to `main` only: preview and production point at the SAME
       # physical D1 instance (one database_id in wrangler.toml), so
       # applying on a preview PR would mutate the production schema
       # before the code merges. Never run this on the preview path.
       #
-      # `check:migrations` (in the type-check job) guarantees every
-      # migration here is additive or explicitly reviewed-destructive,
-      # which is what makes apply-before-deploy safe.
+      # OPT-IN: off by default. Set the repo/Environment variable
+      # ENABLE_D1_MIGRATE=1 to turn it on — and only after granting the
+      # CI token **D1:Edit** (Account → D1 → Edit). A deploy-only token
+      # produces a Cloudflare 7403/7500 here and would block the
+      # deploy, so the safe default is off (forks aren't broken out of
+      # the box). See docs/SELF_HOSTING.md.
       #
-      # Forks: set the repo/Environment variable SKIP_D1_MIGRATE=1 to
-      # opt out (e.g. if you run your own migration pipeline). The CI
-      # token must have D1 write scope for this step — see
-      # docs/SELF_HOSTING.md.
+      # `check:migrations` (in the type-check job) guarantees every
+      # migration is additive or explicitly reviewed-destructive, which
+      # is what makes apply-before-deploy safe.
       - name: Apply D1 migrations (remote, main only)
-        if: github.ref == 'refs/heads/main' && vars.SKIP_D1_MIGRATE != '1'
+        if: github.ref == 'refs/heads/main' && vars.ENABLE_D1_MIGRATE == '1'
         run: |
           set -o pipefail
-          # FEEDBACK_DB → migrations/, CATALOG_DB → migrations/catalog/.
           # Select by BINDING name (not the shared database_name) so
-          # wrangler resolves the right migrations dir.
-          npx wrangler@4 d1 migrations apply FEEDBACK_DB --remote --config wrangler.toml
-          npx wrangler@4 d1 migrations apply CATALOG_DB  --remote --config wrangler.toml
+          # wrangler resolves migrations/catalog/.
+          npx wrangler@4 d1 migrations apply CATALOG_DB --remote --config wrangler.toml
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
