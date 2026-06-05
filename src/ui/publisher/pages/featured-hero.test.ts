@@ -119,6 +119,32 @@ describe('renderFeaturedHeroPage', () => {
     expect(mount.querySelector('.publisher-hero-status')?.textContent).toBe('Hero cleared.')
   })
 
+  it('clears prior error styling when Clear succeeds', async () => {
+    const routes = baseRoutes()
+    routes['/api/v1/featured-hero'] = {
+      body: { hero: { datasetId: DS, window: { start: '2026-05-01T00:00:00.000Z', end: '2026-06-01T00:00:00.000Z' } } },
+    }
+    // First DELETE errors (server), second succeeds.
+    let calls = 0
+    const fetchFn = mockFetch(routes)
+    const orig = fetchFn.getMockImplementation()!
+    fetchFn.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'DELETE') {
+        calls++
+        return { ok: calls > 1, status: calls > 1 ? 204 : 500, type: 'basic', json: async () => ({}), text: async () => '' } as unknown as Response
+      }
+      return orig(input, init)
+    })
+    await renderFeaturedHeroPage(mount, { fetchFn })
+    const clearBtn = mount.querySelector('.publisher-btn:not(.publisher-btn-primary)') as HTMLButtonElement
+    clearBtn.click(); await flush()
+    const status = mount.querySelector('.publisher-hero-status') as HTMLElement
+    expect(status.classList.contains('publisher-hero-status-error')).toBe(true) // first attempt errored
+    clearBtn.click(); await flush()
+    expect(status.textContent).toBe('Hero cleared.')
+    expect(status.classList.contains('publisher-hero-status-error')).toBe(false) // styling cleared
+  })
+
   it('mounts inside a publisher-shell main landmark', async () => {
     await renderFeaturedHeroPage(mount, { fetchFn: mockFetch(baseRoutes()) })
     expect(mount.querySelector('main.publisher-shell')).not.toBeNull()

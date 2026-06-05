@@ -251,7 +251,7 @@ function renderForm(mount: HTMLElement, state: FormState): void {
       if (res.ok) {
         hasPin = true
         setBusy(false)
-        status.textContent = t('publisher.hero.saved')
+        showSuccess(status, t('publisher.hero.saved'))
         return
       }
       setBusy(false)
@@ -266,7 +266,7 @@ function renderForm(mount: HTMLElement, state: FormState): void {
       if (res.ok || (!res.ok && res.kind === 'not_found')) {
         hasPin = false
         setBusy(false)
-        status.textContent = t('publisher.hero.cleared')
+        showSuccess(status, t('publisher.hero.cleared'))
         select.value = ''
         headlineInput.value = ''
         updatePreview()
@@ -315,6 +315,13 @@ function handleWriteError(
 function showError(status: HTMLElement, message: string): void {
   status.textContent = message
   status.classList.add('publisher-hero-status-error')
+}
+
+/** Set a success status, clearing any error styling left by a prior
+ *  failed attempt so e.g. "Hero cleared." doesn't render red. */
+function showSuccess(status: HTMLElement, message: string): void {
+  status.textContent = message
+  status.classList.remove('publisher-hero-status-error')
 }
 
 // ----- Small DOM helpers (mirror the me.ts card/heading idiom) -----
