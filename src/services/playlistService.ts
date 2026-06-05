@@ -6,7 +6,7 @@
  *
  *   [
  *     {
- *       "id": "pl-1716832041000",
+ *       "id": "pl-1716832041000-0-3f9a",
  *       "name": "My favourites",
  *       "createdAt": "2026-05-27T12:00:00.000Z",
  *       "datasets": [
@@ -374,10 +374,12 @@ export function importPlaylists(
     const existingIds = new Set(list.map((p) => p.id))
     for (const incoming of sanitized) {
       if (existingIds.has(incoming.id)) {
-        // Loop to dodge the (unlikely but possible) case where a
-        // freshly generated id collides with one we just added —
-        // generatePlaylistId mixes 4 hex chars over Date.now(), so
-        // back-to-back inserts share the timestamp half.
+        // Loop to dodge the (now very unlikely) case where a freshly
+        // generated id collides with one we just added. The id shape
+        // is `pl-<ms>-<seq>-<rand>`; the monotonic `seq` makes
+        // back-to-back generations within this process distinct, but
+        // the imported `incoming.id` came from elsewhere, so the loop
+        // stays as a belt-and-suspenders guard against any collision.
         let nextId = generatePlaylistId()
         while (existingIds.has(nextId)) nextId = generatePlaylistId()
         existingIds.add(nextId)
@@ -414,8 +416,12 @@ export function onPlaylistsChange(listener: () => void): () => void {
  *  alone. The 16-bit `rand` has a birthday-paradox dupe chance that
  *  shows up around ~100 ids in a tight loop (the source of an
  *  occasional `unique ids` test flake); the counter makes uniqueness
- *  deterministic within a process while `rand` covers cross-reload
- *  uniqueness. Base-36 keeps the segment compact. */
+ *  deterministic *within a process*. `rand` only *reduces* (does not
+ *  guarantee) collisions across reloads/processes, where the counter
+ *  resets to 0 — but a same-millisecond create in two separate page
+ *  loads is vanishingly rare, and a collision there is harmless (the
+ *  later create just overwrites by id, which a user can't trigger).
+ *  Base-36 keeps the segment compact. */
 let idSequence = 0
 
 /** Stable id generator: `pl-<ms>-<seq>-<rand>`. */
@@ -425,7 +431,10 @@ function generatePlaylistId(): string {
 }
 
 /** Test-only — flush the in-memory cache so the next read re-loads
- *  from localStorage. Paired with `localStorage.clear()` in beforeEach. */
+ *  from localStorage, and reset the id sequence so id generation is
+ *  deterministic per test. Paired with `localStorage.clear()` in
+ *  beforeEach. */
 export function resetPlaylistsForTests(): void {
   cache = null
+  idSequence = 0
 }
