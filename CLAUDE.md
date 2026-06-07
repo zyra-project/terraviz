@@ -191,6 +191,33 @@ as `i18n-exempt:`. The check covers `src/services/` only; `src/ui/`
 and the `functions/` + `cli/` backend are intentionally out of
 scope (the backend has its own `docs/CATALOG_*` plan docs).
 
+### Architecture graph (`/graphify`)
+
+A vendored [graphify](https://github.com/safishamsi/graphify) skill
+lives at `.claude/skills/graphify/` (see its `VENDORED.md`). It
+turns the repo into a queryable knowledge graph — community
+detection, "god nodes" (most-connected abstractions), and
+`query` / `path` / `explain` over the structure. It's how the
+module-map drift above was found, and it spans SPA + `functions/`
++ `cli/` + Rust in one graph (surfacing cross-tier coupling the
+per-section docs don't).
+
+**Two passes, very different cost:**
+
+- **Structural** (tree-sitter AST + Leiden clustering) — free,
+  deterministic, seconds. `graphify update <path> --no-cluster`.
+  This is what backs the doc-coverage check and catches drift.
+- **Semantic** (LLM concept/relationship extraction over docs +
+  code) — **~1M tokens** on this repo, counted against your Claude
+  Code usage. Run it **deliberately** (before a large refactor, or
+  periodically), never in CI.
+
+Run it via `/graphify <paths>` in a Claude Code session (e.g.
+`/graphify src functions cli src-tauri docs` skips the generated
+`locales/` + `tokens/` JSON). Outputs land in `graphify-out/`
+(gitignored). The CLI is pre-installed by the SessionStart hook;
+no API key is used — the semantic pass runs on the host session.
+
 ---
 
 ## Orbit — Digital Docent
