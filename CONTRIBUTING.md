@@ -124,7 +124,11 @@ Open issues at <https://github.com/zyra-project/terraviz/issues>.
 - **UI conventions** are documented in [STYLE_GUIDE.md](STYLE_GUIDE.md) (colors, surfaces, frosted-glass design language). Match the existing component patterns.
 - **Module organization**: services in `src/services/`, UI controllers in
   `src/ui/`, types in `src/types/`, utilities in `src/utils/`. New code
-  should fit this layout.
+  should fit this layout. When you add a module under `src/` or
+  `src-tauri/src/`, add a one-line row to the matching module-map table in
+  [CLAUDE.md](CLAUDE.md) in the same PR — `npm run check:doc-coverage`
+  (part of `type-check`) fails CI otherwise. For a module that genuinely
+  needs no row, add a `// doc-exempt: <reason>` comment to its source.
 - **Rust** (desktop app): follow the existing patterns in `src-tauri/src/`.
   Run `cargo fmt` and `cargo clippy` before submitting changes.
 - Check `package.json` for the available `scripts` (lint, format, type-check,
