@@ -1,6 +1,6 @@
 ---
 name: graphify
-description: "Use for any question about a codebase, its architecture, file relationships, or project content — especially when graphify-out/ exists, where the question should be treated as a graphify query first. Turns any input (code, docs, papers, images, videos) into a persistent knowledge graph with god nodes, community detection, and query/path/explain tools."
+description: "Build and query a repo-wide code knowledge graph (SPA + functions/ + cli/ + Rust in one map) for CROSS-TIER or WHOLE-REPO structural questions and pre-refactor impact analysis — what imports/calls/affects X, how subsystems couple, community structure. NOT a replacement for ripgrep + the CLAUDE.md module maps on routine single-file or single-symbol lookups, which are faster. Requires building the graph first (output is gitignored): the structural pass is free and takes seconds; the semantic pass costs ~1M tokens, so run it deliberately. If a graphify-out/ graph already exists, querying it is cheap."
 trigger: /graphify
 ---
 

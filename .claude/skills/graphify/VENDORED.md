@@ -33,6 +33,16 @@ docs corpus), counted against your Claude Code usage. Run it
 deliberately — before a large refactor, or periodically — not on
 every commit. Outputs land in `graphify-out/` (gitignored).
 
+## Local divergence from upstream
+
+The `description:` in `SKILL.md`'s frontmatter has been **rewritten
+locally** (it no longer says "use for any question about a
+codebase"). The upstream blurb nudged sessions to route ordinary
+single-file lookups through graphify, where `ripgrep` + the CLAUDE.md
+module maps are faster. The local version scopes it to cross-tier /
+whole-repo structural questions and pre-refactor impact analysis, and
+flags the build/cost. **Preserve this when updating** — see below.
+
 ## Updating
 
 ```bash
@@ -40,5 +50,7 @@ pip install -U graphifyy && graphify install --platform claude
 cp -r ~/.claude/skills/graphify/* .claude/skills/graphify/
 ```
 
-Then bump `GRAPHIFY_VERSION` in `.claude/hooks/install-graphify.sh`
-and the version above to match, in the same commit.
+A bare `cp` will clobber the locally-rewritten `description:` above —
+re-apply it (or merge by hand) after copying. Then bump
+`GRAPHIFY_VERSION` in `.claude/hooks/install-graphify.sh` and the
+version line above to match, in the same commit.
