@@ -45,7 +45,7 @@
  */
 
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
-import { resolve, relative } from 'node:path'
+import { resolve, relative, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..')
@@ -148,12 +148,14 @@ export function findUndocumentedModules(repoRoot: string = REPO_ROOT): Undocumen
     if (!existsSync(fullDir)) continue
     const doc = readDoc(root.doc)
     for (const file of walk(fullDir, root.ext)) {
-      const rel = relative(repoRoot, file)
+      // Normalize to forward slashes: `relative()` yields `\` on
+      // Windows, but the doc tables (and our basename split) use `/`.
+      const rel = relative(repoRoot, file).split(sep).join('/')
       // Full-path match — basenames repeat across the backend's
       // route dirs, so a basename match would be ambiguous.
       if (doc.includes(rel)) continue
       if (isExempt(file)) continue
-      missing.push({ file: rel, basename: file.slice(file.lastIndexOf('/') + 1), doc: root.doc })
+      missing.push({ file: rel, basename: rel.slice(rel.lastIndexOf('/') + 1), doc: root.doc })
     }
   }
   return missing
@@ -170,10 +172,11 @@ export function formatReport(missing: readonly Undocumented[]): string {
   for (const m of missing) lines.push(`  ${m.file}  → add to ${m.doc}`)
   lines.push(
     '',
-    'Add a row to the module-map table in CLAUDE.md (SPA map for',
-    '`src/`, Rust map for `src-tauri/src/`). If a module genuinely',
-    'needs no row (throwaway shim, obvious from a documented',
-    'sibling), add `// doc-exempt: <reason>` to its source.',
+    'Add a one-line row to the module map named beside each file',
+    'above (CLAUDE.md for `src/` + `src-tauri/src/`, ',
+    'docs/BACKEND_MODULES.md for `functions/` + `cli/`). If a module',
+    'genuinely needs no row (throwaway shim, obvious from a',
+    'documented sibling), add `// doc-exempt: <reason>` to its source.',
   )
   return lines.join('\n')
 }
@@ -194,7 +197,7 @@ function run(): void {
     process.exit(1)
   }
   // eslint-disable-next-line no-console
-  console.log('✓ Every source module is in the CLAUDE.md module map.')
+  console.log('✓ Every source module is documented in its module map.')
 }
 
 if (

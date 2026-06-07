@@ -36,14 +36,14 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `cli/lib/verify-checks.ts` | Production-deploy verification checks for `terraviz verify-deploy` |
 | `cli/lib/vimeo-source.ts` | Resolve a `vimeo:<id>` reference to a source MP4 download URL |
 | `cli/list-realtime-r2.ts` | `terraviz list-realtime-r2` — find migrated rows whose Vimeo source is on a daily re-upload cadence, and recover the original Vimeo id so they can be rolled back |
-| `cli/migrate-r2-assets.ts` | `terraviz migrate-r2-assets` — migrate auxiliary asset URLs (thumbnail / legend / caption / color-table) from NOAA-hosted CloudFront URLs to R2-hosted URLs under `dataset |
+| `cli/migrate-r2-assets.ts` | `terraviz migrate-r2-assets` — migrate auxiliary asset URLs (thumbnail / legend / caption / color-table) from NOAA-hosted CloudFront URLs to R2-hosted URLs under … |
 | `cli/migrate-r2-hls.ts` | `terraviz migrate-r2-hls` — migrate legacy `vimeo:<id>` data_refs to R2-hosted HLS bundles for 4K spherical streaming |
-| `cli/migrate-r2-tours.ts` | `terraviz migrate-r2-tours` — migrate SOS tour.json files (and their sibling assets: overlay images, narrated audio, 360-pano JPGs) from NOAA-hosted CloudFront URLs to R2 |
+| `cli/migrate-r2-tours.ts` | `terraviz migrate-r2-tours` — migrate SOS tour.json files (and their sibling assets: overlay images, narrated audio, 360-pano JPGs) from NOAA-hosted CloudFront URLs to R2-hosted … |
 | `cli/rollback-r2-assets.ts` | `terraviz rollback-r2-assets` — undo migrated auxiliary assets |
 | `cli/rollback-r2-hls.ts` | `terraviz rollback-r2-hls` — undo migrated dataset(s) |
 | `cli/rollback-r2-tours.ts` | `terraviz rollback-r2-tours` — undo a migrated tour |
 | `cli/terraviz.ts` | `terraviz` CLI entry point |
-| `cli/transcode-from-dispatch.ts` | `transcode-from-dispatch` — invoked by the `transcode-hls` GitHub Actions workflow when the publisher portal fires a `repository_dispatch` after a video upload lands in R |
+| `cli/transcode-from-dispatch.ts` | `transcode-from-dispatch` — invoked by the `transcode-hls` GitHub Actions workflow when the publisher portal fires a `repository_dispatch` after a video upload lands in R2 |
 | `cli/verify-deploy.ts` | `terraviz verify-deploy` — operator-friendly post-deploy smoke-test command |
 
 ## Platform & feedback Pages Functions (`functions/api/`)
@@ -121,14 +121,14 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `functions/api/v1/_lib/audit-store.ts` | Append-only writes to the `audit_events` table |
 | `functions/api/v1/_lib/bounded-pool.ts` | Tiny bounded-concurrency helper for parallelizable async work that can't safely fan-out to N at once |
 | `functions/api/v1/_lib/catalog-store.ts` | D1 reader functions for the catalog tables |
-| `functions/api/v1/_lib/data-ref-resolver.ts` | Build the {@link DataRefResolver} the catalog read-paths pass into {@link serializeDataset} so tour rows can surface a fetchable `tourJsonUrl` alongside the manifest `dat |
+| `functions/api/v1/_lib/data-ref-resolver.ts` | Build the {@link DataRefResolver} the catalog read-paths pass into {@link serializeDataset} so tour rows can surface a fetchable `tourJsonUrl` alongside the manifest `dataLink` |
 | `functions/api/v1/_lib/data-ref.ts` | Shared `data_ref` parser |
 | `functions/api/v1/_lib/dataset-mutations.ts` | Publisher-API write paths for the `datasets` table |
 | `functions/api/v1/_lib/dataset-serializer.ts` | Maps `DatasetRow` + `DecorationRows` to the wire `Dataset` shape that frontend consumers expect |
 | `functions/api/v1/_lib/embed-dataset-job.ts` | Embedding pipeline job — Phase 1c |
 | `functions/api/v1/_lib/embeddings.ts` | Workers AI embedding helpers — Phase 1c |
 | `functions/api/v1/_lib/env.ts` | Shared `Env` type for catalog-backend Pages Functions |
-| `functions/api/v1/_lib/errors.ts` | Typed errors used by the storage helpers (`r2-store.ts`, `stream-store.ts`) so the route handlers can distinguish "operator forgot to set credentials" from "the upstream  |
+| `functions/api/v1/_lib/errors.ts` | Typed errors used by the storage helpers (`r2-store.ts`, `stream-store.ts`) so the route handlers can distinguish "operator forgot to set credentials" from "the upstream service … |
 | `functions/api/v1/_lib/featured-datasets.ts` | `featured_datasets` row helpers |
 | `functions/api/v1/_lib/frames-manifest.ts` | Helpers shared by the Phase 3pg/B `/frames` endpoints |
 | `functions/api/v1/_lib/github-dispatch.ts` | GitHub repository_dispatch helper — Phase 3pd |
