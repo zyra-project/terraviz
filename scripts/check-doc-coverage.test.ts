@@ -1,64 +1,94 @@
 import { describe, it, expect } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { resolve } from 'node:path'
+import { resolve, dirname } from 'node:path'
 import { findUndocumentedModules, formatReport, CheckError } from './check-doc-coverage'
 
-/** Build a throwaway repo root with a CLAUDE.md and service files. */
-function fixtureRepo(doc: string, services: Record<string, string>): string {
+/**
+ * Build a throwaway repo root. `files` maps a repo-relative path to
+ * its contents; CLAUDE.md is written from `doc`.
+ */
+function fixtureRepo(doc: string, files: Record<string, string>): string {
   const root = mkdtempSync(resolve(tmpdir(), 'terraviz-doc-cov-'))
   writeFileSync(resolve(root, 'CLAUDE.md'), doc, 'utf-8')
-  const dir = resolve(root, 'src/services')
-  mkdirSync(dir, { recursive: true })
-  for (const [name, body] of Object.entries(services)) {
-    writeFileSync(resolve(dir, name), body, 'utf-8')
+  for (const [rel, body] of Object.entries(files)) {
+    const full = resolve(root, rel)
+    mkdirSync(dirname(full), { recursive: true })
+    writeFileSync(full, body, 'utf-8')
   }
   return root
 }
 
 describe('check-doc-coverage · findUndocumentedModules', () => {
-  it('passes when every service is named in the doc', () => {
+  it('passes when every module is named in the doc', () => {
     const root = fixtureRepo(
-      '| `src/services/alpha.ts` | A | \n| `src/services/beta.ts` | B |\n',
-      { 'alpha.ts': 'export const a = 1\n', 'beta.ts': 'export const b = 2\n' },
+      '| `src/services/alpha.ts` | A |\n| `src/ui/beta.ts` | B |\n',
+      { 'src/services/alpha.ts': 'export const a = 1\n', 'src/ui/beta.ts': 'export const b = 2\n' },
     )
     expect(findUndocumentedModules(root)).toEqual([])
   })
 
-  it('flags a service absent from the doc', () => {
-    const root = fixtureRepo(
-      '| `src/services/alpha.ts` | A |\n',
-      { 'alpha.ts': 'export const a = 1\n', 'gamma.ts': 'export const g = 3\n' },
-    )
+  it('flags a module absent from the doc, anywhere under src/', () => {
+    const root = fixtureRepo('| `src/services/alpha.ts` | A |\n', {
+      'src/services/alpha.ts': 'export const a = 1\n',
+      'src/ui/publisher/pages/gamma.ts': 'export const g = 3\n',
+    })
     const missing = findUndocumentedModules(root)
     expect(missing.map(m => m.basename)).toEqual(['gamma.ts'])
   })
 
-  it('ignores *.test.ts files', () => {
-    const root = fixtureRepo('| `src/services/alpha.ts` | A |\n', {
-      'alpha.ts': 'export const a = 1\n',
-      'alpha.test.ts': 'import { a } from "./alpha"\n',
+  it('checks src-tauri/src Rust modules too', () => {
+    const root = fixtureRepo('| `src-tauri/src/main.rs` | entry |\n', {
+      'src-tauri/src/main.rs': 'fn main() {}\n',
+      'src-tauri/src/lib.rs': 'pub fn x() {}\n',
+    })
+    expect(findUndocumentedModules(root).map(m => m.basename)).toEqual(['lib.rs'])
+  })
+
+  it('ignores tests, .d.ts, generated messages, and test-setup', () => {
+    const root = fixtureRepo('(empty map)\n', {
+      'src/services/alpha.test.ts': 'test\n',
+      'src/types/foo.d.ts': 'declare const x: number\n',
+      'src/i18n/messages.ts': 'export const m = {}\n',
+      'src/i18n/messages.es.ts': 'export const m = {}\n',
+      'src/test-setup.ts': 'import "x"\n',
     })
     expect(findUndocumentedModules(root)).toEqual([])
   })
 
+  it('does not let a longer path cover a shorter basename (me.ts vs time.ts)', () => {
+    const root = fixtureRepo('| `src/utils/time.ts` | time utils |\n', {
+      'src/utils/time.ts': 'export const t = 1\n',
+      'src/ui/publisher/pages/me.ts': 'export const me = 1\n',
+    })
+    expect(findUndocumentedModules(root).map(m => m.basename)).toEqual(['me.ts'])
+  })
+
   it('honours a // doc-exempt: marker with a reason', () => {
     const root = fixtureRepo('(empty map)\n', {
-      'shim.ts': '// doc-exempt: throwaway re-export, obvious from barrel\nexport * from "./x"\n',
+      'src/ui/shim.ts': '// doc-exempt: throwaway re-export, obvious from barrel\nexport * from "./x"\n',
     })
     expect(findUndocumentedModules(root)).toEqual([])
   })
 
   it('does NOT honour a bare doc-exempt with no reason', () => {
     const root = fixtureRepo('(empty map)\n', {
-      'shim.ts': '// doc-exempt:\nexport const x = 1\n',
+      'src/ui/shim.ts': '// doc-exempt:\nexport const x = 1\n',
     })
     expect(findUndocumentedModules(root).map(m => m.basename)).toEqual(['shim.ts'])
+  })
+
+  it('tolerates a missing coverage root (no src-tauri in fixture)', () => {
+    const root = fixtureRepo('| `src/services/alpha.ts` | A |\n', {
+      'src/services/alpha.ts': 'export const a = 1\n',
+    })
+    expect(findUndocumentedModules(root)).toEqual([])
   })
 
   it('throws CheckError when CLAUDE.md is missing', () => {
     const root = mkdtempSync(resolve(tmpdir(), 'terraviz-doc-cov-nodoc-'))
     mkdirSync(resolve(root, 'src/services'), { recursive: true })
+    writeFileSync(resolve(root, 'src/services/alpha.ts'), 'export const a = 1\n', 'utf-8')
     expect(() => findUndocumentedModules(root)).toThrow(CheckError)
   })
 })
@@ -68,9 +98,12 @@ describe('check-doc-coverage · formatReport', () => {
     expect(formatReport([])).toBe('')
   })
 
-  it('lists each missing module path', () => {
-    const report = formatReport([{ file: 'src/services/gamma.ts', basename: 'gamma.ts' }])
-    expect(report).toContain('src/services/gamma.ts')
-    expect(report).toContain('1 service module missing')
+  it('lists each missing module path and its doc home', () => {
+    const report = formatReport([
+      { file: 'src/ui/gamma.ts', basename: 'gamma.ts', doc: 'CLAUDE.md' },
+    ])
+    expect(report).toContain('src/ui/gamma.ts')
+    expect(report).toContain('CLAUDE.md')
+    expect(report).toContain('1 module missing')
   })
 })

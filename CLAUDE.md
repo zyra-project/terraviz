@@ -159,13 +159,70 @@ npm run build:desktop # tsc + vite build + tauri build
 | `src/analytics/hash.ts` | 12-hex SHA-256 helper for free-text fields (search queries, error stack signatures) |
 | `src/ui/privacyUI.ts` | Tools → Privacy panel — tier picker (off / essential / research), session-id display, what-we-collect explainer |
 | `src/ui/disclosureBanner.ts` | First-launch privacy disclosure banner — shown once per install, dismisses to default Essential tier |
+| `src/orbitMain.ts` | Entry point for the Orbit standalone character page (`/orbit`) |
+| `src/config/endpoints.ts` | Externally-hosted endpoint configuration (catalog / proxy / NOAA / NASA base URLs) |
+| `src/types/image-sequence-constants.ts` | Constants shared by the publisher API (`functions/`), the GHA runner (`cli/`), and the portal (`src/`) for the image-sequence upload pipeline |
+| `src/data/regions.ts` | Common region bounding boxes for name-based region resolution |
+| `src/services/orbitCharacter/orbitScene.ts` | Three.js scene + per-frame update for the Orbit character |
+| `src/services/orbitCharacter/orbitMaterials.ts` | Materials + shaders for the Orbit character |
+| `src/services/orbitCharacter/orbitStates.ts` | Persistent-state vocabulary (STATES table) for the Orbit character |
+| `src/services/orbitCharacter/orbitGestures.ts` | Transient gesture overlays that play over the active state, then yield control back |
+| `src/services/orbitCharacter/orbitFlight.ts` | Flight system + scale presets for the Orbit character |
+| `src/services/orbitCharacter/orbitTrails.ts` | Sub-sphere distance-based sparkle-wake trails |
+| `src/services/orbitCharacter/orbitTypes.ts` | Shared types for the Orbit character |
+| `src/ui/catalogTabsUI.ts` | Catalog ↔ Sphere segmented control |
+| `src/ui/catalogGraphUI.ts` | Catalog Graph view — UI mount + cytoscape.js wiring (consumes `catalogGraph.ts`) |
+| `src/ui/catalogMapUI.ts` | Catalog Map view — UI mount + MapLibre wiring (consumes `catalogMap.ts`) |
+| `src/ui/catalogTimelineUI.ts` | Catalog Timeline view — UI mount + SVG wiring (consumes `catalogTimeline.ts`) |
+| `src/ui/playlistUI.ts` | Playlist manager panel + the "Add to playlist" popover from browse cards / info panel |
+| `src/ui/tourUI.ts` | 2D tour control bar + overlay types (VR equivalent is `vrTourOverlay.ts`) |
+| `src/ui/helpUI.ts` | Help panel — Guide tab + Feedback form |
+| `src/ui/creditsPanel.ts` | Credits panel (Tools → Credits) |
+| `src/ui/heroPanelUI.ts` | "Right now" hero panel UI (Phase 7 §9.1 of `docs/WEB_CATALOG_FEATURES_PLAN.md`) |
+| `src/ui/downloadDialogUI.ts` | Web-only zip-download panel (§8.2) |
+| `src/ui/shaderTunerUI.ts` | Dev-only shader-tuner floating panel (§7.2) |
+| `src/ui/orbitDebugPanel.ts` | Debug panel for the Orbit standalone page |
+| `src/ui/orbitPerfHud.ts` | Perf HUD for the Orbit standalone page |
+| `src/ui/orbitPostMessageBridge.ts` | postMessage bridge between the host SPA and the embedded Orbit page |
+| `src/ui/domUtils.ts` | Small DOM helpers shared across UI modules |
+| `src/ui/sanitizeHtml.ts` | Allowlist-based HTML sanitizer for untrusted input |
+| `src/ui/publisher/router.ts` | Tiny History-API router for the publisher portal |
+| `src/ui/publisher/api.ts` | Shared HTTP client for the publisher portal |
+| `src/ui/publisher/types.ts` | Wire types for portal-bound publisher API responses |
+| `src/ui/publisher/components/dataset-form.ts` | Shared dataset create / edit form |
+| `src/ui/publisher/components/asset-uploader.ts` | Asset uploader component (Phase 3pd image-sequence pipeline) |
+| `src/ui/publisher/components/chip-input.ts` | Chip-input control — entries become removable chips as the user types |
+| `src/ui/publisher/components/markdown-toolbar.ts` | GitHub-issue-style markdown toolbar over a `<textarea>` |
+| `src/ui/publisher/components/topbar.ts` | Glass-surface top bar with section tabs |
+| `src/ui/publisher/components/error-card.ts` | Shared error-card renderer used by every portal page |
+| `src/ui/publisher/pages/datasets.ts` | `/publish/datasets` — dataset list visible to the caller |
+| `src/ui/publisher/pages/dataset-detail.ts` | `/publish/datasets/:id` — read-only dataset detail |
+| `src/ui/publisher/pages/dataset-edit.ts` | `/publish/datasets/:id/edit` — edit an existing draft |
+| `src/ui/publisher/pages/dataset-new.ts` | `/publish/datasets/new` — wrapper around the shared dataset form |
+| `src/ui/publisher/pages/tours.ts` | `/publish/tours` — tour-creator landing page |
+| `src/ui/publisher/pages/featured-hero.ts` | `/publish/featured-hero` — set the "Right now" hero override (`docs/HERO_ADMIN_SCOPING.md`) |
+| `src/ui/publisher/pages/me.ts` | `/publish/me` — current-user identity + role display |
+| `src/ui/tourAuthoring/dock.ts` | Floating tour-authoring dock — attaches to SPA chrome on `/?tourEdit=<id>` (or `=new`) |
+| `src/ui/tourAuthoring/state.ts` | In-memory tour-authoring state — dock reads/writes here; `autosave.ts` flushes it |
+| `src/ui/tourAuthoring/autosave.ts` | Debounced autosave for the tour-authoring dock |
+| `src/ui/tourAuthoring/api.ts` | Publisher-side API client for the tour-authoring dock |
+| `src/utils/logger.ts` | Log-level gating so production builds stay silent |
+| `src/utils/debounce.ts` | Debounced-function wrapper |
+| `src/utils/time.ts` | Time parsing / formatting utilities |
+| `src/utils/frames.ts` | Frame-query resolution shared by Orbit (marker parsing) + the dataset loader |
+| `src/utils/deviceCapability.ts` | Device-capability detection for adaptive performance tuning |
+| `src/utils/fetchProgress.ts` | Fetch a URL as a Blob with byte-level progress reporting |
+| `src/utils/captionProxy.ts` | Caption-URL proxying helper |
+| `src/utils/catalogFilters.ts` | URL round-trip for catalog filter state |
+| `src/utils/catalogMode.ts` | Catalog mode — `?catalog=true` URL routing |
+| `src/utils/posterDeepLinks.ts` | Poster deep-link handlers |
 | `functions/api/ingest.ts` | Cloudflare Pages Function — receives telemetry batches, stamps `event_type` / `environment` / `country` / `internal` server-side, writes to Workers Analytics Engine |
 
 > **Note:** the table above is the **SPA** module map. It is
-> linted for completeness against `src/services/` by
-> `npm run check:doc-coverage` (see _Module-map coverage_ below).
-> The `src/ui/` layer is large and only partially listed here;
-> add a row when you introduce a non-obvious panel.
+> linted for completeness by `npm run check:doc-coverage` (see
+> _Module-map coverage_ below): every module under `src/` and
+> `src-tauri/src/` must appear here. When you add a module, add its
+> row in the same PR.
 
 ### Backend subsystems (`functions/` + `cli/`)
 
@@ -182,14 +239,21 @@ docs under `docs/CATALOG_*`. The major clusters, for orientation:
 ### Module-map coverage
 
 `npm run check:doc-coverage` (in the `type-check` chain) fails CI
-if a top-level `src/services/*.ts` module is missing from the
-module-map table above. When you add a service, add its row in the
-same PR. For a module that genuinely warrants no row (throwaway
+if any module under `src/` (SPA map) or `src-tauri/src/` (Rust map)
+is missing from CLAUDE.md. When you add a module, add its row in
+the same PR. For one that genuinely warrants no row (throwaway
 shim, obvious from a documented sibling), add `// doc-exempt:
 <reason>` to its source — the reason is mandatory, same convention
-as `i18n-exempt:`. The check covers `src/services/` only; `src/ui/`
-and the `functions/` + `cli/` backend are intentionally out of
-scope (the backend has its own `docs/CATALOG_*` plan docs).
+as `i18n-exempt:`.
+
+**Scope** (an explicit manifest in `scripts/check-doc-coverage.ts`):
+
+- **Covered:** all of `src/` and `src-tauri/src/`, recursively.
+- **Excluded:** generated code (`messages*.ts` i18n codegen),
+  `*.d.ts`, `*.test.ts`, and `test-setup.ts`.
+- **Delegated, not covered:** `functions/` and `cli/` (the
+  backend) live in `docs/CATALOG_*`, not the CLAUDE.md module map —
+  a CLAUDE.md check would be the wrong tool for them.
 
 ### Architecture graph (`/graphify`)
 
@@ -378,6 +442,22 @@ string must go through the i18n layer; never hard-code English
 in source.** A static check (`npm run check:i18n-strings`) runs
 in the type-check chain and fails CI if it finds a hard-coded
 label in `src/ui/` or `src/services/docent*.ts`.
+
+### i18n runtime modules
+
+The `src/i18n/` layer (these are the runtime modules; the
+`src/i18n/messages*.ts` files are generated codegen output and are
+not individually documented):
+
+| File | Responsibility |
+|---|---|
+| `src/i18n/index.ts` | Public runtime API — `t()`, `plural()`, `interpolate()`, locale switching, `<html dir>` wiring |
+| `src/i18n/bootstrap.ts` | Shared i18n bootstrap for entry points (`main.ts`, `orbitMain.ts`, future entries) |
+| `src/i18n/detect.ts` | Initial-locale detection (query param → storage → `navigator.languages`) |
+| `src/i18n/persistence.ts` | Locale-preference persistence — mirrors `src/utils/viewPreferences.ts` |
+| `src/i18n/format.ts` | Locale-aware formatting helpers (numbers, dates, lists) |
+| `src/i18n/applyI18nAttributes.ts` | DOM walker that translates static markup carrying `data-i18n` attributes |
+| `src/i18n/rtl.ts` | RTL locale set + `<html dir>` resolution |
 
 ### When you add a new UI string
 
@@ -572,6 +652,7 @@ The desktop app shares 100% of the TypeScript source. Desktop-only behaviour is 
 | `src-tauri/src/keychain.rs` | OS keychain read/write for LLM API key |
 | `src-tauri/src/download_manager.rs` | Dataset download with progress events, cancellation, JSON index |
 | `src-tauri/src/download_commands.rs` | Tauri commands exposing download operations to the frontend |
+| `src-tauri/src/lib.rs` | Shared app entry (`run()`) for desktop **and** mobile — module wiring, plugin/builder setup, `native_panic` hook; `main.rs` calls it on desktop, the `mobile_entry_point` macro on iOS/Android |
 
 ### Key configuration files
 

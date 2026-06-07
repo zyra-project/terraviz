@@ -1,48 +1,76 @@
 /**
- * Static check: every service module in `src/services/` is named
- * in the CLAUDE.md module map.
+ * Static check: every source module under the configured coverage
+ * roots is named in its documentation home.
  *
- * Motivation: the module map in CLAUDE.md is the first thing a new
+ * Motivation: the module maps in CLAUDE.md are the first thing a new
  * contributor (or AI agent) reads to orient in the codebase, but
- * it drifts silently — a service lands, ships, and is never added
- * to the table. A one-off audit found ~29 of 49 service modules
- * undocumented. This check locks the regression out the same way
- * `check-i18n-strings` locks out hard-coded English: cheaply, in
+ * they drift silently — a module lands, ships, and is never added.
+ * A one-off audit (via the graphify code-graph tool) found dozens of
+ * modules undocumented. This check locks the regression out the same
+ * way `check-i18n-strings` locks out hard-coded English: cheaply, in
  * the `type-check` chain, on every PR.
  *
- * Intentionally narrow scope (so a clean run stays clean):
+ * Coverage is an explicit manifest (`COVERAGE_ROOTS`) rather than a
+ * single hard-coded directory, because the repo has more than one
+ * documentation home and a "must be in CLAUDE.md" rule is only
+ * correct for some of it:
  *
- *   - Scans only the TOP LEVEL of `src/services/` (not nested
- *     dirs like `orbitCharacter/`), `.ts` files, skipping
- *     `*.test.ts`.
- *   - "Documented" means the filename (e.g. `relatedDatasets.ts`)
- *     appears verbatim anywhere in `CLAUDE.md`. The map renders
- *     each row as `` `src/services/<name>` `` so a substring match
- *     on the basename is sufficient and robust to table reflow.
- *   - A module is exempt if its source carries a
- *     `// doc-exempt: <reason>` comment (reason mandatory), mirroring
- *     the `i18n-exempt:` convention. Use it for throwaway shims or
- *     modules whose role is obvious from a documented sibling.
+ *   - `src/`           → CLAUDE.md SPA module map
+ *   - `src-tauri/src/` → CLAUDE.md Rust module map
+ *   - `functions/`, `cli/` → their own `docs/CATALOG_*` plan docs,
+ *     so they are deliberately NOT covered here (a CLAUDE.md check
+ *     would be the wrong tool — it would force backend files into
+ *     the SPA map).
  *
- * This deliberately does NOT cover `src/ui/`, `functions/`, or
- * `cli/`: the UI layer is only partially mapped by design, and the
- * backend has its own `docs/CATALOG_*` plan docs rather than the
- * SPA module map. Those surfaces can get their own checks later
- * without this one needing exemptions to keep passing.
+ * "Documented" means `/<basename>` (e.g. `/relatedDatasets.ts`)
+ * appears anywhere in the root's `doc` file. The maps always render
+ * a row as a full path — `` `src/services/<name>` `` — so the `/`
+ * boundary both matches those and prevents a shorter name passing
+ * spuriously as a substring of a longer one (`me.ts` ⊂ `time.ts`).
  *
- * Exits 0 when clean. Exits 1 with a per-module report on any
- * miss. Wired into the type-check chain via `package.json`.
+ * Exclusions (not module-map material):
+ *   - `*.test.ts` — tests.
+ *   - `*.d.ts` — ambient declarations.
+ *   - Generated code: `messages.ts` / `messages.<locale>.ts` (the
+ *     i18n codegen output — the i18n layer is documented
+ *     conceptually in the Localization section, not per file).
+ *   - `test-setup.ts` — vitest bootstrap, not a module.
+ *   - Any file carrying a `// doc-exempt: <reason>` comment (reason
+ *     mandatory, same convention as `i18n-exempt:`).
+ *
+ * Exits 0 when clean. Exits 1 with a per-module report on any miss.
+ * Wired into the type-check chain via `package.json`.
  */
 
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
 import { resolve, relative } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..')
 const REPO_ROOT = resolve(HERE, '..')
 
-const SERVICES_DIR = 'src/services'
-const DOC_FILE = 'CLAUDE.md'
+interface CoverageRoot {
+  /** Directory to scan, relative to repo root. */
+  readonly dir: string
+  /** Doc file (relative to repo root) that must name each module. */
+  readonly doc: string
+  /** File-extension filter. */
+  readonly ext: RegExp
+}
+
+const COVERAGE_ROOTS: readonly CoverageRoot[] = [
+  { dir: 'src', doc: 'CLAUDE.md', ext: /\.ts$/ },
+  { dir: 'src-tauri/src', doc: 'CLAUDE.md', ext: /\.rs$/ },
+]
+
+/** Basenames that are never module-map material (generated / infra). */
+const EXCLUDE_BASENAME: readonly RegExp[] = [
+  /\.test\.ts$/,
+  /\.d\.ts$/,
+  /^messages\.ts$/,
+  /^messages\.[^.]+\.ts$/,
+  /^test-setup\.ts$/,
+]
 
 /** `// doc-exempt: <reason>` — reason (≥1 non-space char) mandatory,
  *  and on the SAME line as the marker. `[^\S\n]` is "whitespace
@@ -57,25 +85,24 @@ export interface Undocumented {
   readonly file: string
   /** Bare filename the doc was searched for, e.g. `heroService.ts`. */
   readonly basename: string
+  /** Doc file the module should have appeared in. */
+  readonly doc: string
 }
 
-/** Top-level `*.ts` service modules, excluding tests. */
-function serviceModules(repoRoot: string): string[] {
-  const dir = resolve(repoRoot, SERVICES_DIR)
-  let entries: string[]
-  try {
-    entries = readdirSync(dir)
-  } catch (err) {
-    throw new CheckError(
-      `[doc-coverage] could not read ${SERVICES_DIR}: ${(err as Error).message}`,
-    )
-  }
+function isExcluded(basename: string): boolean {
+  return EXCLUDE_BASENAME.some(re => re.test(basename))
+}
+
+/** Recursively collect candidate module files under `dir`. */
+function walk(dir: string, ext: RegExp): string[] {
   const out: string[] = []
-  for (const name of entries) {
-    if (!name.endsWith('.ts') || name.endsWith('.test.ts')) continue
+  for (const name of readdirSync(dir)) {
     const full = resolve(dir, name)
-    if (!statSync(full).isFile()) continue
-    out.push(full)
+    if (statSync(full).isDirectory()) {
+      out.push(...walk(full, ext))
+    } else if (ext.test(name) && !isExcluded(name)) {
+      out.push(full)
+    }
   }
   return out
 }
@@ -85,24 +112,40 @@ function isExempt(file: string): boolean {
 }
 
 /**
- * Return the service modules absent from the doc. Pure over the
+ * Return modules absent from their doc home. Pure over the
  * filesystem so the test can point it at a fixture repo root.
  */
 export function findUndocumentedModules(repoRoot: string = REPO_ROOT): Undocumented[] {
-  let doc: string
-  try {
-    doc = readFileSync(resolve(repoRoot, DOC_FILE), 'utf-8')
-  } catch (err) {
-    throw new CheckError(
-      `[doc-coverage] could not read ${DOC_FILE}: ${(err as Error).message}`,
-    )
+  const docCache = new Map<string, string>()
+  const readDoc = (rel: string): string => {
+    let text = docCache.get(rel)
+    if (text === undefined) {
+      try {
+        text = readFileSync(resolve(repoRoot, rel), 'utf-8')
+      } catch (err) {
+        throw new CheckError(
+          `[doc-coverage] could not read ${rel}: ${(err as Error).message}`,
+        )
+      }
+      docCache.set(rel, text)
+    }
+    return text
   }
+
   const missing: Undocumented[] = []
-  for (const file of serviceModules(repoRoot)) {
-    const basename = file.slice(file.lastIndexOf('/') + 1)
-    if (doc.includes(basename)) continue
-    if (isExempt(file)) continue
-    missing.push({ file: relative(repoRoot, file), basename })
+  for (const root of COVERAGE_ROOTS) {
+    const fullDir = resolve(repoRoot, root.dir)
+    // A missing root directory is not an error — it lets the test
+    // point at a partial fixture, and tolerates optional surfaces.
+    if (!existsSync(fullDir)) continue
+    const doc = readDoc(root.doc)
+    for (const file of walk(fullDir, root.ext)) {
+      const basename = file.slice(file.lastIndexOf('/') + 1)
+      // `/<basename>` boundary — see header note on `me.ts`/`time.ts`.
+      if (doc.includes(`/${basename}`)) continue
+      if (isExempt(file)) continue
+      missing.push({ file: relative(repoRoot, file), basename, doc: root.doc })
+    }
   }
   return missing
 }
@@ -110,18 +153,18 @@ export function findUndocumentedModules(repoRoot: string = REPO_ROOT): Undocumen
 export function formatReport(missing: readonly Undocumented[]): string {
   if (missing.length === 0) return ''
   const lines = [
-    `[doc-coverage] ${missing.length} service module${
+    `[doc-coverage] ${missing.length} module${
       missing.length === 1 ? '' : 's'
-    } missing from ${DOC_FILE}'s module map:`,
+    } missing from the module map:`,
     '',
   ]
-  for (const m of missing) lines.push(`  ${m.file}`)
+  for (const m of missing) lines.push(`  ${m.file}  → add to ${m.doc}`)
   lines.push(
     '',
-    `Add a row to the module-map table in ${DOC_FILE} (see the`,
-    '"Module map" section). If a module genuinely needs no row',
-    '(throwaway shim, obvious from a documented sibling), add',
-    '`// doc-exempt: <reason>` to its source.',
+    'Add a row to the module-map table in CLAUDE.md (SPA map for',
+    '`src/`, Rust map for `src-tauri/src/`). If a module genuinely',
+    'needs no row (throwaway shim, obvious from a documented',
+    'sibling), add `// doc-exempt: <reason>` to its source.',
   )
   return lines.join('\n')
 }
@@ -142,7 +185,7 @@ function run(): void {
     process.exit(1)
   }
   // eslint-disable-next-line no-console
-  console.log('✓ Every src/services module is in the CLAUDE.md module map.')
+  console.log('✓ Every source module is in the CLAUDE.md module map.')
 }
 
 if (
