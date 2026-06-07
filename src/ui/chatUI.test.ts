@@ -949,6 +949,24 @@ describe('playReturningGreeting (§9.3)', () => {
     expect(document.querySelector('.chat-disclosure-footnote')).toBeNull()
   })
 
+  it('converts <<LOAD:...>> markers to inline placeholders and applies rewrite', async () => {
+    const { triggerOpeningTurn } = await import('../services/docentService')
+    vi.mocked(triggerOpeningTurn).mockImplementation(async function* () {
+      yield { type: 'delta' as const, text: 'Welcome back! Try <<LOAD:bad-id>> ' }
+      // rewrite delivers the validated text (invalid id stripped server-side)
+      yield { type: 'rewrite' as const, text: 'Welcome back! Try <<LOAD:sea-surface-temp>>' }
+      yield { type: 'done' as const, fallback: false }
+    })
+    const cb = makeCallbacks()
+    initChatUI(cb)
+    await playReturningGreeting({ daysSince: 2, newSinceTitles: [], recentTitles: [] })
+
+    const msg = getMessages()[0]
+    // Raw marker syntax must never leak into the rendered greeting text.
+    expect(msg.text).not.toContain('<<LOAD:')
+    expect(msg.text).toContain('[[LOAD:sea-surface-temp]]')
+  })
+
   it('drops the placeholder when the greeting stream yields nothing', async () => {
     const { triggerOpeningTurn } = await import('../services/docentService')
     // eslint-disable-next-line require-yield

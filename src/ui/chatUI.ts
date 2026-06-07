@@ -978,6 +978,30 @@ export async function playReturningGreeting(returning: ReturningUserContext): Pr
         docentMsg.actions.push(chunk.action)
         updateStreamingMessage(docentMsg)
         scrollToBottom()
+      } else if (chunk.type === 'rewrite') {
+        // Validated final text (invalid dataset IDs stripped) — same as
+        // handleSend, so the greeting can't reference a non-existent id.
+        docentMsg.text = chunk.text
+        updateStreamingMessage(docentMsg)
+      } else if (chunk.type === 'done') {
+        // Attach LLM context so feedback payloads carry it (non-enumerable
+        // so saveSession won't serialize it to sessionStorage).
+        Object.defineProperty(docentMsg, 'llmContext', {
+          value: chunk.llmContext ?? { systemPrompt: '', model: '', readingLevel: 'general', visionEnabled: false, fallback: true, historyCompressed: false },
+          writable: true,
+          configurable: true,
+          enumerable: false,
+        })
+        // Convert <<LOAD:...>> markers to inline [[LOAD:...]] placeholders
+        // so load buttons render in place — otherwise the raw marker
+        // syntax would leak into the greeting text.
+        if (docentMsg.text) {
+          docentMsg.text = docentMsg.text.replace(
+            /<?<LOAD:([^>]+)>>?\n?/g,
+            (_, id) => `[[LOAD:${id.trim()}]]`,
+          ).trim()
+          updateStreamingMessage(docentMsg)
+        }
       }
       // Greeting ignores auto-load / globe-control actions — it should
       // offer, not act, and no dataset is loaded in catalog mode.
@@ -1006,6 +1030,9 @@ export async function playReturningGreeting(returning: ReturningUserContext): Pr
   renderMessages()
   scrollToBottom()
   saveSession()
+  // Announce for screen-reader users, mirroring handleSend — the
+  // greeting auto-opens, so without this an AT user gets no cue.
+  callbacks.announce(t('chat.announce.docentResponded'))
 }
 
 function setSendEnabled(enabled: boolean): void {
