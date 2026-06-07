@@ -101,6 +101,35 @@ npm run build:desktop # tsc + vite build + tauri build
 | `src/services/llmProvider.ts` | OpenAI-compatible SSE streaming client + `/models` fetch |
 | `src/services/downloadService.ts` | Offline dataset download manager (desktop only, Tauri commands) |
 | `src/services/tilePreloader.ts` | Eagerly fetches low-zoom GIBS tiles into cache on startup |
+| `src/services/catalogSource.ts` | Build-time switch for where `dataService` / `datasetLoader` source catalog data (SOS snapshot vs node catalog) |
+| `src/services/relatedDatasets.ts` | Algorithmic related-dataset recommendations |
+| `src/services/visitMemory.ts` | Local-only log of which datasets the user has opened (localStorage) |
+| `src/services/qaService.ts` | Loads / queries the preprocessed Q&A knowledge base (local docent path) |
+| `src/services/deepLinkService.ts` | Deep-link handler — `zyra://` URLs and `/dataset/…` links |
+| `src/services/shareService.ts` | Share datasets via the Web Share API or clipboard |
+| `src/services/screenshotService.ts` | Captures the globe canvas (+ optional UI) as a compressed JPEG data URL |
+| `src/services/zipDownloadService.ts` | Web-only "package a dataset as a `.zip`" entry point |
+| `src/services/heroService.ts` | Picks the single "Right now" hero candidate for the catalog landing surface |
+| `src/services/generalFeedbackService.ts` | Posts app-level feedback (bug / feature / other) to `/api/general-feedback` |
+| `src/services/playlistService.ts` | CRUD over user-curated dataset sequences (localStorage) |
+| `src/services/playlistPlayback.ts` | "Active playlist" state machine |
+| `src/services/datasetFilter.ts` | Catalog filter predicate engine — shared by the chip rail and the Graph / Map / Timeline views |
+| `src/services/catalogGraph.ts` | Catalog **Graph** view — pure transform from a filtered catalog to a cytoscape node/edge graph (facet/keyword co-occurrence) |
+| `src/services/catalogMap.ts` | Catalog **Map** view — pure transform to one bbox overlay per dataset (geographic coverage) |
+| `src/services/catalogTimeline.ts` | Catalog **Timeline** view — pure transform to one row per dataset on a shared time axis |
+| `src/services/datasetOverlayOptions.ts` | Pure helpers for the dataset-overlay rendering path (Phase 3e) |
+| `src/services/markdownRenderer.ts` | Markdown → safe HTML renderer (Orbit messages, doc content) |
+| `src/services/docentDegradedState.ts` | Session-scoped degraded-mode state for the docent |
+| `src/services/appleIntelligenceProvider.ts` | On-device LLM Orbit backend via Apple's Foundation Models framework (macOS) |
+| `src/services/uiScaleService.ts` | Runtime side of the `--ui-scale` token (§7.1) |
+| `src/services/shaderSettingsService.ts` | Runtime side of the globe-shader uniforms (§7.2) |
+| `src/services/atmosphereConstants.ts` | Atmospheric-scattering constants + GLSL snippets shared by `earthTileLayer` and the VR/Orbit Earth |
+| `src/services/atmosphereLut.ts` | Transmittance look-up table (LUT) for atmospheric scattering |
+| `src/services/vrBorders.ts` | VR country / coastline borders overlay — thin transparent shell outside the globe surface |
+| `src/services/vrBrowse.ts` | In-VR dataset browse panel (CanvasTexture) — switch datasets without exiting immersive mode |
+| `src/services/vrTimeLabel.ts` | In-VR dataset time label — billboarded floating panel above the globe |
+| `src/services/vrTourControls.ts` | In-VR tour control strip — prev / play-pause / next / stop + step counter |
+| `src/services/vrTourOverlay.ts` | In-VR tour overlay manager — CanvasTexture + VideoTexture panels replacing the 2D `tourUI` surface |
 | `src/ui/chatUI.ts` | Orbit chat panel — rendering, settings, trigger positioning |
 | `src/ui/browseUI.ts` | Dataset browse/search overlay |
 | `src/ui/downloadUI.ts` | Download manager panel — view/delete cached datasets (desktop only) |
@@ -131,6 +160,36 @@ npm run build:desktop # tsc + vite build + tauri build
 | `src/ui/privacyUI.ts` | Tools → Privacy panel — tier picker (off / essential / research), session-id display, what-we-collect explainer |
 | `src/ui/disclosureBanner.ts` | First-launch privacy disclosure banner — shown once per install, dismisses to default Essential tier |
 | `functions/api/ingest.ts` | Cloudflare Pages Function — receives telemetry batches, stamps `event_type` / `environment` / `country` / `internal` server-side, writes to Workers Analytics Engine |
+
+> **Note:** the table above is the **SPA** module map. It is
+> linted for completeness against `src/services/` by
+> `npm run check:doc-coverage` (see _Module-map coverage_ below).
+> The `src/ui/` layer is large and only partially listed here;
+> add a row when you introduce a non-obvious panel.
+
+### Backend subsystems (`functions/` + `cli/`)
+
+The Cloudflare Pages Functions backend and the publisher CLI are
+**not** in the SPA module map above — they have their own plan
+docs under `docs/CATALOG_*`. The major clusters, for orientation:
+
+| Subsystem | Where | What |
+|---|---|---|
+| Semantic search & embeddings | `functions/api/v1/_lib/{embeddings,vectorize-store,embed-dataset-job,search-datasets}.ts` | Vector embeddings + Vectorize-backed semantic dataset search. Authoritative plan: `docs/CATALOG_BACKEND_PLAN.md`. |
+| Publisher | `cli/`, `src/ui/publisher/`, `functions/api/v1/` (`dataset-mutations`, `tour-mutations`, `publisher-store`) | Authoring/publishing datasets & tours into the node catalog. See `docs/CATALOG_PUBLISHING_TOOLS.md`. |
+| R2 asset/tour migration | `cli/` + `functions/api/v1/_lib/` (`migrate-r2-*`, `rollback-r2-*`) | One-off migrations of assets/tours into R2. See `docs/CATALOG_ASSETS_PIPELINE.md`. |
+
+### Module-map coverage
+
+`npm run check:doc-coverage` (in the `type-check` chain) fails CI
+if a top-level `src/services/*.ts` module is missing from the
+module-map table above. When you add a service, add its row in the
+same PR. For a module that genuinely warrants no row (throwaway
+shim, obvious from a documented sibling), add `// doc-exempt:
+<reason>` to its source — the reason is mandatory, same convention
+as `i18n-exempt:`. The check covers `src/services/` only; `src/ui/`
+and the `functions/` + `cli/` backend are intentionally out of
+scope (the backend has its own `docs/CATALOG_*` plan docs).
 
 ---
 
