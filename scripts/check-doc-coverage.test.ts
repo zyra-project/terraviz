@@ -92,6 +92,13 @@ describe('check-doc-coverage · findUndocumentedModules', () => {
     expect(findUndocumentedModules(root)).toEqual([])
   })
 
+  it('does NOT honour doc-exempt outside a // line comment (e.g. in a string)', () => {
+    const root = fixtureRepo('(empty map)\n', {
+      'src/ui/shim.ts': 'export const note = "doc-exempt: not a real comment"\n',
+    })
+    expect(findUndocumentedModules(root).map(m => m.basename)).toEqual(['shim.ts'])
+  })
+
   it('does NOT honour a bare doc-exempt with no reason', () => {
     const root = fixtureRepo('(empty map)\n', {
       'src/ui/shim.ts': '// doc-exempt:\nexport const x = 1\n',

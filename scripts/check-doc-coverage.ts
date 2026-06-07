@@ -80,11 +80,14 @@ const EXCLUDE_BASENAME: readonly RegExp[] = [
   /^test-setup\.ts$/,
 ]
 
-/** `// doc-exempt: <reason>` — reason (≥1 non-space char) mandatory,
- *  and on the SAME line as the marker. `[^\S\n]` is "whitespace
- *  except newline", so a bare `doc-exempt:` at end of line followed
- *  by code on the next line does NOT count as a reason. */
-const DOC_EXEMPT_RE = /\bdoc-exempt:[^\S\n]*\S/
+/** `// doc-exempt: <reason>` — must be a real `//` line comment, with
+ *  a reason (≥1 non-space char) on the SAME line. Requiring the `//`
+ *  marker stops a stray `doc-exempt:` inside a string literal or other
+ *  text from silently exempting a module. `[^\n]*` keeps the `//` and
+ *  the marker on one line; `[^\S\n]` ("whitespace except newline")
+ *  means a bare `doc-exempt:` at end of line does NOT count as a
+ *  reason. */
+const DOC_EXEMPT_RE = /\/\/[^\n]*\bdoc-exempt:[^\S\n]*\S/
 
 class CheckError extends Error {}
 
