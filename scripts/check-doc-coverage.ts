@@ -17,16 +17,18 @@
  *
  *   - `src/`           → CLAUDE.md SPA module map
  *   - `src-tauri/src/` → CLAUDE.md Rust module map
- *   - `functions/`, `cli/` → their own `docs/CATALOG_*` plan docs,
- *     so they are deliberately NOT covered here (a CLAUDE.md check
- *     would be the wrong tool — it would force backend files into
- *     the SPA map).
+ *   - `functions/`, `cli/` → `docs/BACKEND_MODULES.md` (the backend
+ *     map — kept out of CLAUDE.md because it's helper-dense and
+ *     route-shaped, and sits with the `docs/CATALOG_*` plan docs).
  *
- * "Documented" means `/<basename>` (e.g. `/relatedDatasets.ts`)
- * appears anywhere in the root's `doc` file. The maps always render
- * a row as a full path — `` `src/services/<name>` `` — so the `/`
- * boundary both matches those and prevents a shorter name passing
- * spuriously as a substring of a longer one (`me.ts` ⊂ `time.ts`).
+ * "Documented" means the module's full repo-relative path (e.g.
+ * `functions/api/v1/publish/datasets/[id].ts`) appears anywhere in
+ * the root's `doc` file. The maps render each row as a full path —
+ * `` `src/services/<name>` `` — so this matches, and a full-path
+ * match is required because the route-based backend layout repeats
+ * basenames across directories (three different `[id].ts`,
+ * `manifest.ts`, `publish.ts`, …) — a basename match would let one
+ * documented copy spuriously cover the rest.
  *
  * Exclusions (not module-map material):
  *   - `*.test.ts` — tests.
@@ -61,6 +63,12 @@ interface CoverageRoot {
 const COVERAGE_ROOTS: readonly CoverageRoot[] = [
   { dir: 'src', doc: 'CLAUDE.md', ext: /\.ts$/ },
   { dir: 'src-tauri/src', doc: 'CLAUDE.md', ext: /\.rs$/ },
+  // The backend (Cloudflare Pages Functions + publisher CLI) has its
+  // own module map — it's helper-dense and route-shaped, and lives
+  // alongside the `docs/CATALOG_*` plan docs rather than bloating the
+  // SPA map in CLAUDE.md.
+  { dir: 'functions', doc: 'docs/BACKEND_MODULES.md', ext: /\.ts$/ },
+  { dir: 'cli', doc: 'docs/BACKEND_MODULES.md', ext: /\.ts$/ },
 ]
 
 /** Basenames that are never module-map material (generated / infra). */
@@ -140,11 +148,12 @@ export function findUndocumentedModules(repoRoot: string = REPO_ROOT): Undocumen
     if (!existsSync(fullDir)) continue
     const doc = readDoc(root.doc)
     for (const file of walk(fullDir, root.ext)) {
-      const basename = file.slice(file.lastIndexOf('/') + 1)
-      // `/<basename>` boundary — see header note on `me.ts`/`time.ts`.
-      if (doc.includes(`/${basename}`)) continue
+      const rel = relative(repoRoot, file)
+      // Full-path match — basenames repeat across the backend's
+      // route dirs, so a basename match would be ambiguous.
+      if (doc.includes(rel)) continue
       if (isExempt(file)) continue
-      missing.push({ file: relative(repoRoot, file), basename, doc: root.doc })
+      missing.push({ file: rel, basename: file.slice(file.lastIndexOf('/') + 1), doc: root.doc })
     }
   }
   return missing

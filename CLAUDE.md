@@ -148,6 +148,7 @@ npm run build:desktop # tsc + vite build + tauri build
 | `src/utils/vrCapability.ts` | Feature detection — `navigator.xr`, `immersive-vr`, `immersive-ar` support — plus `getInputArchetype()` (controller / screen / transient) and `classifyXrDevice(ua, mode)` (UA-based bucket for `vr_session_started.device_class`) |
 | `src/utils/vrPersistence.ts` | WebXR anchor persistent-handle save/load (localStorage) for cross-session placement stability |
 | `src/utils/viewPreferences.ts` | Persists Dataset info + Legend toggle state to localStorage |
+| `src/analytics/index.ts` | Telemetry public surface — call sites import `emit()` / `flush()` only from this barrel |
 | `src/analytics/emitter.ts` | Telemetry queue + tier gate + batched dispatch + pagehide beacon flush |
 | `src/analytics/transport.ts` | `fetch()` + `sendBeacon()` transport with response classification (ok/retry/permanent) |
 | `src/analytics/config.ts` | `TelemetryTier` persistence (`sos-telemetry-config`); compile-time `TELEMETRY_BUILD_ENABLED` / `TELEMETRY_CONSOLE_MODE` flags |
@@ -163,6 +164,7 @@ npm run build:desktop # tsc + vite build + tauri build
 | `src/config/endpoints.ts` | Externally-hosted endpoint configuration (catalog / proxy / NOAA / NASA base URLs) |
 | `src/types/image-sequence-constants.ts` | Constants shared by the publisher API (`functions/`), the GHA runner (`cli/`), and the portal (`src/`) for the image-sequence upload pipeline |
 | `src/data/regions.ts` | Common region bounding boxes for name-based region resolution |
+| `src/services/orbitCharacter/index.ts` | `OrbitController` — public API for the Orbit character (owns the Three.js scene, rAF loop, state machine) |
 | `src/services/orbitCharacter/orbitScene.ts` | Three.js scene + per-frame update for the Orbit character |
 | `src/services/orbitCharacter/orbitMaterials.ts` | Materials + shaders for the Orbit character |
 | `src/services/orbitCharacter/orbitStates.ts` | Persistent-state vocabulary (STATES table) for the Orbit character |
@@ -186,6 +188,7 @@ npm run build:desktop # tsc + vite build + tauri build
 | `src/ui/orbitPostMessageBridge.ts` | postMessage bridge between the host SPA and the embedded Orbit page |
 | `src/ui/domUtils.ts` | Small DOM helpers shared across UI modules |
 | `src/ui/sanitizeHtml.ts` | Allowlist-based HTML sanitizer for untrusted input |
+| `src/ui/publisher/index.ts` | Publisher portal entry point — lazy-loaded on `/publish/*`; mounts the History-API router + pages |
 | `src/ui/publisher/router.ts` | Tiny History-API router for the publisher portal |
 | `src/ui/publisher/api.ts` | Shared HTTP client for the publisher portal |
 | `src/ui/publisher/types.ts` | Wire types for portal-bound publisher API responses |
@@ -202,6 +205,7 @@ npm run build:desktop # tsc + vite build + tauri build
 | `src/ui/publisher/pages/tours.ts` | `/publish/tours` — tour-creator landing page |
 | `src/ui/publisher/pages/featured-hero.ts` | `/publish/featured-hero` — set the "Right now" hero override (`docs/HERO_ADMIN_SCOPING.md`) |
 | `src/ui/publisher/pages/me.ts` | `/publish/me` — current-user identity + role display |
+| `src/ui/tourAuthoring/index.ts` | Tour-authoring public surface — detects `?tourEdit=` and mounts the dock |
 | `src/ui/tourAuthoring/dock.ts` | Floating tour-authoring dock — attaches to SPA chrome on `/?tourEdit=<id>` (or `=new`) |
 | `src/ui/tourAuthoring/state.ts` | In-memory tour-authoring state — dock reads/writes here; `autosave.ts` flushes it |
 | `src/ui/tourAuthoring/autosave.ts` | Debounced autosave for the tour-authoring dock |
@@ -226,9 +230,12 @@ npm run build:desktop # tsc + vite build + tauri build
 
 ### Backend subsystems (`functions/` + `cli/`)
 
-The Cloudflare Pages Functions backend and the publisher CLI are
-**not** in the SPA module map above — they have their own plan
-docs under `docs/CATALOG_*`. The major clusters, for orientation:
+The Cloudflare Pages Functions backend and the publisher CLI have
+their own per-module map in
+[`docs/BACKEND_MODULES.md`](docs/BACKEND_MODULES.md) (one row per
+file, enforced by `check:doc-coverage`) and their design rationale
+in the `docs/CATALOG_*` plan docs. The major clusters, for
+orientation:
 
 | Subsystem | Where | What |
 |---|---|---|
@@ -248,12 +255,16 @@ as `i18n-exempt:`.
 
 **Scope** (an explicit manifest in `scripts/check-doc-coverage.ts`):
 
-- **Covered:** all of `src/` and `src-tauri/src/`, recursively.
+- **Covered:** all of `src/` and `src-tauri/src/` against this file,
+  recursively; all of `functions/` and `cli/` against
+  [`docs/BACKEND_MODULES.md`](docs/BACKEND_MODULES.md) (the backend
+  map — helper-dense and route-shaped, kept out of CLAUDE.md and
+  next to the `docs/CATALOG_*` plan docs).
 - **Excluded:** generated code (`messages*.ts` i18n codegen),
   `*.d.ts`, `*.test.ts`, and `test-setup.ts`.
-- **Delegated, not covered:** `functions/` and `cli/` (the
-  backend) live in `docs/CATALOG_*`, not the CLAUDE.md module map —
-  a CLAUDE.md check would be the wrong tool for them.
+- Matching is on the **full repo-relative path**, because the
+  backend's route layout repeats basenames across directories
+  (multiple `[id].ts`, `manifest.ts`, `publish.ts`).
 
 ### Architecture graph (`/graphify`)
 

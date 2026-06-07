@@ -64,6 +64,27 @@ describe('check-doc-coverage · findUndocumentedModules', () => {
     expect(findUndocumentedModules(root).map(m => m.basename)).toEqual(['me.ts'])
   })
 
+  it('checks functions/ against docs/BACKEND_MODULES.md, by full path', () => {
+    // Two route handlers share a basename across dirs (the backend's
+    // shape) — documenting one must NOT cover the other.
+    const root = fixtureRepo('', {
+      'functions/a/[id].ts': 'export const a = 1\n',
+      'functions/b/[id].ts': 'export const b = 2\n',
+      'docs/BACKEND_MODULES.md': '| `functions/a/[id].ts` | A |\n',
+    })
+    const missing = findUndocumentedModules(root)
+    expect(missing.map(m => m.file)).toEqual(['functions/b/[id].ts'])
+    expect(missing[0]?.doc).toBe('docs/BACKEND_MODULES.md')
+  })
+
+  it('checks cli/ against docs/BACKEND_MODULES.md', () => {
+    const root = fixtureRepo('', {
+      'cli/terraviz.ts': 'export const t = 1\n',
+      'docs/BACKEND_MODULES.md': '(empty)\n',
+    })
+    expect(findUndocumentedModules(root).map(m => m.file)).toEqual(['cli/terraviz.ts'])
+  })
+
   it('honours a // doc-exempt: marker with a reason', () => {
     const root = fixtureRepo('(empty map)\n', {
       'src/ui/shim.ts': '// doc-exempt: throwaway re-export, obvious from barrel\nexport * from "./x"\n',
