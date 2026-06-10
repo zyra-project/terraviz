@@ -310,7 +310,7 @@ export function validateRunStatusInput(
   body: unknown,
 ): { ok: true; value: RunStatusInput } | { ok: false; errors: WorkflowValidationError[] } {
   const errors: WorkflowValidationError[] = []
-  if (typeof body !== 'object' || body === null) {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
     return { ok: false, errors: [err('body', 'invalid_body', 'Body must be a JSON object.')] }
   }
   const b = body as Record<string, unknown>

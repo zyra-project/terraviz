@@ -87,11 +87,13 @@ export async function renderWorkflowDetailPage(
     void runFn(id).then(result => {
       runBtn.disabled = false
       if (!result.ok) {
-        runStatus.textContent =
-          result.kind === 'server' && result.status === 409
-            ? t('publisher.workflows.runNow.inProgress')
-            : t('publisher.workflows.runNow.failed')
-        runStatus.classList.add('publisher-row-action-status-error')
+        const inProgress = result.kind === 'server' && result.status === 409
+        runStatus.textContent = inProgress
+          ? t('publisher.workflows.runNow.inProgress')
+          : t('publisher.workflows.runNow.failed')
+        // 409 is the active-run guard doing its job — informational,
+        // not an error (PR #176 Copilot review).
+        if (!inProgress) runStatus.classList.add('publisher-row-action-status-error')
         return
       }
       runStatus.textContent = t('publisher.workflows.runNow.queued')

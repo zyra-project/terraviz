@@ -193,25 +193,25 @@ export async function insertRun(
   workflowId: string,
   trigger: 'schedule' | 'manual',
 ): Promise<{ run: WorkflowRunRow } | { conflict: true }> {
-  const active = await db
-    .prepare(
-      `SELECT id FROM workflow_runs
-        WHERE workflow_id = ? AND status IN (${activeStatusPlaceholders})
-        LIMIT 1`,
-    )
-    .bind(workflowId, ...WORKFLOW_RUN_ACTIVE_STATUSES)
-    .first<{ id: string }>()
-  if (active) return { conflict: true }
-
   const id = newUlid()
   const now = new Date().toISOString()
-  await db
+  // Atomic guard-and-insert: the WHERE NOT EXISTS makes the
+  // active-run check and the insert one statement, so two
+  // concurrent callers can't both pass a separate SELECT and
+  // double-queue (PR #176 Copilot review). meta.changes === 0
+  // means the guard rejected us.
+  const result = await db
     .prepare(
       `INSERT INTO workflow_runs (id, workflow_id, status, trigger, created_at)
-       VALUES (?, ?, 'queued', ?, ?)`,
+       SELECT ?, ?, 'queued', ?, ?
+        WHERE NOT EXISTS (
+          SELECT 1 FROM workflow_runs
+           WHERE workflow_id = ? AND status IN (${activeStatusPlaceholders})
+        )`,
     )
-    .bind(id, workflowId, trigger, now)
+    .bind(id, workflowId, trigger, now, workflowId, ...WORKFLOW_RUN_ACTIVE_STATUSES)
     .run()
+  if ((result.meta?.changes ?? 0) === 0) return { conflict: true }
   return {
     run: {
       id,
@@ -285,11 +285,14 @@ export async function applyRunStatus(
 
   const now = new Date().toISOString()
   const isTerminal = input.status !== 'running'
+  // started_at only stamps on the running transition — a
+  // queued → failed run (dispatch died before the runner started)
+  // must keep started_at null (PR #176 Copilot review).
   await db
     .prepare(
       `UPDATE workflow_runs
           SET status = ?,
-              started_at = COALESCE(started_at, ?),
+              started_at = CASE WHEN ? THEN COALESCE(started_at, ?) ELSE started_at END,
               finished_at = CASE WHEN ? THEN ? ELSE finished_at END,
               gha_run_id = COALESCE(?, gha_run_id),
               upload_id = COALESCE(?, upload_id),
@@ -298,6 +301,7 @@ export async function applyRunStatus(
     )
     .bind(
       input.status,
+      input.status === 'running' ? 1 : 0,
       now,
       isTerminal ? 1 : 0,
       now,

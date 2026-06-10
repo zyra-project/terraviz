@@ -337,7 +337,7 @@ async function toCanonicalJson(
     const parse = parseYaml ?? (await import('yaml')).parse
     parsed = parse(text)
   }
-  if (typeof parsed !== 'object' || parsed === null) {
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new Error('not an object')
   }
   return JSON.stringify(parsed)

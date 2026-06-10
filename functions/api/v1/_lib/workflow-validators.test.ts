@@ -132,6 +132,10 @@ describe('validateRunStatusInput', () => {
     }
   })
 
+  it('rejects array bodies', () => {
+    expect(validateRunStatusInput([{ status: 'running' }]).ok).toBe(false)
+  })
+
   it('rejects queued (not a callback state) and unknown statuses', () => {
     expect(validateRunStatusInput({ status: 'queued' }).ok).toBe(false)
     expect(validateRunStatusInput({ status: 'done' }).ok).toBe(false)

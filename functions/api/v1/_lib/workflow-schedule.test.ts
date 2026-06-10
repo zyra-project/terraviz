@@ -19,6 +19,7 @@ describe('parseScheduleSeconds', () => {
     expect(parseScheduleSeconds('P1Y')).toBeNull()
     expect(parseScheduleSeconds('P')).toBeNull()
     expect(parseScheduleSeconds('PT')).toBeNull()
+    expect(parseScheduleSeconds('P1DT')).toBeNull() // bare T is not valid ISO-8601
     expect(parseScheduleSeconds('1h')).toBeNull()
     expect(parseScheduleSeconds('')).toBeNull()
   })

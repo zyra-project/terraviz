@@ -29,6 +29,9 @@ export function parseScheduleSeconds(schedule: string): number | null {
   if (!match) return null
   const [, weeks, days, hours, minutes, seconds] = match
   if (!weeks && !days && !hours && !minutes && !seconds) return null
+  // "P1DT" matches the regex with an empty time section, but a
+  // bare T is not valid ISO-8601 (PR #176 Copilot review).
+  if (schedule.includes('T') && !hours && !minutes && !seconds) return null
   return (
     Number(weeks ?? 0) * 7 * 86_400 +
     Number(days ?? 0) * 86_400 +
