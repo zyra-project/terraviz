@@ -142,6 +142,30 @@ interface AssetInitResponse {
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 
+/** POST /complete with retries — the handler's repository_dispatch
+ *  call to api.github.com can transiently 5xx (observed live in
+ *  spike run 27288385890); complete is safe to retry because a
+ *  duplicate dispatch is absorbed by the transcode guard. */
+async function completeWithRetry(
+  client: TerravizClient,
+  datasetId: string,
+  uploadId: string,
+  note: (line: string) => void,
+  attempts = 3,
+): Promise<{ ok: boolean; status: number; error?: string }> {
+  for (let i = 1; ; i++) {
+    const result = await client.completeAssetUpload(datasetId, uploadId)
+    if (result.ok) return { ok: true, status: result.status }
+    const retryable = result.status === 0 || result.status >= 500
+    if (!retryable || i >= attempts) {
+      return { ok: false, status: result.status, error: result.error }
+    }
+    note(`[spike] WARN: complete attempt ${i} → ${result.status} ${result.error}; retrying`)
+    await sleep(i * 10_000)
+  }
+}
+
+
 async function main(): Promise<number> {
   const parsed = parseArgs(process.argv.slice(2))
   if ('error' in parsed) {

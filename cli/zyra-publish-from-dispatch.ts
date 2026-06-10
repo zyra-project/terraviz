@@ -135,6 +135,28 @@ interface AssetInitResponse {
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 const log = (line: string) => console.error(`[zyra-run] ${line}`)
 
+/** POST /complete with retries — the handler's repository_dispatch
+ *  call to api.github.com can transiently 5xx (observed live in
+ *  spike run 27288385890); complete is safe to retry because a
+ *  duplicate dispatch is absorbed by the transcode guard. */
+async function completeWithRetry(
+  client: TerravizClient,
+  datasetId: string,
+  uploadId: string,
+  attempts = 3,
+): Promise<{ ok: boolean; status: number; error?: string }> {
+  for (let i = 1; ; i++) {
+    const result = await client.completeAssetUpload(datasetId, uploadId)
+    if (result.ok) return { ok: true, status: result.status }
+    const retryable = result.status === 0 || result.status >= 500
+    if (!retryable || i >= attempts) {
+      return { ok: false, status: result.status, error: result.error }
+    }
+    log(`WARN: complete attempt ${i} → ${result.status} ${result.error}; retrying`)
+    await sleep(i * 10_000)
+  }
+}
+
 /**
  * Find the pipeline's `frames-meta.json`, if it produced one.
  * Looks at `{workdir}/frames-meta.json` first (curated-template
@@ -259,9 +281,9 @@ async function phasePublish(client: TerravizClient, args: Args): Promise<number>
     return 4
   }
 
-  const complete = await client.completeAssetUpload(datasetId, uploadId)
+  const complete = await completeWithRetry(client, datasetId, uploadId)
   if (!complete.ok) {
-    log(`FAIL: complete → ${complete.status} ${complete.error}`)
+    log(`FAIL: complete → ${complete.status} ${complete.error ?? ''}`)
     return 4
   }
   log('complete ok — transcode dispatch fired')
