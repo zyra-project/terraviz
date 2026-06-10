@@ -632,6 +632,12 @@ page that copies the prior frame set into a new `upload_id` prefix +
 prompts for the additions) or commit to option B with a
 carefully-scoped append endpoint.
 
+The scheduled-workflow integration scoped in
+[`ZYRA_INTEGRATION_PLAN.md`](ZYRA_INTEGRATION_PLAN.md) is option A
+automated: a Zyra pipeline re-publishes the full asset to the same
+dataset on a cadence. Its `update_mode` field reserves the slot for
+option B, but the append design itself stays owned by this doc.
+
 The plan is to revisit this decision after Phase 1 ships and there's
 real publisher feedback on (a) how often they actually want to
 append vs. re-upload, (b) how big their typical frame sets get, and
