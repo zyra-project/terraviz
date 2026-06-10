@@ -1,0 +1,213 @@
+# Phase Z0 spike (docs/ZYRA_INTEGRATION_PLAN.md) — manually
+# triggered, throwaway-allowed. Runs one NOAA-GSL/zyra-scheduler
+# dataset pipeline (acquire → metadata → compose-video) in the
+# published zyra-scheduler container, then carries the MP4 through
+# the TerraViz publish API via cli/zyra-spike-publish.ts (ffprobe
+# SOS-spec assertion → draft/reuse → presigned PUT → complete →
+# poll for the transcode).
+#
+# What the spike measures, per the plan doc: whether Zyra's output
+# meets the SOS spec without upstream changes, real per-run minutes
+# (read the step timings on the run page), and the end-to-end
+# publish-API leg against a dev node.
+#
+# Required repo secrets (the transcode-hls.yml set):
+#   TERRAVIZ_SERVER, CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET
+name: Zyra Spike (Z0)
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_name:
+        description: 'zyra-scheduler dataset stem (datasets/<name>.env in NOAA-GSL/zyra-scheduler)'
+        required: true
+        default: 'drought'
+      zyra_image:
+        description: 'Zyra runner container image'
+        required: true
+        default: 'ghcr.io/noaa-gsl/zyra-scheduler:latest'
+      dataset_id:
+        description: 'Existing TerraViz dataset ULID to overwrite in place (blank = create a fresh draft)'
+        required: false
+        default: ''
+      publish:
+        description: 'Publish the dataset once the transcode lands'
+        type: boolean
+        required: false
+        default: false
+      wait_seconds:
+        description: 'How long to wait for the transcode (0 = fire and forget)'
+        required: false
+        default: '900'
+
+permissions:
+  contents: read
+
+# One spike at a time — the publish leg can target a shared dev row.
+concurrency:
+  group: zyra-spike
+  cancel-in-progress: false
+
+jobs:
+  spike:
+    runs-on: ubuntu-22.04
+    # Pipeline + transcode wait; generous next to the 6 h job cap.
+    timeout-minutes: 90
+    steps:
+      - name: Validate inputs
+        env:
+          DATASET_NAME: ${{ inputs.dataset_name }}
+          DATASET_ID: ${{ inputs.dataset_id }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$DATASET_NAME" =~ ^[a-z0-9_-]+$ ]]; then
+            echo "::error::dataset_name must match ^[a-z0-9_-]+$ (it becomes a URL path segment)"
+            exit 1
+          fi
+          if [[ -n "$DATASET_ID" ]] && ! [[ "$DATASET_ID" =~ ^[0-9A-HJKMNP-TV-Z]{26}$ ]]; then
+            echo "::error::dataset_id must be a 26-char ULID"
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ffprobe for the publish CLI's SOS-spec assertion. Ubuntu
+      # 22.04's ffmpeg 4.4 is sufficient (same rationale as
+      # transcode-hls.yml).
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Fetch dataset config from zyra-scheduler
+        env:
+          DATASET_NAME: ${{ inputs.dataset_name }}
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            "https://raw.githubusercontent.com/NOAA-GSL/zyra-scheduler/main/datasets/${DATASET_NAME}.env" \
+            -o dataset.env
+          echo "Fetched datasets/${DATASET_NAME}.env:"
+          cat dataset.env
+
+      # The three Zyra stages, verbatim from zyra-scheduler's
+      # reusable workflow (acquire ftp → transform metadata →
+      # visualize compose-video), run inside its published
+      # container via docker so this job keeps the Node toolchain
+      # for the publish leg. Per-stage wall times land in
+      # _work/zyra-timings.txt for the run summary.
+      - name: Run Zyra pipeline (acquire → metadata → compose)
+        env:
+          DATASET_NAME: ${{ inputs.dataset_name }}
+          ZYRA_IMAGE: ${{ inputs.zyra_image }}
+        run: |
+          set -euo pipefail
+          mkdir -p _work
+          docker run --rm --entrypoint "" --user 0 \
+            -v "$PWD/_work:/work" \
+            -v "$PWD/dataset.env:/dataset.env:ro" \
+            -e DATASET_NAME="$DATASET_NAME" \
+            "$ZYRA_IMAGE" \
+            bash -c '
+              set -euo pipefail
+              set -a; source /dataset.env; set +a
+              FRAMES_DIR="/work/images/${DATASET_NAME}"
+              OUTPUT_PATH="/work/output/${DATASET_NAME}.mp4"
+              TIMINGS="/work/zyra-timings.txt"
+              mkdir -p "$FRAMES_DIR/metadata" "/work/output"
+
+              t0=$SECONDS
+              zyra acquire ftp \
+                "ftp://${FTP_HOST}${FTP_PATH}" \
+                --sync-dir "$FRAMES_DIR" \
+                --since-period "$SINCE_PERIOD" \
+                --pattern "$PATTERN" \
+                --date-format "$DATE_FORMAT"
+              echo "acquire: $((SECONDS - t0))s" | tee -a "$TIMINGS"
+
+              t0=$SECONDS
+              zyra transform metadata \
+                --frames-dir "$FRAMES_DIR" \
+                --pattern "$PATTERN" \
+                --datetime-format "$DATE_FORMAT" \
+                --period-seconds "$PERIOD_SECONDS" \
+                --output "$FRAMES_DIR/metadata/frames-meta.json"
+              echo "metadata: $((SECONDS - t0))s" | tee -a "$TIMINGS"
+
+              t0=$SECONDS
+              if [ -n "${BASEMAP_IMAGE:-}" ] && [ -f "${BASEMAP_IMAGE:-}" ]; then
+                zyra visualize compose-video \
+                  --frames "$FRAMES_DIR" \
+                  --output "$OUTPUT_PATH" \
+                  --basemap "$BASEMAP_IMAGE"
+              else
+                [ -n "${BASEMAP_IMAGE:-}" ] && echo "WARN: BASEMAP_IMAGE=$BASEMAP_IMAGE not found in container; composing without basemap"
+                zyra visualize compose-video \
+                  --frames "$FRAMES_DIR" \
+                  --output "$OUTPUT_PATH"
+              fi
+              echo "compose: $((SECONDS - t0))s" | tee -a "$TIMINGS"
+
+              ls -la /work/output/
+            '
+
+      - name: Publish to TerraViz
+        env:
+          TERRAVIZ_SERVER: ${{ secrets.TERRAVIZ_SERVER }}
+          # cli/lib/config.ts env names, fed from the same repo
+          # secrets transcode-hls.yml uses.
+          TERRAVIZ_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          TERRAVIZ_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          DATASET_NAME: ${{ inputs.dataset_name }}
+          DATASET_ID: ${{ inputs.dataset_id }}
+          PUBLISH: ${{ inputs.publish }}
+          WAIT_SECONDS: ${{ inputs.wait_seconds }}
+        run: |
+          set -euo pipefail
+          ARGS=(
+            "--video=_work/output/${DATASET_NAME}.mp4"
+            "--title=Zyra Z0 spike — ${DATASET_NAME}"
+            "--wait-seconds=${WAIT_SECONDS}"
+            "--report=_work/spike-report.md"
+          )
+          [[ -n "$DATASET_ID" ]] && ARGS+=("--dataset-id=${DATASET_ID}")
+          [[ "$PUBLISH" == "true" ]] && ARGS+=("--publish")
+          npx tsx cli/zyra-spike-publish.ts "${ARGS[@]}"
+
+      - name: Run summary
+        if: always()
+        run: |
+          {
+            echo "## Zyra Z0 spike — ${{ inputs.dataset_name }}"
+            echo
+            if [ -f _work/zyra-timings.txt ]; then
+              echo '### Zyra stage timings'
+              echo '```'
+              cat _work/zyra-timings.txt
+              echo '```'
+            fi
+            if [ -f _work/spike-report.md ]; then
+              cat _work/spike-report.md
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload spike artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zyra-spike-${{ inputs.dataset_name }}
+          path: |
+            _work/output/*.mp4
+            _work/images/*/metadata/frames-meta.json
+            _work/zyra-timings.txt
+            _work/spike-report.md
+          if-no-files-found: warn
+          retention-days: 7
