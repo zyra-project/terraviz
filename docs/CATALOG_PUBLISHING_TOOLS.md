@@ -14,6 +14,11 @@ and is lazy-loaded the same way Three.js is — the main bundle is
 unchanged for non-publisher visitors. Code lives under
 `src/ui/publisher/**`.
 
+Scheduled, workflow-driven publishing — Zyra pipelines that keep
+real-time datasets fresh from a `/publish/workflows` section — is
+scoped separately in
+[`ZYRA_INTEGRATION_PLAN.md`](ZYRA_INTEGRATION_PLAN.md).
+
 ## Phase 3 implementation conventions
 
 A short collection of decisions that apply across every page of
