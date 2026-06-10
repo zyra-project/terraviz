@@ -90,6 +90,16 @@ export function validateWorkflow(
   return publisherSend(`${BASE}/${encodeURIComponent(id)}/validate`, body)
 }
 
+/** Minimal draft creation for the workflow form's "Create draft
+ *  dataset" button (Phase Z3) — title + format are all the publish
+ *  API requires to persist a draft shell; the workflow's first run
+ *  fills in the asset and timing. */
+export function createDraftDataset(
+  title: string,
+): Promise<PublisherSendResult<{ dataset: { id: string } }>> {
+  return publisherSend('/api/v1/publish/datasets', { title, format: 'video/mp4' })
+}
+
 export function runWorkflow(
   id: string,
 ): Promise<PublisherSendResult<{ run: PublisherWorkflowRun; mocked: boolean }>> {
