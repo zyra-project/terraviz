@@ -31,10 +31,12 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `cli/lib/r2-upload.ts` | R2 S3-API bulk uploader for HLS bundles |
 | `cli/lib/realtime-title.ts` | Heuristic to detect "real-time" SOS rows by title — the rows whose Vimeo source is re-uploaded on a recurring (typically daily) cadence by NOAA's automation |
 | `cli/lib/snapshot-import.ts` | Pure row-mapping helpers for the SOS catalog snapshot importer |
+| `cli/lib/sos-spec.ts` | ffprobe wrapper + SOS-spec assertion (4096×2048 2:1, 30 fps, h264) shared by the Z0 spike and the Z1 runner |
 | `cli/lib/srt-to-vtt.ts` | SRT → WebVTT converter |
 | `cli/lib/tour-json-parser.ts` | SOS tour.json parser — discovers every URL-bearing field in a tour file and classifies it for migration |
 | `cli/lib/verify-checks.ts` | Production-deploy verification checks for `terraviz verify-deploy` |
 | `cli/lib/vimeo-source.ts` | Resolve a `vimeo:<id>` reference to a source MP4 download URL |
+| `cli/lib/workflow-sidecar.ts` | Metadata-sidecar rendering for the Zyra runner — template interpolation, frames-meta range reader, error-summary sanitizer |
 | `cli/list-realtime-r2.ts` | `terraviz list-realtime-r2` — find migrated rows whose Vimeo source is on a daily re-upload cadence, and recover the original Vimeo id so they can be rolled back |
 | `cli/migrate-r2-assets.ts` | `terraviz migrate-r2-assets` — migrate auxiliary asset URLs (thumbnail / legend / caption / color-table) from NOAA-hosted CloudFront URLs to R2-hosted URLs under … |
 | `cli/migrate-r2-hls.ts` | `terraviz migrate-r2-hls` — migrate legacy `vimeo:<id>` data_refs to R2-hosted HLS bundles for 4K spherical streaming |
@@ -45,6 +47,7 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `cli/terraviz.ts` | `terraviz` CLI entry point |
 | `cli/transcode-from-dispatch.ts` | `transcode-from-dispatch` — invoked by the `transcode-hls` GitHub Actions workflow when the publisher portal fires a `repository_dispatch` after a video upload lands in R2 |
 | `cli/verify-deploy.ts` | `terraviz verify-deploy` — operator-friendly post-deploy smoke-test command |
+| `cli/zyra-publish-from-dispatch.ts` | `zyra-publish-from-dispatch` — Phase Z1 runner CLI (fetch / publish / report-failure phases) invoked by the `zyra-run` GitHub Actions workflow |
 | `cli/zyra-spike-publish.ts` | `zyra-spike-publish` — Phase Z0 spike (see `docs/ZYRA_INTEGRATION_PLAN.md`): ffprobe SOS-spec assertion + publish-API leg for an MP4 a Zyra pipeline rendered on the runner; invoked by the manual `zyra-spike` GitHub Actions workflow |
 
 ## Platform & feedback Pages Functions (`functions/api/`)
@@ -111,6 +114,13 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `functions/api/v1/publish/tours/[id]/publish.ts` | POST /api/v1/publish/tours/{id}/publish |
 | `functions/api/v1/publish/tours/[id]/retract.ts` | POST /api/v1/publish/tours/{id}/retract |
 | `functions/api/v1/publish/tours/draft.ts` | POST /api/v1/publish/tours/draft |
+| `functions/api/v1/publish/workflows.ts` | /api/v1/publish/workflows — Zyra workflow collection (Phase Z1, `docs/ZYRA_INTEGRATION_PLAN.md`) |
+| `functions/api/v1/publish/workflows/[id].ts` | /api/v1/publish/workflows/{id} — read (incl. the runner's definition fetch) + PATCH |
+| `functions/api/v1/publish/workflows/[id]/run.ts` | POST /api/v1/publish/workflows/{id}/run — queue an execution + fire the `zyra-run` dispatch |
+| `functions/api/v1/publish/workflows/[id]/runs.ts` | GET /api/v1/publish/workflows/{id}/runs — run history |
+| `functions/api/v1/publish/workflows/[id]/runs/[run_id]/status.ts` | POST /api/v1/publish/workflows/{id}/runs/{run_id}/status — runner lifecycle callbacks |
+| `functions/api/v1/publish/workflows/[id]/validate.ts` | POST /api/v1/publish/workflows/{id}/validate — static pipeline/template dry-run |
+| `functions/api/v1/publish/workflows/due.ts` | GET /api/v1/publish/workflows/due — the scheduler tick's due list |
 
 ## Backend shared library (`_lib/`)
 
@@ -149,5 +159,8 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `functions/api/v1/_lib/tour-mutations.ts` | Publisher-API write paths for the `tours` table |
 | `functions/api/v1/_lib/ulid.ts` | Single source of truth for ULID minting on the publisher write paths |
 | `functions/api/v1/_lib/validators.ts` | Field-level validators for the publisher-API write paths |
+| `functions/api/v1/_lib/workflow-schedule.ts` | ISO-8601 duration parsing + `next_run_at` math for Zyra workflows |
+| `functions/api/v1/_lib/workflow-store.ts` | D1 data layer for `workflows` + `workflow_runs` (incl. the due query and run-status transitions) |
+| `functions/api/v1/_lib/workflow-validators.ts` | Workflow body validation — the stage/command allowlist boundary, metadata-template checks, run-status callbacks |
 | `functions/api/v1/_lib/vectorize-store.ts` | Vectorize helpers — Phase 1c |
 

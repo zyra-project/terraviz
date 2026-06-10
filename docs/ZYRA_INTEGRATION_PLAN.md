@@ -226,11 +226,15 @@ the same Access middleware as the rest of `/publish`:
 
 `.github/workflows/zyra-scheduler.yml`: a `schedule:` cron firing
 every 15 minutes that calls `GET /workflows/due` with the service
-token and fires one `repository_dispatch` (`event_type: zyra-run`)
-per due workflow. The dispatch payload carries only identifiers
-(`workflow_id`, `run_id`) — the runner fetches the pipeline
-definition from the API, so a stale dispatch can never execute a
-stale pipeline.
+token, then POSTs `/workflows/{id}/run` (`{"trigger":"schedule"}`)
+per due workflow. The **Worker** owns run-row creation and fires
+the `zyra-run` `repository_dispatch` itself, with the
+`GITHUB_DISPATCH_TOKEN` it already holds for transcode dispatches —
+the scheduler job needs no GitHub credentials beyond the keepalive
+step's own `GITHUB_TOKEN`. The dispatch payload carries only
+identifiers (`workflow_id`, `run_id`) — the runner fetches the
+pipeline definition from the API, so a stale dispatch can never
+execute a stale pipeline.
 
 GHA cron granularity is 5 minutes and real-world jitter is
 minutes-scale under load. For the hourly-and-slower cadences this
@@ -432,7 +436,7 @@ in order of importance:
 | Phase | Scope | Demoable state |
 |---|---|---|
 | **Z0 — spike** | Adapt one [`zyra-scheduler`](https://github.com/NOAA-GSL/zyra-scheduler) dataset (e.g. drought): run its pipeline in a manually-triggered GHA workflow, swap the Vimeo/S3 upload leg for a hand-rolled publish-API sequence against a dev node, ffprobe-assert the MP4 against the SOS spec, record real per-run minutes. Also settles open question 2 (`zyra export s3` vs R2) empirically. No schema, no portal, throwaway code allowed. **Artifacts landed:** `.github/workflows/zyra-spike.yml` + `cli/zyra-spike-publish.ts` — trigger via Actions → "Zyra Spike (Z0)". | A real NOAA real-time dataset lands in a dev catalog from a button press; the Z1 contract is built on observed behaviour, not docs. |
-| **Z1 — contract + runner** | Migration (`workflows`, `workflow_runs`); CRUD + `due` + `run` + status routes; `zyra-scheduler.yml` + `zyra-run.yml`; `cli/zyra-publish-from-dispatch.ts` with the Verify preflight; sidecar template spec. Authoring via API / raw YAML only. | An operator registers a pipeline with `curl`, and an hourly dataset updates itself end-to-end. |
+| **Z1 — contract + runner** | Migration (`workflows`, `workflow_runs`); CRUD + `due` + `run` + status routes; `zyra-scheduler.yml` + `zyra-run.yml`; `cli/zyra-publish-from-dispatch.ts` with the Verify preflight; sidecar template spec. Authoring via API / raw YAML only. **Artifacts landed:** `migrations/catalog/0018_workflows.sql`; `functions/api/v1/publish/workflows/**` + the `_lib/workflow-{store,schedule,validators}.ts` trio; `src/types/zyra-workflow-constants.ts` (the shared stage allowlist); both GHA workflows; the runner CLI with `cli/lib/sos-spec.ts` + `cli/lib/workflow-sidecar.ts`. Surfaces marked `Z0-pending` in source (allowlist contents, runner-image pin, frames-meta shape) get re-verified against the spike run before Z1 merges. | An operator registers a pipeline with `curl`, and an hourly dataset updates itself end-to-end. |
 | **Z2 — portal UI** | `/publish/workflows` list / new / edit / history pages; enable toggle; Run now; status badges. | A staff publisher manages workflows without leaving the dashboard. |
 | **Z3 — guided authoring** | Curated pipeline templates; stage-form builder over the allowlist; richer validation surfacing; log links. | A publisher who has never read Zyra docs ships a working hourly pipeline. |
 | **Z4 — real-time UX + upstream** | SPA consumes `period` for freshness (the §7.4 marker driven by data, targeted catalog-cache bypass for due datasets); upstream proposals to NOAA-GSL/zyra (`--preset sos`, `export terraviz`, Narrate/Verify input); alignment with federation Tier 0 once Phase 4 ships. | The catalog visibly knows which datasets are live, and the Zyra-side ergonomics stop being our fork's problem. |
