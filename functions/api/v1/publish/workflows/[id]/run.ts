@@ -52,15 +52,22 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
   const workflow = await getWorkflow(context.env.CATALOG_DB, id)
   if (!workflow) return jsonError(404, 'not_found', 'Workflow not found.')
 
+  // An empty body defaults to manual (the portal's Run now sends
+  // none); malformed JSON is a 400 like every other endpoint
+  // (PR #176 Copilot review).
   let trigger: 'manual' | 'schedule' = 'manual'
-  try {
-    const body = (await context.request.json()) as { trigger?: unknown }
+  const raw = await context.request.text()
+  if (raw.trim().length > 0) {
+    let body: { trigger?: unknown }
+    try {
+      body = JSON.parse(raw) as { trigger?: unknown }
+    } catch {
+      return jsonError(400, 'invalid_json', 'Request body is not valid JSON.')
+    }
     if (body.trigger === 'schedule') trigger = 'schedule'
     else if (body.trigger !== undefined && body.trigger !== 'manual') {
       return jsonError(400, 'invalid_body', 'trigger must be "manual" or "schedule".')
     }
-  } catch {
-    // Empty body is fine — defaults to manual.
   }
 
   // Dispatch-time re-validation against the CURRENT allowlist.

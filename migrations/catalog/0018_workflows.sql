@@ -19,7 +19,7 @@
 -- vocabulary as `datasets.period`, not cron. `next_run_at` is
 -- computed server-side on save and bumped when a scheduled run is
 -- queued; the GHA scheduler tick reads `enabled = 1 AND next_run_at
--- <= now` (see the partial index below).
+-- <= now` (see the index below).
 --
 -- `workflow_runs` is one row per execution, append-only apart from
 -- status transitions (queued → running → succeeded/failed/canceled).

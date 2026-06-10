@@ -27,7 +27,7 @@ function jsonError(status: number, error: string, message: string): Response {
   })
 }
 
-export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
+export const onRequestPost: PagesFunction<CatalogEnv, 'id' | 'run_id'> = async context => {
   if (!context.env.CATALOG_DB) {
     return jsonError(503, 'binding_missing', 'CATALOG_DB binding is not configured on this deployment.')
   }

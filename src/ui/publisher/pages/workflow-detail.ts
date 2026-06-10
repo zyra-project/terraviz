@@ -152,7 +152,14 @@ function buildSummary(workflow: PublisherWorkflow): HTMLElement {
     ],
     [
       t('publisher.workflows.detail.nextRun'),
-      workflow.next_run_at ?? t('publisher.workflows.lastRun.never'),
+      // Disabled clears next_run_at by design — say "Disabled",
+      // not "Never" (PR #176 Copilot review); format the
+      // timestamp like the rest of the page when present.
+      !workflow.enabled
+        ? t('publisher.workflows.enabled.off')
+        : workflow.next_run_at
+          ? formatDate(workflow.next_run_at)
+          : t('publisher.workflows.lastRun.never'),
     ],
   ]
   if (workflow.description) {
