@@ -8,6 +8,10 @@
  *       existence of other publishers' drafts.
  * PUT → Patch metadata. Same authorisation rule as GET.
  *
+ * DELETE → Hard-delete a non-published row (drafts + retracted).
+ *       409 `published` for live rows (retract first) and
+ *       `transcode_in_progress` for rows mid-encode.
+ *
  * `publish`, `retract`, `preview` are sibling files under
  * [id]/ to keep each handler small.
  */
@@ -17,6 +21,7 @@ import type { PublisherData } from '../_middleware'
 import { writeDatasetAudit } from '../../_lib/audit-store'
 import { getDecorations } from '../../_lib/catalog-store'
 import {
+  deleteDataset,
   getDatasetForPublisher,
   updateDataset,
 } from '../../_lib/dataset-mutations'
@@ -106,5 +111,18 @@ export const onRequestPut: PagesFunction<CatalogEnv, 'id'> = async context => {
   return new Response(JSON.stringify({ dataset: result.dataset }), {
     status: 200,
     headers: { 'Content-Type': CONTENT_TYPE, 'Cache-Control': 'private, no-store' },
+  })
+}
+
+export const onRequestDelete: PagesFunction<CatalogEnv, 'id'> = async context => {
+  const publisher = (context.data as unknown as PublisherData).publisher
+  const id = pickId(context)
+  if (!id) return jsonError(400, 'invalid_request', 'Missing dataset id.')
+  const result = await deleteDataset(context.env, publisher, id)
+  if (!result.ok) return jsonError(result.status, result.error, result.message)
+  await writeDatasetAudit(context.env.CATALOG_DB!, publisher, 'dataset.delete', id)
+  return new Response(JSON.stringify({ deleted_id: result.deleted_id }), {
+    status: 200,
+    headers: { 'Content-Type': CONTENT_TYPE },
   })
 }
