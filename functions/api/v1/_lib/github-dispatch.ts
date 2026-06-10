@@ -111,6 +111,19 @@ export interface TranscodeFramesDispatchPayload {
  *  workflow's `on: repository_dispatch: types:` entry. */
 export const TRANSCODE_HLS_EVENT_TYPE = 'transcode-hls'
 
+/** Event type for the Zyra workflow runner (Phase Z1,
+ *  `docs/ZYRA_INTEGRATION_PLAN.md`). Must match
+ *  `.github/workflows/zyra-run.yml`'s `types:` entry. */
+export const ZYRA_RUN_EVENT_TYPE = 'zyra-run'
+
+/** Identifiers only — the runner fetches the pipeline definition
+ *  back from the API so a stale dispatch can never execute a stale
+ *  pipeline. */
+export interface ZyraRunDispatchPayload {
+  workflow_id: string
+  run_id: string
+}
+
 /**
  * Send the dispatch. Returns `{ ok: true }` on success, throws
  * `ConfigurationError` if the env isn't wired, `UpstreamError` if
@@ -126,6 +139,25 @@ export async function dispatchTranscode(
   payload: TranscodeDispatchPayload,
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ ok: true; mocked: boolean }> {
+  return sendRepositoryDispatch(env, TRANSCODE_HLS_EVENT_TYPE, payload, fetchImpl)
+}
+
+/** Fire the Zyra runner for one queued workflow run. Same env,
+ *  token, and mock semantics as {@link dispatchTranscode}. */
+export async function dispatchZyraRun(
+  env: GitHubDispatchEnv,
+  payload: ZyraRunDispatchPayload,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ ok: true; mocked: boolean }> {
+  return sendRepositoryDispatch(env, ZYRA_RUN_EVENT_TYPE, payload, fetchImpl)
+}
+
+async function sendRepositoryDispatch(
+  env: GitHubDispatchEnv,
+  eventType: string,
+  clientPayload: unknown,
+  fetchImpl: typeof fetch,
+): Promise<{ ok: true; mocked: boolean }> {
   if (env.MOCK_GITHUB_DISPATCH === 'true') {
     return { ok: true, mocked: true }
   }
@@ -137,8 +169,8 @@ export async function dispatchTranscode(
   }
   const url = `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/dispatches`
   const body = JSON.stringify({
-    event_type: TRANSCODE_HLS_EVENT_TYPE,
-    client_payload: payload,
+    event_type: eventType,
+    client_payload: clientPayload,
   })
   let res: Response
   try {

@@ -24,7 +24,7 @@ import { newUlid } from './ulid'
 export type AuditActorKind = 'publisher' | 'peer' | 'system'
 
 /** Distinct kinds of subject the publisher API records actions on. */
-export type AuditSubjectKind = 'dataset' | 'tour' | 'peer' | 'grant'
+export type AuditSubjectKind = 'dataset' | 'tour' | 'peer' | 'grant' | 'workflow'
 
 /**
  * `action` is a free-form, dotted token recording *what happened*.
@@ -40,6 +40,9 @@ export type AuditAction =
   | 'dataset.retract'
   | 'hero.set'
   | 'hero.clear'
+  | 'workflow.create'
+  | 'workflow.update'
+  | 'workflow.run'
 
 export interface AuditEventInput {
   actor_kind: AuditActorKind
