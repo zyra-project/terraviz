@@ -16,7 +16,8 @@
 
 import { t } from '../../../i18n'
 import { plural } from '../../../i18n'
-import { clearWarmupFlag, handleSessionError, publisherGet } from '../api'
+import { clearWarmupFlag, handleSessionError, publisherGet, publisherSend,
+} from '../api'
 import { buildErrorCard, type ErrorCardDetails } from '../components/error-card'
 import type {
   DatasetLifecycle,
@@ -27,6 +28,9 @@ import { lifecycleOf } from '../types'
 
 export interface DatasetsPageOptions {
   fetchFn?: typeof fetch
+  /** Confirmation hook — defaults to `window.confirm`. Tests
+   *  inject a stub (the tours-list convention). */
+  confirm?: (message: string) => boolean
   sleep?: (ms: number) => Promise<void>
   navigate?: (url: string) => void
   /** History-API router-navigate fn the page uses to switch
@@ -140,6 +144,8 @@ function formatDate(iso: string): string {
 function renderTable(
   datasets: PublisherDataset[],
   routerNavigate: ((path: string) => void) | undefined,
+  fetchFn?: typeof fetch,
+  confirmFn: (message: string) => boolean = message => window.confirm(message),
 ): HTMLElement {
   const tableWrap = document.createElement('div')
   tableWrap.className = 'publisher-table-wrap publisher-glass'
@@ -155,6 +161,7 @@ function renderTable(
     'publisher.datasets.col.format',
     'publisher.datasets.col.updated',
     'publisher.datasets.col.status',
+    'publisher.datasets.col.actions',
   ]
   for (const key of headerKeys) {
     const th = document.createElement('th')
@@ -225,6 +232,44 @@ function renderTable(
     statusCell.appendChild(statusBadge)
     tr.appendChild(statusCell)
 
+    // Delete (×) — non-published rows only (mirrors the tours-list
+    // delete; live rows must be retracted first, which the API
+    // enforces with a 409 regardless of what the UI shows).
+    const actionsCell = document.createElement('td')
+    if (status !== 'published') {
+      const deleteBtn = document.createElement('button')
+      deleteBtn.type = 'button'
+      deleteBtn.className = 'publisher-row-action publisher-row-delete'
+      deleteBtn.textContent = t('publisher.datasets.action.delete')
+      deleteBtn.setAttribute(
+        'aria-label',
+        t('publisher.datasets.action.delete.aria', { title: d.title }),
+      )
+      const statusSpan = document.createElement('span')
+      statusSpan.className = 'publisher-row-action-status'
+      deleteBtn.addEventListener('click', () => {
+        if (!confirmFn(t('publisher.datasets.delete.confirm', { title: d.title }))) return
+        deleteBtn.disabled = true
+        statusSpan.textContent = ''
+        void publisherSend<{ deleted_id: string }>(
+          `/api/v1/publish/datasets/${encodeURIComponent(d.id)}`,
+          undefined,
+          { method: 'DELETE', fetchFn },
+        ).then(result => {
+          if (!result.ok) {
+            deleteBtn.disabled = false
+            statusSpan.textContent = t('publisher.datasets.delete.failed')
+            statusSpan.classList.add('publisher-row-action-status-error')
+            return
+          }
+          tr.remove()
+        })
+      })
+      actionsCell.appendChild(deleteBtn)
+      actionsCell.appendChild(statusSpan)
+    }
+    tr.appendChild(actionsCell)
+
     tbody.appendChild(tr)
   }
   table.appendChild(tbody)
@@ -238,6 +283,7 @@ type TableHeaderKey =
   | 'publisher.datasets.col.format'
   | 'publisher.datasets.col.updated'
   | 'publisher.datasets.col.status'
+  | 'publisher.datasets.col.actions'
 
 function renderCount(n: number): HTMLElement {
   const el = document.createElement('p')
@@ -303,6 +349,7 @@ function renderListShell(
   content: HTMLElement,
   state: PageState,
   options: Required<Pick<DatasetsPageOptions, 'fetchFn' | 'sleep' | 'navigate'>> & {
+    confirm?: (message: string) => boolean
     routerNavigate: (path: string) => void
   },
 ): void {
@@ -323,7 +370,7 @@ function renderListShell(
   }
 
   shell.appendChild(renderCount(state.datasets.length))
-  shell.appendChild(renderTable(state.datasets, options.routerNavigate))
+  shell.appendChild(renderTable(state.datasets, options.routerNavigate, options.fetchFn, options.confirm))
 
   if (state.nextCursor) {
     shell.appendChild(
@@ -404,6 +451,7 @@ export async function renderDatasetsPage(
     isLoadingMore: false,
   }
   renderListShell(content, state, {
+    confirm: options.confirm,
     fetchFn: options.fetchFn ?? globalThis.fetch,
     sleep: options.sleep ?? (ms => new Promise(r => setTimeout(r, ms))),
     navigate: options.navigate ?? (url => {

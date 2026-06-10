@@ -321,3 +321,89 @@ describe('renderDatasetsPage', () => {
     expect(mount.querySelector('.publisher-error')).toBeNull()
   })
 })
+
+describe('renderDatasetsPage — delete action', () => {
+  const originalPath = window.location.pathname + window.location.search
+  let mount: HTMLDivElement
+
+  beforeEach(() => {
+    mount = document.createElement('div')
+    document.body.appendChild(mount)
+    sessionStorage.clear()
+    window.history.replaceState(null, '', '/publish/datasets')
+  })
+
+  afterEach(() => {
+    window.history.replaceState(null, '', originalPath)
+    vi.restoreAllMocks()
+  })
+
+  function listThen(deleteResponse: Response, rows: RawDataset[]) {
+    // First call: the list fetch; subsequent: the DELETE.
+    return vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ datasets: rows, next_cursor: null }))
+      .mockResolvedValue(deleteResponse)
+  }
+
+  it('shows the delete button only for non-published rows', async () => {
+    const fetchFn = listThen(jsonResponse({ deleted_id: 'x' }), [
+      dataset({ id: '01AAA', published_at: null }),
+      dataset({ id: '01BBB' }), // published
+    ])
+    await renderDatasetsPage(mount, { fetchFn: fetchFn as unknown as typeof fetch })
+    const rows = mount.querySelectorAll('tbody tr')
+    expect(rows[0].querySelector('.publisher-row-delete')).not.toBeNull()
+    expect(rows[1].querySelector('.publisher-row-delete')).toBeNull()
+  })
+
+  it('does not call DELETE when the confirm dialog is cancelled', async () => {
+    const fetchFn = listThen(jsonResponse({ deleted_id: '01AAA' }), [
+      dataset({ id: '01AAA', published_at: null }),
+    ])
+    await renderDatasetsPage(mount, {
+      fetchFn: fetchFn as unknown as typeof fetch,
+      confirm: () => false,
+    })
+    mount.querySelector<HTMLButtonElement>('.publisher-row-delete')?.click()
+    await Promise.resolve()
+    expect(fetchFn).toHaveBeenCalledTimes(1) // list only
+    expect(mount.querySelector('tbody tr')).not.toBeNull()
+  })
+
+  it('removes the row after a confirmed, successful DELETE', async () => {
+    const fetchFn = listThen(jsonResponse({ deleted_id: '01AAA' }), [
+      dataset({ id: '01AAA', published_at: null }),
+    ])
+    await renderDatasetsPage(mount, {
+      fetchFn: fetchFn as unknown as typeof fetch,
+      confirm: () => true,
+    })
+    mount.querySelector<HTMLButtonElement>('.publisher-row-delete')?.click()
+    await vi.waitFor(() => {
+      expect(mount.querySelector('tbody tr')).toBeNull()
+    })
+    expect(fetchFn).toHaveBeenLastCalledWith(
+      '/api/v1/publish/datasets/01AAA',
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+  })
+
+  it('shows an inline error and keeps the row when DELETE fails', async () => {
+    const fetchFn = listThen(
+      new Response(JSON.stringify({ error: 'published' }), { status: 409 }),
+      [dataset({ id: '01AAA', published_at: null })],
+    )
+    await renderDatasetsPage(mount, {
+      fetchFn: fetchFn as unknown as typeof fetch,
+      confirm: () => true,
+    })
+    mount.querySelector<HTMLButtonElement>('.publisher-row-delete')?.click()
+    await vi.waitFor(() => {
+      expect(
+        mount.querySelector('.publisher-row-action-status-error')?.textContent,
+      ).toBeTruthy()
+    })
+    expect(mount.querySelector('tbody tr')).not.toBeNull()
+  })
+})

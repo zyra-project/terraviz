@@ -38,6 +38,7 @@ export type AuditAction =
   | 'dataset.update'
   | 'dataset.publish'
   | 'dataset.retract'
+  | 'dataset.delete'
   | 'hero.set'
   | 'hero.clear'
   | 'workflow.create'

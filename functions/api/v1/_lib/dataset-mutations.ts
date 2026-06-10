@@ -896,3 +896,92 @@ export async function retractDataset(
     .first<DatasetRow>()
   return { ok: true, dataset: after! }
 }
+
+/**
+ * Hard-delete a dataset — the cleanup path the Z0 spike drafts
+ * surfaced the need for (tours have had one since 3pt/G).
+ * Restricted to rows that are not currently published (retract
+ * first) and not mid-transcode. Removes the D1 row (decoration
+ * tables cascade via their FKs), drops the docent embedding,
+ * invalidates the snapshot, and best-effort deletes the row's R2
+ * prefixes (`uploads/`, `videos/`, `datasets/`) so storage doesn't
+ * leak with the row. Visibility gating goes through
+ * `getDatasetForPublisher`, so a community publisher can only
+ * delete their own rows; staff / admin / service can delete any.
+ */
+export async function deleteDataset(
+  env: CatalogEnv,
+  publisher: PublisherRow,
+  id: string,
+  deps: MutationDeps = {},
+): Promise<
+  | { ok: true; deleted_id: string }
+  | { ok: false; status: number; error: string; message: string }
+> {
+  const db = env.CATALOG_DB!
+  const row = await getDatasetForPublisher(db, publisher, id)
+  if (!row) {
+    return { ok: false, status: 404, error: 'not_found', message: `Dataset ${id} not found.` }
+  }
+  if (row.published_at && !row.retracted_at) {
+    return {
+      ok: false,
+      status: 409,
+      error: 'published',
+      message: 'Retract the dataset before deleting it.',
+    }
+  }
+  if ((row as { transcoding?: number | null }).transcoding) {
+    return {
+      ok: false,
+      status: 409,
+      error: 'transcode_in_progress',
+      message: 'A transcode is in flight; wait for it to finish before deleting.',
+    }
+  }
+  // Conditional delete re-asserts the guards atomically — a row
+  // that became published or started transcoding between the
+  // pre-read and this statement survives, and meta.changes tells
+  // us to re-diagnose (PR #177 Copilot review, TOCTOU).
+  const deleted = await db
+    .prepare(
+      `DELETE FROM datasets
+        WHERE id = ?
+          AND (published_at IS NULL OR retracted_at IS NOT NULL)
+          AND (transcoding IS NULL OR transcoding = 0)`,
+    )
+    .bind(id)
+    .run()
+  if ((deleted.meta?.changes ?? 0) === 0) {
+    return {
+      ok: false,
+      status: 409,
+      error: 'conflict',
+      message: 'The dataset changed state (published or transcoding) before the delete landed; refresh and retry.',
+    }
+  }
+  await invalidateSnapshot(env)
+  // Idempotent at the helper level — deleting a vector that was
+  // never written (drafts are unembedded) is a no-op.
+  await enqueueDeleteEmbedding(deps, env, id)
+  if (env.CATALOG_R2) {
+    for (const prefix of [`uploads/${id}/`, `videos/${id}/`, `datasets/${id}/`]) {
+      try {
+        // Bounded best-effort: a few pages per prefix. Anything
+        // beyond that waits for the storage-GC job scoped in
+        // docs/ZYRA_INTEGRATION_PLAN.md §Open questions — D1 is
+        // the canonical "dataset exists" state and is already
+        // cleared.
+        for (let page = 0; page < 5; page++) {
+          const listing = await env.CATALOG_R2.list({ prefix, limit: 500 })
+          if (listing.objects.length === 0) break
+          await Promise.all(listing.objects.map(o => env.CATALOG_R2!.delete(o.key)))
+          if (!listing.truncated) break
+        }
+      } catch {
+        // R2 hiccup must not fail the delete.
+      }
+    }
+  }
+  return { ok: true, deleted_id: id }
+}

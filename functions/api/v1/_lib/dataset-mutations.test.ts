@@ -18,6 +18,7 @@ import { describe, expect, it } from 'vitest'
 import type { PublisherRow } from './publisher-store'
 import {
   createDataset,
+  deleteDataset,
   DELETE_EMBEDDING_JOB_NAME,
   EMBED_JOB_NAME,
   getDatasetForPublisher,
@@ -859,5 +860,81 @@ describe('reindexDataset — bulk re-embed entry point (1d/D)', () => {
     expect(result.status).toBe(503)
     expect(result.errors[0].code).toBe('embed_unconfigured')
     expect(queue.records).toEqual([])
+  })
+})
+
+describe('deleteDataset', () => {
+  it('hard-deletes a draft and enqueues the embedding delete', async () => {
+    // setupEmbedEnv wires the Vectorize binding — without it the
+    // embedding-delete enqueue is deliberately gated off.
+    const { env } = setupEmbedEnv()
+    const created = await createDataset(env as never, STAFF, {
+      title: 'Disposable draft',
+      format: 'video/mp4',
+    })
+    if (!created.ok) throw new Error('setup create failed')
+    const queue = new CapturingJobQueue()
+    const result = await deleteDataset(env as never, STAFF, created.dataset.id, {
+      jobQueue: queue,
+    })
+    expect(result).toEqual({ ok: true, deleted_id: created.dataset.id })
+    expect(await getDatasetForPublisher(env.CATALOG_DB, STAFF, created.dataset.id)).toBeNull()
+    expect(queue.records).toEqual([
+      { name: DELETE_EMBEDDING_JOB_NAME, payload: { dataset_id: created.dataset.id } },
+    ])
+  })
+
+  it("404s when a community publisher targets someone else's row", async () => {
+    const { env } = setupEnv()
+    const created = await createDataset(env as never, STAFF, {
+      title: 'Staff-owned draft',
+      format: 'video/mp4',
+    })
+    if (!created.ok) throw new Error('setup create failed')
+    const result = await deleteDataset(env as never, COMMUNITY, created.dataset.id)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(404)
+    expect(await getDatasetForPublisher(env.CATALOG_DB, STAFF, created.dataset.id)).not.toBeNull()
+  })
+
+  it('409s on a published row, then allows delete once retracted', async () => {
+    const { sqlite, env } = setupEnv()
+    const created = await createDataset(env as never, STAFF, {
+      title: 'Published row',
+      format: 'video/mp4',
+    })
+    if (!created.ok) throw new Error('setup create failed')
+    sqlite
+      .prepare('UPDATE datasets SET published_at = ? WHERE id = ?')
+      .run('2026-06-01T00:00:00.000Z', created.dataset.id)
+    const published = await deleteDataset(env as never, STAFF, created.dataset.id)
+    expect(published.ok).toBe(false)
+    if (!published.ok) {
+      expect(published.status).toBe(409)
+      expect(published.error).toBe('published')
+    }
+    sqlite
+      .prepare('UPDATE datasets SET retracted_at = ? WHERE id = ?')
+      .run('2026-06-02T00:00:00.000Z', created.dataset.id)
+    const retracted = await deleteDataset(env as never, STAFF, created.dataset.id)
+    expect(retracted.ok).toBe(true)
+  })
+
+  it('409s while a transcode is in flight', async () => {
+    const { sqlite, env } = setupEnv()
+    const created = await createDataset(env as never, STAFF, {
+      title: 'Mid-transcode row',
+      format: 'video/mp4',
+    })
+    if (!created.ok) throw new Error('setup create failed')
+    sqlite
+      .prepare('UPDATE datasets SET transcoding = 1 WHERE id = ?')
+      .run(created.dataset.id)
+    const result = await deleteDataset(env as never, STAFF, created.dataset.id)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.status).toBe(409)
+      expect(result.error).toBe('transcode_in_progress')
+    }
   })
 })
