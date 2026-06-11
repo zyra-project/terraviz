@@ -774,6 +774,14 @@ don't have:
 
 ## Phase 2 — R2 / Iceberg for Zyra
 
+> **Superseded for sequencing** by
+> [`ANALYTICS_STORAGE_AND_ADMIN_PLAN.md`](ANALYTICS_STORAGE_AND_ADMIN_PLAN.md):
+> long-term retention lands first as a nightly export (AE SQL API →
+> R2 raw NDJSON + D1 rollups) powering an in-app admin dashboard.
+> Iceberg remains the promotion path for that R2 archive when Zyra
+> needs it, rather than the first step. The sketch below is kept as
+> the original design context.
+
 Client and Pages Function are unchanged. The Function fans out:
 
 ```mermaid

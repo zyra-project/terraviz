@@ -24,6 +24,11 @@ production data, or audit the privacy posture.
 >   — the design history (14-commit rollout). Useful as historical
 >   context; not authoritative for the current schema — that role
 >   belongs to this file plus the type union in `src/types/index.ts`.
+> - [`ANALYTICS_STORAGE_AND_ADMIN_PLAN.md`](ANALYTICS_STORAGE_AND_ADMIN_PLAN.md)
+>   — the read-side plan: long-term storage beyond Analytics Engine's
+>   30–90 day retention (nightly export → R2 raw archive + D1
+>   rollups) and the in-app `/publish/analytics` + `/publish/feedback`
+>   admin tabs that demote Grafana to an optional extra.
 
 ## Two-tier consent model
 
