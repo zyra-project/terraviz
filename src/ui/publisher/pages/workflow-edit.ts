@@ -5,7 +5,8 @@
  * The pipeline is authored as YAML (or JSON — `JSON.parse` is
  * tried first) in a textarea and converted to canonical JSON
  * client-side before save, keeping a YAML parser out of the Pages
- * Functions bundle. The `yaml` package is lazy-imported on first
+ * Functions bundle; on edit, the stored JSON is rendered back to
+ * YAML so the editor always shows Zyra's native dialect. The `yaml` package is lazy-imported on first
  * parse so it only ever loads inside the publisher chunk, and only
  * for publishers who actually open this form. Validate calls the
  * server's static dry-run (`POST /{id}/validate`); per-field
@@ -37,6 +38,8 @@ export interface WorkflowEditPageOptions {
   confirm?: (message: string) => boolean
   /** YAML parser injection point for tests (avoids the lazy import). */
   parseYaml?: (text: string) => unknown
+  /** YAML serializer injection point for tests (avoids the lazy import). */
+  stringifyYaml?: (value: unknown) => string
 }
 
 /** Schedule presets offered via a datalist; the field stays free
@@ -66,6 +69,7 @@ export async function renderWorkflowEditPage(
   const getFn = options.getFn ?? getWorkflow
 
   let existing: PublisherWorkflow | null = null
+  let pipelineDisplay = ''
   if (id) {
     content.replaceChildren(messageShell(t('publisher.workflows.loading')))
     const result = await getFn(id)
@@ -75,9 +79,30 @@ export async function renderWorkflowEditPage(
       return
     }
     existing = result.data.workflow
+    // Storage is canonical JSON, but publishers author and read
+    // YAML — it's what Zyra produces and saves natively — so the
+    // editor round-trips the stored pipeline back to YAML for
+    // display. Save converts YAML→JSON as before.
+    pipelineDisplay = await toDisplayYaml(existing.pipeline_json, options.stringifyYaml)
   }
 
-  content.replaceChildren(buildForm(existing, navigate, options))
+  content.replaceChildren(buildForm(existing, pipelineDisplay, navigate, options))
+}
+
+/** Stored canonical JSON → display YAML. Falls back to the raw
+ *  stored string when it doesn't parse (it is still editable, and
+ *  save-side validation reports the real problem). */
+async function toDisplayYaml(
+  pipelineJson: string,
+  stringifyYaml?: (value: unknown) => string,
+): Promise<string> {
+  try {
+    const parsed = JSON.parse(pipelineJson) as unknown
+    const stringify = stringifyYaml ?? (await import('yaml')).stringify
+    return stringify(parsed)
+  } catch {
+    return pipelineJson
+  }
 }
 
 function messageShell(message: string): HTMLElement {
@@ -121,6 +146,7 @@ function buildField(
 
 function buildForm(
   existing: PublisherWorkflow | null,
+  pipelineDisplay: string,
   navigate: (url: string) => void,
   options: WorkflowEditPageOptions,
 ): HTMLElement {
@@ -232,7 +258,7 @@ function buildForm(
   pipeline.className = 'publisher-form-input publisher-form-textarea'
   pipeline.rows = 14
   pipeline.spellcheck = false
-  pipeline.value = existing ? prettyJson(existing.pipeline_json) : ''
+  pipeline.value = pipelineDisplay
 
   const template = document.createElement('textarea')
 

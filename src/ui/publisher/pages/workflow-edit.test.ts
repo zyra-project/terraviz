@@ -13,6 +13,47 @@ describe('errorArea', () => {
   })
 })
 
+describe('renderWorkflowEditPage — YAML display round-trip', () => {
+  it('shows the stored pipeline as YAML when editing', async () => {
+    const mount = document.createElement('div')
+    document.body.replaceChildren(mount)
+    const stored = JSON.stringify({
+      stages: [{ stage: 'visualize', command: 'compose-video', args: { output: '/work/output/dataset.mp4' } }],
+    })
+    const getFn = vi.fn().mockResolvedValue({
+      ok: true,
+      data: {
+        workflow: {
+          id: '01HX0000000000000000000000',
+          publisher_id: 'p',
+          name: 'W',
+          description: null,
+          pipeline_json: stored,
+          metadata_template: '{}',
+          schedule: 'P1D',
+          enabled: false,
+          target_dataset_id: '01HX0000000000000000000001',
+          update_mode: 'overwrite',
+          last_run_at: null,
+          next_run_at: null,
+          created_at: '',
+          updated_at: '',
+        },
+      },
+    })
+    const { stringify } = await import('yaml')
+    await renderWorkflowEditPage(mount, '01HX0000000000000000000000', {
+      navigate: () => {},
+      getFn,
+      stringifyYaml: stringify,
+    })
+    const pipeline = mount.querySelector('textarea')!
+    expect(pipeline.value).toContain('stages:')
+    expect(pipeline.value).toContain('command: compose-video')
+    expect(pipeline.value.trim().startsWith('{')).toBe(false)
+  })
+})
+
 describe('renderWorkflowEditPage — guided authoring', () => {
   let mount: HTMLDivElement
 
