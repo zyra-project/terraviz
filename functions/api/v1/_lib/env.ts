@@ -228,6 +228,35 @@ export interface CatalogEnv {
    */
   MOCK_AI?: string
   /**
+   * R2 bucket binding for the long-term analytics archive
+   * (`terraviz-analytics` — deliberately separate from
+   * `terraviz-assets` so asset lifecycle rules and access policies
+   * never entangle with telemetry). The nightly export job writes
+   * one `events/v1/YYYY/MM/DD.ndjson.gz` object per UTC day. See
+   * `docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md` Phase A.
+   */
+  ANALYTICS_R2?: R2Bucket
+  /**
+   * Cloudflare account id used to build the Analytics Engine SQL
+   * API URL (`/accounts/{id}/analytics_engine/sql`). Required by
+   * the analytics export endpoint; the dashboard query endpoint
+   * (Phase B) reuses it.
+   */
+  CF_ACCOUNT_ID?: string
+  /**
+   * API token with "Account Analytics Read" permission only —
+   * authorizes the AE SQL API reads. Wrangler secret in
+   * production; never reaches the client (the portal talks to
+   * `/api/v1/publish/**`, which proxies server-side).
+   */
+  ANALYTICS_SQL_TOKEN?: string
+  /**
+   * Analytics Engine dataset name to read from. Defaults to
+   * `terraviz_events` (the dataset `functions/api/ingest.ts`
+   * writes); override only if a fork renamed its dataset binding.
+   */
+  ANALYTICS_AE_DATASET?: string
+  /**
    * GitHub repository owner that hosts the transcode workflow
    * (e.g. `zyra-project`). Used by the video-upload /complete
    * handler (Phase 3pd) to fire a `repository_dispatch` after the
