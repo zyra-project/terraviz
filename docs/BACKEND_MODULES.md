@@ -128,6 +128,7 @@ design rationale in the `docs/CATALOG_*` plan docs.
 |---|---|
 | `functions/api/_lib/workers-ai-error.ts` | Workers AI error classification helper for Phase 1f/D's quota guard rail |
 | `functions/api/v1/_lib/access-auth.ts` | Cloudflare Access JWT verification |
+| `functions/api/v1/_lib/analytics-layouts.ts` | Positional blob/double layout registry per telemetry event type + AE-row → named-fields decoder (decode side of `ingest.ts`'s `toDataPoint`; consumed by the analytics export job — `docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md` Phase A) |
 | `functions/api/v1/_lib/asset-uploads.ts` | `asset_uploads` row-level helpers + per-kind validation rules |
 | `functions/api/v1/_lib/audit-store.ts` | Append-only writes to the `audit_events` table |
 | `functions/api/v1/_lib/bounded-pool.ts` | Tiny bounded-concurrency helper for parallelizable async work that can't safely fan-out to N at once |
