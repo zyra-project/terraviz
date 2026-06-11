@@ -158,7 +158,8 @@ closes, and a query endpoint that stitches "live recent" (AE) onto
 > the `CF_ACCOUNT_ID` + `ANALYTICS_SQL_TOKEN` secrets on the Pages
 > project, then drive the ≤90-day backfill with repeated
 > `POST …/analytics-export?day=YYYY-MM-DD` calls (oldest first)
-> while AE still remembers the rows.
+> while AE still remembers the rows. Full walkthrough:
+> [`SELF_HOSTING.md`](SELF_HOSTING.md) Step 17.
 
 ### A1. Export endpoint
 
@@ -453,10 +454,10 @@ consolidation; no storage work.
 - [`ANALYTICS.md`](ANALYTICS.md) "Where the data goes" diagram gains
   the export → R2/D1 → admin tab legs; the Grafana references shift
   from "the read side" to "an optional read side".
-- [`SELF_HOSTING.md`](SELF_HOSTING.md) gains the new resources:
-  `terraviz-analytics` R2 bucket + binding, the two SQL-API secrets,
-  the migration step, the GHA cron secrets, and marks the entire
-  Grafana walkthrough optional.
+- [`SELF_HOSTING.md`](SELF_HOSTING.md) — the export-pipeline
+  walkthrough (R2 bucket + binding, SQL-API secrets, cron, backfill)
+  already landed with Phase A as Step 17; what remains here is
+  marking the Grafana walkthrough (Step 9) optional-and-demoted.
 - [`PRIVACY.md`](PRIVACY.md) §6 wording loosened from "Iceberg
   format" to format-neutral long-term R2 storage
   (`npm run build:privacy-page` + the CI diff guard).
