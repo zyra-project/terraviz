@@ -1,0 +1,105 @@
+# Nightly analytics export tick (Phase A of
+# docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md). Once a day, shortly
+# after UTC midnight: POST /api/v1/publish/analytics-export, which
+# drains every complete day since the bookmark out of Analytics
+# Engine into the R2 raw archive + the D1 rollup tables. The
+# endpoint walks `bookmark + 1 .. yesterday` itself (capped at 7
+# days per tick), so missed runs self-heal and re-runs are
+# idempotent — cron jitter and the occasional dropped tick are
+# harmless.
+#
+# 00:25 UTC, not 00:00 — the export reads *yesterday*, so it only
+# needs the day to be over; the offset dodges the top-of-hour cron
+# rush and comfortably clears AE's few-second ingest lag.
+#
+# Auth is the same Cloudflare Access service-token pair the Zyra
+# scheduler uses (the publish middleware JIT-provisions service
+# tokens as role='service', which passes the endpoint's privilege
+# check). The keepalive step resets GitHub's 60-day
+# scheduled-workflow disable timer, same as zyra-scheduler.yml —
+# and the same two limits apply: a workflow disabled a full cycle
+# can't self-revive, and forks start with scheduled workflows
+# disabled (one manual enable in the Actions tab).
+#
+# Required repo secrets (the zyra-scheduler.yml set):
+#   TERRAVIZ_SERVER, CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET
+# When TERRAVIZ_SERVER is unset the tick exits quietly. A 503
+# `export_unconfigured` response (deploy hasn't provisioned the
+# ANALYTICS_R2 bucket / SQL-API secrets yet) is logged as a warning
+# but does not fail the run — a fork that runs the Zyra scheduler
+# without the analytics pipeline shouldn't collect red runs every
+# night. Any other non-200 fails the tick.
+name: Analytics Export
+
+on:
+  schedule:
+    - cron: '25 0 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  # The keepalive step PUTs .../actions/workflows/{id}/enable.
+  actions: write
+
+concurrency:
+  group: analytics-export
+  cancel-in-progress: false
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Export completed days
+        env:
+          TERRAVIZ_SERVER: ${{ secrets.TERRAVIZ_SERVER }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${TERRAVIZ_SERVER:-}" ]]; then
+            echo "TERRAVIZ_SERVER secret is not configured — nothing to export."
+            exit 0
+          fi
+          # The endpoint is idempotent, so retrying a transient
+          # network error / 5xx is safe (--retry-all-errors also
+          # re-tries the 503-unconfigured case a couple of times,
+          # which is harmless and fast).
+          STATUS=$(curl -sS -o /tmp/export-response.json -w '%{http_code}' \
+            --retry 3 --retry-delay 5 --retry-all-errors \
+            -X POST \
+            -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+            -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+            -H 'Accept: application/json' \
+            "${TERRAVIZ_SERVER%/}/api/v1/publish/analytics-export")
+          if [[ "$STATUS" == "200" ]]; then
+            jq -r '.exported[] | "exported \(.day): \(.rows) rows -> \(.archiveKey) (\(.archiveBytes) bytes, \(.unknownRows) unknown, \(.truncatedChunks) truncated chunks)"' \
+              /tmp/export-response.json
+            COUNT=$(jq '.exported | length' /tmp/export-response.json)
+            echo "done — $COUNT day(s) exported."
+            # A truncated chunk means an hourly AE query hit its row
+            # cap — possible archive gap; surface it without failing.
+            TRUNCATED=$(jq '[.exported[].truncatedChunks] | add // 0' /tmp/export-response.json)
+            if [[ "$TRUNCATED" != "0" ]]; then
+              echo "::warning::$TRUNCATED hourly chunk(s) hit the AE row cap — see docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md Phase A"
+            fi
+          elif [[ "$STATUS" == "503" ]] && jq -e '.error == "export_unconfigured"' /tmp/export-response.json >/dev/null 2>&1; then
+            echo "::warning::analytics export not configured on this deploy: $(jq -r '.message' /tmp/export-response.json)"
+          else
+            echo "::error::export tick returned $STATUS: $(cat /tmp/export-response.json)"
+            exit 1
+          fi
+
+      # Reset the 60-day inactivity timer (same pattern as
+      # zyra-scheduler.yml). Re-enabling an already-enabled workflow
+      # is a no-op that still counts as activity for the disable
+      # clock.
+      - name: Keepalive
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method PUT \
+            "repos/${{ github.repository }}/actions/workflows/analytics-export.yml/enable" \
+            && echo "keepalive ok" \
+            || echo "::warning::keepalive failed — the 60-day disable timer was not reset"

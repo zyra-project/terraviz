@@ -78,8 +78,9 @@ marked — skip them and the deploy still stands.
 14. [Verify the deploy](#step-14--verify-the-deploy)
 15. [Video transcode pipeline](#step-15--video-transcode-pipeline-r2--github-actions) *(if you accept video uploads)*
 16. [Publisher portal browser flow](#step-16--publisher-portal-browser-flow)
+17. [Analytics long-term export](#step-17--analytics-long-term-export-optional) *(optional)*
 
-**Part C — desktop fork (optional)** → [Step 17](#part-c--desktop-app-fork-optional)
+**Part C — desktop fork (optional)** → [Step 18](#part-c--desktop-app-fork-optional)
 
 **Reference** — [fork-pinned source values](#reference-fork-pinned-source-values), [CI/CD workflow matrix](#reference-cicd-workflow-matrix), [common failure modes](#common-failure-modes), [post-launch](#after-a-successful-launch).
 
@@ -1329,6 +1330,97 @@ provision.
 
 ---
 
+## Step 17 — Analytics long-term export (optional)
+
+Analytics Engine only retains events for 30–90 days. The export
+pipeline ([`docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md`](ANALYTICS_STORAGE_AND_ADMIN_PLAN.md)
+Phase A) drains each completed UTC day into durable storage: a raw
+NDJSON archive in R2 (indefinite, full fidelity) plus daily rollup
+tables in D1 (the data source for the upcoming `/publish/analytics`
+dashboard). Skip this step and the app works fine — you just keep
+losing history at the AE retention boundary.
+
+Prerequisites from earlier steps: the AE dataset (Step 5c), the
+catalog DB with migrations applied (Steps 10–11 — migration
+`0019_analytics_rollups.sql` ships in the repo), and the Access
+service token + GitHub secrets from the transcode wiring (Step 15b).
+
+### 17a. R2 bucket for the raw archive
+
+```bash
+wrangler r2 bucket create terraviz-analytics
+```
+
+Then Pages → Settings → Bindings → Add binding → **R2 bucket**:
+- Variable name: `ANALYTICS_R2`
+- Bucket: `terraviz-analytics`
+
+Deliberately a separate bucket from `terraviz-assets` — telemetry
+should never entangle with asset lifecycle rules or public-read
+access. No CORS policy needed: only the Pages Function writes to
+it, and nothing browser-side ever reads it.
+
+### 17b. Analytics Engine SQL API credentials
+
+The export endpoint reads AE through the SQL API, which needs two
+values on the Pages project (Settings → Variables and secrets,
+Production environment):
+
+| Variable | Type | Value |
+|---|---|---|
+| `CF_ACCOUNT_ID` | Plaintext | Your account id (dashboard sidebar / any dashboard URL) |
+| `ANALYTICS_SQL_TOKEN` | **Secret** | API token with exactly one permission: **Account → Account Analytics → Read** (My Profile → API Tokens → Create Token → Custom) |
+
+Optional: `ANALYTICS_AE_DATASET` (plaintext) if your fork named
+its AE dataset something other than `terraviz_events`.
+
+Bindings and variables take effect on the next deployment —
+redeploy (Step 5e) before testing.
+
+### 17c. Enable the nightly cron
+
+The workflow ships at `.github/workflows/analytics-export.yml`
+(daily, 00:25 UTC) and authenticates with the same repo secrets as
+the Zyra scheduler: `TERRAVIZ_SERVER`, `CF_ACCESS_CLIENT_ID`,
+`CF_ACCESS_CLIENT_SECRET` (Step 15b). Two behaviours to know:
+
+- Forks start with scheduled workflows **disabled** — enable it
+  once in the Actions tab.
+- It exits quietly when `TERRAVIZ_SERVER` is unset, and a 503
+  `export_unconfigured` response (Steps 17a/17b not done yet) logs
+  a warning instead of failing, so a partial setup never collects
+  red runs.
+
+The endpoint walks every day since its bookmark on each tick
+(capped at 7/run), so missed ticks self-heal.
+
+### 17d. Backfill while AE still remembers
+
+The nightly tick only moves forward from its first run. History is
+recoverable exactly as far back as AE's retention (≤ 90 days), so
+backfill once, oldest day first:
+
+```bash
+# One day per call; idempotent, safe to re-run.
+curl -sS -X POST \
+  -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+  -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+  "https://<your-domain>/api/v1/publish/analytics-export?day=2026-03-15"
+```
+
+Verify the pipeline end to end:
+
+```bash
+# Archive object landed:
+wrangler r2 object get terraviz-analytics/events/v1/2026/03/15.ndjson.gz --pipe | gunzip | head -3
+
+# Rollups landed:
+wrangler d1 execute sphere-feedback --remote --config wrangler.toml \
+  --command "SELECT day, COUNT(*) FROM analytics_daily GROUP BY day ORDER BY day"
+```
+
+---
+
 # Part C — Desktop app fork (optional)
 
 The web deploy in Part A is self-contained. If you also intend to
@@ -1336,9 +1428,9 @@ ship the Tauri desktop app under your own brand, three
 upstream-pinned values need changing — skip this entire part for a
 web-only fork.
 
-## Step 17 — Repoint the desktop-specific values
+## Step 18 — Repoint the desktop-specific values
 
-### 17a. Tauri updater endpoint + signing key
+### 18a. Tauri updater endpoint + signing key
 
 `src-tauri/tauri.conf.json` hardcodes the auto-update feed and the
 public half of the upstream signing key:
@@ -1367,7 +1459,7 @@ If you leave the upstream pubkey/endpoint, your users' apps will
 poll the **upstream** release feed and reject any update you sign
 with a different key.
 
-### 17b. macOS notarization (optional)
+### 18b. macOS notarization (optional)
 
 `release.yml` signs + notarizes macOS builds only when the six
 `APPLE_*` secrets are present
@@ -1377,7 +1469,7 @@ with a different key.
 build still succeeds but ships unsigned — macOS users hit the
 Gatekeeper "damaged" warning until they bypass it.
 
-### 17c. `VITE_API_ORIGIN` for desktop API calls
+### 18c. `VITE_API_ORIGIN` for desktop API calls
 
 Desktop builds can't serve relative `/api/` paths (the webview
 origin is `tauri://localhost`), so `src/services/catalogSource.ts`
@@ -1391,7 +1483,7 @@ This same value also drives deep-link host recognition
 (`parseDatasetFromUrl`), so setting it makes your node accept its
 own `/dataset/<id>` links on both web and desktop.
 
-### 17d. Weblate (translation sync)
+### 18d. Weblate (translation sync)
 
 `sync-weblate.yml` calls `npm run sync:weblate`, which defaults to
 the upstream Weblate project (`hosted.weblate.org`, project
@@ -1462,7 +1554,7 @@ pointed at NOAA/NASA and need no change.
   recognises your node's own host (derived from `VITE_API_ORIGIN`)
   plus any `*.pages.dev` preview and `localhost`, so shared
   `/dataset/<id>` links work on your domain with no edit. (Set
-  `VITE_API_ORIGIN` if you ship desktop builds — see Step 17.)
+  `VITE_API_ORIGIN` if you ship desktop builds — see Step 18.)
 - The `terraviz` **CLI** defaults its server to `https://terraviz.app`
   but is already independence-ready: override per-invocation with
   `--server`, the `TERRAVIZ_SERVER` env var, or a persisted
@@ -1483,8 +1575,8 @@ workflow needs and what's safe to drop.
 | `ci.yml` — **deploy** job | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`; optional `vars.VITE_DEFAULT_UI_SCALE`; envs `production`/`preview`; **+ rename the `--project-name terraviz`** | you deploy via the Pages dashboard Git integration (then delete this job — see Step 4) |
 | `poster.yml` | same Cloudflare secrets; envs `poster-production`/`poster-preview`; **+ rename `terraviz-poster`** | you don't ship the poster sub-site |
 | `transcode-hls.yml` | `R2_S3_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `CATALOG_R2_BUCKET`, `TERRAVIZ_SERVER`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` (details in Step 15) | you don't use publisher video uploads |
-| `release.yml` / `desktop.yml` | `TAURI_SIGNING_PRIVATE_KEY` (+ `_PASSWORD`), 6× `APPLE_*` (Step 17) | web-only fork |
-| `sync-weblate.yml` | `WEBLATE_TOKEN` (Step 17d) | you don't run your own translation pipeline |
+| `release.yml` / `desktop.yml` | `TAURI_SIGNING_PRIVATE_KEY` (+ `_PASSWORD`), 6× `APPLE_*` (Step 18) | web-only fork |
+| `sync-weblate.yml` | `WEBLATE_TOKEN` (Step 18d) | you don't run your own translation pipeline |
 | `codeql.yml`, `mobile.yml` | none | **keep** — fork-safe |
 
 ---

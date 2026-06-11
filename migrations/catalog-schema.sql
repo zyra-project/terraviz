@@ -10,6 +10,50 @@
 
 -- Tables
 
+CREATE TABLE analytics_daily (
+  day            TEXT NOT NULL,             -- 'YYYY-MM-DD' (UTC)
+  event_type     TEXT NOT NULL,
+  environment    TEXT NOT NULL,             -- production | preview | local
+  internal       INTEGER NOT NULL,          -- 0 | 1 (Cloudflare Access staff)
+  country        TEXT NOT NULL,             -- ISO 3166-1 alpha-2, or 'XX'
+  platform       TEXT NOT NULL DEFAULT '',  -- web | desktop | mobile | ''
+  events_count   REAL NOT NULL,             -- sample-weighted event count
+  sessions_count REAL NOT NULL,             -- distinct session ids seen
+  metrics        TEXT NOT NULL DEFAULT '{}',-- JSON: named percentiles etc.
+  PRIMARY KEY (day, event_type, environment, internal, country, platform)
+);
+
+CREATE TABLE analytics_dataset_daily (
+  day          TEXT NOT NULL,
+  layer_id     TEXT NOT NULL,
+  environment  TEXT NOT NULL,
+  loads        REAL NOT NULL,               -- layer_loaded, weighted
+  trigger_mix  TEXT NOT NULL DEFAULT '{}',  -- JSON {browse|orbit|tour|url|default: n}
+  source_mix   TEXT NOT NULL DEFAULT '{}',  -- JSON {network|cache|hls|image: n}
+  load_ms_p50  REAL,                        -- NULL when no samples that day
+  load_ms_p95  REAL,
+  dwell_ms_sum REAL,                        -- NULL when no unloads that day
+  PRIMARY KEY (day, layer_id, environment)
+);
+
+CREATE TABLE analytics_export_state (
+  id         INTEGER PRIMARY KEY CHECK (id = 1),
+  last_day   TEXT NOT NULL,                 -- 'YYYY-MM-DD' (UTC)
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE analytics_spatial_daily (
+  day         TEXT NOT NULL,
+  event_type  TEXT NOT NULL,                -- camera_settled | map_click
+  environment TEXT NOT NULL,
+  layer_id    TEXT NOT NULL DEFAULT '',
+  projection  TEXT NOT NULL DEFAULT '',     -- globe | mercator | vr | ar | ''
+  lat_bin     REAL NOT NULL,                -- floor(lat / 0.5) * 0.5
+  lon_bin     REAL NOT NULL,
+  hits        REAL NOT NULL,                -- sample-weighted
+  PRIMARY KEY (day, event_type, environment, layer_id, projection, lat_bin, lon_bin)
+);
+
 CREATE TABLE asset_uploads (
   id              TEXT PRIMARY KEY,           -- ULID
   dataset_id      TEXT NOT NULL,
@@ -269,6 +313,12 @@ CREATE TABLE workflows (
 
 -- Indexes
 
+CREATE INDEX idx_analytics_daily_event
+  ON analytics_daily (event_type, day);
+CREATE INDEX idx_analytics_dataset_daily_layer
+  ON analytics_dataset_daily (layer_id, day);
+CREATE INDEX idx_analytics_spatial_daily_layer
+  ON analytics_spatial_daily (event_type, layer_id, day);
 CREATE INDEX idx_asset_uploads_dataset ON asset_uploads(dataset_id, created_at);
 CREATE INDEX idx_audit_subject ON audit_events(subject_kind, subject_id, created_at);
 CREATE UNIQUE INDEX idx_datasets_legacy_id
