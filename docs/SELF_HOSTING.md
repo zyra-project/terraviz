@@ -1398,14 +1398,24 @@ The endpoint walks every day since its bookmark on each tick
 
 The nightly tick only moves forward from its first run. History is
 recoverable exactly as far back as AE's retention (≤ 90 days), so
-backfill once, oldest day first:
+backfill once, oldest day first.
+
+**Easiest path:** Actions tab → **Analytics Backfill** → Run
+workflow (`.github/workflows/analytics-backfill.yml`). Inputs left
+blank default to "90 days ago through yesterday"; it reuses the
+same repo secrets as the nightly cron, walks the range oldest-first,
+and writes a per-day results table to the run summary. Idempotent —
+safe to re-run or to overlap with the nightly tick.
+
+Or by hand, one day per call (`TERRAVIZ_SERVER` is your production
+origin, the same value as the repo secret):
 
 ```bash
-# One day per call; idempotent, safe to re-run.
+# Idempotent, safe to re-run.
 curl -sS -X POST \
   -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
   -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
-  "https://<your-domain>/api/v1/publish/analytics-export?day=2026-03-15"
+  "${TERRAVIZ_SERVER%/}/api/v1/publish/analytics-export?day=2026-03-15"
 ```
 
 Verify the pipeline end to end:
