@@ -1,0 +1,118 @@
+# Manual analytics backfill (docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md
+# Phase A, SELF_HOSTING.md Step 17d). Run from the Actions tab after
+# first provisioning the export pipeline: walks an inclusive UTC day
+# range oldest-first and POSTs one /api/v1/publish/analytics-export
+# ?day= call per day, using the same Access service-token secrets as
+# the nightly analytics-export.yml cron — the token never has to
+# leave GitHub.
+#
+# Every per-day export is idempotent (the endpoint overwrites the
+# day's R2 object and replaces its rollup rows), so re-running the
+# workflow — or overlapping with the nightly cron — is safe. Days
+# that have already aged out of Analytics Engine's 30–90 day
+# retention simply produce empty archives.
+#
+# Inputs left blank default to the widest useful range: 90 days ago
+# through yesterday. Unlike the nightly cron, a 503
+# export_unconfigured FAILS this workflow — a manual run means an
+# operator is actively setting up and wants to hear about a missing
+# binding, not a quiet skip.
+name: Analytics Backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_day:
+        description: 'First UTC day to export (YYYY-MM-DD). Blank = 90 days ago.'
+        required: false
+        default: ''
+      end_day:
+        description: 'Last UTC day to export (YYYY-MM-DD, inclusive). Blank = yesterday.'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: analytics-backfill
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Walk the day range
+        env:
+          TERRAVIZ_SERVER: ${{ secrets.TERRAVIZ_SERVER }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          START_DAY: ${{ inputs.start_day }}
+          END_DAY: ${{ inputs.end_day }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${TERRAVIZ_SERVER:-}" ]]; then
+            echo "::error::TERRAVIZ_SERVER secret is not configured."
+            exit 1
+          fi
+
+          START="${START_DAY:-$(date -u -d '90 days ago' +%F)}"
+          END="${END_DAY:-$(date -u -d 'yesterday' +%F)}"
+          for value in "$START" "$END"; do
+            if ! date -u -d "$value" +%F >/dev/null 2>&1 || [[ ! "$value" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+              echo "::error::'$value' is not a valid YYYY-MM-DD day."
+              exit 1
+            fi
+          done
+          if [[ "$START" > "$END" ]]; then
+            echo "::error::start_day ($START) is after end_day ($END)."
+            exit 1
+          fi
+          YESTERDAY=$(date -u -d 'yesterday' +%F)
+          if [[ "$END" > "$YESTERDAY" ]]; then
+            echo "::error::end_day ($END) is not a completed UTC day yet (latest exportable: $YESTERDAY)."
+            exit 1
+          fi
+
+          echo "Backfilling $START .. $END (inclusive, oldest first)."
+          {
+            echo "## Analytics backfill $START → $END"
+            echo ""
+            echo "| Day | Rows | Unknown | Truncated chunks | Archive bytes |"
+            echo "|---|---|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          TOTAL_ROWS=0
+          DAY="$START"
+          while [[ ! "$DAY" > "$END" ]]; do
+            STATUS=$(curl -sS -o /tmp/export-response.json -w '%{http_code}' \
+              --retry 3 --retry-delay 5 --retry-all-errors \
+              -X POST \
+              -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+              -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+              -H 'Accept: application/json' \
+              "${TERRAVIZ_SERVER%/}/api/v1/publish/analytics-export?day=${DAY}")
+            if [[ "$STATUS" != "200" ]]; then
+              echo "::error::day $DAY returned $STATUS: $(cat /tmp/export-response.json)"
+              echo "| $DAY | **failed ($STATUS)** | — | — | — |" >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+            ROWS=$(jq -r '.exported[0].rows' /tmp/export-response.json)
+            UNKNOWN=$(jq -r '.exported[0].unknownRows' /tmp/export-response.json)
+            TRUNCATED=$(jq -r '.exported[0].truncatedChunks' /tmp/export-response.json)
+            BYTES=$(jq -r '.exported[0].archiveBytes' /tmp/export-response.json)
+            echo "exported $DAY: $ROWS rows ($BYTES bytes, $UNKNOWN unknown, $TRUNCATED truncated chunks)"
+            echo "| $DAY | $ROWS | $UNKNOWN | $TRUNCATED | $BYTES |" >> "$GITHUB_STEP_SUMMARY"
+            if [[ "$TRUNCATED" != "0" ]]; then
+              echo "::warning::day $DAY had $TRUNCATED hourly chunk(s) at the AE row cap — possible archive gap"
+            fi
+            TOTAL_ROWS=$((TOTAL_ROWS + ROWS))
+            DAY=$(date -u -d "$DAY + 1 day" +%F)
+          done
+
+          {
+            echo ""
+            echo "**Total: $TOTAL_ROWS rows.**"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Backfill complete — $TOTAL_ROWS rows across the range."
