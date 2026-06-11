@@ -4,10 +4,10 @@
  * (`docs/ZYRA_INTEGRATION_PLAN.md` §Runner, the Verify-stage
  * stand-in).
  *
- * Hard failures (don't upload): no video stream, non-2:1 aspect,
- * non-positive duration. Soft warnings (the transcode ladder
- * normalises these): sub-4K resolution, off-spec fps, non-h264
- * codec.
+ * Hard failures (don't upload): no video stream, non-positive
+ * duration. Soft warnings (the transcode ladder normalises these,
+ * and regional/non-global datasets are legitimately non-2:1):
+ * non-2:1 aspect, sub-4K resolution, off-spec fps, non-h264 codec.
  */
 
 import { spawn } from 'node:child_process'
@@ -22,8 +22,11 @@ export const SOS_SPEC = {
   fps: 30,
   codec: 'h264',
   /** 2:1 equirectangular, with a 1% tolerance for odd encoder
-   *  roundings. Non-2:1 input renders visibly wrong on the sphere,
-   *  so this one is a hard failure rather than a warning. */
+   *  roundings. Deviation is a WARNING, not a failure: global
+   *  (sphere) datasets should be 2:1, but other nodes in the
+   *  network carry regional content with arbitrary aspect ratios.
+   *  A per-workflow projection hint could restore strictness for
+   *  declared-global pipelines later. */
   aspectTolerance: 0.01,
 } as const
 
@@ -86,8 +89,8 @@ export function assessSosSpec(probe: ProbeResult): SpecReport {
   } else {
     const aspect = width / height
     if (Math.abs(aspect - 2) > 2 * SOS_SPEC.aspectTolerance) {
-      failures.push(
-        `aspect ratio ${aspect.toFixed(3)} is not 2:1 equirectangular (${width}x${height})`,
+      warnings.push(
+        `aspect ratio ${aspect.toFixed(3)} is not 2:1 equirectangular (${width}x${height}) — expected for regional datasets; global sphere content should be 2:1`,
       )
     }
     if (width !== SOS_SPEC.width || height !== SOS_SPEC.height) {

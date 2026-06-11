@@ -54,9 +54,10 @@ describe('assessSosSpec', () => {
     expect(report.failures).toHaveLength(1)
   })
 
-  it('hard-fails non-2:1 aspect ratios', () => {
+  it('warns (not fails) on non-2:1 aspect ratios — regional datasets are legitimate', () => {
     const report = assessSosSpec(probe({ width: 1920, height: 1080 }))
-    expect(report.failures.some(f => f.includes('2:1'))).toBe(true)
+    expect(report.failures).toEqual([])
+    expect(report.warnings.some(w => w.includes('2:1'))).toBe(true)
   })
 
   it('hard-fails non-positive durations', () => {
