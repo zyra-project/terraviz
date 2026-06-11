@@ -141,6 +141,25 @@ closes, and a query endpoint that stitches "live recent" (AE) onto
 
 ## Phase A — Export & retention pipeline
 
+> **Status: landed** (same PR as this plan). Implementation:
+> [`migrations/catalog/0019_analytics_rollups.sql`](../migrations/catalog/0019_analytics_rollups.sql)
+> — the authoritative DDL (it adds an `environment` column to the
+> spatial table beyond the sketch below; the dataset and spatial
+> rollups exclude internal/staff traffic entirely, while
+> `analytics_daily` keeps `internal` as a dimension) —
+> `functions/api/v1/_lib/analytics-layouts.ts` (typed per-event
+> layout registry + AE-row decoder, round-trip-tested against
+> `ingest.ts`'s real encoder),
+> `functions/api/v1/_lib/analytics-export.ts` (job core),
+> `functions/api/v1/publish/analytics-export.ts` (route),
+> `.github/workflows/analytics-export.yml` (daily 00:25 UTC tick).
+> Remaining operator steps before the pipeline runs: create the
+> `terraviz-analytics` R2 bucket and bind it as `ANALYTICS_R2`, set
+> the `CF_ACCOUNT_ID` + `ANALYTICS_SQL_TOKEN` secrets on the Pages
+> project, then drive the ≤90-day backfill with repeated
+> `POST …/analytics-export?day=YYYY-MM-DD` calls (oldest first)
+> while AE still remembers the rows.
+
 ### A1. Export endpoint
 
 `functions/api/v1/publish/analytics-export.ts` — `POST`, exports one
