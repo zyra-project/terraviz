@@ -88,9 +88,9 @@ CREATE INDEX idx_analytics_spatial_daily_layer
 -- Export bookmark (singleton). `last_day` is the newest fully
 -- exported UTC day; the export endpoint walks `last_day + 1` ..
 -- yesterday on each tick, so a missed cron run self-heals on the
--- next one and re-runs are idempotent (rollup rows are
--- INSERT OR REPLACE on their primary keys; the R2 object for a
--- day is simply overwritten).
+-- next one and re-runs are idempotent (rollup writes are a
+-- delete-the-day-then-insert batch in one D1 transaction; the R2
+-- object for a day is simply overwritten).
 CREATE TABLE analytics_export_state (
   id         INTEGER PRIMARY KEY CHECK (id = 1),
   last_day   TEXT NOT NULL,                 -- 'YYYY-MM-DD' (UTC)

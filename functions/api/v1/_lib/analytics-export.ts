@@ -213,8 +213,11 @@ function percentile(sorted: number[], p: number): number {
 }
 
 function binCoord(value: number): number {
-  // Round the floor result to dodge float dust (e.g. -105.00000000000001).
-  return Math.round(Math.floor(value / SPATIAL_BIN_DEG) * SPATIAL_BIN_DEG * 2) / 2
+  // Snap the floor result to 6 decimals to dodge float dust
+  // (e.g. -105.00000000000001) — precision-independent of
+  // SPATIAL_BIN_DEG, so changing the bin size can't silently
+  // produce off-grid keys.
+  return Math.round(Math.floor(value / SPATIAL_BIN_DEG) * SPATIAL_BIN_DEG * 1e6) / 1e6
 }
 
 function num(fields: Record<string, string | number | boolean>, key: string): number {

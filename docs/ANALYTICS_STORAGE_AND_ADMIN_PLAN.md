@@ -260,7 +260,7 @@ CREATE TABLE analytics_dataset_daily (
   source_mix   TEXT NOT NULL DEFAULT '{}',  -- JSON: network/cache/hls/image
   load_ms_p50  REAL,
   load_ms_p95  REAL,
-  dwell_ms_sum REAL,                        -- Tier B opt-in only; NULL if none
+  dwell_ms_sum REAL,                        -- from layer_unloaded.dwell_ms (Tier A); NULL if none
   PRIMARY KEY (day, layer_id, environment)
 );
 
@@ -384,7 +384,7 @@ Grafana dashboards bake into their WHERE boilerplate.
 |---|---|---|
 | **Overview** | Sessions/day time series; platform / country / build-channel mix; returning-session share | `grafana/dashboards/product-health.json` |
 | **Spatial attention** | MapLibre heatmap of `camera_settled` centers — filterable by **dataset** (`layer_id`), projection (globe / mercator / vr / ar), zoom band; `map_click` overlay split by `hit_kind`; zoom-distribution histogram | `grafana/dashboards/spatial-attention.json` (incl. the per-dataset query at `ANALYTICS_QUERIES.md` §camera_settled heatmap) |
-| **Dataset engagement** | Top datasets by loads; trigger mix (browse / orbit / tour / url); load-source mix (network / cache / hls / image); dwell where Tier B users opted in; zero-result browse searches | `product-health.json` + `research.json` |
+| **Dataset engagement** | Top datasets by loads; trigger mix (browse / orbit / tour / url); load-source mix (network / cache / hls / image); on-globe dwell (Tier A `layer_unloaded.dwell_ms`); zero-result browse searches | `product-health.json` + `research.json` |
 | **Performance & errors** | Error rate; p95 frame time by WebGL renderer hash; FPS distribution; `load_ms` p50/p95 | `product-health.json` |
 | **Funnels** | Tour started→completed; VR session funnel (started → placed → ended, by device class); Orbit usage + neuron cost | `product-health.json` + `orbit-cost.json` |
 
