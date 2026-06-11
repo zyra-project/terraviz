@@ -331,22 +331,36 @@ export function formatDuration(seconds: number): string {
   return `${m}:${pad(sec)}`
 }
 
+/** Fixed-unit ISO-8601 duration subset (weeks/days/hours/minutes/
+ *  seconds) — mirrors the server's `parseScheduleSeconds`.
+ *  Calendar-fuzzy units (years, months) deliberately don't match:
+ *  `parseISO8601Duration` approximates them, which is fine for
+ *  frame-time math but wrong for liveness / cache-TTL decisions
+ *  (PR #179 review). */
+const FIXED_DURATION_RE =
+  /^P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/
+
 /**
  * Parse a `Dataset.period` ISO-8601 duration to milliseconds,
- * returning null (never throwing) for malformed, calendar-fuzzy,
- * or non-positive values — a single bad catalog row must not break
- * cache math (Phase Z4, PR #179 review).
+ * returning null (never throwing) for malformed, calendar-fuzzy
+ * (P1M / P1Y), empty, or non-positive values — a single bad catalog
+ * row must not break cache math (Phase Z4, PR #179 review).
  */
 export function safePeriodMs(period: string | null | undefined): number | null {
   if (!period) return null
-  try {
-    const parsed = parseISO8601Duration(period)
-    if (parsed instanceof Date) return null
-    const ms = parsed.days * 24 * 60 * 60 * 1000
-    return Number.isFinite(ms) && ms > 0 ? ms : null
-  } catch {
-    return null
-  }
+  const match = FIXED_DURATION_RE.exec(period)
+  if (!match) return null
+  const [, weeks, days, hours, minutes, seconds] = match
+  if (!weeks && !days && !hours && !minutes && !seconds) return null
+  // A bare trailing T ("P1DT") matches the regex but is invalid.
+  if (period.includes('T') && !hours && !minutes && !seconds) return null
+  const ms =
+    Number(weeks ?? 0) * 7 * 86_400_000 +
+    Number(days ?? 0) * 86_400_000 +
+    Number(hours ?? 0) * 3_600_000 +
+    Number(minutes ?? 0) * 60_000 +
+    Number(seconds ?? 0) * 1_000
+  return ms > 0 ? ms : null
 }
 
 /**

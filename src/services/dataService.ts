@@ -547,7 +547,7 @@ export class DataService {
       // floored at 5 minutes — so a workflow re-publish is picked
       // up on the next fetch instead of waiting out the full hour.
       const ttl = this.cache
-        ? effectiveCatalogTtl(this.cache.datasets, this.CACHE_DURATION)
+        ? effectiveCatalogTtl(this.cache.datasets, this.CACHE_DURATION, now)
         : this.CACHE_DURATION
       if (this.cache && now - this.cacheTime < ttl) {
         logger.info('[DataService] Using cached datasets')

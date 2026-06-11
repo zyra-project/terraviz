@@ -34,10 +34,15 @@
  *
  * Real-time marker (`isRealtime`):
  *
- *  - Set when the dataset's `tags` contain `'Real-Time'` (the
- *    curated 10-dataset SOS subset), OR when `endTime` is within
- *    the last 24 hours (a heuristic for real-time rows that
- *    aren't tagged). Plan §6.8 documents both rules.
+ *  - Set when the dataset has a LIVE update cadence — `period`
+ *    parses (fixed units) AND `endTime` is within two cadences of
+ *    now, or is absent (Phase Z4: workflow-maintained rows) — OR
+ *    when `tags` contain `'Real-Time'` (the curated 10-dataset SOS
+ *    subset), OR when `endTime` is within the last 24 hours (a
+ *    heuristic for untagged real-time rows). Plan §6.8 documents
+ *    the original two rules; `period` widens the window, it never
+ *    blanket-marks (historical time-series rows carry `period`
+ *    too).
  *  - Computed against an injectable `now` so deterministic tests
  *    pin a fixed clock. Production callers omit it and the
  *    service samples `Date.now()` once per build.

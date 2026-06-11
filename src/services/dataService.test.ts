@@ -454,6 +454,14 @@ describe('effectiveCatalogTtl (Phase Z4)', () => {
     expect(effectiveCatalogTtl(archived, HOUR, NOW)).toBe(HOUR)
   })
 
+  it('rejects calendar-fuzzy periods (P1M/P1Y) for cadence decisions', async () => {
+    const { effectiveCatalogTtl } = await import('./dataService')
+    const monthly = [{ id: 'a', period: 'P1M', endTime: RECENT } as never]
+    const yearly = [{ id: 'a', period: 'P1Y', endTime: RECENT } as never]
+    expect(effectiveCatalogTtl(monthly, HOUR, NOW)).toBe(HOUR)
+    expect(effectiveCatalogTtl(yearly, HOUR, NOW)).toBe(HOUR)
+  })
+
   it('treats malformed periods as no cadence signal instead of throwing', async () => {
     const { effectiveCatalogTtl } = await import('./dataService')
     const bad = [{ id: 'a', period: 'not-a-duration', endTime: RECENT } as never]
