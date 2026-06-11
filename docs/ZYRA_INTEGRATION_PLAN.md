@@ -438,7 +438,7 @@ in order of importance:
 | **Z0 — spike** | Adapt one [`zyra-scheduler`](https://github.com/NOAA-GSL/zyra-scheduler) dataset (e.g. drought): run its pipeline in a manually-triggered GHA workflow, swap the Vimeo/S3 upload leg for a hand-rolled publish-API sequence against a dev node, ffprobe-assert the MP4 against the SOS spec, record real per-run minutes. Also settles open question 2 (`zyra export s3` vs R2) empirically. No schema, no portal, throwaway code allowed. **Artifacts landed:** `.github/workflows/zyra-spike.yml` + `cli/zyra-spike-publish.ts` — trigger via Actions → "Zyra Spike (Z0)". | A real NOAA real-time dataset lands in a dev catalog from a button press; the Z1 contract is built on observed behaviour, not docs. |
 | **Z1 — contract + runner** | Migration (`workflows`, `workflow_runs`); CRUD + `due` + `run` + status routes; `zyra-scheduler.yml` + `zyra-run.yml`; `cli/zyra-publish-from-dispatch.ts` with the Verify preflight; sidecar template spec. Authoring via API / raw YAML only. **Artifacts landed:** `migrations/catalog/0018_workflows.sql`; `functions/api/v1/publish/workflows/**` + the `_lib/workflow-{store,schedule,validators}.ts` trio; `src/types/zyra-workflow-constants.ts` (the shared stage allowlist); both GHA workflows; the runner CLI with `cli/lib/sos-spec.ts` + `cli/lib/workflow-sidecar.ts`. Surfaces marked `Z0-pending` in source (allowlist contents, runner-image pin, frames-meta shape) get re-verified against the spike run before Z1 merges. | An operator registers a pipeline with `curl`, and an hourly dataset updates itself end-to-end. |
 | **Z2 — portal UI** | `/publish/workflows` list / new / edit / history pages; enable toggle; Run now; status badges. | A staff publisher manages workflows without leaving the dashboard. |
-| **Z3 — guided authoring** | Curated pipeline templates; stage-form builder over the allowlist; richer validation surfacing; log links. | A publisher who has never read Zyra docs ships a working hourly pipeline. |
+| **Z3 — guided authoring** | Curated pipeline templates; stage-form builder over the allowlist; richer validation surfacing; log links; a "Create draft dataset" button beside the target field that POSTs a minimal draft (workflow name + video/mp4) and fills the id in place — the new-workflow flow never leaves the page (gap confirmed in production: the form's hint sends the publisher off to do something the form can do itself). | A publisher who has never read Zyra docs ships a working hourly pipeline. |
 | **Z4 — real-time UX + upstream** | SPA consumes `period` for freshness (the §7.4 marker driven by data, targeted catalog-cache bypass for due datasets); upstream proposals to NOAA-GSL/zyra (`--preset sos`, `export terraviz`, Narrate/Verify input); alignment with federation Tier 0 once Phase 4 ships. | The catalog visibly knows which datasets are live, and the Zyra-side ergonomics stop being our fork's problem. |
 
 ### Implementation conventions (Z1/Z2 checklist)
@@ -460,9 +460,9 @@ Repo table stakes, listed so no phase improvises them mid-flight:
   (tier choice, throttling, reviewer checklist).
 - **i18n.** All strings via `publisher.workflows.*` keys; logical
   CSS properties.
-- **Z2 UX.** Workflows reference an existing `target_dataset_id` —
-  the portal needs a "create draft dataset + workflow together"
-  path so operators aren't bounced between two forms.
+- **Z2 UX → owned by Z3.** Workflows reference an existing
+  `target_dataset_id`; the "create draft dataset from the workflow
+  form" affordance ships in Phase Z3 (see the phase table).
 
 ### Non-goals
 

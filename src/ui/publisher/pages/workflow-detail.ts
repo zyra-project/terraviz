@@ -31,6 +31,13 @@ export interface WorkflowDetailPageOptions {
 
 const DEFAULT_REPO_SLUG = 'zyra-project/terraviz'
 
+/** Re-render timer per mount — cleared on every render so SPA
+ *  navigation away (which replaces the mount's children) can't
+ *  stack timers. Mirrors `dataset-detail.ts`'s transcode-poll
+ *  bookkeeping. */
+const activeRunPolls = new WeakMap<HTMLElement, ReturnType<typeof setTimeout>>()
+const RUN_POLL_INTERVAL_MS = 15_000
+
 export async function renderWorkflowDetailPage(
   content: HTMLElement,
   id: string,
@@ -40,6 +47,16 @@ export async function renderWorkflowDetailPage(
   const getFn = options.getFn ?? getWorkflow
   const runsFn = options.runsFn ?? listWorkflowRuns
   const runFn = options.runFn ?? runWorkflow
+
+  // Cancel any pending poll before starting this render — a manual
+  // re-render (Run now) racing a pending timer would otherwise
+  // double-fetch and interleave DOM updates (PR #178 Copilot
+  // review; the dataset-detail.ts cancel-before-cycle pattern).
+  const pendingPoll = activeRunPolls.get(content)
+  if (pendingPoll !== undefined) {
+    clearTimeout(pendingPoll)
+    activeRunPolls.delete(content)
+  }
 
   content.replaceChildren(messageShell(t('publisher.workflows.loading')))
 
@@ -117,6 +134,28 @@ export async function renderWorkflowDetailPage(
   }
 
   content.replaceChildren(shell)
+
+  // Phase Z3 — while a run is queued/running, refresh the page on
+  // a slow poll so status badges and gha_run_id links go live
+  // without a manual reload. Stops on terminal states; the pending
+  // timer was cancelled at the top of this render.
+  const hasActiveRun = runs.some(run => run.status === 'queued' || run.status === 'running')
+  if (hasActiveRun) {
+    activeRunPolls.set(
+      content,
+      setTimeout(() => {
+        // The portal router reuses the mount and replaces its
+        // children, so isConnected alone can't detect navigation
+        // away — also require the URL to still be this workflow's
+        // detail page (PR #178 Copilot review).
+        const stillHere =
+          window.location.pathname === `/publish/workflows/${encodeURIComponent(id)}`
+        if (content.isConnected && stillHere) {
+          void renderWorkflowDetailPage(content, id, options)
+        }
+      }, RUN_POLL_INTERVAL_MS),
+    )
+  }
 }
 
 function messageShell(message: string): HTMLElement {

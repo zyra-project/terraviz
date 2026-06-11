@@ -5,7 +5,8 @@
  * The pipeline is authored as YAML (or JSON — `JSON.parse` is
  * tried first) in a textarea and converted to canonical JSON
  * client-side before save, keeping a YAML parser out of the Pages
- * Functions bundle. The `yaml` package is lazy-imported on first
+ * Functions bundle; on edit, the stored JSON is rendered back to
+ * YAML so the editor always shows Zyra's native dialect. The `yaml` package is lazy-imported on first
  * parse so it only ever loads inside the publisher chunk, and only
  * for publishers who actually open this form. Validate calls the
  * server's static dry-run (`POST /{id}/validate`); per-field
@@ -15,6 +16,7 @@
 import { t } from '../../../i18n'
 import { handleSessionError, type PublisherValidationError } from '../api'
 import {
+  createDraftDataset,
   createWorkflow,
   getWorkflow,
   patchWorkflow,
@@ -22,6 +24,7 @@ import {
   type PublisherWorkflow,
   type WorkflowInputBody,
 } from '../workflows-api'
+import { STAGE_SNIPPETS, WORKFLOW_TEMPLATES } from '../workflow-templates'
 
 export interface WorkflowEditPageOptions {
   navigate?: (url: string) => void
@@ -29,13 +32,33 @@ export interface WorkflowEditPageOptions {
   createFn?: typeof createWorkflow
   patchFn?: typeof patchWorkflow
   validateFn?: typeof validateWorkflow
+  /** Override the minimal-draft creation — tests inject a stub. */
+  createDatasetFn?: typeof createDraftDataset
+  /** Confirmation hook — defaults to `window.confirm`. */
+  confirm?: (message: string) => boolean
   /** YAML parser injection point for tests (avoids the lazy import). */
   parseYaml?: (text: string) => unknown
+  /** YAML serializer injection point for tests (avoids the lazy import). */
+  stringifyYaml?: (value: unknown) => string
 }
 
 /** Schedule presets offered via a datalist; the field stays free
  *  text so any valid ISO-8601 duration in bounds works. */
 const SCHEDULE_PRESETS = ['PT1H', 'PT6H', 'PT12H', 'P1D', 'P1W'] as const
+
+/** Which form area a server validation error belongs to — drives
+ *  the per-field highlighting (Phase Z3 richer validation
+ *  surfacing). Exported for tests. */
+export function errorArea(
+  field: string,
+): 'pipeline' | 'template' | 'name' | 'schedule' | 'target' | 'other' {
+  if (field.startsWith('pipeline_json')) return 'pipeline'
+  if (field.startsWith('metadata_template')) return 'template'
+  if (field === 'name') return 'name'
+  if (field === 'schedule') return 'schedule'
+  if (field === 'target_dataset_id') return 'target'
+  return 'other'
+}
 
 export async function renderWorkflowEditPage(
   content: HTMLElement,
@@ -46,6 +69,7 @@ export async function renderWorkflowEditPage(
   const getFn = options.getFn ?? getWorkflow
 
   let existing: PublisherWorkflow | null = null
+  let pipelineDisplay = ''
   if (id) {
     content.replaceChildren(messageShell(t('publisher.workflows.loading')))
     const result = await getFn(id)
@@ -55,9 +79,30 @@ export async function renderWorkflowEditPage(
       return
     }
     existing = result.data.workflow
+    // Storage is canonical JSON, but publishers author and read
+    // YAML — it's what Zyra produces and saves natively — so the
+    // editor round-trips the stored pipeline back to YAML for
+    // display. Save converts YAML→JSON as before.
+    pipelineDisplay = await toDisplayYaml(existing.pipeline_json, options.stringifyYaml)
   }
 
-  content.replaceChildren(buildForm(existing, navigate, options))
+  content.replaceChildren(buildForm(existing, pipelineDisplay, navigate, options))
+}
+
+/** Stored canonical JSON → display YAML. Falls back to the raw
+ *  stored string when it doesn't parse (it is still editable, and
+ *  save-side validation reports the real problem). */
+async function toDisplayYaml(
+  pipelineJson: string,
+  stringifyYaml?: (value: unknown) => string,
+): Promise<string> {
+  try {
+    const parsed = JSON.parse(pipelineJson) as unknown
+    const stringify = stringifyYaml ?? (await import('yaml')).stringify
+    return stringify(parsed)
+  } catch {
+    return pipelineJson
+  }
 }
 
 function messageShell(message: string): HTMLElement {
@@ -101,6 +146,7 @@ function buildField(
 
 function buildForm(
   existing: PublisherWorkflow | null,
+  pipelineDisplay: string,
   navigate: (url: string) => void,
   options: WorkflowEditPageOptions,
 ): HTMLElement {
@@ -159,19 +205,143 @@ function buildForm(
   target.type = 'text'
   target.required = true
   target.value = existing?.target_dataset_id ?? ''
-  form.appendChild(
-    buildField(
-      t('publisher.workflows.form.target'),
-      t('publisher.workflows.form.target.hint'),
-      target,
-    ).wrap,
+  const targetField = buildField(
+    t('publisher.workflows.form.target'),
+    t('publisher.workflows.form.target.hint'),
+    target,
   )
+  // Phase Z3 — create the draft shell without leaving the form.
+  const createTargetBtn = document.createElement('button')
+  createTargetBtn.type = 'button'
+  createTargetBtn.className = 'publisher-tab publisher-workflow-create-target'
+  createTargetBtn.textContent = t('publisher.workflows.form.createTarget')
+  const createTargetStatus = document.createElement('span')
+  createTargetStatus.className = 'publisher-row-action-status'
+  createTargetBtn.addEventListener('click', () => {
+    const createDataset = options.createDatasetFn ?? createDraftDataset
+    const title = name.value.trim()
+    if (title.length < 3) {
+      createTargetStatus.textContent = t('publisher.workflows.form.createTarget.needName')
+      createTargetStatus.classList.add('publisher-row-action-status-error')
+      return
+    }
+    createTargetBtn.disabled = true
+    createTargetStatus.classList.remove('publisher-row-action-status-error')
+    createTargetStatus.textContent = t('publisher.workflows.form.createTarget.creating')
+    void createDataset(title)
+      .then(result => {
+        if (!result.ok) {
+          createTargetStatus.textContent = t('publisher.workflows.form.createTarget.failed')
+          createTargetStatus.classList.add('publisher-row-action-status-error')
+          return
+        }
+        target.value = result.data.dataset.id
+        createTargetStatus.textContent = t('publisher.workflows.form.createTarget.done')
+      })
+      // publisherSend resolves with an error envelope rather than
+      // rejecting, but a thrown stub or unexpected exception must
+      // not leave the button stuck on "Creating…" (PR #178 Copilot
+      // review).
+      .catch(() => {
+        createTargetStatus.textContent = t('publisher.workflows.form.createTarget.failed')
+        createTargetStatus.classList.add('publisher-row-action-status-error')
+      })
+      .finally(() => {
+        createTargetBtn.disabled = false
+      })
+  })
+  form.appendChild(targetField.wrap)
+  // Interactive controls must not nest inside the field's <label>
+  // (invalid semantics; label activation steals the click) — the
+  // action row is a sibling (PR #178 Copilot review).
+  const targetActions = document.createElement('div')
+  targetActions.className = 'publisher-form-actions publisher-workflow-target-actions'
+  targetActions.appendChild(createTargetBtn)
+  targetActions.appendChild(createTargetStatus)
+  form.appendChild(targetActions)
 
   const pipeline = document.createElement('textarea')
   pipeline.className = 'publisher-form-input publisher-form-textarea'
   pipeline.rows = 14
   pipeline.spellcheck = false
-  pipeline.value = existing ? prettyJson(existing.pipeline_json) : ''
+  pipeline.value = pipelineDisplay
+
+  const template = document.createElement('textarea')
+
+  // Phase Z3 — guided authoring: a template picker that seeds both
+  // textareas, and an insert-stage palette generated from the same
+  // allowlist the server validates against.
+  const confirmFn = options.confirm ?? ((message: string) => window.confirm(message))
+  const guided = document.createElement('div')
+  guided.className = 'publisher-form-field publisher-workflow-guided'
+
+  const templatePicker = document.createElement('select')
+  templatePicker.className = 'publisher-form-input'
+  templatePicker.setAttribute('aria-label', t('publisher.workflows.form.templatePicker'))
+  const templateBlank = document.createElement('option')
+  templateBlank.value = ''
+  templateBlank.textContent = t('publisher.workflows.form.templatePicker')
+  templatePicker.appendChild(templateBlank)
+  for (const wt of WORKFLOW_TEMPLATES) {
+    const option = document.createElement('option')
+    option.value = wt.id
+    option.textContent = t(wt.labelKey)
+    templatePicker.appendChild(option)
+  }
+  templatePicker.addEventListener('change', () => {
+    const chosen = WORKFLOW_TEMPLATES.find(wt => wt.id === templatePicker.value)
+    if (!chosen) return
+    const dirty = pipeline.value.trim().length > 0 || template.value.trim().length > 0
+    if (dirty && !confirmFn(t('publisher.workflows.form.template.overwriteConfirm'))) {
+      templatePicker.value = ''
+      return
+    }
+    pipeline.value = chosen.pipelineYaml
+    template.value = chosen.metadataTemplate
+    statusLine.textContent = t('publisher.workflows.form.template.applied')
+  })
+  guided.appendChild(templatePicker)
+
+  const stagePicker = document.createElement('select')
+  stagePicker.className = 'publisher-form-input'
+  stagePicker.setAttribute('aria-label', t('publisher.workflows.form.insertStage'))
+  const stageBlank = document.createElement('option')
+  stageBlank.value = ''
+  stageBlank.textContent = t('publisher.workflows.form.insertStage')
+  stagePicker.appendChild(stageBlank)
+  for (const snippet of STAGE_SNIPPETS) {
+    const option = document.createElement('option')
+    option.value = snippet.id
+    option.textContent = snippet.id // i18n-exempt: Zyra stage/command identifiers
+    stagePicker.appendChild(option)
+  }
+  stagePicker.addEventListener('change', () => {
+    const chosen = STAGE_SNIPPETS.find(sn => sn.id === stagePicker.value)
+    stagePicker.value = ''
+    if (!chosen) return
+    void (async () => {
+      // Snippets are YAML; if the textarea currently holds JSON
+      // (pasted by the user, or the unparsable-fallback path),
+      // appending YAML would create an unparseable mix — convert
+      // to YAML first (PR #178 Copilot review).
+      let current = pipeline.value
+      if (current.trim().startsWith('{')) {
+        try {
+          const parsed = JSON.parse(current) as unknown
+          const stringify = options.stringifyYaml ?? (await import('yaml')).stringify
+          current = stringify(parsed)
+        } catch {
+          // Leave as-is; Validate will surface the real problem.
+        }
+      }
+      if (current.trim().length === 0) current = 'stages:\n'
+      if (!current.endsWith('\n')) current += '\n'
+      pipeline.value = current + chosen.snippet
+    })()
+  })
+  guided.appendChild(stagePicker)
+  form.appendChild(guided)
+
   form.appendChild(
     buildField(
       t('publisher.workflows.form.pipeline'),
@@ -180,7 +350,6 @@ function buildForm(
     ).wrap,
   )
 
-  const template = document.createElement('textarea')
   template.className = 'publisher-form-input publisher-form-textarea'
   template.rows = 8
   template.spellcheck = false
@@ -228,14 +397,33 @@ function buildForm(
   buttons.appendChild(saveBtn)
   form.appendChild(buttons)
 
+  // Phase Z3 — richer validation surfacing: highlight the form
+  // area each server error belongs to alongside the grouped list.
+  // Complete over errorArea()'s range so 'other' errors still get
+  // a visible anchor — the grouped list itself (PR #178 Copilot
+  // review). tabindex makes the list focusable for the
+  // first-offender focus below.
+  errorList.tabIndex = -1
+  const areaInputs: Record<ReturnType<typeof errorArea>, HTMLElement> = {
+    pipeline,
+    template,
+    name,
+    schedule,
+    target,
+    other: errorList,
+  }
   const showErrors = (errors: PublisherValidationError[]): void => {
+    for (const input of Object.values(areaInputs)) input.removeAttribute('aria-invalid')
     errorList.replaceChildren(
       ...errors.map(err => {
+        const area = errorArea(err.field)
+        if (area !== 'other') areaInputs[area].setAttribute('aria-invalid', 'true')
         const li = document.createElement('li')
         li.textContent = `${err.field}: ${err.message}` // i18n-exempt: server-side validation messages are en-only in v1
         return li
       }),
     )
+    errors[0] && areaInputs[errorArea(errors[0].field)].focus()
   }
 
   const collectBody = async (): Promise<WorkflowInputBody | null> => {
