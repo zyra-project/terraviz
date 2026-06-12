@@ -34,6 +34,11 @@ declare const __BUILD_CHANNEL__: string
 let started = false
 let sessionEnded = false
 let pagehideAbort: AbortController | null = null
+// Idle-tab-aware view time: accumulate only while the document is
+// visible. A tab opened in the background reports ~0 visible_ms
+// while duration_ms keeps counting wall clock.
+let visibleAccumulatedMs = 0
+let visibleSince: number | null = null
 
 /**
  * Emit `session_start` and register the `session_end` unload hook.
@@ -69,6 +74,24 @@ export async function initSession(): Promise<void> {
 
   if (typeof window !== 'undefined') {
     pagehideAbort = new AbortController()
+    // Visibility accumulator FIRST — listeners fire in registration
+    // order, so when the session_end-on-hidden listener below runs,
+    // the just-ended visible stretch is already banked.
+    if (typeof document !== 'undefined') {
+      if (document.visibilityState === 'visible') visibleSince = Date.now()
+      document.addEventListener(
+        'visibilitychange',
+        () => {
+          if (document.visibilityState === 'visible') {
+            visibleSince = Date.now()
+          } else if (visibleSince !== null) {
+            visibleAccumulatedMs += Date.now() - visibleSince
+            visibleSince = null
+          }
+        },
+        { signal: pagehideAbort.signal },
+      )
+    }
     window.addEventListener(
       'pagehide',
       () => emitSessionEnd('pagehide'),
@@ -101,8 +124,16 @@ export function emitSessionEnd(
     exit_reason: reason,
     duration_ms: getSessionDurationMs(),
     event_count: getEventCount(),
+    visible_ms: getVisibleMs(),
   }
   emit(event)
+}
+
+/** Accumulated page-visible time, including the current stretch if
+ * the document is visible right now. */
+export function getVisibleMs(): number {
+  const current = visibleSince !== null ? Date.now() - visibleSince : 0
+  return Math.round(visibleAccumulatedMs + current)
 }
 
 /** Test helper — clear "has a session started yet" guard and unwire
@@ -112,6 +143,8 @@ export function __resetSessionForTests(): void {
   sessionEnded = false
   pagehideAbort?.abort()
   pagehideAbort = null
+  visibleAccumulatedMs = 0
+  visibleSince = null
 }
 
 // ---------------------------------------------------------------

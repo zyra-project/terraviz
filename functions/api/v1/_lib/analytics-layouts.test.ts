@@ -44,6 +44,7 @@ const FIXTURES: { [K in TelemetryEventType]: EventFor<K> } = {
     exit_reason: 'pagehide',
     duration_ms: 60_000,
     event_count: 42,
+    visible_ms: 48_000,
     client_offset_ms: 60_000,
   },
   layer_loaded: {

@@ -199,6 +199,40 @@ describe('session — emitSessionEnd', () => {
     expect(e.event_count).toBeGreaterThanOrEqual(3)
   })
 
+  it('stamps idle-tab-aware visible_ms that never exceeds duration_ms', async () => {
+    // happy-dom boots documents as 'visible', so the whole session
+    // is one visible stretch here; the accumulator's pause-on-hidden
+    // path is covered by the hidden-flip test below.
+    await initSession()
+    emitSessionEnd('pagehide')
+    const e = __peek().find((ev) => ev.event_type === 'session_end')
+    if (!e || e.event_type !== 'session_end') throw new Error('unreachable')
+    expect(e.visible_ms).toBeGreaterThanOrEqual(0)
+    expect(e.visible_ms).toBeLessThanOrEqual(e.duration_ms + 50)
+  })
+
+  it('stops accumulating visible time while the document is hidden', async () => {
+    await initSession()
+    // Flip to hidden: the accumulator banks the visible stretch and
+    // the session_end-on-hidden listener fires with that value.
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'hidden',
+    })
+    const banked = (await import('./session')).getVisibleMs()
+    document.dispatchEvent(new Event('visibilitychange'))
+    // Time passing while hidden must not grow the counter.
+    const after = (await import('./session')).getVisibleMs()
+    expect(after).toBeLessThanOrEqual(banked + 50)
+    const e = __peek().find((ev) => ev.event_type === 'session_end')
+    if (!e || e.event_type !== 'session_end') throw new Error('unreachable')
+    expect(e.exit_reason).toBe('visibilitychange')
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'visible',
+    })
+  })
+
   it('is idempotent — pagehide fired twice yields one session_end', async () => {
     await initSession()
     emitSessionEnd('pagehide')

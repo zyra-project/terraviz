@@ -139,6 +139,7 @@ the four server-stamped blobs. Order is alphabetical by field name
 | `double1` | `client_offset_ms` |
 | `double2` | `duration_ms` |
 | `double3` | `event_count` |
+| `double4` | `visible_ms` (page-visible wall clock — idle-tab-aware view time; 0 on rows from clients predating the field) |
 
 ### `layer_loaded` (Tier A)
 

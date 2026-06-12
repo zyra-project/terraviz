@@ -1018,6 +1018,14 @@ export interface SessionEndEvent extends TelemetryEventBase {
   exit_reason: 'pagehide' | 'visibilitychange' | 'clean'
   duration_ms: number
   event_count: number
+  /** Page-visible wall-clock ms — the idle-tab-aware view time.
+   * Accumulated across `visibilitychange` transitions, so a tab
+   * opened in the background reports ~0 while `duration_ms` keeps
+   * counting. Field name chosen to sort after `event_count`
+   * alphabetically so existing AE double positions stay stable
+   * (the ANALYTICS_CONTRIBUTING.md positional rule); rows from
+   * clients predating this field read back as 0 = unknown. */
+  visible_ms: number
 }
 
 export interface LayerLoadedEvent extends TelemetryEventBase {

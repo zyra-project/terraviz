@@ -81,7 +81,9 @@ export const EVENT_LAYOUTS = {
   },
   session_end: {
     blobs: ['exit_reason'],
-    doubles: ['client_offset_ms', 'duration_ms', 'event_count'],
+    // `visible_ms` was added later and deliberately sorts last; rows
+    // from clients predating it decode as 0 (AE pads unused doubles).
+    doubles: ['client_offset_ms', 'duration_ms', 'event_count', 'visible_ms'],
   },
   layer_loaded: {
     blobs: ['layer_id', 'layer_source', 'slot_index', 'trigger'],
