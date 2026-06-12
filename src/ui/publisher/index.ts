@@ -33,6 +33,7 @@ import { renderWorkflowDetailPage } from './pages/workflow-detail'
 import { renderWorkflowEditPage } from './pages/workflow-edit'
 import { renderFeaturedHeroPage } from './pages/featured-hero'
 import { renderAnalyticsPage } from './pages/analytics'
+import { renderFeedbackPage } from './pages/feedback'
 import { renderTopbar } from './components/topbar'
 import '../../styles/publisher.css'
 
@@ -257,6 +258,10 @@ function analyticsPage(mount: HTMLElement): RouteHandler {
   return () => void renderAnalyticsPage(mount)
 }
 
+function feedbackPage(mount: HTMLElement): RouteHandler {
+  return () => void renderFeedbackPage(mount)
+}
+
 function notFoundPage(mount: HTMLElement): RouteHandler {
   return () => renderPlaceholder(mount, t('publisher.section.notFound'), '3pa/A')
 }
@@ -307,6 +312,7 @@ export async function bootPublisherPortal(): Promise<void> {
       { pattern: '/publish/workflows/:id', handler: workflowDetailPage(content, getRouter) },
       { pattern: '/publish/featured-hero', handler: featuredHeroPage(content) },
       { pattern: '/publish/analytics', handler: analyticsPage(content) },
+      { pattern: '/publish/feedback', handler: feedbackPage(content) },
       { pattern: '/publish/import', handler: importPage(content) },
     ],
     notFoundPage(content),
