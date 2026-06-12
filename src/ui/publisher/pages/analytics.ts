@@ -423,15 +423,18 @@ export async function renderAnalyticsPage(
     table.append(el('thead', {}, [head]))
     const body = el('tbody')
     for (const row of rows) {
-      // Title first (the human-readable identity); the raw telemetry
-      // id stays visible as a second line for operators correlating
-      // with AE queries or the rollup tables.
+      // The catalog title is the identity humans read; the raw
+      // telemetry id survives only as a hover tooltip for the rare
+      // correlate-with-AE/rollup-tables debugging need. Rows whose
+      // id resolves to no catalog title show the id itself — it's
+      // the only identifier they have.
       const nameCell = el('td', { className: 'publisher-analytics-dataset' }, [
-        el('span', { className: 'publisher-analytics-dataset-title', textContent: row.title ?? row.layer_id }),
+        el('span', {
+          className: row.title ? 'publisher-analytics-dataset-title' : 'publisher-analytics-dataset-id',
+          textContent: row.title ?? row.layer_id,
+        }),
       ])
-      if (row.title) {
-        nameCell.append(el('span', { className: 'publisher-analytics-dataset-id', textContent: row.layer_id }))
-      }
+      nameCell.title = row.layer_id
       body.append(
         el('tr', {}, [
           nameCell,
