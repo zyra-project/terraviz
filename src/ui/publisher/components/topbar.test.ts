@@ -42,6 +42,7 @@ describe('renderTopbar', () => {
       'Tours',
       'Workflows',
       'Right now',
+      'Analytics',
       'Import',
     ])
   })

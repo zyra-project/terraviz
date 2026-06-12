@@ -209,5 +209,8 @@
   "vr.controllerTooltip.trigger": "Floating tooltip above the user's VR controllers indicating what the trigger does. Keep short — drawn into a fixed-size canvas above each hand. 'Trigger' refers to the index-finger button on a VR controller.",
   "vr.zoomSlider.aria": "ARIA label for the in-AR vertical zoom slider on phones. Describes its function for screen readers; not visible text.",
   "vr.zoomSlider.label": "Visible label printed above the in-AR zoom slider on phones. Single short word — the column it sits in is narrow.",
-  "vr.zoomSlider.title": "Tooltip on the in-AR zoom slider when hovered with a pointer. Brief — appears as a native browser tooltip."
+  "vr.zoomSlider.title": "Tooltip on the in-AR zoom slider when hovered with a pointer. Brief — appears as a native browser tooltip.",
+  "publisher.analytics.controls.rangeDays": "Date-range picker option; {days} is a number (7/30/90/365). Keep the {days} placeholder.",
+  "publisher.analytics.datasets.loadP50": "Table column header; '≈p50' means 'approximately the 50th percentile' — keep the ≈ and p50 notation.",
+  "publisher.analytics.datasets.loadP95": "Table column header; '≈p95' means 'approximately the 95th percentile' — keep the ≈ and p95 notation."
 }

@@ -193,6 +193,7 @@ npm run build:desktop # tsc + vite build + tauri build
 | `src/ui/publisher/router.ts` | Tiny History-API router for the publisher portal |
 | `src/ui/publisher/api.ts` | Shared HTTP client for the publisher portal |
 | `src/ui/publisher/types.ts` | Wire types for portal-bound publisher API responses |
+| `src/ui/publisher/analytics-charts.ts` | Hand-rolled SVG chart helpers (bar series, mix bars, stat tiles) for the analytics tab — no charting library |
 | `src/ui/publisher/components/dataset-form.ts` | Shared dataset create / edit form |
 | `src/ui/publisher/components/asset-uploader.ts` | Asset uploader component (Phase 3pd image-sequence pipeline) |
 | `src/ui/publisher/components/chip-input.ts` | Chip-input control — entries become removable chips as the user types |
@@ -210,6 +211,7 @@ npm run build:desktop # tsc + vite build + tauri build
 | `src/ui/publisher/pages/workflow-detail.ts` | `/publish/workflows/:id` — workflow summary + run history + Run now |
 | `src/ui/publisher/pages/workflow-edit.ts` | `/publish/workflows/new` + `…/:id/edit` — workflow form (YAML→JSON client-side, server-side Validate) |
 | `src/ui/publisher/pages/featured-hero.ts` | `/publish/featured-hero` — set the "Right now" hero override (`docs/HERO_ADMIN_SCOPING.md`) |
+| `src/ui/publisher/pages/analytics.ts` | `/publish/analytics` — privileged analytics dashboard over the D1 rollups, incl. the MapLibre spatial-attention heatmap (Phase B of `docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md`) |
 | `src/ui/publisher/pages/me.ts` | `/publish/me` — current-user identity + role display |
 | `src/ui/tourAuthoring/index.ts` | Tour-authoring public surface — detects `?tourEdit=` and mounts the dock |
 | `src/ui/tourAuthoring/dock.ts` | Floating tour-authoring dock — attaches to SPA chrome on `/?tourEdit=<id>` (or `=new`) |
