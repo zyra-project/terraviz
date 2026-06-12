@@ -57,6 +57,20 @@ function setup() {
   insertDaily.run(YESTERDAY, 'tour_ended', 'production', 0, 'US', '', 4, 3)
   insertDaily.run(YESTERDAY, 'vr_session_started', 'production', 0, 'US', '', 2, 2)
   insertDaily.run(YESTERDAY, 'orbit_turn', 'production', 0, 'US', '', 20, 5)
+  sqlite
+    .prepare(
+      `INSERT INTO analytics_daily (day, event_type, environment, internal, country, platform, events_count, sessions_count, metrics)
+       VALUES (?, 'session_end', 'production', 0, 'US', '', 12, 12, ?)`,
+    )
+    .run(YESTERDAY, '{"duration_ms_sum":900000,"visible_ms_sum":600000,"duration_ms_p50":50000}')
+  const insertOutcome = sqlite.prepare(
+    `INSERT INTO analytics_outcomes_daily (day, environment, event_type, value, count)
+     VALUES (?, ?, ?, ?, ?)`,
+  )
+  insertOutcome.run(YESTERDAY, 'production', 'tour_ended', 'completed', 3)
+  insertOutcome.run(YESTERDAY, 'production', 'tour_ended', 'abandoned', 1)
+  insertOutcome.run(YESTERDAY, 'production', 'vr_session_started', 'ar', 2)
+  insertOutcome.run(YESTERDAY, 'preview', 'tour_ended', 'completed', 9)
   // Internal traffic — must be excluded.
   insertDaily.run(YESTERDAY, 'session_start', 'production', 1, 'US', 'web', 99, 99)
   // Preview environment — excluded under environment=production.
@@ -143,19 +157,21 @@ describe('GET /api/v1/publish/analytics', () => {
   it('overview: day series, mixes, totals — external production traffic only', async () => {
     const { env } = setup()
     const data = await getData<{
-      days: Array<{ day: string; sessions: number; events: number; errors: number }>
+      days: Array<{ day: string; sessions: number; events: number; errors: number; view_ms: number }>
       platforms: Record<string, number>
       countries: Array<{ country: string; sessions: number }>
-      totals: { sessions: number; events: number; errors: number }
+      totals: { sessions: number; events: number; errors: number; view_ms: number }
     }>(env, '?section=overview&days=90')
 
     expect(data.days.map(d => d.day)).toEqual([OLD_DAY, YESTERDAY])
     const yday = data.days[1]
     expect(yday.sessions).toBe(14) // 10 web + 4 desktop; internal 99 + preview 50 excluded
     expect(yday.errors).toBe(3)
+    expect(yday.view_ms).toBe(600000) // from session_end metrics JSON
     expect(data.platforms).toEqual({ web: 17, desktop: 4 }) // includes OLD_DAY web 7
     expect(data.countries[0]).toEqual({ country: 'US', sessions: 17 })
     expect(data.totals.sessions).toBe(21)
+    expect(data.totals.view_ms).toBe(600000)
   })
 
   it('overview: the days window excludes older rows', async () => {
@@ -244,10 +260,16 @@ describe('GET /api/v1/publish/analytics', () => {
 
   it('funnel: per-day tour / VR / orbit counts', async () => {
     const { env } = setup()
-    const data = await getData<{ days: Array<Record<string, unknown>> }>(env, '?section=funnel&days=30')
+    const data = await getData<{
+      days: Array<Record<string, unknown>>
+      outcomes: { tour_ended: Record<string, number>; vr_session_started: Record<string, number> }
+    }>(env, '?section=funnel&days=30')
     expect(data.days).toEqual([
       { day: YESTERDAY, tours_started: 6, tours_ended: 4, vr_started: 2, orbit_turns: 20 },
     ])
+    // Preview-environment outcomes excluded under environment=production.
+    expect(data.outcomes.tour_ended).toEqual({ completed: 3, abandoned: 1 })
+    expect(data.outcomes.vr_session_started).toEqual({ ar: 2 })
   })
 
   it('serves the second identical request from KV', async () => {
