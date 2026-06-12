@@ -44,10 +44,15 @@ import {
 
 const ME_ENDPOINT = '/api/v1/publish/me'
 const ANALYTICS_ENDPOINT = '/api/v1/publish/analytics'
-/** Same GIBS proxy path the SPA's basemap uses (`mapRenderer.ts`).
- * Rendered desaturated + dimmed (see the raster paint below) so the
- * basemap reads as neutral geography and the heatmap colors pop. */
-const BASEMAP_TILES = '/api/tile/BlueMarble_NextGeneration/default/2004-08/GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpg'
+/** Vendored Natural Earth 1:110m land polygons (public domain),
+ * minified + coordinate-rounded — ~34 KB gzipped, lazy-fetched only
+ * when the spatial section renders. Drawn as a flat two-tone
+ * grayscale basemap (dark ocean, gray land) so the heatmap's color
+ * ramp is the only color on the map. No tile fetches at all — the
+ * heatmap works on bare localhost dev too. */
+const LAND_GEOJSON_URL = '/assets/ne_110m_land.geojson'
+const OCEAN_COLOR = '#0b0e15'
+const LAND_COLOR = '#3a4150'
 const RANGE_CHOICES = [7, 30, 90, 365] as const
 const ENVIRONMENTS = ['production', 'preview'] as const
 
@@ -571,23 +576,11 @@ async function mountHeatmap(container: HTMLElement, bins: SpatialData['bins']): 
     style: {
       version: 8,
       sources: {
-        basemap: { type: 'raster', tiles: [BASEMAP_TILES], tileSize: 256, maxzoom: 8 },
+        land: { type: 'geojson', data: LAND_GEOJSON_URL },
       },
       layers: [
-        {
-          id: 'basemap',
-          type: 'raster',
-          source: 'basemap',
-          // Fully desaturated and dimmed: the imagery becomes
-          // neutral grayscale geography so the heatmap's color ramp
-          // carries all the meaning.
-          paint: {
-            'raster-saturation': -1,
-            'raster-opacity': 0.55,
-            'raster-brightness-max': 0.7,
-            'raster-contrast': 0.15,
-          },
-        },
+        { id: 'ocean', type: 'background', paint: { 'background-color': OCEAN_COLOR } },
+        { id: 'land', type: 'fill', source: 'land', paint: { 'fill-color': LAND_COLOR } },
       ],
     },
     center: [0, 20],
