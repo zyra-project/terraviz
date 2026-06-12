@@ -350,6 +350,28 @@ care who calls it.
 
 ## Phase B — `/publish/analytics` tab
 
+> **Status: landed (v1).** Implementation:
+> `functions/api/v1/_lib/analytics-query.ts` +
+> `functions/api/v1/publish/analytics.ts` (typed section facade,
+> KV-cached ~5 min), `src/ui/publisher/pages/analytics.ts` +
+> `src/ui/publisher/analytics-charts.ts` (page + hand-rolled SVG
+> charts), MapLibre heatmap lazy-imported on first spatial render.
+> Deliberate v1 narrowings against the sketch below:
+> - **Rollups only** — no live-AE recent window yet; data covers
+>   complete UTC days through yesterday and the page says so. The
+>   AE proxy leg can be added to the same endpoint without breaking
+>   the page contract.
+> - **No standalone perf section** — error counts live in Overview;
+>   percentile *trends* need either a smarter rollup (per-day
+>   environment-level percentiles without the country split) or the
+>   live-AE leg. Folded into the open questions.
+> - **Funnel counts, not true funnels** — the daily rollup doesn't
+>   split `tour_ended` by outcome, so the section shows per-day
+>   engagement series (tours started/ended, VR sessions, Orbit
+>   turns). Outcome dimensions are an open question.
+> - Dataset ≈p50/≈p95 are loads-weighted averages of daily
+>   percentiles, labelled as such in the UI.
+
 ### B1. Query endpoint
 
 `functions/api/v1/publish/analytics.ts` — `GET`, behind the publish
