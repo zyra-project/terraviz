@@ -44,15 +44,19 @@ import {
 
 const ME_ENDPOINT = '/api/v1/publish/me'
 const ANALYTICS_ENDPOINT = '/api/v1/publish/analytics'
-/** Vendored Natural Earth 1:110m land polygons (public domain),
- * minified + coordinate-rounded — ~34 KB gzipped, lazy-fetched only
- * when the spatial section renders. Drawn as a flat two-tone
- * grayscale basemap (dark ocean, gray land) so the heatmap's color
- * ramp is the only color on the map. No tile fetches at all — the
- * heatmap works on bare localhost dev too. */
+/** Vendored Natural Earth 1:110m land polygons + admin-0 country
+ * boundary lines (public domain), minified + coordinate-rounded —
+ * ~54 KB gzipped combined, lazy-fetched only when the spatial
+ * section renders. Drawn as a flat grayscale basemap (dark ocean,
+ * gray land, slightly lighter country borders for geographic
+ * context) so the heatmap's color ramp is the only color on the
+ * map. No tile fetches at all — the heatmap works on bare
+ * localhost dev too. */
 const LAND_GEOJSON_URL = '/assets/ne_110m_land.geojson'
+const BORDERS_GEOJSON_URL = '/assets/ne_110m_admin0_borders.geojson'
 const OCEAN_COLOR = '#0b0e15'
 const LAND_COLOR = '#3a4150'
+const BORDER_COLOR = '#5a6374'
 const RANGE_CHOICES = [7, 30, 90, 365] as const
 const ENVIRONMENTS = ['production', 'preview'] as const
 
@@ -577,10 +581,17 @@ async function mountHeatmap(container: HTMLElement, bins: SpatialData['bins']): 
       version: 8,
       sources: {
         land: { type: 'geojson', data: LAND_GEOJSON_URL },
+        borders: { type: 'geojson', data: BORDERS_GEOJSON_URL },
       },
       layers: [
         { id: 'ocean', type: 'background', paint: { 'background-color': OCEAN_COLOR } },
         { id: 'land', type: 'fill', source: 'land', paint: { 'fill-color': LAND_COLOR } },
+        {
+          id: 'borders',
+          type: 'line',
+          source: 'borders',
+          paint: { 'line-color': BORDER_COLOR, 'line-width': 0.6 },
+        },
       ],
     },
     center: [0, 20],
