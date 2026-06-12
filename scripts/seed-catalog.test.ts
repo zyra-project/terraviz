@@ -30,6 +30,7 @@ import Database from 'better-sqlite3'
 const EXPECTED_TABLES = [
   'analytics_daily',
   'analytics_dataset_daily',
+  'analytics_errors_daily',
   'analytics_export_state',
   'analytics_spatial_daily',
   'asset_uploads',
@@ -54,6 +55,7 @@ const EXPECTED_TABLES = [
 const EXPECTED_INDEXES = [
   'idx_analytics_daily_event',
   'idx_analytics_dataset_daily_layer',
+  'idx_analytics_errors_daily_day',
   'idx_analytics_spatial_daily_layer',
   'idx_asset_uploads_dataset',
   'idx_audit_subject',

@@ -176,6 +176,16 @@ export interface DatasetRollupRow {
   dwell_ms_sum: number | null
 }
 
+export interface ErrorsRollupRow {
+  day: string
+  environment: string
+  category: string
+  source: string
+  code: string
+  message_class: string
+  count: number
+}
+
 export interface SpatialRollupRow {
   day: string
   event_type: string
@@ -191,6 +201,7 @@ export interface DayRollups {
   daily: DailyRollupRow[]
   dataset: DatasetRollupRow[]
   spatial: SpatialRollupRow[]
+  errors: ErrorsRollupRow[]
 }
 
 /** Per-event-type numeric field summarized as p50/p95 in
@@ -337,6 +348,8 @@ export function computeRollups(rows: DecodedEventRow[], day: string): DayRollups
   >()
   // analytics_spatial_daily
   const spatial = new Map<string, SpatialRollupRow>()
+  // analytics_errors_daily
+  const errors = new Map<string, ErrorsRollupRow>()
 
   for (const row of rows) {
     const w = row.sample_interval
@@ -365,7 +378,7 @@ export function computeRollups(rows: DecodedEventRow[], day: string): DayRollups
     const metricField = DAILY_METRIC_FIELDS[row.event_type]
     if (metricField) dailyEntry.samples.push(num(row.fields, metricField))
 
-    if (row.internal) continue // dataset + spatial rollups: real users only
+    if (row.internal) continue // dataset/spatial/errors rollups: real users only
 
     if (row.event_type === 'layer_loaded' || row.event_type === 'layer_unloaded') {
       const layerId = str(row.fields, 'layer_id')
@@ -392,6 +405,31 @@ export function computeRollups(rows: DecodedEventRow[], day: string): DayRollups
         } else {
           entry.dwellSum = (entry.dwellSum ?? 0) + num(row.fields, 'dwell_ms') * w
         }
+      }
+    }
+
+    if (row.event_type === 'error') {
+      // Breakdown dimensions for the dashboard's errors table.
+      // `error_detail` (the Tier B sibling carrying stacks) is
+      // deliberately excluded — it duplicates the `error` emit and
+      // counting both would double-report. Weight is the row's
+      // sample interval, matching the analytics_daily errors count
+      // (count_in_batch dedupes repeats within one batch; treating
+      // it as a multiplier would diverge from the tile's number).
+      const key = [row.environment, str(row.fields, 'category'), str(row.fields, 'source'), str(row.fields, 'code'), str(row.fields, 'message_class')].join('\u0000')
+      const entry = errors.get(key)
+      if (entry) {
+        entry.count += w
+      } else {
+        errors.set(key, {
+          day,
+          environment: row.environment,
+          category: str(row.fields, 'category'),
+          source: str(row.fields, 'source'),
+          code: str(row.fields, 'code'),
+          message_class: str(row.fields, 'message_class'),
+          count: w,
+        })
       }
     }
 
@@ -452,6 +490,7 @@ export function computeRollups(rows: DecodedEventRow[], day: string): DayRollups
       }
     }),
     spatial: [...spatial.values()],
+    errors: [...errors.values()],
   }
 }
 
@@ -472,6 +511,7 @@ export async function writeRollupsToD1(db: D1Database, day: string, rollups: Day
     db.prepare(`DELETE FROM analytics_daily WHERE day = ?`).bind(day),
     db.prepare(`DELETE FROM analytics_dataset_daily WHERE day = ?`).bind(day),
     db.prepare(`DELETE FROM analytics_spatial_daily WHERE day = ?`).bind(day),
+    db.prepare(`DELETE FROM analytics_errors_daily WHERE day = ?`).bind(day),
   ]
   const insertDaily = `INSERT INTO analytics_daily
     (day, event_type, environment, internal, country, platform, events_count, sessions_count, metrics)
@@ -501,6 +541,16 @@ export async function writeRollupsToD1(db: D1Database, day: string, rollups: Day
       db
         .prepare(insertSpatial)
         .bind(r.day, r.event_type, r.environment, r.layer_id, r.projection, r.lat_bin, r.lon_bin, r.hits),
+    )
+  }
+  const insertErrors = `INSERT INTO analytics_errors_daily
+    (day, environment, category, source, code, message_class, count)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`
+  for (const r of rollups.errors) {
+    stmts.push(
+      db
+        .prepare(insertErrors)
+        .bind(r.day, r.environment, r.category, r.source, r.code, r.message_class, r.count),
     )
   }
   await db.batch(stmts)

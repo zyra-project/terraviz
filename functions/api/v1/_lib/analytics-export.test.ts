@@ -212,6 +212,25 @@ describe('computeRollups', () => {
     expect(rollups.spatial.reduce((n, r) => n + r.hits, 0)).toBeCloseTo(1, 6)
   })
 
+  it('aggregates error breakdowns by category/source/code/message, external only', () => {
+    const err = (fields: Record<string, string>, extra: Partial<Parameters<typeof decoded>[0]> = {}) =>
+      decoded({ event_type: 'error', fields: { count_in_batch: 1, ...fields } as never, ...extra })
+    const rollups = computeRollups(
+      [
+        err({ category: 'hls', source: 'caught', code: '404', message_class: 'manifest fetch failed' }),
+        err({ category: 'hls', source: 'caught', code: '404', message_class: 'manifest fetch failed' }, { sample_interval: 3 }),
+        err({ category: 'tile', source: 'caught', code: '500', message_class: 'tile error' }),
+        // Internal traffic — excluded like the other detail rollups.
+        err({ category: 'llm', source: 'caught', code: '429', message_class: 'rate limited' }, { internal: true }),
+      ],
+      DAY,
+    )
+    expect(rollups.errors).toHaveLength(2)
+    const hls = rollups.errors.find(r => r.category === 'hls')
+    expect(hls).toMatchObject({ source: 'caught', code: '404', message_class: 'manifest fetch failed', count: 4 })
+    expect(rollups.errors.some(r => r.category === 'llm')).toBe(false)
+  })
+
   it('derives the footprint radius from zoom with floor and cap', () => {
     expect(footprintRadiusDeg(0)).toBe(MAX_FOOTPRINT_DEG)
     expect(footprintRadiusDeg(5)).toBeCloseTo(90 / 32, 6)
