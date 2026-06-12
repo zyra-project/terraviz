@@ -469,6 +469,13 @@ describe('effectiveCatalogTtl (Phase Z4)', () => {
     expect(effectiveCatalogTtl(bad, HOUR, NOW)).toBe(HOUR)
   })
 
+  it('never grows past the caller default, even below the floor', async () => {
+    const { effectiveCatalogTtl } = await import('./dataService')
+    const ONE_MIN = 60 * 1000
+    const live = [{ id: 'a', period: 'PT1M', endTime: '2026-06-11T11:59:30Z' } as never]
+    expect(effectiveCatalogTtl(live, ONE_MIN, NOW)).toBe(ONE_MIN)
+  })
+
   it('tracks sub-hour cadences and floors at five minutes', async () => {
     const { effectiveCatalogTtl } = await import('./dataService')
     const at = (period: string) => [{ id: 'a', period, endTime: '2026-06-11T11:59:00Z' } as never]

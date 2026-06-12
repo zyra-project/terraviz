@@ -584,3 +584,28 @@ describe('resolveManifest (unit)', () => {
     expect(fetchImpl).toHaveBeenCalledWith('https://test/video/7')
   })
 })
+
+describe('cacheControlFor (Phase Z4)', () => {
+  const NOW = Date.parse('2026-06-11T12:00:00Z')
+
+  it('serves the real-time policy for live cadences', async () => {
+    const { cacheControlFor } = await import('./manifest')
+    expect(
+      cacheControlFor({ period: 'P1W', end_time: '2026-06-05T00:00:00Z' }, NOW),
+    ).toContain('max-age=60')
+    // No end_time yet — still-updating row counts as live.
+    expect(cacheControlFor({ period: 'PT1H', end_time: null }, NOW)).toContain('max-age=60')
+  })
+
+  it('keeps the standard policy for stale, absent, or degenerate cadences', async () => {
+    const { cacheControlFor } = await import('./manifest')
+    expect(cacheControlFor({ period: null, end_time: null }, NOW)).toContain('max-age=300')
+    // Historical time-series: period present, trailing edge years old.
+    expect(
+      cacheControlFor({ period: 'PT30M', end_time: '2020-01-01T00:00:00Z' }, NOW),
+    ).toContain('max-age=300')
+    // Degenerate / malformed cadences.
+    expect(cacheControlFor({ period: 'P0D', end_time: null }, NOW)).toContain('max-age=300')
+    expect(cacheControlFor({ period: 'garbage', end_time: null }, NOW)).toContain('max-age=300')
+  })
+})

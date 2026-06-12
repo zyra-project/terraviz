@@ -360,7 +360,9 @@ export function safePeriodMs(period: string | null | undefined): number | null {
     Number(hours ?? 0) * 3_600_000 +
     Number(minutes ?? 0) * 60_000 +
     Number(seconds ?? 0) * 1_000
-  return ms > 0 ? ms : null
+  // Overflowed components (1e999…) produce Infinity — reject, per
+  // the "malformed returns null" contract (PR #179 review).
+  return Number.isFinite(ms) && ms > 0 ? ms : null
 }
 
 /**

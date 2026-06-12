@@ -36,7 +36,9 @@ export function effectiveCatalogTtl(
     const ms = safePeriodMs(dataset.period)
     if (ms !== null && ms < shortest) shortest = ms
   }
-  return Math.max(shortest, MIN_PERIOD_TTL_MS)
+  // Floor at 5 min, but never grow past the caller's default — the
+  // helper's contract is shrink-only (PR #179 review).
+  return Math.min(defaultMs, Math.max(shortest, MIN_PERIOD_TTL_MS))
 }
 
 

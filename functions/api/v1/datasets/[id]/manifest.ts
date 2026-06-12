@@ -72,7 +72,9 @@ export function cacheControlFor(
   now: number = Date.now(),
 ): string {
   const seconds = row.period ? parseScheduleSeconds(row.period) : null
-  if (seconds === null) return CACHE_CONTROL
+  // P0D parses to 0 and overflowed components to Infinity — neither
+  // is a real cadence (PR #179 review).
+  if (seconds === null || !Number.isFinite(seconds) || seconds <= 0) return CACHE_CONTROL
   if (!row.end_time) return CACHE_CONTROL_REALTIME
   const end = Date.parse(row.end_time)
   if (!Number.isFinite(end)) return CACHE_CONTROL
