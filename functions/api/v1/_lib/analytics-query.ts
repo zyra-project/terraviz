@@ -65,6 +65,14 @@ export interface SpatialData {
   bins: Array<{ lat: number; lon: number; hits: number }>
 }
 
+export interface ErrorBreakdownRow {
+  category: string
+  source: string
+  code: string
+  message_class: string
+  count: number
+}
+
 export interface FunnelDay {
   day: string
   tours_started: number
@@ -292,6 +300,27 @@ export async function querySpatial(
     layers: layerIds.map(id => ({ id, title: titles.get(id) ?? null })),
     bins: bins.results ?? [],
   }
+}
+
+/** Frequency-ordered error breakdown over the range — backs the
+ * expandable table behind the Overview section's errors tile.
+ * Telemetry has no severity field; category/source are the closest
+ * grouping, and the ordering is by sample-weighted count. */
+export async function queryErrors(
+  db: D1Database,
+  f: AnalyticsFilters,
+): Promise<{ errors: ErrorBreakdownRow[] }> {
+  const rows = await db
+    .prepare(
+      `SELECT category, source, code, message_class, SUM(count) AS count
+         FROM analytics_errors_daily
+        WHERE day >= ? AND environment = ?
+        GROUP BY category, source, code, message_class
+        ORDER BY count DESC LIMIT 100`,
+    )
+    .bind(f.sinceDay, f.environment)
+    .all<ErrorBreakdownRow>()
+  return { errors: rows.results ?? [] }
 }
 
 export async function queryFunnel(db: D1Database, f: AnalyticsFilters): Promise<{ days: FunnelDay[] }> {

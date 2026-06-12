@@ -224,6 +224,24 @@ describe('GET /api/v1/publish/analytics', () => {
     expect(clicks.bins).toEqual([{ lat: 51.5, lon: 0, hits: 3 }])
   })
 
+  it('errors: frequency-ordered breakdown over the range', async () => {
+    const { env, sqlite } = setup()
+    const insertErrors = sqlite.prepare(
+      `INSERT INTO analytics_errors_daily (day, environment, category, source, code, message_class, count)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    insertErrors.run(YESTERDAY, 'production', 'hls', 'caught', '404', 'manifest fetch failed', 5)
+    insertErrors.run(addDays(YESTERDAY, -1), 'production', 'hls', 'caught', '404', 'manifest fetch failed', 2)
+    insertErrors.run(YESTERDAY, 'production', 'tile', 'caught', '500', 'tile error', 3)
+    insertErrors.run(YESTERDAY, 'preview', 'llm', 'caught', '429', 'rate limited', 9)
+
+    const data = await getData<{ errors: Array<Record<string, unknown>> }>(env, '?section=errors&days=30')
+    expect(data.errors).toEqual([
+      { category: 'hls', source: 'caught', code: '404', message_class: 'manifest fetch failed', count: 7 },
+      { category: 'tile', source: 'caught', code: '500', message_class: 'tile error', count: 3 },
+    ])
+  })
+
   it('funnel: per-day tour / VR / orbit counts', async () => {
     const { env } = setup()
     const data = await getData<{ days: Array<Record<string, unknown>> }>(env, '?section=funnel&days=30')

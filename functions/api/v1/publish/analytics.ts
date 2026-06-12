@@ -7,7 +7,7 @@
  * the query shapes are a fixed enum and every parameter is
  * validated against an allowlist:
  *
- *   ?section=overview|datasets|spatial|funnel   (required)
+ *   ?section=overview|datasets|spatial|funnel|errors   (required)
  *   ?days=7|30|90|365                            (default 30)
  *   ?environment=production|preview              (default production)
  *   spatial only:
@@ -25,6 +25,7 @@ import type { CatalogEnv } from '../_lib/env'
 import type { PublisherData } from './_middleware'
 import {
   queryDatasets,
+  queryErrors,
   queryFunnel,
   queryOverview,
   querySpatial,
@@ -36,7 +37,7 @@ import { isPrivileged } from '../_lib/publisher-store'
 const CONTENT_TYPE = 'application/json; charset=utf-8'
 export const CACHE_TTL_SECONDS = 300
 export const ALLOWED_DAYS = [7, 30, 90, 365] as const
-const ALLOWED_SECTIONS = ['overview', 'datasets', 'spatial', 'funnel'] as const
+const ALLOWED_SECTIONS = ['overview', 'datasets', 'spatial', 'funnel', 'errors'] as const
 const ALLOWED_ENVIRONMENTS = ['production', 'preview'] as const
 const ALLOWED_SPATIAL_EVENTS = ['camera_settled', 'map_click'] as const
 const ALLOWED_PROJECTIONS = ['globe', 'mercator', 'vr', 'ar'] as const
@@ -124,6 +125,9 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
       break
     case 'funnel':
       data = await queryFunnel(db, filters)
+      break
+    case 'errors':
+      data = await queryErrors(db, filters)
       break
   }
 
