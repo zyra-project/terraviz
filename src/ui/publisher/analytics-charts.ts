@@ -222,10 +222,16 @@ export function downloadCsv(filename: string, rows: readonly CsvRow[]): void {
   const a = document.createElement('a')
   a.href = url
   a.download = filename
+  a.style.display = 'none'
   document.body.appendChild(a)
   a.click()
-  a.remove()
-  URL.revokeObjectURL(url)
+  // Revoke on the next tick (same pattern as
+  // zipDownloadService.saveBlobAsDownload / playlistUI) — revoking
+  // synchronously can race the browser's download in some engines.
+  setTimeout(() => {
+    a.remove()
+    URL.revokeObjectURL(url)
+  }, 0)
 }
 
 /** "Export CSV" button. The page passes a `getRows` thunk so the CSV

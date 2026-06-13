@@ -331,7 +331,8 @@ export async function renderAnalyticsPage(
   }
 
   /** Heading row with an inline "Export CSV" button. `slug` becomes
-   * the filename stem (`terraviz-analytics-<slug>-<range>.csv`); the
+   * the filename stem
+   * (`terraviz-analytics-<slug>-<environment>-<days>d.csv`); the
    * `getRows` thunk runs at click time over the already-loaded data.
    * Used only on success renders — loading/empty/error states keep
    * the bare `sectionHeading`, since there's nothing to export. */

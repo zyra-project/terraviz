@@ -587,7 +587,7 @@ export function computeRollups(rows: DecodedEventRow[], day: string): DayRollups
     // --- Phase E coverage rollups ---
 
     if (row.event_type === 'perf_sample') {
-      const key = [row.environment, str(row.fields, 'surface'), str(row.fields, 'webgl_renderer_hash')].join(' ')
+      const key = [row.environment, str(row.fields, 'surface'), str(row.fields, 'webgl_renderer_hash')].join('\u0000')
       const jsheap = num(row.fields, 'jsheap_mb')
       const entry = perf.get(key)
       if (entry) {
@@ -617,7 +617,7 @@ export function computeRollups(rows: DecodedEventRow[], day: string): DayRollups
     // double-count the conversation).
     if (row.event_type === 'orbit_turn' && str(row.fields, 'turn_role') === 'assistant') {
       const model = str(row.fields, 'model')
-      const key = [row.environment, model].join(' ')
+      const key = [row.environment, model].join('\u0000')
       const entry = orbit.get(key)
       if (entry) {
         entry.turns += w
@@ -642,7 +642,7 @@ export function computeRollups(rows: DecodedEventRow[], day: string): DayRollups
     if (row.event_type === 'tour_question_answered') {
       const tourId = str(row.fields, 'tour_id')
       const questionId = str(row.fields, 'question_id')
-      const key = [row.environment, tourId, questionId].join(' ')
+      const key = [row.environment, tourId, questionId].join('\u0000')
       const correct = bool(row.fields, 'was_correct') ? w : 0
       const entry = quiz.get(key)
       if (entry) {
