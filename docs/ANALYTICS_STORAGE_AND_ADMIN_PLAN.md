@@ -5,7 +5,7 @@ analysis surface inside the authenticated `/publish` portal — replacing
 Grafana as the primary dashboard and outliving Analytics Engine's
 30–90 day retention window.
 
-**Status: implemented.** All four phases (A–D) have shipped; this
+**Status: implemented.** All five phases (A–E) have shipped; this
 document now reads as the design record for the analytics storage
 pipeline and the `/publish/analytics` + `/publish/feedback` admin
 tabs. Per-phase "Status: landed" notes mark what each delivered.
