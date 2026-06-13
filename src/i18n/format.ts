@@ -28,6 +28,7 @@ function cacheKey(locale: string, opts: object | undefined): string {
 const dateFormatters = new Map<string, Intl.DateTimeFormat>()
 const numberFormatters = new Map<string, Intl.NumberFormat>()
 const relativeFormatters = new Map<string, Intl.RelativeTimeFormat>()
+const regionFormatters = new Map<string, Intl.DisplayNames>()
 
 /** Format a `Date` (or ISO string) with the active locale. */
 export function formatDate(
@@ -58,6 +59,35 @@ export function formatNumber(
     numberFormatters.set(key, fmt)
   }
   return fmt.format(value)
+}
+
+/**
+ * Full region name for an ISO 3166-1 alpha-2 country code in the
+ * active locale ("US" → "United States", "FR" → "France").
+ *
+ * Falls back to the code itself for unknown / non-region values
+ * (e.g. Cloudflare's `XX` unknown or `T1` Tor pseudo-codes), and
+ * for runtimes whose ICU build lacks region data — same defensive
+ * stance as `docentContext.ts`'s language-name lookup.
+ */
+export function formatRegion(code: string): string {
+  const locale = getLocale()
+  let fmt = regionFormatters.get(locale)
+  if (!fmt) {
+    try {
+      fmt = new Intl.DisplayNames(locale, { type: 'region', fallback: 'code' })
+    } catch {
+      return code
+    }
+    regionFormatters.set(locale, fmt)
+  }
+  try {
+    return fmt.of(code) ?? code
+  } catch {
+    // `.of()` throws RangeError on malformed codes (not just unknown
+    // ones); show the raw code rather than blow up the table.
+    return code
+  }
 }
 
 /**
@@ -95,4 +125,5 @@ export function __resetFormatterCacheForTests(): void {
   dateFormatters.clear()
   numberFormatters.clear()
   relativeFormatters.clear()
+  regionFormatters.clear()
 }

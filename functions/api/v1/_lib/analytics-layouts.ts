@@ -150,8 +150,9 @@ export const EVENT_LAYOUTS = {
     doubles: ['client_offset_ms', 'pause_ms', 'task_index'],
   },
   tour_ended: {
-    blobs: ['outcome', 'tour_id'],
+    blobs: ['outcome', 'tour_id', 'was_auto'],
     doubles: ['client_offset_ms', 'duration_ms', 'task_index'],
+    booleans: ['was_auto'],
   },
   tour_question_answered: {
     blobs: ['question_id', 'tour_id', 'was_correct'],

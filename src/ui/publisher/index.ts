@@ -34,6 +34,7 @@ import { renderWorkflowEditPage } from './pages/workflow-edit'
 import { renderFeaturedHeroPage } from './pages/featured-hero'
 import { renderAnalyticsPage } from './pages/analytics'
 import { renderUsersPage } from './pages/users'
+import { renderFeedbackPage } from './pages/feedback'
 import { renderTopbar } from './components/topbar'
 import { publisherGet } from './api'
 import '../../styles/publisher.css'
@@ -60,6 +61,7 @@ export function routeForPath(
   | 'import'
   | 'workflows'
   | 'analytics'
+  | 'feedback'
   | 'users'
   | 'unknown' {
   if (pathname === '/publish' || pathname.startsWith('/publish/me')) return 'me'
@@ -69,6 +71,7 @@ export function routeForPath(
   if (pathname.startsWith('/publish/featured-hero')) return 'featured_hero'
   if (pathname.startsWith('/publish/import')) return 'import'
   if (pathname.startsWith('/publish/analytics')) return 'analytics'
+  if (pathname.startsWith('/publish/feedback')) return 'feedback'
   if (pathname.startsWith('/publish/users')) return 'users'
   return 'unknown'
 }
@@ -272,6 +275,10 @@ function usersPage(mount: HTMLElement): RouteHandler {
   return () => void renderUsersPage(mount)
 }
 
+function feedbackPage(mount: HTMLElement): RouteHandler {
+  return () => void renderFeedbackPage(mount)
+}
+
 function notFoundPage(mount: HTMLElement): RouteHandler {
   return () => renderPlaceholder(mount, t('publisher.section.notFound'), '3pa/A')
 }
@@ -334,6 +341,7 @@ export async function bootPublisherPortal(): Promise<void> {
       { pattern: '/publish/workflows/:id', handler: workflowDetailPage(content, getRouter) },
       { pattern: '/publish/featured-hero', handler: featuredHeroPage(content) },
       { pattern: '/publish/analytics', handler: analyticsPage(content) },
+      { pattern: '/publish/feedback', handler: feedbackPage(content) },
       { pattern: '/publish/users', handler: usersPage(content) },
       { pattern: '/publish/import', handler: importPage(content) },
     ],

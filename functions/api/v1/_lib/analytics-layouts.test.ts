@@ -174,6 +174,7 @@ const FIXTURES: { [K in TelemetryEventType]: EventFor<K> } = {
     outcome: 'completed',
     task_index: 8,
     duration_ms: 300_000,
+    was_auto: false,
     client_offset_ms: 100,
   },
   tour_question_answered: {

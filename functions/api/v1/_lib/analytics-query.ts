@@ -42,6 +42,8 @@ export interface OverviewDay {
 export interface OverviewData {
   days: OverviewDay[]
   platforms: Record<string, number>
+  /** Sessions by OS family (from session_start; Phase E). */
+  operatingSystems: Record<string, number>
   countries: Array<{ country: string; sessions: number }>
   totals: { sessions: number; events: number; errors: number; view_ms: number }
 }
@@ -66,6 +68,8 @@ export interface SpatialData {
    * dataset filter ('' = default Earth view, title null). */
   layers: Array<{ id: string; title: string | null }>
   bins: Array<{ lat: number; lon: number; hits: number }>
+  /** map_click hit-kind mix (surface / marker / feature / region). */
+  hitKinds: Record<string, number>
 }
 
 export interface ErrorBreakdownRow {
@@ -91,7 +95,7 @@ export interface FunnelOutcomes {
   vr_session_started: Record<string, number>
 }
 
-const TOP_COUNTRIES = 12
+const TOP_COUNTRIES = 20
 const TOP_DATASETS = 25
 /** 0.5° world grid is ≤ ~260k cells; real data is far sparser, but
  * cap the response so a pathological range can't balloon it. */
@@ -176,10 +180,20 @@ export async function queryOverview(db: D1Database, f: AnalyticsFilters): Promis
     viewByDay.set(row.day, (viewByDay.get(row.day) ?? 0) + visible)
   }
 
+  const osRows = await db
+    .prepare(
+      `SELECT key, SUM(count) AS sessions FROM analytics_dimension_daily
+        WHERE day >= ? AND environment = ? AND metric = 'os'
+        GROUP BY key`,
+    )
+    .bind(f.sinceDay, f.environment)
+    .all<{ key: string; sessions: number }>()
+
   const dayRows = (days.results ?? []).map(d => ({ ...d, view_ms: viewByDay.get(d.day) ?? 0 }))
   return {
     days: dayRows,
     platforms: Object.fromEntries((platforms.results ?? []).map(r => [r.platform, r.sessions])),
+    operatingSystems: Object.fromEntries((osRows.results ?? []).map(r => [r.key, r.sessions])),
     countries: countries.results ?? [],
     totals: {
       sessions: dayRows.reduce((n, d) => n + d.sessions, 0),
@@ -322,11 +336,21 @@ export async function querySpatial(
     .bind(...binds)
     .all<{ lat: number; lon: number; hits: number }>()
 
+  const hitKindRows = await db
+    .prepare(
+      `SELECT key, SUM(count) AS n FROM analytics_dimension_daily
+        WHERE day >= ? AND environment = ? AND metric = 'click_kind'
+        GROUP BY key`,
+    )
+    .bind(f.sinceDay, f.environment)
+    .all<{ key: string; n: number }>()
+
   const layerIds = (layers.results ?? []).map(r => r.layer_id)
   const titles = await resolveTitles(db, layerIds)
   return {
     layers: layerIds.map(id => ({ id, title: titles.get(id) ?? null })),
     bins: bins.results ?? [],
+    hitKinds: Object.fromEntries((hitKindRows.results ?? []).map(r => [r.key, r.n])),
   }
 }
 
@@ -354,7 +378,15 @@ export async function queryErrors(
 export async function queryFunnel(
   db: D1Database,
   f: AnalyticsFilters,
-): Promise<{ days: FunnelDay[]; outcomes: FunnelOutcomes }> {
+): Promise<{
+  days: FunnelDay[]
+  outcomes: FunnelOutcomes
+  /** tour_started counts by source (browse | orbit | deeplink |
+   * auto), from the `tour_start` dimension. The `auto` bucket is
+   * `runTourOnLoad` auto-tours, which the outcomes rollup excludes;
+   * the page subtracts it to compute the user-started denominator. */
+  toursStartedBySource: Record<string, number>
+}> {
   const rows = await db
     .prepare(
       `SELECT day,
@@ -384,7 +416,187 @@ export async function queryFunnel(
     if (row.event_type === 'tour_ended') outcomes.tour_ended[row.value] = row.count
     else if (row.event_type === 'vr_session_started') outcomes.vr_session_started[row.value] = row.count
   }
-  return { days: rows.results ?? [], outcomes }
+
+  const sourceRows = await db
+    .prepare(
+      `SELECT key, SUM(count) AS count
+         FROM analytics_dimension_daily
+        WHERE day >= ? AND environment = ? AND metric = 'tour_start'
+        GROUP BY key`,
+    )
+    .bind(f.sinceDay, f.environment)
+    .all<{ key: string; count: number }>()
+  const toursStartedBySource: Record<string, number> = {}
+  for (const row of sourceRows.results ?? []) toursStartedBySource[row.key] = row.count
+
+  return { days: rows.results ?? [], outcomes, toursStartedBySource }
+}
+
+// --- Phase E sections ---
+
+export interface PerfRow {
+  surface: string
+  renderer: string
+  samples: number
+  avg_fps: number
+  avg_frame_p95_ms: number
+  avg_jsheap_mb: number | null
+}
+
+/** Per-renderer/surface performance averages over the range, derived
+ * from the weighted sums in analytics_perf_daily. */
+export async function queryPerf(db: D1Database, f: AnalyticsFilters): Promise<{ rows: PerfRow[] }> {
+  const rows = await db
+    .prepare(
+      `SELECT surface, renderer,
+              SUM(samples) AS samples,
+              SUM(fps_sum) AS fps_sum,
+              SUM(frame_p95_sum) AS frame_p95_sum,
+              SUM(jsheap_sum) AS jsheap_sum,
+              SUM(jsheap_samples) AS jsheap_samples
+         FROM analytics_perf_daily
+        WHERE day >= ? AND environment = ?
+        GROUP BY surface, renderer
+        ORDER BY samples DESC LIMIT 50`,
+    )
+    .bind(f.sinceDay, f.environment)
+    .all<{ surface: string; renderer: string; samples: number; fps_sum: number; frame_p95_sum: number; jsheap_sum: number; jsheap_samples: number }>()
+  return {
+    rows: (rows.results ?? []).map(r => ({
+      surface: r.surface,
+      renderer: r.renderer,
+      samples: r.samples,
+      avg_fps: r.samples > 0 ? r.fps_sum / r.samples : 0,
+      avg_frame_p95_ms: r.samples > 0 ? r.frame_p95_sum / r.samples : 0,
+      avg_jsheap_mb: r.jsheap_samples > 0 ? r.jsheap_sum / r.jsheap_samples : null,
+    })),
+  }
+}
+
+export interface OrbitModelRow {
+  model: string
+  turns: number
+  rounds: number
+  input_tokens: number
+  output_tokens: number
+}
+
+export interface OrbitData {
+  models: OrbitModelRow[]
+  days: Array<{ day: string; rounds: number; turns: number }>
+  totals: { turns: number; rounds: number; input_tokens: number; output_tokens: number }
+}
+
+/** Orbit LLM cost — by model + per-day round counts. Tier B, so
+ * sparse unless users opt into Research mode. */
+export async function queryOrbit(db: D1Database, f: AnalyticsFilters): Promise<OrbitData> {
+  const models = await db
+    .prepare(
+      `SELECT model,
+              SUM(turns) AS turns, SUM(rounds_sum) AS rounds,
+              SUM(input_tokens_sum) AS input_tokens, SUM(output_tokens_sum) AS output_tokens
+         FROM analytics_orbit_daily
+        WHERE day >= ? AND environment = ?
+        GROUP BY model ORDER BY rounds DESC LIMIT 25`,
+    )
+    .bind(f.sinceDay, f.environment)
+    .all<OrbitModelRow>()
+  const days = await db
+    .prepare(
+      `SELECT day, SUM(rounds_sum) AS rounds, SUM(turns) AS turns
+         FROM analytics_orbit_daily
+        WHERE day >= ? AND environment = ?
+        GROUP BY day ORDER BY day`,
+    )
+    .bind(f.sinceDay, f.environment)
+    .all<{ day: string; rounds: number; turns: number }>()
+  // Totals are a separate full aggregate, not a reduce over the
+  // top-25 `models` rows — otherwise the stat tiles undercount when
+  // more than 25 models appear in range.
+  const totalsRow = await db
+    .prepare(
+      `SELECT SUM(turns) AS turns, SUM(rounds_sum) AS rounds,
+              SUM(input_tokens_sum) AS input_tokens, SUM(output_tokens_sum) AS output_tokens
+         FROM analytics_orbit_daily
+        WHERE day >= ? AND environment = ?`,
+    )
+    .bind(f.sinceDay, f.environment)
+    .first<{ turns: number; rounds: number; input_tokens: number; output_tokens: number }>()
+  return {
+    models: models.results ?? [],
+    days: days.results ?? [],
+    totals: {
+      turns: totalsRow?.turns ?? 0,
+      rounds: totalsRow?.rounds ?? 0,
+      input_tokens: totalsRow?.input_tokens ?? 0,
+      output_tokens: totalsRow?.output_tokens ?? 0,
+    },
+  }
+}
+
+export interface ResearchData {
+  topSearches: Array<{ key: string; count: number; avg_length: number }>
+  zeroSearches: Array<{ key: string; count: number }>
+  dwell: Array<{ key: string; count: number; avg_ms: number }>
+  gestures: Array<{ key: string; count: number; avg_magnitude: number }>
+  corrections: Array<{ key: string; count: number }>
+  followThrough: Array<{ key: string; count: number; avg_latency_ms: number }>
+  worstQuestions: Array<{ tour_id: string; question_id: string; answered: number; correct_rate: number }>
+}
+
+/** Tier-B research surface — the research.json dashboard ported.
+ * Every sub-table reads the generic dimension rollup (or the quiz
+ * rollup); all sparse unless users opt into Research mode. */
+export async function queryResearch(db: D1Database, f: AnalyticsFilters): Promise<ResearchData> {
+  const dim = async (metric: string, limit = 20) =>
+    (
+      await db
+        .prepare(
+          `SELECT key, SUM(count) AS count, SUM(value_sum) AS value_sum
+             FROM analytics_dimension_daily
+            WHERE day >= ? AND environment = ? AND metric = ?
+            GROUP BY key ORDER BY count DESC LIMIT ${limit}`,
+        )
+        .bind(f.sinceDay, f.environment, metric)
+        .all<{ key: string; count: number; value_sum: number }>()
+    ).results ?? []
+
+  const [searches, zeros, dwellRows, gestureRows, correctionRows, followRows] = await Promise.all([
+    dim('search'),
+    dim('search_zero'),
+    dim('dwell'),
+    dim('vr_gesture'),
+    dim('orbit_correction'),
+    dim('orbit_follow'),
+  ])
+
+  const quiz = await db
+    .prepare(
+      `SELECT tour_id, question_id, SUM(answered) AS answered, SUM(correct) AS correct
+         FROM analytics_quiz_daily
+        WHERE day >= ? AND environment = ?
+        GROUP BY tour_id, question_id
+        HAVING answered > 0
+        ORDER BY (correct * 1.0 / answered) ASC, answered DESC LIMIT 20`,
+    )
+    .bind(f.sinceDay, f.environment)
+    .all<{ tour_id: string; question_id: string; answered: number; correct: number }>()
+
+  const avg = (count: number, sum: number) => (count > 0 ? sum / count : 0)
+  return {
+    topSearches: searches.map(r => ({ key: r.key, count: r.count, avg_length: avg(r.count, r.value_sum) })),
+    zeroSearches: zeros.map(r => ({ key: r.key, count: r.count })),
+    dwell: dwellRows.map(r => ({ key: r.key, count: r.count, avg_ms: avg(r.count, r.value_sum) })),
+    gestures: gestureRows.map(r => ({ key: r.key, count: r.count, avg_magnitude: avg(r.count, r.value_sum) })),
+    corrections: correctionRows.map(r => ({ key: r.key, count: r.count })),
+    followThrough: followRows.map(r => ({ key: r.key, count: r.count, avg_latency_ms: avg(r.count, r.value_sum) })),
+    worstQuestions: (quiz.results ?? []).map(r => ({
+      tour_id: r.tour_id,
+      question_id: r.question_id,
+      answered: r.answered,
+      correct_rate: r.answered > 0 ? r.correct / r.answered : 0,
+    })),
+  }
 }
 
 function safeJson(text: string): Record<string, number> {

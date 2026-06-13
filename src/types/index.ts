@@ -1148,7 +1148,10 @@ export interface TourStartedEvent extends TelemetryEventBase {
   event_type: 'tour_started'
   tour_id: string
   tour_title: string
-  source: 'browse' | 'orbit' | 'deeplink'
+  /** `'auto'` marks tours auto-started by `dataset.runTourOnLoad`
+   * (no user intent). Funnel/completion analytics exclude these so
+   * the rate reflects deliberately-started tours only. */
+  source: 'browse' | 'orbit' | 'deeplink' | 'auto'
   task_count: number
 }
 
@@ -1181,6 +1184,12 @@ export interface TourEndedEvent extends TelemetryEventBase {
   outcome: TourOutcome
   task_index: number
   duration_ms: number
+  /** True when the matching `tour_started` was `source: 'auto'`
+   * (a `runTourOnLoad` auto-tour). Lets the export job exclude
+   * auto-tours from completion-rate rollups without joining back
+   * to `tour_started`. Alphabetically last, so it appends to the
+   * positional layout without shifting existing fields. */
+  was_auto: boolean
 }
 
 /**
@@ -1530,6 +1539,7 @@ export interface PublisherPortalLoadedEvent extends TelemetryEventBase {
     | 'import'
     | 'workflows'
     | 'analytics'
+    | 'feedback'
     | 'users'
     | 'unknown'
 }

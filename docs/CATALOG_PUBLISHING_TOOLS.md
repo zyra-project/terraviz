@@ -127,7 +127,7 @@ adds the following event types to `TelemetryEvent` in
 
 | Event | Tier | Fields | Notes |
 |---|---|---|---|
-| `publisher_portal_loaded` | A | `route` (`me` \| `datasets` \| `tours` \| `workflows` \| `featured_hero` \| `import` \| `analytics` \| `unknown`) | One per portal-chunk load. |
+| `publisher_portal_loaded` | A | `route` (`me` \| `datasets` \| `tours` \| `workflows` \| `featured_hero` \| `import` \| `analytics` \| `feedback` \| `unknown`) | One per portal-chunk load. |
 | `publisher_action` | A | `action` (`draft_saved` \| `published` \| `retracted` \| `preview_minted` \| `asset_uploaded` \| `bulk_imported`), `dataset_id` (hashed via `src/analytics/hash.ts`) | Server-side `audit_events` rows are the source of truth for *who* did *what*; this Tier-A event powers the operator dashboard without persisting publisher identity client-side. |
 | `publisher_validation_failed` | B | `field`, `code` | Research-tier so we can size which validators trip publishers most without storing the offending free-text values. |
 | `publisher_dwell` | B | `surface` (form section name), `duration_ms` | Existing multi-handle tracker in `src/analytics/dwell.ts`; standard ≤30/min throttle. |

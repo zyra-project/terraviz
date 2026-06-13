@@ -184,6 +184,19 @@ describe('TourEngine — telemetry events', () => {
     const ev = ends[0]
     if (ev.event_type !== 'tour_ended') throw new Error('unreachable')
     expect(ev.outcome).toBe('completed')
+    expect(ev.was_auto).toBe(false)
+  })
+
+  it('flags was_auto on tour_ended for runTourOnLoad auto-tours', async () => {
+    const engine = new TourEngine(SAMPLE_TOUR, noopCallbacks(), {
+      meta: { ...META, source: 'auto' },
+    })
+    await engine.play()
+    const ends = __peek().filter((e) => e.event_type === 'tour_ended')
+    expect(ends).toHaveLength(1)
+    const ev = ends[0]
+    if (ev.event_type !== 'tour_ended') throw new Error('unreachable')
+    expect(ev.was_auto).toBe(true)
   })
 
   it('does not emit tour_started until play() is called', () => {

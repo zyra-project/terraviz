@@ -267,11 +267,136 @@ describe('computeRollups', () => {
     expect(rollups.outcomes.some(o => o.value === 'error')).toBe(false) // internal excluded
   })
 
+  it('excludes runTourOnLoad auto-tours from the outcomes rollup', () => {
+    const rollups = computeRollups(
+      [
+        // Two user-started completions...
+        decoded({ event_type: 'tour_ended', fields: { tour_id: 't1', outcome: 'completed', task_index: 8, duration_ms: 1000, was_auto: false } }),
+        decoded({ event_type: 'tour_ended', fields: { tour_id: 't2', outcome: 'completed', task_index: 3, duration_ms: 500, was_auto: false } }),
+        // ...and two auto-tours that auto-played to completion — must
+        // not inflate the funnel.
+        decoded({ event_type: 'tour_ended', fields: { tour_id: 't3', outcome: 'completed', task_index: 9, duration_ms: 900, was_auto: true } }),
+        decoded({ event_type: 'tour_ended', fields: { tour_id: 't4', outcome: 'completed', task_index: 9, duration_ms: 900, was_auto: true } }),
+      ],
+      DAY,
+    )
+    const completed = rollups.outcomes.find(o => o.event_type === 'tour_ended' && o.value === 'completed')
+    expect(completed?.count).toBe(2)
+  })
+
+  it('rolls up tour_started source mix into the tour_start dimension', () => {
+    const rollups = computeRollups(
+      [
+        decoded({ event_type: 'tour_started', fields: { tour_id: 't1', tour_title: 'A', source: 'browse', task_count: 5 } }),
+        decoded({ event_type: 'tour_started', fields: { tour_id: 't2', tour_title: 'B', source: 'browse', task_count: 5 }, sample_interval: 2 }),
+        decoded({ event_type: 'tour_started', fields: { tour_id: 't3', tour_title: 'C', source: 'auto', task_count: 5 } }),
+        decoded({ event_type: 'tour_started', fields: { tour_id: 't4', tour_title: 'D', source: 'orbit', task_count: 5 } }),
+      ],
+      DAY,
+    )
+    const dims = rollups.dimensions.filter(d => d.metric === 'tour_start')
+    expect(dims.find(d => d.key === 'browse')?.count).toBe(3) // 1 + 2 (sample-weighted)
+    expect(dims.find(d => d.key === 'auto')?.count).toBe(1)
+    expect(dims.find(d => d.key === 'orbit')?.count).toBe(1)
+  })
+
   it('derives the footprint radius from zoom with floor and cap', () => {
     expect(footprintRadiusDeg(0)).toBe(MAX_FOOTPRINT_DEG)
     expect(footprintRadiusDeg(5)).toBeCloseTo(90 / 32, 6)
     expect(footprintRadiusDeg(8)).toBe(0.5)
     expect(footprintRadiusDeg(Number.NaN)).toBe(0.5)
+  })
+
+  // --- Phase E coverage rollups ---
+
+  it('rolls up perf samples into weighted sums, jsheap excluding zeros', () => {
+    const rollups = computeRollups(
+      [
+        decoded({ event_type: 'perf_sample', fields: { surface: 'map', webgl_renderer_hash: 'abc', fps_median_10s: 60, frame_time_p95_ms: 20, jsheap_mb: 300 } }),
+        decoded({ event_type: 'perf_sample', fields: { surface: 'map', webgl_renderer_hash: 'abc', fps_median_10s: 30, frame_time_p95_ms: 40, jsheap_mb: 0 }, sample_interval: 2 }),
+        decoded({ event_type: 'perf_sample', fields: { surface: 'vr', webgl_renderer_hash: 'xyz', fps_median_10s: 72, frame_time_p95_ms: 13, jsheap_mb: 0 } }),
+      ],
+      DAY,
+    )
+    const map = rollups.perf.find(r => r.surface === 'map' && r.renderer === 'abc')!
+    expect(map.samples).toBe(3) // 1 + 2
+    expect(map.fps_sum).toBe(60 + 30 * 2) // weighted avg = 120/3 = 40
+    expect(map.frame_p95_sum).toBe(20 + 40 * 2)
+    expect(map.jsheap_sum).toBe(300) // the jsheap=0 row excluded
+    expect(map.jsheap_samples).toBe(1)
+    expect(rollups.perf.some(r => r.surface === 'vr')).toBe(true)
+  })
+
+  it('rolls up Orbit cost from assistant turns only, by model', () => {
+    const rollups = computeRollups(
+      [
+        decoded({ event_type: 'orbit_turn', fields: { turn_role: 'assistant', model: 'llama-3.1-70b', finish_reason: 'stop', turn_index: 1, duration_ms: 2000, input_tokens: 1500, output_tokens: 200, content_length: 800, turn_rounds: 2 } }),
+        decoded({ event_type: 'orbit_turn', fields: { turn_role: 'assistant', model: 'llama-3.1-70b', finish_reason: 'stop', turn_index: 2, duration_ms: 1000, input_tokens: 500, output_tokens: 100, content_length: 400, turn_rounds: 1 } }),
+        // User-side turn — must not count.
+        decoded({ event_type: 'orbit_turn', fields: { turn_role: 'user', model: 'llama-3.1-70b', finish_reason: 'stop', turn_index: 1, duration_ms: 0, input_tokens: 0, output_tokens: 0, content_length: 50, turn_rounds: 0 } }),
+      ],
+      DAY,
+    )
+    expect(rollups.orbit).toHaveLength(1)
+    const o = rollups.orbit[0]
+    expect(o.model).toBe('llama-3.1-70b')
+    expect(o.turns).toBe(2)
+    expect(o.rounds_sum).toBe(3)
+    expect(o.input_tokens_sum).toBe(2000)
+    expect(o.output_tokens_sum).toBe(300)
+  })
+
+  it('rolls up tour-quiz answered/correct per question', () => {
+    const rollups = computeRollups(
+      [
+        decoded({ event_type: 'tour_question_answered', fields: { tour_id: 't1', question_id: 'q1', task_index: 1, choice_count: 4, chosen_index: 2, correct_index: 2, was_correct: true, response_ms: 3000 } }),
+        decoded({ event_type: 'tour_question_answered', fields: { tour_id: 't1', question_id: 'q1', task_index: 1, choice_count: 4, chosen_index: 0, correct_index: 2, was_correct: false, response_ms: 5000 }, sample_interval: 3 }),
+      ],
+      DAY,
+    )
+    expect(rollups.quiz).toHaveLength(1)
+    const q = rollups.quiz[0]
+    expect(q.answered).toBe(4) // 1 + 3
+    expect(q.correct).toBe(1) // only the first
+    expect(q.response_ms_sum).toBe(3000 + 5000 * 3)
+  })
+
+  it('rolls up generic dimension mixes (search, dwell, gestures, os, clicks)', () => {
+    const rollups = computeRollups(
+      [
+        decoded({ event_type: 'session_start', fields: { platform: 'web', os: 'mac' } }),
+        decoded({ event_type: 'session_start', fields: { platform: 'desktop', os: 'windows' } }),
+        decoded({ event_type: 'map_click', fields: { hit_kind: 'marker', hit_id: 'm1', lat: 1, lon: 1, zoom: 5 } }),
+        decoded({ event_type: 'browse_search', fields: { query_hash: 'abc123', result_count_bucket: '0', query_length: 7 } }),
+        decoded({ event_type: 'dwell', fields: { view_target: 'chat', duration_ms: 15000 } }),
+        decoded({ event_type: 'vr_interaction', fields: { gesture: 'pinch', magnitude: 0.8 } }),
+        decoded({ event_type: 'orbit_correction', fields: { signal: 'thumbs_down', turn_index: 2 } }),
+      ],
+      DAY,
+    )
+    const find = (metric: string, key: string) => rollups.dimensions.find(d => d.metric === metric && d.key === key)
+    expect(find('os', 'mac')?.count).toBe(1)
+    expect(find('os', 'windows')?.count).toBe(1)
+    expect(find('click_kind', 'marker')?.count).toBe(1)
+    expect(find('search', 'abc123')).toMatchObject({ count: 1, value_sum: 7 })
+    expect(find('search_zero', 'abc123')?.count).toBe(1) // bucket '0'
+    expect(find('dwell', 'chat')).toMatchObject({ count: 1, value_sum: 15000 })
+    expect(find('vr_gesture', 'pinch')).toMatchObject({ count: 1, value_sum: 0.8 })
+    expect(find('orbit_correction', 'thumbs_down')?.count).toBe(1)
+  })
+
+  it('excludes internal traffic from the Phase E rollups', () => {
+    const rollups = computeRollups(
+      [
+        decoded({ event_type: 'perf_sample', fields: { surface: 'map', webgl_renderer_hash: 'abc', fps_median_10s: 60, frame_time_p95_ms: 20, jsheap_mb: 300 }, internal: true }),
+        decoded({ event_type: 'orbit_turn', fields: { turn_role: 'assistant', model: 'm', finish_reason: 'stop', turn_index: 1, duration_ms: 1, input_tokens: 1, output_tokens: 1, content_length: 1, turn_rounds: 1 }, internal: true }),
+        decoded({ event_type: 'dwell', fields: { view_target: 'chat', duration_ms: 1 }, internal: true }),
+      ],
+      DAY,
+    )
+    expect(rollups.perf).toHaveLength(0)
+    expect(rollups.orbit).toHaveLength(0)
+    expect(rollups.dimensions).toHaveLength(0)
   })
 })
 

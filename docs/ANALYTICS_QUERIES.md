@@ -53,6 +53,20 @@ positional schema. The first four `blobs[]` are server-stamped
 > within that filter) so a future schema addition doesn't silently
 > change column meaning.
 
+> **Two direct consumers of these layouts.** The positions below are
+> read by (1) Grafana panels and human spelunking, and (2) the
+> **nightly export job**, which decodes AE rows back into named fields
+> before archiving them to R2 and aggregating them into the D1 rollups
+> (`functions/api/v1/_lib/analytics-layouts.ts` — a typed mirror of
+> this table, drift-checked against the `TelemetryEvent` union and
+> round-tripped through the real encoder in CI). The in-app
+> `/publish/analytics` tab is an *indirect* consumer: it reads those
+> D1 rollups, not AE positions. When you add or reorder an event
+> field, update that registry in the same change, or the archive's
+> decoded field names go stale. See
+> [`ANALYTICS_STORAGE_AND_ADMIN_PLAN.md`](ANALYTICS_STORAGE_AND_ADMIN_PLAN.md)
+> Phase A.
+
 > **Null on the wire is forbidden.** Clients emit `''` for empty
 > strings and `0` for empty numbers; the ingest function rejects
 > events containing `null` field values with 400. Otherwise a
@@ -175,6 +189,14 @@ the four server-stamped blobs. Order is alphabetical by field name
 | `double4` | `client_offset_ms` |
 | `double5` | `pitch` (degrees) |
 | `double6` | `zoom` (2 decimals) |
+
+Emitted on `moveend` (drag release, wheel stop, `flyTo`/`easeTo`
+completion). **Auto-rotate moves are excluded** — the 2D globe's
+auto-rotate sweeps the centre longitude on a timer, and emitting
+those completions would paint a spurious latitude-wide band across
+the spatial heatmap, so `mapRenderer` skips the emit while
+auto-rotate is driving the camera (it stops on user interaction, so
+genuine settles still emit).
 
 ### `map_click` (Tier A)
 
@@ -302,11 +324,16 @@ alphabetical order of the field name.
 
 | Position | Field |
 |---|---|
-| `blob5` | `source` (`browse` / `orbit` / `deeplink`) |
+| `blob5` | `source` (`browse` / `orbit` / `deeplink` / `auto`) |
 | `blob6` | `tour_id` |
 | `blob7` | `tour_title` |
 | `double1` | `client_offset_ms` |
 | `double2` | `task_count` |
+
+`source = 'auto'` marks tours auto-started by `dataset.runTourOnLoad`
+(no user intent). The export job rolls the source mix into the
+`tour_start` dimension and excludes `auto` tours from the completion
+funnel — see `tour_ended.was_auto` below.
 
 ### `tour_task_fired` (Tier A)
 
@@ -324,9 +351,15 @@ Position | Paused | Resumed | Ended
 ---|---|---|---
 `blob5` | `reason` | `tour_id` | `outcome`
 `blob6` | `tour_id` | — | `tour_id`
+`blob7` | — | — | `was_auto` (`true` / `false`)
 `double1` | `client_offset_ms` | `client_offset_ms` | `client_offset_ms`
 `double2` | `task_index` | `pause_ms` | `duration_ms`
 `double3` | — | `task_index` | `task_index`
+
+`tour_ended.was_auto` is `true` when the matching `tour_started`
+was `source: 'auto'`. The completion-rate rollup excludes
+`was_auto = true` rows so the funnel reflects user-started tours
+only; the example query below filters them out.
 
 ### `vr_session_started` / `vr_session_ended` (Tier A)
 
@@ -623,17 +656,22 @@ ORDER BY sessions DESC
 
 ### Tour completion rate
 
+`runTourOnLoad` auto-tours (`tour_started.source = 'auto'` /
+`tour_ended.was_auto = 'true'`) auto-play to completion and would
+inflate the rate, so both legs exclude them.
+
 ```sql
 WITH starts AS (
   SELECT blob6 AS tour_id, count() AS n
   FROM terraviz_events
-  WHERE blob1 = 'tour_started' AND blob2 = 'production'
+  WHERE blob1 = 'tour_started' AND blob2 = 'production' AND blob5 != 'auto'
   GROUP BY tour_id
 ),
 completes AS (
   SELECT blob6 AS tour_id, count() AS n
   FROM terraviz_events
   WHERE blob1 = 'tour_ended' AND blob5 = 'completed' AND blob2 = 'production'
+    AND blob7 != 'true'
   GROUP BY tour_id
 )
 SELECT

@@ -229,6 +229,16 @@ export interface CatalogEnv {
    */
   MOCK_AI?: string
   /**
+   * D1 database holding the `feedback` + `general_feedback` tables
+   * (same physical database as CATALOG_DB in the canonical deploy —
+   * two bindings, one instance; the root `migrations/` dir owns its
+   * schema). Read by `/api/v1/publish/feedback` (Phase C of
+   * `docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md`); the write paths
+   * (`/api/feedback`, `/api/general-feedback`) live outside the
+   * publish middleware and keep their own Env types.
+   */
+  FEEDBACK_DB?: D1Database
+  /**
    * R2 bucket binding for the long-term analytics archive
    * (`terraviz-analytics` — deliberately separate from
    * `terraviz-assets` so asset lifecycle rules and access policies

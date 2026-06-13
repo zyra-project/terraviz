@@ -435,9 +435,9 @@ footer.site-footer {
       <h2>6. Where the data goes</h2>
       <p>Everything we store runs on <strong>Cloudflare</strong>:</p>
       <ul>
-      <li><strong>Analytics events</strong>: Cloudflare Workers Analytics Engine (90-day
-      hot retention) and Cloudflare R2 object storage (long-term, Iceberg
-      format) for research analysis</li>
+      <li><strong>Analytics events</strong>: Cloudflare Workers Analytics Engine (30–90 day
+      hot retention) and Cloudflare R2 object storage (long-term archive)
+      plus Cloudflare D1 aggregate tables for product analytics</li>
       <li><strong>Feedback submissions and Orbit ratings</strong>: Cloudflare D1 (a
       managed SQLite database)</li>
       <li><strong>Crash reports</strong>: Cloudflare D1, in a separate table from feedback</li>

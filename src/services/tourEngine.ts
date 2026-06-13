@@ -41,7 +41,9 @@ import { emit } from '../analytics'
 export interface TourTelemetryMeta {
   tourId: string
   tourTitle: string
-  source: 'browse' | 'orbit' | 'deeplink'
+  /** `'auto'` is reserved for `runTourOnLoad` auto-tours, which carry
+   * no user intent and are excluded from completion-rate analytics. */
+  source: 'browse' | 'orbit' | 'deeplink' | 'auto'
 }
 
 // Miles → kilometres
@@ -492,6 +494,7 @@ export class TourEngine {
       outcome,
       task_index: this.index,
       duration_ms: duration,
+      was_auto: this.meta?.source === 'auto',
     })
   }
 

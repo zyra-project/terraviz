@@ -1,6 +1,20 @@
 # Grafana dashboards — Terraviz analytics
 
-Three dashboards visualize the telemetry stream landed in Cloudflare
+> **Optional.** The primary analysis surface is now the in-app
+> **`/publish/analytics`** tab — privilege-gated inside the publisher
+> portal, no external dependency, covering the product-health,
+> dataset-engagement, spatial-heatmap, and funnel panels (see
+> [`docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md`](../docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md)).
+> The tab reads D1 rollups + an R2 archive that outlive Analytics
+> Engine's 30–90 day retention — but those are **populated by the
+> nightly export pipeline a self-hoster must enable first**
+> (`SELF_HOSTING.md` Step 17: R2 bucket, AE SQL-API secrets, the cron
+> workflow). Until that's wired, the tab has nothing to read; Grafana,
+> which queries the live AE stream directly, is the zero-setup option.
+> Either way, reach for Grafana when you want to write your own AE SQL
+> against the raw event stream.
+
+Four dashboards visualize the telemetry stream landed in Cloudflare
 Workers Analytics Engine by `functions/api/ingest.ts`:
 
 - **`product-health.json`** — sessions, layer load times, error
@@ -13,6 +27,9 @@ Workers Analytics Engine by `functions/api/ingest.ts`:
   panel dwell, VR interaction mix, Orbit follow-through and
   correction signals. Empty until at least one user opts into
   Research mode under Tools → Privacy.
+- **`orbit-cost.json`** — Orbit LLM usage and per-turn round counts
+  (`turn_rounds`); leading indicators of Workers AI free-tier neuron
+  exhaustion. Tier B.
 
 The dashboards target the [Infinity datasource](https://grafana.com/grafana/plugins/yesoreyeram-infinity-datasource/)
 plugin, which can call any HTTP API (no native AE plugin exists for

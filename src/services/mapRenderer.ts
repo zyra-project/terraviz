@@ -453,6 +453,14 @@ export class MapRenderer implements GlobeRenderer {
     // caps the emit rate to ≤ 30/min per session across 2D + VR.
     this.map.on('moveend', () => {
       if (!this.map) return
+      // Skip moves driven by auto-rotate: it sweeps the centre
+      // longitude on a timer (`easeTo` every 10s), and each ease
+      // completion is a `moveend`. Those are globe spin, not
+      // attention — emitting them paints a spurious latitude-wide
+      // band of bins across the spatial heatmap. User interaction
+      // clears `autoRotating` (mousedown/touchstart) before any
+      // real move, so genuine settles still emit.
+      if (this.autoRotating) return
       const center = this.map.getCenter()
       emitCameraSettled({
         slot_index: String(this.slotIndex),

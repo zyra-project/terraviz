@@ -3,6 +3,7 @@ import {
   __resetFormatterCacheForTests,
   formatDate,
   formatNumber,
+  formatRegion,
   formatRelative,
 } from './format'
 
@@ -24,6 +25,17 @@ describe('format helpers', () => {
     expect(formatNumber(1234567)).toMatch(/[1-9]/)
     // English grouping comma — sanity check on locale plumbing.
     expect(formatNumber(1234)).toContain('1,234')
+  })
+
+  it('formatRegion expands ISO country codes to full names', () => {
+    expect(formatRegion('US')).toBe('United States')
+    expect(formatRegion('FR')).toBe('France')
+  })
+
+  it('formatRegion falls back to the raw code for unknown values', () => {
+    // Cloudflare emits XX (unknown) / T1 (Tor) pseudo-codes that
+    // aren't real regions — show them verbatim rather than throw.
+    expect(formatRegion('XX')).toBe('XX')
   })
 
   it('formatRelative returns localized relative-time strings', () => {

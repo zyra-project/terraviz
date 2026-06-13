@@ -32,11 +32,24 @@ export interface BarPoint {
   value: number
 }
 
+/** Plot-area width in viewBox units; the bars span this. */
+const PLOT_WIDTH = 480
+/** Left gutter reserved for the Y-axis value labels. */
+const Y_AXIS_GUTTER = 40
+
+/** Compact axis-tick value ("1.2K", "340", "0") in the active
+ * locale — keeps the gutter narrow for large counts. */
+function formatTick(value: number): string {
+  return formatNumber(value, { notation: 'compact', maximumFractionDigits: 1 })
+}
+
 /**
  * Vertical bar series — the workhorse for per-day time series.
  * Scales to the series max; each bar carries a `<title>` tooltip
- * with "label — value". Renders an empty-but-valid SVG for an
- * empty series (the page shows its own empty-state copy).
+ * with "label — value". A Y axis (0 / mid / max gridlines with
+ * value labels in the left gutter) makes the magnitude legible
+ * without hovering. Renders an empty-but-valid SVG for an empty
+ * series (the page shows its own empty-state copy).
  */
 export function renderBarSeries(
   points: BarPoint[],
@@ -53,9 +66,9 @@ export function renderBarSeries(
 ): SVGSVGElement {
   const height = options.height ?? 96
   const axisHeight = options.range && points.length > 0 ? 16 : 0
-  const width = 480
+  const totalWidth = Y_AXIS_GUTTER + PLOT_WIDTH
   const svg = svgEl('svg', {
-    viewBox: `0 0 ${width} ${height + axisHeight}`,
+    viewBox: `0 0 ${totalWidth} ${height + axisHeight}`,
     role: 'img',
     class: 'publisher-analytics-bars',
   })
@@ -63,12 +76,40 @@ export function renderBarSeries(
   if (points.length === 0) return svg
 
   const max = Math.max(...points.map(p => p.value), 1)
-  const step = width / points.length
+  // value → plot y. The bar of height `value/max·(height-4)` sits at
+  // `height - h`, so value=max lands at y=4 and value=0 at y=height.
+  const yFor = (value: number): number => height - (value / max) * (height - 4)
+
+  // Y-axis gridlines + value labels at 0, mid, max. Drawn first so
+  // the bars paint over them.
+  for (const frac of [0, 0.5, 1]) {
+    const value = max * frac
+    const y = yFor(value)
+    const line = svgEl('line', {
+      x1: Y_AXIS_GUTTER,
+      y1: y,
+      x2: totalWidth,
+      y2: y,
+      class: 'publisher-analytics-gridline',
+    })
+    const label = svgEl('text', {
+      x: Y_AXIS_GUTTER - 5,
+      // Nudge the baseline so the text visually centers on the line,
+      // clamped to stay inside the viewBox at the top and bottom.
+      y: Math.min(height - 1, Math.max(8, y + 3)),
+      'text-anchor': 'end',
+      class: 'publisher-analytics-ytick',
+    })
+    label.textContent = formatTick(value)
+    svg.append(line, label)
+  }
+
+  const step = PLOT_WIDTH / points.length
   const barWidth = Math.max(1, Math.min(step - 2, 28))
   points.forEach((p, i) => {
     const h = Math.max(p.value > 0 ? 2 : 0, (p.value / max) * (height - 4))
     const rect = svgEl('rect', {
-      x: i * step + (step - barWidth) / 2,
+      x: Y_AXIS_GUTTER + i * step + (step - barWidth) / 2,
       y: height - h,
       width: barWidth,
       height: h,
@@ -82,9 +123,9 @@ export function renderBarSeries(
   })
   if (options.range && axisHeight > 0) {
     const labelY = height + 12
-    const start = svgEl('text', { x: 0, y: labelY, 'text-anchor': 'start', class: 'publisher-analytics-axis' })
+    const start = svgEl('text', { x: Y_AXIS_GUTTER, y: labelY, 'text-anchor': 'start', class: 'publisher-analytics-axis' })
     start.textContent = options.range.start
-    const end = svgEl('text', { x: width, y: labelY, 'text-anchor': 'end', class: 'publisher-analytics-axis' })
+    const end = svgEl('text', { x: totalWidth, y: labelY, 'text-anchor': 'end', class: 'publisher-analytics-axis' })
     end.textContent = options.range.end
     svg.append(start, end)
   }
@@ -149,6 +190,59 @@ export function renderStatTile(label: string, value: string): HTMLElement {
   valueEl.textContent = value
   tile.append(labelEl, valueEl)
   return tile
+}
+
+// --- CSV export -------------------------------------------------------
+
+export type CsvCell = string | number | null | undefined
+export type CsvRow = CsvCell[]
+
+/** Serialize a cell, quoting only when it carries a comma, quote, or
+ * newline (RFC 4180). `null`/`undefined` become an empty field. */
+function csvCell(value: CsvCell): string {
+  if (value == null) return ''
+  const s = String(value)
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+}
+
+/** Build an RFC-4180 CSV string (CRLF line endings) from rows. The
+ * first row is conventionally the header. */
+export function buildCsv(rows: readonly CsvRow[]): string {
+  return rows.map(row => row.map(csvCell).join(',')).join('\r\n')
+}
+
+/** Trigger a browser download of `rows` as a CSV file. No-op-safe in
+ * environments without `URL.createObjectURL` (jsdom). */
+export function downloadCsv(filename: string, rows: readonly CsvRow[]): void {
+  const csv = buildCsv(rows)
+  // BOM so Excel reads UTF-8 (hashed keys / country codes stay intact).
+  const blob = new Blob(['﻿', csv], { type: 'text/csv;charset=utf-8' })
+  if (typeof URL.createObjectURL !== 'function') return
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.style.display = 'none'
+  document.body.appendChild(a)
+  a.click()
+  // Revoke on the next tick (same pattern as
+  // zipDownloadService.saveBlobAsDownload / playlistUI) — revoking
+  // synchronously can race the browser's download in some engines.
+  setTimeout(() => {
+    a.remove()
+    URL.revokeObjectURL(url)
+  }, 0)
+}
+
+/** "Export CSV" button. The page passes a `getRows` thunk so the CSV
+ * is built from the section's current data only when clicked. */
+export function csvExportButton(label: string, filename: string, getRows: () => CsvRow[]): HTMLElement {
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.className = 'publisher-analytics-export'
+  button.textContent = label
+  button.addEventListener('click', () => downloadCsv(filename, getRows()))
+  return button
 }
 
 /** Compact human duration for dwell sums: "4 h 12 m", "38 m", "55 s". */

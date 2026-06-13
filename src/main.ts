@@ -914,13 +914,21 @@ class InteractiveSphere {
       try {
         if (ref.startsWith('http://') || ref.startsWith('https://') || ref.endsWith('.json')) {
           logger.info('[App] Auto-starting tour from runTourOnLoad URL:', ref)
-          await this.startTour(ref, gen, targetSlot)
+          await this.startTour(ref, gen, targetSlot, {
+            tourId: dataset.id,
+            tourTitle: dataset.title,
+            source: 'auto',
+          })
         } else {
           const tourDataset = dataService.getDatasetById(ref)
           if (tourDataset && tourDataset.format === 'tour/json') {
             logger.info('[App] Auto-starting tour from runTourOnLoad dataset:', tourDataset.id)
             const tourUrl = tourDataset.tourJsonUrl ?? tourDataset.dataLink
-            await this.startTour(tourUrl, gen, targetSlot)
+            await this.startTour(tourUrl, gen, targetSlot, {
+              tourId: tourDataset.id,
+              tourTitle: tourDataset.title,
+              source: 'auto',
+            })
           } else {
             logger.warn('[App] runTourOnLoad references unknown dataset:', ref)
           }

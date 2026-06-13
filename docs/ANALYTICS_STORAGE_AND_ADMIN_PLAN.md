@@ -5,7 +5,10 @@ analysis surface inside the authenticated `/publish` portal — replacing
 Grafana as the primary dashboard and outliving Analytics Engine's
 30–90 day retention window.
 
-**Status: draft for review.**
+**Status: implemented.** All five phases (A–E) have shipped; this
+document now reads as the design record for the analytics storage
+pipeline and the `/publish/analytics` + `/publish/feedback` admin
+tabs. Per-phase "Status: landed" notes mark what each delivered.
 
 > Companion docs:
 > - [`ANALYTICS.md`](ANALYTICS.md) — the end-to-end pipeline reference
@@ -463,6 +466,17 @@ the repo's no-framework stance. No charting library.
 
 ## Phase C — `/publish/feedback` tab
 
+> **Status: landed.** Implementation:
+> `functions/api/v1/publish/feedback.ts` (privilege-gated facade
+> over the same `_feedback-helpers` data layer feedback-admin uses;
+> AI + general dashboard views, on-demand screenshots),
+> `src/ui/publisher/pages/feedback.ts` (tabbed review page with
+> detail overlays), and the deprecation: a bare
+> `GET /api/feedback-admin` now 302-redirects to
+> `/publish/feedback`, with the `?action=` machine endpoints
+> (exports, JSON dashboards, bearer-token fallback) surviving
+> unchanged.
+
 `src/ui/publisher/pages/feedback.ts` + route + tab, privilege-gated
 like Phase B. Server side:
 `functions/api/v1/publish/feedback.ts` (GET, middleware +
@@ -488,6 +502,14 @@ consolidation; no storage work.
 
 ## Phase D — Grafana demotion + documentation pass
 
+> **Status: landed.** Grafana is now documented as optional/secondary
+> in `grafana/README.md` and `SELF_HOSTING.md` Step 9; `ANALYTICS.md`'s
+> "Where the data goes" diagram shows the export → R2/D1 → admin-tab
+> legs with Grafana as an optional read side; `PRIVACY.md` §6 (and the
+> generated `public/privacy.html`) drops the Iceberg-specific wording
+> for format-neutral long-term R2 storage; `ANALYTICS_QUERIES.md` notes
+> the export job as a third consumer of the positional layouts.
+
 - `grafana/README.md` gains a prominent note: optional, for
   self-hosters; the `/publish/analytics` tab is the primary surface.
 - [`ANALYTICS.md`](ANALYTICS.md) "Where the data goes" diagram gains
@@ -506,6 +528,63 @@ consolidation; no storage work.
 
 ---
 
+## Phase E — Grafana parity coverage
+
+> **Status: landed.** A gap analysis after Phase D (see the coverage
+> matrix below) found the in-app tab covered the Tier-A product-health
+> core but not the Tier-B research/cost panels, the perf section, or a
+> few minor dimensions. Phase E closes that gap. Implementation:
+> migration `0022_analytics_phase_e_rollups.sql` (four tables —
+> `analytics_perf_daily`, `analytics_orbit_daily`,
+> `analytics_quiz_daily`, and a generic `analytics_dimension_daily`
+> that absorbs the simple count/sum mixes), the matching export +
+> `analytics-query.ts` sections (`perf`, `orbit`, `research`, plus an
+> OS mix in overview, a click-kind mix in spatial, country cap 12→20),
+> and three new page sections.
+
+### Coverage matrix (Grafana → `/publish/analytics`)
+
+| Grafana surface | In-app status |
+|---|---|
+| product-health: sessions, platform/OS mix, dataset load p95, load-source mix, errors/session + breakdown, country top-20, tour completion | **Covered** (Overview / Dataset / Errors / Funnel) |
+| product-health: 2D/VR FPS, frame-time, JS heap by GPU | **Covered** — Performance section (Phase E) |
+| product-health: migration video/assets/tours (9 panels) | **Not ported** — operator one-shot R2-migration telemetry, out of scope |
+| product-health: publisher-portal loads by route (3 panels) | **Not ported** — minor; `publisher_portal_loaded` still queryable in Grafana |
+| spatial-attention: camera heatmap, regions, 2D-vs-VR/AR | **Covered** — Spatial section (MapLibre heatmap, better) |
+| spatial-attention: map_click hit-kind mix | **Covered** — Spatial click-target mix (Phase E) |
+| orbit-cost: LLM rounds/day, turn-rounds, duration, token use | **Covered** — Orbit usage section (Phase E, Tier B) |
+| research: searches (top + zero-result), dwell, VR gestures, Orbit correction + follow-through, tour-quiz outcomes | **Covered** — Research section (Phase E, Tier B) |
+
+Remaining out-of-scope items (migration telemetry, publisher-portal
+usage, Orbit *response-timing-per-model* and *turn-outcome-mix*
+sub-panels) stay in Grafana, which is why Phase D demoted it rather
+than deleting it.
+
+### Tour-completion accuracy fix
+
+The Funnel section's tour-completion rate was overstated (~88%)
+because `dataset.runTourOnLoad` auto-tours — which auto-play to
+completion with no user intent — were counted in both legs. They
+now carry a distinct provenance:
+
+- `tour_started.source` gained an `'auto'` value; the auto-start
+  paths in `main.ts` pass `source: 'auto'`.
+- `tour_ended` gained a `was_auto` boolean (alphabetically last, so
+  it appends to the positional layout without shifting fields).
+- The export job excludes `was_auto` rows from
+  `analytics_outcomes_daily` and rolls the `tour_started` source mix
+  into `analytics_dimension_daily` under `metric = 'tour_start'`.
+- `queryFunnel` returns `toursStartedBySource`; the page computes the
+  rate over **user-started** tours (total − `auto`) and surfaces the
+  excluded auto-tour count.
+
+This is a collection-layer change: it cleans data going forward.
+Historical `tour_ended` rows predating the change can't be
+re-labelled, so the rate stays blended until those days age out of
+the reporting window.
+
+---
+
 ## Sequencing
 
 | Phase | Delivers | Depends on |
@@ -514,6 +593,7 @@ consolidation; no storage work.
 | **B** — analytics tab | `/publish/analytics` with the five panel groups | A for history (can ship overview panels on live-AE-only earlier if useful) |
 | **C** — feedback tab | `/publish/feedback`; feedback-admin HTML deprecated | nothing technically; sequenced after B to reuse its page patterns |
 | **D** — docs + Grafana demotion | Updated docs, optional-Grafana posture | A–C landed |
+| **E** — Grafana parity coverage | perf / Orbit-cost / research sections + minor dimension fills | B; one backfill re-run to populate history |
 
 Each phase is independently shippable and reviewable; A is the urgent
 one because backfill can only reach as far back as AE still remembers.

@@ -71,6 +71,39 @@ function setup() {
   insertOutcome.run(YESTERDAY, 'production', 'tour_ended', 'abandoned', 1)
   insertOutcome.run(YESTERDAY, 'production', 'vr_session_started', 'ar', 2)
   insertOutcome.run(YESTERDAY, 'preview', 'tour_ended', 'completed', 9)
+
+  // Phase E rollups.
+  sqlite
+    .prepare(
+      `INSERT INTO analytics_perf_daily (day, environment, surface, renderer, samples, fps_sum, frame_p95_sum, jsheap_sum, jsheap_samples)
+       VALUES (?, 'production', 'map', 'gpuA', 4, 200, 80, 600, 3)`,
+    )
+    .run(YESTERDAY)
+  sqlite
+    .prepare(
+      `INSERT INTO analytics_orbit_daily (day, environment, model, turns, rounds_sum, input_tokens_sum, output_tokens_sum, duration_ms_sum)
+       VALUES (?, 'production', 'llama-3.1-70b', 5, 8, 7000, 900, 12000)`,
+    )
+    .run(YESTERDAY)
+  sqlite
+    .prepare(
+      `INSERT INTO analytics_quiz_daily (day, environment, tour_id, question_id, answered, correct, response_ms_sum)
+       VALUES (?, 'production', 't1', 'q1', 10, 2, 30000)`,
+    )
+    .run(YESTERDAY)
+  const insertDim = sqlite.prepare(
+    `INSERT INTO analytics_dimension_daily (day, environment, metric, key, count, value_sum)
+     VALUES (?, 'production', ?, ?, ?, ?)`,
+  )
+  insertDim.run(YESTERDAY, 'os', 'mac', 11, 0)
+  insertDim.run(YESTERDAY, 'os', 'windows', 3, 0)
+  insertDim.run(YESTERDAY, 'click_kind', 'marker', 6, 0)
+  insertDim.run(YESTERDAY, 'search', 'hashAAA', 4, 28)
+  insertDim.run(YESTERDAY, 'search_zero', 'hashAAA', 2, 0)
+  insertDim.run(YESTERDAY, 'dwell', 'chat', 5, 75000)
+  insertDim.run(YESTERDAY, 'vr_gesture', 'pinch', 3, 2.4)
+  insertDim.run(YESTERDAY, 'tour_start', 'browse', 4, 0)
+  insertDim.run(YESTERDAY, 'tour_start', 'auto', 2, 0)
   // Internal traffic — must be excluded.
   insertDaily.run(YESTERDAY, 'session_start', 'production', 1, 'US', 'web', 99, 99)
   // Preview environment — excluded under environment=production.
@@ -159,6 +192,7 @@ describe('GET /api/v1/publish/analytics', () => {
     const data = await getData<{
       days: Array<{ day: string; sessions: number; events: number; errors: number; view_ms: number }>
       platforms: Record<string, number>
+      operatingSystems: Record<string, number>
       countries: Array<{ country: string; sessions: number }>
       totals: { sessions: number; events: number; errors: number; view_ms: number }
     }>(env, '?section=overview&days=90')
@@ -169,6 +203,7 @@ describe('GET /api/v1/publish/analytics', () => {
     expect(yday.errors).toBe(3)
     expect(yday.view_ms).toBe(600000) // from session_end metrics JSON
     expect(data.platforms).toEqual({ web: 17, desktop: 4 }) // includes OLD_DAY web 7
+    expect(data.operatingSystems).toEqual({ mac: 11, windows: 3 }) // Phase E os mix
     expect(data.countries[0]).toEqual({ country: 'US', sessions: 17 })
     expect(data.totals.sessions).toBe(21)
     expect(data.totals.view_ms).toBe(600000)
@@ -263,6 +298,7 @@ describe('GET /api/v1/publish/analytics', () => {
     const data = await getData<{
       days: Array<Record<string, unknown>>
       outcomes: { tour_ended: Record<string, number>; vr_session_started: Record<string, number> }
+      toursStartedBySource: Record<string, number>
     }>(env, '?section=funnel&days=30')
     expect(data.days).toEqual([
       { day: YESTERDAY, tours_started: 6, tours_ended: 4, vr_started: 2, orbit_turns: 20 },
@@ -270,6 +306,51 @@ describe('GET /api/v1/publish/analytics', () => {
     // Preview-environment outcomes excluded under environment=production.
     expect(data.outcomes.tour_ended).toEqual({ completed: 3, abandoned: 1 })
     expect(data.outcomes.vr_session_started).toEqual({ ar: 2 })
+    // Source mix powers the user-started denominator (6 started − 2 auto = 4).
+    expect(data.toursStartedBySource).toEqual({ browse: 4, auto: 2 })
+  })
+
+  it('spatial: includes the map_click hit-kind mix', async () => {
+    const { env } = setup()
+    const data = await getData<{ hitKinds: Record<string, number> }>(env, '?section=spatial&days=30')
+    expect(data.hitKinds).toEqual({ marker: 6 })
+  })
+
+  it('perf: per-renderer averages from weighted sums', async () => {
+    const { env } = setup()
+    const data = await getData<{ rows: Array<Record<string, unknown>> }>(env, '?section=perf&days=30')
+    expect(data.rows).toEqual([
+      { surface: 'map', renderer: 'gpuA', samples: 4, avg_fps: 50, avg_frame_p95_ms: 20, avg_jsheap_mb: 200 },
+    ])
+  })
+
+  it('orbit: model totals and per-day rounds', async () => {
+    const { env } = setup()
+    const data = await getData<{
+      models: Array<Record<string, unknown>>
+      days: Array<Record<string, unknown>>
+      totals: { rounds: number; input_tokens: number }
+    }>(env, '?section=orbit&days=30')
+    expect(data.models[0]).toMatchObject({ model: 'llama-3.1-70b', turns: 5, rounds: 8, input_tokens: 7000 })
+    expect(data.days).toEqual([{ day: YESTERDAY, rounds: 8, turns: 5 }])
+    expect(data.totals.rounds).toBe(8)
+  })
+
+  it('research: search / dwell / gestures / worst quiz questions', async () => {
+    const { env } = setup()
+    const data = await getData<{
+      topSearches: Array<{ key: string; count: number; avg_length: number }>
+      zeroSearches: Array<{ key: string; count: number }>
+      dwell: Array<{ key: string; avg_ms: number }>
+      gestures: Array<{ key: string; avg_magnitude: number }>
+      worstQuestions: Array<{ tour_id: string; question_id: string; correct_rate: number }>
+    }>(env, '?section=research&days=30')
+    expect(data.topSearches[0]).toEqual({ key: 'hashAAA', count: 4, avg_length: 7 })
+    expect(data.zeroSearches[0]).toEqual({ key: 'hashAAA', count: 2 })
+    expect(data.dwell[0]).toMatchObject({ key: 'chat', avg_ms: 15000 })
+    expect(data.gestures[0]).toMatchObject({ key: 'pinch' })
+    expect(data.gestures[0].avg_magnitude).toBeCloseTo(0.8, 6)
+    expect(data.worstQuestions[0]).toMatchObject({ tour_id: 't1', question_id: 'q1', correct_rate: 0.2 })
   })
 
   it('serves the second identical request from KV', async () => {

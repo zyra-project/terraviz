@@ -214,5 +214,6 @@
   "vr.zoomSlider.title": "Tooltip on the in-AR zoom slider when hovered with a pointer. Brief — appears as a native browser tooltip.",
   "publisher.analytics.controls.rangeDays": "Date-range picker option; {days} is a number (7/30/90/365). Keep the {days} placeholder.",
   "publisher.analytics.datasets.loadP50": "Table column header; '≈p50' means 'approximately the 50th percentile' — keep the ≈ and p50 notation.",
-  "publisher.analytics.datasets.loadP95": "Table column header; '≈p95' means 'approximately the 95th percentile' — keep the ≈ and p95 notation."
+  "publisher.analytics.datasets.loadP95": "Table column header; '≈p95' means 'approximately the 95th percentile' — keep the ≈ and p95 notation.",
+  "publisher.analytics.perf.frameP95": "Table header; 'frame p95' = the 95th-percentile frame time. Keep the p95 notation."
 }

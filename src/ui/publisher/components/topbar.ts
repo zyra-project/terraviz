@@ -29,6 +29,7 @@ export interface NavLink {
     | 'publisher.nav.workflows'
     | 'publisher.nav.featuredHero'
     | 'publisher.nav.analytics'
+    | 'publisher.nav.feedback'
     | 'publisher.nav.import'
     | 'publisher.nav.users'
   /** When true the link is only shown to admins (role === 'admin'). */
@@ -42,6 +43,7 @@ const NAV_LINKS: ReadonlyArray<NavLink> = [
   { path: '/publish/workflows', labelKey: 'publisher.nav.workflows' },
   { path: '/publish/featured-hero', labelKey: 'publisher.nav.featuredHero' },
   { path: '/publish/analytics', labelKey: 'publisher.nav.analytics' },
+  { path: '/publish/feedback', labelKey: 'publisher.nav.feedback' },
   { path: '/publish/import', labelKey: 'publisher.nav.import' },
   { path: '/publish/users', labelKey: 'publisher.nav.users', adminOnly: true },
 ]

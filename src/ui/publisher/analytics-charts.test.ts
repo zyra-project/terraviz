@@ -6,6 +6,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  buildCsv,
   formatDurationMs,
   renderBarSeries,
   renderMixBar,
@@ -29,6 +30,28 @@ describe('renderBarSeries', () => {
     expect(h0).toBeCloseTo(h1 / 2)
     expect(rects[1].querySelector('title')?.textContent).toContain('2026-06-10')
     expect(svg.getAttribute('aria-label')).toBe('Sessions per day')
+  })
+
+  it('draws Y-axis gridlines + value ticks (0 / mid / max)', () => {
+    const svg = renderBarSeries(
+      [
+        { label: 'a', value: 0 },
+        { label: 'b', value: 10 },
+      ],
+      { ariaLabel: 'x', height: 100 },
+    )
+    expect(svg.querySelectorAll('line.publisher-analytics-gridline')).toHaveLength(3)
+    const ticks = [...svg.querySelectorAll('text.publisher-analytics-ytick')].map(t => t.textContent)
+    // Max (10), mid (5), and 0 are all labelled.
+    expect(ticks).toContain('10')
+    expect(ticks).toContain('5')
+    expect(ticks).toContain('0')
+  })
+
+  it('insets bars past the Y-axis gutter', () => {
+    const svg = renderBarSeries([{ label: 'a', value: 1 }], { ariaLabel: 'x' })
+    const x = parseFloat(svg.querySelector('rect')!.getAttribute('x')!)
+    expect(x).toBeGreaterThanOrEqual(40) // Y_AXIS_GUTTER
   })
 
   it('renders a valid empty SVG for an empty series', () => {
@@ -96,6 +119,20 @@ describe('renderStatTile', () => {
     const tile = renderStatTile('Sessions', '1,234')
     expect(tile.querySelector('.publisher-analytics-stat-label')?.textContent).toBe('Sessions')
     expect(tile.querySelector('.publisher-analytics-stat-value')?.textContent).toBe('1,234')
+  })
+})
+
+describe('buildCsv', () => {
+  it('joins rows with CRLF and comma-separates cells', () => {
+    expect(buildCsv([['a', 'b'], [1, 2]])).toBe('a,b\r\n1,2')
+  })
+
+  it('quotes cells containing commas, quotes, or newlines', () => {
+    expect(buildCsv([['a,b', 'c"d', 'e\nf']])).toBe('"a,b","c""d","e\nf"')
+  })
+
+  it('renders null / undefined as empty fields', () => {
+    expect(buildCsv([[null, undefined, 0]])).toBe(',,0')
   })
 })
 

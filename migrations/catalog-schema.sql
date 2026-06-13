@@ -36,6 +36,16 @@ CREATE TABLE analytics_dataset_daily (
   PRIMARY KEY (day, layer_id, environment)
 );
 
+CREATE TABLE analytics_dimension_daily (
+  day         TEXT NOT NULL,
+  environment TEXT NOT NULL,
+  metric      TEXT NOT NULL,
+  key         TEXT NOT NULL,
+  count       REAL NOT NULL,               -- sample-weighted
+  value_sum   REAL NOT NULL DEFAULT 0,     -- metric-specific accumulator
+  PRIMARY KEY (day, environment, metric, key)
+);
+
 CREATE TABLE analytics_errors_daily (
   day           TEXT NOT NULL,             -- 'YYYY-MM-DD' (UTC)
   environment   TEXT NOT NULL,             -- production | preview | local
@@ -53,6 +63,18 @@ CREATE TABLE analytics_export_state (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE analytics_orbit_daily (
+  day              TEXT NOT NULL,
+  environment      TEXT NOT NULL,
+  model            TEXT NOT NULL,
+  turns            REAL NOT NULL,          -- sample-weighted assistant turns
+  rounds_sum       REAL NOT NULL,          -- Σ turn_rounds · weight (LLM round-trips)
+  input_tokens_sum  REAL NOT NULL,
+  output_tokens_sum REAL NOT NULL,
+  duration_ms_sum  REAL NOT NULL,
+  PRIMARY KEY (day, environment, model)
+);
+
 CREATE TABLE analytics_outcomes_daily (
   day         TEXT NOT NULL,               -- 'YYYY-MM-DD' (UTC)
   environment TEXT NOT NULL,               -- production | preview | local
@@ -60,6 +82,30 @@ CREATE TABLE analytics_outcomes_daily (
   value       TEXT NOT NULL,               -- the dimension value
   count       REAL NOT NULL,               -- sample-weighted
   PRIMARY KEY (day, environment, event_type, value)
+);
+
+CREATE TABLE analytics_perf_daily (
+  day            TEXT NOT NULL,            -- 'YYYY-MM-DD' (UTC)
+  environment    TEXT NOT NULL,
+  surface        TEXT NOT NULL,            -- map | vr
+  renderer       TEXT NOT NULL,            -- webgl_renderer_hash (8 hex or 'unknown')
+  samples        REAL NOT NULL,            -- sample-weighted perf_sample count
+  fps_sum        REAL NOT NULL,            -- Σ fps_median_10s · weight
+  frame_p95_sum  REAL NOT NULL,            -- Σ frame_time_p95_ms · weight
+  jsheap_sum     REAL NOT NULL,            -- Σ jsheap_mb · weight (only rows > 0)
+  jsheap_samples REAL NOT NULL,            -- weight of rows with jsheap_mb > 0
+  PRIMARY KEY (day, environment, surface, renderer)
+);
+
+CREATE TABLE analytics_quiz_daily (
+  day             TEXT NOT NULL,
+  environment     TEXT NOT NULL,
+  tour_id         TEXT NOT NULL,
+  question_id     TEXT NOT NULL,
+  answered        REAL NOT NULL,           -- sample-weighted answers
+  correct         REAL NOT NULL,           -- of which were correct
+  response_ms_sum REAL NOT NULL,           -- Σ response_ms · weight
+  PRIMARY KEY (day, environment, tour_id, question_id)
 );
 
 CREATE TABLE analytics_spatial_daily (
@@ -337,10 +383,18 @@ CREATE INDEX idx_analytics_daily_event
   ON analytics_daily (event_type, day);
 CREATE INDEX idx_analytics_dataset_daily_layer
   ON analytics_dataset_daily (layer_id, day);
+CREATE INDEX idx_analytics_dimension_daily_metric
+  ON analytics_dimension_daily (environment, metric, day);
 CREATE INDEX idx_analytics_errors_daily_day
   ON analytics_errors_daily (environment, day);
+CREATE INDEX idx_analytics_orbit_daily_day
+  ON analytics_orbit_daily (environment, day);
 CREATE INDEX idx_analytics_outcomes_daily_day
   ON analytics_outcomes_daily (environment, day);
+CREATE INDEX idx_analytics_perf_daily_day
+  ON analytics_perf_daily (environment, day);
+CREATE INDEX idx_analytics_quiz_daily_day
+  ON analytics_quiz_daily (environment, day);
 CREATE INDEX idx_analytics_spatial_daily_layer
   ON analytics_spatial_daily (event_type, layer_id, day);
 CREATE INDEX idx_asset_uploads_dataset ON asset_uploads(dataset_id, created_at);

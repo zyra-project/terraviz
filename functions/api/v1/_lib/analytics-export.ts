@@ -205,12 +205,58 @@ export interface SpatialRollupRow {
   hits: number
 }
 
+export interface PerfRollupRow {
+  day: string
+  environment: string
+  surface: string
+  renderer: string
+  samples: number
+  fps_sum: number
+  frame_p95_sum: number
+  jsheap_sum: number
+  jsheap_samples: number
+}
+
+export interface OrbitRollupRow {
+  day: string
+  environment: string
+  model: string
+  turns: number
+  rounds_sum: number
+  input_tokens_sum: number
+  output_tokens_sum: number
+  duration_ms_sum: number
+}
+
+export interface QuizRollupRow {
+  day: string
+  environment: string
+  tour_id: string
+  question_id: string
+  answered: number
+  correct: number
+  response_ms_sum: number
+}
+
+export interface DimensionRollupRow {
+  day: string
+  environment: string
+  metric: string
+  key: string
+  count: number
+  value_sum: number
+}
+
 export interface DayRollups {
   daily: DailyRollupRow[]
   dataset: DatasetRollupRow[]
   spatial: SpatialRollupRow[]
   errors: ErrorsRollupRow[]
   outcomes: OutcomesRollupRow[]
+  perf: PerfRollupRow[]
+  orbit: OrbitRollupRow[]
+  quiz: QuizRollupRow[]
+  dimensions: DimensionRollupRow[]
 }
 
 /** Per-event-type numeric field summarized as p50/p95 in
@@ -341,6 +387,10 @@ function str(fields: Record<string, string | number | boolean>, key: string): st
   return typeof v === 'string' ? v : ''
 }
 
+function bool(fields: Record<string, string | number | boolean>, key: string): boolean {
+  return fields[key] === true
+}
+
 /**
  * Aggregate one day of decoded rows into the three rollup shapes.
  *
@@ -377,6 +427,25 @@ export function computeRollups(rows: DecodedEventRow[], day: string): DayRollups
   const errors = new Map<string, ErrorsRollupRow>()
   // analytics_outcomes_daily
   const outcomes = new Map<string, OutcomesRollupRow>()
+  // analytics_perf_daily
+  const perf = new Map<string, PerfRollupRow>()
+  // analytics_orbit_daily
+  const orbit = new Map<string, OrbitRollupRow>()
+  // analytics_quiz_daily
+  const quiz = new Map<string, QuizRollupRow>()
+  // analytics_dimension_daily
+  const dimensions = new Map<string, DimensionRollupRow>()
+  /** Accumulate one generic dimension row (count [+ value_sum]). */
+  const addDimension = (environment: string, metric: string, key: string, w: number, valueAdd = 0): void => {
+    const dimKey = [environment, metric, key].join('\u0000')
+    const entry = dimensions.get(dimKey)
+    if (entry) {
+      entry.count += w
+      entry.value_sum += valueAdd
+    } else {
+      dimensions.set(dimKey, { day, environment, metric, key, count: w, value_sum: valueAdd })
+    }
+  }
 
   for (const row of rows) {
     const w = row.sample_interval
@@ -440,7 +509,11 @@ export function computeRollups(rows: DecodedEventRow[], day: string): DayRollups
     }
 
     const outcomeField = OUTCOME_FIELDS[row.event_type]
-    if (outcomeField) {
+    // `runTourOnLoad` auto-tours auto-play to completion and would
+    // inflate the completion funnel — exclude them from the outcomes
+    // rollup so the rate reflects user-started tours only. Their
+    // source mix is still captured via the `tour_start` dimension.
+    if (outcomeField && !(row.event_type === 'tour_ended' && bool(row.fields, 'was_auto'))) {
       const value = str(row.fields, outcomeField)
       if (value !== '') {
         const key = [row.environment, row.event_type, value].join('\u0000')
@@ -510,6 +583,118 @@ export function computeRollups(rows: DecodedEventRow[], day: string): DayRollups
         }
       }
     }
+
+    // --- Phase E coverage rollups ---
+
+    if (row.event_type === 'perf_sample') {
+      const key = [row.environment, str(row.fields, 'surface'), str(row.fields, 'webgl_renderer_hash')].join('\u0000')
+      const jsheap = num(row.fields, 'jsheap_mb')
+      const entry = perf.get(key)
+      if (entry) {
+        entry.samples += w
+        entry.fps_sum += num(row.fields, 'fps_median_10s') * w
+        entry.frame_p95_sum += num(row.fields, 'frame_time_p95_ms') * w
+        if (jsheap > 0) {
+          entry.jsheap_sum += jsheap * w
+          entry.jsheap_samples += w
+        }
+      } else {
+        perf.set(key, {
+          day,
+          environment: row.environment,
+          surface: str(row.fields, 'surface'),
+          renderer: str(row.fields, 'webgl_renderer_hash'),
+          samples: w,
+          fps_sum: num(row.fields, 'fps_median_10s') * w,
+          frame_p95_sum: num(row.fields, 'frame_time_p95_ms') * w,
+          jsheap_sum: jsheap > 0 ? jsheap * w : 0,
+          jsheap_samples: jsheap > 0 ? w : 0,
+        })
+      }
+    }
+
+    // Orbit cost — assistant-side turns only (user turns would
+    // double-count the conversation).
+    if (row.event_type === 'orbit_turn' && str(row.fields, 'turn_role') === 'assistant') {
+      const model = str(row.fields, 'model')
+      const key = [row.environment, model].join('\u0000')
+      const entry = orbit.get(key)
+      if (entry) {
+        entry.turns += w
+        entry.rounds_sum += num(row.fields, 'turn_rounds') * w
+        entry.input_tokens_sum += num(row.fields, 'input_tokens') * w
+        entry.output_tokens_sum += num(row.fields, 'output_tokens') * w
+        entry.duration_ms_sum += num(row.fields, 'duration_ms') * w
+      } else {
+        orbit.set(key, {
+          day,
+          environment: row.environment,
+          model,
+          turns: w,
+          rounds_sum: num(row.fields, 'turn_rounds') * w,
+          input_tokens_sum: num(row.fields, 'input_tokens') * w,
+          output_tokens_sum: num(row.fields, 'output_tokens') * w,
+          duration_ms_sum: num(row.fields, 'duration_ms') * w,
+        })
+      }
+    }
+
+    if (row.event_type === 'tour_question_answered') {
+      const tourId = str(row.fields, 'tour_id')
+      const questionId = str(row.fields, 'question_id')
+      const key = [row.environment, tourId, questionId].join('\u0000')
+      const correct = bool(row.fields, 'was_correct') ? w : 0
+      const entry = quiz.get(key)
+      if (entry) {
+        entry.answered += w
+        entry.correct += correct
+        entry.response_ms_sum += num(row.fields, 'response_ms') * w
+      } else {
+        quiz.set(key, {
+          day,
+          environment: row.environment,
+          tour_id: tourId,
+          question_id: questionId,
+          answered: w,
+          correct,
+          response_ms_sum: num(row.fields, 'response_ms') * w,
+        })
+      }
+    }
+
+    // Generic dimension mixes.
+    if (row.event_type === 'session_start') {
+      const os = str(row.fields, 'os')
+      if (os) addDimension(row.environment, 'os', os, w)
+    } else if (row.event_type === 'map_click') {
+      const hitKind = str(row.fields, 'hit_kind')
+      if (hitKind) addDimension(row.environment, 'click_kind', hitKind, w)
+    } else if (row.event_type === 'browse_search') {
+      const queryHash = str(row.fields, 'query_hash')
+      if (queryHash) {
+        addDimension(row.environment, 'search', queryHash, w, num(row.fields, 'query_length') * w)
+        if (str(row.fields, 'result_count_bucket') === '0') {
+          addDimension(row.environment, 'search_zero', queryHash, w)
+        }
+      }
+    } else if (row.event_type === 'dwell') {
+      const target = str(row.fields, 'view_target')
+      if (target) addDimension(row.environment, 'dwell', target, w, num(row.fields, 'duration_ms') * w)
+    } else if (row.event_type === 'vr_interaction') {
+      const gesture = str(row.fields, 'gesture')
+      if (gesture) addDimension(row.environment, 'vr_gesture', gesture, w, num(row.fields, 'magnitude') * w)
+    } else if (row.event_type === 'orbit_correction') {
+      const signal = str(row.fields, 'signal')
+      if (signal) addDimension(row.environment, 'orbit_correction', signal, w)
+    } else if (row.event_type === 'orbit_load_followed') {
+      const path = str(row.fields, 'path')
+      if (path) addDimension(row.environment, 'orbit_follow', path, w, num(row.fields, 'latency_ms') * w)
+    } else if (row.event_type === 'tour_started') {
+      // Source mix (browse | orbit | deeplink | auto). The funnel
+      // derives user-started tours by subtracting the `auto` bucket.
+      const source = str(row.fields, 'source')
+      if (source) addDimension(row.environment, 'tour_start', source, w)
+    }
   }
 
   return {
@@ -537,6 +722,10 @@ export function computeRollups(rows: DecodedEventRow[], day: string): DayRollups
     spatial: [...spatial.values()],
     errors: [...errors.values()],
     outcomes: [...outcomes.values()],
+    perf: [...perf.values()],
+    orbit: [...orbit.values()],
+    quiz: [...quiz.values()],
+    dimensions: [...dimensions.values()],
   }
 }
 
@@ -559,6 +748,10 @@ export async function writeRollupsToD1(db: D1Database, day: string, rollups: Day
     db.prepare(`DELETE FROM analytics_spatial_daily WHERE day = ?`).bind(day),
     db.prepare(`DELETE FROM analytics_errors_daily WHERE day = ?`).bind(day),
     db.prepare(`DELETE FROM analytics_outcomes_daily WHERE day = ?`).bind(day),
+    db.prepare(`DELETE FROM analytics_perf_daily WHERE day = ?`).bind(day),
+    db.prepare(`DELETE FROM analytics_orbit_daily WHERE day = ?`).bind(day),
+    db.prepare(`DELETE FROM analytics_quiz_daily WHERE day = ?`).bind(day),
+    db.prepare(`DELETE FROM analytics_dimension_daily WHERE day = ?`).bind(day),
   ]
   const insertDaily = `INSERT INTO analytics_daily
     (day, event_type, environment, internal, country, platform, events_count, sessions_count, metrics)
@@ -606,6 +799,44 @@ export async function writeRollupsToD1(db: D1Database, day: string, rollups: Day
   for (const r of rollups.outcomes) {
     stmts.push(
       db.prepare(insertOutcomes).bind(r.day, r.environment, r.event_type, r.value, r.count),
+    )
+  }
+  const insertPerf = `INSERT INTO analytics_perf_daily
+    (day, environment, surface, renderer, samples, fps_sum, frame_p95_sum, jsheap_sum, jsheap_samples)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  for (const r of rollups.perf) {
+    stmts.push(
+      db
+        .prepare(insertPerf)
+        .bind(r.day, r.environment, r.surface, r.renderer, r.samples, r.fps_sum, r.frame_p95_sum, r.jsheap_sum, r.jsheap_samples),
+    )
+  }
+  const insertOrbit = `INSERT INTO analytics_orbit_daily
+    (day, environment, model, turns, rounds_sum, input_tokens_sum, output_tokens_sum, duration_ms_sum)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  for (const r of rollups.orbit) {
+    stmts.push(
+      db
+        .prepare(insertOrbit)
+        .bind(r.day, r.environment, r.model, r.turns, r.rounds_sum, r.input_tokens_sum, r.output_tokens_sum, r.duration_ms_sum),
+    )
+  }
+  const insertQuiz = `INSERT INTO analytics_quiz_daily
+    (day, environment, tour_id, question_id, answered, correct, response_ms_sum)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`
+  for (const r of rollups.quiz) {
+    stmts.push(
+      db
+        .prepare(insertQuiz)
+        .bind(r.day, r.environment, r.tour_id, r.question_id, r.answered, r.correct, r.response_ms_sum),
+    )
+  }
+  const insertDimension = `INSERT INTO analytics_dimension_daily
+    (day, environment, metric, key, count, value_sum)
+    VALUES (?, ?, ?, ?, ?, ?)`
+  for (const r of rollups.dimensions) {
+    stmts.push(
+      db.prepare(insertDimension).bind(r.day, r.environment, r.metric, r.key, r.count, r.value_sum),
     )
   }
   await db.batch(stmts)

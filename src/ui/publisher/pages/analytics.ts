@@ -31,15 +31,17 @@
  */
 
 import { t } from '../../../i18n'
-import { formatDate, formatNumber } from '../../../i18n/format'
+import { formatDate, formatNumber, formatRegion } from '../../../i18n/format'
 import { publisherGet, handleSessionError, type PublisherApiResult } from '../api'
 import { buildErrorCard } from '../components/error-card'
 import { ROUTE_CHANGE_START_EVENT } from '../router'
 import {
+  csvExportButton,
   formatDurationMs,
   renderBarSeries,
   renderMixBar,
   renderStatTile,
+  type CsvRow,
 } from '../analytics-charts'
 
 
@@ -60,6 +62,11 @@ const LAND_COLOR = '#3a4150'
 const BORDER_COLOR = '#5a6374'
 const RANGE_CHOICES = [7, 30, 90, 365] as const
 const ENVIRONMENTS = ['production', 'preview'] as const
+/** Spatial rollup bin size in degrees — must match
+ * `SPATIAL_BIN_DEG` in `functions/api/v1/_lib/analytics-export.ts`.
+ * Bins carry the cell's south-west corner; the heatmap and the CSV
+ * export both derive the cell center by adding half this. */
+const SPATIAL_BIN_DEG = 0.5
 
 interface MeResponse {
   role: string
@@ -75,6 +82,7 @@ interface Envelope<T> {
 interface OverviewData {
   days: Array<{ day: string; sessions: number; events: number; errors: number; view_ms: number }>
   platforms: Record<string, number>
+  operatingSystems: Record<string, number>
   countries: Array<{ country: string; sessions: number }>
   totals: { sessions: number; events: number; errors: number; view_ms: number }
 }
@@ -95,6 +103,34 @@ interface DatasetsData {
 interface SpatialData {
   layers: Array<{ id: string; title: string | null }>
   bins: Array<{ lat: number; lon: number; hits: number }>
+  hitKinds: Record<string, number>
+}
+
+interface PerfData {
+  rows: Array<{
+    surface: string
+    renderer: string
+    samples: number
+    avg_fps: number
+    avg_frame_p95_ms: number
+    avg_jsheap_mb: number | null
+  }>
+}
+
+interface OrbitData {
+  models: Array<{ model: string; turns: number; rounds: number; input_tokens: number; output_tokens: number }>
+  days: Array<{ day: string; rounds: number; turns: number }>
+  totals: { turns: number; rounds: number; input_tokens: number; output_tokens: number }
+}
+
+interface ResearchData {
+  topSearches: Array<{ key: string; count: number; avg_length: number }>
+  zeroSearches: Array<{ key: string; count: number }>
+  dwell: Array<{ key: string; count: number; avg_ms: number }>
+  gestures: Array<{ key: string; count: number; avg_magnitude: number }>
+  corrections: Array<{ key: string; count: number }>
+  followThrough: Array<{ key: string; count: number; avg_latency_ms: number }>
+  worstQuestions: Array<{ tour_id: string; question_id: string; answered: number; correct_rate: number }>
 }
 
 interface ErrorsData {
@@ -119,6 +155,7 @@ interface FunnelData {
     tour_ended: Record<string, number>
     vr_session_started: Record<string, number>
   }
+  toursStartedBySource: Record<string, number>
 }
 
 export interface AnalyticsPageOptions {
@@ -149,6 +186,18 @@ function el<K extends keyof HTMLElementTagNameMap>(
   Object.assign(node, props)
   for (const c of children) node.append(c)
   return node
+}
+
+/** Flatten a mix (`{browse: 12, orbit: 5}`) to a single CSV cell
+ * (`browse:12;orbit:5`), descending by share — keeps the per-row
+ * breakdown in one column rather than exploding into many. Values
+ * are sample-weighted estimates, so they're rounded. */
+function mixCell(mix: Record<string, number>): string {
+  return Object.entries(mix)
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, v]) => `${k}:${Math.round(v)}`)
+    .join(';')
 }
 
 /** Locale-formatted chart axis labels for the envelope's range. */
@@ -213,7 +262,15 @@ export async function renderAnalyticsPage(
   const datasetsHost = el('section', { className: 'publisher-analytics-section' })
   const spatialHost = el('section', { className: 'publisher-analytics-section' })
   const funnelHost = el('section', { className: 'publisher-analytics-section' })
+  const perfHost = el('section', { className: 'publisher-analytics-section' })
+  const orbitHost = el('section', { className: 'publisher-analytics-section' })
+  const researchHost = el('section', { className: 'publisher-analytics-section' })
   let heatmap: HeatmapHandle | null = null
+  // The spatial section's DOM (including its export button) is built
+  // once and updated data-only on filter changes, so the button's
+  // export thunk reads the latest bins from here rather than closing
+  // over the first load's data.
+  let latestSpatialBins: SpatialData['bins'] = []
 
   // Dispose on SPA route transitions (same pattern as
   // dataset-detail's transcode polling): mark the render dead so
@@ -239,9 +296,14 @@ export async function renderAnalyticsPage(
     void loadDatasets()
     void loadSpatial()
     void loadFunnel()
+    void loadPerf()
+    void loadOrbit()
+    void loadResearch()
   })
 
-  mount.replaceChildren(shell(header, overviewHost, datasetsHost, spatialHost, funnelHost))
+  mount.replaceChildren(
+    shell(header, overviewHost, datasetsHost, spatialHost, funnelHost, perfHost, orbitHost, researchHost),
+  )
 
   // Populate on first visit — the header's onChange only covers
   // subsequent control changes.
@@ -249,6 +311,9 @@ export async function renderAnalyticsPage(
   void loadDatasets()
   void loadSpatial()
   void loadFunnel()
+  void loadPerf()
+  void loadOrbit()
+  void loadResearch()
 
   async function fetchSection<T>(query: string): Promise<PublisherApiResult<Envelope<T>>> {
     return publisherGet<Envelope<T>>(`${ANALYTICS_ENDPOINT}${query}`, { fetchFn })
@@ -268,6 +333,20 @@ export async function renderAnalyticsPage(
 
   function sectionHeading(text: string): HTMLElement {
     return el('h2', { className: 'publisher-analytics-heading', textContent: text })
+  }
+
+  /** Heading row with an inline "Export CSV" button. `slug` becomes
+   * the filename stem
+   * (`terraviz-analytics-<slug>-<environment>-<days>d.csv`); the
+   * `getRows` thunk runs at click time over the already-loaded data.
+   * Used only on success renders — loading/empty/error states keep
+   * the bare `sectionHeading`, since there's nothing to export. */
+  function sectionHead(text: string, slug: string, getRows: () => CsvRow[]): HTMLElement {
+    const filename = `terraviz-analytics-${slug}-${state.environment}-${state.days}d.csv`
+    return el('div', { className: 'publisher-analytics-section-head' }, [
+      sectionHeading(text),
+      csvExportButton(t('publisher.analytics.exportCsv'), filename, getRows),
+    ])
   }
 
   function emptyNote(): HTMLElement {
@@ -303,7 +382,24 @@ export async function renderAnalyticsPage(
       ),
     ])
     const range = rangeOf(res.data)
-    const children: (HTMLElement | SVGElement)[] = [sectionHeading(title), tiles, breakdownHost]
+    // CSV column names are stable technical identifiers, not UI copy —
+    // analysts import these downstream, so they stay English across
+    // locales. i18n-exempt: machine-readable CSV header
+    const overviewRows = (): CsvRow[] => [
+      ['day', 'sessions', 'events', 'errors', 'view_minutes'],
+      ...data.days.map(d => [
+        d.day,
+        Math.round(d.sessions),
+        Math.round(d.events),
+        Math.round(d.errors),
+        Math.round(d.view_ms / 60_000),
+      ]),
+    ]
+    const children: (HTMLElement | SVGElement)[] = [
+      sectionHead(title, 'overview', overviewRows),
+      tiles,
+      breakdownHost,
+    ]
     if (data.days.length === 0) {
       children.push(emptyNote())
     } else {
@@ -321,6 +417,8 @@ export async function renderAnalyticsPage(
         ),
         el('h3', { className: 'publisher-analytics-subheading', textContent: t('publisher.analytics.overview.platforms') }),
         renderMixBar(data.platforms, t('publisher.analytics.overview.platforms')),
+        el('h3', { className: 'publisher-analytics-subheading', textContent: t('publisher.analytics.overview.operatingSystems') }),
+        renderMixBar(data.operatingSystems, t('publisher.analytics.overview.operatingSystems')),
         el('h3', { className: 'publisher-analytics-subheading', textContent: t('publisher.analytics.overview.countries') }),
         countriesTable(data.countries),
       )
@@ -392,8 +490,21 @@ export async function renderAnalyticsPage(
       )
     }
     table.append(body)
-    host.replaceChildren(
+    // i18n-exempt: machine-readable CSV header
+    const errorRows = (): CsvRow[] => [
+      ['count', 'category', 'source', 'code', 'message_class'],
+      ...rows.map(r => [Math.round(r.count), r.category, r.source, r.code, r.message_class]),
+    ]
+    const head = el('div', { className: 'publisher-analytics-section-head' }, [
       el('h3', { className: 'publisher-analytics-subheading', textContent: title }),
+      csvExportButton(
+        t('publisher.analytics.exportCsv'),
+        `terraviz-analytics-errors-${state.environment}-${state.days}d.csv`,
+        errorRows,
+      ),
+    ])
+    host.replaceChildren(
+      head,
       table,
       el('p', { className: 'publisher-analytics-footnote', textContent: t('publisher.analytics.errors.orderNote') }),
     )
@@ -410,8 +521,22 @@ export async function renderAnalyticsPage(
       datasetsHost.replaceChildren(sectionHeading(title), emptyNote())
       return
     }
+    // i18n-exempt: machine-readable CSV header
+    const datasetRows = (): CsvRow[] => [
+      ['layer_id', 'title', 'loads', 'trigger_mix', 'source_mix', 'load_ms_p50', 'load_ms_p95', 'dwell_ms_sum'],
+      ...rows.map(r => [
+        r.layer_id,
+        r.title ?? '',
+        Math.round(r.loads),
+        mixCell(r.trigger_mix),
+        mixCell(r.source_mix),
+        r.load_ms_p50 != null ? Math.round(r.load_ms_p50) : '',
+        r.load_ms_p95 != null ? Math.round(r.load_ms_p95) : '',
+        Math.round(r.dwell_ms_sum),
+      ]),
+    ]
     datasetsHost.replaceChildren(
-      sectionHeading(title),
+      sectionHead(title, 'datasets', datasetRows),
       datasetsTable(rows),
       el('p', { className: 'publisher-analytics-footnote', textContent: t('publisher.analytics.datasets.approxNote') }),
     )
@@ -441,6 +566,7 @@ export async function renderAnalyticsPage(
       return sectionError(spatialHost, title, res)
     }
     const data = res.data.data
+    latestSpatialBins = data.bins
 
     if (heatmap) {
       heatmap.setBins(data.bins)
@@ -449,6 +575,37 @@ export async function renderAnalyticsPage(
       return
     }
 
+    // Self-describing spatial export: each row carries the filter
+    // scope (event / dataset / projection) and the full cell geometry
+    // so the heatmap is reconstructable from the CSV alone. There is
+    // no per-bin zoom — the camera footprint is splatted across cells
+    // by zoom at export time (mass-conserving), so the zoom signal is
+    // folded into `hits` (attention mass), not a separate column.
+    // i18n-exempt: machine-readable CSV header
+    const spatialRows = (): CsvRow[] => {
+      const datasetScope =
+        state.spatialLayer === undefined
+          ? 'all'
+          : state.spatialLayer === ''
+            ? 'default-earth'
+            : state.spatialLayer
+      const projectionScope = state.spatialProjection ?? 'all'
+      const half = SPATIAL_BIN_DEG / 2
+      return [
+        ['event', 'dataset', 'projection', 'bin_deg', 'lat_sw', 'lon_sw', 'lat_center', 'lon_center', 'hits'],
+        ...latestSpatialBins.map(b => [
+          state.spatialEvent,
+          datasetScope,
+          projectionScope,
+          SPATIAL_BIN_DEG,
+          b.lat,
+          b.lon,
+          +(b.lat + half).toFixed(4),
+          +(b.lon + half).toFixed(4),
+          Math.round(b.hits),
+        ]),
+      ]
+    }
     const controls = spatialControls(data.layers, state, () => void loadSpatial())
     const mapContainer = el('div', { className: 'publisher-analytics-map' })
     mapContainer.setAttribute('role', 'img')
@@ -456,7 +613,20 @@ export async function renderAnalyticsPage(
     // Always present, toggled by data-only updates above.
     const note = emptyNote()
     note.hidden = data.bins.length > 0
-    spatialHost.replaceChildren(sectionHeading(title), controls, mapContainer, note)
+    const hitKindBlock: HTMLElement[] =
+      Object.keys(data.hitKinds).length > 0
+        ? [
+            el('h3', { className: 'publisher-analytics-subheading', textContent: t('publisher.analytics.spatial.hitKinds') }),
+            renderMixBar(data.hitKinds, t('publisher.analytics.spatial.hitKinds')),
+          ]
+        : []
+    spatialHost.replaceChildren(
+      sectionHead(title, 'spatial', spatialRows),
+      controls,
+      mapContainer,
+      note,
+      ...hitKindBlock,
+    )
     const mounted = await mountHeatmap(mapContainer, data.bins)
     if (disposed) {
       // Navigated away while the dynamic import / map boot was in
@@ -481,19 +651,39 @@ export async function renderAnalyticsPage(
       return
     }
     const outcomes = res.data.data.outcomes
+    const bySource = res.data.data.toursStartedBySource ?? {}
     const toursStarted = days.reduce((n, d) => n + d.tours_started, 0)
+    // `runTourOnLoad` auto-tours auto-play to completion; the export
+    // job excludes them from the outcomes rollup, so the denominator
+    // must drop them too or the rate is understated. Subtract the
+    // `auto` source bucket to get user-started tours.
+    const autoStarted = bySource.auto ?? 0
+    const userStarted = Math.max(0, toursStarted - autoStarted)
     const toursCompleted = outcomes.tour_ended.completed ?? 0
     const completionBlocks: HTMLElement[] = []
     if (toursStarted > 0 || Object.keys(outcomes.tour_ended).length > 0) {
-      completionBlocks.push(
-        el('div', { className: 'publisher-analytics-stats' }, [
+      const tiles: HTMLElement[] = [
+        renderStatTile(
+          t('publisher.analytics.funnel.completionRate'),
+          userStarted > 0
+            ? formatNumber(toursCompleted / userStarted, { style: 'percent', maximumFractionDigits: 0 })
+            : '—',
+        ),
+        renderStatTile(
+          t('publisher.analytics.funnel.userStarted'),
+          formatNumber(userStarted),
+        ),
+      ]
+      if (autoStarted > 0) {
+        tiles.push(
           renderStatTile(
-            t('publisher.analytics.funnel.completionRate'),
-            toursStarted > 0
-              ? formatNumber(toursCompleted / toursStarted, { style: 'percent', maximumFractionDigits: 0 })
-              : '—',
+            t('publisher.analytics.funnel.autoExcluded'),
+            formatNumber(autoStarted),
           ),
-        ]),
+        )
+      }
+      completionBlocks.push(
+        el('div', { className: 'publisher-analytics-stats' }, tiles),
         el('h3', { className: 'publisher-analytics-subheading', textContent: t('publisher.analytics.funnel.tourOutcomes') }),
         renderMixBar(outcomes.tour_ended, t('publisher.analytics.funnel.tourOutcomes')),
       )
@@ -519,11 +709,267 @@ export async function renderAnalyticsPage(
         ),
       ]),
     )
+    // i18n-exempt: machine-readable CSV header
+    const funnelRows = (): CsvRow[] => [
+      ['day', 'tours_started', 'tours_ended', 'vr_started', 'orbit_turns'],
+      ...days.map(d => [d.day, d.tours_started, d.tours_ended, d.vr_started, d.orbit_turns]),
+    ]
     funnelHost.replaceChildren(
-      sectionHeading(title),
+      sectionHead(title, 'funnel', funnelRows),
       ...completionBlocks,
       el('div', { className: 'publisher-analytics-funnel' }, blocks),
     )
+  }
+
+  async function loadPerf(): Promise<void> {
+    const title = t('publisher.analytics.section.perf')
+    perfHost.replaceChildren(sectionHeading(title), loadingNote())
+    const res = await fetchSection<PerfData>(baseQuery('perf'))
+    if (disposed) return
+    if (!res.ok) return sectionError(perfHost, title, res)
+    const rows = res.data.data.rows
+    if (rows.length === 0) {
+      perfHost.replaceChildren(sectionHeading(title), emptyNote())
+      return
+    }
+    const table = el('table', { className: 'publisher-analytics-table' })
+    table.append(
+      el('thead', {}, [
+        el('tr', {}, [
+          el('th', { textContent: t('publisher.analytics.perf.surface') }),
+          el('th', { textContent: t('publisher.analytics.perf.renderer') }),
+          el('th', { textContent: t('publisher.analytics.perf.fps') }),
+          el('th', { textContent: t('publisher.analytics.perf.frameP95') }),
+          el('th', { textContent: t('publisher.analytics.perf.jsheap') }),
+          el('th', { textContent: t('publisher.analytics.perf.samples') }),
+        ]),
+      ]),
+    )
+    const body = el('tbody')
+    for (const r of rows) {
+      body.append(
+        el('tr', {}, [
+          el('td', { textContent: r.surface }),
+          el('td', { className: 'publisher-analytics-dataset-id', textContent: r.renderer }),
+          el('td', { textContent: formatNumber(Math.round(r.avg_fps)) }),
+          el('td', { textContent: `${formatNumber(Math.round(r.avg_frame_p95_ms))} ms` }), // i18n-exempt: unit abbreviation
+          el('td', { textContent: r.avg_jsheap_mb != null ? `${formatNumber(Math.round(r.avg_jsheap_mb))} MB` : '—' }), // i18n-exempt: unit abbreviation
+          el('td', { textContent: formatNumber(Math.round(r.samples)) }),
+        ]),
+      )
+    }
+    table.append(body)
+    // i18n-exempt: machine-readable CSV header
+    const perfRows = (): CsvRow[] => [
+      ['surface', 'renderer', 'samples', 'avg_fps', 'avg_frame_p95_ms', 'avg_jsheap_mb'],
+      ...rows.map(r => [
+        r.surface,
+        r.renderer,
+        Math.round(r.samples),
+        Math.round(r.avg_fps),
+        Math.round(r.avg_frame_p95_ms),
+        r.avg_jsheap_mb != null ? Math.round(r.avg_jsheap_mb) : '',
+      ]),
+    ]
+    perfHost.replaceChildren(
+      sectionHead(title, 'perf', perfRows),
+      table,
+      el('p', { className: 'publisher-analytics-footnote', textContent: t('publisher.analytics.perf.note') }),
+    )
+  }
+
+  async function loadOrbit(): Promise<void> {
+    const title = t('publisher.analytics.section.orbit')
+    orbitHost.replaceChildren(sectionHeading(title), loadingNote())
+    const res = await fetchSection<OrbitData>(baseQuery('orbit'))
+    if (disposed) return
+    if (!res.ok) return sectionError(orbitHost, title, res)
+    const { models, days, totals } = res.data.data
+    if (models.length === 0) {
+      orbitHost.replaceChildren(
+        sectionHeading(title),
+        el('p', { className: 'publisher-analytics-empty', textContent: t('publisher.analytics.orbit.empty') }),
+      )
+      return
+    }
+    const range = rangeOf(res.data)
+    const tiles = el('div', { className: 'publisher-analytics-stats' }, [
+      renderStatTile(t('publisher.analytics.orbit.rounds'), formatNumber(Math.round(totals.rounds))),
+      renderStatTile(t('publisher.analytics.orbit.turns'), formatNumber(Math.round(totals.turns))),
+      renderStatTile(t('publisher.analytics.orbit.inputTokens'), formatNumber(Math.round(totals.input_tokens))),
+      renderStatTile(t('publisher.analytics.orbit.outputTokens'), formatNumber(Math.round(totals.output_tokens))),
+    ])
+    const table = el('table', { className: 'publisher-analytics-table' })
+    table.append(
+      el('thead', {}, [
+        el('tr', {}, [
+          el('th', { textContent: t('publisher.analytics.orbit.model') }),
+          el('th', { textContent: t('publisher.analytics.orbit.rounds') }),
+          el('th', { textContent: t('publisher.analytics.orbit.turns') }),
+          el('th', { textContent: t('publisher.analytics.orbit.inputTokens') }),
+          el('th', { textContent: t('publisher.analytics.orbit.outputTokens') }),
+        ]),
+      ]),
+    )
+    const body = el('tbody')
+    for (const m of models) {
+      body.append(
+        el('tr', {}, [
+          el('td', { className: 'publisher-analytics-dataset-id', textContent: m.model }),
+          el('td', { textContent: formatNumber(Math.round(m.rounds)) }),
+          el('td', { textContent: formatNumber(Math.round(m.turns)) }),
+          el('td', { textContent: formatNumber(Math.round(m.input_tokens)) }),
+          el('td', { textContent: formatNumber(Math.round(m.output_tokens)) }),
+        ]),
+      )
+    }
+    table.append(body)
+    // i18n-exempt: machine-readable CSV header
+    const orbitRows = (): CsvRow[] => [
+      ['model', 'rounds', 'turns', 'input_tokens', 'output_tokens'],
+      ...models.map(m => [m.model, Math.round(m.rounds), Math.round(m.turns), Math.round(m.input_tokens), Math.round(m.output_tokens)]),
+    ]
+    const children: (HTMLElement | SVGElement)[] = [sectionHead(title, 'orbit', orbitRows), tiles, table]
+    if (days.length > 0) {
+      children.push(
+        el('h3', { className: 'publisher-analytics-subheading', textContent: t('publisher.analytics.orbit.roundsPerDay') }),
+        renderBarSeries(
+          days.map(d => ({ label: d.day, value: d.rounds })),
+          { ariaLabel: t('publisher.analytics.orbit.roundsPerDay'), range },
+        ),
+      )
+    }
+    children.push(el('p', { className: 'publisher-analytics-footnote', textContent: t('publisher.analytics.tierBNote') }))
+    orbitHost.replaceChildren(...children)
+  }
+
+  async function loadResearch(): Promise<void> {
+    const title = t('publisher.analytics.section.research')
+    researchHost.replaceChildren(sectionHeading(title), loadingNote())
+    const res = await fetchSection<ResearchData>(baseQuery('research'))
+    if (disposed) return
+    if (!res.ok) return sectionError(researchHost, title, res)
+    const d = res.data.data
+    const empty =
+      d.topSearches.length === 0 &&
+      d.zeroSearches.length === 0 &&
+      d.dwell.length === 0 &&
+      d.gestures.length === 0 &&
+      d.corrections.length === 0 &&
+      d.followThrough.length === 0 &&
+      d.worstQuestions.length === 0
+    if (empty) {
+      researchHost.replaceChildren(
+        sectionHeading(title),
+        el('p', { className: 'publisher-analytics-empty', textContent: t('publisher.analytics.research.empty') }),
+      )
+      return
+    }
+    // One CSV across the section's sub-tables, keyed by a `group`
+    // column; the `detail` column carries each group's extra measure
+    // (avg length / dwell ms / magnitude / latency ms), blank where
+    // none. Questions flatten to key=`tour_id/question_id`,
+    // count=answered, detail=correct_rate.
+    // i18n-exempt: machine-readable CSV header
+    const researchRows = (): CsvRow[] => {
+      const rows: CsvRow[] = [['group', 'key', 'count', 'detail']]
+      for (const r of d.topSearches) rows.push(['top_search', r.key, Math.round(r.count), Math.round(r.avg_length)])
+      for (const r of d.zeroSearches) rows.push(['zero_search', r.key, Math.round(r.count), ''])
+      for (const r of d.dwell) rows.push(['dwell', r.key, Math.round(r.count), Math.round(r.avg_ms)])
+      for (const r of d.gestures) rows.push(['gesture', r.key, Math.round(r.count), r.avg_magnitude])
+      for (const r of d.corrections) rows.push(['correction', r.key, Math.round(r.count), ''])
+      for (const r of d.followThrough) rows.push(['follow_through', r.key, Math.round(r.count), Math.round(r.avg_latency_ms)])
+      for (const q of d.worstQuestions) rows.push(['question', `${q.tour_id}/${q.question_id}`, Math.round(q.answered), q.correct_rate])
+      return rows
+    }
+    const children: HTMLElement[] = [sectionHead(title, 'research', researchRows)]
+    const keyValueTable = <R extends { key: string; count: number }>(
+      label: string,
+      rows: R[],
+      extraHeader?: string,
+      extra?: (r: R) => string,
+    ): void => {
+      if (rows.length === 0) return
+      const table = el('table', { className: 'publisher-analytics-table' })
+      const head = [
+        el('th', { textContent: t('publisher.analytics.research.key') }),
+        el('th', { textContent: t('publisher.analytics.research.count') }),
+      ]
+      if (extraHeader) head.push(el('th', { textContent: extraHeader }))
+      table.append(el('thead', {}, [el('tr', {}, head)]))
+      const body = el('tbody')
+      for (const r of rows) {
+        const cells = [
+          // Keys are hashed queries / enum values — verbatim.
+          // i18n-exempt: technical identifier
+          el('td', { className: 'publisher-analytics-dataset-id', textContent: r.key }),
+          el('td', { textContent: formatNumber(Math.round(r.count)) }),
+        ]
+        if (extra) cells.push(el('td', { textContent: extra(r) }))
+        body.append(el('tr', {}, cells))
+      }
+      table.append(body)
+      children.push(el('h3', { className: 'publisher-analytics-subheading', textContent: label }), table)
+    }
+
+    keyValueTable(
+      t('publisher.analytics.research.topSearches'),
+      d.topSearches,
+      t('publisher.analytics.research.avgLength'),
+      r => formatNumber(Math.round(r.avg_length)),
+    )
+    keyValueTable(t('publisher.analytics.research.zeroSearches'), d.zeroSearches)
+    keyValueTable(
+      t('publisher.analytics.research.dwell'),
+      d.dwell,
+      t('publisher.analytics.research.avgDwell'),
+      r => formatDurationMs(r.avg_ms),
+    )
+    keyValueTable(
+      t('publisher.analytics.research.gestures'),
+      d.gestures,
+      t('publisher.analytics.research.avgMagnitude'),
+      r => formatNumber(r.avg_magnitude, { maximumFractionDigits: 2 }),
+    )
+    keyValueTable(t('publisher.analytics.research.corrections'), d.corrections)
+    keyValueTable(
+      t('publisher.analytics.research.followThrough'),
+      d.followThrough,
+      t('publisher.analytics.research.avgLatency'),
+      r => `${formatNumber(Math.round(r.avg_latency_ms))} ms`, // i18n-exempt: unit abbreviation
+    )
+
+    if (d.worstQuestions.length > 0) {
+      const table = el('table', { className: 'publisher-analytics-table' })
+      table.append(
+        el('thead', {}, [
+          el('tr', {}, [
+            el('th', { textContent: t('publisher.analytics.research.tour') }),
+            el('th', { textContent: t('publisher.analytics.research.question') }),
+            el('th', { textContent: t('publisher.analytics.research.answered') }),
+            el('th', { textContent: t('publisher.analytics.research.correctRate') }),
+          ]),
+        ]),
+      )
+      const body = el('tbody')
+      for (const q of d.worstQuestions) {
+        body.append(
+          el('tr', {}, [
+            el('td', { className: 'publisher-analytics-dataset-id', textContent: q.tour_id }),
+            el('td', { className: 'publisher-analytics-dataset-id', textContent: q.question_id }),
+            el('td', { textContent: formatNumber(Math.round(q.answered)) }),
+            el('td', { textContent: formatNumber(q.correct_rate, { style: 'percent', maximumFractionDigits: 0 }) }),
+          ]),
+        )
+      }
+      table.append(body)
+      children.push(
+        el('h3', { className: 'publisher-analytics-subheading', textContent: t('publisher.analytics.research.worstQuestions') }),
+        table,
+      )
+    }
+    children.push(el('p', { className: 'publisher-analytics-footnote', textContent: t('publisher.analytics.tierBNote') }))
+    researchHost.replaceChildren(...children)
   }
 
   function loadingNote(): HTMLElement {
@@ -539,9 +985,14 @@ export async function renderAnalyticsPage(
     table.append(el('thead', {}, [head]))
     const body = el('tbody')
     for (const row of countries) {
+      // Full localized region name ("United States"); the raw ISO
+      // code survives as a hover tooltip for the rare correlate-with-
+      // raw-telemetry need (mirrors the datasets table's id tooltip).
+      const nameCell = el('td', { textContent: formatRegion(row.country) })
+      nameCell.title = row.country
       body.append(
         el('tr', {}, [
-          el('td', { textContent: row.country }),
+          nameCell,
           el('td', { textContent: formatNumber(Math.round(row.sessions)) }),
         ]),
       )
@@ -732,8 +1183,8 @@ function binsToGeoJson(bins: SpatialData['bins']): GeoJSON.FeatureCollection {
       geometry: {
         type: 'Point',
         // Bin values are the cell's south-west corner; render at
-        // the cell center.
-        coordinates: [b.lon + 0.25, b.lat + 0.25],
+        // the cell center (same offset the CSV export records).
+        coordinates: [b.lon + SPATIAL_BIN_DEG / 2, b.lat + SPATIAL_BIN_DEG / 2],
       },
       properties: { weight: b.hits / max },
     })),
