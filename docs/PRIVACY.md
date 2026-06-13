@@ -320,7 +320,7 @@ and enough text to identify it.
 
 Everything we store runs on **Cloudflare**:
 
-- **Analytics events**: Cloudflare Workers Analytics Engine (90-day
+- **Analytics events**: Cloudflare Workers Analytics Engine (30–90 day
   hot retention) and Cloudflare R2 object storage (long-term archive)
   plus Cloudflare D1 aggregate tables for product analytics
 - **Feedback submissions and Orbit ratings**: Cloudflare D1 (a

@@ -53,15 +53,17 @@ positional schema. The first four `blobs[]` are server-stamped
 > within that filter) so a future schema addition doesn't silently
 > change column meaning.
 
-> **Three consumers of these layouts.** The positions below are read
-> by (1) Grafana panels and human spelunking, (2) the in-app
-> `/publish/analytics` tab, and (3) the **nightly export job**, which
-> decodes AE rows back into named fields before archiving them to R2
+> **Two direct consumers of these layouts.** The positions below are
+> read by (1) Grafana panels and human spelunking, and (2) the
+> **nightly export job**, which decodes AE rows back into named fields
+> before archiving them to R2 and aggregating them into the D1 rollups
 > (`functions/api/v1/_lib/analytics-layouts.ts` — a typed mirror of
 > this table, drift-checked against the `TelemetryEvent` union and
-> round-tripped through the real encoder in CI). When you add or
-> reorder an event field, update that registry in the same change, or
-> the archive's decoded field names go stale. See
+> round-tripped through the real encoder in CI). The in-app
+> `/publish/analytics` tab is an *indirect* consumer: it reads those
+> D1 rollups, not AE positions. When you add or reorder an event
+> field, update that registry in the same change, or the archive's
+> decoded field names go stale. See
 > [`ANALYTICS_STORAGE_AND_ADMIN_PLAN.md`](ANALYTICS_STORAGE_AND_ADMIN_PLAN.md)
 > Phase A.
 

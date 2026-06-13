@@ -59,21 +59,27 @@ client (src/analytics/) ──POST batch──▶ Cloudflare Pages Function
                                           dataset: terraviz_events
                                           (hot store, 30–90 day retention)
                                             │
-                  ┌─────────────────────────┼─────────────────────────┐
-                  │ nightly export          │ live AE SQL API          │ live AE SQL API
-                  │ (GitHub Actions cron)    │ (recent window)          │
-                  ▼                          ▼                          ▼
-   R2 archive  +  D1 rollup tables      /publish/analytics tab     Grafana dashboards
-   events/v1/   analytics_*_daily       (primary, in-app,          grafana/dashboards/*.json
-   *.ndjson.gz  (indefinite)             privilege-gated)          (optional, self-host)
+                  ┌─────────────────────────┴─────────────────────────┐
+                  │ nightly export (GHA cron)                          │ live AE SQL API
+                  ▼                                                    ▼
+   R2 archive  +  D1 rollup tables                               Grafana dashboards
+   events/v1/   analytics_*_daily                                grafana/dashboards/*.json
+   *.ndjson.gz  (indefinite)                                     (optional, self-host)
+                  │
+                  │ rollups (complete days through yesterday)
+                  ▼
+          /publish/analytics tab
+          (primary, in-app, privilege-gated)
 ```
 
 The **`/publish/analytics`** tab is the primary read surface: it
-serves history from the D1 rollups and a recent window live from AE,
-all inside the authenticated portal. **Grafana is now optional** —
-useful for ad-hoc AE SQL exploration, but not required. The export
-pipeline (R2 archive + D1 rollups) is the durable record that outlives
-AE retention; full design in
+reads the D1 rollups (complete UTC days through yesterday — there is
+no live-AE overlay in v1; "today so far" is deferred), all inside the
+authenticated portal. **Grafana is now optional** — it is the only
+surface that queries the live AE stream directly, useful for ad-hoc
+AE SQL exploration, but not required. The export pipeline (R2 archive
++ D1 rollups) is the durable record that outlives AE retention and
+the source the tab reads; full design in
 [`ANALYTICS_STORAGE_AND_ADMIN_PLAN.md`](ANALYTICS_STORAGE_AND_ADMIN_PLAN.md).
 
 - **Transport.** `src/analytics/transport.ts` — `fetch()` for live
@@ -90,9 +96,10 @@ AE retention; full design in
   [`ANALYTICS_QUERIES.md`](ANALYTICS_QUERIES.md) for per-event
   positions.
 - **Querying.** Primary: the in-app **`/publish/analytics`** tab
-  (`functions/api/v1/publish/analytics.ts` over the D1 rollups +
-  a live-AE recent window). Optional: Grafana with the Yesoreyeram
-  Infinity datasource pointed at the AE SQL API — dashboard JSON in
+  (`functions/api/v1/publish/analytics.ts`) over the D1 rollups —
+  complete days through yesterday; v1 has no live-AE overlay.
+  Optional: Grafana with the Yesoreyeram Infinity datasource pointed
+  at the AE SQL API for live, ad-hoc queries — dashboard JSON in
   `grafana/dashboards/` is the source of truth for that path (polish
   in-Grafana, then export and re-commit).
 - **Long-term storage.** A nightly GitHub Actions cron

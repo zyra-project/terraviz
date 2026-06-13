@@ -2,15 +2,16 @@
 
 > **Optional.** The primary analysis surface is now the in-app
 > **`/publish/analytics`** tab — privilege-gated inside the publisher
-> portal, no external dependency, with long-term storage in D1
-> rollups + an R2 archive that outlive Analytics Engine's 30–90 day
-> retention (see
+> portal, no external dependency, covering the product-health,
+> dataset-engagement, spatial-heatmap, and funnel panels (see
 > [`docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md`](../docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md)).
-> These Grafana dashboards remain supported for self-hosters who want
-> ad-hoc SQL exploration over the live AE stream, but a fresh deploy
-> needs none of this to get analytics — the in-app tab covers the
-> product-health, dataset-engagement, spatial-heatmap, and funnel
-> panels. Reach for Grafana when you want to write your own AE SQL
+> The tab reads D1 rollups + an R2 archive that outlive Analytics
+> Engine's 30–90 day retention — but those are **populated by the
+> nightly export pipeline a self-hoster must enable first**
+> (`SELF_HOSTING.md` Step 17: R2 bucket, AE SQL-API secrets, the cron
+> workflow). Until that's wired, the tab has nothing to read; Grafana,
+> which queries the live AE stream directly, is the zero-setup option.
+> Either way, reach for Grafana when you want to write your own AE SQL
 > against the raw event stream.
 
 Four dashboards visualize the telemetry stream landed in Cloudflare
