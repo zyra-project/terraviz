@@ -161,19 +161,12 @@ export async function updatePublisher(
     }
   }
 
-  // last-admin: never leave the deploy with zero active admins.
+  // last-admin: never leave the deploy with zero active admins. Will
+  // this update demote or deactivate the currently-only active admin?
   const loseAdmin =
     existing.role === 'admin' &&
     existing.status === 'active' &&
     (nextRole !== 'admin' || nextStatus !== 'active')
-  if (loseAdmin && (await countActiveAdmins(db, id)) === 0) {
-    return {
-      ok: false,
-      status: 409,
-      error: 'last_admin',
-      message: 'Cannot demote or suspend the last active admin.',
-    }
-  }
 
   const sets: string[] = []
   const binds: unknown[] = []
@@ -201,11 +194,30 @@ export async function updatePublisher(
     return { ok: false, status: 400, error: 'no_changes', message: 'No updatable fields supplied.' }
   }
 
+  // Fold the last-admin guard into the UPDATE itself rather than a
+  // separate count read, so two concurrent demote/suspend requests
+  // can't both pass a stale check and strand the deploy with zero
+  // admins (TOCTOU). The EXISTS clause keeps the write a no-op unless
+  // another active admin remains; `changes === 0` then means the
+  // guard fired.
   binds.push(id)
-  await db
-    .prepare(`UPDATE publishers SET ${sets.join(', ')} WHERE id = ?`)
+  let where = 'id = ?'
+  if (loseAdmin) {
+    where += " AND EXISTS (SELECT 1 FROM publishers WHERE role = 'admin' AND status = 'active' AND id != ?)"
+    binds.push(id)
+  }
+  const result = await db
+    .prepare(`UPDATE publishers SET ${sets.join(', ')} WHERE ${where}`)
     .bind(...binds)
     .run()
+  if (loseAdmin && (result.meta?.changes ?? 0) === 0) {
+    return {
+      ok: false,
+      status: 409,
+      error: 'last_admin',
+      message: 'Cannot demote or suspend the last active admin.',
+    }
+  }
 
   const updated = await getPublisher(db, id)
   // Re-read should always succeed (we just updated an existing row),

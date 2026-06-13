@@ -196,4 +196,16 @@ describe('updatePublisher', () => {
     const res = await updatePublisher(db, 'PUB-LAST', { role: 'publisher' }, actor({ id: 'PUB-GHOST' }))
     expect(res).toMatchObject({ ok: false, status: 409, error: 'last_admin' })
   })
+
+  it('allows demoting an admin while another active admin remains', async () => {
+    const sqlite = seedFixtures({ count: 0 })
+    seedPublisher(sqlite, { id: 'PUB-A', email: 'a@example.com', role: 'admin', status: 'active' })
+    seedPublisher(sqlite, { id: 'PUB-B', email: 'b@example.com', role: 'admin', status: 'active' })
+    const db = asD1(sqlite)
+    const res = await updatePublisher(db, 'PUB-B', { role: 'publisher' }, actor({ id: 'PUB-A' }))
+    expect(res.ok).toBe(true)
+    const row = await getPublisher(db, 'PUB-B')
+    expect(row?.role).toBe('publisher')
+    expect(row?.is_admin).toBe(0)
+  })
 })

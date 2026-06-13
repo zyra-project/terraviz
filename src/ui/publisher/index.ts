@@ -347,12 +347,14 @@ export async function bootPublisherPortal(): Promise<void> {
     ],
     notFoundPage(content),
   )
-  // Fetch identity once so the topbar can show admin-only tabs (the
-  // Users tab). Best-effort — on any failure we hide admin tabs and
-  // let the page-level + API gates do the real enforcement.
-  const isAdmin = await resolveIsAdmin()
-  renderTopbar(root, activeRouter, { isAdmin })
-  await activeRouter.start()
+  // Render the topbar immediately (without admin-only tabs) so the
+  // portal never blocks on the network. The admin-tab probe is
+  // best-effort and only controls visibility of the Users tab, so we
+  // fire it in the background and re-render the topbar if it resolves
+  // true. The page and API both gate independently.
+  const bootedRouter = activeRouter
+  renderTopbar(root, bootedRouter, { isAdmin: false })
+  await bootedRouter.start()
   // One emit per portal-chunk load — the publisher visits
   // /publish/*, the chunk resolves, the first route dispatches,
   // we fire. Subsequent in-portal navigation is *not* counted
@@ -363,6 +365,14 @@ export async function bootPublisherPortal(): Promise<void> {
     route: routeForPath(window.location.pathname),
   })
   logger.info('[publisher] portal booted at', window.location.pathname)
+
+  void resolveIsAdmin().then(isAdmin => {
+    // Guard against a teardown (or re-boot) that happened while the
+    // probe was in flight — only re-render the topbar we mounted.
+    if (isAdmin && activeRouter === bootedRouter) {
+      renderTopbar(root, bootedRouter, { isAdmin: true })
+    }
+  })
 }
 
 /** Tear down the portal — only used by tests. */

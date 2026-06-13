@@ -134,7 +134,9 @@ export interface ListPublishersResponse {
 /** PATCH body for `/api/v1/publish/publishers/{id}`. */
 export interface UpdatePublisherPayload {
   role?: string
-  status?: PublisherStatus
+  // Only active|suspended are PATCH-able — `pending` is the
+  // provisioning default and is rejected by the route.
+  status?: 'active' | 'suspended'
   display_name?: string
   affiliation?: string | null
 }
