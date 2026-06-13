@@ -9,7 +9,7 @@ function samplePayload(overrides: Partial<Record<string, unknown>> = {}) {
     email: 'jane@example.org',
     display_name: 'Jane Doe',
     affiliation: 'NOAA/PMEL',
-    role: 'staff',
+    role: 'admin',
     is_admin: true,
     status: 'active',
     created_at: '2024-09-15T12:00:00Z',
@@ -61,22 +61,21 @@ describe('renderMePage', () => {
     expect(mount.textContent).toContain('NOAA/PMEL')
   })
 
-  it('shows role + admin badges when is_admin is true', async () => {
+  it('renders the admin role with the admin-styled badge', async () => {
     const fetchFn = vi.fn().mockResolvedValue(jsonResponse(SAMPLE))
     await renderMePage(mount, { fetchFn: fetchFn as unknown as typeof fetch })
 
-    const badges = mount.querySelectorAll('.publisher-badge')
-    const texts = Array.from(badges).map(b => b.textContent)
-    expect(texts).toContain('Staff')
-    expect(texts).toContain('Admin')
+    const adminBadge = mount.querySelector('.publisher-badge-admin')
+    expect(adminBadge?.textContent).toBe('Admin')
   })
 
-  it('hides the admin badge when is_admin is false', async () => {
-    const payload = samplePayload({ is_admin: false })
+  it('renders a publisher role with the plain role badge (no admin styling)', async () => {
+    const payload = samplePayload({ role: 'publisher', is_admin: false })
     const fetchFn = vi.fn().mockResolvedValue(jsonResponse(payload))
     await renderMePage(mount, { fetchFn: fetchFn as unknown as typeof fetch })
 
     expect(mount.querySelector('.publisher-badge-admin')).toBeNull()
+    expect(mount.querySelector('.publisher-badge-role')?.textContent).toBe('Publisher')
   })
 
   it("renders an explicit 'Not set' when affiliation is null", async () => {

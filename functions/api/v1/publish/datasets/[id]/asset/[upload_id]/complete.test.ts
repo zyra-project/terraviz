@@ -25,24 +25,24 @@ import { asD1, makeKV, seedFixtures } from '../../../../../_lib/test-helpers'
 import type { PublisherRow } from '../../../../../_lib/publisher-store'
 import { CapturingJobQueue } from '../../../../../_lib/job-queue'
 
-const STAFF: PublisherRow = {
-  id: 'PUB-STAFF',
-  email: 'staff@example.com',
-  display_name: 'Staff',
+const ADMIN: PublisherRow = {
+  id: 'PUB-ADMIN',
+  email: 'admin@example.com',
+  display_name: 'Admin',
   affiliation: null,
   org_id: null,
-  role: 'staff',
+  role: 'admin',
   is_admin: 1,
   status: 'active',
   created_at: '2026-01-01T00:00:00.000Z',
 }
 
-const COMMUNITY: PublisherRow = {
-  ...STAFF,
-  id: 'PUB-COMMUNITY',
-  email: 'community@example.com',
-  display_name: 'Community',
-  role: 'community',
+const PUBLISHER: PublisherRow = {
+  ...ADMIN,
+  id: 'PUB-PUBLISHER',
+  email: 'publisher@example.com',
+  display_name: 'Publisher',
+  role: 'publisher',
   is_admin: 0,
 }
 
@@ -53,7 +53,7 @@ const OTHER_DIGEST = `sha256:${SHA64_OTHER}`
 
 function setupEnv(opts: { datasetPublished?: boolean } = {}) {
   const sqlite = seedFixtures({ count: 1 })
-  for (const p of [STAFF, COMMUNITY]) {
+  for (const p of [ADMIN, PUBLISHER]) {
     sqlite
       .prepare(
         `INSERT INTO publishers (id, email, display_name, role, is_admin, status, created_at)
@@ -62,7 +62,7 @@ function setupEnv(opts: { datasetPublished?: boolean } = {}) {
       .run(p.id, p.email, p.display_name, p.role, p.is_admin, p.status, p.created_at)
   }
   const datasetId = 'DS000' + 'A'.repeat(21)
-  sqlite.prepare(`UPDATE datasets SET publisher_id = ? WHERE id = ?`).run(STAFF.id, datasetId)
+  sqlite.prepare(`UPDATE datasets SET publisher_id = ? WHERE id = ?`).run(ADMIN.id, datasetId)
   if (opts.datasetPublished === false) {
     sqlite.prepare(`UPDATE datasets SET published_at = NULL WHERE id = ?`).run(datasetId)
   }
@@ -103,7 +103,7 @@ function insertPending(
     .run(
       opts.uploadId,
       opts.datasetId,
-      opts.publisherId ?? STAFF.id,
+      opts.publisherId ?? ADMIN.id,
       opts.kind,
       opts.target,
       opts.target_ref,
@@ -150,7 +150,7 @@ function ctx(opts: {
     request: new Request(url, { method: 'POST' }),
     env: opts.env,
     params: { id: opts.datasetId, upload_id: opts.uploadId },
-    data: { publisher: opts.publisher ?? STAFF, jobQueue },
+    data: { publisher: opts.publisher ?? ADMIN, jobQueue },
     waitUntil: () => {},
     passThroughOnException: () => {},
     next: async () => new Response(null),
@@ -522,7 +522,7 @@ describe('POST .../asset/{upload_id}/complete — refusals', () => {
          VALUES (?, ?, 'NODE000', 'Other', 'image/png', '', 0, 'public', 0, 1,
                  '2026-04-29T12:00:00.000Z', '2026-04-29T12:00:00.000Z', ?)`,
       )
-      .run(otherId, 'other', STAFF.id)
+      .run(otherId, 'other', ADMIN.id)
     insertPending(sqlite, {
       uploadId: 'UP-OTHER',
       datasetId: otherId,
@@ -541,7 +541,7 @@ describe('POST .../asset/{upload_id}/complete — refusals', () => {
     expect(res.status).toBe(404)
   })
 
-  it('returns 404 when a community publisher tries to complete a staff-owned upload', async () => {
+  it('returns 404 when a publisher-role account tries to complete an admin-owned upload', async () => {
     const { sqlite, datasetId, kv } = setupEnv()
     insertPending(sqlite, {
       uploadId: 'UP-COMM',
@@ -557,8 +557,8 @@ describe('POST .../asset/{upload_id}/complete — refusals', () => {
       CATALOG_KV: kv,
       CATALOG_R2: makeBucket(HELLO_BYTES.buffer as ArrayBuffer),
     }
-    const res = await completeHandler(ctx({ env, datasetId, uploadId: 'UP-COMM', publisher: COMMUNITY }))
-    // Community can't see the dataset, so the not_found triggers
+    const res = await completeHandler(ctx({ env, datasetId, uploadId: 'UP-COMM', publisher: PUBLISHER }))
+    // Publisher can't see the dataset, so the not_found triggers
     // before the upload row is even consulted.
     expect(res.status).toBe(404)
   })
@@ -965,7 +965,7 @@ describe('POST .../asset/{upload_id}/complete — refusals', () => {
       .run(
         'UP-WEIRD',
         datasetId,
-        STAFF.id,
+        ADMIN.id,
         'thumbnail',
         'gcs', // unknown target
         'gcs:foo',

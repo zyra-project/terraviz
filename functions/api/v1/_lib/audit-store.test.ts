@@ -89,7 +89,7 @@ describe('writeDatasetAudit', () => {
     const db = makeDb()
     const id = await writeDatasetAudit(
       db,
-      { id: 'PUB456', role: 'staff' },
+      { id: 'PUB456', role: 'admin' },
       'dataset.publish',
       'DS02',
       { slug: 'auto' },
@@ -109,7 +109,7 @@ describe('writeDatasetAudit', () => {
     const db = makeDb()
     const id = await writeDatasetAudit(
       db,
-      { id: 'PUB456', role: 'staff' },
+      { id: 'PUB456', role: 'admin' },
       'dataset.retract',
       'DS03',
     )

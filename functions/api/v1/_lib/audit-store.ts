@@ -24,7 +24,14 @@ import { newUlid } from './ulid'
 export type AuditActorKind = 'publisher' | 'peer' | 'system'
 
 /** Distinct kinds of subject the publisher API records actions on. */
-export type AuditSubjectKind = 'dataset' | 'tour' | 'peer' | 'grant' | 'workflow' | 'analytics_day'
+export type AuditSubjectKind =
+  | 'dataset'
+  | 'tour'
+  | 'peer'
+  | 'grant'
+  | 'workflow'
+  | 'analytics_day'
+  | 'publisher'
 
 /**
  * `action` is a free-form, dotted token recording *what happened*.
@@ -45,6 +52,11 @@ export type AuditAction =
   | 'workflow.update'
   | 'workflow.run'
   | 'analytics.export'
+  | 'publisher.approve'
+  | 'publisher.reject'
+  | 'publisher.suspend'
+  | 'publisher.reactivate'
+  | 'publisher.role_change'
 
 export interface AuditEventInput {
   actor_kind: AuditActorKind
@@ -125,6 +137,29 @@ export async function writeDatasetAudit(
     action,
     subject_kind: 'dataset',
     subject_id: datasetId,
+    metadata_json: metadata ? JSON.stringify(metadata) : null,
+  })
+}
+
+/**
+ * Convenience builder for the user-administration routes. Records an
+ * admin acting on another publisher's row (`subject_kind:
+ * 'publisher'`). Used by `publisher-mutations.ts` for approve /
+ * reject / suspend / reactivate / role_change.
+ */
+export async function writePublisherAudit(
+  db: D1Database,
+  actor: { id: string; role: string },
+  action: AuditAction,
+  subjectPublisherId: string,
+  metadata?: Record<string, unknown>,
+): Promise<string | null> {
+  return writeAuditEvent(db, {
+    actor_kind: 'publisher',
+    actor_id: actor.id,
+    action,
+    subject_kind: 'publisher',
+    subject_id: subjectPublisherId,
     metadata_json: metadata ? JSON.stringify(metadata) : null,
   })
 }

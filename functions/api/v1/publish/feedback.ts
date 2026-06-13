@@ -58,7 +58,7 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
   }
   const publisher = (context.data as unknown as PublisherData).publisher
   if (!isPrivileged(publisher)) {
-    return jsonError(403, 'forbidden_role', 'Feedback review is restricted to staff, admin, and service callers.')
+    return jsonError(403, 'forbidden_role', 'Feedback review is restricted to admin and service callers.')
   }
 
   const params = new URL(context.request.url).searchParams

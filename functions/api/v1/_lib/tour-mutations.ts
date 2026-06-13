@@ -8,7 +8,7 @@
  * publish/retract follow the same shape as datasets.
  */
 
-import type { PublisherRow } from './publisher-store'
+import { isPrivileged, type PublisherRow } from './publisher-store'
 import { invalidateSnapshot } from './snapshot'
 import type { CatalogEnv } from './env'
 import { newUlid } from './ulid'
@@ -46,10 +46,6 @@ export interface TourCreateFailure {
   errors: ValidationError[]
 }
 export type TourMutationOutcome = TourCreateResult | TourCreateFailure
-
-function isPrivileged(p: PublisherRow): boolean {
-  return p.is_admin === 1 || p.role === 'staff' || p.role === 'service'
-}
 
 async function slugInUse(db: D1Database, slug: string, exclude?: string): Promise<boolean> {
   const sql = exclude

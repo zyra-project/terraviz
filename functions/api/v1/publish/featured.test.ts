@@ -3,13 +3,13 @@
  *
  * Coverage:
  *   - GET /api/v1/publish/featured returns rows in display order.
- *   - POST adds a row for staff; refuses with 403 for community.
+ *   - POST adds a row for admin; refuses with 403 for publisher.
  *   - POST returns 400 for body shape problems.
  *   - POST returns 404 for an unknown dataset_id, 409 for a
  *     duplicate.
- *   - PUT /{dataset_id} updates position; 403 for community,
+ *   - PUT /{dataset_id} updates position; 403 for publisher,
  *     404 for absent rows, 400 for bad bodies.
- *   - DELETE /{dataset_id} removes; 403 for community; idempotent
+ *   - DELETE /{dataset_id} removes; 403 for publisher; idempotent
  *     when absent (still 204).
  */
 
@@ -22,30 +22,30 @@ import {
 import { asD1, makeKV, seedFixtures } from '../_lib/test-helpers'
 import type { PublisherRow } from '../_lib/publisher-store'
 
-const STAFF: PublisherRow = {
-  id: 'PUB-STAFF',
-  email: 'staff@example.com',
-  display_name: 'Staff',
+const ADMIN: PublisherRow = {
+  id: 'PUB-ADMIN',
+  email: 'admin@example.com',
+  display_name: 'Admin',
   affiliation: null,
   org_id: null,
-  role: 'staff',
+  role: 'admin',
   is_admin: 1,
   status: 'active',
   created_at: '2026-01-01T00:00:00.000Z',
 }
 
-const COMMUNITY: PublisherRow = {
-  ...STAFF,
-  id: 'PUB-COMMUNITY',
-  email: 'community@example.com',
-  display_name: 'Community',
-  role: 'community',
+const PUBLISHER: PublisherRow = {
+  ...ADMIN,
+  id: 'PUB-PUBLISHER',
+  email: 'publisher@example.com',
+  display_name: 'Publisher',
+  role: 'publisher',
   is_admin: 0,
 }
 
 function setupEnv() {
   const sqlite = seedFixtures({ count: 3 })
-  for (const p of [STAFF, COMMUNITY]) {
+  for (const p of [ADMIN, PUBLISHER]) {
     sqlite
       .prepare(
         `INSERT INTO publishers (id, email, display_name, role, is_admin, status, created_at)
@@ -81,7 +81,7 @@ function ctx(opts: {
     request: new Request(url, init),
     env: opts.env,
     params: (opts.params ?? {}) as { [K in string]: string | string[] },
-    data: { publisher: opts.publisher ?? STAFF },
+    data: { publisher: opts.publisher ?? ADMIN },
     waitUntil: () => {},
     passThroughOnException: () => {},
     next: async () => new Response(null),
@@ -101,13 +101,13 @@ describe('GET /api/v1/publish/featured', () => {
         `INSERT INTO featured_datasets (dataset_id, position, added_by, added_at)
          VALUES (?, ?, ?, ?)`,
       )
-      .run(DS_2, 5, STAFF.id, '2026-04-29T12:00:00.000Z')
+      .run(DS_2, 5, ADMIN.id, '2026-04-29T12:00:00.000Z')
     sqlite
       .prepare(
         `INSERT INTO featured_datasets (dataset_id, position, added_by, added_at)
          VALUES (?, ?, ?, ?)`,
       )
-      .run(DS_0, 1, STAFF.id, '2026-04-29T12:01:00.000Z')
+      .run(DS_0, 1, ADMIN.id, '2026-04-29T12:01:00.000Z')
     const res = await featuredGet(ctx({ env }))
     expect(res.status).toBe(200)
     const body = await readJson<{ featured: Array<{ dataset_id: string; position: number }> }>(res)
@@ -141,7 +141,7 @@ describe('GET /api/v1/publish/featured', () => {
 })
 
 describe('POST /api/v1/publish/featured', () => {
-  it('adds a row for staff', async () => {
+  it('adds a row for admin', async () => {
     const { env } = setupEnv()
     const res = await featuredPost(
       ctx({ env, method: 'POST', body: { dataset_id: DS_0, position: 1 } }),
@@ -152,10 +152,10 @@ describe('POST /api/v1/publish/featured', () => {
     expect(body.featured.position).toBe(1)
   })
 
-  it('refuses community publishers with 403', async () => {
+  it('refuses publisher-role accounts with 403', async () => {
     const { env } = setupEnv()
     const res = await featuredPost(
-      ctx({ env, method: 'POST', publisher: COMMUNITY, body: { dataset_id: DS_0, position: 1 } }),
+      ctx({ env, method: 'POST', publisher: PUBLISHER, body: { dataset_id: DS_0, position: 1 } }),
     )
     expect(res.status).toBe(403)
     expect((await readJson<{ error: string }>(res)).error).toBe('forbidden_role')
@@ -207,7 +207,7 @@ describe('POST /api/v1/publish/featured', () => {
 })
 
 describe('PUT /api/v1/publish/featured/{dataset_id}', () => {
-  it('updates position for staff', async () => {
+  it('updates position for admin', async () => {
     const { env } = setupEnv()
     await featuredPost(ctx({ env, method: 'POST', body: { dataset_id: DS_0, position: 1 } }))
     const res = await featuredPut(
@@ -224,13 +224,13 @@ describe('PUT /api/v1/publish/featured/{dataset_id}', () => {
     expect(body.featured.position).toBe(5)
   })
 
-  it('refuses community with 403', async () => {
+  it('refuses publisher with 403', async () => {
     const { env } = setupEnv()
     const res = await featuredPut(
       ctx({
         env,
         method: 'PUT',
-        publisher: COMMUNITY,
+        publisher: PUBLISHER,
         body: { position: 5 },
         url: `https://localhost/api/v1/publish/featured/${DS_0}`,
         params: { dataset_id: DS_0 },
@@ -299,13 +299,13 @@ describe('DELETE /api/v1/publish/featured/{dataset_id}', () => {
     expect(res.status).toBe(204)
   })
 
-  it('refuses community with 403', async () => {
+  it('refuses publisher with 403', async () => {
     const { env } = setupEnv()
     const res = await featuredDelete(
       ctx({
         env,
         method: 'DELETE',
-        publisher: COMMUNITY,
+        publisher: PUBLISHER,
         url: `https://localhost/api/v1/publish/featured/${DS_0}`,
         params: { dataset_id: DS_0 },
       }),

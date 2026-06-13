@@ -106,3 +106,37 @@ export function lifecycleOf(d: PublisherDataset): DatasetLifecycle {
   if (d.published_at) return 'published'
   return 'draft'
 }
+
+/** Account status on the publishers table. */
+export type PublisherStatus = 'pending' | 'active' | 'suspended'
+
+/**
+ * Subset of the server-side `publishers` row the admin Users tab
+ * reads. The PATCH endpoint accepts `role ∈ admin|publisher|readonly`
+ * (service is reserved for machine tokens and not hand-assignable).
+ */
+export interface PublisherSummary {
+  id: string
+  email: string
+  display_name: string
+  affiliation: string | null
+  role: string
+  is_admin: number
+  status: PublisherStatus
+  created_at: string
+}
+
+export interface ListPublishersResponse {
+  publishers: PublisherSummary[]
+  next_cursor: string | null
+}
+
+/** PATCH body for `/api/v1/publish/publishers/{id}`. */
+export interface UpdatePublisherPayload {
+  role?: string
+  // Only active|suspended are PATCH-able — `pending` is the
+  // provisioning default and is rejected by the route.
+  status?: 'active' | 'suspended'
+  display_name?: string
+  affiliation?: string | null
+}

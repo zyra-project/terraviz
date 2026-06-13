@@ -3,8 +3,8 @@
  *
  * Coverage:
  *   - Lookup by email returns an existing row unchanged.
- *   - JIT defaults: user → community/pending, service → service/active,
- *     dev-bypass → staff/active+admin.
+ *   - JIT defaults: user → publisher/pending, service → service/active,
+ *     dev-bypass → admin/active.
  *   - Display name fallback uses the local-part of the email.
  *   - The minted ULID is 26 chars in Crockford-base32.
  */
@@ -63,16 +63,16 @@ describe('getOrCreatePublisher', () => {
         `INSERT INTO publishers (id, email, display_name, role, is_admin, status, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run('PUB000', 'staff@example.com', 'Staff Person', 'staff', 1, 'active', '2026-01-01T00:00:00.000Z')
+      .run('PUB000', 'admin@example.com', 'Admin Person', 'admin', 1, 'active', '2026-01-01T00:00:00.000Z')
     const db = asD1(sqlite)
 
     const row = await getOrCreatePublisher(db, {
-      email: 'staff@example.com',
+      email: 'admin@example.com',
       sub: 'sub-1',
       type: 'user',
     })
     expect(row.id).toBe('PUB000')
-    expect(row.role).toBe('staff')
+    expect(row.role).toBe('admin')
     expect(row.is_admin).toBe(1)
 
     const count = sqlite.prepare('SELECT COUNT(*) AS n FROM publishers').get() as {
@@ -81,7 +81,7 @@ describe('getOrCreatePublisher', () => {
     expect(count.n).toBe(1)
   })
 
-  it('JIT-provisions community/pending for a new user identity', async () => {
+  it('JIT-provisions publisher/pending for a new user identity', async () => {
     const sqlite = seedFixtures({ count: 0 })
     const db = asD1(sqlite)
     const row = await getOrCreatePublisher(db, {
@@ -89,7 +89,7 @@ describe('getOrCreatePublisher', () => {
       sub: 'sub-2',
       type: 'user',
     })
-    expect(row.role).toBe('community')
+    expect(row.role).toBe('publisher')
     expect(row.is_admin).toBe(0)
     expect(row.status).toBe('pending')
     expect(row.email).toBe('newcomer@example.com')
@@ -110,7 +110,7 @@ describe('getOrCreatePublisher', () => {
     expect(row.status).toBe('active')
   })
 
-  it('JIT-provisions staff/active+admin under dev bypass', async () => {
+  it('JIT-provisions admin/active under dev bypass', async () => {
     const sqlite = seedFixtures({ count: 0 })
     const db = asD1(sqlite)
     const row = await getOrCreatePublisher(
@@ -118,7 +118,7 @@ describe('getOrCreatePublisher', () => {
       { email: 'dev@localhost', sub: 'dev-local', type: 'user' },
       { devBypass: true },
     )
-    expect(row.role).toBe('staff')
+    expect(row.role).toBe('admin')
     expect(row.is_admin).toBe(1)
     expect(row.status).toBe('active')
   })
@@ -140,7 +140,7 @@ describe('getOrCreatePublisher', () => {
     expect(second.created_at).toBe(first.created_at)
   })
 
-  it('JIT-provisions staff/active+admin for a trusted-domain user', async () => {
+  it('JIT-provisions admin/active for a trusted-domain user', async () => {
     const sqlite = seedFixtures({ count: 0 })
     const db = asD1(sqlite)
     const row = await getOrCreatePublisher(
@@ -148,7 +148,7 @@ describe('getOrCreatePublisher', () => {
       { email: 'eric@noaa.gov', sub: 'user-eric', type: 'user' },
       { trustedDomains: new Set(['noaa.gov', 'zyra-project.org']) },
     )
-    expect(row.role).toBe('staff')
+    expect(row.role).toBe('admin')
     expect(row.is_admin).toBe(1)
     expect(row.status).toBe('active')
     expect(row.email).toBe('eric@noaa.gov')
@@ -162,7 +162,7 @@ describe('getOrCreatePublisher', () => {
       { email: 'eric@NOAA.GOV', sub: 'user-eric', type: 'user' },
       { trustedDomains: new Set(['noaa.gov']) },
     )
-    expect(row.role).toBe('staff')
+    expect(row.role).toBe('admin')
   })
 
   it('does NOT auto-promote a user from a subdomain that is not explicitly trusted', async () => {
@@ -173,11 +173,11 @@ describe('getOrCreatePublisher', () => {
       { email: 'eric@subteam.noaa.gov', sub: 'user-eric', type: 'user' },
       { trustedDomains: new Set(['noaa.gov']) },
     )
-    expect(row.role).toBe('community')
+    expect(row.role).toBe('publisher')
     expect(row.status).toBe('pending')
   })
 
-  it('falls back to community/pending when trustedDomains is empty', async () => {
+  it('falls back to publisher/pending when trustedDomains is empty', async () => {
     const sqlite = seedFixtures({ count: 0 })
     const db = asD1(sqlite)
     const row = await getOrCreatePublisher(
@@ -185,7 +185,7 @@ describe('getOrCreatePublisher', () => {
       { email: 'eric@noaa.gov', sub: 'user-eric', type: 'user' },
       { trustedDomains: new Set() },
     )
-    expect(row.role).toBe('community')
+    expect(row.role).toBe('publisher')
     expect(row.status).toBe('pending')
   })
 

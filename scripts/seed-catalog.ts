@@ -293,7 +293,7 @@ function seed(opts: SeedOptions): void {
     `INSERT INTO publishers
        (id, email, display_name, affiliation, role, is_admin, status, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(publisherId, 'seed@localhost', 'Seed Publisher', null, 'staff', 1, 'active', ts)
+  ).run(publisherId, 'seed@localhost', 'Seed Publisher', null, 'admin', 1, 'active', ts)
 
   const insertDataset = db.prepare(`
     INSERT INTO datasets (

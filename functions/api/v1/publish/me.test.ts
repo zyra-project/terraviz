@@ -4,11 +4,11 @@ import type { PublisherRow } from '../_lib/publisher-store'
 
 const PUB: PublisherRow = {
   id: 'PUB001',
-  email: 'staff@example.com',
-  display_name: 'Staff User',
+  email: 'admin@example.com',
+  display_name: 'Admin User',
   affiliation: 'NOAA',
   org_id: null,
-  role: 'staff',
+  role: 'admin',
   is_admin: 1,
   status: 'active',
   created_at: '2026-01-01T00:00:00.000Z',
@@ -36,7 +36,7 @@ describe('GET /api/v1/publish/me', () => {
       status: string
     }
     expect(body.id).toBe('PUB001')
-    expect(body.role).toBe('staff')
+    expect(body.role).toBe('admin')
     expect(body.is_admin).toBe(true)
     expect(body.status).toBe('active')
   })

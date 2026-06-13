@@ -20,24 +20,24 @@ import { onRequestPost as assetInit } from './asset'
 import { asD1, makeKV, seedFixtures } from '../../../_lib/test-helpers'
 import type { PublisherRow } from '../../../_lib/publisher-store'
 
-const STAFF: PublisherRow = {
-  id: 'PUB-STAFF',
-  email: 'staff@example.com',
-  display_name: 'Staff',
+const ADMIN: PublisherRow = {
+  id: 'PUB-ADMIN',
+  email: 'admin@example.com',
+  display_name: 'Admin',
   affiliation: null,
   org_id: null,
-  role: 'staff',
+  role: 'admin',
   is_admin: 1,
   status: 'active',
   created_at: '2026-01-01T00:00:00.000Z',
 }
 
-const COMMUNITY: PublisherRow = {
-  ...STAFF,
-  id: 'PUB-COMMUNITY',
-  email: 'community@example.com',
-  display_name: 'Community',
-  role: 'community',
+const PUBLISHER: PublisherRow = {
+  ...ADMIN,
+  id: 'PUB-PUBLISHER',
+  email: 'publisher@example.com',
+  display_name: 'Publisher',
+  role: 'publisher',
   is_admin: 0,
 }
 
@@ -46,8 +46,8 @@ const HAPPY_DIGEST = `sha256:${SHA64}`
 
 function setupEnv(extra: Record<string, unknown> = {}) {
   const sqlite = seedFixtures({ count: 1 })
-  // Seed both publishers + attribute the seeded dataset to STAFF.
-  for (const p of [STAFF, COMMUNITY]) {
+  // Seed both publishers + attribute the seeded dataset to ADMIN.
+  for (const p of [ADMIN, PUBLISHER]) {
     sqlite
       .prepare(
         `INSERT INTO publishers (id, email, display_name, role, is_admin, status, created_at)
@@ -55,9 +55,9 @@ function setupEnv(extra: Record<string, unknown> = {}) {
       )
       .run(p.id, p.email, p.display_name, p.role, p.is_admin, p.status, p.created_at)
   }
-  // The fixture inserts DS000A...A; mark it as STAFF's.
+  // The fixture inserts DS000A...A; mark it as ADMIN's.
   const datasetId = 'DS000' + 'A'.repeat(21)
-  sqlite.prepare(`UPDATE datasets SET publisher_id = ? WHERE id = ?`).run(STAFF.id, datasetId)
+  sqlite.prepare(`UPDATE datasets SET publisher_id = ? WHERE id = ?`).run(ADMIN.id, datasetId)
   return {
     sqlite,
     datasetId,
@@ -90,7 +90,7 @@ function ctx(opts: {
     request: new Request(url, init),
     env: opts.env,
     params: { id: opts.datasetId },
-    data: { publisher: opts.publisher ?? STAFF },
+    data: { publisher: opts.publisher ?? ADMIN },
     waitUntil: () => {},
     passThroughOnException: () => {},
     next: async () => new Response(null),
@@ -268,13 +268,13 @@ describe('POST /api/v1/publish/datasets/{id}/asset — happy paths', () => {
 })
 
 describe('POST /api/v1/publish/datasets/{id}/asset — auth + visibility', () => {
-  it('returns 404 when the dataset is not visible to a community publisher', async () => {
+  it('returns 404 when the dataset is not visible to a publisher-role account', async () => {
     const { env, datasetId } = setupEnv()
     const res = await assetInit(
       ctx({
         env,
         datasetId,
-        publisher: COMMUNITY,
+        publisher: PUBLISHER,
         body: {
           kind: 'thumbnail',
           mime: 'image/png',

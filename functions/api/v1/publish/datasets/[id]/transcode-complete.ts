@@ -32,11 +32,11 @@
  * PR #112 Copilot #3: a misrouted workflow could otherwise PATCH
  * dataset A with dataset B's bundle by passing the wrong path.
  *
- * Authorization: caller must be `role='service'` or `role='staff'`
- * with `is_admin=1`. The Phase 3pa publisher-store provisions
- * Cloudflare Access service tokens as `role='service'`, so the
- * workflow's `CF_Access_Client_Id` / `CF_Access_Client_Secret`
- * carry exactly the right identity by default.
+ * Authorization: caller must be privileged (`role='service'` or
+ * `role='admin'`). The publisher-store provisions Cloudflare Access
+ * service tokens as `role='service'`, so the workflow's
+ * `CF_Access_Client_Id` / `CF_Access_Client_Secret` carry exactly the
+ * right identity by default.
  *
  * Failure envelopes match the rest of the publisher API:
  *   - 400 invalid_json / invalid_body / invalid_upload_id
@@ -55,6 +55,7 @@ import type { CatalogEnv } from '../../../_lib/env'
 import type { PublisherData } from '../../_middleware'
 import type { DatasetRow } from '../../../_lib/catalog-store'
 import { writeDatasetAudit } from '../../../_lib/audit-store'
+import { isPrivileged } from '../../../_lib/publisher-store'
 import {
   clearTranscoding,
   extForMime,
@@ -106,17 +107,15 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
   const id = Array.isArray(idParam) ? idParam[0] : idParam
   if (!id) return jsonError(400, 'invalid_request', 'Missing dataset id.')
 
-  // Restrict to service tokens + admin staff. Community publishers
-  // (and even non-admin staff) shouldn't be flipping `transcoding`
-  // through this endpoint — they go through the normal upload +
-  // /complete flow, which manages the column server-side.
-  const isAllowed =
-    publisher.role === 'service' || (publisher.role === 'staff' && publisher.is_admin === 1)
-  if (!isAllowed) {
+  // Restrict to service tokens + admins. Publisher-role accounts
+  // shouldn't be flipping `transcoding` through this endpoint — they
+  // go through the normal upload + /complete flow, which manages the
+  // column server-side.
+  if (!isPrivileged(publisher)) {
     return jsonError(
       403,
       'transcode_complete_forbidden',
-      'This endpoint is restricted to service tokens and admin staff.',
+      'This endpoint is restricted to service tokens and admins.',
     )
   }
 

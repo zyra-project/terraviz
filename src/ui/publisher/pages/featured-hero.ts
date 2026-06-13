@@ -55,7 +55,7 @@ export interface FeaturedHeroPageOptions {
 }
 
 function clientIsPrivileged(me: MeResponse): boolean {
-  return me.is_admin === true || me.role === 'staff' || me.role === 'service'
+  return me.is_admin === true || me.role === 'admin' || me.role === 'service'
 }
 
 /** Split an ISO timestamp into the local-time `YYYY-MM-DD` value an

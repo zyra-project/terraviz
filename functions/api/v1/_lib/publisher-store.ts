@@ -7,32 +7,56 @@
  * subsequent requests look it up by email and return the existing
  * row.
  *
+ * Role taxonomy (canonical privilege source of truth is `role`;
+ * `is_admin` is a synced legacy mirror of `role === 'admin'`):
+ *
+ *   - `admin`     — full administrator (sees all rows, mutates
+ *                   operator-scoped resources, manages users).
+ *   - `publisher` — the secondary authoring role; sees only its own
+ *                   rows, cannot manage users or operator resources.
+ *   - `readonly`  — reviewer (unprivileged today; reviewer semantics
+ *                   land later).
+ *   - `service`   — machine credential / service token.
+ *
  * Status / role assignment:
  *
  * | Origin                                              | role        | is_admin | status   |
  * |-----------------------------------------------------|-------------|----------|----------|
- * | DEV_BYPASS_ACCESS=true                              | `staff`     | 1        | `active` |
+ * | DEV_BYPASS_ACCESS=true                              | `admin`     | 1        | `active` |
  * | Access service token                                | `service`   | 0        | `active` |
- * | Access user, email domain in TRUSTED_PUBLISHER_DOMAINS | `staff`  | 1        | `active` |
- * | Access user, untrusted domain                       | `community` | 0        | `pending`|
+ * | Access user, email domain in TRUSTED_PUBLISHER_DOMAINS | `admin`  | 1        | `active` |
+ * | Access user, untrusted domain                       | `publisher` | 0        | `pending`|
  *
  * Service tokens are pre-vouched by whoever configured them in the
  * Cloudflare dashboard, so auto-`active` is safe. Trusted-domain
  * users are vouched by the operator's choice to list their domain
- * — appropriate for Phase 3 single-org deploys where the operator
- * IS the publisher. Untrusted-domain user logins default to
- * `pending` so a stranger discovering the publisher API cannot
- * start authoring rows; the publisher portal (Phase 6) will ship
- * the approval UI.
+ * — appropriate for single-org deploys where the operator IS the
+ * admin. Untrusted-domain user logins default to `publisher` /
+ * `pending` so a stranger discovering the publisher API cannot start
+ * authoring rows until an admin approves them in the portal's Users
+ * tab.
  *
  * The `role` column has no SQL CHECK constraint (see
- * `migrations/catalog/0005_publishers_audit.sql`) so adding
- * `service` does not require a migration. The publishing tools doc
- * documents the role enum; the runtime permits the additive value.
+ * `migrations/catalog/0005_publishers_audit.sql`) so the role enum is
+ * additive at the runtime layer without a schema migration. The
+ * `0023_publisher_roles_two_tier.sql` migration backfilled the old
+ * `staff`/`community` rows to `admin`/`publisher`.
  */
 
 import type { AccessIdentity } from './access-auth'
 import { newUlid } from './ulid'
+
+/**
+ * Roles an admin may assign to a publisher through the Users tab.
+ * `service` is intentionally excluded — it is reserved for machine
+ * tokens and provisioned automatically, never hand-assigned.
+ */
+export const ASSIGNABLE_ROLES = ['admin', 'publisher', 'readonly'] as const
+export type AssignableRole = (typeof ASSIGNABLE_ROLES)[number]
+
+/** Valid `status` values on the publishers table. */
+export const PUBLISHER_STATUSES = ['pending', 'active', 'suspended'] as const
+export type PublisherStatus = (typeof PUBLISHER_STATUSES)[number]
 
 /**
  * Parse `TRUSTED_PUBLISHER_DOMAINS` (comma-separated) into a
@@ -95,19 +119,19 @@ export function provisioningDefaults(
   identity: AccessIdentity,
   opts: ProvisionOptions,
 ): { role: string; is_admin: number; status: string } {
-  if (opts.devBypass) return { role: 'staff', is_admin: 1, status: 'active' }
+  if (opts.devBypass) return { role: 'admin', is_admin: 1, status: 'active' }
   if (identity.type === 'service') return { role: 'service', is_admin: 0, status: 'active' }
-  // Trusted-domain users are auto-promoted to staff/admin/active.
-  // This is the supported path for Phase 3 single-org deploys
-  // where the operator IS the publisher — pending-by-default
-  // would lock them out of their own deploy.
+  // Trusted-domain users are auto-promoted to admin/active. This is
+  // the supported path for single-org deploys where the operator IS
+  // the admin — pending-by-default would lock them out of their own
+  // deploy.
   if (opts.trustedDomains && opts.trustedDomains.size > 0) {
     const domain = emailDomain(identity.email)
     if (domain && opts.trustedDomains.has(domain)) {
-      return { role: 'staff', is_admin: 1, status: 'active' }
+      return { role: 'admin', is_admin: 1, status: 'active' }
     }
   }
-  return { role: 'community', is_admin: 0, status: 'pending' }
+  return { role: 'publisher', is_admin: 0, status: 'pending' }
 }
 
 /**
@@ -177,18 +201,26 @@ export async function getOrCreatePublisher(
  * Privileged callers see all rows and can mutate operator-scoped
  * resources (featured-list, peer config, hard delete). The role
  * table:
- *   - `staff` and `service` are privileged.
- *   - `is_admin = 1` is privileged regardless of role (used by
- *     `DEV_BYPASS_ACCESS=true` and by future admin-promotion).
- *   - `community` is unprivileged.
+ *   - `admin` and `service` are privileged.
+ *   - `publisher` and `readonly` are unprivileged.
  *
- * Read-side scoping in `dataset-mutations.ts` consults this; the
- * featured-datasets routes consult it for write-side gating.
+ * `role` is the canonical source of truth; the legacy `is_admin`
+ * column is kept synced (`is_admin = 1` iff `role = 'admin'`) so it is
+ * not consulted here. Read-side scoping in `dataset-mutations.ts`
+ * consults this; the featured-datasets routes consult it for
+ * write-side gating.
  */
 export function isPrivileged(publisher: PublisherRow): boolean {
-  return (
-    publisher.is_admin === 1 ||
-    publisher.role === 'staff' ||
-    publisher.role === 'service'
-  )
+  return publisher.role === 'admin' || publisher.role === 'service'
+}
+
+/**
+ * Admin gate for user management. Strictly `role === 'admin'` —
+ * unlike `isPrivileged`, this excludes `service` tokens, so machine
+ * credentials cannot approve/suspend/promote other publishers. The
+ * Users tab and its endpoints (`/api/v1/publish/publishers`) gate on
+ * this.
+ */
+export function isAdmin(publisher: PublisherRow): boolean {
+  return publisher.role === 'admin'
 }

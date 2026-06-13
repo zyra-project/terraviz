@@ -45,7 +45,7 @@ function makeDb() {
   sqlite
     .prepare(
       `INSERT INTO publishers (id, email, display_name, role, status, created_at)
-       VALUES ('PUB001', 'p@test.local', 'P', 'staff', 'active', ?)`,
+       VALUES ('PUB001', 'p@test.local', 'P', 'admin', 'active', ?)`,
     )
     .run(ts)
   sqlite

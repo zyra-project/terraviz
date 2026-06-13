@@ -9,9 +9,9 @@
  * the workflow can't accidentally PATCH dataset A with dataset B's
  * bundle (Phase 3pd review fix #3).
  *
- * Restricted to service-token / admin-staff callers — community
- * publishers shouldn't be able to manipulate the `transcoding`
- * column directly.
+ * Restricted to privileged callers (service token / admin) —
+ * publisher- and readonly-role accounts shouldn't be able to
+ * manipulate the `transcoding` column directly.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -19,20 +19,20 @@ import { onRequestPost as transcodeComplete } from './transcode-complete'
 import { asD1, makeKV, seedFixtures } from '../../../_lib/test-helpers'
 import type { PublisherRow } from '../../../_lib/publisher-store'
 
-const STAFF_ADMIN: PublisherRow = {
-  id: 'PUB-STAFF',
-  email: 'staff@example.com',
-  display_name: 'Staff',
+const ADMIN: PublisherRow = {
+  id: 'PUB-ADMIN',
+  email: 'admin@example.com',
+  display_name: 'Admin',
   affiliation: null,
   org_id: null,
-  role: 'staff',
+  role: 'admin',
   is_admin: 1,
   status: 'active',
   created_at: '2026-01-01T00:00:00.000Z',
 }
 
 const SERVICE: PublisherRow = {
-  ...STAFF_ADMIN,
+  ...ADMIN,
   id: 'PUB-SERVICE',
   email: 'transcode@service',
   display_name: 'Transcode service',
@@ -40,12 +40,12 @@ const SERVICE: PublisherRow = {
   is_admin: 0,
 }
 
-const COMMUNITY: PublisherRow = {
-  ...STAFF_ADMIN,
-  id: 'PUB-COMMUNITY',
-  email: 'community@example.com',
-  display_name: 'Community',
-  role: 'community',
+const PUBLISHER: PublisherRow = {
+  ...ADMIN,
+  id: 'PUB-PUBLISHER',
+  email: 'publisher@example.com',
+  display_name: 'Publisher',
+  role: 'publisher',
   is_admin: 0,
 }
 
@@ -81,7 +81,7 @@ function setupEnv(opts: {
   activeUploadId?: string | null
 } = {}) {
   const sqlite = seedFixtures({ count: 1 })
-  for (const p of [STAFF_ADMIN, SERVICE, COMMUNITY]) {
+  for (const p of [ADMIN, SERVICE, PUBLISHER]) {
     sqlite
       .prepare(
         `INSERT INTO publishers (id, email, display_name, role, is_admin, status, created_at)
@@ -124,7 +124,7 @@ function setupEnv(opts: {
       .run(
         UPLOAD_ID,
         DATASET_ID,
-        STAFF_ADMIN.id,
+        ADMIN.id,
         opts.uploadKind ?? 'data',
         opts.uploadTargetRef ?? `r2:uploads/${DATASET_ID}/${UPLOAD_ID}/source.mp4`,
         opts.uploadMime ?? 'video/mp4',
@@ -302,26 +302,26 @@ describe('POST .../transcode-complete — happy path', () => {
 })
 
 describe('POST .../transcode-complete — auth', () => {
-  it('allows staff admins through', async () => {
+  it('allows admins through', async () => {
     const { datasetId, uploadId, env } = setupEnv()
     const res = await transcodeComplete(
       ctx({
         env,
         datasetId,
-        publisher: STAFF_ADMIN,
+        publisher: ADMIN,
         body: { upload_id: uploadId, source_digest: DEFAULT_SOURCE_DIGEST },
       }),
     )
     expect(res.status).toBe(200)
   })
 
-  it('rejects community publishers with 403', async () => {
+  it('rejects publisher-role accounts with 403', async () => {
     const { datasetId, uploadId, env } = setupEnv()
     const res = await transcodeComplete(
       ctx({
         env,
         datasetId,
-        publisher: COMMUNITY,
+        publisher: PUBLISHER,
         body: { upload_id: uploadId, source_digest: DEFAULT_SOURCE_DIGEST },
       }),
     )
@@ -329,14 +329,14 @@ describe('POST .../transcode-complete — auth', () => {
     expect((await readJson<{ error: string }>(res)).error).toBe('transcode_complete_forbidden')
   })
 
-  it('rejects non-admin staff with 403', async () => {
-    const nonAdmin: PublisherRow = { ...STAFF_ADMIN, is_admin: 0 }
+  it('rejects readonly-role accounts with 403', async () => {
+    const readonly: PublisherRow = { ...ADMIN, role: 'readonly', is_admin: 0 }
     const { datasetId, uploadId, env } = setupEnv()
     const res = await transcodeComplete(
       ctx({
         env,
         datasetId,
-        publisher: nonAdmin,
+        publisher: readonly,
         body: { upload_id: uploadId, source_digest: DEFAULT_SOURCE_DIGEST },
       }),
     )
@@ -397,7 +397,7 @@ describe('POST .../transcode-complete — refusals', () => {
       .run(
         UPLOAD_ID,
         otherDataset,
-        STAFF_ADMIN.id,
+        ADMIN.id,
         `r2:uploads/${otherDataset}/${UPLOAD_ID}/source.mp4`,
         DEFAULT_SOURCE_DIGEST,
         '2026-04-29T12:00:00.000Z',

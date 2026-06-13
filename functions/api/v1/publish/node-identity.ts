@@ -34,6 +34,7 @@ import {
   type NodeIdentityInput,
 } from '../_lib/catalog-store'
 import { invalidateSnapshot } from '../_lib/snapshot'
+import { isPrivileged } from '../_lib/publisher-store'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
 const MAX_FIELD_LEN = 2048
@@ -68,12 +69,6 @@ function jsonError(status: number, error: string, message: string): Response {
   return json(status, { error, message })
 }
 
-/** A publisher may set the node identity if it's an admin user or a
- *  service token (the bootstrap credential for a fresh deploy). */
-function mayWriteIdentity(p: PublisherData['publisher']): boolean {
-  return p.is_admin === 1 || p.role === 'service'
-}
-
 export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
   const identity = await getNodeIdentity(context.env.CATALOG_DB!)
   return json(200, { identity })
@@ -81,7 +76,9 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
 
 export const onRequestPut: PagesFunction<CatalogEnv> = async context => {
   const publisher = (context.data as unknown as PublisherData).publisher
-  if (!mayWriteIdentity(publisher)) {
+  // Admin users or service tokens (the bootstrap credential for a
+  // fresh deploy) may set the node identity.
+  if (!isPrivileged(publisher)) {
     return jsonError(
       403,
       'forbidden',

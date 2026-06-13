@@ -3,7 +3,7 @@
  * `docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md`).
  *
  * Coverage:
- *   - 503 when CATALOG_DB is unbound; 403 for community callers.
+ *   - 503 when CATALOG_DB is unbound; 403 for publisher callers.
  *   - 400 on unknown section / days / environment / projection.
  *   - Section payloads computed from seeded rollup rows: overview
  *     day series + platform/country mixes + internal exclusion,
@@ -19,18 +19,18 @@ import { addDays, yesterdayUtc } from '../_lib/analytics-export'
 import { asD1, makeKV, seedFixtures } from '../_lib/test-helpers'
 import type { PublisherRow } from '../_lib/publisher-store'
 
-const STAFF: PublisherRow = {
-  id: 'PUB-STAFF',
-  email: 'staff@example.com',
-  display_name: 'Staff',
+const ADMIN: PublisherRow = {
+  id: 'PUB-ADMIN',
+  email: 'admin@example.com',
+  display_name: 'Admin',
   affiliation: null,
   org_id: null,
-  role: 'staff',
+  role: 'admin',
   is_admin: 1,
   status: 'active',
   created_at: '2026-01-01T00:00:00.000Z',
 }
-const COMMUNITY: PublisherRow = { ...STAFF, id: 'PUB-COMM', email: 'c@e', role: 'community', is_admin: 0 }
+const PUBLISHER: PublisherRow = { ...ADMIN, id: 'PUB-COMM', email: 'c@e', role: 'publisher', is_admin: 0 }
 
 // Seeded by `seedFixtures({ count: 2 })`: "Test Dataset 0/1".
 const DS_A = 'DS000' + 'A'.repeat(21)
@@ -132,7 +132,7 @@ function setup() {
   insertSpatial.run(YESTERDAY, 'camera_settled', 'production', '', 'globe', 0, 0, 9)
   insertSpatial.run(YESTERDAY, 'map_click', 'production', '', '', 51.5, 0, 3)
 
-  for (const p of [STAFF, COMMUNITY]) {
+  for (const p of [ADMIN, PUBLISHER]) {
     sqlite
       .prepare(
         `INSERT INTO publishers (id, email, display_name, role, is_admin, status, created_at)
@@ -149,7 +149,7 @@ function ctx(opts: { env: Record<string, unknown>; publisher?: PublisherRow; que
     request: new Request(`https://localhost/api/v1/publish/analytics${opts.query}`, { method: 'GET' }),
     env: opts.env,
     params: {},
-    data: { publisher: opts.publisher ?? STAFF },
+    data: { publisher: opts.publisher ?? ADMIN },
     waitUntil: () => {},
     passThroughOnException: () => {},
     next: async () => new Response(null),
@@ -165,11 +165,11 @@ async function getData<T>(env: Record<string, unknown>, query: string): Promise<
 }
 
 describe('GET /api/v1/publish/analytics', () => {
-  it('503s without CATALOG_DB and 403s for community callers', async () => {
+  it('503s without CATALOG_DB and 403s for publisher callers', async () => {
     const { env } = setup()
     expect((await analyticsGet(ctx({ env: {}, query: '?section=overview' }))).status).toBe(503)
     expect(
-      (await analyticsGet(ctx({ env, publisher: COMMUNITY, query: '?section=overview' }))).status,
+      (await analyticsGet(ctx({ env, publisher: PUBLISHER, query: '?section=overview' }))).status,
     ).toBe(403)
   })
 

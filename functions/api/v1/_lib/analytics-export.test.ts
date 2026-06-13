@@ -557,22 +557,22 @@ describe('gzipNdjson', () => {
 
 // --- Route handler ---
 
-const STAFF: PublisherRow = {
-  id: 'PUB-STAFF',
-  email: 'staff@example.com',
-  display_name: 'Staff',
+const ADMIN: PublisherRow = {
+  id: 'PUB-ADMIN',
+  email: 'admin@example.com',
+  display_name: 'Admin',
   affiliation: null,
   org_id: null,
-  role: 'staff',
+  role: 'admin',
   is_admin: 1,
   status: 'active',
   created_at: '2026-01-01T00:00:00.000Z',
 }
-const COMMUNITY: PublisherRow = { ...STAFF, id: 'PUB-COMM', email: 'c@e', role: 'community', is_admin: 0 }
+const PUBLISHER: PublisherRow = { ...ADMIN, id: 'PUB-COMM', email: 'c@e', role: 'publisher', is_admin: 0 }
 
 function setupRouteEnv() {
   const sqlite = seedFixtures({ count: 0 })
-  for (const p of [STAFF, COMMUNITY]) {
+  for (const p of [ADMIN, PUBLISHER]) {
     sqlite
       .prepare(
         `INSERT INTO publishers (id, email, display_name, role, is_admin, status, created_at)
@@ -598,7 +598,7 @@ function ctx(opts: { env: Record<string, unknown>; publisher?: PublisherRow; que
     request: new Request(`https://localhost/api/v1/publish/analytics-export${opts.query ?? ''}`, { method: 'POST' }),
     env: opts.env,
     params: {},
-    data: { publisher: opts.publisher ?? STAFF },
+    data: { publisher: opts.publisher ?? ADMIN },
     waitUntil: () => {},
     passThroughOnException: () => {},
     next: async () => new Response(null),
@@ -622,9 +622,9 @@ describe('POST /api/v1/publish/analytics-export', () => {
     expect(body.message).not.toContain('CATALOG_DB')
   })
 
-  it('403s for community publishers', async () => {
+  it('403s for publisher-role accounts', async () => {
     const { env } = setupRouteEnv()
-    const response = await exportPost(ctx({ env, publisher: COMMUNITY }))
+    const response = await exportPost(ctx({ env, publisher: PUBLISHER }))
     expect(response.status).toBe(403)
   })
 

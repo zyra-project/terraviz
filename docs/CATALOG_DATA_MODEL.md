@@ -314,8 +314,11 @@ CREATE TABLE orgs (
 
 -- Publisher accounts. Identified by Cloudflare Access email in
 -- Phase 3; (Phase 6) extend with an OIDC subject for community
--- publishers. is_admin is the gate for sensitive node-wide actions
--- (peer management, hard delete, node-wide audit log read).
+-- publishers. `role` is the canonical privilege source of truth
+-- (admin and service are privileged); is_admin is a synced legacy
+-- mirror of role = 'admin' kept for wire-compat. Admins manage other
+-- accounts from the portal's Users tab. The 0023 migration renamed
+-- the original staff/community roles to admin/publisher.
 -- See "Publisher identity & roles" in CATALOG_PUBLISHING_TOOLS.md.
 CREATE TABLE publishers (
   id              TEXT PRIMARY KEY,
@@ -323,8 +326,8 @@ CREATE TABLE publishers (
   display_name    TEXT NOT NULL,
   affiliation     TEXT,
   org_id          TEXT,                       -- nullable in Phase 3; FK to orgs(id) from Phase 6
-  role            TEXT NOT NULL,              -- staff | community | readonly
-  is_admin        INTEGER NOT NULL DEFAULT 0, -- staff sub-role; first staff row on a fresh deploy is auto-promoted
+  role            TEXT NOT NULL,              -- admin | publisher | readonly | service
+  is_admin        INTEGER NOT NULL DEFAULT 0, -- synced mirror of role = 'admin' (legacy; kept for wire-compat)
   status          TEXT NOT NULL,              -- pending | active | suspended
   created_at      TEXT NOT NULL,
   FOREIGN KEY (org_id) REFERENCES orgs(id)

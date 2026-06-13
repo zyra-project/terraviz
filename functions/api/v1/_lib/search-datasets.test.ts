@@ -57,7 +57,7 @@ function seed(rows: SeedRow[]): Database.Database {
   ).run(TS)
   db.prepare(
     `INSERT INTO publishers (id, email, display_name, role, status, created_at)
-     VALUES ('PUB001', 'p@t', 'P', 'staff', 'active', ?)`,
+     VALUES ('PUB001', 'p@t', 'P', 'admin', 'active', ?)`,
   ).run(TS)
   for (const r of rows) {
     db.prepare(
@@ -326,7 +326,7 @@ describe('searchDatasets — filters', () => {
     // so a "no filter" leak would be observable.
     db.prepare(
       `INSERT INTO publishers (id, email, display_name, role, status, created_at)
-       VALUES ('PUB001', 'p@t', 'P', 'staff', 'active', ?)`,
+       VALUES ('PUB001', 'p@t', 'P', 'admin', 'active', ?)`,
     ).run(TS)
     db.prepare(
       `INSERT INTO datasets (id, slug, origin_node, title, abstract, format, data_ref,

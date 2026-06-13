@@ -41,13 +41,13 @@ import {
   type RawSosEntry,
 } from '../../../../../cli/lib/snapshot-import'
 
-const STAFF: PublisherRow = {
+const ADMIN: PublisherRow = {
   id: 'PUB-IMPORTER',
   email: 'importer@example.com',
   display_name: 'SOS Importer',
   affiliation: null,
   org_id: null,
-  role: 'staff',
+  role: 'admin',
   is_admin: 1,
   status: 'active',
   created_at: '2026-04-30T00:00:00.000Z',
@@ -60,7 +60,7 @@ function setupEnv() {
       `INSERT INTO publishers (id, email, display_name, role, is_admin, status, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(STAFF.id, STAFF.email, STAFF.display_name, STAFF.role, STAFF.is_admin, STAFF.status, STAFF.created_at)
+    .run(ADMIN.id, ADMIN.email, ADMIN.display_name, ADMIN.role, ADMIN.is_admin, ADMIN.status, ADMIN.created_at)
   const env = {
     CATALOG_DB: asD1(sqlite),
     CATALOG_KV: makeKV(),
@@ -80,7 +80,7 @@ async function importAndPublish(
         (outcome.row.details ? ` (${outcome.row.details})` : ''),
     )
   }
-  const created = await createDataset(env, STAFF, {
+  const created = await createDataset(env, ADMIN, {
     ...outcome.row.draft,
     legacy_id: outcome.row.legacyId,
   })
@@ -218,7 +218,7 @@ describe('importer → manifest round-trip', () => {
       undefined,
     )
     if (outcome.kind !== 'ok') throw new Error('mapper unexpectedly rejected fixture')
-    const second = await createDataset(env, STAFF, {
+    const second = await createDataset(env, ADMIN, {
       ...outcome.row.draft,
       legacy_id: outcome.row.legacyId,
     })

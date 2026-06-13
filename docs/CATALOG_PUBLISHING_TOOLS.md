@@ -210,7 +210,7 @@ plan deliberately leaves the door open to non-portal authoring
 | Time range | ISO 8601 strings; `start_time ≤ end_time`; both-or-neither set | Date picker with range linkage. |
 | Period | ISO 8601 duration (`P1D`, `PT1H`, …) | Picker emits the canonical form. |
 | Run tour on load | `tours.id` exists; tour visibility ≤ dataset visibility (don't auto-load a private tour from a public dataset) | Picker filtered to compatible tours. |
-| Visibility | enum (`public` \| `federated` \| `restricted` \| `private`) | Default is `public` for staff publishers; community publishers default to `private` and explicit-promote. |
+| Visibility | enum (`public` \| `federated` \| `restricted` \| `private`) | Default is `public` for admins; publisher-role accounts default to `private` and explicit-promote. |
 | Developers | each: name ≤ 200 chars, role ∈ (`data` \| `visualization`), affiliation URL well-formed | At least one row required for a non-trivial publish. |
 | Related datasets | URL well-formed; title ≤ 200 chars | — |
 | License | Either `license_spdx` ∈ SPDX list or `license_statement` non-empty | Picker shows common licenses; advanced mode for free-text. |
@@ -698,24 +698,30 @@ paths produce a `publisher_id` that is bound to every write through
 the publisher API. The `publishers` table is the local mirror of
 that identity; rows are JIT-provisioned on first login.
 
-### Phase 3 — staff-only
+### Phase 3 — admin + publisher (two-tier)
 
-In Phase 3 the only publishers are staff (administrators of the
-deploying node):
+Phase 3 ships a two-tier human role model behind Cloudflare Access:
 
 - Cloudflare Access protects `/publish/**` and `/api/v1/publish/**`.
-- On first login, the API handler reads the Access JWT, finds an
-  existing `publishers` row by email, or creates one with
-  `role='staff'` and `status='active'`.
+- On first login, the API handler reads the Access JWT and finds an
+  existing `publishers` row by email or JIT-provisions one. A login
+  from a `TRUSTED_PUBLISHER_DOMAINS` domain (or dev-bypass) provisions
+  as `role='admin', status='active'`; any other user login provisions
+  as `role='publisher', status='pending'`; service tokens as
+  `role='service', status='active'`.
 - `affiliation` defaults to the deploying organisation's name (a
   Wrangler env var) and is editable in the portal's profile page.
-- Every staff publisher can publish, edit any draft (including
-  ones authored by other staff), and retract any dataset the
-  deploying node owns. Equivalent to "every Access user is admin."
+- **Admins** have full administrative authority over the deploying
+  node's catalog, including managing other accounts from the portal's
+  **Users** tab (`/publish/users`): approve/reject pending accounts,
+  suspend/reactivate, and change roles. **Publishers** can author and
+  manage their own datasets but not other users or operator-scoped
+  resources. Two guardrails keep a deploy administrable: an admin
+  cannot demote/suspend their own account, nor the last active admin.
 
 This is enough for the public reference deploy and any single-org
-institutional deploy. It deliberately does not solve multi-publisher
-coordination; that is Phase 6.
+institutional deploy. The org-scoping, review-queue, and OIDC pieces
+below remain Phase 6.
 
 ### Phase 6 — community publishers and finer roles
 
@@ -727,12 +733,13 @@ give them a useful but bounded portal:
   ORCID, GitHub, Google) issues identity claims that the publisher
   API exchanges for a session.
 - The `publishers.role` column carries one of:
-  - `staff` — full administrative authority over the deploying
-    node's catalog.
-  - `community` — can author their own datasets; can edit / retract
+  - `admin` — full administrative authority over the deploying
+    node's catalog, including managing other accounts.
+  - `publisher` — can author their own datasets; can edit / retract
     only datasets they own or have been explicitly invited to.
   - `readonly` — sees the portal but cannot write. Used for
     auditors and reviewers in the review-queue flow.
+  - `service` — non-interactive machine credential (service token).
 - A new `org_id` column (nullable in Phase 3, populated for
   community publishers from Phase 6 onward) groups publishers
   into institutional units. Cross-org isolation is the default —
@@ -742,9 +749,11 @@ give them a useful but bounded portal:
 ### Capability matrix
 
 The matrix below is the source of truth for the publisher API's
-authorization checks. Phase 3 collapses to the `staff` column.
+authorization checks. Today the privileged column is `admin` (the
+`isPrivileged` gate is `role ∈ {admin, service}`); the `publisher`
+columns and the review-queue rows are the Phase 6 target.
 
-| Action | staff | community (own) | community (invited) | readonly |
+| Action | admin | publisher (own) | publisher (invited) | readonly |
 |---|---|---|---|---|
 | Create dataset draft | ✓ | ✓ | — | — |
 | Edit own draft | ✓ | ✓ | n/a | — |
@@ -753,16 +762,19 @@ authorization checks. Phase 3 collapses to the `staff` column.
 | Approve a submitted draft | ✓ | — | — | ✓ if assigned |
 | Publish (transition `published_at` → now) | ✓ | ✓ if no review queue | ✓ if no review queue | — |
 | Retract a published dataset | ✓ | ✓ if owner | — | — |
-| Hard-delete a dataset | ✓ admin only | — | — | — |
+| Hard-delete a dataset | ✓ | — | — | — |
 | Issue a read-side `dataset_grant` | ✓ | ✓ if owner | — | — |
-| Manage federation peers | ✓ admin only | — | — | — |
+| Manage federation peers | ✓ | — | — | — |
+| Manage user accounts (Users tab) | ✓ | — | — | — |
 | View audit log for a dataset | ✓ | ✓ if owner | ✓ | — |
-| View audit log node-wide | ✓ admin only | — | — | — |
+| View audit log node-wide | ✓ | — | — | — |
 
-The "admin" sub-role within `staff` is a flag on the publisher row
-(`is_admin INTEGER NOT NULL DEFAULT 0`); only admins can manage
-peers, hard-delete, or read the node-wide audit log. The first
-staff row created on a fresh deploy is auto-promoted to admin.
+`role` is the canonical privilege signal. The legacy `is_admin`
+column (`INTEGER NOT NULL DEFAULT 0`) is kept as a synced mirror of
+`role = 'admin'` for wire-compat. User-management actions gate on the
+strict `isAdmin` (`role === 'admin'`, excluding service tokens) and
+write `audit_events` rows with `subject_kind = 'publisher'` and a
+`publisher.{approve,reject,suspend,reactivate,role_change}` action.
 
 ## Cross-publisher collaboration
 

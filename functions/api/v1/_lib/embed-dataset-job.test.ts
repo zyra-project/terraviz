@@ -57,7 +57,7 @@ function setupDb(overrides: {
   ).run(TS)
   db.prepare(
     `INSERT INTO publishers (id, email, display_name, role, status, created_at)
-     VALUES ('PUB001', 'p@t', 'P', 'staff', 'active', ?)`,
+     VALUES ('PUB001', 'p@t', 'P', 'admin', 'active', ?)`,
   ).run(TS)
   db.prepare(
     `INSERT INTO datasets (id, slug, origin_node, title, abstract, organization,

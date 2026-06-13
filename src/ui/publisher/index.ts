@@ -33,8 +33,10 @@ import { renderWorkflowDetailPage } from './pages/workflow-detail'
 import { renderWorkflowEditPage } from './pages/workflow-edit'
 import { renderFeaturedHeroPage } from './pages/featured-hero'
 import { renderAnalyticsPage } from './pages/analytics'
+import { renderUsersPage } from './pages/users'
 import { renderFeedbackPage } from './pages/feedback'
 import { renderTopbar } from './components/topbar'
+import { publisherGet } from './api'
 import '../../styles/publisher.css'
 
 const PORTAL_ROOT_ID = 'publisher-root'
@@ -51,7 +53,17 @@ const PORTAL_CONTENT_ID = 'publisher-content'
  */
 export function routeForPath(
   pathname: string,
-): 'me' | 'datasets' | 'tours' | 'featured_hero' | 'import' | 'workflows' | 'analytics' | 'feedback' | 'unknown' {
+):
+  | 'me'
+  | 'datasets'
+  | 'tours'
+  | 'featured_hero'
+  | 'import'
+  | 'workflows'
+  | 'analytics'
+  | 'feedback'
+  | 'users'
+  | 'unknown' {
   if (pathname === '/publish' || pathname.startsWith('/publish/me')) return 'me'
   if (pathname.startsWith('/publish/datasets')) return 'datasets'
   if (pathname.startsWith('/publish/tours')) return 'tours'
@@ -60,6 +72,7 @@ export function routeForPath(
   if (pathname.startsWith('/publish/import')) return 'import'
   if (pathname.startsWith('/publish/analytics')) return 'analytics'
   if (pathname.startsWith('/publish/feedback')) return 'feedback'
+  if (pathname.startsWith('/publish/users')) return 'users'
   return 'unknown'
 }
 
@@ -258,12 +271,28 @@ function analyticsPage(mount: HTMLElement): RouteHandler {
   return () => void renderAnalyticsPage(mount)
 }
 
+function usersPage(mount: HTMLElement): RouteHandler {
+  return () => void renderUsersPage(mount)
+}
+
 function feedbackPage(mount: HTMLElement): RouteHandler {
   return () => void renderFeedbackPage(mount)
 }
 
 function notFoundPage(mount: HTMLElement): RouteHandler {
   return () => renderPlaceholder(mount, t('publisher.section.notFound'), '3pa/A')
+}
+
+/**
+ * Best-effort identity probe used only to decide whether the topbar
+ * renders admin-only tabs. Returns false on any error — the Users
+ * page and its API both enforce admin access independently, so a
+ * hidden-but-reachable tab degrades safely.
+ */
+async function resolveIsAdmin(): Promise<boolean> {
+  const res = await publisherGet<{ role: string; is_admin: boolean }>('/api/v1/publish/me')
+  if (!res.ok) return false
+  return res.data.is_admin === true || res.data.role === 'admin'
 }
 
 let activeRouter: PublisherRouter | null = null
@@ -313,12 +342,19 @@ export async function bootPublisherPortal(): Promise<void> {
       { pattern: '/publish/featured-hero', handler: featuredHeroPage(content) },
       { pattern: '/publish/analytics', handler: analyticsPage(content) },
       { pattern: '/publish/feedback', handler: feedbackPage(content) },
+      { pattern: '/publish/users', handler: usersPage(content) },
       { pattern: '/publish/import', handler: importPage(content) },
     ],
     notFoundPage(content),
   )
-  renderTopbar(root, activeRouter)
-  await activeRouter.start()
+  // Render the topbar immediately (without admin-only tabs) so the
+  // portal never blocks on the network. The admin-tab probe is
+  // best-effort and only controls visibility of the Users tab, so we
+  // fire it in the background and re-render the topbar if it resolves
+  // true. The page and API both gate independently.
+  const bootedRouter = activeRouter
+  renderTopbar(root, bootedRouter, { isAdmin: false })
+  await bootedRouter.start()
   // One emit per portal-chunk load — the publisher visits
   // /publish/*, the chunk resolves, the first route dispatches,
   // we fire. Subsequent in-portal navigation is *not* counted
@@ -329,6 +365,14 @@ export async function bootPublisherPortal(): Promise<void> {
     route: routeForPath(window.location.pathname),
   })
   logger.info('[publisher] portal booted at', window.location.pathname)
+
+  void resolveIsAdmin().then(isAdmin => {
+    // Guard against a teardown (or re-boot) that happened while the
+    // probe was in flight — only re-render the topbar we mounted.
+    if (isAdmin && activeRouter === bootedRouter) {
+      renderTopbar(root, bootedRouter, { isAdmin: true })
+    }
+  })
 }
 
 /** Tear down the portal — only used by tests. */

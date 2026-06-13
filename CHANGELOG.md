@@ -16,6 +16,30 @@ referenced in [`README.md`](README.md).
 
 ---
 
+## Phase 3pu — Admin user administration + two-tier roles
+
+**Branch:** `claude/eager-brahmagupta-ahym0t`
+
+Closes the gap where a new publisher stuck at
+`status='pending'` could only be approved by hand-editing D1 or
+redeploying with `TRUSTED_PUBLISHER_DOMAINS`.
+
+- **Two-tier role model.** The publisher role taxonomy is now
+  `admin | publisher | readonly | service`. Migration `0023`
+  backfills the previous `staff → admin` and `community → publisher`
+  rows. `role` is the canonical privilege signal; the legacy
+  `is_admin` column is kept as a synced mirror of `role = 'admin'`.
+  `isPrivileged()` is now `role ∈ {admin, service}`, with a new
+  strict `isAdmin()` gate for user management.
+- **Admin Users tab.** A new admin-only `/publish/users` page lists
+  publisher accounts and lets an admin approve/reject pending
+  accounts, suspend/reactivate, and change roles. Backed by
+  `GET /api/v1/publish/publishers` and
+  `GET|PATCH /api/v1/publish/publishers/{id}` (admin-gated). Two
+  guardrails prevent self-lockout and demoting/suspending the last
+  active admin. Each change writes a `subject_kind='publisher'`
+  audit row.
+
 ## Phase 3pt-fix — Tour preview CSP fix
 
 **Branch:** `claude/tour-preview-blob-fix`

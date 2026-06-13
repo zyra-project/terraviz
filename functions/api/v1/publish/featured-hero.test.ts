@@ -3,12 +3,12 @@
  * Phase B).
  *
  * Coverage:
- *   - PUT sets the singleton for staff; 403 for community.
+ *   - PUT sets the singleton for admin; 403 for publisher.
  *   - PUT 400 for a missing/invalid window; 404 for an unknown dataset.
  *   - PUT writes a `hero.set` audit row and busts the KV cache.
  *   - PUT upserts (a second set replaces).
  *   - DELETE clears (204) + `hero.clear` audit + KV bust; 403 for
- *     community; idempotent when absent.
+ *     publisher; idempotent when absent.
  *   - 503 when CATALOG_DB is unbound.
  */
 
@@ -19,18 +19,18 @@ import { getHeroOverride } from '../_lib/hero-override-store'
 import { HERO_CACHE_KEY } from '../_lib/hero-override-store'
 import type { PublisherRow } from '../_lib/publisher-store'
 
-const STAFF: PublisherRow = {
-  id: 'PUB-STAFF',
-  email: 'staff@example.com',
-  display_name: 'Staff',
+const ADMIN: PublisherRow = {
+  id: 'PUB-ADMIN',
+  email: 'admin@example.com',
+  display_name: 'Admin',
   affiliation: null,
   org_id: null,
-  role: 'staff',
+  role: 'admin',
   is_admin: 1,
   status: 'active',
   created_at: '2026-01-01T00:00:00.000Z',
 }
-const COMMUNITY: PublisherRow = { ...STAFF, id: 'PUB-COMMUNITY', email: 'c@e', role: 'community', is_admin: 0 }
+const PUBLISHER: PublisherRow = { ...ADMIN, id: 'PUB-PUBLISHER', email: 'c@e', role: 'publisher', is_admin: 0 }
 
 const DS_0 = 'DS000' + 'A'.repeat(21)
 const DS_1 = 'DS001' + 'A'.repeat(21)
@@ -39,7 +39,7 @@ const WINDOW = { start: '2026-05-01T00:00:00.000Z', end: '2026-06-01T00:00:00.00
 
 function setupEnv() {
   const sqlite = seedFixtures({ count: 2 })
-  for (const p of [STAFF, COMMUNITY]) {
+  for (const p of [ADMIN, PUBLISHER]) {
     sqlite
       .prepare(
         `INSERT INTO publishers (id, email, display_name, role, is_admin, status, created_at)
@@ -66,7 +66,7 @@ function ctx(opts: {
     request: new Request('https://localhost/api/v1/publish/featured-hero', init),
     env: opts.env,
     params: {} as Record<string, string | string[]>,
-    data: { publisher: opts.publisher ?? STAFF },
+    data: { publisher: opts.publisher ?? ADMIN },
     waitUntil: () => {},
     passThroughOnException: () => {},
     next: async () => new Response(null),
@@ -80,9 +80,9 @@ function auditCount(sqlite: ReturnType<typeof seedFixtures>, action: string): nu
 }
 
 describe('PUT /api/v1/publish/featured-hero', () => {
-  it('403 for a community publisher', async () => {
+  it('403 for a publisher-role account', async () => {
     const { env } = setupEnv()
-    const res = await heroPut(ctx({ env, publisher: COMMUNITY, body: { dataset_id: DS_0, window: WINDOW } }))
+    const res = await heroPut(ctx({ env, publisher: PUBLISHER, body: { dataset_id: DS_0, window: WINDOW } }))
     expect(res.status).toBe(403)
   })
 
@@ -128,9 +128,9 @@ describe('PUT /api/v1/publish/featured-hero', () => {
 })
 
 describe('DELETE /api/v1/publish/featured-hero', () => {
-  it('403 for a community publisher', async () => {
+  it('403 for a publisher-role account', async () => {
     const { env } = setupEnv()
-    const res = await heroDelete(ctx({ env, publisher: COMMUNITY, method: 'DELETE' }))
+    const res = await heroDelete(ctx({ env, publisher: PUBLISHER, method: 'DELETE' }))
     expect(res.status).toBe(403)
   })
 

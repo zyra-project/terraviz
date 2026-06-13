@@ -15,13 +15,13 @@ import { onRequestPost as tourPreview } from './tours/[id]/preview'
 import { asD1, makeKV, seedFixtures } from '../_lib/test-helpers'
 import type { PublisherRow } from '../_lib/publisher-store'
 
-const STAFF: PublisherRow = {
-  id: 'PUB-STAFF',
-  email: 'staff@example.com',
-  display_name: 'Staff',
+const ADMIN: PublisherRow = {
+  id: 'PUB-ADMIN',
+  email: 'admin@example.com',
+  display_name: 'Admin',
   affiliation: null,
   org_id: null,
-  role: 'staff',
+  role: 'admin',
   is_admin: 1,
   status: 'active',
   created_at: '2026-01-01T00:00:00.000Z',
@@ -43,7 +43,7 @@ function ctx<P extends string = never>(opts: {
     request: new Request(url, init),
     env: opts.env,
     params: (opts.params ?? {}) as { [K in P]: string | string[] },
-    data: { publisher: STAFF },
+    data: { publisher: ADMIN },
     waitUntil: () => {},
     passThroughOnException: () => {},
     next: async () => new Response(null),
@@ -58,7 +58,7 @@ function setupEnv() {
       `INSERT INTO publishers (id, email, display_name, role, is_admin, status, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(STAFF.id, STAFF.email, STAFF.display_name, STAFF.role, STAFF.is_admin, STAFF.status, STAFF.created_at)
+    .run(ADMIN.id, ADMIN.email, ADMIN.display_name, ADMIN.role, ADMIN.is_admin, ADMIN.status, ADMIN.created_at)
   return {
     sqlite,
     env: {

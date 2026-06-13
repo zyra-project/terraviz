@@ -27,13 +27,13 @@ import {
 } from './featured-datasets'
 import type { PublisherRow } from './publisher-store'
 
-const STAFF: PublisherRow = {
-  id: 'PUB-STAFF',
-  email: 'staff@example.com',
-  display_name: 'Staff',
+const ADMIN: PublisherRow = {
+  id: 'PUB-ADMIN',
+  email: 'admin@example.com',
+  display_name: 'Admin',
   affiliation: null,
   org_id: null,
-  role: 'staff',
+  role: 'admin',
   is_admin: 1,
   status: 'active',
   created_at: '2026-01-01T00:00:00.000Z',
@@ -53,7 +53,7 @@ function setupDb(datasetCount = 3) {
       `INSERT INTO publishers (id, email, display_name, role, is_admin, status, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(STAFF.id, STAFF.email, STAFF.display_name, STAFF.role, STAFF.is_admin, STAFF.status, ts)
+    .run(ADMIN.id, ADMIN.email, ADMIN.display_name, ADMIN.role, ADMIN.is_admin, ADMIN.status, ts)
   for (let i = 0; i < datasetCount; i++) {
     const id = `DS${String(i).padStart(3, '0')}` + 'A'.repeat(21)
     sqlite
@@ -63,7 +63,7 @@ function setupDb(datasetCount = 3) {
                                created_at, updated_at, publisher_id)
          VALUES (?, ?, 'NODE000', ?, 'video/mp4', '', 0, 'public', 0, 1, ?, ?, ?)`,
       )
-      .run(id, `dataset-${i}`, `Dataset ${i}`, ts, ts, STAFF.id)
+      .run(id, `dataset-${i}`, `Dataset ${i}`, ts, ts, ADMIN.id)
   }
   return { sqlite, d1: asD1(sqlite) }
 }
@@ -77,19 +77,19 @@ describe('listFeaturedDatasets', () => {
         `INSERT INTO featured_datasets (dataset_id, position, added_by, added_at)
          VALUES (?, ?, ?, ?)`,
       )
-      .run(ids[2], 5, STAFF.id, '2026-04-29T12:00:00.000Z')
+      .run(ids[2], 5, ADMIN.id, '2026-04-29T12:00:00.000Z')
     sqlite
       .prepare(
         `INSERT INTO featured_datasets (dataset_id, position, added_by, added_at)
          VALUES (?, ?, ?, ?)`,
       )
-      .run(ids[0], 1, STAFF.id, '2026-04-29T12:01:00.000Z')
+      .run(ids[0], 1, ADMIN.id, '2026-04-29T12:01:00.000Z')
     sqlite
       .prepare(
         `INSERT INTO featured_datasets (dataset_id, position, added_by, added_at)
          VALUES (?, ?, ?, ?)`,
       )
-      .run(ids[1], 5, STAFF.id, '2026-04-29T12:02:00.000Z')
+      .run(ids[1], 5, ADMIN.id, '2026-04-29T12:02:00.000Z')
     const list = await listFeaturedDatasets(d1)
     expect(list.map(r => r.dataset_id)).toEqual([ids[0], ids[2], ids[1]])
   })
@@ -103,7 +103,7 @@ describe('listFeaturedDatasets', () => {
           `INSERT INTO featured_datasets (dataset_id, position, added_by, added_at)
            VALUES (?, ?, ?, ?)`,
         )
-        .run(ids[i], i, STAFF.id, '2026-04-29T12:00:00.000Z')
+        .run(ids[i], i, ADMIN.id, '2026-04-29T12:00:00.000Z')
     }
     const list = await listFeaturedDatasets(d1, { limit: 2 })
     expect(list).toHaveLength(2)
@@ -113,21 +113,21 @@ describe('listFeaturedDatasets', () => {
 describe('addFeaturedDataset', () => {
   it('inserts a fresh row', async () => {
     const { d1 } = setupDb()
-    const result = await addFeaturedDataset(d1, STAFF, {
+    const result = await addFeaturedDataset(d1, ADMIN, {
       dataset_id: 'DS000' + 'A'.repeat(21),
       position: 1,
     })
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.row.position).toBe(1)
-    expect(result.row.added_by).toBe(STAFF.id)
+    expect(result.row.added_by).toBe(ADMIN.id)
   })
 
   it('refuses duplicates with 409', async () => {
     const { d1 } = setupDb()
     const id = 'DS000' + 'A'.repeat(21)
-    await addFeaturedDataset(d1, STAFF, { dataset_id: id, position: 1 })
-    const second = await addFeaturedDataset(d1, STAFF, { dataset_id: id, position: 2 })
+    await addFeaturedDataset(d1, ADMIN, { dataset_id: id, position: 1 })
+    const second = await addFeaturedDataset(d1, ADMIN, { dataset_id: id, position: 2 })
     expect(second.ok).toBe(false)
     if (second.ok) return
     expect(second.status).toBe(409)
@@ -136,7 +136,7 @@ describe('addFeaturedDataset', () => {
 
   it('refuses unknown dataset_id with 404', async () => {
     const { d1 } = setupDb()
-    const result = await addFeaturedDataset(d1, STAFF, {
+    const result = await addFeaturedDataset(d1, ADMIN, {
       dataset_id: 'DS999' + 'A'.repeat(21),
       position: 1,
     })
@@ -158,8 +158,8 @@ describe('addFeaturedDataset', () => {
         `INSERT INTO featured_datasets (dataset_id, position, added_by, added_at)
          VALUES (?, ?, ?, ?)`,
       )
-      .run(id, 1, STAFF.id, '2026-04-29T12:00:00.000Z')
-    const result = await addFeaturedDataset(d1, STAFF, { dataset_id: id, position: 5 })
+      .run(id, 1, ADMIN.id, '2026-04-29T12:00:00.000Z')
+    const result = await addFeaturedDataset(d1, ADMIN, { dataset_id: id, position: 5 })
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.status).toBe(409)
@@ -176,7 +176,7 @@ describe('updateFeaturedPosition', () => {
   it('updates an existing row', async () => {
     const { d1 } = setupDb()
     const id = 'DS000' + 'A'.repeat(21)
-    await addFeaturedDataset(d1, STAFF, { dataset_id: id, position: 1 })
+    await addFeaturedDataset(d1, ADMIN, { dataset_id: id, position: 1 })
     const result = await updateFeaturedPosition(d1, id, 7)
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -196,7 +196,7 @@ describe('removeFeaturedDataset', () => {
   it('removes when present', async () => {
     const { d1 } = setupDb()
     const id = 'DS000' + 'A'.repeat(21)
-    await addFeaturedDataset(d1, STAFF, { dataset_id: id, position: 1 })
+    await addFeaturedDataset(d1, ADMIN, { dataset_id: id, position: 1 })
     await removeFeaturedDataset(d1, id)
     const list = await listFeaturedDatasets(d1)
     expect(list).toHaveLength(0)
@@ -246,7 +246,7 @@ function setupPublished(): { sqlite: ReturnType<typeof freshMigratedDb>; env: Ca
       `INSERT INTO publishers (id, email, display_name, role, is_admin, status, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(STAFF.id, STAFF.email, STAFF.display_name, STAFF.role, STAFF.is_admin, STAFF.status, ts)
+    .run(ADMIN.id, ADMIN.email, ADMIN.display_name, ADMIN.role, ADMIN.is_admin, ADMIN.status, ts)
 
   const ids: string[] = []
   for (let i = 0; i < 4; i++) {
@@ -271,7 +271,7 @@ function setupPublished(): { sqlite: ReturnType<typeof freshMigratedDb>; env: Ca
         ts,
         ts,
         ts,
-        STAFF.id,
+        ADMIN.id,
       )
     sqlite
       .prepare(
@@ -298,13 +298,13 @@ describe('listFeaturedForDocent', () => {
     sqlite
       .prepare(
         `INSERT INTO featured_datasets (dataset_id, position, added_by, added_at)
-         VALUES (?, ?, 'PUB-STAFF', ?)`,
+         VALUES (?, ?, 'PUB-ADMIN', ?)`,
       )
       .run(ids[0], 1, '2026-04-29T12:00:00.000Z')
     sqlite
       .prepare(
         `INSERT INTO featured_datasets (dataset_id, position, added_by, added_at)
-         VALUES (?, ?, 'PUB-STAFF', ?)`,
+         VALUES (?, ?, 'PUB-ADMIN', ?)`,
       )
       .run(ids[1], 2, '2026-04-29T12:00:00.000Z')
 
@@ -328,13 +328,13 @@ describe('listFeaturedForDocent', () => {
     sqlite
       .prepare(
         `INSERT INTO featured_datasets (dataset_id, position, added_by, added_at)
-         VALUES (?, ?, 'PUB-STAFF', ?)`,
+         VALUES (?, ?, 'PUB-ADMIN', ?)`,
       )
       .run(ids[0], 1, '2026-04-29T12:00:00.000Z')
     sqlite
       .prepare(
         `INSERT INTO featured_datasets (dataset_id, position, added_by, added_at)
-         VALUES (?, ?, 'PUB-STAFF', ?)`,
+         VALUES (?, ?, 'PUB-ADMIN', ?)`,
       )
       .run(ids[1], 2, '2026-04-29T12:00:00.000Z')
 
@@ -351,14 +351,14 @@ describe('listFeaturedForDocent', () => {
       sqlite
         .prepare(
           `INSERT INTO featured_datasets (dataset_id, position, added_by, added_at)
-           VALUES (?, ?, 'PUB-STAFF', ?)`,
+           VALUES (?, ?, 'PUB-ADMIN', ?)`,
         )
         .run(ids[i], i, '2026-04-29T12:00:00.000Z')
     }
     sqlite
       .prepare(
         `INSERT INTO featured_datasets (dataset_id, position, added_by, added_at)
-         VALUES (?, 99, 'PUB-STAFF', ?)`,
+         VALUES (?, 99, 'PUB-ADMIN', ?)`,
       )
       .run(ids[3], '2026-04-29T12:00:00.000Z')
 
@@ -372,7 +372,7 @@ describe('listFeaturedForDocent', () => {
       sqlite
         .prepare(
           `INSERT INTO featured_datasets (dataset_id, position, added_by, added_at)
-           VALUES (?, ?, 'PUB-STAFF', ?)`,
+           VALUES (?, ?, 'PUB-ADMIN', ?)`,
         )
         .run(ids[i], i, '2026-04-29T12:00:00.000Z')
     }
@@ -402,7 +402,7 @@ describe('listFeaturedForDocent', () => {
     sqlite
       .prepare(
         `INSERT INTO featured_datasets (dataset_id, position, added_by, added_at)
-         VALUES (?, 1, 'PUB-STAFF', ?)`,
+         VALUES (?, 1, 'PUB-ADMIN', ?)`,
       )
       .run(ids[2], '2026-04-29T12:00:00.000Z')
     const result = await listFeaturedForDocent(env)
@@ -417,7 +417,7 @@ describe('listFeaturedForDocent', () => {
     sqlite
       .prepare(
         `INSERT INTO featured_datasets (dataset_id, position, added_by, added_at)
-         VALUES (?, 1, 'PUB-STAFF', ?)`,
+         VALUES (?, 1, 'PUB-ADMIN', ?)`,
       )
       .run(ids[0], '2026-04-29T12:00:00.000Z')
     const result = await listFeaturedForDocent(env)

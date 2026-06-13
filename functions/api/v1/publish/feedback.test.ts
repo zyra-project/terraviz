@@ -19,18 +19,18 @@ import { onRequestGet as feedbackGet } from './feedback'
 import { asD1 } from '../_lib/test-helpers'
 import type { PublisherRow } from '../_lib/publisher-store'
 
-const STAFF: PublisherRow = {
-  id: 'PUB-STAFF',
-  email: 'staff@example.com',
+const ADMIN: PublisherRow = {
+  id: 'PUB-ADMIN',
+  email: 'admin@example.com',
   display_name: 'Staff',
   affiliation: null,
   org_id: null,
-  role: 'staff',
+  role: 'admin',
   is_admin: 1,
   status: 'active',
   created_at: '2026-01-01T00:00:00.000Z',
 }
-const COMMUNITY: PublisherRow = { ...STAFF, id: 'PUB-COMM', email: 'c@e', role: 'community', is_admin: 0 }
+const PUBLISHER: PublisherRow = { ...ADMIN, id: 'PUB-COMM', email: 'c@e', role: 'publisher', is_admin: 0 }
 
 const FEEDBACK_MIGRATIONS_DIR = resolve(__dirname, '../../../../migrations')
 
@@ -82,7 +82,7 @@ function ctx(opts: { env: Record<string, unknown>; publisher?: PublisherRow; que
     request: new Request(`https://localhost/api/v1/publish/feedback${opts.query}`, { method: 'GET' }),
     env: opts.env,
     params: {},
-    data: { publisher: opts.publisher ?? STAFF },
+    data: { publisher: opts.publisher ?? ADMIN },
     waitUntil: () => {},
     passThroughOnException: () => {},
     next: async () => new Response(null),
@@ -91,10 +91,10 @@ function ctx(opts: { env: Record<string, unknown>; publisher?: PublisherRow; que
 }
 
 describe('GET /api/v1/publish/feedback', () => {
-  it('503s without FEEDBACK_DB and 403s for community callers', async () => {
+  it('503s without FEEDBACK_DB and 403s for publisher-role callers', async () => {
     const { env } = setup()
     expect((await feedbackGet(ctx({ env: {}, query: '?view=ai' }))).status).toBe(503)
-    expect((await feedbackGet(ctx({ env, publisher: COMMUNITY, query: '?view=ai' }))).status).toBe(403)
+    expect((await feedbackGet(ctx({ env, publisher: PUBLISHER, query: '?view=ai' }))).status).toBe(403)
   })
 
   it('400s on a missing or unknown view', async () => {

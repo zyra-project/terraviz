@@ -27,7 +27,7 @@ function mockFetch(routes: Record<string, RouteSpec>) {
 }
 
 const baseRoutes = (): Record<string, RouteSpec> => ({
-  '/api/v1/publish/me': { body: { role: 'staff', is_admin: false } },
+  '/api/v1/publish/me': { body: { role: 'admin', is_admin: false } },
   '/api/v1/publish/datasets': { body: { datasets: [{ id: DS, title: 'Live Storm', thumbnail_url: null }] } },
   '/api/v1/featured-hero': { body: { hero: null } },
 })
@@ -43,7 +43,7 @@ beforeEach(() => {
 describe('renderFeaturedHeroPage', () => {
   it('shows a restricted card for a non-privileged publisher', async () => {
     const routes = baseRoutes()
-    routes['/api/v1/publish/me'] = { body: { role: 'community', is_admin: false } }
+    routes['/api/v1/publish/me'] = { body: { role: 'publisher', is_admin: false } }
     await renderFeaturedHeroPage(mount, { fetchFn: mockFetch(routes) })
     expect(mount.querySelector('.publisher-hero-restricted')).not.toBeNull()
     expect(mount.querySelector('.publisher-hero-select')).toBeNull()
@@ -182,7 +182,7 @@ describe('renderFeaturedHeroPage', () => {
     expect(mount.querySelector('main.publisher-shell')).not.toBeNull()
     // The restricted path also gets the landmark.
     const r = baseRoutes()
-    r['/api/v1/publish/me'] = { body: { role: 'community', is_admin: false } }
+    r['/api/v1/publish/me'] = { body: { role: 'publisher', is_admin: false } }
     mount.replaceChildren()
     await renderFeaturedHeroPage(mount, { fetchFn: mockFetch(r) })
     expect(mount.querySelector('main.publisher-shell')).not.toBeNull()

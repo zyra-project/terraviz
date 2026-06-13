@@ -109,6 +109,8 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `functions/api/v1/publish/feedback.ts` | GET /api/v1/publish/feedback — privilege-gated facade over `_feedback-helpers` for the `/publish/feedback` tab (AI + general dashboards, on-demand screenshots; exports stay on `/api/feedback-admin?action=…`) |
 | `functions/api/v1/publish/me.ts` | GET /api/v1/publish/me — return the calling publisher's profile |
 | `functions/api/v1/publish/node-identity.ts` | /api/v1/publish/node-identity — read / provision this node's identity |
+| `functions/api/v1/publish/publishers.ts` | GET /api/v1/publish/publishers — admin Users tab list (status/role/q filters, cursor pagination) |
+| `functions/api/v1/publish/publishers/[id].ts` | GET / PATCH /api/v1/publish/publishers/{id} — admin approve / suspend / promote / edit-role |
 | `functions/api/v1/publish/redirect-back.ts` | GET /api/v1/publish/redirect-back?to=<path> |
 | `functions/api/v1/publish/tours.ts` | /api/v1/publish/tours — tour collection endpoint |
 | `functions/api/v1/publish/tours/[id].ts` | /api/v1/publish/tours/{id} |
@@ -154,6 +156,7 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `functions/api/v1/_lib/job-queue.ts` | Asynchronous job queue interface — Phase 1b |
 | `functions/api/v1/_lib/loopback.ts` | Loopback hostname check — shared by the publish middleware's `DEV_BYPASS_ACCESS=true` gate and the asset-complete handler's `MOCK_R2=true` gate |
 | `functions/api/v1/_lib/preview-token.ts` | Short-lived signed preview tokens for unpublished datasets and tours |
+| `functions/api/v1/_lib/publisher-mutations.ts` | Admin user-administration store helper — list / get / update publishers, self-lockout + last-admin guardrails |
 | `functions/api/v1/_lib/publisher-store.ts` | D1 reader / writer for the `publishers` table |
 | `functions/api/v1/_lib/r2-public-url.ts` | Build a publicly-readable URL for an R2 object key |
 | `functions/api/v1/_lib/r2-store.ts` | R2 storage helpers — Phase 1b |

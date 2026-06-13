@@ -606,7 +606,7 @@ environments.
 | `NODE_ID_PRIVATE_KEY_PEM` | Secret | Ed25519 keypair for federation signing and `/.well-known/terraviz.json` advertisement. Generated with `npm run gen:node-key`. | Publishing anything. |
 | `PREVIEW_SIGNING_KEY` | Secret | HMAC-SHA-256 secret for preview-token signing. Without it the preview endpoints fail closed. | The CLI's `terraviz preview` command. |
 | `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` | Plaintext | Cloudflare Access app credentials for `/api/v1/publish/**`. Without them the publisher middleware 503s with `access_unconfigured`. | Publisher API access. |
-| `TRUSTED_PUBLISHER_DOMAINS` | Plaintext (optional) | Comma-separated email domains whose verified Access user logins JIT-provision as `staff/active/admin=1` instead of the default `community/pending`. Required for single-org deploys where the operator IS the publisher (otherwise SSO sign-in lands the operator at `pending` and locks them out of their own deploy). Match is exact, case-insensitive, no subdomain wildcarding. Service tokens are unaffected. | Single-org publisher portal access (Step 16). |
+| `TRUSTED_PUBLISHER_DOMAINS` | Plaintext (optional) | Comma-separated email domains whose verified Access user logins JIT-provision as `admin/active/admin=1` instead of the default `publisher/pending`. Recommended for single-org deploys where the operator IS the admin (otherwise the first SSO sign-in lands at `pending` with no admin yet to approve it). Once one admin exists, additional users can be approved from the portal's Users tab instead. Match is exact, case-insensitive, no subdomain wildcarding. Service tokens are unaffected. | Single-org publisher portal access (Step 16). |
 | `R2_PUBLIC_BASE` | Plaintext | Public origin for the catalog R2 bucket (e.g. `https://assets.terraviz.your-org.org`). The manifest endpoint and SPA build playable HLS / image / tour-asset URLs from this. Bind the domain under R2 → bucket → Settings → Connect Domain first. **Not optional for the audit** (see note below). | Serving any R2-hosted asset. |
 | `R2_S3_ENDPOINT` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | Secret | R2 S3-API credentials for server-side presigned PUT minting and digest verification. Minted at R2 → Manage R2 API Tokens (Read+Write on the bucket). The same three values are also consumed shell-side by the migration CLIs and the transcode workflow. | Browser/CLI asset uploads. |
 | `GITHUB_OWNER` / `GITHUB_REPO` / `GITHUB_DISPATCH_TOKEN` | Plaintext / Plaintext / Secret | Point the video-transcode `repository_dispatch` at **your fork** (e.g. `your-org` / `terraviz`). Token is a PAT with `repo`/Contents:write on that repo. Without them video uploads 503 `github_dispatch_unconfigured`. | Video transcode (Step 15). |
@@ -1277,9 +1277,9 @@ iterate without going through Access for every refresh.
 Once 16a's Access app is wired and you sign into the portal for the
 first time, the publisher middleware JIT-provisions a row for your
 email. The default classification for an Access user login is
-`role=community, status=pending` — which a multi-org review queue
-would later approve. For a single-org deploy where you ARE the
-publisher, leave the queue out of the picture by setting
+`role=publisher, status=pending` — which an admin later approves
+from the portal's **Users** tab. For a single-org deploy where you
+ARE the operator, skip the approval step by setting
 `TRUSTED_PUBLISHER_DOMAINS` to your operator's email-domain pattern
 (see the bindings table in Step 10):
 
@@ -1289,18 +1289,28 @@ TRUSTED_PUBLISHER_DOMAINS = noaa.gov,zyra-project.org
 
 Set on both Production and Preview, then redeploy. Verified
 user logins matching either domain provision as
-`role=staff, status=active, is_admin=1` — full administrative
-authority over the deploying node's catalog. Service tokens are
-unaffected (they continue to provision as `role=service`).
+`role=admin, status=active, is_admin=1` — full administrative
+authority over the deploying node's catalog, including approving and
+managing other publishers. Service tokens are unaffected (they
+continue to provision as `role=service`).
 
-**If you already signed in before setting this var.** Pages will
-have JIT-provisioned a `community/pending` row already; the
-`getOrCreatePublisher` path doesn't update existing rows.
-Promote it once via the D1 console:
+**Approving additional users.** Once at least one admin exists, new
+sign-ins land at `publisher/pending` and an admin approves them
+in-product: open **/publish/users** (the Users tab, visible only to
+admins), filter to **Pending**, and click **Approve** — or change
+their role. No D1 access required. (Admins can't demote or suspend
+their own account, nor remove the last remaining admin, so a deploy
+always keeps at least one administrator.)
+
+**If you already signed in before setting `TRUSTED_PUBLISHER_DOMAINS`
+and have no admin yet.** Pages will have JIT-provisioned a
+`publisher/pending` row already; the `getOrCreatePublisher` path
+doesn't update existing rows. Bootstrap the first admin once via the
+D1 console (afterwards, use the Users tab):
 
 ```sql
 UPDATE publishers
-SET role = 'staff', is_admin = 1, status = 'active'
+SET role = 'admin', is_admin = 1, status = 'active'
 WHERE email = 'you@your-org.org';
 ```
 
@@ -1749,11 +1759,13 @@ every application-level JWT (both users and service tokens).
 Fixed in 3pa/J/A; any row JIT-provisioned before that fix
 shipped still has the wrong classification.
 
-One-shot D1 fix-up:
+One-shot fix-up (if you already have another admin, do this from the
+Users tab instead — set the row's role to Admin; the D1 form below is
+only needed when no admin exists yet):
 
 ```sql
 UPDATE publishers
-SET role = 'staff', is_admin = 1, status = 'active'
+SET role = 'admin', is_admin = 1, status = 'active'
 WHERE email = 'you@your-org.org';
 ```
 

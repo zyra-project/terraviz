@@ -33,7 +33,7 @@ function setup(opts: { withAi?: boolean; withVec?: boolean; withKv?: boolean } =
   sqlite
     .prepare(
       `INSERT INTO publishers (id, email, display_name, role, status, created_at)
-       VALUES ('PUB001', 'p@t', 'P', 'staff', 'active', ?)`,
+       VALUES ('PUB001', 'p@t', 'P', 'admin', 'active', ?)`,
     )
     .run(TS)
 

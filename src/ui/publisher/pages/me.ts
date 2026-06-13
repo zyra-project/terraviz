@@ -107,10 +107,10 @@ function renderError(
 
 function localizedRole(role: string): string {
   switch (role) {
-    case 'staff':
-      return t('publisher.me.role.staff')
-    case 'community':
-      return t('publisher.me.role.community')
+    case 'admin':
+      return t('publisher.me.role.admin')
+    case 'publisher':
+      return t('publisher.me.role.publisher')
     case 'service':
       return t('publisher.me.role.service')
     case 'readonly':
@@ -157,8 +157,9 @@ function renderProfile(mount: HTMLElement, me: PublisherMeResponse): void {
 
   fields.appendChild(field(t('publisher.me.field.email'), me.email))
 
-  // Role + admin live on the same row visually but render as two
-  // separate badges to keep the textContent semantics simple.
+  // Role badge. Under the two-tier model the role itself encodes
+  // admin-ness (role === 'admin'), so there's no separate admin
+  // badge — `is_admin` is just a legacy mirror of the role.
   const roleRow = document.createElement('div')
   roleRow.className = 'publisher-field'
   const roleLabel = document.createElement('span')
@@ -166,10 +167,7 @@ function renderProfile(mount: HTMLElement, me: PublisherMeResponse): void {
   roleLabel.textContent = t('publisher.me.field.role')
   const roleValue = document.createElement('span')
   roleValue.className = 'publisher-field-value'
-  roleValue.appendChild(badge(localizedRole(me.role), 'role'))
-  if (me.is_admin) {
-    roleValue.appendChild(badge(t('publisher.me.role.admin'), 'admin'))
-  }
+  roleValue.appendChild(badge(localizedRole(me.role), me.role === 'admin' ? 'admin' : 'role'))
   roleRow.appendChild(roleLabel)
   roleRow.appendChild(roleValue)
   fields.appendChild(roleRow)

@@ -15,7 +15,7 @@
  *   - 403 pending / suspended.
  *   - Calls next() with `context.data.publisher` populated for an
  *     active publisher.
- *   - Dev-bypass on loopback mints a staff/active publisher and
+ *   - Dev-bypass on loopback mints an admin/active publisher and
  *     calls next().
  */
 
@@ -96,7 +96,7 @@ describe('publish/_middleware', () => {
     expect(next.fn).not.toHaveBeenCalled()
   })
 
-  it('mints a staff publisher and calls next() under dev bypass on localhost', async () => {
+  it('mints an admin publisher and calls next() under dev bypass on localhost', async () => {
     const sqlite = seedFixtures({ count: 0 })
     const env = {
       CATALOG_DB: asD1(sqlite),
@@ -115,14 +115,14 @@ describe('publish/_middleware', () => {
     const row = sqlite
       .prepare(`SELECT email, role, is_admin, status FROM publishers WHERE email = 'me@localhost'`)
       .get() as { email: string; role: string; is_admin: number; status: string }
-    expect(row).toMatchObject({ role: 'staff', is_admin: 1, status: 'active' })
+    expect(row).toMatchObject({ role: 'admin', is_admin: 1, status: 'active' })
 
     interface PublisherCtxData {
       publisher?: { email?: string; role?: string }
     }
     const data = ctx.data as PublisherCtxData
     expect(data.publisher?.email).toBe('me@localhost')
-    expect(data.publisher?.role).toBe('staff')
+    expect(data.publisher?.role).toBe('admin')
   })
 
   it('returns 401 unauthenticated when the assertion header is missing', async () => {
@@ -167,7 +167,7 @@ describe('publish/_middleware', () => {
         `INSERT INTO publishers (id, email, display_name, role, is_admin, status, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run('PUB001', 'pending@example.com', 'pending', 'community', 0, 'pending', '2026-01-01T00:00:00.000Z')
+      .run('PUB001', 'pending@example.com', 'pending', 'publisher', 0, 'pending', '2026-01-01T00:00:00.000Z')
     const env = {
       CATALOG_DB: asD1(sqlite),
       CATALOG_KV: makeKV(),
@@ -190,7 +190,7 @@ describe('publish/_middleware', () => {
         `INSERT INTO publishers (id, email, display_name, role, is_admin, status, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run('PUB002', 'banned@example.com', 'banned', 'community', 0, 'suspended', '2026-01-01T00:00:00.000Z')
+      .run('PUB002', 'banned@example.com', 'banned', 'publisher', 0, 'suspended', '2026-01-01T00:00:00.000Z')
     const env = {
       CATALOG_DB: asD1(sqlite),
       CATALOG_KV: makeKV(),

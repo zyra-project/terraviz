@@ -25,13 +25,13 @@ import type { PublisherRow } from './publisher-store'
 
 const TS = '2026-05-01T00:00:00.000Z'
 
-const STAFF: PublisherRow = {
-  id: 'PUB-STAFF',
-  email: 'staff@example.com',
-  display_name: 'Staff',
+const ADMIN: PublisherRow = {
+  id: 'PUB-ADMIN',
+  email: 'admin@example.com',
+  display_name: 'Admin',
   affiliation: null,
   org_id: null,
-  role: 'staff',
+  role: 'admin',
   is_admin: 1,
   status: 'active',
   created_at: TS,
@@ -50,7 +50,7 @@ function setupDb(datasetCount = 2) {
       `INSERT INTO publishers (id, email, display_name, role, is_admin, status, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(STAFF.id, STAFF.email, STAFF.display_name, STAFF.role, STAFF.is_admin, STAFF.status, TS)
+    .run(ADMIN.id, ADMIN.email, ADMIN.display_name, ADMIN.role, ADMIN.is_admin, ADMIN.status, TS)
   const ids: string[] = []
   for (let i = 0; i < datasetCount; i++) {
     const id = `DS${String(i).padStart(3, '0')}` + 'A'.repeat(21)
@@ -63,7 +63,7 @@ function setupDb(datasetCount = 2) {
          VALUES (?, ?, 'NODE000', ?, ?, 'video/mp4', 'vimeo:1',
                  0, 'public', 0, 1, ?, ?, ?, ?)`,
       )
-      .run(id, `dataset-${i}`, `Dataset ${i}`, 'Abstract.', TS, TS, TS, STAFF.id)
+      .run(id, `dataset-${i}`, `Dataset ${i}`, 'Abstract.', TS, TS, TS, ADMIN.id)
   }
   return { db: asD1(sqlite), ids }
 }
@@ -83,16 +83,16 @@ describe('getHeroOverride / setHeroOverride / clearHeroOverride', () => {
 
   it('sets and reads back the singleton', async () => {
     const { db, ids } = setupDb()
-    const res = await setHeroOverride(db, STAFF, validInput(ids[0]), TS)
+    const res = await setHeroOverride(db, ADMIN, validInput(ids[0]), TS)
     expect(res.ok).toBe(true)
     const row = await getHeroOverride(db)
-    expect(row).toMatchObject({ dataset_id: ids[0], set_by: STAFF.id, set_at: TS })
+    expect(row).toMatchObject({ dataset_id: ids[0], set_by: ADMIN.id, set_at: TS })
   })
 
   it('a second set replaces the first (singleton)', async () => {
     const { db, ids } = setupDb()
-    await setHeroOverride(db, STAFF, validInput(ids[0]), TS)
-    await setHeroOverride(db, STAFF, { ...validInput(ids[1]), headline: 'New' }, TS)
+    await setHeroOverride(db, ADMIN, validInput(ids[0]), TS)
+    await setHeroOverride(db, ADMIN, { ...validInput(ids[1]), headline: 'New' }, TS)
     const row = await getHeroOverride(db)
     expect(row?.dataset_id).toBe(ids[1])
     expect(row?.headline).toBe('New')
@@ -100,13 +100,13 @@ describe('getHeroOverride / setHeroOverride / clearHeroOverride', () => {
 
   it('404s an unknown dataset_id', async () => {
     const { db } = setupDb()
-    const res = await setHeroOverride(db, STAFF, validInput('GHOSTGHOSTGHOSTGHOSTGHOST'), TS)
+    const res = await setHeroOverride(db, ADMIN, validInput('GHOSTGHOSTGHOSTGHOSTGHOST'), TS)
     expect(res).toMatchObject({ ok: false, status: 404, error: 'not_found' })
   })
 
   it('clear is idempotent', async () => {
     const { db, ids } = setupDb()
-    await setHeroOverride(db, STAFF, validInput(ids[0]), TS)
+    await setHeroOverride(db, ADMIN, validInput(ids[0]), TS)
     await clearHeroOverride(db)
     await clearHeroOverride(db) // again — no throw
     expect(await getHeroOverride(db)).toBeNull()
@@ -114,7 +114,7 @@ describe('getHeroOverride / setHeroOverride / clearHeroOverride', () => {
 
   it('retiring the pinned dataset cascades the override away', async () => {
     const { db, ids } = setupDb()
-    await setHeroOverride(db, STAFF, validInput(ids[0]), TS)
+    await setHeroOverride(db, ADMIN, validInput(ids[0]), TS)
     await db.prepare(`DELETE FROM datasets WHERE id = ?`).bind(ids[0]).run()
     expect(await getHeroOverride(db)).toBeNull()
   })

@@ -55,23 +55,24 @@ export interface CatalogEnv {
   /**
    * Comma-separated list of email domains (e.g.
    * `noaa.gov,zyra-project.org`) whose verified Access user logins
-   * auto-promote to `role='staff', is_admin=1, status='active'` on
+   * auto-promote to `role='admin', is_admin=1, status='active'` on
    * JIT provisioning. Empty / unset means the default
-   * community/pending classification applies — appropriate for
-   * multi-org deploys (Phase 6) where strangers signing in via
-   * SSO must wait for explicit approval.
+   * publisher/pending classification applies — appropriate for
+   * multi-org deploys where strangers signing in via SSO must wait
+   * for an admin to approve them in the portal's Users tab.
    *
-   * For Phase 3 single-org deploys (one organisation's Access
-   * application gating one Terraviz instance), setting this to
-   * the operator's email domain is the right default — the
-   * operator IS the publisher, and pending-by-default would lock
-   * them out of their own deploy.
+   * For single-org deploys (one organisation's Access application
+   * gating one Terraviz instance), setting this to the operator's
+   * email domain is the right default — the operator IS the admin,
+   * and pending-by-default would lock them out of their own deploy.
    *
    * Domain matching is case-insensitive and exact: `noaa.gov`
    * matches `alice@noaa.gov` but not `alice@example.noaa.gov`
    * (subdomains require their own entry). Service-token identities
    * are unaffected; they continue to provision as
-   * `role='service', is_admin=0, status='active'`.
+   * `role='service', is_admin=0, status='active'`. Admins can also
+   * approve/promote accounts after the fact in the portal's Users
+   * tab — `TRUSTED_PUBLISHER_DOMAINS` is just the zero-touch path.
    */
   TRUSTED_PUBLISHER_DOMAINS?: string
   /**

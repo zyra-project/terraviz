@@ -24,13 +24,13 @@ import { onRequestPost as datasetPreview } from './datasets/[id]/preview'
 import { asD1, makeCtx, makeKV, seedFixtures } from '../_lib/test-helpers'
 import type { PublisherRow } from '../_lib/publisher-store'
 
-const STAFF: PublisherRow = {
-  id: 'PUB-STAFF',
-  email: 'staff@example.com',
-  display_name: 'Staff',
+const ADMIN: PublisherRow = {
+  id: 'PUB-ADMIN',
+  email: 'admin@example.com',
+  display_name: 'Admin',
   affiliation: null,
   org_id: null,
-  role: 'staff',
+  role: 'admin',
   is_admin: 1,
   status: 'active',
   created_at: '2026-01-01T00:00:00.000Z',
@@ -57,7 +57,7 @@ function ctxWithPublisher<P extends string = never>(opts: {
     request,
     env: opts.env,
     params: (opts.params ?? {}) as { [K in P]: string | string[] },
-    data: { publisher: STAFF },
+    data: { publisher: ADMIN },
     waitUntil: () => {},
     passThroughOnException: () => {},
     next: async () => new Response(null),
@@ -72,7 +72,7 @@ function setupEnv() {
       `INSERT INTO publishers (id, email, display_name, role, is_admin, status, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(STAFF.id, STAFF.email, STAFF.display_name, STAFF.role, STAFF.is_admin, STAFF.status, STAFF.created_at)
+    .run(ADMIN.id, ADMIN.email, ADMIN.display_name, ADMIN.role, ADMIN.is_admin, ADMIN.status, ADMIN.created_at)
   return {
     sqlite,
     env: {
@@ -497,7 +497,7 @@ describe('audit_events writes', () => {
     const rows = readAudit(sqlite, id)
     expect(rows).toHaveLength(1)
     expect(rows[0].actor_kind).toBe('publisher')
-    expect(rows[0].actor_id).toBe(STAFF.id)
+    expect(rows[0].actor_id).toBe(ADMIN.id)
     expect(rows[0].action).toBe('dataset.create')
     expect(rows[0].subject_kind).toBe('dataset')
     expect(JSON.parse(rows[0].metadata_json ?? '{}')).toMatchObject({
@@ -550,7 +550,7 @@ describe('audit_events writes', () => {
     await datasetPublish(ctxWithPublisher<'id'>({ env, method: 'POST', params: { id } }))
     const rows = readAudit(sqlite, id).filter(r => r.action === 'dataset.publish')
     expect(rows).toHaveLength(1)
-    expect(rows[0].actor_id).toBe(STAFF.id)
+    expect(rows[0].actor_id).toBe(ADMIN.id)
   })
 
   it('records dataset.retract on the retract route', async () => {
@@ -566,7 +566,7 @@ describe('audit_events writes', () => {
     await datasetRetract(ctxWithPublisher<'id'>({ env, method: 'POST', params: { id } }))
     const rows = readAudit(sqlite, id).filter(r => r.action === 'dataset.retract')
     expect(rows).toHaveLength(1)
-    expect(rows[0].actor_id).toBe(STAFF.id)
+    expect(rows[0].actor_id).toBe(ADMIN.id)
   })
 
   it('does not record an audit row when create fails validation', async () => {

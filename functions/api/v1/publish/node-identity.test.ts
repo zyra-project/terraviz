@@ -34,14 +34,14 @@ const ADMIN: PublisherRow = {
   display_name: 'Admin',
   affiliation: null,
   org_id: null,
-  role: 'staff',
+  role: 'admin',
   is_admin: 1,
   status: 'active',
   created_at: '2026-01-01T00:00:00.000Z',
 }
 
 const SERVICE: PublisherRow = { ...ADMIN, id: 'PUB_SVC', role: 'service', is_admin: 0 }
-const COMMUNITY: PublisherRow = { ...ADMIN, id: 'PUB_C', role: 'community', is_admin: 0 }
+const PUBLISHER: PublisherRow = { ...ADMIN, id: 'PUB_C', role: 'publisher', is_admin: 0 }
 
 function putCtx(db: Database.Database, publisher: PublisherRow, body: unknown, kv = makeKV()) {
   return {
@@ -195,7 +195,7 @@ describe('PUT /api/v1/publish/node-identity', () => {
   it('forbids a non-admin, non-service publisher', async () => {
     const db = freshDb()
     const res = await onRequestPut(
-      putCtx(db, COMMUNITY, {
+      putCtx(db, PUBLISHER, {
         display_name: 'Nope',
         base_url: 'https://nope.example.org',
         public_key: 'ed25519:k',

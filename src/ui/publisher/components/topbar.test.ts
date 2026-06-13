@@ -48,6 +48,31 @@ describe('renderTopbar', () => {
     ])
   })
 
+  it('hides the admin-only Users tab by default', () => {
+    renderTopbar(host, router)
+    const labels = Array.from(
+      host.querySelectorAll<HTMLAnchorElement>('a.publisher-nav-link'),
+    ).map(a => a.textContent)
+    expect(labels).not.toContain('Users')
+  })
+
+  it('hides the Users tab when isAdmin is false', () => {
+    renderTopbar(host, router, { isAdmin: false })
+    const labels = Array.from(
+      host.querySelectorAll<HTMLAnchorElement>('a.publisher-nav-link'),
+    ).map(a => a.textContent)
+    expect(labels).not.toContain('Users')
+  })
+
+  it('shows the Users tab when isAdmin is true', () => {
+    renderTopbar(host, router, { isAdmin: true })
+    const usersLink = Array.from(
+      host.querySelectorAll<HTMLAnchorElement>('a.publisher-nav-link'),
+    ).find(a => a.textContent === 'Users')
+    expect(usersLink).toBeTruthy()
+    expect(usersLink?.getAttribute('href')).toBe('/publish/users')
+  })
+
   it('marks the link that matches the current path as active', () => {
     window.history.replaceState(null, '', '/publish/datasets')
     renderTopbar(host, router)

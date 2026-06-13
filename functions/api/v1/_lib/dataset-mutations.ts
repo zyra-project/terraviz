@@ -6,11 +6,10 @@
  * concerns: ULID minting, slug uniqueness checks, decoration
  * upsert, role-aware visibility filters.
  *
- * Authorisation model (Phase 1a):
- *   - `staff` and the synthetic `service` role see all rows.
- *   - `community` (and any role we don't recognise) see only rows
- *     where `publisher_id = caller.id`.
- *   - `is_admin = 1` is staff-equivalent (used by dev-bypass).
+ * Authorisation model:
+ *   - `admin` and the synthetic `service` role see all rows.
+ *   - `publisher` / `readonly` (and any role we don't recognise) see
+ *     only rows where `publisher_id = caller.id`.
  *
  * Phase 1a is metadata-only: `data_ref` / `thumbnail_ref` /
  * `legend_ref` / `caption_ref` are bare strings supplied by the
