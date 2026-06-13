@@ -524,9 +524,19 @@ After Steps 4–7 are wired:
 | Hashing is one-way | `node -e "import('./src/analytics/hash.ts').then(m => m.hashQuery('test').then(console.log))"` should output the same 12 hex chars you saw in AE. |
 | Kill switch | `wrangler kv key put telemetry_enabled disabled --namespace-id=<id>` → next /api/ingest POST should return 410. Then delete the key, verify back to 204. |
 
-## Step 9 — Grafana (optional)
+## Step 9 — Grafana (optional, secondary)
 
-The repo ships three dashboard JSONs under `grafana/dashboards/`.
+> **You probably don't need this.** The primary analytics surface is
+> the in-app **`/publish/analytics`** tab — it ships with the app, is
+> privilege-gated behind the portal's Cloudflare Access, and covers
+> product health, dataset engagement, the spatial heatmap, and
+> funnels with no external service. To turn it on, wire the export
+> pipeline in [Step 17](#step-17--analytics-long-term-export-optional)
+> (R2 bucket + AE SQL-API secrets + nightly cron). Grafana stays
+> available for self-hosters who want to write ad-hoc AE SQL against
+> the raw event stream, but it is no longer the recommended path.
+
+The repo ships four dashboard JSONs under `grafana/dashboards/`.
 See [`grafana/README.md`](../grafana/README.md) for the setup
 walkthrough — Cloudflare API token, Infinity plugin, datasource
 config, dashboard import.

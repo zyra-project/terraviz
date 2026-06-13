@@ -5,7 +5,10 @@ analysis surface inside the authenticated `/publish` portal — replacing
 Grafana as the primary dashboard and outliving Analytics Engine's
 30–90 day retention window.
 
-**Status: draft for review.**
+**Status: implemented.** All four phases (A–D) have shipped; this
+document now reads as the design record for the analytics storage
+pipeline and the `/publish/analytics` + `/publish/feedback` admin
+tabs. Per-phase "Status: landed" notes mark what each delivered.
 
 > Companion docs:
 > - [`ANALYTICS.md`](ANALYTICS.md) — the end-to-end pipeline reference
@@ -498,6 +501,14 @@ consolidation; no storage work.
 ---
 
 ## Phase D — Grafana demotion + documentation pass
+
+> **Status: landed.** Grafana is now documented as optional/secondary
+> in `grafana/README.md` and `SELF_HOSTING.md` Step 9; `ANALYTICS.md`'s
+> "Where the data goes" diagram shows the export → R2/D1 → admin-tab
+> legs with Grafana as an optional read side; `PRIVACY.md` §6 (and the
+> generated `public/privacy.html`) drops the Iceberg-specific wording
+> for format-neutral long-term R2 storage; `ANALYTICS_QUERIES.md` notes
+> the export job as a third consumer of the positional layouts.
 
 - `grafana/README.md` gains a prominent note: optional, for
   self-hosters; the `/publish/analytics` tab is the primary surface.
