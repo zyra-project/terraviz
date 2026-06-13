@@ -33,7 +33,9 @@ import { renderWorkflowDetailPage } from './pages/workflow-detail'
 import { renderWorkflowEditPage } from './pages/workflow-edit'
 import { renderFeaturedHeroPage } from './pages/featured-hero'
 import { renderAnalyticsPage } from './pages/analytics'
+import { renderUsersPage } from './pages/users'
 import { renderTopbar } from './components/topbar'
+import { publisherGet } from './api'
 import '../../styles/publisher.css'
 
 const PORTAL_ROOT_ID = 'publisher-root'
@@ -50,7 +52,16 @@ const PORTAL_CONTENT_ID = 'publisher-content'
  */
 export function routeForPath(
   pathname: string,
-): 'me' | 'datasets' | 'tours' | 'featured_hero' | 'import' | 'workflows' | 'analytics' | 'unknown' {
+):
+  | 'me'
+  | 'datasets'
+  | 'tours'
+  | 'featured_hero'
+  | 'import'
+  | 'workflows'
+  | 'analytics'
+  | 'users'
+  | 'unknown' {
   if (pathname === '/publish' || pathname.startsWith('/publish/me')) return 'me'
   if (pathname.startsWith('/publish/datasets')) return 'datasets'
   if (pathname.startsWith('/publish/tours')) return 'tours'
@@ -58,6 +69,7 @@ export function routeForPath(
   if (pathname.startsWith('/publish/featured-hero')) return 'featured_hero'
   if (pathname.startsWith('/publish/import')) return 'import'
   if (pathname.startsWith('/publish/analytics')) return 'analytics'
+  if (pathname.startsWith('/publish/users')) return 'users'
   return 'unknown'
 }
 
@@ -256,8 +268,24 @@ function analyticsPage(mount: HTMLElement): RouteHandler {
   return () => void renderAnalyticsPage(mount)
 }
 
+function usersPage(mount: HTMLElement): RouteHandler {
+  return () => void renderUsersPage(mount)
+}
+
 function notFoundPage(mount: HTMLElement): RouteHandler {
   return () => renderPlaceholder(mount, t('publisher.section.notFound'), '3pa/A')
+}
+
+/**
+ * Best-effort identity probe used only to decide whether the topbar
+ * renders admin-only tabs. Returns false on any error — the Users
+ * page and its API both enforce admin access independently, so a
+ * hidden-but-reachable tab degrades safely.
+ */
+async function resolveIsAdmin(): Promise<boolean> {
+  const res = await publisherGet<{ role: string; is_admin: boolean }>('/api/v1/publish/me')
+  if (!res.ok) return false
+  return res.data.is_admin === true || res.data.role === 'admin'
 }
 
 let activeRouter: PublisherRouter | null = null
@@ -306,11 +334,16 @@ export async function bootPublisherPortal(): Promise<void> {
       { pattern: '/publish/workflows/:id', handler: workflowDetailPage(content, getRouter) },
       { pattern: '/publish/featured-hero', handler: featuredHeroPage(content) },
       { pattern: '/publish/analytics', handler: analyticsPage(content) },
+      { pattern: '/publish/users', handler: usersPage(content) },
       { pattern: '/publish/import', handler: importPage(content) },
     ],
     notFoundPage(content),
   )
-  renderTopbar(root, activeRouter)
+  // Fetch identity once so the topbar can show admin-only tabs (the
+  // Users tab). Best-effort — on any failure we hide admin tabs and
+  // let the page-level + API gates do the real enforcement.
+  const isAdmin = await resolveIsAdmin()
+  renderTopbar(root, activeRouter, { isAdmin })
   await activeRouter.start()
   // One emit per portal-chunk load — the publisher visits
   // /publish/*, the chunk resolves, the first route dispatches,
