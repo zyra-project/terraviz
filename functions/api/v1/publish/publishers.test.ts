@@ -148,6 +148,14 @@ describe('PATCH /api/v1/publish/publishers/{id}', () => {
     expect(body.errors[0].field).toBe('role')
   })
 
+  it('400s on status=pending (only active|suspended are PATCH-able)', async () => {
+    const { env } = setupEnv([ADMIN, PUBLISHER])
+    const res = await detailPatch(ctx({ env, method: 'PATCH', params: { id: 'PUB-PUB' }, body: { status: 'pending' } }))
+    expect(res.status).toBe(400)
+    const body = await readJson<{ errors: Array<{ field: string }> }>(res)
+    expect(body.errors[0].field).toBe('status')
+  })
+
   it('rejects service as an assignable role', async () => {
     const { env } = setupEnv([ADMIN, PUBLISHER])
     const res = await detailPatch(ctx({ env, method: 'PATCH', params: { id: 'PUB-PUB' }, body: { role: 'service' } }))

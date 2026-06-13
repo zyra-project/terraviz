@@ -16,7 +16,13 @@
  */
 
 import { t } from '../../../i18n'
-import { clearWarmupFlag, handleSessionError, publisherGet, publisherSend } from '../api'
+import {
+  clearWarmupFlag,
+  handleSessionError,
+  publisherGet,
+  publisherSend,
+  type PublisherSendResult,
+} from '../api'
 import { buildErrorCard } from '../components/error-card'
 import type { ListPublishersResponse, PublisherSummary, UpdatePublisherPayload } from '../types'
 
@@ -354,10 +360,34 @@ function actionButton(
   return btn
 }
 
+/** Pull a human-readable message off a non-session PATCH failure:
+ *  the field-level validation messages, or the server envelope's
+ *  `message` (the guardrail 409s ship `{ error, message }`), falling
+ *  back to the generic localized label. */
+function failureMessage(
+  res: Exclude<PublisherSendResult<unknown>, { ok: true } | { ok: false; kind: 'session' }>,
+): string {
+  if (res.kind === 'validation') {
+    const joined = res.errors.map(e => e.message).join('; ')
+    if (joined) return joined
+  }
+  if (res.kind === 'server' && res.body) {
+    try {
+      const parsed = JSON.parse(res.body) as { message?: unknown }
+      if (typeof parsed.message === 'string' && parsed.message) return parsed.message
+    } catch {
+      /* non-JSON body — fall through to the generic label */
+    }
+  }
+  return t('publisher.users.action.failed')
+}
+
 /**
  * Apply a PATCH and reflect success/failure on the control. Returns
- * true on success. On failure (validation, guardrail 409, network)
- * a short message is shown next to the row.
+ * true on success. A session expiry routes through the shared
+ * `handleSessionError` (redirect-back warmup) like the rest of the
+ * portal; validation and guardrail (409) failures surface their
+ * server message inline rather than a flat "Update failed".
  */
 async function applyUpdate(
   publisher: PublisherSummary,
@@ -375,7 +405,18 @@ async function applyUpdate(
   )
   ui.select.disabled = false
   if (res.ok) return true
-  ui.statusEl.textContent = t('publisher.users.action.failed')
+
+  if (res.kind === 'session') {
+    // Same auto-warmup the other pages use; only surface a message
+    // when the loop guard declines to redirect.
+    if (handleSessionError({ navigate: options.navigate }) === 'show-error') {
+      ui.statusEl.textContent = t('publisher.users.action.failed')
+      ui.statusEl.classList.add('publisher-row-action-status-error')
+    }
+    return false
+  }
+
+  ui.statusEl.textContent = failureMessage(res)
   ui.statusEl.classList.add('publisher-row-action-status-error')
   return false
 }

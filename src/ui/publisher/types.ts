@@ -122,7 +122,7 @@ export interface PublisherSummary {
   affiliation: string | null
   role: string
   is_admin: number
-  status: string
+  status: PublisherStatus
   created_at: string
 }
 

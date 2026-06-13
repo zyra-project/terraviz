@@ -136,17 +136,39 @@ describe('renderUsersPage', () => {
     expect(Array.from(mount.querySelectorAll('button')).map(b => b.textContent)).not.toContain('Suspend')
   })
 
-  it('surfaces a failure message when the PATCH is rejected', async () => {
+  it('surfaces the guardrail message when the PATCH is rejected (409)', async () => {
     const routes = {
       '/api/v1/publish/me': { body: ME_ADMIN },
       '/api/v1/publish/publishers': { body: { publishers: [publisher()], next_cursor: null } },
-      'PATCH /api/v1/publish/publishers/PUB-1': { status: 409, body: { error: 'last_admin', message: 'no' } },
+      'PATCH /api/v1/publish/publishers/PUB-1': {
+        status: 409,
+        body: { error: 'last_admin', message: 'Cannot demote or suspend the last active admin.' },
+      },
     }
     await renderUsersPage(mount, { fetchFn: mockFetch(routes) })
     const approve = Array.from(mount.querySelectorAll('button')).find(b => b.textContent === 'Approve')!
     approve.click()
     await flush()
-    expect(mount.querySelector('.publisher-row-action-status-error')?.textContent).toBe('Update failed')
+    expect(mount.querySelector('.publisher-row-action-status-error')?.textContent).toBe(
+      'Cannot demote or suspend the last active admin.',
+    )
+  })
+
+  it('routes a session expiry during PATCH through handleSessionError', async () => {
+    sessionStorage.clear()
+    const navigate = vi.fn()
+    const routes = {
+      '/api/v1/publish/me': { body: ME_ADMIN },
+      '/api/v1/publish/publishers': { body: { publishers: [publisher()], next_cursor: null } },
+      'PATCH /api/v1/publish/publishers/PUB-1': { status: 401, body: {} },
+    }
+    await renderUsersPage(mount, { fetchFn: mockFetch(routes), navigate })
+    const approve = Array.from(mount.querySelectorAll('button')).find(b => b.textContent === 'Approve')!
+    approve.click()
+    await flush()
+    // First session error auto-navigates to the redirect-back warmup.
+    expect(navigate).toHaveBeenCalledTimes(1)
+    expect(navigate.mock.calls[0][0]).toContain('/api/v1/publish/redirect-back')
   })
 
   it('shows an empty-state message when no users match', async () => {

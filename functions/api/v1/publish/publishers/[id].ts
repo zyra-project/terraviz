@@ -19,10 +19,14 @@
 
 import type { CatalogEnv } from '../../_lib/env'
 import type { PublisherData } from '../_middleware'
-import { isAdmin, ASSIGNABLE_ROLES, PUBLISHER_STATUSES } from '../../_lib/publisher-store'
+import { isAdmin, ASSIGNABLE_ROLES } from '../../_lib/publisher-store'
 import { getPublisher, updatePublisher, type PublisherUpdatePayload } from '../../_lib/publisher-mutations'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
+
+/** Statuses an admin may set via PATCH. `pending` (the provisioning
+ *  default) is intentionally excluded — see the validation note. */
+const PATCHABLE_STATUSES = ['active', 'suspended'] as const
 
 function jsonError(status: number, error: string, message: string): Response {
   return new Response(JSON.stringify({ error, message }), {
@@ -95,11 +99,16 @@ export const onRequestPatch: PagesFunction<CatalogEnv, 'id'> = async context => 
     }
   }
   if (status !== undefined) {
-    if (typeof status !== 'string' || !(PUBLISHER_STATUSES as readonly string[]).includes(status)) {
+    // Only active | suspended are reachable through admin actions
+    // (approve / reactivate → active, reject / suspend → suspended).
+    // `pending` is the provisioning default and is never set via PATCH
+    // — accepting it would allow odd transitions (e.g. active→pending)
+    // and misclassify the audit action.
+    if (typeof status !== 'string' || !(PATCHABLE_STATUSES as readonly string[]).includes(status)) {
       errors.push({
         field: 'status',
         code: 'invalid_status',
-        message: `status must be one of: ${PUBLISHER_STATUSES.join(', ')}.`,
+        message: `status must be one of: ${PATCHABLE_STATUSES.join(', ')}.`,
       })
     }
   }
