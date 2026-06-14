@@ -223,6 +223,58 @@ async function screenshotWithRetry(
  * marker, so they rely on the full-scene shot — same boundary the
  * plan calls out for viewport precision.
  */
+interface CropTarget {
+  key: string
+  box: Box
+}
+
+/**
+ * Find every *visible* i18n-tagged element and its box in ONE
+ * in-browser pass. Doing the visibility + geometry check client-side
+ * (synchronous `getBoundingClientRect` / `getComputedStyle`) is
+ * essential for speed: a per-element Playwright `boundingBox()` loop
+ * blocks on hidden elements (collapsed panels) and re-probes them on
+ * every scene, which is O(scenes × hidden-elements) and stalls the
+ * run. Here hidden elements are filtered out instantly.
+ *
+ * Boxes are viewport coordinates (scenes don't scroll the window —
+ * the panels are fixed/absolute overlays), which is what
+ * `page.screenshot({ clip })` expects.
+ */
+async function collectCropTargets(
+  page: import('playwright').Page,
+): Promise<CropTarget[]> {
+  return page.evaluate((attrs: string[]) => {
+    const out: { key: string; box: Box }[] = []
+    const seen = new Set<string>()
+    for (const attr of attrs) {
+      for (const el of Array.from(document.querySelectorAll(`[${attr}]`))) {
+        const key = el.getAttribute(attr)
+        if (!key || seen.has(key)) continue
+        const r = el.getBoundingClientRect()
+        if (r.width < 1 || r.height < 1) continue
+        // Off-screen → skip (only the viewport is captured anyway).
+        if (
+          r.bottom <= 0 ||
+          r.right <= 0 ||
+          r.top >= window.innerHeight ||
+          r.left >= window.innerWidth
+        ) {
+          continue
+        }
+        const cs = window.getComputedStyle(el as HTMLElement)
+        if (cs.visibility === 'hidden' || cs.display === 'none' || cs.opacity === '0') {
+          continue
+        }
+        seen.add(key)
+        out.push({ key, box: { x: r.left, y: r.top, width: r.width, height: r.height } })
+      }
+    }
+    return out
+    // `Box` is structurally identical in the page context.
+  }, [...I18N_ATTRS] as string[])
+}
+
 async function captureCrops(
   page: import('playwright').Page,
   scene: Scene,
@@ -230,45 +282,38 @@ async function captureCrops(
   croppedKeys: Set<string>,
 ): Promise<CapturedScene[]> {
   const crops: CapturedScene[] = []
-  for (const attr of I18N_ATTRS) {
-    const loc = page.locator(`[${attr}]`)
-    const count = await loc.count().catch(() => 0)
-    for (let i = 0; i < count; i++) {
-      const el = loc.nth(i)
-      const key = await el.getAttribute(attr).catch(() => null)
-      if (!key || croppedKeys.has(key)) continue
-      let box: Box | null = null
-      try {
-        box = await el.boundingBox({ timeout: 2_000 })
-      } catch {
-        continue
-      }
-      if (!box || box.width < 1 || box.height < 1) continue
-      const clip = padClip(box, CROP_PAD, viewport)
-      if (clip.width < 1 || clip.height < 1) continue
-      const name = `crop:${key}${NAME_SUFFIX}`
-      const file = `crop-${slugKey(key)}${NAME_SUFFIX}.png`
-      let png: Buffer
-      try {
-        png = await page.screenshot({
-          path: resolve(OUT_DIR, file),
-          clip,
-          animations: 'disabled',
-          timeout: 15_000,
-        })
-      } catch {
-        continue
-      }
-      croppedKeys.add(key)
-      crops.push({
-        name,
-        description: `Close-up of "${key}" (on ${scene.name})`,
-        file,
-        sha256: sha256(png),
-        keys: [key],
-        kind: 'crop',
+  let targets: CropTarget[]
+  try {
+    targets = await collectCropTargets(page)
+  } catch {
+    return crops
+  }
+  for (const { key, box } of targets) {
+    if (croppedKeys.has(key)) continue
+    const clip = padClip(box, CROP_PAD, viewport)
+    if (clip.width < 1 || clip.height < 1) continue
+    const name = `crop:${key}${NAME_SUFFIX}`
+    const file = `crop-${slugKey(key)}${NAME_SUFFIX}.png`
+    let png: Buffer
+    try {
+      png = await page.screenshot({
+        path: resolve(OUT_DIR, file),
+        clip,
+        animations: 'disabled',
+        timeout: 15_000,
       })
+    } catch {
+      continue
     }
+    croppedKeys.add(key)
+    crops.push({
+      name,
+      description: `Close-up of "${key}" (on ${scene.name})`,
+      file,
+      sha256: sha256(png),
+      keys: [key],
+      kind: 'crop',
+    })
   }
   return crops
 }
