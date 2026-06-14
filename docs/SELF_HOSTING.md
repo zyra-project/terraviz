@@ -1653,14 +1653,24 @@ on:
    deployed report reflects production (real tiles, network, console).
    Left unset, it deploys the local capture.
 
-   > If your `/publish/**` routes sit behind Cloudflare Access at the
-   > edge (Step 7), the headless capture of the publisher/admin scenes
-   > will hit the SSO wall when run against production — the public
-   > scenes still capture fine. The scene *data* is fixture-stubbed
-   > regardless; it's only the page shell that Access can gate. Leave
-   > `VISUAL_DEPLOY_URL` unset (local capture) if that bothers you, or
-   > exempt the static `/publish/*` route from Access (the `/api/v1/publish/**`
-   > API stays protected).
+4. **Optional, for publisher/admin scenes against a live deploy** — if
+   your `/publish/**` routes sit behind Cloudflare Access (Step 7), a
+   headless live capture hits the SSO wall and those scenes time out (the
+   public scenes still capture fine). To capture the real portal, give
+   the live run a **Cloudflare Access service token** (Zero Trust →
+   Access → Service Auth) as two repository **Secrets**:
+   `VISUAL_ACCESS_CLIENT_ID` and `VISUAL_ACCESS_CLIENT_SECRET`. The
+   capture then sends `CF-Access-Client-{Id,Secret}` on every request, so
+   the publisher/admin pages load and the report shows **real backend
+   data** (fixtures are disabled in this mode — they only stub a local
+   no-backend run).
+
+   > Two caveats. (a) A service token bypasses Access but **not** Bot
+   > Fight Mode / WAF (Step 15c) — if your zone challenges the headless
+   > runner you'll need the same skip rule. (b) Leave the two secrets
+   > unset and the live report simply captures the public scenes and
+   > skips the gated ones (non-fatal) — or leave `VISUAL_DEPLOY_URL`
+   > unset entirely to deploy the complete local fixture capture instead.
 
 The deploy step is `continue-on-error`, so skipping all of the above
 breaks nothing: PRs still get the smoke gate, the report artifact, and

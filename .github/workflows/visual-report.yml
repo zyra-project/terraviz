@@ -201,6 +201,13 @@ jobs:
         env:
           SCREENSHOT_BASE_URL: ${{ vars.VISUAL_DEPLOY_URL }}
           VISUAL_AXE: '1'
+          # Optional CF Access service token so the publisher/admin routes
+          # (behind Access on a real deploy) load instead of hitting the
+          # SSO wall. Absent → those scenes time out and only public scenes
+          # capture (still non-fatal). With it, fixtures are disabled and
+          # the report shows real backend data.
+          VISUAL_ACCESS_CLIENT_ID: ${{ secrets.VISUAL_ACCESS_CLIENT_ID }}
+          VISUAL_ACCESS_CLIENT_SECRET: ${{ secrets.VISUAL_ACCESS_CLIENT_SECRET }}
         run: npm run screenshots:report || echo "::warning::Some live scenes failed; see log."
 
       # Deploy the report to the terraviz-visual Pages project for a

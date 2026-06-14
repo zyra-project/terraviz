@@ -25,6 +25,11 @@
  *   SCREENSHOT_OUT_DIR    default <repo>/report-out
  *   VISUAL_VIEWPORTS      default "desktop=1440x900,mobile=390x844"
  *   VISUAL_AXE            "1"/"true" → run an axe-core a11y scan per shot
+ *   VISUAL_ACCESS_CLIENT_ID / VISUAL_ACCESS_CLIENT_SECRET
+ *     a Cloudflare Access service token — when both are set the capture
+ *     sends `CF-Access-Client-{Id,Secret}` on every request so it can
+ *     load routes behind Access (publisher / admin portal) against a live
+ *     deploy, and serves *real* backend data (fixtures are disabled).
  *
  * See `docs/VISUAL_REPORT_PLAN.md`.
  */
@@ -57,6 +62,33 @@ const OUT_DIR = resolve(
   process.env.SCREENSHOT_OUT_DIR ?? resolve(REPO_ROOT, 'report-out'),
 )
 const DEFAULT_VIEWPORTS = 'desktop=1440x900,mobile=390x844'
+
+/**
+ * Build the Cloudflare Access service-token headers from the environment,
+ * or `undefined` when not configured. Exported for tests.
+ *
+ * When set, the capture sends these on every request so it can load
+ * routes behind Cloudflare Access (the publisher / admin portal) against
+ * a live deploy — otherwise the headless browser hits the SSO login wall
+ * and those scenes time out. Both halves must be present.
+ */
+export function accessHeadersFromEnv(
+  id: string | undefined = process.env.VISUAL_ACCESS_CLIENT_ID,
+  secret: string | undefined = process.env.VISUAL_ACCESS_CLIENT_SECRET,
+): Record<string, string> | undefined {
+  if (id && secret) {
+    return { 'CF-Access-Client-Id': id, 'CF-Access-Client-Secret': secret }
+  }
+  return undefined
+}
+
+const ACCESS_HEADERS = accessHeadersFromEnv()
+// With an Access service token we are authenticating against a real
+// backend, so we want the *real* data the portal renders — fixtures
+// (which stub /api with demo data) are disabled in that mode. Without a
+// token, fixtures populate the data-backed scenes against a local dev
+// server that has no backend.
+const USE_FIXTURES = ACCESS_HEADERS === undefined
 
 interface ViewportPass {
   label: string
@@ -108,10 +140,10 @@ async function captureShot(
 ): Promise<ReportShot> {
   return withScenePage(
     browser,
-    { viewport: pass.viewport, baseURL: BASE_URL },
+    { viewport: pass.viewport, baseURL: BASE_URL, extraHTTPHeaders: ACCESS_HEADERS },
     async (page) => {
       const collector = attachSignalCollectors(page)
-      if (scene.fixtures) await installFixtures(page, scene.fixtures)
+      if (USE_FIXTURES && scene.fixtures) await installFixtures(page, scene.fixtures)
       await scene.setup(page)
       if (axeEnabled()) {
         collector.signals.axeViolations = await runAxe(page)
@@ -143,7 +175,10 @@ async function run(): Promise<void> {
   // eslint-disable-next-line no-console
   console.log(
     `Capturing ${scenes.length} scene(s) × ${passes.length} viewport(s) ` +
-      `from ${BASE_URL} → ${OUT_DIR}`,
+      `from ${BASE_URL} → ${OUT_DIR}` +
+      (ACCESS_HEADERS
+        ? ' (authenticated via CF Access service token; fixtures disabled)'
+        : ''),
   )
 
   const browser = await launchBrowser()

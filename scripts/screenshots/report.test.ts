@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseViewportMatrix } from './report'
+import { accessHeadersFromEnv, parseViewportMatrix } from './report'
 
 describe('parseViewportMatrix', () => {
   it('parses the default desktop + mobile matrix', () => {
@@ -32,5 +32,21 @@ describe('parseViewportMatrix', () => {
 
   it('rejects a malformed dimension', () => {
     expect(() => parseViewportMatrix('desktop=wide')).toThrow(/viewport must look like/)
+  })
+})
+
+describe('accessHeadersFromEnv', () => {
+  it('returns CF Access headers when both halves are present', () => {
+    expect(accessHeadersFromEnv('id-123', 'secret-456')).toEqual({
+      'CF-Access-Client-Id': 'id-123',
+      'CF-Access-Client-Secret': 'secret-456',
+    })
+  })
+
+  it('returns undefined when either half is missing or empty', () => {
+    expect(accessHeadersFromEnv(undefined, undefined)).toBeUndefined()
+    expect(accessHeadersFromEnv('id', undefined)).toBeUndefined()
+    expect(accessHeadersFromEnv(undefined, 'secret')).toBeUndefined()
+    expect(accessHeadersFromEnv('', '')).toBeUndefined()
   })
 })

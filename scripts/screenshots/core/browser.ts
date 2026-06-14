@@ -93,12 +93,19 @@ export async function gotoApp(page: Page, path: string): Promise<void> {
  */
 export async function withScenePage<T>(
   browser: Browser,
-  opts: { viewport: Viewport; baseURL: string },
+  opts: {
+    viewport: Viewport
+    baseURL: string
+    /** Headers added to every request in the context — e.g. a
+     *  Cloudflare Access service token for capturing behind Access. */
+    extraHTTPHeaders?: Record<string, string>
+  },
   fn: (page: Page) => Promise<T>,
 ): Promise<T> {
   const context = await browser.newContext({
     viewport: opts.viewport,
     baseURL: opts.baseURL,
+    extraHTTPHeaders: opts.extraHTTPHeaders,
   })
   const page = await context.newPage()
   try {
