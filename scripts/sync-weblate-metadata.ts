@@ -42,6 +42,7 @@ import {
   fetchSourceUnits,
   hasToken,
   unitsByContext,
+  weblateFetch,
   WeblateError,
   WEBLATE_COMPONENT,
   WEBLATE_PROJECT,
@@ -54,7 +55,7 @@ const LOCALES_DIR = resolve(REPO_ROOT, 'locales')
 
 async function patchExplanation(unitId: number, explanation: string): Promise<void> {
   const url = `${WEBLATE_URL}/api/units/${unitId}/`
-  const res = await fetch(url, {
+  const res = await weblateFetch(url, {
     method: 'PATCH',
     headers: {
       ...authHeaders(),

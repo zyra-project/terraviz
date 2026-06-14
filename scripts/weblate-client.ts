@@ -59,12 +59,86 @@ export function authHeaders(): Record<string, string> {
   return { Authorization: `Token ${WEBLATE_TOKEN}` }
 }
 
+const sleep = (ms: number): Promise<void> =>
+  new Promise((r) => setTimeout(r, ms))
+
+// Light proactive pacing so a long association run doesn't constantly
+// trip Weblate's burst limit (reactive backoff below still covers it).
+// ~8 req/s by default; raise WEBLATE_MIN_INTERVAL_MS if hosted.weblate.org
+// throttles harder.
+const MIN_INTERVAL_DEFAULT = 120
+const MIN_INTERVAL_RAW = Number(process.env.WEBLATE_MIN_INTERVAL_MS ?? MIN_INTERVAL_DEFAULT)
+// A non-numeric env value would yield NaN, which silently disables
+// pacing (every NaN comparison is false) — clamp it back to the default.
+const MIN_INTERVAL_MS = Number.isFinite(MIN_INTERVAL_RAW)
+  ? MIN_INTERVAL_RAW
+  : MIN_INTERVAL_DEFAULT
+let lastCallAt = 0
+async function pace(): Promise<void> {
+  if (MIN_INTERVAL_MS <= 0) return
+  const wait = lastCallAt + MIN_INTERVAL_MS - Date.now()
+  if (wait > 0) await sleep(wait)
+  lastCallAt = Date.now()
+}
+
+/**
+ * Parse a `Retry-After` header (seconds, or an HTTP date) into ms.
+ * Returns null when absent/unparseable so the caller can fall back to
+ * exponential backoff.
+ */
+export function retryAfterMs(header: string | null, now = Date.now()): number | null {
+  if (!header) return null
+  const secs = Number(header)
+  if (Number.isFinite(secs)) return Math.max(0, secs * 1000)
+  const date = Date.parse(header)
+  return Number.isNaN(date) ? null : Math.max(0, date - now)
+}
+
+/**
+ * `fetch` wrapper that rides out Weblate's rate limiting. hosted.weblate.org
+ * returns 429 (DRF throttle) or 503 (front-proxy "Rate limit" page) when
+ * requests come too fast; the screenshot sync makes thousands of
+ * one-unit-per-call associations, so this is expected. On a 429/503 we
+ * wait for `Retry-After` (or exponential backoff, capped) and retry. Other
+ * statuses (including other errors) are returned to the caller as-is.
+ *
+ * Bodies must be re-readable across retries — use `FormData`,
+ * `URLSearchParams`, or string/Buffer bodies, never a one-shot stream.
+ *
+ * `maxRetries` counts retries *after* the first request, so the worst
+ * case is `maxRetries + 1` total requests (1 initial + up to 8 retries).
+ */
+export async function weblateFetch(
+  url: string,
+  init?: RequestInit,
+  maxRetries = 8,
+): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    await pace()
+    const res = await fetch(url, init)
+    if ((res.status !== 429 && res.status !== 503) || attempt >= maxRetries) {
+      return res
+    }
+    const waitMs =
+      retryAfterMs(res.headers.get('retry-after')) ??
+      Math.min(60_000, 1_000 * 2 ** attempt)
+    // Drain the body so the connection can be reused.
+    await res.text().catch(() => {})
+    // eslint-disable-next-line no-console
+    console.warn(
+      `  rate-limited (${res.status}); waiting ${Math.round(waitMs / 1000)}s ` +
+        `then retrying (attempt ${attempt + 1}/${maxRetries})`,
+    )
+    await sleep(waitMs)
+  }
+}
+
 /** Walk every page of a paginated Weblate list endpoint. */
 export async function fetchAllPages<T>(firstUrl: string): Promise<T[]> {
   let next: string | null = firstUrl
   const all: T[] = []
   while (next) {
-    const res = await fetch(next, { headers: authHeaders() })
+    const res = await weblateFetch(next, { headers: authHeaders() })
     if (!res.ok) {
       throw new WeblateError(`GET ${next} → ${res.status} ${res.statusText}`)
     }

@@ -46,6 +46,7 @@ import {
   hasToken,
   sourceTranslationUrl,
   unitsByContext,
+  weblateFetch,
   WeblateError,
   WEBLATE_COMPONENT,
   WEBLATE_PROJECT,
@@ -161,7 +162,7 @@ async function createScreenshot(
     new Blob([new Uint8Array(png)], { type: 'image/png' }),
     scene.file,
   )
-  const res = await fetch(`${WEBLATE_URL}/api/screenshots/`, {
+  const res = await weblateFetch(`${WEBLATE_URL}/api/screenshots/`, {
     method: 'POST',
     headers: authHeaders(),
     body: form,
@@ -194,7 +195,7 @@ async function replaceScreenshotImage(
     scene.file,
   )
   const url = `${WEBLATE_URL}/api/screenshots/${shot.id}/file/`
-  const res = await fetch(url, {
+  const res = await weblateFetch(url, {
     method: 'POST',
     headers: authHeaders(),
     body: form,
@@ -212,7 +213,7 @@ async function associateUnit(shotId: number, unitId: number): Promise<void> {
   // `unit_id` is a FORM parameter per the Weblate API (not JSON).
   // Passing URLSearchParams makes fetch send
   // application/x-www-form-urlencoded.
-  const res = await fetch(url, {
+  const res = await weblateFetch(url, {
     method: 'POST',
     headers: authHeaders(),
     body: new URLSearchParams({ unit_id: String(unitId) }),
@@ -228,7 +229,7 @@ async function associateUnit(shotId: number, unitId: number): Promise<void> {
 
 async function dissociateUnit(shotId: number, unitId: number): Promise<void> {
   const url = `${WEBLATE_URL}/api/screenshots/${shotId}/units/${unitId}/`
-  const res = await fetch(url, { method: 'DELETE', headers: authHeaders() })
+  const res = await weblateFetch(url, { method: 'DELETE', headers: authHeaders() })
   // 404 is fine — already gone.
   if (!res.ok && res.status !== 404) {
     const body = await res.text().catch(() => '')
@@ -249,7 +250,7 @@ async function storedImageSha(shot: WeblateScreenshot): Promise<string | null> {
   const url = shot.file_url.startsWith('http')
     ? shot.file_url
     : `${WEBLATE_URL}${shot.file_url}`
-  const res = await fetch(url, { headers: authHeaders() })
+  const res = await weblateFetch(url, { headers: authHeaders() })
   if (!res.ok) return null
   return sha256(new Uint8Array(await res.arrayBuffer()))
 }
