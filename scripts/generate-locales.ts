@@ -527,6 +527,37 @@ export function build(localesDir: string = LOCALES_DIR): BuildOutput {
 
 // ---- CLI entry point ────────────────────────────────────────────────
 
+/**
+ * Print build warnings. The per-key "missing translation" warnings are
+ * collapsed to one count per locale by default — across many
+ * partially-translated locales the per-key list floods CI logs and
+ * Weblate is the real source of truth for coverage. `--verbose` restores
+ * the full per-key list. Any other warning kind is always printed.
+ */
+function emitWarnings(warnings: readonly string[], verbose: boolean): void {
+  /* eslint-disable no-console */
+  if (warnings.length === 0) return
+  if (verbose) {
+    for (const w of warnings) console.warn(w)
+    return
+  }
+  const missingByFile = new Map<string, number>()
+  const other: string[] = []
+  for (const w of warnings) {
+    const m = /^\[locales\] (\S+): missing translation for /.exec(w)
+    if (m) missingByFile.set(m[1], (missingByFile.get(m[1]) ?? 0) + 1)
+    else other.push(w)
+  }
+  for (const [file, count] of missingByFile) {
+    console.warn(
+      `[locales] ${file}: ${count} missing translation(s) ` +
+        '(run `npm run locales -- --verbose` to list)',
+    )
+  }
+  for (const w of other) console.warn(w)
+  /* eslint-enable no-console */
+}
+
 function run(): void {
   const checkMode = process.argv.includes('--check')
   let output: BuildOutput
@@ -540,10 +571,7 @@ function run(): void {
     throw err
   }
 
-  for (const w of output.warnings) {
-    // eslint-disable-next-line no-console
-    console.warn(w)
-  }
+  emitWarnings(output.warnings, process.argv.includes('--verbose'))
 
   if (checkMode) {
     let stale = false

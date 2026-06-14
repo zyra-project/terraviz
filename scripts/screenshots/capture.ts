@@ -47,11 +47,23 @@
 
 import { createHash } from 'node:crypto'
 import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { parse, resolve, sep } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
-import { chromium, type Browser } from 'playwright'
+import type { Browser } from 'playwright'
 
+import {
+  REPO_ROOT,
+  assertSafeOutDir,
+  launchBrowser,
+  padClip,
+  parseViewport,
+  screenshotWithRetry,
+  slugKey,
+  withScenePage,
+} from './core/browser'
+import { installFixtures } from './core/fixtures'
+import type { Box } from './core/types'
 import {
   computeCoverage,
   formatCoverageLine,
@@ -59,8 +71,9 @@ import {
 } from './coverage'
 import { scenes, type Scene } from './scenes'
 
-const HERE = resolve(fileURLToPath(import.meta.url), '..')
-const REPO_ROOT = resolve(HERE, '..', '..')
+// Re-exported so the existing helper tests (capture.helpers.test.ts) and
+// any other importer keep resolving these from './capture'.
+export { padClip, slugKey }
 
 const BASE_URL = process.env.SCREENSHOT_BASE_URL ?? 'http://localhost:4173'
 // Resolve to an absolute path so the safety guard and every
@@ -89,56 +102,6 @@ const I18N_ATTRS = [
   'data-i18n-title',
   'data-i18n-placeholder',
 ] as const
-
-interface Box {
-  x: number
-  y: number
-  width: number
-  height: number
-}
-
-/** Filesystem-safe slug for a dotted message key. */
-export function slugKey(key: string): string {
-  return key.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '')
-}
-
-/** Pad a box by `pad` px and clamp it to the viewport. */
-export function padClip(box: Box, pad: number, vp: { width: number; height: number }): Box {
-  const x = Math.max(0, box.x - pad)
-  const y = Math.max(0, box.y - pad)
-  const right = Math.min(vp.width, box.x + box.width + pad)
-  const bottom = Math.min(vp.height, box.y + box.height + pad)
-  return { x, y, width: Math.max(0, right - x), height: Math.max(0, bottom - y) }
-}
-
-/**
- * Refuse to `rm -rf` a path that is the filesystem root, the repo
- * root, or an ancestor of it. `run()` wipes OUT_DIR for a clean
- * slate, so a mistyped SCREENSHOT_OUT_DIR (`/`, empty → cwd, a
- * parent dir) must not nuke real files.
- */
-function assertSafeOutDir(dir: string): void {
-  const root = parse(dir).root
-  const isAncestorOfRepo = `${REPO_ROOT}${sep}`.startsWith(`${dir}${sep}`)
-  if (dir === root || dir === REPO_ROOT || isAncestorOfRepo) {
-    throw new Error(
-      `Refusing to delete SCREENSHOT_OUT_DIR="${dir}": it is the ` +
-        'filesystem root, the repo root, or an ancestor of it. Point ' +
-        'it at a dedicated output directory.',
-    )
-  }
-}
-
-function parseViewport(): { width: number; height: number } {
-  const raw = process.env.SCREENSHOT_VIEWPORT ?? '1440x900'
-  const m = /^(\d+)x(\d+)$/.exec(raw.trim())
-  if (!m) {
-    throw new Error(
-      `SCREENSHOT_VIEWPORT must look like "1440x900", got "${raw}".`,
-    )
-  }
-  return { width: Number(m[1]), height: Number(m[2]) }
-}
 
 /** Shape the app publishes on `window.__i18nTrace` (see
  *  `src/i18n/screenshotTrace.ts`). Declared locally because that
@@ -182,32 +145,6 @@ async function readTracedKeys(
     return w.__i18nTrace ? [...w.__i18nTrace.seen] : []
   })
   return keys.sort()
-}
-
-/**
- * Screenshot the page, retrying once on failure.
- *
- * `animations: 'disabled'` freezes CSS animations/transitions so the
- * capture is stable. The retry absorbs an intermittent compositor
- * stall seen under resource pressure late in a long serial run —
- * Playwright reports it as a misleading "waiting for fonts to load"
- * timeout even on pages with zero web fonts, and the same page
- * screenshots fine in isolation. So this is a transient-stall guard,
- * not a correctness fix.
- */
-async function screenshotWithRetry(
-  page: import('playwright').Page,
-  path: string,
-): Promise<Buffer> {
-  const opts = { path, animations: 'disabled', timeout: 60_000 } as const
-  try {
-    return await page.screenshot(opts)
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    // eslint-disable-next-line no-console
-    console.warn(`  retrying screenshot after: ${msg}`)
-    return page.screenshot(opts)
-  }
 }
 
 /**
@@ -324,15 +261,16 @@ async function captureScene(
   viewport: { width: number; height: number },
   croppedKeys: Set<string>,
 ): Promise<CapturedScene[]> {
-  const context = await browser.newContext({ viewport, baseURL: BASE_URL })
-  const page = await context.newPage()
-  try {
+  return withScenePage(browser, { viewport, baseURL: BASE_URL }, async (page) => {
     // Fresh trace per scene. Reset before setup in case the first
     // navigation already happened; the hook re-publishes the handle
     // on the next resolved key regardless.
     await page.addInitScript(() => {
       ;(window as TracedWindow).__i18nTrace?.reset()
     })
+    // Populate data-backed surfaces so per-string crops capture real
+    // content, not a "Loading…" state (Phase V7).
+    if (scene.fixtures) await installFixtures(page, scene.fixtures)
     await scene.setup(page)
     const keys = await readTracedKeys(page)
     const name = `${scene.name}${NAME_SUFFIX}`
@@ -350,9 +288,7 @@ async function captureScene(
       ? await captureCrops(page, scene, viewport, croppedKeys)
       : []
     return [sceneShot, ...crops]
-  } finally {
-    await context.close()
-  }
+  })
 }
 
 async function run(): Promise<void> {
@@ -369,7 +305,7 @@ async function run(): Promise<void> {
       `at ${viewport.width}x${viewport.height} → ${OUT_DIR}`,
   )
 
-  const browser = await chromium.launch()
+  const browser = await launchBrowser()
   const captured: CapturedScene[] = []
   // Shared across scenes so each distinct string is cropped once
   // (first scene that renders it visibly wins).

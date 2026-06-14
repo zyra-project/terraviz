@@ -1,0 +1,227 @@
+name: Visual report
+
+# Captures the UI across every scene × viewport (desktop + mobile),
+# collects per-scene problems (console/page errors, failed requests,
+# optional axe a11y), and on pull requests pixel-diffs against the
+# baseline from the latest main run. Produces a browsable HTML report
+# (the `visual-report` artifact) and an advisory PR comment.
+#
+# Deliberately SEPARATE from sync-weblate-screenshots.yml: that workflow
+# feeds translators and must never write to Weblate from a PR; this one
+# feeds developers/reviewers and runs on every PR. Keeping them apart
+# lets each stay green independently (same reasoning as poster.yml vs
+# ci.yml).
+#
+# Advisory by design — a visual change or a problem badge never fails
+# this check (the gating signal is the smoke job, added later). See
+# docs/VISUAL_REPORT_PLAN.md.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: &visual_paths
+      - 'src/**'
+      - 'index.html'
+      - 'scripts/screenshots/**'
+      - '.github/workflows/visual-report.yml'
+  pull_request:
+    paths: *visual_paths
+
+# PRs get fast feedback, so cancel superseded runs (unlike the
+# serialized Weblate sync).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read the repo + write PR comments. The Cloudflare deploy uses its own
+# API token, not GITHUB_TOKEN.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  # Gating: interaction smoke tests (search, Orbit local engine,
+  # navigation, a fixture-backed publisher page). Unlike the advisory
+  # report above, a failed assertion or page error fails this check.
+  smoke:
+    name: Smoke / interaction tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Run smoke tests
+        env:
+          SCREENSHOT_BASE_URL: http://127.0.0.1:4173
+        run: |
+          npm run dev -- --host 127.0.0.1 --port 4173 &
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:4173 >/dev/null && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:4173 >/dev/null \
+            || { echo "::error::dev server did not become reachable within 60s"; exit 1; }
+          npm run screenshots:smoke
+
+  visual-report:
+    name: Capture + diff + report
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Chromium only, with its OS deps, to keep the cache small.
+      - run: npx playwright install --with-deps chromium
+
+      # Serve the app and capture in one step so the background server
+      # lives for the whole run. Advisory: a broken scene must not fail
+      # the job, so swallow the capturer's non-zero exit — the failure
+      # is visible in the log and as a reduced shot count in the report.
+      - name: Capture report
+        env:
+          SCREENSHOT_BASE_URL: http://127.0.0.1:4173
+        run: |
+          npm run dev -- --host 127.0.0.1 --port 4173 &
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:4173 >/dev/null && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:4173 >/dev/null \
+            || { echo "::error::dev server did not become reachable within 60s"; exit 1; }
+          # On a PR the report is advisory, so a broken scene only warns.
+          # On main it must fail loudly: swallowing here would publish an
+          # incomplete `visual-baseline`, silently turning the missing
+          # scenes into perpetual "new" soft-passes on future PRs.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            npm run screenshots:report || echo "::warning::Some scenes failed to capture; see log."
+          else
+            npm run screenshots:report
+          fi
+
+      # On a PR, pull the baseline PNGs from the latest successful main
+      # run of this workflow and diff against them. Best-effort: no
+      # baseline yet (first run / new repo) is a soft pass.
+      - name: Download main baseline
+        if: github.event_name == 'pull_request'
+        uses: dawidd6/action-download-artifact@v6
+        continue-on-error: true
+        with:
+          workflow: visual-report.yml
+          branch: main
+          name: visual-baseline
+          path: visual-baseline
+          if_no_artifact_found: warn
+
+      - name: Diff against baseline
+        if: github.event_name == 'pull_request'
+        run: |
+          if ls visual-baseline/*.png >/dev/null 2>&1; then
+            # Advisory: a non-zero exit (e.g. a transient read/parse
+            # error) must not fail this report job. The diff result is
+            # surfaced in the artifact + PR comment regardless.
+            npm run screenshots:diff -- --baseline visual-baseline \
+              || echo "::warning::screenshots:diff exited non-zero; see log."
+          else
+            echo "No baseline PNGs found — skipping diff (soft pass)."
+          fi
+
+      # Always surface the HTML report + PNGs (incl. on capture failure).
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-report
+          path: report-out/
+          if-no-files-found: warn
+
+      # Publish the baseline that future PRs diff against. Main only.
+      - name: Publish baseline
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-baseline
+          path: report-out/
+          retention-days: 90
+          if-no-files-found: warn
+
+      # Advisory PR comment, updated in place (find-by-marker).
+      - name: Build PR summary
+        if: github.event_name == 'pull_request'
+        env:
+          VISUAL_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        # Best-effort: if summary generation fails (missing/invalid
+        # report.json), still write a marker-bearing placeholder so the
+        # comment step stays robust. `--silent` keeps npm's lifecycle
+        # banner out of the comment body.
+        run: |
+          npm run --silent screenshots:summary > report-out/pr-comment.md || {
+            printf '%s\n' '<!-- visual-report -->' '_Visual report summary unavailable — see the run log._' \
+              > report-out/pr-comment.md
+          }
+
+      - name: Post / update PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs')
+            const body = fs.readFileSync('report-out/pr-comment.md', 'utf8')
+            const marker = '<!-- visual-report -->'
+            const { owner, repo } = context.repo
+            const issue_number = context.issue.number
+            const { data: comments } = await github.rest.issues.listComments({
+              owner, repo, issue_number, per_page: 100,
+            })
+            const existing = comments.find((c) => c.body && c.body.includes(marker))
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body })
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body })
+            }
+
+      # Deploy report (Phase V6): re-capture against the LIVE deployed
+      # app with the a11y scan on, so the deployed report reflects
+      # production reality — real tiles, real network, real console —
+      # and catches problems local capture structurally can't (missing
+      # images, failed tile requests, contrast issues). Runs only when a
+      # VISUAL_DEPLOY_URL repo variable is set; otherwise the local
+      # report captured above is what gets deployed. Note: the baseline
+      # was already published from the deterministic LOCAL capture above,
+      # so overwriting report-out here does not affect regression diffs.
+      - name: Re-capture against the live app (a11y on)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.VISUAL_DEPLOY_URL != ''
+        env:
+          SCREENSHOT_BASE_URL: ${{ vars.VISUAL_DEPLOY_URL }}
+          VISUAL_AXE: '1'
+        run: npm run screenshots:report || echo "::warning::Some live scenes failed; see log."
+
+      # Deploy the report to the terraviz-visual Pages project for a
+      # stable URL. Main only; non-fatal so a not-yet-created project
+      # (or absent secrets) can't break the baseline/report above.
+      - name: Deploy report to Cloudflare Pages
+        id: deploy
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          DEPLOY_LOG=$(mktemp)
+          npx wrangler@4 pages deploy report-out/ \
+            --project-name terraviz-visual \
+            --branch main \
+            --commit-hash "${{ github.sha }}" 2>&1 | tee "$DEPLOY_LOG"
+          REPORT_URL=$(grep -oP 'https://[^\s]+\.pages\.dev' "$DEPLOY_LOG" | tail -1 || true)
+          echo "Report deployed: $REPORT_URL"
+          echo "## 🖼️ Visual report deployed" >> "$GITHUB_STEP_SUMMARY"
+          echo "$REPORT_URL" >> "$GITHUB_STEP_SUMMARY"
+          rm -f "$DEPLOY_LOG"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

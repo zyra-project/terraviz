@@ -76,6 +76,11 @@ npm run test         # vitest run
 npm run tokens       # regenerate src/styles/tokens.css from tokens/*.json
 npm run dev:desktop  # Tauri dev mode (requires Rust)
 npm run build:desktop # tsc + vite build + tauri build
+
+# Visual testing & reporting (run against a dev server on :4173)
+npm run screenshots:report  # capture every scene × viewport → report-out/index.html
+npm run screenshots:diff -- --baseline <dir>  # pixel-diff vs a baseline
+npm run screenshots:smoke   # gating interaction tests (search, Orbit, nav)
 ```
 
 > **Note:** `src/styles/tokens.css` is a generated build artifact
@@ -302,6 +307,44 @@ Run it via `/graphify <paths>` in a Claude Code session (e.g.
 `locales/` + `tokens/` JSON). Outputs land in `graphify-out/`
 (gitignored). The CLI is pre-installed by the SessionStart hook;
 no API key is used — the semantic pass runs on the host session.
+
+---
+
+## Visual testing & reporting
+
+A Playwright-driven tool captures the real UI to catch visual and
+interaction regressions. It started as the Weblate translator-screenshot
+pipeline and now shares one capture core
+(`scripts/screenshots/core/`) across several consumers. Authoritative
+design: [`docs/VISUAL_REPORT_PLAN.md`](docs/VISUAL_REPORT_PLAN.md).
+
+| Command | What it does |
+|---|---|
+| `npm run screenshots:report` | Captures every scene × viewport (desktop + mobile) into a self-contained `report-out/index.html` gallery with per-scene problem badges (console/page errors, failed requests, optional `VISUAL_AXE` a11y). The local visual-debug surface. |
+| `npm run screenshots:diff -- --baseline <dir>` | Pixel-diffs the current `report-out/` against a baseline PNG dir (masked regions excluded); advisory. |
+| `npm run screenshots:smoke` | Gating interaction tests — search, Orbit's local engine, navigation, a fixture-backed publisher page. |
+| `npm run screenshots:capture` | The Weblate translator-screenshot capture (separate output + uploader). |
+
+All capture commands run against a dev server on `:4173`
+(`npm run dev -- --port 4173`). CI is
+[`.github/workflows/visual-report.yml`](.github/workflows/visual-report.yml):
+PRs get an advisory `visual-report` artifact + comment (diffed against
+the latest `main` baseline) and a gating smoke job; `main` publishes the
+baseline and deploys the report. The Weblate sync
+(`sync-weblate-screenshots.yml`) is deliberately separate.
+
+- **Scenes** are the one human-maintained list:
+  [`scripts/screenshots/scenes.ts`](scripts/screenshots/scenes.ts)
+  (`{ name, description, setup(page), masks?, fixtures? }`). `masks`
+  excludes non-deterministic regions (globe / MapLibre / graph) from the
+  diff; `fixtures` route-stubs `/api/**` so data-backed pages render
+  populated (see
+  [`scripts/screenshots/fixtures/`](scripts/screenshots/fixtures/),
+  typed against `src/ui/publisher/types.ts`).
+- **Convention (mirrors the module-map coverage rule):** when you add a
+  UI route or surface under `src/ui/`, add a `Scene` for it in the same
+  PR — and a smoke assertion if it is interactive. Report strings are
+  dev/CI output and are intentionally **not** routed through i18n.
 
 ---
 

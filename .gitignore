@@ -93,3 +93,8 @@ graphify-out/
 # from the running app each run; uploaded to Weblate, never committed.
 # See docs/WEBLATE_SCREENSHOT_SYNC_PLAN.md.
 screenshots-out/
+
+# Visual report output — PNGs + report.json + index.html produced by
+# `npm run screenshots:report`. Regenerated each run; uploaded as a CI
+# artifact / deployed, never committed. See docs/VISUAL_REPORT_PLAN.md.
+report-out/
