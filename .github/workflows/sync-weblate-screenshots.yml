@@ -1,0 +1,95 @@
+name: Sync Weblate screenshots
+
+# Captures translator screenshots from the running app and pushes
+# them to Weblate's screenshots REST API, associating each shot with
+# the i18n keys the scene rendered. Sibling of `sync-weblate.yml`
+# (which syncs the per-string Explanation field) but heavier — it
+# builds nothing extra, yet runs a headless browser — so its triggers
+# are more conservative.
+#
+# Triggers:
+#   - workflow_dispatch — one-off refresh from the Actions tab
+#   - schedule (weekly) — safety net that catches drift even when the
+#     path filter below misses something
+#   - push to main, only on paths that could change a screenshot
+#   - pull_request on the same paths — runs CAPTURE only (uploads the
+#     PNGs as a build artifact for review); never writes to Weblate
+#     from an un-merged branch.
+#
+# See docs/WEBLATE_SCREENSHOT_SYNC_PLAN.md (phase S5).
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Mondays 04:00 UTC.
+    - cron: '0 4 * * 1'
+  push:
+    branches: [main]
+    paths: &screenshot_paths
+      - 'src/ui/**'
+      - 'src/i18n/**'
+      - 'locales/en.json'
+      - 'scripts/screenshots/**'
+      - 'scripts/sync-weblate-screenshots.ts'
+      - 'scripts/weblate-client.ts'
+      - '.github/workflows/sync-weblate-screenshots.yml'
+  pull_request:
+    paths: *screenshot_paths
+
+# Serialize rather than cancel: the upload is idempotent, but
+# cancelling mid-reconcile could leave a tail of unassociated units
+# until the next run.
+concurrency:
+  group: sync-weblate-screenshots
+  cancel-in-progress: false
+
+# Capture + upload only check out the repo and call the Weblate API
+# with WEBLATE_TOKEN. No git push, no package writes, no deployments.
+permissions:
+  contents: read
+
+jobs:
+  screenshots:
+    name: Capture + push screenshots
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Chromium only, with its OS deps, to keep the cache small.
+      - run: npx playwright install --with-deps chromium
+
+      # Serve with the trace flag baked in (Vite inlines it at serve
+      # time on the dev server) and capture in the same step so the
+      # background server lives for the whole capture.
+      - name: Capture screenshots
+        env:
+          SCREENSHOT_BASE_URL: http://127.0.0.1:4173
+        run: |
+          VITE_I18N_TRACE=true npm run dev -- --host 127.0.0.1 --port 4173 &
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:4173 >/dev/null && break
+            sleep 1
+          done
+          npm run screenshots:capture
+
+      # Always surface the artifacts (incl. on PRs and on capture
+      # failure) so a broken scene is reviewable.
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weblate-screenshots
+          path: screenshots-out/
+          if-no-files-found: warn
+
+      # Push to Weblate only off main / dispatch / schedule — never
+      # from a pull request.
+      - name: Push to Weblate
+        if: github.event_name != 'pull_request'
+        run: npm run screenshots:sync
+        env:
+          WEBLATE_TOKEN: ${{ secrets.WEBLATE_TOKEN }}

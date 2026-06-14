@@ -18,9 +18,16 @@
  * This phase does NOT touch Weblate; it only produces artifacts for
  * local/PR review. The uploader is phase S4.
  *
- * Prerequisite: a running server with the trace flag on, e.g.
- *     npm run build
- *     VITE_I18N_TRACE=true npm run preview &   # serves :4173
+ * Prerequisite: a running server **built/served with the trace flag
+ * on**. Vite inlines `import.meta.env.VITE_I18N_TRACE` at build time,
+ * so the flag must be present when the bundle is produced — setting
+ * it only at `preview` is too late. The dev server honours it at
+ * serve time, which is the simplest path:
+ *     VITE_I18N_TRACE=true npm run dev -- --port 4173 &
+ *     npm run screenshots:capture
+ * For a production-style bundle instead:
+ *     VITE_I18N_TRACE=true npm run build
+ *     npm run preview -- --port 4173 &
  *     npm run screenshots:capture
  *
  * Config (env):
