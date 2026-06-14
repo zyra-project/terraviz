@@ -37,61 +37,20 @@ import { resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { readExplanations } from './generate-locales'
+import {
+  authHeaders,
+  fetchSourceUnits,
+  hasToken,
+  unitsByContext,
+  WeblateError,
+  WEBLATE_COMPONENT,
+  WEBLATE_PROJECT,
+  WEBLATE_URL,
+} from './weblate-client'
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..')
 const REPO_ROOT = resolve(HERE, '..')
 const LOCALES_DIR = resolve(REPO_ROOT, 'locales')
-
-const WEBLATE_URL = process.env.WEBLATE_URL ?? 'https://hosted.weblate.org'
-const WEBLATE_PROJECT = process.env.WEBLATE_PROJECT ?? 'terraviz'
-const WEBLATE_COMPONENT = process.env.WEBLATE_COMPONENT ?? 'app-locales'
-const WEBLATE_TOKEN = process.env.WEBLATE_TOKEN
-
-interface WeblateUnit {
-  id: number
-  context: string
-  explanation: string
-}
-
-interface WeblateUnitsPage {
-  count: number
-  next: string | null
-  results: WeblateUnit[]
-}
-
-class SyncError extends Error {}
-
-function authHeaders(): Record<string, string> {
-  if (!WEBLATE_TOKEN) {
-    throw new SyncError(
-      'WEBLATE_TOKEN not set. Create one at ' +
-        `${WEBLATE_URL}/accounts/profile/#api and pass via env var.`,
-    )
-  }
-  return { Authorization: `Token ${WEBLATE_TOKEN}` }
-}
-
-/** Walk the paginated source-units endpoint, collecting every unit. */
-async function fetchSourceUnits(): Promise<WeblateUnit[]> {
-  // Source units are the English ones — explanations attach to the
-  // source, not per-translation, so we patch the source unit and
-  // every locale inherits the visible context.
-  let next: string | null =
-    `${WEBLATE_URL}/api/translations/${WEBLATE_PROJECT}/${WEBLATE_COMPONENT}/en/units/`
-  const all: WeblateUnit[] = []
-  while (next) {
-    const res = await fetch(next, { headers: authHeaders() })
-    if (!res.ok) {
-      throw new SyncError(
-        `GET ${next} → ${res.status} ${res.statusText}`,
-      )
-    }
-    const page = (await res.json()) as WeblateUnitsPage
-    all.push(...page.results)
-    next = page.next
-  }
-  return all
-}
 
 async function patchExplanation(unitId: number, explanation: string): Promise<void> {
   const url = `${WEBLATE_URL}/api/units/${unitId}/`
@@ -105,14 +64,14 @@ async function patchExplanation(unitId: number, explanation: string): Promise<vo
   })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
-    throw new SyncError(
+    throw new WeblateError(
       `PATCH ${url} → ${res.status} ${res.statusText}${body ? `\n  ${body}` : ''}`,
     )
   }
 }
 
 async function run(): Promise<void> {
-  if (!WEBLATE_TOKEN) {
+  if (!hasToken()) {
     console.error(
       'WEBLATE_TOKEN not set. Create one at ' +
         `${WEBLATE_URL}/accounts/profile/#api and pass via env var:\n` +
@@ -146,7 +105,7 @@ async function run(): Promise<void> {
   )
 
   const units = await fetchSourceUnits()
-  const byKey = new Map(units.map((u) => [u.context, u]))
+  const byKey = unitsByContext(units)
 
   let updated = 0
   let skipped = 0
@@ -192,8 +151,8 @@ if (
 ) {
   run().catch((err) => {
     // Treat any thrown Error as a clean exit so the operator sees
-    // the message, not a stack trace. Covers SyncError (HTTP /
-    // auth failures from this script) and LocaleBuildError /
+    // the message, not a stack trace. Covers WeblateError (HTTP /
+    // auth failures from the shared client) and LocaleBuildError /
     // anything else `readExplanations` rethrows (stale key,
     // invalid JSON, IO failure on the sidecar).
     if (err instanceof Error) {
@@ -204,4 +163,4 @@ if (
   })
 }
 
-export { run, SyncError }
+export { run }
