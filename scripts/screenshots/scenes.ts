@@ -51,6 +51,15 @@ export interface Scene {
    * `fixtures/publisher.ts` (Phase V7).
    */
   fixtures?: FixtureRule[]
+  /**
+   * Minimum viewport width (CSS px) this scene applies to. The report
+   * capturer *skips* (does not fail) the scene at narrower viewports —
+   * used for surfaces the product itself hides on small screens, e.g.
+   * the Graph / Timeline views, whose toggles are absent under the app's
+   * `(max-width: 768px) and (orientation: portrait)` gate. Omit to
+   * capture at every viewport.
+   */
+  minWidth?: number
 }
 
 /** Open the catalog landing surface (the Browse overlay). */
@@ -143,6 +152,9 @@ export const scenes: Scene[] = [
     // The cytoscape force layout settles to slightly different pixel
     // positions per run; mask it so the diff doesn't flap.
     masks: ['#browse-graph'],
+    // The Graph toggle is dropped on portrait phones (Cards + Map only),
+    // so only capture this on wider viewports.
+    minWidth: 769,
     async setup(page) {
       await openCatalog(page)
       await page.locator('#browse-view-mode [data-view-mode="graph"]').click()
@@ -152,6 +164,8 @@ export const scenes: Scene[] = [
   {
     name: 'browse-timeline-view',
     description: 'Browse overlay switched to the Timeline view',
+    // Like Graph, the Timeline toggle is absent on portrait phones.
+    minWidth: 769,
     async setup(page) {
       await openCatalog(page)
       await page.locator('#browse-view-mode [data-view-mode="timeline"]').click()

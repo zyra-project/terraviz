@@ -142,6 +142,15 @@ async function run(): Promise<void> {
   try {
     for (const pass of passes) {
       for (const scene of scenes) {
+        // Skip surfaces the product hides below their min width (e.g.
+        // Graph / Timeline on portrait phones) — a skip, not a failure.
+        if (scene.minWidth && pass.viewport.width < scene.minWidth) {
+          // eslint-disable-next-line no-console
+          console.log(
+            `↷ ${scene.name} @ ${pass.label} (needs ≥${scene.minWidth}px)`,
+          )
+          continue
+        }
         try {
           const shot = await captureShot(browser, scene, pass)
           shots.push(shot)
