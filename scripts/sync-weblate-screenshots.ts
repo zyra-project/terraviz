@@ -79,6 +79,18 @@ interface WeblateScreenshot {
   units?: string[]
 }
 
+/** Raw screenshot as returned by the API before normalization. Weblate
+ *  uses hyperlinked serializers, so objects carry `url`
+ *  (`.../api/screenshots/123/`) rather than a bare numeric `id`. */
+interface RawScreenshot {
+  id?: number
+  url?: string
+  name: string
+  translation?: string
+  file_url?: string
+  units?: string[]
+}
+
 const sha256 = (buf: Buffer | Uint8Array): string =>
   createHash('sha256').update(buf).digest('hex')
 
@@ -86,6 +98,30 @@ const sha256 = (buf: Buffer | Uint8Array): string =>
 export function unitIdFromUrl(url: string): number | null {
   const m = /\/units\/(\d+)\/?$/.exec(url)
   return m ? Number(m[1]) : null
+}
+
+/** Trailing integer id from a `.../api/screenshots/123/` URL. */
+export function screenshotIdFromUrl(url: string | undefined): number | null {
+  if (!url) return null
+  const m = /\/screenshots\/(\d+)\/?$/.exec(url)
+  return m ? Number(m[1]) : null
+}
+
+/**
+ * Resolve a usable numeric `id` from a raw screenshot. The hyperlinked
+ * serializer returns `url`, not `id`, so fall back to parsing the url.
+ * Returns null if neither is present (caller decides how to handle).
+ */
+function normalizeScreenshot(raw: RawScreenshot): WeblateScreenshot | null {
+  const id = typeof raw.id === 'number' ? raw.id : screenshotIdFromUrl(raw.url)
+  if (id == null) return null
+  return {
+    id,
+    name: raw.name,
+    translation: raw.translation,
+    file_url: raw.file_url,
+    units: raw.units,
+  }
 }
 
 /**
@@ -97,11 +133,14 @@ export function unitIdFromUrl(url: string): number | null {
  * low-frequency CI job, so the extra pages are acceptable.
  */
 async function listSourceScreenshots(): Promise<WeblateScreenshot[]> {
-  const all = await fetchAllPages<WeblateScreenshot>(
+  const all = await fetchAllPages<RawScreenshot>(
     `${WEBLATE_URL}/api/screenshots/`,
   )
   const src = sourceTranslationUrl()
-  return all.filter((s) => s.translation === src)
+  return all
+    .filter((s) => s.translation === src)
+    .map(normalizeScreenshot)
+    .filter((s): s is WeblateScreenshot => s !== null)
 }
 
 async function createScreenshot(
@@ -134,7 +173,13 @@ async function createScreenshot(
         (body ? `\n  ${body}` : ''),
     )
   }
-  return (await res.json()) as WeblateScreenshot
+  const shot = normalizeScreenshot((await res.json()) as RawScreenshot)
+  if (!shot) {
+    throw new WeblateError(
+      `Created screenshot ${scene.name} but the response had no id/url to associate units with.`,
+    )
+  }
+  return shot
 }
 
 async function replaceScreenshotImage(

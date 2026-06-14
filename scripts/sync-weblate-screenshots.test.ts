@@ -4,6 +4,7 @@ import type { WeblateUnit } from './weblate-client'
 import {
   diffUnits,
   resolveUnitIds,
+  screenshotIdFromUrl,
   unitIdFromUrl,
 } from './sync-weblate-screenshots'
 
@@ -17,6 +18,20 @@ describe('sync-weblate-screenshots helpers', () => {
     it('returns null for non-unit URLs', () => {
       expect(unitIdFromUrl('https://hosted.weblate.org/api/screenshots/9/')).toBeNull()
       expect(unitIdFromUrl('nonsense')).toBeNull()
+    })
+  })
+
+  describe('screenshotIdFromUrl', () => {
+    it('extracts the trailing screenshot id from a hyperlinked url', () => {
+      expect(
+        screenshotIdFromUrl('https://hosted.weblate.org/api/screenshots/42/'),
+      ).toBe(42)
+      expect(screenshotIdFromUrl('/api/screenshots/7')).toBe(7)
+    })
+
+    it('returns null for undefined or non-screenshot URLs', () => {
+      expect(screenshotIdFromUrl(undefined)).toBeNull()
+      expect(screenshotIdFromUrl('https://hosted.weblate.org/api/units/9/')).toBeNull()
     })
   })
 
