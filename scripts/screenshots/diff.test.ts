@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { PNG } from 'pngjs'
 
-import { diffPngBuffers } from './diff'
+import { diffPngBuffers, parseThreshold } from './diff'
 
 /** A solid-colour PNG of the given size. */
 function solidPng(
@@ -35,6 +35,23 @@ function partialPng(width: number, height: number, fillRows: number): Buffer {
   }
   return PNG.sync.write(png)
 }
+
+describe('parseThreshold', () => {
+  it('defaults when unset or empty', () => {
+    expect(parseThreshold(undefined)).toBe(0.001)
+    expect(parseThreshold('')).toBe(0.001)
+  })
+
+  it('parses a finite non-negative number', () => {
+    expect(parseThreshold('0.05')).toBe(0.05)
+    expect(parseThreshold('0')).toBe(0)
+  })
+
+  it('throws on non-numeric or negative values instead of yielding NaN', () => {
+    expect(() => parseThreshold('abc')).toThrow(/finite number/)
+    expect(() => parseThreshold('-0.1')).toThrow(/≥ 0/)
+  })
+})
 
 describe('diffPngBuffers', () => {
   it('reports unchanged for identical images', () => {

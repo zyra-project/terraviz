@@ -64,6 +64,8 @@ jobs:
             curl -sf http://127.0.0.1:4173 >/dev/null && break
             sleep 1
           done
+          curl -sf http://127.0.0.1:4173 >/dev/null \
+            || { echo "::error::dev server did not become reachable within 60s"; exit 1; }
           npm run screenshots:smoke
 
   visual-report:
@@ -92,6 +94,8 @@ jobs:
             curl -sf http://127.0.0.1:4173 >/dev/null && break
             sleep 1
           done
+          curl -sf http://127.0.0.1:4173 >/dev/null \
+            || { echo "::error::dev server did not become reachable within 60s"; exit 1; }
           npm run screenshots:report || echo "::warning::Some scenes failed to capture; see log."
 
       # On a PR, pull the baseline PNGs from the latest successful main
@@ -145,7 +149,15 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           VISUAL_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: npm run screenshots:summary > report-out/pr-comment.md
+        # Best-effort: if summary generation fails (missing/invalid
+        # report.json), still write a marker-bearing placeholder so the
+        # comment step stays robust. `--silent` keeps npm's lifecycle
+        # banner out of the comment body.
+        run: |
+          npm run --silent screenshots:summary > report-out/pr-comment.md || {
+            printf '%s\n' '<!-- visual-report -->' '_Visual report summary unavailable — see the run log._' \
+              > report-out/pr-comment.md
+          }
 
       - name: Post / update PR comment
         if: github.event_name == 'pull_request'

@@ -53,7 +53,26 @@ import type {
 const OUT_DIR = resolve(
   process.env.SCREENSHOT_OUT_DIR ?? resolve(REPO_ROOT, 'report-out'),
 )
-const THRESHOLD = Number(process.env.VISUAL_DIFF_THRESHOLD ?? '0.001')
+/**
+ * Parse the changed-pixel ratio gate. An unset value defaults; a
+ * non-numeric or negative value fails fast rather than silently becoming
+ * `NaN` (which would make every shot compare `unchanged`). Exported for
+ * tests.
+ */
+export function parseThreshold(
+  raw: string | undefined = process.env.VISUAL_DIFF_THRESHOLD,
+): number {
+  if (raw === undefined || raw === '') return 0.001
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 0) {
+    throw new Error(
+      `VISUAL_DIFF_THRESHOLD must be a finite number ≥ 0, got "${raw}".`,
+    )
+  }
+  return n
+}
+
+const THRESHOLD = parseThreshold()
 // pixelmatch's per-pixel colour-distance tolerance (0–1); separate from
 // our changed-pixel *ratio* gate above.
 const PIXEL_THRESHOLD = 0.1
@@ -146,13 +165,20 @@ async function run(): Promise<void> {
       readFile(resolve(OUT_DIR, shot.file)),
     ])
     const res = diffPngBuffers(baseBuf, curBuf, THRESHOLD)
+    const changed = res.status === 'changed' || res.status === 'size-changed'
 
-    const baselineFile = `baseline-${shot.file}`
-    await copyFile(basePath, resolve(OUT_DIR, baselineFile))
+    // Only changed shots get a triptych, so only they need their
+    // baseline/diff copied into the report dir — keeps the artifact
+    // small as scene count grows.
+    let baselineFile: string | undefined
     let diffFile: string | undefined
-    if (res.diff) {
-      diffFile = `diff-${shot.file}`
-      await writeFile(resolve(OUT_DIR, diffFile), res.diff)
+    if (changed) {
+      baselineFile = `baseline-${shot.file}`
+      await copyFile(basePath, resolve(OUT_DIR, baselineFile))
+      if (res.diff) {
+        diffFile = `diff-${shot.file}`
+        await writeFile(resolve(OUT_DIR, diffFile), res.diff)
+      }
     }
 
     comparisons.push({
@@ -164,7 +190,7 @@ async function run(): Promise<void> {
       changedPixels: res.changedPixels,
       ratio: res.ratio,
       status: res.status,
-      changed: res.status === 'changed' || res.status === 'size-changed',
+      changed,
     })
   }
 
