@@ -16,9 +16,12 @@
  * Non-deterministic regions (globe, MapLibre, graph) are masked at
  * capture time (see `scenes.ts` `masks` + the report capturer), so they
  * are byte-identical between baseline and current and contribute no
- * diff. A missing baseline is a **soft pass** (status `new`): a brand
- * new scene, or the first PR before any `main` baseline exists, must not
- * fail. This step is advisory and never exits non-zero.
+ * diff. A missing *baseline image* is a **soft pass** (status `new`): a
+ * brand new scene, or the first PR before any `main` baseline exists,
+ * must not fail. The diff *result* is advisory — a visual change never
+ * fails the build, and the CI step tolerates a non-zero exit. Genuine
+ * errors (a missing `--baseline` argument, an unreadable report) still
+ * exit non-zero so they surface locally and in the log.
  *
  * Usage:
  *   npm run screenshots:diff -- --baseline <dir>

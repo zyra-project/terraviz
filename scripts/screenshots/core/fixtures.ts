@@ -80,17 +80,21 @@ export async function installFixtures(
   rules: readonly FixtureRule[],
   opts: InstallFixturesOptions = {},
 ): Promise<void> {
-  await page.route('**/api/**', (route) => {
+  await page.route('**/api/**', async (route) => {
     const req = route.request()
-    const hit = matchFixture(rules, req.url(), req.method())
-    if (hit) {
-      void route.fulfill(hit)
-      return
-    }
-    void route.fulfill({
+    const hit = matchFixture(rules, req.url(), req.method()) ?? {
       status: opts.unmatchedStatus ?? 404,
       contentType: 'application/json',
       body: JSON.stringify(opts.unmatchedBody ?? { error: 'no_fixture' }),
-    })
+    }
+    try {
+      await route.fulfill(hit)
+    } catch (err) {
+      // The page/context can close mid-request (scene already done);
+      // awaiting keeps this from surfacing as an unhandled rejection.
+      const msg = err instanceof Error ? err.message : String(err)
+      // eslint-disable-next-line no-console
+      console.warn(`  fixture fulfill skipped: ${msg}`)
+    }
   })
 }

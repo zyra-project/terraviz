@@ -93,11 +93,18 @@ export function renderPrSummary(
 }
 
 async function readJsonIfExists<T>(path: string): Promise<T | undefined> {
+  let raw: string
   try {
-    return JSON.parse(await readFile(path, 'utf-8')) as T
-  } catch {
-    return undefined
+    raw = await readFile(path, 'utf-8')
+  } catch (err) {
+    // A genuinely-absent file is "doesn't exist"; anything else
+    // (permissions, etc.) is a real error worth surfacing.
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    throw err
   }
+  // A present-but-invalid file is a real problem — don't mask it as
+  // "missing", which would print a misleading "run report first".
+  return JSON.parse(raw) as T
 }
 
 async function run(): Promise<void> {
