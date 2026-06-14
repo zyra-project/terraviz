@@ -50,6 +50,10 @@ import {
   WEBLATE_URL,
   type WeblateUnit,
 } from './weblate-client'
+// Type-only import — erased at runtime, so the uploader does NOT
+// pull in the capturer's `playwright` dependency. Keeps the
+// manifest shape a single source of truth across the two scripts.
+import type { CapturedScene } from './screenshots/capture'
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..')
 const REPO_ROOT = resolve(HERE, '..')
@@ -57,15 +61,6 @@ const OUT_DIR =
   process.env.SCREENSHOT_OUT_DIR ?? resolve(REPO_ROOT, 'screenshots-out')
 
 const DRY_RUN = process.argv.includes('--dry-run')
-
-/** One entry of the capturer's `screenshots.json`. */
-interface CapturedScene {
-  name: string
-  description: string
-  file: string
-  sha256: string
-  keys: string[]
-}
 
 /** Weblate screenshot object (fields we use). */
 interface WeblateScreenshot {
