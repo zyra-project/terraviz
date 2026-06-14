@@ -1,11 +1,18 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { retryAfterMs, weblateFetch } from './weblate-client'
+import {
+  __resetPacingForTests,
+  retryAfterMs,
+  weblateFetch,
+} from './weblate-client'
 
 const res = (status: number, headers: Record<string, string> = {}): Response =>
   new Response('body', { status, headers })
 
 describe('weblate-client', () => {
+  beforeEach(() => {
+    __resetPacingForTests()
+  })
   afterEach(() => {
     vi.unstubAllGlobals()
   })

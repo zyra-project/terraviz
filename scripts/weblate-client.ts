@@ -70,15 +70,38 @@ const MIN_INTERVAL_DEFAULT = 120
 const MIN_INTERVAL_RAW = Number(process.env.WEBLATE_MIN_INTERVAL_MS ?? MIN_INTERVAL_DEFAULT)
 // A non-numeric env value would yield NaN, which silently disables
 // pacing (every NaN comparison is false) — clamp it back to the default.
-const MIN_INTERVAL_MS = Number.isFinite(MIN_INTERVAL_RAW)
+const BASE_INTERVAL_MS = Number.isFinite(MIN_INTERVAL_RAW)
   ? MIN_INTERVAL_RAW
   : MIN_INTERVAL_DEFAULT
+// Ceiling the adaptive throttle ramps up to.
+const MAX_INTERVAL_RAW = Number(process.env.WEBLATE_MAX_INTERVAL_MS ?? 5000)
+const MAX_INTERVAL_MS = Number.isFinite(MAX_INTERVAL_RAW) ? MAX_INTERVAL_RAW : 5000
+
+// Adaptive request spacing. Starts at the base interval and ramps up
+// (×2, capped) every time the server throttles us, so a long run
+// converges on hosted.weblate.org's sustainable rate instead of
+// hammering the burst limit and retrying every single call. Increase-
+// only within a run (no decay) to stay stable once it settles.
+let currentIntervalMs = BASE_INTERVAL_MS
 let lastCallAt = 0
+
 async function pace(): Promise<void> {
-  if (MIN_INTERVAL_MS <= 0) return
-  const wait = lastCallAt + MIN_INTERVAL_MS - Date.now()
+  if (currentIntervalMs <= 0) return
+  const wait = lastCallAt + currentIntervalMs - Date.now()
   if (wait > 0) await sleep(wait)
   lastCallAt = Date.now()
+}
+
+/** Slow the global pace after a throttle response. */
+function slowDown(): void {
+  const next = (currentIntervalMs || BASE_INTERVAL_MS || MIN_INTERVAL_DEFAULT) * 2
+  currentIntervalMs = Math.min(MAX_INTERVAL_MS, next)
+}
+
+/** Test-only: reset the adaptive pace between cases. */
+export function __resetPacingForTests(): void {
+  currentIntervalMs = BASE_INTERVAL_MS
+  lastCallAt = 0
 }
 
 /**
@@ -119,6 +142,9 @@ export async function weblateFetch(
     if ((res.status !== 429 && res.status !== 503) || attempt >= maxRetries) {
       return res
     }
+    // Throttled: slow the global pace for every subsequent request so
+    // the run converges on the server's sustainable rate.
+    slowDown()
     const waitMs =
       retryAfterMs(res.headers.get('retry-after')) ??
       Math.min(60_000, 1_000 * 2 ** attempt)
@@ -126,8 +152,8 @@ export async function weblateFetch(
     await res.text().catch(() => {})
     // eslint-disable-next-line no-console
     console.warn(
-      `  rate-limited (${res.status}); waiting ${Math.round(waitMs / 1000)}s ` +
-        `then retrying (attempt ${attempt + 1}/${maxRetries})`,
+      `  rate-limited (${res.status}); pace now ${currentIntervalMs}ms; ` +
+        `waiting ${Math.round(waitMs / 1000)}s then retrying (retry ${attempt + 1}/${maxRetries})`,
     )
     await sleep(waitMs)
   }
