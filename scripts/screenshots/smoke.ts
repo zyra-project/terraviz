@@ -23,7 +23,7 @@ import { pathToFileURL } from 'node:url'
 
 import type { Browser, Page } from 'playwright'
 
-import { launchBrowser, withScenePage } from './core/browser'
+import { gotoApp, launchBrowser, withScenePage } from './core/browser'
 import { installFixtures, type FixtureRule } from './core/fixtures'
 import { attachSignalCollectors } from './core/signals'
 import { publisherFixtures } from './fixtures/publisher'
@@ -71,7 +71,7 @@ const checks: Check[] = [
   {
     name: 'catalog search narrows the result grid',
     async run(page) {
-      await page.goto('/?catalog=true')
+      await gotoApp(page, '/?catalog=true')
       await page.locator('#browse-overlay').waitFor({ state: 'visible' })
       await page.locator('#browse-toolbar').waitFor({ state: 'visible' })
       const before = await page.locator('#browse-grid .browse-card').count()
@@ -89,7 +89,7 @@ const checks: Check[] = [
   {
     name: 'Orbit local engine answers a chat message',
     async run(page) {
-      await page.goto('/?catalog=true')
+      await gotoApp(page, '/?catalog=true')
       await page.locator('#browse-overlay').waitFor({ state: 'visible' })
       await page.locator('#browse-chat-btn').click()
       await page.locator('#chat-panel').waitFor({ state: 'visible' })
@@ -112,7 +112,7 @@ const checks: Check[] = [
   {
     name: 'view-mode navigation mounts each surface',
     async run(page) {
-      await page.goto('/?catalog=true')
+      await gotoApp(page, '/?catalog=true')
       await page.locator('#browse-overlay').waitFor({ state: 'visible' })
       for (const [mode, panel] of [
         ['graph', '#browse-graph'],
@@ -128,7 +128,7 @@ const checks: Check[] = [
     name: 'publisher datasets page renders populated content',
     fixtures: publisherFixtures({ admin: true }),
     async run(page) {
-      await page.goto('/publish/datasets')
+      await gotoApp(page, '/publish/datasets')
       await page.locator('#publisher-root .publisher-topbar').waitFor({ state: 'visible' })
       await page
         .locator('#publisher-root', { hasText: 'Global Sea Surface Temperature' })

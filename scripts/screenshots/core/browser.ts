@@ -75,6 +75,17 @@ export function launchBrowser(): Promise<Browser> {
 }
 
 /**
+ * Navigate to an app route, waiting only for `domcontentloaded` rather
+ * than the full `load` event. The app is a long-lived WebGL surface that
+ * keeps streaming external resources (GIBS map tiles, video) well after
+ * it is interactive, so waiting for `load` flakily times out in CI.
+ * Scenes and checks wait on their own readiness selectors after this.
+ */
+export async function gotoApp(page: Page, path: string): Promise<void> {
+  await page.goto(path, { waitUntil: 'domcontentloaded' })
+}
+
+/**
  * Run `fn` against a fresh page in its own context, always closing the
  * context afterward. Centralizes the per-scene lifecycle so every
  * consumer gets the same isolation (cookies, storage, init scripts) per

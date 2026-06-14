@@ -26,6 +26,7 @@
 
 import type { Page } from 'playwright'
 
+import { gotoApp } from './core/browser'
 import type { FixtureRule } from './core/fixtures'
 import { publisherFixtures } from './fixtures/publisher'
 
@@ -64,7 +65,7 @@ export interface Scene {
 
 /** Open the catalog landing surface (the Browse overlay). */
 async function openCatalog(page: Page): Promise<void> {
-  await page.goto('/?catalog=true')
+  await gotoApp(page, '/?catalog=true')
   await page.locator('#browse-overlay').waitFor({ state: 'visible' })
   // Let the filter rail / grid paint before keys are read.
   await page.locator('#browse-toolbar').waitFor({ state: 'visible' })
@@ -88,7 +89,7 @@ async function openCatalog(page: Page): Promise<void> {
  * empty Weblate screenshot field).
  */
 async function openPublish(page: Page, path: string): Promise<void> {
-  await page.goto(path)
+  await gotoApp(page, path)
   await page.locator('#publisher-root .publisher-topbar').waitFor({ state: 'visible' })
 }
 
