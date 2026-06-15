@@ -38,6 +38,21 @@ export interface AxeViolation {
   impact: string | null
   /** How many DOM nodes triggered the rule. */
   nodes: number
+  /** axe rule documentation URL (Deque University) — the report links
+   *  the rule id here. */
+  helpUrl: string
+  /** CSS selector path(s) of the failing node(s), capped, so the report
+   *  can point at the offending element(s). */
+  targets: string[]
+}
+
+/** Flatten one axe node `target` (a CSS path, possibly nested for
+ *  iframes/shadow DOM) to a single selector string. */
+function targetToSelector(target: unknown): string {
+  if (Array.isArray(target)) {
+    return target.map((t) => (Array.isArray(t) ? t.join(' ') : String(t))).join(' ')
+  }
+  return String(target)
 }
 
 /** Everything observed while a single scene was on screen. */
@@ -147,6 +162,9 @@ export async function runAxe(page: Page): Promise<AxeViolation[]> {
       id: v.id,
       impact: v.impact ?? null,
       nodes: v.nodes.length,
+      helpUrl: v.helpUrl,
+      // Cap at 5 selectors so a rule failing on many nodes stays compact.
+      targets: v.nodes.slice(0, 5).map((n) => targetToSelector(n.target)),
     }))
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

@@ -43,7 +43,15 @@ describe('summarizeSignals', () => {
     s.pageErrors.push('crash')
     s.failedRequests.push({ url: 'u', method: 'GET', failure: 'x' })
     s.badResponses.push({ url: 'u', status: 500 })
-    s.axeViolations = [{ id: 'color-contrast', impact: 'serious', nodes: 2 }]
+    s.axeViolations = [
+      {
+        id: 'color-contrast',
+        impact: 'serious',
+        nodes: 2,
+        helpUrl: 'https://dequeuniversity.com/rules/axe/4.x/color-contrast',
+        targets: ['.a > span', '#b'],
+      },
+    ]
     s.consoleWarnings.push('meh')
 
     const sum = summarizeSignals(s)
@@ -90,6 +98,28 @@ describe('renderReportHtml', () => {
     expect(html).toContain('scene-problems')
     expect(html).toContain('page error: TypeError: &lt;script&gt;')
     expect(html).not.toContain('<script>')
+  })
+
+  it('links the a11y rule to its docs and lists the offending selectors', () => {
+    const bad = emptySignals()
+    bad.axeViolations = [
+      {
+        id: 'color-contrast',
+        impact: 'serious',
+        nodes: 2,
+        helpUrl: 'https://dequeuniversity.com/rules/axe/4.x/color-contrast',
+        targets: ['.card > span', '#cta'],
+      },
+    ]
+    const html = renderReportHtml(manifest([shot({ signals: bad })]))
+
+    expect(html).toContain(
+      '<a href="https://dequeuniversity.com/rules/axe/4.x/color-contrast"',
+    )
+    expect(html).toContain('>color-contrast</a>')
+    expect(html).toContain('<details><summary>2 node(s)</summary>')
+    expect(html).toContain('<code>.card &gt; span</code>')
+    expect(html).toContain('<code>#cta</code>')
   })
 
   it('renders the diff triptych and changed badge when diffs are supplied', () => {
