@@ -1667,9 +1667,11 @@ on:
    a *different* token just for the visual report, set dedicated
    `VISUAL_ACCESS_CLIENT_ID` / `VISUAL_ACCESS_CLIENT_SECRET` secrets and
    they take precedence. Either way the capture sends
-   `CF-Access-Client-{Id,Secret}` on every request, so the publisher/admin
-   pages load and the report shows **real backend data** (fixtures are
-   disabled in this mode — they only stub a local no-backend run).
+   `CF-Access-Client-{Id,Secret}` only on **first-party** requests (same
+   origin as `VISUAL_DEPLOY_URL`; never to third-party tile/CDN hosts, so
+   the token can't leak), so the publisher/admin pages load and the report
+   shows **real backend data** (fixtures are disabled in this mode — they
+   only stub a local no-backend run).
 
    > Two caveats. (a) A service token bypasses Access but **not** Bot
    > Fight Mode / WAF (Step 15c) — if your zone challenges the headless
