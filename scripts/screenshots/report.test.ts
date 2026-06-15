@@ -85,6 +85,14 @@ describe('resolveSceneFilter', () => {
   it('returns undefined with neither flag nor env', () => {
     expect(resolveSceneFilter([], undefined)).toBeUndefined()
   })
+
+  it('throws on a bare flag with no value or a following flag', () => {
+    expect(() => resolveSceneFilter(['--scene'], undefined)).toThrow(/requires a value/)
+    expect(() => resolveSceneFilter(['--scene', '--baseline'], undefined)).toThrow(
+      /requires a value/,
+    )
+    expect(() => resolveSceneFilter(['--only'], 'env')).toThrow(/requires a value/)
+  })
 })
 
 describe('selectScenes', () => {

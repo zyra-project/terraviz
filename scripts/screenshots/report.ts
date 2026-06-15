@@ -155,7 +155,15 @@ export function resolveSceneFilter(
 ): string | undefined {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
-    if (arg === '--scene' || arg === '--only') return argv[i + 1]
+    if (arg === '--scene' || arg === '--only') {
+      const value = argv[i + 1]
+      // A bare flag (no value, or another flag next) would silently fall
+      // through to "all scenes" and waste a full capture run — fail loudly.
+      if (value === undefined || value.startsWith('--')) {
+        throw new Error(`${arg} requires a value, e.g. "${arg} tools-menu".`)
+      }
+      return value
+    }
     const m = /^--(?:scene|only)=(.*)$/.exec(arg)
     if (m) return m[1]
   }
@@ -163,10 +171,11 @@ export function resolveSceneFilter(
 }
 
 /**
- * Narrow the scene list to a comma-separated set of names, preserving
- * the manifest order. Throws on an unknown name (with the available set)
- * so a typo fails loudly rather than silently capturing nothing.
- * A blank/undefined filter selects everything. Exported for tests.
+ * Narrow the scene list to a comma-separated set of names, returned in
+ * the order requested (e.g. `c,a` → `[c, a]`), de-duped. Throws on an
+ * unknown name (with the available set) so a typo fails loudly rather
+ * than silently capturing nothing. A blank/undefined filter selects
+ * everything. Exported for tests.
  */
 export function selectScenes(
   all: readonly Scene[],
@@ -211,9 +220,10 @@ async function captureShot(
       let cropFile: string | undefined
       if (scene.crop) {
         cropFile = `${scene.name}-${pass.label}-crop.png`
-        await page.locator(scene.crop).first().screenshot({
-          path: resolve(OUT_DIR, cropFile),
-        })
+        await screenshotWithRetry(
+          page.locator(scene.crop).first(),
+          resolve(OUT_DIR, cropFile),
+        )
       }
       return {
         scene: scene.name,

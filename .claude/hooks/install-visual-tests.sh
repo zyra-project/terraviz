@@ -28,8 +28,14 @@ fi
 
 # 2. Playwright Chromium — only when the binary is absent. Honour
 #    PLAYWRIGHT_BROWSERS_PATH (set to /opt/pw-browsers in this env),
-#    falling back to Playwright's default cache location.
-browsers_dir="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"
+#    falling back to Playwright's default cache location. The special
+#    value "0" means "install inside the npm package" — point the check
+#    there so a warm container in that config isn't re-downloaded.
+case "${PLAYWRIGHT_BROWSERS_PATH:-}" in
+  0)  browsers_dir="node_modules/playwright-core/.local-browsers" ;;
+  "") browsers_dir="$HOME/.cache/ms-playwright" ;;
+  *)  browsers_dir="$PLAYWRIGHT_BROWSERS_PATH" ;;
+esac
 if ! ls "$browsers_dir"/chromium-* >/dev/null 2>&1; then
   npx --yes playwright install chromium >/dev/null 2>&1 || true
 fi

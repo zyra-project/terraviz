@@ -160,11 +160,19 @@ export async function withScenePage<T>(
  * area is byte-identical and contributes zero diff.
  */
 export async function screenshotWithRetry(
-  page: Page,
+  target: Page | Locator,
   path: string,
   extra: { mask?: Locator[] } = {},
 ): Promise<Buffer> {
-  const opts = { path, animations: 'disabled', timeout: 20_000, ...extra } as const
+  // Accepts a `Page` (full-viewport shot, supports `mask`) or a `Locator`
+  // (element crop — `Locator.screenshot` has no `mask` option). Both get
+  // the same animation-disable + retry treatment so crops are as stable
+  // as full shots.
+  const isPage = 'goto' in target
+  const page = isPage ? target : target.page()
+  const opts = isPage
+    ? ({ path, animations: 'disabled', timeout: 20_000, ...extra } as const)
+    : ({ path, animations: 'disabled', timeout: 20_000 } as const)
   const attempts = 3
   let lastErr: unknown
   for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -172,7 +180,7 @@ export async function screenshotWithRetry(
     // settle (the previous attempt's stall often clears on its own).
     if (attempt > 1) await page.waitForTimeout(750)
     try {
-      return await page.screenshot(opts)
+      return await target.screenshot(opts)
     } catch (err) {
       lastErr = err
       const msg = err instanceof Error ? err.message : String(err)

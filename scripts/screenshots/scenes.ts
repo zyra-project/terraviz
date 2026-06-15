@@ -152,14 +152,22 @@ async function openGlobe(page: Page): Promise<void> {
   const viewportWidth = page.viewportSize()?.width ?? 0
   if (viewportWidth >= 769) {
     await overlay.waitFor({ state: 'visible', timeout: 15000 })
-    for (let i = 0; i < 8; i++) {
+    let hidden = false
+    for (let i = 0; i < 8 && !hidden; i++) {
       await close.click().catch(() => {})
-      try {
-        await overlay.waitFor({ state: 'hidden', timeout: 750 })
-        break
-      } catch {
-        // Not hidden yet — retry.
-      }
+      hidden = await overlay
+        .waitFor({ state: 'hidden', timeout: 750 })
+        .then(() => true)
+        .catch(() => false)
+    }
+    // Fail loudly rather than proceeding with the overlay still up — it
+    // would intercept clicks on the Tools bar and surface as an opaque
+    // click-timeout deep in the scene's setup.
+    if (!hidden) {
+      throw new Error(
+        'openGlobe: Browse overlay did not close after retries — it would ' +
+          'intercept clicks on the Tools bar.',
+      )
     }
   }
   await page.locator('#tools-menu-toggle').waitFor({ state: 'visible' })
