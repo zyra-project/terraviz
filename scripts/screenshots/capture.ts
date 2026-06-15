@@ -291,6 +291,17 @@ async function captureScene(
   })
 }
 
+/**
+ * Scenes this (Weblate string-screenshot) capturer should run — every
+ * scene except those opted out via `Scene.skipWeblate`. Heavy-WebGL
+ * scenes (the globe) are opted out because this capturer reuses one
+ * long-lived browser and takes full-page screenshots: the globe's GPU
+ * pressure makes the following scenes' captures fail. Exported for tests.
+ */
+export function weblateScenes(all: readonly Scene[] = scenes): Scene[] {
+  return all.filter((s) => !s.skipWeblate)
+}
+
 async function run(): Promise<void> {
   const viewport = parseViewport()
 
@@ -299,9 +310,11 @@ async function run(): Promise<void> {
   await rm(OUT_DIR, { recursive: true, force: true })
   await mkdir(OUT_DIR, { recursive: true })
 
+  const captureList = weblateScenes()
+
   // eslint-disable-next-line no-console
   console.log(
-    `Capturing ${scenes.length} scene(s) from ${BASE_URL} ` +
+    `Capturing ${captureList.length} scene(s) from ${BASE_URL} ` +
       `at ${viewport.width}x${viewport.height} → ${OUT_DIR}`,
   )
 
@@ -314,7 +327,7 @@ async function run(): Promise<void> {
   try {
     // Serial: scenes are cheap and serial keeps the log readable and
     // the trace unambiguous (one page in flight at a time).
-    for (const scene of scenes) {
+    for (const scene of captureList) {
       try {
         const results = await captureScene(browser, scene, viewport, croppedKeys)
         captured.push(...results)

@@ -48,6 +48,18 @@ export interface Scene {
    */
   crop?: string
   /**
+   * Opt this scene out of the Weblate string-screenshot capturer
+   * (`capture.ts`) — it is still captured by the report capturer.
+   *
+   * Use for scenes whose heavy WebGL rendering (the globe) destabilizes
+   * the Weblate capturer's long-lived shared browser: that capturer
+   * takes *full-page* screenshots, and the globe's GPU pressure makes
+   * the *following* scenes' captures fail with Chromium's "Unable to
+   * capture screenshot". The report capturer is unaffected — it takes
+   * viewport screenshots and masks the globe (`#map-grid`).
+   */
+  skipWeblate?: boolean
+  /**
    * Selectors for non-deterministic regions to mask out of the visual
    * regression diff (the WebGL globe, MapLibre tiles, a force-directed
    * graph). Consumed by the report capturer's `screenshot({ mask })`;
@@ -265,6 +277,11 @@ export const scenes: Scene[] = [
     // The popover is the focus; emit a tight crop of it alongside the
     // full-viewport shot.
     crop: '#tools-menu-popover',
+    // The full globe renders behind the popover. In the Weblate
+    // capturer (long-lived shared browser, full-page screenshots) that
+    // GPU load makes the *following* scenes' captures fail, so opt this
+    // scene out there — it still runs in the report capturer.
+    skipWeblate: true,
     async setup(page) {
       await openGlobe(page)
       await page.locator('#tools-menu-toggle').click()
