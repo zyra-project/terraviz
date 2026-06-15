@@ -62,6 +62,15 @@ export interface Scene {
    * capture at every viewport.
    */
   minWidth?: number
+  /**
+   * This scene's state is *forced* by fixtures (an empty list, a 500
+   * error) and cannot be reproduced against a real backend. The report
+   * capturer skips it when fixtures are disabled (the authenticated live
+   * deploy-report run), where it would otherwise hang waiting for a state
+   * the live data never reaches. The Weblate capturer always runs it (it
+   * is always local + stubbed).
+   */
+  requiresFixtures?: boolean
 }
 
 /** Open the catalog landing surface (the Browse overlay). */
@@ -313,6 +322,7 @@ export const scenes: Scene[] = [
     name: 'publish-datasets-empty',
     description: 'Publisher portal — datasets list, empty state',
     fixtures: publisherFixtures({ datasets: 'empty' }),
+    requiresFixtures: true,
     async setup(page) {
       await openPublish(page, '/publish/datasets')
       await page.locator('.publisher-empty-message').first().waitFor()
@@ -322,6 +332,7 @@ export const scenes: Scene[] = [
     name: 'publish-datasets-error',
     description: 'Publisher portal — datasets list, server-error card',
     fixtures: publisherFixtures({ datasets: 'error' }),
+    requiresFixtures: true,
     async setup(page) {
       await openPublish(page, '/publish/datasets')
       await page.locator('.publisher-error').first().waitFor()
@@ -331,6 +342,7 @@ export const scenes: Scene[] = [
     name: 'publish-workflows-empty',
     description: 'Publisher portal — workflows list, empty state',
     fixtures: publisherFixtures({ workflows: 'empty' }),
+    requiresFixtures: true,
     async setup(page) {
       await openPublish(page, '/publish/workflows')
       await page.locator('.publisher-empty-message').first().waitFor()
@@ -340,6 +352,7 @@ export const scenes: Scene[] = [
     name: 'admin-users-empty',
     description: 'Admin — Users tab, empty state',
     fixtures: publisherFixtures({ admin: true, publishers: 'empty' }),
+    requiresFixtures: true,
     async setup(page) {
       await openPublish(page, '/publish/users')
       await page.locator('.publisher-empty').first().waitFor()

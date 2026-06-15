@@ -83,8 +83,24 @@ function renderProblems(s: SceneSignals): string {
     lines.push(`<li class="warn">request failed (${escapeHtml(r.failure)}): ${escapeHtml(r.url)}</li>`)
   for (const r of s.badResponses)
     lines.push(`<li class="warn">HTTP ${r.status}: ${escapeHtml(r.url)}</li>`)
-  for (const v of s.axeViolations ?? [])
-    lines.push(`<li class="a11y">a11y ${escapeHtml(v.impact ?? 'n/a')} — ${escapeHtml(v.id)} (${v.nodes} node(s))</li>`)
+  for (const v of s.axeViolations ?? []) {
+    // Link the rule id to its axe/Deque docs; list the offending node
+    // selectors in an expandable <details> so the failure is locatable.
+    const rule = v.helpUrl
+      ? `<a href="${escapeHtml(v.helpUrl)}" target="_blank" rel="noopener">${escapeHtml(v.id)}</a>`
+      : escapeHtml(v.id)
+    // `targets` may be absent on an older persisted report.json.
+    const targets = v.targets ?? []
+    const where =
+      targets.length > 0
+        ? `<details><summary>${v.nodes} node(s)</summary><ul class="a11y-targets">` +
+          targets.map((t) => `<li><code>${escapeHtml(t)}</code></li>`).join('') +
+          '</ul></details>'
+        : `(${v.nodes} node(s))`
+    lines.push(
+      `<li class="a11y">a11y ${escapeHtml(v.impact ?? 'n/a')} — ${rule} ${where}</li>`,
+    )
+  }
   for (const w of s.consoleWarnings) lines.push(`<li class="muted">console warning: ${escapeHtml(w)}</li>`)
   if (lines.length === 0) return ''
   return `<ul class="problems">${lines.join('')}</ul>`
@@ -233,6 +249,11 @@ export function renderReportHtml(
   ul.problems li { padding: .12rem 0; }
   li.err { color: #ff7b72; } li.warn { color: #e3b341; }
   li.a11y { color: #79c0ff; } li.muted { color: #8b949e; }
+  li.a11y a { color: #79c0ff; text-decoration: underline; }
+  li.a11y details { display: inline-block; vertical-align: top; }
+  li.a11y summary { cursor: pointer; color: #8b949e; }
+  ul.a11y-targets { margin: .2rem 0 .2rem 1rem; padding: 0; list-style: disc; }
+  ul.a11y-targets code { color: #adbac7; word-break: break-all; }
 </style>
 </head>
 <body>

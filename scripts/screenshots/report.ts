@@ -214,6 +214,14 @@ async function run(): Promise<void> {
           )
           continue
         }
+        // Forced-state scenes (empty list / 500) only exist with stubs;
+        // against a real backend (authenticated live run, fixtures off)
+        // they'd hang waiting for a state the live data never reaches.
+        if (scene.requiresFixtures && !USE_FIXTURES) {
+          // eslint-disable-next-line no-console
+          console.log(`↷ ${scene.name} @ ${pass.label} (needs fixtures)`)
+          continue
+        }
         try {
           const shot = await captureShot(browser, scene, pass)
           shots.push(shot)
