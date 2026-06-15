@@ -1,0 +1,39 @@
+name: Design Round-Trip (advisory)
+
+# Advisory reverse-sync fidelity gate (docs/DESIGN_SYNC_PLAN.md §4 R1).
+# Runs the seed → export → reconcile → diff round-trip and asserts an
+# empty diff for round-trippable tokens with the hostile set restored
+# byte-identical. Deliberately NON-gating: the Penpot MCP is pre-beta and
+# the live export can't run in CI, so a regression here should surface as
+# a signal, not block merges. (The reconcile/reader unit tests in the
+# normal `npm run test` job ARE gating — this job covers the end-to-end
+# round-trip against the simulated post-seed graph.)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tokens/**'
+      - 'scripts/sync-penpot-*.ts'
+      - 'scripts/read-penpot.ts'
+      - 'scripts/penpot-reconcile.ts'
+      - 'scripts/check-design-roundtrip.ts'
+      - '.github/workflows/design-roundtrip.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  round-trip:
+    name: Reverse-sync fidelity (advisory)
+    runs-on: ubuntu-latest
+    # Advisory: surface a regression without blocking the PR.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check:design-roundtrip
