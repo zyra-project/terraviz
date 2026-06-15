@@ -1,4 +1,12 @@
 {
+  "permissions": {
+    "allow": [
+      "mcp__PenPot__high_level_overview",
+      "mcp__PenPot__penpot_api_info",
+      "mcp__PenPot__execute_code",
+      "mcp__PenPot__export_shape"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {
