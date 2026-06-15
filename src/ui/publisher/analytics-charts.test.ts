@@ -72,6 +72,26 @@ describe('renderBarSeries', () => {
     expect(heights[0]).toBe(0)
     expect(heights[2]).toBeGreaterThanOrEqual(2) // minimum visible sliver
   })
+
+  it('coerces a non-finite datum to 0 instead of emitting NaN coordinates', () => {
+    // A missing/NaN count in the source data must not make Math.max
+    // propagate NaN into every line/rect/text coordinate.
+    const svg = renderBarSeries(
+      [
+        { label: 'a', value: 5 },
+        { label: 'b', value: NaN },
+        { label: 'c', value: undefined as unknown as number },
+      ],
+      { ariaLabel: 'x' },
+    )
+    const coords = [
+      ...[...svg.querySelectorAll('line')].flatMap(l => [l.getAttribute('y1'), l.getAttribute('y2')]),
+      ...[...svg.querySelectorAll('rect')].flatMap(r => [r.getAttribute('y'), r.getAttribute('height')]),
+      ...[...svg.querySelectorAll('text')].map(t => t.getAttribute('y')),
+    ]
+    expect(coords.length).toBeGreaterThan(0)
+    for (const c of coords) expect(Number.isFinite(parseFloat(c!))).toBe(true)
+  })
 })
 
 describe('renderBarSeries range labels', () => {

@@ -75,7 +75,13 @@ export function renderBarSeries(
   svg.setAttribute('aria-label', options.ariaLabel)
   if (points.length === 0) return svg
 
-  const max = Math.max(...points.map(p => p.value), 1)
+  // Coerce a non-finite datum (a missing / NaN count in the source
+  // data) to 0. Without this, `Math.max` propagates the NaN —
+  // `Math.max(NaN, 1) === NaN` — and every coordinate below becomes
+  // NaN, flooding the console with `<rect> attribute y: Expected
+  // length, "NaN"` and rendering a blank chart.
+  const valueOf = (p: BarPoint): number => (Number.isFinite(p.value) ? p.value : 0)
+  const max = Math.max(...points.map(valueOf), 1)
   // value → plot y. The bar of height `value/max·(height-4)` sits at
   // `height - h`, so value=max lands at y=4 and value=0 at y=height.
   const yFor = (value: number): number => height - (value / max) * (height - 4)
@@ -107,7 +113,8 @@ export function renderBarSeries(
   const step = PLOT_WIDTH / points.length
   const barWidth = Math.max(1, Math.min(step - 2, 28))
   points.forEach((p, i) => {
-    const h = Math.max(p.value > 0 ? 2 : 0, (p.value / max) * (height - 4))
+    const value = valueOf(p)
+    const h = Math.max(value > 0 ? 2 : 0, (value / max) * (height - 4))
     const rect = svgEl('rect', {
       x: Y_AXIS_GUTTER + i * step + (step - barWidth) / 2,
       y: height - h,
@@ -117,7 +124,7 @@ export function renderBarSeries(
       class: 'publisher-analytics-bar',
     })
     const title = svgEl('title')
-    title.textContent = `${p.label} — ${formatNumber(Math.round(p.value))}`
+    title.textContent = `${p.label} — ${formatNumber(Math.round(value))}`
     rect.appendChild(title)
     svg.appendChild(rect)
   })
