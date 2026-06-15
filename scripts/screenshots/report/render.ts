@@ -133,6 +133,12 @@ function renderDiffTriptych(d: DiffComparison): string {
   return `<div class="diff-row">${cells.join('')}</div>`
 }
 
+/** Element-crop companion thumbnail, when the scene declared a `crop`. */
+function renderCrop(shot: ReportShot): string {
+  if (!shot.cropFile) return ''
+  return `<div class="crop-row"><figure><figcaption>crop</figcaption><a href="${escapeHtml(shot.cropFile)}" target="_blank" rel="noopener"><img loading="lazy" src="${escapeHtml(shot.cropFile)}" alt="${escapeHtml(shot.scene)} crop (${escapeHtml(shot.viewport)})" /></a></figure></div>`
+}
+
 function renderShot(shot: ReportShot, diff?: DiffComparison): string {
   const sum = summarizeSignals(shot.signals)
   const badges =
@@ -151,6 +157,7 @@ function renderShot(shot: ReportShot, diff?: DiffComparison): string {
         <a href="${escapeHtml(shot.file)}" target="_blank" rel="noopener">
           <img loading="lazy" src="${escapeHtml(shot.file)}" alt="${escapeHtml(shot.scene)} (${escapeHtml(shot.viewport)})" />
         </a>
+        ${renderCrop(shot)}
         ${diff ? renderDiffTriptych(diff) : ''}
         ${renderProblems(shot.signals)}
       </figure>`
@@ -229,6 +236,10 @@ export function renderReportHtml(
   figure.shot { margin: 0; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; background: #161b22; }
   figure.has-problems { border-color: #6e2630; }
   figure.changed { border-color: #9e6a00; }
+  .crop-row { padding: .4rem; border-top: 1px solid #30363d; }
+  .crop-row figure { margin: 0; }
+  .crop-row figcaption { padding: .25rem .4rem; color: #8b949e; border: none; font-size: .72rem; }
+  .crop-row img { border: 1px solid #30363d; background: #161b22; }
   .diff-row { display: grid; grid-template-columns: 1fr 1fr; gap: .4rem; padding: .4rem;
     border-top: 1px solid #30363d; }
   .diff-row figure { margin: 0; }

@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import { padClip, slugKey } from './capture'
+import { padClip, slugKey, weblateScenes } from './capture'
+import { scenes, type Scene } from './scenes'
+
+const fakeScene = (name: string, over: Partial<Scene> = {}): Scene => ({
+  name,
+  description: name,
+  setup: async () => {},
+  ...over,
+})
 
 describe('capture helpers', () => {
   describe('slugKey', () => {
@@ -52,6 +60,32 @@ describe('capture helpers', () => {
       )
       expect(clip.width).toBe(0)
       expect(clip.height).toBe(0)
+    })
+  })
+
+  describe('weblateScenes', () => {
+    it('drops scenes opted out via skipWeblate, keeps the rest in order', () => {
+      const list = [
+        fakeScene('a'),
+        fakeScene('b', { skipWeblate: true }),
+        fakeScene('c'),
+      ]
+      expect(weblateScenes(list).map((s) => s.name)).toEqual(['a', 'c'])
+    })
+
+    it('returns all scenes when none opt out', () => {
+      const list = [fakeScene('a'), fakeScene('b')]
+      expect(weblateScenes(list)).toHaveLength(2)
+    })
+
+    it('excludes the WebGL-heavy tools-menu scene from the real manifest', () => {
+      const names = weblateScenes().map((s) => s.name)
+      expect(names).not.toContain('tools-menu')
+      // A non-opted-out scene is still present.
+      expect(names).toContain('orbit-settings')
+      expect(weblateScenes().length).toBe(
+        scenes.filter((s) => !s.skipWeblate).length,
+      )
     })
   })
 })

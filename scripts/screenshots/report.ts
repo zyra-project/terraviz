@@ -139,6 +139,65 @@ export function parseViewportMatrix(
   return passes
 }
 
+/**
+ * Resolve the scene filter from the CLI / environment, or `undefined`
+ * for "all scenes". Accepts `--scene a,b`, `--scene=a,b`, `--only a`
+ * (argv) or the `VISUAL_ONLY` env var; argv wins. Exported for tests.
+ *
+ * This is the single-panel fast path: capturing one surface reuses the
+ * maintained scene navigation / fixtures / masks instead of an ad-hoc
+ * throwaway script. Example:
+ *     npm run screenshots:report -- --scene tools-menu
+ */
+export function resolveSceneFilter(
+  argv: readonly string[] = process.argv.slice(2),
+  env: string | undefined = process.env.VISUAL_ONLY,
+): string | undefined {
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]
+    if (arg === '--scene' || arg === '--only') {
+      const value = argv[i + 1]
+      // A bare flag (no value, or another flag next) would silently fall
+      // through to "all scenes" and waste a full capture run — fail loudly.
+      if (value === undefined || value.startsWith('--')) {
+        throw new Error(`${arg} requires a value, e.g. "${arg} tools-menu".`)
+      }
+      return value
+    }
+    const m = /^--(?:scene|only)=(.*)$/.exec(arg)
+    if (m) return m[1]
+  }
+  return env
+}
+
+/**
+ * Narrow the scene list to a comma-separated set of names, returned in
+ * the order requested (e.g. `c,a` → `[c, a]`), de-duped. Throws on an
+ * unknown name (with the available set) so a typo fails loudly rather
+ * than silently capturing nothing. A blank/undefined filter selects
+ * everything. Exported for tests.
+ */
+export function selectScenes(
+  all: readonly Scene[],
+  filter: string | undefined,
+): Scene[] {
+  const wanted = (filter ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  if (wanted.length === 0) return [...all]
+  const byName = new Map(all.map((s) => [s.name, s]))
+  const missing = wanted.filter((name) => !byName.has(name))
+  if (missing.length > 0) {
+    throw new Error(
+      `Unknown scene(s): ${missing.join(', ')}. Available: ` +
+        all.map((s) => s.name).join(', '),
+    )
+  }
+  // De-dupe while preserving the order the names were requested in.
+  return [...new Set(wanted)].map((name) => byName.get(name)!)
+}
+
 async function captureShot(
   browser: Browser,
   scene: Scene,
@@ -157,6 +216,15 @@ async function captureShot(
       const file = `${scene.name}-${pass.label}.png`
       const mask = (scene.masks ?? []).map((sel) => page.locator(sel))
       const png = await screenshotWithRetry(page, resolve(OUT_DIR, file), { mask })
+      // Optional tightly-cropped companion shot focused on one element.
+      let cropFile: string | undefined
+      if (scene.crop) {
+        cropFile = `${scene.name}-${pass.label}-crop.png`
+        await screenshotWithRetry(
+          page.locator(scene.crop).first(),
+          resolve(OUT_DIR, cropFile),
+        )
+      }
       return {
         scene: scene.name,
         description: scene.description,
@@ -165,6 +233,7 @@ async function captureShot(
         height: pass.viewport.height,
         file,
         sha256: sha256(png),
+        ...(cropFile ? { cropFile } : {}),
         signals: collector.signals,
       }
     },
@@ -173,6 +242,7 @@ async function captureShot(
 
 async function run(): Promise<void> {
   const passes = parseViewportMatrix()
+  const selected = selectScenes(scenes, resolveSceneFilter())
 
   // Half-configured auth is almost always a mistake — warn (without
   // printing the values) so a one-secret CI/local run is easy to
@@ -192,8 +262,11 @@ async function run(): Promise<void> {
 
   // eslint-disable-next-line no-console
   console.log(
-    `Capturing ${scenes.length} scene(s) × ${passes.length} viewport(s) ` +
+    `Capturing ${selected.length} scene(s) × ${passes.length} viewport(s) ` +
       `from ${BASE_URL} → ${OUT_DIR}` +
+      (selected.length < scenes.length
+        ? ` (filtered to: ${selected.map((s) => s.name).join(', ')})`
+        : '') +
       (ACCESS_HEADERS
         ? ' (authenticated via CF Access service token; fixtures disabled)'
         : ''),
@@ -204,7 +277,7 @@ async function run(): Promise<void> {
   let failed = 0
   try {
     for (const pass of passes) {
-      for (const scene of scenes) {
+      for (const scene of selected) {
         // Skip surfaces the product hides below their min width (e.g.
         // Graph / Timeline on portrait phones) — a skip, not a failure.
         if (scene.minWidth && pass.viewport.width < scene.minWidth) {

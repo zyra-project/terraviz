@@ -23,6 +23,12 @@ export interface ReportShot {
   /** PNG filename within the report output directory. */
   file: string
   sha256: string
+  /**
+   * Element-crop PNG filename (`<scene>-<viewport>-crop.png`), present
+   * only when the scene declares a `crop` selector. A tightly-cropped
+   * companion to `file` focused on one component.
+   */
+  cropFile?: string
   /** Problems observed while the scene was on screen. */
   signals: SceneSignals
 }

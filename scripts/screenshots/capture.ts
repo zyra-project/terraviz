@@ -291,6 +291,17 @@ async function captureScene(
   })
 }
 
+/**
+ * Scenes this (Weblate string-screenshot) capturer should run — every
+ * scene except those opted out via `Scene.skipWeblate`. Heavy-WebGL
+ * scenes (the globe) are opted out because this capturer reuses one
+ * long-lived browser and takes full-page screenshots: the globe's GPU
+ * pressure makes the following scenes' captures fail. Exported for tests.
+ */
+export function weblateScenes(all: readonly Scene[] = scenes): Scene[] {
+  return all.filter((s) => !s.skipWeblate)
+}
+
 async function run(): Promise<void> {
   const viewport = parseViewport()
 
@@ -299,22 +310,47 @@ async function run(): Promise<void> {
   await rm(OUT_DIR, { recursive: true, force: true })
   await mkdir(OUT_DIR, { recursive: true })
 
+  const captureList = weblateScenes()
+
   // eslint-disable-next-line no-console
   console.log(
-    `Capturing ${scenes.length} scene(s) from ${BASE_URL} ` +
+    `Capturing ${captureList.length} scene(s) from ${BASE_URL} ` +
       `at ${viewport.width}x${viewport.height} → ${OUT_DIR}`,
   )
 
-  const browser = await launchBrowser()
+  // Hardening for the long capture run: taking ~25 full-page
+  // screenshots in one browser accumulates renderer resources
+  // (notably /dev/shm in containerized CI, plus compositor memory)
+  // until `Page.captureScreenshot` fails in a block of scenes, then
+  // recovers once they're reclaimed. `--disable-dev-shm-usage` moves
+  // that scratch space to /tmp, and we recycle the browser every few
+  // scenes so nothing accumulates far enough to fail. Both are
+  // render-neutral (no GPU/rendering flags). See PR #201.
+  const BROWSER_ARGS = ['--disable-dev-shm-usage']
+  // Recycle frequently: at every-5 a single scene still failed when its
+  // batch followed ~4 WebGL-heavy scenes (browse-graph/timeline/map +
+  // orbit-settings), just over the exhaustion threshold. Every-3 keeps
+  // at most ~2 heavy scenes per browser, well under it.
+  const RECYCLE_EVERY = 3
+
+  let browser = await launchBrowser({ args: BROWSER_ARGS })
   const captured: CapturedScene[] = []
   // Shared across scenes so each distinct string is cropped once
   // (first scene that renders it visibly wins).
   const croppedKeys = new Set<string>()
   let failed = 0
+  let sinceLaunch = 0
   try {
     // Serial: scenes are cheap and serial keeps the log readable and
     // the trace unambiguous (one page in flight at a time).
-    for (const scene of scenes) {
+    for (const scene of captureList) {
+      // Recycle the browser to release accumulated renderer resources
+      // before they exhaust (see BROWSER_ARGS note above).
+      if (sinceLaunch >= RECYCLE_EVERY) {
+        await browser.close()
+        browser = await launchBrowser({ args: BROWSER_ARGS })
+        sinceLaunch = 0
+      }
       try {
         const results = await captureScene(browser, scene, viewport, croppedKeys)
         captured.push(...results)
@@ -332,6 +368,7 @@ async function run(): Promise<void> {
         // eslint-disable-next-line no-console
         console.error(`✗ ${scene.name}: ${msg}`)
       }
+      sinceLaunch++
     }
   } finally {
     await browser.close()

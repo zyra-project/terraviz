@@ -320,7 +320,7 @@ design: [`docs/VISUAL_REPORT_PLAN.md`](docs/VISUAL_REPORT_PLAN.md).
 
 | Command | What it does |
 |---|---|
-| `npm run screenshots:report` | Captures every scene × viewport (desktop + mobile) into a self-contained `report-out/index.html` gallery with per-scene problem badges (console/page errors, failed requests, optional `VISUAL_AXE` a11y). The local visual-debug surface. |
+| `npm run screenshots:report` | Captures every scene × viewport (desktop + mobile) into a self-contained `report-out/index.html` gallery with per-scene problem badges (console/page errors, failed requests, optional `VISUAL_AXE` a11y). The local visual-debug surface. Add `-- --scene <name>[,<name>]` (or `VISUAL_ONLY=`) to capture just one surface while iterating on it — reuses the scene's maintained navigation/fixtures/masks instead of an ad-hoc script. |
 | `npm run screenshots:diff -- --baseline <dir>` | Pixel-diffs the current `report-out/` against a baseline PNG dir (masked regions excluded); advisory. |
 | `npm run screenshots:smoke` | Gating interaction tests — search, Orbit's local engine, navigation, a fixture-backed publisher page. |
 | `npm run screenshots:capture` | The Weblate translator-screenshot capture (separate output + uploader). |

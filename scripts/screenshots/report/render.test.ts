@@ -191,4 +191,19 @@ describe('renderReportHtml', () => {
     expect(html.match(/id="scene-catalog-landing"/g)).toHaveLength(1)
     expect(html.match(/<figure class="shot/g)).toHaveLength(2)
   })
+
+  it('renders the element-crop companion when cropFile is present', () => {
+    const html = renderReportHtml(
+      manifest([shot({ cropFile: 'tools-menu-desktop-crop.png' })]),
+    )
+    expect(html).toContain('class="crop-row"')
+    expect(html).toContain('src="tools-menu-desktop-crop.png"')
+  })
+
+  it('omits the crop row when no cropFile is set', () => {
+    const html = renderReportHtml(manifest([shot()]))
+    // The `.crop-row` CSS rule is always in <style>; assert the element
+    // markup is absent.
+    expect(html).not.toContain('<div class="crop-row"')
+  })
 })

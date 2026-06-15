@@ -8,7 +8,7 @@
  * key trace, runs `setup()`, reads which i18n keys the scene
  * rendered (`window.__i18nTrace`), and screenshots the viewport.
  *
- * Keep scenes coarse — one per meaningful UI surface, ~15–25 total
+ * Keep scenes coarse — one per meaningful UI surface, ~15–30 total
  * at full coverage. The string→screenshot association falls out of
  * the capture automatically (via the `VITE_I18N_TRACE` hook in
  * `src/i18n/screenshotTrace.ts`); you never list individual keys
@@ -38,6 +38,27 @@ export interface Scene {
   description: string
   /** Drive the app to the state to capture. */
   setup: (page: Page) => Promise<void>
+  /**
+   * Optional selector for a single element to *additionally* capture as
+   * a tightly-cropped PNG (`<scene>-<viewport>-crop.png`), alongside the
+   * full-viewport shot. Use it to make a component the focus of the
+   * report — a panel / popover / form — when the full viewport is mostly
+   * context. The report capturer crops to this element's bounding box;
+   * the Weblate capturer ignores it. The full shot is always captured.
+   */
+  crop?: string
+  /**
+   * Opt this scene out of the Weblate string-screenshot capturer
+   * (`capture.ts`) — it is still captured by the report capturer.
+   *
+   * Use for scenes whose heavy WebGL rendering (the globe) destabilizes
+   * the Weblate capturer's long-lived shared browser: that capturer
+   * takes *full-page* screenshots, and the globe's GPU pressure makes
+   * the *following* scenes' captures fail with Chromium's "Unable to
+   * capture screenshot". The report capturer is unaffected — it takes
+   * viewport screenshots and masks the globe (`#map-grid`).
+   */
+  skipWeblate?: boolean
   /**
    * Selectors for non-deterministic regions to mask out of the visual
    * regression diff (the WebGL globe, MapLibre tiles, a force-directed
@@ -101,6 +122,55 @@ async function openCatalog(page: Page): Promise<void> {
 async function openPublish(page: Page, path: string): Promise<void> {
   await gotoApp(page, path)
   await page.locator('#publisher-root .publisher-topbar').waitFor({ state: 'visible' })
+}
+
+/**
+ * Open the globe (Sphere) view with no dataset loaded.
+ *
+ * The desktop landing auto-opens the Browse overlay over the globe once
+ * the catalog data renders (a few seconds in); narrow viewports land on
+ * the globe with the overlay closed. We dismiss it on desktop so the
+ * Tools bar (and the playback transport / info panel) behind it is
+ * reachable. We deliberately do *not* load a dataset: dataset imagery is
+ * fetched from external tile/video hosts that aren't reachable in the
+ * offline CI capture, so the info-panel / playback surfaces (which only
+ * appear once a dataset loads) are out of scope here and would hang. The
+ * chrome that renders without a dataset — the Tools bar and its popover
+ * — is the target.
+ */
+async function openGlobe(page: Page): Promise<void> {
+  await gotoApp(page, '/')
+  const overlay = page.locator('#browse-overlay')
+  const close = page.locator('#browse-close')
+  // Only the desktop landing auto-opens the overlay (mirrors the app's
+  // 769px breakpoint used by the Graph/Timeline scenes' `minWidth`). On
+  // desktop, wait for it to open, then click close until it reports
+  // hidden — its close handler can wire a beat after the button paints,
+  // so a single early click sometimes misses, leaving the overlay
+  // intercepting clicks on the Tools bar behind it (`.hidden` =>
+  // display:none).
+  const viewportWidth = page.viewportSize()?.width ?? 0
+  if (viewportWidth >= 769) {
+    await overlay.waitFor({ state: 'visible', timeout: 15000 })
+    let hidden = false
+    for (let i = 0; i < 8 && !hidden; i++) {
+      await close.click().catch(() => {})
+      hidden = await overlay
+        .waitFor({ state: 'hidden', timeout: 750 })
+        .then(() => true)
+        .catch(() => false)
+    }
+    // Fail loudly rather than proceeding with the overlay still up — it
+    // would intercept clicks on the Tools bar and surface as an opaque
+    // click-timeout deep in the scene's setup.
+    if (!hidden) {
+      throw new Error(
+        'openGlobe: Browse overlay did not close after retries — it would ' +
+          'intercept clicks on the Tools bar.',
+      )
+    }
+  }
+  await page.locator('#tools-menu-toggle').waitFor({ state: 'visible' })
 }
 
 export const scenes: Scene[] = [
@@ -197,6 +267,45 @@ export const scenes: Scene[] = [
       await openCatalog(page)
       await page.locator('#browse-view-mode [data-view-mode="map"]').click()
       await page.locator('#browse-map:not(.hidden)').waitFor()
+    },
+  },
+
+  // ── Globe / immersive UI surfaces ─────────────────────────────
+  // The chrome that overlays the WebGL globe. No dataset is loaded
+  // (dataset imagery is network-gated and unreachable in offline
+  // capture — see openGlobe()), so these capture the surfaces that
+  // render without one.
+  {
+    name: 'tools-menu',
+    description:
+      'Globe view — Tools popover (view toggles, layout picker, Orbit settings entry)',
+    // The WebGL globe renders behind the popover and is
+    // non-deterministic (rotation, tiles) — mask it out of the diff.
+    masks: ['#map-grid'],
+    // The popover is the focus; emit a tight crop of it alongside the
+    // full-viewport shot.
+    crop: '#tools-menu-popover',
+    // The full globe renders behind the popover. In the Weblate
+    // capturer (long-lived shared browser, full-page screenshots) that
+    // GPU load makes the *following* scenes' captures fail, so opt this
+    // scene out there — it still runs in the report capturer.
+    skipWeblate: true,
+    async setup(page) {
+      await openGlobe(page)
+      await page.locator('#tools-menu-toggle').click()
+      await page.locator('#tools-menu-popover:not(.hidden)').waitFor()
+    },
+  },
+  {
+    name: 'orbit-settings',
+    description:
+      'Orbit chat — settings form (LLM endpoint, model, reading level)',
+    async setup(page) {
+      await openCatalog(page)
+      await page.locator('#browse-chat-btn').click()
+      await page.locator('#chat-panel').waitFor({ state: 'visible' })
+      await page.locator('#chat-settings-btn').click()
+      await page.locator('#chat-settings').waitFor({ state: 'visible' })
     },
   },
 
