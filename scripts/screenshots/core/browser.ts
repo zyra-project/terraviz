@@ -85,6 +85,16 @@ export async function gotoApp(page: Page, path: string): Promise<void> {
   await page.goto(path, { waitUntil: 'domcontentloaded' })
 }
 
+/** True when `url` is on the same origin as `baseURL`. Used to scope
+ *  injected auth headers to the first party. Malformed URLs → false. */
+export function isSameOrigin(url: string, baseURL: string): boolean {
+  try {
+    return new URL(url).origin === new URL(baseURL).origin
+  } catch {
+    return false
+  }
+}
+
 /**
  * Run `fn` against a fresh page in its own context, always closing the
  * context afterward. Centralizes the per-scene lifecycle so every
@@ -93,13 +103,35 @@ export async function gotoApp(page: Page, path: string): Promise<void> {
  */
 export async function withScenePage<T>(
   browser: Browser,
-  opts: { viewport: Viewport; baseURL: string },
+  opts: {
+    viewport: Viewport
+    baseURL: string
+    /** Headers (e.g. a Cloudflare Access service token) added **only**
+     *  to first-party requests — same origin as `baseURL`. Never sent to
+     *  third parties (tiles / CDNs / external APIs), so the token cannot
+     *  leak cross-origin. */
+    extraHTTPHeaders?: Record<string, string>
+  },
   fn: (page: Page) => Promise<T>,
 ): Promise<T> {
   const context = await browser.newContext({
     viewport: opts.viewport,
     baseURL: opts.baseURL,
   })
+  const headers = opts.extraHTTPHeaders
+  if (headers && Object.keys(headers).length > 0) {
+    // Scope the headers to the baseURL origin. Passing them to
+    // newContext() would attach them to *every* request — including the
+    // external tile/CDN hosts the app loads — leaking the secret.
+    await context.route('**/*', async (route) => {
+      const req = route.request()
+      if (isSameOrigin(req.url(), opts.baseURL)) {
+        await route.continue({ headers: { ...req.headers(), ...headers } })
+      } else {
+        await route.continue()
+      }
+    })
+  }
   const page = await context.newPage()
   try {
     return await fn(page)

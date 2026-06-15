@@ -97,6 +97,10 @@ export const scenes: Scene[] = [
   {
     name: 'catalog-landing',
     description: 'Dataset browser as the catalog landing surface, no filters applied',
+    // The "Right now" hero (heroService) re-rolls its dataset on each
+    // fresh capture, so its thumbnail/title differ run-to-run — mask it
+    // out of the diff (it's prominent on mobile and flapped the gate).
+    masks: ['#hero-panel'],
     async setup(page) {
       await openCatalog(page)
     },
