@@ -3,9 +3,9 @@ import { describe, expect, it } from 'vitest'
 import { scenes } from './scenes'
 
 describe('screenshot scene manifest', () => {
-  it('covers the high-traffic surface (~15–25 scenes)', () => {
+  it('covers the high-traffic surface (~15–30 scenes)', () => {
     expect(scenes.length).toBeGreaterThanOrEqual(15)
-    expect(scenes.length).toBeLessThanOrEqual(25)
+    expect(scenes.length).toBeLessThanOrEqual(30)
   })
 
   it('every scene has a unique name', () => {
@@ -43,6 +43,13 @@ describe('screenshot scene manifest', () => {
         'browse-map-view',
         'help-panel',
       ]),
+    )
+  })
+
+  it('covers the globe-overlay surfaces', () => {
+    const names = scenes.map((s) => s.name)
+    expect(names).toEqual(
+      expect.arrayContaining(['tools-menu', 'orbit-settings']),
     )
   })
 })

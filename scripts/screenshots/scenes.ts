@@ -8,7 +8,7 @@
  * key trace, runs `setup()`, reads which i18n keys the scene
  * rendered (`window.__i18nTrace`), and screenshots the viewport.
  *
- * Keep scenes coarse — one per meaningful UI surface, ~15–25 total
+ * Keep scenes coarse — one per meaningful UI surface, ~15–30 total
  * at full coverage. The string→screenshot association falls out of
  * the capture automatically (via the `VITE_I18N_TRACE` hook in
  * `src/i18n/screenshotTrace.ts`); you never list individual keys
@@ -101,6 +101,47 @@ async function openCatalog(page: Page): Promise<void> {
 async function openPublish(page: Page, path: string): Promise<void> {
   await gotoApp(page, path)
   await page.locator('#publisher-root .publisher-topbar').waitFor({ state: 'visible' })
+}
+
+/**
+ * Open the globe (Sphere) view with no dataset loaded.
+ *
+ * The desktop landing auto-opens the Browse overlay over the globe once
+ * the catalog data renders (a few seconds in); narrow viewports land on
+ * the globe with the overlay closed. We dismiss it on desktop so the
+ * Tools bar (and the playback transport / info panel) behind it is
+ * reachable. We deliberately do *not* load a dataset: dataset imagery is
+ * fetched from external tile/video hosts that aren't reachable in the
+ * offline CI capture, so the info-panel / playback surfaces (which only
+ * appear once a dataset loads) are out of scope here and would hang. The
+ * chrome that renders without a dataset — the Tools bar and its popover
+ * — is the target.
+ */
+async function openGlobe(page: Page): Promise<void> {
+  await gotoApp(page, '/')
+  const overlay = page.locator('#browse-overlay')
+  const close = page.locator('#browse-close')
+  // Only the desktop landing auto-opens the overlay (mirrors the app's
+  // 769px breakpoint used by the Graph/Timeline scenes' `minWidth`). On
+  // desktop, wait for it to open, then click close until it reports
+  // hidden — its close handler can wire a beat after the button paints,
+  // so a single early click sometimes misses, leaving the overlay
+  // intercepting clicks on the Tools bar behind it (`.hidden` =>
+  // display:none).
+  const viewportWidth = page.viewportSize()?.width ?? 0
+  if (viewportWidth >= 769) {
+    await overlay.waitFor({ state: 'visible', timeout: 15000 })
+    for (let i = 0; i < 8; i++) {
+      await close.click().catch(() => {})
+      try {
+        await overlay.waitFor({ state: 'hidden', timeout: 750 })
+        break
+      } catch {
+        // Not hidden yet — retry.
+      }
+    }
+  }
+  await page.locator('#tools-menu-toggle').waitFor({ state: 'visible' })
 }
 
 export const scenes: Scene[] = [
@@ -197,6 +238,37 @@ export const scenes: Scene[] = [
       await openCatalog(page)
       await page.locator('#browse-view-mode [data-view-mode="map"]').click()
       await page.locator('#browse-map:not(.hidden)').waitFor()
+    },
+  },
+
+  // ── Globe / immersive UI surfaces ─────────────────────────────
+  // The chrome that overlays the WebGL globe. No dataset is loaded
+  // (dataset imagery is network-gated and unreachable in offline
+  // capture — see openGlobe()), so these capture the surfaces that
+  // render without one.
+  {
+    name: 'tools-menu',
+    description:
+      'Globe view — Tools popover (view toggles, layout picker, Orbit settings entry)',
+    // The WebGL globe renders behind the popover and is
+    // non-deterministic (rotation, tiles) — mask it out of the diff.
+    masks: ['#map-grid'],
+    async setup(page) {
+      await openGlobe(page)
+      await page.locator('#tools-menu-toggle').click()
+      await page.locator('#tools-menu-popover:not(.hidden)').waitFor()
+    },
+  },
+  {
+    name: 'orbit-settings',
+    description:
+      'Orbit chat — settings form (LLM endpoint, model, reading level)',
+    async setup(page) {
+      await openCatalog(page)
+      await page.locator('#browse-chat-btn').click()
+      await page.locator('#chat-panel').waitFor({ state: 'visible' })
+      await page.locator('#chat-settings-btn').click()
+      await page.locator('#chat-settings').waitFor({ state: 'visible' })
     },
   },
 

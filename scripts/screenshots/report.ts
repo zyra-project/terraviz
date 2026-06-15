@@ -139,6 +139,56 @@ export function parseViewportMatrix(
   return passes
 }
 
+/**
+ * Resolve the scene filter from the CLI / environment, or `undefined`
+ * for "all scenes". Accepts `--scene a,b`, `--scene=a,b`, `--only a`
+ * (argv) or the `VISUAL_ONLY` env var; argv wins. Exported for tests.
+ *
+ * This is the single-panel fast path: capturing one surface reuses the
+ * maintained scene navigation / fixtures / masks instead of an ad-hoc
+ * throwaway script. Example:
+ *     npm run screenshots:report -- --scene tools-menu
+ */
+export function resolveSceneFilter(
+  argv: readonly string[] = process.argv.slice(2),
+  env: string | undefined = process.env.VISUAL_ONLY,
+): string | undefined {
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]
+    if (arg === '--scene' || arg === '--only') return argv[i + 1]
+    const m = /^--(?:scene|only)=(.*)$/.exec(arg)
+    if (m) return m[1]
+  }
+  return env
+}
+
+/**
+ * Narrow the scene list to a comma-separated set of names, preserving
+ * the manifest order. Throws on an unknown name (with the available set)
+ * so a typo fails loudly rather than silently capturing nothing.
+ * A blank/undefined filter selects everything. Exported for tests.
+ */
+export function selectScenes(
+  all: readonly Scene[],
+  filter: string | undefined,
+): Scene[] {
+  const wanted = (filter ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  if (wanted.length === 0) return [...all]
+  const byName = new Map(all.map((s) => [s.name, s]))
+  const missing = wanted.filter((name) => !byName.has(name))
+  if (missing.length > 0) {
+    throw new Error(
+      `Unknown scene(s): ${missing.join(', ')}. Available: ` +
+        all.map((s) => s.name).join(', '),
+    )
+  }
+  // De-dupe while preserving the order the names were requested in.
+  return [...new Set(wanted)].map((name) => byName.get(name)!)
+}
+
 async function captureShot(
   browser: Browser,
   scene: Scene,
@@ -173,6 +223,7 @@ async function captureShot(
 
 async function run(): Promise<void> {
   const passes = parseViewportMatrix()
+  const selected = selectScenes(scenes, resolveSceneFilter())
 
   // Half-configured auth is almost always a mistake — warn (without
   // printing the values) so a one-secret CI/local run is easy to
@@ -192,8 +243,11 @@ async function run(): Promise<void> {
 
   // eslint-disable-next-line no-console
   console.log(
-    `Capturing ${scenes.length} scene(s) × ${passes.length} viewport(s) ` +
+    `Capturing ${selected.length} scene(s) × ${passes.length} viewport(s) ` +
       `from ${BASE_URL} → ${OUT_DIR}` +
+      (selected.length < scenes.length
+        ? ` (filtered to: ${selected.map((s) => s.name).join(', ')})`
+        : '') +
       (ACCESS_HEADERS
         ? ' (authenticated via CF Access service token; fixtures disabled)'
         : ''),
@@ -204,7 +258,7 @@ async function run(): Promise<void> {
   let failed = 0
   try {
     for (const pass of passes) {
-      for (const scene of scenes) {
+      for (const scene of selected) {
         // Skip surfaces the product hides below their min width (e.g.
         // Graph / Timeline on portrait phones) — a skip, not a failure.
         if (scene.minWidth && pass.viewport.width < scene.minWidth) {
