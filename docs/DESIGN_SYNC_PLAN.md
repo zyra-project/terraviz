@@ -154,6 +154,15 @@ MCP-driven channel and a no-agent fallback. Crucially they converge on a
 **single reconcile + diff + PR step** — designers never hand-edit repo
 JSON, and there is exactly one place that knows the repo shape.
 
+**The reliability contract sits on channel B, not A** (Decision §5).
+The MCP is pre-beta and the `execute_code` bridge is the only
+programmatic read, so the agent-driven channel A is treated as an
+*accelerant* — preferred when an agent is present — while the
+channel-agnostic reconcile core must be **fully runnable from native
+export alone**. When the MCP flakes, the designer's Tokens → Export
+still produces a correct PR. "MCP primary" therefore means *preferred
+when available*, not *required*.
+
 ```
 (A) MCP exporter ──┐
                    ├──► reconcile ──► three-way diff ──► PR
@@ -165,8 +174,9 @@ JSON, and there is exactly one place that knows the repo shape.
 **reader** plugin JS. An agent (a Claude Code session) runs it through
 `execute_code`, receives the token/set/theme graph as JSON, hands it to
 the reconcile step, writes `tokens/*.json`, runs `npm run tokens`, and
-opens a PR. Lowest designer friction — the designer says "sync my Penpot
-changes" and reviews a PR — at the cost of an agent in the loop.
+opens a **draft** PR (Decision §5). Lowest designer friction — the
+designer says "sync my Penpot changes" and reviews a PR — at the cost of
+an agent in the loop.
 
 **Channel B — Native export (fallback).** The designer uses Penpot's
 built-in Tokens → Export JSON, drops the file(s) in a watched path, and
@@ -206,8 +216,13 @@ edits. The plan uses a **three-way** model:
 
 - **Base** = current `tokens/*.json` in the repo.
 - **Incoming** = the Penpot export (channel A or B).
-- **Ancestor** = a last-synced snapshot (a `tokens/.penpot-snapshot/`
-  copy written on every successful sync — *pending open question 3*).
+- **Ancestor** = the last-synced repo state, **anchored in git** —
+  *not* a duplicate snapshot directory. Each successful sync records the
+  producing commit's SHA + timestamp in a tiny
+  `tokens/.penpot-sync-state.json`; the reconcile step recovers the
+  ancestor with `git show <sha>:tokens/<file>`. This gives full
+  three-way detection without committing a redundant copy of every
+  token that would double the diff of every sync (Decision §5).
 
 Resolution:
 
@@ -218,10 +233,6 @@ Resolution:
   review.
 - Token present in Penpot but absent from repo schema → flag, do not
   auto-add (schema is repo-owned).
-
-If open question 3 resolves toward "no ancestor", the model degrades to
-two-way (designer-wins on visual tokens, repo-wins on hostile) — simpler,
-but blind to concurrent engineer edits.
 
 ### Round-trip fidelity verification (the acceptance gate)
 
@@ -313,9 +324,12 @@ generalizes before the round-trip is proven on one slice.
 | **R4 — layout sketch → spike** | Probe board/variant read; decide build-vs-non-goal per §3 | A written go/no-go; likely **no-go** on layout generation |
 
 **Dependencies.** R1 depends on R0 (don't generalize an unproven
-inverse). R2 depends on R1 (stable pipeline). R3 is independent and may
-be pulled earlier (*open question 5*). R4 is gated on R1–R3 and may be
-declared not-worth-it outright.
+inverse). R2 depends on R1 (stable pipeline). **R3 (spacing scale) is an
+independent parallel track, scheduled by appetite — deliberately *not*
+pulled earlier** (Decision §5): it is a churny migration touching every
+CSS file, and front-loading it would inject unrelated risk and diff-noise
+into the R0/R1 reverse-sync validation. R4 is gated on R1–R3 and may be
+declared not-worth-it outright. The critical path is R0 → R1 → R2.
 
 **The concrete first slice is `Components/Playback`** — a full component
 set that exercises dimension modes (tablet overrides) but, unlike chat,
@@ -339,6 +353,24 @@ proof that the reverse direction works against the live MCP.
 - **Scaling stops at tokens + breakpoint geometry in Penpot**; layout,
   animation, and structural CSS stay in code.
 
+**Resolved in review (2026-06-15)** — the five questions previously in §7:
+
+- **Reliability contract on channel B, not A.** Agent-in-the-loop is
+  accepted for the *preferred* path, but the reconcile core must run
+  fully from native export alone; the MCP exporter is an accelerant, not
+  a hard dependency. ("MCP primary" = preferred when available.)
+- **Auto-open a *draft* PR per sync** — branch `design-sync/<set-or-date>`,
+  CODEOWNERS-routed to a design-system reviewer, draft so a human always
+  promotes it. No-op (empty-diff) syncs open no PR.
+- **Three-way diff with a git-anchored ancestor** — record the last sync
+  commit SHA in `tokens/.penpot-sync-state.json` and recover the ancestor
+  via `git show`, rather than committing a duplicate snapshot directory.
+- **§3 ceiling held conservative** — tokens + breakpoint geometry in
+  Penpot, layout in code; R4 is a written go/no-go spike (expected
+  no-go), not a board → CSS build.
+- **R3 (spacing scale) stays a parallel track**, scheduled by appetite;
+  the critical path is R0 → R1 → R2.
+
 ---
 
 ## §6 Risks & mitigations
@@ -348,7 +380,7 @@ proof that the reverse direction works against the live MCP.
 | Pre-beta MCP instability / API drift | Exporter breaks silently | Fallback channel B; pin the probed API surface in R0; advisory (not gating) CI |
 | `theme.activeSets` read unreliable (cf. `addSet` was broken on the seeded version) | Wrong mode inversion | Verify in R0 before trusting theme composition; fall back to reading `Modes/*` sets by name |
 | Wrong focused Penpot file | Export reads the wrong library | Guard on `penpot.currentFile?.name` before any read (same operating note the seeders use) |
-| Designer value silently overwrites engineer edit | Lost work | Three-way diff with snapshot ancestor; loud PR flagging |
+| Designer value silently overwrites engineer edit | Lost work | Three-way diff with git-anchored ancestor; loud PR flagging |
 | Build-wrapping leaks into JSON | `var(--ui-scale)`/`max(` in tokens | Reconcile step strips + asserts; fidelity gate catches |
 | Scope creep into layout generation | Unbounded effort | §3 non-goals; R4 is a go/no-go spike, not a build |
 
@@ -356,21 +388,12 @@ proof that the reverse direction works against the live MCP.
 
 ## §7 Open questions
 
-1. **Agent-in-the-loop for the primary channel** — is it acceptable that
-   the low-friction reverse path *requires* a Claude Code session, or
-   must the primary path be designer-runnable with no agent (which would
-   make native export co-equal rather than fallback)?
-2. **PR mechanics** — open a real PR per sync, or write the JSON diff to
-   a branch for a human to PR? Any branch-naming / reviewer convention to
-   bake in?
-3. **Last-synced snapshot** — store a `tokens/.penpot-snapshot/`
-   ancestor for three-way conflict detection, or accept simpler two-way
-   "designer-wins-on-visual / repo-wins-on-hostile" with no ancestor?
-4. **Scope ceiling for §3** — stop at "tokens + breakpoint geometry in
-   Penpot, layout in code", or seriously scope Penpot-board → CSS layout
-   generation (with the non-goal argued either way)?
-5. **Tier-2 + spacing ordering** — confirm R1→R4, or pull spacing-scale
-   activation (R3) earlier since it is independent of the reverse sync?
+The five planning questions from the first draft were **resolved in the
+2026-06-15 review** and folded into §5 (Decisions). None remain blocking
+for the Phase R0 implementation session. The one prerequisite carried
+forward is operational, not a decision: run the live read-only MCP probe
+(blocked under plan mode) as the first task of R0, and confirm the
+`theme.activeSets` read path before trusting theme composition (§6).
 
 ---
 
