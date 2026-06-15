@@ -75,4 +75,29 @@ describe('publisherFixtures', () => {
     expect(list?.body).toContain('"datasets"')
     expect(list?.body).not.toContain('"keywords"')
   })
+
+  it('serves an empty list when a list state is "empty"', () => {
+    const rules = publisherFixtures({ datasets: 'empty', workflows: 'empty' })
+    const datasets = matchFixture(rules, 'http://h/api/v1/publish/datasets', 'GET')
+    const workflows = matchFixture(rules, 'http://h/api/v1/publish/workflows', 'GET')
+    expect(datasets?.status).toBe(200)
+    expect(JSON.parse(datasets!.body)).toEqual({ datasets: [], next_cursor: null })
+    expect(JSON.parse(workflows!.body)).toEqual({ workflows: [] })
+  })
+
+  it('serves a 500 server error when a list state is "error"', () => {
+    const rules = publisherFixtures({ datasets: 'error' })
+    const datasets = matchFixture(rules, 'http://h/api/v1/publish/datasets', 'GET')
+    expect(datasets?.status).toBe(500)
+    // The dataset detail rule (still populated) must not shadow the
+    // errored list rule.
+    const detail = matchFixture(rules, 'http://h/api/v1/publish/datasets/01ABC', 'GET')
+    expect(detail?.status).toBe(200)
+  })
+
+  it('serves an empty publishers list for the admin Users tab', () => {
+    const rules = publisherFixtures({ admin: true, publishers: 'empty' })
+    const publishers = matchFixture(rules, 'http://h/api/v1/publish/publishers', 'GET')
+    expect(JSON.parse(publishers!.body)).toEqual({ publishers: [], next_cursor: null })
+  })
 })

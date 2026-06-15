@@ -246,6 +246,49 @@ export function analyticsFixtures(): FixtureRule[] {
 }
 
 // ── Feedback (authoritative: _feedback-helpers.ts + page AiRow/GeneralRow) ──
+interface AiRow {
+  rating: string
+  comment: string
+  tags: string[]
+  user_message: string
+  assistant_message: string
+  dataset_id: string | null
+  modelConfig: Record<string, unknown>
+  isFallback: boolean
+  turn_index: number | null
+  system_prompt: string
+  created_at: string
+}
+interface AiData {
+  totalCount: number
+  thumbsUpCount: number
+  thumbsDownCount: number
+  byDay: Array<{ date: string; up: number; down: number }>
+  topTags: Array<{ tag: string; count: number }>
+  recentFeedback: AiRow[]
+}
+interface GeneralRow {
+  id: number
+  kind: string
+  message: string
+  contact: string
+  url: string
+  user_agent: string
+  app_version: string
+  platform: string
+  dataset_id: string | null
+  created_at: string
+  hasScreenshot: boolean
+}
+interface GeneralData {
+  totalCount: number
+  bugCount: number
+  featureCount: number
+  otherCount: number
+  byDay: Array<{ date: string; bugs: number; features: number; other: number }>
+  recentFeedback: GeneralRow[]
+}
+
 const feedbackWrapper = <T>(view: 'ai' | 'general', data: T) => ({ view, days: 30, data })
 
 const aiData = {
@@ -290,7 +333,7 @@ const aiData = {
       created_at: '2026-04-02T09:10:00.000Z',
     },
   ],
-}
+} satisfies AiData
 
 const generalData = {
   totalCount: 37,
@@ -329,7 +372,7 @@ const generalData = {
       hasScreenshot: false,
     },
   ],
-}
+} satisfies GeneralData
 
 /**
  * Feedback fixtures — the AI + general dashboard views (matched on the
