@@ -547,14 +547,86 @@ unchanged`.
 
 **Out of scope for this pass** (deferred to follow-up branches):
 
-- Mode overrides (`com.tokens-studio.modes`) — same as for Global;
-  default `$value` only here too. Once Penpot themes are wired,
-  components will gain `Tablet` / `Phone Portrait` / `Mobile Native`
-  variants alongside the Global `Mobile Native` set.
+- Mode overrides (`com.tokens-studio.modes`) — handled by the
+  sibling `scripts/sync-penpot-modes.ts` (see below).
 - A second-pass script to land `calc()`/`number` tokens via a
   different Penpot mechanism (manual override at the shape level,
   or as plain library values rather than design tokens) if a
   designer needs to interact with them.
+
+#### Bootstrap tooling: `scripts/sync-penpot-modes.ts`
+
+Third script in the seeding series, after the Global and Components
+scripts have populated their base sets. Reads every
+`$extensions["com.tokens-studio.modes"]` block in `tokens/global.json`
+and `tokens/components/*.json`, groups overrides by mode key, and
+emits two layers of plugin code:
+
+1. **One Penpot set per non-default mode**, holding only the tokens
+   that have an override for that mode. The set is intentionally
+   **not toggled active** — themes manage activation. (Toggling a
+   set's `active` directly puts Penpot into "manual" mode and
+   disables every theme; see the `TokenTheme` API doc.)
+
+| File | Penpot set | tokens |
+|---|---|---:|
+| `tokens/global.json` `mobile-native` overrides | `Modes/Mobile-Native` | 3 |
+| Tablet overrides across `chat`/`playback`/`tools-menu`/`browse` | `Modes/Tablet` | 18 |
+| Phone-portrait overrides across `browse`/`chat` | `Modes/Phone-Portrait` | 4 |
+
+2. **One Penpot theme per mode**, in group `Default` (Penpot makes
+   themes within a group mutually exclusive at activation time).
+   Each theme's set list reflects the CSS-cascade Phone-Portrait
+   inherits Tablet's overrides:
+
+| Theme | Activated sets (later wins on collision) |
+|---|---|
+| Default | Global + Components/* |
+| Tablet | + Modes/Tablet |
+| Phone Portrait | + Modes/Tablet + Modes/Phone-Portrait |
+| Mobile Native | + Modes/Mobile-Native |
+
+After seeding, the script activates the **Default** theme so the
+file leaves the "manual mode" state that the Global / Components
+scripts left behind (those scripts toggled their base sets active
+directly, which Penpot interprets as a custom theme).
+
+**API caveat — `theme.addSet(...)` is broken on this Penpot
+version.** Every argument shape (`TokenSet`, `id`, `name`,
+`{id}`, `{name}`, array) returns a generic `Value not valid:
+Field message is invalid` error. The `TokenTheme.addSet`/
+`removeSet` mutators on already-existing themes therefore can't be
+used right now. The script works around this by passing the full
+set list to `addTheme({ group, name, sets: [name, ...] })` at
+**creation** time (which is the only shape Penpot accepts) and, if
+an existing theme's `activeSets` doesn't match the target list,
+removes it and re-creates from scratch. Themes have no external
+references, so recreate is observably identical to in-place
+mutation. If a future Penpot release fixes `addSet`, switch to
+in-place updates without losing the existing theme rows.
+
+**Value caveat — same as the Components script.** `calc(...)`
+mode-override values are skipped with stderr warning. The current
+JSON has one such case: `component.chat.panel-width` `tablet`
+override = `calc(100vw - 1.5rem)`. Phone-portrait and default
+both override this token to plain values, so designers still see
+`100%` (Phone Portrait theme) and the JSON-only default in CSS.
+
+**Initial seed (May 2026).** 25 mode tokens across 3 sets + 4
+themes; idempotent re-run is `0 created / 0 updated / 25 unchanged`
+plus all themes `unchanged`. The Default theme is left active.
+
+**Out of scope for this pass:**
+
+- The other direction (Penpot → JSON export of mode overrides) —
+  same staged plan as for the base scripts.
+- Composite themes for the Tauri-mobile-on-phone scenario
+  (Mobile Native + Phone Portrait). Mobile Native overrides only
+  global tokens (radius/touch) and Phone Portrait overrides only
+  component tokens, so they don't actually collide; a designer
+  who needs the union today can manually toggle both sets active
+  in the Tokens panel. Adding it as a fifth theme is mechanical
+  if it turns out to be useful.
 
 ### Phase 4: CI and contributor setup
 
