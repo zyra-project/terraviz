@@ -28,6 +28,7 @@ import type { Page } from 'playwright'
 
 import { gotoApp } from './core/browser'
 import type { FixtureRule } from './core/fixtures'
+import { analyticsFixtures, feedbackFixtures } from './fixtures/admin'
 import { publisherFixtures } from './fixtures/publisher'
 
 export interface Scene {
@@ -258,24 +259,39 @@ export const scenes: Scene[] = [
   },
 
   // ── Admin-only surfaces ───────────────────────────────────────
-  // Privileged tabs, populated with an admin identity via fixtures so
-  // the tabs render. (Analytics/feedback rollup endpoints aren't stubbed
-  // yet — those views fall back to their error/empty surface, a
-  // representative state worth capturing.)
+  // Privileged tabs, populated with an admin identity + the analytics /
+  // feedback rollup fixtures so the dashboards render their real charts,
+  // tables and stat tiles (synthetic, no-PII data). See fixtures/admin.ts.
   {
     name: 'admin-analytics',
-    description: 'Admin — analytics dashboard (admin identity via fixtures)',
-    fixtures: publisherFixtures({ admin: true }),
+    description: 'Admin — analytics dashboard (populated charts/tables via fixtures)',
+    fixtures: [...publisherFixtures({ admin: true }), ...analyticsFixtures()],
+    // The spatial-attention heatmap is a non-deterministic MapLibre
+    // canvas — mask it out of the diff.
+    masks: ['.publisher-analytics-map'],
     async setup(page) {
       await openPublish(page, '/publish/analytics')
+      await page.locator('.publisher-analytics-table').first().waitFor()
     },
   },
   {
     name: 'admin-feedback',
-    description: 'Admin — feedback review (admin identity via fixtures)',
-    fixtures: publisherFixtures({ admin: true }),
+    description: 'Admin — feedback review, AI thumbs tab (populated via fixtures)',
+    fixtures: [...publisherFixtures({ admin: true }), ...feedbackFixtures()],
     async setup(page) {
       await openPublish(page, '/publish/feedback')
+      await page.locator('.publisher-analytics-table').first().waitFor()
+    },
+  },
+  {
+    name: 'admin-feedback-general',
+    description: 'Admin — feedback review, general (bug/feature) tab',
+    fixtures: [...publisherFixtures({ admin: true }), ...feedbackFixtures()],
+    async setup(page) {
+      await openPublish(page, '/publish/feedback')
+      // Second tab = general; the AI tab is the default.
+      await page.locator('.publisher-feedback-tab').nth(1).click()
+      await page.locator('.publisher-analytics-table').first().waitFor()
     },
   },
   {
