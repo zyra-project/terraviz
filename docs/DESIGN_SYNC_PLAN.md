@@ -87,9 +87,17 @@ the read direction.
 > the prompt can be answered); (b) call the Penpot MCP **directly** over
 > HTTPS with the account MCP key (`?userToken=…`), bypassing the gateway
 > — egress to `design.penpot.app` is open and the `initialize` /
-> `tools/list` / `execute_code` handshake works. The empirical
-> enumerate is therefore pending an operator action, not a design
-> unknown.
+> `tools/list` / `execute_code` handshake works.
+>
+> **Resolved (2026-06-15).** The probe was run via path (b) — a direct
+> streamable-HTTP read with the account MCP key — and **succeeded**. The
+> live `TerraViz - Design System` file returned all 8 seeded sets
+> (`Global`, `Components/*`, `Modes/*`) and all 4 themes **with their
+> `activeSets`** (the §6 unverified read path — now confirmed). The
+> exported graph matched `PenpotGraph` exactly, and feeding it through
+> the reconcile produced an **empty diff** against all five repo files.
+> R0's empirical gate is therefore **met** (see "Implementation
+> status").
 
 ### What the MCP can and can't do
 
@@ -387,14 +395,37 @@ The fidelity gate runs the §2 acceptance check
 graph built from the seeders' own output — proving `reconcile ∘ seed =
 identity` on the round-trippable set (122 tokens across 5 files, 4
 hostile values asserted restored byte-identical). The live export
-(channel A or B) feeds the *same* reconcile + diff unchanged once the
-probe is unblocked.
+(channel A or B) feeds the *same* reconcile + diff via
+`check-design-roundtrip.ts --graph <file>`.
 
-**Remaining for R0:** run the live read-only enumerate against the
-focused `TerraViz - Design System` file and confirm (i) the exported
-graph shape matches `PenpotGraph`, and (ii) the `theme.activeSets` read
-path (already exercised by `sync-penpot-modes.ts`'s idempotent recreate
-logic, so only lightly unverified). Either unblock path in §1 works.
+**R0 — done (live-validated 2026-06-15).** The live read-only enumerate
+ran against the focused `TerraViz - Design System` file (§1). Both R0
+acceptance conditions are met empirically:
+
+- The exported graph matched `PenpotGraph` exactly, and running it
+  through the reconcile produced an **empty diff** for all five repo
+  files with the 4 hostile values restored.
+- The `theme.activeSets` read path returned all four themes' set
+  composition — the §6 risk is retired. (Note: Penpot returns
+  `activeSets` in its own internal order, not the seeder's written
+  order. This is harmless for the reverse path — the reconcile maps mode
+  overrides to `Modes/<TitleCase>` sets by *name*, never by theme order
+  — but it does mean the *forward* modes seeder's order-sensitive
+  idempotency compare can report a spurious "recreate"; tracked for the
+  seeder, not the exporter.)
+
+Two real-world observations from the live run, both handled correctly:
+
+- The live Global set is **missing the four `facet-color.*` tokens** the
+  repo has — the design file predates them. The reconcile kept the repo
+  values and emitted `missing-in-export` warnings rather than dropping
+  them (the §2 "exists only in repo → keep repo" rule, validated live).
+  Forward-sync follow-up: re-run `sync-penpot-global.ts` to seed
+  `facet-color`.
+- Penpot reports weight tokens with type `fontWeights` (its TokenType),
+  the repo uses W3C `fontWeight`. The reconcile keys round-trippability
+  off the **repo** `$type` and matches export tokens by name, so the
+  singular/plural difference is a non-issue.
 
 ---
 
@@ -455,13 +486,17 @@ forward is operational, not a decision: run the live read-only MCP probe
 and confirm the `theme.activeSets` read path before trusting theme
 composition (§6).
 
-That probe is currently blocked — not by plan mode but by the managed
-MCP gateway pinning the Penpot tools to `always_ask`, which an automated
-cloud session can't satisfy (§1). It needs an operator action to unblock:
-either set the Penpot connector's tools to "Always allow" / run from an
-interactive session, or call the Penpot streamable-HTTP server directly
-with the account MCP key (`?userToken=…`). Both are verified feasible;
-neither changes any design decision above.
+That probe was blocked by the managed MCP gateway pinning the Penpot
+tools to `always_ask` (§1), which an automated cloud session can't
+satisfy, and was **resolved 2026-06-15** by calling the Penpot
+streamable-HTTP server directly with the account MCP key
+(`?userToken=…`). It returned the full graph, confirmed the
+`theme.activeSets` read path, and round-tripped to an empty diff. No
+design decision above changed; the only follow-ups are operational (a
+forward re-seed for `facet-color`; the forward seeder's order-sensitive
+theme compare). For routine syncs, prefer the gateway path with the
+connector set to "Always allow", or an interactive session — the
+direct-HTTP route is the no-agent fallback.
 
 ---
 

@@ -21,6 +21,16 @@
  * Wired as **advisory** CI (`.github/workflows/design-roundtrip.yml`,
  * continue-on-error) per §4 R1. Exits non-zero on any diff so it is also
  * runnable as a local gate: `npm run check:design-roundtrip`.
+ *
+ * CLI:
+ *   npm run check:design-roundtrip                 # simulated post-seed graph
+ *   npm run check:design-roundtrip -- --graph FILE # a real exported graph
+ *
+ * `--graph FILE` feeds the same reconcile + diff a *real* Penpot export
+ * (channel A `read-penpot.ts` output, or channel B native export), so the
+ * live round-trip is validated with zero extra machinery. The file may
+ * be a bare `PenpotGraph` or the `{ result, log }` wrapper the MCP
+ * `execute_code` tool returns.
  */
 
 import { readFileSync, readdirSync } from 'node:fs'
@@ -126,7 +136,20 @@ function walkLeaves(
   for (const k of Object.keys(node)) walkLeaves(node[k], [...path, k], visit)
 }
 
+/** Load a real exported graph, unwrapping the MCP `{ result, log }` shape. */
+function loadGraphFile(path: string): PenpotGraph {
+  const raw = readJson(path) as Record<string, unknown>
+  const graph = (raw && typeof raw === 'object' && 'result' in raw ? raw.result : raw) as PenpotGraph
+  if (!graph || !Array.isArray(graph.sets)) {
+    throw new Error(`${path}: not a PenpotGraph (no "sets" array)`)
+  }
+  return graph
+}
+
 function main(): void {
+  const graphArgIdx = process.argv.indexOf('--graph')
+  const graphPath = graphArgIdx >= 0 ? process.argv[graphArgIdx + 1] : undefined
+
   const repoFiles: RepoTokenFile[] = [
     { label: 'tokens/global.json', baseSetName: GLOBAL_SET_NAME, json: readJson(GLOBAL_PATH) },
     ...componentFiles().map((p) => ({
@@ -136,7 +159,12 @@ function main(): void {
     })),
   ]
 
-  const graph = buildSeededGraph()
+  const graph = graphPath ? loadGraphFile(graphPath) : buildSeededGraph()
+  console.log(
+    graphPath
+      ? `Source: exported graph ${graphPath} (file=${graph.file ?? 'unknown'})\n`
+      : 'Source: simulated post-seed graph (reconcile ∘ seed = identity)\n',
+  )
   const result = reconcile(repoFiles, graph)
 
   let mismatches = 0
