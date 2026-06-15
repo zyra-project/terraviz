@@ -864,6 +864,13 @@ Phase 6 (STYLE_GUIDE auto-update) — after Phase 1a + 1b
 
 ## Future Work (not part of this plan)
 
+> The **reverse direction** (Penpot → repo) and how the pipeline could
+> scale to complete panels and full-screen layouts are designed in a
+> companion plan: [`DESIGN_SYNC_PLAN.md`](DESIGN_SYNC_PLAN.md). Several
+> items below (reverse-sync script, Penpot component library, layout
+> configuration, Tier 2 tokens, spacing-scale activation) are sequenced
+> there as phases R0–R4.
+
 These items depend on prerequisites that don't exist yet:
 
 - **Penpot component library** — Build the Tier 1 component frames
