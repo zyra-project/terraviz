@@ -27,6 +27,19 @@ describe('sync-penpot-components', () => {
     expect(planByName.has('Components/Tools-Menu')).toBe(true)
   })
 
+  it('covers the Tier-2 component sets (info-panel, help) with their base values', () => {
+    expect(planByName.has('Components/Info-Panel')).toBe(true)
+    expect(planByName.has('Components/Help')).toBe(true)
+
+    const info = planByName.get('Components/Info-Panel')!
+    expect(info.specs.find((s) => s.name === 'component.info-panel.max-width')?.value).toBe('340px')
+    expect(info.specs.find((s) => s.name === 'component.info-panel.body-padding')?.value).toBe('0.75rem')
+
+    const help = planByName.get('Components/Help')!
+    expect(help.specs.find((s) => s.name === 'component.help.panel-width')?.value).toBe('640px')
+    expect(help.specs.find((s) => s.name === 'component.help.trigger-size')?.value).toBe('36px')
+  })
+
   it('mirrors the JSON path in token names', () => {
     const browse = planByName.get('Components/Browse')!
     const browseNames = new Set(browse.specs.map((s) => s.name))

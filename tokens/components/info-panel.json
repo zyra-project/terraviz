@@ -1,0 +1,33 @@
+{
+  "component": {
+    "info-panel": {
+      "max-width": {
+        "$value": "340px",
+        "$type": "dimension",
+        "$description": "Info panel max-width (desktop; full-bleed minus gutter at tablet)",
+        "$extensions": {
+          "com.tokens-studio.modes": {
+            "default": "340px",
+            "tablet": "calc(100vw - 1.5rem)"
+          }
+        }
+      },
+      "body-max-height-expanded": {
+        "$value": "60vh",
+        "$type": "dimension",
+        "$description": "Expanded info-body scroll max-height",
+        "$extensions": {
+          "com.tokens-studio.modes": {
+            "default": "60vh",
+            "tablet": "40vh"
+          }
+        }
+      },
+      "body-padding": {
+        "$value": "0.75rem",
+        "$type": "dimension",
+        "$description": "Info-body inline + bottom padding"
+      }
+    }
+  }
+}

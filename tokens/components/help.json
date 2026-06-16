@@ -1,0 +1,42 @@
+{
+  "component": {
+    "help": {
+      "panel-width": {
+        "$value": "640px",
+        "$type": "dimension",
+        "$description": "Help panel width (desktop intent; CSS clamps it with min())",
+        "$extensions": {
+          "com.tokens-studio.modes": {
+            "default": "640px",
+            "tablet": "calc(100vw - 1.5rem)",
+            "phone-portrait": "100vw"
+          }
+        }
+      },
+      "panel-max-height": {
+        "$value": "80vh",
+        "$type": "dimension",
+        "$description": "Help panel max-height (full-height sheet on portrait phones)",
+        "$extensions": {
+          "com.tokens-studio.modes": {
+            "default": "80vh",
+            "tablet": "70vh",
+            "phone-portrait": "100dvh"
+          }
+        }
+      },
+      "trigger-size": {
+        "$value": "36px",
+        "$type": "dimension",
+        "$description": "Help trigger button size (min-height on desktop; square touch target on tablet/portrait)",
+        "$extensions": {
+          "com.tokens-studio.modes": {
+            "default": "36px",
+            "tablet": "48px",
+            "phone-portrait": "40px"
+          }
+        }
+      }
+    }
+  }
+}
