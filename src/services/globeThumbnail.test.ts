@@ -15,7 +15,15 @@ describe('resolveGlobeThumbnailOptions', () => {
       mime: 'image/webp',
       quality: 0.92,
       lonOrigin: 0,
+      latOrigin: 0,
     })
+  })
+
+  it('passes longitude through and clamps latitude tilt to ±90', () => {
+    expect(resolveGlobeThumbnailOptions({ lonOrigin: 200 }).lonOrigin).toBe(200)
+    expect(resolveGlobeThumbnailOptions({ latOrigin: 45 }).latOrigin).toBe(45)
+    expect(resolveGlobeThumbnailOptions({ latOrigin: 200 }).latOrigin).toBe(90)
+    expect(resolveGlobeThumbnailOptions({ latOrigin: -200 }).latOrigin).toBe(-90)
   })
 
   it('rounds and clamps the output size into the supported range', () => {

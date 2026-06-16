@@ -36,6 +36,7 @@ import { MAX_IMAGE_SEQUENCE_FRAMES as MAX_FRAMES } from '../../../types/image-se
 import {
   generateGlobeThumbnail,
   loadImageFromBlob,
+  type GlobeThumbnailOptions,
   type GlobeThumbnailSource,
 } from '../../../services/globeThumbnail'
 import {
@@ -130,10 +131,13 @@ export interface AssetUploaderOptions {
    *  zero extra uploads. Hidden when null/absent (e.g. the data is
    *  a video or an unresolvable ref). Thumbnail kind only. */
   dataAssetUrl?: string | null
-  /** Test seam — renders a 2:1 source to a globe thumbnail Blob.
-   *  Defaults to the real WebGL `generateGlobeThumbnail`, which
-   *  can't run under happy-dom. */
-  generateThumbnail?: (source: GlobeThumbnailSource) => Promise<Blob>
+  /** Test seam — renders a 2:1 source to a globe thumbnail Blob at
+   *  the given longitude/latitude. Defaults to the real WebGL
+   *  `generateGlobeThumbnail`, which can't run under happy-dom. */
+  generateThumbnail?: (
+    source: GlobeThumbnailSource,
+    options?: GlobeThumbnailOptions,
+  ) => Promise<Blob>
   /** Test seam — decodes a Blob into an image. Defaults to
    *  `loadImageFromBlob`. */
   decodeImage?: (blob: Blob) => Promise<HTMLImageElement>
@@ -199,21 +203,30 @@ const INITIAL: StageState = {
 /** Globe-thumbnail generator sub-flow (thumbnail uploader only).
  *  `idle` → `rendering` → `preview` (a generated capture awaiting
  *  the publisher's confirm) → back to `idle` once uploaded, or
- *  `error`. The generated File + its object-URL preview live here
- *  until the publisher confirms or discards. */
+ *  `error`. The decoded source, current rotation, generated File,
+ *  and its object-URL preview live here so the publisher can rotate
+ *  to a desired area of focus (re-rendering from the same source)
+ *  before confirming. */
 type GenStage = 'idle' | 'rendering' | 'preview' | 'error'
 
 interface GenState {
   stage: GenStage
+  /** The decoded 2:1 source, kept so rotation re-renders don't
+   *  re-decode / re-fetch. */
+  source?: GlobeThumbnailSource
+  /** Current longitude spin in degrees (-180..180). */
+  lon: number
+  /** Current latitude tilt in degrees (-90..90). */
+  lat: number
   /** Object URL of the generated preview image (revoked on
-   *  discard / regenerate / upload). */
+   *  re-render / discard / upload). */
   previewUrl?: string
   /** The generated capture, ready to hand to `run()`. */
   file?: File
   errorDetail?: string
 }
 
-const INITIAL_GEN: GenState = { stage: 'idle' }
+const INITIAL_GEN: GenState = { stage: 'idle', lon: 0, lat: 0 }
 
 const STAGE_STATUS_KEY: Record<Stage, MessageKey> = {
   idle: 'publisher.assetUploader.status.idle',
@@ -352,10 +365,14 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
   let framesState: FramesState = INITIAL_FRAMES
   // Globe-thumbnail generator state — only used on a `thumbnail`
   // uploader. Independent of the main upload `state`: the publisher
-  // generates + previews a globe capture here, then "Use this
-  // thumbnail" feeds the generated File into the same `run()` upload
-  // path the file picker uses.
+  // generates + previews a globe capture here (rotating to a desired
+  // area of focus), then "Use this thumbnail" feeds the generated
+  // File into the same `run()` upload path the file picker uses.
   let genState: GenState = INITIAL_GEN
+  // Monotonic token so a slower rotation re-render can't overwrite a
+  // newer one — the publisher dragging a slider fires renders faster
+  // than they resolve.
+  let genRenderSeq = 0
   // Tab strip is only mounted for the primary `data` asset of a
   // video-format dataset — that's where image-sequence input is
   // meaningful (the catalog encodes every frames upload to a video
@@ -642,6 +659,35 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
       preview.alt = t('publisher.assetUploader.generate.previewAlt')
       section.appendChild(preview)
 
+      // Rotation controls — bring a desired area of focus to the
+      // centre of the capture. Each slider re-renders from the kept
+      // source on release (`change`), with a live degree readout on
+      // `input`; re-rendering on every pixel of drag would spin up a
+      // fresh WebGL context per frame.
+      const rotateHint = document.createElement('p')
+      rotateHint.className = 'publisher-asset-uploader-generate-help'
+      rotateHint.textContent = t('publisher.assetUploader.generate.rotateHint')
+      section.appendChild(rotateHint)
+
+      section.appendChild(
+        buildRotationSlider({
+          axis: 'lon',
+          labelKey: 'publisher.assetUploader.generate.longitude',
+          min: -180,
+          max: 180,
+          value: g.lon,
+        }),
+      )
+      section.appendChild(
+        buildRotationSlider({
+          axis: 'lat',
+          labelKey: 'publisher.assetUploader.generate.latitude',
+          min: -90,
+          max: 90,
+          value: g.lat,
+        }),
+      )
+
       const actions = document.createElement('div')
       actions.className = 'publisher-asset-uploader-generate-actions'
 
@@ -686,30 +732,99 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
     return section
   }
 
-  /** Render a globe thumbnail from an already-decoded source and
-   *  move to the preview stage. Shared by the file + data paths. */
-  async function renderPreview(source: GlobeThumbnailSource): Promise<void> {
+  /** A labelled rotation slider with a live degree readout. Updates
+   *  `genState` on drag (`input`) and re-renders the preview on
+   *  release (`change`) — re-rendering per drag frame would spin up
+   *  a fresh WebGL context each move. */
+  function buildRotationSlider(o: {
+    axis: 'lon' | 'lat'
+    labelKey: MessageKey
+    min: number
+    max: number
+    value: number
+  }): HTMLElement {
+    const sliderId = `${GENERATE_INPUT_ID}-${o.axis}`
+    const row = document.createElement('div')
+    row.className = 'publisher-asset-uploader-generate-rotate'
+
+    const label = document.createElement('label')
+    label.className = 'publisher-asset-uploader-generate-rotate-label'
+    label.htmlFor = sliderId
+    label.textContent = t(o.labelKey)
+    row.appendChild(label)
+
+    const slider = document.createElement('input')
+    slider.type = 'range'
+    slider.id = sliderId
+    slider.className = 'publisher-asset-uploader-generate-rotate-input'
+    slider.min = String(o.min)
+    slider.max = String(o.max)
+    slider.step = '1'
+    slider.value = String(o.value)
+    row.appendChild(slider)
+
+    const readout = document.createElement('span')
+    readout.className = 'publisher-asset-uploader-generate-rotate-readout'
+    readout.textContent = t('publisher.assetUploader.generate.degrees', {
+      value: String(o.value),
+    })
+    row.appendChild(readout)
+
+    slider.addEventListener('input', () => {
+      const v = Number(slider.value)
+      if (o.axis === 'lon') genState.lon = v
+      else genState.lat = v
+      readout.textContent = t('publisher.assetUploader.generate.degrees', {
+        value: String(v),
+      })
+    })
+    slider.addEventListener('change', () => {
+      void renderPreview()
+    })
+    return row
+  }
+
+  /** Render (or re-render) the preview from the source currently in
+   *  `genState`, at its current longitude/latitude. Stale renders
+   *  (superseded by a newer rotation) are dropped via `genRenderSeq`
+   *  so a slow render can't clobber a newer preview. The previous
+   *  preview stays visible until the new one lands, so rotating
+   *  doesn't flash an empty frame. */
+  async function renderPreview(): Promise<void> {
+    const source = genState.source
+    if (!source) return
+    const seq = ++genRenderSeq
     const generate = options.generateThumbnail ?? generateGlobeThumbnail
-    const blob = await generate(source)
+    const blob = await generate(source, {
+      lonOrigin: genState.lon,
+      latOrigin: genState.lat,
+    })
+    // A newer rotation started while this one was rendering — drop
+    // this result so the latest one wins.
+    if (seq !== genRenderSeq) return
     const previewUrl = URL.createObjectURL(blob)
     // WebP is the generator's default output; name + type line up
     // with the aux image mime gate in `run()`.
     const file = new File([blob], 'globe-thumbnail.webp', {
       type: blob.type || 'image/webp',
     })
-    genState = { stage: 'preview', previewUrl, file }
+    if (genState.previewUrl) URL.revokeObjectURL(genState.previewUrl)
+    genState = { ...genState, stage: 'preview', previewUrl, file }
     paint()
   }
 
   async function runGenerateFromFile(file: File): Promise<void> {
     const decode = options.decodeImage ?? loadImageFromBlob
-    genState = { stage: 'rendering' }
+    if (genState.previewUrl) URL.revokeObjectURL(genState.previewUrl)
+    genState = { ...INITIAL_GEN, stage: 'rendering' }
     paint()
     try {
       const img = await decode(file)
-      await renderPreview(img)
+      genState = { ...genState, source: img }
+      await renderPreview()
     } catch (err) {
       genState = {
+        ...INITIAL_GEN,
         stage: 'error',
         errorDetail: err instanceof Error ? err.message : String(err),
       }
@@ -726,14 +841,17 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
         if (!res.ok) throw new Error(`Data frame fetch failed (${res.status}).`)
         return res.blob()
       })
-    genState = { stage: 'rendering' }
+    if (genState.previewUrl) URL.revokeObjectURL(genState.previewUrl)
+    genState = { ...INITIAL_GEN, stage: 'rendering' }
     paint()
     try {
       const blob = await fetchBlob(url)
       const img = await decode(blob)
-      await renderPreview(img)
+      genState = { ...genState, source: img }
+      await renderPreview()
     } catch (err) {
       genState = {
+        ...INITIAL_GEN,
         stage: 'error',
         errorDetail: err instanceof Error ? err.message : String(err),
       }

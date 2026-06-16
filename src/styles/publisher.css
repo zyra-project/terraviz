@@ -831,6 +831,30 @@
   background: var(--white-o05, rgba(255, 255, 255, 0.05));
 }
 
+.publisher-asset-uploader-generate-rotate {
+  display: flex;
+  align-items: center;
+  gap: calc(0.5rem * var(--ui-scale));
+  font-size: calc(0.8125rem * var(--ui-scale));
+}
+
+.publisher-asset-uploader-generate-rotate-label {
+  inline-size: calc(4.5rem * var(--ui-scale));
+  color: var(--color-text-muted, #999999);
+}
+
+.publisher-asset-uploader-generate-rotate-input {
+  flex: 1 1 auto;
+  min-inline-size: calc(120px * var(--ui-scale));
+}
+
+.publisher-asset-uploader-generate-rotate-readout {
+  inline-size: calc(3rem * var(--ui-scale));
+  text-align: end;
+  color: var(--color-text, #e8eaf0);
+  font-variant-numeric: tabular-nums;
+}
+
 .publisher-asset-uploader-generate-actions {
   display: flex;
   flex-wrap: wrap;

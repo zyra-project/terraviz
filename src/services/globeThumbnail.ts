@@ -50,6 +50,11 @@ export interface GlobeThumbnailOptions {
    *  chosen meridian faces the camera. Default 0 (the texture's
    *  horizontal centre faces front). */
   lonOrigin?: number
+  /** Latitude tilt in degrees — tilts the globe up/down so a
+   *  chosen parallel faces the camera. Paired with `lonOrigin`,
+   *  this lets a publisher bring any region to the centre of the
+   *  capture. Default 0. */
+  latOrigin?: number
 }
 
 /** Injection seam — WebGL can't run under happy-dom, so tests pass
@@ -68,6 +73,7 @@ interface ResolvedOptions {
   mime: 'image/webp' | 'image/png'
   quality: number
   lonOrigin: number
+  latOrigin: number
 }
 
 const DEFAULTS: ResolvedOptions = {
@@ -77,6 +83,7 @@ const DEFAULTS: ResolvedOptions = {
   mime: 'image/webp',
   quality: 0.92,
   lonOrigin: 0,
+  latOrigin: 0,
 }
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -98,7 +105,8 @@ export function resolveGlobeThumbnailOptions(
   const mime = opts.mime === 'image/png' ? 'image/png' : DEFAULTS.mime
   const quality = clamp(opts.quality ?? DEFAULTS.quality, 0, 1)
   const lonOrigin = opts.lonOrigin ?? DEFAULTS.lonOrigin
-  return { size, supersample, fill, mime, quality, lonOrigin }
+  const latOrigin = clamp(opts.latOrigin ?? DEFAULTS.latOrigin, -90, 90)
+  return { size, supersample, fill, mime, quality, lonOrigin, latOrigin }
 }
 
 /**
@@ -203,7 +211,11 @@ export async function generateGlobeThumbnail(
   texture.needsUpdate = true
   const material = new THREE_.MeshBasicMaterial({ map: texture })
   const mesh = new THREE_.Mesh(geometry, material)
+  // Longitude spins around the polar axis; latitude tilts the globe
+  // so the chosen parallel faces the camera. Together they bring any
+  // region to the centre of the capture.
   mesh.rotation.y = (opts.lonOrigin * Math.PI) / 180
+  mesh.rotation.x = (opts.latOrigin * Math.PI) / 180
   scene.add(mesh)
 
   const half = orthoHalfExtent(opts.fill)

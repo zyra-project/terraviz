@@ -573,6 +573,56 @@ describe('renderAssetUploader — auxiliary kinds (thumbnail / legend)', () => {
     })
   })
 
+  it('re-renders the preview with the new rotation when a slider is moved', async () => {
+    const generated = new Blob(['globe'], { type: 'image/webp' })
+    const generateThumbnail = vi.fn().mockResolvedValue(generated)
+    const decodeImage = vi
+      .fn()
+      .mockResolvedValue({ width: 2048, height: 1024 } as unknown as HTMLImageElement)
+
+    mount.appendChild(
+      renderAssetUploader({
+        datasetId: '01AAAAAAAAAAAAAAAAAAAAAAAA',
+        kind: 'thumbnail',
+        format: 'image/png',
+        onUploaded: () => {},
+        generateThumbnail,
+        decodeImage,
+      }),
+    )
+
+    // Generate an initial preview.
+    const genInput = mount.querySelector<HTMLInputElement>(
+      'input[id^="dataset-asset-generate-"][type="file"]',
+    )!
+    const frame = new File(['frame'], 'frame.png', { type: 'image/png' })
+    Object.defineProperty(genInput, 'files', {
+      value: { 0: frame, length: 1, item: (i: number) => (i === 0 ? frame : null) },
+      configurable: true,
+    })
+    genInput.dispatchEvent(new Event('change', { bubbles: true }))
+    for (let i = 0; i < 6; i++) await new Promise(r => setTimeout(r, 0))
+
+    expect(generateThumbnail).toHaveBeenCalledTimes(1)
+    // First render is at the default orientation.
+    expect(generateThumbnail.mock.calls[0][1]).toMatchObject({ lonOrigin: 0, latOrigin: 0 })
+
+    // Drag the longitude slider and release.
+    const lonSlider = mount.querySelector<HTMLInputElement>(
+      'input[type="range"][id$="-lon"]',
+    )!
+    lonSlider.value = '120'
+    lonSlider.dispatchEvent(new Event('input', { bubbles: true }))
+    lonSlider.dispatchEvent(new Event('change', { bubbles: true }))
+    for (let i = 0; i < 6; i++) await new Promise(r => setTimeout(r, 0))
+
+    // Re-rendered at the new longitude, reusing the decoded source
+    // (no second decode).
+    expect(generateThumbnail).toHaveBeenCalledTimes(2)
+    expect(generateThumbnail.mock.calls[1][1]).toMatchObject({ lonOrigin: 120, latOrigin: 0 })
+    expect(decodeImage).toHaveBeenCalledTimes(1)
+  })
+
   it('generates from the dataset data URL when the one-click button is used', async () => {
     const generated = new Blob(['globe'], { type: 'image/webp' })
     const generateThumbnail = vi.fn().mockResolvedValue(generated)
