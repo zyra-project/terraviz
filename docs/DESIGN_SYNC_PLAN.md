@@ -360,7 +360,7 @@ carries no `calc`/`number` hostile tokens, so it isolates the reverse
 mechanism from the restore-from-repo path. It is the smallest honest
 proof that the reverse direction works against the live MCP.
 
-### Implementation status (R0 / R1)
+### Implementation status (R0 / R1 / R2)
 
 The reverse-sync **code** is landed and green; the **live empirical
 probe** is the one remaining R0 item, blocked on an operator action
@@ -426,6 +426,40 @@ Two real-world observations from the live run, both handled correctly:
   the repo uses W3C `fontWeight`. The reconcile keys round-trippability
   off the **repo** `$type` and matches export tokens by name, so the
   singular/plural difference is a non-issue.
+
+**R2 — Tier-2 (info-panel + help), offline-validated.** The two Tier-2
+component token sets are landed —
+[`tokens/components/info-panel.json`](../tokens/components/info-panel.json)
+and [`tokens/components/help.json`](../tokens/components/help.json),
+with values extracted from `src/styles/{info-panel,help}.css` and
+matching the `DESIGN_SYSTEM_PLAN.md` Tier-2 table. No machinery changed:
+the seeders (`sync-penpot-components`, `sync-penpot-modes`), the reader
+(`read-penpot`), the reconcile core, and the fidelity gate all
+auto-discover `tokens/components/*.json`, so the new files flow through
+unchanged. The gate now passes **128 tokens across 7 files** with **6
+hostile values** asserted restored byte-identical — the +2 over R1 are
+the `info-panel.max-width` and `help.panel-width` tablet overrides,
+both `calc(100vw - 1.5rem)` (Penpot can't store `calc`, so the repo
+stays authoritative and the reconcile restores them). Tablet /
+phone-portrait overrides fold into the existing `Modes/Tablet` /
+`Modes/Phone-Portrait` sets; both new base sets activate under every
+theme. Per §4 R2 this is the `reconcile ∘ seed = identity` proof on the
+**simulated** post-seed graph — fully offline. Two follow-ups remain,
+both noted, neither blocking the gate:
+
+1. **Live R2 round-trip confirmation** — run `read-penpot` through the
+   connector against the real file and feed it to
+   `check:design-roundtrip --graph`. Blocked on the same connector
+   issue as the R0 `facet-color` re-seed (§7).
+2. **Forward CSS wiring** — consume `var(--component-info-panel-*)` /
+   `var(--component-help-*)` in the stylesheets. Owned by
+   `DESIGN_SYSTEM_PLAN.md`; staged after the token files because the
+   help trigger changes shape across breakpoints and the help panel
+   clamps with `min()`, so the swap is not a one-liner. The build
+   already emits the correct wrapped values
+   (`calc(340px * var(--ui-scale))`, the floored `max(48px, …)` touch
+   targets, the `@media` mode blocks), so the wiring is a verified-safe
+   swap when scheduled.
 
 ---
 
