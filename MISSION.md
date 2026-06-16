@@ -16,23 +16,22 @@ to someone else's platform and give up their data, their branding, and their
 control with it.
 
 Two walls. One between the data and the public, one between the publisher and
-the audience. This project is built to take down both.
+the audience. This project exists to take down both.
 
-## What This Project Does
+## What We're Building
 
-Terraviz streams public-interest data onto a navigable 3D globe, on any device:
-phone, tablet, laptop, or headset. Desktop builds for Windows, Mac, and Linux
-are there for people who need the extra power.
-
-Behind the globe is a federated catalog. Any institution can publish its data to
-it and keep that data on its own hardware, under its own name, on its own domain.
-Nothing has to move. Nothing has to be surrendered.
+A set of open tools that carry public-interest data the whole way, from the
+archive to a globe in someone's hand. They acquire and process raw data, catalog
+and surface what exists, help authors turn it into something worth watching, and
+stream the result to any device, free and without an account. No single platform
+sits in the middle. It is a constellation of cooperating open tools, not a
+service you rent.
 
 It starts with the planet. Environmental data is the most universal story we have
-and some of the most invisible, so it is where the catalog begins. But the globe
-does not care what the data is about. Climate, census, public health, hazards,
-the night sky: if it can be placed in space and time and it serves the public, it
-belongs here.
+and some of the most invisible, so it is where the work begins. But the tools do
+not care what the data is about. Anything that can be placed in space and time and
+serves the public can travel these rails, from weather and oceans to wildfire and
+air quality to the night sky overhead.
 
 ## Why It Matters
 
@@ -43,14 +42,17 @@ one more person who can see how their community is changing and understand why.
 
 ## Reach Without Surrender
 
-The same thing that frees the viewer frees the publisher. A museum, a university,
-a research lab, a city agency, a federal partner: each can reach a wide audience
-without giving up their data, their domain, or their identity. Public reach
-without the platform tax.
+This is the offer to the institutions that hold the data. You can take your data
+from raw files all the way to a public, navigable globe and keep it on your own
+hardware, under your own name, on your own domain. Reaching an audience no longer
+means handing your work to a platform and surrendering control of it.
 
-And because it runs as an open, federated protocol rather than a single service,
-no one host has to stay in charge for it to keep working. The network outlasts
-any one institution, including the one that started it.
+You do not need your own servers to start. The lightest path keeps your name on
+your data from the first day, and running your own node is a step you can take
+later, not a toll at the door. It is built as an open protocol rather than a
+single service, so no one host has to stay in charge for it to keep working. The
+aim is a network that outlasts any one institution, not a platform that owns the
+institutions on it.
 
 ## Where Science on a Sphere Fits
 
@@ -59,23 +61,35 @@ suspended globes have shown the public what Earth's systems actually look like,
 in museums and science centers worldwide. It is one of the most powerful
 science-communication tools ever built. But you have to be in the room.
 
-SOS is this project's anchor customer and its seed catalog: roughly 600 datasets,
-imported unchanged, the proof that the model works. It is the first publisher,
-not the reason the project exists. Every door it opens for SOS is open to
-everyone else.
+Science on a Sphere is this project's anchor customer and its seed catalog:
+roughly 600 datasets, imported unchanged, the proof that the model works. It is
+the first publisher, not the reason the project exists. Every door it opens for
+Science on a Sphere is open to everyone else.
+
+## What This Is Not
+
+It is not a place to hand over custody of your data. It is a way to publish and
+show it while keeping it yours. It is not a general analysis suite or a
+replacement for the systems you already run. And it is not a safe channel for
+anyone reporting at personal risk: the tools are built to attribute and credit,
+not to conceal, and they should never be trusted to protect a source.
 
 ## Who It's For
 
 Two audiences, both essential.
 
-The people who want to see: students and educators, curious people on their lunch
-break, researchers without museum access, communities on the front lines of a
-changing world. Anyone who wants to understand the place they live.
+The institutions that hold the data: universities, research labs, planetariums,
+museums, agencies, and community groups with something worth showing and a stake
+in keeping it theirs. The promise to them is reach without surrender, and an
+invitation to help shape what gets built.
 
-And the people who hold the data: institutions with something worth showing and a
-stake in keeping it theirs. The communities most affected by what the data
+And the people who want to see it: students and educators, curious people on
+their lunch break, researchers without museum access, communities on the front
+lines of a changing world. The communities most affected by what the data
 describes belong on both sides of that line, not only an audience for it but a
 source of it, on their own terms.
 
-The data was always meant for the public. This makes sure that where you stand,
-and who you work for, no longer decides whether you get to see it.
+The data was always meant for the public, and the institutions that hold it were
+never meant to lose it in the act of sharing. This project makes sure that where
+you stand, who you work for, and which platform you can afford no longer decide
+whether the world gets to see what we know about it.
