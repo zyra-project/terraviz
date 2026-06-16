@@ -17,7 +17,7 @@ import type { CatalogEnv } from '../../../_lib/env'
 import type { PublisherData } from '../../_middleware'
 import { isPrivileged } from '../../../_lib/publisher-store'
 import { writeAuditEvent } from '../../../_lib/audit-store'
-import { isConfigurationError } from '../../../_lib/errors'
+import { isConfigurationError, safeErrorReason } from '../../../_lib/errors'
 import { dispatchZyraRun, type GitHubDispatchEnv } from '../../../_lib/github-dispatch'
 import { computeNextRunAt } from '../../../_lib/workflow-schedule'
 import { validatePipeline, type WorkflowValidationError } from '../../../_lib/workflow-validators'
@@ -109,9 +109,9 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
       error_summary: 'GitHub dispatch failed before the runner started.',
     })
     if (isConfigurationError(e)) {
-      return jsonError(503, 'dispatch_unconfigured', (e as Error).message)
+      return jsonError(503, 'dispatch_unconfigured', safeErrorReason(e, 'GitHub dispatch is not configured on this deployment.'))
     }
-    return jsonError(502, 'dispatch_failed', e instanceof Error ? e.message : String(e))
+    return jsonError(502, 'dispatch_failed', safeErrorReason(e, 'GitHub dispatch failed before the runner started.'))
   }
 
   await writeAuditEvent(context.env.CATALOG_DB, {
