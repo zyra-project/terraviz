@@ -1097,6 +1097,32 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
         paint()
         options.onUploaded({ mode: 'transcoding' })
       } else {
+        // Non-transcoding completion: the server has stamped the
+        // relevant `*_ref` (`data_ref` for a direct image upload,
+        // `thumbnail_ref` / `legend_ref` for an aux upload) on the
+        // row and echoes the updated dataset back. A missing value
+        // here means the response shape is wrong or the row didn't
+        // actually update — treat it as a failure rather than
+        // reporting success with an empty ref. An empty ref would
+        // later be dropped by the form's save (silently losing the
+        // upload the publisher just did) or, worse, used to
+        // overwrite an existing ref. PR #207 Copilot review.
+        const ref =
+          kind === 'data'
+            ? completeResult.data.dataset.data_ref
+            : kind === 'thumbnail'
+              ? completeResult.data.dataset.thumbnail_ref
+              : completeResult.data.dataset.legend_ref
+        if (!ref) {
+          state = {
+            ...state,
+            stage: 'error',
+            statusKey: STAGE_STATUS_KEY.error,
+            errorDetail: t('publisher.assetUploader.completeMissingRef'),
+          }
+          paint()
+          return
+        }
         state = {
           ...state,
           stage: 'done-direct',
@@ -1105,19 +1131,11 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
         }
         paint()
         if (kind === 'data') {
-          options.onUploaded({
-            mode: 'direct',
-            dataRef: completeResult.data.dataset.data_ref ?? '',
-          })
+          options.onUploaded({ mode: 'direct', dataRef: ref })
         } else {
-          // Auxiliary upload — the server stamped `thumbnail_ref` /
-          // `legend_ref` on the row; hand the new value back so the
-          // parent form mirrors it into its manual input + state.
-          const ref =
-            kind === 'thumbnail'
-              ? completeResult.data.dataset.thumbnail_ref
-              : completeResult.data.dataset.legend_ref
-          options.onUploaded({ mode: 'aux', kind, ref: ref ?? '' })
+          // Aux upload — hand the new ref back so the parent form
+          // mirrors it into its manual input + state.
+          options.onUploaded({ mode: 'aux', kind, ref })
         }
       }
     } catch (err) {

@@ -581,6 +581,7 @@
   "publisher.analytics.title": "Analytics",
   "publisher.api.fallbackError.invalidJson": "The server rejected the request.",
   "publisher.api.fallbackError.validationFailed": "Validation failed.",
+  "publisher.assetUploader.completeMissingRef": "Upload finished, but the server didn't return a saved reference. Please retry.",
   "publisher.assetUploader.current": "Current reference:",
   "publisher.assetUploader.errorDetails": "Show details",
   "publisher.assetUploader.frames.frameCount": "{count} frame(s), {size} total",

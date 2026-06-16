@@ -406,6 +406,49 @@ describe('renderAssetUploader — auxiliary kinds (thumbnail / legend)', () => {
     })
   })
 
+  it('errors instead of reporting success when the complete response omits the ref', async () => {
+    // PR #207 Copilot review — a 200 complete with no stamped ref
+    // must surface as a failure, not a false success that sets the
+    // form ref to an empty string.
+    const onUploaded = vi.fn()
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            upload_id: 'UP-NOREF',
+            kind: 'thumbnail',
+            target: 'r2',
+            r2: { method: 'PUT', url: 'https://r2.example/put', headers: {}, key: 'k' },
+            expires_at: 'soon',
+            mock: false,
+          },
+          201,
+        ),
+      )
+      // /complete returns 200 but without thumbnail_ref.
+      .mockResolvedValueOnce(jsonResponse({ dataset: {} }))
+
+    mount.appendChild(
+      renderAssetUploader({
+        datasetId: '01AAAAAAAAAAAAAAAAAAAAAAAA',
+        kind: 'thumbnail',
+        format: 'image/png',
+        onUploaded,
+        hashFn: async () => 'sha256:' + 'a'.repeat(64),
+        fetchFn: fetchFn as unknown as typeof fetch,
+        xhrFactory: fakeXhrFactory(),
+      }),
+    )
+
+    pickFile(mount, 'image/png', 'mock-png-bytes')
+    for (let i = 0; i < 8; i++) await new Promise(r => setTimeout(r, 0))
+
+    expect(onUploaded).not.toHaveBeenCalled()
+    expect(mount.querySelector('.publisher-asset-uploader-status-error')).not.toBeNull()
+    expect(mount.textContent).toContain("didn't return a saved reference")
+  })
+
   it('rejects a non-image file for an aux kind before any network call', async () => {
     const fetchFn = vi.fn()
     mount.appendChild(
