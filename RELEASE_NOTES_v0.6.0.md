@@ -53,9 +53,22 @@ Web users do not need to do anything.
 
 ---
 
+## What's in the desktop app vs. the web
+
+A lot of this release's surface area is **authoring and operations**, which lives only on the deployed web node. The desktop app and the web app share 100% of the TypeScript source, but a few of the headline features below are web-only by design:
+
+- **The desktop app is the viewer.** Globe rendering, datasets, Orbit, VR/AR, and offline downloads all ship in the desktop build and benefit from this release's rendering and catalog-exploration work.
+- **The publisher portal, Zyra workflows, and the analytics / feedback dashboards are web-only.** They are reached at `/publish/*` on the deployed node, call that node's `/api/v1/publish/*` backend, and authenticate through Cloudflare Access — none of which is reachable from the desktop app's bundled `tauri://localhost` origin. The desktop window also has no address bar and no in-app link to the portal. Publishers and operators do this work in a browser on the node.
+
+Each web-only highlight below is tagged accordingly.
+
+---
+
 ## Highlights
 
 ### The publisher portal ships ([#111](https://github.com/zyra-project/terraviz/pull/111), [#112](https://github.com/zyra-project/terraviz/pull/112), [#116](https://github.com/zyra-project/terraviz/pull/116)–[#121](https://github.com/zyra-project/terraviz/pull/121), [#127](https://github.com/zyra-project/terraviz/pull/127), [#188](https://github.com/zyra-project/terraviz/pull/188))
+
+> **Web-only.** Reached at `/publish/*` on the deployed node; not part of the desktop app.
 
 The headline of this release. The node catalog backend that landed across v0.5.0 now has a complete authoring surface at `/publish/*`, lazy-loaded behind Cloudflare Access. A publisher signs in through the browser Access flow and gets a real editorial workflow — no `terraviz` CLI required (the CLI keeps working unchanged; the portal is an alternative surface on the same write API).
 
@@ -67,9 +80,13 @@ The headline of this release. The node catalog backend that landed across v0.5.0
 
 ### Publisher tour creator ([#127](https://github.com/zyra-project/terraviz/pull/127), [#134](https://github.com/zyra-project/terraviz/pull/134), [#136](https://github.com/zyra-project/terraviz/pull/136))
 
+> **Web-only** (authoring). The tours themselves play back everywhere, including in the desktop app.
+
 The `/publish/tours` placeholder is now a working authoring flow. A publisher clicks **New tour**, lands on the SPA in tour-authoring mode, and captures camera positions, dataset loads, layout switches, environment toggles, rotation, and flow control through a floating dock — 18 capture types in all. Tasks reorder by drag-and-drop, edit via an inline JSON escape hatch, and the draft autosaves to R2. A **Preview** button plays the in-memory draft from the start; **Publish** snapshots it to an immutable key. Tours also gained a public discovery endpoint so published tours surface in browse, plus a retract gesture ([#136](https://github.com/zyra-project/terraviz/pull/136)).
 
 ### Globe thumbnails + geography controls ([#207](https://github.com/zyra-project/terraviz/pull/207), [#208](https://github.com/zyra-project/terraviz/pull/208), [#209](https://github.com/zyra-project/terraviz/pull/209))
+
+> **Web-only.** Part of the publisher dataset form.
 
 Three additions round out the dataset form:
 
@@ -97,9 +114,13 @@ Authoritative plan: [`docs/WEB_CATALOG_FEATURES_PLAN.md`](https://github.com/zyr
 
 ### Zyra workflows — automation for real-time datasets ([#175](https://github.com/zyra-project/terraviz/pull/175), [#176](https://github.com/zyra-project/terraviz/pull/176), [#178](https://github.com/zyra-project/terraviz/pull/178), [#179](https://github.com/zyra-project/terraviz/pull/179))
 
+> **Web-only.** Authored and run from `/publish/workflows` on the deployed node.
+
 A new workflow layer lets publishers keep live datasets fresh on a schedule. Phase Z1 shipped the stage/command-allowlisted workflow contract + a runner; Z2 added the portal UI (`/publish/workflows` list, detail with run history and **Run now**, a YAML→JSON editor with server-side validation); Z3 added guided authoring with curated templates and live run-status polling; Z4 added period-driven freshness and frame-gap backfill templates so an hourly series can self-heal. Full design: [`docs/ZYRA_INTEGRATION_PLAN.md`](https://github.com/zyra-project/terraviz/blob/v0.6.0/docs/ZYRA_INTEGRATION_PLAN.md).
 
 ### Analytics storage & in-portal admin dashboard ([#180](https://github.com/zyra-project/terraviz/pull/180)–[#187](https://github.com/zyra-project/terraviz/pull/187))
+
+> **Web-only** (operator dashboards). The desktop app still *emits* telemetry under the same two-tier consent model.
 
 The privacy-first telemetry pipeline grew a durable storage tier and moved its operator surface into the portal:
 
