@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { hashFileSha256, renderAssetUploader } from './asset-uploader'
+import { ROUTE_CHANGE_START_EVENT } from '../router'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -704,6 +705,41 @@ describe('renderAssetUploader — auxiliary kinds (thumbnail / legend)', () => {
     expect(generateThumbnail.mock.calls[0][0]).toBe(capturedCanvas)
     expect(dispose).toHaveBeenCalled()
     expect(mount.querySelector('.publisher-asset-uploader-generate-preview')).not.toBeNull()
+  })
+
+  it('disposes a video stream that finishes loading after a route change', async () => {
+    // A slow HLS load that resolves only after the publisher has
+    // navigated away must NOT re-attach a live stream — it should be
+    // disposed. PR #208 Copilot review (in-flight scrub load).
+    const dispose = vi.fn()
+    let resolveLoad: (h: unknown) => void = () => {}
+    const loadVideoScrub = vi.fn(
+      () => new Promise(res => { resolveLoad = res }),
+    ) as unknown as (url: string) => Promise<never>
+
+    mount.appendChild(
+      renderAssetUploader({
+        datasetId: '01AAAAAAAAAAAAAAAAAAAAAAAA',
+        kind: 'thumbnail',
+        format: 'video/mp4',
+        dataAssetUrl: 'https://assets.example/master.m3u8',
+        onUploaded: () => {},
+        loadVideoScrub,
+      }),
+    )
+    Array.from(mount.querySelectorAll('button'))
+      .find(b => b.textContent?.includes('Generate from this dataset'))!
+      .click()
+    for (let i = 0; i < 4; i++) await new Promise(r => setTimeout(r, 0))
+
+    // Navigate away while still "Loading video…".
+    window.dispatchEvent(new Event(ROUTE_CHANGE_START_EVENT))
+    // Now the load resolves — too late.
+    resolveLoad({ video: document.createElement('video'), capture: () => document.createElement('canvas'), dispose })
+    for (let i = 0; i < 4; i++) await new Promise(r => setTimeout(r, 0))
+
+    expect(dispose).toHaveBeenCalled()
+    expect(mount.querySelector('.publisher-asset-uploader-generate-video')).toBeNull()
   })
 
   it('disposes the video stream when the scrub is cancelled', async () => {

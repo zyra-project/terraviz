@@ -131,7 +131,9 @@ export function resolveGlobeThumbnailOptions(
   opts: GlobeThumbnailOptions = {},
 ): ResolvedOptions {
   const size = Math.round(clamp(opts.size ?? DEFAULTS.size, 16, 2048))
-  const supersample = clamp(opts.supersample ?? DEFAULTS.supersample, 1, 4)
+  // Round to an integer so a fractional factor (e.g. 1.5) can't yield
+  // fractional canvas / renderer dimensions. PR #208 Copilot review.
+  const supersample = Math.round(clamp(opts.supersample ?? DEFAULTS.supersample, 1, 4))
   const fill = clamp(opts.fill ?? DEFAULTS.fill, 0.1, 1)
   const mime = opts.mime === 'image/png' ? 'image/png' : DEFAULTS.mime
   const quality = clamp(opts.quality ?? DEFAULTS.quality, 0, 1)
@@ -307,10 +309,7 @@ export async function generateGlobeThumbnail(
     // the same tick — but we await it so a future async source path
     // (or a stubbed deferred handle) stays correct.
     await new Promise<void>(resolve => {
-      earth.setTexture(
-        { kind: 'image', element: source as HTMLImageElement, options: options.overlay },
-        resolve,
-      )
+      earth.setTexture({ kind: 'image', element: source, options: options.overlay }, resolve)
     })
 
     // A regional Earth dataset shows a base Earth outside its bbox,

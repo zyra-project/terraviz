@@ -235,7 +235,12 @@ export type VrDatasetTexture =
     }
   | {
       readonly kind: 'image'
-      readonly element: HTMLImageElement
+      /** A decoded image source. Usually an `HTMLImageElement` (the
+       *  2D loader's decoded dataset image), but also accepts a
+       *  `HTMLCanvasElement` / `ImageBitmap` — e.g. a frame grabbed
+       *  from the dataset's video by the globe-thumbnail generator.
+       *  All are valid `THREE.Texture` sources. */
+      readonly element: HTMLImageElement | HTMLCanvasElement | ImageBitmap
       readonly options?: DatasetOverlayOptions
     }
 
@@ -1096,7 +1101,15 @@ export function createPhotorealEarth(
   // ── Texture state ─────────────────────────────────────────────────
   let activeDatasetTexture: THREE.Texture | null = null
   /** Identity of the currently-loaded spec — element reference for change detection. */
-  let activeKey: HTMLVideoElement | HTMLImageElement | null = null
+  // Identity token for the active dataset source (compared by ===,
+  // never read as an element). Accepts every `VrDatasetTexture`
+  // element kind, incl. the canvas / ImageBitmap image sources.
+  let activeKey:
+    | HTMLVideoElement
+    | HTMLImageElement
+    | HTMLCanvasElement
+    | ImageBitmap
+    | null = null
   /**
    * Cleanup closure for pending video `seeked`/`playing` listeners.
    * Without this, a dataset swap or session end before the HLS

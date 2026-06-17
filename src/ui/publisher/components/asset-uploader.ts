@@ -464,7 +464,14 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
   // route navigation — a streaming HLS left running would leak
   // bandwidth + memory.
   let activeScrub: VideoScrubHandle | null = null
+  // Monotonic token bumped whenever a scrub is cleared — lets an
+  // in-flight `loadVideoScrub()` detect it was cancelled (route
+  // change / new load) while awaiting and dispose its handle instead
+  // of re-attaching a stale HLS instance + listener. PR #208 Copilot
+  // review.
+  let scrubLoadSeq = 0
   function clearScrub(): void {
+    scrubLoadSeq++
     if (activeScrub) {
       activeScrub.dispose()
       activeScrub = null
@@ -799,9 +806,9 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
           const handle = g.scrub
           if (!handle) return
           const canvas = handle.capture()
-          window.removeEventListener(ROUTE_CHANGE_START_EVENT, clearScrub)
-          handle.dispose()
-          activeScrub = null
+          // Grab the frame, then tear the stream down (disposes the
+          // handle, removes the listener, bumps the load token).
+          clearScrub()
           // The captured frame IS the dataset's data — apply its
           // render hints so the thumbnail matches the live globe.
           genState = {
@@ -1079,18 +1086,33 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
    *  seek + capture a frame (handled by the `scrubbing`-stage UI). */
   async function runScrubFromData(url: string): Promise<void> {
     clearScrub()
+    // Capture the load token AFTER clearScrub bumped it; a later
+    // clearScrub (route change / new load) will bump it again, which
+    // is how we detect this load was cancelled while awaiting.
+    const seq = scrubLoadSeq
     if (genState.previewUrl) URL.revokeObjectURL(genState.previewUrl)
     genState = { ...INITIAL_GEN, stage: 'scrubbing' }
     paint()
+    // Attach the teardown listener BEFORE the await so a route change
+    // during the (possibly slow) HLS load still fires clearScrub and
+    // invalidates this load.
+    window.addEventListener(ROUTE_CHANGE_START_EVENT, clearScrub)
     const load = options.loadVideoScrub ?? defaultLoadVideoScrub
     try {
       const handle = await load(url)
+      if (seq !== scrubLoadSeq) {
+        // Cancelled (route change / a newer load) while loading — drop
+        // this handle instead of re-attaching a stale HLS instance.
+        handle.dispose()
+        return
+      }
       activeScrub = handle
-      // Tear the stream down if the publisher navigates away mid-scrub.
-      window.addEventListener(ROUTE_CHANGE_START_EVENT, clearScrub)
       genState = { ...genState, scrub: handle }
       paint()
     } catch (err) {
+      // Ignore a stale failure from a cancelled load.
+      if (seq !== scrubLoadSeq) return
+      window.removeEventListener(ROUTE_CHANGE_START_EVENT, clearScrub)
       genState = {
         ...INITIAL_GEN,
         stage: 'error',

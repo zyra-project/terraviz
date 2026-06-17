@@ -40,6 +40,11 @@ describe('resolveGlobeThumbnailOptions', () => {
     expect(resolveGlobeThumbnailOptions({ quality: 2 }).quality).toBe(1)
   })
 
+  it('rounds supersample to an integer (no fractional render dimensions)', () => {
+    expect(resolveGlobeThumbnailOptions({ supersample: 1.5 }).supersample).toBe(2)
+    expect(resolveGlobeThumbnailOptions({ supersample: 2.4 }).supersample).toBe(2)
+  })
+
   it('only accepts png as an alternative mime, else falls back to webp', () => {
     expect(resolveGlobeThumbnailOptions({ mime: 'image/png' }).mime).toBe('image/png')
     expect(

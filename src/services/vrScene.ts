@@ -194,7 +194,9 @@ export function createVrScene(
     shadowMat: THREE.MeshBasicMaterial
     /** Per-globe borders shell. Always present; `borders.mesh.visible` gates rendering. */
     borders: VrBordersHandle
-    activeKey: HTMLVideoElement | HTMLImageElement | null
+    // Identity token (compared by ===), accepts every dataset source
+    // kind incl. the canvas / ImageBitmap image sources.
+    activeKey: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | ImageBitmap | null
     activeTexture: THREE.Texture | null
     cancelPendingVideoListeners: (() => void) | null
   }
