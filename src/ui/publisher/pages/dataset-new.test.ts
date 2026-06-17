@@ -496,6 +496,44 @@ describe('renderDatasetNewPage', () => {
     expect(body.citation_text).toBe('NOAA PMEL, 2026.')
   })
 
+  it('renders a per-corner bounding-box validation error inline', async () => {
+    const errors = {
+      errors: [
+        {
+          field: 'bounding_box.n',
+          code: 'invalid_value',
+          message: 'bounding_box.n must be in [-90, 90] (got 200).',
+        },
+      ],
+    }
+    const fetchFn = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(errors), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    renderDatasetNewPage(mount, {
+      fetchFn: fetchFn as unknown as typeof fetch,
+      routerNavigate: vi.fn(),
+    })
+
+    setInput(mount, '#dataset-title', 'A title')
+    setInput(mount, '#dataset-bbox-n', '200')
+    setInput(mount, '#dataset-bbox-s', '20')
+    setInput(mount, '#dataset-bbox-w', '-10')
+    setInput(mount, '#dataset-bbox-e', '30')
+    submitForm(mount)
+    await new Promise(r => setTimeout(r, 0))
+    await new Promise(r => setTimeout(r, 0))
+
+    const nInput = mount.querySelector<HTMLInputElement>('#dataset-bbox-n')
+    expect(nInput?.getAttribute('aria-invalid')).toBe('true')
+    expect(nInput?.getAttribute('aria-describedby')).toBe('dataset-bbox-n-err')
+    expect(mount.querySelector('#dataset-bbox-n-err')?.textContent).toContain(
+      'must be in [-90, 90]',
+    )
+  })
+
   it('renders per-field validation error on the licensing fields', async () => {
     const errors = {
       errors: [

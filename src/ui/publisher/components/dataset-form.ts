@@ -795,10 +795,24 @@ function geographyCard(state: FormState): HTMLElement {
     input.value = c.value
     input.placeholder = c.placeholder
     const err = findError(state.errors, c.field)
-    if (err) input.setAttribute('aria-invalid', 'true')
+    if (err) {
+      input.setAttribute('aria-invalid', 'true')
+      input.setAttribute('aria-describedby', `${c.id}-err`)
+    }
     input.addEventListener('input', () => c.set(input.value))
     input.addEventListener('change', () => c.set(input.value))
     col.appendChild(input)
+    // Surface the validator's actionable per-corner message (e.g.
+    // "bounding_box.n must be in [-90, 90]") rather than just a red
+    // input. PR #209 Copilot review.
+    if (err) {
+      const cornerErr = document.createElement('p')
+      cornerErr.id = `${c.id}-err`
+      cornerErr.className = 'publisher-form-error'
+      cornerErr.setAttribute('role', 'alert')
+      cornerErr.textContent = err.message
+      col.appendChild(cornerErr)
+    }
     bboxRow.appendChild(col)
   }
   bboxWrap.appendChild(bboxRow)
