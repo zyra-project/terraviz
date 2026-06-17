@@ -23,7 +23,7 @@ import {
   listDatasetsForPublisher,
   type ListOptions,
 } from '../_lib/dataset-mutations'
-import { resolveAssetRefStrict } from '../_lib/r2-public-url'
+import { resolveHttpAssetUrl } from '../_lib/r2-public-url'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
 
@@ -72,7 +72,7 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
   // table can render a thumbnail cell (null when none / unresolvable).
   const withThumbnails = datasets.map(d => ({
     ...d,
-    thumbnail_url: resolveAssetRefStrict(context.env, d.thumbnail_ref),
+    thumbnail_url: resolveHttpAssetUrl(context.env, d.thumbnail_ref),
   }))
   return new Response(JSON.stringify({ datasets: withThumbnails, next_cursor }), {
     status: 200,

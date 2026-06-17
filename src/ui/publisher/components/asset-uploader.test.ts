@@ -907,6 +907,10 @@ describe('renderAssetUploader — auxiliary kinds (thumbnail / legend)', () => {
       Array.from(mount.querySelectorAll('button')).find(
         b => b.textContent === 'Use this thumbnail',
       ) as HTMLButtonElement | undefined
+    const discardBtn = (): HTMLButtonElement | undefined =>
+      Array.from(mount.querySelectorAll('button')).find(
+        b => b.textContent === 'Discard',
+      ) as HTMLButtonElement | undefined
 
     // Initial generate → preview, Use enabled.
     const genInput = mount.querySelector<HTMLInputElement>(
@@ -920,6 +924,7 @@ describe('renderAssetUploader — auxiliary kinds (thumbnail / legend)', () => {
     genInput.dispatchEvent(new Event('change', { bubbles: true }))
     for (let i = 0; i < 6; i++) await new Promise(r => setTimeout(r, 0))
     expect(useBtn()?.disabled).toBe(false)
+    expect(discardBtn()?.disabled).toBe(false)
 
     // Move the longitude slider → re-render starts but hangs.
     const lon = mount.querySelector<HTMLInputElement>('input[type="range"][id$="-lon"]')!
@@ -927,14 +932,55 @@ describe('renderAssetUploader — auxiliary kinds (thumbnail / legend)', () => {
     lon.dispatchEvent(new Event('input', { bubbles: true }))
     lon.dispatchEvent(new Event('change', { bubbles: true }))
     for (let i = 0; i < 2; i++) await new Promise(r => setTimeout(r, 0))
-    // Use is inert while the re-render is in flight (can't upload a
-    // stale capture).
+    // Use + Discard are inert while the re-render is in flight — Use
+    // can't upload a stale capture, and Discard can't be undone by a
+    // late render repainting the preview.
     expect(useBtn()?.disabled).toBe(true)
+    expect(discardBtn()?.disabled).toBe(true)
 
-    // Let the re-render settle → Use re-enables.
+    // Let the re-render settle → both re-enable.
     resolveSecond(g2)
     for (let i = 0; i < 6; i++) await new Promise(r => setTimeout(r, 0))
     expect(useBtn()?.disabled).toBe(false)
+    expect(discardBtn()?.disabled).toBe(false)
+  })
+
+  it('surfaces an error + disposes the stream if capturing the video frame throws', async () => {
+    const dispose = vi.fn()
+    const loadVideoScrub = vi.fn().mockResolvedValue({
+      video: document.createElement('video'),
+      capture: () => {
+        // e.g. drawImage on a not-yet-decodable frame (videoWidth=0).
+        throw new Error('InvalidStateError')
+      },
+      dispose,
+    })
+
+    mount.appendChild(
+      renderAssetUploader({
+        datasetId: '01AAAAAAAAAAAAAAAAAAAAAAAA',
+        kind: 'thumbnail',
+        format: 'video/mp4',
+        dataAssetUrl: 'https://assets.example/master.m3u8',
+        onUploaded: () => {},
+        loadVideoScrub,
+      }),
+    )
+    Array.from(mount.querySelectorAll('button'))
+      .find(b => b.textContent?.includes('Generate from this dataset'))!
+      .click()
+    for (let i = 0; i < 4; i++) await new Promise(r => setTimeout(r, 0))
+
+    Array.from(mount.querySelectorAll('button'))
+      .find(b => b.textContent === 'Capture this frame')!
+      .click()
+    for (let i = 0; i < 4; i++) await new Promise(r => setTimeout(r, 0))
+
+    expect(dispose).toHaveBeenCalled()
+    expect(
+      mount.querySelector('.publisher-asset-uploader-generate .publisher-asset-uploader-status-error'),
+    ).not.toBeNull()
+    expect(mount.querySelector('.publisher-asset-uploader-generate-video')).toBeNull()
   })
 
   it('moves to the error state (no unhandled rejection) when a rotation re-render fails', async () => {

@@ -146,6 +146,26 @@ export function resolveAssetRefStrict(
 }
 
 /**
+ * Resolve a ref to a **fetchable HTTP(S) URL**, or null.
+ *
+ * `resolveAssetRefStrict` passes non-`r2:` refs through verbatim, so
+ * a `vimeo:123` (or any non-HTTP scheme) would come back unchanged.
+ * The publisher portal feeds these values straight into `fetch()` and
+ * `<img src>` (data-frame fetch, thumbnail/legend previews), so only
+ * `http(s)` URLs are usable — anything else must surface as null so
+ * the UI hides the one-click generator / image preview rather than
+ * fetching an invalid URL or injecting an unsupported scheme into the
+ * DOM. PR #208 Copilot review.
+ */
+export function resolveHttpAssetUrl(
+  env: CatalogEnv,
+  ref: string | null | undefined,
+): string | null {
+  const resolved = resolveAssetRefStrict(env, ref)
+  return resolved && /^https?:\/\//i.test(resolved) ? resolved : null
+}
+
+/**
  * Has the operator bound an R2 public-read origin?
  *
  * Returns true when either `R2_PUBLIC_BASE` is set (production

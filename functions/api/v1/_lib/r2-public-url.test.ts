@@ -21,6 +21,7 @@ import {
   encodeR2Key,
   resolveAssetRef,
   resolveAssetRefStrict,
+  resolveHttpAssetUrl,
   resolveR2HlsPublicUrl,
   resolveR2PublicUrl,
 } from './r2-public-url'
@@ -271,5 +272,37 @@ describe('buildFramesUrlTemplate (3pg/A)', () => {
     // that lands at the wrong R2 key.
     expect(buildFramesUrlTemplate(env, REF, 'PNG')).toBeNull()
     expect(buildFramesUrlTemplate(env, REF, '../etc/passwd')).toBeNull()
+  })
+})
+
+describe('resolveHttpAssetUrl (PR #208 — portal fetch/img safety)', () => {
+  it('resolves an r2: ref to its http(s) public URL', () => {
+    const env: CatalogEnv = { R2_PUBLIC_BASE: 'https://assets.example.com' }
+    expect(resolveHttpAssetUrl(env, 'r2:datasets/DS/thumbnail.webp')).toBe(
+      'https://assets.example.com/datasets/DS/thumbnail.webp',
+    )
+  })
+
+  it('passes a bare https URL through', () => {
+    const env: CatalogEnv = {}
+    expect(resolveHttpAssetUrl(env, 'https://cdn.example/x.png')).toBe(
+      'https://cdn.example/x.png',
+    )
+  })
+
+  it('returns null for a non-http(s) ref (vimeo:) so the portal never fetches it', () => {
+    const env: CatalogEnv = { R2_PUBLIC_BASE: 'https://assets.example.com' }
+    expect(resolveHttpAssetUrl(env, 'vimeo:123456')).toBeNull()
+  })
+
+  it('returns null for an r2: ref that cannot be resolved (no public base)', () => {
+    const env: CatalogEnv = {}
+    expect(resolveHttpAssetUrl(env, 'r2:datasets/DS/thumbnail.webp')).toBeNull()
+  })
+
+  it('returns null for empty / nullish refs', () => {
+    const env: CatalogEnv = { R2_PUBLIC_BASE: 'https://assets.example.com' }
+    expect(resolveHttpAssetUrl(env, null)).toBeNull()
+    expect(resolveHttpAssetUrl(env, '')).toBeNull()
   })
 })

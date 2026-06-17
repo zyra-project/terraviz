@@ -25,7 +25,7 @@ import {
   getDatasetForPublisher,
   updateDataset,
 } from '../../_lib/dataset-mutations'
-import { resolveAssetRefStrict } from '../../_lib/r2-public-url'
+import { resolveHttpAssetUrl } from '../../_lib/r2-public-url'
 import { type JobQueue, WaitUntilJobQueue } from '../../_lib/job-queue'
 
 /** Test injection point — middleware/tests can pre-populate `context.data.jobQueue`. */
@@ -63,11 +63,11 @@ export const onRequestGet: PagesFunction<CatalogEnv, 'id'> = async context => {
   // Null when the ref can't be resolved (no R2_PUBLIC_BASE bound, or
   // a non-resolvable scheme) — the portal then hides the one-click
   // affordance and falls back to the manual frame picker.
-  const dataUrl = resolveAssetRefStrict(context.env, row.data_ref)
+  const dataUrl = resolveHttpAssetUrl(context.env, row.data_ref)
   // Same resolution for the auxiliary images so the portal can render
   // an actual preview (not just the `r2:` ref text) in the edit form.
-  const thumbnailUrl = resolveAssetRefStrict(context.env, row.thumbnail_ref)
-  const legendUrl = resolveAssetRefStrict(context.env, row.legend_ref)
+  const thumbnailUrl = resolveHttpAssetUrl(context.env, row.thumbnail_ref)
+  const legendUrl = resolveHttpAssetUrl(context.env, row.legend_ref)
   return new Response(
     JSON.stringify({
       dataset: row,

@@ -805,7 +805,24 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
         capture.addEventListener('click', () => {
           const handle = g.scrub
           if (!handle) return
-          const canvas = handle.capture()
+          // `drawImage(video)` can throw if the frame isn't decodable
+          // yet (videoWidth=0 → InvalidStateError). Catch it, tear the
+          // stream down, and surface a generator error rather than
+          // letting it bubble out and strand a live HLS stream. PR
+          // #208 Copilot review.
+          let canvas: HTMLCanvasElement
+          try {
+            canvas = handle.capture()
+          } catch (err) {
+            clearScrub()
+            genState = {
+              ...INITIAL_GEN,
+              stage: 'error',
+              errorDetail: err instanceof Error ? err.message : String(err),
+            }
+            paint()
+            return
+          }
           // Grab the frame, then tear the stream down (disposes the
           // handle, removes the listener, bumps the load token).
           clearScrub()
@@ -903,7 +920,12 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
       discard.type = 'button'
       discard.className = 'publisher-button publisher-button-secondary'
       discard.textContent = t('publisher.assetUploader.generate.discard')
+      // Disabled (and no-op) while a rotation re-render is in flight —
+      // otherwise an in-flight render could resolve after the discard
+      // and repaint the preview, undoing it. PR #208 Copilot review.
+      discard.disabled = busy
       discard.addEventListener('click', () => {
+        if (busy) return
         if (g.previewUrl) URL.revokeObjectURL(g.previewUrl)
         genState = INITIAL_GEN
         paint()
