@@ -208,6 +208,14 @@ export async function generateGlobeThumbnail(
   const geometry = new THREE_.SphereGeometry(1, 96, 64)
   const texture = new THREE_.Texture(source as unknown as HTMLImageElement)
   texture.colorSpace = THREE_.SRGBColorSpace
+  // Linear filtering, no mipmaps: this is a one-shot render, so mipmap
+  // generation is wasted work — and a non-power-of-two source frame
+  // (a hand-picked 1000×500 image, say) would otherwise force a
+  // resize/fallback or warning. Matches the codebase convention for
+  // dynamic textures. PR #208 Copilot review.
+  texture.minFilter = THREE_.LinearFilter
+  texture.magFilter = THREE_.LinearFilter
+  texture.generateMipmaps = false
   texture.needsUpdate = true
   const material = new THREE_.MeshBasicMaterial({ map: texture })
   const mesh = new THREE_.Mesh(geometry, material)

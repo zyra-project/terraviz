@@ -373,6 +373,12 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
   // newer one — the publisher dragging a slider fires renders faster
   // than they resolve.
   let genRenderSeq = 0
+  // True while a render is in flight (initial generate or a rotation
+  // re-render). Folded into the generator's `busy` so "Use this
+  // thumbnail" can't upload a stale capture mid-re-render and a late
+  // render can't repaint after the publisher has moved on. PR #208
+  // Copilot review.
+  let genRendering = false
   // Tab strip is only mounted for the primary `data` asset of a
   // video-format dataset — that's where image-sequence input is
   // meaningful (the catalog encodes every frames upload to a video
@@ -611,7 +617,7 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
     // Copilot review.
     const uploadInFlight =
       state.stage !== 'idle' && state.stage !== 'error' && state.stage !== 'done-direct'
-    const busy = g.stage === 'rendering' || uploadInFlight
+    const busy = g.stage === 'rendering' || uploadInFlight || genRendering
 
     const controls = document.createElement('div')
     controls.className = 'publisher-asset-uploader-generate-controls'
@@ -816,6 +822,12 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
     const source = genState.source
     if (!source) return
     const seq = ++genRenderSeq
+    // Mark busy + repaint so the action buttons (Use this thumbnail,
+    // Generate…) disable for the duration — the rotation sliders stay
+    // live so the publisher can keep adjusting. The current preview
+    // stays visible (no empty flash). PR #208 Copilot review.
+    genRendering = true
+    paint()
     const generate = options.generateThumbnail ?? generateGlobeThumbnail
     try {
       const blob = await generate(source, {
@@ -823,8 +835,10 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
         latOrigin: genState.lat,
       })
       // A newer rotation started while this one was rendering — drop
-      // this result so the latest one wins.
+      // this result so the latest one wins. The newer render owns
+      // `genRendering` and will clear it when it settles.
       if (seq !== genRenderSeq) return
+      genRendering = false
       const previewUrl = URL.createObjectURL(blob)
       // WebP is the generator's default output; name + type line up
       // with the aux image mime gate in `run()`.
@@ -837,6 +851,7 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
     } catch (err) {
       // Drop a stale failure superseded by a newer rotation.
       if (seq !== genRenderSeq) return
+      genRendering = false
       if (genState.previewUrl) URL.revokeObjectURL(genState.previewUrl)
       genState = {
         ...INITIAL_GEN,

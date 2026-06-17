@@ -87,6 +87,11 @@ describe('canvasToBlob', () => {
 function fakeThree() {
   const events: string[] = []
   const blob = new Blob(['rendered'], { type: 'image/webp' })
+  const textures: Array<{
+    minFilter: unknown
+    magFilter: unknown
+    generateMipmaps: boolean
+  }> = []
 
   class WebGLRenderer {
     domElement: unknown
@@ -116,7 +121,12 @@ function fakeThree() {
   class Texture {
     colorSpace = ''
     needsUpdate = false
-    constructor(public image: unknown) {}
+    minFilter: unknown = 'mipmap-default'
+    magFilter: unknown = 'mipmap-default'
+    generateMipmaps = true
+    constructor(public image: unknown) {
+      textures.push(this)
+    }
     dispose() {
       events.push('texture.dispose')
     }
@@ -156,9 +166,10 @@ function fakeThree() {
     Mesh,
     OrthographicCamera,
     SRGBColorSpace: 'srgb',
+    LinearFilter: 'linear',
   } as unknown as typeof import('three')
 
-  return { three, events, blob }
+  return { three, events, blob, textures }
 }
 
 function fakeCanvasFactory(blob: Blob) {
@@ -178,7 +189,7 @@ function fakeCanvasFactory(blob: Blob) {
 
 describe('generateGlobeThumbnail', () => {
   it('renders, captures a blob, and releases every GPU resource', async () => {
-    const { three, events, blob } = fakeThree()
+    const { three, events, blob, textures } = fakeThree()
     const source = { width: 2048, height: 1024 } as unknown as HTMLImageElement
 
     const result = await generateGlobeThumbnail(
@@ -188,6 +199,13 @@ describe('generateGlobeThumbnail', () => {
     )
 
     expect(result).toBe(blob)
+    // Linear filtering, no mipmaps — one-shot render, NPOT-safe.
+    expect(textures).toHaveLength(1)
+    expect(textures[0]).toMatchObject({
+      minFilter: 'linear',
+      magFilter: 'linear',
+      generateMipmaps: false,
+    })
     // The render fired before teardown, and every GPU handle was
     // disposed (a leaked context would exhaust the browser pool
     // after a few previews).

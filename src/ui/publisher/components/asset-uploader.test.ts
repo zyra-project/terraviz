@@ -691,6 +691,70 @@ describe('renderAssetUploader — auxiliary kinds (thumbnail / legend)', () => {
     expect(fetchFn).not.toHaveBeenCalled()
   })
 
+  it('disables "Use this thumbnail" while a rotation re-render is in flight', async () => {
+    const g1 = new Blob(['g1'], { type: 'image/webp' })
+    const g2 = new Blob(['g2'], { type: 'image/webp' })
+    let resolveSecond!: (b: Blob) => void
+    const generateThumbnail = vi
+      .fn()
+      .mockResolvedValueOnce(g1)
+      // The rotation re-render hangs until we resolve it, so we can
+      // observe the in-flight state.
+      .mockImplementationOnce(
+        () =>
+          new Promise<Blob>(r => {
+            resolveSecond = r
+          }),
+      )
+    const decodeImage = vi
+      .fn()
+      .mockResolvedValue({ width: 2048, height: 1024 } as unknown as HTMLImageElement)
+
+    mount.appendChild(
+      renderAssetUploader({
+        datasetId: '01AAAAAAAAAAAAAAAAAAAAAAAA',
+        kind: 'thumbnail',
+        format: 'image/png',
+        onUploaded: () => {},
+        generateThumbnail,
+        decodeImage,
+      }),
+    )
+
+    const useBtn = (): HTMLButtonElement | undefined =>
+      Array.from(mount.querySelectorAll('button')).find(
+        b => b.textContent === 'Use this thumbnail',
+      ) as HTMLButtonElement | undefined
+
+    // Initial generate → preview, Use enabled.
+    const genInput = mount.querySelector<HTMLInputElement>(
+      'input[id^="dataset-asset-generate-"][type="file"]',
+    )!
+    const frame = new File(['frame'], 'frame.png', { type: 'image/png' })
+    Object.defineProperty(genInput, 'files', {
+      value: { 0: frame, length: 1, item: (i: number) => (i === 0 ? frame : null) },
+      configurable: true,
+    })
+    genInput.dispatchEvent(new Event('change', { bubbles: true }))
+    for (let i = 0; i < 6; i++) await new Promise(r => setTimeout(r, 0))
+    expect(useBtn()?.disabled).toBe(false)
+
+    // Move the longitude slider → re-render starts but hangs.
+    const lon = mount.querySelector<HTMLInputElement>('input[type="range"][id$="-lon"]')!
+    lon.value = '90'
+    lon.dispatchEvent(new Event('input', { bubbles: true }))
+    lon.dispatchEvent(new Event('change', { bubbles: true }))
+    for (let i = 0; i < 2; i++) await new Promise(r => setTimeout(r, 0))
+    // Use is inert while the re-render is in flight (can't upload a
+    // stale capture).
+    expect(useBtn()?.disabled).toBe(true)
+
+    // Let the re-render settle → Use re-enables.
+    resolveSecond(g2)
+    for (let i = 0; i < 6; i++) await new Promise(r => setTimeout(r, 0))
+    expect(useBtn()?.disabled).toBe(false)
+  })
+
   it('moves to the error state (no unhandled rejection) when a rotation re-render fails', async () => {
     const generated = new Blob(['globe'], { type: 'image/webp' })
     // First render (the initial preview) succeeds; the rotation
