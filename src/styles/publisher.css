@@ -329,6 +329,30 @@
   gap: calc(0.5rem * var(--ui-scale));
 }
 
+/* Preview of the currently-saved thumbnail / legend image. */
+.publisher-form-aux-preview {
+  inline-size: calc(120px * var(--ui-scale));
+  block-size: auto;
+  max-block-size: calc(120px * var(--ui-scale));
+  object-fit: contain;
+  align-self: flex-start;
+  border-radius: calc(6px * var(--ui-scale));
+  background: var(--white-o05, rgba(255, 255, 255, 0.05));
+}
+
+/* Thumbnail cell in the datasets table. */
+.publisher-cell-thumb {
+  inline-size: calc(56px * var(--ui-scale));
+}
+
+.publisher-table-thumb {
+  inline-size: calc(40px * var(--ui-scale));
+  block-size: calc(40px * var(--ui-scale));
+  object-fit: cover;
+  border-radius: calc(4px * var(--ui-scale));
+  vertical-align: middle;
+}
+
 .publisher-form-label {
   font-size: calc(0.875rem * var(--ui-scale));
   font-weight: 500;

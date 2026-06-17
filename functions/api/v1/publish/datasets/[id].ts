@@ -64,10 +64,16 @@ export const onRequestGet: PagesFunction<CatalogEnv, 'id'> = async context => {
   // a non-resolvable scheme) — the portal then hides the one-click
   // affordance and falls back to the manual frame picker.
   const dataUrl = resolveAssetRefStrict(context.env, row.data_ref)
+  // Same resolution for the auxiliary images so the portal can render
+  // an actual preview (not just the `r2:` ref text) in the edit form.
+  const thumbnailUrl = resolveAssetRefStrict(context.env, row.thumbnail_ref)
+  const legendUrl = resolveAssetRefStrict(context.env, row.legend_ref)
   return new Response(
     JSON.stringify({
       dataset: row,
       data_url: dataUrl,
+      thumbnail_url: thumbnailUrl,
+      legend_url: legendUrl,
       keywords: decorations?.keywords ?? [],
       tags: decorations?.tags ?? [],
     }),

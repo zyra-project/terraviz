@@ -53,6 +53,11 @@ export interface DatasetFormOptions {
    *  doesn't have to be re-uploaded. Null/absent → that affordance
    *  is hidden and the manual frame picker is the path. */
   dataUrl?: string | null
+  /** Resolved public URLs of the dataset's current thumbnail /
+   *  legend (edit mode), so the form can show an image preview of
+   *  each alongside its uploader. Null/absent → no preview. */
+  thumbnailUrl?: string | null
+  legendUrl?: string | null
   /** Keyword chips to prefill in edit mode. Optional — server
    *  endpoints that don't yet ship keywords can pass an empty
    *  array and the chip input starts blank. */
@@ -103,6 +108,10 @@ interface FormState {
    *  generated thumbnail matches the live globe. Null in create mode
    *  (no row yet). */
   overlay: DatasetOverlayOptions | null
+  /** Resolved URLs of the currently-saved thumbnail / legend images
+   *  (edit mode), shown as a preview in the media card. */
+  currentThumbnailUrl: string | null
+  currentLegendUrl: string | null
   organization: string
   abstract: string
   /** Toggle between editing the abstract markdown source and
@@ -909,10 +918,25 @@ function auxAssetField(
     /** The dataset's render hints, forwarded so a generated thumbnail
      *  matches the live globe (thumbnail only). */
     dataAssetOverlay?: DatasetOverlayOptions | null
+    /** Resolved URL of the currently-saved image for this slot, shown
+     *  as a preview above the uploader. Null → no preview. */
+    currentImageUrl?: string | null
   },
 ): HTMLElement {
   const wrap = document.createElement('div')
   wrap.className = 'publisher-form-aux-asset'
+
+  // Preview of the currently-saved image (edit mode), so the
+  // publisher sees the actual thumbnail / legend rather than only its
+  // `r2:` ref text.
+  if (opts.currentImageUrl) {
+    const preview = document.createElement('img')
+    preview.className = 'publisher-form-aux-preview'
+    preview.src = opts.currentImageUrl
+    preview.alt = t(opts.uploaderLabelKey)
+    preview.loading = 'lazy'
+    wrap.appendChild(preview)
+  }
 
   // Guided uploader — edit mode only. The `/asset` init endpoint
   // is scoped to a saved dataset id, so create mode (no row yet)
@@ -1078,6 +1102,7 @@ function mediaCard(
       cacheKey: 'thumbnailUploader',
       dataAssetUrl: thumbnailDataSourceUrl(state),
       dataAssetOverlay: state.overlay,
+      currentImageUrl: state.currentThumbnailUrl,
     }),
   )
 
@@ -1095,6 +1120,7 @@ function mediaCard(
       inputId: 'dataset-legend-ref',
       errorField: 'legend_ref',
       cacheKey: 'legendUploader',
+      currentImageUrl: state.currentLegendUrl,
     }),
   )
 
@@ -1609,6 +1635,8 @@ function initialState(
   initialKeywords: ReadonlyArray<string>,
   initialTags: ReadonlyArray<string>,
   dataUrl: string | null | undefined,
+  thumbnailUrl: string | null | undefined,
+  legendUrl: string | null | undefined,
 ): FormState {
   if (mode === 'create' || !row) {
     return {
@@ -1622,6 +1650,8 @@ function initialState(
       legendRef: '',
       dataUrl: '',
       overlay: null,
+      currentThumbnailUrl: null,
+      currentLegendUrl: null,
       organization: '',
       abstract: '',
       abstractPreviewing: false,
@@ -1661,6 +1691,8 @@ function initialState(
     legendRef: row.legend_ref ?? '',
     dataUrl: dataUrl ?? '',
     overlay: overlayFromRow(row),
+    currentThumbnailUrl: thumbnailUrl ?? null,
+    currentLegendUrl: legendUrl ?? null,
     organization: row.organization ?? '',
     abstract: row.abstract ?? '',
     abstractPreviewing: false,
@@ -1701,6 +1733,8 @@ export function renderDatasetForm(
     options.initialKeywords ?? [],
     options.initialTags ?? [],
     options.dataUrl,
+    options.thumbnailUrl,
+    options.legendUrl,
   )
   // One lifecycle token per form mount, shared across every
   // renderForm call (internal re-renders included). Flipped to

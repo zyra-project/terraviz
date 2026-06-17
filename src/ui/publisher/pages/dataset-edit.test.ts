@@ -41,12 +41,20 @@ function dataset(
 
 function detailResponse(
   d: PublisherDatasetDetail,
-  extras: { keywords?: string[]; tags?: string[]; data_url?: string | null } = {},
+  extras: {
+    keywords?: string[]
+    tags?: string[]
+    data_url?: string | null
+    thumbnail_url?: string | null
+    legend_url?: string | null
+  } = {},
 ): Response {
   return new Response(
     JSON.stringify({
       dataset: d,
       data_url: extras.data_url ?? null,
+      thumbnail_url: extras.thumbnail_url ?? null,
+      legend_url: extras.legend_url ?? null,
       keywords: extras.keywords ?? [],
       tags: extras.tags ?? [],
     }),
@@ -194,6 +202,29 @@ describe('renderDatasetEditPage', () => {
     })
     expect(mount.querySelector('.publisher-asset-uploader-generate')).not.toBeNull()
     expect(mount.textContent).not.toContain('Generate from this dataset')
+  })
+
+  it('shows image previews of the current thumbnail + legend', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      detailResponse(
+        dataset({
+          thumbnail_ref: 'r2:datasets/01EDIT/thumbnail.webp',
+          legend_ref: 'r2:datasets/01EDIT/legend.png',
+        }),
+        {
+          thumbnail_url: 'https://assets.example/thumbnail.webp',
+          legend_url: 'https://assets.example/legend.png',
+        },
+      ),
+    )
+    await renderDatasetEditPage(mount, '01EDIT0000000000000000000', {
+      fetchFn: fetchFn as unknown as typeof fetch,
+    })
+    const previews = Array.from(
+      mount.querySelectorAll<HTMLImageElement>('img.publisher-form-aux-preview'),
+    ).map(i => i.src)
+    expect(previews).toContain('https://assets.example/thumbnail.webp')
+    expect(previews).toContain('https://assets.example/legend.png')
   })
 
   it('prefills keyword chips from the decoration arrays', async () => {

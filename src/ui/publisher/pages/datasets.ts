@@ -156,6 +156,7 @@ function renderTable(
   const thead = document.createElement('thead')
   const headerRow = document.createElement('tr')
   const headerKeys: ReadonlyArray<TableHeaderKey> = [
+    'publisher.datasets.col.thumbnail',
     'publisher.datasets.col.title',
     'publisher.datasets.col.slug',
     'publisher.datasets.col.format',
@@ -175,6 +176,20 @@ function renderTable(
   const tbody = document.createElement('tbody')
   for (const d of datasets) {
     const tr = document.createElement('tr')
+
+    // Thumbnail cell — a small preview when the row has a resolved
+    // thumbnail, empty otherwise.
+    const thumbCell = document.createElement('td')
+    thumbCell.className = 'publisher-cell-thumb'
+    if (d.thumbnail_url) {
+      const img = document.createElement('img')
+      img.className = 'publisher-table-thumb'
+      img.src = d.thumbnail_url
+      img.alt = '' // decorative — the title is in the adjacent cell
+      img.loading = 'lazy'
+      thumbCell.appendChild(img)
+    }
+    tr.appendChild(thumbCell)
 
     const titleCell = document.createElement('td')
     const titleLink = document.createElement('a')
@@ -278,6 +293,7 @@ function renderTable(
 }
 
 type TableHeaderKey =
+  | 'publisher.datasets.col.thumbnail'
   | 'publisher.datasets.col.title'
   | 'publisher.datasets.col.slug'
   | 'publisher.datasets.col.format'

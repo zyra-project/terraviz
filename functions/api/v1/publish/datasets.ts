@@ -23,6 +23,7 @@ import {
   listDatasetsForPublisher,
   type ListOptions,
 } from '../_lib/dataset-mutations'
+import { resolveAssetRefStrict } from '../_lib/r2-public-url'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
 
@@ -67,7 +68,13 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
     publisher,
     options,
   )
-  return new Response(JSON.stringify({ datasets, next_cursor }), {
+  // Resolve each row's `thumbnail_ref` to a public URL so the list
+  // table can render a thumbnail cell (null when none / unresolvable).
+  const withThumbnails = datasets.map(d => ({
+    ...d,
+    thumbnail_url: resolveAssetRefStrict(context.env, d.thumbnail_ref),
+  }))
+  return new Response(JSON.stringify({ datasets: withThumbnails, next_cursor }), {
     status: 200,
     headers: { 'Content-Type': CONTENT_TYPE, 'Cache-Control': 'private, no-store' },
   })

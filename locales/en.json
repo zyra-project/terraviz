@@ -759,6 +759,7 @@
   "publisher.datasets.col.format": "Format",
   "publisher.datasets.col.slug": "Slug",
   "publisher.datasets.col.status": "Status",
+  "publisher.datasets.col.thumbnail": "Thumbnail",
   "publisher.datasets.col.title": "Title",
   "publisher.datasets.col.updated": "Updated",
   "publisher.datasets.count.one": "{count} dataset",

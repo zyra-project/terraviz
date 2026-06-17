@@ -43,6 +43,10 @@ export interface PublisherDataset {
   retracted_at: string | null
   publisher_id: string | null
   legacy_id: string | null
+  /** The row's `thumbnail_ref` resolved to a publicly-readable URL,
+   *  for a thumbnail cell in the list table. Null/absent when there's
+   *  no thumbnail or it can't be resolved (no R2 public base bound). */
+  thumbnail_url?: string | null
 }
 
 /**
@@ -108,6 +112,12 @@ export interface DatasetDetailResponse {
    *  "Generate from this dataset's data" one-click path for already-
    *  uploaded image datasets. */
   data_url?: string | null
+  /** The dataset's `thumbnail_ref` / `legend_ref` resolved to
+   *  publicly-readable URLs, so the edit form can render an actual
+   *  image preview of each (not just the `r2:` ref text). Null/absent
+   *  when unset or unresolvable. */
+  thumbnail_url?: string | null
+  legend_url?: string | null
   /** Decoration arrays sit alongside the row rather than inline
    *  because the server stores them in separate join tables; the
    *  edit form prefills its chip inputs from these. */

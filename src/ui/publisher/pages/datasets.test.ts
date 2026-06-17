@@ -15,6 +15,7 @@ interface RawDataset {
   retracted_at: string | null
   publisher_id: string | null
   legacy_id: string | null
+  thumbnail_url?: string | null
 }
 
 function dataset(overrides: Partial<RawDataset> = {}): RawDataset {
@@ -55,6 +56,24 @@ describe('renderDatasetsPage', () => {
 
   afterEach(() => {
     window.history.replaceState(null, '', originalPath)
+  })
+
+  it('renders a thumbnail image in the row when the dataset has one', async () => {
+    window.history.replaceState(null, '', '/publish/datasets')
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse({
+        datasets: [
+          dataset({ id: 'WITH', thumbnail_url: 'https://assets.example/t.webp' }),
+          dataset({ id: 'WITHOUT', thumbnail_url: null }),
+        ],
+        next_cursor: null,
+      }),
+    )
+    await renderDatasetsPage(mount, { fetchFn: fetchFn as unknown as typeof fetch })
+    const thumbs = mount.querySelectorAll<HTMLImageElement>('img.publisher-table-thumb')
+    // Only the row with a resolved thumbnail renders an <img>.
+    expect(thumbs).toHaveLength(1)
+    expect(thumbs[0].src).toBe('https://assets.example/t.webp')
   })
 
   it('fetches with status=draft by default and renders three tabs', async () => {
