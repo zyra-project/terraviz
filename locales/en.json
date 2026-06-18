@@ -200,6 +200,8 @@
   "chat.feedback.tag.wrongDataset": "Wrong dataset",
   "chat.feedback.thumbsDown": "Bad response",
   "chat.feedback.thumbsUp": "Good response",
+  "chat.greeting.disclosure": "Orbit remembers what you've explored on this device to personalize this greeting — it's never sent to a server. Manage it in Tools → Privacy.",
+  "chat.greeting.disclosure.link": "View privacy",
   "chat.header.subtitle": "· digital docent",
   "chat.header.title": "Orbit",
   "chat.input.label": "Ask Orbit",

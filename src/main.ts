@@ -33,7 +33,7 @@ import {
 import { updateMapControlsPosition } from './ui/mapControlsUI'
 import { initToolsMenu, syncToolsMenuState, syncToolsMenuLayout, pulseBrowseButton } from './ui/toolsMenuUI'
 import { openCreditsPanel } from './ui/creditsPanel'
-import { initChatUI, openChat, openChatSettings, notifyDatasetChanged, showChatTrigger, hideChatTrigger, closeChat, flushPendingGlobeActions } from './ui/chatUI'
+import { initChatUI, openChat, openChatSettings, notifyDatasetChanged, showChatTrigger, hideChatTrigger, closeChat, flushPendingGlobeActions, playReturningGreeting } from './ui/chatUI'
 import { loadViewPreferences, saveViewPreferences, type ViewPreferences } from './utils/viewPreferences'
 import { initHelpUI, setActiveDataset as setHelpActiveDataset } from './ui/helpUI'
 import { showDisclosureBannerIfNeeded } from './ui/disclosureBanner'
@@ -64,7 +64,7 @@ import { showTourControls, hideTourControls, hideAllTourTextBoxes, hideAllTourIm
 import { initLegendForDataset, clearLegendCache, loadConfig } from './services/docentService'
 import { isMobile, IS_MOBILE_NATIVE, getCloudTextureUrl } from './utils/deviceCapability'
 import { initDeepLinks } from './services/deepLinkService'
-import { recordVisit, writeLastSession } from './services/visitMemory'
+import { recordVisit, writeLastSession, getLastSession, getRecent } from './services/visitMemory'
 import { getCatalogMode, setCatalogMode } from './utils/catalogMode'
 import {
   hideCatalogTabs,
@@ -624,6 +624,52 @@ class InteractiveSphere {
       },
       openChatWithQuery: (query) => this.openChatWithQuery(query),
     })
+
+    // §9.3 — proactive returning-visitor greeting. Catalog mode only,
+    // and only when the last session ended > 24 h ago. Fire-and-forget;
+    // playReturningGreeting / triggerOpeningTurn self-gate on the LLM
+    // being configured and on once-per-session, so this is safe to call
+    // unconditionally here.
+    this.maybeGreetReturningVisitor()
+  }
+
+  /**
+   * §9.3 — decide whether to fire Orbit's returning-user greeting and,
+   * if so, hand the local visit context to the chat UI. All inputs are
+   * local-only (visit memory); nothing is sent server-side except the
+   * resulting prompt block to the configured LLM.
+   */
+  private maybeGreetReturningVisitor(): void {
+    if (!getCatalogMode()) return
+    const last = getLastSession()
+    if (!last) return
+    const lastMs = Date.parse(last)
+    if (!Number.isFinite(lastMs)) return
+    const DAY_MS = 24 * 60 * 60 * 1000
+    const elapsed = Date.now() - lastMs
+    if (elapsed <= DAY_MS) return // need a gap of more than 24 h
+
+    const datasets = this.appState.datasets
+    const daysSince = Math.max(1, Math.floor(elapsed / DAY_MS))
+    // New since the last visit: catalog rows whose dateAdded is later
+    // than lastSession (cap 5 titles; let the LLM pick what to surface).
+    const newSinceTitles = datasets
+      .filter((d) => {
+        if (d.isHidden) return false
+        const added = d.enriched?.dateAdded
+        if (!added) return false
+        const addedMs = Date.parse(added)
+        return Number.isFinite(addedMs) && addedMs > lastMs
+      })
+      .slice(0, 5)
+      .map((d) => d.title)
+    // Recently viewed (cap 3), resolved to current catalog titles.
+    const byId = new Map(datasets.map((d) => [d.id, d]))
+    const recentTitles = getRecent(3)
+      .map((id) => byId.get(id)?.title)
+      .filter((title): title is string => !!title)
+
+    void playReturningGreeting({ daysSince, newSinceTitles, recentTitles })
   }
 
   /**

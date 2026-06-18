@@ -3,6 +3,7 @@ import type { Dataset, ChatMessage } from '../types'
 import {
   buildCategorySummary,
   buildCurrentDatasetContext,
+  buildReturningUserBlock,
   buildSystemPrompt,
   buildMessageHistory,
   buildCompressedHistory,
@@ -171,10 +172,39 @@ describe('getListFeaturedDatasetsTool (Phase 1c)', () => {
   })
 })
 
+describe('buildReturningUserBlock', () => {
+  it('includes the days-since line and the supplied titles', () => {
+    const block = buildReturningUserBlock({
+      daysSince: 3,
+      newSinceTitles: ['Alpha', 'Bravo'],
+      recentTitles: ['Charlie'],
+    })
+    expect(block).toContain('returning visitor')
+    expect(block).toContain('3 days ago')
+    expect(block).toContain('Alpha; Bravo')
+    expect(block).toContain('Charlie')
+  })
+
+  it('singularizes one day and omits empty new/recent lines', () => {
+    const block = buildReturningUserBlock({ daysSince: 1, newSinceTitles: [], recentTitles: [] })
+    expect(block).toContain('1 day ago')
+    expect(block).not.toContain('New datasets')
+    expect(block).not.toContain('Recently viewed')
+  })
+})
+
 describe('buildSystemPrompt', () => {
   it('includes docent role description', () => {
     const prompt = buildSystemPrompt(datasets, null)
     expect(prompt).toContain('Orbit')
+  })
+
+  it('prepends the returning-user block only when provided', () => {
+    const without = buildSystemPrompt(datasets, null)
+    expect(without).not.toContain('returning visitor')
+    const block = buildReturningUserBlock({ daysSince: 2, newSinceTitles: [], recentTitles: [] })
+    const withBlock = buildSystemPrompt(datasets, null, 'general', false, null, null, null, undefined, block)
+    expect(withBlock).toContain('returning visitor')
   })
 
   it('places the language directive BEFORE the role description for non-English locales', async () => {
