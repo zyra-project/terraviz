@@ -280,8 +280,20 @@ reasonably adjust belong here — not structural CSS.
 | `playback.json` | transport-btn min-width (28→40px), font-size (0.7→1rem), home-btn min-size (36→44px), time-label font-size |
 | `tools-menu.json` | btn min-height (34→38px), popover min-width (240→260px), item font-size (0.75→0.82rem), layout-btn min-height (30→36px) |
 
-Tier 2 (info-panel, help) can be added in a follow-up once the
-pipeline is proven. Tier 3 (loading, download, tour) stays hardcoded.
+Tier 2 (info-panel, help) **token files now exist** —
+`tokens/components/info-panel.json` and `tokens/components/help.json`,
+added by reverse-sync Phase R2 (see
+[`DESIGN_SYNC_PLAN.md`](DESIGN_SYNC_PLAN.md) §4). They carry the
+`max-width` / `body-max-height-expanded` / `body-padding` (info-panel)
+and `panel-width` / `panel-max-height` / `trigger-size` (help) values
+with their tablet / phone-portrait modes, and round-trip through the
+fidelity gate. The **forward CSS wiring** (consuming
+`var(--component-info-panel-*)` / `var(--component-help-*)` in
+`src/styles/{info-panel,help}.css`) is the remaining Tier-2 step — it
+is fiddlier than Tier-1 (the help trigger changes shape across
+breakpoints and the help panel clamps width/height with `min()`), so
+it is deliberately staged after the token files land. Tier 3 (loading,
+download, tour) stays hardcoded.
 
 **Tasks:**
 - [ ] Create `tokens/components/` directory
@@ -863,6 +875,13 @@ Phase 6 (STYLE_GUIDE auto-update) — after Phase 1a + 1b
    across all CSS files — a separate task.
 
 ## Future Work (not part of this plan)
+
+> The **reverse direction** (Penpot → repo) and how the pipeline could
+> scale to complete panels and full-screen layouts are designed in a
+> companion plan: [`DESIGN_SYNC_PLAN.md`](DESIGN_SYNC_PLAN.md). Several
+> items below (reverse-sync script, Penpot component library, layout
+> configuration, Tier 2 tokens, spacing-scale activation) are sequenced
+> there as phases R0–R4.
 
 These items depend on prerequisites that don't exist yet:
 

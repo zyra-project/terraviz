@@ -41,6 +41,7 @@
     "build:qa": "npx tsx scripts/build-qa-index.ts",
     "build:privacy-page": "npx tsx scripts/build-privacy-page.ts",
     "check:privacy-page": "npx tsx scripts/build-privacy-page.ts --check",
+    "check:design-roundtrip": "npx tsx scripts/check-design-roundtrip.ts",
     "dev:functions": "wrangler pages dev public --ip 0.0.0.0 --port 8788",
     "db:migrate": "wrangler d1 migrations apply CATALOG_DB --local",
     "db:seed": "tsx scripts/seed-catalog.ts",

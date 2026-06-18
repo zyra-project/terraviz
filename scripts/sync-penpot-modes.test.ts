@@ -44,6 +44,28 @@ describe('sync-penpot-modes', () => {
     expect(panelW?.value).toBe('100%')
   })
 
+  it('folds Tier-2 (info-panel, help) overrides into the existing mode sets', () => {
+    const tablet = setByName.get('Modes/Tablet')!
+    expect(
+      tablet.specs.find((s) => s.name === 'component.info-panel.body-max-height-expanded')?.value,
+    ).toBe('40vh')
+    expect(tablet.specs.find((s) => s.name === 'component.help.trigger-size')?.value).toBe('48px')
+    expect(tablet.specs.find((s) => s.name === 'component.help.panel-max-height')?.value).toBe('70vh')
+
+    const phone = setByName.get('Modes/Phone-Portrait')!
+    expect(phone.specs.find((s) => s.name === 'component.help.panel-width')?.value).toBe('100vw')
+    expect(phone.specs.find((s) => s.name === 'component.help.panel-max-height')?.value).toBe('100dvh')
+    expect(phone.specs.find((s) => s.name === 'component.help.trigger-size')?.value).toBe('40px')
+  })
+
+  it('skips the Tier-2 calc() tablet width overrides (repo stays authoritative)', () => {
+    const calcSkips = result.skipped
+      .filter((s) => s.mode === 'tablet' && /calc\(\)/i.test(s.reason))
+      .map((s) => s.name)
+    expect(calcSkips).toContain('component.info-panel.max-width')
+    expect(calcSkips).toContain('component.help.panel-width')
+  })
+
   it('skips calc() override values with a stderr-style reason', () => {
     const skip = result.skipped.find(
       (s) =>
@@ -70,6 +92,8 @@ describe('sync-penpot-modes', () => {
       'Global',
       'Components/Browse',
       'Components/Chat',
+      'Components/Help',
+      'Components/Info-Panel',
       'Components/Playback',
       'Components/Tools-Menu',
     ])
