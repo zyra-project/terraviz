@@ -167,3 +167,18 @@ index_name = "terraviz-datasets"
 # both voice endpoints return 503 so clients cool down and fall back
 # to the browser engine. Absent / any other value = voice enabled.
 # See docs/ORBIT_VOICE_PLAN.md §6, §8 (decision 4).
+#
+# --- Orbit voice realtime streaming (Phase 3) ---
+#
+# /api/voice/stream proxies a browser WebSocket to Cloudflare's AI
+# Gateway realtime endpoint (Deepgram Nova-3/Flux) for live interim
+# transcripts. Configure in the Pages dashboard (Settings → Variables);
+# absent any of these the route 503s and the client falls back to the
+# batch Whisper engine, so this is opt-in:
+#   CF_ACCOUNT_ID     - Cloudflare account id (plain var)
+#   CF_AI_GATEWAY     - AI Gateway name (plain var)
+#   CF_AIG_TOKEN      - AI Gateway authorization, the `cf-aig-authorization`
+#                       value (store as an ENCRYPTED secret, never plaintext)
+#   VOICE_STREAM_MODEL - optional override, defaults to @cf/deepgram/nova-3
+# See docs/ORBIT_VOICE_PLAN.md §3 and
+# https://developers.cloudflare.com/ai-gateway/usage/websockets-api/realtime-api/
