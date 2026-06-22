@@ -6,10 +6,14 @@ and text-to-speech (TTS) so Orbit can *talk back*. The existing
 typed chat experience is untouched; voice is a feature-gated,
 additive layer over the hybrid LLM + local-engine pipeline.
 
-Status: **draft for review.** No code yet. This document scopes
-the approach, the UI, the Cloudflare and client-side options, and
-a phase plan that lands a usable web MVP first and defers the
-expensive bits (realtime streaming, on-device models) behind it.
+Status: **draft for review — Phase 1 implementation underway.**
+This document scopes the approach, the UI, the Cloudflare and
+client-side options, and a phase plan that lands a usable web MVP
+first and defers the expensive bits (realtime streaming, on-device
+models) behind it. The voice-service foundation (capability
+detection, provider resolver, per-locale matrix, spoken-form
+projection) and the browser Web Speech engines have landed in this
+branch; the mic UI is the next slice (§12).
 
 > Cross-references:
 > [`docs/DOCENT_UX_IMPROVEMENT_PLAN.md`](DOCENT_UX_IMPROVEMENT_PLAN.md)

@@ -22,7 +22,7 @@
  * matrix, §4.4 resolver, §10 engineering specifics).
  */
 
-import type { VoiceProviderPreference } from '../types'
+import type { VoiceProviderPreference, VoiceProvider } from '../types'
 
 // ---------------------------------------------------------------------------
 // Capability detection
@@ -50,11 +50,12 @@ export function detectVoiceCapabilities(): VoiceCapabilities {
     return { webSpeechStt: false, speechSynthesis: false, mediaRecorder: false, getUserMedia: false }
   }
   const w = window as unknown as Record<string, unknown>
+  const hasNavigator = typeof navigator !== 'undefined'
   return {
     webSpeechStt: 'SpeechRecognition' in w || 'webkitSpeechRecognition' in w,
     speechSynthesis: 'speechSynthesis' in w,
     mediaRecorder: typeof (w['MediaRecorder']) !== 'undefined',
-    getUserMedia: !!(navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function'),
+    getUserMedia: hasNavigator && !!(navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function'),
   }
 }
 
@@ -112,7 +113,7 @@ export interface SttSession {
 }
 
 export interface SttEngine {
-  readonly provider: VoiceProviderPreference
+  readonly provider: VoiceProvider
   /** Whether this engine can serve the given base language. */
   supportsLanguage(lang: string): boolean
   /** Whether this engine can run given the detected capabilities. */
@@ -129,7 +130,7 @@ export interface TtsSpeakOptions {
 }
 
 export interface TtsEngine {
-  readonly provider: VoiceProviderPreference
+  readonly provider: VoiceProvider
   supportsLanguage(lang: string): boolean
   isAvailable(caps: VoiceCapabilities): boolean
   /** Resolves when the utterance finishes (or is cancelled). */
@@ -161,15 +162,15 @@ export function resetVoiceEngines(): void {
  * Phases 2/4 register the `cloud` / `local` engines; until then
  * `auto` falls through to `browser`. (docs/ORBIT_VOICE_PLAN.md §4.4)
  */
-const AUTO_ORDER: readonly VoiceProviderPreference[] = ['local', 'cloud', 'browser']
+const AUTO_ORDER: readonly VoiceProvider[] = ['local', 'cloud', 'browser']
 
-function pickEngine<T extends { provider: VoiceProviderPreference; supportsLanguage(l: string): boolean; isAvailable(c: VoiceCapabilities): boolean }>(
+function pickEngine<T extends { provider: VoiceProvider; supportsLanguage(l: string): boolean; isAvailable(c: VoiceCapabilities): boolean }>(
   engines: readonly T[],
   pref: VoiceProviderPreference,
   lang: string,
   caps: VoiceCapabilities,
 ): T | null {
-  const order = pref === 'auto' ? AUTO_ORDER : [pref]
+  const order: readonly VoiceProviderPreference[] = pref === 'auto' ? AUTO_ORDER : [pref]
   for (const provider of order) {
     const engine = engines.find(e => e.provider === provider && e.isAvailable(caps) && e.supportsLanguage(lang))
     if (engine) return engine
@@ -195,8 +196,8 @@ export function resolveTtsEngine(
 
 /** What provider, if any, can serve voice in a given locale right now. */
 export interface LocaleVoiceSupport {
-  stt: VoiceProviderPreference | null
-  tts: VoiceProviderPreference | null
+  stt: VoiceProvider | null
+  tts: VoiceProvider | null
 }
 
 /**
@@ -303,7 +304,7 @@ export function splitIntoSpokenChunks(input: string): string[] {
 
 /** A scripted STT engine for tests — emits the given transcript as a final result. */
 export function createFakeSttEngine(opts: {
-  provider?: VoiceProviderPreference
+  provider?: VoiceProvider
   languages?: Iterable<string>
   transcript?: string
   available?: boolean
@@ -325,7 +326,7 @@ export function createFakeSttEngine(opts: {
 
 /** A TTS engine for tests — records what it was asked to speak. */
 export function createFakeTtsEngine(opts: {
-  provider?: VoiceProviderPreference
+  provider?: VoiceProvider
   languages?: Iterable<string>
   available?: boolean
   spoken?: string[]

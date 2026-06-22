@@ -543,6 +543,13 @@ export type ReadingLevel = 'young-learner' | 'general' | 'in-depth' | 'expert'
  */
 export type VoiceProviderPreference = 'auto' | 'cloud' | 'local' | 'browser'
 
+/**
+ * A *concrete* voice engine backend — `VoiceProviderPreference`
+ * minus the `'auto'` meta-preference. Engines declare one of these,
+ * and resolved per-locale support reports one of these (or `null`).
+ */
+export type VoiceProvider = Exclude<VoiceProviderPreference, 'auto'>
+
 export interface DocentConfig {
   apiUrl: string         // default: '/api'
   apiKey: string         // default: '' (empty = no auth, for Ollama)
