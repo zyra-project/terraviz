@@ -23,7 +23,7 @@ import { isAvailable as isAppleIntelligenceAvailable } from '../services/appleIn
 import { setLogLevel, logger } from '../utils/logger'
 import { emit, startDwell, type DwellHandle } from '../analytics'
 import { enMessages, t, getLocale, type MessageKey } from '../i18n'
-import { resolveSttEngine, resolveTtsEngine, voiceSupportForLocale, splitIntoSpokenChunks, baseLanguage, type SttSession, type TtsEngine } from '../services/voiceService'
+import { resolveSttEngine, resolveTtsEngine, voiceSupportForLocale, splitIntoSpokenChunks, baseLanguage, listVoiceLanguageOptions, type SttSession, type TtsEngine } from '../services/voiceService'
 import { registerBrowserVoiceEngines, primeBrowserTts, listBrowserVoices, curateVoices, onBrowserVoicesChanged } from '../services/voiceBrowserEngines'
 import { registerCloudVoiceEngines } from '../services/voiceCloudEngines'
 
@@ -572,6 +572,36 @@ function populateVoiceOptions(): void {
   select.value = selected
 }
 
+/**
+ * Fill the recognition-language override picker. "Same as app" (value
+ * "") keeps voice tracking the UI locale; the rest are the BCP-47
+ * languages the voice stack can name (§8 Phase 3), labelled in the
+ * active locale via `Intl.DisplayNames` so no per-language i18n keys
+ * are needed. Selecting one decouples spoken language from UI locale.
+ */
+function populateVoiceLanguageOptions(): void {
+  const select = document.getElementById('chat-settings-voice-lang') as HTMLSelectElement | null
+  if (!select) return
+  const cfg = loadConfig()
+  const defaultLabel = t('chat.settings.voiceLang.auto')
+  let names: Intl.DisplayNames | null = null
+  try {
+    names = new Intl.DisplayNames([getLocale()], { type: 'language' })
+  } catch { /* DisplayNames unsupported — fall back to the raw tag */ }
+  select.innerHTML = ''
+  const defaultOpt = document.createElement('option')
+  defaultOpt.value = ''
+  defaultOpt.textContent = defaultLabel
+  select.appendChild(defaultOpt)
+  for (const code of listVoiceLanguageOptions()) {
+    const opt = document.createElement('option')
+    opt.value = code
+    opt.textContent = names?.of(code) ?? code // i18n-exempt: localized via Intl.DisplayNames or raw BCP-47 tag
+    select.appendChild(opt)
+  }
+  select.value = cfg.voiceLang ?? ''
+}
+
 function toggleListening(): void {
   // The mic tap is a user gesture — prime iOS TTS now so a
   // voice-initiated reply (which auto-sends later, off-gesture) can
@@ -832,6 +862,7 @@ async function populateSettings(): Promise<void> {
   const autospeakInput = document.getElementById('chat-settings-voice-autospeak') as HTMLInputElement | null
   if (autospeakInput) autospeakInput.checked = config.voiceAutoSpeak ?? false
   populateVoiceOptions()
+  populateVoiceLanguageOptions()
   const providerSelect = document.getElementById('chat-settings-voice-provider') as HTMLSelectElement | null
   if (providerSelect) providerSelect.value = config.voiceProvider ?? 'auto'
   const rateSelect = document.getElementById('chat-settings-voice-rate') as HTMLSelectElement | null
@@ -930,14 +961,17 @@ function readSettingsForm(): DocentConfig {
   const voiceNameSelect = document.getElementById('chat-settings-voice-name') as HTMLSelectElement | null
   const voiceRateSelect = document.getElementById('chat-settings-voice-rate') as HTMLSelectElement | null
   const voiceProviderSelect = document.getElementById('chat-settings-voice-provider') as HTMLSelectElement | null
+  const voiceLangSelect = document.getElementById('chat-settings-voice-lang') as HTMLSelectElement | null
   const parsedRate = Number(voiceRateSelect?.value)
   // Carry forward voice config not exposed in this form so a save
-  // doesn't wipe it (recognition language lands later).
+  // doesn't wipe it.
   const current = loadConfig()
   const providerValue = voiceProviderSelect?.value
   const voiceProvider = providerValue === 'browser' || providerValue === 'cloud' || providerValue === 'auto'
     ? providerValue
     : current.voiceProvider
+  // "" (Same as app) clears the override so voice tracks the UI locale.
+  const voiceLang = voiceLangSelect ? (voiceLangSelect.value || undefined) : current.voiceLang
   return {
     apiUrl: urlInput?.value.trim() || defaults.apiUrl,
     apiKey: keyInput?.value.trim() ?? '',
@@ -948,7 +982,7 @@ function readSettingsForm(): DocentConfig {
     debugPrompt: debugInput?.checked ?? defaults.debugPrompt,
     voiceAutoSpeak: autospeakInput?.checked ?? current.voiceAutoSpeak,
     voiceProvider,
-    voiceLang: current.voiceLang,
+    voiceLang,
     voiceName: voiceNameSelect ? (voiceNameSelect.value || undefined) : current.voiceName,
     voiceRate: Number.isFinite(parsedRate) && parsedRate > 0 ? parsedRate : current.voiceRate,
   }

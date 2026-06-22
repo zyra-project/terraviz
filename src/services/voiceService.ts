@@ -223,6 +223,20 @@ export function voiceSupportForLocale(
   }
 }
 
+/**
+ * Base BCP-47 languages the voice stack can name with confidence —
+ * the union of the cloud STT + TTS coverage. Backs the recognition-
+ * language override (`voiceLang`): the settings picker offers these
+ * so a visitor can speak a language that differs from the read UI
+ * locale (bilingual floor, regional STT accuracy, kiosk pinning).
+ * The caller prepends a "" ("same as app locale") default; the
+ * browser engine still accepts any locale the OS supports via the
+ * default path. (docs/ORBIT_VOICE_PLAN.md §8 — Phase 3)
+ */
+export function listVoiceLanguageOptions(): string[] {
+  return [...new Set([...CLOUD_STT_LANGUAGES, ...CLOUD_TTS_LANGUAGES])].sort()
+}
+
 // ---------------------------------------------------------------------------
 // Spoken-form projection (§1.1)
 // ---------------------------------------------------------------------------

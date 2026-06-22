@@ -240,6 +240,8 @@
   "chat.settings.url.tauri.placeholder": "https://api.openai.com/v1 or http://localhost:11434/v1",
   "chat.settings.vision.label": "Vision mode — send a globe screenshot with each message so Orbit can describe what you see. Uses a vision-capable model automatically.",
   "chat.settings.voiceAutoSpeak.label": "Speak replies aloud — Orbit reads its answers using your device's voice. Available in supported languages.",
+  "chat.settings.voiceLang.auto": "Same as app",
+  "chat.settings.voiceLang.label": "Recognition language",
   "chat.settings.voiceName.default": "Default",
   "chat.settings.voiceName.label": "Voice",
   "chat.settings.voiceProvider.auto": "Automatic",

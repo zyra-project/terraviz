@@ -10,6 +10,7 @@ import {
   submitFeedback,
 } from './chatUI'
 import type { ChatCallbacks } from './chatUI'
+import { loadConfig } from '../services/docentService'
 import {
   clearDegraded,
   markDegraded,
@@ -40,6 +41,11 @@ function setupDOM(): void {
         <input id="chat-settings-enabled" type="checkbox" checked />
         <input id="chat-settings-vision" type="checkbox" />
         <select id="chat-settings-reading-level"><option value="general" selected>General</option></select>
+        <select id="chat-settings-voice-lang">
+          <option value=""></option>
+          <option value="es">es</option>
+          <option value="ja">ja</option>
+        </select>
         <button id="chat-settings-test"></button>
         <button id="chat-settings-save"></button>
         <span id="chat-settings-status"></span>
@@ -78,6 +84,24 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks()
   resetDegradedForTests()
+})
+
+describe('recognition-language override (voiceLang)', () => {
+  it('saves a chosen language and clears it on "Same as app"', () => {
+    initChatUI(makeCallbacks())
+    const sel = document.getElementById('chat-settings-voice-lang') as HTMLSelectElement
+    const save = document.getElementById('chat-settings-save') as HTMLButtonElement
+
+    sel.value = 'es'
+    save.click()
+    expect(loadConfig().voiceLang).toBe('es')
+
+    // "" is the "Same as app" default — clears the override so voice
+    // tracks the UI locale again.
+    sel.value = ''
+    save.click()
+    expect(loadConfig().voiceLang).toBeUndefined()
+  })
 })
 
 describe('initChatUI', () => {

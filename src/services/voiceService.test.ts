@@ -10,6 +10,7 @@ import {
   resolveSttEngine,
   resolveTtsEngine,
   voiceSupportForLocale,
+  listVoiceLanguageOptions,
   createFakeSttEngine,
   createFakeTtsEngine,
   CLOUD_STT_LANGUAGES,
@@ -164,5 +165,21 @@ describe('fake engines', () => {
     const engine = createFakeTtsEngine({ spoken })
     await engine.speak('hello', { lang: 'en' })
     expect(spoken).toEqual(['hello'])
+  })
+})
+
+describe('listVoiceLanguageOptions', () => {
+  it('returns the de-duplicated union of cloud STT + TTS languages', () => {
+    const opts = listVoiceLanguageOptions()
+    const expected = new Set([...CLOUD_STT_LANGUAGES, ...CLOUD_TTS_LANGUAGES])
+    expect(new Set(opts)).toEqual(expected)
+    // No duplicates.
+    expect(opts.length).toBe(new Set(opts).size)
+  })
+
+  it('is sorted and base-language only (no region subtags)', () => {
+    const opts = listVoiceLanguageOptions()
+    expect([...opts]).toEqual([...opts].sort())
+    for (const code of opts) expect(code).not.toContain('-')
   })
 })

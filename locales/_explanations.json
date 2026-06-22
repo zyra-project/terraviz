@@ -5,6 +5,8 @@
   "chat.autoLoad.altHint": "Appended to chat.autoLoad.message when alternative datasets are available. Begins with a leading space; preserve the space if your language uses spaces between sentences.",
   "chat.autoLoad.message": "Sent when Orbit auto-loads a dataset on the user's first turn. Preserve **{title}** (markdown bold, rendered) and {altHint} (which is either chat.autoLoad.altHint or empty).",
   "chat.fallback.localDev": "Shown when the LLM is unreachable in local development. Backticks render as inline code; preserve them around `npm run dev` and `/api`.",
+  "chat.settings.voiceLang.auto": "Default option in Orbit's 'Recognition language' picker. Means voice input/output follows the app's UI language. 'app' = this application.",
+  "chat.settings.voiceLang.label": "Settings label for the picker that sets which spoken language Orbit listens for and speaks, independent of the UI language.",
   "chat.fallback.production": "Shown when the LLM is unreachable in production. Brief; the user has no way to fix this themselves.",
   "chat.welcome.hint": "Companion line below chat.welcome.intro. Same warm, helpful, non-corporate voice as Orbit. Mentions Browse as a parallel path.",
   "chat.welcome.intro": "First-person introduction from Orbit, the AI docent. Voice should be warm and helpful, not corporate. Markdown bold (**Orbit**) renders at runtime; preserve the asterisks.",
