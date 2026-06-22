@@ -149,7 +149,11 @@ async function runPool<T>(
   fn: (item: T) => Promise<void>,
 ): Promise<void> {
   let cursor = 0
-  const width = Math.max(1, Math.min(concurrency, items.length || 1))
+  // Normalize first: a NaN / non-finite / <1 concurrency must never
+  // collapse `width` to NaN (Array.from({length: NaN}) is empty, which
+  // would silently spawn zero workers and skip every item).
+  const safe = Number.isFinite(concurrency) ? Math.max(1, Math.floor(concurrency)) : 1
+  const width = Math.min(safe, items.length || 1)
   async function worker(): Promise<void> {
     for (;;) {
       const i = cursor++

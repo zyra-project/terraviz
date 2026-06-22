@@ -307,6 +307,22 @@ describe('saveFramesToR2', () => {
     for (const name of names) expect(store.has(`${PREFIX}${name}`)).toBe(true)
   })
 
+  it('still uploads every frame when concurrency is non-finite', async () => {
+    const { store, fetchImpl } = makeFakeR2()
+    const dir = tmpFramesDir()
+    for (const d of ['20240101', '20240108', '20240115']) {
+      writeFileSync(join(dir, `f_${d}.png`), d)
+    }
+    // A NaN concurrency must clamp to a real worker, not collapse the
+    // pool to zero workers and silently skip every upload.
+    const result = await saveFramesToR2(CONFIG, DATASET, dir, {
+      fetchImpl,
+      concurrency: Number.NaN,
+    })
+    expect(result.uploaded).toBe(3)
+    expect(store.size).toBe(3)
+  })
+
   it('is a no-op when the frames directory does not exist', async () => {
     const { store, fetchImpl } = makeFakeR2({ [`${PREFIX}f.png`]: bytes('x') })
     const result = await saveFramesToR2(CONFIG, DATASET, join(tmpFramesDir(), 'nope'), {
