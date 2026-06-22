@@ -4493,6 +4493,19 @@ h3 a[href*="github.com/zyra-project/terraviz/blob/"]:focus-visible {
   height: auto;
 }
 
+.analytics__dash-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  cursor: zoom-in;
+}
+
+/* Panoramic captures (overview, spatial heatmap, funnel row) read
+   better spanning the full grid width than squeezed into one column. */
+.analytics__dash--wide {
+  grid-column: 1 / -1;
+}
+
 .analytics__dash-ph {
   flex: 1;
   display: flex;

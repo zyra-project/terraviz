@@ -4516,6 +4516,19 @@ h3 a[href*="github.com/zyra-project/terraviz/blob/"]:focus-visible {
   height: auto;
 }
 
+.analytics__dash-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  cursor: zoom-in;
+}
+
+/* Panoramic captures (overview, spatial heatmap, funnel row) read
+   better spanning the full grid width than squeezed into one column. */
+.analytics__dash--wide {
+  grid-column: 1 / -1;
+}
+
 .analytics__dash-ph {
   flex: 1;
   display: flex;
@@ -8209,129 +8222,68 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
 
         <h3 class="analytics__subhead">From the dashboards</h3>
         <p class="analytics__subhead-hint">
-          The privileged <code>/publish/analytics</code> dashboard — admins and staff only — reads the D1 rollups stitched with a recent-window query against Workers Analytics Engine: an overview, a MapLibre spatial-attention heatmap, dataset engagement, performance, and funnels. The optional Grafana dashboards documented in <a href="https://github.com/zyra-project/terraviz/blob/main/grafana/README.md" target="_blank" rel="noopener"><code>grafana/README.md</code></a> read the same AE data via the SQL API. Coarse aggregations only — no per-event row inspection, no PII to redact. Two illustrative panels below show the visual shape (synthetic data, schema-accurate); two placeholder tiles will swap in real captures from a long-running instance.
+          The built-in <code>/publish/analytics</code> dashboard — admins and staff only, in the publisher portal — is the primary surface. It reads the D1 rollups stitched with a recent-window query against Workers Analytics Engine, all coarse aggregations: an overview, audience mix, dataset engagement, a MapLibre spatial-attention heatmap, tour / VR / Orbit funnels, and performance. No per-event row inspection, no PII to redact, every panel CSV-exportable. The captures below are from a live instance. <em>(Operators who already run Grafana can point the dashboards in <a href="https://github.com/zyra-project/terraviz/blob/main/grafana/README.md" target="_blank" rel="noopener"><code>grafana/README.md</code></a> at the same Analytics Engine dataset — an optional secondary reader.)</em>
         </p>
 
         <div class="analytics__dashboards">
-          <figure class="analytics__dash analytics__dash--svg">
-            <div class="analytics__dash-title">Sessions per day · 30-day window</div>
-            <svg viewBox="0 0 320 160"
-                 class="analytics__dash-svg"
-                 role="img"
-                 aria-label="Mock line chart showing sessions per day over a 30-day window. The line trends gently upward from around 110 sessions to around 180 sessions, with day-to-day variation. Y-axis labels 0, 50, 100, 150, 200. X-axis labels day 1, 8, 15, 22, 30.">
-              <defs>
-                <linearGradient id="dash-area-1" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stop-color="#4da6ff" stop-opacity="0.45" />
-                  <stop offset="100%" stop-color="#4da6ff" stop-opacity="0" />
-                </linearGradient>
-                <style>
-                  .dash-bg     { fill: #11151a; }
-                  .dash-axis   { stroke: #2a3340; stroke-width: 1; fill: none; }
-                  .dash-grid   { stroke: #1d242d; stroke-width: 1; fill: none; stroke-dasharray: 2 3; }
-                  .dash-line   { stroke: #4da6ff; stroke-width: 1.6; fill: none; }
-                  .dash-tick   { font-family: 'Source Code Pro', monospace; font-size: 8px; fill: #9aa6b3; }
-                  .dash-bar    { fill: #4da6ff; }
-                  .dash-bar-2  { fill: #26a69a; }
-                  .dash-bar-3  { fill: #e09537; }
-                  .dash-bar-4  { fill: #7e57c2; }
-                  .dash-bar-5  { fill: #d05a99; }
-                  .dash-bar-6  { fill: #43a047; }
-                  .dash-cat    { font-family: 'Source Code Pro', monospace; font-size: 8px; fill: #9aa6b3; }
-                </style>
-              </defs>
-              <rect class="dash-bg" x="0" y="0" width="320" height="160" />
-              <!-- Gridlines -->
-              <line class="dash-grid" x1="36" y1="32" x2="308" y2="32" />
-              <line class="dash-grid" x1="36" y1="60" x2="308" y2="60" />
-              <line class="dash-grid" x1="36" y1="88" x2="308" y2="88" />
-              <line class="dash-grid" x1="36" y1="116" x2="308" y2="116" />
-              <!-- Axes -->
-              <line class="dash-axis" x1="36" y1="20" x2="36" y2="140" />
-              <line class="dash-axis" x1="36" y1="140" x2="308" y2="140" />
-              <!-- Y ticks -->
-              <text class="dash-tick" x="32" y="142" text-anchor="end">0</text>
-              <text class="dash-tick" x="32" y="118" text-anchor="end">50</text>
-              <text class="dash-tick" x="32" y="90" text-anchor="end">100</text>
-              <text class="dash-tick" x="32" y="62" text-anchor="end">150</text>
-              <text class="dash-tick" x="32" y="34" text-anchor="end">200</text>
-              <!-- Filled area under line -->
-              <path d="M 40,118 L 49,114 L 58,116 L 67,108 L 76,112 L 85,104 L 94,106 L 103,98 L 112,102 L 121,94 L 130,96 L 139,90 L 148,92 L 157,84 L 166,88 L 175,80 L 184,82 L 193,76 L 202,78 L 211,72 L 220,74 L 229,68 L 238,70 L 247,66 L 256,68 L 265,62 L 274,64 L 283,60 L 292,58 L 301,56 L 301,140 L 40,140 Z"
-                    fill="url(#dash-area-1)" />
-              <!-- Trend line -->
-              <path d="M 40,118 L 49,114 L 58,116 L 67,108 L 76,112 L 85,104 L 94,106 L 103,98 L 112,102 L 121,94 L 130,96 L 139,90 L 148,92 L 157,84 L 166,88 L 175,80 L 184,82 L 193,76 L 202,78 L 211,72 L 220,74 L 229,68 L 238,70 L 247,66 L 256,68 L 265,62 L 274,64 L 283,60 L 292,58 L 301,56"
-                    class="dash-line" />
-              <!-- X ticks -->
-              <text class="dash-tick" x="40" y="152" text-anchor="middle">1</text>
-              <text class="dash-tick" x="103" y="152" text-anchor="middle">8</text>
-              <text class="dash-tick" x="166" y="152" text-anchor="middle">15</text>
-              <text class="dash-tick" x="229" y="152" text-anchor="middle">22</text>
-              <text class="dash-tick" x="301" y="152" text-anchor="middle">30</text>
-            </svg>
+          <figure class="analytics__dash analytics__dash--wide">
+            <div class="analytics__dash-title">Overview · last 30 days</div>
+            <img class="analytics__dash-img"
+                 src="assets/screenshots/publish-analytics-overview.webp"
+                 alt="The /publish/analytics Overview: a range and environment selector, then sample-weighted stat tiles — 263 sessions, 15 minutes total view time, 3,467 events, 4 errors, 1.5% errors per session — above a sessions-per-day bar chart for the last 30 days."
+                 loading="lazy">
             <figcaption class="analytics__dash-caption">
-              <code>session_start</code> events grouped by date. <em>Synthetic data — schema example.</em>
+              Sample-weighted stat tiles + sessions-per-day, from the live <code>/publish/analytics</code> dashboard.
             </figcaption>
           </figure>
 
-          <figure class="analytics__dash analytics__dash--svg">
-            <div class="analytics__dash-title">Layer toggles by category · 7-day window</div>
-            <svg viewBox="0 0 320 160"
-                 class="analytics__dash-svg"
-                 role="img"
-                 aria-label="Mock bar chart of layer toggle counts grouped by category over a 7-day window. Bars from tallest to shortest: Atmosphere, Ocean, Cryosphere, Land, Biosphere, Other. Counts in the hundreds.">
-              <rect class="dash-bg" x="0" y="0" width="320" height="160" />
-              <!-- Gridlines -->
-              <line class="dash-grid" x1="36" y1="32" x2="308" y2="32" />
-              <line class="dash-grid" x1="36" y1="60" x2="308" y2="60" />
-              <line class="dash-grid" x1="36" y1="88" x2="308" y2="88" />
-              <line class="dash-grid" x1="36" y1="116" x2="308" y2="116" />
-              <!-- Axes -->
-              <line class="dash-axis" x1="36" y1="20" x2="36" y2="140" />
-              <line class="dash-axis" x1="36" y1="140" x2="308" y2="140" />
-              <!-- Y ticks -->
-              <text class="dash-tick" x="32" y="142" text-anchor="end">0</text>
-              <text class="dash-tick" x="32" y="118" text-anchor="end">100</text>
-              <text class="dash-tick" x="32" y="90" text-anchor="end">200</text>
-              <text class="dash-tick" x="32" y="62" text-anchor="end">300</text>
-              <text class="dash-tick" x="32" y="34" text-anchor="end">400</text>
-              <!-- Bars: 6 categories, descending -->
-              <rect class="dash-bar"   x="50"  y="44"  width="32" height="96" />
-              <rect class="dash-bar-2" x="92"  y="58"  width="32" height="82" />
-              <rect class="dash-bar-3" x="134" y="74"  width="32" height="66" />
-              <rect class="dash-bar-4" x="176" y="88"  width="32" height="52" />
-              <rect class="dash-bar-5" x="218" y="100" width="32" height="40" />
-              <rect class="dash-bar-6" x="260" y="116" width="32" height="24" />
-              <!-- Category labels -->
-              <text class="dash-cat" x="66"  y="152" text-anchor="middle">atmo</text>
-              <text class="dash-cat" x="108" y="152" text-anchor="middle">ocean</text>
-              <text class="dash-cat" x="150" y="152" text-anchor="middle">cryo</text>
-              <text class="dash-cat" x="192" y="152" text-anchor="middle">land</text>
-              <text class="dash-cat" x="234" y="152" text-anchor="middle">bio</text>
-              <text class="dash-cat" x="276" y="152" text-anchor="middle">other</text>
-            </svg>
+          <figure class="analytics__dash">
+            <div class="analytics__dash-title">Audience · platform · OS · geography</div>
+            <img class="analytics__dash-img"
+                 src="assets/screenshots/publish-analytics-audience.webp"
+                 alt="The /publish/analytics audience panels: view time per day, a platform mix bar (100% web), an OS mix bar (Linux 84%, Windows 11%, iOS 4%, Android 1%), and a top-countries table led by the United States."
+                 loading="lazy">
             <figcaption class="analytics__dash-caption">
-              <code>layer_toggle</code> events grouped by dataset category. <em>Synthetic data — schema example.</em>
+              View-time, platform / OS mix, and top countries — bucketed enums only, no User-Agent stored.
             </figcaption>
           </figure>
 
-          <figure class="analytics__dash analytics__dash--ph">
-            <div class="analytics__dash-title">Frame-time p95 by build channel · 30-day window</div>
-            <div class="analytics__dash-ph">Grafana panel · live capture pending</div>
+          <figure class="analytics__dash">
+            <div class="analytics__dash-title">Dataset engagement</div>
+            <img class="analytics__dash-img"
+                 src="assets/screenshots/publish-analytics-datasets.webp"
+                 alt="The /publish/analytics dataset-engagement table: per-dataset loads, a trigger mix (url, orbit, tour, browse), the asset source (image or hls), load-time p50 and p95, and on-globe dwell."
+                 loading="lazy">
             <figcaption class="analytics__dash-caption">
-              <code>perf_sample.frame_time_p95_ms</code> bucketed by build channel (web · desktop · mobile). Real capture lands once production has gathered enough samples.
+              Per-dataset loads, trigger + source mix, load-time percentiles, and on-globe dwell.
             </figcaption>
           </figure>
 
-          <figure class="analytics__dash analytics__dash--ph">
-            <div class="analytics__dash-title">Tour completion funnel · last 30 days</div>
-            <div class="analytics__dash-ph">Grafana panel · live capture pending</div>
+          <figure class="analytics__dash analytics__dash--wide">
+            <div class="analytics__dash-title">Spatial attention</div>
+            <img class="analytics__dash-img"
+                 src="assets/screenshots/publish-analytics-spatial.webp"
+                 alt="The /publish/analytics spatial-attention view: a MapLibre heatmap of where the camera settled across sessions, with bright hotspots over the Caribbean and Atlantic and scattered activity worldwide. A signal, dataset, and projection selector sits above it."
+                 loading="lazy">
             <figcaption class="analytics__dash-caption">
-              How far visitors get into a multi-step tour: <code>tour_started</code> → <code>tour_step</code> → <code>tour_completed</code>. Real capture pending.
+              A MapLibre heatmap of camera attention — lat/lon rounded to ~111&nbsp;m before it ever leaves the browser.
+            </figcaption>
+          </figure>
+
+          <figure class="analytics__dash analytics__dash--wide">
+            <div class="analytics__dash-title">Tours · VR · Orbit · performance</div>
+            <img class="analytics__dash-img"
+                 src="assets/screenshots/publish-analytics-tours-perf.webp"
+                 alt="The /publish/analytics funnels and performance section: tour completion, user-started tours, VR session modes, per-day tours started and ended, Orbit turns, and a performance table of average FPS, frame-time p95, and JS heap by render surface."
+                 loading="lazy">
+            <figcaption class="analytics__dash-caption">
+              Tour / VR / Orbit funnels plus a performance table (FPS, frame p95, JS heap) by render surface.
             </figcaption>
           </figure>
         </div>
 
         <p class="analytics__dashboards-note">
-          Coming next: a public Grafana snapshot URL for live, hands-on exploration. The same coarse-bucketed queries the dashboards already run — no PII to redact, no auth required to view.
+          Every panel exports to CSV straight from the portal. The same coarse-bucketed rollups also feed an optional Grafana board for operators who want custom panels — no PII to redact either way.
         </p>
 
         <p class="analytics__refs">
