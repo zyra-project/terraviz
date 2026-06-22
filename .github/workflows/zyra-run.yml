@@ -113,7 +113,17 @@ jobs:
           docker run --rm --entrypoint "" --user 0 \
             -v "$PWD/_work:/work" \
             "$IMAGE" \
-            bash -c 'set -euo pipefail; zyra run /work/pipeline.json'
+            bash -c '
+              set -euo pipefail
+              # pad-missing needs Pillow, which the scheduler image does
+              # not bundle — install it on demand (as the zyra-scheduler
+              # GitLab pipeline does) when the pipeline uses that stage.
+              if grep -q "pad-missing" /work/pipeline.json && ! python -c "import PIL" >/dev/null 2>&1; then
+                echo "Installing Pillow for the pad-missing stage..."
+                pip install --no-cache-dir --disable-pip-version-check pillow
+              fi
+              zyra run /work/pipeline.json
+            '
           # A pipeline produces either a composed MP4 (compose-video)
           # or a frame sequence (recall-enabled templates drop it and
           # publish frames via the image-sequence path). Require one
