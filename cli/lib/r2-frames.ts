@@ -137,6 +137,34 @@ function makeClient(config: R2UploadConfig): AwsClient {
 }
 
 /**
+ * Run `fn` over `items` with bounded parallelism. Counters mutated
+ * inside `fn` are safe — Node's event loop is single-threaded, so
+ * increments between awaits don't race. Used for the per-object
+ * restore GETs and save PUTs/DELETEs, where serial round-trips over
+ * a multi-thousand-frame window are the wall-clock cost.
+ */
+async function runPool<T>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T) => Promise<void>,
+): Promise<void> {
+  let cursor = 0
+  // Normalize first: a NaN / non-finite / <1 concurrency must never
+  // collapse `width` to NaN (Array.from({length: NaN}) is empty, which
+  // would silently spawn zero workers and skip every item).
+  const safe = Number.isFinite(concurrency) ? Math.max(1, Math.floor(concurrency)) : 1
+  const width = Math.min(safe, items.length || 1)
+  async function worker(): Promise<void> {
+    for (;;) {
+      const i = cursor++
+      if (i >= items.length) return
+      await fn(items[i])
+    }
+  }
+  await Promise.all(Array.from({ length: width }, () => worker()))
+}
+
+/**
  * List every key under `prefix`, following ListObjectsV2
  * continuation tokens so a frame set larger than one S3 page (1000
  * objects) enumerates fully — the large frame sets this cache
@@ -241,35 +269,25 @@ export async function restoreFramesFromR2(
   }
 
   let restored = 0
-  let cursor = 0
-  const concurrency = Math.max(1, options.concurrency ?? DEFAULT_CONCURRENCY)
-  async function worker(): Promise<void> {
-    for (;;) {
-      const i = cursor++
-      if (i >= toFetch.length) return
-      const { key, dest } = toFetch[i]
-      const signed = await client.sign(buildObjectUrl(config, key), { method: 'GET' })
-      let res: Response
-      try {
-        res = await fetchImpl(signed)
-      } catch (e) {
-        throw new R2UploadError(
-          null,
-          key,
-          `GET ${key} unreachable: ${e instanceof Error ? e.message : String(e)}`,
-        )
-      }
-      if (!res.ok) {
-        const text = await res.text().catch(() => '')
-        throw new R2UploadError(res.status, key, `GET ${key} failed (${res.status}): ${text.slice(0, 200)}`)
-      }
-      await writeFile(dest, new Uint8Array(await res.arrayBuffer()))
-      restored++
+  await runPool(toFetch, options.concurrency ?? DEFAULT_CONCURRENCY, async ({ key, dest }) => {
+    const signed = await client.sign(buildObjectUrl(config, key), { method: 'GET' })
+    let res: Response
+    try {
+      res = await fetchImpl(signed)
+    } catch (e) {
+      throw new R2UploadError(
+        null,
+        key,
+        `GET ${key} unreachable: ${e instanceof Error ? e.message : String(e)}`,
+      )
     }
-  }
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, toFetch.length || 1) }, () => worker()),
-  )
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new R2UploadError(res.status, key, `GET ${key} failed (${res.status}): ${text.slice(0, 200)}`)
+    }
+    await writeFile(dest, new Uint8Array(await res.arrayBuffer()))
+    restored++
+  })
 
   log(`restore: ${restored} restored, ${skipped} already present (${keys.length} in cache)`)
   return { restored, skipped }
@@ -346,23 +364,26 @@ export async function saveFramesToR2(
     if (name) remoteByName.set(name, key)
   }
 
-  let uploaded = 0
-  for (const name of desired) {
-    if (remoteByName.has(name)) continue
+  // Upload the window's not-yet-cached frames with bounded
+  // concurrency — on a cold cache this is the whole window (4k+
+  // frames for a 10-minute product), so serial PUTs were the
+  // 20-minutes-plus save bottleneck.
+  const concurrency = options.concurrency ?? DEFAULT_CONCURRENCY
+  const toUpload = desired.filter(name => !remoteByName.has(name))
+  await runPool(toUpload, concurrency, async name => {
     const body = new Uint8Array(await readFile(join(framesDir, name)))
     await uploadR2Object(config, prefix + name, body, contentTypeForFile(name), { fetchImpl })
-    uploaded++
-  }
+  })
+  const uploaded = toUpload.length
 
   // Prune everything not in the desired set — frames that aged out
   // of the window, frames whose local file is gone, and any stale
   // synthetic copy a prior run cached.
-  let pruned = 0
-  for (const [name, key] of remoteByName) {
-    if (desiredSet.has(name)) continue
+  const toPrune = [...remoteByName.entries()].filter(([name]) => !desiredSet.has(name))
+  await runPool(toPrune, concurrency, async ([, key]) => {
     await deleteR2Object(config, key, { fetchImpl })
-    pruned++
-  }
+  })
+  const pruned = toPrune.length
 
   log(`save: ${uploaded} uploaded, ${pruned} pruned, ${desired.length} kept in cache` +
     (exclude.size > 0 ? ` (${exclude.size} synthetic excluded)` : ''))

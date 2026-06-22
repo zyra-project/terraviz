@@ -40,7 +40,11 @@
  *   2 — publisher API call failed (fetch / status / PATCH)
  *   3 — SOS spec preflight failed (hard failures)
  *   4 — asset init / PUT / complete failed
- *   5 — transcode wait timeout (upload landed; encode didn't finish)
+ *
+ * (A transcode that outlasts the --wait-seconds window is NOT a
+ * failure: the asset published and the encode finalizes
+ * asynchronously, so the publish phase reports success. The former
+ * exit code 5 is retired.)
  */
 
 import { createHash } from 'node:crypto'
@@ -273,8 +277,17 @@ async function waitAndReportSucceeded(
     const expectedRef = `r2:videos/${datasetId}/${uploadId}/master.m3u8`
     for (;;) {
       if (Date.now() > deadline) {
-        log(`TIMEOUT: transcode did not finish within ${args.waitSeconds}s`)
-        return 5
+        // The wait is a best-effort confirmation window, not a gate:
+        // the asset upload + metadata PATCH already succeeded and the
+        // transcode was dispatched, so a slow encode (a large
+        // frame-sequence transcode can run 30+ min) must not
+        // false-fail the run. Report success; the transcode finalizes
+        // `data_ref` asynchronously and reports its own status. Tune
+        // the window via --wait-seconds (0 = fire-and-forget).
+        log(
+          `transcode still running after ${args.waitSeconds}s — asset published and transcode dispatched; reporting success (it finalizes asynchronously)`,
+        )
+        break
       }
       await sleep(15_000)
       const row = await client.get<DatasetEnvelope>(datasetId)
