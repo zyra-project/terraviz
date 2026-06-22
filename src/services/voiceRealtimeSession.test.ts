@@ -164,3 +164,27 @@ describe('RealtimeVoiceSession — mic acquisition failure', () => {
     expect(session.getState()).toBe('idle')
   })
 })
+
+describe('RealtimeVoiceSession — engine ends unexpectedly', () => {
+  it('recovers to listening when the engine ends mid-capture (not via stop)', async () => {
+    const engine = createFakeStreamingSttEngine({})
+    const mic = makeFakeMic()
+    const vad = makeFakeVad()
+    const session = new RealtimeVoiceSession({
+      engine, lang: 'en', mode: 'open-mic',
+      onTurn: () => {}, acquireMic: mic.acquireMic, startVad: vad.startVad,
+    })
+    await session.arm()
+    vad.speechStart()
+    expect(session.getState()).toBe('capturing')
+
+    // Engine ends on its own (Web Speech timeout / permission loss).
+    engine.endActiveSession()
+    expect(session.getState()).toBe('listening')
+
+    // The session can capture again on the next onset.
+    vad.speechStart()
+    expect(session.getState()).toBe('capturing')
+    expect(engine.active).toBe(true)
+  })
+})

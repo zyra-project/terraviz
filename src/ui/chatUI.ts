@@ -609,6 +609,13 @@ function syncHandsFree(): void {
     lang: cfg.voiceLang || getLocale(),
     provider: cfg.voiceProvider ?? 'auto',
   })
+  // If hands-free ended up inactive (turned off, or no streaming engine
+  // resolved), make sure any ducking from a prior turn is released — the
+  // send/drain path that normally un-ducks may never run again.
+  if (!handsFree?.isActive()) {
+    setMicListening(false)
+    setVoiceAudioFocus(false)
+  }
 }
 
 /** Show the mic only when an STT engine resolves for the active locale (§3 matrix). */
@@ -688,15 +695,18 @@ function toggleListening(): void {
   primeBrowserTts()
   const mode = loadConfig().voiceHandsFree ?? 'off'
   // Open-mic: the mic button is a mute toggle for the always-on session.
+  // Don't set the indicator here — unmute arms asynchronously and can
+  // fail (permission denied); the controller's state-change hook drives
+  // setMicListening so the UI never gets stuck showing "listening".
   if (mode === 'open-mic' && handsFree?.isActive()) {
     const muted = handsFree.toggleMute()
-    setMicListening(!muted)
     callbacks?.announce(t(muted ? 'chat.announce.voiceMuted' : 'chat.announce.voiceListening'))
     return
   }
-  // Push-to-talk is driven by pointer down/up (see wireEvents); a plain
-  // click does nothing.
-  if (mode === 'push-to-talk') return
+  // Push-to-talk is driven by pointer down/up (see wireEvents) — but
+  // only when a hands-free session is actually live. If none resolved,
+  // fall through to the Phase 1 single-tap path so the mic still works.
+  if (mode === 'push-to-talk' && handsFree?.isActive()) return
   // Phase 1 single-tap path.
   if (sttSession) stopListening()
   else startListening()

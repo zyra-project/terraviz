@@ -447,6 +447,9 @@ export interface FakeStreamingSttEngine extends StreamingSttEngine {
   emitSpeechState(speaking: boolean): void
   /** Emit a recoverable error into the active session. */
   emitError(error: Error): void
+  /** Simulate the engine ending on its own (not via stop()) — service
+   *  timeout, permission loss — to exercise caller recovery. */
+  endActiveSession(): void
   /** True while a session is open (stop() not yet called). */
   readonly active: boolean
   readonly stopCount: number
@@ -483,6 +486,12 @@ export function createFakeStreamingSttEngine(opts: {
     emitTurn: (text) => current?.onTurn(text),
     emitSpeechState: (speaking) => current?.onSpeechStateChange?.(speaking),
     emitError: (error) => current?.onError(error),
+    endActiveSession: () => {
+      if (!current) return
+      const ended = current
+      current = null
+      ended.onEnd?.()
+    },
     get active() { return current !== null },
     get stopCount() { return stopCount },
     get abortTurnCount() { return abortTurnCount },

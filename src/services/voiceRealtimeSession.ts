@@ -189,7 +189,19 @@ export class RealtimeVoiceSession {
 
   private beginStream(): void {
     if (this.sttSession || !this.stream) return
-    this.sttSession = this.opts.engine.startStreaming({
+    let live = true
+    let session: StreamingSttSession | undefined
+    const onEnded = (): void => {
+      live = false
+      // Engine ended — ours via stop(), or unexpectedly (Web Speech
+      // timeout, permission loss, network). Drop the session and return
+      // to a recoverable state so the next onset/press can restart.
+      if (session !== undefined && this.sttSession === session) {
+        this.sttSession = null
+        if (this.state === 'capturing') this.setState(this.suspended ? 'suspended' : 'listening')
+      }
+    }
+    session = this.opts.engine.startStreaming({
       lang: this.opts.lang,
       stream: this.stream, // let a record→transcribe engine reuse our mic
       onPartial: (t) => this.opts.onPartial?.(t),
@@ -203,15 +215,22 @@ export class RealtimeVoiceSession {
         }
       },
       onError: (e) => this.opts.onError?.(e),
-      onEnd: () => { /* session-level end handled by endStream */ },
+      onEnd: onEnded,
     })
+    // The engine may have ended synchronously during start (e.g. an
+    // immediate failure) — don't enter `capturing` with a dead session.
+    if (!live) return
+    this.sttSession = session
     this.setState('capturing')
   }
 
   private endStream(): void {
-    if (!this.sttSession) return
-    try { this.sttSession.stop() } catch (err) { logger.warn('[voice] realtime stop failed', err) }
+    const session = this.sttSession
+    if (!session) return
+    // Null first so the engine's onEnd (which stop() may fire) sees the
+    // session already retired and doesn't double-handle the transition.
     this.sttSession = null
+    try { session.stop() } catch (err) { logger.warn('[voice] realtime stop failed', err) }
   }
 
   private stopTracks(): void {
