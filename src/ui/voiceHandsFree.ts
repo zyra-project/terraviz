@@ -49,6 +49,10 @@ export class HandsFreeController {
   private session: RealtimeVoiceSession | null = null
   private mode: VoiceHandsFreeMode = 'off'
   private muted = false
+  // Last-synced language / provider, so a lang or provider change while
+  // staying in the same mode still rebuilds the session.
+  private lang = ''
+  private provider: VoiceProviderPreference = 'auto'
 
   constructor(
     private readonly hooks: HandsFreeHooks,
@@ -62,12 +66,20 @@ export class HandsFreeController {
 
   /**
    * (Re)configure from the current voice config. Tears down on `off`
-   * or when no streaming engine resolves; (re)creates on a real mode
-   * change. A no-op when the mode is unchanged (keeps a live session).
+   * or when no streaming engine resolves; (re)creates on a real change.
+   * A no-op only when mode AND language AND provider are unchanged
+   * (otherwise the live session would keep recognizing with stale
+   * settings).
    */
   sync(opts: HandsFreeSyncOptions): void {
-    if (opts.mode === this.mode && (this.mode === 'off' || this.session)) return
+    const unchanged = opts.mode === this.mode
+      && opts.lang === this.lang
+      && opts.provider === this.provider
+      && (this.mode === 'off' || this.session !== null)
+    if (unchanged) return
     this.teardown()
+    this.lang = opts.lang
+    this.provider = opts.provider
     if (opts.mode === 'off') return
     const engine = resolveStreamingSttEngine(opts.provider, opts.lang)
     if (!engine) return // no streaming engine for this locale → stay inert

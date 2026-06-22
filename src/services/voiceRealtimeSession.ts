@@ -77,6 +77,7 @@ export class RealtimeVoiceSession {
   private vad: MicVad | null = null
   private sttSession: StreamingSttSession | null = null
   private suspended = false
+  private armSeq = 0 // generation token to detect disarm during async arm()
 
   constructor(opts: RealtimeSessionOptions) {
     this.opts = opts
@@ -101,17 +102,23 @@ export class RealtimeVoiceSession {
    */
   async arm(): Promise<void> {
     if (this.state !== 'idle') return
+    // disarm() also leaves `state === 'idle'`, so state alone can't tell
+    // us a disarm raced in while we awaited the mic. A generation token
+    // does: disarm() (and any re-arm) bumps it, invalidating this call.
+    const seq = ++this.armSeq
+    let stream: MediaStream
     try {
-      this.stream = await this.acquireMic()
+      stream = await this.acquireMic()
     } catch (err) {
-      this.opts.onError?.(err as Error)
+      if (seq === this.armSeq) this.opts.onError?.(err as Error)
       return
     }
-    // A disarm() may have raced in while we awaited the mic.
-    if (this.state !== 'idle') {
-      this.stopTracks()
+    if (seq !== this.armSeq) {
+      // disarm()/re-arm happened during acquisition — drop this mic.
+      stream.getTracks().forEach(t => t.stop())
       return
     }
+    this.stream = stream
     if (this.opts.mode === 'open-mic') {
       this.vad = this.startVad(this.stream, {
         ...this.opts.vad,
@@ -124,6 +131,7 @@ export class RealtimeVoiceSession {
 
   /** Close everything and return to idle. */
   disarm(): void {
+    this.armSeq++ // invalidate any in-flight arm()
     this.endStream()
     this.vad?.stop()
     this.vad = null

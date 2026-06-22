@@ -146,8 +146,10 @@ export const browserStreamingSttEngine: StreamingSttEngine = {
     rec.continuous = true
     rec.maxAlternatives = 1
 
-    let emittedTurns = 0 // count of final results already emitted
-    let aborted = false  // barge-in: drop the in-flight turn's output
+    let emittedTurns = 0  // count of final results already emitted
+    let aborted = false   // barge-in: suppress the in-flight turn's output
+    let restarting = false // abortTurn() restarts rather than ending
+    let stopped = false   // stop() ends the session for good
 
     rec.onresult = (event) => {
       if (aborted) return
@@ -170,7 +172,19 @@ export const browserStreamingSttEngine: StreamingSttEngine = {
     rec.onspeechstart = () => { if (!aborted) onSpeechStateChange?.(true) }
     rec.onspeechend = () => { if (!aborted) onSpeechStateChange?.(false) }
     rec.onerror = (event) => onError(new Error(event?.error || 'speech-recognition-error'))
-    rec.onend = () => onEnd?.()
+    rec.onend = () => {
+      // `abort()` from abortTurn() fires `onend`; restart instead of
+      // ending so the continuous session keeps listening. A real stop()
+      // (or a fatal start failure) ends it.
+      if (restarting && !stopped) {
+        restarting = false
+        aborted = false
+        emittedTurns = 0
+        try { rec.start() } catch (err) { onError(err as Error); onEnd?.() }
+        return
+      }
+      onEnd?.()
+    }
     try {
       rec.start()
     } catch (err) {
@@ -179,13 +193,17 @@ export const browserStreamingSttEngine: StreamingSttEngine = {
     }
     return {
       stop: () => {
+        stopped = true
         try { rec.stop() } catch { /* already stopped */ }
       },
       abortTurn: () => {
-        // Discard the current turn's output and reset recognition so
-        // the next utterance starts clean. (Barge-in — slice 5 drives this.)
+        // Discard the in-flight turn WITHOUT ending the session: abort
+        // the current recognition (drops its audio + partials), then the
+        // onend handler restarts it so listening continues clean.
+        if (stopped) return
         aborted = true
-        try { rec.abort() } catch { /* already stopped */ }
+        restarting = true
+        try { rec.abort() } catch { restarting = false }
       },
     }
   },

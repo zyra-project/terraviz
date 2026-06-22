@@ -149,6 +149,35 @@ describe('browser streaming STT engine', () => {
     expect(states).toEqual([true, false])
   })
 
+  it('abortTurn discards the turn and keeps the session alive (restart, no onEnd)', () => {
+    let startCount = 0
+    class FakeRec {
+      lang = ''; interimResults = false; continuous = false; maxAlternatives = 1
+      onresult: ((e: any) => void) | null = null
+      onerror: ((e: any) => void) | null = null
+      onend: (() => void) | null = null
+      onspeechstart: (() => void) | null = null
+      onspeechend: (() => void) | null = null
+      start() { startCount++ }
+      stop() { this.onend?.() }
+      abort() { this.onend?.() } // Web Speech fires onend after abort
+    }
+    w['SpeechRecognition'] = FakeRec
+
+    let ended = false
+    const session = browserStreamingSttEngine.startStreaming({
+      lang: 'en', onTurn: () => {}, onError: () => {}, onEnd: () => { ended = true },
+    })
+    expect(startCount).toBe(1)
+
+    session.abortTurn()      // abort → onend → restart (not end)
+    expect(startCount).toBe(2)
+    expect(ended).toBe(false)
+
+    session.stop()           // real stop → onend → onEnd
+    expect(ended).toBe(true)
+  })
+
   it('errors and ends when SpeechRecognition is absent', async () => {
     const errors: string[] = []
     await new Promise<void>((resolve) => {

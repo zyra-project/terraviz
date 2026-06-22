@@ -1217,6 +1217,10 @@ async function handleSend(): Promise<void> {
   showTyping()
   setSendEnabled(false)
   beginSpeaking()
+  // Identify this turn's speaking session so the resume below can't
+  // re-enable the mic if a newer turn has since taken over (a stale
+  // earlier ttsChain settling after the next send began).
+  const turnSpeakId = ttsSessionId
   const turnStartedAt = Date.now()
   let streamFinishReason: 'stop' | 'length' | 'tool_calls' | 'error' = 'stop'
 
@@ -1371,8 +1375,10 @@ async function handleSend(): Promise<void> {
   // Resume hands-free listening only once any spoken reply has finished
   // draining (ttsChain), so the open mic doesn't capture Orbit's voice.
   // When auto-speak is off, ttsChain is already resolved → immediate.
-  // Restore the ducked dataset audio at the same point.
+  // Restore the ducked dataset audio at the same point. Skip if a newer
+  // turn has since started speaking — it now owns the mic/ducking.
   void ttsChain.finally(() => {
+    if (turnSpeakId !== ttsSessionId) return
     handsFree?.setBusy(false)
     setVoiceAudioFocus(false)
   })
