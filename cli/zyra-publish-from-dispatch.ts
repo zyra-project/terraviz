@@ -46,7 +46,7 @@
 import { createHash } from 'node:crypto'
 import { readFile, writeFile, stat, mkdir, readdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { resolveConfig } from './lib/config'
 import { TerravizClient } from './lib/client'
 import { assessSosSpec, runFfprobe } from './lib/sos-spec'
@@ -440,16 +440,30 @@ function mapWorkPath(pipelinePath: string | null, workdir: string): string {
   return join(workdir, 'images', 'frames')
 }
 
+/** Like `mapWorkPath` but for an arbitrary `/work/...` file path —
+ *  returns null (rather than a frames-dir fallback) when the path
+ *  isn't under the mounted workdir, so a caller can tell "absent"
+ *  from "defaulted". */
+function mapWorkFile(pipelinePath: string | null, workdir: string): string | null {
+  if (!pipelinePath) return null
+  if (pipelinePath === '/work') return workdir
+  if (pipelinePath.startsWith('/work/')) return join(workdir, pipelinePath.slice('/work/'.length))
+  return null
+}
+
 interface FrameParams {
   framesDir: string
   /** Window budget for the prune, or null to keep everything. */
   keepFrames: number | null
+  /** Host path to the pad-missing JSON report, or null when the
+   *  pipeline has no pad-missing stage with a `json-report` arg. */
+  padReportPath: string | null
 }
 
-/** Derive the frames directory + window budget from the stored
- *  pipeline definition: the acquire stage's `sync-dir` +
- *  `since-period`, and a scan-frames/metadata stage's
- *  `period-seconds`. */
+/** Derive the frames directory + window budget + pad-report path
+ *  from the stored pipeline definition: the acquire stage's
+ *  `sync-dir` + `since-period`, a scan-frames/metadata stage's
+ *  `period-seconds`, and the pad-missing stage's `json-report`. */
 function deriveFrameParams(pipelineJson: string, workdir: string): FrameParams {
   let stages: Array<Record<string, unknown>> = []
   try {
@@ -461,6 +475,7 @@ function deriveFrameParams(pipelineJson: string, workdir: string): FrameParams {
   let syncDir: string | null = null
   let sincePeriod: string | null = null
   let periodSeconds: number | null = null
+  let padReport: string | null = null
   for (const stage of stages) {
     const args = (stage.args ?? {}) as Record<string, unknown>
     if (stage.stage === 'acquire') {
@@ -472,6 +487,9 @@ function deriveFrameParams(pipelineJson: string, workdir: string): FrameParams {
       if (typeof ps === 'number') periodSeconds = ps
       else if (typeof ps === 'string' && /^\d+$/.test(ps)) periodSeconds = Number(ps)
     }
+    if (stage.command === 'pad-missing' && typeof args['json-report'] === 'string') {
+      padReport = args['json-report']
+    }
   }
   return {
     framesDir: mapWorkPath(syncDir, workdir),
@@ -479,6 +497,29 @@ function deriveFrameParams(pipelineJson: string, workdir: string): FrameParams {
       sincePeriod ? isoDurationToSeconds(sincePeriod) : null,
       periodSeconds,
     ),
+    padReportPath: mapWorkFile(padReport, workdir),
+  }
+}
+
+/**
+ * Read the synthetic-frame filenames from a `pad-missing` JSON
+ * report (`created_files` — absolute paths whose basenames are the
+ * frame filenames). Returns [] when the report is absent, malformed,
+ * or a dry run — fail-open so a missing report never deletes real
+ * cache data.
+ */
+export async function readPaddedFrameNames(reportPath: string): Promise<string[]> {
+  try {
+    const report = JSON.parse(await readFile(reportPath, 'utf-8')) as {
+      created_files?: unknown
+      dry_run?: unknown
+    }
+    if (report.dry_run === true || !Array.isArray(report.created_files)) return []
+    return report.created_files
+      .filter((f): f is string => typeof f === 'string')
+      .map(f => basename(f))
+  } catch {
+    return []
   }
 }
 
@@ -537,15 +578,20 @@ async function phaseSaveFrames(args: Args): Promise<number> {
   }
   const wf = await readWorkflowForFrames(args.workdir)
   if (!wf) return 0
-  const { framesDir, keepFrames } = deriveFrameParams(wf.pipelineJson, args.workdir)
+  const { framesDir, keepFrames, padReportPath } = deriveFrameParams(wf.pipelineJson, args.workdir)
+  // Synthetic frames (pad-missing's created_files) stay out of the
+  // cache so the next run's acquire can replace them with real ones.
+  const excludeNames = padReportPath ? await readPaddedFrameNames(padReportPath) : []
   try {
     const result = await saveFramesToR2(cfg, wf.datasetId, framesDir, {
       log,
       keepFrames: keepFrames ?? undefined,
+      excludeNames,
     })
     log(
       `frame cache: ${result.uploaded} uploaded, ${result.pruned} pruned, ${result.kept} kept` +
-        (keepFrames ? ` (window ${keepFrames})` : ' (no window prune)'),
+        (keepFrames ? ` (window ${keepFrames})` : ' (no window prune)') +
+        (excludeNames.length ? ` (${excludeNames.length} synthetic kept out)` : ''),
     )
   } catch (err) {
     log(`WARN: frame save failed (continuing) — ${err instanceof Error ? err.message : String(err)}`)

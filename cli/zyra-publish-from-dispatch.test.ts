@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { findFramesMeta, parseArgs } from './zyra-publish-from-dispatch'
+import { findFramesMeta, parseArgs, readPaddedFrameNames } from './zyra-publish-from-dispatch'
 
 const ULID = '01HX0000000000000000000000'
 
@@ -40,6 +40,44 @@ describe('parseArgs', () => {
         parseArgs([`--phase=${phase}`, `--workflow-id=${ULID}`, `--run-id=${ULID}`]),
       ).toMatchObject({ phase, workdir: '_work' })
     }
+  })
+})
+
+describe('readPaddedFrameNames', () => {
+  it('extracts the basenames of pad-missing created_files', async () => {
+    const workdir = await mkdtemp(join(tmpdir(), 'zyra-pad-'))
+    const reportPath = join(workdir, 'pad-missing-report.json')
+    // Shape mirrors a real pad-missing report (absolute paths).
+    await writeFile(
+      reportPath,
+      JSON.stringify({
+        status: 'completed',
+        fill_mode: 'nearest',
+        created_count: 2,
+        created_files: [
+          '/builds/x/_work/images/clouds/linear_rgb_cyl_20260611_1910.jpg',
+          '/builds/x/_work/images/clouds/linear_rgb_cyl_20260611_1920.jpg',
+        ],
+        dry_run: false,
+      }),
+    )
+    expect(await readPaddedFrameNames(reportPath)).toEqual([
+      'linear_rgb_cyl_20260611_1910.jpg',
+      'linear_rgb_cyl_20260611_1920.jpg',
+    ])
+  })
+
+  it('returns [] for a dry run, a missing file, or no created_files', async () => {
+    const workdir = await mkdtemp(join(tmpdir(), 'zyra-pad-'))
+    expect(await readPaddedFrameNames(join(workdir, 'absent.json'))).toEqual([])
+
+    const dryPath = join(workdir, 'dry.json')
+    await writeFile(dryPath, JSON.stringify({ dry_run: true, created_files: ['/x/a.png'] }))
+    expect(await readPaddedFrameNames(dryPath)).toEqual([])
+
+    const emptyPath = join(workdir, 'empty.json')
+    await writeFile(emptyPath, JSON.stringify({ status: 'completed', missing_count: 0 }))
+    expect(await readPaddedFrameNames(emptyPath)).toEqual([])
   })
 })
 

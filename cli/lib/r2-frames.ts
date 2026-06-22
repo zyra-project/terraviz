@@ -105,6 +105,17 @@ export interface SaveOptions extends FrameSyncOptions {
    * cache. Omit (or pass a non-positive value) to keep everything.
    */
   keepFrames?: number
+  /**
+   * Frame filenames to keep OUT of the cache — the synthetic frames
+   * `pad-missing` created this run (its report's `created_files`).
+   * Excluding them is the padded→real freshening mechanism: a
+   * synthetic frame is never cached, so the next run's
+   * `acquire --sync-dir` re-fetches the real frame once it lands
+   * upstream (and `pad-missing` simply re-creates it while it is
+   * still genuinely missing). Any matching object already in the
+   * cache is pruned.
+   */
+  excludeNames?: Iterable<string>
 }
 
 function makeClient(config: R2UploadConfig): AwsClient {
@@ -283,7 +294,14 @@ export async function saveFramesToR2(
       ? Math.min(options.keepFrames, localNames.length)
       : localNames.length
   const kept = localNames.slice(localNames.length - keep)
-  const keptSet = new Set(kept)
+
+  // Synthetic (padded) frames are deliberately NOT cached: leaving
+  // them out is what lets the next run's acquire replace a padded
+  // frame with the real one once it lands upstream. The desired
+  // cache set is the window minus the synthetic frames.
+  const exclude = new Set(options.excludeNames ?? [])
+  const desired = exclude.size > 0 ? kept.filter(n => !exclude.has(n)) : kept
+  const desiredSet = new Set(desired)
 
   const remoteKeys = await listPrefixKeys(config, client, fetchImpl, prefix)
   const remoteByName = new Map<string, string>()
@@ -293,22 +311,26 @@ export async function saveFramesToR2(
   }
 
   let uploaded = 0
-  for (const name of kept) {
+  for (const name of desired) {
     if (remoteByName.has(name)) continue
     const body = new Uint8Array(await readFile(join(framesDir, name)))
     await uploadR2Object(config, prefix + name, body, contentTypeForFile(name), { fetchImpl })
     uploaded++
   }
 
+  // Prune everything not in the desired set — frames that aged out
+  // of the window, frames whose local file is gone, and any stale
+  // synthetic copy a prior run cached.
   let pruned = 0
   for (const [name, key] of remoteByName) {
-    if (keptSet.has(name)) continue
+    if (desiredSet.has(name)) continue
     await deleteR2Object(config, key, { fetchImpl })
     pruned++
   }
 
-  log(`save: ${uploaded} uploaded, ${pruned} pruned, ${kept.length} kept in cache`)
-  return { uploaded, pruned, kept: kept.length }
+  log(`save: ${uploaded} uploaded, ${pruned} pruned, ${desired.length} kept in cache` +
+    (exclude.size > 0 ? ` (${exclude.size} synthetic excluded)` : ''))
+  return { uploaded, pruned, kept: desired.length }
 }
 
 /**

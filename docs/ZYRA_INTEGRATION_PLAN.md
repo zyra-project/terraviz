@@ -624,14 +624,17 @@ consumes:
 Persisting frames across runs is also what makes
 **padded→real freshening** possible — the capability the scheduler
 gets from `acquire --prefer-remote-if-meta-newer`. We do it
-runner-side rather than via that static flag, because a static
-pipeline can't condition the flag on a frames-meta that doesn't
-exist on the first (cold-cache) run: `save-frames` records which
-frames `pad-missing` synthesised (from its `--json-report`), and
-`restore-frames` skips restoring those, so `acquire --sync-dir`
-re-fetches the real frame if it has since landed and `pad-missing`
-re-pads only what's still missing. This is a refinement on top of
-the plain cache, sequenced after it.
+runner-side rather than via that static flag (a static pipeline
+can't condition the flag on a frames-meta that doesn't exist on the
+first, cold-cache run), and more simply than a restore-side marker:
+**synthetic frames are never cached.** `save-frames` reads the
+`pad-missing` report's `created_files`, excludes those frames from
+the upload, and prunes any stale synthetic copy already in the
+cache. So the next run restores only real frames, `acquire
+--sync-dir` re-fetches a frame that has since landed upstream, and
+`pad-missing` simply re-creates the ones still genuinely missing. No
+marker, no restore-side change — a refinement on top of the plain
+cache, sequenced after it.
 
 ### Non-goals
 
@@ -649,9 +652,10 @@ the plain cache, sequenced after it.
    window-prune to keep only the active window. Best-effort: a cache
    miss or R2 hiccup logs a warning and the run proceeds, so the
    cache can never break a workflow.
-2. **Padded→real freshening** — `restore-frames` skips
-   previously-synthesised frames so real ones can replace them
-   (runner-side, no zyra flag — see above).
+2. **Padded→real freshening** — `save-frames` keeps the
+   `pad-missing` report's synthetic frames out of the cache, so the
+   next run's acquire can replace them with the real frames once
+   they land (runner-side, no zyra flag — see above).
 3. **Recall** — publish the run's padded frames via the
    image-sequence asset path so `/frames` lights up. The one
    behavioural shift to confirm at this step: a recall-enabled

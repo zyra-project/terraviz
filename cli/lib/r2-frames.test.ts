@@ -244,6 +244,32 @@ describe('saveFramesToR2', () => {
     expect([...store.keys()]).toEqual([`${PREFIX}f_20240101.png`])
   })
 
+  it('keeps synthetic (padded) frames out of the cache and prunes stale copies', async () => {
+    const { store, fetchImpl } = makeFakeR2({
+      [`${PREFIX}f_20240101.png`]: bytes('real'),
+      [`${PREFIX}f_20240108.png`]: bytes('stale-synthetic'),
+    })
+    const dir = tmpFramesDir()
+    // Local dir holds a real frame, a freshly-padded synthetic one,
+    // and a new real frame.
+    writeFileSync(join(dir, 'f_20240101.png'), 'real')
+    writeFileSync(join(dir, 'f_20240108.png'), 'synthetic-this-run')
+    writeFileSync(join(dir, 'f_20240115.png'), 'real-new')
+    const result = await saveFramesToR2(CONFIG, DATASET, dir, {
+      fetchImpl,
+      excludeNames: ['f_20240108.png'],
+    })
+    // The synthetic frame is neither uploaded nor retained; the new
+    // real frame is uploaded; the stale synthetic cache copy is pruned.
+    expect([...store.keys()].sort()).toEqual([
+      `${PREFIX}f_20240101.png`,
+      `${PREFIX}f_20240115.png`,
+    ])
+    expect(result.uploaded).toBe(1)
+    expect(result.pruned).toBe(1)
+    expect(result.kept).toBe(2)
+  })
+
   it('keeps everything when no window budget is given', async () => {
     const { store, fetchImpl } = makeFakeR2()
     const dir = tmpFramesDir()
