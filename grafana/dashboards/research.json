@@ -603,7 +603,7 @@
       "id": 11,
       "type": "table",
       "title": "Orbit voice — interactions by provider, mode & trigger",
-      "description": "Voice STT/TTS usage. No transcript or audio is ever stored — only provider, mode (stt/tts), trigger, count, and average measured duration (ms; 0 for TTS-start events).",
+      "description": "Voice STT/TTS usage. No transcript or audio is ever stored — only provider, mode (stt/tts), trigger, count, and average measured duration (ms; 0 for TTS-start events). Hands-free turns show as trigger open-mic/push-to-talk. Barge-in rows (blob5='true') are excluded so the positional reads stay aligned; count barge-ins separately via blob5='true'.",
       "gridPos": {
         "x": 0,
         "y": 54,
@@ -627,7 +627,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT blob7 AS provider, blob6 AS mode, blob9 AS trigger, count() AS interactions, round(avg(double2)) AS avg_ms FROM terraviz_events WHERE blob1 = 'voice_interaction' AND blob2 = '$environment' AND blob4 = 'false' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY provider, mode, trigger ORDER BY interactions DESC",
+            "data": "SELECT blob7 AS provider, blob6 AS mode, blob9 AS trigger, count() AS interactions, round(avg(double2)) AS avg_ms FROM terraviz_events WHERE blob1 = 'voice_interaction' AND blob2 = '$environment' AND blob4 = 'false' AND blob5 != 'true' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY provider, mode, trigger ORDER BY interactions DESC",
             "headers": [
               {
                 "key": "Content-Type",

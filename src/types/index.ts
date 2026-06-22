@@ -1831,14 +1831,19 @@ export interface VoiceInteractionEvent extends TelemetryEventBase {
   mode: 'stt' | 'tts'
   /** Which engine served it. */
   provider: VoiceProvider
-  /** How it was initiated: mic capture, auto-speak, or the per-message replay button. */
-  trigger: 'mic' | 'autospeak' | 'replay'
+  /** How it was initiated: push-to-talk mic, auto-speak, the per-message
+   *  replay button, or a hands-free realtime turn (open-mic / push-to-talk
+   *  — the §10.4 numbers that decide the exhibit interaction model). */
+  trigger: 'mic' | 'autospeak' | 'replay' | 'open-mic' | 'push-to-talk'
   /** Recognition / synthesis wall-clock duration in ms; `0` when not measured (e.g. TTS start). */
   duration_ms: number
   /** BCP-47 base language (e.g. `en`, `es`). Low-cardinality, not free text. */
   lang: string
   /** Whether it completed successfully (STT produced a final transcript / TTS started). */
   success: boolean
+  /** TTS only — the spoken reply was cut short by a hands-free barge-in
+   *  (the user interrupted Orbit). Drives the barge-in-frequency metric (§10.4). */
+  interrupted?: boolean
 }
 
 /** The full discriminated event union. Add new events here, add them

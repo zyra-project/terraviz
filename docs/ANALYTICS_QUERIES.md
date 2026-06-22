@@ -522,18 +522,31 @@ alphabetical layout. Per-event positions:
 
 Fields sort alphabetically (after the 4 server-stamped blobs, and
 excluding `event_type`): `client_offset_ms` (num), `duration_ms`
-(num), `lang` (str), `mode` (str), `provider` (str), `success`
-(bool → str), `trigger` (str).
+(num), `interrupted` (bool → str, **optional**), `lang` (str),
+`mode` (str), `provider` (str), `success` (bool → str),
+`trigger` (str).
 
-| Position | Field |
+`interrupted` is the **optional blob**: present only on a TTS
+barge-in (`interrupted = 'true'`). When present it sorts first and
+sits at `blob5`, shifting the rest up one; when absent (the common
+case — every STT turn and every non-interrupted reply) the positions
+below hold. Detect a barge-in row by `blob5 = 'true'` (a normal
+row's `blob5` is the `lang` enum, never `true`).
+
+| Position (no barge-in) | Field |
 |---|---|
 | `blob5` | `lang` (BCP-47 base, e.g. `en`) |
 | `blob6` | `mode` (`stt` / `tts`) |
 | `blob7` | `provider` (`cloud` / `local` / `browser`) |
 | `blob8` | `success` (`true` / `false`) |
-| `blob9` | `trigger` (`mic` / `autospeak` / `replay`) |
+| `blob9` | `trigger` (`mic` / `autospeak` / `replay` / `open-mic` / `push-to-talk`) |
 | `double1` | `client_offset_ms` |
 | `double2` | `duration_ms` |
+
+**Hands-free turns** carry `trigger = 'open-mic'` or `'push-to-talk'`
+— the §10.4 numbers for the open-mic-vs-button exhibit decision.
+**Barge-in frequency** = count of rows with `blob5 = 'true'`. Exclude
+those from the turn breakdown with `AND blob5 != 'true'`.
 
 ---
 
