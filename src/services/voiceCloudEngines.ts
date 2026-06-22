@@ -97,7 +97,15 @@ export const cloudTtsEngine: TtsEngine = {
       noteKill(res, await readCode(res))
       return
     }
-    const data = await res.json() as { audio?: string; format?: string }
+    // Soft-fail a bad body — this runs inside the TTS queue chain, so a
+    // throw here would reject the chain and wedge the Stop-speaking UI.
+    let data: { audio?: string; format?: string }
+    try {
+      data = await res.json()
+    } catch (err) {
+      logger.warn('[voice] cloud TTS response parse failed', err)
+      return
+    }
     if (!data.audio) return
     await playDataUrl(`data:audio/mpeg;base64,${data.audio}`)
   },

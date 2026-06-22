@@ -6,7 +6,8 @@
  * cloud endpoints directly. It owns:
  *
  *   - capability detection (what this environment can do),
- *   - a provider registry + resolver (on-device → cloud → browser),
+ *   - a provider registry + resolver (`auto` = on-device → browser;
+ *     `cloud` is opt-in, excluded from `auto`),
  *   - the per-locale capability matrix (voice exists only for a
  *     subset of the UI's locales),
  *   - the **spoken-form projection** — a spoken answer is not a

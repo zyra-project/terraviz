@@ -242,7 +242,7 @@
   "chat.settings.voiceAutoSpeak.label": "Speak replies aloud — Orbit reads its answers using your device's voice. Available in supported languages.",
   "chat.settings.voiceName.default": "Default",
   "chat.settings.voiceName.label": "Voice",
-  "chat.settings.voiceProvider.auto": "Automatic (on-device)",
+  "chat.settings.voiceProvider.auto": "Automatic",
   "chat.settings.voiceProvider.browser": "Browser",
   "chat.settings.voiceProvider.cloud": "Cloud (Cloudflare)",
   "chat.settings.voiceProvider.label": "Voice engine",

@@ -535,11 +535,11 @@ export interface GeneralFeedbackPayload {
 export type ReadingLevel = 'young-learner' | 'general' | 'in-depth' | 'expert'
 
 /**
- * Where Orbit's voice (STT/TTS) is sourced from. `auto` lets
- * `voiceService` pick the best available engine at runtime
- * (on-device → Cloudflare edge → browser). The explicit values pin
- * a path for power users / kiosk operators. See
- * `docs/ORBIT_VOICE_PLAN.md` §4.4.
+ * Where Orbit's voice (STT/TTS) is sourced from. `auto` resolves
+ * **on-device → browser** at runtime; `cloud` is **opt-in only**
+ * (deliberately excluded from `auto` because edge inference is
+ * metered) and the explicit values pin a path for power users /
+ * kiosk operators. See `docs/ORBIT_VOICE_PLAN.md` §4.4.
  */
 export type VoiceProviderPreference = 'auto' | 'cloud' | 'local' | 'browser'
 

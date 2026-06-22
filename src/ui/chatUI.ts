@@ -1101,7 +1101,10 @@ async function handleSend(): Promise<void> {
           docentMsg.text += chunk.text
           updateStreamingMessage(docentMsg)
           scrollToBottom()
-          pumpSpeech(docentMsg.text, false)
+          // Only re-chunk for speech when this delta may have completed
+          // a sentence — re-splitting the whole message on every token
+          // would be O(n²). The `done` flush catches any trailing text.
+          if (/[.!?\n]/.test(chunk.text)) pumpSpeech(docentMsg.text, false)
           break
 
         case 'action': {
