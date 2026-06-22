@@ -217,7 +217,15 @@ export function registerTtsEngine(engine: TtsEngine): void {
 }
 
 export function registerStreamingSttEngine(engine: StreamingSttEngine): void {
-  if (!streamingSttEngines.some(e => e.provider === engine.provider)) streamingSttEngines.push(engine)
+  // Unlike the push-to-talk STT/TTS registries (one engine per
+  // provider), the streaming registry keeps an ordered fallback chain:
+  // a provider may register a preferred engine (e.g. the realtime WS
+  // path) ahead of a reliable default (batch record→transcribe). The
+  // resolver picks the first *available* one, so when the preferred
+  // engine cools itself down mid-session the next session falls back to
+  // the default. Dedup by identity to stay idempotent across repeated
+  // registration (config change / re-init).
+  if (!streamingSttEngines.includes(engine)) streamingSttEngines.push(engine)
 }
 
 /** Clear the registry — for tests, and for re-registration on config change. */

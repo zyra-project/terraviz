@@ -13,6 +13,7 @@ import {
   resolveStreamingSttEngine,
   type VoiceCapabilities,
 } from './voiceService'
+import { createWsStreamingSttEngine, __resetWsStreamingDisabled, type WsLike } from './voiceWsStreaming'
 
 const ALL_CAPS: VoiceCapabilities = {
   webSpeechStt: true,
@@ -21,9 +22,20 @@ const ALL_CAPS: VoiceCapabilities = {
   getUserMedia: true,
 }
 
+/** Minimal driveable fake socket — drives the WS engine's cooldown path. */
+function makeFakeSocket(): { sock: WsLike } {
+  const sock: WsLike = {
+    binaryType: '', readyState: 1,
+    send: () => {}, close: () => { sock.onclose?.() },
+    onopen: null, onmessage: null, onerror: null, onclose: null,
+  }
+  return { sock }
+}
+
 beforeEach(() => {
   resetVoiceEngines()
   __resetCloudVoiceDisabled()
+  __resetWsStreamingDisabled()
 })
 
 afterEach(() => {
@@ -144,6 +156,44 @@ describe('cloud streaming STT', () => {
     expect(resolveStreamingSttEngine('cloud', 'en', ALL_CAPS)?.provider).toBe('cloud')
     // opt-in only — never picked by `auto`.
     expect(resolveStreamingSttEngine('auto', 'en', ALL_CAPS)).toBeNull()
+  })
+
+  it('prefers the realtime WS engine when VITE_VOICE_WS_STREAMING is on', () => {
+    // Default (flag off) → batch engine is the cloud streaming provider.
+    registerCloudVoiceEngines()
+    expect(resolveStreamingSttEngine('cloud', 'en', ALL_CAPS)).toBe(cloudStreamingSttEngine)
+
+    // Flag on → the WS engine wins the `cloud` provider slot.
+    resetVoiceEngines()
+    vi.stubEnv('VITE_VOICE_WS_STREAMING', 'true')
+    registerCloudVoiceEngines()
+    const engine = resolveStreamingSttEngine('cloud', 'en', ALL_CAPS)
+    expect(engine).not.toBe(cloudStreamingSttEngine)
+    expect(engine?.provider).toBe('cloud')
+    vi.unstubAllEnvs()
+  })
+
+  it('keeps the batch engine as a fallback when the WS path cools down', () => {
+    vi.stubEnv('VITE_VOICE_WS_STREAMING', 'true')
+    registerCloudVoiceEngines()
+    // Both register (WS preferred, batch behind it); WS wins while available.
+    expect(resolveStreamingSttEngine('cloud', 'en', ALL_CAPS)).not.toBe(cloudStreamingSttEngine)
+
+    // Cool down the session-scoped WS path — the disabled flag is module
+    // state shared across instances, so drive it through a fake-injected
+    // one receiving a proxy error frame.
+    const sock = makeFakeSocket()
+    const probe = createWsStreamingSttEngine({
+      createSocket: () => sock.sock,
+      startCapture: () => ({ stop: () => {} }),
+    })
+    probe.startStreaming({ lang: 'en', stream: {} as MediaStream, onTurn: () => {}, onError: () => {}, onEnd: () => {} })
+    sock.sock.onopen?.()
+    sock.sock.onmessage?.({ data: JSON.stringify({ type: 'error', code: 'voice_disabled' }) })
+
+    // WS is now unavailable → the resolver falls back to the batch engine.
+    expect(resolveStreamingSttEngine('cloud', 'en', ALL_CAPS)).toBe(cloudStreamingSttEngine)
+    vi.unstubAllEnvs()
   })
 
   it('records the provided stream and emits a turn on stop (without owning the mic)', async () => {

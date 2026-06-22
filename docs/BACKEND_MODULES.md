@@ -73,6 +73,7 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `functions/api/voice/_voice-lib.ts` | Shared helpers for the voice Pages Functions — Workers AI model IDs, `KILL_VOICE` kill switch, CORS/origin, per-IP rate limiter, base64 (`docs/ORBIT_VOICE_PLAN.md` §7) |
 | `functions/api/voice/synthesize.ts` | Route: POST /api/voice/synthesize — text-to-speech via Workers AI (MeloTTS default, Aura opt-in) |
 | `functions/api/voice/transcribe.ts` | Route: POST /api/voice/transcribe — speech-to-text via Workers AI (Whisper large v3 turbo) |
+| `functions/api/voice/stream.ts` | Route: WS /api/voice/stream — realtime STT proxy; pipes linear16 PCM to Cloudflare's AI Gateway realtime endpoint (Deepgram Nova-3/Flux) with the `cf-aig-authorization` secret, JSON transcripts back. Config: `CF_ACCOUNT_ID` / `CF_AI_GATEWAY` / `CF_AIG_TOKEN`. When unset, `KILL_VOICE` is on, or over the per-IP cap, it accepts the socket and sends a JSON error frame (`{type:"error",code}`) before closing — a browser WS can't read an HTTP status — so the client cools down and the streaming resolver falls back to batch Whisper (`docs/ORBIT_VOICE_PLAN.md` §3) |
 | `functions/api/tile/[[path]].ts` | Route: /api/tile/[...path] |
 
 ## Catalog read API (`functions/api/v1/`)
