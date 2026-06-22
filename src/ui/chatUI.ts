@@ -90,6 +90,8 @@ let ttsEngine: TtsEngine | null = null
 let spokenChunkCount = 0
 let ttsChain: Promise<void> = Promise.resolve()
 let speakingActive = false
+let ttsTrigger: 'autospeak' | 'replay' = 'autospeak'
+let ttsEmitted = false
 
 /** Globe-control actions deferred until a load-dataset action in the same message completes. */
 let pendingGlobeActions: ChatAction[] = []
@@ -572,6 +574,10 @@ function startListening(): void {
     return
   }
   let sawFinal = false
+  let sttError = false
+  const startedAt = Date.now()
+  const provider = engine.provider
+  const langBase = baseLanguage(lang)
   setMicListening(true)
   callbacks?.announce(t('chat.announce.voiceListening'))
   sttSession = engine.start({
@@ -587,12 +593,23 @@ function startListening(): void {
     },
     onError: (err) => {
       logger.warn('[voice] STT error', err)
+      sttError = true
       endListening()
       callbacks?.announce(t('chat.announce.voiceError'))
     },
     onEnd: () => {
       const hadFinal = sawFinal
       endListening()
+      // Tier B: no transcript text — only provider/lang/duration/success.
+      emit({
+        event_type: 'voice_interaction',
+        mode: 'stt',
+        provider,
+        trigger: 'mic',
+        duration_ms: Math.max(0, Date.now() - startedAt),
+        lang: langBase,
+        success: hadFinal && !sttError,
+      })
       // Auto-send on a committed transcript (push-to-talk turn).
       if (hadFinal && input.value.trim()) void handleSend()
     },
@@ -634,7 +651,28 @@ function beginSpeaking(): void {
   ttsEngine = resolveTtsEngine(cfg.voiceProvider ?? 'auto', cfg.voiceLang || getLocale())
   spokenChunkCount = 0
   speakingActive = !!ttsEngine
+  ttsTrigger = 'autospeak'
+  ttsEmitted = false
   if (speakingActive) setStopSpeakingVisible(true)
+}
+
+/**
+ * Emit the Tier B `voice_interaction` (TTS) event once per speaking
+ * session, the first time speech is actually produced. No text or
+ * audio — only provider / language / trigger. (ORBIT_VOICE_PLAN §6)
+ */
+function emitTtsOnce(): void {
+  if (ttsEmitted || !ttsEngine) return
+  ttsEmitted = true
+  emit({
+    event_type: 'voice_interaction',
+    mode: 'tts',
+    provider: ttsEngine.provider,
+    trigger: ttsTrigger,
+    duration_ms: 0,
+    lang: baseLanguage(loadConfig().voiceLang || getLocale()),
+    success: true,
+  })
 }
 
 /**
@@ -656,6 +694,7 @@ function pumpSpeech(fullText: string, final: boolean): void {
   for (let i = spokenChunkCount; i < upto; i++) {
     const sentence = sentences[i]
     if (!sentence) continue
+    emitTtsOnce()
     ttsChain = ttsChain.then(() => (speakingActive ? engine.speak(sentence, { lang, rate, voice }) : undefined))
   }
   spokenChunkCount = Math.max(spokenChunkCount, upto)
@@ -700,6 +739,9 @@ function speakMessage(text: string): void {
   stopSpeaking()
   speakingActive = true
   ttsEngine = engine
+  ttsTrigger = 'replay'
+  ttsEmitted = false
+  emitTtsOnce()
   setStopSpeakingVisible(true)
   const lang = cfg.voiceLang || getLocale()
   const rate = cfg.voiceRate

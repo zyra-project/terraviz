@@ -266,6 +266,11 @@ export const EVENT_LAYOUTS = {
     blobs: ['code', 'field'],
     doubles: ['client_offset_ms'],
   },
+  voice_interaction: {
+    blobs: ['lang', 'mode', 'provider', 'success', 'trigger'],
+    doubles: ['client_offset_ms', 'duration_ms'],
+    booleans: ['success'],
+  },
 } as const satisfies {
   [K in TelemetryEventType]: {
     blobs: readonly BlobKeys<EventFor<K>>[]

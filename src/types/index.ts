@@ -951,6 +951,7 @@ export const TIER_B_EVENT_TYPES = [
   'error_detail',
   'tour_question_answered',
   'publisher_validation_failed',
+  'voice_interaction',
 ] as const
 export type TierBEventType = (typeof TIER_B_EVENT_TYPES)[number]
 
@@ -1805,6 +1806,30 @@ export interface PublisherValidationFailedEvent extends TelemetryEventBase {
   code: string
 }
 
+/**
+ * One voice (STT or TTS) interaction. Tier B: a research signal for
+ * how Orbit's voice is used (provider / language / success / latency),
+ * not an operator-critical metric. Privacy: **no transcript text and
+ * no audio ever** — only the bucketed fields below; the spoken/heard
+ * content never leaves the device through telemetry.
+ * (docs/ORBIT_VOICE_PLAN.md §6)
+ */
+export interface VoiceInteractionEvent extends TelemetryEventBase {
+  event_type: 'voice_interaction'
+  /** Speech-to-text (mic input) or text-to-speech (spoken reply). */
+  mode: 'stt' | 'tts'
+  /** Which engine served it. */
+  provider: VoiceProvider
+  /** How it was initiated: mic capture, auto-speak, or the per-message replay button. */
+  trigger: 'mic' | 'autospeak' | 'replay'
+  /** Recognition / synthesis wall-clock duration in ms; `0` when not measured (e.g. TTS start). */
+  duration_ms: number
+  /** BCP-47 base language (e.g. `en`, `es`). Low-cardinality, not free text. */
+  lang: string
+  /** Whether it completed successfully (STT produced a final transcript / TTS started). */
+  success: boolean
+}
+
 /** The full discriminated event union. Add new events here, add them
  * to `TIER_B_EVENT_TYPES` if Tier B, and update the wiring table in
  * `docs/ANALYTICS_IMPLEMENTATION_PLAN.md`. */
@@ -1854,3 +1879,4 @@ export type TelemetryEvent =
   | CatalogMapRegionDrawnEvent
   | VrInteractionEvent
   | ErrorDetailEvent
+  | VoiceInteractionEvent

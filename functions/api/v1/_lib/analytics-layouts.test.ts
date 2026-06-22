@@ -383,6 +383,16 @@ const FIXTURES: { [K in TelemetryEventType]: EventFor<K> } = {
     code: 'slug_too_short',
     client_offset_ms: 100,
   },
+  voice_interaction: {
+    event_type: 'voice_interaction',
+    mode: 'tts',
+    provider: 'browser',
+    trigger: 'replay',
+    duration_ms: 0,
+    lang: 'en',
+    success: true,
+    client_offset_ms: 100,
+  },
 }
 
 const ENVELOPE = {

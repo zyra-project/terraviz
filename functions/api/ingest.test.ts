@@ -329,6 +329,31 @@ describe('toDataPoint', () => {
     expect(dp.blobs!.filter((b) => b === 'true').length).toBeGreaterThanOrEqual(1)
   })
 
+  it('encodes voice_interaction at its documented blob/double positions', () => {
+    // Mirrors docs/ANALYTICS_QUERIES.md → voice_interaction. Fields
+    // sort alphabetically after the 4 server-stamped blobs; emit()
+    // always stamps client_offset_ms so it occupies double1.
+    const event = {
+      event_type: 'voice_interaction',
+      mode: 'tts',
+      provider: 'browser',
+      trigger: 'replay',
+      duration_ms: 0,
+      lang: 'en',
+      success: true,
+      client_offset_ms: 42,
+    } as unknown as TelemetryEvent
+    const dp = toDataPoint(event, 'sess', 'production', 'US', false)
+    expect(dp.blobs![0]).toBe('voice_interaction')
+    expect(dp.blobs![4]).toBe('en')        // blob5 lang
+    expect(dp.blobs![5]).toBe('tts')       // blob6 mode
+    expect(dp.blobs![6]).toBe('browser')   // blob7 provider
+    expect(dp.blobs![7]).toBe('true')      // blob8 success
+    expect(dp.blobs![8]).toBe('replay')    // blob9 trigger
+    expect(dp.doubles![0]).toBe(42)        // double1 client_offset_ms
+    expect(dp.doubles![1]).toBe(0)         // double2 duration_ms
+  })
+
   it('skips null and undefined fields entirely (defense-in-depth — validation rejects them upstream)', () => {
     const event = {
       event_type: 'vr_session_ended',

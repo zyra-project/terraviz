@@ -79,7 +79,7 @@ const KNOWN_EVENT_TYPES: ReadonlySet<string> = new Set([
   'catalog_map_region_drawn',
   'vr_interaction', 'error_detail',
   'publisher_portal_loaded', 'publisher_action',
-  'publisher_validation_failed',
+  'publisher_validation_failed', 'voice_interaction',
 ])
 
 // --- CORS / origin ---

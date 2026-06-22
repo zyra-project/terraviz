@@ -518,6 +518,23 @@ alphabetical layout. Per-event positions:
 | `double5` | `response_ms` |
 | `double6` | `task_index` |
 
+#### `voice_interaction`
+
+Fields sort alphabetically (after the 4 server-stamped blobs, and
+excluding `event_type`): `client_offset_ms` (num), `duration_ms`
+(num), `lang` (str), `mode` (str), `provider` (str), `success`
+(bool → str), `trigger` (str).
+
+| Position | Field |
+|---|---|
+| `blob5` | `lang` (BCP-47 base, e.g. `en`) |
+| `blob6` | `mode` (`stt` / `tts`) |
+| `blob7` | `provider` (`cloud` / `local` / `browser`) |
+| `blob8` | `success` (`true` / `false`) |
+| `blob9` | `trigger` (`mic` / `autospeak` / `replay`) |
+| `double1` | `client_offset_ms` |
+| `double2` | `duration_ms` |
+
 ---
 
 ## Product Health queries

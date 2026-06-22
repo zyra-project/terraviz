@@ -598,6 +598,74 @@
           ]
         }
       ]
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "Orbit voice — interactions by provider, mode & trigger",
+      "description": "Voice STT/TTS usage. No transcript or audio is ever stored — only provider, mode (stt/tts), trigger, count, and average measured duration (ms; 0 for TTS-start events).",
+      "gridPos": {
+        "x": 0,
+        "y": 54,
+        "w": 12,
+        "h": 10
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/sql",
+          "url_options": {
+            "method": "POST",
+            "data": "SELECT blob7 AS provider, blob6 AS mode, blob9 AS trigger, count() AS interactions, round(avg(double2)) AS avg_ms FROM terraviz_events WHERE blob1 = 'voice_interaction' AND blob2 = '$environment' AND blob4 = 'false' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY provider, mode, trigger ORDER BY interactions DESC",
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
+          },
+          "parser": "backend",
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "provider",
+              "text": "provider",
+              "type": "string"
+            },
+            {
+              "selector": "mode",
+              "text": "mode",
+              "type": "string"
+            },
+            {
+              "selector": "trigger",
+              "text": "trigger",
+              "type": "string"
+            },
+            {
+              "selector": "interactions",
+              "text": "interactions",
+              "type": "number"
+            },
+            {
+              "selector": "avg_ms",
+              "text": "avg_ms",
+              "type": "number"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

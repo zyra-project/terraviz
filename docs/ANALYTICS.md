@@ -164,6 +164,7 @@ must be corrected.
 | `vr_interaction` | **B** | `src/services/vrInteraction.ts` (per-gesture, throttled) |
 | `error_detail` | **B** | `src/analytics/errorCapture.ts` (adds sanitized stack) |
 | `tour_question_answered` | **B** | `src/services/tourEngine.ts` |
+| `voice_interaction` | **B** | `src/ui/chatUI.ts` (Orbit voice STT/TTS — no transcript or audio, only provider / lang / duration / success) |
 
 Per-event field documentation lives in the type definitions
 (`src/types/index.ts` lines 685–1023) and the query reference
