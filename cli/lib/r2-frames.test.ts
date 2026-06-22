@@ -281,6 +281,15 @@ describe('saveFramesToR2', () => {
     expect(store.size).toBe(3)
   })
 
+  it('leaves the cache untouched when the frames dir exists but is empty', async () => {
+    const { store, fetchImpl } = makeFakeR2({ [`${PREFIX}f_20240101.png`]: bytes('a') })
+    const dir = tmpFramesDir() // created, but holds no frame files
+    const result = await saveFramesToR2(CONFIG, DATASET, dir, { fetchImpl })
+    expect(result).toEqual({ uploaded: 0, pruned: 0, kept: 0 })
+    // The cache must NOT be pruned just because this run produced nothing.
+    expect(store.size).toBe(1)
+  })
+
   it('is a no-op when the frames directory does not exist', async () => {
     const { store, fetchImpl } = makeFakeR2({ [`${PREFIX}f.png`]: bytes('x') })
     const result = await saveFramesToR2(CONFIG, DATASET, join(tmpFramesDir(), 'nope'), {

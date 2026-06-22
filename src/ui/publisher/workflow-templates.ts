@@ -29,12 +29,13 @@
  * §Real-time frame store). Templates that want a plain composed
  * video keep `compose-video` (see `http-frames-sos`).
  *
- * Not modelled here: the scheduler's `acquire --prefer-remote-if-meta-newer`
- * flag, which swaps previously-padded synthetic frames for real ones
- * once they land. It depends on the frame directory persisting across
- * runs (the GitLab pipeline caches it); the TerraViz runner mounts a
- * fresh `_work` per run, so there is nothing to replace — revisit if
- * the runner grows a cross-run frame cache.
+ * Padded→real freshening — what the scheduler's
+ * `acquire --prefer-remote-if-meta-newer` flag does — is handled
+ * runner-side, not by a template flag: the R2 frame cache keeps
+ * pad-missing's synthetic frames out of the cache, so the next run's
+ * `acquire --sync-dir` re-fetches the real frame once it lands. See
+ * `cli/lib/r2-frames.ts` and `docs/ZYRA_INTEGRATION_PLAN.md`
+ * §Real-time frame store.
  *
  * The stage snippets back the "Insert stage" palette — the
  * lightweight, textarea-native form of zyra-editor's stage palette

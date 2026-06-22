@@ -16,7 +16,7 @@ const goodPipeline = JSON.stringify({
     {
       stage: 'acquire',
       command: 'ftp',
-      args: { url: 'ftp://ftp.nnvl.noaa.gov/SOS/DroughtRisk_Weekly', 'sync-dir': '/work/images/drought' },
+      args: { path: 'ftp://ftp.nnvl.noaa.gov/SOS/DroughtRisk_Weekly', 'sync-dir': '/work/images/drought' },
     },
     {
       stage: 'visualize',
@@ -58,7 +58,7 @@ describe('validatePipeline', () => {
         {
           stage: 'acquire',
           command: 'ftp',
-          args: { url: 'ftp://host/x', 'sync-dir': WORKFLOW_FRAMES_OUTPUT_DIR },
+          args: { path: 'ftp://host/x', 'sync-dir': WORKFLOW_FRAMES_OUTPUT_DIR },
         },
         {
           stage: 'process',
@@ -72,7 +72,7 @@ describe('validatePipeline', () => {
 
   it('rejects a pipeline that writes neither the MP4 nor a frames dir', () => {
     const noOutput = JSON.stringify({
-      stages: [{ stage: 'acquire', command: 'ftp', args: { url: 'ftp://host/x' } }],
+      stages: [{ stage: 'acquire', command: 'ftp', args: { path: 'ftp://host/x' } }],
     })
     expect(runPipeline(noOutput).some(e => e.code === 'missing_output')).toBe(true)
   })

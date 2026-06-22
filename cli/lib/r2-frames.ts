@@ -45,6 +45,10 @@ import {
 /** S3-API region R2 expects in the SigV4 signature (see r2-upload). */
 const R2_REGION = 'auto'
 
+/** Default parallelism for per-object transfers — matches the HLS
+ *  bundle uploader's worker-pool size. */
+const DEFAULT_CONCURRENCY = 6
+
 /** Frame files we cache. Mirrors the scheduler's acquire patterns
  *  (PNG/JPEG/WebP); anything else under the prefix (a stray report,
  *  a sidecar) is ignored on both restore and prune so the cache
@@ -76,6 +80,11 @@ export interface FrameSyncOptions {
   fetchImpl?: typeof fetch
   /** Per-line progress / diagnostics sink. Defaults to a no-op. */
   log?: (line: string) => void
+  /** Bounded parallelism for per-object transfers (restore GETs).
+   *  Defaults to `DEFAULT_CONCURRENCY` (6), matching the HLS bundle
+   *  uploader — enough to hide per-request latency over large frame
+   *  windows without hammering R2. */
+  concurrency?: number
 }
 
 export interface RestoreResult {
@@ -215,7 +224,10 @@ export async function restoreFramesFromR2(
   const keys = await listPrefixKeys(config, client, fetchImpl, prefix)
   await mkdir(framesDir, { recursive: true })
 
-  let restored = 0
+  // Resolve the set to download first (skipping frames already on
+  // disk), then GET them with bounded concurrency — a large window
+  // is exactly where serial round-trips would risk a runner timeout.
+  const toFetch: Array<{ key: string; dest: string }> = []
   let skipped = 0
   for (const key of keys) {
     const name = frameNameFromKey(prefix, key)
@@ -225,24 +237,40 @@ export async function restoreFramesFromR2(
       skipped++
       continue
     }
-    const signed = await client.sign(buildObjectUrl(config, key), { method: 'GET' })
-    let res: Response
-    try {
-      res = await fetchImpl(signed)
-    } catch (e) {
-      throw new R2UploadError(
-        null,
-        key,
-        `GET ${key} unreachable: ${e instanceof Error ? e.message : String(e)}`,
-      )
-    }
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      throw new R2UploadError(res.status, key, `GET ${key} failed (${res.status}): ${text.slice(0, 200)}`)
-    }
-    await writeFile(dest, new Uint8Array(await res.arrayBuffer()))
-    restored++
+    toFetch.push({ key, dest })
   }
+
+  let restored = 0
+  let cursor = 0
+  const concurrency = Math.max(1, options.concurrency ?? DEFAULT_CONCURRENCY)
+  async function worker(): Promise<void> {
+    for (;;) {
+      const i = cursor++
+      if (i >= toFetch.length) return
+      const { key, dest } = toFetch[i]
+      const signed = await client.sign(buildObjectUrl(config, key), { method: 'GET' })
+      let res: Response
+      try {
+        res = await fetchImpl(signed)
+      } catch (e) {
+        throw new R2UploadError(
+          null,
+          key,
+          `GET ${key} unreachable: ${e instanceof Error ? e.message : String(e)}`,
+        )
+      }
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new R2UploadError(res.status, key, `GET ${key} failed (${res.status}): ${text.slice(0, 200)}`)
+      }
+      await writeFile(dest, new Uint8Array(await res.arrayBuffer()))
+      restored++
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, toFetch.length || 1) }, () => worker()),
+  )
+
   log(`restore: ${restored} restored, ${skipped} already present (${keys.length} in cache)`)
   return { restored, skipped }
 }
@@ -284,6 +312,14 @@ export async function saveFramesToR2(
     // No frames dir → nothing to save (e.g. acquire produced
     // nothing). Leave the cache untouched.
     log(`save: ${framesDir} unreadable — nothing to save`)
+    return { uploaded: 0, pruned: 0, kept: 0 }
+  }
+  if (localNames.length === 0) {
+    // The dir exists but holds no frames (acquire produced nothing,
+    // or a failed run). Treat it as "nothing to save" rather than
+    // pruning every cached frame — same fail-open posture as an
+    // unreadable dir.
+    log(`save: ${framesDir} has no frames — leaving the cache untouched`)
     return { uploaded: 0, pruned: 0, kept: 0 }
   }
 
