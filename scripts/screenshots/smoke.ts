@@ -138,6 +138,44 @@ const checks: Check[] = [
     },
   },
   {
+    name: 'workflow template picker fills the drought recall pipeline',
+    fixtures: publisherFixtures(),
+    async run(page) {
+      await gotoApp(page, '/publish/workflows/new')
+      await page.locator('#publisher-root .publisher-topbar').waitFor({ state: 'visible' })
+
+      // Pick the curated drought template via the template <select>,
+      // identified by its option value (the visible label is i18n).
+      const templatePicker = page.locator('select', {
+        has: page.locator('option[value="ftp-frames-sos"]'),
+      })
+      await templatePicker.waitFor({ state: 'visible' })
+      await templatePicker.selectOption('ftp-frames-sos')
+
+      // The pipeline textarea (first of the two) now holds the
+      // recall-enabled drought pipeline: a basemap pad-missing stage
+      // and NO compose-video (it publishes frames, not an MP4).
+      const pipeline = page.locator('.publisher-form-textarea').first()
+      const yaml = await pipeline.inputValue()
+      assert(yaml.includes('command: pad-missing'), 'pipeline should include the pad-missing stage')
+      assert(
+        yaml.includes('fill-mode: basemap'),
+        'drought pad-missing should fill gaps from the basemap',
+      )
+      assert(
+        !yaml.includes('compose-video'),
+        'recall-enabled drought template should not compose a video',
+      )
+
+      // The metadata template textarea (the second) is seeded too.
+      const meta = page.locator('.publisher-form-textarea').nth(1)
+      assert(
+        (await meta.inputValue()).includes('{{data_start}}'),
+        'metadata template should be seeded with the data-range placeholders',
+      )
+    },
+  },
+  {
     name: 'globe-thumbnail generator renders a preview and re-renders on rotation',
     fixtures: publisherFixtures(),
     async run(page) {
