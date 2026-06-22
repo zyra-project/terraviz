@@ -16,11 +16,13 @@
 import {
   registerSttEngine,
   registerTtsEngine,
+  registerStreamingSttEngine,
   CLOUD_STT_LANGUAGES,
   CLOUD_TTS_LANGUAGES,
   baseLanguage,
   type SttEngine,
   type TtsEngine,
+  type StreamingSttEngine,
 } from './voiceService'
 import { logger } from '../utils/logger'
 
@@ -124,6 +126,29 @@ export const cloudTtsEngine: TtsEngine = {
 // STT
 // ---------------------------------------------------------------------------
 
+/**
+ * POST a recorded utterance to the Whisper endpoint. Returns the
+ * transcript, or an `Error` (kill-switch responses are noted so the
+ * session cools down). Shared by the push-to-talk and streaming engines.
+ */
+async function transcribeBlob(blob: Blob): Promise<{ text: string } | { error: Error }> {
+  try {
+    const res = await fetch(TRANSCRIBE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': blob.type },
+      body: blob,
+    })
+    if (!res.ok) {
+      noteKill(res, await readCode(res))
+      return { error: new Error(`transcribe ${res.status}`) }
+    }
+    const data = await res.json() as { text?: string }
+    return { text: data.text ?? '' }
+  } catch (err) {
+    return { error: err as Error }
+  }
+}
+
 export const cloudSttEngine: SttEngine = {
   provider: 'cloud',
   supportsLanguage: (lang) => CLOUD_STT_LANGUAGES.has(baseLanguage(lang)),
@@ -149,25 +174,10 @@ export const cloudSttEngine: SttEngine = {
         cleanup()
         const blob = new Blob(chunks, { type: recorder?.mimeType || 'audio/webm' })
         if (!blob.size) { onEnd(); return }
-        try {
-          const res = await fetch(TRANSCRIBE_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': blob.type },
-            body: blob,
-          })
-          if (!res.ok) {
-            noteKill(res, await readCode(res))
-            onError(new Error(`transcribe ${res.status}`))
-            onEnd()
-            return
-          }
-          const data = await res.json() as { text?: string }
-          onResult({ transcript: data.text ?? '', isFinal: true })
-          onEnd()
-        } catch (err) {
-          onError(err as Error)
-          onEnd()
-        }
+        const result = await transcribeBlob(blob)
+        if ('error' in result) { onError(result.error); onEnd(); return }
+        onResult({ transcript: result.text, isFinal: true })
+        onEnd()
       }
       recorder.start()
       safetyTimer = setTimeout(() => {
@@ -188,10 +198,81 @@ export const cloudSttEngine: SttEngine = {
   },
 }
 
+/**
+ * Realtime streaming STT over Cloudflare Whisper (Phase 3). Cloudflare
+ * Whisper is request/response, not a live socket — so this engine
+ * records **one VAD-bounded utterance per `startStreaming`→`stop`
+ * cycle** (the caller's local VAD does the segmentation) and POSTs it
+ * to `/api/voice/transcribe`, emitting the result as a single `onTurn`.
+ * No live partials (the documented cloud STT trade-off, §4.4); a true
+ * WebSocket path (Deepgram Nova-3/Flux on Workers AI) can register here
+ * later behind the same interface. Reuses the session's mic `stream` so
+ * the utterance isn't clipped by a second async `getUserMedia`.
+ */
+export const cloudStreamingSttEngine: StreamingSttEngine = {
+  provider: 'cloud',
+  supportsLanguage: (lang) => CLOUD_STT_LANGUAGES.has(baseLanguage(lang)),
+  isAvailable: (caps) => !IS_TAURI && !cloudVoiceDisabled && caps.mediaRecorder && caps.getUserMedia,
+  startStreaming: ({ stream, onTurn, onError, onEnd }) => {
+    let stopped = false
+    let aborted = false
+    let recorder: MediaRecorder | null = null
+    let ownStream: MediaStream | null = null // only set if we opened our own
+    let safetyTimer: ReturnType<typeof setTimeout> | null = null
+    const chunks: BlobPart[] = []
+
+    const cleanup = (): void => {
+      if (safetyTimer) clearTimeout(safetyTimer)
+      // Stop only a mic we opened ourselves — a shared session stream is
+      // owned (and reused across utterances) by the caller.
+      ownStream?.getTracks().forEach(t => t.stop())
+      ownStream = null
+    }
+
+    const begin = (s: MediaStream): void => {
+      if (stopped) { cleanup(); onEnd?.(); return }
+      recorder = new MediaRecorder(s)
+      recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data) }
+      recorder.onstop = async () => {
+        cleanup()
+        if (aborted) { onEnd?.(); return } // barge-in — discard, don't transcribe
+        const blob = new Blob(chunks, { type: recorder?.mimeType || 'audio/webm' })
+        if (!blob.size) { onEnd?.(); return }
+        const result = await transcribeBlob(blob)
+        if ('error' in result) { onError(result.error); onEnd?.(); return }
+        if (result.text) onTurn(result.text.trim())
+        onEnd?.()
+      }
+      recorder.start()
+      safetyTimer = setTimeout(() => {
+        if (recorder?.state === 'recording') recorder.stop()
+      }, MAX_RECORD_MS)
+    }
+
+    if (stream) {
+      begin(stream)
+    } else {
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then((s) => { ownStream = s; begin(s) })
+        .catch((err) => { onError(err as Error); onEnd?.() })
+    }
+
+    const finalize = (): void => {
+      if (recorder && recorder.state === 'recording') recorder.stop()
+      else cleanup()
+    }
+    return {
+      stop: () => { stopped = true; finalize() },
+      abortTurn: () => { aborted = true; finalize() },
+    }
+  },
+}
+
 /** Register the cloud engines (web only). Idempotent via the registry. */
 export function registerCloudVoiceEngines(): void {
   if (IS_TAURI) return
   registerSttEngine(cloudSttEngine)
+  registerStreamingSttEngine(cloudStreamingSttEngine)
   registerTtsEngine(cloudTtsEngine)
   logger.debug('[voice] cloud engines registered (opt-in via provider=cloud)')
 }

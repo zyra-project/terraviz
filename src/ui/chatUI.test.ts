@@ -10,6 +10,7 @@ import {
   submitFeedback,
 } from './chatUI'
 import type { ChatCallbacks } from './chatUI'
+import { loadConfig } from '../services/docentService'
 import {
   clearDegraded,
   markDegraded,
@@ -40,6 +41,16 @@ function setupDOM(): void {
         <input id="chat-settings-enabled" type="checkbox" checked />
         <input id="chat-settings-vision" type="checkbox" />
         <select id="chat-settings-reading-level"><option value="general" selected>General</option></select>
+        <select id="chat-settings-voice-lang">
+          <option value=""></option>
+          <option value="es">es</option>
+          <option value="ja">ja</option>
+        </select>
+        <select id="chat-settings-voice-handsfree">
+          <option value="off"></option>
+          <option value="push-to-talk">Push to talk</option>
+          <option value="open-mic">Open mic</option>
+        </select>
         <button id="chat-settings-test"></button>
         <button id="chat-settings-save"></button>
         <span id="chat-settings-status"></span>
@@ -65,7 +76,16 @@ function makeCallbacks(): MockCallbacks {
     getCurrentDataset: vi.fn().mockReturnValue(null),
     announce: vi.fn(),
     onOpenBrowse: vi.fn(),
+    onVoiceAudioFocus: vi.fn(),
   } as MockCallbacks
+}
+
+/** Let pending micro/macrotasks settle (handleSend is async). */
+async function flush(n = 12): Promise<void> {
+  for (let i = 0; i < n; i++) {
+    await Promise.resolve()
+    await new Promise((r) => setTimeout(r, 0))
+  }
 }
 
 beforeEach(() => {
@@ -73,11 +93,63 @@ beforeEach(() => {
   sessionStorage.clear()
   localStorage.clear()
   resetDegradedForTests()
+  // The message list is module-level; clear it so a test that sends a
+  // message doesn't leak into a later "no messages" assertion.
+  clearChat()
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
   resetDegradedForTests()
+})
+
+describe('recognition-language override (voiceLang)', () => {
+  it('saves a chosen language and clears it on "Same as app"', () => {
+    initChatUI(makeCallbacks())
+    const sel = document.getElementById('chat-settings-voice-lang') as HTMLSelectElement
+    const save = document.getElementById('chat-settings-save') as HTMLButtonElement
+
+    sel.value = 'es'
+    save.click()
+    expect(loadConfig().voiceLang).toBe('es')
+
+    // "" is the "Same as app" default — clears the override so voice
+    // tracks the UI locale again.
+    sel.value = ''
+    save.click()
+    expect(loadConfig().voiceLang).toBeUndefined()
+  })
+})
+
+describe('voice audio ducking', () => {
+  it('ducks dataset audio on send and restores it after the turn', async () => {
+    const cb = makeCallbacks()
+    initChatUI(cb)
+    const input = document.getElementById('chat-input') as HTMLTextAreaElement
+    input.value = 'hello orbit'
+    ;(document.getElementById('chat-send') as HTMLButtonElement).click()
+    await flush()
+    const calls = (cb.onVoiceAudioFocus as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0])
+    // Ducked at the start of the turn, restored once it completes.
+    expect(calls[0]).toBe(true)
+    expect(calls[calls.length - 1]).toBe(false)
+  })
+})
+
+describe('hands-free mode (voiceHandsFree)', () => {
+  it('persists the chosen hands-free mode through settings', () => {
+    initChatUI(makeCallbacks())
+    const sel = document.getElementById('chat-settings-voice-handsfree') as HTMLSelectElement
+    const save = document.getElementById('chat-settings-save') as HTMLButtonElement
+
+    sel.value = 'open-mic'
+    save.click()
+    expect(loadConfig().voiceHandsFree).toBe('open-mic')
+
+    sel.value = 'off'
+    save.click()
+    expect(loadConfig().voiceHandsFree).toBe('off')
+  })
 })
 
 describe('initChatUI', () => {

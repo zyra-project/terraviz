@@ -127,9 +127,11 @@ npm run screenshots:smoke   # gating interaction tests (search, Orbit, nav)
 | `src/services/markdownRenderer.ts` | Markdown → safe HTML renderer (Orbit messages, doc content) |
 | `src/services/docentDegradedState.ts` | Session-scoped degraded-mode state for the docent |
 | `src/services/appleIntelligenceProvider.ts` | On-device LLM Orbit backend via Apple's Foundation Models framework (macOS) |
-| `src/services/voiceService.ts` | Orbit voice foundation — STT/TTS capability detection, provider registry + resolver (`auto` = on-device → browser; `cloud` opt-in only), per-locale capability matrix, spoken-form projection + sentence chunking (`docs/ORBIT_VOICE_PLAN.md`) |
-| `src/services/voiceBrowserEngines.ts` | Phase 1 browser Web Speech engines (`SpeechRecognition` STT + `speechSynthesis` TTS) registered against `voiceService`'s resolver |
-| `src/services/voiceCloudEngines.ts` | Phase 2 Cloudflare-edge voice engines — STT (`/api/voice/transcribe`, Whisper) + TTS (`/api/voice/synthesize`, MeloTTS/Aura); opt-in `cloud` provider, web-only, honours the `KILL_VOICE` cooldown |
+| `src/services/voiceService.ts` | Orbit voice foundation — STT/TTS capability detection, provider registry + resolver (`auto` = on-device → browser; `cloud` opt-in only) incl. the Phase 3 realtime streaming-STT registry/resolver, per-locale capability matrix, recognition-language options, spoken-form projection + sentence chunking (`docs/ORBIT_VOICE_PLAN.md`) |
+| `src/services/voiceBrowserEngines.ts` | Browser Web Speech engines registered against `voiceService`'s resolver — Phase 1 push-to-talk `SpeechRecognition` STT + `speechSynthesis` TTS, plus the Phase 3 **continuous** streaming STT engine (zero-dependency hands-free path) |
+| `src/services/voiceCloudEngines.ts` | Cloudflare-edge voice engines — push-to-talk STT + Phase 3 **streaming** STT (both `/api/voice/transcribe`, Whisper; the streaming one records one VAD-bounded utterance per turn) + TTS (`/api/voice/synthesize`, MeloTTS/Aura); opt-in `cloud` provider, web-only, honours the `KILL_VOICE` cooldown |
+| `src/services/voiceVad.ts` | Phase 3 local voice-activity detection — pure `EnergyVad` energy-threshold state machine (attack/release hysteresis) + thin `startMicVad` Web Audio capture loop; gates mic audio locally before any realtime streaming (`docs/ORBIT_VOICE_PLAN.md` §9.1) |
+| `src/services/voiceRealtimeSession.ts` | Phase 3 hands-free session controller — composes the streaming STT engine + local VAD gate into one turn cycle; drives both the `open-mic` (VAD-gated) and `push-to-talk` (caller-driven) interaction models; mic/VAD seams injectable for tests (`docs/ORBIT_VOICE_PLAN.md` §9.1) |
 | `src/services/uiScaleService.ts` | Runtime side of the `--ui-scale` token (§7.1) |
 | `src/services/shaderSettingsService.ts` | Runtime side of the globe-shader uniforms (§7.2) |
 | `src/services/atmosphereConstants.ts` | Atmospheric-scattering constants + GLSL snippets shared by `earthTileLayer` and the VR/Orbit Earth |
@@ -140,6 +142,7 @@ npm run screenshots:smoke   # gating interaction tests (search, Orbit, nav)
 | `src/services/vrTourControls.ts` | In-VR tour control strip — prev / play-pause / next / stop + step counter |
 | `src/services/vrTourOverlay.ts` | In-VR tour overlay manager — CanvasTexture + VideoTexture panels replacing the 2D `tourUI` surface |
 | `src/ui/chatUI.ts` | Orbit chat panel — rendering, settings, trigger positioning |
+| `src/ui/voiceHandsFree.ts` | Phase 3 hands-free wiring — `HandsFreeController` bridges `RealtimeVoiceSession` to the chat input/send path (partials→input, turn→send, suspend during think/speak), drives open-mic mute + push-to-talk press; inert until opted in and a streaming engine resolves (`docs/ORBIT_VOICE_PLAN.md` §9.1) |
 | `src/ui/browseUI.ts` | Dataset browse/search overlay |
 | `src/ui/downloadUI.ts` | Download manager panel — view/delete cached datasets (desktop only) |
 | `src/ui/mapControlsUI.ts` | Map controls positioning helper — keeps the Tools bar above the playback transport |

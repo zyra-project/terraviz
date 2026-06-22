@@ -2079,7 +2079,30 @@ class InteractiveSphere {
       getCurrentDataset: () => this.appState.currentDataset,
       announce: (msg) => this.announce(msg),
       onOpenBrowse: () => this.openBrowsePanel(),
+      onVoiceAudioFocus: (active) => this.duckDatasetAudio(active),
     })
+  }
+
+  /**
+   * Phase 3 hands-free — duck the loaded dataset's audio during a voice
+   * turn so the mic doesn't transcribe it and TTS doesn't compete (§9.1).
+   * The HLS `<video>` is muted by default; this only has an audible
+   * effect once the user has unmuted via the transport mute button. We
+   * lower the volume rather than toggling `.muted`, so the user's mute
+   * choice is preserved, and restore the prior volume afterward.
+   */
+  private duckPrevVolume: number | undefined = undefined
+
+  private duckDatasetAudio(active: boolean): void {
+    const video = this.hlsService?.video
+    if (!video) return
+    if (active) {
+      if (this.duckPrevVolume === undefined) this.duckPrevVolume = video.volume
+      video.volume = Math.min(video.volume, 0.12)
+    } else if (this.duckPrevVolume !== undefined) {
+      video.volume = this.duckPrevVolume
+      this.duckPrevVolume = undefined
+    }
   }
 
   /**

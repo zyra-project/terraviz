@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   registerBrowserVoiceEngines,
   browserSttEngine,
+  browserStreamingSttEngine,
   browserTtsEngine,
   curateVoices,
   voiceQualityRank,
@@ -11,6 +12,7 @@ import {
   resetVoiceEngines,
   resolveSttEngine,
   resolveTtsEngine,
+  resolveStreamingSttEngine,
   type VoiceCapabilities,
 } from './voiceService'
 
@@ -84,6 +86,109 @@ describe('registerBrowserVoiceEngines', () => {
     registerBrowserVoiceEngines(ALL_CAPS)
     expect(resolveSttEngine('auto', 'en', ALL_CAPS)?.provider).toBe('browser')
     expect(resolveTtsEngine('auto', 'en', ALL_CAPS)?.provider).toBe('browser')
+  })
+
+  it('registers the streaming STT engine when Web Speech is available', () => {
+    registerBrowserVoiceEngines(ALL_CAPS)
+    expect(resolveStreamingSttEngine('auto', 'en', ALL_CAPS)?.provider).toBe('browser')
+    resetVoiceEngines()
+    registerBrowserVoiceEngines({ ...ALL_CAPS, webSpeechStt: false })
+    expect(resolveStreamingSttEngine('auto', 'en', ALL_CAPS)).toBeNull()
+  })
+})
+
+describe('browser streaming STT engine', () => {
+  /** Build a Web Speech results list from scripted segments. */
+  function results(...segs: Array<{ t: string; final: boolean }>): any {
+    const obj: any = { length: segs.length }
+    segs.forEach((s, i) => { obj[i] = { length: 1, isFinal: s.final, 0: { transcript: s.t } } })
+    return obj
+  }
+
+  it('emits per-utterance turns, interim partials, and speech-state in continuous mode', async () => {
+    class FakeStreaming {
+      lang = ''; interimResults = false; continuous = false; maxAlternatives = 1
+      onresult: ((e: any) => void) | null = null
+      onerror: ((e: any) => void) | null = null
+      onend: (() => void) | null = null
+      onspeechstart: (() => void) | null = null
+      onspeechend: (() => void) | null = null
+      start() {
+        queueMicrotask(() => {
+          this.onspeechstart?.()
+          this.onresult?.({ resultIndex: 0, results: results({ t: 'hel', final: false }) })
+          this.onresult?.({ resultIndex: 0, results: results({ t: 'hello', final: true }) })
+          this.onresult?.({ resultIndex: 1, results: results({ t: 'hello', final: true }, { t: 'wor', final: false }) })
+          this.onresult?.({ resultIndex: 1, results: results({ t: 'hello', final: true }, { t: 'world', final: true }) })
+          this.onspeechend?.()
+        })
+      }
+      stop() { this.onend?.() }
+      abort() { this.onend?.() }
+    }
+    w['SpeechRecognition'] = FakeStreaming
+
+    const partials: string[] = []
+    const turns: string[] = []
+    const states: boolean[] = []
+    await new Promise<void>((resolve) => {
+      const session = browserStreamingSttEngine.startStreaming({
+        lang: 'en-US',
+        onPartial: (t) => partials.push(t),
+        onTurn: (t) => turns.push(t),
+        onSpeechStateChange: (s) => states.push(s),
+        onError: () => {},
+        onEnd: () => resolve(),
+      })
+      // After the scripted microtask emits, end the session.
+      setTimeout(() => session.stop(), 0)
+    })
+
+    expect(turns).toEqual(['hello', 'world'])
+    expect(partials).toEqual(['hel', 'wor'])
+    expect(states).toEqual([true, false])
+  })
+
+  it('abortTurn discards the turn and keeps the session alive (restart, no onEnd)', () => {
+    let startCount = 0
+    class FakeRec {
+      lang = ''; interimResults = false; continuous = false; maxAlternatives = 1
+      onresult: ((e: any) => void) | null = null
+      onerror: ((e: any) => void) | null = null
+      onend: (() => void) | null = null
+      onspeechstart: (() => void) | null = null
+      onspeechend: (() => void) | null = null
+      start() { startCount++ }
+      stop() { this.onend?.() }
+      abort() { this.onend?.() } // Web Speech fires onend after abort
+    }
+    w['SpeechRecognition'] = FakeRec
+
+    let ended = false
+    const session = browserStreamingSttEngine.startStreaming({
+      lang: 'en', onTurn: () => {}, onError: () => {}, onEnd: () => { ended = true },
+    })
+    expect(startCount).toBe(1)
+
+    session.abortTurn()      // abort → onend → restart (not end)
+    expect(startCount).toBe(2)
+    expect(ended).toBe(false)
+
+    session.stop()           // real stop → onend → onEnd
+    expect(ended).toBe(true)
+  })
+
+  it('errors and ends when SpeechRecognition is absent', async () => {
+    const errors: string[] = []
+    await new Promise<void>((resolve) => {
+      browserStreamingSttEngine.startStreaming({
+        lang: 'en',
+        onTurn: () => {},
+        onError: (e) => errors.push(e.message),
+        onEnd: () => resolve(),
+      })
+    })
+    expect(errors).toEqual(['SpeechRecognition unavailable'])
   })
 })
 

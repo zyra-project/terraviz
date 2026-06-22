@@ -550,6 +550,15 @@ export type VoiceProviderPreference = 'auto' | 'cloud' | 'local' | 'browser'
  */
 export type VoiceProvider = Exclude<VoiceProviderPreference, 'auto'>
 
+/**
+ * Realtime hands-free interaction model (Phase 3). `off` keeps the
+ * Phase 1 single-tap mic; `push-to-talk` opens the mic while a control
+ * is held; `open-mic` listens continuously with local VAD gating.
+ * §9.1 has us ship both `push-to-talk` and `open-mic` so a real
+ * install can pick. Default `off`.
+ */
+export type VoiceHandsFreeMode = 'off' | 'push-to-talk' | 'open-mic'
+
 export interface DocentConfig {
   apiUrl: string         // default: '/api'
   apiKey: string         // default: '' (empty = no auth, for Ollama)
@@ -567,6 +576,7 @@ export interface DocentConfig {
   voiceLang?: string                // BCP-47 override; default = active UI locale
   voiceName?: string                // specific TTS voice id (provider-scoped)
   voiceRate?: number                // TTS speaking rate (0.5–2); default 1
+  voiceHandsFree?: VoiceHandsFreeMode // realtime hands-free mode; default 'off' (Phase 3)
 }
 
 /**

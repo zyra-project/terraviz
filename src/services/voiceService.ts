@@ -140,8 +140,73 @@ export interface TtsEngine {
   cancel(): void
 }
 
+// ---------------------------------------------------------------------------
+// Streaming STT — the Phase 3 realtime / hands-free abstraction
+// ---------------------------------------------------------------------------
+//
+// Distinct from `SttEngine` (single-utterance push-to-talk, Phases 1–2).
+// A streaming engine runs a *continuous* session: it detects turn
+// boundaries itself (endpointing / turn detection rather than a
+// hand-rolled silence timer) and emits one `onTurn` per completed
+// utterance, with live `onPartial` updates in between. This is
+// provider-agnostic on purpose — the realtime UI (VAD gating,
+// listening indicator, barge-in) is built against this interface and a
+// fake engine, so the concrete provider (Deepgram Flux WS proxy vs a
+// Cloudflare realtime path) can be chosen later without UI churn.
+// (docs/ORBIT_VOICE_PLAN.md §8 decision 5, §9.1, §10)
+
+export interface StreamingSttCallbacks {
+  /** Live partial transcript for the in-progress turn (may revise). */
+  onPartial?: (text: string) => void
+  /** A completed turn — the engine's turn detector has endpointed. */
+  onTurn: (transcript: string) => void
+  /**
+   * Voice-activity transitions from the engine's local VAD: `true`
+   * when speech onset is detected, `false` on the trailing silence.
+   * Drives the "listening" indicator and lets the caller duck audio.
+   */
+  onSpeechStateChange?: (speaking: boolean) => void
+  onError: (error: Error) => void
+  /** The continuous session has fully ended (stop() or fatal error). */
+  onEnd?: () => void
+}
+
+export interface StreamingSttStartOptions extends StreamingSttCallbacks {
+  lang: string
+  /**
+   * The session's live mic stream, when it has one. An engine that
+   * captures its own audio (e.g. cloud record→transcribe) reuses this
+   * instead of opening a second `getUserMedia` — avoiding a duplicate
+   * mic and the start-of-utterance clip an async re-acquire would
+   * cause. Engines that capture internally (browser Web Speech) ignore
+   * it.
+   */
+  stream?: MediaStream
+}
+
+/** A live continuous recognition session. */
+export interface StreamingSttSession {
+  /** End the session and release the mic. */
+  stop(): void
+  /**
+   * Discard the in-flight turn without ending the session — used for
+   * barge-in (the user interrupts) and to drop a turn that collided
+   * with Orbit's own TTS. The session keeps listening afterwards.
+   */
+  abortTurn(): void
+}
+
+export interface StreamingSttEngine {
+  readonly provider: VoiceProvider
+  supportsLanguage(lang: string): boolean
+  isAvailable(caps: VoiceCapabilities): boolean
+  /** Begin a continuous, turn-detected recognition session. */
+  startStreaming(options: StreamingSttStartOptions): StreamingSttSession
+}
+
 const sttEngines: SttEngine[] = []
 const ttsEngines: TtsEngine[] = []
+const streamingSttEngines: StreamingSttEngine[] = []
 
 export function registerSttEngine(engine: SttEngine): void {
   if (!sttEngines.some(e => e.provider === engine.provider)) sttEngines.push(engine)
@@ -151,10 +216,15 @@ export function registerTtsEngine(engine: TtsEngine): void {
   if (!ttsEngines.some(e => e.provider === engine.provider)) ttsEngines.push(engine)
 }
 
+export function registerStreamingSttEngine(engine: StreamingSttEngine): void {
+  if (!streamingSttEngines.some(e => e.provider === engine.provider)) streamingSttEngines.push(engine)
+}
+
 /** Clear the registry — for tests, and for re-registration on config change. */
 export function resetVoiceEngines(): void {
   sttEngines.length = 0
   ttsEngines.length = 0
+  streamingSttEngines.length = 0
 }
 
 /**
@@ -198,6 +268,20 @@ export function resolveTtsEngine(
   return pickEngine(ttsEngines, pref, baseLanguage(lang), caps)
 }
 
+/**
+ * Resolve a realtime streaming STT engine (Phase 3). Same preference /
+ * capability resolution as the push-to-talk path; a separate registry
+ * because not every provider streams. `null` → no realtime engine for
+ * this locale/preference, so the caller falls back to push-to-talk.
+ */
+export function resolveStreamingSttEngine(
+  pref: VoiceProviderPreference,
+  lang: string,
+  caps: VoiceCapabilities = detectVoiceCapabilities(),
+): StreamingSttEngine | null {
+  return pickEngine(streamingSttEngines, pref, baseLanguage(lang), caps)
+}
+
 /** What provider, if any, can serve voice in a given locale right now. */
 export interface LocaleVoiceSupport {
   stt: VoiceProvider | null
@@ -221,6 +305,20 @@ export function voiceSupportForLocale(
     stt: resolveSttEngine(pref, lang, caps)?.provider ?? null,
     tts: resolveTtsEngine(pref, lang, caps)?.provider ?? null,
   }
+}
+
+/**
+ * Base BCP-47 languages the voice stack can name with confidence —
+ * the union of the cloud STT + TTS coverage. Backs the recognition-
+ * language override (`voiceLang`): the settings picker offers these
+ * so a visitor can speak a language that differs from the read UI
+ * locale (bilingual floor, regional STT accuracy, kiosk pinning).
+ * The caller prepends a "" ("same as app locale") default; the
+ * browser engine still accepts any locale the OS supports via the
+ * default path. (docs/ORBIT_VOICE_PLAN.md §8 — Phase 3)
+ */
+export function listVoiceLanguageOptions(): string[] {
+  return [...new Set([...CLOUD_STT_LANGUAGES, ...CLOUD_TTS_LANGUAGES])].sort()
 }
 
 // ---------------------------------------------------------------------------
@@ -329,6 +427,74 @@ export function createFakeSttEngine(opts: {
       })
       return { stop: () => {} }
     },
+  }
+}
+
+/**
+ * A driveable streaming STT engine for tests (and the reference shape
+ * the real Deepgram/Cloudflare engines will implement). Real streaming
+ * recognition is nondeterministic and can't run in CI (§10.3), so the
+ * fake lets a test push partials, completed turns, and VAD transitions
+ * into the active session by hand, and records stop/abortTurn for
+ * barge-in assertions.
+ */
+export interface FakeStreamingSttEngine extends StreamingSttEngine {
+  /** Emit a live partial transcript into the active session. */
+  emitPartial(text: string): void
+  /** Emit a completed (endpointed) turn into the active session. */
+  emitTurn(text: string): void
+  /** Emit a VAD speech-state transition into the active session. */
+  emitSpeechState(speaking: boolean): void
+  /** Emit a recoverable error into the active session. */
+  emitError(error: Error): void
+  /** Simulate the engine ending on its own (not via stop()) — service
+   *  timeout, permission loss — to exercise caller recovery. */
+  endActiveSession(): void
+  /** True while a session is open (stop() not yet called). */
+  readonly active: boolean
+  readonly stopCount: number
+  readonly abortTurnCount: number
+}
+
+export function createFakeStreamingSttEngine(opts: {
+  provider?: VoiceProvider
+  languages?: Iterable<string>
+  available?: boolean
+} = {}): FakeStreamingSttEngine {
+  const langs = new Set(opts.languages ?? ['en'])
+  let current: StreamingSttStartOptions | null = null
+  let stopCount = 0
+  let abortTurnCount = 0
+  return {
+    provider: opts.provider ?? 'browser',
+    supportsLanguage: (l) => langs.has(baseLanguage(l)),
+    isAvailable: () => opts.available ?? true,
+    startStreaming: (options) => {
+      current = options
+      return {
+        stop: () => {
+          if (!current) return
+          const ended = current
+          current = null
+          stopCount++
+          ended.onEnd?.()
+        },
+        abortTurn: () => { abortTurnCount++ },
+      }
+    },
+    emitPartial: (text) => current?.onPartial?.(text),
+    emitTurn: (text) => current?.onTurn(text),
+    emitSpeechState: (speaking) => current?.onSpeechStateChange?.(speaking),
+    emitError: (error) => current?.onError(error),
+    endActiveSession: () => {
+      if (!current) return
+      const ended = current
+      current = null
+      ended.onEnd?.()
+    },
+    get active() { return current !== null },
+    get stopCount() { return stopCount },
+    get abortTurnCount() { return abortTurnCount },
   }
 }
 

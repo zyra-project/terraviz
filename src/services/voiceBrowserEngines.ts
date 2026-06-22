@@ -17,9 +17,11 @@
 import {
   registerSttEngine,
   registerTtsEngine,
+  registerStreamingSttEngine,
   detectVoiceCapabilities,
   type SttEngine,
   type TtsEngine,
+  type StreamingSttEngine,
   type VoiceCapabilities,
 } from './voiceService'
 import { logger } from '../utils/logger'
@@ -51,6 +53,8 @@ interface SpeechRecognitionLike {
   onresult: ((event: SpeechRecognitionEventLike) => void) | null
   onerror: ((event: { error?: string }) => void) | null
   onend: (() => void) | null
+  onspeechstart?: (() => void) | null
+  onspeechend?: (() => void) | null
 }
 type SpeechRecognitionCtor = new () => SpeechRecognitionLike
 
@@ -104,6 +108,102 @@ export const browserSttEngine: SttEngine = {
     return {
       stop: () => {
         try { rec.stop() } catch { /* already stopped */ }
+      },
+    }
+  },
+}
+
+/**
+ * Streaming STT via the Web Speech API in **continuous** mode — the
+ * Phase 3 realtime engine that needs no external provider or key, so
+ * the `auto` resolver can serve hands-free voice today (a Deepgram /
+ * Cloudflare engine can register later for better turn detection).
+ *
+ * Continuous recognition emits a final result per endpointed utterance
+ * (≈ a turn) with interim results in between, and fires
+ * `onspeechstart` / `onspeechend` — which map directly onto the
+ * `StreamingSttEngine` contract. (docs/ORBIT_VOICE_PLAN.md §4.1, §9.1)
+ *
+ * Privacy: in Chrome this streams audio to Google, so the kiosk path
+ * should still prefer a cloud/on-device streaming engine; the local
+ * VAD gate (`RealtimeVoiceSession`) keeps audio from streaming until
+ * speech onset regardless.
+ */
+export const browserStreamingSttEngine: StreamingSttEngine = {
+  provider: 'browser',
+  supportsLanguage: (lang) => !!lang,
+  isAvailable: (caps) => caps.webSpeechStt,
+  startStreaming: ({ lang, onPartial, onTurn, onSpeechStateChange, onError, onEnd }) => {
+    const Ctor = getSpeechRecognitionCtor()
+    if (!Ctor) {
+      onError(new Error('SpeechRecognition unavailable'))
+      onEnd?.()
+      return { stop: () => {}, abortTurn: () => {} }
+    }
+    const rec = new Ctor()
+    rec.lang = lang
+    rec.interimResults = true
+    rec.continuous = true
+    rec.maxAlternatives = 1
+
+    let emittedTurns = 0  // count of final results already emitted
+    let aborted = false   // barge-in: suppress the in-flight turn's output
+    let restarting = false // abortTurn() restarts rather than ending
+    let stopped = false   // stop() ends the session for good
+
+    rec.onresult = (event) => {
+      if (aborted) return
+      // Continuous mode accumulates every result across the session.
+      // Emit each newly-final result as a turn; the trailing interim
+      // results form the live partial.
+      for (let i = emittedTurns; i < event.results.length; i++) {
+        const result = event.results[i]
+        if (result?.isFinal) {
+          onTurn((result[0]?.transcript ?? '').trim())
+          emittedTurns = i + 1
+        }
+      }
+      let partial = ''
+      for (let i = emittedTurns; i < event.results.length; i++) {
+        partial += event.results[i]?.[0]?.transcript ?? ''
+      }
+      if (partial) onPartial?.(partial)
+    }
+    rec.onspeechstart = () => { if (!aborted) onSpeechStateChange?.(true) }
+    rec.onspeechend = () => { if (!aborted) onSpeechStateChange?.(false) }
+    rec.onerror = (event) => onError(new Error(event?.error || 'speech-recognition-error'))
+    rec.onend = () => {
+      // `abort()` from abortTurn() fires `onend`; restart instead of
+      // ending so the continuous session keeps listening. A real stop()
+      // (or a fatal start failure) ends it.
+      if (restarting && !stopped) {
+        restarting = false
+        aborted = false
+        emittedTurns = 0
+        try { rec.start() } catch (err) { onError(err as Error); onEnd?.() }
+        return
+      }
+      onEnd?.()
+    }
+    try {
+      rec.start()
+    } catch (err) {
+      onError(err as Error)
+      onEnd?.()
+    }
+    return {
+      stop: () => {
+        stopped = true
+        try { rec.stop() } catch { /* already stopped */ }
+      },
+      abortTurn: () => {
+        // Discard the in-flight turn WITHOUT ending the session: abort
+        // the current recognition (drops its audio + partials), then the
+        // onend handler restarts it so listening continues clean.
+        if (stopped) return
+        aborted = true
+        restarting = true
+        try { rec.abort() } catch { restarting = false }
       },
     }
   },
@@ -281,7 +381,10 @@ export function onBrowserVoicesChanged(cb: () => void): () => void {
 export function registerBrowserVoiceEngines(
   caps: VoiceCapabilities = detectVoiceCapabilities(),
 ): VoiceCapabilities {
-  if (caps.webSpeechStt) registerSttEngine(browserSttEngine)
+  if (caps.webSpeechStt) {
+    registerSttEngine(browserSttEngine)
+    registerStreamingSttEngine(browserStreamingSttEngine)
+  }
   if (caps.speechSynthesis) registerTtsEngine(browserTtsEngine)
   logger.debug('[voice] browser engines registered', { stt: caps.webSpeechStt, tts: caps.speechSynthesis })
   return caps

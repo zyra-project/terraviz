@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   cloudSttEngine,
+  cloudStreamingSttEngine,
   cloudTtsEngine,
   registerCloudVoiceEngines,
   __resetCloudVoiceDisabled,
@@ -9,6 +10,7 @@ import {
   resetVoiceEngines,
   resolveTtsEngine,
   resolveSttEngine,
+  resolveStreamingSttEngine,
   type VoiceCapabilities,
 } from './voiceService'
 
@@ -132,5 +134,81 @@ describe('cloud STT', () => {
 
     expect(results).toEqual(['show me sea ice'])
     expect(track.stop).toHaveBeenCalled()
+  })
+})
+
+describe('cloud streaming STT', () => {
+  it('declares the cloud provider and registers against the streaming resolver', () => {
+    expect(cloudStreamingSttEngine.provider).toBe('cloud')
+    registerCloudVoiceEngines()
+    expect(resolveStreamingSttEngine('cloud', 'en', ALL_CAPS)?.provider).toBe('cloud')
+    // opt-in only — never picked by `auto`.
+    expect(resolveStreamingSttEngine('auto', 'en', ALL_CAPS)).toBeNull()
+  })
+
+  it('records the provided stream and emits a turn on stop (without owning the mic)', async () => {
+    let onstop: (() => void) | null = null
+    class FakeRecorder {
+      state = 'inactive'
+      mimeType = 'audio/webm'
+      ondataavailable: ((e: { data: Blob }) => void) | null = null
+      set onstop(fn: () => void) { onstop = fn }
+      constructor(_s: unknown) {}
+      start() {
+        this.state = 'recording'
+        this.ondataavailable?.({ data: new Blob(['x'], { type: 'audio/webm' }) })
+      }
+      stop() { this.state = 'inactive'; onstop?.() }
+    }
+    vi.stubGlobal('MediaRecorder', FakeRecorder as unknown as typeof MediaRecorder)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ text: 'show me sea ice' }), { status: 200 },
+    )))
+
+    // A shared session stream — its tracks must NOT be stopped by the engine.
+    const track = { stop: vi.fn() }
+    const sharedStream = { getTracks: () => [track] } as unknown as MediaStream
+
+    const turns: string[] = []
+    await new Promise<void>((resolve) => {
+      const session = cloudStreamingSttEngine.startStreaming({
+        lang: 'en',
+        stream: sharedStream,
+        onTurn: (t) => turns.push(t),
+        onError: () => {},
+        onEnd: () => resolve(),
+      })
+      queueMicrotask(() => session.stop())
+    })
+
+    expect(turns).toEqual(['show me sea ice'])
+    expect(track.stop).not.toHaveBeenCalled() // shared stream is the caller's
+  })
+
+  it('abortTurn discards the utterance without transcribing', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ text: 'dropped' }), { status: 200 }))
+    let onstop: (() => void) | null = null
+    class FakeRecorder {
+      state = 'inactive'; mimeType = 'audio/webm'
+      ondataavailable: ((e: { data: Blob }) => void) | null = null
+      set onstop(fn: () => void) { onstop = fn }
+      constructor(_s: unknown) {}
+      start() { this.state = 'recording'; this.ondataavailable?.({ data: new Blob(['x']) }) }
+      stop() { this.state = 'inactive'; onstop?.() }
+    }
+    vi.stubGlobal('MediaRecorder', FakeRecorder as unknown as typeof MediaRecorder)
+    vi.stubGlobal('fetch', fetchMock)
+
+    const stream = { getTracks: () => [{ stop: vi.fn() }] } as unknown as MediaStream
+    const turns: string[] = []
+    await new Promise<void>((resolve) => {
+      const session = cloudStreamingSttEngine.startStreaming({
+        lang: 'en', stream, onTurn: (t) => turns.push(t), onError: () => {}, onEnd: () => resolve(),
+      })
+      queueMicrotask(() => session.abortTurn())
+    })
+
+    expect(turns).toEqual([])
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

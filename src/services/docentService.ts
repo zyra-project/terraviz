@@ -240,6 +240,7 @@ const DEFAULT_CONFIG: DocentConfig = {
   voiceAutoSpeak: false,
   voiceProvider: 'auto',
   voiceRate: 1,
+  voiceHandsFree: 'off',
 }
 
 /** Yielded by the service during response generation */

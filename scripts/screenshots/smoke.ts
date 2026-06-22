@@ -26,6 +26,7 @@ import type { Browser, Page } from 'playwright'
 import { gotoApp, launchBrowser, withScenePage } from './core/browser'
 import { installFixtures, type FixtureRule } from './core/fixtures'
 import { attachSignalCollectors } from './core/signals'
+import { catalogFixtures } from './fixtures/catalog'
 import { publisherFixtures } from './fixtures/publisher'
 
 const BASE_URL = process.env.SCREENSHOT_BASE_URL ?? 'http://localhost:4173'
@@ -70,6 +71,7 @@ interface Check {
 const checks: Check[] = [
   {
     name: 'catalog search narrows the result grid',
+    fixtures: catalogFixtures(),
     async run(page) {
       await gotoApp(page, '/?catalog=true')
       await page.locator('#browse-overlay').waitFor({ state: 'visible' })
@@ -90,6 +92,7 @@ const checks: Check[] = [
   },
   {
     name: 'Orbit local engine answers a chat message',
+    fixtures: catalogFixtures(),
     async run(page) {
       await gotoApp(page, '/?catalog=true')
       await page.locator('#browse-overlay').waitFor({ state: 'visible' })
