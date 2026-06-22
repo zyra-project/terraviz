@@ -24,6 +24,7 @@ import { setLogLevel, logger } from '../utils/logger'
 import { emit, startDwell, type DwellHandle } from '../analytics'
 import { enMessages, t, getLocale, type MessageKey } from '../i18n'
 import { resolveSttEngine, resolveTtsEngine, voiceSupportForLocale, splitIntoSpokenChunks, baseLanguage, listVoiceLanguageOptions, type SttSession, type TtsEngine } from '../services/voiceService'
+import { HandsFreeController } from './voiceHandsFree'
 import { registerBrowserVoiceEngines, primeBrowserTts, listBrowserVoices, curateVoices, onBrowserVoicesChanged } from '../services/voiceBrowserEngines'
 import { registerCloudVoiceEngines } from '../services/voiceCloudEngines'
 
@@ -427,7 +428,22 @@ function wireEvents(): void {
   }
   document.getElementById('chat-close')?.addEventListener('click', closeChat)
   document.getElementById('chat-send')?.addEventListener('click', handleSend)
-  document.getElementById('chat-mic')?.addEventListener('click', toggleListening)
+  const micBtn = document.getElementById('chat-mic')
+  micBtn?.addEventListener('click', toggleListening)
+  // Push-to-talk: capture only while the mic is held down. Pointer
+  // events cover mouse, touch and pen; `pointerup`/`leave`/`cancel`
+  // all release so a turn can't get stuck capturing.
+  micBtn?.addEventListener('pointerdown', () => {
+    if ((loadConfig().voiceHandsFree ?? 'off') !== 'push-to-talk') return
+    primeBrowserTts()
+    void handsFree?.press()
+  })
+  const releasePtt = (): void => {
+    if ((loadConfig().voiceHandsFree ?? 'off') === 'push-to-talk') handsFree?.release()
+  }
+  micBtn?.addEventListener('pointerup', releasePtt)
+  micBtn?.addEventListener('pointerleave', releasePtt)
+  micBtn?.addEventListener('pointercancel', releasePtt)
   document.getElementById('chat-stop-speaking')?.addEventListener('click', () => {
     stopSpeaking()
     callbacks?.announce(t('chat.announce.voiceStopped'))
@@ -530,6 +546,38 @@ function initVoiceInput(): void {
   // reload / tests) doesn't accumulate duplicate listeners.
   voicesUnsub?.()
   voicesUnsub = onBrowserVoicesChanged(populateVoiceOptions)
+  // Phase 3 hands-free: bridge the realtime session to the input/send
+  // path. Inert until the user opts into a mode and a streaming engine
+  // resolves. Recreated on re-init (idempotent teardown).
+  handsFree?.teardown()
+  handsFree = new HandsFreeController({
+    onPartial: (text) => fillVoiceInput(text),
+    onTurn: (text) => { fillVoiceInput(text); void handleSend() },
+    onStateChange: (state) => setMicListening(state === 'capturing' || state === 'listening'),
+  })
+  syncHandsFree()
+}
+
+/** Module-level hands-free controller (null until init). */
+let handsFree: HandsFreeController | null = null
+
+/** Fill the chat input with a (partial or final) transcript, resizing. */
+function fillVoiceInput(text: string): void {
+  const input = document.getElementById('chat-input') as HTMLTextAreaElement | null
+  if (!input) return
+  input.value = text
+  input.style.height = 'auto'
+  input.style.height = Math.min(input.scrollHeight, 96) + 'px'
+}
+
+/** (Re)configure the hands-free controller from the current config. */
+function syncHandsFree(): void {
+  const cfg = loadConfig()
+  handsFree?.sync({
+    mode: cfg.voiceHandsFree ?? 'off',
+    lang: cfg.voiceLang || getLocale(),
+    provider: cfg.voiceProvider ?? 'auto',
+  })
 }
 
 /** Show the mic only when an STT engine resolves for the active locale (§3 matrix). */
@@ -607,6 +655,18 @@ function toggleListening(): void {
   // voice-initiated reply (which auto-sends later, off-gesture) can
   // still be spoken aloud.
   primeBrowserTts()
+  const mode = loadConfig().voiceHandsFree ?? 'off'
+  // Open-mic: the mic button is a mute toggle for the always-on session.
+  if (mode === 'open-mic' && handsFree?.isActive()) {
+    const muted = handsFree.toggleMute()
+    setMicListening(!muted)
+    callbacks?.announce(t(muted ? 'chat.announce.voiceMuted' : 'chat.announce.voiceListening'))
+    return
+  }
+  // Push-to-talk is driven by pointer down/up (see wireEvents); a plain
+  // click does nothing.
+  if (mode === 'push-to-talk') return
+  // Phase 1 single-tap path.
   if (sttSession) stopListening()
   else startListening()
 }
@@ -1007,6 +1067,9 @@ function handleSettingsSave(): void {
   // refresh mic visibility + the voice picker.
   updateMicVisibility()
   populateVoiceOptions()
+  // Hands-free mode / language / provider may have changed — re-sync
+  // the realtime session (creates, tears down, or re-arms as needed).
+  syncHandsFree()
   const status = document.getElementById('chat-settings-status')
   if (status) {
     status.textContent = t('chat.settings.status.saved')
@@ -1065,9 +1128,15 @@ async function handleSend(): Promise<void> {
     sttSuppressAutoSend = true
     stopListening()
   }
+  // Hands-free: suspend the open mic while Orbit thinks/speaks so it
+  // can't transcribe its own reply (§9.1). Resumed once speech drains.
+  handsFree?.setBusy(true)
 
   const text = input.value.trim()
-  if (!text) return
+  if (!text) {
+    handsFree?.setBusy(false)
+    return
+  }
 
   // Add user message
   const userMsg: ChatMessage = {
@@ -1266,6 +1335,10 @@ async function handleSend(): Promise<void> {
   setSendEnabled(true)
   // Speak any remaining (final) sentence and let the queue drain.
   pumpSpeech(docentMsg.text, true)
+  // Resume hands-free listening only once any spoken reply has finished
+  // draining (ttsChain), so the open mic doesn't capture Orbit's voice.
+  // When auto-speak is off, ttsChain is already resolved → immediate.
+  void ttsChain.finally(() => handsFree?.setBusy(false))
 
   // Clean up empty actions array
   if (docentMsg.actions?.length === 0) delete docentMsg.actions

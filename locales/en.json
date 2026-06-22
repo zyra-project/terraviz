@@ -173,6 +173,7 @@
   "chat.announce.visionEnabled": "Vision mode enabled",
   "chat.announce.voiceError": "Voice input is unavailable",
   "chat.announce.voiceListening": "Listening",
+  "chat.announce.voiceMuted": "Microphone muted",
   "chat.announce.voiceStopped": "Stopped speaking",
   "chat.autoLoad.altHint": " Here are some alternatives if this isn't quite right:",
   "chat.autoLoad.message": "I've loaded **{title}** — that's your closest match.{altHint}",
