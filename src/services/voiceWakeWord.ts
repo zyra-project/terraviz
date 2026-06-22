@@ -87,3 +87,78 @@ export class WakeWordDetector {
     this.cooldownUntil = 0
   }
 }
+
+// ---------------------------------------------------------------------------
+// Scorer seam + composition
+// ---------------------------------------------------------------------------
+
+/** A running wake-word scorer; `stop()` releases its audio graph / model. */
+export interface WakeWordCapture {
+  stop(): void
+}
+
+/**
+ * Produces per-frame wake-word scores from a mic stream and pushes them
+ * to `onScore`. The concrete backend is the on-device openWakeWord
+ * pipeline (onnxruntime-web: melspectrogram → speech embedding → wake
+ * model); tests inject a fake. Async because the real one lazy-loads
+ * the runtime + models.
+ */
+export type WakeWordScorer = (
+  stream: MediaStream,
+  onScore: (score: number) => void,
+) => WakeWordCapture | Promise<WakeWordCapture>
+
+export interface StartWakeWordOptions extends WakeWordOptions {
+  /**
+   * Base URL the openWakeWord ONNX models are hosted at (operator-
+   * provided — they aren't bundled). Passed through to the default
+   * ONNX scorer; ignored when a `scorer` is injected.
+   */
+  modelBaseUrl?: string
+  /** Injectable scorer (tests / alternate backends). */
+  scorer?: WakeWordScorer
+}
+
+/** A running wake-word session; `stop()` tears it down. */
+export interface WakeWordSession {
+  stop(): void
+}
+
+/**
+ * Compose a scorer with a `WakeWordDetector`: every score the scorer
+ * emits is fed through the threshold/debounce/cooldown machine, and
+ * `onWake` fires on a confirmed "Hey Orbit". Returns a session whose
+ * `stop()` releases the scorer. Resolving the scorer is async (model
+ * load), so a `stop()` that races the load is honoured.
+ */
+export async function startWakeWord(
+  stream: MediaStream,
+  opts: StartWakeWordOptions,
+): Promise<WakeWordSession> {
+  const detector = new WakeWordDetector(opts)
+  const scorer = opts.scorer ?? defaultScorerUnavailable
+  let stopped = false
+  let capture: WakeWordCapture | null = null
+  capture = await scorer(stream, (score) => { if (!stopped) detector.push(score) })
+  if (stopped) { capture.stop(); return { stop: () => {} } }
+  return {
+    stop: () => {
+      stopped = true
+      detector.reset()
+      capture?.stop()
+      capture = null
+    },
+  }
+}
+
+/**
+ * Placeholder backend until the openWakeWord ONNX scorer lands. It
+ * reports unavailable (never scores) so wake-word stays inert rather
+ * than silently broken when no real scorer is wired. The ONNX pipeline
+ * — lazy `import('onnxruntime-web')`, the three openWakeWord models
+ * loaded from `modelBaseUrl`, 80 ms / 16 kHz framing → score — replaces
+ * this; it needs the operator-hosted model files and real-hardware
+ * validation, so it's deliberately not faked in as if it worked.
+ */
+const defaultScorerUnavailable: WakeWordScorer = () => ({ stop: () => {} })

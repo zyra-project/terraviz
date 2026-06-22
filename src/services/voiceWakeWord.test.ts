@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { WakeWordDetector } from './voiceWakeWord'
+import { WakeWordDetector, startWakeWord, type WakeWordScorer } from './voiceWakeWord'
 
 /** Push `n` frames of `score` into a detector. */
 function pushN(d: WakeWordDetector, score: number, n: number): void {
@@ -65,5 +65,37 @@ describe('WakeWordDetector', () => {
     expect(d.armed).toBe(true)
     pushN(d, 0.9, 2)
     expect(onWake).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('startWakeWord (scorer composition)', () => {
+  const dummyStream = {} as MediaStream
+
+  it('fires onWake when the scorer feeds enough hits, and stop() releases it', async () => {
+    let emit: ((score: number) => void) | null = null
+    let stopped = false
+    const scorer: WakeWordScorer = (_stream, onScore) => {
+      emit = onScore
+      return { stop: () => { stopped = true } }
+    }
+    const onWake = vi.fn()
+    const session = await startWakeWord(dummyStream, { scorer, threshold: 0.6, triggerFrames: 2, cooldownMs: 0, onWake })
+
+    emit!(0.9)
+    emit!(0.9)
+    expect(onWake).toHaveBeenCalledTimes(1)
+
+    session.stop()
+    expect(stopped).toBe(true)
+    // Scores after stop are ignored.
+    emit!(0.9); emit!(0.9)
+    expect(onWake).toHaveBeenCalledTimes(1)
+  })
+
+  it('is inert with the default (no scorer) backend', async () => {
+    const onWake = vi.fn()
+    const session = await startWakeWord(dummyStream, { onWake })
+    session.stop()
+    expect(onWake).not.toHaveBeenCalled()
   })
 })
