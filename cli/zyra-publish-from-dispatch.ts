@@ -62,6 +62,7 @@ import {
   saveFramesToR2,
   windowFrameBudget,
 } from './lib/r2-frames'
+import { publishFrameSequence } from './lib/frames-publish'
 
 const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/
 
@@ -218,21 +219,18 @@ async function phaseFetch(client: TerravizClient, args: Args): Promise<number> {
   return 0
 }
 
-async function phasePublish(client: TerravizClient, args: Args): Promise<number> {
-  const workflow = JSON.parse(
-    await readFile(join(args.workdir, 'workflow.json'), 'utf-8'),
-  ) as WorkflowEnvelope['workflow']
-  const datasetId = workflow.target_dataset_id
-
-  // 1. Preflight (the Verify-stage stand-in).
-  const probe = await runFfprobe(args.ffprobeBin, args.video)
-  const spec = assessSosSpec(probe)
-  log(`ffprobe: ${spec.summary}`)
-  for (const w of spec.warnings) log(`WARN: ${w}`)
-  for (const f of spec.failures) log(`FAIL: ${f}`)
-  if (spec.failures.length > 0) return 3
-
-  // 2. Sidecar → dataset PATCH.
+/**
+ * Render the metadata sidecar from the workflow template +
+ * frames-meta and PATCH the dataset. Shared by the video and
+ * frame-sequence publish paths (the frame path needs it for the
+ * `start_time` / `period` the `/frames` surface reads). Returns an
+ * exit code on failure, or null on success.
+ */
+async function applyMetadataSidecar(
+  client: TerravizClient,
+  args: Args,
+  workflow: WorkflowEnvelope['workflow'],
+): Promise<number | null> {
   let framesMeta: unknown
   const metaPath = await findFramesMeta(args.workdir)
   if (metaPath) {
@@ -247,13 +245,92 @@ async function phasePublish(client: TerravizClient, args: Args): Promise<number>
   const sidecar = renderSidecar(template, buildRunVars({ runId: args.runId, framesMeta }))
   for (const w of sidecar.warnings) log(`WARN: ${w}`)
   if (Object.keys(sidecar.fields).length > 0) {
-    const patched = await client.updateDataset(datasetId, sidecar.fields)
+    const patched = await client.updateDataset(workflow.target_dataset_id, sidecar.fields)
     if (!patched.ok) {
       log(`FAIL: dataset PATCH → ${patched.status} ${patched.error}`)
       return 2
     }
-    log(`dataset ${datasetId} metadata updated (${Object.keys(sidecar.fields).join(', ')})`)
+    log(`dataset ${workflow.target_dataset_id} metadata updated (${Object.keys(sidecar.fields).join(', ')})`)
   }
+  return null
+}
+
+/**
+ * Poll until the transcode flips `data_ref` to the expected bundle,
+ * then POST the succeeded status. The expected ref is identical for
+ * the MP4 and frame-sequence paths — both transcode to
+ * `videos/{dataset}/{upload}/master.m3u8`.
+ */
+async function waitAndReportSucceeded(
+  client: TerravizClient,
+  args: Args,
+  datasetId: string,
+  uploadId: string,
+): Promise<number> {
+  if (args.waitSeconds > 0) {
+    const deadline = Date.now() + args.waitSeconds * 1000
+    const expectedRef = `r2:videos/${datasetId}/${uploadId}/master.m3u8`
+    for (;;) {
+      if (Date.now() > deadline) {
+        log(`TIMEOUT: transcode did not finish within ${args.waitSeconds}s`)
+        return 5
+      }
+      await sleep(15_000)
+      const row = await client.get<DatasetEnvelope>(datasetId)
+      if (!row.ok) {
+        log(`WARN: poll → ${row.status} ${row.error}`)
+        continue
+      }
+      if (row.body.dataset.data_ref === expectedRef && !row.body.dataset.transcoding) {
+        log(`transcode landed — data_ref=${expectedRef}`)
+        break
+      }
+    }
+  }
+
+  const status = await client.postWorkflowRunStatus(args.workflowId, args.runId, {
+    status: 'succeeded',
+    gha_run_id: args.ghaRunId,
+    upload_id: uploadId,
+  })
+  if (!status.ok) {
+    log(`FAIL: succeeded callback → ${status.status} ${status.error}`)
+    return 2
+  }
+  log(`done — run ${args.runId} succeeded`)
+  return 0
+}
+
+async function phasePublish(client: TerravizClient, args: Args): Promise<number> {
+  const workflow = JSON.parse(
+    await readFile(join(args.workdir, 'workflow.json'), 'utf-8'),
+  ) as WorkflowEnvelope['workflow']
+  // Branch on what the pipeline produced: a composed MP4, or a frame
+  // sequence (recall-enabled templates drop `compose-video` and
+  // leave their padded frames on disk for the image-sequence path).
+  return existsSync(args.video)
+    ? await publishVideo(client, args, workflow)
+    : await publishFrames(client, args, workflow)
+}
+
+async function publishVideo(
+  client: TerravizClient,
+  args: Args,
+  workflow: WorkflowEnvelope['workflow'],
+): Promise<number> {
+  const datasetId = workflow.target_dataset_id
+
+  // 1. Preflight (the Verify-stage stand-in).
+  const probe = await runFfprobe(args.ffprobeBin, args.video)
+  const spec = assessSosSpec(probe)
+  log(`ffprobe: ${spec.summary}`)
+  for (const w of spec.warnings) log(`WARN: ${w}`)
+  for (const f of spec.failures) log(`FAIL: ${f}`)
+  if (spec.failures.length > 0) return 3
+
+  // 2. Sidecar → dataset PATCH.
+  const sidecarCode = await applyMetadataSidecar(client, args, workflow)
+  if (sidecarCode !== null) return sidecarCode
 
   // 3. Asset init → PUT → complete (overwrite-in-place: same
   //    dataset, fresh upload_id; the transcoding guard 409s if a
@@ -304,38 +381,45 @@ async function phasePublish(client: TerravizClient, args: Args): Promise<number>
   log('complete ok — transcode dispatch fired')
 
   // 4. Wait for the transcode to flip data_ref, then report.
-  if (args.waitSeconds > 0) {
-    const deadline = Date.now() + args.waitSeconds * 1000
-    const expectedRef = `r2:videos/${datasetId}/${uploadId}/master.m3u8`
-    for (;;) {
-      if (Date.now() > deadline) {
-        log(`TIMEOUT: transcode did not finish within ${args.waitSeconds}s`)
-        return 5
-      }
-      await sleep(15_000)
-      const row = await client.get<DatasetEnvelope>(datasetId)
-      if (!row.ok) {
-        log(`WARN: poll → ${row.status} ${row.error}`)
-        continue
-      }
-      if (row.body.dataset.data_ref === expectedRef && !row.body.dataset.transcoding) {
-        log(`transcode landed — data_ref=${expectedRef}`)
-        break
-      }
-    }
+  return await waitAndReportSucceeded(client, args, datasetId, uploadId)
+}
+
+/**
+ * Publish the run's padded frame sequence via the image-sequence
+ * asset path (`docs/ZYRA_INTEGRATION_PLAN.md` §Real-time frame store
+ * stage 3). The transcode builds the same HLS bundle the MP4 path
+ * would AND sets the frame columns that light up `/frames`, so
+ * recall comes for free. No ffprobe preflight here — there's no MP4
+ * to probe; the transcode enforces the output spec.
+ */
+async function publishFrames(
+  client: TerravizClient,
+  args: Args,
+  workflow: WorkflowEnvelope['workflow'],
+): Promise<number> {
+  const datasetId = workflow.target_dataset_id
+  const { framesDir } = deriveFrameParams(workflow.pipeline_json, args.workdir)
+  log(`no MP4 at ${args.video} — publishing frame sequence from ${framesDir}`)
+
+  // 1. Sidecar first — sets the start_time / period the /frames
+  //    surface needs to render per-frame timestamps.
+  const sidecarCode = await applyMetadataSidecar(client, args, workflow)
+  if (sidecarCode !== null) return sidecarCode
+
+  // 2. Hash → init → PUT frames + manifest → complete (fires the
+  //    transcode).
+  let uploadId: string
+  try {
+    const result = await publishFrameSequence(client, datasetId, framesDir, { log })
+    uploadId = result.uploadId
+    log(`frame sequence upload ${uploadId} (${result.frameCount} frames, mock=${result.mock}) — transcode dispatch fired`)
+  } catch (err) {
+    log(`FAIL: frame-sequence publish → ${err instanceof Error ? err.message : String(err)}`)
+    return 4
   }
 
-  const status = await client.postWorkflowRunStatus(args.workflowId, args.runId, {
-    status: 'succeeded',
-    gha_run_id: args.ghaRunId,
-    upload_id: uploadId,
-  })
-  if (!status.ok) {
-    log(`FAIL: succeeded callback → ${status.status} ${status.error}`)
-    return 2
-  }
-  log(`done — run ${args.runId} succeeded`)
-  return 0
+  // 3. Wait for the transcode to flip data_ref, then report.
+  return await waitAndReportSucceeded(client, args, datasetId, uploadId)
 }
 
 /** R2 frame-cache config from the runner env, or null when the

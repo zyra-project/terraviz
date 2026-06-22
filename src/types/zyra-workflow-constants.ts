@@ -81,6 +81,23 @@ export const METADATA_TEMPLATE_VARIABLES: readonly string[] = [
  */
 export const WORKFLOW_OUTPUT_PATH = '/work/output/dataset.mp4'
 
+/**
+ * Where a frames-output (recall-enabled) pipeline leaves its frame
+ * sequence, from the runner container's point of view. Such a
+ * pipeline drops `compose-video` and publishes its padded frames
+ * through the image-sequence asset path instead — the transcode
+ * builds the same HLS bundle and the `/frames` surface lights up
+ * (`docs/ZYRA_INTEGRATION_PLAN.md` §Real-time frame store).
+ *
+ * `/validate` accepts a pipeline that writes the MP4 to
+ * `WORKFLOW_OUTPUT_PATH` **or** declares this frames directory as a
+ * stage arg (`sync-dir` / `frames-dir` / `output-dir`), so a
+ * registered pipeline still can't silently produce nothing the
+ * publish leg can find. The runner reads frames from here when no
+ * MP4 was produced.
+ */
+export const WORKFLOW_FRAMES_OUTPUT_DIR = '/work/images/frames'
+
 /** Run lifecycle vocabulary (workflow_runs.status). */
 export const WORKFLOW_RUN_STATUSES = [
   'queued',

@@ -21,6 +21,14 @@
  * vegetation basemap (the SOS DroughtRisk product's MISSING_FRAME);
  * other datasets typically use `--fill-mode nearest`.
  *
+ * The drought template is recall-enabled: it drops `compose-video`
+ * and ends on the frame set at `/work/images/frames`, which the
+ * runner publishes through the image-sequence asset path. The
+ * transcode builds the same HLS video AND lights up the per-dataset
+ * `/frames` download surface (`docs/ZYRA_INTEGRATION_PLAN.md`
+ * §Real-time frame store). Templates that want a plain composed
+ * video keep `compose-video` (see `http-frames-sos`).
+ *
  * Not modelled here: the scheduler's `acquire --prefer-remote-if-meta-newer`
  * flag, which swaps previously-padded synthetic frames for real ones
  * once they land. It depends on the frame directory persisting across
@@ -83,11 +91,6 @@ export const WORKFLOW_TEMPLATES: readonly WorkflowTemplate[] = [
       datetime-format: '%Y%m%d'
       period-seconds: 604800
       output: /work/frames-meta.json
-  - stage: visualize
-    command: compose-video
-    args:
-      frames: /work/images/frames
-      output: /work/output/dataset.mp4
 `,
     metadataTemplate: `{
   "title": "My real-time dataset",

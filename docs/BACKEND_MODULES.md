@@ -28,6 +28,7 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `cli/lib/config.ts` | Resolve the CLI's runtime configuration: server URL + auth |
 | `cli/lib/ffmpeg-hls.ts` | FFmpeg HLS encoder wrapper — multi-rendition equirectangular |
 | `cli/lib/migration-telemetry.ts` | Operator-side telemetry emitter for the migration CLIs |
+| `cli/lib/frames-publish.ts` | Publish a runner's padded frame directory as an image-sequence asset (hash → init → PUT frames + `source_filenames.json` → complete) so the Zyra recall path reuses the existing `/frames` surface (`docs/ZYRA_INTEGRATION_PLAN.md` §Real-time frame store) |
 | `cli/lib/r2-frames.ts` | R2-backed frame cache for real-time Zyra workflow runs — restore/save a dataset's frames under `workflow-frames/{dataset_id}/` with window-only prune (`docs/ZYRA_INTEGRATION_PLAN.md` §Real-time frame store) |
 | `cli/lib/r2-upload.ts` | R2 S3-API bulk uploader for HLS bundles |
 | `cli/lib/realtime-title.ts` | Heuristic to detect "real-time" SOS rows by title — the rows whose Vimeo source is re-uploaded on a recurring (typically daily) cadence by NOAA's automation |

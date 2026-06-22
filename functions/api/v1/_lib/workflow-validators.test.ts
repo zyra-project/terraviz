@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { WORKFLOW_OUTPUT_PATH } from '../../../../src/types/zyra-workflow-constants'
+import {
+  WORKFLOW_FRAMES_OUTPUT_DIR,
+  WORKFLOW_OUTPUT_PATH,
+} from '../../../../src/types/zyra-workflow-constants'
 import {
   validateMetadataTemplate,
   validatePipeline,
@@ -47,6 +50,31 @@ function runTemplate(json: unknown): WorkflowValidationError[] {
 describe('validatePipeline', () => {
   it('accepts an allowlisted pipeline that writes the output path', () => {
     expect(runPipeline(goodPipeline)).toEqual([])
+  })
+
+  it('accepts a frames-output (recall) pipeline with no composed MP4', () => {
+    const framesPipeline = JSON.stringify({
+      stages: [
+        {
+          stage: 'acquire',
+          command: 'ftp',
+          args: { url: 'ftp://host/x', 'sync-dir': WORKFLOW_FRAMES_OUTPUT_DIR },
+        },
+        {
+          stage: 'process',
+          command: 'scan-frames',
+          args: { 'frames-dir': WORKFLOW_FRAMES_OUTPUT_DIR, output: '/work/frames-meta.json' },
+        },
+      ],
+    })
+    expect(runPipeline(framesPipeline)).toEqual([])
+  })
+
+  it('rejects a pipeline that writes neither the MP4 nor a frames dir', () => {
+    const noOutput = JSON.stringify({
+      stages: [{ stage: 'acquire', command: 'ftp', args: { url: 'ftp://host/x' } }],
+    })
+    expect(runPipeline(noOutput).some(e => e.code === 'missing_output')).toBe(true)
   })
 
   it('rejects stages and commands off the allowlist', () => {

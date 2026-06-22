@@ -26,6 +26,7 @@ import {
   MAX_PIPELINE_STAGES,
   METADATA_TEMPLATE_ALLOWED_FIELDS,
   METADATA_TEMPLATE_VARIABLES,
+  WORKFLOW_FRAMES_OUTPUT_DIR,
   WORKFLOW_OUTPUT_PATH,
   WORKFLOW_RUN_STATUSES,
   ZYRA_STAGE_ALLOWLIST,
@@ -131,7 +132,9 @@ export function validatePipeline(
           )
           continue
         }
-        if (value === WORKFLOW_OUTPUT_PATH) writesOutput = true
+        if (value === WORKFLOW_OUTPUT_PATH || value === WORKFLOW_FRAMES_OUTPUT_DIR) {
+          writesOutput = true
+        }
       }
     }
   })
@@ -141,7 +144,8 @@ export function validatePipeline(
       err(
         'pipeline_json',
         'missing_output',
-        `At least one stage arg must equal "${WORKFLOW_OUTPUT_PATH}" — the publish leg reads the MP4 from there.`,
+        `At least one stage arg must equal "${WORKFLOW_OUTPUT_PATH}" (the publish leg reads the MP4 from there) ` +
+          `or "${WORKFLOW_FRAMES_OUTPUT_DIR}" (a frames-output pipeline the publish leg reads as an image sequence).`,
       ),
     )
   }

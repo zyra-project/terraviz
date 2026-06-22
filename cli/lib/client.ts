@@ -365,6 +365,31 @@ export class TerravizClient {
     )
   }
 
+  /**
+   * Initiate an image-sequence upload — the same `POST .../asset`
+   * endpoint, routed into the sequence path by the presence of a
+   * `frames` array. Mints one presigned PUT per frame + one for the
+   * source-filenames JSON blob (`ImageSequenceInitResponse`). The
+   * runner re-hashes that blob against `source_filenames_digest`
+   * before encoding.
+   */
+  initImageSequenceUpload<T = unknown>(
+    datasetId: string,
+    body: {
+      kind: 'data'
+      mime: string
+      size: number
+      frames: Array<{ filename: string; digest: string; size: number }>
+      source_filenames_digest: string
+    },
+  ): Promise<Result<T>> {
+    return this.request<T>(
+      'POST',
+      `/api/v1/publish/datasets/${encodeURIComponent(datasetId)}/asset`,
+      body,
+    )
+  }
+
   /** Finalise an asset upload — server verifies the digest and flips the row. */
   completeAssetUpload<T = unknown>(
     datasetId: string,

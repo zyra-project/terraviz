@@ -114,8 +114,16 @@ jobs:
             -v "$PWD/_work:/work" \
             "$IMAGE" \
             bash -c 'set -euo pipefail; zyra run /work/pipeline.json'
-          if [[ ! -f _work/output/dataset.mp4 ]]; then
-            echo "::error::pipeline finished but /work/output/dataset.mp4 does not exist — the registered pipeline must write its MP4 there (enforced by /validate; see WORKFLOW_OUTPUT_PATH)"
+          # A pipeline produces either a composed MP4 (compose-video)
+          # or a frame sequence (recall-enabled templates drop it and
+          # publish frames via the image-sequence path). Require one
+          # of the two — a pipeline that produced neither is broken.
+          if [[ -f _work/output/dataset.mp4 ]]; then
+            echo "pipeline produced a composed MP4"
+          elif [[ -n "$(find _work/images/frames -maxdepth 1 -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) -print -quit 2>/dev/null)" ]]; then
+            echo "pipeline produced a frame sequence — publishing via the image-sequence path"
+          else
+            echo "::error::pipeline finished but produced neither /work/output/dataset.mp4 nor frames under /work/images/frames (see WORKFLOW_OUTPUT_PATH / WORKFLOW_FRAMES_OUTPUT_DIR)"
             exit 1
           fi
 
