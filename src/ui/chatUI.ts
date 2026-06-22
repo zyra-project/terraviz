@@ -97,6 +97,11 @@ let ttsChain: Promise<void> = Promise.resolve()
 let speakingActive = false
 let ttsTrigger: 'autospeak' | 'replay' = 'autospeak'
 let ttsEmitted = false
+/** Monotonic id bumped when a new speaking session begins. Queued
+ * `ttsChain` callbacks capture it and bail if a newer session has
+ * started — otherwise a prior reply's pending promise could hide the
+ * Stop control or enqueue speech into the current session. */
+let ttsSessionId = 0
 
 /** Globe-control actions deferred until a load-dataset action in the same message completes. */
 let pendingGlobeActions: ChatAction[] = []
@@ -664,6 +669,7 @@ function setMicListening(on: boolean): void {
  */
 function beginSpeaking(): void {
   stopSpeaking()
+  ttsSessionId++
   const cfg = loadConfig()
   if (!cfg.voiceAutoSpeak) { ttsEngine = null; return }
   // Runs in the send-click / Enter gesture task — unlock iOS audio
@@ -705,6 +711,7 @@ function emitTtsOnce(): void {
  */
 function pumpSpeech(fullText: string, final: boolean): void {
   if (!speakingActive || !ttsEngine) return
+  const session = ttsSessionId
   const sentences = splitIntoSpokenChunks(fullText)
   const upto = final ? sentences.length : Math.max(0, sentences.length - 1)
   const cfg = loadConfig()
@@ -716,12 +723,13 @@ function pumpSpeech(fullText: string, final: boolean): void {
     const sentence = sentences[i]
     if (!sentence) continue
     emitTtsOnce()
-    ttsChain = ttsChain.then(() => (speakingActive ? engine.speak(sentence, { lang, rate, voice }) : undefined))
+    ttsChain = ttsChain.then(() => (speakingActive && session === ttsSessionId ? engine.speak(sentence, { lang, rate, voice }) : undefined))
   }
   spokenChunkCount = Math.max(spokenChunkCount, upto)
   if (final) {
-    // Hide the Stop control once the queued speech drains.
-    ttsChain = ttsChain.then(() => { if (speakingActive) setStopSpeakingVisible(false) })
+    // Hide the Stop control once the queued speech drains — but only
+    // if this is still the active session.
+    ttsChain = ttsChain.then(() => { if (speakingActive && session === ttsSessionId) setStopSpeakingVisible(false) })
   }
 }
 
@@ -758,6 +766,8 @@ function speakMessage(text: string): void {
   const first = chunks[0]
   if (!first) return
   stopSpeaking()
+  ttsSessionId++
+  const session = ttsSessionId
   speakingActive = true
   ttsEngine = engine
   ttsTrigger = 'replay'
@@ -771,9 +781,9 @@ function speakMessage(text: string): void {
   for (let i = 1; i < chunks.length; i++) {
     const sentence = chunks[i]
     if (!sentence) continue
-    chain = chain.then(() => (speakingActive ? engine.speak(sentence, { lang, rate, voice }) : undefined))
+    chain = chain.then(() => (speakingActive && session === ttsSessionId ? engine.speak(sentence, { lang, rate, voice }) : undefined))
   }
-  ttsChain = chain.then(() => { if (speakingActive) setStopSpeakingVisible(false) })
+  ttsChain = chain.then(() => { if (speakingActive && session === ttsSessionId) setStopSpeakingVisible(false) })
 }
 
 function wireSpeakButtons(container: ParentNode): void {

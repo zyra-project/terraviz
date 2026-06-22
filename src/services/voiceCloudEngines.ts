@@ -24,7 +24,7 @@ import {
 } from './voiceService'
 import { logger } from '../utils/logger'
 
-const IS_TAURI = !!(window as unknown as Record<string, unknown>).__TAURI__
+const IS_TAURI = typeof window !== 'undefined' && !!(window as unknown as Record<string, unknown>).__TAURI__
 const TRANSCRIBE_URL = '/api/voice/transcribe'
 const SYNTHESIZE_URL = '/api/voice/synthesize'
 /** Cap a single cloud recording so a forgotten session can't run forever. */
@@ -70,6 +70,11 @@ function playDataUrl(url: string): Promise<void> {
     }
     audio.onended = done
     audio.onerror = done
+    // cancel() pauses rather than ending, which fires neither `ended`
+    // nor `error` — resolve on pause too so an awaited speak() honours
+    // its "resolves when finished or cancelled" contract instead of
+    // hanging the TTS chain.
+    audio.onpause = done
     // play() can reject (e.g. iOS gesture policy); resolve anyway so a
     // queued sequence can't wedge.
     audio.play().catch(done)

@@ -110,10 +110,10 @@ export function makeRateLimiter(limit: number) {
 
 export function arrayBufferToBase64(buf: ArrayBuffer): string {
   const bytes = new Uint8Array(buf)
-  let binary = ''
+  const parts: string[] = []
   const chunk = 0x8000
   for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
+    parts.push(String.fromCharCode(...bytes.subarray(i, i + chunk)))
   }
-  return btoa(binary)
+  return btoa(parts.join(''))
 }
