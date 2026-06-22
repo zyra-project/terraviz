@@ -208,9 +208,9 @@
                 <td class="fed__portability-alts">OpenAI · Ollama · LM Studio · vLLM · llama.cpp</td>
               </tr>
               <tr>
-                <td><code>Stream</code> + <code>Images</code></td>
-                <td>Video transcoding · image variants</td>
-                <td class="fed__portability-alts">AWS MediaConvert + S3 · ffmpeg + sharp · Mux</td>
+                <td><code>GitHub Actions</code> + <code>R2</code> · <code>Images</code></td>
+                <td>Video transcoding (ffmpeg) · image variants</td>
+                <td class="fed__portability-alts">AWS MediaConvert · ffmpeg on any CI · sharp · Mux</td>
               </tr>
               <tr>
                 <td><code>Cloudflare Access</code></td>
@@ -348,7 +348,7 @@
             <ul>
               <li>D1 catalog with SOS-seeded rows; migrations checked in</li>
               <li><code>/api/v1/catalog · /search · /featured</code> Pages Functions serving</li>
-              <li>Publisher dev-bypass (<code>.dev.vars</code>) for local iteration</li>
+              <li>Publisher portal + CLI live behind Cloudflare Access (dev-bypass via <code>.dev.vars</code> for local iteration)</li>
               <li><code>npm run gen:node-key</code> generates the Ed25519 identity</li>
               <li><code>/.well-known/terraviz.json</code> manifest endpoint</li>
               <li>node-backed catalog is the default (<code>VITE_CATALOG_SOURCE=node</code>); legacy SOS S3 path opt-in for rollback only</li>
@@ -365,7 +365,6 @@
               <li>Verify the peer's Ed25519 signature on each pull</li>
               <li>Merge peer-published rows into the local catalog</li>
               <li>Per-dataset access control (publisher → specific peers)</li>
-              <li>Publisher portal beyond dev-bypass auth</li>
               <li>JSON Schema + OpenAPI 3.1 spec + a two-node <code>npm run test:federation</code> conformance harness ship in the <em>same</em> Phase 4 PR — the spec is the contract third parties implement against, enforced by CI</li>
             </ul>
           </article>

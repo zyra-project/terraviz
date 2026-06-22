@@ -96,13 +96,13 @@
 
         <h3 class="analytics__subhead">Where the events go</h3>
         <p class="analytics__subhead-hint">
-          From the browser to a Grafana dashboard, four hops. Each one is reviewable in the source; each one drops information rather than gathering it.
+          From the browser to the dashboards, a handful of hops. Each one is reviewable in the source; each one drops information rather than gathering it.
         </p>
 
         <figure class="analytics__flow">
-          <svg viewBox="0 0 760 220"
+          <svg viewBox="0 0 760 270"
                role="img"
-               aria-label="Analytics event flow diagram. Five boxes left to right. The browser emit module batches events client-side. A pagehide beacon ships the batch to a Cloudflare Pages Function ingest endpoint. The function stamps event_type, country (from CF-IPCountry), and an internal flag, then writes to Workers Analytics Engine. Grafana reads aggregated rows from AE for dashboards.">
+               aria-label="Analytics event flow diagram. The browser emit module batches events client-side. A pagehide beacon ships the batch to a Cloudflare Pages Function ingest endpoint. The function stamps event_type, country (from CF-IPCountry), and an internal flag, then writes to Workers Analytics Engine. A nightly export job rolls those events up into D1 summary tables and a gzipped R2 archive, which back the privileged in-app /publish/analytics dashboard; Grafana is an optional secondary reader.">
             <defs>
               <marker id="arrow-an" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
                 <path d="M0,0 L9,4.5 L0,9 Z" fill="#737373" />
@@ -152,21 +152,28 @@
               <text class="an-mono an-mono-mist" x="75" y="54" text-anchor="middle">aggregated rows</text>
             </g>
 
-            <path class="an-arrow" d="M665,140 L665,170" marker-end="url(#arrow-an)" />
-            <text class="an-arrow-label" x="680" y="158" text-anchor="start">read</text>
-            <g transform="translate(590,170)">
-              <rect class="an-box" x="0" y="0" width="150" height="36" rx="6" />
-              <text class="an-text" x="75" y="22" text-anchor="middle">Grafana dashboards</text>
+            <path class="an-arrow" d="M665,140 L665,164" marker-end="url(#arrow-an)" />
+            <text class="an-arrow-label" x="680" y="156" text-anchor="start">nightly</text>
+            <g transform="translate(555,164)">
+              <rect class="an-box" x="0" y="0" width="200" height="40" rx="6" />
+              <text class="an-text" x="100" y="18" text-anchor="middle">D1 rollups · R2 archive</text>
+              <text class="an-mono" x="100" y="33" text-anchor="middle">daily export job</text>
             </g>
+            <path class="an-arrow" d="M655,204 L655,222" marker-end="url(#arrow-an)" />
+            <g transform="translate(555,222)">
+              <rect class="an-box-final" x="0" y="0" width="200" height="34" rx="6" />
+              <text class="an-text an-text-light" x="100" y="22" text-anchor="middle">/publish/analytics</text>
+            </g>
+            <text class="an-mono-mist" x="655" y="268" text-anchor="middle">+ Grafana · optional secondary reader</text>
           </svg>
           <figcaption class="analytics__flow-caption">
-            BROWSER · EMIT → BEACON → /API/INGEST · DROP+STAMP → ANALYTICS ENGINE → GRAFANA
+            BROWSER · EMIT → BEACON → /API/INGEST · DROP+STAMP → ANALYTICS ENGINE → D1 ROLLUPS + R2 → /PUBLISH/ANALYTICS
           </figcaption>
         </figure>
 
         <h3 class="analytics__subhead">From the dashboards</h3>
         <p class="analytics__subhead-hint">
-          The Grafana dashboards documented in <a href="https://github.com/zyra-project/terraviz/blob/main/grafana/README.md" target="_blank" rel="noopener"><code>grafana/README.md</code></a> read from Workers Analytics Engine via the SQL API. Coarse aggregations only — no per-event row inspection, no PII to redact. Two illustrative panels below show the visual shape (synthetic data, schema-accurate); two placeholder tiles will swap in real captures from a long-running instance.
+          The privileged <code>/publish/analytics</code> dashboard — admins and staff only — reads the D1 rollups stitched with a recent-window query against Workers Analytics Engine: an overview, a MapLibre spatial-attention heatmap, dataset engagement, performance, and funnels. The optional Grafana dashboards documented in <a href="https://github.com/zyra-project/terraviz/blob/main/grafana/README.md" target="_blank" rel="noopener"><code>grafana/README.md</code></a> read the same AE data via the SQL API. Coarse aggregations only — no per-event row inspection, no PII to redact. Two illustrative panels below show the visual shape (synthetic data, schema-accurate); two placeholder tiles will swap in real captures from a long-running instance.
         </p>
 
         <div class="analytics__dashboards">

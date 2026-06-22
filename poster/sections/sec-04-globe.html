@@ -126,13 +126,13 @@
 
         <h3 class="demo-section__title">Where the bytes come from</h3>
         <p class="demo-section__hint">
-          Most of TerraViz's serving lives on Cloudflare today — the catalog database, the asset store, the docent's LLM, the semantic-search index, telemetry, auth, and the CDN edge cache that sits in front of all of it. A small set of endpoints live elsewhere by design: NASA GIBS for tile-cache locality, the legacy Vimeo proxy as a transitional video host (Stream replaces it), and a configurable bring-your-own-LLM path for visitors who prefer their own provider over Workers AI. Solid boxes are live in production today; <span class="globe__arch-planned-pill">PLANNED</span> dashed boxes are drafted in the catalog backend docs but not yet bound.
+          Most of TerraViz's serving lives on Cloudflare today — the catalog database, the asset store (now including the HLS video ladder), the docent's LLM, the semantic-search index, telemetry, auth, and the CDN edge cache that sits in front of all of it. Video is transcoded out-of-band rather than by a managed service: a publisher upload lands in R2, a GitHub Actions runner re-encodes it to a multi-rendition HLS ladder with ffmpeg, and writes the segments back to R2. There is no Cloudflare Stream in the path — it was evaluated and dropped once its standard-plan 1080p rendition ceiling proved too low for the 4K spherical content the globe renders. A small set of endpoints live elsewhere by design: NASA GIBS for tile-cache locality, the legacy Vimeo proxy still serving the video rows not yet migrated to R2, and a configurable bring-your-own-LLM path for visitors who prefer their own provider over Workers AI. Solid boxes are live in production today; <span class="globe__arch-planned-pill">PLANNED</span> dashed boxes are drafted in the catalog backend docs but not yet bound.
         </p>
 
         <figure class="globe__diagram">
           <svg viewBox="0 0 920 590"
                role="img"
-               aria-label="TerraViz architecture diagram, three horizontal bands. The top band, CLIENT, lists Browser, Quest, iOS, Android, and Desktop. A single HTTPS arrow drops down into the middle band, CLOUDFLARE EDGE. The first tier inside the edge band is the CDN edge cache — every request lands there first, with per-route Cache-Control directives and ETag-driven 304s. On a cache miss the request fans out to TerraViz web app (Pages) on the left or Pages Functions on the right, which exposes /api/v1/* (catalog, search, featured, manifest, publish, ingest, federation), /api/chat/* (completions, models), /api/feedback, /api/tile, and /api/legend. Pages Functions binds to a LIVE row of seven services — D1 catalog, R2 assets, KV cache, Workers Analytics Engine telemetry, Cloudflare Access auth, Workers AI for Orbit's LLM and dataset embeddings, and Vectorize for semantic search. Below that, a PLANNED row of four dashed boxes — Stream for video, Images for variants, Queues for async jobs, Durable Objects for federation coordination. The bottom band, DIRECT-FETCH ENDPOINTS, lists four boxes: NASA GIBS (tiles, fetched directly by the client for cache locality), Vimeo proxy (today's video host, with a planned migration to Cloudflare Stream), BYO LLM provider (when a visitor configures their own OpenAI-compatible endpoint instead of Workers AI), and Federation peers (cross-instance catalog pulls — see section 7 for the full diagram).">
+               aria-label="TerraViz architecture diagram, three horizontal bands. The top band, CLIENT, lists Browser, Quest, iOS, Android, and Desktop. A single HTTPS arrow drops down into the middle band, CLOUDFLARE EDGE. The first tier inside the edge band is the CDN edge cache — every request lands there first, with per-route Cache-Control directives and ETag-driven 304s. On a cache miss the request fans out to TerraViz web app (Pages) on the left or Pages Functions on the right, which exposes /api/v1/* (catalog, search, featured, manifest, publish, ingest, federation), /api/chat/* (completions, models), /api/feedback, /api/tile, and /api/legend. Pages Functions binds to a LIVE row of seven services — D1 catalog, R2 assets and HLS video, KV cache, Workers Analytics Engine telemetry, Cloudflare Access auth, Workers AI for Orbit's LLM and dataset embeddings, and Vectorize for semantic search. Below that, a PLANNED row of three dashed boxes — Images for image variants, Queues for async jobs, Durable Objects for federation coordination. The bottom band, DIRECT-FETCH ENDPOINTS, lists four boxes: NASA GIBS (tiles, fetched directly by the client for cache locality), Vimeo proxy (legacy video host for rows not yet migrated to R2 HLS, which is transcoded out-of-band by a GitHub Actions ffmpeg runner), BYO LLM provider (when a visitor configures their own OpenAI-compatible endpoint instead of Workers AI), and Federation peers (cross-instance catalog pulls — see section 7 for the full diagram).">
             <defs>
               <marker id="arrow-arch" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
                 <path d="M0,0 L9,4.5 L0,9 Z" fill="#737373" />
@@ -243,7 +243,7 @@
             <g transform="translate(186,292)">
               <rect class="arch-box" x="0" y="0" width="100" height="50" rx="6" />
               <text class="arch-text" x="50" y="22" text-anchor="middle">R2</text>
-              <text class="arch-mono" x="50" y="38" text-anchor="middle">assets</text>
+              <text class="arch-mono" x="50" y="38" text-anchor="middle">assets + HLS</text>
             </g>
 
             <line class="arch-rail" x1="348" y1="276" x2="348" y2="292" />
@@ -281,32 +281,26 @@
               <text class="arch-mono" x="50" y="38" text-anchor="middle">semantic search</text>
             </g>
 
-            <!-- PLANNED row: 4 dashed boxes -->
+            <!-- PLANNED row: 3 dashed boxes (Stream removed — video
+                 now ships via R2 + GitHub Actions, shown LIVE above). -->
             <text class="arch-band-label-cf" x="40" y="366">PLANNED</text>
-            <line class="arch-rail-dashed" x1="200" y1="362" x2="720" y2="362" />
-            <line class="arch-rail-dashed" x1="200" y1="362" x2="200" y2="378" />
-            <g transform="translate(124,378)">
-              <rect class="arch-box-planned" x="0" y="0" width="152" height="50" rx="6" />
-              <text class="arch-text" x="76" y="22" text-anchor="middle">Stream</text>
-              <text class="arch-mono-accent" x="76" y="38" text-anchor="middle">video · replaces Vimeo</text>
-            </g>
-
-            <line class="arch-rail-dashed" x1="374" y1="362" x2="374" y2="378" />
-            <g transform="translate(298,378)">
+            <line class="arch-rail-dashed" x1="250" y1="362" x2="670" y2="362" />
+            <line class="arch-rail-dashed" x1="250" y1="362" x2="250" y2="378" />
+            <g transform="translate(174,378)">
               <rect class="arch-box-planned" x="0" y="0" width="152" height="50" rx="6" />
               <text class="arch-text" x="76" y="22" text-anchor="middle">Images</text>
               <text class="arch-mono-accent" x="76" y="38" text-anchor="middle">variants · replaces ladder</text>
             </g>
 
-            <line class="arch-rail-dashed" x1="548" y1="362" x2="548" y2="378" />
-            <g transform="translate(472,378)">
+            <line class="arch-rail-dashed" x1="460" y1="362" x2="460" y2="378" />
+            <g transform="translate(384,378)">
               <rect class="arch-box-planned" x="0" y="0" width="152" height="50" rx="6" />
               <text class="arch-text" x="76" y="22" text-anchor="middle">Queues</text>
               <text class="arch-mono-accent" x="76" y="38" text-anchor="middle">async jobs</text>
             </g>
 
-            <line class="arch-rail-dashed" x1="722" y1="362" x2="722" y2="378" />
-            <g transform="translate(646,378)">
+            <line class="arch-rail-dashed" x1="670" y1="362" x2="670" y2="378" />
+            <g transform="translate(594,378)">
               <rect class="arch-box-planned" x="0" y="0" width="152" height="50" rx="6" />
               <text class="arch-text" x="76" y="22" text-anchor="middle">Durable Objects</text>
               <text class="arch-mono-accent" x="76" y="38" text-anchor="middle">federation coord.</text>
@@ -327,8 +321,8 @@
             <g transform="translate(258,488)">
               <rect class="arch-box" x="0" y="0" width="190" height="76" rx="8" />
               <text class="arch-text" x="95" y="24" text-anchor="middle">Vimeo proxy</text>
-              <text class="arch-mono" x="95" y="44" text-anchor="middle">video · transitional</text>
-              <text class="arch-mono-accent" x="95" y="58" text-anchor="middle">→ Stream (planned)</text>
+              <text class="arch-mono" x="95" y="44" text-anchor="middle">video · legacy rows</text>
+              <text class="arch-mono-accent" x="95" y="58" text-anchor="middle">→ R2 HLS (migrating)</text>
               <text class="arch-mono-mist" x="95" y="70" text-anchor="middle">from client today</text>
             </g>
 

@@ -160,7 +160,7 @@
             Mobile is the most interesting deployment for the docent. Both Apple and Google now ship system-level LLMs — <strong>Apple Intelligence Foundation Models</strong> on iOS (≥ 18.1 on supported hardware) and <strong>Gemini Nano</strong> via AICore on Android. Bridging Orbit into those means the chat is <em>free, private, and offline-by-default</em> on eligible devices, with no API key, no provider relationship, no network round-trip.
           </p>
           <p>
-            The shape is a small Tauri plugin per platform — Swift wrapping <code>FoundationModels</code> on iOS, Kotlin wrapping <code>AICore</code> on Android — surfaced behind the existing <code>llmProvider</code> interface. On hardware too old for system LLMs, the same provider gracefully falls back to the OpenAI-compatible path that web and desktop already use. <em>This is the forward direction, not yet shipped.</em>
+            The shape is a small Tauri plugin per platform — Swift wrapping <code>FoundationModels</code>, Kotlin wrapping <code>AICore</code> on Android — surfaced behind the existing <code>llmProvider</code> interface. The macOS desktop build already wires Apple's Foundation Models through this provider; extending it to iOS and Android phones is the forward direction. On hardware too old for system LLMs, the same provider gracefully falls back to the OpenAI-compatible path that web and desktop already use. <em>Mobile on-device Orbit is not yet shipped.</em>
           </p>
         </aside>
       </div>

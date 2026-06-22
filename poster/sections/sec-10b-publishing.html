@@ -7,7 +7,7 @@
         <div class="pub__hero">
           <div class="pub__hero-text">
             <p class="fed__lede">
-              <strong>Publish once · seen on every TerraViz install.</strong> The publisher portal at <code>/publish</code> is a single-form workflow — dataset entry, tour authoring, asset upload, semantic-search indexing, federation visibility — behind staff SSO. The companion <code>@zyra/terraviz-cli</code> ships first to npm with signed binaries: <a href="#fed-tiers"><strong>Tier 0 publishing</strong></a> is <code>terraviz publish dataset.yaml</code> on a schedule against the canonical node, scriptable from any CI — the federation arc's first deliverable, with one partner pilot driving auth ergonomics. A subscribing peer's catalog pulls your row on its next sync; no separate distribution, no CDN hand-off, no museum partnership required. Both paths run through the same edge-compute + SQL DB + object-storage backend that powers the rest of the catalog stack — same edge, same auth, no separate moving parts. The Cloudflare-flavoured names below (Pages Functions, D1, R2, Stream, Images, Vectorize, Workers AI, Access) are the today-deploy; <a href="#sec-10-federation">§8</a> covers the portability story for operators wanting a different cloud. Full spec in <a href="https://github.com/zyra-project/terraviz/blob/main/docs/CATALOG_PUBLISHING_TOOLS.md" target="_blank" rel="noopener"><code>CATALOG_PUBLISHING_TOOLS.md</code></a>.
+              <strong>Publish once · seen on every TerraViz install.</strong> The publisher portal at <code>/publish</code> is live today behind Cloudflare Access — a single-form workflow for dataset entry, tour authoring, asset upload, and semantic-search indexing. The companion <code>terraviz</code> CLI hits the same publisher API: <code>terraviz publish dataset.yaml</code>, scriptable from any CI for research orgs running scheduled pipelines. Both paths run through the same edge-compute + SQL DB + object-storage backend that powers the rest of the catalog stack — same edge, same auth, no separate moving parts. Once <a href="#sec-10-federation">cross-node federation</a> lands, a subscribing peer's catalog will pull your row on its next sync; no separate distribution, no CDN hand-off, no museum partnership required. The Cloudflare-flavoured names below (Pages Functions, D1, R2, GitHub Actions transcode, Images, Vectorize, Workers AI, Access) are the today-deploy; <a href="#sec-10-federation">§8</a> covers the portability story for operators wanting a different cloud. Full spec in <a href="https://github.com/zyra-project/terraviz/blob/main/docs/CATALOG_PUBLISHING_TOOLS.md" target="_blank" rel="noopener"><code>CATALOG_PUBLISHING_TOOLS.md</code></a>.
             </p>
           </div>
           <aside class="pub__rail" aria-label="terraviz-cli session">
@@ -19,16 +19,16 @@
             </div>
             <pre class="pub__rail-cli"><code><span class="pub__rail-prompt">$</span> terraviz publish dataset.yaml
 <span class="pub__rail-line">↑ uploading dataset.yaml ··· 2 KB</span>
-<span class="pub__rail-line">↑ resolving asset (vimeo) ··· 4.2 GB</span>
+<span class="pub__rail-line">↑ uploading asset → R2 ··· 4.2 GB</span>
+<span class="pub__rail-line pub__rail-ok">✓ transcode queued (GitHub Actions)</span>
 <span class="pub__rail-line pub__rail-ok">✓ published as climate-futures-2024</span>
-<span class="pub__rail-line pub__rail-ok">✓ federation manifest reindexed</span>
-<span class="pub__rail-line pub__rail-meta">ETA on subscribing peers ≤ 15 min</span></code></pre>
+<span class="pub__rail-line pub__rail-meta">search index reembedded · ~30 s</span></code></pre>
           </aside>
         </div>
 
         <h3 class="fed__subhead">Try the portal</h3>
         <p class="fed__subhead-hint">
-          An interactive publisher dashboard will live here once the portal UI ships behind staff SSO — mock the dataset-entry form, run a draft preview against the live globe, watch the asset pipeline transcode in real time. Until then, the full form spec, validation rules, and CLI surface live in <a href="https://github.com/zyra-project/terraviz/blob/main/docs/CATALOG_PUBLISHING_TOOLS.md" target="_blank" rel="noopener"><code>CATALOG_PUBLISHING_TOOLS.md</code></a>.
+          The publisher portal is live today at <code>/publish</code> behind Cloudflare Access — the dataset-entry form, a draft preview against the live globe, and real-time transcode status all ship. An interactive sandboxed embed will land here in a follow-up; until then, the full form spec, validation rules, and CLI surface live in <a href="https://github.com/zyra-project/terraviz/blob/main/docs/CATALOG_PUBLISHING_TOOLS.md" target="_blank" rel="noopener"><code>CATALOG_PUBLISHING_TOOLS.md</code></a>.
         </p>
 
         <figure class="pub__demo" aria-labelledby="pub-demo-caption">
@@ -41,7 +41,7 @@
             </div>
             <div class="pub__demo-body">
               <div class="pub__demo-label">Interactive publisher dashboard</div>
-              <div class="pub__demo-tag">embed pending · drafted</div>
+              <div class="pub__demo-tag">embed pending · portal live</div>
             </div>
           </div>
           <figcaption id="pub-demo-caption" class="pub__demo-caption">
@@ -61,8 +61,8 @@
           </article>
 
           <article class="fed__stack-card">
-            <h3>Asset &amp; decimation pipeline</h3>
-            <p>Cloudflare Stream transcodes uploaded video into the rendition ladder (replaces today's Vimeo proxy). Cloudflare Images derives the 4096 → 2048 → 1024 image variants on demand instead of the hand-rolled fallback ladder. Sphere thumbnails auto-generate at upload time as 2:1 equirectangular crops. Content-addressed R2 keys so revisions never invalidate caches. Full flow lives in <a href="https://github.com/zyra-project/terraviz/blob/main/docs/CATALOG_ASSETS_PIPELINE.md" target="_blank" rel="noopener"><code>CATALOG_ASSETS_PIPELINE.md</code></a>.</p>
+            <h3>Asset &amp; transcode pipeline</h3>
+            <p>A publisher's MP4 — or a stack of individual frames — uploads straight to R2 over a presigned PUT; a GitHub Actions runner re-encodes it with ffmpeg into a 4K / 1080p / 720p HLS ladder, writes the segments back to R2, and the row's <code>data_ref</code> flips atomically. Cloudflare Stream was evaluated and dropped — its standard-plan 1080p ceiling was too low for 4K spherical video. Sphere thumbnails auto-generate at upload time as 2:1 equirectangular crops; Cloudflare Images can derive resolution variants for image datasets. Content-addressed R2 keys so revisions never invalidate caches. Full flow lives in <a href="https://github.com/zyra-project/terraviz/blob/main/docs/CATALOG_ASSETS_PIPELINE.md" target="_blank" rel="noopener"><code>CATALOG_ASSETS_PIPELINE.md</code></a>.</p>
           </article>
 
           <article class="fed__stack-card">
@@ -72,7 +72,7 @@
 
           <article class="fed__stack-card">
             <h3>Semantic search</h3>
-            <p>Cloudflare Vectorize stores a 768-dim embedding per dataset. The docent's <code>search_datasets</code> LLM tool queries it directly today (used by Orbit when a visitor asks "show me something about hurricanes"); a follow-on swaps the public <code>/api/v1/search</code> URL from D1 <code>LIKE</code> to Vectorize semantic behind the same path. Federated rows reindex locally on sync, so each node owns its own search experience without phoning home.</p>
+            <p>Cloudflare Vectorize stores a 768-dim embedding per dataset. The public <code>/api/v1/search</code> endpoint runs Vectorize semantic search (with a text fallback) today, and the docent's <code>search_datasets</code> LLM tool queries the same index (used by Orbit when a visitor asks "show me something about hurricanes"). Once federation lands, peer rows reindex locally on sync, so each node owns its own search experience without phoning home.</p>
           </article>
         </div>
 
@@ -84,7 +84,7 @@
         <figure class="fed__arch">
           <svg viewBox="0 0 920 240"
                role="img"
-               aria-label="Publish-path diagram, five steps left to right. Step 1: Publisher portal or CLI accepts the form submission and the asset upload. Step 2: Pages Functions validate fields, write the draft row to D1, and stage the asset upload. Step 3: The asset pipeline routes video to Cloudflare Stream for transcoding and images to Cloudflare Images for variants, returning content-addressed URLs. Step 4: Workers AI generates a 768-dim embedding from the dataset's text fields and writes it to Vectorize. Step 5: The dataset is now reachable via the public catalog API, the public search endpoint, the docent's search_datasets LLM tool, and the federation manifest.">
+               aria-label="Publish-path diagram, five steps left to right. Step 1: Publisher portal or CLI accepts the form submission and the asset upload. Step 2: Pages Functions validate fields, write the draft row to D1, and stage the asset upload. Step 3: The asset pipeline uploads video to R2 and transcodes it to an HLS ladder on a GitHub Actions ffmpeg runner, with image variants derived via Cloudflare Images, returning content-addressed URLs. Step 4: Workers AI generates a 768-dim embedding from the dataset's text fields and writes it to Vectorize. Step 5: The dataset is now reachable via the public catalog API, the public search endpoint, the docent's search_datasets LLM tool, and the federation manifest.">
             <defs>
               <marker id="arrow-pub" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
                 <path d="M0,0 L9,4.5 L0,9 Z" fill="#737373" />
@@ -108,7 +108,7 @@
               <text class="pub-text" x="80" y="62" text-anchor="middle">portal · CLI</text>
               <text class="pub-mono" x="80" y="84" text-anchor="middle">/publish (Access)</text>
               <text class="pub-mono" x="80" y="98" text-anchor="middle">terraviz publish ...</text>
-              <text class="pub-tag" x="80" y="114" text-anchor="middle">drafted</text>
+              <text class="pub-tag" x="80" y="114" text-anchor="middle">live</text>
             </g>
 
             <path class="pub-arrow" d="M180,100 L200,100" marker-end="url(#arrow-pub)" />
@@ -121,7 +121,7 @@
               <text class="pub-text" x="80" y="62" text-anchor="middle">validate · stage</text>
               <text class="pub-mono" x="80" y="84" text-anchor="middle">/api/v1/publish</text>
               <text class="pub-mono" x="80" y="98" text-anchor="middle">/api/v1/ingest</text>
-              <text class="pub-tag" x="80" y="114" text-anchor="middle">live (dev-bypass)</text>
+              <text class="pub-tag" x="80" y="114" text-anchor="middle">live (Access)</text>
             </g>
 
             <path class="pub-arrow" d="M360,100 L380,100" marker-end="url(#arrow-pub)" />
@@ -131,10 +131,10 @@
               <rect class="pub-step" x="0" y="0" width="160" height="120" rx="8" />
               <text class="pub-num" x="14" y="22">03</text>
               <text class="pub-text" x="80" y="46" text-anchor="middle">Asset pipeline</text>
-              <text class="pub-text" x="80" y="62" text-anchor="middle">decimate · variant</text>
-              <text class="pub-mono" x="80" y="84" text-anchor="middle">Stream (video)</text>
+              <text class="pub-text" x="80" y="62" text-anchor="middle">transcode · variant</text>
+              <text class="pub-mono" x="80" y="84" text-anchor="middle">R2 + GHA (video)</text>
               <text class="pub-mono" x="80" y="98" text-anchor="middle">Images (variants)</text>
-              <text class="pub-tag" x="80" y="114" text-anchor="middle">drafted</text>
+              <text class="pub-tag" x="80" y="114" text-anchor="middle">live</text>
             </g>
 
             <path class="pub-arrow" d="M540,100 L560,100" marker-end="url(#arrow-pub)" />
@@ -171,36 +171,37 @@
             <text class="pub-tag" x="820" y="200" text-anchor="middle">REACHABLE</text>
           </svg>
           <figcaption class="fed__arch-caption">
-            Five steps from upload to reachable. Step 2 is live behind a dev-bypass; step 4's Vectorize index is live and powers Orbit's search tool today; the portal UI (step 1), the Stream / Images cutover (step 3), and the public <code>/api/v1/search</code> swap (step 5) are drafted and phased. The reachable wire shape (step 5) is a <strong>STAC Item</strong> profile and the catalog response is a STAC Collection — recognised by the geospatial ecosystem out of the box, no custom client work to consume.
+            Five steps from upload to reachable — all live today. The portal and CLI publish behind Cloudflare Access (step 1); Pages Functions validate and stage (step 2); video transcodes on R2 + GitHub Actions and images via Cloudflare Images (step 3); Workers AI embeds into Vectorize (step 4); and the dataset is reachable via the public catalog and Vectorize-backed search (step 5). The reachable wire shape (step 5) is a <strong>STAC Item</strong> profile and the catalog response is a STAC Collection — recognised by the geospatial ecosystem out of the box, no custom client work to consume.
           </figcaption>
         </figure>
 
         <h3 class="fed__subhead">Where it stands</h3>
         <p class="fed__subhead-hint">
-          The shape is drafted across the catalog plan docs; pieces are landing in phases. Mirrors §8's federation cadence — work the model first, then the auth, then the UI.
+          The portal, CLI, asset pipeline, and search index are live; cross-node federation and the finer-grained publishing controls land in later phases. Mirrors §8's federation cadence — work the model first, then the auth, then the UI.
         </p>
 
         <div class="fed__phase-grid">
           <article class="fed__phase fed__phase--shipped">
             <p class="fed__phase-tag">Today · shipped</p>
-            <h3>Backend, dev-bypass, search index</h3>
+            <h3>Portal, CLI, pipeline, search index</h3>
             <ul>
-              <li>Publisher API endpoints in Pages Functions (<code>/api/v1/publish</code>, <code>/api/v1/ingest</code>)</li>
-              <li>Publisher dev-bypass via <code>.dev.vars</code> for local iteration</li>
-              <li>Vectorize index live; drives Orbit's <code>search_datasets</code> LLM tool</li>
-              <li>D1 schema covers <code>publishers</code>, <code>publisher_keys</code>, <code>publish_audit</code> — see <a href="https://github.com/zyra-project/terraviz/blob/main/docs/CATALOG_DATA_MODEL.md" target="_blank" rel="noopener"><code>CATALOG_DATA_MODEL.md</code></a></li>
+              <li>Publisher portal live at <code>/publish</code> behind Cloudflare Access — datasets, tours, featured-hero, analytics, feedback, users</li>
+              <li>Tour creator capture mode (<code>?tourEdit=</code>) writing <code>tour.json</code> to R2</li>
+              <li>Asset pipeline — R2 presigned upload + GitHub Actions HLS transcode + auto sphere thumbnails</li>
+              <li>Public <code>/api/v1/search</code> and Orbit's <code>search_datasets</code> tool both run the Vectorize index</li>
+              <li><code>terraviz</code> CLI — <code>publish</code> / <code>update</code> / <code>retract</code> / <code>list</code> against the same API; D1 schema in <a href="https://github.com/zyra-project/terraviz/blob/main/docs/CATALOG_DATA_MODEL.md" target="_blank" rel="noopener"><code>CATALOG_DATA_MODEL.md</code></a></li>
             </ul>
           </article>
 
           <article class="fed__phase fed__phase--draft">
             <p class="fed__phase-tag">Forthcoming · drafted</p>
-            <h3>Portal, pipeline, public search</h3>
+            <h3>Federation, finer roles, bulk tools</h3>
             <ul>
-              <li>Publisher portal UI behind staff SSO</li>
-              <li>Tour creator capture mode</li>
-              <li>Stream + Images cutover, replacing the Vimeo proxy and the hand-rolled image ladder</li>
-              <li>Public <code>/api/v1/search</code> swaps D1 <code>LIKE</code> → Vectorize semantic behind the same path</li>
-              <li>Authoring CLI with signed binaries + npm package</li>
+              <li>Cross-node federation — subscribe to peer manifests, verify signatures, merge peer rows (Phase 4)</li>
+              <li>Community publishers via OIDC + a review queue beyond the two-tier admin / publisher model</li>
+              <li>Per-publisher analytics and cross-publisher collaboration on a dataset</li>
+              <li>Bulk import for onboarding existing catalogs at scale</li>
+              <li>Signed standalone CLI binaries + npm distribution for supply-chain auditability</li>
             </ul>
           </article>
         </div>

@@ -5624,7 +5624,7 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
             <p class="feature-card__anchor">§9</p>
             <h3 class="feature-card__title">Publishing &amp; search</h3>
             <p class="feature-card__desc">
-              Publisher portal, tour creator, asset / decimation pipeline (Stream + Images), authoring CLI, and the Vectorize-backed semantic search index. How content gets into a node, before it ever federates.
+              Publisher portal, tour creator, asset pipeline (R2 + GitHub Actions transcode), authoring CLI, and the Vectorize-backed semantic search index. How content gets into a node, before it ever federates.
             </p>
             <span class="feature-card__cta">Add your data</span>
           </a>
@@ -5809,13 +5809,13 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
 
         <h3 class="demo-section__title">Where the bytes come from</h3>
         <p class="demo-section__hint">
-          Most of TerraViz's serving lives on Cloudflare today — the catalog database, the asset store, the docent's LLM, the semantic-search index, telemetry, auth, and the CDN edge cache that sits in front of all of it. A small set of endpoints live elsewhere by design: NASA GIBS for tile-cache locality, the legacy Vimeo proxy as a transitional video host (Stream replaces it), and a configurable bring-your-own-LLM path for visitors who prefer their own provider over Workers AI. Solid boxes are live in production today; <span class="globe__arch-planned-pill">PLANNED</span> dashed boxes are drafted in the catalog backend docs but not yet bound.
+          Most of TerraViz's serving lives on Cloudflare today — the catalog database, the asset store (now including the HLS video ladder), the docent's LLM, the semantic-search index, telemetry, auth, and the CDN edge cache that sits in front of all of it. Video is transcoded out-of-band rather than by a managed service: a publisher upload lands in R2, a GitHub Actions runner re-encodes it to a multi-rendition HLS ladder with ffmpeg, and writes the segments back to R2. There is no Cloudflare Stream in the path — it was evaluated and dropped once its standard-plan 1080p rendition ceiling proved too low for the 4K spherical content the globe renders. A small set of endpoints live elsewhere by design: NASA GIBS for tile-cache locality, the legacy Vimeo proxy still serving the video rows not yet migrated to R2, and a configurable bring-your-own-LLM path for visitors who prefer their own provider over Workers AI. Solid boxes are live in production today; <span class="globe__arch-planned-pill">PLANNED</span> dashed boxes are drafted in the catalog backend docs but not yet bound.
         </p>
 
         <figure class="globe__diagram">
           <svg viewBox="0 0 920 590"
                role="img"
-               aria-label="TerraViz architecture diagram, three horizontal bands. The top band, CLIENT, lists Browser, Quest, iOS, Android, and Desktop. A single HTTPS arrow drops down into the middle band, CLOUDFLARE EDGE. The first tier inside the edge band is the CDN edge cache — every request lands there first, with per-route Cache-Control directives and ETag-driven 304s. On a cache miss the request fans out to TerraViz web app (Pages) on the left or Pages Functions on the right, which exposes /api/v1/* (catalog, search, featured, manifest, publish, ingest, federation), /api/chat/* (completions, models), /api/feedback, /api/tile, and /api/legend. Pages Functions binds to a LIVE row of seven services — D1 catalog, R2 assets, KV cache, Workers Analytics Engine telemetry, Cloudflare Access auth, Workers AI for Orbit's LLM and dataset embeddings, and Vectorize for semantic search. Below that, a PLANNED row of four dashed boxes — Stream for video, Images for variants, Queues for async jobs, Durable Objects for federation coordination. The bottom band, DIRECT-FETCH ENDPOINTS, lists four boxes: NASA GIBS (tiles, fetched directly by the client for cache locality), Vimeo proxy (today's video host, with a planned migration to Cloudflare Stream), BYO LLM provider (when a visitor configures their own OpenAI-compatible endpoint instead of Workers AI), and Federation peers (cross-instance catalog pulls — see section 7 for the full diagram).">
+               aria-label="TerraViz architecture diagram, three horizontal bands. The top band, CLIENT, lists Browser, Quest, iOS, Android, and Desktop. A single HTTPS arrow drops down into the middle band, CLOUDFLARE EDGE. The first tier inside the edge band is the CDN edge cache — every request lands there first, with per-route Cache-Control directives and ETag-driven 304s. On a cache miss the request fans out to TerraViz web app (Pages) on the left or Pages Functions on the right, which exposes /api/v1/* (catalog, search, featured, manifest, publish, ingest, federation), /api/chat/* (completions, models), /api/feedback, /api/tile, and /api/legend. Pages Functions binds to a LIVE row of seven services — D1 catalog, R2 assets and HLS video, KV cache, Workers Analytics Engine telemetry, Cloudflare Access auth, Workers AI for Orbit's LLM and dataset embeddings, and Vectorize for semantic search. Below that, a PLANNED row of three dashed boxes — Images for image variants, Queues for async jobs, Durable Objects for federation coordination. The bottom band, DIRECT-FETCH ENDPOINTS, lists four boxes: NASA GIBS (tiles, fetched directly by the client for cache locality), Vimeo proxy (legacy video host for rows not yet migrated to R2 HLS, which is transcoded out-of-band by a GitHub Actions ffmpeg runner), BYO LLM provider (when a visitor configures their own OpenAI-compatible endpoint instead of Workers AI), and Federation peers (cross-instance catalog pulls — see section 7 for the full diagram).">
             <defs>
               <marker id="arrow-arch" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
                 <path d="M0,0 L9,4.5 L0,9 Z" fill="#737373" />
@@ -5926,7 +5926,7 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
             <g transform="translate(186,292)">
               <rect class="arch-box" x="0" y="0" width="100" height="50" rx="6" />
               <text class="arch-text" x="50" y="22" text-anchor="middle">R2</text>
-              <text class="arch-mono" x="50" y="38" text-anchor="middle">assets</text>
+              <text class="arch-mono" x="50" y="38" text-anchor="middle">assets + HLS</text>
             </g>
 
             <line class="arch-rail" x1="348" y1="276" x2="348" y2="292" />
@@ -5964,32 +5964,26 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
               <text class="arch-mono" x="50" y="38" text-anchor="middle">semantic search</text>
             </g>
 
-            <!-- PLANNED row: 4 dashed boxes -->
+            <!-- PLANNED row: 3 dashed boxes (Stream removed — video
+                 now ships via R2 + GitHub Actions, shown LIVE above). -->
             <text class="arch-band-label-cf" x="40" y="366">PLANNED</text>
-            <line class="arch-rail-dashed" x1="200" y1="362" x2="720" y2="362" />
-            <line class="arch-rail-dashed" x1="200" y1="362" x2="200" y2="378" />
-            <g transform="translate(124,378)">
-              <rect class="arch-box-planned" x="0" y="0" width="152" height="50" rx="6" />
-              <text class="arch-text" x="76" y="22" text-anchor="middle">Stream</text>
-              <text class="arch-mono-accent" x="76" y="38" text-anchor="middle">video · replaces Vimeo</text>
-            </g>
-
-            <line class="arch-rail-dashed" x1="374" y1="362" x2="374" y2="378" />
-            <g transform="translate(298,378)">
+            <line class="arch-rail-dashed" x1="250" y1="362" x2="670" y2="362" />
+            <line class="arch-rail-dashed" x1="250" y1="362" x2="250" y2="378" />
+            <g transform="translate(174,378)">
               <rect class="arch-box-planned" x="0" y="0" width="152" height="50" rx="6" />
               <text class="arch-text" x="76" y="22" text-anchor="middle">Images</text>
               <text class="arch-mono-accent" x="76" y="38" text-anchor="middle">variants · replaces ladder</text>
             </g>
 
-            <line class="arch-rail-dashed" x1="548" y1="362" x2="548" y2="378" />
-            <g transform="translate(472,378)">
+            <line class="arch-rail-dashed" x1="460" y1="362" x2="460" y2="378" />
+            <g transform="translate(384,378)">
               <rect class="arch-box-planned" x="0" y="0" width="152" height="50" rx="6" />
               <text class="arch-text" x="76" y="22" text-anchor="middle">Queues</text>
               <text class="arch-mono-accent" x="76" y="38" text-anchor="middle">async jobs</text>
             </g>
 
-            <line class="arch-rail-dashed" x1="722" y1="362" x2="722" y2="378" />
-            <g transform="translate(646,378)">
+            <line class="arch-rail-dashed" x1="670" y1="362" x2="670" y2="378" />
+            <g transform="translate(594,378)">
               <rect class="arch-box-planned" x="0" y="0" width="152" height="50" rx="6" />
               <text class="arch-text" x="76" y="22" text-anchor="middle">Durable Objects</text>
               <text class="arch-mono-accent" x="76" y="38" text-anchor="middle">federation coord.</text>
@@ -6010,8 +6004,8 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
             <g transform="translate(258,488)">
               <rect class="arch-box" x="0" y="0" width="190" height="76" rx="8" />
               <text class="arch-text" x="95" y="24" text-anchor="middle">Vimeo proxy</text>
-              <text class="arch-mono" x="95" y="44" text-anchor="middle">video · transitional</text>
-              <text class="arch-mono-accent" x="95" y="58" text-anchor="middle">→ Stream (planned)</text>
+              <text class="arch-mono" x="95" y="44" text-anchor="middle">video · legacy rows</text>
+              <text class="arch-mono-accent" x="95" y="58" text-anchor="middle">→ R2 HLS (migrating)</text>
               <text class="arch-mono-mist" x="95" y="70" text-anchor="middle">from client today</text>
             </g>
 
@@ -6513,7 +6507,7 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
         <div class="orbit__hero">
           <div class="orbit__hero-text">
             <p class="orbit__lede">
-              Orbit is hybrid. A local keyword engine runs concurrently with an LLM stream over any OpenAI-compatible endpoint — instant + offline on one side, depth and provider-of-your-choice on the other. If the LLM errors or is disabled, the local engine's response transparently takes over. When the LLM succeeds, it can drop datasets and tours straight onto the globe via the same <code>&lt;&lt;LOAD:ID&gt;&gt;</code> marker pattern.
+              Orbit is hybrid. A local keyword engine runs concurrently with an LLM stream over any OpenAI-compatible endpoint — instant + offline on one side, depth and provider-of-your-choice on the other. If the LLM errors or is disabled, the local engine's response transparently takes over. When the LLM succeeds, it can drop datasets and tours straight onto the globe via the same <code>&lt;&lt;LOAD:ID&gt;&gt;</code> marker pattern. Orbit can also listen and talk back — optional speech-to-text input and spoken replies, on-device in the browser by default, with an opt-in Cloudflare-edge voice path (Whisper transcription + edge TTS).
             </p>
           </div>
           <aside class="orbit__rail" aria-label="Sample Orbit chat exchange with inline load chips for a dataset and a tour">
@@ -7154,7 +7148,7 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
             Mobile is the most interesting deployment for the docent. Both Apple and Google now ship system-level LLMs — <strong>Apple Intelligence Foundation Models</strong> on iOS (≥ 18.1 on supported hardware) and <strong>Gemini Nano</strong> via AICore on Android. Bridging Orbit into those means the chat is <em>free, private, and offline-by-default</em> on eligible devices, with no API key, no provider relationship, no network round-trip.
           </p>
           <p>
-            The shape is a small Tauri plugin per platform — Swift wrapping <code>FoundationModels</code> on iOS, Kotlin wrapping <code>AICore</code> on Android — surfaced behind the existing <code>llmProvider</code> interface. On hardware too old for system LLMs, the same provider gracefully falls back to the OpenAI-compatible path that web and desktop already use. <em>This is the forward direction, not yet shipped.</em>
+            The shape is a small Tauri plugin per platform — Swift wrapping <code>FoundationModels</code>, Kotlin wrapping <code>AICore</code> on Android — surfaced behind the existing <code>llmProvider</code> interface. The macOS desktop build already wires Apple's Foundation Models through this provider; extending it to iOS and Android phones is the forward direction. On hardware too old for system LLMs, the same provider gracefully falls back to the OpenAI-compatible path that web and desktop already use. <em>Mobile on-device Orbit is not yet shipped.</em>
           </p>
         </aside>
       </div>
@@ -7308,7 +7302,7 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
 
         <h3 class="loc__subhead">What's deferred</h3>
         <p class="loc__subhead-hint">
-          L1 (UI chrome) and L1.5 (RTL) ship now. Three further waves are scoped but blocked on the federated catalog backend — same plumbing that makes self-hosted publishing possible.
+          L1 (UI chrome) and L1.5 (RTL) ship now. L2 is unblocked — the publishing backend it depends on has shipped — and is the next wave to build; L3 and L4 still wait on cross-node federation.
         </p>
 
         <div class="loc__waves">
@@ -7320,7 +7314,7 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
             <div class="loc__wave-body">
               Per-publisher UI string overrides via an <code>/api/v1/locale/&lt;lang&gt;</code> overlay endpoint, plus a publisher-portal locale-override editor. Lets a partner relabel <em>their</em> deployment without forking the source.
             </div>
-            <span class="loc__wave-block">blocked on Catalog Phase 3</span>
+            <span class="loc__wave-block">Catalog Phase 3 shipped — buildable next</span>
           </div>
 
           <div class="loc__wave">
@@ -7331,7 +7325,7 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
             <div class="loc__wave-body">
               Dataset titles, abstracts, and source attribution localized via a <code>dataset_translations</code> sidecar table, CLI <code>--lang</code> sidecar files, and federation propagation of signed translation rows so a translation made at one peer surfaces across the network.
             </div>
-            <span class="loc__wave-block">blocked on Catalog Phases 3 + 4</span>
+            <span class="loc__wave-block">blocked on federation (Phase 4)</span>
           </div>
 
           <div class="loc__wave">
@@ -7340,9 +7334,9 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
               <small>tour narration</small>
             </div>
             <div class="loc__wave-body">
-              Tour-author narration translated alongside the tour JSON. Sits on top of L3 plus the tour authoring tooling — the per-language captions need a UI to author and a stable round-trip mechanism through the federation.
+              Tour-author narration translated alongside the tour JSON. The tour authoring tooling has shipped; L4 now sits on top of L3 — the per-language captions need a stable round-trip mechanism through the federation.
             </div>
-            <span class="loc__wave-block">blocked on L3 + tour authoring</span>
+            <span class="loc__wave-block">blocked on L3</span>
           </div>
         </div>
 
@@ -7587,9 +7581,9 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
                 <td class="fed__portability-alts">OpenAI · Ollama · LM Studio · vLLM · llama.cpp</td>
               </tr>
               <tr>
-                <td><code>Stream</code> + <code>Images</code></td>
-                <td>Video transcoding · image variants</td>
-                <td class="fed__portability-alts">AWS MediaConvert + S3 · ffmpeg + sharp · Mux</td>
+                <td><code>GitHub Actions</code> + <code>R2</code> · <code>Images</code></td>
+                <td>Video transcoding (ffmpeg) · image variants</td>
+                <td class="fed__portability-alts">AWS MediaConvert · ffmpeg on any CI · sharp · Mux</td>
               </tr>
               <tr>
                 <td><code>Cloudflare Access</code></td>
@@ -7727,7 +7721,7 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
             <ul>
               <li>D1 catalog with SOS-seeded rows; migrations checked in</li>
               <li><code>/api/v1/catalog · /search · /featured</code> Pages Functions serving</li>
-              <li>Publisher dev-bypass (<code>.dev.vars</code>) for local iteration</li>
+              <li>Publisher portal + CLI live behind Cloudflare Access (dev-bypass via <code>.dev.vars</code> for local iteration)</li>
               <li><code>npm run gen:node-key</code> generates the Ed25519 identity</li>
               <li><code>/.well-known/terraviz.json</code> manifest endpoint</li>
               <li>node-backed catalog is the default (<code>VITE_CATALOG_SOURCE=node</code>); legacy SOS S3 path opt-in for rollback only</li>
@@ -7744,7 +7738,6 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
               <li>Verify the peer's Ed25519 signature on each pull</li>
               <li>Merge peer-published rows into the local catalog</li>
               <li>Per-dataset access control (publisher → specific peers)</li>
-              <li>Publisher portal beyond dev-bypass auth</li>
               <li>JSON Schema + OpenAPI 3.1 spec + a two-node <code>npm run test:federation</code> conformance harness ship in the <em>same</em> Phase 4 PR — the spec is the contract third parties implement against, enforced by CI</li>
             </ul>
           </article>
@@ -7832,7 +7825,7 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
         <div class="pub__hero">
           <div class="pub__hero-text">
             <p class="fed__lede">
-              <strong>Publish once · seen on every TerraViz install.</strong> The publisher portal at <code>/publish</code> is a single-form workflow — dataset entry, tour authoring, asset upload, semantic-search indexing, federation visibility — behind staff SSO. The companion <code>@zyra/terraviz-cli</code> ships first to npm with signed binaries: <a href="#fed-tiers"><strong>Tier 0 publishing</strong></a> is <code>terraviz publish dataset.yaml</code> on a schedule against the canonical node, scriptable from any CI — the federation arc's first deliverable, with one partner pilot driving auth ergonomics. A subscribing peer's catalog pulls your row on its next sync; no separate distribution, no CDN hand-off, no museum partnership required. Both paths run through the same edge-compute + SQL DB + object-storage backend that powers the rest of the catalog stack — same edge, same auth, no separate moving parts. The Cloudflare-flavoured names below (Pages Functions, D1, R2, Stream, Images, Vectorize, Workers AI, Access) are the today-deploy; <a href="#sec-10-federation">§8</a> covers the portability story for operators wanting a different cloud. Full spec in <a href="https://github.com/zyra-project/terraviz/blob/main/docs/CATALOG_PUBLISHING_TOOLS.md" target="_blank" rel="noopener"><code>CATALOG_PUBLISHING_TOOLS.md</code></a>.
+              <strong>Publish once · seen on every TerraViz install.</strong> The publisher portal at <code>/publish</code> is live today behind Cloudflare Access — a single-form workflow for dataset entry, tour authoring, asset upload, and semantic-search indexing. The companion <code>terraviz</code> CLI hits the same publisher API: <code>terraviz publish dataset.yaml</code>, scriptable from any CI for research orgs running scheduled pipelines. Both paths run through the same edge-compute + SQL DB + object-storage backend that powers the rest of the catalog stack — same edge, same auth, no separate moving parts. Once <a href="#sec-10-federation">cross-node federation</a> lands, a subscribing peer's catalog will pull your row on its next sync; no separate distribution, no CDN hand-off, no museum partnership required. The Cloudflare-flavoured names below (Pages Functions, D1, R2, GitHub Actions transcode, Images, Vectorize, Workers AI, Access) are the today-deploy; <a href="#sec-10-federation">§8</a> covers the portability story for operators wanting a different cloud. Full spec in <a href="https://github.com/zyra-project/terraviz/blob/main/docs/CATALOG_PUBLISHING_TOOLS.md" target="_blank" rel="noopener"><code>CATALOG_PUBLISHING_TOOLS.md</code></a>.
             </p>
           </div>
           <aside class="pub__rail" aria-label="terraviz-cli session">
@@ -7844,16 +7837,16 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
             </div>
             <pre class="pub__rail-cli"><code><span class="pub__rail-prompt">$</span> terraviz publish dataset.yaml
 <span class="pub__rail-line">↑ uploading dataset.yaml ··· 2 KB</span>
-<span class="pub__rail-line">↑ resolving asset (vimeo) ··· 4.2 GB</span>
+<span class="pub__rail-line">↑ uploading asset → R2 ··· 4.2 GB</span>
+<span class="pub__rail-line pub__rail-ok">✓ transcode queued (GitHub Actions)</span>
 <span class="pub__rail-line pub__rail-ok">✓ published as climate-futures-2024</span>
-<span class="pub__rail-line pub__rail-ok">✓ federation manifest reindexed</span>
-<span class="pub__rail-line pub__rail-meta">ETA on subscribing peers ≤ 15 min</span></code></pre>
+<span class="pub__rail-line pub__rail-meta">search index reembedded · ~30 s</span></code></pre>
           </aside>
         </div>
 
         <h3 class="fed__subhead">Try the portal</h3>
         <p class="fed__subhead-hint">
-          An interactive publisher dashboard will live here once the portal UI ships behind staff SSO — mock the dataset-entry form, run a draft preview against the live globe, watch the asset pipeline transcode in real time. Until then, the full form spec, validation rules, and CLI surface live in <a href="https://github.com/zyra-project/terraviz/blob/main/docs/CATALOG_PUBLISHING_TOOLS.md" target="_blank" rel="noopener"><code>CATALOG_PUBLISHING_TOOLS.md</code></a>.
+          The publisher portal is live today at <code>/publish</code> behind Cloudflare Access — the dataset-entry form, a draft preview against the live globe, and real-time transcode status all ship. An interactive sandboxed embed will land here in a follow-up; until then, the full form spec, validation rules, and CLI surface live in <a href="https://github.com/zyra-project/terraviz/blob/main/docs/CATALOG_PUBLISHING_TOOLS.md" target="_blank" rel="noopener"><code>CATALOG_PUBLISHING_TOOLS.md</code></a>.
         </p>
 
         <figure class="pub__demo" aria-labelledby="pub-demo-caption">
@@ -7866,7 +7859,7 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
             </div>
             <div class="pub__demo-body">
               <div class="pub__demo-label">Interactive publisher dashboard</div>
-              <div class="pub__demo-tag">embed pending · drafted</div>
+              <div class="pub__demo-tag">embed pending · portal live</div>
             </div>
           </div>
           <figcaption id="pub-demo-caption" class="pub__demo-caption">
@@ -7886,8 +7879,8 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
           </article>
 
           <article class="fed__stack-card">
-            <h3>Asset &amp; decimation pipeline</h3>
-            <p>Cloudflare Stream transcodes uploaded video into the rendition ladder (replaces today's Vimeo proxy). Cloudflare Images derives the 4096 → 2048 → 1024 image variants on demand instead of the hand-rolled fallback ladder. Sphere thumbnails auto-generate at upload time as 2:1 equirectangular crops. Content-addressed R2 keys so revisions never invalidate caches. Full flow lives in <a href="https://github.com/zyra-project/terraviz/blob/main/docs/CATALOG_ASSETS_PIPELINE.md" target="_blank" rel="noopener"><code>CATALOG_ASSETS_PIPELINE.md</code></a>.</p>
+            <h3>Asset &amp; transcode pipeline</h3>
+            <p>A publisher's MP4 — or a stack of individual frames — uploads straight to R2 over a presigned PUT; a GitHub Actions runner re-encodes it with ffmpeg into a 4K / 1080p / 720p HLS ladder, writes the segments back to R2, and the row's <code>data_ref</code> flips atomically. Cloudflare Stream was evaluated and dropped — its standard-plan 1080p ceiling was too low for 4K spherical video. Sphere thumbnails auto-generate at upload time as 2:1 equirectangular crops; Cloudflare Images can derive resolution variants for image datasets. Content-addressed R2 keys so revisions never invalidate caches. Full flow lives in <a href="https://github.com/zyra-project/terraviz/blob/main/docs/CATALOG_ASSETS_PIPELINE.md" target="_blank" rel="noopener"><code>CATALOG_ASSETS_PIPELINE.md</code></a>.</p>
           </article>
 
           <article class="fed__stack-card">
@@ -7897,7 +7890,7 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
 
           <article class="fed__stack-card">
             <h3>Semantic search</h3>
-            <p>Cloudflare Vectorize stores a 768-dim embedding per dataset. The docent's <code>search_datasets</code> LLM tool queries it directly today (used by Orbit when a visitor asks "show me something about hurricanes"); a follow-on swaps the public <code>/api/v1/search</code> URL from D1 <code>LIKE</code> to Vectorize semantic behind the same path. Federated rows reindex locally on sync, so each node owns its own search experience without phoning home.</p>
+            <p>Cloudflare Vectorize stores a 768-dim embedding per dataset. The public <code>/api/v1/search</code> endpoint runs Vectorize semantic search (with a text fallback) today, and the docent's <code>search_datasets</code> LLM tool queries the same index (used by Orbit when a visitor asks "show me something about hurricanes"). Once federation lands, peer rows reindex locally on sync, so each node owns its own search experience without phoning home.</p>
           </article>
         </div>
 
@@ -7909,7 +7902,7 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
         <figure class="fed__arch">
           <svg viewBox="0 0 920 240"
                role="img"
-               aria-label="Publish-path diagram, five steps left to right. Step 1: Publisher portal or CLI accepts the form submission and the asset upload. Step 2: Pages Functions validate fields, write the draft row to D1, and stage the asset upload. Step 3: The asset pipeline routes video to Cloudflare Stream for transcoding and images to Cloudflare Images for variants, returning content-addressed URLs. Step 4: Workers AI generates a 768-dim embedding from the dataset's text fields and writes it to Vectorize. Step 5: The dataset is now reachable via the public catalog API, the public search endpoint, the docent's search_datasets LLM tool, and the federation manifest.">
+               aria-label="Publish-path diagram, five steps left to right. Step 1: Publisher portal or CLI accepts the form submission and the asset upload. Step 2: Pages Functions validate fields, write the draft row to D1, and stage the asset upload. Step 3: The asset pipeline uploads video to R2 and transcodes it to an HLS ladder on a GitHub Actions ffmpeg runner, with image variants derived via Cloudflare Images, returning content-addressed URLs. Step 4: Workers AI generates a 768-dim embedding from the dataset's text fields and writes it to Vectorize. Step 5: The dataset is now reachable via the public catalog API, the public search endpoint, the docent's search_datasets LLM tool, and the federation manifest.">
             <defs>
               <marker id="arrow-pub" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
                 <path d="M0,0 L9,4.5 L0,9 Z" fill="#737373" />
@@ -7933,7 +7926,7 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
               <text class="pub-text" x="80" y="62" text-anchor="middle">portal · CLI</text>
               <text class="pub-mono" x="80" y="84" text-anchor="middle">/publish (Access)</text>
               <text class="pub-mono" x="80" y="98" text-anchor="middle">terraviz publish ...</text>
-              <text class="pub-tag" x="80" y="114" text-anchor="middle">drafted</text>
+              <text class="pub-tag" x="80" y="114" text-anchor="middle">live</text>
             </g>
 
             <path class="pub-arrow" d="M180,100 L200,100" marker-end="url(#arrow-pub)" />
@@ -7946,7 +7939,7 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
               <text class="pub-text" x="80" y="62" text-anchor="middle">validate · stage</text>
               <text class="pub-mono" x="80" y="84" text-anchor="middle">/api/v1/publish</text>
               <text class="pub-mono" x="80" y="98" text-anchor="middle">/api/v1/ingest</text>
-              <text class="pub-tag" x="80" y="114" text-anchor="middle">live (dev-bypass)</text>
+              <text class="pub-tag" x="80" y="114" text-anchor="middle">live (Access)</text>
             </g>
 
             <path class="pub-arrow" d="M360,100 L380,100" marker-end="url(#arrow-pub)" />
@@ -7956,10 +7949,10 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
               <rect class="pub-step" x="0" y="0" width="160" height="120" rx="8" />
               <text class="pub-num" x="14" y="22">03</text>
               <text class="pub-text" x="80" y="46" text-anchor="middle">Asset pipeline</text>
-              <text class="pub-text" x="80" y="62" text-anchor="middle">decimate · variant</text>
-              <text class="pub-mono" x="80" y="84" text-anchor="middle">Stream (video)</text>
+              <text class="pub-text" x="80" y="62" text-anchor="middle">transcode · variant</text>
+              <text class="pub-mono" x="80" y="84" text-anchor="middle">R2 + GHA (video)</text>
               <text class="pub-mono" x="80" y="98" text-anchor="middle">Images (variants)</text>
-              <text class="pub-tag" x="80" y="114" text-anchor="middle">drafted</text>
+              <text class="pub-tag" x="80" y="114" text-anchor="middle">live</text>
             </g>
 
             <path class="pub-arrow" d="M540,100 L560,100" marker-end="url(#arrow-pub)" />
@@ -7996,36 +7989,37 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
             <text class="pub-tag" x="820" y="200" text-anchor="middle">REACHABLE</text>
           </svg>
           <figcaption class="fed__arch-caption">
-            Five steps from upload to reachable. Step 2 is live behind a dev-bypass; step 4's Vectorize index is live and powers Orbit's search tool today; the portal UI (step 1), the Stream / Images cutover (step 3), and the public <code>/api/v1/search</code> swap (step 5) are drafted and phased. The reachable wire shape (step 5) is a <strong>STAC Item</strong> profile and the catalog response is a STAC Collection — recognised by the geospatial ecosystem out of the box, no custom client work to consume.
+            Five steps from upload to reachable — all live today. The portal and CLI publish behind Cloudflare Access (step 1); Pages Functions validate and stage (step 2); video transcodes on R2 + GitHub Actions and images via Cloudflare Images (step 3); Workers AI embeds into Vectorize (step 4); and the dataset is reachable via the public catalog and Vectorize-backed search (step 5). The reachable wire shape (step 5) is a <strong>STAC Item</strong> profile and the catalog response is a STAC Collection — recognised by the geospatial ecosystem out of the box, no custom client work to consume.
           </figcaption>
         </figure>
 
         <h3 class="fed__subhead">Where it stands</h3>
         <p class="fed__subhead-hint">
-          The shape is drafted across the catalog plan docs; pieces are landing in phases. Mirrors §8's federation cadence — work the model first, then the auth, then the UI.
+          The portal, CLI, asset pipeline, and search index are live; cross-node federation and the finer-grained publishing controls land in later phases. Mirrors §8's federation cadence — work the model first, then the auth, then the UI.
         </p>
 
         <div class="fed__phase-grid">
           <article class="fed__phase fed__phase--shipped">
             <p class="fed__phase-tag">Today · shipped</p>
-            <h3>Backend, dev-bypass, search index</h3>
+            <h3>Portal, CLI, pipeline, search index</h3>
             <ul>
-              <li>Publisher API endpoints in Pages Functions (<code>/api/v1/publish</code>, <code>/api/v1/ingest</code>)</li>
-              <li>Publisher dev-bypass via <code>.dev.vars</code> for local iteration</li>
-              <li>Vectorize index live; drives Orbit's <code>search_datasets</code> LLM tool</li>
-              <li>D1 schema covers <code>publishers</code>, <code>publisher_keys</code>, <code>publish_audit</code> — see <a href="https://github.com/zyra-project/terraviz/blob/main/docs/CATALOG_DATA_MODEL.md" target="_blank" rel="noopener"><code>CATALOG_DATA_MODEL.md</code></a></li>
+              <li>Publisher portal live at <code>/publish</code> behind Cloudflare Access — datasets, tours, featured-hero, analytics, feedback, users</li>
+              <li>Tour creator capture mode (<code>?tourEdit=</code>) writing <code>tour.json</code> to R2</li>
+              <li>Asset pipeline — R2 presigned upload + GitHub Actions HLS transcode + auto sphere thumbnails</li>
+              <li>Public <code>/api/v1/search</code> and Orbit's <code>search_datasets</code> tool both run the Vectorize index</li>
+              <li><code>terraviz</code> CLI — <code>publish</code> / <code>update</code> / <code>retract</code> / <code>list</code> against the same API; D1 schema in <a href="https://github.com/zyra-project/terraviz/blob/main/docs/CATALOG_DATA_MODEL.md" target="_blank" rel="noopener"><code>CATALOG_DATA_MODEL.md</code></a></li>
             </ul>
           </article>
 
           <article class="fed__phase fed__phase--draft">
             <p class="fed__phase-tag">Forthcoming · drafted</p>
-            <h3>Portal, pipeline, public search</h3>
+            <h3>Federation, finer roles, bulk tools</h3>
             <ul>
-              <li>Publisher portal UI behind staff SSO</li>
-              <li>Tour creator capture mode</li>
-              <li>Stream + Images cutover, replacing the Vimeo proxy and the hand-rolled image ladder</li>
-              <li>Public <code>/api/v1/search</code> swaps D1 <code>LIKE</code> → Vectorize semantic behind the same path</li>
-              <li>Authoring CLI with signed binaries + npm package</li>
+              <li>Cross-node federation — subscribe to peer manifests, verify signatures, merge peer rows (Phase 4)</li>
+              <li>Community publishers via OIDC + a review queue beyond the two-tier admin / publisher model</li>
+              <li>Per-publisher analytics and cross-publisher collaboration on a dataset</li>
+              <li>Bulk import for onboarding existing catalogs at scale</li>
+              <li>Signed standalone CLI binaries + npm distribution for supply-chain auditability</li>
             </ul>
           </article>
         </div>
@@ -8131,13 +8125,13 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
 
         <h3 class="analytics__subhead">Where the events go</h3>
         <p class="analytics__subhead-hint">
-          From the browser to a Grafana dashboard, four hops. Each one is reviewable in the source; each one drops information rather than gathering it.
+          From the browser to the dashboards, a handful of hops. Each one is reviewable in the source; each one drops information rather than gathering it.
         </p>
 
         <figure class="analytics__flow">
-          <svg viewBox="0 0 760 220"
+          <svg viewBox="0 0 760 270"
                role="img"
-               aria-label="Analytics event flow diagram. Five boxes left to right. The browser emit module batches events client-side. A pagehide beacon ships the batch to a Cloudflare Pages Function ingest endpoint. The function stamps event_type, country (from CF-IPCountry), and an internal flag, then writes to Workers Analytics Engine. Grafana reads aggregated rows from AE for dashboards.">
+               aria-label="Analytics event flow diagram. The browser emit module batches events client-side. A pagehide beacon ships the batch to a Cloudflare Pages Function ingest endpoint. The function stamps event_type, country (from CF-IPCountry), and an internal flag, then writes to Workers Analytics Engine. A nightly export job rolls those events up into D1 summary tables and a gzipped R2 archive, which back the privileged in-app /publish/analytics dashboard; Grafana is an optional secondary reader.">
             <defs>
               <marker id="arrow-an" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
                 <path d="M0,0 L9,4.5 L0,9 Z" fill="#737373" />
@@ -8187,21 +8181,28 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
               <text class="an-mono an-mono-mist" x="75" y="54" text-anchor="middle">aggregated rows</text>
             </g>
 
-            <path class="an-arrow" d="M665,140 L665,170" marker-end="url(#arrow-an)" />
-            <text class="an-arrow-label" x="680" y="158" text-anchor="start">read</text>
-            <g transform="translate(590,170)">
-              <rect class="an-box" x="0" y="0" width="150" height="36" rx="6" />
-              <text class="an-text" x="75" y="22" text-anchor="middle">Grafana dashboards</text>
+            <path class="an-arrow" d="M665,140 L665,164" marker-end="url(#arrow-an)" />
+            <text class="an-arrow-label" x="680" y="156" text-anchor="start">nightly</text>
+            <g transform="translate(555,164)">
+              <rect class="an-box" x="0" y="0" width="200" height="40" rx="6" />
+              <text class="an-text" x="100" y="18" text-anchor="middle">D1 rollups · R2 archive</text>
+              <text class="an-mono" x="100" y="33" text-anchor="middle">daily export job</text>
             </g>
+            <path class="an-arrow" d="M655,204 L655,222" marker-end="url(#arrow-an)" />
+            <g transform="translate(555,222)">
+              <rect class="an-box-final" x="0" y="0" width="200" height="34" rx="6" />
+              <text class="an-text an-text-light" x="100" y="22" text-anchor="middle">/publish/analytics</text>
+            </g>
+            <text class="an-mono-mist" x="655" y="268" text-anchor="middle">+ Grafana · optional secondary reader</text>
           </svg>
           <figcaption class="analytics__flow-caption">
-            BROWSER · EMIT → BEACON → /API/INGEST · DROP+STAMP → ANALYTICS ENGINE → GRAFANA
+            BROWSER · EMIT → BEACON → /API/INGEST · DROP+STAMP → ANALYTICS ENGINE → D1 ROLLUPS + R2 → /PUBLISH/ANALYTICS
           </figcaption>
         </figure>
 
         <h3 class="analytics__subhead">From the dashboards</h3>
         <p class="analytics__subhead-hint">
-          The Grafana dashboards documented in <a href="https://github.com/zyra-project/terraviz/blob/main/grafana/README.md" target="_blank" rel="noopener"><code>grafana/README.md</code></a> read from Workers Analytics Engine via the SQL API. Coarse aggregations only — no per-event row inspection, no PII to redact. Two illustrative panels below show the visual shape (synthetic data, schema-accurate); two placeholder tiles will swap in real captures from a long-running instance.
+          The privileged <code>/publish/analytics</code> dashboard — admins and staff only — reads the D1 rollups stitched with a recent-window query against Workers Analytics Engine: an overview, a MapLibre spatial-attention heatmap, dataset engagement, performance, and funnels. The optional Grafana dashboards documented in <a href="https://github.com/zyra-project/terraviz/blob/main/grafana/README.md" target="_blank" rel="noopener"><code>grafana/README.md</code></a> read the same AE data via the SQL API. Coarse aggregations only — no per-event row inspection, no PII to redact. Two illustrative panels below show the visual shape (synthetic data, schema-accurate); two placeholder tiles will swap in real captures from a long-running instance.
         </p>
 
         <div class="analytics__dashboards">
@@ -8379,9 +8380,11 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
           <ul class="stack__items">
             <li class="stack__item"><a class="stack__item-name" href="https://developers.cloudflare.com/pages/" target="_blank" rel="noopener">Cloudflare Pages</a><span class="stack__item-blurb">Static + Pages Functions on the same edge, same deploy.</span></li>
             <li class="stack__item"><a class="stack__item-name" href="https://developers.cloudflare.com/d1/" target="_blank" rel="noopener">D1</a><span class="stack__item-blurb">SQLite at the edge. The catalog database.</span></li>
-            <li class="stack__item"><a class="stack__item-name" href="https://developers.cloudflare.com/r2/" target="_blank" rel="noopener">R2</a><span class="stack__item-blurb">S3-compatible object storage for assets — thumbnails, legends, captions.</span></li>
+            <li class="stack__item"><a class="stack__item-name" href="https://developers.cloudflare.com/r2/" target="_blank" rel="noopener">R2</a><span class="stack__item-blurb">S3-compatible object storage for assets — HLS video ladders, thumbnails, legends, captions.</span></li>
             <li class="stack__item"><a class="stack__item-name" href="https://developers.cloudflare.com/analytics/analytics-engine/" target="_blank" rel="noopener">Workers Analytics Engine</a><span class="stack__item-blurb">Append-only telemetry sink with SQL-flavoured queries.</span></li>
             <li class="stack__item"><a class="stack__item-name" href="https://developers.cloudflare.com/kv/" target="_blank" rel="noopener">KV</a><span class="stack__item-blurb">Short-lived caches and rate-limit counters at the edge.</span></li>
+            <li class="stack__item"><a class="stack__item-name" href="https://developers.cloudflare.com/vectorize/" target="_blank" rel="noopener">Vectorize</a><span class="stack__item-blurb">Vector index for semantic dataset search; 768-dim embeddings from Workers AI.</span></li>
+            <li class="stack__item"><a class="stack__item-name" href="https://docs.github.com/actions" target="_blank" rel="noopener">GitHub Actions</a><span class="stack__item-blurb">Out-of-band ffmpeg runner that transcodes uploads into the R2-hosted HLS ladder.</span></li>
             <li class="stack__item"><a class="stack__item-name" href="https://developers.cloudflare.com/cloudflare-one/" target="_blank" rel="noopener">Cloudflare Access</a><span class="stack__item-blurb">Staff sign-in for the publisher portal — no password store of our own.</span></li>
           </ul>
         </div>
@@ -8392,7 +8395,7 @@ section figure:not(.hero__qr-figure):not(.cta__qr) img {
             <li class="stack__item"><a class="stack__item-name" href="https://developers.cloudflare.com/workers-ai/" target="_blank" rel="noopener">Cloudflare Workers AI</a><span class="stack__item-blurb">The default Orbit LLM in the web build. Edge-hosted inference; runs out of the box on the same Cloudflare account that serves the catalog. Visitors who configure their own provider override it.</span></li>
             <li class="stack__item"><span class="stack__item-name">OpenAI-compatible</span><span class="stack__item-blurb">Provider-agnostic. Any endpoint that speaks the protocol works.</span></li>
             <li class="stack__item"><span class="stack__item-name"><a href="https://ollama.com/" target="_blank" rel="noopener">Ollama</a> · <a href="https://lmstudio.ai/" target="_blank" rel="noopener">LM Studio</a></span><span class="stack__item-blurb">Local models on desktop. The HTTP allowlist permits localhost.</span></li>
-            <li class="stack__item"><a class="stack__item-name" href="https://developer.apple.com/documentation/FoundationModels" target="_blank" rel="noopener">Apple Intelligence</a><span class="stack__item-blurb">Forthcoming. Foundation Models on iOS — free, private, offline.</span></li>
+            <li class="stack__item"><a class="stack__item-name" href="https://developer.apple.com/documentation/FoundationModels" target="_blank" rel="noopener">Apple Intelligence</a><span class="stack__item-blurb">Foundation Models — on-device Orbit on macOS today; the iOS bridge is forthcoming. Free, private, offline.</span></li>
             <li class="stack__item"><a class="stack__item-name" href="https://developer.android.com/ai/gemini-nano" target="_blank" rel="noopener">Gemini Nano</a><span class="stack__item-blurb">Forthcoming. AICore on Android — same shape, same bridge pattern.</span></li>
           </ul>
         </div>

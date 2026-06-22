@@ -145,7 +145,7 @@
 
         <h3 class="loc__subhead">What's deferred</h3>
         <p class="loc__subhead-hint">
-          L1 (UI chrome) and L1.5 (RTL) ship now. Three further waves are scoped but blocked on the federated catalog backend — same plumbing that makes self-hosted publishing possible.
+          L1 (UI chrome) and L1.5 (RTL) ship now. L2 is unblocked — the publishing backend it depends on has shipped — and is the next wave to build; L3 and L4 still wait on cross-node federation.
         </p>
 
         <div class="loc__waves">
@@ -157,7 +157,7 @@
             <div class="loc__wave-body">
               Per-publisher UI string overrides via an <code>/api/v1/locale/&lt;lang&gt;</code> overlay endpoint, plus a publisher-portal locale-override editor. Lets a partner relabel <em>their</em> deployment without forking the source.
             </div>
-            <span class="loc__wave-block">blocked on Catalog Phase 3</span>
+            <span class="loc__wave-block">Catalog Phase 3 shipped — buildable next</span>
           </div>
 
           <div class="loc__wave">
@@ -168,7 +168,7 @@
             <div class="loc__wave-body">
               Dataset titles, abstracts, and source attribution localized via a <code>dataset_translations</code> sidecar table, CLI <code>--lang</code> sidecar files, and federation propagation of signed translation rows so a translation made at one peer surfaces across the network.
             </div>
-            <span class="loc__wave-block">blocked on Catalog Phases 3 + 4</span>
+            <span class="loc__wave-block">blocked on federation (Phase 4)</span>
           </div>
 
           <div class="loc__wave">
@@ -177,9 +177,9 @@
               <small>tour narration</small>
             </div>
             <div class="loc__wave-body">
-              Tour-author narration translated alongside the tour JSON. Sits on top of L3 plus the tour authoring tooling — the per-language captions need a UI to author and a stable round-trip mechanism through the federation.
+              Tour-author narration translated alongside the tour JSON. The tour authoring tooling has shipped; L4 now sits on top of L3 — the per-language captions need a stable round-trip mechanism through the federation.
             </div>
-            <span class="loc__wave-block">blocked on L3 + tour authoring</span>
+            <span class="loc__wave-block">blocked on L3</span>
           </div>
         </div>
 
