@@ -28,24 +28,31 @@
 
         <h3 class="fed__subhead">Try the portal</h3>
         <p class="fed__subhead-hint">
-          The publisher portal is live today at <code>/publish</code> behind Cloudflare Access — the dataset-entry form, a draft preview against the live globe, and real-time transcode status all ship. An interactive sandboxed embed will land here in a follow-up; until then, the full form spec, validation rules, and CLI surface live in <a href="https://github.com/zyra-project/terraviz/blob/main/docs/CATALOG_PUBLISHING_TOOLS.md" target="_blank" rel="noopener"><code>CATALOG_PUBLISHING_TOOLS.md</code></a>.
+          The publisher portal is live today at <code>/publish</code> behind Cloudflare Access — the dataset-entry form, a draft preview against the live globe, and real-time transcode status all ship. It's embedded below; because staff single sign-on gates it (and Access blocks framing), you may need to open it in a new tab to sign in. The full form spec, validation rules, and CLI surface live in <a href="https://github.com/zyra-project/terraviz/blob/main/docs/CATALOG_PUBLISHING_TOOLS.md" target="_blank" rel="noopener"><code>CATALOG_PUBLISHING_TOOLS.md</code></a>.
         </p>
 
         <figure class="pub__demo" aria-labelledby="pub-demo-caption">
-          <div class="pub__demo-frame">
-            <div class="pub__demo-chrome">
-              <span class="pub__demo-dot pub__demo-dot--r"></span>
-              <span class="pub__demo-dot pub__demo-dot--y"></span>
-              <span class="pub__demo-dot pub__demo-dot--g"></span>
-              <span class="pub__demo-url"><code>terraviz.zyra-project.org/publish</code></span>
-            </div>
-            <div class="pub__demo-body">
-              <div class="pub__demo-label">Interactive publisher dashboard</div>
-              <div class="pub__demo-tag">embed pending · portal live</div>
+          <div class="demo-frame"
+               id="publish-demo"
+               data-state="loading"
+               data-default-src="https://terraviz.zyra-project.org/publish">
+            <button type="button"
+                    class="demo-frame__fullscreen-btn"
+                    data-fullscreen-target="publish-demo"
+                    aria-label="Toggle fullscreen">⤢ Fullscreen</button>
+            <iframe class="demo-frame__iframe"
+                    src="about:blank"
+                    title="Live TerraViz publisher portal at /publish — staff single sign-on required"
+                    loading="lazy"
+                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
+                    referrerpolicy="strict-origin-when-cross-origin"></iframe>
+            <div class="demo-frame__fallback" role="status" aria-live="polite">
+              <p class="demo-frame__fallback-title">Opening the live publisher portal…</p>
+              <p class="demo-frame__fallback-body">The portal is gated by staff single sign-on (Cloudflare Access), which blocks embedding inside another page — so it may not render here. Open <a class="demo-frame__fallback-link" href="https://terraviz.zyra-project.org/publish" target="_blank" rel="noopener">terraviz.zyra-project.org/publish</a> in a new tab to sign in and explore the real thing.</p>
             </div>
           </div>
           <figcaption id="pub-demo-caption" class="pub__demo-caption">
-            What lands here: a sandboxed embed of the publisher portal that lets visitors fill out a draft dataset entry, click <strong>Preview</strong> to see it on the globe, then walk through how the same payload reaches D1 + R2 + Vectorize via the publish path below. No real publish (read-only sandbox); same form, same validation, same preview.
+            The live publisher portal at <code>/publish</code>, embedded. It sits behind staff single sign-on (Cloudflare Access), so signing in opens the real dataset-entry form, draft <strong>Preview</strong> against the globe, asset upload, analytics, and the rest — the same payload path to D1 + R2 + Vectorize described below.
           </figcaption>
         </figure>
 
