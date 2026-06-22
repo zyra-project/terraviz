@@ -31,9 +31,15 @@ engines, and a **Voice-engine** picker (Auto / Browser / Cloud).
 Web Speech) and **Cloudflare** (Whisper, VAD-segmented), the
 **hands-free chat wiring** (partials→input, turn→send, self-trigger
 suspend, mute, listening indicator), and **barge-in + dataset-audio
-ducking**. Remaining Phase 3+ work: a true **WebSocket** streaming path
-(Deepgram Nova-3/Flux on Workers AI) for live partials, **streaming-turn
-telemetry** (§10.4), Phase 3.5 **wake-word**, and Phase 4 (on-device).
+ducking**. **Phase 3.5 wake-word** has now landed too: the on-device
+`WakeWordDetector` + the **openWakeWord ONNX scorer** (built-in `hey
+jarvis`; lazy onnxruntime-web, operator-hosted models, runbook +
+custom-"Hey Orbit" training steps in `docs/ORBIT_WAKEWORD.md`) — pending
+on-hardware validation and the hands-free UI wiring. Remaining Phase 3+
+work: a true **WebSocket** streaming path (Deepgram Nova-3/Flux on
+Workers AI) for live partials, **streaming-turn telemetry** (§10.4), the
+wake-word **hands-free integration** (a wake-arm mode + settings), and
+Phase 4 (on-device).
 
 > Cross-references:
 > [`docs/DOCENT_UX_IMPROVEMENT_PLAN.md`](DOCENT_UX_IMPROVEMENT_PLAN.md)
