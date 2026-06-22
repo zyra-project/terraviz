@@ -130,6 +130,7 @@ npm run screenshots:smoke   # gating interaction tests (search, Orbit, nav)
 | `src/services/voiceService.ts` | Orbit voice foundation — STT/TTS capability detection, provider registry + resolver (`auto` = on-device → browser; `cloud` opt-in only) incl. the Phase 3 realtime streaming-STT registry/resolver, per-locale capability matrix, recognition-language options, spoken-form projection + sentence chunking (`docs/ORBIT_VOICE_PLAN.md`) |
 | `src/services/voiceBrowserEngines.ts` | Phase 1 browser Web Speech engines (`SpeechRecognition` STT + `speechSynthesis` TTS) registered against `voiceService`'s resolver |
 | `src/services/voiceCloudEngines.ts` | Phase 2 Cloudflare-edge voice engines — STT (`/api/voice/transcribe`, Whisper) + TTS (`/api/voice/synthesize`, MeloTTS/Aura); opt-in `cloud` provider, web-only, honours the `KILL_VOICE` cooldown |
+| `src/services/voiceVad.ts` | Phase 3 local voice-activity detection — pure `EnergyVad` energy-threshold state machine (attack/release hysteresis) + thin `startMicVad` Web Audio capture loop; gates mic audio locally before any realtime streaming (`docs/ORBIT_VOICE_PLAN.md` §9.1) |
 | `src/services/uiScaleService.ts` | Runtime side of the `--ui-scale` token (§7.1) |
 | `src/services/shaderSettingsService.ts` | Runtime side of the globe-shader uniforms (§7.2) |
 | `src/services/atmosphereConstants.ts` | Atmospheric-scattering constants + GLSL snippets shared by `earthTileLayer` and the VR/Orbit Earth |
