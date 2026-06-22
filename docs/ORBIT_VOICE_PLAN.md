@@ -23,8 +23,17 @@ also landed: the **Cloudflare-edge STT/TTS** Pages Functions
 (`/api/voice/transcribe` Whisper, `/api/voice/synthesize`
 MeloTTS/Aura) behind `KILL_VOICE`, the opt-in **cloud** client
 engines, and a **Voice-engine** picker (Auto / Browser / Cloud).
-Next: Phase 3 (realtime / hands-free — now also carrying the
-recognition-language override) and Phase 4 (on-device).
+**Phase 3** (realtime / hands-free) has now largely landed too: the
+**recognition-language override**, the **streaming-STT abstraction**
+(registry/resolver + fake), the **local VAD gate** (`EnergyVad`), the
+**`RealtimeVoiceSession`** controller driving **both `open-mic` and
+`push-to-talk`**, concrete streaming engines for **browser** (continuous
+Web Speech) and **Cloudflare** (Whisper, VAD-segmented), the
+**hands-free chat wiring** (partials→input, turn→send, self-trigger
+suspend, mute, listening indicator), and **barge-in + dataset-audio
+ducking**. Remaining Phase 3+ work: a true **WebSocket** streaming path
+(Deepgram Nova-3/Flux on Workers AI) for live partials, **streaming-turn
+telemetry** (§10.4), Phase 3.5 **wake-word**, and Phase 4 (on-device).
 
 > Cross-references:
 > [`docs/DOCENT_UX_IMPROVEMENT_PLAN.md`](DOCENT_UX_IMPROVEMENT_PLAN.md)
@@ -480,7 +489,7 @@ requirement** that pulls realtime ahead of on-device).
 | **0 — Spike** | `voiceService.ts` skeleton + capability detection; throwaway prototype wiring Web Speech STT into `handleSend()` and `speechSynthesis` onto a reply. Validate UX, latency, the sentence-chunking. | branch only | none | none |
 | **1 — Web MVP** | Mic button + listening UI + interim transcript; auto-speak toggle (**default off**); settings rows; i18n + a11y + scenes + Tier B telemetry. **Browser APIs only.** | web | none | none |
 | **2 — Cloud STT/TTS + guards** | `functions/api/voice/{transcribe,synthesize}.ts` over the `AI` binding (Whisper turbo STT; **MeloTTS default**, Aura-2 opt-in); `voiceProvider` resolver; desktop via `corsFetch`. **`KILL_VOICE` env + per-session usage caps + client cooldown land here.** | web + desktop | 2 Pages Functions | edge inference |
-| **3 — Realtime / hands-free** *(committed — exhibit req.)* | Deepgram **Flux** turn detection + **Nova-3/Flux WebSocket** streaming partials; always-listening with **local VAD gating before any audio is streamed**, clear listening indicator + mute; **barge-in**; "Stop speaking" → "interrupt" upgrade. Plus the **recognition-language override** (`voiceLang`) — UI control to decouple spoken language from UI locale (the plumbing already lands in Phases 1–2; only the settings control is outstanding). | web + desktop | WS proxy / Realtime | edge inference |
+| **3 — Realtime / hands-free** *(committed — exhibit req.; **largely shipped**)* | **Shipped:** local VAD gating before any audio streams, listening indicator + mute, **barge-in** ("Stop speaking" → "interrupt"), dataset-audio ducking, both **open-mic** and **push-to-talk**, browser (continuous Web Speech) + **Cloudflare Whisper (VAD-segmented)** streaming engines, and the **recognition-language override** (`voiceLang`). **Remaining:** the true **WebSocket** path (Deepgram **Flux** turn detection + **Nova-3/Flux** streaming partials) for live interim transcripts, and streaming-turn telemetry. | web + desktop | WS proxy / Realtime | edge inference |
 | **3.5 — Wake-word** *(committed)* | "Hey Orbit" off-the-shelf small wake model to arm listening hands-free in the exhibit. | web + desktop | local / WS | edge inference |
 | **4 — On-device / private** | WebGPU Whisper + local TTS (`transformers.js`); Apple Speech/AVSpeechSynthesizer on macOS Tauri; "private mode." | web (WebGPU) + desktop | none (local) | none |
 | **5 — Character & VR** | Orbit-character speaking animation / amplitude lip-sync; wire `voiceService` into the VR docent (`VR_INVESTIGATION_PLAN.md` §5); optional spatial audio. | web + VR | reuse | reuse |
