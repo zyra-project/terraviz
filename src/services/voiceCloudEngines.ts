@@ -24,6 +24,7 @@ import {
   type TtsEngine,
   type StreamingSttEngine,
 } from './voiceService'
+import { createWsStreamingSttEngine } from './voiceWsStreaming'
 import { logger } from '../utils/logger'
 
 const IS_TAURI = typeof window !== 'undefined' && !!(window as unknown as Record<string, unknown>).__TAURI__
@@ -272,6 +273,15 @@ export const cloudStreamingSttEngine: StreamingSttEngine = {
 export function registerCloudVoiceEngines(): void {
   if (IS_TAURI) return
   registerSttEngine(cloudSttEngine)
+  // Realtime WS streaming (live partials) is preferred for `cloud`
+  // streaming when the deploy opts in (the AI Gateway must be
+  // configured — see /api/voice/stream). Registered first so it wins
+  // the provider (the registry dedupes); otherwise the batch Whisper
+  // engine remains the reliable default. Default off so deploys that
+  // haven't set up the gateway are unaffected.
+  if (import.meta.env.VITE_VOICE_WS_STREAMING === 'true') {
+    registerStreamingSttEngine(createWsStreamingSttEngine())
+  }
   registerStreamingSttEngine(cloudStreamingSttEngine)
   registerTtsEngine(cloudTtsEngine)
   logger.debug('[voice] cloud engines registered (opt-in via provider=cloud)')

@@ -146,6 +146,21 @@ describe('cloud streaming STT', () => {
     expect(resolveStreamingSttEngine('auto', 'en', ALL_CAPS)).toBeNull()
   })
 
+  it('prefers the realtime WS engine when VITE_VOICE_WS_STREAMING is on', () => {
+    // Default (flag off) → batch engine is the cloud streaming provider.
+    registerCloudVoiceEngines()
+    expect(resolveStreamingSttEngine('cloud', 'en', ALL_CAPS)).toBe(cloudStreamingSttEngine)
+
+    // Flag on → the WS engine wins the `cloud` provider slot.
+    resetVoiceEngines()
+    vi.stubEnv('VITE_VOICE_WS_STREAMING', 'true')
+    registerCloudVoiceEngines()
+    const engine = resolveStreamingSttEngine('cloud', 'en', ALL_CAPS)
+    expect(engine).not.toBe(cloudStreamingSttEngine)
+    expect(engine?.provider).toBe('cloud')
+    vi.unstubAllEnvs()
+  })
+
   it('records the provided stream and emits a turn on stop (without owning the mic)', async () => {
     let onstop: (() => void) | null = null
     class FakeRecorder {
