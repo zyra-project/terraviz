@@ -128,6 +128,11 @@ export interface SegmentManifest {
   epoch: string | null
   /** Informational: the dataset's cadence at write time. */
   period: string | null
+  /** Per-rendition `CODECS` string (e.g. `stream_0` → `avc1.4d4033`),
+   *  parsed from ffmpeg's own master on the first encode and carried
+   *  forward so reuse-only runs still emit `CODECS` in the master.
+   *  Absent only for manifests written before this was tracked. */
+  codecs?: Record<string, string>
   /** Rendition ids present in `chunks[*].segments`, in ladder order. */
   renditions: RenditionDescriptor[]
   /** Live chunks in playback order. */
@@ -300,7 +305,7 @@ export function finalizeManifest(
   plan: SegmentPlan,
   renditions: readonly RenditionDescriptor[],
   extinfByHex: ReadonlyMap<string, number>,
-  meta: { epoch: string | null; period: string | null },
+  meta: { epoch: string | null; period: string | null; codecs?: Record<string, string> },
 ): SegmentManifest {
   const chunks: ManifestChunk[] = plan.plannedChunks.map(planned => {
     const segments: Record<string, SegmentRef> = {}
@@ -322,6 +327,7 @@ export function finalizeManifest(
     version: 1,
     epoch: meta.epoch,
     period: meta.period,
+    ...(meta.codecs ? { codecs: meta.codecs } : {}),
     renditions: [...renditions],
     chunks,
   }
@@ -351,6 +357,14 @@ function formatExtinf(seconds: number): string {
  * Matches the shape ffmpeg's HLS muxer emits (VERSION 3, VOD type,
  * per-segment `#EXTINF`, `#EXT-X-ENDLIST`) so hls.js/Safari play it
  * identically. `#EXT-X-TARGETDURATION` is `ceil(max EXTINF)`.
+ *
+ * Each segment is encoded independently, so its internal PTS restarts
+ * at the muxer's base (~1.4 s) rather than continuing the previous
+ * segment's timeline. `#EXT-X-DISCONTINUITY` before every segment
+ * after the first tells the player to reset its timestamp mapping at
+ * each boundary — without it, hls.js sees overlapping PTS across
+ * segments and stalls. (A single-segment playlist needs no
+ * discontinuity; the first fragment's PTS offset is handled natively.)
  */
 export function buildVariantPlaylist(segments: readonly SegmentRef[]): string {
   const target = segments.reduce((max, s) => Math.max(max, s.extinf), 0)
@@ -361,10 +375,11 @@ export function buildVariantPlaylist(segments: readonly SegmentRef[]): string {
     '#EXT-X-MEDIA-SEQUENCE:0',
     '#EXT-X-PLAYLIST-TYPE:VOD',
   ]
-  for (const seg of segments) {
+  segments.forEach((seg, i) => {
+    if (i > 0) lines.push('#EXT-X-DISCONTINUITY')
     lines.push(`#EXTINF:${formatExtinf(seg.extinf)},`)
     lines.push(segmentUri(seg.hex))
-  }
+  })
   lines.push('#EXT-X-ENDLIST')
   return lines.join('\n') + '\n'
 }
@@ -376,8 +391,13 @@ export interface MasterVariant {
   bandwidth: number
   width: number
   height: number
-  /** Optional `CODECS` attribute (e.g. probed `avc1.4d4028`). hls.js
-   *  tolerates its absence; include it when known. */
+  /** `CODECS` attribute (e.g. `avc1.4d4033`). hls.js needs this to set
+   *  up MSE before the first segment is probed — omitting it leaves the
+   *  player unable to reach `canplay` for some content. The incremental
+   *  runner refuses to publish unless every rendition has one (falling
+   *  back to a full encode otherwise), so incremental masters always
+   *  carry it; the field stays optional here because this is a general
+   *  builder also exercised without codecs. */
   codecs?: string
 }
 

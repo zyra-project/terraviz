@@ -47,8 +47,12 @@ function makeFakes(prev: SegmentManifest | null = null) {
       encodeCalls.push(fr.length)
       // One byte-blob per rendition; content irrelevant to the test.
       const segments: Record<string, Uint8Array> = {}
-      for (const r of RENDITIONS) segments[r.id] = new Uint8Array([fr.length])
-      return { segments, extinf: fr.length / 30 }
+      const codecs: Record<string, string> = {}
+      for (const r of RENDITIONS) {
+        segments[r.id] = new Uint8Array([fr.length])
+        codecs[r.id] = 'avc1.4d4028'
+      }
+      return { segments, extinf: fr.length / 30, codecs }
     },
     segmentExists: async hex => segmentStore.has(hex),
     putSegment: async (hex, _body) => {
@@ -100,6 +104,56 @@ describe('runIncremental', () => {
     expect(fakes.savedManifest?.chunks).toHaveLength(3)
     expect(fakes.savedManifest?.epoch).toBe('2026-01-01T00:00:00.000Z')
     expect(Object.keys(fakes.uploadedPlaylists ?? {})).toContain('master.m3u8')
+    // CODECS from the encode are persisted and emitted in the master.
+    expect(fakes.savedManifest?.codecs).toEqual({
+      stream_0: 'avc1.4d4028',
+      stream_1: 'avc1.4d4028',
+      stream_2: 'avc1.4d4028',
+    })
+    expect(fakes.uploadedPlaylists?.['master.m3u8']).toContain('CODECS="avc1.4d4028"')
+    // Multi-segment variant playlists carry discontinuity tags between
+    // independently-encoded segments (3 chunks → 2 boundaries).
+    const variant = fakes.uploadedPlaylists?.['stream_0/playlist.m3u8'] ?? ''
+    expect((variant.match(/#EXT-X-DISCONTINUITY/g) ?? []).length).toBe(2)
+  })
+
+  it('reuse-only run inherits CODECS from the prior manifest', async () => {
+    const prev = await coldRun(frames(360))
+    expect(prev.codecs).toBeTruthy()
+    const fakes = makeFakes(prev)
+    // Same frames → every chunk reused, no fresh encode this run.
+    await runIncremental(fakes.deps, params(frames(360), 0))
+    expect(fakes.encodeCalls).toEqual([])
+    expect(fakes.savedManifest?.codecs).toEqual(prev.codecs)
+    expect(fakes.uploadedPlaylists?.['master.m3u8']).toContain('CODECS=')
+  })
+
+  it('refuses to publish (throws → full-encode fallback) when no CODECS are available', async () => {
+    // A pre-codecs manifest reused wholesale: no fresh encode, no
+    // persisted codecs → publishing would reproduce the incident.
+    const prev = await coldRun(frames(360))
+    const prevNoCodecs = { ...prev }
+    delete prevNoCodecs.codecs
+    const fakes = makeFakes(prevNoCodecs)
+    await expect(runIncremental(fakes.deps, params(frames(360), 0))).rejects.toThrow(/no CODECS/)
+    // Nothing was published — the caller falls back to a full encode.
+    expect(fakes.savedManifest).toBeNull()
+    expect(fakes.uploadedPlaylists).toBeNull()
+  })
+
+  it('bails before uploading any segment when an encode yields no CODECS (no storage leak)', async () => {
+    const fakes = makeFakes(null)
+    // Cold start that encodes chunks but whose encoder reports no codecs
+    // (e.g. ffmpeg master parse failure). The guard must fire before the
+    // first putSegment so no orphaned content-addressed segments leak.
+    fakes.deps.encodeChunk = async fr => {
+      const segments: Record<string, Uint8Array> = {}
+      for (const r of RENDITIONS) segments[r.id] = new Uint8Array([fr.length])
+      return { segments, extinf: fr.length / 30 } // no codecs
+    }
+    await expect(runIncremental(fakes.deps, params(frames(400), 0))).rejects.toThrow(/no CODECS/)
+    expect(fakes.puts).toEqual([]) // nothing uploaded → no orphaned segments
+    expect(fakes.savedManifest).toBeNull()
   })
 
   it('append: reuses interior chunks, encodes only the grown tail', async () => {
@@ -184,8 +238,12 @@ describe('runIncremental', () => {
     // playlist rather than recomputing it.
     fakes.deps.encodeChunk = async fr => {
       const segments: Record<string, Uint8Array> = {}
-      for (const r of RENDITIONS) segments[r.id] = new Uint8Array([fr.length])
-      return { segments, extinf: 1.234567 }
+      const codecs: Record<string, string> = {}
+      for (const r of RENDITIONS) {
+        segments[r.id] = new Uint8Array([fr.length])
+        codecs[r.id] = 'avc1.4d4028'
+      }
+      return { segments, extinf: 1.234567, codecs }
     }
     await runIncremental(fakes.deps, params(frames(40), 0)) // 1 partial chunk
     const variant = fakes.uploadedPlaylists?.['stream_0/playlist.m3u8'] ?? ''

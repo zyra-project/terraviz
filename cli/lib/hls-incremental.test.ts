@@ -250,6 +250,22 @@ describe('playlist builders', () => {
     expect(pl.trimEnd().endsWith('#EXT-X-ENDLIST')).toBe(true)
   })
 
+  it('buildVariantPlaylist marks a discontinuity before each independently-encoded segment after the first', () => {
+    // 3 segments → 2 boundaries; the tag precedes segments 2 and 3 only
+    // (the first fragment needs none).
+    const multi = buildVariantPlaylist([
+      { hex: 'aaa', extinf: 6 },
+      { hex: 'bbb', extinf: 6 },
+      { hex: 'ccc', extinf: 6 },
+    ])
+    expect((multi.match(/#EXT-X-DISCONTINUITY/g) ?? []).length).toBe(2)
+    expect(multi.indexOf('#EXTINF')).toBeLessThan(multi.indexOf('#EXT-X-DISCONTINUITY'))
+    // A single-segment playlist (the drought case) carries no
+    // discontinuity tag.
+    const single = buildVariantPlaylist([{ hex: 'aaa', extinf: 1.7 }])
+    expect(single).not.toContain('#EXT-X-DISCONTINUITY')
+  })
+
   it('buildMasterPlaylist lists each variant with BANDWIDTH + RESOLUTION', () => {
     const m = buildMasterPlaylist([
       { id: 'stream_0', bandwidth: 25_000_000, width: 4096, height: 2048, codecs: 'avc1.4d4028' },

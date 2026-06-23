@@ -131,9 +131,25 @@ CRF, `preset slow`, `profile main`, `yuv420p`, `OUTPUT_FRAME_RATE`). Feed ≤180
 → exactly one keyframe-led segment per rendition. CRF keeps per-frame quality uniform;
 the only GOP boundary is the chunk seam, which is **already** a segment boundary in
 the monolithic encode — no new seams. Read the produced `#EXTINF` (don't assume 6.0).
-`hasAudio=false` (frames are silent). Keep `#EXT-X-DISCONTINUITY` as a fallback knob
-if a strict player trips on discontinuous internal PTS (not expected for VOD with
-correct EXTINF).
+`hasAudio=false` (frames are silent).
+
+**Playlist faithfulness (required, learned in production).** Each chunk is encoded
+as a standalone HLS output, so two details of ffmpeg's own playlists must be
+reproduced or hls.js stalls:
+
+- **`CODECS` in the master.** ffmpeg's master declares
+  `CODECS="avc1.4d40xx"` per rendition; hls.js needs it to set up MSE before the
+  first segment is probed. The hand-built master parses ffmpeg's emitted
+  `master.m3u8` for the exact strings (`parseMasterCodecs`) and persists them in the
+  segment manifest so reuse-only runs still emit them. Omitting `CODECS` leaves the
+  player unable to reach `canplay` (the first shipped version did this and broke a
+  live single-segment dataset).
+- **`#EXT-X-DISCONTINUITY` between segments.** Each independently-encoded segment
+  restarts its internal PTS at the muxer base (~1.4 s) rather than continuing the
+  prior segment's timeline, so a discontinuity tag precedes every segment after the
+  first; without it hls.js sees overlapping PTS across segments and stalls. A
+  single-segment playlist needs none (the first fragment's PTS offset is handled
+  natively — exactly like ffmpeg's monolithic single-segment output).
 
 ## Files
 
