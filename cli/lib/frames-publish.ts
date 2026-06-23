@@ -248,8 +248,10 @@ export async function publishFrameSequence(
   }
   const body = init.body
 
-  const attempts = options.putAttempts ?? DEFAULT_PUT_ATTEMPTS
-  const delayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS
+  // Clamp to sane values so a stray option (0, negative, float) can't
+  // produce zero/odd attempts and silently weaken the upload.
+  const attempts = Math.max(1, Math.floor(options.putAttempts ?? DEFAULT_PUT_ATTEMPTS))
+  const delayMs = Math.max(0, options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS)
 
   if (body.mock) {
     log(`frames-publish: mock mode — skipping ${frames.length} frame PUTs + manifest`)

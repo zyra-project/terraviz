@@ -196,4 +196,13 @@ describe('publishFrameSequence', () => {
     ).rejects.toThrow(/\(403\).*after 1 attempt/)
     expect(calls.putUrls).toHaveLength(1) // one attempt, no retry
   })
+
+  it('clamps a stray putAttempts: 0 up to a single attempt', async () => {
+    const dir = tmpFrames({ 'f_1.png': 'a' })
+    const { client, calls } = makeStubClient({ onUpload: () => ({ ok: false, status: 500, message: 'x' }) })
+    await expect(
+      publishFrameSequence(client, 'DATASET01', dir, { concurrency: 1, putAttempts: 0, retryDelayMs: 0 }),
+    ).rejects.toThrow(/after 1 attempt/)
+    expect(calls.putUrls).toHaveLength(1) // clamped to 1, not 0
+  })
 })
