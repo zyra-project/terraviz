@@ -106,7 +106,10 @@ export async function runIncremental(
   // manifest exists its epoch is authoritative — the caller is
   // expected to derive `offset` from it, but enforce here too so a
   // drifted `params.epoch` can't silently corrupt the persisted grid.
-  const epoch = prev?.epoch ?? params.epoch
+  // Use an explicit prev-presence check (not `??`) so a prior
+  // `epoch: null` (pure-sequence manifest) is preserved even if the
+  // caller passes a non-null epoch.
+  const epoch = prev ? prev.epoch : params.epoch
   if (prev && prev.epoch !== params.epoch) {
     log(
       `WARN: ignoring caller epoch ${params.epoch ?? 'null'} — keeping frozen ` +

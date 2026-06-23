@@ -202,4 +202,16 @@ describe('runIncremental', () => {
     await runIncremental(fakes.deps, params(frames(360), 0, '2027-06-15T12:00:00.000Z'))
     expect(fakes.savedManifest?.epoch).toBe('2026-01-01T00:00:00.000Z')
   })
+
+  it('preserves a prior null epoch over a non-null caller epoch', async () => {
+    // A pure-sequence manifest has epoch=null; that must stay frozen
+    // even if the caller passes a non-null epoch (the `??` trap).
+    const cold = makeFakes(null)
+    await runIncremental(cold.deps, params(frames(360), 0, null))
+    const prev = cold.savedManifest!
+    expect(prev.epoch).toBeNull()
+    const fakes = makeFakes(prev)
+    await runIncremental(fakes.deps, params(frames(360), 0, '2027-06-15T12:00:00.000Z'))
+    expect(fakes.savedManifest?.epoch).toBeNull()
+  })
 })

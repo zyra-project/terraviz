@@ -154,7 +154,15 @@ export function gridOffset(
   ) {
     return null
   }
-  return Math.round((startTimeMs - epochMs) / periodMs)
+  // The first frame must land exactly on a cadence step from the
+  // frozen epoch (the sequence is contiguous at `period`). If
+  // `start_time` has drifted off the grid, rounding would silently
+  // mis-bucket every frame into the wrong absolute chunk — return null
+  // so the caller falls back to a full encode instead.
+  const steps = (startTimeMs - epochMs) / periodMs
+  const rounded = Math.round(steps)
+  if (Math.abs(steps - rounded) > 1e-6) return null
+  return rounded
 }
 
 /**

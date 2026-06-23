@@ -58,6 +58,16 @@ describe('gridOffset', () => {
     expect(gridOffset(NaN, 0, 600)).toBeNull()
     expect(gridOffset(0, 0, -600)).toBeNull()
   })
+  it('returns null when start is off the cadence grid', () => {
+    const period = 600_000 // 10 min
+    // 3.5 steps after epoch — not an integer number of periods, so the
+    // grid is unusable and the caller must fall back to a full encode.
+    expect(gridOffset(3.5 * period, 0, period)).toBeNull()
+    // Even a small drift (one second on a 10-minute cadence) is off-grid.
+    expect(gridOffset(period + 1_000, 0, period)).toBeNull()
+    // Exact alignment still rounds cleanly.
+    expect(gridOffset(4 * period, 0, period)).toBe(4)
+  })
 })
 
 describe('computeChunkGrid', () => {
