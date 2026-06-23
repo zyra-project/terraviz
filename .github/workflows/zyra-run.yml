@@ -106,12 +106,21 @@ jobs:
       - name: Run Zyra pipeline
         env:
           ZYRA_IMAGE: ${{ vars.ZYRA_SCHEDULER_IMAGE || '' }}
+          # Verbosity for the in-container `zyra run`. Defaults to debug
+          # so a failing stage (e.g. a flaky `acquire ftp` against NOAA's
+          # server) surfaces its actual error + any internal retries,
+          # instead of a bare "Stage N failed with exit code 2". Quiet it
+          # later without a commit via the ZYRA_VERBOSITY repo variable.
+          ZYRA_VERBOSITY: ${{ vars.ZYRA_VERBOSITY || 'debug' }}
         run: |
           set -euo pipefail
           IMAGE="${ZYRA_IMAGE:-$ZYRA_IMAGE_DEFAULT}"
           echo "runner image: $IMAGE"
+          echo "zyra verbosity: $ZYRA_VERBOSITY"
           docker run --rm --entrypoint "" --user 0 \
             -v "$PWD/_work:/work" \
+            -e "ZYRA_VERBOSITY=$ZYRA_VERBOSITY" \
+            -e "DATAVIZHUB_VERBOSITY=$ZYRA_VERBOSITY" \
             "$IMAGE" \
             bash -c '
               set -euo pipefail
