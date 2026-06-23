@@ -572,6 +572,56 @@ export async function postTranscodeComplete(
   }
 }
 
+/**
+ * Report a FAILED transcode so the dataset row's `transcoding` lock is
+ * released — it would otherwise stick forever, blocking re-uploads and
+ * showing a perpetual in-progress state. Called from the transcode-hls
+ * workflow's failure/cancellation step, which covers the job timeout
+ * that SIGKILLs the main runner before it can post `transcode-complete`.
+ * Best-effort, but surfaces real problems (auth, wrong deploy) the same
+ * way `postTranscodeComplete` does so the operator sees a stuck row.
+ */
+export async function postTranscodeFailed(
+  server: ServerEnv,
+  datasetId: string,
+  uploadId: string,
+  errorSummary: string,
+): Promise<void> {
+  const url = `${server.server}/api/v1/publish/datasets/${datasetId}/transcode-failed`
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      'CF-Access-Client-Id': server.accessClientId,
+      'CF-Access-Client-Secret': server.accessClientSecret,
+    },
+    body: JSON.stringify({ upload_id: uploadId, error_summary: errorSummary }),
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    if (isCloudflareChallenge(res.headers.get('content-type'), body)) {
+      throw new Error(
+        `transcode-failed blocked by Cloudflare's WAF managed challenge (status ${res.status}). ` +
+          `Access service tokens bypass Access but not Bot Fight Mode / WAF managed rules — see ` +
+          `docs/SELF_HOSTING.md §8e for the WAF skip rule.`,
+      )
+    }
+    throw new Error(`transcode-failed returned ${res.status}: ${body}`)
+  }
+  // Same wrong-deploy guard as transcode-complete: an SPA index.html
+  // served with 200 for an unmatched API path would otherwise read as
+  // a successful lock release.
+  const contentType = res.headers.get('content-type') ?? ''
+  if (!contentType.toLowerCase().includes('application/json')) {
+    const snippet = (await res.text().catch(() => '')).slice(0, 200).replace(/\s+/g, ' ').trim()
+    throw new Error(
+      `transcode-failed returned 2xx with non-JSON content-type "${contentType}" — the route ` +
+        `handler did not run (deploy predates /transcode-failed?). Body preview: ${snippet}`,
+    )
+  }
+}
+
 /** The dataset's time-coverage grid, the basis for absolute-grid
  *  chunking (`docs/INCREMENTAL_HLS_PLAN.md` §1). */
 interface DatasetGrid {

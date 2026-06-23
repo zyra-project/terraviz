@@ -1091,6 +1091,40 @@ export async function clearTranscoding(
 }
 
 /**
+ * Failure counterpart to `clearTranscoding`: the transcode job failed
+ * (encode error, or the GHA job timeout that SIGKILLs the runner before
+ * it can post `/transcode-complete`), so no bundle was produced.
+ *
+ * Release the transcode lock — `transcoding = NULL`,
+ * `active_transcode_upload_id = NULL` — and leave `data_ref`,
+ * `content_digest`, and the `frame_*` columns exactly as the stamp HELD
+ * them: on a re-upload to a published row those still hold the prior
+ * published bundle, so dropping the lock reverts the row to its last
+ * good state; on a draft they stay unset. Guarded by the active-upload
+ * binding so a stale failure callback can't unstick a *newer* upload's
+ * in-flight transcode. Returns the affected row count (0 ⇒ the binding
+ * had already moved on).
+ */
+export async function abandonTranscoding(
+  db: D1Database,
+  datasetId: string,
+  uploadId: string,
+  now: string,
+): Promise<number> {
+  const result = await db
+    .prepare(
+      `UPDATE datasets
+         SET transcoding = NULL,
+             active_transcode_upload_id = NULL,
+             updated_at = ?
+       WHERE id = ? AND active_transcode_upload_id = ?`,
+    )
+    .bind(now, datasetId, uploadId)
+    .run()
+  return result.meta?.changes ?? 0
+}
+
+/**
  * Build (but do not execute) the `UPDATE datasets` statement for a
  * verified upload. Returns a prepared+bound D1PreparedStatement so
  * callers can either run it directly or include it in a batch.
