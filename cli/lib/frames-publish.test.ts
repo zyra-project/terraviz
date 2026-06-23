@@ -85,7 +85,9 @@ describe('buildSourceFilenames', () => {
 
 /** Minimal stub of the TerravizClient surface publishFrameSequence
  *  touches, recording calls for assertions. */
-function makeStubClient(opts: { mock?: boolean } = {}) {
+function makeStubClient(
+  opts: { mock?: boolean; onUpload?: (url: string) => { ok: boolean; status: number; message?: string } } = {},
+) {
   const calls = {
     init: [] as unknown[],
     putUrls: [] as string[],
@@ -123,7 +125,7 @@ function makeStubClient(opts: { mock?: boolean } = {}) {
     },
     uploadBytes: (_target: string, url: string) => {
       calls.putUrls.push(url)
-      return Promise.resolve({ ok: true, status: 200 })
+      return Promise.resolve(opts.onUpload?.(url) ?? { ok: true, status: 200 })
     },
     completeAssetUpload: (datasetId: string, uploadId: string) => {
       calls.complete.push([datasetId, uploadId])
@@ -158,5 +160,49 @@ describe('publishFrameSequence', () => {
     expect(result.mock).toBe(true)
     expect(calls.putUrls).toHaveLength(0)
     expect(calls.complete).toEqual([['DATASET01', 'UPLOAD01']])
+  })
+
+  it('retries a transient 500 PUT and succeeds (R2 InternalError)', async () => {
+    const dir = tmpFrames({ 'f_1.png': 'a' })
+    const failedOnce = new Set<string>()
+    const { client, calls } = makeStubClient({
+      onUpload: url => {
+        if (!failedOnce.has(url)) {
+          failedOnce.add(url)
+          return { ok: false, status: 500, message: 'InternalError' }
+        }
+        return { ok: true, status: 200 }
+      },
+    })
+    const result = await publishFrameSequence(client, 'DATASET01', dir, { concurrency: 1, retryDelayMs: 0 })
+    expect(result.frameCount).toBe(1)
+    // frame PUT (1 fail + 1 ok) + manifest PUT (1 fail + 1 ok) = 4 calls.
+    expect(calls.putUrls).toHaveLength(4)
+  })
+
+  it('gives up after putAttempts on a persistent 5xx and reports the attempt count', async () => {
+    const dir = tmpFrames({ 'f_1.png': 'a' })
+    const { client } = makeStubClient({ onUpload: () => ({ ok: false, status: 503, message: 'unavailable' }) })
+    await expect(
+      publishFrameSequence(client, 'DATASET01', dir, { concurrency: 1, putAttempts: 3, retryDelayMs: 0 }),
+    ).rejects.toThrow(/after 3 attempt\(s\)/)
+  })
+
+  it('does not retry a deterministic 4xx', async () => {
+    const dir = tmpFrames({ 'f_1.png': 'a' })
+    const { client, calls } = makeStubClient({ onUpload: () => ({ ok: false, status: 403, message: 'forbidden' }) })
+    await expect(
+      publishFrameSequence(client, 'DATASET01', dir, { concurrency: 1, putAttempts: 4, retryDelayMs: 0 }),
+    ).rejects.toThrow(/\(403\).*after 1 attempt/)
+    expect(calls.putUrls).toHaveLength(1) // one attempt, no retry
+  })
+
+  it('clamps a stray putAttempts: 0 up to a single attempt', async () => {
+    const dir = tmpFrames({ 'f_1.png': 'a' })
+    const { client, calls } = makeStubClient({ onUpload: () => ({ ok: false, status: 500, message: 'x' }) })
+    await expect(
+      publishFrameSequence(client, 'DATASET01', dir, { concurrency: 1, putAttempts: 0, retryDelayMs: 0 }),
+    ).rejects.toThrow(/after 1 attempt/)
+    expect(calls.putUrls).toHaveLength(1) // clamped to 1, not 0
   })
 })

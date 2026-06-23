@@ -50,6 +50,7 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `cli/rollback-r2-tours.ts` | `terraviz rollback-r2-tours` — undo a migrated tour |
 | `cli/terraviz.ts` | `terraviz` CLI entry point |
 | `cli/transcode-from-dispatch.ts` | `transcode-from-dispatch` — invoked by the `transcode-hls` GitHub Actions workflow when the publisher portal fires a `repository_dispatch` after a video upload lands in R2 |
+| `cli/report-transcode-failure.ts` | `report-transcode-failure` — the `transcode-hls` workflow's failure/cancellation step; POSTs `/transcode-failed` to release a dataset's stuck `transcoding` lock when the encode errors or the job times out (the timeout SIGKILLs the main runner before it can self-report) |
 | `cli/verify-deploy.ts` | `terraviz verify-deploy` — operator-friendly post-deploy smoke-test command |
 | `cli/zyra-publish-from-dispatch.ts` | `zyra-publish-from-dispatch` — Phase Z1 runner CLI (fetch / restore-frames / save-frames / publish / report-failure phases) invoked by the `zyra-run` GitHub Actions workflow |
 | `cli/zyra-spike-publish.ts` | `zyra-spike-publish` — Phase Z0 spike (see `docs/ZYRA_INTEGRATION_PLAN.md`): ffprobe SOS-spec assertion + publish-API leg for an MP4 a Zyra pipeline rendered on the runner; invoked by the manual `zyra-spike` GitHub Actions workflow |
@@ -111,6 +112,7 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `functions/api/v1/publish/datasets/[id]/reindex.ts` | POST /api/v1/publish/datasets/{id}/reindex |
 | `functions/api/v1/publish/datasets/[id]/retract.ts` | POST /api/v1/publish/datasets/{id}/retract |
 | `functions/api/v1/publish/datasets/[id]/transcode-complete.ts` | POST /api/v1/publish/datasets/{id}/transcode-complete |
+| `functions/api/v1/publish/datasets/[id]/transcode-failed.ts` | POST /api/v1/publish/datasets/{id}/transcode-failed — failure counterpart; releases the `transcoding` lock (leaves `data_ref` on the prior bundle) when the transcode job errors or times out |
 | `functions/api/v1/publish/featured-hero.ts` | /api/v1/publish/featured-hero — the "Right now" hero admin write API (Phase B of `docs/HERO_ADMIN_SCOPING.md`) |
 | `functions/api/v1/publish/featured.ts` | /api/v1/publish/featured |
 | `functions/api/v1/publish/featured/[dataset_id].ts` | /api/v1/publish/featured/{dataset_id} |

@@ -197,6 +197,27 @@ jobs:
               --cleanup-on-failure
           fi
 
+      # Release the dataset's `transcoding` lock when the encode failed
+      # or — the common case — the job hit `timeout-minutes` and was
+      # cancelled, which SIGKILLs the runner above before it can post
+      # `transcode-complete`. `failure() || cancelled()` covers both and
+      # never fires on success. The server leaves `data_ref` on the
+      # prior good bundle and is idempotent, so this is safe to run.
+      - name: Report transcode failure
+        if: ${{ failure() || cancelled() }}
+        env:
+          TERRAVIZ_SERVER: ${{ secrets.TERRAVIZ_SERVER }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          PAYLOAD_DATASET_ID: ${{ github.event.client_payload.dataset_id }}
+          PAYLOAD_UPLOAD_ID: ${{ github.event.client_payload.upload_id }}
+        run: |
+          set -euo pipefail
+          npx tsx cli/report-transcode-failure.ts \
+            --dataset-id="$PAYLOAD_DATASET_ID" \
+            --upload-id="$PAYLOAD_UPLOAD_ID" \
+            --error-summary="Transcode failed or timed out in GitHub Actions run ${{ github.run_id }} — see the Actions log."
+
       - name: Summarise outcome
         if: always()
         env:
@@ -206,5 +227,5 @@ jobs:
           if [ "$JOB_STATUS" = "success" ]; then
             echo "::notice::Transcode complete for $PAYLOAD_DATASET_ID"
           else
-            echo "::error::Transcode failed for $PAYLOAD_DATASET_ID (job status: $JOB_STATUS). The dataset row is still flagged transcoding=1; an operator can clear it manually after diagnosing or trigger a retry by re-uploading."
+            echo "::error::Transcode failed for $PAYLOAD_DATASET_ID (job status: $JOB_STATUS). The Report-transcode-failure step attempts to release the dataset's transcoding lock — if that step also failed (see its log), clear it manually. Then retry the publish from the dashboard."
           fi
