@@ -46,9 +46,9 @@ function makeFakes(prev: SegmentManifest | null = null) {
     encodeChunk: async fr => {
       encodeCalls.push(fr.length)
       // One byte-blob per rendition; content irrelevant to the test.
-      const out: Record<string, Uint8Array> = {}
-      for (const r of RENDITIONS) out[r.id] = new Uint8Array([fr.length])
-      return out
+      const segments: Record<string, Uint8Array> = {}
+      for (const r of RENDITIONS) segments[r.id] = new Uint8Array([fr.length])
+      return { segments, extinf: fr.length / 30 }
     },
     segmentExists: async hex => segmentStore.has(hex),
     putSegment: async (hex, _body) => {
@@ -175,5 +175,31 @@ describe('runIncremental', () => {
     const result = await runIncremental(fakes.deps, params(frames(540), 0))
     expect(result.prunedSegments).toBe(0)
     expect(result.reusedChunks).toBe(3) // the publish itself succeeded
+  })
+
+  it('writes the encoder-emitted #EXTINF verbatim (not frames/30)', async () => {
+    const fakes = makeFakes(null)
+    // Return a duration the muxer might emit that is NOT frames/30, to
+    // prove the runner carries the measured value through to the
+    // playlist rather than recomputing it.
+    fakes.deps.encodeChunk = async fr => {
+      const segments: Record<string, Uint8Array> = {}
+      for (const r of RENDITIONS) segments[r.id] = new Uint8Array([fr.length])
+      return { segments, extinf: 1.234567 }
+    }
+    await runIncremental(fakes.deps, params(frames(40), 0)) // 1 partial chunk
+    const variant = fakes.uploadedPlaylists?.['stream_0/playlist.m3u8'] ?? ''
+    expect(variant).toContain('#EXTINF:1.234567')
+    // The manifest records the same measured duration.
+    const ref = fakes.savedManifest?.chunks[0].segments['stream_0']
+    expect(ref?.extinf).toBe(1.234567)
+  })
+
+  it('freezes the epoch from the prior manifest, ignoring a drifted caller epoch', async () => {
+    const prev = await coldRun(frames(360)) // epoch '2026-01-01T00:00:00.000Z'
+    const fakes = makeFakes(prev)
+    // Caller passes a different epoch; the frozen manifest epoch must win.
+    await runIncremental(fakes.deps, params(frames(360), 0, '2027-06-15T12:00:00.000Z'))
+    expect(fakes.savedManifest?.epoch).toBe('2026-01-01T00:00:00.000Z')
   })
 })

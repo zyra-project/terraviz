@@ -60,12 +60,16 @@ export interface FrameEntry {
 }
 
 /** One rendition of the ladder, reduced to what the incremental core
- *  needs (its pixel dims double as its stable identity). */
+ *  needs. Pixel dims + CRF together form its stable identity. */
 export interface RenditionDescriptor {
   /** Stream directory id — `stream_0` / `stream_1` / `stream_2`. */
   id: string
   width: number
   height: number
+  /** x264 quality (CRF). Part of the segment identity so a quality
+   *  change at the same dimensions forces a re-encode instead of
+   *  recycling bytes produced under the old setting. */
+  crf: number
 }
 
 /** The default ladder projected to `RenditionDescriptor`s, indexed
@@ -75,6 +79,7 @@ export const DEFAULT_RENDITION_DESCRIPTORS: readonly RenditionDescriptor[] =
     id: `stream_${i}`,
     width: r.height * 2,
     height: r.height,
+    crf: r.crf,
   }))
 
 /** A grid-aligned group of ≤ `FRAMES_PER_CHUNK` consecutive frames
@@ -183,10 +188,13 @@ export function computeChunkGrid(
 
 /**
  * Content hash identifying a (chunk, rendition) segment. Canonical
- * over `{ gridIndex, rendition dims, padded, ordered frame digests }`
- * — so the same real frames at the same grid cell always produce the
- * same hex (recycle), and any change (new digest, padded→real, a
- * different rendition) produces a new hex (re-encode).
+ * over `{ gridIndex, rendition dims+CRF, padded, ordered frame
+ * digests }` — so the same real frames at the same grid cell always
+ * produce the same hex (recycle), and any change (new digest,
+ * padded→real, different dimensions or CRF) produces a new hex
+ * (re-encode). Codec settings shared across the whole ladder (preset,
+ * profile, GOP) aren't per-rendition fields here; a change to those in
+ * `ffmpeg-hls.ts` must bump `v` to force a global re-encode.
  */
 export function segmentDescriptorHash(
   chunk: Pick<ChunkInput, 'gridIndex' | 'frames' | 'padded'>,
@@ -195,7 +203,7 @@ export function segmentDescriptorHash(
   const descriptor = JSON.stringify({
     v: 1,
     grid: chunk.gridIndex,
-    rendition: `${rendition.width}x${rendition.height}`,
+    rendition: `${rendition.width}x${rendition.height}@crf${rendition.crf}`,
     padded: chunk.padded,
     digests: chunk.frames.map(f => f.digest),
   })

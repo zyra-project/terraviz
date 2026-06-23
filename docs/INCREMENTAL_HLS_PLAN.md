@@ -4,7 +4,7 @@
 
 Realizes [`CATALOG_IMAGE_SEQUENCE_PLAN.md`](CATALOG_IMAGE_SEQUENCE_PLAN.md)
 §Phase 2 "option B (VOD segment append)", generalized to append + replace +
-window-slide, and closes the loop the [`ZYRA_INTEGRATION_PLAN.md`](ZYRA_INTEGRATION_PLAN.md)
+window-slide, and closes the loop that [`ZYRA_INTEGRATION_PLAN.md`](ZYRA_INTEGRATION_PLAN.md)
 §Update model reserved behind `update_mode`.
 
 ## Context

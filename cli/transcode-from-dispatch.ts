@@ -651,14 +651,17 @@ async function fetchDatasetGrid(
  * temp input dir so the image-sequence demuxer reads a contiguous
  * `%05d` run, then `encodeHls` produces `stream_<i>/segment_000.ts`
  * for each rendition (≤180 frames < the 6 s `hls_time` ⇒ one
- * segment). Returns the segment bytes keyed by `stream_<i>` —
- * matching `DEFAULT_RENDITION_DESCRIPTORS[i].id`.
+ * segment). Returns the segment bytes keyed by `stream_<i>` (matching
+ * `DEFAULT_RENDITION_DESCRIPTORS[i].id`) plus the measured `extinf`
+ * read verbatim from ffmpeg's emitted variant playlist — identical
+ * across renditions, so the runner writes the muxer's real duration
+ * rather than assuming frames/30.
  */
 async function encodeChunkSegments(
   args: { frameExtension: string; ffmpegBin: string | null },
   framesDir: string,
   chunkFrames: readonly FrameEntry[],
-): Promise<Record<string, Uint8Array>> {
+): Promise<{ segments: Record<string, Uint8Array>; extinf: number }> {
   const ext = args.frameExtension
   const tmpIn = mkdtempSync(join(tmpdir(), 'tvchunk-in-'))
   const tmpOut = mkdtempSync(join(tmpdir(), 'tvchunk-out-'))
@@ -675,7 +678,7 @@ async function encodeChunkSegments(
       inputArgs: ['-framerate', String(OUTPUT_FRAME_RATE)],
       hasAudio: false,
     })
-    const out: Record<string, Uint8Array> = {}
+    const segments: Record<string, Uint8Array> = {}
     for (let i = 0; i < DEFAULT_RENDITIONS.length; i++) {
       const streamDir = join(tmpOut, `stream_${i}`)
       // A ≤180-frame chunk must encode to exactly one segment for the
@@ -688,9 +691,17 @@ async function encodeChunkSegments(
           `chunk encode produced >1 segment for stream_${i} (frames=${chunkFrames.length})`,
         )
       }
-      out[`stream_${i}`] = new Uint8Array(readFileSync(join(streamDir, 'segment_000.ts')))
+      segments[`stream_${i}`] = new Uint8Array(readFileSync(join(streamDir, 'segment_000.ts')))
     }
-    return out
+    // EXTINF is identical across renditions (same frame count + fps);
+    // read it from stream_0's emitted variant playlist so muxer
+    // rounding on partial chunks is preserved verbatim.
+    const playlist = readFileSync(join(tmpOut, 'stream_0', 'playlist.m3u8'), 'utf-8')
+    const extinfMatch = /#EXTINF:([0-9]+(?:\.[0-9]+)?)/.exec(playlist)
+    if (!extinfMatch) {
+      throw new Error('chunk encode produced no #EXTINF in stream_0/playlist.m3u8')
+    }
+    return { segments, extinf: Number(extinfMatch[1]) }
   } finally {
     rmSync(tmpIn, { recursive: true, force: true })
     rmSync(tmpOut, { recursive: true, force: true })

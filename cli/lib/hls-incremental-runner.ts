@@ -14,7 +14,6 @@
  * `cli/transcode-from-dispatch.ts`.
  */
 
-import { OUTPUT_FRAME_RATE } from './ffmpeg-hls'
 import {
   assemblePlaylists,
   computeChunkGrid,
@@ -35,10 +34,15 @@ export interface IncrementalDeps {
   loadManifest(): Promise<SegmentManifest | null>
   /** Persist the new manifest. */
   saveManifest(manifest: SegmentManifest): Promise<void>
-  /** Encode one chunk's frames → one `.ts` per rendition, returned
-   *  as bytes keyed by `RenditionDescriptor.id`. One ffmpeg call
-   *  produces all renditions (the `split`/`scale` filter graph). */
-  encodeChunk(frames: readonly FrameEntry[]): Promise<Record<string, Uint8Array>>
+  /** Encode one chunk's frames → one `.ts` per rendition (bytes keyed
+   *  by `RenditionDescriptor.id`) plus the segment's measured `extinf`
+   *  (ffmpeg's emitted `#EXTINF`, identical across renditions for the
+   *  same chunk — same frame count + fps). One ffmpeg call produces
+   *  all renditions (the `split`/`scale` filter graph). */
+  encodeChunk(frames: readonly FrameEntry[]): Promise<{
+    segments: Record<string, Uint8Array>
+    extinf: number
+  }>
   /** HEAD `segments/sha256/{hex}.ts` — skip the PUT when it exists
    *  (content-addressed ⇒ identical bytes already there). */
   segmentExists(hex: string): Promise<boolean>
@@ -65,6 +69,13 @@ export interface IncrementalParams {
   period: string | null
   /** Per-rendition `BANDWIDTH` (bits/sec) for the master playlist. */
   bandwidthByRendition: ReadonlyMap<string, number>
+  /** Filenames the pad-missing report flagged as synthetic, so chunks
+   *  containing them are marked `padded` in the manifest. A padded→real
+   *  swap already re-encodes via the frame-digest change (synthetic and
+   *  real frames hash differently), so this only refines the manifest's
+   *  provenance signal; the live runner passes it once the pad-report
+   *  is wired to the transcode dispatch. */
+  paddedNames?: ReadonlySet<string>
 }
 
 export interface IncrementalResult {
@@ -87,25 +98,39 @@ export async function runIncremental(
 ): Promise<IncrementalResult> {
   const log = deps.log ?? (() => {})
   const prev = await deps.loadManifest()
-  const newChunks = computeChunkGrid(params.frames, params.offset)
+  const newChunks = computeChunkGrid(params.frames, params.offset, params.paddedNames)
   const plan = planSegments(newChunks, params.renditions, prev)
+
+  // The grid epoch is frozen on first write and must never change, or
+  // grid-cell assignment (and therefore reuse) drifts. When a prior
+  // manifest exists its epoch is authoritative — the caller is
+  // expected to derive `offset` from it, but enforce here too so a
+  // drifted `params.epoch` can't silently corrupt the persisted grid.
+  const epoch = prev?.epoch ?? params.epoch
+  if (prev && prev.epoch !== params.epoch) {
+    log(
+      `WARN: ignoring caller epoch ${params.epoch ?? 'null'} — keeping frozen ` +
+        `manifest epoch ${prev.epoch ?? 'null'}`,
+    )
+  }
   log(
     `incremental: ${newChunks.length} chunks — ${plan.encodeChunks.length} to encode, ` +
       `${newChunks.length - plan.encodeChunks.length} reused`,
   )
 
-  // Encode the changed chunks → content-addressed segment PUTs. Each
-  // chunk's segment duration is exactly frames/30 — the encoder pins
-  // -framerate 30 -r 30, so N input frames produce N/30 seconds.
+  // Encode the changed chunks → content-addressed segment PUTs. The
+  // segment duration is whatever ffmpeg actually emitted as `#EXTINF`
+  // (the encoder pins -framerate 30 -r 30, so a full 180-frame chunk
+  // is 6.0 s, but partial head/tail chunks and muxer rounding are
+  // carried verbatim rather than assumed to be frames/30).
   const extinfByHex = new Map<string, number>()
   let uploadedSegments = 0
   for (const chunk of plan.encodeChunks) {
-    const extinf = chunk.frames.length / OUTPUT_FRAME_RATE
     const produced = await deps.encodeChunk(chunk.frames)
     for (const rendition of params.renditions) {
       const hex = segmentDescriptorHash(chunk, rendition)
-      extinfByHex.set(hex, extinf)
-      const body = produced[rendition.id]
+      extinfByHex.set(hex, produced.extinf)
+      const body = produced.segments[rendition.id]
       if (!body) {
         throw new Error(`runIncremental: encodeChunk produced no ${rendition.id} segment`)
       }
@@ -118,7 +143,7 @@ export async function runIncremental(
 
   // Stitch recycled + fresh segments into the per-upload playlists.
   const manifest = finalizeManifest(plan, params.renditions, extinfByHex, {
-    epoch: params.epoch,
+    epoch,
     period: params.period,
   })
   const { master, variants } = assemblePlaylists(manifest, params.bandwidthByRendition)
