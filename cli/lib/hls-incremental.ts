@@ -393,9 +393,11 @@ export interface MasterVariant {
   height: number
   /** `CODECS` attribute (e.g. `avc1.4d4033`). hls.js needs this to set
    *  up MSE before the first segment is probed — omitting it leaves the
-   *  player unable to reach `canplay` for some content. Always supply
-   *  it (parsed from ffmpeg's own master), matching the full-encode
-   *  bundles. */
+   *  player unable to reach `canplay` for some content. The incremental
+   *  runner refuses to publish unless every rendition has one (falling
+   *  back to a full encode otherwise), so incremental masters always
+   *  carry it; the field stays optional here because this is a general
+   *  builder also exercised without codecs. */
   codecs?: string
 }
 

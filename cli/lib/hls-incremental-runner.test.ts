@@ -128,6 +128,19 @@ describe('runIncremental', () => {
     expect(fakes.uploadedPlaylists?.['master.m3u8']).toContain('CODECS=')
   })
 
+  it('refuses to publish (throws → full-encode fallback) when no CODECS are available', async () => {
+    // A pre-codecs manifest reused wholesale: no fresh encode, no
+    // persisted codecs → publishing would reproduce the incident.
+    const prev = await coldRun(frames(360))
+    const prevNoCodecs = { ...prev }
+    delete prevNoCodecs.codecs
+    const fakes = makeFakes(prevNoCodecs)
+    await expect(runIncremental(fakes.deps, params(frames(360), 0))).rejects.toThrow(/no CODECS/)
+    // Nothing was published — the caller falls back to a full encode.
+    expect(fakes.savedManifest).toBeNull()
+    expect(fakes.uploadedPlaylists).toBeNull()
+  })
+
   it('append: reuses interior chunks, encodes only the grown tail', async () => {
     const prev = await coldRun(frames(360)) // 2 full chunks
     const fakes = makeFakes(prev)
@@ -210,8 +223,12 @@ describe('runIncremental', () => {
     // playlist rather than recomputing it.
     fakes.deps.encodeChunk = async fr => {
       const segments: Record<string, Uint8Array> = {}
-      for (const r of RENDITIONS) segments[r.id] = new Uint8Array([fr.length])
-      return { segments, extinf: 1.234567 }
+      const codecs: Record<string, string> = {}
+      for (const r of RENDITIONS) {
+        segments[r.id] = new Uint8Array([fr.length])
+        codecs[r.id] = 'avc1.4d4028'
+      }
+      return { segments, extinf: 1.234567, codecs }
     }
     await runIncremental(fakes.deps, params(frames(40), 0)) // 1 partial chunk
     const variant = fakes.uploadedPlaylists?.['stream_0/playlist.m3u8'] ?? ''

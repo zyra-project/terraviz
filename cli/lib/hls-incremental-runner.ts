@@ -153,6 +153,20 @@ export async function runIncremental(
   }
   const resolvedCodecs = codecs ?? prev?.codecs
 
+  // Never publish a master without CODECS for every rendition — that
+  // is exactly the unplayable-bundle incident this guards against. It
+  // can happen on a reuse-only run whose prior manifest predates codec
+  // tracking, or if codec parsing ever fails. Throw so the caller
+  // falls back to the proven full ffmpeg encode rather than ship a
+  // master hls.js can't initialize.
+  const missingCodecs = params.renditions.filter(r => !resolvedCodecs?.[r.id])
+  if (missingCodecs.length > 0) {
+    throw new Error(
+      `runIncremental: no CODECS for ${missingCodecs.map(r => r.id).join(', ')} — ` +
+        `refusing to publish a master hls.js can't initialize (falling back to full encode)`,
+    )
+  }
+
   // Stitch recycled + fresh segments into the per-upload playlists.
   const manifest = finalizeManifest(plan, params.renditions, extinfByHex, {
     epoch,
