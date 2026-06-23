@@ -173,7 +173,7 @@ jobs:
         # mirror fails fast and retries, and cap the lock wait — a
         # transient hiccup costs seconds, not the 30-minute job timeout.
         run: |
-          set -e
+          set -euo pipefail
           export DEBIAN_FRONTEND=noninteractive
           sudo systemctl stop apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
           sudo systemctl stop apt-daily.service apt-daily-upgrade.service unattended-upgrades.service 2>/dev/null || true
