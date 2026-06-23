@@ -661,7 +661,7 @@ async function encodeChunkSegments(
   args: { frameExtension: string; ffmpegBin: string | null },
   framesDir: string,
   chunkFrames: readonly FrameEntry[],
-): Promise<{ segments: Record<string, Uint8Array>; extinf: number }> {
+): Promise<{ segments: Record<string, Uint8Array>; extinf: number; codecs?: Record<string, string> }> {
   const ext = args.frameExtension
   const tmpIn = mkdtempSync(join(tmpdir(), 'tvchunk-in-'))
   const tmpOut = mkdtempSync(join(tmpdir(), 'tvchunk-out-'))
@@ -701,11 +701,37 @@ async function encodeChunkSegments(
     if (!extinfMatch) {
       throw new Error('chunk encode produced no #EXTINF in stream_0/playlist.m3u8')
     }
-    return { segments, extinf: Number(extinfMatch[1]) }
+    // Parse ffmpeg's own master for the per-rendition CODECS strings
+    // (e.g. stream_0 → avc1.4d4033). hls.js needs CODECS in the master
+    // to set up MSE; the hand-built incremental master must carry the
+    // exact values ffmpeg computed, matching the full-encode bundles.
+    const codecs = parseMasterCodecs(readFileSync(join(tmpOut, 'master.m3u8'), 'utf-8'))
+    return { segments, extinf: Number(extinfMatch[1]), codecs }
   } finally {
     rmSync(tmpIn, { recursive: true, force: true })
     rmSync(tmpOut, { recursive: true, force: true })
   }
+}
+
+/**
+ * Map each `stream_N` to its `CODECS` string from an ffmpeg-emitted
+ * master playlist. ffmpeg lists, per rendition, an
+ * `#EXT-X-STREAM-INF:...,CODECS="avc1.4d4033"` line immediately
+ * followed by the `stream_N/playlist.m3u8` URI; pair them. Returns
+ * undefined when no CODECS were found (so the caller can fall back to
+ * the prior manifest's values).
+ */
+function parseMasterCodecs(masterText: string): Record<string, string> | undefined {
+  const lines = masterText.split('\n')
+  const codecs: Record<string, string> = {}
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].startsWith('#EXT-X-STREAM-INF')) continue
+    const codecMatch = /CODECS="([^"]+)"/.exec(lines[i])
+    const uri = (lines[i + 1] ?? '').trim()
+    const idMatch = /^(stream_\d+)\//.exec(uri)
+    if (codecMatch && idMatch) codecs[idMatch[1]] = codecMatch[1]
+  }
+  return Object.keys(codecs).length > 0 ? codecs : undefined
 }
 
 /** New `AwsClient` for an ad-hoc R2 request (GET/HEAD/LIST). The

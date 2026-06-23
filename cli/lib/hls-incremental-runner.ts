@@ -35,13 +35,16 @@ export interface IncrementalDeps {
   /** Persist the new manifest. */
   saveManifest(manifest: SegmentManifest): Promise<void>
   /** Encode one chunk's frames → one `.ts` per rendition (bytes keyed
-   *  by `RenditionDescriptor.id`) plus the segment's measured `extinf`
+   *  by `RenditionDescriptor.id`), the segment's measured `extinf`
    *  (ffmpeg's emitted `#EXTINF`, identical across renditions for the
-   *  same chunk — same frame count + fps). One ffmpeg call produces
-   *  all renditions (the `split`/`scale` filter graph). */
+   *  same chunk — same frame count + fps), and the per-rendition
+   *  `CODECS` strings ffmpeg computed for its own master (constant
+   *  across chunks, so the runner captures them once). One ffmpeg call
+   *  produces all renditions (the `split`/`scale` filter graph). */
   encodeChunk(frames: readonly FrameEntry[]): Promise<{
     segments: Record<string, Uint8Array>
     extinf: number
+    codecs?: Record<string, string>
   }>
   /** HEAD `segments/sha256/{hex}.ts` — skip the PUT when it exists
    *  (content-addressed ⇒ identical bytes already there). */
@@ -128,8 +131,13 @@ export async function runIncremental(
   // carried verbatim rather than assumed to be frames/30).
   const extinfByHex = new Map<string, number>()
   let uploadedSegments = 0
+  // CODECS strings are constant across chunks (same encoder + ladder),
+  // so capture them from the first fresh encode; fall back to the prior
+  // manifest when this run reused every chunk (no encode happened).
+  let codecs: Record<string, string> | undefined
   for (const chunk of plan.encodeChunks) {
     const produced = await deps.encodeChunk(chunk.frames)
+    if (produced.codecs && !codecs) codecs = produced.codecs
     for (const rendition of params.renditions) {
       const hex = segmentDescriptorHash(chunk, rendition)
       extinfByHex.set(hex, produced.extinf)
@@ -143,13 +151,20 @@ export async function runIncremental(
       }
     }
   }
+  const resolvedCodecs = codecs ?? prev?.codecs
 
   // Stitch recycled + fresh segments into the per-upload playlists.
   const manifest = finalizeManifest(plan, params.renditions, extinfByHex, {
     epoch,
     period: params.period,
+    codecs: resolvedCodecs,
   })
-  const { master, variants } = assemblePlaylists(manifest, params.bandwidthByRendition)
+  const codecsByRendition = new Map(Object.entries(manifest.codecs ?? {}))
+  const { master, variants } = assemblePlaylists(
+    manifest,
+    params.bandwidthByRendition,
+    codecsByRendition,
+  )
   await deps.uploadPlaylists({ [MASTER_PLAYLIST_FILE]: master, ...variants })
   await deps.saveManifest(manifest)
 
