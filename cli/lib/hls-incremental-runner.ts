@@ -135,9 +135,18 @@ export async function runIncremental(
   // so capture them from the first fresh encode; fall back to the prior
   // manifest when this run reused every chunk (no encode happened).
   let codecs: Record<string, string> | undefined
+  let codecsChecked = false
   for (const chunk of plan.encodeChunks) {
     const produced = await deps.encodeChunk(chunk.frames)
     if (produced.codecs && !codecs) codecs = produced.codecs
+    // Validate CODECS availability before the first `putSegment` so a
+    // parse failure (or a pre-codecs prior manifest) bails without
+    // leaking content-addressed segments into the shared store — the
+    // full-encode fallback path runs no incremental GC to reclaim them.
+    if (!codecsChecked) {
+      assertCodecsComplete(codecs ?? prev?.codecs, params.renditions)
+      codecsChecked = true
+    }
     for (const rendition of params.renditions) {
       const hex = segmentDescriptorHash(chunk, rendition)
       extinfByHex.set(hex, produced.extinf)
@@ -152,20 +161,10 @@ export async function runIncremental(
     }
   }
   const resolvedCodecs = codecs ?? prev?.codecs
-
-  // Never publish a master without CODECS for every rendition — that
-  // is exactly the unplayable-bundle incident this guards against. It
-  // can happen on a reuse-only run whose prior manifest predates codec
-  // tracking, or if codec parsing ever fails. Throw so the caller
-  // falls back to the proven full ffmpeg encode rather than ship a
-  // master hls.js can't initialize.
-  const missingCodecs = params.renditions.filter(r => !resolvedCodecs?.[r.id])
-  if (missingCodecs.length > 0) {
-    throw new Error(
-      `runIncremental: no CODECS for ${missingCodecs.map(r => r.id).join(', ')} — ` +
-        `refusing to publish a master hls.js can't initialize (falling back to full encode)`,
-    )
-  }
+  // Also covers the reuse-only run (no encode loop ran, so the in-loop
+  // check above never fired): never publish a master hls.js can't
+  // initialize. No segments were uploaded in that case, so nothing leaks.
+  assertCodecsComplete(resolvedCodecs, params.renditions)
 
   // Stitch recycled + fresh segments into the per-upload playlists.
   const manifest = finalizeManifest(plan, params.renditions, extinfByHex, {
@@ -193,6 +192,23 @@ export async function runIncremental(
     reusedChunks: newChunks.length - plan.encodeChunks.length,
     uploadedSegments,
     prunedSegments,
+  }
+}
+
+/** Throw unless every rendition has a CODECS string. Publishing a
+ *  master without CODECS is the unplayable-bundle incident this guards
+ *  against; the caller's catch falls back to the proven full ffmpeg
+ *  encode. Called before any `putSegment` so a failure leaks nothing. */
+function assertCodecsComplete(
+  codecs: Record<string, string> | undefined,
+  renditions: readonly RenditionDescriptor[],
+): void {
+  const missing = renditions.filter(r => !codecs?.[r.id])
+  if (missing.length > 0) {
+    throw new Error(
+      `runIncremental: no CODECS for ${missing.map(r => r.id).join(', ')} — ` +
+        `refusing to publish a master hls.js can't initialize (falling back to full encode)`,
+    )
   }
 }
 

@@ -141,6 +141,21 @@ describe('runIncremental', () => {
     expect(fakes.uploadedPlaylists).toBeNull()
   })
 
+  it('bails before uploading any segment when an encode yields no CODECS (no storage leak)', async () => {
+    const fakes = makeFakes(null)
+    // Cold start that encodes chunks but whose encoder reports no codecs
+    // (e.g. ffmpeg master parse failure). The guard must fire before the
+    // first putSegment so no orphaned content-addressed segments leak.
+    fakes.deps.encodeChunk = async fr => {
+      const segments: Record<string, Uint8Array> = {}
+      for (const r of RENDITIONS) segments[r.id] = new Uint8Array([fr.length])
+      return { segments, extinf: fr.length / 30 } // no codecs
+    }
+    await expect(runIncremental(fakes.deps, params(frames(400), 0))).rejects.toThrow(/no CODECS/)
+    expect(fakes.puts).toEqual([]) // nothing uploaded → no orphaned segments
+    expect(fakes.savedManifest).toBeNull()
+  })
+
   it('append: reuses interior chunks, encodes only the grown tail', async () => {
     const prev = await coldRun(frames(360)) // 2 full chunks
     const fakes = makeFakes(prev)
