@@ -136,8 +136,17 @@ export async function runIncremental(
   // manifest when this run reused every chunk (no encode happened).
   let codecs: Record<string, string> | undefined
   let codecsChecked = false
+  let encodedSoFar = 0
   for (const chunk of plan.encodeChunks) {
     const produced = await deps.encodeChunk(chunk.frames)
+    encodedSoFar++
+    // Per-chunk progress: a cold start re-encodes every chunk and can
+    // run for many minutes, so surface where it is (the alternative is
+    // a silent gap until completion or a timeout).
+    log(
+      `encoded chunk ${encodedSoFar}/${plan.encodeChunks.length} ` +
+        `(grid ${chunk.gridIndex}, ${chunk.frames.length} frames)`,
+    )
     if (produced.codecs && !codecs) codecs = produced.codecs
     // Validate CODECS availability before the first `putSegment` so a
     // parse failure (or a pre-codecs prior manifest) bails without

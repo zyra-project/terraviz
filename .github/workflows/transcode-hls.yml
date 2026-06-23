@@ -49,10 +49,14 @@ jobs:
   transcode:
     name: Transcode ${{ github.event.client_payload.dataset_id }}
     runs-on: ubuntu-22.04
-    # 30 min cap — large 4K sources can push 10–15 min; doubling the
-    # ceiling keeps the runner from killing a slow but eventually-
-    # successful encode.
-    timeout-minutes: 30
+    # 90 min cap. A normal incremental run reuses most chunks and
+    # finishes in minutes, but a COLD start (no prior segment manifest)
+    # re-encodes every chunk as a separate sequential ffmpeg pass, which
+    # is slower than the old single monolithic encode — a 4K dataset of
+    # several thousand frames (e.g. a P30D 10-min-cadence set ≈ 24
+    # chunks) blew past the old 30-min cap mid-encode. The cold start is
+    # a one-time cost per dataset; subsequent runs reuse and are fast.
+    timeout-minutes: 90
 
     steps:
       - name: Validate dispatch payload
