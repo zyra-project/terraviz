@@ -87,6 +87,49 @@ export interface FramesPublishOptions {
   log?: (line: string) => void
   /** Override the per-frame PUT concurrency (tests pin it to 1). */
   concurrency?: number
+  /** Total attempts per R2 PUT before giving up. R2 returns sporadic
+   *  500 InternalError, so a single un-retried PUT among thousands of
+   *  frames fails the whole publish. Default 4. */
+  putAttempts?: number
+  /** Base backoff between PUT retries (ms); doubles each attempt.
+   *  Default 500. Tests pass 0. */
+  retryDelayMs?: number
+}
+
+const DEFAULT_PUT_ATTEMPTS = 4
+const DEFAULT_RETRY_DELAY_MS = 500
+
+function sleep(ms: number): Promise<void> {
+  return ms > 0 ? new Promise(resolve => setTimeout(resolve, ms)) : Promise.resolve()
+}
+
+/**
+ * PUT bytes to a presigned R2 URL, retrying transient failures — a
+ * network blip (`status 0`), a 429, or any 5xx. R2 hands back
+ * occasional `500 InternalError`, and with thousands of frame PUTs the
+ * odds of hitting one are high; a single un-retried failure would sink
+ * the whole publish. Deterministic 4xx (except 429) fails fast.
+ * Backoff doubles each attempt from `delayMs`.
+ */
+async function putBytesWithRetry(
+  client: TerravizClient,
+  url: string,
+  headers: Record<string, string>,
+  bytes: Uint8Array,
+  mime: string,
+  filename: string,
+  attempts: number,
+  delayMs: number,
+): Promise<{ ok: boolean; status: number; message?: string; attempts: number }> {
+  let last: { ok: boolean; status: number; message?: string } = { ok: false, status: 0 }
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    last = await client.uploadBytes('r2', url, headers, bytes, mime, filename)
+    if (last.ok) return { ...last, attempts: attempt }
+    const retriable = last.status === 0 || last.status === 429 || last.status >= 500
+    if (!retriable || attempt === attempts) return { ...last, attempts: attempt }
+    await sleep(delayMs * 2 ** (attempt - 1))
+  }
+  return { ...last, attempts }
 }
 
 function mimeForName(name: string): string | null {
@@ -150,6 +193,8 @@ async function putFrames(
   mime: string,
   initFrames: InitFrame[],
   concurrency: number,
+  attempts: number,
+  delayMs: number,
 ): Promise<void> {
   let cursor = 0
   async function worker(): Promise<void> {
@@ -158,9 +203,12 @@ async function putFrames(
       if (i >= initFrames.length) return
       const fr = initFrames[i]
       const bytes = new Uint8Array(await readFile(join(framesDir, fr.filename)))
-      const put = await client.uploadBytes('r2', fr.url, fr.headers, bytes, mime, fr.filename)
+      const put = await putBytesWithRetry(client, fr.url, fr.headers, bytes, mime, fr.filename, attempts, delayMs)
       if (!put.ok) {
-        throw new Error(`frames-publish: frame PUT ${fr.filename} failed (${put.status})${put.message ? `: ${put.message}` : ''}`)
+        throw new Error(
+          `frames-publish: frame PUT ${fr.filename} failed (${put.status})` +
+            `${put.message ? `: ${put.message}` : ''} after ${put.attempts} attempt(s)`,
+        )
       }
     }
   }
@@ -200,21 +248,37 @@ export async function publishFrameSequence(
   }
   const body = init.body
 
+  const attempts = options.putAttempts ?? DEFAULT_PUT_ATTEMPTS
+  const delayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS
+
   if (body.mock) {
     log(`frames-publish: mock mode — skipping ${frames.length} frame PUTs + manifest`)
   } else {
-    await putFrames(client, framesDir, mime, body.frames, options.concurrency ?? DEFAULT_CONCURRENCY)
+    await putFrames(
+      client,
+      framesDir,
+      mime,
+      body.frames,
+      options.concurrency ?? DEFAULT_CONCURRENCY,
+      attempts,
+      delayMs,
+    )
     const blob = new TextEncoder().encode(manifestJson)
-    const blobPut = await client.uploadBytes(
-      'r2',
+    const blobPut = await putBytesWithRetry(
+      client,
       body.source_filenames.url,
       body.source_filenames.headers,
       blob,
       'application/json',
       'source_filenames.json',
+      attempts,
+      delayMs,
     )
     if (!blobPut.ok) {
-      throw new Error(`frames-publish: source-filenames PUT failed (${blobPut.status})${blobPut.message ? `: ${blobPut.message}` : ''}`)
+      throw new Error(
+        `frames-publish: source-filenames PUT failed (${blobPut.status})` +
+          `${blobPut.message ? `: ${blobPut.message}` : ''} after ${blobPut.attempts} attempt(s)`,
+      )
     }
     log(`frames-publish: uploaded ${body.frames.length} frame(s) + manifest`)
   }
