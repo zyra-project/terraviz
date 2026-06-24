@@ -106,12 +106,27 @@ jobs:
       - name: Run Zyra pipeline
         env:
           ZYRA_IMAGE: ${{ vars.ZYRA_SCHEDULER_IMAGE || '' }}
+          # Verbosity for the in-container `zyra run`. Defaults to debug
+          # so a failing stage (e.g. a flaky `acquire ftp` against NOAA's
+          # server) surfaces its actual error instead of a bare
+          # "Stage N failed with exit code 2". Quiet it later without a
+          # commit via the ZYRA_VERBOSITY repo variable.
+          ZYRA_VERBOSITY: ${{ vars.ZYRA_VERBOSITY || 'debug' }}
+          # zyra's FTP backend has NO retry (connectors/backends/ftp.py:
+          # 30s timeout, sync_directory's RETR is un-try/caught), so a
+          # single transient NOAA-FTP hiccup crashes `acquire`. Retry the
+          # whole `zyra run`; tune via the ZYRA_RUN_ATTEMPTS repo variable.
+          ZYRA_RUN_ATTEMPTS: ${{ vars.ZYRA_RUN_ATTEMPTS || '3' }}
         run: |
           set -euo pipefail
           IMAGE="${ZYRA_IMAGE:-$ZYRA_IMAGE_DEFAULT}"
           echo "runner image: $IMAGE"
+          echo "zyra verbosity: $ZYRA_VERBOSITY ; run attempts: $ZYRA_RUN_ATTEMPTS"
           docker run --rm --entrypoint "" --user 0 \
             -v "$PWD/_work:/work" \
+            -e "ZYRA_VERBOSITY=$ZYRA_VERBOSITY" \
+            -e "DATAVIZHUB_VERBOSITY=$ZYRA_VERBOSITY" \
+            -e "ZYRA_RUN_ATTEMPTS=$ZYRA_RUN_ATTEMPTS" \
             "$IMAGE" \
             bash -c '
               set -euo pipefail
@@ -124,7 +139,36 @@ jobs:
                 echo "Installing Pillow for the pad-missing stage..."
                 pip install --no-cache-dir --disable-pip-version-check "pillow==12.2.0"
               fi
-              zyra run /work/pipeline.json
+              # Retry the whole pipeline on failure. zyra has no internal
+              # FTP retry, so a transient NOAA-FTP error crashes acquire;
+              # acquire is incremental (--sync-dir + --since-period over
+              # the bind-mounted /work), so each attempt resumes from the
+              # frames already downloaded and only fetches what is still
+              # missing. zyra stops at the first failed stage, so a retry
+              # never leaves a half-run pipeline (pad-missing only runs
+              # once acquire succeeds).
+              attempts="${ZYRA_RUN_ATTEMPTS:-3}"
+              # Guard against a bad repo-variable value (0, empty, or
+              # non-integer) — otherwise seq errors under set -e or the
+              # loop runs zero times and never invokes zyra.
+              if ! [[ "$attempts" =~ ^[1-9][0-9]*$ ]]; then
+                echo "::warning::ZYRA_RUN_ATTEMPTS=\"$attempts\" is not a positive integer; using 3"
+                attempts=3
+              fi
+              ok=0
+              for i in $(seq 1 "$attempts"); do
+                echo "::group::zyra run (attempt $i/$attempts)"
+                if zyra run /work/pipeline.json; then ok=1; echo "::endgroup::"; break; fi
+                echo "::endgroup::"
+                if [ "$i" -lt "$attempts" ]; then
+                  echo "::warning::zyra run attempt $i/$attempts failed; retrying after $((i * 30))s"
+                  sleep $((i * 30))
+                fi
+              done
+              if [ "$ok" -ne 1 ]; then
+                echo "::error::zyra run failed after $attempts attempt(s)"
+                exit 1
+              fi
             '
           # Gate on what the pipeline DECLARES, not on which files are
           # present. With the frame cache, restored frames almost always
