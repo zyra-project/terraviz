@@ -21,6 +21,34 @@ import {
 } from './zyra-acquire-softpass'
 
 describe('classifyZyraFailure', () => {
+  it('keys off zyra’s "Stage N [acquire] failed" line as the primary signal', () => {
+    // Real-world shape: the MDTM debug noise every run emits, then the
+    // broken-pipe error, then zyra's authoritative stage-failure line.
+    const log = [
+      'DEBUG: FTP MDTM failed for linear_rgb_cyl_20260606_1050.jpg: [Errno 32] Broken pipe',
+      'DEBUG: Downloading linear_rgb_cyl_20260624_0240.jpg: missing or zero-byte',
+      'Stage 1 [acquire] failed with exit code 2.',
+      'Command: zyra acquire ftp ftp://ftp.sos.noaa.gov/sosrt/rt/noaa/sat/linear/raw --sync-dir /work/images/frames',
+      'ERROR: Stage 1 [acquire] failed with exit code 2.',
+    ].join('\n')
+    const result = classifyZyraFailure(log)
+    expect(result.acquireFailure).toBe(true)
+    expect(result.signal).toBe('stage:acquire')
+  })
+
+  it('escalates when a DOWNSTREAM stage failed, even with FTP/MDTM noise in the log', () => {
+    // acquire succeeded (its MDTM noise is present), but compose failed.
+    // The stage line names `visualize`, so we must NOT soft-pass.
+    const log = [
+      'DEBUG: FTP MDTM failed for linear_rgb_cyl_20260606_1050.jpg: [Errno 32] Broken pipe',
+      'DEBUG: Skipping linear_rgb_cyl_20260606_1050.jpg: up-to-date',
+      'Stage 2 [visualize] failed with exit code 1.',
+    ].join('\n')
+    const result = classifyZyraFailure(log)
+    expect(result.acquireFailure).toBe(false)
+    expect(result.signal).toBeNull()
+  })
+
   it('matches FTP-connector specifics', () => {
     const log = [
       'INFO acquire ftp ...',
@@ -41,6 +69,7 @@ describe('classifyZyraFailure', () => {
       true,
     )
     expect(classifyZyraFailure(ctx('OSError: [Errno 101] Network is unreachable')).acquireFailure).toBe(true)
+    expect(classifyZyraFailure(ctx('BrokenPipeError: [Errno 32] Broken pipe')).acquireFailure).toBe(true)
     expect(
       classifyZyraFailure(ctx('socket.gaierror: [Errno -3] Temporary failure in name resolution')).acquireFailure,
     ).toBe(true)

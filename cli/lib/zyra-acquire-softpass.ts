@@ -66,6 +66,7 @@ const STRONG_ACQUIRE_SIGNATURES: ReadonlyArray<{ re: RegExp; label: string }> = 
 const NETWORK_SIGNATURES: ReadonlyArray<{ re: RegExp; label: string }> = [
   { re: /TimeoutError|socket\.timeout|timed out/i, label: 'timeout' },
   { re: /Connection reset|ConnectionResetError|\[Errno 104\]/i, label: 'conn-reset' },
+  { re: /Broken pipe|\[Errno 32\]/i, label: 'broken-pipe' },
   { re: /Connection refused|\[Errno 111\]/i, label: 'conn-refused' },
   { re: /Network is unreachable|\[Errno 101\]|\[Errno 110\]/i, label: 'net-unreachable' },
   { re: /\bEOFError\b/, label: 'eof' },
@@ -86,22 +87,48 @@ const NETWORK_SIGNATURES: ReadonlyArray<{ re: RegExp; label: string }> = [
 const ACQUIRE_STAGE_ANCHOR =
   /\bacquir(?:e|ing)\b|connectors\/backends\/ftp\.py|\bFTPConnector\b/i
 
+/**
+ * zyra's authoritative stage-failure line — e.g.
+ * `Stage 1 [acquire] failed with exit code 2.` zyra stops at the first
+ * failed stage and names it, so this captures *which* stage broke
+ * directly rather than guessing from error keywords. This is the
+ * primary classifier signal: it both confirms an acquire failure and —
+ * crucially — rules one OUT when a downstream stage (`visualize`,
+ * `process`, …) is what failed, even though the log is littered with
+ * the FTP `MDTM` debug noise that every run emits.
+ */
+const STAGE_FAILURE_RE = /Stage\s+\d+\s+\[([a-z0-9_+-]+)\]\s+failed/gi
+
 export interface FailureClassification {
-  /** True when the captured log matches a known transient
-   *  acquire/FTP/network signature (with acquire context for the
-   *  generic network tier). */
+  /** True when the failure is attributable to the acquire stage. */
   acquireFailure: boolean
-  /** The matched signature label (for logging), or null. */
+  /** The matched signal label (for logging), or null. */
   signal: string | null
 }
 
 /**
- * Classify a failed `zyra run`'s captured combined output. A STRONG
- * FTP-connector signature matches anywhere; a generic NETWORK signature
- * only matches when the log also shows the acquire stage ran. Anything
- * else reports a non-acquire failure (which the caller escalates).
+ * Classify a failed `zyra run`'s captured combined output.
+ *
+ * 1. Primary — parse zyra's own `Stage N [<stage>] failed` line. If the
+ *    failed stage is `acquire`, it's an acquire failure; if it names any
+ *    other stage, escalate (a downstream/code failure), regardless of
+ *    how much FTP/MDTM noise the log carries.
+ * 2. Fallback (no structured stage line — older/different zyra output):
+ *    a STRONG FTP-connector signature matches anywhere; a generic
+ *    NETWORK signature only matches with acquire-stage context.
+ *
+ * Anything else reports a non-acquire failure (which the caller
+ * escalates) — deliberately conservative so a real bug is never
+ * silently swallowed.
  */
 export function classifyZyraFailure(log: string): FailureClassification {
+  let failedStage: string | null = null
+  for (const m of log.matchAll(STAGE_FAILURE_RE)) failedStage = m[1].toLowerCase()
+  if (failedStage !== null) {
+    return failedStage === 'acquire'
+      ? { acquireFailure: true, signal: 'stage:acquire' }
+      : { acquireFailure: false, signal: null }
+  }
   for (const sig of STRONG_ACQUIRE_SIGNATURES) {
     if (sig.re.test(log)) return { acquireFailure: true, signal: sig.label }
   }
