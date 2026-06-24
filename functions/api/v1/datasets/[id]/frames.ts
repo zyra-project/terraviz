@@ -43,7 +43,7 @@
 
 import type { CatalogEnv } from '../../_lib/env'
 import { getPublicDataset } from '../../_lib/catalog-store'
-import { buildFramesUrlTemplate, isR2PublicConfigured } from '../../_lib/r2-public-url'
+import { buildFrameRecallUrl, isR2PublicConfigured } from '../../_lib/r2-public-url'
 import {
   findClosestFrameIndex,
   findFrameWindow,
@@ -206,34 +206,14 @@ export const onRequestGet: PagesFunction<CatalogEnv, 'id'> = async context => {
   }
   const endIndex = Math.min(windowTo, startIndex + limitOrErr - 1)
 
-  // Two distinct failure modes for `buildFramesUrlTemplate`:
-  //   - deployment misconfig (no `R2_PUBLIC_BASE`/`MOCK_R2`) — a
-  //     503 the operator needs to fix.
-  //   - bad row data (malformed `frame_source_filenames_ref` or
-  //     extension) — a 500 the publisher's row landed in a state
-  //     `clearTranscoding` shouldn't produce.
-  // Pre-checking the env lets the post-fact `null` surface as the
-  // correct row-data error rather than misleading the operator
-  // into chasing an env config that's already fine. Phase 3pg-
-  // review/B — Copilot discussion_r3277221658.
+  // Recall needs an R2 public origin to resolve content-addressed
+  // frame URLs; without one, surface the misconfig as a 503 the
+  // operator fixes rather than emitting unresolvable URLs.
   if (!isR2PublicConfigured(context.env)) {
     return jsonError(
       503,
       'r2_unconfigured',
       'R2_PUBLIC_BASE / MOCK_R2 must be configured for the frame surface.',
-    )
-  }
-  const urlTemplate = buildFramesUrlTemplate(
-    context.env,
-    row.frame_source_filenames_ref,
-    row.frame_extension,
-  )
-  if (!urlTemplate) {
-    return jsonError(
-      500,
-      'invalid_frame_metadata',
-      `Dataset ${id}'s frame_source_filenames_ref or frame_extension is malformed; ` +
-        'frame URLs cannot be built. An operator should inspect the row.',
     )
   }
 
@@ -256,13 +236,15 @@ export const onRequestGet: PagesFunction<CatalogEnv, 'id'> = async context => {
     )
   }
 
-  const frames = renderFrameRange(
-    row,
-    manifest,
-    urlTemplate,
-    startIndex,
-    endIndex,
-  )
+  const frames = renderFrameRange(context.env, id, row, manifest, startIndex, endIndex)
+  if ('error' in frames) {
+    return jsonError(
+      500,
+      'invalid_frame_metadata',
+      `Dataset ${id} has a frame whose manifest digest or extension can't be resolved ` +
+        `to a content-addressed URL (frame ${frames.error}). An operator should inspect the row.`,
+    )
+  }
   const nextCursor = endIndex < windowTo ? String(endIndex + 1) : null
 
   return new Response(
@@ -276,7 +258,24 @@ export const onRequestGet: PagesFunction<CatalogEnv, 'id'> = async context => {
   )
 }
 
+interface RenderedFrame {
+  index: number
+  displayName: string
+  originalFilename: string
+  timestamp: string | null
+  contentDigest: string
+  url: string
+}
+
+/** Render a range of frames with **direct** content-addressed R2 URLs
+ *  (resolved per-frame from the manifest digest). The list path skips
+ *  the `/frames/{index}` redirect hop the dataset-level urlTemplate
+ *  takes, so bulk recall goes straight to R2. Returns `{ error: index }`
+ *  for the first frame whose digest/extension can't be resolved (a
+ *  malformed row), which the caller turns into a 500. */
 function renderFrameRange(
+  env: CatalogEnv,
+  datasetId: string,
   row: {
     slug: string
     start_time: string | null
@@ -284,28 +283,21 @@ function renderFrameRange(
     frame_extension: string | null
   },
   manifest: FrameManifestEntry[],
-  urlTemplate: string,
   startIndex: number,
   endIndex: number,
-): Array<{
-  index: number
-  displayName: string
-  originalFilename: string
-  timestamp: string | null
-  contentDigest: string
-  url: string
-}> {
+): RenderedFrame[] | { error: number } {
   const ext = row.frame_extension!
-  const out: ReturnType<typeof renderFrameRange> = []
+  const out: RenderedFrame[] = []
   for (let i = startIndex; i <= endIndex; i++) {
-    const padded = String(i).padStart(5, '0')
+    const url = buildFrameRecallUrl(env, datasetId, manifest[i].digest, ext)
+    if (!url) return { error: i }
     out.push({
       index: i,
       displayName: renderFrameDisplayName(row, ext, i),
       originalFilename: manifest[i].filename,
       timestamp: frameTimestamp(row, i),
       contentDigest: manifest[i].digest,
-      url: urlTemplate.replace('{index}', padded),
+      url,
     })
   }
   return out

@@ -1694,9 +1694,10 @@ describe('POST .../asset/{upload_id}/complete — image-sequence dispatch (3pf)'
       datasetId,
       kind: 'data',
       target: 'r2',
-      // The prefix-shaped target_ref matches what /asset writes.
-      // /complete reads `frame_count` + `mime` and rebuilds the
-      // per-frame keys via `buildFrameKey`, so the target_ref is
+      // The prefix-shaped target_ref matches what /asset writes — it's
+      // the frames-upload recognition marker. /complete reads the
+      // source_filenames.json manifest for the per-frame digests and
+      // HEADs the content-addressed keys, so target_ref is
       // informational rather than load-bearing on the read path.
       target_ref: `r2:uploads/${datasetId}/${UPLOAD_ID}/frames/`,
       mime,
@@ -1787,15 +1788,80 @@ describe('POST .../asset/{upload_id}/complete — image-sequence dispatch (3pf)'
     expect((await readJson<{ error: string }>(res)).error).toBe('transcoding_in_progress')
   })
 
-  it('returns 409 asset_missing when one of the frame keys is not present in R2', async () => {
+  // Frames are content-addressed: /complete reads source_filenames.json
+  // to learn each frame's digest, then HEADs
+  // `videos/{ds}/frames/sha256/{hex}.{ext}`. This bucket serves a
+  // controllable manifest + a set of "present" frame keys.
+  function makeFramesBucket(manifestJson: string | null, presentFrameKeys: Set<string>): R2Bucket {
+    return {
+      get: async (key: string) =>
+        key.endsWith('/source_filenames.json')
+          ? manifestJson === null
+            ? null
+            : ({ text: async () => manifestJson } as unknown as R2ObjectBody)
+          : null,
+      head: async (key: string) =>
+        presentFrameKeys.has(key) ? ({ size: 1 } as unknown as R2Object) : null,
+    } as unknown as R2Bucket
+  }
+
+  function framesManifest(datasetId: string, digests: string[]) {
+    const json = JSON.stringify(
+      digests.map((digest, index) => ({ index, filename: `f${index}.png`, digest })),
+    )
+    const keys = new Set(digests.map(d => `videos/${datasetId}/frames/sha256/${d.replace('sha256:', '')}.png`))
+    return { json, keys }
+  }
+
+  it('verifies content-addressed frames via the manifest digests, fires dispatch, 202', async () => {
     const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: false })
-    // No MOCK_R2 — real R2 binding that we control. Bucket
-    // returns null on every head() so the first frame's HEAD
-    // fails and the route surfaces 409.
+    const { json, keys } = framesManifest(datasetId, [`sha256:${'a'.repeat(64)}`, `sha256:${'b'.repeat(64)}`])
     const env = {
       CATALOG_DB: asD1(sqlite),
       CATALOG_KV: kv,
-      CATALOG_R2: makeBucket(null),
+      CATALOG_R2: makeFramesBucket(json, keys),
+      MOCK_GITHUB_DISPATCH: 'true',
+    }
+    seedFrameUpload(sqlite, datasetId, 2)
+
+    const res = await completeHandler(ctx({ env, datasetId, uploadId: UPLOAD_ID }))
+    expect(res.status).toBe(202)
+    const row = sqlite.prepare(`SELECT transcoding FROM datasets WHERE id = ?`).get(datasetId) as {
+      transcoding: number | null
+    }
+    expect(row.transcoding).toBe(1)
+  })
+
+  it('returns 409 asset_missing when the manifest is present but a content-addressed frame is absent', async () => {
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: false })
+    const { json } = framesManifest(datasetId, [`sha256:${'a'.repeat(64)}`, `sha256:${'b'.repeat(64)}`])
+    // Only the first frame's object exists in R2.
+    const present = new Set([`videos/${datasetId}/frames/sha256/${'a'.repeat(64)}.png`])
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      CATALOG_R2: makeFramesBucket(json, present),
+      MOCK_GITHUB_DISPATCH: 'true',
+    }
+    seedFrameUpload(sqlite, datasetId, 2)
+
+    const res = await completeHandler(ctx({ env, datasetId, uploadId: UPLOAD_ID }))
+    expect(res.status).toBe(409)
+    expect((await readJson<{ error: string }>(res)).error).toBe('asset_missing')
+    const status = sqlite
+      .prepare(`SELECT status, failure_reason FROM asset_uploads WHERE id = ?`)
+      .get(UPLOAD_ID) as { status: string; failure_reason: string }
+    expect(status.status).toBe('failed')
+    expect(status.failure_reason).toBe('asset_missing')
+  })
+
+  it('returns 409 asset_missing when the source-filenames manifest never landed', async () => {
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: false })
+    // Manifest GET returns null — the publisher never PUT the blob.
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      CATALOG_R2: makeFramesBucket(null, new Set()),
       MOCK_GITHUB_DISPATCH: 'true',
     }
     seedFrameUpload(sqlite, datasetId, 3)
@@ -1803,8 +1869,6 @@ describe('POST .../asset/{upload_id}/complete — image-sequence dispatch (3pf)'
     const res = await completeHandler(ctx({ env, datasetId, uploadId: UPLOAD_ID }))
     expect(res.status).toBe(409)
     expect((await readJson<{ error: string }>(res)).error).toBe('asset_missing')
-    // The asset_uploads row is now marked failed so a retry mints
-    // a fresh upload rather than re-running this one.
     const status = sqlite
       .prepare(`SELECT status, failure_reason FROM asset_uploads WHERE id = ?`)
       .get(UPLOAD_ID) as { status: string; failure_reason: string }

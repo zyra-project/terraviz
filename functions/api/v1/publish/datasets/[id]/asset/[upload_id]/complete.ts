@@ -50,12 +50,13 @@ import {
 } from '../../../../../_lib/bounded-pool'
 import { invalidateSnapshot } from '../../../../../_lib/snapshot'
 import {
-  buildFrameKey,
+  buildContentAddressedFrameKey,
   buildFrameSourceFilenamesKey,
   isVideoSourceKey,
   verifyContentDigest,
   verifyObjectExists,
 } from '../../../../../_lib/r2-store'
+import { parseFrameManifest } from '../../../../../_lib/frames-manifest'
 import { getTranscodeStatus } from '../../../../../_lib/stream-store'
 import { dispatchTranscode } from '../../../../../_lib/github-dispatch'
 import { mimeMatchesFormat } from '../../asset'
@@ -835,21 +836,48 @@ async function handleFrameSourceComplete(
         'CATALOG_R2 binding is not configured on this deployment.',
       )
     }
-    const frameKeys = Array.from({ length: frameCount }, (_, i) =>
-      buildFrameKey(datasetId, uploadId, i, extension),
-    )
+    // Frames are content-addressed (`docs/INCREMENTAL_FRAME_UPLOAD_PLAN.md`),
+    // so the per-frame R2 keys are derived from each frame's digest —
+    // which lives in the source-filenames manifest, not from the index.
+    // Read + parse that blob first (it also confirms the blob landed),
+    // then HEAD the distinct content-addressed frame keys.
     const sourceFilenamesKey = buildFrameSourceFilenamesKey(datasetId, uploadId)
-    const allKeys = [...frameKeys, sourceFilenamesKey]
+    const blobObj = await context.env.CATALOG_R2.get(sourceFilenamesKey)
+    if (!blobObj) {
+      const failedAt = new Date().toISOString()
+      await markAssetUploadFailed(context.env.CATALOG_DB!, uploadId, 'asset_missing', failedAt)
+      return jsonError(
+        409,
+        'asset_missing',
+        `Object at ${sourceFilenamesKey} is not present in R2. The publisher likely never ` +
+          `uploaded the source-filenames manifest; mint a fresh upload to retry.`,
+      )
+    }
+    const manifest = parseFrameManifest(await blobObj.text())
+    if (!manifest || manifest.length !== frameCount) {
+      const failedAt = new Date().toISOString()
+      await markAssetUploadFailed(context.env.CATALOG_DB!, uploadId, 'asset_missing', failedAt)
+      return jsonError(
+        409,
+        'asset_missing',
+        `Source-filenames manifest at ${sourceFilenamesKey} is missing, malformed, or its length ` +
+          `(${manifest?.length ?? 'unparseable'}) disagrees with frame_count ${frameCount}. ` +
+          `Mint a fresh upload to retry.`,
+      )
+    }
+    // Distinct keys: identical frame bytes share one content-addressed
+    // object, so a deduped HEAD set keeps us well under the Workers
+    // subrequest cap even at the 10 000-frame ceiling.
+    const frameKeys = [
+      ...new Set(manifest.map(e => buildContentAddressedFrameKey(datasetId, e.digest, extension))),
+    ]
     // Bounded-concurrency HEAD pool rather than `Promise.all` —
     // Cloudflare Workers cap outbound subrequests at 50 (free) /
-    // 1000 (paid) per invocation, so 10 001 parallel HEADs at the
-    // frame cap would surface as `Too many subrequests` 5xx and
-    // leave the asset_uploads row stuck `pending`. 16 workers is
-    // well below the paid-tier cap and high enough that the
-    // HEAD-all wall-clock stays small. Phase 3pf-review/G —
-    // Copilot discussion_r3263466382.
+    // 1000 (paid) per invocation. 16 workers is well below the
+    // paid-tier cap and high enough that the HEAD-all wall-clock
+    // stays small. Phase 3pf-review/G — Copilot discussion_r3263466382.
     const existences = await runBoundedPool(
-      allKeys.map(key => () => verifyObjectExists(context.env, key)),
+      frameKeys.map(key => () => verifyObjectExists(context.env, key)),
       FRAME_OPERATION_CONCURRENCY,
     )
     for (let i = 0; i < existences.length; i++) {
@@ -875,7 +903,7 @@ async function handleFrameSourceComplete(
         return jsonError(
           409,
           'asset_missing',
-          `Object at ${allKeys[i]} is not present in R2. The publisher likely never ` +
+          `Object at ${frameKeys[i]} is not present in R2. The publisher likely never ` +
             `uploaded the bytes; mint a fresh upload to retry.`,
         )
       }

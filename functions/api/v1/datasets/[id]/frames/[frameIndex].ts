@@ -22,7 +22,7 @@
 
 import type { CatalogEnv } from '../../../_lib/env'
 import { getPublicDataset } from '../../../_lib/catalog-store'
-import { buildFramesUrlTemplate, isR2PublicConfigured } from '../../../_lib/r2-public-url'
+import { buildFrameRecallUrl, isR2PublicConfigured } from '../../../_lib/r2-public-url'
 import { loadFrameManifest } from '../../../_lib/frames-manifest'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
@@ -87,28 +87,14 @@ async function resolveFrame(
       `Dataset ${id} has frames 0..${row.frame_count - 1}; got ${idx}.`,
     )
   }
-  // Pre-check the env so the post-fact `null` from
-  // `buildFramesUrlTemplate` surfaces as the right error code
-  // (row data vs deployment misconfig). Phase 3pg-review/B —
-  // Copilot discussion_r3277221688.
+  // Recall needs an R2 public origin to resolve the content-addressed
+  // frame URL; surface a missing one as a 503 (deployment misconfig)
+  // rather than a confusing 404.
   if (!isR2PublicConfigured(env)) {
     return jsonError(
       503,
       'r2_unconfigured',
       'R2_PUBLIC_BASE / MOCK_R2 must be configured for the frame surface.',
-    )
-  }
-  const template = buildFramesUrlTemplate(
-    env,
-    row.frame_source_filenames_ref,
-    row.frame_extension,
-  )
-  if (!template) {
-    return jsonError(
-      500,
-      'invalid_frame_metadata',
-      `Dataset ${id}'s frame_source_filenames_ref or frame_extension is malformed; ` +
-        'frame URLs cannot be built. An operator should inspect the row.',
     )
   }
   const manifestKey = row.frame_source_filenames_ref.startsWith('r2:')
@@ -129,9 +115,21 @@ async function resolveFrame(
       `Frame manifest length ${manifest.length} does not match dataset frame_count ${row.frame_count}.`,
     )
   }
-  const padded = String(idx).padStart(5, '0')
+  // Resolve the content-addressed URL from this frame's manifest
+  // digest. This is the indirection the dataset-level urlTemplate
+  // points at: clients hit `…/frames/{index}` and we 302 to the
+  // shared `videos/{id}/frames/sha256/{hex}.{ext}` object.
+  const url = buildFrameRecallUrl(env, id, manifest[idx].digest, row.frame_extension)
+  if (!url) {
+    return jsonError(
+      500,
+      'invalid_frame_metadata',
+      `Dataset ${id}'s frame ${idx} digest or extension is malformed; the ` +
+        'content-addressed URL cannot be built. An operator should inspect the row.',
+    )
+  }
   return {
-    url: template.replace('{index}', padded),
+    url,
     digest: manifest[idx].digest,
     ext: row.frame_extension,
   }

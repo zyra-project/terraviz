@@ -67,7 +67,15 @@ import {
   renderSidecar,
   sanitizeErrorSummary,
 } from './lib/workflow-sidecar'
-import { loadR2ConfigFromEnv, type R2UploadConfig } from './lib/r2-upload'
+import {
+  deleteR2Object,
+  getR2ObjectText,
+  listR2KeysPaginated,
+  loadR2ConfigFromEnv,
+  r2ObjectExists,
+  type R2UploadConfig,
+} from './lib/r2-upload'
+import { frameHexFromKey, frameStorePrefix, selectFrameOrphans } from './lib/frame-store'
 import {
   isoDurationToSeconds,
   restoreFramesFromR2,
@@ -198,6 +206,7 @@ interface DatasetEnvelope {
     transcoding?: number | null
     end_time?: string | null
     updated_at?: string | null
+    frame_source_filenames_ref?: string | null
   }
 }
 
@@ -504,19 +513,125 @@ async function publishFrames(
   if (sidecarCode !== null) return sidecarCode
 
   // 2. Hash → init → PUT frames + manifest → complete (fires the
-  //    transcode).
+  //    transcode). Frames are content-addressed
+  //    (`docs/INCREMENTAL_FRAME_UPLOAD_PLAN.md`), so when R2 creds are
+  //    present we HEAD-skip frames already in the shared store and PUT
+  //    only the delta — a scheduled re-publish uploads the day's new
+  //    frames, not the whole window.
+  const r2 = frameCacheConfig()
+  // Capture the digests of the manifest the row advertises RIGHT NOW —
+  // before this run's transcode swaps it — as the GC grace set. This is
+  // the prior window the live `/frames` recall is still serving; reading
+  // it up front (rather than at GC time) makes the prune race-proof:
+  // even if the transcode completes during the publish wait below, the
+  // prior frames are already pinned for a one-run grace window.
+  const priorDigests = r2 ? await fetchAdvertisedFrameDigests(client, r2, datasetId) : []
+
   let uploadId: string
+  let currentDigests: string[] = []
   try {
-    const result = await publishFrameSequence(client, datasetId, framesDir, { log })
+    const result = await publishFrameSequence(client, datasetId, framesDir, {
+      log,
+      exists: r2 ? key => r2ObjectExists(r2, key) : undefined,
+    })
     uploadId = result.uploadId
-    log(`frame sequence upload ${uploadId} (${result.frameCount} frames, mock=${result.mock}) — transcode dispatch fired`)
+    currentDigests = result.digests
+    log(
+      `frame sequence upload ${uploadId} (${result.frameCount} frames: ` +
+        `${result.uploaded} uploaded, ${result.reused} reused, mock=${result.mock}) — transcode dispatch fired`,
+    )
   } catch (err) {
     log(`FAIL: frame-sequence publish → ${err instanceof Error ? err.message : String(err)}`)
     return 4
   }
 
   // 3. Wait for the transcode to flip data_ref, then report.
-  return await waitAndReportSucceeded(client, args, datasetId, uploadId)
+  const code = await waitAndReportSucceeded(client, args, datasetId, uploadId)
+
+  // 4. GC the content-addressed frame store (best-effort — never
+  //    changes the run's outcome). Keep this run's frames ∪ the prior
+  //    window captured above (the one-run grace window).
+  if (code === 0 && r2) {
+    await gcFrameStore(r2, datasetId, [...currentDigests, ...priorDigests])
+  }
+  return code
+}
+
+/**
+ * Read the digests of whatever frame manifest the dataset row currently
+ * advertises (`frame_source_filenames_ref`). Called at publish start so
+ * the value is the PRIOR window (the bundle `/frames` recall is serving
+ * before this run's transcode swaps it in) — the grace set the frame GC
+ * must keep so an in-flight reader on the prior manifest doesn't lose
+ * frames mid-enumeration.
+ *
+ * Best-effort: returns [] (no grace contribution) on any miss — a
+ * missing row, no prior frames, an unreadable or unparseable manifest.
+ * This run's own digests still protect the just-published frames.
+ */
+async function fetchAdvertisedFrameDigests(
+  client: TerravizClient,
+  r2: R2UploadConfig,
+  datasetId: string,
+): Promise<string[]> {
+  try {
+    const row = await client.get<DatasetEnvelope>(datasetId)
+    const ref = row.ok ? row.body.dataset.frame_source_filenames_ref : null
+    if (!ref) return []
+    const manifestKey = ref.startsWith('r2:') ? ref.slice('r2:'.length) : ref
+    const blob = await getR2ObjectText(r2, manifestKey)
+    if (!blob) return []
+    const entries = JSON.parse(blob) as Array<{ digest?: unknown }>
+    return entries
+      .filter((e): e is { digest: string } => typeof e.digest === 'string')
+      .map(e => e.digest)
+  } catch (err) {
+    log(`WARN: frame GC — could not read the prior manifest for the grace set (${err instanceof Error ? err.message : String(err)})`)
+    return []
+  }
+}
+
+/**
+ * Mark-and-sweep the shared content-addressed frame store
+ * (`docs/INCREMENTAL_FRAME_UPLOAD_PLAN.md` §GC). `keepDigests` is this
+ * run's frames ∪ the prior window captured at publish start, so every
+ * frame either the new bundle or the still-serving prior bundle
+ * references survives; the rest (frames that slid off ≥2 windows ago)
+ * is reclaimed. Fully best-effort: any failure logs and returns without
+ * affecting the run, exactly like `pruneSegments` in the HLS path.
+ */
+async function gcFrameStore(
+  r2: R2UploadConfig,
+  datasetId: string,
+  keepDigests: string[],
+): Promise<void> {
+  try {
+    const keys = await listR2KeysPaginated(r2, frameStorePrefix(datasetId))
+    const hexToKey = new Map<string, string>()
+    for (const k of keys) {
+      const hex = frameHexFromKey(k)
+      if (hex) hexToKey.set(hex, k)
+    }
+    const orphanHexes = selectFrameOrphans([...hexToKey.keys()], keepDigests)
+    if (orphanHexes.length === 0) {
+      log(`frame GC: nothing to prune (${hexToKey.size} frame(s) all referenced)`)
+      return
+    }
+    let deleted = 0
+    for (const hex of orphanHexes) {
+      const key = hexToKey.get(hex)
+      if (!key) continue
+      try {
+        await deleteR2Object(r2, key)
+        deleted++
+      } catch (err) {
+        log(`WARN: frame GC delete ${key} failed (continuing) — ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+    log(`frame GC: pruned ${deleted}/${orphanHexes.length} orphaned frame(s), kept ${hexToKey.size - deleted}`)
+  } catch (err) {
+    log(`WARN: frame GC failed (continuing) — ${err instanceof Error ? err.message : String(err)}`)
+  }
 }
 
 /** R2 frame-cache config from the runner env, or null when the

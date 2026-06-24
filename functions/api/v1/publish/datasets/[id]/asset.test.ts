@@ -612,11 +612,15 @@ describe('POST /api/v1/publish/datasets/{id}/asset — image-sequence (3pf)', ()
     }>(res)
     expect(body.target).toBe('r2')
     expect(body.frames).toHaveLength(3)
-    // Indexes are zero-padded to 5 digits in the R2 key, matching
-    // the `%05d` glob ffmpeg's image-sequence input reads.
-    expect(body.frames[0].key).toMatch(/\/frames\/00000\.png$/)
-    expect(body.frames[1].key).toMatch(/\/frames\/00001\.png$/)
-    expect(body.frames[2].key).toMatch(/\/frames\/00002\.png$/)
+    // Frames are content-addressed: each key is
+    // `videos/{dataset}/frames/sha256/{hex}.{ext}` derived from the
+    // frame's own digest (shared across uploads so re-publishes
+    // dedupe), not the legacy per-upload `{index}.{ext}` path.
+    expect(body.frames[0].key).toBe(`videos/${datasetId}/frames/sha256/${'0'.repeat(64)}.png`)
+    expect(body.frames[1].key).toBe(`videos/${datasetId}/frames/sha256/${'0'.repeat(63)}1.png`)
+    expect(body.frames[2].key).toBe(`videos/${datasetId}/frames/sha256/${'0'.repeat(63)}2.png`)
+    // No upload_id in the frame path.
+    expect(body.frames[0].key).not.toContain(body.upload_id)
     // The source-filenames blob lives one level up from frames/.
     expect(body.source_filenames.key).toMatch(/\/source_filenames\.json$/)
     expect(body.source_filenames.key).not.toContain('/frames/')

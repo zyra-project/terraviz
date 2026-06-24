@@ -6,6 +6,10 @@ const DATASET_ID = 'DS000AAAAAAAAAAAAAAAAAAAAA'
 const UPLOAD_ID = '01HYAAAAAAAAAAAAAAAAAAAAAA'
 const PUBLIC_BASE = 'https://assets.test'
 const VALID_DIGEST = 'sha256:' + 'a'.repeat(64)
+// Every fixture frame shares VALID_DIGEST, so all indices resolve to
+// the same content-addressed object (that's the whole point — the
+// redirect target is keyed by content, not index).
+const CA_URL = `${PUBLIC_BASE}/videos/${DATASET_ID}/frames/sha256/${'a'.repeat(64)}.png`
 
 function makeBucket(content: string | null): R2Bucket {
   return {
@@ -67,9 +71,7 @@ describe('GET /api/v1/datasets/{id}/frames/{frameIndex} (3pg/B)', () => {
       }),
     )
     expect(res.status).toBe(302)
-    expect(res.headers.get('Location')).toBe(
-      `${PUBLIC_BASE}/uploads/${DATASET_ID}/${UPLOAD_ID}/frames/00003.png`,
-    )
+    expect(res.headers.get('Location')).toBe(CA_URL)
     // RFC 9530 Content-Digest header — `sha-256=:<base64>:`.
     expect(res.headers.get('Content-Digest')).toMatch(/^sha-256=:[A-Za-z0-9+/=]+:$/)
   })
@@ -84,7 +86,7 @@ describe('GET /api/v1/datasets/{id}/frames/{frameIndex} (3pg/B)', () => {
         }),
       )
       expect(res.status).toBe(302)
-      expect(res.headers.get('Location')).toContain('frames/00003.png')
+      expect(res.headers.get('Location')).toBe(CA_URL)
     }
   })
 
@@ -140,7 +142,7 @@ describe('GET /api/v1/datasets/{id}/frames/{frameIndex} (3pg/B)', () => {
     expect(res.status).toBe(200)
     expect(res.headers.get('Content-Type')).toBe('image/png')
     expect(res.headers.get('Content-Digest')).toMatch(/^sha-256=:[A-Za-z0-9+/=]+:$/)
-    expect(res.headers.get('X-Frame-Url')).toContain('frames/00002.png')
+    expect(res.headers.get('X-Frame-Url')).toBe(CA_URL)
     const body = await res.text()
     expect(body).toBe('')
   })

@@ -21,7 +21,7 @@ import {
 } from '../_lib/catalog-store'
 import { serializeDataset } from '../_lib/dataset-serializer'
 import { makeDataRefResolver } from '../_lib/data-ref-resolver'
-import { buildFramesUrlTemplate, resolveAssetRefStrict } from '../_lib/r2-public-url'
+import { buildFramesRedirectTemplate, resolveAssetRefStrict } from '../_lib/r2-public-url'
 import { computeEtag } from '../_lib/snapshot'
 
 const CACHE_CONTROL = 'public, max-age=60, stale-while-revalidate=300'
@@ -69,8 +69,8 @@ export const onRequestGet: PagesFunction<CatalogEnv, 'id'> = async context => {
   // against a non-public-bucket S3 endpoint).
   const assetResolver = (ref: string | null | undefined) =>
     resolveAssetRefStrict(context.env, ref)
-  const framesResolver = (ref: string, ext: string) =>
-    buildFramesUrlTemplate(context.env, ref, ext)
+  const framesResolver = (datasetId: string, baseUrl: string) =>
+    buildFramesRedirectTemplate(context.env, baseUrl, datasetId)
   const dataset = serializeDataset(
     row,
     decorations.get(id)!,

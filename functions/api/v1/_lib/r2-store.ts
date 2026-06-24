@@ -336,6 +336,64 @@ export function buildVideoBundlePrefix(datasetId: string, uploadId: string): str
 }
 
 /**
+ * Content-addressed R2 key for a single frame:
+ * `videos/{datasetId}/frames/sha256/{hex}.{ext}`
+ * (`docs/INCREMENTAL_FRAME_UPLOAD_PLAN.md`).
+ *
+ * Frames are keyed by the SHA-256 of their bytes — shared across every
+ * upload of the dataset — so a scheduled re-publish PUTs only the
+ * frames whose content actually changed and reuses the rest, exactly
+ * as the HLS *segment* store (`videos/{datasetId}/segments/sha256/…`)
+ * already does. The `{hex}` is the 64-char lowercase hex of the
+ * frame's `sha256:` digest (the one the publisher records in
+ * `source_filenames.json` and the transcode re-verifies); accepts the
+ * digest with or without the `sha256:` prefix.
+ *
+ * Unlike the per-upload `buildFrameKey`, no `upload_id` appears in the
+ * path: identical bytes resolve to one object regardless of which
+ * upload (re)introduced them, which is what makes the upload
+ * idempotent and the recall URL stable across re-publishes.
+ */
+export function buildContentAddressedFrameKey(
+  datasetId: string,
+  digest: string,
+  ext: string,
+): string {
+  assertUlid('buildContentAddressedFrameKey: datasetId', datasetId)
+  const hex = digest.replace(/^sha256:/, '')
+  if (!/^[0-9a-f]{64}$/.test(hex)) {
+    throw new Error(
+      `buildContentAddressedFrameKey: digest must be sha256:<64 lowercase hex>, got "${digest}"`,
+    )
+  }
+  if (!/^[a-z0-9]+$/.test(ext)) {
+    throw new Error(
+      `buildContentAddressedFrameKey: ext must be a lowercase-alphanumeric extension, got "${ext}"`,
+    )
+  }
+  return `${VIDEO_BUNDLE_KEY_PREFIX}/${datasetId}/frames/sha256/${hex}.${ext}`
+}
+
+/** Prefix that holds all content-addressed frames for a dataset:
+ *  `videos/{datasetId}/frames/sha256/`. The trailing slash scopes an
+ *  R2 `list` to exactly the frame objects (the mark-and-sweep GC
+ *  enumerates this). */
+export function buildFramesContentPrefix(datasetId: string): string {
+  assertUlid('buildFramesContentPrefix: datasetId', datasetId)
+  return `${VIDEO_BUNDLE_KEY_PREFIX}/${datasetId}/frames/sha256/`
+}
+
+const CONTENT_ADDRESSED_FRAME_KEY_PATTERN = new RegExp(
+  `^${VIDEO_BUNDLE_KEY_PREFIX}/[0-9A-HJKMNP-TV-Z]{26}/frames/sha256/[0-9a-f]{64}\\.[a-z0-9]+$`,
+)
+
+/** Does an R2 key match the content-addressed frame shape
+ *  `buildContentAddressedFrameKey` produces? */
+export function isContentAddressedFrameKey(key: string): boolean {
+  return CONTENT_ADDRESSED_FRAME_KEY_PATTERN.test(key)
+}
+
+/**
  * Build a content-addressed R2 key per `CATALOG_ASSETS_PIPELINE.md`
  * "R2 assets: content-addressed keys". The hex must be the SHA-256
  * the publisher claims for these bytes; the upload-complete handler

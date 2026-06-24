@@ -24,6 +24,7 @@
  */
 
 import type { CatalogEnv } from './env'
+import { buildContentAddressedFrameKey } from './r2-store'
 
 /**
  * Encode an R2 key for inclusion in a URL path. Slashes are
@@ -187,56 +188,65 @@ export function isR2PublicConfigured(env: CatalogEnv): boolean {
 }
 
 /**
- * Frame-source-filenames-ref shape produced by `clearTranscoding`:
- * `r2:uploads/{datasetId}/{uploadId}/source_filenames.json`. Phase
- * 3pg/A extracts the `{uploadId}` from this to build per-frame URL
- * templates without threading the upload_id through a separate
- * column — the source-filenames ref already locks in which upload's
- * frames are live, so it's the single source of truth for "which
- * frames live alongside this dataset row right now".
+ * Resolve a single frame's content-addressed public URL:
+ * `{R2_PUBLIC_BASE}/videos/{datasetId}/frames/sha256/{hex}.{ext}`
+ * (`docs/INCREMENTAL_FRAME_UPLOAD_PLAN.md`). The `digest` is the
+ * frame's `sha256:<hex>` from the `source_filenames.json` manifest;
+ * the `/frames` list and `/frames/{index}` recall endpoints resolve
+ * each frame's direct URL through here.
+ *
+ * Returns null when R2 public-base resolution falls through (operator
+ * must bind `R2_PUBLIC_BASE` or set `MOCK_R2=true`), or when the
+ * digest/extension is malformed. The helper is non-throwing so the
+ * caller decides how to classify the failure: the `/frames` and
+ * `/frames/{index}` endpoints pre-check `isR2PublicConfigured` (→ 503
+ * for the unconfigured case) and treat a remaining null as malformed
+ * row metadata (→ 500 `invalid_frame_metadata`). Returning null rather
+ * than throwing keeps one bad manifest entry from blowing up the whole
+ * request with an unhandled exception.
  */
-const FRAME_SOURCE_FILENAMES_REF_PATTERN =
-  /^r2:uploads\/([0-9A-HJKMNP-TV-Z]{26})\/([0-9A-HJKMNP-TV-Z]{26})\/source_filenames\.json$/
+export function buildFrameRecallUrl(
+  env: CatalogEnv,
+  datasetId: string,
+  digest: string,
+  frameExtension: string,
+): string | null {
+  let key: string
+  try {
+    key = buildContentAddressedFrameKey(datasetId, digest, frameExtension)
+  } catch {
+    return null
+  }
+  return resolveR2HlsPublicUrl(env, key)
+}
 
 /**
- * Build the per-frame URL template that `WireDataset.frames.urlTemplate`
- * surfaces. The literal `{index}` token survives URL encoding so
- * consumers can substitute the zero-padded frame number directly:
+ * Build the dataset-level `WireDataset.frames.urlTemplate` — an
+ * absolute URL with a literal `{index}` token that consumers
+ * substitute the zero-padded frame number into:
  *
  *     const url = template.replace('{index}', String(i).padStart(5, '0'))
  *
- * Returns null when R2 public-base resolution falls through (same
- * shape `resolveR2HlsPublicUrl` uses — operator must bind
- * `R2_PUBLIC_BASE` or set `MOCK_R2=true` for the template to be
- * well-defined). Also returns null when the supplied
- * `frame_source_filenames_ref` doesn't match the canonical shape —
- * a row whose ref column got truncated or hand-edited can't be
- * mapped back to its frames, and silently returning null is safer
- * than emitting a template that points at a non-existent prefix.
+ * Content-addressed frames can't be expressed as one direct-R2
+ * `{index}` template (each index maps to an arbitrary hash), so the
+ * template points at the `/frames/{index}` **redirect** endpoint —
+ * the stable indirection the API already exposes ("the redirect target
+ * adapts" to bucket-layout changes). Following the resulting URL 302s
+ * to the content-addressed object. The `/frames` *list* endpoint still
+ * emits direct content-addressed URLs (it has the manifest), so bulk
+ * download skips the hop.
  *
- * The `{index}` token is preserved by splitting the key at the
- * filename: the prefix portion is URL-encoded through `encodeR2Key`,
- * then `{index}.{ext}` is appended verbatim. `{` and `}` would
- * otherwise become `%7B` / `%7D` under `encodeURIComponent`,
- * forcing every consumer to URL-decode before substituting.
+ * Returns null when R2 public-base resolution isn't configured — same
+ * fail-quiet gate as before, so a deployment without an R2 public
+ * origin simply doesn't advertise a frame surface.
  */
-export function buildFramesUrlTemplate(
+export function buildFramesRedirectTemplate(
   env: CatalogEnv,
-  frameSourceFilenamesRef: string,
-  frameExtension: string,
+  baseUrl: string,
+  datasetId: string,
 ): string | null {
-  const match = FRAME_SOURCE_FILENAMES_REF_PATTERN.exec(frameSourceFilenamesRef)
-  if (!match) return null
-  if (!/^[a-z0-9]+$/.test(frameExtension)) return null
-  const [, datasetId, uploadId] = match
-  // Resolve a sentinel prefix to leverage the existing public-base
-  // selection logic; then swap the sentinel for the `{index}` token
-  // so the surviving URL carries it literally. The sentinel
-  // (`__FRAMES_INDEX_TOKEN__`) is reserved per project convention —
-  // matches `[A-Z_]+` so a future migration can grep-and-rename if
-  // the token shape ever changes.
-  const sentinelKey = `uploads/${datasetId}/${uploadId}/frames/__FRAMES_INDEX_TOKEN__.${frameExtension}`
-  const resolved = resolveR2HlsPublicUrl(env, sentinelKey)
-  if (!resolved) return null
-  return resolved.replace('__FRAMES_INDEX_TOKEN__', '{index}')
+  if (!isR2PublicConfigured(env)) return null
+  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(datasetId)) return null
+  const base = baseUrl.replace(/\/$/, '')
+  return `${base}/api/v1/datasets/${datasetId}/frames/{index}`
 }

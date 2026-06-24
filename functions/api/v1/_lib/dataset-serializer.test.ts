@@ -463,9 +463,13 @@ describe('serializeDataset — frames envelope (3pg/A)', () => {
   const DS = '01HXAAAAAAAAAAAAAAAAAAAAAA'
   const UP = '01HYAAAAAAAAAAAAAAAAAAAAAA'
   const FRAMES_REF = `r2:uploads/${DS}/${UP}/source_filenames.json`
-  const TEMPLATE = `https://assets.test/uploads/${DS}/${UP}/frames/{index}.png`
-  const stubFramesResolver = (ref: string, ext: string) =>
-    ref === FRAMES_REF && ext === 'png' ? TEMPLATE : null
+  // The dataset-level urlTemplate now points at the /frames/{index}
+  // redirect endpoint (content-addressed frames have no direct-R2
+  // {index} template); the resolver builds it from (datasetId, baseUrl).
+  const tmpl = (datasetId: string) =>
+    `https://test.example.com/api/v1/datasets/${datasetId}/frames/{index}`
+  const stubFramesResolver = (datasetId: string, baseUrl: string) =>
+    `${baseUrl.replace(/\/$/, '')}/api/v1/datasets/${datasetId}/frames/{index}`
 
   it('omits frames when frame_count is null (legacy video / non-sequence row)', () => {
     const wire = serializeDataset(
@@ -497,7 +501,7 @@ describe('serializeDataset — frames envelope (3pg/A)', () => {
     )
     expect(wire.frames).toEqual({
       count: 240,
-      urlTemplate: TEMPLATE,
+      urlTemplate: tmpl(DS),
       framesDigest: 'sha256:' + 'a'.repeat(64),
     })
   })
@@ -519,7 +523,7 @@ describe('serializeDataset — frames envelope (3pg/A)', () => {
       undefined,
       stubFramesResolver,
     )
-    expect(wire.frames).toEqual({ count: 5, urlTemplate: TEMPLATE })
+    expect(wire.frames).toEqual({ count: 5, urlTemplate: tmpl('DS_TEST') })
   })
 
   it('omits frames when no resolver is supplied (legacy call sites pre-3pg)', () => {

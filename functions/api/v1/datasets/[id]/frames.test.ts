@@ -105,7 +105,8 @@ describe('GET /api/v1/datasets/{id}/frames (3pg/B)', () => {
       originalFilename: 'original_0.png',
       timestamp: '2026-05-16T00:00:00.000Z',
       contentDigest: VALID_DIGEST,
-      url: `${PUBLIC_BASE}/uploads/${DATASET_ID}/${UPLOAD_ID}/frames/00000.png`,
+      // Content-addressed: keyed by the frame's digest, no upload_id.
+      url: `${PUBLIC_BASE}/videos/${DATASET_ID}/frames/sha256/${'a'.repeat(64)}.png`,
     })
     expect(body.cursor).toBeNull()
   })
@@ -321,16 +322,15 @@ describe('GET /api/v1/datasets/{id}/frames (3pg/B)', () => {
   })
 
   it('returns 500 invalid_frame_metadata when env is OK but the row is malformed', async () => {
-    // Same as Copilot pass-2: split the failure modes so the
-    // operator sees the actual cause. Phase 3pg-review/B —
-    // discussion_r3277221658. Force a malformed
-    // `frame_source_filenames_ref` so `buildFramesUrlTemplate`
-    // returns null even though R2_PUBLIC_BASE is set.
+    // Split the failure modes so the operator sees the actual cause
+    // (row data vs deployment misconfig). With content-addressed
+    // frames the per-frame URL is built from the manifest digest +
+    // `frame_extension`; force a malformed extension (passes the
+    // non-null row gate but `buildContentAddressedFrameKey` rejects
+    // it) so the URL can't be built even though R2_PUBLIC_BASE is set.
     const sqlite = seedFramesRow()
     sqlite
-      .prepare(
-        `UPDATE datasets SET frame_source_filenames_ref = 'r2:bogus/not/the/canonical/shape.json' WHERE id = ?`,
-      )
+      .prepare(`UPDATE datasets SET frame_extension = 'PNG' WHERE id = ?`)
       .run(DATASET_ID)
     const env = {
       CATALOG_DB: asD1(sqlite),

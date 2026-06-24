@@ -41,7 +41,7 @@ import {
 } from '../../../_lib/catalog-store'
 import { serializeDataset } from '../../../_lib/dataset-serializer'
 import { makeDataRefResolver } from '../../../_lib/data-ref-resolver'
-import { buildFramesUrlTemplate, resolveAssetRefStrict } from '../../../_lib/r2-public-url'
+import { buildFramesRedirectTemplate, resolveAssetRefStrict } from '../../../_lib/r2-public-url'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
 // Errors are explicitly non-cacheable: RFC 9111 lets intermediaries
@@ -121,8 +121,8 @@ export const onRequestGet: PagesFunction<CatalogEnv, Params> = async context => 
   const resolveDataRef = makeDataRefResolver(context.env)
   const assetResolver = (ref: string | null | undefined) =>
     resolveAssetRefStrict(context.env, ref)
-  const framesResolver = (ref: string, ext: string) =>
-    buildFramesUrlTemplate(context.env, ref, ext)
+  const framesResolver = (datasetId: string, baseUrl: string) =>
+    buildFramesRedirectTemplate(context.env, baseUrl, datasetId)
   const dataset = serializeDataset(
     row,
     decorations.get(id)!,

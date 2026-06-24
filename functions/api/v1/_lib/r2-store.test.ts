@@ -25,9 +25,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildAssetKey,
+  buildContentAddressedFrameKey,
   buildFrameKey,
   buildFrameSequencePrefix,
   buildFrameSourceFilenamesKey,
+  buildFramesContentPrefix,
+  isContentAddressedFrameKey,
   isFrameKey,
   isFrameSequencePrefix,
   isVideoSourceKey,
@@ -240,6 +243,44 @@ describe('buildFrameSequencePrefix + buildFrameSourceFilenamesKey', () => {
     expect(() => buildFrameSequencePrefix(DS, 'NOTAULID')).toThrow(/uploadId/)
     expect(() => buildFrameSourceFilenamesKey('NOTAULID', UP)).toThrow(/datasetId/)
     expect(() => buildFrameSourceFilenamesKey(DS, 'NOTAULID')).toThrow(/uploadId/)
+  })
+})
+
+describe('buildContentAddressedFrameKey + buildFramesContentPrefix + isContentAddressedFrameKey', () => {
+  const DS = '01HXAAAAAAAAAAAAAAAAAAAAAA'
+  const HEX = 'a'.repeat(64)
+  const DIGEST = `sha256:${HEX}`
+
+  it('keys a frame by its content hash, sharing one object across uploads', () => {
+    expect(buildContentAddressedFrameKey(DS, DIGEST, 'jpg')).toBe(`videos/${DS}/frames/sha256/${HEX}.jpg`)
+    // No upload_id in the path — identical bytes resolve to one object.
+    expect(buildContentAddressedFrameKey(DS, DIGEST, 'png')).toBe(`videos/${DS}/frames/sha256/${HEX}.png`)
+  })
+
+  it('accepts a bare hex digest (no sha256: prefix)', () => {
+    expect(buildContentAddressedFrameKey(DS, HEX, 'webp')).toBe(`videos/${DS}/frames/sha256/${HEX}.webp`)
+  })
+
+  it('rejects a malformed digest, a non-ULID dataset, and a bad ext', () => {
+    expect(() => buildContentAddressedFrameKey(DS, 'sha256:nothex', 'jpg')).toThrow(/digest/)
+    expect(() => buildContentAddressedFrameKey(DS, `sha256:${'A'.repeat(64)}`, 'jpg')).toThrow(/digest/)
+    expect(() => buildContentAddressedFrameKey('NOTAULID', DIGEST, 'jpg')).toThrow(/datasetId/)
+    expect(() => buildContentAddressedFrameKey(DS, DIGEST, '.jpg')).toThrow(/ext/)
+    expect(() => buildContentAddressedFrameKey(DS, DIGEST, 'JPG')).toThrow(/ext/)
+  })
+
+  it('prefix ends with a trailing slash for list-scoped GC', () => {
+    expect(buildFramesContentPrefix(DS)).toBe(`videos/${DS}/frames/sha256/`)
+    expect(() => buildFramesContentPrefix('NOTAULID')).toThrow(/datasetId/)
+  })
+
+  it('isContentAddressedFrameKey matches the produced shape, rejects the legacy per-upload shape', () => {
+    expect(isContentAddressedFrameKey(buildContentAddressedFrameKey(DS, DIGEST, 'jpg'))).toBe(true)
+    expect(isContentAddressedFrameKey(`videos/${DS}/frames/sha256/${HEX}.jpg`)).toBe(true)
+    // Legacy per-upload frame key must NOT match.
+    expect(isContentAddressedFrameKey(`uploads/${DS}/01HYAAAAAAAAAAAAAAAAAAAAAA/frames/00000.jpg`)).toBe(false)
+    expect(isContentAddressedFrameKey(`videos/${DS}/frames/sha256/${'A'.repeat(64)}.jpg`)).toBe(false)
+    expect(isContentAddressedFrameKey(`videos/${DS}/segments/sha256/${HEX}.ts`)).toBe(false)
   })
 })
 

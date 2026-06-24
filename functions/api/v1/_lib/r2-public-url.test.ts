@@ -17,7 +17,8 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  buildFramesUrlTemplate,
+  buildFrameRecallUrl,
+  buildFramesRedirectTemplate,
   encodeR2Key,
   resolveAssetRef,
   resolveAssetRefStrict,
@@ -202,76 +203,66 @@ describe('encodeR2Key', () => {
   })
 })
 
-describe('buildFramesUrlTemplate (3pg/A)', () => {
+describe('buildFrameRecallUrl (content-addressed)', () => {
   const DS = '01HXAAAAAAAAAAAAAAAAAAAAAA'
-  const UP = '01HYAAAAAAAAAAAAAAAAAAAAAA'
-  const REF = `r2:uploads/${DS}/${UP}/source_filenames.json`
+  const HEX = 'a'.repeat(64)
+  const DIGEST = `sha256:${HEX}`
   const PUBLIC_BASE = 'https://assets.terraviz.example.com'
 
-  it('builds a public URL template with a literal {index} token', () => {
+  it('resolves a frame to its content-addressed public URL', () => {
     const env = { R2_PUBLIC_BASE: PUBLIC_BASE } as CatalogEnv
-    const template = buildFramesUrlTemplate(env, REF, 'png')
-    expect(template).toBe(
-      `${PUBLIC_BASE}/uploads/${DS}/${UP}/frames/{index}.png`,
+    expect(buildFrameRecallUrl(env, DS, DIGEST, 'png')).toBe(
+      `${PUBLIC_BASE}/videos/${DS}/frames/sha256/${HEX}.png`,
     )
-  })
-
-  it('preserves the {index} braces literally (no URL encoding)', () => {
-    // `encodeURIComponent('{')` is `%7B` — the whole point of the
-    // sentinel-and-swap pattern is that consumers can do
-    // `template.replace('{index}', padded)` without URL-decoding.
-    const env = { R2_PUBLIC_BASE: PUBLIC_BASE } as CatalogEnv
-    const template = buildFramesUrlTemplate(env, REF, 'jpg')!
-    expect(template).toContain('{index}')
-    expect(template).not.toContain('%7B')
-    expect(template).not.toContain('%7D')
   })
 
   it('falls through MOCK_R2 when R2_PUBLIC_BASE is unset', () => {
     const env = { MOCK_R2: 'true', CATALOG_R2_BUCKET: 'bkt' } as CatalogEnv
-    const template = buildFramesUrlTemplate(env, REF, 'webp')
-    expect(template).toBe(
-      `https://mock-r2.localhost/bkt/uploads/${DS}/${UP}/frames/{index}.webp`,
+    expect(buildFrameRecallUrl(env, DS, DIGEST, 'webp')).toBe(
+      `https://mock-r2.localhost/bkt/videos/${DS}/frames/sha256/${HEX}.webp`,
     )
   })
 
-  it('returns null when neither R2_PUBLIC_BASE nor MOCK_R2 is set', () => {
-    // Mirrors the resolveR2HlsPublicUrl policy — a missing public
-    // base surfaces as a wire-field omission rather than a URL that
-    // 403s on the SPA. The strict variant is what catches the
-    // misconfig before publishing the wire shape.
-    const env = {} as CatalogEnv
-    expect(buildFramesUrlTemplate(env, REF, 'png')).toBeNull()
+  it('returns null when no public base is configured', () => {
+    expect(buildFrameRecallUrl({} as CatalogEnv, DS, DIGEST, 'png')).toBeNull()
   })
 
-  it('returns null when the source-filenames ref shape is wrong', () => {
+  it('fails quiet (null, not throw) on a malformed digest, dataset, or extension', () => {
     const env = { R2_PUBLIC_BASE: PUBLIC_BASE } as CatalogEnv
-    // Missing `r2:` scheme.
-    expect(
-      buildFramesUrlTemplate(env, `uploads/${DS}/${UP}/source_filenames.json`, 'png'),
-    ).toBeNull()
-    // Wrong filename.
-    expect(
-      buildFramesUrlTemplate(env, `r2:uploads/${DS}/${UP}/index.json`, 'png'),
-    ).toBeNull()
-    // Non-ULID dataset id.
-    expect(
-      buildFramesUrlTemplate(env, `r2:uploads/short/${UP}/source_filenames.json`, 'png'),
-    ).toBeNull()
-    // Non-ULID upload id.
-    expect(
-      buildFramesUrlTemplate(env, `r2:uploads/${DS}/short/source_filenames.json`, 'png'),
-    ).toBeNull()
+    expect(buildFrameRecallUrl(env, DS, 'sha256:nothex', 'png')).toBeNull()
+    expect(buildFrameRecallUrl(env, 'NOTAULID', DIGEST, 'png')).toBeNull()
+    expect(buildFrameRecallUrl(env, DS, DIGEST, 'PNG')).toBeNull()
+    expect(buildFrameRecallUrl(env, DS, DIGEST, '../etc/passwd')).toBeNull()
+  })
+})
+
+describe('buildFramesRedirectTemplate (dataset-level urlTemplate)', () => {
+  const DS = '01HXAAAAAAAAAAAAAAAAAAAAAA'
+  const BASE = 'https://node.terraviz.example.com'
+
+  it('points the {index} template at the /frames/{index} redirect endpoint', () => {
+    const env = { R2_PUBLIC_BASE: 'https://assets.example' } as CatalogEnv
+    expect(buildFramesRedirectTemplate(env, BASE, DS)).toBe(
+      `${BASE}/api/v1/datasets/${DS}/frames/{index}`,
+    )
   })
 
-  it('rejects extensions outside the [a-z0-9]+ allowlist', () => {
-    const env = { R2_PUBLIC_BASE: PUBLIC_BASE } as CatalogEnv
-    // Empty.
-    expect(buildFramesUrlTemplate(env, REF, '')).toBeNull()
-    // Uppercase or path traversal would otherwise produce a URL
-    // that lands at the wrong R2 key.
-    expect(buildFramesUrlTemplate(env, REF, 'PNG')).toBeNull()
-    expect(buildFramesUrlTemplate(env, REF, '../etc/passwd')).toBeNull()
+  it('keeps the {index} braces literal so consumers substitute directly', () => {
+    const env = { MOCK_R2: 'true' } as CatalogEnv
+    const t = buildFramesRedirectTemplate(env, `${BASE}/`, DS)!
+    expect(t).toContain('{index}')
+    expect(t).not.toContain('%7B')
+    // Trailing slash on baseUrl is normalised.
+    expect(t).toBe(`${BASE}/api/v1/datasets/${DS}/frames/{index}`)
+  })
+
+  it('returns null when R2 public origin is unconfigured (frames not advertised)', () => {
+    expect(buildFramesRedirectTemplate({} as CatalogEnv, BASE, DS)).toBeNull()
+  })
+
+  it('returns null for a non-ULID dataset id', () => {
+    const env = { MOCK_R2: 'true' } as CatalogEnv
+    expect(buildFramesRedirectTemplate(env, BASE, 'NOTAULID')).toBeNull()
   })
 })
 

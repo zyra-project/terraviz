@@ -94,7 +94,7 @@ function makeStubClient(
     complete: [] as Array<[string, string]>,
   }
   const client = {
-    initImageSequenceUpload: (_datasetId: string, body: unknown) => {
+    initImageSequenceUpload: (datasetId: string, body: unknown) => {
       calls.init.push(body)
       const frames = (body as { frames: FrameDigest[] }).frames
       return Promise.resolve({
@@ -104,19 +104,24 @@ function makeStubClient(
           upload_id: 'UPLOAD01',
           kind: 'data',
           target: 'r2',
+          // Mirror the real init: content-addressed per-frame keys
+          // derived from each frame's digest
+          // (videos/{dataset}/frames/sha256/{hex}.{ext}), so the
+          // dedupe `exists` gate is exercised against the real key
+          // shape, not the legacy per-upload index path.
           frames: frames.map((f, index) => ({
             filename: f.filename,
             index,
             method: 'PUT',
             url: `https://r2.example/frames/${index}`,
             headers: {},
-            key: `uploads/d/u/frames/${String(index).padStart(5, '0')}.png`,
+            key: `videos/${datasetId}/frames/sha256/${f.digest.replace(/^sha256:/, '')}.png`,
           })),
           source_filenames: {
             method: 'PUT',
             url: 'https://r2.example/source_filenames.json',
             headers: {},
-            key: 'uploads/d/u/source_filenames.json',
+            key: `uploads/${datasetId}/UPLOAD01/source_filenames.json`,
           },
           expires_at: '2030-01-01T00:00:00Z',
           mock: opts.mock ?? false,
@@ -141,7 +146,9 @@ describe('publishFrameSequence', () => {
     const { client, calls } = makeStubClient()
     const result = await publishFrameSequence(client, 'DATASET01', dir, { concurrency: 1 })
 
-    expect(result).toEqual({ uploadId: 'UPLOAD01', frameCount: 3, mock: false })
+    expect(result).toMatchObject({ uploadId: 'UPLOAD01', frameCount: 3, uploaded: 3, reused: 0, mock: false })
+    expect(result.digests).toHaveLength(3)
+    expect(result.digests.every(d => /^sha256:[0-9a-f]{64}$/.test(d))).toBe(true)
     // 3 frame PUTs + 1 manifest PUT.
     expect(calls.putUrls).toHaveLength(4)
     expect(calls.putUrls).toContain('https://r2.example/source_filenames.json')
@@ -150,6 +157,41 @@ describe('publishFrameSequence', () => {
     const initBody = calls.init[0] as { frames: FrameDigest[]; source_filenames_digest: string }
     expect(initBody.frames.map(f => f.filename)).toEqual(['f_1.png', 'f_2.png', 'f_3.png'])
     expect(initBody.source_filenames_digest).toMatch(/^sha256:[0-9a-f]{64}$/)
+  })
+
+  it('skips frames whose content-addressed key already exists (dedupe)', async () => {
+    const dir = tmpFrames({ 'f_1.png': 'a', 'f_2.png': 'b', 'f_3.png': 'c' })
+    const { client, calls } = makeStubClient()
+    // The stub keys frames content-addressed at
+    // videos/DATASET01/frames/sha256/{sha256(content)}.png; pretend the
+    // first two frames' bytes ('a', 'b') already live in R2, only 'c' is
+    // new.
+    const caKey = (content: string) =>
+      `videos/DATASET01/frames/sha256/${sha256Hex(content)}.png`
+    const present = new Set([caKey('a'), caKey('b')])
+    const result = await publishFrameSequence(client, 'DATASET01', dir, {
+      concurrency: 1,
+      exists: (key: string) => Promise.resolve(present.has(key)),
+    })
+
+    expect(result).toMatchObject({ frameCount: 3, uploaded: 1, reused: 2 })
+    // Only the 1 new frame PUT + the manifest PUT (manifest is never
+    // deduped) = 2 calls.
+    expect(calls.putUrls).toHaveLength(2)
+    expect(calls.putUrls).toContain('https://r2.example/source_filenames.json')
+    expect(calls.complete).toEqual([['DATASET01', 'UPLOAD01']])
+  })
+
+  it('uploads on a HEAD failure (best-effort gate never blocks the publish)', async () => {
+    const dir = tmpFrames({ 'f_1.png': 'a' })
+    const { client, calls } = makeStubClient()
+    const result = await publishFrameSequence(client, 'DATASET01', dir, {
+      concurrency: 1,
+      exists: () => Promise.reject(new Error('HEAD blew up')),
+    })
+    // The throwing gate is swallowed → the frame is uploaded anyway.
+    expect(result).toMatchObject({ uploaded: 1, reused: 0 })
+    expect(calls.putUrls).toHaveLength(2) // frame + manifest
   })
 
   it('skips the byte PUTs in mock mode but still completes', async () => {

@@ -194,20 +194,29 @@ export type DataRefResolver = (dataRef: string) => string | null
 export type AssetRefResolver = (ref: string | null | undefined) => string | null
 
 /**
- * Pluggable callback that returns the public per-frame URL template
- * for an image-sequence upload (Phase 3pg/A). Takes the row's
- * `frame_source_filenames_ref` (the canonical ULID-pair container)
- * and the row's `frame_extension`, returns a URL with a literal
- * `{index}` token consumers substitute with the zero-padded 5-digit
- * frame number. Lives outside the serializer for the same reason
- * `DataRefResolver` does — keeps the serializer free of env
- * bindings; call sites close over what they have on hand. Returns
- * null when R2 public-base resolution falls through, mirroring
+ * Pluggable callback that returns the dataset-level per-frame URL
+ * template for an image-sequence upload. Takes the row's `datasetId`
+ * and the node `baseUrl`, and returns a URL with a literal `{index}`
+ * token consumers substitute with the zero-padded 5-digit frame
+ * number.
+ *
+ * Since frames are content-addressed, no single direct-R2 `{index}`
+ * template can exist (each index maps to an arbitrary hash), so the
+ * template points at the `/frames/{index}` **redirect** endpoint —
+ * `${baseUrl}/api/v1/datasets/{datasetId}/frames/{index}` — which 302s
+ * to the content-addressed object (see `buildFramesRedirectTemplate`).
+ * The `/frames` *list* endpoint emits direct content-addressed URLs
+ * separately, so bulk download skips the hop.
+ *
+ * Lives outside the serializer for the same reason `DataRefResolver`
+ * does — keeps the serializer free of env bindings; call sites close
+ * over what they have on hand. Returns null when R2 public-base
+ * resolution falls through (frames not advertised), mirroring
  * `AssetRefResolver`'s shape.
  */
 export type FramesUrlTemplateResolver = (
-  frameSourceFilenamesRef: string,
-  frameExtension: string,
+  datasetId: string,
+  baseUrl: string,
 ) => string | null
 
 function nonNull<T>(v: T | null | undefined): T | undefined {
@@ -415,10 +424,7 @@ export function serializeDataset(
     row.frame_source_filenames_ref != null &&
     resolveFramesUrlTemplate
   ) {
-    const urlTemplate = resolveFramesUrlTemplate(
-      row.frame_source_filenames_ref,
-      row.frame_extension,
-    )
+    const urlTemplate = resolveFramesUrlTemplate(row.id, identity.base_url)
     if (urlTemplate) {
       const frames: WireDatasetFrames = {
         count: row.frame_count,
