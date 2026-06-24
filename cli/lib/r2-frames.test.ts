@@ -195,6 +195,27 @@ describe('restoreFramesFromR2', () => {
     expect(result.restored).toBe(2)
     expect(readdirSync(dir).sort()).toEqual(['f_1.png', 'f_2.png'])
   })
+
+  it('is non-fatal: one frame failing does not abort the rest of the restore', async () => {
+    const { fetchImpl } = makeFakeR2({
+      [`${PREFIX}f_1.png`]: bytes('1'),
+      [`${PREFIX}f_2.png`]: bytes('2'),
+      [`${PREFIX}f_3.png`]: bytes('3'),
+    })
+    // Fail the GET of f_2 with a non-retryable 403 so the pool can't
+    // ride it out via retry — the point is the OTHER frames still land.
+    const flaky = (async (input: Request): Promise<Response> => {
+      const url = new URL(input.url)
+      if (input.method === 'GET' && !url.searchParams.has('list-type') && url.pathname.endsWith('f_2.png')) {
+        return new Response('denied', { status: 403 })
+      }
+      return fetchImpl(input)
+    }) as unknown as typeof fetch
+    const dir = tmpFramesDir()
+    const result = await restoreFramesFromR2(CONFIG, DATASET, dir, { fetchImpl: flaky })
+    expect(result.restored).toBe(2)
+    expect(readdirSync(dir).sort()).toEqual(['f_1.png', 'f_3.png'])
+  })
 })
 
 describe('saveFramesToR2', () => {
@@ -210,6 +231,24 @@ describe('saveFramesToR2', () => {
     // The already-cached frame is not re-PUT.
     expect(new TextDecoder().decode(store.get(`${PREFIX}f_20240101.png`))).toBe('cached')
     expect(new TextDecoder().decode(store.get(`${PREFIX}f_20240108.png`))).toBe('new')
+  })
+
+  it('is non-fatal: one frame PUT failing does not abort the rest of the save', async () => {
+    const { store, fetchImpl } = makeFakeR2()
+    const dir = tmpFramesDir()
+    for (const n of ['f_1.png', 'f_2.png', 'f_3.png']) writeFileSync(join(dir, n), n)
+    // Fail the PUT of f_2 with a non-retryable 403.
+    const flaky = (async (input: Request): Promise<Response> => {
+      const url = new URL(input.url)
+      if (input.method === 'PUT' && url.pathname.endsWith('f_2.png')) {
+        return new Response('denied', { status: 403 })
+      }
+      return fetchImpl(input)
+    }) as unknown as typeof fetch
+    const result = await saveFramesToR2(CONFIG, DATASET, dir, { fetchImpl: flaky })
+    // 2 of 3 uploaded; the failed frame is simply not cached.
+    expect(result.uploaded).toBe(2)
+    expect([...store.keys()].sort()).toEqual([`${PREFIX}f_1.png`, `${PREFIX}f_3.png`])
   })
 
   it('prunes the cache to the newest N frames (window-only retention)', async () => {

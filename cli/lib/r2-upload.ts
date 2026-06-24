@@ -583,6 +583,37 @@ export async function getR2ObjectText(
   return await res.text()
 }
 
+/** GET an R2 object's bytes, or null on 404. Retries transient
+ *  failures (network / 429 / 5xx) like the other helpers. Used by the
+ *  frame cache restore to pull each cached frame onto disk; frames are
+ *  small (~1 MB JPEGs) so an in-memory `arrayBuffer` is fine. Throws on
+ *  a non-404 error. */
+export async function getR2ObjectBytes(
+  config: R2UploadConfig,
+  key: string,
+  options: UploadR2ObjectOptions = {},
+): Promise<Uint8Array | null> {
+  validateR2Config(config)
+  const fetchImpl = options.fetchImpl ?? fetch
+  const { attempts, delayMs } = retryBudget(options)
+  const res = await signedFetchWithRetry(
+    s3Client(config),
+    buildObjectUrl(config, key),
+    { method: 'GET' },
+    'GET',
+    key,
+    fetchImpl,
+    attempts,
+    delayMs,
+  )
+  if (res.status === 404) return null
+  if (res.status < 200 || res.status >= 300) {
+    const text = await res.text().catch(() => '')
+    throw new R2UploadError(res.status, key, `GET ${key} failed (${res.status}): ${text.slice(0, 200)}`)
+  }
+  return new Uint8Array(await res.arrayBuffer())
+}
+
 /**
  * Paginated ListObjectsV2 over a key prefix — follows
  * `NextContinuationToken` so a prefix with more than 1,000 objects (a
