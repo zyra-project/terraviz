@@ -65,6 +65,7 @@ import {
   extForMime,
   getAssetUpload,
   markAssetUploadFailed,
+  sampleFrameIndices,
   markTranscodingUploadCompleted,
   revertTranscodingStamp,
   stampTranscodingForFrameSource,
@@ -865,17 +866,22 @@ async function handleFrameSourceComplete(
           `Mint a fresh upload to retry.`,
       )
     }
-    // Distinct keys: identical frame bytes share one content-addressed
-    // object, so a deduped HEAD set keeps us well under the Workers
-    // subrequest cap even at the 10 000-frame ceiling.
+    // HEAD a SAMPLE of the frames, not all of them. Verifying every
+    // frame here is thousands of server-side R2 HEADs at the window
+    // ceiling (minutes of `/complete` latency, near the Workers
+    // subrequest budget); the transcode re-downloads and re-hashes
+    // every frame against the manifest digest anyway, so this only
+    // needs to catch a broadly-failed upload fast. The sample always
+    // covers the first + last frame plus a spread of the interior, and
+    // a deduped key set drops identical-byte frames
+    // (`docs/INCREMENTAL_FRAME_UPLOAD_PLAN.md`).
     const frameKeys = [
-      ...new Set(manifest.map(e => buildContentAddressedFrameKey(datasetId, e.digest, extension))),
+      ...new Set(
+        sampleFrameIndices(frameCount).map(i =>
+          buildContentAddressedFrameKey(datasetId, manifest[i].digest, extension),
+        ),
+      ),
     ]
-    // Bounded-concurrency HEAD pool rather than `Promise.all` —
-    // Cloudflare Workers cap outbound subrequests at 50 (free) /
-    // 1000 (paid) per invocation. 16 workers is well below the
-    // paid-tier cap and high enough that the HEAD-all wall-clock
-    // stays small. Phase 3pf-review/G — Copilot discussion_r3263466382.
     const existences = await runBoundedPool(
       frameKeys.map(key => () => verifyObjectExists(context.env, key)),
       FRAME_OPERATION_CONCURRENCY,

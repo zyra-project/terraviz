@@ -492,6 +492,43 @@ function formatBytes(n: number): string {
   return `${n} B`
 }
 
+/** Max frames the `/complete` handler HEAD-verifies. */
+export const FRAME_VERIFY_SAMPLE_SIZE = 16
+
+/**
+ * Pick up to `max` evenly-spread frame indices to HEAD-verify at
+ * `/complete` (`docs/INCREMENTAL_FRAME_UPLOAD_PLAN.md`).
+ *
+ * HEAD-verifying all N frames before stamping `transcoding` is a
+ * fail-fast guard, but at the 10 000-frame ceiling it's thousands of
+ * server-side R2 HEADs per `/complete` — minutes of latency and close
+ * to the Workers subrequest budget. Since the transcode re-downloads
+ * and re-hashes *every* frame against the manifest digest (a missing or
+ * corrupt frame fails the encode regardless), the `/complete` check
+ * only needs to catch a broadly-failed upload cheaply. Sampling a
+ * spread (always the first and last, plus interior points) does that in
+ * a handful of HEADs.
+ *
+ * Returns sorted, distinct indices in `[0, count)`. For
+ * `count <= max` it returns all of them (small uploads verify in full).
+ */
+export function sampleFrameIndices(count: number, max: number = FRAME_VERIFY_SAMPLE_SIZE): number[] {
+  if (count <= 0) return []
+  if (count === 1) return [0]
+  // n in [2, count]: at least 2 so the spread always covers BOTH the
+  // first and last frame and `(n - 1)` is never zero (a `max` that
+  // floors/clamps to 1, or a non-finite `max`, would otherwise divide
+  // by zero → NaN indices). Non-finite `max` falls back to the default.
+  const m = Number.isFinite(max) ? Math.floor(max) : FRAME_VERIFY_SAMPLE_SIZE
+  const n = Math.min(count, Math.max(2, m))
+  if (count <= n) return Array.from({ length: count }, (_, i) => i)
+  const indices = new Set<number>()
+  for (let i = 0; i < n; i++) {
+    indices.add(Math.round((i * (count - 1)) / (n - 1)))
+  }
+  return [...indices].sort((a, b) => a - b)
+}
+
 /**
  * Picks the file extension for a given mime. Used to build the
  * content-addressed R2 key. `application/json` maps to `json` so

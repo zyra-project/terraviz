@@ -24,6 +24,7 @@ import { onRequestPost as completeHandler } from './complete'
 import { asD1, makeKV, seedFixtures } from '../../../../../_lib/test-helpers'
 import type { PublisherRow } from '../../../../../_lib/publisher-store'
 import { CapturingJobQueue } from '../../../../../_lib/job-queue'
+import { sampleFrameIndices } from '../../../../../_lib/asset-uploads'
 
 const ADMIN: PublisherRow = {
   id: 'PUB-ADMIN',
@@ -1874,6 +1875,56 @@ describe('POST .../asset/{upload_id}/complete — image-sequence dispatch (3pf)'
       .get(UPLOAD_ID) as { status: string; failure_reason: string }
     expect(status.status).toBe('failed')
     expect(status.failure_reason).toBe('asset_missing')
+  })
+
+  it('only HEAD-verifies a sample — a non-sampled missing frame still completes (202)', async () => {
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: false })
+    const N = 100
+    const digests = Array.from({ length: N }, (_, i) => `sha256:${i.toString(16).padStart(64, '0')}`)
+    const { json } = framesManifest(datasetId, digests)
+    // Index 50 is NOT in the size-16 sample of 100 — guard that premise.
+    expect(new Set(sampleFrameIndices(N)).has(50)).toBe(false)
+    // Every frame present EXCEPT index 50.
+    const present = new Set(
+      digests
+        .filter((_, i) => i !== 50)
+        .map(d => `videos/${datasetId}/frames/sha256/${d.replace('sha256:', '')}.png`),
+    )
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      CATALOG_R2: makeFramesBucket(json, present),
+      MOCK_GITHUB_DISPATCH: 'true',
+    }
+    seedFrameUpload(sqlite, datasetId, N)
+
+    const res = await completeHandler(ctx({ env, datasetId, uploadId: UPLOAD_ID }))
+    expect(res.status).toBe(202) // sampling skipped the absent frame; transcode catches it later
+  })
+
+  it('still 409s when a SAMPLED frame is missing (first frame is always sampled)', async () => {
+    const { sqlite, datasetId, kv } = setupEnv({ datasetPublished: false })
+    const N = 100
+    const digests = Array.from({ length: N }, (_, i) => `sha256:${i.toString(16).padStart(64, '0')}`)
+    const { json } = framesManifest(datasetId, digests)
+    expect(new Set(sampleFrameIndices(N)).has(0)).toBe(true) // index 0 is always sampled
+    // Every frame present EXCEPT index 0.
+    const present = new Set(
+      digests
+        .filter((_, i) => i !== 0)
+        .map(d => `videos/${datasetId}/frames/sha256/${d.replace('sha256:', '')}.png`),
+    )
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: kv,
+      CATALOG_R2: makeFramesBucket(json, present),
+      MOCK_GITHUB_DISPATCH: 'true',
+    }
+    seedFrameUpload(sqlite, datasetId, N)
+
+    const res = await completeHandler(ctx({ env, datasetId, uploadId: UPLOAD_ID }))
+    expect(res.status).toBe(409)
+    expect((await readJson<{ error: string }>(res)).error).toBe('asset_missing')
   })
 
   it('idempotent retry on a completed frame-source upload returns 200 with transcoding=true', async () => {

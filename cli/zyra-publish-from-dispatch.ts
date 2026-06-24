@@ -337,8 +337,12 @@ async function waitAndReportSucceeded(
   uploadId: string,
 ): Promise<number> {
   if (args.waitSeconds > 0) {
-    const deadline = Date.now() + args.waitSeconds * 1000
+    const started = Date.now()
+    const deadline = started + args.waitSeconds * 1000
     const expectedRef = `r2:videos/${datasetId}/${uploadId}/master.m3u8`
+    // Heartbeat so the step doesn't look dead while the (silent)
+    // transcode runs — throttled to ~once a minute.
+    let lastHeartbeat = 0
     for (;;) {
       if (Date.now() > deadline) {
         // The wait is a best-effort confirmation window, not a gate:
@@ -362,6 +366,11 @@ async function waitAndReportSucceeded(
       if (row.body.dataset.data_ref === expectedRef && !row.body.dataset.transcoding) {
         log(`transcode landed — data_ref=${expectedRef}`)
         break
+      }
+      const elapsed = Math.round((Date.now() - started) / 1000)
+      if (elapsed - lastHeartbeat >= 60) {
+        lastHeartbeat = elapsed
+        log(`waiting on transcode… (${elapsed}s elapsed, transcoding=${row.body.dataset.transcoding ? 1 : 0})`)
       }
     }
   }
