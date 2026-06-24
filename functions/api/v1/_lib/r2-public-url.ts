@@ -197,9 +197,13 @@ export function isR2PublicConfigured(env: CatalogEnv): boolean {
  *
  * Returns null when R2 public-base resolution falls through (operator
  * must bind `R2_PUBLIC_BASE` or set `MOCK_R2=true`), or when the
- * digest/extension is malformed — recall must fail quiet, not throw,
- * so a single bad manifest entry returns null rather than 500-ing the
- * whole listing.
+ * digest/extension is malformed. The helper is non-throwing so the
+ * caller decides how to classify the failure: the `/frames` and
+ * `/frames/{index}` endpoints pre-check `isR2PublicConfigured` (→ 503
+ * for the unconfigured case) and treat a remaining null as malformed
+ * row metadata (→ 500 `invalid_frame_metadata`). Returning null rather
+ * than throwing keeps one bad manifest entry from blowing up the whole
+ * request with an unhandled exception.
  */
 export function buildFrameRecallUrl(
   env: CatalogEnv,

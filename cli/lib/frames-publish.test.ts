@@ -94,7 +94,7 @@ function makeStubClient(
     complete: [] as Array<[string, string]>,
   }
   const client = {
-    initImageSequenceUpload: (_datasetId: string, body: unknown) => {
+    initImageSequenceUpload: (datasetId: string, body: unknown) => {
       calls.init.push(body)
       const frames = (body as { frames: FrameDigest[] }).frames
       return Promise.resolve({
@@ -104,19 +104,24 @@ function makeStubClient(
           upload_id: 'UPLOAD01',
           kind: 'data',
           target: 'r2',
+          // Mirror the real init: content-addressed per-frame keys
+          // derived from each frame's digest
+          // (videos/{dataset}/frames/sha256/{hex}.{ext}), so the
+          // dedupe `exists` gate is exercised against the real key
+          // shape, not the legacy per-upload index path.
           frames: frames.map((f, index) => ({
             filename: f.filename,
             index,
             method: 'PUT',
             url: `https://r2.example/frames/${index}`,
             headers: {},
-            key: `uploads/d/u/frames/${String(index).padStart(5, '0')}.png`,
+            key: `videos/${datasetId}/frames/sha256/${f.digest.replace(/^sha256:/, '')}.png`,
           })),
           source_filenames: {
             method: 'PUT',
             url: 'https://r2.example/source_filenames.json',
             headers: {},
-            key: 'uploads/d/u/source_filenames.json',
+            key: `uploads/${datasetId}/UPLOAD01/source_filenames.json`,
           },
           expires_at: '2030-01-01T00:00:00Z',
           mock: opts.mock ?? false,
@@ -157,12 +162,13 @@ describe('publishFrameSequence', () => {
   it('skips frames whose content-addressed key already exists (dedupe)', async () => {
     const dir = tmpFrames({ 'f_1.png': 'a', 'f_2.png': 'b', 'f_3.png': 'c' })
     const { client, calls } = makeStubClient()
-    // The stub keys frames at `uploads/d/u/frames/{0..2}.png`; pretend
-    // the first two already live in R2, only the third is new.
-    const present = new Set([
-      'uploads/d/u/frames/00000.png',
-      'uploads/d/u/frames/00001.png',
-    ])
+    // The stub keys frames content-addressed at
+    // videos/DATASET01/frames/sha256/{sha256(content)}.png; pretend the
+    // first two frames' bytes ('a', 'b') already live in R2, only 'c' is
+    // new.
+    const caKey = (content: string) =>
+      `videos/DATASET01/frames/sha256/${sha256Hex(content)}.png`
+    const present = new Set([caKey('a'), caKey('b')])
     const result = await publishFrameSequence(client, 'DATASET01', dir, {
       concurrency: 1,
       exists: (key: string) => Promise.resolve(present.has(key)),

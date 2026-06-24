@@ -194,21 +194,25 @@ export type DataRefResolver = (dataRef: string) => string | null
 export type AssetRefResolver = (ref: string | null | undefined) => string | null
 
 /**
- * Pluggable callback that returns the public per-frame URL template
- * for an image-sequence upload (Phase 3pg/A). Takes the row's
- * `frame_source_filenames_ref` (the canonical ULID-pair container)
- * and the row's `frame_extension`, returns a URL with a literal
- * `{index}` token consumers substitute with the zero-padded 5-digit
- * frame number. Lives outside the serializer for the same reason
- * `DataRefResolver` does — keeps the serializer free of env
- * bindings; call sites close over what they have on hand. Returns
- * null when R2 public-base resolution falls through, mirroring
- * `AssetRefResolver`'s shape.
+ * Pluggable callback that returns the dataset-level per-frame URL
+ * template for an image-sequence upload. Takes the row's `datasetId`
+ * and the node `baseUrl`, and returns a URL with a literal `{index}`
+ * token consumers substitute with the zero-padded 5-digit frame
+ * number.
  *
- * The template now points at the `/frames/{index}` redirect endpoint
- * (content-addressed frames can't be a direct-R2 `{index}` template),
- * so the resolver takes the `datasetId` + node `baseUrl` it builds the
- * redirect URL from — see `buildFramesRedirectTemplate`.
+ * Since frames are content-addressed, no single direct-R2 `{index}`
+ * template can exist (each index maps to an arbitrary hash), so the
+ * template points at the `/frames/{index}` **redirect** endpoint —
+ * `${baseUrl}/api/v1/datasets/{datasetId}/frames/{index}` — which 302s
+ * to the content-addressed object (see `buildFramesRedirectTemplate`).
+ * The `/frames` *list* endpoint emits direct content-addressed URLs
+ * separately, so bulk download skips the hop.
+ *
+ * Lives outside the serializer for the same reason `DataRefResolver`
+ * does — keeps the serializer free of env bindings; call sites close
+ * over what they have on hand. Returns null when R2 public-base
+ * resolution falls through (frames not advertised), mirroring
+ * `AssetRefResolver`'s shape.
  */
 export type FramesUrlTemplateResolver = (
   datasetId: string,
