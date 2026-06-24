@@ -491,7 +491,7 @@ describe('uploadR2Object (3b/F)', () => {
       'datasets/DS001/caption.vtt',
       new Uint8Array(10),
       'text/vtt',
-      { fetchImpl },
+      { fetchImpl, retryDelayMs: 0 },
     ).catch(e => e) as R2UploadError
     expect(err).toBeInstanceOf(R2UploadError)
     expect(err.status).toBeNull()
@@ -588,7 +588,7 @@ describe('deleteR2Object (3b/I)', () => {
     const err = await deleteR2Object(
       CONFIG,
       'datasets/DS001/legend.png',
-      { fetchImpl },
+      { fetchImpl, retryDelayMs: 0 },
     ).catch(e => e) as R2UploadError
     expect(err).toBeInstanceOf(R2UploadError)
     expect(err.status).toBeNull()
@@ -620,11 +620,39 @@ describe('r2ObjectExists', () => {
     ).toBe(false)
   })
 
-  it('throws on an unexpected error status (not 404)', async () => {
+  it('throws on a persistent unexpected error status (not 404), after retrying', async () => {
     const err = vi.fn(async () => new Response(null, { status: 500 }))
     await expect(
-      r2ObjectExists(CONFIG, 'videos/x/frames/sha256/a.png', { fetchImpl: err as unknown as typeof fetch }),
+      r2ObjectExists(CONFIG, 'videos/x/frames/sha256/a.png', {
+        fetchImpl: err as unknown as typeof fetch,
+        attempts: 3,
+        retryDelayMs: 0,
+      }),
     ).rejects.toBeInstanceOf(R2UploadError)
+    expect(err).toHaveBeenCalledTimes(3) // 5xx is retried
+  })
+
+  it('retries a transient 429 then returns true (R2 read-rate throttle)', async () => {
+    let n = 0
+    const flaky = vi.fn(async () => (++n < 2 ? new Response(null, { status: 429 }) : new Response(null, { status: 200 })))
+    expect(
+      await r2ObjectExists(CONFIG, 'videos/x/frames/sha256/a.png', {
+        fetchImpl: flaky as unknown as typeof fetch,
+        retryDelayMs: 0,
+      }),
+    ).toBe(true)
+    expect(flaky).toHaveBeenCalledTimes(2)
+  })
+
+  it('does NOT retry a deterministic 4xx (403 fails fast — only 429/5xx are retried)', async () => {
+    const forbidden = vi.fn(async () => new Response(null, { status: 403 }))
+    await expect(
+      r2ObjectExists(CONFIG, 'videos/x/frames/sha256/a.png', {
+        fetchImpl: forbidden as unknown as typeof fetch,
+        retryDelayMs: 0,
+      }),
+    ).rejects.toBeInstanceOf(R2UploadError)
+    expect(forbidden).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -669,10 +697,29 @@ describe('listR2KeysPaginated', () => {
     expect(calls).toHaveLength(2)
   })
 
-  it('throws R2UploadError on a non-2xx list', async () => {
+  it('throws R2UploadError on a persistent non-2xx list, after retrying the 5xx', async () => {
     const fetchImpl = vi.fn(async () => new Response('nope', { status: 503 }))
     await expect(
-      listR2KeysPaginated(CONFIG, 'videos/d/frames/sha256/', { fetchImpl: fetchImpl as unknown as typeof fetch }),
+      listR2KeysPaginated(CONFIG, 'videos/d/frames/sha256/', {
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        attempts: 3,
+        retryDelayMs: 0,
+      }),
     ).rejects.toBeInstanceOf(R2UploadError)
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
+  })
+
+  it('retries a transient 500 on the first page then succeeds', async () => {
+    let n = 0
+    const fetchImpl = vi.fn(async () => {
+      if (++n === 1) return new Response('err', { status: 500 })
+      return new Response(page(['videos/d/frames/sha256/a.png']), { status: 200 })
+    })
+    const keys = await listR2KeysPaginated(CONFIG, 'videos/d/frames/sha256/', {
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      retryDelayMs: 0,
+    })
+    expect(keys).toEqual(['videos/d/frames/sha256/a.png'])
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
   })
 })

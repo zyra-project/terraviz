@@ -106,6 +106,78 @@ export class R2UploadError extends Error {
   }
 }
 
+/** Total attempts per R2 request before giving up on transient
+ *  failures. R2 returns sporadic `500 InternalError` on PUT and a
+ *  `429 ServiceUnavailable` ("reduce your rate of simultaneous reads")
+ *  under read pressure; a single un-retried op among thousands (the
+ *  frame cache restore/save, the transcode's segment HEADs) drops that
+ *  object — and for the cache that means a NOAA re-fetch. */
+const DEFAULT_R2_ATTEMPTS = 4
+/** Base backoff between R2 retries (ms); doubles each attempt. */
+const DEFAULT_R2_RETRY_DELAY_MS = 500
+
+function r2Sleep(ms: number): Promise<void> {
+  return ms > 0 ? new Promise(resolve => setTimeout(resolve, ms)) : Promise.resolve()
+}
+
+/** Transient R2 failures worth retrying: a network throw (the callers
+ *  surface this path separately), R2's rate-limit 429, and any 5xx
+ *  (the sporadic InternalError). Deterministic 4xx (403/404/…) fail
+ *  fast — a retry can't fix them. */
+function isRetryableR2Status(status: number): boolean {
+  return status === 429 || status >= 500
+}
+
+/**
+ * Sign + fetch an R2 request, retrying transient failures (network
+ * error, 429, 5xx) with exponential backoff. Re-signs each attempt so a
+ * long backoff can't outlive the SigV4 signature. Returns the final
+ * `Response` — the caller applies its own ok/non-ok handling — and
+ * throws `R2UploadError` only when the final attempt is a network
+ * throw. `label` (GET/PUT/HEAD/DELETE/LIST) + `key` shape the error
+ * message for the operator's log.
+ */
+async function signedFetchWithRetry(
+  client: AwsClient,
+  url: string,
+  signInit: RequestInit,
+  label: string,
+  key: string,
+  fetchImpl: typeof fetch,
+  attempts: number,
+  delayMs: number,
+): Promise<Response> {
+  for (let attempt = 1; ; attempt++) {
+    let res: Response
+    try {
+      res = await fetchImpl(await client.sign(url, signInit))
+    } catch (e) {
+      if (attempt >= attempts) {
+        throw new R2UploadError(
+          null,
+          key,
+          `${label} ${key} unreachable: ${e instanceof Error ? e.message : String(e)}`,
+        )
+      }
+      await r2Sleep(delayMs * 2 ** (attempt - 1))
+      continue
+    }
+    if (res.ok || !isRetryableR2Status(res.status) || attempt >= attempts) return res
+    await r2Sleep(delayMs * 2 ** (attempt - 1))
+  }
+}
+
+/** Resolve the per-request retry budget from caller options. */
+function retryBudget(options: { attempts?: number; retryDelayMs?: number }): {
+  attempts: number
+  delayMs: number
+} {
+  return {
+    attempts: Math.max(1, Math.floor(options.attempts ?? DEFAULT_R2_ATTEMPTS)),
+    delayMs: Math.max(0, options.retryDelayMs ?? DEFAULT_R2_RETRY_DELAY_MS),
+  }
+}
+
 /**
  * Read R2 S3-API credentials from `process.env`. Returns an
  * incomplete config if any variable is missing — caller should
@@ -289,6 +361,12 @@ export async function uploadHlsBundle(
 export interface UploadR2ObjectOptions {
   /** Test injection. Defaults to the global `fetch`. */
   fetchImpl?: typeof fetch
+  /** Total attempts per request before giving up on a transient R2
+   *  failure (network / 429 / 5xx). Default 4. */
+  attempts?: number
+  /** Base backoff between retries (ms); doubles each attempt. Default
+   *  500. Tests pass 0. */
+  retryDelayMs?: number
 }
 
 export interface UploadR2ObjectResult {
@@ -327,12 +405,8 @@ export async function uploadR2Object(
 ): Promise<UploadR2ObjectResult> {
   validateR2Config(config)
   const fetchImpl = options.fetchImpl ?? fetch
-  const client = new AwsClient({
-    accessKeyId: config.accessKeyId,
-    secretAccessKey: config.secretAccessKey,
-    service: 's3',
-    region: R2_REGION,
-  })
+  const { attempts, delayMs } = retryBudget(options)
+  const client = s3Client(config)
 
   const start = Date.now()
   const url = buildObjectUrl(config, key)
@@ -344,25 +418,23 @@ export async function uploadR2Object(
     body.byteOffset,
     body.byteOffset + body.byteLength,
   ) as ArrayBuffer
-  const signed = await client.sign(url, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': contentType,
-      'Content-Length': String(body.byteLength),
+  const res = await signedFetchWithRetry(
+    client,
+    url,
+    {
+      method: 'PUT',
+      headers: {
+        'Content-Type': contentType,
+        'Content-Length': String(body.byteLength),
+      },
+      body: ab,
     },
-    body: ab,
-  })
-
-  let res: Response
-  try {
-    res = await fetchImpl(signed)
-  } catch (e) {
-    throw new R2UploadError(
-      null,
-      key,
-      `PUT ${key} unreachable: ${e instanceof Error ? e.message : String(e)}`,
-    )
-  }
+    'PUT',
+    key,
+    fetchImpl,
+    attempts,
+    delayMs,
+  )
   if (res.status < 200 || res.status >= 300) {
     const text = await res.text().catch(() => '')
     throw new R2UploadError(
@@ -420,27 +492,12 @@ export async function deleteR2Object(
 ): Promise<{ key: string; durationMs: number }> {
   validateR2Config(config)
   const fetchImpl = options.fetchImpl ?? fetch
-  const client = new AwsClient({
-    accessKeyId: config.accessKeyId,
-    secretAccessKey: config.secretAccessKey,
-    service: 's3',
-    region: R2_REGION,
-  })
+  const { attempts, delayMs } = retryBudget(options)
+  const client = s3Client(config)
 
   const start = Date.now()
   const url = buildObjectUrl(config, key)
-  const signed = await client.sign(url, { method: 'DELETE' })
-
-  let res: Response
-  try {
-    res = await fetchImpl(signed)
-  } catch (e) {
-    throw new R2UploadError(
-      null,
-      key,
-      `DELETE ${key} unreachable: ${e instanceof Error ? e.message : String(e)}`,
-    )
-  }
+  const res = await signedFetchWithRetry(client, url, { method: 'DELETE' }, 'DELETE', key, fetchImpl, attempts, delayMs)
   // S3 returns 204 on successful single-object DELETE. R2 follows
   // the same semantics. Anything outside 2xx is an error here —
   // the caller (rollback path) treats orphan storage as
@@ -482,13 +539,17 @@ export async function r2ObjectExists(
 ): Promise<boolean> {
   validateR2Config(config)
   const fetchImpl = options.fetchImpl ?? fetch
-  const signed = await s3Client(config).sign(buildObjectUrl(config, key), { method: 'HEAD' })
-  let res: Response
-  try {
-    res = await fetchImpl(signed)
-  } catch (e) {
-    throw new R2UploadError(null, key, `HEAD ${key} unreachable: ${e instanceof Error ? e.message : String(e)}`)
-  }
+  const { attempts, delayMs } = retryBudget(options)
+  const res = await signedFetchWithRetry(
+    s3Client(config),
+    buildObjectUrl(config, key),
+    { method: 'HEAD' },
+    'HEAD',
+    key,
+    fetchImpl,
+    attempts,
+    delayMs,
+  )
   if (res.status === 404) return false
   if (res.status >= 200 && res.status < 300) return true
   throw new R2UploadError(res.status, key, `HEAD ${key} failed (${res.status})`)
@@ -504,13 +565,17 @@ export async function getR2ObjectText(
 ): Promise<string | null> {
   validateR2Config(config)
   const fetchImpl = options.fetchImpl ?? fetch
-  const signed = await s3Client(config).sign(buildObjectUrl(config, key), { method: 'GET' })
-  let res: Response
-  try {
-    res = await fetchImpl(signed)
-  } catch (e) {
-    throw new R2UploadError(null, key, `GET ${key} unreachable: ${e instanceof Error ? e.message : String(e)}`)
-  }
+  const { attempts, delayMs } = retryBudget(options)
+  const res = await signedFetchWithRetry(
+    s3Client(config),
+    buildObjectUrl(config, key),
+    { method: 'GET' },
+    'GET',
+    key,
+    fetchImpl,
+    attempts,
+    delayMs,
+  )
   if (res.status === 404) return null
   if (res.status < 200 || res.status >= 300) {
     throw new R2UploadError(res.status, key, `GET ${key} failed (${res.status})`)
@@ -532,6 +597,7 @@ export async function listR2KeysPaginated(
 ): Promise<string[]> {
   validateR2Config(config)
   const fetchImpl = options.fetchImpl ?? fetch
+  const { attempts, delayMs } = retryBudget(options)
   const client = s3Client(config)
   const keys: string[] = []
   let token: string | undefined
@@ -540,13 +606,7 @@ export async function listR2KeysPaginated(
       `${config.endpoint}/${encodeURIComponent(config.bucket)}` +
       `?list-type=2&prefix=${encodeURIComponent(prefix)}`
     if (token) url += `&continuation-token=${encodeURIComponent(token)}`
-    const signed = await client.sign(url, { method: 'GET' })
-    let res: Response
-    try {
-      res = await fetchImpl(signed)
-    } catch (e) {
-      throw new R2UploadError(null, prefix, `LIST ${prefix} unreachable: ${e instanceof Error ? e.message : String(e)}`)
-    }
+    const res = await signedFetchWithRetry(client, url, { method: 'GET' }, 'LIST', prefix, fetchImpl, attempts, delayMs)
     if (!res.ok) {
       const text = await res.text().catch(() => '')
       throw new R2UploadError(res.status, prefix, `LIST ${prefix} failed (${res.status}): ${text.slice(0, 200)}`)
