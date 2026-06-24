@@ -52,7 +52,7 @@ import {
 } from '../../../_lib/bounded-pool'
 import {
   buildAssetKey,
-  buildFrameKey,
+  buildContentAddressedFrameKey,
   buildFrameSequencePrefix,
   buildFrameSourceFilenamesKey,
   buildVideoSourceKey,
@@ -374,14 +374,16 @@ interface AssetInitResponse {
 
 interface ImageSequenceInitFrameResponse {
   filename: string
-  /** Zero-padded position in the encode order (matches the
-   *  five-digit format `buildFrameKey` writes into the R2 key). */
+  /** Zero-based position in the encode order. The runner maps this
+   *  back to the `source_filenames.json` manifest entry (index →
+   *  digest) so recall can resolve the content-addressed key. */
   index: number
   method: 'PUT'
   url: string
   headers: Record<string, string>
-  /** R2 key the presigned URL writes to —
-   *  `uploads/{dataset_id}/{upload_id}/frames/{NNNNN}.{ext}`. */
+  /** Content-addressed R2 key the presigned URL writes to —
+   *  `videos/{dataset_id}/frames/sha256/{hex}.{ext}`. Shared across
+   *  uploads, so the runner HEAD-skips keys already present. */
   key: string
 }
 
@@ -414,13 +416,15 @@ interface ImageSequenceInitResponse {
  * JSON blob. Persists a single `asset_uploads` row with
  * `frame_count = N` so /complete can branch its HEAD-all loop.
  *
- * The per-frame R2 keys come from `buildFrameKey` —
- * `uploads/{dataset_id}/{upload_id}/frames/{NNNNN}.{ext}` —
- * with `extension` derived from the validated mime via
- * `extForMime`. The asset_uploads row's `target_ref` stores the
- * prefix (with trailing slash) since there's no single canonical
- * key for the upload; /complete reconstructs the per-frame keys
- * from `frame_count` + `mime`.
+ * The per-frame R2 keys are content-addressed —
+ * `videos/{dataset_id}/frames/sha256/{hex}.{ext}` via
+ * `buildContentAddressedFrameKey`, with `extension` derived from the
+ * validated mime via `extForMime`. The asset_uploads row's
+ * `target_ref` stores the per-upload `frames/` prefix purely as the
+ * frames-upload recognition marker for /complete (the
+ * `source_filenames.json` manifest lives alongside it); the frame
+ * bytes themselves live in the shared content-addressed store, keyed
+ * by each frame's digest from the manifest.
  *
  * Format constraint: image-sequence uploads only target video
  * datasets (`format = 'video/mp4'`). The runner's output is
@@ -524,7 +528,13 @@ async function handleImageSequenceInit(
     // string construction so the budget concern doesn't apply
     // there, but the same code path works.
     const framePresignJobs = frames.map((f, index) => async () => {
-      const key = buildFrameKey(id, uploadId, index, extension)
+      // Content-addressed: each frame's key is derived from its own
+      // SHA-256, shared across every upload of this dataset
+      // (`docs/INCREMENTAL_FRAME_UPLOAD_PLAN.md`). A scheduled
+      // re-publish therefore reuses unchanged frames — the runner
+      // HEAD-skips keys already in R2 and PUTs only the delta — instead
+      // of re-uploading the whole window to a fresh per-upload prefix.
+      const key = buildContentAddressedFrameKey(id, f.digest, extension)
       const presigned = await presignPut(context.env, key, {
         contentType: mime,
         // Video-tier TTL covers multi-GB sequence uploads on a
