@@ -34,13 +34,24 @@ describe('classifyZyraFailure', () => {
     expect(result.signal).toBe('ftplib')
   })
 
-  it('matches a bare network timeout (acquire is the only network stage)', () => {
-    expect(classifyZyraFailure('socket.timeout: timed out').acquireFailure).toBe(true)
-    expect(classifyZyraFailure('ConnectionResetError: [Errno 104] Connection reset by peer').acquireFailure).toBe(true)
-    expect(classifyZyraFailure('OSError: [Errno 101] Network is unreachable').acquireFailure).toBe(true)
-    expect(classifyZyraFailure('socket.gaierror: [Errno -3] Temporary failure in name resolution').acquireFailure).toBe(
+  it('matches a generic network transient WHEN the acquire stage is in context', () => {
+    const ctx = (err: string) => `Running stage acquire (ftp)\n${err}`
+    expect(classifyZyraFailure(ctx('socket.timeout: timed out')).acquireFailure).toBe(true)
+    expect(classifyZyraFailure(ctx('ConnectionResetError: [Errno 104] Connection reset by peer')).acquireFailure).toBe(
       true,
     )
+    expect(classifyZyraFailure(ctx('OSError: [Errno 101] Network is unreachable')).acquireFailure).toBe(true)
+    expect(
+      classifyZyraFailure(ctx('socket.gaierror: [Errno -3] Temporary failure in name resolution')).acquireFailure,
+    ).toBe(true)
+  })
+
+  it('does NOT soft-pass a generic network error with NO acquire context (e.g. pip install)', () => {
+    // The in-container `pip install pillow` step runs BEFORE `zyra run`
+    // and logs the pad-missing stage, not acquire — a network blip there
+    // must escalate, not soft-pass.
+    const pip = 'Installing Pillow for the pad-missing stage...\nTimeoutError: timed out fetching pillow==12.2.0'
+    expect(classifyZyraFailure(pip).acquireFailure).toBe(false)
   })
 
   it('does NOT match a compose-video / code failure (escalates)', () => {
@@ -106,10 +117,51 @@ describe('assessBundleFreshness', () => {
     expect(r.ageSeconds).toBe(3 * 86_400)
   })
 
-  it('treats an unparseable end_time as fresh (no escalation on an unknown)', () => {
+  it('falls back to updated_at when end_time is null — fresh', () => {
+    const r = assessBundleFreshness({
+      dataRef: 'r2:videos/DS/UP/master.m3u8',
+      endTime: null,
+      updatedAt: '2026-06-23T23:30:00Z', // 30 min old
+      nowMs: NOW,
+      staleAfterSeconds: STALE_AFTER,
+    })
+    expect(r.published).toBe(true)
+    expect(r.stale).toBe(false)
+    expect(r.ageSeconds).toBe(1800)
+    expect(r.detail).toMatch(/updated_at/)
+  })
+
+  it('falls back to updated_at when end_time is null — stale escalates (sustained outage)', () => {
+    const r = assessBundleFreshness({
+      dataRef: 'r2:videos/DS/UP/master.m3u8',
+      endTime: null,
+      updatedAt: '2026-06-21T00:00:00Z', // 3 days old
+      nowMs: NOW,
+      staleAfterSeconds: STALE_AFTER,
+    })
+    expect(r.published).toBe(true)
+    expect(r.stale).toBe(true)
+    expect(r.ageSeconds).toBe(3 * 86_400)
+  })
+
+  it('prefers end_time over updated_at when both are present', () => {
+    const r = assessBundleFreshness({
+      dataRef: 'r2:videos/DS/UP/master.m3u8',
+      endTime: '2026-06-23T23:00:00Z', // 1h old — the trailing edge
+      updatedAt: '2026-06-20T00:00:00Z', // 4 days old — ignored
+      nowMs: NOW,
+      staleAfterSeconds: STALE_AFTER,
+    })
+    expect(r.stale).toBe(false)
+    expect(r.ageSeconds).toBe(3600)
+    expect(r.detail).toMatch(/end_time/)
+  })
+
+  it('treats both timestamps unparseable as fresh (no escalation on a pure unknown)', () => {
     const r = assessBundleFreshness({
       dataRef: 'r2:videos/DS/UP/master.m3u8',
       endTime: 'not-a-date',
+      updatedAt: null,
       nowMs: NOW,
       staleAfterSeconds: STALE_AFTER,
     })

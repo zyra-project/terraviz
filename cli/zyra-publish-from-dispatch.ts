@@ -197,6 +197,7 @@ interface DatasetEnvelope {
     data_ref?: string | null
     transcoding?: number | null
     end_time?: string | null
+    updated_at?: string | null
   }
 }
 
@@ -766,11 +767,13 @@ async function phaseAcquireSoftpass(client: TerravizClient, args: Args): Promise
   const datasetId = await readTargetDatasetId(args.workdir)
   let dataRef: string | null | undefined
   let endTime: string | null | undefined
+  let updatedAt: string | null | undefined
   if (datasetId) {
     const row = await client.get<DatasetEnvelope>(datasetId)
     if (row.ok) {
       dataRef = row.body.dataset.data_ref
       endTime = row.body.dataset.end_time
+      updatedAt = row.body.dataset.updated_at
     } else {
       log(`WARN: dataset GET → ${row.status} ${row.error} — treating as unpublished (will escalate)`)
     }
@@ -781,6 +784,7 @@ async function phaseAcquireSoftpass(client: TerravizClient, args: Args): Promise
   const freshness = assessBundleFreshness({
     dataRef,
     endTime,
+    updatedAt,
     nowMs: Date.now(),
     staleAfterSeconds: args.staleAfterSeconds,
   })

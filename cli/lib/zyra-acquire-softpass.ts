@@ -32,29 +32,38 @@
  * Signatures that mark a `zyra run` failure as an *acquire-stage*
  * fetch failure rather than a downstream (compose / code) failure.
  *
- * Two families, both safe to soft-pass:
- *   - FTP-connector specifics — zyra's `connectors/backends/ftp.py`
- *     (`ftplib`, MDTM, `ensure_ftp_connection`, the ftplib exception
- *     classes). Unambiguous.
- *   - Network-level transients — timeouts, connection resets/refusals,
- *     DNS failures. In a real-time pipeline `acquire` is the *only*
- *     network-touching stage (`pad-missing` and `compose-video` are
- *     local), so a network error is an acquire error. A compose-video
- *     failure surfaces ffmpeg errors, not these — the families don't
- *     overlap in practice.
+ * Split into two tiers by how much context they need:
  *
- * Deliberately conservative: an unrecognized failure returns
+ *   - STRONG — zyra's `connectors/backends/ftp.py` specifics (`ftplib`,
+ *     MDTM, `ensure_ftp_connection`, the ftplib exception classes).
+ *     These name the FTP connector's own code path, so they only ever
+ *     appear when acquire ran the FTP backend. Safe to match anywhere
+ *     in the log.
+ *   - NETWORK — generic transport errors (timeouts, resets, DNS). These
+ *     are NOT acquire-specific: the in-container `pip install pillow`
+ *     step (which runs *before* `zyra run`) can emit them too, and a
+ *     compose stage hitting a CDN theoretically could. So a generic
+ *     network signature only counts as an acquire failure when the log
+ *     also shows the acquire stage actually ran (see
+ *     `ACQUIRE_STAGE_ANCHOR`).
+ *
+ * Deliberately conservative throughout: an unrecognized failure — or a
+ * generic network error with no acquire context — returns
  * `acquireFailure: false` and escalates (the current, notify-loudly
  * behaviour), so a real bug can never be silently swallowed.
+ *
+ * Note we do NOT key off a bare `ftp://` URL: that string appears in
+ * normal pipeline configs (the `ftp-frames-sos` template) and is echoed
+ * even on a *successful* acquire, so it can't distinguish a failure.
  */
-const ACQUIRE_FAILURE_SIGNATURES: ReadonlyArray<{ re: RegExp; label: string }> = [
-  // FTP-connector specifics.
+const STRONG_ACQUIRE_SIGNATURES: ReadonlyArray<{ re: RegExp; label: string }> = [
   { re: /ftplib/i, label: 'ftplib' },
   { re: /ensure_ftp_connection|sync_directory/i, label: 'ftp-connector' },
   { re: /\bMDTM\b/, label: 'ftp-mdtm' },
   { re: /error_perm|error_temp|error_proto|error_reply/i, label: 'ftplib-error' },
-  { re: /\bftp:\/\//i, label: 'ftp-url' },
-  // Network-level transients (acquire is the only network stage).
+]
+
+const NETWORK_SIGNATURES: ReadonlyArray<{ re: RegExp; label: string }> = [
   { re: /TimeoutError|socket\.timeout|timed out/i, label: 'timeout' },
   { re: /Connection reset|ConnectionResetError|\[Errno 104\]/i, label: 'conn-reset' },
   { re: /Connection refused|\[Errno 111\]/i, label: 'conn-refused' },
@@ -66,22 +75,40 @@ const ACQUIRE_FAILURE_SIGNATURES: ReadonlyArray<{ re: RegExp; label: string }> =
   },
 ]
 
+/**
+ * Evidence that the `acquire` stage itself ran or failed — required
+ * before a *generic* network error (the NETWORK tier) is accepted as a
+ * soft-passable acquire failure. Matches zyra's stage-name logging
+ * (`acquire` / `acquiring`) or the FTP connector's source path. A
+ * pip-install network failure (which logs "...for the pad-missing
+ * stage...", not "acquire") therefore does NOT qualify and escalates.
+ */
+const ACQUIRE_STAGE_ANCHOR =
+  /\bacquir(?:e|ing)\b|connectors\/backends\/ftp\.py|\bFTPConnector\b/i
+
 export interface FailureClassification {
   /** True when the captured log matches a known transient
-   *  acquire/FTP/network signature. */
+   *  acquire/FTP/network signature (with acquire context for the
+   *  generic network tier). */
   acquireFailure: boolean
   /** The matched signature label (for logging), or null. */
   signal: string | null
 }
 
 /**
- * Classify a failed `zyra run`'s captured combined output. Matches the
- * first acquire/FTP/network signature it finds; otherwise reports a
- * non-acquire failure (which the caller escalates).
+ * Classify a failed `zyra run`'s captured combined output. A STRONG
+ * FTP-connector signature matches anywhere; a generic NETWORK signature
+ * only matches when the log also shows the acquire stage ran. Anything
+ * else reports a non-acquire failure (which the caller escalates).
  */
 export function classifyZyraFailure(log: string): FailureClassification {
-  for (const sig of ACQUIRE_FAILURE_SIGNATURES) {
+  for (const sig of STRONG_ACQUIRE_SIGNATURES) {
     if (sig.re.test(log)) return { acquireFailure: true, signal: sig.label }
+  }
+  if (ACQUIRE_STAGE_ANCHOR.test(log)) {
+    for (const sig of NETWORK_SIGNATURES) {
+      if (sig.re.test(log)) return { acquireFailure: true, signal: sig.label }
+    }
   }
   return { acquireFailure: false, signal: null }
 }
@@ -100,6 +127,13 @@ export interface FreshnessInput {
    *  soft-pass never advances it — during an outage it freezes while
    *  `now` marches on, so its age is the outage duration. */
   endTime: string | null | undefined
+  /** The dataset row's `updated_at`, used as the staleness reference
+   *  when `end_time` is null/unparseable. Real-time rows can carry a
+   *  null `end_time` (treated as "still updating" elsewhere); without
+   *  a fallback the bundle would read as fresh forever and a sustained
+   *  outage would never escalate. A soft-pass skips the metadata PATCH,
+   *  so `updated_at` also freezes during an outage. */
+  updatedAt?: string | null | undefined
   nowMs: number
   staleAfterSeconds: number
 }
@@ -107,10 +141,16 @@ export interface FreshnessInput {
 export interface FreshnessResult {
   published: boolean
   stale: boolean
-  /** Age of the bundle's trailing edge in seconds, or null when it
-   *  can't be measured (unset/unparseable `end_time`). */
+  /** Age of the staleness reference in seconds, or null when neither
+   *  `end_time` nor `updated_at` is parseable. */
   ageSeconds: number | null
   detail: string
+}
+
+function parseTimestampMs(value: string | null | undefined): number | null {
+  if (!value) return null
+  const ms = Date.parse(value)
+  return Number.isFinite(ms) ? ms : null
 }
 
 /**
@@ -118,11 +158,14 @@ export interface FreshnessResult {
  * soft-pass over a transient acquire failure.
  *
  * - No published bundle → not fresh (escalate: nothing to serve).
- * - Published but `end_time` unset/unparseable → can't measure age;
- *   treat as fresh (don't escalate on an unknown — the data is intact
- *   and the failure is a recognized transient).
- * - Published with a trailing edge older than `staleAfterSeconds` →
- *   stale (escalate: the outage is sustained).
+ * - Published: measure staleness against `end_time` (the data's
+ *   trailing edge), falling back to `updated_at` when `end_time` is
+ *   null/unparseable — so a real-time row with no `end_time` still
+ *   escalates during a prolonged outage.
+ * - Only when BOTH timestamps are unparseable do we treat the bundle
+ *   as fresh (can't measure — don't escalate on a pure unknown; the
+ *   data is intact and the failure is a recognized transient). With
+ *   `updated_at` being NOT NULL in the schema, this is the rare case.
  */
 export function assessBundleFreshness(input: FreshnessInput): FreshnessResult {
   if (!hasPublishedBundle(input.dataRef)) {
@@ -133,22 +176,25 @@ export function assessBundleFreshness(input: FreshnessInput): FreshnessResult {
       detail: `dataset has no published bundle (data_ref=${input.dataRef ?? '(none)'})`,
     }
   }
-  const endMs = input.endTime ? Date.parse(input.endTime) : NaN
-  if (!Number.isFinite(endMs)) {
+  const endMs = parseTimestampMs(input.endTime)
+  const updatedMs = parseTimestampMs(input.updatedAt)
+  const referenceMs = endMs ?? updatedMs
+  const referenceSource = endMs !== null ? 'end_time' : 'updated_at'
+  if (referenceMs === null) {
     return {
       published: true,
       stale: false,
       ageSeconds: null,
-      detail: `end_time ${input.endTime ?? '(unset)'} is unparseable — cannot measure staleness, treating the bundle as fresh`,
+      detail: `neither end_time (${input.endTime ?? 'unset'}) nor updated_at (${input.updatedAt ?? 'unset'}) is parseable — cannot measure staleness, treating the bundle as fresh`,
     }
   }
-  const ageSeconds = Math.round((input.nowMs - endMs) / 1000)
+  const ageSeconds = Math.round((input.nowMs - referenceMs) / 1000)
   const stale = ageSeconds > input.staleAfterSeconds
   return {
     published: true,
     stale,
     ageSeconds,
-    detail: `published bundle trailing edge is ${ageSeconds}s old (stale-after ${input.staleAfterSeconds}s)`,
+    detail: `published bundle is ${ageSeconds}s old (by ${referenceSource}; stale-after ${input.staleAfterSeconds}s)`,
   }
 }
 
