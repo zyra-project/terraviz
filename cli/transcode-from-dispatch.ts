@@ -111,6 +111,7 @@ import {
   type SegmentManifest,
 } from './lib/hls-incremental'
 import { runIncremental, type IncrementalDeps } from './lib/hls-incremental-runner'
+import { frameContentKey } from './lib/frame-store'
 
 const R2_REGION = 'auto'
 
@@ -374,21 +375,28 @@ async function downloadFrames(
       const i = cursor++
       if (i >= args.frameCount) return
       const padded = String(i).padStart(5, '0')
-      const key = `uploads/${args.datasetId}/${args.uploadId}/frames/${padded}.${args.frameExtension}`
+      // `verifySourceFilenamesBlob` enforces `entry.index === i` for
+      // every entry, so positional lookup is the entry for frame `i`.
+      const entry = manifest[i]
+      // Content-addressed source: resolve each frame to its shared
+      // `videos/{ds}/frames/sha256/{hex}.{ext}` key from the manifest
+      // digest, not a per-upload index key
+      // (`docs/INCREMENTAL_FRAME_UPLOAD_PLAN.md`).
+      const key = frameContentKey(args.datasetId, entry.digest, args.frameExtension)
       const destPath = join(framesDir, `${padded}.${args.frameExtension}`)
       try {
-        const result = await downloadFromR2(config, key, destPath)
-        // `verifySourceFilenamesBlob` enforces `entry.index === i`
-        // for every entry, so positional lookup is the entry
-        // for frame `i`. Re-assert here so a future refactor
-        // that loosens the verify step can't silently desync
-        // the digest check from the frame being downloaded.
-        const entry = manifest[i]
+        // Re-assert the index↔position invariant so a future refactor
+        // that loosens the verify step can't silently desync the
+        // digest check from the frame being downloaded.
         if (entry.index !== i) {
           throw new Error(
             `manifest entry index ${entry.index} does not match frame position ${i}`,
           )
         }
+        const result = await downloadFromR2(config, key, destPath)
+        // The key is content-addressed, so a digest mismatch here means
+        // R2 served the wrong bytes for this hash (corruption) — fail
+        // the encode loudly rather than build a bad bundle.
         if (result.digest !== entry.digest) {
           throw new Error(
             `digest mismatch (expected=${entry.digest} actual=${result.digest})`,

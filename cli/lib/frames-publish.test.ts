@@ -141,7 +141,9 @@ describe('publishFrameSequence', () => {
     const { client, calls } = makeStubClient()
     const result = await publishFrameSequence(client, 'DATASET01', dir, { concurrency: 1 })
 
-    expect(result).toEqual({ uploadId: 'UPLOAD01', frameCount: 3, mock: false })
+    expect(result).toMatchObject({ uploadId: 'UPLOAD01', frameCount: 3, uploaded: 3, reused: 0, mock: false })
+    expect(result.digests).toHaveLength(3)
+    expect(result.digests.every(d => /^sha256:[0-9a-f]{64}$/.test(d))).toBe(true)
     // 3 frame PUTs + 1 manifest PUT.
     expect(calls.putUrls).toHaveLength(4)
     expect(calls.putUrls).toContain('https://r2.example/source_filenames.json')
@@ -150,6 +152,40 @@ describe('publishFrameSequence', () => {
     const initBody = calls.init[0] as { frames: FrameDigest[]; source_filenames_digest: string }
     expect(initBody.frames.map(f => f.filename)).toEqual(['f_1.png', 'f_2.png', 'f_3.png'])
     expect(initBody.source_filenames_digest).toMatch(/^sha256:[0-9a-f]{64}$/)
+  })
+
+  it('skips frames whose content-addressed key already exists (dedupe)', async () => {
+    const dir = tmpFrames({ 'f_1.png': 'a', 'f_2.png': 'b', 'f_3.png': 'c' })
+    const { client, calls } = makeStubClient()
+    // The stub keys frames at `uploads/d/u/frames/{0..2}.png`; pretend
+    // the first two already live in R2, only the third is new.
+    const present = new Set([
+      'uploads/d/u/frames/00000.png',
+      'uploads/d/u/frames/00001.png',
+    ])
+    const result = await publishFrameSequence(client, 'DATASET01', dir, {
+      concurrency: 1,
+      exists: (key: string) => Promise.resolve(present.has(key)),
+    })
+
+    expect(result).toMatchObject({ frameCount: 3, uploaded: 1, reused: 2 })
+    // Only the 1 new frame PUT + the manifest PUT (manifest is never
+    // deduped) = 2 calls.
+    expect(calls.putUrls).toHaveLength(2)
+    expect(calls.putUrls).toContain('https://r2.example/source_filenames.json')
+    expect(calls.complete).toEqual([['DATASET01', 'UPLOAD01']])
+  })
+
+  it('uploads on a HEAD failure (best-effort gate never blocks the publish)', async () => {
+    const dir = tmpFrames({ 'f_1.png': 'a' })
+    const { client, calls } = makeStubClient()
+    const result = await publishFrameSequence(client, 'DATASET01', dir, {
+      concurrency: 1,
+      exists: () => Promise.reject(new Error('HEAD blew up')),
+    })
+    // The throwing gate is swallowed → the frame is uploaded anyway.
+    expect(result).toMatchObject({ uploaded: 1, reused: 0 })
+    expect(calls.putUrls).toHaveLength(2) // frame + manifest
   })
 
   it('skips the byte PUTs in mock mode but still completes', async () => {

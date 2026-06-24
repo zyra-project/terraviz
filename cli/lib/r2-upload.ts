@@ -457,6 +457,109 @@ export async function deleteR2Object(
   return { key, durationMs: Date.now() - start }
 }
 
+function s3Client(config: R2UploadConfig): AwsClient {
+  return new AwsClient({
+    accessKeyId: config.accessKeyId,
+    secretAccessKey: config.secretAccessKey,
+    service: 's3',
+    region: R2_REGION,
+  })
+}
+
+/**
+ * HEAD an R2 object: true if it exists, false on 404. Used by the
+ * content-addressed frame publish to skip re-uploading frames already
+ * in the shared store (`docs/INCREMENTAL_FRAME_UPLOAD_PLAN.md`). Throws
+ * `R2UploadError` on a network failure or an unexpected non-404 error
+ * status so a transient hiccup can be distinguished from a real
+ * "absent" (callers treat a thrown HEAD as "not present" → re-upload,
+ * which is always safe because the key is content-addressed).
+ */
+export async function r2ObjectExists(
+  config: R2UploadConfig,
+  key: string,
+  options: UploadR2ObjectOptions = {},
+): Promise<boolean> {
+  validateR2Config(config)
+  const fetchImpl = options.fetchImpl ?? fetch
+  const signed = await s3Client(config).sign(buildObjectUrl(config, key), { method: 'HEAD' })
+  let res: Response
+  try {
+    res = await fetchImpl(signed)
+  } catch (e) {
+    throw new R2UploadError(null, key, `HEAD ${key} unreachable: ${e instanceof Error ? e.message : String(e)}`)
+  }
+  if (res.status === 404) return false
+  if (res.status >= 200 && res.status < 300) return true
+  throw new R2UploadError(res.status, key, `HEAD ${key} failed (${res.status})`)
+}
+
+/** GET an R2 object's body as text, or null on 404. Used by the frame
+ *  GC to read the currently-advertised `source_filenames.json` manifest
+ *  for the keep-set. Throws on network / non-404 error. */
+export async function getR2ObjectText(
+  config: R2UploadConfig,
+  key: string,
+  options: UploadR2ObjectOptions = {},
+): Promise<string | null> {
+  validateR2Config(config)
+  const fetchImpl = options.fetchImpl ?? fetch
+  const signed = await s3Client(config).sign(buildObjectUrl(config, key), { method: 'GET' })
+  let res: Response
+  try {
+    res = await fetchImpl(signed)
+  } catch (e) {
+    throw new R2UploadError(null, key, `GET ${key} unreachable: ${e instanceof Error ? e.message : String(e)}`)
+  }
+  if (res.status === 404) return null
+  if (res.status < 200 || res.status >= 300) {
+    throw new R2UploadError(res.status, key, `GET ${key} failed (${res.status})`)
+  }
+  return await res.text()
+}
+
+/**
+ * Paginated ListObjectsV2 over a key prefix — follows
+ * `NextContinuationToken` so a prefix with more than 1,000 objects (a
+ * frame store routinely has thousands) lists completely. Returns every
+ * key under the prefix. Throws `R2UploadError` on a network / non-2xx
+ * failure.
+ */
+export async function listR2KeysPaginated(
+  config: R2UploadConfig,
+  prefix: string,
+  options: UploadR2ObjectOptions = {},
+): Promise<string[]> {
+  validateR2Config(config)
+  const fetchImpl = options.fetchImpl ?? fetch
+  const client = s3Client(config)
+  const keys: string[] = []
+  let token: string | undefined
+  do {
+    let url =
+      `${config.endpoint}/${encodeURIComponent(config.bucket)}` +
+      `?list-type=2&prefix=${encodeURIComponent(prefix)}`
+    if (token) url += `&continuation-token=${encodeURIComponent(token)}`
+    const signed = await client.sign(url, { method: 'GET' })
+    let res: Response
+    try {
+      res = await fetchImpl(signed)
+    } catch (e) {
+      throw new R2UploadError(null, prefix, `LIST ${prefix} unreachable: ${e instanceof Error ? e.message : String(e)}`)
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new R2UploadError(res.status, prefix, `LIST ${prefix} failed (${res.status}): ${text.slice(0, 200)}`)
+    }
+    const xml = await res.text()
+    keys.push(...parseListKeys(xml))
+    token = /<IsTruncated>\s*true\s*<\/IsTruncated>/i.test(xml)
+      ? /<NextContinuationToken>([^<]+)<\/NextContinuationToken>/.exec(xml)?.[1]
+      : undefined
+  } while (token)
+  return keys
+}
+
 export async function deleteR2Prefix(
   config: R2UploadConfig,
   keyPrefix: string,

@@ -308,6 +308,15 @@ jobs:
           TERRAVIZ_SERVER: ${{ secrets.TERRAVIZ_SERVER }}
           TERRAVIZ_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           TERRAVIZ_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          # R2 S3 creds let the frame-sequence publish HEAD-skip frames
+          # already in the content-addressed store (only the day's new
+          # frames upload) and GC frames that slid off the window
+          # (docs/INCREMENTAL_FRAME_UPLOAD_PLAN.md). Absent → the publish
+          # still works, just re-uploads every frame (no dedupe).
+          R2_S3_ENDPOINT: ${{ secrets.R2_S3_ENDPOINT }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CATALOG_R2_BUCKET: ${{ secrets.CATALOG_R2_BUCKET }}
         run: |
           npx tsx cli/zyra-publish-from-dispatch.ts \
             --phase=publish \
