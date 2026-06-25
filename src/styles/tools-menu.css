@@ -410,4 +410,13 @@
     #map-controls {
         bottom: calc(calc(3.2rem * var(--ui-scale)) + env(safe-area-inset-bottom));
     }
+    /* The popover is anchored to #map-controls, so the same
+       safe-area inset that lifts the bar also lifts the popover.
+       Subtract it from the scroll cap too, otherwise the menu can
+       still extend off the top by the safe-area amount. env() has a
+       built-in fallback (0px when unsupported), so this matches the
+       base rule on non-notched devices. */
+    .tools-menu-popover {
+        max-height: calc(100vh - calc(7rem * var(--ui-scale)) - env(safe-area-inset-bottom));
+    }
 }
