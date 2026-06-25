@@ -16,6 +16,7 @@ import {
   type PlaybackState,
 } from './playbackController'
 import type { AppState } from '../types'
+import { logger } from '../utils/logger'
 
 // Stub requestAnimationFrame / cancelAnimationFrame
 let rafCallbacks: FrameRequestCallback[] = []
@@ -109,6 +110,36 @@ describe('startPlaybackLoop / stopPlaybackLoop', () => {
     state.playbackUpdateId = null
     expect(() => stopPlaybackLoop(state)).not.toThrow()
     expect(cancelAnimationFrame).not.toHaveBeenCalled()
+  })
+
+  it('invokes the optional onTick on every frame', () => {
+    const hls = makeMockHls()
+    const onTick = vi.fn()
+    startPlaybackLoop(state, hls, null, makeAppState(), vi.fn(), undefined, onTick)
+
+    // Drive two frames: each queued rAF callback runs the loop body
+    // (which calls onTick) and schedules the next frame.
+    rafCallbacks.shift()!(0)
+    expect(onTick).toHaveBeenCalledTimes(1)
+    rafCallbacks.shift()!(0)
+    expect(onTick).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps the loop alive (and logs) when onTick throws', () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    const hls = makeMockHls()
+    const onTick = vi.fn(() => { throw new Error('boom') })
+    startPlaybackLoop(state, hls, null, makeAppState(), vi.fn(), undefined, onTick)
+
+    const frame = rafCallbacks.shift()!
+    // The throw must be swallowed so the rest of the loop body runs...
+    expect(() => frame(0)).not.toThrow()
+    expect(warnSpy).toHaveBeenCalled()
+    // ...and the next frame must still be scheduled — otherwise a single
+    // sync exception would silently kill playback (scrubber/label/loop).
+    expect(rafCallbacks).toHaveLength(1)
+
+    warnSpy.mockRestore()
   })
 })
 

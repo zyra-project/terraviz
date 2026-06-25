@@ -137,6 +137,15 @@ const LOADING_HIDE_DELAY_MS = 300
 const SIBLING_DRIFT_THRESHOLD_S = 0.15
 
 /**
+ * Epsilon (seconds) for pinning an out-of-range sibling to its boundary
+ * frame in `correctSiblingDrift`. Smaller than a typical video frame, so
+ * a frozen out-of-range panel sits exactly on its first/last available
+ * frame — but non-zero so we don't rewrite `currentTime` every frame once
+ * it's already pinned there.
+ */
+const BOUNDARY_PIN_EPS_S = 0.02
+
+/**
  * Root application class that boots the WebGL globe, loads datasets,
  * and orchestrates all UI subsystems (browse panel, chat, playback controls).
  *
@@ -2736,14 +2745,15 @@ class InteractiveSphere {
 
       sibVideo.playbackRate = rate
 
-      if (shouldSeek) {
-        sibVideo.currentTime = targetTime
-        const sibTex = sibPanel?.videoTexture
-        if (sibTex) sibTex.needsUpdate = true
-      }
-
       if (position === 'inside') {
         this.viewports.setOutOfRange(i, false)
+        // Threshold-gated seek: smooths over small drift without seeking
+        // every frame (the smoothing rate keeps it close between snaps).
+        if (shouldSeek) {
+          sibVideo.currentTime = targetTime
+          const sibTex = sibPanel?.videoTexture
+          if (sibTex) sibTex.needsUpdate = true
+        }
         const wasOutOfRange = this.siblingOutOfRange[i] === true
         this.siblingOutOfRange[i] = false
         // Resume a sibling that was frozen out-of-range and has now
@@ -2754,10 +2764,18 @@ class InteractiveSphere {
           sibVideo.play().catch(() => { /* autoplay blocked */ })
         }
       } else {
-        // Primary date is outside this sibling's range — it's been
-        // seeked to the nearest boundary frame above; freeze + mark it.
+        // Primary date is outside this sibling's range — pin it exactly
+        // to the nearest boundary frame (first/last available data) so a
+        // frozen panel never sits on a slightly-in-range frame. Done
+        // independent of the in-range smoothing threshold, but epsilon-
+        // guarded so we don't rewrite currentTime once already pinned.
         this.viewports.setOutOfRange(i, true)
         this.siblingOutOfRange[i] = true
+        if (Math.abs(sibVideo.currentTime - targetTime) > BOUNDARY_PIN_EPS_S) {
+          sibVideo.currentTime = targetTime
+          const sibTex = sibPanel?.videoTexture
+          if (sibTex) sibTex.needsUpdate = true
+        }
         if (!sibVideo.paused) sibVideo.pause()
       }
     }
