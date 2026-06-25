@@ -54,7 +54,16 @@ export function startPlaybackLoop(
     // Fires every frame regardless of primary play/pause state. Used
     // by multi-viewport sync to keep sibling panels locked to the
     // primary's date; self-guards when there is nothing to correct.
-    if (onTick) onTick()
+    // Isolated so a transient throw (e.g. a null access during panel
+    // teardown) can't abort the loop before the next rAF is scheduled —
+    // that would silently freeze the scrubber, time label, and auto-loop.
+    if (onTick) {
+      try {
+        onTick()
+      } catch (e) {
+        logger.warn('[App] Playback onTick failed:', e)
+      }
+    }
 
     if (hlsService) {
       const video = hlsService.getVideo()

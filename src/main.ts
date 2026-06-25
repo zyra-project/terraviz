@@ -257,6 +257,14 @@ class InteractiveSphere {
    * `correctSiblingDrift()`.
    */
   private primaryVideoSyncActive = false
+  /**
+   * Per-slot record of whether a sibling was frozen out-of-range on the
+   * previous drift-correction frame. Lets `correctSiblingDrift` resume a
+   * sibling with a single `play()` on the out→in transition instead of
+   * re-issuing `play()` (and allocating/catching a Promise) every frame
+   * when autoplay is blocked or a stream is briefly unplayable.
+   */
+  private siblingOutOfRange: boolean[] = []
 
   /**
    * Convenience getter returning the primary viewport's renderer.
@@ -2507,36 +2515,35 @@ class InteractiveSphere {
   }
 
   /**
-   * Sibling video sync — seek-once-then-free-run strategy.
+   * Sibling video sync — primary-as-master-clock, per-frame correction.
    *
-   * The previous implementation listened to every `timeupdate` event
-   * (~4 per second) and seeked every sibling's `currentTime` on each
-   * tick. That caused constant decoder interruption (16+ seeks/sec
-   * with 4 panels), manifesting as visible jitter and pauses.
+   * The primary panel's video is the single source of truth for the
+   * current real-world date; siblings are kept locked to it. Rather
+   * than set a once-off `playbackRate` and let siblings free-run (which
+   * integrates `video.duration` imprecision into visible drift — see
+   * terraviz#132), we re-derive each sibling's target position from the
+   * primary's date and snap it back whenever it drifts past the
+   * threshold.
    *
-   * New approach:
+   *   - **On play / seeked** (`seekSiblingsToDate`): exact-align every
+   *     sibling to the primary's date and mirror its play/pause state.
+   *     Runs once on attach and on the primary's `play` / `seeked`.
    *
-   *   - **On play**: seek every sibling to match the primary's
-   *     real-world date, then call `play()` on all of them at once.
-   *     After that, the browser's internal media clock keeps them
-   *     naturally in sync without any seeking.
+   *   - **On pause** (`seekSiblingsToDate`): exact-align overlapping
+   *     siblings to the primary's date *then* freeze them, so the held
+   *     frame is frame-accurate for side-by-side study. Out-of-range
+   *     siblings stay frozen at their nearest boundary frame.
    *
-   *   - **On pause**: pause all siblings. No seek — they're already
-   *     at the right position from the play-sync.
+   *   - **Per-frame drift correction** (`correctSiblingDrift`, driven
+   *     from the playback rAF loop while the primary is playing): every
+   *     frame, re-derive each sibling's target/rate and snap it back if
+   *     it has drifted past {@link SIBLING_DRIFT_THRESHOLD_S}. The rate
+   *     is kept only as a smoothing aid so we don't seek every frame;
+   *     correctness comes from the threshold-gated re-seek.
    *
-   *   - **On seeked** (user scrubbed the transport): re-compute
-   *     target times, seek siblings, then resume play if the primary
-   *     is playing.
-   *
-   *   - **Periodic drift check** (every 5 seconds): if any sibling
-   *     has drifted more than 1.0s from the primary's date-mapped
-   *     position, seek just that sibling. This catches slow decoder
-   *     drift without the constant-seek jitter. The 1.0s threshold
-   *     is generous — 0.3s was too tight and triggered on normal
-   *     inter-decoder variance.
-   *
-   * This reduces seeking from ~16/sec to essentially 0 during normal
-   * playback, with a soft correction every 5s only when needed.
+   * Net: drift is bounded by the threshold (one frame to correct) rather
+   * than by an interval, and seeking stays near-zero in steady state
+   * because the smoothing rate keeps siblings inside the threshold.
    */
   private attachPrimaryVideoSync(): void {
     this.detachPrimaryVideoSync()
@@ -2737,13 +2744,20 @@ class InteractiveSphere {
 
       if (position === 'inside') {
         this.viewports.setOutOfRange(i, false)
+        const wasOutOfRange = this.siblingOutOfRange[i] === true
+        this.siblingOutOfRange[i] = false
         // Resume a sibling that was frozen out-of-range and has now
-        // re-entered its window as the primary advanced.
-        if (sibVideo.paused) sibVideo.play().catch(() => { /* autoplay blocked */ })
+        // re-entered its window as the primary advanced. Only on the
+        // transition — re-issuing play() every frame would churn
+        // Promises (and log warnings) if autoplay is blocked.
+        if (wasOutOfRange && sibVideo.paused) {
+          sibVideo.play().catch(() => { /* autoplay blocked */ })
+        }
       } else {
         // Primary date is outside this sibling's range — it's been
         // seeked to the nearest boundary frame above; freeze + mark it.
         this.viewports.setOutOfRange(i, true)
+        this.siblingOutOfRange[i] = true
         if (!sibVideo.paused) sibVideo.pause()
       }
     }
@@ -2756,6 +2770,7 @@ class InteractiveSphere {
    */
   private detachPrimaryVideoSync(): void {
     this.primaryVideoSyncActive = false
+    this.siblingOutOfRange = []
     const target = this.primaryVideoSyncTarget
     if (target) {
       for (const { event, handler } of this.primaryVideoSyncListeners) {
