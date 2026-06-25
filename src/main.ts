@@ -2610,7 +2610,10 @@ class InteractiveSphere {
           if (primaryRangeMs > 0 && sibRangeMs > 0) {
             // rate = (sib video seconds per real-world ms) / (primary video seconds per real-world ms)
             // Simplifies to: (sibDuration / sibRangeMs) / (primaryDuration / primaryRangeMs)
-            const rate = (sibVideo.duration / sibRangeMs) / (primaryVideo.duration / primaryRangeMs)
+            // Scaled by the primary's actual playbackRate so the sibling
+            // tracks tour playback-rate changes (e.g. 5fps → 0.167×),
+            // not just the 1× case (terraviz#229).
+            const rate = (sibVideo.duration / sibRangeMs) / (primaryVideo.duration / primaryRangeMs) * primaryVideo.playbackRate
             // Clamp to browser limits (typically 0.0625–16×)
             sibVideo.playbackRate = Math.max(0.0625, Math.min(16, rate))
           }
@@ -2736,6 +2739,7 @@ class InteractiveSphere {
         sibEnd: new Date(sibDataset.endTime),
         primaryDuration: primaryVideo.duration,
         primaryRangeMs,
+        primaryPlaybackRate: primaryVideo.playbackRate,
         hardSeekThresholdS: SIBLING_HARD_SEEK_THRESHOLD_S,
       })
 

@@ -518,6 +518,39 @@ describe('computeSiblingSyncCorrection', () => {
     expect(c.rate).toBeCloseTo(0.75, 5)
   })
 
+  it('scales the rate by the primary playback speed (tour 5fps → 0.167x)', () => {
+    // Identical range/duration siblings: pacing ratio is 1, so the
+    // sibling must run at the primary's actual speed, not 1x — otherwise
+    // it races ahead and the hard-seek snaps it back (the #229 flicker).
+    const c = computeSiblingSyncCorrection({
+      date: mid(),
+      sibCurrentTime: 15, // aligned, no drift
+      sibDuration: 30,
+      sibStart: start,
+      sibEnd: end,
+      primaryDuration: 30,
+      primaryRangeMs: rangeMs,
+      primaryPlaybackRate: 5 / 30, // ≈ 0.167x
+      hardSeekThresholdS: 0.5,
+    })
+    expect(c.shouldSeek).toBe(false)
+    expect(c.rate).toBeCloseTo(5 / 30, 5)
+  })
+
+  it('defaults primaryPlaybackRate to 1x when omitted', () => {
+    const c = computeSiblingSyncCorrection({
+      date: mid(),
+      sibCurrentTime: 15,
+      sibDuration: 30,
+      sibStart: start,
+      sibEnd: end,
+      primaryDuration: 30,
+      primaryRangeMs: rangeMs,
+      hardSeekThresholdS: 0.5,
+    })
+    expect(c.rate).toBeCloseTo(1, 5)
+  })
+
   it('hard-seeks (no trim) once in-range drift exceeds the hard-seek threshold', () => {
     const c = computeSiblingSyncCorrection({
       date: mid(),

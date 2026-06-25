@@ -270,8 +270,18 @@ export function computeSiblingSyncCorrection(params: {
   primaryDuration: number
   primaryRangeMs: number
   hardSeekThresholdS: number
+  /**
+   * The primary video's *current* `playbackRate`. The pacing ratio
+   * assumes the primary runs at 1×, so it must be scaled by the
+   * primary's actual speed — otherwise, when a tour slows playback
+   * (e.g. 5 fps → 0.167×, which sets only the primary's rate), the
+   * sibling keeps running at the ~1× pacing ratio and races ahead until
+   * a hard seek snaps it back, a visible flicker (terraviz#229).
+   * Defaults to 1.
+   */
+  primaryPlaybackRate?: number
 }): SiblingSyncCorrection {
-  const { date, sibCurrentTime, sibDuration, sibStart, sibEnd, primaryDuration, primaryRangeMs, hardSeekThresholdS } = params
+  const { date, sibCurrentTime, sibDuration, sibStart, sibEnd, primaryDuration, primaryRangeMs, hardSeekThresholdS, primaryPlaybackRate = 1 } = params
 
   const { videoTime: targetTime, position } = dateToVideoTime(date, sibDuration, sibStart, sibEnd)
 
@@ -283,6 +293,9 @@ export function computeSiblingSyncCorrection(params: {
     // rate = (sib video seconds per real-world ms) / (primary video seconds per real-world ms)
     baseRate = (sibDuration / sibRangeMs) / (primaryDuration / primaryRangeMs)
   }
+  // Scale by the primary's actual speed so the sibling tracks it through
+  // tour playback-rate changes, not just at 1×.
+  baseRate *= primaryPlaybackRate
   const clamp = (r: number) => Math.max(MIN_PLAYBACK_RATE, Math.min(MAX_PLAYBACK_RATE, r))
 
   if (position !== 'inside') {
