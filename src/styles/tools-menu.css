@@ -102,6 +102,14 @@
     inset-inline-end: 0;
     min-width: var(--component-tools-menu-popover-min-width);
     max-width: calc(100vw - calc(1.5rem * var(--ui-scale)));
+    /* Cap the popover to the space above the Tools bar so a tall
+       menu (many sections, or a large --ui-scale) scrolls inside
+       the popover instead of overflowing off the top of the
+       screen. Mirrors the chat/Orbit panel's bounded-height +
+       scrollable-body pattern. The subtracted offset leaves room
+       for the Tools bar below (#map-controls bottom 3.2rem + the
+       button), the 0.5rem gap above it, and a small top margin. */
+    max-height: calc(100vh - calc(7rem * var(--ui-scale)));
     padding: calc(0.75rem * var(--ui-scale));
     background: rgba(13, 13, 18, 0.94);
     backdrop-filter: blur(14px);
@@ -112,6 +120,10 @@
     color: #ddd;
     font-size: calc(0.75rem * var(--ui-scale));
     z-index: 11;
+    /* Flex column so the header stays pinned and the body scrolls. */
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 .tools-menu-popover.hidden { display: none; }
 
@@ -122,6 +134,19 @@
     margin-bottom: calc(0.5rem * var(--ui-scale));
     padding-bottom: calc(0.4rem * var(--ui-scale));
     border-bottom: 1px solid var(--white-o08);
+    flex-shrink: 0;
+}
+
+/* Scrollable body — holds every section so the header (with its
+   close button) stays visible while the sections scroll. The
+   negative inline margin + matching padding lets the scrollbar sit
+   at the popover's edge while section content keeps its inset. */
+.tools-menu-popover-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    margin-inline: calc(-0.75rem * var(--ui-scale));
+    padding-inline: calc(0.75rem * var(--ui-scale));
 }
 .tools-menu-popover-title {
     font-size: calc(0.72rem * var(--ui-scale));
@@ -384,5 +409,14 @@
 @supports (padding-bottom: env(safe-area-inset-bottom)) {
     #map-controls {
         bottom: calc(calc(3.2rem * var(--ui-scale)) + env(safe-area-inset-bottom));
+    }
+    /* The popover is anchored to #map-controls, so the same
+       safe-area inset that lifts the bar also lifts the popover.
+       Subtract it from the scroll cap too, otherwise the menu can
+       still extend off the top by the safe-area amount. env() has a
+       built-in fallback (0px when unsupported), so this matches the
+       base rule on non-notched devices. */
+    .tools-menu-popover {
+        max-height: calc(100vh - calc(7rem * var(--ui-scale)) - env(safe-area-inset-bottom));
     }
 }

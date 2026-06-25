@@ -246,6 +246,7 @@ export function initToolsMenu(
         <span class="tools-menu-popover-title">${tHtml('tools.popover.title')}</span>
         <button type="button" class="tools-menu-close" id="tools-menu-close" aria-label="${tAttr('tools.close.aria')}">&#x2715;</button>
       </div>
+      <div class="tools-menu-popover-body">
       <section class="tools-menu-section" aria-label="${tAttr('tools.section.view.aria')}">
         <h4 class="tools-menu-section-title">${tHtml('tools.section.view')}</h4>
         <button type="button" class="tools-menu-item" id="tools-menu-labels" aria-pressed="false">
@@ -350,6 +351,7 @@ export function initToolsMenu(
           <span class="tools-menu-item-label">${tHtml('tools.actions.privacy')}</span>
         </button>
       </section>
+      </div>
     </div>
   `
 
