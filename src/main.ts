@@ -2639,13 +2639,14 @@ class InteractiveSphere {
     // --- Wire event listeners ---
 
     const onPlay = () => seekSiblingsToDate(true)
-    const onPause = () => {
-      for (let i = 0; i < this.panelStates.length; i++) {
-        if (i === this.viewports.getPrimaryIndex()) continue
-        const sibVideo = this.panelStates[i]?.hlsService?.getVideo?.() ?? null
-        if (sibVideo && !sibVideo.paused) sibVideo.pause()
-      }
-    }
+    // On pause, exact-align every overlapping sibling to the primary's
+    // date *before* freezing, so the held frame is frame-accurate for
+    // side-by-side study — paused is exactly when a viewer scrutinises
+    // the comparison, and a one-shot seek can't thrash. seekSiblingsToDate
+    // both snaps in-range siblings to the exact date and (because the
+    // primary is already paused here) mirrors the pause to them; siblings
+    // whose window doesn't contain the date stay frozen at their boundary.
+    const onPause = () => seekSiblingsToDate(true)
     const onSeeked = () => seekSiblingsToDate(true)
 
     primaryVideo.addEventListener('play', onPlay)
