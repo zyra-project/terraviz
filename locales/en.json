@@ -864,6 +864,7 @@
   "publisher.events.saved": "Saved.",
   "publisher.events.signal.geo": "Geo",
   "publisher.events.signal.temporal": "Time",
+  "publisher.events.signal.topic": "Topic",
   "publisher.events.source": "Source",
   "publisher.events.status.approved": "Approved",
   "publisher.events.status.expired": "Expired",

@@ -15,6 +15,10 @@ import {
   scoreMatch,
   proposeMatches,
   runMatcherForEvent,
+  tokenize,
+  buildEventTerms,
+  buildDatasetTerms,
+  scoreLexical,
   TEMPORAL_HORIZON_MS,
   type MatchDataset,
 } from './events-matcher'
@@ -129,7 +133,7 @@ describe('scoreMatch', () => {
       period: 'PT15M', // live → temporal = 1
     }
     const m = scoreMatch(event, ds, NOW)
-    expect(m.signals).toEqual({ geo: 1, temporal: 1 })
+    expect(m.signals).toEqual({ geo: 1, temporal: 1, lexical: null })
     expect(m.score).toBeCloseTo(1)
   })
 
@@ -142,9 +146,64 @@ describe('scoreMatch', () => {
     expect(m.score).toBe(1)
   })
 
-  it('scores 0 with both signals null when nothing is readable', () => {
+  it('scores 0 with all signals null when nothing is readable', () => {
     const m = scoreMatch({}, { id: 'd' }, NOW)
-    expect(m).toEqual({ datasetId: 'd', score: 0, signals: { geo: null, temporal: null } })
+    expect(m).toEqual({ datasetId: 'd', score: 0, signals: { geo: null, temporal: null, lexical: null } })
+  })
+})
+
+describe('topical signal', () => {
+  it('tokenize drops stopwords + digits and stems plurals', () => {
+    expect(tokenize('Severe Storms near 29.0°N on 2026-06-24')).toEqual(['severe', 'storm'])
+  })
+
+  it('stems -oes / -ies plurals so they match their singulars', () => {
+    expect(tokenize('Volcanoes and anomalies')).toEqual(['volcano', 'anomaly'])
+  })
+
+  it('a volcano event reaches a volcano-subject dataset (no special-case key)', () => {
+    const ev = buildEventTerms({ categoryValues: ['Volcanoes'] })
+    expect(ev.has('volcano')).toBe(true)
+    expect(scoreLexical(ev, buildDatasetTerms({ title: 'Volcanic ash and aerosols' }))).toBeGreaterThan(0)
+  })
+
+  it('buildEventTerms expands a category into related dataset topics', () => {
+    const terms = buildEventTerms({ title: 'Tropical cyclone', categoryValues: ['Severe Storms'] })
+    expect(terms.has('storm')).toBe(true)
+    // "Severe Storms" → expands to cloud / precipitation so it can reach
+    // a cloud or precipitation dataset.
+    expect(terms.has('cloud')).toBe(true)
+    expect(terms.has('precipitation')).toBe(true)
+  })
+
+  it('scoreLexical rises with overlap and is 0 with none', () => {
+    const ev = buildEventTerms({ categoryValues: ['Severe Storms'] })
+    expect(scoreLexical(ev, buildDatasetTerms({ title: 'Cloud cover' }))).toBeGreaterThan(0)
+    expect(scoreLexical(ev, buildDatasetTerms({ title: 'Sea surface salinity' }))).toBe(0)
+  })
+
+  it('a topically-irrelevant dataset scores 0 even when live + temporally overlapping', () => {
+    const event = { occurredStart: '2026-06-25T00:00:00Z', terms: buildEventTerms({ title: 'Severe storm' }) }
+    const unrelated: MatchDataset = {
+      id: 'sst',
+      startTime: '2026-01-01T00:00:00Z',
+      period: 'PT15M', // live, temporal would be 1
+      subjectTerms: buildDatasetTerms({ title: 'Sea surface temperature' }),
+    }
+    expect(scoreMatch(event, unrelated, NOW).score).toBe(0)
+  })
+
+  it('ranks an overlapping real-time dataset above an equally-topical static one', () => {
+    const event = { occurredStart: '2026-06-25T00:00:00Z', terms: buildEventTerms({ title: 'Severe storm' }) }
+    const subjectTerms = buildDatasetTerms({ title: 'Cloud imagery' })
+    const live: MatchDataset = { id: 'live', startTime: '2026-01-01T00:00:00Z', period: 'PT15M', subjectTerms }
+    const stat: MatchDataset = {
+      id: 'static',
+      startTime: '2026-06-20T00:00:00Z',
+      endTime: '2026-06-30T00:00:00Z',
+      subjectTerms,
+    }
+    expect(scoreMatch(event, live, NOW).score).toBeGreaterThan(scoreMatch(event, stat, NOW).score)
   })
 })
 
@@ -173,23 +232,22 @@ describe('proposeMatches', () => {
 })
 
 describe('runMatcherForEvent', () => {
-  it('writes proposed links for the temporally-matching datasets', async () => {
+  it('writes proposed links for the topically + temporally matching datasets', async () => {
     const sqlite = seedFixtures({ count: 2 })
     const db = asD1(sqlite)
 
-    // DS000 → a live realtime dataset covering now; DS001 → an old
-    // static dataset far from the event. (seedFixtures leaves the
-    // temporal columns null, so set them here.)
+    // DS000 → a live realtime cloud dataset (topically related to a storm
+    // event, covering now); DS001 → an unrelated old static dataset.
     sqlite
-      .prepare(`UPDATE datasets SET start_time = ?, end_time = NULL, period = ? WHERE id = ?`)
-      .run('2026-01-01T00:00:00Z', 'PT15M', seededDatasetId(0))
+      .prepare(`UPDATE datasets SET start_time = ?, end_time = NULL, period = ?, title = ? WHERE id = ?`)
+      .run('2026-01-01T00:00:00Z', 'PT15M', 'Cloud cover (real-time)', seededDatasetId(0))
     sqlite
       .prepare(`UPDATE datasets SET start_time = ?, end_time = ?, period = NULL WHERE id = ?`)
       .run('2000-01-01T00:00:00Z', '2000-02-01T00:00:00Z', seededDatasetId(1))
 
     const { id: eventId } = await insertCurrentEvent(db, {
       originNode: 'NODE000',
-      title: 'Storm now',
+      title: 'Severe storm now',
       sourceName: 'NOAA',
       sourceUrl: 'https://example.gov/x',
       occurredStart: '2026-06-25T12:00:00Z',
@@ -197,16 +255,20 @@ describe('runMatcherForEvent', () => {
 
     const matches = await runMatcherForEvent(db, eventId, { now: NOW })
 
+    // The unrelated "Test Dataset 1" has no topical overlap → filtered.
     expect(matches.map(m => m.datasetId)).toEqual([seededDatasetId(0)])
-    expect(matches[0].signals).toEqual({ geo: null, temporal: 1 })
+    expect(matches[0].signals).toMatchObject({ geo: null, temporal: 1 })
+    expect(matches[0].signals.lexical).toBeGreaterThan(0)
 
     // Persisted as a proposed link, readable from the store.
     const links = await listLinksForEvent(db, eventId)
     expect(links).toHaveLength(1)
     expect(links[0].dataset_id).toBe(seededDatasetId(0))
     expect(links[0].status).toBe('proposed')
-    expect(links[0].match_score).toBeCloseTo(1)
-    expect(JSON.parse(links[0].signals_json!)).toEqual({ geo: null, temporal: 1 })
+    expect(links[0].match_score).toBeGreaterThan(0.5)
+    const sig = JSON.parse(links[0].signals_json!)
+    expect(sig).toMatchObject({ geo: null, temporal: 1 })
+    expect(sig.lexical).toBeGreaterThan(0)
   })
 
   it('returns an empty list for an unknown event', async () => {
@@ -217,11 +279,11 @@ describe('runMatcherForEvent', () => {
   it('skips hidden / unpublished / retracted datasets', async () => {
     const sqlite = seedFixtures({ count: 3 })
     const db = asD1(sqlite)
-    // All three would match temporally; disqualify two.
+    // All three would match (topically + temporally); disqualify two.
     for (let i = 0; i < 3; i++) {
       sqlite
-        .prepare(`UPDATE datasets SET start_time = ?, period = ? WHERE id = ?`)
-        .run('2026-01-01T00:00:00Z', 'PT15M', seededDatasetId(i))
+        .prepare(`UPDATE datasets SET start_time = ?, period = ?, title = ? WHERE id = ?`)
+        .run('2026-01-01T00:00:00Z', 'PT15M', 'Cloud imagery (real-time)', seededDatasetId(i))
     }
     sqlite.prepare(`UPDATE datasets SET is_hidden = 1 WHERE id = ?`).run(seededDatasetId(1))
     sqlite
