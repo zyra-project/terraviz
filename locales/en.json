@@ -833,6 +833,8 @@
   "publisher.events.empty": "No events to review right now.",
   "publisher.events.error.generic": "Could not save. Please try again.",
   "publisher.events.error.session": "Your session expired. Please sign in again.",
+  "publisher.events.filter.all": "All",
+  "publisher.events.filter.label": "Filter by status",
   "publisher.events.form.cancel": "Cancel",
   "publisher.events.form.created": "Event created.",
   "publisher.events.form.error": "Couldn't create the event. Check the fields and try again.",

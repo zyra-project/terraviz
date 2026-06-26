@@ -132,6 +132,21 @@ describe('GET /api/v1/publish/events', () => {
     const body = JSON.parse(await res.text()) as { events: Array<{ title: string }> }
     expect(body.events.map(e => e.title)).toEqual(['approved one'])
   })
+
+  it('status=all lists events of every status', async () => {
+    const { env } = setupEnv()
+    const db = env.CATALOG_DB
+    const a = await insertCurrentEvent(db, { ...SAMPLE, title: 'approved one' })
+    const r = await insertCurrentEvent(db, { ...SAMPLE, title: 'rejected one' })
+    await insertCurrentEvent(db, { ...SAMPLE, title: 'proposed one' })
+    await setEventStatus(db, a.id, 'approved', 'PUB-ADMIN')
+    await setEventStatus(db, r.id, 'rejected', 'PUB-ADMIN')
+
+    const res = await eventsGet(ctx({ env, url: 'https://localhost/api/v1/publish/events?status=all' }))
+    expect(res.status).toBe(200)
+    const body = JSON.parse(await res.text()) as { events: Array<{ title: string }> }
+    expect(body.events.map(e => e.title).sort()).toEqual(['approved one', 'proposed one', 'rejected one'])
+  })
 })
 
 function postCtx(opts: { env: Record<string, unknown>; publisher?: PublisherRow; body?: unknown }) {

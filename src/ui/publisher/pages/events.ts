@@ -66,6 +66,12 @@ interface RefreshResult {
   failed: number
 }
 
+/** The queue's status filter — the four real statuses plus `all`
+ *  (every status), so a curator can find + manage already-reviewed
+ *  events, not just the `proposed` review backlog. */
+type QueueFilter = EventStatus | 'all'
+const QUEUE_FILTERS: readonly QueueFilter[] = ['proposed', 'approved', 'rejected', 'expired', 'all']
+
 export interface EventsPageOptions {
   fetchFn?: typeof fetch
   navigate?: (url: string) => void
@@ -143,8 +149,13 @@ export async function renderEventsPage(
  *  the Refresh / New-event actions, which want the freshly-pulled state.
  *  An optional `notice` is surfaced in the header's status line so a
  *  message ("Imported 3 new…") survives the re-render. */
-async function loadAndRenderQueue(mount: HTMLElement, state: EventsPageOptions, notice?: string): Promise<void> {
-  const eventsRes = await publisherGet<EventsResponse>(EVENTS_ENDPOINT, { fetchFn: state.fetchFn })
+async function loadAndRenderQueue(
+  mount: HTMLElement,
+  state: EventsPageOptions,
+  notice?: string,
+  status: QueueFilter = 'proposed',
+): Promise<void> {
+  const eventsRes = await publisherGet<EventsResponse>(`${EVENTS_ENDPOINT}?status=${status}`, { fetchFn: state.fetchFn })
   if (!eventsRes.ok) {
     if (eventsRes.kind === 'session') {
       if (handleSessionError({ navigate: state.navigate }) === 'navigating') return
@@ -155,11 +166,17 @@ async function loadAndRenderQueue(mount: HTMLElement, state: EventsPageOptions, 
     mount.replaceChildren(shell(buildErrorCard(eventsRes.kind, details)))
     return
   }
-  renderQueue(mount, eventsRes.data.events, state, notice)
+  renderQueue(mount, eventsRes.data.events, state, notice, status)
 }
 
-function renderQueue(mount: HTMLElement, events: ReviewEvent[], state: EventsPageOptions, notice?: string): void {
-  const header = renderHeader(mount, state, notice)
+function renderQueue(
+  mount: HTMLElement,
+  events: ReviewEvent[],
+  state: EventsPageOptions,
+  notice?: string,
+  status: QueueFilter = 'proposed',
+): void {
+  const header = renderHeader(mount, state, notice, status)
 
   if (events.length === 0) {
     mount.replaceChildren(shell(header, el('p', { className: 'publisher-empty-message', textContent: t('publisher.events.empty') })))
@@ -167,13 +184,14 @@ function renderQueue(mount: HTMLElement, events: ReviewEvent[], state: EventsPag
   }
 
   const list = el('div', { className: 'publisher-events-list' })
-  for (const event of events) list.append(renderEventCard(event, state))
+  for (const event of events) list.append(renderEventCard(mount, event, state, status))
   mount.replaceChildren(shell(header, list))
 }
 
-/** The queue header card: title, intro, the Refresh / New-event actions,
- *  a status line, and a host slot the inline form mounts into. */
-function renderHeader(mount: HTMLElement, state: EventsPageOptions, notice?: string): HTMLElement {
+/** The queue header card: title, intro, the status filter, the Refresh /
+ *  New-event actions, a status line, and a host slot the inline form
+ *  mounts into. `filter` is the active status view. */
+function renderHeader(mount: HTMLElement, state: EventsPageOptions, notice?: string, filter: QueueFilter = 'proposed'): HTMLElement {
   const status = el('p', { className: 'publisher-events-actions-status', role: 'status' })
   if (notice) status.textContent = notice
   const formHost = el('div', { className: 'publisher-events-form-host' })
@@ -187,8 +205,8 @@ function renderHeader(mount: HTMLElement, state: EventsPageOptions, notice?: str
     status.textContent = t('publisher.events.refreshing')
     void publisherSend<RefreshResult>(REFRESH_ENDPOINT, {}, { method: 'POST', fetchFn: state.fetchFn }).then(res => {
       if (res.ok) {
-        // Re-render with the freshly-pulled queue, carrying the result
-        // summary into the new header's status line.
+        // Re-render the freshly-pulled queue, preserving the active
+        // filter and carrying the result summary into the status line.
         void loadAndRenderQueue(
           mount,
           state,
@@ -197,6 +215,7 @@ function renderHeader(mount: HTMLElement, state: EventsPageOptions, notice?: str
             refreshed: String(res.data.refreshed),
             failed: String(res.data.failed),
           }),
+          filter,
         )
         return
       }
@@ -212,17 +231,45 @@ function renderHeader(mount: HTMLElement, state: EventsPageOptions, notice?: str
       formHost.replaceChildren() // toggle closed
       return
     }
-    formHost.replaceChildren(renderNewEventForm(mount, state, formHost))
+    formHost.replaceChildren(renderNewEventForm(mount, state, formHost, filter))
   })
 
   const actions = el('div', { className: 'publisher-events-toolbar' }, [refreshBtn, newBtn])
   return card(
     heading(t('publisher.events.title')),
     el('p', { className: 'publisher-events-intro', textContent: t('publisher.events.intro') }),
+    renderFilterBar(mount, state, filter),
     actions,
     status,
     formHost,
   )
+}
+
+/** Translated label for a queue filter (reuses the per-status labels). */
+function filterLabel(f: QueueFilter): string {
+  return f === 'all' ? t('publisher.events.filter.all') : statusLabel(f)
+}
+
+/** The status filter row. Switching filter re-fetches the queue at that
+ *  status — this is how a curator reaches approved events to remove them
+ *  (Reject), since the default view is the `proposed` backlog. */
+function renderFilterBar(mount: HTMLElement, state: EventsPageOptions, active: QueueFilter): HTMLElement {
+  const bar = el('div', { className: 'publisher-events-filters', role: 'group' })
+  bar.setAttribute('aria-label', t('publisher.events.filter.label'))
+  for (const f of QUEUE_FILTERS) {
+    const btn = el('button', {
+      type: 'button',
+      className: `publisher-events-filter${f === active ? ' publisher-events-filter-active' : ''}`,
+      textContent: filterLabel(f),
+    })
+    // Toggle semantics: set the pressed state explicitly on every button.
+    btn.setAttribute('aria-pressed', f === active ? 'true' : 'false')
+    btn.addEventListener('click', () => {
+      if (f !== active) void loadAndRenderQueue(mount, state, undefined, f)
+    })
+    bar.append(btn)
+  }
+  return bar
 }
 
 /** A labelled form control. */
@@ -235,7 +282,12 @@ function field(labelText: string, control: HTMLElement): HTMLElement {
 
 /** The inline hand-authoring form. Posts to the create endpoint with no
  *  feed key (a manual event); on success it reloads the queue. */
-function renderNewEventForm(mount: HTMLElement, state: EventsPageOptions, formHost: HTMLElement): HTMLElement {
+function renderNewEventForm(
+  mount: HTMLElement,
+  state: EventsPageOptions,
+  formHost: HTMLElement,
+  filter: QueueFilter = 'proposed',
+): HTMLElement {
   const titleInput = el('input', { type: 'text', required: true, className: 'publisher-form-input' })
   const summaryInput = el('textarea', { className: 'publisher-form-textarea', rows: 2 })
   const sourceNameInput = el('input', { type: 'text', required: true, className: 'publisher-form-input' })
@@ -290,7 +342,7 @@ function renderNewEventForm(mount: HTMLElement, state: EventsPageOptions, formHo
     void publisherSend<unknown>(EVENTS_ENDPOINT, body, { method: 'POST', fetchFn: state.fetchFn }).then(res => {
       submitBtn.disabled = false
       if (res.ok) {
-        void loadAndRenderQueue(mount, state, t('publisher.events.form.created'))
+        void loadAndRenderQueue(mount, state, t('publisher.events.form.created'), filter)
         return
       }
       if (res.kind === 'session' && handleSessionError({ navigate: state.navigate }) === 'navigating') return
@@ -331,7 +383,7 @@ function formatScore(score: number | null): string {
   return `${Math.round(score * 100)}%`
 }
 
-function renderEventCard(event: ReviewEvent, state: EventsPageOptions): HTMLElement {
+function renderEventCard(mount: HTMLElement, event: ReviewEvent, state: EventsPageOptions, filter: QueueFilter): HTMLElement {
   const statusEl = el('div', { className: 'publisher-events-status', role: 'status' })
   const badgeEl = badge(event.status)
 
@@ -356,6 +408,14 @@ function renderEventCard(event: ReviewEvent, state: EventsPageOptions): HTMLElem
       setBusy(false, eventButtons)
       if (res.ok) {
         const next: EventStatus = res.data.event?.status ?? (decision === 'approve' ? 'approved' : 'rejected')
+        // If the event no longer matches the active filter, reload so it
+        // leaves the view (e.g. a Reject in the Approved view) and the
+        // empty state shows if it was the last one. In the `all` view —
+        // or when the status still matches — reflect it in place.
+        if (filter !== 'all' && next !== filter) {
+          void loadAndRenderQueue(mount, state, t('publisher.events.saved'), filter)
+          return
+        }
         badgeEl.className = `publisher-events-badge publisher-events-badge-${next}`
         badgeEl.textContent = statusLabel(next)
         statusEl.textContent = t('publisher.events.saved')

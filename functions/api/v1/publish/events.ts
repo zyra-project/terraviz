@@ -88,14 +88,19 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
     return jsonError(403, 'forbidden_role', 'The events review queue is restricted to admin and service callers.')
   }
 
+  // `?status=` narrows to one bucket; `?status=all` lists every status
+  // (so a curator can find + manage already-reviewed events); omitted
+  // defaults to the `proposed` review queue.
   const statusParam = new URL(context.request.url).searchParams.get('status')
-  if (statusParam && !VALID_STATUSES.includes(statusParam as CurrentEventStatus)) {
-    return jsonError(400, 'invalid_status', `\`status\` must be one of: ${VALID_STATUSES.join(', ')}.`)
+  if (statusParam && statusParam !== 'all' && !VALID_STATUSES.includes(statusParam as CurrentEventStatus)) {
+    return jsonError(400, 'invalid_status', `\`status\` must be one of: ${VALID_STATUSES.join(', ')}, or \`all\`.`)
   }
-  const status = (statusParam as CurrentEventStatus | null) ?? 'proposed'
 
   const db = context.env.CATALOG_DB
-  const eventRows = await listCurrentEvents(db, { status })
+  const eventRows = await listCurrentEvents(
+    db,
+    statusParam === 'all' ? {} : { status: (statusParam as CurrentEventStatus | null) ?? 'proposed' },
+  )
 
   // Bulk-fetch links + decorations for the whole page (chunked IN
   // queries) rather than two per event, then resolve all referenced

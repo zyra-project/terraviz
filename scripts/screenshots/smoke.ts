@@ -154,6 +154,9 @@ const checks: Check[] = [
       // The proposed dataset link rows render under the event.
       const links = page.locator('.publisher-events-link')
       assert((await links.count()) >= 1, 'event should render at least one proposed dataset link')
+      // The status filter row lets a curator reach reviewed events.
+      const filters = page.locator('.publisher-events-filters button')
+      assert((await filters.count()) >= 5, 'queue header should expose the status filter (incl. All)')
       // The authoring toolbar exposes Refresh + New event; clicking New
       // reveals the inline hand-authoring form.
       const toolbarButtons = page.locator('.publisher-events-toolbar button')
