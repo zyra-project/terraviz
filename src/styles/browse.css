@@ -1176,6 +1176,9 @@ body.browse-view-map .browse-title {
 .browse-map-legend-dot-realtime {
     background: var(--color-success);
 }
+.browse-map-legend-dot-event {
+    background: var(--color-warning, #e0a23c);
+}
 .browse-map-include-global {
     display: flex;
     align-items: center;

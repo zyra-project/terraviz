@@ -130,6 +130,29 @@ const checks: Check[] = [
     },
   },
   {
+    name: 'catalog Timeline + Map expose the current-event legend',
+    async run(page) {
+      // The catalog Map + Timeline ship an amber "current event" legend
+      // swatch as the user-visible affordance for the event overlays.
+      // Asserting the swatch is data-independent (no dated/linked
+      // fixture dataset required, which the dev-server SOS catalog can't
+      // guarantee); the actual marker rendering is covered
+      // deterministically by the catalogTimelineUI / catalogMapUI unit
+      // tests, which feed `events` directly.
+      await gotoApp(page, '/?catalog=true')
+      await page.locator('#browse-overlay').waitFor({ state: 'visible' })
+      await page.locator('#browse-toolbar').waitFor({ state: 'visible' })
+
+      await page.locator('#browse-view-mode [data-view-mode="timeline"]').click()
+      await page.locator('#browse-timeline:not(.hidden)').waitFor()
+      await page.locator('.browse-timeline-legend-dot-event').first().waitFor({ timeout: 15_000 })
+
+      await page.locator('#browse-view-mode [data-view-mode="map"]').click()
+      await page.locator('#browse-map:not(.hidden)').waitFor()
+      await page.locator('.browse-map-legend-dot-event').first().waitFor({ timeout: 15_000 })
+    },
+  },
+  {
     name: 'publisher datasets page renders populated content',
     fixtures: publisherFixtures({ admin: true }),
     async run(page) {
