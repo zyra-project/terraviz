@@ -120,6 +120,7 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `functions/api/v1/publish/datasets/[id]/transcode-failed.ts` | POST /api/v1/publish/datasets/{id}/transcode-failed — failure counterpart; releases the `transcoding` lock (leaves `data_ref` on the prior bundle) when the transcode job errors or times out |
 | `functions/api/v1/publish/events.ts` | GET (privileged current-events review queue) + POST (privileged create / ingest: idempotent on `(feed_id, external_id)`, runs the matcher on create; `docs/CURRENT_EVENTS_PLAN.md` §5, §9) |
 | `functions/api/v1/publish/events/[id].ts` | POST /api/v1/publish/events/{id} — curator review-submit (event + per-link approve/reject) |
+| `functions/api/v1/publish/events/refresh.ts` | POST /api/v1/publish/events/refresh — privileged on-demand ingestion pull: fetches the node's configured feed (EONET) server-side and runs the shared upsert+match path, so a curator can refresh the queue without waiting for the cron (`docs/CURRENT_EVENTS_PLAN.md` §9) |
 | `functions/api/v1/publish/featured-hero.ts` | /api/v1/publish/featured-hero — the "Right now" hero admin write API (Phase B of `docs/HERO_ADMIN_SCOPING.md`) |
 | `functions/api/v1/publish/featured.ts` | /api/v1/publish/featured |
 | `functions/api/v1/publish/featured/[dataset_id].ts` | /api/v1/publish/featured/{dataset_id} |
@@ -165,6 +166,7 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `functions/api/v1/_lib/embeddings.ts` | Workers AI embedding helpers — Phase 1c |
 | `functions/api/v1/_lib/env.ts` | Shared `Env` type for catalog-backend Pages Functions |
 | `functions/api/v1/_lib/errors.ts` | Typed errors used by the storage helpers (`r2-store.ts`, `stream-store.ts`) so the route handlers can distinguish "operator forgot to set credentials" from "the upstream service … |
+| `functions/api/v1/_lib/events-ingest.ts` | Shared current-events ingestion core — `parseCreate` (source-agnostic create-body validation), `resolveOriginNode`, and the idempotent `ingestEvent` (upsert + matcher run); reused by the create route and the refresh route (`docs/CURRENT_EVENTS_PLAN.md` §9) |
 | `functions/api/v1/_lib/events-matcher.ts` | Geo + temporal scoring for current events — pure bbox-IoU / liveness-overlap signals + `runMatcherForEvent` proposing `event_dataset_links` (`docs/CURRENT_EVENTS_PLAN.md` §4) |
 | `functions/api/v1/_lib/events-store.ts` | `current_events` + `event_dataset_links` data access — storage layer for the source-agnostic current-events feature (`docs/CURRENT_EVENTS_PLAN.md`) |
 | `functions/api/v1/_lib/featured-datasets.ts` | `featured_datasets` row helpers |
