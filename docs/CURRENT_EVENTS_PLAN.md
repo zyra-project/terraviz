@@ -48,6 +48,13 @@ came from.
   source citation, and nothing reaches end-users without a curator
   approving it. Trust comes from source allow-listing plus a human in
   the loop — not from an algorithm's confidence.
+- **Node-relative, not subject-specific.** What counts as a relevant
+  "current event" is defined by *this node's own catalog*, never by a
+  hardcoded subject area. A node about Earth science wires an
+  Earth-science feed; a node about something else wires a feed that fits
+  it, or none at all. There is no default feed baked into the product,
+  and matching always runs against the node's own datasets — so the
+  feature is meaningful on any node, not just a Science-on-a-Sphere one.
 - **Annotate, don't replace.** A current event is a thin record that
   *points at* datasets. It never competes with the dataset as the unit
   of content; it is a timely doorway to it.
@@ -95,6 +102,11 @@ These recur across every system above and become hard requirements:
    explicitly **not** a fact-checking or misinformation-verdict engine.
 6. **Graceful absence.** Better to show nothing than to manufacture
    relevance. Surfaces hide when there's no vetted, in-window event.
+7. **Node-appropriate sourcing.** Which feed(s) a node ingests is
+   configured per node to fit its catalog — not a built-in default. The
+   pipeline (provenance, allow-listing, matching, curator gate) is
+   source-agnostic and the connectors are pluggable; a node ingests
+   nothing until an operator wires a feed appropriate to what it hosts.
 
 ---
 
@@ -267,10 +279,14 @@ in-app surfaces exist, and is explicitly **not** part of Phase 1.
 Prove the entire **ingest → match → approve → surface** loop end-to-end
 on the lowest-risk feed, with the smallest user-facing footprint:
 
-- Seed from **one authoritative structured feed**: NASA **EONET**. It is
-  geo- and time-tagged, openly licensed, requires no scraping and
-  carries no ToS risk, and its content (natural events on Earth) is the
-  closest possible fit to SOS datasets.
+- Wire **one authoritative structured feed appropriate to the node's
+  catalog** as the first connector. For this reference deployment —
+  Science on a Sphere, an Earth-science catalog — NASA **EONET** is the
+  natural pick: geo- and time-tagged, openly licensed, no scraping or
+  ToS risk, and its content (natural events on Earth) is the closest
+  possible fit to SOS datasets. EONET is an *example connector*, not a
+  product default — a node with a different catalog wires a different
+  feed (or none) behind the same source-agnostic pipeline.
 - Add the `current_events` + `event_dataset_links` D1 tables.
 - Build the **geographic + temporal** matcher (defer semantic/Vectorize
   to Phase 2 — geo + time alone are strong for natural-hazard events).
