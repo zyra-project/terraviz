@@ -1,5 +1,4 @@
 {
-  "browse.map.event.aria": "Accessible label for an amber current-event marker on the catalog map. Preserve {title} — the event's headline.",
   "browse.map.event.tooltip.source": "Hover-tooltip line naming the event's source organization on the catalog map. Preserve {name}.",
   "browse.timeline.event.aria": "Accessible label for an amber current-event marker on the catalog timeline axis. Preserve {title} — the event's headline.",
   "chat.action.flyingTo": "Live-region announcement during a chat-driven camera move. Preserve {coords}. Keep it brief — screen readers read this aloud.",

@@ -250,8 +250,21 @@ export function createCatalogTimeline(
     .attr('aria-hidden', 'true')
   // Current-event markers ride the axis band (sticky, always visible
   // while rows scroll) so they stay aligned with the time ticks above
-  // them. Appended last so they paint over the axis line / now-marker.
-  const eventsGroup = axisSvg.append('g').attr('class', 'browse-timeline-events')
+  // them. They live in a SEPARATE SVG overlaid on the axis — NOT inside
+  // `axisSvg`, which is `aria-hidden` (decorative; the data is conveyed
+  // by the accessible rows below). The markers are interactive
+  // (focusable, role=button, aria-label), so an `aria-hidden` ancestor
+  // would pull them out of the accessibility tree while leaving them as
+  // tab stops — the worst of both. This overlay is a labelled group so
+  // the markers stay keyboard- and screen-reader-reachable. CSS pins it
+  // over the axis with `pointer-events: none` (markers re-enable it) so
+  // the brush underneath still works.
+  const eventsSvg = select(axisWrap)
+    .append('svg')
+    .attr('class', 'browse-timeline-events-svg')
+    .attr('role', 'group')
+    .attr('aria-label', t('browse.timeline.events.aria'))
+  const eventsGroup = eventsSvg.append('g').attr('class', 'browse-timeline-events')
 
   const rowsSvg = select(rowsWrap)
     .append('svg')
@@ -415,6 +428,12 @@ export function createCatalogTimeline(
     const axisWidthTotal = chartWidth + AXIS_HPADDING_PX * 2
     const axisSvgWidth = GUTTER_PX + axisWidthTotal
     axisSvg
+      .attr('width', axisSvgWidth)
+      .attr('height', AXIS_HEIGHT_PX + BRUSH_HEIGHT_PX)
+    // Keep the event overlay the same size + coordinate space as the
+    // axis so the markers' absolute `cx` (which includes the gutter)
+    // lands on the correct year.
+    eventsSvg
       .attr('width', axisSvgWidth)
       .attr('height', AXIS_HEIGHT_PX + BRUSH_HEIGHT_PX)
     // Position the inner axis group AFTER the gutter so labels in
