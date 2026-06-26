@@ -54,6 +54,8 @@ import {
   VISITS_LRU_CAP,
 } from '../services/visitMemory'
 import { renderHeroPanel, destroyHeroPanel } from './heroPanelUI'
+import { fetchApprovedEvents, type PublicEvent } from '../services/eventsService'
+import { buildCatalogEvents, type EventOverlay } from '../services/catalogEvents'
 import { getCatalogMode } from '../utils/catalogMode'
 import type { CatalogGraphController } from './catalogGraphUI'
 import type { CatalogTimelineController } from './catalogTimelineUI'
@@ -863,6 +865,29 @@ export function showBrowseUI(
   // resolves the most-recently-visited ids back to catalog rows.
   const datasetById = new Map<string, Dataset>(allDatasets.map(d => [d.id, d]))
 
+  // Approved current events for the Map / Timeline overlays. Fetched
+  // once (below) after first paint; until then the views render no
+  // event markers. `eventOverlaysFor` narrows them to the currently-
+  // visible dataset set so catalog filtering also filters the events.
+  let approvedEvents: readonly PublicEvent[] = []
+
+  /**
+   * Build the event overlays for the active filter/search state. The
+   * visible dataset set is exactly what `filterDatasets` returns for
+   * the same predicates the Map/Timeline transforms consume, so an
+   * event whose only linked dataset is filtered out drops with it.
+   */
+  function eventOverlaysFor(
+    effectiveState: FilterState,
+    freeText: string,
+  ): readonly EventOverlay[] {
+    if (approvedEvents.length === 0) return []
+    const visibleIds = new Set(
+      filterDatasets(allDatasets, effectiveState, freeText, resolvers).map(d => d.id),
+    )
+    return buildCatalogEvents(approvedEvents, visibleIds).overlays
+  }
+
   // Accordion section open/collapsed state — persisted to
   // localStorage so the user's expand/collapse choices stick
   // across sessions. The user explicitly asked for an accordion
@@ -1317,6 +1342,7 @@ export function showBrowseUI(
         datasets: allDatasets,
         filterState: effectiveState,
         searchQuery: parsed.freeText,
+        events: eventOverlaysFor(effectiveState, parsed.freeText),
       })
     } else if (viewMode === 'map' && mapContainer) {
       hideContainer(gridContainer)
@@ -1330,6 +1356,7 @@ export function showBrowseUI(
         datasets: allDatasets,
         filterState: effectiveState,
         searchQuery: parsed.freeText,
+        events: eventOverlaysFor(effectiveState, parsed.freeText),
       })
     } else {
       hideContainer(graphContainer)
@@ -1860,6 +1887,7 @@ export function showBrowseUI(
         datasets: allDatasets,
         filterState: effectiveState,
         searchQuery: parsed.freeText,
+        events: eventOverlaysFor(effectiveState, parsed.freeText),
       })
     } else if (viewMode === 'map' && mapController) {
       const parsed = parseSearchQuery(searchQuery)
@@ -1868,6 +1896,7 @@ export function showBrowseUI(
         datasets: allDatasets,
         filterState: effectiveState,
         searchQuery: parsed.freeText,
+        events: eventOverlaysFor(effectiveState, parsed.freeText),
       })
     }
     emitFilterChange(previous, next)
@@ -2219,6 +2248,17 @@ export function showBrowseUI(
   // flicker.
   void applyViewMode()
   updateDownloadButtons()
+
+  // Fetch approved current events once, then repaint the active
+  // overlay view so the Map/Timeline event markers appear when the
+  // request resolves (degrades to no markers on any failure — the
+  // client returns `[]`). Only the spatial/temporal views consume
+  // events, so a non-overlay view (Cards/Graph) needs no repaint.
+  void fetchApprovedEvents().then(events => {
+    approvedEvents = events
+    if (events.length === 0) return
+    if (viewMode === 'timeline' || viewMode === 'map') void applyViewMode(false)
+  })
 
   // Mark the overlay as initialized so subsequent show requests
   // can skip re-running this function and avoid duplicating

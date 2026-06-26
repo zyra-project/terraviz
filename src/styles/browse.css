@@ -916,6 +916,9 @@ body.browse-view-map .browse-title {
 .browse-timeline-legend-dot-realtime {
     background: var(--color-success);
 }
+.browse-timeline-legend-dot-event {
+    background: var(--color-warning, #e0a23c);
+}
 .browse-timeline-brush-summary {
     margin-inline-start: auto;
     font-size: calc(0.6rem * var(--ui-scale));
@@ -1079,6 +1082,33 @@ body.browse-view-map .browse-title {
     stroke: var(--color-bg);
     stroke-width: 1;
 }
+/* Current-event marker overlay — its own SVG pinned over the axis band
+   (which is `aria-hidden`); kept separate so the interactive markers
+   stay in the accessibility tree. `pointer-events: none` lets brush
+   gestures fall through to the axis below; the markers re-enable it. */
+.browse-timeline-events-svg {
+    position: absolute;
+    inset-block-start: 0;
+    inset-inline-start: 0;
+    pointer-events: none;
+}
+/* Current-event axis markers — amber dots on the time axis, distinct
+   from the teal coverage bars and green real-time dots. */
+.browse-timeline-event {
+    fill: var(--color-warning, #e0a23c);
+    stroke: var(--color-bg);
+    stroke-width: 1;
+    cursor: pointer;
+    pointer-events: auto;
+}
+.browse-timeline-event:hover {
+    fill-opacity: 0.85;
+}
+.browse-timeline-event:focus-visible {
+    outline: none;
+    stroke: var(--color-accent);
+    stroke-width: 2;
+}
 .browse-timeline-empty {
     padding: calc(1.5rem * var(--ui-scale));
     text-align: center;
@@ -1156,6 +1186,9 @@ body.browse-view-map .browse-title {
 }
 .browse-map-legend-dot-realtime {
     background: var(--color-success);
+}
+.browse-map-legend-dot-event {
+    background: var(--color-warning, #e0a23c);
 }
 .browse-map-include-global {
     display: flex;

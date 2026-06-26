@@ -42,6 +42,7 @@ import {
   type CatalogMap,
   type MapBboxOverlay,
 } from '../services/catalogMap'
+import type { EventOverlay } from '../services/catalogEvents'
 import { type FilterState } from '../services/datasetFilter'
 import type { Dataset } from '../types'
 import { emit } from '../analytics'
@@ -62,6 +63,14 @@ const BBOX_SOURCE_ID = 'catalog-map-bboxes'
 const BBOX_FILL_LAYER_ID = 'catalog-map-bboxes-fill'
 const BBOX_OUTLINE_LAYER_ID = 'catalog-map-bboxes-outline'
 const BBOX_REALTIME_LAYER_ID = 'catalog-map-bboxes-realtime'
+
+/** Source + layer IDs for the current-event overlays. A separate
+ *  GeoJSON source from the dataset bboxes so events render in their
+ *  own amber styling above the teal dataset footprints. */
+const EVENTS_SOURCE_ID = 'catalog-map-events'
+const EVENTS_BBOX_FILL_LAYER_ID = 'catalog-map-events-bbox-fill'
+const EVENTS_BBOX_OUTLINE_LAYER_ID = 'catalog-map-events-bbox-outline'
+const EVENTS_POINT_LAYER_ID = 'catalog-map-events-point'
 
 /** Per-minute throttle budget for `catalog_map_region_drawn`. Same
  *  shape as `camera_settled` and `catalog_timeline_brush_applied`
@@ -105,6 +114,12 @@ export interface CatalogMapUpdate {
   /** Free-text portion of the search query (prefix tokens are
    *  already merged into filterState by the caller). */
   searchQuery: string
+  /** Approved current-event overlays narrowed to the currently-visible
+   *  dataset set (see `catalogEvents.buildCatalogEvents`). Rendered as
+   *  amber markers/footprints; click previews the first linked dataset.
+   *  Optional — absent until `browseUI` resolves the events fetch
+   *  (degrades to no markers). */
+  events?: readonly EventOverlay[]
 }
 
 export interface CatalogMapController {
@@ -159,6 +174,56 @@ function bboxToPolygon(overlay: MapBboxOverlay): GeoJSON.Feature<GeoJSON.Polygon
 }
 
 // ---------------------------------------------------------------------------
+// Event overlay → GeoJSON
+// ---------------------------------------------------------------------------
+
+/**
+ * Convert a current-event overlay to a GeoJSON feature for the events
+ * source — a Polygon for a `boundingBox` geometry, a Point for a
+ * `point` geometry. Region-only events (neither bbox nor point) can't
+ * be placed on the map and are dropped (returns `null`). Each feature
+ * carries the title, source name, and the first linked dataset id so
+ * the click handler can preview it and the tooltip can cite it.
+ */
+function eventToFeature(
+  overlay: EventOverlay,
+): GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.Point> | null {
+  const props = {
+    eventId: overlay.eventId,
+    title: overlay.title,
+    sourceName: overlay.source.name,
+    datasetId: overlay.linkedDatasetIds[0],
+  }
+  const bb = overlay.geometry.boundingBox
+  if (bb) {
+    const { n, s, w, e } = bb
+    return {
+      type: 'Feature',
+      properties: { ...props, kind: 'bbox' },
+      geometry: {
+        type: 'Polygon',
+        coordinates: [[
+          [w, s],
+          [e, s],
+          [e, n],
+          [w, n],
+          [w, s],
+        ]],
+      },
+    }
+  }
+  const pt = overlay.geometry.point
+  if (pt) {
+    return {
+      type: 'Feature',
+      properties: { ...props, kind: 'point' },
+      geometry: { type: 'Point', coordinates: [pt.lon, pt.lat] },
+    }
+  }
+  return null
+}
+
+// ---------------------------------------------------------------------------
 // Module entry
 // ---------------------------------------------------------------------------
 
@@ -186,6 +251,7 @@ export function createCatalogMap(
     <div class="browse-map-legend" aria-hidden="true">
       <span class="browse-map-legend-dot browse-map-legend-dot-coverage"></span>${escapeHtml(t('browse.map.legend.coverage'))}
       <span class="browse-map-legend-dot browse-map-legend-dot-realtime"></span>${escapeHtml(t('browse.map.legend.realtime'))}
+      <span class="browse-map-legend-dot browse-map-legend-dot-event"></span>${escapeHtml(t('browse.map.legend.event'))}
     </div>
     <label class="browse-map-include-global">
       <input type="checkbox" class="browse-map-include-global-input" />
@@ -408,6 +474,45 @@ export function createCatalogMap(
       },
     })
 
+    // --- Current-event overlays (separate amber source/layers) ---
+    // A distinct GeoJSON source so events render in their own amber
+    // styling above the teal dataset footprints. Empty at boot;
+    // `rebuild` swaps in the live event features.
+    map.addSource(EVENTS_SOURCE_ID, {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+    })
+    const eventColor = cssVar('--color-warning', '#e0a23c')
+    // Footprint fill for bbox-geometry events.
+    map.addLayer({
+      id: EVENTS_BBOX_FILL_LAYER_ID,
+      type: 'fill',
+      source: EVENTS_SOURCE_ID,
+      filter: ['==', ['get', 'kind'], 'bbox'],
+      paint: { 'fill-color': eventColor, 'fill-opacity': 0.2 },
+    })
+    map.addLayer({
+      id: EVENTS_BBOX_OUTLINE_LAYER_ID,
+      type: 'line',
+      source: EVENTS_SOURCE_ID,
+      filter: ['==', ['get', 'kind'], 'bbox'],
+      paint: { 'line-color': eventColor, 'line-width': 2, 'line-opacity': 0.95 },
+    })
+    // Circle marker for point-geometry events.
+    map.addLayer({
+      id: EVENTS_POINT_LAYER_ID,
+      type: 'circle',
+      source: EVENTS_SOURCE_ID,
+      filter: ['==', ['get', 'kind'], 'point'],
+      paint: {
+        'circle-radius': 6,
+        'circle-color': eventColor,
+        'circle-opacity': 0.85,
+        'circle-stroke-color': cssVar('--color-bg', '#0b1020'),
+        'circle-stroke-width': 1.5,
+      },
+    })
+
     // Click handler — preview the dataset's card. If the click
     // hits multiple overlapping bboxes the tooltip below lists
     // them all; the click action picks the top-most (MapLibre
@@ -430,6 +535,58 @@ export function createCatalogMap(
       if (drawMode) return
       renderTooltipAt(e)
     })
+
+    // Event-overlay interaction — click previews the linked dataset;
+    // hover shows a compact tooltip (title + cited source). Wired on
+    // both the bbox-fill and point layers so either geometry is
+    // interactive.
+    for (const layerId of [EVENTS_BBOX_FILL_LAYER_ID, EVENTS_POINT_LAYER_ID]) {
+      map.on('click', layerId, (e) => {
+        if (drawMode) return
+        const features = e.features ?? []
+        const datasetId = features[0]?.properties?.datasetId as string | undefined
+        if (datasetId) callbacks.onPreviewDataset(datasetId)
+      })
+      map.on('mouseenter', layerId, () => {
+        if (!drawMode) map.getCanvas().style.cursor = 'pointer'
+      })
+      map.on('mouseleave', layerId, () => {
+        if (!drawMode) map.getCanvas().style.cursor = ''
+        tooltip.classList.add('hidden')
+      })
+      map.on('mousemove', layerId, (e) => {
+        if (drawMode) return
+        renderEventTooltipAt(e)
+      })
+    }
+  }
+
+  /**
+   * Show the event tooltip — the event title + its cited source. A
+   * compact, single-row variant of the dataset overlap tooltip;
+   * reuses the same `tooltip` element + positioning.
+   */
+  function renderEventTooltipAt(
+    e: MapMouseEvent & { features?: GeoJSON.Feature[] },
+  ): void {
+    const feature = (e.features ?? [])[0]
+    if (!feature) {
+      tooltip.classList.add('hidden')
+      return
+    }
+    const p = feature.properties ?? {}
+    const title = String(p.title ?? '')
+    const sourceName = String(p.sourceName ?? '')
+    const sourceLine = sourceName
+      ? `<span class="browse-map-tooltip-bounds">${escapeHtml(t('browse.map.event.tooltip.source', { name: sourceName }))}</span>`
+      : ''
+    tooltip.innerHTML = `<div class="browse-map-tooltip-row"><span class="browse-map-tooltip-title">${escapeHtml(title)}</span>${sourceLine}</div>`
+    const offset = 12
+    const left = Math.min(e.point.x + offset, canvas.clientWidth - 260)
+    const top_ = Math.min(e.point.y + offset, canvas.clientHeight - 80)
+    tooltip.style.insetInlineStart = `${Math.max(8, left)}px`
+    tooltip.style.insetBlockStart = `${Math.max(8, top_)}px`
+    tooltip.classList.remove('hidden')
   }
 
   /**
@@ -627,6 +784,18 @@ export function createCatalogMap(
     })
   }
 
+  /** Swap the current-event overlay features into the events source.
+   *  Region-only events (no bbox/point) drop out via `eventToFeature`
+   *  returning null. No-op until the source exists (post-`load`). */
+  function setEventOverlayData(events: readonly EventOverlay[]): void {
+    const source = map.getSource(EVENTS_SOURCE_ID) as GeoJSONSource | undefined
+    if (!source) return
+    const features = events
+      .map(eventToFeature)
+      .filter((f): f is GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.Point> => f !== null)
+    source.setData({ type: 'FeatureCollection', features })
+  }
+
   function rebuild(): void {
     if (!lastInput || !mapReady) return
     let result = buildMap(
@@ -703,6 +872,8 @@ export function createCatalogMap(
       // from a clean slate.
       const source = map.getSource(BBOX_SOURCE_ID) as GeoJSONSource | undefined
       source?.setData({ type: 'FeatureCollection', features: [] })
+      // Events ride alongside the datasets — nothing visible, no events.
+      setEventOverlayData([])
       return
     }
     const wasHidden = empty.classList.contains('hidden') === false
@@ -719,6 +890,10 @@ export function createCatalogMap(
     const features = result.bboxes.map(bboxToPolygon)
     const source = map.getSource(BBOX_SOURCE_ID) as GeoJSONSource | undefined
     source?.setData({ type: 'FeatureCollection', features })
+
+    // Current-event overlays — placed (bbox/point) events only;
+    // region-only events have nowhere to render and are dropped.
+    setEventOverlayData(lastInput.events ?? [])
 
     // Banner: surface an explanation when every visible bbox is
     // global. Without context the user sees a (near-)uniform

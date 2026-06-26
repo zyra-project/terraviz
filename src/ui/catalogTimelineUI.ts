@@ -40,9 +40,11 @@ import { select, type Selection } from 'd3-selection'
 
 import {
   buildTimeline,
+  toFractionalYear,
   type Timeline,
   type TimelineRow,
 } from '../services/catalogTimeline'
+import type { EventOverlay } from '../services/catalogEvents'
 import { type FilterState } from '../services/datasetFilter'
 import type { Dataset } from '../types'
 import { emit } from '../analytics'
@@ -84,6 +86,10 @@ const ROW_COUNT_MEDIUM = 500
 const MIN_BAR_WIDTH_PX = 3
 /** Radius of the real-time trailing-edge marker dot, in pixels. */
 const REALTIME_MARKER_RADIUS_PX = 4
+/** Radius of the current-event axis marker dot, in pixels. Slightly
+ *  larger than the real-time dot so an event reads as a deliberate
+ *  point of interest, not a row decoration. */
+const EVENT_MARKER_RADIUS_PX = 5
 
 /** Per-minute throttle budget for `catalog_timeline_brush_applied`.
  *  Matches `camera_settled` and `catalog_graph_node_clicked` so an
@@ -122,6 +128,12 @@ export interface CatalogTimelineUpdate {
   /** Free-text portion of the search query (prefix tokens are
    *  already merged into filterState by the caller). */
   searchQuery: string
+  /** Approved current-event overlays narrowed to the currently-visible
+   *  dataset set (see `catalogEvents.buildCatalogEvents`). Rendered as
+   *  amber markers on the time axis; click previews the first linked
+   *  dataset. Optional — absent until `browseUI` resolves the events
+   *  fetch (degrades to no markers). */
+  events?: readonly EventOverlay[]
 }
 
 export interface CatalogTimelineController {
@@ -164,6 +176,7 @@ export function createCatalogTimeline(
     <div class="browse-timeline-legend" aria-hidden="true">
       <span class="browse-timeline-legend-dot browse-timeline-legend-dot-coverage"></span>${escapeHtml(t('browse.timeline.legend.coverage'))}
       <span class="browse-timeline-legend-dot browse-timeline-legend-dot-realtime"></span>${escapeHtml(t('browse.timeline.legend.realtime'))}
+      <span class="browse-timeline-legend-dot browse-timeline-legend-dot-event"></span>${escapeHtml(t('browse.timeline.legend.event'))}
     </div>
     <div class="browse-timeline-brush-summary" aria-live="polite"></div>
     <button type="button"
@@ -235,6 +248,23 @@ export function createCatalogTimeline(
     .attr('y1', BRUSH_HEIGHT_PX)
     .attr('y2', AXIS_HEIGHT_PX + BRUSH_HEIGHT_PX)
     .attr('aria-hidden', 'true')
+  // Current-event markers ride the axis band (sticky, always visible
+  // while rows scroll) so they stay aligned with the time ticks above
+  // them. They live in a SEPARATE SVG overlaid on the axis — NOT inside
+  // `axisSvg`, which is `aria-hidden` (decorative; the data is conveyed
+  // by the accessible rows below). The markers are interactive
+  // (focusable, role=button, aria-label), so an `aria-hidden` ancestor
+  // would pull them out of the accessibility tree while leaving them as
+  // tab stops — the worst of both. This overlay is a labelled group so
+  // the markers stay keyboard- and screen-reader-reachable. CSS pins it
+  // over the axis with `pointer-events: none` (markers re-enable it) so
+  // the brush underneath still works.
+  const eventsSvg = select(axisWrap)
+    .append('svg')
+    .attr('class', 'browse-timeline-events-svg')
+    .attr('role', 'group')
+    .attr('aria-label', t('browse.timeline.events.aria'))
+  const eventsGroup = eventsSvg.append('g').attr('class', 'browse-timeline-events')
 
   const rowsSvg = select(rowsWrap)
     .append('svg')
@@ -382,6 +412,9 @@ export function createCatalogTimeline(
         brushSummary.textContent = ''
         brushClearBtn.classList.add('hidden')
       }
+      // No axis/domain in the empty state — clear any stale event
+      // markers so they don't linger from a previous populated render.
+      eventsGroup.selectAll('*').remove()
       return
     }
     empty.classList.add('hidden')
@@ -395,6 +428,12 @@ export function createCatalogTimeline(
     const axisWidthTotal = chartWidth + AXIS_HPADDING_PX * 2
     const axisSvgWidth = GUTTER_PX + axisWidthTotal
     axisSvg
+      .attr('width', axisSvgWidth)
+      .attr('height', AXIS_HEIGHT_PX + BRUSH_HEIGHT_PX)
+    // Keep the event overlay the same size + coordinate space as the
+    // axis so the markers' absolute `cx` (which includes the gutter)
+    // lands on the correct year.
+    eventsSvg
       .attr('width', axisSvgWidth)
       .attr('height', AXIS_HEIGHT_PX + BRUSH_HEIGHT_PX)
     // Position the inner axis group AFTER the gutter so labels in
@@ -457,6 +496,8 @@ export function createCatalogTimeline(
     } else {
       nowMarker.style('display', 'none')
     }
+
+    renderEventMarkers(lastInput.events ?? [], domain)
 
     // --- Rows SVG ---
     const rowHeight = rowHeightFor(timeline.rows.length)
@@ -573,6 +614,69 @@ export function createCatalogTimeline(
       .attr('cy', rowHeight / 2)
       .attr('r', REALTIME_MARKER_RADIUS_PX)
       .style('display', (d) => (d.isRealtime ? '' : 'none'))
+  }
+
+  /**
+   * Render the current-event markers onto the sticky axis band. Each
+   * event is anchored at its `occurredStart` on the shared time axis
+   * (amber dot, distinct from the teal coverage bars and the green
+   * real-time row markers). Click / Enter previews the event's first
+   * linked dataset — the same `onPreviewDataset` path the rows use, so
+   * the marker reads as one interaction system with the row clicks.
+   *
+   * An event with no parseable `occurredStart`, or one whose time
+   * falls outside the visible domain, is dropped (mirrors the
+   * now-marker's in-domain guard) — there is nowhere on the axis to
+   * place it honestly.
+   */
+  function renderEventMarkers(
+    events: readonly EventOverlay[],
+    domain: { min: number; max: number },
+  ): void {
+    // Resolve each event to an x-position; drop the unplaceable ones.
+    type PlacedEvent = { overlay: EventOverlay; year: number }
+    const placed: PlacedEvent[] = []
+    for (const overlay of events) {
+      const year = toFractionalYear(overlay.occurredStart)
+      if (year == null) continue
+      if (year < domain.min || year > domain.max) continue
+      placed.push({ overlay, year })
+    }
+
+    const cy = BRUSH_HEIGHT_PX + AXIS_HEIGHT_PX / 2
+    const markers = eventsGroup
+      .selectAll<SVGCircleElement, PlacedEvent>('circle.browse-timeline-event')
+      .data(placed, (d) => d.overlay.eventId)
+
+    markers.exit().remove()
+
+    const enter = markers
+      .enter()
+      .append('circle')
+      .attr('class', 'browse-timeline-event')
+      .attr('r', EVENT_MARKER_RADIUS_PX)
+      .attr('role', 'button')
+      .attr('tabindex', 0)
+      .on('click', (_event, d) => {
+        callbacks.onPreviewDataset(d.overlay.linkedDatasetIds[0])
+      })
+      .on('keydown', (event, d) => {
+        const ke = event as KeyboardEvent
+        if (ke.key === 'Enter' || ke.key === ' ') {
+          ke.preventDefault()
+          callbacks.onPreviewDataset(d.overlay.linkedDatasetIds[0])
+        }
+      })
+    enter.append('title')
+
+    const merged = enter.merge(markers)
+    merged
+      .attr('cx', (d) => GUTTER_PX + AXIS_HPADDING_PX + xScale(d.year))
+      .attr('cy', cy)
+      .attr('aria-label', (d) =>
+        t('browse.timeline.event.aria', { title: d.overlay.title }),
+      )
+    merged.select<SVGTitleElement>('title').text((d) => d.overlay.title)
   }
 
   function syncBrushFromFilterState(

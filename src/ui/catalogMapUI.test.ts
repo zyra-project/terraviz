@@ -17,7 +17,11 @@ const mapStub = vi.hoisted(() => {
   const handlers: Record<string, Array<(...args: unknown[]) => void>> = {}
   const layerHandlers: Record<string, Record<string, Array<(...args: unknown[]) => void>>> = {}
   const dispose = vi.fn()
+  // `setData` is the bbox source's spy (kept named `setData` so the
+  // existing overlay assertions read unchanged); `eventsSetData` is
+  // the separate current-events source. `getSource` dispatches by id.
   const setData = vi.fn()
+  const eventsSetData = vi.fn()
   // Stable canvas across calls within a single controller's lifetime
   // so tests can grab a reference and synthesise mousedown events
   // against it. Reset in beforeEach.
@@ -33,7 +37,9 @@ const mapStub = vi.hoisted(() => {
     }),
     addSource: vi.fn(),
     addLayer: vi.fn(),
-    getSource: vi.fn(() => ({ setData })),
+    getSource: vi.fn((id: string) =>
+      id === 'catalog-map-events' ? { setData: eventsSetData } : { setData },
+    ),
     getCanvas: vi.fn(() => {
       // Memoised so the controller's `const mapCanvas = map.getCanvas()`
       // returns the same element on every subsequent call (cursor
@@ -53,6 +59,7 @@ const mapStub = vi.hoisted(() => {
     map,
     dispose,
     setData,
+    eventsSetData,
     handlers,
     layerHandlers,
     canvas: () => canvasEl,
@@ -107,6 +114,7 @@ describe('createCatalogMap', () => {
     Object.keys(mapStub.handlers).forEach(k => delete mapStub.handlers[k])
     Object.keys(mapStub.layerHandlers).forEach(k => delete mapStub.layerHandlers[k])
     mapStub.setData.mockClear()
+    mapStub.eventsSetData.mockClear()
     mapStub.resetCanvas()
   })
 
@@ -363,6 +371,98 @@ describe('createCatalogMap', () => {
     // Draw mode auto-exits after a successful commit so the user
     // can resume panning without a second click.
     expect(drawBtn.getAttribute('aria-pressed')).toBe('false')
+    controller.destroy()
+  })
+
+  it('renders a current-event point feature into the events source', async () => {
+    const { createCatalogMap } = await import('./catalogMapUI')
+    const host = document.getElementById('host')!
+    const controller = createCatalogMap(host, {
+      onRegionChange: vi.fn(),
+      onPreviewDataset: vi.fn(),
+    })
+    controller.update({
+      datasets: [makeDataset({ id: 'linked' })],
+      filterState: {},
+      searchQuery: '',
+      events: [
+        {
+          eventId: 'evt1',
+          title: 'Marine heatwave',
+          source: { name: 'NOAA', url: 'https://example.gov/heat' },
+          occurredStart: '2024-06-01',
+          geometry: { point: { lat: 20, lon: -40 } },
+          linkedDatasetIds: ['linked'],
+        },
+      ],
+    })
+    for (const h of mapStub.handlers.load ?? []) h()
+    // The events source got its own setData call with one point feature.
+    const lastEvents = mapStub.eventsSetData.mock.calls.at(-1)?.[0] as { features: GeoJSON.Feature[] }
+    expect(lastEvents.features).toHaveLength(1)
+    expect(lastEvents.features[0].geometry.type).toBe('Point')
+    expect(lastEvents.features[0].properties?.datasetId).toBe('linked')
+    controller.destroy()
+  })
+
+  it('clicking an event point layer previews the first linked dataset', async () => {
+    const { createCatalogMap } = await import('./catalogMapUI')
+    const host = document.getElementById('host')!
+    const onPreviewDataset = vi.fn()
+    const controller = createCatalogMap(host, {
+      onRegionChange: vi.fn(),
+      onPreviewDataset,
+    })
+    controller.update({
+      datasets: [makeDataset({ id: 'linked' })],
+      filterState: {},
+      searchQuery: '',
+      events: [
+        {
+          eventId: 'evt1',
+          title: 'Marine heatwave',
+          source: { name: 'NOAA', url: 'https://example.gov/heat' },
+          occurredStart: '2024-06-01',
+          geometry: { point: { lat: 20, lon: -40 } },
+          linkedDatasetIds: ['linked'],
+        },
+      ],
+    })
+    for (const h of mapStub.handlers.load ?? []) h()
+    const clickHandlers = mapStub.layerHandlers['catalog-map-events-point']?.click ?? []
+    expect(clickHandlers.length).toBeGreaterThan(0)
+    for (const h of clickHandlers) {
+      h({ features: [{ properties: { datasetId: 'linked' } }] })
+    }
+    expect(onPreviewDataset).toHaveBeenCalledWith('linked')
+    controller.destroy()
+  })
+
+  it('drops a region-only event (no bbox/point) from the events source', async () => {
+    const { createCatalogMap } = await import('./catalogMapUI')
+    const host = document.getElementById('host')!
+    const controller = createCatalogMap(host, {
+      onRegionChange: vi.fn(),
+      onPreviewDataset: vi.fn(),
+    })
+    controller.update({
+      datasets: [makeDataset({ id: 'linked' })],
+      filterState: {},
+      searchQuery: '',
+      events: [
+        {
+          eventId: 'evt-region',
+          title: 'Region-only event',
+          source: { name: 'NOAA', url: 'https://example.gov/x' },
+          occurredStart: '2024-06-01',
+          geometry: { regionName: 'Pacific Ocean' },
+          linkedDatasetIds: ['linked'],
+        },
+      ],
+    })
+    for (const h of mapStub.handlers.load ?? []) h()
+    const lastEvents = mapStub.eventsSetData.mock.calls.at(-1)?.[0] as { features: GeoJSON.Feature[] }
+    expect(lastEvents.features).toHaveLength(0)
     controller.destroy()
   })
 
