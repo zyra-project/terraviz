@@ -95,6 +95,7 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `functions/api/v1/datasets/[id]/preview/[token].ts` | GET /api/v1/datasets/{id}/preview/{token} |
 | `functions/api/v1/datasets/[id]/preview/[token]/manifest.ts` | GET /api/v1/datasets/{id}/preview/{token}/manifest |
 | `functions/api/v1/featured-event.ts` | GET /api/v1/featured-event — public read of the current event that headlines the "Right now" hero (`docs/CURRENT_EVENTS_PLAN.md` §6.1) |
+| `functions/api/v1/events.ts` | GET /api/v1/events — public list of approved current events (geometry + time + visible linked dataset ids) for the catalog Map/Timeline overlays; KV-cached, `{ events: [] }` graceful degradation (`docs/CURRENT_EVENTS_PLAN.md` §6.3) |
 | `functions/api/v1/featured-hero.ts` | Route: GET /api/v1/featured-hero |
 | `functions/api/v1/featured.ts` | Route: GET /api/v1/featured |
 | `functions/api/v1/logout.ts` | GET /api/v1/logout |

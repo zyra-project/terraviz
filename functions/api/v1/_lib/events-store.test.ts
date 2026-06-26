@@ -24,6 +24,7 @@ import {
   toPublicFeaturedEvent,
   listLinksForEvents,
   getDecorationsForEvents,
+  listPublicEvents,
   type NewCurrentEvent,
 } from './events-store'
 
@@ -424,5 +425,71 @@ describe('getFeaturedEvent', () => {
     const row = await getFeaturedEvent(db, { now: NOW })
     expect(row?.id).toBe(newer)
     expect(row?.dataset_id).toBe(seededDatasetId(1))
+  })
+})
+
+describe('listPublicEvents', () => {
+  const NOW = Date.parse('2026-06-26T00:00:00.000Z')
+
+  /** Seed an approved event linked to seeded dataset `i`. */
+  async function seedApprovedEvent(
+    db: D1Database,
+    opts: {
+      datasetIndex?: number
+      publishedAt?: string
+      approveEvent?: boolean
+      approveLink?: boolean
+      geometry?: NewCurrentEvent['geometry']
+    } = {},
+  ): Promise<string> {
+    const datasetId = seededDatasetId(opts.datasetIndex ?? 0)
+    const { id } = await insertCurrentEvent(db, {
+      ...sampleEvent(),
+      publishedAt: opts.publishedAt ?? '2026-06-20T00:00:00.000Z',
+      geometry: opts.geometry,
+    })
+    await upsertEventDatasetLink(db, { eventId: id, datasetId, matchScore: 0.9 })
+    if (opts.approveEvent ?? true) await setEventStatus(db, id, 'approved', 'PUB1')
+    if (opts.approveLink ?? true) await setLinkStatus(db, id, datasetId, 'approved', 'PUB1')
+    return id
+  }
+
+  it('returns approved events with their approved, visible dataset ids + geometry', async () => {
+    const { db } = freshDb()
+    const id = await seedApprovedEvent(db, { geometry: { point: { lat: 29, lon: -89 } } })
+    const events = await listPublicEvents(db, { now: NOW })
+    expect(events).toHaveLength(1)
+    expect(events[0].id).toBe(id)
+    expect(events[0].datasetIds).toEqual([seededDatasetId(0)])
+    expect(events[0].geometry.point).toEqual({ lat: 29, lon: -89 })
+    expect(events[0].source).toMatchObject({ name: 'NOAA', url: 'https://example.gov/storm' })
+  })
+
+  it('excludes proposed events and unapproved links', async () => {
+    const { db } = freshDb()
+    await seedApprovedEvent(db, { datasetIndex: 0, approveEvent: false }) // proposed event
+    await seedApprovedEvent(db, { datasetIndex: 1, approveLink: false }) // approved event, proposed link
+    expect(await listPublicEvents(db, { now: NOW })).toEqual([])
+  })
+
+  it('drops an event whose only approved link is to a hidden dataset', async () => {
+    const { sqlite, db } = freshDb()
+    await seedApprovedEvent(db, { datasetIndex: 0 })
+    sqlite.prepare('UPDATE datasets SET is_hidden = 1 WHERE id = ?').run(seededDatasetId(0))
+    expect(await listPublicEvents(db, { now: NOW })).toEqual([])
+  })
+
+  it('excludes events older than the recency window', async () => {
+    const { db } = freshDb()
+    await seedApprovedEvent(db, { publishedAt: '2026-05-01T00:00:00.000Z' })
+    expect(await listPublicEvents(db, { now: NOW })).toEqual([])
+  })
+
+  it('orders freshest-first', async () => {
+    const { db } = freshDb()
+    const older = await seedApprovedEvent(db, { datasetIndex: 0, publishedAt: '2026-06-18T00:00:00.000Z' })
+    const newer = await seedApprovedEvent(db, { datasetIndex: 1, publishedAt: '2026-06-24T00:00:00.000Z' })
+    const events = await listPublicEvents(db, { now: NOW })
+    expect(events.map(e => e.id)).toEqual([newer, older])
   })
 })
