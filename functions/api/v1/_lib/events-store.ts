@@ -26,6 +26,28 @@
 
 import { newUlid } from './ulid'
 
+/** KV key the public `GET /api/v1/featured-event` caches under. Shared
+ *  with the review route so an approve/reject can bust it for immediate
+ *  effect (the 60 s TTL is the backstop). */
+export const FEATURED_EVENT_CACHE_KEY = 'featured-event:v1'
+
+/** How recent an approved event must be to headline the hero — by its
+ *  published / occurred date. Keeps the "Right now" surface honest:
+ *  a curator-approved event ages out rather than lingering as "now". */
+export const FEATURED_EVENT_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000
+
+/** Best-effort bust of the public featured-event cache after a review
+ *  changes event/link status. Swallows errors — a missed bust just
+ *  waits out the TTL. */
+export async function bustFeaturedEventCache(kv: KVNamespace | undefined): Promise<void> {
+  if (!kv) return
+  try {
+    await kv.delete(FEATURED_EVENT_CACHE_KEY)
+  } catch {
+    // TTL is the backstop.
+  }
+}
+
 /** Curator-gated lifecycle of a current event. Only `approved` events
  *  are ever surfaced to end-users. */
 export type CurrentEventStatus = 'proposed' | 'approved' | 'rejected' | 'expired'
@@ -454,5 +476,87 @@ export function toPublicEvent(
   if (row.occurred_end) out.occurredEnd = row.occurred_end
   if (row.reviewed_at) out.reviewedAt = row.reviewed_at
   if (row.reviewed_by) out.reviewedBy = row.reviewed_by
+  return out
+}
+
+/** A row from {@link getFeaturedEvent}: the event joined to its chosen
+ *  approved, visible dataset link. */
+export interface FeaturedEventRow {
+  id: string
+  title: string
+  summary: string | null
+  source_name: string
+  source_url: string
+  published_at: string | null
+  occurred_start: string | null
+  occurred_end: string | null
+  dataset_id: string
+  dataset_title: string
+  match_score: number | null
+}
+
+/** The public (camelCase) shape the hero surface reads. */
+export interface FeaturedEventPublic {
+  id: string
+  title: string
+  summary?: string
+  source: { name: string; url: string; publishedAt?: string }
+  occurredStart?: string
+  occurredEnd?: string
+  datasetId: string
+  datasetTitle: string
+}
+
+/**
+ * The single event that should headline the "Right now" hero: the
+ * freshest **approved** event that has an **approved** link to a
+ * published, visible dataset, within {@link FEATURED_EVENT_MAX_AGE_MS}
+ * of `now`. Freshness is the event's published date, falling back to its
+ * occurred-start then created-at. Returns null when nothing qualifies.
+ *
+ * One row, one query — the join filters to approved+visible so the
+ * client never has to re-check, and ordering picks the freshest event
+ * then its best-scoring link. ISO-8601 UTC timestamps compare
+ * lexicographically, so the string cutoff is a valid recency gate.
+ */
+export async function getFeaturedEvent(
+  db: D1Database,
+  opts: { now?: number; maxAgeMs?: number } = {},
+): Promise<FeaturedEventRow | null> {
+  const now = opts.now ?? Date.now()
+  const cutoff = new Date(now - (opts.maxAgeMs ?? FEATURED_EVENT_MAX_AGE_MS)).toISOString()
+  const row = await db
+    .prepare(
+      `SELECT e.id, e.title, e.summary, e.source_name, e.source_url, e.published_at,
+              e.occurred_start, e.occurred_end,
+              l.dataset_id AS dataset_id, d.title AS dataset_title, l.match_score AS match_score
+         FROM current_events e
+         JOIN event_dataset_links l ON l.event_id = e.id AND l.status = 'approved'
+         JOIN datasets d ON d.id = l.dataset_id
+        WHERE e.status = 'approved'
+          AND d.published_at IS NOT NULL AND d.is_hidden = 0 AND d.retracted_at IS NULL
+          AND COALESCE(e.published_at, e.occurred_start, e.created_at) >= ?
+        ORDER BY COALESCE(e.published_at, e.occurred_start, e.created_at) DESC,
+                 l.match_score DESC
+        LIMIT 1`,
+    )
+    .bind(cutoff)
+    .first<FeaturedEventRow>()
+  return row ?? null
+}
+
+/** Shape a featured-event row into its public payload. */
+export function toPublicFeaturedEvent(row: FeaturedEventRow): FeaturedEventPublic {
+  const out: FeaturedEventPublic = {
+    id: row.id,
+    title: row.title,
+    source: { name: row.source_name, url: row.source_url },
+    datasetId: row.dataset_id,
+    datasetTitle: row.dataset_title,
+  }
+  if (row.summary) out.summary = row.summary
+  if (row.published_at) out.source.publishedAt = row.published_at
+  if (row.occurred_start) out.occurredStart = row.occurred_start
+  if (row.occurred_end) out.occurredEnd = row.occurred_end
   return out
 }

@@ -32,6 +32,7 @@ import {
   setEventStatus,
   setLinkStatus,
   toPublicEvent,
+  bustFeaturedEventCache,
   type CurrentEventStatus,
   type EventLinkStatus,
 } from '../../_lib/events-store'
@@ -177,6 +178,11 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
       links: parsed.value.links,
     }),
   })
+
+  // A status change can alter what the public "Right now" hero surfaces;
+  // bust the cache so an approval shows up within a tick (the 60 s TTL is
+  // the backstop).
+  await bustFeaturedEventCache(context.env.CATALOG_KV)
 
   // Re-read so the response reflects the applied decisions.
   const updated = await getCurrentEvent(db, id)
