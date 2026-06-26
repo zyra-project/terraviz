@@ -16,10 +16,11 @@
  * visible datasets is ever returned, so it is safe to serve anonymously.
  *
  * Caching mirrors `featured-event`: KV-cached at `events-list:v1` with a
- * 60 s TTL (the review route busts the key on approve/reject); a missing
- * `CATALOG_DB` (or a read error, e.g. the table not yet migrated) degrades
- * to `{ events: [] }` so the catalog views simply show no overlay rather
- * than breaking.
+ * 60 s TTL (the review route busts the key on approve/reject). A missing
+ * `CATALOG_DB` returns 503 (the client treats any non-200 as "no
+ * overlay"); a read error (e.g. the table not yet migrated) degrades to a
+ * `no-store` `{ events: [] }` so the catalog shows no overlay and recovers
+ * immediately once the schema exists (no stale empty list lingers).
  */
 
 import type { CatalogEnv } from './_lib/env'
@@ -35,7 +36,7 @@ function jsonError(status: number, error: string, message: string): Response {
   })
 }
 
-function ok(body: string, xCache: 'HIT' | 'MISS' | 'BYPASS'): Response {
+function ok(body: string, xCache: 'HIT' | 'MISS'): Response {
   return new Response(body, {
     status: 200,
     headers: {
@@ -43,6 +44,16 @@ function ok(body: string, xCache: 'HIT' | 'MISS' | 'BYPASS'): Response {
       'Cache-Control': `public, max-age=${CACHE_TTL_SECONDS}`,
       'X-Cache': xCache,
     },
+  })
+}
+
+/** A degraded (read-error) empty list. `no-store` so a transient failure
+ *  — most commonly the table not yet migrated — isn't cached by any
+ *  intermediary and recovery is immediate once the schema exists. */
+function degraded(): Response {
+  return new Response(JSON.stringify({ events: [] }), {
+    status: 200,
+    headers: { 'Content-Type': CONTENT_TYPE, 'Cache-Control': 'no-store', 'X-Cache': 'BYPASS' },
   })
 }
 
@@ -56,9 +67,9 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
     if (cached) return ok(cached, 'HIT')
   }
 
-  // Degrade to `{ events: [] }` on any read failure (most commonly the
-  // current_events table not yet migrated). Not cached, so recovery is
-  // immediate once the schema exists.
+  // Degrade to a `no-store` `{ events: [] }` on any read failure (most
+  // commonly the current_events table not yet migrated) so nothing caches
+  // the empty list and recovery is immediate once the schema exists.
   let events
   try {
     events = await listPublicEvents(context.env.CATALOG_DB)
@@ -67,7 +78,7 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
       '[events] read failed — returning empty list (table missing / D1 error):',
       err instanceof Error ? err.message : String(err),
     )
-    return ok(JSON.stringify({ events: [] }), 'BYPASS')
+    return degraded()
   }
 
   const body = JSON.stringify({ events })
