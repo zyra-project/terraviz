@@ -160,6 +160,7 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `functions/api/v1/_lib/embeddings.ts` | Workers AI embedding helpers — Phase 1c |
 | `functions/api/v1/_lib/env.ts` | Shared `Env` type for catalog-backend Pages Functions |
 | `functions/api/v1/_lib/errors.ts` | Typed errors used by the storage helpers (`r2-store.ts`, `stream-store.ts`) so the route handlers can distinguish "operator forgot to set credentials" from "the upstream service … |
+| `functions/api/v1/_lib/events-matcher.ts` | Geo + temporal scoring for current events — pure bbox-IoU / liveness-overlap signals + `runMatcherForEvent` proposing `event_dataset_links` (`docs/CURRENT_EVENTS_PLAN.md` §4) |
 | `functions/api/v1/_lib/events-store.ts` | `current_events` + `event_dataset_links` data access — storage layer for the source-agnostic current-events feature (`docs/CURRENT_EVENTS_PLAN.md`) |
 | `functions/api/v1/_lib/featured-datasets.ts` | `featured_datasets` row helpers |
 | `functions/api/v1/_lib/frames-manifest.ts` | Helpers shared by the Phase 3pg/B `/frames` endpoints |
