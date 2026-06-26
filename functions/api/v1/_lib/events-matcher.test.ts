@@ -157,6 +157,16 @@ describe('topical signal', () => {
     expect(tokenize('Severe Storms near 29.0°N on 2026-06-24')).toEqual(['severe', 'storm'])
   })
 
+  it('stems -oes / -ies plurals so they match their singulars', () => {
+    expect(tokenize('Volcanoes and anomalies')).toEqual(['volcano', 'anomaly'])
+  })
+
+  it('a volcano event reaches a volcano-subject dataset (no special-case key)', () => {
+    const ev = buildEventTerms({ categoryValues: ['Volcanoes'] })
+    expect(ev.has('volcano')).toBe(true)
+    expect(scoreLexical(ev, buildDatasetTerms({ title: 'Volcanic ash and aerosols' }))).toBeGreaterThan(0)
+  })
+
   it('buildEventTerms expands a category into related dataset topics', () => {
     const terms = buildEventTerms({ title: 'Tropical cyclone', categoryValues: ['Severe Storms'] })
     expect(terms.has('storm')).toBe(true)

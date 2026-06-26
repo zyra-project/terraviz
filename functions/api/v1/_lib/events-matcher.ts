@@ -230,7 +230,6 @@ const TOPIC_EXPANSIONS: Record<string, readonly string[]> = {
   wildfire: ['fire', 'smoke', 'thermal', 'burn', 'aerosol'],
   fire: ['smoke', 'thermal', 'burn', 'aerosol'],
   volcano: ['ash', 'eruption', 'thermal', 'sulfur', 'aerosol', 'smoke'],
-  volcanoe: ['volcano', 'ash', 'eruption', 'thermal', 'sulfur', 'aerosol'],
   flood: ['precipitation', 'rain', 'water', 'river', 'runoff'],
   drought: ['precipitation', 'soil', 'moisture', 'vegetation', 'temperature'],
   dust: ['aerosol', 'sand', 'air', 'smoke'],
@@ -243,10 +242,16 @@ const TOPIC_EXPANSIONS: Record<string, readonly string[]> = {
   flow: ['lava', 'thermal'],
 }
 
-/** Stem a single trailing 's' (storms→storm, clouds→cloud) without a
- *  full stemmer; good enough for plural/singular bridging. */
+/** Light plural→singular stem (no full stemmer) for plural/singular
+ *  bridging: handles `-oes` (volcanoes→volcano), `-ies` (anomalies→
+ *  anomaly), then a single trailing `-s` (storms→storm). */
 function stem(token: string): string {
-  return token.length > 4 && token.endsWith('s') && !token.endsWith('ss') ? token.slice(0, -1) : token
+  if (token.length > 4) {
+    if (token.endsWith('oes')) return token.slice(0, -2)
+    if (token.endsWith('ies')) return `${token.slice(0, -3)}y`
+    if (token.endsWith('s') && !token.endsWith('ss')) return token.slice(0, -1)
+  }
+  return token
 }
 
 /** Lowercase alphabetic tokens of length ≥ 3, stopwords dropped, stemmed.
@@ -449,15 +454,22 @@ export async function runMatcherForEvent(
   const rows = res.results ?? []
 
   // Each candidate's subject vocabulary (title + abstract + keywords +
-  // category values + tags), read in bulk.
-  const datasetDecorations = await getDecorations(db, rows.map(r => r.id))
+  // category values + tags), read in bulk — but only when the event has
+  // topic terms to match against. With no event topics `scoreMatch`
+  // falls back to temporal(+geo) and ignores `subjectTerms`, so skip the
+  // decoration queries + term building entirely.
+  const datasetDecorations = eventTerms.size > 0 ? await getDecorations(db, rows.map(r => r.id)) : null
   const candidates: MatchDataset[] = rows.map(r => {
-    const deco = datasetDecorations.get(r.id)
-    return {
+    const base: MatchDataset = {
       id: r.id,
       startTime: r.start_time,
       endTime: r.end_time,
       period: r.period,
+    }
+    if (!datasetDecorations) return base
+    const deco = datasetDecorations.get(r.id)
+    return {
+      ...base,
       subjectTerms: buildDatasetTerms({
         title: r.title,
         abstract: r.abstract,
