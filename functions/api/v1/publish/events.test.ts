@@ -193,9 +193,12 @@ describe('POST /api/v1/publish/events', () => {
 
   it('creates a proposed event (201) and runs the matcher', async () => {
     const { env, sqlite } = setupEnv()
-    // Make DS000 a live realtime dataset so the temporal matcher proposes
-    // a link for an event occurring now.
-    sqlite.prepare(`UPDATE datasets SET start_time = ?, period = ? WHERE id = ?`).run('2026-01-01T00:00:00Z', 'PT15M', DS_0)
+    // Make DS000 a live realtime cloud dataset — topically related to the
+    // "Hurricane Lena" event (hurricane → cloud) and covering now — so the
+    // matcher proposes a link.
+    sqlite
+      .prepare(`UPDATE datasets SET start_time = ?, period = ?, title = ? WHERE id = ?`)
+      .run('2026-01-01T00:00:00Z', 'PT15M', 'Cloud cover (real-time)', DS_0)
 
     const res = await eventsPost(postCtx({ env, body: CREATE }))
     expect(res.status).toBe(201)

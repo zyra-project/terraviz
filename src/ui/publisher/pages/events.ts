@@ -37,7 +37,7 @@ interface ReviewLink {
   datasetId: string
   datasetTitle: string | null
   score: number | null
-  signals: { geo?: number | null; temporal?: number | null; semantic?: number | null } | null
+  signals: { geo?: number | null; temporal?: number | null; lexical?: number | null; semantic?: number | null } | null
   status: LinkStatus
 }
 
@@ -504,8 +504,9 @@ function renderLinkRow(eventId: string, link: ReviewLink, state: EventsPageOptio
   rejectBtn.addEventListener('click', () => submit('reject'))
 
   const signals = el('span', { className: 'publisher-events-signals' }, [
-    signalChip('geo', link.signals?.geo),
+    signalChip('topic', link.signals?.lexical),
     signalChip('temporal', link.signals?.temporal),
+    signalChip('geo', link.signals?.geo),
   ])
 
   return el('div', { className: 'publisher-events-link' }, [
@@ -518,8 +519,13 @@ function renderLinkRow(eventId: string, link: ReviewLink, state: EventsPageOptio
   ])
 }
 
-function signalChip(kind: 'geo' | 'temporal', value: number | null | undefined): HTMLElement {
-  const label = kind === 'geo' ? t('publisher.events.signal.geo') : t('publisher.events.signal.temporal')
+function signalChip(kind: 'geo' | 'temporal' | 'topic', value: number | null | undefined): HTMLElement {
+  const label =
+    kind === 'geo'
+      ? t('publisher.events.signal.geo')
+      : kind === 'temporal'
+        ? t('publisher.events.signal.temporal')
+        : t('publisher.events.signal.topic')
   const v = value == null ? '—' : `${Math.round(value * 100)}%`
   return el('span', { className: 'publisher-events-chip', textContent: `${label} ${v}` })
 }
