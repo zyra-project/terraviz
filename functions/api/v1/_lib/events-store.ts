@@ -31,18 +31,23 @@ import { newUlid } from './ulid'
  *  effect (the 60 s TTL is the backstop). */
 export const FEATURED_EVENT_CACHE_KEY = 'featured-event:v1'
 
+/** KV key the public `GET /api/v1/events` list caches under (the catalog
+ *  Map/Timeline overlays). Busted alongside the featured-event key. */
+export const EVENTS_LIST_CACHE_KEY = 'events-list:v1'
+
 /** How recent an approved event must be to headline the hero — by its
  *  published / occurred date. Keeps the "Right now" surface honest:
  *  a curator-approved event ages out rather than lingering as "now". */
 export const FEATURED_EVENT_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000
 
-/** Best-effort bust of the public featured-event cache after a review
- *  changes event/link status. Swallows errors — a missed bust just
- *  waits out the TTL. */
+/** Best-effort bust of the public event caches (hero + catalog list)
+ *  after a review changes event/link status. Swallows errors — a missed
+ *  bust just waits out the TTL. */
 export async function bustFeaturedEventCache(kv: KVNamespace | undefined): Promise<void> {
   if (!kv) return
   try {
     await kv.delete(FEATURED_EVENT_CACHE_KEY)
+    await kv.delete(EVENTS_LIST_CACHE_KEY)
   } catch {
     // TTL is the backstop.
   }
@@ -576,12 +581,8 @@ export async function setLinkStatus(
     .run()
 }
 
-/** Shape a stored event row (+ optional decorations) into the public
- *  payload. */
-export function toPublicEvent(
-  row: CurrentEventRow,
-  decorations: EventDecorations = { categories: {}, keywords: [] },
-): CurrentEventPublic {
+/** Extract the {@link EventGeometry} subset present on a stored row. */
+function geometryFromRow(row: CurrentEventRow): EventGeometry {
   const geometry: EventGeometry = {}
   if (
     row.bbox_n != null &&
@@ -595,6 +596,16 @@ export function toPublicEvent(
     geometry.point = { lat: row.point_lat, lon: row.point_lon }
   }
   if (row.region_name) geometry.regionName = row.region_name
+  return geometry
+}
+
+/** Shape a stored event row (+ optional decorations) into the public
+ *  payload. */
+export function toPublicEvent(
+  row: CurrentEventRow,
+  decorations: EventDecorations = { categories: {}, keywords: [] },
+): CurrentEventPublic {
+  const geometry = geometryFromRow(row)
 
   const out: CurrentEventPublic = {
     id: row.id,
@@ -697,5 +708,100 @@ export function toPublicFeaturedEvent(row: FeaturedEventRow): FeaturedEventPubli
   if (row.published_at) out.source.publishedAt = row.published_at
   if (row.occurred_start) out.occurredStart = row.occurred_start
   if (row.occurred_end) out.occurredEnd = row.occurred_end
+  return out
+}
+
+/** One approved event for the public catalog overlays (Map/Timeline):
+ *  enough to plot it in space + time, cite it, and click through to a
+ *  dataset. `datasetIds` are the event's APPROVED links to published,
+ *  visible datasets only — so the overlay never points at hidden data. */
+export interface PublicEventListItem {
+  id: string
+  title: string
+  summary?: string
+  source: { name: string; url: string; publishedAt?: string }
+  occurredStart?: string
+  occurredEnd?: string
+  geometry: EventGeometry
+  datasetIds: string[]
+}
+
+/** Resolve, per event, the dataset ids of its APPROVED links to
+ *  published/visible datasets — chunked `IN (…)`, score-ordered. */
+async function approvedVisibleLinksForEvents(
+  db: D1Database,
+  eventIds: readonly string[],
+): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>()
+  for (const id of eventIds) out.set(id, [])
+  for (let i = 0; i < eventIds.length; i += EVENT_BIND_BATCH) {
+    const chunk = eventIds.slice(i, i + EVENT_BIND_BATCH)
+    const ph = chunk.map(() => '?').join(', ')
+    const res = await db
+      .prepare(
+        `SELECT l.event_id AS event_id, l.dataset_id AS dataset_id
+           FROM event_dataset_links l
+           JOIN datasets d ON d.id = l.dataset_id
+          WHERE l.event_id IN (${ph})
+            AND l.status = 'approved'
+            AND d.published_at IS NOT NULL AND d.is_hidden = 0 AND d.retracted_at IS NULL
+          ORDER BY l.match_score DESC`,
+      )
+      .bind(...chunk)
+      .all<{ event_id: string; dataset_id: string }>()
+    for (const r of res.results ?? []) out.get(r.event_id)?.push(r.dataset_id)
+  }
+  return out
+}
+
+/**
+ * The approved events for the public catalog overlays: each `approved`
+ * event within {@link FEATURED_EVENT_MAX_AGE_MS} that has at least one
+ * `approved` link to a published, visible dataset. Mirrors
+ * {@link getFeaturedEvent}'s gating (approved event + approved link +
+ * visible dataset + recency) but returns the full set, each carrying its
+ * visible linked dataset ids. Events whose only links are to hidden/
+ * unapproved datasets are dropped entirely.
+ */
+export async function listPublicEvents(
+  db: D1Database,
+  opts: { now?: number; maxAgeMs?: number; limit?: number } = {},
+): Promise<PublicEventListItem[]> {
+  const now = opts.now ?? Date.now()
+  const cutoff = new Date(now - (opts.maxAgeMs ?? FEATURED_EVENT_MAX_AGE_MS)).toISOString()
+  const limit = Math.max(1, Math.min(opts.limit ?? 200, 500))
+
+  const res = await db
+    .prepare(
+      `SELECT ${EVENT_COLUMNS} FROM current_events
+        WHERE status = 'approved'
+          AND COALESCE(published_at, occurred_start, created_at) >= ?
+        ORDER BY COALESCE(published_at, occurred_start, created_at) DESC
+        LIMIT ?`,
+    )
+    .bind(cutoff, limit)
+    .all<CurrentEventRow>()
+  const rows = res.results ?? []
+  if (rows.length === 0) return []
+
+  const linksByEvent = await approvedVisibleLinksForEvents(db, rows.map(r => r.id))
+
+  const out: PublicEventListItem[] = []
+  for (const row of rows) {
+    const datasetIds = linksByEvent.get(row.id) ?? []
+    if (datasetIds.length === 0) continue // no visible, approved dataset → not surfaceable
+    const item: PublicEventListItem = {
+      id: row.id,
+      title: row.title,
+      source: { name: row.source_name, url: row.source_url },
+      geometry: geometryFromRow(row),
+      datasetIds,
+    }
+    if (row.summary) item.summary = row.summary
+    if (row.published_at) item.source.publishedAt = row.published_at
+    if (row.occurred_start) item.occurredStart = row.occurred_start
+    if (row.occurred_end) item.occurredEnd = row.occurred_end
+    out.push(item)
+  }
   return out
 }
