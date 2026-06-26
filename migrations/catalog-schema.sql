@@ -149,6 +149,42 @@ CREATE TABLE audit_events (
   created_at     TEXT NOT NULL
 );
 
+CREATE TABLE current_events (
+  id             TEXT PRIMARY KEY,              -- ULID (newUlid)
+  origin_node    TEXT NOT NULL,                 -- node_id, denormalized (federation-ready)
+
+  title          TEXT NOT NULL,
+  summary        TEXT,
+
+  -- Provenance — mandatory source attribution (every item is citable).
+  source_name    TEXT NOT NULL,                 -- e.g. "NOAA", "USGS"
+  source_url     TEXT NOT NULL,                 -- the citation link
+  published_at   TEXT,                          -- ISO 8601, when the source published
+  feed_id        TEXT,                          -- connector that produced this (null = manual)
+
+  -- The event's own time span (distinct from publish time).
+  occurred_start TEXT,                          -- ISO 8601
+  occurred_end   TEXT,                          -- ISO 8601 (null = ongoing / instantaneous)
+
+  -- Geometry — any subset may be present.
+  bbox_n         REAL,                          -- NSWE box, degrees (cf. datasets.bbox_*)
+  bbox_s         REAL,
+  bbox_w         REAL,
+  bbox_e         REAL,
+  point_lat      REAL,
+  point_lon      REAL,
+  region_name    TEXT,                          -- resolved via regions.ts at match time
+
+  -- Curator gate: proposed | approved | rejected | expired.
+  status         TEXT NOT NULL DEFAULT 'proposed',
+
+  created_at     TEXT NOT NULL,                 -- ISO 8601
+  updated_at     TEXT NOT NULL,                 -- ISO 8601
+  reviewed_at    TEXT,                          -- ISO 8601, when a curator last acted
+  reviewed_by    TEXT,                          -- publishers.id (audit), null until reviewed
+  FOREIGN KEY (reviewed_by) REFERENCES publishers(id)
+);
+
 CREATE TABLE dataset_categories (
   dataset_id  TEXT NOT NULL,
   facet       TEXT NOT NULL,                  -- e.g., "Theme", "Region"
@@ -277,6 +313,36 @@ CREATE TABLE datasets (
   FOREIGN KEY (publisher_id) REFERENCES publishers(id)
 );
 
+CREATE TABLE event_categories (
+  event_id  TEXT NOT NULL,
+  facet     TEXT NOT NULL,                      -- e.g. "Theme", "Region"
+  value     TEXT NOT NULL,
+  PRIMARY KEY (event_id, facet, value),
+  FOREIGN KEY (event_id) REFERENCES current_events(id) ON DELETE CASCADE
+);
+
+CREATE TABLE event_dataset_links (
+  event_id     TEXT NOT NULL,
+  dataset_id   TEXT NOT NULL,
+  match_score  REAL,                            -- combined matcher score
+  signals_json TEXT,                            -- JSON: { geo, temporal, semantic }
+  status       TEXT NOT NULL DEFAULT 'proposed', -- proposed | approved | rejected
+  created_at   TEXT NOT NULL,                   -- ISO 8601
+  approved_at  TEXT,                            -- ISO 8601, null until approved
+  approved_by  TEXT,                            -- publishers.id (audit)
+  PRIMARY KEY (event_id, dataset_id),
+  FOREIGN KEY (event_id)    REFERENCES current_events(id) ON DELETE CASCADE,
+  FOREIGN KEY (dataset_id)  REFERENCES datasets(id)       ON DELETE CASCADE,
+  FOREIGN KEY (approved_by) REFERENCES publishers(id)
+);
+
+CREATE TABLE event_keywords (
+  event_id  TEXT NOT NULL,
+  keyword   TEXT NOT NULL,
+  PRIMARY KEY (event_id, keyword),
+  FOREIGN KEY (event_id) REFERENCES current_events(id) ON DELETE CASCADE
+);
+
 CREATE TABLE featured_datasets (
   dataset_id   TEXT PRIMARY KEY,
   position     INTEGER NOT NULL,             -- display order; lower = higher
@@ -399,12 +465,15 @@ CREATE INDEX idx_analytics_spatial_daily_layer
   ON analytics_spatial_daily (event_type, layer_id, day);
 CREATE INDEX idx_asset_uploads_dataset ON asset_uploads(dataset_id, created_at);
 CREATE INDEX idx_audit_subject ON audit_events(subject_kind, subject_id, created_at);
+CREATE INDEX idx_current_events_origin_node ON current_events(origin_node);
+CREATE INDEX idx_current_events_status      ON current_events(status, created_at);
 CREATE UNIQUE INDEX idx_datasets_legacy_id
   ON datasets(legacy_id)
   WHERE legacy_id IS NOT NULL;
 CREATE INDEX idx_datasets_publisher  ON datasets(publisher_id);
 CREATE INDEX idx_datasets_updated_at ON datasets(updated_at);
 CREATE INDEX idx_datasets_visibility ON datasets(visibility, is_hidden, retracted_at);
+CREATE INDEX idx_event_dataset_links_dataset ON event_dataset_links(dataset_id, status);
 CREATE INDEX idx_featured_datasets_position ON featured_datasets(position);
 CREATE UNIQUE INDEX idx_node_identity_singleton ON node_identity(singleton);
 CREATE INDEX idx_renditions_dataset ON dataset_renditions(dataset_id);
