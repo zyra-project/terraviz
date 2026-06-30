@@ -70,13 +70,15 @@ describe('renderEventsPage', () => {
     expect(fetchFn.mock.calls.some(c => String(c[0]).includes('/publish/events'))).toBe(false)
   })
 
-  it('renders an event card with its source, title, and link row', async () => {
+  it('renders the selected event detail with source, title, and a pairing row', async () => {
     await renderEventsPage(mount, { fetchFn: mockFetch(baseRoutes()) })
-    expect(mount.querySelector('.publisher-events-event-title')?.textContent).toBe('Hurricane makes landfall')
+    // The first event is auto-selected into the detail pane.
+    expect(mount.querySelector('.publisher-events-detail-title')?.textContent).toBe('Hurricane makes landfall')
     const sourceLink = mount.querySelector('.publisher-events-source-link') as HTMLAnchorElement
     expect(sourceLink?.href).toContain('example.gov/storm')
-    const linkRow = mount.querySelector('.publisher-events-link')
-    expect(linkRow?.querySelector('.publisher-events-link-title')?.textContent).toBe('Live Storm')
+    expect(mount.querySelector('.publisher-events-pairing-name')?.textContent).toBe('Live Storm')
+    // …and the queue lists it on the left.
+    expect(mount.querySelector('.publisher-events-queue-title')?.textContent).toBe('Hurricane makes landfall')
   })
 
   it('shows the empty state when there are no events', async () => {
@@ -84,7 +86,7 @@ describe('renderEventsPage', () => {
     routes['/api/v1/publish/events'] = { body: { events: [] } }
     await renderEventsPage(mount, { fetchFn: mockFetch(routes) })
     expect(mount.querySelector('.publisher-empty-message')).not.toBeNull()
-    expect(mount.querySelector('.publisher-events-card')).toBeNull()
+    expect(mount.querySelector('.publisher-events-detail')).toBeNull()
   })
 
   it('defaults to the proposed filter and re-fetches at the chosen status', async () => {
@@ -103,8 +105,8 @@ describe('renderEventsPage', () => {
 
     expect(fetchFn.mock.calls.some(c => String(c[0]).includes('/publish/events?status=approved'))).toBe(true)
     expect(mount.querySelector('.publisher-events-filter-active')?.textContent).toBe('Approved')
-    // The existing per-event Reject control is reachable here to remove it.
-    expect(mount.querySelector('.publisher-events-actions .publisher-btn')).not.toBeNull()
+    // The event-level Reject control is reachable in the detail pane.
+    expect(mount.querySelector('.publisher-events-decision-reject')).not.toBeNull()
   })
 
   it('approves the event via POST and reloads (it leaves the proposed view)', async () => {
@@ -113,7 +115,7 @@ describe('renderEventsPage', () => {
     const fetchFn = mockFetch(routes)
     await renderEventsPage(mount, { fetchFn })
 
-    const approve = mount.querySelector('.publisher-events-actions .publisher-btn-primary') as HTMLButtonElement
+    const approve = mount.querySelector('.publisher-events-decision-approve') as HTMLButtonElement
     approve.click()
     await settle()
 
@@ -141,12 +143,12 @@ describe('renderEventsPage', () => {
     allBtn.click()
     await settle()
 
-    const approve = mount.querySelector('.publisher-events-actions .publisher-btn-primary') as HTMLButtonElement
+    const approve = mount.querySelector('.publisher-events-decision-approve') as HTMLButtonElement
     approve.click()
     await settle()
 
     // 'approved' still matches the All view → no reload, badge flips in place.
-    const badge = mount.querySelector('.publisher-events-header .publisher-events-badge')
+    const badge = mount.querySelector('.publisher-events-detail-header .publisher-events-badge')
     expect(badge?.classList.contains('publisher-events-badge-approved')).toBe(true)
   })
 
@@ -208,7 +210,7 @@ describe('renderEventsPage', () => {
     const fetchFn = mockFetch(routes)
     await renderEventsPage(mount, { fetchFn })
 
-    const linkApprove = mount.querySelector('.publisher-events-link .publisher-btn-small.publisher-btn-primary') as HTMLButtonElement
+    const linkApprove = mount.querySelector('.publisher-events-pairing .publisher-events-icon-btn-approve') as HTMLButtonElement
     linkApprove.click()
     await flush()
 
