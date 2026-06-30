@@ -107,7 +107,8 @@ npm run screenshots:smoke   # gating interaction tests (search, Orbit, nav)
 | `src/services/downloadService.ts` | Offline dataset download manager (desktop only, Tauri commands) |
 | `src/services/tilePreloader.ts` | Eagerly fetches low-zoom GIBS tiles into cache on startup |
 | `src/services/catalogSource.ts` | Build-time switch for where `dataService` / `datasetLoader` source catalog data (SOS snapshot vs node catalog) |
-| `src/services/relatedDatasets.ts` | Algorithmic related-dataset recommendations |
+| `src/services/relatedDatasets.ts` | Algorithmic (lexical) related-dataset recommendations — the offline fallback |
+| `src/services/relatedDatasetsService.ts` | Client for the semantic "more like this" endpoint (`GET /api/v1/datasets/:id/related`); the info panel renders the lexical list, then progressively enhances it with this. Degrades to `null` (keep lexical) on any failure |
 | `src/services/visitMemory.ts` | Local-only log of which datasets the user has opened (localStorage) |
 | `src/services/qaService.ts` | Loads / queries the preprocessed Q&A knowledge base (local docent path) |
 | `src/services/deepLinkService.ts` | Deep-link handler — `zyra://` URLs and `/dataset/…` links |

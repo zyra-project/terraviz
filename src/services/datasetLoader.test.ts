@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { displayDatasetInfo } from './datasetLoader'
 import type { Dataset } from '../types'
 
@@ -32,6 +32,18 @@ function setupInfoDOM(): void {
 describe('displayDatasetInfo', () => {
   beforeEach(() => {
     setupInfoDOM()
+    // `displayDatasetInfo` fires an async semantic-related fetch
+    // (Phase 3b progressive enhancement). Stub it to a degraded
+    // response so the enhancement no-ops on the lexical list these
+    // tests assert on — and so no real socket is opened in CI.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ datasets: [], degraded: 'unconfigured' }) }) as unknown as Response),
+    )
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   it('shows the info panel and sets the title', () => {

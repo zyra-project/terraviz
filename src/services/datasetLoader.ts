@@ -19,6 +19,7 @@ import { updatePlayButton, loadCaptions } from '../ui/playbackController'
 import { startDwell, type DwellHandle } from '../analytics'
 import { addViewSeconds } from './visitMemory'
 import { recommendRelated, normalizeTitle as normalizeRelatedTitle } from './relatedDatasets'
+import { fetchSemanticRelatedIds, RELATED_DEFAULT_LIMIT } from './relatedDatasetsService'
 import { openAddToPlaylistPopover } from '../ui/playlistUI'
 import { openDownloadDialog } from '../ui/downloadDialogUI'
 import { t, tAttr } from '../i18n'
@@ -411,17 +412,30 @@ function renderCreditRow(label: string, value: string, affiliationUrl?: string):
 /**
  * Build the related-datasets section. Combines the manually-curated
  * `EnrichedMetadata.relatedDatasets` (rendered first, in author
- * order) with algorithmic recommendations from `relatedDatasets.ts`
- * filling in up to the §4.2 cap. Returns an empty string when
- * nothing surfaces.
+ * order) with algorithmic recommendations filling in up to the §4.2
+ * cap. Returns an empty string when nothing surfaces.
+ *
+ * The algorithmic portion is either the pure lexical scorer from
+ * `relatedDatasets.ts` (the default + offline fallback) or, when
+ * `algorithmicOverride` is supplied, the semantic "more like this"
+ * ordering from `relatedDatasetsService.ts` (`docs/CURRENT_EVENTS_PLAN.md`
+ * Phase 3b). The override is filtered here against the same
+ * manual/self/hidden exclusions the lexical path applies, so a swap is
+ * apples-to-apples.
  *
  * Manual entries that don't resolve to a catalog row render as
  * grayed-out text (off-catalog references — preserved from the
  * pre-§4.2 behaviour so a curator's notes about external context
  * still show). Algorithmic recommendations always resolve, so they
- * always render as live links.
+ * always render as live links. The whole block is wrapped in
+ * `.info-related-section` so the async semantic enhancement can replace
+ * it in place.
  */
-function renderRelatedDatasetsHtml(target: Dataset, datasets: Dataset[]): string {
+function renderRelatedDatasetsHtml(
+  target: Dataset,
+  datasets: Dataset[],
+  algorithmicOverride: Dataset[] | null = null,
+): string {
   const manual = target.enriched?.relatedDatasets ?? []
   const manualLinks: Array<{ label: string; match: Dataset | null }> = manual.map((rd) => {
     const wanted = normalizeRelatedTitle(rd.title)
@@ -436,11 +450,14 @@ function renderRelatedDatasetsHtml(target: Dataset, datasets: Dataset[]): string
     manualTitles.add(normalizeRelatedTitle(entry.label))
   }
 
-  const algorithmic = recommendRelated(target, datasets, manualIds, manualTitles)
+  const algorithmic = algorithmicOverride
+    ? algorithmicOverride.filter(d => d.id !== target.id && !manualIds.has(d.id) && !d.isHidden)
+    : recommendRelated(target, datasets, manualIds, manualTitles)
 
   if (manualLinks.length === 0 && algorithmic.length === 0) return ''
 
-  let html = `<p class="info-section-label">${escapeHtml(t('infoPanel.relatedDatasets'))}</p>`
+  let html = `<div class="info-related-section">`
+  html += `<p class="info-section-label">${escapeHtml(t('infoPanel.relatedDatasets'))}</p>`
   html += `<ul class="info-related">`
   for (const entry of manualLinks) {
     if (entry.match) {
@@ -452,8 +469,74 @@ function renderRelatedDatasetsHtml(target: Dataset, datasets: Dataset[]): string
   for (const candidate of algorithmic) {
     html += `<li><a href="?dataset=${encodeURIComponent(candidate.id)}" data-dataset-id="${escapeAttr(candidate.id)}">${escapeHtml(candidate.title)}</a></li>`
   }
-  html += `</ul>`
+  html += `</ul></div>`
   return html
+}
+
+/**
+ * Wire related-dataset links within `scope` to load in-place. The URL
+ * update preserves any existing `?catalog=true` flag (Phase 1 §3.2) so
+ * a related-link click while in catalog mode keeps the catalog↔sphere
+ * tab control visible — same contract as `selectDatasetFromBrowse` in
+ * main.ts. Extracted so the async semantic enhancement can re-wire its
+ * freshly-rendered links.
+ */
+function wireRelatedLinks(scope: ParentNode, onLoadDataset: (id: string) => void): void {
+  scope.querySelectorAll('a[data-dataset-id]').forEach(link => {
+    link.addEventListener('click', (ev) => {
+      ev.preventDefault()
+      const id = (link as HTMLElement).dataset.datasetId
+      if (id) {
+        const params = new URLSearchParams(window.location.search)
+        params.set('dataset', id)
+        window.history.pushState({}, '', `?${params.toString()}`)
+        onLoadDataset(id)
+      }
+    })
+  })
+}
+
+/**
+ * Progressively enhance the related-datasets list with the semantic
+ * "more like this" ordering. Renders nothing new on its own — the
+ * lexical list is already on screen — and silently no-ops on any
+ * backend failure / degraded response (the service returns `null`), so
+ * the panel never regresses below the offline behaviour. On success it
+ * replaces the `.info-related-section` block in place and re-wires the
+ * new links.
+ */
+async function enhanceRelatedDatasets(
+  infoBody: HTMLElement,
+  dataset: Dataset,
+  datasets: Dataset[],
+  onLoadDataset: (id: string) => void,
+): Promise<void> {
+  const section = infoBody.querySelector('.info-related-section')
+  if (!section) return // no related block rendered → nothing to enhance
+
+  const ids = await fetchSemanticRelatedIds(dataset.id, RELATED_DEFAULT_LIMIT)
+  if (!ids) return // degraded / empty / error → keep the lexical list
+
+  const byId = new Map(datasets.map(d => [d.id, d]))
+  const semantic = ids
+    .map(id => byId.get(id))
+    .filter((d): d is Dataset => d !== undefined)
+  if (semantic.length === 0) return
+
+  const newHtml = renderRelatedDatasetsHtml(dataset, datasets, semantic)
+  if (!newHtml) return
+
+  // The panel may have been re-rendered (a new dataset loaded) while
+  // the fetch was in flight — only replace the section if it's still
+  // attached to the live info body.
+  if (!infoBody.contains(section)) return
+
+  const tmp = document.createElement('div')
+  tmp.innerHTML = newHtml
+  const fresh = tmp.firstElementChild
+  if (!fresh) return
+  section.replaceWith(fresh)
+  wireRelatedLinks(fresh, onLoadDataset)
 }
 
 /** Populate and display the dataset info panel with metadata, legend, related datasets, and event wiring. */
@@ -690,23 +773,13 @@ export function displayDatasetInfo(
     })
   }
 
-  // Wire up related dataset links to load in-place. The URL update
-  // preserves any existing `?catalog=true` flag (Phase 1 §3.2) so
-  // a related-link click while in catalog mode keeps the
-  // catalog↔sphere tab control visible — same contract as
-  // `selectDatasetFromBrowse` in main.ts.
-  infoBody.querySelectorAll('a[data-dataset-id]').forEach(link => {
-    link.addEventListener('click', (ev) => {
-      ev.preventDefault()
-      const id = (link as HTMLElement).dataset.datasetId
-      if (id) {
-        const params = new URLSearchParams(window.location.search)
-        params.set('dataset', id)
-        window.history.pushState({}, '', `?${params.toString()}`)
-        onLoadDataset(id)
-      }
-    })
-  })
+  // Wire up related dataset links to load in-place (lexical list,
+  // rendered synchronously above), then progressively enhance the list
+  // with the semantic "more like this" ordering when the backend is
+  // available (Phase 3b). The enhancement no-ops on any failure, so the
+  // lexical list stands as the fallback.
+  wireRelatedLinks(infoBody, onLoadDataset)
+  void enhanceRelatedDatasets(infoBody, dataset, datasets, onLoadDataset)
 
   // Wire up the description show-more / show-less toggle.
   const descWrap = infoBody.querySelector('.info-description-wrap[data-truncated="true"]') as HTMLElement | null
