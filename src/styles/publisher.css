@@ -2059,26 +2059,6 @@
   min-block-size: calc(1rem * var(--ui-scale));
 }
 
-/* Inline hand-authoring form. */
-.publisher-events-form-host:empty {
-  display: none;
-}
-
-.publisher-events-form {
-  display: flex;
-  flex-direction: column;
-  gap: calc(0.6rem * var(--ui-scale));
-  margin-block-start: calc(0.75rem * var(--ui-scale));
-  padding-block-start: calc(0.75rem * var(--ui-scale));
-  border-block-start: 1px solid var(--white-o08, rgba(255, 255, 255, 0.08));
-}
-
-.publisher-events-form-heading {
-  margin: 0;
-  font-size: calc(0.95rem * var(--ui-scale));
-  font-weight: 600;
-}
-
 .publisher-events-field {
   display: flex;
   flex-direction: column;
@@ -2086,13 +2066,160 @@
   font-size: calc(0.8rem * var(--ui-scale));
 }
 
-.publisher-events-form-actions {
+/* --- "+ New event" slide-in drawer (Direction D: compose + pair) --- */
+.publisher-events-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
   display: flex;
-  flex-wrap: wrap;
+  justify-content: flex-end;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.publisher-events-drawer {
+  display: flex;
+  flex-direction: column;
+  inline-size: min(46rem, 100%);
+  max-inline-size: 100%;
+  block-size: 100%;
+  /* Opaque app-shell background — the drawer floats over the dimmed
+     backdrop, so it can't use the translucent `--color-surface-alt`
+     (which only reads as a surface when layered over an opaque page). */
+  background: var(--color-bg, #0a0d14);
+  border-inline-start: 1px solid var(--white-o08, rgba(255, 255, 255, 0.08));
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.4);
+  animation: publisher-events-drawer-in var(--transition-panel, 0.25s) ease;
+}
+
+@keyframes publisher-events-drawer-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+:root[dir="rtl"] .publisher-events-drawer {
+  animation-name: publisher-events-drawer-in-rtl;
+}
+
+@keyframes publisher-events-drawer-in-rtl {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .publisher-events-drawer { animation: none; }
+}
+
+.publisher-events-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(0.75rem * var(--ui-scale));
+  padding: calc(1rem * var(--ui-scale)) calc(1.25rem * var(--ui-scale));
+  border-block-end: 1px solid var(--white-o08, rgba(255, 255, 255, 0.08));
+}
+
+.publisher-events-drawer-close {
+  flex: none;
+  inline-size: calc(2rem * var(--ui-scale));
+  block-size: calc(2rem * var(--ui-scale));
+  border: 1px solid var(--white-o08, rgba(255, 255, 255, 0.08));
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--color-text, #e8ecf3);
+  font-size: calc(0.9rem * var(--ui-scale));
+  cursor: pointer;
+}
+
+.publisher-events-drawer-close:hover {
+  background: var(--white-o08, rgba(255, 255, 255, 0.08));
+}
+
+.publisher-events-drawer-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: calc(1.25rem * var(--ui-scale));
+  flex: 1;
+  min-block-size: 0;
+  overflow-y: auto;
+  padding: calc(1.25rem * var(--ui-scale));
+}
+
+@media (max-width: 720px) {
+  .publisher-events-drawer-body { grid-template-columns: minmax(0, 1fr); }
+}
+
+.publisher-events-drawer-compose,
+.publisher-events-drawer-pair {
+  display: flex;
+  flex-direction: column;
+  gap: calc(0.6rem * var(--ui-scale));
+  min-block-size: 0;
+}
+
+.publisher-events-drawer-pair-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
   gap: calc(0.5rem * var(--ui-scale));
 }
 
-.publisher-events-form-status {
+.publisher-events-drawer-paired {
+  font-size: calc(0.75rem * var(--ui-scale));
+  color: var(--color-text-muted, #aab2c0);
+  font-variant-numeric: tabular-nums;
+}
+
+.publisher-events-drawer-candidates {
+  display: flex;
+  flex-direction: column;
+  gap: calc(0.3rem * var(--ui-scale));
+  overflow-y: auto;
+}
+
+.publisher-events-drawer-candidate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(0.5rem * var(--ui-scale));
+  padding: calc(0.45rem * var(--ui-scale)) calc(0.6rem * var(--ui-scale));
+  border: 1px solid var(--white-o08, rgba(255, 255, 255, 0.08));
+  border-radius: 0.4rem;
+  background: var(--color-surface, #14141b);
+}
+
+.publisher-events-drawer-candidate-on {
+  border-color: var(--color-success, #3fb950);
+  background: var(--color-success-o08, rgba(63, 185, 80, 0.08));
+}
+
+.publisher-events-drawer-candidate-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(0.85rem * var(--ui-scale));
+}
+
+.publisher-events-drawer-hint {
+  margin: 0;
+  font-size: calc(0.8rem * var(--ui-scale));
+  color: var(--color-text-muted, #aab2c0);
+}
+
+.publisher-events-drawer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(0.75rem * var(--ui-scale));
+  padding: calc(1rem * var(--ui-scale)) calc(1.25rem * var(--ui-scale));
+  border-block-start: 1px solid var(--white-o08, rgba(255, 255, 255, 0.08));
+}
+
+.publisher-events-drawer-actions {
+  display: flex;
+  gap: calc(0.5rem * var(--ui-scale));
+}
+
+.publisher-events-drawer-status {
   margin: 0;
   font-size: calc(0.85rem * var(--ui-scale));
   color: var(--color-text-muted, #aab2c0);

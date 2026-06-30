@@ -176,22 +176,26 @@ describe('renderEventsPage', () => {
     expect(mount.querySelector('.publisher-events-actions-status')?.textContent).toContain('2')
   })
 
-  it('reveals the new-event form and creates a manual event via POST', async () => {
+  it('opens the new-event drawer and creates a manual event via POST', async () => {
     const routes = baseRoutes()
+    routes['/api/v1/publish/datasets'] = { body: { datasets: [], next_cursor: null } }
     routes['POST /api/v1/publish/events'] = { status: 201, body: { created: true, event: { id: EVT, status: 'proposed' }, links: [] } }
     const fetchFn = mockFetch(routes)
     await renderEventsPage(mount, { fetchFn })
 
     const toolbarButtons = mount.querySelectorAll<HTMLButtonElement>('.publisher-events-toolbar button')
-    toolbarButtons[1].click() // New event
-    const form = mount.querySelector('.publisher-events-form') as HTMLFormElement
-    expect(form).not.toBeNull()
+    toolbarButtons[1].click() // New event → drawer (mounts on document.body)
+    const drawer = document.querySelector('.publisher-events-drawer')
+    expect(drawer).not.toBeNull()
+    expect(document.querySelector('.publisher-events-drawer-pair')).not.toBeNull()
 
-    const inputs = form.querySelectorAll<HTMLInputElement>('input')
+    const inputs = document.querySelectorAll<HTMLInputElement>('.publisher-events-drawer-compose input')
     inputs[0].value = 'Manual storm' // title
     inputs[1].value = 'NOAA' // source name
     inputs[2].value = 'https://example.gov/manual' // source url
-    form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))
+    const saveBtn = Array.from(document.querySelectorAll<HTMLButtonElement>('.publisher-events-drawer-actions button'))
+      .find(b => b.classList.contains('publisher-btn-primary'))!
+    saveBtn.click()
     await settle()
 
     const createPost = fetchFn.mock.calls.find(
@@ -199,9 +203,11 @@ describe('renderEventsPage', () => {
     )
     expect(createPost).toBeTruthy()
     const sent = JSON.parse((createPost![1] as RequestInit).body as string)
-    expect(sent).toMatchObject({ title: 'Manual storm', source: { name: 'NOAA', url: 'https://example.gov/manual' } })
+    expect(sent).toMatchObject({ title: 'Manual storm', source: { name: 'NOAA', url: 'https://example.gov/manual' }, datasetIds: [] })
     // No feed key — this is a hand-authored event.
     expect(sent.feedId).toBeUndefined()
+    // The drawer closes and the queue reloads (selecting the new event).
+    expect(document.querySelector('.publisher-events-drawer')).toBeNull()
   })
 
   it('approves a single link via POST with the link decision', async () => {

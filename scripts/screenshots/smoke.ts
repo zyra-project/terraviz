@@ -164,11 +164,12 @@ const checks: Check[] = [
       const filters = page.locator('.publisher-events-filters button')
       assert((await filters.count()) >= 5, 'queue header should expose the status filter (incl. All)')
       // The authoring toolbar exposes Refresh + New event; clicking New
-      // reveals the inline hand-authoring form.
+      // opens the Direction-D drawer (compose + search/pair datasets).
       const toolbarButtons = page.locator('.publisher-events-toolbar button')
       assert((await toolbarButtons.count()) >= 2, 'queue header should expose the Refresh + New-event actions')
       await toolbarButtons.nth(1).click()
-      await page.locator('.publisher-events-form').first().waitFor({ timeout: 5_000 })
+      await page.locator('.publisher-events-drawer').first().waitFor({ timeout: 5_000 })
+      await page.locator('.publisher-events-drawer-pair').first().waitFor({ timeout: 5_000 })
     },
   },
   {

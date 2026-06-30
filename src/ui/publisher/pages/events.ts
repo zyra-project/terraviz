@@ -22,6 +22,7 @@ import { buildErrorCard } from '../components/error-card'
 import { renderEventQueue } from '../components/events/event-queue'
 import { renderEventDetail } from '../components/events/event-detail'
 import { mountEventLocator } from '../components/events/event-locator-map'
+import { openNewEventDrawer } from '../components/events/new-event-drawer'
 import type { EventStatus, EventsResponse, ReviewEvent } from '../components/events/events-model'
 
 interface MeResponse {
@@ -95,12 +96,15 @@ export async function renderEventsPage(mount: HTMLElement, options: EventsPageOp
   await loadAndRenderQueue(mount, { fetchFn, navigate: options.navigate })
 }
 
-/** Fetch the queue at `status` and render the triage view. */
+/** Fetch the queue at `status` and render the triage view. `selectId`
+ *  prefers a specific event for the initial selection (e.g. a just-created
+ *  one) when it's present in the returned list. */
 async function loadAndRenderQueue(
   mount: HTMLElement,
   state: EventsPageOptions,
   notice?: string,
   status: QueueFilter = 'proposed',
+  selectId?: string,
 ): Promise<void> {
   const res = await publisherGet<EventsResponse>(`${EVENTS_ENDPOINT}?status=${status}`, { fetchFn: state.fetchFn })
   if (!res.ok) {
@@ -113,7 +117,7 @@ async function loadAndRenderQueue(
     mount.replaceChildren(shell(buildErrorCard(res.kind, details)))
     return
   }
-  renderTriage(mount, res.data.events, state, notice, status)
+  renderTriage(mount, res.data.events, state, notice, status, selectId)
 }
 
 /** The master–detail triage view: top bar + (queue | detail). */
@@ -123,8 +127,10 @@ function renderTriage(
   state: EventsPageOptions,
   notice: string | undefined,
   filter: QueueFilter,
+  selectId?: string,
 ): void {
-  let selectedId: string | null = events[0]?.id ?? null
+  let selectedId: string | null =
+    (selectId && events.some(e => e.id === selectId) ? selectId : events[0]?.id) ?? null
 
   const topbar = renderTopbar(mount, state, notice, filter)
 
@@ -183,7 +189,6 @@ function renderTopbar(
 ): HTMLElement {
   const status = el('p', 'publisher-events-actions-status', notice ? [notice] : [])
   status.setAttribute('role', 'status')
-  const formHost = el('div', 'publisher-events-form-host')
 
   const refreshBtn = document.createElement('button')
   refreshBtn.type = 'button'
@@ -219,11 +224,15 @@ function renderTopbar(
   newBtn.className = 'publisher-btn publisher-btn-primary'
   newBtn.textContent = t('publisher.events.new')
   newBtn.addEventListener('click', () => {
-    if (formHost.childElementCount > 0) {
-      formHost.replaceChildren()
-      return
-    }
-    formHost.replaceChildren(renderNewEventForm(mount, state, formHost, filter))
+    openNewEventDrawer({
+      fetchFn: state.fetchFn,
+      navigate: state.navigate,
+      // Reload preserving the active filter; prefer-select the new event
+      // (lands `proposed`) so its manual + matched links are ready to vet.
+      onCreated: newId => {
+        void loadAndRenderQueue(mount, state, t('publisher.events.form.created'), filter, newId)
+      },
+    })
   })
 
   const filters = el('div', 'publisher-events-filters')
@@ -248,7 +257,6 @@ function renderTopbar(
     ]),
     filters,
     status,
-    formHost,
   ])
   return card(bar)
 }
@@ -262,81 +270,3 @@ function statusLabel(status: EventStatus): string {
   }
 }
 
-function field(labelText: string, control: HTMLElement): HTMLElement {
-  return el('label', 'publisher-events-field', [
-    el('span', 'publisher-field-label', [labelText]),
-    control,
-  ])
-}
-
-/** The inline hand-authoring form (replaced by a drawer in a later
- *  slice). Posts to the create endpoint with no feed key; reloads the
- *  queue on success. */
-function renderNewEventForm(
-  mount: HTMLElement,
-  state: EventsPageOptions,
-  formHost: HTMLElement,
-  filter: QueueFilter,
-): HTMLElement {
-  const titleInput = Object.assign(document.createElement('input'), { type: 'text', required: true, className: 'publisher-form-input' })
-  const summaryInput = Object.assign(document.createElement('textarea'), { className: 'publisher-form-textarea', rows: 2 })
-  const sourceNameInput = Object.assign(document.createElement('input'), { type: 'text', required: true, className: 'publisher-form-input' })
-  const sourceUrlInput = Object.assign(document.createElement('input'), { type: 'url', required: true, className: 'publisher-form-input', placeholder: 'https://' })
-  const startInput = Object.assign(document.createElement('input'), { type: 'text', className: 'publisher-form-input', placeholder: '2026-06-26T12:00:00Z' })
-  const endInput = Object.assign(document.createElement('input'), { type: 'text', className: 'publisher-form-input' })
-  const regionInput = Object.assign(document.createElement('input'), { type: 'text', className: 'publisher-form-input' })
-  const keywordsInput = Object.assign(document.createElement('input'), { type: 'text', className: 'publisher-form-input' })
-
-  const status = el('p', 'publisher-events-form-status', [])
-  status.setAttribute('role', 'status')
-  const submitBtn = Object.assign(document.createElement('button'), { type: 'submit', className: 'publisher-btn publisher-btn-primary', textContent: t('publisher.events.form.submit') })
-  const cancelBtn = Object.assign(document.createElement('button'), { type: 'button', className: 'publisher-btn', textContent: t('publisher.events.form.cancel') })
-  cancelBtn.addEventListener('click', () => formHost.replaceChildren())
-
-  const form = el('form', 'publisher-events-form', [
-    el('h3', 'publisher-events-form-heading', [t('publisher.events.form.heading')]),
-    field(t('publisher.events.form.title'), titleInput),
-    field(t('publisher.events.form.summary'), summaryInput),
-    field(t('publisher.events.form.sourceName'), sourceNameInput),
-    field(t('publisher.events.form.sourceUrl'), sourceUrlInput),
-    field(t('publisher.events.form.occurredStart'), startInput),
-    field(t('publisher.events.form.occurredEnd'), endInput),
-    field(t('publisher.events.form.region'), regionInput),
-    field(t('publisher.events.form.keywords'), keywordsInput),
-    el('div', 'publisher-events-form-actions', [submitBtn, cancelBtn]),
-    status,
-  ]) as HTMLFormElement
-
-  form.addEventListener('submit', ev => {
-    ev.preventDefault()
-    const trimmed = (v: string): string | undefined => {
-      const s = v.trim()
-      return s.length > 0 ? s : undefined
-    }
-    const region = trimmed(regionInput.value)
-    const keywords = keywordsInput.value.split(',').map(k => k.trim()).filter(k => k.length > 0)
-    const body = {
-      title: titleInput.value.trim(),
-      summary: trimmed(summaryInput.value),
-      source: { name: sourceNameInput.value.trim(), url: sourceUrlInput.value.trim() },
-      occurredStart: trimmed(startInput.value),
-      occurredEnd: trimmed(endInput.value),
-      geometry: region ? { regionName: region } : undefined,
-      keywords: keywords.length > 0 ? keywords : undefined,
-    }
-    status.classList.remove('publisher-events-status-error')
-    submitBtn.disabled = true
-    void publisherSend<unknown>(EVENTS_ENDPOINT, body, { method: 'POST', fetchFn: state.fetchFn }).then(res => {
-      submitBtn.disabled = false
-      if (res.ok) {
-        void loadAndRenderQueue(mount, state, t('publisher.events.form.created'), filter)
-        return
-      }
-      if (res.kind === 'session' && handleSessionError({ navigate: state.navigate }) === 'navigating') return
-      status.textContent = res.kind === 'validation' && res.errors.length > 0 ? res.errors[0].message : t('publisher.events.form.error')
-      status.classList.add('publisher-events-status-error')
-    })
-  })
-
-  return form
-}
