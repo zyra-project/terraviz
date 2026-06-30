@@ -21,6 +21,7 @@ import { publisherGet, publisherSend, handleSessionError } from '../api'
 import { buildErrorCard } from '../components/error-card'
 import { renderEventQueue } from '../components/events/event-queue'
 import { renderEventDetail } from '../components/events/event-detail'
+import { mountEventLocator } from '../components/events/event-locator-map'
 import type { EventStatus, EventsResponse, ReviewEvent } from '../components/events/events-model'
 
 interface MeResponse {
@@ -128,9 +129,14 @@ function renderTriage(
   const topbar = renderTopbar(mount, state, notice, filter)
 
   // The body rebuilds queue + detail together so selection + in-place
-  // status changes (which mutate `events`) stay in sync.
+  // status changes (which mutate `events`) stay in sync. The active
+  // locator map is disposed before each rebuild so its WebGL context
+  // doesn't leak across selections.
   const body = el('div', 'publisher-events-body')
+  let locatorDispose: (() => void) | null = null
   const rebuildBody = (): void => {
+    locatorDispose?.()
+    locatorDispose = null
     body.replaceChildren()
     if (events.length === 0) {
       body.append(el('p', 'publisher-empty-message', [t('publisher.events.empty')]))
@@ -146,6 +152,9 @@ function renderTriage(
     const detail = renderEventDetail(selected, {
       fetchFn: state.fetchFn,
       navigate: state.navigate,
+      mountLocator: (slot, point) => {
+        locatorDispose = mountEventLocator(slot, point)
+      },
       onEventStatusChange: (_id, next) => {
         // If the event no longer matches the active filter, reload so it
         // leaves the queue; otherwise just refresh the body so the queue

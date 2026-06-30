@@ -2339,6 +2339,18 @@
   background: var(--color-surface, #14141b);
 }
 .publisher-events-detail-map .maplibregl-canvas { border-radius: var(--radius-lg, 8px); }
+.publisher-events-locator-canvas {
+  position: absolute;
+  inset: 0;
+}
+.publisher-events-locator-marker {
+  inline-size: calc(0.7rem * var(--ui-scale));
+  block-size: calc(0.7rem * var(--ui-scale));
+  border-radius: 50%;
+  background: var(--color-accent, #4da6ff);
+  border: 2px solid var(--color-bg, #0d0d12);
+  box-shadow: 0 0 0 calc(0.2rem * var(--ui-scale)) var(--accent-o30, rgba(77, 166, 255, 0.3));
+}
 .publisher-events-detail-coords {
   position: absolute;
   inset-block-end: calc(0.4rem * var(--ui-scale));
