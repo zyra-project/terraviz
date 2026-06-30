@@ -246,14 +246,50 @@ extends, to keep the work bounded.
 
 ---
 
-## 7. Optional: auto-generated "current events tour" *(stretch)*
+## 7. Auto-generated "current events tour" — companion to the AI blog draft
 
-A `generateEventTour(event)` helper emitting standard `tourEngine.ts`
-tasks — `flyTo` → `setTime` → `loadDataset` → caption — turns a breaking
-event into a ~30-second guided explainer with zero authoring effort.
-This composes the existing tour task vocabulary and playback state
-machine; it is a natural Phase 3 payoff once events, matching, and the
-in-app surfaces exist, and is explicitly **not** part of Phase 1.
+A `generateEventTour(event, datasets)` helper emitting standard
+`tourEngine.ts` tasks — `flyTo` → `setTime` → `loadDataset` → caption —
+turns a breaking event into a ~30-second guided explainer with zero
+authoring effort. This composes the existing tour task vocabulary and
+playback state machine; it is a natural later-phase payoff once events,
+matching, and the in-app surfaces exist, and is explicitly **not** part
+of Phase 1.
+
+**Pairing with the AI blog generator (Phase 3d).** This started as an
+isolated stretch idea; it lands best as a **companion deliverable to the
+AI draft blog post**, not a separate feature. The blog generator already
+gathers exactly the bundle a tour needs — the curator-selected datasets,
+the cited event, and the node's host-org profile — so one "Generate"
+action can emit **two artifacts from the same inputs**: a markdown post
+*and* a playable tour that flies the globe through the same story. The
+mapping is direct:
+
+| Blog-generate input | Tour task |
+|---|---|
+| event geometry (point / bbox centre) | `flyTo` target |
+| event occurred time | `setTime` |
+| each selected dataset id | `loadDataset` (with `worldIndex` for side-by-side comparisons via `setEnvView`) |
+| the AI-written prose, per stop | stop `caption` |
+
+The post is the *read*; the tour is the *show* — a reader finishes the
+article and hits "Play tour" to watch exactly what they just read about.
+
+**Why it's cheap to add.** We invent no format. `tourEngine.ts` already
+plays SOS-format tour JSON, and the publisher already owns the authoring
+pipeline (`src/ui/tourAuthoring/`, the `/publish/tours` page, the
+tour-mutations API, R2 storage). The generated tour drops in as a
+normal **editable draft** linked to the post — the curator tweaks
+captions and timing before publishing, under the same human-in-the-loop
+trust discipline as the blog draft (no auto-publish; captions and
+citations come only from the approved event + real dataset metadata).
+The AI generation step writes the prose and the stop captions in one
+call so the two artifacts stay consistent.
+
+Concretely in Phase 3d: extend `POST /api/v1/publish/blog/generate` to
+optionally return a tour draft alongside the markdown, persist it as a
+normal tour record linked to the post, and surface a "Generate tour too"
+toggle plus a tour preview in the blog authoring UI.
 
 ---
 
@@ -308,7 +344,11 @@ model, on the safest source, before investing in breadth.
 
 ### Phase 3 — guided experiences & sharing
 
-- **Auto-generated event tours** (§7).
+- **Auto-generated event tours** (§7) — shipped as a companion to the
+  **AI draft-and-publish blog generator** (the expansion's Phase 3d):
+  one generation step emits both the cited markdown post and a playable
+  `tourEngine.ts` tour from the same selected-datasets + event + host-org
+  bundle.
 - Multi-feed fusion and de-duplication across sources.
 - **Federation-aware event sharing** between nodes — gated on Phase 4
   federation; see the freshness note below.
