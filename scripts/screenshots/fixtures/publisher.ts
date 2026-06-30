@@ -226,9 +226,14 @@ const events = {
       occurredStart: '2026-06-25T00:00:00.000Z',
       occurredEnd: '2026-06-26T00:00:00.000Z',
       status: 'proposed',
+      geometry: { point: { lat: 29.3, lon: -90.0 } },
+      categories: { 'Severe Storms': ['Hurricane'] },
       links: [
-        { datasetId: '01HEXAMPLEDATASET00000001', datasetTitle: 'Global Sea Surface Temperature', score: 0.93, signals: { geo: null, temporal: 1 }, status: 'proposed' },
-        { datasetId: '01HEXAMPLEDATASET00000003', datasetTitle: 'Global Precipitation (IMERG)', score: 0.71, signals: { geo: null, temporal: 0.71 }, status: 'proposed' },
+        // A graded spread so the Match Badge shows all four tones
+        // (green ≥85, amber 60–84, red <60, neutral "—" for null geo).
+        { datasetId: '01HEXAMPLEDATASET00000001', datasetTitle: 'Global Sea Surface Temperature', score: 0.98, signals: { lexical: 1, temporal: 1, geo: 0.83 }, status: 'proposed' },
+        { datasetId: '01HEXAMPLEDATASET00000003', datasetTitle: 'Global Precipitation (IMERG)', score: 0.71, signals: { lexical: 0.9, temporal: 1, geo: 0.4 }, status: 'proposed' },
+        { datasetId: '01HEXAMPLEDATASET00000005', datasetTitle: 'Climate Model — Air Temperature: SSP2', score: 0.61, signals: { lexical: 0.64, temporal: 1, geo: null }, status: 'proposed' },
       ],
     },
     {
