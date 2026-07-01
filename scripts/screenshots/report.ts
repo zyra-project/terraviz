@@ -41,7 +41,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-import type { Browser } from 'playwright'
+import type { Browser, Page } from 'playwright'
 
 import {
   REPO_ROOT,
@@ -198,6 +198,26 @@ export function selectScenes(
   return [...new Set(wanted)].map((name) => byName.get(name)!)
 }
 
+/**
+ * Hide the non-deterministic WebGL globe backdrop so the report diff
+ * only reflects the deterministic chrome/overlay surfaces.
+ *
+ * `#map-grid` is the full-viewport multi-globe grid (`viewportManager`);
+ * it renders behind the catalog Browse overlay and the globe-view Tools
+ * chrome. Its rAF loop, auto-rotation, and UTC-driven day/night shading
+ * make it a fresh pixel field every capture. We hide it with
+ * `visibility: hidden` (keeps layout — the grid is absolutely positioned,
+ * so nothing reflows) rather than masking it, because a mask paints the
+ * locator's *bounding box* (the whole viewport here) and would obscure
+ * the overlay panels that sit on top. Idempotent and best-effort: a scene
+ * without the grid (pure publisher pages) is unaffected.
+ */
+async function stabilizeBackdrop(page: Page): Promise<void> {
+  await page.addStyleTag({
+    content: '#map-grid, #map-grid canvas { visibility: hidden !important; }',
+  })
+}
+
 async function captureShot(
   browser: Browser,
   scene: Scene,
@@ -213,6 +233,21 @@ async function captureShot(
       if (axeEnabled()) {
         collector.signals.axeViolations = await runAxe(page)
       }
+      // Neutralize the WebGL globe backdrop before capturing. The
+      // full-viewport globe grid (`#map-grid`) renders behind every
+      // catalog / globe overlay scene; it auto-rotates and is day/night
+      // shaded from the real UTC sun position, so it is GPU-rasterized to
+      // *different* pixels on every run. That produced pervasive
+      // false-positive churn across the ~9 SPA scenes that overlay it,
+      // drowning the real chrome/panel diffs the report exists to catch.
+      // It is never itself a diff target — the one scene where the globe
+      // is the subject (`tools-menu`) already masks it — so hiding it (vs.
+      // masking, which would paint over the overlay panels sitting on top)
+      // makes the backdrop deterministic while leaving every overlay
+      // surface intact. Runs *after* axe so the a11y scan still sees the
+      // real page. Report-only: the Weblate capturer wants translators to
+      // see the globe, and the smoke runner never diffs pixels.
+      await stabilizeBackdrop(page)
       const file = `${scene.name}-${pass.label}.png`
       const mask = (scene.masks ?? []).map((sel) => page.locator(sel))
       const png = await screenshotWithRetry(page, resolve(OUT_DIR, file), { mask })
