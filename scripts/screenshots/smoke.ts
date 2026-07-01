@@ -130,26 +130,27 @@ const checks: Check[] = [
     },
   },
   {
-    name: 'catalog Timeline + Map expose the current-event legend',
+    name: 'catalog Timeline exposes the current-event legend',
     async run(page) {
-      // The catalog Map + Timeline ship an amber "current event" legend
-      // swatch as the user-visible affordance for the event overlays.
-      // Asserting the swatch is data-independent (no dated/linked
-      // fixture dataset required, which the dev-server SOS catalog can't
-      // guarantee); the actual marker rendering is covered
-      // deterministically by the catalogTimelineUI / catalogMapUI unit
-      // tests, which feed `events` directly.
+      // The catalog Timeline ships an amber "current event" legend swatch
+      // as the user-visible affordance for the event overlays. The swatch
+      // is static markup, so asserting it is data-independent.
+      //
+      // The equivalent MAP-view assertion used to live here too, but the
+      // map view lazy-loads the heavy MapLibre chunk before its toolbar
+      // (legend) mounts, so on a cold CI runner it occasionally tailed
+      // past the wait and flaked this gating check. The map legend swatch
+      // is now covered deterministically by the catalogMapUI unit test
+      // (`browse-map-legend-dot-event`), and the map view's *mount* is
+      // already covered by the "view-mode navigation mounts each surface"
+      // check — so the flaky live-map wait was pure redundancy.
       await gotoApp(page, '/?catalog=true')
       await page.locator('#browse-overlay').waitFor({ state: 'visible' })
       await page.locator('#browse-toolbar').waitFor({ state: 'visible' })
 
       await page.locator('#browse-view-mode [data-view-mode="timeline"]').click()
       await page.locator('#browse-timeline:not(.hidden)').waitFor()
-      await page.locator('.browse-timeline-legend-dot-event').first().waitFor({ timeout: 15_000 })
-
-      await page.locator('#browse-view-mode [data-view-mode="map"]').click()
-      await page.locator('#browse-map:not(.hidden)').waitFor()
-      await page.locator('.browse-map-legend-dot-event').first().waitFor({ timeout: 15_000 })
+      await page.locator('.browse-timeline-legend-dot-event').first().waitFor({ timeout: 30_000 })
     },
   },
   {

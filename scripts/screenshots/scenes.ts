@@ -279,9 +279,11 @@ export const scenes: Scene[] = [
     name: 'tools-menu',
     description:
       'Globe view — Tools popover (view toggles, layout picker, Orbit settings entry)',
-    // The WebGL globe renders behind the popover and is
-    // non-deterministic (rotation, tiles) — mask it out of the diff.
-    masks: ['#map-grid'],
+    // The WebGL globe renders behind the popover and is non-deterministic
+    // (rotation, tiles). The report capturer hides `#map-grid` before
+    // every shot (`stabilizeBackdrop`), so no per-scene mask is needed —
+    // and dropping it lets the full-viewport shot diff the popover instead
+    // of being painted over by a full-viewport mask.
     // The popover is the focus; emit a tight crop of it alongside the
     // full-viewport shot.
     crop: '#tools-menu-popover',
