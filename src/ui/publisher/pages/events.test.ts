@@ -70,13 +70,15 @@ describe('renderEventsPage', () => {
     expect(fetchFn.mock.calls.some(c => String(c[0]).includes('/publish/events'))).toBe(false)
   })
 
-  it('renders an event card with its source, title, and link row', async () => {
+  it('renders the selected event detail with source, title, and a pairing row', async () => {
     await renderEventsPage(mount, { fetchFn: mockFetch(baseRoutes()) })
-    expect(mount.querySelector('.publisher-events-event-title')?.textContent).toBe('Hurricane makes landfall')
+    // The first event is auto-selected into the detail pane.
+    expect(mount.querySelector('.publisher-events-detail-title')?.textContent).toBe('Hurricane makes landfall')
     const sourceLink = mount.querySelector('.publisher-events-source-link') as HTMLAnchorElement
     expect(sourceLink?.href).toContain('example.gov/storm')
-    const linkRow = mount.querySelector('.publisher-events-link')
-    expect(linkRow?.querySelector('.publisher-events-link-title')?.textContent).toBe('Live Storm')
+    expect(mount.querySelector('.publisher-events-pairing-name')?.textContent).toBe('Live Storm')
+    // …and the queue lists it on the left.
+    expect(mount.querySelector('.publisher-events-queue-title')?.textContent).toBe('Hurricane makes landfall')
   })
 
   it('shows the empty state when there are no events', async () => {
@@ -84,7 +86,7 @@ describe('renderEventsPage', () => {
     routes['/api/v1/publish/events'] = { body: { events: [] } }
     await renderEventsPage(mount, { fetchFn: mockFetch(routes) })
     expect(mount.querySelector('.publisher-empty-message')).not.toBeNull()
-    expect(mount.querySelector('.publisher-events-card')).toBeNull()
+    expect(mount.querySelector('.publisher-events-detail')).toBeNull()
   })
 
   it('defaults to the proposed filter and re-fetches at the chosen status', async () => {
@@ -103,8 +105,8 @@ describe('renderEventsPage', () => {
 
     expect(fetchFn.mock.calls.some(c => String(c[0]).includes('/publish/events?status=approved'))).toBe(true)
     expect(mount.querySelector('.publisher-events-filter-active')?.textContent).toBe('Approved')
-    // The existing per-event Reject control is reachable here to remove it.
-    expect(mount.querySelector('.publisher-events-actions .publisher-btn')).not.toBeNull()
+    // The event-level Reject control is reachable in the detail pane.
+    expect(mount.querySelector('.publisher-events-decision-reject')).not.toBeNull()
   })
 
   it('approves the event via POST and reloads (it leaves the proposed view)', async () => {
@@ -113,7 +115,7 @@ describe('renderEventsPage', () => {
     const fetchFn = mockFetch(routes)
     await renderEventsPage(mount, { fetchFn })
 
-    const approve = mount.querySelector('.publisher-events-actions .publisher-btn-primary') as HTMLButtonElement
+    const approve = mount.querySelector('.publisher-events-decision-approve') as HTMLButtonElement
     approve.click()
     await settle()
 
@@ -141,12 +143,12 @@ describe('renderEventsPage', () => {
     allBtn.click()
     await settle()
 
-    const approve = mount.querySelector('.publisher-events-actions .publisher-btn-primary') as HTMLButtonElement
+    const approve = mount.querySelector('.publisher-events-decision-approve') as HTMLButtonElement
     approve.click()
     await settle()
 
     // 'approved' still matches the All view → no reload, badge flips in place.
-    const badge = mount.querySelector('.publisher-events-header .publisher-events-badge')
+    const badge = mount.querySelector('.publisher-events-detail-header .publisher-events-badge')
     expect(badge?.classList.contains('publisher-events-badge-approved')).toBe(true)
   })
 
@@ -174,22 +176,26 @@ describe('renderEventsPage', () => {
     expect(mount.querySelector('.publisher-events-actions-status')?.textContent).toContain('2')
   })
 
-  it('reveals the new-event form and creates a manual event via POST', async () => {
+  it('opens the new-event drawer and creates a manual event via POST', async () => {
     const routes = baseRoutes()
+    routes['/api/v1/publish/datasets'] = { body: { datasets: [], next_cursor: null } }
     routes['POST /api/v1/publish/events'] = { status: 201, body: { created: true, event: { id: EVT, status: 'proposed' }, links: [] } }
     const fetchFn = mockFetch(routes)
     await renderEventsPage(mount, { fetchFn })
 
     const toolbarButtons = mount.querySelectorAll<HTMLButtonElement>('.publisher-events-toolbar button')
-    toolbarButtons[1].click() // New event
-    const form = mount.querySelector('.publisher-events-form') as HTMLFormElement
-    expect(form).not.toBeNull()
+    toolbarButtons[1].click() // New event → drawer (mounts on document.body)
+    const drawer = document.querySelector('.publisher-events-drawer')
+    expect(drawer).not.toBeNull()
+    expect(document.querySelector('.publisher-events-drawer-pair')).not.toBeNull()
 
-    const inputs = form.querySelectorAll<HTMLInputElement>('input')
+    const inputs = document.querySelectorAll<HTMLInputElement>('.publisher-events-drawer-compose input')
     inputs[0].value = 'Manual storm' // title
     inputs[1].value = 'NOAA' // source name
     inputs[2].value = 'https://example.gov/manual' // source url
-    form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))
+    const saveBtn = Array.from(document.querySelectorAll<HTMLButtonElement>('.publisher-events-drawer-actions button'))
+      .find(b => b.classList.contains('publisher-btn-primary'))!
+    saveBtn.click()
     await settle()
 
     const createPost = fetchFn.mock.calls.find(
@@ -197,9 +203,11 @@ describe('renderEventsPage', () => {
     )
     expect(createPost).toBeTruthy()
     const sent = JSON.parse((createPost![1] as RequestInit).body as string)
-    expect(sent).toMatchObject({ title: 'Manual storm', source: { name: 'NOAA', url: 'https://example.gov/manual' } })
+    expect(sent).toMatchObject({ title: 'Manual storm', source: { name: 'NOAA', url: 'https://example.gov/manual' }, datasetIds: [] })
     // No feed key — this is a hand-authored event.
     expect(sent.feedId).toBeUndefined()
+    // The drawer closes and the queue reloads (selecting the new event).
+    expect(document.querySelector('.publisher-events-drawer')).toBeNull()
   })
 
   it('approves a single link via POST with the link decision', async () => {
@@ -208,7 +216,7 @@ describe('renderEventsPage', () => {
     const fetchFn = mockFetch(routes)
     await renderEventsPage(mount, { fetchFn })
 
-    const linkApprove = mount.querySelector('.publisher-events-link .publisher-btn-small.publisher-btn-primary') as HTMLButtonElement
+    const linkApprove = mount.querySelector('.publisher-events-pairing .publisher-events-icon-btn-approve') as HTMLButtonElement
     linkApprove.click()
     await flush()
 

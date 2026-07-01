@@ -400,7 +400,9 @@ export const scenes: Scene[] = [
     fixtures: publisherFixtures({ admin: true }),
     async setup(page) {
       await openPublish(page, '/publish/events')
-      await page.locator('.publisher-events-list').first().waitFor()
+      // Direction A master–detail: wait for the detail title (the first
+      // event auto-selects) so the capture includes the populated panes.
+      await page.locator('.publisher-events-detail-title').first().waitFor()
     },
   },
   {

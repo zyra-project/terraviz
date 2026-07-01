@@ -159,8 +159,12 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
   const input: NewCurrentEvent = { ...parsed.value, originNode: await resolveOriginNode(db) }
 
   // Idempotent on the feed dedupe key, runs the matcher inline so the
-  // review queue is pre-populated — shared with the refresh route.
-  const { id, created, proposedLinks } = await ingestEvent(db, input)
+  // review queue is pre-populated — shared with the refresh route. The
+  // drawer's hand-picked pairings (`datasetIds`) are seeded as proposed
+  // links alongside the matcher's output.
+  const { id, created, proposedLinks, manualLinks } = await ingestEvent(db, input, {
+    manualDatasetIds: parsed.manualDatasetIds,
+  })
 
   await writeAuditEvent(db, {
     actor_kind: 'publisher',
@@ -173,6 +177,8 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
       feed_id: input.feedId ?? null,
       external_id: input.externalId ?? null,
       proposed_links: proposedLinks,
+      // The count actually inserted (visibility-filtered), not merely requested.
+      manual_links: manualLinks,
     }),
   })
   // A new approved event can't appear yet (lands proposed), but a

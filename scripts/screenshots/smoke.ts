@@ -169,23 +169,30 @@ const checks: Check[] = [
     async run(page) {
       await gotoApp(page, '/publish/events')
       await page.locator('#publisher-root .publisher-topbar').waitFor({ state: 'visible' })
-      await page.locator('.publisher-events-list').first().waitFor({ timeout: 15_000 })
+      // Direction A master–detail: the queue (left) lists events; the
+      // first auto-selects into the detail (right).
+      await page.locator('.publisher-events-queue-list').first().waitFor({ timeout: 15_000 })
       await page
-        .locator('.publisher-events-event-title', { hasText: 'Hurricane Lena makes landfall' })
+        .locator('.publisher-events-detail-title', { hasText: 'Hurricane Lena makes landfall' })
         .first()
         .waitFor()
-      // The proposed dataset link rows render under the event.
-      const links = page.locator('.publisher-events-link')
-      assert((await links.count()) >= 1, 'event should render at least one proposed dataset link')
+      // The dataset pairing rows render in the detail, each with a Match Badge.
+      const pairings = page.locator('.publisher-events-pairing')
+      assert((await pairings.count()) >= 1, 'detail should render at least one dataset pairing')
+      assert(
+        (await page.locator('.publisher-events-match-badge').count()) >= 1,
+        'each pairing should render a Match Badge',
+      )
       // The status filter row lets a curator reach reviewed events.
       const filters = page.locator('.publisher-events-filters button')
       assert((await filters.count()) >= 5, 'queue header should expose the status filter (incl. All)')
       // The authoring toolbar exposes Refresh + New event; clicking New
-      // reveals the inline hand-authoring form.
+      // opens the Direction-D drawer (compose + search/pair datasets).
       const toolbarButtons = page.locator('.publisher-events-toolbar button')
       assert((await toolbarButtons.count()) >= 2, 'queue header should expose the Refresh + New-event actions')
       await toolbarButtons.nth(1).click()
-      await page.locator('.publisher-events-form').first().waitFor({ timeout: 5_000 })
+      await page.locator('.publisher-events-drawer').first().waitFor({ timeout: 5_000 })
+      await page.locator('.publisher-events-drawer-pair').first().waitFor({ timeout: 5_000 })
     },
   },
   {

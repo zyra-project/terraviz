@@ -219,6 +219,12 @@ npm run screenshots:smoke   # gating interaction tests (search, Orbit, nav)
 | `src/ui/publisher/components/markdown-toolbar.ts` | GitHub-issue-style markdown toolbar over a `<textarea>` |
 | `src/ui/publisher/components/topbar.ts` | Glass-surface top bar with section tabs |
 | `src/ui/publisher/components/error-card.ts` | Shared error-card renderer used by every portal page |
+| `src/ui/publisher/components/events/match-badge.ts` | Events-tab **Match Badge** primitive — Topic/Time/Geo facet tags + composite %, threshold-toned (`docs/events-tab-handoff/EVENTS_TAB_IMPLEMENTATION_BRIEF.md` §5) |
+| `src/ui/publisher/components/events/events-model.ts` | Events-tab wire types + pure helpers (`AUTO_PAIR_THRESHOLD`, `autoPairTargets`, `compositePercent`, `locatorPoint`, `primaryCategory`) shared by the queue/detail components |
+| `src/ui/publisher/components/events/event-queue.ts` | Events-tab Direction A **left master list** — one row per event (status dot + title + `source · N datasets to review`), selection-highlighted |
+| `src/ui/publisher/components/events/event-detail.ts` | Events-tab Direction A **right detail pane** — two-level approval (heavy event Approve/Reject + light per-dataset ✓/✕ + Approve-all-≥90%), meta strip, Match Badge rows, locator slot |
+| `src/ui/publisher/components/events/event-locator-map.ts` | Events-tab detail **locator** — lazy MapLibre mini-map (GIBS Blue Marble raster + accent marker) centred on the event; web-only, disposed on detail swap |
+| `src/ui/publisher/components/events/new-event-drawer.ts` | Events-tab Direction D **"+ New event" slide-in drawer** — compose-the-event fields (left) + search/pair published datasets (right); posts the compose body plus hand-picked `datasetIds` to the create endpoint (seeded as proposed links); focus-trapped, Escape/backdrop close |
 | `src/ui/publisher/pages/datasets.ts` | `/publish/datasets` — dataset list visible to the caller |
 | `src/ui/publisher/pages/dataset-detail.ts` | `/publish/datasets/:id` — read-only dataset detail |
 | `src/ui/publisher/pages/dataset-edit.ts` | `/publish/datasets/:id/edit` — edit an existing draft |

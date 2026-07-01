@@ -19,6 +19,7 @@ import {
   findEventByExternal,
   updateCurrentEventContent,
   insertCurrentEvent,
+  upsertEventDatasetLink,
   type EventGeometry,
   type NewCurrentEvent,
 } from './events-store'
@@ -52,14 +53,40 @@ export function sanitizeCategories(raw: unknown): Record<string, string[]> | und
   return Object.keys(out).length > 0 ? out : undefined
 }
 
+/** Max hand-picked dataset pairings accepted on create. A curator
+ *  authoring an event by hand pairs a handful; the cap guards against a
+ *  pathological payload writing thousands of link rows. */
+export const MAX_MANUAL_DATASET_IDS = 50
+
+/** Coerce an untrusted `datasetIds` value to a clean, deduped list of
+ *  non-empty strings, capped at {@link MAX_MANUAL_DATASET_IDS}. These are
+ *  hand-picked pairings from the new-event drawer, inserted as `proposed`
+ *  links alongside the matcher's output. Invalid entries are dropped
+ *  (lenient, like {@link sanitizeCategories}) rather than rejected. */
+export function sanitizeDatasetIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  const seen = new Set<string>()
+  for (const v of raw) {
+    // Trim so whitespace-padded ids can't slip past dedupe / the FK check.
+    if (typeof v === 'string') {
+      const id = v.trim()
+      if (id.length > 0) seen.add(id)
+    }
+    if (seen.size >= MAX_MANUAL_DATASET_IDS) break
+  }
+  return [...seen]
+}
+
 /** Parse a create body into a {@link NewCurrentEvent}. Provenance
  *  (title + source.name + source.url) is mandatory; everything else is
- *  optional. Geometry accepts any subset of bbox / point / region. The
- *  returned `originNode` is a placeholder — the caller overwrites it
- *  with the resolved node id via {@link resolveOriginNode}. */
+ *  optional. Geometry accepts any subset of bbox / point / region.
+ *  `manualDatasetIds` carries the drawer's hand-picked pairings (empty
+ *  for feed ingestion). The returned `originNode` is a placeholder — the
+ *  caller overwrites it with the resolved node id via
+ *  {@link resolveOriginNode}. */
 export function parseCreate(
   raw: unknown,
-): { ok: true; value: NewCurrentEvent } | { ok: false; errors: FieldError[] } {
+): { ok: true; value: NewCurrentEvent; manualDatasetIds: string[] } | { ok: false; errors: FieldError[] } {
   const errors: FieldError[] = []
   const b = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
 
@@ -118,6 +145,7 @@ export function parseCreate(
       categories,
       keywords,
     },
+    manualDatasetIds: sanitizeDatasetIds(b.datasetIds),
   }
 }
 
@@ -132,6 +160,40 @@ export interface IngestOutcome {
   id: string
   created: boolean
   proposedLinks: number
+  /** How many hand-picked pairings were actually inserted — i.e. after
+   *  dropping ids that don't resolve to a visible, published dataset.
+   *  May be fewer than the requested `datasetIds` if one was hidden /
+   *  retracted between drawer load and save. */
+  manualLinks: number
+}
+
+export interface IngestOptions {
+  /** Hand-picked dataset pairings from the new-event drawer, inserted as
+   *  `proposed` links before the matcher runs. Filtered to real, visible
+   *  datasets; unknown / hidden ids are silently dropped. */
+  manualDatasetIds?: readonly string[]
+}
+
+/** Restrict an id list to datasets that exist and are publicly visible
+ *  (mirrors the matcher's candidate filter). Guards the link FK and stops
+ *  a manual pairing from pointing at a hidden/retracted dataset. */
+async function filterVisibleDatasetIds(
+  db: D1Database,
+  ids: readonly string[],
+): Promise<string[]> {
+  if (ids.length === 0) return []
+  const placeholders = ids.map(() => '?').join(', ')
+  const res = await db
+    .prepare(
+      `SELECT id FROM datasets
+        WHERE id IN (${placeholders})
+          AND published_at IS NOT NULL
+          AND is_hidden = 0
+          AND retracted_at IS NULL`,
+    )
+    .bind(...ids)
+    .all<{ id: string }>()
+  return (res.results ?? []).map(r => r.id)
 }
 
 /**
@@ -143,10 +205,20 @@ export interface IngestOutcome {
  * untouched, so a curator-rejected event is never resurrected by a
  * re-ingest. Events without a feed key always insert (manual authoring).
  *
+ * Hand-picked `manualDatasetIds` (drawer pairings) are inserted as
+ * `proposed` links **before** the matcher runs, so any that also match
+ * pick up real T/Ti/G signals (the matcher's `ON CONFLICT` refreshes the
+ * score while preserving `status`), and manual-only pairings persist with
+ * no automatic score.
+ *
  * The matcher runs inline so the review queue is pre-populated. The
  * caller owns auditing and any cache invalidation.
  */
-export async function ingestEvent(db: D1Database, input: NewCurrentEvent): Promise<IngestOutcome> {
+export async function ingestEvent(
+  db: D1Database,
+  input: NewCurrentEvent,
+  opts: IngestOptions = {},
+): Promise<IngestOutcome> {
   let id: string
   let created: boolean
   if (input.feedId && input.externalId) {
@@ -164,6 +236,15 @@ export async function ingestEvent(db: D1Database, input: NewCurrentEvent): Promi
     created = true
   }
 
+  // Seed the hand-picked pairings before the matcher so an overlapping
+  // dataset's link is refreshed (not clobbered) with real signals.
+  const manualIds = await filterVisibleDatasetIds(db, opts.manualDatasetIds ?? [])
+  for (const datasetId of manualIds) {
+    await upsertEventDatasetLink(db, { eventId: id, datasetId, status: 'proposed' })
+  }
+
   const matches = await runMatcherForEvent(db, id)
-  return { id, created, proposedLinks: matches.length }
+  const matchedIds = new Set(matches.map(m => m.datasetId))
+  const manualOnly = manualIds.filter(dsId => !matchedIds.has(dsId)).length
+  return { id, created, proposedLinks: matches.length + manualOnly, manualLinks: manualIds.length }
 }
