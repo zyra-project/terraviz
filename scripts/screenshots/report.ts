@@ -240,13 +240,15 @@ async function captureShot(
       // *different* pixels on every run. That produced pervasive
       // false-positive churn across the ~9 SPA scenes that overlay it,
       // drowning the real chrome/panel diffs the report exists to catch.
-      // It is never itself a diff target — the one scene where the globe
-      // is the subject (`tools-menu`) already masks it — so hiding it (vs.
-      // masking, which would paint over the overlay panels sitting on top)
-      // makes the backdrop deterministic while leaving every overlay
-      // surface intact. Runs *after* axe so the a11y scan still sees the
-      // real page. Report-only: the Weblate capturer wants translators to
-      // see the globe, and the smoke runner never diffs pixels.
+      // It is never itself a diff target — no scene means to diff the globe
+      // pixels (the one scene where it's the subject, `tools-menu`, focuses
+      // its crop on the popover; its full shot used to mask the globe, which
+      // this hide supersedes) — so hiding it (vs. masking, which would paint
+      // over the overlay panels sitting on top) makes the backdrop
+      // deterministic while leaving every overlay surface intact. Runs
+      // *after* axe so the a11y scan still sees the real page. Report-only:
+      // the Weblate capturer wants translators to see the globe, and the
+      // smoke runner never diffs pixels.
       await stabilizeBackdrop(page)
       const file = `${scene.name}-${pass.label}.png`
       const mask = (scene.masks ?? []).map((sel) => page.locator(sel))
