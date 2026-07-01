@@ -435,4 +435,54 @@ describe('displayDatasetInfo — "In the news"', () => {
     await flush()
     expect(document.getElementById('info-body')!.querySelector('.info-in-the-news-section')).toBeNull()
   })
+
+  it('renders a "View on globe" button when the event has a place/time', async () => {
+    stubFetchWithEvents([NEWS_EVENT])
+    displayDatasetInfo(makeDataset({ id: 'ds-news' }), [], vi.fn(), vi.fn())
+    await flush()
+    const body = document.getElementById('info-body')!
+    expect(body.querySelector('.info-news-locate')).not.toBeNull()
+    // The out-of-range note ships hidden until a click reports it.
+    expect((body.querySelector('.info-news-note') as HTMLElement).hidden).toBe(true)
+  })
+
+  it('omits the button for an event with neither geometry nor time', async () => {
+    stubFetchWithEvents([{ ...NEWS_EVENT, occurredStart: undefined, geometry: {} }])
+    displayDatasetInfo(makeDataset({ id: 'ds-news' }), [], vi.fn(), vi.fn())
+    await flush()
+    expect(document.getElementById('info-body')!.querySelector('.info-news-locate')).toBeNull()
+  })
+
+  it('invokes onNavigateToEvent with the event when the button is clicked', async () => {
+    stubFetchWithEvents([NEWS_EVENT])
+    const onNav = vi.fn(() => ({ navigated: true, time: 'seeked' as const }))
+    displayDatasetInfo(makeDataset({ id: 'ds-news' }), [], vi.fn(), onNav)
+    await flush()
+    ;(document.querySelector('.info-news-locate') as HTMLButtonElement).click()
+    expect(onNav).toHaveBeenCalledTimes(1)
+    expect(onNav.mock.calls[0][0]).toMatchObject({ id: 'E1' })
+  })
+
+  it('reveals the note only when the seek reports out-of-range', async () => {
+    stubFetchWithEvents([NEWS_EVENT])
+    const onNav = vi.fn(() => ({ navigated: true, time: 'out-of-range' as const }))
+    displayDatasetInfo(makeDataset({ id: 'ds-news' }), [], vi.fn(), onNav)
+    await flush()
+    const btn = document.querySelector('.info-news-locate') as HTMLButtonElement
+    const note = btn.parentElement!.querySelector('.info-news-note') as HTMLElement
+    expect(note.hidden).toBe(true)
+    btn.click()
+    expect(note.hidden).toBe(false)
+  })
+
+  it('keeps the note hidden when the seek succeeds', async () => {
+    stubFetchWithEvents([NEWS_EVENT])
+    const onNav = vi.fn(() => ({ navigated: true, time: 'seeked' as const }))
+    displayDatasetInfo(makeDataset({ id: 'ds-news' }), [], vi.fn(), onNav)
+    await flush()
+    const btn = document.querySelector('.info-news-locate') as HTMLButtonElement
+    btn.click()
+    const note = btn.parentElement!.querySelector('.info-news-note') as HTMLElement
+    expect(note.hidden).toBe(true)
+  })
 })

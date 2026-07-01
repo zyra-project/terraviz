@@ -13,6 +13,7 @@
   "publisher.events.queue.toReview": "Sub-line counting an event's dataset pairings to review. Preserve {count}.",
   "browse.map.event.tooltip.source": "Hover-tooltip line naming the event's source organization on the catalog map. Preserve {name}.",
   "browse.timeline.event.aria": "Accessible label for an amber current-event marker on the catalog timeline axis. Preserve {title} — the event's headline.",
+  "infoPanel.news.viewOnGlobe.aria": "Accessible label for the 'View on globe' button on an 'In the news' event card in the dataset info panel — it flies the globe to the event's place and time. Preserve {title} (the event's headline).",
   "chat.action.flyingTo": "Live-region announcement during a chat-driven camera move. Preserve {coords}. Keep it brief — screen readers read this aloud.",
   "chat.action.navigatingTo": "Live-region announcement during a chat-driven navigation. Preserve {label}. Keep it brief.",
   "chat.action.seekingTo": "Live-region announcement during a chat-driven date seek. Preserve {date}. Keep it brief.",

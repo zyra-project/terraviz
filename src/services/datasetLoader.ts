@@ -507,7 +507,42 @@ function wireRelatedLinks(scope: ParentNode, onLoadDataset: (id: string) => void
   })
 }
 
-/** One "In the news" card: headline + cited source link + when. */
+/**
+ * Outcome of navigating the globe to a related current event, returned by
+ * the {@link NavigateToEvent} callback so the card can surface the
+ * out-of-range note (per the "fly + note when out of range" decision).
+ */
+export interface EventNavResult {
+  /** The camera moved to the event's geometry. */
+  navigated: boolean
+  /**
+   * Time-seek outcome:
+   * - `'seeked'` — the loaded dataset was moved to the event's time.
+   * - `'out-of-range'` — the event's time lies outside this dataset's
+   *   coverage; the caller reveals a small note (we still fly to place).
+   * - `'none'` — the event has no time, or the dataset has no time axis
+   *   (static image), so there is nothing to seek and nothing to note.
+   */
+  time: 'seeked' | 'out-of-range' | 'none'
+}
+
+/** Fly the active globe to an event's place and seek to its time. */
+export type NavigateToEvent = (ev: PublicEvent) => EventNavResult
+
+/** True when an event carries a place or a time we could navigate to. */
+function eventHasNavTarget(ev: PublicEvent): boolean {
+  const g = ev.geometry
+  return !!(g.point || g.boundingBox || g.regionName || ev.occurredStart)
+}
+
+/**
+ * One "In the news" card: headline + cited source link + when, plus a
+ * "View on globe" action when the event has a place/time to jump to. The
+ * action button is wired by index in {@link renderInTheNews} (it needs the
+ * live `PublicEvent` + the navigate callback, neither available in a pure
+ * HTML string). An empty, hidden note element rides along so the click
+ * handler can reveal it when the event's time is outside the dataset range.
+ */
 function renderNewsItemHtml(ev: PublicEvent): string {
   const when = ev.occurredStart ?? ev.source.publishedAt
   const dateLabel = when ? escapeHtml(when.slice(0, 10)) : ''
@@ -518,7 +553,17 @@ function renderNewsItemHtml(ev: PublicEvent): string {
   html += `<a href="${escapeAttr(ev.source.url)}" target="_blank" rel="noopener noreferrer" class="info-news-source">`
     + `${escapeHtml(ev.source.name)} ↗</a>`
   if (dateLabel) html += `<span class="info-news-date"> · ${dateLabel}</span>`
-  html += `</p></li>`
+  html += `</p>`
+  if (eventHasNavTarget(ev)) {
+    html += `<button type="button" class="info-news-locate"`
+      + ` aria-label="${escapeAttr(t('infoPanel.news.viewOnGlobe.aria', { title: ev.title }))}">`
+      + escapeHtml(t('infoPanel.news.viewOnGlobe'))
+      + `</button>`
+    html += `<p class="info-news-note" role="status" hidden>`
+      + escapeHtml(t('infoPanel.news.timeOutOfRange'))
+      + `</p>`
+  }
+  html += `</li>`
   return html
 }
 
@@ -527,8 +572,17 @@ function renderNewsItemHtml(ev: PublicEvent): string {
  * linked to this dataset. Graceful absence: on no events / any failure
  * the placeholder is removed so no empty section lingers. Mirrors
  * `enhanceRelatedDatasets`' progressive, never-regress contract.
+ *
+ * When `onNavigateToEvent` is provided, each card's "View on globe" button
+ * flies the active globe to the event's place and seeks the loaded dataset
+ * to its time; if the time is outside the dataset's coverage the card's
+ * note is revealed (the fly still happens).
  */
-async function renderInTheNews(infoBody: HTMLElement, datasetId: string): Promise<void> {
+async function renderInTheNews(
+  infoBody: HTMLElement,
+  datasetId: string,
+  onNavigateToEvent?: NavigateToEvent,
+): Promise<void> {
   const slot = infoBody.querySelector('.info-in-the-news-section')
   if (!slot) return
   const events = await fetchEventsForDataset(datasetId)
@@ -542,6 +596,31 @@ async function renderInTheNews(infoBody: HTMLElement, datasetId: string): Promis
   let html = `<p class="info-section-label">${escapeHtml(t('infoPanel.inTheNews'))}</p>`
   html += `<ul class="info-in-the-news">${events.map(renderNewsItemHtml).join('')}</ul>`
   slot.innerHTML = html
+  if (onNavigateToEvent) wireNewsLocateButtons(slot, events, onNavigateToEvent)
+}
+
+/**
+ * Wire each card's "View on globe" button to fly-and-seek. Buttons are
+ * matched to events positionally — `renderNewsItemHtml` emits at most one
+ * `.info-news-locate` per card in list order — so the Nth button drives the
+ * Nth navigable event. Reveals the card's out-of-range note only when the
+ * event's time falls outside the dataset's coverage.
+ */
+function wireNewsLocateButtons(
+  slot: Element,
+  events: readonly PublicEvent[],
+  onNavigateToEvent: NavigateToEvent,
+): void {
+  const navigable = events.filter(eventHasNavTarget)
+  slot.querySelectorAll<HTMLButtonElement>('.info-news-locate').forEach((btn, i) => {
+    const ev = navigable[i]
+    if (!ev) return
+    btn.addEventListener('click', () => {
+      const result = onNavigateToEvent(ev)
+      const note = btn.parentElement?.querySelector<HTMLElement>('.info-news-note')
+      if (note) note.hidden = result.time !== 'out-of-range'
+    })
+  })
 }
 
 /**
@@ -592,6 +671,7 @@ export function displayDatasetInfo(
   dataset: Dataset,
   datasets: Dataset[],
   onLoadDataset: (id: string) => void,
+  onNavigateToEvent?: NavigateToEvent,
 ): void {
   const infoPanel = document.getElementById('info-panel')
   const infoTitle = document.getElementById('info-title')
@@ -836,7 +916,7 @@ export function displayDatasetInfo(
 
   // "In the news" — fill the placeholder with approved current events for
   // this dataset (or remove it if there are none). Non-blocking; graceful.
-  void renderInTheNews(infoBody, dataset.id)
+  void renderInTheNews(infoBody, dataset.id, onNavigateToEvent)
 
   // Wire up the description show-more / show-less toggle.
   const descWrap = infoBody.querySelector('.info-description-wrap[data-truncated="true"]') as HTMLElement | null
