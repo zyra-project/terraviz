@@ -127,6 +127,10 @@ describe('createCatalogMap', () => {
     })
     expect(host.classList.contains('browse-map-host')).toBe(true)
     expect(host.querySelector('.browse-map-toolbar')).not.toBeNull()
+    // The amber "current event" legend swatch — the user-visible
+    // affordance for the event overlays. Asserted here deterministically
+    // (the smoke check dropped its flaky live-map wait for it).
+    expect(host.querySelector('.browse-map-legend-dot-event')).not.toBeNull()
     expect(host.querySelector('.browse-map-canvas')).not.toBeNull()
     expect(host.querySelector('.browse-map-tooltip')).not.toBeNull()
     expect(host.querySelector('.browse-map-empty')).not.toBeNull()
