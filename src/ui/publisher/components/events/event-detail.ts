@@ -17,6 +17,8 @@
 import { t } from '../../../../i18n'
 import { publisherSend, handleSessionError } from '../../api'
 import { renderMatchBadge, toDisplayScore } from './match-badge'
+import { loadPublishedDatasets, filterDatasetsByTitle } from './dataset-search'
+import type { PublisherDataset } from '../../types'
 import {
   autoPairTargets,
   locatorPoint,
@@ -25,6 +27,9 @@ import {
   type ReviewEvent,
   type ReviewLink,
 } from './events-model'
+
+/** Cap on candidate rows shown in the "+ Add dataset" search. */
+const ADD_CANDIDATE_ROWS = 20
 
 const EVENTS_ENDPOINT = '/api/v1/publish/events'
 
@@ -243,9 +248,13 @@ export function renderEventDetail(event: ReviewEvent, cb: EventDetailCallbacks):
   // --- Dataset pairings ---
   const pairings = el('div', 'publisher-events-pairings')
   const head = el('div', 'publisher-events-pairings-head')
-  head.append(
-    el('p', 'publisher-events-eyebrow', [t('publisher.events.links') + ` · ${event.links.length}`]),
-  )
+  const eyebrow = el('p', 'publisher-events-eyebrow', [t('publisher.events.links') + ` · ${event.links.length}`])
+  const updateCount = (): void => {
+    eyebrow.textContent = t('publisher.events.links') + ` · ${event.links.length}`
+  }
+  head.append(eyebrow)
+  const headActions = el('div', 'publisher-events-pairings-actions')
+  head.append(headActions)
 
   const bulkStatus = el('span', 'publisher-events-bulk-status')
   bulkStatus.setAttribute('role', 'status')
@@ -287,8 +296,19 @@ export function renderEventDetail(event: ReviewEvent, cb: EventDetailCallbacks):
         handleWriteError(res, bulkStatus, cb.navigate)
       })
     })
-    head.append(bulkBtn)
+    headActions.append(bulkBtn)
   }
+
+  // "+ Add dataset" — pair a dataset the matcher never suggested. A
+  // toggle in the head reveals an inline catalog search; picking a
+  // candidate POSTs `addDatasetIds` and appends a fresh proposed row.
+  const addBtn = document.createElement('button')
+  addBtn.type = 'button'
+  addBtn.className = 'publisher-btn publisher-btn-small publisher-events-add-btn'
+  addBtn.textContent = t('publisher.events.addDataset')
+  addBtn.setAttribute('aria-expanded', 'false')
+  headActions.append(addBtn)
+
   pairings.append(head, bulkStatus)
 
   const rowsHost = el('div', 'publisher-events-pairings-list')
@@ -301,7 +321,93 @@ export function renderEventDetail(event: ReviewEvent, cb: EventDetailCallbacks):
     for (const link of event.links) rowsHost.append(renderLinkRow(event.id, link, cb))
   }
   rebuildRows()
-  pairings.append(rowsHost)
+
+  // --- Add-dataset inline search panel (lazy, hidden until toggled) ---
+  const addPanel = el('div', 'publisher-events-add-panel')
+  addPanel.hidden = true
+  const addSearch = document.createElement('input')
+  addSearch.type = 'search'
+  addSearch.className = 'publisher-form-input'
+  addSearch.placeholder = t('publisher.events.drawer.searchPlaceholder')
+  addSearch.setAttribute('aria-label', t('publisher.events.drawer.searchAria'))
+  addSearch.disabled = true
+  const addStatus = el('span', 'publisher-events-add-status')
+  addStatus.setAttribute('role', 'status')
+  const addCandidates = el('div', 'publisher-events-add-candidates')
+  addPanel.append(addSearch, addCandidates, addStatus)
+
+  let addDatasets: PublisherDataset[] = []
+  let addLoaded = false
+
+  const linkedIds = (): Set<string> => new Set(event.links.map(l => l.datasetId))
+
+  const addOne = (ds: PublisherDataset): void => {
+    addStatus.textContent = ''
+    addStatus.classList.remove('publisher-events-status-error')
+    void publisherSend<unknown>(
+      `${EVENTS_ENDPOINT}/${event.id}`,
+      { addDatasetIds: [ds.id] },
+      { method: 'POST', fetchFn: cb.fetchFn },
+    ).then(res => {
+      if (res.ok) {
+        event.links.push({ datasetId: ds.id, datasetTitle: ds.title, score: null, signals: null, status: 'proposed' })
+        rebuildRows()
+        updateCount()
+        cb.onLinksChanged?.()
+        renderAddCandidates()
+        return
+      }
+      handleWriteError(res, addStatus, cb.navigate)
+    })
+  }
+
+  const renderAddCandidates = (): void => {
+    addCandidates.replaceChildren()
+    const q = addSearch.value.trim()
+    if (q.length === 0) {
+      addCandidates.append(el('p', 'publisher-events-add-hint', [t('publisher.events.drawer.searchHint')]))
+      return
+    }
+    const matches = filterDatasetsByTitle(addDatasets, q, linkedIds(), ADD_CANDIDATE_ROWS)
+    if (matches.length === 0) {
+      addCandidates.append(el('p', 'publisher-events-add-hint', [t('publisher.events.drawer.noResults')]))
+      return
+    }
+    for (const ds of matches) {
+      const row = el('div', 'publisher-events-add-candidate')
+      const name = el('span', 'publisher-events-add-candidate-name')
+      name.textContent = ds.title
+      name.title = ds.title
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'publisher-events-icon-btn publisher-events-icon-btn-approve'
+      btn.textContent = '+'
+      btn.setAttribute('aria-label', t('publisher.events.drawer.addAria', { title: ds.title }))
+      btn.addEventListener('click', () => addOne(ds))
+      row.append(name, btn)
+      addCandidates.append(row)
+    }
+  }
+  addSearch.addEventListener('input', renderAddCandidates)
+
+  addBtn.addEventListener('click', () => {
+    const open = addPanel.hidden
+    addPanel.hidden = !open
+    addBtn.setAttribute('aria-expanded', open ? 'true' : 'false')
+    if (!open) return
+    renderAddCandidates()
+    addSearch.focus()
+    if (addLoaded) return
+    addLoaded = true
+    void loadPublishedDatasets(cb.fetchFn, cb.navigate).then(list => {
+      if (list === null) return
+      addDatasets = list
+      addSearch.disabled = false
+      renderAddCandidates()
+    })
+  })
+
+  pairings.append(addPanel, rowsHost)
   pane.append(pairings)
 
   return pane

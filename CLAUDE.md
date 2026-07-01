@@ -221,6 +221,7 @@ npm run screenshots:smoke   # gating interaction tests (search, Orbit, nav)
 | `src/ui/publisher/components/error-card.ts` | Shared error-card renderer used by every portal page |
 | `src/ui/publisher/components/events/match-badge.ts` | Events-tab **Match Badge** primitive — Topic/Time/Geo facet tags + composite %, threshold-toned (`docs/events-tab-handoff/EVENTS_TAB_IMPLEMENTATION_BRIEF.md` §5) |
 | `src/ui/publisher/components/events/events-model.ts` | Events-tab wire types + pure helpers (`AUTO_PAIR_THRESHOLD`, `autoPairTargets`, `compositePercent`, `locatorPoint`, `primaryCategory`) shared by the queue/detail components |
+| `src/ui/publisher/components/events/dataset-search.ts` | Shared catalog-search helpers for the Events-tab pairing UIs (`loadPublishedDatasets` paginated fetch + `filterDatasetsByTitle`) — used by the new-event drawer's pair pane and the detail pane's "+ Add dataset" control |
 | `src/ui/publisher/components/events/event-queue.ts` | Events-tab Direction A **left master list** — one row per event (status dot + title + `source · N datasets to review`), selection-highlighted |
 | `src/ui/publisher/components/events/event-detail.ts` | Events-tab Direction A **right detail pane** — two-level approval (heavy event Approve/Reject + light per-dataset ✓/✕ + Approve-all-≥90%), meta strip, Match Badge rows, locator slot |
 | `src/ui/publisher/components/events/event-locator-map.ts` | Events-tab detail **locator** — lazy MapLibre mini-map (GIBS Blue Marble raster + accent marker) centred on the event; web-only, disposed on detail swap |

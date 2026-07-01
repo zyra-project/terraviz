@@ -22,18 +22,16 @@
  */
 
 import { t } from '../../../../i18n'
-import { publisherGet, publisherSend, handleSessionError, type PublisherApiResult } from '../../api'
+import { publisherSend, handleSessionError } from '../../api'
 import { dateTimeToIso } from '../dataset-form'
-import type { ListDatasetsResponse, PublisherDataset } from '../../types'
+import { loadPublishedDatasets, filterDatasetsByTitle } from './dataset-search'
+import type { PublisherDataset } from '../../types'
 
 const EVENTS_ENDPOINT = '/api/v1/publish/events'
-const DATASETS_ENDPOINT = '/api/v1/publish/datasets'
 
 /** Cap on candidate rows rendered for a query — keeps the DOM bounded on
  *  a large catalog; the curator narrows with the search box. */
 const MAX_CANDIDATE_ROWS = 40
-/** Cap on dataset pages fetched into the in-memory pairing index. */
-const MAX_DATASET_PAGES = 6
 
 export interface NewEventDrawerOptions {
   fetchFn?: typeof fetch
@@ -86,34 +84,6 @@ function dateTimeField(labelText: string): { root: HTMLElement; getIso: () => st
   ])
   const root = el('div', 'publisher-events-field', [el('span', 'publisher-field-label', [labelText]), row])
   return { root, getIso: () => dateTimeToIso(dateInput.value, timeInput.value) }
-}
-
-/** Fetch published datasets into a flat `{id,title}` index (paginated,
- *  capped). Returns `null` on a session redirect (the caller bails). */
-async function loadPublishedDatasets(
-  fetchFn: typeof fetch | undefined,
-  navigate: ((url: string) => void) | undefined,
-): Promise<PublisherDataset[] | null> {
-  const all: PublisherDataset[] = []
-  let cursor: string | null = null
-  for (let page = 0; page < MAX_DATASET_PAGES; page++) {
-    const listUrl: string = `${DATASETS_ENDPOINT}?status=published${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
-    const res: PublisherApiResult<ListDatasetsResponse> = await publisherGet<ListDatasetsResponse>(listUrl, { fetchFn })
-    if (!res.ok) {
-      if (res.kind === 'session') {
-        // Session redirect in flight — bail so the caller leaves the
-        // search UI disabled rather than enabling it mid-navigation.
-        handleSessionError({ navigate })
-        return null
-      }
-      // A partial list is still useful for pairing; stop on other errors.
-      break
-    }
-    all.push(...res.data.datasets)
-    cursor = res.data.next_cursor
-    if (!cursor) break
-  }
-  return all
 }
 
 /**
@@ -205,7 +175,7 @@ export function openNewEventDrawer(options: NewEventDrawerOptions): () => void {
       }
       return
     }
-    const matches = datasets.filter(d => d.title.toLowerCase().includes(q)).slice(0, MAX_CANDIDATE_ROWS)
+    const matches = filterDatasetsByTitle(datasets, q, new Set(), MAX_CANDIDATE_ROWS)
     if (matches.length === 0) {
       candidates.append(el('p', 'publisher-events-drawer-hint', [t('publisher.events.drawer.noResults')]))
       return

@@ -834,6 +834,7 @@
   "publisher.datasets.tabs.aria": "Dataset lifecycle filter",
   "publisher.error.detailsSummary": "Server response",
   "publisher.error.statusLine": "HTTP {status}",
+  "publisher.events.addDataset": "Add dataset",
   "publisher.events.approve": "Approve",
   "publisher.events.bulkApprove": "Approve all ≥90% · {count}",
   "publisher.events.bulkApproved": "Paired {count} datasets",
