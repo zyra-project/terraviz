@@ -12,7 +12,6 @@
  * source the catalog map uses) — so no Tauri `tauritile://` path here.
  */
 
-import 'maplibre-gl/dist/maplibre-gl.css'
 import type { StyleSpecification } from 'maplibre-gl'
 
 /** GIBS Blue Marble raster — the same source `mapRenderer.ts` uses,
@@ -46,8 +45,11 @@ export function mountEventLocator(slot: HTMLElement, point: { lat: number; lon: 
   let disposed = false
   let remove: (() => void) | null = null
 
-  void import('maplibre-gl')
-    .then(({ default: maplibregl }) => {
+  // Lazy-import the JS *and* the stylesheet together (Vite injects the
+  // CSS on dynamic import), so neither lands in the eager publisher chunk
+  // even though this module is imported eagerly by events.ts.
+  void Promise.all([import('maplibre-gl'), import('maplibre-gl/dist/maplibre-gl.css')])
+    .then(([{ default: maplibregl }]) => {
       if (disposed) return
       const canvas = document.createElement('div')
       canvas.className = 'publisher-events-locator-canvas'

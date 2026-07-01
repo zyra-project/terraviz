@@ -1,6 +1,22 @@
 import { describe, it, expect, vi } from 'vitest'
 import { renderEventDetail } from './event-detail'
-import type { ReviewEvent } from './events-model'
+import type { ReviewEvent, ReviewLink } from './events-model'
+
+function okFetch() {
+  return vi.fn(async () => ({
+    ok: true,
+    status: 200,
+    type: 'basic',
+    json: async () => ({ event: null, links: [] }),
+    text: async () => '{}',
+  }) as unknown as Response)
+}
+
+function link(datasetId: string): ReviewLink {
+  return { datasetId, datasetTitle: datasetId, score: 0.95, signals: { lexical: 0.95 }, status: 'proposed' }
+}
+
+const flush = () => new Promise<void>(r => setTimeout(r, 0))
 
 function event(overrides: Partial<ReviewEvent> = {}): ReviewEvent {
   return {
@@ -31,5 +47,18 @@ describe('renderEventDetail — locator coordinates', () => {
       { onEventStatusChange: vi.fn() },
     )
     expect(pane.querySelector('.publisher-events-detail-coords')?.textContent).toBe('12.5°N, 100.1°E')
+  })
+})
+
+describe('renderEventDetail — onLinksChanged', () => {
+  it('fires after a per-link decision so the queue count can refresh', async () => {
+    const onLinksChanged = vi.fn()
+    const pane = renderEventDetail(
+      event({ links: [link('DS1')] }),
+      { onEventStatusChange: vi.fn(), onLinksChanged, fetchFn: okFetch() },
+    )
+    ;(pane.querySelector('.publisher-events-pairing .publisher-events-icon-btn-approve') as HTMLButtonElement).click()
+    await flush()
+    expect(onLinksChanged).toHaveBeenCalled()
   })
 })

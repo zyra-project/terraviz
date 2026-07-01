@@ -77,10 +77,10 @@ export function autoPairTargets(
 ): string[] {
   return event.links
     .filter(l => l.status === 'proposed')
-    .filter(l => {
-      const c = compositePercent(l)
-      return c != null && c >= threshold
-    })
+    // Compare the RAW 0–1 score against the threshold, not the rounded
+    // display percent — an approval shortcut must be conservative, so a
+    // link at 0.895 (rounds to 90) stays below a 90% threshold.
+    .filter(l => l.score != null && Number.isFinite(l.score) && l.score >= threshold / 100)
     .map(l => l.datasetId)
 }
 

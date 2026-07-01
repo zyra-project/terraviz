@@ -228,6 +228,9 @@ export function openNewEventDrawer(options: NewEventDrawerOptions): () => void {
   panel.setAttribute('role', 'dialog')
   panel.setAttribute('aria-modal', 'true')
   panel.setAttribute('aria-label', t('publisher.events.drawer.heading'))
+  // Programmatically focusable so re-opening (guard below) can move focus
+  // back into the dialog — a plain <div> isn't focusable without this.
+  panel.tabIndex = -1
 
   const backdrop = el('div', 'publisher-events-drawer-backdrop', [panel])
 

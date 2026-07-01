@@ -163,12 +163,23 @@ function renderTriage(
       body.append(el('p', 'publisher-empty-message', [t('publisher.events.empty')]))
       return
     }
-    const queue = renderEventQueue(events, selectedId, {
-      onSelect: id => {
-        selectedId = id
-        rebuildBody()
-      },
-    }, filter === 'all' ? t('publisher.events.filter.all') : statusLabel(filter))
+    const eyebrow = filter === 'all' ? t('publisher.events.filter.all') : statusLabel(filter)
+    const buildQueue = (): HTMLElement =>
+      renderEventQueue(events, selectedId, {
+        onSelect: id => {
+          selectedId = id
+          rebuildBody()
+        },
+      }, eyebrow)
+    // Re-render just the queue node in place (keeps queue | detail as the
+    // grid's two direct children) so a per-link / bulk decision refreshes
+    // the "N datasets to review" count without rebuilding the detail pane.
+    let queue = buildQueue()
+    const refreshQueue = (): void => {
+      const next = buildQueue()
+      queue.replaceWith(next)
+      queue = next
+    }
     const selected = events.find(e => e.id === selectedId) ?? events[0]
     const detail = renderEventDetail(selected, {
       fetchFn: state.fetchFn,
@@ -186,6 +197,7 @@ function renderTriage(
         }
         rebuildBody()
       },
+      onLinksChanged: refreshQueue,
     })
     body.append(queue, detail)
   }

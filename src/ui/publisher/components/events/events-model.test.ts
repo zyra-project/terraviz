@@ -37,6 +37,17 @@ describe('autoPairTargets', () => {
     const event = { links: [link({ datasetId: 'a', score: 0.7 }), link({ datasetId: 'b', score: 0.5 })] }
     expect(autoPairTargets(event, 60)).toEqual(['a'])
   })
+
+  it('compares the raw score, not the rounded display percent', () => {
+    // 0.895 rounds to 90% for display but is below a 90% approval bar.
+    const event = {
+      links: [
+        link({ datasetId: 'justUnder', score: 0.895, status: 'proposed' }),
+        link({ datasetId: 'justOver', score: 0.905, status: 'proposed' }),
+      ],
+    }
+    expect(autoPairTargets(event)).toEqual(['justOver'])
+  })
 })
 
 describe('locatorPoint', () => {

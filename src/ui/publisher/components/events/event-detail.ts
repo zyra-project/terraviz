@@ -34,6 +34,9 @@ export interface EventDetailCallbacks {
   /** Fired after the event's own status changes so the orchestrator can
    *  reload the queue (status left the active filter) or update in place. */
   onEventStatusChange: (eventId: string, next: EventStatus) => void
+  /** Fired after a per-link / bulk decision mutates `event.links` in place,
+   *  so the orchestrator can refresh the queue's "N to review" count. */
+  onLinksChanged?: () => void
   /** Mount the live locator into the given slot for the given point.
    *  Injected by the orchestrator so this module needn't import MapLibre. */
   mountLocator?: (slot: HTMLElement, point: { lat: number; lon: number }) => void
@@ -131,6 +134,7 @@ function renderLinkRow(eventId: string, link: ReviewLink, cb: EventDetailCallbac
         rejectBtn.disabled = false
         if (res.ok) {
           setPaired(decision === 'approve' ? 'approved' : 'rejected')
+          cb.onLinksChanged?.()
           return
         }
         handleWriteError(res, rowStatus, cb.navigate)
@@ -276,6 +280,7 @@ export function renderEventDetail(event: ReviewEvent, cb: EventDetailCallbacks):
           rebuildRows()
           bulkBtn.remove()
           bulkStatus.textContent = t('publisher.events.bulkApproved', { count: String(current.length) })
+          cb.onLinksChanged?.()
           return
         }
         bulkBtn.disabled = false
