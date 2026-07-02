@@ -2686,3 +2686,122 @@
 .publisher-events-match-composite-mid    { color: var(--color-warning, #e0a23c); }
 .publisher-events-match-composite-weak   { color: var(--color-error-soft, #ff6b6b); }
 .publisher-events-match-composite-na     { color: var(--color-text-dim, #8a93a3); }
+
+/* ── Feeds console (/publish/feeds) ───────────────────────────────
+   The current-events feed registry: connector rows, the curated
+   preset gallery, and the bring-your-own-feed form. Flat app-shell
+   surfaces matching the Events tab. */
+.publisher-feeds-intro {
+    margin: 0 0 0.75rem;
+    color: var(--color-text-secondary, #b8c0cc);
+    font-size: 0.85rem;
+}
+
+.publisher-feeds-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.publisher-feeds-row,
+.publisher-feeds-preset {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0.65rem;
+    background: var(--color-surface-alt, rgba(255, 255, 255, 0.04));
+    border: 1px solid var(--white-o08, rgba(255, 255, 255, 0.08));
+    border-radius: 8px;
+}
+
+.publisher-feeds-preset {
+    margin-block-start: 0.4rem;
+}
+
+.publisher-feeds-dot {
+    flex: 0 0 auto;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+.publisher-feeds-dot-on  { background: var(--color-success, #6dc96d); }
+.publisher-feeds-dot-off { background: var(--color-text-dim, #8a93a3); }
+
+.publisher-feeds-row-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.publisher-feeds-row-label {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.publisher-feeds-row-meta {
+    font-size: 0.75rem;
+    color: var(--color-text-secondary, #b8c0cc);
+}
+.publisher-feeds-row-meta-error {
+    color: var(--color-warning, #e0a23c);
+}
+
+.publisher-feeds-row-actions {
+    display: flex;
+    gap: 0.35rem;
+    flex: 0 0 auto;
+}
+
+.publisher-feeds-group {
+    margin: 0.9rem 0 0.2rem;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-text-dim, #8a93a3);
+}
+
+.publisher-feeds-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-block-end: 0.6rem;
+}
+
+.publisher-feeds-input {
+    padding: 0.45rem 0.55rem;
+    background: var(--color-surface-alt, rgba(255, 255, 255, 0.04));
+    border: 1px solid var(--white-o08, rgba(255, 255, 255, 0.08));
+    border-radius: 6px;
+    color: var(--color-text, #eef1f5);
+}
+
+.publisher-feeds-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-block-start: 0.6rem;
+}
+
+.publisher-feeds-status {
+    margin-block-start: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--color-text-secondary, #b8c0cc);
+    min-height: 1.1em;
+}
+.publisher-feeds-status-error {
+    color: var(--color-warning, #e0a23c);
+}
+
+@media (max-width: 720px) {
+    .publisher-feeds-row,
+    .publisher-feeds-preset {
+        flex-wrap: wrap;
+    }
+    .publisher-feeds-row-actions {
+        inline-size: 100%;
+        justify-content: flex-end;
+    }
+}

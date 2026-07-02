@@ -32,6 +32,7 @@ import { renderWorkflowsPage } from './pages/workflows'
 import { renderWorkflowDetailPage } from './pages/workflow-detail'
 import { renderWorkflowEditPage } from './pages/workflow-edit'
 import { renderFeaturedHeroPage } from './pages/featured-hero'
+import { renderFeedsPage } from './pages/feeds'
 import { renderEventsPage } from './pages/events'
 import { renderAnalyticsPage } from './pages/analytics'
 import { renderUsersPage } from './pages/users'
@@ -60,6 +61,7 @@ export function routeForPath(
   | 'tours'
   | 'featured_hero'
   | 'events'
+  | 'feeds'
   | 'import'
   | 'workflows'
   | 'analytics'
@@ -72,6 +74,7 @@ export function routeForPath(
   if (pathname.startsWith('/publish/workflows')) return 'workflows'
   if (pathname.startsWith('/publish/featured-hero')) return 'featured_hero'
   if (pathname.startsWith('/publish/events')) return 'events'
+  if (pathname.startsWith('/publish/feeds')) return 'feeds'
   if (pathname.startsWith('/publish/import')) return 'import'
   if (pathname.startsWith('/publish/analytics')) return 'analytics'
   if (pathname.startsWith('/publish/feedback')) return 'feedback'
@@ -274,6 +277,10 @@ function eventsPage(mount: HTMLElement): RouteHandler {
   return () => void renderEventsPage(mount)
 }
 
+function feedsPage(mount: HTMLElement): RouteHandler {
+  return () => void renderFeedsPage(mount)
+}
+
 function analyticsPage(mount: HTMLElement): RouteHandler {
   return () => void renderAnalyticsPage(mount)
 }
@@ -348,6 +355,7 @@ export async function bootPublisherPortal(): Promise<void> {
       { pattern: '/publish/workflows/:id', handler: workflowDetailPage(content, getRouter) },
       { pattern: '/publish/featured-hero', handler: featuredHeroPage(content) },
       { pattern: '/publish/events', handler: eventsPage(content) },
+      { pattern: '/publish/feeds', handler: feedsPage(content) },
       { pattern: '/publish/analytics', handler: analyticsPage(content) },
       { pattern: '/publish/feedback', handler: feedbackPage(content) },
       { pattern: '/publish/users', handler: usersPage(content) },

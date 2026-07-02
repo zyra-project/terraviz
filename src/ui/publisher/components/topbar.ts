@@ -29,6 +29,7 @@ export interface NavLink {
     | 'publisher.nav.workflows'
     | 'publisher.nav.featuredHero'
     | 'publisher.nav.events'
+    | 'publisher.nav.feeds'
     | 'publisher.nav.analytics'
     | 'publisher.nav.feedback'
     | 'publisher.nav.import'
@@ -44,6 +45,7 @@ const NAV_LINKS: ReadonlyArray<NavLink> = [
   { path: '/publish/workflows', labelKey: 'publisher.nav.workflows' },
   { path: '/publish/featured-hero', labelKey: 'publisher.nav.featuredHero' },
   { path: '/publish/events', labelKey: 'publisher.nav.events', adminOnly: true },
+  { path: '/publish/feeds', labelKey: 'publisher.nav.feeds', adminOnly: true },
   { path: '/publish/analytics', labelKey: 'publisher.nav.analytics' },
   { path: '/publish/feedback', labelKey: 'publisher.nav.feedback' },
   { path: '/publish/import', labelKey: 'publisher.nav.import' },
