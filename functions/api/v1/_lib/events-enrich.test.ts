@@ -122,3 +122,16 @@ describe('buildEnrichPrompt', () => {
     expect(system).toContain('null')
   })
 })
+
+describe('model selection', () => {
+  it('uses the env override when set, the known-alive default otherwise', async () => {
+    const calls: string[] = []
+    const run = async (model: string) => {
+      calls.push(model)
+      return { response: JSON.stringify({ date: '2026-06-23', place: null, confidence: 0.9 }) }
+    }
+    await enrichEventFields({ AI: { run } }, PLAIN_NEWS)
+    await enrichEventFields({ AI: { run }, EVENTS_ENRICH_MODEL: '@cf/example/newer-model' }, PLAIN_NEWS)
+    expect(calls).toEqual(['@cf/meta/llama-4-scout-17b-16e-instruct', '@cf/example/newer-model'])
+  })
+})

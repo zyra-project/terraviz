@@ -30,9 +30,12 @@
 import { getRegionNames, resolveRegion } from '../../../../src/data/regions'
 import type { EventGeometry, NewCurrentEvent } from './events-store'
 
-/** Small instruct model — this is a constrained JSON extraction, not
- *  generation; the 8B tier is fast and cheap enough to run inline. */
-export const ENRICH_MODEL_ID = '@cf/meta/llama-3.1-8b-instruct'
+/** Default extraction model — the same id the Orbit chat path defaults
+ *  to, so it is known-alive on this account (llama-3.1-8b was
+ *  deprecated 2026-05-30 and taught us not to pin a second id here).
+ *  Override per-deployment with the EVENTS_ENRICH_MODEL env var when
+ *  this one is deprecated in turn. */
+export const ENRICH_MODEL_ID = '@cf/meta/llama-4-scout-17b-16e-instruct'
 
 /** Extractions the model itself is less sure of than this are dropped.
  *  Curators still vet everything; the gate just keeps obviously shaky
@@ -49,6 +52,9 @@ export interface EnrichEnv {
   AI?: {
     run(model: string, inputs: Record<string, unknown>): Promise<unknown>
   }
+  /** Optional model-id override (deployment env var) — the escape hatch
+   *  for the next Workers AI model deprecation. */
+  EVENTS_ENRICH_MODEL?: string
 }
 
 export type InferredField = 'occurredStart' | 'geometry'
@@ -135,7 +141,7 @@ export async function enrichEventFields(
   let text: string
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
-    const modelCall = env.AI.run(ENRICH_MODEL_ID, {
+    const modelCall = env.AI.run(env.EVENTS_ENRICH_MODEL || ENRICH_MODEL_ID, {
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user },
