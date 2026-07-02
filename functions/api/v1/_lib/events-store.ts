@@ -371,7 +371,12 @@ export async function updateCurrentEventContent(
   await writeEventDecorations(db, id, input.categories, input.keywords)
 }
 
-/** List events, newest first, optionally filtered by status. */
+/** List events, newest first by the event's *own* time — when it
+ *  occurred, else when its source published it, else when we ingested
+ *  it. Ordering by `created_at` alone made one refresh run's batch come
+ *  out in reverse feed order (feeds list newest articles first, so the
+ *  newest got the earliest insert timestamps), which is exactly
+ *  backwards for a curator triaging the queue. */
 export async function listCurrentEvents(
   db: D1Database,
   opts: { status?: CurrentEventStatus; limit?: number } = {},
@@ -381,7 +386,7 @@ export async function listCurrentEvents(
   const stmt = db.prepare(
     `SELECT ${EVENT_COLUMNS} FROM current_events
      ${where}
-     ORDER BY created_at DESC
+     ORDER BY COALESCE(occurred_start, published_at, created_at) DESC
      LIMIT ?`,
   )
   const bound = opts.status ? stmt.bind(opts.status, limit) : stmt.bind(limit)

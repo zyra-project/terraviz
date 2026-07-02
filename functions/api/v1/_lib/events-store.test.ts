@@ -129,9 +129,13 @@ describe('insertCurrentEvent + getCurrentEvent', () => {
 })
 
 describe('listCurrentEvents', () => {
-  it('orders newest-first and filters by status', async () => {
+  it('orders newest-first by event time and filters by status', async () => {
     const { db } = freshDb()
-    await insertCurrentEvent(db, sampleEvent({ title: 'older' }), '2026-06-01T00:00:00.000Z')
+    await insertCurrentEvent(
+      db,
+      sampleEvent({ title: 'older', occurredStart: '2026-05-20T06:00:00.000Z' }),
+      '2026-06-01T00:00:00.000Z',
+    )
     const approved = await insertCurrentEvent(
       db,
       sampleEvent({ title: 'newer' }),
@@ -147,6 +151,40 @@ describe('listCurrentEvents', () => {
 
     const onlyProposed = await listCurrentEvents(db, { status: 'proposed' })
     expect(onlyProposed.map(e => e.title)).toEqual(['older'])
+  })
+
+  it("orders by the event's own time, not insertion order", async () => {
+    const { db } = freshDb()
+    // A feed lists newest articles first, so within one refresh run the
+    // newest event gets the EARLIEST insert timestamp. The queue must
+    // still put it on top.
+    await insertCurrentEvent(
+      db,
+      sampleEvent({ title: 'newest article', occurredStart: '2026-06-24T00:00:00.000Z' }),
+      '2026-06-25T10:00:00.000Z',
+    )
+    await insertCurrentEvent(
+      db,
+      sampleEvent({ title: 'oldest article', occurredStart: '2026-06-10T00:00:00.000Z' }),
+      '2026-06-25T10:00:01.000Z',
+    )
+    // No occurred time → falls back to the source publish date.
+    await insertCurrentEvent(
+      db,
+      sampleEvent({
+        title: 'middle (publish-date fallback)',
+        occurredStart: null,
+        occurredEnd: null,
+        publishedAt: '2026-06-17T00:00:00.000Z',
+      }),
+      '2026-06-25T10:00:02.000Z',
+    )
+    const all = await listCurrentEvents(db)
+    expect(all.map(e => e.title)).toEqual([
+      'newest article',
+      'middle (publish-date fallback)',
+      'oldest article',
+    ])
   })
 
   it('honours the limit (clamped)', async () => {
