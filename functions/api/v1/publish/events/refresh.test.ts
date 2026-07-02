@@ -170,7 +170,7 @@ describe('POST /api/v1/publish/events/refresh', () => {
     sqlite
       .prepare(
         `INSERT INTO feed_connectors (id, kind, label, url, category, enabled, created_at, updated_at)
-         VALUES ('FEED_FUTURE', 'rss', 'Future feed', 'https://example.org/feed.xml', 'news', 1,
+         VALUES ('FEED_FUTURE', 'carrier-pigeon', 'Future feed', 'https://example.org/feed.xml', 'news', 1,
                  '2026-07-01T00:00:00.000Z', '2026-07-01T00:00:00.000Z')`,
       )
       .run()
@@ -189,6 +189,47 @@ describe('POST /api/v1/publish/events/refresh', () => {
       .prepare(`SELECT last_run_status FROM feed_connectors WHERE id = 'FEED_FUTURE'`)
       .get() as { last_run_status: string }
     expect(row.last_run_status).toBe('error')
+  })
+
+  it('ingests an RSS connector — connector id as feedId, label as provenance', async () => {
+    const { env, sqlite } = setupEnv()
+    // Only the RSS connector is enabled, so the single fetch stub serves it.
+    sqlite.prepare(`UPDATE feed_connectors SET enabled = 0 WHERE id = 'FEED_EONET_DEFAULT'`).run()
+    sqlite
+      .prepare(
+        `INSERT INTO feed_connectors (id, kind, label, url, category, enabled, created_at, updated_at)
+         VALUES ('FEED_RSS_01', 'rss', 'Example Environment', 'https://news.example.org/rss', 'news', 1,
+                 '2026-07-01T00:00:00.000Z', '2026-07-01T00:00:00.000Z')`,
+      )
+      .run()
+    const rssXml = `<rss version="2.0"><channel>
+      <item>
+        <title>Storm batters the coast</title>
+        <link>https://news.example.org/storm</link>
+        <guid>storm-1</guid>
+        <pubDate>Tue, 30 Jun 2026 08:15:00 GMT</pubDate>
+      </item>
+    </channel></rss>`
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, status: 200, text: async () => rssXml }) as unknown as Response),
+    )
+
+    const res = await refreshPost(ctx({ env }))
+    expect(res.status).toBe(200)
+    const body = JSON.parse(await res.text()) as { created: number; feeds: Array<{ id: string; kind: string }> }
+    expect(body.created).toBe(1)
+    expect(body.feeds).toEqual([expect.objectContaining({ id: 'FEED_RSS_01', kind: 'rss', created: 1 })])
+
+    const events = await listCurrentEvents(env.CATALOG_DB as Parameters<typeof listCurrentEvents>[0])
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({
+      title: 'Storm batters the coast',
+      feed_id: 'FEED_RSS_01',
+      external_id: 'storm-1',
+      source_name: 'Example Environment',
+      status: 'proposed',
+    })
   })
 
   it('is idempotent — a second pull refreshes instead of duplicating', async () => {

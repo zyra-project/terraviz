@@ -38,6 +38,7 @@ import {
   type FeedConnectorRow,
 } from '../../_lib/feed-connectors-store'
 import { mapEonetFeed, type EonetFeed, type EventCreateBody } from '../../../../../cli/lib/eonet'
+import { mapRssFeed } from '../../../../../cli/lib/rss'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
 
@@ -78,22 +79,37 @@ function jsonError(status: number, error: string, message: string): Response {
 async function fetchAndMap(
   connector: FeedConnectorRow,
 ): Promise<{ ok: true; fetched: number; bodies: EventCreateBody[] } | { ok: false; error: string }> {
-  if (connector.kind !== 'eonet') {
-    return { ok: false, error: `unknown connector kind "${connector.kind}"` }
+  if (connector.kind === 'eonet') {
+    let feed: EonetFeed
+    try {
+      const res = await fetch(connector.url, { signal: AbortSignal.timeout(FEED_TIMEOUT_MS) })
+      if (!res.ok) return { ok: false, error: `feed responded ${res.status}` }
+      feed = (await res.json()) as EonetFeed
+    } catch {
+      return { ok: false, error: 'could not reach the feed' }
+    }
+    return {
+      ok: true,
+      fetched: Array.isArray(feed.events) ? feed.events.length : 0,
+      bodies: mapEonetFeed(feed),
+    }
   }
-  let feed: EonetFeed
-  try {
-    const res = await fetch(connector.url, { signal: AbortSignal.timeout(FEED_TIMEOUT_MS) })
-    if (!res.ok) return { ok: false, error: `feed responded ${res.status}` }
-    feed = (await res.json()) as EonetFeed
-  } catch {
-    return { ok: false, error: 'could not reach the feed' }
+  if (connector.kind === 'rss') {
+    // Generic RSS 2.0 / Atom — the bring-your-own-feed kind. The
+    // connector's registry id namespaces the dedupe key and its label is
+    // the provenance on every event it produces.
+    let xml: string
+    try {
+      const res = await fetch(connector.url, { signal: AbortSignal.timeout(FEED_TIMEOUT_MS) })
+      if (!res.ok) return { ok: false, error: `feed responded ${res.status}` }
+      xml = await res.text()
+    } catch {
+      return { ok: false, error: 'could not reach the feed' }
+    }
+    const bodies = mapRssFeed(xml, { feedId: connector.id, sourceName: connector.label })
+    return { ok: true, fetched: bodies.length, bodies }
   }
-  return {
-    ok: true,
-    fetched: Array.isArray(feed.events) ? feed.events.length : 0,
-    bodies: mapEonetFeed(feed),
-  }
+  return { ok: false, error: `unknown connector kind "${connector.kind}"` }
 }
 
 export const onRequestPost: PagesFunction<CatalogEnv> = async context => {

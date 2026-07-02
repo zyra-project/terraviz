@@ -29,6 +29,7 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `cli/lib/config.ts` | Resolve the CLI's runtime configuration: server URL + auth |
 | `cli/lib/eonet.ts` | Pure NASA EONET → current-event mapper for `terraviz import-events` + the refresh route. Synthesizes a readable summary (category + coords + time) when EONET gives none, and picks a public source page — falling back to a public NASA Worldview imagery deep-link when the only source is auth-walled (IRWIN/JTWC) (`docs/CURRENT_EVENTS_PLAN.md` §9) |
 | `cli/lib/ffmpeg-hls.ts` | FFmpeg HLS encoder wrapper — multi-rendition equirectangular |
+| `cli/lib/rss.ts` | Pure generic RSS 2.0 / Atom → current-event mapper — the bring-your-own-feed connector kind. Zero-dependency tolerant XML scan (Workers has no DOMParser); carries GeoRSS points through as event geometry; the connector's registry id namespaces the `(feed_id, external_id)` dedupe key (`docs/CURRENT_EVENTS_PLAN.md` §9) |
 | `cli/lib/hls-incremental.ts` | Pure core of incremental HLS re-encoding — absolute-grid chunking, content-addressed segment hashing, reuse-vs-encode diff, playlist assembly (`docs/INCREMENTAL_HLS_PLAN.md`) |
 | `cli/lib/hls-incremental-runner.ts` | Incremental transcode orchestration over an injectable I/O seam — load manifest → diff → encode changed chunks → recycle the rest → publish playlists → persist manifest → mark-and-sweep segment GC (`docs/INCREMENTAL_HLS_PLAN.md` Stages 2-3) |
 | `cli/lib/migration-telemetry.ts` | Operator-side telemetry emitter for the migration CLIs |
