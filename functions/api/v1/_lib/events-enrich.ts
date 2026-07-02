@@ -89,18 +89,18 @@ export function extractJsonObject(text: string): Record<string, unknown> | null 
 }
 
 /** A plausible extracted date: a real calendar day, not decades off,
- *  and not after the publish anchor by more than a day (an event a feed
- *  reports on can't meaningfully post-date its own report by more). */
+ *  and not after the anchor by more than a day (an event a feed reports
+ *  on can't meaningfully post-date its own report by more). Items
+ *  without a parseable publish date anchor to *now* instead, so a
+ *  far-future hallucination can't slip through on anchor-less items. */
 export function isPlausibleDate(iso: string, publishedAt: string | null | undefined): boolean {
   const ms = Date.parse(iso)
   if (!Number.isFinite(ms)) return false
   const year = new Date(ms).getUTCFullYear()
   if (year < 1900) return false
-  const anchorMs = publishedAt ? Date.parse(publishedAt) : NaN
-  if (Number.isFinite(anchorMs)) {
-    if (ms > anchorMs + 24 * 60 * 60 * 1000) return false
-  }
-  return true
+  const publishedMs = publishedAt ? Date.parse(publishedAt) : NaN
+  const anchorMs = Number.isFinite(publishedMs) ? publishedMs : Date.now()
+  return ms <= anchorMs + 24 * 60 * 60 * 1000
 }
 
 /** Build the extraction prompt. Exported for tests. */

@@ -111,6 +111,13 @@ describe('isPlausibleDate', () => {
     expect(isPlausibleDate('1815-06-18', null)).toBe(false)
     expect(isPlausibleDate('not a date', null)).toBe(false)
   })
+
+  it('anchors to now when there is no publish date — far-future rejected, recent past kept', () => {
+    expect(isPlausibleDate('2100-01-01', null)).toBe(false)
+    expect(isPlausibleDate('2100-01-01', 'not a date either')).toBe(false)
+    const lastWeek = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+    expect(isPlausibleDate(lastWeek, null)).toBe(true)
+  })
 })
 
 describe('buildEnrichPrompt', () => {
