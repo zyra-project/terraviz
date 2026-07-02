@@ -79,7 +79,10 @@ const EONET_FEED = {
 
 /** Stub the global fetch the route uses to pull the feed. */
 function stubFeed(value: unknown, ok = true): void {
-  vi.stubGlobal('fetch', vi.fn(async () => ({ ok, json: async () => value }) as unknown as Response))
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({ ok, status: ok ? 200 : 502, json: async () => value }) as unknown as Response),
+  )
 }
 
 afterEach(() => {
@@ -109,26 +112,83 @@ describe('POST /api/v1/publish/events/refresh', () => {
     expect(body.error).toBe('feed_unavailable')
   })
 
-  it('pulls the feed, creates proposed events, and audits the refresh', async () => {
+  it('pulls the enabled connectors, creates proposed events, and audits the refresh', async () => {
     const { env, sqlite } = setupEnv()
     stubFeed(EONET_FEED)
 
     const res = await refreshPost(ctx({ env }))
     expect(res.status).toBe(200)
     const body = JSON.parse(await res.text()) as {
-      feed: string
       fetched: number
       mappable: number
       created: number
       refreshed: number
       failed: number
+      feeds: Array<{ id: string; kind: string; created: number; error?: string }>
     }
-    expect(body).toMatchObject({ feed: 'eonet', fetched: 2, mappable: 2, created: 2, refreshed: 0, failed: 0 })
+    expect(body).toMatchObject({ fetched: 2, mappable: 2, created: 2, refreshed: 0, failed: 0 })
+    // The migration-seeded EONET connector is the one enabled feed.
+    expect(body.feeds).toHaveLength(1)
+    expect(body.feeds[0]).toMatchObject({ id: 'FEED_EONET_DEFAULT', kind: 'eonet', created: 2 })
 
     const events = await listCurrentEvents(env.CATALOG_DB as Parameters<typeof listCurrentEvents>[0])
     expect(events).toHaveLength(2)
     expect(events.every(e => e.status === 'proposed')).toBe(true)
     expect(auditCount(sqlite, 'event.refreshed')).toBe(1)
+
+    // Run bookkeeping recorded on the connector row.
+    const row = sqlite
+      .prepare(`SELECT last_run_status, last_run_error FROM feed_connectors WHERE id = ?`)
+      .get('FEED_EONET_DEFAULT') as { last_run_status: string; last_run_error: string | null }
+    expect(row).toMatchObject({ last_run_status: 'ok', last_run_error: null })
+  })
+
+  it('records the failure on the connector row when its feed is down', async () => {
+    const { env, sqlite } = setupEnv()
+    stubFeed(null, false)
+    await refreshPost(ctx({ env }))
+    const row = sqlite
+      .prepare(`SELECT last_run_status, last_run_error FROM feed_connectors WHERE id = ?`)
+      .get('FEED_EONET_DEFAULT') as { last_run_status: string; last_run_error: string | null }
+    expect(row.last_run_status).toBe('error')
+    expect(row.last_run_error).toContain('502')
+  })
+
+  it('skips a disabled connector (200 with zeros when none are enabled)', async () => {
+    const { env, sqlite } = setupEnv()
+    sqlite.prepare(`UPDATE feed_connectors SET enabled = 0 WHERE id = ?`).run('FEED_EONET_DEFAULT')
+    stubFeed(EONET_FEED)
+    const res = await refreshPost(ctx({ env }))
+    expect(res.status).toBe(200)
+    const body = JSON.parse(await res.text()) as { created: number; feeds: unknown[] }
+    expect(body.created).toBe(0)
+    expect(body.feeds).toHaveLength(0)
+  })
+
+  it('skips a connector of unknown kind with a recorded error, without failing the run', async () => {
+    const { env, sqlite } = setupEnv()
+    sqlite
+      .prepare(
+        `INSERT INTO feed_connectors (id, kind, label, url, category, enabled, created_at, updated_at)
+         VALUES ('FEED_FUTURE', 'rss', 'Future feed', 'https://example.org/feed.xml', 'news', 1,
+                 '2026-07-01T00:00:00.000Z', '2026-07-01T00:00:00.000Z')`,
+      )
+      .run()
+    stubFeed(EONET_FEED)
+    const res = await refreshPost(ctx({ env }))
+    expect(res.status).toBe(200)
+    const body = JSON.parse(await res.text()) as {
+      created: number
+      feeds: Array<{ id: string; error?: string }>
+    }
+    // EONET still ingests; the unknown-kind row reports its error.
+    expect(body.created).toBe(2)
+    const future = body.feeds.find(f => f.id === 'FEED_FUTURE')
+    expect(future?.error).toContain('unknown connector kind')
+    const row = sqlite
+      .prepare(`SELECT last_run_status FROM feed_connectors WHERE id = 'FEED_FUTURE'`)
+      .get() as { last_run_status: string }
+    expect(row.last_run_status).toBe('error')
   })
 
   it('is idempotent — a second pull refreshes instead of duplicating', async () => {

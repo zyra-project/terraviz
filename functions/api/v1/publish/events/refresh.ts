@@ -3,18 +3,24 @@
  * ingestion (`docs/CURRENT_EVENTS_PLAN.md` §9).
  *
  * The scheduled importer (`.github/workflows/import-events.yml`) pulls
- * the feed every 6 hours; this route lets a curator pull it *now* from
- * the review queue instead of waiting for the next cron tick. It does
- * server-side what the CLI importer does: fetch the node's configured
- * feed, map each item to a create body via the shared pure mapper, and
- * run the same idempotent upsert+match path (`events-ingest.ts`). Every
- * event still lands `proposed` — the curator gate is unchanged.
+ * on a cron; this route lets a curator pull *now* from the review queue.
+ * It iterates the node's **enabled feed connectors** (the
+ * `feed_connectors` registry, `feed-connectors-store.ts`): for each, it
+ * fetches the feed, maps items to create bodies via the connector's
+ * pure mapper, and runs the same idempotent upsert+match path
+ * (`events-ingest.ts`). Every event still lands `proposed` — the
+ * curator gate is unchanged.
  *
- * Source-agnostic backend, node-configurable connector: NASA EONET is
- * the one connector wired for this Earth-science node (mirroring the
- * CLI). A node covering a different subject would wire a different feed.
- * The EONET specifics are quarantined to the imported pure mapper; the
- * upsert/validation core (`events-ingest.ts`) stays feed-agnostic.
+ * Connector dispatch is by `kind`: 'eonet' (the GeoJSON mapper in
+ * `cli/lib/eonet.ts`) is the one implementation today; the generic RSS
+ * connector lands next. A row whose kind this deployment doesn't know
+ * is skipped with a recorded error rather than failing the run, so a
+ * registry ahead of the code degrades gracefully.
+ *
+ * One connector's outage shouldn't hide another's events: fetch
+ * failures are recorded per-connector (`recordFeedRun`) and the run
+ * continues. The route only answers 502 when every enabled connector
+ * failed to fetch — preserving the old single-feed behaviour.
  *
  * Privileged-only (admin / service). Static `refresh` segment, so Pages
  * routes it ahead of the sibling `[id]` review-submit handler.
@@ -26,22 +32,68 @@ import { isPrivileged } from '../../_lib/publisher-store'
 import { writeAuditEvent } from '../../_lib/audit-store'
 import { parseCreate, resolveOriginNode, ingestEvent } from '../../_lib/events-ingest'
 import { bustFeaturedEventCache } from '../../_lib/events-store'
-import { mapEonetFeed, EONET_DEFAULT_URL, EONET_FEED_ID, type EonetFeed } from '../../../../../cli/lib/eonet'
+import {
+  listFeedConnectors,
+  recordFeedRun,
+  type FeedConnectorRow,
+} from '../../_lib/feed-connectors-store'
+import { mapEonetFeed, type EonetFeed, type EventCreateBody } from '../../../../../cli/lib/eonet'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
 
-/** Bound the per-request matcher loop. EONET's `days=14` window keeps
- *  the open-event count modest; this is a backstop, not the norm. */
+/** Bound the per-request matcher loop — a global budget across all
+ *  connectors. EONET's `days=14` window keeps the open-event count
+ *  modest; this is a backstop, not the norm. */
 const MAX_REFRESH_EVENTS = 100
 
 /** Give up on a slow feed rather than hang the request. */
 const FEED_TIMEOUT_MS = 10_000
+
+/** Per-connector outcome reported in the response + run bookkeeping. */
+interface ConnectorSummary {
+  id: string
+  kind: string
+  label: string
+  fetched: number
+  mappable: number
+  created: number
+  refreshed: number
+  failed: number
+  error?: string
+}
 
 function jsonError(status: number, error: string, message: string): Response {
   return new Response(JSON.stringify({ error, message }), {
     status,
     headers: { 'Content-Type': CONTENT_TYPE },
   })
+}
+
+/**
+ * Fetch + map one connector's feed into create bodies. Returns the raw
+ * item count alongside the mapped bodies, or a human-readable error
+ * string for the run bookkeeping. Dispatches on `kind` — the only place
+ * connector implementations are enumerated.
+ */
+async function fetchAndMap(
+  connector: FeedConnectorRow,
+): Promise<{ ok: true; fetched: number; bodies: EventCreateBody[] } | { ok: false; error: string }> {
+  if (connector.kind !== 'eonet') {
+    return { ok: false, error: `unknown connector kind "${connector.kind}"` }
+  }
+  let feed: EonetFeed
+  try {
+    const res = await fetch(connector.url, { signal: AbortSignal.timeout(FEED_TIMEOUT_MS) })
+    if (!res.ok) return { ok: false, error: `feed responded ${res.status}` }
+    feed = (await res.json()) as EonetFeed
+  } catch {
+    return { ok: false, error: 'could not reach the feed' }
+  }
+  return {
+    ok: true,
+    fetched: Array.isArray(feed.events) ? feed.events.length : 0,
+    bodies: mapEonetFeed(feed),
+  }
 }
 
 export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
@@ -54,42 +106,72 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
   }
 
   const db = context.env.CATALOG_DB
-
-  // Fetch the node's configured feed (EONET). A feed outage shouldn't
-  // read as a server bug — surface it as a 502 the UI can explain.
-  let feed: EonetFeed
-  try {
-    const res = await fetch(EONET_DEFAULT_URL, { signal: AbortSignal.timeout(FEED_TIMEOUT_MS) })
-    if (!res.ok) return jsonError(502, 'feed_unavailable', `The events feed responded ${res.status}.`)
-    feed = (await res.json()) as EonetFeed
-  } catch {
-    return jsonError(502, 'feed_unavailable', 'Could not reach the events feed.')
-  }
-
-  const fetched = Array.isArray(feed.events) ? feed.events.length : 0
-  const mapped = mapEonetFeed(feed)
-  const bodies = mapped.slice(0, MAX_REFRESH_EVENTS)
-
+  const connectors = await listFeedConnectors(db, { enabledOnly: true })
   const originNode = await resolveOriginNode(db)
-  let created = 0
-  let refreshed = 0
-  let failed = 0
-  for (const body of bodies) {
-    const parsed = parseCreate(body)
-    if (!parsed.ok) {
-      failed++
+
+  const feeds: ConnectorSummary[] = []
+  let budget = MAX_REFRESH_EVENTS
+  let anyFetched = false
+
+  for (const connector of connectors) {
+    const summary: ConnectorSummary = {
+      id: connector.id,
+      kind: connector.kind,
+      label: connector.label,
+      fetched: 0,
+      mappable: 0,
+      created: 0,
+      refreshed: 0,
+      failed: 0,
+    }
+    const result = await fetchAndMap(connector)
+    if (!result.ok) {
+      summary.error = result.error
+      await recordFeedRun(db, connector.id, { status: 'error', error: result.error })
+      feeds.push(summary)
       continue
     }
-    try {
-      const outcome = await ingestEvent(db, { ...parsed.value, originNode })
-      if (outcome.created) created++
-      else refreshed++
-    } catch {
-      failed++
+    anyFetched = true
+    summary.fetched = result.fetched
+    summary.mappable = result.bodies.length
+
+    for (const body of result.bodies.slice(0, budget)) {
+      const parsed = parseCreate(body)
+      if (!parsed.ok) {
+        summary.failed++
+        continue
+      }
+      try {
+        const outcome = await ingestEvent(db, { ...parsed.value, originNode })
+        if (outcome.created) summary.created++
+        else summary.refreshed++
+      } catch {
+        summary.failed++
+      }
     }
+    budget -= Math.min(summary.mappable, budget)
+    await recordFeedRun(db, connector.id, { status: 'ok' })
+    feeds.push(summary)
   }
 
-  const summary = { feed: EONET_FEED_ID, fetched, mappable: mapped.length, created, refreshed, failed }
+  // Preserve the old single-feed contract: a total feed outage is a 502
+  // the UI explains, not a silent all-zeros success. (No enabled
+  // connectors at all is a legitimate configuration → 200 with zeros.)
+  if (connectors.length > 0 && !anyFetched) {
+    return jsonError(502, 'feed_unavailable', 'Could not reach any enabled events feed.')
+  }
+
+  const totals = feeds.reduce(
+    (acc, f) => ({
+      fetched: acc.fetched + f.fetched,
+      mappable: acc.mappable + f.mappable,
+      created: acc.created + f.created,
+      refreshed: acc.refreshed + f.refreshed,
+      failed: acc.failed + f.failed,
+    }),
+    { fetched: 0, mappable: 0, created: 0, refreshed: 0, failed: 0 },
+  )
+  const summary = { ...totals, feeds }
 
   await writeAuditEvent(db, {
     actor_kind: 'publisher',

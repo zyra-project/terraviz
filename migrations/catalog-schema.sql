@@ -356,6 +356,20 @@ CREATE TABLE featured_datasets (
   FOREIGN KEY (added_by)   REFERENCES publishers(id)
 );
 
+CREATE TABLE feed_connectors (
+  id TEXT PRIMARY KEY,                -- ULID for operator-added rows; fixed id for seeds
+  kind TEXT NOT NULL,                 -- connector implementation: 'eonet' | 'rss' (later)
+  label TEXT NOT NULL,                -- operator-facing display name
+  url TEXT NOT NULL,                  -- the feed endpoint the connector fetches
+  category TEXT,                      -- portal grouping ('hazards', 'science-news', 'news', …)
+  enabled INTEGER NOT NULL DEFAULT 1, -- 0 = paused; disabled rows are skipped by every run
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  last_run_at TEXT,                   -- ISO timestamp of the most recent run attempt
+  last_run_status TEXT,               -- 'ok' | 'error' (null until first run)
+  last_run_error TEXT                 -- human-readable failure detail when status = 'error'
+);
+
 CREATE TABLE hero_override (
   id           INTEGER PRIMARY KEY CHECK (id = 1),  -- singleton row
   dataset_id   TEXT NOT NULL,
@@ -482,6 +496,7 @@ CREATE INDEX idx_datasets_updated_at ON datasets(updated_at);
 CREATE INDEX idx_datasets_visibility ON datasets(visibility, is_hidden, retracted_at);
 CREATE INDEX idx_event_dataset_links_dataset ON event_dataset_links(dataset_id, status);
 CREATE INDEX idx_featured_datasets_position ON featured_datasets(position);
+CREATE INDEX idx_feed_connectors_enabled ON feed_connectors(enabled);
 CREATE UNIQUE INDEX idx_node_identity_singleton ON node_identity(singleton);
 CREATE INDEX idx_renditions_dataset ON dataset_renditions(dataset_id);
 CREATE INDEX idx_tours_visibility ON tours(visibility, retracted_at, published_at);

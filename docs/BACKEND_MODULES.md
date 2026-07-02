@@ -172,6 +172,7 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `functions/api/v1/_lib/events-ingest.ts` | Shared current-events ingestion core — `parseCreate` (source-agnostic create-body validation), `resolveOriginNode`, and the idempotent `ingestEvent` (upsert + matcher run); reused by the create route and the refresh route (`docs/CURRENT_EVENTS_PLAN.md` §9) |
 | `functions/api/v1/_lib/events-matcher.ts` | Topical + temporal + geo scoring for current events — pure signals (curated topic-expanded term overlap, liveness-overlap, bbox-IoU) where topical relevance drives ranking and real-time/liveness boosts; `runMatcherForEvent` proposing `event_dataset_links` (`docs/CURRENT_EVENTS_PLAN.md` §4) |
 | `functions/api/v1/_lib/events-store.ts` | `current_events` + `event_dataset_links` data access — storage layer for the source-agnostic current-events feature (`docs/CURRENT_EVENTS_PLAN.md`) |
+| `functions/api/v1/_lib/feed-connectors-store.ts` | `feed_connectors` data access — the node-configurable current-events feed registry (which feeds this node ingests, enabled/disabled, one-row-deep run bookkeeping); read by the refresh route / importer, CRUD'd by the portal feeds page (`docs/CURRENT_EVENTS_PLAN.md` §9) |
 | `functions/api/v1/_lib/featured-datasets.ts` | `featured_datasets` row helpers |
 | `functions/api/v1/_lib/frames-manifest.ts` | Helpers shared by the Phase 3pg/B `/frames` endpoints |
 | `functions/api/v1/_lib/github-dispatch.ts` | GitHub repository_dispatch helper — Phase 3pd |
