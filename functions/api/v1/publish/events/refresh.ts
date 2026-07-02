@@ -54,10 +54,10 @@ const MAX_REFRESH_EVENTS = 100
 const FEED_TIMEOUT_MS = 10_000
 
 /** Max AI date/location-enrichment calls per refresh request (slice C).
- *  Only *new* events missing both fields spend from this, so steady
- *  state (mostly re-ingests) costs nothing; a first pull of a busy
- *  plain-news feed enriches the newest items and leaves the rest for
- *  the next cycle. */
+ *  Only *new* events missing a date or a location spend from this, so
+ *  steady state (mostly re-ingests) costs nothing; a first pull of a
+ *  busy plain-news feed enriches the newest items and leaves the rest
+ *  for the next cycle. */
 const MAX_ENRICH_CALLS = 25
 
 /** Per-connector outcome reported in the response + run bookkeeping. */

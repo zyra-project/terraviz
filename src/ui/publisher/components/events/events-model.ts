@@ -34,6 +34,10 @@ export interface EventGeometry {
   regionName?: string
 }
 
+/** The provenance vocabulary of the slice-C enrichment — which event
+ *  fields the ingest layer can AI-infer (`events-enrich.ts`). */
+export type InferredField = 'occurredStart' | 'geometry'
+
 export interface ReviewEvent {
   id: string
   title: string
@@ -46,10 +50,10 @@ export interface ReviewEvent {
   /** Facet group → values, e.g. `{ "Wildfires": ["Fire"] }`. */
   categories?: Record<string, string[]>
   keywords?: string[]
-  /** Fields the ingest layer AI-inferred ('occurredStart' / 'geometry')
-   *  — the detail pane badges these so the curator double-checks them
-   *  before approving (feeds slice C). */
-  inferredFields?: string[]
+  /** Fields the ingest layer AI-inferred — the detail pane badges these
+   *  so the curator double-checks them before approving (feeds slice C).
+   *  Mirrors the backend's `InferredField` provenance vocabulary. */
+  inferredFields?: InferredField[]
   links: ReviewLink[]
 }
 
