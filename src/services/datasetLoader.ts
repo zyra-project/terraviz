@@ -20,6 +20,7 @@ import { startDwell, type DwellHandle } from '../analytics'
 import { addViewSeconds } from './visitMemory'
 import { recommendRelated, normalizeTitle as normalizeRelatedTitle } from './relatedDatasets'
 import { fetchSemanticRelatedIds, RELATED_DEFAULT_LIMIT } from './relatedDatasetsService'
+import { fetchEventsForDataset, type PublicEvent } from './eventsService'
 import { openAddToPlaylistPopover } from '../ui/playlistUI'
 import { openDownloadDialog } from '../ui/downloadDialogUI'
 import { t, tAttr } from '../i18n'
@@ -506,6 +507,43 @@ function wireRelatedLinks(scope: ParentNode, onLoadDataset: (id: string) => void
   })
 }
 
+/** One "In the news" card: headline + cited source link + when. */
+function renderNewsItemHtml(ev: PublicEvent): string {
+  const when = ev.occurredStart ?? ev.source.publishedAt
+  const dateLabel = when ? escapeHtml(when.slice(0, 10)) : ''
+  // `ev.source.url` is guaranteed http(s) by `sanitizePublicEvent`.
+  let html = `<li class="info-news-item">`
+  html += `<p class="info-news-title">${escapeHtml(ev.title)}</p>`
+  html += `<p class="info-news-meta">`
+  html += `<a href="${escapeAttr(ev.source.url)}" target="_blank" rel="noopener noreferrer" class="info-news-source">`
+    + `${escapeHtml(ev.source.name)} ↗</a>`
+  if (dateLabel) html += `<span class="info-news-date"> · ${dateLabel}</span>`
+  html += `</p></li>`
+  return html
+}
+
+/**
+ * Fill the "In the news" placeholder with the approved current events
+ * linked to this dataset. Graceful absence: on no events / any failure
+ * the placeholder is removed so no empty section lingers. Mirrors
+ * `enhanceRelatedDatasets`' progressive, never-regress contract.
+ */
+async function renderInTheNews(infoBody: HTMLElement, datasetId: string): Promise<void> {
+  const slot = infoBody.querySelector('.info-in-the-news-section')
+  if (!slot) return
+  const events = await fetchEventsForDataset(datasetId)
+  // The panel may have been re-rendered for another dataset while we
+  // awaited — bail if our slot is gone or now belongs to a different id.
+  if (!infoBody.contains(slot) || slot.getAttribute('data-dataset-id') !== datasetId) return
+  if (events.length === 0) {
+    slot.remove()
+    return
+  }
+  let html = `<p class="info-section-label">${escapeHtml(t('infoPanel.inTheNews'))}</p>`
+  html += `<ul class="info-in-the-news">${events.map(renderNewsItemHtml).join('')}</ul>`
+  slot.innerHTML = html
+}
+
 /**
  * Progressively enhance the related-datasets list with the semantic
  * "more like this" ordering. Renders nothing new on its own — the
@@ -686,6 +724,11 @@ export function displayDatasetInfo(
     html += `<dl class="info-credits">${creditRows.join('')}</dl>`
   }
 
+  // --- "In the news" — approved current events linked to this dataset.
+  // Placeholder filled async by `renderInTheNews` after the panel mounts;
+  // removed entirely when the dataset has no events (graceful absence). --
+  html += `<div class="info-in-the-news-section" data-dataset-id="${escapeAttr(dataset.id)}"></div>`
+
   // --- Related datasets — manual entries first, then algorithmic
   // recommendations to fill the list up to the §4.2 cap. ----------
   const relatedHtml = renderRelatedDatasetsHtml(dataset, datasets)
@@ -790,6 +833,10 @@ export function displayDatasetInfo(
   // lexical list stands as the fallback.
   wireRelatedLinks(infoBody, onLoadDataset)
   void enhanceRelatedDatasets(infoBody, dataset, datasets, onLoadDataset)
+
+  // "In the news" — fill the placeholder with approved current events for
+  // this dataset (or remove it if there are none). Non-blocking; graceful.
+  void renderInTheNews(infoBody, dataset.id)
 
   // Wire up the description show-more / show-less toggle.
   const descWrap = infoBody.querySelector('.info-description-wrap[data-truncated="true"]') as HTMLElement | null

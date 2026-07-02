@@ -392,3 +392,47 @@ describe('displayDatasetInfo', () => {
     expect(() => displayDatasetInfo(makeDataset(), [], vi.fn())).not.toThrow()
   })
 })
+
+describe('displayDatasetInfo — "In the news"', () => {
+  const flush = async () => { for (let i = 0; i < 4; i++) await new Promise(r => setTimeout(r, 0)) }
+  const NEWS_EVENT = {
+    id: 'E1',
+    title: 'Marine heatwave off the coast',
+    source: { name: 'NOAA', url: 'https://example.gov/heatwave', publishedAt: '2026-06-25T00:00:00Z' },
+    occurredStart: '2026-06-25T12:00:00Z',
+    geometry: {},
+    datasetIds: ['ds-news'],
+  }
+
+  /** Route the per-dataset events endpoint to `events`; everything else
+   *  (the semantic-related enhancement) degrades. */
+  function stubFetchWithEvents(events: unknown[]): void {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const body = url.includes('/events') ? { events } : { datasets: [], degraded: 'unconfigured' }
+      return { ok: true, status: 200, json: async () => body } as unknown as Response
+    }))
+  }
+
+  beforeEach(() => { setupInfoDOM() })
+  afterEach(async () => { vi.unstubAllGlobals(); await import('./eventsService').then(m => m.resetDatasetEventsCacheForTests()) })
+
+  it('renders an "In the news" section when the dataset has approved events', async () => {
+    stubFetchWithEvents([NEWS_EVENT])
+    displayDatasetInfo(makeDataset({ id: 'ds-news' }), [], vi.fn())
+    await flush()
+    const body = document.getElementById('info-body')!
+    const section = body.querySelector('.info-in-the-news-section')
+    expect(section).not.toBeNull()
+    expect(section!.querySelector('.info-news-title')!.textContent).toBe('Marine heatwave off the coast')
+    const link = section!.querySelector('.info-news-source') as HTMLAnchorElement
+    expect(link.href).toContain('example.gov/heatwave')
+  })
+
+  it('removes the placeholder when the dataset has no events (graceful absence)', async () => {
+    stubFetchWithEvents([])
+    displayDatasetInfo(makeDataset({ id: 'ds-quiet' }), [], vi.fn())
+    await flush()
+    expect(document.getElementById('info-body')!.querySelector('.info-in-the-news-section')).toBeNull()
+  })
+})

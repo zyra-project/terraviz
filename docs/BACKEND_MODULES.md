@@ -93,6 +93,7 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `functions/api/v1/datasets/[id]/frames/[frameIndex].ts` | Route: `/api/v1/datasets/{id}/frames/{frameIndex}` |
 | `functions/api/v1/datasets/[id]/manifest.ts` | Route: GET /api/v1/datasets/{id}/manifest |
 | `functions/api/v1/datasets/[id]/related.ts` | Route: GET /api/v1/datasets/{id}/related — semantic "more like this" (Vectorize); lexical `relatedDatasets.ts` is the client fallback |
+| `functions/api/v1/datasets/[id]/events.ts` | Route: GET /api/v1/datasets/{id}/events — public "In the news" list: the approved current events with an approved link to this dataset (`listApprovedEventsForDataset`); short `Cache-Control`, `{ events: [] }` graceful degradation (`docs/CURRENT_EVENTS_PLAN.md` §6) |
 | `functions/api/v1/datasets/[id]/preview/[token].ts` | GET /api/v1/datasets/{id}/preview/{token} |
 | `functions/api/v1/datasets/[id]/preview/[token]/manifest.ts` | GET /api/v1/datasets/{id}/preview/{token}/manifest |
 | `functions/api/v1/featured-event.ts` | GET /api/v1/featured-event — public read of the current event that headlines the "Right now" hero (`docs/CURRENT_EVENTS_PLAN.md` §6.1) |

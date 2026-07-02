@@ -1,5 +1,11 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { sanitizePublicEvent, fetchApprovedEvents, resetEventsCacheForTests } from './eventsService'
+import {
+  sanitizePublicEvent,
+  fetchApprovedEvents,
+  fetchEventsForDataset,
+  resetEventsCacheForTests,
+  resetDatasetEventsCacheForTests,
+} from './eventsService'
 
 const VALID = {
   id: 'E1',
@@ -14,6 +20,7 @@ afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   resetEventsCacheForTests()
+  resetDatasetEventsCacheForTests()
 })
 
 describe('sanitizePublicEvent', () => {
@@ -63,5 +70,29 @@ describe('fetchApprovedEvents', () => {
     await fetchApprovedEvents()
     await fetchApprovedEvents()
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('fetchEventsForDataset', () => {
+  it('fetches the per-dataset endpoint and sanitizes', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ events: [VALID] }) })
+    vi.stubGlobal('fetch', fetchMock)
+    const events = await fetchEventsForDataset('DS0')
+    expect(events.map(e => e.id)).toEqual(['E1'])
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/v1/datasets/DS0/events')
+  })
+
+  it('returns [] on a non-ok response', async () => {
+    stubFetch(null, false)
+    expect(await fetchEventsForDataset('DS0')).toEqual([])
+  })
+
+  it('caches per dataset id', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ events: [VALID] }) })
+    vi.stubGlobal('fetch', fetchMock)
+    await fetchEventsForDataset('DS0')
+    await fetchEventsForDataset('DS0') // cached
+    await fetchEventsForDataset('DS1') // different id → refetch
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })

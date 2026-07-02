@@ -136,3 +136,46 @@ export async function fetchApprovedEvents(signal?: AbortSignal): Promise<PublicE
     return []
   }
 }
+
+/** Per-dataset "In the news" cache — keyed by dataset id, 60 s TTL. */
+const perDatasetCache = new Map<string, { value: PublicEvent[]; fetchedAt: number }>()
+
+function datasetEventsUrl(datasetId: string): string {
+  const base = typeof import.meta !== 'undefined' && import.meta.env?.BASE_URL ? import.meta.env.BASE_URL : '/'
+  return `${base}api/v1/datasets/${encodeURIComponent(datasetId)}/events`
+}
+
+/** Reset the per-dataset cache (tests only). */
+export function resetDatasetEventsCacheForTests(): void {
+  perDatasetCache.clear()
+}
+
+/**
+ * Fetch + cache the approved current events that relate to one dataset
+ * (`GET /api/v1/datasets/:id/events`) — the info panel's "In the news"
+ * section. Same sanitize + degrade-to-`[]` contract as
+ * {@link fetchApprovedEvents}; a per-dataset 60 s in-memory cache so
+ * reopening the same dataset doesn't refetch.
+ */
+export async function fetchEventsForDataset(datasetId: string, signal?: AbortSignal): Promise<PublicEvent[]> {
+  const cached = perDatasetCache.get(datasetId)
+  if (cached && Date.now() - cached.fetchedAt < EVENTS_LIST_CACHE_MS) return cached.value
+  try {
+    const res = await fetch(datasetEventsUrl(datasetId), { signal })
+    if (!res.ok) {
+      perDatasetCache.set(datasetId, { value: [], fetchedAt: Date.now() })
+      return []
+    }
+    const parsed = (await res.json()) as { events?: unknown }
+    const list = Array.isArray(parsed?.events) ? parsed.events : []
+    const value = list.map(sanitizePublicEvent).filter((e): e is PublicEvent => e !== null)
+    perDatasetCache.set(datasetId, { value, fetchedAt: Date.now() })
+    return value
+  } catch (err) {
+    if ((err as { name?: string })?.name !== 'AbortError') {
+      logger.warn('[events] Failed to fetch dataset events:', err)
+      perDatasetCache.set(datasetId, { value: [], fetchedAt: Date.now() })
+    }
+    return []
+  }
+}

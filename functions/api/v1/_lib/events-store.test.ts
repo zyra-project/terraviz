@@ -26,6 +26,7 @@ import {
   listLinksForEvents,
   getDecorationsForEvents,
   listPublicEvents,
+  listApprovedEventsForDataset,
   type NewCurrentEvent,
 } from './events-store'
 
@@ -513,5 +514,50 @@ describe('listPublicEvents', () => {
     const newer = await seedApprovedEvent(db, { datasetIndex: 1, publishedAt: '2026-06-24T00:00:00.000Z' })
     const events = await listPublicEvents(db, { now: NOW })
     expect(events.map(e => e.id)).toEqual([newer, older])
+  })
+
+  describe('listApprovedEventsForDataset', () => {
+    async function seedApprovedEvent(
+      db: D1Database,
+      opts: { datasetIndex?: number; publishedAt?: string; approveEvent?: boolean; approveLink?: boolean } = {},
+    ): Promise<string> {
+      const datasetId = seededDatasetId(opts.datasetIndex ?? 0)
+      const { id } = await insertCurrentEvent(db, { ...sampleEvent(), publishedAt: opts.publishedAt ?? '2026-06-20T00:00:00.000Z' })
+      await upsertEventDatasetLink(db, { eventId: id, datasetId, matchScore: 0.9 })
+      if (opts.approveEvent ?? true) await setEventStatus(db, id, 'approved', 'PUB1')
+      if (opts.approveLink ?? true) await setLinkStatus(db, id, datasetId, 'approved', 'PUB1')
+      return id
+    }
+
+    it('returns approved events linked to the dataset, newest first', async () => {
+      const { db } = freshDb()
+      const older = await seedApprovedEvent(db, { datasetIndex: 0, publishedAt: '2026-06-18T00:00:00.000Z' })
+      const newer = await seedApprovedEvent(db, { datasetIndex: 0, publishedAt: '2026-06-24T00:00:00.000Z' })
+      const events = await listApprovedEventsForDataset(db, seededDatasetId(0), { now: NOW })
+      expect(events.map(e => e.id)).toEqual([newer, older])
+      expect(events[0].datasetIds).toContain(seededDatasetId(0))
+    })
+
+    it('excludes a proposed event or an unapproved link', async () => {
+      const { db } = freshDb()
+      await seedApprovedEvent(db, { datasetIndex: 0, approveEvent: false })
+      await seedApprovedEvent(db, { datasetIndex: 0, approveLink: false })
+      expect(await listApprovedEventsForDataset(db, seededDatasetId(0), { now: NOW })).toEqual([])
+    })
+
+    it('does not return an event linked only to a different dataset', async () => {
+      const { db } = freshDb()
+      await seedApprovedEvent(db, { datasetIndex: 1 }) // linked to DS001
+      expect(await listApprovedEventsForDataset(db, seededDatasetId(0), { now: NOW })).toEqual([])
+    })
+
+    it('returns nothing when the requested dataset is hidden (no info leak)', async () => {
+      const { sqlite, db } = freshDb()
+      await seedApprovedEvent(db, { datasetIndex: 0 })
+      // The dataset the caller is asking about is hidden — a public probe
+      // of its id must not surface its linked events.
+      sqlite.prepare('UPDATE datasets SET is_hidden = 1 WHERE id = ?').run(seededDatasetId(0))
+      expect(await listApprovedEventsForDataset(db, seededDatasetId(0), { now: NOW })).toEqual([])
+    })
   })
 })

@@ -170,6 +170,44 @@
     font-size: calc(0.7rem * var(--ui-scale));
 }
 
+/* --- "In the news" — approved current events for this dataset ---
+   Cited cards: headline + external source link + date. Distinct from
+   the related-datasets list (which links to other datasets). */
+.info-in-the-news {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.info-news-item {
+    margin-bottom: calc(0.5rem * var(--ui-scale));
+}
+
+.info-news-title {
+    margin: 0;
+    font-size: calc(0.72rem * var(--ui-scale));
+    color: var(--color-text);
+    line-height: 1.35;
+}
+
+.info-news-meta {
+    margin: calc(0.1rem * var(--ui-scale)) 0 0;
+    font-size: calc(0.65rem * var(--ui-scale));
+}
+
+.info-news-source {
+    color: var(--color-accent);
+    text-decoration: none;
+}
+
+.info-news-source:hover {
+    text-decoration: underline;
+}
+
+.info-news-date {
+    color: var(--color-text-muted);
+}
+
 /* --- Captions-available badge (Phase 3 §5.2) -------------------
    Surfaces "this dataset has captions" in the info panel even
    when the SRT fetch hasn't (yet) succeeded — keeps the affordance
