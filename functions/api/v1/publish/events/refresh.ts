@@ -36,6 +36,7 @@ import { writeAuditEvent } from '../../_lib/audit-store'
 import { parseCreate, resolveOriginNode, ingestEvent } from '../../_lib/events-ingest'
 import { bustFeaturedEventCache } from '../../_lib/events-store'
 import {
+  feedRequestHeaders,
   listFeedConnectors,
   recordFeedRun,
   type FeedConnectorRow,
@@ -115,7 +116,10 @@ async function fetchAndMap(
   if (connector.kind === 'eonet') {
     let feed: EonetFeed
     try {
-      const res = await fetch(connector.url, { signal: AbortSignal.timeout(FEED_TIMEOUT_MS) })
+      const res = await fetch(connector.url, {
+        headers: feedRequestHeaders('eonet'),
+        signal: AbortSignal.timeout(FEED_TIMEOUT_MS),
+      })
       if (!res.ok) return { ok: false, error: `feed responded ${res.status}` }
       feed = (await res.json()) as EonetFeed
     } catch {
@@ -132,7 +136,12 @@ async function fetchAndMap(
   // the provenance on every event it produces.
   let xml: string
   try {
-    const res = await fetch(connector.url, { signal: AbortSignal.timeout(FEED_TIMEOUT_MS) })
+    // Real news CDNs content-negotiate: a bare Workers fetch (no UA, no
+    // Accept) gets 406'd by e.g. The Guardian. Send honest bot headers.
+    const res = await fetch(connector.url, {
+      headers: feedRequestHeaders('rss'),
+      signal: AbortSignal.timeout(FEED_TIMEOUT_MS),
+    })
     if (!res.ok) return { ok: false, error: `feed responded ${res.status}` }
     xml = await res.text()
   } catch {

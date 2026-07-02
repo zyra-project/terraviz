@@ -141,6 +141,13 @@ describe('POST /api/v1/publish/events/refresh', () => {
       .prepare(`SELECT last_run_status, last_run_error FROM feed_connectors WHERE id = ?`)
       .get('FEED_EONET_DEFAULT') as { last_run_status: string; last_run_error: string | null }
     expect(row).toMatchObject({ last_run_status: 'ok', last_run_error: null })
+
+    // The feed fetch identifies itself — real news CDNs 406 a bare
+    // Workers fetch with no User-Agent (The Guardian did, live).
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>
+    const init = fetchMock.mock.calls[0]?.[1] as { headers?: Record<string, string> } | undefined
+    expect(init?.headers?.['User-Agent']).toContain('TerravizEventsBot')
+    expect(init?.headers?.Accept).toBeTruthy()
   })
 
   it('records the failure on the connector row when its feed is down', async () => {

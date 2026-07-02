@@ -18,7 +18,11 @@
 import type { CatalogEnv } from '../../_lib/env'
 import type { PublisherData } from '../_middleware'
 import { isPrivileged } from '../../_lib/publisher-store'
-import { FEED_CONNECTOR_KINDS, type FeedConnectorKind } from '../../_lib/feed-connectors-store'
+import {
+  FEED_CONNECTOR_KINDS,
+  feedRequestHeaders,
+  type FeedConnectorKind,
+} from '../../_lib/feed-connectors-store'
 import { mapEonetFeed, type EonetFeed, type EventCreateBody } from '../../../../../cli/lib/eonet'
 import { countFeedItems, mapRssFeed } from '../../../../../cli/lib/rss'
 
@@ -83,7 +87,10 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
   if ((kind as FeedConnectorKind) === 'eonet') {
     let feed: EonetFeed
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(FEED_TIMEOUT_MS) })
+      const res = await fetch(url, {
+        headers: feedRequestHeaders('eonet'),
+        signal: AbortSignal.timeout(FEED_TIMEOUT_MS),
+      })
       if (!res.ok) return jsonError(502, 'feed_unavailable', `The feed responded ${res.status}.`)
       feed = (await res.json()) as EonetFeed
     } catch {
@@ -94,7 +101,12 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
   } else {
     let xml: string
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(FEED_TIMEOUT_MS) })
+      // Real news CDNs content-negotiate: a bare Workers fetch (no UA,
+      // no Accept) gets 406'd by e.g. The Guardian. Honest bot headers.
+      const res = await fetch(url, {
+        headers: feedRequestHeaders('rss'),
+        signal: AbortSignal.timeout(FEED_TIMEOUT_MS),
+      })
       if (!res.ok) return jsonError(502, 'feed_unavailable', `The feed responded ${res.status}.`)
       xml = await res.text()
     } catch {

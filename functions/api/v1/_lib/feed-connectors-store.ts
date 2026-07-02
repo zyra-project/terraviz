@@ -23,6 +23,24 @@ import { newUlid } from './ulid'
 export const FEED_CONNECTOR_KINDS = ['eonet', 'rss'] as const
 export type FeedConnectorKind = (typeof FEED_CONNECTOR_KINDS)[number]
 
+/**
+ * Request headers for every server-side feed fetch (the refresh route
+ * and the preview dry-run). A bare Workers `fetch` sends no
+ * `User-Agent`/`Accept`, and mainstream news CDNs reject that (The
+ * Guardian's answers 406 Not Acceptable) — an honest bot UA with a
+ * contact URL plus a feed-shaped Accept gets past content negotiation
+ * and is polite to operators reading their logs.
+ */
+export function feedRequestHeaders(kind: FeedConnectorKind): Record<string, string> {
+  return {
+    'User-Agent': 'TerravizEventsBot/1.0 (+https://github.com/zyra-project/terraviz)',
+    Accept:
+      kind === 'eonet'
+        ? 'application/json'
+        : 'application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.1',
+  }
+}
+
 /** One `feed_connectors` row, column-for-column. */
 export interface FeedConnectorRow {
   id: string
