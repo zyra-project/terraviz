@@ -191,6 +191,7 @@
   "chat.datasetPrompt.tellMe": "Tell me about {title}",
   "chat.degraded.quotaExhausted": "Reduced functionality — Workers AI quota reached. Suggestions are using offline matching until it recovers.",
   "chat.error.generic": "Sorry, I had trouble responding. Try asking again, or check the LLM settings.",
+  "chat.event.eyebrow": "In the news",
   "chat.fallback.localDev": "⚠ AI service unavailable — running in offline mode. Make sure `npm run dev` is proxying /api, or configure a local provider in settings.",
   "chat.fallback.production": "⚠ AI service unavailable — showing offline results. Check LLM settings.",
   "chat.feedback.dismiss": "Dismiss",

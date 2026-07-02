@@ -428,6 +428,44 @@ describe('handleSend streaming', () => {
     })
   })
 
+  it('renders a cited event card for an event-citation action', async () => {
+    const { processMessage } = await import('../services/docentService')
+    const mockedProcessMessage = vi.mocked(processMessage)
+
+    mockedProcessMessage.mockImplementation(async function* () {
+      yield { type: 'delta' as const, text: 'There is an active wildfire outbreak.' }
+      yield {
+        type: 'action' as const,
+        action: {
+          type: 'event-citation' as const,
+          eventId: 'EVT_1',
+          title: 'Wildfire outbreak in the Sierra',
+          sourceName: 'InciWeb',
+          sourceUrl: 'https://inciweb.example/1',
+        },
+      }
+      yield { type: 'done' as const, fallback: false }
+    })
+
+    const cb = makeCallbacks()
+    cb.getDatasets.mockReturnValue([])
+    cb.getCurrentDataset.mockReturnValue(null)
+    initChatUI(cb)
+    openChat()
+
+    const input = document.getElementById('chat-input') as HTMLTextAreaElement
+    input.value = "what's happening with wildfires?"
+    ;(document.getElementById('chat-send') as HTMLButtonElement).click()
+
+    await vi.waitFor(() => {
+      const card = document.querySelector('.chat-event-citation')
+      expect(card).not.toBeNull()
+      expect(card!.querySelector('.chat-event-title')!.textContent).toBe('Wildfire outbreak in the Sierra')
+      const link = card!.querySelector('.chat-event-source') as HTMLAnchorElement
+      expect(link.href).toContain('inciweb.example/1')
+    })
+  })
+
   it('disables send button while streaming', async () => {
     const { processMessage } = await import('../services/docentService')
     const mockedProcessMessage = vi.mocked(processMessage)

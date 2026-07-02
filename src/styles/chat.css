@@ -240,6 +240,37 @@
 .chat-action-status-err {
     color: rgba(255, 160, 100, 0.7);
 }
+/* Cited current-event card the docent surfaces from an <<EVENT:ID>> marker.
+   The accompanying Load button + fly/seek status chips render as their own
+   action items alongside it. */
+.chat-event-citation {
+    background: var(--color-surface-alt);
+    border: 1px solid var(--white-o08);
+    border-inline-start: 3px solid var(--color-warning, #e0a23c);
+    border-radius: var(--component-chat-action-btn-radius);
+    padding: calc(0.4rem * var(--ui-scale)) calc(0.55rem * var(--ui-scale));
+}
+.chat-event-eyebrow {
+    display: block;
+    font-size: calc(0.58rem * var(--ui-scale));
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-warning, #e0a23c);
+}
+.chat-event-title {
+    margin: calc(0.15rem * var(--ui-scale)) 0 calc(0.2rem * var(--ui-scale));
+    font-size: calc(0.72rem * var(--ui-scale));
+    line-height: 1.3;
+    color: var(--color-text);
+}
+.chat-event-source {
+    font-size: calc(0.64rem * var(--ui-scale));
+    color: var(--color-accent);
+    text-decoration: none;
+}
+.chat-event-source:hover {
+    text-decoration: underline;
+}
 .chat-action-loaded {
     cursor: default;
     opacity: 0.5;

@@ -1354,7 +1354,11 @@ async function handleSend(): Promise<void> {
           // gets queued so it can re-evaluate after the user loads
           // a dataset that might satisfy it (different time-enabled
           // dataset → different success conditions).
-          if (action.type !== 'load-dataset') {
+          // `event-citation` is display-only (the load + fly/seek ride on
+          // the sibling load-dataset / fly-to / set-time actions the
+          // <<EVENT:ID>> marker expanded into), so it renders but is never
+          // deferred for execution.
+          if (action.type !== 'load-dataset' && action.type !== 'event-citation') {
             pendingGlobeActions.push(action)
           }
           updateStreamingMessage(docentMsg)
@@ -1715,6 +1719,17 @@ function renderActions(actions: ChatAction[]): string {
       // SPA side); render it verbatim so all consumers agree on
       // the label.
       return `<button class="chat-action-btn chat-action-frame" data-dataset-id="${escapeAttr(a.datasetId)}" data-frame-query="${escapeAttr(a.frameQuery)}" aria-label="${escapeAttr(t('chat.action.loadFrame.aria', { name: a.displayName }))}"><span class="chat-action-title">${escapeHtml(a.displayName)}</span> <span class="chat-action-load">${escapeHtml(t('chat.action.loadFrame'))}</span></button>`
+    }
+    if (a.type === 'event-citation') {
+      // Cited current-event card. Display-only: the sibling load-dataset /
+      // fly-to / set-time actions (expanded from the same <<EVENT:ID>>
+      // marker) do the loading and globe move. `sourceUrl` is guaranteed
+      // http(s) by the events client's sanitizer.
+      return `<div class="chat-event-citation">
+        <span class="chat-event-eyebrow">${escapeHtml(t('chat.event.eyebrow'))}</span>
+        <p class="chat-event-title">${escapeHtml(a.title)}</p>
+        <a class="chat-event-source" href="${escapeAttr(a.sourceUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(a.sourceName)} ↗</a>
+      </div>`
     }
     return ''
   }).join('')

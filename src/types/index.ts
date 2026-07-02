@@ -419,6 +419,22 @@ export type ChatAction =
       frameQuery: string
       displayName: string
     }
+  /**
+   * A cited current-event card the docent surfaces from an `<<EVENT:ID>>`
+   * marker (`docs/CURRENT_EVENTS_PLAN.md` §6.2). Display-only — the
+   * accompanying dataset load + globe fly/seek ride on the ordinary
+   * `load-dataset` / `fly-to` / `fit-bounds` / `set-time` actions the
+   * marker expands into (all derived client-side from the approved event,
+   * so the coordinates and time are never LLM-authored). `sourceUrl` is
+   * guaranteed http(s) by the events client's sanitizer.
+   */
+  | {
+      type: 'event-citation'
+      eventId: string
+      title: string
+      sourceName: string
+      sourceUrl: string
+    }
 
 /**
  * Snapshot of the LLM context used to generate an AI response.

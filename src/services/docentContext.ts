@@ -236,6 +236,15 @@ Additional globe markers:
 - <<LABELS:on>> or <<LABELS:off>> — Show or hide geographic labels and boundaries
 - <<REGION:name>> — Highlight a well-known geographic region and navigate to it. Supported regions include countries (e.g. <<REGION:Brazil>>), continents (<<REGION:Africa>>), oceans (<<REGION:Pacific Ocean>>), and geographic features (<<REGION:Amazon Basin>>, <<REGION:Ring of Fire>>, <<REGION:Sahara Desert>>).
 
+## Current Events
+When the user's message includes a [CURRENT EVENTS] block, it lists reputable, curator-approved current events relevant to this node's data — each with an \`id\`, a headline, its source, a date, and the \`dataset_id\` that best explains it. Surface one by placing a marker on its own line:
+- <<EVENT:ID>> — Show a cited card for that event AND load the dataset that explains it, flying the globe to where and when it happened. The client fills in the location, time, source, and dataset from the approved event — you supply ONLY the ID.
+
+Rules for events:
+- ONLY use an ID that appears verbatim in a [CURRENT EVENTS] block or a \`search_events\` tool result. NEVER invent an event, headline, source, date, or ID — the only current events that exist are the curator-approved ones in those sources. If none fits the user's question, don't mention one.
+- When a headline directly answers the user (e.g. "what's happening with wildfires right now?"), lead with <<EVENT:ID>> — you do NOT also need a <<LOAD:...>> or <<FLY:...>>; the event marker loads its dataset and moves the globe for you.
+- Refer to the event naturally in prose (e.g. "there's an active wildfire outbreak") but let the marker carry the citation; do not paste the source URL into your text.
+
 IMPORTANT rules for globe markers:
 - <<FLY:...>> can be used ANY time the user asks to see a location — it works whether or not a dataset is loaded. If the user asks to fly somewhere, just do it.
 - <<TIME:...>> requires a time-enabled dataset to be loaded. Dates MUST fall within the dataset's time range shown in the "Current View" section. Never suggest a date outside the range.
@@ -532,6 +541,46 @@ export function getListFeaturedDatasetsTool(): LLMTool {
             default: 6,
             minimum: 1,
             maximum: 24,
+          },
+        },
+      },
+    },
+  }
+}
+
+/**
+ * Tool definition for searching approved current events
+ * (`docs/CURRENT_EVENTS_PLAN.md` §6.2). The docent surfaces the returned
+ * events with `<<EVENT:ID>>` markers. Executed client-side as an in-memory
+ * keyword filter over the approved, in-window events already fetched for
+ * the turn (mirrors `search_catalog`), so it needs no Vectorize and works
+ * on any deploy. The `[CURRENT EVENTS]` injection block covers the
+ * cold-start case; this tool is for follow-up queries where the block is
+ * absent or a different topic than what's injected.
+ *
+ * Result shape: `{ events: [{ id, title, source_name, occurred, dataset_id }] }`.
+ * Only IDs returned here (or present in a [CURRENT EVENTS] block) are valid
+ * `<<EVENT:ID>>` payloads — the anti-hallucination rule for events.
+ */
+export function getSearchEventsTool(): LLMTool {
+  return {
+    type: 'function',
+    function: {
+      name: 'search_events',
+      description: 'Search reputable, curator-approved current events relevant to this node\'s data (recent news / authoritative-org reporting tied to a dataset). Use this when the user asks what is happening "right now", references a news story, or wants the current real-world context behind the data — and the [CURRENT EVENTS] block is absent or does not cover their topic. Returns matching approved events, each with `id`, `title`, `source_name`, `occurred` (date), and `dataset_id` (the dataset that explains it). Surface a result with an `<<EVENT:ID>>` marker. Returns an empty `events` array when nothing matches or no events are approved — never invent one.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'Natural-language topic to match against approved event headlines and summaries (e.g. "wildfires", "hurricane in the Atlantic", "flooding"). Leave empty to list all approved current events.',
+          },
+          limit: {
+            type: 'number',
+            description: 'Maximum number of events to return. Defaults to 5. Maximum 20.',
+            default: 5,
+            minimum: 1,
+            maximum: 20,
           },
         },
       },

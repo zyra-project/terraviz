@@ -8,7 +8,8 @@
 import type { Dataset, ChatMessage, ChatAction, DocentConfig, LegendCache, MapViewContext, LLMContextSnapshot, ReadingLevel } from '../types'
 import { streamChat, checkAvailability, type AvailabilityResult, type LLMMessage, type LLMContentPart, type LLMToolCall } from './llmProvider'
 import { isAvailable as isAppleIntelligenceAvailable, streamChatLocal } from './appleIntelligenceProvider'
-import { buildSystemPrompt, buildCompressedHistory, buildLanguageReminderMessage, getSearchCatalogTool, getSearchDatasetsTool, getListFeaturedDatasetsTool, getLoadDatasetTool, getLoadFrameTool, getFlyToTool, getSetTimeTool, getFitBoundsTool, getAddMarkerTool, getToggleLabelsTool, getHighlightRegionTool } from './docentContext'
+import { buildSystemPrompt, buildCompressedHistory, buildLanguageReminderMessage, getSearchCatalogTool, getSearchDatasetsTool, getListFeaturedDatasetsTool, getSearchEventsTool, getLoadDatasetTool, getLoadFrameTool, getFlyToTool, getSetTimeTool, getFitBoundsTool, getAddMarkerTool, getToggleLabelsTool, getHighlightRegionTool } from './docentContext'
+import { fetchApprovedEvents, type PublicEvent } from './eventsService'
 import { parseIntent, generateResponse, searchDatasets, evaluateAutoLoad } from './docentEngine'
 import { clearDegraded as clearDegradedState, markDegraded as markDegradedState } from './docentDegradedState'
 import { apiFetch } from './catalogSource'
@@ -20,6 +21,11 @@ import { t } from '../i18n'
 
 // --- Constants ---
 const CONFIG_STORAGE_KEY = 'sos-docent-config'
+
+/** Max approved events injected into the `[CURRENT EVENTS]` block per turn.
+ *  The approved set is small in practice; the cap bounds token cost and
+ *  keeps the highest-weighted events visible. */
+const CURRENT_EVENTS_INJECTION_CAP = 12
 
 /**
  * Default vision-capable model for Cloudflare Workers AI. `llama-4-scout`
@@ -414,6 +420,51 @@ export function executeSearchCatalog(
   })
 }
 
+/** One approved event as the `search_events` tool returns it to the LLM. */
+export interface EventSearchResult {
+  id: string
+  title: string
+  source_name: string
+  occurred: string
+  dataset_id: string
+}
+
+/** Default / max events `search_events` returns in one call. */
+const SEARCH_EVENTS_DEFAULT_LIMIT = 5
+const SEARCH_EVENTS_MAX_LIMIT = 20
+
+/**
+ * Execute a `search_events` tool call — a pure, in-memory keyword filter
+ * over the approved events already fetched for the turn (no network, works
+ * on any deploy). An empty query lists all approved events (capped by
+ * `limit`); otherwise a case-insensitive substring match over the event's
+ * title + summary. Returns the compact shape the LLM needs to surface an
+ * `<<EVENT:ID>>` marker — only these ids (plus the [CURRENT EVENTS] block)
+ * are valid event references.
+ */
+export function executeSearchEvents(
+  args: Record<string, unknown>,
+  events: readonly PublicEvent[],
+): { events: EventSearchResult[] } {
+  const query = typeof args.query === 'string' ? args.query.trim().toLowerCase() : ''
+  const rawLimit = typeof args.limit === 'number' && Number.isFinite(args.limit)
+    ? args.limit
+    : SEARCH_EVENTS_DEFAULT_LIMIT
+  const limit = Math.max(1, Math.min(SEARCH_EVENTS_MAX_LIMIT, Math.floor(rawLimit)))
+  const matched = query
+    ? events.filter(ev => `${ev.title} ${ev.summary ?? ''}`.toLowerCase().includes(query))
+    : events
+  return {
+    events: matched.slice(0, limit).map(ev => ({
+      id: ev.id,
+      title: ev.title,
+      source_name: ev.source.name,
+      occurred: (ev.occurredStart ?? ev.source.publishedAt ?? '').slice(0, 10),
+      dataset_id: ev.datasetIds[0] ?? '',
+    })),
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Phase 1c — backend discovery tools (search_datasets + list_featured_datasets)
 //
@@ -706,6 +757,11 @@ export type ExtractedGlobeAction =
    *  side resolution happens in `resolveFrameQuery` against the
    *  dataset's `frames` envelope. */
   | { type: 'load-frame'; datasetId: string; datasetTitle: string; frameQuery: string; displayName: string }
+  /** A cited current-event card from an `<<EVENT:ID>>` marker. The
+   *  accompanying dataset load + fly/seek are emitted as ordinary
+   *  load-dataset / fly-to / fit-bounds / set-time actions the marker
+   *  expands into, so this variant carries only the citation display. */
+  | { type: 'event-citation'; eventId: string; title: string; sourceName: string; sourceUrl: string }
 
 /**
  * Try to resolve the contents of a `<<LOAD:...>>` marker to a real
@@ -924,11 +980,16 @@ function reconcileMarkerProse(text: string, datasets: Dataset[]): string {
 export function validateAndCleanText(
   text: string,
   datasets: Dataset[],
+  events: readonly PublicEvent[] = [],
 ): { cleanedText: string; validIds: Set<string>; invalidIds: Set<string>; globeActions: ExtractedGlobeAction[] } {
   const validIds = new Set<string>()
   const invalidIds = new Set<string>()
   const globeActions: ExtractedGlobeAction[] = []
   const datasetIdSet = new Set(datasets.map(d => d.id))
+  // Approved current events, keyed by uppercased id — the docent lowercases
+  // ULIDs about as often as it lowercases dataset ids, so match tolerantly.
+  const eventById = new Map<string, PublicEvent>()
+  for (const ev of events) eventById.set(ev.id.toUpperCase(), ev)
   // When the title-overlap fallback rescues a marker, remember the
   // mapping so the strip step downstream can rewrite the marker to
   // the canonical id (rather than leaving the LLM's title-shaped
@@ -1102,6 +1163,44 @@ export function validateAndCleanText(
     }
   }
 
+  // Extract <<EVENT:ID>> markers — a curator-approved current event
+  // (`docs/CURRENT_EVENTS_PLAN.md` §6.2). We expand each one, entirely
+  // from the approved event's own data (never LLM-authored numbers), into:
+  //   - an `event-citation` card (headline + cited source),
+  //   - a `load-dataset` of the dataset that explains it,
+  //   - a place move (`fly-to` for a point, `fit-bounds` for a box / named
+  //     region) and a `set-time` seek to when it happened.
+  // The load + fly + seek then ride the ordinary post-load flush the LLM's
+  // own <<LOAD>>+<<FLY>>+<<TIME>> sequences use. An id not present in the
+  // approved set is dropped (stripped below) — the anti-hallucination gate.
+  const EVENT_FLY_ALTITUDE_KM = 3000
+  for (const match of text.matchAll(/<?<EVENT:\s*([^>]+?)\s*>>?\n?/g)) {
+    const ev = eventById.get(match[1].trim().toUpperCase())
+    if (!ev) continue
+    globeActions.push({
+      type: 'event-citation',
+      eventId: ev.id,
+      title: ev.title,
+      sourceName: ev.source.name,
+      sourceUrl: ev.source.url,
+    })
+    const datasetId = ev.datasetIds[0]
+    if (datasetId && datasetIdSet.has(datasetId)) validIds.add(datasetId)
+    const g = ev.geometry
+    if (g.point) {
+      globeActions.push({ type: 'fly-to', lat: g.point.lat, lon: g.point.lon, altitude: EVENT_FLY_ALTITUDE_KM })
+    } else if (g.boundingBox) {
+      const { n, s, w, e } = g.boundingBox
+      globeActions.push({ type: 'fit-bounds', bounds: [w, s, e, n] })
+    } else if (g.regionName) {
+      const region = resolveRegion(g.regionName)
+      if (region) globeActions.push({ type: 'fit-bounds', bounds: region.bounds, label: region.name })
+    }
+    if (ev.occurredStart && !isNaN(new Date(ev.occurredStart).getTime())) {
+      globeActions.push({ type: 'set-time', isoDate: ev.occurredStart })
+    }
+  }
+
   // Fallback: parse bare `fly_to: lat, lon, alt` patterns (LLMs that ignore marker instructions)
   for (const match of text.matchAll(/\bfly_to\s*[:(\s]\s*([-\d.]+)\s*,\s*([-\d.]+)(?:\s*,\s*([-\d.]+))?\s*\)?/gi)) {
     const lat = parseFloat(match[1])
@@ -1185,6 +1284,9 @@ export function validateAndCleanText(
   cleanedText = cleanedText.replace(/<?<MARKER:[^>]+>>?\n?/g, '')
   cleanedText = cleanedText.replace(/<?<LABELS:[^>]+>>?\n?/g, '')
   cleanedText = cleanedText.replace(/<?<REGION:[^>]+>>?\n?/g, '')
+  // Strip <<EVENT:...>> markers — valid ones are carried forward as the
+  // event-citation + load + fly/seek actions; invalid ids just vanish.
+  cleanedText = cleanedText.replace(/<?<EVENT:[^>]+>>?\n?/g, '')
 
   // Strip bare fly_to/set_time text patterns (entire line)
   cleanedText = cleanedText.replace(/^.*\bfly_to\s*[:(\s]\s*[-\d.,\s]+\)?\s*$/gim, '')
@@ -1231,8 +1333,9 @@ async function* emitValidatedActions(
   accumulatedText: string,
   datasets: Dataset[],
   yieldedIds: Set<string>,
+  events: readonly PublicEvent[] = [],
 ): AsyncGenerator<DocentStreamChunk> {
-  const { cleanedText, validIds, invalidIds, globeActions } = validateAndCleanText(accumulatedText, datasets)
+  const { cleanedText, validIds, invalidIds, globeActions } = validateAndCleanText(accumulatedText, datasets, events)
   // Rewrite whenever the text was modified — covers stripped markers, hallucinated IDs,
   // and unresolved <<REGION:...>> names that still need to be removed from display.
   const needsRewrite = cleanedText !== accumulatedText
@@ -1269,6 +1372,17 @@ async function* emitValidatedActions(
           datasetTitle: ga.datasetTitle,
           frameQuery: ga.frameQuery,
           displayName: ga.displayName,
+        },
+      }
+    } else if (ga.type === 'event-citation') {
+      yield {
+        type: 'action',
+        action: {
+          type: 'event-citation',
+          eventId: ga.eventId,
+          title: ga.title,
+          sourceName: ga.sourceName,
+          sourceUrl: ga.sourceUrl,
         },
       }
     }
@@ -1490,6 +1604,12 @@ export async function* processMessage(
       return
     }
 
+    // Approved current events (curator-gated) for the [CURRENT EVENTS]
+    // injection, the `search_events` tool, and `<<EVENT:ID>>` validation.
+    // Cached 60 s in eventsService and degrades to [] on any failure, so a
+    // deploy without the events endpoint is a silent no-op here.
+    const approvedEvents = await fetchApprovedEvents()
+
     let preSearchContext = ''
     if (preSearchHits.length > 0) {
       const lines = preSearchHits.map(h => {
@@ -1528,6 +1648,22 @@ export async function* processMessage(
       })
       preSearchContext +=
         `[AVAILABLE TOURS — guided experiences that walk the user through a topic with narration, camera movements, and dataset loads:\n${tourLines.join('\n')}\nRecommend a tour when the user seems new, asks for an overview, says they don't know where to start, or asks for a guided experience. Surface with the same <<LOAD:ID>> marker as a regular dataset — the SPA routes tour-format rows into the tour engine automatically.]\n`
+    }
+
+    // [CURRENT EVENTS] injection — the cold-start path for the Orbit
+    // events surface (docs/CURRENT_EVENTS_PLAN.md §6.2). Like tours, the
+    // approved set is small, so we inject every event (capped) each turn
+    // rather than gating on a query; the model decides when a headline is
+    // relevant. Only these ids are valid <<EVENT:ID>> payloads — this block
+    // and the search_events tool are the anti-hallucination gate for events.
+    if (approvedEvents.length > 0) {
+      const eventLines = approvedEvents.slice(0, CURRENT_EVENTS_INJECTION_CAP).map(ev => {
+        const when = (ev.occurredStart ?? ev.source.publishedAt ?? '').slice(0, 10)
+        const datasetId = ev.datasetIds[0] ?? ''
+        return `- ${ev.id} | ${ev.title} | ${ev.source.name}${when ? ' | ' + when : ''}${datasetId ? ' | dataset_id: ' + datasetId : ''}`
+      })
+      preSearchContext +=
+        `[CURRENT EVENTS — reputable, curator-approved current events relevant to this node's data. Surface one with an <<EVENT:ID>> marker on its own line: it shows a cited card AND loads the dataset that explains it, flying the globe to where and when it happened. Only the ids below are valid; never invent an event, headline, or source:\n${eventLines.join('\n')}]\n`
     }
 
     const userMessage: LLMMessage = visionActive
@@ -1569,6 +1705,7 @@ export async function* processMessage(
       getSearchDatasetsTool(),
       getListFeaturedDatasetsTool(),
       getSearchCatalogTool(),
+      getSearchEventsTool(),
       getLoadDatasetTool(),
       getLoadFrameTool(),
       getFlyToTool(),
@@ -1666,11 +1803,11 @@ export async function* processMessage(
                 if (
                   chunk.call.name === 'search_catalog' ||
                   chunk.call.name === 'search_datasets' ||
-                  chunk.call.name === 'list_featured_datasets'
+                  chunk.call.name === 'list_featured_datasets' ||
+                  chunk.call.name === 'search_events'
                 ) {
-                  // All three discovery tools need a tool-result message
-                  // sent back to the LLM — queue for the end-of-round
-                  // dispatch below.
+                  // All discovery tools need a tool-result message sent back
+                  // to the LLM — queue for the end-of-round dispatch below.
                   pendingSearchCalls.push(chunk.call)
                 } else if (chunk.call.name === 'load_dataset') {
                   const args = chunk.call.arguments as { dataset_id?: string; dataset_title?: string }
@@ -1900,6 +2037,16 @@ export async function* processMessage(
                 tool_call_id: call.id,
                 content: JSON.stringify(result),
               })
+            } else if (call.name === 'search_events') {
+              // In-memory filter over the approved events already fetched
+              // for this turn — no network, works on any deploy.
+              const result = executeSearchEvents(call.arguments, approvedEvents)
+              logger.info(`[Docent] search_events("${String(call.arguments.query ?? '')}") → ${result.events.length} result(s)`)
+              conversationMessages.push({
+                role: 'tool',
+                tool_call_id: call.id,
+                content: JSON.stringify(result),
+              })
             } else {
               // Legacy in-process search_catalog.
               const results = executeSearchCatalog(call.arguments, datasets)
@@ -1924,7 +2071,7 @@ export async function* processMessage(
           // Self-heal the degraded badge so the user knows
           // functionality is restored without a manual reload.
           clearDegradedState()
-          yield* emitValidatedActions(accumulatedText, datasets, yieldedIds)
+          yield* emitValidatedActions(accumulatedText, datasets, yieldedIds, approvedEvents)
 
           // Safety net: if the LLM mentioned dataset titles from search_catalog
           // results in its prose but didn't emit <<LOAD:...>> markers for them,
