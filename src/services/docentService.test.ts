@@ -1947,6 +1947,16 @@ describe('validateAndCleanText — <<EVENT:ID>> markers', () => {
     expect(globeActions.some(g => g.type === 'set-time')).toBe(false)
     expect(globeActions.some(g => g.type === 'event-citation')).toBe(true)
   })
+
+  it('drops the whole event when its dataset is not in the client catalog', () => {
+    // No Load button could anchor the card, so emit nothing (the card +
+    // fly/seek without a load would break the "one tap loads it" contract).
+    const ev = makeEvent({ datasetIds: ['NOT_IN_CATALOG'] })
+    const { cleanedText, validIds, globeActions } = validateAndCleanText('<<EVENT:EVT_0001>>', datasets, [ev])
+    expect(globeActions).toHaveLength(0)
+    expect(validIds.size).toBe(0)
+    expect(cleanedText).not.toContain('EVENT')
+  })
 })
 
 describe('executeSearchEvents', () => {

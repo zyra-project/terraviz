@@ -1177,6 +1177,13 @@ export function validateAndCleanText(
   for (const match of text.matchAll(/<?<EVENT:\s*([^>]+?)\s*>>?\n?/g)) {
     const ev = eventById.get(match[1].trim().toUpperCase())
     if (!ev) continue
+    // The card's contract is "one tap loads the dataset that explains it".
+    // If that dataset isn't in this client's catalog there's no Load button
+    // to anchor the card — and the deferred fly/seek would never flush
+    // (nothing loads to trigger it) — so drop the whole event this turn.
+    // The marker is still stripped from the prose below.
+    const datasetId = ev.datasetIds[0]
+    if (!datasetId || !datasetIdSet.has(datasetId)) continue
     globeActions.push({
       type: 'event-citation',
       eventId: ev.id,
@@ -1184,8 +1191,7 @@ export function validateAndCleanText(
       sourceName: ev.source.name,
       sourceUrl: ev.source.url,
     })
-    const datasetId = ev.datasetIds[0]
-    if (datasetId && datasetIdSet.has(datasetId)) validIds.add(datasetId)
+    validIds.add(datasetId)
     const g = ev.geometry
     if (g.point) {
       globeActions.push({ type: 'fly-to', lat: g.point.lat, lon: g.point.lon, altitude: EVENT_FLY_ALTITUDE_KM })
