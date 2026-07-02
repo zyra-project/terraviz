@@ -58,7 +58,10 @@ import {
 } from './ui/playbackController'
 import {
   loadImageDataset, loadVideoDataset, displayDatasetInfo,
+  type EventNavResult,
 } from './services/datasetLoader'
+import { resolveRegion } from './data/regions'
+import type { PublicEvent } from './services/eventsService'
 import { TourEngine, type TourTelemetryMeta } from './services/tourEngine'
 import { showTourControls, hideTourControls, hideAllTourTextBoxes, hideAllTourImages, hideAllTourVideos, hideAllTourPopups, hideAllTourQuestions } from './ui/tourUI'
 import { initLegendForDataset, clearLegendCache, loadConfig } from './services/docentService'
@@ -1389,6 +1392,59 @@ class InteractiveSphere {
   }
 
   /**
+   * Fly the primary globe to a related current event's place and seek the
+   * loaded dataset to its time — the "In the news" card's "View on globe"
+   * action (`docs/CURRENT_EVENTS_PLAN.md` §6). Reuses the same primitives
+   * Orbit's docent drives: `renderer.flyTo` / `fitBounds` for place,
+   * `seekToDate` for time. Point geometry flies in to a regional altitude;
+   * a bounding box or a named region fits its extent. The time seek only
+   * runs when the event's start falls inside the loaded dataset's coverage;
+   * outside it (common for rolling real-time windows) we still fly to the
+   * place and report `out-of-range` so the card can note it.
+   */
+  private navigateToEvent(ev: PublicEvent): EventNavResult {
+    // A point event flies to ~regional altitude (km → MapLibre zoom in
+    // `MapRenderer.flyTo`); box/region events fit their extent instead.
+    const EVENT_FLY_ALTITUDE_KM = 3000
+    let navigated = false
+    const g = ev.geometry
+    if (g.point) {
+      void this.renderer?.flyTo(g.point.lat, g.point.lon, EVENT_FLY_ALTITUDE_KM)
+      if (isVrActive()) void flyToOnGlobe(g.point.lat, g.point.lon)
+      navigated = true
+    } else if (g.boundingBox) {
+      const { n, s, w, e } = g.boundingBox
+      this.renderer?.fitBounds([w, s, e, n])
+      navigated = true
+    } else if (g.regionName) {
+      const region = resolveRegion(g.regionName)
+      if (region) {
+        this.renderer?.fitBounds(region.bounds)
+        navigated = true
+      }
+    }
+
+    let time: EventNavResult['time'] = 'none'
+    if (ev.occurredStart) {
+      const ds = this.appState.currentDataset
+      const start = ds?.startTime ? new Date(ds.startTime).getTime() : NaN
+      const end = ds?.endTime ? new Date(ds.endTime).getTime() : NaN
+      const target = new Date(ev.occurredStart).getTime()
+      // Only temporal datasets can be seeked or reported out-of-range; a
+      // static image has no time axis, so there is nothing to note.
+      if (!isNaN(start) && !isNaN(end) && end > start && !isNaN(target)) {
+        if (target >= start && target <= end) {
+          seekToDate(ev.occurredStart, this.hlsService, this.appState, this.playback)
+          time = 'seeked'
+        } else {
+          time = 'out-of-range'
+        }
+      }
+    }
+    return { navigated, time }
+  }
+
+  /**
    * Render the info panel for whichever slot `getInfoDisplayIndex`
    * points at, repopulate the picker dropdown with all loaded
    * datasets, and show/hide the picker based on how many are loaded.
@@ -1408,7 +1464,12 @@ class InteractiveSphere {
     }
 
     // Render the currently-selected dataset into the info panel body.
-    displayDatasetInfo(dataset, this.appState.datasets, (id) => this.loadDataset(id, 'browse'))
+    displayDatasetInfo(
+      dataset,
+      this.appState.datasets,
+      (id) => this.loadDataset(id, 'browse'),
+      (ev) => this.navigateToEvent(ev),
+    )
 
     // Repopulate the picker with every loaded dataset (in panel order)
     // and wire the change handler once.

@@ -208,6 +208,35 @@
     color: var(--color-text-muted);
 }
 
+/* "View on globe" — navigates the globe to the event: flies to its
+   location and/or seeks the dataset to its time, whichever the event has.
+   Subtle text button so it doesn't compete with the cited source link. */
+.info-news-locate {
+    display: inline-flex;
+    align-items: center;
+    margin-top: calc(0.25rem * var(--ui-scale));
+    padding: calc(0.15rem * var(--ui-scale)) calc(0.4rem * var(--ui-scale));
+    border: 1px solid var(--color-accent);
+    border-radius: var(--radius-sm, 4px);
+    background: transparent;
+    color: var(--color-accent);
+    font-size: calc(0.62rem * var(--ui-scale));
+    cursor: pointer;
+}
+
+.info-news-locate:hover {
+    background: var(--color-accent);
+    color: var(--color-bg);
+}
+
+/* Revealed only when the event's time falls outside the loaded dataset's
+   coverage (we still fly to the place). */
+.info-news-note {
+    margin: calc(0.25rem * var(--ui-scale)) 0 0;
+    font-size: calc(0.6rem * var(--ui-scale));
+    color: var(--color-warning, #e0a23c);
+}
+
 /* --- Captions-available badge (Phase 3 §5.2) -------------------
    Surfaces "this dataset has captions" in the info panel even
    when the SRT fetch hasn't (yet) succeeded — keeps the affordance
