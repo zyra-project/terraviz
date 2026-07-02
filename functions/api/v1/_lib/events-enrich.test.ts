@@ -13,6 +13,7 @@ import {
   buildEnrichPrompt,
   enrichEventFields,
   extractJsonObject,
+  extractModelText,
   isPlausibleDate,
   MIN_CONFIDENCE,
 } from './events-enrich'
@@ -140,5 +141,33 @@ describe('model selection', () => {
     await enrichEventFields({ AI: { run } }, PLAIN_NEWS)
     await enrichEventFields({ AI: { run }, EVENTS_ENRICH_MODEL: '@cf/example/newer-model' }, PLAIN_NEWS)
     expect(calls).toEqual(['@cf/meta/llama-4-scout-17b-16e-instruct', '@cf/example/newer-model'])
+  })
+})
+
+describe('extractModelText', () => {
+  const EXTRACT = JSON.stringify({ date: '2026-06-23', place: 'Europe', confidence: 0.9 })
+
+  it('accepts every known Workers AI reply envelope', async () => {
+    // Classic { response: string }, JSON-mode { response: object },
+    // OpenAI-compatible choices (llama-4-scout, observed live), and
+    // bare output_text — all must enrich identically.
+    const shapes: unknown[] = [
+      { response: EXTRACT },
+      { response: { date: '2026-06-23', place: 'Europe', confidence: 0.9 } },
+      { choices: [{ message: { role: 'assistant', content: EXTRACT } }] },
+      { output_text: EXTRACT },
+    ]
+    for (const shape of shapes) {
+      const out = await enrichEventFields({ AI: { run: async () => shape } }, PLAIN_NEWS)
+      expect(out?.occurredStart, JSON.stringify(shape).slice(0, 60)).toBe('2026-06-23T00:00:00.000Z')
+      expect(out?.geometry?.regionName).toBe('Europe')
+    }
+  })
+
+  it('returns null for unrecognised shapes', () => {
+    expect(extractModelText(undefined)).toBeNull()
+    expect(extractModelText({ something: 'else' })).toBeNull()
+    expect(extractModelText({ choices: [] })).toBeNull()
+    expect(extractModelText({ response: '' })).toBeNull()
   })
 })

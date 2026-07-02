@@ -72,6 +72,33 @@ function hasGeometry(geometry: EventGeometry | undefined): boolean {
   return Boolean(geometry && (geometry.boundingBox || geometry.point || geometry.regionName))
 }
 
+/**
+ * Pull the reply text out of whatever envelope the model returned.
+ * Workers AI is not uniform across model generations: classic models
+ * answer `{ response: string }`, JSON-mode replies can arrive as
+ * `{ response: object }` (already parsed), and newer models use the
+ * OpenAI-compatible `{ choices: [{ message: { content } }] }` shape
+ * (llama-4-scout does, observed live on the preview deployment).
+ * Returns null for anything unrecognisable.
+ */
+export function extractModelText(raw: unknown): string | null {
+  if (typeof raw === 'string') return raw || null
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  if (typeof r.response === 'string') return r.response || null
+  // JSON mode — the reply arrives pre-parsed; re-serialize for the
+  // shared extraction path.
+  if (r.response && typeof r.response === 'object') return JSON.stringify(r.response)
+  const choices = r.choices
+  if (Array.isArray(choices) && choices[0] && typeof choices[0] === 'object') {
+    const msg = (choices[0] as Record<string, unknown>).message
+    const content = msg && typeof msg === 'object' ? (msg as Record<string, unknown>).content : undefined
+    if (typeof content === 'string') return content || null
+  }
+  if (typeof r.output_text === 'string') return r.output_text || null
+  return null
+}
+
 /** Pull the first JSON object out of a model reply that may wrap it in
  *  prose or a code fence. Returns null when nothing parses. */
 export function extractJsonObject(text: string): Record<string, unknown> | null {
@@ -157,15 +184,20 @@ export async function enrichEventFields(
         timer = setTimeout(() => reject(new Error('enrich timeout')), ENRICH_TIMEOUT_MS)
       }),
     ])
-    const r = (raced ?? {}) as { response?: unknown }
-    if (typeof r.response !== 'string' || r.response.length === 0) {
-      // Visible in the deployment's real-time logs — distinguishes "the
-      // model answered garbage" from "the binding is missing" (which
-      // never reaches this function).
-      console.warn('[events-enrich] model returned an empty/non-text response')
+    const extracted = extractModelText(raced)
+    if (!extracted) {
+      // Visible in the deployment's real-time logs — the raw payload
+      // (truncated) names the envelope shape we failed to recognise.
+      let shape = ''
+      try {
+        shape = JSON.stringify(raced).slice(0, 300)
+      } catch {
+        shape = String(raced)
+      }
+      console.warn('[events-enrich] unrecognised model response shape:', shape)
       return null
     }
-    text = r.response
+    text = extracted
   } catch (e) {
     console.warn('[events-enrich] model call failed:', e instanceof Error ? e.message : String(e))
     return null
