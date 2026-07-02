@@ -2697,6 +2697,11 @@
     font-size: 0.85rem;
 }
 
+.publisher-feeds-restricted {
+    margin: 0;
+    color: var(--color-text-muted, #aab2c0);
+}
+
 .publisher-feeds-list {
     display: flex;
     flex-direction: column;

@@ -111,7 +111,9 @@ function categoryLabel(category: FeedPresetCategory | string | null): string {
     case 'news':
       return t('publisher.feeds.category.news')
     default:
-      return t('publisher.feeds.category.other')
+      // An unknown category (stored via the API, or from a newer
+      // deployment) shows verbatim rather than collapsing to "Other".
+      return category || t('publisher.feeds.category.other')
   }
 }
 
