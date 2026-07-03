@@ -131,8 +131,10 @@ describe('POST /api/v1/publish/node-profile/logo', () => {
       ctx({ env, method: 'POST', body: { contentType: 'image/svg+xml', dataBase64: toB64(pngBytes()) } }),
     )
     expect(res.status).toBe(400)
-    const { errors } = await readJson<{ errors: Array<{ field: string; code: string }> }>(res)
+    const { errors } = await readJson<{ errors: Array<{ field: string; code: string; message: string }> }>(res)
     expect(errors[0]).toMatchObject({ field: 'contentType', code: 'unsupported' })
+    // The shared validator's "Image ..." copy is re-worded per surface.
+    expect(errors[0].message).toMatch(/^Logo /)
     expect(puts).toHaveLength(0)
   })
 

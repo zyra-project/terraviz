@@ -87,7 +87,11 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
 
   const payload = validateImagePayload(body, LOGO_MAX_BYTES)
   if (!payload.ok) {
-    return fieldErrors([payload.error])
+    // The shared validator speaks about "Image …"; this surface is
+    // specifically the logo, so keep the route's original wording.
+    return fieldErrors([
+      { ...payload.error, message: payload.error.message.replace(/^Image /, 'Logo ') },
+    ])
   }
   const { bytes, contentType, ext } = payload
 
