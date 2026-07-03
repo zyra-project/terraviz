@@ -218,3 +218,51 @@ describe('renderEventDetail — coordinate override', () => {
     expect(body.edits.point).toEqual({ lat: 37.2, lon: -76.8 })
   })
 })
+
+describe('renderEventDetail — generate tour', () => {
+  it('POSTs to /tour and navigates into the authoring dock on success', async () => {
+    const fetchFn = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({
+      ok: true,
+      status: 201,
+      type: 'basic',
+      json: async () => ({ tour: { id: '01HXTOUR', slug: 'event-tour', title: 'Event: Storm' } }),
+      text: async () => '{}',
+    }) as unknown as Response)
+    const navigate = vi.fn()
+    const pane = renderEventDetail(event({ links: [link('DS1')] }), {
+      onEventStatusChange: vi.fn(),
+      fetchFn,
+      navigate,
+    })
+    ;(pane.querySelector('.publisher-events-tour-btn') as HTMLButtonElement).click()
+    await flush()
+    const [url, init] = fetchFn.mock.calls[0]
+    expect(String(url)).toBe('/api/v1/publish/events/EVT1/tour')
+    expect((init as RequestInit).method).toBe('POST')
+    expect(navigate).toHaveBeenCalledWith('/?tourEdit=01HXTOUR')
+  })
+
+  it('surfaces the server message when the event has no stops', async () => {
+    const body = {
+      error: 'no_datasets',
+      errors: [{ field: 'links', code: 'no_datasets', message: 'No visible dataset pairings.' }],
+    }
+    const fetchFn = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({
+      ok: false,
+      status: 400,
+      type: 'basic',
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+    }) as unknown as Response)
+    const navigate = vi.fn()
+    const pane = renderEventDetail(event(), { onEventStatusChange: vi.fn(), fetchFn, navigate })
+    const btn = pane.querySelector('.publisher-events-tour-btn') as HTMLButtonElement
+    btn.click()
+    await flush()
+    expect(navigate).not.toHaveBeenCalled()
+    expect(btn.disabled).toBe(false)
+    const status = pane.querySelector('.publisher-events-tour-status') as HTMLElement
+    expect(status.textContent).toBe('No visible dataset pairings.')
+    expect(status.classList.contains('publisher-events-status-error')).toBe(true)
+  })
+})

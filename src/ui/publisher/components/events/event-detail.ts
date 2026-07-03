@@ -445,6 +445,36 @@ export function renderEventDetail(event: ReviewEvent, cb: EventDetailCallbacks):
     headActions.append(bulkBtn)
   }
 
+  // "Generate tour" — one-shot: turn this event + its vetted pairings
+  // into an editable draft tour (docs/CURRENT_EVENTS_PLAN.md §7), then
+  // jump straight into the authoring dock to polish and publish.
+  const tourStatus = el('span', 'publisher-events-tour-status')
+  tourStatus.setAttribute('role', 'status')
+  const tourBtn = document.createElement('button')
+  tourBtn.type = 'button'
+  tourBtn.className = 'publisher-btn publisher-btn-small publisher-events-tour-btn'
+  tourBtn.textContent = t('publisher.events.generateTour')
+  tourBtn.addEventListener('click', () => {
+    tourBtn.disabled = true
+    tourStatus.textContent = t('publisher.events.generateTour.working')
+    tourStatus.classList.remove('publisher-events-status-error')
+    void publisherSend<{ tour: { id: string } }>(
+      `${EVENTS_ENDPOINT}/${encodeURIComponent(event.id)}/tour`,
+      {},
+      { method: 'POST', fetchFn: cb.fetchFn },
+    ).then(res => {
+      tourBtn.disabled = false
+      if (res.ok) {
+        tourStatus.textContent = ''
+        const navigate = cb.navigate ?? ((url: string) => { window.location.href = url })
+        navigate(`/?tourEdit=${encodeURIComponent(res.data.tour.id)}`)
+        return
+      }
+      handleWriteError(res, tourStatus, cb.navigate)
+    })
+  })
+  headActions.append(tourBtn)
+
   // "+ Add dataset" — pair a dataset the matcher never suggested. A
   // toggle in the head reveals an inline catalog search; picking a
   // candidate POSTs `addDatasetIds` and appends a fresh proposed row.
@@ -455,7 +485,7 @@ export function renderEventDetail(event: ReviewEvent, cb: EventDetailCallbacks):
   addBtn.setAttribute('aria-expanded', 'false')
   headActions.append(addBtn)
 
-  pairings.append(head, bulkStatus)
+  pairings.append(head, bulkStatus, tourStatus)
 
   const rowsHost = el('div', 'publisher-events-pairings-list')
   const rebuildRows = (): void => {

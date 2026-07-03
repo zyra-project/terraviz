@@ -2713,6 +2713,7 @@
 }
 .publisher-events-pairing-status,
 .publisher-events-bulk-status,
+.publisher-events-tour-status,
 .publisher-events-decision-status {
   font-size: calc(0.75rem * var(--ui-scale));
   color: var(--color-text-muted, #aab2c0);

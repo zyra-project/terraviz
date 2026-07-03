@@ -92,7 +92,18 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
 
   const datasets = await resolveStopDatasets(db, id)
   if (datasets.length === 0) {
-    return jsonError(400, 'no_datasets', 'This event has no visible dataset pairings to build tour stops from.')
+    // Carries the `errors: [...]` field envelope alongside the plain
+    // `{ error, message }` shape so the portal's publisherSend client
+    // surfaces the specific message rather than a generic 400 toast.
+    const message = 'This event has no visible dataset pairings to build tour stops from.'
+    return new Response(
+      JSON.stringify({
+        error: 'no_datasets',
+        message,
+        errors: [{ field: 'links', code: 'no_datasets', message }],
+      }),
+      { status: 400, headers: { 'Content-Type': CONTENT_TYPE } },
+    )
   }
 
   // Captions: AI-written when the binding exists, deterministic
