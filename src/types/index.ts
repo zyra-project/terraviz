@@ -701,6 +701,19 @@ export type TourTaskDef =
    * Distinct from `unloadAllDatasets`, which wipes every panel.
    */
   | { unloadDataset: string }
+  /**
+   * Seek the loaded (video) dataset to a moment in time — the tour
+   * analogue of the docent's `set_time` action, added for the
+   * auto-generated current-events tours (`docs/CURRENT_EVENTS_PLAN.md`
+   * §7: event occurred time → setTime). A no-op when no seekable
+   * dataset is loaded or the time is outside its range.
+   */
+  | { setTime: SetTimeTaskParams }
+
+export interface SetTimeTaskParams {
+  /** ISO-8601 instant (or date) to seek the loaded dataset to. */
+  time: string
+}
 
 export interface FlyToTaskParams {
   lat: number
@@ -917,6 +930,12 @@ export interface TourCallbacks {
   togglePlayPause(): void
   isPlaying(): boolean
   setPlaybackRate(rate: number): void
+  /**
+   * Seek the loaded dataset to an ISO time (the `setTime` task).
+   * Optional — hosts without seekable playback (or older wiring)
+   * simply skip the task.
+   */
+  setTime?(isoTime: string): void
   onTourEnd(): void
   /** Called when the user clicks the stop button in tour controls */
   onStop(): void

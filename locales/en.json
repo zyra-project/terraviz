@@ -882,6 +882,8 @@
   "publisher.events.form.submit": "Create event",
   "publisher.events.form.summary": "Summary (optional)",
   "publisher.events.form.title": "Title",
+  "publisher.events.generateTour": "Generate tour",
+  "publisher.events.generateTour.working": "Generating tour draft…",
   "publisher.events.inferred.date": "date",
   "publisher.events.inferred.label": "AI-inferred",
   "publisher.events.inferred.location": "location",

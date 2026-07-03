@@ -62,6 +62,7 @@ export type AuditAction =
   | 'event.reviewed'
   | 'event.ingested'
   | 'event.refreshed'
+  | 'event.tour_generated'
   | 'feed.created'
   | 'feed.updated'
   | 'feed.deleted'

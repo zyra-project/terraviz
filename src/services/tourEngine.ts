@@ -17,6 +17,7 @@ import type {
   TourFile, TourTaskDef, TourState, TourCallbacks, TourViewLayout,
   LoadDatasetTaskParams,
   FlyToTaskParams, ShowRectTaskParams, DatasetAnimationTaskParams,
+  SetTimeTaskParams,
   TiltRotateCameraTaskParams, QuestionTaskParams,
   PlayAudioTaskParams, PlayVideoTaskParams, ShowImageTaskParams,
   ShowPopupHtmlTaskParams, AddPlacemarkTaskParams,
@@ -536,6 +537,8 @@ export class TourEngine {
         return this.execUnloadDataset(value as string)
       case 'datasetAnimation':
         return this.execDatasetAnimation(value as DatasetAnimationTaskParams)
+      case 'setTime':
+        return this.execSetTime(value as SetTimeTaskParams)
 
       // Multi-viewport layout
       case 'setEnvView':
@@ -873,6 +876,19 @@ export class TourEngine {
       logger.info(`[Tour] setEnvView: legacy flat view "${raw}" rendered as single globe (flat projection not supported)`)
     }
     await this.callbacks.setEnvView({ layout })
+  }
+
+  private execSetTime(params: SetTimeTaskParams): void {
+    // Best-effort: the host seeks the loaded dataset when it can (a
+    // seekable video within range); otherwise the tour just plays on.
+    if (!params?.time || typeof params.time !== 'string') return
+    if (!this.callbacks.setTime) {
+      // debug, not info — a tour with several setTime stops on a host
+      // that intentionally doesn't wire the callback would spam the log.
+      logger.debug('[Tour] setTime task skipped — host provides no setTime callback')
+      return
+    }
+    this.callbacks.setTime(params.time)
   }
 
   private execDatasetAnimation(params: DatasetAnimationTaskParams): void {

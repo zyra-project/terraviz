@@ -191,6 +191,9 @@ const checks: Check[] = [
         .first()
         .click()
       await page.locator('.publisher-events-inferred-badge').first().waitFor({ timeout: 5_000 })
+      // The pairings toolbar exposes the one-shot Generate-tour action
+      // (event + vetted pairings → editable draft tour).
+      await page.locator('.publisher-events-tour-btn').first().waitFor({ timeout: 5_000 })
       // The status filter row lets a curator reach reviewed events.
       const filters = page.locator('.publisher-events-filters button')
       assert((await filters.count()) >= 5, 'queue header should expose the status filter (incl. All)')

@@ -1189,6 +1189,12 @@ class InteractiveSphere {
       setPlaybackRate: (rate) => {
         if (this.hlsService) this.hlsService.playbackRate = rate
       },
+      // The `setTime` task — same seek the docent's set_time action and
+      // the In-the-news jump use. Best-effort: an unseekable dataset or
+      // out-of-range time is a quiet no-op mid-tour.
+      setTime: (isoTime) => {
+        seekToDate(isoTime, this.hlsService, this.appState, this.playback)
+      },
       onTourEnd: () => this.endTour(),
       onStop: () => {
         // User-initiated stop. Release a playlist that was waiting

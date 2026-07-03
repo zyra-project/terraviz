@@ -357,6 +357,25 @@ describe('TourEngine', () => {
       expect(renderer.flyTo).toHaveBeenCalledWith(40, -105, 500 * 1.60934 * 0.2)
     })
 
+    it('dispatches setTime to the callback, and skips it when unwired', async () => {
+      const setTime = vi.fn()
+      const cb = makeCallbacks({ setTime })
+      const engine = new TourEngine(makeTour([
+        { setTime: { time: '2026-06-25T00:00:00.000Z' } },
+      ]), cb)
+      await engine.play()
+      expect(setTime).toHaveBeenCalledWith('2026-06-25T00:00:00.000Z')
+
+      // A host without the callback (older wiring) must not throw.
+      const bare = makeCallbacks()
+      delete (bare as Partial<TourCallbacks>).setTime
+      const engine2 = new TourEngine(makeTour([
+        { setTime: { time: '2026-06-25T00:00:00.000Z' } },
+        { pauseSeconds: 0 },
+      ]), bare)
+      await expect(engine2.play()).resolves.toBeUndefined()
+    })
+
     it('dispatches loadDataset to callback', async () => {
       const cb = makeCallbacks()
       const engine = new TourEngine(makeTour([

@@ -634,6 +634,7 @@ The tour engine (`src/services/tourEngine.ts`) plays back SOS-format tour JSON f
 | `setEnvView` | `callbacks.setEnvView()` — switches layout (1globe/2globes/4globes) |
 | `unloadDataset` | `callbacks.unloadDatasetAt()` — unloads a specific dataset by tour handle |
 | `worldIndex` on `loadDataset` | Routes dataset load to a specific panel slot (1-indexed) |
+| `setTime` | `callbacks.setTime()` — seeks the loaded (video) dataset to an ISO time (`seekToDate`); best-effort no-op when unseekable / out of range. Added for the auto-generated current-events tours (`docs/CURRENT_EVENTS_PLAN.md` §7) |
 
 ---
 
