@@ -161,7 +161,12 @@ CREATE TABLE blog_posts (
   status       TEXT NOT NULL DEFAULT 'draft',
   created_at   TEXT NOT NULL,            -- ISO 8601
   updated_at   TEXT NOT NULL,            -- ISO 8601
-  published_at TEXT,                     -- ISO 8601; set on publish
+  -- ISO 8601; set on publish. No trailing comment on this line:
+  -- SQLite's ALTER ... ADD COLUMN splices new columns onto the last
+  -- column-def line of the stored CREATE TABLE text, and a trailing
+  -- comment would read as if it documented the appended column
+  -- (same convention as 0024's reviewed_by and 0028's updated_at).
+  published_at TEXT, tour_id TEXT,
   FOREIGN KEY (author_id) REFERENCES publishers(id),
   FOREIGN KEY (event_id)  REFERENCES current_events(id) ON DELETE SET NULL
 );

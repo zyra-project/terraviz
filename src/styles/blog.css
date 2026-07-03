@@ -136,6 +136,24 @@ body.blog-body {
   color: var(--color-accent, #4cc3ff);
 }
 
+.blog-post-tour {
+  margin-block-start: 1.5rem;
+}
+
+.blog-post-tour-btn {
+  display: inline-block;
+  padding: calc(0.55rem * var(--ui-scale, 1)) calc(1.1rem * var(--ui-scale, 1));
+  border: 1px solid var(--color-accent, #4cc3ff);
+  border-radius: calc(8px * var(--ui-scale, 1));
+  color: var(--color-accent, #4cc3ff);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.blog-post-tour-btn:hover {
+  background: var(--accent-o20, rgba(76, 195, 255, 0.2));
+}
+
 .blog-post-explore {
   margin-block-start: 2rem;
   border-block-start: 1px solid var(--white-o08, rgba(255, 255, 255, 0.08));

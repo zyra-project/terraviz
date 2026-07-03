@@ -42,6 +42,8 @@ interface PublicPost {
   publishedAt: string | null
   datasets: Array<{ id: string; title: string }>
   event: { id: string; title: string; sourceName: string; sourceUrl: string } | null
+  /** The published companion tour, when one exists and is playable. */
+  tour?: { id: string } | null
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -142,6 +144,20 @@ function renderPost(post: PublicPost): HTMLElement {
     link.rel = 'noopener noreferrer'
     cite.append(link)
     wrap.append(cite)
+  }
+
+  if (post.tour?.id) {
+    // `?tour=` boots the globe with the tour playing (posterDeepLinks
+    // resolves published catalog tours by id).
+    const tourWrap = el('p', { className: 'blog-post-tour' })
+    tourWrap.append(
+      el('a', {
+        className: 'blog-post-tour-btn',
+        href: `/?tour=${encodeURIComponent(post.tour.id)}`,
+        textContent: t('blog.public.playTour'),
+      }),
+    )
+    wrap.append(tourWrap)
   }
 
   if (post.datasets.length > 0) {

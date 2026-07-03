@@ -299,6 +299,8 @@ export function blogPublicFixtures(): FixtureRule[] {
       publishedAt: '2026-07-01T00:00:00.000Z',
       datasets: [{ id: '01HXDS0000000000000000000A', title: 'Earth at Night' }],
       event: { id: 'EVT1', title: 'Global urbanization report released', sourceName: 'UN Habitat', sourceUrl: 'https://example.org/report' },
+      // A playable companion tour → the scene shows the Play button.
+      tour: { id: 'TR000AAAAAAAAAAAAAAAAAAAAA' },
     },
   }
   const list = {

@@ -71,6 +71,16 @@ describe('bootBlogPage', () => {
     const cite = document.querySelector('.blog-post-citation a') as HTMLAnchorElement
     expect(cite.getAttribute('href')).toBe('https://example.gov/heatwave')
     expect(cite.rel).toContain('noopener')
+    // No playable tour on this post → no button.
+    expect(document.querySelector('.blog-post-tour-btn')).toBeNull()
+  })
+
+  it('renders the Play-the-companion-tour button when the API surfaces one', async () => {
+    history.pushState(null, '', '/blog/gulf-warming')
+    stubFetch(200, { post: { ...POST.post, tour: { id: 'TR000AAAAAAAAAAAAAAAAAAAAA' } } })
+    await bootBlogPage()
+    const btn = document.querySelector('.blog-post-tour-btn') as HTMLAnchorElement
+    expect(btn.getAttribute('href')).toBe('/?tour=TR000AAAAAAAAAAAAAAAAAAAAA')
   })
 
   it('renders the missing view for an unknown slug', async () => {

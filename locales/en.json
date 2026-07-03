@@ -10,6 +10,7 @@
   "blog.public.loading": "Loading…",
   "blog.public.missing.back": "Back to all posts",
   "blog.public.missing.title": "That post isn't here.",
+  "blog.public.playTour": "▶ Play the companion tour",
   "blog.public.title": "From the team",
   "browse.activeFilters.aria": "Active filters",
   "browse.activeFilters.bbox.region": "Region {ns}, {ew}",

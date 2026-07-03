@@ -270,3 +270,68 @@ describe('deriveBlogSlug', () => {
     expect(deriveBlogSlug('!!!')).toBe('post')
   })
 })
+
+describe('companion-tour linkage', () => {
+  // Crockford ULID alphabet (no I, L, O, U).
+  const TOUR_ID = 'TR000' + 'A'.repeat(21)
+
+  function seedTour(
+    sqlite: ReturnType<typeof seedFixtures>,
+    opts: { published?: boolean; retracted?: boolean; visibility?: string } = {},
+  ): void {
+    sqlite
+      .prepare(
+        `INSERT INTO tours (id, slug, origin_node, title, tour_json_ref, visibility,
+                            schema_version, created_at, updated_at, published_at, retracted_at, publisher_id)
+         VALUES (?, 'companion-tour', 'NODE000', 'Companion', 'r2:tours/x/tour.json', ?,
+                 1, '2026-07-01T00:00:00.000Z', '2026-07-01T00:00:00.000Z', ?, ?, NULL)`,
+      )
+      .run(
+        TOUR_ID,
+        opts.visibility ?? 'public',
+        opts.published === false ? null : '2026-07-01T00:00:00.000Z',
+        opts.retracted ? '2026-07-02T00:00:00.000Z' : null,
+      )
+  }
+
+  it('tourId round-trips through create/read; garbage ids are rejected', async () => {
+    const { env } = setupEnv()
+    const post = await createDraft(env, { ...VALID, tourId: TOUR_ID })
+    const res = await getOne(ctx({ env, params: { id: post.id } }))
+    expect((await readJson<{ post: { tourId: string | null } }>(res)).post.tourId).toBe(TOUR_ID)
+
+    const bad = await createPost(ctx({ env, method: 'POST', body: { ...VALID, tourId: 'not-a-ulid' } }))
+    expect(bad.status).toBe(400)
+    const { errors } = await readJson<{ errors: Array<{ field: string }> }>(bad)
+    expect(errors.some(e => e.field === 'tourId')).toBe(true)
+  })
+
+  it('the public post surfaces the tour only while published + public + not retracted', async () => {
+    const { env, sqlite } = setupEnv()
+    const post = await createDraft(env, { ...VALID, tourId: TOUR_ID })
+    await transition(ctx({ env, method: 'POST', params: { id: post.id }, body: { action: 'publish' } }))
+
+    // No tours row at all (dangling id) → no tour on the wire.
+    let res = await publicPost(ctx({ env, path: `/api/v1/blog/${post.slug}`, params: { slug: post.slug } }))
+    expect((await readJson<{ post: { tour: unknown } }>(res)).post.tour).toBeNull()
+
+    // Draft tour → still gated. (Bust the per-slug KV cache between
+    // reads — direct SQL changes don't flow through the write routes.)
+    seedTour(sqlite, { published: false })
+    ;(env.CATALOG_KV as unknown as { _store: Map<string, string> })._store.clear()
+    res = await publicPost(ctx({ env, path: `/api/v1/blog/${post.slug}`, params: { slug: post.slug } }))
+    expect((await readJson<{ post: { tour: unknown } }>(res)).post.tour).toBeNull()
+
+    // Published + public → playable.
+    sqlite.prepare(`UPDATE tours SET published_at = '2026-07-01T00:00:00.000Z' WHERE id = ?`).run(TOUR_ID)
+    ;(env.CATALOG_KV as unknown as { _store: Map<string, string> })._store.clear()
+    res = await publicPost(ctx({ env, path: `/api/v1/blog/${post.slug}`, params: { slug: post.slug } }))
+    expect((await readJson<{ post: { tour: { id: string } | null } }>(res)).post.tour).toEqual({ id: TOUR_ID })
+
+    // Retracted → gated again.
+    sqlite.prepare(`UPDATE tours SET retracted_at = '2026-07-02T00:00:00.000Z' WHERE id = ?`).run(TOUR_ID)
+    ;(env.CATALOG_KV as unknown as { _store: Map<string, string> })._store.clear()
+    res = await publicPost(ctx({ env, path: `/api/v1/blog/${post.slug}`, params: { slug: post.slug } }))
+    expect((await readJson<{ post: { tour: unknown } }>(res)).post.tour).toBeNull()
+  })
+})

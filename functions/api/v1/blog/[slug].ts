@@ -16,7 +16,7 @@
  */
 
 import type { CatalogEnv } from '../_lib/env'
-import { blogPostCacheKey, getPublishedBySlug, toPublicPost } from '../_lib/blog-store'
+import { blogPostCacheKey, getPublishedBySlug, resolvePlayableTourId, toPublicPost } from '../_lib/blog-store'
 import { getCurrentEvent } from '../_lib/events-store'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
@@ -77,6 +77,7 @@ export const onRequestGet: PagesFunction<CatalogEnv, 'slug'> = async context => 
   let pub
   let datasets: Array<{ id: string; title: string }> = []
   let event: { id: string; title: string; sourceName: string; sourceUrl: string } | null = null
+  let tour: { id: string } | null = null
   try {
     const row = await getPublishedBySlug(context.env.CATALOG_DB, slug)
     if (!row) return notFound()
@@ -111,6 +112,11 @@ export const onRequestGet: PagesFunction<CatalogEnv, 'slug'> = async context => 
         event = { id: ev.id, title: ev.title, sourceName: ev.source_name, sourceUrl: ev.source_url }
       }
     }
+
+    // Companion tour: only surfaced while published, public, and not
+    // retracted — the same two-gate discipline as the event citation.
+    const playable = await resolvePlayableTourId(context.env.CATALOG_DB, pub.tourId)
+    if (playable) tour = { id: playable }
   } catch (err) {
     console.warn(
       '[blog] post read failed (table missing / D1 error):',
@@ -128,6 +134,7 @@ export const onRequestGet: PagesFunction<CatalogEnv, 'slug'> = async context => 
       publishedAt: pub.publishedAt,
       datasets,
       event,
+      tour,
     },
   })
   if (context.env.CATALOG_KV) {

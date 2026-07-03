@@ -43,6 +43,7 @@ interface PostWire {
   eventId: string | null
   status: 'draft' | 'published'
   publishedAt: string | null
+  tourId: string | null
 }
 
 interface ReviewEventLite {
@@ -181,6 +182,10 @@ export async function renderBlogEditPage(mount: HTMLElement, options: BlogEditPa
   const existing = postRes?.ok ? postRes.data.post : null
   let postId = existing?.id ?? null
   let postStatus: 'draft' | 'published' = existing?.status ?? 'draft'
+  // The AI-generated companion tour (tours-row id). Set by a
+  // generate-with-tour, persisted with the post so the public page
+  // can offer "Play the companion tour" once the tour is published.
+  let companionTourId: string | null = existing?.tourId ?? null
 
   // ----- Grounding state -----
   const selected = new Map<string, string>() // dataset id → title
@@ -324,7 +329,20 @@ export async function renderBlogEditPage(mount: HTMLElement, options: BlogEditPa
   })
   genTourLink.target = '_blank'
   genTourLink.rel = 'noopener'
-  genTourLink.hidden = true
+  // The link mirrors `companionTourId` at all times — it represents
+  // the post's PERSISTED tour linkage (saved with the post), not the
+  // last generate attempt. A failed regenerate, or a regenerate
+  // without the tour box, leaves the existing linkage (and so the
+  // link) in place.
+  const refreshTourLink = (): void => {
+    if (companionTourId) {
+      genTourLink.href = `/?tourEdit=${encodeURIComponent(companionTourId)}`
+      genTourLink.hidden = false
+    } else {
+      genTourLink.hidden = true
+    }
+  }
+  refreshTourLink()
   const genBtn = el('button', {
     type: 'button', className: 'publisher-btn publisher-btn-primary publisher-blog-generate-btn',
     textContent: t('publisher.blog.generate.run'),
@@ -335,9 +353,6 @@ export async function renderBlogEditPage(mount: HTMLElement, options: BlogEditPa
       return
     }
     genBtn.disabled = true
-    // Only ever reflect the latest attempt — a stale link from an
-    // earlier success must not survive a failed regenerate.
-    genTourLink.hidden = true
     setStatus(genStatus, t('publisher.blog.generate.working'), false)
     void publisherSend<{ draft: { title: string; summary: string; bodyMd: string }; tour: { id: string } | null; tourError: string | null }>(
       GENERATE_ENDPOINT,
@@ -360,15 +375,15 @@ export async function renderBlogEditPage(mount: HTMLElement, options: BlogEditPa
         bodyInput.value = res.data.draft.bodyMd
         // Keep an open Preview pane in sync with the drafted body.
         if (!preview.hidden) renderPreview()
-        genTourLink.hidden = !res.data.tour
         if (res.data.tour) {
-          genTourLink.href = `/?tourEdit=${encodeURIComponent(res.data.tour.id)}`
+          companionTourId = res.data.tour.id
           setStatus(genStatus, t('publisher.blog.generate.doneWithTour'), false)
         } else if (res.data.tourError) {
           setStatus(genStatus, t('publisher.blog.generate.doneTourFailed', { reason: res.data.tourError }), false)
         } else {
           setStatus(genStatus, t('publisher.blog.generate.done'), false)
         }
+        refreshTourLink()
       })
       .catch(() => setStatus(genStatus, t('publisher.blog.error.generic'), true))
       .finally(() => {
@@ -398,6 +413,7 @@ export async function renderBlogEditPage(mount: HTMLElement, options: BlogEditPa
     bodyMd: bodyInput.value,
     datasetIds: [...selected.keys()],
     eventId: citedEventId,
+    tourId: companionTourId,
   })
 
   saveBtn.addEventListener('click', () => {

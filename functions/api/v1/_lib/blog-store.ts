@@ -57,6 +57,7 @@ export interface BlogPostRow {
   created_at: string
   updated_at: string
   published_at: string | null
+  tour_id: string | null
 }
 
 /** The authoring-side wire shape (drafts included). */
@@ -73,10 +74,12 @@ export interface BlogPostPublic {
   createdAt: string
   updatedAt: string
   publishedAt: string | null
+  /** The AI-generated companion tour's tours-row id, when one exists. */
+  tourId: string | null
 }
 
 const COLUMNS =
-  'id, slug, title, summary, body_md, dataset_ids, event_id, author_id, status, created_at, updated_at, published_at'
+  'id, slug, title, summary, body_md, dataset_ids, event_id, author_id, status, created_at, updated_at, published_at, tour_id'
 
 function parseDatasetIds(raw: string | null): string[] {
   if (!raw) return []
@@ -102,6 +105,7 @@ export function toPublicPost(row: BlogPostRow): BlogPostPublic {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     publishedAt: row.published_at,
+    tourId: row.tour_id,
   }
 }
 
@@ -152,6 +156,7 @@ export interface BlogPostInput {
   bodyMd: string
   datasetIds: string[]
   eventId: string | null
+  tourId: string | null
 }
 
 export async function insertBlogPost(
@@ -175,15 +180,17 @@ export async function insertBlogPost(
     created_at: now,
     updated_at: now,
     published_at: null,
+    tour_id: input.tourId,
   }
   await db
     .prepare(
       `INSERT INTO blog_posts (${COLUMNS})
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       row.id, row.slug, row.title, row.summary, row.body_md, row.dataset_ids,
       row.event_id, row.author_id, row.status, row.created_at, row.updated_at, row.published_at,
+      row.tour_id,
     )
     .run()
   return row
@@ -202,7 +209,7 @@ export async function updateBlogPost(
   await db
     .prepare(
       `UPDATE blog_posts
-          SET title = ?, summary = ?, body_md = ?, dataset_ids = ?, event_id = ?, updated_at = ?
+          SET title = ?, summary = ?, body_md = ?, dataset_ids = ?, event_id = ?, tour_id = ?, updated_at = ?
         WHERE id = ?`,
     )
     .bind(
@@ -211,6 +218,7 @@ export async function updateBlogPost(
       input.bodyMd,
       input.datasetIds.length > 0 ? JSON.stringify(input.datasetIds) : null,
       input.eventId,
+      input.tourId,
       now,
       id,
     )
@@ -372,6 +380,44 @@ export function validateBlogInput(
     }
   }
 
+  let tourId: string | null = null
+  if (body.tourId != null) {
+    // Tours mint Crockford ULIDs; reject anything else up front so a
+    // garbage id can't occupy the column (a *dangling* valid id is
+    // fine — the public read only surfaces playable tours).
+    if (typeof body.tourId !== 'string' || !/^[0-9A-HJKMNP-TV-Z]{26}$/.test(body.tourId)) {
+      errors.push({ field: 'tourId', code: 'invalid', message: '`tourId` must be a tour id.' })
+    } else {
+      tourId = body.tourId
+    }
+  }
+
   if (errors.length > 0) return { ok: false, errors }
-  return { ok: true, value: { title, summary, bodyMd, datasetIds, eventId } }
+  return { ok: true, value: { title, summary, bodyMd, datasetIds, eventId, tourId } }
+}
+
+/**
+ * The public-playability gate for a post's companion tour: the tours
+ * row must be published, not retracted, and publicly visible — the
+ * same predicate the public catalog applies. Returns the id when
+ * playable, null otherwise (including dangling ids from deleted
+ * tours).
+ */
+export async function resolvePlayableTourId(
+  db: D1Database,
+  tourId: string | null,
+): Promise<string | null> {
+  if (!tourId) return null
+  const row = await db
+    .prepare(
+      `SELECT id FROM tours
+        WHERE id = ?
+          AND published_at IS NOT NULL
+          AND retracted_at IS NULL
+          AND visibility = 'public'
+        LIMIT 1`,
+    )
+    .bind(tourId)
+    .first<{ id: string }>()
+  return row?.id ?? null
 }
