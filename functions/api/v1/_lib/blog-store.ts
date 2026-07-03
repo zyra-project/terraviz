@@ -135,7 +135,11 @@ async function ensureUniqueSlug(db: D1Database, desired: string): Promise<string
   let n = 1
   while (await slugInUse(db, candidate)) {
     n++
-    candidate = `${desired}-${n}`.slice(0, 64)
+    // Truncate the BASE to make room for the suffix — slicing the
+    // composed string would drop the suffix on a max-length slug and
+    // re-test the same candidate forever.
+    const suffix = `-${n}`
+    candidate = `${desired.slice(0, 64 - suffix.length)}${suffix}`
     if (n > 100) throw new Error('Could not allocate a unique blog slug')
   }
   return candidate

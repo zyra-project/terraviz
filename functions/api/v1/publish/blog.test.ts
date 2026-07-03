@@ -129,6 +129,19 @@ describe('blog authoring routes', () => {
     expect(post.slug).toBe('watching-the-gulf-warm')
   })
 
+  it('suffixes collisions on max-length slugs without dropping the suffix', async () => {
+    // Regression: slicing the composed candidate would drop the '-2'
+    // on a 64-char slug and re-test the same candidate forever.
+    const { env } = setupEnv()
+    const longTitle = 'x'.repeat(80) // slugs to exactly 64 chars
+    const a = await createDraft(env, { ...VALID, title: longTitle })
+    const b = await createDraft(env, { ...VALID, title: longTitle })
+    expect(a.slug).toHaveLength(64)
+    expect(b.slug.endsWith('-2')).toBe(true)
+    expect(b.slug.length).toBeLessThanOrEqual(64)
+    expect(b.slug).not.toBe(a.slug)
+  })
+
   it('400 with field errors for a missing title/body', async () => {
     const { env } = setupEnv()
     const res = await createPost(ctx({ env, method: 'POST', body: { summary: 'x' } }))

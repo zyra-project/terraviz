@@ -61,50 +61,52 @@ export const onRequestGet: PagesFunction<CatalogEnv, 'slug'> = async context => 
     if (cached) return ok(cached, 'HIT')
   }
 
-  let row
+  // One degrade guard around EVERY read — the post lookup and both
+  // hydration queries. A transient D1 failure anywhere must yield the
+  // documented `no-store` 404, never a 500 from a public route.
+  let pub
+  let datasets: Array<{ id: string; title: string }> = []
+  let event: { id: string; title: string; sourceName: string; sourceUrl: string } | null = null
   try {
-    row = await getPublishedBySlug(context.env.CATALOG_DB, slug)
+    const row = await getPublishedBySlug(context.env.CATALOG_DB, slug)
+    if (!row) return notFound()
+    pub = toPublicPost(row)
+
+    // Hydrate cited-dataset titles, visibility-filtered — the same
+    // filter every public dataset surface applies.
+    const ids = pub.datasetIds.slice(0, MAX_HYDRATE)
+    if (ids.length > 0) {
+      const placeholders = ids.map(() => '?').join(', ')
+      const res = await context.env.CATALOG_DB
+        .prepare(
+          `SELECT id, title FROM datasets
+            WHERE id IN (${placeholders})
+              AND published_at IS NOT NULL
+              AND is_hidden = 0
+              AND retracted_at IS NULL`,
+        )
+        .bind(...ids)
+        .all<{ id: string; title: string }>()
+      const byId = new Map((res.results ?? []).map(r => [r.id, r]))
+      datasets = ids.flatMap(id => {
+        const hit = byId.get(id)
+        return hit ? [{ id: hit.id, title: hit.title }] : []
+      })
+    }
+
+    // Cited event: only surfaced while approved.
+    if (pub.eventId) {
+      const ev = await getCurrentEvent(context.env.CATALOG_DB, pub.eventId)
+      if (ev && ev.status === 'approved') {
+        event = { id: ev.id, title: ev.title, sourceName: ev.source_name, sourceUrl: ev.source_url }
+      }
+    }
   } catch (err) {
     console.warn(
       '[blog] post read failed (table missing / D1 error):',
       err instanceof Error ? err.message : String(err),
     )
     return notFound()
-  }
-  if (!row) return notFound()
-
-  const pub = toPublicPost(row)
-
-  // Hydrate cited-dataset titles, visibility-filtered — the same
-  // filter every public dataset surface applies.
-  let datasets: Array<{ id: string; title: string }> = []
-  const ids = pub.datasetIds.slice(0, MAX_HYDRATE)
-  if (ids.length > 0) {
-    const placeholders = ids.map(() => '?').join(', ')
-    const res = await context.env.CATALOG_DB
-      .prepare(
-        `SELECT id, title FROM datasets
-          WHERE id IN (${placeholders})
-            AND published_at IS NOT NULL
-            AND is_hidden = 0
-            AND retracted_at IS NULL`,
-      )
-      .bind(...ids)
-      .all<{ id: string; title: string }>()
-    const byId = new Map((res.results ?? []).map(r => [r.id, r]))
-    datasets = ids.flatMap(id => {
-      const hit = byId.get(id)
-      return hit ? [{ id: hit.id, title: hit.title }] : []
-    })
-  }
-
-  // Cited event: only surfaced while approved.
-  let event: { id: string; title: string; sourceName: string; sourceUrl: string } | null = null
-  if (pub.eventId) {
-    const ev = await getCurrentEvent(context.env.CATALOG_DB, pub.eventId)
-    if (ev && ev.status === 'approved') {
-      event = { id: ev.id, title: ev.title, sourceName: ev.source_name, sourceUrl: ev.source_url }
-    }
   }
 
   const body = JSON.stringify({
