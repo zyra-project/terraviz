@@ -16,7 +16,7 @@
  * the route surfaces, not a silent fallback.
  */
 
-import type { NodeProfileRow } from './node-profile-store'
+import { PROFILE_TONE_MAX_LEN, type NodeProfileRow } from './node-profile-store'
 import type { CurrentEventRow } from './events-store'
 import { extractModelText, extractJsonObject, ENRICH_MODEL_ID, type EnrichEnv } from './events-enrich'
 
@@ -66,10 +66,13 @@ const ABSTRACT_CLIP = 500
 /** Build the grounded prompt. Exported for tests. */
 export function buildBlogPrompt(inputs: GenerateInputs): { system: string; user: string } {
   const words = LENGTH_WORDS[inputs.length ?? 'medium']
-  const tone =
+  // Same bound for both tone sources — the profile's default_tone is
+  // already validated to this length at write time.
+  const tone = (
     (inputs.tone && inputs.tone.trim())
     || inputs.profile?.default_tone
     || 'curious, educational, accessible to the general public'
+  ).slice(0, PROFILE_TONE_MAX_LEN)
 
   const system =
     'You draft a blog post for the website of the organization described below. ' +

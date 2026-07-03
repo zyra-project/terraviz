@@ -30,7 +30,7 @@ import { getNodeProfile } from '../../_lib/node-profile-store'
 import { getCurrentEvent } from '../../_lib/events-store'
 import { generateBlogDraft, type BlogDraftLength } from '../../_lib/blog-generate'
 import { buildEventTourTasks, generateTourCaptions, type EventTourDataset } from '../../_lib/event-tour'
-import { createDraftTour, writeTourDraftJson } from '../../_lib/tour-mutations'
+import { createDraftTour, deleteTour, writeTourDraftJson } from '../../_lib/tour-mutations'
 import { POST_MAX_DATASETS } from '../../_lib/blog-store'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
@@ -145,8 +145,19 @@ export const onRequestPost: PagesFunction<CatalogEnv & EnrichEnv> = async contex
         tourError = created.errors?.[0]?.message ?? 'Could not create the tour draft.'
       } else {
         const written = await writeTourDraftJson(context.env, publisher, created.tour.id, { tourTasks })
-        if (!written.ok) tourError = written.message
-        else tour = { id: written.tour.id, slug: written.tour.slug, title: written.tour.title }
+        if (!written.ok) {
+          tourError = written.message
+          // Honour the tour:null contract — don't leave an empty,
+          // undiscoverable draft row behind. Best-effort: a failed
+          // cleanup just means a stray empty draft in /publish/tours.
+          try {
+            await deleteTour(context.env, publisher, created.tour.id)
+          } catch {
+            // The row survives as a visible (deletable) empty draft.
+          }
+        } else {
+          tour = { id: written.tour.id, slug: written.tour.slug, title: written.tour.title }
+        }
       }
     } catch (e) {
       // Log the real failure server-side; the wire gets a generic
