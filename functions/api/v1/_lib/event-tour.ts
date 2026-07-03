@@ -36,6 +36,11 @@ export const MAX_CAPTION_CHARS = 280
 const INTRO_HOLD_S = 6
 const STOP_HOLD_S = 10
 
+/** Don't let one slow model call stall the whole generate request —
+ *  past this, the deterministic template captions win (mirrors
+ *  `ENRICH_TIMEOUT_MS` in `events-enrich.ts`). */
+const CAPTIONS_TIMEOUT_MS = 10_000
+
 /** The per-dataset facts a stop needs. */
 export interface EventTourDataset {
   id: string
@@ -210,14 +215,24 @@ export async function generateTourCaptions(
     (event.region_name ? `Region: ${event.region_name}\n` : '') +
     `Datasets:\n${datasetLines}`
 
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
-    const raced = await env.AI.run(env.EVENTS_ENRICH_MODEL || ENRICH_MODEL_ID, {
+    const modelCall = env.AI.run(env.EVENTS_ENRICH_MODEL || ENRICH_MODEL_ID, {
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user },
       ],
       max_tokens: 700,
     })
+    // A late rejection from the losing branch must never surface as an
+    // unhandled rejection in the Workers runtime.
+    void modelCall.catch(() => {})
+    const raced = await Promise.race([
+      modelCall,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('caption timeout')), CAPTIONS_TIMEOUT_MS)
+      }),
+    ])
     const text = extractModelText(raced)
     if (!text) return fallback
     const start = text.indexOf('{')
@@ -242,5 +257,7 @@ export async function generateTourCaptions(
   } catch (e) {
     console.warn('[event-tour] caption generation failed:', e instanceof Error ? e.message : String(e))
     return fallback
+  } finally {
+    clearTimeout(timer)
   }
 }

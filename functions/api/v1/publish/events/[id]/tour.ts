@@ -17,6 +17,7 @@
  */
 
 import type { CatalogEnv } from '../../../_lib/env'
+import type { EnrichEnv } from '../../../_lib/events-enrich'
 import type { PublisherData } from '../../_middleware'
 import { isPrivileged } from '../../../_lib/publisher-store'
 import { writeAuditEvent } from '../../../_lib/audit-store'
@@ -73,7 +74,7 @@ async function resolveStopDatasets(db: D1Database, eventId: string): Promise<Eve
   return out
 }
 
-export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
+export const onRequestPost: PagesFunction<CatalogEnv & EnrichEnv, 'id'> = async context => {
   if (!context.env.CATALOG_DB) {
     return jsonError(503, 'binding_missing', 'CATALOG_DB binding is not configured on this deployment.')
   }
@@ -108,7 +109,7 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
 
   // Captions: AI-written when the binding exists, deterministic
   // templates otherwise — the tour generator never blocks on the model.
-  const captions = await generateTourCaptions(context.env as never, event, datasets)
+  const captions = await generateTourCaptions(context.env, event, datasets)
   const tourTasks = buildEventTourTasks(event, datasets, captions)
 
   const created = await createDraftTour(context.env, publisher, { title: `Event: ${event.title}`.slice(0, 200) })

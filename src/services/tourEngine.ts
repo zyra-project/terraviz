@@ -883,7 +883,9 @@ export class TourEngine {
     // seekable video within range); otherwise the tour just plays on.
     if (!params?.time || typeof params.time !== 'string') return
     if (!this.callbacks.setTime) {
-      logger.info('[Tour] setTime task skipped — host provides no setTime callback')
+      // debug, not info — a tour with several setTime stops on a host
+      // that intentionally doesn't wire the callback would spam the log.
+      logger.debug('[Tour] setTime task skipped — host provides no setTime callback')
       return
     }
     this.callbacks.setTime(params.time)
