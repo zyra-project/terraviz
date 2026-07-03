@@ -287,6 +287,20 @@ describe('buildBlogPrompt / parseDraftReply', () => {
     expect(out).not.toContain('made-up.example.com')
   })
 
+  it('URL grounding is path-case-sensitive but host-case-insensitive', () => {
+    const facts = 'Link: https://Example.org/Docs/Page'
+    const body = 'See https://example.org/Docs/Page and https://example.org/docs/page.'
+    const out = stripUngroundedUrls(body, facts)
+    expect(out).toContain('https://example.org/Docs/Page')
+    // Same host, different path casing — NOT the grounded URL.
+    expect(out).not.toContain('/docs/page')
+  })
+
+  it('leaves indentation untouched when nothing was stripped', () => {
+    const body = '## H\n\n- item\n  - nested item\n\n    indented code'
+    expect(stripUngroundedUrls(body, 'no urls here')).toBe(body)
+  })
+
   it('repairs the full control-char range, not just \\n/\\r/\\t', () => {
     const raw = '{"title": "T", "summary": "s", "bodyMd": "page\fbreak and bellend"}'
     const parsed = parseDraftReply(raw)

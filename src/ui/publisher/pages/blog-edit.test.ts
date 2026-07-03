@@ -139,6 +139,44 @@ describe('renderBlogEditPage', () => {
     expect(link.getAttribute('href')).toBe('/?tourEdit=TOUR1')
   })
 
+  it('a failed regenerate hides the previous attempt\'s tour link', async () => {
+    const capture: Captured = { posts: [] }
+    const mount = document.createElement('div')
+    let failNext = false
+    const failure = { error: 'generation_failed', message: 'The model call failed or timed out — try again.' }
+    const fetchFn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : (input as Request).url
+      const method = init?.method ?? 'GET'
+      if (method === 'POST' && url.includes('/blog/generate')) {
+        if (failNext) {
+          return { ok: false, status: 502, type: 'basic', json: async () => failure, text: async () => JSON.stringify(failure) } as unknown as Response
+        }
+        const body = { draft: DRAFT.draft, tour: { id: 'TOUR1' }, tourError: null }
+        return { ok: true, status: 200, type: 'basic', json: async () => body, text: async () => JSON.stringify(body) } as unknown as Response
+      }
+      let body: unknown = {}
+      if (url.includes('/publish/me')) body = ADMIN_ME
+      else if (url.includes('/publish/datasets')) body = DATASETS
+      else if (url.includes('/publish/events')) body = EVENTS
+      return { ok: true, status: 200, type: 'basic', json: async () => body, text: async () => JSON.stringify(body) } as unknown as Response
+    })
+    await renderBlogEditPage(mount, { fetchFn, navigate: vi.fn() })
+    await flush()
+    void capture
+
+    pickDataset(mount)
+    const genBtn = mount.querySelector('.publisher-blog-generate-btn') as HTMLButtonElement
+    const link = mount.querySelector('.publisher-blog-tour-link') as HTMLAnchorElement
+    genBtn.click()
+    await flush()
+    expect(link.hidden).toBe(false)
+
+    failNext = true
+    genBtn.click()
+    await flush()
+    expect(link.hidden).toBe(true)
+  })
+
   it('citing an event seeds its APPROVED dataset links as chips (proposed excluded)', async () => {
     const capture: Captured = { posts: [] }
     const mount = await mountEditor(capture)

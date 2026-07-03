@@ -335,6 +335,9 @@ export async function renderBlogEditPage(mount: HTMLElement, options: BlogEditPa
       return
     }
     genBtn.disabled = true
+    // Only ever reflect the latest attempt — a stale link from an
+    // earlier success must not survive a failed regenerate.
+    genTourLink.hidden = true
     setStatus(genStatus, t('publisher.blog.generate.working'), false)
     void publisherSend<{ draft: { title: string; summary: string; bodyMd: string }; tour: { id: string } | null; tourError: string | null }>(
       GENERATE_ENDPOINT,

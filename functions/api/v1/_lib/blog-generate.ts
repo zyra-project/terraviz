@@ -187,10 +187,20 @@ export function repairJsonStringNewlines(text: string): string {
 /** Match http(s) URLs; trailing sentence punctuation excluded. */
 const URL_RE = /https?:\/\/[^\s)\]}"'<>]+/g
 
-/** Comparison form: case-normalized host, trailing slash/punctuation
- *  trimmed — `https://x.org/` and `https://x.org` are one URL. */
+/** Comparison form: scheme + host case-normalized (they're
+ *  case-insensitive; the path/query are NOT), trailing
+ *  slash/punctuation trimmed — `https://x.org/` and `https://x.org`
+ *  are one URL, but `/Path` and `/path` stay distinct. */
 function normalizeUrl(raw: string): string {
-  return raw.replace(/[.,;:!?]+$/, '').replace(/\/+$/, '').toLowerCase()
+  const trimmed = raw.replace(/[.,;:!?]+$/, '').replace(/\/+$/, '')
+  try {
+    const u = new URL(trimmed)
+    // The URL parser lowercases protocol + host; path/query/hash keep
+    // their original case.
+    return `${u.protocol}//${u.host}${u.pathname}${u.search}${u.hash}`.replace(/\/+$/, '')
+  } catch {
+    return trimmed
+  }
 }
 
 /**
@@ -208,13 +218,23 @@ export function stripUngroundedUrls(bodyMd: string, groundedText: string): strin
 
   // Markdown links first, so a kept/stripped decision applies to the
   // whole construct rather than its inner URL.
-  let out = bodyMd.replace(/\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g, (whole, text: string, url: string) =>
-    allowed.has(normalizeUrl(url)) ? whole : text,
-  )
+  let removed = false
+  let out = bodyMd.replace(/\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g, (whole, text: string, url: string) => {
+    if (allowed.has(normalizeUrl(url))) return whole
+    removed = true
+    return text
+  })
   // Bare URLs (grounded ones survive the same check).
-  out = out.replace(URL_RE, m => (allowed.has(normalizeUrl(m)) ? m : ''))
-  // Tidy artifacts a dropped bare URL can leave: "( )" and doubled spaces.
-  return out.replace(/\(\s*\)/g, '').replace(/[^\S\n]{2,}/g, ' ')
+  out = out.replace(URL_RE, m => {
+    if (allowed.has(normalizeUrl(m))) return m
+    removed = true
+    return ''
+  })
+  if (!removed) return bodyMd
+  // Tidy artifacts a dropped bare URL can leave: "( )" and doubled
+  // spaces. The collapse requires a non-whitespace char before the
+  // run so leading indentation (nested lists, code blocks) survives.
+  return out.replace(/\(\s*\)/g, '').replace(/(\S)[^\S\n]{2,}/g, '$1 ')
 }
 
 /** Parse the model reply into a draft; null when unusable. */
