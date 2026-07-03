@@ -24,6 +24,13 @@ describe('extractOgImage', () => {
     expect(extractOgImage('<meta name="twitter:image" content="https://img.ex/tw.jpg">')).toBe('https://img.ex/tw.jpg')
   })
 
+  it('does not double-unescape &amp;-prefixed entities (CodeQL)', () => {
+    // `&amp;quot;` must decode to the literal text `&quot;`, not `"`.
+    expect(extractOgImage('<meta property="og:image" content="https://img.ex/a.jpg?q=&amp;quot;x">')).toBe(
+      'https://img.ex/a.jpg?q=&quot;x',
+    )
+  })
+
   it('rejects non-http(s) and empty content', () => {
     expect(extractOgImage('<meta property="og:image" content="javascript:alert(1)">')).toBeNull()
     expect(extractOgImage('<meta property="og:image" content="">')).toBeNull()

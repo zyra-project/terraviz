@@ -19,13 +19,15 @@ export const OG_FETCH_TIMEOUT_MS = 5_000
 export const OG_MAX_BYTES = 256 * 1024
 
 /** Minimal entity decode for attribute values (feeds/CMSes escape
- *  query separators as &amp;). */
+ *  query separators as &amp;). The ampersand decodes LAST so a
+ *  double-escaped sequence (`&amp;quot;`) can't cascade into a second
+ *  unescape — same ordering discipline as rss.ts's decodeEntities. */
 function decodeAttr(value: string): string {
   return value
-    .replace(/&amp;/gi, '&')
-    .replace(/&#38;/g, '&')
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/g, "'")
+    .replace(/&amp;/gi, '&')
+    .replace(/&#38;/g, '&')
 }
 
 /** A usable image URL: http(s) and sanely bounded. */
