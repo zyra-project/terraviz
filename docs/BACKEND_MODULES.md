@@ -99,6 +99,8 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `functions/api/v1/datasets/[id]/preview/[token]/manifest.ts` | GET /api/v1/datasets/{id}/preview/{token}/manifest |
 | `functions/api/v1/featured-event.ts` | GET /api/v1/featured-event — public read of the current event that headlines the "Right now" hero (`docs/CURRENT_EVENTS_PLAN.md` §6.1) |
 | `functions/api/v1/events.ts` | GET /api/v1/events — public list of approved current events (geometry + time + visible linked dataset ids) for the catalog Map/Timeline overlays; KV-cached, `{ events: [] }` graceful degradation (`docs/CURRENT_EVENTS_PLAN.md` §6.3) |
+| `functions/api/v1/blog.ts` | GET /api/v1/blog — public list of published blog posts (lean card shape, KV-cached `blog:list:v1` 60 s, degrades to an empty list) (`docs/CURRENT_EVENTS_PLAN.md` §7) |
+| `functions/api/v1/blog/[slug].ts` | GET /api/v1/blog/{slug} — one published post hydrated for the public page: full markdown body + visibility-filtered cited-dataset titles + the cited event's citation ONLY while approved; 404 for drafts and unknown slugs alike; KV-cached per slug |
 | `functions/api/v1/featured-hero.ts` | Route: GET /api/v1/featured-hero |
 | `functions/api/v1/featured.ts` | Route: GET /api/v1/featured |
 | `functions/api/v1/logout.ts` | GET /api/v1/logout |
@@ -130,6 +132,8 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `functions/api/v1/publish/feeds/[id].ts` | POST (patch a connector — label/url/category/**enable-disable**) + DELETE (remove; already-ingested events untouched) — privileged, audit-logged (`docs/CURRENT_EVENTS_PLAN.md` §9) |
 | `functions/api/v1/publish/feeds/preview.ts` | GET /api/v1/publish/feeds/preview?url=&kind= — privileged dry-run of a feed URL through the same pure mapper the refresh route uses; returns the first few mapped items (title/publishedAt/link) so an operator can see what a preset or pasted URL would ingest before adding it. Writes nothing (`docs/CURRENT_EVENTS_PLAN.md` §9) |
 | `functions/api/v1/publish/featured-hero.ts` | /api/v1/publish/featured-hero — the "Right now" hero admin write API (Phase B of `docs/HERO_ADMIN_SCOPING.md`) |
+| `functions/api/v1/publish/blog.ts` | GET (authoring list, drafts included, `?status=` filter) + POST (create a draft post — title/summary/markdown body/cited datasets/cited event; privileged, audit-logged `blog.create`) (`docs/CURRENT_EVENTS_PLAN.md` §7) |
+| `functions/api/v1/publish/blog/[id].ts` | GET (one post incl. drafts) + PUT (update content — the slug never changes, published URLs stay stable) + POST `{action: publish\|unpublish}` (the curator-gated status transition) — privileged writes, audit-logged, busts the public blog caches |
 | `functions/api/v1/publish/node-profile.ts` | GET + PUT /api/v1/publish/node-profile — the singleton host-organization profile (org name, mission, about, region focus, tone, links); any publisher reads, privileged writes, audit-logged (`node_profile.update`) — the "about the host" context Phase 3d blog generation grounds itself in |
 | `functions/api/v1/publish/featured.ts` | /api/v1/publish/featured |
 | `functions/api/v1/publish/featured/[dataset_id].ts` | /api/v1/publish/featured/{dataset_id} |
@@ -186,6 +190,7 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `functions/api/v1/_lib/frames-manifest.ts` | Helpers shared by the Phase 3pg/B `/frames` endpoints |
 | `functions/api/v1/_lib/github-dispatch.ts` | GitHub repository_dispatch helper — Phase 3pd |
 | `functions/api/v1/_lib/hero-override-store.ts` | `hero_override` singleton row helpers |
+| `functions/api/v1/_lib/blog-store.ts` | `blog_posts` data access (Phase 3d) — draft-born rows, stable slugs (allocated once, dataset-slug rules with a `post` fallback), publish/unpublish transitions keeping the first publish time, body validation with bounded fields, and the public KV cache keys + bust helper |
 | `functions/api/v1/_lib/node-profile-store.ts` | `node_profile` singleton row helpers — read/upsert + body validation (bounded prose fields, http(s)-only links) for the host-organization profile (Phase 3d) |
 | `functions/api/v1/_lib/iso-duration.ts` | Minimal ISO 8601 duration parser scoped to the shapes the catalog's `period` column carries |
 | `functions/api/v1/_lib/job-queue.ts` | Asynchronous job queue interface — Phase 1b |

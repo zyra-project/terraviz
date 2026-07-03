@@ -149,6 +149,23 @@ CREATE TABLE audit_events (
   created_at     TEXT NOT NULL
 );
 
+CREATE TABLE blog_posts (
+  id           TEXT PRIMARY KEY,
+  slug         TEXT NOT NULL UNIQUE,
+  title        TEXT NOT NULL,
+  summary      TEXT,                     -- optional standfirst under the title
+  body_md      TEXT NOT NULL,
+  dataset_ids  TEXT,                     -- JSON array of datasets.id
+  event_id     TEXT,                     -- optional cited current_events.id
+  author_id    TEXT NOT NULL,            -- publishers.id
+  status       TEXT NOT NULL DEFAULT 'draft',
+  created_at   TEXT NOT NULL,            -- ISO 8601
+  updated_at   TEXT NOT NULL,            -- ISO 8601
+  published_at TEXT,                     -- ISO 8601; set on publish
+  FOREIGN KEY (author_id) REFERENCES publishers(id),
+  FOREIGN KEY (event_id)  REFERENCES current_events(id) ON DELETE SET NULL
+);
+
 CREATE TABLE current_events (
   id             TEXT PRIMARY KEY,              -- ULID (newUlid)
   origin_node    TEXT NOT NULL,                 -- node_id, denormalized (federation-ready)
@@ -496,6 +513,7 @@ CREATE INDEX idx_analytics_spatial_daily_layer
   ON analytics_spatial_daily (event_type, layer_id, day);
 CREATE INDEX idx_asset_uploads_dataset ON asset_uploads(dataset_id, created_at);
 CREATE INDEX idx_audit_subject ON audit_events(subject_kind, subject_id, created_at);
+CREATE INDEX idx_blog_posts_status ON blog_posts(status, published_at DESC);
 CREATE UNIQUE INDEX idx_current_events_feed_external
   ON current_events(feed_id, external_id)
   WHERE feed_id IS NOT NULL AND external_id IS NOT NULL;

@@ -35,6 +35,7 @@ export type AuditSubjectKind =
   | 'event'
   | 'feed'
   | 'node_profile'
+  | 'blog_post'
 
 /**
  * `action` is a free-form, dotted token recording *what happened*.
@@ -68,6 +69,10 @@ export type AuditAction =
   | 'feed.updated'
   | 'feed.deleted'
   | 'node_profile.update'
+  | 'blog.create'
+  | 'blog.update'
+  | 'blog.publish'
+  | 'blog.unpublish'
 
 export interface AuditEventInput {
   actor_kind: AuditActorKind
