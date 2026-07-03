@@ -51,6 +51,26 @@ describe('renderNodeProfilePage', () => {
     expect(mount.querySelectorAll('.publisher-nodeprofile-link-row')).toHaveLength(1)
   })
 
+  it('mounts the markdown toolbar on About and Preview renders sanitized markdown', async () => {
+    const mount = document.createElement('div')
+    await renderNodeProfilePage(mount, {
+      fetchFn: mockFetch({ '/publish/me': ADMIN_ME, '/publish/node-profile': PROFILE }),
+    })
+    // The shared GitHub-issue-style toolbar sits above the textarea.
+    expect(mount.querySelector('.publisher-markdown-toolbar')).toBeTruthy()
+    // Toggling Preview renders the markdown (## About → <h2>) and
+    // hides the editing surfaces; toggling back restores them.
+    const toggle = mount.querySelector('.publisher-form-toggle') as HTMLButtonElement
+    toggle.click()
+    const preview = mount.querySelector('.publisher-form-markdown-preview') as HTMLElement
+    expect(preview.hidden).toBe(false)
+    expect(preview.querySelector('h2')?.textContent).toBe('About')
+    expect((mount.querySelector('#nodeprofile-about') as HTMLElement).hidden).toBe(true)
+    toggle.click()
+    expect(preview.hidden).toBe(true)
+    expect((mount.querySelector('#nodeprofile-about') as HTMLElement).hidden).toBe(false)
+  })
+
   it('shows the restricted card for a non-privileged caller', async () => {
     const mount = document.createElement('div')
     await renderNodeProfilePage(mount, {

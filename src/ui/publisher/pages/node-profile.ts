@@ -14,6 +14,8 @@
 import { t } from '../../../i18n'
 import { publisherGet, publisherSend, handleSessionError } from '../api'
 import { buildErrorCard } from '../components/error-card'
+import { attachToolbar, renderMarkdownToolbar } from '../components/markdown-toolbar'
+import { renderMarkdown } from '../../../services/markdownRenderer'
 
 /** Keep in sync with the backend store bounds
  *  (`functions/api/v1/_lib/node-profile-store.ts`). The API is the
@@ -149,6 +151,38 @@ function renderForm(mount: HTMLElement, state: FormState): void {
     maxLength: ABOUT_MAX_LEN,
     value: profile?.aboutMd ?? '',
   })
+  // GitHub-issue-style markdown helpers on the About field — the same
+  // toolbar + Edit/Preview toggle the dataset abstract uses. The
+  // preview renders through the shared sanitized markdown pipeline.
+  const aboutToolbar = renderMarkdownToolbar()
+  attachToolbar(aboutToolbar, about, { onChange: () => {} })
+  const aboutPreview = el('div', { className: 'publisher-form-markdown-preview' })
+  aboutPreview.hidden = true
+  const aboutToggle = el('button', {
+    type: 'button',
+    className: 'publisher-form-toggle',
+    textContent: t('publisher.datasetForm.action.preview'),
+  })
+  aboutToggle.addEventListener('click', () => {
+    const showPreview = aboutPreview.hidden
+    aboutPreview.hidden = !showPreview
+    about.hidden = showPreview
+    aboutToolbar.hidden = showPreview
+    aboutToggle.textContent = showPreview
+      ? t('publisher.datasetForm.action.edit')
+      : t('publisher.datasetForm.action.preview')
+    if (!showPreview) return
+    if (about.value.trim().length === 0) {
+      aboutPreview.replaceChildren(
+        el('p', { className: 'publisher-form-markdown-empty', textContent: t('publisher.datasetForm.preview.empty') }),
+      )
+      return
+    }
+    // renderMarkdown runs `marked` then sanitizeMarkdownHtml — safe to
+    // set as innerHTML (XSS-tested in markdownRenderer.test.ts).
+    aboutPreview.innerHTML = renderMarkdown(about.value)
+  })
+
   const region = el('input', {
     type: 'text',
     className: 'publisher-nodeprofile-input',
@@ -261,7 +295,7 @@ function renderForm(mount: HTMLElement, state: FormState): void {
     el('p', { className: 'publisher-nodeprofile-intro', textContent: t('publisher.nodeProfile.intro') }),
     labelled(t('publisher.nodeProfile.orgName'), orgName),
     labelled(t('publisher.nodeProfile.mission'), mission),
-    labelled(t('publisher.nodeProfile.aboutMd'), about),
+    aboutField(t('publisher.nodeProfile.aboutMd'), aboutToggle, aboutToolbar, about, aboutPreview),
     labelled(t('publisher.nodeProfile.regionFocus'), region),
     labelled(t('publisher.nodeProfile.defaultTone'), tone),
     el('div', { className: 'publisher-nodeprofile-links-wrap' }, [
@@ -291,5 +325,25 @@ function labelled(label: string, control: HTMLElement): HTMLElement {
   const wrap = el('label', { className: 'publisher-nodeprofile-field' })
   wrap.append(el('span', { className: 'publisher-field-label', textContent: label }))
   wrap.append(control)
+  return wrap
+}
+
+/** The About field: label + Edit/Preview toggle on one row, then the
+ *  markdown toolbar, the textarea, and the (initially hidden) preview.
+ *  A `div` rather than `labelled`'s `<label>` wrapper — a button
+ *  inside a label would re-trigger itself via label activation. */
+function aboutField(
+  label: string,
+  toggle: HTMLElement,
+  toolbar: HTMLElement,
+  textarea: HTMLElement,
+  preview: HTMLElement,
+): HTMLElement {
+  const wrap = el('div', { className: 'publisher-nodeprofile-field' })
+  const row = el('div', { className: 'publisher-form-label-row' }, [
+    el('span', { className: 'publisher-field-label', textContent: label }),
+    toggle,
+  ])
+  wrap.append(row, toolbar, textarea, preview)
   return wrap
 }
