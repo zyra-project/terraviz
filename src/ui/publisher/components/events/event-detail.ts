@@ -297,6 +297,21 @@ export function renderEventDetail(event: ReviewEvent, cb: EventDetailCallbacks):
     ]),
   )
 
+  // --- Story image (feed enclosure / og:image) — rendered so the
+  // curator vets it alongside the text; approving the event approves
+  // the image that generated tours will show. http(s) re-guarded
+  // client-side before it reaches an <img src>.
+  if (event.imageUrl && /^https?:\/\//i.test(event.imageUrl)) {
+    const img = document.createElement('img')
+    img.className = 'publisher-events-story-image'
+    img.src = event.imageUrl
+    img.alt = t('publisher.events.storyImage.alt')
+    img.loading = 'lazy'
+    // A dead image link should vanish, not show a broken-image glyph.
+    img.addEventListener('error', () => img.remove())
+    pane.append(img)
+  }
+
   // --- Meta strip: source / first observed / detail ---
   const sourceLink = document.createElement('a')
   sourceLink.className = 'publisher-events-source-link'

@@ -2454,6 +2454,16 @@
   font-size: calc(1.15rem * var(--ui-scale));
   color: var(--color-text, #e8eaf0);
 }
+.publisher-events-story-image {
+  display: block;
+  max-inline-size: min(24rem, 100%);
+  max-block-size: calc(12rem * var(--ui-scale));
+  object-fit: cover;
+  border: 1px solid var(--white-o08);
+  border-radius: calc(8px * var(--ui-scale));
+  margin-block-end: calc(0.75rem * var(--ui-scale));
+}
+
 .publisher-events-meta {
   display: flex;
   flex-wrap: wrap;

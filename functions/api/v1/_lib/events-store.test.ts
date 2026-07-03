@@ -376,6 +376,7 @@ describe('toPublicEvent', () => {
       origin_node: 'NODE000',
       title: 'Quiet day',
       summary: null,
+      image_url: null,
       source_name: 'USGS',
       source_url: 'https://example.gov/x',
       published_at: null,

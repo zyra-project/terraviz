@@ -67,6 +67,7 @@ export type EventTourEvent = Pick<
   | 'summary'
   | 'source_name'
   | 'occurred_start'
+  | 'image_url'
   | 'bbox_n'
   | 'bbox_s'
   | 'bbox_w'
@@ -163,18 +164,27 @@ export function buildEventTourTasks(
   // player routes it into the responsive media rail
   // (`tourUI.usesMediaRail`), so no coordinates to get wrong across
   // viewports. Hidden before the first dataset takes the globe.
+  // The story's own image (RSS enclosure / og:image, curator-vetted
+  // with the event) beats a dataset thumbnail — it shows what the
+  // headline is about; the data preview is the fallback.
+  const storyImage =
+    event.image_url && /^https?:\/\//i.test(event.image_url) ? event.image_url : null
   const introMedia = datasets.slice(0, MAX_TOUR_STOPS).find(d => d.thumbnailUrl)
-  if (introMedia?.thumbnailUrl) {
+  const introUrl = storyImage ?? introMedia?.thumbnailUrl ?? null
+  const introCaption = storyImage
+    ? `${event.title} — ${event.source_name}`
+    : introMedia?.title
+  if (introUrl) {
     tasks.push({
       showImage: {
         imageID: 'event-intro-media',
-        filename: introMedia.thumbnailUrl,
-        caption: introMedia.title,
+        filename: introUrl,
+        ...(introCaption ? { caption: introCaption } : {}),
       },
     })
   }
   tasks.push({ pauseSeconds: INTRO_HOLD_S }, { hideRect: 'event-intro' })
-  if (introMedia?.thumbnailUrl) {
+  if (introUrl) {
     tasks.push({ hideImage: 'event-intro-media' })
   }
   datasets.slice(0, MAX_TOUR_STOPS).forEach((d, i) => {

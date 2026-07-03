@@ -165,6 +165,8 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
   const { id, created, proposedLinks, manualLinks } = await ingestEvent(db, input, {
     manualDatasetIds: parsed.manualDatasetIds,
     env: context.env,
+    // The og:image fallback may fetch the cited article once.
+    ogFetch: (input, init) => fetch(input, init),
   })
 
   await writeAuditEvent(db, {

@@ -51,6 +51,8 @@ export interface EventCreateBody {
   }
   categories?: Record<string, string[]>
   keywords?: string[]
+  /** The story's lead image (feed enclosure / media:content), http(s). */
+  imageUrl?: string
 }
 
 function asStr(v: unknown): string | undefined {

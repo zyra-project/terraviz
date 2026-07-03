@@ -33,6 +33,8 @@ export interface RssItem {
   publishedAt?: string
   point?: { lat: number; lon: number }
   keywords?: string[]
+  /** The item's lead image, when the feed syndicates one. */
+  imageUrl?: string
 }
 
 /** Cap summaries so a full-article description doesn't bloat the row. */
@@ -167,6 +169,46 @@ function isHttpUrl(url: string | undefined): url is string {
   return !!url && /^https?:\/\//i.test(url)
 }
 
+/**
+ * The item's lead image, when the feed syndicates one. Checked in
+ * preference order:
+ *   1. `media:content` with an image `type`/`medium` (Media RSS — the
+ *      richest form, used by most news feeds),
+ *   2. `enclosure` with an image `type` (RSS 2.0 core),
+ *   3. `media:thumbnail` (small, but better than nothing),
+ *   4. Atom `link rel="enclosure"` with an image `type`.
+ * http(s)-only; anything else is treated as "no image".
+ */
+function parseImageUrl(block: string): string | undefined {
+  const isImage = (attrs: string): boolean => {
+    const type = attrs.match(/\btype\s*=\s*"([^"]*)"/i)?.[1]
+    const medium = attrs.match(/\bmedium\s*=\s*"([^"]*)"/i)?.[1]
+    if (type) return /^image\//i.test(type)
+    if (medium) return medium.toLowerCase() === 'image'
+    return false
+  }
+  const candidates: Array<{ tag: string; attr: string; needImage: boolean; requireRel?: string }> = [
+    { tag: '(?:[a-zA-Z0-9]+:)?content', attr: 'url', needImage: true },
+    { tag: 'enclosure', attr: 'url', needImage: true },
+    { tag: '(?:[a-zA-Z0-9]+:)?thumbnail', attr: 'url', needImage: false },
+    { tag: 'link', attr: 'href', needImage: true, requireRel: 'enclosure' },
+  ]
+  for (const c of candidates) {
+    for (const m of block.matchAll(new RegExp(`<${c.tag}\\s([^>]*?)/?>`, 'gi'))) {
+      const attrs = m[1]
+      if (c.requireRel) {
+        const rel = attrs.match(/\brel\s*=\s*"([^"]*)"/i)?.[1]
+        if (rel !== c.requireRel) continue
+      }
+      if (c.needImage && !isImage(attrs)) continue
+      const value = attrs.match(new RegExp(`\\b${c.attr}\\s*=\\s*"([^"]*)"`, 'i'))?.[1]
+      const url = value ? decodeEntities(value) : undefined
+      if (isHttpUrl(url)) return url
+    }
+  }
+  return undefined
+}
+
 /** Parse one `<item>` (RSS 2.0) block. */
 function parseRssItem(block: string): RssItem | null {
   const title = toPlainText(tagText(block, 'title') ?? '')
@@ -183,6 +225,7 @@ function parseRssItem(block: string): RssItem | null {
     publishedAt: toIso(tagText(block, 'pubDate')),
     point: parsePoint(block),
     keywords: keywords.length ? keywords : undefined,
+    imageUrl: parseImageUrl(block),
   }
 }
 
@@ -207,6 +250,7 @@ function parseAtomEntry(block: string): RssItem | null {
     publishedAt: toIso(tagText(block, 'published') ?? tagText(block, 'updated')),
     point: parsePoint(block),
     keywords: keywords.length ? keywords : undefined,
+    imageUrl: parseImageUrl(block),
   }
 }
 
@@ -264,6 +308,7 @@ export function mapRssFeed(
       if (item.publishedAt) body.occurredStart = item.publishedAt
       if (item.point) body.geometry = { point: item.point }
       if (item.keywords) body.keywords = item.keywords
+      if (item.imageUrl) body.imageUrl = item.imageUrl
       return body
     })
 }

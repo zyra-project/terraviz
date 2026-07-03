@@ -168,3 +168,43 @@ describe('mapRssFeed', () => {
     expect(bodies[0].summary!.length).toBe(500)
   })
 })
+
+describe('lead-image extraction (story media)', () => {
+  const wrap = (inner: string): string =>
+    `<rss><channel><item><title>T</title><link>https://ex.org/story</link>${inner}</item></channel></rss>`
+
+  it('reads media:content, enclosure, and media:thumbnail in preference order', () => {
+    expect(
+      parseRssFeed(wrap('<media:content url="https://img.ex/mc.jpg" type="image/jpeg"/>'))[0].imageUrl,
+    ).toBe('https://img.ex/mc.jpg')
+    expect(
+      parseRssFeed(wrap('<enclosure url="https://img.ex/enc.png" type="image/png"/>'))[0].imageUrl,
+    ).toBe('https://img.ex/enc.png')
+    expect(
+      parseRssFeed(wrap('<media:thumbnail url="https://img.ex/thumb.jpg"/>'))[0].imageUrl,
+    ).toBe('https://img.ex/thumb.jpg')
+    // media:content beats enclosure when both are present.
+    expect(
+      parseRssFeed(
+        wrap('<enclosure url="https://img.ex/enc.png" type="image/png"/><media:content url="https://img.ex/mc.jpg" medium="image"/>'),
+      )[0].imageUrl,
+    ).toBe('https://img.ex/mc.jpg')
+  })
+
+  it('skips non-image enclosures and non-http(s) urls', () => {
+    expect(parseRssFeed(wrap('<enclosure url="https://ex.org/ep.mp3" type="audio/mpeg"/>'))[0].imageUrl).toBeUndefined()
+    expect(parseRssFeed(wrap('<enclosure url="ftp://img.ex/x.png" type="image/png"/>'))[0].imageUrl).toBeUndefined()
+  })
+
+  it('reads Atom image enclosure links and maps into the create body', () => {
+    const atom =
+      '<feed><entry><title>T</title><link href="https://ex.org/story"/>' +
+      '<link rel="enclosure" type="image/jpeg" href="https://img.ex/atom.jpg"/>' +
+      '<id>a1</id></entry></feed>'
+    const items = parseRssFeed(atom)
+    expect(items[0].imageUrl).toBe('https://img.ex/atom.jpg')
+
+    const bodies = mapRssFeed(atom, { feedId: 'F1', sourceName: 'Example' })
+    expect(bodies[0].imageUrl).toBe('https://img.ex/atom.jpg')
+  })
+})

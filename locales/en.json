@@ -982,6 +982,7 @@
   "publisher.events.status.expired": "Expired",
   "publisher.events.status.proposed": "Proposed",
   "publisher.events.status.rejected": "Rejected",
+  "publisher.events.storyImage.alt": "Image from the cited story",
   "publisher.events.title": "Current events review",
   "publisher.feedback.ai.comment": "Comment",
   "publisher.feedback.ai.negative": "Negative",

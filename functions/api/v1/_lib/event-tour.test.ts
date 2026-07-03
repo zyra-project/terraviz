@@ -28,6 +28,7 @@ function makeEvent(overrides: Partial<EventTourEvent> = {}): EventTourEvent {
     summary: 'Delta reached category 3 overnight.',
     source_name: 'NOAA',
     occurred_start: '2026-06-25T12:00:00.000Z',
+    image_url: null,
     bbox_n: null,
     bbox_s: null,
     bbox_w: null,
@@ -155,6 +156,29 @@ describe('buildEventTourTasks', () => {
     // Positionless → the player's media rail, never a coordinate box.
     expect(JSON.stringify(show)).not.toMatch(/xPct|yPct|widthPct|heightPct/)
     expect(tasks.find(t => 'hideImage' in t)).toEqual({ hideImage: 'event-intro-media' })
+  })
+
+  it("prefers the event's own story image over a dataset thumbnail, cited", () => {
+    const withThumb = { ...makeDataset('DS2'), thumbnailUrl: 'https://assets.example.org/ds2-thumb.png' }
+    const tasks = buildEventTourTasks(
+      makeEvent({ image_url: 'https://img.ex/story.jpg' }),
+      [withThumb],
+      captions,
+    )
+    const show = tasks.find(t => 'showImage' in t) as unknown as { showImage: Record<string, unknown> }
+    expect(show.showImage).toEqual({
+      imageID: 'event-intro-media',
+      filename: 'https://img.ex/story.jpg',
+      // The story image carries the citation, not the dataset title.
+      caption: 'Hurricane Delta strengthens — NOAA',
+    })
+    // A non-http(s) stored value must fall back to the thumbnail.
+    const fallback = buildEventTourTasks(
+      makeEvent({ image_url: 'javascript:alert(1)' }),
+      [withThumb],
+      captions,
+    ).find(t => 'showImage' in t) as unknown as { showImage: Record<string, unknown> }
+    expect(fallback.showImage.filename).toBe('https://assets.example.org/ds2-thumb.png')
   })
 
   it('emits no media tasks when no stop has a thumbnail', () => {

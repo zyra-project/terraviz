@@ -54,6 +54,9 @@ export interface ReviewEvent {
    *  so the curator double-checks them before approving (feeds slice C).
    *  Mirrors the backend's `InferredField` provenance vocabulary. */
   inferredFields?: InferredField[]
+  /** The story's lead image (feed enclosure / og:image) — shown in the
+   *  detail pane so the curator vets it with the event. */
+  imageUrl?: string
   links: ReviewLink[]
 }
 

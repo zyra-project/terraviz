@@ -226,3 +226,88 @@ describe('ingestEvent — slice-C AI enrichment', () => {
     expect(enrichBudget.remaining).toBe(0)
   })
 })
+
+describe('story media (task: story media)', () => {
+  it('parseCreate keeps a valid imageUrl and silently drops garbage', () => {
+    const good = parseCreate(createBody({ imageUrl: 'https://img.ex/story.jpg' }))
+    expect(good.ok && good.value.imageUrl).toBe('https://img.ex/story.jpg')
+
+    // Lenient drop — a bad image must not refuse the event.
+    const bad = parseCreate(createBody({ imageUrl: 'javascript:alert(1)' }))
+    expect(bad.ok && bad.value.imageUrl).toBeNull()
+    const long = parseCreate(createBody({ imageUrl: `https://img.ex/${'x'.repeat(2100)}` }))
+    expect(long.ok && long.value.imageUrl).toBeNull()
+  })
+
+  const input = (overrides: Partial<NewCurrentEvent> = {}): NewCurrentEvent => ({
+    originNode: 'NODE000',
+    title: 'Storm story',
+    sourceName: 'NOAA',
+    sourceUrl: 'https://example.gov/storm',
+    feedId: 'FEED1',
+    externalId: 'item-1',
+    ...overrides,
+  })
+
+  it('og:image fallback fills a missing image; a feed-provided image wins without fetching', async () => {
+    const { sqlite, db } = freshDb()
+    const ogFetch = (async () =>
+      ({
+        ok: true,
+        headers: { get: () => 'text/html' },
+        body: null,
+        text: async () => '<meta property="og:image" content="https://img.ex/og.jpg">',
+      }) as unknown as Response) as unknown as typeof fetch
+
+    const a = await ingestEvent(db, input(), { ogFetch })
+    let row = sqlite.prepare('SELECT image_url FROM current_events WHERE id = ?').get(a.id) as { image_url: string }
+    expect(row.image_url).toBe('https://img.ex/og.jpg')
+
+    // Feed image present → no article fetch, feed value stored.
+    let fetched = 0
+    const counting = (async () => {
+      fetched++
+      throw new Error('should not be called')
+    }) as unknown as typeof fetch
+    const b = await ingestEvent(db, input({ externalId: 'item-2', imageUrl: 'https://img.ex/feed.jpg' }), {
+      ogFetch: counting,
+    })
+    row = sqlite.prepare('SELECT image_url FROM current_events WHERE id = ?').get(b.id) as { image_url: string }
+    expect(row.image_url).toBe('https://img.ex/feed.jpg')
+    expect(fetched).toBe(0)
+  })
+
+  it('spends the shared enrich budget and skips when exhausted', async () => {
+    const { sqlite, db } = freshDb()
+    let fetched = 0
+    const ogFetch = (async () => {
+      fetched++
+      return {
+        ok: true,
+        headers: { get: () => 'text/html' },
+        body: null,
+        text: async () => '<meta property="og:image" content="https://img.ex/og.jpg">',
+      } as unknown as Response
+    }) as unknown as typeof fetch
+
+    const budget = { remaining: 1 }
+    const a = await ingestEvent(db, input(), { ogFetch, enrichBudget: budget })
+    const b = await ingestEvent(db, input({ externalId: 'item-2' }), { ogFetch, enrichBudget: budget })
+    expect(fetched).toBe(1)
+    const rowA = sqlite.prepare('SELECT image_url FROM current_events WHERE id = ?').get(a.id) as { image_url: string | null }
+    const rowB = sqlite.prepare('SELECT image_url FROM current_events WHERE id = ?').get(b.id) as { image_url: string | null }
+    expect(rowA.image_url).toBe('https://img.ex/og.jpg')
+    expect(rowB.image_url).toBeNull()
+  })
+
+  it('a re-ingest without an image preserves the previously stored one', async () => {
+    const { sqlite, db } = freshDb()
+    const first = await ingestEvent(db, input({ imageUrl: 'https://img.ex/original.jpg' }), {})
+    // Same dedupe key, no image this time (typical refresh).
+    const second = await ingestEvent(db, input(), {})
+    expect(second.id).toBe(first.id)
+    expect(second.created).toBe(false)
+    const row = sqlite.prepare('SELECT image_url FROM current_events WHERE id = ?').get(first.id) as { image_url: string }
+    expect(row.image_url).toBe('https://img.ex/original.jpg')
+  })
+})

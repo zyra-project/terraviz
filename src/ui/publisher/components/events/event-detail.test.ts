@@ -29,6 +29,22 @@ function event(overrides: Partial<ReviewEvent> = {}): ReviewEvent {
   }
 }
 
+describe('renderEventDetail — story image (task: story media)', () => {
+  it('renders the vetted story image and drops non-http(s) urls', () => {
+    const withImage = renderEventDetail(event({ imageUrl: 'https://img.ex/story.jpg' }), {
+      fetchFn: okFetch(),
+    } as never)
+    const img = withImage.querySelector('.publisher-events-story-image') as HTMLImageElement
+    expect(img.getAttribute('src')).toBe('https://img.ex/story.jpg')
+
+    // eslint-disable-next-line no-script-url
+    const evil = renderEventDetail(event({ imageUrl: 'javascript:alert(1)' }), { fetchFn: okFetch() } as never)
+    expect(evil.querySelector('.publisher-events-story-image')).toBeNull()
+    const none = renderEventDetail(event(), { fetchFn: okFetch() } as never)
+    expect(none.querySelector('.publisher-events-story-image')).toBeNull()
+  })
+})
+
 describe('renderEventDetail — locator coordinates', () => {
   it('renders the hemisphere suffix without the numeric sign', () => {
     // A southern/western point: the suffix conveys the hemisphere, so the

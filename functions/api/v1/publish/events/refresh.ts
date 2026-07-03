@@ -224,7 +224,12 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
         // `env` enables the matcher's semantic (Vectorize) signal and the
         // slice-C date/location enrichment when the AI bindings are
         // configured; both degrade gracefully when not.
-        const outcome = await ingestEvent(db, { ...parsed.value, originNode }, { env: context.env, enrichBudget })
+        const outcome = await ingestEvent(db, { ...parsed.value, originNode }, {
+          env: context.env,
+          enrichBudget,
+          // og:image article fetches spend the same per-run budget.
+          ogFetch: (input, init) => fetch(input, init),
+        })
         if (outcome.created) summary.created++
         else summary.refreshed++
         if (outcome.enriched) summary.enriched++

@@ -16,6 +16,7 @@
 import { looksLikeUrl } from './validators'
 import { runMatcherForEvent, type MatcherEnv } from './events-matcher'
 import { enrichEventFields, type EnrichEnv, type InferredField } from './events-enrich'
+import { fetchOgImage } from './og-image'
 import {
   findEventByExternal,
   updateCurrentEventContent,
@@ -129,6 +130,14 @@ export function parseCreate(
     ? (b.keywords as unknown[]).filter((k): k is string => typeof k === 'string' && k.length > 0)
     : undefined
 
+  // The story's lead image (feed enclosure / media:content). Lenient
+  // drop rather than a field error — a bad image URL shouldn't refuse
+  // an otherwise valid event; it just arrives imageless. Same http(s)
+  // guard as source.url, plus a length cap so a data:-adjacent
+  // monster can't occupy the column.
+  const imageRaw = asString(b.imageUrl)
+  const imageUrl = imageRaw && looksLikeUrl(imageRaw) && imageRaw.length <= 2048 ? imageRaw : null
+
   if (errors.length > 0) return { ok: false, errors }
   return {
     ok: true,
@@ -146,6 +155,7 @@ export function parseCreate(
       geometry,
       categories,
       keywords,
+      imageUrl,
     },
     manualDatasetIds: sanitizeDatasetIds(b.datasetIds),
   }
@@ -188,6 +198,12 @@ export interface IngestOptions {
    *  bound keeps one refresh from stacking that many model calls).
    *  Omitted → each ingest may enrich (the single-event create path). */
   enrichBudget?: { remaining: number }
+  /** Injectable fetch for the og:image fallback (task: story media) —
+   *  routes pass the runtime fetch; omitted (tests, callers that don't
+   *  want outbound article fetches) → the fallback is skipped. Spends
+   *  the same `enrichBudget` units as the AI enrichment so a
+   *  100-event refresh can't stack 100 article fetches. */
+  ogFetch?: typeof fetch
 }
 
 /** Restrict an id list to datasets that exist and are publicly visible
@@ -233,6 +249,20 @@ async function withEnrichment(input: NewCurrentEvent, opts: IngestOptions): Prom
   if (enriched.occurredStart) out.occurredStart = enriched.occurredStart
   if (enriched.geometry) out.geometry = { ...input.geometry, ...enriched.geometry }
   return out
+}
+
+/** Fill a new event's missing lead image from the cited article's
+ *  og:image (task: story media). Feed-provided images always win —
+ *  this only runs when the item carried none. Returns the input
+ *  untouched on skip or miss. */
+async function withStoryImage(input: NewCurrentEvent, opts: IngestOptions): Promise<NewCurrentEvent> {
+  if (input.imageUrl || !opts.ogFetch) return input
+  if (opts.enrichBudget) {
+    if (opts.enrichBudget.remaining <= 0) return input
+    opts.enrichBudget.remaining--
+  }
+  const imageUrl = await fetchOgImage(input.sourceUrl, opts.ogFetch)
+  return imageUrl ? { ...input, imageUrl } : input
 }
 
 /** On a feed re-ingest, keep previously AI-inferred values for fields
@@ -308,17 +338,21 @@ export async function ingestEvent(
       // Re-ingest: carry previously-inferred fields the source still
       // doesn't provide, so a 6-hourly refresh can't erase enrichment
       // (and doesn't pay for a fresh model call every cycle).
-      await updateCurrentEventContent(db, existing.id, mergeInferred(input, existing))
+      const refreshed = mergeInferred(input, existing)
+      // Same preservation for the story image: a feed item that never
+      // carried one must not erase a previously og-fetched image.
+      if (!refreshed.imageUrl && existing.image_url) refreshed.imageUrl = existing.image_url
+      await updateCurrentEventContent(db, existing.id, refreshed)
       id = existing.id
       created = false
     } else {
-      const prepared = await withEnrichment(input, opts)
+      const prepared = await withStoryImage(await withEnrichment(input, opts), opts)
       enriched = prepared !== input
       id = (await insertCurrentEvent(db, prepared)).id
       created = true
     }
   } else {
-    const prepared = await withEnrichment(input, opts)
+    const prepared = await withStoryImage(await withEnrichment(input, opts), opts)
     enriched = prepared !== input
     id = (await insertCurrentEvent(db, prepared)).id
     created = true

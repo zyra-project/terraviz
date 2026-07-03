@@ -106,6 +106,8 @@ export interface CurrentEventRow {
   /** JSON array of AI-filled field names ('["occurredStart","geometry"]');
    *  NULL when everything came from the source (slice C provenance). */
   inferred_fields: string | null
+  /** The story's own image (feed enclosure / og:image), http(s). */
+  image_url: string | null
 }
 
 /** The `event_dataset_links` row as stored (snake_case). */
@@ -148,6 +150,8 @@ export interface CurrentEventPublic {
   /** Which fields were AI-inferred at ingest ('occurredStart' /
    *  'geometry') — the review queue badges these for the curator. */
   inferredFields?: string[]
+  /** The story's lead image (http(s), re-validated on read). */
+  imageUrl?: string
 }
 
 /** Fields a caller supplies to {@link insertCurrentEvent}. The store
@@ -172,6 +176,9 @@ export interface NewCurrentEvent {
   /** Which fields the ingest layer AI-inferred (slice C). Stored as a
    *  JSON array so the curator queue can badge them. */
   inferredFields?: string[] | null
+  /** The story's lead image (feed enclosure / media:content /
+   *  og:image), http(s)-validated by the ingest layer. */
+  imageUrl?: string | null
 }
 
 /** Fields a caller supplies to {@link upsertEventDatasetLink}. */
@@ -188,7 +195,7 @@ export interface NewEventDatasetLink {
 const EVENT_COLUMNS = `id, origin_node, title, summary, source_name, source_url,
   published_at, feed_id, external_id, occurred_start, occurred_end,
   bbox_n, bbox_s, bbox_w, bbox_e, point_lat, point_lon, region_name,
-  status, created_at, updated_at, reviewed_at, reviewed_by, inferred_fields`
+  status, created_at, updated_at, reviewed_at, reviewed_by, inferred_fields, image_url`
 
 const LINK_COLUMNS = `event_id, dataset_id, match_score, signals_json,
   status, created_at, approved_at, approved_by`
@@ -235,12 +242,13 @@ export async function insertCurrentEvent(
     reviewed_at: null,
     reviewed_by: null,
     inferred_fields: input.inferredFields?.length ? JSON.stringify(input.inferredFields) : null,
+    image_url: input.imageUrl ?? null,
   }
 
   await db
     .prepare(
       `INSERT INTO current_events (${EVENT_COLUMNS})
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       row.id,
@@ -267,6 +275,7 @@ export async function insertCurrentEvent(
       row.reviewed_at,
       row.reviewed_by,
       row.inferred_fields,
+      row.image_url,
     )
     .run()
 
@@ -342,7 +351,7 @@ export async function updateCurrentEventContent(
           SET title = ?, summary = ?, source_name = ?, source_url = ?, published_at = ?,
               occurred_start = ?, occurred_end = ?,
               bbox_n = ?, bbox_s = ?, bbox_w = ?, bbox_e = ?, point_lat = ?, point_lon = ?,
-              region_name = ?, inferred_fields = ?, updated_at = ?
+              region_name = ?, inferred_fields = ?, image_url = ?, updated_at = ?
         WHERE id = ?`,
     )
     .bind(
@@ -361,6 +370,7 @@ export async function updateCurrentEventContent(
       point?.lon ?? null,
       input.geometry?.regionName ?? null,
       input.inferredFields?.length ? JSON.stringify(input.inferredFields) : null,
+      input.imageUrl ?? null,
       now,
       id,
     )
@@ -741,6 +751,9 @@ export function toPublicEvent(
   if (row.occurred_end) out.occurredEnd = row.occurred_end
   if (row.reviewed_at) out.reviewedAt = row.reviewed_at
   if (row.reviewed_by) out.reviewedBy = row.reviewed_by
+  // Re-validate on the way out (like the profile links): a stored
+  // non-http(s) image URL must never reach an <img src>.
+  if (row.image_url && /^https?:\/\//i.test(row.image_url)) out.imageUrl = row.image_url
   if (row.inferred_fields) {
     try {
       const parsed: unknown = JSON.parse(row.inferred_fields)
