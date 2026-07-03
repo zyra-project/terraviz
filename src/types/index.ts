@@ -1608,6 +1608,7 @@ export interface PublisherPortalLoadedEvent extends TelemetryEventBase {
     | 'tours'
     | 'featured_hero'
     | 'node_profile'
+    | 'blog'
     | 'events'
     | 'feeds'
     | 'import'
