@@ -7,6 +7,11 @@
  */
 
 import { isWorkersAiQuotaError } from '../_lib/workers-ai-error'
+import {
+  extractModelText,
+  extractModelToolCalls,
+  type WorkersAiToolCall,
+} from '../_lib/workers-ai-text'
 
 interface Env {
   AI: {
@@ -273,13 +278,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       })
       const inputs: Record<string, unknown> = { messages: wfMessages, max_tokens: DEFAULT_MAX_TOKENS }
       if (body.tools?.length) inputs.tools = body.tools
-      const result = (await context.env.AI.run(cfModel, inputs)) as {
-        response?: string
-        tool_calls?: Array<{ id?: string; type?: string; function?: { name: string; arguments: unknown }; name?: string; arguments?: Record<string, unknown> }>
-      }
+      const result = await context.env.AI.run(cfModel, inputs)
+      // Envelope-tolerant reads — some models answer { response, tool_calls }
+      // top-level, others the OpenAI { choices: [{ message }] } shape.
+      const resultText = extractModelText(result)
+      const resultToolCalls = extractModelToolCalls(result)
       const chatId = `chatcmpl-${Date.now()}`
       // Normalize tool_calls to OpenAI shape (same logic as toolStreamShim)
-      const normalizedToolCalls = result.tool_calls?.map((raw, i) => {
+      const normalizedToolCalls = resultToolCalls?.map((raw, i) => {
         const name = raw.function?.name ?? raw.name ?? ''
         const rawArgs = raw.function?.arguments ?? raw.arguments ?? {}
         return {
@@ -300,10 +306,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           index: 0,
           message: {
             role: 'assistant',
-            content: result.response ?? '',
+            content: resultText ?? '',
             ...(normalizedToolCalls?.length ? { tool_calls: normalizedToolCalls } : {}),
           },
-          finish_reason: result.tool_calls?.length ? 'tool_calls' : 'stop',
+          finish_reason: resultToolCalls?.length ? 'tool_calls' : 'stop',
         }],
       }
       return new Response(JSON.stringify(payload), {
@@ -415,8 +421,8 @@ async function visionStreamShim(
 
   let text: string
   try {
-    const result = (await ai.run(model, inputs)) as { response?: string }
-    text = result.response ?? ''
+    const result = await ai.run(model, inputs)
+    text = extractModelText(result) ?? ''
     if (!text) {
       text = '[Vision model returned an empty response. Try rephrasing your question.]'
     }
@@ -550,7 +556,7 @@ async function nonStreamResponse(
   const inputs: Record<string, unknown> = { messages, max_tokens: DEFAULT_MAX_TOKENS }
   if (image) inputs.image = [...image]
 
-  const result = (await ai.run(model, inputs)) as { response?: string }
+  const result = await ai.run(model, inputs)
 
   const payload = {
     id: `chatcmpl-${Date.now()}`,
@@ -560,7 +566,7 @@ async function nonStreamResponse(
     choices: [
       {
         index: 0,
-        message: { role: 'assistant', content: result.response ?? '' },
+        message: { role: 'assistant', content: extractModelText(result) ?? '' },
         finish_reason: 'stop',
       },
     ],
@@ -616,21 +622,9 @@ async function toolStreamShim(
   }
   if (tools?.length) inputs.tools = tools
 
-  type WorkersAIToolCall = {
-    id?: string
-    type?: string
-    function?: { name: string; arguments: unknown }
-    name?: string
-    arguments?: Record<string, unknown>
-  }
-  type WorkersAIResult = {
-    response?: string
-    tool_calls?: WorkersAIToolCall[]
-  }
-
-  let result: WorkersAIResult
+  let result: unknown
   try {
-    result = (await ai.run(model, inputs)) as WorkersAIResult
+    result = await ai.run(model, inputs)
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Workers AI error'
     // Phase 1f/D — distinguish quota-exhausted from generic
@@ -656,20 +650,25 @@ async function toolStreamShim(
   const base = { id: chatId, object: 'chat.completion.chunk', created, model }
   const chunks: string[] = []
 
+  // Envelope-tolerant reads — some models answer { response, tool_calls }
+  // top-level, others the OpenAI { choices: [{ message }] } shape.
+  const resultText = extractModelText(result)
+  const resultToolCalls: WorkersAiToolCall[] | null = extractModelToolCalls(result)
+
   // Text content chunk (if present)
-  if (result.response) {
+  if (resultText) {
     chunks.push(
       `data: ${JSON.stringify({
         ...base,
-        choices: [{ index: 0, delta: { content: result.response } }],
+        choices: [{ index: 0, delta: { content: resultText } }],
       })}\n\n`,
     )
   }
 
   // Tool call chunks (if present)
-  if (result.tool_calls?.length) {
-    for (let i = 0; i < result.tool_calls.length; i++) {
-      const raw = result.tool_calls[i]
+  if (resultToolCalls?.length) {
+    for (let i = 0; i < resultToolCalls.length; i++) {
+      const raw = resultToolCalls[i]
       // Normalize both response shapes into OpenAI's function-tool-call format
       const name = raw.function?.name ?? raw.name ?? ''
       const rawArgs = raw.function?.arguments ?? raw.arguments ?? {}
@@ -704,7 +703,7 @@ async function toolStreamShim(
       choices: [{
         index: 0,
         delta: {},
-        finish_reason: result.tool_calls?.length ? 'tool_calls' : 'stop',
+        finish_reason: resultToolCalls?.length ? 'tool_calls' : 'stop',
       }],
     })}\n\n`,
   )

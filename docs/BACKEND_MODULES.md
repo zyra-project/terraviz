@@ -157,6 +157,7 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | File | Responsibility |
 |---|---|
 | `functions/api/_lib/workers-ai-error.ts` | Workers AI error classification helper for Phase 1f/D's quota guard rail |
+| `functions/api/_lib/workers-ai-text.ts` | Workers AI reply-envelope extraction shared by every server-side `env.AI.run()` consumer (Orbit chat proxy, events enrichment, event-tour captions) — `extractModelText` / `extractModelToolCalls` tolerate both the classic `{ response, tool_calls }` shape and the OpenAI-compatible `{ choices: [{ message }] }` envelope newer models emit |
 | `functions/api/v1/_lib/access-auth.ts` | Cloudflare Access JWT verification |
 | `functions/api/v1/_lib/analytics-export.ts` | Analytics export job core — drains one UTC day from the AE SQL API into the R2 raw archive (`events/v1/…ndjson.gz`) + the D1 rollup tables (migration 0019); `docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md` Phase A |
 | `functions/api/v1/_lib/analytics-layouts.ts` | Positional blob/double layout registry per telemetry event type + AE-row → named-fields decoder (decode side of `ingest.ts`'s `toDataPoint`; consumed by the analytics export job — `docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md` Phase A) |

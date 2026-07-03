@@ -28,7 +28,14 @@
  */
 
 import { getRegionNames, resolveRegion } from '../../../../src/data/regions'
+import { extractModelText } from '../../_lib/workers-ai-text'
 import type { EventGeometry, NewCurrentEvent } from './events-store'
+
+// Re-exported so existing consumers (event-tour.ts, the enrich probe)
+// keep their import path; the canonical home is now the shared
+// `functions/api/_lib/workers-ai-text.ts`, used by the Orbit chat proxy
+// too.
+export { extractModelText }
 
 /** Default extraction model — the same id the Orbit chat path defaults
  *  to, so it is known-alive on this account (llama-3.1-8b was
@@ -70,33 +77,6 @@ export interface EnrichmentResult {
  *  use — enrichment never second-guesses source-provided location. */
 function hasGeometry(geometry: EventGeometry | undefined): boolean {
   return Boolean(geometry && (geometry.boundingBox || geometry.point || geometry.regionName))
-}
-
-/**
- * Pull the reply text out of whatever envelope the model returned.
- * Workers AI is not uniform across model generations: classic models
- * answer `{ response: string }`, JSON-mode replies can arrive as
- * `{ response: object }` (already parsed), and newer models use the
- * OpenAI-compatible `{ choices: [{ message: { content } }] }` shape
- * (llama-4-scout does, observed live on the preview deployment).
- * Returns null for anything unrecognisable.
- */
-export function extractModelText(raw: unknown): string | null {
-  if (typeof raw === 'string') return raw || null
-  if (!raw || typeof raw !== 'object') return null
-  const r = raw as Record<string, unknown>
-  if (typeof r.response === 'string') return r.response || null
-  // JSON mode — the reply arrives pre-parsed; re-serialize for the
-  // shared extraction path.
-  if (r.response && typeof r.response === 'object') return JSON.stringify(r.response)
-  const choices = r.choices
-  if (Array.isArray(choices) && choices[0] && typeof choices[0] === 'object') {
-    const msg = (choices[0] as Record<string, unknown>).message
-    const content = msg && typeof msg === 'object' ? (msg as Record<string, unknown>).content : undefined
-    if (typeof content === 'string') return content || null
-  }
-  if (typeof r.output_text === 'string') return r.output_text || null
-  return null
 }
 
 /** Pull the first JSON object out of a model reply that may wrap it in
