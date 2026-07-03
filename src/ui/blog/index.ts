@@ -20,6 +20,12 @@ import { t } from '../../i18n'
 import { renderMarkdown } from '../../services/markdownRenderer'
 import '../../styles/blog.css'
 
+/** The lean host-org identity from `GET /api/v1/node-profile`. */
+interface PublicIdentity {
+  orgName: string
+  logoUrl: string | null
+}
+
 interface PublicPostCard {
   slug: string
   title: string
@@ -49,11 +55,36 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node
 }
 
-/** The shared page chrome: a header linking home + back to the list. */
-function chrome(content: HTMLElement): HTMLElement {
+/**
+ * Fetch the public host-org identity for the header. Degrades to
+ * null on any failure — the header just shows the app title. The
+ * logo URL is re-guarded to http(s) client-side before it reaches an
+ * `<img src>`, mirroring the events-source sanitize discipline.
+ */
+async function fetchIdentity(): Promise<PublicIdentity | null> {
+  try {
+    const res = await fetch('/api/v1/node-profile')
+    if (!res.ok) return null
+    const { profile } = (await res.json()) as { profile: PublicIdentity | null }
+    if (!profile || typeof profile.orgName !== 'string' || !profile.orgName) return null
+    const logoUrl =
+      typeof profile.logoUrl === 'string' && /^https?:\/\//i.test(profile.logoUrl) ? profile.logoUrl : null
+    return { orgName: profile.orgName, logoUrl }
+  } catch {
+    return null
+  }
+}
+
+/** The shared page chrome: a header linking home + back to the list,
+ *  with the host org's logo when one is configured. */
+function chrome(content: HTMLElement, identity: PublicIdentity | null = null): HTMLElement {
   const root = el('div', { className: 'blog-root' })
   const header = el('header', { className: 'blog-header' })
-  const home = el('a', { className: 'blog-home-link', href: '/', textContent: t('app.title') })
+  const home = el('a', { className: 'blog-home-link', href: '/' })
+  if (identity?.logoUrl) {
+    home.append(el('img', { className: 'blog-logo', src: identity.logoUrl, alt: identity.orgName }))
+  }
+  home.append(el('span', { textContent: identity?.orgName ?? t('app.title') }))
   const index = el('a', { className: 'blog-index-link', href: '/blog', textContent: t('blog.public.indexLink') })
   header.append(home, index)
   const main = el('main', { className: 'blog-main' })
@@ -143,6 +174,8 @@ export async function bootBlogPage(): Promise<void> {
   document.body.classList.add('blog-body')
 
   const path = location.pathname.replace(/\/+$/, '')
+  // Kicked off alongside the content fetch; never rejects.
+  const identityPromise = fetchIdentity()
 
   try {
     // Inside the try so a malformed percent-encoding (`/blog/%E0%A4`)
@@ -151,18 +184,18 @@ export async function bootBlogPage(): Promise<void> {
     if (!slug) {
       const res = await fetch('/api/v1/blog')
       const { posts } = (await res.json()) as { posts: PublicPostCard[] }
-      document.body.replaceChildren(chrome(renderList(posts)))
+      document.body.replaceChildren(chrome(renderList(posts), await identityPromise))
       return
     }
     const res = await fetch(`/api/v1/blog/${encodeURIComponent(slug)}`)
     if (!res.ok) {
-      document.body.replaceChildren(chrome(renderMissing()))
+      document.body.replaceChildren(chrome(renderMissing(), await identityPromise))
       return
     }
     const { post } = (await res.json()) as { post: PublicPost }
     document.title = post.title // i18n-exempt: the post's own title, already localized content
-    document.body.replaceChildren(chrome(renderPost(post)))
+    document.body.replaceChildren(chrome(renderPost(post), await identityPromise))
   } catch {
-    document.body.replaceChildren(chrome(renderMissing()))
+    document.body.replaceChildren(chrome(renderMissing(), await identityPromise))
   }
 }

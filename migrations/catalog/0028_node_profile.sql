@@ -36,6 +36,10 @@ CREATE TABLE node_profile (
   default_tone TEXT,
   links_json   TEXT,                     -- JSON array of {label, url}
   updated_by   TEXT NOT NULL,            -- publishers.id (audit)
-  updated_at   TEXT NOT NULL,            -- ISO 8601
+  -- ISO 8601. No trailing comment here: SQLite's ALTER ... ADD COLUMN
+  -- splices new columns onto the last column-def line of the stored
+  -- CREATE TABLE text, and a trailing comment would read as if it
+  -- documented the appended column (see 0024's reviewed_by).
+  updated_at   TEXT NOT NULL,
   FOREIGN KEY (updated_by) REFERENCES publishers(id)
 );

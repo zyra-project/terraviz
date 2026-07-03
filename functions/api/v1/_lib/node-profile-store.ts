@@ -24,6 +24,30 @@ export const PROFILE_TONE_MAX_LEN = 200
 export const PROFILE_MAX_LINKS = 10
 export const PROFILE_LINK_LABEL_MAX_LEN = 100
 
+/** Logo upload bounds (`POST /api/v1/publish/node-profile/logo`).
+ *  Raster only — SVG is deliberately excluded (scriptable content on
+ *  a public surface). The cap keeps the base64 JSON body and the
+ *  in-Worker digest buffer small. */
+export const LOGO_MAX_BYTES = 512 * 1024
+export const LOGO_CONTENT_TYPES: Readonly<Record<string, string>> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/webp': 'webp',
+}
+
+/** KV key for the public `GET /api/v1/node-profile` payload. */
+export const NODE_PROFILE_CACHE_KEY = 'node-profile:v1'
+
+/** Best-effort bust of the public profile cache. */
+export async function bustNodeProfileCache(kv: KVNamespace | undefined): Promise<void> {
+  if (!kv) return
+  try {
+    await kv.delete(NODE_PROFILE_CACHE_KEY)
+  } catch {
+    // Best-effort — a stale entry expires on its own TTL.
+  }
+}
+
 /** The `node_profile` row as stored. */
 export interface NodeProfileRow {
   org_name: string
@@ -32,6 +56,7 @@ export interface NodeProfileRow {
   region_focus: string | null
   default_tone: string | null
   links_json: string | null
+  logo_ref: string | null
   updated_by: string
   updated_at: string
 }
@@ -49,6 +74,7 @@ export interface NodeProfilePublic {
   regionFocus: string | null
   defaultTone: string | null
   links: NodeProfileLink[]
+  logoUrl: string | null
   updatedBy: string
   updatedAt: string
 }
@@ -58,7 +84,7 @@ export async function getNodeProfile(db: D1Database): Promise<NodeProfileRow | n
   const row = await db
     .prepare(
       `SELECT org_name, mission, about_md, region_focus, default_tone,
-              links_json, updated_by, updated_at
+              links_json, logo_ref, updated_by, updated_at
          FROM node_profile
         WHERE id = 1
         LIMIT 1`,
@@ -72,8 +98,16 @@ export async function getNodeProfile(db: D1Database): Promise<NodeProfileRow | n
  *  stored link is re-validated on the way out (non-empty bounded
  *  label, http(s)-only url, clamped to {@link PROFILE_MAX_LINKS}) —
  *  legacy or hand-edited rows must not let a `javascript:` url reach
- *  a surface that renders these as anchors. */
-export function toPublicProfile(row: NodeProfileRow): NodeProfilePublic {
+ *  a surface that renders these as anchors.
+ *
+ *  `resolveLogoRef` maps the stored `logo_ref` (`r2:<key>`) to a
+ *  fetchable http(s) URL — routes bind `resolveHttpAssetUrl(env, …)`
+ *  so only http(s) results ever reach an `<img src>`. Omitted (tests
+ *  that don't care about R2 resolution) → `logoUrl: null`. */
+export function toPublicProfile(
+  row: NodeProfileRow,
+  resolveLogoRef?: (ref: string) => string | null,
+): NodeProfilePublic {
   let links: NodeProfileLink[] = []
   if (row.links_json) {
     try {
@@ -102,6 +136,7 @@ export function toPublicProfile(row: NodeProfileRow): NodeProfilePublic {
     regionFocus: row.region_focus,
     defaultTone: row.default_tone,
     links,
+    logoUrl: row.logo_ref && resolveLogoRef ? resolveLogoRef(row.logo_ref) : null,
     updatedBy: row.updated_by,
     updatedAt: row.updated_at,
   }
@@ -117,7 +152,9 @@ export interface ValidatedProfileInput {
   links_json: string | null
 }
 
-/** Upsert the singleton profile. */
+/** Upsert the singleton profile. `logo_ref` is deliberately absent
+ *  from the column list — the text-fields PUT must not clear a logo
+ *  set through the dedicated upload route. */
 export async function setNodeProfile(
   db: D1Database,
   publisher: PublisherRow,
@@ -151,16 +188,34 @@ export async function setNodeProfile(
       now,
     )
     .run()
-  return {
-    org_name: input.org_name,
-    mission: input.mission,
-    about_md: input.about_md,
-    region_focus: input.region_focus,
-    default_tone: input.default_tone,
-    links_json: input.links_json,
-    updated_by: publisher.id,
-    updated_at: now,
-  }
+  // Re-read rather than reconstructing from input so columns the
+  // upsert doesn't touch (logo_ref) come back accurate.
+  const row = await getNodeProfile(db)
+  if (!row) throw new Error('node_profile upsert did not persist')
+  return row
+}
+
+/**
+ * Set (or clear, with `null`) the profile's logo ref. Returns
+ * `'missing'` when no profile row exists yet — the logo upload
+ * requires a saved profile so there is an `org_name` to attribute
+ * the logo to.
+ */
+export async function setNodeProfileLogo(
+  db: D1Database,
+  publisher: PublisherRow,
+  logoRef: string | null,
+  now: string = new Date().toISOString(),
+): Promise<'ok' | 'missing'> {
+  const res = await db
+    .prepare(
+      `UPDATE node_profile
+          SET logo_ref = ?, updated_by = ?, updated_at = ?
+        WHERE id = 1`,
+    )
+    .bind(logoRef, publisher.id, now)
+    .run()
+  return res.meta.changes > 0 ? 'ok' : 'missing'
 }
 
 /** A single body-validation error in the publisher-API array shape. */

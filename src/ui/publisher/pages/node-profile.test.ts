@@ -35,6 +35,7 @@ const PROFILE = {
     regionFocus: 'Gulf coast',
     defaultTone: 'educational',
     links: [{ label: 'Website', url: 'https://coastal.example.org' }],
+    logoUrl: null,
   },
 }
 
@@ -111,6 +112,95 @@ describe('renderNodeProfilePage', () => {
       links: [{ label: 'Docs', url: 'https://docs.example.org' }],
     })
     expect(mount.querySelector('.publisher-nodeprofile-status')!.textContent).toBe('Profile saved.')
+  })
+
+  it('renders the logo card with a preview when a logo is set, and Remove clears it', async () => {
+    const mount = document.createElement('div')
+    const withLogo = {
+      profile: { ...PROFILE.profile, logoUrl: 'https://assets.example.org/logo.png' },
+    }
+    const fetchFn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : (input as Request).url
+      const method = init?.method ?? 'GET'
+      let body: unknown = {}
+      if (method === 'DELETE') body = { logoUrl: null }
+      else if (url.includes('/publish/me')) body = ADMIN_ME
+      else if (url.includes('/publish/node-profile')) body = withLogo
+      return { ok: true, status: 200, type: 'basic', json: async () => body, text: async () => JSON.stringify(body) } as unknown as Response
+    })
+    await renderNodeProfilePage(mount, { fetchFn })
+
+    const img = mount.querySelector('.publisher-nodeprofile-logo-img') as HTMLImageElement
+    expect(img.getAttribute('src')).toBe('https://assets.example.org/logo.png')
+
+    const remove = Array.from(mount.querySelectorAll('button')).find(b => b.textContent === 'Remove logo')!
+    expect(remove.hidden).toBe(false)
+    remove.click()
+    await flush()
+    expect(fetchFn.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(true)
+    expect(mount.querySelector('.publisher-nodeprofile-logo-img')).toBeNull()
+    expect(mount.querySelector('.publisher-nodeprofile-logo-none')).toBeTruthy()
+  })
+
+  it('uploads a picked file as base64 JSON and updates the preview', async () => {
+    const mount = document.createElement('div')
+    const posts: Array<{ url: string; body: { contentType: string; dataBase64: string } }> = []
+    const fetchFn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : (input as Request).url
+      const method = init?.method ?? 'GET'
+      let body: unknown = {}
+      if (method === 'POST') {
+        posts.push({ url, body: JSON.parse(String(init?.body)) })
+        body = { logoUrl: 'https://assets.example.org/new-logo.png' }
+      } else if (url.includes('/publish/me')) body = ADMIN_ME
+      else if (url.includes('/publish/node-profile')) body = PROFILE
+      return { ok: true, status: 200, type: 'basic', json: async () => body, text: async () => JSON.stringify(body) } as unknown as Response
+    })
+    await renderNodeProfilePage(mount, { fetchFn })
+
+    const fileInput = mount.querySelector('#nodeprofile-logo-file') as HTMLInputElement
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2])], 'logo.png', { type: 'image/png' })
+    Object.defineProperty(fileInput, 'files', { value: [file], configurable: true })
+    fileInput.dispatchEvent(new Event('change'))
+    await flush()
+    await flush() // arrayBuffer → send → render
+
+    expect(posts).toHaveLength(1)
+    expect(posts[0].url).toContain('/api/v1/publish/node-profile/logo')
+    expect(posts[0].body.contentType).toBe('image/png')
+    expect(posts[0].body.dataBase64.length).toBeGreaterThan(0)
+    const img = mount.querySelector('.publisher-nodeprofile-logo-img') as HTMLImageElement
+    expect(img.getAttribute('src')).toBe('https://assets.example.org/new-logo.png')
+  })
+
+  it('treats a non-http(s) logoUrl as no logo — placeholder shown, Remove hidden', async () => {
+    const mount = document.createElement('div')
+    const weird = { profile: { ...PROFILE.profile, logoUrl: 'javascript:alert(1)' } } // eslint-disable-line no-script-url
+    await renderNodeProfilePage(mount, {
+      fetchFn: mockFetch({ '/publish/me': ADMIN_ME, '/publish/node-profile': weird }),
+    })
+    expect(mount.querySelector('.publisher-nodeprofile-logo-img')).toBeNull()
+    expect(mount.querySelector('.publisher-nodeprofile-logo-none')).toBeTruthy()
+    const remove = Array.from(mount.querySelectorAll('button')).find(b => b.textContent === 'Remove logo')!
+    expect(remove.hidden).toBe(true)
+  })
+
+  it('blocks an oversized file client-side', async () => {
+    const mount = document.createElement('div')
+    const fetchFn = mockFetch({ '/publish/me': ADMIN_ME, '/publish/node-profile': PROFILE })
+    await renderNodeProfilePage(mount, { fetchFn })
+
+    const fileInput = mount.querySelector('#nodeprofile-logo-file') as HTMLInputElement
+    const big = new File([new Uint8Array(512 * 1024 + 1)], 'big.png', { type: 'image/png' })
+    Object.defineProperty(fileInput, 'files', { value: [big], configurable: true })
+    fileInput.dispatchEvent(new Event('change'))
+    await flush()
+
+    // No POST fired — only the two initial GETs.
+    expect(fetchFn.mock.calls.every(([, init]) => (init?.method ?? 'GET') === 'GET')).toBe(true)
+    const statuses = mount.querySelectorAll('.publisher-nodeprofile-status')
+    const logoStatus = statuses[statuses.length - 1]
+    expect(logoStatus.classList.contains('publisher-nodeprofile-status-error')).toBe(true)
   })
 
   it('blocks Save client-side when orgName is empty', async () => {

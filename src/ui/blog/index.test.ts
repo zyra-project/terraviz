@@ -24,12 +24,20 @@ const POST = {
   },
 }
 
-function stubFetch(status: number, body: unknown) {
-  vi.stubGlobal('fetch', vi.fn(async () => ({
-    ok: status === 200,
-    status,
-    json: async () => body,
-  }) as unknown as Response))
+const IDENTITY = { profile: { orgName: 'The Zyra Project', logoUrl: 'https://assets.example.org/logo.png' } }
+
+/** Stub fetch for the content endpoints; `/api/v1/node-profile`
+ *  (the header identity) is routed separately. */
+function stubFetch(status: number, body: unknown, identity: unknown = { profile: null }) {
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    const isIdentity = url.includes('/api/v1/node-profile')
+    return {
+      ok: isIdentity ? true : status === 200,
+      status: isIdentity ? 200 : status,
+      json: async () => (isIdentity ? identity : body),
+    } as unknown as Response
+  }))
 }
 
 afterEach(() => {
@@ -81,5 +89,24 @@ describe('bootBlogPage', () => {
     // must land on the missing view, not stick in the loading state.
     expect(document.querySelector('.blog-loading')).toBeNull()
     expect(document.querySelector('.blog-missing')).toBeTruthy()
+  })
+
+  it('renders the org logo + name in the header when the identity is configured', async () => {
+    history.pushState(null, '', '/blog')
+    stubFetch(200, LIST, IDENTITY)
+    await bootBlogPage()
+    const logo = document.querySelector('.blog-home-link .blog-logo') as HTMLImageElement
+    expect(logo.getAttribute('src')).toBe('https://assets.example.org/logo.png')
+    expect(logo.alt).toBe('The Zyra Project')
+    expect(document.querySelector('.blog-home-link')?.textContent).toContain('The Zyra Project')
+  })
+
+  it('drops a non-http(s) logo url and falls back to the app title without identity', async () => {
+    history.pushState(null, '', '/blog')
+    // eslint-disable-next-line no-script-url
+    stubFetch(200, LIST, { profile: { orgName: 'Evil', logoUrl: 'javascript:alert(1)' } })
+    await bootBlogPage()
+    expect(document.querySelector('.blog-logo')).toBeNull()
+    expect(document.querySelector('.blog-home-link')?.textContent).toContain('Evil')
   })
 })

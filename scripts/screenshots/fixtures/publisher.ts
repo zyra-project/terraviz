@@ -309,6 +309,9 @@ export function blogPublicFixtures(): FixtureRule[] {
   return [
     { url: '/api/v1/blog/', json: post },
     { url: '/api/v1/blog', json: list },
+    // The header identity read (org name + logo). No logo in the
+    // fixture — external image bytes would flake the capture.
+    { url: '/api/v1/node-profile', json: { profile: { orgName: 'Coastal Science Center', logoUrl: null } } },
   ]
 }
 
@@ -322,6 +325,7 @@ const nodeProfile = {
     regionFocus: 'Gulf of Mexico coast',
     defaultTone: 'educational, general public',
     links: [{ label: 'Website', url: 'https://coastal.example.org' }],
+    logoUrl: null,
     updatedBy: 'PUB-ADMIN',
     updatedAt: '2026-07-01T00:00:00.000Z',
   },

@@ -69,6 +69,7 @@ export type AuditAction =
   | 'feed.updated'
   | 'feed.deleted'
   | 'node_profile.update'
+  | 'node_profile.logo_update'
   | 'blog.create'
   | 'blog.update'
   | 'blog.publish'

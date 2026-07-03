@@ -45,11 +45,19 @@ interface ProfileResponse {
     regionFocus: string | null
     defaultTone: string | null
     links: ProfileLink[]
+    logoUrl: string | null
   } | null
 }
 
 const ME_ENDPOINT = '/api/v1/publish/me'
 const PROFILE_ENDPOINT = '/api/v1/publish/node-profile'
+const LOGO_ENDPOINT = '/api/v1/publish/node-profile/logo'
+
+/** Keep in sync with `LOGO_MAX_BYTES` / `LOGO_CONTENT_TYPES` in the
+ *  backend store — the API is the hard cap; these stop bad picks
+ *  before a wasted round-trip. */
+const LOGO_MAX_BYTES = 512 * 1024
+const LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp']
 
 export interface NodeProfilePageOptions {
   fetchFn?: typeof fetch
@@ -306,7 +314,142 @@ function renderForm(mount: HTMLElement, state: FormState): void {
     el('div', { className: 'publisher-nodeprofile-actions' }, [saveBtn]),
     status,
   )
-  mount.replaceChildren(shell(form))
+  mount.replaceChildren(shell(form, renderLogoCard(state)))
+}
+
+/**
+ * The logo card — preview, upload (base64-in-JSON to the dedicated
+ * logo route), and remove. Uploading requires a saved profile; the
+ * API enforces that, and the card surfaces its field error verbatim.
+ */
+function renderLogoCard(state: FormState): HTMLElement {
+  // Normalize once at the boundary: anything non-http(s) is treated
+  // as "no logo" everywhere (preview AND the Remove button), so the
+  // two can't disagree about whether a logo exists.
+  const httpUrl = (u: string | null | undefined): string | null =>
+    u && /^https?:\/\//i.test(u) ? u : null
+  let logoUrl = httpUrl(state.profile?.logoUrl)
+
+  const preview = el('div', { className: 'publisher-nodeprofile-logo-preview' })
+  const renderPreview = (): void => {
+    preview.replaceChildren(
+      logoUrl
+        ? el('img', { src: logoUrl, alt: t('publisher.nodeProfile.logo.alt'), className: 'publisher-nodeprofile-logo-img' })
+        : el('p', { className: 'publisher-nodeprofile-logo-none', textContent: t('publisher.nodeProfile.logo.none') }),
+    )
+  }
+  renderPreview()
+
+  const status = el('div', { className: 'publisher-nodeprofile-status', role: 'status' })
+  const setStatus = (message: string, isError: boolean): void => {
+    status.textContent = message
+    status.classList.toggle('publisher-nodeprofile-status-error', isError)
+  }
+
+  const fileInput = el('input', { type: 'file', className: 'publisher-nodeprofile-logo-file', id: 'nodeprofile-logo-file' })
+  fileInput.accept = LOGO_TYPES.join(',')
+  fileInput.hidden = true
+  const chooseBtn = el('button', {
+    type: 'button',
+    className: 'publisher-btn publisher-btn-small',
+    textContent: t('publisher.nodeProfile.logo.choose'),
+  })
+  chooseBtn.addEventListener('click', () => fileInput.click())
+
+  const removeBtn = el('button', {
+    type: 'button',
+    className: 'publisher-btn publisher-btn-small',
+    textContent: t('publisher.nodeProfile.logo.remove'),
+  })
+  const refreshRemove = (): void => {
+    removeBtn.hidden = logoUrl === null
+  }
+  refreshRemove()
+
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files?.[0]
+    fileInput.value = ''
+    if (!file) return
+    if (!LOGO_TYPES.includes(file.type)) {
+      setStatus(t('publisher.nodeProfile.logo.error.type'), true)
+      return
+    }
+    if (file.size > LOGO_MAX_BYTES) {
+      setStatus(t('publisher.nodeProfile.logo.error.size'), true)
+      return
+    }
+    chooseBtn.disabled = true
+    setStatus(t('publisher.nodeProfile.logo.uploading'), false)
+    void file
+      .arrayBuffer()
+      .then(buf => {
+        // Chunked btoa — String.fromCharCode(...allBytes) overflows
+        // the argument limit on files past ~100 KB.
+        const bytes = new Uint8Array(buf)
+        let bin = ''
+        const CHUNK = 0x8000
+        for (let i = 0; i < bytes.length; i += CHUNK) {
+          bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+        }
+        return publisherSend<{ logoUrl: string | null }>(
+          LOGO_ENDPOINT,
+          { contentType: file.type, dataBase64: btoa(bin) },
+          { method: 'POST', fetchFn: state.fetchFn },
+        )
+      })
+      .then(res => {
+        if (res.ok) {
+          logoUrl = httpUrl(res.data.logoUrl)
+          renderPreview()
+          refreshRemove()
+          setStatus(t('publisher.nodeProfile.logo.uploaded'), false)
+          return
+        }
+        if (res.kind === 'session') {
+          if (handleSessionError({ navigate: state.navigate }) === 'navigating') return
+          setStatus(t('publisher.nodeProfile.error.session'), true)
+        } else if (res.kind === 'validation' && res.errors && res.errors.length > 0) {
+          setStatus(res.errors[0].message, true)
+        } else {
+          setStatus(t('publisher.nodeProfile.error.generic'), true)
+        }
+      })
+      .catch(() => setStatus(t('publisher.nodeProfile.error.generic'), true))
+      .finally(() => {
+        chooseBtn.disabled = false
+      })
+  })
+
+  removeBtn.addEventListener('click', () => {
+    removeBtn.disabled = true
+    void publisherSend<{ logoUrl: string | null }>(LOGO_ENDPOINT, {}, { method: 'DELETE', fetchFn: state.fetchFn })
+      .then(res => {
+        if (res.ok) {
+          logoUrl = null
+          renderPreview()
+          refreshRemove()
+          setStatus(t('publisher.nodeProfile.logo.removed'), false)
+          return
+        }
+        if (res.kind === 'session') {
+          if (handleSessionError({ navigate: state.navigate }) === 'navigating') return
+          setStatus(t('publisher.nodeProfile.error.session'), true)
+        } else {
+          setStatus(t('publisher.nodeProfile.error.generic'), true)
+        }
+      })
+      .finally(() => {
+        removeBtn.disabled = false
+      })
+  })
+
+  return card(
+    heading(t('publisher.nodeProfile.logo.label')),
+    el('p', { className: 'publisher-nodeprofile-intro', textContent: t('publisher.nodeProfile.logo.hint') }),
+    preview,
+    el('div', { className: 'publisher-nodeprofile-actions' }, [chooseBtn, removeBtn, fileInput]),
+    status,
+  )
 }
 
 // ----- Small DOM helpers (mirror the featured-hero.ts idiom) -----

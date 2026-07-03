@@ -101,6 +101,7 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `functions/api/v1/events.ts` | GET /api/v1/events — public list of approved current events (geometry + time + visible linked dataset ids) for the catalog Map/Timeline overlays; KV-cached, `{ events: [] }` graceful degradation (`docs/CURRENT_EVENTS_PLAN.md` §6.3) |
 | `functions/api/v1/blog.ts` | GET /api/v1/blog — public list of published blog posts (lean card shape, KV-cached `blog:list:v1` 60 s, degrades to an empty list) (`docs/CURRENT_EVENTS_PLAN.md` §7) |
 | `functions/api/v1/blog/[slug].ts` | GET /api/v1/blog/{slug} — one published post hydrated for the public page: full markdown body + visibility-filtered cited-dataset titles + the cited event's citation ONLY while approved; 404 for drafts and unknown slugs alike; KV-cached per slug |
+| `functions/api/v1/node-profile.ts` | GET /api/v1/node-profile — lean public host-organization identity (`orgName` + resolved `logoUrl`) for the blog header and future about/footer surfaces; KV-cached `node-profile:v1` 300 s, degrades to `{ profile: null }` |
 | `functions/api/v1/featured-hero.ts` | Route: GET /api/v1/featured-hero |
 | `functions/api/v1/featured.ts` | Route: GET /api/v1/featured |
 | `functions/api/v1/logout.ts` | GET /api/v1/logout |
@@ -136,6 +137,7 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `functions/api/v1/publish/blog/[id].ts` | GET (one post incl. drafts) + PUT (update content — the slug never changes, published URLs stay stable) + POST `{action: publish\|unpublish}` (the curator-gated status transition) — privileged writes, audit-logged, busts the public blog caches |
 | `functions/api/v1/publish/blog/generate.ts` | POST /api/v1/publish/blog/generate — AI-draft a post from the curator's selections (datasets + optional cited event + the node profile); the draft is returned, not persisted; `includeTour` additionally persists the §7 companion tour draft over the hand-picked datasets (best-effort — a tour failure never sinks the draft). Privileged, audit-logged (`blog.generate`) |
 | `functions/api/v1/publish/node-profile.ts` | GET + PUT /api/v1/publish/node-profile — the singleton host-organization profile (org name, mission, about, region focus, tone, links); any publisher reads, privileged writes, audit-logged (`node_profile.update`) — the "about the host" context Phase 3d blog generation grounds itself in |
+| `functions/api/v1/publish/node-profile/logo.ts` | POST + DELETE /api/v1/publish/node-profile/logo — org-logo upload (base64-in-JSON, png/jpeg/webp allowlist + magic-byte check, 512 KB cap, SVG excluded) stored content-addressed in R2 (`node/logo/sha256/…`), sets `logo_ref`, audits `node_profile.logo_update`, busts the public identity cache |
 | `functions/api/v1/publish/featured.ts` | /api/v1/publish/featured |
 | `functions/api/v1/publish/featured/[dataset_id].ts` | /api/v1/publish/featured/{dataset_id} |
 | `functions/api/v1/publish/feedback.ts` | GET /api/v1/publish/feedback — privilege-gated facade over `_feedback-helpers` for the `/publish/feedback` tab (AI + general dashboards, on-demand screenshots; exports stay on `/api/feedback-admin?action=…`) |

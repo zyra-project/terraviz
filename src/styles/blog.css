@@ -24,9 +24,20 @@ body.blog-body {
 }
 
 .blog-home-link {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(0.5rem * var(--ui-scale, 1));
   color: var(--color-text, #f4f7fa);
   text-decoration: none;
   font-weight: 600;
+}
+
+.blog-logo {
+  block-size: calc(1.75rem * var(--ui-scale, 1));
+  inline-size: auto;
+  max-inline-size: calc(8rem * var(--ui-scale, 1));
+  border-radius: 4px;
+  object-fit: contain;
 }
 
 .blog-index-link {
