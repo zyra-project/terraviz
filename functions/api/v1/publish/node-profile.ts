@@ -17,12 +17,14 @@
 import type { CatalogEnv } from '../_lib/env'
 import type { PublisherData } from './_middleware'
 import {
+  bustNodeProfileCache,
   getNodeProfile,
   setNodeProfile,
   toPublicProfile,
   validateProfileInput,
 } from '../_lib/node-profile-store'
 import { isPrivileged } from '../_lib/publisher-store'
+import { resolveHttpAssetUrl } from '../_lib/r2-public-url'
 import { writeAuditEvent } from '../_lib/audit-store'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
@@ -39,7 +41,9 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
     return jsonError(503, 'binding_missing', 'CATALOG_DB binding is not configured on this deployment.')
   }
   const row = await getNodeProfile(context.env.CATALOG_DB)
-  return new Response(JSON.stringify({ profile: row ? toPublicProfile(row) : null }), {
+  const env = context.env
+  const profile = row ? toPublicProfile(row, ref => resolveHttpAssetUrl(env, ref)) : null
+  return new Response(JSON.stringify({ profile }), {
     status: 200,
     headers: { 'Content-Type': CONTENT_TYPE, 'Cache-Control': 'private, no-store' },
   })
@@ -83,8 +87,11 @@ export const onRequestPut: PagesFunction<CatalogEnv> = async context => {
       has_about: row.about_md != null,
     }),
   })
+  // The public identity read serves orgName — keep it fresh.
+  await bustNodeProfileCache(context.env.CATALOG_KV)
 
-  return new Response(JSON.stringify({ profile: toPublicProfile(row) }), {
+  const env = context.env
+  return new Response(JSON.stringify({ profile: toPublicProfile(row, ref => resolveHttpAssetUrl(env, ref)) }), {
     status: 200,
     headers: { 'Content-Type': CONTENT_TYPE, 'Cache-Control': 'private, no-store' },
   })

@@ -418,7 +418,7 @@ CREATE TABLE node_profile (
   default_tone TEXT,
   links_json   TEXT,                     -- JSON array of {label, url}
   updated_by   TEXT NOT NULL,            -- publishers.id (audit)
-  updated_at   TEXT NOT NULL,            -- ISO 8601
+  updated_at   TEXT NOT NULL, logo_ref TEXT,            -- ISO 8601
   FOREIGN KEY (updated_by) REFERENCES publishers(id)
 );
 

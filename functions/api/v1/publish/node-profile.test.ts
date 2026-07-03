@@ -153,6 +153,7 @@ describe('toPublicProfile', () => {
     region_focus: null,
     default_tone: null,
     links_json: null,
+    logo_ref: null,
     updated_by: 'PUB-ADMIN',
     updated_at: '2026-07-01T00:00:00.000Z',
   }
