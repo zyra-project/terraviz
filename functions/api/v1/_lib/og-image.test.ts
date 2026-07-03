@@ -29,6 +29,10 @@ describe('extractOgImage', () => {
     expect(extractOgImage('<meta property="og:image" content="https://img.ex/a.jpg?q=&amp;quot;x">')).toBe(
       'https://img.ex/a.jpg?q=&quot;x',
     )
+    // Same for a numeric ampersand chained behind an escaped one.
+    expect(extractOgImage('<meta property="og:image" content="https://img.ex/a.jpg?q=&amp;#38;x">')).toBe(
+      'https://img.ex/a.jpg?q=&#38;x',
+    )
   })
 
   it('rejects non-http(s) and empty content', () => {
