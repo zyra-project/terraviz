@@ -29,6 +29,7 @@ import { writeAuditEvent } from '../../_lib/audit-store'
 import { getNodeProfile } from '../../_lib/node-profile-store'
 import { getCurrentEvent } from '../../_lib/events-store'
 import { generateBlogDraft, type BlogDraftLength } from '../../_lib/blog-generate'
+import { resolveHttpAssetUrl } from '../../_lib/r2-public-url'
 import { buildEventTourTasks, generateTourCaptions, type EventTourDataset } from '../../_lib/event-tour'
 import { createDraftTour, deleteTour, writeTourDraftJson } from '../../_lib/tour-mutations'
 import { POST_MAX_DATASETS } from '../../_lib/blog-store'
@@ -86,14 +87,14 @@ export const onRequestPost: PagesFunction<CatalogEnv & EnrichEnv> = async contex
   const placeholders = datasetIds.map(() => '?').join(', ')
   const dsRes = await db
     .prepare(
-      `SELECT id, title, abstract, start_time, end_time, format FROM datasets
+      `SELECT id, title, abstract, start_time, end_time, format, thumbnail_ref FROM datasets
         WHERE id IN (${placeholders})
           AND published_at IS NOT NULL
           AND is_hidden = 0
           AND retracted_at IS NULL`,
     )
     .bind(...datasetIds)
-    .all<{ id: string; title: string; abstract: string | null; start_time: string | null; end_time: string | null; format: string | null }>()
+    .all<{ id: string; title: string; abstract: string | null; start_time: string | null; end_time: string | null; format: string | null; thumbnail_ref: string | null }>()
   const byId = new Map((dsRes.results ?? []).map(r => [r.id, r]))
   const datasets = datasetIds.flatMap(id => {
     const row = byId.get(id)
@@ -135,6 +136,7 @@ export const onRequestPost: PagesFunction<CatalogEnv & EnrichEnv> = async contex
         startTime: d.start_time,
         endTime: d.end_time,
         format: d.format,
+        thumbnailUrl: resolveHttpAssetUrl(context.env, d.thumbnail_ref),
       }))
       const captions = await generateTourCaptions(context.env, event, tourDatasets)
       const tourTasks = buildEventTourTasks(event, tourDatasets, captions)

@@ -22,6 +22,7 @@ import type { PublisherData } from '../../_middleware'
 import { isPrivileged } from '../../../_lib/publisher-store'
 import { writeAuditEvent } from '../../../_lib/audit-store'
 import { getCurrentEvent, listLinksForEvent } from '../../../_lib/events-store'
+import { resolveHttpAssetUrl } from '../../../_lib/r2-public-url'
 import { createDraftTour, writeTourDraftJson } from '../../../_lib/tour-mutations'
 import {
   buildEventTourTasks,
@@ -46,7 +47,11 @@ function jsonError(status: number, error: string, message: string): Response {
  *  whole candidate pool BEFORE the stop cap, so a hidden top-scored link
  *  yields the next visible one rather than a hole (or a spurious
  *  `no_datasets`). */
-async function resolveStopDatasets(db: D1Database, eventId: string): Promise<EventTourDataset[]> {
+async function resolveStopDatasets(
+  db: D1Database,
+  eventId: string,
+  resolveThumb: (ref: string | null) => string | null,
+): Promise<EventTourDataset[]> {
   const links = await listLinksForEvent(db, eventId)
   const approved = links.filter(l => l.status === 'approved')
   const pool = (approved.length > 0 ? approved : links.filter(l => l.status === 'proposed'))
@@ -60,14 +65,14 @@ async function resolveStopDatasets(db: D1Database, eventId: string): Promise<Eve
   const placeholders = pool.map(() => '?').join(', ')
   const res = await db
     .prepare(
-      `SELECT id, title, start_time, end_time, format FROM datasets
+      `SELECT id, title, start_time, end_time, format, thumbnail_ref FROM datasets
         WHERE id IN (${placeholders})
           AND published_at IS NOT NULL
           AND is_hidden = 0
           AND retracted_at IS NULL`,
     )
     .bind(...pool.map(l => l.dataset_id))
-    .all<{ id: string; title: string; start_time: string | null; end_time: string | null; format: string | null }>()
+    .all<{ id: string; title: string; start_time: string | null; end_time: string | null; format: string | null; thumbnail_ref: string | null }>()
   const byId = new Map((res.results ?? []).map(r => [r.id, r]))
   // Preserve the score order the pool established; cap AFTER the
   // visibility filter so the draft always gets the best visible stops.
@@ -75,7 +80,14 @@ async function resolveStopDatasets(db: D1Database, eventId: string): Promise<Eve
   for (const link of pool) {
     const row = byId.get(link.dataset_id)
     if (row) {
-      out.push({ id: row.id, title: row.title, startTime: row.start_time, endTime: row.end_time, format: row.format })
+      out.push({
+        id: row.id,
+        title: row.title,
+        startTime: row.start_time,
+        endTime: row.end_time,
+        format: row.format,
+        thumbnailUrl: resolveThumb(row.thumbnail_ref),
+      })
       if (out.length === MAX_TOUR_STOPS) break
     }
   }
@@ -99,7 +111,7 @@ export const onRequestPost: PagesFunction<CatalogEnv & EnrichEnv, 'id'> = async 
   const event = await getCurrentEvent(db, id)
   if (!event) return jsonError(404, 'not_found', `Event ${id} not found.`)
 
-  const datasets = await resolveStopDatasets(db, id)
+  const datasets = await resolveStopDatasets(db, id, ref => resolveHttpAssetUrl(context.env, ref))
   if (datasets.length === 0) {
     // Carries the `errors: [...]` field envelope alongside the plain
     // `{ error, message }` shape so the portal's publisherSend client

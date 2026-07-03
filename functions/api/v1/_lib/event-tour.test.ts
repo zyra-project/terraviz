@@ -40,7 +40,7 @@ function makeEvent(overrides: Partial<EventTourEvent> = {}): EventTourEvent {
 }
 
 function makeDataset(id: string, title = `Dataset ${id}`): EventTourDataset {
-  return { id, title, startTime: '2026-06-01T00:00:00Z', endTime: null, format: 'video/mp4' }
+  return { id, title, startTime: '2026-06-01T00:00:00Z', endTime: null, format: 'video/mp4', thumbnailUrl: null }
 }
 
 describe('eventFlyTarget', () => {
@@ -133,6 +133,35 @@ describe('buildEventTourTasks', () => {
     expect(keys).not.toContain('flyTo')
     expect(keys).not.toContain('setTime')
     expect(keys).toContain('loadDataset')
+  })
+
+  it('shows the first available dataset thumbnail as a positionless intro media card', () => {
+    const withThumb = { ...makeDataset('DS2'), thumbnailUrl: 'https://assets.example.org/ds2-thumb.png' }
+    const tasks = buildEventTourTasks(
+      makeEvent({ point_lat: 25, point_lon: -80 }),
+      [makeDataset('DS1'), withThumb],
+      captions,
+    )
+    const keys = tasks.map(t => Object.keys(t)[0])
+    // The media card rides with the intro caption and is hidden
+    // before the first dataset takes the globe.
+    expect(keys.slice(0, 6)).toEqual(['flyTo', 'showRect', 'showImage', 'pauseSeconds', 'hideRect', 'hideImage'])
+    const show = tasks.find(t => 'showImage' in t) as unknown as { showImage: Record<string, unknown> }
+    expect(show.showImage).toEqual({
+      imageID: 'event-intro-media',
+      filename: 'https://assets.example.org/ds2-thumb.png',
+      caption: withThumb.title,
+    })
+    // Positionless → the player's media rail, never a coordinate box.
+    expect(JSON.stringify(show)).not.toMatch(/xPct|yPct|widthPct|heightPct/)
+    expect(tasks.find(t => 'hideImage' in t)).toEqual({ hideImage: 'event-intro-media' })
+  })
+
+  it('emits no media tasks when no stop has a thumbnail', () => {
+    const tasks = buildEventTourTasks(makeEvent(), [makeDataset('DS1')], captions)
+    const keys = tasks.map(t => Object.keys(t)[0])
+    expect(keys).not.toContain('showImage')
+    expect(keys).not.toContain('hideImage')
   })
 
   it('caps the stops at MAX_TOUR_STOPS and falls back per-stop for missing captions', () => {

@@ -48,6 +48,10 @@ export interface EventTourDataset {
   startTime: string | null
   endTime: string | null
   format: string | null
+  /** Resolved public http(s) URL of the dataset's thumbnail, or null.
+   *  Callers resolve `thumbnail_ref` via `resolveHttpAssetUrl` so only
+   *  fetchable URLs reach the tour JSON. */
+  thumbnailUrl: string | null
 }
 
 export interface EventTourCaptions {
@@ -142,21 +146,37 @@ export function buildEventTourTasks(
   if (target) {
     tasks.push({ flyTo: { lat: target.lat, lon: target.lon, altmi: target.altmi, animated: true } })
   }
-  tasks.push(
-    {
-      showRect: {
-        rectID: 'event-intro',
-        caption: captions.intro,
-        captionPos: 'bottom',
-        xPct: 10,
-        yPct: 72,
-        widthPct: 80,
-        heightPct: 18,
-      },
+  tasks.push({
+    showRect: {
+      rectID: 'event-intro',
+      caption: captions.intro,
+      captionPos: 'bottom',
+      xPct: 10,
+      yPct: 72,
+      widthPct: 80,
+      heightPct: 18,
     },
-    { pauseSeconds: INTRO_HOLD_S },
-    { hideRect: 'event-intro' },
-  )
+  })
+  // Intro media card: while the camera flies and the intro caption
+  // holds, the globe still shows plain Earth — a preview of the data
+  // about to load fills that gap. Positionless on purpose: the
+  // player routes it into the responsive media rail
+  // (`tourUI.usesMediaRail`), so no coordinates to get wrong across
+  // viewports. Hidden before the first dataset takes the globe.
+  const introMedia = datasets.slice(0, MAX_TOUR_STOPS).find(d => d.thumbnailUrl)
+  if (introMedia?.thumbnailUrl) {
+    tasks.push({
+      showImage: {
+        imageID: 'event-intro-media',
+        filename: introMedia.thumbnailUrl,
+        caption: introMedia.title,
+      },
+    })
+  }
+  tasks.push({ pauseSeconds: INTRO_HOLD_S }, { hideRect: 'event-intro' })
+  if (introMedia?.thumbnailUrl) {
+    tasks.push({ hideImage: 'event-intro-media' })
+  }
   datasets.slice(0, MAX_TOUR_STOPS).forEach((d, i) => {
     tasks.push({ loadDataset: { id: d.id, worldIndex: 1 } })
     if (event.occurred_start) tasks.push({ setTime: { time: event.occurred_start } })
