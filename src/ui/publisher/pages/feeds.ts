@@ -523,10 +523,10 @@ function renderConsole(
   mount.replaceChildren(shell(yourFeeds, suggested, custom, channelsCard))
 }
 
-/** The "Agency video channels" card — the reputable-source allowlist
- *  the YouTube media suggestion filters against. Built-in agency
- *  channels are shown as fixed; the node's own channels are added by
- *  URL and removable. */
+/** The "Trusted video channels" card — the reputable-source allowlist
+ *  the YouTube media suggestion filters against. The built-in agency
+ *  defaults are shown as fixed; the node's own channels (any vetted
+ *  channel, agency or not) are added by URL and removable. */
 function renderChannelsCard(
   mount: HTMLElement,
   channels: YoutubeChannel[],
