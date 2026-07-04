@@ -201,26 +201,38 @@ interface CommonsImageInfo {
   extmetadata?: Record<string, { value?: unknown }>
 }
 
+interface CommonsPage {
+  /** Generator result order — `pages` is keyed by pageid, which does
+   *  NOT preserve geosearch's nearest-first ordering; `index` does. */
+  index?: number
+  imageinfo?: CommonsImageInfo[]
+}
+
 /** No attribution obligation: the stored image_url can't carry one. */
 const FREE_LICENSE_RE = /public domain|cc0/i
 
 /**
  * Map a Commons API response to suggestions — pure, exported for
  * tests. Keeps only raster images under a public-domain/CC0 license,
- * nearest-first (the API's order), capped to the shortlist size.
+ * nearest-first (sorted by the generator `index`, since the `pages`
+ * object is pageid-keyed), capped to the shortlist size. The sized
+ * thumb rendition is REQUIRED — the full-size original can be tens of
+ * megabytes and must never become the stored/previewed URL.
  */
 export function parseCommonsResponse(json: unknown): MediaSuggestion[] {
-  const pages = (json as { query?: { pages?: Record<string, { imageinfo?: CommonsImageInfo[] }> } })
-    ?.query?.pages
+  const pages = (json as { query?: { pages?: Record<string, CommonsPage> } })?.query?.pages
   if (!pages || typeof pages !== 'object') return []
+  const ordered = Object.values(pages).sort(
+    (a, b) => (a?.index ?? Number.MAX_SAFE_INTEGER) - (b?.index ?? Number.MAX_SAFE_INTEGER),
+  )
   const out: MediaSuggestion[] = []
-  for (const page of Object.values(pages)) {
+  for (const page of ordered) {
     const info = page?.imageinfo?.[0]
     if (!info) continue
     if (typeof info.mime !== 'string' || !info.mime.startsWith('image/')) continue
     const license = info.extmetadata?.LicenseShortName?.value
     if (typeof license !== 'string' || !FREE_LICENSE_RE.test(license)) continue
-    const url = info.thumburl ?? info.url
+    const url = info.thumburl
     if (typeof url !== 'string' || !/^https?:\/\//i.test(url) || url.length > 2048) continue
     out.push({
       kind: 'commons',

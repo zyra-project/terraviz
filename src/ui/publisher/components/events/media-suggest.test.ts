@@ -150,6 +150,32 @@ describe('Commons nearby photos', () => {
     expect(parseCommonsResponse({ query: { pages } })).toHaveLength(3)
   })
 
+  it('orders by the generator index, not the pageid keys', () => {
+    // `pages` is pageid-keyed; geosearch's nearest-first order lives in
+    // each page's `index`. Pageid 9 is the NEAREST result here.
+    const suggestions = parseCommonsResponse({
+      query: {
+        pages: {
+          '1': { index: 2, ...commonsPage({ thumburl: 'https://upload.wikimedia.org/far.jpg' }) },
+          '9': { index: 0, ...commonsPage({ thumburl: 'https://upload.wikimedia.org/nearest.jpg' }) },
+          '5': { index: 1, ...commonsPage({ thumburl: 'https://upload.wikimedia.org/near.jpg' }) },
+        },
+      },
+    })
+    expect(suggestions.map(s => s.url)).toEqual([
+      'https://upload.wikimedia.org/nearest.jpg',
+      'https://upload.wikimedia.org/near.jpg',
+      'https://upload.wikimedia.org/far.jpg',
+    ])
+  })
+
+  it('requires the sized thumb — never the full-size original', () => {
+    const suggestions = parseCommonsResponse({
+      query: { pages: { '1': commonsPage({ thumburl: undefined }) } },
+    })
+    expect(suggestions).toEqual([])
+  })
+
   it('returns [] for malformed bodies', () => {
     expect(parseCommonsResponse(null)).toEqual([])
     expect(parseCommonsResponse({ query: {} })).toEqual([])
