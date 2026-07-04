@@ -95,6 +95,48 @@ describe('renderEventDetail — suggested media (task: media suggestion engine)'
     expect(body.edits.imageAlt).toBeTruthy() // the Worldview card's description
   })
 
+  it('offers a ShakeMap card for an earthquake event', async () => {
+    const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'https://localhost')
+      let body: unknown = { query: { pages: {} } } // commons: nothing nearby
+      if (url.hostname === 'earthquake.usgs.gov') {
+        body = url.searchParams.has('eventid')
+          ? { properties: { products: { shakemap: [{ contents: { 'download/intensity.jpg': { url: 'https://earthquake.usgs.gov/i.jpg' } } }] } } }
+          : { features: [{ properties: { detail: 'https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=us7000&format=geojson' } }] }
+      }
+      return { ok: true, status: 200, type: 'basic', json: async () => body, text: async () => JSON.stringify(body) } as unknown as Response
+    })
+    const pane = renderEventDetail(
+      event({
+        title: 'Magnitude 7.8 earthquake strikes near Kablalan',
+        occurredStart: '2026-06-08T00:00:00.000Z',
+        geometry: { point: { lat: 5.9, lon: 124.8 } },
+      }),
+      { onEventStatusChange: vi.fn(), fetchFn } as never,
+    )
+    await flush()
+    const previews = [...pane.querySelectorAll('.publisher-events-suggest-preview')] as HTMLImageElement[]
+    expect(previews.some(p => p.src === 'https://earthquake.usgs.gov/i.jpg')).toBe(true)
+  })
+
+  it('offers an NHC cone card for a tropical event — even without geometry', async () => {
+    const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'https://localhost')
+      const body =
+        url.pathname === '/api/v1/publish/media/nhc-storms'
+          ? { activeStorms: [{ id: 'al052026', name: 'Delta' }] }
+          : { query: { pages: {} } }
+      return { ok: true, status: 200, type: 'basic', json: async () => body, text: async () => JSON.stringify(body) } as unknown as Response
+    })
+    const pane = renderEventDetail(
+      event({ title: 'Hurricane Delta strengthens overnight' }), // no geometry
+      { onEventStatusChange: vi.fn(), fetchFn } as never,
+    )
+    await flush()
+    const previews = [...pane.querySelectorAll('.publisher-events-suggest-preview')] as HTMLImageElement[]
+    expect(previews.some(p => p.src.includes('AL052026_5day_cone'))).toBe(true)
+  })
+
   it('appends nearby Commons photo cards asynchronously alongside the Worldview card', async () => {
     const commonsBody = {
       query: {

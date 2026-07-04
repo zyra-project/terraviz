@@ -26,7 +26,7 @@ import type { EventGeometry } from './events-model'
 
 export interface MediaSuggestion {
   /** Provenance tier — drives the badge + alt text. */
-  kind: 'worldview' | 'commons'
+  kind: 'worldview' | 'commons' | 'shakemap' | 'nhc'
   /** The image URL itself. */
   url: string
   /** Attribution shown on the card and stored in curator memory —
@@ -263,6 +263,183 @@ export async function fetchCommonsSuggestions(
     return parseCommonsResponse(await res.json())
   } catch {
     return []
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// USGS ShakeMaps (earthquake events)
+// ---------------------------------------------------------------------------
+
+const USGS_QUERY_API = 'https://earthquake.usgs.gov/fdsnws/event/1/query'
+/** Only ever follow detail links back to the same host we queried. */
+const USGS_HOST = 'earthquake.usgs.gov'
+/** Search window around the event date — quakes are instants; the
+ *  slack absorbs timezone fuzz in AI-inferred dates. */
+const USGS_WINDOW_DAYS = 2
+const USGS_RADIUS_KM = 300
+const USGS_MIN_MAGNITUDE = 4
+export const USGS_TIMEOUT_MS = 5_000
+
+/** Does this event read like an earthquake? Cheap text gate so a
+ *  wildfire near a coincidental quake never gets a ShakeMap card. */
+export function looksLikeQuake(event: { title?: string; summary?: string; keywords?: string[] }): boolean {
+  const text = `${event.title ?? ''} ${event.summary ?? ''} ${(event.keywords ?? []).join(' ')}`
+  return /\b(earthquake|quake|seismic|tremor|aftershock)\b/i.test(text)
+}
+
+/** The FDSN event query for "the largest shakemapped quake near this
+ *  place around this date" — pure, exported for tests. */
+export function buildUsgsQueryUrl(point: { lat: number; lon: number }, dateIso: string): string {
+  const ms = Date.parse(dateIso)
+  const day = 24 * 60 * 60 * 1000
+  const params = new URLSearchParams({
+    format: 'geojson',
+    starttime: new Date(ms - USGS_WINDOW_DAYS * day).toISOString().slice(0, 10),
+    endtime: new Date(ms + USGS_WINDOW_DAYS * day).toISOString().slice(0, 10),
+    latitude: String(clampLat(point.lat)),
+    longitude: String(clampLon(point.lon)),
+    maxradiuskm: String(USGS_RADIUS_KM),
+    minmagnitude: String(USGS_MIN_MAGNITUDE),
+    producttype: 'shakemap',
+    orderby: 'magnitude',
+    limit: '1',
+  })
+  return `${USGS_QUERY_API}?${params.toString()}`
+}
+
+/** Pull the matched quake's detail-feed URL out of the query response
+ *  — pure, exported for tests. Only same-host http(s) URLs pass. */
+export function parseUsgsQuery(json: unknown): string | null {
+  const detail = (json as { features?: Array<{ properties?: { detail?: unknown } }> })
+    ?.features?.[0]?.properties?.detail
+  if (typeof detail !== 'string') return null
+  try {
+    const u = new URL(detail)
+    return (u.protocol === 'https:' || u.protocol === 'http:') && u.hostname === USGS_HOST ? detail : null
+  } catch {
+    return null
+  }
+}
+
+/** Pull the ShakeMap intensity image out of the detail feed
+ *  (`products.shakemap[0].contents["download/intensity.jpg"].url`) —
+ *  pure, exported for tests. */
+export function parseShakemapDetail(json: unknown): string | null {
+  const contents = (json as {
+    properties?: { products?: { shakemap?: Array<{ contents?: Record<string, { url?: unknown }> }> } }
+  })?.properties?.products?.shakemap?.[0]?.contents
+  const url = contents?.['download/intensity.jpg']?.url ?? contents?.['download/intensity.png']?.url
+  return typeof url === 'string' && /^https?:\/\//i.test(url) && url.length <= 2048 ? url : null
+}
+
+/**
+ * Fetch the ShakeMap intensity-map candidate for an earthquake event:
+ * query the FDSN event API (keyless, CORS-enabled) for the largest
+ * shakemapped quake near the event's place and date, then read the
+ * intensity image from its detail feed. Two bounded fetches; every
+ * failure path — not a quake, no location/date, no match, timeout —
+ * is null.
+ */
+export async function fetchShakemapSuggestion(
+  event: { title?: string; summary?: string; keywords?: string[]; occurredStart?: string; source?: { publishedAt?: string }; geometry?: EventGeometry },
+  fetchFn: typeof fetch = fetch,
+): Promise<MediaSuggestion | null> {
+  if (!looksLikeQuake(event)) return null
+  const point = locationFor(event.geometry)
+  const rawDate = event.occurredStart ?? event.source?.publishedAt
+  if (!point || !rawDate || !Number.isFinite(Date.parse(rawDate))) return null
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), USGS_TIMEOUT_MS)
+  try {
+    const res = await fetchFn(buildUsgsQueryUrl(point, rawDate), { signal: controller.signal })
+    if (!res.ok) return null
+    const detailUrl = parseUsgsQuery(await res.json())
+    if (!detailUrl) return null
+    const detail = await fetchFn(detailUrl, { signal: controller.signal })
+    if (!detail.ok) return null
+    const url = parseShakemapDetail(await detail.json())
+    if (!url) return null
+    return {
+      kind: 'shakemap',
+      url,
+      attribution: 'USGS ShakeMap', // i18n-exempt: proper noun attribution
+    }
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// NHC forecast cones (tropical-cyclone events)
+// ---------------------------------------------------------------------------
+
+/** Same-origin proxy over NHC's CurrentStorms.json — nhc.noaa.gov
+ *  serves no CORS headers, so the browser can't fetch it directly. */
+export const NHC_STORMS_ENDPOINT = '/api/v1/publish/media/nhc-storms'
+export const NHC_TIMEOUT_MS = 5_000
+
+/** Does this event read like a tropical cyclone? */
+export function looksLikeTropical(event: { title?: string; summary?: string; keywords?: string[] }): boolean {
+  const text = `${event.title ?? ''} ${event.summary ?? ''} ${(event.keywords ?? []).join(' ')}`
+  return /\b(hurricane|typhoon|cyclone|tropical\s+(storm|depression))\b/i.test(text)
+}
+
+/** The public 5-day forecast-cone graphic for an active storm id
+ *  (`al062023` → `storm_graphics/AT06/AL062023_…_sm2.png`) — pure,
+ *  exported for tests. Null for a malformed id. If NHC retires the
+ *  graphic (storm dissipated), the card's preview 404s and the card
+ *  removes itself — same degradation as every other source. */
+export function buildNhcConeUrl(stormId: string): string | null {
+  const m = stormId.match(/^(al|ep|cp)(\d{2})(\d{4})$/i)
+  if (!m) return null
+  const dir = ({ al: 'AT', ep: 'EP', cp: 'CP' } as const)[m[1].toLowerCase() as 'al' | 'ep' | 'cp']
+  return `https://www.nhc.noaa.gov/storm_graphics/${dir}${m[2]}/${stormId.toUpperCase()}_5day_cone_with_line_and_wind_sm2.png`
+}
+
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * Fetch the forecast-cone candidate for a tropical-cyclone event:
+ * read the active-storms list through the same-origin proxy and match
+ * a storm whose NAME appears as a word in the event title ("Hurricane
+ * Delta strengthens" ↔ "Delta"). Null when the event isn't tropical,
+ * nothing is active, or no name matches.
+ */
+export async function fetchNhcConeSuggestion(
+  event: { title?: string; summary?: string; keywords?: string[] },
+  fetchFn: typeof fetch = fetch,
+): Promise<MediaSuggestion | null> {
+  if (!looksLikeTropical(event)) return null
+  const title = event.title ?? ''
+  if (!title) return null
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), NHC_TIMEOUT_MS)
+  try {
+    const res = await fetchFn(NHC_STORMS_ENDPOINT, { signal: controller.signal })
+    if (!res.ok) return null
+    const { activeStorms } = (await res.json()) as { activeStorms?: Array<{ id?: unknown; name?: unknown }> }
+    if (!Array.isArray(activeStorms)) return null
+    for (const storm of activeStorms) {
+      if (typeof storm?.id !== 'string' || typeof storm?.name !== 'string') continue
+      if (storm.name.length < 3) continue // "Two"-style numerals stay, single letters don't false-match
+      if (!new RegExp(`\\b${escapeRe(storm.name)}\\b`, 'i').test(title)) continue
+      const url = buildNhcConeUrl(storm.id)
+      if (!url) continue
+      return {
+        kind: 'nhc',
+        url,
+        attribution: 'NOAA / National Hurricane Center', // i18n-exempt: proper noun attribution
+      }
+    }
+    return null
+  } catch {
+    return null
   } finally {
     clearTimeout(timer)
   }

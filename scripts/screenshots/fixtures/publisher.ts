@@ -287,6 +287,12 @@ const blogAuthoring = {
   ],
 }
 
+/** The NHC media proxy — quiet season, no cone cards in captures. */
+const NHC_STORMS_RULE: FixtureRule = {
+  url: '/api/v1/publish/media/nhc-storms',
+  json: { activeStorms: [] },
+}
+
 /** Public blog fixtures — the `/blog` list + one full `/blog/:slug`
  *  post, used by the public-surface scenes/smoke. */
 export function blogPublicFixtures(): FixtureRule[] {
@@ -440,6 +446,7 @@ export function publisherFixtures(
     // Preview before the registry list — rules substring-match in order.
     { url: '/api/v1/publish/feeds/preview', json: feedPreview },
     { url: '/api/v1/publish/feeds', json: feeds },
+    NHC_STORMS_RULE,
     { url: '/api/v1/publish/node-profile', json: nodeProfile },
     { url: '/api/v1/publish/blog', json: blogAuthoring },
   ]

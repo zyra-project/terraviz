@@ -420,6 +420,9 @@ export const scenes: Scene[] = [
       await page.route('https://commons.wikimedia.org/**', r =>
         r.fulfill({ status: 200, contentType: 'application/json', body: '{"query":{"pages":{}}}' }),
       )
+      await page.route('https://earthquake.usgs.gov/**', r =>
+        r.fulfill({ status: 200, contentType: 'application/json', body: '{"features":[]}' }),
+      )
       await openPublish(page, '/publish/events')
       // Direction A master–detail: wait for the detail title (the first
       // event auto-selects) so the capture includes the populated panes.

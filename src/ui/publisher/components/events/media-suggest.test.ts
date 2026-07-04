@@ -8,9 +8,17 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   buildCommonsQueryUrl,
+  buildNhcConeUrl,
+  buildUsgsQueryUrl,
   buildWorldviewSnapshot,
   fetchCommonsSuggestions,
+  fetchNhcConeSuggestion,
+  fetchShakemapSuggestion,
+  looksLikeQuake,
+  looksLikeTropical,
   parseCommonsResponse,
+  parseShakemapDetail,
+  parseUsgsQuery,
   WORLDVIEW_SNAPSHOT_LAYER,
 } from './media-suggest'
 
@@ -225,5 +233,120 @@ describe('Commons nearby photos', () => {
       ok as unknown as typeof fetch,
     )
     expect(String(ok.mock.calls[0][0])).toContain('ggscoord=5%7C180')
+  })
+})
+
+describe('USGS ShakeMap source', () => {
+  const QUAKE = {
+    title: 'Magnitude 7.8 earthquake strikes near Kablalan, Philippines',
+    occurredStart: '2026-06-08T00:00:00.000Z',
+    geometry: { point: { lat: 5.9, lon: 124.8 } },
+  }
+
+  it('gates on quake-looking text', () => {
+    expect(looksLikeQuake(QUAKE)).toBe(true)
+    expect(looksLikeQuake({ title: 'Hurricane Delta strengthens' })).toBe(false)
+    expect(looksLikeQuake({ title: 'Storm', keywords: ['aftershock'] })).toBe(true)
+  })
+
+  it('builds the windowed, shakemap-filtered FDSN query', () => {
+    const p = params(buildUsgsQueryUrl({ lat: 5.9, lon: 124.8 }, '2026-06-08T00:00:00.000Z'))
+    expect(p.get('starttime')).toBe('2026-06-06')
+    expect(p.get('endtime')).toBe('2026-06-10')
+    expect(p.get('latitude')).toBe('5.9')
+    expect(p.get('longitude')).toBe('124.8')
+    expect(p.get('producttype')).toBe('shakemap')
+    expect(p.get('orderby')).toBe('magnitude')
+    expect(p.get('limit')).toBe('1')
+  })
+
+  it('only follows detail URLs back to earthquake.usgs.gov', () => {
+    expect(
+      parseUsgsQuery({ features: [{ properties: { detail: 'https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=x&format=geojson' } }] }),
+    ).toContain('eventid=x')
+    expect(parseUsgsQuery({ features: [{ properties: { detail: 'https://evil.example.org/x' } }] })).toBeNull()
+    expect(parseUsgsQuery({ features: [] })).toBeNull()
+  })
+
+  it('pulls the intensity image from the detail feed', () => {
+    const detail = {
+      properties: {
+        products: {
+          shakemap: [{ contents: { 'download/intensity.jpg': { url: 'https://earthquake.usgs.gov/product/shakemap/x/us/1/download/intensity.jpg' } } }],
+        },
+      },
+    }
+    expect(parseShakemapDetail(detail)).toContain('intensity.jpg')
+    expect(parseShakemapDetail({ properties: { products: {} } })).toBeNull()
+  })
+
+  it('runs the two-fetch chain and degrades to null on any failure', async () => {
+    const detailUrl = 'https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=us7000&format=geojson'
+    const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const body = url.includes('eventid=us7000')
+        ? { properties: { products: { shakemap: [{ contents: { 'download/intensity.jpg': { url: 'https://earthquake.usgs.gov/i.jpg' } } }] } } }
+        : { features: [{ properties: { detail: detailUrl } }] }
+      return { ok: true, json: async () => body } as unknown as Response
+    })
+    const s = await fetchShakemapSuggestion(QUAKE, fetchFn as unknown as typeof fetch)
+    expect(s).toMatchObject({ kind: 'shakemap', url: 'https://earthquake.usgs.gov/i.jpg' })
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+
+    // Not a quake → no request at all.
+    const idle = vi.fn()
+    expect(await fetchShakemapSuggestion({ title: 'Wildfire', geometry: QUAKE.geometry, occurredStart: QUAKE.occurredStart }, idle as unknown as typeof fetch)).toBeNull()
+    expect(idle).not.toHaveBeenCalled()
+
+    // Upstream failure → null.
+    const boom = vi.fn(async () => {
+      throw new Error('offline')
+    })
+    expect(await fetchShakemapSuggestion(QUAKE, boom as unknown as typeof fetch)).toBeNull()
+  })
+})
+
+describe('NHC forecast-cone source', () => {
+  it('gates on tropical-looking text', () => {
+    expect(looksLikeTropical({ title: 'Hurricane Delta strengthens overnight' })).toBe(true)
+    expect(looksLikeTropical({ title: 'Tropical Storm Ana forms' })).toBe(true)
+    expect(looksLikeTropical({ title: 'Earthquake near Tokyo' })).toBe(false)
+  })
+
+  it('builds the cone graphic URL from the storm id', () => {
+    expect(buildNhcConeUrl('al062023')).toBe(
+      'https://www.nhc.noaa.gov/storm_graphics/AT06/AL062023_5day_cone_with_line_and_wind_sm2.png',
+    )
+    expect(buildNhcConeUrl('ep182024')).toBe(
+      'https://www.nhc.noaa.gov/storm_graphics/EP18/EP182024_5day_cone_with_line_and_wind_sm2.png',
+    )
+    expect(buildNhcConeUrl('nonsense')).toBeNull()
+  })
+
+  it('matches the storm by name as a whole word in the title', async () => {
+    const fetchFn = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ activeStorms: [{ id: 'al052026', name: 'Delta' }, { id: 'al062026', name: 'Epsilon' }] }),
+    }) as unknown as Response)
+    const s = await fetchNhcConeSuggestion({ title: 'Hurricane Delta strengthens' }, fetchFn as unknown as typeof fetch)
+    expect(s).toMatchObject({ kind: 'nhc' })
+    expect(s!.url).toContain('AL052026')
+
+    // "Deltaville" must not match "Delta"... and a non-tropical event
+    // never fires the request.
+    const none = await fetchNhcConeSuggestion({ title: 'Hurricane watch near Kappaville' }, fetchFn as unknown as typeof fetch)
+    expect(none).toBeNull()
+    const idle = vi.fn()
+    expect(await fetchNhcConeSuggestion({ title: 'Flooding in town' }, idle as unknown as typeof fetch)).toBeNull()
+    expect(idle).not.toHaveBeenCalled()
+  })
+
+  it('degrades to null on proxy failure or an empty season', async () => {
+    const empty = vi.fn(async () => ({ ok: true, json: async () => ({ activeStorms: [] }) }) as unknown as Response)
+    expect(await fetchNhcConeSuggestion({ title: 'Hurricane Delta strengthens' }, empty as unknown as typeof fetch)).toBeNull()
+    const boom = vi.fn(async () => {
+      throw new Error('offline')
+    })
+    expect(await fetchNhcConeSuggestion({ title: 'Hurricane Delta strengthens' }, boom as unknown as typeof fetch)).toBeNull()
   })
 })

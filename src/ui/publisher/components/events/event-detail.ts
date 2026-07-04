@@ -28,7 +28,14 @@ import {
   type ReviewEvent,
   type ReviewLink,
 } from './events-model'
-import { buildWorldviewSnapshot, fetchCommonsSuggestions, type MediaSuggestion } from './media-suggest'
+import {
+  buildWorldviewSnapshot,
+  fetchCommonsSuggestions,
+  fetchNhcConeSuggestion,
+  fetchShakemapSuggestion,
+  looksLikeTropical,
+  type MediaSuggestion,
+} from './media-suggest'
 
 /** Cap on candidate rows shown in the "+ Add dataset" search. */
 const ADD_CANDIDATE_ROWS = 20
@@ -102,6 +109,24 @@ function handleWriteError(
  * loads the preview), and nothing is stored until the curator picks.
  * A candidate whose image fails to load removes itself.
  */
+function suggestionBadge(kind: MediaSuggestion['kind']): string {
+  switch (kind) {
+    case 'commons': return t('publisher.events.suggest.commons')
+    case 'shakemap': return t('publisher.events.suggest.shakemap')
+    case 'nhc': return t('publisher.events.suggest.nhc')
+    case 'worldview': return t('publisher.events.suggest.worldview')
+  }
+}
+
+function suggestionAlt(kind: MediaSuggestion['kind']): string {
+  switch (kind) {
+    case 'commons': return t('publisher.events.suggest.commonsAlt')
+    case 'shakemap': return t('publisher.events.suggest.shakemapAlt')
+    case 'nhc': return t('publisher.events.suggest.nhcAlt')
+    case 'worldview': return t('publisher.events.suggest.worldviewAlt')
+  }
+}
+
 function suggestionCard(
   suggestion: MediaSuggestion,
   event: ReviewEvent,
@@ -111,10 +136,7 @@ function suggestionCard(
   const card = el('div', 'publisher-events-suggest-card')
   // One description serves the preview and, on pick, the stored alt
   // text (media accessibility) every downstream surface renders with.
-  const altText =
-    suggestion.kind === 'commons'
-      ? t('publisher.events.suggest.commonsAlt')
-      : t('publisher.events.suggest.worldviewAlt')
+  const altText = suggestionAlt(suggestion.kind)
   const img = document.createElement('img')
   img.className = 'publisher-events-suggest-preview'
   img.src = suggestion.url
@@ -127,11 +149,7 @@ function suggestionCard(
 
   const meta = el('div', 'publisher-events-suggest-meta')
   meta.append(
-    el('span', 'publisher-events-suggest-badge', [
-      suggestion.kind === 'commons'
-        ? t('publisher.events.suggest.commons')
-        : t('publisher.events.suggest.worldview'),
-    ]),
+    el('span', 'publisher-events-suggest-badge', [suggestionBadge(suggestion.kind)]),
     el('span', 'publisher-events-suggest-attribution', [suggestion.attribution]),
   )
 
@@ -244,9 +262,12 @@ function renderImageUpload(
 }
 
 function renderMediaSuggestions(event: ReviewEvent, cb: EventDetailCallbacks): HTMLElement | null {
-  // Location is the one hard requirement — every source is "imagery
-  // of the place". (Worldview additionally needs a date.)
-  if (!event.geometry?.point && !event.geometry?.boundingBox) return null
+  // Location is the usual hard requirement — most sources are
+  // "imagery of the place". (Worldview additionally needs a date.)
+  // The NHC cone is the exception: it matches by storm NAME, so a
+  // tropical event qualifies even without geometry.
+  const located = Boolean(event.geometry?.point ?? event.geometry?.boundingBox)
+  if (!located && !looksLikeTropical(event)) return null
 
   const wrap = el('div', 'publisher-events-suggest')
   wrap.append(el('h4', 'publisher-events-suggest-title', [t('publisher.events.suggest.title')]))
@@ -260,14 +281,24 @@ function renderMediaSuggestions(event: ReviewEvent, cb: EventDetailCallbacks): H
   if (worldview) wrap.append(suggestionCard(worldview, event, cb, syncWithCards))
   syncWithCards()
 
-  // Nearby public-domain photos arrive async; append only while the
-  // event is still imageless (a pane swapped out mid-fetch is detached
-  // — appending there is harmless and it just gets collected).
-  void fetchCommonsSuggestions(event, cb.fetchFn ?? fetch).then(suggestions => {
-    if (event.imageUrl) return
-    for (const s of suggestions) wrap.append(suggestionCard(s, event, cb, syncWithCards))
-    syncWithCards()
-  })
+  // Fetched sources arrive async, each appending as it resolves;
+  // append only while the event is still imageless (a pane swapped
+  // out mid-fetch is detached — appending there is harmless and it
+  // just gets collected). Hazard-specific sources (ShakeMap / NHC
+  // cone) gate themselves on the event's own text, so most events
+  // fire only the Commons lookup.
+  const fetchFn = cb.fetchFn ?? fetch
+  const appendLater = (promise: Promise<MediaSuggestion[] | MediaSuggestion | null>): void => {
+    void promise.then(result => {
+      if (event.imageUrl || !result) return
+      const suggestions = Array.isArray(result) ? result : [result]
+      for (const s of suggestions) wrap.append(suggestionCard(s, event, cb, syncWithCards))
+      syncWithCards()
+    })
+  }
+  appendLater(fetchShakemapSuggestion(event, fetchFn))
+  appendLater(fetchNhcConeSuggestion(event, fetchFn))
+  appendLater(fetchCommonsSuggestions(event, fetchFn))
 
   return wrap
 }
