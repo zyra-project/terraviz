@@ -2508,12 +2508,61 @@
   font-size: calc(0.8rem * var(--ui-scale));
 }
 
+.publisher-events-suggest-preview-wrap {
+  position: relative;
+  inline-size: min(14rem, 45%);
+  flex: none;
+}
+
 .publisher-events-suggest-preview {
   display: block;
-  inline-size: min(14rem, 45%);
+  inline-size: 100%;
   max-block-size: calc(9rem * var(--ui-scale));
   object-fit: cover;
   border-radius: calc(6px * var(--ui-scale));
+}
+
+/* Play glyph over a video-source thumbnail (classic centering). */
+.publisher-events-suggest-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  inline-size: calc(2.2rem * var(--ui-scale));
+  block-size: calc(2.2rem * var(--ui-scale));
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: calc(0.9rem * var(--ui-scale));
+  pointer-events: none;
+}
+
+.publisher-events-suggest-caption {
+  font-size: calc(0.78rem * var(--ui-scale));
+  color: var(--color-text-muted);
+  line-height: 1.3;
+}
+
+/* Attached agency video — the picked embed, framed 16:9. */
+.publisher-events-video {
+  margin-block-start: calc(0.75rem * var(--ui-scale));
+}
+
+.publisher-events-video-frame {
+  display: block;
+  inline-size: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--white-o08);
+  border-radius: calc(8px * var(--ui-scale));
+}
+
+.publisher-events-video-foot {
+  display: flex;
+  align-items: center;
+  gap: calc(0.5rem * var(--ui-scale));
+  margin-block-start: calc(0.4rem * var(--ui-scale));
 }
 
 .publisher-events-suggest-meta {
@@ -2948,6 +2997,25 @@
 .publisher-feeds-entry {
     display: flex;
     flex-direction: column;
+}
+
+.publisher-feeds-channels {
+    list-style: none;
+    margin: 0 0 0.75rem;
+    padding: 0;
+}
+
+.publisher-feeds-channel-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.4rem 0;
+    border-block-end: 1px solid var(--white-o08, rgba(255, 255, 255, 0.08));
+}
+
+.publisher-feeds-channel-row:last-child {
+    border-block-end: none;
 }
 
 .publisher-feeds-preview {

@@ -14,6 +14,8 @@ import {
   fetchCommonsSuggestions,
   fetchNhcConeSuggestion,
   fetchShakemapSuggestion,
+  fetchYoutubeSuggestions,
+  isNocookieEmbedUrl,
   looksLikeQuake,
   looksLikeTropical,
   parseCommonsResponse,
@@ -358,5 +360,51 @@ describe('NHC forecast-cone source', () => {
       throw new Error('offline')
     })
     expect(await fetchNhcConeSuggestion({ title: 'Hurricane Delta strengthens' }, boom as unknown as typeof fetch)).toBeNull()
+  })
+})
+
+describe('agency YouTube source', () => {
+  it('validates the nocookie embed shape (client mirror)', () => {
+    expect(isNocookieEmbedUrl('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ')).toBe(true)
+    expect(isNocookieEmbedUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ')).toBe(false)
+    expect(isNocookieEmbedUrl(null)).toBe(false)
+  })
+
+  it('maps proxy results to video suggestions (thumb preview + embed url)', async () => {
+    const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
+      expect(String(input)).toContain('/api/v1/publish/media/youtube-search?q=Hurricane%20Delta')
+      return {
+        ok: true,
+        json: async () => ({
+          videos: [
+            { videoId: 'dQw4w9WgXcQ', title: 'NOAA briefing', channelName: 'NOAA Education' },
+            { videoId: 'bad id!', title: 'x', channelName: 'NASA' }, // invalid id → dropped
+          ],
+        }),
+      } as unknown as Response
+    })
+    const out = await fetchYoutubeSuggestions({ title: 'Hurricane Delta' }, fetchFn as unknown as typeof fetch)
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({
+      kind: 'youtube',
+      url: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg',
+      embedUrl: 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ',
+      attribution: 'NOAA Education',
+      title: 'NOAA briefing',
+    })
+  })
+
+  it('degrades to [] with no title or on any failure', async () => {
+    const idle = vi.fn()
+    expect(await fetchYoutubeSuggestions({}, idle as unknown as typeof fetch)).toEqual([])
+    expect(idle).not.toHaveBeenCalled()
+
+    const empty = vi.fn(async () => ({ ok: true, json: async () => ({ videos: [] }) }) as unknown as Response)
+    expect(await fetchYoutubeSuggestions({ title: 'x' }, empty as unknown as typeof fetch)).toEqual([])
+
+    const boom = vi.fn(async () => {
+      throw new Error('offline')
+    })
+    expect(await fetchYoutubeSuggestions({ title: 'x' }, boom as unknown as typeof fetch)).toEqual([])
   })
 })

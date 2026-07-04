@@ -34,6 +34,7 @@ const ME_ENDPOINT = '/api/v1/publish/me'
 const FEEDS_ENDPOINT = '/api/v1/publish/feeds'
 const PREVIEW_ENDPOINT = '/api/v1/publish/feeds/preview'
 const REFRESH_ENDPOINT = '/api/v1/publish/events/refresh'
+const YOUTUBE_CHANNELS_ENDPOINT = '/api/v1/publish/media/youtube-channels'
 
 interface MeResponse {
   role: string
@@ -64,6 +65,16 @@ interface RefreshResponse {
 
 interface PreviewResponse {
   items: Array<{ title: string; publishedAt: string | null; url: string }>
+}
+
+interface YoutubeChannel {
+  channelId: string
+  channelName: string
+  builtin: boolean
+}
+
+interface YoutubeChannelsResponse {
+  channels: YoutubeChannel[]
 }
 
 export interface FeedsPageOptions {
@@ -121,9 +132,12 @@ export async function renderFeedsPage(mount: HTMLElement, options: FeedsPageOpti
   const fetchFn = options.fetchFn
   mount.replaceChildren(shell(el('p', { className: 'publisher-loading', textContent: t('publisher.feeds.loading') })))
 
-  const [meRes, feedsRes] = await Promise.all([
+  const [meRes, feedsRes, channelsRes] = await Promise.all([
     publisherGet<MeResponse>(ME_ENDPOINT, { fetchFn }),
     publisherGet<FeedsResponse>(FEEDS_ENDPOINT, { fetchFn }),
+    // The YouTube channel allowlist is a secondary card; a failure here
+    // (e.g. an older deploy without the route) must not sink the page.
+    publisherGet<YoutubeChannelsResponse>(YOUTUBE_CHANNELS_ENDPOINT, { fetchFn }),
   ])
 
   const renderFailure = (res: { kind: ErrorKind; status?: number; body?: string }): void => {
@@ -161,7 +175,13 @@ export async function renderFeedsPage(mount: HTMLElement, options: FeedsPageOpti
     return
   }
 
-  renderConsole(mount, feedsRes.data.feeds, options)
+  // `null` = the channels endpoint is unavailable (older deploy where
+  // the route 404s, or a transient failure) — distinct from a valid
+  // response. renderConsole omits the whole card in that case rather
+  // than showing an allowlist UI whose Add/Remove actions would 404.
+  const channels =
+    channelsRes.ok && Array.isArray(channelsRes.data.channels) ? channelsRes.data.channels : null
+  renderConsole(mount, feedsRes.data.feeds, channels, options)
 }
 
 /** Re-fetch the connector list and re-render — after every mutation. */
@@ -169,7 +189,12 @@ async function reload(mount: HTMLElement, options: FeedsPageOptions): Promise<vo
   await renderFeedsPage(mount, options)
 }
 
-function renderConsole(mount: HTMLElement, feeds: FeedRow[], options: FeedsPageOptions): void {
+function renderConsole(
+  mount: HTMLElement,
+  feeds: FeedRow[],
+  channels: YoutubeChannel[] | null,
+  options: FeedsPageOptions,
+): void {
   const status = el('div', { className: 'publisher-feeds-status', role: 'status' })
   const showError = (message: string): void => {
     status.textContent = message
@@ -497,5 +522,94 @@ function renderConsole(mount: HTMLElement, feeds: FeedRow[], options: FeedsPageO
     customPreview.panel,
   )
 
-  mount.replaceChildren(shell(yourFeeds, suggested, custom))
+  // ── Card 4: agency-YouTube channel allowlist ───────────────────
+  // Omit the card entirely when the channels endpoint is unavailable
+  // (older deploy) — an allowlist UI whose Add/Remove would 404 is
+  // worse than no card.
+  const cards = [yourFeeds, suggested, custom]
+  if (channels !== null) cards.push(renderChannelsCard(mount, channels, options, showError, send))
+
+  mount.replaceChildren(shell(...cards))
+}
+
+/** The "Trusted video channels" card — the reputable-source allowlist
+ *  the YouTube media suggestion filters against. The built-in agency
+ *  defaults are shown as fixed; the node's own channels (any vetted
+ *  channel, agency or not) are added by URL and removable. */
+function renderChannelsCard(
+  mount: HTMLElement,
+  channels: YoutubeChannel[],
+  options: FeedsPageOptions,
+  showError: (message: string) => void,
+  send: (endpoint: string, body: unknown, method: 'POST' | 'DELETE') => Promise<boolean>,
+): HTMLElement {
+  const wrap = card(
+    heading(t('publisher.feeds.channels.title')),
+    el('p', { className: 'publisher-feeds-intro', textContent: t('publisher.feeds.channels.intro') }),
+  )
+
+  const list = el('ul', { className: 'publisher-feeds-channels' })
+  for (const ch of channels) {
+    const row = el('li', { className: 'publisher-feeds-channel-row' })
+    const main = el('span', { className: 'publisher-feeds-row-main' }, [
+      el('span', { className: 'publisher-feeds-row-label', textContent: ch.channelName }),
+      el('span', {
+        className: 'publisher-feeds-row-meta',
+        textContent: ch.builtin ? t('publisher.feeds.channels.builtin') : ch.channelId,
+      }),
+    ])
+    row.append(main)
+    if (!ch.builtin) {
+      const remove = el('button', {
+        type: 'button',
+        className: 'publisher-btn publisher-btn-small',
+        textContent: t('publisher.feeds.channels.remove'),
+      })
+      remove.addEventListener('click', () => {
+        remove.disabled = true
+        void send(`${YOUTUBE_CHANNELS_ENDPOINT}/${encodeURIComponent(ch.channelId)}`, undefined, 'DELETE').then(
+          ok => {
+            if (ok) void reload(mount, options)
+            else remove.disabled = false
+          },
+        )
+      })
+      row.append(remove)
+    }
+    list.append(row)
+  }
+  wrap.append(list)
+
+  const urlInput = el('input', {
+    type: 'text',
+    className: 'publisher-feeds-input',
+    id: 'feeds-channel-url',
+    placeholder: 'https://youtube.com/@… or /channel/UC…', // i18n-exempt: URL shape hint
+    maxLength: 300,
+  })
+  const addBtn = el('button', {
+    type: 'button',
+    className: 'publisher-btn publisher-btn-primary',
+    textContent: t('publisher.feeds.channels.add'),
+  })
+  addBtn.addEventListener('click', () => {
+    const url = urlInput.value.trim()
+    if (!url) {
+      showError(t('publisher.feeds.channels.invalid'))
+      return
+    }
+    addBtn.disabled = true
+    void send(YOUTUBE_CHANNELS_ENDPOINT, { url }, 'POST').then(ok => {
+      if (ok) void reload(mount, options)
+      else addBtn.disabled = false
+    })
+  })
+  wrap.append(
+    el('label', { className: 'publisher-feeds-field' }, [
+      el('span', { className: 'publisher-field-label', textContent: t('publisher.feeds.channels.url') }),
+      urlInput,
+    ]),
+    el('div', { className: 'publisher-feeds-actions' }, [addBtn]),
+  )
+  return wrap
 }

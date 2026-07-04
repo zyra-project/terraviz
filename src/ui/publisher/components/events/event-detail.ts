@@ -33,6 +33,8 @@ import {
   fetchCommonsSuggestions,
   fetchNhcConeSuggestion,
   fetchShakemapSuggestion,
+  fetchYoutubeSuggestions,
+  isNocookieEmbedUrl,
   looksLikeTropical,
   type MediaSuggestion,
 } from './media-suggest'
@@ -114,6 +116,7 @@ function suggestionBadge(kind: MediaSuggestion['kind']): string {
     case 'commons': return t('publisher.events.suggest.commons')
     case 'shakemap': return t('publisher.events.suggest.shakemap')
     case 'nhc': return t('publisher.events.suggest.nhc')
+    case 'youtube': return t('publisher.events.suggest.youtube')
     case 'worldview': return t('publisher.events.suggest.worldview')
   }
 }
@@ -123,6 +126,7 @@ function suggestionAlt(kind: MediaSuggestion['kind']): string {
     case 'commons': return t('publisher.events.suggest.commonsAlt')
     case 'shakemap': return t('publisher.events.suggest.shakemapAlt')
     case 'nhc': return t('publisher.events.suggest.nhcAlt')
+    case 'youtube': return t('publisher.events.suggest.youtubeAlt')
     case 'worldview': return t('publisher.events.suggest.worldviewAlt')
   }
 }
@@ -133,10 +137,14 @@ function suggestionCard(
   cb: EventDetailCallbacks,
   onCardGone: () => void,
 ): HTMLElement {
-  const card = el('div', 'publisher-events-suggest-card')
-  // One description serves the preview and, on pick, the stored alt
-  // text (media accessibility) every downstream surface renders with.
-  const altText = suggestionAlt(suggestion.kind)
+  // The agency-YouTube source is a VIDEO: it stores `video_embed_url`,
+  // not the event image, and its preview is a play-badged thumbnail.
+  const isVideo = suggestion.kind === 'youtube' && typeof suggestion.embedUrl === 'string'
+  const card = el('div', `publisher-events-suggest-card${isVideo ? ' publisher-events-suggest-card-video' : ''}`)
+  // One description serves the preview and, on an image pick, the
+  // stored alt text (media accessibility) every surface renders with.
+  const altText = suggestion.title ?? suggestionAlt(suggestion.kind)
+  const preview = el('div', 'publisher-events-suggest-preview-wrap')
   const img = document.createElement('img')
   img.className = 'publisher-events-suggest-preview'
   img.src = suggestion.url
@@ -146,25 +154,39 @@ function suggestionCard(
     card.remove()
     onCardGone()
   })
+  preview.append(img)
+  if (isVideo) {
+    const play = el('span', 'publisher-events-suggest-play', ['▶'])
+    play.setAttribute('aria-hidden', 'true') // decorative — the alt text conveys "video"
+    preview.append(play)
+  }
 
   const meta = el('div', 'publisher-events-suggest-meta')
   meta.append(
     el('span', 'publisher-events-suggest-badge', [suggestionBadge(suggestion.kind)]),
     el('span', 'publisher-events-suggest-attribution', [suggestion.attribution]),
   )
+  if (suggestion.title) {
+    meta.append(el('span', 'publisher-events-suggest-caption', [suggestion.title]))
+  }
 
   const status = el('span', 'publisher-events-edit-status')
   const use = document.createElement('button')
   use.type = 'button'
   use.className = 'publisher-btn publisher-btn-small publisher-btn-primary'
-  use.textContent = t('publisher.events.suggest.use')
+  use.textContent = isVideo ? t('publisher.events.suggest.useVideo') : t('publisher.events.suggest.use')
   use.addEventListener('click', () => {
     use.disabled = true
     status.textContent = ''
     status.classList.remove('publisher-events-status-error')
+    // Video → `edits.videoEmbedUrl` (the embed); image → `edits.imageUrl`
+    // (the URL itself) plus its alt text.
+    const edits = isVideo
+      ? { videoEmbedUrl: suggestion.embedUrl }
+      : { imageUrl: suggestion.url, imageAlt: altText }
     void publisherSend<{ event?: Partial<ReviewEvent> }>(
       `${EVENTS_ENDPOINT}/${encodeURIComponent(event.id)}`,
-      { edits: { imageUrl: suggestion.url, imageAlt: altText } },
+      { edits },
       { fetchFn: cb.fetchFn },
     ).then(res => {
       use.disabled = false
@@ -172,16 +194,23 @@ function suggestionCard(
         handleWriteError(res, status, cb.navigate)
         return
       }
-      // The event now has a vetted image — reflect it and let the
-      // orchestrator re-render (the pane yields to the story image).
-      event.imageUrl = res.data?.event?.imageUrl ?? suggestion.url
-      event.imageAlt = res.data?.event?.imageAlt ?? altText
-      cb.onEventStatusChange(event.id, event.status)
+      if (isVideo) {
+        // A video attaches without displacing the image; reflect it and
+        // let the card show its "attached" state via re-render.
+        event.videoEmbedUrl = res.data?.event?.videoEmbedUrl ?? suggestion.embedUrl
+        cb.onEventStatusChange(event.id, event.status)
+      } else {
+        // The event now has a vetted image — the pane yields to the
+        // story image on re-render.
+        event.imageUrl = res.data?.event?.imageUrl ?? suggestion.url
+        event.imageAlt = res.data?.event?.imageAlt ?? altText
+        cb.onEventStatusChange(event.id, event.status)
+      }
     })
   })
 
   meta.append(use, status)
-  card.append(img, meta)
+  card.append(preview, meta)
   return card
 }
 
@@ -262,12 +291,16 @@ function renderImageUpload(
 }
 
 function renderMediaSuggestions(event: ReviewEvent, cb: EventDetailCallbacks): HTMLElement | null {
-  // Location is the usual hard requirement — most sources are
-  // "imagery of the place". (Worldview additionally needs a date.)
-  // The NHC cone is the exception: it matches by storm NAME, so a
-  // tropical event qualifies even without geometry.
+  // Two independent tracks. IMAGE sources fill the event's story image
+  // and need a location (most are "imagery of the place"; the NHC cone
+  // matches by storm NAME, so a tropical event qualifies without one).
+  // The VIDEO source (agency YouTube) fills `video_embed_url` and needs
+  // only a title. Offer image sources while imageless, the video source
+  // while videoless — an event can accept both.
   const located = Boolean(event.geometry?.point ?? event.geometry?.boundingBox)
-  if (!located && !looksLikeTropical(event)) return null
+  const wantImage = !event.imageUrl && (located || looksLikeTropical(event))
+  const wantVideo = !event.videoEmbedUrl && Boolean((event.title ?? '').trim())
+  if (!wantImage && !wantVideo) return null
 
   const wrap = el('div', 'publisher-events-suggest')
   wrap.append(el('h4', 'publisher-events-suggest-title', [t('publisher.events.suggest.title')]))
@@ -277,29 +310,83 @@ function renderMediaSuggestions(event: ReviewEvent, cb: EventDetailCallbacks): H
     wrap.hidden = !any
   }
 
-  const worldview = buildWorldviewSnapshot(event)
-  if (worldview) wrap.append(suggestionCard(worldview, event, cb, syncWithCards))
+  if (wantImage) {
+    const worldview = buildWorldviewSnapshot(event)
+    if (worldview) wrap.append(suggestionCard(worldview, event, cb, syncWithCards))
+  }
   syncWithCards()
 
-  // Fetched sources arrive async, each appending as it resolves;
-  // append only while the event is still imageless (a pane swapped
-  // out mid-fetch is detached — appending there is harmless and it
-  // just gets collected). Hazard-specific sources (ShakeMap / NHC
-  // cone) gate themselves on the event's own text, so most events
-  // fire only the Commons lookup.
+  // Fetched sources arrive async, each appending as it resolves. Guard
+  // per track at resolution time: an image card is dropped once the
+  // event has an image, a video card once it has a video (a pane
+  // swapped out mid-fetch is detached — appending is harmless, GC'd).
   const fetchFn = cb.fetchFn ?? fetch
   const appendLater = (promise: Promise<MediaSuggestion[] | MediaSuggestion | null>): void => {
     void promise.then(result => {
-      if (event.imageUrl || !result) return
+      if (!result) return
       const suggestions = Array.isArray(result) ? result : [result]
-      for (const s of suggestions) wrap.append(suggestionCard(s, event, cb, syncWithCards))
+      for (const s of suggestions) {
+        const stillWanted = s.kind === 'youtube' ? !event.videoEmbedUrl : !event.imageUrl
+        if (stillWanted) wrap.append(suggestionCard(s, event, cb, syncWithCards))
+      }
       syncWithCards()
     })
   }
-  appendLater(fetchShakemapSuggestion(event, fetchFn))
-  appendLater(fetchNhcConeSuggestion(event, fetchFn))
-  appendLater(fetchCommonsSuggestions(event, fetchFn))
+  if (wantImage) {
+    appendLater(fetchShakemapSuggestion(event, fetchFn))
+    appendLater(fetchNhcConeSuggestion(event, fetchFn))
+    appendLater(fetchCommonsSuggestions(event, fetchFn))
+  }
+  if (wantVideo) {
+    appendLater(fetchYoutubeSuggestions(event, fetchFn))
+  }
 
+  return wrap
+}
+
+/**
+ * The attached agency video (a curator-picked YouTube embed) — framed
+ * as the generated tour will show it, with a Remove control. The embed
+ * host is re-guarded by the caller before this renders.
+ */
+function renderAttachedVideo(event: ReviewEvent, cb: EventDetailCallbacks): HTMLElement {
+  const wrap = el('div', 'publisher-events-video')
+  const frame = document.createElement('iframe')
+  frame.className = 'publisher-events-video-frame'
+  frame.src = event.videoEmbedUrl! // caller guarded isNocookieEmbedUrl
+  frame.title = t('publisher.events.suggest.videoAttached')
+  frame.setAttribute('loading', 'lazy')
+  frame.setAttribute('allowfullscreen', '')
+  frame.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin')
+  frame.setAttribute('allow', 'accelerometer; encrypted-media; gyroscope; picture-in-picture')
+
+  const status = el('span', 'publisher-events-edit-status')
+  const remove = document.createElement('button')
+  remove.type = 'button'
+  remove.className = 'publisher-btn publisher-btn-small'
+  remove.textContent = t('publisher.events.suggest.removeVideo')
+  remove.addEventListener('click', () => {
+    remove.disabled = true
+    status.textContent = ''
+    status.classList.remove('publisher-events-status-error')
+    void publisherSend<{ event?: Partial<ReviewEvent> }>(
+      `${EVENTS_ENDPOINT}/${encodeURIComponent(event.id)}`,
+      { edits: { videoEmbedUrl: '' } }, // empty string clears it
+      { fetchFn: cb.fetchFn },
+    ).then(res => {
+      remove.disabled = false
+      if (!res.ok) {
+        handleWriteError(res, status, cb.navigate)
+        return
+      }
+      event.videoEmbedUrl = undefined
+      cb.onEventStatusChange(event.id, event.status)
+    })
+  })
+
+  const foot = el('div', 'publisher-events-video-foot')
+  foot.append(remove, status)
+  wrap.append(frame, foot)
   return wrap
 }
 
@@ -521,14 +608,21 @@ export function renderEventDetail(event: ReviewEvent, cb: EventDetailCallbacks):
     img.addEventListener('error', () => img.remove())
     pane.append(img, renderImageUpload(event, cb, 'replace'))
   } else {
-    // --- Suggested media (task: media suggestion engine) — offered
-    // only while the event has no image; picking one writes it as the
-    // event's story image through the review endpoint's edits.
-    const suggest = renderMediaSuggestions(event, cb)
-    if (suggest) pane.append(suggest)
     // The publisher's own photo is always an option, located or not.
     pane.append(renderImageUpload(event, cb, 'upload'))
   }
+
+  // --- Attached agency video (the picked YouTube embed) — framed for
+  // the curator to vet, with a Remove control. Independent of the image.
+  if (event.videoEmbedUrl && isNocookieEmbedUrl(event.videoEmbedUrl)) {
+    pane.append(renderAttachedVideo(event, cb))
+  }
+
+  // --- Suggested media (task: media suggestion engine) — image
+  // sources while imageless, the agency-YouTube source while videoless;
+  // each pick writes through the review endpoint's edits.
+  const suggest = renderMediaSuggestions(event, cb)
+  if (suggest) pane.append(suggest)
 
   // --- Meta strip: source / first observed / detail ---
   const sourceLink = document.createElement('a')

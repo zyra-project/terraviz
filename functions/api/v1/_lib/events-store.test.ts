@@ -398,6 +398,7 @@ describe('toPublicEvent', () => {
       inferred_fields: null,
       image_url: null,
       image_alt: null,
+      video_embed_url: null,
     }
     expect(toPublicEvent({ ...base, image_url: 'https://img.ex/story.jpg' }).imageUrl).toBe('https://img.ex/story.jpg')
     // eslint-disable-next-line no-script-url
@@ -413,6 +414,7 @@ describe('toPublicEvent', () => {
       summary: null,
       image_url: null,
       image_alt: null,
+      video_embed_url: null,
       source_name: 'USGS',
       source_url: 'https://example.gov/x',
       published_at: null,

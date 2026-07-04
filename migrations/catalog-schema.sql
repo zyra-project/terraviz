@@ -207,7 +207,7 @@ CREATE TABLE current_events (
   -- column line so a later ALTER ADD COLUMN doesn't splice a new column
   -- after it and inherit this comment in the schema snapshot.)
   reviewed_at    TEXT,
-  reviewed_by    TEXT, external_id TEXT, inferred_fields TEXT, image_url TEXT, image_alt TEXT,
+  reviewed_by    TEXT, external_id TEXT, inferred_fields TEXT, image_url TEXT, image_alt TEXT, video_embed_url TEXT,
   FOREIGN KEY (reviewed_by) REFERENCES publishers(id)
 );
 
@@ -498,6 +498,14 @@ CREATE TABLE workflows (
   updated_at         TEXT NOT NULL,
   FOREIGN KEY (publisher_id)      REFERENCES publishers(id),
   FOREIGN KEY (target_dataset_id) REFERENCES datasets(id)
+);
+
+CREATE TABLE youtube_channels (
+  channel_id    TEXT PRIMARY KEY,          -- canonical UC… id
+  channel_name  TEXT NOT NULL,             -- fetched channel title (display)
+  added_by      TEXT,                      -- publishers.id (nullable for service)
+  created_at    TEXT NOT NULL,
+  FOREIGN KEY (added_by) REFERENCES publishers(id)
 );
 
 -- Indexes

@@ -26,12 +26,19 @@ import type { EventGeometry } from './events-model'
 
 export interface MediaSuggestion {
   /** Provenance tier — drives the badge + alt text. */
-  kind: 'worldview' | 'commons' | 'shakemap' | 'nhc'
-  /** The image URL itself. */
+  kind: 'worldview' | 'commons' | 'shakemap' | 'nhc' | 'youtube'
+  /** The card's preview image URL. For image sources this is also the
+   *  value stored as the event image; for the `youtube` video source
+   *  it's the thumbnail (a preview only — never stored). */
   url: string
-  /** Attribution shown on the card and stored in curator memory —
-   *  both sources are public domain but credit is good manners. */
+  /** Attribution shown on the card and stored in curator memory. */
   attribution: string
+  /** Present ONLY for the `youtube` video source: the nocookie embed
+   *  URL stored as the event's `video_embed_url` (not `image_url`) —
+   *  YouTube's ToS forbids restoring its thumbnails as node content. */
+  embedUrl?: string
+  /** The video/image's own title, when the source provides one. */
+  title?: string
 }
 
 /** Daily global true-color — available for any date since 2000 and
@@ -461,6 +468,88 @@ export async function fetchNhcConeSuggestion(
     return null
   } catch {
     return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Agency YouTube video embeds
+// ---------------------------------------------------------------------------
+
+/** Same-origin proxy over the YouTube Data API — the key is server-side
+ *  (`YOUTUBE_API_KEY`), and results are pre-filtered to a vetted agency
+ *  channel allowlist. */
+export const YOUTUBE_SEARCH_ENDPOINT = '/api/v1/publish/media/youtube-search'
+export const YOUTUBE_TIMEOUT_MS = 6_000
+
+/** YouTube's mid-res thumbnail for a video id — the card preview only.
+ *  i.ytimg.com is served with CORS and needs no key. */
+function youtubeThumbUrl(videoId: string): string {
+  return `https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/hqdefault.jpg`
+}
+
+/** Build the nocookie embed URL from a bare video id (mirrors the
+ *  server-side helper; the stored value re-validated on write/read). */
+function youtubeEmbedUrl(videoId: string): string {
+  return `https://www.youtube-nocookie.com/embed/${videoId}`
+}
+
+/** Client mirror of the server-side embed-host guard: only our own
+ *  `youtube-nocookie.com/embed/{id}` form may reach an iframe src. */
+export function isNocookieEmbedUrl(raw: string | null | undefined): boolean {
+  if (!raw) return false
+  let u: URL
+  try {
+    u = new URL(raw)
+  } catch {
+    return false
+  }
+  return (
+    u.protocol === 'https:' &&
+    u.hostname === 'www.youtube-nocookie.com' &&
+    /^\/embed\/[\w-]{6,20}$/.test(u.pathname)
+  )
+}
+
+/**
+ * Fetch agency-YouTube video candidates for an event via the
+ * same-origin proxy, using the event title as the query. Each becomes
+ * a `youtube` suggestion: `url` is the thumbnail (card preview),
+ * `embedUrl` is the nocookie player the pick stores. Degrades to `[]`
+ * on no title, no key (proxy returns empty), timeout, or any failure.
+ */
+export async function fetchYoutubeSuggestions(
+  event: { title?: string },
+  fetchFn: typeof fetch = fetch,
+): Promise<MediaSuggestion[]> {
+  const query = (event.title ?? '').trim()
+  if (!query) return []
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), YOUTUBE_TIMEOUT_MS)
+  try {
+    const res = await fetchFn(`${YOUTUBE_SEARCH_ENDPOINT}?q=${encodeURIComponent(query)}`, {
+      signal: controller.signal,
+    })
+    if (!res.ok) return []
+    const { videos } = (await res.json()) as {
+      videos?: Array<{ videoId?: unknown; title?: unknown; channelName?: unknown }>
+    }
+    if (!Array.isArray(videos)) return []
+    const out: MediaSuggestion[] = []
+    for (const v of videos) {
+      if (typeof v?.videoId !== 'string' || !/^[\w-]{6,20}$/.test(v.videoId)) continue
+      out.push({
+        kind: 'youtube',
+        url: youtubeThumbUrl(v.videoId),
+        embedUrl: youtubeEmbedUrl(v.videoId),
+        attribution: typeof v.channelName === 'string' && v.channelName ? v.channelName : 'YouTube', // i18n-exempt: proper noun / channel name
+        ...(typeof v.title === 'string' && v.title ? { title: v.title } : {}),
+      })
+    }
+    return out
+  } catch {
+    return []
   } finally {
     clearTimeout(timer)
   }

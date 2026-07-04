@@ -57,6 +57,7 @@ import {
 } from '../../_lib/events-store'
 import { sanitizeDatasetIds, filterVisibleDatasetIds } from '../../_lib/events-ingest'
 import { looksLikeUrl } from '../../_lib/validators'
+import { isNocookieEmbedUrl } from '../../_lib/youtube-channels'
 import { runMatcherForEvent } from '../../_lib/events-matcher'
 import { resolveRegion } from '../../../../../src/data/regions'
 
@@ -84,7 +85,7 @@ interface ParsedReview {
    *  resolved from `edits.regionName` via `regions.ts` and/or a raw
    *  `edits.point`; `pointOnly` marks a point-without-region edit so the
    *  handler can preserve the event's existing bbox/region. */
-  edits?: { occurredStart?: string; geometry?: EventGeometry; pointOnly?: boolean; imageUrl?: string; imageAlt?: string | null }
+  edits?: { occurredStart?: string; geometry?: EventGeometry; pointOnly?: boolean; imageUrl?: string; imageAlt?: string | null; videoEmbedUrl?: string | null }
 }
 
 function jsonError(status: number, error: string, message: string): Response {
@@ -208,7 +209,20 @@ function parseReview(
         out.imageAlt = alt.length > 0 ? alt : null
       }
     }
-    if (out.occurredStart !== undefined || out.geometry !== undefined || out.imageUrl !== undefined || out.imageAlt !== undefined) edits = out
+    // Curator-picked video embed (the agency-YouTube suggestion). Only
+    // our own source's nocookie/embed shape may pass — it becomes an
+    // iframe src. Empty string clears it.
+    if (e.videoEmbedUrl != null) {
+      const v = typeof e.videoEmbedUrl === 'string' ? e.videoEmbedUrl.trim() : ''
+      if (v === '') {
+        out.videoEmbedUrl = null
+      } else if (!isNocookieEmbedUrl(v)) {
+        errors.push({ field: 'edits.videoEmbedUrl', code: 'invalid', message: '`edits.videoEmbedUrl` must be a youtube-nocookie.com/embed URL.' })
+      } else {
+        out.videoEmbedUrl = v
+      }
+    }
+    if (out.occurredStart !== undefined || out.geometry !== undefined || out.imageUrl !== undefined || out.imageAlt !== undefined || out.videoEmbedUrl !== undefined) edits = out
   }
 
   if (event === undefined && links.length === 0 && addDatasetIds.length === 0 && edits === undefined && errors.length === 0) {
@@ -267,6 +281,7 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
       geometry: edits.geometry,
       imageUrl: edits.imageUrl,
       imageAlt: edits.imageAlt,
+      videoEmbedUrl: edits.videoEmbedUrl,
     })
     // The matcher scores on date/place — an image-only edit changes
     // no signal, so skip the re-run for it.

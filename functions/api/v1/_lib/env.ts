@@ -298,4 +298,13 @@ export interface CatalogEnv {
    * GHA workflow wired up. Refused on non-loopback hostnames.
    */
   MOCK_GITHUB_DISPATCH?: string
+  /**
+   * YouTube Data API v3 key for the agency-YouTube media-suggestion
+   * source (task: media suggestion engine). Read ONLY by the
+   * `publish/media/youtube-search` proxy — never shipped to the
+   * client. Absent = the source stays off (the proxy returns no
+   * videos); nothing errors. Acquisition + restriction walkthrough:
+   * `docs/YOUTUBE_API_KEY.md`.
+   */
+  YOUTUBE_API_KEY?: string
 }

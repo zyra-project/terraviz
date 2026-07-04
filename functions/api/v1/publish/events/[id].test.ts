@@ -306,6 +306,30 @@ describe('POST /api/v1/publish/events/:id', () => {
       expect(row!.image_alt).toBe('A new description')
     })
 
+    it('accepts a nocookie video embed, rejects any other host, and clears on empty', async () => {
+      const { env } = setupEnv()
+      const id = await seedInferredEvent(env)
+      const embed = 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ'
+      const ok = await reviewPost(ctx({ env, id, body: { edits: { videoEmbedUrl: embed } } }))
+      expect(ok.status).toBe(200)
+      let row = await getCurrentEvent(env.CATALOG_DB, id)
+      expect(row!.video_embed_url).toBe(embed)
+      // Image untouched — video is an independent field.
+      expect(row!.image_url).toBeNull()
+
+      // A watch-page / third-party URL is refused on field edits.videoEmbedUrl.
+      const bad = await reviewPost(
+        ctx({ env, id, body: { edits: { videoEmbedUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' } } }),
+      )
+      expect(bad.status).toBe(400)
+      expect((await bad.json() as { errors: Array<{ field: string }> }).errors[0].field).toBe('edits.videoEmbedUrl')
+
+      // Empty string clears it.
+      await reviewPost(ctx({ env, id, body: { edits: { videoEmbedUrl: '' } } }))
+      row = await getCurrentEvent(env.CATALOG_DB, id)
+      expect(row!.video_embed_url).toBeNull()
+    })
+
     it('400 for a non-http(s) or oversized imageUrl', async () => {
       const { env } = setupEnv()
       const id = await seedInferredEvent(env)

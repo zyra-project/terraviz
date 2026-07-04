@@ -29,6 +29,7 @@ function makeEvent(overrides: Partial<EventTourEvent> = {}): EventTourEvent {
     source_name: 'NOAA',
     occurred_start: '2026-06-25T12:00:00.000Z',
     image_url: null,
+    video_embed_url: null,
     bbox_n: null,
     bbox_s: null,
     bbox_w: null,
@@ -186,6 +187,29 @@ describe('buildEventTourTasks', () => {
     const keys = tasks.map(t => Object.keys(t)[0])
     expect(keys).not.toContain('showImage')
     expect(keys).not.toContain('hideImage')
+  })
+
+  it('frames a curator-picked agency video as an intro embed card (trusted)', () => {
+    const embed = 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ'
+    const tasks = buildEventTourTasks(
+      makeEvent({ video_embed_url: embed }),
+      [makeDataset('DS1')],
+      captions,
+    )
+    const show = tasks.find(t => 'showPopupHtml' in t) as unknown as {
+      showPopupHtml: { popupID: string; url: string; allowScripts?: boolean }
+    }
+    expect(show.showPopupHtml).toEqual({ popupID: 'event-intro-video', url: embed, allowScripts: true })
+    // Shown then hidden within the intro (before the datasets load).
+    expect(tasks.find(t => 'hidePopupHtml' in t)).toEqual({ hidePopupHtml: 'event-intro-video' })
+
+    // A non-nocookie stored value is never framed.
+    const noVideo = buildEventTourTasks(
+      makeEvent({ video_embed_url: 'https://www.youtube.com/watch?v=x' }),
+      [makeDataset('DS1')],
+      captions,
+    )
+    expect(noVideo.some(t => 'showPopupHtml' in t)).toBe(false)
   })
 
   it('caps the stops at MAX_TOUR_STOPS and falls back per-stop for missing captions', () => {

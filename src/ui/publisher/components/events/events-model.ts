@@ -60,6 +60,9 @@ export interface ReviewEvent {
   /** Alt text for `imageUrl` (media accessibility) — curator-supplied
    *  on upload / suggestion pick. */
   imageAlt?: string
+  /** Curator-picked agency video embed (youtube-nocookie/embed) — the
+   *  generated tour frames it; independent of the story image. */
+  videoEmbedUrl?: string
   links: ReviewLink[]
 }
 

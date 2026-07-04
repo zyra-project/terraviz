@@ -58,18 +58,20 @@ describe('renderEventDetail — suggested media (task: media suggestion engine)'
     expect(preview.src).toContain('wvs.earthdata.nasa.gov')
     expect(preview.src).toContain('TIME=2026-06-25')
 
-    // A vetted image already present → the story image wins, no pane.
+    // A vetted image already present → the story image wins; no image
+    // suggestion card is offered (the video track is independent).
     const withImage = renderEventDetail(
       { ...located(), imageUrl: 'https://img.ex/story.jpg' },
       { fetchFn: okFetch() } as never,
     )
-    expect(withImage.querySelector('.publisher-events-suggest')).toBeNull()
+    expect(withImage.querySelector('.publisher-events-story-image')).toBeTruthy()
+    expect(withImage.querySelector('.publisher-events-suggest-preview')).toBeNull()
 
-    // No location → nothing to snapshot, no pane.
+    // No location → nothing to snapshot, no image card synchronously.
     const nowhere = renderEventDetail(event({ occurredStart: '2026-06-25T12:00:00.000Z' }), {
       fetchFn: okFetch(),
     } as never)
-    expect(nowhere.querySelector('.publisher-events-suggest')).toBeNull()
+    expect(nowhere.querySelector('.publisher-events-suggest-preview')).toBeNull()
   })
 
   it('uses the stored alt text on the story image and offers Replace photo', () => {
@@ -135,6 +137,59 @@ describe('renderEventDetail — suggested media (task: media suggestion engine)'
     await flush()
     const previews = [...pane.querySelectorAll('.publisher-events-suggest-preview')] as HTMLImageElement[]
     expect(previews.some(p => p.src.includes('AL052026_5day_cone'))).toBe(true)
+  })
+
+  it('offers an agency-YouTube video card and posts videoEmbedUrl on pick', async () => {
+    const fetchFn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), 'https://localhost')
+      let body: unknown = { query: { pages: {} } } // commons: nothing
+      if (url.pathname === '/api/v1/publish/media/youtube-search') {
+        body = { videos: [{ videoId: 'dQw4w9WgXcQ', title: 'NOAA briefing', channelName: 'NOAA Education' }] }
+      } else if ((init?.method ?? 'GET') === 'POST') {
+        body = { event: { videoEmbedUrl: 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ' } }
+      }
+      return { ok: true, status: 200, type: 'basic', json: async () => body, text: async () => JSON.stringify(body) } as unknown as Response
+    })
+    const onEventStatusChange = vi.fn()
+    const evt = event({ title: 'Hurricane Delta strengthens' })
+    const pane = renderEventDetail(evt, { onEventStatusChange, fetchFn } as never)
+    await flush()
+
+    const videoCard = pane.querySelector('.publisher-events-suggest-card-video') as HTMLElement
+    expect(videoCard).toBeTruthy()
+    expect((videoCard.querySelector('.publisher-events-suggest-preview') as HTMLImageElement).src).toContain(
+      'i.ytimg.com/vi/dQw4w9WgXcQ',
+    )
+    // Its action stores the embed, not the image.
+    ;(videoCard.querySelector('button') as HTMLButtonElement).click()
+    await flush()
+    const post = fetchFn.mock.calls.find(
+      c => (c[1] as RequestInit | undefined)?.method === 'POST',
+    )!
+    const sent = JSON.parse(String((post[1] as RequestInit).body)) as { edits: { videoEmbedUrl?: string } }
+    expect(sent.edits.videoEmbedUrl).toBe('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ')
+    expect(evt.videoEmbedUrl).toBe('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ')
+    expect(onEventStatusChange).toHaveBeenCalled()
+  })
+
+  it('frames an attached video and clears it on Remove', async () => {
+    const fetchFn = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({
+      ok: true, status: 200, type: 'basic', json: async () => ({ event: {} }), text: async () => '{}',
+    }) as unknown as Response)
+    const onEventStatusChange = vi.fn()
+    const evt = event({ videoEmbedUrl: 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ' })
+    const pane = renderEventDetail(evt, { onEventStatusChange, fetchFn } as never)
+
+    const frame = pane.querySelector('.publisher-events-video-frame') as HTMLIFrameElement
+    expect(frame.src).toBe('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ')
+    fetchFn.mockClear()
+    ;(pane.querySelector('.publisher-events-video button') as HTMLButtonElement).click()
+    await flush()
+    const sent = JSON.parse(String((fetchFn.mock.calls[0][1] as RequestInit).body)) as {
+      edits: { videoEmbedUrl?: string }
+    }
+    expect(sent.edits.videoEmbedUrl).toBe('') // empty clears
+    expect(evt.videoEmbedUrl).toBeUndefined()
   })
 
   it('appends nearby Commons photo cards asynchronously alongside the Worldview card', async () => {
@@ -329,6 +384,7 @@ describe('renderEventDetail — curator metadata override', () => {
     toggle.click()
     const form = pane.querySelector('.publisher-events-edit-form') as HTMLElement
     expect(form.hidden).toBe(false)
+    fetchFn.mockClear() // drop the render-time media-suggestion fetches
 
     const [dateInput, regionInput] = [...form.querySelectorAll('input')]
     expect(dateInput.value).toBe('2026-06-20') // prefilled
@@ -367,6 +423,7 @@ describe('renderEventDetail — coordinate override', () => {
     const inputs = [...form.querySelectorAll('input')]
     const pointInput = inputs[2]
     const save = form.querySelector('button') as HTMLButtonElement
+    fetchFn.mockClear() // drop the render-time media-suggestion fetches
 
     // Malformed → client-side error, no POST.
     pointInput.value = 'not coords'
@@ -398,6 +455,7 @@ describe('renderEventDetail — generate tour', () => {
       fetchFn,
       navigate,
     })
+    fetchFn.mockClear() // drop the render-time media-suggestion fetches
     ;(pane.querySelector('.publisher-events-tour-btn') as HTMLButtonElement).click()
     await flush()
     const [url, init] = fetchFn.mock.calls[0]

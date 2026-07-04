@@ -22,6 +22,7 @@
 
 import type { TourTaskDef } from '../../../../src/types'
 import type { CurrentEventRow } from './events-store'
+import { isNocookieEmbedUrl } from './youtube-channels'
 import { extractModelText, ENRICH_MODEL_ID, type EnrichEnv } from './events-enrich'
 
 /** Stops beyond this add length, not clarity — the plan pitches a
@@ -68,6 +69,7 @@ export type EventTourEvent = Pick<
   | 'source_name'
   | 'occurred_start'
   | 'image_url'
+  | 'video_embed_url'
   | 'bbox_n'
   | 'bbox_s'
   | 'bbox_w'
@@ -183,9 +185,21 @@ export function buildEventTourTasks(
       },
     })
   }
+  // A curator-picked agency video (nocookie/embed) rides the media
+  // rail as an intro embed card — the viewer can watch the briefing
+  // while the camera settles. Trusted host → the iframe may run
+  // scripts (the player needs them). Same intro lifecycle as the image.
+  const videoEmbed =
+    event.video_embed_url && isNocookieEmbedUrl(event.video_embed_url) ? event.video_embed_url : null
+  if (videoEmbed) {
+    tasks.push({ showPopupHtml: { popupID: 'event-intro-video', url: videoEmbed, allowScripts: true } })
+  }
   tasks.push({ pauseSeconds: INTRO_HOLD_S }, { hideRect: 'event-intro' })
   if (introUrl) {
     tasks.push({ hideImage: 'event-intro-media' })
+  }
+  if (videoEmbed) {
+    tasks.push({ hidePopupHtml: 'event-intro-video' })
   }
   datasets.slice(0, MAX_TOUR_STOPS).forEach((d, i) => {
     tasks.push({ loadDataset: { id: d.id, worldIndex: 1 } })

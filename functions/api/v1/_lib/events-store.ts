@@ -25,6 +25,7 @@
  */
 
 import { newUlid } from './ulid'
+import { isNocookieEmbedUrl } from './youtube-channels'
 
 /** KV key the public `GET /api/v1/featured-event` caches under. Shared
  *  with the review route so an approve/reject can bust it for immediate
@@ -111,6 +112,9 @@ export interface CurrentEventRow {
   /** Human-written description of `image_url` (curator-supplied on
    *  upload / suggestion pick); NULL for feed images without one. */
   image_alt: string | null
+  /** Curator-picked video EMBED url (youtube-nocookie.com/embed/{id}) —
+   *  framed by the generated tour; NULL when none picked. */
+  video_embed_url: string | null
 }
 
 /** The `event_dataset_links` row as stored (snake_case). */
@@ -157,6 +161,8 @@ export interface CurrentEventPublic {
   imageUrl?: string
   /** Alt text for `imageUrl` — only present alongside it. */
   imageAlt?: string
+  /** Curator-picked video embed url (nocookie/embed), when present. */
+  videoEmbedUrl?: string
 }
 
 /** Fields a caller supplies to {@link insertCurrentEvent}. The store
@@ -186,6 +192,8 @@ export interface NewCurrentEvent {
   imageUrl?: string | null
   /** Alt text for `imageUrl`; feeds rarely carry one. */
   imageAlt?: string | null
+  /** Curator-picked video embed url; feeds never carry one. */
+  videoEmbedUrl?: string | null
 }
 
 /** Fields a caller supplies to {@link upsertEventDatasetLink}. */
@@ -202,7 +210,7 @@ export interface NewEventDatasetLink {
 const EVENT_COLUMNS = `id, origin_node, title, summary, source_name, source_url,
   published_at, feed_id, external_id, occurred_start, occurred_end,
   bbox_n, bbox_s, bbox_w, bbox_e, point_lat, point_lon, region_name,
-  status, created_at, updated_at, reviewed_at, reviewed_by, inferred_fields, image_url, image_alt`
+  status, created_at, updated_at, reviewed_at, reviewed_by, inferred_fields, image_url, image_alt, video_embed_url`
 
 const LINK_COLUMNS = `event_id, dataset_id, match_score, signals_json,
   status, created_at, approved_at, approved_by`
@@ -251,12 +259,13 @@ export async function insertCurrentEvent(
     inferred_fields: input.inferredFields?.length ? JSON.stringify(input.inferredFields) : null,
     image_url: input.imageUrl ?? null,
     image_alt: input.imageAlt ?? null,
+    video_embed_url: input.videoEmbedUrl ?? null,
   }
 
   await db
     .prepare(
       `INSERT INTO current_events (${EVENT_COLUMNS})
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       row.id,
@@ -285,6 +294,7 @@ export async function insertCurrentEvent(
       row.inferred_fields,
       row.image_url,
       row.image_alt,
+      row.video_embed_url,
     )
     .run()
 
@@ -431,7 +441,7 @@ export async function listCurrentEvents(
 export async function applyEventEdits(
   db: D1Database,
   id: string,
-  edits: { occurredStart?: string; geometry?: EventGeometry; imageUrl?: string; imageAlt?: string | null },
+  edits: { occurredStart?: string; geometry?: EventGeometry; imageUrl?: string; imageAlt?: string | null; videoEmbedUrl?: string | null },
   now: string = new Date().toISOString(),
 ): Promise<void> {
   const existing = await getCurrentEvent(db, id)
@@ -454,6 +464,11 @@ export async function applyEventEdits(
     // Alt-only edit (describe the image already in place).
     sets.push('image_alt = ?')
     binds.push(edits.imageAlt)
+  }
+  if (edits.videoEmbedUrl !== undefined) {
+    // A video is independent of the image — set or clear it alone.
+    sets.push('video_embed_url = ?')
+    binds.push(edits.videoEmbedUrl)
   }
   if (edits.occurredStart !== undefined) {
     sets.push('occurred_start = ?')
@@ -780,6 +795,11 @@ export function toPublicEvent(
   if (row.image_url && /^https?:\/\//i.test(row.image_url)) {
     out.imageUrl = row.image_url
     if (row.image_alt) out.imageAlt = row.image_alt
+  }
+  // Re-validate the embed host on read — only our own nocookie/embed
+  // URLs may ever reach an iframe src.
+  if (row.video_embed_url && isNocookieEmbedUrl(row.video_embed_url)) {
+    out.videoEmbedUrl = row.video_embed_url
   }
   if (row.inferred_fields) {
     try {
