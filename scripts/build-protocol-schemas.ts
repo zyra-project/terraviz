@@ -37,7 +37,15 @@ import { createGenerator, type Config } from 'ts-json-schema-generator'
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const OUT_DIR = resolve(ROOT, 'public/schema/v1')
 const TSCONFIG = resolve(ROOT, 'functions/tsconfig.json')
-const SCHEMA_BASE = 'https://terraviz.zyra-project.org/schema/v1'
+
+// Base URL stamped into each schema's `$id`. A fork / staging / partner
+// node serves these from its own `<origin>/schema/v1/`, so the `$id`
+// base is configurable — set `SCHEMA_BASE_URL` and regenerate to emit
+// `$id`s that match your deployment. Defaults to the canonical origin,
+// which is what the committed schemas carry. (Same "lift hardcoded URLs
+// to env vars" fork-friendliness as docs/SELF_HOSTING.md.)
+const DEFAULT_SCHEMA_BASE = 'https://terraviz.zyra-project.org/schema/v1'
+const SCHEMA_BASE = (process.env.SCHEMA_BASE_URL ?? DEFAULT_SCHEMA_BASE).replace(/\/+$/, '')
 
 interface Target {
   /** Output filename under public/schema/v1/. */

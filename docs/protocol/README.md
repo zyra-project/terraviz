@@ -55,6 +55,16 @@ its published contract can never silently diverge. If you change
 `WireDataset`, `CatalogResponseBody`, or `WellKnownDoc`, regenerate
 and commit in the same change (and add a CHANGELOG entry).
 
+**Forks / non-canonical nodes:** each schema's `$id` base defaults to
+the canonical origin (`https://terraviz.zyra-project.org/schema/v1`),
+which is what the committed files carry. A fork, staging, or partner
+node that serves these from its own origin can regenerate with a
+matching `$id` by setting the base:
+
+```bash
+SCHEMA_BASE_URL=https://terraviz.example.org/schema/v1 npm run gen:protocol-schemas
+```
+
 ## Design choices
 
 - **`additionalProperties` is left open (defaults to `true`).** The

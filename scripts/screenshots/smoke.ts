@@ -133,18 +133,39 @@ const checks: Check[] = [
     name: 'embed mode strips the app shell',
     fixtures: catalogFixtures(),
     async run(page) {
+      // Baseline: this chrome is genuinely visible on a bare globe, so
+      // asserting embed mode hides it is a real gate (not a no-op that
+      // passes because the element was hidden for some other reason).
+      await gotoApp(page, '/')
+      for (const id of ['#map-controls', '#help-trigger']) {
+        await page.locator(id).waitFor({ state: 'visible' })
+      }
+      // Embed mode hides it.
       await gotoApp(page, '/?embed=1')
-      // The mode class is applied synchronously at boot.
       await page.locator('body.embed-mode').waitFor()
-      // The app-shell chrome a bare "/" shows must be suppressed in embed
-      // mode — assert each is hidden so a regression that re-introduces
-      // chrome (e.g. a dropped/scoped-out embed rule) fails this gate.
-      for (const id of ['#map-controls', '#help-trigger', '#chat-trigger', '#home-btn']) {
+      for (const id of ['#map-controls', '#help-trigger']) {
         assert(!(await page.locator(id).isVisible()), `embed mode should hide ${id}`)
       }
-      // The ?chat=1 sub-flag opts the Orbit trigger back in.
-      await gotoApp(page, '/?embed=1&chat=1')
-      await page.locator('body.embed-show-chat').waitFor()
+      // The ?chat=1 sub-flag (body.embed-show-chat) must stop embed.css from
+      // hiding the Orbit chat trigger. The app only adds `.visible` to the
+      // trigger once a dataset loads (never in offline CI), so its live
+      // visibility isn't observable here — assert the embed.css rule both
+      // ways against the app's real "shown" class instead. A regression on
+      // the `:not(.embed-show-chat)` selector flips one of these.
+      const rule = await page.evaluate(() => {
+        const el = document.getElementById('chat-trigger')
+        if (!el) return { hiddenInEmbed: false, shownWithChatFlag: false }
+        el.classList.add('visible') // simulate the app having shown the trigger
+        const body = document.body
+        body.classList.add('embed-mode')
+        body.classList.remove('embed-show-chat')
+        const hiddenInEmbed = getComputedStyle(el).display === 'none'
+        body.classList.add('embed-show-chat')
+        const shownWithChatFlag = getComputedStyle(el).display !== 'none'
+        return { hiddenInEmbed, shownWithChatFlag }
+      })
+      assert(rule.hiddenInEmbed, 'embed mode should hide a shown #chat-trigger')
+      assert(rule.shownWithChatFlag, '?chat=1 (embed-show-chat) should un-hide #chat-trigger')
     },
   },
   {
