@@ -62,6 +62,7 @@ const EXPECTED_TABLES = [
   'tours',
   'workflow_runs',
   'workflows',
+  'youtube_channels',
 ]
 
 const EXPECTED_INDEXES = [

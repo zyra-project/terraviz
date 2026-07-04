@@ -40,9 +40,20 @@ const EONET_FEED = {
   lastRunError: null,
 }
 
+const NASA_CHANNEL = 'UCLA_DiR1FfKNvjuUpBHmylQ'
+const CUSTOM_CHANNEL = 'UCcustom0000000000000000'
+
 const baseRoutes = (): Record<string, RouteSpec> => ({
   '/api/v1/publish/me': { body: { role: 'admin', is_admin: true } },
   '/api/v1/publish/feeds': { body: { feeds: [EONET_FEED] } },
+  '/api/v1/publish/media/youtube-channels': {
+    body: {
+      channels: [
+        { channelId: NASA_CHANNEL, channelName: 'NASA', builtin: true },
+        { channelId: CUSTOM_CHANNEL, channelName: 'City Museum', builtin: false },
+      ],
+    },
+  },
 })
 
 const flush = () => new Promise<void>(r => setTimeout(r, 0))
@@ -223,5 +234,57 @@ describe('renderFeedsPage', () => {
     runBtn.click()
     await flush()
     expect(fetchFn.mock.calls.some(c => String(c[0]).includes('/events/refresh'))).toBe(true)
+  })
+
+  it('lists built-in + custom YouTube channels; only custom ones are removable', async () => {
+    await renderFeedsPage(mount, { fetchFn: mockFetch(baseRoutes()) })
+    const rows = [...mount.querySelectorAll('.publisher-feeds-channel-row')]
+    expect(rows.length).toBe(2)
+    const builtinRow = rows.find(r => r.textContent?.includes('NASA'))!
+    const customRow = rows.find(r => r.textContent?.includes('City Museum'))!
+    // Built-in has no Remove button; custom does.
+    expect(builtinRow.querySelector('button')).toBeNull()
+    expect(customRow.querySelector('button')?.textContent).toBe('Remove')
+  })
+
+  it('adding a channel by URL POSTs { url } to the channels endpoint', async () => {
+    const routes = baseRoutes()
+    routes['POST /api/v1/publish/media/youtube-channels'] = {
+      status: 201,
+      body: { channel: { channelId: CUSTOM_CHANNEL, channelName: 'City Museum', builtin: false } },
+    }
+    const fetchFn = mockFetch(routes)
+    await renderFeedsPage(mount, { fetchFn })
+
+    const addBtn = [...mount.querySelectorAll('button')].find(b => b.textContent === 'Add channel') as HTMLButtonElement
+    // Empty → client-side error, no POST.
+    addBtn.click()
+    await flush()
+    expect(fetchFn.mock.calls.some(c => String(c[0]).endsWith('/youtube-channels') && (c[1]?.method ?? 'GET') === 'POST')).toBe(false)
+
+    ;(mount.querySelector('#feeds-channel-url') as HTMLInputElement).value = 'https://youtube.com/@citymuseum'
+    addBtn.click()
+    await flush()
+    const post = fetchFn.mock.calls.find(
+      c => String(c[0]).endsWith('/youtube-channels') && (c[1]?.method ?? 'GET') === 'POST',
+    )
+    expect(JSON.parse(String(post![1]!.body))).toEqual({ url: 'https://youtube.com/@citymuseum' })
+  })
+
+  it('removing a custom channel DELETEs it', async () => {
+    const routes = baseRoutes()
+    routes[`DELETE /api/v1/publish/media/youtube-channels/${CUSTOM_CHANNEL}`] = { body: { removed: true } }
+    const fetchFn = mockFetch(routes)
+    await renderFeedsPage(mount, { fetchFn })
+    const customRow = [...mount.querySelectorAll('.publisher-feeds-channel-row')].find(r =>
+      r.textContent?.includes('City Museum'),
+    )!
+    ;(customRow.querySelector('button') as HTMLButtonElement).click()
+    await flush()
+    expect(
+      fetchFn.mock.calls.some(
+        c => String(c[0]).includes(`/youtube-channels/${CUSTOM_CHANNEL}`) && c[1]?.method === 'DELETE',
+      ),
+    ).toBe(true)
   })
 })

@@ -2999,6 +2999,25 @@
     flex-direction: column;
 }
 
+.publisher-feeds-channels {
+    list-style: none;
+    margin: 0 0 0.75rem;
+    padding: 0;
+}
+
+.publisher-feeds-channel-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.4rem 0;
+    border-block-end: 1px solid var(--white-o08, rgba(255, 255, 255, 0.08));
+}
+
+.publisher-feeds-channel-row:last-child {
+    border-block-end: none;
+}
+
 .publisher-feeds-preview {
     margin: 0.25rem 0 0.15rem;
     padding: 0.45rem 0.65rem;

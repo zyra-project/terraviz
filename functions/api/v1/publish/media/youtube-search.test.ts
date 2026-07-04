@@ -7,7 +7,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { onRequestGet as searchGet, parseYoutubeSearch } from './youtube-search'
-import { makeKV } from '../../_lib/test-helpers'
+import { asD1, makeKV, seedFixtures } from '../../_lib/test-helpers'
 import type { PublisherRow } from '../../_lib/publisher-store'
 
 const ADMIN: PublisherRow = {
@@ -111,6 +111,19 @@ describe('GET /api/v1/publish/media/youtube-search', () => {
     const second = await searchGet(ctx({ q: 'hurricane delta', env }))
     expect(second.headers.get('X-Cache')).toBe('HIT')
     expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+
+  it("includes a node's custom channels in the effective allowlist", async () => {
+    const CUSTOM = 'UCcustom0000000000000000'
+    const sqlite = seedFixtures({ count: 0 })
+    sqlite
+      .prepare(`INSERT INTO youtube_channels (channel_id, channel_name, added_by, created_at) VALUES (?, ?, NULL, ?)`)
+      .run(CUSTOM, 'City Museum', '2026-07-01T00:00:00.000Z')
+    stubUpstream([item('cust123XYZ', CUSTOM), item('def456XYZ', 'UCnotAllowed')])
+    const env = { YOUTUBE_API_KEY: 'k', CATALOG_DB: asD1(sqlite) }
+    const res = await searchGet(ctx({ q: 'local flood', env }))
+    const { videos } = await readJson<{ videos: Array<{ videoId: string; channelName: string }> }>(res)
+    expect(videos).toEqual([{ videoId: 'cust123XYZ', title: 'A briefing', channelId: CUSTOM, channelName: 'City Museum' }])
   })
 
   it('degrades to [] on upstream failure and does not cache it', async () => {

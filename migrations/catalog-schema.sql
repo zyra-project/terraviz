@@ -500,6 +500,14 @@ CREATE TABLE workflows (
   FOREIGN KEY (target_dataset_id) REFERENCES datasets(id)
 );
 
+CREATE TABLE youtube_channels (
+  channel_id    TEXT PRIMARY KEY,          -- canonical UC… id
+  channel_name  TEXT NOT NULL,             -- fetched channel title (display)
+  added_by      TEXT,                      -- publishers.id (nullable for service)
+  created_at    TEXT NOT NULL,
+  FOREIGN KEY (added_by) REFERENCES publishers(id)
+);
+
 -- Indexes
 
 CREATE INDEX idx_analytics_daily_event

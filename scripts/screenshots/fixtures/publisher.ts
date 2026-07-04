@@ -299,6 +299,19 @@ const YOUTUBE_SEARCH_RULE: FixtureRule = {
   json: { videos: [] },
 }
 
+/** The YouTube channel allowlist — built-in defaults + one custom
+ *  channel so the Feeds console's channels card renders populated. */
+const YOUTUBE_CHANNELS_RULE: FixtureRule = {
+  url: '/api/v1/publish/media/youtube-channels',
+  json: {
+    channels: [
+      { channelId: 'UCLA_DiR1FfKNvjuUpBHmylQ', channelName: 'NASA', builtin: true },
+      { channelId: 'UCeXH8GZyV3sVqAr45AvupOA', channelName: 'USGS', builtin: true },
+      { channelId: 'UCcustom0000000000000000', channelName: 'Coastal Science Center', builtin: false },
+    ],
+  },
+}
+
 /** Public blog fixtures — the `/blog` list + one full `/blog/:slug`
  *  post, used by the public-surface scenes/smoke. */
 export function blogPublicFixtures(): FixtureRule[] {
@@ -454,6 +467,7 @@ export function publisherFixtures(
     { url: '/api/v1/publish/feeds', json: feeds },
     NHC_STORMS_RULE,
     YOUTUBE_SEARCH_RULE,
+    YOUTUBE_CHANNELS_RULE,
     { url: '/api/v1/publish/node-profile', json: nodeProfile },
     { url: '/api/v1/publish/blog', json: blogAuthoring },
   ]

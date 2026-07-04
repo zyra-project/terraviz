@@ -24,6 +24,7 @@ import type { CatalogEnv } from '../../_lib/env'
 import type { PublisherData } from '../_middleware'
 import { isPrivileged } from '../../_lib/publisher-store'
 import { channelName, isAllowlistedChannel } from '../../_lib/youtube-channels'
+import { listCustomChannels } from '../../_lib/youtube-channels-store'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
 const SEARCH_API = 'https://www.googleapis.com/youtube/v3/search'
@@ -52,8 +53,9 @@ function ok(body: string, xCache: 'HIT' | 'MISS'): Response {
 
 /** Stable cache key from the query — lowercased, whitespace-collapsed,
  *  URI-encoded so a KV key can't be oversized or contain odd bytes. */
-function cacheKeyFor(query: string): string {
-  return `yt-search:v1:${encodeURIComponent(query.toLowerCase().replace(/\s+/g, ' ').trim()).slice(0, 256)}`
+function cacheKeyFor(query: string, signature: string): string {
+  const q = query.toLowerCase().replace(/\s+/g, ' ').trim()
+  return `yt-search:v1:${encodeURIComponent(`${signature}|${q}`).slice(0, 400)}`
 }
 
 interface YtSearchItem {
@@ -61,8 +63,22 @@ interface YtSearchItem {
   snippet?: { title?: unknown; channelId?: unknown }
 }
 
-/** Map + allowlist-filter a search.list body — pure, exported for tests. */
-export function parseYoutubeSearch(json: unknown): VideoCandidate[] {
+/** The effective allowlist a search is filtered against: the hardcoded
+ *  agency defaults plus the node's custom channels. */
+export interface ChannelAllowlist {
+  has(channelId: string): boolean
+  name(channelId: string): string | null
+}
+
+/** The hardcoded-only allowlist (no custom channels) — the default. */
+const DEFAULT_ALLOWLIST: ChannelAllowlist = {
+  has: isAllowlistedChannel,
+  name: channelName,
+}
+
+/** Map + allowlist-filter a search.list body — pure, exported for
+ *  tests. Filters against `allow` (defaults ∪ node custom channels). */
+export function parseYoutubeSearch(json: unknown, allow: ChannelAllowlist = DEFAULT_ALLOWLIST): VideoCandidate[] {
   const items = (json as { items?: YtSearchItem[] })?.items
   if (!Array.isArray(items)) return []
   const out: VideoCandidate[] = []
@@ -71,12 +87,12 @@ export function parseYoutubeSearch(json: unknown): VideoCandidate[] {
     const channelId = item?.snippet?.channelId
     const title = item?.snippet?.title
     if (typeof videoId !== 'string' || !/^[\w-]{6,20}$/.test(videoId)) continue
-    if (typeof channelId !== 'string' || !isAllowlistedChannel(channelId)) continue
+    if (typeof channelId !== 'string' || !allow.has(channelId)) continue
     out.push({
       videoId,
       title: typeof title === 'string' ? title : '',
       channelId,
-      channelName: channelName(channelId) ?? '',
+      channelName: allow.name(channelId) ?? '',
     })
     if (out.length >= SHORTLIST) break
   }
@@ -98,7 +114,18 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
     return ok(JSON.stringify({ videos: [] }), 'MISS')
   }
 
-  const cacheKey = cacheKeyFor(query)
+  // Effective allowlist = hardcoded agency defaults ∪ the node's own
+  // custom channels. A change to the custom set changes the cache key,
+  // so a freshly-added channel's videos aren't hidden by a stale entry.
+  const custom = context.env.CATALOG_DB ? await listCustomChannels(context.env.CATALOG_DB) : []
+  const customMap = new Map(custom.map(c => [c.channelId, c.channelName]))
+  const allow: ChannelAllowlist = {
+    has: id => isAllowlistedChannel(id) || customMap.has(id),
+    name: id => customMap.get(id) ?? channelName(id),
+  }
+  const signature = [...customMap.keys()].sort().join(',')
+
+  const cacheKey = cacheKeyFor(query, signature)
   if (context.env.CATALOG_KV) {
     try {
       const cached = await context.env.CATALOG_KV.get(cacheKey)
@@ -125,7 +152,7 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
     const res = await fetch(`${SEARCH_API}?${params.toString()}`, { signal: controller.signal })
     if (res.ok) {
       upstreamOk = true
-      videos = parseYoutubeSearch(await res.json())
+      videos = parseYoutubeSearch(await res.json(), allow)
     }
   } catch {
     // Timeout / network / parse — degrade to an empty list.

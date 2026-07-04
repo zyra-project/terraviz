@@ -36,6 +36,7 @@ export type AuditSubjectKind =
   | 'feed'
   | 'node_profile'
   | 'blog_post'
+  | 'youtube_channel'
 
 /**
  * `action` is a free-form, dotted token recording *what happened*.
@@ -66,6 +67,8 @@ export type AuditAction =
   | 'event.refreshed'
   | 'event.tour_generated'
   | 'event.image_upload'
+  | 'youtube_channel.add'
+  | 'youtube_channel.remove'
   | 'feed.created'
   | 'feed.updated'
   | 'feed.deleted'
