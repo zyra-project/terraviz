@@ -117,6 +117,23 @@ body.blog-body {
   margin-block-end: 1.25rem;
 }
 
+.blog-post-figure {
+  margin: 0 0 1.25rem;
+}
+
+.blog-post-image {
+  display: block;
+  max-width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--white-o08, rgba(255, 255, 255, 0.08));
+}
+
+.blog-post-figcaption {
+  margin-block-start: 0.4rem;
+  font-size: calc(0.8rem * var(--ui-scale, 1));
+  color: var(--color-text-muted, #aab2c0);
+}
+
 .blog-post-body {
   line-height: 1.65;
 }

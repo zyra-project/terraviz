@@ -63,6 +63,20 @@ export async function initDeepLinks(
 }
 
 /**
+ * Parse a dataset ID from a `/dataset/<id>` pathname. This is the web
+ * boot path for the links `shareService` copies and blog posts emit —
+ * the SPA is served at that path (Pages SPA fallback) and main.ts
+ * resolves the dataset from it at startup. The Tauri deep-link flow
+ * below handles the same shape arriving as a full URL.
+ */
+export function parseDatasetPathname(pathname: string): string | null {
+  // Same id alphabet as parseDatasetFromUrl's ID_PATTERN (ULIDs +
+  // legacy INTERNAL_SOS_*), so both entry points accept the same links.
+  const m = pathname.match(/^\/dataset\/([A-Z0-9_]+)\/?$/i)
+  return m ? m[1] : null
+}
+
+/**
  * Parse a dataset ID from a deep link URL.
  *
  * Supports:

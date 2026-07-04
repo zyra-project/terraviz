@@ -41,7 +41,7 @@ interface PublicPost {
   bodyMd: string
   publishedAt: string | null
   datasets: Array<{ id: string; title: string }>
-  event: { id: string; title: string; sourceName: string; sourceUrl: string } | null
+  event: { id: string; title: string; sourceName: string; sourceUrl: string; imageUrl?: string | null } | null
   /** The published companion tour, when one exists and is playable. */
   tour?: { id: string } | null
 }
@@ -126,6 +126,29 @@ function renderPost(post: PublicPost): HTMLElement {
   const meta = el('p', { className: 'blog-post-meta', textContent: dateLabel(post.publishedAt) })
   wrap.append(meta)
   if (post.summary) wrap.append(el('p', { className: 'blog-post-summary', textContent: post.summary }))
+
+  // Lead image: the cited event's vetted story image (feed enclosure /
+  // og:image / curator pick), captioned with the citation it came
+  // from. http(s) re-guarded client-side before it reaches <img src>.
+  if (post.event?.imageUrl && /^https?:\/\//i.test(post.event.imageUrl)) {
+    const figure = el('figure', { className: 'blog-post-figure' })
+    const img = el('img', {
+      className: 'blog-post-image',
+      src: post.event.imageUrl,
+      alt: post.event.title,
+      loading: 'lazy',
+    })
+    // A dead image link should drop the whole figure, caption included.
+    img.addEventListener('error', () => figure.remove())
+    figure.append(
+      img,
+      el('figcaption', {
+        className: 'blog-post-figcaption',
+        textContent: `${post.event.title} — ${post.event.sourceName}`,
+      }),
+    )
+    wrap.append(figure)
+  }
 
   const body = el('div', { className: 'blog-post-body' })
   // renderMarkdown runs `marked` then sanitizeMarkdownHtml — safe to

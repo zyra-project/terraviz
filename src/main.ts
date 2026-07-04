@@ -66,7 +66,7 @@ import { TourEngine, type TourTelemetryMeta } from './services/tourEngine'
 import { showTourControls, hideTourControls, hideAllTourTextBoxes, hideAllTourImages, hideAllTourVideos, hideAllTourPopups, hideAllTourQuestions } from './ui/tourUI'
 import { initLegendForDataset, clearLegendCache, loadConfig } from './services/docentService'
 import { isMobile, IS_MOBILE_NATIVE, getCloudTextureUrl } from './utils/deviceCapability'
-import { initDeepLinks } from './services/deepLinkService'
+import { initDeepLinks, parseDatasetPathname } from './services/deepLinkService'
 import { recordVisit, writeLastSession } from './services/visitMemory'
 import { getCatalogMode, setCatalogMode } from './utils/catalogMode'
 import {
@@ -502,6 +502,12 @@ class InteractiveSphere {
 
       const datasetId = previewFailed ? null : this.getDatasetIdFromUrl()
       if (datasetId) {
+        // Canonicalize a path-form deep link (`/dataset/<id>`) to the
+        // query form so in-app `?dataset=` pushState navigation doesn't
+        // stack a query onto the old path.
+        if (parseDatasetPathname(window.location.pathname)) {
+          window.history.replaceState({}, '', `/?dataset=${encodeURIComponent(datasetId)}`)
+        }
         this.setLoadingStatus('Loading dataset\u2026', 50)
         await this.loadDataset(datasetId, 'url')
         this.setLoading(false)
@@ -702,10 +708,12 @@ class InteractiveSphere {
     }
   }
 
-  /** Extract the `dataset` query parameter from the current URL. */
+  /** Extract the dataset to boot with from the current URL — the
+   *  `?dataset=` query param, or the `/dataset/<id>` path form that
+   *  share links and blog posts emit (served via the SPA fallback). */
   private getDatasetIdFromUrl(): string | null {
     const params = new URLSearchParams(window.location.search)
-    return params.get('dataset')
+    return params.get('dataset') ?? parseDatasetPathname(window.location.pathname)
   }
 
   /**

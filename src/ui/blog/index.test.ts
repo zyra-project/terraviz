@@ -75,6 +75,34 @@ describe('bootBlogPage', () => {
     expect(document.querySelector('.blog-post-tour-btn')).toBeNull()
   })
 
+  it('renders the event story image as a captioned lead figure, dropping non-http(s) urls', async () => {
+    history.pushState(null, '', '/blog/gulf-warming')
+    stubFetch(200, {
+      post: { ...POST.post, event: { ...POST.post.event, imageUrl: 'https://img.example.org/heatwave.jpg' } },
+    })
+    await bootBlogPage()
+    const img = document.querySelector('.blog-post-image') as HTMLImageElement
+    expect(img.getAttribute('src')).toBe('https://img.example.org/heatwave.jpg')
+    expect(document.querySelector('.blog-post-figcaption')?.textContent).toBe('Gulf marine heatwave — NOAA')
+
+    // A dead image link drops the whole figure, caption included.
+    img.dispatchEvent(new Event('error'))
+    expect(document.querySelector('.blog-post-figure')).toBeNull()
+    expect(document.querySelector('.blog-post-figcaption')).toBeNull()
+
+    // eslint-disable-next-line no-script-url
+    stubFetch(200, { post: { ...POST.post, event: { ...POST.post.event, imageUrl: 'javascript:alert(1)' } } })
+    await bootBlogPage()
+    expect(document.querySelector('.blog-post-figure')).toBeNull()
+  })
+
+  it('renders no figure when the event carries no image', async () => {
+    history.pushState(null, '', '/blog/gulf-warming')
+    stubFetch(200, POST)
+    await bootBlogPage()
+    expect(document.querySelector('.blog-post-figure')).toBeNull()
+  })
+
   it('renders the Play-the-companion-tour button when the API surfaces one', async () => {
     history.pushState(null, '', '/blog/gulf-warming')
     stubFetch(200, { post: { ...POST.post, tour: { id: 'TR000AAAAAAAAAAAAAAAAAAAAA' } } })

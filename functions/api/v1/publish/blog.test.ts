@@ -222,6 +222,32 @@ describe('publish transition + public reads', () => {
     expect(detail.event?.sourceUrl).toBe('https://example.gov/heatwave')
   })
 
+  it("the approved event's vetted story image rides the public payload, re-guarded on read", async () => {
+    const { env, sqlite } = setupEnv()
+    const ev = await insertCurrentEvent(env.CATALOG_DB, {
+      originNode: 'NODE000',
+      title: 'Gulf marine heatwave',
+      sourceName: 'NOAA',
+      sourceUrl: 'https://example.gov/heatwave',
+      imageUrl: 'https://img.example.org/heatwave.jpg',
+    })
+    await setEventStatus(env.CATALOG_DB, ev.id, 'approved', ADMIN.id)
+    const post = await createDraft(env, { ...VALID, eventId: ev.id })
+    await transition(ctx({ env, method: 'POST', params: { id: post.id }, body: { action: 'publish' } }))
+
+    const one = await publicPost(ctx({ env, path: `/api/v1/blog/${post.slug}`, params: { slug: post.slug } }))
+    const { post: detail } = await readJson<{ post: { event: { imageUrl: string | null } | null } }>(one)
+    expect(detail.event?.imageUrl).toBe('https://img.example.org/heatwave.jpg')
+
+    // A stored non-http(s) value (defense in depth — parseCreate should
+    // never let one in) is re-guarded to null before it reaches the wire.
+    sqlite.prepare(`UPDATE current_events SET image_url = 'javascript:alert(1)' WHERE id = ?`).run(ev.id)
+    await transition(ctx({ env, method: 'POST', params: { id: post.id }, body: { action: 'publish' } })) // bust cache
+    const again = await publicPost(ctx({ env, path: `/api/v1/blog/${post.slug}`, params: { slug: post.slug } }))
+    const { post: reread } = await readJson<{ post: { event: { imageUrl: string | null } | null } }>(again)
+    expect(reread.event?.imageUrl).toBeNull()
+  })
+
   it('GET /publish/blog/:id returns drafts to authors; publish is idempotent on published_at', async () => {
     const { env } = setupEnv()
     const post = await createDraft(env)
