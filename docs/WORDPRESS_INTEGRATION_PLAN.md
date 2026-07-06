@@ -539,6 +539,22 @@ its own posts. The temptation is a two-way sync. Resist it.
 Two-way body sync, or making WP the master of Terraviz blog
 content, is an explicit **non-goal** (§9).
 
+### Extending the bridge to Events & Feeds
+
+The plugin team asked whether the same one-way sync can target
+Terraviz **Events** and **Feeds**. The Terraviz-side answer —
+with the exact route shapes, entity fields, auth, and the
+gaps a blog-shaped reuse would hit — is in
+[`WORDPRESS_EVENTS_FEEDS_SYNC.md`](WORDPRESS_EVENTS_FEEDS_SYNC.md).
+Headline: the publish routes exist, but they do **not** mirror the
+blog quartet, and they shouldn't — a Terraviz *event* is a
+curator-gated news story (born `proposed`, no self-publish), and a
+Terraviz *feed* is an ingest **connector** (an RSS/EONET source
+URL), not a content item. The recommended shape reuses
+`POST /publish/events` verbatim with the WP permalink as
+`source.url` and the imported event landing in the curator queue,
+rather than parameterising the blog sync engine.
+
 ---
 
 ## 7. Repo & packaging decision — separate repo, shared contracts
