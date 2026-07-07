@@ -553,11 +553,13 @@ export type VoiceProvider = Exclude<VoiceProviderPreference, 'auto'>
 /**
  * Realtime hands-free interaction model (Phase 3). `off` keeps the
  * Phase 1 single-tap mic; `push-to-talk` opens the mic while a control
- * is held; `open-mic` listens continuously with local VAD gating.
- * §9.1 has us ship both `push-to-talk` and `open-mic` so a real
- * install can pick. Default `off`.
+ * is held; `open-mic` listens continuously with local VAD gating;
+ * `wake-word` stays silent until an on-device "Hey Orbit" wake arms a
+ * single turn (the privacy-preserving exhibit path — no audio streams
+ * until a wake fires; §9.1). §9.1 has us ship these so a real install
+ * can pick. Default `off`.
  */
-export type VoiceHandsFreeMode = 'off' | 'push-to-talk' | 'open-mic'
+export type VoiceHandsFreeMode = 'off' | 'push-to-talk' | 'open-mic' | 'wake-word'
 
 export interface DocentConfig {
   apiUrl: string         // default: '/api'
@@ -1833,8 +1835,10 @@ export interface VoiceInteractionEvent extends TelemetryEventBase {
   provider: VoiceProvider
   /** How it was initiated: push-to-talk mic, auto-speak, the per-message
    *  replay button, or a hands-free realtime turn (open-mic / push-to-talk
-   *  — the §10.4 numbers that decide the exhibit interaction model). */
-  trigger: 'mic' | 'autospeak' | 'replay' | 'open-mic' | 'push-to-talk'
+   *  / wake-word — the §10.4 numbers that decide the exhibit interaction
+   *  model, incl. the wake-word false-fire rate: a `wake-word` STT row
+   *  with `success:false` is a wake that produced no turn). */
+  trigger: 'mic' | 'autospeak' | 'replay' | 'open-mic' | 'push-to-talk' | 'wake-word'
   /** Recognition / synthesis wall-clock duration in ms; `0` when not measured (e.g. TTS start). */
   duration_ms: number
   /** BCP-47 base language (e.g. `en`, `es`). Low-cardinality, not free text. */
