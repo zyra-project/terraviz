@@ -1190,14 +1190,16 @@
   margin: 0;
 }
 
-/* --- Glass-surface card (SPA-matched) --- */
+/* --- Surface card (flat app-shell — UI refresh) --- */
 
+/* Formerly a frosted-glass surface (backdrop-filter blur). The
+ * redesign drops glass everywhere in favour of flat white-alpha
+ * surfaces. The `publisher-glass` class name is kept as the shared
+ * hook so the ~30 call sites need no churn; only its look changed. */
 .publisher-glass {
-  background: var(--glass-bg, rgba(13, 13, 18, 0.92));
-  backdrop-filter: var(--glass-blur, blur(12px));
-  -webkit-backdrop-filter: var(--glass-blur, blur(12px));
-  border: 1px solid var(--white-o08, rgba(255, 255, 255, 0.08));
-  border-radius: calc(12px * var(--ui-scale));
+  background: var(--color-surface-alt, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--color-surface-border-subtle, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-2xl, 12px);
 }
 
 .publisher-card {
