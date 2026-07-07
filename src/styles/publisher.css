@@ -11,9 +11,13 @@
 
 .publisher-portal {
   min-height: 100vh;
+  /* Two-column app shell: the fixed-width sidebar rail down the
+     inline-start edge + the scrollable content column. */
+  display: flex;
+  align-items: stretch;
   background: var(--color-bg, #0a0d14);
   color: var(--color-text, #e6e8ec);
-  font-family: var(--font-family-sans, system-ui, sans-serif);
+  font-family: var(--font-sans, system-ui, sans-serif);
   box-sizing: border-box;
   /* Declare the whole portal as a dark color scheme so the browser
      renders every native control — <select> dropdown lists, the
@@ -25,96 +29,199 @@
 }
 
 .publisher-content {
+  flex: 1 1 auto;
+  min-width: 0;
   padding: calc(2rem * var(--ui-scale));
 }
 
 .publisher-shell {
-  max-width: calc(960px * var(--ui-scale));
+  max-width: calc(1080px * var(--ui-scale));
   margin: 0 auto;
 }
 
-/* --- Topbar (glass-surface, sticky) --- */
+/* --- Sidebar rail (flat, sticky, grouped nav) --- */
 
-.publisher-topbar {
+.publisher-sidebar {
   position: sticky;
   top: 0;
-  z-index: 100;
+  align-self: flex-start;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: calc(212px * var(--ui-scale));
+  height: 100vh;
   display: flex;
-  align-items: center;
-  gap: calc(2rem * var(--ui-scale));
-  padding: calc(0.75rem * var(--ui-scale)) calc(2rem * var(--ui-scale));
-  border-radius: 0;
-  border-block-start: 0;
-  border-inline-start: 0;
-  border-inline-end: 0;
+  flex-direction: column;
+  gap: var(--space-lg, 0.75rem);
+  padding: var(--space-lg, 0.75rem) var(--space-md, 0.5rem);
+  background: var(--color-surface-alt, rgba(255, 255, 255, 0.04));
+  border-inline-end: 1px solid var(--color-surface-border-subtle, rgba(255, 255, 255, 0.08));
+  overflow-y: auto;
 }
 
-.publisher-topbar-title-block {
+.publisher-sidebar-brand {
   display: flex;
   align-items: center;
-  gap: calc(0.75rem * var(--ui-scale));
+  gap: var(--space-sm, 0.4rem);
+  padding: var(--space-xs, 0.25rem) var(--space-sm, 0.4rem);
 }
 
-.publisher-topbar-back {
+.publisher-sidebar-back {
   color: var(--color-text-muted, #999999);
   text-decoration: none;
-  font-size: calc(1.1rem * var(--ui-scale));
-  padding: calc(0.25rem * var(--ui-scale)) calc(0.5rem * var(--ui-scale));
-  border-radius: calc(6px * var(--ui-scale));
+  font-size: var(--text-xl, 1rem);
+  line-height: 1;
+  padding: var(--space-2xs, 0.2rem) var(--space-sm, 0.4rem);
+  border-radius: var(--radius-md, 6px);
 }
 
-.publisher-topbar-back:hover {
-  background: var(--white-o08, rgba(255, 255, 255, 0.08));
+.publisher-sidebar-back:hover {
+  background: var(--color-surface-hover, rgba(255, 255, 255, 0.12));
   color: var(--color-text, #e8eaf0);
 }
 
-.publisher-topbar-back:focus-visible {
-  outline: 2px solid var(--white-o20, rgba(255, 255, 255, 0.2));
+.publisher-sidebar-back:focus-visible {
+  outline: 2px solid var(--color-accent, #4da6ff);
   outline-offset: 2px;
 }
 
-.publisher-topbar-title {
-  font-size: calc(0.95rem * var(--ui-scale));
+.publisher-sidebar-title {
+  font-size: var(--text-md, 0.8rem);
   font-weight: 600;
+  letter-spacing: 0.02em;
   color: var(--color-text, #e8eaf0);
 }
 
 .publisher-nav {
   display: flex;
-  gap: calc(0.25rem * var(--ui-scale));
+  flex-direction: column;
+  gap: var(--space-lg, 0.75rem);
+  flex: 1 1 auto;
+}
+
+.publisher-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.publisher-nav-group-label {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-2xs, 0.6rem);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-faint, #666666);
+  padding: var(--space-xs, 0.25rem) var(--space-sm, 0.4rem);
 }
 
 .publisher-nav-link {
-  color: var(--color-text-muted, #999999);
+  color: var(--color-text-secondary, #bbbbbb);
   text-decoration: none;
-  font-size: calc(0.875rem * var(--ui-scale));
-  padding: calc(0.5rem * var(--ui-scale)) calc(0.875rem * var(--ui-scale));
-  border-radius: calc(6px * var(--ui-scale));
-  border: 1px solid transparent;
+  font-size: var(--text-md, 0.8rem);
+  padding: var(--space-sm, 0.4rem) var(--space-sm, 0.4rem);
+  border-radius: var(--radius-md, 6px);
+  border-inline-start: 2px solid transparent;
   transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
 }
 
 .publisher-nav-link:hover {
   color: var(--color-text, #e8eaf0);
-  background: var(--white-o05, rgba(255, 255, 255, 0.05));
+  background: var(--color-surface, rgba(255, 255, 255, 0.06));
 }
 
 .publisher-nav-link:focus-visible {
-  outline: 2px solid var(--white-o20, rgba(255, 255, 255, 0.2));
+  outline: 2px solid var(--color-accent, #4da6ff);
   outline-offset: 2px;
 }
 
 .publisher-nav-link-active {
   color: var(--color-text, #e8eaf0);
-  background: var(--white-o10, rgba(255, 255, 255, 0.1));
-  border-color: var(--white-o12, rgba(255, 255, 255, 0.12));
+  background: var(--accent-o08, rgba(77, 166, 255, 0.08));
+  border-inline-start-color: var(--color-accent, #4da6ff);
 }
 
-/* Sign out lives at the far right, visually separated from the
- * section tabs. The `margin-inline-start: auto` shoves it across
- * the flex row, leaving the section nav on the left. */
+/* Account footer — the account link + sign-out, pinned to the rail's
+ * block-end edge, divided from the grouped nav. */
+.publisher-sidebar-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-block-start: var(--space-md, 0.5rem);
+  border-block-start: 1px solid var(--color-surface-border-subtle, rgba(255, 255, 255, 0.08));
+}
+
 .publisher-nav-link-signout {
-  margin-inline-start: auto;
+  color: var(--color-text-muted, #999999);
+}
+
+/* Mobile: the rail can't hold a 212px column beside the content on a
+ * phone, so stack — the portal becomes a column and the sidebar a
+ * full-width top strip whose groups lay out in a horizontally
+ * scrolling row. */
+@media (max-width: 768px) {
+  .publisher-portal {
+    flex-direction: column;
+  }
+
+  .publisher-sidebar {
+    position: static;
+    width: 100%;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-md, 0.5rem);
+    overflow-x: auto;
+    border-inline-end: 0;
+    border-block-end: 1px solid var(--color-surface-border-subtle, rgba(255, 255, 255, 0.08));
+  }
+
+  .publisher-sidebar-brand {
+    flex-shrink: 0;
+  }
+
+  .publisher-nav {
+    flex-direction: row;
+    align-items: stretch;
+    gap: var(--space-md, 0.5rem);
+  }
+
+  /* Group labels are noise in the horizontal strip — the links carry
+   * the meaning; hide the eyebrows but keep them for screen readers. */
+  .publisher-nav-group {
+    flex-direction: row;
+    align-items: center;
+    gap: 1px;
+  }
+
+  .publisher-nav-group-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .publisher-nav-link {
+    white-space: nowrap;
+    border-inline-start: 0;
+    border-block-end: 2px solid transparent;
+  }
+
+  .publisher-nav-link-active {
+    border-inline-start: 0;
+    border-block-end-color: var(--color-accent, #4da6ff);
+  }
+
+  .publisher-sidebar-footer {
+    flex-direction: row;
+    flex-shrink: 0;
+    padding-block-start: 0;
+    padding-inline-start: var(--space-md, 0.5rem);
+    border-block-start: 0;
+    border-inline-start: 1px solid var(--color-surface-border-subtle, rgba(255, 255, 255, 0.08));
+  }
 }
 
 /* --- Lifecycle tabs (Drafts / Published / Retracted) --- */

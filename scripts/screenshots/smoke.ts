@@ -197,7 +197,7 @@ const checks: Check[] = [
     fixtures: publisherFixtures({ admin: true }),
     async run(page) {
       await gotoApp(page, '/publish/datasets')
-      await page.locator('#publisher-root .publisher-topbar').waitFor({ state: 'visible' })
+      await page.locator('#publisher-root .publisher-sidebar').waitFor({ state: 'visible' })
       await page
         .locator('#publisher-root', { hasText: 'Global Sea Surface Temperature' })
         .waitFor({ timeout: 15_000 })
@@ -208,7 +208,7 @@ const checks: Check[] = [
     fixtures: publisherFixtures({ admin: true }),
     async run(page) {
       await gotoApp(page, '/publish/events')
-      await page.locator('#publisher-root .publisher-topbar').waitFor({ state: 'visible' })
+      await page.locator('#publisher-root .publisher-sidebar').waitFor({ state: 'visible' })
       // Direction A master–detail: the queue (left) lists events; the
       // first auto-selects into the detail (right).
       await page.locator('.publisher-events-queue-list').first().waitFor({ timeout: 15_000 })
@@ -250,7 +250,7 @@ const checks: Check[] = [
     fixtures: publisherFixtures({ admin: true }),
     async run(page) {
       await gotoApp(page, '/publish/node-profile')
-      await page.locator('#publisher-root .publisher-topbar').waitFor({ state: 'visible' })
+      await page.locator('#publisher-root .publisher-sidebar').waitFor({ state: 'visible' })
       const org = page.locator('#nodeprofile-org')
       await org.waitFor({ timeout: 15_000 })
       assert(
@@ -270,7 +270,7 @@ const checks: Check[] = [
       // Authoring: the editor's three sections mount, with the picker
       // enabled once the catalog fixture loads.
       await gotoApp(page, '/publish/blog/new')
-      await page.locator('#publisher-root .publisher-topbar').waitFor({ state: 'visible' })
+      await page.locator('#publisher-root .publisher-sidebar').waitFor({ state: 'visible' })
       await page.locator('#blog-title').waitFor({ timeout: 15_000 })
       await page.locator('.publisher-blog-generate-btn').waitFor()
       await page.locator('#publisher-root input[type="search"]:not([disabled])').first().waitFor({ timeout: 10_000 })
@@ -292,7 +292,7 @@ const checks: Check[] = [
     fixtures: publisherFixtures({ admin: true }),
     async run(page) {
       await gotoApp(page, '/publish/feeds')
-      await page.locator('#publisher-root .publisher-topbar').waitFor({ state: 'visible' })
+      await page.locator('#publisher-root .publisher-sidebar').waitFor({ state: 'visible' })
       // The registered connectors render with state dots + bookkeeping.
       await page
         .locator('.publisher-feeds-row', { hasText: 'NASA EONET' })
@@ -331,7 +331,7 @@ const checks: Check[] = [
     fixtures: publisherFixtures(),
     async run(page) {
       await gotoApp(page, '/publish/workflows/new')
-      await page.locator('#publisher-root .publisher-topbar').waitFor({ state: 'visible' })
+      await page.locator('#publisher-root .publisher-sidebar').waitFor({ state: 'visible' })
 
       // Pick the curated drought template via the template <select>,
       // identified by its option value (the visible label is i18n).
@@ -369,7 +369,7 @@ const checks: Check[] = [
     fixtures: publisherFixtures(),
     async run(page) {
       await gotoApp(page, '/publish/datasets/01HEXAMPLEDATASET00000001/edit')
-      await page.locator('#publisher-root .publisher-topbar').waitFor({ state: 'visible' })
+      await page.locator('#publisher-root .publisher-sidebar').waitFor({ state: 'visible' })
       // The thumbnail uploader's globe-thumbnail generator block.
       await page
         .locator('.publisher-asset-uploader-generate')
