@@ -4559,3 +4559,25 @@
 .publisher-license-chooser-apply {
   padding-block: calc(0.3rem * var(--ui-scale));
 }
+
+/* --- Dataset form: Media section — data upload subheadings --- */
+.publisher-form-subheading {
+  margin: 0 0 calc(0.5rem * var(--ui-scale));
+  font-size: calc(0.95rem * var(--ui-scale));
+  font-weight: 600;
+  color: var(--color-text, #e8eaf0);
+}
+.publisher-form-data-upload {
+  padding-block-end: calc(1rem * var(--ui-scale));
+  margin-block-end: calc(1rem * var(--ui-scale));
+  border-block-end: 1px solid var(--white-o08, rgba(255, 255, 255, 0.08));
+}
+.publisher-form-data-upload-notice {
+  margin: 0 0 calc(0.75rem * var(--ui-scale));
+  padding: calc(0.6rem * var(--ui-scale)) calc(0.85rem * var(--ui-scale));
+  background: var(--accent-o08, rgba(77, 166, 255, 0.08));
+  border: 1px solid var(--accent-o20, rgba(77, 166, 255, 0.2));
+  border-radius: var(--radius-lg, calc(8px * var(--ui-scale)));
+  color: var(--color-text-secondary, #b8c0cc);
+  font-size: calc(0.85rem * var(--ui-scale));
+}

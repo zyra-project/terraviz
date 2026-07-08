@@ -1819,13 +1819,24 @@ function renderForm(
     }),
   )
 
-  // data_ref is required by `validateForPublish` server-side but
-  // draft-saveable empty. In create mode the dataset id doesn't
-  // exist yet — the uploader needs an id to scope its
-  // /asset endpoint against — so we keep the manual ref input as
+  // The primary dataset-data upload lives in the Media section
+  // (alongside thumbnail + legend), built here into `dataUploadEl`
+  // and inserted into the media card below. data_ref is required by
+  // `validateForPublish` server-side but draft-saveable empty. In
+  // create mode the dataset id doesn't exist yet — the uploader
+  // needs an id to scope its /asset endpoint against — so we show a
+  // clear "save a draft first" notice plus the manual ref input as
   // a fallback for `vimeo:` / external URLs. In edit mode we hand
   // off to the asset uploader (3pd/C); the manual ref input stays
   // available for the non-upload paths (legacy / external).
+  const dataUploadEl = document.createElement('div')
+  dataUploadEl.className = 'publisher-form-data-upload'
+  dataUploadEl.appendChild(
+    el('h3', {
+      className: 'publisher-form-subheading',
+      textContent: t('publisher.datasetForm.dataUpload.heading'),
+    }),
+  )
   if (ctx.mode === 'edit' && ctx.datasetId && ctx.isTranscoding) {
     // Row is currently mid-transcode. The detail page has the
     // 5-second poller (it auto-refreshes when transcoding
@@ -1868,7 +1879,7 @@ function renderForm(
       current.textContent = state.dataRef
       refDisplay.appendChild(current)
     }
-    identityCard.appendChild(refDisplay)
+    dataUploadEl.appendChild(refDisplay)
   } else if (ctx.mode === 'edit' && ctx.datasetId) {
     // Edit mode mounts BOTH the guided uploader and the manual
     // text input. The uploader covers the "I have an MP4 / PNG
@@ -1957,11 +1968,11 @@ function renderForm(
       ctx.lifecycle.uploaderFormat = state.format
       uploaderWrap.appendChild(uploaderEl)
     }
-    identityCard.appendChild(uploaderWrap)
+    dataUploadEl.appendChild(uploaderWrap)
     // Manual ref input — for editors who want to swap to a
     // legacy `vimeo:` / `url:` ref or paste an already-encoded
     // `r2:videos/...` value without re-uploading bytes.
-    identityCard.appendChild(
+    dataUploadEl.appendChild(
       inputField({
         id: 'dataset-data-ref',
         labelKey: 'publisher.datasetForm.field.dataRefManual',
@@ -1976,11 +1987,15 @@ function renderForm(
       }),
     )
   } else {
-    // Create-mode fallback — the publisher can still paste a
-    // `vimeo:` ref or an external URL by hand. Once the draft
-    // saves and they navigate to the edit page, the uploader
-    // shows up.
-    identityCard.appendChild(
+    // Create-mode — the file uploader needs a saved dataset id, so
+    // make the two-step explicit: save a draft, then upload on the
+    // edit page. The manual ref input stays for pasting a `vimeo:`
+    // ref or external URL by hand.
+    const notice = document.createElement('p')
+    notice.className = 'publisher-form-data-upload-notice'
+    notice.textContent = t('publisher.datasetForm.dataUpload.createNotice')
+    dataUploadEl.appendChild(notice)
+    dataUploadEl.appendChild(
       inputField({
         id: 'dataset-data-ref',
         labelKey: 'publisher.datasetForm.field.dataRef',
@@ -2018,6 +2033,9 @@ function renderForm(
   const mediaEl = mediaCard(content, state, ctx)
   mediaEl.id = 'ds-section-media'
   mediaEl.dataset.section = 'ds-section-media'
+  // Primary dataset-data upload leads the Media section (before the
+  // thumbnail + legend). Insert it right after the section heading.
+  mediaEl.insertBefore(dataUploadEl, mediaEl.children[1] ?? null)
   const licensingEl = licensingCard(state, update)
   licensingEl.id = 'ds-section-licensing'
   licensingEl.dataset.section = 'ds-section-licensing'
