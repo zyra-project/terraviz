@@ -763,14 +763,69 @@ describe('renderDatasetNewPage', () => {
     expect(body.tags).toEqual(['featured'])
   })
 
-  it('renders the media card with thumbnail + legend manual inputs but no uploaders in create mode', () => {
-    // The guided uploader needs a saved row to scope its /asset
-    // endpoint against, so create mode (no id yet) shows only the
-    // manual ref inputs. The uploader appears on the edit page.
+  it('single-step: picking a file mints the draft first, then uploads against the new id', async () => {
+    const fetchFn = vi
+      .fn()
+      // 1. create draft (POST) — ensureDraftId
+      .mockResolvedValueOnce(jsonResponse({ dataset: { id: '01CREATEDDRAFTID000000000' } }, 201))
+      // 2. /asset init (mock:true skips the XHR PUT)
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            upload_id: 'UP-1',
+            kind: 'data',
+            target: 'r2',
+            r2: { method: 'PUT', url: 'https://mock-r2.localhost/put', headers: {}, key: 'k' },
+            expires_at: 'soon',
+            mock: true,
+          },
+          201,
+        ),
+      )
+      // 3. /complete → direct image ref
+      .mockResolvedValueOnce(jsonResponse({ dataset: { data_ref: 'r2:datasets/NEW/asset.png' } }))
+
+    renderDatasetNewPage(mount, {
+      fetchFn: fetchFn as unknown as typeof fetch,
+      routerNavigate: vi.fn(),
+    })
+
+    setInput(mount, '#dataset-title', 'Single step')
+    clickRadio(mount, 'format', 'image/png')
+
+    // The data uploader's file input (first uploader in the data-upload
+    // block). Picking a file drives the single-step flow.
+    const input = mount.querySelector<HTMLInputElement>(
+      '.publisher-form-data-upload .publisher-asset-uploader input[type="file"]',
+    )!
+    const file = new File(['png-bytes'], 'frame.png', { type: 'image/png' })
+    Object.defineProperty(input, 'files', {
+      value: { 0: file, length: 1, item: (i: number) => (i === 0 ? file : null) } as unknown as FileList,
+      configurable: true,
+    })
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+    for (let i = 0; i < 10; i++) await new Promise(r => setTimeout(r, 0))
+
+    // First call is the draft-create POST…
+    expect(fetchFn.mock.calls[0][0]).toBe('/api/v1/publish/datasets')
+    expect(fetchFn.mock.calls[0][1].method).toBe('POST')
+    // …then the /asset mint targets the freshly-created id.
+    expect(fetchFn.mock.calls[1][0]).toContain(
+      '/api/v1/publish/datasets/01CREATEDDRAFTID000000000/asset',
+    )
+  })
+
+  it('mounts the guided uploaders (single-step) alongside the manual inputs in create mode', () => {
+    // Create mode mounts the data / thumbnail / legend uploaders even
+    // though no row exists yet: picking a file mints the draft lazily
+    // (via `ensureDatasetId`) and continues the upload against the new
+    // row. The manual ref inputs stay as the paste-a-ref escape hatch.
     renderDatasetNewPage(mount)
+    expect(mount.querySelector('#dataset-data-ref')).not.toBeNull()
     expect(mount.querySelector('#dataset-thumbnail-ref')).not.toBeNull()
     expect(mount.querySelector('#dataset-legend-ref')).not.toBeNull()
-    expect(mount.querySelector('.publisher-asset-uploader')).toBeNull()
+    // data + thumbnail + legend = three guided uploaders.
+    expect(mount.querySelectorAll('.publisher-asset-uploader')).toHaveLength(3)
   })
 
   it('omits thumbnail_ref + legend_ref from the body when blank', async () => {

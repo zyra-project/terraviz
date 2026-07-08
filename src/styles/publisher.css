@@ -4572,12 +4572,3 @@
   margin-block-end: calc(1rem * var(--ui-scale));
   border-block-end: 1px solid var(--white-o08, rgba(255, 255, 255, 0.08));
 }
-.publisher-form-data-upload-notice {
-  margin: 0 0 calc(0.75rem * var(--ui-scale));
-  padding: calc(0.6rem * var(--ui-scale)) calc(0.85rem * var(--ui-scale));
-  background: var(--accent-o08, rgba(77, 166, 255, 0.08));
-  border: 1px solid var(--accent-o20, rgba(77, 166, 255, 0.2));
-  border-radius: var(--radius-lg, calc(8px * var(--ui-scale)));
-  color: var(--color-text-secondary, #b8c0cc);
-  font-size: calc(0.85rem * var(--ui-scale));
-}

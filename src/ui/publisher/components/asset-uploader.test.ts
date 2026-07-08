@@ -289,6 +289,85 @@ describe('renderAssetUploader', () => {
     expect(xhrFactory).not.toHaveBeenCalled()
     expect(onUploaded).toHaveBeenCalled()
   })
+
+  it('mints the draft lazily via ensureDatasetId when no id is set (create single-step)', async () => {
+    // Create form: the uploader is mounted with an empty datasetId +
+    // an `ensureDatasetId` that saves the draft on first file pick.
+    // The subsequent /asset + /complete calls must target the
+    // freshly-minted id.
+    const onUploaded = vi.fn()
+    const ensureDatasetId = vi.fn().mockResolvedValue('01NEWDRAFTIDNEWDRAFTIDNEW')
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            upload_id: 'UP-NEW',
+            kind: 'data',
+            target: 'r2',
+            r2: { method: 'PUT', url: 'https://r2.example/put', headers: {}, key: 'k' },
+            expires_at: 'soon',
+            mock: true,
+          },
+          201,
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ dataset: { data_ref: 'r2:datasets/NEW/asset.png' } }),
+      )
+
+    mount.appendChild(
+      renderAssetUploader({
+        datasetId: '',
+        ensureDatasetId,
+        format: 'image/png',
+        onUploaded,
+        hashFn: async () => 'sha256:' + 'd'.repeat(64),
+        fetchFn: fetchFn as unknown as typeof fetch,
+        xhrFactory: fakeXhrFactory(),
+      }),
+    )
+
+    pickFile(mount, 'image/png', 'mock-png-bytes')
+    for (let i = 0; i < 8; i++) await new Promise(r => setTimeout(r, 0))
+
+    expect(ensureDatasetId).toHaveBeenCalledTimes(1)
+    // The mint targets the id ensureDatasetId returned.
+    const mintUrl = fetchFn.mock.calls[0][0]
+    expect(mintUrl).toContain('/api/v1/publish/datasets/01NEWDRAFTIDNEWDRAFTIDNEW/asset')
+    expect(onUploaded).toHaveBeenCalledWith({
+      mode: 'direct',
+      dataRef: 'r2:datasets/NEW/asset.png',
+    })
+  })
+
+  it('aborts the upload (no /asset call) when ensureDatasetId cannot save the draft', async () => {
+    // e.g. the title is missing — the parent form surfaces the
+    // validation error and ensureDatasetId resolves null. The
+    // uploader must not attempt a mint against an empty id.
+    const onUploaded = vi.fn()
+    const ensureDatasetId = vi.fn().mockResolvedValue(null)
+    const fetchFn = vi.fn()
+
+    mount.appendChild(
+      renderAssetUploader({
+        datasetId: '',
+        ensureDatasetId,
+        format: 'image/png',
+        onUploaded,
+        hashFn: async () => 'sha256:' + 'e'.repeat(64),
+        fetchFn: fetchFn as unknown as typeof fetch,
+        xhrFactory: fakeXhrFactory(),
+      }),
+    )
+
+    pickFile(mount, 'image/png', 'mock-png-bytes')
+    for (let i = 0; i < 8; i++) await new Promise(r => setTimeout(r, 0))
+
+    expect(ensureDatasetId).toHaveBeenCalledTimes(1)
+    expect(fetchFn).not.toHaveBeenCalled()
+    expect(onUploaded).not.toHaveBeenCalled()
+  })
 })
 
 describe('renderAssetUploader — auxiliary kinds (thumbnail / legend)', () => {

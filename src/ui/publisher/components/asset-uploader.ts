@@ -189,8 +189,20 @@ export interface AssetUploaderOptions {
   onUploaded: (outcome: AssetUploadOutcome) => void
   /** Fired when the publisher's draft hasn't been saved yet (the
    *  asset endpoints require an existing dataset id). The parent
-   *  form is expected to surface a "Save draft first" notice. */
+   *  form is expected to surface a "Save draft first" notice. Only
+   *  reached when neither `datasetId` nor `ensureDatasetId` can
+   *  produce an id. */
   onMissingDataset?: () => void
+  /** Lazily mint the dataset id when the uploader is mounted before
+   *  the row exists — the create-form single-step path. Called once,
+   *  the moment the publisher picks their first file, when
+   *  `datasetId` is absent. Returns the freshly-minted id, or null if
+   *  the draft couldn't be saved (e.g. a required field like the
+   *  title is missing — the parent form surfaces that error). When it
+   *  resolves an id the parent is expected to have flipped itself
+   *  into edit mode so any later re-render mounts a normally-scoped
+   *  uploader. */
+  ensureDatasetId?: () => Promise<string | null>
   /** Injected fetch — defaults to `globalThis.fetch`. */
   fetchFn?: typeof fetch
   /** Injected XHR factory — tests pass a stub that emits
@@ -1387,9 +1399,38 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
    * always `transcoding` mode — frame-source uploads land at the
    * same /transcode-complete callback the MP4 path uses.
    */
-  async function runFrameSequence(files: File[]): Promise<void> {
-    if (!options.datasetId) {
+  /**
+   * Resolve the dataset id for an upload run. In edit mode this is
+   * the scoped `options.datasetId`; on the create form it's minted
+   * lazily via `ensureDatasetId` the moment the publisher picks a
+   * file (single-step upload). `showSaving` paints a "saving draft"
+   * status while the draft is being created. Returns null when no id
+   * is available or the draft couldn't be saved — the caller aborts,
+   * and `onMissingDataset` covers the no-`ensureDatasetId` case.
+   */
+  async function ensureId(showSaving: () => void): Promise<string | null> {
+    if (options.datasetId) return options.datasetId
+    if (!options.ensureDatasetId) {
       options.onMissingDataset?.()
+      return null
+    }
+    showSaving()
+    const id = await options.ensureDatasetId().catch(() => null)
+    return id || null
+  }
+
+  async function runFrameSequence(files: File[]): Promise<void> {
+    const datasetId = await ensureId(() => {
+      framesState = { ...framesState, stage: 'minting', progress: 0 }
+      paint()
+    })
+    if (!datasetId) {
+      // No id (and the parent surfaced any error) — drop back to the
+      // picked state so the "Start upload" button is usable again.
+      if (framesState.stage === 'minting') {
+        framesState = { ...framesState, stage: 'picked' }
+        paint()
+      }
       return
     }
     const total = files.length
@@ -1443,7 +1484,7 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
       paint()
       const totalSize = frameDigests.reduce((sum, f) => sum + f.size, 0)
       const initResult = await publisherSend<ImageSequenceInitResponse>(
-        `/api/v1/publish/datasets/${encodeURIComponent(options.datasetId)}/asset`,
+        `/api/v1/publish/datasets/${encodeURIComponent(datasetId)}/asset`,
         {
           kind: 'data',
           // Use the mime resolved + asserted-uniform during
@@ -1569,7 +1610,7 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
       framesState = { ...framesState, stage: 'completing', progress: 1 }
       paint()
       const completeResult = await publisherSend<AssetCompleteResponse>(
-        `/api/v1/publish/datasets/${encodeURIComponent(options.datasetId)}/asset/${init.upload_id}/complete`,
+        `/api/v1/publish/datasets/${encodeURIComponent(datasetId)}/asset/${init.upload_id}/complete`,
         {},
         { fetchFn: options.fetchFn, sleep: options.sleep },
       )
@@ -1633,10 +1674,6 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
   }
 
   async function run(file: File): Promise<void> {
-    if (!options.datasetId) {
-      options.onMissingDataset?.()
-      return
-    }
     // Browsers sometimes report `File.type === ''` for files
     // dragged from certain OS file managers, or for ext-only
     // matches. Fall back to deriving the MIME from the filename
@@ -1682,6 +1719,30 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
       return
     }
 
+    // Resolve (or lazily mint) the dataset id now that we know the
+    // file is valid. On the create form this saves the draft and
+    // flips the parent into edit mode; in edit mode it's a no-op that
+    // returns the scoped id.
+    const datasetId = await ensureId(() => {
+      state = {
+        ...INITIAL,
+        stage: 'minting',
+        progress: 0,
+        statusKey: 'publisher.assetUploader.status.savingDraft',
+      }
+      paint()
+    })
+    if (!datasetId) {
+      // The draft couldn't be saved (the parent surfaced the reason)
+      // or there's no id to write to. Reset the picker so a retry is
+      // possible once the blocker is resolved.
+      if (state.statusKey === 'publisher.assetUploader.status.savingDraft') {
+        state = INITIAL
+        paint()
+      }
+      return
+    }
+
     try {
       // 1. Hash.
       state = { ...state, stage: 'hashing', progress: 0, statusKey: STAGE_STATUS_KEY.hashing }
@@ -1692,7 +1753,7 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
       state = { ...state, stage: 'minting', statusKey: STAGE_STATUS_KEY.minting }
       paint()
       const initResult = await publisherSend<AssetInitResponse>(
-        `/api/v1/publish/datasets/${encodeURIComponent(options.datasetId)}/asset`,
+        `/api/v1/publish/datasets/${encodeURIComponent(datasetId)}/asset`,
         {
           kind,
           mime: effectiveMime,
@@ -1726,7 +1787,7 @@ export function renderAssetUploader(options: AssetUploaderOptions): HTMLElement 
       }
       paint()
       const completeResult = await publisherSend<AssetCompleteResponse>(
-        `/api/v1/publish/datasets/${encodeURIComponent(options.datasetId)}/asset/${init.upload_id}/complete`,
+        `/api/v1/publish/datasets/${encodeURIComponent(datasetId)}/asset/${init.upload_id}/complete`,
         {},
         { fetchFn: options.fetchFn, sleep: options.sleep },
       )

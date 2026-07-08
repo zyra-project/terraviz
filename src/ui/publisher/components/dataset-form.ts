@@ -29,7 +29,11 @@ import {
 import { buildErrorCard, type ErrorCardDetails } from './error-card'
 import { attachToolbar, renderMarkdownToolbar } from './markdown-toolbar'
 import { renderChipInput } from './chip-input'
-import { renderAssetUploader, type AuxAssetKind } from './asset-uploader'
+import {
+  renderAssetUploader,
+  type AssetUploadOutcome,
+  type AuxAssetKind,
+} from './asset-uploader'
 import { renderMarkdown } from '../../../services/markdownRenderer'
 import type { PublisherDatasetDetail } from '../types'
 import type { DatasetOverlayOptions } from '../../../types'
@@ -1396,6 +1400,16 @@ interface RenderContext {
   sleep: (ms: number) => Promise<void>
   navigate: (url: string) => void
   routerNavigate: (path: string) => void
+  /** Single-step create upload: save the current draft (without
+   *  navigating away) and return its new id, flipping `ctx` into edit
+   *  mode so subsequent renders mount edit-scoped uploaders. Returns
+   *  null if the draft couldn't be saved (a required field is
+   *  missing — the form surfaces the error). Bound per render by
+   *  `renderForm`; the create-mode asset uploaders pass it as their
+   *  `ensureDatasetId`. Single-flighted via `lifecycle.draftCreation`
+   *  so two slots (data + thumbnail) picked back-to-back don't mint
+   *  two rows. */
+  ensureDraftId: () => Promise<string | null>
   /** Shared lifecycle token for the form mount. `disposed` flips
    *  to true exactly once — when ROUTE_CHANGE_START_EVENT fires —
    *  and stays true. All renders within a single form mount share
@@ -1432,6 +1446,12 @@ interface RenderContext {
      *  so there's no `*Format` companion the way `data` has. */
     thumbnailUploader?: HTMLElement
     legendUploader?: HTMLElement
+    /** Single-flight latch for the create-form draft mint. Holds the
+     *  in-flight (or resolved) `ensureDraftId` promise so concurrent
+     *  first-file picks across the data / thumbnail / legend slots
+     *  share one create POST instead of racing to mint duplicate
+     *  rows. Cleared on failure so a retry can re-mint. */
+    draftCreation?: Promise<string | null>
   }
 }
 
@@ -1484,11 +1504,14 @@ function auxAssetField(
     wrap.appendChild(preview)
   }
 
-  // Guided uploader — edit mode only. The `/asset` init endpoint
-  // is scoped to a saved dataset id, so create mode (no row yet)
-  // gets only the manual input; once the draft is saved the
-  // publisher lands on the edit page where the uploader appears.
-  if (ctx.mode === 'edit' && ctx.datasetId) {
+  // Guided uploader — mounted in both modes. In edit mode it's
+  // scoped to the saved row; in create mode it's handed
+  // `ensureDatasetId`, so picking a thumbnail / legend image saves
+  // the draft first (single-step upload) exactly like the primary
+  // data slot. The manual input below stays as the paste-a-ref
+  // escape hatch.
+  {
+    const scopedId = ctx.mode === 'edit' && ctx.datasetId ? ctx.datasetId : null
     const uploaderWrap = document.createElement('div')
     uploaderWrap.className = 'publisher-field'
     const label = document.createElement('span')
@@ -1498,14 +1521,19 @@ function auxAssetField(
 
     // Reuse the previously-mounted uploader subtree across renders
     // so a parent repaint (title edit, save-in-progress) doesn't
-    // interrupt an in-flight upload. Same rationale as the `data`
-    // uploader's subtree preservation, minus the format key.
-    const cached = ctx.lifecycle[opts.cacheKey]
+    // interrupt an in-flight upload — edit mode only. Same rationale
+    // as the `data` uploader's subtree preservation, minus the format
+    // key. Create-mode uploaders are never cached: they carry an
+    // empty datasetId until the draft is minted, after which the
+    // next (edit-scoped) render must build a fresh, id-bound uploader.
+    const cached = scopedId ? ctx.lifecycle[opts.cacheKey] : undefined
     if (cached) {
       uploaderWrap.appendChild(cached)
     } else {
       const uploaderEl = renderAssetUploader({
-        datasetId: ctx.datasetId,
+        datasetId: scopedId ?? '',
+        // Create mode resolves the id lazily on first file pick.
+        ensureDatasetId: scopedId ? undefined : ctx.ensureDraftId,
         kind: opts.kind,
         format: state.format,
         currentDataRef: opts.refValue || null,
@@ -1525,7 +1553,7 @@ function auxAssetField(
           if (manual) manual.value = outcome.ref
         },
       })
-      ctx.lifecycle[opts.cacheKey] = uploaderEl
+      if (scopedId) ctx.lifecycle[opts.cacheKey] = uploaderEl
       uploaderWrap.appendChild(uploaderEl)
     }
     wrap.appendChild(uploaderWrap)
@@ -1678,6 +1706,12 @@ function renderForm(
   state: FormState,
   ctx: RenderContext,
 ): void {
+  // Rebind the create-mode single-step draft mint to this render's
+  // `persistDataset` closure (function declarations below are hoisted,
+  // so the reference resolves). The single-flight latch lives on
+  // `ctx.lifecycle`, which persists across renders.
+  ctx.ensureDraftId = ensureDraftId
+
   const shell = document.createElement('main')
   shell.className = 'publisher-shell publisher-dataset-form'
 
@@ -1880,98 +1914,93 @@ function renderForm(
       refDisplay.appendChild(current)
     }
     dataUploadEl.appendChild(refDisplay)
-  } else if (ctx.mode === 'edit' && ctx.datasetId) {
-    // Edit mode mounts BOTH the guided uploader and the manual
-    // text input. The uploader covers the "I have an MP4 / PNG
-    // on my disk" case; the manual input covers the
-    // "swap to a `vimeo:` legacy URL or paste an existing
-    // `r2:videos/...` ref" case, which the uploader can't
-    // express (its flow always uploads bytes). Fix for PR #112
-    // Copilot #5 — the prior single-uploader layout left
-    // editors no way to change a `vimeo:` / `url:` /
-    // already-transcoded `r2:` ref short of round-tripping
-    // through the API.
+  } else {
+    // Both edit (the row exists) and create (the draft is minted
+    // lazily the moment the publisher picks their first file) mount
+    // the guided uploader. In create mode the uploader has no scoped
+    // id yet, so it's handed `ensureDatasetId` — picking a file saves
+    // the draft, flips the form into edit mode, and continues the
+    // upload against the freshly-minted row (single-step upload). The
+    // manual ref input stays in both modes as the escape hatch for a
+    // `vimeo:` / external URL / already-encoded `r2:videos/...` ref
+    // the byte-uploading flow can't express (PR #112 Copilot #5).
+    const scopedId = ctx.mode === 'edit' && ctx.datasetId ? ctx.datasetId : null
+
+    const handleDataUploaded = (outcome: AssetUploadOutcome): void => {
+      // Bail if the user navigated away during the upload (which can
+      // take minutes for a multi-GB video) — the deferred callback
+      // would otherwise mutate the next page's DOM. `ctx.lifecycle`
+      // flips `disposed` only on route navigation, not on internal
+      // re-renders, so an upload in flight across input changes still
+      // resolves correctly. PR #112 followup.
+      if (ctx.lifecycle.disposed) return
+      // Direct upload (image): the server already wrote `data_ref`;
+      // mirror it into form state + the manual input so a later Save
+      // doesn't clobber it. Video upload: the server stamped
+      // `transcoding=1` and cleared `data_ref` — flip
+      // `ctx.isTranscoding` and re-render so the manual input + Save
+      // are replaced by the read-only transcoding notice. (Extended
+      // from PR #112 to cover the create single-step path, where `ctx`
+      // has just been flipped into edit mode by `ensureDraftId`.)
+      if (outcome.mode === 'direct') {
+        state.dataRef = outcome.dataRef
+        const manual = content.querySelector<HTMLInputElement>('#dataset-data-ref')
+        if (manual) manual.value = outcome.dataRef
+        ctx.lifecycle.uploader = undefined
+        ctx.lifecycle.uploaderFormat = undefined
+      } else if (outcome.mode === 'transcoding') {
+        state.dataRef = ''
+        ctx.isTranscoding = true
+        ctx.lifecycle.uploader = undefined
+        ctx.lifecycle.uploaderFormat = undefined
+        update()
+      }
+    }
+
     const uploaderWrap = document.createElement('div')
     uploaderWrap.className = 'publisher-field'
     const label = document.createElement('span')
     label.className = 'publisher-field-label'
     label.textContent = t('publisher.datasetForm.field.dataRef')
     uploaderWrap.appendChild(label)
-    // Reuse the previously-mounted uploader DOM across renders
-    // when the format is unchanged. This preserves the
-    // uploader's internal state (in-flight XHR, progress,
-    // mid-flight promise chain) so a parent re-render — e.g.
-    // the publisher edits the title while a multi-GB upload is
-    // progressing — doesn't tear down the upload UI. Format
-    // changes still recreate the uploader: its mime-acceptance
-    // logic is set at construction time, and a publisher
-    // switching format mid-upload is a meaningful state
-    // change. PR #112 followup — dataset-form.ts:asset uploader
-    // subtree preservation.
-    if (ctx.lifecycle.uploader && ctx.lifecycle.uploaderFormat === state.format) {
+    // Reuse the previously-mounted uploader DOM across renders when
+    // the format is unchanged — edit mode only. This preserves the
+    // uploader's in-flight XHR / progress / promise chain so a parent
+    // re-render (e.g. a title edit during a multi-GB upload) doesn't
+    // tear down the upload UI. Create-mode uploaders are never cached:
+    // the cached instance carries an empty datasetId, and once the
+    // draft is minted the next render is edit-scoped and must build a
+    // fresh, id-bound uploader rather than reuse the placeholder. PR
+    // #112 followup — dataset-form.ts:asset uploader subtree
+    // preservation.
+    if (
+      scopedId &&
+      ctx.lifecycle.uploader &&
+      ctx.lifecycle.uploaderFormat === state.format
+    ) {
       uploaderWrap.appendChild(ctx.lifecycle.uploader)
     } else {
       const uploaderEl = renderAssetUploader({
-        datasetId: ctx.datasetId,
+        datasetId: scopedId ?? '',
+        // Create mode resolves the id lazily on first file pick.
+        ensureDatasetId: scopedId ? undefined : ctx.ensureDraftId,
         format: state.format,
         currentDataRef: state.dataRef || null,
         navigate: ctx.navigate,
         fetchFn: ctx.fetchFn,
         sleep: ctx.sleep,
-        onUploaded: outcome => {
-          // Bail if the user navigated away during the upload
-          // (which can take minutes for a multi-GB video). Without
-          // this guard, the deferred callback would call update()
-          // or mutate #dataset-data-ref on the next page's DOM.
-          // `ctx.lifecycle` is the shared per-mount token — flips
-          // only on route navigation, not on internal re-renders,
-          // so an upload in flight across input changes still
-          // resolves correctly. PR #112 followup —
-          // dataset-form.ts:disposed race.
-          if (ctx.lifecycle.disposed) return
-          // On a direct upload (image), the server already wrote
-          // `data_ref` to the row. Mirror the field-state so a
-          // subsequent form save doesn't clobber it with an empty
-          // string. On a video upload the server stamped
-          // `transcoding=1` and cleared data_ref — flip
-          // `ctx.isTranscoding` and rerender so the manual ref
-          // input + Save button are replaced with the read-only
-          // transcoding notice. Without the rerender the publisher
-          // could type a fresh data_ref into the still-mounted
-          // manual input and Save would clobber the in-flight
-          // transcode's eventual master.m3u8 — PR #112 followup
-          // (dataset-form.ts:1007).
-          if (outcome.mode === 'direct') {
-            state.dataRef = outcome.dataRef
-            // Reflect the new ref in the manual input below so
-            // the publisher sees what the row now points at.
-            const manual = content.querySelector<HTMLInputElement>('#dataset-data-ref')
-            if (manual) manual.value = outcome.dataRef
-            // The uploader's job is done — drop the cache so a
-            // future format change or new upload starts fresh.
-            ctx.lifecycle.uploader = undefined
-            ctx.lifecycle.uploaderFormat = undefined
-          } else {
-            state.dataRef = ''
-            ctx.isTranscoding = true
-            // Cache cleared by the isTranscoding branch on next
-            // render (transcoding-locked branch doesn't mount
-            // an uploader at all); the in-flight upload's
-            // completion has already arrived here.
-            ctx.lifecycle.uploader = undefined
-            ctx.lifecycle.uploaderFormat = undefined
-            update()
-          }
-        },
+        onUploaded: handleDataUploaded,
       })
-      ctx.lifecycle.uploader = uploaderEl
-      ctx.lifecycle.uploaderFormat = state.format
+      if (scopedId) {
+        ctx.lifecycle.uploader = uploaderEl
+        ctx.lifecycle.uploaderFormat = state.format
+      }
       uploaderWrap.appendChild(uploaderEl)
     }
     dataUploadEl.appendChild(uploaderWrap)
-    // Manual ref input — for editors who want to swap to a
-    // legacy `vimeo:` / `url:` ref or paste an already-encoded
-    // `r2:videos/...` value without re-uploading bytes.
+    // Manual ref input — swap to a legacy `vimeo:` / `url:` ref or
+    // paste an already-encoded `r2:videos/...` value without
+    // re-uploading bytes.
     dataUploadEl.appendChild(
       inputField({
         id: 'dataset-data-ref',
@@ -1980,29 +2009,6 @@ function renderForm(
         value: state.dataRef,
         placeholder: t('publisher.datasetForm.placeholder.dataRef'),
         helpKey: 'publisher.datasetForm.help.dataRefManual',
-        error: findError(state.errors, 'data_ref'),
-        onChange: v => {
-          state.dataRef = v
-        },
-      }),
-    )
-  } else {
-    // Create-mode — the file uploader needs a saved dataset id, so
-    // make the two-step explicit: save a draft, then upload on the
-    // edit page. The manual ref input stays for pasting a `vimeo:`
-    // ref or external URL by hand.
-    const notice = document.createElement('p')
-    notice.className = 'publisher-form-data-upload-notice'
-    notice.textContent = t('publisher.datasetForm.dataUpload.createNotice')
-    dataUploadEl.appendChild(notice)
-    dataUploadEl.appendChild(
-      inputField({
-        id: 'dataset-data-ref',
-        labelKey: 'publisher.datasetForm.field.dataRef',
-        required: false,
-        value: state.dataRef,
-        placeholder: t('publisher.datasetForm.placeholder.dataRef'),
-        helpKey: 'publisher.datasetForm.help.dataRef',
         error: findError(state.errors, 'data_ref'),
         onChange: v => {
           state.dataRef = v
@@ -2115,12 +2121,10 @@ function renderForm(
     renderForm(content, state, ctx)
   }
 
-  async function onSubmit(): Promise<void> {
-    state.isSaving = true
-    state.errors = []
-    state.topLevelError = null
-    update()
-
+  /** Build the create/edit request body from the current form
+   *  state. Shared by the Save-draft button (`onSubmit`) and the
+   *  single-step create upload (`ensureDraftId`). */
+  function buildRequestBody(): Record<string, unknown> {
     const body: Record<string, unknown> = {
       title: state.title.trim(),
       format: state.format,
@@ -2189,7 +2193,31 @@ function renderForm(
     // instead of carrying placeholder rows.
     if (state.keywords.length > 0) body.keywords = [...state.keywords]
     if (state.tags.length > 0) body.tags = [...state.tags]
+    return body
+  }
 
+  /**
+   * POST/PUT the current form state to the catalog.
+   *
+   * - `navigateOnSuccess` routes to the edit (create) / detail (edit)
+   *   page after a successful save — the Save-draft button's flow.
+   * - `keepMounted` suppresses the in-flight + success re-renders so
+   *   a live asset upload driving this save (the create-form
+   *   single-step path) isn't torn down mid-flight; validation /
+   *   server / network failures still re-render to surface the error.
+   *
+   * Returns the saved dataset id on success, else null.
+   */
+  async function persistDataset(opts: {
+    navigateOnSuccess: boolean
+    keepMounted?: boolean
+  }): Promise<string | null> {
+    state.isSaving = true
+    state.errors = []
+    state.topLevelError = null
+    if (!opts.keepMounted) update()
+
+    const body = buildRequestBody()
     const endpoint =
       ctx.mode === 'edit' && ctx.datasetId
         ? editEndpoint(ctx.datasetId)
@@ -2209,24 +2237,27 @@ function renderForm(
 
     if (result.ok) {
       clearWarmupFlag()
-      // On create, send the publisher straight to the edit page
-      // (which mounts the asset uploader) rather than the read-only
-      // detail page. The structural reason the uploader can't live
-      // on /new is that the asset-init endpoint is scoped by
-      // dataset id — there's no row to attach the upload to yet.
-      // Navigating to detail then forcing an Edit click is two
-      // extra clicks of friction; jumping to /edit lets the
-      // publisher pick a file as their next action, which is
-      // almost certainly what they want after Save Draft on a
-      // greenfield row. Edit-mode saves keep the existing
-      // navigate-to-detail behavior — the publisher was already
-      // editing, the natural next step is to review.
-      const id = encodeURIComponent(result.data.dataset.id)
-      const target = ctx.mode === 'create'
-        ? `/publish/datasets/${id}/edit`
-        : `/publish/datasets/${id}`
-      ctx.routerNavigate(target)
-      return
+      if (opts.navigateOnSuccess) {
+        // On create, send the publisher straight to the edit page
+        // (which mounts the asset uploader) rather than the read-only
+        // detail page. The structural reason the uploader can't live
+        // on /new is that the asset-init endpoint is scoped by
+        // dataset id — there's no row to attach the upload to yet.
+        // Navigating to detail then forcing an Edit click is two
+        // extra clicks of friction; jumping to /edit lets the
+        // publisher pick a file as their next action, which is
+        // almost certainly what they want after Save Draft on a
+        // greenfield row. Edit-mode saves keep the existing
+        // navigate-to-detail behavior — the publisher was already
+        // editing, the natural next step is to review.
+        const id = encodeURIComponent(result.data.dataset.id)
+        const target =
+          ctx.mode === 'create'
+            ? `/publish/datasets/${id}/edit`
+            : `/publish/datasets/${id}`
+        ctx.routerNavigate(target)
+      }
+      return result.data.dataset.id
     }
     if (result.kind === 'validation') {
       state.errors = result.errors
@@ -2236,7 +2267,7 @@ function renderForm(
         state.activeSection = sectionForField(result.errors[0].field)
       }
       update()
-      return
+      return null
     }
     if (result.kind === 'session') {
       if (handleSessionError({ navigate: ctx.navigate }) === 'show-error') {
@@ -2244,18 +2275,69 @@ function renderForm(
         state.topLevelErrorDetails = {}
         update()
       }
-      return
+      return null
     }
     if (result.kind === 'server') {
       state.topLevelError = 'server'
       state.topLevelErrorDetails = { status: result.status, body: result.body }
       update()
-      return
+      return null
     }
     // network / not_found — surface as a transient network error.
     state.topLevelError = 'network'
     state.topLevelErrorDetails = {}
     update()
+    return null
+  }
+
+  async function onSubmit(): Promise<void> {
+    await persistDataset({ navigateOnSuccess: true })
+  }
+
+  /**
+   * Single-step create upload: save the draft (without navigating)
+   * and hand its new id back to the asset uploader that triggered
+   * it, flipping `ctx` into edit mode so later renders mount
+   * edit-scoped uploaders and a reload lands on the edit page.
+   * Single-flighted via `ctx.lifecycle.draftCreation` so two slots
+   * (data + thumbnail) picked back-to-back share one create POST.
+   */
+  async function ensureDraftId(): Promise<string | null> {
+    if (ctx.mode === 'edit' && ctx.datasetId) return ctx.datasetId
+    if (ctx.lifecycle.draftCreation) return ctx.lifecycle.draftCreation
+    const creation = (async (): Promise<string | null> => {
+      const id = await persistDataset({ navigateOnSuccess: false, keepMounted: true })
+      if (!id) return null
+      // Flip into edit mode in place — subsequent renders (triggered
+      // when the upload finishes) mount an edit-scoped uploader, and
+      // the address bar reflects the row so a reload lands on /edit.
+      // Deliberately no re-render here: the live uploader that called
+      // us must stay mounted to finish its in-flight PUT.
+      ctx.mode = 'edit'
+      ctx.datasetId = id
+      try {
+        window.history.replaceState(
+          window.history.state,
+          '',
+          `/publish/datasets/${encodeURIComponent(id)}/edit`,
+        )
+      } catch {
+        /* replaceState can throw in exotic embeddings — non-fatal */
+      }
+      return id
+    })()
+    ctx.lifecycle.draftCreation = creation
+    // Release the latch on failure so a fixed-up retry can re-mint;
+    // on success we keep it (the early-return above short-circuits
+    // once `ctx.datasetId` is set anyway).
+    void creation
+      .then(id => {
+        if (!id) ctx.lifecycle.draftCreation = undefined
+      })
+      .catch(() => {
+        ctx.lifecycle.draftCreation = undefined
+      })
+    return creation
   }
 }
 
@@ -2440,6 +2522,10 @@ export function renderDatasetForm(
       (path => {
         window.location.href = path
       }),
+    // Overwritten at the top of every `renderForm` with a closure
+    // bound to the current render's `persistDataset`. The stub keeps
+    // the initial literal type-complete before that first bind.
+    ensureDraftId: async () => null,
     lifecycle,
   })
 }
