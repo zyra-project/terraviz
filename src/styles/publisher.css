@@ -335,6 +335,32 @@
   margin: 0 0 calc(0.5rem * var(--ui-scale));
 }
 
+/* Datasets list search box — filters the loaded rows client-side. */
+.publisher-datasets-search-wrap {
+  margin-block: calc(0.25rem * var(--ui-scale)) calc(0.75rem * var(--ui-scale));
+}
+.publisher-datasets-search {
+  inline-size: 100%;
+  box-sizing: border-box;
+  padding: calc(0.55rem * var(--ui-scale)) calc(0.75rem * var(--ui-scale));
+  background: var(--color-surface-alt, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--white-o15, rgba(255, 255, 255, 0.15));
+  border-radius: calc(8px * var(--ui-scale));
+  color: var(--color-text, #e8eaf0);
+  font-size: calc(0.9rem * var(--ui-scale));
+  color-scheme: dark;
+}
+.publisher-datasets-search::placeholder {
+  color: var(--color-text-muted, #8a92a0);
+}
+.publisher-datasets-search:focus {
+  outline: none;
+  border-color: var(--color-accent, #4da6ff);
+}
+.publisher-datasets-nomatch {
+  margin-block-start: calc(0.5rem * var(--ui-scale));
+}
+
 .publisher-table-wrap {
   padding: 0;
   overflow: auto;

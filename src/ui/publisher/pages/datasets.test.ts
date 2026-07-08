@@ -138,6 +138,53 @@ describe('renderDatasetsPage', () => {
     expect(firstLink?.getAttribute('href')).toBe('/publish/datasets/A')
   })
 
+  it('filters the table client-side via the search box (title or slug)', async () => {
+    window.history.replaceState(null, '', '/publish/datasets?status=published')
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse({
+        datasets: [
+          dataset({ id: 'A', title: 'Sea Surface Temperature', slug: 'sst' }),
+          dataset({ id: 'B', title: 'Arctic Sea Ice', slug: 'arctic-ice' }),
+          dataset({ id: 'C', title: 'Global Precipitation', slug: 'precip' }),
+        ],
+        next_cursor: null,
+      }),
+    )
+    await renderDatasetsPage(mount, {
+      fetchFn: fetchFn as unknown as typeof fetch,
+      fetchCounts: false,
+    })
+    const search = mount.querySelector<HTMLInputElement>('.publisher-datasets-search')!
+    const visibleTitles = (): (string | null | undefined)[] =>
+      Array.from(mount.querySelectorAll<HTMLElement>('tbody tr'))
+        .filter(r => !r.hidden)
+        .map(r => r.querySelector('.publisher-row-link')?.textContent)
+
+    // Match by title substring — "sea" hits two rows.
+    search.value = 'sea'
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(visibleTitles()).toEqual(['Sea Surface Temperature', 'Arctic Sea Ice'])
+    expect(mount.querySelector('.publisher-list-count')?.textContent).toBe('2 of 3 shown')
+
+    // Match by slug.
+    search.value = 'precip'
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(visibleTitles()).toEqual(['Global Precipitation'])
+
+    // No match → message shown, table hidden.
+    search.value = 'zzz'
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(visibleTitles()).toHaveLength(0)
+    expect(mount.querySelector<HTMLElement>('.publisher-datasets-nomatch')?.hidden).toBe(false)
+    expect(mount.querySelector<HTMLElement>('.publisher-table-wrap')?.hidden).toBe(true)
+
+    // Clear → all rows back, plain count restored.
+    search.value = ''
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(visibleTitles()).toHaveLength(3)
+    expect(mount.querySelector('.publisher-list-count')?.textContent).toBe('3 datasets')
+  })
+
   it('intercepts a plain title-link click and routes through the portal router', async () => {
     window.history.replaceState(null, '', '/publish/datasets?status=published')
     const fetchFn = vi.fn().mockResolvedValue(

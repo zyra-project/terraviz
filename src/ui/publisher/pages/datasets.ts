@@ -66,6 +66,11 @@ function currentStatus(): DatasetLifecycle {
 
 function buildListUrl(status: DatasetLifecycle, cursor: string | null): string {
   const params = new URLSearchParams({ status })
+  // Request the server's max page size (200) so a publisher's whole tab
+  // loads in one request in the common case — the client-side search
+  // box then filters the full set instantly. Catalogs beyond 200 still
+  // paginate via the cursor + Load more.
+  params.set('limit', '200')
   if (cursor) params.set('cursor', cursor)
   return `${DATASETS_ENDPOINT}?${params.toString()}`
 }
@@ -191,6 +196,8 @@ function renderTable(
   const tbody = document.createElement('tbody')
   for (const d of datasets) {
     const tr = document.createElement('tr')
+    // Haystack for the client-side search box (title + slug, lowered).
+    tr.dataset.search = `${d.title} ${d.slug}`.toLowerCase()
 
     // Thumbnail cell — a small preview when the row has a resolved
     // thumbnail, empty otherwise.
@@ -409,6 +416,9 @@ interface PageState {
   /** Per-lifecycle totals shown in the tab labels; null until the
    *  best-effort count probe resolves. */
   counts: Record<DatasetLifecycle, number> | null
+  /** Client-side search query — filters the loaded rows by title/slug.
+   *  Persisted on the state so it survives Load-more / tab re-renders. */
+  search: string
 }
 
 function renderHeader(routerNavigate: (path: string) => void): HTMLElement {
@@ -467,8 +477,59 @@ function renderListShell(
     return
   }
 
-  shell.appendChild(renderCount(state.datasets.length))
-  shell.appendChild(renderTable(state.datasets, options.routerNavigate, options.fetchFn, options.confirm))
+  // Search box — filters the loaded rows client-side by title/slug so a
+  // large tab (150+ datasets) is quick to navigate.
+  const searchWrap = document.createElement('div')
+  searchWrap.className = 'publisher-datasets-search-wrap'
+  const search = document.createElement('input')
+  search.type = 'search'
+  search.className = 'publisher-datasets-search'
+  search.placeholder = t('publisher.datasets.search.placeholder')
+  search.setAttribute('aria-label', t('publisher.datasets.search.aria'))
+  search.value = state.search
+  searchWrap.appendChild(search)
+  shell.appendChild(searchWrap)
+
+  const count = renderCount(state.datasets.length)
+  shell.appendChild(count)
+
+  const table = renderTable(state.datasets, options.routerNavigate, options.fetchFn, options.confirm)
+  shell.appendChild(table)
+
+  const noMatch = document.createElement('p')
+  noMatch.className = 'publisher-empty-message publisher-datasets-nomatch'
+  noMatch.hidden = true
+  shell.appendChild(noMatch)
+
+  // Apply the (persisted) query: hide non-matching rows, update the
+  // count, and swap in a no-match message when nothing matches. Runs on
+  // every keystroke without re-rendering the shell, so focus is kept.
+  const applyFilter = (): void => {
+    const q = state.search.trim().toLowerCase()
+    const rows = Array.from(table.querySelectorAll<HTMLElement>('tbody tr'))
+    let shown = 0
+    for (const row of rows) {
+      const match = !q || (row.dataset.search ?? '').includes(q)
+      row.hidden = !match
+      if (match) shown++
+    }
+    count.textContent = q
+      ? t('publisher.datasets.count.filtered', { shown: String(shown), total: String(rows.length) })
+      : plural(
+          rows.length,
+          { one: 'publisher.datasets.count.one', other: 'publisher.datasets.count.other' },
+          { count: rows.length },
+        )
+    const empty = q.length > 0 && shown === 0
+    table.hidden = empty
+    noMatch.hidden = !empty
+    if (empty) noMatch.textContent = t('publisher.datasets.search.noMatch', { query: state.search.trim() })
+  }
+  search.addEventListener('input', () => {
+    state.search = search.value
+    applyFilter()
+  })
+  applyFilter()
 
   if (state.nextCursor) {
     shell.appendChild(
@@ -548,6 +609,7 @@ export async function renderDatasetsPage(
     nextCursor: result.data.next_cursor,
     isLoadingMore: false,
     counts: null,
+    search: '',
   }
   const shellOptions = {
     confirm: options.confirm,
