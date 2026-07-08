@@ -41,10 +41,15 @@ WS engine for **live interim transcripts**, flag-gated
 **Phase 3.5 wake-word** has now landed as well: the on-device
 `WakeWordDetector` + the **openWakeWord ONNX scorer** (built-in `hey
 jarvis`; lazy onnxruntime-web, operator-hosted models, runbook +
-custom-"Hey Orbit" training steps in `docs/ORBIT_WAKEWORD.md`) — pending
-on-hardware validation and the hands-free UI wiring. Remaining Phase 3+
-work: the wake-word **hands-free integration** (a wake-arm mode +
-settings) and Phase 4 (on-device).
+custom-"Hey Orbit" training steps in `docs/ORBIT_WAKEWORD.md`), plus its
+**hands-free integration** — a `wake-word` interaction model in
+`HandsFreeController` (silent until an on-device wake arms a single
+turn — no audio streams to STT before the wake), the settings picker
+option (gated on `VITE_VOICE_WAKEWORD_MODEL_URL`), and the §10.4
+**false-fire** telemetry (a `wake-word` turn with no speech). With that,
+**Phase 3 is functionally complete** — remaining work is on-hardware
+validation of the WebSocket + wake-word paths and Phase 4 (on-device
+models).
 
 > Cross-references:
 > [`docs/DOCENT_UX_IMPROVEMENT_PLAN.md`](DOCENT_UX_IMPROVEMENT_PLAN.md)

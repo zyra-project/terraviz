@@ -149,7 +149,7 @@ npm run screenshots:smoke   # gating interaction tests (search, Orbit, nav)
 | `src/services/vrTourControls.ts` | In-VR tour control strip — prev / play-pause / next / stop + step counter |
 | `src/services/vrTourOverlay.ts` | In-VR tour overlay manager — CanvasTexture + VideoTexture panels replacing the 2D `tourUI` surface |
 | `src/ui/chatUI.ts` | Orbit chat panel — rendering, settings, trigger positioning |
-| `src/ui/voiceHandsFree.ts` | Phase 3 hands-free wiring — `HandsFreeController` bridges `RealtimeVoiceSession` to the chat input/send path (partials→input, turn→send, suspend during think/speak), drives open-mic mute + push-to-talk press; inert until opted in and a streaming engine resolves (`docs/ORBIT_VOICE_PLAN.md` §9.1) |
+| `src/ui/voiceHandsFree.ts` | Phase 3 hands-free wiring — `HandsFreeController` bridges `RealtimeVoiceSession` to the chat input/send path (partials→input, turn→send, suspend during think/speak), drives open-mic mute, push-to-talk press, and the **wake-word** model (an on-device wake phrase — built-in default "Hey Jarvis" — arms a single turn via `startWakeWord`; `isWakeWordConfigured()` gates it on `VITE_VOICE_WAKEWORD_MODEL_URL`); inert until opted in and a streaming engine resolves (`docs/ORBIT_VOICE_PLAN.md` §9.1, `docs/ORBIT_WAKEWORD.md`) |
 | `src/ui/browseUI.ts` | Dataset browse/search overlay |
 | `src/ui/downloadUI.ts` | Download manager panel — view/delete cached datasets (desktop only) |
 | `src/ui/mapControlsUI.ts` | Map controls positioning helper — keeps the Tools bar above the playback transport |

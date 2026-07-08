@@ -539,14 +539,18 @@ row's `blob5` is the `lang` enum, never `true`).
 | `blob6` | `mode` (`stt` / `tts`) |
 | `blob7` | `provider` (`cloud` / `local` / `browser`) |
 | `blob8` | `success` (`true` / `false`) |
-| `blob9` | `trigger` (`mic` / `autospeak` / `replay` / `open-mic` / `push-to-talk`) |
+| `blob9` | `trigger` (`mic` / `autospeak` / `replay` / `open-mic` / `push-to-talk` / `wake-word`) |
 | `double1` | `client_offset_ms` |
 | `double2` | `duration_ms` |
 
-**Hands-free turns** carry `trigger = 'open-mic'` or `'push-to-talk'`
-— the §10.4 numbers for the open-mic-vs-button exhibit decision.
-**Barge-in frequency** = count of rows with `blob5 = 'true'`. Exclude
-those from the turn breakdown with `AND blob5 != 'true'`.
+**Hands-free turns** carry `trigger = 'open-mic'`, `'push-to-talk'` or
+`'wake-word'` — the §10.4 numbers for the open-mic-vs-button-vs-wake
+exhibit decision. **Barge-in frequency** = count of rows with
+`blob5 = 'true'`. Exclude those from the turn breakdown with
+`AND blob5 != 'true'`. **Wake-word false-fire rate** = share of
+`trigger = 'wake-word'` STT rows (`blob6 = 'stt'`) with
+`success = 'false'` (`blob8`) — a wake that armed a turn but heard no
+speech; raise the wake threshold if it climbs.
 
 ---
 

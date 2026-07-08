@@ -12,6 +12,7 @@
   "chat.settings.voiceHandsFree.off": "Hands-free option: disabled — the user taps the mic for each utterance.",
   "chat.settings.voiceHandsFree.openMic": "Hands-free option: the mic listens continuously and detects when the user speaks.",
   "chat.settings.voiceHandsFree.pushToTalk": "Hands-free option: the mic captures only while a control is held down.",
+  "chat.settings.voiceHandsFree.wakeWord": "Hands-free option: Orbit listens only after a spoken wake phrase. The exact phrase depends on the wake-word model the operator configured (the built-in default is “Hey Jarvis”), so this label is intentionally phrase-neutral — translate “Wake word” generically.",
   "chat.settings.voiceLang.auto": "Default option in Orbit's 'Recognition language' picker. Means voice input/output follows the app's UI language. 'app' = this application.",
   "chat.settings.voiceLang.label": "Settings label for the picker that sets which spoken language Orbit listens for and speaks, independent of the UI language.",
   "chat.welcome.hint": "Companion line below chat.welcome.intro. Same warm, helpful, non-corporate voice as Orbit. Mentions Browse as a parallel path.",

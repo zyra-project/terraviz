@@ -70,7 +70,36 @@ the same files). Total size is a few MB.
 
 ## 3. Pointing the app at the models
 
-`startWakeWord` (and the hands-free wiring that will call it) take:
+### 3.1 Enabling the hands-free mode (operators)
+
+The chat's hands-free picker (Tools → Orbit → Settings → **Hands-free**)
+only offers the **"Wake word"** option once a deploy has configured the
+model URL. The label is phrase-neutral on purpose: the phrase a visitor
+must say is whatever the configured model detects — the built-in default
+is **"Hey Jarvis"**, and a branded **"Hey Orbit"** needs a custom model
+(§5). Set these **build-time** env vars (they're
+`VITE_`-prefixed, so they're baked into the bundle at `npm run build`;
+Cloudflare Pages → Settings → Variables → *build* variables):
+
+| Build var | Meaning | Default |
+|---|---|---|
+| `VITE_VOICE_WAKEWORD_MODEL_URL` | Base URL of the three `.onnx` files. **Set this to enable the mode.** | — (option hidden) |
+| `VITE_VOICE_WAKEWORD_MODEL` | Wake-classifier filename under the base URL | `hey_jarvis_v0.1.onnx` |
+| `VITE_VOICE_WAKEWORD_ORT_URL` | onnxruntime-web ESM URL (self-host for offline) | pinned jsdelivr URL |
+
+Wake-word is **web-only** (the ONNX/CDN path doesn't run in the Tauri
+desktop shell) and stays **hidden** unless the model URL is set — so the
+feature is opt-in and safe by default. Once enabled, selecting the mode
+makes Orbit stay silent until it hears the wake phrase, then it arms a
+single turn (nothing is streamed to STT before the wake). The mic button
+mutes/unmutes the wake listener. A wake that hears no speech is dropped
+and logged as a **false fire** in the `voice_interaction` telemetry
+(trigger `wake-word`, `success:false`) — the §10.4 metric for tuning the
+threshold to the hall.
+
+### 3.2 The underlying options
+
+The build vars above feed `startWakeWord`, which takes:
 
 | Option | Meaning | Default |
 |---|---|---|
@@ -79,12 +108,13 @@ the same files). Total size is a few MB.
 | `ortUrl` | onnxruntime-web ESM URL (CDN; self-host for offline) | pinned jsdelivr URL |
 | `threshold` / `triggerFrames` / `cooldownMs` | Detector tuning | `0.5` / `3` / `2000` |
 
-Example:
+Example (the default hands-free wiring does this for you via the build
+vars; call it directly only for a bespoke integration):
 
 ```ts
 import { startWakeWord } from './services/voiceWakeWord'
 
-const session = await startWakeWord(micStream, {
+const session = startWakeWord(micStream, {
   modelBaseUrl: '/wakeword',          // serves the 3 .onnx files
   // wakeModel: 'hey_orbit.onnx',     // once you've trained one (§5)
   threshold: 0.5,

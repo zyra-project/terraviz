@@ -24,7 +24,7 @@ import { setLogLevel, logger } from '../utils/logger'
 import { emit, startDwell, type DwellHandle } from '../analytics'
 import { enMessages, t, getLocale, type MessageKey } from '../i18n'
 import { resolveSttEngine, resolveTtsEngine, resolveStreamingSttEngine, voiceSupportForLocale, splitIntoSpokenChunks, baseLanguage, listVoiceLanguageOptions, type SttSession, type TtsEngine } from '../services/voiceService'
-import { HandsFreeController } from './voiceHandsFree'
+import { HandsFreeController, isWakeWordConfigured } from './voiceHandsFree'
 import { registerBrowserVoiceEngines, primeBrowserTts, listBrowserVoices, curateVoices, onBrowserVoicesChanged } from '../services/voiceBrowserEngines'
 import { registerCloudVoiceEngines } from '../services/voiceCloudEngines'
 
@@ -560,6 +560,7 @@ function initVoiceInput(): void {
   // never picks them; web-only (no /api proxy in the desktop shell).
   registerCloudVoiceEngines()
   updateMicVisibility()
+  revealWakeWordOption()
   populateVoiceOptions()
   // System voices load asynchronously — refresh the picker when they
   // arrive. Release any prior subscription first so a re-init (hot
@@ -579,6 +580,7 @@ function initVoiceInput(): void {
       // ducked through send + reply; released at the resume point).
       if (state === 'capturing') { handsFreeCaptureStartedAt = Date.now(); setVoiceAudioFocus(true) }
     },
+    onWakeMisfire: () => emitWakeMisfire(),
   })
   syncHandsFree()
 }
@@ -614,6 +616,27 @@ function emitHandsFreeTurn(transcript: string): void {
     // An empty final transcript (the streaming engine can emit one) is
     // not a successful turn — derive success from real text.
     success: transcript.trim().length > 0,
+  })
+}
+
+/**
+ * Tier B: record a wake-word false fire — the wake phrase armed a turn
+ * but no speech followed. A `wake-word` STT row with `success:false` and
+ * no duration; the false-fire rate is the §10.4 metric that tells the
+ * exhibit whether the wake threshold is tuned for the hall.
+ */
+function emitWakeMisfire(): void {
+  const cfg = loadConfig()
+  const lang = cfg.voiceLang || getLocale()
+  const provider = resolveStreamingSttEngine(cfg.voiceProvider ?? 'auto', lang)?.provider ?? 'browser'
+  emit({
+    event_type: 'voice_interaction',
+    mode: 'stt',
+    provider,
+    trigger: 'wake-word',
+    duration_ms: 0,
+    lang: baseLanguage(lang),
+    success: false, // a wake with no turn — the false-fire signal
   })
 }
 
@@ -670,6 +693,17 @@ function syncHandsFree(): void {
     setMicListening(false)
     setVoiceAudioFocus(false)
   }
+}
+
+/**
+ * Reveal the wake-word hands-free option only when a deploy has
+ * configured the on-device model (`VITE_VOICE_WAKEWORD_MODEL_URL`,
+ * web-only). Otherwise it stays hidden so it isn't offered as a dead
+ * choice. (docs/ORBIT_WAKEWORD.md)
+ */
+function revealWakeWordOption(): void {
+  const opt = document.querySelector<HTMLOptionElement>('#chat-settings-voice-handsfree option[value="wake-word"]')
+  if (opt) opt.hidden = !isWakeWordConfigured()
 }
 
 /** Show the mic only when an STT engine resolves for the active locale (§3 matrix). */
@@ -748,11 +782,12 @@ function toggleListening(): void {
   // still be spoken aloud.
   primeBrowserTts()
   const mode = loadConfig().voiceHandsFree ?? 'off'
-  // Open-mic: the mic button is a mute toggle for the always-on session.
-  // Don't set the indicator here — unmute arms asynchronously and can
-  // fail (permission denied); the controller's state-change hook drives
-  // setMicListening so the UI never gets stuck showing "listening".
-  if (mode === 'open-mic' && handsFree?.isActive()) {
+  // Open-mic and wake-word: the mic button mutes/unmutes the always-on
+  // session (the wake listener, for wake-word). Don't set the indicator
+  // here — unmute arms asynchronously and can fail (permission denied);
+  // the controller's state-change hook drives setMicListening so the UI
+  // never gets stuck showing "listening".
+  if ((mode === 'open-mic' || mode === 'wake-word') && handsFree?.isActive()) {
     const muted = handsFree.toggleMute()
     callbacks?.announce(t(muted ? 'chat.announce.voiceMuted' : 'chat.announce.voiceListening'))
     return
@@ -1130,8 +1165,13 @@ function readSettingsForm(): DocentConfig {
     : current.voiceProvider
   // "" (Same as app) clears the override so voice tracks the UI locale.
   const voiceLang = voiceLangSelect ? (voiceLangSelect.value || undefined) : current.voiceLang
-  const handsFreeValue = handsFreeSelect?.value
-  const voiceHandsFree = handsFreeValue === 'push-to-talk' || handsFreeValue === 'open-mic' || handsFreeValue === 'off'
+  // A stale/persisted 'wake-word' on a deploy that no longer configures
+  // it (or Tauri) falls back to 'off' — the option is hidden, so it
+  // can't be re-selected and would otherwise strand a dead mode.
+  let handsFreeValue = handsFreeSelect?.value
+  if (handsFreeValue === 'wake-word' && !isWakeWordConfigured()) handsFreeValue = 'off'
+  const voiceHandsFree = handsFreeValue === 'push-to-talk' || handsFreeValue === 'open-mic'
+    || handsFreeValue === 'wake-word' || handsFreeValue === 'off'
     ? handsFreeValue
     : current.voiceHandsFree
   return {
