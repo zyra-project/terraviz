@@ -169,13 +169,14 @@ function renderTable(
 
   const thead = document.createElement('thead')
   const headerRow = document.createElement('tr')
+  // Deck layout (no standalone Status column) — the lifecycle badge
+  // sits under the title in the Title cell.
   const headerKeys: ReadonlyArray<TableHeaderKey> = [
     'publisher.datasets.col.thumbnail',
     'publisher.datasets.col.title',
     'publisher.datasets.col.slug',
     'publisher.datasets.col.format',
     'publisher.datasets.col.updated',
-    'publisher.datasets.col.status',
     'publisher.datasets.col.actions',
   ]
   for (const key of headerKeys) {
@@ -206,6 +207,10 @@ function renderTable(
     tr.appendChild(thumbCell)
 
     const titleCell = document.createElement('td')
+    // Title + lifecycle badge stacked (deck layout — the badge lives
+    // under the title rather than in a standalone Status column).
+    const titleStack = document.createElement('div')
+    titleStack.className = 'publisher-cell-title'
     const titleLink = document.createElement('a')
     const detailHref = `/publish/datasets/${encodeURIComponent(d.id)}`
     titleLink.href = detailHref
@@ -229,7 +234,22 @@ function renderTable(
         }
       })
     }
-    titleCell.appendChild(titleLink)
+    titleStack.appendChild(titleLink)
+
+    const status = lifecycleOf(d)
+    const statusBadge = document.createElement('span')
+    statusBadge.className = 'publisher-badge publisher-badge-status'
+    statusBadge.dataset.status =
+      status === 'draft' ? 'pending' : status === 'retracted' ? 'suspended' : 'active'
+    statusBadge.textContent =
+      status === 'draft'
+        ? t('publisher.datasets.status.draft')
+        : status === 'published'
+          ? t('publisher.datasets.status.published')
+          : t('publisher.datasets.status.retracted')
+    titleStack.appendChild(statusBadge)
+
+    titleCell.appendChild(titleStack)
     tr.appendChild(titleCell)
 
     const slugCell = document.createElement('td')
@@ -246,20 +266,6 @@ function renderTable(
     updatedCell.className = 'publisher-cell-updated'
     updatedCell.textContent = formatDate(d.updated_at)
     tr.appendChild(updatedCell)
-
-    const statusCell = document.createElement('td')
-    const status = lifecycleOf(d)
-    const statusBadge = document.createElement('span')
-    statusBadge.className = 'publisher-badge publisher-badge-status'
-    statusBadge.dataset.status = status === 'draft' ? 'pending' : status === 'retracted' ? 'suspended' : 'active'
-    statusBadge.textContent =
-      status === 'draft'
-        ? t('publisher.datasets.status.draft')
-        : status === 'published'
-          ? t('publisher.datasets.status.published')
-          : t('publisher.datasets.status.retracted')
-    statusCell.appendChild(statusBadge)
-    tr.appendChild(statusCell)
 
     // Actions: Edit (all rows) + Retract (published) / Delete
     // (drafts & retracted). Live rows must be retracted before they
@@ -359,7 +365,6 @@ type TableHeaderKey =
   | 'publisher.datasets.col.slug'
   | 'publisher.datasets.col.format'
   | 'publisher.datasets.col.updated'
-  | 'publisher.datasets.col.status'
   | 'publisher.datasets.col.actions'
 
 function renderCount(n: number): HTMLElement {

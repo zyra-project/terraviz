@@ -4213,11 +4213,26 @@
   background: var(--accent-o15, rgba(77, 166, 255, 0.15));
   color: var(--color-accent, #4da6ff);
 }
+/* Title cell — title link with the lifecycle badge stacked beneath
+   it (deck layout: status lives in the row, not a separate column). */
+.publisher-cell-title {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: calc(0.35rem * var(--ui-scale));
+}
 .publisher-cell-actions {
   display: flex;
   align-items: center;
   gap: calc(0.5rem * var(--ui-scale));
   white-space: nowrap;
+}
+/* The flex `gap` already spaces the actions — drop the per-action
+   inline margin here so there's no trailing space (which could nudge
+   the table into a 1px horizontal overflow). Other action containers
+   that don't use flex-gap keep the base margin. */
+.publisher-cell-actions .publisher-row-action {
+  margin-inline-end: 0;
 }
 /* Edit / View / target links keep the neutral base pill (defined
    above). Tone variants (retract / delete / run-now) live alongside

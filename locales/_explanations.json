@@ -135,7 +135,6 @@
   "publisher.datasetForm.visibility.restricted": "Visibility radio option meaning 'visible only to specific grants the publisher issues'. Phase 5 feature; ships earlier in the form so the field is complete.",
   "publisher.datasets.col.format": "Column heading on the publisher's dataset table — shows the dataset's MIME-style format (`video/mp4`, `image/png`, `tour/json`, …). Single word; tight column.",
   "publisher.datasets.col.slug": "Column heading on the publisher's dataset table — shows the dataset's URL slug (e.g., `sst-anomaly-2026-04`). Single word; rendered in a monospace cell.",
-  "publisher.datasets.col.status": "Column heading on the publisher's dataset table — shows the lifecycle badge (Draft / Published / Retracted). Single word.",
   "publisher.datasets.col.title": "Column heading on the publisher's dataset table — the dataset's title, rendered as a link to the detail page. Single word.",
   "publisher.datasets.col.updated": "Column heading on the publisher's dataset table — shows the dataset's last-modified date (`updated_at` server field, localized via Intl.DateTimeFormat). Single word.",
   "publisher.datasets.count.one": "Pluralised count rendered above the dataset table when exactly one row is displayed. Preserve {count}. CLDR-aware via the i18n plural() helper.",
