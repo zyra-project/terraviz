@@ -277,6 +277,15 @@
 }
 
 .publisher-tab {
+  /* Works for both <a> and <button> tabs — reset native button
+     chrome so a <button class="publisher-tab"> (Feeds / Analytics)
+     matches the anchor tabs. */
+  appearance: none;
+  background: transparent;
+  border-inline: 0;
+  border-block-start: 0;
+  cursor: pointer;
+  font-family: inherit;
   color: var(--color-text-muted, #999999);
   text-decoration: none;
   font-size: calc(0.875rem * var(--ui-scale));
@@ -287,6 +296,9 @@
 }
 
 .publisher-tab:hover {
+  /* Keep transparent — the global `button:hover` in base.css would
+     otherwise paint an accent fill on the <button> tabs. */
+  background: transparent;
   color: var(--color-text, #e8eaf0);
 }
 
@@ -4223,4 +4235,10 @@
 .publisher-team-service-badge {
   background: var(--white-o08, rgba(255, 255, 255, 0.08));
   color: var(--color-text-secondary, #b8c0cc);
+}
+
+/* --- Analytics section tabs --- */
+.publisher-analytics-tabs {
+  margin-block: calc(1rem * var(--ui-scale)) calc(1.25rem * var(--ui-scale));
+  flex-wrap: wrap;
 }

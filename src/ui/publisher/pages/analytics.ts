@@ -287,6 +287,18 @@ export async function renderAnalyticsPage(
   }
   window.addEventListener(ROUTE_CHANGE_START_EVENT, onRouteChange)
 
+  // The spatial section owns a MapLibre canvas, which mis-sizes if
+  // it initialises inside a hidden (display:none) tab. So spatial is
+  // loaded lazily the first time its tab is shown — the container is
+  // visible by then. The other six sections are SVG/DOM and render
+  // correctly while hidden, so they load eagerly.
+  let spatialLoaded = false
+  const loadSpatialOnce = (): void => {
+    if (spatialLoaded) return
+    spatialLoaded = true
+    void loadSpatial()
+  }
+
   const header = buildHeader(state, () => {
     if (heatmap) {
       heatmap.destroy()
@@ -294,22 +306,70 @@ export async function renderAnalyticsPage(
     }
     void loadOverview()
     void loadDatasets()
-    void loadSpatial()
     void loadFunnel()
     void loadPerf()
     void loadOrbit()
     void loadResearch()
+    // Reload spatial only if it was already opened this session.
+    if (spatialLoaded) void loadSpatial()
+  })
+
+  // Section tabs (deck layout). Each tab toggles the matching host's
+  // visibility; the section content is already (or lazily) loaded.
+  const tabHosts: Array<{
+    labelKey:
+      | 'publisher.analytics.tab.overview'
+      | 'publisher.analytics.tab.datasets'
+      | 'publisher.analytics.tab.spatial'
+      | 'publisher.analytics.tab.engagement'
+      | 'publisher.analytics.tab.performance'
+      | 'publisher.analytics.tab.orbit'
+      | 'publisher.analytics.tab.research'
+    host: HTMLElement
+    onShow?: () => void
+  }> = [
+    { labelKey: 'publisher.analytics.tab.overview', host: overviewHost },
+    { labelKey: 'publisher.analytics.tab.datasets', host: datasetsHost },
+    { labelKey: 'publisher.analytics.tab.spatial', host: spatialHost, onShow: loadSpatialOnce },
+    { labelKey: 'publisher.analytics.tab.engagement', host: funnelHost },
+    { labelKey: 'publisher.analytics.tab.performance', host: perfHost },
+    { labelKey: 'publisher.analytics.tab.orbit', host: orbitHost },
+    { labelKey: 'publisher.analytics.tab.research', host: researchHost },
+  ]
+  const tabbar = el('div', { className: 'publisher-tabs publisher-analytics-tabs', role: 'tablist' })
+  tabbar.setAttribute('aria-label', t('publisher.analytics.tabs.aria'))
+  tabHosts.forEach((entry, i) => {
+    entry.host.hidden = i !== 0
+    const tab = el('button', {
+      type: 'button',
+      className: i === 0 ? 'publisher-tab publisher-tab-active' : 'publisher-tab',
+      textContent: t(entry.labelKey),
+    }) as HTMLButtonElement
+    tab.setAttribute('role', 'tab')
+    tab.setAttribute('aria-selected', i === 0 ? 'true' : 'false')
+    tab.addEventListener('click', () => {
+      tabHosts.forEach(e => {
+        e.host.hidden = e !== entry
+      })
+      for (const btn of Array.from(tabbar.children)) {
+        const isThis = btn === tab
+        btn.classList.toggle('publisher-tab-active', isThis)
+        btn.setAttribute('aria-selected', isThis ? 'true' : 'false')
+      }
+      entry.onShow?.()
+    })
+    tabbar.append(tab)
   })
 
   mount.replaceChildren(
-    shell(header, overviewHost, datasetsHost, spatialHost, funnelHost, perfHost, orbitHost, researchHost),
+    shell(header, tabbar, overviewHost, datasetsHost, spatialHost, funnelHost, perfHost, orbitHost, researchHost),
   )
 
-  // Populate on first visit — the header's onChange only covers
-  // subsequent control changes.
+  // Populate the eager (non-map) sections on first visit — the
+  // header's onChange only covers subsequent control changes, and
+  // spatial waits for its tab.
   void loadOverview()
   void loadDatasets()
-  void loadSpatial()
   void loadFunnel()
   void loadPerf()
   void loadOrbit()
