@@ -475,11 +475,54 @@ function renderConsole(
     id: 'feeds-custom-url',
     placeholder: 'https://…', // i18n-exempt: URL shape hint, not prose
   })
-  const categorySelect = el('select', { className: 'publisher-feeds-input', id: 'feeds-custom-category' })
-  for (const c of FEED_PRESET_CATEGORIES) {
-    categorySelect.append(el('option', { value: c, textContent: categoryLabel(c) }))
+  // Category is a free-text combobox: the three curated presets plus
+  // any categories already in use on existing feeds are offered as
+  // datalist suggestions, but the publisher can type a new one. The
+  // backend stores an arbitrary string (`feed_connectors.category`
+  // TEXT, capped at 60 chars server-side, no enum), so a custom
+  // category persists and reappears here on the next render.
+  const presetByLabel = new Map<string, string>()
+  const categoryOptions: string[] = []
+  const seenCategoryLabels = new Set<string>()
+  const addCategoryOption = (value: string): void => {
+    const label = categoryLabel(value)
+    const key = label.toLowerCase()
+    if (seenCategoryLabels.has(key)) return
+    seenCategoryLabels.add(key)
+    categoryOptions.push(label)
   }
-  categorySelect.append(el('option', { value: '', textContent: t('publisher.feeds.category.other') }))
+  for (const c of FEED_PRESET_CATEGORIES) {
+    presetByLabel.set(categoryLabel(c).toLowerCase(), c)
+    addCategoryOption(c)
+  }
+  // Distinct categories already stored on the publisher's feeds — this
+  // is what makes a previously-created custom category reappear.
+  for (const f of feeds) {
+    if (f.category) addCategoryOption(f.category)
+  }
+
+  const categoryList = el('datalist', { id: 'feeds-category-list' })
+  for (const label of categoryOptions) {
+    categoryList.append(el('option', { value: label }))
+  }
+  const categoryInput = el('input', {
+    type: 'text',
+    className: 'publisher-feeds-input',
+    id: 'feeds-custom-category',
+    maxLength: 60,
+    placeholder: t('publisher.feeds.custom.category.placeholder'),
+  })
+  categoryInput.setAttribute('list', 'feeds-category-list')
+
+  /** Map the typed/selected display label back to the stored category:
+   *  a preset label collapses to its key ('Natural hazards' →
+   *  'hazards') so it groups with feeds added from the preset gallery;
+   *  anything else is stored verbatim; empty → no category. */
+  const resolveCategory = (): string | null => {
+    const typed = categoryInput.value.trim()
+    if (!typed) return null
+    return presetByLabel.get(typed.toLowerCase()) ?? typed
+  }
 
   const addCustomBtn = el('button', {
     type: 'button',
@@ -493,10 +536,11 @@ function renderConsole(
       showError(t('publisher.feeds.custom.invalid'))
       return
     }
+    const category = resolveCategory()
     addCustomBtn.disabled = true
     void send(
       FEEDS_ENDPOINT,
-      { kind: 'rss', label, url, ...(categorySelect.value ? { category: categorySelect.value } : {}) },
+      { kind: 'rss', label, url, ...(category ? { category } : {}) },
       'POST',
     ).then(ok => {
       if (ok) void reload(mount, options)
@@ -511,13 +555,23 @@ function renderConsole(
     return wrap
   }
 
+  // Category field carries a hint + the datalist that backs the combobox.
+  const categoryField = labelled(t('publisher.feeds.custom.category'), categoryInput)
+  categoryField.append(
+    el('span', {
+      className: 'publisher-feeds-hint',
+      textContent: t('publisher.feeds.custom.category.hint'),
+    }),
+    categoryList,
+  )
+
   const customPreview = previewControl('rss', () => urlInput.value.trim())
   const custom = card(
     heading(t('publisher.feeds.custom.title')),
     el('p', { className: 'publisher-feeds-intro', textContent: t('publisher.feeds.custom.intro') }),
     labelled(t('publisher.feeds.custom.label'), labelInput),
     labelled(t('publisher.feeds.custom.url'), urlInput),
-    labelled(t('publisher.feeds.custom.category'), categorySelect),
+    categoryField,
     el('div', { className: 'publisher-feeds-actions' }, [customPreview.button, addCustomBtn]),
     customPreview.panel,
   )

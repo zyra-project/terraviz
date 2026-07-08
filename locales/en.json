@@ -1134,6 +1134,8 @@
   "publisher.feeds.channels.url": "Channel URL",
   "publisher.feeds.custom.add": "Add feed",
   "publisher.feeds.custom.category": "Category",
+  "publisher.feeds.custom.category.hint": "Pick a suggested category or type your own — it groups this feed and is offered again next time.",
+  "publisher.feeds.custom.category.placeholder": "Pick or type a category",
   "publisher.feeds.custom.intro": "Point at any RSS or Atom feed. Items arrive as proposed events for review — nothing surfaces publicly without your approval.",
   "publisher.feeds.custom.invalid": "Enter a name and an http(s) feed URL.",
   "publisher.feeds.custom.label": "Name",
