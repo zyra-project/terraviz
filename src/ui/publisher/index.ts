@@ -40,7 +40,7 @@ import { renderEventsPage } from './pages/events'
 import { renderAnalyticsPage } from './pages/analytics'
 import { renderUsersPage } from './pages/users'
 import { renderFeedbackPage } from './pages/feedback'
-import { renderTopbar } from './components/topbar'
+import { renderSidebar } from './components/sidebar'
 import { publisherGet } from './api'
 import '../../styles/publisher.css'
 
@@ -111,10 +111,10 @@ function ensureMount(): PortalMount {
     root.className = 'publisher-portal'
     document.body.appendChild(root)
   }
-  // Build (or reuse) the content slot. The topbar mounts ahead of
-  // it on each boot via `renderTopbar(root, ...)`; pages render
+  // Build (or reuse) the content slot. The sidebar mounts ahead of
+  // it on each boot via `renderSidebar(root, ...)`; pages render
   // into `content` so a route change replaces page contents
-  // without touching the topbar.
+  // without touching the sidebar.
   let content = document.getElementById(PORTAL_CONTENT_ID)
   if (!content) {
     // Plain <div>, not <main>. Each page renderer mounts its own
@@ -386,13 +386,13 @@ export async function bootPublisherPortal(): Promise<void> {
     ],
     notFoundPage(content),
   )
-  // Render the topbar immediately (without admin-only tabs) so the
-  // portal never blocks on the network. The admin-tab probe is
-  // best-effort and only controls visibility of the Users tab, so we
-  // fire it in the background and re-render the topbar if it resolves
-  // true. The page and API both gate independently.
+  // Render the sidebar immediately (without admin-only links) so the
+  // portal never blocks on the network. The admin probe is
+  // best-effort and only controls visibility of the admin links, so
+  // we fire it in the background and re-render the sidebar if it
+  // resolves true. The page and API both gate independently.
   const bootedRouter = activeRouter
-  renderTopbar(root, bootedRouter, { isAdmin: false })
+  renderSidebar(root, bootedRouter, { isAdmin: false })
   await bootedRouter.start()
   // One emit per portal-chunk load — the publisher visits
   // /publish/*, the chunk resolves, the first route dispatches,
@@ -407,9 +407,9 @@ export async function bootPublisherPortal(): Promise<void> {
 
   void resolveIsAdmin().then(isAdmin => {
     // Guard against a teardown (or re-boot) that happened while the
-    // probe was in flight — only re-render the topbar we mounted.
+    // probe was in flight — only re-render the sidebar we mounted.
     if (isAdmin && activeRouter === bootedRouter) {
-      renderTopbar(root, bootedRouter, { isAdmin: true })
+      renderSidebar(root, bootedRouter, { isAdmin: true })
     }
   })
 }

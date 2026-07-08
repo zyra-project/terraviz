@@ -122,7 +122,7 @@ async function openCatalog(page: Page): Promise<void> {
  */
 async function openPublish(page: Page, path: string): Promise<void> {
   await gotoApp(page, path)
-  await page.locator('#publisher-root .publisher-topbar').waitFor({ state: 'visible' })
+  await page.locator('#publisher-root .publisher-sidebar').waitFor({ state: 'visible' })
 }
 
 /**
