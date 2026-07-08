@@ -502,14 +502,6 @@ export const scenes: Scene[] = [
     },
   },
   {
-    name: 'publish-import',
-    description: 'Publisher portal — import page',
-    fixtures: publisherFixtures(),
-    async setup(page) {
-      await openPublish(page, '/publish/import')
-    },
-  },
-  {
     name: 'publish-featured-hero',
     description: 'Publisher portal — "Right now" featured-hero override',
     fixtures: publisherFixtures({ admin: true }),
