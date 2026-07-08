@@ -123,7 +123,9 @@ export async function renderBlogPage(mount: HTMLElement, options: BlogPageOption
     const table = el('table', { className: 'publisher-table' })
     const thead = el('thead')
     const headRow = el('tr')
-    for (const key of ['publisher.blog.col.title', 'publisher.blog.col.status', 'publisher.blog.col.updated', 'publisher.blog.col.link'] as const) {
+    // Deck layout: status badge folded under the title, no standalone
+    // Status column.
+    for (const key of ['publisher.blog.col.title', 'publisher.blog.col.updated', 'publisher.blog.col.link'] as const) {
       headRow.append(el('th', { textContent: t(key) }))
     }
     thead.append(headRow)
@@ -132,6 +134,9 @@ export async function renderBlogPage(mount: HTMLElement, options: BlogPageOption
     for (const post of posts) {
       const tr = el('tr')
       const titleCell = el('td')
+      // Title link + status badge stacked (deck fold — no separate
+      // Status column).
+      const titleStack = el('div', { className: 'publisher-cell-title' })
       const link = el('a', {
         className: 'publisher-row-link',
         href: `/publish/blog/${encodeURIComponent(post.id)}/edit`,
@@ -142,16 +147,15 @@ export async function renderBlogPage(mount: HTMLElement, options: BlogPageOption
         e.preventDefault()
         navigate(`/publish/blog/${encodeURIComponent(post.id)}/edit`)
       })
-      titleCell.append(link)
-      tr.append(titleCell)
-      tr.append(
-        el('td', {}, [
-          el('span', {
-            className: `publisher-blog-badge publisher-blog-badge-${post.status}`,
-            textContent: post.status === 'published' ? t('publisher.blog.status.published') : t('publisher.blog.status.draft'),
-          }),
-        ]),
+      titleStack.append(link)
+      titleStack.append(
+        el('span', {
+          className: `publisher-blog-badge publisher-blog-badge-${post.status}`,
+          textContent: post.status === 'published' ? t('publisher.blog.status.published') : t('publisher.blog.status.draft'),
+        }),
       )
+      titleCell.append(titleStack)
+      tr.append(titleCell)
       tr.append(el('td', { className: 'publisher-cell-updated', textContent: post.updatedAt.slice(0, 10) }))
       // Actions: Edit (all rows, opens the editor) + View (published
       // only — a public page to link to). Consistent action pills with

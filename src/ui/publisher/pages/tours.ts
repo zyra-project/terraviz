@@ -257,9 +257,10 @@ function buildTable(
 
   const thead = document.createElement('thead')
   const headRow = document.createElement('tr')
+  // Deck layout: no standalone Status column — the status badge sits
+  // under the title (same fold as the datasets list).
   for (const key of [
     'publisher.tours.col.title',
-    'publisher.tours.col.status',
     'publisher.tours.col.updated',
     'publisher.tours.col.actions',
   ] as const) {
@@ -294,19 +295,6 @@ function buildRow(
 ): HTMLElement {
   const tr = document.createElement('tr')
 
-  const titleCell = document.createElement('td')
-  const titleLink = document.createElement('a')
-  titleLink.className = 'publisher-row-link'
-  titleLink.href = `/?tourEdit=${encodeURIComponent(tour.id)}`
-  titleLink.textContent = tour.title
-  titleLink.addEventListener('click', e => {
-    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
-    e.preventDefault()
-    navigate(`/?tourEdit=${encodeURIComponent(tour.id)}`)
-  })
-  titleCell.appendChild(titleLink)
-  tr.appendChild(titleCell)
-
   // Phase 3pt/G follow-up — three-way status. A retracted row
   // keeps `published_at` set (history) and adds `retracted_at`;
   // it should read as "Retracted" in the list so the publisher
@@ -318,7 +306,21 @@ function buildRow(
       ? 'published'
       : 'draft'
   tr.dataset.status = statusKind
-  const statusCell = document.createElement('td')
+
+  const titleCell = document.createElement('td')
+  // Title link + status badge stacked (deck fold — no separate column).
+  const titleStack = document.createElement('div')
+  titleStack.className = 'publisher-cell-title'
+  const titleLink = document.createElement('a')
+  titleLink.className = 'publisher-row-link'
+  titleLink.href = `/?tourEdit=${encodeURIComponent(tour.id)}`
+  titleLink.textContent = tour.title
+  titleLink.addEventListener('click', e => {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+    e.preventDefault()
+    navigate(`/?tourEdit=${encodeURIComponent(tour.id)}`)
+  })
+  titleStack.appendChild(titleLink)
   const badge = document.createElement('span')
   badge.className = `publisher-badge publisher-badge-status publisher-badge-${statusKind}`
   badge.textContent =
@@ -327,8 +329,9 @@ function buildRow(
       : statusKind === 'published'
         ? t('publisher.tours.status.published')
         : t('publisher.tours.status.draft')
-  statusCell.appendChild(badge)
-  tr.appendChild(statusCell)
+  titleStack.appendChild(badge)
+  titleCell.appendChild(titleStack)
+  tr.appendChild(titleCell)
 
   const updatedCell = document.createElement('td')
   updatedCell.className = 'publisher-cell-updated'
