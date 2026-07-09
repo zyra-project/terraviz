@@ -3786,6 +3786,12 @@
   grid-template-columns: 1fr 1fr;
   gap: calc(1.5rem * var(--ui-scale));
 }
+/* Keep each column within its 1fr track — a grid item defaults to
+   `min-width: auto`, so without this the nowrap/long feedback text
+   would stretch its track and push the column off-screen. */
+.publisher-overview-col {
+  min-inline-size: 0;
+}
 
 .publisher-overview-activity,
 .publisher-overview-feedback {
@@ -3854,9 +3860,10 @@
   min-inline-size: 0;
   font-size: calc(0.86rem * var(--ui-scale));
   color: var(--color-text-secondary, #b8c0cc);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Wrap within the column rather than truncating off-screen. Break
+     long unbroken tokens (URLs, JSON blobs) so they can't overflow. */
+  overflow-wrap: anywhere;
+  line-height: 1.4;
 }
 
 .publisher-overview-empty {
