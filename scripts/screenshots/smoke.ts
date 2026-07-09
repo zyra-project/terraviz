@@ -267,13 +267,18 @@ const checks: Check[] = [
     name: 'blog editor renders grounding pickers + Generate; public post renders sanitized markdown',
     fixtures: [...publisherFixtures({ admin: true }), ...blogPublicFixtures()],
     async run(page) {
-      // Authoring: the editor's three sections mount, with the picker
-      // enabled once the catalog fixture loads.
+      // Authoring: the editor is a tabbed stepper (Content / Sources /
+      // AI draft). Content is the default tab; the picker + Generate
+      // live behind their tabs, so open each before asserting on it.
       await gotoApp(page, '/publish/blog/new')
       await page.locator('#publisher-root .publisher-sidebar').waitFor({ state: 'visible' })
       await page.locator('#blog-title').waitFor({ timeout: 15_000 })
-      await page.locator('.publisher-blog-generate-btn').waitFor()
+      // Sources tab — the dataset picker enables once the catalog loads.
+      await page.locator('.publisher-form-nav-link[data-section="blog-sources"]').click()
       await page.locator('#publisher-root input[type="search"]:not([disabled])').first().waitFor({ timeout: 10_000 })
+      // AI draft tab — the Generate control.
+      await page.locator('.publisher-form-nav-link[data-section="blog-aidraft"]').click()
+      await page.locator('.publisher-blog-generate-btn').waitFor()
 
       // Public: the post page renders the sanitized body, the dataset
       // deep link, and the event citation.
