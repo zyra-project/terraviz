@@ -563,13 +563,14 @@ export const scenes: Scene[] = [
   },
   {
     name: 'publish-blog-edit',
-    description: 'Publisher portal — tabbed blog editor (Content / Sources / AI draft)',
+    description: 'Publisher portal — tabbed blog editor (Content / Sources / Media / AI draft)',
     fixtures: publisherFixtures({ admin: true }),
     async setup(page) {
       await openPublish(page, '/publish/blog/new')
       // Tabbed stepper — the Content tab is the default capture; the
-      // rail nav confirms the AI-draft/Sources sections mounted.
+      // rail nav confirms the Sources/Media/AI-draft sections mounted.
       await page.locator('#blog-title').waitFor()
+      await page.locator('.publisher-form-nav-link[data-section="blog-media"]').waitFor()
       await page.locator('.publisher-form-nav-link[data-section="blog-aidraft"]').waitFor()
     },
   },

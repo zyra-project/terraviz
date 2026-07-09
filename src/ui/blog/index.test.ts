@@ -116,6 +116,40 @@ describe('bootBlogPage', () => {
     expect(document.querySelector('.blog-post-figure')).toBeNull()
   })
 
+  it("prefers the post's cover image over the event image, with no citation caption", async () => {
+    history.pushState(null, '', '/blog/gulf-warming')
+    stubFetch(200, {
+      post: {
+        ...POST.post,
+        coverImageUrl: 'https://img.example.org/cover.jpg',
+        coverImageAlt: 'Curator-picked cover',
+        // Even with an event image present, the cover wins.
+        event: { ...POST.post.event, imageUrl: 'https://img.example.org/heatwave.jpg' },
+      },
+    })
+    await bootBlogPage()
+    const img = document.querySelector('.blog-post-image') as HTMLImageElement
+    expect(img.getAttribute('src')).toBe('https://img.example.org/cover.jpg')
+    expect(img.alt).toBe('Curator-picked cover')
+    // The cover is the post's own image — no event citation caption.
+    expect(document.querySelector('.blog-post-figcaption')).toBeNull()
+
+    // A non-http(s) cover falls back to the event image path.
+    // eslint-disable-next-line no-script-url
+    stubFetch(200, {
+      post: {
+        ...POST.post,
+        coverImageUrl: 'javascript:alert(1)',
+        event: { ...POST.post.event, imageUrl: 'https://img.example.org/heatwave.jpg' },
+      },
+    })
+    await bootBlogPage()
+    expect((document.querySelector('.blog-post-image') as HTMLImageElement).getAttribute('src')).toBe(
+      'https://img.example.org/heatwave.jpg',
+    )
+    expect(document.querySelector('.blog-post-figcaption')?.textContent).toBe('Gulf marine heatwave — NOAA')
+  })
+
   it('renders the Play-the-companion-tour button when the API surfaces one', async () => {
     history.pushState(null, '', '/blog/gulf-warming')
     stubFetch(200, { post: { ...POST.post, tour: { id: 'TR000AAAAAAAAAAAAAAAAAAAAA' } } })

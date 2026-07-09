@@ -40,6 +40,11 @@ interface PublicPost {
   summary: string | null
   bodyMd: string
   publishedAt: string | null
+  /** The post's own curator-picked lead image (Media tab), preferred
+   *  over the cited event's story image. http(s)-guarded server-side
+   *  and re-guarded here before it reaches an `<img src>`. */
+  coverImageUrl?: string | null
+  coverImageAlt?: string | null
   datasets: Array<{ id: string; title: string }>
   event: { id: string; title: string; sourceName: string; sourceUrl: string; imageUrl?: string | null; imageAlt?: string | null } | null
   /** The published companion tour, when one exists and is playable. */
@@ -127,14 +132,28 @@ function renderPost(post: PublicPost): HTMLElement {
   wrap.append(meta)
   if (post.summary) wrap.append(el('p', { className: 'blog-post-summary', textContent: post.summary }))
 
-  // Lead image: the cited event's vetted story image (feed enclosure /
-  // og:image / curator pick), captioned with the citation it came
-  // from. http(s) re-guarded client-side before it reaches <img src>.
-  if (post.event?.imageUrl && /^https?:\/\//i.test(post.event.imageUrl)) {
+  // Lead image. The post's own cover (curator pick from the Media tab)
+  // wins; otherwise fall back to the cited event's vetted story image,
+  // captioned with the citation it came from. http(s) re-guarded
+  // client-side before either reaches <img src>.
+  const cover = post.coverImageUrl && /^https?:\/\//i.test(post.coverImageUrl) ? post.coverImageUrl : null
+  const eventImage = post.event?.imageUrl && /^https?:\/\//i.test(post.event.imageUrl) ? post.event.imageUrl : null
+  if (cover) {
     const figure = el('figure', { className: 'blog-post-figure' })
     const img = el('img', {
       className: 'blog-post-image',
-      src: post.event.imageUrl,
+      src: cover,
+      alt: post.coverImageAlt ?? post.title,
+      loading: 'lazy',
+    })
+    img.addEventListener('error', () => figure.remove())
+    figure.append(img)
+    wrap.append(figure)
+  } else if (eventImage && post.event) {
+    const figure = el('figure', { className: 'blog-post-figure' })
+    const img = el('img', {
+      className: 'blog-post-image',
+      src: eventImage,
       alt: post.event.imageAlt ?? post.event.title,
       loading: 'lazy',
     })

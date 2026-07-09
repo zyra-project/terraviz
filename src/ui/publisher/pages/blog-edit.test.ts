@@ -19,6 +19,17 @@ const EVENTS = {
     {
       id: 'EVT1',
       title: 'Gulf marine heatwave',
+      // Media-seed fields (the Media tab feeds these to the suggestion
+      // engine): a date + a location light up the Worldview snapshot,
+      // and the event's own story image becomes a candidate card.
+      summary: 'Record sea-surface temperatures across the Gulf.',
+      source: { name: 'NOAA', url: 'https://example.gov/heatwave', publishedAt: '2026-07-01T00:00:00Z' },
+      occurredStart: '2026-07-01T00:00:00Z',
+      status: 'approved',
+      geometry: { point: { lat: 27, lon: -90 } },
+      keywords: ['heatwave', 'gulf'],
+      imageUrl: 'https://img.example.gov/heatwave.jpg',
+      imageAlt: 'SST anomaly over the Gulf',
       links: [
         // Approved link to the dataset the tests pick manually — the
         // seed dedupes against it; the proposed link must NOT seed.
@@ -292,7 +303,48 @@ describe('renderBlogEditPage', () => {
       datasetIds: ['DS_SST'],
       eventId: null,
       tourId: null,
+      coverImageUrl: null,
+      coverImageAlt: null,
     })
+  })
+
+  it('Media tab: needs a cited event, then offers set-cover + insert from suggestions', async () => {
+    const capture: Captured = { posts: [] }
+    const mount = await mountEditor(capture)
+    const openMedia = () =>
+      (mount.querySelector('.publisher-form-nav-link[data-section="blog-media"]') as HTMLButtonElement).click()
+
+    // No event cited yet → the grid shows the "cite an event" hint.
+    openMedia()
+    expect(mount.querySelector('.publisher-blog-media-card')).toBeNull()
+    expect((mount.querySelector('.publisher-blog-media-grid') as HTMLElement).textContent).toContain('Cite a current event')
+
+    // Cite the event (on the Sources tab), then reopen Media — the
+    // event's story image + the Worldview snapshot render synchronously.
+    const evSelect = mount.querySelector('.publisher-blog-event-select') as HTMLSelectElement
+    evSelect.value = 'EVT1'
+    evSelect.dispatchEvent(new Event('change'))
+    openMedia()
+    const cards = mount.querySelectorAll('.publisher-blog-media-card')
+    expect(cards.length).toBeGreaterThanOrEqual(2)
+
+    // "Set as cover" reflects into the cover preview.
+    const cover = mount.querySelector('.publisher-blog-cover') as HTMLElement
+    expect(cover.textContent).toContain('No cover image set')
+    ;(cards[0].querySelector('.publisher-button-primary') as HTMLButtonElement).click()
+    expect(mount.querySelector('.publisher-blog-cover-img')).toBeTruthy()
+
+    // "Insert into post" drops markdown into the body.
+    const body = mount.querySelector('#blog-body') as HTMLTextAreaElement
+    ;(cards[1].querySelector('.publisher-blog-media-actions button') as HTMLButtonElement).click()
+    expect(body.value).toMatch(/!\[.*\]\(https?:\/\/.+\)/)
+
+    // Save carries the picked cover into the create body.
+    ;(mount.querySelector('#blog-title') as HTMLInputElement).value = 'Heatwave'
+    ;(mount.querySelector('.publisher-blog-save-btn') as HTMLButtonElement).click()
+    await flush()
+    const save = capture.posts.find(p => p.url.endsWith('/publish/blog')) as { body: { coverImageUrl: string | null } }
+    expect(save.body.coverImageUrl).toMatch(/^https?:\/\//)
   })
 
   it('shows the restricted card for a non-privileged caller', async () => {

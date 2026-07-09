@@ -268,14 +268,19 @@ const checks: Check[] = [
     fixtures: [...publisherFixtures({ admin: true }), ...blogPublicFixtures()],
     async run(page) {
       // Authoring: the editor is a tabbed stepper (Content / Sources /
-      // AI draft). Content is the default tab; the picker + Generate
-      // live behind their tabs, so open each before asserting on it.
+      // Media / AI draft). Content is the default tab; the picker,
+      // Media grid, and Generate live behind their tabs, so open each
+      // before asserting on it.
       await gotoApp(page, '/publish/blog/new')
       await page.locator('#publisher-root .publisher-sidebar').waitFor({ state: 'visible' })
       await page.locator('#blog-title').waitFor({ timeout: 15_000 })
       // Sources tab — the dataset picker enables once the catalog loads.
       await page.locator('.publisher-form-nav-link[data-section="blog-sources"]').click()
       await page.locator('#publisher-root input[type="search"]:not([disabled])').first().waitFor({ timeout: 10_000 })
+      // Media tab — the cover picker + suggestion grid (empty until an
+      // event is cited, so it shows the "cite an event" hint here).
+      await page.locator('.publisher-form-nav-link[data-section="blog-media"]').click()
+      await page.locator('.publisher-blog-media-grid').waitFor()
       // AI draft tab — the Generate control.
       await page.locator('.publisher-form-nav-link[data-section="blog-aidraft"]').click()
       await page.locator('.publisher-blog-generate-btn').waitFor()
