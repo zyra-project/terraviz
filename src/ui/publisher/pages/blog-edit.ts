@@ -540,6 +540,30 @@ export async function renderBlogEditPage(mount: HTMLElement, options: BlogEditPa
     void fetchYoutubeSuggestions(ev, ff).then(rs => { for (const r of rs) append(r, mediaBadge(r.kind)) })
   }
 
+  // Re-pull the approved-events list so the Media tab reflects edits the
+  // curator made in the Events tab (a location or date attached after
+  // this editor loaded) — otherwise the suggestions seed off the stale
+  // mount-time snapshot and geo/date-gated sources never appear. Fires
+  // on each Media-tab open when an event is cited; single-flight.
+  let refreshingEvents = false
+  const refreshEventsForMedia = (): void => {
+    if (refreshingEvents) return
+    refreshingEvents = true
+    void publisherGet<{ events: ReviewEvent[] }>(EVENTS_ENDPOINT, { fetchFn })
+      .then(res => {
+        if (res.ok) {
+          events = res.data.events
+          renderEventOptions()
+        }
+      })
+      .finally(() => {
+        refreshingEvents = false
+        // Rebuild against the freshest event data (or leave the instant
+        // snapshot render in place if the refresh failed).
+        rebuildMedia()
+      })
+  }
+
   // ----- Save / publish actions -----
   const saveStatus = el('span', { className: 'publisher-blog-status' })
   saveStatus.setAttribute('role', 'status')
@@ -689,10 +713,16 @@ export async function renderBlogEditPage(mount: HTMLElement, options: BlogEditPa
   // Toggle visibility in place (no re-render) so field state, an
   // in-flight generate, and the open Preview all survive a tab switch.
   const showSection = (id: string): void => {
-    // Entering Media (re)builds the suggestion grid for the currently
-    // cited event, but only when that event changed since the last
-    // build — so the fetched sources aren't re-hit on every tab visit.
-    if (id === 'blog-media' && mediaRenderedFor !== citedEventId) rebuildMedia()
+    if (id === 'blog-media') {
+      // Render instantly from the current snapshot when the cited event
+      // changed since the last build (fetched sources aren't re-hit on an
+      // unchanged revisit)…
+      if (mediaRenderedFor !== citedEventId) rebuildMedia()
+      // …then, when an event is cited, re-pull the events list so edits
+      // made in the Events tab (a location/date attached after this
+      // editor loaded) flow in and rebuild against the fresh data.
+      if (citedEventId) refreshEventsForMedia()
+    }
     for (const s of SECTIONS) s.card.style.display = s.id === id ? '' : 'none'
     for (const [sid, btn] of navLinks) {
       const on = sid === id

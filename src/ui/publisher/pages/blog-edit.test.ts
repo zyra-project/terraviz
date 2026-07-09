@@ -347,6 +347,52 @@ describe('renderBlogEditPage', () => {
     expect(save.body.coverImageUrl).toMatch(/^https?:\/\//)
   })
 
+  it('Media tab re-pulls the events list so geometry/date attached after load flow in', async () => {
+    // Opening Media refetches /publish/events; the first (mount-time)
+    // response has no geometry/date (no Worldview possible), the second
+    // (Events-tab edit landed) attaches an Iowa bbox + date — the tab
+    // must rebuild from the fresh copy and surface the Worldview card.
+    const capture: Captured = { posts: [] }
+    let eventsCalls = 0
+    const fetchFn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+      const method = init?.method ?? 'GET'
+      let body: unknown = {}
+      if (method === 'POST' || method === 'PUT') {
+        capture.posts.push({ url, body: JSON.parse(String(init?.body)) })
+      } else if (url.includes('/publish/me')) body = ADMIN_ME
+      else if (url.includes('/publish/datasets')) body = DATASETS
+      else if (url.includes('/publish/events')) {
+        eventsCalls++
+        const base = { id: 'EVT1', title: 'Iowa wildfire smoke', source: { name: 'NOAA', url: 'https://x' }, status: 'approved', links: [] }
+        // Second call onwards: the curator has attached location + date.
+        body = {
+          events: [
+            eventsCalls === 1
+              ? base
+              : { ...base, occurredStart: '2026-07-01T00:00:00Z', geometry: { boundingBox: { n: 43.5, s: 40.4, w: -96.6, e: -90.1 }, regionName: 'Iowa' } },
+          ],
+        }
+      }
+      return { ok: true, status: 200, type: 'basic', json: async () => body, text: async () => JSON.stringify(body) } as unknown as Response
+    })
+    const mount = document.createElement('div')
+    await renderBlogEditPage(mount, { fetchFn, navigate: vi.fn() })
+    await flush()
+
+    const evSelect = mount.querySelector('.publisher-blog-event-select') as HTMLSelectElement
+    evSelect.value = 'EVT1'
+    evSelect.dispatchEvent(new Event('change'))
+    ;(mount.querySelector('.publisher-form-nav-link[data-section="blog-media"]') as HTMLButtonElement).click()
+    await flush()
+
+    // The refetched event has an Iowa bbox + date → a Worldview snapshot
+    // card (wvs.earthdata.nasa.gov preview) is now present.
+    const worldview = mount.querySelector('.publisher-blog-media-preview[src*="wvs.earthdata.nasa.gov"]')
+    expect(worldview).toBeTruthy()
+    expect(eventsCalls).toBeGreaterThanOrEqual(2)
+  })
+
   it('shows the restricted card for a non-privileged caller', async () => {
     const mount = document.createElement('div')
     const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
