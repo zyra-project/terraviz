@@ -75,6 +75,19 @@ describe('GET /publish/media/youtube-channels', () => {
     )
     expect(channels.find(c => c.channelId === NASA)?.disabled).toBe(true)
   })
+
+  it('degrades (not a 500) when the disabled/custom tables are missing (rollout / preview D1)', async () => {
+    const { env, sqlite } = setup()
+    // An un-migrated deploy: the new table (and even the custom one) absent.
+    sqlite.prepare('DROP TABLE youtube_channels_disabled').run()
+    sqlite.prepare('DROP TABLE youtube_channels').run()
+    const res = await listGet(ctx({ env }))
+    expect(res.status).toBe(200)
+    const { channels } = await readJson<{ channels: Array<{ channelId: string; builtin: boolean; disabled: boolean }> }>(res)
+    // Built-in defaults still list, none disabled; no custom channels.
+    expect(channels.some(c => c.channelId === NASA && c.builtin && !c.disabled)).toBe(true)
+    expect(channels.every(c => c.builtin)).toBe(true)
+  })
 })
 
 describe('POST /publish/media/youtube-channels/:id (disable toggle)', () => {
