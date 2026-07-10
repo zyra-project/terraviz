@@ -107,8 +107,10 @@ signature/most-differentiating; 6–7 are optional.
 4. **Publish your first dataset** — guided form, asset upload, publish lifecycle.
    `dataset.webm`. (`components/{dataset-form,asset-uploader}.ts`, `pages/dataset-detail.ts`)
 5. **Bulk-import a catalog** — CSV manifest with per-row validation. `import.webm`.
-6. *(Optional)* **Automate refresh with Zyra workflows** — `pages/workflows.ts`.
-7. *(Optional)* **Read the room: analytics & feedback** — `analytics.webm`.
+6. **Automate refresh with Zyra workflows** — author + schedule a pipeline.
+   `workflows.webm`. (`pages/workflows.ts`)
+7. **Read the room: analytics & feedback** — engagement + Orbit/bug feedback.
+   `analytics.webm`, `feedback.webm`. (`pages/{analytics,feedback}.ts`)
 
 ---
 
@@ -153,15 +155,16 @@ SCREENSHOT_BASE_URL=http://127.0.0.1:4173 DEMO_HOLD_MS=2200 \
 Output lands in `demo-out/` (gitignored): `<flow>.webm` per flow,
 `<flow>-NN-<beat>.png` per beat, and `manifest.json` (flow → narration cue → beat
 files) for the editor. Flows: `overview, node-profile, dataset, import, events,
-blog, analytics`. Env knobs: `DEMO_HOLD_MS` (per-beat linger, default 1600),
-`SCREENSHOT_VIEWPORT` (default `1440x900`), `DEMO_FLOW` / `--flow` (filter), and
-`PLAYWRIGHT_CHROMIUM_PATH` (point at a pre-installed Chromium if the pinned
-Playwright build isn't downloaded).
+blog, workflows, feedback, analytics`. Env knobs: `DEMO_HOLD_MS` (per-beat linger,
+default 1600), `SCREENSHOT_VIEWPORT` (default `1440x900`), `DEMO_FLOW` / `--flow`
+(filter), and `PLAYWRIGHT_CHROMIUM_PATH` (point at a pre-installed Chromium if the
+pinned Playwright build isn't downloaded).
 
-**Notes for a richer signature clip:** the `blog` flow's Media tab shows the
-"cite an event" empty state (no event cited in the fixture). For the film's blog
-beat, prefer Track B so real suggested-media cards appear, or extend the `blog`
-flow to cite an event on the Sources tab first.
+The `blog` flow cites a fixture event on the Sources tab and stubs the Worldview
+host with a real Earth frame, so the Media tab renders a populated **"Satellite
+view"** suggestion card (plus the "not shown for this event" notes) rather than an
+empty state. For a fuller Media grid (Commons photos, agency video), record that
+beat from Track B against a seeded event with imagery.
 
 ### Track B — seeded live app (Act 2 payoff b-roll, or hand-recording)
 

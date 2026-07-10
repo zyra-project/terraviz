@@ -27,7 +27,7 @@
  * captured from a seeded live app — see the runbook.
  */
 
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import type { Page } from 'playwright'
@@ -43,7 +43,13 @@ import {
 } from './core/browser'
 import { installFixtures, type FixtureRule } from './core/fixtures'
 import { publisherFixtures } from './fixtures/publisher'
-import { analyticsFixtures } from './fixtures/admin'
+import { analyticsFixtures, feedbackFixtures } from './fixtures/admin'
+
+/** A real equirectangular Earth frame (the globe-thumbnail sample),
+ *  served as the Worldview snapshot so the blog Media tab shows a
+ *  populated suggestion card instead of an empty state — deterministic,
+ *  no live NASA fetch. */
+const EARTH_FRAME = readFileSync(resolve(REPO_ROOT, 'scripts/screenshots/fixtures/equirect-sample.png'))
 
 const BASE_URL = process.env.SCREENSHOT_BASE_URL ?? 'http://localhost:4173'
 const OUT_DIR = resolve(REPO_ROOT, 'demo-out')
@@ -93,6 +99,22 @@ const overviewExtras: FixtureRule[] = [
  *  noise (mirrors the `publish-events` scene). */
 async function stubEventMediaHosts(page: Page): Promise<void> {
   await page.route('https://wvs.earthdata.nasa.gov/**', r => r.fulfill({ status: 204, body: '' }))
+  await page.route('https://commons.wikimedia.org/**', r =>
+    r.fulfill({ status: 200, contentType: 'application/json', body: '{"query":{"pages":{}}}' }),
+  )
+  await page.route('https://earthquake.usgs.gov/**', r =>
+    r.fulfill({ status: 200, contentType: 'application/json', body: '{"features":[]}' }),
+  )
+}
+
+/** Blog Media-tab sources: serve a real Earth frame for the Worldview
+ *  snapshot (so a card renders), and empty-but-valid bodies for the
+ *  fetched sources (so they degrade quietly to their "not shown" notes).
+ *  Keeps the beat populated AND deterministic. */
+async function stubBlogMediaHosts(page: Page): Promise<void> {
+  await page.route('https://wvs.earthdata.nasa.gov/**', r =>
+    r.fulfill({ status: 200, contentType: 'image/png', body: EARTH_FRAME }),
+  )
   await page.route('https://commons.wikimedia.org/**', r =>
     r.fulfill({ status: 200, contentType: 'application/json', body: '{"query":{"pages":{}}}' }),
   )
@@ -225,20 +247,60 @@ const flows: DemoFlow[] = [
   },
   {
     name: 'blog',
-    narration: "Cite your datasets and an approved event, pull in suggested imagery, and generate a full post plus a playable companion tour — in your node's voice.",
+    narration: "Cite your datasets and an event, pull in suggested imagery, and generate a full post plus a playable companion tour — in your node's voice.",
     fixtures: publisherFixtures({ admin: true }),
+    extraRoutes: stubBlogMediaHosts,
     async run({ page, beat }) {
       await openPublish(page, '/publish/blog/new')
       await page.locator('#blog-title').waitFor()
       await beat('content')
-      for (const [section, label] of [
-        ['blog-sources', 'sources'],
-        ['blog-media', 'media'],
-        ['blog-aidraft', 'ai-draft'],
-      ] as const) {
-        await page.locator(`.publisher-form-nav-link[data-section="${section}"]`).click()
-        await beat(label)
-      }
+
+      // Sources — cite an event so the Media tab has something to
+      // suggest from (the event's place + date drive the imagery).
+      await page.locator('.publisher-form-nav-link[data-section="blog-sources"]').click()
+      const evSelect = page.locator('.publisher-blog-event-select')
+      await page.locator('.publisher-blog-event-select:not([disabled])').waitFor().catch(() => {})
+      await evSelect.selectOption({ index: 1 }).catch(() => {})
+      await beat('sources', { highlight: '.publisher-blog-event-select' })
+
+      // Media — now seeded off the cited event (Worldview snapshot card).
+      await page.locator('.publisher-form-nav-link[data-section="blog-media"]').click()
+      await page
+        .locator('.publisher-blog-media-card, .publisher-blog-media-notes')
+        .first()
+        .waitFor()
+        .catch(() => {})
+      await beat('media')
+
+      // AI draft — tone / length / companion tour → one Generate.
+      await page.locator('.publisher-form-nav-link[data-section="blog-aidraft"]').click()
+      await beat('ai-draft')
+    },
+  },
+  {
+    name: 'workflows',
+    narration: 'Automate dataset refresh with Zyra workflows — author a pipeline, schedule it, and run it on demand with live run history.',
+    fixtures: publisherFixtures(),
+    async run({ page, beat }) {
+      await openPublish(page, '/publish/workflows')
+      await page.locator('.publisher-workflows-new').first().waitFor().catch(() => {})
+      await beat('list')
+      await openPublish(page, '/publish/workflows/new')
+      await page.locator('textarea').first().waitFor().catch(() => {})
+      await beat('editor')
+    },
+  },
+  {
+    name: 'feedback',
+    narration: 'Read the room — thumbs on Orbit answers and bug/feature reports, with per-day trends and exportable detail.',
+    fixtures: [...publisherFixtures({ admin: true }), ...feedbackFixtures()],
+    async run({ page, beat }) {
+      await openPublish(page, '/publish/feedback')
+      await page.locator('.publisher-analytics-table').first().waitFor()
+      await beat('ai-thumbs')
+      await page.locator('.publisher-feedback-tab').nth(1).click().catch(() => {})
+      await page.locator('.publisher-analytics-table').first().waitFor()
+      await beat('general')
     },
   },
   {
