@@ -3241,6 +3241,12 @@
     border-block-end: none;
 }
 
+/* A built-in channel switched off for this node — dimmed, but its
+   label stays legible so the row reads as "present but paused". */
+.publisher-feeds-channel-row-off .publisher-feeds-row-label {
+    opacity: 0.55;
+}
+
 .publisher-feeds-preview {
     margin: 0.25rem 0 0.15rem;
     padding: 0.45rem 0.65rem;

@@ -166,11 +166,15 @@ busy newsroom will exhaust it. If that's you, you have three levers:
 1. **Request a quota increase** — the YouTube Data API grants these for
    free through the Google Cloud console; this is the intended path for
    higher volume.
-2. **Trim the built-in allowlist** in
-   [`youtube-channels.ts`](../functions/api/v1/_lib/youtube-channels.ts)
-   to just the channels relevant to your subject area — fewer channels,
-   proportionally less quota per event.
-3. **Lower the cap** (`MAX_CHANNELS_SEARCHED` in `youtube-search.ts`) so
+2. **Disable channels you don't need** — in the **Feeds console →
+   "Trusted video channels"** card, each built-in channel has a
+   **Disable** toggle. A disabled channel is dropped from the search
+   fan-out (and its quota) for your node, with no source edit or
+   redeploy, and can be re-enabled anytime. This is the per-node way to
+   trim the list to your subject area.
+3. **Trim the built-in defaults** for a whole fork by editing
+   [`youtube-channels.ts`](../functions/api/v1/_lib/youtube-channels.ts).
+4. **Lower the cap** (`MAX_CHANNELS_SEARCHED` in `youtube-search.ts`) so
    each event searches only the highest-priority channels.
 
 If the quota is ever exhausted the API returns 403 `quotaExceeded`,

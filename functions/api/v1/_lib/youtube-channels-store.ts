@@ -80,6 +80,49 @@ export async function removeCustomChannel(db: D1Database, channelId: string): Pr
   return (res.meta?.changes ?? 0) > 0
 }
 
+// ---------------------------------------------------------------------------
+// Per-node disable list for the BUILT-IN agency channels
+// ---------------------------------------------------------------------------
+//
+// Built-in channels are code constants, so a node turns one off by
+// recording its id here rather than deleting a row. The search proxy
+// subtracts this set from the effective allowlist (and from the
+// per-event fan-out). Only built-in ids are ever stored — custom
+// channels are disabled by removing them.
+
+/** The set of built-in channel ids this node has switched off — merged
+ *  (subtracted) by the search proxy. Empty when nothing is disabled. */
+export async function disabledBuiltinChannelIds(db: D1Database): Promise<Set<string>> {
+  const res = await db.prepare('SELECT channel_id FROM youtube_channels_disabled').all<{ channel_id: string }>()
+  return new Set((res.results ?? []).map(r => r.channel_id))
+}
+
+/**
+ * Switch a built-in channel off (disabled = true) or back on (false).
+ * Off is an insert (idempotent via ON CONFLICT); on is a delete. The
+ * caller validates that `channelId` is a real built-in before calling.
+ */
+export async function setBuiltinChannelDisabled(
+  db: D1Database,
+  channelId: string,
+  disabled: boolean,
+  disabledBy: string | null,
+  now: string = new Date().toISOString(),
+): Promise<void> {
+  if (disabled) {
+    await db
+      .prepare(
+        `INSERT INTO youtube_channels_disabled (channel_id, disabled_by, created_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(channel_id) DO NOTHING`,
+      )
+      .bind(channelId, disabledBy, now)
+      .run()
+  } else {
+    await db.prepare('DELETE FROM youtube_channels_disabled WHERE channel_id = ?').bind(channelId).run()
+  }
+}
+
 /** A canonical channel id shape (`UC` + 22 url-safe chars). */
 export function isChannelId(value: string): boolean {
   return /^UC[\w-]{22}$/.test(value)

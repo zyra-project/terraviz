@@ -63,6 +63,7 @@ const EXPECTED_TABLES = [
   'workflow_runs',
   'workflows',
   'youtube_channels',
+  'youtube_channels_disabled',
 ]
 
 const EXPECTED_INDEXES = [

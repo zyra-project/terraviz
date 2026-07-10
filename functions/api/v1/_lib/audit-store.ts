@@ -69,6 +69,8 @@ export type AuditAction =
   | 'event.image_upload'
   | 'youtube_channel.add'
   | 'youtube_channel.remove'
+  | 'youtube_channel.disable'
+  | 'youtube_channel.enable'
   | 'feed.created'
   | 'feed.updated'
   | 'feed.deleted'

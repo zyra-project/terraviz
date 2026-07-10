@@ -8,11 +8,13 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   addCustomChannel,
   customChannelIds,
+  disabledBuiltinChannelIds,
   isChannelId,
   listCustomChannels,
   parseChannelUrl,
   removeCustomChannel,
   resolveChannelUrl,
+  setBuiltinChannelDisabled,
 } from './youtube-channels-store'
 import { asD1, seedFixtures } from './test-helpers'
 
@@ -114,5 +116,24 @@ describe('custom-channel CRUD', () => {
     expect(await removeCustomChannel(d, NASA)).toBe(true)
     expect(await removeCustomChannel(d, NASA)).toBe(false) // gone
     expect(await listCustomChannels(d)).toEqual([])
+  })
+})
+
+describe('built-in disable list', () => {
+  it('switches a built-in off (idempotent) and back on', async () => {
+    const d = db()
+    expect([...(await disabledBuiltinChannelIds(d))]).toEqual([])
+
+    await setBuiltinChannelDisabled(d, NASA, true, null, '2026-07-01T00:00:00.000Z')
+    expect([...(await disabledBuiltinChannelIds(d))]).toEqual([NASA])
+    // Disabling again is a no-op, not a duplicate/throw.
+    await setBuiltinChannelDisabled(d, NASA, true, null)
+    expect([...(await disabledBuiltinChannelIds(d))]).toEqual([NASA])
+
+    await setBuiltinChannelDisabled(d, NASA, false, null)
+    expect([...(await disabledBuiltinChannelIds(d))]).toEqual([])
+    // Enabling something already enabled is also a no-op.
+    await setBuiltinChannelDisabled(d, NASA, false, null)
+    expect([...(await disabledBuiltinChannelIds(d))]).toEqual([])
   })
 })

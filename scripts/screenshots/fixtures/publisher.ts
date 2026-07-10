@@ -305,9 +305,11 @@ const YOUTUBE_CHANNELS_RULE: FixtureRule = {
   url: '/api/v1/publish/media/youtube-channels',
   json: {
     channels: [
-      { channelId: 'UCLA_DiR1FfKNvjuUpBHmylQ', channelName: 'NASA', builtin: true },
-      { channelId: 'UCeXH8GZyV3sVqAr45AvupOA', channelName: 'USGS', builtin: true },
-      { channelId: 'UCcustom0000000000000000', channelName: 'Coastal Science Center', builtin: false },
+      { channelId: 'UCLA_DiR1FfKNvjuUpBHmylQ', channelName: 'NASA', builtin: true, disabled: false },
+      // One built-in switched off so the card renders both the Disable
+      // and Enable (dimmed-row) states.
+      { channelId: 'UCeXH8GZyV3sVqAr45AvupOA', channelName: 'USGS', builtin: true, disabled: true },
+      { channelId: 'UCcustom0000000000000000', channelName: 'Coastal Science Center', builtin: false, disabled: false },
     ],
   },
 }

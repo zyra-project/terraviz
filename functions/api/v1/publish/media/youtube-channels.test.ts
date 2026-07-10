@@ -7,7 +7,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { onRequestGet as listGet, onRequestPost as addPost } from './youtube-channels'
-import { onRequestDelete as removeDelete } from './youtube-channels/[id]'
+import { onRequestDelete as removeDelete, onRequestPost as togglePost } from './youtube-channels/[id]'
 import { asD1, seedFixtures } from '../../_lib/test-helpers'
 import { addCustomChannel } from '../../_lib/youtube-channels-store'
 import type { PublisherRow } from '../../_lib/publisher-store'
@@ -62,9 +62,56 @@ describe('GET /publish/media/youtube-channels', () => {
     const { env } = setup()
     await addCustomChannel(env.CATALOG_DB, { channelId: CUSTOM, channelName: 'My Museum', addedBy: ADMIN.id })
     const res = await listGet(ctx({ env }))
-    const { channels } = await readJson<{ channels: Array<{ channelId: string; builtin: boolean }> }>(res)
-    expect(channels.some(c => c.channelId === NASA && c.builtin)).toBe(true)
-    expect(channels.some(c => c.channelId === CUSTOM && !c.builtin)).toBe(true)
+    const { channels } = await readJson<{ channels: Array<{ channelId: string; builtin: boolean; disabled: boolean }> }>(res)
+    expect(channels.some(c => c.channelId === NASA && c.builtin && !c.disabled)).toBe(true)
+    expect(channels.some(c => c.channelId === CUSTOM && !c.builtin && !c.disabled)).toBe(true)
+  })
+
+  it('marks a switched-off built-in as disabled', async () => {
+    const { env } = setup()
+    await togglePost(ctx({ env, id: NASA, body: { disabled: true } }))
+    const { channels } = await readJson<{ channels: Array<{ channelId: string; disabled: boolean }> }>(
+      await listGet(ctx({ env })),
+    )
+    expect(channels.find(c => c.channelId === NASA)?.disabled).toBe(true)
+  })
+})
+
+describe('POST /publish/media/youtube-channels/:id (disable toggle)', () => {
+  it('disables then re-enables a built-in, audit-logged', async () => {
+    const { env, sqlite } = setup()
+    const off = await togglePost(ctx({ env, id: NASA, body: { disabled: true } }))
+    expect(off.status).toBe(200)
+    expect(await readJson<{ disabled: boolean }>(off)).toEqual({ channelId: NASA, builtin: true, disabled: true })
+
+    const disabledRow = sqlite
+      .prepare(`SELECT COUNT(*) AS n FROM youtube_channels_disabled WHERE channel_id = ?`)
+      .get(NASA) as { n: number }
+    expect(disabledRow.n).toBe(1)
+
+    const on = await togglePost(ctx({ env, id: NASA, body: { disabled: false } }))
+    expect(await readJson<{ disabled: boolean }>(on)).toEqual({ channelId: NASA, builtin: true, disabled: false })
+    const afterEnable = sqlite
+      .prepare(`SELECT COUNT(*) AS n FROM youtube_channels_disabled WHERE channel_id = ?`)
+      .get(NASA) as { n: number }
+    expect(afterEnable.n).toBe(0)
+
+    const actions = sqlite
+      .prepare(`SELECT action FROM audit_events WHERE subject_id = ? ORDER BY created_at`)
+      .all(NASA) as unknown as Array<{ action: string }>
+    expect(actions.map(a => a.action)).toEqual(['youtube_channel.disable', 'youtube_channel.enable'])
+  })
+
+  it('404s a custom id (custom channels are removed, not disabled)', async () => {
+    const { env } = setup()
+    await addCustomChannel(env.CATALOG_DB, { channelId: CUSTOM, channelName: 'x', addedBy: ADMIN.id })
+    expect((await togglePost(ctx({ env, id: CUSTOM, body: { disabled: true } }))).status).toBe(404)
+  })
+
+  it('400s a non-boolean disabled and 403s a publisher role', async () => {
+    const { env } = setup()
+    expect((await togglePost(ctx({ env, id: NASA, body: { disabled: 'yes' } }))).status).toBe(400)
+    expect((await togglePost(ctx({ env, publisher: PUBLISHER, id: NASA, body: { disabled: true } }))).status).toBe(403)
   })
 })
 

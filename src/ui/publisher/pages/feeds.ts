@@ -71,6 +71,9 @@ interface YoutubeChannel {
   channelId: string
   channelName: string
   builtin: boolean
+  /** Built-in channels switched off for this node — excluded from the
+   *  media search until re-enabled. Always false for custom channels. */
+  disabled?: boolean
 }
 
 interface YoutubeChannelsResponse {
@@ -646,15 +649,38 @@ function renderChannelsCard(
   const list = el('ul', { className: 'publisher-feeds-channels' })
   for (const ch of channels) {
     const row = el('li', { className: 'publisher-feeds-channel-row' })
+    if (ch.builtin && ch.disabled) row.classList.add('publisher-feeds-channel-row-off')
+    const metaText = ch.builtin
+      ? ch.disabled
+        ? t('publisher.feeds.channels.builtinDisabled')
+        : t('publisher.feeds.channels.builtin')
+      : ch.channelId
     const main = el('span', { className: 'publisher-feeds-row-main' }, [
       el('span', { className: 'publisher-feeds-row-label', textContent: ch.channelName }),
-      el('span', {
-        className: 'publisher-feeds-row-meta',
-        textContent: ch.builtin ? t('publisher.feeds.channels.builtin') : ch.channelId,
-      }),
+      el('span', { className: 'publisher-feeds-row-meta', textContent: metaText }),
     ])
     row.append(main)
-    if (!ch.builtin) {
+    if (ch.builtin) {
+      // Built-ins can't be removed (code constants) — a node switches
+      // one off/on per-node instead, dropping it from the media search.
+      const toggle = el('button', {
+        type: 'button',
+        className: 'publisher-button publisher-button-small',
+        textContent: ch.disabled ? t('publisher.feeds.channels.enable') : t('publisher.feeds.channels.disable'),
+      })
+      toggle.addEventListener('click', () => {
+        toggle.disabled = true
+        void send(
+          `${YOUTUBE_CHANNELS_ENDPOINT}/${encodeURIComponent(ch.channelId)}`,
+          { disabled: !ch.disabled },
+          'POST',
+        ).then(ok => {
+          if (ok) void reload(mount, options)
+          else toggle.disabled = false
+        })
+      })
+      row.append(toggle)
+    } else {
       const remove = el('button', {
         type: 'button',
         className: 'publisher-button publisher-button-small',

@@ -40,7 +40,7 @@ import {
   channelName,
   isAllowlistedChannel,
 } from '../../_lib/youtube-channels'
-import { listCustomChannels } from '../../_lib/youtube-channels-store'
+import { disabledBuiltinChannelIds, listCustomChannels } from '../../_lib/youtube-channels-store'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
 const SEARCH_API = 'https://www.googleapis.com/youtube/v3/search'
@@ -181,29 +181,39 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
     return ok(JSON.stringify({ videos: [] }), 'MISS')
   }
 
-  // Effective allowlist = hardcoded agency defaults ∪ the node's own
-  // custom channels. A change to the custom set changes the cache key,
-  // so a freshly-added channel's videos aren't hidden by a stale entry.
-  // A missing/failed `youtube_channels` table (e.g. an un-migrated
-  // preview D1) degrades to defaults-only — the source must never 500.
+  // Effective allowlist = (hardcoded agency defaults minus the built-ins
+  // this node has switched off) ∪ the node's own custom channels. Both
+  // sets change the cache key, so a freshly-added channel's videos aren't
+  // hidden by a stale entry and a just-disabled channel's stop appearing
+  // at once. A missing/failed `youtube_channels*` table (e.g. an
+  // un-migrated preview D1) degrades to defaults-only — never a 500.
   let custom: Awaited<ReturnType<typeof listCustomChannels>> = []
+  let disabledBuiltins = new Set<string>()
   if (context.env.CATALOG_DB) {
     try {
       custom = await listCustomChannels(context.env.CATALOG_DB)
     } catch {
       // No custom table yet → just the hardcoded agency defaults.
     }
+    try {
+      disabledBuiltins = await disabledBuiltinChannelIds(context.env.CATALOG_DB)
+    } catch {
+      // No disable table yet → nothing is disabled.
+    }
   }
   const customMap = new Map(custom.map(c => [c.channelId, c.channelName]))
   const allow: ChannelAllowlist = {
-    has: id => isAllowlistedChannel(id) || customMap.has(id),
+    has: id => !disabledBuiltins.has(id) && (isAllowlistedChannel(id) || customMap.has(id)),
     name: id => customMap.get(id) ?? channelName(id),
   }
-  // Signature = the built-in allowlist + the node's custom ids, hashed.
-  // Folding the built-in set in means removing a channel from the
-  // hardcoded defaults invalidates its previously-cached results at once
-  // rather than serving them until TTL expiry.
-  const signature = sigHash(`${AGENCY_ALLOWLIST_SIGNATURE}|${[...customMap.keys()].sort().join(',')}`)
+  // Signature = the built-in allowlist + the node's custom ids + the
+  // disabled built-in ids, hashed. Folding the built-in set in means
+  // removing a channel from the hardcoded defaults invalidates its
+  // previously-cached results at once; folding the disabled set in does
+  // the same the moment a curator toggles a channel off or on.
+  const signature = sigHash(
+    `${AGENCY_ALLOWLIST_SIGNATURE}|${[...customMap.keys()].sort().join(',')}|off:${[...disabledBuiltins].sort().join(',')}`,
+  )
 
   const cacheKey = cacheKeyFor(query, signature)
   if (context.env.CATALOG_KV) {
@@ -222,7 +232,7 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
   const searchChannelIds: string[] = []
   const seenChannel = new Set<string>()
   for (const id of [...customMap.keys(), ...Object.keys(AGENCY_YOUTUBE_CHANNELS)]) {
-    if (seenChannel.has(id)) continue
+    if (seenChannel.has(id) || disabledBuiltins.has(id)) continue
     seenChannel.add(id)
     searchChannelIds.push(id)
     if (searchChannelIds.length >= MAX_CHANNELS_SEARCHED) break

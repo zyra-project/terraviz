@@ -214,6 +214,24 @@ describe('GET /api/v1/publish/media/youtube-search', () => {
     expect(videos).toEqual([{ videoId: 'cust123XYZ', title: 'A briefing', channelId: CUSTOM, channelName: 'City Museum' }])
   })
 
+  it('excludes a built-in channel the node has switched off', async () => {
+    const sqlite = seedFixtures({ count: 0 })
+    sqlite
+      .prepare(`INSERT INTO youtube_channels_disabled (channel_id, disabled_by, created_at) VALUES (?, NULL, ?)`)
+      .run(NASA, '2026-07-01T00:00:00.000Z')
+    // NASA would match, but it's disabled → never queried, never surfaced.
+    const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
+      const channelId = new URL(String(input)).searchParams.get('channelId')
+      const vid = channelId === NASA ? 'nasaVIDabc' : null
+      return { ok: true, json: async () => ({ items: vid ? [item(vid, channelId!)] : [] }) } as unknown as Response
+    })
+    vi.stubGlobal('fetch', fetchFn)
+    const res = await searchGet(ctx({ q: 'hurricane', env: { YOUTUBE_API_KEY: 'k', CATALOG_DB: asD1(sqlite) } }))
+    expect(await readJson<{ videos: unknown[] }>(res)).toEqual({ videos: [] })
+    const queried = fetchFn.mock.calls.map(c => new URL(String(c[0])).searchParams.get('channelId'))
+    expect(queried).not.toContain(NASA)
+  })
+
   it('degrades to defaults-only (not a 500) when the custom-channels table is missing', async () => {
     // An un-migrated preview D1: any query on `youtube_channels` throws.
     const failingDb = {

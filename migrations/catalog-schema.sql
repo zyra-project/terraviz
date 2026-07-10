@@ -508,6 +508,13 @@ CREATE TABLE youtube_channels (
   FOREIGN KEY (added_by) REFERENCES publishers(id)
 );
 
+CREATE TABLE youtube_channels_disabled (
+  channel_id   TEXT PRIMARY KEY,          -- a built-in agency channel id, switched off
+  disabled_by  TEXT,                      -- publishers.id (nullable for service)
+  created_at   TEXT NOT NULL,
+  FOREIGN KEY (disabled_by) REFERENCES publishers(id)
+);
+
 -- Indexes
 
 CREATE INDEX idx_analytics_daily_event
