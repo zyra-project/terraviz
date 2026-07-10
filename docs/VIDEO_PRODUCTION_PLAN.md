@@ -54,13 +54,16 @@ Four acts. Timecodes are targets; keep it tight over complete.
 - **VO:** *"On TerraViz, your data becomes something anyone can explore — a free,
   no-account viewer that streams it onto a navigable 3D globe, on any device from
   a phone to a headset."*
-- **Beats (b-roll — seeded live app / `/orbit`, see §5):**
-  1. Spin the globe; load a dataset onto it; scrub time. (`src/main.ts`)
+- **Beats (b-roll — the `globe` + `orbit` demo flows, plus seeded-live for the
+  rest; see §5):**
+  1. Spin the globe (`globe.webm` — `?embed=1&rotate=on`); then load a dataset
+     onto it + scrub time (seeded-live). (`src/main.ts`)
   2. Open a published **blog post** → click **"Play tour"** → the camera flies,
-     datasets load, captions narrate. *"The post is the read; the tour is the
-     show."* (`src/ui/blog/index.ts`, `src/services/tourEngine.ts`)
-  3. Ask **Orbit** a question; it answers and drops the right dataset on the
-     globe. (`/orbit?preset=…&fly=1`, `src/services/docentService.ts`)
+     datasets load, captions narrate (seeded-live). *"The post is the read; the
+     tour is the show."* (`src/ui/blog/index.ts`, `src/services/tourEngine.ts`)
+  3. **Orbit** flies to Earth (`orbit.webm` — `/orbit?preset=planetary&fly=1`);
+     for "ask a question → drops a dataset on the globe," use seeded-live.
+     (`src/services/docentService.ts`)
   4. Two-globe compare; then the same globe embedded on a third-party page.
      (`docs/EMBED_URL_GRAMMAR.md`)
 
@@ -131,14 +134,17 @@ show vaporware.
 ## 5. Capture runbook
 
 Two tracks. **Portal footage** (Act 3 + all chapters) is deterministic and
-fixture-driven. **Payoff b-roll** (Act 2) needs the real WebGL globe, so it comes
-from a seeded live app or the `/orbit` demo presets.
+fixture-driven. **Payoff b-roll** (Act 2 — globe + Orbit) is captured live by two
+extra flows in the same command, but it renders real WebGL so it's a clip, not a
+byte-reproducible still (and the globe needs network access to the Earth
+imagery — see the note below).
 
-### Track A — deterministic portal footage (recommended default)
+### Track A — the `screenshots:demo` capturer (recommended default)
 
-Reuses the visual-report fixture/scene stack: the portal renders **fully
+Reuses the visual-report fixture/scene stack: the portal flows render **fully
 populated with realistic multi-org data against a plain `vite` dev server, no
-backend**, and is reproducible run to run.
+backend**, and are reproducible run to run. The `globe` and `orbit` flows record
+the live Act-2 b-roll from the same run.
 
 ```bash
 # shell 1 — dev server
@@ -153,12 +159,23 @@ SCREENSHOT_BASE_URL=http://127.0.0.1:4173 DEMO_HOLD_MS=2200 \
 ```
 
 Output lands in `demo-out/` (gitignored): `<flow>.webm` per flow,
-`<flow>-NN-<beat>.png` per beat, and `manifest.json` (flow → narration cue → beat
-files) for the editor. Flows: `overview, node-profile, dataset, import, events,
-blog, workflows, feedback, analytics`. Env knobs: `DEMO_HOLD_MS` (per-beat linger,
-default 1600), `SCREENSHOT_VIEWPORT` (default `1440x900`), `DEMO_FLOW` / `--flow`
-(filter), and `PLAYWRIGHT_CHROMIUM_PATH` (point at a pre-installed Chromium if the
-pinned Playwright build isn't downloaded).
+`<flow>-NN-<beat>.png` per beat, `manifest.json` (flow → narration cue → beat
+files), and **`storyboard.html`** — a self-reviewing page pairing every clip +
+still with its narration cue (open it to scan the whole shot flow, or hand it to
+an editor). Flows: `overview, node-profile, dataset, import, events, blog,
+workflows, feedback, analytics` (portal) + `globe, orbit` (Act-2 b-roll). Env
+knobs: `DEMO_HOLD_MS` (per-beat linger, default 1600), `SCREENSHOT_VIEWPORT`
+(default `1440x900`), `DEMO_FLOW` / `--flow` (filter), and
+`PLAYWRIGHT_CHROMIUM_PATH` (point at a pre-installed Chromium if the pinned
+Playwright build isn't downloaded).
+
+**Globe/Orbit b-roll needs network.** The `globe` and `orbit` flows pull the real
+Earth imagery (NASA GIBS) — with network access they render the lit globe and
+Orbit's fly-to-Earth; in a restricted sandbox the textures don't load (the globe
+shows its branded loading state and Orbit's Earth is blank, though the character
+still renders). Run these where the imagery hosts are reachable. For a **dataset
+loaded onto the globe** or a **tour playing**, use Track B — those pull dataset
+tiles/video that only the seeded live app serves.
 
 The `blog` flow cites a fixture event on the Sources tab and stubs the Worldview
 host with a real Earth frame, so the Media tab renders a populated **"Satellite

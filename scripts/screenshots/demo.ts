@@ -42,6 +42,7 @@ import {
   withVideoPage,
 } from './core/browser'
 import { installFixtures, type FixtureRule } from './core/fixtures'
+import type { Viewport } from './core/types'
 import { publisherFixtures } from './fixtures/publisher'
 import { analyticsFixtures, feedbackFixtures } from './fixtures/admin'
 
@@ -162,7 +163,9 @@ interface DemoFlow {
   /** One-line narration cue — echoed to the console + the manifest so the
    *  script and the footage stay aligned. */
   narration: string
-  fixtures: FixtureRule[]
+  /** `/api` route stubs. Omitted for the live b-roll flows (globe /
+   *  Orbit), which want real data/tiles rather than a stubbed backend. */
+  fixtures?: FixtureRule[]
   /** Extra page.route stubs beyond the /api fixtures (external hosts). */
   extraRoutes?: (page: Page) => Promise<void>
   run: (ctx: DemoContext) => Promise<void>
@@ -314,7 +317,113 @@ const flows: DemoFlow[] = [
       await beat('heatmap', { highlight: '.publisher-analytics-map' })
     },
   },
+
+  // ── Act-2 payoff b-roll (live, no fixtures) ───────────────────────
+  // The end-user surfaces. These record the real animated WebGL — the
+  // globe and the Orbit character — so they're clips first, stills
+  // second. No /api stubbing: the globe wants real GIBS tiles, Orbit is
+  // self-contained Three.js. Against a plain dev server the globe still
+  // renders its atmosphere/day-night base even if tiles are slow; for a
+  // dataset ON the globe or a tour playing, use the seeded live app
+  // (Track B in docs/VIDEO_PRODUCTION_PLAN.md).
+  {
+    name: 'globe',
+    narration: 'Your data becomes something anyone can explore — a navigable 3D globe, on any device.',
+    async run({ page, beat }) {
+      // Embed mode = minimal chrome; rotate=on auto-spins the globe.
+      await gotoApp(page, '/?embed=1&rotate=on')
+      await page.locator('canvas').first().waitFor({ timeout: 30_000 })
+      // Wait for the branded loading splash to clear (globe ready). This
+      // needs network access to the GIBS Earth imagery — in a restricted
+      // sandbox the textures never load, so this is best-effort: on
+      // timeout the flow still records (the branded loading state).
+      await page.locator('#loading-screen').waitFor({ state: 'hidden', timeout: 25_000 }).catch(() => {})
+      await page.waitForTimeout(2000)
+      await beat('globe', { hold: 5000 }) // linger so the clip catches the spin
+      await beat('globe-rotated', { hold: 4000 })
+    },
+  },
+  {
+    name: 'orbit',
+    narration: 'And Orbit, the AI docent, answers questions and flies you to exactly the data you asked about.',
+    async run({ page, beat }) {
+      // ?fly=1 triggers a Fly-to-Earth scale lesson on load.
+      await gotoApp(page, '/orbit?preset=planetary&fly=1')
+      await page.locator('#orbit-canvas-host canvas').first().waitFor({ timeout: 30_000 })
+      // Hide the dev-only chrome (perf HUD + debug panel) for a clean shot.
+      await page
+        .addStyleTag({ content: '#orbit-perf-hud, .orbit-debug-panel { display: none !important; }' })
+        .catch(() => {})
+      await beat('orbit-arrive', { hold: 2000 })
+      await page.waitForTimeout(4000) // the fly-to-Earth animation
+      await beat('orbit-earth', { hold: 3000 })
+    },
+  },
 ]
+
+interface DemoManifestEntry {
+  name: string
+  narration: string
+  clip: string
+  beats: string[]
+}
+
+const escHtml = (s: string): string =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+/**
+ * A self-reviewing storyboard: each flow's clip + its beat stills paired
+ * with the narration cue, so a reviewer or editor can scan the whole shot
+ * flow on one page. References the `.webm`/`.png` files relatively — open
+ * it from inside `demo-out/`.
+ */
+function renderStoryboard(flows: DemoManifestEntry[], viewport: Viewport): string {
+  const sections = flows
+    .map(
+      f => `
+    <section>
+      <h2>${escHtml(f.name)}</h2>
+      <p class="cue">${escHtml(f.narration)}</p>
+      <video controls preload="metadata" src="${escHtml(f.clip)}"></video>
+      <div class="stills">
+        ${f.beats
+          .map(
+            b =>
+              `<figure><img loading="lazy" src="${escHtml(b)}" alt="${escHtml(b)}"><figcaption>${escHtml(b.replace(/\.png$/, ''))}</figcaption></figure>`,
+          )
+          .join('\n        ')}
+      </div>
+    </section>`,
+    )
+    .join('\n')
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TerraViz publisher demo — storyboard</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0b0e14; color: #e6ebf2; font: 15px/1.5 system-ui, -apple-system, sans-serif; }
+  header { padding: 1.5rem 2rem; border-bottom: 1px solid #1e2430; }
+  header h1 { margin: 0 0 .25rem; font-size: 1.3rem; }
+  header p { margin: 0; color: #9aa4b2; }
+  main { padding: 1.5rem 2rem; display: flex; flex-direction: column; gap: 2.5rem; }
+  section { border: 1px solid #1e2430; border-radius: 12px; padding: 1.25rem; background: #10141c; }
+  h2 { margin: 0 0 .35rem; font-size: 1.05rem; text-transform: capitalize; }
+  .cue { margin: 0 0 1rem; color: #aab2c0; max-width: 72ch; }
+  video { width: 100%; max-width: 720px; border-radius: 8px; border: 1px solid #1e2430; background: #000; display: block; margin-bottom: 1rem; }
+  .stills { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: .75rem; }
+  figure { margin: 0; }
+  figure img { width: 100%; border-radius: 6px; border: 1px solid #1e2430; }
+  figcaption { color: #7c8696; font-size: .8rem; margin-top: .25rem; }
+</style></head>
+<body>
+  <header>
+    <h1>TerraViz publisher demo — storyboard</h1>
+    <p>${flows.length} flow(s) · ${viewport.width}×${viewport.height} · script: docs/VIDEO_PRODUCTION_PLAN.md</p>
+  </header>
+  <main>${sections}
+  </main>
+</body></html>`
+}
 
 /** `--flow a,b` (or `DEMO_FLOW=a,b`) narrows the run. Empty = all. */
 function parseFlowFilter(): Set<string> | null {
@@ -337,7 +446,7 @@ async function main(): Promise<void> {
   rmSync(OUT_DIR, { recursive: true, force: true })
   mkdirSync(OUT_DIR, { recursive: true })
 
-  const manifest: Array<{ name: string; narration: string; clip: string; beats: string[] }> = []
+  const manifest: DemoManifestEntry[] = []
   const browser = await launchBrowser()
   try {
     for (const flow of selected) {
@@ -347,7 +456,7 @@ async function main(): Promise<void> {
         browser,
         { viewport: VIEWPORT, baseURL: BASE_URL, videoPath: resolve(OUT_DIR, `${flow.name}.webm`) },
         async page => {
-          await installFixtures(page, flow.fixtures)
+          if (flow.fixtures) await installFixtures(page, flow.fixtures)
           if (flow.extraRoutes) await flow.extraRoutes(page)
           let n = 0
           const beat = async (label: string, opts: { highlight?: string; hold?: number } = {}): Promise<void> => {
@@ -370,7 +479,8 @@ async function main(): Promise<void> {
   }
 
   writeFileSync(resolve(OUT_DIR, 'manifest.json'), JSON.stringify({ viewport: VIEWPORT, flows: manifest }, null, 2))
-  console.log(`\nWrote ${manifest.length} flow(s) to demo-out/ (see manifest.json).`)
+  writeFileSync(resolve(OUT_DIR, 'storyboard.html'), renderStoryboard(manifest, VIEWPORT))
+  console.log(`\nWrote ${manifest.length} flow(s) to demo-out/ (manifest.json + storyboard.html).`)
 }
 
 main().catch(err => {
