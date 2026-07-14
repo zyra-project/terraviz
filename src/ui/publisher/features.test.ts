@@ -8,7 +8,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fetchFeatures, renderFeatureDisabledCard, resetFeaturesCache } from './features'
+import { fetchFeatures, fetchPublicOrgName, renderFeatureDisabledCard, resetFeaturesCache } from './features'
 import { defaultFeatures } from '../../types/node-features'
 
 function okFetch(features: unknown): typeof fetch {
@@ -38,6 +38,27 @@ describe('fetchFeatures', () => {
     const b = await fetchFeatures({ fetchFn: vi.fn() as unknown as typeof fetch })
     expect(a).toEqual(b)
     expect((fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1)
+  })
+
+  it('fetchPublicOrgName shares the same single read (no second fetch)', async () => {
+    const fetchFn = vi.fn(async () =>
+      new Response(
+        JSON.stringify({ profile: { orgName: 'Coastal Science Center', logoUrl: null }, features: {} }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    ) as unknown as typeof fetch
+    const [features, orgName] = await Promise.all([
+      fetchFeatures({ fetchFn }),
+      fetchPublicOrgName({ fetchFn }),
+    ])
+    expect(features).toEqual(defaultFeatures())
+    expect(orgName).toBe('Coastal Science Center')
+    expect((fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1)
+  })
+
+  it('fetchPublicOrgName degrades to null on failure', async () => {
+    const failing = vi.fn(async () => new Response('boom', { status: 500 })) as unknown as typeof fetch
+    expect(await fetchPublicOrgName({ fetchFn: failing })).toBeNull()
   })
 
   it('resetFeaturesCache forces a refetch', async () => {

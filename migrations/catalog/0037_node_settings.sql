@@ -16,9 +16,11 @@
 -- Singleton by construction, mirroring `node_profile` (0028):
 --   - `id` pinned to 1 by a CHECK constraint; "set" is an upsert on
 --     id = 1. Absence of a row means "never configured" = every
---     feature enabled. `features_json` stores only explicit values;
---     missing/unknown keys normalize to enabled — see
---     `src/types/node-features.ts` (`normalizeFeatures`).
+--     feature enabled. Writes store the complete normalized map
+--     (every key, so the row is self-describing); reads still
+--     normalize defensively — missing/unknown keys resolve to
+--     enabled — see `src/types/node-features.ts`
+--     (`normalizeFeatures`).
 --   - `updated_by` / `updated_at` — audit trail of the last edit
 --     (full history in `audit_events` as `node_settings.update`).
 

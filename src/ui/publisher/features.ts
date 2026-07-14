@@ -31,20 +31,45 @@ const FEATURES_ENDPOINT = '/api/v1/node-profile'
  *  portal chrome can re-resolve and re-render the sidebar. */
 export const FEATURES_CHANGE_EVENT = 'publisher:featureschange'
 
-let cached: Promise<FeatureMap> | null = null
+/** The parsed public node-profile payload — everything the portal
+ *  consumes from that endpoint, cached as one read. */
+interface NodeProfilePayload {
+  orgName: string | null
+  features: FeatureMap
+}
 
-/** The node's feature toggles, cached for the life of the portal
- *  chunk. `resetFeaturesCache()` after a settings save (or in tests). */
-export function fetchFeatures(options: { fetchFn?: typeof fetch } = {}): Promise<FeatureMap> {
+let cached: Promise<NodeProfilePayload> | null = null
+
+function fetchPayload(options: { fetchFn?: typeof fetch } = {}): Promise<NodeProfilePayload> {
   if (!cached) {
-    cached = publisherGet<{ features?: unknown }>(FEATURES_ENDPOINT, options)
-      .then(res => (res.ok ? normalizeFeatures(res.data.features) : defaultFeatures()))
-      .catch(() => defaultFeatures())
+    cached = publisherGet<{ profile?: { orgName?: string | null } | null; features?: unknown }>(
+      FEATURES_ENDPOINT,
+      options,
+    )
+      .then(res =>
+        res.ok
+          ? { orgName: res.data.profile?.orgName ?? null, features: normalizeFeatures(res.data.features) }
+          : { orgName: null, features: defaultFeatures() },
+      )
+      .catch(() => ({ orgName: null, features: defaultFeatures() }))
   }
   return cached
 }
 
-/** Drop the cached toggle map — the next `fetchFeatures()` refetches. */
+/** The node's feature toggles, cached for the life of the portal
+ *  chunk. `resetFeaturesCache()` after a settings save (or in tests). */
+export function fetchFeatures(options: { fetchFn?: typeof fetch } = {}): Promise<FeatureMap> {
+  return fetchPayload(options).then(p => p.features)
+}
+
+/** The public org name off the same cached read — the chrome probe
+ *  uses this instead of fetching `/api/v1/node-profile` a second
+ *  time alongside {@link fetchFeatures}. */
+export function fetchPublicOrgName(options: { fetchFn?: typeof fetch } = {}): Promise<string | null> {
+  return fetchPayload(options).then(p => p.orgName)
+}
+
+/** Drop the cached payload — the next read refetches. */
 export function resetFeaturesCache(): void {
   cached = null
 }

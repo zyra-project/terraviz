@@ -44,7 +44,7 @@ import { renderFeedbackPage } from './pages/feedback'
 import { renderImportPage } from './pages/import'
 import { renderSidebar, type SidebarIdentity } from './components/sidebar'
 import { publisherGet } from './api'
-import { FEATURES_CHANGE_EVENT, fetchFeatures } from './features'
+import { FEATURES_CHANGE_EVENT, fetchFeatures, fetchPublicOrgName } from './features'
 import type { FeatureMap } from '../../types/node-features'
 import '../../styles/publisher.css'
 
@@ -348,18 +348,19 @@ interface PortalChrome {
  * events feature on (the endpoint 403s otherwise).
  */
 async function resolvePortalChrome(): Promise<PortalChrome> {
-  const [meRes, profRes, features] = await Promise.all([
+  // The org name and the toggle map ride the same public
+  // node-profile payload, read once through the module cache the
+  // gated pages share — one fetch + parse, fail-open to all-enabled.
+  const [meRes, orgName, features] = await Promise.all([
     publisherGet<{ role: string; is_admin: boolean; display_name: string }>(
       '/api/v1/publish/me',
     ),
-    publisherGet<{ profile: { orgName?: string | null } | null }>('/api/v1/node-profile'),
-    // Same endpoint as the profile read, but through the module cache
-    // the gated pages share — one parse, fail-open to all-enabled.
+    fetchPublicOrgName(),
     fetchFeatures(),
   ])
   const isAdmin = meRes.ok && (meRes.data.is_admin === true || meRes.data.role === 'admin')
   const identity: SidebarIdentity = {
-    orgName: profRes.ok ? profRes.data.profile?.orgName ?? null : null,
+    orgName,
     displayName: meRes.ok ? meRes.data.display_name : null,
     roleLabel: meRes.ok ? localizedRole(meRes.data.role) : null,
   }
