@@ -243,14 +243,14 @@ npm run screenshots:smoke   # gating interaction tests (search, Orbit, nav)
 | `src/ui/publisher/pages/workflows.ts` | `/publish/workflows` — Zyra workflow list |
 | `src/ui/publisher/pages/workflow-detail.ts` | `/publish/workflows/:id` — workflow summary + run history + Run now |
 | `src/ui/publisher/pages/workflow-edit.ts` | `/publish/workflows/new` + `…/:id/edit` — workflow form (YAML→JSON client-side, server-side Validate) |
-| `src/ui/publisher/pages/featured-hero.ts` | `/publish/featured-hero` — set the "Right now" hero override (`docs/HERO_ADMIN_SCOPING.md`) |
+| `src/ui/publisher/pages/featured-hero.ts` | `/publish/featured-hero` — set the "Right now" hero override (admins); non-admin publishers get a read-only view of the current pin (`docs/HERO_ADMIN_SCOPING.md`) |
 | `src/ui/publisher/pages/node-profile.ts` | `/publish/node-profile` — edit the node / host-organization profile (org name, mission, about, region focus, tone, links) — the "about the host" context Phase 3d AI drafts ground themselves in |
 | `src/ui/publisher/pages/blog.ts` | `/publish/blog` — blog authoring list (drafts + published, status badges, New post) |
 | `src/ui/publisher/pages/blog-edit.ts` | `/publish/blog/new` + `…/:id/edit` — tabbed blog editor (Content / Sources / Media / AI draft): dataset/event grounding pickers, the **Media** tab (reuses the Events-tab `media-suggest` engine — Worldview / Commons / ShakeMap / NHC / agency YouTube + the cited event's story image — to insert imagery into the body or set the post's cover image), the AI Generate panel (tone/length/companion-tour → `POST /publish/blog/generate`), markdown body with the shared toolbar + sanitized Preview, Save/Publish/Unpublish |
 | `src/ui/publisher/pages/feeds.ts` | `/publish/feeds` — the current-events feed console: registered connectors (pause/resume/remove, Run now, last-run status), the curated preset gallery, and the bring-your-own RSS/Atom form (`docs/CURRENT_EVENTS_PLAN.md` §9) |
 | `src/ui/publisher/pages/events.ts` | `/publish/events` — current-events review queue: curator approve/reject of proposed events + their dataset links (`docs/CURRENT_EVENTS_PLAN.md` §5) |
-| `src/ui/publisher/pages/analytics.ts` | `/publish/analytics` — privileged analytics dashboard over the D1 rollups, incl. the MapLibre spatial-attention heatmap (Phase B of `docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md`) |
-| `src/ui/publisher/pages/feedback.ts` | `/publish/feedback` — privileged feedback review (AI thumbs + bug/feature reports) over the D1 feedback tables; replaces the feedback-admin HTML dashboard (Phase C of `docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md`) |
+| `src/ui/publisher/pages/analytics.ts` | `/publish/analytics` — read-only analytics dashboard over the D1 rollups (open to any active publisher), incl. the MapLibre spatial-attention heatmap (Phase B of `docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md`) |
+| `src/ui/publisher/pages/feedback.ts` | `/publish/feedback` — read-only feedback review (AI thumbs + bug/feature reports; open to any active publisher) over the D1 feedback tables; replaces the feedback-admin HTML dashboard (Phase C of `docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md`) |
 | `src/ui/publisher/pages/me.ts` | `/publish/me` — current-user identity + role display |
 | `src/ui/publisher/pages/users.ts` | `/publish/users` — admin-only Users tab: approve / reject / suspend / reactivate publishers and change roles (admin / publisher / readonly) |
 | `src/ui/tourAuthoring/index.ts` | Tour-authoring public surface — detects `?tourEdit=` and mounts the dock |

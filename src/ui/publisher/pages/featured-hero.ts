@@ -2,16 +2,18 @@
  * /publish/featured-hero — set the "Right now" hero override (Phase C
  * of `docs/HERO_ADMIN_SCOPING.md`).
  *
- * Privileged-only (staff / admin / service). The page fetches the
- * caller's role (`/api/v1/publish/me`), the catalog datasets for the
- * picker (`/api/v1/publish/datasets`), and the current pin
- * (`/api/v1/featured-hero`), then renders a form: dataset picker,
- * mandatory activation window, optional headline, a live preview of
- * the real hero card, and Set / Clear buttons wired to
+ * The page fetches the caller's role (`/api/v1/publish/me`), the
+ * catalog datasets for the picker (`/api/v1/publish/datasets`), and
+ * the current pin (`/api/v1/featured-hero`).
+ *
+ * Privileged callers (staff / admin / service) get the editing form:
+ * dataset picker, mandatory activation window, optional headline, a
+ * live preview of the real hero card, and Set / Clear buttons wired to
  * `PUT` / `DELETE /api/v1/publish/featured-hero`.
  *
- * Non-privileged callers get a restricted card (the API also enforces
- * 403, but gating here avoids a fill-then-reject round-trip).
+ * Non-privileged (but active) publishers get a read-only view of the
+ * currently-featured dataset — no editing controls. The write
+ * endpoints stay 403 server-side regardless.
  *
  * The preview reuses the live hero-panel stylesheet so the curator
  * sees exactly what ships. The portal boots its own CSS bundle
@@ -20,6 +22,7 @@
 
 import { fetchFeatures, renderFeatureDisabledCard } from '../features'
 import { t } from '../../../i18n'
+import { formatDate } from '../../../i18n/format'
 import { publisherGet, publisherSend, handleSessionError } from '../api'
 import { buildErrorCard } from '../components/error-card'
 import { dateTimeToIso } from '../components/dataset-form'
@@ -133,14 +136,13 @@ export async function renderFeaturedHeroPage(
   if (!meRes.ok || !datasetsRes.ok || !heroRes.ok) return
 
   if (!clientIsPrivileged(meRes.data)) {
-    mount.replaceChildren(
-      shell(
-        card(
-          heading(t('publisher.hero.title')),
-          el('p', { className: 'publisher-hero-restricted', textContent: t('publisher.hero.restricted') }),
-        ),
-      ),
-    )
+    // Read-only view: a non-admin publisher can see which dataset is
+    // currently featured (and its window / headline) but not change
+    // it. The write endpoints stay 403 server-side regardless.
+    renderReadOnly(mount, {
+      datasets: datasetsRes.data.datasets,
+      currentHero: heroRes.data.hero,
+    })
     return
   }
 
@@ -150,6 +152,80 @@ export async function renderFeaturedHeroPage(
     fetchFn,
     navigate: options.navigate,
   })
+}
+
+interface ReadOnlyState {
+  datasets: DatasetsResponse['datasets']
+  currentHero: HeroResponse['hero']
+}
+
+/** Render the view-only hero surface for non-admin publishers: the
+ *  currently-featured dataset (preview card + window + headline) or an
+ *  empty state, with no editing controls. */
+function renderReadOnly(mount: HTMLElement, state: ReadOnlyState): void {
+  const { datasets, currentHero } = state
+  const children: HTMLElement[] = [
+    heading(t('publisher.hero.title')),
+    el('p', { className: 'publisher-hero-intro', textContent: t('publisher.hero.readonly.notice') }),
+  ]
+
+  if (currentHero) {
+    const ds = datasets.find(d => d.id === currentHero.datasetId)
+    const display = currentHero.headline?.trim() || ds?.title || currentHero.datasetId
+    children.push(
+      el('span', { className: 'publisher-field-label', textContent: t('publisher.hero.readonly.current') }),
+      heroPreviewCard(display, ds?.thumbnail_url ?? null),
+      el('p', {
+        className: 'publisher-hero-readonly-meta',
+        textContent: t('publisher.hero.readonly.window', {
+          start: formatWindowStamp(currentHero.window.start),
+          end: formatWindowStamp(currentHero.window.end),
+        }),
+      }),
+    )
+    if (currentHero.headline?.trim()) {
+      children.push(
+        el('p', {
+          className: 'publisher-hero-readonly-meta',
+          textContent: t('publisher.hero.readonly.headline', { headline: currentHero.headline.trim() }),
+        }),
+      )
+    }
+  } else {
+    children.push(
+      el('p', { className: 'publisher-hero-readonly-meta', textContent: t('publisher.hero.readonly.none') }),
+    )
+  }
+
+  mount.replaceChildren(shell(card(...children)))
+}
+
+/** Build the live hero-panel preview card for a given title + thumb.
+ *  Shared shape with `renderForm`'s live preview so the read-only view
+ *  looks identical to what ships. */
+function heroPreviewCard(title: string, thumb: string | null): HTMLElement {
+  const preview = el('div', { className: 'publisher-hero-preview hero-panel' })
+  const inner = el('div', { className: 'hero-panel-inner' })
+  const cardBtn = el('div', { className: 'hero-panel-card' })
+  if (thumb) cardBtn.append(el('img', { className: 'hero-panel-thumb', src: thumb, alt: '' }))
+  cardBtn.append(
+    el('span', { className: 'hero-panel-text' }, [
+      el('span', { className: 'hero-panel-eyebrow', textContent: t('browse.hero.heading') }),
+      el('span', { className: 'hero-panel-title', textContent: title }),
+      el('span', { className: 'hero-panel-badge', textContent: t('browse.hero.label') }),
+    ]),
+  )
+  inner.append(cardBtn)
+  preview.append(inner)
+  return preview
+}
+
+/** Locale-aware date+time for the read-only window display. Falls back
+ *  to the raw ISO string when unparseable. */
+function formatWindowStamp(iso: string): string {
+  const ms = Date.parse(iso)
+  if (!Number.isFinite(ms)) return iso
+  return formatDate(new Date(ms), { dateStyle: 'medium', timeStyle: 'short' })
 }
 
 /** Wrap page content in the portal's `<main class="publisher-shell">`

@@ -41,12 +41,41 @@ beforeEach(() => {
 })
 
 describe('renderFeaturedHeroPage', () => {
-  it('shows a restricted card for a non-privileged publisher', async () => {
-    const routes = baseRoutes()
+  it('shows a read-only view (no editing controls) for a non-privileged publisher with no pin', async () => {
+    const routes = baseRoutes() // hero: null
     routes['/api/v1/publish/me'] = { body: { role: 'publisher', is_admin: false } }
     await renderFeaturedHeroPage(mount, { fetchFn: mockFetch(routes) })
-    expect(mount.querySelector('.publisher-hero-restricted')).not.toBeNull()
+    // No editing controls at all.
     expect(mount.querySelector('.publisher-hero-select')).toBeNull()
+    expect(mount.querySelector('.publisher-button')).toBeNull()
+    // The view-only notice + empty state render.
+    expect(mount.querySelector('.publisher-hero-intro')?.textContent).toContain('view-only')
+    expect(mount.querySelector('.publisher-hero-readonly-meta')?.textContent).toContain(
+      'No dataset is currently featured',
+    )
+  })
+
+  it('shows the currently-featured dataset read-only for a non-privileged publisher', async () => {
+    const routes = baseRoutes()
+    routes['/api/v1/publish/me'] = { body: { role: 'publisher', is_admin: false } }
+    routes['/api/v1/featured-hero'] = {
+      body: {
+        hero: {
+          datasetId: DS,
+          window: { start: '2026-07-01T00:00:00Z', end: '2026-07-08T00:00:00Z' },
+          headline: 'Storm of the week',
+        },
+      },
+    }
+    await renderFeaturedHeroPage(mount, { fetchFn: mockFetch(routes) })
+    // Read-only preview card with the pinned dataset's title/headline.
+    expect(mount.querySelector('.publisher-hero-select')).toBeNull()
+    expect(mount.querySelector('.publisher-button')).toBeNull()
+    expect(mount.querySelector('.hero-panel-title')?.textContent).toBe('Storm of the week')
+    // Window + headline meta lines render.
+    const meta = Array.from(mount.querySelectorAll('.publisher-hero-readonly-meta')).map(n => n.textContent)
+    expect(meta.some(m => m?.includes('Active'))).toBe(true)
+    expect(meta.some(m => m?.includes('Storm of the week'))).toBe(true)
   })
 
   it('renders the form with dataset options for a privileged publisher', async () => {
@@ -180,7 +209,7 @@ describe('renderFeaturedHeroPage', () => {
   it('mounts inside a publisher-shell main landmark', async () => {
     await renderFeaturedHeroPage(mount, { fetchFn: mockFetch(baseRoutes()) })
     expect(mount.querySelector('main.publisher-shell')).not.toBeNull()
-    // The restricted path also gets the landmark.
+    // The read-only (non-privileged) path also gets the landmark.
     const r = baseRoutes()
     r['/api/v1/publish/me'] = { body: { role: 'publisher', is_admin: false } }
     mount.replaceChildren()

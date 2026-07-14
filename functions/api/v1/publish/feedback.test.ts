@@ -98,10 +98,14 @@ function ctx(opts: { env: Record<string, unknown>; publisher?: PublisherRow; que
 }
 
 describe('GET /api/v1/publish/feedback', () => {
-  it('503s without FEEDBACK_DB and 403s for publisher-role callers', async () => {
-    const { env } = setup()
+  it('503s without FEEDBACK_DB', async () => {
     expect((await feedbackGet(ctx({ env: {}, query: '?view=ai' }))).status).toBe(503)
-    expect((await feedbackGet(ctx({ env, publisher: PUBLISHER, query: '?view=ai' }))).status).toBe(403)
+  })
+
+  it('is readable by a non-privileged (publisher-role) caller — read-only view access', async () => {
+    const { env } = setup()
+    const res = await feedbackGet(ctx({ env, publisher: PUBLISHER, query: '?view=ai' }))
+    expect(res.status).toBe(200)
   })
 
   it('400s on a missing or unknown view', async () => {

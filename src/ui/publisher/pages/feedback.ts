@@ -4,9 +4,9 @@
  *
  * Replaces the hand-rolled HTML dashboard the legacy
  * `/api/feedback-admin` endpoint served (its `?action=` CSV/JSONL
- * machine exports survive and are linked from here). Privileged-only,
- * same client gate as featured-hero/analytics; data comes from
- * `GET /api/v1/publish/feedback`, which fronts the same
+ * machine exports survive and are linked from here). Read-only for
+ * any active publisher — the page never mutates feedback; data comes
+ * from `GET /api/v1/publish/feedback`, which fronts the same
  * `_feedback-helpers` data layer the old dashboard used.
  *
  * Two views, switched by tabs:
@@ -31,16 +31,10 @@ import { buildErrorCard } from '../components/error-card'
 import { ROUTE_CHANGE_START_EVENT } from '../router'
 import { renderBarSeries, renderStatTile } from '../analytics-charts'
 
-const ME_ENDPOINT = '/api/v1/publish/me'
 const FEEDBACK_ENDPOINT = '/api/v1/publish/feedback'
 const AI_EXPORT_URL = '/api/feedback-admin?action=ai-export&include_prompt=true'
 const GENERAL_EXPORT_URL = '/api/feedback-admin?action=general-export'
 const RANGE_CHOICES = [7, 30, 90, 365] as const
-
-interface MeResponse {
-  role: string
-  is_admin: boolean
-}
 
 interface AiRow {
   rating: string
@@ -99,10 +93,6 @@ export interface FeedbackPageOptions {
   navigate?: (url: string) => void
 }
 
-function clientIsPrivileged(me: MeResponse): boolean {
-  return me.is_admin === true || me.role === 'admin' || me.role === 'service'
-}
-
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   props: Partial<HTMLElementTagNameMap[K]> & { className?: string } = {},
@@ -140,29 +130,9 @@ export async function renderFeedbackPage(
     shell(el('p', { className: 'publisher-loading', textContent: t('publisher.feedback.loading') })),
   )
 
-  const meRes = await publisherGet<MeResponse>(ME_ENDPOINT, { fetchFn })
-  if (!meRes.ok) {
-    if (meRes.kind === 'session') {
-      if (handleSessionError({ navigate: options.navigate }) === 'navigating') return
-      mount.replaceChildren(shell(buildErrorCard('session')))
-      return
-    }
-    const details = meRes.kind === 'server' ? { status: meRes.status, body: meRes.body } : {}
-    mount.replaceChildren(shell(buildErrorCard(meRes.kind, details)))
-    return
-  }
-  if (!clientIsPrivileged(meRes.data)) {
-    mount.replaceChildren(
-      shell(
-        el('h1', { textContent: t('publisher.feedback.title') }),
-        el('p', {
-          className: 'publisher-hero-restricted',
-          textContent: t('publisher.feedback.restricted'),
-        }),
-      ),
-    )
-    return
-  }
+  // Feedback review is a read-only surface, open to any active
+  // publisher. The per-view data reads below surface any session /
+  // server error; there's no separate role gate here.
 
   const state = { view: 'ai' as 'ai' | 'general', days: 30 as (typeof RANGE_CHOICES)[number] }
   const contentHost = el('section', { className: 'publisher-feedback-content' })

@@ -15,14 +15,14 @@
  *     ?layer=<id>                                ('' = default Earth; omit = all)
  *     ?projection=globe|mercator|vr|ar           (omit = all)
  *
- * Privileged callers only (staff / admin / service) — same gate as
- * featured-hero. Responses are KV-cached ~5 minutes (key includes
+ * Read-only for any active publisher (view access); mutations
+ * elsewhere (the operator backfill in `analytics-export.ts`) stay
+ * privileged. Responses are KV-cached ~5 minutes (key includes
  * every filter) so a dashboard refresh storm stays cheap; rollups
  * only change once a day anyway.
  */
 
 import type { CatalogEnv } from '../_lib/env'
-import type { PublisherData } from './_middleware'
 import {
   queryDatasets,
   queryErrors,
@@ -35,7 +35,6 @@ import {
   type AnalyticsFilters,
 } from '../_lib/analytics-query'
 import { addDays, yesterdayUtc } from '../_lib/analytics-export'
-import { isPrivileged } from '../_lib/publisher-store'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
 export const CACHE_TTL_SECONDS = 300
@@ -58,11 +57,9 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
   if (!context.env.CATALOG_DB) {
     return jsonError(503, 'binding_missing', 'CATALOG_DB binding is not configured on this deployment.')
   }
-  const publisher = (context.data as unknown as PublisherData).publisher
-  if (!isPrivileged(publisher)) {
-    return jsonError(403, 'forbidden_role', 'Analytics is restricted to staff, admin, and service callers.')
-  }
-
+  // Read-only view is open to any active publisher (the middleware
+  // has already rejected pending / suspended accounts). No role gate
+  // here — analytics is a dashboard, not a mutation surface.
   const params = new URL(context.request.url).searchParams
   const section = params.get('section') ?? ''
   if (!(ALLOWED_SECTIONS as readonly string[]).includes(section)) {

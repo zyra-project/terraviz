@@ -3,7 +3,7 @@
  * `docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md`).
  *
  * Coverage:
- *   - 503 when CATALOG_DB is unbound; 403 for publisher callers.
+ *   - 503 when CATALOG_DB is unbound; read-only view open to publisher callers.
  *   - 400 on unknown section / days / environment / projection.
  *   - Section payloads computed from seeded rollup rows: overview
  *     day series + platform/country mixes + internal exclusion,
@@ -165,12 +165,14 @@ async function getData<T>(env: Record<string, unknown>, query: string): Promise<
 }
 
 describe('GET /api/v1/publish/analytics', () => {
-  it('503s without CATALOG_DB and 403s for publisher callers', async () => {
-    const { env } = setup()
+  it('503s without CATALOG_DB', async () => {
     expect((await analyticsGet(ctx({ env: {}, query: '?section=overview' }))).status).toBe(503)
-    expect(
-      (await analyticsGet(ctx({ env, publisher: PUBLISHER, query: '?section=overview' }))).status,
-    ).toBe(403)
+  })
+
+  it('is readable by a non-privileged (publisher-role) caller — read-only view access', async () => {
+    const { env } = setup()
+    const res = await analyticsGet(ctx({ env, publisher: PUBLISHER, query: '?section=overview' }))
+    expect(res.status).toBe(200)
   })
 
   it('400s on invalid parameters', async () => {
