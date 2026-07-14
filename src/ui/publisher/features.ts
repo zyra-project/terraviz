@@ -2,13 +2,23 @@
  * Portal-side helpers for the per-node feature toggles
  * (`src/types/node-features.ts`).
  *
- * `fetchFeatures()` is a module-cached read of the public
- * `GET /api/v1/node-profile` payload (which carries the toggle map) —
- * every gated page calls it first thing, so the cache keeps that to
- * one network read per portal load. Fail-open: any fetch problem
- * resolves to all-enabled, matching the server-side gate's semantics
- * (the API 403 is the real enforcement; this layer only avoids a
- * fetch-then-reject round-trip and renders the right card).
+ * `fetchFeatures()` is a module-cached read of the AUTHED
+ * `GET /api/v1/publish/node-settings` endpoint — every gated page
+ * calls it first thing, so the cache keeps that to one network read
+ * per portal load. The authed endpoint matters: it answers
+ * `private, no-store` straight from D1, so an admin's save is
+ * visible on the very next read. (The toggle map also rides the
+ * public `/api/v1/node-profile` payload, but that response is
+ * `public, max-age=300` — the browser/edge would serve a stale
+ * all-on copy for up to five minutes after a save, making the
+ * portal's sidebar and page gates disagree with the already-updated
+ * server gate. The public payload remains the right source for the
+ * public blog SPA, where that propagation window is acceptable.)
+ *
+ * Fail-open: any fetch problem resolves to all-enabled, matching the
+ * server-side gate's semantics (the API 403 is the real enforcement;
+ * this layer only avoids a fetch-then-reject round-trip and renders
+ * the right card).
  *
  * `renderFeatureDisabledCard()` is the disabled-state surface a gated
  * page renders instead of its content — the same card idiom as the
@@ -25,53 +35,49 @@ import {
 } from '../../types/node-features'
 import { publisherGet } from './api'
 
-const FEATURES_ENDPOINT = '/api/v1/node-profile'
+/** Authed, `no-store` — reads D1 directly, fresh after every save. */
+const SETTINGS_ENDPOINT = '/api/v1/publish/node-settings'
+/** Public identity payload — fine for the org name, whose staleness
+ *  (≤300 s browser/edge cache) is cosmetic. */
+const IDENTITY_ENDPOINT = '/api/v1/node-profile'
 
 /** Fired on `window` after an admin saves the toggle set, so the
  *  portal chrome can re-resolve and re-render the sidebar. */
 export const FEATURES_CHANGE_EVENT = 'publisher:featureschange'
 
-/** The parsed public node-profile payload — everything the portal
- *  consumes from that endpoint, cached as one read. */
-interface NodeProfilePayload {
-  orgName: string | null
-  features: FeatureMap
-}
-
-let cached: Promise<NodeProfilePayload> | null = null
-
-function fetchPayload(options: { fetchFn?: typeof fetch } = {}): Promise<NodeProfilePayload> {
-  if (!cached) {
-    cached = publisherGet<{ profile?: { orgName?: string | null } | null; features?: unknown }>(
-      FEATURES_ENDPOINT,
-      options,
-    )
-      .then(res =>
-        res.ok
-          ? { orgName: res.data.profile?.orgName ?? null, features: normalizeFeatures(res.data.features) }
-          : { orgName: null, features: defaultFeatures() },
-      )
-      .catch(() => ({ orgName: null, features: defaultFeatures() }))
-  }
-  return cached
-}
+let cachedFeatures: Promise<FeatureMap> | null = null
+let cachedOrgName: Promise<string | null> | null = null
 
 /** The node's feature toggles, cached for the life of the portal
  *  chunk. `resetFeaturesCache()` after a settings save (or in tests). */
 export function fetchFeatures(options: { fetchFn?: typeof fetch } = {}): Promise<FeatureMap> {
-  return fetchPayload(options).then(p => p.features)
+  if (!cachedFeatures) {
+    cachedFeatures = publisherGet<{ features?: unknown }>(SETTINGS_ENDPOINT, options)
+      .then(res => (res.ok ? normalizeFeatures(res.data.features) : defaultFeatures()))
+      .catch(() => defaultFeatures())
+  }
+  return cachedFeatures
 }
 
-/** The public org name off the same cached read — the chrome probe
- *  uses this instead of fetching `/api/v1/node-profile` a second
- *  time alongside {@link fetchFeatures}. */
+/** The public org name for the chrome footer, cached like the
+ *  toggles. Deliberately the cacheable public read — a stale org
+ *  name is harmless, unlike stale toggles. */
 export function fetchPublicOrgName(options: { fetchFn?: typeof fetch } = {}): Promise<string | null> {
-  return fetchPayload(options).then(p => p.orgName)
+  if (!cachedOrgName) {
+    cachedOrgName = publisherGet<{ profile?: { orgName?: string | null } | null }>(
+      IDENTITY_ENDPOINT,
+      options,
+    )
+      .then(res => (res.ok ? res.data.profile?.orgName ?? null : null))
+      .catch(() => null)
+  }
+  return cachedOrgName
 }
 
-/** Drop the cached payload — the next read refetches. */
+/** Drop the cached reads — the next read refetches. */
 export function resetFeaturesCache(): void {
-  cached = null
+  cachedFeatures = null
+  cachedOrgName = null
 }
 
 /** Localized display name for a feature key. */

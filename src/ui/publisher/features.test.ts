@@ -25,11 +25,16 @@ describe('fetchFeatures', () => {
     resetFeaturesCache()
   })
 
-  it('parses the toggle map from the public node-profile payload', async () => {
-    const features = await fetchFeatures({ fetchFn: okFetch({ blog: false, events: false }) })
+  it('parses the toggle map from the authed node-settings read', async () => {
+    const fetchFn = okFetch({ blog: false, events: false })
+    const features = await fetchFeatures({ fetchFn })
     expect(features.blog).toBe(false)
     expect(features.events).toBe(false)
     expect(features.datasets).toBe(true)
+    // The freshness-critical read — must hit the authed no-store
+    // endpoint, not the publicly cached node-profile payload.
+    const calls = (fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls
+    expect(String(calls[0][0])).toContain('/api/v1/publish/node-settings')
   })
 
   it('caches the promise — a second call makes no second fetch', async () => {
@@ -40,20 +45,21 @@ describe('fetchFeatures', () => {
     expect((fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1)
   })
 
-  it('fetchPublicOrgName shares the same single read (no second fetch)', async () => {
+  it('fetchPublicOrgName reads the public identity payload and caches it', async () => {
     const fetchFn = vi.fn(async () =>
       new Response(
         JSON.stringify({ profile: { orgName: 'Coastal Science Center', logoUrl: null }, features: {} }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       ),
     ) as unknown as typeof fetch
-    const [features, orgName] = await Promise.all([
-      fetchFeatures({ fetchFn }),
-      fetchPublicOrgName({ fetchFn }),
-    ])
-    expect(features).toEqual(defaultFeatures())
+    const orgName = await fetchPublicOrgName({ fetchFn })
     expect(orgName).toBe('Coastal Science Center')
-    expect((fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1)
+    const calls = (fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls
+    expect(String(calls[0][0])).toContain('/api/v1/node-profile')
+    // Second call served from the module cache.
+    const again = await fetchPublicOrgName({ fetchFn: vi.fn() as unknown as typeof fetch })
+    expect(again).toBe('Coastal Science Center')
+    expect(calls).toHaveLength(1)
   })
 
   it('fetchPublicOrgName degrades to null on failure', async () => {

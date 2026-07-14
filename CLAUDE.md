@@ -213,7 +213,7 @@ npm run screenshots:smoke   # gating interaction tests (search, Orbit, nav)
 | `src/ui/publisher/index.ts` | Publisher portal entry point — lazy-loaded on `/publish/*`; mounts the History-API router + pages |
 | `src/ui/publisher/router.ts` | Tiny History-API router for the publisher portal |
 | `src/ui/publisher/api.ts` | Shared HTTP client for the publisher portal |
-| `src/ui/publisher/features.ts` | Portal-side feature-toggle helpers — module-cached `fetchFeatures()` over the public node-profile read (fail-open to all-enabled) + the shared "feature turned off" card gated pages render instead of their content |
+| `src/ui/publisher/features.ts` | Portal-side feature-toggle helpers — module-cached `fetchFeatures()` over the authed no-store `publish/node-settings` read (fresh after every save; fail-open to all-enabled) + the org-name read off the public node-profile payload + the shared "feature turned off" card gated pages render instead of their content |
 | `src/ui/publisher/types.ts` | Wire types for portal-bound publisher API responses |
 | `src/ui/publisher/analytics-charts.ts` | Hand-rolled SVG chart helpers (bar series with Y-axis, mix bars, stat tiles) + CSV export helpers for the analytics tab — no charting library |
 | `src/ui/publisher/components/dataset-form.ts` | Shared dataset create / edit form |

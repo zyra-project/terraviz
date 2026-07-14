@@ -472,10 +472,11 @@ export function publisherFixtures(
     YOUTUBE_CHANNELS_RULE,
     { url: '/api/v1/publish/node-profile', json: nodeProfile },
     // Feature toggles: all-on so every portal surface stays visible in
-    // captures. Backs both the node-profile page's Features card
-    // (authed read) and the gated pages' fetchFeatures() (public read
-    // — the `/api/v1/node-profile` path is NOT a substring of the
-    // publish one, so both rules are needed).
+    // captures. The authed node-settings rule backs the Features card
+    // AND the gated pages' fetchFeatures(); the public node-profile
+    // rule backs the chrome's org-name read (the `/api/v1/node-profile`
+    // path is NOT a substring of the publish one, so both rules are
+    // needed).
     { url: '/api/v1/publish/node-settings', json: { features: {}, updatedBy: null, updatedAt: null } },
     { url: '/api/v1/node-profile', json: { profile: { orgName: 'Coastal Science Center', logoUrl: null }, features: {} } },
     { url: '/api/v1/publish/blog', json: blogAuthoring },

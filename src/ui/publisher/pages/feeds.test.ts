@@ -73,7 +73,7 @@ describe('renderFeedsPage', () => {
     try {
       await fetchFeatures({
         fetchFn: mockFetch({
-          '/api/v1/node-profile': { body: { profile: null, features: { events: false } } },
+          '/api/v1/publish/node-settings': { body: { features: { events: false } } },
         }) as unknown as typeof fetch,
       })
       const pageFetch = mockFetch(baseRoutes())
