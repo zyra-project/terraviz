@@ -6,6 +6,7 @@ import {
   satisfactionPercent,
   deriveActivity,
 } from './overview'
+import { fetchFeatures, resetFeaturesCache } from '../features'
 import type { PublisherDataset } from '../types'
 
 const NOW = new Date('2026-07-08T12:00:00Z')
@@ -201,6 +202,45 @@ describe('renderOverviewPage', () => {
     expect(mount.querySelector('.publisher-overview-feedback')).toBeNull()
     expect(mount.textContent).not.toContain('AI satisfaction')
     expect(mount.textContent).not.toContain('New event')
+  })
+
+  it('hides toggled-off feature panels and skips their reads', async () => {
+    resetFeaturesCache()
+    try {
+      // Prime the module-cached toggle map: newsroom + insights off.
+      await fetchFeatures({
+        fetchFn: vi.fn().mockResolvedValue(
+          jsonResponse({
+            profile: null,
+            features: { events: false, hero: false, feedback: false, analytics: false },
+          }),
+        ) as unknown as typeof fetch,
+      })
+      const fetchFn = adminFetch() as unknown as ReturnType<typeof vi.fn>
+      await renderOverviewPage(mount, { fetchFn: fetchFn as unknown as typeof fetch, now: () => NOW })
+
+      expect(mount.querySelector('.publisher-overview')).not.toBeNull()
+      // Datasets tile stays; the gated tiles, pipeline, feedback
+      // column, needs-you event/hero cards, and New event action go.
+      expect(mount.textContent).toContain('Published datasets')
+      expect(mount.textContent).not.toContain('Globe views')
+      expect(mount.textContent).not.toContain('AI satisfaction')
+      expect(mount.textContent).not.toContain('event awaiting review')
+      expect(mount.textContent).not.toContain('Hero expires')
+      expect(mount.textContent).not.toContain('New event')
+      expect(mount.querySelector('.publisher-overview-pipeline')).toBeNull()
+      expect(mount.querySelector('.publisher-overview-feedback')).toBeNull()
+
+      // The gated reads were never fetched.
+      const urls = fetchFn.mock.calls.map(c => String(c[0]))
+      expect(urls.some(u => u.includes('/publish/events'))).toBe(false)
+      expect(urls.some(u => u.includes('/publish/feeds'))).toBe(false)
+      expect(urls.some(u => u.includes('/publish/feedback'))).toBe(false)
+      expect(urls.some(u => u.includes('/publish/analytics'))).toBe(false)
+      expect(urls.some(u => u.includes('/featured-hero'))).toBe(false)
+    } finally {
+      resetFeaturesCache()
+    }
   })
 
   it('renders a session error card when the warmup was already attempted', async () => {

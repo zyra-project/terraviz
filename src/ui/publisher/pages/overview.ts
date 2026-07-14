@@ -21,8 +21,10 @@
 
 import { t, plural } from '../../../i18n'
 import { formatNumber, formatRelative } from '../../../i18n/format'
+import type { FeatureMap } from '../../../types/node-features'
 import { clearWarmupFlag, handleSessionError, publisherGet } from '../api'
 import { buildErrorCard, type ErrorCardDetails } from '../components/error-card'
+import { fetchFeatures } from '../features'
 import { renderStatTile } from '../analytics-charts'
 import type { PublisherDataset, ListDatasetsResponse } from '../types'
 import { lifecycleOf } from '../types'
@@ -334,15 +336,22 @@ async function loadOverview(
   fetchFn: typeof fetch,
   privileged: boolean,
   now: Date,
+  features: FeatureMap,
 ): Promise<OverviewData> {
   const weekAgo = now.getTime() - 7 * MS_PER_DAY
 
-  // Reads available to any authenticated publisher.
+  // Reads available to any authenticated publisher. Reads whose
+  // feature is toggled off are skipped outright — their endpoints
+  // would only answer 403/empty, and the panels degrade the same way
+  // as a failed best-effort read.
+  const none = Promise.resolve(null)
   const [profile, published, recent, hero] = await Promise.all([
     getOrNull<NodeProfileResponse>('/api/v1/node-profile', fetchFn),
-    getOrNull<ListDatasetsResponse>('/api/v1/publish/datasets?status=published&limit=500', fetchFn),
-    getOrNull<ListDatasetsResponse>('/api/v1/publish/datasets?limit=8', fetchFn),
-    getOrNull<HeroResponse>('/api/v1/featured-hero', fetchFn),
+    features.datasets
+      ? getOrNull<ListDatasetsResponse>('/api/v1/publish/datasets?status=published&limit=500', fetchFn)
+      : none,
+    features.datasets ? getOrNull<ListDatasetsResponse>('/api/v1/publish/datasets?limit=8', fetchFn) : none,
+    features.hero ? getOrNull<HeroResponse>('/api/v1/featured-hero', fetchFn) : none,
   ])
 
   const recentDatasets = recent?.datasets ?? []
@@ -369,17 +378,22 @@ async function loadOverview(
 
   if (!privileged) return data
 
-  // Privileged reads — best-effort, in parallel.
+  // Privileged reads — best-effort, in parallel; feature-gated reads
+  // are skipped the same way as the base set.
   const [proposed, approved, feeds, feedback, analytics, workflows] = await Promise.all([
-    getOrNull<EventsResponse>('/api/v1/publish/events?status=proposed', fetchFn),
-    getOrNull<EventsResponse>('/api/v1/publish/events?status=approved', fetchFn),
-    getOrNull<FeedsResponse>('/api/v1/publish/feeds', fetchFn),
-    getOrNull<FeedbackResponse>('/api/v1/publish/feedback?view=ai&days=7&recent=5', fetchFn),
-    getOrNull<{ data?: { totals?: { sessions?: number } } }>(
-      '/api/v1/publish/analytics?section=overview&days=7',
-      fetchFn,
-    ),
-    getOrNull<WorkflowsResponse>('/api/v1/publish/workflows', fetchFn),
+    features.events ? getOrNull<EventsResponse>('/api/v1/publish/events?status=proposed', fetchFn) : none,
+    features.events ? getOrNull<EventsResponse>('/api/v1/publish/events?status=approved', fetchFn) : none,
+    features.events ? getOrNull<FeedsResponse>('/api/v1/publish/feeds', fetchFn) : none,
+    features.feedback
+      ? getOrNull<FeedbackResponse>('/api/v1/publish/feedback?view=ai&days=7&recent=5', fetchFn)
+      : none,
+    features.analytics
+      ? getOrNull<{ data?: { totals?: { sessions?: number } } }>(
+          '/api/v1/publish/analytics?section=overview&days=7',
+          fetchFn,
+        )
+      : none,
+    features.workflows ? getOrNull<WorkflowsResponse>('/api/v1/publish/workflows', fetchFn) : none,
   ])
 
   data.proposedEvents = proposed?.events ?? []
@@ -441,6 +455,7 @@ function primaryAction(
 function renderHeader(
   data: OverviewData,
   privileged: boolean,
+  features: FeatureMap,
   routerNavigate?: (p: string) => void,
 ): HTMLElement {
   const header = el('header', 'publisher-overview-header')
@@ -459,10 +474,12 @@ function renderHeader(
   header.appendChild(titles)
 
   const actions = el('div', 'publisher-overview-header-actions')
-  actions.appendChild(
-    primaryAction(t('publisher.overview.action.newDataset'), '/publish/datasets/new', routerNavigate),
-  )
-  if (privileged) {
+  if (features.datasets) {
+    actions.appendChild(
+      primaryAction(t('publisher.overview.action.newDataset'), '/publish/datasets/new', routerNavigate),
+    )
+  }
+  if (privileged && features.events) {
     actions.appendChild(
       primaryAction(t('publisher.overview.action.newEvent'), '/publish/events', routerNavigate),
     )
@@ -590,7 +607,7 @@ function renderNeedsYou(
   return section
 }
 
-function renderGlance(data: OverviewData, privileged: boolean): HTMLElement {
+function renderGlance(data: OverviewData, privileged: boolean, features: FeatureMap): HTMLElement {
   const section = el('section', 'publisher-overview-section')
   section.appendChild(sectionLabel(t('publisher.overview.glance.label')))
   const grid = el('div', 'publisher-overview-stats')
@@ -604,24 +621,30 @@ function renderGlance(data: OverviewData, privileged: boolean): HTMLElement {
     ),
   )
   if (privileged) {
-    grid.appendChild(
-      renderStatTile(
-        t('publisher.overview.glance.globeViews'),
-        data.globeViews == null ? '—' : num(data.globeViews),
-      ),
-    )
-    grid.appendChild(
-      renderStatTile(
-        t('publisher.overview.glance.eventsSurfaced'),
-        num(data.approvedEvents.length),
-      ),
-    )
-    grid.appendChild(
-      renderStatTile(
-        t('publisher.overview.glance.aiSatisfaction'),
-        data.satisfactionPct == null ? '—' : `${data.satisfactionPct}%`,
-      ),
-    )
+    if (features.analytics) {
+      grid.appendChild(
+        renderStatTile(
+          t('publisher.overview.glance.globeViews'),
+          data.globeViews == null ? '—' : num(data.globeViews),
+        ),
+      )
+    }
+    if (features.events) {
+      grid.appendChild(
+        renderStatTile(
+          t('publisher.overview.glance.eventsSurfaced'),
+          num(data.approvedEvents.length),
+        ),
+      )
+    }
+    if (features.feedback) {
+      grid.appendChild(
+        renderStatTile(
+          t('publisher.overview.glance.aiSatisfaction'),
+          data.satisfactionPct == null ? '—' : `${data.satisfactionPct}%`,
+        ),
+      )
+    }
   }
   section.appendChild(grid)
   return section
@@ -652,6 +675,7 @@ function pipelineStage(
 function renderPipeline(
   data: OverviewData,
   now: Date,
+  features: FeatureMap,
   routerNavigate?: (p: string) => void,
 ): HTMLElement {
   // "New items today" is derived from event ingest time (feeds have
@@ -723,28 +747,33 @@ function renderPipeline(
       routerNavigate,
     ),
   )
-  flow.appendChild(el('div', 'publisher-overview-pipeline-arrow', '→'))
-  const heroLive = data.hero != null
-  const heroSub =
-    heroLive && data.hero
-      ? t('publisher.overview.pipeline.feature.sub', {
-          when: formatRelative(new Date(data.hero.window.end), now),
-        })
-      : t('publisher.overview.pipeline.feature.subNone')
-  flow.appendChild(
-    pipelineStage(
-      {
-        kicker: t('publisher.overview.pipeline.feature.kicker'),
-        title: t('publisher.overview.pipeline.feature.title'),
-        stat: heroLive
-          ? t('publisher.overview.pipeline.feature.stat.live')
-          : t('publisher.overview.pipeline.feature.stat.none'),
-        sub: heroSub,
-        path: '/publish/featured-hero',
-      },
-      routerNavigate,
-    ),
-  )
+  // The final "feature it" stage rides the hero toggle — a node with
+  // events on but the hero surface off still gets the sources→curate
+  // flow, just without the third stage.
+  if (features.hero) {
+    flow.appendChild(el('div', 'publisher-overview-pipeline-arrow', '→'))
+    const heroLive = data.hero != null
+    const heroSub =
+      heroLive && data.hero
+        ? t('publisher.overview.pipeline.feature.sub', {
+            when: formatRelative(new Date(data.hero.window.end), now),
+          })
+        : t('publisher.overview.pipeline.feature.subNone')
+    flow.appendChild(
+      pipelineStage(
+        {
+          kicker: t('publisher.overview.pipeline.feature.kicker'),
+          title: t('publisher.overview.pipeline.feature.title'),
+          stat: heroLive
+            ? t('publisher.overview.pipeline.feature.stat.live')
+            : t('publisher.overview.pipeline.feature.stat.none'),
+          sub: heroSub,
+          path: '/publish/featured-hero',
+        },
+        routerNavigate,
+      ),
+    )
+  }
 
   section.appendChild(flow)
   section.appendChild(
@@ -820,24 +849,28 @@ function renderOverview(
   mount: HTMLElement,
   data: OverviewData,
   privileged: boolean,
+  features: FeatureMap,
   now: Date,
   routerNavigate?: (p: string) => void,
 ): void {
   const shell = el('main', 'publisher-shell publisher-overview')
-  shell.appendChild(renderHeader(data, privileged, routerNavigate))
+  shell.appendChild(renderHeader(data, privileged, features, routerNavigate))
 
+  // Needs-you cards self-hide via the data: a disabled feature's
+  // loads were skipped, so its card never has anything to show.
   const needs = renderNeedsYou(data, now, routerNavigate)
   if (needs) shell.appendChild(needs)
 
-  shell.appendChild(renderGlance(data, privileged))
+  shell.appendChild(renderGlance(data, privileged, features))
 
-  if (privileged) {
-    shell.appendChild(renderPipeline(data, now, routerNavigate))
+  // The newsroom pipeline is the feeds→events(→hero) flow.
+  if (privileged && features.events) {
+    shell.appendChild(renderPipeline(data, now, features, routerNavigate))
   }
 
   const columns = el('div', 'publisher-overview-columns')
   columns.appendChild(renderActivityColumn(data, now))
-  if (privileged) columns.appendChild(renderFeedbackColumn(data, now))
+  if (privileged && features.feedback) columns.appendChild(renderFeedbackColumn(data, now))
   shell.appendChild(columns)
 
   mount.replaceChildren(shell)
@@ -878,6 +911,9 @@ export async function renderOverviewPage(
   clearWarmupFlag()
 
   const privileged = isPrivileged(meResult.data)
-  const data = await loadOverview(fetchFn, privileged, now)
-  renderOverview(mount, data, privileged, now, routerNavigate)
+  // The node's feature toggles gate which reads run and which panels
+  // render. Module-cached + fail-open (all-enabled) like every page.
+  const features = await fetchFeatures()
+  const data = await loadOverview(fetchFn, privileged, now, features)
+  renderOverview(mount, data, privileged, features, now, routerNavigate)
 }
