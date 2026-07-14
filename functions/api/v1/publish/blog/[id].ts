@@ -2,14 +2,16 @@
  * /api/v1/publish/blog/:id — single-post authoring operations
  * (Phase 3d).
  *
- * GET  → The post, drafts included (any signed-in publisher).
+ * GET  → The post, drafts included (any active publisher). Carries
+ *        `can_edit` so the portal knows whether to offer authoring.
  * PUT  → Update content fields (`{ title, bodyMd, summary?,
  *        datasetIds?, eventId? }`). The slug never changes — published
- *        URLs stay stable across edits. Privileged-only.
+ *        URLs stay stable across edits. Owner-scoped: only the post's
+ *        author (or an admin) may edit.
  * POST → `{ action: 'publish' | 'unpublish' }` — the status
  *        transition. Publish is idempotent and keeps the first
  *        publish time; unpublish returns the post to draft.
- *        Privileged-only.
+ *        Owner-scoped, same rule as PUT.
  *
  * Every write is audit-logged (`blog.update` / `blog.publish` /
  * `blog.unpublish`) and busts the public blog caches so the change is
@@ -18,10 +20,11 @@
 
 import type { CatalogEnv } from '../../_lib/env'
 import type { PublisherData } from '../_middleware'
-import { isPrivileged } from '../../_lib/publisher-store'
+import type { PublisherRow } from '../../_lib/publisher-store'
 import { writeAuditEvent, type AuditAction } from '../../_lib/audit-store'
 import {
   bustBlogCache,
+  canMutateBlogPost,
   getBlogPost,
   publishBlogPost,
   toPublicPost,
@@ -45,22 +48,26 @@ function paramId(context: Parameters<PagesFunction<CatalogEnv, 'id'>>[0]): strin
   return id || null
 }
 
-function okPost(row: Parameters<typeof toPublicPost>[0]): Response {
-  return new Response(JSON.stringify({ post: toPublicPost(row) }), {
-    status: 200,
-    headers: { 'Content-Type': CONTENT_TYPE, 'Cache-Control': 'private, no-store' },
-  })
+function okPost(row: Parameters<typeof toPublicPost>[0], publisher: PublisherRow): Response {
+  return new Response(
+    JSON.stringify({ post: { ...toPublicPost(row), can_edit: canMutateBlogPost(publisher, row) } }),
+    {
+      status: 200,
+      headers: { 'Content-Type': CONTENT_TYPE, 'Cache-Control': 'private, no-store' },
+    },
+  )
 }
 
 export const onRequestGet: PagesFunction<CatalogEnv, 'id'> = async context => {
   if (!context.env.CATALOG_DB) {
     return jsonError(503, 'binding_missing', 'CATALOG_DB binding is not configured on this deployment.')
   }
+  const publisher = (context.data as unknown as PublisherData).publisher
   const id = paramId(context)
   if (!id) return jsonError(400, 'invalid_request', 'Missing post id.')
   const row = await getBlogPost(context.env.CATALOG_DB, id)
   if (!row) return jsonError(404, 'not_found', `Post ${id} not found.`)
-  return okPost(row)
+  return okPost(row, publisher)
 }
 
 export const onRequestPut: PagesFunction<CatalogEnv, 'id'> = async context => {
@@ -68,11 +75,16 @@ export const onRequestPut: PagesFunction<CatalogEnv, 'id'> = async context => {
     return jsonError(503, 'binding_missing', 'CATALOG_DB binding is not configured on this deployment.')
   }
   const publisher = (context.data as unknown as PublisherData).publisher
-  if (!isPrivileged(publisher)) {
-    return jsonError(403, 'forbidden_role', 'Editing blog posts is restricted to admin and service callers.')
-  }
   const id = paramId(context)
   if (!id) return jsonError(400, 'invalid_request', 'Missing post id.')
+
+  // Owner-scoped: only the author (or an admin) may edit. 404 for an
+  // unknown post; 403 for one the caller doesn't own.
+  const current = await getBlogPost(context.env.CATALOG_DB, id)
+  if (!current) return jsonError(404, 'not_found', `Post ${id} not found.`)
+  if (!canMutateBlogPost(publisher, current)) {
+    return jsonError(403, 'forbidden_owner', 'You can only edit blog posts you authored.')
+  }
 
   let body: unknown
   try {
@@ -102,7 +114,7 @@ export const onRequestPut: PagesFunction<CatalogEnv, 'id'> = async context => {
   // A published post's content just changed — refresh the public reads.
   if (row.status === 'published') await bustBlogCache(context.env.CATALOG_KV, row.slug)
 
-  return okPost(row)
+  return okPost(row, publisher)
 }
 
 export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
@@ -110,9 +122,6 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
     return jsonError(503, 'binding_missing', 'CATALOG_DB binding is not configured on this deployment.')
   }
   const publisher = (context.data as unknown as PublisherData).publisher
-  if (!isPrivileged(publisher)) {
-    return jsonError(403, 'forbidden_role', 'Publishing blog posts is restricted to admin and service callers.')
-  }
   const id = paramId(context)
   if (!id) return jsonError(400, 'invalid_request', 'Missing post id.')
 
@@ -129,6 +138,10 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
 
   const existing = await getBlogPost(context.env.CATALOG_DB, id)
   if (!existing) return jsonError(404, 'not_found', `Post ${id} not found.`)
+  // Owner-scoped: only the author (or an admin) may (un)publish.
+  if (!canMutateBlogPost(publisher, existing)) {
+    return jsonError(403, 'forbidden_owner', 'You can only publish blog posts you authored.')
+  }
 
   const row =
     action === 'publish'
@@ -147,5 +160,5 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
   })
   await bustBlogCache(context.env.CATALOG_KV, row.slug)
 
-  return okPost(row)
+  return okPost(row, publisher)
 }

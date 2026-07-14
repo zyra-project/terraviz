@@ -59,12 +59,14 @@ function aiStub(reply: unknown = { response: DRAFT_REPLY }) {
 
 function setupEnv(ai?: ReturnType<typeof aiStub>) {
   const sqlite = seedFixtures({ count: 2 })
-  sqlite
-    .prepare(
-      `INSERT INTO publishers (id, email, display_name, role, is_admin, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(ADMIN.id, ADMIN.email, ADMIN.display_name, ADMIN.role, ADMIN.is_admin, ADMIN.status, ADMIN.created_at)
+  for (const p of [ADMIN, PUBLISHER]) {
+    sqlite
+      .prepare(
+        `INSERT INTO publishers (id, email, display_name, role, is_admin, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(p.id, p.email, p.display_name, p.role, p.is_admin, p.status, p.created_at)
+  }
   // A node profile so the prompt grounding is observable.
   sqlite
     .prepare(
@@ -108,10 +110,10 @@ async function readJson<T>(res: Response): Promise<T> {
 }
 
 describe('POST /api/v1/publish/blog/generate', () => {
-  it('403 for a publisher-role account', async () => {
+  it('is allowed for a publisher-role account (authoring helper, open to any active publisher)', async () => {
     const { env } = setupEnv(aiStub())
     const res = await generate(ctx({ env, publisher: PUBLISHER, body: { datasetIds: [DS_0] } }))
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(200)
   })
 
   it('400 when no datasets are selected (or none are visible)', async () => {

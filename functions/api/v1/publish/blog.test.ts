@@ -38,12 +38,14 @@ const DS_1 = 'DS001' + 'A'.repeat(21)
 
 function setupEnv() {
   const sqlite = seedFixtures({ count: 2 })
-  sqlite
-    .prepare(
-      `INSERT INTO publishers (id, email, display_name, role, is_admin, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(ADMIN.id, ADMIN.email, ADMIN.display_name, ADMIN.role, ADMIN.is_admin, ADMIN.status, ADMIN.created_at)
+  for (const p of [ADMIN, PUBLISHER]) {
+    sqlite
+      .prepare(
+        `INSERT INTO publishers (id, email, display_name, role, is_admin, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(p.id, p.email, p.display_name, p.role, p.is_admin, p.status, p.created_at)
+  }
   return { sqlite, env: { CATALOG_DB: asD1(sqlite), CATALOG_KV: makeKV() } }
 }
 
@@ -93,10 +95,37 @@ async function createDraft(env: Record<string, unknown>, body: Record<string, un
 }
 
 describe('blog authoring routes', () => {
-  it('POST is 403 for a publisher-role account', async () => {
+  it('lets a publisher-role account create a draft and stamps them as author', async () => {
     const { env } = setupEnv()
     const res = await createPost(ctx({ env, method: 'POST', publisher: PUBLISHER, body: VALID }))
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(201)
+    const { post } = await readJson<{ post: { id: string } }>(res)
+    // The author is the creating publisher, and it's editable by them.
+    const list = await authorList(ctx({ env, publisher: PUBLISHER }))
+    const { posts } = await readJson<{ posts: Array<{ id: string; authorId: string; can_edit: boolean }> }>(list)
+    const mine = posts.find(p => p.id === post.id)!
+    expect(mine.authorId).toBe(PUBLISHER.id)
+    expect(mine.can_edit).toBe(true)
+  })
+
+  it('a publisher cannot edit or publish a post authored by someone else (403 forbidden_owner)', async () => {
+    const { env } = setupEnv()
+    // ADMIN authors a post; PUBLISHER may read it but not mutate it.
+    const post = await createDraft(env) // ctx defaults to ADMIN
+    const listed = await authorList(ctx({ env, publisher: PUBLISHER }))
+    const { posts } = await readJson<{ posts: Array<{ id: string; can_edit: boolean }> }>(listed)
+    expect(posts.find(p => p.id === post.id)!.can_edit).toBe(false) // visible, not editable
+
+    const edit = await updateOne(
+      ctx({ env, method: 'PUT', publisher: PUBLISHER, params: { id: post.id }, body: VALID }),
+    )
+    expect(edit.status).toBe(403)
+    expect((await readJson<{ error: string }>(edit)).error).toBe('forbidden_owner')
+
+    const pub = await transition(
+      ctx({ env, method: 'POST', publisher: PUBLISHER, params: { id: post.id }, body: { action: 'publish' } }),
+    )
+    expect(pub.status).toBe(403)
   })
 
   it('create derives a slug, stores the draft, and audits blog.create', async () => {

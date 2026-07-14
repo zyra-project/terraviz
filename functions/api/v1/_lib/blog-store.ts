@@ -13,7 +13,7 @@
  */
 
 import { newUlid } from './ulid'
-import type { PublisherRow } from './publisher-store'
+import { type PublisherRow, isPrivileged } from './publisher-store'
 
 /** Bounds keep the stored payload sane; the portal enforces the same
  *  limits client-side. */
@@ -107,6 +107,20 @@ function parseDatasetIds(raw: string | null): string[] {
   } catch {
     return []
   }
+}
+
+/**
+ * Whether `publisher` may mutate (edit / publish / unpublish / delete)
+ * the given post. Mirrors the datasets rule: the post's author, or a
+ * privileged (admin / service) caller. Reads are open to every active
+ * publisher; this only gates writes. `drafting a post makes them an
+ * owner` is already true — `insertBlogPost` stamps `author_id`.
+ */
+export function canMutateBlogPost(
+  publisher: PublisherRow,
+  row: Pick<BlogPostRow, 'author_id'>,
+): boolean {
+  return isPrivileged(publisher) || row.author_id === publisher.id
 }
 
 export function toPublicPost(row: BlogPostRow): BlogPostPublic {
