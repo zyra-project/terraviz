@@ -30,6 +30,7 @@
  * spatial-only filters reload just the heatmap data.
  */
 
+import { fetchFeatures, renderFeatureDisabledCard } from '../features'
 import { t } from '../../../i18n'
 import { formatDate, formatNumber, formatRegion } from '../../../i18n/format'
 import { publisherGet, handleSessionError, type PublisherApiResult } from '../api'
@@ -217,6 +218,10 @@ export async function renderAnalyticsPage(
   mount: HTMLElement,
   options: AnalyticsPageOptions = {},
 ): Promise<void> {
+  if (!(await fetchFeatures()).analytics) {
+    renderFeatureDisabledCard(mount, 'analytics')
+    return
+  }
   const fetchFn = options.fetchFn
   mount.replaceChildren(
     shell(el('p', { className: 'publisher-loading', textContent: t('publisher.analytics.loading') })),

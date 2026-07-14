@@ -5,6 +5,7 @@
  * just calls it with `mode: 'create'` and a blank initial state.
  */
 
+import { fetchFeatures, renderFeatureDisabledCard } from '../features'
 import {
   renderDatasetForm,
   type DatasetFormOptions,
@@ -17,6 +18,11 @@ export function renderDatasetNewPage(
   options: DatasetNewPageOptions = {},
 ): void {
   renderDatasetForm(content, { mode: 'create', ...options })
+  // Sync render first (this page has no loading state); swap in the
+  // disabled card if the toggles resolve off. Fail-open on any error.
+  void fetchFeatures().then(features => {
+    if (!features.datasets) renderFeatureDisabledCard(content, 'datasets')
+  })
 }
 
 // Re-export the ISO conversion helper so existing imports

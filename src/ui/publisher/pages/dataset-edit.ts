@@ -16,6 +16,7 @@
  * errors inline.
  */
 
+import { fetchFeatures, renderFeatureDisabledCard } from '../features'
 import { t } from '../../../i18n'
 import { clearWarmupFlag, handleSessionError, publisherGet } from '../api'
 import {
@@ -71,6 +72,10 @@ export async function renderDatasetEditPage(
   id: string,
   options: DatasetEditPageOptions = {},
 ): Promise<void> {
+  if (!(await fetchFeatures()).datasets) {
+    renderFeatureDisabledCard(content, 'datasets')
+    return
+  }
   renderLoading(content)
   const result = await publisherGet<DatasetDetailResponse>(endpoint(id), {
     fetchFn: options.fetchFn,

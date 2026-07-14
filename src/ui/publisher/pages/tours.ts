@@ -8,6 +8,7 @@
  * for fresh publishers + a "New tour" button.
  */
 
+import { fetchFeatures, renderFeatureDisabledCard } from '../features'
 import { t } from '../../../i18n'
 import { clearWarmupFlag, handleSessionError } from '../api'
 import {
@@ -40,6 +41,10 @@ export async function renderToursPage(
   content: HTMLElement,
   options: ToursPageOptions = {},
 ): Promise<void> {
+  if (!(await fetchFeatures()).tours) {
+    renderFeatureDisabledCard(content, 'tours')
+    return
+  }
   const navigate = options.navigate ?? ((url: string) => {
     window.location.assign(url)
   })

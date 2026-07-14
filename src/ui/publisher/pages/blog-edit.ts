@@ -25,6 +25,7 @@
  * independently.
  */
 
+import { fetchFeatures, renderFeatureDisabledCard } from '../features'
 import { t } from '../../../i18n'
 import { publisherGet, publisherSend, handleSessionError } from '../api'
 import { buildErrorCard } from '../components/error-card'
@@ -174,6 +175,10 @@ function withResolvedGeometry(ev: ReviewEvent): ReviewEvent {
 }
 
 export async function renderBlogEditPage(mount: HTMLElement, options: BlogEditPageOptions = {}): Promise<void> {
+  if (!(await fetchFeatures()).blog) {
+    renderFeatureDisabledCard(mount, 'blog')
+    return
+  }
   const fetchFn = options.fetchFn
   const navigate = options.navigate ?? ((url: string) => { window.location.href = url })
   mount.replaceChildren(shell(el('p', { className: 'publisher-loading', textContent: t('publisher.blog.loading') })))

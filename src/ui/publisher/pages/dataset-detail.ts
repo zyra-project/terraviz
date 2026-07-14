@@ -16,6 +16,7 @@
  * card.
  */
 
+import { fetchFeatures, renderFeatureDisabledCard } from '../features'
 import { t } from '../../../i18n'
 import {
   clearWarmupFlag,
@@ -626,6 +627,10 @@ export async function renderDatasetDetailPage(
   id: string,
   options: DatasetDetailPageOptions = {},
 ): Promise<void> {
+  if (!(await fetchFeatures()).datasets) {
+    renderFeatureDisabledCard(content, 'datasets')
+    return
+  }
   renderLoading(content)
   const result = await publisherGet<DatasetDetailResponse>(endpoint(id), options)
   if (!result.ok) {

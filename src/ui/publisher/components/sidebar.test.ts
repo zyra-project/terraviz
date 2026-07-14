@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { renderSidebar, teardownSidebar, initialsOf } from './sidebar'
+import { defaultFeatures } from '../../../types/node-features'
 import { PublisherRouter, ROUTE_CHANGE_EVENT } from '../router'
 
 function clickWith(el: HTMLElement, init: Partial<MouseEventInit> = {}): MouseEvent {
@@ -74,6 +75,40 @@ describe('renderSidebar', () => {
     expect(labels).not.toContain('Feeds')
     expect(labels).not.toContain('Events')
     expect(labels).not.toContain('Team')
+  })
+
+  it('hides links whose feature toggle is off', () => {
+    renderSidebar(host, router, {
+      isAdmin: true,
+      features: { ...defaultFeatures(), blog: false, tours: false, datasets: false },
+    })
+    const labels = linkLabels(host)
+    expect(labels).not.toContain('Blog')
+    expect(labels).not.toContain('Tours')
+    expect(labels).not.toContain('Datasets')
+    expect(labels).not.toContain('Import') // rides the datasets toggle
+    // Untagged + enabled items stay.
+    expect(labels).toContain('Overview')
+    expect(labels).toContain('Workflows')
+    expect(labels).toContain('Node profile')
+  })
+
+  it('drops a whole group when every item in it is toggled off', () => {
+    renderSidebar(host, router, {
+      isAdmin: true,
+      features: { ...defaultFeatures(), events: false, hero: false, blog: false, tours: false },
+    })
+    const headers = Array.from(host.querySelectorAll('.publisher-nav-group-label')).map(
+      h => h.textContent,
+    )
+    expect(headers).not.toContain('Newsroom')
+    expect(headers).toContain('Catalog')
+  })
+
+  it('undefined features (optimistic first render) shows everything', () => {
+    renderSidebar(host, router, { isAdmin: true })
+    expect(linkLabels(host)).toContain('Blog')
+    expect(linkLabels(host)).toContain('Tours')
   })
 
   it('renders the events badge only when the count is positive and admin', () => {

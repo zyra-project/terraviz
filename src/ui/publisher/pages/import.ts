@@ -15,6 +15,7 @@
  * page.
  */
 
+import { fetchFeatures, renderFeatureDisabledCard } from '../features'
 import { t, type MessageKey } from '../../../i18n'
 import { downloadCsv } from '../analytics-charts'
 
@@ -491,6 +492,12 @@ function renderCliPanel(options: ImportPageOptions): HTMLElement {
  */
 export function renderImportPage(mount: HTMLElement, options: ImportPageOptions = {}): void {
   const state: PageState = { method: 'manifest', rows: null, parseErrorKey: undefined, fileName: '' }
+
+  // Sync render first (this page has no loading state); swap in the
+  // disabled card if the toggles resolve off. Fail-open on any error.
+  void fetchFeatures().then(features => {
+    if (!features.datasets) renderFeatureDisabledCard(mount, 'datasets')
+  })
 
   const rerender = (): void => {
     const shell = el('main', 'publisher-shell publisher-import')

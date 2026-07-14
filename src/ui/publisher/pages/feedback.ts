@@ -23,6 +23,7 @@
  * exact rows.
  */
 
+import { fetchFeatures, renderFeatureDisabledCard } from '../features'
 import { t } from '../../../i18n'
 import { formatDate, formatNumber } from '../../../i18n/format'
 import { publisherGet, handleSessionError, type PublisherApiResult } from '../api'
@@ -130,6 +131,10 @@ export async function renderFeedbackPage(
   mount: HTMLElement,
   options: FeedbackPageOptions = {},
 ): Promise<void> {
+  if (!(await fetchFeatures()).feedback) {
+    renderFeatureDisabledCard(mount, 'feedback')
+    return
+  }
   const fetchFn = options.fetchFn
   mount.replaceChildren(
     shell(el('p', { className: 'publisher-loading', textContent: t('publisher.feedback.loading') })),

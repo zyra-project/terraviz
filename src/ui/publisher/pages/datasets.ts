@@ -14,6 +14,7 @@
  * it (see `../api.ts` and the 3pb/A commit).
  */
 
+import { fetchFeatures, renderFeatureDisabledCard } from '../features'
 import { t } from '../../../i18n'
 import { plural } from '../../../i18n'
 import { clearWarmupFlag, handleSessionError, publisherGet, publisherSend,
@@ -579,6 +580,10 @@ export async function renderDatasetsPage(
   content: HTMLElement,
   options: DatasetsPageOptions = {},
 ): Promise<void> {
+  if (!(await fetchFeatures()).datasets) {
+    renderFeatureDisabledCard(content, 'datasets')
+    return
+  }
   const status = currentStatus()
   renderLoading(content)
 

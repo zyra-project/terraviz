@@ -16,6 +16,7 @@
  * 403; gating here avoids a fetch-then-reject round-trip).
  */
 
+import { fetchFeatures, renderFeatureDisabledCard } from '../features'
 import { t } from '../../../i18n'
 import { publisherGet, publisherSend, handleSessionError } from '../api'
 import { buildErrorCard } from '../components/error-card'
@@ -81,6 +82,10 @@ function card(...children: HTMLElement[]): HTMLElement {
 }
 
 export async function renderEventsPage(mount: HTMLElement, options: EventsPageOptions = {}): Promise<void> {
+  if (!(await fetchFeatures()).events) {
+    renderFeatureDisabledCard(mount, 'events')
+    return
+  }
   const fetchFn = options.fetchFn
   mount.replaceChildren(shell(el('p', 'publisher-loading', [t('publisher.events.loading')])))
 

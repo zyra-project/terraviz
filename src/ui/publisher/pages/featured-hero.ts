@@ -18,6 +18,7 @@
  * (`publisher.css`), so the hero styles are imported here explicitly.
  */
 
+import { fetchFeatures, renderFeatureDisabledCard } from '../features'
 import { t } from '../../../i18n'
 import { publisherGet, publisherSend, handleSessionError } from '../api'
 import { buildErrorCard } from '../components/error-card'
@@ -96,6 +97,10 @@ export async function renderFeaturedHeroPage(
   mount: HTMLElement,
   options: FeaturedHeroPageOptions = {},
 ): Promise<void> {
+  if (!(await fetchFeatures()).hero) {
+    renderFeatureDisabledCard(mount, 'hero')
+    return
+  }
   const fetchFn = options.fetchFn
   mount.replaceChildren(shell(el('p', { className: 'publisher-loading', textContent: t('publisher.hero.loading') })))
 

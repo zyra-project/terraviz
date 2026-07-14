@@ -6,6 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderFeedsPage } from './feeds'
+import { fetchFeatures, resetFeaturesCache } from '../features'
 import { FEED_PRESETS } from '../feed-presets'
 
 interface RouteSpec { status?: number; body?: unknown }
@@ -65,6 +66,26 @@ beforeEach(() => {
 })
 
 describe('renderFeedsPage', () => {
+  it('renders the disabled card (and skips every fetch) when events is off', async () => {
+    // Prime the module-cached toggle map with events off, then render
+    // — the page consults the cache before touching its own APIs.
+    resetFeaturesCache()
+    try {
+      await fetchFeatures({
+        fetchFn: mockFetch({
+          '/api/v1/node-profile': { body: { profile: null, features: { events: false } } },
+        }) as unknown as typeof fetch,
+      })
+      const pageFetch = mockFetch(baseRoutes())
+      await renderFeedsPage(mount, { fetchFn: pageFetch })
+      expect(mount.querySelector('.publisher-feature-disabled')).not.toBeNull()
+      expect(mount.querySelector('.publisher-feeds-row')).toBeNull()
+      expect(pageFetch).not.toHaveBeenCalled()
+    } finally {
+      resetFeaturesCache()
+    }
+  })
+
   it('shows a restricted card for a non-privileged publisher', async () => {
     const routes = baseRoutes()
     routes['/api/v1/publish/me'] = { body: { role: 'publisher', is_admin: false } }

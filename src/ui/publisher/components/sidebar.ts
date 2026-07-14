@@ -19,6 +19,7 @@
  */
 
 import { t } from '../../../i18n'
+import type { FeatureKey, FeatureMap } from '../../../types/node-features'
 import {
   ROUTE_CHANGE_EVENT,
   type PublisherRouter,
@@ -52,6 +53,10 @@ export interface NavItem {
   labelKey: NavLabelKey
   /** When true the link is only shown to admins (role === 'admin'). */
   adminOnly?: boolean
+  /** When set, the link hides while that feature toggle is off. Like
+   *  `adminOnly` this is visibility only — the page and API still
+   *  gate independently. */
+  feature?: FeatureKey
   /** When true, the events count badge renders on this item. */
   badge?: 'events'
 }
@@ -67,26 +72,26 @@ const NAV_GROUPS: ReadonlyArray<NavGroup> = [
   {
     labelKey: 'publisher.nav.group.catalog',
     items: [
-      { path: '/publish/datasets', labelKey: 'publisher.nav.datasets' },
-      { path: '/publish/workflows', labelKey: 'publisher.nav.workflows' },
-      { path: '/publish/import', labelKey: 'publisher.nav.import' },
+      { path: '/publish/datasets', labelKey: 'publisher.nav.datasets', feature: 'datasets' },
+      { path: '/publish/workflows', labelKey: 'publisher.nav.workflows', feature: 'workflows' },
+      { path: '/publish/import', labelKey: 'publisher.nav.import', feature: 'datasets' },
     ],
   },
   {
     labelKey: 'publisher.nav.group.newsroom',
     items: [
-      { path: '/publish/feeds', labelKey: 'publisher.nav.feeds', adminOnly: true },
-      { path: '/publish/events', labelKey: 'publisher.nav.events', adminOnly: true, badge: 'events' },
-      { path: '/publish/featured-hero', labelKey: 'publisher.nav.featuredHero' },
-      { path: '/publish/blog', labelKey: 'publisher.nav.blog', adminOnly: true },
-      { path: '/publish/tours', labelKey: 'publisher.nav.tours' },
+      { path: '/publish/feeds', labelKey: 'publisher.nav.feeds', adminOnly: true, feature: 'events' },
+      { path: '/publish/events', labelKey: 'publisher.nav.events', adminOnly: true, feature: 'events', badge: 'events' },
+      { path: '/publish/featured-hero', labelKey: 'publisher.nav.featuredHero', feature: 'hero' },
+      { path: '/publish/blog', labelKey: 'publisher.nav.blog', adminOnly: true, feature: 'blog' },
+      { path: '/publish/tours', labelKey: 'publisher.nav.tours', feature: 'tours' },
     ],
   },
   {
     labelKey: 'publisher.nav.group.insights',
     items: [
-      { path: '/publish/analytics', labelKey: 'publisher.nav.analytics' },
-      { path: '/publish/feedback', labelKey: 'publisher.nav.feedback' },
+      { path: '/publish/analytics', labelKey: 'publisher.nav.analytics', feature: 'analytics' },
+      { path: '/publish/feedback', labelKey: 'publisher.nav.feedback', feature: 'feedback' },
     ],
   },
   {
@@ -117,6 +122,11 @@ export interface SidebarOptions {
   /** Count of events awaiting review; renders as a badge on the
    *  Events item when > 0. */
   eventsBadge?: number
+  /** The node's feature toggles. Items whose `feature` is `false`
+   *  here are hidden. Undefined (the optimistic first render, or a
+   *  failed chrome fetch) shows everything — fail-open, matching the
+   *  server-side gate. Visibility only; pages and APIs still gate. */
+  features?: FeatureMap
 }
 
 /**
@@ -179,7 +189,11 @@ function buildNav(activeRouter: PublisherRouter, options: SidebarOptions): HTMLE
   nav.setAttribute('aria-label', t('publisher.nav.aria'))
 
   for (const group of NAV_GROUPS) {
-    const visible = group.items.filter(item => !item.adminOnly || options.isAdmin)
+    const visible = group.items.filter(
+      item =>
+        (!item.adminOnly || options.isAdmin) &&
+        (!item.feature || options.features?.[item.feature] !== false),
+    )
     if (visible.length === 0) continue
 
     const groupEl = document.createElement('div')

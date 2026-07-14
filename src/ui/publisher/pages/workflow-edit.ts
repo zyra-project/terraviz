@@ -13,6 +13,7 @@
  * errors from save/validate render in a shared list.
  */
 
+import { fetchFeatures, renderFeatureDisabledCard } from '../features'
 import { t } from '../../../i18n'
 import { handleSessionError, type PublisherValidationError } from '../api'
 import {
@@ -65,6 +66,10 @@ export async function renderWorkflowEditPage(
   id: string | null,
   options: WorkflowEditPageOptions = {},
 ): Promise<void> {
+  if (!(await fetchFeatures()).workflows) {
+    renderFeatureDisabledCard(content, 'workflows')
+    return
+  }
   const navigate = options.navigate ?? ((url: string) => window.location.assign(url))
   const getFn = options.getFn ?? getWorkflow
 

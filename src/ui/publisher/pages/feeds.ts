@@ -25,6 +25,7 @@
  * curator review queue — nothing surfaces publicly without approval.
  */
 
+import { fetchFeatures, renderFeatureDisabledCard } from '../features'
 import { t } from '../../../i18n'
 import { publisherGet, publisherSend, handleSessionError } from '../api'
 import { buildErrorCard, type ErrorKind } from '../components/error-card'
@@ -132,6 +133,10 @@ function categoryLabel(category: FeedPresetCategory | string | null): string {
 }
 
 export async function renderFeedsPage(mount: HTMLElement, options: FeedsPageOptions = {}): Promise<void> {
+  if (!(await fetchFeatures()).events) {
+    renderFeatureDisabledCard(mount, 'events')
+    return
+  }
   const fetchFn = options.fetchFn
   mount.replaceChildren(shell(el('p', { className: 'publisher-loading', textContent: t('publisher.feeds.loading') })))
 

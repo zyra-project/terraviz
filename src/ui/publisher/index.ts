@@ -44,6 +44,8 @@ import { renderFeedbackPage } from './pages/feedback'
 import { renderImportPage } from './pages/import'
 import { renderSidebar, type SidebarIdentity } from './components/sidebar'
 import { publisherGet } from './api'
+import { fetchFeatures } from './features'
+import type { FeatureMap } from '../../types/node-features'
 import '../../styles/publisher.css'
 
 const PORTAL_ROOT_ID = 'publisher-root'
@@ -334,22 +336,26 @@ interface PortalChrome {
   isAdmin: boolean
   identity: SidebarIdentity
   eventsBadge: number
+  features: FeatureMap
 }
 
 /**
  * Best-effort probe that fills in the sidebar's admin-only links,
- * footer identity, and events badge. Every read degrades safely —
- * the pages and their APIs enforce access independently, so a
- * hidden-but-reachable link (or a missing badge) is harmless. The
- * events count is only fetched for admins (the endpoint 403s
- * otherwise).
+ * feature-gated links, footer identity, and events badge. Every read
+ * degrades safely — the pages and their APIs enforce access
+ * independently, so a hidden-but-reachable link (or a missing badge)
+ * is harmless. The events count is only fetched for admins with the
+ * events feature on (the endpoint 403s otherwise).
  */
 async function resolvePortalChrome(): Promise<PortalChrome> {
-  const [meRes, profRes] = await Promise.all([
+  const [meRes, profRes, features] = await Promise.all([
     publisherGet<{ role: string; is_admin: boolean; display_name: string }>(
       '/api/v1/publish/me',
     ),
     publisherGet<{ profile: { orgName?: string | null } | null }>('/api/v1/node-profile'),
+    // Same endpoint as the profile read, but through the module cache
+    // the gated pages share — one parse, fail-open to all-enabled.
+    fetchFeatures(),
   ])
   const isAdmin = meRes.ok && (meRes.data.is_admin === true || meRes.data.role === 'admin')
   const identity: SidebarIdentity = {
@@ -358,11 +364,11 @@ async function resolvePortalChrome(): Promise<PortalChrome> {
     roleLabel: meRes.ok ? localizedRole(meRes.data.role) : null,
   }
   let eventsBadge = 0
-  if (isAdmin) {
+  if (isAdmin && features.events) {
     const ev = await publisherGet<{ events: unknown[] }>('/api/v1/publish/events?status=proposed')
     if (ev.ok && Array.isArray(ev.data.events)) eventsBadge = ev.data.events.length
   }
-  return { isAdmin, identity, eventsBadge }
+  return { isAdmin, identity, eventsBadge, features }
 }
 
 let activeRouter: PublisherRouter | null = null
