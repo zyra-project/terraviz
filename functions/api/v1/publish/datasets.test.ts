@@ -36,6 +36,17 @@ const ADMIN: PublisherRow = {
   created_at: '2026-01-01T00:00:00.000Z',
 }
 
+// A second, non-privileged publisher — used to exercise the
+// read-open / write-owner-scoped split.
+const PUBLISHER: PublisherRow = {
+  ...ADMIN,
+  id: 'PUB-COMM',
+  email: 'comm@example.com',
+  display_name: 'Community',
+  role: 'publisher',
+  is_admin: 0,
+}
+
 function ctxWithPublisher<P extends string = never>(opts: {
   env: Record<string, unknown>
   url?: string
@@ -43,6 +54,9 @@ function ctxWithPublisher<P extends string = never>(opts: {
   headers?: Record<string, string>
   body?: unknown
   params?: Record<string, string>
+  /** The authenticated publisher the middleware would have attached.
+   *  Defaults to ADMIN so the existing tests are unaffected. */
+  publisher?: PublisherRow
 }) {
   const url = opts.url ?? 'https://localhost/api/v1/publish/datasets'
   const headers = new Headers(opts.headers ?? {})
@@ -57,7 +71,7 @@ function ctxWithPublisher<P extends string = never>(opts: {
     request,
     env: opts.env,
     params: (opts.params ?? {}) as { [K in P]: string | string[] },
-    data: { publisher: ADMIN },
+    data: { publisher: opts.publisher ?? ADMIN },
     waitUntil: () => {},
     passThroughOnException: () => {},
     next: async () => new Response(null),
@@ -67,12 +81,14 @@ function ctxWithPublisher<P extends string = never>(opts: {
 
 function setupEnv() {
   const sqlite = seedFixtures({ count: 0 })
-  sqlite
-    .prepare(
-      `INSERT INTO publishers (id, email, display_name, role, is_admin, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(ADMIN.id, ADMIN.email, ADMIN.display_name, ADMIN.role, ADMIN.is_admin, ADMIN.status, ADMIN.created_at)
+  for (const p of [ADMIN, PUBLISHER]) {
+    sqlite
+      .prepare(
+        `INSERT INTO publishers (id, email, display_name, role, is_admin, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(p.id, p.email, p.display_name, p.role, p.is_admin, p.status, p.created_at)
+  }
   return {
     sqlite,
     env: {
@@ -228,6 +244,92 @@ describe('GET / PUT /api/v1/publish/datasets/{id}', () => {
     expect(res.status).toBe(200)
     const body = await readJson<{ dataset: { title: string } }>(res)
     expect(body.dataset.title).toBe('Renamed')
+  })
+})
+
+describe('read-open / write-owner-scoped (whole-catalog visibility)', () => {
+  /** Seed one admin-owned row + one community-owned row. */
+  async function seedMixed() {
+    const { env, sqlite } = setupEnv()
+    const adminRow = await readJson<{ dataset: { id: string } }>(
+      await onRequestPost(
+        ctxWithPublisher({ env, method: 'POST', body: { title: 'Admin owned', format: 'video/mp4' } }),
+      ),
+    )
+    const commRow = await readJson<{ dataset: { id: string } }>(
+      await onRequestPost(
+        ctxWithPublisher({
+          env,
+          method: 'POST',
+          body: { title: 'Community owned', format: 'video/mp4' },
+          publisher: PUBLISHER,
+        }),
+      ),
+    )
+    return { env, sqlite, adminId: adminRow.dataset.id, commId: commRow.dataset.id }
+  }
+
+  it('GET list shows a community publisher the whole catalog with per-row can_edit', async () => {
+    const { env, adminId, commId } = await seedMixed()
+    const res = await onRequestGet(ctxWithPublisher({ env, publisher: PUBLISHER }))
+    expect(res.status).toBe(200)
+    const body = await readJson<{
+      datasets: Array<{ id: string; can_edit: boolean }>
+    }>(res)
+    // Both rows are visible, not just the community publisher's own.
+    expect(body.datasets.map(d => d.id).sort()).toEqual([adminId, commId].sort())
+    const byId = new Map(body.datasets.map(d => [d.id, d.can_edit]))
+    expect(byId.get(commId)).toBe(true) // own row → editable
+    expect(byId.get(adminId)).toBe(false) // someone else's → view-only
+  })
+
+  it('GET list marks every row can_edit for a privileged (admin) caller', async () => {
+    const { env, adminId, commId } = await seedMixed()
+    const res = await onRequestGet(ctxWithPublisher({ env, publisher: ADMIN }))
+    const body = await readJson<{ datasets: Array<{ id: string; can_edit: boolean }> }>(res)
+    for (const d of body.datasets) expect(d.can_edit).toBe(true)
+    expect(body.datasets.map(d => d.id).sort()).toEqual([adminId, commId].sort())
+  })
+
+  it('GET detail lets a community publisher read another owner’s row with can_edit=false', async () => {
+    const { env, adminId } = await seedMixed()
+    const res = await datasetGet(
+      ctxWithPublisher<'id'>({ env, params: { id: adminId }, publisher: PUBLISHER }),
+    )
+    expect(res.status).toBe(200)
+    const body = await readJson<{ dataset: { id: string; can_edit: boolean } }>(res)
+    expect(body.dataset.id).toBe(adminId)
+    expect(body.dataset.can_edit).toBe(false)
+  })
+
+  it('PUT stays owner-scoped: a community publisher gets 404 editing another owner’s row', async () => {
+    const { env, adminId } = await seedMixed()
+    const res = await datasetPut(
+      ctxWithPublisher<'id'>({
+        env,
+        method: 'PUT',
+        body: { title: 'Hijack attempt' },
+        params: { id: adminId },
+        publisher: PUBLISHER,
+      }),
+    )
+    expect(res.status).toBe(404)
+  })
+
+  it('PUT succeeds on the community publisher’s own row', async () => {
+    const { env, commId } = await seedMixed()
+    const res = await datasetPut(
+      ctxWithPublisher<'id'>({
+        env,
+        method: 'PUT',
+        body: { title: 'Renamed by owner' },
+        params: { id: commId },
+        publisher: PUBLISHER,
+      }),
+    )
+    expect(res.status).toBe(200)
+    const body = await readJson<{ dataset: { title: string } }>(res)
+    expect(body.dataset.title).toBe('Renamed by owner')
   })
 })
 

@@ -247,6 +247,20 @@ describe('renderDatasetDetailPage', () => {
     expect(edit?.textContent).toBe('Edit')
   })
 
+  it('hides Edit / Preview / Retract when the caller cannot edit the row', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(detailResponse(dataset({ can_edit: false })))
+    await renderDatasetDetailPage(mount, '01ABC', {
+      fetchFn: fetchFn as unknown as typeof fetch,
+    })
+    // Read-only view: the row still renders, but none of the
+    // owner-scoped mutation affordances appear.
+    expect(mount.querySelector('.publisher-detail-edit')).toBeNull()
+    expect(mount.querySelector('.publisher-detail-preview')).toBeNull()
+    expect(mount.querySelector('.publisher-detail-title')?.textContent).toBe(
+      'Sea Surface Temperature Anomaly — April 2026',
+    )
+  })
+
   it('Edit button delegates to routerNavigate on a plain click', async () => {
     const fetchFn = vi.fn().mockResolvedValue(detailResponse(dataset()))
     const routerNavigate = vi.fn<(path: string) => void>()

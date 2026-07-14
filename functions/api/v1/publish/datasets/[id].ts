@@ -2,11 +2,13 @@
  * /api/v1/publish/datasets/{id}
  *
  * GET → Single dataset full body (draft, published, retracted).
- *       Community publishers can only fetch rows they own; staff
- *       see anything. 404 when the row doesn't exist OR isn't
- *       visible — we don't distinguish, to avoid leaking the
- *       existence of other publishers' drafts.
- * PUT → Patch metadata. Same authorisation rule as GET.
+ *       Readable by any authenticated publisher — the whole node
+ *       catalog is visible. 404 only when the row doesn't exist. The
+ *       response carries `can_edit` so the portal knows whether to
+ *       offer the mutation controls.
+ * PUT → Patch metadata. Owner-scoped: only the row's publisher (or a
+ *       privileged caller) may write; others get 404 from the
+ *       ownership gate.
  *
  * DELETE → Hard-delete a non-published row (drafts + retracted).
  *       409 `published` for live rows (retract first) and
@@ -21,7 +23,9 @@ import type { PublisherData } from '../_middleware'
 import { writeDatasetAudit } from '../../_lib/audit-store'
 import { getDecorations } from '../../_lib/catalog-store'
 import {
+  canMutateDataset,
   deleteDataset,
+  getDatasetById,
   getDatasetForPublisher,
   updateDataset,
 } from '../../_lib/dataset-mutations'
@@ -53,7 +57,7 @@ export const onRequestGet: PagesFunction<CatalogEnv, 'id'> = async context => {
   const id = pickId(context)
   if (!id) return jsonError(400, 'invalid_request', 'Missing dataset id.')
   const db = context.env.CATALOG_DB!
-  const row = await getDatasetForPublisher(db, publisher, id)
+  const row = await getDatasetById(db, id)
   if (!row) return jsonError(404, 'not_found', `Dataset ${id} not found.`)
   const decorations = (await getDecorations(db, [id])).get(id)
   // Resolve the raw `data_ref` (`r2:<key>` or a bare URL) to a
@@ -70,7 +74,9 @@ export const onRequestGet: PagesFunction<CatalogEnv, 'id'> = async context => {
   const legendUrl = resolveHttpAssetUrl(context.env, row.legend_ref)
   return new Response(
     JSON.stringify({
-      dataset: row,
+      // `can_edit` rides on the dataset object (as it does in the list
+      // response) so the portal reads `dataset.can_edit` uniformly.
+      dataset: { ...row, can_edit: canMutateDataset(publisher, row) },
       data_url: dataUrl,
       thumbnail_url: thumbnailUrl,
       legend_url: legendUrl,

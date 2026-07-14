@@ -98,6 +98,18 @@ describe('renderDatasetEditPage', () => {
     )
   })
 
+  it('redirects a non-owner (can_edit=false) to the read-only detail page instead of the form', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(detailResponse(dataset({ can_edit: false })))
+    const navigate = vi.fn<(url: string) => void>()
+    await renderDatasetEditPage(mount, '01EDIT0000000000000000000', {
+      fetchFn: fetchFn as unknown as typeof fetch,
+      navigate,
+    })
+    expect(navigate).toHaveBeenCalledWith('/publish/datasets/01EDIT0000000000000000000')
+    // The form is not mounted for a read-only caller.
+    expect(mount.querySelector<HTMLInputElement>('#dataset-title')).toBeNull()
+  })
+
   it('surfaces the existing data_ref via the asset uploader’s "current" line + the manual override input', async () => {
     const fetchFn = vi.fn().mockResolvedValue(
       detailResponse(dataset({ data_ref: 'r2:videos/01XYZ/master.m3u8' })),

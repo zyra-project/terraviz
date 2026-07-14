@@ -10,10 +10,13 @@
  * Role taxonomy (canonical privilege source of truth is `role`;
  * `is_admin` is a synced legacy mirror of `role === 'admin'`):
  *
- *   - `admin`     — full administrator (sees all rows, mutates
+ *   - `admin`     — full administrator (mutates any row + the
  *                   operator-scoped resources, manages users).
- *   - `publisher` — the secondary authoring role; sees only its own
- *                   rows, cannot manage users or operator resources.
+ *   - `publisher` — the secondary authoring role; can read the whole
+ *                   node catalog but may only mutate its own rows, and
+ *                   cannot manage users or operator resources. (Reads
+ *                   are open to every publisher; the owner scope lives
+ *                   on the write path — see `dataset-mutations.ts`.)
  *   - `readonly`  — reviewer (unprivileged today; reviewer semantics
  *                   land later).
  *   - `service`   — machine credential / service token.

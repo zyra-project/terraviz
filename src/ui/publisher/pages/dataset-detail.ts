@@ -153,67 +153,76 @@ function renderHeader(d: PublisherDatasetDetail, hooks: HeaderHooks): HTMLElemen
     titleRow.appendChild(transcodingBadge)
   }
 
-  const editHref = `/publish/datasets/${encodeURIComponent(d.id)}/edit`
-  const editLink = document.createElement('a')
-  editLink.className = 'publisher-button publisher-button-secondary publisher-detail-edit'
-  editLink.href = editHref
-  editLink.textContent = t('publisher.datasetDetail.editAction')
-  if (hooks.routerNavigate) {
-    editLink.addEventListener('click', event => {
-      // Plain left-click + no modifier → SPA navigation. Anything
-      // else (cmd-click, middle-click, etc.) falls through to the
-      // browser so the publisher can still open the edit form in a
-      // new tab.
-      if (
-        event.button === 0 &&
-        !event.metaKey &&
-        !event.ctrlKey &&
-        !event.shiftKey &&
-        !event.altKey
-      ) {
-        event.preventDefault()
-        hooks.routerNavigate!(editHref)
-      }
-    })
-  }
-  titleRow.appendChild(editLink)
+  // Edit / Preview / Publish / Retract are all owner-scoped writes.
+  // Every publisher can view any row in the catalog, but the mutation
+  // controls only appear on rows the caller may actually change
+  // (`can_edit`). Absent (older payload / fixture) is treated as
+  // editable; the server is the authoritative gate regardless of what
+  // the UI shows.
+  const canEdit = d.can_edit !== false
+  if (canEdit) {
+    const editHref = `/publish/datasets/${encodeURIComponent(d.id)}/edit`
+    const editLink = document.createElement('a')
+    editLink.className = 'publisher-button publisher-button-secondary publisher-detail-edit'
+    editLink.href = editHref
+    editLink.textContent = t('publisher.datasetDetail.editAction')
+    if (hooks.routerNavigate) {
+      editLink.addEventListener('click', event => {
+        // Plain left-click + no modifier → SPA navigation. Anything
+        // else (cmd-click, middle-click, etc.) falls through to the
+        // browser so the publisher can still open the edit form in a
+        // new tab.
+        if (
+          event.button === 0 &&
+          !event.metaKey &&
+          !event.ctrlKey &&
+          !event.shiftKey &&
+          !event.altKey
+        ) {
+          event.preventDefault()
+          hooks.routerNavigate!(editHref)
+        }
+      })
+    }
+    titleRow.appendChild(editLink)
 
-  // Preview button — mints a 15-minute signed token and surfaces
-  // the SPA-side `/?preview=<token>&dataset=<id>` URL so the
-  // publisher can share an unpublished draft as a live globe
-  // rendering. The SPA consumer (3pe/C) fetches the wire-shape
-  // metadata + the token-gated manifest sibling, then runs the
-  // dataset through the regular loader path. Hidden while
-  // transcoding (data_ref is empty so there'd be nothing to
-  // render). See `dispatchPreview` below for the rationale.
-  if (!d.transcoding) {
-    const previewBtn = document.createElement('button')
-    previewBtn.type = 'button'
-    previewBtn.className =
-      'publisher-button publisher-button-secondary publisher-detail-preview'
-    previewBtn.textContent = t('publisher.datasetDetail.action.preview')
-    previewBtn.addEventListener('click', () => {
-      hooks.onPreview?.()
-    })
-    titleRow.appendChild(previewBtn)
-  }
+    // Preview button — mints a 15-minute signed token and surfaces
+    // the SPA-side `/?preview=<token>&dataset=<id>` URL so the
+    // publisher can share an unpublished draft as a live globe
+    // rendering. The SPA consumer (3pe/C) fetches the wire-shape
+    // metadata + the token-gated manifest sibling, then runs the
+    // dataset through the regular loader path. Hidden while
+    // transcoding (data_ref is empty so there'd be nothing to
+    // render). See `dispatchPreview` below for the rationale.
+    if (!d.transcoding) {
+      const previewBtn = document.createElement('button')
+      previewBtn.type = 'button'
+      previewBtn.className =
+        'publisher-button publisher-button-secondary publisher-detail-preview'
+      previewBtn.textContent = t('publisher.datasetDetail.action.preview')
+      previewBtn.addEventListener('click', () => {
+        hooks.onPreview?.()
+      })
+      titleRow.appendChild(previewBtn)
+    }
 
-  // Drafts and retracted rows surface a "Publish" affordance;
-  // published rows surface "Retract". The route handlers accept
-  // re-publishing a retracted row (it clears retracted_at and
-  // re-stamps published_at) so the same button does double duty.
-  //
-  // While a row is transcoding (Phase 3pd video upload in flight)
-  // the Publish button is gated: data_ref is empty until the GHA
-  // workflow finishes, so the publish-readiness validator would
-  // reject anyway. Disabling here gives the publisher a clearer
-  // signal than "submit-then-error."
-  if (status === 'published') {
-    titleRow.appendChild(renderActionButton('retract', hooks.onAction))
-  } else {
-    titleRow.appendChild(
-      renderActionButton('publish', hooks.onAction, { disabled: !!d.transcoding }),
-    )
+    // Drafts and retracted rows surface a "Publish" affordance;
+    // published rows surface "Retract". The route handlers accept
+    // re-publishing a retracted row (it clears retracted_at and
+    // re-stamps published_at) so the same button does double duty.
+    //
+    // While a row is transcoding (Phase 3pd video upload in flight)
+    // the Publish button is gated: data_ref is empty until the GHA
+    // workflow finishes, so the publish-readiness validator would
+    // reject anyway. Disabling here gives the publisher a clearer
+    // signal than "submit-then-error."
+    if (status === 'published') {
+      titleRow.appendChild(renderActionButton('retract', hooks.onAction))
+    } else {
+      titleRow.appendChild(
+        renderActionButton('publish', hooks.onAction, { disabled: !!d.transcoding }),
+      )
+    }
   }
 
   header.appendChild(titleRow)

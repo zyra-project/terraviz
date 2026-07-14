@@ -47,6 +47,14 @@ export interface PublisherDataset {
    *  for a thumbnail cell in the list table. Null/absent when there's
    *  no thumbnail or it can't be resolved (no R2 public base bound). */
   thumbnail_url?: string | null
+  /** Whether the current caller may mutate this row (edit / retract /
+   *  delete). The whole catalog is visible to every publisher, but
+   *  writes stay owner-scoped, so the portal only shows the mutation
+   *  controls when this is true. Absent on older payloads / fixtures,
+   *  which the UI treats as editable (`can_edit !== false`) since the
+   *  server is the authoritative gate regardless of what the UI
+   *  shows. */
+  can_edit?: boolean
 }
 
 /**

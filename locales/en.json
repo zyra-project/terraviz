@@ -960,6 +960,8 @@
   "publisher.datasets.action.edit.aria": "Edit dataset {title}",
   "publisher.datasets.action.retract": "Retract",
   "publisher.datasets.action.retract.aria": "Retract dataset {title}",
+  "publisher.datasets.action.view": "View",
+  "publisher.datasets.action.view.aria": "View dataset {title}",
   "publisher.datasets.col.actions": "Actions",
   "publisher.datasets.col.format": "Format",
   "publisher.datasets.col.slug": "Slug",

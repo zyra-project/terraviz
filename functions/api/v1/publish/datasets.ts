@@ -19,6 +19,7 @@ import type { PublisherData } from './_middleware'
 import { writeDatasetAudit } from '../_lib/audit-store'
 import { getNodeIdentity } from '../_lib/catalog-store'
 import {
+  canMutateDataset,
   createDataset,
   listDatasetsForPublisher,
   type ListOptions,
@@ -69,10 +70,15 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
     options,
   )
   // Resolve each row's `thumbnail_ref` to a public URL so the list
-  // table can render a thumbnail cell (null when none / unresolvable).
+  // table can render a thumbnail cell (null when none / unresolvable),
+  // and stamp `can_edit` so the portal only shows the Edit / Retract /
+  // Delete controls on rows the caller may actually mutate. The whole
+  // catalog is now visible to every publisher, but writes stay
+  // owner-scoped.
   const withThumbnails = datasets.map(d => ({
     ...d,
     thumbnail_url: resolveHttpAssetUrl(context.env, d.thumbnail_ref),
+    can_edit: canMutateDataset(publisher, d),
   }))
   return new Response(JSON.stringify({ datasets: withThumbnails, next_cursor }), {
     status: 200,

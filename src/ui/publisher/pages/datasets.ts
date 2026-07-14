@@ -275,14 +275,40 @@ function renderTable(
     updatedCell.textContent = formatDate(d.updated_at)
     tr.appendChild(updatedCell)
 
-    // Actions: Edit (all rows) + Retract (published) / Delete
-    // (drafts & retracted). Live rows must be retracted before they
-    // can be deleted, which the API enforces with a 409 regardless
-    // of what the UI shows.
+    // Actions: for a row the caller can mutate, Edit (all rows) +
+    // Retract (published) / Delete (drafts & retracted). Live rows
+    // must be retracted before they can be deleted, which the API
+    // enforces with a 409 regardless of what the UI shows. The whole
+    // catalog is visible to every publisher, but writes stay
+    // owner-scoped — a row the caller can't mutate (`can_edit ===
+    // false`) shows only a View link. `can_edit` absent (older
+    // payload / fixture) is treated as editable; the server is the
+    // authoritative gate regardless of what the UI shows.
     const actionsCell = document.createElement('td')
     actionsCell.className = 'publisher-cell-actions'
     const statusSpan = document.createElement('span')
     statusSpan.className = 'publisher-row-action-status'
+
+    const canEdit = d.can_edit !== false
+    if (!canEdit) {
+      const detailHrefRO = `/publish/datasets/${encodeURIComponent(d.id)}`
+      const viewLink = document.createElement('a')
+      viewLink.href = detailHrefRO
+      viewLink.className = 'publisher-row-action publisher-row-view'
+      viewLink.textContent = t('publisher.datasets.action.view')
+      viewLink.setAttribute('aria-label', t('publisher.datasets.action.view.aria', { title: d.title }))
+      if (routerNavigate) {
+        viewLink.addEventListener('click', event => {
+          if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+          event.preventDefault()
+          routerNavigate(detailHrefRO)
+        })
+      }
+      actionsCell.appendChild(viewLink)
+      tr.appendChild(actionsCell)
+      tbody.appendChild(tr)
+      continue
+    }
 
     const editHref = `/publish/datasets/${encodeURIComponent(d.id)}/edit`
     const editLink = document.createElement('a')

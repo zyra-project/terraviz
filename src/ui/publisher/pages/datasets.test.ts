@@ -16,6 +16,7 @@ interface RawDataset {
   publisher_id: string | null
   legacy_id: string | null
   thumbnail_url?: string | null
+  can_edit?: boolean
 }
 
 function dataset(overrides: Partial<RawDataset> = {}): RawDataset {
@@ -469,6 +470,23 @@ describe('renderDatasetsPage — delete action', () => {
     expect(mount.querySelector('.publisher-row-edit')?.getAttribute('href')).toBe('/publish/datasets/P/edit')
     expect(mount.querySelector('.publisher-row-retract')).not.toBeNull()
     expect(mount.querySelector('.publisher-row-delete')).toBeNull()
+  })
+
+  it('a row the caller cannot edit shows only a View link (no Edit/Retract/Delete)', async () => {
+    window.history.replaceState(null, '', '/publish/datasets?status=published')
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse({
+        datasets: [dataset({ id: 'OTHER', published_at: '2026-04-30T12:00:00Z', can_edit: false })],
+        next_cursor: null,
+      }),
+    )
+    await renderDatasetsPage(mount, { fetchFn: fetchFn as unknown as typeof fetch, fetchCounts: false })
+    expect(mount.querySelector('.publisher-row-edit')).toBeNull()
+    expect(mount.querySelector('.publisher-row-retract')).toBeNull()
+    expect(mount.querySelector('.publisher-row-delete')).toBeNull()
+    const view = mount.querySelector('.publisher-row-view')
+    expect(view).not.toBeNull()
+    expect(view?.getAttribute('href')).toBe('/publish/datasets/OTHER')
   })
 
   it('a confirmed Retract POSTs to the retract endpoint and drops the row', async () => {
