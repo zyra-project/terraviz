@@ -19,6 +19,7 @@ import type { CatalogEnv } from '../_lib/env'
 import type { PublisherData } from './_middleware'
 import { getNodeIdentity } from '../_lib/catalog-store'
 import { createTour, listToursForPublisher } from '../_lib/tour-mutations'
+import { can } from '../_lib/capabilities'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
 const DEFAULT_LIMIT = 50
@@ -59,6 +60,9 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
 
 export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
   const publisher = (context.data as unknown as PublisherData).publisher
+  if (!can(publisher, 'content.create')) {
+    return jsonError(403, 'forbidden_role', 'Creating tours requires an authoring role.')
+  }
   // See publish/datasets.ts — the createTour SQL embeds the
   // node_identity row id as `origin_node`, so a fresh deploy that
   // hasn't run `gen:node-key` would crash with a NOT NULL error.

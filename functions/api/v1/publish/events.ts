@@ -21,6 +21,7 @@ import type { CatalogEnv } from '../_lib/env'
 import type { PublisherData } from './_middleware'
 import { writeAuditEvent } from '../_lib/audit-store'
 import { parseCreate, resolveOriginNode, ingestEvent, type FieldError } from '../_lib/events-ingest'
+import { can } from '../_lib/capabilities'
 import {
   canMutateEvent,
   listCurrentEvents,
@@ -142,11 +143,15 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
   if (!context.env.CATALOG_DB) {
     return jsonError(503, 'binding_missing', 'CATALOG_DB binding is not configured on this deployment.')
   }
-  // Any active publisher may create a manual event, and doing so makes
+  // Any authoring role may create a manual event, and doing so makes
   // them its owner (symmetric with drafting a blog / creating a
   // dataset). It still starts `proposed` and needs approval to surface
-  // publicly, but only the creator / an admin may edit it thereafter.
+  // publicly, but only the creator / an editor / admin may edit it
+  // thereafter. Reviewers (read-only) are refused.
   const publisher = (context.data as unknown as PublisherData).publisher
+  if (!can(publisher, 'content.create')) {
+    return jsonError(403, 'forbidden_role', 'Creating events requires an authoring role.')
+  }
 
   let body: unknown
   try {

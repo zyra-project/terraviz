@@ -174,7 +174,7 @@ describe('PATCH /api/v1/publish/publishers/{id}', () => {
     const other = { ...ADMIN, id: 'PUB-OTHER', email: 'o@e' }
     const { env } = setupEnv([ADMIN, other])
     const res = await detailPatch(
-      ctx({ env, method: 'PATCH', params: { id: 'PUB-ADMIN' }, body: { role: 'publisher' } }),
+      ctx({ env, method: 'PATCH', params: { id: 'PUB-ADMIN' }, body: { role: 'author' } }),
     )
     expect(res.status).toBe(409)
     expect((await readJson<{ error: string }>(res)).error).toBe('self_lockout')
@@ -184,7 +184,7 @@ describe('PATCH /api/v1/publish/publishers/{id}', () => {
     const { env } = setupEnv([ADMIN])
     const ghost = { ...ADMIN, id: 'PUB-GHOST' }
     const res = await detailPatch(
-      ctx({ env, publisher: ghost, method: 'PATCH', params: { id: 'PUB-ADMIN' }, body: { role: 'publisher' } }),
+      ctx({ env, publisher: ghost, method: 'PATCH', params: { id: 'PUB-ADMIN' }, body: { role: 'author' } }),
     )
     expect(res.status).toBe(409)
     expect((await readJson<{ error: string }>(res)).error).toBe('last_admin')

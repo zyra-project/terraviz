@@ -26,6 +26,7 @@ import {
   validateBlogInput,
   type BlogPostStatus,
 } from '../_lib/blog-store'
+import { can } from '../_lib/capabilities'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
 
@@ -67,9 +68,13 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
   if (!context.env.CATALOG_DB) {
     return jsonError(503, 'binding_missing', 'CATALOG_DB binding is not configured on this deployment.')
   }
-  // Any active publisher may create a draft; `insertBlogPost` stamps
-  // them as author, and only the author (or an admin) may edit it after.
+  // Any authoring role may create a draft; `insertBlogPost` stamps them
+  // as author, and only the author (or an editor/admin) may edit it
+  // after. Reviewers (read-only) are refused here.
   const publisher = (context.data as unknown as PublisherData).publisher
+  if (!can(publisher, 'content.create')) {
+    return jsonError(403, 'forbidden_role', 'Creating blog posts requires an authoring role.')
+  }
 
   let body: unknown
   try {

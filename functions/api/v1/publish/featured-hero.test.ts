@@ -30,7 +30,8 @@ const ADMIN: PublisherRow = {
   status: 'active',
   created_at: '2026-01-01T00:00:00.000Z',
 }
-const PUBLISHER: PublisherRow = { ...ADMIN, id: 'PUB-PUBLISHER', email: 'c@e', role: 'publisher', is_admin: 0 }
+const PUBLISHER: PublisherRow = { ...ADMIN, id: 'PUB-PUBLISHER', email: 'c@e', role: 'author', is_admin: 0 }
+const EDITOR: PublisherRow = { ...ADMIN, id: 'PUB-EDITOR', email: 'ed@e', role: 'editor', is_admin: 0 }
 
 const DS_0 = 'DS000' + 'A'.repeat(21)
 const DS_1 = 'DS001' + 'A'.repeat(21)
@@ -39,7 +40,7 @@ const WINDOW = { start: '2026-05-01T00:00:00.000Z', end: '2026-06-01T00:00:00.00
 
 function setupEnv() {
   const sqlite = seedFixtures({ count: 2 })
-  for (const p of [ADMIN, PUBLISHER]) {
+  for (const p of [ADMIN, PUBLISHER, EDITOR]) {
     sqlite
       .prepare(
         `INSERT INTO publishers (id, email, display_name, role, is_admin, status, created_at)
@@ -80,10 +81,16 @@ function auditCount(sqlite: ReturnType<typeof seedFixtures>, action: string): nu
 }
 
 describe('PUT /api/v1/publish/featured-hero', () => {
-  it('403 for a publisher-role account', async () => {
+  it('403 for an author-role account (lacks hero.manage)', async () => {
     const { env } = setupEnv()
     const res = await heroPut(ctx({ env, publisher: PUBLISHER, body: { dataset_id: DS_0, window: WINDOW } }))
     expect(res.status).toBe(403)
+  })
+
+  it('lets an editor set the hero (hero.manage)', async () => {
+    const { env } = setupEnv()
+    const res = await heroPut(ctx({ env, publisher: EDITOR, body: { dataset_id: DS_0, window: WINDOW } }))
+    expect(res.status).toBe(200)
   })
 
   it('400 for a missing window', async () => {

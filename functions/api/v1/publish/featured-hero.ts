@@ -30,7 +30,7 @@ import {
   toPublicHero,
   validateHeroInput,
 } from '../_lib/hero-override-store'
-import { isPrivileged } from '../_lib/publisher-store'
+import { can } from '../_lib/capabilities'
 import { writeAuditEvent } from '../_lib/audit-store'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
@@ -46,7 +46,7 @@ function forbidden(): Response {
   return jsonError(
     403,
     'forbidden_role',
-    'Hero override is restricted to staff, admin, and service callers.',
+    'Setting the hero requires the editor or admin role.',
   )
 }
 
@@ -55,7 +55,7 @@ export const onRequestPut: PagesFunction<CatalogEnv> = async context => {
     return jsonError(503, 'binding_missing', 'CATALOG_DB binding is not configured on this deployment.')
   }
   const publisher = (context.data as unknown as PublisherData).publisher
-  if (!isPrivileged(publisher)) return forbidden()
+  if (!can(publisher, 'hero.manage')) return forbidden()
 
   let body: unknown
   try {
@@ -105,7 +105,7 @@ export const onRequestDelete: PagesFunction<CatalogEnv> = async context => {
     return jsonError(503, 'binding_missing', 'CATALOG_DB binding is not configured on this deployment.')
   }
   const publisher = (context.data as unknown as PublisherData).publisher
-  if (!isPrivileged(publisher)) return forbidden()
+  if (!can(publisher, 'hero.manage')) return forbidden()
 
   // Read the existing pin (if any) so the audit row records which
   // dataset was un-pinned. Clear is idempotent regardless.

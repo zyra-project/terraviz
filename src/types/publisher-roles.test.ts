@@ -39,11 +39,11 @@ describe('publisher role → capability matrix', () => {
       'content.publish.own': 0, 'content.edit.any': 0, 'content.delete.any': 0, 'content.publish.any': 0,
       'insights.read': 1, 'hero.read': 1, 'hero.manage': 0, 'operator.manage': 0, 'users.manage': 0,
     },
-    // R1: reviewer mirrors author (behavior-preserving no-op of the old
-    // `readonly`). Phase R2 flips these authoring cells to 0.
+    // Reviewer is a true read-only role: reads catalog/queues/insights,
+    // authors nothing.
     reviewer: {
-      'content.read': 1, 'content.create': 1, 'content.edit.own': 1, 'content.delete.own': 1,
-      'content.publish.own': 1, 'content.edit.any': 0, 'content.delete.any': 0, 'content.publish.any': 0,
+      'content.read': 1, 'content.create': 0, 'content.edit.own': 0, 'content.delete.own': 0,
+      'content.publish.own': 0, 'content.edit.any': 0, 'content.delete.any': 0, 'content.publish.any': 0,
       'insights.read': 1, 'hero.read': 1, 'hero.manage': 0, 'operator.manage': 0, 'users.manage': 0,
     },
   }

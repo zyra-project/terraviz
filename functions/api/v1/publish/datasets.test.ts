@@ -43,9 +43,12 @@ const PUBLISHER: PublisherRow = {
   id: 'PUB-COMM',
   email: 'comm@example.com',
   display_name: 'Community',
-  role: 'publisher',
+  role: 'author',
   is_admin: 0,
 }
+
+// A read-only reviewer — may read but authors nothing.
+const REVIEWER: PublisherRow = { ...PUBLISHER, id: 'PUB-REVIEWER', email: 'r@e', role: 'reviewer' }
 
 function ctxWithPublisher<P extends string = never>(opts: {
   env: Record<string, unknown>
@@ -123,6 +126,15 @@ describe('POST /api/v1/publish/datasets', () => {
     expect(res.status).toBe(400)
     const body = await readJson<{ errors: Array<{ field: string; code: string }> }>(res)
     expect(body.errors.length).toBeGreaterThan(0)
+  })
+
+  it('returns 403 for a read-only reviewer (lacks content.create)', async () => {
+    const { env } = setupEnv()
+    const res = await onRequestPost(
+      ctxWithPublisher({ env, method: 'POST', body: { title: 'Nope', format: 'video/mp4' }, publisher: REVIEWER }),
+    )
+    expect(res.status).toBe(403)
+    expect((await readJson<{ error: string }>(res)).error).toBe('forbidden_role')
   })
 
   it('returns 503 identity_missing when node_identity has not been provisioned', async () => {

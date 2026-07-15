@@ -89,7 +89,7 @@ describe('getOrCreatePublisher', () => {
       sub: 'sub-2',
       type: 'user',
     })
-    expect(row.role).toBe('publisher')
+    expect(row.role).toBe('contributor')
     expect(row.is_admin).toBe(0)
     expect(row.status).toBe('pending')
     expect(row.email).toBe('newcomer@example.com')
@@ -173,7 +173,7 @@ describe('getOrCreatePublisher', () => {
       { email: 'eric@subteam.noaa.gov', sub: 'user-eric', type: 'user' },
       { trustedDomains: new Set(['noaa.gov']) },
     )
-    expect(row.role).toBe('publisher')
+    expect(row.role).toBe('contributor')
     expect(row.status).toBe('pending')
   })
 
@@ -185,7 +185,7 @@ describe('getOrCreatePublisher', () => {
       { email: 'eric@noaa.gov', sub: 'user-eric', type: 'user' },
       { trustedDomains: new Set() },
     )
-    expect(row.role).toBe('publisher')
+    expect(row.role).toBe('contributor')
     expect(row.status).toBe('pending')
   })
 

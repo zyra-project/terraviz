@@ -13,13 +13,11 @@
  * `roleCan(role, cap)` (server: `can(publisher, cap)`), never
  * `role === '...'`.
  *
- * Phase R1 is behavior-preserving: the matrix below reproduces today's
- * effective behavior for the current role strings — in particular
- * `reviewer` (today's `readonly`) still carries the authoring
- * capabilities it has always had in practice, because `readonly` was
- * never enforced. Phase R2 tightens it to a true read-only role. Until
- * the `0039` rename migration lands, the legacy `publisher` / `readonly`
- * strings are accepted as aliases of `author` / `reviewer`.
+ * `reviewer` (post-`0039`; the legacy `readonly`) is a true read-only
+ * role: it may read the catalog, queues, and insights but authors
+ * nothing. The legacy `publisher` / `readonly` strings are accepted as
+ * aliases of `author` / `reviewer` (see {@link normalizeRole}) so a
+ * mid-deploy read of an un-migrated row still resolves correctly.
  */
 
 /** The capability vocabulary (see the plan doc §3). */
@@ -65,10 +63,14 @@ const SERVICE_CAPS: ReadonlySet<Capability> = new Set(
 )
 
 // --- The matrix. Each role → the capabilities it holds. ------------------
-//
-// R1 note: `reviewer` intentionally mirrors `author` here to preserve
-// today's (unenforced-`readonly`) behavior. R2 replaces the reviewer row
-// with `READ_ONLY`.
+
+// Read-only: catalog + queues + insights, authors nothing.
+const READ_ONLY_CAPS: ReadonlySet<Capability> = new Set<Capability>([
+  'content.read',
+  'insights.read',
+  'hero.read',
+])
+
 const AUTHOR_CAPS: ReadonlySet<Capability> = new Set<Capability>([
   'content.read',
   'content.create',
@@ -96,17 +98,13 @@ const EDITOR_CAPS: ReadonlySet<Capability> = new Set<Capability>([
   'hero.manage',
 ])
 
-// R1: reviewer == author (behavior-preserving). R2 flips this to a true
-// read-only set (`content.read` + `insights.read` + `hero.read`).
-const REVIEWER_CAPS_R1: ReadonlySet<Capability> = AUTHOR_CAPS
-
 export const ROLE_CAPABILITIES: Record<Role, ReadonlySet<Capability>> = {
   admin: ALL,
   service: SERVICE_CAPS,
   editor: EDITOR_CAPS,
   author: AUTHOR_CAPS,
   contributor: CONTRIBUTOR_CAPS,
-  reviewer: REVIEWER_CAPS_R1,
+  reviewer: READ_ONLY_CAPS,
 }
 
 /**

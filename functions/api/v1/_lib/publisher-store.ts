@@ -8,55 +8,61 @@
  * row.
  *
  * Role taxonomy (canonical privilege source of truth is `role`;
- * `is_admin` is a synced legacy mirror of `role === 'admin'`):
+ * `is_admin` is a synced legacy mirror of `role === 'admin'`). The
+ * capabilities each role holds live in the shared matrix
+ * `src/types/publisher-roles.ts`; this is the prose summary. See
+ * `docs/PUBLISHER_ROLES_PLAN.md`.
  *
- *   - `admin`     — full administrator (mutates any row + the
- *                   operator-scoped resources, manages users).
- *   - `publisher` — the secondary authoring role; can read the whole
- *                   node catalog but may only mutate its own rows, and
- *                   cannot manage users or operator resources. (Reads
- *                   are open to every publisher; the owner scope lives
- *                   on the write path — see `dataset-mutations.ts`.)
- *   - `readonly`  — reviewer (unprivileged today; reviewer semantics
- *                   land later).
- *   - `service`   — machine credential / service token.
+ *   - `admin`       — full administrator (any content + operator
+ *                     resources + user management).
+ *   - `editor`      — publish/edit ANY content + the hero; no user or
+ *                     operator settings.
+ *   - `author`      — create + publish/edit its OWN content.
+ *   - `contributor` — create + edit its OWN drafts, but cannot
+ *                     self-publish (an editor/admin approves).
+ *   - `reviewer`    — read-only (catalog, queues, insights).
+ *   - `service`     — machine credential; admin-equivalent for content
+ *                     + operator work, but NOT user management.
  *
  * Status / role assignment:
  *
- * | Origin                                              | role        | is_admin | status   |
- * |-----------------------------------------------------|-------------|----------|----------|
- * | DEV_BYPASS_ACCESS=true                              | `admin`     | 1        | `active` |
- * | Access service token                                | `service`   | 0        | `active` |
- * | Access user, email domain in TRUSTED_PUBLISHER_DOMAINS | `admin`  | 1        | `active` |
- * | Access user, untrusted domain                       | `publisher` | 0        | `pending`|
+ * | Origin                                              | role          | is_admin | status   |
+ * |-----------------------------------------------------|---------------|----------|----------|
+ * | DEV_BYPASS_ACCESS=true                              | `admin`       | 1        | `active` |
+ * | Access service token                                | `service`     | 0        | `active` |
+ * | Access user, email domain in TRUSTED_PUBLISHER_DOMAINS | `admin`    | 1        | `active` |
+ * | Access user, untrusted domain                       | `contributor` | 0        | `pending`|
  *
  * Service tokens are pre-vouched by whoever configured them in the
  * Cloudflare dashboard, so auto-`active` is safe. Trusted-domain
  * users are vouched by the operator's choice to list their domain
  * — appropriate for single-org deploys where the operator IS the
- * admin. Untrusted-domain user logins default to `publisher` /
- * `pending` so a stranger discovering the publisher API cannot start
- * authoring rows until an admin approves them in the portal's Users
- * tab.
+ * admin. Untrusted-domain user logins default to the least-privileged
+ * authoring role (`contributor`) + `pending` so a stranger discovering
+ * the publisher API cannot author anything until an admin approves and
+ * (optionally) promotes them in the portal's Users tab.
  *
  * The `role` column has no SQL CHECK constraint (see
  * `migrations/catalog/0005_publishers_audit.sql`) so the role enum is
  * additive at the runtime layer without a schema migration. The
- * `0023_publisher_roles_two_tier.sql` migration backfilled the old
- * `staff`/`community` rows to `admin`/`publisher`.
+ * `0023_publisher_roles_two_tier.sql` migration backfilled
+ * `staff`/`community` → `admin`/`publisher`; `0039_publisher_roles_five.sql`
+ * renamed `publisher`/`readonly` → `author`/`reviewer`.
  */
 
 import type { AccessIdentity } from './access-auth'
 import { newUlid } from './ulid'
-import { roleCan } from '../../../../src/types/publisher-roles'
+import { roleCan, ASSIGNABLE_ROLES as ROLES_ASSIGNABLE, type Role } from '../../../../src/types/publisher-roles'
 
 /**
  * Roles an admin may assign to a publisher through the Users tab.
- * `service` is intentionally excluded — it is reserved for machine
- * tokens and provisioned automatically, never hand-assigned.
+ * Re-exported from the shared role matrix (`src/types/publisher-roles.ts`)
+ * so there is one source of truth. `service` is intentionally excluded —
+ * it is reserved for machine tokens and provisioned automatically,
+ * never hand-assigned.
  */
-export const ASSIGNABLE_ROLES = ['admin', 'publisher', 'readonly'] as const
-export type AssignableRole = (typeof ASSIGNABLE_ROLES)[number]
+export const ASSIGNABLE_ROLES = ROLES_ASSIGNABLE
+export type AssignableRole = Role
 
 /** Valid `status` values on the publishers table. */
 export const PUBLISHER_STATUSES = ['pending', 'active', 'suspended'] as const
@@ -135,7 +141,12 @@ export function provisioningDefaults(
       return { role: 'admin', is_admin: 1, status: 'active' }
     }
   }
-  return { role: 'publisher', is_admin: 0, status: 'pending' }
+  // Untrusted-domain logins default to the least-privileged authoring
+  // role (`contributor`) and `pending` status, so a stranger who
+  // discovers the publisher API can author nothing until an admin
+  // approves them and (if desired) promotes them to author/editor
+  // (decision D4 in docs/PUBLISHER_ROLES_PLAN.md).
+  return { role: 'contributor', is_admin: 0, status: 'pending' }
 }
 
 /**

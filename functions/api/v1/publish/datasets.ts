@@ -24,6 +24,7 @@ import {
   listDatasetsForPublisher,
   type ListOptions,
 } from '../_lib/dataset-mutations'
+import { can } from '../_lib/capabilities'
 import { resolveHttpAssetUrl } from '../_lib/r2-public-url'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
@@ -88,6 +89,9 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
 
 export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
   const publisher = (context.data as unknown as PublisherData).publisher
+  if (!can(publisher, 'content.create')) {
+    return jsonError(403, 'forbidden_role', 'Creating datasets requires an authoring role.')
+  }
   // The mutation embeds the node_identity row id as `origin_node`
   // via `(SELECT node_id FROM node_identity LIMIT 1)`. If a
   // contributor hits POST before running `gen:node-key`, that
