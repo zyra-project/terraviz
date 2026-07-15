@@ -42,6 +42,7 @@ import type { PublisherData } from '../_middleware'
 import { writeAuditEvent } from '../../_lib/audit-store'
 import {
   canMutateEvent,
+  canReviewEvent,
   claimEventOwner,
   getCurrentEvent,
   listLinksForEvent,
@@ -258,11 +259,19 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
   const event = await getCurrentEvent(db, id)
   if (!event) return jsonError(404, 'not_found', `Event ${id} not found.`)
 
-  // Write-scope: an unclaimed event is open (approving it is how a
-  // publisher claims it); once owned, only the owner or an admin may
-  // review it further.
+  // Two-tier write gate (decision D1). Baseline: the caller must be able
+  // to *edit* this event at all (its owner with edit.own, or an editor
+  // with edit.any). Additionally, any approve/reject decision — on the
+  // event itself or its dataset links — is a *publish* action, so it
+  // needs a publishing role. A contributor may correct its own event's
+  // metadata (edits-only submit) but cannot approve it; approving an
+  // unclaimed feed event requires content.publish.any (editor/admin).
   if (!canMutateEvent(publisher, event)) {
-    return jsonError(403, 'forbidden_owner', 'You can only review events you own.')
+    return jsonError(403, 'forbidden_owner', 'You can only edit events you own.')
+  }
+  const hasDecision = parsed.value.event != null || parsed.value.links.length > 0
+  if (hasDecision && !canReviewEvent(publisher, event)) {
+    return jsonError(403, 'forbidden_role', 'Approving or rejecting an event requires a publishing role.')
   }
 
   // Apply metadata corrections before anything else, so a same-submit

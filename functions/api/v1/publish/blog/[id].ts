@@ -21,6 +21,7 @@
 import type { CatalogEnv } from '../../_lib/env'
 import type { PublisherData } from '../_middleware'
 import type { PublisherRow } from '../../_lib/publisher-store'
+import { canOwnOrAny } from '../../_lib/capabilities'
 import { writeAuditEvent, type AuditAction } from '../../_lib/audit-store'
 import {
   bustBlogCache,
@@ -138,9 +139,11 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
 
   const existing = await getBlogPost(context.env.CATALOG_DB, id)
   if (!existing) return jsonError(404, 'not_found', `Post ${id} not found.`)
-  // Owner-scoped: only the author (or an admin) may (un)publish.
-  if (!canMutateBlogPost(publisher, existing)) {
-    return jsonError(403, 'forbidden_owner', 'You can only publish blog posts you authored.')
+  // Publishing is a privilege above editing: the author (own) or an
+  // editor/admin (any) may (un)publish. A contributor can draft + edit
+  // its own post but cannot publish it.
+  if (!canOwnOrAny(publisher, existing.author_id, 'content.publish.own', 'content.publish.any')) {
+    return jsonError(403, 'forbidden_owner', 'Publishing a blog post requires a publishing role.')
   }
 
   const row =

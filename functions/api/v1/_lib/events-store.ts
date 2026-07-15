@@ -27,7 +27,7 @@
 import { newUlid } from './ulid'
 import { isNocookieEmbedUrl } from './youtube-channels'
 import type { PublisherRow } from './publisher-store'
-import { can } from './capabilities'
+import { can, canOwnOrAny } from './capabilities'
 
 /** KV key the public `GET /api/v1/featured-event` caches under. Shared
  *  with the review route so an approve/reject can bust it for immediate
@@ -541,13 +541,24 @@ export function canMutateEvent(
   publisher: PublisherRow,
   event: Pick<CurrentEventRow, 'owner_id'>,
 ): boolean {
-  if (can(publisher, 'content.edit.any')) return true
-  // An unclaimed event is open (approving it is how a publisher claims
-  // it). NOTE: Phase R4 tightens this — claiming an unclaimed event will
-  // require `content.publish.any` (Editor+), per decision D1 in the
-  // roles plan. For now the free pass preserves PR #283's behavior.
-  if (event.owner_id == null) return true
-  return event.owner_id === publisher.id && can(publisher, 'content.edit.own')
+  return canOwnOrAny(publisher, event.owner_id, 'content.edit.own', 'content.edit.any')
+}
+
+/**
+ * Whether `publisher` may **review** (approve/reject) the event or its
+ * dataset links — a publish-tier action, distinct from editing its
+ * metadata. Per decision D1 (`docs/PUBLISHER_ROLES_PLAN.md`): the
+ * event's owner with `content.publish.own` (an author approving their
+ * own manual event), or any `content.publish.any` holder (an editor /
+ * admin clearing the feed queue, which also claims an unclaimed event).
+ * A contributor can edit its own event's metadata but cannot approve
+ * it.
+ */
+export function canReviewEvent(
+  publisher: PublisherRow,
+  event: Pick<CurrentEventRow, 'owner_id'>,
+): boolean {
+  return canOwnOrAny(publisher, event.owner_id, 'content.publish.own', 'content.publish.any')
 }
 
 /**

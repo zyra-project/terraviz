@@ -11,6 +11,7 @@
 import type { CatalogEnv } from '../../../_lib/env'
 import type { PublisherData } from '../../_middleware'
 import { writeDatasetAudit } from '../../../_lib/audit-store'
+import { canOwnOrAny } from '../../../_lib/capabilities'
 import {
   getDatasetForPublisher,
   retractDataset,
@@ -39,6 +40,11 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
 
   const existing = await getDatasetForPublisher(context.env.CATALOG_DB!, publisher, id)
   if (!existing) return jsonError(404, 'not_found', `Dataset ${id} not found.`)
+  // Retract is a publish-tier action (it changes public visibility) —
+  // same gate as publish.
+  if (!canOwnOrAny(publisher, existing.publisher_id, 'content.publish.own', 'content.publish.any')) {
+    return jsonError(403, 'forbidden_role', 'Retracting requires a publishing role.')
+  }
 
   const jobQueue =
     (context.data as unknown as RetractContextData).jobQueue ??

@@ -29,14 +29,16 @@ const ADMIN: PublisherRow = {
   status: 'active',
   created_at: '2026-01-01T00:00:00.000Z',
 }
-const PUBLISHER: PublisherRow = { ...ADMIN, id: 'PUB-PUBLISHER', email: 'c@e', role: 'publisher', is_admin: 0 }
+const PUBLISHER: PublisherRow = { ...ADMIN, id: 'PUB-PUBLISHER', email: 'c@e', role: 'author', is_admin: 0 }
+const EDITOR: PublisherRow = { ...ADMIN, id: 'PUB-EDITOR', email: 'ed@e', role: 'editor', is_admin: 0 }
+const CONTRIBUTOR: PublisherRow = { ...ADMIN, id: 'PUB-CONTRIB', email: 'co@e', role: 'contributor', is_admin: 0 }
 
 const DS_0 = 'DS000' + 'A'.repeat(21)
 const DS_1 = 'DS001' + 'A'.repeat(21)
 
 function setupEnv() {
   const sqlite = seedFixtures({ count: 2 })
-  for (const p of [ADMIN, PUBLISHER]) {
+  for (const p of [ADMIN, PUBLISHER, EDITOR, CONTRIBUTOR]) {
     sqlite
       .prepare(
         `INSERT INTO publishers (id, email, display_name, role, is_admin, status, created_at)
@@ -83,19 +85,53 @@ async function seedEventWithLink(env: { CATALOG_DB: D1Database }) {
 }
 
 describe('POST /api/v1/publish/events/:id', () => {
-  it('lets a publisher approve an unclaimed event and claims ownership for them', async () => {
+  it('lets an editor approve an unclaimed event and claims ownership for them (D1)', async () => {
     const { env } = setupEnv()
     const id = await seedEventWithLink(env)
-    const res = await reviewPost(ctx({ env, id, publisher: PUBLISHER, body: { event: 'approve' } }))
+    const res = await reviewPost(ctx({ env, id, publisher: EDITOR, body: { event: 'approve' } }))
     expect(res.status).toBe(200)
     const row = await getCurrentEvent(env.CATALOG_DB, id)
     expect(row!.status).toBe('approved')
-    expect(row!.owner_id).toBe(PUBLISHER.id) // approving claimed it
+    expect(row!.owner_id).toBe(EDITOR.id) // approving claimed it
     const body = JSON.parse(await res.text()) as { event: { can_edit: boolean } }
     expect(body.event.can_edit).toBe(true)
   })
 
-  it('403 forbidden_owner when a publisher reviews an event owned by someone else', async () => {
+  it('403 when an author touches an UNCLAIMED feed event (Editor territory — D1)', async () => {
+    const { env } = setupEnv()
+    const id = await seedEventWithLink(env) // owner_id null
+    // An author can neither edit nor approve an unclaimed feed event —
+    // it fails the baseline edit gate (needs edit.any).
+    const res = await reviewPost(ctx({ env, id, publisher: PUBLISHER, body: { event: 'approve' } }))
+    expect(res.status).toBe(403)
+    expect((JSON.parse(await res.text()) as { error: string }).error).toBe('forbidden_owner')
+  })
+
+  it('lets an author approve their OWN event (publish.own)', async () => {
+    const { env } = setupEnv()
+    const id = (await insertCurrentEvent(env.CATALOG_DB, { ...SAMPLE, ownerId: PUBLISHER.id })).id
+    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_0, matchScore: 0.9 })
+    const res = await reviewPost(ctx({ env, id, publisher: PUBLISHER, body: { event: 'approve' } }))
+    expect(res.status).toBe(200)
+    expect((await getCurrentEvent(env.CATALOG_DB, id))!.status).toBe('approved')
+  })
+
+  it('lets a contributor edit its OWN event metadata but not approve it', async () => {
+    const { env } = setupEnv()
+    const id = (await insertCurrentEvent(env.CATALOG_DB, { ...SAMPLE, ownerId: CONTRIBUTOR.id })).id
+    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_0, matchScore: 0.9 })
+    // Edits-only submit (no decision) → allowed.
+    const edit = await reviewPost(
+      ctx({ env, id, publisher: CONTRIBUTOR, body: { edits: { occurredStart: '2026-06-26T00:00:00Z' } } }),
+    )
+    expect(edit.status).toBe(200)
+    // A decision → refused (no publish.own).
+    const approve = await reviewPost(ctx({ env, id, publisher: CONTRIBUTOR, body: { event: 'approve' } }))
+    expect(approve.status).toBe(403)
+    expect((JSON.parse(await approve.text()) as { error: string }).error).toBe('forbidden_role')
+  })
+
+  it('403 forbidden_owner when an author reviews an event owned by someone else', async () => {
     const { env } = setupEnv()
     // Seed an event already owned by the admin.
     const id = (await insertCurrentEvent(env.CATALOG_DB, { ...SAMPLE, ownerId: 'PUB-ADMIN' })).id

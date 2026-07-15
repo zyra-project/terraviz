@@ -49,6 +49,8 @@ const PUBLISHER: PublisherRow = {
 
 // A read-only reviewer — may read but authors nothing.
 const REVIEWER: PublisherRow = { ...PUBLISHER, id: 'PUB-REVIEWER', email: 'r@e', role: 'reviewer' }
+// A contributor — may create + edit own drafts, but cannot publish.
+const CONTRIBUTOR: PublisherRow = { ...PUBLISHER, id: 'PUB-CONTRIB', email: 'co@e', role: 'contributor' }
 
 function ctxWithPublisher<P extends string = never>(opts: {
   env: Record<string, unknown>
@@ -84,7 +86,7 @@ function ctxWithPublisher<P extends string = never>(opts: {
 
 function setupEnv() {
   const sqlite = seedFixtures({ count: 0 })
-  for (const p of [ADMIN, PUBLISHER]) {
+  for (const p of [ADMIN, PUBLISHER, CONTRIBUTOR]) {
     sqlite
       .prepare(
         `INSERT INTO publishers (id, email, display_name, role, is_admin, status, created_at)
@@ -342,6 +344,34 @@ describe('read-open / write-owner-scoped (whole-catalog visibility)', () => {
     expect(res.status).toBe(200)
     const body = await readJson<{ dataset: { title: string } }>(res)
     expect(body.dataset.title).toBe('Renamed by owner')
+  })
+})
+
+describe('contributor cannot publish (R4)', () => {
+  it('lets a contributor create + edit its own draft but 403s on publish', async () => {
+    const { env } = setupEnv()
+    // Create as the contributor (content.create allowed).
+    const created = await onRequestPost(
+      ctxWithPublisher({
+        env,
+        method: 'POST',
+        body: { title: 'Contrib draft', format: 'video/mp4', data_ref: 'vimeo:1', license_spdx: 'CC-BY-4.0' },
+        publisher: CONTRIBUTOR,
+      }),
+    )
+    expect(created.status).toBe(201)
+    const id = (await readJson<{ dataset: { id: string } }>(created)).dataset.id
+    // Edit own draft → allowed.
+    const edit = await datasetPut(
+      ctxWithPublisher<'id'>({ env, method: 'PUT', body: { title: 'Edited' }, params: { id }, publisher: CONTRIBUTOR }),
+    )
+    expect(edit.status).toBe(200)
+    // Publish own draft → 403 (no content.publish.own).
+    const pub = await datasetPublish(
+      ctxWithPublisher<'id'>({ env, method: 'POST', params: { id }, publisher: CONTRIBUTOR }),
+    )
+    expect(pub.status).toBe(403)
+    expect((await readJson<{ error: string }>(pub)).error).toBe('forbidden_role')
   })
 })
 
