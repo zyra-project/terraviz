@@ -31,6 +31,7 @@
  */
 
 import { type PublisherRow, isPrivileged } from './publisher-store'
+import { can, canOwnOrAny } from './capabilities'
 import type { DatasetRow } from './catalog-store'
 import { invalidateSnapshot } from './snapshot'
 import type { CatalogEnv } from './env'
@@ -145,7 +146,11 @@ export type DraftCreateOutcome = DraftCreateResult | DraftCreateFailure
  * only gates the owner-scoped write path via `getDatasetForPublisher`.
  */
 function publisherScope(publisher: PublisherRow): { sql: string; binds: unknown[] } {
-  if (isPrivileged(publisher)) return { sql: '1=1', binds: [] }
+  // The mutation-visibility gate: callers who may edit any row see the
+  // whole table; everyone else only their own. (Editors gain
+  // `content.edit.any` in a later phase; today only admin/service hold
+  // it, so this is behavior-identical to the old isPrivileged check.)
+  if (can(publisher, 'content.edit.any')) return { sql: '1=1', binds: [] }
   return { sql: 'publisher_id = ?', binds: [publisher.id] }
 }
 
@@ -161,7 +166,7 @@ export function canMutateDataset(
   publisher: PublisherRow,
   row: Pick<DatasetRow, 'publisher_id'>,
 ): boolean {
-  return isPrivileged(publisher) || row.publisher_id === publisher.id
+  return canOwnOrAny(publisher, row.publisher_id, 'content.edit.own', 'content.edit.any')
 }
 
 /**

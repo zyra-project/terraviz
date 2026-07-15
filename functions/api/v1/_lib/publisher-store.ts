@@ -48,6 +48,7 @@
 
 import type { AccessIdentity } from './access-auth'
 import { newUlid } from './ulid'
+import { roleCan } from '../../../../src/types/publisher-roles'
 
 /**
  * Roles an admin may assign to a publisher through the Users tab.
@@ -201,29 +202,31 @@ export async function getOrCreatePublisher(
 }
 
 /**
- * Privileged callers see all rows and can mutate operator-scoped
- * resources (featured-list, peer config, hard delete). The role
- * table:
- *   - `admin` and `service` are privileged.
- *   - `publisher` and `readonly` are unprivileged.
+ * Privileged callers can mutate operator-scoped resources (feeds, node
+ * profile / identity, media config, featured list, hero, workflows,
+ * analytics backfill). Now a thin alias over the capability matrix:
+ * `operator.manage` is held by exactly `admin` + `service`, so this is
+ * behavior-identical to the old `role ∈ {admin, service}` check while
+ * the individual call sites are migrated to their specific capability
+ * (`hero.manage`, `content.publish.any`, …) in later phases.
  *
  * `role` is the canonical source of truth; the legacy `is_admin`
  * column is kept synced (`is_admin = 1` iff `role = 'admin'`) so it is
- * not consulted here. Read-side scoping in `dataset-mutations.ts`
- * consults this; the featured-datasets routes consult it for
- * write-side gating.
+ * not consulted here.
+ *
+ * Design: `docs/PUBLISHER_ROLES_PLAN.md`.
  */
 export function isPrivileged(publisher: PublisherRow): boolean {
-  return publisher.role === 'admin' || publisher.role === 'service'
+  return roleCan(publisher.role, 'operator.manage')
 }
 
 /**
- * Admin gate for user management. Strictly `role === 'admin'` —
- * unlike `isPrivileged`, this excludes `service` tokens, so machine
- * credentials cannot approve/suspend/promote other publishers. The
- * Users tab and its endpoints (`/api/v1/publish/publishers`) gate on
- * this.
+ * Admin gate for user management. `users.manage` is held by `admin`
+ * only (not `service`), so this preserves the old strict
+ * `role === 'admin'` semantics: machine credentials cannot
+ * approve/suspend/promote other publishers. The Users tab and its
+ * endpoints (`/api/v1/publish/publishers`) gate on this.
  */
 export function isAdmin(publisher: PublisherRow): boolean {
-  return publisher.role === 'admin'
+  return roleCan(publisher.role, 'users.manage')
 }

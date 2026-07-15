@@ -213,6 +213,7 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `functions/api/v1/_lib/preview-token.ts` | Short-lived signed preview tokens for unpublished datasets and tours |
 | `functions/api/v1/_lib/publisher-mutations.ts` | Admin user-administration store helper — list / get / update publishers, self-lockout + last-admin guardrails |
 | `functions/api/v1/_lib/publisher-store.ts` | D1 reader / writer for the `publishers` table |
+| `functions/api/v1/_lib/capabilities.ts` | Server-side capability check (`can` / `canOwnOrAny`) — thin adapter over the shared role→capability matrix (`src/types/publisher-roles.ts`); the authorization primitive routes/mutations gate on (`docs/PUBLISHER_ROLES_PLAN.md`) |
 | `functions/api/v1/_lib/r2-public-url.ts` | Build a publicly-readable URL for an R2 object key |
 | `functions/api/v1/_lib/image-upload.ts` | Shared validation for small direct image uploads (base64-in-JSON): png/jpeg/webp allowlist, magic-byte check against the claimed type, bounded decode, sha256 for content-addressed keys — used by the node-profile logo and tour-media routes |
 | `functions/api/v1/_lib/r2-store.ts` | R2 storage helpers — Phase 1b |

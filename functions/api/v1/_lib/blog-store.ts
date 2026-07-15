@@ -13,7 +13,8 @@
  */
 
 import { newUlid } from './ulid'
-import { type PublisherRow, isPrivileged } from './publisher-store'
+import type { PublisherRow } from './publisher-store'
+import { canOwnOrAny } from './capabilities'
 
 /** Bounds keep the stored payload sane; the portal enforces the same
  *  limits client-side. */
@@ -120,7 +121,7 @@ export function canMutateBlogPost(
   publisher: PublisherRow,
   row: Pick<BlogPostRow, 'author_id'>,
 ): boolean {
-  return isPrivileged(publisher) || row.author_id === publisher.id
+  return canOwnOrAny(publisher, row.author_id, 'content.edit.own', 'content.edit.any')
 }
 
 export function toPublicPost(row: BlogPostRow): BlogPostPublic {

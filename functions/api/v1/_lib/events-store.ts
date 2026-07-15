@@ -26,7 +26,8 @@
 
 import { newUlid } from './ulid'
 import { isNocookieEmbedUrl } from './youtube-channels'
-import { type PublisherRow, isPrivileged } from './publisher-store'
+import type { PublisherRow } from './publisher-store'
+import { can } from './capabilities'
 
 /** KV key the public `GET /api/v1/featured-event` caches under. Shared
  *  with the review route so an approve/reject can bust it for immediate
@@ -540,7 +541,13 @@ export function canMutateEvent(
   publisher: PublisherRow,
   event: Pick<CurrentEventRow, 'owner_id'>,
 ): boolean {
-  return isPrivileged(publisher) || event.owner_id == null || event.owner_id === publisher.id
+  if (can(publisher, 'content.edit.any')) return true
+  // An unclaimed event is open (approving it is how a publisher claims
+  // it). NOTE: Phase R4 tightens this — claiming an unclaimed event will
+  // require `content.publish.any` (Editor+), per decision D1 in the
+  // roles plan. For now the free pass preserves PR #283's behavior.
+  if (event.owner_id == null) return true
+  return event.owner_id === publisher.id && can(publisher, 'content.edit.own')
 }
 
 /**

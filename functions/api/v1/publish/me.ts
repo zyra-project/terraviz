@@ -9,6 +9,7 @@
 
 import type { CatalogEnv } from '../_lib/env'
 import type { PublisherData } from './_middleware'
+import { capabilitiesForRole } from '../../../../src/types/publisher-roles'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
 
@@ -24,6 +25,9 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
       is_admin: publisher.is_admin === 1,
       status: publisher.status,
       created_at: publisher.created_at,
+      // The caller's resolved capability list — the portal gates its
+      // controls on these rather than re-deriving from `role`.
+      capabilities: capabilitiesForRole(publisher.role),
     }),
     {
       status: 200,
