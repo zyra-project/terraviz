@@ -143,7 +143,15 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
   // editor/admin (any) may (un)publish. A contributor can draft + edit
   // its own post but cannot publish it.
   if (!canOwnOrAny(publisher, existing.author_id, 'content.publish.own', 'content.publish.any')) {
-    return jsonError(403, 'forbidden_owner', 'Publishing a blog post requires a publishing role.')
+    // Distinguish the two failure modes: the owner who simply lacks a
+    // publishing capability (e.g. a contributor) is a role problem;
+    // a non-owner without `content.publish.any` is an ownership problem.
+    const isOwner = existing.author_id === publisher.id
+    return jsonError(
+      403,
+      isOwner ? 'forbidden_role' : 'forbidden_owner',
+      'Publishing a blog post requires a publishing role.',
+    )
   }
 
   const row =

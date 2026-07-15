@@ -350,7 +350,11 @@ function renderMediaSuggestions(event: ReviewEvent, cb: EventDetailCallbacks): H
  * as the generated tour will show it, with a Remove control. The embed
  * host is re-guarded by the caller before this renders.
  */
-function renderAttachedVideo(event: ReviewEvent, cb: EventDetailCallbacks): HTMLElement {
+function renderAttachedVideo(
+  event: ReviewEvent,
+  cb: EventDetailCallbacks,
+  canEdit: boolean,
+): HTMLElement {
   const wrap = el('div', 'publisher-events-video')
   const frame = document.createElement('iframe')
   frame.className = 'publisher-events-video-frame'
@@ -360,6 +364,12 @@ function renderAttachedVideo(event: ReviewEvent, cb: EventDetailCallbacks): HTML
   frame.setAttribute('allowfullscreen', '')
   frame.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin')
   frame.setAttribute('allow', 'accelerometer; encrypted-media; gyroscope; picture-in-picture')
+
+  // Non-editable callers can watch the video but get no Remove control.
+  if (!canEdit) {
+    wrap.append(frame)
+    return wrap
+  }
 
   const status = el('span', 'publisher-events-edit-status')
   const remove = document.createElement('button')
@@ -676,9 +686,11 @@ export function renderEventDetail(event: ReviewEvent, cb: EventDetailCallbacks):
   }
 
   // --- Attached agency video (the picked YouTube embed) — framed for
-  // the curator to vet, with a Remove control. Independent of the image.
-  if (event.videoEmbedUrl && isNocookieEmbedUrl(event.videoEmbedUrl) && canEdit) {
-    pane.append(renderAttachedVideo(event, cb))
+  // the curator to vet. Independent of the image. Read-all/write-own:
+  // everyone can watch the attached video; only editable callers get the
+  // Remove control.
+  if (event.videoEmbedUrl && isNocookieEmbedUrl(event.videoEmbedUrl)) {
+    pane.append(renderAttachedVideo(event, cb, canEdit))
   }
 
   // --- Suggested media (task: media suggestion engine) — image
