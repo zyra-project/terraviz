@@ -15,6 +15,10 @@ on:
       - 'src-tauri/**'
       - 'src/**'
       - 'public/**'
+      # Standalone design-preview mockup is a static artifact copied
+      # verbatim into the bundle — it can't affect a native build, so a
+      # change to it alone should not spin up the platform matrix.
+      - '!public/design-preview.html'
       - 'package.json'
       - 'vite.config.ts'
       - '.github/workflows/desktop.yml'
@@ -24,6 +28,10 @@ on:
       - 'src-tauri/**'
       - 'src/**'
       - 'public/**'
+      # Standalone design-preview mockup is a static artifact copied
+      # verbatim into the bundle — it can't affect a native build, so a
+      # change to it alone should not spin up the platform matrix.
+      - '!public/design-preview.html'
       - 'package.json'
       - 'vite.config.ts'
       - '.github/workflows/desktop.yml'
