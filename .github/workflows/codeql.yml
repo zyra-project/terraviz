@@ -38,11 +38,11 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
-          # Belt-and-suspenders in case Tauri mobile scaffolding regenerates
-          paths-ignore: |
-            src-tauri/gen/**
-            **/node_modules/**
-            **/dist/**
+          # `paths`/`paths-ignore` are only honored inside the config
+          # file — they are NOT valid inputs to this step, so an inline
+          # `paths-ignore:` here is silently ignored. Exclusions live in
+          # the config file below.
+          config-file: ./.github/codeql-config.yml
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4

@@ -1,11 +1,28 @@
 # CodeQL scanning configuration
 #
-# Excludes auto-generated Tauri mobile scaffolds from analysis. These
-# directories contain template Kotlin/Gradle/Swift code produced by
-# `tauri android init` / `tauri ios init` and are not hand-written
-# application code. CodeQL's Java/Kotlin scanner fails on them because
-# build-time generated files (tauri.settings.gradle, tauri.build.gradle.kts)
-# are gitignored and absent at scan time.
+# Wired into .github/workflows/codeql.yml via the init step's
+# `config-file:` input. NOTE: `paths` / `paths-ignore` are only
+# honored inside this config file — they are NOT valid inputs to the
+# codeql-action/init step, so an inline `paths-ignore:` on the step is
+# silently ignored. This file is the single source of truth for path
+# exclusions.
+#
+# Excludes:
+#  - Auto-generated Tauri mobile scaffolds: template Kotlin/Gradle/
+#    Swift produced by `tauri android init` / `tauri ios init`, not
+#    hand-written application code. CodeQL's Java/Kotlin scanner fails
+#    on them because build-time generated files
+#    (tauri.settings.gradle, tauri.build.gradle.kts) are gitignored
+#    and absent at scan time.
+#  - Vendored dependencies and build output.
+#  - The self-contained design-review mockup: a generated
+#    artifact-export bundle (vendored React UMD + the export bootstrap
+#    loader), not hand-written application code and never imported into
+#    the app. CodeQL flags the minified third-party JS; scanning it is
+#    noise.
 
 paths-ignore:
   - src-tauri/gen/**
+  - "**/node_modules/**"
+  - "**/dist/**"
+  - public/design-preview.html
