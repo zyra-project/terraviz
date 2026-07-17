@@ -394,6 +394,27 @@ describe('POST /api/v1/publish/events/:id', () => {
       expect(row!.video_embed_url).toBeNull()
     })
 
+    it('accepts a direct video file, rejects a non-http url, clears on empty', async () => {
+      const { env } = setupEnv()
+      const id = await seedInferredEvent(env)
+      const file = 'https://oceantoday.noaa.gov/coral/bleach_720p.mp4'
+      const ok = await reviewPost(ctx({ env, id, body: { edits: { videoFileUrl: file } } }))
+      expect(ok.status).toBe(200)
+      let row = await getCurrentEvent(env.CATALOG_DB, id)
+      expect(row!.video_file_url).toBe(file)
+      // Independent of the embed + image fields.
+      expect(row!.video_embed_url).toBeNull()
+      expect(row!.image_url).toBeNull()
+
+      const bad = await reviewPost(ctx({ env, id, body: { edits: { videoFileUrl: 'ftp://oceantoday.noaa.gov/x.mp4' } } }))
+      expect(bad.status).toBe(400)
+      expect((await bad.json() as { errors: Array<{ field: string }> }).errors[0].field).toBe('edits.videoFileUrl')
+
+      await reviewPost(ctx({ env, id, body: { edits: { videoFileUrl: '' } } }))
+      row = await getCurrentEvent(env.CATALOG_DB, id)
+      expect(row!.video_file_url).toBeNull()
+    })
+
     it('400 for a non-http(s) or oversized imageUrl', async () => {
       const { env } = setupEnv()
       const id = await seedInferredEvent(env)

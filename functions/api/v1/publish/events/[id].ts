@@ -87,7 +87,7 @@ interface ParsedReview {
    *  resolved from `edits.regionName` via `regions.ts` and/or a raw
    *  `edits.point`; `pointOnly` marks a point-without-region edit so the
    *  handler can preserve the event's existing bbox/region. */
-  edits?: { occurredStart?: string; geometry?: EventGeometry; pointOnly?: boolean; imageUrl?: string; imageAlt?: string | null; videoEmbedUrl?: string | null }
+  edits?: { occurredStart?: string; geometry?: EventGeometry; pointOnly?: boolean; imageUrl?: string; imageAlt?: string | null; videoEmbedUrl?: string | null; videoFileUrl?: string | null }
 }
 
 function jsonError(status: number, error: string, message: string): Response {
@@ -224,7 +224,21 @@ function parseReview(
         out.videoEmbedUrl = v
       }
     }
-    if (out.occurredStart !== undefined || out.geometry !== undefined || out.imageUrl !== undefined || out.imageAlt !== undefined || out.videoEmbedUrl !== undefined) edits = out
+    // Curator-picked DIRECT video file (the non-YouTube video-sitemap
+    // suggestion). http(s) + bounded at write, mirroring imageUrl; the
+    // registered-source host allowlist is enforced authoritatively where
+    // it plays (the tour emitter + the media-proxy). Empty string clears.
+    if (e.videoFileUrl != null) {
+      const v = typeof e.videoFileUrl === 'string' ? e.videoFileUrl.trim() : ''
+      if (v === '') {
+        out.videoFileUrl = null
+      } else if (!looksLikeUrl(v) || v.length > 2048) {
+        errors.push({ field: 'edits.videoFileUrl', code: 'invalid', message: '`edits.videoFileUrl` must be an http(s) URL of at most 2048 characters.' })
+      } else {
+        out.videoFileUrl = v
+      }
+    }
+    if (out.occurredStart !== undefined || out.geometry !== undefined || out.imageUrl !== undefined || out.imageAlt !== undefined || out.videoEmbedUrl !== undefined || out.videoFileUrl !== undefined) edits = out
   }
 
   if (event === undefined && links.length === 0 && addDatasetIds.length === 0 && edits === undefined && errors.length === 0) {
@@ -296,6 +310,7 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
       imageUrl: edits.imageUrl,
       imageAlt: edits.imageAlt,
       videoEmbedUrl: edits.videoEmbedUrl,
+      videoFileUrl: edits.videoFileUrl,
     })
     // The matcher scores on date/place — an image-only edit changes
     // no signal, so skip the re-run for it.

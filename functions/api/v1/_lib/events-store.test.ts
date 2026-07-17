@@ -400,6 +400,7 @@ describe('toPublicEvent', () => {
       image_alt: null,
       video_embed_url: null,
       owner_id: null,
+      video_file_url: null,
     }
     expect(toPublicEvent({ ...base, image_url: 'https://img.ex/story.jpg' }).imageUrl).toBe('https://img.ex/story.jpg')
     // eslint-disable-next-line no-script-url
@@ -437,6 +438,7 @@ describe('toPublicEvent', () => {
       reviewed_by: null,
       inferred_fields: null,
       owner_id: null,
+      video_file_url: null,
     })
     expect(pub.geometry).toEqual({})
     expect(pub.summary).toBeUndefined()

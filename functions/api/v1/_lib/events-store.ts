@@ -111,6 +111,11 @@ export interface CurrentEventRow {
    *  proposed event is still unclaimed. Distinct from `reviewed_by`
    *  (the last curator to act). Gates the write path; reads are open. */
   owner_id: string | null
+  /** Curator-picked DIRECT video file (e.g. a NOAA Ocean Today MP4),
+   *  played as a native <video> — distinct from the nocookie
+   *  `video_embed_url`. Host-allowlist-guarded at tour-emit / proxy
+   *  time. NULL when none picked. */
+  video_file_url: string | null
   /** JSON array of AI-filled field names ('["occurredStart","geometry"]');
    *  NULL when everything came from the source (slice C provenance). */
   inferred_fields: string | null
@@ -170,6 +175,9 @@ export interface CurrentEventPublic {
   imageAlt?: string
   /** Curator-picked video embed url (nocookie/embed), when present. */
   videoEmbedUrl?: string
+  /** Curator-picked DIRECT video file (native <video>), when present +
+   *  http(s) — the host-allowlist guard is applied at tour-emit / proxy. */
+  videoFileUrl?: string
 }
 
 /** Fields a caller supplies to {@link insertCurrentEvent}. The store
@@ -201,6 +209,8 @@ export interface NewCurrentEvent {
   imageAlt?: string | null
   /** Curator-picked video embed url; feeds never carry one. */
   videoEmbedUrl?: string | null
+  /** Curator-picked DIRECT video file; feeds never carry one. */
+  videoFileUrl?: string | null
   /** Durable owner (publishers.id). The manual-create path sets this to
    *  the creating publisher; the ingest path leaves it null (a feed
    *  event is unclaimed until someone approves it). */
@@ -221,7 +231,7 @@ export interface NewEventDatasetLink {
 const EVENT_COLUMNS = `id, origin_node, title, summary, source_name, source_url,
   published_at, feed_id, external_id, occurred_start, occurred_end,
   bbox_n, bbox_s, bbox_w, bbox_e, point_lat, point_lon, region_name,
-  status, created_at, updated_at, reviewed_at, reviewed_by, inferred_fields, image_url, image_alt, video_embed_url, owner_id`
+  status, created_at, updated_at, reviewed_at, reviewed_by, inferred_fields, image_url, image_alt, video_embed_url, owner_id, video_file_url`
 
 const LINK_COLUMNS = `event_id, dataset_id, match_score, signals_json,
   status, created_at, approved_at, approved_by`
@@ -272,12 +282,13 @@ export async function insertCurrentEvent(
     image_alt: input.imageAlt ?? null,
     video_embed_url: input.videoEmbedUrl ?? null,
     owner_id: input.ownerId ?? null,
+    video_file_url: input.videoFileUrl ?? null,
   }
 
   await db
     .prepare(
       `INSERT INTO current_events (${EVENT_COLUMNS})
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       row.id,
@@ -308,6 +319,7 @@ export async function insertCurrentEvent(
       row.image_alt,
       row.video_embed_url,
       row.owner_id,
+      row.video_file_url,
     )
     .run()
 
@@ -454,7 +466,7 @@ export async function listCurrentEvents(
 export async function applyEventEdits(
   db: D1Database,
   id: string,
-  edits: { occurredStart?: string; geometry?: EventGeometry; imageUrl?: string; imageAlt?: string | null; videoEmbedUrl?: string | null },
+  edits: { occurredStart?: string; geometry?: EventGeometry; imageUrl?: string; imageAlt?: string | null; videoEmbedUrl?: string | null; videoFileUrl?: string | null },
   now: string = new Date().toISOString(),
 ): Promise<void> {
   const existing = await getCurrentEvent(db, id)
@@ -482,6 +494,11 @@ export async function applyEventEdits(
     // A video is independent of the image — set or clear it alone.
     sets.push('video_embed_url = ?')
     binds.push(edits.videoEmbedUrl)
+  }
+  if (edits.videoFileUrl !== undefined) {
+    // The direct-file video (native <video>), independent of the embed.
+    sets.push('video_file_url = ?')
+    binds.push(edits.videoFileUrl)
   }
   if (edits.occurredStart !== undefined) {
     sets.push('occurred_start = ?')
@@ -863,6 +880,13 @@ export function toPublicEvent(
   // URLs may ever reach an iframe src.
   if (row.video_embed_url && isNocookieEmbedUrl(row.video_embed_url)) {
     out.videoEmbedUrl = row.video_embed_url
+  }
+  // The direct-file video is exposed with only a pure http(s) check; the
+  // authoritative registered-source host guard is applied where it's
+  // actually played — the tour emitter (`event-tour.ts`) and the
+  // media-proxy — both of which have the DB the allowlist needs.
+  if (row.video_file_url && /^https?:\/\//i.test(row.video_file_url)) {
+    out.videoFileUrl = row.video_file_url
   }
   if (row.inferred_fields) {
     try {
