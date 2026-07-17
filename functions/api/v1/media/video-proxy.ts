@@ -27,6 +27,28 @@ import { allowlistedContentHosts } from '../_lib/video-index-store'
  *  time-to-first-byte, not the whole transfer. */
 const UPSTREAM_TIMEOUT_MS = 15_000
 
+/** How long a resolved allowlist is reused before re-reading D1. A
+ *  single `<video>` fires many GET/HEAD Range requests, so re-querying
+ *  the allowlist on every one adds needless D1 latency/cost to the
+ *  streaming path. The set only changes when sources are (re)indexed or
+ *  toggled, so a short staleness window is fine — a just-removed host
+ *  stays proxyable for at most this long. */
+const ALLOWLIST_TTL_MS = 30_000
+
+/** Per-D1-binding TTL cache. Keyed by the binding object (a WeakMap) so
+ *  it caches across requests within one Worker isolate in production,
+ *  while staying isolated per test (each test uses a distinct DB). */
+const allowlistCache = new WeakMap<object, { hosts: Set<string>; expires: number }>()
+
+async function cachedAllowlistedHosts(db: D1Database): Promise<Set<string>> {
+  const now = Date.now()
+  const cached = allowlistCache.get(db as object)
+  if (cached && cached.expires > now) return cached.hosts
+  const hosts = await allowlistedContentHosts(db)
+  allowlistCache.set(db as object, { hosts, expires: now + ALLOWLIST_TTL_MS })
+  return hosts
+}
+
 /** Response headers copied from upstream when present — everything a
  *  media element needs to play + seek. `content-type` is handled
  *  separately (restricted to a media allowlist), NOT blindly forwarded. */
@@ -88,7 +110,7 @@ async function handle(context: Parameters<PagesFunction<CatalogEnv>>[0], method:
   }
 
   // Only proxy hosts a registered, enabled source actually serves.
-  const allowed = await allowlistedContentHosts(context.env.CATALOG_DB)
+  const allowed = await cachedAllowlistedHosts(context.env.CATALOG_DB)
   if (!allowed.has(target.hostname.toLowerCase())) {
     return refuse(403, 'This host is not a registered video source.')
   }

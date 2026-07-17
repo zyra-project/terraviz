@@ -162,29 +162,33 @@ export async function refreshVideoSource(
   const now = new Date().toISOString()
 
   for (const video of videos) {
-    const embedText = buildVideoEmbeddingText(video)
-    const textHash = embedText ? await sha1Hex(embedText) : ''
-
-    // Skip re-embedding when the text + model version are unchanged.
-    const stamp = await getIndexedVideoStamp(db, source.id, video.externalId)
-    const unchanged =
-      stamp?.embedTextHash === textHash &&
-      stamp?.embeddingVersion === EMBEDDING_MODEL_VERSION &&
-      textHash !== ''
-
     let embed: { vector: number[]; version: number; textHash: string } | null = null
-    if (!unchanged && canEmbed && embedText) {
-      const budgetOk = !opts.embedBudget || opts.embedBudget.remaining > 0
-      if (budgetOk) {
-        try {
-          const vector = await embedDatasetText(opts.env!, embedText)
-          embed = { vector, version: EMBEDDING_MODEL_VERSION, textHash }
-          embedded++
-          if (opts.embedBudget) opts.embedBudget.remaining--
-        } catch {
-          // Embedding failed this entry — index content-only; a later
-          // run retries it.
-          embed = null
+
+    // Only spend hashing + a D1 stamp read when this entry could actually
+    // be embedded — i.e. AI is available and the shared budget has
+    // headroom. When embedding can't run (unconfigured / budget spent) the
+    // entry is upserted content-only and keeps any existing vector, so the
+    // hash + change-detection read would be pure waste on a large sitemap.
+    const budgetOk = !opts.embedBudget || opts.embedBudget.remaining > 0
+    if (canEmbed && budgetOk) {
+      const embedText = buildVideoEmbeddingText(video)
+      if (embedText) {
+        const textHash = await sha1Hex(embedText)
+        // Skip re-embedding when the text + model version are unchanged.
+        const stamp = await getIndexedVideoStamp(db, source.id, video.externalId)
+        const unchanged =
+          stamp?.embedTextHash === textHash && stamp?.embeddingVersion === EMBEDDING_MODEL_VERSION
+        if (!unchanged) {
+          try {
+            const vector = await embedDatasetText(opts.env!, embedText)
+            embed = { vector, version: EMBEDDING_MODEL_VERSION, textHash }
+            embedded++
+            if (opts.embedBudget) opts.embedBudget.remaining--
+          } catch {
+            // Embedding failed this entry — index content-only; a later
+            // run retries it.
+            embed = null
+          }
         }
       }
     }
