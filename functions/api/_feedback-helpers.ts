@@ -321,7 +321,13 @@ function estimateDataUrlBytes(dataUrl: string): number {
 
 function csvEscape(value: unknown): string {
   if (value == null) return ''
-  const s = String(value)
+  let s = String(value)
+  // Formula-injection guard: several columns are visitor-controlled
+  // free text, and spreadsheet apps execute cells starting with these
+  // characters. Prefix with a quote so they import as literal text.
+  if (/^[=+\-@\t\r]/.test(s)) {
+    s = `'${s}`
+  }
   if (/[",\r\n]/.test(s)) {
     return `"${s.replace(/"/g, '""')}"`
   }

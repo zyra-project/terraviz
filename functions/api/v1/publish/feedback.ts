@@ -94,10 +94,15 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
       if (!object) {
         return jsonError(404, 'not_found', `Screenshot object is missing from R2 for general_feedback id ${id}.`)
       }
+      // nosniff + inline disposition: the bytes are attacker-supplied
+      // (magic-checked as PNG at ingest); make sure no browser ever
+      // reinterprets them as anything but the declared image type.
       return new Response(object.body, {
         status: 200,
         headers: {
           'Content-Type': object.httpMetadata?.contentType ?? 'image/png',
+          'Content-Disposition': `inline; filename="feedback-${id}.png"`,
+          'X-Content-Type-Options': 'nosniff',
           'Cache-Control': 'private, no-store',
         },
       })
