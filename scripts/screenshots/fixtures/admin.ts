@@ -279,13 +279,22 @@ interface GeneralRow {
   dataset_id: string | null
   created_at: string
   hasScreenshot: boolean
+  screenshotIsFile: boolean
+  source: string
+  rating: number | null
+  reporter_name: string
+  status: string
+  country: string
+  meta: Record<string, unknown> | null
 }
 interface GeneralData {
   totalCount: number
   bugCount: number
   featureCount: number
   otherCount: number
-  byDay: Array<{ date: string; bugs: number; features: number; other: number }>
+  ideaCount: number
+  contentCount: number
+  byDay: Array<{ date: string; bugs: number; features: number; other: number; ideas: number; content: number }>
   recentFeedback: GeneralRow[]
 }
 
@@ -336,13 +345,15 @@ const aiData = {
 } satisfies AiData
 
 const generalData = {
-  totalCount: 37,
+  totalCount: 38,
   bugCount: 14,
   featureCount: 18,
   otherCount: 5,
+  ideaCount: 1,
+  contentCount: 0,
   byDay: [
-    { date: '2026-04-01', bugs: 3, features: 4, other: 1 },
-    { date: '2026-04-02', bugs: 5, features: 6, other: 2 },
+    { date: '2026-04-01', bugs: 3, features: 4, other: 1, ideas: 0, content: 0 },
+    { date: '2026-04-02', bugs: 5, features: 6, other: 2, ideas: 1, content: 0 },
   ],
   recentFeedback: [
     {
@@ -357,6 +368,13 @@ const generalData = {
       dataset_id: DATASET_A,
       created_at: '2026-04-02T11:30:00.000Z',
       hasScreenshot: true,
+      screenshotIsFile: false,
+      source: '',
+      rating: null,
+      reporter_name: '',
+      status: 'new',
+      country: '',
+      meta: null,
     },
     {
       id: 102,
@@ -370,6 +388,33 @@ const generalData = {
       dataset_id: null,
       created_at: '2026-04-01T16:05:00.000Z',
       hasScreenshot: false,
+      screenshotIsFile: false,
+      source: '',
+      rating: null,
+      reporter_name: '',
+      status: 'new',
+      country: '',
+      meta: null,
+    },
+    {
+      id: 103,
+      kind: 'idea',
+      message: 'A lightning-strike layer would pair well with the storm tours.',
+      contact: 'ada@example.com',
+      url: '',
+      user_agent: '(redacted)',
+      app_version: '',
+      platform: '',
+      dataset_id: 'Sea Surface Temperature (sst-anomaly)',
+      created_at: '2026-04-02T18:03:00.000Z',
+      hasScreenshot: false,
+      screenshotIsFile: false,
+      source: 'terraviz-standalone',
+      rating: 4,
+      reporter_name: 'Ada',
+      status: 'new',
+      country: 'US',
+      meta: { when: '2026-04-02T18:03:00.000Z', viewport: '1920×1080', dpr: 2, uiScale: 1.5, device: 'desktop' },
     },
   ],
 } satisfies GeneralData

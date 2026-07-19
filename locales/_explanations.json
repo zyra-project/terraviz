@@ -173,6 +173,8 @@
   "publisher.feature.hero": "Display name of the \"Right now\" hero feature (the featured-dataset spotlight on the catalog landing surface) in the feature-toggles UI.",
   "publisher.featureDisabled.body": "Body of the card a portal page shows when its feature is toggled off. Preserve {feature} (a localized feature name, e.g. 'Blog').",
   "publisher.featureDisabled.title": "Heading of the card a portal page shows when its feature is toggled off. Preserve {feature} (a localized feature name).",
+  "publisher.feedback.detail.appState": "Collapsible section label in the feedback detail panel showing the app-state snapshot (viewport, dataset, frame…) captured when the report was sent.",
+  "publisher.feedback.general.ratingValue": "Star rating out of five shown in the feedback queue; keep the {rating} placeholder.",
   "publisher.feeds.lastRun.error": "Feed-row status line when the last ingest attempt failed. Preserve {detail} (a short technical failure description).",
   "publisher.feeds.lastRun.ok": "Feed-row status line after a successful ingest. Preserve {when} (a date-time string).",
   "publisher.feeds.runDone": "Summary after running all enabled feeds. Preserve {created}, {refreshed}, and {failed} (counts).",

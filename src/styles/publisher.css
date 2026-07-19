@@ -2011,6 +2011,8 @@
 .publisher-feedback-kind-bug { color: #ff8a8a; border-color: rgba(255, 138, 138, 0.4); }
 .publisher-feedback-kind-feature { color: #4ea1ff; border-color: rgba(78, 161, 255, 0.4); }
 .publisher-feedback-kind-other { color: #f2b34c; border-color: rgba(242, 179, 76, 0.4); }
+.publisher-feedback-kind-idea { color: #6fd08c; border-color: rgba(111, 208, 140, 0.4); }
+.publisher-feedback-kind-content { color: #c99cff; border-color: rgba(201, 156, 255, 0.4); }
 .publisher-feedback-tags {
   list-style: none;
   display: flex;
@@ -2087,6 +2089,32 @@
   border-radius: calc(6px * var(--ui-scale));
   border: 1px solid rgba(255, 255, 255, 0.1);
   display: block;
+}
+/* R2-backed screenshots render as a bounded thumbnail; clicking the
+   wrapping link opens the full-size image in a new tab. */
+.publisher-feedback-screenshot-link {
+  display: block;
+  cursor: zoom-in;
+}
+.publisher-feedback-screenshot-link .publisher-feedback-screenshot {
+  max-block-size: calc(240px * var(--ui-scale));
+  object-fit: contain;
+}
+.publisher-feedback-appstate {
+  margin-block-start: calc(0.75rem * var(--ui-scale));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: calc(6px * var(--ui-scale));
+  padding: calc(0.5rem * var(--ui-scale)) calc(0.75rem * var(--ui-scale));
+}
+.publisher-feedback-appstate summary {
+  cursor: pointer;
+  font-size: calc(0.75rem * var(--ui-scale));
+  color: var(--color-text-muted, #999999);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.publisher-feedback-appstate[open] summary {
+  margin-block-end: calc(0.6rem * var(--ui-scale));
 }
 .publisher-feedback-row:focus-visible td {
   background: rgba(255, 255, 255, 0.06);

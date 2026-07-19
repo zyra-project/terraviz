@@ -81,7 +81,33 @@ function setup() {
        VALUES (?, ?, ?)`,
     )
     .run('feature', 'more datasets please', hoursAgo(2))
+  // A standalone-widget submission (migration 0007): idea kind,
+  // rating, reporter identity, meta snapshot, R2-backed screenshot.
+  sqlite
+    .prepare(
+      `INSERT INTO general_feedback (kind, message, contact, created_at, source, rating, reporter_name, meta, screenshot_r2_key, status, country)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      'idea', 'add a lightning layer', 'ada@example.com', hoursAgo(1),
+      'terraviz-standalone', 4, 'Ada', '{"viewport":"800×600","dpr":1}',
+      'feedback/screenshots/test-shot.png', 'new', 'US',
+    )
   return { sqlite, env: { FEEDBACK_DB: asD1(sqlite) } }
+}
+
+const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])
+
+function fakeR2(storedKey: string): R2Bucket {
+  return {
+    async get(key: string) {
+      if (key !== storedKey) return null
+      return {
+        body: new Response(PNG_BYTES).body,
+        httpMetadata: { contentType: 'image/png' },
+      }
+    },
+  } as unknown as R2Bucket
 }
 
 function ctx(opts: { env: Record<string, unknown>; publisher?: PublisherRow; query: string }) {
@@ -158,16 +184,56 @@ describe('GET /api/v1/publish/feedback', () => {
         totalCount: number
         bugCount: number
         featureCount: number
+        ideaCount: number
+        contentCount: number
         recentFeedback: Array<Record<string, unknown>>
       }
     }
-    expect(body.data.totalCount).toBe(2)
+    expect(body.data.totalCount).toBe(3)
     expect(body.data.bugCount).toBe(1)
     expect(body.data.featureCount).toBe(1)
+    expect(body.data.ideaCount).toBe(1)
+    expect(body.data.contentCount).toBe(0)
     const bug = body.data.recentFeedback.find(r => r.kind === 'bug')!
     expect(bug.hasScreenshot).toBe(true)
+    expect(bug.screenshotIsFile).toBe(false)
     expect(bug.screenshot).toBeUndefined() // fetched on demand, never inlined
     expect(bug.message).toBe('globe is upside down')
+  })
+
+  it('exposes the standalone-widget fields on general rows', async () => {
+    const { env } = setup()
+    const response = await feedbackGet(ctx({ env, query: '?view=general' }))
+    const body = (await response.json()) as { data: { recentFeedback: Array<Record<string, unknown>> } }
+    const idea = body.data.recentFeedback.find(r => r.kind === 'idea')!
+    expect(idea).toMatchObject({
+      source: 'terraviz-standalone',
+      rating: 4,
+      reporter_name: 'Ada',
+      contact: 'ada@example.com',
+      status: 'new',
+      country: 'US',
+      hasScreenshot: true,
+      screenshotIsFile: true,
+      meta: { viewport: '800×600', dpr: 1 },
+    })
+  })
+
+  it('streams an R2-backed screenshot via view=screenshot-file', async () => {
+    const { env, sqlite } = setup()
+    const ideaId = (sqlite.prepare(`SELECT id FROM general_feedback WHERE kind = 'idea'`).get() as { id: number }).id
+    const withR2 = { ...env, CATALOG_R2: fakeR2('feedback/screenshots/test-shot.png') }
+
+    const hit = await feedbackGet(ctx({ env: withR2, query: `?view=screenshot-file&id=${ideaId}` }))
+    expect(hit.status).toBe(200)
+    expect(hit.headers.get('Content-Type')).toBe('image/png')
+    expect(new Uint8Array(await hit.arrayBuffer())).toEqual(PNG_BYTES)
+
+    // A row without an R2 key 404s on the file view…
+    const bugId = (sqlite.prepare(`SELECT id FROM general_feedback WHERE kind = 'bug'`).get() as { id: number }).id
+    expect((await feedbackGet(ctx({ env: withR2, query: `?view=screenshot-file&id=${bugId}` }))).status).toBe(404)
+    // …and so does a deployment without the R2 binding.
+    expect((await feedbackGet(ctx({ env, query: `?view=screenshot-file&id=${ideaId}` }))).status).toBe(404)
   })
 
   it('serves a single screenshot on demand and 404s when absent', async () => {

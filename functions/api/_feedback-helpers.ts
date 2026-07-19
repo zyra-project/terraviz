@@ -30,7 +30,10 @@ export interface GeneralDashboardResponse {
   bugCount: number
   featureCount: number
   otherCount: number
-  byDay: Array<{ date: string; bugs: number; features: number; other: number }>
+  /** Standalone-widget kinds (migration 0007). */
+  ideaCount: number
+  contentCount: number
+  byDay: Array<{ date: string; bugs: number; features: number; other: number; ideas: number; content: number }>
   recentFeedback: Array<Record<string, unknown>>
 }
 
@@ -142,9 +145,11 @@ export async function fetchGeneralDashboard(
       COUNT(*) as total,
       SUM(CASE WHEN kind = 'bug' THEN 1 ELSE 0 END) as bugs,
       SUM(CASE WHEN kind = 'feature' THEN 1 ELSE 0 END) as features,
-      SUM(CASE WHEN kind = 'other' THEN 1 ELSE 0 END) as other
+      SUM(CASE WHEN kind = 'other' THEN 1 ELSE 0 END) as other,
+      SUM(CASE WHEN kind = 'idea' THEN 1 ELSE 0 END) as ideas,
+      SUM(CASE WHEN kind = 'content' THEN 1 ELSE 0 END) as content
     FROM general_feedback`,
-  ).first<{ total: number; bugs: number; features: number; other: number }>()
+  ).first<{ total: number; bugs: number; features: number; other: number; ideas: number; content: number }>()
 
   const sinceDate = new Date(Date.now() - days * 86_400_000).toISOString()
   const byDay = await db.prepare(
@@ -152,22 +157,31 @@ export async function fetchGeneralDashboard(
       DATE(created_at) as date,
       SUM(CASE WHEN kind = 'bug' THEN 1 ELSE 0 END) as bugs,
       SUM(CASE WHEN kind = 'feature' THEN 1 ELSE 0 END) as features,
-      SUM(CASE WHEN kind = 'other' THEN 1 ELSE 0 END) as other
+      SUM(CASE WHEN kind = 'other' THEN 1 ELSE 0 END) as other,
+      SUM(CASE WHEN kind = 'idea' THEN 1 ELSE 0 END) as ideas,
+      SUM(CASE WHEN kind = 'content' THEN 1 ELSE 0 END) as content
     FROM general_feedback
     WHERE created_at >= ?
     GROUP BY DATE(created_at)
     ORDER BY date DESC`,
-  ).bind(sinceDate).all<{ date: string; bugs: number; features: number; other: number }>()
+  ).bind(sinceDate).all<{ date: string; bugs: number; features: number; other: number; ideas: number; content: number }>()
 
   // Recent entries — the screenshot column is intentionally NOT
   // selected here. Data URLs can be up to 200KB each, so inlining
   // them in a 100-row list response can produce multi-megabyte
   // payloads. The admin UI fetches screenshots on demand via the
   // screenshot action when the user opens a detail panel.
+  // The legacy `screenshot` column holds small inline data URLs; the
+  // standalone widget stores binaries in R2 and only the key here.
+  // Neither payload is inlined in list responses — the portal fetches
+  // inline shots via the screenshot view and streams R2-backed ones
+  // via screenshot-file, chosen by `screenshotIsFile`.
   const recent = await db.prepare(
     `SELECT id, kind, message, contact, url, user_agent, app_version,
             platform, dataset_id, created_at,
-            length(screenshot) as screenshot_length
+            source, rating, reporter_name, meta, status, country,
+            length(screenshot) as screenshot_length,
+            screenshot_r2_key != '' as screenshot_is_file
     FROM general_feedback
     ORDER BY created_at DESC
     LIMIT ?`,
@@ -182,7 +196,14 @@ export async function fetchGeneralDashboard(
     platform: string
     dataset_id: string | null
     created_at: string
+    source: string
+    rating: number | null
+    reporter_name: string
+    meta: string
+    status: string
+    country: string
     screenshot_length: number
+    screenshot_is_file: number
   }>()
 
   return {
@@ -190,12 +211,25 @@ export async function fetchGeneralDashboard(
     bugCount: totals?.bugs ?? 0,
     featureCount: totals?.features ?? 0,
     otherCount: totals?.other ?? 0,
+    ideaCount: totals?.ideas ?? 0,
+    contentCount: totals?.content ?? 0,
     byDay: byDay.results,
     recentFeedback: recent.results.map(r => {
-      const { screenshot_length, ...rest } = r
+      const { screenshot_length, screenshot_is_file, meta, ...rest } = r
+      let parsedMeta: Record<string, unknown> | null = null
+      if (meta) {
+        try {
+          const value = JSON.parse(meta) as unknown
+          if (value && typeof value === 'object' && !Array.isArray(value)) {
+            parsedMeta = value as Record<string, unknown>
+          }
+        } catch { /* malformed snapshot — omit */ }
+      }
       return {
         ...rest,
-        hasScreenshot: (screenshot_length ?? 0) > 0,
+        meta: parsedMeta,
+        hasScreenshot: (screenshot_length ?? 0) > 0 || !!screenshot_is_file,
+        screenshotIsFile: !!screenshot_is_file,
         screenshotLength: screenshot_length ?? 0,
       }
     }),
@@ -287,7 +321,14 @@ function estimateDataUrlBytes(dataUrl: string): number {
 
 function csvEscape(value: unknown): string {
   if (value == null) return ''
-  const s = String(value)
+  let s = String(value)
+  // Formula-injection guard: several columns are visitor-controlled
+  // free text, and spreadsheet apps execute cells starting with these
+  // characters — including after leading whitespace (" =1+1").
+  // Prefix with a quote so they import as literal text.
+  if (/^[\t\r]/.test(s) || /^\s*[=+\-@]/.test(s)) {
+    s = `'${s}`
+  }
   if (/[",\r\n]/.test(s)) {
     return `"${s.replace(/"/g, '""')}"`
   }
@@ -318,7 +359,9 @@ export async function streamGeneralExport(
 
   const stmt = db.prepare(
     `SELECT id, kind, message, contact, url, user_agent, app_version,
-            platform, dataset_id, screenshot, created_at
+            platform, dataset_id, screenshot, created_at,
+            source, rating, reporter_name, meta, status, country,
+            screenshot_r2_key
     FROM general_feedback
     ${where}
     ORDER BY created_at ASC
@@ -337,6 +380,13 @@ export async function streamGeneralExport(
     dataset_id: string | null
     screenshot: string
     created_at: string
+    source: string
+    rating: number | null
+    reporter_name: string
+    meta: string
+    status: string
+    country: string
+    screenshot_r2_key: string
   }>()
 
   const encoder = new TextEncoder()
@@ -347,6 +397,11 @@ export async function streamGeneralExport(
         'id',
         'kind',
         'created_at',
+        'status',
+        'source',
+        'rating',
+        'reporter_name',
+        'country',
         'platform',
         'dataset_id',
         'url',
@@ -355,17 +410,24 @@ export async function streamGeneralExport(
         'user_agent',
         'has_screenshot',
         'screenshot_bytes',
+        'screenshot_r2_key',
+        'meta',
         'message',
       ].join(',') + '\r\n'
       controller.enqueue(encoder.encode(header))
 
       for (const row of rows) {
-        const hasScreenshot = !!row.screenshot
-        const screenshotBytes = hasScreenshot ? estimateDataUrlBytes(row.screenshot) : 0
+        const hasScreenshot = !!row.screenshot || !!row.screenshot_r2_key
+        const screenshotBytes = row.screenshot ? estimateDataUrlBytes(row.screenshot) : 0
         const line = [
           csvEscape(row.id),
           csvEscape(row.kind),
           csvEscape(row.created_at),
+          csvEscape(row.status),
+          csvEscape(row.source),
+          csvEscape(row.rating ?? ''),
+          csvEscape(row.reporter_name),
+          csvEscape(row.country),
           csvEscape(row.platform),
           csvEscape(row.dataset_id ?? ''),
           csvEscape(row.url),
@@ -374,6 +436,8 @@ export async function streamGeneralExport(
           csvEscape(row.user_agent),
           csvEscape(hasScreenshot ? 'true' : 'false'),
           csvEscape(screenshotBytes),
+          csvEscape(row.screenshot_r2_key),
+          csvEscape(row.meta),
           csvEscape(row.message),
         ].join(',') + '\r\n'
         controller.enqueue(encoder.encode(line))
@@ -386,11 +450,11 @@ export async function streamGeneralExport(
 export async function fetchScreenshot(
   db: D1Database,
   id: number,
-): Promise<{ id: number; screenshot: string } | null> {
+): Promise<{ id: number; screenshot: string; r2Key: string } | null> {
   const row = await db.prepare(
-    'SELECT screenshot FROM general_feedback WHERE id = ?',
-  ).bind(id).first<{ screenshot: string }>()
+    'SELECT screenshot, screenshot_r2_key FROM general_feedback WHERE id = ?',
+  ).bind(id).first<{ screenshot: string; screenshot_r2_key: string }>()
 
   if (!row) return null
-  return { id, screenshot: row.screenshot || '' }
+  return { id, screenshot: row.screenshot || '', r2Key: row.screenshot_r2_key || '' }
 }

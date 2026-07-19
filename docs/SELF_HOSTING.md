@@ -293,6 +293,64 @@ Pages → Settings → Bindings → Add binding → **D1**:
 - Variable name: `FEEDBACK_DB`
 - D1 database: select `sphere-feedback`
 
+#### Standalone feedback widget (`POST /api/feedback`)
+
+The standalone HTML build's feedback widget POSTs
+bug/idea/content reports to `/api/feedback` on the deployed
+origin (overridable via `window.TERRAVIZ_FEEDBACK_URL`). The
+route answers with wildcard CORS and requires no `Origin`
+header — the widget also runs from `file://`, and reviewers
+verify the endpoint with plain `curl`. Submissions land in the
+same `general_feedback` queue the Publisher Portal's Feedback
+tab reviews, with `status: 'new'`.
+
+Two deployment notes beyond the `FEEDBACK_DB` binding above:
+
+- **Screenshots need `CATALOG_R2`** (wired in Step 10).
+  Screenshot PNGs are decoded and stored as binaries under
+  `feedback/screenshots/` in the assets bucket; only the object
+  key lands in D1. Without the binding, reports are still
+  stored — their screenshots are dropped (logged in the
+  Function's tail).
+
+- **The endpoint must never be served a challenge.** The widget
+  runs without cookies and the fallback path is a `mailto:`
+  draft, so a `Just a moment...` interstitial silently degrades
+  every submission. JS Detections / AI Labyrinth can stay ON
+  zone-wide — JS Detections only *feeds signals* to rules, and
+  AI Labyrinth targets crawlers following hidden links — but if
+  your zone has Bot Fight Mode, Managed Rules, or custom WAF
+  rules that act on those signals, add a skip rule so
+  API-shaped POSTs to this one path pass:
+
+  1. Security → WAF → Custom rules → Create rule, e.g.
+     `standalone feedback endpoint skip`.
+  2. Expression:
+     ```
+     (http.request.uri.path eq "/api/feedback"
+       and http.request.method eq "POST")
+     ```
+  3. Action: **Skip** — tick "All managed rules", "All Super Bot
+     Fight Mode Rules", "Browser Integrity Check", and
+     "Security Level", same checklist as the transcode-complete
+     rule in Step 15c. On Free/Pro zones with plain Bot Fight
+     Mode, see 15c's Step 2 for the BFM caveat.
+
+  The endpoint carries its own abuse controls (JSON-only,
+  ~12 MB body cap, 10/hour per-IP rate limit), so the skip
+  does not leave it bare.
+
+  Verify from a cookie-less, JS-less client:
+
+  ```bash
+  curl -X POST https://<your-domain>/api/feedback \
+    -H 'Content-Type: application/json' \
+    -d '{"source":"terraviz-standalone","type":"idea","rating":4,
+         "text":"Test from curl","name":null,"email":null,
+         "meta":{"ua":"curl"},"screenshot":null}'
+  # → 200 {"ok":true,"id":"…"}   (challenge HTML = rule not matching)
+  ```
+
 ### 5b. Workers AI — Catalog enrichment + summarization
 
 Pages → Settings → Bindings → Add binding → **Workers AI**:
