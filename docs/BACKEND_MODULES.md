@@ -67,11 +67,12 @@ design rationale in the `docs/CATALOG_*` plan docs.
 |---|---|
 | `functions/.well-known/terraviz.json.ts` | Route: GET /.well-known/terraviz.json |
 | `functions/api/_feedback-helpers.ts` | Cloudflare Pages Function helpers — feedback admin data layer |
+| `functions/api/_standalone-feedback.ts` | Standalone-widget feedback handler — validates the `terraviz-standalone` POST shape (bug/idea/content + rating + meta snapshot), stores PNG screenshots as binaries in `CATALOG_R2`, inserts into `general_feedback` with `status: 'new'`; wildcard-CORS, per-IP rate-limited |
 | `functions/api/chat/completions.ts` | Route: /api/chat/completions |
 | `functions/api/feedback-admin.ts` | Route: /api/feedback-admin |
 | `functions/api/feedback-dashboard.ts` | Route: /api/feedback-dashboard |
 | `functions/api/feedback-export.ts` | Route: /api/feedback-export |
-| `functions/api/feedback.ts` | Route: /api/feedback |
+| `functions/api/feedback.ts` | Route: /api/feedback — dispatches by body shape: Orbit AI thumbs ratings (origin-gated) vs. standalone-widget reports (handed to `_standalone-feedback.ts`) |
 | `functions/api/general-feedback-dashboard.ts` | Route: /api/general-feedback-dashboard |
 | `functions/api/general-feedback-export.ts` | Route: /api/general-feedback-export |
 | `functions/api/general-feedback-screenshot.ts` | Route: /api/general-feedback-screenshot |

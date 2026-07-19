@@ -1,15 +1,29 @@
 /**
  * Cloudflare Pages Function — /api/feedback
  *
- * Accepts user feedback on AI (Orbit) responses.
- * Stores feedback in Cloudflare D1 for later analysis.
+ * Two payload shapes share this route, dispatched by body shape:
  *
- * POST /api/feedback  — JSON body matching FeedbackPayload
+ * 1. AI (Orbit) response feedback — thumbs ratings from the in-app
+ *    chat, matching FeedbackBody below. Same-origin/localhost CORS.
+ * 2. Standalone-widget feedback — the standalone TerraViz build's
+ *    bug/idea/content reports (`source: "terraviz-standalone"`),
+ *    handled by `_standalone-feedback.ts`. Wildcard CORS: the
+ *    widget also runs from file:// and arbitrary origins via
+ *    `window.TERRAVIZ_FEEDBACK_URL`, and plain curl must work.
+ *
+ * POST /api/feedback  — JSON body matching either shape
  */
 
 import { getEffectiveFeatures } from './v1/_lib/node-settings-store'
+import {
+  handleStandaloneFeedback,
+  isStandaloneFeedbackBody,
+  standaloneCorsHeaders,
+  MAX_STANDALONE_BODY_BYTES,
+  type StandaloneFeedbackEnv,
+} from './_standalone-feedback'
 
-interface Env {
+interface Env extends StandaloneFeedbackEnv {
   FEEDBACK_DB?: D1Database
   /** Catalog bindings — read-only here, for the per-node feature
    *  toggles (`node_settings`). Optional like everything else. */
@@ -110,15 +124,52 @@ function isValidBody(body: unknown): body is FeedbackBody {
 
 // --- Handlers ---
 
-export const onRequestOptions: PagesFunction<Env> = async (context) => {
-  const origin = context.request.headers.get('Origin')
-  if (!isAllowedOrigin(origin, context.request.url)) {
-    return new Response(null, { status: 403 })
-  }
-  return new Response(null, { status: 204, headers: corsHeaders(origin) })
+export const onRequestOptions: PagesFunction<Env> = async () => {
+  // Preflight must succeed from any origin — the standalone widget's
+  // shape is only knowable from the POST body, which a preflight
+  // doesn't carry. This grants nothing: the AI-thumbs branch still
+  // enforces its origin gate on the actual POST, and no credentials
+  // are involved on either branch.
+  return new Response(null, { status: 204, headers: standaloneCorsHeaders() })
 }
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
+  // Whole-body cap, cheap header check first. Covers both branches —
+  // the AI path never legitimately approaches it.
+  const declaredLength = parseInt(context.request.headers.get('Content-Length') ?? '', 10)
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_STANDALONE_BODY_BYTES) {
+    return new Response(JSON.stringify({ error: 'Payload too large' }), {
+      status: 413,
+      headers: { ...standaloneCorsHeaders(), 'Content-Type': 'application/json' },
+    })
+  }
+
+  let body: unknown
+  try {
+    const raw = await context.request.text()
+    if (raw.length > MAX_STANDALONE_BODY_BYTES) {
+      return new Response(JSON.stringify({ error: 'Payload too large' }), {
+        status: 413,
+        headers: { ...standaloneCorsHeaders(), 'Content-Type': 'application/json' },
+      })
+    }
+    body = JSON.parse(raw)
+  } catch {
+    return new Response(JSON.stringify({ error: 'Invalid JSON' }), {
+      status: 400,
+      headers: { ...standaloneCorsHeaders(), 'Content-Type': 'application/json' },
+    })
+  }
+
+  // Standalone-widget submissions take their own path: wildcard CORS,
+  // no Origin requirement, R2-backed screenshots, general_feedback.
+  if (isStandaloneFeedbackBody(body)) {
+    return handleStandaloneFeedback(
+      context as unknown as EventContext<StandaloneFeedbackEnv, string, Record<string, unknown>>,
+      body,
+    )
+  }
+
   const origin = context.request.headers.get('Origin')
   if (!origin || !isAllowedOrigin(origin, context.request.url)) {
     return new Response(null, { status: 403 })
@@ -129,16 +180,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   if (ip && isRateLimited(ip)) {
     return new Response(JSON.stringify({ error: 'Rate limit exceeded. Try again shortly.' }), {
       status: 429,
-      headers: { ...cors, 'Content-Type': 'application/json' },
-    })
-  }
-
-  let body: unknown
-  try {
-    body = await context.request.json()
-  } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON' }), {
-      status: 400,
       headers: { ...cors, 'Content-Type': 'application/json' },
     })
   }
