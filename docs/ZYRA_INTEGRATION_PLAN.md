@@ -481,6 +481,11 @@ in order of importance:
 | **Z3 — guided authoring** | Curated pipeline templates; stage-form builder over the allowlist; richer validation surfacing; log links; a "Create draft dataset" button beside the target field that POSTs a minimal draft (workflow name + video/mp4) and fills the id in place — the new-workflow flow never leaves the page (gap confirmed in production: the form's hint sends the publisher off to do something the form can do itself). | A publisher who has never read Zyra docs ships a working hourly pipeline. |
 | **Z4 — real-time UX + upstream** | SPA consumes `period` for freshness (the §7.4 marker driven by data, targeted catalog-cache bypass for due datasets); upstream proposals to NOAA-GSL/zyra (`--preset sos`, `export terraviz`, Narrate/Verify input); alignment with federation Tier 0 once Phase 4 ships. | The catalog visibly knows which datasets are live, and the Zyra-side ergonomics stop being our fork's problem. |
 
+Authoring beyond Z3 — a source probe with pattern induction,
+curated dataset-source presets, one-click upstream gap issues,
+and an evidence-gated Orbit authoring mode — is scoped separately
+in [`WORKFLOW_AUTHORING_PLAN.md`](WORKFLOW_AUTHORING_PLAN.md).
+
 ### Implementation conventions (Z1/Z2 checklist)
 
 Repo table stakes, listed so no phase improvises them mid-flight:

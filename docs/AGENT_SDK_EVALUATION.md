@@ -152,6 +152,11 @@ it. The escalation path stays deliberate:
    above get built — still under the convention, still not the
    SDK.
 
+The phased in-product design for this escalation — deterministic
+probe and preset layers first, the Orbit-backed owned loop as a
+final, evidence-gated phase — is scoped in
+[`WORKFLOW_AUTHORING_PLAN.md`](WORKFLOW_AUTHORING_PLAN.md).
+
 ### Agent SDK in product code — rejected
 
 `@anthropic-ai/claude-agent-sdk` in `package.json` would be the
