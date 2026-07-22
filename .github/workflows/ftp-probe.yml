@@ -12,7 +12,7 @@ on:
       dirs:
         description: Space-separated dirs under ftp://public.sos.noaa.gov/
         required: false
-        default: rt/sst/nesdis/sst rt/sst/nesdis/sst_anom
+        default: rt/sst/nesdis/sst/4096 rt/sst/nesdis/sst_anom/4096
 
 permissions: {}
 
@@ -23,7 +23,7 @@ jobs:
     steps:
       - name: List directories
         env:
-          DIRS: ${{ inputs.dirs || 'rt/sst/nesdis/sst rt/sst/nesdis/sst_anom' }}
+          DIRS: ${{ inputs.dirs || 'rt/sst/nesdis/sst/4096 rt/sst/nesdis/sst_anom/4096' }}
         run: |
           for d in $DIRS; do
             echo "===== ftp://public.sos.noaa.gov/$d/ ====="
