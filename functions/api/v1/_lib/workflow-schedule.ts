@@ -81,7 +81,11 @@ export function advanceNextRunAt(
   now: Date = new Date(),
 ): string | null {
   const seconds = parseScheduleSeconds(schedule)
-  if (seconds === null) return null
+  // <= 0 guards zero-length durations (`PT0S` parses to 0): a zero
+  // period makes the catch-up division blow up to Infinity and
+  // toISOString() throw. Unreachable via /validate (15-min floor) —
+  // this is for legacy/corrupted rows (PR #303 Copilot review).
+  if (seconds === null || seconds <= 0) return null
   const dueMs = due === null ? NaN : Date.parse(due)
   // No parseable anchor (legacy row, manual enable path) — fall
   // back to wall-clock, which then becomes the anchor.

@@ -84,4 +84,9 @@ describe('advanceNextRunAt', () => {
   it('returns null for unparsable schedules', () => {
     expect(advanceNextRunAt('soon', due)).toBeNull()
   })
+
+  it('returns null for zero-length durations instead of throwing', () => {
+    expect(advanceNextRunAt('PT0S', due)).toBeNull()
+    expect(advanceNextRunAt('P0D', due, new Date(due))).toBeNull()
+  })
 })
