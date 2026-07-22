@@ -1,0 +1,32 @@
+# Throwaway probe: list SOS real-time FTP directories that can't be
+# reached over HTTPS, so workflow drafts use verified frame filename
+# patterns instead of guesses. Manually dispatched, no secrets, reads
+# a public NOAA anonymous-FTP server. Delete the branch when done.
+name: FTP Probe (throwaway)
+
+on:
+  workflow_dispatch:
+    inputs:
+      dirs:
+        description: Space-separated dirs under ftp://public.sos.noaa.gov/
+        required: false
+        default: rt/sst/nesdis/sst rt/sst/nesdis/sst_anom
+
+permissions: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: List directories
+        env:
+          DIRS: ${{ inputs.dirs }}
+        run: |
+          for d in $DIRS; do
+            echo "===== ftp://public.sos.noaa.gov/$d/ ====="
+            listing=$(curl -sS --max-time 90 "ftp://public.sos.noaa.gov/$d/" || echo "LIST FAILED")
+            echo "$listing" | head -5
+            echo "  ... ($(echo "$listing" | wc -l) entries total) ..."
+            echo "$listing" | tail -10
+          done
