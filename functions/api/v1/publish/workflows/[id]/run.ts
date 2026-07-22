@@ -19,7 +19,7 @@ import { isPrivileged } from '../../../_lib/publisher-store'
 import { writeAuditEvent } from '../../../_lib/audit-store'
 import { isConfigurationError, safeErrorReason } from '../../../_lib/errors'
 import { dispatchZyraRun, type GitHubDispatchEnv } from '../../../_lib/github-dispatch'
-import { computeNextRunAt } from '../../../_lib/workflow-schedule'
+import { advanceNextRunAt } from '../../../_lib/workflow-schedule'
 import { validatePipeline, type WorkflowValidationError } from '../../../_lib/workflow-validators'
 import {
   applyRunStatus,
@@ -88,7 +88,7 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
 
   if (trigger === 'schedule') {
     await updateWorkflow(context.env.CATALOG_DB, workflow.id, {
-      next_run_at: computeNextRunAt(workflow.schedule),
+      next_run_at: advanceNextRunAt(workflow.schedule, workflow.next_run_at),
     })
   }
 
