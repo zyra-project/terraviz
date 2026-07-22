@@ -5,6 +5,8 @@
 name: FTP Probe (throwaway)
 
 on:
+  push:
+    branches: [claude/ftp-probe]
   workflow_dispatch:
     inputs:
       dirs:
@@ -21,7 +23,7 @@ jobs:
     steps:
       - name: List directories
         env:
-          DIRS: ${{ inputs.dirs }}
+          DIRS: ${{ inputs.dirs || 'rt/sst/nesdis/sst rt/sst/nesdis/sst_anom' }}
         run: |
           for d in $DIRS; do
             echo "===== ftp://public.sos.noaa.gov/$d/ ====="
