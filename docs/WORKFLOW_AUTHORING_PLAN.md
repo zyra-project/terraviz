@@ -132,11 +132,15 @@ per-product caveats that otherwise get rediscovered per author
 
 The initial catalog is generated, not typed: one probe sweep
 (A1's job, pointed at the `rt/` tree) plus induction, then edited
-into shape. Presets prefill the whole form — source, acquire and
-scan stages, metadata template, schedule — reducing "wire a new
-SOS real-time dataset" to a picker, a target dataset, and Run
-now. This lands on the same side of
-`ZYRA_INTEGRATION_PLAN.md` §Open questions #6 as the curated
+into shape — **already done once**: the first generation (19 ready
+entries, plus the flagged/excluded analysis, from a 2026-07-22
+sweep of 152 directories) is checked in as
+[`DATASET_SOURCE_PRESETS_DRAFT.md`](DATASET_SOURCE_PRESETS_DRAFT.md),
+the copy-out seed for the real module. Presets prefill the whole
+form — source, acquire and scan stages, metadata template,
+schedule — reducing "wire a new SOS real-time dataset" to a
+picker, a target dataset, and Run now. This lands on the same side
+of `ZYRA_INTEGRATION_PLAN.md` §Open questions #6 as the curated
 templates: versioned with the app, revisit if a second node wants
 its own catalog.
 
