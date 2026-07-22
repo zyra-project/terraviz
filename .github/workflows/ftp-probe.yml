@@ -1,34 +1,50 @@
-# Throwaway probe: list SOS real-time FTP directories that can't be
-# reached over HTTPS, so workflow drafts use verified frame filename
-# patterns instead of guesses. Manually dispatched, no secrets, reads
-# a public NOAA anonymous-FTP server. Delete the branch when done.
+# Throwaway probe: walk the SOS real-time FTP tree and print bounded
+# directory listings, so workflow drafts and the A3 source-preset
+# catalog (docs/WORKFLOW_AUTHORING_PLAN.md) use verified frame
+# filename patterns instead of guesses. Runs on push to this branch
+# only; no permissions, no secrets; reads a public NOAA anonymous-FTP
+# server. Delete the branch when done.
 name: FTP Probe (throwaway)
 
 on:
   push:
     branches: [claude/ftp-probe]
-  workflow_dispatch:
-    inputs:
-      dirs:
-        description: Space-separated dirs under ftp://public.sos.noaa.gov/
-        required: false
-        default: rt/sst/nesdis/sst/4096 rt/sst/nesdis/sst_anom/4096
 
 permissions: {}
 
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
-      - name: List directories
-        env:
-          DIRS: ${{ inputs.dirs || 'rt/sst/nesdis/sst/4096 rt/sst/nesdis/sst_anom/4096' }}
+      - name: Walk rt/ tree
         run: |
-          for d in $DIRS; do
-            echo "===== ftp://public.sos.noaa.gov/$d/ ====="
-            listing=$(curl -sS --max-time 90 "ftp://public.sos.noaa.gov/$d/" || echo "LIST FAILED")
-            echo "$listing" | head -5
-            echo "  ... ($(echo "$listing" | wc -l) entries total) ..."
-            echo "$listing" | tail -10
-          done
+          HOST=ftp://public.sos.noaa.gov
+          MAX_DIRS=250
+          count=0
+          walk() {
+            local dir="$1" depth="$2"
+            count=$((count+1))
+            [ "$count" -gt "$MAX_DIRS" ] && { echo "!! dir budget exhausted at $dir"; return; }
+            local listing
+            listing=$(curl -s --max-time 60 "$HOST/$dir/" || true)
+            [ -z "$listing" ] && { echo "!! $dir EMPTY-OR-FAILED"; return; }
+            local files subdirs nfiles
+            files=$(echo "$listing" | awk '$1 !~ /^d/ {print $NF}')
+            subdirs=$(echo "$listing" | awk '$1 ~ /^d/ {print $NF}')
+            nfiles=$(echo "$files" | grep -c . || true)
+            echo "== $dir files:$nfiles"
+            if [ "$nfiles" -gt 0 ]; then
+              echo "$files" | head -3 | sed 's/^/   F /'
+              [ "$nfiles" -gt 3 ] && echo "$files" | tail -2 | sed 's/^/   L /'
+            fi
+            if [ "$depth" -lt 5 ]; then
+              local s
+              for s in $subdirs; do
+                case "$s" in media|labels|playlist|_notes|.*) continue;; esac
+                walk "$dir/$s" $((depth+1))
+              done
+            fi
+          }
+          walk rt 1
+          echo "TOTAL_DIRS_LISTED=$count"
