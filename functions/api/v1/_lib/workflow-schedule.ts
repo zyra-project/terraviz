@@ -53,13 +53,41 @@ export function isValidSchedule(schedule: string): boolean {
 }
 
 /**
- * The next due time, ISO-8601. Used on save (enable / schedule
- * change) and when a scheduled run is queued — bumping at
- * queue time, not completion, is what stops the next 15-minute
- * tick from re-dispatching a workflow whose run is still going.
+ * The next due time from now, ISO-8601. Used on save (enable /
+ * schedule change), where "now" is the only anchor there is.
  */
 export function computeNextRunAt(schedule: string, now: Date = new Date()): string | null {
   const seconds = parseScheduleSeconds(schedule)
   if (seconds === null) return null
   return new Date(now.getTime() + seconds * 1000).toISOString()
+}
+
+/**
+ * The next due time when a scheduled run is queued, anchored to the
+ * stored due time rather than the wall clock. Bumping at queue time,
+ * not completion, is what stops the next 15-minute tick from
+ * re-dispatching a workflow whose run is still going — but `now +
+ * period` would also add every dispatch delay (cron tick
+ * granularity, GHA schedule jitter, which is hours-scale under
+ * load) to the phase permanently, ratcheting a daily run around the
+ * clock. Advancing `due` by whole periods keeps the phase stable and
+ * per-run jitter per-run. A far-behind workflow (disabled scheduler,
+ * long outage) skips straight past the missed slots — always
+ * strictly future, never a catch-up burst.
+ */
+export function advanceNextRunAt(
+  schedule: string,
+  due: string | null,
+  now: Date = new Date(),
+): string | null {
+  const seconds = parseScheduleSeconds(schedule)
+  if (seconds === null) return null
+  const dueMs = due === null ? NaN : Date.parse(due)
+  // No parseable anchor (legacy row, manual enable path) — fall
+  // back to wall-clock, which then becomes the anchor.
+  if (!Number.isFinite(dueMs)) return computeNextRunAt(schedule, now)
+  const periodMs = seconds * 1000
+  const periodsBehind = Math.floor((now.getTime() - dueMs) / periodMs)
+  const advance = Math.max(1, periodsBehind + 1)
+  return new Date(dueMs + advance * periodMs).toISOString()
 }

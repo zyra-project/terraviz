@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  advanceNextRunAt,
   computeNextRunAt,
   isValidSchedule,
   parseScheduleSeconds,
@@ -43,5 +44,44 @@ describe('computeNextRunAt', () => {
 
   it('returns null for unparsable schedules', () => {
     expect(computeNextRunAt('soon')).toBeNull()
+  })
+})
+
+describe('advanceNextRunAt', () => {
+  const due = '2026-06-10T00:00:00.000Z'
+
+  it('keeps the phase when dispatch is on time (cron-tick jitter)', () => {
+    const now = new Date('2026-06-10T00:07:00.000Z')
+    expect(advanceNextRunAt('P1D', due, now)).toBe('2026-06-11T00:00:00.000Z')
+  })
+
+  it('keeps the phase when dispatch is hours late (GHA schedule delay)', () => {
+    const now = new Date('2026-06-10T02:13:00.000Z')
+    expect(advanceNextRunAt('P1D', due, now)).toBe('2026-06-11T00:00:00.000Z')
+  })
+
+  it('skips missed slots in one jump when several periods behind', () => {
+    const now = new Date('2026-06-13T05:00:00.000Z') // 3 periods + 5h late
+    expect(advanceNextRunAt('P1D', due, now)).toBe('2026-06-14T00:00:00.000Z')
+  })
+
+  it('advances a full period past an exactly-due boundary', () => {
+    const now = new Date(due)
+    expect(advanceNextRunAt('P1D', due, now)).toBe('2026-06-11T00:00:00.000Z')
+  })
+
+  it('still moves forward under clock skew (now before due)', () => {
+    const now = new Date('2026-06-09T23:58:00.000Z')
+    expect(advanceNextRunAt('P1D', due, now)).toBe('2026-06-11T00:00:00.000Z')
+  })
+
+  it('falls back to now + period without a usable anchor', () => {
+    const now = new Date('2026-06-10T00:07:00.000Z')
+    expect(advanceNextRunAt('P1D', null, now)).toBe('2026-06-11T00:07:00.000Z')
+    expect(advanceNextRunAt('P1D', 'not-a-date', now)).toBe('2026-06-11T00:07:00.000Z')
+  })
+
+  it('returns null for unparsable schedules', () => {
+    expect(advanceNextRunAt('soon', due)).toBeNull()
   })
 })
