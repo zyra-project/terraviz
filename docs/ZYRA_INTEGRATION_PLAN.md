@@ -701,7 +701,11 @@ cache, sequenced after it.
 3. **Failure escalation.** A workflow that fails every hour fills
    `workflow_runs` and nobody notices. Minimum viable: auto-disable
    after N consecutive failures + a status banner in the portal.
-   Email/webhook fan-out belongs to the deferred 3pj work.
+   Email/webhook fan-out belongs to the deferred 3pj work. An
+   agent-assisted *diagnosis* hook for these failures (headless,
+   behind the run-status contract) is conditionally approved in
+   [`AGENT_SDK_EVALUATION.md`](AGENT_SDK_EVALUATION.md), gated on
+   this table's observed non-transient failure rate.
 4. **Community publishers.** The v1 staff-only restriction is a
    trust decision, not a technical one. Revisit alongside the
    Phase 6 review-queue (`submitted_at` / `approved_at`) — a

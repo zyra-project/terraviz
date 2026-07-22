@@ -140,6 +140,36 @@ for codebase conventions and constraints.
 
 ---
 
+## LLM Integrations
+
+TerraViz uses LLMs in a few narrow places (Orbit, voice, current-events
+enrichment). Every LLM touchpoint follows one convention, enforced in review:
+
+1. **Speak through an existing contract.** Vendor engines sit behind an
+   interface that a different engine — or a human — could satisfy: the
+   OpenAI-compatible provider client
+   ([`src/services/llmProvider.ts`](src/services/llmProvider.ts)), the
+   workflow run-status callback, the metadata sidecar. A capability that
+   can't be expressed through an existing contract needs the contract
+   designed first, not a bespoke integration.
+2. **Availability-gate with a working fallback.**
+   [`src/services/appleIntelligenceProvider.ts`](src/services/appleIntelligenceProvider.ts)
+   is the exemplar: vendor-specific engine, same `StreamChunk` interface,
+   `isAvailable()` gate, transparent fallback to the HTTP provider. A
+   deployment without the vendor (a fork without an API key, non-Apple
+   hardware) degrades to the fallback or a silent no-op — never a broken
+   feature.
+3. **No vendor LLM SDK in `dependencies`.** The agnostic layer is the wire
+   protocol: `llmProvider.ts` is raw `fetch` + SSE with no dependencies, and
+   stays that way. Vendor-specific *code* is fine when rules 1–2 hold;
+   vendor SDK *packages* are not.
+
+Verdicts on specific agentic-integration proposals (and the reasoning
+behind this convention) are recorded in
+[docs/AGENT_SDK_EVALUATION.md](docs/AGENT_SDK_EVALUATION.md).
+
+---
+
 ## Testing
 
 1. Install dependencies:
