@@ -10,10 +10,13 @@
 >
 > **Revisit when:** workflow authoring opens to community
 > publishers ([`ZYRA_INTEGRATION_PLAN.md`](ZYRA_INTEGRATION_PLAN.md)
-> §Open questions #4); Zyra's upstream **Narrate** stage ships; the
-> `workflow_runs` failure data shows a persistent non-transient
-> failure rate; or a self-hosted node needs the edge functions to
-> run against something other than Cloudflare's AI binding.
+> §Open questions #4); authoring friction is observed suppressing
+> dataset supply — **staff included** (hit 2026-07-22, see
+> §Workflow authoring assistant); Zyra's upstream **Narrate** stage
+> ships; the `workflow_runs` failure data shows a persistent
+> non-transient failure rate; or a self-hosted node needs the edge
+> functions to run against something other than Cloudflare's AI
+> binding.
 
 ---
 
@@ -125,6 +128,29 @@ it must be built as an owned loop over the OpenAI-compatible
 provider contract — draft → validate → read errors → revise — not
 as an embedded vendor SDK. That loop is simple enough to own;
 that's what makes the agnostic form viable here.
+
+**2026-07-22 update — gate partially hit, at staff level.** The
+original gate ("community authoring opens") was mis-specified: the
+real trigger is authoring friction suppressing dataset supply, and
+the node operator reports exactly that — one live workflow against
+zyra-scheduler's twelve production datasets, with wiring friction
+named as the reason more don't exist. Suppressed supply never
+shows up in `workflow_runs`, which is why this doc has to record
+it. The escalation path stays deliberate:
+
+1. **First response — dev-edge authoring, zero product surface.**
+   Draft new pipelines in AI-assisted development sessions
+   (validated via `/validate` + a manual run), and *log where the
+   wiring hour actually goes*: source research, Zyra arg
+   knowledge, the publish leg, or the fire-a-run-and-wait
+   iteration loop. A drafted pipeline that collapses the time
+   proves the friction was knowledge; time still lost to the GHA
+   loop points at deterministic tooling (a faster validation
+   surface), not an LLM.
+2. **Only if dev-edge authoring proves insufficient** (volume, or
+   non-staff authors) does the in-product owned-loop assistant
+   above get built — still under the convention, still not the
+   SDK.
 
 ### Agent SDK in product code — rejected
 
