@@ -19,6 +19,7 @@
     "screenshots:report": "npx tsx scripts/screenshots/report.ts",
     "screenshots:diff": "npx tsx scripts/screenshots/diff.ts",
     "screenshots:smoke": "npx tsx scripts/screenshots/smoke.ts",
+    "screenshots:demo": "npx tsx scripts/screenshots/demo.ts",
     "screenshots:summary": "npx tsx scripts/screenshots/summary.ts",
     "screenshots:sync": "npx tsx scripts/sync-weblate-screenshots.ts",
     "postinstall": "npm run tokens && npm run locales",

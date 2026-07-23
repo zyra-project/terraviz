@@ -98,3 +98,8 @@ screenshots-out/
 # `npm run screenshots:report`. Regenerated each run; uploaded as a CI
 # artifact / deployed, never committed. See docs/VISUAL_REPORT_PLAN.md.
 report-out/
+
+# Demo capture output — per-flow .webm clips + numbered stills +
+# manifest.json produced by `npm run screenshots:demo` for the training
+# video. Regenerated each run, never committed. See docs/VIDEO_PRODUCTION_PLAN.md.
+demo-out/

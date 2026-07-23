@@ -10,7 +10,7 @@
  * See `docs/VISUAL_REPORT_PLAN.md`.
  */
 
-import { parse, resolve, sep } from 'node:path'
+import { dirname, parse, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { chromium, type Browser, type Locator, type Page } from 'playwright'
@@ -69,9 +69,14 @@ export function assertSafeOutDir(dir: string): void {
   }
 }
 
-/** Launch a headless Chromium for a capture run. */
+/** Launch a headless Chromium for a capture run. `PLAYWRIGHT_CHROMIUM_PATH`
+ *  overrides the browser binary — handy when a pre-installed Chromium's
+ *  build number doesn't match the pinned Playwright package (so the run
+ *  doesn't demand `npx playwright install`); left unset in CI, which
+ *  installs the matching browser. */
 export function launchBrowser(opts: { args?: string[] } = {}): Promise<Browser> {
-  return chromium.launch({ args: opts.args })
+  const executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined
+  return chromium.launch({ args: opts.args, executablePath })
 }
 
 /**
@@ -154,6 +159,51 @@ export async function withScenePage<T>(
   } finally {
     await context.close()
   }
+}
+
+/**
+ * Like {@link withScenePage}, but records the whole session to a `.webm`
+ * clip saved at `videoPath`. Playwright finalizes the recording on
+ * context close, so we grab the `Video` handle, close the context, then
+ * `saveAs` it to the named path and drop the random temp file Playwright
+ * wrote alongside it. Used by the demo capturer (`../demo.ts`) to produce
+ * a continuous clip of a scripted flow; the still-per-beat capture
+ * happens inside `fn` via {@link screenshotWithRetry}.
+ *
+ * A recording failure (a wedged compositor, a missing clip) is
+ * swallowed — a demo clip is best-effort and must not abort the run —
+ * but an error thrown by `fn` itself propagates after the context is
+ * cleaned up.
+ */
+export async function withVideoPage(
+  browser: Browser,
+  opts: { viewport: Viewport; baseURL: string; videoPath: string },
+  fn: (page: Page) => Promise<void>,
+): Promise<void> {
+  const context = await browser.newContext({
+    viewport: opts.viewport,
+    baseURL: opts.baseURL,
+    recordVideo: { dir: dirname(opts.videoPath), size: opts.viewport },
+  })
+  const page = await context.newPage()
+  let fnErr: unknown
+  try {
+    await fn(page)
+  } catch (err) {
+    fnErr = err
+  } finally {
+    const video = page.video()
+    await context.close() // flushes + finalizes the .webm
+    if (video) {
+      try {
+        await video.saveAs(opts.videoPath)
+        await video.delete() // remove the random-named temp clip
+      } catch {
+        // Best-effort: a missing clip shouldn't fail the whole demo run.
+      }
+    }
+  }
+  if (fnErr) throw fnErr
 }
 
 /**
