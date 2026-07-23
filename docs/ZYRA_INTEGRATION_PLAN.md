@@ -455,9 +455,11 @@ in order of importance:
    `service` in the five-role matrix. (This doc originally said
    "staff", a pre-five-role term that never existed as a role;
    issue #305 resolved the mismatch in favor of editor as the
-   trusted human role.) Community publishers don't get the
-   surface. Relaxing this is a §Open questions item, not a v1
-   feature.
+   trusted human role.) The enforcement point is the API's
+   capability gate: the sidebar's Workflows item is
+   feature-gated, not role-gated, so other roles may *see* the
+   section but every route 403s them. Granting more roles is a
+   §Open questions item, not a v1 feature.
 2. **What can run.** `/validate` — enforced again at dispatch
    time, not just at save — checks every stage/command pair
    against a server-side allowlist (the implemented Zyra stages
