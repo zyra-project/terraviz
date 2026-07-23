@@ -31,6 +31,23 @@ next" rule from `~/.claude/CLAUDE.md` applies here especially:
   named phases, explicit non-goals, tables for comparisons,
   honest tradeoffs. New plan content should match.
 
+### LLM integration convention
+
+Any change that touches an LLM call — Orbit, voice, enrichment,
+workflow tooling, anything new — must follow
+[CONTRIBUTING.md](CONTRIBUTING.md) §LLM Integrations: speak
+through an existing contract, availability-gate with a working
+fallback (quota exhaustion included), no vendor LLM SDK in
+`dependencies`, and external content in model input is data,
+never instructions. Verdicts on specific agentic proposals
+(embedded Agent SDK: rejected; run-failure diagnosis:
+conditionally approved; others parked behind named triggers) are
+in [`docs/AGENT_SDK_EVALUATION.md`](docs/AGENT_SDK_EVALUATION.md)
+— check it before proposing or building an agentic feature, and
+add new value ideas to
+[`docs/LLM_INTEGRATION_OPPORTUNITIES.md`](docs/LLM_INTEGRATION_OPPORTUNITIES.md)
+rather than building them ad hoc.
+
 ### Federation planning artifact
 
 Federation work — Phase 4 routes (handshake / feed / signing),
