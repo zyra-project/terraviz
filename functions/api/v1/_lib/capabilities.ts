@@ -35,3 +35,15 @@ export function canOwnOrAny(
   if (can(publisher, anyCap)) return true
   return ownerId != null && ownerId === publisher.id && can(publisher, ownCap)
 }
+
+/**
+ * Workflow management gate (`workflows.manage`: editor, admin,
+ * service). Previously these routes used `isPrivileged`
+ * (`operator.manage`: admin + service) while their 403 message named
+ * "staff" — a role that doesn't exist in the matrix. The Zyra plan's
+ * v1 intent ("workflow CRUD is restricted to staff and service") maps
+ * to editor as the trusted human role; see issue #305.
+ */
+export function canManageWorkflows(publisher: PublisherRow): boolean {
+  return can(publisher, 'workflows.manage')
+}

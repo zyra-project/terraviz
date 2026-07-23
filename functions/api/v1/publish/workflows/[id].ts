@@ -14,7 +14,7 @@
 
 import type { CatalogEnv } from '../../_lib/env'
 import type { PublisherData } from '../_middleware'
-import { isPrivileged } from '../../_lib/publisher-store'
+import { canManageWorkflows } from '../../_lib/capabilities'
 import { writeAuditEvent } from '../../_lib/audit-store'
 import { computeNextRunAt } from '../../_lib/workflow-schedule'
 import { validateWorkflowInput } from '../../_lib/workflow-validators'
@@ -38,7 +38,7 @@ function forbidden(): Response {
   return jsonError(
     403,
     'forbidden_role',
-    'Workflows are restricted to staff, admin, and service callers.',
+    'Workflows are restricted to editor, admin, and service callers.',
   )
 }
 
@@ -53,7 +53,7 @@ export const onRequestGet: PagesFunction<CatalogEnv, 'id'> = async context => {
     return jsonError(503, 'binding_missing', 'CATALOG_DB binding is not configured on this deployment.')
   }
   const publisher = (context.data as unknown as PublisherData).publisher
-  if (!isPrivileged(publisher)) return forbidden()
+  if (!canManageWorkflows(publisher)) return forbidden()
   const id = pickId(context)
   if (!id) return jsonError(404, 'not_found', 'Workflow not found.')
 
@@ -71,7 +71,7 @@ export const onRequestPatch: PagesFunction<CatalogEnv, 'id'> = async context => 
     return jsonError(503, 'binding_missing', 'CATALOG_DB binding is not configured on this deployment.')
   }
   const publisher = (context.data as unknown as PublisherData).publisher
-  if (!isPrivileged(publisher)) return forbidden()
+  if (!canManageWorkflows(publisher)) return forbidden()
   const id = pickId(context)
   if (!id) return jsonError(404, 'not_found', 'Workflow not found.')
 

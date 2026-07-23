@@ -14,7 +14,7 @@
 
 import type { CatalogEnv } from '../../../../../_lib/env'
 import type { PublisherData } from '../../../../_middleware'
-import { isPrivileged } from '../../../../../_lib/publisher-store'
+import { canManageWorkflows } from '../../../../../_lib/capabilities'
 import { validateRunStatusInput } from '../../../../../_lib/workflow-validators'
 import { applyRunStatus, getRun } from '../../../../../_lib/workflow-store'
 
@@ -32,8 +32,8 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id' | 'run_id'> = async c
     return jsonError(503, 'binding_missing', 'CATALOG_DB binding is not configured on this deployment.')
   }
   const publisher = (context.data as unknown as PublisherData).publisher
-  if (!isPrivileged(publisher)) {
-    return jsonError(403, 'forbidden_role', 'Run callbacks are restricted to staff, admin, and service callers.')
+  if (!canManageWorkflows(publisher)) {
+    return jsonError(403, 'forbidden_role', 'Run callbacks are restricted to editor, admin, and service callers.')
   }
   const idParam = context.params.id
   const runParam = context.params.run_id
