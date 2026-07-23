@@ -367,3 +367,148 @@ export const DATASET_SOURCE_PRESETS_DRAFT: readonly DatasetSourcePresetDraft[] =
   },
 ]
 ```
+
+## Worked example — the SST pair, paste-ready
+
+The two workflow definitions authored from this catalog's first
+two entries (dev-edge, 2026-07-22), preserved verbatim: paste the
+pipeline into the portal's raw-YAML textarea and the JSON into the
+metadata template, schedule P1D. Workflow definitions live in D1
+by design — these are case-study artifacts, not source files.
+
+### Sea Surface Temperature — pipeline
+
+```yaml
+# Sea Surface Temperature — Real-time (daily, recall-enabled)
+#
+# Source verified by direct FTP listing (GHA probe run 29893076257,
+# branch claude/ftp-probe, 2026-07-22):
+#   ftp://public.sos.noaa.gov/rt/sst/nesdis/sst/4096/
+#   365 files, sst_YYYYMMDD.png (~21 MB each), rolling 1-year window,
+#   currently 2025-07-10 → 2026-07-12. NOAA Coral Reef Watch daily
+#   5 km blended satellite SST.
+#
+# Notes:
+# - The upstream product lags real time by ~9-10 days and sometimes
+#   lands in multi-day batches; end_time will always trail today.
+#   This is the nature of the science-quality composite, not a bug.
+# - ~7.7 GB working set at 4096. If run time or cache size is a
+#   concern, swap the path and nothing else to .../sst/2048/ —
+#   same filenames, quarter the bytes.
+# - Recall-enabled shape (no compose-video): ends on the frame set
+#   at /work/images/frames; the runner publishes via the
+#   image-sequence path (HLS video + /frames download surface).
+# - fill-mode nearest: SST is a continuous field — repeat the
+#   neighbouring day rather than compositing a basemap.
+stages:
+  - stage: acquire
+    command: ftp
+    args:
+      path: ftp://public.sos.noaa.gov/rt/sst/nesdis/sst/4096
+      sync-dir: /work/images/frames
+      since-period: P1Y
+      pattern: '^sst_[0-9]{8}\.png$'
+      date-format: '%Y%m%d'
+  - stage: process
+    command: scan-frames
+    args:
+      frames-dir: /work/images/frames
+      pattern: '^sst_[0-9]{8}\.png$'
+      datetime-format: '%Y%m%d'
+      period-seconds: 86400
+      output: /work/frames-meta.json
+  - stage: process
+    command: pad-missing
+    args:
+      frames-meta: /work/frames-meta.json
+      output-dir: /work/images/frames
+      fill-mode: nearest
+      json-report: /work/pad-missing-report.json
+  - stage: process
+    command: scan-frames
+    args:
+      frames-dir: /work/images/frames
+      pattern: '^sst_[0-9]{8}\.png$'
+      datetime-format: '%Y%m%d'
+      period-seconds: 86400
+      output: /work/frames-meta.json
+```
+
+### Sea Surface Temperature — metadata template
+
+```json
+{
+  "title": "Sea Surface Temperature - Real-time",
+  "abstract": "Daily cloud-free composite of global sea surface temperature from NOAA Coral Reef Watch, blending measurements from multiple geostationary and polar-orbiting satellites at 5 km resolution. Warm equatorial water expands toward the poles through each hemisphere's summer and withdraws in winter; the same data underpins monitoring of coral bleaching heat stress, hurricane development, and El Nino / La Nina. Updated automatically every day. Current data range: {{data_start}} to {{data_end}}.",
+  "categories": ["Water"],
+  "keywords": ["sst", "sea surface temperature", "ocean", "coral reef watch", "real-time"],
+  "start_time": "{{data_start}}",
+  "end_time": "{{data_end}}",
+  "period": "{{data_period}}",
+  "organization": "NOAA",
+  "attribution_text": "NOAA NESDIS Coral Reef Watch / NOAA Science On a Sphere",
+  "website_link": "https://sos.noaa.gov/catalog/datasets/sea-surface-temperature-real-time/"
+}
+```
+
+### Sea Surface Temperature Anomaly — pipeline
+
+```yaml
+# Sea Surface Temperature Anomaly — Real-time (daily, recall-enabled)
+#
+# Source verified by direct FTP listing (GHA probe run 29893076257,
+# branch claude/ftp-probe, 2026-07-22):
+#   ftp://public.sos.noaa.gov/rt/sst/nesdis/sst_anom/4096/
+#   365 files, sst_anom_YYYYMMDD.png (~5 MB each), rolling 1-year
+#   window. Same Coral Reef Watch product family as the SST feed,
+#   same ~9-10 day lag; ~1.9 GB working set at 4096.
+stages:
+  - stage: acquire
+    command: ftp
+    args:
+      path: ftp://public.sos.noaa.gov/rt/sst/nesdis/sst_anom/4096
+      sync-dir: /work/images/frames
+      since-period: P1Y
+      pattern: '^sst_anom_[0-9]{8}\.png$'
+      date-format: '%Y%m%d'
+  - stage: process
+    command: scan-frames
+    args:
+      frames-dir: /work/images/frames
+      pattern: '^sst_anom_[0-9]{8}\.png$'
+      datetime-format: '%Y%m%d'
+      period-seconds: 86400
+      output: /work/frames-meta.json
+  - stage: process
+    command: pad-missing
+    args:
+      frames-meta: /work/frames-meta.json
+      output-dir: /work/images/frames
+      fill-mode: nearest
+      json-report: /work/pad-missing-report.json
+  - stage: process
+    command: scan-frames
+    args:
+      frames-dir: /work/images/frames
+      pattern: '^sst_anom_[0-9]{8}\.png$'
+      datetime-format: '%Y%m%d'
+      period-seconds: 86400
+      output: /work/frames-meta.json
+```
+
+### Sea Surface Temperature Anomaly — metadata template
+
+```json
+{
+  "title": "Sea Surface Temperature Anomaly - Real-time",
+  "abstract": "Daily global sea surface temperature anomaly from NOAA Coral Reef Watch: how much warmer or cooler the ocean surface is than the long-term average for that day of year, at 5 km resolution. Persistent warm anomalies signal coral bleaching heat stress and developing El Nino; cool anomalies mark upwelling and La Nina. Updated automatically every day. Current data range: {{data_start}} to {{data_end}}.",
+  "categories": ["Water"],
+  "keywords": ["sst anomaly", "sea surface temperature", "ocean", "coral reef watch", "el nino", "la nina", "real-time"],
+  "start_time": "{{data_start}}",
+  "end_time": "{{data_end}}",
+  "period": "{{data_period}}",
+  "organization": "NOAA",
+  "attribution_text": "NOAA NESDIS Coral Reef Watch / NOAA Science On a Sphere",
+  "website_link": "https://sos.noaa.gov/catalog/datasets/sea-surface-temperature-anomaly-real-time/"
+}
+```
