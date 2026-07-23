@@ -102,3 +102,14 @@ See **[STYLE_GUIDE.md](STYLE_GUIDE.md)** for the complete visual design language
 - Cloud overlay uses non-linear alpha curve (gamma 1.8) in WebGL2 shader
 - Skybox rendered as a separate 3D custom layer with cubemap sampling
 - Test files are co-located with source files (e.g., `main.test.ts`, `dataService.test.ts`)
+
+## LLM Integrations
+
+Any change touching an LLM call follows the convention in
+[CONTRIBUTING.md](CONTRIBUTING.md) §LLM Integrations (existing
+contract, availability gate + fallback, no vendor LLM SDK in
+`dependencies`, external content is data — never instructions).
+Agentic-integration verdicts live in
+[docs/AGENT_SDK_EVALUATION.md](docs/AGENT_SDK_EVALUATION.md);
+value ideas go to
+[docs/LLM_INTEGRATION_OPPORTUNITIES.md](docs/LLM_INTEGRATION_OPPORTUNITIES.md).
