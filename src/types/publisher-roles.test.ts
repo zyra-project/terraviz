@@ -17,34 +17,34 @@ describe('publisher role → capability matrix', () => {
     admin: {
       'content.read': 1, 'content.create': 1, 'content.edit.own': 1, 'content.delete.own': 1,
       'content.publish.own': 1, 'content.edit.any': 1, 'content.delete.any': 1, 'content.publish.any': 1,
-      'insights.read': 1, 'hero.read': 1, 'hero.manage': 1, 'operator.manage': 1, 'users.manage': 1,
+      'insights.read': 1, 'hero.read': 1, 'hero.manage': 1, 'workflows.manage': 1, 'operator.manage': 1, 'users.manage': 1,
     },
     service: {
       'content.read': 1, 'content.create': 1, 'content.edit.own': 1, 'content.delete.own': 1,
       'content.publish.own': 1, 'content.edit.any': 1, 'content.delete.any': 1, 'content.publish.any': 1,
-      'insights.read': 1, 'hero.read': 1, 'hero.manage': 1, 'operator.manage': 1, 'users.manage': 0,
+      'insights.read': 1, 'hero.read': 1, 'hero.manage': 1, 'workflows.manage': 1, 'operator.manage': 1, 'users.manage': 0,
     },
     editor: {
       'content.read': 1, 'content.create': 1, 'content.edit.own': 1, 'content.delete.own': 1,
       'content.publish.own': 1, 'content.edit.any': 1, 'content.delete.any': 1, 'content.publish.any': 1,
-      'insights.read': 1, 'hero.read': 1, 'hero.manage': 1, 'operator.manage': 0, 'users.manage': 0,
+      'insights.read': 1, 'hero.read': 1, 'hero.manage': 1, 'workflows.manage': 1, 'operator.manage': 0, 'users.manage': 0,
     },
     author: {
       'content.read': 1, 'content.create': 1, 'content.edit.own': 1, 'content.delete.own': 1,
       'content.publish.own': 1, 'content.edit.any': 0, 'content.delete.any': 0, 'content.publish.any': 0,
-      'insights.read': 1, 'hero.read': 1, 'hero.manage': 0, 'operator.manage': 0, 'users.manage': 0,
+      'insights.read': 1, 'hero.read': 1, 'hero.manage': 0, 'workflows.manage': 0, 'operator.manage': 0, 'users.manage': 0,
     },
     contributor: {
       'content.read': 1, 'content.create': 1, 'content.edit.own': 1, 'content.delete.own': 1,
       'content.publish.own': 0, 'content.edit.any': 0, 'content.delete.any': 0, 'content.publish.any': 0,
-      'insights.read': 1, 'hero.read': 1, 'hero.manage': 0, 'operator.manage': 0, 'users.manage': 0,
+      'insights.read': 1, 'hero.read': 1, 'hero.manage': 0, 'workflows.manage': 0, 'operator.manage': 0, 'users.manage': 0,
     },
     // Reviewer is a true read-only role: reads catalog/queues/insights,
     // authors nothing.
     reviewer: {
       'content.read': 1, 'content.create': 0, 'content.edit.own': 0, 'content.delete.own': 0,
       'content.publish.own': 0, 'content.edit.any': 0, 'content.delete.any': 0, 'content.publish.any': 0,
-      'insights.read': 1, 'hero.read': 1, 'hero.manage': 0, 'operator.manage': 0, 'users.manage': 0,
+      'insights.read': 1, 'hero.read': 1, 'hero.manage': 0, 'workflows.manage': 0, 'operator.manage': 0, 'users.manage': 0,
     },
   }
 

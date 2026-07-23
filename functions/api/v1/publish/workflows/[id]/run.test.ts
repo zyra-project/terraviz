@@ -15,8 +15,8 @@ import { onRequestPost as run } from './run'
 import { asD1, seedFixtures } from '../../../_lib/test-helpers'
 import type { PublisherRow } from '../../../_lib/publisher-store'
 
-// operator.manage is held by admin + service only (the route's 403
-// message says "staff" but roleCan disagrees — see publisher-store).
+// Workflow routes gate on `workflows.manage` (editor, admin,
+// service) — see capabilities.ts and issue #305.
 const ADMIN: PublisherRow = {
   id: 'PUB-ADMIN',
   email: 'admin@example.com',
@@ -28,6 +28,9 @@ const ADMIN: PublisherRow = {
   status: 'active',
   created_at: '2026-01-01T00:00:00.000Z',
 }
+
+const EDITOR: PublisherRow = { ...ADMIN, id: 'PUB-EDITOR', email: 'editor@example.com', display_name: 'Editor', role: 'editor', is_admin: 0 }
+const AUTHOR: PublisherRow = { ...ADMIN, id: 'PUB-AUTHOR', email: 'author@example.com', display_name: 'Author', role: 'author', is_admin: 0 }
 
 const WORKFLOW_ID = '01H0000000000000000000000A'
 const DAY_MS = 86_400_000
@@ -99,7 +102,7 @@ function readNextRunAt(sqlite: Database.Database): string | null {
   ).next_run_at
 }
 
-function makeCtx(env: Record<string, unknown>, body?: unknown) {
+function makeCtx(env: Record<string, unknown>, body?: unknown, publisher: PublisherRow = ADMIN) {
   const url = `https://localhost/api/v1/publish/workflows/${WORKFLOW_ID}/run`
   const headers = new Headers()
   if (body !== undefined) headers.set('Content-Type', 'application/json')
@@ -109,7 +112,7 @@ function makeCtx(env: Record<string, unknown>, body?: unknown) {
     request: new Request(url, init),
     env,
     params: { id: WORKFLOW_ID },
-    data: { publisher: ADMIN },
+    data: { publisher },
     waitUntil: () => {},
     passThroughOnException: () => {},
     next: async () => new Response(null),
@@ -167,6 +170,22 @@ describe('POST /workflows/{id}/run — scheduled next_run_at bump', () => {
     expect(res.status).toBe(202)
 
     expect(readNextRunAt(sqlite)).toBe(due)
+  })
+
+  it('gates on workflows.manage: editor may trigger, author may not', async () => {
+    const { sqlite, env } = setupEnv()
+    insertWorkflow(sqlite, '2026-08-01T05:00:00.000Z')
+
+    const editorRes = await run(makeCtx(env, undefined, EDITOR))
+    expect(editorRes.status).toBe(202)
+
+    const authorRes = await run(makeCtx(env, undefined, AUTHOR))
+    expect(authorRes.status).toBe(403)
+    const body = (await authorRes.json()) as { error: string; message: string }
+    expect(body.error).toBe('forbidden_role')
+    // The message names real roles now — no phantom "staff" (issue #305).
+    expect(body.message).toContain('editor')
+    expect(body.message).not.toContain('staff')
   })
 
   it('inserts a queued run row for the dispatch', async () => {

@@ -450,9 +450,13 @@ Pipeline YAML is user-supplied execution config that runs inside
 the node's GitHub Actions with repo secrets in scope. Containment,
 in order of importance:
 
-1. **Who can author.** Workflow CRUD is restricted to `staff` and
-   `service` roles in v1. Community publishers don't see the
-   section. Relaxing this is a §Open questions item, not a v1
+1. **Who can author.** Workflow CRUD gates on the
+   `workflows.manage` capability — `editor`, `admin`, and
+   `service` in the five-role matrix. (This doc originally said
+   "staff", a pre-five-role term that never existed as a role;
+   issue #305 resolved the mismatch in favor of editor as the
+   trusted human role.) Community publishers don't get the
+   surface. Relaxing this is a §Open questions item, not a v1
    feature.
 2. **What can run.** `/validate` — enforced again at dispatch
    time, not just at save — checks every stage/command pair

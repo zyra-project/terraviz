@@ -15,7 +15,7 @@
 
 import type { CatalogEnv } from '../../../_lib/env'
 import type { PublisherData } from '../../_middleware'
-import { isPrivileged } from '../../../_lib/publisher-store'
+import { canManageWorkflows } from '../../../_lib/capabilities'
 import { writeAuditEvent } from '../../../_lib/audit-store'
 import { isConfigurationError, safeErrorReason } from '../../../_lib/errors'
 import { dispatchZyraRun, type GitHubDispatchEnv } from '../../../_lib/github-dispatch'
@@ -42,8 +42,8 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
     return jsonError(503, 'binding_missing', 'CATALOG_DB binding is not configured on this deployment.')
   }
   const publisher = (context.data as unknown as PublisherData).publisher
-  if (!isPrivileged(publisher)) {
-    return jsonError(403, 'forbidden_role', 'Workflows are restricted to staff, admin, and service callers.')
+  if (!canManageWorkflows(publisher)) {
+    return jsonError(403, 'forbidden_role', 'Workflows are restricted to editor, admin, and service callers.')
   }
   const idParam = context.params.id
   const id = (Array.isArray(idParam) ? idParam[0] : idParam) || null

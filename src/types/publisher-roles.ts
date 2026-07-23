@@ -33,6 +33,7 @@ export const CAPABILITIES = [
   'insights.read',
   'hero.read',
   'hero.manage',
+  'workflows.manage',
   'operator.manage',
   'users.manage',
 ] as const
@@ -96,6 +97,11 @@ const EDITOR_CAPS: ReadonlySet<Capability> = new Set<Capability>([
   'content.delete.any',
   'content.publish.any',
   'hero.manage',
+  // Zyra workflows publish content on a cadence — an editorial power
+  // (the Zyra plan's v1 "staff and service" authoring restriction,
+  // mapped to the five-role vocabulary). Deliberately NOT
+  // operator.manage: workflows don't grant feed/node/key config.
+  'workflows.manage',
 ])
 
 export const ROLE_CAPABILITIES: Record<Role, ReadonlySet<Capability>> = {

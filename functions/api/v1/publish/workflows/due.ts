@@ -17,7 +17,7 @@
 import type { CatalogEnv } from '../../_lib/env'
 import type { PublisherData } from '../_middleware'
 import { getEffectiveFeatures } from '../../_lib/node-settings-store'
-import { isPrivileged } from '../../_lib/publisher-store'
+import { canManageWorkflows } from '../../_lib/capabilities'
 import { getDueWorkflows } from '../../_lib/workflow-store'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
@@ -30,9 +30,9 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
     )
   }
   const publisher = (context.data as unknown as PublisherData).publisher
-  if (!isPrivileged(publisher)) {
+  if (!canManageWorkflows(publisher)) {
     return new Response(
-      JSON.stringify({ error: 'forbidden_role', message: 'The due list is restricted to staff, admin, and service callers.' }),
+      JSON.stringify({ error: 'forbidden_role', message: 'The due list is restricted to editor, admin, and service callers.' }),
       { status: 403, headers: { 'Content-Type': CONTENT_TYPE } },
     )
   }

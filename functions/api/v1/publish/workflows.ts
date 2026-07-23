@@ -8,15 +8,15 @@
  *        400 `{ errors }` for validation failures; 201 with
  *        `{ workflow }` + Location on success.
  *
- * Both privileged-only (staff / admin / service) — pipeline YAML is
- * user-supplied execution config that runs in the node's GHA, so
- * community publishers don't get the surface in v1 (plan doc
- * §Security model).
+ * Both gated on `workflows.manage` (editor / admin / service) —
+ * pipeline YAML is user-supplied execution config that runs in the
+ * node's GHA, so community publishers don't get the surface in v1
+ * (plan doc §Security model).
  */
 
 import type { CatalogEnv } from '../_lib/env'
 import type { PublisherData } from './_middleware'
-import { isPrivileged } from '../_lib/publisher-store'
+import { canManageWorkflows } from '../_lib/capabilities'
 import { writeAuditEvent } from '../_lib/audit-store'
 import { computeNextRunAt } from '../_lib/workflow-schedule'
 import { validateWorkflowInput, type WorkflowInput } from '../_lib/workflow-validators'
@@ -40,7 +40,7 @@ function forbidden(): Response {
   return jsonError(
     403,
     'forbidden_role',
-    'Workflows are restricted to staff, admin, and service callers.',
+    'Workflows are restricted to editor, admin, and service callers.',
   )
 }
 
@@ -49,7 +49,7 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
     return jsonError(503, 'binding_missing', 'CATALOG_DB binding is not configured on this deployment.')
   }
   const publisher = (context.data as unknown as PublisherData).publisher
-  if (!isPrivileged(publisher)) return forbidden()
+  if (!canManageWorkflows(publisher)) return forbidden()
 
   const url = new URL(context.request.url)
   const limitRaw = Number(url.searchParams.get('limit') ?? '50')
@@ -67,7 +67,7 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
     return jsonError(503, 'binding_missing', 'CATALOG_DB binding is not configured on this deployment.')
   }
   const publisher = (context.data as unknown as PublisherData).publisher
-  if (!isPrivileged(publisher)) return forbidden()
+  if (!canManageWorkflows(publisher)) return forbidden()
 
   let body: unknown
   try {
