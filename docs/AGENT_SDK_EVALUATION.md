@@ -17,6 +17,11 @@
 > non-transient failure rate; or a self-hosted node needs the edge
 > functions to run against something other than Cloudflare's AI
 > binding.
+>
+> This doc records constraints and verdicts; the value side — what
+> the LLM machinery is *for*, consumer and publisher opportunity
+> ideas that fit these constraints — is registered in
+> [`LLM_INTEGRATION_OPPORTUNITIES.md`](LLM_INTEGRATION_OPPORTUNITIES.md).
 
 ---
 
