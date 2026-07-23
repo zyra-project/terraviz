@@ -72,7 +72,7 @@ it?**
 | Real-time dataset generation & refresh | **No LLM** — settled | Deterministic Zyra pipelines (shipped) | — |
 | Conversational docent (Orbit) | **No agent** — settled | OpenAI-compatible provider contract (shipped) | — |
 | Workflow run-failure diagnosis | **Conditionally approved** | Headless CLI step in GHA, behind the run-status contract | Failure-rate data first |
-| Run metadata narration (abstracts, captions) | **Parked** | Single completion call behind the sidecar contract | Upstream Narrate stage ships |
+| Run metadata narration (abstracts, captions) | **Parked** | Single completion call behind the sidecar contract | Upstream Narrate ships; free text needs a review gate (see below) |
 | Workflow authoring assistant | **Parked** | Own loop over the provider contract — *not* the SDK | Community authoring opens (plan §OQ4) |
 | Agent SDK embedded in product code | **Rejected** | — | — |
 | Upstream Zyra development (Z4 gaps) | **Out of scope here** | Normal AI-assisted development in `NOAA-GSL/zyra` / the mirror | — |
@@ -110,6 +110,30 @@ where agnosticism buys nothing and removal is deleting a file.
 failure rate first. If real failures are rare, auto-disable + a
 banner + an occasional human look is the right amount of
 engineering, and this stays unbuilt.
+
+**Threat note (convention rule 4):** the hook's inputs — run logs,
+pipeline definitions, error text — quote content from remote
+servers (filenames, FTP banners), which makes them a prompt
+injection surface. The conditions above are also the containment:
+the diagnosis is inert data on a run row, proposed patches are
+never auto-applied, and nothing the agent emits acquires a write
+path beyond the callback. Any future loosening (auto-applied
+patches, auto-retries with modified pipelines) must re-clear this
+note first.
+
+### Run metadata narration — parked, with one pre-condition
+
+When upstream Narrate ships, the sidecar contract it slots into
+**auto-publishes**: scheduled runs PATCH metadata onto the live
+catalog with no human in the loop. That is safe for template
+interpolation and stays safe for model-derived *structured* values
+(dates, ranges). It is **not** safe for model-drafted free text —
+an hallucinated abstract would ship on a cron under the node's
+name. Pre-condition, recorded now so it doesn't get relitigated
+under feature pressure: LLM-drafted free-text fields (abstract,
+title) enter the sidecar only behind a review gate (draft state,
+curator approval — the Phase 6 review-queue shape), never on the
+unattended path.
 
 ### Workflow authoring assistant — parked
 

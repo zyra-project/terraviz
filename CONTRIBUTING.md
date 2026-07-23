@@ -163,6 +163,16 @@ enrichment). Every LLM touchpoint follows one convention, enforced in review:
    protocol: `llmProvider.ts` is raw `fetch` + SSE with no dependencies, and
    stays that way. Vendor-specific *code* is fine when rules 1–2 hold;
    vendor SDK *packages* are not.
+4. **External content in model input is data, never instructions.** Anything
+   an LLM reads that originates outside the trust boundary — catalog
+   metadata, feed items, remote directory listings, run logs quoting a
+   remote server — may be adversarial (prompt injection). Model *output*
+   influenced by such content only ever reaches the world through a
+   validated contract (the stage/command allowlist, `/validate`, a
+   human-approved save); it is never executed, auto-published, or granted a
+   write path of its own. Rule 2's gate includes quota exhaustion: a
+   provider that runs out mid-flight (see `_lib/workers-ai-error.ts`)
+   degrades like a provider that was never configured.
 
 Verdicts on specific agentic-integration proposals (and the reasoning
 behind this convention) are recorded in

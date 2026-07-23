@@ -116,6 +116,12 @@ issue instead of a shrug. When Orbit exists (A4) it can draft a
 better body; the deterministic version ships first and is never
 removed as the fallback.
 
+One sizing constraint: `/issues/new` query params truncate around
+~8 KB, and a pipeline JSON plus a validator error can exceed that.
+The composer budgets the URL — full error text first, then the
+failing stage's JSON, then a note that the rest was truncated —
+with a copy-body-to-clipboard fallback when even that doesn't fit.
+
 ## Phase A3 — Source presets: curate the judgment once
 
 The portal already has the exact pattern:
@@ -177,6 +183,18 @@ allowlist validates every draft, nothing is enabled or run
 without a human click. Orbit **proposes**; the operator
 **disposes**.
 
+**Threat note (convention rule 4):** `probe_source` puts
+externally-controlled text — filenames and listing content from a
+remote server — directly into the model's context, which makes a
+compromised or malicious feed a prompt-injection vector. The
+containment is structural, and the same as everywhere else in this
+plan: whatever the model emits is inert until it passes `/validate`
+(allowlist, arg shapes, output-path rule) and a human clicks Save;
+listings are rendered to the operator verbatim, never interpreted
+as instructions by anything but the model whose output is caged.
+Any A4 tool that would give Orbit a side effect beyond the four
+listed must re-clear this note.
+
 ---
 
 ## Phases
@@ -200,6 +218,12 @@ without a human click. Orbit **proposes**; the operator
   restriction and `ZYRA_INTEGRATION_PLAN.md` §Open questions #4.
 - **No probe fetches from the Worker.** Operator-supplied URLs
   are only ever fetched by the GHA probe job.
+- **No authenticated sources.** The probe job runs with no secrets
+  in scope by design, so credentialed feeds (password-protected
+  FTP, API-keyed HTTP) can be neither probed nor preset. That's a
+  consequence of the security posture, not an oversight — it holds
+  until the runner grows a per-source secrets story, which is its
+  own plan.
 - **No LLM requirement.** Every phase through A3 is fully usable
   with no provider configured.
 
