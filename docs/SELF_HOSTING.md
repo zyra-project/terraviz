@@ -667,6 +667,7 @@ environments.
 | `TRUSTED_PUBLISHER_DOMAINS` | Plaintext (optional) | Comma-separated email domains whose verified Access user logins JIT-provision as `reviewer/active` — auto-approved (they skip the `pending` queue) but read-only, **not** admin. Everyone else defaults to `reviewer/pending`. An admin promotes trusted users to an authoring role from the portal's Users tab. You do **not** need this to seat your first admin: the first human to sign in on a deploy with no active admin is bootstrapped to `admin/active` automatically (service tokens excepted). Match is exact, case-insensitive, no subdomain wildcarding. Service tokens are unaffected. | Single-org publisher portal access (Step 16). |
 | `R2_PUBLIC_BASE` | Plaintext | Public origin for the catalog R2 bucket (e.g. `https://assets.terraviz.your-org.org`). The manifest endpoint and SPA build playable HLS / image / tour-asset URLs from this. Bind the domain under R2 → bucket → Settings → Connect Domain first. **Not optional for the audit** (see note below). | Serving any R2-hosted asset. |
 | `R2_S3_ENDPOINT` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | Secret | R2 S3-API credentials for server-side presigned PUT minting and digest verification. Minted at R2 → Manage R2 API Tokens (Read+Write on the bucket). The same three values are also consumed shell-side by the migration CLIs and the transcode workflow. | Browser/CLI asset uploads. |
+| `CATALOG_R2_BUCKET` | Plaintext | Name of the bucket `CATALOG_R2` points at. Presigned PUTs are path-style (`<endpoint>/<bucket>/<key>`), so this is what the Worker signs against — the native binding does **not** supply it. Set it explicitly even if the bucket is named `terraviz-assets`; see the silent-default warning below. Also needed as a GitHub Actions secret of the same name (Step 15). | Browser/CLI asset uploads, workflow runs. |
 | `GITHUB_OWNER` / `GITHUB_REPO` / `GITHUB_DISPATCH_TOKEN` | Plaintext / Plaintext / Secret | Point the video-transcode `repository_dispatch` at **your fork** (e.g. `your-org` / `terraviz`). Token is a PAT with `repo`/Contents:write on that repo. Without them video uploads 503 `github_dispatch_unconfigured`. | Video transcode (Step 15). |
 | `YOUTUBE_API_KEY` | Secret (optional) | YouTube Data API v3 key for the agency-YouTube media-suggestion source in the events review queue (and for resolving a pasted `@handle`/custom-URL channel in the Feeds console). Acquisition + restriction walkthrough: [`YOUTUBE_API_KEY.md`](YOUTUBE_API_KEY.md). Absent = the source stays off; nothing errors. | YouTube media suggestions. |
 
@@ -686,6 +687,22 @@ this automatically.
 > don't run uploads/transcode yet, prune the corresponding entries
 > from `expected-bindings.ts` so the audit reflects your deploy's
 > actual surface).
+
+> **`CATALOG_R2_BUCKET` fails quietly and at a distance — set it.**
+> It is the one R2 setting with a hard-coded fallback: unset, both
+> the Worker (`functions/api/v1/_lib/r2-store.ts`) and the GitHub
+> Actions runner (`cli/lib/r2-upload.ts`) default to upstream's
+> bucket name, `terraviz-assets`. A node whose bucket is named
+> anything else then signs every presigned PUT and every CLI
+> `LIST`/`PUT` against a bucket outside its API token's scope, and
+> R2 answers with a bare `401 Unauthorized` naming neither the
+> bucket nor the reason. Nothing upstream of that point complains:
+> the `CATALOG_R2` binding, Access, and D1 all keep working, so a
+> publish gets as far as writing dataset metadata and dies on the
+> first byte of asset upload. It is required in **two** places that
+> are configured separately — the Pages env var here, and the
+> GitHub Actions secret in Step 15 — and missing either one
+> reproduces the same 401 on a different half of the pipeline.
 
 ## Step 11 — Apply the catalog migrations
 
@@ -1113,7 +1130,7 @@ Repository secrets):
 | `R2_S3_ENDPOINT` | Same value as the Pages `R2_S3_ENDPOINT` env. |
 | `R2_ACCESS_KEY_ID` | R2 S3 access-key id with read+write on the assets bucket. Same key the publisher API uses for digest verification is fine. |
 | `R2_SECRET_ACCESS_KEY` | The matching secret. |
-| `CATALOG_R2_BUCKET` | Optional bucket-name override. Defaults to `terraviz-assets`. |
+| `CATALOG_R2_BUCKET` | Name of your assets bucket. **Set this** unless your bucket is literally named `terraviz-assets` — unset, the runner falls back to that upstream name and every S3 call addresses a bucket outside your token's scope, which R2 rejects with a bare `401 Unauthorized`. Must match the Pages env var of the same name (Step 10). |
 | `TERRAVIZ_SERVER` | Base URL of the Pages deploy (e.g. `https://terraviz.app`). The workflow POSTs `<server>/api/v1/publish/datasets/{id}/transcode-complete` at the end of the run; the route constructs `data_ref` server-side from the route id + the workflow-supplied `upload_id` and clears `transcoding`. |
 | `CF_ACCESS_CLIENT_ID` | Cloudflare Access **service token** id. The token is provisioned via Zero Trust → Access → Service Auth. The publisher API JIT-provisions it as `role='service'` on first use; the `/transcode-complete` route accepts that role explicitly. |
 | `CF_ACCESS_CLIENT_SECRET` | The matching secret. |

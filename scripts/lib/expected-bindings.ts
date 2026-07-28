@@ -179,13 +179,13 @@ export const EXPECTED_BINDINGS: ExpectedBinding[] = [
       'play time on a typical (non-public-bucket) production setup.',
   },
 
-  // ── R2 S3-API credentials (Phase 3 + 3b + 3c operator-side migrations) ─
+  // ── R2 S3-API addressing (Phase 3 + 3b + 3c operator-side migrations) ─
   // The migrate-r2-hls (Phase 3), migrate-r2-assets (Phase 3b),
   // and migrate-r2-tours (Phase 3c) CLIs talk to R2 via the S3
-  // API (no native R2 binding outside the Worker runtime). One
-  // set of three env vars covers all three CLIs. The audit
-  // lists these here so the operator sees them as MISSING
-  // before the migration attempt errors out at
+  // API (no native R2 binding outside the Worker runtime). The
+  // credential trio plus the bucket name below covers all three
+  // CLIs. The audit lists these here so the operator sees them as
+  // MISSING before the migration attempt errors out at
   // credential-validation.
   {
     name: 'R2_S3_ENDPOINT',
@@ -214,6 +214,23 @@ export const EXPECTED_BINDINGS: ExpectedBinding[] = [
     hint:
       'R2 S3-API secret access key. Paired with R2_ACCESS_KEY_ID; shown once ' +
       'at token mint time.',
+  },
+  {
+    name: 'CATALOG_R2_BUCKET',
+    type: 'plaintext',
+    environments: BOTH,
+    hint:
+      'Name of the catalog R2 bucket, used to build the path-style S3 URL ' +
+      '(<endpoint>/<bucket>/<key>) that presigned PUTs and the CLIs sign ' +
+      'against. Must match the bucket the CATALOG_R2 binding points at, and ' +
+      'the GitHub Actions secret of the same name. Set it explicitly even ' +
+      'when the bucket IS named terraviz-assets: unset, both the Worker ' +
+      '(r2-store.ts) and the runner (cli/lib/r2-upload.ts) silently fall back ' +
+      'to that upstream name, so a node whose bucket is named anything else ' +
+      'addresses a bucket outside its token scope and R2 answers every ' +
+      'presigned PUT and CLI LIST with a bare 401 Unauthorized that names ' +
+      'neither the bucket nor the reason. Plaintext, not a secret — it is a ' +
+      'bucket name, not a credential.',
   },
 
   // ── GitHub Actions transcode dispatch (Phase 3pd) ─────────────
