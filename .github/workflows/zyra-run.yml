@@ -28,7 +28,18 @@
 # below for why the scheduler image cannot run these pipelines.
 #
 # Required repo secrets (the transcode-hls.yml set):
-#   TERRAVIZ_SERVER, CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET
+#   TERRAVIZ_SERVER, CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET,
+#   R2_S3_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY,
+#   CATALOG_R2_BUCKET
+#
+# CATALOG_R2_BUCKET is the one that looks optional and isn't: unset,
+# `cli/lib/r2-upload.ts` falls back to upstream's bucket name
+# (`terraviz-assets`), so a node whose bucket is named anything else
+# gets a bare `401 Unauthorized` from R2 on the frame-cache LIST and
+# on every asset upload. It must carry the same value as the Pages
+# env var of the same name — the presigned PUTs the publish phase
+# uploads to are signed server-side against *that* copy, so the two
+# halves fail independently (SELF_HOSTING.md Steps 10 + 15).
 name: Zyra Run
 
 on:

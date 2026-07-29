@@ -164,6 +164,37 @@ describe('diffBindings', () => {
   })
 })
 
+describe('EXPECTED_BINDINGS manifest', () => {
+  // Regression guard for the silent-default trap: a presigned PUT is
+  // path-style (`<endpoint>/<bucket>/<key>`), so the bucket NAME is
+  // as load-bearing as the credential trio — and unlike the trio it
+  // has a hard-coded fallback (`terraviz-assets`) in both
+  // `functions/api/v1/_lib/r2-store.ts` and `cli/lib/r2-upload.ts`.
+  // Drop it from the manifest and the audit hands a downstream node
+  // a clean bill of health while every upload 401s against a bucket
+  // outside its token scope. `fullyConfigured()` derives its fixture
+  // from the manifest, so nothing above would catch the removal.
+  it('covers the full R2 S3-addressing set, bucket name included', () => {
+    const r2Names = new Set(EXPECTED_BINDINGS.map(b => b.name))
+    for (const name of [
+      'R2_S3_ENDPOINT',
+      'R2_ACCESS_KEY_ID',
+      'R2_SECRET_ACCESS_KEY',
+      'CATALOG_R2_BUCKET',
+    ]) {
+      expect(r2Names).toContain(name)
+    }
+  })
+
+  it('declares CATALOG_R2_BUCKET as plaintext in both environments', () => {
+    const bucket = EXPECTED_BINDINGS.find(b => b.name === 'CATALOG_R2_BUCKET')
+    // Plaintext, not secret — it is a bucket name, not a credential,
+    // and `diffBindings` treats a type mismatch as a hard failure.
+    expect(bucket?.type).toBe('plaintext')
+    expect(bucket?.environments).toEqual(['production', 'preview'])
+  })
+})
+
 describe('formatDiffTable', () => {
   it('produces a stable table layout with status glyphs', () => {
     const proj = fullyConfigured()
