@@ -43,9 +43,19 @@ def main():
     a = ap.parse_args()
 
     # Tick labels: share a x10^-n exponent so the numbers stay short.
+    #
+    # Only factor the exponent out when the plain numbers would actually be
+    # unwieldy. Applied unconditionally it destroys human-scale ranges: a
+    # 0..120 index at x10^2 rounds to "0 0 1 1". Column mass density (3e-4)
+    # still needs it, so the rule is on magnitude, not on units.
     exp = int(np.floor(np.log10(a.vmax))) if a.vmax > 0 else 0
+    if -2 <= exp <= 3:
+        exp = 0
     scale = 10.0 ** exp
     ticks = np.linspace(a.vmin, a.vmax, 4)
+    # Enough decimals that adjacent ticks stay distinct after scaling.
+    step = (a.vmax - a.vmin) / (len(ticks) - 1) / scale
+    decimals = 0 if step >= 1 else int(np.ceil(-np.log10(step)))
 
     fig = plt.figure(figsize=(9.0, 2.2), dpi=150)
     fig.patch.set_facecolor("white")
@@ -54,7 +64,7 @@ def main():
         ax, cmap=plt.get_cmap(a.cmap),
         norm=colors.Normalize(a.vmin, a.vmax), orientation="horizontal")
     cb.set_ticks(ticks)
-    cb.set_ticklabels([f"{t/scale:.0f}" for t in ticks])
+    cb.set_ticklabels([f"{t/scale:.{decimals}f}" for t in ticks])
     cb.ax.tick_params(labelsize=12, color="#333", labelcolor="#222", length=5, width=1)
     cb.outline.set_edgecolor("#333"); cb.outline.set_linewidth(1)
 
