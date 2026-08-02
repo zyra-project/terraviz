@@ -91,7 +91,7 @@ count, palette, and vmax:
 | Asset | Shape it demonstrates |
 |---|---|
 | [assets/model-cycle-data-encoded.template.yaml](assets/model-cycle-data-encoded.template.yaml) | **Global**, 3-hourly, 41 frames — self-updating GEFS-Aerosols column field. The annotated starting point. |
-| [assets/rrfs-hwp-conus-data-encoded.yaml](assets/rrfs-hwp-conus-data-encoded.yaml) + [assets/rrfs-hwp-conus-metadata.json](assets/rrfs-hwp-conus-metadata.json) | **Regional**, hourly, 85 frames — RRFS wildfire potential over CONUS. A worked example of a regional `dst_bounds` (which must equal the dataset's `bounding_box`, or hover values land in the wrong place), of picking a source when the obvious one lacks the field, and of calibrating a sparse index rather than a mass field. |
+| [assets/rrfs-hwp-conus-data-encoded.yaml](assets/rrfs-hwp-conus-data-encoded.yaml) + [assets/rrfs-hwp-conus-metadata.json](assets/rrfs-hwp-conus-metadata.json) | **Regional**, hourly, 85 frames — RRFS wildfire potential over CONUS, and the **frames-output** worked example (no `compose-video`; see the preference below). Also shows a regional `dst_bounds` (which must equal the dataset's `bounding_box`, or hover values land in the wrong place), picking a source when the obvious one lacks the field, and calibrating a sparse index rather than a mass field. |
 
 The stage shape:
 `convert-format` (fetch + `.idx`-subset + geotiff) → `reproject`

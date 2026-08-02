@@ -32,8 +32,20 @@
 #
 # DATA-ENCODED CONTRACT: heatmap carries data_encoded + color_scale_file +
 #   cmap_inline (a named --cmap is IGNORED here); NO width/height/basemap on
-#   heatmap; 4K comes from reproject regridding the DATA; compose-video has NO
-#   preset: sos (it would rescale and average the luma).
+#   heatmap; 4K comes from reproject regridding the DATA.
+#
+# FRAMES OUTPUT, NOT compose-video: this pipeline deliberately ends on the
+#   frame set at /work/images/frames rather than composing an MP4. On a
+#   data-encoded dataset the luma IS the data, and compose-video would encode
+#   it to H.264 only for the downstream HLS transcode to encode it again — two
+#   lossy generations over value-bearing pixels, which drifts the hover
+#   readings. Publishing frames lets the transcode do the single encode, and
+#   lights up the per-dataset /frames download surface. The validator accepts
+#   this directory in place of the MP4 path (WORKFLOW_FRAMES_OUTPUT_DIR).
+#
+#   The cost: playback speed is no longer carried by a compose-video fps, so
+#   set `playback_fps` on the dataset row by hand or 85 frames play in ~2.8 s.
+#   The sibling RRFS smoke dataset uses 4, which puts this run at ~21 s.
 stages:
   - stage: process
     command: convert-format
@@ -413,10 +425,3 @@ stages:
       datetime_format: '%Y%m%dT%H%M%S'
       period_seconds: 3600
       output: /work/frames-meta.json
-  - stage: visualize
-    command: compose-video
-    args:
-      frames: /work/images/frames
-      glob: '[0-9]*.png'
-      output: /work/output/dataset.mp4
-      fps: 8
