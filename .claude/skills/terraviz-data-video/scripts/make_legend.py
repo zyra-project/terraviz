@@ -42,7 +42,18 @@ def main():
     ap.add_argument("--out", default="legend.png")
     a = ap.parse_args()
 
-    # Tick labels: share a x10^-n exponent so the numbers stay short.
+    # A colorbar over an empty range says nothing, and the tick-decimal maths
+    # below divides by the range. Reject it here with a readable message
+    # rather than dying on an inf/nan conversion further down.
+    if a.vmax <= a.vmin:
+        ap.error(
+            f"--vmax ({a.vmax:g}) must be greater than --vmin ({a.vmin:g}); "
+            "a colorbar needs a non-empty range"
+        )
+
+    # Tick labels share one power-of-ten exponent so the numbers stay short.
+    # It is usually negative (column mass density lives at 1e-4), but a large
+    # enough vmax factors out a positive one instead.
     #
     # Only factor the exponent out when the plain numbers would actually be
     # unwieldy. Applied unconditionally it destroys human-scale ranges: a
