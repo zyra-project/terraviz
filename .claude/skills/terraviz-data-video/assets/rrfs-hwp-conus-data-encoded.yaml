@@ -1,0 +1,422 @@
+# RRFS Hourly Wildfire Potential (WFIREPOT) — 3 km CONUS, data-encoded.
+#
+# The fire-side companion to the RRFS smoke datasets: WFIREPOT is what the
+# model's smoke emissions are driven from, so this reads as the upstream of
+# "vertically integrated smoke".
+#
+# SOURCE (checked 2026-08-02, .idx record 186 of 318):
+#   rrfs_public/.../rrfs.tHHz.2dfld.3km.fNNN.conus.grib2  ->  WFIREPOT:surface
+#
+#   WFIREPOT is NOT in rrfs_a/.../rrfs.tHHz.subset.3km.fNNN.na.grib2 — the
+#   curated 3 km North American subset that backs the smoke datasets carries
+#   COLMD/MASSDEN but no fire-potential record at any forecast hour. The only
+#   other source that has it is 2dfld.13km.na (North America, but 13 km and
+#   3-hourly / 29 frames). Hourly 3 km therefore means CONUS; that tradeoff is
+#   the reason this pipeline is CONUS-only.
+#
+# CADENCE: the 85-frame 84-hour run is posted at 00/06/12/18Z only (cycle 01Z
+#   carries 18 frames, 03Z carries 37) — hence PT6H cycle stepping, not PT1H.
+#   f084 lands ~3-3.5 h after cycle time, so PT6H lag has ~2.5 h of margin.
+#
+# CALIBRATION: pooled f021/f045/f069 of the 2026-08-02 00Z cycle (5.7M points,
+#   no bitmap, all points valid): max 132.4, 48.3% exact zeros, p99 86.6,
+#   p99.9 106, p99.99 120.3. vmax 120 ~= p99.99 — clipping the top 0.1% of a
+#   *fire danger* field is precisely the wrong thing to clip, so this rounds up
+#   from p99.9 rather than down.
+#
+# PALETTE: YlOrRd — light-starting (pale yellow reads on the black globe) with
+#   fire semantics, and distinct from the smoke datasets' YlOrBr. With
+#   transparent_range 12 the transparent band is luma <12/256 -> value <5.6,
+#   which lands just above the 48% of the grid that is exact zero: no-fire-risk
+#   ground stays clear, every nonzero value renders.
+#
+# DATA-ENCODED CONTRACT: heatmap carries data_encoded + color_scale_file +
+#   cmap_inline (a named --cmap is IGNORED here); NO width/height/basemap on
+#   heatmap; 4K comes from reproject regridding the DATA; compose-video has NO
+#   preset: sos (it would rescale and average the luma).
+stages:
+  - stage: process
+    command: convert-format
+    args:
+      format: geotiff
+      pattern: 'WFIREPOT:surface'
+      output_dir: /work/tif
+      inputs:
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f000.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f001.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f002.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f003.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f004.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f005.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f006.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f007.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f008.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f009.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f010.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f011.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f012.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f013.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f014.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f015.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f016.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f017.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f018.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f019.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f020.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f021.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f022.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f023.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f024.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f025.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f026.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f027.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f028.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f029.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f030.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f031.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f032.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f033.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f034.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f035.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f036.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f037.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f038.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f039.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f040.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f041.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f042.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f043.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f044.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f045.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f046.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f047.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f048.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f049.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f050.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f051.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f052.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f053.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f054.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f055.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f056.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f057.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f058.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f059.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f060.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f061.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f062.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f063.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f064.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f065.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f066.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f067.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f068.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f069.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f070.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f071.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f072.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f073.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f074.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f075.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f076.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f077.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f078.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f079.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f080.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f081.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f082.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f083.conus.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT6H}}/{{cycle_hour:PT6H:PT6H}}/rrfs.t{{cycle_hour:PT6H:PT6H}}z.2dfld.3km.f084.conus.grib2
+      output_names:
+        - '{{valid_compact:PT6H:PT6H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT1H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT2H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT3H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT4H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT5H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT6H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT7H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT8H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT9H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT10H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT11H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT12H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT13H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT14H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT15H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT16H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT17H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT18H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT19H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT20H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT21H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT22H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT23H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT24H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT25H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT26H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT27H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT28H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT29H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT30H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT31H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT32H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT33H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT34H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT35H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT36H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT37H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT38H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT39H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT40H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT41H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT42H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT43H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT44H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT45H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT46H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT47H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT48H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT49H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT50H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT51H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT52H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT53H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT54H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT55H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT56H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT57H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT58H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT59H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT60H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT61H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT62H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT63H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT64H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT65H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT66H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT67H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT68H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT69H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT70H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT71H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT72H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT73H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT74H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT75H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT76H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT77H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT78H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT79H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT80H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT81H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT82H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT83H}}.tif'
+        - '{{valid_compact:PT6H:PT6H:PT84H}}.tif'
+  - stage: process
+    command: reproject
+    args:
+      inputs:
+        - /work/tif/{{valid_compact:PT6H:PT6H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT1H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT2H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT3H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT4H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT5H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT6H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT7H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT8H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT9H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT10H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT11H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT12H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT13H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT14H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT15H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT16H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT17H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT18H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT19H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT20H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT21H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT22H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT23H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT24H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT25H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT26H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT27H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT28H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT29H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT30H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT31H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT32H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT33H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT34H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT35H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT36H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT37H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT38H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT39H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT40H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT41H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT42H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT43H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT44H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT45H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT46H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT47H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT48H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT49H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT50H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT51H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT52H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT53H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT54H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT55H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT56H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT57H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT58H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT59H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT60H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT61H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT62H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT63H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT64H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT65H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT66H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT67H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT68H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT69H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT70H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT71H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT72H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT73H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT74H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT75H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT76H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT77H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT78H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT79H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT80H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT81H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT82H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT83H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT6H:PT84H}}.tif
+      output_dir: /work/wrapped
+      # Lambert 1799x1059 source spanning 21.14-52.62N, 134.10-60.92W ->
+      # the bbox the sibling RRFS CONUS smoke dataset already uses. The
+      # dataset's bounding_box MUST equal these bounds or the hover readout
+      # maps values to the wrong ground position.
+      dst_bounds: [-135, 21, -60, 53]
+      width: 4096
+      height: 2048
+  - stage: visualize
+    command: heatmap
+    args:
+      inputs:
+        - /work/wrapped/{{valid_compact:PT6H:PT6H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT1H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT2H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT3H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT4H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT5H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT6H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT7H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT8H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT9H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT10H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT11H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT12H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT13H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT14H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT15H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT16H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT17H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT18H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT19H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT20H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT21H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT22H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT23H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT24H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT25H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT26H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT27H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT28H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT29H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT30H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT31H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT32H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT33H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT34H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT35H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT36H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT37H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT38H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT39H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT40H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT41H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT42H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT43H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT44H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT45H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT46H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT47H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT48H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT49H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT50H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT51H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT52H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT53H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT54H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT55H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT56H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT57H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT58H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT59H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT60H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT61H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT62H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT63H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT64H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT65H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT66H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT67H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT68H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT69H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT70H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT71H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT72H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT73H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT74H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT75H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT76H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT77H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT78H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT79H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT80H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT81H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT82H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT83H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT6H:PT84H}}.tif
+      output_dir: /work/images/frames
+      data_encoded: true
+      color_scale_file: /work/color-scale.json
+      units: 'index'
+      cmap_inline: '{"type":"continuous","base":"YlOrRd","transparent_range":12,"blend_range":48,"overall_alpha":0.95}'
+      vmin: 0
+      vmax: 120
+  - stage: process
+    command: scan-frames
+    args:
+      frames_dir: /work/images/frames
+      datetime_format: '%Y%m%dT%H%M%S'
+      period_seconds: 3600
+      output: /work/frames-meta.json
+  - stage: visualize
+    command: compose-video
+    args:
+      frames: /work/images/frames
+      glob: '[0-9]*.png'
+      output: /work/output/dataset.mp4
+      fps: 8

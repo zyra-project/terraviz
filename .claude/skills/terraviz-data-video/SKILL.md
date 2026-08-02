@@ -85,9 +85,15 @@ rescaled unit reads far better. Zyra has no unit-scaling process command, so if
 readability matters, pick the variable accordingly at step 2.
 
 ### 4. Write the pipeline
-Start from [assets/model-cycle-data-encoded.template.yaml](assets/model-cycle-data-encoded.template.yaml)
-(a self-updating GEFS-Aerosols column-field pipeline) and adapt the `--pattern`,
-frame count, palette, and vmax. The stage shape:
+Start from one of the two validated assets and adapt the `--pattern`, frame
+count, palette, and vmax:
+
+| Asset | Shape it demonstrates |
+|---|---|
+| [assets/model-cycle-data-encoded.template.yaml](assets/model-cycle-data-encoded.template.yaml) | **Global**, 3-hourly, 41 frames — self-updating GEFS-Aerosols column field. The annotated starting point. |
+| [assets/rrfs-hwp-conus-data-encoded.yaml](assets/rrfs-hwp-conus-data-encoded.yaml) + [assets/rrfs-hwp-conus-metadata.json](assets/rrfs-hwp-conus-metadata.json) | **Regional**, hourly, 85 frames — RRFS wildfire potential over CONUS. A worked example of a regional `dst_bounds` (which must equal the dataset's `bounding_box`, or hover values land in the wrong place), of picking a source when the obvious one lacks the field, and of calibrating a sparse index rather than a mass field. |
+
+The stage shape:
 `convert-format` (fetch + `.idx`-subset + geotiff) → `reproject`
 (0–360 → ±180, regrid to 4096×2048) → `heatmap --data-encoded` → `scan-frames`
 (derive time range) → **publish frames, or `compose-video`**.
