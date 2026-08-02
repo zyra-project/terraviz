@@ -64,9 +64,20 @@ def main():
         exp = 0
     scale = 10.0 ** exp
     ticks = np.linspace(a.vmin, a.vmax, 4)
-    # Enough decimals that adjacent ticks stay distinct after scaling.
-    step = (a.vmax - a.vmin) / (len(ticks) - 1) / scale
-    decimals = 0 if step >= 1 else int(np.ceil(-np.log10(step)))
+    scaled = ticks / scale
+
+    # Fewest decimals whose labels stay distinct AND sit within 2% of the bar
+    # from the tick they label. Deciding on the step size alone is not enough:
+    # it reads fine when the scaled ticks are round (0/40/80/120 -> "0 40 80
+    # 120") but mislabels an uneven range, because a step above 1 does not
+    # imply integer ticks. vmax 50000 scales to 0/1.67/3.33/5 and rounded to
+    # "0 2 3 5", printing "2" a fifth of the bar away from where 2 falls.
+    span = scaled[-1] - scaled[0]
+    for decimals in range(4):
+        rounded = np.round(scaled, decimals)
+        if (len(set(rounded)) == len(rounded)
+                and np.abs(rounded - scaled).max() <= 0.02 * span):
+            break
 
     fig = plt.figure(figsize=(9.0, 2.2), dpi=150)
     fig.patch.set_facecolor("white")
