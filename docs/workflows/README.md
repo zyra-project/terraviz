@@ -4,12 +4,13 @@ Status: draft for review
 
 Workflow pipelines validated against this repo's own validators, with
 their sources confirmed reachable and correctly georeferenced, but not
-curated into the publisher portal. Each entry is a pair:
+curated into the publisher portal. Each entry is a set:
 
 | File | Role |
 |---|---|
 | `<name>.yaml` | the `pipeline_json` body — paste into **Publish → Workflows → New**, or `POST /api/v1/publish/workflows` |
 | `<name>.metadata.json` | the metadata sidecar for the same workflow |
+| `<name>.legend.png` | the `legend_ref` image, attached via Publish → Media |
 
 These are deliberately *not* in
 [`src/ui/publisher/workflow-templates.ts`](../../src/ui/publisher/workflow-templates.ts).
@@ -25,26 +26,29 @@ and [`DATA_ENCODED_VIDEO_PLAN.md`](../DATA_ENCODED_VIDEO_PLAN.md).
 
 ---
 
-## `emodnet-cargo-vessel-density` — Cargo Ships at Sea
+# The EMODnet vessel-density pair
 
-Ninety-six monthly frames of cargo-vessel density, January 2017 through
-December 2024, rendered data-encoded so the globe recolours it
-client-side and hovering reports a real number.
+Two workflows over the same source and the same pipeline shape:
 
-### What it shows
+| Workflow | Ship type | Dataset title | Palette | `vmax` |
+|---|---|---|---|---|
+| `emodnet-cargo-vessel-density` | `09` Cargo | Cargo Ships at Sea | `cool` (cyan→magenta) | 10 |
+| `emodnet-tanker-vessel-density` | `10` Tanker | Tankers at Sea | `autumn` (red→yellow) | 6 |
 
-Each pixel is the number of ship-hours cargo vessels spent in that
-square kilometre during the month, derived from AIS — the transponder
-broadcast every large ship carries. The result is the shipping network
-drawn by the ships themselves, with the chokepoints standing out as the
-brightest knots: Gibraltar, the Dover Strait, the Bosphorus, the
-approaches to Rotterdam and Hamburg.
+Each is 96 monthly frames, January 2017 → December 2024, rendered
+data-encoded so the globe recolours client-side and hovering reports a
+real number in hours per km² per month. Everything from here to
+[Per-dataset notes](#per-dataset-notes) applies to both.
 
-### Source
+Both are generated from one script so a structural change cannot land
+on one variant and not the other; the generator lives in the commit
+history rather than in-tree, since the YAML is the artifact.
+
+## Source
 
 | | |
 |---|---|
-| Service | EMODnet Human Activities WCS, `emodnet__vesseldensity_09` (*"Vessel Density Monthly totals - Cargo"*) |
+| Service | EMODnet Human Activities WCS, `emodnet__vesseldensity_<code>` |
 | Endpoint | `https://ows.emodnet-humanactivities.eu/geoserver/wcs` |
 | Units | hours per km² per month |
 | Native grid | 1×1 km, EPSG:3857 |
@@ -57,37 +61,44 @@ the Cloudflare-403 problem that killed the GSL FV3-Chem attempt does
 not apply. The service also reprojects server-side, so frames arrive
 already in EPSG:4326.
 
-### Coverage is European, and that is the main tradeoff
+Other ship types are the same coverage with a different two-digit code,
+each confirmed against `DescribeCoverage`: `01` Fishing, `08`
+Passenger, `09` Cargo, `10` Tanker, `all` All types. A further variant
+is a search-and-replace on the coverage code **plus fresh `vmin`/`vmax`
+sampling** — see [Calibration](#calibration-and-what-it-costs) for why
+that second half is not optional.
+
+## Coverage is European, and that is the main tradeoff
 
 `DescribeCoverage` advertises an envelope of roughly 87°W–98°E,
 15°N–87°N. **That envelope is misleading** — it is the bounding box of
-the EPSG:3857 mosaic footprint reprojected to EPSG:4326, not where
-data exists. Probing the actual raster, non-zero cells span only
-**41°W–68°E, 25°N–79°N**, and the useful mass is narrower still.
+the EPSG:3857 mosaic footprint reprojected to EPSG:4326, not where data
+exists. Probing the actual raster, non-zero cells span only
+**41°W–68°E, 25°N–79°N**.
 
 Confirmed present: the North Sea, Channel, Irish Sea, Baltic, Biscay,
-the whole Mediterranean, the Black Sea, the Norwegian and Barents
-Seas, the Atlantic approaches out past the Azores, and the Canaries.
+the whole Mediterranean, the Black Sea, the Norwegian and Barents Seas,
+the Atlantic approaches out past the Azores, and the Canaries.
 
 Confirmed **absent** — these return nodata, not zero: the Red Sea and
 Suez transit, the Arabian Sea and India, Malacca and Singapore, Panama,
 the western Atlantic seaboard, and the entire Pacific. After
 reprojection onto the global frame, **5.5% of the globe carries data
-and 94.5% is transparent nodata.** On the sphere this reads as a
-bright European region, not a worldwide layer. Anything framed as
-"global shipping lanes" is not this dataset.
+and 94.5% is transparent nodata.** On the sphere this reads as a bright
+European region, not a worldwide layer. Anything framed as "global
+shipping lanes" is not these datasets.
 
 The alternative considered was the World Bank / IMF
 [Global Shipping Traffic Density](https://datacatalog.worldbank.org/search/dataset/0037580/global-shipping-traffic-density)
 (CC-BY 4.0), which genuinely is global and is the familiar worldwide
-lane map. It was rejected here because it ships only as ~480 MB ZIP
-archives — zyra has no decompression stage — and because it is a
-single static 2015–2021 aggregate, so it animates nothing. Publishing
-it means a one-time offline prep (unzip, downsample from 72000×36000,
-host the result) rather than a workflow. It remains a good companion
-dataset; it just isn't this one.
+lane map. It was rejected because it ships only as ~480 MB ZIP archives
+— zyra has no decompression stage — and because it is a single static
+2015–2021 aggregate, so it animates nothing. Publishing it means a
+one-time offline prep (unzip, downsample from 72000×36000, host the
+result) rather than a workflow. It remains a good companion dataset; it
+just isn't these.
 
-### Non-goals
+## Non-goals
 
 - **Individual vessel tracks.** Routes as lines, or ships as moving
   points, are not buildable on the workflow path. Three separate walls:
@@ -96,44 +107,35 @@ dataset; it just isn't this one.
   rather than animated vector layers. See
   [`capability-gaps.md`](../../.claude/skills/terraviz-data-video/references/capability-gaps.md).
 - **Live traffic.** A fixed historical archive. EMODnet republishes
-  annually, so there is no cycle arithmetic to template and this is a
-  one-shot build, not a scheduled refresh.
+  annually, so there is no cycle arithmetic to template and these are
+  one-shot builds, not scheduled refreshes.
 
-### Calibration, and what it costs
+## Calibration, and what it costs
 
-`vmin: 0`, `vmax: 10`. Measured on the frames the pipeline actually
-produces (2728×1214 requests, ~0.088°/px):
+Both fields are strongly log-normal, with port basins three to five
+orders of magnitude above the median. zyra has no log transform — a
+confirmed Tier-2 gap — so the encoder is linear and something has to
+give. The skill's usual `vmax ≈ p99.9` rule assumes a roughly normal
+field; applied here it would render the lane network essentially black.
 
-| Month | p90 | p99 | max | % of non-zero cells clipped at vmax=10 |
-|---|---|---|---|---|
-| 2017-01 | 0.45 | 5.68 | 3874 | 0.5% |
-| 2018-07 | 0.56 | 6.06 | 3335 | 0.6% |
-| 2020-04 | 0.51 | 5.92 | 2792 | 0.6% |
-| 2022-03 | 0.63 | 7.64 | 4320 | 0.8% |
-| 2024-12 | 0.76 | 8.50 | 5103 | 0.8% |
+Each variant instead picks a `vmax` that spends the ramp on the lanes
+and clips **0.5–0.8% of non-zero cells**. Holding that clip rate equal
+across the pair is what keeps the two comparable by eye — it is why the
+numbers differ rather than being shared.
 
-The skill's usual rule is `vmax ≈ p99.9`, which here is ~106 and would
-render the lane network essentially black. That rule assumes a roughly
-normal field; this one is strongly log-normal, with port basins three
-orders of magnitude above the median (pooled p50 = 0.065). zyra has no
-log transform — a confirmed Tier-2 gap — so the encoder is linear and
-something has to give.
+**The cost is real and identical in both: above `vmax` the hover
+readout under-reports.** A busy port basin reads as the `vmax` value
+rather than its true one. Lanes are the subject; ports clip. Both
+legends say so on their face.
 
-`vmax: 10` spends the ramp on the lanes and clips under 1% of non-zero
-cells. **That clipping is a real cost, stated plainly: above
-10 h/km²/month the hover readout under-reports, so a busy port basin
-reads "10" rather than its true value.** Lanes are the subject here;
-ports clip.
+This is also why a new ship-type variant cannot just inherit a `vmax`.
+Tanker traffic is roughly 40% lighter than cargo in the body of the
+distribution while peaking twice as high, so reusing cargo's 10 would
+have dimmed the tanker network for no reason.
 
-`transparent_range: 2` (rather than the aerosol convention of 12) is
-the other choice. At vmax=10 it hides values below 0.078, keeping ~45%
-of non-zero cells visible; 12 would keep ~12% and erase most of the
-network. True zero-density water and the −9999 nodata fill both land
-on luma 0 and stay transparent either way.
+## Four things in the pipeline that look wrong and aren't
 
-### Four things in the pipeline that look wrong and aren't
-
-All four are commented in the YAML, and each was verified against
+All four are commented in both YAMLs, and each was verified against
 zyra's source or the live service rather than assumed.
 
 1. **The fetch is `acquire http --inputs`, not `process
@@ -161,7 +163,7 @@ zyra's source or the live service rather than assumed.
    required argparse positional for `acquire http`; in `--inputs` mode
    `_cmd_http` returns before reading it.
 
-### Why WCS 2.0.1 rather than the shorter 1.0.0 request
+## Why WCS 2.0.1 rather than the shorter 1.0.0 request
 
 WCS 1.0.0 takes a `BBOX` + `CRS` + `WIDTH`/`HEIGHT` request that is
 ~100 characters shorter per frame. **It is silently wrong on this
@@ -181,58 +183,44 @@ OGC URI forms, so the short forms are used.
 Spatial subsetting is ignored by this server however it is asked — in
 native `X`/`Y`, or as `Lat`/`Long` with `subsettingCrs`. Rather than
 fight it, the request takes the server's full 2728×1214 window (stable
-across all months at −117.26,−16.72 → 122.53,90.0) and lets `reproject`
-crop and pad it onto the global frame from each frame's own embedded
-transform. That also makes per-frame extent drift a non-issue.
+across all months and both ship types at −117.26,−16.72 → 122.53,90.0)
+and lets `reproject` crop and pad it onto the global frame from each
+frame's own embedded transform. That also makes per-frame extent drift
+a non-issue.
 
 The request size is chosen to match: 2728×1214 over that window is
 0.0879°/px, within rounding of the 4096×2048 global grid's
 0.087890625°/px. With `resampling: nearest` the warp is close to a
 paste — a local simulation of the reproject stage carried all 57 743
-non-zero values of the 2024-12 frame through unchanged.
+non-zero values of the cargo 2024-12 frame through unchanged.
 
-### Output, and the one manual step after publishing
+## Output, and the one manual step after publishing
 
-The pipeline ends on the frame set at `/work/images/frames` rather than
-an MP4. `/validate` accepts that in place of `WORKFLOW_OUTPUT_PATH`,
-and it avoids a second lossy generation over pixels whose luma carries
-the data.
+Both pipelines end on the frame set at `/work/images/frames` rather
+than an MP4. `/validate` accepts that in place of
+`WORKFLOW_OUTPUT_PATH`, and it avoids a second lossy generation over
+pixels whose luma carries the data.
 
 The cost is that **`playback_fps` must be set on the dataset row by
 hand**, or 96 frames play in about three seconds. Around `8` gives a
 twelve-second loop.
 
-There is also no automatic gradient legend on `main`, so one is
-committed alongside the workflow:
-[`emodnet-cargo-vessel-density.legend.png`](emodnet-cargo-vessel-density.legend.png)
-(1350×330, opaque RGB). Attach it as the dataset's `legend_ref` via
-Publish → Media. It carries the clipping caveat on its face — the high
-end is labelled *"busiest lanes · 10+ clips"* — so the legend does not
-imply a precision the encoding cannot deliver.
+There is no automatic gradient legend on `main` either, so one is
+committed per variant. Attach it as the dataset's `legend_ref` via
+Publish → Media. Each was generated by the skill's
+`scripts/make_legend.py` — regenerate if `vmax` or the palette `base`
+ever change, since a legend that disagrees with the globe is worse than
+none.
 
-It was generated by the skill's `scripts/make_legend.py`:
-
-```bash
-python3 .claude/skills/terraviz-data-video/scripts/make_legend.py \
-  --title "Cargo Ships at Sea" \
-  --subtitle "Cargo-vessel density from AIS (EMODnet Human Activities)" \
-  --cmap cool --vmin 0 --vmax 10 --units "hours per km² per month" \
-  --low "quiet water" --high "busiest lanes · 10+ clips" \
-  --out docs/workflows/emodnet-cargo-vessel-density.legend.png
-```
-
-Regenerate it if `vmax` or the palette `base` ever change — a legend
-that disagrees with the globe is worse than none. The `color_scale`
-sidecar drives the hover readout either way.
-
-### Runtime budget
+## Runtime budget
 
 Each WCS request takes **~26 s**, dominated by server-side mosaic
 reprojection rather than transfer — a half-size request costs the same
-26 s, which is why the frames are requested at full resolution. Ninety-
-six frames is therefore **~42 minutes of fetching** and ~1.5 GB
-downloaded, against `zyra-run.yml`'s 120-minute `timeout-minutes` on
-`ubuntu-22.04`. Reproject and heatmap have not been timed.
+26 s, which is why frames are requested at full resolution. Ninety-six
+frames is therefore **~42 minutes of fetching** and ~1.5 GB downloaded
+per variant, against `zyra-run.yml`'s 120-minute `timeout-minutes` on
+`ubuntu-22.04`. Reproject and heatmap have not been timed. `acquire
+http` fetches sequentially, so this does not parallelise.
 
 Intermediates are the other pressure: 96 frames at 4096×2048 float32 is
 ~3.2 GB in `/work/wrapped` on top of the 1.5 GB of source.
@@ -241,25 +229,10 @@ If a run times out or runs out of disk, **cut frames from the front** —
 dropping 2017–2018 leaves 72 frames and about a third off both numbers,
 and the recent years carry more of the interest.
 
-### Verification already run
+**Run the two workflows separately.** They are independent dataset rows
+and each needs its own budget.
 
-| Check | Result |
-|---|---|
-| `validatePipeline` (the same code `/validate` runs) | OK |
-| `validateMetadataTemplate` | OK |
-| Placeholder interpolation | no unresolved `{{` |
-| `materializeInlinePalettes` | writes `cmap-2.json`, repoints `cmap_file` |
-| Data-encoded contract | `data_encoded: true`, no `width`/`height`, no `basemap` |
-| Pipeline size | 3 stages, 96 items/list, 33 632 B (51% of the 64 KiB bound) |
-| Source reachability | sampled frames across 2017–2024 all HTTP 200, `image/tiff`, stable 2728×1214 extent |
-| Georeferencing | chokepoints carry traffic, land and out-of-coverage ocean are nodata |
-| Reproject simulation | local rasterio warp to 4096×2048 preserves every non-zero value |
-
-**Not yet run: the workflow itself.** It has never executed end to end
-on a runner, so the stage arguments are validated but not *proven*.
-Run it once against a node before trusting the output.
-
-### Extending it to new years
+## Extending to new years
 
 EMODnet adds a year at a time. To pick up 2025, append twelve entries to
 each of the three `inputs` lists following the existing pattern —
@@ -274,7 +247,112 @@ curl -s "https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&versio
 &request=DescribeCoverage&coverageId=emodnet__vesseldensity_09" | grep -o 'timePosition>[^<]*' | tail -5
 ```
 
-Other ship types are the same coverage with a different two-digit code
-(`01` fishing, `08` passenger, `09` cargo, `10` tanker, `all`), so a
-tanker-traffic variant is a search-and-replace on `vesseldensity_09`
-plus fresh `vmin`/`vmax` sampling.
+## Verification already run
+
+Both variants, unless noted:
+
+| Check | Result |
+|---|---|
+| `validatePipeline` (the same code `/validate` runs) | OK |
+| `validateMetadataTemplate` | OK |
+| Placeholder interpolation | no unresolved `{{` |
+| `materializeInlinePalettes` | writes `cmap-2.json`, repoints `cmap_file` |
+| Data-encoded contract | `data_encoded: true`, no `width`/`height`, no `basemap` |
+| Pipeline size | 3 stages, 96 items/list, 33 632 B cargo / 33 633 B tanker (51% of the 64 KiB bound) |
+| Source reachability | sampled frames across 2017–2024 all HTTP 200, `image/tiff`, stable 2728×1214 extent |
+| Georeferencing | chokepoints carry traffic, land and out-of-coverage ocean are nodata |
+| Reproject simulation | local rasterio warp to 4096×2048 preserves every non-zero value (cargo) |
+
+**Not yet run: the workflows themselves.** Neither has executed end to
+end on a runner, so the stage arguments are validated but not *proven*.
+Run each once against a node before trusting the output.
+
+---
+
+# Per-dataset notes
+
+## `emodnet-cargo-vessel-density` — Cargo Ships at Sea
+
+Container ships, bulk carriers, car carriers, general cargo. The
+chokepoints stand out as the brightest knots: Gibraltar, the Dover
+Strait, the approaches to Rotterdam and Hamburg.
+
+Palette `cool` (cyan→magenta), `vmin: 0`, `vmax: 10`,
+`transparent_range: 2`.
+
+| Month | p90 | p99 | max | clipped at `vmax=10` |
+|---|---|---|---|---|
+| 2017-01 | 0.45 | 5.68 | 3874 | 0.5% |
+| 2018-07 | 0.56 | 6.06 | 3335 | 0.6% |
+| 2020-04 | 0.51 | 5.92 | 2792 | 0.6% |
+| 2022-03 | 0.63 | 7.64 | 4320 | 0.8% |
+| 2024-12 | 0.76 | 8.50 | 5103 | 0.8% |
+
+Pooled p50 0.065, p99 6.70, p99.9 106. `transparent_range: 2` hides
+values below 0.078 and keeps ~45% of non-zero cells visible; the
+aerosol convention of 12 would keep ~12% and erase most of the network.
+
+Legend: [`emodnet-cargo-vessel-density.legend.png`](emodnet-cargo-vessel-density.legend.png)
+
+```bash
+python3 .claude/skills/terraviz-data-video/scripts/make_legend.py \
+  --title "Cargo Ships at Sea" \
+  --subtitle "Cargo-vessel density from AIS (EMODnet Human Activities)" \
+  --cmap cool --vmin 0 --vmax 10 --units "hours per km² per month" \
+  --low "quiet water" --high "busiest lanes · 10+ clips" \
+  --out docs/workflows/emodnet-cargo-vessel-density.legend.png
+```
+
+## `emodnet-tanker-vessel-density` — Tankers at Sea
+
+Crude oil, refined products, chemicals and gas. **This is not the cargo
+map in different colours** — the traffic pattern genuinely differs.
+Measured on the 2024-12 frames, as a 3×3 maximum in h/km²/month:
+
+| Location | Cargo | Tanker | |
+|---|---|---|---|
+| Bosphorus | 106 | **9310** | ~88× — Black Sea and Caspian oil through a strait a few hundred metres wide |
+| Rotterdam approach | 107 | **342** | ~3× — Europe's largest oil port |
+| Port Said | 38 | 51 | |
+| Gibraltar | **1558** | 641 | cargo dominates |
+| Dover Strait | **35** | 21 | cargo dominates |
+| Danish straits | **18** | 10 | |
+
+Palette `autumn` (red→yellow), `vmin: 0`, `vmax: 6`,
+`transparent_range: 3`.
+
+| Month | p90 | p99 | max | clipped at `vmax=6` |
+|---|---|---|---|---|
+| 2017-01 | 0.34 | 3.62 | 8759 | 0.6% |
+| 2018-07 | 0.36 | 3.14 | 8162 | 0.5% |
+| 2020-04 | 0.33 | 3.42 | 7664 | 0.5% |
+| 2022-03 | 0.42 | 4.30 | 9452 | 0.7% |
+| 2024-12 | 0.50 | 5.08 | 9310 | 0.8% |
+
+Pooled p50 0.053, p99 3.81, p99.9 55.7 — lighter than cargo through the
+body of the distribution, and peaking about twice as high.
+`transparent_range: 3` (not cargo's 2) hides values below 0.047 and
+keeps ~40% of non-zero cells, matching cargo's ~45%; at 2 it would keep
+58% and haze the map with AIS scatter.
+
+`autumn` is a deliberate departure from the skill's "light-starting
+colormap" guidance, which exists so faint values survive on the black
+globe. Two reasons it holds here: `transparent_range` plus `blend_range`
+already drop the faintest ~60% of cells by design, so the surviving
+values are the ones that should read bright — an ascending-luminance
+ramp suits "more traffic = brighter" better than cargo's descending
+`cool`. And fully saturated red is unmistakable on black in a way its
+0.21 relative luminance understates. Hue distinctness from the cargo
+variant was the deciding factor, since the two are meant to be compared
+side by side.
+
+Legend: [`emodnet-tanker-vessel-density.legend.png`](emodnet-tanker-vessel-density.legend.png)
+
+```bash
+python3 .claude/skills/terraviz-data-video/scripts/make_legend.py \
+  --title "Tankers at Sea" \
+  --subtitle "Tanker-vessel density from AIS (EMODnet Human Activities)" \
+  --cmap autumn --vmin 0 --vmax 6 --units "hours per km² per month" \
+  --low "quiet water" --high "busiest lanes · 6+ clips" \
+  --out docs/workflows/emodnet-tanker-vessel-density.legend.png
+```
