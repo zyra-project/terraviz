@@ -232,6 +232,45 @@ and the recent years carry more of the interest.
 **Run the two workflows separately.** They are independent dataset rows
 and each needs its own budget.
 
+## After the run: leave it disabled, don't try to delete it
+
+These are one-shot builds, which raises the obvious question of what to
+do with the workflow row afterwards. Short answer: nothing.
+
+**There is no delete endpoint.** `publish/workflows.ts` serves GET and
+POST; `publish/workflows/[id].ts` serves GET and PATCH. There is no
+`deleteWorkflow` in `workflow-store.ts` and no delete control in the
+portal. Deleting is not an available action.
+
+It also isn't needed, because the defaults already make a workflow
+inert:
+
+- `workflows.enabled` defaults to **0** (`0018_workflows.sql`), so a
+  newly created workflow does not run on its own.
+- The scheduler's due query requires `enabled = 1 AND next_run_at IS
+  NOT NULL`.
+- `POST /workflows/{id}/run` has **no enabled guard** — only a 409 when
+  a run is already active.
+
+So the flow for an archive dataset is: create it (it arrives disabled),
+hit **Run now**, and leave it. It never fires again, and it costs one
+D1 row.
+
+`schedule` is `NOT NULL` and must parse to between 15 minutes and 90
+days with no calendar units, so a value has to be stored even though
+nothing will consume it. `P90D` — the ceiling — is the most honest
+placeholder.
+
+If someone deletes the row directly in D1 anyway: the **dataset is
+unaffected**. The foreign key points workflow → dataset
+(`target_dataset_id REFERENCES datasets(id)`), never the reverse, and
+nothing in the dataset read path joins `workflows`, so the published
+dataset, its R2 assets and its HLS bundle keep serving. What is lost is
+`workflow_runs`, which cascades (`ON DELETE CASCADE`) — the Actions log
+links, the `upload_id` back-reference and any error summaries — plus
+the pipeline itself. That last one is why these YAMLs live in the repo:
+the in-product record is deletable, this one is not.
+
 ## Extending to new years
 
 EMODnet adds a year at a time. To pick up 2025, append twelve entries to
