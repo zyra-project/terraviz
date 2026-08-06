@@ -1,7 +1,7 @@
 /**
  * scripts/dump-catalog-schema.ts
  *
- * Regenerates `migrations/catalog-schema.sql` — the canonical
+ * Regenerates `schema/catalog-schema.sql` — the canonical
  * post-migration snapshot — from a fresh in-memory apply of every
  * migration under `migrations/catalog/`.
  *
@@ -11,7 +11,7 @@
  *     npm run db:dump-schema
  *
  * The snapshot is the review artefact for migration changes: a
- * reviewer reads `migrations/catalog-schema.sql` rather than
+ * reviewer reads `schema/catalog-schema.sql` rather than
  * piecing the schema together from the per-migration deltas. CI
  * runs the migrations smoke test (`scripts/seed-catalog.test.ts`)
  * and fails the PR if a contributor edited a migration without

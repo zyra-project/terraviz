@@ -203,16 +203,19 @@ jobs:
       # only runs pending ones, so re-running every deploy is a no-op
       # when current.
       #
-      # CATALOG_DB only. We deliberately do NOT auto-apply FEEDBACK_DB:
-      # its migrations_dir is the repo-root `migrations/`, which also
-      # holds the generated `catalog-schema.sql` *snapshot* — wrangler
-      # would treat that snapshot as a feedback "migration" and try to
-      # create catalog tables in the feedback DB. CATALOG_DB's dir is
-      # `migrations/catalog/` (no snapshot), so it's clean. The two
-      # bindings point at the same physical D1, so the catalog
-      # migrations are all the catalog backend / hero feature needs.
-      # Feedback-DB schema changes are rare and applied by hand
-      # (docs/SELF_HOSTING.md Phase 8).
+      # CATALOG_DB only, and now for one reason rather than two. The
+      # original reason is gone: FEEDBACK_DB's migrations_dir used to
+      # hold the generated `catalog-schema.sql` snapshot, which wrangler
+      # would queue as a feedback "migration" and use to create catalog
+      # tables in the wrong place. That file lives in `schema/` now, so
+      # `migrations/` holds migrations and nothing else.
+      #
+      # What remains is a scope decision: the two bindings point at the
+      # same physical D1, so the catalog migrations are all the catalog
+      # backend / hero feature needs, and feedback-DB schema changes are
+      # rare enough to apply by hand (docs/SELF_HOSTING.md Phase 8).
+      # Auto-applying FEEDBACK_DB here would now be safe — it is simply
+      # not needed.
       #
       # Gated to `main` only: preview and production point at the SAME
       # physical D1 instance (one database_id in wrangler.toml), so

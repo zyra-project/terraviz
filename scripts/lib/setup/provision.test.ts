@@ -8,7 +8,6 @@ import {
   ensureVectorizeMetadata,
   extractJson,
   isAlreadyExists,
-  isSnapshotFileFailure,
   kvTitleMatches,
   type CommandResult,
   type CommandRunner,
@@ -257,57 +256,6 @@ describe('ensureVectorizeMetadata', () => {
     const res = await ensureVectorizeMetadata(run, 'idx', ['peer_id', 'category'])
     expect(res.created).toEqual(['peer_id', 'category'])
     expect(calls.filter(c => c[1] === 'create-metadata-index')).toHaveLength(2)
-  })
-})
-
-describe('isSnapshotFileFailure', () => {
-  // Wrangler tables every pending migration, then names the one that
-  // failed. Both parts appear in real output, so both appear here.
-  const wranglerOutput = (failed: string, error: string) =>
-    [
-      '┌─────────────────────────────┬────────┐',
-      '│ name                        │ status │',
-      '├─────────────────────────────┼────────┤',
-      '│ 0007_feedback_reports.sql   │ ✅     │',
-      '│ catalog-schema.sql          │ ❌     │',
-      '└─────────────────────────────┴────────┘',
-      `Migration ${failed} failed with the following errors:`,
-      error,
-    ].join('\n')
-
-  it('recognises the catalog-schema.sql collision', () => {
-    expect(
-      isSnapshotFileFailure(
-        err(wranglerOutput('catalog-schema.sql', 'table analytics_daily already exists at offset 13')),
-      ),
-    ).toBe(true)
-  })
-
-  it('does not classify a successful run as the known failure', () => {
-    expect(isSnapshotFileFailure(ok('applied'))).toBe(false)
-  })
-
-  it('does not swallow a genuine migration failure', () => {
-    expect(isSnapshotFileFailure(err('no such column: bbox_n'))).toBe(false)
-    expect(isSnapshotFileFailure(err('Authentication error'))).toBe(false)
-  })
-
-  // The whole point of anchoring on the "Migration <name> failed"
-  // line: the snapshot's filename is in the pending-migrations table
-  // regardless of which file actually broke, so a substring search
-  // would call this harmless and continue over a real schema failure.
-  it('does not excuse a different migration that also says "already exists"', () => {
-    expect(
-      isSnapshotFileFailure(
-        err(wranglerOutput('0008_events.sql', 'table events already exists at offset 42')),
-      ),
-    ).toBe(false)
-  })
-
-  // Failing loudly on an unrecognised shape beats assuming the old one
-  // still holds; the caller prints the raw wrangler output.
-  it('does not guess when wrangler names no failing migration', () => {
-    expect(isSnapshotFileFailure(err('something already exists, somewhere'))).toBe(false)
   })
 })
 

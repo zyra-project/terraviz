@@ -259,7 +259,7 @@ arg *keys* are not allowlisted (`workflow-validators.ts:118-167` checks only
 stage/command pairs, scalar/array shape, and lengths), so a new zyra stage arg
 needs no validator change.
 
-Dormant schema worth knowing about: `migrations/catalog-schema.sql:301-311`
+Dormant schema worth knowing about: `schema/catalog-schema.sql:301-311`
 already declares `color_space`, `bit_depth`, `has_alpha`, `alpha_encoding`,
 `primary_codec` plus a `dataset_renditions` table — **zero code references
 anywhere**. They don't express "luma encodes data", so they don't replace

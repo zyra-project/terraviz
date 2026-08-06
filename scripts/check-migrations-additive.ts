@@ -17,9 +17,10 @@
  * auto-apply path safe-by-default while still allowing a reviewed
  * destructive migration through.
  *
- * Scans `migrations/*.sql` and `migrations/catalog/*.sql`. The
- * generated `migrations/catalog-schema.sql` snapshot (CREATE-only) is
- * excluded — it isn't a migration.
+ * Scans `migrations/*.sql` and `migrations/catalog/*.sql`. Both hold
+ * migrations and nothing else — the generated catalog snapshot used to
+ * sit in the first of them and needed excluding by name; it now lives
+ * in `schema/`, which this never scans.
  *
  * Run via `npm run check:migrations` (wired into the type-check chain).
  */
@@ -30,7 +31,6 @@ import { pathToFileURL } from 'node:url'
 
 const REPO_ROOT = resolve(import.meta.dirname, '..')
 const MIGRATION_DIRS = ['migrations', join('migrations', 'catalog')]
-const SNAPSHOT_BASENAME = 'catalog-schema.sql'
 const REVIEWED_MARKER = /--\s*destructive:\s*reviewed\b/i
 
 /** A destructive-pattern probe applied per-statement (comment-stripped,
@@ -92,7 +92,6 @@ function main(): void {
     if (!existsSync(absDir)) continue
     for (const name of readdirSync(absDir)) {
       if (!name.endsWith('.sql')) continue
-      if (name === SNAPSHOT_BASENAME) continue
       scanned++
       findings.push(...scanFile(join(absDir, name), join(dir, name)))
     }

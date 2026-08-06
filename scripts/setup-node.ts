@@ -108,8 +108,6 @@ import {
   ensureR2Bucket,
   ensureVectorizeIndex,
   ensureVectorizeMetadata,
-  isSnapshotFileFailure,
-  SNAPSHOT_MIGRATION_FILE,
   type CommandResult,
   type CommandRunner,
 } from './lib/setup/provision.ts'
@@ -691,28 +689,18 @@ export async function runSetup(deps: SetupDeps): Promise<number> {
     if (!opts.apply) {
       deps.stdout.write(
         '  would apply CATALOG_DB   (migrations/catalog/)\n' +
-          '  would apply FEEDBACK_DB  (migrations/)\n' +
-          '  CATALOG_DB runs first — see isSnapshotFileFailure() in\n' +
-          '  scripts/lib/setup/provision.ts for why the order matters.\n\n',
+          '  would apply FEEDBACK_DB  (migrations/)\n\n',
       )
     } else {
-      // CATALOG_DB first — see isSnapshotFileFailure(). Reversing
-      // these on a fresh database lets the generated
-      // `catalog-schema.sql` snapshot apply for real and wreck the
-      // catalog migration sequence.
+      // The order used to matter: the generated catalog snapshot lived
+      // in FEEDBACK_DB's migrations dir, so running that binding first
+      // on a fresh database applied the whole catalog schema outside
+      // the migration tracker. The snapshot now lives in `schema/`,
+      // the two migration sets are disjoint, and either order works.
       for (const binding of ['CATALOG_DB', 'FEEDBACK_DB'] as const) {
         const res = await applyMigrations(deps.runner, binding, !opts.localMigrations)
         if (res.code === 0) {
           deps.stdout.write(`  ${binding}  applied\n`)
-          continue
-        }
-        if (binding === 'FEEDBACK_DB' && isSnapshotFileFailure(res)) {
-          deps.stdout.write(
-            `  ${binding}  applied — then stopped on ${SNAPSHOT_MIGRATION_FILE}\n` +
-              `           (a generated snapshot, not a migration; it lives in this\n` +
-              `           binding's migrations dir and always fails here. Harmless\n` +
-              `           because CATALOG_DB ran first.)\n`,
-          )
           continue
         }
         deps.stderr.write(

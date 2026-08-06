@@ -248,19 +248,31 @@ describe('runSetup — wrangler.toml step', () => {
 })
 
 describe('runSetup — migrations step', () => {
-  // CATALOG_DB must run first. Verified against a clean database:
-  // FEEDBACK_DB's migrations dir also holds the generated
-  // catalog-schema.sql snapshot, which on an empty database applies
-  // for real and creates the whole catalog schema outside the
-  // migration tracker — after which every CATALOG_DB migration fails
-  // on "table node_identity already exists".
+  // The order was once load-bearing: FEEDBACK_DB's migrations dir also
+  // held the generated catalog snapshot, which on an empty database
+  // applied for real and created the catalog schema outside the
+  // migration tracker, after which every CATALOG_DB migration failed on
+  // "table node_identity already exists". The snapshot moved to
+  // `schema/`, so the two sets are disjoint and either order works.
+  // Pinned anyway, because a stable order keeps the output readable.
   it('applies CATALOG_DB before FEEDBACK_DB', async () => {
     const h = harness({ argv: ['--only=migrations', '--apply'], files: {} })
     expect(await runSetup(h.deps)).toBe(0)
     expect(h.calls.map(c => c[3])).toEqual(['CATALOG_DB', 'FEEDBACK_DB'])
   })
 
-  it('tolerates the known catalog-schema.sql failure on FEEDBACK_DB', async () => {
+  /**
+   * There used to be a tolerated failure here. `catalog-schema.sql` sat
+   * in FEEDBACK_DB's migrations dir, wrangler queued it as a migration,
+   * and it always failed — so `npm run setup` special-cased that one
+   * filename and carried on.
+   *
+   * The file moved out of the migrations tree, so there is nothing left
+   * to tolerate. This pins the consequence: a FEEDBACK_DB migration
+   * failure is now just a failure, including one phrased the way the
+   * snapshot's used to be.
+   */
+  it('no longer tolerates a snapshot-shaped failure on FEEDBACK_DB', async () => {
     const h = harness({
       argv: ['--only=migrations', '--apply'],
       files: {},
@@ -275,14 +287,13 @@ describe('runSetup — migrations step', () => {
             }
           : { code: 0, stdout: '', stderr: '' },
     })
-    expect(await runSetup(h.deps)).toBe(0)
-    expect(h.out()).toContain('catalog-schema.sql')
+    expect(await runSetup(h.deps)).toBe(1)
+    expect(h.errOut()).toContain('analytics_daily')
   })
 
-  // The tolerance is for one known file, not for the phrase. A real
-  // FEEDBACK_DB migration failing this way is a schema problem, and
-  // continuing past it would report a broken install as a clean one.
-  it('does not extend that tolerance to a different already-exists failure', async () => {
+  // An "already exists" failure is a schema problem, and continuing
+  // past it would report a broken install as a clean one.
+  it('fails on an already-exists error from a real migration', async () => {
     const h = harness({
       argv: ['--only=migrations', '--apply'],
       files: {},
@@ -301,7 +312,7 @@ describe('runSetup — migrations step', () => {
     expect(h.errOut()).toContain('0008_events.sql')
   })
 
-  it('does not extend that tolerance to CATALOG_DB', async () => {
+  it('fails the same way on CATALOG_DB', async () => {
     const h = harness({
       argv: ['--only=migrations', '--apply'],
       files: {},

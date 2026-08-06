@@ -40,7 +40,7 @@ Blast-radius analysis (Explore agents + graphify structural graph) found the key
     updated_at TEXT NOT NULL
   );
   ```
-  No seed row — absence = all defaults. Regenerate `migrations/catalog-schema.sql` via `npm run db:dump-schema` in the same commit; apply locally with `npm run db:migrate`.
+  No seed row — absence = all defaults. Regenerate `schema/catalog-schema.sql` via `npm run db:dump-schema` in the same commit; apply locally with `npm run db:migrate`.
 
 - **New store `functions/api/v1/_lib/node-settings-store.ts`** (template: `node-profile-store.ts`):
   - `getNodeSettings(db)`, `setNodeFeatures(db, publisher, features, now?)` (upsert id=1, audit `node_settings.update` via `_lib/audit-store.ts` with the disabled set in metadata), `validateFeaturesInput(raw)`, `bustNodeFeaturesCache(kv)`.
@@ -120,7 +120,7 @@ Gated response: `403 { error: 'feature_disabled', feature: '<key>', message: ...
 ## Files (summary)
 
 New: `migrations/catalog/0037_node_settings.sql`, `functions/api/v1/_lib/node-settings-store.ts` (+test), `functions/api/v1/publish/node-settings.ts` (+test), `src/types/node-features.ts`, `src/ui/publisher/features.ts` (+test).
-Modified (key): `functions/api/v1/publish/_middleware.ts`, `functions/api/v1/node-profile.ts` + `_lib/node-profile-store.ts` (cache key bump), the 7 public read handlers above, `publish/events/refresh.ts`, `publish/workflows/due.ts`, `publish/blog/generate.ts` + `_lib/blog-generate.ts`, `publish/events/[id]/tour.ts`, `functions/api/feedback.ts` + `general-feedback*.ts`, `src/ui/publisher/{index.ts, components/sidebar.ts, pages/node-profile.ts, pages/overview.ts, pages/blog-edit.ts, pages/events.ts}` + the ~12 gated pages (one-line gate call each), `src/ui/blog/index.ts`, `migrations/catalog-schema.sql`, `locales/en.json` (+`npm run locales`), `scripts/screenshots/scenes.ts` (+fixtures), `docs/BACKEND_MODULES.md` + CLAUDE.md module-map rows.
+Modified (key): `functions/api/v1/publish/_middleware.ts`, `functions/api/v1/node-profile.ts` + `_lib/node-profile-store.ts` (cache key bump), the 7 public read handlers above, `publish/events/refresh.ts`, `publish/workflows/due.ts`, `publish/blog/generate.ts` + `_lib/blog-generate.ts`, `publish/events/[id]/tour.ts`, `functions/api/feedback.ts` + `general-feedback*.ts`, `src/ui/publisher/{index.ts, components/sidebar.ts, pages/node-profile.ts, pages/overview.ts, pages/blog-edit.ts, pages/events.ts}` + the ~12 gated pages (one-line gate call each), `src/ui/blog/index.ts`, `schema/catalog-schema.sql`, `locales/en.json` (+`npm run locales`), `scripts/screenshots/scenes.ts` (+fixtures), `docs/BACKEND_MODULES.md` + CLAUDE.md module-map rows.
 
 ## Phasing (one logical change per commit, `git commit -s`)
 

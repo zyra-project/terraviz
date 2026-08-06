@@ -8,7 +8,7 @@
  *      ("Per-PR" CI gates), reduced to a unit test that runs in
  *      milliseconds.
  *   2. The resulting schema matches the checked-in
- *      `migrations/catalog-schema.sql` snapshot. This is the
+ *      `schema/catalog-schema.sql` snapshot. This is the
  *      "schema diff" CI gate from the same section: schema changes
  *      require a regenerated snapshot in the same PR.
  *

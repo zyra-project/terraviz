@@ -251,8 +251,8 @@ here:
 | `data_ref` supports `peer:<node>/<id>` scheme | **Schema-ready, code rejects it** | `migrations/catalog/0001_init.sql:40` lists it; `functions/api/v1/datasets/[id]/manifest.ts:320` says "Phase 4". |
 | `/api/v1/federation/feed` route | **Missing** | No file exists. |
 | `/api/v1/federation/handshake` route | **Missing** | No file exists. |
-| `federation_peers` table | **Missing** | Not in `migrations/catalog-schema.sql`. |
-| `federated_datasets` mirror table | **Missing** | Not in `migrations/catalog-schema.sql`. |
+| `federation_peers` table | **Missing** | Not in `schema/catalog-schema.sql`. |
+| `federated_datasets` mirror table | **Missing** | Not in `schema/catalog-schema.sql`. |
 | Catalog signing (Ed25519 over response body) | **Missing** | `NODE_ID_PRIVATE_KEY_PEM` is wired through `CatalogEnv` but unused (`functions/api/v1/_lib/env.ts:36`). |
 | Frontend "origin badge" / peer filter chip | **Missing** | `src/ui/browseUI.ts` has no peer-aware code. |
 | STAC alignment (the wire shape would need to be a STAC Item profile per the plan) | **Missing** | `grep -n "stac\|STAC" functions/api/v1/_lib/dataset-serializer.ts` returns nothing. |
@@ -1089,7 +1089,7 @@ Files cited or read for this scoping:
 - `functions/api/v1/catalog.ts`, `functions/api/v1/_lib/env.ts`, `_lib/dataset-serializer.ts`, `_lib/catalog-store.ts` — catalog read API
 - `functions/api/v1/datasets/[id]/manifest.ts` — manifest endpoint, hardcodes Phase 4 deferrals
 - `functions/api/v1/publish/**` — publisher API
-- `migrations/catalog/0001_init.sql`–`0008_legacy_id.sql`, `migrations/catalog-schema.sql` — schema as actually applied
+- `migrations/catalog/0001_init.sql`–`0008_legacy_id.sql`, `schema/catalog-schema.sql` — schema as actually applied
 - `scripts/gen-node-key.ts`, `scripts/seed-catalog.ts` — node setup tooling
 - `src/services/dataService.ts:12`, `hlsService.ts:27`, `downloadService.ts:13`, `photorealEarth.ts:90` — hardcoded URL surfaces
 - `src/services/catalogSource.ts` — `VITE_CATALOG_SOURCE` switch

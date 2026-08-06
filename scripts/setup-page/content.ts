@@ -221,31 +221,30 @@ npm run dev:functions      # http://localhost:8788`,
     body: [
       {
         kind: 'trap',
-        title: 'Run CATALOG_DB first, and the order is not cosmetic',
+        title: 'Select by binding name, never by database name',
         body: [
-          "FEEDBACK_DB's migrations directory is the repo root, which also contains `catalog-schema.sql` — a generated snapshot of the fully-migrated catalog schema. Wrangler has no way to know it is not a migration, so it queues it as one.",
-          'On an empty database, running FEEDBACK_DB first means that snapshot **applies for real**, creating the entire catalog schema outside the migration tracker. Every subsequent CATALOG_DB migration then fails on `table node_identity already exists`, and the install cannot be completed. Run CATALOG_DB first and the snapshot fails harmlessly on its first statement instead.',
-          '**So the second command is expected to end with an error** — `table analytics_daily already exists` — after applying the seven real feedback migrations. That one failure is harmless. Any other failure is not.',
+          'Both `[[d1_databases]]` blocks declare `database_name = "sphere-feedback"` with **different** migration directories. Passing the bare name is ambiguous: wrangler resolves it to the first match, silently applies the wrong set, and leaves the catalog tables uncreated.',
+          'The symptom lands a long way from the cause — `table datasets has no column named bbox_n`, the first time somebody clicks Save draft in the portal.',
         ],
       },
     ],
     automated: { code: 'npm run setup -- --apply --only=migrations' },
     automatedNote: [
-      'Applies both sets in the order that works, and distinguishes the expected failure above from a real one. Add `--local-migrations` to rehearse against your local database first.',
+      'Applies both sets and stops on any failure. Add `--local-migrations` to rehearse against your local database first.',
     ],
     manual: {
       summary: 'Do it by hand',
       body: [
         {
-          code: `wrangler d1 migrations apply CATALOG_DB  --remote   # first!
-wrangler d1 migrations apply FEEDBACK_DB --remote   # ends in a harmless error`,
+          code: `wrangler d1 migrations apply CATALOG_DB  --remote   # migrations/catalog/
+wrangler d1 migrations apply FEEDBACK_DB --remote   # migrations/`,
         },
         {
-          html: '<b>Always select by binding name, never by database name.</b> Both blocks declare <code>database_name = "sphere-feedback"</code> with different migration dirs. Passing the bare name is ambiguous; wrangler silently applies the wrong set and leaves the catalog tables uncreated. The symptom lands much later as <code>table datasets has no column named bbox_n</code> when someone clicks Save draft.',
+          html: 'Either order works now. FEEDBACK_DB used to have to run second: the generated catalog snapshot sat in its migrations directory and would apply for real on an empty database. That file lives in <code>schema/</code>.',
         },
       ],
     },
-    gate: 'Both migration lists report nothing pending except `catalog-schema.sql` on FEEDBACK_DB. Re-run both after every `git pull` that brings new migration files — they are idempotent.',
+    gate: 'Both migration lists report nothing pending. Re-run both after every `git pull` that brings new migration files — they are idempotent.',
     gateShort: 'Your database has its tables, with nothing left to apply.',
     anchor: 'phase-4--create-the-schema',
   },

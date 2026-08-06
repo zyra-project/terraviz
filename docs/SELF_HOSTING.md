@@ -737,46 +737,13 @@ wrangler d1 info CATALOG_DB     # should print YOUR database, 0 tables
 Two migration sets live in this repo, keyed by **binding name**.
 
 > **Automated.** `npm run setup -- --apply --only=migrations` applies
-> both, in the order that works, and distinguishes the expected
-> `catalog-schema.sql` failure below from a real one. Add
-> `--local-migrations` to rehearse against the local `.wrangler/`
-> database first.
+> both and stops on any failure. Add `--local-migrations` to rehearse
+> against the local `.wrangler/` database first.
 
 ```bash
 wrangler d1 migrations apply CATALOG_DB  --remote    # migrations/catalog/
 wrangler d1 migrations apply FEEDBACK_DB --remote    # migrations/
 ```
-
-> ⚠️ **Run `CATALOG_DB` first. The order is not cosmetic.**
->
-> `FEEDBACK_DB`'s `migrations_dir` is the repo-root `migrations/`,
-> which also contains **`catalog-schema.sql`** — a *generated
-> snapshot* of the fully-migrated catalog schema, written by
-> `npm run db:dump-schema` for reference. Wrangler has no way to know
-> it isn't a migration, so it queues it as one.
->
-> On an empty database, running `FEEDBACK_DB` first means that
-> snapshot **applies for real**, creating the entire catalog schema
-> outside the migration tracker. Every subsequent `CATALOG_DB`
-> migration then fails on `table node_identity already exists`, and
-> the install cannot be completed. Verified on a clean database:
->
-> ```
-> wrangler d1 migrations apply FEEDBACK_DB   → exit 0
-> wrangler d1 migrations apply CATALOG_DB    → exit 1
->   ✘ table node_identity already exists at offset 13: SQLITE_ERROR
-> ```
->
-> Run `CATALOG_DB` first and every table in the snapshot already
-> exists, so it fails on its first statement and changes nothing.
->
-> **So the second command is expected to end with an error** —
-> `table analytics_daily already exists` — *after* applying the seven
-> real feedback migrations. That one failure is harmless. Any other
-> failure is not. (`npm run setup` handles this distinction for you,
-> keying on the `Migration <name> failed` line wrangler prints — a
-> failure in any *other* file still stops the run. It is also why
-> `ci.yml` only ever auto-applies `CATALOG_DB`.)
 
 > ⚠️ **Always select by binding name, never by database name.**
 > Both `[[d1_databases]]` blocks declare
@@ -792,8 +759,14 @@ wrangler d1 migrations apply FEEDBACK_DB --remote    # migrations/
 
 ```bash
 wrangler d1 migrations list CATALOG_DB --remote     # "No migrations to apply"
-wrangler d1 migrations list FEEDBACK_DB --remote    # only catalog-schema.sql pending
+wrangler d1 migrations list FEEDBACK_DB --remote    # "No migrations to apply"
 ```
+
+Both should be clean. `FEEDBACK_DB` used to report one file pending
+forever — the generated `catalog-schema.sql` snapshot lived in its
+migrations directory, so wrangler queued a file that was never a
+migration. The snapshot moved to `schema/`, so a pending entry here
+now means what it says.
 
 That command diffs the whole `migrations/catalog/` directory
 against the remote tracker table, so it stays correct as the
@@ -1745,11 +1718,12 @@ because the step runs before the deploy, that blocks the whole
 deploy. Editing a token's permissions keeps its value, so no
 rotation is needed.
 
-It applies `CATALOG_DB` only — `FEEDBACK_DB`'s `migrations_dir` is
-the repo-root `migrations/`, which also holds the generated
-`catalog-schema.sql` snapshot that wrangler would misread as a
-migration. Gated to `refs/heads/main`, because preview deploys
-share the same physical D1 as production.
+It applies `CATALOG_DB` only. That was once a safety requirement and
+is now just scope. Both bindings point at the same physical database,
+so the catalog migrations are all the backend needs, and feedback
+schema changes are rare enough to apply by hand. Gated to
+`refs/heads/main`, because preview deploys share the same physical D1
+as production.
 `npm run check:migrations` (in the type-check job) fails the build
 on destructive schema statements (DDL) unless the migration opts in with a
 `-- destructive: reviewed` comment.
