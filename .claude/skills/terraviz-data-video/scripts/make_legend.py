@@ -29,6 +29,29 @@ from matplotlib import colors
 from PIL import Image
 
 
+def _nice_ticks(vmin, vmax, target=5):
+    """Ticks on round numbers, ~`target` of them, inclusive of both ends.
+
+    linspace puts ticks wherever the range divides, which reads fine at
+    vmax=3e-4 (0/1/2/3 after scaling) and badly at vmax=10 (0/3.33/6.67/10).
+    """
+    span = float(vmax) - float(vmin)
+    if span <= 0:
+        return np.array([vmin])
+    raw = span / (target - 1)
+    mag = 10.0 ** np.floor(np.log10(raw))
+    # On a tie take the larger step (fewer, cleaner ticks) — that is what keeps
+    # vmax=3e-4 on 0/1/2/3 rather than half-steps. The tolerance matters: the
+    # two candidates are exactly equidistant there, and float error alone would
+    # otherwise decide it.
+    cands = [m * mag for m in (1, 2, 2.5, 5, 10)]
+    diffs = [abs(c - raw) for c in cands]
+    best = min(diffs)
+    step = max(c for c, d in zip(cands, diffs) if d <= best * (1 + 1e-9) + 1e-15)
+    ticks = np.arange(np.ceil(vmin / step) * step, vmax + step * 0.5, step)
+    return ticks[(ticks >= vmin - step * 1e-6) & (ticks <= vmax + step * 1e-6)]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--title", required=True)
@@ -43,9 +66,16 @@ def main():
     a = ap.parse_args()
 
     # Tick labels: share a x10^-n exponent so the numbers stay short.
+    # Only worth it when the exponent is actually large — a human-scale range
+    # (vmax=10, say) would otherwise be labelled "0 0 1 1" against "x10^1".
     exp = int(np.floor(np.log10(a.vmax))) if a.vmax > 0 else 0
+    if -3 < exp < 3:
+        exp = 0
     scale = 10.0 ** exp
-    ticks = np.linspace(a.vmin, a.vmax, 4)
+    ticks = _nice_ticks(a.vmin, a.vmax)
+    # Enough decimals for the step to survive, no more.
+    sstep = (ticks[1] - ticks[0]) / scale if len(ticks) > 1 else 1.0
+    decimals = 0 if sstep == int(sstep) else (1 if round(sstep, 1) == sstep else 2)
 
     fig = plt.figure(figsize=(9.0, 2.2), dpi=150)
     fig.patch.set_facecolor("white")
@@ -54,7 +84,7 @@ def main():
         ax, cmap=plt.get_cmap(a.cmap),
         norm=colors.Normalize(a.vmin, a.vmax), orientation="horizontal")
     cb.set_ticks(ticks)
-    cb.set_ticklabels([f"{t/scale:.0f}" for t in ticks])
+    cb.set_ticklabels([f"{t/scale:.{decimals}f}" for t in ticks])
     cb.ax.tick_params(labelsize=12, color="#333", labelcolor="#222", length=5, width=1)
     cb.outline.set_edgecolor("#333"); cb.outline.set_linewidth(1)
 
