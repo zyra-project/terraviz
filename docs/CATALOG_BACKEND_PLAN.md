@@ -2696,6 +2696,15 @@ contract tests and unit tests.
 
 - One commit per migration, with the migration file in the same
   commit as the code that depends on it.
+- **A migration's filename is permanent once it merges.**
+  `d1_migrations.name` records the full filename, not the number, so
+  renaming an applied file makes wrangler treat it as new and run it
+  a second time. For an `ALTER TABLE … ADD COLUMN` that fails with
+  `duplicate column name` and aborts every migration behind it. Pick
+  the number carefully in review, while changing it is still free —
+  `npm run check:migrations` fails on a number claimed twice, and the
+  one existing collision (two `0036` files, shipped) is frozen there
+  for exactly this reason.
 - `schema_version` bumps in a separate commit so its diff is the
   one place to audit shape changes.
 - Federation protocol changes go through a separate `protocol/`
