@@ -57,8 +57,10 @@ them for, so the ask is answerable in one round trip.
 
 [`workflows/global-composite-reflectivity.pipeline.yaml`](workflows/global-composite-reflectivity.pipeline.yaml)
 — GFS 0.25° composite reflectivity (`REFC`), from `noaa-gfs-bdp-pds`
-on NODD. Validated, calibrated against sampled records, URLs confirmed
-live. It can be registered and run now.
+on NODD. **Run end to end** (§7), not merely validated: it fetches,
+reprojects, encodes, and produces a globe that reads correctly. The
+run is also what corrected two claims in this document — see §5's
+palette retune and §6's resolution correction.
 
 It is the only **global** reflectivity field that a CI runner can
 actually reach. The honest ranking of the alternatives:
@@ -174,8 +176,53 @@ running the real builder:
   equivalent here.
 
 Verified output: 256 stops, first opaque code at luma 24 (5.18 dBZ),
-band edges crisp, sidecar 11,146 chars against a 16,384 limit, palette
-arg 702 chars against 2,000.
+band edges crisp, sidecar ~11 KB against a 16,384-char limit, palette
+arg 707 chars against 2,000.
+
+### The ramp needed retuning for a lit globe
+
+Rendering it settled a question that reasoning would not have. The
+stock NWS ramp is drawn for a **white** radar background, and the globe
+is neither white nor blank — a data-encoded dataset carries no basemap
+precisely because the globe supplies Earth underneath. Composited over
+`earth_diffuse_4096`, the stock ramp failed twice:
+
+- **Two bands read as holes.** The 15–20 dBZ pure blue (`3,0,244`) and
+  the 30–35 dBZ dark green (`0,142,0`) are darker than the ocean they
+  sit on. Light-to-moderate precipitation *disappeared*, then
+  reappeared as green above it — the field looked discontinuous where
+  the data is smooth.
+- **Every band at full alpha buried the map.** 20.75% of texels draw
+  something in a typical frame, and at alpha 255 that is a solid cyan
+  blanket over a fifth of the planet. Continents vanished under
+  drizzle.
+
+The fix keeps the convention where it matters and changes it where the
+background forces it: **hue boundaries are untouched**, so it still
+reads as a radar map and 45 dBZ is still orange. Alpha now ramps across
+the light bands (70 → 120 → 175 → 215 → 245 → 255), so drizzle is a
+wash the Earth shows through and only real precipitation goes solid,
+and the two dark bands are lightened to clear the ocean. Near-opaque
+coverage drops from 20.75% to 1.93% while total coverage is unchanged —
+the same data, weighted so the eye reads intensity.
+
+Alpha is display-only: `lumaToValue` never consults it, so every hover
+reading is identical under either ramp.
+
+### One rough edge: clear air reports 0.00 dBZ
+
+`_transparent_range` emits `transparentRange` **only for continuous
+palettes** — a classified one carries its transparency per-band in the
+stop alphas instead. The globe recolours correctly either way, but
+`datasetProbe` gates its no-data flag on `isTransparentLuma`, which
+reads that absent field. So hovering clear ocean reports `0.00 dBZ`
+rather than "no data".
+
+Defensible (0 dBZ *is* the no-echo end of the scale) but not ideal, and
+not fixable from the pipeline. The clean fix is upstream: have
+`_transparent_range` derive the band from a classified palette's
+leading zero-alpha entries, which is a few lines. Filed nothing —
+that needs approval first.
 
 ## 6. Resolution honesty
 
@@ -191,9 +238,28 @@ is the right trade for now. But it means "3-km" in the dataset title
 would describe the model, not the pixels, and the copy is written
 accordingly.
 
-The GFS file deliberately does **not** upsize: its native 1440×721 is
-the data, and a 4096-wide frame would only claim resolution the source
-does not have.
+**Correction from the run.** An earlier draft of this section said the
+GFS file kept its native 1440×721 by omitting the size. That was wrong
+twice over. `zyra process reproject` defaults to `--width 4096`
+(`raster_reproject.DEFAULT_WIDTH`), so omitting the size does not keep
+native resolution — it upsizes silently, which the first run duly did.
+And native would not have been the right choice anyway:
+`cli/lib/sos-spec.ts` asserts 4096×2048 and flags anything else as "the
+transcode upscales/downscales, check source quality", so a smaller
+frame just moves the upscale downstream onto the *luma*. Doing it in
+`reproject` resamples the **data**, which is the entire reason the
+contract puts regridding on that stage.
+
+Both files now state 4096×2048 explicitly. A size this load-bearing
+should not be arriving from a default nobody looked up — which is
+exactly how the wrong claim got written in the first place.
+
+One caveat worth recording: reproject's default resampling is
+**bilinear**, so the 2.84× upsample interpolates. Standard for a
+continuous field, and dBZ is continuous — but dBZ is also logarithmic,
+so a bilinear blend of two dBZ values is not the linear-average
+reflectivity of the pair. The error is small and every radar display
+makes it; it is noted so nobody rediscovers it as a bug.
 
 ## 7. Verification performed
 
@@ -218,10 +284,74 @@ strictly increasing.
   `read_bytes_any` writes fetched bytes to its own `.grib2` temp file,
   so nothing sniffs the URL suffix.
 
-Not verified, because it needs a runner: an end-to-end `zyra run`, and
-therefore the actual appearance of the globe. The first run should be
-checked against the skill's debugging map before the dataset is made
-public.
+### The end-to-end run (2026-08-12)
+
+`zyra run` over the full 49-frame GFS pipeline, cycle `20260812/06`:
+
+| | |
+|---|---|
+| Result | exit 0, **49/49 frames**, no missing, no duplicates |
+| Wall clock | **2m30s** (fetch ~40s, reproject ~60s, heatmap ~50s) |
+| Peak disk | ~1.9 GB — 195 MB GeoTIFF, 1.6 GB reprojected, 75 MB frames |
+| `scan-frames` | recovered 2026-08-12T06:00 → 2026-08-14T06:00, 3600 s |
+
+The `.idx` subsetting does what it promises: 49 fetches of a ~500 MB
+file each moved ~1 MB.
+
+**Clipping, across the whole forecast** — the check that says whether
+`vmax` was chosen right:
+
+| Valid | max luma | max dBZ | clipped px |
+|---|---|---|---|
+| 08-12 06Z | 236 | 50.90 | 0 |
+| 08-12 14Z | 246 | 53.06 | 0 |
+| 08-12 18Z | 246 | 53.06 | 0 |
+| 08-13 06Z | 241 | 51.98 | 0 |
+
+**Zero clipped pixels anywhere**, peaking at 53.06 dBZ against a
+ceiling of 55 — about 2 dBZ of headroom, tight but real. Note the peak
+lands at 14Z and 18Z, i.e. afternoon convection, and runs ~1.3 dBZ
+above what the three sampled records suggested. Sampling one cycle
+gets you close; it does not get you the maximum. Had `vmax` been the
+p99.9 of 37, roughly 0.1% of the globe would be clipped — and that 0.1%
+is the storms.
+
+### What it looks like
+
+Frames were composited over `earth_diffuse_4096` through the client's
+own `parseColorScale` → `buildColorScaleLut`, so the preview is the
+globe's colouring rather than an impression of it. The sidecar parses
+(so no grayscale fallback), luma 236 → 50.90 dBZ, and the bands land
+where they should: cyan at 5, green at 20, yellow at 35, red at 50.
+
+It reads correctly. Mid-latitude frontal bands, the ITCZ, monsoon
+convection over India and China, afternoon convection firing over land
+and dying after dark across the 49-hour loop. Coverage is stable at
+20–21% of texels per frame. Geography stays legible underneath.
+
+It also confirms the caveat in §2 rather than softening it: the top
+half of the ramp barely lights. Orange and red appear as specks, never
+as the cores a radar loop would show, because GFS does not build storms
+— it estimates them. The picture is honest, and it is visibly not a
+convection-permitting product.
+
+### Two deviations from what CI would run
+
+Recorded because they bound the claim, not because either looks
+material:
+
+- **zyra 0.1.54 from PyPI in a venv, not the pinned container**
+  (`ghcr.io/noaa-gsl/zyra@sha256:0f335b9d…`). The sandbox has a docker
+  CLI but no daemon. Same pipeline code; not the same image.
+- **numpy 2.4.6, where zyra pins `<2.0`.** Installed `--no-deps`
+  because two unrelated core dependencies (`reverse-geocoder`,
+  `PyVimeo`) will not build here. Nothing in the run touched them, and
+  no numpy-2 incompatibility surfaced.
+
+Still unverified: the real globe. This was an offline composite, not
+the SPA — it does not exercise `earthTileLayer`'s shader, the HLS
+transcode, or `playback_fps`. Publish once and look before making the
+dataset public.
 
 ## 8. Extending to other fields
 

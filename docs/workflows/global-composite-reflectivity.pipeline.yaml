@@ -14,9 +14,14 @@
 #          Measured 2026-08-12: the 12Z cycle had f048 posted by +5h09m,
 #          so PT6H selects a cycle that is already complete end to end.
 # Frames:  hourly f000..f048 (49 frames, 2-day outlook)
-# Grid:    native 1440x721. Deliberately NOT upsized to 4096x2048 -- there
-#          is no 0.25 deg detail to recover by doing so, and the larger
-#          frame would only claim resolution the source does not have.
+# Grid:    reprojected 1440x721 -> 4096x2048, stated explicitly rather than
+#          left to the default. `reproject` defaults to --width 4096, so
+#          OMITTING the size does not keep native resolution -- it upsizes
+#          silently. 4096x2048 is also what cli/lib/sos-spec.ts asserts, and
+#          what the transcode would scale to anyway; doing it here resamples
+#          the DATA (bilinear) instead of the rendered luma, which is the
+#          whole reason the contract puts regridding on this stage. It adds
+#          no detail the 0.25 deg source lacks.
 # Range:   vmin 0, vmax 55 dBZ. Sampled from real records (f006/f012/f024 of
 #          2026-08-11 00Z): max 51.8 dBZ, p99.9 ~37.5, p99.99 ~43. 55
 #          clears the observed maximum without clipping and keeps the
@@ -197,6 +202,11 @@ stages:
         - /work/tif/{{valid_compact:PT6H:PT6H:PT48H}}.tif
       output_dir: /work/wrapped
       dst_bounds: [-180, -90, 180, 90]
+      # Regrid the DATA here. Doing it on the heatmap stage is a hard
+      # error under --data-encoded: resizing a rendered frame would
+      # average luma codes, i.e. invent dBZ values nothing measured.
+      width: 4096
+      height: 2048
 
   # 3. The data-encoded render. Luma *is* the dBZ value; the sidecar written
   #    to color_scale_file is what lets the globe recolour it and report a
@@ -264,7 +274,7 @@ stages:
       # Bounds below are in dBZ, not in palette position: zyra maps them back
       # through vmin/vmax, so 45 dBZ is orange at any vmax. Changing vmax
       # changes the quantisation step and the clip ceiling, never a colour.
-      cmap_inline: '{"type":"classified","entries":[{"Color":[0,0,0,0],"Upper Bound":0},{"Color":[4,233,231,255],"Upper Bound":5},{"Color":[1,159,244,255],"Upper Bound":10},{"Color":[3,0,244,255],"Upper Bound":15},{"Color":[2,253,2,255],"Upper Bound":20},{"Color":[1,197,1,255],"Upper Bound":25},{"Color":[0,142,0,255],"Upper Bound":30},{"Color":[253,248,2,255],"Upper Bound":35},{"Color":[229,188,0,255],"Upper Bound":40},{"Color":[253,149,0,255],"Upper Bound":45},{"Color":[253,0,0,255],"Upper Bound":50},{"Color":[212,0,0,255],"Upper Bound":55},{"Color":[188,0,0,255],"Upper Bound":60},{"Color":[248,0,253,255],"Upper Bound":65},{"Color":[152,84,198,255],"Upper Bound":70},{"Color":[255,255,255,255],"Upper Bound":75}]}'
+      cmap_inline: '{"type":"classified","entries":[{"Color":[0,0,0,0],"Upper Bound":0},{"Color":[120,245,244,70],"Upper Bound":5},{"Color":[60,175,250,120],"Upper Bound":10},{"Color":[70,105,255,175],"Upper Bound":15},{"Color":[2,253,2,215],"Upper Bound":20},{"Color":[1,210,1,245],"Upper Bound":25},{"Color":[0,165,0,255],"Upper Bound":30},{"Color":[253,248,2,255],"Upper Bound":35},{"Color":[229,188,0,255],"Upper Bound":40},{"Color":[253,149,0,255],"Upper Bound":45},{"Color":[253,0,0,255],"Upper Bound":50},{"Color":[212,0,0,255],"Upper Bound":55},{"Color":[188,0,0,255],"Upper Bound":60},{"Color":[248,0,253,255],"Upper Bound":65},{"Color":[152,84,198,255],"Upper Bound":70},{"Color":[255,255,255,255],"Upper Bound":75}]}'
       # No width/height (forbidden with data_encoded), no basemap (the globe
       # supplies Earth).
 
