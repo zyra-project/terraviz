@@ -7,13 +7,15 @@ in the meantime. Companion to
 `terraviz-data-video` skill's data-encoded contract.
 
 > **Status: draft for review.** Two pipelines written and validated;
-> one of them is runnable. Nothing published yet.
+> the GFS one has been run end to end. Nothing published yet.
 >
 > **Last reviewed: 2026-08-12.**
 > **Revisit when:** NSF NCAR posts gridded MPAS 3-km output at a
 > fetchable URL; the 3-km global run restarts as a live real-time
-> product; RRFS v2 (the MPAS-engine one) reaches NODD; or the globe's
-> frame budget moves off 4096×2048.
+> product; RRFS v2 (the MPAS-engine one) reaches NODD; the globe's
+> frame budget moves off 4096×2048; or zyra lets a **classified**
+> palette declare its own no-data band, which is what §5 is waiting on
+> to swap back to the NWS ramp.
 
 ---
 
@@ -58,9 +60,11 @@ them for, so the ask is answerable in one round trip.
 [`workflows/global-composite-reflectivity.pipeline.yaml`](workflows/global-composite-reflectivity.pipeline.yaml)
 — GFS 0.25° composite reflectivity (`REFC`), from `noaa-gfs-bdp-pds`
 on NODD. **Run end to end** (§7), not merely validated: it fetches,
-reprojects, encodes, and produces a globe that reads correctly. The
-run is also what corrected two claims in this document — see §5's
-palette retune and §6's resolution correction.
+reprojects, encodes, and produces a globe that reads correctly. Running
+it is also what corrected three claims in this document — the palette
+type (§5), the ramp's alphas (§5), and the grid (§6). None of the three
+was catchable by reading the pipeline; two needed a render and one
+needed the statistics computed.
 
 It is the only **global** reflectivity field that a CI runner can
 actually reach. The honest ranking of the alternatives:
@@ -142,12 +146,13 @@ the planet has no precipitation at any moment. Everything at or below
 `vmin` lands on luma 0, which the palette's first band renders fully
 transparent, so clear air drops out and the globe shows through.
 
-## 5. The palette: bounds in dBZ, not in palette position
+## 5. The palette: the no-data band is what picks it
 
-Reflectivity is read as absolute categories — 45 dBZ *is* orange to
-anyone who has looked at a radar map. zyra's **classified** palette
-spec supports that directly, and its behaviour was confirmed by reading
-`build_color_scale` rather than assumed:
+The obvious choice for reflectivity is a **classified** palette, and
+this shipped as one first. Reflectivity is read as absolute categories —
+45 dBZ *is* orange to anyone who has seen a radar map — and zyra's
+classified spec supports that exactly, walking bounds back through
+vmin/vmax so a colour means a dBZ value at any range:
 
 ```python
 # A classified palette is defined against DATA values, so walk
@@ -155,29 +160,70 @@ spec supports that directly, and its behaviour was confirmed by reading
 values = np.asarray(ts) * (vmax - vmin) + vmin
 ```
 
-So the shipped palette is the NWS/AWIPS ramp with `Upper Bound` values
-in dBZ. The consequence is worth stating plainly: **changing `vmax`
-changes the quantisation step and the clip ceiling, never a colour.**
-45 dBZ is orange at `vmax` 55 and at `vmax` 75 alike. That is why the
-GFS and MPAS files can carry different ranges and still be read against
-the same legend.
+**It had to be given up, and not for a reason about colour.**
 
-Two edges of the spec that are easy to get wrong, both verified by
-running the real builder:
+`normalize_to_luma` sends NaN and masked texels to luma 0 — the same
+code as `vmin` — and says so plainly:
 
-- `BoundaryNorm(bounds, len(bounds) − 1)`: N entries define N−1 bins,
-  and values *below* the first bound take the **under** colour, which
-  is entry 0's. So entry 0 must be the transparent one — otherwise
-  clear air paints cyan across the whole globe.
-- A classified palette emits **no `transparentRange`** in the sidecar;
-  transparency is per-band and rides in the stop alphas. That is fine
-  for the client, which treats the field as optional, but it means the
-  continuous-palette convention of `transparent_range: 12` has no
-  equivalent here.
+> NaN and masked entries become 0, which is both ``vmin`` and the
+> "nothing measured here" code **the palette's transparent range
+> covers**.
 
-Verified output: 256 stops, first opaque code at luma 24 (5.18 dBZ),
-band edges crisp, sidecar ~11 KB against a 16,384-char limit, palette
-arg 707 chars against 2,000.
+That range is `_transparent_range`, and it returns `None` for anything
+whose `type` is not `"continuous"`. So a classified palette publishes a
+sidecar with **no `transparentRange`** — and that field is the client's
+only declaration that luma 0 is absence rather than a measurement.
+Three consumers read it through `isTransparentLuma`:
+
+| Consumer | With no `transparentRange` |
+|---|---|
+| `datasetStats` | every statistic averages in the ~78% of the frame that is clear air |
+| `datasetContours` | isolines trace *through* the no-data footprint |
+| `datasetProbe` | hovering open ocean reports `0.00 dBZ`, not no-data |
+
+Measured on a real frame, the statistics half of that is not subtle:
+
+| | mean | median | coverage |
+|---|---|---|---|
+| No `transparentRange` | 3.17 dBZ | **0.00** | 100.00% |
+| Declared (shipped) | 13.70 dBZ | 12.29 | 22.10% |
+
+A reported median global reflectivity of zero is not a rounding
+problem, it is a wrong answer. `datasetStats`'s own header predicts it:
+*"Counting it as `vmin` would drag every mean toward the bottom of the
+scale in exact proportion to how much of the frame is empty."*
+
+**Rendering is correct either way** — a classified palette carries its
+alpha in the stops, so the globe looks right while every consumer that
+asks "is this texel data?" is told yes. That is precisely why looking
+at it does not catch this.
+
+So both files ship a **continuous** turbo ramp with `transparent_range`
+23 (GFS) / 17 (MPAS) — 5 dBZ in both cases — blending to solid at
+25 dBZ. Verified through the pipeline's own sidecar:
+`transparentRange: 0.089844`, `isTransparentLuma(0) === true`, first
+data luma 23 = 4.96 dBZ.
+
+### What that costs, and when to undo it
+
+Continuous colours are pinned to palette **position**, not to value:
+`_sample_palette`'s continuous branch samples `cmap(t)` with no
+vmin/vmax walk-back, unlike its classified branch. So changing `vmax`
+changes what every colour means, and the GFS (0–55) and MPAS (0–75)
+files are **not** directly comparable by colour today. Pin both to one
+range if they ever need to share a legend.
+
+At 0–55 turbo lands close to convention by luck — green ~25 dBZ, yellow
+~35, orange ~44, red ~49, within a couple of dBZ of the NWS ramp — so
+the practical loss is smaller than the principle suggests.
+
+**Undo this when zyra derives the transparent band from a classified
+palette's leading zero-alpha entries.** The information is already in
+the spec: the classified ramp's entry 0 was `[0,0,0,0]` with
+`Upper Bound: 0`, i.e. "everything below 0 dBZ draws nothing". A few
+lines in `_transparent_range` would let a classified palette declare
+its own no-data band, at which point the NWS ramp is strictly better
+and the swap is a one-line palette change with no re-encode.
 
 ### The ramp needed retuning for a lit globe
 
@@ -208,21 +254,6 @@ the same data, weighted so the eye reads intensity.
 
 Alpha is display-only: `lumaToValue` never consults it, so every hover
 reading is identical under either ramp.
-
-### One rough edge: clear air reports 0.00 dBZ
-
-`_transparent_range` emits `transparentRange` **only for continuous
-palettes** — a classified one carries its transparency per-band in the
-stop alphas instead. The globe recolours correctly either way, but
-`datasetProbe` gates its no-data flag on `isTransparentLuma`, which
-reads that absent field. So hovering clear ocean reports `0.00 dBZ`
-rather than "no data".
-
-Defensible (0 dBZ *is* the no-echo end of the scale) but not ideal, and
-not fixable from the pipeline. The clean fix is upstream: have
-`_transparent_range` derive the band from a classified palette's
-leading zero-alpha entries, which is a few lines. Filed nothing —
-that needs approval first.
 
 ## 6. Resolution honesty
 
@@ -321,8 +352,9 @@ is the storms.
 Frames were composited over `earth_diffuse_4096` through the client's
 own `parseColorScale` → `buildColorScaleLut`, so the preview is the
 globe's colouring rather than an impression of it. The sidecar parses
-(so no grayscale fallback), luma 236 → 50.90 dBZ, and the bands land
-where they should: cyan at 5, green at 20, yellow at 35, red at 50.
+(so no grayscale fallback), luma 236 → 50.90 dBZ, and the shipped turbo
+ramp lands close to radar convention: nothing below 5 dBZ, solid by 25,
+green ~25, yellow ~35, orange ~44, red ~49.
 
 It reads correctly. Mid-latitude frontal bands, the ITCZ, monsoon
 convection over India and China, afternoon convection firing over land
