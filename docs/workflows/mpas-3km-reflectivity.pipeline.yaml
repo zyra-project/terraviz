@@ -1,0 +1,350 @@
+# NSF NCAR MPAS 3-km global composite reflectivity - data-encoded.
+#
+# ###################################################################
+# # THIS PIPELINE CANNOT RUN YET. The host below is a placeholder on
+# # the reserved .invalid TLD, so it can never accidentally resolve to
+# # somebody else's server. As of 2026-08-12 the NSF NCAR MPAS 3-km
+# # global forecast publishes PNG graphics only -- there is no public
+# # GRIB2/NetCDF endpoint, no S3 bucket, no THREDDS, and no GDEX/RDA
+# # entry. Its own data_access.php says "For real-time data access,
+# # send us an email." The run is also not currently live: Spring 2025
+# # (ended 30 May 2025) and Fall 2025 are archives.
+# #
+# # See docs/MPAS_3KM_REFLECTIVITY_PLAN.md for the full source
+# # investigation and what has to become true for this to run.
+# ###################################################################
+#
+# TO ACTIVATE, the source URL must satisfy three properties. All three
+# are hard requirements, not preferences:
+#
+#   1. GRIB2 (or NetCDF) on a REGULAR LAT/LON GRID. MPAS's native output
+#      is an unstructured Voronoi mesh, and zyra is raster-only -- it
+#      cannot read the mesh. NCAR must post an interpolated grid.
+#   2. A DATE-TEMPLATABLE PATH. The placeholder grammar has {{cycle_date}}
+#      / {{cycle_hour}} and nothing else -- no day-of-year, no 2-digit
+#      year. A <YYDDDHHmm> filename cannot be expressed and is a dead end.
+#   3. NO CLOUDFLARE IN FRONT. Many *.ucar.edu and *.noaa.gov hosts 403
+#      datacenter IPs, which fails the fetch no matter how correct the
+#      pipeline is. Verify with a curl from a CI runner, not a laptop.
+#
+# Cycles:  daily 00Z assumed (P1D). LAG PT12H is a PLACEHOLDER -- a 3-km
+#          global 60-h forecast takes hours to run and hours more to post,
+#          and the lag must cover the whole run posting, not just f000.
+#          Measure it against the real feed before enabling the schedule.
+# Frames:  hourly f000..f060 (61 frames), matching the 60-h forecast length.
+# Grid:    reprojected to 4096x2048. Note honestly what that means: 4096
+#          columns over 360 deg is ~0.088 deg, about 9.8 km at the equator.
+#          A true 3-km global frame would need ~13333 columns. The globe's
+#          frame budget, not the model, is the resolution limit here -- so
+#          this shows convection-permitting *structure* resolved to ~10 km,
+#          which is still far more than GFS's parameterised smear.
+# Range:   vmin 0, vmax 75 dBZ -- UNVERIFIED, unlike the GFS sibling.
+#          Convection-permitting models routinely produce 65-70 dBZ cores,
+#          and 75 is the NWS ramp ceiling, so nothing clips. Re-measure
+#          with scripts/sample_grib_range.py once real records exist; the
+#          palette colours will not move when vmax does, only the
+#          quantisation step (75/255 = 0.294 dBZ per luma code).
+stages:
+  # 1. Fetch one GRIB2 record per lead hour and write it as a GeoTIFF.
+  #    `pattern` subsets via the .idx sidecar, so each fetch is a range-GET
+  #    of the single reflectivity record rather than the whole ~500 MB file.
+  - stage: process
+    command: convert-format
+    args:
+      format: geotiff
+      pattern: 'REFC:entire atmosphere'
+      output_dir: /work/tif
+      inputs:
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f000.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f001.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f002.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f003.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f004.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f005.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f006.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f007.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f008.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f009.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f010.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f011.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f012.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f013.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f014.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f015.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f016.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f017.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f018.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f019.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f020.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f021.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f022.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f023.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f024.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f025.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f026.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f027.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f028.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f029.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f030.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f031.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f032.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f033.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f034.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f035.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f036.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f037.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f038.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f039.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f040.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f041.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f042.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f043.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f044.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f045.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f046.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f047.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f048.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f049.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f050.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f051.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f052.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f053.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f054.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f055.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f056.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f057.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f058.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f059.grib2
+        - https://REPLACE-WITH-MPAS-HOST.invalid/mpas3km/{{cycle_date:P1D:PT12H}}/{{cycle_hour:P1D:PT12H}}/mpas.t{{cycle_hour:P1D:PT12H}}z.global3km.f060.grib2
+      output_names:
+        - '{{valid_compact:P1D:PT12H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT1H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT2H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT3H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT4H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT5H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT6H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT7H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT8H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT9H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT10H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT11H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT12H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT13H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT14H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT15H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT16H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT17H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT18H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT19H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT20H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT21H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT22H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT23H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT24H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT25H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT26H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT27H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT28H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT29H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT30H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT31H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT32H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT33H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT34H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT35H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT36H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT37H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT38H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT39H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT40H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT41H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT42H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT43H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT44H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT45H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT46H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT47H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT48H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT49H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT50H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT51H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT52H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT53H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT54H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT55H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT56H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT57H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT58H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT59H}}.tif'
+        - '{{valid_compact:P1D:PT12H:PT60H}}.tif'
+
+  # 2. Rotate the 0-360 source grid onto +/-180 equirectangular, which is
+  #    the projection the globe samples.
+  - stage: process
+    command: reproject
+    args:
+      inputs:
+        - /work/tif/{{valid_compact:P1D:PT12H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT1H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT2H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT3H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT4H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT5H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT6H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT7H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT8H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT9H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT10H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT11H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT12H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT13H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT14H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT15H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT16H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT17H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT18H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT19H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT20H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT21H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT22H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT23H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT24H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT25H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT26H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT27H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT28H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT29H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT30H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT31H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT32H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT33H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT34H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT35H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT36H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT37H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT38H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT39H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT40H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT41H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT42H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT43H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT44H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT45H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT46H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT47H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT48H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT49H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT50H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT51H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT52H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT53H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT54H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT55H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT56H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT57H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT58H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT59H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT12H:PT60H}}.tif
+      output_dir: /work/wrapped
+      dst_bounds: [-180, -90, 180, 90]
+      # Regrid the DATA here. Doing it on the heatmap stage is a hard
+      # error under --data-encoded: resizing a rendered frame would
+      # average luma codes, i.e. invent dBZ values nothing measured.
+      width: 4096
+      height: 2048
+
+  # 3. The data-encoded render. Luma *is* the dBZ value; the sidecar written
+  #    to color_scale_file is what lets the globe recolour it and report a
+  #    real number under the cursor. Both keys are required -- `data_encoded`
+  #    without `color_scale_file` publishes silently as a flat picture.
+  - stage: visualize
+    command: heatmap
+    args:
+      inputs:
+        - /work/wrapped/{{valid_compact:P1D:PT12H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT1H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT2H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT3H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT4H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT5H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT6H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT7H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT8H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT9H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT10H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT11H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT12H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT13H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT14H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT15H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT16H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT17H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT18H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT19H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT20H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT21H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT22H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT23H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT24H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT25H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT26H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT27H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT28H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT29H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT30H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT31H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT32H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT33H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT34H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT35H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT36H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT37H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT38H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT39H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT40H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT41H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT42H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT43H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT44H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT45H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT46H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT47H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT48H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT49H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT50H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT51H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT52H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT53H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT54H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT55H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT56H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT57H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT58H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT59H}}.tif
+        - /work/wrapped/{{valid_compact:P1D:PT12H:PT60H}}.tif
+      output_dir: /work/images/frames
+      data_encoded: true
+      color_scale_file: /work/color-scale.json
+      units: "dBZ"
+      vmin: 0
+      vmax: 75
+      # Bounds below are in dBZ, not in palette position: zyra maps them back
+      # through vmin/vmax, so 45 dBZ is orange at any vmax. Changing vmax
+      # changes the quantisation step and the clip ceiling, never a colour.
+      cmap_inline: '{"type":"classified","entries":[{"Color":[0,0,0,0],"Upper Bound":0},{"Color":[4,233,231,255],"Upper Bound":5},{"Color":[1,159,244,255],"Upper Bound":10},{"Color":[3,0,244,255],"Upper Bound":15},{"Color":[2,253,2,255],"Upper Bound":20},{"Color":[1,197,1,255],"Upper Bound":25},{"Color":[0,142,0,255],"Upper Bound":30},{"Color":[253,248,2,255],"Upper Bound":35},{"Color":[229,188,0,255],"Upper Bound":40},{"Color":[253,149,0,255],"Upper Bound":45},{"Color":[253,0,0,255],"Upper Bound":50},{"Color":[212,0,0,255],"Upper Bound":55},{"Color":[188,0,0,255],"Upper Bound":60},{"Color":[248,0,253,255],"Upper Bound":65},{"Color":[152,84,198,255],"Upper Bound":70},{"Color":[255,255,255,255],"Upper Bound":75}]}'
+      # No width/height (forbidden with data_encoded), no basemap (the globe
+      # supplies Earth).
+
+  # 4. Recover the time range from the valid-time frame names.
+  - stage: process
+    command: scan-frames
+    args:
+      frames_dir: /work/images/frames
+      datetime_format: "%Y%m%dT%H%M%S"
+      period_seconds: 3600
+      output: /work/frames-meta.json
+
+# No compose-video: frames publish through the image-sequence path, which
+# avoids a second lossy generation over value-bearing luma. Set
+# `playback_fps` on the dataset row by hand (~8 suits 61 frames).
