@@ -342,9 +342,14 @@ stages:
       # CONTINUOUS is load-bearing, not a colour preference. zyra emits the
       # sidecar's `transparentRange` ONLY for a continuous palette, and that
       # field is the sole declaration that luma 0 means "nothing here" rather
-      # than "0 dBZ". Without it datasetStats averages the empty ~79% of
+      # than "0 dBZ". Without it datasetStats averages the empty majority of
       # the frame into every statistic, datasetContours traces the no-data
       # footprint, and the hover readout reports 0.00 dBZ over open ocean.
+      # (Unmeasured here — this pipeline has no fetchable source yet. On the
+      # GFS sibling the same field came out 22.10% covered.)
+      # Tracked upstream as NOAA-GSL/zyra#363; if that lands, the classified
+      # NWS ramp becomes usable here — see docs/MPAS_3KM_REFLECTIVITY_PLAN.md
+      # §5, which has the undo conditions and what they cost.
       # transparent_range/blend_range are luma codes, not dBZ: 17 = 5 dBZ
       # (below it nothing draws) and +68 reaches solid at 25 dBZ.
       cmap_inline: '{"type":"continuous","base":"turbo","transparent_range":17,"blend_range":68,"overall_alpha":0.95}'

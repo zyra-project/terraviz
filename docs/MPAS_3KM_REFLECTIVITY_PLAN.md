@@ -13,9 +13,10 @@ in the meantime. Companion to
 > **Revisit when:** NSF NCAR posts gridded MPAS 3-km output at a
 > fetchable URL; the 3-km global run restarts as a live real-time
 > product; RRFS v2 (the MPAS-engine one) reaches NODD; the globe's
-> frame budget moves off 4096×2048; or zyra lets a **classified**
-> palette declare its own no-data band, which is what §5 is waiting on
-> to swap back to the NWS ramp.
+> frame budget moves off 4096×2048; or
+> [NOAA-GSL/zyra#363](https://github.com/NOAA-GSL/zyra/issues/363)
+> (a **classified** palette declaring its own no-data band) closes,
+> which is what §5 is waiting on to swap back to the NWS ramp.
 
 ---
 
@@ -224,6 +225,14 @@ the spec: the classified ramp's entry 0 was `[0,0,0,0]` with
 lines in `_transparent_range` would let a classified palette declare
 its own no-data band, at which point the NWS ramp is strictly better
 and the swap is a one-line palette change with no re-encode.
+
+Filed upstream as [NOAA-GSL/zyra#363][zyra-363], with the measurements
+above and both a derive-it and an explicit-`dataMinLuma` option. **When
+that issue closes, re-read this section before acting on it** — the
+swap is only one line if the fix lands as the derive-it option, since
+an explicit new sidecar field would need client support first.
+
+[zyra-363]: https://github.com/NOAA-GSL/zyra/issues/363
 
 ### The ramp needed retuning for a lit globe
 
