@@ -214,7 +214,9 @@ which is why the PR stops here rather than guessing.
    Central Operations dataflow) and `rrfs.feedback@noaa.gov`.
 2. **Upstream zyra change** — see the section below. Selecting a record
    by GRIB2 metadata rather than by variable name would make NOMADS
-   usable; nothing in the pinned runner can do it today.
+   usable; nothing in the pinned runner can do it today. Prepared but
+   **not filed**:
+   [`UPSTREAM_ZYRA_ISSUE_DRAFT.md`](UPSTREAM_ZYRA_ISSUE_DRAFT.md).
 3. **Hold the published rows at their last good run until 2026-10-06**
    and revisit at implementation, when the production feed and its
    distribution are settled.
