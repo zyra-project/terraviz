@@ -100,31 +100,56 @@ plays roughly a third as long.
 
 ### Why these read S3 and not the NOMADS path
 
-The NOMADS tree is the authority for the new layout and is fresher, but
-it is not fetchable at this scale: **NOMADS publishes no `.idx`
-sidecars**, and `convert-format --pattern` needs one to range-GET a
-single record. Without it the pipeline pulls whole files — 151 MB per NA
-forecast hour, 360 MB per CONUS hour, i.e. ~4.4 GB and ~30 GB per run.
+The obvious question, since NOMADS is where the v1.0 layout change is
+announced and is where it was mapped from. **It is the same data** —
+NODD mirrors NCEP's v1.0 product to `noaa-rrfs-pds/rrfs_public/` under
+identical filenames. What differs is not the content but what each
+endpoint lets you *ask for*.
 
-NOAA Open Data Dissemination mirrors the same v1.0 product to
-`noaa-rrfs-pds/rrfs_public/` **with** `.idx` sidecars, so one record
-costs ~0.4 MB instead of 151 MB. That is also the source the published
-rows already credit ("distributed via NOAA Open Data Dissemination on
-AWS"), so this keeps the attribution honest.
+`convert-format --pattern` extracts one GRIB2 record by range-GETting
+the bytes an `.idx` sidecar points at. Measured against NOMADS on
+2026-08-13:
+
+| | NOMADS | NODD S3 |
+|---|---|---|
+| `.idx` sidecar | **absent** — `.idx`, `.inv`, `.index` and a bare `.idx` on the stem all 404/403 | present next to every GRIB2 |
+| GRIB filter service | **none for RRFS** — not among the 74 wired `gribfilter.php` datasets; `?ds=rrfs` renders site chrome with no form and no `filter_*.pl` (compare `hrrr_2d` → `filter_hrrr_2d.pl`) | n/a |
+| HTTP Range | honoured (`206`, `Accept-Ranges: bytes`) — but with no index there is no byte range to ask for | honoured, and the `.idx` says which |
+| Cost of one record | the whole file: **154 MB** (NA 13 km), 360 MB (CONUS 3 km) | **~0.4–1.2 MB** |
+
+So on NOMADS there is no mechanism to fetch a single field. Pulling
+whole files instead would be ~4.5 GB per NA run and ~30 GB per CONUS
+run — past the runner's disk in the CONUS case, and squarely the bulk
+pattern NOMADS asks users to take to NODD instead. (Whether zyra falls
+back to a whole-file download when no `.idx` is present, or simply
+errors, is not something this migration verified — but neither outcome
+is usable at that size.)
+
+S3 is also the source the published rows already credit ("distributed
+via NOAA Open Data Dissemination on AWS"), so it keeps the attribution
+honest.
 
 The one cost is freshness. The mirror normally lands a cycle 1.3–3.9 h
 after cycle time (measured across four cycles), which is what the `PT5H`
 lag in these pipelines is sized against.
 
-> **Open at time of writing:** the NODD mirror stalled after
-> `rrfs.20260812/11z` (last object written 2026-08-12T12:28Z) and had
-> published nothing new as of 2026-08-13T15:50Z. Both `rrfs_public/`
-> and `rrfs_a/` stopped at the same moment, so this looks like a mirror
-> outage rather than anything about RRFS itself. **Confirm the mirror
-> has caught up before running these** — a stalled mirror makes every
-> input 404. If it turns out to be permanent rather than an outage, the
-> honest fallback is a smaller frame count from NOMADS, not whole-file
-> downloads.
+> **Open at time of writing — the mirror is stalled.** `noaa-rrfs-pds`
+> stopped accepting new objects after `rrfs.20260812/11z`; its newest
+> object anywhere is `2026-08-12T12:58Z`, unchanged as of
+> `2026-08-13T19:48Z` (~31 h). NOMADS meanwhile has `rrfs.20260813`.
+>
+> Diagnosis: this is **bucket-specific, not NODD-wide**. All three
+> prefixes in `noaa-rrfs-pds` — `rrfs_public/`, `rrfs_a/` and `refs/` —
+> stopped within the same window, while `noaa-gefs-pds`,
+> `noaa-hrrr-bdp-pds` and `noaa-gfs-bdp-pds` all carry current
+> `20260813` directories. There is no GCP mirror of RRFS to fall back
+> to (`gs://rrfs-pds` and `gs://noaa-rrfs-pds` both 404).
+>
+> **Confirm the mirror has caught up before running these** — while it
+> is stalled every input 404s. This is worth reporting to NODD rather
+> than waiting out silently. If it turned out to be permanent rather
+> than an outage, the answer would be to renegotiate the frame count
+> against what NOMADS can serve, not to start pulling 154 MB files.
 
 ### Calibration
 
