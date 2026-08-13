@@ -1,0 +1,198 @@
+# RRFS smoke — whole-column loading, North America (13 km)
+#
+# REVISED for RRFS v1.0. What changed from the RRFS-A pipeline this
+# replaces:
+#
+#   bucket prefix   rrfs_a/            ->  rrfs_public/
+#   NA product      2dfld.3km....na    ->  2dfld.13km....na
+#   NA resolution   3 km (4881x2961)   ->  13 km (1127x683)
+#   NA cadence      hourly, 85 frames  ->  3-hourly, 29 frames
+#   cycles with NA  every hour         ->  00/06/12/18z only
+#   GRIB record     unchanged          ->  unchanged
+#   domain extent   unchanged          ->  unchanged (same rotated_ll grid)
+#
+# The 13 km NA grid covers the same ground as the retired 3 km one, so
+# `dst_bounds`, the dataset bbox and the frame geometry all carry over
+# untouched. Only the source path and the frame cadence move.
+#
+# Frame geometry is deliberately left at 4030x2080 (26 px/deg), the
+# same as the frames this replaces, so nothing downstream shifts. It
+# now oversamples the source ~3x; 1240x640 (8 px/deg) would match the
+# new native 13 km resolution if you would rather ship lighter frames.
+#
+# Replaces the pipeline behind: north-america-smoke
+#                               "Wildfire Smoke Overhead"
+# Measured 2026-08-13 on rrfs.20260811/18 f024: p99.9 = 1.11e-4,
+# p99.99 = 2.82e-4, max = 1.74e-3 kg m-2. vmax stays at 5e-4 (the
+# published calibration) so hover values and the legend stay
+# comparable with previous runs; retune deliberately, not as a side
+# effect of this migration.
+stages:
+  # 1. Fetch each forecast hour and cut ONE GRIB2 record out of it.
+  #    `pattern` is an .idx regex: the runner reads the sidecar and
+  #    range-GETs only the matching record, so a 151 MB file costs
+  #    ~0.4 MB. This is why the pipeline reads the NODD S3 mirror and
+  #    not the NOMADS tree — NOMADS publishes no .idx, so the same
+  #    stage there would pull every byte of every forecast hour.
+  - stage: process
+    command: convert-format
+    args:
+      format: geotiff
+      pattern: 'COLMD:entire atmosphere.*Particulate organic matter dry'
+      output_dir: /work/tif
+      inputs:
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f000.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f003.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f006.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f009.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f012.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f015.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f018.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f021.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f024.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f027.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f030.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f033.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f036.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f039.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f042.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f045.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f048.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f051.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f054.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f057.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f060.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f063.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f066.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f069.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f072.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f075.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f078.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f081.na.grib2
+        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT6H:PT5H}}/{{cycle_hour:PT6H:PT5H}}/rrfs.t{{cycle_hour:PT6H:PT5H}}z.2dfld.13km.f084.na.grib2
+      output_names:
+        - "{{valid_compact:PT6H:PT5H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT3H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT6H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT9H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT12H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT15H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT18H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT21H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT24H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT27H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT30H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT33H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT36H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT39H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT42H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT45H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT48H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT51H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT54H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT57H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT60H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT63H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT66H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT69H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT72H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT75H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT78H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT81H}}.tif"
+        - "{{valid_compact:PT6H:PT5H:PT84H}}.tif"
+  # 2. Reproject the model grid onto an equirectangular frame the globe
+  #    can wrap. `width`/`height` give square pixels over `dst_bounds`
+  #    (4030 / 155deg = 2080 / 80deg). Resampling the DATA here is
+  #    legitimate; resizing the rendered luma later would not be.
+  - stage: process
+    command: reproject
+    args:
+      inputs:
+        - /work/tif/{{valid_compact:PT6H:PT5H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT3H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT6H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT9H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT12H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT15H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT18H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT21H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT24H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT27H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT30H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT33H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT36H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT39H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT42H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT45H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT48H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT51H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT54H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT57H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT60H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT63H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT66H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT69H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT72H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT75H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT78H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT81H}}.tif
+        - /work/tif/{{valid_compact:PT6H:PT5H:PT84H}}.tif
+      output_dir: /work/wrapped
+      dst_bounds: [-175, 5, -20, 85]
+      width: 4030
+      height: 2080
+  # 3. Render data-encoded frames: pixel luma IS the value. Needs
+  #    `data_encoded` + `color_scale_file` together (either alone
+  #    publishes a picture with no hover readout), a palette from
+  #    `cmap_inline` (a named `cmap` is ignored on this path), and no
+  #    width/height/basemap.
+  - stage: visualize
+    command: heatmap
+    args:
+      inputs:
+        - /work/wrapped/{{valid_compact:PT6H:PT5H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT3H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT6H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT9H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT12H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT15H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT18H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT21H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT24H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT27H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT30H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT33H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT36H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT39H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT42H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT45H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT48H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT51H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT54H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT57H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT60H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT63H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT66H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT69H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT72H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT75H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT78H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT81H}}.tif
+        - /work/wrapped/{{valid_compact:PT6H:PT5H:PT84H}}.tif
+      output_dir: /work/images/frames
+      data_encoded: true
+      color_scale_file: /work/color-scale.json
+      units: "kg m-2"
+      cmap_inline: '{"type":"continuous","base":"YlOrBr","transparent_range":12,"blend_range":48,"overall_alpha":0.95}'
+      vmin: 0
+      vmax: 0.0005
+  # 4. Read the valid times back off the frame filenames so the
+  #    metadata template's {{data_start}}/{{data_end}} report what the
+  #    frames on disk actually are.
+  - stage: process
+    command: scan-frames
+    args:
+      frames_dir: /work/images/frames
+      datetime_format: "%Y%m%dT%H%M%S"
+      period_seconds: 10800
+      output: /work/frames-meta.json
