@@ -31,6 +31,11 @@ RRFS-A paths, so all three pipelines needed revising.
 | `rrfs-smoke-near-surface-north-america.*` | `rrfs-smoke-near-surface-north-america` — "RRFS Smoke — Near-Surface, North America" |
 | `rrfs-smoke-column-conus.*` | `wildfire-smoke-forecast-transparent-united-states-rrfs` — "Wildfire Smoke Forecast (Transparent) — United States (RRFS)" |
 
+`rrfs-radar-reflectivity-conus.*` is a **new** dataset rather than a
+revision — see [Radar reflectivity](#radar-reflectivity-conus-15-minute)
+below. It needs a dataset row created in the portal first; the other
+three attach to rows that already exist.
+
 ### What actually changed
 
 ```
@@ -141,19 +146,104 @@ CONUS ones for the same field. Lowering NA `vmax` toward ~3e-4 would
 brighten faint plumes, at the cost of clipping the densest cores and of
 no longer matching the CONUS row's scale.
 
-### Verification
+---
+
+## Radar reflectivity, CONUS, 15-minute
+
+A **new** dataset, added alongside the migration because mapping the
+v1.0 file inventory turned up the sub-hourly product and it is the one
+place RRFS publishes something faster than hourly.
+
+| | |
+|---|---|
+| Source | `2dfld.3km.subh.fNNN.conus.grib2` (+ the hourly `f000` for the analysis) |
+| Field | `REFC` — composite reflectivity, entire atmosphere, dBZ |
+| Frames | 73 at 15-minute spacing, t+0 → t+18 h |
+| Cycles | **every hour** — subh is published at all 24 cycle hours |
+| Geometry | 2250 × 960 over `[-135, 21, -60, 53]` — identical to the CONUS smoke row, so the two overlay exactly |
+
+This is the only dataset here that refreshes hourly. The smoke rows are
+tied to the four synoptic cycles because that is where the long forecast
+lives; subh runs complete at every cycle hour, `+1.4–3.0 h` after cycle
+time, so a `PT1H` interval with a `PT4H` lag is honest.
+
+### Why five `convert-format` stages
+
+Each `subh.fNNN` file holds **four** REFC records — the three 15-minute
+sub-steps plus the on-the-hour instant. `pattern` selects one record per
+file and is a single stage-level argument, so each slot needs its own
+stage. The sub-step times are absolute minutes from cycle time
+(`subh.f006` holds 315/330/345, not 15/30/45), so each pattern lists its
+18 possible values explicitly rather than matching a suffix.
+
+Verified against the real sidecars: 73 pattern/file checks, every one
+matching exactly one record, and the four patterns partition a file's
+four REFC records with no overlap and nothing left uncovered.
+
+Only the analysis frame has to come from the hourly product — subh
+starts at f001, so t+0 would otherwise be missing. It is also the most
+trustworthy frame in the set, being the radar-assimilated initial state.
+
+### Why `vmin` is 5 dBZ and `vmax` is 75
+
+`vmin` is not a cosmetic floor on this path. `lumaToValue` anchors the
+visible ramp at `dataMinLuma` (`= ceil(transparentRange × 255)`), so
+everything below `vmin` lands in the transparent band and reads as
+*absent* rather than as a measured value. That is exactly what the
+field wants: its floor is a flat **−20 dBZ fill covering more than half
+the domain** (the median of the whole grid is −20), and that fill should
+disappear, not render as data. `vmin: 5` makes "no echo" mean "below the
+first detectable echo".
+
+`vmax: 75` deliberately departs from the contract's usual
+`vmax ≈ p99.9`. Measured 2026-08-13 on `rrfs.20260811/18`:
+
+| | min | p99.9 | p99.99 | max |
+|---|---|---|---|---|
+| subh f006 (315 min) | −20.0 | 55.8 | 63.4 | 66.6 |
+| subh f012 (705 min) | −20.0 | 46.7 | 60.6 | 67.4 |
+
+dBZ is a standard scale with conventional breakpoints — 20 light, 35
+moderate, 45 heavy, 50+ hail — and clipping at ~56 would flatten
+precisely the severe cores the dataset exists to show. 75 dBZ across 243
+visible codes still quantises at 0.29 dBZ, finer than the 0.5 dBZ steps
+operational radar products typically ship.
+
+The palette is `turbo` rather than one of the light-starting maps the
+aerosol rows use. It runs dark blue → cyan → green → yellow → red, the
+ordering radar users read fluently; faint echo being dim against the
+dark globe is the intended reading here rather than a defect.
+
+Set `playback_fps` on the row — 73 frames at the default 30 fps plays in
+about 2.4 s. Around 8 fps gives a ~9 s loop.
+
+A full run moves ~80 MB: one REFC record is ~1.1 MB through an `.idx`
+range-GET, against 360 MB for the file that contains it.
+
+AK publishes a subh product too, if a second domain is ever wanted;
+HI and PR publish theirs at 2.5 km.
+
+---
+
+## Verification
 
 Each pipeline was checked with the recipe in
 `.claude/skills/terraviz-data-video/references/verification.md`:
 
-- `validatePipeline` + `validateMetadataTemplate` — OK for all three
+- `validatePipeline` + `validateMetadataTemplate` — OK for all four
 - placeholder interpolation — no unresolved `{{` left
 - `materializeInlinePalettes` — palette materializes, `data_encoded: true`,
   `color_scale_file` present, no `width`/`height`/`basemap` on the heatmap stage
 - every rendered input URL **and** its `.idx` HEAD-checked against a
-  complete cycle (`rrfs.20260811/18`) — 29/29 and 85/85 resolve
-- both record patterns confirmed to match exactly one GRIB2 record
+  complete cycle (`rrfs.20260811/18`) — 29/29, 85/85 and 19/19 resolve
+- every record pattern confirmed to match **exactly one** GRIB2 record
+  in every file it is pointed at — 73 pattern/file checks for the radar
+  pipeline alone, plus its four patterns confirmed to partition each
+  file's four REFC records with no overlap
+- radar frame series confirmed unique and evenly spaced: 73 names, one
+  distinct gap of 900 s, t+0 → t+18 h
 
-Not yet done: an end-to-end run. These have not been executed against a
-live runner, so the first run of each still wants a look at the publish
-log for `render_encoding, color_scale` among the updated fields.
+Not yet done: an end-to-end run. None of these have been executed
+against a live runner, so the first run of each still wants a look at
+the publish log for `render_encoding, color_scale` among the updated
+fields.
