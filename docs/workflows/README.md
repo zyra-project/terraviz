@@ -212,23 +212,82 @@ which is why the PR stops here rather than guessing.
    NOMADS can carry `.idx` sidecars.** One answer restores the whole
    design unchanged. SCN contacts: `ncep.pmb.dataflow@noaa.gov` (NWS
    Central Operations dataflow) and `rrfs.feedback@noaa.gov`.
-2. **Establish what zyra does when no `.idx` exists** — whether
-   `convert-format --pattern` errors, downloads the whole file, or
-   streams and stops at the matching record. This migration did not
-   verify it, and the three outcomes have very different consequences.
-   Worth knowing: the smoke records sit early in the file (`MASSDEN` is
-   record 83 of 318, ~32 MB in; `COLMD` is 148, ~51 MB in), so a
-   stream-and-stop reader would need a fifth to a third of each file
-   rather than all of it.
-3. **Re-scope to whatever NOMADS can honestly sustain**, if whole-file
-   fetching is the only option. At 154 MB per NA forecast hour, a
-   6-hourly NA set (15 frames) is ~2.3 GB per run; CONUS at 360 MB per
-   hour does not fit a runner at any useful frame count. This is a real
-   reduction in the datasets, not a transparent swap, and NOMADS asks
-   bulk users to go to NODD precisely to avoid this pattern.
-4. **Hold the published rows at their last good run until 2026-10-06**
+2. **Upstream zyra change** — see the section below. Selecting a record
+   by GRIB2 metadata rather than by variable name would make NOMADS
+   usable; nothing in the pinned runner can do it today.
+3. **Hold the published rows at their last good run until 2026-10-06**
    and revisit at implementation, when the production feed and its
    distribution are settled.
+
+### Why NOMADS cannot be used with the pinned runner
+
+Read out of zyra **v0.1.52**, the version behind the runner digest in
+`.github/workflows/zyra-run.yml`
+(`ghcr.io/noaa-gsl/zyra@sha256:0f335b9d…` → `org.opencontainers.image.version
+= v0.1.52`, revision `78e8c62`, built 2026-07-26).
+
+**A missing `.idx` is a hard failure, not a fallback.** From
+`zyra/utils/io_utils.py::read_bytes_any`:
+
+```python
+if idx_pattern:
+    lines  = http_backend.get_idx_lines(path_or_url)   # GETs <url>.idx
+    ranges = idx_to_byteranges(lines, idx_pattern)
+    if not ranges:
+        raise RuntimeError(f"No .idx lines matched pattern {idx_pattern!r} …")
+    return http_backend.download_byteranges(path_or_url, ranges.keys())
+return http_backend.fetch_bytes(path_or_url)   # whole file — only when idx_pattern is falsy
+```
+
+`get_idx_lines` calls `raise_for_status()` inside `with_retries(max_attempts=3)`,
+so a 404 on the sidecar is retried three times and then raised;
+`read_bytes_any` rewraps it as `RuntimeError`, `cmd_convert_format` logs
+and returns 2, and zyra stops at the first failed stage. There is no
+whole-file fallback on this path and no stream-and-stop reader.
+
+**The `--var` alternative cannot name these fields.** Dropping `pattern`
+does reach `fetch_bytes` (the whole 154–360 MB file, into memory), after
+which `--var` is a regex matched against cfgrib `data_vars` or pygrib
+`shortName`/`name`. Every field these pipelines need is nameless:
+
+| Record | `shortName` | `name` | `paramId` |
+|---|---|---|---|
+| `REFC` (rec 1) | `unknown` | `unknown` | 0 |
+| `MASSDEN` ×5 (recs 83–87) | `unknown` | `unknown` | 0 |
+| `COLMD` ×4 (recs 148–151) | `unknown` | `unknown` | 0 |
+
+This is specific to the fields we want, not the file: of 27 records
+sampled across the 318, 21 name cleanly (`st`, `tp`, `crain`, `gh`, `u`,
+`cin`, `tcc`, …) and the 6 that do not include every one of ours. Since
+they all collide on the single string `unknown`, no regex can separate
+organic-matter `COLMD` from dust `COLMD`, or `REFC`'s 315-minute step
+from its 330-minute one. And `extract_variable` returns `matches[0]` —
+the *first* match — so a wrong pick would be silent rather than an error.
+That makes `--var` worse than unusable here; it is quietly wrong.
+
+**wgrib2 is present but not reachable from this shape.** The image does
+ship it (`WITH_WGRIB2=source` on amd64), and `wgrib2 -match` matches the
+*inventory line*, which carries exactly the discriminating text
+(`aerosol=Particulate organic matter dry`, `315 min fcst`). But the only
+code path using it is `cmd_extract_variable`, gated on `--stdout` with
+`--format netcdf|grib2` — not `geotiff` — single-input only, and it
+still calls `read_bytes_any` with the pattern first, so a URL input dies
+on the missing `.idx` before wgrib2 is reached. Driving it would need a
+local file, one stage per frame (29–85 against a 12-stage cap), and a
+geotiff path that does not exist there.
+
+So the discriminating information lives only in the `.idx`/inventory
+line, and the one zyra path that reads it needs the sidecar the source
+no longer publishes. **Re-scoping to fewer frames from NOMADS does not
+help** — the blocker is naming, not volume. An upstream change that let
+a record be selected by GRIB2 metadata (discipline / category / number +
+level + aerosol type), or that gave `convert-format`'s batch geotiff
+flow a `wgrib2 -match` path, would reopen it.
+
+> Not verified: what `--backend wgrib2` yields for `convert-format
+> geotiff`. `grib_decode` accepts it, but the geotiff writer is built
+> around the xarray/cfgrib object, so it is unlikely to help and was not
+> chased further.
 
 ### Calibration
 
