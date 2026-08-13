@@ -74,6 +74,19 @@ For the CONUS dataset it is a real change: **it refreshes 4× a day
 rather than hourly**, with the same 84-hour outlook and the same 85
 hourly frames as before.
 
+**Sub-hourly is not an option for smoke.** CONUS (and AK) also publish
+a `2dfld.3km.subh.fNNN.<domain>.grib2` product covering f001–f018, which
+holds the 15-minute sub-steps leading up to each forecast hour —
+`subh.f006` carries 315/330/345 min, with the 360-minute instant in the
+hourly `f006`. Union'd with the hourly files that would give 15-minute
+resolution through the first 18 hours. But `subh` carries **no aerosol
+records at all** — its 156 records are precipitation, reflectivity and
+surface weather (`APCP`, `REFC`, `VIL`, `GUST`, `VIS`, `TMP`, …), with
+no `MASSDEN`, `COLMD` or `AOTK`. RRFS writes chemistry output on an
+hourly cadence regardless of the dynamics sub-steps, so the hourly
+product is the only source for smoke; `subh` is the right file for a
+15-minute radar or precipitation dataset.
+
 **The NA datasets drop from 85 frames to 29.** The 13 km NA product is
 published 3-hourly, so `period` moves `PT1H` → `PT3H` and the frame
 count moves 85 → 29 across the same 84-hour outlook. If you set

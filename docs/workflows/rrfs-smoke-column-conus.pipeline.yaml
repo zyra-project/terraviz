@@ -20,6 +20,17 @@
 # moves from hourly to PT6H accordingly — this dataset refreshes 4x a
 # day rather than hourly, with the same 84 h outlook as before.
 #
+# Not the `subh` product, deliberately. CONUS also publishes
+# `2dfld.3km.subh.fNNN.conus.grib2` (f001..f018), which holds the
+# 15-minute sub-steps leading up to each hour — f006 carries 315/330/
+# 345 min, with the 360 min instant in the hourly f006. But its 156
+# records are all precipitation, reflectivity and surface weather
+# (APCP, REFC, VIL, GUST, VIS, TMP, ...) and it contains no `aerosol=`
+# record at all: no MASSDEN, no COLMD, no AOTK. RRFS writes its
+# chemistry output hourly regardless of the dynamics sub-steps, so the
+# hourly product is the only source for smoke. `subh` would be the
+# right file for a 15-minute radar or precip dataset.
+#
 # Replaces the pipeline behind: wildfire-smoke-forecast-transparent-united-states-rrfs
 #                               "Wildfire Smoke Forecast (Transparent) — United States (RRFS)"
 # Measured 2026-08-13 on rrfs.20260811/18 f024: p99.9 = 2.17e-4,
