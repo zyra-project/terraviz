@@ -19,6 +19,30 @@ checked against.
 
 ---
 
+## ⚠ Status: the RRFS pipelines are blocked on a data source
+
+**Do not run these yet.** Their structure, record patterns, calibration
+and geometry are verified, but every `inputs:` URL points at
+`noaa-rrfs-pds`, and that bucket was **retired on 2026-08-11** — it is
+not an outage, and no new files will ever land there. Its last object
+anywhere is `2026-08-12T12:58Z`.
+
+Per [SCN 26-48](https://www.weather.gov/media/notification/pdf_2026/scn26-048_RRFS_and_REFS_Implementation.aab.pdf),
+`noaa-rrfs-pds` carried the RRFS/REFS **prototype** feed, which stopped
+when the pre-implementation parallel phase began on 2026-08-11. RRFS v1.0
+implements 2026-10-06. There is **no S3 successor**: ten candidate NODD
+bucket names 404, there is no GCP mirror, and the AWS registry entry
+still describes the retired prototype.
+
+That leaves NOMADS as the only live source, and NOMADS cannot serve a
+single GRIB2 record — see [below](#why-these-read-s3-and-not-the-nomads-path).
+The efficient fetch every one of these pipelines is built on has no
+source at present. Resolving that is a decision about scope and about
+what NCEP will publish, not an edit to these files — the open options
+are in [What to do about it](#what-to-do-about-it).
+
+---
+
 ## The RRFS v1.0 migration (2026-08-13)
 
 RRFS moved from the pre-operational RRFS-A stream to operational
@@ -133,23 +157,78 @@ The one cost is freshness. The mirror normally lands a cycle 1.3–3.9 h
 after cycle time (measured across four cycles), which is what the `PT5H`
 lag in these pipelines is sized against.
 
-> **Open at time of writing — the mirror is stalled.** `noaa-rrfs-pds`
-> stopped accepting new objects after `rrfs.20260812/11z`; its newest
-> object anywhere is `2026-08-12T12:58Z`, unchanged as of
-> `2026-08-13T19:48Z` (~31 h). NOMADS meanwhile has `rrfs.20260813`.
->
-> Diagnosis: this is **bucket-specific, not NODD-wide**. All three
-> prefixes in `noaa-rrfs-pds` — `rrfs_public/`, `rrfs_a/` and `refs/` —
-> stopped within the same window, while `noaa-gefs-pds`,
-> `noaa-hrrr-bdp-pds` and `noaa-gfs-bdp-pds` all carry current
-> `20260813` directories. There is no GCP mirror of RRFS to fall back
-> to (`gs://rrfs-pds` and `gs://noaa-rrfs-pds` both 404).
->
-> **Confirm the mirror has caught up before running these** — while it
-> is stalled every input 404s. This is worth reporting to NODD rather
-> than waiting out silently. If it turned out to be permanent rather
-> than an outage, the answer would be to renegotiate the frame count
-> against what NOMADS can serve, not to start pulling 154 MB files.
+> **This reasoning is now stranded.** It explains why S3 was the right
+> source while `noaa-rrfs-pds` was alive. It is retired, so the trade it
+> describes no longer has a side to land on: the endpoint that can serve
+> one record does not receive data, and the endpoint that receives data
+> cannot serve one record. Kept because it is the constraint any
+> replacement source has to satisfy.
+
+### What the retirement actually said
+
+From [SCN 26-48](https://www.weather.gov/media/notification/pdf_2026/scn26-048_RRFS_and_REFS_Implementation.aab.pdf)
+(NWS Headquarters, 2026-07-06) and the AWS registry entry:
+
+- `noaa-rrfs-pds` carried the **prototype** RRFS/REFS feed. It stopped
+  updating when the pre-implementation parallel phase began
+  **2026-08-11**. Observed last write: `2026-08-12T12:58Z`.
+- Pre-implementation data lives on NOMADS at
+  `/pub/data/nccf/com/rrfs/para/`. The `/rrfs/v1.0/` path serves the
+  **same files** (verified identical size, mtime and leading bytes).
+- **Production implementation is 2026-10-06**, at which point the SCN
+  names `/pub/data/nccf/com/rrfs/prod/` as the location.
+  `/rrfs/prod/` is currently empty.
+- The SCN's file list confirms `rrfs.tCCz.2dfld.13km.fFFF.na.grib2` is a
+  standard product, and confirms 84 h at 00/06/12/18z with 18 h at the
+  other hourly cycles — matching what this migration measured
+  independently. The 3 km output is distributed only as the CONUS/AK/HI/PR
+  subsets, which is why the NA domain is 13 km.
+- The SCN names no AWS/NODD distribution at all.
+
+> **Path stability is an open question.** These files currently use
+> `/rrfs/v1.0/`, which works today and reads like the versioned
+> production path. But the SCN names `para/` for now and `prod/` from
+> October 6. Whichever source question gets resolved, the path wants
+> confirming with NCEP dataflow rather than inferring — it is a
+> one-line change but a silent breakage if missed.
+
+### What was ruled out
+
+| Candidate | Result |
+|---|---|
+| A successor NODD bucket | 10 name variants probed, all 404 |
+| GCP / Azure mirror | `gs://rrfs-pds`, `gs://noaa-rrfs-pds` 404; Azure unreachable from here, unconfirmed |
+| NOMADS `.idx` | absent under 4 naming variants |
+| NOMADS GRIB filter | RRFS not among the 74 wired `gribfilter.php` datasets |
+| NOMADS NOAAPORT feed (`/com/para/noaaport/rrfs/`) | carries a 3 km NA product, but **147 MB** per file and no index — no better |
+| Smaller product carrying the same fields | `prslev` is larger (675 records) and has no aerosol records at all |
+
+### What to do about it
+
+Roughly in order of leverage. None of these is an edit to these files,
+which is why the PR stops here rather than guessing.
+
+1. **Ask NCEP whether v1.0 will be published to NODD, and whether
+   NOMADS can carry `.idx` sidecars.** One answer restores the whole
+   design unchanged. SCN contacts: `ncep.pmb.dataflow@noaa.gov` (NWS
+   Central Operations dataflow) and `rrfs.feedback@noaa.gov`.
+2. **Establish what zyra does when no `.idx` exists** — whether
+   `convert-format --pattern` errors, downloads the whole file, or
+   streams and stops at the matching record. This migration did not
+   verify it, and the three outcomes have very different consequences.
+   Worth knowing: the smoke records sit early in the file (`MASSDEN` is
+   record 83 of 318, ~32 MB in; `COLMD` is 148, ~51 MB in), so a
+   stream-and-stop reader would need a fifth to a third of each file
+   rather than all of it.
+3. **Re-scope to whatever NOMADS can honestly sustain**, if whole-file
+   fetching is the only option. At 154 MB per NA forecast hour, a
+   6-hourly NA set (15 frames) is ~2.3 GB per run; CONUS at 360 MB per
+   hour does not fit a runner at any useful frame count. This is a real
+   reduction in the datasets, not a transparent swap, and NOMADS asks
+   bulk users to go to NODD precisely to avoid this pattern.
+4. **Hold the published rows at their last good run until 2026-10-06**
+   and revisit at implementation, when the production feed and its
+   distribution are settled.
 
 ### Calibration
 
