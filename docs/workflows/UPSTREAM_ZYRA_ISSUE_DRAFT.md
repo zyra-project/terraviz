@@ -5,6 +5,20 @@ Filing is public and outward-facing, so it needs a human to send it.
 Delete this file once the issue is opened, and replace the reference in
 [`README.md`](README.md) with the issue number.
 
+> **The urgency is gone.** This was drafted while the only live RRFS
+> source was NOMADS. NOAA has since published the operational bucket
+> `noaa-rrfs-ops-pds`, which carries `.idx` sidecars, and all four
+> pipelines now read it — so nothing here is blocked on this issue any
+> more. The underlying gap is still real (any origin serving GRIB2
+> without a sidecar strands a pipeline the same way, and the `--var`
+> silent-wrong-field behaviour is a bug in its own right), but filing is
+> now a judgement call rather than a necessity.
+>
+> If it is filed, the "Motivating case" section below should be recast
+> in the past tense and note that a sidecar-bearing bucket resolved it —
+> a maintainer will reasonably ask whether the reporter still needs
+> anything, and the honest answer is that we do not, today.
+
 Suggested title:
 
 > `convert-format`: a GRIB2 record is unselectable when the source has no `.idx` and `shortName` is `unknown`

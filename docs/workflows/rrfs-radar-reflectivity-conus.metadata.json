@@ -1,8 +1,22 @@
 {
   "title": "Radar Reflectivity Forecast — United States (RRFS)",
-  "abstract": "Where it is raining, snowing and storming across the United States, forecast every fifteen minutes for the next eighteen hours.\n\nThis is simulated radar — the same composite reflectivity picture a national radar mosaic shows, but run forward in time by the forecast model. Blue and green are light precipitation, yellow and orange are heavy rain, and red and pink are the cores of severe storms, where hail is likely. Clear air is left transparent.\n\nThe first frame is the analysis, which has real radar observations folded into it, so it starts from what the radars are actually seeing. Everything after it is forecast, and the further out it runs the less the exact position of any individual storm should be trusted — the pattern is more reliable than the placement.\n\nFifteen-minute steps on the NOAA Rapid Refresh Forecast System's 3 km CONUS domain, refreshed every hour. Frames are data-encoded: the brightness of each pixel carries the measured value, so hovering reports reflectivity in dBZ rather than a colour.",
-  "categories": ["Atmosphere", "Weather"],
-  "keywords": ["radar", "reflectivity", "precipitation", "storms", "severe weather", "forecast", "RRFS", "CONUS", "United States", "NOAA"],
+  "abstract": "Where it is raining, snowing and storming across the United States, forecast every fifteen minutes for the next eighteen hours.\n\nThis is simulated radar — the same composite reflectivity picture a national radar mosaic shows, but run forward in time by the forecast model. Blue and green are light precipitation, yellow and orange are heavy rain, and red and pink are the cores of severe storms, where hail is likely. Clear air is left transparent.\n\nThe forecast begins fifteen minutes ahead of the model's start time and runs eighteen hours out. The further ahead it goes, the less the exact position of any individual storm should be trusted — the pattern is more reliable than the placement.\n\nSeventy-two fifteen-minute steps on the NOAA Rapid Refresh Forecast System's 3 km CONUS domain, refreshed every hour. Frames are data-encoded: the brightness of each pixel carries the measured value, so hovering reports reflectivity in dBZ rather than a colour.",
+  "categories": [
+    "Atmosphere",
+    "Weather"
+  ],
+  "keywords": [
+    "radar",
+    "reflectivity",
+    "precipitation",
+    "storms",
+    "severe weather",
+    "forecast",
+    "RRFS",
+    "CONUS",
+    "United States",
+    "NOAA"
+  ],
   "start_time": "{{data_start}}",
   "end_time": "{{data_end}}",
   "period": "PT15M",

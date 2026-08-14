@@ -1,11 +1,10 @@
 # RRFS composite radar reflectivity — CONUS, 15-minute (3 km)
 #
 # NEW dataset (not a revision). Built on RRFS v1.0's sub-hourly CONUS
-# product, `2dfld.3km.subh.fNNN.conus.grib2`.
+# product from the operational NODD bucket `noaa-rrfs-ops-pds` (the
+# prototype bucket `noaa-rrfs-pds` was retired 2026-08-11).
 #
-# Shape, and why it differs from the smoke pipelines beside it:
-#
-#   cadence      15-minute, 73 frames (t+0 .. t+18h)
+#   cadence      15-minute, 72 frames (t+15m .. t+18h)
 #   cycles       EVERY hour — subh is published at all 24 cycle hours,
 #                so this refreshes hourly rather than 4x a day
 #   outlook      18 h (subh runs f001..f018 only)
@@ -14,10 +13,18 @@
 #
 # Each subh file carries FOUR REFC records — the three 15-minute
 # sub-steps plus the on-the-hour instant — so f001..f018 alone yields
-# 72 frames from t+15m to t+18h. The analysis (t+0) is the one frame
-# that has to come from the hourly product.
+# all 72 frames with no second pass over the 4x larger hourly files.
 #
-# Why five convert-format stages: `pattern` selects one record per
+# NO ANALYSIS FRAME, deliberately. The t+0 instant lives only in the
+# hourly product, and that product runs on the 3-hourly cycles
+# (00/03/06/09/12/15/18/21z) rather than every hour — verified across
+# all 24 cycles of 2026-08-13, where f000.conus is present at 8 and
+# 404s at the other 16. Including it would fail this pipeline two
+# hours out of every three. The series therefore starts at t+15m; the
+# cost is 15 minutes of lead-in, against keeping the hourly refresh
+# that is the whole point of reading subh.
+#
+# Why four convert-format stages: `pattern` selects one record per
 # file and is a single stage-level arg, so each of the four slots
 # needs its own stage. The sub-step minutes are absolute from cycle
 # time (subh.f006 holds 315/330/345), not relative, so each pattern
@@ -36,27 +43,17 @@
 # users read fluently. Faint echo being dim on the dark globe is the
 # intended reading here, not a defect.
 #
-# One record is ~1.1 MB via .idx range-GET, so a full run moves ~80 MB.
+# LAG PT4H clears the measured envelope comfortably: subh completed
+# +1.79h to +2.37h after cycle time across synoptic and off-synoptic
+# cycles on 2026-08-14. One record is ~1.1 MB via .idx range-GET, so a
+# full run moves ~80 MB.
 #
 # NOTE: subh carries NO aerosol fields (no MASSDEN/COLMD/AOTK), which
 # is why the smoke pipelines cannot use it and this one cannot carry
 # smoke. AK also publishes a subh product if a second domain is ever
 # wanted; HI/PR publish theirs at 2.5 km.
 stages:
-  # 1. The analysis frame (t+0). It lives in the hourly product, not in
-  #    subh, and it is the radar-assimilated initial state — the closest
-  #    thing here to an observation rather than a forecast.
-  - stage: process
-    command: convert-format
-    args:
-      format: geotiff
-      pattern: 'REFC:entire atmosphere.*:anl'
-      output_dir: /work/tif
-      inputs:
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.f000.conus.grib2
-      output_names:
-        - "{{valid_compact:PT1H:PT4H}}.tif"
-  # 2. Every :15 sub-step (quarter past the hour), f001..f018.
+  # 1. Every :15 sub-step (quarter past the hour), f001..f018.
   #    `pattern` must select exactly ONE record per file, and each subh
   #    file holds four — so the minute is pinned explicitly. The values
   #    are absolute minutes from cycle time, which differ per file, so
@@ -68,24 +65,24 @@ stages:
       pattern: 'REFC:entire atmosphere.*:(15|75|135|195|255|315|375|435|495|555|615|675|735|795|855|915|975|1035) min fcst'
       output_dir: /work/tif
       inputs:
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f001.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f002.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f003.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f004.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f005.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f006.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f007.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f008.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f009.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f010.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f011.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f012.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f013.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f014.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f015.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f016.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f017.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f018.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f001.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f002.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f003.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f004.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f005.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f006.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f007.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f008.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f009.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f010.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f011.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f012.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f013.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f014.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f015.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f016.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f017.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f018.conus.grib2
       output_names:
         - "{{valid_compact:PT1H:PT4H:PT15M}}.tif"
         - "{{valid_compact:PT1H:PT4H:PT1H15M}}.tif"
@@ -105,7 +102,7 @@ stages:
         - "{{valid_compact:PT1H:PT4H:PT15H15M}}.tif"
         - "{{valid_compact:PT1H:PT4H:PT16H15M}}.tif"
         - "{{valid_compact:PT1H:PT4H:PT17H15M}}.tif"
-  # 3. Every :30 sub-step (half past the hour), f001..f018.
+  # 2. Every :30 sub-step (half past the hour), f001..f018.
   #    `pattern` must select exactly ONE record per file, and each subh
   #    file holds four — so the minute is pinned explicitly. The values
   #    are absolute minutes from cycle time, which differ per file, so
@@ -117,24 +114,24 @@ stages:
       pattern: 'REFC:entire atmosphere.*:(30|90|150|210|270|330|390|450|510|570|630|690|750|810|870|930|990|1050) min fcst'
       output_dir: /work/tif
       inputs:
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f001.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f002.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f003.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f004.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f005.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f006.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f007.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f008.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f009.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f010.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f011.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f012.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f013.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f014.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f015.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f016.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f017.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f018.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f001.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f002.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f003.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f004.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f005.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f006.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f007.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f008.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f009.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f010.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f011.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f012.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f013.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f014.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f015.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f016.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f017.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f018.conus.grib2
       output_names:
         - "{{valid_compact:PT1H:PT4H:PT30M}}.tif"
         - "{{valid_compact:PT1H:PT4H:PT1H30M}}.tif"
@@ -154,7 +151,7 @@ stages:
         - "{{valid_compact:PT1H:PT4H:PT15H30M}}.tif"
         - "{{valid_compact:PT1H:PT4H:PT16H30M}}.tif"
         - "{{valid_compact:PT1H:PT4H:PT17H30M}}.tif"
-  # 4. Every :45 sub-step (quarter to the hour), f001..f018.
+  # 3. Every :45 sub-step (quarter to the hour), f001..f018.
   #    `pattern` must select exactly ONE record per file, and each subh
   #    file holds four — so the minute is pinned explicitly. The values
   #    are absolute minutes from cycle time, which differ per file, so
@@ -166,24 +163,24 @@ stages:
       pattern: 'REFC:entire atmosphere.*:(45|105|165|225|285|345|405|465|525|585|645|705|765|825|885|945|1005|1065) min fcst'
       output_dir: /work/tif
       inputs:
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f001.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f002.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f003.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f004.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f005.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f006.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f007.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f008.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f009.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f010.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f011.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f012.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f013.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f014.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f015.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f016.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f017.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f018.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f001.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f002.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f003.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f004.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f005.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f006.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f007.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f008.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f009.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f010.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f011.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f012.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f013.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f014.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f015.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f016.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f017.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f018.conus.grib2
       output_names:
         - "{{valid_compact:PT1H:PT4H:PT45M}}.tif"
         - "{{valid_compact:PT1H:PT4H:PT1H45M}}.tif"
@@ -203,7 +200,7 @@ stages:
         - "{{valid_compact:PT1H:PT4H:PT15H45M}}.tif"
         - "{{valid_compact:PT1H:PT4H:PT16H45M}}.tif"
         - "{{valid_compact:PT1H:PT4H:PT17H45M}}.tif"
-  # 5. The on-the-hour instant, f001..f018 — also carried inside subh,
+  # 4. The on-the-hour instant, f001..f018 — also carried inside subh,
   #    so no second pass over the (4x larger) hourly files is needed.
   - stage: process
     command: convert-format
@@ -212,24 +209,24 @@ stages:
       pattern: 'REFC:entire atmosphere.*:[0-9]+ hour fcst'
       output_dir: /work/tif
       inputs:
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f001.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f002.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f003.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f004.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f005.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f006.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f007.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f008.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f009.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f010.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f011.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f012.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f013.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f014.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f015.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f016.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f017.conus.grib2
-        - https://noaa-rrfs-pds.s3.amazonaws.com/rrfs_public/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f018.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f001.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f002.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f003.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f004.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f005.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f006.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f007.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f008.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f009.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f010.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f011.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f012.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f013.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f014.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f015.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f016.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f017.conus.grib2
+        - https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{{cycle_date:PT1H:PT4H}}/{{cycle_hour:PT1H:PT4H}}/rrfs.t{{cycle_hour:PT1H:PT4H}}z.2dfld.3km.subh.f018.conus.grib2
       output_names:
         - "{{valid_compact:PT1H:PT4H:PT1H}}.tif"
         - "{{valid_compact:PT1H:PT4H:PT2H}}.tif"
@@ -249,14 +246,13 @@ stages:
         - "{{valid_compact:PT1H:PT4H:PT16H}}.tif"
         - "{{valid_compact:PT1H:PT4H:PT17H}}.tif"
         - "{{valid_compact:PT1H:PT4H:PT18H}}.tif"
-  # 6. Reproject the 3 km Lambert grid onto the same equirectangular
+  # 5. Reproject the 3 km Lambert grid onto the same equirectangular
   #    frame the CONUS smoke dataset uses — 2250x960 over the same
-  #    bounds, i.e. 30 px/deg square pixels.
+  #    bounds, i.e. 30 px/deg square pixels, so the two overlay exactly.
   - stage: process
     command: reproject
     args:
       inputs:
-        - /work/tif/{{valid_compact:PT1H:PT4H}}.tif
         - /work/tif/{{valid_compact:PT1H:PT4H:PT15M}}.tif
         - /work/tif/{{valid_compact:PT1H:PT4H:PT30M}}.tif
         - /work/tif/{{valid_compact:PT1H:PT4H:PT45M}}.tif
@@ -333,7 +329,7 @@ stages:
       dst_bounds: [-135, 21, -60, 53]
       width: 2250
       height: 960
-  # 7. Data-encoded render. vmin is the no-echo threshold, not a
+  # 6. Data-encoded render. vmin is the no-echo threshold, not a
   #    cosmetic floor: `lumaToValue` anchors the visible ramp at
   #    `dataMinLuma` (= ceil(transparent_range/256 * 255)), so
   #    everything below vmin falls in the transparent band and reads as
@@ -344,7 +340,6 @@ stages:
     command: heatmap
     args:
       inputs:
-        - /work/wrapped/{{valid_compact:PT1H:PT4H}}.tif
         - /work/wrapped/{{valid_compact:PT1H:PT4H:PT15M}}.tif
         - /work/wrapped/{{valid_compact:PT1H:PT4H:PT30M}}.tif
         - /work/wrapped/{{valid_compact:PT1H:PT4H:PT45M}}.tif
@@ -424,7 +419,7 @@ stages:
       cmap_inline: '{"type":"continuous","base":"turbo","transparent_range":12,"blend_range":16,"overall_alpha":0.95}'
       vmin: 5
       vmax: 75
-  # 8. 15-minute cadence.
+  # 7. 15-minute cadence.
   - stage: process
     command: scan-frames
     args:
