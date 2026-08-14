@@ -269,6 +269,28 @@ quoted so it survives YAML → JSON as a string and reaches argparse's
 `type=float` as `nan` (an unquoted YAML `nan` risks becoming JSON
 `null`).
 
+### The dataset bbox comes from `dst_bounds`, never from `bounds`
+
+The portal's Geography card takes four numbers (N / S / W / E, all
+required together, `n >= s`). They describe **where the published frames
+sit on the globe**, which is the reprojection *target*:
+
+| Dataset | `dst_bounds` (W, S, E, N) | Portal bbox |
+|---|---|---|
+| Both NA smoke rows | `[-175, 5, -20, 85]` | **N 85, S 5, W −175, E −20** |
+| CONUS smoke, CONUS radar | `[-135, 21, -60, 53]` | **N 53, S 21, W −135, E −60** |
+
+All three existing rows already carry exactly these, so nothing needs
+changing there — only the new radar row needs the CONUS box entered.
+
+**Do not put `bounds` in the bbox fields.** `bounds` is the *source*
+grid's extent in the rotated-pole CRS's own degree units, and its north
+and south are deliberately inverted. Read as geography, `[-61.05415,
+36.98445, 60.99995, -36.98445]` would place a North America dataset
+across the Atlantic and equatorial Africa, and would fail the `n >= s`
+check on the way in. The two arguments are unrelated coordinate systems
+that happen to share a unit name.
+
 ---
 
 ## `categories` cannot go in a metadata template
