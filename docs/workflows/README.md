@@ -21,7 +21,7 @@ checked against.
 
 ## Status
 
-**Ready to run; not yet run.** All six pipelines validate, and every
+**Ready to run; not yet run.** All seven pipelines validate, and every
 input URL, `.idx` sidecar and record pattern was verified against the
 live operational bucket at the *current* cycle on 2026-08-14 — details in
 [Verification](#verification). What has not happened is an end-to-end run
@@ -34,20 +34,22 @@ against a real runner.
 | `rrfs-smoke-column-conus.*` | `wildfire-smoke-forecast-transparent-united-states-rrfs` — "Wildfire Smoke Forecast (Transparent) — United States (RRFS)" | 85 × PT1H | 4×/day |
 | `rrfs-smoke-near-surface-conus.*` | **new** — "RRFS Smoke — Near-Surface, United States" | 85 × PT1H | 4×/day |
 | `rrfs-wildfire-potential-conus.*` | `wildfire-potential-hourly-forecast-united-states-rrfs` — "Wildfire Potential — Hourly Forecast, United States (RRFS)" | 85 × PT1H | 4×/day |
+| `rrfs-wildfire-potential-north-america.*` | **new** — "Wildfire Potential — Hourly Forecast, North America (RRFS)" | 85 × PT1H | 4×/day |
 | `rrfs-radar-reflectivity-conus.*` | **new** — see [Radar reflectivity](#radar-reflectivity-conus-15-minute) | 72 × PT15M | hourly |
 
-Four attach to dataset rows that already exist. The two marked **new**
+Four attach to dataset rows that already exist. The three marked **new**
 need rows created in the portal first.
 
-The four smoke pipelines form two matched pairs — whole-column and
-near-surface, on the NA and CONUS domains — so any domain can be read
-against the other quantity, and any quantity against the other domain.
+Six of the seven form matched NA/CONUS pairs — whole-column smoke,
+near-surface smoke, and wildfire potential — each pair sharing a `vmax`
+so the two domains can be read against each other. Radar is CONUS-only,
+because the sub-hourly product it needs has no NA domain.
 
 ---
 
 ## Source: `noaa-rrfs-ops-pds`
 
-All six read the operational NODD bucket:
+All seven read the operational NODD bucket:
 
 ```
 https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.YYYYMMDD/CC/rrfs.tCCz.<product>.f<FFF>.<domain>.grib2
@@ -113,7 +115,7 @@ subsets — not something a pipeline can recover.
 ### Cycle structure (three different answers, all load-bearing)
 
 RRFS v1.0 does not publish everything on the same schedule, and the
-six pipelines land in three different buckets of that schedule:
+seven pipelines land in three different buckets of that schedule:
 
 | Product | Cycles it runs on | Forecast length |
 |---|---|---|
@@ -123,8 +125,8 @@ six pipelines land in three different buckets of that schedule:
 
 Consequences:
 
-- The four smoke datasets and wildfire potential need `PT6H`, so they
-  refresh **4× a day** with the same 84-hour outlook as before.
+- The four smoke datasets and both wildfire-potential datasets need
+  `PT6H`, so they refresh **4× a day** with the same 84-hour outlook.
 - The radar dataset reads only `subh`, so it can refresh **hourly**.
 - The radar dataset **cannot include a t+0 analysis frame**: that instant
   lives only in the hourly product, which is missing two hours out of
@@ -139,7 +141,7 @@ cadence regardless of the dynamics sub-steps.
 
 ### Lag
 
-`PT5H` for the five hourly-product pipelines, `PT4H` for radar. Measured real-time
+`PT5H` for the six hourly-product pipelines, `PT4H` for radar. Measured real-time
 envelopes on 2026-08-14:
 
 | | first object | last object |
@@ -270,7 +272,7 @@ correlation is the trustworthy metric here.
 > workflow still in the node, since a vertical mirror in rotated space is
 > subtle enough to survive a glance at a thumbnail.
 
-`dst_nodata: 'nan'` is set on all six so the area outside a model's
+`dst_nodata: 'nan'` is set on all seven so the area outside a model's
 footprint reads as *absent* rather than as a measured zero — it is
 quoted so it survives YAML → JSON as a string and reaches argparse's
 `type=float` as `nan` (an unquoted YAML `nan` risks becoming JSON
@@ -284,11 +286,12 @@ sit on the globe**, which is the reprojection *target*:
 
 | Dataset | `dst_bounds` (W, S, E, N) | Portal bbox |
 |---|---|---|
-| Both NA smoke rows | `[-175, 5, -20, 85]` | **N 85, S 5, W −175, E −20** |
+| Both NA smoke rows, NA wildfire potential | `[-175, 5, -20, 85]` | **N 85, S 5, W −175, E −20** |
 | Both CONUS smoke rows, wildfire potential, CONUS radar | `[-135, 21, -60, 53]` | **N 53, S 21, W −135, E −60** |
 
 All four existing rows already carry exactly these, so nothing needs
-changing there — only the two new rows need the CONUS box entered.
+changing there. Of the three new rows, two take the CONUS box and NA
+wildfire potential takes the NA one.
 
 **Do not put `bounds` in the bbox fields.** `bounds` is the *source*
 grid's extent in the rotated-pole CRS's own degree units, and its north
@@ -361,6 +364,7 @@ expression — an interval between runs, bounded to PT15M–P90D.
 | `rrfs-smoke-column-conus` | `PT6H` | 4 |
 | `rrfs-smoke-near-surface-conus` | `PT6H` | 4 |
 | `rrfs-wildfire-potential-conus` | `PT6H` | 4 |
+| `rrfs-wildfire-potential-north-america` | `PT6H` | 4 |
 | `rrfs-radar-reflectivity-conus` | `PT1H` | 24 |
 
 Each matches its pipeline's cycle interval, so every run picks up a
@@ -415,6 +419,8 @@ migration. Sampled 2026-08-13 from `rrfs.20260811/18` f024:
 |---|---|---|---|---|
 | NA 13 km column smoke (kg m⁻²) | 1.11e-4 | 2.82e-4 | 1.74e-3 | 5e-4 |
 | NA 13 km near-surface smoke (kg m⁻³) | 4.18e-8 | 1.27e-7 | 3.54e-6 | 2e-7 |
+| NA 13 km wildfire potential (index) | 13.9–19.4 | 18.9–30.5 | 45.0 | 50 |
+| CONUS 3 km wildfire potential (index) | 15.4–21.2 | 20.6–23.1 | 45.0 | 50 |
 | CONUS 3 km column smoke (kg m⁻²) | 2.17e-4 | 6.19e-4 | 2.26e-3 | 5e-4 |
 | CONUS 3 km near-surface smoke (kg m⁻³) | 1.63e-8 | 1.12e-7 | 9.88e-7 | 2e-7 |
 
@@ -433,9 +439,12 @@ no longer matching the CONUS row's scale.
 `vmax = 120`, and the field does not come close: measured across four
 forecast hours of `rrfs.20260814/12`, the maximum runs 27–45 with p99.99
 at 21–23. 120 pushes everything real into the bottom quarter of the
-ramp — the dark-globe symptom. That pipeline therefore ships **`vmax =
-50`**, clearing the largest observed value with headroom while keeping
-the high end distinguishable rather than clipped. Unlike the smoke rows,
+ramp — the dark-globe symptom. Both potential pipelines therefore ship **`vmax = 50`**, clearing the
+largest observed value with headroom while keeping the high end
+distinguishable rather than clipped. The two domains track each other
+closely — f069 peaks at the same 44.95 in both, the same
+fire-favourable region seen through two grids — so one value serves
+both, as the smoke pairs do. Unlike the smoke rows,
 where the published value was generous but defensible, this one is
 simply wrong; reverting is a one-line change if continuity matters more.
 
@@ -515,7 +524,7 @@ HI and PR publish theirs at 2.5 km.
 Each pipeline was checked with the recipe in
 `.claude/skills/terraviz-data-video/references/verification.md`.
 
-Static, all six:
+Static, all seven:
 
 - `validatePipeline` + `validateMetadataTemplate` — OK
 - the rendered metadata sidecar plus `render_encoding` and a real
@@ -535,6 +544,7 @@ Live, against `noaa-rrfs-ops-pds` at the **current** cycle
 | CONUS column smoke | 85 | 85 | 0 | 85/85 | 0 of 85 | one gap, 3600 s |
 | CONUS near-surface smoke | 85 | 85 | 0 | 85/85 | 0 of 85 | one gap, 3600 s |
 | CONUS wildfire potential | 85 | 85 | 0 | 85/85 | 0 of 85 | one gap, 3600 s |
+| NA wildfire potential | 85 | 85 | 0 | 85/85 | 0 of 85 | one gap, 3600 s |
 | CONUS radar 15-min | 18 | 72 | 0 | 18/18 | 0 of 72 | one gap, 900 s |
 
 Frame names are unique in every case, and each series has exactly one
