@@ -342,6 +342,60 @@ pipelines emit is ~9.9–11.7 k chars against a `COLOR_SCALE_MAX_CHARS` of
 
 ---
 
+## Schedule (and why enable-time matters)
+
+The portal's **Schedule** field is an ISO-8601 *duration*, not a cron
+expression — an interval between runs, bounded to PT15M–P90D.
+
+| Workflow | Schedule | Runs/day |
+|---|---|---|
+| `rrfs-smoke-column-north-america` | `PT6H` | 4 |
+| `rrfs-smoke-near-surface-north-america` | `PT6H` | 4 |
+| `rrfs-smoke-column-conus` | `PT6H` | 4 |
+| `rrfs-radar-reflectivity-conus` | `PT1H` | 24 |
+
+Each matches its pipeline's cycle interval, so every run picks up a
+cycle the previous run did not — no repeated work, nothing skipped.
+
+### The `PT6H` ones must be enabled in the right half-hour
+
+There is no wall-clock anchor. `computeNextRunAt` sets the first due
+time to **now + interval** when you enable the workflow, and
+`advanceNextRunAt` then advances by whole periods from the stored due
+time — deliberately, so dispatch jitter stays per-run instead of
+ratcheting the phase around the clock. The consequence: **whatever
+moment you enable a `PT6H` workflow becomes its phase, permanently.**
+
+Those pipelines use `PT6H` cycles with a `PT5H` lag, so
+`{{cycle_date}}`/`{{cycle_hour}}` flip to a newly-available cycle at:
+
+```
+05:00   11:00   17:00   23:00   UTC
+```
+
+The first scheduled run happens one full interval after you enable, so
+to land runs just after each flip, **enable during 05:00–05:30,
+11:00–11:30, 17:00–17:30 or 23:00–23:30 UTC**. Every later run inherits
+that offset.
+
+Enable at, say, 04:00 UTC instead and the runs sit at 10:00 / 16:00 /
+22:00 / 04:00 — each an hour *before* the flip, so each one fetches the
+cycle before the one it could have had, forever. Not broken; the data is
+just up to six hours staler than necessary. The fix is to disable and
+re-enable inside one of the windows above.
+
+Use **Run now** for an immediate first publish rather than waiting out
+the first interval.
+
+`PT1H` on the radar workflow needs none of this care — its cycle
+interval is also an hour, so a new cycle is available at every flip and
+the phase cannot be wrong. If you would rather not time the enable on
+the smoke workflows, `PT1H` works there too and is always within an hour
+of the flip, but five runs in six then re-fetch, re-render and re-upload
+85 frames that did not change. Not recommended.
+
+---
+
 ## Calibration
 
 `vmin`/`vmax` for the smoke rows are **unchanged** from the published
