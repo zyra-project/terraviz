@@ -271,6 +271,55 @@ quoted so it survives YAML → JSON as a string and reaches argparse's
 
 ---
 
+## `categories` cannot go in a metadata template
+
+If a run reaches the publish step and dies with:
+
+```
+[zyra-run] FAIL: dataset PATCH → 400 http_error
+```
+
+…and the template sets `categories`, that is why. (`http_error` is the
+CLI's fallback when the envelope carries no top-level `error` code — the
+real per-field reason is in a `details` array it does not print, so the
+message is unhelpfully generic.)
+
+Two validators disagree about the shape, and no value satisfies both:
+
+| | Accepts | Source |
+|---|---|---|
+| `validateMetadataTemplate` (saving the workflow) | strings and **string arrays** only | `workflow-validators.ts` |
+| `validateDraftUpdate` (the dataset PATCH) | `categories` must be **an object** of facet→values; arrays are `invalid_type` | `validators.ts:601` |
+
+So a flat `["Atmosphere", "Air Quality"]` saves fine and then 400s at
+publish, and the correct `{"Atmosphere": ["Air Quality"]}` is rejected
+when the workflow is saved. `categories` is in
+`METADATA_TEMPLATE_ALLOWED_FIELDS`, but it is **not usable there**.
+
+**These templates therefore omit `categories` entirely.** That is not
+just a workaround — it is also the safer behaviour: the PATCH only
+touches categories `if (body.categories !== undefined)`, so omitting the
+field leaves whatever the dataset row already has intact instead of
+deleting and rewriting it on every run. Set categories once on the row
+in the portal, where the form can send the object shape.
+
+The house convention, for when you do: the **key is the theme and the
+values are sub-topics** — `{"Atmosphere": ["Air Quality", "Wildfire
+Smoke"]}`. The SPA renders `Object.keys(categories)` on browse cards, so
+the key is what a user sees.
+
+> Worth fixing upstream in this repo: either drop `categories` from
+> `METADATA_TEMPLATE_ALLOWED_FIELDS`, or teach the template validator to
+> accept an object for that one field. Leaving both as they are means the
+> field advertises support it does not have, and fails late — after a
+> full pipeline run — with a message that names no field.
+
+For the record, the colour scale is **not** implicated: the sidecar these
+pipelines emit is ~9.9–11.7 k chars against a `COLOR_SCALE_MAX_CHARS` of
+16,384.
+
+---
+
 ## Calibration
 
 `vmin`/`vmax` for the smoke rows are **unchanged** from the published

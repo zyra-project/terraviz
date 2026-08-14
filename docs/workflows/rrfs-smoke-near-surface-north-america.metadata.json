@@ -1,10 +1,6 @@
 {
   "title": "RRFS Smoke — Near-Surface, North America ({{run_date}})",
   "abstract": "Wildfire smoke at ground level across North America — the smoke down where people are.\n\nThis is how much smoke is in the air just above the surface, which is what drives hazy air, poor visibility and the smell of smoke on the wind. Bright areas mean a heavy plume has settled over that spot. Smoke often travels thousands of miles high in the atmosphere without ever reaching the ground, so this view is usually far patchier than the whole-column one — comparing the two shows which plumes are actually being breathed.\n\nAn 84-hour hourly outlook on the NOAA Rapid Refresh Forecast System's 13 km North America domain. Frames are data-encoded: the brightness of each pixel carries the measured value, so hovering reports the near-surface smoke concentration in kilograms per cubic metre rather than a colour.",
-  "categories": [
-    "Atmosphere",
-    "Air Quality"
-  ],
   "keywords": [
     "wildfire",
     "smoke",
