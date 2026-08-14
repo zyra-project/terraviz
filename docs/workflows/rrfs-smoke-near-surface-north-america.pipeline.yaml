@@ -314,7 +314,25 @@ stages:
         - /work/tif/{{valid_compact:PT6H:PT5H:PT83H}}.tif
         - /work/tif/{{valid_compact:PT6H:PT5H:PT84H}}.tif
       output_dir: /work/wrapped
+      # The 13 km NA grid is `rotated_ll`, and zyra's
+      # `_grib_georeference` handles only regular_ll and lambert — so the
+      # GeoTIFF from stage 1 carries NO crs and an identity transform
+      # (it emits rasterio's NotGeoreferencedWarning). Without `s_srs`
+      # this stage hard-fails: "source raster has no embedded CRS".
+      s_srs: '+proj=ob_tran +o_proj=longlat +o_lat_p=35 +o_lon_p=0 +lon_0=247
+        +R=6371229 +to_meter=0.0174532925199433 +no_defs'
+      # NORTH AND SOUTH ARE SWAPPED ON PURPOSE. Do not "fix" this.
+      # The GRIB scans south-first (jScansPositively=1). The georeferenced
+      # path in convert-format flips rows to north-up; the ungeoreferenced
+      # fallback this grid takes does NOT, so the array reaches us upside
+      # down. Passing north as `south` makes rasterio's from_bounds emit a
+      # positive y-step transform, which un-mirrors it. Measured against
+      # the GRIB's own latitudes/longitudes: normal order puts the field's
+      # maximum 2708 km from truth, this order puts it 1.6 km away — inside
+      # one 13 km cell. Edges are grid-point centres +/- d/2, d=0.1083.
+      bounds: [-61.05415, 36.98445, 60.99995, -36.98445]
       dst_bounds: [-175, 5, -20, 85]
+      dst_nodata: 'nan'
       width: 4030
       height: 2080
   # 3. Render data-encoded frames: pixel luma IS the value. Needs

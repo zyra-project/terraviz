@@ -324,6 +324,7 @@ stages:
         - /work/tif/{{valid_compact:PT6H:PT5H:PT84H}}.tif
       output_dir: /work/wrapped
       dst_bounds: [-135, 21, -60, 53]
+      dst_nodata: 'nan'
       width: 2250
       height: 960
   # 3. Render data-encoded frames: pixel luma IS the value. Needs

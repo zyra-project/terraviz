@@ -191,6 +191,86 @@ blocker is naming, not volume.
 
 ---
 
+## The rotated NA grid needs `s_srs` and inverted `bounds`
+
+If a run logs this, it is **not cosmetic**:
+
+```
+rasterio/__init__.py: NotGeoreferencedWarning: The given matrix is equal to
+Affine.identity or its flipped counterpart.
+```
+
+It means `convert-format` wrote a GeoTIFF with **no CRS and an identity
+transform**, and for the NA pipelines the next stage then fails outright:
+
+```
+ReprojectError: source raster has no embedded CRS; pass --s-srs (and --bounds for plain images)
+```
+
+**Cause.** zyra's `_grib_georeference` (`processing/grib_utils.py`)
+derives a CRS and transform from the GRIB metadata for exactly two grid
+types — `regular_ll` and `lambert` — and returns `None` for anything
+else. The NA 13 km product is **`rotated_ll`** (rotated pole at 35°N /
+247°E), which nothing in zyra handles; there is no `rotated` anywhere in
+the source. It falls through to a rioxarray path that writes no
+georeferencing at all.
+
+CONUS is `lambert`, so both CONUS pipelines take the supported path and
+need none of this.
+
+**Fix, entirely inside the pipeline.** The NA reproject stage carries:
+
+```yaml
+s_srs: '+proj=ob_tran +o_proj=longlat +o_lat_p=35 +o_lon_p=0 +lon_0=247
+  +R=6371229 +to_meter=0.0174532925199433 +no_defs'
+bounds: [-61.05415, 36.98445, 60.99995, -36.98445]
+```
+
+The projection string matches the GRIB exactly: southern pole
+(−35.0, 247.0) → `o_lat_p=35`, `lon_0=247`, sphere `R=6371229`
+(`shapeOfTheEarth=6`), `to_meter` converting the grid's degree units.
+
+**`bounds` has north and south deliberately swapped.** The GRIB scans
+south-first (`jScansPositively=1`). The *georeferenced* path in
+`convert-format` normalizes that to north-up; the ungeoreferenced
+fallback this grid takes does **not**, so the array arrives upside down
+and `bounds` is the only lever left. Passing north in the `south` slot
+makes rasterio's `from_bounds` emit a positive y-step transform, which
+un-mirrors it. The edges are grid-point centres ± d/2 with d = 0.1083°
+— note these are the **13 km** grid's own extent, not the retired 3 km
+grid's `±61.0125 / ±37.0125`.
+
+**Verified against the GRIB's own `latitudes`/`longitudes` arrays**, by
+reprojecting a real record and comparing:
+
+| | argmax offset | corr(source, reprojected) | control¹ |
+|---|---|---|---|
+| NA 13 km smoke, normal `bounds` | **2708 km** | — | — |
+| NA 13 km smoke, swapped `bounds` | 1.6 km | 0.998 | 0.923 |
+| CONUS 3 km smoke (lambert) | 1.2 km | — | — |
+| CONUS `subh` REFC (lambert) | 99.7 km² | 0.979 | 0.572 |
+
+¹ correlation if the source is deliberately sampled 0.5° off — the
+number a genuinely misregistered raster would score.
+² argmax instability, not misregistration: reflectivity is spiky with
+many near-ties, so the single hottest pixel moves under resampling. The
+correlation is the trustworthy metric here.
+
+> The same trap applies to the retired 3 km NA grid, which also scanned
+> south-first. A reproject stage using `bounds: [-61.0125, -37.0125,
+> 61.0125, 37.0125]` in normal order puts that grid's maximum **1123 km**
+> from truth under zyra v0.1.52 — worth checking against any older NA
+> workflow still in the node, since a vertical mirror in rotated space is
+> subtle enough to survive a glance at a thumbnail.
+
+`dst_nodata: 'nan'` is set on all four so the area outside a model's
+footprint reads as *absent* rather than as a measured zero — it is
+quoted so it survives YAML → JSON as a string and reaches argparse's
+`type=float` as `nan` (an unquoted YAML `nan` risks becoming JSON
+`null`).
+
+---
+
 ## Calibration
 
 `vmin`/`vmax` for the smoke rows are **unchanged** from the published

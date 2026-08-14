@@ -327,6 +327,7 @@ stages:
         - /work/tif/{{valid_compact:PT1H:PT4H:PT18H}}.tif
       output_dir: /work/wrapped
       dst_bounds: [-135, 21, -60, 53]
+      dst_nodata: 'nan'
       width: 2250
       height: 960
   # 6. Data-encoded render. vmin is the no-echo threshold, not a
