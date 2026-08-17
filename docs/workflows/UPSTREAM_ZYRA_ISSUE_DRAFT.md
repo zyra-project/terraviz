@@ -7,7 +7,7 @@ Delete this file once the issue is opened, and replace the reference in
 
 > **The urgency is gone.** This was drafted while the only live RRFS
 > source was NOMADS. NOAA has since published the operational bucket
-> `noaa-rrfs-ops-pds`, which carries `.idx` sidecars, and all four
+> `noaa-rrfs-ops-pds`, which carries `.idx` sidecars, and all the
 > pipelines now read it — so nothing here is blocked on this issue any
 > more. The underlying gap is still real (any origin serving GRIB2
 > without a sidecar strands a pipeline the same way, and the `--var`
@@ -17,7 +17,21 @@ Delete this file once the issue is opened, and replace the reference in
 > If it is filed, the "Motivating case" section below should be recast
 > in the past tense and note that a sidecar-bearing bucket resolved it —
 > a maintainer will reasonably ask whether the reporter still needs
-> anything, and the honest answer is that we do not, today.
+> anything, and the honest answer is that we do not, today. Narrowing it
+> to just the `extract_variable` silent-wrong-field behaviour, and
+> dropping the `.idx` framing entirely, would make a stronger and more
+> honest report.
+
+> **This is not the georeferencing issue.** A second, unrelated gap is
+> drafted at
+> [`UPSTREAM_ZYRA_ISSUE_GEOREF_DRAFT.md`](UPSTREAM_ZYRA_ISSUE_GEOREF_DRAFT.md):
+> `_grib_georeference` covers only two of the four grid types NCEP
+> publishes. That one is **actively blocking** — Hawaii and Puerto Rico
+> cannot be built at all — and carries a verified fix. The two concern
+> different functions and different symptoms (*which record* versus
+> *where it is on Earth*) and should be filed separately; merging them
+> would hand a maintainer two unrelated changes in one thread. If only
+> one gets filed, file that one.
 
 Suggested title:
 

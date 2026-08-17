@@ -196,7 +196,9 @@ blocker is naming, not volume.
 > without a sidecar strands a pipeline the same way. An issue is drafted
 > at [`UPSTREAM_ZYRA_ISSUE_DRAFT.md`](UPSTREAM_ZYRA_ISSUE_DRAFT.md) and
 > **not filed**. The operational bucket removes the urgency, so filing is
-> now a judgement call rather than a blocker.
+> now a judgement call rather than a blocker — and it is a *separate*
+> concern from the georeferencing gap below, which is the one actually
+> blocking work.
 
 ---
 
@@ -437,6 +439,12 @@ No pipeline-level argument fixes this. `s_srs` and `bounds` are
 `convert-format`.
 
 **The upstream fix is small, and was verified rather than assumed.**
+An issue is drafted at
+[`UPSTREAM_ZYRA_ISSUE_GEOREF_DRAFT.md`](UPSTREAM_ZYRA_ISSUE_GEOREF_DRAFT.md)
+and **not filed**. It is deliberately separate from the `.idx` draft:
+that one is about *which record* gets selected, this one about *where it
+lands on Earth* — different functions, different symptoms, and only this
+one is currently blocking.
 Reshaping the 1-D array to `(Nj, Ni)`, flipping for `jScansPositively`,
 and attaching a Mercator CRS built from `LaDInDegrees` — the same shape
 of work the `lambert` branch already does — reprojects Hawaii correctly:
