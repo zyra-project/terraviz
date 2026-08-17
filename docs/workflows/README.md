@@ -407,6 +407,46 @@ the smoke workflows, `PT1H` works there too and is always within an hour
 of the flip, but five runs in six then re-fetch, re-render and re-upload
 85 frames that did not change. Not recommended.
 
+### Which domains are buildable at all
+
+The georeferencing gap above is not only about NA. `_grib_georeference`
+handles two grid types, and RRFS publishes four, so what a domain needs —
+or whether it can be done at all — depends on its projection. Measured
+against zyra v0.1.52 on `rrfs.20260814/12`:
+
+| Domain | `gridType` | cfgrib dims | `convert-format geotiff` | Status |
+|---|---|---|---|---|
+| CONUS 3 km | `lambert` | `(y, x)` | georeferenced | **works natively** |
+| NA 13 km | `rotated_ll` | `(y, x)` | identity, no CRS | **works** with `s_srs` + inverted `bounds` |
+| AK 3 km | `polar_stereographic` | `(y, x)` | identity, no CRS | **should work** the same way — untested end to end |
+| HI 2.5 km | `mercator` | **`(values,)`** | **raises** | **blocked** |
+| PR 2.5 km | `mercator` | **`(values,)`** | **raises** | **blocked** |
+
+Hawaii and Puerto Rico fail earlier and harder than NA did. cfgrib does
+not recognise these Mercator grids as 2-D, so it flattens them to a
+single `values` dimension; rioxarray then cannot build a raster from a
+1-D array and throws `MissingSpatialDimensionError`, which zyra
+re-raises as:
+
+```
+ValueError: GeoTIFF conversion requires rioxarray/rasterio and georeferencing
+```
+
+No pipeline-level argument fixes this. `s_srs` and `bounds` are
+*reproject*-stage arguments, and the run dies one stage earlier in
+`convert-format`.
+
+**The upstream fix is small, and was verified rather than assumed.**
+Reshaping the 1-D array to `(Nj, Ni)`, flipping for `jScansPositively`,
+and attaching a Mercator CRS built from `LaDInDegrees` — the same shape
+of work the `lambert` branch already does — reprojects Hawaii correctly:
+correlation **0.986** against the GRIB's own coordinate arrays, where a
+deliberate half-degree sampling offset scores 0.224. Two additions to
+`_grib_georeference` (a `mercator` branch, and a reshape when cfgrib
+returns 1-D) would unlock HI and PR, and adding `rotated_ll` and
+`polar_stereographic` there too would retire the `s_srs` workaround the
+NA pipelines currently carry.
+
 ---
 
 ## Calibration
