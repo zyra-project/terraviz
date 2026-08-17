@@ -14,6 +14,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { DataService } from './dataService'
 
 const ORIGINAL_SOURCE = import.meta.env.VITE_CATALOG_SOURCE
+const ORIGINAL_SAMPLE_TOURS = import.meta.env.VITE_SAMPLE_TOURS
 
 function mockNodeCatalog(datasets: unknown[], tours: unknown[] = []) {
   return vi.fn(async (input: RequestInfo | URL | string) => {
@@ -44,6 +45,12 @@ describe('DataService — node-mode', () => {
       delete (import.meta.env as Record<string, string>).VITE_CATALOG_SOURCE
     } else {
       ;(import.meta.env as Record<string, string>).VITE_CATALOG_SOURCE = ORIGINAL_SOURCE
+    }
+    if (ORIGINAL_SAMPLE_TOURS === undefined) {
+      delete (import.meta.env as Record<string, string>).VITE_SAMPLE_TOURS
+    } else {
+      ;(import.meta.env as Record<string, string>).VITE_SAMPLE_TOURS =
+        ORIGINAL_SAMPLE_TOURS
     }
     vi.unstubAllGlobals()
   })
@@ -94,6 +101,47 @@ describe('DataService — node-mode', () => {
     const ids = datasets.map(d => d.id)
     expect(ids).toContain('SAMPLE_TOUR')
     expect(ids).toContain('SAMPLE_TOUR_CLIMATE_FUTURES')
+  })
+
+  it('omits the sample tours when VITE_SAMPLE_TOURS=false', async () => {
+    ;(import.meta.env as Record<string, string>).VITE_SAMPLE_TOURS = 'false'
+    vi.stubGlobal('fetch', mockNodeCatalog([]))
+    const svc = new DataService()
+    const datasets = await svc.fetchDatasets()
+    // A downstream node with nothing published shows nothing — no
+    // tour card pointing at SOS handles it never held.
+    expect(datasets).toEqual([])
+  })
+
+  it('keeps the node’s own published tours when VITE_SAMPLE_TOURS=false', async () => {
+    ;(import.meta.env as Record<string, string>).VITE_SAMPLE_TOURS = 'false'
+    vi.stubGlobal(
+      'fetch',
+      mockNodeCatalog(
+        [],
+        [
+          {
+            id: '01HXPUB000000000000000002',
+            slug: 'local-tour',
+            title: 'Our Own Tour',
+            description: null,
+            tour_json_url: 'https://r2.example.com/tours/01HX/published/01HZ.json',
+            thumbnail_url: null,
+            visibility: 'public',
+            schema_version: 1,
+            created_at: '2026-05-01T00:00:00.000Z',
+            updated_at: '2026-05-01T00:00:00.000Z',
+            published_at: '2026-05-01T00:00:00.000Z',
+            origin_node: 'NODE000',
+          },
+        ],
+      ),
+    )
+    const svc = new DataService()
+    const ids = (await svc.fetchDatasets()).map(d => d.id)
+    // The flag drops the two bundled samples only. It is not the
+    // `tours` node-feature toggle, which gates every tour.
+    expect(ids).toEqual(['01HXPUB000000000000000002'])
   })
 
   it('merges publisher tours from /api/v1/tours into the dataset list', async () => {

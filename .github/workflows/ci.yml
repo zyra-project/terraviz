@@ -148,6 +148,14 @@ jobs:
           # falls through to 1.0, so non-production builds boot at
           # the universal default.
           VITE_DEFAULT_UI_SCALE: ${{ vars.VITE_DEFAULT_UI_SCALE }}
+          # A fork whose node never held the legacy SOS datasets sets
+          # this Variable to 'false' to drop the two bundled sample
+          # tours. Unset evaluates to '' — which is not 'false' — so
+          # this deployment keeps them, and a fork flips it from
+          # Settings without editing this file. The passthrough has to
+          # exist either way: Vite only sees variables named here, so
+          # setting the Variable alone would do nothing.
+          VITE_SAMPLE_TOURS: ${{ vars.VITE_SAMPLE_TOURS }}
       - uses: actions/upload-artifact@v4
         with:
           name: dist
@@ -196,6 +204,7 @@ jobs:
           # the production-environment Variables (1.5 for the SOS
           # deploy, '' / 1.0 for preview).
           VITE_DEFAULT_UI_SCALE: ${{ vars.VITE_DEFAULT_UI_SCALE }}
+          VITE_SAMPLE_TOURS: ${{ vars.VITE_SAMPLE_TOURS }}
       # Apply pending CATALOG_DB migrations to the REMOTE before the new
       # Functions go live, so additive schema (new tables/columns) is
       # present when the new code lands. `wrangler d1 migrations apply`

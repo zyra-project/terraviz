@@ -7,13 +7,15 @@
 <style>
   body { background:#111; color:#eee; font:13px/1.5 ui-monospace,Menlo,monospace; margin:0; padding:1rem; }
   h1 { font-size:1rem; margin:0 0 .5rem; }
+  h2 { font-size:.9rem; margin:1.25rem 0 .25rem; color:#9cf; }
   p { color:#9aa; max-width:60ch; }
-  button { font:inherit; padding:.5rem 1rem; margin:.25rem 0; cursor:pointer; }
-  table { border-collapse:collapse; margin-top:1rem; font-size:12px; }
+  button { font:inherit; padding:.5rem 1rem; margin:.25rem .25rem .25rem 0; cursor:pointer; }
+  table { border-collapse:collapse; margin-top:.5rem; font-size:12px; }
   th,td { border:1px solid #333; padding:.25rem .5rem; text-align:right; }
   th:first-child, td:first-child { text-align:left; }
-  .pass { color:#5f5; } .fail { color:#f66; }
+  .pass { color:#5f5; } .fail { color:#f66; } .warn { color:#fc6; } .muted { color:#777; }
   video,canvas { display:none; }
+  pre { background:#000; color:#8f8; padding:.5rem; overflow-x:auto; font-size:11px; }
 </style>
 </head>
 <body>
@@ -30,24 +32,247 @@ diagnostics: Safari on macOS and iOS transforms every one of them identically
 &mdash; endpoints preserved, up to 11 codes of error in between &mdash; which is why
 the probe no longer reads that way. Expect them to fail on Safari; that is the
 finding, not a regression.</p>
+<p><strong>H_ceiling_8k is the Phase 0 probe</strong>
+(<code>docs/DATA_ENCODED_RESOLUTION_PLAN.md</code>). Same encoder settings as
+<code>G</code>, at 8192&times;4096. Its capability row &mdash; decodes, <code>readyState</code>,
+decoded size, <code>MAX_TEXTURE_SIZE</code>, <code>texImage2D</code>, and whether a known
+texel survives &mdash; is the record that plan gates on. A failure there is a
+result to write down for this device, not a bug.</p>
+<p>The <code>native</code> column is the one that cannot be faked. A device that
+decodes the frame but quietly halves it would keep every ramp band intact and
+report good values that were never measured. The frame carries isolated
+single-texel spikes for that reason: they read ~252 at full resolution and
+collapse to ~63 through a 2&times; downscale.</p>
 <button id="run">Run check</button>
+<button id="copy" hidden>Copy results</button>
+<button id="copy-cap" hidden title="Just the Phase 0 capability block — use this if the full report gets truncated on its way off the device">Copy Phase 0 only</button>
 <div id="out"></div>
 
 <video id="v" muted playsinline preload="auto" crossorigin="anonymous"></video>
-<canvas id="cgl" width="4096" height="256"></canvas>
+<!-- Deliberately small and fixed. This used to be sized to the frame, which
+     at 8192x4096 is a ~134 MB drawing buffer and is refused by several of the
+     mobile browsers Phase 0 exists to measure — turning a canvas limit into
+     what would look like a decode failure. The shader now addresses source
+     texels directly (texelFetch) and writes one output pixel per sample, so
+     the texture is still uploaded at full size — which is the part under
+     test — while the render target stays trivial. -->
+<canvas id="cgl" width="256" height="3"></canvas>
 
 <script>
-const BAND_W = 16, W = 4096, H = 256, SAMPLE_Y = 128
+// One output pixel per sample. 256 columns covers the 256 ramp bands and
+// every spike column the 8K frame carries (8192 / 64 = 128).
+const COLS = 256
+const ROW_BAND = 0, ROW_SPIKE = 1, ROW_BG = 2
 
-async function probe(src) {
+// A spike reads ~252 at native resolution and ~63 through a 2x box
+// downscale — measured on the encoder side, not assumed. Anything above
+// this threshold is nowhere near a resampled frame.
+const SPIKE_NATIVE_MIN = 200
+// …and the background between spikes must still be black, otherwise we
+// are not looking at the spike pattern at all and the reading above
+// means nothing.
+const SPIKE_BG_MAX = 16
+
+// The full-blit readout is a diagnostic, and a 2D canvas at 8192x4096 is
+// ~134 MB. Skipping it past this size keeps an out-of-memory failure from
+// being read as a decoder result.
+const FULL_BLIT_MAX_TEXELS = 16 * 1024 * 1024
+
+// A media element that can neither decode nor reject leaves the probe
+// awaiting an event that never arrives. Firefox on Windows does exactly
+// this on the 8K rung: no `loadeddata`, no `error`, no `seeked`. Both
+// waits are therefore bounded.
+//
+// A timeout is recorded as its own outcome rather than folded into
+// "failed". A clean `MediaError` (iOS Safari) and a silent stall
+// (Firefox) are different device behaviours — one is a decoder
+// declining, the other is a decoder that accepted the stream and got
+// stuck — and a matrix that cannot tell them apart loses the
+// distinction that would decide whether a fallback can even be
+// triggered.
+//
+// Generous on purpose: an 8K software decode on a slow machine is
+// legitimately slow, and a timeout that fires on a working device
+// records a false negative in a matrix meant to outlive the session
+// that produced it.
+const LOAD_TIMEOUT_MS = 30000
+const SEEK_TIMEOUT_MS = 30000
+
+function withTimeout(promise, ms, what) {
+  let timer
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    new Promise((_, rej) => {
+      timer = setTimeout(
+        () => rej(new Error(what + ' timed out after ' + (ms / 1000)
+          + 's — the element never fired an event, success or error')), ms)
+    }),
+  ])
+}
+
+/** `MAX_TEXTURE_SIZE` and the renderer string, readable without a video.
+ *
+ *  These used to be filled in by `renderSamples`, which only runs after a
+ *  successful decode — so precisely the rows where they matter most, a
+ *  refusal or a stall, reported neither. §The probe argues a context
+ *  capped below the frame width settles the question *before* anything
+ *  decodes; that argument needs the number present on a failed row.
+ *  Cached, because a second `getContext` on the same canvas returns the
+ *  same context anyway. */
+let glCapsCache
+function glCapabilities() {
+  if (glCapsCache !== undefined) return glCapsCache
+  const gl = gl2()
+  if (!gl) { glCapsCache = {}; return glCapsCache }
+  const ext = gl.getExtension('WEBGL_debug_renderer_info')
+  glCapsCache = {
+    maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE),
+    glRenderer: ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
+  }
+  return glCapsCache
+}
+
+let glCtx
+function gl2() {
+  if (glCtx === undefined) {
+    glCtx = document.getElementById('cgl')
+      .getContext('webgl2', { preserveDrawingBuffer: true, antialias: false })
+  }
+  return glCtx
+}
+
+const VS = `#version 300 es
+in vec2 p; void main(){ gl_Position = vec4(p, 0., 1.); }`
+
+// texelFetch rather than a normalised sample: it addresses the source
+// texel by integer coordinate, so there is no filtering, no flip
+// convention and no rounding between "the texel we encoded" and "the
+// texel we read". Row 0 samples the ramp, row 1 the spikes, row 2 the
+// background midway between two spikes.
+const FS = `#version 300 es
+precision highp float; precision highp int;
+uniform highp sampler2D t;
+uniform int uBandW, uBandRow, uSpikeStep, uSpikeRow, uTexW, uTexH;
+out vec4 o;
+void main() {
+  int i = int(gl_FragCoord.x);
+  int row = int(gl_FragCoord.y);
+  ivec2 c;
+  if (row == 0)      c = ivec2(i * uBandW + uBandW / 2, uBandRow);
+  else if (row == 1) c = ivec2(uSpikeStep / 2 + i * uSpikeStep, uSpikeRow);
+  else               c = ivec2(uSpikeStep + i * uSpikeStep, uSpikeRow);
+  c = clamp(c, ivec2(0), ivec2(uTexW - 1, uTexH - 1));
+  o = vec4(texelFetch(t, c, 0).rgb, 1.);
+}`
+
+function buildProgram(gl) {
+  const mk = (type, src) => {
+    const sh = gl.createShader(type)
+    gl.shaderSource(sh, src); gl.compileShader(sh)
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh))
+    return sh
+  }
+  const prog = gl.createProgram()
+  gl.attachShader(prog, mk(gl.VERTEX_SHADER, VS))
+  gl.attachShader(prog, mk(gl.FRAGMENT_SHADER, FS))
+  gl.linkProgram(prog)
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog))
+  gl.useProgram(prog)
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer())
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW)
+  const loc = gl.getAttribLocation(prog, 'p')
+  gl.enableVertexAttribArray(loc)
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0)
+  return prog
+}
+
+/** Upload the current video frame and read every sample back in one pass. */
+function renderSamples(v, g, cap) {
+  const gl = gl2()
+  if (!gl) { cap.texUpload = 'no webgl2'; return null }
+  cap.maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE)
+  const ext = gl.getExtension('WEBGL_debug_renderer_info')
+  cap.glRenderer = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)
+
+  // A context that cannot hold the frame settles Phase 0 for this device
+  // without decoding anything, so say so plainly instead of letting
+  // texImage2D fail with a generic error.
+  if (cap.maxTextureSize < g.width || cap.maxTextureSize < g.height) {
+    cap.texUpload = 'MAX_TEXTURE_SIZE ' + cap.maxTextureSize + ' < frame'
+    return null
+  }
+
+  let prog
+  try { prog = buildProgram(gl) } catch (e) { cap.texUpload = 'shader: ' + (e.message || e); return null }
+
+  gl.bindTexture(gl.TEXTURE_2D, gl.createTexture())
+  gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE)
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+
+  while (gl.getError() !== gl.NO_ERROR) { /* drain anything stale */ }
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, v)
+  const err = gl.getError()
+  cap.texUpload = err === gl.NO_ERROR ? 'ok' : ('gl 0x' + err.toString(16))
+  if (err !== gl.NO_ERROR) return null
+
+  const u = n => gl.getUniformLocation(prog, n)
+  gl.uniform1i(u('uBandW'), g.bandWidth)
+  gl.uniform1i(u('uBandRow'), g.bandSampleY)
+  gl.uniform1i(u('uSpikeStep'), g.spikeStep)
+  gl.uniform1i(u('uSpikeRow'), g.spikeStep ? g.spikeTop + g.spikeStep / 2 : 0)
+  // The *decoded* size, not the expected one: if the device handed back a
+  // smaller frame we must clamp to what actually exists, and the spike
+  // amplitude is what reports the discrepancy.
+  gl.uniform1i(u('uTexW'), v.videoWidth)
+  gl.uniform1i(u('uTexH'), v.videoHeight)
+
+  gl.viewport(0, 0, COLS, 3)
+  gl.drawArrays(gl.TRIANGLES, 0, 3)
+  const buf = new Uint8Array(COLS * 3 * 4)
+  gl.readPixels(0, 0, COLS, 3, gl.RGBA, gl.UNSIGNED_BYTE, buf)
+  return (row, i) => buf[((row * COLS) + i) * 4]
+}
+
+async function probe(g) {
   const v = document.getElementById('v')
-  v.src = src
-  await new Promise((res, rej) => {
-    v.onloadeddata = res
-    v.onerror = () => rej(new Error('load failed (code ' + (v.error && v.error.code) + ') — no H.264 decoder?'))
-  })
-  await new Promise(res => { v.onseeked = res; v.currentTime = 0.2 })
-  const result = { videoWidth: v.videoWidth, videoHeight: v.videoHeight }
+  const cap = {
+    name: g.name, expectedWidth: g.width, expectedHeight: g.height, decoded: false,
+    // Seeded up front so a refusal or a stall still carries them.
+    ...glCapabilities(),
+  }
+  const result = { cap }
+
+  v.src = './out/' + g.name + '.mp4'
+  try {
+    await withTimeout(new Promise((res, rej) => {
+      v.onloadeddata = res
+      v.onerror = () => rej(new Error('load failed (code ' + (v.error && v.error.code)
+        + ') — no H.264 decoder at ' + g.width + 'x' + g.height + '?'))
+    }), LOAD_TIMEOUT_MS, 'decode of ' + g.width + 'x' + g.height)
+    await withTimeout(
+      new Promise(res => { v.onseeked = res; v.currentTime = 0.2 }),
+      SEEK_TIMEOUT_MS, 'seek of ' + g.width + 'x' + g.height)
+  } catch (e) {
+    // Detach and abort before giving up. A load left pending can fire
+    // its event later, and since each wait installs its handler on the
+    // same shared element, a late `loadeddata` from this variant would
+    // resolve the *next* variant's wait and report one variant's frame
+    // under another's name.
+    v.onloadeddata = null; v.onerror = null; v.onseeked = null
+    v.removeAttribute('src'); v.load()
+    throw e
+  }
+
+  cap.decoded = true
+  cap.readyState = v.readyState
+  cap.videoWidth = v.videoWidth
+  cap.videoHeight = v.videoHeight
+
+  const bandX = i => i * g.bandWidth + Math.floor(g.bandWidth / 2)
 
   // Readout path: the exact 1x1 drawImage the design prescribes for hover.
   {
@@ -55,7 +280,7 @@ async function probe(src) {
     const ctx = c.getContext('2d', { willReadFrequently: true })
     const vals = []
     for (let i = 0; i < 256; i++) {
-      ctx.drawImage(v, i * BAND_W + BAND_W / 2, SAMPLE_Y, 1, 1, 0, 0, 1, 1)
+      ctx.drawImage(v, bandX(i), g.bandSampleY, 1, 1, 0, 0, 1, 1)
       vals.push(ctx.getImageData(0, 0, 1, 1).data[0])
     }
     result.readout = vals
@@ -75,7 +300,7 @@ async function probe(src) {
       const ctx = c.getContext('2d', { willReadFrequently: true, colorSpace: 'srgb' })
       const vals = []
       for (let i = 0; i < 256; i++) {
-        ctx.drawImage(v, i * BAND_W + BAND_W / 2, SAMPLE_Y, 1, 1, 0, 0, 1, 1)
+        ctx.drawImage(v, bandX(i), g.bandSampleY, 1, 1, 0, 0, 1, 1)
         vals.push(ctx.getImageData(0, 0, 1, 1, { colorSpace: 'srgb' }).data[0])
       }
       result.readoutSrgb = vals
@@ -84,7 +309,9 @@ async function probe(src) {
 
   // Is it the per-texel 1x1 draw, or any draw at all? One full-size blit,
   // then read every sample out of a single ImageData.
-  {
+  if (v.videoWidth * v.videoHeight > FULL_BLIT_MAX_TEXELS) {
+    result.readoutFullError = 'skipped — frame too large for a 2D canvas'
+  } else {
     try {
       const c = document.createElement('canvas')
       c.width = v.videoWidth; c.height = v.videoHeight
@@ -92,49 +319,32 @@ async function probe(src) {
       ctx.drawImage(v, 0, 0)
       const img = ctx.getImageData(0, 0, c.width, c.height)
       const vals = []
-      for (let i = 0; i < 256; i++) {
-        const x = i * BAND_W + BAND_W / 2
-        vals.push(img.data[(SAMPLE_Y * c.width + x) * 4])
-      }
+      for (let i = 0; i < 256; i++) vals.push(img.data[(g.bandSampleY * c.width + bandX(i)) * 4])
       result.readoutFull = vals
     } catch (e) { result.readoutFullError = String(e.message || e) }
   }
 
   // Render path: upload the video to a texture and read it back.
-  {
-    const gl = document.getElementById('cgl').getContext('webgl2', { preserveDrawingBuffer: true, antialias: false })
-    if (!gl) { result.renderError = 'no webgl2'; return result }
-    gl.bindTexture(gl.TEXTURE_2D, gl.createTexture())
-    gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE)
-    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false)
-    for (const [k, val] of [['TEXTURE_MIN_FILTER','NEAREST'],['TEXTURE_MAG_FILTER','NEAREST'],
-                            ['TEXTURE_WRAP_S','CLAMP_TO_EDGE'],['TEXTURE_WRAP_T','CLAMP_TO_EDGE']])
-      gl.texParameteri(gl.TEXTURE_2D, gl[k], gl[val])
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, v)
-
-    const mk = (t, s) => { const sh = gl.createShader(t); gl.shaderSource(sh, s); gl.compileShader(sh)
-      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh)); return sh }
-    const prog = gl.createProgram()
-    gl.attachShader(prog, mk(gl.VERTEX_SHADER, `#version 300 es
-      in vec2 p; out vec2 uv; void main(){ uv = p*0.5+0.5; gl_Position = vec4(p,0.,1.); }`))
-    gl.attachShader(prog, mk(gl.FRAGMENT_SHADER, `#version 300 es
-      precision highp float; in vec2 uv; uniform sampler2D t; out vec4 o;
-      void main(){ o = vec4(texture(t, vec2(uv.x, 1.-uv.y)).rgb, 1.); }`))
-    gl.linkProgram(prog); gl.useProgram(prog)
-    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer())
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW)
-    const loc = gl.getAttribLocation(prog, 'p')
-    gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0)
-    gl.viewport(0, 0, W, H); gl.drawArrays(gl.TRIANGLES, 0, 3)
-
-    const px = new Uint8Array(4), vals = []
-    for (let i = 0; i < 256; i++) {
-      gl.readPixels(i * BAND_W + BAND_W / 2, H - 1 - SAMPLE_Y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px)
-      vals.push(px[0])
-    }
+  const at = renderSamples(v, g, cap)
+  if (!at) {
+    result.renderError = cap.texUpload || 'render unavailable'
+  } else {
+    result.glRenderer = cap.glRenderer
+    const vals = []
+    for (let i = 0; i < 256; i++) vals.push(at(ROW_BAND, i))
     result.render = vals
-    const ext = gl.getExtension('WEBGL_debug_renderer_info')
-    result.glRenderer = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)
+
+    if (g.spikeStep) {
+      const n = Math.floor(g.width / g.spikeStep)
+      let sSum = 0, bMax = 0
+      for (let i = 0; i < n; i++) {
+        sSum += at(ROW_SPIKE, i)
+        bMax = Math.max(bMax, at(ROW_BG, i))
+      }
+      cap.spikeMean = sSum / n
+      cap.spikeBgMax = bMax
+      cap.spikeNative = cap.spikeMean >= SPIKE_NATIVE_MIN && bMax <= SPIKE_BG_MAX
+    }
   }
   return result
 }
@@ -155,52 +365,296 @@ function analyse(vals) {
   return { exact, mae: sumAbs/256, maxAbs, gain: a, offset: b, v0: vals[0], v255: vals[255], pass }
 }
 
-window.runCheck = async function (variants) {
-  const rows = []
-  for (const name of variants) {
-    let r
-    try { r = await probe(`./out/${name}.mp4`) }
-    catch (e) { rows.push({ name, error: String(e.message || e) }); continue }
-    for (const path of ['readout', 'readoutSrgb', 'readoutFull', 'render']) {
-      if (!r[path]) { rows.push({ name, path, error: r[path + 'Error'] || 'unavailable' }); continue }
-      rows.push({ name, path, glRenderer: r.glRenderer, ...analyse(r[path]) })
-    }
-  }
-  const out = document.getElementById('out')
-  out.innerHTML = '<table><tr><th>variant</th><th>path</th><th>exact</th><th>MAE</th>'
+let lastReport = ''
+let lastCapReport = ''
+
+function capTable(caps) {
+  const cell = (ok, text) => '<td class="' + (ok ? 'pass' : 'fail') + '">' + text + '</td>'
+  return '<h2>Phase 0 — capability</h2><table><tr><th>variant</th><th>expected</th>'
+    + '<th>decoded</th><th>ready</th><th>decoded size</th><th>MAX_TEXTURE_SIZE</th>'
+    + '<th>texImage2D</th><th>spike</th><th>native</th></tr>'
+    + caps.map(c => {
+        const expect = c.expectedWidth + '×' + c.expectedHeight
+        if (!c.decoded) {
+          return '<tr><td>' + c.name + '</td><td>' + expect + '</td>'
+            + '<td colspan="7" class="fail">' + (c.error || 'did not decode') + '</td></tr>'
+        }
+        const size = c.videoWidth + '×' + c.videoHeight
+        const sizeOk = c.videoWidth === c.expectedWidth && c.videoHeight === c.expectedHeight
+        const texOk = (c.maxTextureSize || 0) >= c.expectedWidth
+        return '<tr><td>' + c.name + '</td><td>' + expect + '</td>'
+          + cell(true, 'yes')
+          + '<td>' + (c.readyState === undefined ? '-' : c.readyState) + '</td>'
+          + cell(sizeOk, size)
+          + cell(texOk, c.maxTextureSize === undefined ? '-' : c.maxTextureSize)
+          + cell(c.texUpload === 'ok', c.texUpload || '-')
+          + (c.spikeMean === undefined
+              ? '<td class="muted">—</td><td class="muted">—</td>'
+              : '<td>' + c.spikeMean.toFixed(0) + '</td>' + cell(c.spikeNative, c.spikeNative ? 'yes' : 'NO'))
+          + '</tr>'
+      }).join('')
+    + '</table>'
+}
+
+function valueTable(rows) {
+  return '<h2>Value round trip</h2><table><tr><th>variant</th><th>path</th><th>exact</th><th>MAE</th>'
     + '<th>max|e|</th><th>gain</th><th>offset</th><th>0→</th><th>255→</th><th></th></tr>'
     + rows.map(r => r.error
-        ? `<tr><td>${r.name}</td><td>${r.path||''}</td><td colspan="8" class="fail">${r.error}</td></tr>`
-        : `<tr><td>${r.name}</td><td>${r.path}</td><td>${r.exact}/256</td><td>${r.mae.toFixed(3)}</td>`
-          + `<td>${r.maxAbs}</td><td>${r.gain.toFixed(4)}</td><td>${r.offset.toFixed(2)}</td>`
-          + `<td>${r.v0}</td><td>${r.v255}</td>`
-          + `<td class="${r.pass?'pass':'fail'}">${r.pass?'PASS':'FAIL'}</td></tr>`).join('')
+        ? '<tr><td>' + r.name + '</td><td>' + (r.path||'') + '</td><td colspan="8" class="fail">' + r.error + '</td></tr>'
+        : '<tr><td>' + r.name + '</td><td>' + r.path + '</td><td>' + r.exact + '/256</td><td>' + r.mae.toFixed(3) + '</td>'
+          + '<td>' + r.maxAbs + '</td><td>' + r.gain.toFixed(4) + '</td><td>' + r.offset.toFixed(2) + '</td>'
+          + '<td>' + r.v0 + '</td><td>' + r.v255 + '</td>'
+          + '<td class="' + (r.pass?'pass':'fail') + '">' + (r.pass?'PASS':'FAIL') + '</td></tr>').join('')
     + '</table>'
-  return rows
+}
+
+// The three 2D-canvas diagnostics have returned byte-identical numbers
+// on every device measured so far — three lines carrying one fact, and
+// they are two thirds of the longest section of the report. Collapse a
+// consecutive trio when it agrees; print the paths separately the
+// moment they do not, because a divergence between them would be the
+// finding rather than noise.
+const READOUT_PATHS = ['readout', 'readoutSrgb', 'readoutFull']
+
+function describeRow(r) {
+  return r.error ? 'ERROR ' + r.error
+    : r.exact + '/256  MAE ' + r.mae.toFixed(3) + '  max|e| ' + r.maxAbs
+      + '  gain ' + r.gain.toFixed(4) + '  offset ' + r.offset.toFixed(2)
+      + '  ' + (r.pass ? 'PASS' : 'FAIL')
+}
+
+function valueLines(rows) {
+  const lines = []
+  for (let i = 0; i < rows.length; ) {
+    const r = rows[i]
+    if (!r.path) { lines.push('  ' + r.name + '   ' + describeRow(r)); i++; continue }
+    if (r.path === READOUT_PATHS[0]) {
+      const trio = rows.slice(i, i + 3)
+      const aligned = trio.length === 3
+        && trio.every((x, k) => x.name === r.name && x.path === READOUT_PATHS[k])
+      if (aligned) {
+        const texts = trio.map(describeRow)
+        if (texts[0] === texts[1] && texts[1] === texts[2]) {
+          lines.push('  ' + r.name + ' readout(x3 same)  ' + texts[0])
+          i += 3
+          continue
+        }
+      }
+    }
+    lines.push('  ' + r.name + ' ' + r.path + '  ' + describeRow(r))
+    i++
+  }
+  return lines
+}
+
+function reportHeader(caps) {
+  return ['# luma-range-check',
+    'ua: ' + navigator.userAgent,
+    'gl: ' + (caps.find(c => c.glRenderer) || {}).glRenderer,
+    '']
+}
+
+/** The Phase 0 half on its own. Getting text off a headset goes through
+ *  whatever the tester has to hand, and at least one of those paths
+ *  truncated a full report near 2 KB — silently, mid-line, with the
+ *  capability block intact only because it happens to come first. This
+ *  is the half the matrix is made of, and it fits with room to spare. */
+function buildCapabilityReport(caps) {
+  const lines = reportHeader(caps)
+  lines.push('capability:')
+  for (const c of caps) {
+    lines.push('  ' + c.name
+      + '  expected=' + c.expectedWidth + 'x' + c.expectedHeight
+      + '  decoded=' + (c.decoded ? 'yes' : 'NO')
+      + (c.decoded ? '  readyState=' + c.readyState
+          + '  size=' + c.videoWidth + 'x' + c.videoHeight
+          + '  maxTex=' + c.maxTextureSize
+          + '  texImage2D=' + c.texUpload
+          + (c.spikeMean === undefined ? ''
+              : '  spike=' + c.spikeMean.toFixed(1) + '  native=' + (c.spikeNative ? 'yes' : 'NO'))
+        : '  maxTex=' + (c.maxTextureSize ?? '-')
+          + '  error=' + (c.error || '')))
+  }
+  lines.push(endMarker(caps.length, 0))
+  return lines.join('\n')
+}
+
+/** The last line, and the point of it: a truncated paste is otherwise
+ *  indistinguishable from a short run. One report was cut mid-values
+ *  and only caught by counting rows against the variant list by hand. */
+function endMarker(variants, values) {
+  return '# end — ' + variants + ' variants, ' + values
+    + ' value rows. No "# end" line means the paste was truncated.'
+}
+
+function buildReport(caps, rows) {
+  const lines = reportHeader(caps)
+  lines.push('capability:')
+  for (const c of caps) {
+    lines.push('  ' + c.name
+      + '  expected=' + c.expectedWidth + 'x' + c.expectedHeight
+      + '  decoded=' + (c.decoded ? 'yes' : 'NO')
+      + (c.decoded ? '  readyState=' + c.readyState
+          + '  size=' + c.videoWidth + 'x' + c.videoHeight
+          + '  maxTex=' + c.maxTextureSize
+          + '  texImage2D=' + c.texUpload
+          + (c.spikeMean === undefined ? ''
+              : '  spike=' + c.spikeMean.toFixed(1) + '  native=' + (c.spikeNative ? 'yes' : 'NO'))
+        : '  error=' + (c.error || '')))
+  }
+  lines.push('')
+  lines.push('values:')
+  const vl = valueLines(rows)
+  for (const l of vl) lines.push(l)
+  lines.push('')
+  lines.push(endMarker(caps.length, vl.length))
+  return lines.join('\n')
+}
+
+window.runCheck = async function (names) {
+  const manifest = await (await fetch('./variants.json', { cache: 'no-store' })).json()
+  const wanted = names && names.length
+    ? names.map(n => manifest.find(m => m.name === n)).filter(Boolean)
+    : manifest
+  const rows = [], caps = []
+  const out = document.getElementById('out')
+
+  // Repaint after every variant. This used to render once, after the
+  // whole loop finished — so a single variant that stalled discarded
+  // the results of every variant that had already passed, and the page
+  // sat there looking dead with nothing to copy. Partial results are
+  // the normal case on the devices this exists to measure, not an
+  // error path.
+  const paint = note => {
+    out.innerHTML = (note ? '<p class="warn">' + note + '</p>' : '')
+      + capTable(caps) + valueTable(rows)
+  }
+
+  for (let i = 0; i < wanted.length; i++) {
+    const g = wanted[i]
+    // Name the variant in flight. A stall then reads as "stuck on
+    // H_ceiling_8k" rather than as a broken page, which is the
+    // difference between a reportable result and an abandoned run.
+    paint('Testing ' + g.name + ' (' + (i + 1) + ' of ' + wanted.length + ') — allowing up to '
+      + ((LOAD_TIMEOUT_MS + SEEK_TIMEOUT_MS) / 1000) + 's for a stall…')
+    // Let that line paint before a decode takes the main thread — raced
+    // against a timer, because `requestAnimationFrame` does not fire in a
+    // background tab. A tester who switches away during a run measured in
+    // minutes would otherwise stall here indefinitely, on a page reading
+    // "Testing <name>", which is indistinguishable from the device stall
+    // this harness exists to tell apart from a working device. It is the
+    // one wait the commit that bounded every other wait left unbounded.
+    // Nothing else in this probe needs a frame callback, so with this
+    // raced the whole decode path survives a backgrounded tab.
+    await Promise.race([
+      new Promise(res => requestAnimationFrame(() => res())),
+      new Promise(res => setTimeout(res, 100)),
+    ])
+
+    let r = null
+    try { r = await probe(g) }
+    catch (e) {
+      const msg = String(e.message || e)
+      caps.push({
+        name: g.name, expectedWidth: g.width, expectedHeight: g.height,
+        decoded: false, error: msg,
+        // Same reasoning as the seed above: a device that cannot hold the
+        // frame is a Phase 0 finding, and this is the row it lands on.
+        ...glCapabilities(),
+      })
+      rows.push({ name: g.name, error: msg })
+    }
+    if (r) {
+      caps.push(r.cap)
+      for (const path of ['readout', 'readoutSrgb', 'readoutFull', 'render']) {
+        if (!r[path]) { rows.push({ name: g.name, path, error: r[path + 'Error'] || 'unavailable' }); continue }
+        rows.push({ name: g.name, path, glRenderer: r.glRenderer, ...analyse(r[path]) })
+      }
+    }
+
+    // Keep the report and the copy button in step with what has been
+    // measured so far, so a tester who gives up part way through still
+    // leaves with everything up to that point.
+    lastReport = buildReport(caps, rows)
+    lastCapReport = buildCapabilityReport(caps)
+    document.getElementById('copy').hidden = false
+    document.getElementById('copy-cap').hidden = false
+    paint(null)
+  }
+  return { rows, caps }
 }
 // Ask the server which variants exist. Deliberately NO hardcoded
 // fallback: a list baked in here is a list that goes stale the moment a
 // variant is added, and the failure mode is silent — the table renders,
 // every row passes, and the variant you came to test was never run.
 // Better to say nothing ran than to imply the wrong thing did.
+//
+// The geometry now rides along with each entry for the same reason: this
+// page used to hardcode 4096x256, which would have sampled the wrong
+// texels the moment a second frame size existed and reported it as data.
 document.getElementById('run').onclick = async () => {
   const out = document.getElementById('out')
   out.textContent = 'Loading variant list…'
-  let variants
+  let manifest
   try {
     const r = await fetch('./variants.json', { cache: 'no-store' })
     if (!r.ok) throw new Error('HTTP ' + r.status)
-    variants = (await r.json()).map(v => v.name)
-    if (!variants.length) throw new Error('server reported no variants')
+    manifest = await r.json()
+    if (!manifest.length) throw new Error('server reported no variants')
   } catch (e) {
     out.innerHTML = '<p class="fail">Could not load ./variants.json ('
       + String(e.message || e) + '). Not running a guessed subset — '
       + 'restart the harness with --serve so the list is served.</p>'
     return
   }
-  out.textContent = 'Testing ' + variants.length + ' variants: ' + variants.join(', ') + '…'
-  return window.runCheck(variants)
+  // ?only=NAME,NAME restricts the run. Getting a report off a headset
+  // goes through whatever the tester has to hand, and at least one of
+  // those paths truncates near 2 KB — running only the variants still
+  // missing is a shorter report than any amount of formatting economy
+  // can produce. An unknown name stops the run rather than being
+  // skipped, for the same reason the variant list is not hardcoded: a
+  // silently smaller run reports a subset as if it were the whole.
+  const only = (new URLSearchParams(location.search).get('only') || '')
+    .split(',').map(s => s.trim()).filter(Boolean)
+  if (only.length) {
+    const known = manifest.map(m => m.name)
+    const unknown = only.filter(n => known.indexOf(n) === -1)
+    if (unknown.length) {
+      out.textContent = 'Unknown variant(s): ' + unknown.join(', ')
+        + '. Known: ' + known.join(', ')
+      return
+    }
+    manifest = manifest.filter(m => only.indexOf(m.name) !== -1)
+  }
+  out.textContent = 'Testing ' + manifest.length + ' variants: '
+    + manifest.map(m => m.name).join(', ') + '…'
+  return window.runCheck(manifest.map(m => m.name))
 }
+
+async function copyTo(btn, text, label) {
+  try {
+    await navigator.clipboard.writeText(text)
+    btn.textContent = 'Copied (' + text.length + ' chars)'
+  } catch {
+    // Clipboard access is refused in plenty of the contexts this page is
+    // opened in (insecure LAN origin, in-headset browser). Showing the
+    // text is the fallback that always works.
+    const pre = document.createElement('pre')
+    pre.textContent = text
+    document.getElementById('out').appendChild(pre)
+    btn.textContent = 'Shown below'
+  }
+  setTimeout(() => { btn.textContent = label }, 3000)
+}
+
+// The character count is on the button on purpose. Whatever carries the
+// text off the device is the thing that truncates it, and knowing the
+// report was 2.4 KB is what turns "the paste looks short" into a
+// diagnosis instead of a re-run.
+document.getElementById('copy').onclick = e =>
+  copyTo(e.currentTarget, lastReport, 'Copy results')
+document.getElementById('copy-cap').onclick = e =>
+  copyTo(e.currentTarget, lastCapReport, 'Copy Phase 0 only')
 </script>
 </body>
 </html>

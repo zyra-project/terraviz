@@ -67,6 +67,10 @@ export interface AssetInitBody {
   mime?: unknown
   size?: unknown
   content_digest?: unknown
+  /** Opt out of the transcode for a `data` + `video/mp4` upload,
+   *  publishing the uploaded bytes as the served asset. See
+   *  `ValidatedAssetInit.transcode`. */
+  transcode?: unknown
 }
 
 export interface ValidatedAssetInit {
@@ -74,6 +78,26 @@ export interface ValidatedAssetInit {
   mime: string
   size: number
   content_digest: string
+  /**
+   * Whether a `data` + `video/mp4` upload should go through the GHA
+   * transcode. Defaults to `true`, which is the historical behaviour
+   * and stays the behaviour for every other kind.
+   *
+   * `false` publishes the uploaded file *as* the served asset: the
+   * mint hands back a content-addressed key instead of the
+   * `uploads/…/source.mp4` one the workflow watches, so `/complete`
+   * writes `data_ref` directly and no workflow is dispatched.
+   *
+   * It exists because the transcode is destructive for a data-encoded
+   * video. `DATA_ENCODED_RENDITIONS` pins one rung at 4096×2048, so a
+   * larger frame is decimated — and when luma *is* the measurement,
+   * re-encoding changes the values rather than the picture quality.
+   * The route gates this on `render_encoding`, since for an ordinary
+   * video the transcode earns its keep: it normalises to 30 fps, which
+   * the tour engine's `requestedFps / 30` maths assumes, and builds the
+   * ladder the player expects.
+   */
+  transcode: boolean
 }
 
 export interface AssetInitValidationError {
@@ -149,6 +173,24 @@ export function validateAssetInit(
     })
   }
 
+  // Absent means "transcode", which is what every caller written
+  // before this field did. Only a literal boolean is accepted — a
+  // string "false" arriving from a hand-rolled client would otherwise
+  // be truthy and silently transcode the file it was meant to
+  // preserve, which is the failure this flag exists to prevent.
+  let transcode = true
+  if (body.transcode !== undefined) {
+    if (typeof body.transcode !== 'boolean') {
+      errors.push({
+        field: 'transcode',
+        code: 'invalid_type',
+        message: 'transcode must be a boolean when present.',
+      })
+    } else {
+      transcode = body.transcode
+    }
+  }
+
   if (errors.length) return { ok: false, errors }
   // `kind` is non-null in the success path because errors would be
   // non-empty otherwise; the `!` makes the narrowing explicit.
@@ -159,6 +201,7 @@ export function validateAssetInit(
       mime: body.mime as string,
       size: body.size as number,
       content_digest: body.content_digest as string,
+      transcode,
     },
   }
 }

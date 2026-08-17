@@ -4,7 +4,7 @@
  * Extracted from InteractiveSphere to isolate data-loading concerns.
  */
 
-import { HLSService, type VideoProxyResponse } from './hlsService'
+import { HLSService, type VideoProxyFile, type VideoProxyResponse } from './hlsService'
 import { dataService } from './dataService'
 import { apiFetch, isManifestUrl } from './catalogSource'
 import { getDownload, getDownloadPath, isZipDownloadable } from './downloadService'
@@ -232,6 +232,26 @@ function tryLoadImage(urls: string[]): Promise<HTMLImageElement> {
 // --- Video loading ---
 
 /** Load a video dataset via HLS streaming, set up the video texture, and configure playback controls. */
+/**
+ * Choose a directly-playable file from a manifest's `files[]`.
+ *
+ * Preference order is a Vimeo-shaped ladder first, then anything with a
+ * link at all. That last clause is the fix: the previous fallback
+ * required `f.width && f.link`, and `width` is optional on
+ * `VideoProxyFile` — so a single-file manifest, whose one entry the
+ * backend emits as `{ quality: 'source', size: 0, type, link }` with no
+ * dimensions, matched none of the three branches and raised "No
+ * playable video source found" while holding a perfectly good URL.
+ *
+ * A `link` is the only field playing it actually requires.
+ */
+export function pickDirectFile(files: VideoProxyFile[]): VideoProxyFile | undefined {
+  return files.find(f => f.quality === '1080p' && f.link)
+    ?? files.find(f => f.quality === '720p' && f.link)
+    ?? files.find(f => f.width && f.link)
+    ?? files.find(f => f.link)
+}
+
 export async function loadVideoDataset(
   dataset: Dataset,
   renderer: GlobeRenderer,
@@ -283,15 +303,33 @@ export async function loadVideoDataset(
     }
     logger.info('[App] Video manifest received:', { duration: manifest.duration, qualities: manifest.files.length })
 
-    try {
-      await hlsService.loadStream(manifest.hls, video, isMobile)
-    } catch (hlsError) {
-      logger.warn('[App] HLS failed, falling back to direct MP4:', hlsError)
-      const mp4File = manifest.files.find(f => f.quality === '1080p')
-        ?? manifest.files.find(f => f.quality === '720p')
-        ?? manifest.files.find(f => f.width && f.link)
-      if (!mp4File) throw new Error('No playable video source found')
-      await hlsService.loadDirect(mp4File.link, video)
+    // An empty `hls` is a *choice*, not a failure. The manifest route
+    // emits one for a single-file MP4 reference — `url:<href>` and a
+    // non-`.m3u8` `r2:<key>` both land in `externalVideoManifest` — and
+    // its comment says the frontend "picks up `files[0].link`" instead.
+    // That contract was never honoured here: progressive was reachable
+    // only by throwing through the HLS path, which cost three separate
+    // things. hls.js treats an empty source as a fatal network error and
+    // the handler below *retries* it before rejecting, so a designed
+    // path burned retries and called `reportError('hls', …)` on every
+    // load. Worse, Safari answers `canPlayType('…mpegurl')` truthy, so
+    // an empty URL took the native branch as `video.src = ''`, which is
+    // not guaranteed to fire `error` — a load that may never settle
+    // either way, on the platform that most needs this path.
+    if (!manifest.hls) {
+      const direct = pickDirectFile(manifest.files)
+      if (!direct) throw new Error('Manifest declared no HLS stream and no playable file')
+      logger.info('[App] Manifest is single-file; loading progressive MP4 directly')
+      await hlsService.loadDirect(direct.link, video)
+    } else {
+      try {
+        await hlsService.loadStream(manifest.hls, video, isMobile)
+      } catch (hlsError) {
+        logger.warn('[App] HLS failed, falling back to direct MP4:', hlsError)
+        const mp4File = pickDirectFile(manifest.files)
+        if (!mp4File) throw new Error('No playable video source found')
+        await hlsService.loadDirect(mp4File.link, video)
+      }
     }
   }
 

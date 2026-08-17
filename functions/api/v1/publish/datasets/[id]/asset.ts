@@ -46,6 +46,7 @@ import type { PublisherRow } from '../../../_lib/publisher-store'
 import { getDatasetForPublisher } from '../../../_lib/dataset-mutations'
 import { isConfigurationError, safeErrorReason } from '../../../_lib/errors'
 import { isLoopbackHost } from '../../../_lib/loopback'
+import { RENDER_ENCODING_DATA_LUMA } from '../../../../../../src/types/color-scale'
 import {
   FRAME_OPERATION_CONCURRENCY,
   runBoundedPool,
@@ -106,12 +107,17 @@ function chooseTarget(_kind: AssetKind, _mime: string): 'r2' | 'stream' {
 }
 
 /**
- * Should this `(kind, mime)` upload land at the video-source key
- * for the GHA transcode workflow to pick up, or at a regular
- * content-addressed asset key? Video data is the one case that
- * goes through the async transcode pipeline.
+ * Is this a video data upload? Distinct from *where it lands*: since
+ * the `transcode: false` option, a video data upload may be either a
+ * source for the workflow or the served asset itself.
+ *
+ * This predicate governs the things true of both — the extended
+ * presigned TTL (a 10 GB ceiling either way) and the concurrency
+ * guard, which matters *more* for a publish-as-is upload: an in-flight
+ * transcode's `/transcode-complete` would overwrite the `data_ref` a
+ * direct upload just wrote.
  */
-function isVideoSourceUpload(kind: AssetKind, mime: string): boolean {
+function isVideoDataUpload(kind: AssetKind, mime: string): boolean {
   return kind === 'data' && mime === 'video/mp4'
 }
 
@@ -167,7 +173,7 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
       headers: { 'Content-Type': CONTENT_TYPE },
     })
   }
-  const { kind, mime, size, content_digest } = validated.value
+  const { kind, mime, size, content_digest, transcode } = validated.value
 
   // For `data` uploads, the mime must match the dataset's declared
   // `format` — otherwise we'd commit a `data_ref` to bytes whose
@@ -203,7 +209,40 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
   // Scope is video-only — image and aux uploads don't go through
   // the transcoding lifecycle, so a parallel image upload during
   // a video transcode is harmless.
-  if (isVideoSourceUpload(kind, mime) && existing.transcoding) {
+  // `transcode: false` is only offered where the transcode is
+  // destructive rather than merely redundant. For a data-encoded
+  // video, luma *is* the measurement: `DATA_ENCODED_RENDITIONS` pins
+  // one rung at 4096x2048, so a larger frame is decimated, and the
+  // re-encode moves values rather than softening a picture. For an
+  // ordinary video the transcode earns its keep — it normalises to 30
+  // fps, which `tourEngine`'s `requestedFps / 30` assumes, and builds
+  // the ladder the player expects. Refusing here rather than in the UI
+  // because the UI is not the authoritative check.
+  if (!transcode) {
+    if (!isVideoDataUpload(kind, mime)) {
+      return jsonError(
+        422,
+        'transcode_not_applicable',
+        'transcode: false applies only to a kind="data" upload with mime="video/mp4". ' +
+          'Every other asset kind is already stored as uploaded.',
+      )
+    }
+    if (existing.render_encoding !== RENDER_ENCODING_DATA_LUMA) {
+      return jsonError(
+        422,
+        'transcode_required',
+        'transcode: false publishes the uploaded file as the served asset without ' +
+          're-encoding, which is supported only for data-encoded datasets ' +
+          `(render_encoding = "${RENDER_ENCODING_DATA_LUMA}"). Dataset ${id} has ` +
+          `render_encoding = ${existing.render_encoding ?? 'null'}. For an ordinary ` +
+          'video the transcode normalises frame rate to 30 fps and builds the HLS ' +
+          'ladder the player expects; skipping it would publish whatever was uploaded. ' +
+          "Set the dataset's render encoding first, or omit transcode.",
+      )
+    }
+  }
+
+  if (isVideoDataUpload(kind, mime) && existing.transcoding) {
     return jsonError(
       409,
       'transcoding_in_progress',
@@ -290,8 +329,14 @@ export const onRequestPost: PagesFunction<CatalogEnv, 'id'> = async context => {
       // existing cache.
       const ext = extForMime(mime)
       const hex = content_digest.slice('sha256:'.length)
-      const isVideo = isVideoSourceUpload(kind, mime)
-      const key = isVideo
+      const isVideo = isVideoDataUpload(kind, mime)
+      // `transcode: false` sends a video to the content-addressed key
+      // instead of `uploads/…/source.mp4`. That single choice is the
+      // whole mechanism: `/complete` branches on `isVideoSourceKey`,
+      // so a key that does not match it takes the direct path —
+      // `data_ref` written from the upload's own ref, no dispatch, no
+      // `transcoding=1`. Nothing downstream needed a new branch.
+      const key = isVideo && transcode
         ? buildVideoSourceKey(id, uploadId)
         : buildAssetKey(id, kind, hex, ext)
       // Video sources get the extended TTL — `R2_PUT_TTL_SECONDS`

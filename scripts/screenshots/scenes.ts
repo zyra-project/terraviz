@@ -538,6 +538,22 @@ export const scenes: Scene[] = [
     },
   },
   {
+    name: 'publish-dataset-data-encoded',
+    description:
+      'Publisher portal — new-dataset form, Media step: the data-encoded toggle and its colour-scale sidecar field',
+    fixtures: publisherFixtures(),
+    async setup(page) {
+      await openPublish(page, '/publish/datasets/new')
+      // The form is a stepper; the encoding controls live on the Media
+      // step, above the upload control.
+      await page.locator('.publisher-form-nav-link[data-section="ds-section-media"]').click()
+      await page.locator('#dataset-data-encoded').check()
+      // The sidecar field only exists once the mode is on, so wait for
+      // it rather than capturing the frame before it mounts.
+      await page.locator('#dataset-color-scale').waitFor({ state: 'visible' })
+    },
+  },
+  {
     name: 'publish-dataset-edit-thumbnail',
     description:
       'Publisher portal — dataset edit, globe-thumbnail generator: a rendered preview with longitude/latitude rotation sliders',

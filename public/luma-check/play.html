@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data-encoded playback check</title>
+<style>
+  body { background:#111; color:#eee; font:13px/1.5 ui-monospace,Menlo,monospace; margin:0; padding:1rem; }
+  h1 { font-size:1rem; margin:0 0 .5rem; }
+  p { color:#9aa; max-width:64ch; }
+  button { font:inherit; padding:.5rem 1rem; margin:.25rem .25rem .25rem 0; cursor:pointer; }
+  table { border-collapse:collapse; margin-top:.5rem; font-size:12px; }
+  th,td { border:1px solid #333; padding:.25rem .5rem; text-align:right; }
+  th:first-child, td:first-child { text-align:left; }
+  .pass { color:#5f5; } .fail { color:#f66; } .warn { color:#fc6; }
+  video,canvas { display:none; }
+  pre { background:#000; color:#8f8; padding:.5rem; overflow-x:auto; font-size:11px; }
+</style>
+</head>
+<body>
+<h1>Data-encoded playback check</h1>
+<p>The luma check answers <em>does one frame decode</em>. This answers
+<em>does it play</em> — the question that decides whether a resolution rung is
+a capability or a curiosity.</p>
+
+<p><strong>It measures the whole per-frame cost, not just decode.</strong> The
+globe uploads every video frame to a WebGL texture, so a device can decode an
+8192&times;4096 stream comfortably and still be sunk by <code>texImage2D</code>.
+Both are timed separately here.</p>
+
+<p class="warn"><strong>Point this at a representative clip.</strong> Pass
+<code>?clip=&lt;url&gt;</code>. The luma check's own variants are 12 <em>identical</em>
+flat-band frames lasting 0.4&nbsp;s, which compress to almost nothing and decode
+for free — running this against them measures the harness, not the device.</p>
+
+<button id="run">Run playback check</button>
+<button id="copy" hidden>Copy results</button>
+<div id="out"></div>
+
+<video id="v" muted playsinline preload="auto" crossorigin="anonymous"></video>
+<canvas id="cgl" width="64" height="1"></canvas>
+
+<script>
+// Long enough that startup transients (first-frame decode, texture
+// allocation, thermal headroom on a cold device) do not dominate the
+// mean, short enough that nobody abandons the run wearing a headset.
+const MEASURE_MS = 12000
+// The catalog encodes everything at 30 fps and expresses a dataset's
+// display rate as `playbackRate = requestedFps / 30`
+// (`cli/lib/ffmpeg-hls.ts` OUTPUT_FRAME_RATE, `tourEngine`
+// execDatasetAnimation). A data-encoded dataset is typically shown at
+// 1-2 fps, so measuring at 1x tests a load roughly sixteen times
+// heavier than anything the app asks for. Mirrors the app's own clamp
+// in `src/utils/time.ts`: below 0.0625x browsers ignore the value, so
+// 1.875 fps is the real floor no matter what a caller requests.
+const SOURCE_FPS = 30
+const MIN_PLAYBACK_RATE = 0.0625
+const MAX_PLAYBACK_RATE = 16
+// The first frames of any stream are the cheapest and least
+// representative — allocation happens once and the I-frame is already
+// decoded by the time playback starts. Discard them.
+const WARMUP_FRAMES = 5
+const TIMEOUT_MS = 30000
+
+const VS = `#version 300 es
+in vec2 p; void main(){ gl_Position = vec4(p, 0., 1.); }`
+// One output pixel per column; the point is to force the sampler to
+// actually read the uploaded texture so a driver cannot elide the
+// upload as dead work.
+const FS = `#version 300 es
+precision highp float; uniform highp sampler2D t; out vec4 o;
+void main(){ o = vec4(texelFetch(t, ivec2(int(gl_FragCoord.x), 0), 0).rgb, 1.); }`
+
+let gl, prog, tex
+function initGl() {
+  // `powerPreference` matters more than it looks on a hybrid-graphics
+  // machine. MapLibre asks for 'high-performance', so the 2D globe gets
+  // the discrete GPU; a probe that asks for nothing gets whichever the
+  // browser prefers, which on a desktop with a 4090 was the Intel iGPU.
+  // The first playback row was measured that way and reported an upload
+  // cost from the wrong device entirely. Match the app, and print the
+  // renderer so the next reader can check rather than assume.
+  gl = document.getElementById('cgl').getContext('webgl2', {
+    antialias: false,
+    powerPreference: 'high-performance',
+  })
+  if (!gl) return 'no webgl2'
+  const mk = (type, src) => {
+    const sh = gl.createShader(type)
+    gl.shaderSource(sh, src); gl.compileShader(sh)
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh))
+    return sh
+  }
+  prog = gl.createProgram()
+  gl.attachShader(prog, mk(gl.VERTEX_SHADER, VS))
+  gl.attachShader(prog, mk(gl.FRAGMENT_SHADER, FS))
+  gl.linkProgram(prog)
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog))
+  gl.useProgram(prog)
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer())
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW)
+  const loc = gl.getAttribLocation(prog, 'p')
+  gl.enableVertexAttribArray(loc)
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0)
+  tex = gl.createTexture()
+  gl.bindTexture(gl.TEXTURE_2D, tex)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+  gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE)
+  return null
+}
+
+/** Upload one frame and draw from it. Returns ms spent, or -1 on error.
+ *
+ *  `finish()` before stopping the clock: without it the timing measures
+ *  how long the driver took to *queue* the upload, which on a tiler is
+ *  close to zero and says nothing. This is a deliberate stall, so the
+ *  number is an upper bound on per-frame GPU cost rather than the cost
+ *  a pipelined renderer would actually pay. */
+function uploadAndDraw(v) {
+  const t0 = performance.now()
+  gl.bindTexture(gl.TEXTURE_2D, tex)
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, v)
+  if (gl.getError() !== gl.NO_ERROR) return -1
+  gl.viewport(0, 0, 64, 1)
+  gl.drawArrays(gl.TRIANGLES, 0, 3)
+  gl.finish()
+  return performance.now() - t0
+}
+
+function pct(n, d) { return d ? (100 * n / d).toFixed(2) + '%' : '—' }
+
+/** Resolve `?clip=` to an http(s) URL, or null.
+ *
+ *  The parameter is attacker-controllable in a shared link, `video.src`
+ *  accepts `javascript:` and `data:` URLs, and this page ships on every
+ *  preview deploy — so the sink is reachable rather than theoretical.
+ *  Parse-then-allowlist rather than pattern-match the string: the URL
+ *  parser is the thing that decides what the protocol actually is, and
+ *  a regex over the raw text is how `java\nscript:` gets through.
+ *
+ *  Cross-origin stays deliberately allowed. The clip this page exists
+ *  to measure is far too large for the repo and will usually be hosted
+ *  elsewhere; the protocol is the part that matters, not the host. */
+function safeClipUrl(raw) {
+  let u
+  try { u = new URL(raw, location.href) } catch (e) { return null }
+  return (u.protocol === 'http:' || u.protocol === 'https:') ? u.href : null
+}
+
+let report = ''
+
+async function run(clipUrl, rate) {
+  const out = document.getElementById('out')
+  const v = document.getElementById('v')
+  const rec = { clip: clipUrl, ua: navigator.userAgent }
+
+  const glErr = initGl()
+  if (glErr) { out.innerHTML = '<p class="fail">' + glErr + '</p>'; return }
+  const ext = gl.getExtension('WEBGL_debug_renderer_info')
+  rec.gl = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)
+  rec.maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE)
+
+  // Pre-flight the URL before handing it to the media element.
+  //
+  // A 404 arrives at `<video>` as `MediaError` code 4 —
+  // MEDIA_ERR_SRC_NOT_SUPPORTED — exactly like a decoder refusing the
+  // stream, because what came back was an error page rather than a
+  // video. On a device that has already decoded a *larger* frame, a
+  // mistyped path would otherwise read as a decode ceiling: a confident
+  // wrong answer, and the worst thing a probe can produce.
+  //
+  // Non-fatal by design. A cross-origin clip without CORS headers fails
+  // this fetch while the element may still load, so a failure here is
+  // reported and the run continues.
+  out.textContent = 'Checking ' + clipUrl + '…'
+  try {
+    const head = await fetch(clipUrl, { method: 'HEAD', cache: 'no-store' })
+    rec.httpStatus = head.status
+    rec.httpType = head.headers.get('content-type') || '(none)'
+    // Only a definitive absence stops the run. Plenty of hosts serve GET
+    // happily while answering HEAD with 405 or 501, and aborting on those
+    // would label a perfectly good clip "not there" without ever testing
+    // playback — the same false-negative this pre-flight was added to
+    // prevent, pointing the other way.
+    if (head.status === 404 || head.status === 410) {
+      rec.error = 'HTTP ' + head.status + ' fetching the clip — the file is not there. '
+        + 'This is a path problem, not a decoder result.'
+      out.innerHTML = '<p class="fail">' + rec.error + '</p>'
+      finish(rec, null)
+      return
+    }
+  } catch (e) {
+    // Reachable but unreadable from script (typically CORS), or the host
+    // is down. Record it; the element gets its own attempt below.
+    rec.httpStatus = 'unreachable by fetch (' + String(e.message || e) + ')'
+  }
+
+  out.textContent = 'Loading ' + clipUrl + '…'
+  v.src = clipUrl
+  try {
+    await new Promise((res, rej) => {
+      v.onloadeddata = res
+      v.onerror = () => rej(new Error('load failed (code ' + (v.error && v.error.code) + ')'))
+      setTimeout(() => rej(new Error('load timed out after ' + TIMEOUT_MS / 1000 + 's')), TIMEOUT_MS)
+    })
+  } catch (e) {
+    rec.error = String(e.message || e)
+    out.innerHTML = '<p class="fail">' + rec.error + '</p>'
+    finish(rec, null)
+    return
+  }
+  rec.size = v.videoWidth + 'x' + v.videoHeight
+  rec.duration = v.duration
+
+  // requestVideoFrameCallback is the only API that reports *presented*
+  // frames. Without it the run still measures wall-clock vs mediaTime,
+  // which catches a catastrophic stall but not a quietly halved rate.
+  const hasRvfc = typeof v.requestVideoFrameCallback === 'function'
+  rec.rvfc = hasRvfc
+
+  const uploads = []
+  let frames = 0, mediaAccum = 0, prevMedia = null, loops = 0
+  let startWall = null, timedOut = false
+
+  // Loop rather than require a long clip. A representative 8K encode is
+  // expensive to produce and the useful ones tend to be short — 20
+  // frames of real data is a better test than 300 frames of anything
+  // synthetic. Replaying it costs a keyframe per loop, which makes the
+  // measurement slightly *harder* than a continuous stream rather than
+  // easier, so a short clip cannot flatter the device.
+  v.loop = true
+
+  // mediaTime restarts at each wrap, so the clip's own clock has to be
+  // accumulated across loops. Comparing first to last would otherwise
+  // report a near-zero advance and call a device that kept up perfectly
+  // a device that stalled.
+  const advance = t => {
+    if (prevMedia !== null) {
+      let d = t - prevMedia
+      if (d < 0) { d += (v.duration || 0); loops++ }
+      if (d >= 0 && isFinite(d)) mediaAccum += d
+    }
+    prevMedia = t
+  }
+
+  v.playbackRate = rate
+  rec.rate = rate
+  rec.targetFps = SOURCE_FPS * rate
+  out.textContent = 'Playing for ' + MEASURE_MS / 1000 + 's at ' + rate + 'x ('
+    + rec.targetFps.toFixed(2) + ' fps)…'
+  // A rejected play() is autoplay policy or a bad media state, not a
+  // performance result. Swallowing it let the run continue into the
+  // frame wait and report "FALLS BEHIND" for a video that never began.
+  try {
+    await v.play()
+  } catch (e) {
+    rec.error = 'play() was refused: ' + String((e && e.message) || e)
+      + ' — playback never started, so nothing below was measured.'
+    out.innerHTML = '<p class="fail">' + rec.error + '</p>'
+    finish(rec, null)
+    return
+  }
+
+  await new Promise(done => {
+    const stop = () => { v.pause(); done() }
+    if (hasRvfc) {
+      const onFrame = (now, meta) => {
+        frames++
+        if (frames === WARMUP_FRAMES) { startWall = now; prevMedia = meta.mediaTime }
+        else if (frames > WARMUP_FRAMES) {
+          advance(meta.mediaTime)
+          const ms = uploadAndDraw(v)
+          if (ms >= 0) uploads.push(ms)
+          if (now - startWall >= MEASURE_MS) return stop()
+        }
+        v.requestVideoFrameCallback(onFrame)
+      }
+      v.requestVideoFrameCallback(onFrame)
+    } else {
+      startWall = performance.now()
+      prevMedia = v.currentTime
+      const tick = () => {
+        frames++
+        advance(v.currentTime)
+        const ms = uploadAndDraw(v)
+        if (ms >= 0) uploads.push(ms)
+        if (performance.now() - startWall >= MEASURE_MS) return stop()
+        requestAnimationFrame(tick)
+      }
+      requestAnimationFrame(tick)
+    }
+    // Bounded regardless: a stalled clip must not hang the page the way
+    // the luma probe's unbounded waits did. Record that the bound fired,
+    // because a decoder that stalls and a decoder that merely runs slow
+    // are different device findings and the ratio alone cannot separate
+    // them — a clip that never reaches the warm-up count leaves
+    // `startWall` null and would otherwise report as NaN or as an
+    // ordinary low ratio.
+    setTimeout(() => { timedOut = true; stop() }, MEASURE_MS + TIMEOUT_MS)
+  })
+
+  if (timedOut || startWall === null) {
+    rec.error = startWall === null
+      ? 'timed out before ' + WARMUP_FRAMES + ' warm-up frames arrived — the decoder '
+        + 'produced ' + frames + ' frame(s) in ' + ((MEASURE_MS + TIMEOUT_MS) / 1000)
+        + 's. This is a stall, not a playback rate.'
+      : 'timed out after ' + ((MEASURE_MS + TIMEOUT_MS) / 1000) + 's — playback stalled '
+        + 'part way through. Metrics below the warm-up are not reported.'
+    out.innerHTML = '<p class="fail">' + rec.error + '</p>'
+    finish(rec, null)
+    return
+  }
+  const wallMs = performance.now() - startWall
+  rec.measuredFrames = Math.max(0, frames - WARMUP_FRAMES)
+  rec.wallSeconds = wallMs / 1000
+  rec.mediaSeconds = mediaAccum
+  rec.loops = loops
+  // The honest headline. mediaTime is the clip's own clock; wall clock
+  // is the viewer's. A ratio below 1 means playback fell behind real
+  // time no matter how many frames were counted.
+  // Normalised by the requested rate. At 0.0625x the clip's clock is
+  // *meant* to advance at a sixteenth of wall time, so an unnormalised
+  // ratio would report every correct slow-playback run as a stall.
+  rec.realtimeRatio = wallMs > 0 ? mediaAccum / ((wallMs / 1000) * rate) : 0
+  rec.presentedFps = rec.wallSeconds > 0 ? rec.measuredFrames / rec.wallSeconds : 0
+
+  const q = typeof v.getVideoPlaybackQuality === 'function' ? v.getVideoPlaybackQuality() : null
+  if (q) { rec.totalFrames = q.totalVideoFrames; rec.droppedFrames = q.droppedVideoFrames }
+
+  if (uploads.length) {
+    const s = uploads.slice().sort((a, b) => a - b)
+    rec.uploadMeanMs = uploads.reduce((a, b) => a + b, 0) / uploads.length
+    rec.uploadP95Ms = s[Math.min(s.length - 1, Math.floor(s.length * 0.95))]
+    rec.uploadMaxMs = s[s.length - 1]
+  }
+  finish(rec, out)
+}
+
+/** Verdicts are deliberately about budgets rather than a single pass:
+ *  a clip only needs to sustain *its own* rate, and a headset renders
+ *  at 72-90 Hz regardless of how slowly the video updates — so the
+ *  upload cost is judged against a frame budget, not against 30 fps. */
+function finish(rec, out) {
+  const lines = ['# playback-check', 'ua: ' + rec.ua, 'gl: ' + (rec.gl || '—'),
+    'clip: ' + rec.clip, '']
+  if (rec.error) {
+    if (rec.httpStatus !== undefined) {
+      lines.push('http=' + rec.httpStatus + '  type=' + (rec.httpType || '—'))
+    }
+    lines.push('ERROR ' + rec.error)
+  } else {
+    lines.push('http=' + rec.httpStatus + '  type=' + (rec.httpType || '—'))
+    lines.push('size=' + rec.size + '  duration=' + (rec.duration || 0).toFixed(2) + 's'
+      + '  maxTex=' + rec.maxTex + '  rVFC=' + (rec.rvfc ? 'yes' : 'NO'))
+    // Requested high-performance; the `gl:` line above says what was
+    // actually granted. On a hybrid machine those differ, and the
+    // difference invalidated a measurement once already.
+    lines.push('powerPreference=high-performance (check the gl: line for what was granted)')
+    lines.push('rate=' + rec.rate + 'x  target=' + rec.targetFps.toFixed(2) + 'fps'
+      + '  (catalog encodes at ' + SOURCE_FPS + 'fps; app floor is '
+      + (SOURCE_FPS * MIN_PLAYBACK_RATE).toFixed(3) + 'fps)')
+    lines.push('realtime=' + rec.realtimeRatio.toFixed(3) + 'x'
+      + '  presented=' + rec.presentedFps.toFixed(1) + 'fps'
+      + '  frames=' + rec.measuredFrames + ' over ' + rec.wallSeconds.toFixed(1) + 's'
+      + '  loops=' + rec.loops)
+    if (rec.totalFrames !== undefined) {
+      lines.push('dropped=' + rec.droppedFrames + '/' + rec.totalFrames
+        + ' (' + pct(rec.droppedFrames, rec.totalFrames) + ')')
+    }
+    if (rec.uploadMeanMs !== undefined) {
+      lines.push('texImage2D mean=' + rec.uploadMeanMs.toFixed(2) + 'ms'
+        + '  p95=' + rec.uploadP95Ms.toFixed(2) + 'ms'
+        + '  max=' + rec.uploadMaxMs.toFixed(2) + 'ms')
+      lines.push('  (budget: 11.1ms at 90Hz, 13.9ms at 72Hz, 16.7ms at 60Hz)')
+    }
+    const realtime = rec.realtimeRatio >= 0.95
+    lines.push('')
+    // No successful upload is a failure, not an absent column. Every
+    // texImage2D returning an error — a frame past MAX_TEXTURE_SIZE, say
+    // — leaves no samples, and reporting "KEEPS UP" on the strength of
+    // the playback ratio alone would be a green verdict for a device
+    // that could not hold the frame at all.
+    if (rec.uploadMeanMs === undefined) {
+      lines.push('verdict: NO SUCCESSFUL TEXTURE UPLOAD — texImage2D failed for every '
+        + 'sampled frame (maxTex=' + rec.maxTex + ' against a ' + rec.size + ' frame). '
+        + 'Playback ratio was ' + rec.realtimeRatio.toFixed(3) + 'x but nothing was drawn.')
+    } else {
+      lines.push('verdict: playback ' + (realtime ? 'KEEPS UP' : 'FALLS BEHIND')
+        + '; upload ' + (rec.uploadP95Ms <= 11.1 ? 'fits 90Hz'
+            : rec.uploadP95Ms <= 16.7 ? 'fits 60Hz only' : 'EXCEEDS 60Hz budget'))
+    }
+  }
+  lines.push('# end — playback-check. No "# end" line means the paste was truncated.')
+  report = lines.join('\n')
+  if (out) {
+    const pre = document.createElement('pre')
+    pre.textContent = report
+    out.innerHTML = ''
+    out.appendChild(pre)
+  }
+  document.getElementById('copy').hidden = false
+}
+
+document.getElementById('run').onclick = () => {
+  const out = document.getElementById('out')
+  const raw = new URLSearchParams(location.search).get('clip')
+  if (!raw) {
+    out.innerHTML =
+      '<p class="fail">No ?clip=&lt;url&gt; given. This check deliberately has no '
+      + 'default: the only clips shipped beside it are 0.4s of identical flat frames, '
+      + 'and running against those would report a device as fine on content that '
+      + 'costs nothing to decode.</p>'
+    return
+  }
+  const clip = safeClipUrl(raw)
+  if (!clip) {
+    // textContent, not innerHTML: the rejected value is the untrusted
+    // one, and echoing it into markup would reintroduce the sink this
+    // check exists to close.
+    out.textContent = 'Refusing that ?clip= value — only http(s) URLs are accepted.'
+    return
+  }
+  // ?rate= mirrors the app's playbackRate, so the default measures the
+  // load the app actually asks for rather than a 16x-heavier one. A
+  // caller wanting the stress case passes rate=1 explicitly.
+  const raw2 = new URLSearchParams(location.search).get('rate')
+  let rate = raw2 === null ? MIN_PLAYBACK_RATE : Number(raw2)
+  if (!isFinite(rate) || rate <= 0) {
+    out.textContent = 'Refusing that ?rate= value — expected a positive number.'
+    return
+  }
+  rate = Math.min(MAX_PLAYBACK_RATE, Math.max(MIN_PLAYBACK_RATE, rate))
+  document.getElementById('run').disabled = true
+  return run(clip, rate)
+}
+
+document.getElementById('copy').onclick = async e => {
+  const btn = e.currentTarget
+  try {
+    await navigator.clipboard.writeText(report)
+    btn.textContent = 'Copied (' + report.length + ' chars)'
+  } catch {
+    btn.textContent = 'Select the text above'
+  }
+  setTimeout(() => { btn.textContent = 'Copy results' }, 3000)
+}
+</script>
+</body>
+</html>

@@ -1521,3 +1521,106 @@ describe('hashFileSha256', () => {
     expect(digest).toBe(`sha256:${refHex}`)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Publish as uploaded (transcode: false)
+// ---------------------------------------------------------------------------
+
+describe('asset uploader — publish as uploaded', () => {
+  /** The two responses a video upload consumes: mint, then complete. */
+  function videoFetch(completeBody: unknown = { dataset: { data_ref: 'r2:datasets/x' } }) {
+    return vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            upload_id: 'UP-1',
+            kind: 'data',
+            target: 'r2',
+            r2: { method: 'PUT', url: 'https://r2.example/put', headers: {}, key: 'datasets/x/by-digest/aa.mp4' },
+            expires_at: 'soon',
+            mock: false,
+          },
+          201,
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse(completeBody, 200))
+  }
+
+  function mintBody(fetchFn: ReturnType<typeof vi.fn>): Record<string, unknown> {
+    return JSON.parse((fetchFn.mock.calls[0][1] as RequestInit).body as string)
+  }
+
+  it('defaults a data-encoded video to transcode: false', async () => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    const onUploaded = vi.fn()
+    const fetchFn = videoFetch()
+    mount.appendChild(
+      renderAssetUploader({
+        datasetId: '01AAAAAAAAAAAAAAAAAAAAAAAA',
+        format: 'video/mp4',
+        dataEncoded: true,
+        onUploaded,
+        hashFn: async () => 'sha256:' + 'a'.repeat(64),
+        fetchFn: fetchFn as unknown as typeof fetch,
+        xhrFactory: fakeXhrFactory(),
+        detectFpsFn: async () => 30,
+      }),
+    )
+    pickFile(mount, 'video/mp4', 'mock-mp4-bytes')
+    await until(() => fetchFn.mock.calls.length > 0, 'the /asset mint')
+    // The transcode decimates a data-encoded frame to the single
+    // 4096x2048 rung and re-encodes values that *are* the measurement,
+    // so preserving the file is the safe default rather than the
+    // opt-in.
+    expect(mintBody(fetchFn).transcode).toBe(false)
+  })
+
+  it('omits the flag entirely when the row is not data-encoded', async () => {
+    // The mint route refuses `transcode` on an ordinary video, so
+    // sending it as a no-op would be an error the server has to
+    // forgive.
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    const fetchFn = videoFetch({ dataset: { data_ref: '' }, transcoding: true })
+    mount.appendChild(
+      renderAssetUploader({
+        datasetId: '01AAAAAAAAAAAAAAAAAAAAAAAA',
+        format: 'video/mp4',
+        dataEncoded: false,
+        onUploaded: vi.fn(),
+        hashFn: async () => 'sha256:' + 'a'.repeat(64),
+        fetchFn: fetchFn as unknown as typeof fetch,
+        xhrFactory: fakeXhrFactory(),
+      }),
+    )
+    pickFile(mount, 'video/mp4', 'mock-mp4-bytes')
+    await until(() => fetchFn.mock.calls.length > 0, 'the /asset mint')
+    expect('transcode' in mintBody(fetchFn)).toBe(false)
+  })
+
+  it('offers the opt-out only on a data-encoded video', () => {
+    const withEncoding = document.createElement('div')
+    withEncoding.appendChild(
+      renderAssetUploader({
+        datasetId: '01AAAAAAAAAAAAAAAAAAAAAAAA',
+        format: 'video/mp4',
+        dataEncoded: true,
+        onUploaded: vi.fn(),
+      }),
+    )
+    expect(withEncoding.querySelector('.publisher-asset-uploader-asis')).not.toBeNull()
+
+    const plain = document.createElement('div')
+    plain.appendChild(
+      renderAssetUploader({
+        datasetId: '01AAAAAAAAAAAAAAAAAAAAAAAA',
+        format: 'video/mp4',
+        dataEncoded: false,
+        onUploaded: vi.fn(),
+      }),
+    )
+    expect(plain.querySelector('.publisher-asset-uploader-asis')).toBeNull()
+  })
+})

@@ -33,6 +33,32 @@ export function getCatalogSource(): CatalogSource {
 }
 
 /**
+ * Whether to inject the two bundled sample tours (`SAMPLE_TOUR`,
+ * `SAMPLE_TOUR_CLIMATE_FUTURES`) into the catalog. Default on;
+ * `VITE_SAMPLE_TOURS=false` is the only value that turns them off,
+ * matching the `VITE_TELEMETRY_ENABLED` convention — a typo leaves
+ * the flagship deployment's tours in place rather than silently
+ * dropping them.
+ *
+ * The tours ship in the bundle (`public/assets/test-tour.json`,
+ * `public/assets/climate-futures-tour.json`) and are injected
+ * client-side, after `/api/v1/catalog` returns, so an empty catalog
+ * does not suppress them. Both drive legacy SOS handles (`INTERNAL_SOS_25_VIDEO`,
+ * `INTERNAL_SOS_SSP_GA_19`, …) that a downstream node has no reason
+ * to hold — there the cards launch a tour that can load nothing, and
+ * Orbit recommends them besides (it reads the same catalog list).
+ * Such a node sets this to `false`.
+ *
+ * Kept as a build-time flag rather than a `tours` node-feature
+ * toggle because the feature key gates *all* tours, including the
+ * operator's own published ones. This is narrower on purpose: it
+ * removes the two bundled samples and nothing else.
+ */
+export function sampleToursEnabled(): boolean {
+  return import.meta.env.VITE_SAMPLE_TOURS !== 'false'
+}
+
+/**
  * True when a `dataLink` URL is shaped like one of this node's
  * manifest endpoints. Used by the dataset loader to decide whether
  * to fetch the manifest envelope or treat the link as a direct

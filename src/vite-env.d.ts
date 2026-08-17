@@ -24,6 +24,11 @@ interface ImportMetaEnv {
   /** Catalog source: `'node'` (this node's own backend, default) or
    *  `'legacy'` (the SOS snapshot). See `src/services/catalogSource.ts`. */
   readonly VITE_CATALOG_SOURCE?: string
+  /** When `'false'`, the two bundled sample tours are not injected
+   *  into the catalog. Default on. A downstream node that hasn't
+   *  imported the SOS datasets they drive wants this off. See
+   *  `src/services/catalogSource.ts`. */
+  readonly VITE_SAMPLE_TOURS?: string
   /** Absolute API origin for desktop (Tauri) builds, which can't use
    *  relative `/api/` paths. Set to your node's domain for an
    *  independent fork. See `src/services/catalogSource.ts`. */

@@ -22,7 +22,7 @@ import { isLiveCadence, parseISO8601Duration, safePeriodMs } from '../utils/time
 import { resolveDatasetRef } from '../utils/datasetUrl'
 import { logger } from '../utils/logger'
 import { reportError } from '../analytics'
-import { apiFetch, getCatalogSource } from './catalogSource'
+import { apiFetch, getCatalogSource, sampleToursEnabled } from './catalogSource'
 
 /** Milliseconds floor for period-driven cache expiry — even a PT15M
  *  workflow shouldn't make every page interaction re-fetch the
@@ -439,8 +439,15 @@ export class PreviewFetchError extends Error {
  * paths. Pulled out as a function so both call sites get identical
  * rows; once these are publishable as real `tours/json` rows we can
  * delete this helper.
+ *
+ * Returns nothing when the deployment builds with
+ * `VITE_SAMPLE_TOURS=false` — see `sampleToursEnabled` in
+ * `catalogSource.ts` for why a downstream node wants that. The gate
+ * lives here rather than at the two call sites so neither path can
+ * grow a third injection that forgets it.
  */
 function sampleTourBuiltins(): Dataset[] {
+  if (!sampleToursEnabled()) return []
   return [
     {
       id: 'SAMPLE_TOUR',
@@ -692,6 +699,10 @@ export class DataService {
    * registered them in the catalog. Once Phase 1a's CLI lands those
    * tours as real `tours/json` rows, this client-side injection
    * becomes redundant; we'll remove it then.
+   *
+   * A node that never held the legacy SOS datasets those tours drive
+   * builds with `VITE_SAMPLE_TOURS=false` and gets none of them —
+   * `sampleTourBuiltins` returns empty and this push is a no-op.
    */
   private async fetchDatasetsFromNode(): Promise<Dataset[]> {
     logger.info('[DataService] Fetching datasets from node catalog...')

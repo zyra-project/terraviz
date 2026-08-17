@@ -1066,6 +1066,28 @@
   font-size: calc(0.875rem * var(--ui-scale));
 }
 
+/* --- Publish-as-uploaded control (data-encoded video only) --- */
+.publisher-asset-uploader-asis {
+  display: flex;
+  gap: calc(0.5rem * var(--ui-scale));
+  align-items: baseline;
+  font-size: calc(0.875rem * var(--ui-scale));
+}
+
+.publisher-asset-uploader-help {
+  margin: 0;
+  font-size: calc(0.8125rem * var(--ui-scale));
+  opacity: 0.75;
+}
+
+/* Advisory, not an error: the upload proceeds either way, so this
+   reads as a caution rather than a failure. */
+.publisher-asset-uploader-warning {
+  margin: 0;
+  font-size: calc(0.8125rem * var(--ui-scale));
+  color: var(--warning, #f0b429);
+}
+
 /* --- Globe-thumbnail generator (thumbnail uploader only) --- */
 .publisher-asset-uploader-generate {
   display: flex;

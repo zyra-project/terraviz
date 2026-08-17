@@ -75,6 +75,50 @@ describe('validateAssetInit', () => {
     expect(result.value.kind).toBe('data')
   })
 
+  it('defaults transcode to true when the field is absent', () => {
+    // Every caller written before the field existed omits it, and
+    // must keep going through the transcode.
+    const result = validateAssetInit({
+      kind: 'data',
+      mime: 'video/mp4',
+      size: 50 * 1024 * 1024,
+      content_digest: HAPPY_DIGEST,
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.transcode).toBe(true)
+  })
+
+  it('carries transcode: false through to the validated value', () => {
+    const result = validateAssetInit({
+      kind: 'data',
+      mime: 'video/mp4',
+      size: 50 * 1024 * 1024,
+      content_digest: HAPPY_DIGEST,
+      transcode: false,
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.transcode).toBe(false)
+  })
+
+  it('refuses a non-boolean transcode rather than coercing it', () => {
+    // The dangerous input is the string "false", which is truthy: a
+    // hand-rolled client sending it would silently transcode the file
+    // it meant to preserve, which is the one failure this flag exists
+    // to prevent.
+    const result = validateAssetInit({
+      kind: 'data',
+      mime: 'video/mp4',
+      size: 50 * 1024 * 1024,
+      content_digest: HAPPY_DIGEST,
+      transcode: 'false',
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.errors.some(e => e.field === 'transcode' && e.code === 'invalid_type')).toBe(true)
+  })
+
   it('accepts an image thumbnail', () => {
     const result = validateAssetInit({
       kind: 'thumbnail',

@@ -1,30 +1,82 @@
 [
   {
     "name": "A_today",
-    "note": "today's settings — no colour flags at all"
+    "note": "today's settings — no colour flags at all",
+    "width": 4096,
+    "height": 256,
+    "bandWidth": 16,
+    "bandSampleY": 128,
+    "spikeStep": 0,
+    "spikeTop": 256
   },
   {
     "name": "B_tag_only",
-    "note": "retag only — the naive fix, expected to FAIL"
+    "note": "retag only — the naive fix, expected to FAIL",
+    "width": 4096,
+    "height": 256,
+    "bandWidth": 16,
+    "bandSampleY": 128,
+    "spikeStep": 0,
+    "spikeTop": 256
   },
   {
     "name": "C_limited",
-    "note": "consistent limited range — survives, but only 219 code levels"
+    "note": "consistent limited range — survives, but only 219 code levels",
+    "width": 4096,
+    "height": 256,
+    "bandWidth": 16,
+    "bandSampleY": 128,
+    "spikeStep": 0,
+    "spikeTop": 256
   },
   {
     "name": "D_full_proper",
-    "note": "conversion AND tag both full range — the recommended setting"
+    "note": "conversion AND tag both full range — the recommended setting",
+    "width": 4096,
+    "height": 256,
+    "bandWidth": 16,
+    "bandSampleY": 128,
+    "spikeStep": 0,
+    "spikeTop": 256
   },
   {
     "name": "E_range_only",
-    "note": "full-range conversion + range tag, NO transfer/primaries/matrix tags"
+    "note": "full-range conversion + range tag, NO transfer/primaries/matrix tags",
+    "width": 4096,
+    "height": 256,
+    "bandWidth": 16,
+    "bandSampleY": 128,
+    "spikeStep": 0,
+    "spikeTop": 256
   },
   {
     "name": "F_no_trc",
-    "note": "everything D has except --color_trc — isolates the transfer tag"
+    "note": "everything D has except --color_trc — isolates the transfer tag",
+    "width": 4096,
+    "height": 256,
+    "bandWidth": 16,
+    "bandSampleY": 128,
+    "spikeStep": 0,
+    "spikeTop": 256
   },
   {
     "name": "G_neighbor_only",
-    "note": "exactly what the encoder now emits — neighbor scale, no colour flags"
+    "note": "exactly what the encoder now emits — neighbor scale, no colour flags",
+    "width": 4096,
+    "height": 256,
+    "bandWidth": 16,
+    "bandSampleY": 128,
+    "spikeStep": 0,
+    "spikeTop": 256
+  },
+  {
+    "name": "H_ceiling_8k",
+    "note": "Phase 0 — 8192x4096 at the shipped data-encoded settings",
+    "width": 8192,
+    "height": 4096,
+    "bandWidth": 32,
+    "bandSampleY": 1024,
+    "spikeStep": 64,
+    "spikeTop": 2048
   }
 ]

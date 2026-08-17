@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { displayDatasetInfo } from './datasetLoader'
+import { displayDatasetInfo, pickDirectFile } from './datasetLoader'
 import type { Dataset } from '../types'
 import { until } from '../test-utils'
 
@@ -499,5 +499,57 @@ describe('displayDatasetInfo — "In the news"', () => {
     btn.click()
     const note = btn.parentElement!.querySelector('.info-news-note') as HTMLElement
     expect(note.hidden).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// pickDirectFile — the single-file manifest seam
+// ---------------------------------------------------------------------------
+
+describe('pickDirectFile', () => {
+  it('finds the single entry a direct-MP4 manifest emits', () => {
+    // Exactly what `externalVideoManifest` in
+    // `functions/api/v1/datasets/[id]/manifest.ts` produces for a
+    // `url:<href>` or non-`.m3u8` `r2:<key>` reference: no `width`, and
+    // a `quality` that is neither of the Vimeo rungs. The previous
+    // selector required `f.width && f.link`, so this matched nothing
+    // and the load threw "No playable video source found" while
+    // holding a working URL.
+    const file = pickDirectFile([
+      { quality: 'source', size: 0, type: 'video/mp4', link: 'https://cdn.example/a.mp4' },
+    ])
+    expect(file?.link).toBe('https://cdn.example/a.mp4')
+  })
+
+  it('still prefers the 1080p rung when a Vimeo-shaped ladder is present', () => {
+    const file = pickDirectFile([
+      { quality: '360p', width: 640, size: 1, type: 'video/mp4', link: 'lo.mp4' },
+      { quality: '1080p', width: 1920, size: 3, type: 'video/mp4', link: 'hi.mp4' },
+      { quality: '720p', width: 1280, size: 2, type: 'video/mp4', link: 'mid.mp4' },
+    ])
+    expect(file?.link).toBe('hi.mp4')
+  })
+
+  it('falls to 720p when there is no 1080p', () => {
+    const file = pickDirectFile([
+      { quality: '360p', width: 640, size: 1, type: 'video/mp4', link: 'lo.mp4' },
+      { quality: '720p', width: 1280, size: 2, type: 'video/mp4', link: 'mid.mp4' },
+    ])
+    expect(file?.link).toBe('mid.mp4')
+  })
+
+  it('skips an entry with no link rather than returning it', () => {
+    // A linkless entry would reach `video.src = undefined` and fail as
+    // a media error, which reads as a device problem rather than a
+    // manifest one.
+    const file = pickDirectFile([
+      { quality: '1080p', width: 1920, size: 3, type: 'video/mp4', link: '' },
+      { quality: 'source', size: 0, type: 'video/mp4', link: 'only-real.mp4' },
+    ])
+    expect(file?.link).toBe('only-real.mp4')
+  })
+
+  it('returns undefined for an empty list so the caller can name the failure', () => {
+    expect(pickDirectFile([])).toBeUndefined()
   })
 })

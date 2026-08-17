@@ -1,5 +1,11 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
-import { apiFetch, getCatalogSource, isManifestUrl, resolveApiUrl } from './catalogSource'
+import {
+  apiFetch,
+  getCatalogSource,
+  isManifestUrl,
+  resolveApiUrl,
+  sampleToursEnabled,
+} from './catalogSource'
 
 const ORIGINAL = import.meta.env.VITE_CATALOG_SOURCE
 
@@ -25,6 +31,41 @@ describe('getCatalogSource', () => {
   it('falls back to node on an unknown value', () => {
     ;(import.meta.env as Record<string, string>).VITE_CATALOG_SOURCE = 'wat'
     expect(getCatalogSource()).toBe('node')
+  })
+})
+
+describe('sampleToursEnabled', () => {
+  const ORIGINAL_SAMPLE_TOURS = import.meta.env.VITE_SAMPLE_TOURS
+
+  afterEach(() => {
+    if (ORIGINAL_SAMPLE_TOURS === undefined) {
+      delete (import.meta.env as Record<string, string>).VITE_SAMPLE_TOURS
+    } else {
+      ;(import.meta.env as Record<string, string>).VITE_SAMPLE_TOURS =
+        ORIGINAL_SAMPLE_TOURS
+    }
+  })
+
+  it('defaults to enabled when unset', () => {
+    delete (import.meta.env as Record<string, string>).VITE_SAMPLE_TOURS
+    expect(sampleToursEnabled()).toBe(true)
+  })
+
+  it('disables only for the exact string "false"', () => {
+    ;(import.meta.env as Record<string, string>).VITE_SAMPLE_TOURS = 'false'
+    expect(sampleToursEnabled()).toBe(false)
+  })
+
+  // A typo must leave the flagship deployment's tours in place rather
+  // than silently dropping them — same fail-safe direction as
+  // `VITE_TELEMETRY_ENABLED`.
+  it('stays enabled for a near-miss value', () => {
+    ;(import.meta.env as Record<string, string>).VITE_SAMPLE_TOURS = 'False'
+    expect(sampleToursEnabled()).toBe(true)
+    ;(import.meta.env as Record<string, string>).VITE_SAMPLE_TOURS = '0'
+    expect(sampleToursEnabled()).toBe(true)
+    ;(import.meta.env as Record<string, string>).VITE_SAMPLE_TOURS = ''
+    expect(sampleToursEnabled()).toBe(true)
   })
 })
 

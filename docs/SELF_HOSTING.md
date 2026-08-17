@@ -880,6 +880,7 @@ variable at all — they ship in your own build.
 | `VITE_EARTH_ASSET_BASE` | *(unset)* | Leave it. The Earth textures are committed to the repo, so your build ships them and serves them from your domain. Set it only to put them on a CDN instead. |
 | `VITE_API_ORIGIN` | `https://` + `W2` | Only needed for desktop builds (Phase 15), harmless to set now. |
 | `VITE_DEFAULT_UI_SCALE` | *(unset)* | `1.5` suits kiosks. Clamped to [0.5, 2.0]; a visitor's own choice always wins. |
+| `VITE_SAMPLE_TOURS` | `false` | Set it unless you ran `import-snapshot`. Drops the two bundled sample tours, which drive SOS datasets your node doesn't have. See [Reference C](#reference-c--fork-pinned-source-values). |
 
 Save and Deploy. Record the project name as `W10`.
 
@@ -2012,7 +2013,8 @@ is [`scripts/lib/expected-bindings.ts`](../scripts/lib/expected-bindings.ts).
 `VITE_BUILD_CHANNEL`, `VITE_TELEMETRY_ENABLED`,
 `VITE_EARTH_ASSET_BASE`, `VITE_API_ORIGIN`,
 `VITE_DEFAULT_UI_SCALE`, `VITE_VIDEO_PROXY_BASE`,
-`VITE_CAPTION_PROXY_BASE`, `VITE_VOICE_WS_STREAMING`,
+`VITE_CAPTION_PROXY_BASE`, `VITE_SAMPLE_TOURS`,
+`VITE_VOICE_WS_STREAMING`,
 `VITE_VOICE_WAKEWORD_MODEL_URL`. Changing one needs a **rebuild**,
 not just a redeploy.
 
@@ -2070,6 +2072,7 @@ quietly dependent on upstream infrastructure.
 | `VITE_EARTH_ASSET_BASE` | *(unset — served from your own origin)* | Earth basemap textures (diffuse / night lights / normal / borders) for the photoreal Earth and 2D overlays — loaded by **every** node. | **Nothing to do.** The eleven files are committed under `public/assets/basemaps/`, so your clone has them and your build serves them itself — no install-time fetch, and it works air-gapped. Set this only to move them to a CDN. |
 | `VITE_VIDEO_PROXY_BASE` | `https://video-proxy.zyra-project.org/video` | Resolves **legacy SOS** `vimeo:` data refs into HLS/MP4. | Only if you ran `import-snapshot` and want video independent of upstream. The proxy worker isn't in this repo. |
 | `VITE_CAPTION_PROXY_BASE` | `https://video-proxy.zyra-project.org/captions` | CORS shim for legacy `sos.noaa.gov` `.srt` captions. | Same. |
+| `VITE_SAMPLE_TOURS` | *(unset — the two bundled tours are shown)* | "Climate Connections" and "Climate Futures", the sample tours committed under `public/assets/`. They are injected into the catalog **client-side**, after `/api/v1/catalog` returns, so they appear even on a node that has published nothing — and they load SOS handles (`INTERNAL_SOS_25_VIDEO`, `INTERNAL_SOS_SSP_GA_19`, …) that only exist upstream. On your node the cards open a tour that can load nothing, and Orbit recommends them to newcomers besides. | **Set it to `false`** unless you ran `import-snapshot` and hold those datasets. It drops those two rows only — your own published tours are unaffected (that is the `tours` node-feature toggle, which is broader). If CI builds, it is a **GitHub Variable** (Settings → Secrets and variables → Actions → Variables, or the `production` Environment); `ci.yml` already passes it through. If Cloudflare builds, set it in Pages → Settings → Environment variables. |
 | `TERRAVIZ_DOCS_URL` | `https://github.com/zyra-project/terraviz/blob/main/docs/SELF_HOSTING.md` | Base for the 19 links the `/setup` console makes into this guide (17 anchored per phase). Read at **build** time by `npm run build:setup-page`. | Once your fork's copy of this guide diverges from upstream's. Set it to your own blob URL — including the branch, if yours isn't `main` — and rebuild. |
 
 Content you publish through the portal is transcoded to your own

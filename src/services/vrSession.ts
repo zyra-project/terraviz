@@ -533,6 +533,36 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     // transparent and reveal the camera feed; VR keeps it disabled
     // for a slight performance edge (one less blend pass per pixel).
     alpha: isAr,
+    // State a preference for the discrete GPU on a hybrid-graphics
+    // machine. Three.js leaves this at `'default'`, and MapLibre already
+    // asks for `'high-performance'`, so absent this the 2D globe and the
+    // immersive globe are asking for different things on one machine.
+    //
+    // **It is a hint, and it is not always honoured.** Measured on a
+    // Windows box with an RTX 4090: an unhinted context came back as
+    // `ANGLE (Intel, Intel(R) UHD Graphics …)`, and so did a context
+    // that asked for `'high-performance'`. Chrome appears to pick one
+    // GPU for its whole GPU process, so a per-context request cannot
+    // move it; what moved it was the Windows per-app graphics
+    // preference. So this option does not guarantee an adapter, and on
+    // that platform it may do nothing at all.
+    //
+    // What it buys where it *is* honoured: `WebXRManager.setSession`
+    // awaits `gl.makeXRCompatible()`, which migrates the context to the
+    // adapter driving the headset. That migration can force a context
+    // loss and restore — every texture, including the dataset video and
+    // the whole photoreal Earth stack, destroyed and re-uploaded —
+    // landing inside the session-start ordering this file documents as
+    // already delicate (see the `XRControllerModelFactory` note above).
+    // A context created on that adapter has nothing to migrate. Where
+    // the hint is ignored, `makeXRCompatible` still handles correctness;
+    // this only removes a cost, and only sometimes.
+    //
+    // Deliberately *not* applied to the Orbit character page: that scene
+    // never enters XR, so it gains nothing here, and forcing a laptop
+    // onto its discrete GPU for a decorative idle animation is a real
+    // battery cost for no user-visible benefit.
+    powerPreference: 'high-performance',
   })
   renderer.setPixelRatio(window.devicePixelRatio)
   renderer.setSize(window.innerWidth, window.innerHeight)

@@ -183,9 +183,126 @@ data-encoded datasets:
   explicit alongside the tag, via `scale=in_range=full:out_range=full`.
   `-x264-params` is not needed; the ffmpeg-level flags suffice.
 
-  Still unverified: Safari, iOS Safari, and Firefox. `npm run
-  check:luma-range -- --serve` prints a LAN URL for testing on a real
-  device.
+  **iOS Safari agrees with Chrome to the digit** (Safari 26.6 / iOS
+  18.7, measured 2026-08-13 through the WebGL path). Every row of the
+  table above reproduces: today's settings and `tv`+conversion both fit
+  gain 1.0005, `-color_range pc` alone breaks identically at gain
+  0.8589 / offset 15.99, and the recommended
+  `scale=in_range=full:out_range=full` + `pc` is 256/256 exact. The
+  second decoder family does not change the recommendation.
+
+  **Measured on five browser/platform pairs, which do not agree.** Two
+  variants past that table were added to narrow *why* the
+  recommendation works. Running everything on three further pairs found
+  two separate things, and the honest summary is a table rather than a
+  rule (values are the WebGL path, the one the globe uses):
+
+  | setting | iOS Safari 26.6 | macOS Safari 26.5.2 | Chrome 150 / Win 11 | Chrome 151 / macOS M2 | Quest 3 / OculusBrowser 149 |
+  |---|---|---|---|---|---|
+  | today (no colour flags) | 220/256 | 220/256 | 220/256 | 220/256 | 214/256 |
+  | `-color_range pc` alone | **fail** 0.859 | **fail** 0.859 | **fail** 0.859 | **fail** 0.859 | **fail** 0.859 |
+  | `tv` + matching conversion | 220/256 | 220/256 | 220/256 | 220/256 | — |
+  | full conversion + `pc` (recommended) | **256/256** | **256/256** | **256/256** | 220/256 | **256/256** |
+  | conversion + range tag only | **256/256** | **256/256** | **256/256** | 220/256 | **256/256** |
+  | recommended minus `-color_trc` | **256/256** | **256/256** | **fail** 1.130 | 220/256 | **fail** 1.129 |
+
+  (The Quest `tv`+conversion render row was lost in transit off the
+  headset; its readout row was 220/256 and the setting is not in
+  question on any pair.)
+
+  **A partial tag set is worse than no tags at all, and this is a Blink
+  behaviour rather than one browser's quirk.** Dropping only
+  `-color_trc` — leaving conversion, range tag, primaries and matrix —
+  breaks on *both* Chromium pairs that honour the range tag at all:
+  Windows Chrome at gain 1.1295 / offset −14.52, and the Quest's
+  OculusBrowser at 1.1291 / −14.54. Two independently built Chromiums
+  on entirely unrelated hardware, agreeing to three decimal places.
+  Both WebKit pairs return the same file clean at 256/256. macOS Chrome
+  is not a counterexample: it ignores the range tag on every variant,
+  so it has nothing to half-apply.
+
+  That matters for how seriously to take the rule. A single failing
+  browser invites working around it; a reproducible Blink behaviour is
+  most of the web, and the argv is the only place it can be fixed. The
+  transfer tag is not required in the
+  abstract — the range-only variant omits transfer, primaries and
+  matrix together and is never worse than the recommendation anywhere.
+  What breaks is naming *some* colour tags and leaving transfer
+  unspecified, which gives a decoder enough to commit to a colour space
+  and nothing to interpret it with. The error's shape supports that
+  reading (8 exact values with max|e| 20 is a curve, where the range
+  failure above is close to affine), though the check fits a straight
+  line and cannot prove a mechanism. **Tag everything, or tag only the
+  range — never something in between.**
+
+  **And the recommendation's payoff is not universal — one pair does
+  not honour it.** macOS Chrome returns the recommended setting at
+  220/256, gain 1.0007: identical to the untagged path rather than the
+  256/256 the other three give. Nothing is wrong with those values —
+  they pass, within one code, exactly as today's settings do. What is
+  missing is the reason to prefer the setting at all. Full-range
+  tagging was chosen for *occupancy*, 256 reachable codes rather than
+  256 squeezed through 219, and on that pair the benefit does not
+  arrive. It is Chrome-on-macOS specifically, and four of the five
+  pairs measured — including a second Chromium, on the Quest — return
+  the recommended setting at 256/256. Safari on the same Mac returns
+  256/256 too, so this is neither an engine nor an OS property but the
+  one combination.
+
+  The recommendation still stands, because it is never worse than the
+  alternatives: exact on four pairs, equal to untagged on the fifth,
+  failing nowhere. But nothing downstream may assume a full 256-level
+  lattice. The occupancy loss described in the next bullet is a live
+  possibility on a *correctly tagged* stream rather than only on a
+  legacy untagged one, and the Analyze histogram will comb on that pair
+  either way.
+
+  This corrects an earlier entry here which read two variants passing
+  on iOS Safari as evidence that the non-range colour tags were
+  documentation rather than mechanism. That was one platform's result
+  stated as a general conclusion: the second platform falsified the
+  claim about `-color_trc`, and the third falsified the assumption that
+  the recommended setting delivers 256/256 everywhere.
+
+  Still unverified: Firefox. macOS Safari 26.5.2 is in the table above
+  and analysed below, so the only engine left unmeasured on this
+  question is Gecko. Every preview deploy
+  serves the check at `/luma-check/page.html`, which is the practical
+  way to reach a phone or a headset; `npm run check:luma-range --
+  --serve` prints a LAN URL for a machine on the same network.
+
+  **The 2D-canvas readout cannot be rescued, and this measured it.**
+  On the same device all three `readout*` diagnostics fail identically
+  on every variant — gain ≈1.003, offset ≈+6, up to 11 codes of error,
+  endpoints intact. Pinning `colorSpace: 'srgb'` on both the context
+  and the `getImageData` call changes nothing, and neither does one
+  full-size blit instead of per-texel 1×1 draws. Those two variants
+  existed to isolate the cause so a fix could be chosen by measurement;
+  the measurement says there is no arrangement of the 2D path that
+  avoids the transform. macOS Safari reproduces the iOS numbers exactly
+  (gain 1.0033, offset +6.10, 12/256), which is the first measurement
+  of the macOS half of that claim rather than an assertion about it.
+  And the controls now isolate it on a single machine: **Chrome on that
+  same Mac passes all three readout paths** and matches its WebGL path,
+  as does Chrome on Windows. Same hardware, same VideoToolbox, one
+  engine transforms and the other does not — so this is WebKit's doing,
+  not a property of 2D canvases and not Apple's colour management. This
+  is what
+  [`glLumaSampler`](../src/services/glLumaSampler.ts) shipping without
+  a 2D fallback buys, and it is now measured on the platform that
+  motivated it rather than assumed.
+
+  **On Adreno the two paths disagree by a code, in the other
+  direction.** The Quest is the only device measured where the WebGL
+  and 2D readings are not identical, and there the GL path is the
+  marginally noisier one: 214/256 against the readout's 220/256 on the
+  untagged settings, 220/256 against 217/256 on the 8K frame. Every
+  reading stays within `max|e|` 1 and passes, and one code is well
+  under the quantisation step any physical value carries anyway
+  (`docs/DATA_ANALYSIS_PLAN.md` §A2), so this changes nothing about
+  what the hover readout may claim. Recorded so that a ±1 discrepancy
+  seen on Adreno later is recognised as texture-sampling rounding
+  rather than chased as a decode bug.
 
   **The untagged round trip preserves values, not occupancy.** Shipped
   untagged, the encoder contracts to limited range and both decoders
@@ -207,6 +324,11 @@ data-encoded datasets:
   measured.
 - **Single rendition.** The 720p rung would resample a data raster to a quarter
   scale. Data-encoded datasets should publish the 4096×2048 rung only.
+  **Revisited 2026-08-16:** "the 4096×2048 rung" and "the source rung" were the
+  same number while every dataset was 4096×2048, and a 7200×3600 source
+  separates them — the constant now decimates by a non-integer factor above it
+  and upscales beneath it. See §The ladder as a relative shape in
+  [`DATA_ENCODED_RESOLUTION_PLAN.md`](DATA_ENCODED_RESOLUTION_PLAN.md).
 
 **`segmentDescriptorHash` in `cli/lib/hls-incremental.ts:212-224` must have its
 `v: 1` bumped.** Its own docstring warns that ladder-wide codec settings are not
@@ -466,3 +588,123 @@ A separate idea the chroma planes *could* legitimately serve — not more
 precision, but a **second variable at quarter resolution** (wind U/V
 alongside a scalar, say) where coarse spatial resolution is acceptable for
 the secondary field. That warrants its own design if a dataset wants it.
+
+### Why the frame is 4096×2048, and what more resolution would cost
+
+The companion question to the one above — not "more bits per texel" but
+"more texels" — and it recurs every time a source is finer than the grid.
+A 4096-wide equirectangular frame is **9.78 km per texel at the equator**
+(40,075 km ÷ 4096), so anything convection-permitting arrives already
+finer than the globe can show. `cli/lib/sos-spec.ts` pins 4096×2048 as the
+ladder top; deviating from it is a **warning**, not a failure, so nothing
+mechanically stops a larger frame. What stops it is further downstream.
+
+| target | grid (2:1) | megapixels | vs shipped | fits H.264/HEVC level 6.2 |
+|---|---|---|---|---|
+| 9.78 km — shipped | 4096×2048 | 8.4 | 1× | yes — measured, level 5.1 |
+| 4.89 km | 8192×4096 | 33.6 | 4× | yes — measured, level **6.0** |
+| 3.75 km | 10687×5343 | 57.1 | 6.8× | **no** |
+| 3 km — MPAS mesh scale | 13358×6679 | 89.2 | 10.6× | **no** |
+
+Both codecs cap a frame at **35,651,584 pixels** (8192×4352) at their
+highest defined level. That is a spec ceiling, not a bitrate or flag
+problem: everything past it is unencodable at any quality. Practical
+decode limits sit lower still — plenty of hardware advertises a high
+level and tops out at 4K.
+
+The two "yes" rows are measured rather than inferred: an 8192×4096
+encode through this repo's exact settings is accepted by x264 at Main
+profile and stamps **level 6.0**, not 6.2. Levels 6.0/6.1/6.2 share one
+139,264-macroblock frame ceiling and differ only in bitrate, and
+8192×4096 is 131,072 macroblocks — so it clears the lowest of the three,
+which is a better compatibility position than the ceiling figure alone
+suggests. What that encode also showed is that the *frame size* is not
+what bites: holding `maxBitrateKbps` at the shipped 25 000 while
+quadrupling the pixels degrades the value round trip in the tail
+(p99.9 error 2 → 7, worst texel 13 → 152), and the damage clusters in
+high-frequency regions — the storm cores, for a reflectivity field.
+At matched bits-per-pixel the 8K encode is indistinguishable from the
+shipped rung. Full numbers, the device-decode probe that is still
+outstanding, and what building this would take are in
+[`DATA_ENCODED_RESOLUTION_PLAN.md`](DATA_ENCODED_RESOLUTION_PLAN.md).
+
+Four routes past that ceiling get proposed. In rough order of how often:
+
+- **A frame sequence instead of a video.** There is no client-side frame
+  animation to fall back on. `src/utils/frames.ts` resolves a frame
+  *query* to a single `ResolvedFrame` — one URL, one timestamp — for deep
+  links and Orbit markers; it picks a frame rather than stepping through
+  them, and `playbackController.ts` contains no reference to frames at
+  all, driving one `hlsService.getVideo()`. Frames are an *upload* format:
+  `cli/transcode-from-dispatch.ts` declares
+  `SourceKind = 'video' | 'frames'` and feeds the frames branch through
+  ffmpeg's `image2` demuxer into the same HLS ladder, capped at
+  `MAX_IMAGE_SEQUENCE_FRAMES = 10_000`. So a frame set does not dodge the
+  transport — it *becomes* it, with the same losses.
+- **Tiles played in lockstep** (four 4K quadrants, say). The arithmetic
+  disappoints first: each quadrant is 180°×90°, itself 2:1, so four
+  4096×2048 tiles compose to 8192×4096 — 4.89 km, not 3.75. Reaching 3.75
+  needs a 3×3 tiling and nine streams. Then the engineering: the 4-globe
+  layout proves four concurrent decodes work, but `viewportManager` syncs
+  **cameras only** (`syncCameras` / `jumpTo` / a `syncLock` re-entry
+  guard) and nothing time-syncs panels. Drift is invisible across four
+  *different* datasets and fatal across four tiles of *one* field —
+  `currentTime` snaps to the nearest decodable point, each element keeps
+  its own clock, and a one-frame skew means the values either side of a
+  seam come from different timesteps. Seams are a data problem
+  independently: bilinear filtering samples across tile edges, so edges
+  need padding and deliberate clamping, and `datasetProbe`,
+  `datasetStats`, and `glLumaSampler.snapshot()` all assume one frame in
+  one context.
+- **A resolution ladder with capability fallback.** The most promising of
+  the four, because the machinery already exists and was deliberately
+  switched off. `cli/lib/ffmpeg-hls.ts` carries a three-rung display
+  ladder (4096×2048, 2160×1080, 1440×720) and a **separate single-rung
+  ladder for data-encoded**, on the grounds recorded there: the lower
+  rungs "would resample a data raster to a quarter scale." `hlsService.ts`
+  already implements exactly the fallback such a scheme wants — mobile
+  caps `autoLevelCapping` to the screen dimension, and a media error caps
+  one level below "to prevent repeatedly hitting the same wall."
+  The gap is that ABR switches on **bandwidth**, not only on capability.
+  For display video those are one feature; here a bandwidth dip would swap
+  the rung mid-session, changing the value under the cursor and making
+  "the displayed frame" that Analyze reduces non-deterministic.
+  **The workable form is to pin, not adapt:** publish both rungs, resolve
+  capability once at load, then set `hls.currentLevel` (which locks a rung)
+  rather than `autoLevelCapping` (which leaves ABR free beneath the cap),
+  keeping the media-error handler as the escape hatch since a decode
+  failure is real capability information. Two costs to price in — the
+  downscale must be `flags=neighbor` per the Encoder section, and
+  neighbour decimation means the rungs genuinely *disagree* about the
+  value at a given lat/lon, so two viewers on different hardware read
+  different numbers and the Analyze caveat line has to say so; and
+  changing ladder settings requires bumping `v: 1` in
+  `segmentDescriptorHash` (`cli/lib/hls-incremental.ts`) or segments
+  cached under the old settings get recycled into a bundle carrying the
+  new ones.
+- **One larger single stream.** Unglamorous and the cheapest real gain:
+  8192×4096 is under the codec ceiling, so it needs no new architecture at
+  all — no sync, no seams, no rung selection, one decoder. It wants device
+  testing rather than design work, and `sos-spec` will warn on the
+  resolution. One caveat the encode measurement added: it is *not* purely
+  a settings-free bump, because `DATA_ENCODED_RENDITIONS`' 25 Mbps cap
+  corrupts values at four times the pixels and has to scale.
+  [`DATA_ENCODED_RESOLUTION_PLAN.md`](DATA_ENCODED_RESOLUTION_PLAN.md)
+  is the implementation plan.
+
+Note what none of these move. Every route still runs the luma through
+`yuv420p` and the limited-range round trip, so the ~219 distinguishable
+levels of §Encoder are unchanged however finely space is subdivided.
+**Tiling and laddering buy spatial resolution, never value precision** —
+if a dataset's problem is fidelity rather than sharpness, this whole
+section is the wrong axis and the preceding one is the right one.
+
+So, in order of preference: **accept 9.78 km** (usually correct — the
+globe is a browsable surface, not an analysis grid, and `datasetStats`
+already weights by true cell area rather than pretending texels are
+equal); **test one 8192×4096 stream** if a source genuinely warrants it;
+**pin a two-rung ladder** if that stream proves undecodable somewhere it
+matters; and past ~35 MP, stop trying to make video carry it — the
+grain-aligned answer is a tiled pyramid with zoom-dependent LOD, the way
+GIBS already serves the basemap, which is a different renderer path and
+its own design.

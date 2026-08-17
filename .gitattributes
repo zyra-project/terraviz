@@ -35,3 +35,15 @@ src-tauri/gen/**/*.png  -filter -diff -merge
 # price is carrying them in history, which is why they are 2048 /
 # 4096 / 8192 and not larger.
 public/assets/basemaps/** -filter -diff -merge
+
+# The luma-check bundle is a diagnostic, so how it fails matters more
+# than the 90 KB it costs. Through LFS, a clone without `git lfs pull`
+# serves text files wearing `.mp4` names, and the check then reports
+# "no H.264 decoder" for every browser it is opened in — a confident
+# wrong answer, which for a probe is worse than no answer. The Phase 0
+# 8192x4096 frame is 78 KiB and the rest are ~3 KiB; flat bands
+# compress to almost nothing, so plain blobs cost little here.
+#
+# They are already plain blobs in history — this pins that, rather than
+# leaving it to whether the committer happened to have LFS installed.
+public/luma-check/out/*.mp4 -filter -diff -merge
