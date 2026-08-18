@@ -826,11 +826,12 @@ chain is restored, since `heatmap` alone cannot roll 0–360 longitudes or regri
 a Gaussian axis. Then this dataset is an ordinary stored workflow with **no
 preprocessing at all**, and so is every other model-history source.
 
-The issue is written and ready to file:
-[`docs/upstream/zyra-issue-netcdf-dimension-selection.md`](upstream/zyra-issue-netcdf-dimension-selection.md).
-It lives here rather than at `NOAA-GSL/zyra` only because it could not be filed
-from the session that wrote it — cross-owner repository attach is unsupported,
-so filing needs a session scoped to that repo, or a paste into the issue form.
+**Filed:** [zyra-project/zyra#300](https://github.com/zyra-project/zyra/issues/300),
+labelled `relay-upstream` so the mirror's relay creates the twin at
+`NOAA-GSL/zyra` (the original). The body is kept at
+[`docs/upstream/zyra-issue-netcdf-dimension-selection.md`](upstream/zyra-issue-netcdf-dimension-selection.md)
+— worth confirming the upstream twin appeared, since the relay depends on
+`SYNC_PAT_ORG` holding upstream write access.
 
 **(b) At the source — cheapest, if CSL will do it.** If the model also wrote a
 2-D surface field (an `sfcf`-style file, or surface ozone as GRIB2), today's

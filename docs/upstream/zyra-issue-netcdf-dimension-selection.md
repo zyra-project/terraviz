@@ -1,14 +1,21 @@
 # [Workflow Gap] Dimension selection on the existing NetCDF input path
 
-> **Ready to file at `NOAA-GSL/zyra`.** Uses their
-> `⚡ Workflow Gap / Missing Command` template; labels `workflow-gap`,
-> `enhancement`. Kept in-repo because it could not be filed from the session
-> that wrote it — that session was scoped to `zyra-project/terraviz`, and
-> cross-owner attach is unsupported.
+> **FILED:** [zyra-project/zyra#300](https://github.com/zyra-project/zyra/issues/300),
+> labelled `relay-upstream`.
+>
+> `NOAA-GSL/zyra` is the original; `zyra-project/zyra` is a downstream mirror
+> with a documented relay for downstream-originated issues (its
+> `.github/workflows/README.md` names AI-agent sessions as a case). Applying
+> `relay-upstream` is what creates the upstream twin, so the label is the
+> filing, not a shortcut around it. Filed downstream because this session was
+> scoped to `zyra-project/*` and cross-owner attach is unsupported.
+>
+> **Check the twin actually appeared** at `NOAA-GSL/zyra`. The relay needs
+> `SYNC_PAT_ORG` to hold upstream write access; without it the label is inert
+> and the issue needs pasting upstream by hand. This copy is the paste source.
 >
 > Body verified against zyra `main` @ v0.1.54. Every claim about what already
-> works cites the file and line it was read from, so a reviewer can check it
-> without re-deriving anything.
+> works cites the file and line it was read from.
 
 ## Summary
 
