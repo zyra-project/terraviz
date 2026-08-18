@@ -1,0 +1,147 @@
+# UFS-Chem global surface ozone (retro) — data-encoded globe dataset.
+#
+# Design notes: ../UFS_CHEM_SFC_OZONE_PLAN.md
+#
+# ============================================================================
+# NOT RUNNABLE AS COMMITTED. Two reasons, both deliberate:
+#
+#   1. Every value marked ADAPT is a placeholder until the catalog is
+#      inventoried (`scripts/inventory-thredds.py`, plan §2). The variable
+#      name, file names, cadence, units and vmax are all unknown today, and
+#      guessing them would produce a dataset that renders wrong rather than
+#      one that fails loudly.
+#
+#   2. `gsl.noaa.gov` 403s datacenter/CI egress (plan §3.1). A GitHub Actions
+#      runner cannot fetch these URLs at all, whatever this file says. Resolve
+#      that first — mirroring the collection to S3 is the preferred fix, and
+#      would also let these URLs be templated rather than literal.
+# ============================================================================
+#
+# Why NCSS URLs rather than fileServer: NCSS subsets server-side, so a
+# multi-variable UFS history file yields just the surface ozone field. It needs
+# no allowlist change because an NCSS request is an ordinary HTTP GET, which
+# `convert-format --inputs` already fetches (plan §3.3). Fall back to
+# /thredds/fileServer/... + a `process extract-variable` stage if this TDS has
+# NCSS disabled.
+#
+# Why literal dates and no {{cycle_date}}: this is retrospective data, so the
+# dates are fixed. The placeholder grammar has no day-of-year formatter and
+# could not express GSL's <YYDDDHHmm><FFF> names anyway — which only matters
+# for a live feed (plan §4.1).
+#
+# DATA-ENCODED CONTRACT: heatmap carries data_encoded + color_scale_file + a
+# cmap_inline palette (a named --cmap is IGNORED), and NO width/height/basemap.
+# The 4K grid comes from `reproject` resampling the DATA, never from resizing
+# luma. Output is the frame set, not an MP4 (plan §4.5).
+#
+# FRAME LIST: nine frames shown to establish the pattern. Expand to the real
+# span once the cadence is known. Measured (plan §4.4), the byte budget is not
+# the constraint — 121 hourly frames is 62% of MAX_PIPELINE_JSON_BYTES. The
+# binding limit is MAX_PIPELINE_ARG_LIST_ITEMS (128), which 5 days of hourly
+# output nearly saturates; split a longer span across runs.
+
+stages:
+  # 1. Fetch one surface-ozone field per time step, already subset by the
+  #    server, and write each as a GeoTIFF named by its valid time.
+  - stage: process
+    command: convert-format
+    args:
+      format: geotiff
+      var: 'o3_sfc'            # ADAPT: exact variable name from the .das probe
+      output_dir: /work/tif
+      inputs:
+        # ADAPT: file names, variable, and the time range. `accept=netcdf4`
+        # asks NCSS for NetCDF; west/east=-180/180 requests a +/-180 grid so
+        # `reproject` has less to undo.
+        - 'https://gsl.noaa.gov/thredds/ncss/grid/retro/ufs_chem_sfc_ozone/ufs_chem_sfc_ozone_20170701.nc?var=o3_sfc&north=90&south=-90&west=-180&east=180&horizStride=1&time_start=2017-07-01T00:00:00Z&time_end=2017-07-01T00:00:00Z&accept=netcdf4'
+        - 'https://gsl.noaa.gov/thredds/ncss/grid/retro/ufs_chem_sfc_ozone/ufs_chem_sfc_ozone_20170701.nc?var=o3_sfc&north=90&south=-90&west=-180&east=180&horizStride=1&time_start=2017-07-01T03:00:00Z&time_end=2017-07-01T03:00:00Z&accept=netcdf4'
+        - 'https://gsl.noaa.gov/thredds/ncss/grid/retro/ufs_chem_sfc_ozone/ufs_chem_sfc_ozone_20170701.nc?var=o3_sfc&north=90&south=-90&west=-180&east=180&horizStride=1&time_start=2017-07-01T06:00:00Z&time_end=2017-07-01T06:00:00Z&accept=netcdf4'
+        - 'https://gsl.noaa.gov/thredds/ncss/grid/retro/ufs_chem_sfc_ozone/ufs_chem_sfc_ozone_20170701.nc?var=o3_sfc&north=90&south=-90&west=-180&east=180&horizStride=1&time_start=2017-07-01T09:00:00Z&time_end=2017-07-01T09:00:00Z&accept=netcdf4'
+        - 'https://gsl.noaa.gov/thredds/ncss/grid/retro/ufs_chem_sfc_ozone/ufs_chem_sfc_ozone_20170701.nc?var=o3_sfc&north=90&south=-90&west=-180&east=180&horizStride=1&time_start=2017-07-01T12:00:00Z&time_end=2017-07-01T12:00:00Z&accept=netcdf4'
+        - 'https://gsl.noaa.gov/thredds/ncss/grid/retro/ufs_chem_sfc_ozone/ufs_chem_sfc_ozone_20170701.nc?var=o3_sfc&north=90&south=-90&west=-180&east=180&horizStride=1&time_start=2017-07-01T15:00:00Z&time_end=2017-07-01T15:00:00Z&accept=netcdf4'
+        - 'https://gsl.noaa.gov/thredds/ncss/grid/retro/ufs_chem_sfc_ozone/ufs_chem_sfc_ozone_20170701.nc?var=o3_sfc&north=90&south=-90&west=-180&east=180&horizStride=1&time_start=2017-07-01T18:00:00Z&time_end=2017-07-01T18:00:00Z&accept=netcdf4'
+        - 'https://gsl.noaa.gov/thredds/ncss/grid/retro/ufs_chem_sfc_ozone/ufs_chem_sfc_ozone_20170701.nc?var=o3_sfc&north=90&south=-90&west=-180&east=180&horizStride=1&time_start=2017-07-01T21:00:00Z&time_end=2017-07-01T21:00:00Z&accept=netcdf4'
+        - 'https://gsl.noaa.gov/thredds/ncss/grid/retro/ufs_chem_sfc_ozone/ufs_chem_sfc_ozone_20170702.nc?var=o3_sfc&north=90&south=-90&west=-180&east=180&horizStride=1&time_start=2017-07-02T00:00:00Z&time_end=2017-07-02T00:00:00Z&accept=netcdf4'
+      output_names:
+        # Valid-time names: `scan-frames` recovers the range from them and the
+        # frame ordering falls out of the sort.
+        - '20170701T000000.tif'
+        - '20170701T030000.tif'
+        - '20170701T060000.tif'
+        - '20170701T090000.tif'
+        - '20170701T120000.tif'
+        - '20170701T150000.tif'
+        - '20170701T180000.tif'
+        - '20170701T210000.tif'
+        - '20170702T000000.tif'
+
+  # 2. Normalise the grid. This is also the ONLY legitimate place to change
+  #    resolution for a data-encoded dataset: it resamples the data, whereas
+  #    resizing on the heatmap stage would average luma that carries values.
+  - stage: process
+    command: reproject
+    args:
+      inputs:
+        - /work/tif/20170701T000000.tif
+        - /work/tif/20170701T030000.tif
+        - /work/tif/20170701T060000.tif
+        - /work/tif/20170701T090000.tif
+        - /work/tif/20170701T120000.tif
+        - /work/tif/20170701T150000.tif
+        - /work/tif/20170701T180000.tif
+        - /work/tif/20170701T210000.tif
+        - /work/tif/20170702T000000.tif
+      output_dir: /work/wrapped
+      dst_bounds: [-180, -90, 180, 90]
+      # ADAPT: drop width/height to keep the model's native grid, which is
+      # honester and lighter. Set them only to upsize toward the 4096x2048
+      # SOS frame.
+      width: 4096
+      height: 2048
+
+  # 3. The data-encoded render.
+  - stage: visualize
+    command: heatmap
+    args:
+      inputs:
+        - /work/wrapped/20170701T000000.tif
+        - /work/wrapped/20170701T030000.tif
+        - /work/wrapped/20170701T060000.tif
+        - /work/wrapped/20170701T090000.tif
+        - /work/wrapped/20170701T120000.tif
+        - /work/wrapped/20170701T150000.tif
+        - /work/wrapped/20170701T180000.tif
+        - /work/wrapped/20170701T210000.tif
+        - /work/wrapped/20170702T000000.tif
+      output_dir: /work/images/frames
+      data_encoded: true
+      color_scale_file: /work/color-scale.json   # OUTPUT — heatmap writes it
+      units: 'ppbv'                              # ADAPT: from the .das probe.
+                                                 # If the file stores mol mol-1,
+                                                 # hover reads 0.0000000452 and
+                                                 # zyra cannot rescale — plan
+                                                 # §4.3 covers the options.
+      # Ozone is NOT an aerosol: it has a large non-zero global background, so
+      # the aerosol convention of a transparent low band would erase most of the
+      # atmosphere. transparent_range 0 keeps the whole field visible; only true
+      # no-data fades. YlOrRd follows the air-quality colour convention.
+      cmap_inline: '{"type":"continuous","base":"YlOrRd","transparent_range":0,"blend_range":8,"overall_alpha":0.92}'
+      vmin: 0            # keep at 0: raising it clamps clean-air values, and
+                         # hover fidelity is the point of data-encoding
+      vmax: 80           # ADAPT: ~p99.9 of the real field. Too high => the
+                         # classic near-black globe.
+      # NO width/height (forbidden with data_encoded), NO basemap.
+
+  # 4. Derive the dataset time range from the valid-time frame names.
+  - stage: process
+    command: scan-frames
+    args:
+      frames_dir: /work/images/frames
+      datetime_format: '%Y%m%dT%H%M%S'
+      period_seconds: 10800     # ADAPT: 3600 if the retro output is hourly
+      output: /work/frames-meta.json
+
+# Publish the FRAME SET, not an MP4 (plan §4.5): compose-video plus the HLS
+# transcode would put two lossy generations over luma whose values are the
+# data. Remember to set playback_fps on the dataset row, or these frames play
+# in about a second.
