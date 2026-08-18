@@ -1,0 +1,121 @@
+# Reachability probe for NOAA GSL's THREDDS server, from a real CI runner.
+# Manually triggered, throwaway-allowed — same spirit as zyra-spike.yml.
+#
+# Why this exists: docs/UFS_CHEM_SFC_OZONE_PLAN.md §3.1 established that
+# gsl.noaa.gov 403s *one* datacenter egress IP, and inferred that a GitHub
+# Actions runner would be refused too. That inference is untested and load
+# bearing — GHA runs on Azure ranges, not the range that was measured, and
+# Cloudflare rules are commonly ASN/reputation scoped. The answer decides the
+# architecture:
+#
+#   reachable   -> the subsetting step runs as an ordinary Python step in the
+#                  same workflow, pulling ~12 MB over OPeNDAP. No external
+#                  hosting, no separate mirror service, no `acquire http` stage.
+#   refused     -> the subset has to happen on a NOAA-side machine and the
+#                  frames must be published somewhere CI can read.
+#
+# Note this is about REACHABILITY only. Even when reachable, zyra still cannot
+# subset a 4-D NetCDF (plan §3.6), so the Python step is required either way —
+# the question is only *where* it runs.
+#
+# Sends a custom User-Agent throughout: NOAA GSL IT confirmed the stock
+# python-requests/curl UA trips a Cloudflare rule of its own, so a default UA
+# would conflate two separate causes of refusal.
+name: UFS-Chem source reachability
+
+on:
+  workflow_dispatch:
+    inputs:
+      cycle_date:
+        description: 'Cycle date to probe (YYYYMMDD)'
+        required: true
+        default: '20260817'
+      run_mirror:
+        description: 'Also run the real mirror script for one frame (the end-to-end test)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    env:
+      UA: 'terraviz-workflow/1.0 (+https://github.com/zyra-project/terraviz)'
+      DATE: ${{ inputs.cycle_date }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Runner egress IP
+        run: |
+          echo "runner egress: $(curl -sS --max-time 20 https://api.ipify.org || echo unknown)" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: HTTP probes against gsl.noaa.gov
+        run: |
+          {
+            echo "## HTTP reachability (custom UA)"
+            echo ""
+            echo "| Endpoint | Status |"
+            echo "|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          B="https://gsl.noaa.gov/thredds"
+          F="$B/fileServer/data/ufs-chem_csl/$DATE/gfs.t00z.atmf000.nc"
+          D="$B/dodsC/data/ufs-chem_csl/$DATE/gfs.t00z.atmf000.nc"
+          probe () {
+            code=$(curl -sS --max-time 45 -A "$UA" -o /dev/null -w '%{http_code}' "$2" || echo 000)
+            echo "| $1 | \`$code\` |" >> "$GITHUB_STEP_SUMMARY"
+            echo "$1 -> $code"
+          }
+          probe "catalog.xml"        "$B/catalog/data/ufs-chem_csl/$DATE/catalog.xml"
+          probe "fileServer (HEAD)"  "$F"
+          probe "OPeNDAP .dds"       "$D.dds"
+          probe "OPeNDAP .das"       "$D.das"
+
+      - name: FTP probe against gsdftp.fsl.noaa.gov
+        continue-on-error: true
+        run: |
+          code=$(curl -sS --max-time 45 -u "anonymous:terraviz@noaa.gov" \
+                   -o /dev/null -w '%{http_code}' \
+                   "ftp://gsdftp.fsl.noaa.gov/ufs-chem_csl/$DATE/" || echo 000)
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "FTP directory listing: \`$code\` (000 = blocked or timed out)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: End-to-end — run the real mirror for one frame
+        if: ${{ inputs.run_mirror }}
+        continue-on-error: true
+        run: |
+          python3 -m pip install --quiet xarray netcdf4 rasterio
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Mirror, one frame" >> "$GITHUB_STEP_SUMMARY"
+          if python3 scripts/mirror-ufs-ozone.py \
+               --date "$DATE" --fhr-max 0 --to-ppbv --out ./probe-frames 2>&1 | tee mirror.log; then
+            {
+              echo ""
+              echo '```'
+              cat mirror.log
+              echo '```'
+              echo ""
+              echo "**Reachable and subsettable from CI** — the subsetting step can run here."
+            } >> "$GITHUB_STEP_SUMMARY"
+            ls -la ./probe-frames
+          else
+            {
+              echo ""
+              echo '```'
+              cat mirror.log
+              echo '```'
+              echo ""
+              echo "**Mirror failed** — see the log above. If the HTTP probes were 403 this is the"
+              echo "Cloudflare block and the subset must run NOAA-side."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload the probe frame
+        if: ${{ inputs.run_mirror }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ufs-chem-probe-frame
+          path: ./probe-frames/
+          if-no-files-found: ignore

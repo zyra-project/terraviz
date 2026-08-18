@@ -45,23 +45,37 @@ So this is not a bandwidth problem being solved by a clever pipeline. It is a
 **36 MB/day product** sitting behind a 267 GB access pattern, reachable by a
 mechanism (OPeNDAP) that is verified working — just not from CI.
 
-**Recommended architecture: a small NOAA-side subsetting step.** Something that
-can reach `gsl.noaa.gov` opens each `dodsC` URL and takes the surface level of
-one ozone variable. Two figures, easily confused:
+**The subsetting step is required either way** — zyra cannot subset a 4-D
+NetCDF (§3.6), so a small Python step using xarray-over-OPeNDAP has to exist
+regardless. The open question is only **where it runs**, and that turns on a
+fact not yet measured.
 
-| | 3-hourly (41 frames) | hourly (121 frames) |
-|---|---|---|
-| Pulled over the wire (384×192 native) | **12 MB** | **36 MB** |
-| Written by the mirror (1440×720 GeoTIFF) | ~152 MB | ~448 MB |
+§3.1 established that `gsl.noaa.gov` refuses *one* datacenter egress IP, and
+inferred that a GitHub Actions runner would be refused too. **That inference is
+untested and load-bearing.** GHA runs on Azure ranges, not the range that was
+measured, and Cloudflare rules are commonly ASN- or reputation-scoped. Two
+architectures follow, and they differ a lot:
 
-The wire figure is the one that matters against the 267 GB alternative; the
-written figure is larger only because the mirror resamples to the globe's grid
-in the same pass (§3.6). Either is small enough to run almost anywhere, and the
-mirror is also the natural place to fix B4 (unit rescaling) since Zyra cannot.
+| If the runner **can** reach GSL | If it **cannot** |
+|---|---|
+| The Python subset runs as an ordinary step in the same workflow | The subset runs on a NOAA-side machine |
+| Pulls ~12 MB over OPeNDAP straight into `/work` | Frames must be published somewhere CI can read |
+| **No hosting, no mirror service, no `acquire http` stage** | Needs a home for ~152 MB/cycle and a publish step |
+| One workflow, one trigger | Two systems, split provenance |
 
-The alternative — GSL allowlisting the runner so the workflow reads OPeNDAP
-directly — is cleaner still and removes the moving part. Worth asking for; the
-mirror is the fallback that does not depend on the answer.
+There is **no mirror today** — the sources are GSL's THREDDS server and the
+`gsdftp` FTP server, nothing else — so the left-hand column is not merely
+tidier, it is the difference between shipping and standing up new
+infrastructure.
+
+`.github/workflows/ufs-chem-reachability.yml` settles it: a manually-triggered
+probe that reports the runner's egress IP, HTTP/OPeNDAP/FTP status against the
+real endpoints, and then runs the actual mirror script for one frame. Run that
+before building anything further.
+
+Worth noting the sources are already reachable from a NOAA workstation — the
+OPeNDAP probe in §2.0b was run that way — so the right-hand column is always
+available as a fallback. It just costs more to operate.
 
 ## 2. Inventory — what is actually in these files
 
