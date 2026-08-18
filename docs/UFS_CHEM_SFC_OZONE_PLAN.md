@@ -2,10 +2,11 @@
 
 **Status: draft for review.**
 **Last reviewed: 2026-08-18.**
-**Revisit when:** GSL changes the Cloudflare policy on `gsl.noaa.gov`;
-`acquire thredds` is allowlisted; either collection moves to NODD/S3; the
-model starts publishing a 2-D `sfcf` surface file (which would retire the
-mirror step); or the grid/cadence changes from 384×192 hourly.
+**Revisit when:** zyra gains NetCDF dimension selection (§3.7 — this retires
+the whole bespoke path); the model starts publishing a 2-D `sfcf` surface file
+(same effect, no code needed); GSL changes the Cloudflare policy on
+`gsl.noaa.gov`; either collection moves to NODD/S3; or the grid/cadence changes
+from 384×192 hourly.
 
 Sources under evaluation, both on NOAA GSL's THREDDS server:
 
@@ -20,9 +21,10 @@ palette is a client-side transform rather than baked-in colour.
 
 ## 1. Summary
 
-The inventory is complete (§2) and the pipeline is written and validated
-(§4.6). Of the five things that stood in the way, four have resolved; only
-reachability is genuinely blocking:
+The inventory is complete (§2), the pipeline is written and validated (§4.6),
+and the subset has run end-to-end on a GitHub runner (§3.1c). All five original
+blockers have resolved. What remains is not a blocker but a design debt: the
+build is a bespoke workflow rather than a stored one (§3.7).
 
 | # | Blocker | Status | Severity |
 |---|---|---|---|
@@ -47,35 +49,20 @@ mechanism (OPeNDAP) that is verified working — just not from CI.
 
 **The subsetting step is required either way** — zyra cannot subset a 4-D
 NetCDF (§3.6), so a small Python step using xarray-over-OPeNDAP has to exist
-regardless. The open question is only **where it runs**, and that turns on a
-fact not yet measured.
+regardless. The only open question was **where it runs**, and that is now
+measured rather than inferred.
 
-§3.1 established that `gsl.noaa.gov` refuses *one* datacenter egress IP, and
-inferred that a GitHub Actions runner would be refused too. **That inference is
-untested and load-bearing.** GHA runs on Azure ranges, not the range that was
-measured, and Cloudflare rules are commonly ASN- or reputation-scoped. Two
-architectures follow, and they differ a lot:
+An earlier revision of this section reasoned that `gsl.noaa.gov` refuses one
+datacenter IP and therefore would refuse a GitHub Actions runner. It does not.
+On a real runner (§3.1c) every curl probe returns 403 while the mirror script
+opens the same OPeNDAP endpoint and writes a frame — the refusal discriminates
+on the client, not the source address. So the subset runs **inside the
+workflow**, pulling ~12 MB, with no hosting and no mirror service.
 
-| If the runner **can** reach GSL | If it **cannot** |
-|---|---|
-| The Python subset runs as an ordinary step in the same workflow | The subset runs on a NOAA-side machine |
-| Pulls ~12 MB over OPeNDAP straight into `/work` | Frames must be published somewhere CI can read |
-| **No hosting, no mirror service, no `acquire http` stage** | Needs a home for ~152 MB/cycle and a publish step |
-| One workflow, one trigger | Two systems, split provenance |
-
-There is **no mirror today** — the sources are GSL's THREDDS server and the
-`gsdftp` FTP server, nothing else — so the left-hand column is not merely
-tidier, it is the difference between shipping and standing up new
-infrastructure.
-
-`.github/workflows/ufs-chem-reachability.yml` settles it: a manually-triggered
-probe that reports the runner's egress IP, HTTP/OPeNDAP/FTP status against the
-real endpoints, and then runs the actual mirror script for one frame. Run that
-before building anything further.
-
-Worth noting the sources are already reachable from a NOAA workstation — the
-OPeNDAP probe in §2.0b was run that way — so the right-hand column is always
-available as a fallback. It just costs more to operate.
+`.github/workflows/ufs-chem-ozone.yml` implements that. It is explicitly a
+spike, not a pattern: no other dataset has a hand-written workflow, and §3.7
+sets out the one upstream capability that turns this into an ordinary stored,
+scheduled workflow like every other dataset.
 
 ## 2. Inventory — what is actually in these files
 
@@ -471,16 +458,16 @@ f006 -> 20260817T060000.tif  (3.57 MB)
 total 10.7 MB (whole-file equivalent would be ~7 GB)
 ```
 
-**Two cautions against over-reading this.** The same script failed on a Windows
-/ ArcGIS Pro workstation with `NetCDF: I/O failure` and an empty
-`curl error details:` — so client environment matters in ways not fully
-characterised, and success here does not guarantee success elsewhere. And a
-GitHub Actions runner is a third environment again. That is exactly what
-`.github/workflows/ufs-chem-reachability.yml` measures; run it before assuming.
+**One caution that still stands.** The same script failed on a Windows /
+ArcGIS Pro workstation with `NetCDF: I/O failure` and an empty
+`curl error details:`, so client environment matters in ways not fully
+characterised and success in one place does not guarantee it in another. That
+is why the script now diagnoses such failures by asking the same endpoint a
+plain HTTPS question and reporting what the network actually said.
 
-The practical consequence is large and favourable: if the runner behaves like
-this container, **the subsetting step runs inside the workflow** and no mirror
-hosting is needed at all.
+The GitHub Actions runner was the environment that mattered, and it was
+measured rather than assumed — §3.1c. **The subsetting step runs inside the
+workflow**, and no mirror hosting is needed.
 
 ### 3.1c Measured on the actual runner — the mirror works in CI
 
