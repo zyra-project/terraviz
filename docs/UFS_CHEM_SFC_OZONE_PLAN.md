@@ -27,7 +27,7 @@ is genuinely blocking:
 | # | Blocker | Status | Severity |
 |---|---|---|---|
 | B1 | `gsl.noaa.gov` Cloudflare policy 403s datacenter/CI egress | **Verified, blocking** — but FTP likely routes around it (§3.1a) | Must be solved before any workflow runs |
-| B2 | `acquire thredds` is not on the TerraViz stage allowlist | Verified | **Not blocking** — NCSS routes around it (§3.3) |
+| B2 | `acquire thredds` is not on the TerraViz stage allowlist | **Verified against the real validator** (§3.4) | Not blocking — NCSS routes around it (§3.3) — but allowlisting it would collapse the pipeline and remove B5 |
 | B3 | Placeholder grammar can't express day-of-year filenames | **Dissolved** — wrong collection (§2.1) | Not blocking; `ufs-chem_csl` templates cleanly |
 | B4 | Zyra cannot rescale units; ozone may be stored as mole fraction | Conditional on §2 | Cosmetic but material — decides hover readability |
 | B5 | Frame count vs `MAX_PIPELINE_ARG_LIST_ITEMS` (128) | Measured, §4.4 | Minor — 5 days hourly fits at 121 |
@@ -323,6 +323,76 @@ there is an `.idx` sidecar naming which bytes hold which record. THREDDS
 publishes no such sidecar, so ranges are not a subsetting mechanism here even
 when `Accept-Ranges: bytes` is advertised.
 
+### 3.4 `acquire thredds`: blocked here, exists upstream, and worth unblocking
+
+Both halves of the B2 claim were tested rather than assumed.
+
+**TerraViz does reject it.** Run against the real validator
+(`functions/api/v1/_lib/workflow-validators.ts`), not just read off the
+constant:
+
+| Pipeline | Verdict |
+|---|---|
+| `acquire thredds` | **REJECTED** — `Command for stage "acquire" must be one of: http, ftp, s3.` |
+| `acquire ftp` / `http` / `s3` | Pass |
+| `visualize sos` | **REJECTED** — `must be one of: heatmap, contour, animate, compose-video.` |
+| `process extract-variable` | Pass |
+
+**Zyra does have it** — confirmed against `NOAA-GSL/zyra` at v0.1.54
+(`src/zyra/connectors/backends/thredds.py`, plus CLI tests and a sample
+pipeline). Its declared options are a much better fit for this dataset than
+anything on the allowlist:
+
+`--sync-dir`, `--pattern` (regex over dataset urlPath), `--since-period`
+(ISO-8601 lookback), `--recursive` / `--max-depth` (nested `catalogRef`
+traversal), `--header` (repeatable `Name: Value`), `--auth` / `--credential`,
+`--overwrite-existing`, `--skip-if-local-done`.
+
+Two things follow that change the recommendation.
+
+**1. It would collapse the pipeline.** Zyra's own sample,
+`samples/pipelines/thredds_to_local.yaml`, targets GSL THREDDS directly:
+
+```yaml
+- stage: acquire
+  command: thredds
+  args:
+    catalog_url: https://gsl.noaa.gov/thredds/catalog/fv3-chem-0p25deg-grib2/catalog.xml
+    sync_dir: ./frames
+    pattern: "\\.grib2$"
+    since_period: "P1D"
+```
+
+Six args replace the five parallel lists of 41–121 templated URLs that §4.4
+sizes. That does not merely shrink the file — it removes the frame-budget
+question (B5) *entirely*, along with any need to enumerate forecast hours or
+template dates. The backend enumerates `catalog.xml`, maps datasets to
+fileServer URLs, and skips existing non-empty files on re-runs, which is a
+better self-updating story than placeholder templating gives us.
+
+**2. Zyra sends no default User-Agent.** `headers` defaults to `None` on the
+fetch path, so requests go out with the stock urllib/requests UA — precisely
+what IT identified as the string Cloudflare refuses. So an `acquire thredds`
+stage against `gsl.noaa.gov` would **403 even from a NOAA-allowed IP**, and the
+fix is to pass the UA explicitly:
+
+```yaml
+    header: "User-Agent: terraviz-workflow/1.0"
+```
+
+That is a scalar string, so it satisfies the validator's arg rules. It does
+**not** solve B1 — the CI-egress block is separate and no header clears it —
+but it is required for this route to work from anywhere at all.
+
+**Revised recommendation.** Allowlisting `acquire thredds` is worth doing on
+its merits, and this dataset is a good reason. It is a Tier 1 gap: the fix is
+to add the entry *and* confirm the pinned runner digest
+(`ZYRA_IMAGE_DEFAULT` in `.github/workflows/zyra-run.yml`) carries the command,
+bumping both together as the allowlist comment requires. It still does not
+unblock B1 on its own, and it still offers no subsetting — the backend
+downloads through `fileServer`, whole files — so the routing table in §3.1a is
+unchanged on that axis.
+
 ## 4. Workflow design
 
 ### 4.1 Templating: neither collection is blocked by it
@@ -463,9 +533,10 @@ design, and B1 stands regardless.
   bytes to avoid moving, not a product.
 - **Changing the Cloudflare policy from inside this repo.** B1 is resolved by
   GSL/IT or by mirroring, not by pipeline code.
-- **Adding `acquire thredds` to the allowlist.** §3.3 makes it unnecessary for
-  this dataset. If it is added later it should be for its own reasons, coupled
-  to a runner-container bump as the allowlist comment requires.
+- **Adding `acquire thredds` in this plan's scope.** §3.4 argues it *should* be
+  allowlisted — it collapses the pipeline and removes B5 — but that is its own
+  change, coupled to a runner-digest bump, and it does not unblock B1. Track it
+  separately rather than folding it in here.
 - **A dynamic colorbar legend.** Not on `main`; attach a `legend_ref` PNG.
 
 ## 6. Next steps
