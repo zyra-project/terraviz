@@ -2,11 +2,15 @@
 
 **Status: draft for review.**
 **Last reviewed: 2026-08-18.**
-**Revisit when:** zyra gains NetCDF dimension selection (§3.7 — this retires
-the whole bespoke path); the model starts publishing a 2-D `sfcf` surface file
-(same effect, no code needed); GSL changes the Cloudflare policy on
-`gsl.noaa.gov`; either collection moves to NODD/S3; or the grid/cadence changes
-from 384×192 hourly.
+**Revisit when:** zyra gains NetCDF dimension selection
+([zyra-project/zyra#300](https://github.com/zyra-project/zyra/issues/300) —
+this retires the whole bespoke path, and is the only route still open); GSL
+changes the Cloudflare policy on `gsl.noaa.gov`; either collection moves to
+NODD/S3; or the grid/cadence changes from 384×192 hourly.
+
+Note the source will **not** change shape to suit us: CSL serves every consumer
+of this model and publishes standard 3-D history output (§3.7b). Plans that
+depend on a 2-D surface product appearing are not viable.
 
 Sources under evaluation, both on NOAA GSL's THREDDS server:
 
@@ -833,23 +837,30 @@ labelled `relay-upstream` so the mirror's relay creates the twin at
 — worth confirming the upstream twin appeared, since the relay depends on
 `SYNC_PAT_ORG` holding upstream write access.
 
-**(b) At the source — cheapest, if CSL will do it.** If the model also wrote a
-2-D surface field (an `sfcf`-style file, or surface ozone as GRIB2), today's
-tooling handles it unchanged: no upstream change, no mirror, no bespoke
-workflow. It is a model-output configuration change rather than software, and
-it would cut the published volume from 267 GB/cycle to something tiny for every
-consumer, not just this one. Worth asking before building anything.
+**(b) At the source — ruled out, and for a good reason.** An earlier revision
+of this section proposed asking CSL to publish a 2-D surface field alongside
+the 3-D history files, on the grounds that it would need no code anywhere.
+**That is not a reasonable ask.** CSL serves every consumer of this model, not
+this one; a provider in that position publishes standard model output and does
+not maintain per-consumer derivatives. Confirmed with the team rather than
+assumed.
+
+The consequence runs the other way from how it first looks. If the source will
+correctly stay as 3-D history files, then **every** consumer of it faces the
+same subsetting problem — and the fix belongs in the tooling, once, rather than
+in each consumer's pipeline. That is not a fallback position for (a); it is the
+argument for it.
 
 **(c) A generic normalising tier** — a service that turns awkward sources into
 consumable ones. This is really (a) wearing a different hat, minus the
 reusability, plus new infrastructure to operate. Not recommended.
 
-**Recommendation:** ask (b), file (a), and treat the bespoke workflow as a
-spike that proves the rendering chain and gets a first dataset on the globe.
-Delete it when either lands. What it is genuinely good for in the meantime is
-validating the data-encoded contract end-to-end — calibration, palette,
-sidecar — so that when the standard path opens, the pipeline dropped into it is
-already known-correct.
+**Recommendation: (a), and only (a).** It is filed as
+[zyra-project/zyra#300](https://github.com/zyra-project/zyra/issues/300).
+Until it lands, the bespoke workflow is the stopgap — and its real value is not
+shipping one dataset but validating the data-encoded contract end-to-end
+(calibration, palette, sidecar), so that when dimension selection arrives, the
+stored pipeline dropped into the standard path is already known-correct.
 
 ## 4. Workflow design
 
@@ -1018,6 +1029,9 @@ design, and B1 stands regardless.
   change, coupled to a runner-digest bump, and it does not unblock B1. Track it
   separately rather than folding it in here.
 - **A dynamic colorbar legend.** Not on `main`; attach a `legend_ref` PNG.
+- **Asking the data provider to change what it publishes.** CSL serves every
+  consumer of this model; per-consumer derivatives are not their job, and the
+  subsetting problem is ours to solve in tooling (§3.7b).
 - **A per-dataset workflow as the end state.** The bespoke workflow is a spike
   (§3.7). Proper integration is a stored, scheduled workflow like every other
   dataset, and needs one upstream capability to get there.
