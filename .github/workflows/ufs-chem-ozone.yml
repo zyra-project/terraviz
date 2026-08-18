@@ -1,7 +1,14 @@
 # UFS-Chem global surface ozone — bespoke data-encoded frame build.
 #
-# Design: docs/UFS_CHEM_SFC_OZONE_PLAN.md (§3.1c chose this "bespoke" shape
-# over the two-stage one).
+# THIS IS A SPIKE, NOT A PATTERN. Every other dataset reaches the globe as a
+# stored workflow row that zyra-scheduler dispatches into zyra-run; a
+# hand-written workflow per dataset does not scale past one. It exists because
+# zyra cannot yet subset a 4-D NetCDF, and it should be deleted once that
+# lands. See docs/UFS_CHEM_SFC_OZONE_PLAN.md §3.7 for what proper integration
+# needs — the gap is one dimension selector, not a new reader.
+#
+# Design: docs/UFS_CHEM_SFC_OZONE_PLAN.md (§3.1c chose this shape over the
+# two-stage one; §3.7 says what replaces it).
 #
 # WHY THIS IS NOT A PUBLISHER-AUTHORED ZYRA WORKFLOW
 # --------------------------------------------------

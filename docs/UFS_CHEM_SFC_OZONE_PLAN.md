@@ -802,6 +802,62 @@ the data still has its true coordinates attached, which means in the mirror.
 That is one resampling instead of two, and a deliberate, documented deviation
 from "reprojection lives in Zyra".
 
+### 3.7 What proper integration requires
+
+The bespoke workflow (§3.1c) is a stopgap, and should be read as one. Every
+other dataset reaches the globe the same way: a publisher authors a workflow,
+it is stored as a row in D1 (`pipeline_json`, `metadata_template`, `schedule`,
+`target_dataset_id`), `zyra-scheduler.yml` finds it due, and `zyra-run.yml`
+fetches, runs it in the pinned container, and publishes. A per-dataset
+hand-written workflow is not that, and does not scale past one.
+
+**There is deliberately no extension point.** `zyra-run.yml` has no pre- or
+post-stage hook, and that is a feature: `pipeline_json` is declarative and
+allowlisted precisely so a database row cannot execute arbitrary code in CI.
+Adding a "prepare step" would hand every stored workflow a shell. So the fix
+cannot live in per-dataset configuration — it has to live somewhere that is
+not per-dataset.
+
+That leaves three places, and only two are good.
+
+**(a) In zyra — the correct home.** The gap is far narrower than it first
+appears. `visualize heatmap` *already* reads NetCDF, gates its NetCDF branch on
+the `.nc` extension (which a `dodsC` URL satisfies), passes the path straight to
+`xarray.open_dataset`, and takes `--var` and `--xarray-engine`. OPeNDAP support
+is already present, transitively, through `netCDF4-python` → `netcdf-c`. The
+single missing thing is:
+
+```python
+# heatmap_manager.py, _resolve_data()
+arr = ds[var].values      # whole variable — no dimension selection
+```
+
+There is no `--isel` / `--sel` / `--level` anywhere, so a 4-D variable arrives
+4-D and cannot render. Add positional dimension selection — best on
+`convert-format`, so the standard `convert-format → reproject → heatmap`
+chain is restored, since `heatmap` alone cannot roll 0–360 longitudes or regrid
+a Gaussian axis. Then this dataset is an ordinary stored workflow with **no
+preprocessing at all**, and so is every other model-history source. Draft issue
+written; see §6.
+
+**(b) At the source — cheapest, if CSL will do it.** If the model also wrote a
+2-D surface field (an `sfcf`-style file, or surface ozone as GRIB2), today's
+tooling handles it unchanged: no upstream change, no mirror, no bespoke
+workflow. It is a model-output configuration change rather than software, and
+it would cut the published volume from 267 GB/cycle to something tiny for every
+consumer, not just this one. Worth asking before building anything.
+
+**(c) A generic normalising tier** — a service that turns awkward sources into
+consumable ones. This is really (a) wearing a different hat, minus the
+reusability, plus new infrastructure to operate. Not recommended.
+
+**Recommendation:** ask (b), file (a), and treat the bespoke workflow as a
+spike that proves the rendering chain and gets a first dataset on the globe.
+Delete it when either lands. What it is genuinely good for in the meantime is
+validating the data-encoded contract end-to-end — calibration, palette,
+sidecar — so that when the standard path opens, the pipeline dropped into it is
+already known-correct.
+
 ## 4. Workflow design
 
 ### 4.1 Templating: neither collection is blocked by it
@@ -969,6 +1025,9 @@ design, and B1 stands regardless.
   change, coupled to a runner-digest bump, and it does not unblock B1. Track it
   separately rather than folding it in here.
 - **A dynamic colorbar legend.** Not on `main`; attach a `legend_ref` PNG.
+- **A per-dataset workflow as the end state.** The bespoke workflow is a spike
+  (§3.7). Proper integration is a stored, scheduled workflow like every other
+  dataset, and needs one upstream capability to get there.
 
 ## 6. Next steps
 
