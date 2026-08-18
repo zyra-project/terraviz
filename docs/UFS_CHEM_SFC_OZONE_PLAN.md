@@ -32,16 +32,140 @@ is genuinely blocking:
 | B4 | Zyra cannot rescale units; ozone may be stored as mole fraction | Conditional on §2 | Cosmetic but material — decides hover readability |
 | B5 | Frame count vs `MAX_PIPELINE_ARG_LIST_ITEMS` (128) | Measured, §4.4 | Minor — 5 days hourly fits at 121 |
 
-**B1 is the whole story.** Everything downstream is designed and ready; it
-cannot be exercised until a machine that runs the workflow can read the files.
+**B1 is the whole story** — but the inventory (§2) has now made the answer
+obvious. The numbers that decide it:
+
+| | |
+|---|---|
+| One cycle, whole files over FTP | **267 GB** |
+| The same product via OPeNDAP subsetting | **35.7 MB** |
+| Ratio | **7,482×** |
+
+So this is not a bandwidth problem being solved by a clever pipeline. It is a
+**36 MB/day product** sitting behind a 267 GB access pattern, reachable by a
+mechanism (OPeNDAP) that is verified working — just not from CI.
+
+**Recommended architecture: a small NOAA-side subsetting step.** Something that
+can reach `gsl.noaa.gov` opens each `dodsC` URL, takes the surface level of one
+ozone variable, and writes ~0.3 MB per frame to object storage. The workflow
+then consumes ~36 MB/cycle from a CI-reachable location. The mirror is small
+enough to run almost anywhere and cheap enough to be uncontroversial, and it is
+also the natural place to fix B4 (unit rescaling) since Zyra cannot.
+
+The alternative — GSL allowlisting the runner so the workflow reads OPeNDAP
+directly — is cleaner still and removes the moving part. Worth asking for; the
+mirror is the fallback that does not depend on the answer.
 
 ## 2. Inventory — what is actually in these files
 
-**Not yet established.** This section is deliberately empty rather than
-guessed. The catalog could not be read from the environment this design was
-written in (§3.1), and inventing a variable list would be worse than leaving a
-hole: every calibration decision below (`vmin`/`vmax`, `units`, the palette,
-the frame cadence) depends on the real answer.
+### 2.0 Confirmed, from a real FTP listing
+
+The `data/ufs-chem_csl/20260817/` directory was listed successfully over FTP
+(§3.1a). The result decides the architecture, and not in the direction hoped
+for:
+
+| Fact | Value |
+|---|---|
+| Files | **121** — `gfs.t00z.atmf000.nc` … `atmf120.nc` |
+| Cadence | **Hourly**, f000–f120 (5-day forecast) |
+| Cycles per day | **One** — `t00z` only |
+| Size per file | **~2.21 GB** (2.204–2.209 GB) |
+| **Total per cycle** | **~267 GB** |
+| `sfcf*.nc` companion | **Absent** — 3-D atmosphere history only |
+
+**The missing `sfcf` is the important part.** §2.1 flagged this as the
+question that decides the route, and the answer is the expensive one. There is
+no small 2-D surface file; surface ozone must be extracted as the lowest model
+level of a 3-D field inside a 2.21 GB file.
+
+**What that costs if you move whole files:**
+
+| | |
+|---|---|
+| Downloaded per cycle | **267 GB** |
+| Actually needed (121 × one 2-D level) | **~0.57 GB** |
+| Useful fraction | **0.21%** — a **468× waste** |
+
+Transfer time alone is survivable (~0.7 h at 100 MB/s, inside the 6 h GHA job
+limit), but moving 267 GB of NOAA egress daily to use 570 MB of it is not a
+defensible pipeline, and staging it on a runner with ~14 GB of disk means
+streaming file-by-file with no room for error.
+
+**Two derived facts worth recording:**
+
+- **Frame count is 121**, exactly the case §4.4 sized. It fits
+  `MAX_PIPELINE_ARG_LIST_ITEMS` (128) with seven to spare — but only if frames
+  are enumerated at all, which the OPeNDAP route may avoid.
+- **Cycle timing:** the 2026-08-17 00Z cycle posted between 02:39 and 04:30 UTC
+  on 2026-08-18 — about **28.5 h after cycle time**. With one cycle per day
+  that gives `{{cycle_date:P1D:PT30H}}` and a literal `t00z`. Note this is
+  *daily*, not the 6-hourly `PT6H` the aerosol template uses.
+
+### 2.0b Contents, from a successful OPeNDAP probe
+
+`xr.open_dataset()` against the `dodsC` endpoint **succeeded from a
+NOAA-allowed network**, which confirms the §3.5 inference end-to-end: xarray
+opens these files over DAP with no DAP-specific code. The dataset:
+
+| Property | Value |
+|---|---|
+| Source | `FV3GFS`, `grid: gaussian`, `hydrostatic: non-hydrostatic` |
+| Horizontal grid | **384 × 192** (`im`/`jm`, `grid_xt`/`grid_yt`) |
+| Vertical | **64 levels** (`pfull`), 65 interfaces (`phalf`) |
+| Data variables | **148**, with `ncnsto: 139` constituents — full chemistry |
+| Longitude | `grid_xt` 0.0 → 359.1 — **0–360**, needs wrapping to ±180 |
+| Latitude | `grid_yt` 89.28 → −89.28 — **Gaussian, north-to-south, unevenly spaced** |
+| Time (f000) | `2026-08-17T00:10:00` — note the **10-minute offset** from cycle time |
+
+**Ozone candidates present:** `o3`, `o3mr`, `o3s`, `o3s_e90` (plus related
+chemistry: `hno3`, `no3`, `nh4no3`, `ch3co3`, `mao3`). `o3mr` is the standard
+FV3GFS ozone mixing ratio; `o3` is the chemistry tracer; `o3s` / `o3s_e90` are
+stratospheric-origin tracers, which are **not** what a surface-ozone product
+wants. Choosing between `o3` and `o3mr` needs their `units` attribute — the one
+remaining blocker on calibration (§2.1a).
+
+**The grid is much coarser than assumed, and that is good news.** At 384 × 192
+a single 2-D level is **0.295 MB**, not the ~4.7 MB earlier arithmetic used. So
+the entire five-day animation is:
+
+| | |
+|---|---|
+| 121 frames × one surface level | **35.7 MB** |
+| Same data via whole-file FTP | **267 GB** |
+| Ratio | **7,482× — we need 0.013% of it** |
+
+That reframes the whole problem. This is not a big-data pipeline being
+throttled; it is a **36 MB product trapped behind a 267 GB access pattern**.
+
+**Three gotchas the probe exposed**, none of which are visible from a file
+listing:
+
+1. **The DAP view is not CF-compliant.** Variables carry *anonymous*
+   dimensions — `o3(o3_0=1, o3_1=64, o3_2=192, o3_3=384)` — with no
+   association to the `pfull` / `grid_xt` / `grid_yt` coordinates. Selection
+   must be **positional** (`.isel(o3_1=63)`), not by coordinate value. Any tool
+   that auto-detects CF lat/lon axes — including geotiff writers — will need
+   the dims named or the coordinates re-attached first.
+2. **The surface is the last level, not the first.** `pfull` ascends
+   0.3792 → 997.3 hPa, so **index 63** is the near-surface level.
+3. **The grid is Gaussian, not regular.** `grid_yt` is unevenly spaced, so
+   `reproject` is doing a genuine regrid to equirectangular, not just a
+   longitude roll. That is within its remit, but it is real resampling.
+
+### 2.1a Still unknown
+
+One thing, and it is the last blocker on calibration:
+
+- **Units of `o3` and `o3mr`** (and which of the two to use) — this is B4, and
+  it decides whether hover reads `45 ppbv` or `0.0000000452`.
+
+```python
+for v in ('o3', 'o3mr', 'o3s'):
+    print(v, ds[v].attrs)
+```
+
+The **retro** collection also remains unlisted, though it matters much less now
+that the daily one is characterised.
 
 To fill it in, run [`scripts/inventory-thredds.py`](../scripts/inventory-thredds.py)
 from a NOAA-allowed network:
@@ -558,6 +682,28 @@ something a pipeline arg fixes. Four honest options, best first:
 
 If the files already carry ppbv, none of this applies — hence the dependency
 on §2.
+
+### 4.3a Resolution: do not upscale to 4K
+
+The aerosol template regrids to 4096×2048 in `reproject`, and copying that here
+would be a mistake. The native grid is **384×192**:
+
+| Target | Linear upscale | Verdict |
+|---|---|---|
+| 4096×2048 | **10.7×** | Invents detail the model never resolved |
+| 1440×720 | 3.8× | Reasonable |
+| 768×384 | 2.0× | Conservative, honest |
+
+Upsizing is legitimate in `reproject` because it resamples the *data* rather
+than the luma — that is why the contract puts it there. But legitimacy is not
+the same as honesty: a 10.7× upscale of a 1°-ish field produces a smooth image
+that reads as far more resolved than the science behind it, on a globe whose
+whole selling point is that hovering gives you a real number.
+
+**Recommend 1440×720.** It is a clean 2:1 equirectangular, a modest upsample,
+and a sensible texture size for the sphere. The regrid is doing real work
+regardless, since the source is Gaussian (§2.0b) and must land on a regular
+grid.
 
 ### 4.4 Frame budget (B5)
 
