@@ -4,10 +4,15 @@
 **Last reviewed: 2026-08-18.**
 **Revisit when:** the inventory in §2 is filled in from a real catalog read;
 GSL changes the Cloudflare policy on `gsl.noaa.gov`; `acquire thredds` is
-allowlisted; the retro collection moves to NODD/S3.
+allowlisted; either collection moves to NODD/S3; or the `sfcf`-vs-`atmf`
+question in §2.1 is settled.
 
-Source under evaluation:
-`https://gsl.noaa.gov/thredds/catalog/retro/ufs_chem_sfc_ozone/catalog.html`
+Sources under evaluation, both on NOAA GSL's THREDDS server:
+
+- `retro/ufs_chem_sfc_ozone` — the retrospective collection this started from.
+- `data/ufs-chem_csl` — daily, date-pathed CSL UFS-Chem output. **The better
+  target**, because its names template natively into a self-updating workflow
+  (§2.1, §4.1).
 
 Goal: put UFS-Chem global surface ozone on the TerraViz globe as a
 **data-encoded** dataset — hover reports a real value in real units, and the
@@ -23,7 +28,7 @@ is genuinely blocking:
 |---|---|---|---|
 | B1 | `gsl.noaa.gov` Cloudflare policy 403s datacenter/CI egress | **Verified, blocking** | Must be solved before any workflow runs |
 | B2 | `acquire thredds` is not on the TerraViz stage allowlist | Verified | **Not blocking** — NCSS routes around it (§3.3) |
-| B3 | Placeholder grammar can't express GSL's day-of-year filenames | Verified | **Not blocking for retro** — fixed dates need no templating (§4.1) |
+| B3 | Placeholder grammar can't express day-of-year filenames | **Dissolved** — wrong collection (§2.1) | Not blocking; `ufs-chem_csl` templates cleanly |
 | B4 | Zyra cannot rescale units; ozone may be stored as mole fraction | Conditional on §2 | Cosmetic but material — decides hover readability |
 | B5 | Frame count vs `MAX_PIPELINE_ARG_LIST_ITEMS` (128) | Measured, §4.4 | Minor — 5 days hourly fits at 121 |
 
@@ -65,6 +70,58 @@ The questions it answers, and why each one matters here:
 | Grid shape + lon convention (0–360 vs ±180) | Whether `reproject` must wrap, and the regrid size |
 | Time cadence and span | `period_seconds`, `fps`, dataset `start_time`/`end_time` |
 | `Accept-Ranges` + NCSS availability | Which transfer mechanism in §3 is actually on |
+
+### 2.1 There are two collections, and the daily one is the better target
+
+A second path came up in review:
+
+```
+https://gsl.noaa.gov/thredds/catalog/data/ufs-chem_csl/20260817/catalog.html
+https://gsl.noaa.gov/thredds/fileServer/data/ufs-chem_csl/20260817/gfs.t00z.atmf000.nc
+```
+
+Also 403 from CI (checked: `catalog.html`, `catalog.xml`, `fileServer`, and
+`dodsC`, custom UA included — B1 is host-wide, not collection-specific). But
+the *filename* is readable without fetching it, and it changes several
+conclusions. Everything in this subsection is inference from naming
+convention, to be confirmed by the §2 probe:
+
+- **`/20260817/`** is a date-pathed daily directory — exactly the `YYYYMMDD`
+  that `{{cycle_date:INTERVAL:LAG}}` emits.
+- **`gfs.t00z`** is a cycle-hour token — exactly the zero-padded `HH` that
+  `{{cycle_hour:INTERVAL:LAG}}` emits.
+- **`atmf000`** is the standard UFS/GFS atmosphere history file at forecast
+  hour 000, zero-padded to three digits, so lead hours enumerate the way the
+  aerosol template already does.
+
+Together that means the URL templates natively:
+
+```
+https://gsl.noaa.gov/thredds/fileServer/data/ufs-chem_csl/{{cycle_date:PT6H:PT9H}}/gfs.t{{cycle_hour:PT6H:PT9H}}z.atmf{FFF}.nc
+```
+
+**This dissolves B3.** The day-of-year limitation documented against "GSL
+THREDDS" concerns a *different* collection whose names are `<YYDDDHHmm><FFF>`;
+`ufs-chem_csl` uses conventional UFS naming that the grammar handles as-is. The
+practical consequence is large: a **live, self-updating** UFS-Chem dataset is
+possible here, not just a one-shot retro import. That is the more valuable
+product, and it is the one this plan should aim at.
+
+Two things the probe must settle before the pipeline is written against it:
+
+- **`atmf` is the 3-D file.** UFS atmosphere history carries every variable on
+  every model level, which is typically multi-gigabyte per forecast hour.
+  Surface ozone would be the lowest model level of the ozone field. If the
+  collection also publishes a companion **`sfcf000.nc`** surface file, that is
+  2-D, far smaller, and almost certainly the better input — check for it first.
+- **Ozone in UFS `atmf` is conventionally `o3mr`, a mass mixing ratio in
+  `kg kg-1`.** If that is what is stored, B4 is live: hover would read
+  `0.0000000452`. See §4.3.
+
+Pulling a 3-D multi-GB file per frame to use one level of one variable is the
+worst case for transfer cost, which makes the server-side subsetting in §3.3
+much more valuable here than it would be for a 2-D source — the difference
+between gigabytes and megabytes per frame, not a marginal saving.
 
 ## 3. Efficient data transfer
 
@@ -174,17 +231,29 @@ when `Accept-Ranges: bytes` is advertised.
 
 ## 4. Workflow design
 
-### 4.1 Retro data does not need the placeholder grammar
+### 4.1 Templating: neither collection is blocked by it
 
-The documented reason GSL THREDDS is a dead end for *self-updating* workflows
+The documented reason "GSL THREDDS" is a dead end for *self-updating* workflows
 is that its filenames encode `<YYDDDHHmm><FFF>` — year, day-of-year, hour,
 minute, forecast hour — and the placeholder grammar has no day-of-year or
-2-digit-year formatter.
+2-digit-year formatter. That warning is accurate, and it is about neither
+collection here:
 
-That constraint does not apply here. This is a **retrospective** collection:
-the dates are fixed and known, so the URLs are written out literally and no
-templating is involved. B3 is real, and it is simply not in the path for a
-retro dataset. It returns the moment anyone wants a live UFS-Chem feed.
+| Collection | Naming | Templatable? |
+|---|---|---|
+| `retro/ufs_chem_sfc_ozone` | Fixed historical dates | Not needed — write URLs literally |
+| `data/ufs-chem_csl` | `/YYYYMMDD/gfs.t{HH}z.atmf{FFF}.nc` | **Yes**, natively (§2.1) |
+| (the documented dead end) | `<YYDDDHHmm><FFF>` | No |
+
+So the retro import needs no templating because its dates are fixed, and the
+daily collection needs it and has it. B3 only returns if a future source uses
+day-of-year names.
+
+Given the choice, **build against the daily collection**: it yields a dataset
+that refreshes itself with each model cycle, which is worth considerably more
+on the globe than a frozen historical window. The retro collection is the
+better *first* target only if the daily one turns out to lack a surface field
+(§2.1) — or as a way to prove the pipeline while B1 is being resolved.
 
 ### 4.2 Two entry shapes, chosen by container format
 
@@ -230,13 +299,28 @@ the truth. For a dataset whose selling point is "hover gives you the real
 number", that is the wrong trade. Keep `vmin: 0` and let the palette's low end
 carry the background.
 
-**B4, units.** If the inventory reports ozone as a mole fraction in `mol mol-1`
-or `kg kg-1`, hover will read `0.0000000452` — technically correct, practically
-unreadable. Zyra has no unit-rescaling command (a confirmed upstream gap), so
-there are only three honest options: accept the exponent; ask whoever generates
-the retro files to also write a ppbv field; or rescale during the mirror step
-in §3.1 option 1, which is the neatest fix if we are mirroring anyway. If the
-files already carry ppbv, none of this applies — hence the dependency on §2.
+**B4, units — now the likeliest problem on the list.** UFS atmosphere history
+conventionally stores ozone as `o3mr`, a mass mixing ratio in `kg kg-1`
+(§2.1). If that is what the probe finds, hover reads `0.0000000452` —
+technically correct, practically unreadable, and squarely against the point of
+a dataset whose selling feature is that you can query it.
+
+Zyra has no unit-rescaling command; it is a confirmed upstream gap, not
+something a pipeline arg fixes. Four honest options, best first:
+
+1. **Rescale while mirroring.** If B1 is solved by mirroring to S3 (§3.1),
+   convert to ppbv in that same step. It costs nothing extra and produces the
+   readable dataset.
+2. **Use a surface file that already carries ppbv.** If the collection
+   publishes `sfcf*.nc` with a diagnostic surface-ozone field, check its units
+   before assuming — diagnostics are often written in ppbv precisely because
+   they are meant to be read.
+3. **Ask CSL to write a ppbv field** into the output. Slowest, most durable.
+4. **Accept the exponent.** Works, and it makes the hover readout close to
+   useless for a non-specialist audience.
+
+If the files already carry ppbv, none of this applies — hence the dependency
+on §2.
 
 ### 4.4 Frame budget (B5)
 
@@ -280,9 +364,9 @@ design, and B1 stands regardless.
 
 ## 5. Non-goals
 
-- **A live/operational UFS-Chem feed.** Retro only. A live feed reopens B3 and
-  needs a source whose filenames fit the placeholder grammar.
-- **Vertical ozone structure.** The globe renders a 2-D raster; surface only.
+- **Vertical/3-D ozone rendering.** Even though `atmf` carries every model
+  level, the globe renders a 2-D raster. Surface only; the other levels are
+  bytes to avoid moving, not a product.
 - **Changing the Cloudflare policy from inside this repo.** B1 is resolved by
   GSL/IT or by mirroring, not by pipeline code.
 - **Adding `acquire thredds` to the allowlist.** §3.3 makes it unnecessary for
@@ -292,11 +376,30 @@ design, and B1 stands regardless.
 
 ## 6. Next steps
 
-1. Run `scripts/inventory-thredds.py` from a NOAA-allowed network; paste or
-   commit the JSON. **Everything else is blocked on this.**
-2. Fill in §2, then settle `--var`, `vmax`, `units`, cadence, and the palette.
-3. Decide B1: mirror to S3 (preferred), allowlist a self-hosted runner, or
-   hand-stage a one-shot.
-4. Relay the §3.1 evidence to IT — specifically that the UA fix does not cover
+1. Run `scripts/inventory-thredds.py` from a NOAA-allowed network against
+   **both** collections; paste or commit the JSON. **Everything else is
+   blocked on this.**
+
+   ```bash
+   # the daily collection — the better target (§2.1)
+   python3 scripts/inventory-thredds.py \
+     https://gsl.noaa.gov/thredds/catalog/data/ufs-chem_csl/20260817/catalog.xml \
+     --probe 2 > ufs-chem-csl-inventory.json
+
+   # the retro collection
+   python3 scripts/inventory-thredds.py \
+     https://gsl.noaa.gov/thredds/catalog/retro/ufs_chem_sfc_ozone/catalog.xml \
+     --probe 2 > sfc-ozone-inventory.json
+   ```
+
+2. From the daily listing, answer the two §2.1 questions first: **is there a
+   `sfcf*.nc` companion** (2-D, small, probably the right input), and **what
+   are the ozone variable's units** (B4)? Those two answers drive most of the
+   remaining design.
+3. Fill in §2, then settle `--var`, `vmax`, `units`, cadence, and the palette.
+4. Decide B1: mirror to S3 (preferred — and it is where the B4 unit rescale
+   would live), allowlist a self-hosted runner, or hand-stage a one-shot.
+5. Relay the §3.1 evidence to IT — specifically that the UA fix does not cover
    CI egress, which is the case that matters for automation.
-5. Validate the YAML against the real validators, then dispatch a run.
+6. Retarget the draft YAML at the daily collection with templated URLs (§4.1),
+   validate against the real validators, then dispatch a run.
