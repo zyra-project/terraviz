@@ -2,10 +2,10 @@
 
 **Status: draft for review.**
 **Last reviewed: 2026-08-18.**
-**Revisit when:** the inventory in §2 is filled in from a real catalog read;
-GSL changes the Cloudflare policy on `gsl.noaa.gov`; `acquire thredds` is
-allowlisted; either collection moves to NODD/S3; or the `sfcf`-vs-`atmf`
-question in §2.1 is settled.
+**Revisit when:** GSL changes the Cloudflare policy on `gsl.noaa.gov`;
+`acquire thredds` is allowlisted; either collection moves to NODD/S3; the
+model starts publishing a 2-D `sfcf` surface file (which would retire the
+mirror step); or the grid/cadence changes from 384×192 hourly.
 
 Sources under evaluation, both on NOAA GSL's THREDDS server:
 
@@ -20,16 +20,16 @@ palette is a client-side transform rather than baked-in colour.
 
 ## 1. Summary
 
-The pipeline shape for this dataset is well-understood and is not the hard
-part. Three things stand between us and a running workflow, and only the first
-is genuinely blocking:
+The inventory is complete (§2) and the pipeline is written and validated
+(§4.6). Of the five things that stood in the way, four have resolved; only
+reachability is genuinely blocking:
 
 | # | Blocker | Status | Severity |
 |---|---|---|---|
 | B1 | `gsl.noaa.gov` Cloudflare policy 403s datacenter/CI egress | **Verified, blocking** — but FTP likely routes around it (§3.1a) | Must be solved before any workflow runs |
 | B2 | `acquire thredds` is not on the TerraViz stage allowlist | **Verified against the real validator** (§3.4) | Not blocking — NCSS routes around it (§3.3) — but allowlisting it would collapse the pipeline and remove B5 |
 | B3 | Placeholder grammar can't express day-of-year filenames | **Dissolved** — wrong collection (§2.1) | Not blocking; `ufs-chem_csl` templates cleanly |
-| B4 | Zyra cannot rescale units; ozone may be stored as mole fraction | Conditional on §2 | Cosmetic but material — decides hover readability |
+| B4 | Zyra cannot rescale units | **Largely dissolved** — `o3` is in `ppm` (§2.1a) | Cosmetic; the mirror does ppm→ppbv |
 | B5 | Frame count vs `MAX_PIPELINE_ARG_LIST_ITEMS` (128) | Measured, §4.4 | Minor — 5 days hourly fits at 121 |
 
 **B1 is the whole story** — but the inventory (§2) has now made the answer
@@ -121,8 +121,7 @@ opens these files over DAP with no DAP-specific code. The dataset:
 chemistry: `hno3`, `no3`, `nh4no3`, `ch3co3`, `mao3`). `o3mr` is the standard
 FV3GFS ozone mixing ratio; `o3` is the chemistry tracer; `o3s` / `o3s_e90` are
 stratospheric-origin tracers, which are **not** what a surface-ozone product
-wants. Choosing between `o3` and `o3mr` needs their `units` attribute — the one
-remaining blocker on calibration (§2.1a).
+wants. §2.1a settles the choice on units, and picks `o3`.
 
 **The grid is much coarser than assumed, and that is good news.** At 384 × 192
 a single 2-D level is **0.295 MB**, not the ~4.7 MB earlier arithmetic used. So
@@ -152,20 +151,45 @@ listing:
    `reproject` is doing a genuine regrid to equirectangular, not just a
    longitude roll. That is within its remit, but it is real resampling.
 
-### 2.1a Still unknown
+### 2.1a Variable choice and units — resolved, and B4 with them
 
-One thing, and it is the last blocker on calibration:
+| Variable | `long_name` | **units** | Verdict |
+|---|---|---|---|
+| **`o3`** | o3 mixing ratio | **`ppm`** | **Use this one** |
+| `o3mr` | ozone mixing ratio | `kg/kg` | Hovers as `0.0000000452` — avoid |
+| `o3s` | o3s mixing ratio | `ppm` | Stratospheric-origin tracer, not surface ozone |
+| `o3s_e90` | — | — | Likewise |
 
-- **Units of `o3` and `o3mr`** (and which of the two to use) — this is B4, and
-  it decides whether hover reads `45 ppbv` or `0.0000000452`.
+**`o3` is in ppm, so B4 largely dissolves.** This is exactly the "pick a
+variable whose native units read well" move the data-video guidance recommends,
+and it is available here only because the model writes both forms. Choosing
+`o3mr` — the name that looks more canonical — would have been the wrong call.
 
-```python
-for v in ('o3', 'o3mr', 'o3s'):
-    print(v, ds[v].attrs)
-```
+The measured surface field (level 63, f000 of the 2026-08-17 00z cycle) also
+confirms the label is real rather than mis-stated:
 
-The **retro** collection also remains unlisted, though it matters much less now
-that the daily one is characterised.
+| Statistic | ppm | **ppbv** |
+|---|---|---|
+| min | 6.53e-05 | 0.07 |
+| p50 | 0.02197 | **21.97** |
+| mean | 0.02211 | **22.11** |
+| p90 | 0.02902 | 29.02 |
+| p99 | 0.04059 | 40.59 |
+| p99.9 | 0.04933 | 49.33 |
+| max | 0.05956 | **59.56** |
+
+A global mean of 22 ppbv, a median of 22, and a maximum near 60 are textbook
+surface ozone — clean marine background sits at 15–30 ppbv and polluted
+episodes reach 50–80. Nothing here is mislabelled.
+
+**Remaining unit choice is cosmetic, not blocking.** ppm hovers as `0.0221`,
+which is legible; ppbv hovers as `22.1`, which is how air quality is normally
+quoted and how the NAAQS 8-hour standard (70 ppbv) is stated. Since the mirror
+step (§1) exists anyway, `mirror-ufs-ozone.py --to-ppbv` does the ×1000 there
+and the pipeline declares `units: ppbv`.
+
+The **retro** collection remains unlisted, though it matters much less now that
+the daily one is characterised.
 
 To fill it in, run [`scripts/inventory-thredds.py`](../scripts/inventory-thredds.py)
 from a NOAA-allowed network:
@@ -650,7 +674,7 @@ Earth. For ozone the whole field is the story:
 | `blend_range` | 48 | **8** | Only true no-data should fade out |
 | `base` | `YlOrBr` (smoke) | **`YlOrRd`** | Matches air-quality convention, light→dark, full-field legible |
 | `vmin` | 0 | **0** | See tradeoff below |
-| `vmax` | p99.9 | **p99.9 of the real field** | From §2; a too-high `vmax` gives the classic near-black globe |
+| `vmax` | p99.9 | **80 ppbv** | Clears the measured max (59.6) with forecast headroom; keeps the 70 ppbv NAAQS threshold inside the scale rather than clipped, since clipping corrupts hover |
 
 On `vmin`: raising it to a clean-air floor (~10–20 ppb, once units are known)
 would sharpen contrast considerably, because the mid-palette would no longer be
