@@ -26,7 +26,7 @@ reachability is genuinely blocking:
 
 | # | Blocker | Status | Severity |
 |---|---|---|---|
-| B1 | `gsl.noaa.gov` Cloudflare policy refuses some clients | **Narrower than first stated (§3.1b)** — the OPeNDAP path works from a datacenter IP; the mirror has now run end-to-end from one | Largely resolved; confirm on the actual runner |
+| B1 | `gsl.noaa.gov` Cloudflare policy refuses some clients | **Resolved (§3.1c)** — measured on a real GitHub Actions runner: curl 403s, but the mirror ran and wrote a frame | No external hosting required |
 | B2 | `acquire thredds` is not on the TerraViz stage allowlist | **Verified against the real validator** (§3.4) | Not blocking — NCSS routes around it (§3.3) — but allowlisting it would collapse the pipeline and remove B5 |
 | B3 | Placeholder grammar can't express day-of-year filenames | **Dissolved** — wrong collection (§2.1) | Not blocking; `ufs-chem_csl` templates cleanly |
 | B4 | Zyra cannot rescale units | **Largely dissolved** — `o3` is in `ppm` (§2.1a) | Cosmetic; the mirror does ppm→ppbv |
@@ -481,6 +481,59 @@ GitHub Actions runner is a third environment again. That is exactly what
 The practical consequence is large and favourable: if the runner behaves like
 this container, **the subsetting step runs inside the workflow** and no mirror
 hosting is needed at all.
+
+### 3.1c Measured on the actual runner — the mirror works in CI
+
+Run 32192599986, dispatched against the feature branch, on an Azure `westus2`
+runner with egress `20.125.46.150`:
+
+| Probe | Result |
+|---|---|
+| `catalog.xml` (curl) | **403** |
+| `fileServer` HEAD (curl) | **403** |
+| OPeNDAP `.dds` (curl) | **403** |
+| OPeNDAP `.das` (curl) | **403** |
+| FTP listing (curl) | **530 Access denied** — connected, credentials rejected |
+| **`mirror-ufs-ozone.py` (xarray → netcdf-c)** | **wrote `20260817T000000.tif`, 3.56 MB** |
+
+This reproduces §3.1b exactly, on unrelated infrastructure: **every curl request
+403s, including to the very OPeNDAP endpoint that xarray then opens
+successfully.** Two independent environments now show the same split, so it is
+a property of the server's policy rather than a quirk of one network. The
+uploaded artifact is 3,555,218 bytes — the same size as the frame produced
+locally.
+
+The mechanism remains uncharacterised, deliberately. netcdf-c itself links
+libcurl, so "curl versus not-curl" is not the explanation; header set, TLS
+configuration and DAP request shape are all candidates. Resolving it is not
+required to proceed, and would be a poor use of time next to simply using the
+path that works.
+
+**FTP is reachable from CI too** — which §3.1a could not establish, because
+that environment blocked FTP egress outright. A `530` is an authentication
+refusal, not a network block: the placeholder e-mail used as the anonymous
+password was rejected, not the connection. Anonymous FTP conventionally wants a
+real, deliverable address. Moot for this dataset either way, since FTP offers
+no subsetting.
+
+**B1 is resolved.** The subsetting step can run on a GitHub Actions runner.
+
+**One integration caveat, so this is not over-read.** `zyra-run.yml` executes a
+*stored* pipeline inside the zyra container; it cannot run arbitrary Python. So
+"the mirror runs in CI" does not by itself mean "the mirror runs inside the
+publisher-authored pipeline". Two shapes follow, and choosing between them is a
+real decision:
+
+| | Bespoke workflow | Two-stage |
+|---|---|---|
+| Shape | One workflow: mirror step → zyra container over local frames → publish | A mirror workflow publishes frames; a stored pipeline fetches them with `acquire http` |
+| Hosting | **None** | Somewhere for ~152 MB/cycle |
+| Fits the platform's model | No — bypasses the publisher-authored pipeline path | Yes |
+| Frame list in `pipeline_json` | Not needed | 41 templated URLs |
+
+The pipeline in §4.6 is written for the two-stage shape, which is why it still
+carries an `acquire http` stage. Switching to the bespoke shape deletes that
+stage and the hosting question with it.
 
 ### 3.2 What THREDDS offers, and what Zyra can use
 
