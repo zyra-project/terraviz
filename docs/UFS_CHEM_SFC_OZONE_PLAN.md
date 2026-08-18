@@ -278,18 +278,17 @@ enormously in bytes moved:
 |---|---|---|---|
 | `HTTPServer` (`fileServer`) | whole file | **All variables, all levels, all times** | Yes — `acquire http`, or URLs straight into `convert-format --inputs` |
 | `NetcdfSubset` (`ncss`) | server-side subset by variable / bbox / time | **Only what you ask for** | **Yes** — it is a plain GET with query params (§3.3) |
-| `OPeNDAP` (`dodsC`) | index hyperslab | Only the slab | No — nothing in Zyra speaks DAP |
+| `OPeNDAP` (`dodsC`) | index hyperslab | Only the slab | **Yes** — via xarray, see §3.5. (An earlier draft said no; that was wrong.) |
 | `WMS` / `WCS` | rendered tiles / coverages | Tiny | No — WMS returns *pictures*, which defeats data-encoding entirely |
 | `CdmRemote` | ncstream binary | Only the slab | No client |
 | `catalog.xml` crawl | listing | Tiny | `acquire thredds` is **not allowlisted** (B2) |
 
 Two entries deserve emphasis. **WMS is a trap**: it is the cheapest thing on
 the list and it is useless here, because a rendered image has already thrown
-away the values that make the dataset queryable. And **OPeNDAP is the best
-mechanism nobody can use** — it is exactly the right tool for "give me one
-surface variable out of a 3-D history file", and there is no Zyra command that
-speaks it. It remains the right tool for the *inventory* step, which is why
-`scripts/inventory-thredds.py` uses it.
+away the values that make the dataset queryable. And **OPeNDAP is the strongest
+option on the table** — it is exactly the right tool for "give one surface
+level of one variable out of a 3-D history file", and, contrary to an earlier
+draft of this document, Zyra can consume it. That correction is §3.5.
 
 ### 3.3 NCSS is the way around the allowlist gap
 
@@ -392,6 +391,80 @@ bumping both together as the allowlist comment requires. It still does not
 unblock B1 on its own, and it still offers no subsetting — the backend
 downloads through `fileServer`, whole files — so the routing table in §3.1a is
 unchanged on that axis.
+
+### 3.5 OPeNDAP does subset — and Zyra can consume it (correction)
+
+The collection exposes an OPeNDAP endpoint:
+
+```
+https://gsl.noaa.gov/thredds/dodsC/data/ufs-chem_csl/20260817/gfs.t00z.atmf000.nc.html
+```
+
+(The `.html` suffix is the OPeNDAP Data Access Form — a browser UI for building
+constraint expressions. Its presence confirms DAP is switched on.)
+
+**Yes, it subsets, and it is the best mechanism available for this dataset.**
+Measured against a reachable TDS (`thredds.ucar.edu`, since `gsl.noaa.gov`
+refuses CI), opening a `dodsC` URL with xarray and pulling a single 2-D slice
+out of a 4-D variable — as it happens, `Ozone_Mixing_Ratio_isobaric`, the same
+field class this plan targets:
+
+| | |
+|---|---|
+| Open the dataset over DAP | 1.2 s |
+| Full variable | 32,181 MB |
+| One time × one level slice | **4.15 MB in 0.5 s** |
+| Transferred | **0.0129% — a 7,749× reduction** |
+
+That is the difference between viable and not for a 3-D `atmf` source.
+
+**The correction.** An earlier draft of this document asserted that no Zyra
+command speaks DAP, and used that to rule OPeNDAP out. That was wrong in a way
+worth spelling out, because the reasoning generalises:
+
+- Zyra contains no DAP client code — that part was right.
+- But Zyra opens NetCDF through **xarray**, with **netcdf4** as the engine, and
+  `netCDF4-python` links `netcdf-c`, which has **DAP2/DAP4 built in**. DAP
+  support arrives transitively, without any DAP-specific code.
+- `load_netcdf()` in `src/zyra/processing/netcdf_data_processor.py` does
+  `ds = xr.open_dataset(str(path_or_bytes))` with **no local-file check** — so
+  a `dodsC` URL passed where a path is expected should open over DAP.
+- The pinned runner image is the `zyra` image, built with the `processing`
+  extra, which carries `netcdf4` and `xarray`. (Corroborated by the fact that
+  the existing `convert-format` / `reproject` / `heatmap` stages already work.)
+- The TerraViz validator does not care: a `dodsC` URL is an ordinary string arg.
+  **No allowlist change, no upstream issue.**
+
+**One thing this is not.** TDS does **not** serve a NetCDF *file* response on
+`dodsC` — `.nc` and `.nc4` both return HTTP 400 (verified; that is a Hyrax
+feature, not a TDS one). `.dds`, `.das`, `.ascii` and `.dods` all return 200.
+So the "plain GET that yields a NetCDF subset" trick belongs to **NCSS** (§3.3),
+while OPeNDAP needs a DAP-capable reader — which, per above, we have.
+
+**Honest limit on this finding.** What was measured is that *xarray over DAP
+subsets a TDS endpoint*, which is solid. What was **not** measured is Zyra's
+CLI plumbing carrying a URL end-to-end into that loader — that is a
+code-reading inference, and it needs one run against a reachable DAP endpoint
+to confirm. It also does nothing about B1.
+
+**Where this leaves the routing table.** OPeNDAP now dominates on transfer
+cost, which matters most in exactly the case §2.1 flagged as worst — 3-D `atmf`
+files with no 2-D `sfcf` companion:
+
+| Route | Reachable from CI | Subsetting | Allowlist change |
+|---|---|---|---|
+| **OPeNDAP** via xarray | No (B1) | **Best** — variable + level + time | **None** |
+| NCSS via `acquire http` | No (B1) | Good — variable + bbox + time | None |
+| `acquire thredds` | No (B1) | **None** — whole files | Required (§3.4) |
+| FTP (`gsdftp`) | **Likely yes** | **None** — whole files | None |
+| S3 mirror | **Yes** | Whatever the mirror does | None |
+
+The shape of the decision is now clear: **FTP is the reachability answer,
+OPeNDAP is the efficiency answer, and they are on different hosts.** If `sfcf`
+files exist, FTP alone is enough and the conflict disappears. If only `atmf`
+exists, either GSL must let CI reach `gsl.noaa.gov`, or the mirror step becomes
+the place where subsetting happens — pulling one level over DAP from a NOAA
+machine and writing small files to S3.
 
 ## 4. Workflow design
 
