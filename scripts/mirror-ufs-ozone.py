@@ -5,31 +5,37 @@ This is the NOAA-side half of the architecture in
 `docs/UFS_CHEM_SFC_OZONE_PLAN.md`. It exists because of an unusually lopsided
 ratio: one forecast cycle is **121 files of ~2.21 GB = ~267 GB**, and the
 surface-ozone animation hiding inside it is **~36 MB** — 0.013% of the bytes.
-Pulling whole files to use one model level is a 7,482x waste, and the machine
-that runs the Zyra workflow (a CI runner) cannot reach `gsl.noaa.gov` at all,
-because Cloudflare 403s datacenter egress.
+Pulling whole files to use one model level is a 7,482x waste.
 
-So: run this where GSL *is* reachable. For each forecast hour it opens the
-OPeNDAP endpoint, takes one 2-D level of one variable (~0.3 MB over the wire),
-and writes a small georeferenced frame. Publish the output where CI can read
-it and point the workflow there.
+For each forecast hour it opens the OPeNDAP endpoint, takes one 2-D level of
+one variable (~0.3 MB over the wire), and writes a small georeferenced frame.
 
-Why this cannot be a Zyra stage
--------------------------------
-Asked directly, and checked against zyra `main`:
+It runs anywhere that can reach the source, **including a GitHub Actions
+runner** — measured, run 32192599986: curl gets 403 from `gsl.noaa.gov` but
+xarray/netcdf-c opens the same OPeNDAP endpoint and writes a frame. The
+refusal discriminates on the client, not the source address.
 
-* `process extract-variable` is **GRIB2-only** ("Extract a variable from GRIB2
-  by regex pattern") and has no level selector.
-* `process convert-format` reads through `read_bytes_any()`, which returns
-  **whole-file bytes**; its only subsetting mechanism is GRIB `.idx` byte
-  ranges. A NetCDF input is either copied verbatim (when `--format netcdf`) or
-  handed to `grib_decode`, so **NetCDF -> GeoTIFF is not a supported path**.
-* Zyra's I/O model is "fetch bytes, then decode", which is structurally
-  incompatible with OPeNDAP's "open lazily, request slices" — the very thing
-  that makes 267 GB into 36 MB.
+Why this is not a Zyra stage (yet)
+----------------------------------
+Checked against zyra `main` (v0.1.54). The gap is narrower than it looks:
 
-Closing that gap needs an upstream `NOAA-GSL/zyra` change (a NetCDF/OPeNDAP
-reader with level selection), not an allowlist edit.
+* `visualize heatmap` **already** reads NetCDF — it gates that branch on the
+  `.nc` extension, which a `dodsC` URL satisfies, passes the path straight to
+  `xarray.open_dataset`, and takes `--var` and `--xarray-engine`. OPeNDAP
+  support is already present, transitively via netCDF4-python -> netcdf-c.
+* What is missing is **dimension selection**: `_resolve_data()` does
+  `arr = ds[var].values`, so a 4-D variable arrives 4-D and cannot render, and
+  all 64 levels cross the wire when one was wanted.
+* `process extract-variable` is GRIB2-only, and `convert_to_format()` takes a
+  `DecodedGRIB`, so nothing upstream of heatmap can reduce the field either.
+
+So the upstream ask is one selector — best on `convert-format`, so the standard
+`convert-format -> reproject -> heatmap` chain is restored, since heatmap alone
+cannot roll 0-360 longitudes or regrid a Gaussian axis. See
+`docs/UFS_CHEM_SFC_OZONE_PLAN.md` §3.7. Not an allowlist edit: both commands
+are already allowlisted.
+
+This script is a **stopgap**, not a pattern. Delete it once that lands.
 
 What this repairs on the way through
 ------------------------------------
@@ -49,8 +55,8 @@ What this repairs on the way through
 
 This means the GeoTIFF path does the reprojection that would normally be Zyra's
 job (`docs/ZYRA_INTEGRATION_PLAN.md` §Reprojection lives in Zyra). That is a
-deliberate, documented deviation: Zyra cannot read this source at all, and
-doing it here costs **one** resampling instead of two.
+deliberate, documented deviation: Zyra cannot read this source at all today,
+and doing it here costs **one** resampling instead of two.
 
 Usage:
     # globe-ready GeoTIFF frames, 3-hourly, ppbv  (what the pipeline consumes)

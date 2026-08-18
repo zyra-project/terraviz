@@ -837,8 +837,13 @@ There is no `--isel` / `--sel` / `--level` anywhere, so a 4-D variable arrives
 `convert-format`, so the standard `convert-format → reproject → heatmap`
 chain is restored, since `heatmap` alone cannot roll 0–360 longitudes or regrid
 a Gaussian axis. Then this dataset is an ordinary stored workflow with **no
-preprocessing at all**, and so is every other model-history source. Draft issue
-written; see §6.
+preprocessing at all**, and so is every other model-history source.
+
+The issue is written and ready to file:
+[`docs/upstream/zyra-issue-netcdf-dimension-selection.md`](upstream/zyra-issue-netcdf-dimension-selection.md).
+It lives here rather than at `NOAA-GSL/zyra` only because it could not be filed
+from the session that wrote it — cross-owner repository attach is unsupported,
+so filing needs a session scoped to that repo, or a paste into the issue form.
 
 **(b) At the source — cheapest, if CSL will do it.** If the model also wrote a
 2-D surface field (an `sfcf`-style file, or surface ozone as GRIB2), today's
