@@ -144,10 +144,17 @@ stages:
       # the aerosol convention of 12 would erase most of the atmosphere.
       cmap_inline: '{"type":"continuous","base":"YlOrRd","transparent_range":0,"blend_range":8,"overall_alpha":0.92}'
       vmin: 0
-      vmax: 80          # ppbv. Clears the measured max (59.6) with headroom for
-                        # forecast hotspots, and keeps the 70 ppbv NAAQS 8-hour
-                        # threshold inside the scale rather than clipped.
-                        # Clipping would corrupt hover, which is the whole point.
+      vmax: 120         # ppbv. Sampled across the real forecast (f000..f120):
+                        # most frames peak near 60-67, but f012 reaches 109.6 in
+                        # a midday photochemical episode. 80 would have clipped
+                        # exactly the exceedances that matter most.
+                        #
+                        # vmax is calibration, not aesthetics: anything above it
+                        # clamps and then reads back WRONG under the cursor. The
+                        # background (mean 22) sitting at 18% of scale is fine --
+                        # the colorbar's range control restretches the DISPLAY
+                        # client-side without touching the stored values, which
+                        # is the whole point of data-encoding.
       # NO width/height (forbidden with data_encoded), NO basemap.
 
   # 3. Derive the dataset time range from the valid-time frame names.

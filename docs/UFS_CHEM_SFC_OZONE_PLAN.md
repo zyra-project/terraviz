@@ -26,7 +26,7 @@ reachability is genuinely blocking:
 
 | # | Blocker | Status | Severity |
 |---|---|---|---|
-| B1 | `gsl.noaa.gov` Cloudflare policy 403s datacenter/CI egress | **Verified, blocking** — but FTP likely routes around it (§3.1a) | Must be solved before any workflow runs |
+| B1 | `gsl.noaa.gov` Cloudflare policy refuses some clients | **Narrower than first stated (§3.1b)** — the OPeNDAP path works from a datacenter IP; the mirror has now run end-to-end from one | Largely resolved; confirm on the actual runner |
 | B2 | `acquire thredds` is not on the TerraViz stage allowlist | **Verified against the real validator** (§3.4) | Not blocking — NCSS routes around it (§3.3) — but allowlisting it would collapse the pipeline and remove B5 |
 | B3 | Placeholder grammar can't express day-of-year filenames | **Dissolved** — wrong collection (§2.1) | Not blocking; `ufs-chem_csl` templates cleanly |
 | B4 | Zyra cannot rescale units | **Largely dissolved** — `o3` is in `ppm` (§2.1a) | Cosmetic; the mirror does ppm→ppbv |
@@ -440,6 +440,47 @@ mirroring, per the table above.
 One caveat worth confirming: anonymous FTP is being retired across much of
 NOAA in favour of HTTPS and cloud distribution, so check that this server is
 expected to persist before building on it.
+
+### 3.1b Correction: the block is not simply IP-based
+
+§3.1 concluded from six curl attempts that `gsl.noaa.gov` refuses this
+container's IP host-wide, and inferred CI would be refused too. **Both halves
+were too strong.** Re-measured from the same container, same egress range, same
+User-Agent:
+
+| Client | Result |
+|---|---|
+| `curl` (any of six UAs, incl. the IT-recommended string) | **403** |
+| Python `urllib.request` | **200**, valid DDS returned |
+| `xarray.open_dataset` (netcdf-c → libcurl) over DAP | **200**, dataset opened in 5.0 s |
+
+So the refusal discriminates on something about the client, not on the source
+address alone. The exact mechanism was not established — TLS fingerprinting,
+request shape, and an expiring rate-limit are all consistent with what was
+seen, and distinguishing them is not necessary to proceed. What matters is the
+measurement: **the OPeNDAP path works from a datacenter IP.**
+
+That was then confirmed the only way that counts. `scripts/mirror-ufs-ozone.py`
+was run against the live endpoint **from this container**, and produced three
+real frames:
+
+```
+f000 -> 20260817T000000.tif  (3.56 MB)
+f003 -> 20260817T030000.tif  (3.56 MB)
+f006 -> 20260817T060000.tif  (3.57 MB)
+total 10.7 MB (whole-file equivalent would be ~7 GB)
+```
+
+**Two cautions against over-reading this.** The same script failed on a Windows
+/ ArcGIS Pro workstation with `NetCDF: I/O failure` and an empty
+`curl error details:` — so client environment matters in ways not fully
+characterised, and success here does not guarantee success elsewhere. And a
+GitHub Actions runner is a third environment again. That is exactly what
+`.github/workflows/ufs-chem-reachability.yml` measures; run it before assuming.
+
+The practical consequence is large and favourable: if the runner behaves like
+this container, **the subsetting step runs inside the workflow** and no mirror
+hosting is needed at all.
 
 ### 3.2 What THREDDS offers, and what Zyra can use
 

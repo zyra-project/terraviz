@@ -82,11 +82,54 @@ URL_TEMPLATE = (
     "{date}/gfs.t{cycle:02d}z.atmf{fhr:03d}.nc"
 )
 PPM_TO_PPB = 1000.0
+# A non-default User-Agent: NOAA GSL IT confirmed the stock python/curl UA
+# trips a Cloudflare rule of its own, so a default one would conflate two
+# separate causes of refusal in the diagnosis below.
+USER_AGENT = "terraviz-mirror/1.0 (+https://github.com/zyra-project/terraviz)"
 DEFAULT_GRID = "1440x720"
 
 
 def build_url(date: str, cycle: int, fhr: int) -> str:
     return URL_TEMPLATE.format(date=date, cycle=cycle, fhr=fhr)
+
+
+def diagnose_url(url: str) -> str:
+    """Explain a DAP open failure in terms of what the network actually said.
+
+    netcdf-c reports every DAP problem as "NetCDF: I/O failure", often with an
+    empty "curl error details:" line, which cannot distinguish a Cloudflare
+    refusal from a TLS trust problem from a proxy. So on failure we ask the
+    same host a plain HTTPS question and report the real answer.
+    """
+    import urllib.error
+    import urllib.request
+
+    probe = url + ".dds"
+    req = urllib.request.Request(probe, headers={"User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            body = resp.read(200).decode("utf-8", "replace")
+        if "Dataset" in body:
+            return ("plain HTTPS to the same endpoint returned 200 and a valid DDS, so the "
+                    "network and the server are fine. The failure is inside netcdf-c's DAP "
+                    "client - usually a CA bundle it cannot read, or a proxy it does not use. "
+                    "Try setting HTTP.SSL.CAINFO in a .dodsrc file, or run from a machine "
+                    "where xarray.open_dataset on this URL already works.")
+        return f"plain HTTPS returned 200 but not a DDS; first bytes: {body[:120]!r}"
+    except urllib.error.HTTPError as exc:
+        if exc.code == 403:
+            return ("plain HTTPS returned 403 Forbidden - this network is refused by the "
+                    "host's Cloudflare policy, exactly as CI is. Nothing in this script can "
+                    "fix that; run it from a NOAA-allowed network.")
+        return f"plain HTTPS returned HTTP {exc.code} {exc.reason}."
+    except urllib.error.URLError as exc:
+        reason = getattr(exc, "reason", exc)
+        if "CERTIFICATE" in str(reason).upper() or "SSL" in str(reason).upper():
+            return (f"TLS failure on plain HTTPS too ({reason}) - this is a certificate-trust "
+                    "problem on this machine, not a server refusal.")
+        return f"plain HTTPS could not connect either ({reason}) - proxy or DNS, not the server."
+    except Exception as exc:  # noqa: BLE001
+        return f"could not probe the endpoint: {type(exc).__name__}: {exc}"
 
 
 def surface_index(ds) -> int:
@@ -278,6 +321,10 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001 - one bad hour must not kill the run
             failed += 1
             print(f"  f{fhr:03d} FAILED: {type(exc).__name__}: {exc}", file=sys.stderr)
+            # netcdf-c's DAP errors are opaque; say what the network really did,
+            # once, rather than repeating an unhelpful message per frame.
+            if failed == 1 and "NetCDF" in f"{type(exc).__name__}: {exc}":
+                print(f"\n  diagnosis: {diagnose_url(url)}\n", file=sys.stderr)
 
     print(f"\nwrote {written}, skipped {skipped}, failed {failed}")
     if written:
