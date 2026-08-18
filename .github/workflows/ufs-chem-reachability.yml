@@ -1,12 +1,15 @@
 # Reachability probe for NOAA GSL's THREDDS server, from a real CI runner.
 # Manually triggered, throwaway-allowed — same spirit as zyra-spike.yml.
 #
-# Why this exists: docs/UFS_CHEM_SFC_OZONE_PLAN.md §3.1 established that
-# gsl.noaa.gov 403s *one* datacenter egress IP, and inferred that a GitHub
-# Actions runner would be refused too. That inference is untested and load
-# bearing — GHA runs on Azure ranges, not the range that was measured, and
-# Cloudflare rules are commonly ASN/reputation scoped. The answer decides the
-# architecture:
+# Why this exists: gsl.noaa.gov refuses some clients and not others. Measured
+# from one datacenter IP, with the same User-Agent throughout: curl gets 403,
+# but Python urllib gets 200, and xarray/netcdf-c opens the dataset over DAP in
+# 5 seconds. So the refusal discriminates on the client, not the source address
+# alone, and the OPeNDAP path demonstrably works from a datacenter IP.
+#
+# What is NOT established is whether a GitHub Actions runner behaves the same
+# way. It is a third environment again — the same script failed on a Windows
+# workstation where this succeeded — and the answer decides the architecture:
 #
 #   reachable   -> the subsetting step runs as an ordinary Python step in the
 #                  same workflow, pulling ~12 MB over OPeNDAP. No external
@@ -85,9 +88,20 @@ jobs:
         if: ${{ inputs.run_mirror }}
         continue-on-error: true
         run: |
-          python3 -m pip install --quiet xarray netcdf4 rasterio
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "## Mirror, one frame" >> "$GITHUB_STEP_SUMMARY"
+          # The script lives on the feature branch. Dispatched against main it
+          # is absent, and the HTTP probes above are still the primary signal —
+          # so say that plainly rather than failing on a missing file.
+          if [ ! -f scripts/mirror-ufs-ozone.py ]; then
+            {
+              echo ""
+              echo "_Skipped: \`scripts/mirror-ufs-ozone.py\` is not on this ref."
+              echo "Re-dispatch against a ref that has it to run the end-to-end test._"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          python3 -m pip install --quiet xarray netcdf4 rasterio
           if python3 scripts/mirror-ufs-ozone.py \
                --date "$DATE" --fhr-max 0 --to-ppbv --out ./probe-frames 2>&1 | tee mirror.log; then
             {
