@@ -1,0 +1,197 @@
+# UFS-Chem global surface ozone — bespoke data-encoded frame build.
+#
+# Design: docs/UFS_CHEM_SFC_OZONE_PLAN.md (§3.1c chose this "bespoke" shape
+# over the two-stage one).
+#
+# WHY THIS IS NOT A PUBLISHER-AUTHORED ZYRA WORKFLOW
+# --------------------------------------------------
+# The source is a 3-D NetCDF served over OPeNDAP: 121 files of ~2.21 GB per
+# cycle, holding a ~36 MB animation. Extracting it needs one 2-D level of one
+# variable, and zyra cannot do that — `extract-variable` is GRIB2-only with no
+# level selector, `convert_to_format` takes a DecodedGRIB so NetCDF -> GeoTIFF
+# has no path, and `read_bytes_any` returns whole-file bytes, which is the
+# opposite of OPeNDAP's open-lazily-request-slices (plan §3.6). So the subset
+# runs here as a Python step, and zyra picks up from georeferenced frames.
+#
+# That step CAN run here: measured on a real runner (run 32192599986), curl
+# gets 403 from gsl.noaa.gov but xarray/netcdf-c opens the same OPeNDAP
+# endpoint and writes a frame (plan §3.1c).
+#
+# WHAT THIS PRODUCES
+# ------------------
+# A data-encoded frame set under _work/images/frames — 8-bit luma where the
+# value IS the pixel, plus a color-scale sidecar. Uploaded as an artifact.
+#
+# PUBLISHING IS NOT WIRED UP, deliberately. cli/zyra-publish-from-dispatch.ts
+# --phase=publish reads a workflow.json that --phase=fetch writes from a stored
+# D1 workflow row, so it assumes a publisher-authored workflow this job does
+# not have. Publishing these frames needs either a stored workflow whose
+# pipeline reads the pre-populated /work/tif, or a publish path that takes a
+# dataset id directly. Left as the next decision rather than guessed at.
+name: UFS-Chem surface ozone (bespoke build)
+
+on:
+  workflow_dispatch:
+    inputs:
+      cycle_date:
+        description: 'Cycle date, YYYYMMDD. Blank = the most recent complete cycle (~30h lag).'
+        required: false
+        default: ''
+      step_hours:
+        description: 'Forecast-hour stride (3 = 41 frames over 5 days; 1 = 121)'
+        required: false
+        default: '3'
+      fhr_max:
+        description: 'Last forecast hour'
+        required: false
+        default: '120'
+
+permissions:
+  contents: read
+
+env:
+  # Same digest zyra-run.yml pins; the two are meant to move together.
+  ZYRA_IMAGE: ghcr.io/noaa-gsl/zyra@sha256:0f335b9d9b2f0eba6d7ef9407906b13eddb1ead43b984bc07c21b4507063b09b
+  VMIN: '0'
+  # ppbv. Sampled across a real forecast: most frames peak near 60-67, but f012
+  # reached 109.6 in a midday photochemical episode. Anything above vmax clamps
+  # and then reads back WRONG under the cursor, so this clears the observed
+  # maximum rather than flattering the picture (plan §4.3).
+  VMAX: '120'
+  UNITS: ppbv
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve the cycle
+        id: cycle
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.cycle_date }}" ]; then
+            DATE="${{ inputs.cycle_date }}"
+          else
+            # One 00z cycle per day, fully posted ~28.5 h after cycle time
+            # (measured from file mtimes). 30 h back, floored to the day.
+            DATE=$(date -u -d '30 hours ago' +%Y%m%d)
+          fi
+          echo "date=$DATE" >> "$GITHUB_OUTPUT"
+          echo "Building cycle $DATE" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Subset surface ozone over OPeNDAP
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet xarray netcdf4 rasterio
+          mkdir -p _work/tif
+          python3 scripts/mirror-ufs-ozone.py \
+            --date "${{ steps.cycle.outputs.date }}" \
+            --step "${{ inputs.step_hours }}" \
+            --fhr-max "${{ inputs.fhr_max }}" \
+            --to-ppbv \
+            --out _work/tif | tee mirror.log
+          COUNT=$(find _work/tif -name '*.tif' | wc -l)
+          echo "frames mirrored: $COUNT"
+          [ "$COUNT" -gt 0 ] || { echo "::error::no frames were mirrored"; exit 1; }
+          {
+            echo ""
+            echo "## Subset"
+            echo '```'
+            tail -n 3 mirror.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build the pipeline from the frames that exist
+        run: |
+          set -euo pipefail
+          mkdir -p _work/images/frames
+          # Generated from the mirrored files rather than hardcoded, so a
+          # partially-posted cycle renders what it has instead of failing on a
+          # missing input. No acquire/convert-format/reproject stage: the
+          # mirror already emitted the target grid (plan §3.6).
+          python3 - <<'PY'
+          import json, pathlib
+          tifs = sorted(p.name for p in pathlib.Path("_work/tif").glob("*.tif"))
+          palette = {"type": "continuous", "base": "YlOrRd",
+                     # Ozone is NOT an aerosol: it has a large non-zero global
+                     # background, so the aerosol convention of a transparent
+                     # low band would erase most of the atmosphere.
+                     "transparent_range": 0, "blend_range": 8, "overall_alpha": 0.92}
+          pathlib.Path("_work/cmap.json").write_text(json.dumps(palette))
+          pipeline = {"stages": [
+            {"stage": "visualize", "command": "heatmap", "args": {
+              "inputs": [f"/work/tif/{n}" for n in tifs],
+              "output_dir": "/work/images/frames",
+              "data_encoded": True,
+              "color_scale_file": "/work/color-scale.json",
+              "cmap_file": "/work/cmap.json",
+              "units": "ppbv", "vmin": 0, "vmax": 120}},
+            {"stage": "process", "command": "scan-frames", "args": {
+              "frames_dir": "/work/images/frames",
+              "datetime_format": "%Y%m%dT%H%M%S",
+              "period_seconds": 3600 * int("${{ inputs.step_hours }}"),
+              "output": "/work/frames-meta.json"}},
+          ]}
+          pathlib.Path("_work/pipeline.json").write_text(json.dumps(pipeline, indent=2))
+          print(f"pipeline over {len(tifs)} frames")
+          PY
+
+      - name: Render data-encoded frames
+        run: |
+          set -uo pipefail
+          docker run --rm --entrypoint "" --user 0 \
+            -v "$PWD/_work:/work" \
+            -e ZYRA_VERBOSITY=info \
+            "$ZYRA_IMAGE" \
+            bash -c '
+              set -euo pipefail
+              # The zyra image sets PROJ_LIB for its arm64 apt layout but sets
+              # it unconditionally; on amd64 that path has no proj.db and the
+              # stale value overrides the PROJ data bundled in the rasterio
+              # wheel, so every CRS lookup dies with "Cannot find proj.db"
+              # (NOAA-GSL/zyra#318). Same guard zyra-run.yml carries.
+              if [ -n "${PROJ_LIB:-}" ] && [ ! -f "${PROJ_LIB}/proj.db" ]; then
+                echo "::notice::PROJ_LIB=$PROJ_LIB has no proj.db; clearing it"
+                unset PROJ_LIB
+              fi
+              zyra run /work/pipeline.json
+            '
+
+      - name: Verify the data-encoded output
+        run: |
+          set -euo pipefail
+          N=$(find _work/images/frames -maxdepth 1 -type f -iname '*.png' | wc -l)
+          {
+            echo ""
+            echo "## Render"
+            echo "- frames rendered: **$N**"
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "$N" -gt 0 ] || { echo "::error::no frames under _work/images/frames"; exit 1; }
+          # The color-scale sidecar is what makes this a measurement rather
+          # than a picture: without it the globe shows raw luma, with no hover
+          # values and no client-side recolour (plan §The data-encoded contract).
+          if [ -f _work/color-scale.json ]; then
+            {
+              echo "- color scale: **written**"
+              echo ""
+              echo '```json'
+              head -c 600 _work/color-scale.json
+              echo ""
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::no color-scale sidecar — this would publish as a picture"
+            exit 1
+          fi
+
+      - name: Upload frames
+        uses: actions/upload-artifact@v4
+        with:
+          name: ufs-chem-ozone-frames-${{ steps.cycle.outputs.date }}
+          path: |
+            _work/images/frames/
+            _work/color-scale.json
+            _work/frames-meta.json
+          if-no-files-found: error

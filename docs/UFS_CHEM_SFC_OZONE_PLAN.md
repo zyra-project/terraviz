@@ -531,9 +531,29 @@ real decision:
 | Fits the platform's model | No — bypasses the publisher-authored pipeline path | Yes |
 | Frame list in `pipeline_json` | Not needed | 41 templated URLs |
 
-The pipeline in §4.6 is written for the two-stage shape, which is why it still
-carries an `acquire http` stage. Switching to the bespoke shape deletes that
-stage and the hosting question with it.
+**Decision: bespoke.** `.github/workflows/ufs-chem-ozone.yml` implements it —
+one job that subsets over OPeNDAP, generates a pipeline from whatever frames
+the subset produced, renders them data-encoded in the pinned zyra container,
+and uploads the frame set. No hosting, no `acquire` stage, no templated frame
+list. The §4.6 pipeline is retained as the two-stage reference for when frames
+do get a public home.
+
+Two things the bespoke workflow does that are worth knowing:
+
+- **The pipeline is generated, not stored.** It is built from the files the
+  subset actually wrote, so a partially-posted cycle renders what exists
+  instead of failing on a missing input — and there is no 41-entry templated
+  URL list to keep in sync.
+- **Publishing is deliberately not wired up.**
+  `cli/zyra-publish-from-dispatch.ts --phase=publish` reads a `workflow.json`
+  that `--phase=fetch` writes from a stored D1 workflow row, so it assumes a
+  publisher-authored workflow this job does not have. Publishing these frames
+  needs either a stored workflow whose pipeline reads a pre-populated
+  `/work/tif`, or a publish path that takes a dataset id directly. That is the
+  next decision, and guessing at it would have been worse than naming it.
+
+The reachability probe that settled §3.1c has been removed — it was throwaway
+by design and its question is answered.
 
 ### 3.2 What THREDDS offers, and what Zyra can use
 
