@@ -26,7 +26,7 @@ is genuinely blocking:
 
 | # | Blocker | Status | Severity |
 |---|---|---|---|
-| B1 | `gsl.noaa.gov` Cloudflare policy 403s datacenter/CI egress | **Verified, blocking** | Must be solved before any workflow runs |
+| B1 | `gsl.noaa.gov` Cloudflare policy 403s datacenter/CI egress | **Verified, blocking** — but FTP likely routes around it (§3.1a) | Must be solved before any workflow runs |
 | B2 | `acquire thredds` is not on the TerraViz stage allowlist | Verified | **Not blocking** — NCSS routes around it (§3.3) |
 | B3 | Placeholder grammar can't express day-of-year filenames | **Dissolved** — wrong collection (§2.1) | Not blocking; `ufs-chem_csl` templates cleanly |
 | B4 | Zyra cannot rescale units; ozone may be stored as mole fraction | Conditional on §2 | Cosmetic but material — decides hover readability |
@@ -174,6 +174,100 @@ Three ways out, in preference order:
 3. **Stage the data by hand.** Pull it once from a NOAA workstation, push to
    the node's own object storage, point the workflow there. Fine for a
    one-shot retro dataset; not a pattern to build on.
+
+### 3.1a FTP — the most promising route around B1
+
+`gsdftp.fsl.noaa.gov` (the legacy FSL/GSD anonymous FTP server) publishes what
+looks like the same tree:
+
+```
+ftp://anonymous@gsdftp.fsl.noaa.gov/ufs-chem_csl/20260817/gfs.t00z.atmf000.nc
+```
+
+**This is a different host, and the difference is the whole point.** It
+resolves to `137.75.133.215` — a real NOAA address, **not Cloudflare**. The bot
+policy that refuses every request to `gsl.noaa.gov` simply does not exist here.
+
+**Credentials.** Anonymous FTP takes the username `anonymous` with an **email
+address** as the password — not the literal string `anonymous`, which many
+servers reject:
+
+```bash
+curl -u "anonymous:you@noaa.gov" 'ftp://gsdftp.fsl.noaa.gov/ufs-chem_csl/20260817/'
+```
+
+It could not be tested from the environment this plan was written in, and the
+reason matters. FTP egress is blocked by *that sandbox*, not by NOAA. Four
+attempts, each failing at a different and unambiguous layer:
+
+| Attempt | Result |
+|---|---|
+| Direct FTP, passive | `Connection timed out` on port 21 |
+| Through the agent proxy (absolute-form) | Proxy: *"only accepts HTTPS CONNECT tunnels"* |
+| Forced `--proxytunnel` CONNECT | `Connection reset by peer` — no CONNECT to :21 |
+| Active mode (`-P -`) | `Connection timed out` |
+
+Confirmed with a control: `ftp://ftp.gnu.org/`, a famously open anonymous
+server, times out identically. Every failure lands at the TCP connect (`Trying
+137.75.133.215:21... Connection timed out`) before any login is attempted, so
+credentials were never a factor. So the two failures are not the same kind of
+thing:
+
+| Host | Result | What it means |
+|---|---|---|
+| `gsl.noaa.gov:443` | **403 + `cf-ray`** | An affirmative refusal by NOAA's Cloudflare. Will also refuse CI. |
+| `gsdftp.fsl.noaa.gov:21` | **Timeout** | Local egress policy. Says nothing about whether NOAA would serve a CI runner. |
+
+Four things line up in FTP's favour:
+
+1. **No Cloudflare**, so no bot rule and no UA problem.
+2. **`acquire ftp` is on the stage allowlist** (`acquire: ['http','ftp','s3']`)
+   — unlike `acquire thredds`, this needs no allowlist change at all.
+3. **`acquire ftp` supports `--sync-dir`**, which `acquire http` does not — so
+   it can pull a whole dated directory rather than one enumerated URL per
+   frame. That also sidesteps the per-frame list bounds in §4.4 entirely.
+4. **GitHub Actions runners have unrestricted outbound**, including FTP.
+
+**The cost: FTP has no subsetting.** There is no NCSS, no OPeNDAP, no
+range-by-variable — you get whole files. So §3.3's server-side subsetting, the
+thing that makes a multi-gigabyte 3-D `atmf` file affordable, is unavailable on
+this route. The two candidate routes trade against each other cleanly:
+
+| | THREDDS (`gsl.noaa.gov`) | FTP (`gsdftp.fsl.noaa.gov`) |
+|---|---|---|
+| Reachable from CI | **No** (Cloudflare) | Likely yes — untested |
+| Allowlisted stage | via `acquire http` + NCSS | **`acquire ftp`**, directly |
+| Server-side subsetting | **Yes** (NCSS/OPeNDAP) | **No** — whole files only |
+| Directory sync | No (`acquire http` is one URL) | **Yes** (`--sync-dir`) |
+
+**This makes the `sfcf`-vs-`atmf` question from §2.1 decisive rather than
+merely useful.** If the collection publishes a 2-D `sfcf*.nc` surface file,
+FTP is straightforwardly the best route: small files, no subsetting needed,
+allowlisted stage, no bot policy. If only the 3-D `atmf` files exist, FTP means
+pulling gigabytes per forecast hour to use a single model level — at which
+point mirroring to S3 (and subsetting during the mirror) wins again.
+
+**Verifying it (two commands, from anywhere with FTP egress).** These answer
+the decisive `sfcf`-vs-`atmf` question *and* size the transfer, which between
+them settle the route:
+
+```bash
+# 1. What is actually in a cycle directory, with sizes?
+curl -u "anonymous:you@noaa.gov" \
+  'ftp://gsdftp.fsl.noaa.gov/ufs-chem_csl/20260817/'
+
+# 2. How far back do cycles go, and is today's present?
+curl -u "anonymous:you@noaa.gov" --list-only \
+  'ftp://gsdftp.fsl.noaa.gov/ufs-chem_csl/'
+```
+
+If (1) lists `sfcf*.nc` alongside `atmf*.nc`, FTP is the route and this plan
+gets simple. If it is `atmf` only, compare the file size against the cost of
+mirroring, per the table above.
+
+One caveat worth confirming: anonymous FTP is being retired across much of
+NOAA in favour of HTTPS and cloud distribution, so check that this server is
+expected to persist before building on it.
 
 ### 3.2 What THREDDS offers, and what Zyra can use
 
@@ -376,9 +470,21 @@ design, and B1 stands regardless.
 
 ## 6. Next steps
 
+0. **Check FTP first** (§3.1a) — it is one command, it is the likeliest route
+   around B1, and its answer decides whether the rest of this plan simplifies:
+
+   ```bash
+   curl -u "anonymous:you@noaa.gov" \
+     'ftp://gsdftp.fsl.noaa.gov/ufs-chem_csl/20260817/'
+   ```
+
+   Looking for: does a 2-D `sfcf*.nc` exist alongside the 3-D `atmf*.nc`, and
+   how big are they?
+
 1. Run `scripts/inventory-thredds.py` from a NOAA-allowed network against
-   **both** collections; paste or commit the JSON. **Everything else is
-   blocked on this.**
+   **both** collections; paste or commit the JSON. Still worth doing even if
+   FTP works — the OPeNDAP `.das` probe is the cheapest way to get variable
+   names and units, which FTP cannot tell you without downloading a file.
 
    ```bash
    # the daily collection — the better target (§2.1)
