@@ -46,11 +46,18 @@ So this is not a bandwidth problem being solved by a clever pipeline. It is a
 mechanism (OPeNDAP) that is verified working — just not from CI.
 
 **Recommended architecture: a small NOAA-side subsetting step.** Something that
-can reach `gsl.noaa.gov` opens each `dodsC` URL, takes the surface level of one
-ozone variable, and writes ~0.3 MB per frame to object storage. The workflow
-then consumes ~36 MB/cycle from a CI-reachable location. The mirror is small
-enough to run almost anywhere and cheap enough to be uncontroversial, and it is
-also the natural place to fix B4 (unit rescaling) since Zyra cannot.
+can reach `gsl.noaa.gov` opens each `dodsC` URL and takes the surface level of
+one ozone variable. Two figures, easily confused:
+
+| | 3-hourly (41 frames) | hourly (121 frames) |
+|---|---|---|
+| Pulled over the wire (384×192 native) | **12 MB** | **36 MB** |
+| Written by the mirror (1440×720 GeoTIFF) | ~152 MB | ~448 MB |
+
+The wire figure is the one that matters against the 267 GB alternative; the
+written figure is larger only because the mirror resamples to the globe's grid
+in the same pass (§3.6). Either is small enough to run almost anywhere, and the
+mirror is also the natural place to fix B4 (unit rescaling) since Zyra cannot.
 
 The alternative — GSL allowlisting the runner so the workflow reads OPeNDAP
 directly — is cleaner still and removes the moving part. Worth asking for; the
@@ -147,9 +154,12 @@ listing:
    the dims named or the coordinates re-attached first.
 2. **The surface is the last level, not the first.** `pfull` ascends
    0.3792 → 997.3 hPa, so **index 63** is the near-surface level.
-3. **The grid is Gaussian, not regular.** `grid_yt` is unevenly spaced, so
-   `reproject` is doing a genuine regrid to equirectangular, not just a
-   longitude roll. That is within its remit, but it is real resampling.
+3. **The grid is Gaussian, not regular.** `grid_yt` is unevenly spaced — which
+   a GeoTIFF geotransform cannot express, since it assumes regular spacing.
+   Writing Gaussian rows as if regular would misplace data by up to half a cell
+   near the poles. The regrid therefore has to happen while the true
+   coordinates are still attached, i.e. in the mirror rather than in a later
+   `reproject` (§3.6).
 
 ### 2.1a Variable choice and units — resolved, and B4 with them
 
@@ -613,6 +623,56 @@ files exist, FTP alone is enough and the conflict disappears. If only `atmf`
 exists, either GSL must let CI reach `gsl.noaa.gov`, or the mirror step becomes
 the place where subsetting happens — pulling one level over DAP from a NOAA
 machine and writing small files to S3.
+
+### 3.6 Can the subsetting be a standard Zyra stage? No — and why
+
+Asked directly, and worth answering from the source rather than from the shape
+of the stage list. Checked against `NOAA-GSL/zyra` v0.1.54:
+
+| Command | What it actually does | Fit |
+|---|---|---|
+| `process extract-variable` | "Extract a variable from **GRIB2** by regex pattern" | GRIB2-only, and **no level selector** |
+| `process convert-format` | Reads via `read_bytes_any()` → **whole-file bytes**; `.idx` byte ranges are its only subsetting | NetCDF input is either copied verbatim (`--format netcdf`) or handed to `grib_decode` |
+| `process reproject` | Warps an already-georeferenced raster | Fine, but downstream of the problem |
+
+Three specific walls, in increasing order of how hard they are to move:
+
+1. **No level selection anywhere.** Our field is 4-D `(time, level, lat, lon)`
+   and we need one level. Nothing in `process` takes an index or a coordinate.
+2. **NetCDF → GeoTIFF is not a supported path.** `convert_to_format()` is typed
+   `(decoded: DecodedGRIB, ...)`. A NetCDF input with `--format geotiff` goes to
+   `grib_decode` and fails.
+3. **The I/O model is structurally wrong for this.** `read_bytes_any()` returns
+   `bytes` — fetch the whole file, then decode. OPeNDAP's advantage is the
+   opposite: open lazily, request slices. The 7,482× saving in §2.0b *is* that
+   laziness, and a bytes-oriented reader cannot express it. Even a NetCDF
+   reader bolted onto `convert-format` would pull 2.21 GB per frame unless it
+   opened the endpoint lazily.
+
+Wall 3 is the real one. Walls 1 and 2 are missing features; wall 3 is an
+architectural assumption that suits GRIB2-on-S3 (where `.idx` byte ranges give
+random access over plain HTTP) and does not carry over to DAP.
+
+**Tier:** this is a **Tier 2 gap** — a zyra capability gap, not a TerraViz
+allowlist gap. `extract-variable` is *already* allowlisted; adding entries
+changes nothing. Closing it means an upstream issue asking for a
+NetCDF/OPeNDAP reader with variable **and** level selection, opening the source
+lazily. There is precedent: `process reproject` arrived upstream
+(NOAA-GSL/zyra#295/#306) and was allowlisted here once released.
+
+**Until then the mirror script is not a workaround, it is the design.** It runs
+where the data is reachable, moves 0.013% of the bytes, and hands the pipeline
+frames it can already consume.
+
+**One consequence for the pipeline** (and a bug this question caught): an
+earlier draft here fed mirrored **NetCDF** into `convert-format --format
+geotiff`, which wall 2 makes impossible. The mirror now writes **GeoTIFF**
+directly and the pipeline is three stages — `acquire http` → `heatmap` →
+`scan-frames`. It also carries no `reproject`, because a Gaussian latitude axis
+cannot be expressed in a GeoTIFF geotransform: the regrid has to happen while
+the data still has its true coordinates attached, which means in the mirror.
+That is one resampling instead of two, and a deliberate, documented deviation
+from "reprojection lives in Zyra".
 
 ## 4. Workflow design
 
