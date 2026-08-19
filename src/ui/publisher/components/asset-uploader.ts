@@ -33,6 +33,8 @@
 
 import { t, type MessageKey } from '../../../i18n'
 import { detectVideoFrameRate } from './mp4-frame-rate'
+import { apiFetch, isManifestUrl } from '../../../services/catalogSource'
+import { pickDirectFile } from '../../../services/datasetLoader'
 import { MAX_IMAGE_SEQUENCE_FRAMES as MAX_FRAMES } from '../../../types/image-sequence-constants'
 import {
   generateGlobeThumbnail,
@@ -115,6 +117,51 @@ export interface VideoScrubHandle {
  * setup the globe's video textures use, so reading a frame off the
  * canvas is taint-free.
  */
+/**
+ * Attach a dataset's video to the scrub element, by whichever route it
+ * is actually served.
+ *
+ * This called `loadStream` unconditionally, which is an HLS URL's
+ * contract and not every dataset's. A data-encoded video published *as
+ * uploaded* has no HLS ladder at all — its manifest carries `hls: ""`
+ * and a single progressive file — so the one-click "Generate from this
+ * dataset's data" button handed hls.js a JSON manifest to parse as an
+ * m3u8 and failed for exactly the datasets that most need a generated
+ * thumbnail, since a publisher cannot hand-render a globe.
+ *
+ * `datasetLoader` already resolves this correctly for the live globe;
+ * the same helpers are reused here rather than restated, so the two
+ * cannot drift into disagreeing about which route a dataset takes.
+ */
+export async function attachScrubSource(
+  svc: InstanceType<typeof import('../../../services/hlsService')['HLSService']>,
+  url: string,
+  video: HTMLVideoElement,
+): Promise<void> {
+  if (!isManifestUrl(url)) {
+    // A direct asset URL. `.m3u8` is the only thing hls.js should see;
+    // anything else is a progressive file it would choke on.
+    if (/\.m3u8(\?|$)/i.test(url)) await svc.loadStream(url, video)
+    else await svc.loadDirect(url, video)
+    return
+  }
+  const res = await apiFetch(url, { headers: { Accept: 'application/json' } })
+  if (!res.ok) throw new Error(`Manifest fetch failed: ${res.status} ${res.statusText}`)
+  const manifest = (await res.json()) as {
+    hls?: string
+    files?: Parameters<typeof pickDirectFile>[0]
+  }
+  if (!manifest.hls) {
+    const direct = pickDirectFile(manifest.files ?? [])
+    if (!direct?.link) {
+      throw new Error('Manifest declared no HLS stream and no playable file')
+    }
+    await svc.loadDirect(direct.link, video)
+    return
+  }
+  await svc.loadStream(manifest.hls, video)
+}
+
 async function defaultLoadVideoScrub(url: string): Promise<VideoScrubHandle> {
   const { HLSService } = await import('../../../services/hlsService')
   const video = document.createElement('video')
@@ -126,7 +173,7 @@ async function defaultLoadVideoScrub(url: string): Promise<VideoScrubHandle> {
   video.className = 'publisher-asset-uploader-generate-video'
   const svc = new HLSService()
   try {
-    await svc.loadStream(url, video)
+    await attachScrubSource(svc, url, video)
   } catch (err) {
     // On a load failure the handle (and its `dispose`) is never
     // returned, so tear the HLS instance + element down here rather
