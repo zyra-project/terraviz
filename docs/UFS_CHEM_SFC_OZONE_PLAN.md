@@ -3,8 +3,9 @@
 **Status: draft for review.**
 **Last reviewed: 2026-08-18.**
 **Revisit when:** zyra gains NetCDF dimension selection
-([zyra-project/zyra#300](https://github.com/zyra-project/zyra/issues/300) —
-this retires the whole bespoke path, and is the only route still open); GSL
+([NOAA-GSL/zyra#367](https://github.com/NOAA-GSL/zyra/issues/367), mirrored as
+zyra-project/zyra#300 — this retires the whole bespoke path, and is the only
+route still open); GSL
 changes the Cloudflare policy on `gsl.noaa.gov`; either collection moves to
 NODD/S3; or the grid/cadence changes from 384×192 hourly.
 
