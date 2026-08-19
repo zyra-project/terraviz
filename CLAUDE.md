@@ -141,6 +141,7 @@ npm run screenshots:smoke   # gating interaction tests (search, Orbit, nav)
 |---|---|
 | `src/main.ts` | App entry — boots MapLibre renderer, orchestrates dataset loading |
 | `src/types/index.ts` | All shared types (`Dataset`, `ChatMessage`, `AppState`, `DocentConfig`…) |
+| `src/types/dataset-experience.ts` | TerraViz-authoritative versioned contract for dataset-synchronized captions/audio, endpoint dwell, simultaneous layers, overlays, and per-asset rights; includes fail-closed wire parsing (`docs/SOS_IMPORT.md`) |
 | `src/services/mapRenderer.ts` | MapLibre GL JS globe — GIBS tiles, navigation, markers, terrain |
 | `src/services/viewportManager.ts` | Multi-globe orchestrator — 1/2/4 synchronised MapRenderer instances in a CSS grid, camera lockstep, panel promotion |
 | `src/services/earthTileLayer.ts` | CustomLayerInterface — day/night blend, clouds, specular, sun, skybox |

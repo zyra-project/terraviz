@@ -3,8 +3,10 @@
  */
 
 import type { ColorScale, RenderEncoding } from './color-scale'
+import type { DatasetExperienceManifest } from './dataset-experience'
 
 export type { ColorScale, RenderEncoding }
+export type { DatasetExperienceManifest } from './dataset-experience'
 
 /**
  * Supported dataset formats.
@@ -87,6 +89,9 @@ export interface Dataset {
   closedCaptionLink?: string
   websiteLink?: string
   runTourOnLoad?: string
+
+  /** TerraViz-authoritative synchronized tracks, dwell, layers, and overlays. */
+  experience?: DatasetExperienceManifest
 
   /** Pixel-coords → data-value mapping for the color table, used
    * by SOS desktop's hover-to-probe feature. Stored as a JSON

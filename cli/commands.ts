@@ -748,6 +748,16 @@ Commands:
                                       --dry-run prints the plan. Typically run on a
                                       schedule with a service token.
 
+  import-sos inventory <root.sos> [...] --catalog=<sos_sqlite.db>
+                                      Crawl native SOS playlist metadata from
+                                      local roots and FTP includes, cache only
+                                      small .sos files, and write a conversion
+                                      inventory. Never downloads bulk media,
+                                      executes scripts, publishes, or writes R2.
+                                      Optional: --output=<json>,
+                                      --cache-dir=<dir>, --policy=<yaml>,
+                                      --no-network, --refresh, --max-depth=N.
+
   verify-deploy [--skip-publish-checks]
                                       Run the post-deploy smoke-test checklist
                                       from CATALOG_BACKEND_DEVELOPMENT.md against

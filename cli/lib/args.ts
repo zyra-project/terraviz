@@ -37,6 +37,7 @@ export const BOOLEAN_FLAGS = new Set<string>([
   'from-stdin',
   'human',
   'update-existing',
+  'refresh',
 ])
 
 export function parseArgs(argv: string[], booleans: Set<string> = BOOLEAN_FLAGS): ParsedArgs {

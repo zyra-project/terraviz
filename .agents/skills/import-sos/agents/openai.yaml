@@ -1,0 +1,4 @@
+interface:
+  display_name: "Import Native SOS Datasets"
+  short_description: "Inventory and convert SOS playlists safely"
+  default_prompt: "Use $import-sos to inventory native SOS playlists and plan a safe TerraViz migration."

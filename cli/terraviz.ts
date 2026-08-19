@@ -50,6 +50,7 @@ import { runMigrateR2Assets } from './migrate-r2-assets'
 import { runMigrateR2Tours } from './migrate-r2-tours'
 import { runRollbackR2Tours } from './rollback-r2-tours'
 import { runRollbackR2Assets } from './rollback-r2-assets'
+import { runImportSos } from './import-sos'
 
 async function main(argv: string[]): Promise<number> {
   // Bare `-h` short flag — parseArgs only knows about `--`, so handle
@@ -115,6 +116,8 @@ async function main(argv: string[]): Promise<number> {
       return runImportSnapshot(ctx)
     case 'import-events':
       return runImportEvents(ctx)
+    case 'import-sos':
+      return runImportSos(ctx)
     case 'verify-deploy':
       return runVerifyDeploy(ctx, { config })
     case 'migrate-r2-hls':

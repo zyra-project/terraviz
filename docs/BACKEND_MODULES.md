@@ -22,6 +22,7 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `cli/commands.ts` | Command implementations for the `terraviz` CLI |
 | `cli/import-events.ts` | `terraviz import-events` — ingest current events from NASA EONET into the catalog as proposed events (`docs/CURRENT_EVENTS_PLAN.md` §9) |
 | `cli/import-snapshot.ts` | `terraviz import-snapshot` — one-shot bulk importer for the legacy SOS catalog snapshot |
+| `cli/import-sos.ts` | `terraviz import-sos inventory` — metadata-only native SOS SQLite/playlist crawl and conversion-report command (`docs/SOS_IMPORT.md`) |
 | `cli/init-node.ts` | `terraviz init-node` — provision (or update) this node's identity |
 | `cli/lib/args.ts` | Hand-rolled argv parser for the `terraviz` CLI |
 | `cli/lib/asset-fetch.ts` | HTTP fetch helper for the Phase 3b asset migration |
@@ -41,6 +42,11 @@ design rationale in the `docs/CATALOG_*` plan docs.
 | `cli/lib/realtime-title.ts` | Heuristic to detect "real-time" SOS rows by title — the rows whose Vimeo source is re-uploaded on a recurring (typically daily) cadence by NOAA's automation |
 | `cli/lib/snapshot-import.ts` | Pure row-mapping helpers for the SOS catalog snapshot importer |
 | `cli/lib/sos-spec.ts` | ffprobe wrapper + SOS-spec assertion (4096×2048 2:1, 30 fps, h264) shared by the Z0 spike and the Z1 runner |
+| `cli/lib/sos-catalog.ts` | Read-only native `sos_sqlite.db` loader and playlist-to-dataset/variation matcher; explicitly separate from SOS Explorer |
+| `cli/lib/sos-conversion.ts` | Native SOS clip → conservative TerraViz draft/experience/companion-Tour plan with YAML policy, rights gates, and compatibility findings |
+| `cli/lib/sos-crawler.ts` | Recursive metadata-only playlist crawler with depth/cycle/error reporting and resolved source references |
+| `cli/lib/sos-playlist.ts` | Native `playlist.sos` parser matching SOS clip/layer/PIP semantics while preserving unknown properties |
+| `cli/lib/sos-source.ts` | Cache-first local/HTTP/FTP playlist reader plus native shared-path resolution; byte/time bounded and media-blind |
 | `cli/lib/srt-to-vtt.ts` | SRT → WebVTT converter |
 | `cli/lib/tour-json-parser.ts` | SOS tour.json parser — discovers every URL-bearing field in a tour file and classifies it for migration |
 | `cli/lib/verify-checks.ts` | Production-deploy verification checks for `terraviz verify-deploy` |

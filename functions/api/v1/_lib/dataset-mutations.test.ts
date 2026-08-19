@@ -168,6 +168,29 @@ describe('createDataset', () => {
     expect(result.errors[0].field).toBe('legacy_id')
     expect(result.errors[0].code).toBe('forbidden')
   })
+
+  it('persists importer state for staff and rejects it from community publishers', async () => {
+    const { env } = setupEnv()
+    const sourceState = JSON.stringify({ version: 1, sourceSystem: 'sos', sourceFingerprint: 'abc' })
+    const denied = await createDataset(env, PUBLISHER, {
+      title: 'Community source state',
+      format: 'image/png',
+      source_import_state: sourceState,
+    })
+    expect(denied.ok).toBe(false)
+    if (denied.ok) return
+    expect(denied.status).toBe(403)
+    expect(denied.errors[0]).toMatchObject({ field: 'source_import_state', code: 'forbidden' })
+
+    const allowed = await createDataset(env, ADMIN, {
+      title: 'Staff source state',
+      format: 'image/png',
+      source_import_state: sourceState,
+    })
+    expect(allowed.ok).toBe(true)
+    if (!allowed.ok) return
+    expect(allowed.dataset.source_import_state).toBe(sourceState)
+  })
 })
 
 describe('listDatasetsForPublisher', () => {

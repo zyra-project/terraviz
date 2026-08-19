@@ -26,6 +26,7 @@ import {
   parseColorScale,
   RENDER_ENCODING_DATA_LUMA,
 } from '../../../../src/types/color-scale'
+import { parseDatasetExperience } from '../../../../src/types/dataset-experience'
 
 const RESERVED_SLUGS = new Set([
   'api',
@@ -104,6 +105,10 @@ export interface DatasetDraftBody {
    *  data-encoded pair above: a picture published as a frame
    *  sequence wants a readable speed too. */
   playback_fps?: number | null
+  /** Versioned TerraViz dataset-experience JSON. */
+  experience_manifest?: string | null
+  /** Privileged importer checkpoint used for three-way merge. */
+  source_import_state?: string | null
   website_link?: string
   start_time?: string
   end_time?: string
@@ -355,6 +360,22 @@ function validateJsonStringField(
     JSON.parse(value)
   } catch {
     errors.push(err(field, 'invalid_json', `${field} must be a JSON-stringified value.`))
+  }
+}
+
+function validateExperienceManifest(value: unknown, errors: ValidationError[]): void {
+  if (value == null || value === '') return
+  if (typeof value !== 'string') return
+  try {
+    if (!parseDatasetExperience(JSON.parse(value))) {
+      errors.push(err(
+        'experience_manifest',
+        'invalid_value',
+        'experience_manifest must be a supported versioned TerraViz dataset experience.',
+      ))
+    }
+  } catch {
+    // validateJsonStringField emits the more specific invalid_json error.
   }
 }
 
@@ -670,6 +691,9 @@ export function validateDraftCreate(body: DatasetDraftBody): ValidationError[] {
   validateOptionalString('data_ref', body.data_ref, 1024, errors)
   validateOptionalString('color_table_ref', body.color_table_ref, 1024, errors)
   validateJsonStringField('probing_info', body.probing_info, 4096, errors)
+  validateJsonStringField('experience_manifest', body.experience_manifest, 262144, errors)
+  validateExperienceManifest(body.experience_manifest, errors)
+  validateJsonStringField('source_import_state', body.source_import_state, 262144, errors)
   validateBoundingBox(body.bounding_box, errors)
   validateOptionalString('celestial_body', body.celestial_body, 64, errors)
   validateRadiusMi(body.radius_mi, errors)
@@ -718,6 +742,9 @@ export function validateDraftUpdate(body: DatasetDraftBody): ValidationError[] {
   validateOptionalString('data_ref', body.data_ref, 1024, errors)
   validateOptionalString('color_table_ref', body.color_table_ref, 1024, errors)
   validateJsonStringField('probing_info', body.probing_info, 4096, errors)
+  validateJsonStringField('experience_manifest', body.experience_manifest, 262144, errors)
+  validateExperienceManifest(body.experience_manifest, errors)
+  validateJsonStringField('source_import_state', body.source_import_state, 262144, errors)
   validateBoundingBox(body.bounding_box, errors)
   validateOptionalString('celestial_body', body.celestial_body, 64, errors)
   validateRadiusMi(body.radius_mi, errors)

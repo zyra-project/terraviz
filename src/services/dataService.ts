@@ -265,6 +265,7 @@ interface WireDataset {
    *  in the JSON schema and emitted by the serializer; likewise never
    *  declared here until now. */
   probingInfo?: ProbingInfo
+  experience?: Dataset['experience']
   websiteLink?: string
   startTime?: string
   endTime?: string
@@ -378,6 +379,7 @@ function wireToDataset(d: WireDataset): Dataset {
     // has been reading `undefined` on every catalog-sourced dataset.
     colorTableLink: d.colorTableLink,
     probingInfo: d.probingInfo,
+    experience: d.experience,
     websiteLink: d.websiteLink,
     startTime: d.startTime,
     endTime: d.endTime,

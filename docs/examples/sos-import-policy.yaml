@@ -1,0 +1,24 @@
+version: 1
+
+defaults:
+  # Native SOS does not carry a dependable dataset-license field.
+  visibility_when_license_unknown: private
+  caption_language: en
+
+datasets:
+  # Stable key: sos:<DataID>:primary, or sos:<DataID>:<playlist filename>.
+  sos:1:primary:
+    visibility: private
+    disposition: import
+    # Populate only from verified rights evidence.
+    license_spdx: CC0-1.0
+    license_url: https://creativecommons.org/publicdomain/zero/1.0/
+    license_statement: Example only; replace with verified dataset-specific evidence.
+    attribution_text: Example only; SetSource may inform attribution but not licensing.
+    rights_holder: Example rights holder
+    asset_rights:
+      # Key by a raw playlist value or the resolved source URL.
+      media/thumbnail.jpg:
+        license_spdx: CC0-1.0
+        attribution_text: Example asset-specific attribution
+    notes: Remove this example block or replace every value before a production run.

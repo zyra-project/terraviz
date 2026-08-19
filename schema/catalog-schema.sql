@@ -335,7 +335,7 @@ CREATE TABLE datasets (
 
   published_at       TEXT,
   retracted_at       TEXT,
-  publisher_id       TEXT, legacy_id TEXT, color_table_ref TEXT, probing_info TEXT, bbox_n REAL, bbox_s REAL, bbox_w REAL, bbox_e REAL, celestial_body TEXT, radius_mi REAL, lon_origin REAL, is_flipped_in_y INTEGER, transcoding INTEGER, active_transcode_upload_id TEXT, frame_count INTEGER, frame_extension TEXT, frame_source_filenames_ref TEXT, render_encoding TEXT, color_scale TEXT, playback_fps REAL,
+  publisher_id       TEXT, legacy_id TEXT, color_table_ref TEXT, probing_info TEXT, bbox_n REAL, bbox_s REAL, bbox_w REAL, bbox_e REAL, celestial_body TEXT, radius_mi REAL, lon_origin REAL, is_flipped_in_y INTEGER, transcoding INTEGER, active_transcode_upload_id TEXT, frame_count INTEGER, frame_extension TEXT, frame_source_filenames_ref TEXT, render_encoding TEXT, color_scale TEXT, playback_fps REAL, experience_manifest TEXT, source_import_state TEXT,
   FOREIGN KEY (publisher_id) REFERENCES publishers(id)
 );
 

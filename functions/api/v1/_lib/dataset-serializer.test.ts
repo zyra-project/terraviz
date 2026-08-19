@@ -204,6 +204,23 @@ describe('serializeDataset — Phase 3b columns', () => {
     const wire = serializeDataset(fakeRow({}), emptyDecoration, fakeIdentity)
     expect(wire.probingInfo).toBeUndefined()
   })
+
+  it('exposes valid TerraViz experience metadata but never importer state', () => {
+    const experience = {
+      version: 1,
+      textTracks: [{ source: 'https://example.org/en.vtt', format: 'vtt', language: 'en' }],
+    }
+    const wire = serializeDataset(
+      fakeRow({
+        experience_manifest: JSON.stringify(experience),
+        source_import_state: JSON.stringify({ sourcePlaylist: 'ftp://private-ish/path' }),
+      }),
+      emptyDecoration,
+      fakeIdentity,
+    )
+    expect(wire.experience).toEqual(experience)
+    expect(wire).not.toHaveProperty('sourceImportState')
+  })
 })
 
 describe('serializeDataset — Phase 3d columns (non-global metadata)', () => {

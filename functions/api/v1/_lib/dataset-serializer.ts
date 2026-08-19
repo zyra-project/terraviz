@@ -24,6 +24,10 @@ import {
   type RenderEncoding,
 } from '../../../../src/types/color-scale'
 import type { DatasetRow, DecorationRows, NodeIdentityRow } from './catalog-store'
+import {
+  parseDatasetExperience,
+  type DatasetExperienceManifest,
+} from '../../../../src/types/dataset-experience'
 
 /**
  * The wire `Dataset` shape — additive superset of the existing
@@ -129,6 +133,8 @@ export interface WireDataset {
    * (`{ t, rgba }`), `vmin` / `vmax`, optional `units` and
    * `transparentRange`. Omitted unless `renderEncoding` is set. */
   colorScale?: ColorScale
+  /** TerraViz-owned synchronized tracks, dwell, composition, and overlays. */
+  experience?: DatasetExperienceManifest
   /**
    * For `tour/json` rows: the resolved URL the SPA's tour engine
    * fetches the tour document from, bypassing the manifest endpoint
@@ -406,6 +412,7 @@ export function serializeDataset(
     // parseability + the 4096-char cap — NOT the object's
     // field-level shape.
     probingInfo: parseJsonField(row.probing_info),
+    experience: parseDatasetExperience(parseJsonField(row.experience_manifest)) ?? undefined,
     // Phase 3d typed metadata. boundingBox surfaces only when all
     // four corners are non-null (a partial bbox is meaningless to
     // any consumer). celestialBody / radiusMi / lonOrigin /

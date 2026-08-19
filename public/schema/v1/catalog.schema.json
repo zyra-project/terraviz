@@ -295,6 +295,226 @@
               "vmax"
             ]
           },
+          "experience": {
+            "type": "object",
+            "properties": {
+              "version": {
+                "type": "number",
+                "const": 1
+              },
+              "textTracks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "source": {
+                      "type": "string"
+                    },
+                    "format": {
+                      "type": "string",
+                      "enum": [
+                        "vtt",
+                        "srt",
+                        "unknown"
+                      ]
+                    },
+                    "language": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "isDefault": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "format",
+                    "language"
+                  ]
+                }
+              },
+              "audioTracks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "source": {
+                      "type": "string"
+                    },
+                    "volume": {
+                      "type": "number"
+                    },
+                    "startOffsetMs": {
+                      "type": "number"
+                    },
+                    "sync": {
+                      "type": "string",
+                      "const": "dataset-clock"
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "sync"
+                  ]
+                }
+              },
+              "playbackPolicy": {
+                "type": "object",
+                "properties": {
+                  "firstDwellMs": {
+                    "type": "number"
+                  },
+                  "lastDwellMs": {
+                    "type": "number"
+                  }
+                }
+              },
+              "composition": {
+                "type": "object",
+                "properties": {
+                  "layers": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "ordinal": {
+                          "type": "number"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "opacity": {
+                          "type": "number"
+                        },
+                        "visible": {
+                          "type": "boolean"
+                        },
+                        "blendMode": {
+                          "type": "string",
+                          "enum": [
+                            "normal",
+                            "multiply",
+                            "screen",
+                            "add"
+                          ]
+                        },
+                        "syncGroup": {
+                          "type": "string"
+                        },
+                        "sourceMetadata": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "ordinal",
+                        "name",
+                        "source"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "layers"
+                ]
+              },
+              "overlays": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "ordinal": {
+                      "type": "number"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "image",
+                        "video",
+                        "text",
+                        "live",
+                        "unknown"
+                      ]
+                    },
+                    "placement": {
+                      "type": "string",
+                      "enum": [
+                        "viewport",
+                        "globe",
+                        "projector"
+                      ]
+                    },
+                    "pathSource": {
+                      "type": "string"
+                    },
+                    "opacity": {
+                      "type": "number"
+                    },
+                    "width": {
+                      "type": "number"
+                    },
+                    "height": {
+                      "type": "number"
+                    },
+                    "sourceMetadata": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ordinal",
+                    "source",
+                    "kind",
+                    "placement"
+                  ]
+                }
+              },
+              "assetRights": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "source": {
+                      "type": "string"
+                    },
+                    "licenseSpdx": {
+                      "type": "string"
+                    },
+                    "licenseUrl": {
+                      "type": "string"
+                    },
+                    "licenseStatement": {
+                      "type": "string"
+                    },
+                    "attributionText": {
+                      "type": "string"
+                    },
+                    "rightsHolder": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "source"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "version"
+            ]
+          },
           "tourJsonUrl": {
             "type": "string"
           },

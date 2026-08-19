@@ -355,20 +355,25 @@ async function replaceDecorations(
  * unprivileged caller tries to set it; returns null when the
  * caller is allowed to proceed.
  */
-function checkLegacyIdAllowed(
+function checkImportFieldsAllowed(
   publisher: PublisherRow,
   body: DatasetDraftBody,
 ): DraftCreateFailure | null {
-  if (body.legacy_id === undefined) return null
+  const field = body.legacy_id !== undefined
+    ? 'legacy_id'
+    : body.source_import_state !== undefined
+      ? 'source_import_state'
+      : null
+  if (!field) return null
   if (isPrivileged(publisher)) return null
   return {
     ok: false,
     status: 403,
     errors: [
       {
-        field: 'legacy_id',
+        field,
         code: 'forbidden',
-        message: 'legacy_id may only be set by privileged publishers (staff / service token).',
+        message: `${field} may only be set by privileged publishers (staff / service token).`,
       },
     ],
   }
@@ -386,7 +391,7 @@ export async function createDataset(
   const errors = validateDraftCreate(body)
   if (errors.length) return { ok: false, status: 400, errors }
 
-  const legacyIdGate = checkLegacyIdAllowed(publisher, body)
+  const legacyIdGate = checkImportFieldsAllowed(publisher, body)
   if (legacyIdGate) return legacyIdGate
 
   const db = env.CATALOG_DB!
@@ -434,9 +439,9 @@ export async function createDataset(
          probing_info,
          bbox_n, bbox_s, bbox_w, bbox_e,
          celestial_body, radius_mi, lon_origin, is_flipped_in_y,
-         render_encoding, color_scale, playback_fps,
+         render_encoding, color_scale, playback_fps, experience_manifest, source_import_state,
          schema_version, created_at, updated_at, published_at, publisher_id
-       ) VALUES (?,?,(SELECT node_id FROM node_identity LIMIT 1),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       ) VALUES (?,?,(SELECT node_id FROM node_identity LIMIT 1),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     )
     .bind(
       id,
@@ -506,6 +511,8 @@ export async function createDataset(
       // becomes an ffmpeg argument and the chunk-grid divisor, and a 0
       // reaching either is worse than a rejected write.
       sanePlaybackFps(body.playback_fps),
+      body.experience_manifest ?? null,
+      body.source_import_state ?? null,
       1,
       now,
       now,
@@ -538,7 +545,7 @@ export async function updateDataset(
   const errors = validateDraftUpdate(body)
   if (errors.length) return { ok: false, status: 400, errors }
 
-  const legacyIdGate = checkLegacyIdAllowed(publisher, body)
+  const legacyIdGate = checkImportFieldsAllowed(publisher, body)
   if (legacyIdGate) return legacyIdGate
 
   const db = env.CATALOG_DB!
@@ -672,6 +679,8 @@ export async function updateDataset(
   // Independent of the pair above: a *picture* dataset published as a
   // frame sequence wants a readable speed too.
   if (body.playback_fps !== undefined) set('playback_fps', sanePlaybackFps(body.playback_fps))
+  if (body.experience_manifest !== undefined) set('experience_manifest', body.experience_manifest)
+  if (body.source_import_state !== undefined) set('source_import_state', body.source_import_state)
   if (body.website_link !== undefined) set('website_link', body.website_link)
   if (body.start_time !== undefined) set('start_time', body.start_time)
   if (body.end_time !== undefined) set('end_time', body.end_time)
@@ -693,7 +702,7 @@ export async function updateDataset(
   // would surface as a SQLite UNIQUE-constraint failure inside the
   // UPDATE, which the route layer would currently wrap as an
   // unstructured 500. Privilege-gated upstream by
-  // checkLegacyIdAllowed.
+  // checkImportFieldsAllowed.
   if (body.legacy_id !== undefined) {
     const conflict = await db
       .prepare('SELECT id FROM datasets WHERE legacy_id = ? AND id != ? LIMIT 1')

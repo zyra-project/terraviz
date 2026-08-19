@@ -235,6 +235,29 @@ describe('validateDraftCreate', () => {
     ).toBe(true)
   })
 
+  it('accepts a versioned dataset experience and rejects unknown versions', () => {
+    const valid = JSON.stringify({
+      version: 1,
+      audioTracks: [{ source: 'r2:datasets/DS/audio.mp3', sync: 'dataset-clock' }],
+      playbackPolicy: { firstDwellMs: 1500 },
+    })
+    expect(validateDraftCreate({
+      title: 'Experience manifest',
+      format: 'image/png',
+      experience_manifest: valid,
+    })).toEqual([])
+
+    const invalid = validateDraftCreate({
+      title: 'Future experience manifest',
+      format: 'image/png',
+      experience_manifest: JSON.stringify({ version: 99 }),
+    })
+    expect(invalid).toContainEqual(expect.objectContaining({
+      field: 'experience_manifest',
+      code: 'invalid_value',
+    }))
+  })
+
   it('rejects out-of-range bounding_box corners (3d/A)', () => {
     // Latitude (n, s) must be in [-90, 90]; longitude (w, e) in
     // [-180, 180]. Each violation pinpoints the specific sub-field

@@ -120,6 +120,10 @@ export interface DatasetRow {
    * stays 30 regardless — the tour engine's `frameRate` maths
    * depends on it. */
   playback_fps: number | null
+  /** TerraViz-authoritative versioned JSON for synchronized presentation features. */
+  experience_manifest?: string | null
+  /** Privileged importer checkpoint; never exposed by the public serializer. */
+  source_import_state?: string | null
   /** Boolean (0/1) flag set by the video-upload /complete handler
    * when a `source.mp4` lands in R2 and a GHA transcode dispatch
    * fires (Phase 3pd). The workflow clears the flag and writes
