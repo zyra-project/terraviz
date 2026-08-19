@@ -830,12 +830,17 @@ chain is restored, since `heatmap` alone cannot roll 0–360 longitudes or regri
 a Gaussian axis. Then this dataset is an ordinary stored workflow with **no
 preprocessing at all**, and so is every other model-history source.
 
-**Filed:** [zyra-project/zyra#300](https://github.com/zyra-project/zyra/issues/300),
-labelled `relay-upstream` so the mirror's relay creates the twin at
-`NOAA-GSL/zyra` (the original). The body is kept at
-[`docs/upstream/zyra-issue-netcdf-dimension-selection.md`](upstream/zyra-issue-netcdf-dimension-selection.md)
-— worth confirming the upstream twin appeared, since the relay depends on
-`SYNC_PAT_ORG` holding upstream write access.
+**Filed:** [zyra-project/zyra#300](https://github.com/zyra-project/zyra/issues/300)
+→ relayed to **[NOAA-GSL/zyra#367](https://github.com/NOAA-GSL/zyra/issues/367)**,
+which is the one to track. The relay works, so `SYNC_PAT_ORG` does hold upstream
+write access.
+
+The verbatim body is kept at
+[`docs/upstream/zyra-issue-netcdf-dimension-selection.md`](upstream/zyra-issue-netcdf-dimension-selection.md),
+and it is the authoritative copy: the relay strips angle-bracket placeholders as
+though they were HTML tags, so the example command renders upstream as
+`https:///thredds/dodsC//gfs...` with the `<host>` and `<path>` segments
+missing.
 
 **(b) At the source — ruled out, and for a good reason.** An earlier revision
 of this section proposed asking CSL to publish a 2-D surface field alongside

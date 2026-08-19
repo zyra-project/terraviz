@@ -1,7 +1,17 @@
 # [Workflow Gap] Dimension selection on the existing NetCDF input path
 
-> **FILED:** [zyra-project/zyra#300](https://github.com/zyra-project/zyra/issues/300),
-> labelled `relay-upstream`.
+> **FILED:** [zyra-project/zyra#300](https://github.com/zyra-project/zyra/issues/300)
+> → relayed to **[NOAA-GSL/zyra#367](https://github.com/NOAA-GSL/zyra/issues/367)**
+> (the upstream twin; the relay stamped #300 with `upstream-sync` about two
+> minutes after the label went on).
+>
+> ⚠️ **The relay mangled the body.** Angle-bracket placeholders were stripped as
+> if they were HTML tags, so upstream the example command reads
+> `https:///thredds/dodsC//gfs.t00z.atmf000.nc` — the `<host>` and `<path>`
+> segments are gone, and `<YYYYMMDD>` likewise. **This file is the correct
+> text**; prefer it over the rendered issue, and consider pasting a corrected
+> command as a comment on #367. Body edits are not synced by the relay (it
+> carries status only), so fixing #300 would not fix #367.
 >
 > `NOAA-GSL/zyra` is the original; `zyra-project/zyra` is a downstream mirror
 > with a documented relay for downstream-originated issues (its
