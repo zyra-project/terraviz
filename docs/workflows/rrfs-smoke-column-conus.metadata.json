@@ -1,0 +1,22 @@
+{
+  "title": "Wildfire Smoke Forecast (Transparent) — United States (RRFS)",
+  "abstract": "Wildfire smoke drifting across the United States, forecast hour by hour. The colour shows how much smoke is in the air overhead — all of it, from the ground to the top of the sky, added up into a single column. Pale yellow is a thin haze; deep orange is thick smoke. Where the map shows through, the air is clear.\n\nSmoke from a large fire does not stay put. It rises, catches the winds a few kilometres up, and can travel a continent away while the fire that made it burns on. That is why a clear day on the ground can still sit under a smoke plume.\n\nAn 84-hour hourly outlook on the NOAA Rapid Refresh Forecast System's 3 km CONUS domain. Frames are data-encoded: the brightness of each pixel carries the measured value, so hovering reports the smoke loading in kilograms per square metre rather than a colour.",
+  "keywords": [
+    "wildfire",
+    "smoke",
+    "aerosol",
+    "air quality",
+    "forecast",
+    "RRFS",
+    "United States",
+    "CONUS",
+    "NOAA"
+  ],
+  "start_time": "{{data_start}}",
+  "end_time": "{{data_end}}",
+  "period": "PT1H",
+  "organization": "NOAA National Weather Service",
+  "attribution_text": "NOAA/NWS/NCEP Rapid Refresh Forecast System (RRFS) v1.0, distributed via NOAA Open Data Dissemination on AWS.",
+  "license_statement": "Output of the NOAA Rapid Refresh Forecast System (RRFS), produced by NOAA/NWS/NCEP. As a work of the United States Government it is not subject to domestic copyright protection under 17 U.S.C. § 105 and may be freely used and redistributed. Provided without warranty; not for use as the sole basis of operational or safety-of-life decisions.",
+  "website_link": "https://registry.opendata.aws/noaa-rrfs/"
+}
