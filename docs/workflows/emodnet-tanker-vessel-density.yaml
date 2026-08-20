@@ -1,0 +1,363 @@
+# EMODnet tanker-vessel density -> data-encoded globe animation.
+#
+# 96 monthly frames (2017-01 .. 2024-12), ship type 10 = "Tanker" from the
+# EMODnet Human Activities vessel-density mosaic. Density is hours per square
+# kilometre per month. Companion doc: docs/workflows/README.md.
+#
+# FOUR THINGS HERE LOOK WRONG AND AREN'T. Each was verified against zyra's
+# source or against the live service, not assumed.
+#
+#   1. The fetch is `acquire http --inputs`, not `process convert-format`.
+#      convert-format runs its bytes through grib_decode() unconditionally --
+#      it has a NetCDF pass-through and nothing else -- so handing it a
+#      GeoTIFF fails. `acquire http` takes --inputs + --output-dir.
+#
+#   2. Every URL ends in `&name=/<frame>.tif`. `acquire http --inputs` names
+#      each download `Path(url).name`, which for a bare WCS request is the
+#      whole query string. GeoServer ignores the unknown `name` parameter
+#      (byte-identical response with and without it) and it moves the URL's
+#      last `/` to just before the filename we want, so every frame lands as
+#      /work/tif/<YYYYMMDD>T000000.tif -- which the later stages and the
+#      frame ordering both depend on.
+#
+#   3. The quotes in `subset=time(%22...%22)` must stay percent-encoded.
+#      A raw `"` makes Tomcat reject the request target with a bare 400
+#      before GeoServer ever sees it.
+#
+#   4. `url:` is set to the bare endpoint and never fetched -- it is the
+#      required argparse positional for `acquire http`, and in --inputs mode
+#      _cmd_http returns before reading it.
+#
+# WCS 2.0.1 is deliberate: the 1.0.0 `BBOX`+`CRS` path on this server returns
+# a raster tagged with the requested bounds but filled from the wrong window
+# of the mosaic. 2.0.1 with outputCrs georeferences correctly (verified by
+# probing Gibraltar / Dover / the Bosphorus / Rotterdam against land).
+# Spatial subsetting is ignored by this server whichever way it is asked, so
+# the request takes the full window and `reproject` crops and pads it onto
+# the global frame from each frame's own embedded transform.
+#
+# CALIBRATION: vmax=6 h/km2/month -- NOT the cargo variant's 10. Tanker traffic
+# is genuinely lighter: across 2017-01, 2018-07, 2020-04, 2022-03 and 2024-12
+# the p99 of non-zero cells is 3.1-5.1 (cargo: 5.7-8.5) and the pooled p50 is
+# 0.053. vmax=6 clips 0.5-0.8% of non-zero cells, the same rate vmax=10 gives
+# cargo, so the two variants stay comparable by eye. Same log-normal problem
+# and the same accepted cost: above 6 the hover readout under-reports, and
+# tanker peaks are extreme (the Bosphorus alone reaches ~9300).
+# transparent_range=3, not cargo's 2: at vmax=6 it drops values below 0.047
+# and keeps ~40% of non-zero cells, matching cargo's ~45%. tr=2 here would
+# keep 58% and haze the map with AIS scatter.
+stages:
+  - stage: acquire
+    command: http
+    args:
+      url: https://ows.emodnet-humanactivities.eu/geoserver/wcs
+      output_dir: /work/tif
+      inputs:
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222017-01-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20170101T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222017-02-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20170201T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222017-03-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20170301T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222017-04-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20170401T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222017-05-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20170501T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222017-06-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20170601T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222017-07-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20170701T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222017-08-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20170801T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222017-09-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20170901T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222017-10-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20171001T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222017-11-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20171101T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222017-12-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20171201T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222018-01-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20180101T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222018-02-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20180201T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222018-03-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20180301T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222018-04-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20180401T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222018-05-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20180501T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222018-06-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20180601T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222018-07-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20180701T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222018-08-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20180801T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222018-09-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20180901T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222018-10-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20181001T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222018-11-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20181101T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222018-12-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20181201T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222019-01-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20190101T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222019-02-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20190201T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222019-03-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20190301T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222019-04-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20190401T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222019-05-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20190501T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222019-06-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20190601T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222019-07-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20190701T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222019-08-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20190801T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222019-09-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20190901T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222019-10-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20191001T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222019-11-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20191101T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222019-12-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20191201T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222020-01-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20200101T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222020-02-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20200201T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222020-03-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20200301T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222020-04-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20200401T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222020-05-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20200501T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222020-06-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20200601T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222020-07-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20200701T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222020-08-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20200801T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222020-09-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20200901T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222020-10-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20201001T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222020-11-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20201101T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222020-12-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20201201T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222021-01-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20210101T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222021-02-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20210201T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222021-03-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20210301T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222021-04-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20210401T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222021-05-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20210501T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222021-06-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20210601T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222021-07-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20210701T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222021-08-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20210801T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222021-09-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20210901T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222021-10-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20211001T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222021-11-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20211101T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222021-12-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20211201T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222022-01-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20220101T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222022-02-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20220201T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222022-03-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20220301T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222022-04-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20220401T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222022-05-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20220501T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222022-06-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20220601T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222022-07-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20220701T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222022-08-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20220801T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222022-09-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20220901T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222022-10-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20221001T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222022-11-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20221101T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222022-12-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20221201T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222023-01-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20230101T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222023-02-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20230201T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222023-03-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20230301T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222023-04-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20230401T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222023-05-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20230501T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222023-06-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20230601T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222023-07-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20230701T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222023-08-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20230801T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222023-09-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20230901T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222023-10-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20231001T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222023-11-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20231101T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222023-12-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20231201T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222024-01-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20240101T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222024-02-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20240201T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222024-03-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20240301T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222024-04-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20240401T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222024-05-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20240501T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222024-06-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20240601T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222024-07-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20240701T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222024-08-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20240801T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222024-09-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20240901T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222024-10-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20241001T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222024-11-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20241101T000000.tif'
+        - 'https://ows.emodnet-humanactivities.eu/geoserver/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=emodnet__vesseldensity_10&format=image/tiff&subset=time(%222024-12-01T00:00:00.000Z%22)&outputCrs=EPSG:4326&scaleSize=i(2728),j(1214)&name=/20241201T000000.tif'
+  - stage: process
+    command: reproject
+    args:
+      output_dir: /work/wrapped
+      dst_bounds: [-180, -90, 180, 90]
+      width: 4096
+      height: 2048
+      resampling: nearest
+      inputs:
+        - '/work/tif/20170101T000000.tif'
+        - '/work/tif/20170201T000000.tif'
+        - '/work/tif/20170301T000000.tif'
+        - '/work/tif/20170401T000000.tif'
+        - '/work/tif/20170501T000000.tif'
+        - '/work/tif/20170601T000000.tif'
+        - '/work/tif/20170701T000000.tif'
+        - '/work/tif/20170801T000000.tif'
+        - '/work/tif/20170901T000000.tif'
+        - '/work/tif/20171001T000000.tif'
+        - '/work/tif/20171101T000000.tif'
+        - '/work/tif/20171201T000000.tif'
+        - '/work/tif/20180101T000000.tif'
+        - '/work/tif/20180201T000000.tif'
+        - '/work/tif/20180301T000000.tif'
+        - '/work/tif/20180401T000000.tif'
+        - '/work/tif/20180501T000000.tif'
+        - '/work/tif/20180601T000000.tif'
+        - '/work/tif/20180701T000000.tif'
+        - '/work/tif/20180801T000000.tif'
+        - '/work/tif/20180901T000000.tif'
+        - '/work/tif/20181001T000000.tif'
+        - '/work/tif/20181101T000000.tif'
+        - '/work/tif/20181201T000000.tif'
+        - '/work/tif/20190101T000000.tif'
+        - '/work/tif/20190201T000000.tif'
+        - '/work/tif/20190301T000000.tif'
+        - '/work/tif/20190401T000000.tif'
+        - '/work/tif/20190501T000000.tif'
+        - '/work/tif/20190601T000000.tif'
+        - '/work/tif/20190701T000000.tif'
+        - '/work/tif/20190801T000000.tif'
+        - '/work/tif/20190901T000000.tif'
+        - '/work/tif/20191001T000000.tif'
+        - '/work/tif/20191101T000000.tif'
+        - '/work/tif/20191201T000000.tif'
+        - '/work/tif/20200101T000000.tif'
+        - '/work/tif/20200201T000000.tif'
+        - '/work/tif/20200301T000000.tif'
+        - '/work/tif/20200401T000000.tif'
+        - '/work/tif/20200501T000000.tif'
+        - '/work/tif/20200601T000000.tif'
+        - '/work/tif/20200701T000000.tif'
+        - '/work/tif/20200801T000000.tif'
+        - '/work/tif/20200901T000000.tif'
+        - '/work/tif/20201001T000000.tif'
+        - '/work/tif/20201101T000000.tif'
+        - '/work/tif/20201201T000000.tif'
+        - '/work/tif/20210101T000000.tif'
+        - '/work/tif/20210201T000000.tif'
+        - '/work/tif/20210301T000000.tif'
+        - '/work/tif/20210401T000000.tif'
+        - '/work/tif/20210501T000000.tif'
+        - '/work/tif/20210601T000000.tif'
+        - '/work/tif/20210701T000000.tif'
+        - '/work/tif/20210801T000000.tif'
+        - '/work/tif/20210901T000000.tif'
+        - '/work/tif/20211001T000000.tif'
+        - '/work/tif/20211101T000000.tif'
+        - '/work/tif/20211201T000000.tif'
+        - '/work/tif/20220101T000000.tif'
+        - '/work/tif/20220201T000000.tif'
+        - '/work/tif/20220301T000000.tif'
+        - '/work/tif/20220401T000000.tif'
+        - '/work/tif/20220501T000000.tif'
+        - '/work/tif/20220601T000000.tif'
+        - '/work/tif/20220701T000000.tif'
+        - '/work/tif/20220801T000000.tif'
+        - '/work/tif/20220901T000000.tif'
+        - '/work/tif/20221001T000000.tif'
+        - '/work/tif/20221101T000000.tif'
+        - '/work/tif/20221201T000000.tif'
+        - '/work/tif/20230101T000000.tif'
+        - '/work/tif/20230201T000000.tif'
+        - '/work/tif/20230301T000000.tif'
+        - '/work/tif/20230401T000000.tif'
+        - '/work/tif/20230501T000000.tif'
+        - '/work/tif/20230601T000000.tif'
+        - '/work/tif/20230701T000000.tif'
+        - '/work/tif/20230801T000000.tif'
+        - '/work/tif/20230901T000000.tif'
+        - '/work/tif/20231001T000000.tif'
+        - '/work/tif/20231101T000000.tif'
+        - '/work/tif/20231201T000000.tif'
+        - '/work/tif/20240101T000000.tif'
+        - '/work/tif/20240201T000000.tif'
+        - '/work/tif/20240301T000000.tif'
+        - '/work/tif/20240401T000000.tif'
+        - '/work/tif/20240501T000000.tif'
+        - '/work/tif/20240601T000000.tif'
+        - '/work/tif/20240701T000000.tif'
+        - '/work/tif/20240801T000000.tif'
+        - '/work/tif/20240901T000000.tif'
+        - '/work/tif/20241001T000000.tif'
+        - '/work/tif/20241101T000000.tif'
+        - '/work/tif/20241201T000000.tif'
+  - stage: visualize
+    command: heatmap
+    args:
+      output_dir: /work/images/frames
+      data_encoded: true
+      color_scale_file: /work/color-scale.json
+      units: "h/km2/month"
+      cmap_inline: '{"type":"continuous","base":"autumn","transparent_range":3,"blend_range":10,"overall_alpha":0.95}'
+      vmin: 0
+      vmax: 6
+      inputs:
+        - '/work/wrapped/20170101T000000.tif'
+        - '/work/wrapped/20170201T000000.tif'
+        - '/work/wrapped/20170301T000000.tif'
+        - '/work/wrapped/20170401T000000.tif'
+        - '/work/wrapped/20170501T000000.tif'
+        - '/work/wrapped/20170601T000000.tif'
+        - '/work/wrapped/20170701T000000.tif'
+        - '/work/wrapped/20170801T000000.tif'
+        - '/work/wrapped/20170901T000000.tif'
+        - '/work/wrapped/20171001T000000.tif'
+        - '/work/wrapped/20171101T000000.tif'
+        - '/work/wrapped/20171201T000000.tif'
+        - '/work/wrapped/20180101T000000.tif'
+        - '/work/wrapped/20180201T000000.tif'
+        - '/work/wrapped/20180301T000000.tif'
+        - '/work/wrapped/20180401T000000.tif'
+        - '/work/wrapped/20180501T000000.tif'
+        - '/work/wrapped/20180601T000000.tif'
+        - '/work/wrapped/20180701T000000.tif'
+        - '/work/wrapped/20180801T000000.tif'
+        - '/work/wrapped/20180901T000000.tif'
+        - '/work/wrapped/20181001T000000.tif'
+        - '/work/wrapped/20181101T000000.tif'
+        - '/work/wrapped/20181201T000000.tif'
+        - '/work/wrapped/20190101T000000.tif'
+        - '/work/wrapped/20190201T000000.tif'
+        - '/work/wrapped/20190301T000000.tif'
+        - '/work/wrapped/20190401T000000.tif'
+        - '/work/wrapped/20190501T000000.tif'
+        - '/work/wrapped/20190601T000000.tif'
+        - '/work/wrapped/20190701T000000.tif'
+        - '/work/wrapped/20190801T000000.tif'
+        - '/work/wrapped/20190901T000000.tif'
+        - '/work/wrapped/20191001T000000.tif'
+        - '/work/wrapped/20191101T000000.tif'
+        - '/work/wrapped/20191201T000000.tif'
+        - '/work/wrapped/20200101T000000.tif'
+        - '/work/wrapped/20200201T000000.tif'
+        - '/work/wrapped/20200301T000000.tif'
+        - '/work/wrapped/20200401T000000.tif'
+        - '/work/wrapped/20200501T000000.tif'
+        - '/work/wrapped/20200601T000000.tif'
+        - '/work/wrapped/20200701T000000.tif'
+        - '/work/wrapped/20200801T000000.tif'
+        - '/work/wrapped/20200901T000000.tif'
+        - '/work/wrapped/20201001T000000.tif'
+        - '/work/wrapped/20201101T000000.tif'
+        - '/work/wrapped/20201201T000000.tif'
+        - '/work/wrapped/20210101T000000.tif'
+        - '/work/wrapped/20210201T000000.tif'
+        - '/work/wrapped/20210301T000000.tif'
+        - '/work/wrapped/20210401T000000.tif'
+        - '/work/wrapped/20210501T000000.tif'
+        - '/work/wrapped/20210601T000000.tif'
+        - '/work/wrapped/20210701T000000.tif'
+        - '/work/wrapped/20210801T000000.tif'
+        - '/work/wrapped/20210901T000000.tif'
+        - '/work/wrapped/20211001T000000.tif'
+        - '/work/wrapped/20211101T000000.tif'
+        - '/work/wrapped/20211201T000000.tif'
+        - '/work/wrapped/20220101T000000.tif'
+        - '/work/wrapped/20220201T000000.tif'
+        - '/work/wrapped/20220301T000000.tif'
+        - '/work/wrapped/20220401T000000.tif'
+        - '/work/wrapped/20220501T000000.tif'
+        - '/work/wrapped/20220601T000000.tif'
+        - '/work/wrapped/20220701T000000.tif'
+        - '/work/wrapped/20220801T000000.tif'
+        - '/work/wrapped/20220901T000000.tif'
+        - '/work/wrapped/20221001T000000.tif'
+        - '/work/wrapped/20221101T000000.tif'
+        - '/work/wrapped/20221201T000000.tif'
+        - '/work/wrapped/20230101T000000.tif'
+        - '/work/wrapped/20230201T000000.tif'
+        - '/work/wrapped/20230301T000000.tif'
+        - '/work/wrapped/20230401T000000.tif'
+        - '/work/wrapped/20230501T000000.tif'
+        - '/work/wrapped/20230601T000000.tif'
+        - '/work/wrapped/20230701T000000.tif'
+        - '/work/wrapped/20230801T000000.tif'
+        - '/work/wrapped/20230901T000000.tif'
+        - '/work/wrapped/20231001T000000.tif'
+        - '/work/wrapped/20231101T000000.tif'
+        - '/work/wrapped/20231201T000000.tif'
+        - '/work/wrapped/20240101T000000.tif'
+        - '/work/wrapped/20240201T000000.tif'
+        - '/work/wrapped/20240301T000000.tif'
+        - '/work/wrapped/20240401T000000.tif'
+        - '/work/wrapped/20240501T000000.tif'
+        - '/work/wrapped/20240601T000000.tif'
+        - '/work/wrapped/20240701T000000.tif'
+        - '/work/wrapped/20240801T000000.tif'
+        - '/work/wrapped/20240901T000000.tif'
+        - '/work/wrapped/20241001T000000.tif'
+        - '/work/wrapped/20241101T000000.tif'
+        - '/work/wrapped/20241201T000000.tif'

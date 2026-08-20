@@ -1,0 +1,21 @@
+{
+  "title": "Cargo Ships at Sea",
+  "abstract": "Eight years of cargo traffic, one frame per month. Every bright thread is a shipping lane worn into the sea by vessels carrying containers, grain, ore and cars, and the brightest knots are the places the whole trade has to squeeze through — the Strait of Gibraltar, the Dover Strait, the Bosphorus, the approaches to Rotterdam and Hamburg. Brighter means more ship-hours spent in that square kilometre during the month, so you are watching how hard each stretch of water is worked, not just where ships can go. Built from AIS, the transponder signal every large ship broadcasts, pooled by EMODnet across European waters and the North Atlantic. Coverage runs from the mid-Atlantic to the Black Sea and from the Canaries to the Barents Sea; the rest of the ocean is outside this dataset rather than empty.",
+  "keywords": [
+    "shipping",
+    "cargo",
+    "maritime",
+    "trade",
+    "AIS",
+    "vessel traffic"
+  ],
+  "start_time": "2017-01-01T00:00:00Z",
+  "end_time": "2024-12-01T00:00:00Z",
+  "period": "P1M",
+  "organization": "EMODnet Human Activities",
+  "attribution_text": "EMODnet Human Activities vessel density map; data originator Cogea Srl. Built from AIS data supplied by CLS and ORBCOMM.",
+  "website_link": "https://emodnet.ec.europa.eu/en/human-activities",
+  "license_spdx": "CC-BY-4.0",
+  "license_url": "https://creativecommons.org/licenses/by/4.0/",
+  "license_statement": "Creative Commons Attribution 4.0. This data was downloaded from the EMODnet Portal. The data originator is Cogea Srl."
+}
