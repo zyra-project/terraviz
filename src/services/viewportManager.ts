@@ -35,6 +35,7 @@ import { MapRenderer, setActiveMapRenderer } from './mapRenderer'
 import type { ColorScaleDisplay } from './colorScaleDisplay'
 import { logger } from '../utils/logger'
 import { emit } from '../analytics'
+import { t } from '../i18n'
 
 /** Map the internal ViewLayout string into the bucket the analytics
  * schema understands ('1globe' / '2globes' / '4globes'). */
@@ -102,6 +103,9 @@ interface Viewport {
   /** Floating per-panel legend element — lazily created the first
    *  time the panel needs one, and toggled via classList thereafter. */
   legend: HTMLButtonElement | null
+  /** Floating "this panel is not on the labelled date" notice —
+   *  lazily created the first time a panel needs one. */
+  timeNotice: HTMLDivElement | null
   /** Floating per-panel colorbar for data-encoded datasets. Replaced
    *  wholesale rather than mutated, because a display change alters the
    *  gradient, the ticks and the accessible name together. */
@@ -282,6 +286,45 @@ export class ViewportManager {
     const vp = this.viewports[slot]
     if (!vp) return
     vp.container.classList.toggle('out-of-range', isOutOfRange)
+  }
+
+  /**
+   * Mount, update, or clear the "not on the labelled date" notice.
+   *
+   * The multi-globe layout shows one time label for every panel, derived
+   * from the primary. When a sibling is verifiably somewhere else, this
+   * is how the panel stops the label from speaking for it — it names the
+   * date the panel is actually on rather than just marking it wrong.
+   *
+   * Mutually exclusive with the out-of-range treatment by construction:
+   * a panel whose range does not cover the labelled date is reported as
+   * `uncovered` and never reaches here, so the two never stack.
+   *
+   * Takes the already-formatted date the panel is actually showing —
+   * the caller owns date formatting, this owns the sentence around it.
+   * `null` hides the notice.
+   */
+  setPanelTimeNotice(slot: number, shownDate: string | null): void {
+    const vp = this.viewports[slot]
+    if (!vp) return
+
+    if (!shownDate) {
+      if (vp.timeNotice) vp.timeNotice.classList.add('hidden')
+      return
+    }
+
+    if (!vp.timeNotice) {
+      const el = document.createElement('div')
+      el.className = 'panel-time-notice'
+      // Assertive would interrupt; this is a correction to something
+      // already on screen, not an alert.
+      el.setAttribute('role', 'status')
+      vp.container.appendChild(el)
+      vp.timeNotice = el
+    }
+    const text = t('viewport.panel.timeMismatch', { date: shownDate })
+    if (vp.timeNotice.textContent !== text) vp.timeNotice.textContent = text
+    vp.timeNotice.classList.remove('hidden')
   }
 
   /**
@@ -489,7 +532,7 @@ export class ViewportManager {
     const onMove = () => this.syncCameras(index)
     renderer.getMap()?.on('move', onMove)
 
-    this.viewports.push({ index, container, renderer, indicator, legend: null, colorbar: null, onMove })
+    this.viewports.push({ index, container, renderer, indicator, legend: null, colorbar: null, timeNotice: null, onMove })
   }
 
   private destroyViewport(vp: Viewport): void {

@@ -14,7 +14,7 @@ import './styles/index.css'
 
 import { HLSService } from './services/hlsService'
 import { dataService, PreviewFetchError } from './services/dataService'
-import { formatDate, videoTimeToDate, dateToVideoTime, computeSiblingSyncCorrection, isSubDailyPeriod, getSunPosition, inferDisplayInterval } from './utils/time'
+import { formatDate, videoTimeToDate, dateToVideoTime, computeSiblingSyncCorrection, verifySiblingTime, isSubDailyPeriod, getSunPosition, inferDisplayInterval } from './utils/time'
 import { logger } from './utils/logger'
 import type { AppState, VideoTextureHandle, TourFile, Dataset } from './types'
 
@@ -292,6 +292,18 @@ class InteractiveSphere {
    * when autoplay is blocked or a stream is briefly unplayable.
    */
   private siblingOutOfRange: boolean[] = []
+  /**
+   * The primary's true instant behind the shared time label, or `null`
+   * when the label is asserting nothing. Stashed by
+   * `updateVideoTimeLabel` as it formats, so `verifySiblingTimes` checks
+   * panels against the position actually on screen rather than
+   * re-deriving one that could differ. Unsnapped on purpose — see
+   * `verifySiblingTime`.
+   */
+  private assertedLabelDate: Date | null = null
+  /** Per-slot record of which siblings currently carry a time notice,
+   *  so clearing them while playing costs one array scan and no DOM. */
+  private siblingTimeNoticed: boolean[] = []
 
   /**
    * Convenience getter returning the primary viewport's renderer.
@@ -1188,7 +1200,12 @@ class InteractiveSphere {
         ? { playhead: video.currentTime, paused: video.paused, seeking: video.seeking }
         : { playhead: null, paused: true }
     },
-    () => notifyAnalyzePlaybackSettled(),
+    () => {
+      notifyAnalyzePlaybackSettled()
+      // The transport has stopped on a frame, so every sibling's
+      // position is finally stable enough to be worth reading back.
+      this.verifySiblingTimes()
+    },
   )
 
   /** Start the requestAnimationFrame playback loop that syncs the scrubber, time label, and auto-loop. */
@@ -1206,6 +1223,10 @@ class InteractiveSphere {
       // integrates duration-imprecision error into visible drift).
       () => {
         this.correctSiblingDrift()
+        // Any time notice describes a settled frame; once the playhead
+        // is moving again it describes nothing. correctSiblingDrift has
+        // already returned above unless the primary is playing.
+        if (this.primaryVideoSyncActive) this.clearSiblingTimeNoticesWhilePlaying()
         // Cheap on every frame — a comparison and a subtraction — and it
         // has to be sampled at frame rate to know when the playhead
         // stopped. The loop already treats a throw here as something to
@@ -1525,7 +1546,10 @@ class InteractiveSphere {
   /** Map the current video playback time to a real-world date and update the time label. */
   private updateVideoTimeLabel(videoTime: number): void {
     const dataset = this.appState.currentDataset
-    if (!dataset) return
+    if (!dataset) {
+      this.assertedLabelDate = null
+      return
+    }
 
     if (dataset.startTime && dataset.endTime) {
       const start = new Date(dataset.startTime)
@@ -1533,12 +1557,18 @@ class InteractiveSphere {
       const videoDuration = this.hlsService?.duration ?? 1
       const snapMs = this.playback.displayInterval?.intervalMs
       const currentDate = videoTimeToDate(videoTime, videoDuration, start, end, snapMs)
+      // The same playhead without the snap. `verifySiblingTimes` compares
+      // true instants across panels; snapping first would make a
+      // sub-frame difference at a bucket edge look like a full step.
+      const trueDate = videoTimeToDate(videoTime, videoDuration, start, end)
       const showTime = dataset.period
         ? isSubDailyPeriod(dataset.period)
         : (this.playback.displayInterval?.showTime ?? false)
       this.appState.timeLabel = formatDate(currentDate, showTime)
+      this.assertedLabelDate = trueDate
       this.showTimeLabel(true)
     } else {
+      this.assertedLabelDate = null
       this.showTimeLabel(false)
     }
   }
@@ -3161,13 +3191,124 @@ class InteractiveSphere {
   }
 
   /**
+   * Read back whether every sibling actually shows the date the shared
+   * time label claims, and mark the ones that don't.
+   *
+   * The multi-globe layout asserts one label over every panel, derived
+   * from the primary alone. Siblings are commanded to that date by
+   * `seekSiblingsToDate` and never read back, so a write that fails to
+   * land leaves the label quietly speaking for a panel that is somewhere
+   * else. `correctSiblingDrift` would notice, but it returns early while
+   * the primary is paused — and paused is exactly when a viewer reads
+   * the label and compares panels.
+   *
+   * Runs on settle rather than per frame: the playback settle watcher
+   * fires once the transport is paused, not seeking, and still, which is
+   * both the only moment the answer is stable and the only moment it
+   * matters. Verification only — correcting here would fight the sync
+   * controller for the playhead, and a panel that cannot reach the
+   * labelled moment should say so rather than silently retry.
+   */
+  private verifySiblingTimes(): void {
+    const labelDate = this.assertedLabelDate
+    // Nothing is being asserted (no dataset, or no temporal range), so
+    // there is no claim for a panel to contradict.
+    if (!labelDate) {
+      this.clearSiblingTimeNotices()
+      return
+    }
+
+    const pIdx = this.viewports.getPrimaryIndex()
+    const snapMs = this.playback.displayInterval?.intervalMs
+
+    for (let i = 0; i < this.panelStates.length; i++) {
+      if (i === pIdx) continue
+      const panel = this.panelStates[i]
+      const video = panel?.hlsService?.getVideo?.() ?? null
+      const ds = panel?.dataset
+
+      // No video, no range, or a duration we cannot map through: there
+      // is nothing to compare, which is not the same as a mismatch.
+      if (!video || !ds?.startTime || !ds.endTime || !(video.duration > 0)) {
+        this.setSiblingTimeNotice(i, null)
+        continue
+      }
+
+      const verdict = verifySiblingTime({
+        labelDate,
+        sibCurrentTime: video.currentTime,
+        sibDuration: video.duration,
+        sibStart: new Date(ds.startTime),
+        sibEnd: new Date(ds.endTime),
+        snapIntervalMs: snapMs,
+      })
+
+      // `uncovered` is left alone deliberately — the out-of-range
+      // treatment already explains that panel, and saying it twice in
+      // two different vocabularies is worse than saying it once.
+      if (verdict.alignment !== 'off') {
+        this.setSiblingTimeNotice(i, null)
+        continue
+      }
+
+      const showTime = ds.period
+        ? isSubDailyPeriod(ds.period)
+        : (this.playback.displayInterval?.showTime ?? false)
+      this.setSiblingTimeNotice(i, formatDate(verdict.shownDate, showTime))
+      logger.debug(
+        `[App] Panel ${i} is ${Math.round(verdict.driftMs / 1000)}s of real time off the label`,
+      )
+    }
+  }
+
+  /** Show or hide one panel's time notice, tracking it for cheap clearing. */
+  private setSiblingTimeNotice(slot: number, shownDate: string | null): void {
+    this.viewports.setPanelTimeNotice(slot, shownDate)
+    this.siblingTimeNoticed[slot] = shownDate !== null
+  }
+
+  /**
+   * Drop every time notice.
+   *
+   * A notice describes one settled position, so it goes stale the
+   * instant the transport moves again. The array scan short-circuits
+   * when nothing is marked, which is the overwhelmingly common case.
+   */
+  /**
+   * Drop stale time notices once the transport is moving again.
+   *
+   * Called from the playback loop, which ticks whether or not the
+   * primary is playing, so it makes its own play check. Both guards are
+   * cheap and short-circuit before touching the DOM.
+   */
+  private clearSiblingTimeNoticesWhilePlaying(): void {
+    if (!this.siblingTimeNoticed.some(Boolean)) return
+    const primary = this.panelStates[this.viewports.getPrimaryIndex()]?.hlsService?.getVideo?.() ?? null
+    if (!primary || primary.paused) return
+    this.clearSiblingTimeNotices()
+  }
+
+  private clearSiblingTimeNotices(): void {
+    if (!this.siblingTimeNoticed.some(Boolean)) return
+    for (let i = 0; i < this.siblingTimeNoticed.length; i++) {
+      if (this.siblingTimeNoticed[i]) this.setSiblingTimeNotice(i, null)
+    }
+  }
+
+  /**
    * Detach all sibling-sync listeners from the previous primary video,
    * disarm per-frame drift correction, and clear any lingering
-   * out-of-range state from siblings.
+   * out-of-range or time-notice state from siblings.
    */
   private detachPrimaryVideoSync(): void {
     this.primaryVideoSyncActive = false
     this.siblingOutOfRange = []
+    // A time notice names a date for a specific panel showing a specific
+    // dataset. Both can change out from under it here — a layout change,
+    // a new primary — so it is cleared rather than left to be corrected
+    // on the next settle.
+    this.clearSiblingTimeNotices()
+    this.siblingTimeNoticed = []
     const target = this.primaryVideoSyncTarget
     if (target) {
       for (const { event, handler } of this.primaryVideoSyncListeners) {
