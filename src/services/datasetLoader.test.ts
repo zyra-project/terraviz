@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { displayDatasetInfo, pickDirectFile, pickPanelSizedFile, panelWidthBudgetPx } from './datasetLoader'
+import { displayDatasetInfo, pickDirectFile, pickPanelSizedFile, panelWidthBudgetPx, shouldSizeToPanel } from './datasetLoader'
 import type { Dataset } from '../types'
 import { until } from '../test-utils'
 
@@ -553,6 +553,33 @@ describe('pickPanelSizedFile', () => {
       1176,
     )
     expect(file?.link).toBe('hi.mp4')
+  })
+})
+
+describe('shouldSizeToPanel', () => {
+  it('sizes an ordinary picture dataset to its panel', () => {
+    expect(shouldSizeToPanel(undefined, 1176)).toBe(true)
+    expect(shouldSizeToPanel(null, 1176)).toBe(true)
+  })
+
+  it('refuses to size down a data-encoded dataset', () => {
+    // Resolution-for-memory is a picture-quality trade, and it is
+    // incoherent when luma IS the measurement: a resampled data raster
+    // hands the probe, Analyze and the CSV exports averaged values that
+    // were never measured. `DATA_ENCODED_RENDITIONS` states the same
+    // rule at the publishing end by building a single rung.
+    expect(shouldSizeToPanel('data-luma', 1176)).toBe(false)
+  })
+
+  it('refuses for any encoding, not just the one that exists today', () => {
+    // The rule is "this carries values", not "this is data-luma" — a
+    // future encoding must not have to remember to opt out.
+    expect(shouldSizeToPanel('some-future-encoding', 1176)).toBe(false)
+  })
+
+  it('is false with no budget, so every other path stays untouched', () => {
+    expect(shouldSizeToPanel(undefined, undefined)).toBe(false)
+    expect(shouldSizeToPanel(undefined, 0)).toBe(false)
   })
 })
 

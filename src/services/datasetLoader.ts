@@ -108,7 +108,8 @@ export interface DatasetLoaderOptions {
    * {@link panelWidthBudgetPx}.
    *
    * Set only when the decode budget is genuinely contended — more than
-   * one video panel at once. On a browser that plays HLS natively there
+   * one video panel at once, and never honoured for a data-encoded
+   * dataset (see {@link shouldSizeToPanel}). On a browser that plays HLS natively there
    * is no way to cap the rendition through the player, so the loader
    * imposes the ceiling by playing a panel-sized progressive file
    * instead. Absent, every path behaves exactly as before, including
@@ -281,6 +282,15 @@ const GLOBE_TEXTURE_OVERSAMPLE = 2
  * the best on offer beats an arbitrary one. Files carrying no `width`
  * are only reachable through the {@link pickDirectFile} fallback, as
  * there is no way to judge whether they fit.
+ *
+ * **Never call this for a data-encoded dataset.** Trading resolution for
+ * memory is a picture-quality trade, and it is incoherent when luma *is*
+ * the measurement — a downscaled data raster hands back averaged values
+ * that were never measured, silently corrupting the hover readout,
+ * Analyze, contours and their exports. `DATA_ENCODED_RENDITIONS` in
+ * `cli/lib/ffmpeg-hls.ts` encodes the same rule at the other end of the
+ * pipeline by publishing a single rung. {@link shouldSizeToPanel} is the
+ * gate; this function cannot see the difference on its own.
  */
 export function pickPanelSizedFile(
   files: VideoProxyFile[],
@@ -291,6 +301,32 @@ export function pickPanelSizedFile(
     .sort((a, b) => a.width! - b.width!)
   if (!sized.length) return pickDirectFile(files)
   return sized.find(f => f.width! >= targetWidthPx) ?? sized[sized.length - 1]
+}
+
+/**
+ * May this dataset's video be sized down to fit its panel?
+ *
+ * No, for anything carrying a `renderEncoding`. The ABR ladder exists to
+ * trade picture quality for bandwidth, and that trade is incoherent when
+ * luma is the measurement: resampling a data raster averages values that
+ * were never measured and hands them to the probe, Analyze and the CSV
+ * exports as if they had been. `cli/lib/ffmpeg-hls.ts` states the same
+ * rule from the publishing side — a viewer on a slow connection "should
+ * wait for the real numbers rather than silently receive invented ones"
+ * — and enforces it by building data-encoded video as a single rung.
+ *
+ * Today that single rung means a sized pick would return the only file
+ * anyway, and an as-uploaded data-encoded video carries no `hls` at all
+ * so it never reaches this decision. Both are accidents of the current
+ * pipeline rather than guarantees, and the failure they would mask is
+ * silent numerical corruption, so the rule is stated here too.
+ */
+export function shouldSizeToPanel(
+  renderEncoding: string | null | undefined,
+  budgetPx: number | undefined,
+): boolean {
+  if (!budgetPx || budgetPx <= 0) return false
+  return !renderEncoding
 }
 
 /**
@@ -379,7 +415,7 @@ export async function loadVideoDataset(
       if (!direct) throw new Error('Manifest declared no HLS stream and no playable file')
       logger.info('[App] Manifest is single-file; loading progressive MP4 directly')
       await hlsService.loadDirect(direct.link, video)
-    } else if (videoWidthBudgetPx && usesNativeHls()) {
+    } else if (videoWidthBudgetPx && usesNativeHls() && shouldSizeToPanel(dataset.renderEncoding, videoWidthBudgetPx)) {
       // Native HLS takes no configuration — neither the buffer caps nor
       // the ABR resolution cap in `loadStream` exist on this path — so a
       // phone decodes whatever the platform picks for a panel that may
