@@ -1,5 +1,7 @@
 # Repo hygiene: remove the nested duplicate tree, committed bytecode, and the third copy of the C++ source
 
+> **Not for filing.** tubeviz is upstream and unaffiliated; nothing here is to be opened as an issue on that repository. Kept as the analysis record behind [`docs/TOUR_DIRECTION_PLAN.md`](../../TOUR_DIRECTION_PLAN.md). See that document's §3 for why none of this code may be imported.
+
 **Labels:** `chore`, `good first issue`
 
 ## Summary
