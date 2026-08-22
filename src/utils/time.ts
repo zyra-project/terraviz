@@ -198,6 +198,36 @@ export const MIN_PLAYBACK_RATE = 0.0625
 export const MAX_PLAYBACK_RATE = 16
 
 /**
+ * Lowest `HTMLMediaElement.readyState` at which a sibling video may be
+ * steered by multi-viewport sync — `HAVE_METADATA`.
+ *
+ * Metadata is the real prerequisite: once it has loaded, `duration` is
+ * known, and `duration` is the only property of the sibling that
+ * {@link computeSiblingSyncCorrection} reads besides `currentTime`. The
+ * frame data a higher `readyState` would promise is not an input to the
+ * decision — it is the thing a `currentTime` write goes and fetches.
+ *
+ * **Do not raise this to `HAVE_CURRENT_DATA` (2).** That is where it sat
+ * until it caused the loop-wrap stall: `playbackController`'s auto-loop
+ * pauses the primary at `duration - VIDEO_END_THRESHOLD`, and the
+ * resulting `pause` fires `seekSiblingsToDate`, which parks every
+ * sibling at that same near-end position. A MediaSource-backed element
+ * seeked to within roughly one segment of its buffered end sits at
+ * `HAVE_METADATA` indefinitely — so the guard then skipped those
+ * siblings at exactly the moment the primary wrapped and they needed
+ * seeking home. Nothing steered them until the browser re-buffered them
+ * on its own, and they froze mid-comparison. Measured in Chromium: a
+ * `currentTime` write recovers such an element to `HAVE_ENOUGH_DATA` in
+ * ≤16 ms, whereas skipping it leaves the panel stranded at the old
+ * position indefinitely.
+ *
+ * `HAVE_NOTHING` (0) stays excluded, and deliberately: `duration` is
+ * `NaN` there, which would poison the mapping (and `NaN <= 0` is false,
+ * so the callers' own `duration` guards would not catch it).
+ */
+export const SIBLING_MIN_READY_STATE = 1
+
+/**
  * Soft-sync controller gains for in-range siblings. Small drift is
  * corrected by gently trimming `playbackRate` rather than seeking —
  * a `currentTime` write on a *playing* video forces a decoder seek
