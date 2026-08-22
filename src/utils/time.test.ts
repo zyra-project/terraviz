@@ -10,6 +10,7 @@ import {
   computeSiblingSyncCorrection,
   MIN_PLAYBACK_RATE,
   MAX_PLAYBACK_RATE,
+  SIBLING_MIN_READY_STATE,
   inferDisplayInterval,
   getSunPosition,
 } from './time'
@@ -565,6 +566,59 @@ describe('computeSiblingSyncCorrection', () => {
     expect(c.shouldSeek).toBe(true)
     expect(c.targetTime).toBeCloseTo(15, 5)
     expect(c.rate).toBeCloseTo(1, 5) // untrimmed pacing rate
+  })
+
+  // --- the loop wrap ---
+
+  it('sends a sibling parked at its own end home when the primary has wrapped', () => {
+    // The wrap: the primary has looped back to the start of its range
+    // while the sibling is still sitting at the end of its own video —
+    // the state `seekSiblingsToDate` leaves it in when the auto-loop
+    // pauses the primary a hair short of `duration`.
+    const c = computeSiblingSyncCorrection({
+      date: start,          // primary wrapped to the beginning of the range
+      sibCurrentTime: 30,   // sibling still parked at the end of its video
+      sibDuration: 30,
+      sibStart: start,
+      sibEnd: end,
+      primaryDuration: 30,
+      primaryRangeMs: rangeMs,
+      hardSeekThresholdS: 0.5,
+    })
+    // The control law was never the problem: the desync is a whole video
+    // duration, so it asks for a hard seek back to the start. What used
+    // to go wrong is that the caller's `readyState` guard skipped the
+    // sibling before this ever ran — see SIBLING_MIN_READY_STATE.
+    expect(c.position).toBe('inside')
+    expect(c.targetTime).toBeCloseTo(0, 5)
+    expect(c.shouldSeek).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// SIBLING_MIN_READY_STATE
+// ---------------------------------------------------------------------------
+describe('SIBLING_MIN_READY_STATE', () => {
+  // Mirrors the HTMLMediaElement constants, which jsdom does not expose
+  // on a bare object.
+  const HAVE_NOTHING = 0, HAVE_METADATA = 1, HAVE_CURRENT_DATA = 2
+
+  it('admits a sibling as soon as metadata is known', () => {
+    expect(SIBLING_MIN_READY_STATE).toBe(HAVE_METADATA)
+  })
+
+  it('still excludes HAVE_NOTHING, where duration is NaN', () => {
+    expect(HAVE_NOTHING).toBeLessThan(SIBLING_MIN_READY_STATE)
+  })
+
+  // Regression tripwire. Raising this to HAVE_CURRENT_DATA is what caused
+  // the multi-globe loop-wrap stall: a MediaSource-backed sibling seeked
+  // to within a segment of its buffered end sits at HAVE_METADATA
+  // indefinitely, and the sync paths would skip it at precisely the wrap,
+  // leaving the panel frozen. If you are about to change this line,
+  // read the doc comment on the constant first.
+  it('never requires frame data the corrective seek would itself fetch', () => {
+    expect(SIBLING_MIN_READY_STATE).toBeLessThan(HAVE_CURRENT_DATA)
   })
 })
 
