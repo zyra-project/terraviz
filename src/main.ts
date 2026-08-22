@@ -14,7 +14,7 @@ import './styles/index.css'
 
 import { HLSService } from './services/hlsService'
 import { dataService, PreviewFetchError } from './services/dataService'
-import { formatDate, videoTimeToDate, dateToVideoTime, computeSiblingSyncCorrection, isSubDailyPeriod, getSunPosition, inferDisplayInterval } from './utils/time'
+import { formatDate, videoTimeToDate, dateToVideoTime, computeSiblingSyncCorrection, SIBLING_MIN_READY_STATE, isSubDailyPeriod, getSunPosition, inferDisplayInterval } from './utils/time'
 import { logger } from './utils/logger'
 import type { AppState, VideoTextureHandle, TourFile, Dataset } from './types'
 
@@ -2974,7 +2974,11 @@ class InteractiveSphere {
         const sibPanel = this.panelStates[i]
         const sibHls = sibPanel?.hlsService
         const sibVideo = sibHls?.getVideo?.() ?? null
-        if (!sibVideo || sibVideo.readyState < 2) continue
+        // Metadata is enough to steer a sibling — see
+        // {@link SIBLING_MIN_READY_STATE}. This is the call that has to
+        // reach a sibling parked at its own end when the primary wraps,
+        // so it must not wait for frame data the seek itself will fetch.
+        if (!sibVideo || sibVideo.readyState < SIBLING_MIN_READY_STATE) continue
 
         const sibDataset = sibPanel?.dataset
         const sibHasRange = !!(sibDataset?.startTime && sibDataset.endTime && sibVideo.duration > 0)
@@ -3108,7 +3112,11 @@ class InteractiveSphere {
       if (i === pIdx) continue
       const sibPanel = this.panelStates[i]
       const sibVideo = sibPanel?.hlsService?.getVideo?.() ?? null
-      if (!sibVideo || sibVideo.readyState < 2) continue
+      // See {@link SIBLING_MIN_READY_STATE}. A sibling below
+      // HAVE_CURRENT_DATA is exactly the one that needs correcting: the
+      // desync at a loop wrap is the whole video duration, far past the
+      // hard-seek threshold, and the corrective write is what restores it.
+      if (!sibVideo || sibVideo.readyState < SIBLING_MIN_READY_STATE) continue
 
       const sibDataset = sibPanel?.dataset
       if (!sibDataset?.startTime || !sibDataset.endTime || sibVideo.duration <= 0) continue
