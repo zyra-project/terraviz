@@ -30,6 +30,35 @@ const MOBILE_BUFFER_LENGTH = 30
 const DESKTOP_BUFFER_LENGTH = 600
 const MAX_ERROR_RETRIES = 3
 
+/**
+ * Does this browser play HLS natively instead of through hls.js?
+ *
+ * True on iOS Safari, which reports `Hls.isSupported()` false and hands
+ * `.m3u8` to the platform player. That path takes no configuration: the
+ * buffer caps and the ABR resolution cap below both live inside the
+ * hls.js branch and simply do not exist there, so a phone decodes
+ * whatever rendition the platform picks — full resolution, uncapped —
+ * for a panel that may be a couple of hundred pixels wide.
+ *
+ * Callers use this to decide whether a resolution ceiling has to be
+ * imposed by *choosing a different file* rather than by configuring the
+ * player, which is the only lever the native path leaves.
+ *
+ * Memoized: the answer cannot change within a session, and the probe
+ * allocates a video element.
+ */
+let nativeHlsSupport: boolean | null = null
+export function usesNativeHls(): boolean {
+  if (nativeHlsSupport !== null) return nativeHlsSupport
+  if (Hls.isSupported()) {
+    nativeHlsSupport = false
+    return false
+  }
+  const probe = document.createElement('video')
+  nativeHlsSupport = probe.canPlayType('application/vnd.apple.mpegurl') !== ''
+  return nativeHlsSupport
+}
+
 export class HLSService {
   private hls: Hls | null = null
   video: HTMLVideoElement | null = null

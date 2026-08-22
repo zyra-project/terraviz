@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { displayDatasetInfo, pickDirectFile } from './datasetLoader'
+import { displayDatasetInfo, pickDirectFile, pickPanelSizedFile, panelWidthBudgetPx } from './datasetLoader'
 import type { Dataset } from '../types'
 import { until } from '../test-utils'
 
@@ -499,6 +499,84 @@ describe('displayDatasetInfo — "In the news"', () => {
     btn.click()
     const note = btn.parentElement!.querySelector('.info-news-note') as HTMLElement
     expect(note.hidden).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// pickPanelSizedFile / panelWidthBudgetPx — the iOS decode ceiling (#230)
+// ---------------------------------------------------------------------------
+
+describe('pickPanelSizedFile', () => {
+  const ladder = [
+    { quality: '360p', width: 640, size: 1, type: 'video/mp4', link: 'lo.mp4' },
+    { quality: '720p', width: 1280, size: 2, type: 'video/mp4', link: 'mid.mp4' },
+    { quality: '1080p', width: 1920, size: 3, type: 'video/mp4', link: 'hi.mp4' },
+    { quality: '4k', width: 3840, size: 4, type: 'video/mp4', link: 'uhd.mp4' },
+  ]
+
+  it('takes the smallest rung that still covers the panel', () => {
+    expect(pickPanelSizedFile(ladder, 1176)?.link).toBe('mid.mp4')
+  })
+
+  it('does not round down below the panel it has to cover', () => {
+    // 1281 is one pixel past 720p; dropping to it would undersample.
+    expect(pickPanelSizedFile(ladder, 1281)?.link).toBe('hi.mp4')
+  })
+
+  it('takes an exact match rather than the rung above it', () => {
+    expect(pickPanelSizedFile(ladder, 1280)?.link).toBe('mid.mp4')
+  })
+
+  it('falls back to the widest rung when the ladder tops out too low', () => {
+    // A full-screen phone panel can want more than the ladder offers;
+    // the best available beats an arbitrary pick.
+    expect(pickPanelSizedFile(ladder, 99999)?.link).toBe('uhd.mp4')
+  })
+
+  it('defers to pickDirectFile when nothing declares a width', () => {
+    // The single-file manifest shape: one entry, no dimensions. There
+    // is no way to judge fit, so this must not return undefined and
+    // strand a perfectly good URL.
+    const file = pickPanelSizedFile(
+      [{ quality: 'source', size: 0, type: 'video/mp4', link: 'https://cdn.example/a.mp4' }],
+      1176,
+    )
+    expect(file?.link).toBe('https://cdn.example/a.mp4')
+  })
+
+  it('ignores a sized entry with no link', () => {
+    const file = pickPanelSizedFile(
+      [
+        { quality: '720p', width: 1280, size: 2, type: 'video/mp4', link: '' },
+        { quality: '1080p', width: 1920, size: 3, type: 'video/mp4', link: 'hi.mp4' },
+      ],
+      1176,
+    )
+    expect(file?.link).toBe('hi.mp4')
+  })
+})
+
+describe('panelWidthBudgetPx', () => {
+  it('sizes a 2x2 panel on a 3x-density phone well below full resolution', () => {
+    // iPhone-shaped: ~393 CSS px viewport, so a quarter-grid panel is
+    // ~196 CSS px. At DPR 3 and 2x oversample that is ~1176 source px —
+    // a 720p rung, not the 4K one an uncapped native player may pick.
+    const budget = panelWidthBudgetPx(196, 3)
+    expect(budget).toBe(1176)
+    expect(pickPanelSizedFile([
+      { quality: '720p', width: 1280, size: 2, type: 'video/mp4', link: 'mid.mp4' },
+      { quality: '4k', width: 3840, size: 4, type: 'video/mp4', link: 'uhd.mp4' },
+    ], budget)?.link).toBe('mid.mp4')
+  })
+
+  it('asks for more when the same panel is the whole screen', () => {
+    // The formula scales with the panel rather than special-casing
+    // layouts: one globe on the same phone earns a higher rung.
+    expect(panelWidthBudgetPx(393, 3)).toBeGreaterThan(panelWidthBudgetPx(196, 3))
+  })
+
+  it('treats a nonsense devicePixelRatio as 1 rather than shrinking', () => {
+    expect(panelWidthBudgetPx(400, 0)).toBe(800)
   })
 })
 

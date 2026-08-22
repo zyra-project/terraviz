@@ -70,7 +70,7 @@ import {
   type PlaybackState,
 } from './ui/playbackController'
 import {
-  loadImageDataset, loadVideoDataset, displayDatasetInfo,
+  loadImageDataset, loadVideoDataset, panelWidthBudgetPx, displayDatasetInfo,
   type EventNavResult,
 } from './services/datasetLoader'
 import { resolveRegion } from './data/regions'
@@ -1102,7 +1102,8 @@ class InteractiveSphere {
         // should be released so its backing bytes can be GC'd.
         if (this.panelStates[targetSlot]) this.panelStates[targetSlot].image = null
         const result = await loadVideoDataset(
-          dataset, targetRenderer, this.appState, this.isMobile, this.playback, loaderCallbacks
+          dataset, targetRenderer, this.appState, this.isMobile, this.playback, loaderCallbacks,
+          { videoWidthBudgetPx: this.panelDecodeBudget(targetSlot) },
         )
         // If a newer load started while we were awaiting, discard these results.
         // Don't dispose videoTexture here — setVideoTexture already placed it on
@@ -1313,7 +1314,7 @@ class InteractiveSphere {
       if (this.panelStates[targetSlot]) this.panelStates[targetSlot].image = null
       const result = await loadVideoDataset(
         dataset, targetRenderer, this.appState, this.isMobile, this.playback, tourLoaderCallbacks,
-        { isPrimary: isPrimarySlot },
+        { isPrimary: isPrimarySlot, videoWidthBudgetPx: this.panelDecodeBudget(targetSlot) },
       )
       this.storePanelVideoResult(targetSlot, result)
       if (isPrimarySlot) {
@@ -2902,6 +2903,27 @@ class InteractiveSphere {
     if (!panel) return
     panel.hlsService = result.hlsService
     panel.videoTexture = result.videoTexture
+  }
+
+  /**
+   * The decode-resolution budget for a panel, or `undefined` to leave
+   * every load path exactly as it was.
+   *
+   * Returns a budget only when more than one video panel is live, which
+   * is the only situation where the decoder budget is actually
+   * contended. That matters because the ceiling can only be imposed on
+   * a natively-playing HLS stream by giving up adaptive streaming for a
+   * fixed-size file (see `loadVideoDataset`), and that is a real trade —
+   * worth making for four panels on a phone, not for one.
+   *
+   * A panel that has not been laid out yet reports no width, and no
+   * width means no opinion rather than a guess at one.
+   */
+  private panelDecodeBudget(slot: number): number | undefined {
+    if (this.viewports.getPanelCount() <= 1) return undefined
+    const cssWidth = this.viewports.getPanelCssWidth(slot)
+    if (cssWidth <= 0) return undefined
+    return panelWidthBudgetPx(cssWidth, window.devicePixelRatio || 1)
   }
 
   /**

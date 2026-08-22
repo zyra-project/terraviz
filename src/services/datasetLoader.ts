@@ -4,7 +4,7 @@
  * Extracted from InteractiveSphere to isolate data-loading concerns.
  */
 
-import { HLSService, type VideoProxyFile, type VideoProxyResponse } from './hlsService'
+import { HLSService, usesNativeHls, type VideoProxyFile, type VideoProxyResponse } from './hlsService'
 import { dataService } from './dataService'
 import { apiFetch, isManifestUrl } from './catalogSource'
 import { getDownload, getDownloadPath, isZipDownloadable } from './downloadService'
@@ -103,6 +103,18 @@ export interface DatasetLoaderOptions {
    * `dataLink` is the manifest endpoint.
    */
   directImageUrl?: boolean
+  /**
+   * Width in source pixels this panel actually needs, from
+   * {@link panelWidthBudgetPx}.
+   *
+   * Set only when the decode budget is genuinely contended — more than
+   * one video panel at once. On a browser that plays HLS natively there
+   * is no way to cap the rendition through the player, so the loader
+   * imposes the ceiling by playing a panel-sized progressive file
+   * instead. Absent, every path behaves exactly as before, including
+   * single-globe iOS, which keeps adaptive streaming.
+   */
+  videoWidthBudgetPx?: number
 }
 
 // --- Image loading ---
@@ -245,6 +257,51 @@ function tryLoadImage(urls: string[]): Promise<HTMLImageElement> {
  *
  * A `link` is the only field playing it actually requires.
  */
+/**
+ * How much wider than the panel the equirectangular source should be.
+ *
+ * The texture spans 360° of longitude and roughly half of that is facing
+ * the viewer, so covering a panel at one texel per device pixel takes
+ * about twice the panel's width. Anything beyond that is decoded and
+ * then thrown away by the sampler.
+ */
+const GLOBE_TEXTURE_OVERSAMPLE = 2
+
+/**
+ * Choose the smallest rendition that still covers a panel of this width.
+ *
+ * The counterpart to {@link pickDirectFile}, which deliberately prefers
+ * the *highest* quality — the right call for one globe filling the
+ * screen, and the wrong one for a 2×2 grid on a phone, where each panel
+ * is a couple of hundred CSS pixels and the decoder is being handed a
+ * full-resolution stream to sample down.
+ *
+ * Preference order: the smallest file at least as wide as the target,
+ * then — if the ladder tops out below it — the widest available, since
+ * the best on offer beats an arbitrary one. Files carrying no `width`
+ * are only reachable through the {@link pickDirectFile} fallback, as
+ * there is no way to judge whether they fit.
+ */
+export function pickPanelSizedFile(
+  files: VideoProxyFile[],
+  targetWidthPx: number,
+): VideoProxyFile | undefined {
+  const sized = files
+    .filter(f => f.link && typeof f.width === 'number' && f.width > 0)
+    .sort((a, b) => a.width! - b.width!)
+  if (!sized.length) return pickDirectFile(files)
+  return sized.find(f => f.width! >= targetWidthPx) ?? sized[sized.length - 1]
+}
+
+/**
+ * Width in source pixels a panel of this CSS width wants, for
+ * {@link pickPanelSizedFile}. Separated so the device-pixel-ratio and
+ * oversample reasoning is testable without a layout.
+ */
+export function panelWidthBudgetPx(panelCssWidth: number, devicePixelRatio: number): number {
+  return Math.round(panelCssWidth * Math.max(1, devicePixelRatio) * GLOBE_TEXTURE_OVERSAMPLE)
+}
+
 export function pickDirectFile(files: VideoProxyFile[]): VideoProxyFile | undefined {
   return files.find(f => f.quality === '1080p' && f.link)
     ?? files.find(f => f.quality === '720p' && f.link)
@@ -262,6 +319,7 @@ export async function loadVideoDataset(
   options: DatasetLoaderOptions = {},
 ): Promise<{ hlsService: HLSService; videoTexture: VideoTextureHandle }> {
   const isPrimary = options.isPrimary ?? true
+  const videoWidthBudgetPx = options.videoWidthBudgetPx
   const hlsService = new HLSService()
   const video = hlsService.createVideo()
 
@@ -321,6 +379,36 @@ export async function loadVideoDataset(
       if (!direct) throw new Error('Manifest declared no HLS stream and no playable file')
       logger.info('[App] Manifest is single-file; loading progressive MP4 directly')
       await hlsService.loadDirect(direct.link, video)
+    } else if (videoWidthBudgetPx && usesNativeHls()) {
+      // Native HLS takes no configuration — neither the buffer caps nor
+      // the ABR resolution cap in `loadStream` exist on this path — so a
+      // phone decodes whatever the platform picks for a panel that may
+      // be a couple of hundred pixels wide. Four of those at once is
+      // what crashes the 4-globe tour on iOS (terraviz#230). The only
+      // ceiling the native path leaves is choosing a smaller file, so
+      // that is what a contended layout does.
+      //
+      // Adaptive streaming is what gets traded away, which is why the
+      // caller only sets a budget when more than one video panel is
+      // live. A single globe keeps HLS and its bitrate adaptation.
+      const sized = pickPanelSizedFile(manifest.files, videoWidthBudgetPx)
+      if (sized) {
+        logger.info(
+          `[App] Native HLS + ${manifest.files.length}-file ladder: playing ${sized.quality}`
+          + ` (${sized.width ?? '?'}px) for a ${videoWidthBudgetPx}px panel budget`,
+        )
+        try {
+          await hlsService.loadDirect(sized.link, video)
+        } catch (directError) {
+          // A rendition URL can 404 or be withdrawn while the HLS
+          // manifest is perfectly good. Falling back keeps the panel
+          // working at the old memory cost, which beats an empty globe.
+          logger.warn('[App] Panel-sized file failed, falling back to HLS:', directError)
+          await hlsService.loadStream(manifest.hls, video, isMobile)
+        }
+      } else {
+        await hlsService.loadStream(manifest.hls, video, isMobile)
+      }
     } else {
       try {
         await hlsService.loadStream(manifest.hls, video, isMobile)

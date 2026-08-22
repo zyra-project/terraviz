@@ -237,6 +237,18 @@ export class ViewportManager {
   }
 
   /** Number of active panels. */
+  /**
+   * A panel's rendered CSS width, or 0 before it has been laid out.
+   *
+   * Feeds the decode-resolution budget: in a 2×2 grid on a phone each
+   * panel is a fraction of the viewport, and that fraction — not the
+   * screen — is what the decoded video has to cover. Callers treat 0 as
+   * "unknown, change nothing".
+   */
+  getPanelCssWidth(slot: number): number {
+    return this.viewports[slot]?.container.clientWidth ?? 0
+  }
+
   getPanelCount(): number {
     return this.viewports.length
   }
