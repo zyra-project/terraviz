@@ -314,7 +314,7 @@ export function initToolsMenu(
           <button type="button" class="tools-menu-layout-btn${currentLayout === '1' ? ' active' : ''}" id="tools-menu-layout-1" aria-pressed="${currentLayout === '1'}" title="${tAttr('tools.layout.single')}">1</button>
           <button type="button" class="tools-menu-layout-btn${currentLayout === '2h' ? ' active' : ''}" id="tools-menu-layout-2h" aria-pressed="${currentLayout === '2h'}" title="${tAttr('tools.layout.twoHorizontal')}">2&#x2194;</button>
           <button type="button" class="tools-menu-layout-btn${currentLayout === '2v' ? ' active' : ''}" id="tools-menu-layout-2v" aria-pressed="${currentLayout === '2v'}" title="${tAttr('tools.layout.twoVertical')}">2&#x2195;</button>
-          <button type="button" class="tools-menu-layout-btn${currentLayout === '4' ? ' active' : ''}" id="tools-menu-layout-4" aria-pressed="${currentLayout === '4'}"${fourGlobeAllowed ? '' : ' disabled'} title="${tAttr(fourGlobeAllowed ? 'tools.layout.four' : 'tools.layout.four.unavailable')}">4</button>
+          <button type="button" class="tools-menu-layout-btn${currentLayout === '4' ? ' active' : ''}" id="tools-menu-layout-4" aria-pressed="${currentLayout === '4'}"${fourGlobeAllowed ? '' : ' aria-disabled="true"'} title="${tAttr(fourGlobeAllowed ? 'tools.layout.four' : 'tools.layout.four.unavailable')}" aria-label="${tAttr(fourGlobeAllowed ? 'tools.layout.four' : 'tools.layout.four.unavailable')}">4</button>
         </div>
       </section>
       <section class="tools-menu-section" aria-label="${tAttr('tools.section.actions.aria')}">
@@ -660,6 +660,11 @@ export function initToolsMenu(
     }
     for (const [layout, btn] of layoutBtns) {
       btn.addEventListener('click', () => {
+        // `aria-disabled` keeps the control focusable so its reason is
+        // reachable, which means the click still arrives and has to be
+        // refused here. Silently: the label already says why, and
+        // announcing a refusal on every press would nag.
+        if (btn.getAttribute('aria-disabled') === 'true') return
         onSetLayout(layout)
         for (const [l, b] of layoutBtns) {
           const active = l === layout
