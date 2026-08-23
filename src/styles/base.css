@@ -116,6 +116,40 @@ canvas {
     transition: opacity 0.2s;
 }
 
+/* A panel that is verifiably NOT on the date the shared time label
+   claims — the read-back that `verifySiblingTime` performs whenever
+   the transport settles while paused. Distinct from .out-of-range:
+   there the dataset simply doesn't cover the time and the frozen
+   boundary frame is expected; here the panel was told to go somewhere
+   and didn't, so the label is speaking for a frame it doesn't
+   describe. The two are mutually exclusive by construction (an
+   uncovered panel never reaches this state), so they share the ribbon
+   position rather than needing to stack. The panel is NOT dimmed —
+   the frame it shows is real data at a real time, just not the
+   labelled one, and dimming would suggest otherwise. */
+.map-viewport .panel-time-notice {
+    position: absolute;
+    top: calc(0.5rem * var(--ui-scale));
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 4;
+    padding: calc(0.25rem * var(--ui-scale)) calc(0.6rem * var(--ui-scale));
+    font-size: calc(0.65rem * var(--ui-scale));
+    font-weight: 500;
+    letter-spacing: 0.03em;
+    color: var(--color-warning);
+    background: rgba(13, 13, 18, 0.85);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid rgba(255, 204, 102, 0.35);
+    border-radius: calc(12px * var(--ui-scale));
+    white-space: nowrap;
+    pointer-events: none;
+}
+.map-viewport .panel-time-notice.hidden {
+    display: none;
+}
+
 /* Floating dataset legend anchored to the bottom-right of
    each panel. Visible when:
      - A dataset with a `legendLink` is loaded in that panel

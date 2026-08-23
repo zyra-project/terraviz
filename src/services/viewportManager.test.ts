@@ -540,6 +540,67 @@ describe('clampLayoutToPanelBudget', () => {
 })
 
 // ---------------------------------------------------------------------------
+// setPanelTimeNotice
+// ---------------------------------------------------------------------------
+
+describe('ViewportManager.setPanelTimeNotice', () => {
+  it('mounts a notice naming the date the panel is actually showing', () => {
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '2h')
+
+    vm.setPanelTimeNotice(1, 'Mar 2, 2026')
+
+    const notices = grid.querySelectorAll('.panel-time-notice')
+    expect(notices).toHaveLength(1)
+    // The date has to survive into the rendered text — the whole point
+    // is telling the viewer which moment this panel is on instead.
+    expect(notices[0].textContent).toContain('Mar 2, 2026')
+    expect(notices[0].getAttribute('role')).toBe('status')
+    vm.dispose()
+  })
+
+  it('reuses the element and rewrites the date on a later call', () => {
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '2h')
+
+    vm.setPanelTimeNotice(1, 'Mar 2, 2026')
+    vm.setPanelTimeNotice(1, 'Mar 3, 2026')
+
+    expect(grid.querySelectorAll('.panel-time-notice')).toHaveLength(1)
+    expect(grid.querySelector('.panel-time-notice')!.textContent).toContain('Mar 3, 2026')
+    vm.dispose()
+  })
+
+  it('hides on null without discarding the element', () => {
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '2h')
+
+    vm.setPanelTimeNotice(1, 'Mar 2, 2026')
+    vm.setPanelTimeNotice(1, null)
+
+    const notice = grid.querySelector('.panel-time-notice')!
+    expect(notice.classList.contains('hidden')).toBe(true)
+    vm.dispose()
+  })
+
+  it('is inert for a slot that does not exist', () => {
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '1')
+
+    // Teardown clears notices across every slot the previous layout had,
+    // so this is reached routinely rather than exceptionally.
+    expect(() => vm.setPanelTimeNotice(3, null)).not.toThrow()
+    expect(() => vm.setPanelTimeNotice(3, 'Mar 2, 2026')).not.toThrow()
+    expect(grid.querySelectorAll('.panel-time-notice')).toHaveLength(0)
+    vm.dispose()
+  })
+})
+
+// ---------------------------------------------------------------------------
 // setPanelLegend
 // ---------------------------------------------------------------------------
 
