@@ -304,6 +304,9 @@ class InteractiveSphere {
   /** Per-slot record of which siblings currently carry a time notice,
    *  so clearing them while playing costs one array scan and no DOM. */
   private siblingTimeNoticed: boolean[] = []
+  /** Per-slot: a `seeked`-driven texture upload is already armed, so a
+   *  second seek this frame does not stack another listener. */
+  private siblingUploadPending: boolean[] = []
 
   /**
    * Convenience getter returning the primary viewport's renderer.
@@ -3066,8 +3069,7 @@ class InteractiveSphere {
           }
         }
 
-        const sibTex = sibPanel?.videoTexture
-        if (sibTex) sibTex.needsUpdate = true
+        this.uploadSiblingFrameOnSeek(i, sibVideo)
       }
     }
 
@@ -3173,8 +3175,7 @@ class InteractiveSphere {
 
       if (shouldSeek) {
         sibVideo.currentTime = targetTime
-        const sibTex = sibPanel?.videoTexture
-        if (sibTex) sibTex.needsUpdate = true
+        this.uploadSiblingFrameOnSeek(i, sibVideo)
       }
 
       if (position === 'inside') {
@@ -3196,6 +3197,43 @@ class InteractiveSphere {
         if (!sibVideo.paused) sibVideo.pause()
       }
     }
+  }
+
+  /**
+   * Upload a sibling's frame once its seek has actually landed.
+   *
+   * Setting `needsUpdate` straight after writing `currentTime` schedules
+   * a repaint that arrives before the seek completes, so it uploads the
+   * frame the panel was *already* showing and clears the one-shot flag.
+   * The video is then paused, `!paused` is false, and the repaint
+   * heartbeat in `earthTileLayer` does not run — nothing re-uploads,
+   * ever. The panel keeps its pre-seek frame for good while its clock
+   * reads the right time, which is how a globe ends up two hours behind
+   * the label with no way back.
+   *
+   * Measured seeks complete in ~2 ms against locally buffered media,
+   * which is why this never showed up in instrumented tests; against
+   * real HLS a sibling can hold `HAVE_METADATA` for ~2 s, and the
+   * repaint wins every time.
+   *
+   * `seeked` only fires once the data is there, so the upload it arms
+   * cannot land early. The texture is looked up when the event fires
+   * rather than captured, so a dataset swap in between retargets it
+   * instead of writing through a stale handle.
+   */
+  private uploadSiblingFrameOnSeek(slot: number, video: HTMLVideoElement): void {
+    const tex = this.panelStates[slot]?.videoTexture
+    // Still worth the immediate hint: a seek that needs no data never
+    // fires `seeked`, and this is the only upload it will get.
+    if (tex) tex.needsUpdate = true
+    if (!video.seeking || this.siblingUploadPending[slot]) return
+
+    this.siblingUploadPending[slot] = true
+    video.addEventListener('seeked', () => {
+      this.siblingUploadPending[slot] = false
+      const current = this.panelStates[slot]?.videoTexture
+      if (current) current.needsUpdate = true
+    }, { once: true })
   }
 
   /**
@@ -3331,6 +3369,7 @@ class InteractiveSphere {
     // on the next settle.
     this.clearSiblingTimeNotices()
     this.siblingTimeNoticed = []
+    this.siblingUploadPending = []
     // And the settle detector has to forget where it was, for the reason
     // its own docs give: it reports a position once, so a new primary
     // paused at the same `currentTime` — the normal case for
