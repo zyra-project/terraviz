@@ -1507,6 +1507,18 @@ export class MapRenderer implements GlobeRenderer {
     }
   }
 
+  /**
+   * Playhead of the frame currently in this panel's dataset texture, or
+   * `null` when none has been uploaded.
+   *
+   * What the globe is *showing*, as opposed to what its video element
+   * reports. The two diverge whenever an upload is skipped, which is
+   * precisely the case a sibling-alignment check has to catch.
+   */
+  getUploadedFrameTime(): number | null {
+    return this.earthLayer?.getUploadedFrameTime() ?? null
+  }
+
   // --- Earth materials ---
 
   /** Wait for the earth tile layer's textures (night lights, specular, clouds) to load. */

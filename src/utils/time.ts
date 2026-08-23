@@ -198,6 +198,36 @@ export const MIN_PLAYBACK_RATE = 0.0625
 export const MAX_PLAYBACK_RATE = 16
 
 /**
+ * Lowest `HTMLMediaElement.readyState` at which a sibling video may be
+ * steered by multi-viewport sync — `HAVE_METADATA`.
+ *
+ * Metadata is the real prerequisite: once it has loaded, `duration` is
+ * known, and `duration` is the only property of the sibling that
+ * {@link computeSiblingSyncCorrection} reads besides `currentTime`. The
+ * frame data a higher `readyState` would promise is not an input to the
+ * decision — it is the thing a `currentTime` write goes and fetches.
+ *
+ * **Do not raise this to `HAVE_CURRENT_DATA` (2).** That is where it sat
+ * until it caused the loop-wrap stall: `playbackController`'s auto-loop
+ * pauses the primary at `duration - VIDEO_END_THRESHOLD`, and the
+ * resulting `pause` fires `seekSiblingsToDate`, which parks every
+ * sibling at that same near-end position. A MediaSource-backed element
+ * seeked to within roughly one segment of its buffered end sits at
+ * `HAVE_METADATA` indefinitely — so the guard then skipped those
+ * siblings at exactly the moment the primary wrapped and they needed
+ * seeking home. Nothing steered them until the browser re-buffered them
+ * on its own, and they froze mid-comparison. Measured in Chromium: a
+ * `currentTime` write recovers such an element to `HAVE_ENOUGH_DATA` in
+ * ≤16 ms, whereas skipping it leaves the panel stranded at the old
+ * position indefinitely.
+ *
+ * `HAVE_NOTHING` (0) stays excluded, and deliberately: `duration` is
+ * `NaN` there, which would poison the mapping (and `NaN <= 0` is false,
+ * so the callers' own `duration` guards would not catch it).
+ */
+export const SIBLING_MIN_READY_STATE = 1
+
+/**
  * Soft-sync controller gains for in-range siblings. Small drift is
  * corrected by gently trimming `playbackRate` rather than seeking —
  * a `currentTime` write on a *playing* video forces a decoder seek
@@ -317,6 +347,145 @@ export function computeSiblingSyncCorrection(params: {
   // slow down (rate < base); behind → speed up.
   const trim = Math.max(-SYNC_MAX_RATE_TRIM, Math.min(SYNC_MAX_RATE_TRIM, error * SYNC_RATE_GAIN))
   return { position, targetTime, rate: clamp(baseRate * (1 - trim)), shouldSeek: false }
+}
+
+/**
+ * Tolerance used when the label has no display cadence to snap to,
+ * expressed in *video* seconds and converted to real-world time by the
+ * sibling's own scale. One frame at the 30 fps the transcode pipeline
+ * targets: below that, no seek could have landed anywhere else.
+ */
+const UNSNAPPED_TOLERANCE_VIDEO_S = 1 / 30
+
+/** How a sibling panel's own playhead compares to the shared label. */
+export type SiblingTimeAlignment =
+  /** Showing the same moment the label claims, within tolerance. */
+  | 'aligned'
+  /** Showing a demonstrably different moment than the label claims. */
+  | 'off'
+  /** The label's date falls outside this dataset's range, so its frozen
+   *  boundary frame is expected rather than wrong — the panel already
+   *  says so itself via the out-of-range treatment. */
+  | 'uncovered'
+
+export interface SiblingTimeVerdict {
+  alignment: SiblingTimeAlignment
+  /** The real-world date this sibling's playhead is actually on. */
+  shownDate: Date
+  /** The sibling's true instant minus the label's. Positive means ahead. */
+  driftMs: number
+  /** The gap the comparison forgave, so a caller can explain itself. */
+  toleranceMs: number
+}
+
+/**
+ * Which playhead describes what a panel is *showing*.
+ *
+ * `uploadedFrameTime` — the position of the frame last written into the
+ * panel's texture — is the honest answer, and is preferred whenever the
+ * renderer can supply it. A video element's `currentTime` describes the
+ * element rather than the globe, and the two come apart in exactly the
+ * cases worth catching: a seek reads back its target instantly while the
+ * element is still buffering, and a panel whose repaint chain has broken
+ * keeps advancing its clock over a texture that stopped updating. Both
+ * report perfect alignment from `currentTime` while showing a stale
+ * frame.
+ *
+ * `currentTime` remains the fallback for a panel that has not uploaded
+ * yet, or a surface that cannot report — there, an approximate answer
+ * beats no answer.
+ */
+export function shownFrameTime(
+  uploadedFrameTime: number | null | undefined,
+  currentTime: number,
+): number {
+  return typeof uploadedFrameTime === 'number' && Number.isFinite(uploadedFrameTime)
+    ? uploadedFrameTime
+    : currentTime
+}
+
+/**
+ * Does a sibling panel actually show the date the shared label claims?
+ *
+ * Multi-globe playback asserts **one** time label over every panel, and
+ * that label is derived from the primary alone (see
+ * `updateVideoTimeLabel`). Siblings are *commanded* to the primary's
+ * date by `seekSiblingsToDate` and never read back, so any write that
+ * fails to land leaves the label quietly speaking for a panel that is
+ * somewhere else. Per-frame drift correction would catch it, but it is
+ * disabled while the transport is paused — which is exactly when a
+ * viewer reads the label and compares panels side by side.
+ *
+ * This is the read-back. It is deliberately a *verification* and not a
+ * correction: re-seeking here would fight the sync controller for
+ * ownership of the playhead, and a panel that cannot be moved to the
+ * labelled moment should say so rather than silently try forever.
+ *
+ * The tolerance is half a displayed step, applied to the **unsnapped**
+ * instants behind both panels. Snapping both to the label's grid and
+ * comparing buckets is the obvious implementation and the wrong one: it
+ * is brittle exactly where it matters least, since a sub-frame
+ * difference straddling a bucket edge reads as a full step of
+ * disagreement. Comparing true instants and forgiving half a step says
+ * the honest thing — these panels are closer together than the display
+ * can distinguish. Only `shownDate` is snapped, so the caller's notice
+ * reads in the same vocabulary as the label it contradicts.
+ *
+ * Without a display cadence the fallback is one video frame's worth of
+ * real-world time, which on a 60-hour range across 61 frames is about an
+ * hour and on an 85-year range is about a month — the resolution the
+ * imagery itself has, in both cases.
+ *
+ * Callers must have established that `sibDuration > 0`; a degenerate
+ * duration yields `sibStart` for every playhead and cannot be compared.
+ */
+export function verifySiblingTime(params: {
+  /**
+   * The primary's true instant behind the label — *unsnapped*, so it can
+   * be compared like-for-like with the sibling's own true instant.
+   */
+  labelDate: Date
+  /**
+   * Playhead of the frame this panel is *showing* — from
+   * {@link shownFrameTime}, not the video element's `currentTime`.
+   */
+  sibFrameTime: number
+  sibDuration: number
+  sibStart: Date
+  sibEnd: Date
+  /** The label's snap cadence, when it has one. */
+  snapIntervalMs?: number
+}): SiblingTimeVerdict {
+  const { labelDate, sibFrameTime, sibDuration, sibStart, sibEnd, snapIntervalMs } = params
+
+  // Two mappings of the same playhead: the true instant, which is what
+  // gets compared, and the snapped one, which is what gets shown.
+  const trueDate = videoTimeToDate(sibFrameTime, sibDuration, sibStart, sibEnd)
+  const shownDate = videoTimeToDate(sibFrameTime, sibDuration, sibStart, sibEnd, snapIntervalMs)
+  const driftMs = trueDate.getTime() - labelDate.getTime()
+
+  const sibRangeMs = sibEnd.getTime() - sibStart.getTime()
+  const toleranceMs = snapIntervalMs && snapIntervalMs > 0
+    ? snapIntervalMs / 2
+    : sibDuration > 0 && sibRangeMs > 0
+      ? (sibRangeMs / sibDuration) * UNSNAPPED_TOLERANCE_VIDEO_S
+      : 0
+
+  // Coverage is asked first: a panel whose range does not reach the
+  // labelled date is pinned to its nearest boundary frame on purpose,
+  // and flagging that as a mismatch would double-report a state the
+  // out-of-range treatment already explains.
+  const labelMs = labelDate.getTime()
+  if (labelMs < sibStart.getTime() || labelMs > sibEnd.getTime()) {
+    return { alignment: 'uncovered', shownDate, driftMs, toleranceMs }
+  }
+
+  return {
+    alignment: Math.abs(driftMs) <= toleranceMs ? 'aligned' : 'off',
+    shownDate,
+    driftMs,
+    toleranceMs,
+  }
 }
 
 /** Standard snap intervals in ascending order of size. The list
