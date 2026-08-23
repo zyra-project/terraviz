@@ -1226,7 +1226,7 @@ class InteractiveSphere {
         // Any time notice describes a settled frame; once the playhead
         // is moving again it describes nothing. correctSiblingDrift has
         // already returned above unless the primary is playing.
-        if (this.primaryVideoSyncActive) this.clearSiblingTimeNoticesWhilePlaying()
+        if (this.primaryVideoSyncActive) this.clearSiblingTimeNoticesWhileMoving()
         // Cheap on every frame — a comparison and a subtraction — and it
         // has to be sampled at frame rate to know when the playhead
         // stopped. The loop already treats a throw here as something to
@@ -3285,14 +3285,21 @@ class InteractiveSphere {
   /**
    * Drop stale time notices once the transport is moving again.
    *
+   * "Moving" is playing *or* seeking. A scrub while paused leaves
+   * `paused` true and only raises `seeking`, so testing `paused` alone
+   * held the previous notice on screen for the whole drag — naming one
+   * date while the label and the panels moved through others, which is
+   * the opposite of what a notice about a settled frame should mean.
+   *
    * Called from the playback loop, which ticks whether or not the
-   * primary is playing, so it makes its own play check. Both guards are
+   * primary is playing, so it makes its own check. Both guards are
    * cheap and short-circuit before touching the DOM.
    */
-  private clearSiblingTimeNoticesWhilePlaying(): void {
+  private clearSiblingTimeNoticesWhileMoving(): void {
     if (!this.siblingTimeNoticed.some(Boolean)) return
     const primary = this.panelStates[this.viewports.getPrimaryIndex()]?.hlsService?.getVideo?.() ?? null
-    if (!primary || primary.paused) return
+    if (!primary) return
+    if (primary.paused && !primary.seeking) return
     this.clearSiblingTimeNotices()
   }
 
@@ -3317,6 +3324,13 @@ class InteractiveSphere {
     // on the next settle.
     this.clearSiblingTimeNotices()
     this.siblingTimeNoticed = []
+    // And the settle detector has to forget where it was, for the reason
+    // its own docs give: it reports a position once, so a new primary
+    // paused at the same `currentTime` — the normal case for
+    // equal-duration videos held in lockstep — would be suppressed as
+    // already-reported and never verified. The playhead is the same
+    // number but a different panel's frame.
+    this.playbackSettle.reset()
     const target = this.primaryVideoSyncTarget
     if (target) {
       for (const { event, handler } of this.primaryVideoSyncListeners) {
