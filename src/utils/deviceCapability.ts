@@ -32,6 +32,50 @@ export const IS_MOBILE_NATIVE: boolean = (() => {
   return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
 })()
 
+/**
+ * Widest viewport still treated as a phone for the video-decode cap.
+ *
+ * Deliberately a viewport test and *not* {@link isMobile}, which also
+ * returns true for `maxTouchPoints > 0` — a touchscreen laptop, an
+ * iPad, a Quest headset. Those have the decode headroom a phone does
+ * not, and capping them would take away a layout that works.
+ */
+const PHONE_MAX_VIEWPORT_PX = 768
+
+/**
+ * Most simultaneous video panels a phone will hold.
+ *
+ * Measured on an iPhone 16 against the Climate Futures tour: four
+ * globes with no datasets is fine, four with *image* datasets is fine,
+ * and video dies somewhere between the second and third decoder — while
+ * still loading, before anything animates. So the ceiling is on video
+ * decoders existing, not on playback, on panel count, or on WebGL
+ * contexts, and there is no window in which to intervene once the
+ * layout has asked for four. See terraviz#230.
+ *
+ * Two is the largest value observed to survive.
+ */
+export const MAX_VIDEO_PANELS_PHONE = 2
+
+/**
+ * How many video panels this viewport width may hold at once.
+ *
+ * Pure, so the policy is testable without a window. Non-phone widths
+ * report {@link UNCAPPED_VIDEO_PANELS} — every layout the app offers.
+ */
+export const UNCAPPED_VIDEO_PANELS = 4
+export function maxVideoPanelsForWidth(viewportWidthPx: number): number {
+  return viewportWidthPx <= PHONE_MAX_VIEWPORT_PX
+    ? MAX_VIDEO_PANELS_PHONE
+    : UNCAPPED_VIDEO_PANELS
+}
+
+/** {@link maxVideoPanelsForWidth} for the live viewport. */
+export function maxVideoPanels(): number {
+  if (typeof window === 'undefined') return UNCAPPED_VIDEO_PANELS
+  return maxVideoPanelsForWidth(window.innerWidth)
+}
+
 interface NetworkInformation {
   effectiveType?: string
 }

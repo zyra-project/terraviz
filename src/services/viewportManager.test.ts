@@ -96,7 +96,7 @@ vi.mock('./mapRenderer', () => ({
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import { ViewportManager } from './viewportManager'
+import { ViewportManager, clampLayoutToPanelBudget } from './viewportManager'
 import { setActiveMapRenderer } from './mapRenderer'
 
 // ---------------------------------------------------------------------------
@@ -498,6 +498,44 @@ describe('ViewportManager.dispose', () => {
     vm.dispose()
     expect(grid.querySelectorAll('.map-viewport')).toHaveLength(0)
     expect(setActiveMapRenderer).toHaveBeenLastCalledWith(null)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// clampLayoutToPanelBudget — the phone video-decode cap (terraviz#230)
+// ---------------------------------------------------------------------------
+
+describe('clampLayoutToPanelBudget', () => {
+  it('passes a layout the budget already covers straight through', () => {
+    expect(clampLayoutToPanelBudget('4', 4, false)).toBe('4')
+    expect(clampLayoutToPanelBudget('2h', 2, false)).toBe('2h')
+    expect(clampLayoutToPanelBudget('1', 2, true)).toBe('1')
+  })
+
+  it('reduces four globes to two when the budget is two', () => {
+    // The crash case: a tour asks for four without knowing the device.
+    expect(clampLayoutToPanelBudget('4', 2, true)).toBe('2v')
+    expect(clampLayoutToPanelBudget('4', 2, false)).toBe('2h')
+  })
+
+  it('stacks on a portrait phone and splits side-by-side in landscape', () => {
+    // Orientation decides whether two panels are usable at all: stacked
+    // in portrait gives each globe the full width, where side-by-side
+    // would leave it under 200px.
+    expect(clampLayoutToPanelBudget('4', 2, true)).toBe('2v')
+    expect(clampLayoutToPanelBudget('4', 2, false)).toBe('2h')
+  })
+
+  it('falls to a single globe when even two are too many', () => {
+    expect(clampLayoutToPanelBudget('4', 1, true)).toBe('1')
+    expect(clampLayoutToPanelBudget('2v', 1, false)).toBe('1')
+  })
+
+  it('never reduces a two-panel layout under a two-panel budget', () => {
+    // Both 2h and 2v cost two decoders, so neither should be rewritten
+    // into the other just because the budget is exactly two.
+    expect(clampLayoutToPanelBudget('2v', 2, false)).toBe('2v')
+    expect(clampLayoutToPanelBudget('2h', 2, true)).toBe('2h')
   })
 })
 
