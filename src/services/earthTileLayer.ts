@@ -1842,13 +1842,33 @@ export function createEarthTileLayer(): EarthTileLayerControl {
 
       // --- Dataset overlay: opaque textured sphere (replaces earth effects) ---
       if (datasetActive && dataset && datasetTex) {
+        // A playing video keeps its own panel animating: each render
+        // schedules the next one. The repaint *is* the loop, so it has to
+        // run whether or not there is a frame to upload this time.
+        //
+        // It used to sit inside the upload branch below, which meant a
+        // render landing while `readyState` was under HAVE_CURRENT_DATA
+        // scheduled nothing and killed the chain. A seek is exactly that
+        // window — the element drops to HAVE_METADATA for a second or
+        // two while it re-buffers — so after a scrub a non-primary panel
+        // would keep playing with nothing drawing it, frozen on its last
+        // uploaded frame until some unrelated repaint (a globe drag, a
+        // layout change) happened to restart it.
+        //
+        // The primary never showed this because `startPlaybackLoop`
+        // repaints it every frame from the rAF loop — but that heartbeat
+        // is `this.renderer`, the primary's map alone. Siblings have
+        // only this line.
+        if (datasetVideo && !datasetVideo.paused) mapRef?.triggerRepaint()
+
         // For video datasets, re-upload the current frame every render.
         // Also re-upload on forceVideoUpdate (scrubbing while paused).
+        // Still gated on having data: a frameless element has nothing to
+        // hand `texImage2D`, and holding the last good frame is right.
         if (datasetVideo && datasetVideo.readyState >= 2 && (!datasetVideo.paused || forceVideoUpdate)) {
           gl2.bindTexture(gl2.TEXTURE_2D, datasetTex)
           gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.RGBA, gl2.RGBA, gl2.UNSIGNED_BYTE, datasetVideo)
           forceVideoUpdate = false
-          if (!datasetVideo.paused) mapRef?.triggerRepaint()
         }
 
         // A data-encoded dataset is the one case with a real alpha
