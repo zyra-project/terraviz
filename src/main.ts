@@ -14,7 +14,7 @@ import './styles/index.css'
 
 import { HLSService } from './services/hlsService'
 import { dataService, PreviewFetchError } from './services/dataService'
-import { formatDate, videoTimeToDate, dateToVideoTime, computeSiblingSyncCorrection, SIBLING_MIN_READY_STATE, verifySiblingTime, isSubDailyPeriod, getSunPosition, inferDisplayInterval } from './utils/time'
+import { formatDate, videoTimeToDate, dateToVideoTime, computeSiblingSyncCorrection, SIBLING_MIN_READY_STATE, verifySiblingTime, shownFrameTime, isSubDailyPeriod, getSunPosition, inferDisplayInterval } from './utils/time'
 import { logger } from './utils/logger'
 import type { AppState, VideoTextureHandle, TourFile, Dataset } from './types'
 
@@ -3233,6 +3233,7 @@ class InteractiveSphere {
       if (i === pIdx) continue
       const panel = this.panelStates[i]
       const video = panel?.hlsService?.getVideo?.() ?? null
+      const renderer = this.viewports.getRendererAt(i)
       const ds = panel?.dataset
 
       // No video, no range, or a duration we cannot map through: there
@@ -3244,7 +3245,13 @@ class InteractiveSphere {
 
       const verdict = verifySiblingTime({
         labelDate,
-        sibCurrentTime: video.currentTime,
+        // What the globe is showing, not what its video element says —
+        // see `shownFrameTime`. The renderer knows which frame actually
+        // reached the texture; the element only knows its own clock.
+        sibFrameTime: shownFrameTime(
+          renderer instanceof MapRenderer ? renderer.getUploadedFrameTime() : null,
+          video.currentTime,
+        ),
         sibDuration: video.duration,
         sibStart: new Date(ds.startTime),
         sibEnd: new Date(ds.endTime),

@@ -379,6 +379,32 @@ export interface SiblingTimeVerdict {
 }
 
 /**
+ * Which playhead describes what a panel is *showing*.
+ *
+ * `uploadedFrameTime` — the position of the frame last written into the
+ * panel's texture — is the honest answer, and is preferred whenever the
+ * renderer can supply it. A video element's `currentTime` describes the
+ * element rather than the globe, and the two come apart in exactly the
+ * cases worth catching: a seek reads back its target instantly while the
+ * element is still buffering, and a panel whose repaint chain has broken
+ * keeps advancing its clock over a texture that stopped updating. Both
+ * report perfect alignment from `currentTime` while showing a stale
+ * frame.
+ *
+ * `currentTime` remains the fallback for a panel that has not uploaded
+ * yet, or a surface that cannot report — there, an approximate answer
+ * beats no answer.
+ */
+export function shownFrameTime(
+  uploadedFrameTime: number | null | undefined,
+  currentTime: number,
+): number {
+  return typeof uploadedFrameTime === 'number' && Number.isFinite(uploadedFrameTime)
+    ? uploadedFrameTime
+    : currentTime
+}
+
+/**
  * Does a sibling panel actually show the date the shared label claims?
  *
  * Multi-globe playback asserts **one** time label over every panel, and
@@ -419,19 +445,23 @@ export function verifySiblingTime(params: {
    * be compared like-for-like with the sibling's own true instant.
    */
   labelDate: Date
-  sibCurrentTime: number
+  /**
+   * Playhead of the frame this panel is *showing* — from
+   * {@link shownFrameTime}, not the video element's `currentTime`.
+   */
+  sibFrameTime: number
   sibDuration: number
   sibStart: Date
   sibEnd: Date
   /** The label's snap cadence, when it has one. */
   snapIntervalMs?: number
 }): SiblingTimeVerdict {
-  const { labelDate, sibCurrentTime, sibDuration, sibStart, sibEnd, snapIntervalMs } = params
+  const { labelDate, sibFrameTime, sibDuration, sibStart, sibEnd, snapIntervalMs } = params
 
   // Two mappings of the same playhead: the true instant, which is what
   // gets compared, and the snapped one, which is what gets shown.
-  const trueDate = videoTimeToDate(sibCurrentTime, sibDuration, sibStart, sibEnd)
-  const shownDate = videoTimeToDate(sibCurrentTime, sibDuration, sibStart, sibEnd, snapIntervalMs)
+  const trueDate = videoTimeToDate(sibFrameTime, sibDuration, sibStart, sibEnd)
+  const shownDate = videoTimeToDate(sibFrameTime, sibDuration, sibStart, sibEnd, snapIntervalMs)
   const driftMs = trueDate.getTime() - labelDate.getTime()
 
   const sibRangeMs = sibEnd.getTime() - sibStart.getTime()

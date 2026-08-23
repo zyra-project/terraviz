@@ -9,6 +9,7 @@ import {
   dateToVideoTime,
   computeSiblingSyncCorrection,
   verifySiblingTime,
+  shownFrameTime,
   MIN_PLAYBACK_RATE,
   MAX_PLAYBACK_RATE,
   SIBLING_MIN_READY_STATE,
@@ -624,6 +625,34 @@ describe('SIBLING_MIN_READY_STATE', () => {
 })
 
 // ---------------------------------------------------------------------------
+// shownFrameTime — what the panel is showing, not what its element says
+// ---------------------------------------------------------------------------
+describe('shownFrameTime', () => {
+  it('prefers the frame that actually reached the texture', () => {
+    // The case this exists for: a seek reads its target back instantly
+    // while the element is still buffering, so `currentTime` claims a
+    // position whose frame is not on screen.
+    expect(shownFrameTime(12.5, 18.0)).toBe(12.5)
+  })
+
+  it('falls back to currentTime when nothing has been uploaded yet', () => {
+    expect(shownFrameTime(null, 18.0)).toBe(18.0)
+    expect(shownFrameTime(undefined, 18.0)).toBe(18.0)
+  })
+
+  it('keeps a legitimate zero rather than treating it as absent', () => {
+    // The first frame of a dataset is a real answer; a falsy check here
+    // would silently report the element's clock instead.
+    expect(shownFrameTime(0, 18.0)).toBe(0)
+  })
+
+  it('rejects a non-finite recording', () => {
+    expect(shownFrameTime(NaN, 18.0)).toBe(18.0)
+    expect(shownFrameTime(Infinity, 18.0)).toBe(18.0)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // verifySiblingTime — does a panel show the date the label claims?
 // ---------------------------------------------------------------------------
 describe('verifySiblingTime', () => {
@@ -640,7 +669,7 @@ describe('verifySiblingTime', () => {
 
   it('accepts a sibling sitting on the labelled moment', () => {
     const v = verifySiblingTime({
-      labelDate: at(1), sibCurrentTime: 1, sibDuration: DUR,
+      labelDate: at(1), sibFrameTime: 1, sibDuration: DUR,
       sibStart: start, sibEnd: end, snapIntervalMs: HOUR,
     })
     expect(v.alignment).toBe('aligned')
@@ -651,7 +680,7 @@ describe('verifySiblingTime', () => {
     // A seek lands on the nearest decodable frame rather than exactly
     // where it was asked to; that must not read as a mismatch.
     const v = verifySiblingTime({
-      labelDate: at(1), sibCurrentTime: 1 + (1 / 30) * 0.4, sibDuration: DUR,
+      labelDate: at(1), sibFrameTime: 1 + (1 / 30) * 0.4, sibDuration: DUR,
       sibStart: start, sibEnd: end, snapIntervalMs: HOUR,
     })
     expect(v.alignment).toBe('aligned')
@@ -661,7 +690,7 @@ describe('verifySiblingTime', () => {
     // The failure this exists to catch — the label reads the wrap
     // position while the sibling is stranded at its own last frame.
     const v = verifySiblingTime({
-      labelDate: start, sibCurrentTime: DUR, sibDuration: DUR,
+      labelDate: start, sibFrameTime: DUR, sibDuration: DUR,
       sibStart: start, sibEnd: end, snapIntervalMs: HOUR,
     })
     expect(v.alignment).toBe('off')
@@ -671,11 +700,11 @@ describe('verifySiblingTime', () => {
 
   it('signs the drift so a caller can tell ahead from behind', () => {
     const ahead = verifySiblingTime({
-      labelDate: at(1), sibCurrentTime: 1.5, sibDuration: DUR,
+      labelDate: at(1), sibFrameTime: 1.5, sibDuration: DUR,
       sibStart: start, sibEnd: end, snapIntervalMs: HOUR,
     })
     const behind = verifySiblingTime({
-      labelDate: at(1), sibCurrentTime: 0.5, sibDuration: DUR,
+      labelDate: at(1), sibFrameTime: 0.5, sibDuration: DUR,
       sibStart: start, sibEnd: end, snapIntervalMs: HOUR,
     })
     expect(ahead.driftMs).toBeGreaterThan(0)
@@ -690,14 +719,14 @@ describe('verifySiblingTime', () => {
     // mismatch would explain one state twice in two vocabularies.
     const before = verifySiblingTime({
       labelDate: new Date('2026-02-01T00:00:00Z'),
-      sibCurrentTime: 0, sibDuration: DUR,
+      sibFrameTime: 0, sibDuration: DUR,
       sibStart: start, sibEnd: end, snapIntervalMs: HOUR,
     })
     expect(before.alignment).toBe('uncovered')
 
     const after = verifySiblingTime({
       labelDate: new Date('2026-04-01T00:00:00Z'),
-      sibCurrentTime: DUR, sibDuration: DUR,
+      sibFrameTime: DUR, sibDuration: DUR,
       sibStart: start, sibEnd: end, snapIntervalMs: HOUR,
     })
     expect(after.alignment).toBe('uncovered')
@@ -708,7 +737,7 @@ describe('verifySiblingTime', () => {
     // label and the assertion the label makes is true.
     const v = verifySiblingTime({
       labelDate: new Date('2026-03-01T04:00:00Z'),
-      sibCurrentTime: (4 * HOUR / (end.getTime() - start.getTime())) * DUR + 0.001,
+      sibFrameTime: (4 * HOUR / (end.getTime() - start.getTime())) * DUR + 0.001,
       sibDuration: DUR, sibStart: start, sibEnd: end, snapIntervalMs: HOUR,
     })
     expect(v.toleranceMs).toBe(HOUR / 2)
@@ -724,7 +753,7 @@ describe('verifySiblingTime', () => {
       ((d.getTime() - start.getTime()) / (end.getTime() - start.getTime())) * DUR
     const v = verifySiblingTime({
       labelDate: new Date('2026-03-01T03:29:00Z'),
-      sibCurrentTime: videoTimeFor(new Date('2026-03-01T03:31:00Z')),
+      sibFrameTime: videoTimeFor(new Date('2026-03-01T03:31:00Z')),
       sibDuration: DUR, sibStart: start, sibEnd: end, snapIntervalMs: HOUR,
     })
     expect(Math.abs(v.driftMs - 2 * 60 * 1000)).toBeLessThan(1000)
@@ -736,7 +765,7 @@ describe('verifySiblingTime', () => {
 
   it('falls back to one video frame of real time with no display cadence', () => {
     const v = verifySiblingTime({
-      labelDate: at(1), sibCurrentTime: 1, sibDuration: DUR,
+      labelDate: at(1), sibFrameTime: 1, sibDuration: DUR,
       sibStart: start, sibEnd: end,
     })
     // 60 hours over 2.033s of video → one 1/30s frame is ~59 minutes.
@@ -750,7 +779,7 @@ describe('verifySiblingTime', () => {
     // the same real-world date sits at twice the video time. Comparing
     // raw currentTime across panels would call this a mismatch.
     const v = verifySiblingTime({
-      labelDate: at(1), sibCurrentTime: 2, sibDuration: DUR * 2,
+      labelDate: at(1), sibFrameTime: 2, sibDuration: DUR * 2,
       sibStart: start, sibEnd: end, snapIntervalMs: HOUR,
     })
     expect(v.alignment).toBe('aligned')
