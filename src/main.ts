@@ -14,7 +14,7 @@ import './styles/index.css'
 
 import { HLSService } from './services/hlsService'
 import { dataService, PreviewFetchError } from './services/dataService'
-import { formatDate, videoTimeToDate, dateToVideoTime, computeSiblingSyncCorrection, SIBLING_MIN_READY_STATE, verifySiblingTime, shownFrameTime, isSubDailyPeriod, getSunPosition, inferDisplayInterval } from './utils/time'
+import { formatDate, videoTimeToDate, dateToVideoTime, computeSiblingSyncCorrection, SIBLING_MIN_READY_STATE, SIBLING_HARD_SEEK_THRESHOLD_S, verifySiblingTime, shownFrameTime, isSubDailyPeriod, getSunPosition, inferDisplayInterval } from './utils/time'
 import { logger } from './utils/logger'
 import type { AppState, VideoTextureHandle, TourFile, Dataset } from './types'
 
@@ -149,19 +149,6 @@ const CLOUD_TEXTURE_WEIGHT = 0.2
 const LOADING_BASE_PROGRESS = 20
 const LOADING_TEXTURE_RANGE = 70
 const LOADING_HIDE_DELAY_MS = 300
-
-/**
- * Drift (seconds of video time) beyond which `correctSiblingDrift`
- * hard-seeks a sibling instead of easing it back via a rate trim.
- * Smaller drift is corrected smoothly through `playbackRate` (see
- * `computeSiblingSyncCorrection`), so a hard seek — which interrupts
- * decode and flickers the panel (terraviz#229) — fires only for a real
- * desync (re-entry from out-of-range, a stall, or a scrub). The soft
- * rate trim keeps steady-state drift far below this, so on the Climate
- * Futures tour (≈2.8 model years per video second) the panels stay
- * visibly locked without per-frame seeking.
- */
-const SIBLING_HARD_SEEK_THRESHOLD_S = 0.5
 
 /**
  * Root application class that boots the WebGL globe, loads datasets,
@@ -3182,7 +3169,16 @@ class InteractiveSphere {
 
       sibVideo.playbackRate = rate
 
-      if (shouldSeek) {
+      // A seek already in flight is left alone. This runs every frame,
+      // and a lower hard-seek threshold means it fires during the
+      // ~2s a sibling spends re-buffering after a scrub — precisely
+      // when it is least able to absorb another one. Writing
+      // `currentTime` again there restarts the fetch hls.js is already
+      // running, so a stall could be extended indefinitely by the very
+      // correction meant to end it. The seek in flight is heading close
+      // to the right place; whatever it misses by, the next frame after
+      // it lands will still see and correct.
+      if (shouldSeek && !sibVideo.seeking) {
         sibVideo.currentTime = targetTime
         this.uploadSiblingFrameOnSeek(i, sibVideo)
       }
