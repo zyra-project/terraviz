@@ -151,6 +151,16 @@ const LOADING_TEXTURE_RANGE = 70
 const LOADING_HIDE_DELAY_MS = 300
 
 /**
+ * How long to let a requested redraw land before a panel that is showing
+ * the wrong frame is reported as such.
+ *
+ * `needsUpdate` schedules a repaint, so the upload takes a frame or two.
+ * Generous next to that, and short enough to be imperceptible against
+ * the settle delay that precedes it.
+ */
+const SIBLING_REPAIR_CONFIRM_MS = 120
+
+/**
  * Root application class that boots the WebGL globe, loads datasets,
  * and orchestrates all UI subsystems (browse panel, chat, playback controls).
  *
@@ -302,6 +312,8 @@ class InteractiveSphere {
    * upload-on-seek fix for the rest of the session.
    */
   private siblingSeekUploads: Array<AbortController | null> = []
+  /** Pending re-check after a repair attempt — see `verifySiblingTimes`. */
+  private siblingRepairTimer: ReturnType<typeof setTimeout> | null = null
 
   /**
    * Convenience getter returning the primary viewport's renderer.
@@ -3257,6 +3269,10 @@ class InteractiveSphere {
     if (slot === undefined) {
       for (const armed of this.siblingSeekUploads) armed?.abort()
       this.siblingSeekUploads = []
+      if (this.siblingRepairTimer !== null) {
+        clearTimeout(this.siblingRepairTimer)
+        this.siblingRepairTimer = null
+      }
       return
     }
     this.siblingSeekUploads[slot]?.abort()
@@ -3282,7 +3298,17 @@ class InteractiveSphere {
    * controller for the playhead, and a panel that cannot reach the
    * labelled moment should say so rather than silently retry.
    */
-  private verifySiblingTimes(): void {
+  private verifySiblingTimes(afterRepair = false): void {
+    if (this.siblingRepairTimer !== null) {
+      clearTimeout(this.siblingRepairTimer)
+      this.siblingRepairTimer = null
+    }
+    // A re-check that arrives after the transport moved again describes
+    // nothing; the moving-clear path owns the notices from here.
+    const primaryVideo = this.panelStates[this.viewports.getPrimaryIndex()]?.hlsService?.getVideo?.() ?? null
+    if (afterRepair && (!primaryVideo || !primaryVideo.paused || primaryVideo.seeking)) return
+
+    let repairing = false
     const labelDate = this.assertedLabelDate
     // Nothing is being asserted (no dataset, or no temporal range), so
     // there is no claim for a panel to contradict.
@@ -3331,13 +3357,39 @@ class InteractiveSphere {
         continue
       }
 
+      // The panel is showing the wrong frame. Before saying so, ask for
+      // a redraw — the overwhelmingly common cause is a texture left
+      // behind a clock that is already correct, and one upload fixes
+      // that whatever produced it. This is not the correction
+      // `verifySiblingTime`'s contract rules out: that is about seeking,
+      // which would fight the sync controller for the playhead. Nothing
+      // here moves a playhead; it repaints what the video already holds.
+      const tex = this.panelStates[i]?.videoTexture
+      if (!afterRepair && tex) {
+        tex.needsUpdate = true
+        repairing = true
+        continue
+      }
+
       const showTime = ds.period
         ? isSubDailyPeriod(ds.period)
         : (this.playback.displayInterval?.showTime ?? false)
       this.setSiblingTimeNotice(i, formatDate(verdict.shownDate, showTime))
       logger.debug(
-        `[App] Panel ${i} is ${Math.round(verdict.driftMs / 1000)}s of real time off the label`,
+        `[App] Panel ${i} is ${Math.round(verdict.driftMs / 1000)}s of real time off the label`
+        + (afterRepair ? ' and did not repaint' : ''),
       )
+    }
+
+    // Confirm the repair rather than assuming it. A notice is only
+    // earned by a panel that stayed wrong after being asked to redraw,
+    // which keeps the ribbon meaning "I could not fix this" instead of
+    // flashing up for every transient staleness.
+    if (repairing) {
+      this.siblingRepairTimer = setTimeout(() => {
+        this.siblingRepairTimer = null
+        this.verifySiblingTimes(true)
+      }, SIBLING_REPAIR_CONFIRM_MS)
     }
   }
 
