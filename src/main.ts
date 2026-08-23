@@ -304,9 +304,17 @@ class InteractiveSphere {
   /** Per-slot record of which siblings currently carry a time notice,
    *  so clearing them while playing costs one array scan and no DOM. */
   private siblingTimeNoticed: boolean[] = []
-  /** Per-slot: a `seeked`-driven texture upload is already armed, so a
-   *  second seek this frame does not stack another listener. */
-  private siblingUploadPending: boolean[] = []
+  /**
+   * Per-slot abort handle for an armed `seeked`-driven texture upload.
+   *
+   * Non-null means one is already armed, so a second seek in the same
+   * frame does not stack another listener. Aborting both removes the
+   * listener and clears that state in one step, which matters because
+   * the two must never disagree: a slot left marked armed after its
+   * video is gone can never arm again, and would silently lose the
+   * upload-on-seek fix for the rest of the session.
+   */
+  private siblingSeekUploads: Array<AbortController | null> = []
 
   /**
    * Convenience getter returning the primary viewport's renderer.
@@ -2792,6 +2800,7 @@ class InteractiveSphere {
       for (let i = newCount; i < oldCount; i++) {
         const panel = this.panelStates[i]
         if (!panel) continue
+        this.cancelSiblingSeekUpload(i)
         if (panel.videoTexture) { panel.videoTexture.dispose() }
         if (panel.hlsService) { panel.hlsService.destroy() }
       }
@@ -3226,14 +3235,36 @@ class InteractiveSphere {
     // Still worth the immediate hint: a seek that needs no data never
     // fires `seeked`, and this is the only upload it will get.
     if (tex) tex.needsUpdate = true
-    if (!video.seeking || this.siblingUploadPending[slot]) return
+    if (!video.seeking || this.siblingSeekUploads[slot]) return
 
-    this.siblingUploadPending[slot] = true
+    const armed = new AbortController()
+    this.siblingSeekUploads[slot] = armed
     video.addEventListener('seeked', () => {
-      this.siblingUploadPending[slot] = false
+      this.siblingSeekUploads[slot] = null
+      // Looked up now rather than captured, so a dataset swap between
+      // arming and firing retargets this instead of writing through a
+      // handle that no longer belongs to the panel.
       const current = this.panelStates[slot]?.videoTexture
       if (current) current.needsUpdate = true
-    }, { once: true })
+    }, { once: true, signal: armed.signal })
+  }
+
+  /**
+   * Drop any armed upload for a slot, or for every slot.
+   *
+   * Called wherever a panel's video goes away. `seeked` never fires on a
+   * destroyed element, so without this the slot stays marked armed
+   * forever and refuses to arm again — the tour swaps sibling datasets a
+   * dozen times, so the fix would quietly stop working panel by panel.
+   */
+  private cancelSiblingSeekUpload(slot?: number): void {
+    if (slot === undefined) {
+      for (const armed of this.siblingSeekUploads) armed?.abort()
+      this.siblingSeekUploads = []
+      return
+    }
+    this.siblingSeekUploads[slot]?.abort()
+    this.siblingSeekUploads[slot] = null
   }
 
   /**
@@ -3369,7 +3400,7 @@ class InteractiveSphere {
     // on the next settle.
     this.clearSiblingTimeNotices()
     this.siblingTimeNoticed = []
-    this.siblingUploadPending = []
+    this.cancelSiblingSeekUpload()
     // And the settle detector has to forget where it was, for the reason
     // its own docs give: it reports a position once, so a new primary
     // paused at the same `currentTime` — the normal case for
@@ -3406,6 +3437,10 @@ class InteractiveSphere {
     const targetSlot = slot ?? this.viewports.getPrimaryIndex()
     const panel = this.panelStates[targetSlot]
     if (!panel) return
+
+    // Before anything else: this slot's video is about to be destroyed,
+    // and an armed listener on it would never fire.
+    this.cancelSiblingSeekUpload(targetSlot)
 
     const isPrimary = targetSlot === this.viewports.getPrimaryIndex()
     if (isPrimary) {
