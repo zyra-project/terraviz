@@ -228,6 +228,34 @@ export const MAX_PLAYBACK_RATE = 16
 export const SIBLING_MIN_READY_STATE = 1
 
 /**
+ * Drift, in seconds of video time, beyond which `correctSiblingDrift`
+ * hard-seeks a sibling instead of easing it back through a rate trim.
+ *
+ * Two measurements from a 4-globe Climate Futures session set this, both
+ * taken from the browser at 2 Hz against clips of ~29 s covering 85
+ * model years:
+ *
+ *   - **Steady-state drift ≈ 0.026 s.** What the soft rate trim holds
+ *     during normal playback. The threshold must sit well above this or
+ *     it would seek continuously — the flicker terraviz#229 fixed.
+ *   - **Post-stall offset ≈ 0.35 s.** After a scrub, a sibling holds
+ *     `HAVE_METADATA` for ~2 s while it re-buffers, and the primary
+ *     keeps playing: 2 s × a 0.168 playback rate lands almost exactly
+ *     there. The threshold must sit below this so it snaps out in one
+ *     frame instead of being trimmed away.
+ *
+ * At 0.15 s the margins are ~5.8x above the first and ~2.3x below the
+ * second. The previous 0.5 s cleared the first comfortably but sat
+ * *above* the second, so a post-scrub offset was left to the trim — and
+ * the trim closes 0.35 s at roughly 0.029 s per second, which is about
+ * twelve seconds of visibly staggered globes after every scrub.
+ *
+ * Lives here rather than in `main.ts` so the value can be tested against
+ * those two numbers directly, next to the control law it feeds.
+ */
+export const SIBLING_HARD_SEEK_THRESHOLD_S = 0.15
+
+/**
  * Soft-sync controller gains for in-range siblings. Small drift is
  * corrected by gently trimming `playbackRate` rather than seeking —
  * a `currentTime` write on a *playing* video forces a decoder seek
