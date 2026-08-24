@@ -917,3 +917,86 @@ describe('Tools menu specular preset radio', () => {
     expect(last.value_class).toBe('comfortable')
   })
 })
+
+// ---------------------------------------------------------------------------
+// The four-globe button on a phone (terraviz#230)
+//
+// The pure cap in `deviceCapability` is tested there. What these cover
+// is the wiring: that the picker actually asks for the budget, and that
+// the resulting control is both unavailable *and* still reachable. Every
+// other test in this file runs at the default desktop size, where the
+// gate is invisible — so without these, disconnecting it would leave the
+// suite green while the crash path reopened.
+// ---------------------------------------------------------------------------
+
+describe('tools menu four-globe gate', () => {
+  const spies: Array<{ mockRestore(): void }> = []
+
+  function stubViewport(width: number, height: number): void {
+    spies.push(vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(width))
+    spies.push(vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(height))
+  }
+
+  afterEach(() => {
+    for (const s of spies.splice(0)) s.mockRestore()
+  })
+
+  it('marks the button unavailable on a portrait phone', () => {
+    stubViewport(393, 852)
+    const vm = makeViewports(1)
+    initToolsMenu(vm as any, { getCurrentDataset: () => null })
+
+    const btn = document.getElementById('tools-menu-layout-4')!
+    expect(btn.getAttribute('aria-disabled')).toBe('true')
+  })
+
+  it('marks it unavailable on that phone rotated', () => {
+    // Landscape is the case a width-only gate missed: 852px reads as a
+    // desktop, and the button would offer the layout that crashes it.
+    stubViewport(852, 393)
+    const vm = makeViewports(1)
+    initToolsMenu(vm as any, { getCurrentDataset: () => null })
+
+    expect(document.getElementById('tools-menu-layout-4')!.getAttribute('aria-disabled')).toBe('true')
+  })
+
+  it('keeps the unavailable button focusable and labelled with the reason', () => {
+    // `aria-disabled` rather than `disabled` precisely so this holds: a
+    // native disabled button leaves the tab order, taking the only
+    // explanation of why four globes are missing with it.
+    stubViewport(393, 852)
+    const vm = makeViewports(1)
+    initToolsMenu(vm as any, { getCurrentDataset: () => null })
+
+    const btn = document.getElementById('tools-menu-layout-4') as HTMLButtonElement
+    expect(btn.hasAttribute('disabled')).toBe(false)
+    const label = btn.getAttribute('aria-label')
+    expect(label).toBeTruthy()
+    expect(label).not.toBe(document.getElementById('tools-menu-layout-1')!.getAttribute('title'))
+  })
+
+  it('refuses the click instead of requesting four panels', () => {
+    stubViewport(393, 852)
+    const vm = makeViewports(1)
+    const onSetLayout = vi.fn()
+    initToolsMenu(vm as any, { onSetLayout, getCurrentDataset: () => null })
+
+    const btn = document.getElementById('tools-menu-layout-4') as HTMLButtonElement
+    btn.click()
+
+    expect(onSetLayout).not.toHaveBeenCalled()
+    expect(btn.classList.contains('active')).toBe(false)
+  })
+
+  it('leaves the button available on a desktop', () => {
+    stubViewport(1440, 900)
+    const vm = makeViewports(1)
+    const onSetLayout = vi.fn()
+    initToolsMenu(vm as any, { onSetLayout, getCurrentDataset: () => null })
+
+    const btn = document.getElementById('tools-menu-layout-4') as HTMLButtonElement
+    expect(btn.hasAttribute('aria-disabled')).toBe(false)
+    btn.click()
+    expect(onSetLayout).toHaveBeenCalledWith('4')
+  })
+})
