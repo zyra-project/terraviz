@@ -14,7 +14,7 @@ import './styles/index.css'
 
 import { HLSService } from './services/hlsService'
 import { dataService, PreviewFetchError } from './services/dataService'
-import { formatDate, videoTimeToDate, dateToVideoTime, computeSiblingSyncCorrection, SIBLING_MIN_READY_STATE, SIBLING_HARD_SEEK_THRESHOLD_S, verifySiblingTime, shownFrameTime, isSubDailyPeriod, getSunPosition, inferDisplayInterval } from './utils/time'
+import { formatDate, videoTimeToDate, dateToVideoTime, computeSiblingSyncCorrection, SIBLING_MIN_READY_STATE, SIBLING_HARD_SEEK_THRESHOLD_S, SIBLING_SEEK_EPS_S, verifySiblingTime, shownFrameTime, isSubDailyPeriod, getSunPosition, inferDisplayInterval } from './utils/time'
 import { logger } from './utils/logger'
 import type { AppState, VideoTextureHandle, TourFile, Dataset } from './types'
 
@@ -3053,7 +3053,7 @@ class InteractiveSphere {
 
           if (position === 'inside') {
             this.viewports.setOutOfRange(i, false)
-            sibVideo.currentTime = targetTime
+            this.alignSiblingTo(i, sibVideo, targetTime)
             if (mirrorPlayState) {
               if (primaryVideo.paused && !sibVideo.paused) {
                 sibVideo.pause()
@@ -3063,7 +3063,7 @@ class InteractiveSphere {
             }
           } else {
             this.viewports.setOutOfRange(i, true)
-            sibVideo.currentTime = targetTime
+            this.alignSiblingTo(i, sibVideo, targetTime)
             if (!sibVideo.paused) sibVideo.pause()
           }
         } else {
@@ -3214,6 +3214,34 @@ class InteractiveSphere {
         if (!sibVideo.paused) sibVideo.pause()
       }
     }
+  }
+
+  /**
+   * Move a sibling to a target position — but only if it is not already
+   * there.
+   *
+   * A seek is expensive in a way the old unconditional write assumed it
+   * was not. Browser capture of a 4-globe session: four panels already
+   * aligned at 0.5820 of their duration, pressing play seeked the three
+   * siblings to 0.5822 — a fifth of one frame — and left all three at
+   * `HAVE_METADATA` for five seconds, frozen on their previous frame
+   * while the primary played on. Every play, pause and scrub was paying
+   * that, because `seekSiblingsToDate` wrote `currentTime` whether or
+   * not it changed anything.
+   *
+   * Within {@link SIBLING_SEEK_EPS_S} the panel is on the same frame it
+   * would seek to, so the seek is skipped — but the texture is still
+   * nudged, since being on the right frame and *showing* it are
+   * different claims, and the second is the one that keeps failing.
+   */
+  private alignSiblingTo(slot: number, video: HTMLVideoElement, targetTime: number): void {
+    if (Math.abs(video.currentTime - targetTime) <= SIBLING_SEEK_EPS_S) {
+      const tex = this.panelStates[slot]?.videoTexture
+      if (tex) tex.needsUpdate = true
+      return
+    }
+    video.currentTime = targetTime
+    this.uploadSiblingFrameOnSeek(slot, video)
   }
 
   /**
