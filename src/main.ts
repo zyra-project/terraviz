@@ -2943,6 +2943,19 @@ class InteractiveSphere {
     if (!panel) return
     panel.hlsService = result.hlsService
     panel.videoTexture = result.videoTexture
+
+    // A stream that dies after load used to say nothing at all, which
+    // left this panel holding a frame for good while the shared time
+    // label went on asserting a moment for it. Clear any stale mark
+    // first: this slot may be being reused by a new dataset.
+    this.viewports.setPanelStreamNotice(slot, false)
+    result.hlsService.onFatalError((error) => {
+      // Guard against a late callback for a dataset this slot no
+      // longer holds — the tour swaps sibling datasets repeatedly.
+      if (this.panelStates[slot]?.hlsService !== result.hlsService) return
+      logger.error(`[App] Panel ${slot} stream failed terminally: ${error.type}/${error.details}`)
+      this.viewports.setPanelStreamNotice(slot, true)
+    })
   }
 
   /**
@@ -3532,6 +3545,9 @@ class InteractiveSphere {
       panel.hlsService.destroy()
       panel.hlsService = null
     }
+    // The notice described a stream that no longer exists. `destroy()`
+    // above already dropped the handler, so nothing can re-raise it.
+    this.viewports.setPanelStreamNotice(targetSlot, false)
 
     if (isPrimary) {
       this.appState.isPlaying = false

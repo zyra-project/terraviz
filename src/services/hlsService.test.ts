@@ -4,17 +4,44 @@ import { HLSService } from './hlsService'
 // ---------------------------------------------------------------------------
 // Mock hls.js — we test HLSService logic, not the HLS library itself
 // ---------------------------------------------------------------------------
+// `on` records its handlers rather than discarding them, so a test can
+// drive the real event order — MANIFEST_PARSED (which settles the load
+// promise) and only then ERROR — which is the whole subject below.
+const hlsMock = vi.hoisted(() => ({
+  handlers: new Map<string, (e: string, d: unknown) => void>(),
+  instance: null as null | { startLoad: ReturnType<typeof vi.fn>; recoverMediaError: ReturnType<typeof vi.fn> },
+  reset(): void {
+    this.handlers.clear()
+    this.instance = null
+  },
+  fire(event: string, data?: unknown): void {
+    this.handlers.get(event)?.(event, data)
+  },
+}))
+
 vi.mock('hls.js', () => {
   const MockHls = Object.assign(
-    vi.fn().mockImplementation(() => ({
-      loadSource: vi.fn(),
-      attachMedia: vi.fn(),
-      destroy: vi.fn(),
-      on: vi.fn(),
-      levels: [],
-      startLoad: vi.fn(),
-      recoverMediaError: vi.fn(),
-    })),
+    // A `function` expression, not an arrow: this mock is constructed
+    // with `new`, and an arrow has no [[Construct]]. No test reached
+    // this path before, so the original arrow was never exercised.
+    vi.fn(function () {
+      const inst = {
+        loadSource: vi.fn(),
+        attachMedia: vi.fn(),
+        destroy: vi.fn(),
+        on: vi.fn((event: string, cb: (e: string, d: unknown) => void) => {
+          hlsMock.handlers.set(event, cb)
+        }),
+        levels: [],
+        currentLevel: 0,
+        autoLevelCapping: -1,
+        audioTracks: [],
+        startLoad: vi.fn(),
+        recoverMediaError: vi.fn(),
+      }
+      hlsMock.instance = inst
+      return inst
+    }),
     {
       isSupported: vi.fn().mockReturnValue(true),
       Events: {
@@ -141,5 +168,373 @@ describe('HLSService.loadStream — unsupported browser', () => {
     // canPlayType returns '' for mpegurl in happy-dom, triggering the else branch
     await expect(svc.loadStream('https://example.com/stream.m3u8', video))
       .rejects.toThrow('HLS is not supported')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Fatal errors after the load promise has settled
+//
+// `loadStream` resolves on MANIFEST_PARSED, which fires long before
+// playback. Fatal errors after that were rejecting a promise nobody was
+// holding — a silent no-op — so a stream that died mid-playback spent
+// its retries and went quiet. These pin the two halves: before the
+// promise settles it still rejects (the progressive-MP4 fallback in
+// `datasetLoader` depends on that), and after, the failure reaches a
+// handler instead of vanishing.
+// ---------------------------------------------------------------------------
+
+describe('HLSService fatal errors after load', () => {
+  const NETWORK = { fatal: true, type: 'networkError', details: 'fragLoadError' }
+  const MEDIA = { fatal: true, type: 'mediaError', details: 'bufferStalledError' }
+
+  beforeEach(async () => {
+    hlsMock.reset()
+    const { default: Hls } = await import('hls.js')
+    vi.mocked(Hls.isSupported).mockReturnValue(true)
+  })
+
+  /** Load a stream and settle it, returning the service and the load promise. */
+  function loadAndSettle(svc: HLSService): Promise<void> {
+    const video = document.createElement('video')
+    const p = svc.loadStream('https://example.com/s.m3u8', video)
+    hlsMock.fire('hlsManifestParsed', { levels: [] })
+    return p
+  }
+
+  it('reports a post-load fatal error to the handler once retries are spent', async () => {
+    const svc = new HLSService()
+    const seen: unknown[] = []
+    svc.onFatalError((e) => seen.push(e))
+    await loadAndSettle(svc)
+
+    // Three recoveries, then the failure is terminal.
+    for (let i = 0; i < 4; i++) hlsMock.fire('hlsError', NETWORK)
+
+    expect(hlsMock.instance?.startLoad).toHaveBeenCalledTimes(3)
+    expect(seen).toEqual([{ type: 'networkError', details: 'fragLoadError' }])
+  })
+
+  it('stays silent while retries remain', async () => {
+    const svc = new HLSService()
+    const seen: unknown[] = []
+    svc.onFatalError((e) => seen.push(e))
+    await loadAndSettle(svc)
+
+    for (let i = 0; i < 3; i++) hlsMock.fire('hlsError', NETWORK)
+
+    // Recovery is in progress — not something to report yet.
+    expect(hlsMock.instance?.startLoad).toHaveBeenCalledTimes(3)
+    expect(seen).toEqual([])
+  })
+
+  it('reports a terminal media error too', async () => {
+    const svc = new HLSService()
+    const seen: unknown[] = []
+    svc.onFatalError((e) => seen.push(e))
+    await loadAndSettle(svc)
+
+    for (let i = 0; i < 4; i++) hlsMock.fire('hlsError', MEDIA)
+
+    expect(hlsMock.instance?.recoverMediaError).toHaveBeenCalledTimes(3)
+    expect(seen).toEqual([{ type: 'mediaError', details: 'bufferStalledError' }])
+  })
+
+  it('still rejects when the failure lands before the promise settles', async () => {
+    // The load-time contract `datasetLoader`'s MP4 fallback rests on.
+    const svc = new HLSService()
+    const seen: unknown[] = []
+    svc.onFatalError((e) => seen.push(e))
+
+    const video = document.createElement('video')
+    const p = svc.loadStream('https://example.com/s.m3u8', video)
+    for (let i = 0; i < 4; i++) hlsMock.fire('hlsError', NETWORK)
+
+    await expect(p).rejects.toThrow('HLS network error after 3 retries')
+    // Rejecting *is* the report at this point; it must not double up.
+    expect(seen).toEqual([])
+  })
+
+  it('does not report a stream failure to a disposed panel', async () => {
+    // `destroy()` calls `video.load()`, which can itself fire `error`.
+    const svc = new HLSService()
+    const seen: unknown[] = []
+    svc.onFatalError((e) => seen.push(e))
+    await loadAndSettle(svc)
+
+    svc.destroy()
+    for (let i = 0; i < 4; i++) hlsMock.fire('hlsError', NETWORK)
+
+    expect(seen).toEqual([])
+  })
+
+  it('keeps reporting later failures, not just the first', async () => {
+    // A panel that recovers and dies again is still a dead panel.
+    const svc = new HLSService()
+    const seen: unknown[] = []
+    svc.onFatalError((e) => seen.push(e))
+    await loadAndSettle(svc)
+
+    for (let i = 0; i < 4; i++) hlsMock.fire('hlsError', NETWORK)
+    hlsMock.fire('hlsError', NETWORK)
+
+    expect(seen).toHaveLength(2)
+  })
+
+  it('is inert when no handler is registered', async () => {
+    const svc = new HLSService()
+    await loadAndSettle(svc)
+
+    expect(() => {
+      for (let i = 0; i < 4; i++) hlsMock.fire('hlsError', NETWORK)
+    }).not.toThrow()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The handler is registered late, so a failure can precede it
+//
+// `onFatalError` cannot be called until `loadVideoDataset` returns, and
+// that is well after the load promise settles — the loader still waits
+// for `canplay` first. A stream dying on its first fragment dies inside
+// that window.
+// ---------------------------------------------------------------------------
+
+describe('HLSService fatal errors before a handler exists', () => {
+  const NETWORK = { fatal: true, type: 'networkError', details: 'fragLoadError' }
+
+  beforeEach(async () => {
+    hlsMock.reset()
+    const { default: Hls } = await import('hls.js')
+    vi.mocked(Hls.isSupported).mockReturnValue(true)
+  })
+
+  it('delivers a failure that landed before the handler was registered', async () => {
+    const svc = new HLSService()
+    const video = document.createElement('video')
+    const p = svc.loadStream('https://example.com/s.m3u8', video)
+    hlsMock.fire('hlsManifestParsed', { levels: [] })
+    await p
+
+    // The window: settled, but the caller is still awaiting `canplay`.
+    for (let i = 0; i < 4; i++) hlsMock.fire('hlsError', NETWORK)
+
+    const seen: unknown[] = []
+    svc.onFatalError((e) => seen.push(e))
+    expect(seen).toEqual([{ type: 'networkError', details: 'fragLoadError' }])
+  })
+
+  it('holds the first failure, not the last', async () => {
+    // Later terminal errors are usually cascades of the first.
+    const svc = new HLSService()
+    const video = document.createElement('video')
+    const p = svc.loadStream('https://example.com/s.m3u8', video)
+    hlsMock.fire('hlsManifestParsed', { levels: [] })
+    await p
+
+    for (let i = 0; i < 4; i++) hlsMock.fire('hlsError', NETWORK)
+    hlsMock.fire('hlsError', { fatal: true, type: 'mediaError', details: 'later' })
+
+    const seen: unknown[] = []
+    svc.onFatalError((e) => seen.push(e))
+    expect(seen).toEqual([{ type: 'networkError', details: 'fragLoadError' }])
+  })
+
+  it('delivers a held failure only once', async () => {
+    const svc = new HLSService()
+    const video = document.createElement('video')
+    const p = svc.loadStream('https://example.com/s.m3u8', video)
+    hlsMock.fire('hlsManifestParsed', { levels: [] })
+    await p
+    for (let i = 0; i < 4; i++) hlsMock.fire('hlsError', NETWORK)
+
+    svc.onFatalError(() => { /* first registration drains it */ })
+    const seen: unknown[] = []
+    svc.onFatalError((e) => seen.push(e))
+    expect(seen).toEqual([])
+  })
+
+  it('does not deliver a held failure to a disposed panel', async () => {
+    const svc = new HLSService()
+    const video = document.createElement('video')
+    const p = svc.loadStream('https://example.com/s.m3u8', video)
+    hlsMock.fire('hlsManifestParsed', { levels: [] })
+    await p
+    for (let i = 0; i < 4; i++) hlsMock.fire('hlsError', NETWORK)
+
+    svc.destroy()
+    const seen: unknown[] = []
+    svc.onFatalError((e) => seen.push(e))
+    expect(seen).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Safari's native HLS path
+//
+// A different lifecycle from hls.js: a persistent DOM listener rather
+// than a library callback. It is also the iOS path, so it carries the
+// devices least able to absorb a stream failure quietly.
+// ---------------------------------------------------------------------------
+
+describe('HLSService native HLS path', () => {
+  /** Force the native branch: hls.js unsupported, canPlayType truthy. */
+  async function nativeVideo(): Promise<HTMLVideoElement> {
+    const { default: Hls } = await import('hls.js')
+    vi.mocked(Hls.isSupported).mockReturnValue(false)
+    const video = document.createElement('video')
+    video.canPlayType = () => 'maybe'
+    return video
+  }
+
+  it('reports an error that arrives after the stream loaded', async () => {
+    const svc = new HLSService()
+    const video = await nativeVideo()
+    const p = svc.loadStream('https://example.com/s.m3u8', video)
+    video.dispatchEvent(new Event('loadedmetadata'))
+    await p
+
+    const seen: unknown[] = []
+    svc.onFatalError((e) => seen.push(e))
+    video.dispatchEvent(new Event('error'))
+
+    expect(seen).toEqual([{ type: 'native', details: 'nativeHlsError' }])
+  })
+
+  it('still rejects when the error arrives before load', async () => {
+    const svc = new HLSService()
+    const video = await nativeVideo()
+    const p = svc.loadStream('https://example.com/s.m3u8', video)
+    video.dispatchEvent(new Event('error'))
+
+    await expect(p).rejects.toThrow('Native HLS load failed')
+  })
+
+  it('keeps listening past the first error, unlike a `once` listener', async () => {
+    // The listener is deliberately not `once`: on this path it is the
+    // only report a dying stream has.
+    const svc = new HLSService()
+    const video = await nativeVideo()
+    const p = svc.loadStream('https://example.com/s.m3u8', video)
+    video.dispatchEvent(new Event('loadedmetadata'))
+    await p
+
+    const seen: unknown[] = []
+    svc.onFatalError((e) => seen.push(e))
+    video.dispatchEvent(new Event('error'))
+    video.dispatchEvent(new Event('error'))
+
+    expect(seen).toHaveLength(2)
+  })
+
+  it('goes quiet once the panel is disposed', async () => {
+    const svc = new HLSService()
+    const video = await nativeVideo()
+    const p = svc.loadStream('https://example.com/s.m3u8', video)
+    video.dispatchEvent(new Event('loadedmetadata'))
+    await p
+
+    const seen: unknown[] = []
+    svc.onFatalError((e) => seen.push(e))
+    svc.destroy()
+    video.dispatchEvent(new Event('error'))
+
+    expect(seen).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// loadDirect — the progressive MP4 a failed HLS stream falls back *to*
+// ---------------------------------------------------------------------------
+
+describe('HLSService.loadDirect', () => {
+  it('reports an error that arrives after the file loaded', async () => {
+    const svc = new HLSService()
+    const video = document.createElement('video')
+    const p = svc.loadDirect('https://example.com/v.mp4', video)
+    video.dispatchEvent(new Event('loadedmetadata'))
+    await p
+
+    const seen: unknown[] = []
+    svc.onFatalError((e) => seen.push(e))
+    video.dispatchEvent(new Event('error'))
+
+    expect(seen).toEqual([{ type: 'native', details: 'mp4ErrorAfterLoad' }])
+  })
+
+  it('still rejects when the error arrives before load', async () => {
+    const svc = new HLSService()
+    const video = document.createElement('video')
+    const p = svc.loadDirect('https://example.com/v.mp4', video)
+    video.dispatchEvent(new Event('error'))
+
+    await expect(p).rejects.toThrow('Failed to load MP4 directly')
+  })
+
+  it('holds a post-load failure until a handler arrives', async () => {
+    const svc = new HLSService()
+    const video = document.createElement('video')
+    const p = svc.loadDirect('https://example.com/v.mp4', video)
+    video.dispatchEvent(new Event('loadedmetadata'))
+    await p
+    video.dispatchEvent(new Event('error'))
+
+    const seen: unknown[] = []
+    svc.onFatalError((e) => seen.push(e))
+    expect(seen).toEqual([{ type: 'native', details: 'mp4ErrorAfterLoad' }])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// A rejected load is the caller's failure, not a later one
+//
+// `datasetLoader` catches a `loadStream` rejection and falls back to the
+// progressive MP4 through the *same* service and video, and `loadDirect`
+// does not tear the hls.js instance down. The abandoned stream keeps
+// emitting, and reporting that would condemn a healthy fallback.
+// ---------------------------------------------------------------------------
+
+describe('HLSService after a rejected load', () => {
+  const NETWORK = { fatal: true, type: 'networkError', details: 'fragLoadError' }
+
+  beforeEach(async () => {
+    hlsMock.reset()
+    const { default: Hls } = await import('hls.js')
+    vi.mocked(Hls.isSupported).mockReturnValue(true)
+  })
+
+  it('ignores later errors from a stream whose load already rejected', async () => {
+    const svc = new HLSService()
+    const video = document.createElement('video')
+    const p = svc.loadStream('https://example.com/s.m3u8', video)
+
+    // Never reaches MANIFEST_PARSED — the load fails outright.
+    for (let i = 0; i < 4; i++) hlsMock.fire('hlsError', NETWORK)
+    await expect(p).rejects.toThrow('HLS network error')
+
+    // The abandoned instance is still attached and still emitting.
+    for (let i = 0; i < 4; i++) hlsMock.fire('hlsError', NETWORK)
+
+    const seen: unknown[] = []
+    svc.onFatalError((e) => seen.push(e))
+    expect(seen).toEqual([])
+  })
+
+  it('still reports a failure of the MP4 the caller fell back to', async () => {
+    // The fallback itself dying is a real terminal failure.
+    const svc = new HLSService()
+    const video = document.createElement('video')
+    const p = svc.loadStream('https://example.com/s.m3u8', video)
+    for (let i = 0; i < 4; i++) hlsMock.fire('hlsError', NETWORK)
+    await expect(p).rejects.toThrow('HLS network error')
+
+    const direct = svc.loadDirect('https://example.com/v.mp4', video)
+    video.dispatchEvent(new Event('loadedmetadata'))
+    await direct
+
+    const seen: unknown[] = []
+    svc.onFatalError((e) => seen.push(e))
+    video.dispatchEvent(new Event('error'))
+
+    expect(seen).toEqual([{ type: 'native', details: 'mp4ErrorAfterLoad' }])
   })
 })
