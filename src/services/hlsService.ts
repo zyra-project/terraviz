@@ -142,14 +142,23 @@ export class HLSService {
       // exactly as the bare `resolve`/`reject` did; after, a failure
       // reaches the handler instead of disappearing.
       let settled = false
+      let loaded = false
       const succeed = (): void => {
         if (settled) return
         settled = true
+        loaded = true
         resolve()
       }
       const fail = (type: string, details: string, error: Error): void => {
         if (settled) {
-          this.reportFatal({ type, details })
+          // Only a stream that actually loaded can fail *later*. If this
+          // promise rejected, the caller owns that failure and is
+          // already handling it — `datasetLoader` falls back to the
+          // progressive MP4 through this very service and video, and
+          // `loadDirect` does not tear the hls.js instance down, so the
+          // abandoned stream goes on emitting into here. Reporting those
+          // would mark a healthy fallback as terminally failed.
+          if (loaded) this.reportFatal({ type, details })
           return
         }
         settled = true

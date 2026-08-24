@@ -483,3 +483,58 @@ describe('HLSService.loadDirect', () => {
     expect(seen).toEqual([{ type: 'native', details: 'mp4ErrorAfterLoad' }])
   })
 })
+
+// ---------------------------------------------------------------------------
+// A rejected load is the caller's failure, not a later one
+//
+// `datasetLoader` catches a `loadStream` rejection and falls back to the
+// progressive MP4 through the *same* service and video, and `loadDirect`
+// does not tear the hls.js instance down. The abandoned stream keeps
+// emitting, and reporting that would condemn a healthy fallback.
+// ---------------------------------------------------------------------------
+
+describe('HLSService after a rejected load', () => {
+  const NETWORK = { fatal: true, type: 'networkError', details: 'fragLoadError' }
+
+  beforeEach(async () => {
+    hlsMock.reset()
+    const { default: Hls } = await import('hls.js')
+    vi.mocked(Hls.isSupported).mockReturnValue(true)
+  })
+
+  it('ignores later errors from a stream whose load already rejected', async () => {
+    const svc = new HLSService()
+    const video = document.createElement('video')
+    const p = svc.loadStream('https://example.com/s.m3u8', video)
+
+    // Never reaches MANIFEST_PARSED — the load fails outright.
+    for (let i = 0; i < 4; i++) hlsMock.fire('hlsError', NETWORK)
+    await expect(p).rejects.toThrow('HLS network error')
+
+    // The abandoned instance is still attached and still emitting.
+    for (let i = 0; i < 4; i++) hlsMock.fire('hlsError', NETWORK)
+
+    const seen: unknown[] = []
+    svc.onFatalError((e) => seen.push(e))
+    expect(seen).toEqual([])
+  })
+
+  it('still reports a failure of the MP4 the caller fell back to', async () => {
+    // The fallback itself dying is a real terminal failure.
+    const svc = new HLSService()
+    const video = document.createElement('video')
+    const p = svc.loadStream('https://example.com/s.m3u8', video)
+    for (let i = 0; i < 4; i++) hlsMock.fire('hlsError', NETWORK)
+    await expect(p).rejects.toThrow('HLS network error')
+
+    const direct = svc.loadDirect('https://example.com/v.mp4', video)
+    video.dispatchEvent(new Event('loadedmetadata'))
+    await direct
+
+    const seen: unknown[] = []
+    svc.onFatalError((e) => seen.push(e))
+    video.dispatchEvent(new Event('error'))
+
+    expect(seen).toEqual([{ type: 'native', details: 'mp4ErrorAfterLoad' }])
+  })
+})
