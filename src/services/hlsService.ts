@@ -47,6 +47,7 @@ export class HLSService {
   private hls: Hls | null = null
   video: HTMLVideoElement | null = null
   private fatalErrorHandler: ((error: HlsFatalError) => void) | null = null
+  private pendingFatalError: HlsFatalError | null = null
 
   /**
    * Register a handler for fatal errors that arrive after the stream
@@ -66,6 +67,33 @@ export class HLSService {
    */
   onFatalError(handler: ((error: HlsFatalError) => void) | null): void {
     this.fatalErrorHandler = handler
+    const pending = this.pendingFatalError
+    if (handler && pending) {
+      this.pendingFatalError = null
+      handler(pending)
+    }
+  }
+
+  /**
+   * Deliver a terminal failure, or hold it until someone is listening.
+   *
+   * The handler cannot be registered until `loadVideoDataset` returns,
+   * and that is well after this promise settles: the loader still waits
+   * for `canplay` first. A stream that dies on its first fragment dies
+   * squarely inside that window — and because `canplay` then never
+   * fires, the load also surfaces as a generic timeout rather than the
+   * failure that caused it. Dropping the error there would reproduce
+   * the exact bug this seam exists to close, just in a smaller window.
+   *
+   * The first terminal error is the one held: later ones are usually
+   * cascades of it, and the first is what a reader needs.
+   */
+  private reportFatal(error: HlsFatalError): void {
+    if (this.fatalErrorHandler) {
+      this.fatalErrorHandler(error)
+      return
+    }
+    this.pendingFatalError ??= error
   }
 
   /**
@@ -121,7 +149,7 @@ export class HLSService {
       }
       const fail = (type: string, details: string, error: Error): void => {
         if (settled) {
-          this.fatalErrorHandler?.({ type, details })
+          this.reportFatal({ type, details })
           return
         }
         settled = true
@@ -248,7 +276,7 @@ export class HLSService {
         if (settled) {
           logger.warn('[HLS] Direct MP4 failed after load')
           reportError('hls', new Error('progressive: mp4ErrorAfterLoad'))
-          this.fatalErrorHandler?.({ type: 'native', details: 'mp4ErrorAfterLoad' })
+          this.reportFatal({ type: 'native', details: 'mp4ErrorAfterLoad' })
           return
         }
         settled = true
@@ -328,6 +356,7 @@ export class HLSService {
     // the native paths keep their listener armed on purpose. A panel
     // being disposed must not be told its stream failed.
     this.fatalErrorHandler = null
+    this.pendingFatalError = null
     if (this.hls) {
       this.hls.destroy()
       this.hls = null
