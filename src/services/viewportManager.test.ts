@@ -809,3 +809,75 @@ describe('ViewportManager panel budget', () => {
     vm2.dispose()
   })
 })
+
+// ---------------------------------------------------------------------------
+// Panel notices — a failed stream outranks a time mismatch
+// ---------------------------------------------------------------------------
+
+describe('ViewportManager panel notices', () => {
+  it('shows the stream notice in place of a time mismatch', () => {
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '2h')
+
+    vm.setPanelTimeNotice(1, 'Aug 5, 2026')
+    const notice = grid.querySelectorAll('.map-viewport')[1].querySelector('.panel-time-notice')!
+    expect(notice.textContent).toContain('Aug 5, 2026')
+
+    // The failure explains the mismatch; showing the symptom over the
+    // cause would be a downgrade.
+    vm.setPanelStreamNotice(1, true)
+    expect(notice.textContent).not.toContain('Aug 5, 2026')
+    expect(notice.classList.contains('hidden')).toBe(false)
+    vm.dispose()
+  })
+
+  it('keeps the stream notice when the time notice is cleared', () => {
+    // A dead stream does not come back to life because the transport moved.
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '2h')
+
+    vm.setPanelStreamNotice(1, true)
+    vm.setPanelTimeNotice(1, null)
+
+    const notice = grid.querySelectorAll('.map-viewport')[1].querySelector('.panel-time-notice')!
+    expect(notice.classList.contains('hidden')).toBe(false)
+    vm.dispose()
+  })
+
+  it('falls back to the time mismatch once the stream notice clears', () => {
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '2h')
+
+    vm.setPanelTimeNotice(1, 'Aug 5, 2026')
+    vm.setPanelStreamNotice(1, true)
+    vm.setPanelStreamNotice(1, false)
+
+    const notice = grid.querySelectorAll('.map-viewport')[1].querySelector('.panel-time-notice')!
+    expect(notice.textContent).toContain('Aug 5, 2026')
+    vm.dispose()
+  })
+
+  it('hides the notice when neither cause is active', () => {
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '2h')
+
+    vm.setPanelStreamNotice(1, true)
+    vm.setPanelStreamNotice(1, false)
+
+    const notice = grid.querySelectorAll('.map-viewport')[1].querySelector('.panel-time-notice')!
+    expect(notice.classList.contains('hidden')).toBe(true)
+    vm.dispose()
+  })
+
+  it('is inert for a slot that does not exist', () => {
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '1')
+    expect(() => vm.setPanelStreamNotice(3, true)).not.toThrow()
+    vm.dispose()
+  })
+})

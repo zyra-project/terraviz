@@ -133,6 +133,10 @@ interface Viewport {
   /** Floating "this panel is not on the labelled date" notice —
    *  lazily created the first time a panel needs one. */
   timeNotice: HTMLDivElement | null
+  /** Date this panel is actually showing, when it contradicts the label. */
+  noticeDate: string | null
+  /** True once this panel's stream has failed terminally. */
+  streamFailed: boolean
   /** Floating per-panel colorbar for data-encoded datasets. Replaced
    *  wholesale rather than mutated, because a display change alters the
    *  gradient, the ticks and the accessible name together. */
@@ -356,8 +360,44 @@ export class ViewportManager {
   setPanelTimeNotice(slot: number, shownDate: string | null): void {
     const vp = this.viewports[slot]
     if (!vp) return
+    vp.noticeDate = shownDate
+    this.renderPanelNotice(slot)
+  }
 
-    if (!shownDate) {
+  /**
+   * Mark a panel whose stream has failed terminally.
+   *
+   * Distinct from the time notice because the cause is knowable and
+   * permanent: the panel is not merely behind the label, it has stopped
+   * and will not catch up on its own.
+   */
+  setPanelStreamNotice(slot: number, failed: boolean): void {
+    const vp = this.viewports[slot]
+    if (!vp) return
+    vp.streamFailed = failed
+    this.renderPanelNotice(slot)
+  }
+
+  /**
+   * Paint whichever notice this panel has earned.
+   *
+   * A failed stream outranks a time mismatch. Both describe the same
+   * observable — this panel is not showing the moment the shared label
+   * claims — but the failure says *why*, and unlike a mismatch it will
+   * not resolve on the next frame. Showing the weaker one on top of it
+   * would replace an explanation with a symptom.
+   */
+  private renderPanelNotice(slot: number): void {
+    const vp = this.viewports[slot]
+    if (!vp) return
+
+    const text = vp.streamFailed
+      ? t('viewport.panel.streamFailed')
+      : vp.noticeDate
+        ? t('viewport.panel.timeMismatch', { date: vp.noticeDate })
+        : null
+
+    if (!text) {
       if (vp.timeNotice) vp.timeNotice.classList.add('hidden')
       return
     }
@@ -371,7 +411,6 @@ export class ViewportManager {
       vp.container.appendChild(el)
       vp.timeNotice = el
     }
-    const text = t('viewport.panel.timeMismatch', { date: shownDate })
     if (vp.timeNotice.textContent !== text) vp.timeNotice.textContent = text
     vp.timeNotice.classList.remove('hidden')
   }
@@ -581,7 +620,7 @@ export class ViewportManager {
     const onMove = () => this.syncCameras(index)
     renderer.getMap()?.on('move', onMove)
 
-    this.viewports.push({ index, container, renderer, indicator, legend: null, colorbar: null, timeNotice: null, onMove })
+    this.viewports.push({ index, container, renderer, indicator, legend: null, colorbar: null, timeNotice: null, noticeDate: null, streamFailed: false, onMove })
   }
 
   private destroyViewport(vp: Viewport): void {

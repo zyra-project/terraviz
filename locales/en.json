@@ -1951,6 +1951,7 @@
   "tour.task.unload.handle": "Unload dataset → {handle}",
   "tour.task.unloadAll": "Unload all datasets",
   "tour.toolbar.aria": "Tour controls",
+  "viewport.panel.streamFailed": "Stopped updating",
   "viewport.panel.timeMismatch": "Showing {date}",
   "vr.controllerTooltip.grip": "Grip: exit",
   "vr.controllerTooltip.thumbstick": "Thumbstick: zoom",
