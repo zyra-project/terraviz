@@ -32,6 +32,61 @@ export const IS_MOBILE_NATIVE: boolean = (() => {
   return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
 })()
 
+/**
+ * Largest *shorter* viewport edge still treated as a phone.
+ *
+ * Classified on the smaller of the two dimensions so the answer does not
+ * change when the device rotates. Width alone leaves the crash open in
+ * landscape — the 393x852 phone from the report reads 852 wide once
+ * turned, sails past any width test, and builds four decoders anyway.
+ *
+ * 600 rather than the 768 mobile breakpoint because 768 is an iPad's
+ * *short* edge. Phones top out near 440 on the short side and tablets
+ * start around 744, so 600 sits in the gap and leaves iPads uncapped, as
+ * intended — they have not been shown to have this problem.
+ *
+ * Deliberately not {@link isMobile}, which is also true for
+ * `maxTouchPoints > 0`: a touchscreen laptop, an iPad, a Quest headset.
+ * Those have the decode headroom a phone does not.
+ */
+const PHONE_MAX_SHORT_EDGE_PX = 600
+
+/**
+ * Most simultaneous video panels a phone will hold.
+ *
+ * Measured on an iPhone 16 against the Climate Futures tour: four globes
+ * with no datasets is fine, four with *image* datasets is fine, and
+ * video dies somewhere between the second and third decoder — while
+ * still loading, before anything animates. So the ceiling is on video
+ * decoders existing, not on playback, panel count, or WebGL contexts,
+ * and there is no window in which to intervene once the layout has asked
+ * for four. See terraviz#230.
+ *
+ * Two is the largest value observed to survive.
+ */
+export const MAX_VIDEO_PANELS_PHONE = 2
+
+/** Every layout the app offers — the answer for anything not a phone. */
+export const UNCAPPED_VIDEO_PANELS = 4
+
+/**
+ * How many video panels a viewport of these dimensions may hold at once.
+ *
+ * Pure, so the policy is testable without a window. Order-independent:
+ * the same device answers the same in either orientation.
+ */
+export function maxVideoPanelsForViewport(widthPx: number, heightPx: number): number {
+  return Math.min(widthPx, heightPx) <= PHONE_MAX_SHORT_EDGE_PX
+    ? MAX_VIDEO_PANELS_PHONE
+    : UNCAPPED_VIDEO_PANELS
+}
+
+/** {@link maxVideoPanelsForViewport} for the live viewport. */
+export function maxVideoPanels(): number {
+  if (typeof window === 'undefined') return UNCAPPED_VIDEO_PANELS
+  return maxVideoPanelsForViewport(window.innerWidth, window.innerHeight)
+}
+
 interface NetworkInformation {
   effectiveType?: string
 }

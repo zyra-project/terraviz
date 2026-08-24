@@ -234,6 +234,7 @@
   "publisher.users.confirm.reject": "Confirm dialog text before an admin rejects a pending account. {name} is the account's display name — keep the placeholder verbatim.",
   "publisher.users.confirm.suspend": "Confirm dialog text before an admin suspends an active account. {name} is the account's display name — keep the placeholder verbatim.",
   "publisher.users.restricted": "Shown on the Users tab to a non-admin who reaches it directly. Explains the tab is admin-only.",
+  "tools.layout.four.unavailable": "Tooltip on the disabled four-globe button in the Tools layout picker, shown on phones. A phone cannot keep four video decoders alive, so the option is turned off there rather than crashing the tab. Keep it short — it is a button tooltip.",
   "tour.image.alt": "Alt text for tour-embedded images. Describes the image to screen-reader users; not visible text on screen.",
   "tour.legend.alt": "Alt text for tour legend images. Describes the legend; not visible text.",
   "tour.question.alt": "Alt text for tour question icons. Indicates this is a question prompt; not visible text.",

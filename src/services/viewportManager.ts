@@ -36,6 +36,7 @@ import type { ColorScaleDisplay } from './colorScaleDisplay'
 import { logger } from '../utils/logger'
 import { emit } from '../analytics'
 import { t } from '../i18n'
+import { maxVideoPanels } from '../utils/deviceCapability'
 
 /** Map the internal ViewLayout string into the bucket the analytics
  * schema understands ('1globe' / '2globes' / '4globes'). */
@@ -54,6 +55,32 @@ const PANEL_COUNT: Record<ViewLayout, number> = {
   '2h': 2,
   '2v': 2,
   '4': 4,
+}
+
+/**
+ * Reduce a requested layout to one the device can actually hold.
+ *
+ * A phone cannot keep more than {@link MAX_VIDEO_PANELS_PHONE} video
+ * decoders alive; the third one crashes the tab while it is still
+ * loading (terraviz#230). Nothing downstream can recover from that, and
+ * a tour asks for four panels without knowing what device it is on, so
+ * the request is reduced here rather than honoured and then survived.
+ *
+ * Orientation picks the two-panel variant, because it decides whether
+ * the result is usable: stacked on a portrait phone gives each globe
+ * the full width, where side-by-side would give it under 200px.
+ *
+ * Pure and exported for tests. `maxPanels` is the caller's cap so the
+ * policy stays in `deviceCapability`.
+ */
+export function clampLayoutToPanelBudget(
+  layout: ViewLayout,
+  maxPanels: number,
+  portrait: boolean,
+): ViewLayout {
+  if (PANEL_COUNT[layout] <= maxPanels) return layout
+  if (maxPanels <= 1) return '1'
+  return portrait ? '2v' : '2h'
 }
 
 /**
@@ -133,6 +160,14 @@ export class ViewportManager {
   ): void {
     this.grid = grid
     this.callbacks = callbacks
+    // Boot into what the device can hold. A deep link can name a layout
+    // (`?layout=4`) as directly as a tour can, and `setLayout`'s clamp
+    // is downstream of here.
+    initialLayout = clampLayoutToPanelBudget(
+      initialLayout,
+      maxVideoPanels(),
+      typeof window !== 'undefined' && window.innerHeight >= window.innerWidth,
+    )
     this.applyGridTemplate(initialLayout)
     this.layout = initialLayout
 
@@ -160,6 +195,20 @@ export class ViewportManager {
       logger.warn('[ViewportManager] setLayout called before init')
       return
     }
+    // What the device can hold, not what was asked for. A tour asks for
+    // four panels without knowing what it is running on, and on a phone
+    // the third video decoder crashes the tab mid-load — see
+    // `clampLayoutToPanelBudget`.
+    const requested = layout
+    layout = clampLayoutToPanelBudget(
+      layout,
+      maxVideoPanels(),
+      typeof window !== 'undefined' && window.innerHeight >= window.innerWidth,
+    )
+    if (layout !== requested) {
+      logger.info(`[ViewportManager] Layout ${requested} reduced to ${layout} for this device`)
+    }
+
     if (layout === this.layout) return
 
     const targetCount = PANEL_COUNT[layout]

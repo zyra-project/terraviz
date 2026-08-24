@@ -1799,6 +1799,7 @@
   "tools.language.aria": "Choose language",
   "tools.layout.aria": "Globe layout",
   "tools.layout.four": "Four globes in a grid",
+  "tools.layout.four.unavailable": "Four globes need a larger screen",
   "tools.layout.single": "Single globe",
   "tools.layout.twoHorizontal": "Two globes side-by-side",
   "tools.layout.twoVertical": "Two globes stacked",

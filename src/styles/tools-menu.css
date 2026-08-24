@@ -376,6 +376,20 @@
     border-color: var(--color-accent);
     background: var(--accent-o12);
 }
+/* Unavailable on this device — a phone cannot hold four video decoders
+   (terraviz#230). Marked with aria-disabled rather than the native
+   attribute so it keeps its place in the tab order and a keyboard or
+   screen-reader user can still reach the explanation on it. That means
+   styling the state here rather than getting :disabled for free. */
+.tools-menu-layout-btn[aria-disabled="true"] {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+.tools-menu-layout-btn[aria-disabled="true"]:hover {
+    background: var(--color-surface-alt);
+    color: #ccc;
+    border-color: var(--white-o10);
+}
 .tools-menu-layout-btn:focus-visible {
     outline: 2px solid var(--accent-o70);
     outline-offset: 2px;
