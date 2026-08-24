@@ -16,6 +16,19 @@ export interface VideoProxyFile {
   link: string
 }
 
+/**
+ * A fatal stream error that arrived *after* the stream had loaded.
+ *
+ * `type` is hls.js's error type (`networkError`, `mediaError`) on the
+ * MSE path, or `native` where the browser's own HLS/progressive
+ * pipeline reported it and no finer classification exists.
+ */
+export interface HlsFatalError {
+  type: string
+  /** hls.js error details (e.g. `fragLoadError`), or a short tag. */
+  details: string
+}
+
 export interface VideoProxyResponse {
   id: string
   title: string
@@ -33,6 +46,55 @@ const MAX_ERROR_RETRIES = 3
 export class HLSService {
   private hls: Hls | null = null
   video: HTMLVideoElement | null = null
+  private fatalErrorHandler: ((error: HlsFatalError) => void) | null = null
+  private pendingFatalError: HlsFatalError | null = null
+
+  /**
+   * Register a handler for fatal errors that arrive after the stream
+   * has already loaded.
+   *
+   * `loadStream` resolves on `MANIFEST_PARSED`, which fires long before
+   * playback. Every fatal error after that point was calling `reject`
+   * on a promise that had already settled — a no-op — so a stream that
+   * died mid-playback spent its retry budget and then went quiet. hls.js
+   * stops loading at that point, and because a seek reports its
+   * *target* through `currentTime` the moment it is written, the panel
+   * is left showing a frame that will never advance behind a clock that
+   * reads correct. Nothing downstream could see it.
+   *
+   * Errors *before* the promise settles keep rejecting, so the
+   * progressive-MP4 fallback in `datasetLoader` is untouched.
+   */
+  onFatalError(handler: ((error: HlsFatalError) => void) | null): void {
+    this.fatalErrorHandler = handler
+    const pending = this.pendingFatalError
+    if (handler && pending) {
+      this.pendingFatalError = null
+      handler(pending)
+    }
+  }
+
+  /**
+   * Deliver a terminal failure, or hold it until someone is listening.
+   *
+   * The handler cannot be registered until `loadVideoDataset` returns,
+   * and that is well after this promise settles: the loader still waits
+   * for `canplay` first. A stream that dies on its first fragment dies
+   * squarely inside that window — and because `canplay` then never
+   * fires, the load also surfaces as a generic timeout rather than the
+   * failure that caused it. Dropping the error there would reproduce
+   * the exact bug this seam exists to close, just in a smaller window.
+   *
+   * The first terminal error is the one held: later ones are usually
+   * cascades of it, and the first is what a reader needs.
+   */
+  private reportFatal(error: HlsFatalError): void {
+    if (this.fatalErrorHandler) {
+      this.fatalErrorHandler(error)
+      return
+    }
+    this.pendingFatalError ??= error
+  }
 
   /**
    * Fetch HLS manifest and metadata from the video proxy
@@ -74,6 +136,35 @@ export class HLSService {
    */
   loadStream(hlsUrl: string, video: HTMLVideoElement, mobile = false): Promise<void> {
     return new Promise((resolve, reject) => {
+      // This promise settles on `MANIFEST_PARSED`, so anything that
+      // fails later has no caller left to reject to. Route every
+      // outcome through these: before the promise settles they behave
+      // exactly as the bare `resolve`/`reject` did; after, a failure
+      // reaches the handler instead of disappearing.
+      let settled = false
+      let loaded = false
+      const succeed = (): void => {
+        if (settled) return
+        settled = true
+        loaded = true
+        resolve()
+      }
+      const fail = (type: string, details: string, error: Error): void => {
+        if (settled) {
+          // Only a stream that actually loaded can fail *later*. If this
+          // promise rejected, the caller owns that failure and is
+          // already handling it — `datasetLoader` falls back to the
+          // progressive MP4 through this very service and video, and
+          // `loadDirect` does not tear the hls.js instance down, so the
+          // abandoned stream goes on emitting into here. Reporting those
+          // would mark a healthy fallback as terminally failed.
+          if (loaded) this.reportFatal({ type, details })
+          return
+        }
+        settled = true
+        reject(error)
+      }
+
       // Clean up previous HLS instance
       if (this.hls) {
         this.hls.destroy()
@@ -114,7 +205,7 @@ export class HLSService {
             logger.info(`[HLS] Mobile ABR capped at level ${cap} (${this.hls!.levels[cap].width}x${this.hls!.levels[cap].height}) for screen ${maxScreenDim}px`)
           }
 
-          resolve()
+          succeed()
         })
 
         this.hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
@@ -135,7 +226,8 @@ export class HLSService {
                 networkRecoveries++
                 this.hls?.startLoad()
               } else {
-                reject(new Error(`HLS network error after ${MAX_RECOVERIES} retries: ${data.details}`))
+                fail(data.type, data.details,
+                  new Error(`HLS network error after ${MAX_RECOVERIES} retries: ${data.details}`))
               }
             } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
               if (mediaRecoveries < MAX_RECOVERIES) {
@@ -149,20 +241,26 @@ export class HLSService {
                 }
                 this.hls?.recoverMediaError()
               } else {
-                reject(new Error(`HLS media error after ${MAX_RECOVERIES} retries: ${data.details}`))
+                fail(data.type, data.details,
+                  new Error(`HLS media error after ${MAX_RECOVERIES} retries: ${data.details}`))
               }
             } else {
-              reject(new Error(`HLS fatal error: ${data.details}`))
+              fail(data.type, data.details, new Error(`HLS fatal error: ${data.details}`))
             }
           }
         })
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
         // Safari native HLS support
         video.src = hlsUrl
-        video.addEventListener('loadedmetadata', () => resolve(), { once: true })
-        video.addEventListener('error', () => reject(new Error('Native HLS load failed')), { once: true })
+        video.addEventListener('loadedmetadata', () => succeed(), { once: true })
+        // Deliberately not `once`: on this path the same listener is the
+        // only report of a stream that dies during playback, which is
+        // the case this whole seam exists for. `destroy()` drops the
+        // handler, and the element goes with it.
+        video.addEventListener('error', () => fail('native', 'nativeHlsError',
+          new Error('Native HLS load failed')))
       } else {
-        reject(new Error('HLS is not supported in this browser'))
+        fail('unsupported', 'hlsUnsupported', new Error('HLS is not supported in this browser'))
       }
     })
   }
@@ -172,14 +270,27 @@ export class HLSService {
    */
   loadDirect(mp4Url: string, video: HTMLVideoElement): Promise<void> {
     return new Promise((resolve, reject) => {
+      // Same settle-once shape as `loadStream`, for the same reason:
+      // this is the path a failed HLS stream falls back *to*, so it
+      // dying quietly after load leaves a panel with nothing left.
+      let settled = false
       video.src = mp4Url
       video.addEventListener('loadedmetadata', () => {
         logger.info('[HLS] Direct MP4 loaded, duration:', video.duration)
+        if (settled) return
+        settled = true
         resolve()
       }, { once: true })
       video.addEventListener('error', () => {
+        if (settled) {
+          logger.warn('[HLS] Direct MP4 failed after load')
+          reportError('hls', new Error('progressive: mp4ErrorAfterLoad'))
+          this.reportFatal({ type: 'native', details: 'mp4ErrorAfterLoad' })
+          return
+        }
+        settled = true
         reject(new Error('Failed to load MP4 directly'))
-      }, { once: true })
+      })
     })
   }
 
@@ -250,6 +361,11 @@ export class HLSService {
 
   /** Tear down the HLS instance, stop playback, and remove the video element from the DOM. */
   destroy(): void {
+    // Before anything else: `video.load()` below can fire `error`, and
+    // the native paths keep their listener armed on purpose. A panel
+    // being disposed must not be told its stream failed.
+    this.fatalErrorHandler = null
+    this.pendingFatalError = null
     if (this.hls) {
       this.hls.destroy()
       this.hls = null

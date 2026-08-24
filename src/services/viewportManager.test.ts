@@ -96,7 +96,7 @@ vi.mock('./mapRenderer', () => ({
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import { ViewportManager } from './viewportManager'
+import { ViewportManager, clampLayoutToPanelBudget } from './viewportManager'
 import { setActiveMapRenderer } from './mapRenderer'
 
 // ---------------------------------------------------------------------------
@@ -502,6 +502,44 @@ describe('ViewportManager.dispose', () => {
 })
 
 // ---------------------------------------------------------------------------
+// clampLayoutToPanelBudget — the phone video-decode cap (terraviz#230)
+// ---------------------------------------------------------------------------
+
+describe('clampLayoutToPanelBudget', () => {
+  it('passes a layout the budget already covers straight through', () => {
+    expect(clampLayoutToPanelBudget('4', 4, false)).toBe('4')
+    expect(clampLayoutToPanelBudget('2h', 2, false)).toBe('2h')
+    expect(clampLayoutToPanelBudget('1', 2, true)).toBe('1')
+  })
+
+  it('reduces four globes to two when the budget is two', () => {
+    // The crash case: a tour asks for four without knowing the device.
+    expect(clampLayoutToPanelBudget('4', 2, true)).toBe('2v')
+    expect(clampLayoutToPanelBudget('4', 2, false)).toBe('2h')
+  })
+
+  it('stacks on a portrait phone and splits side-by-side in landscape', () => {
+    // Orientation decides whether two panels are usable at all: stacked
+    // in portrait gives each globe the full width, where side-by-side
+    // would leave it under 200px.
+    expect(clampLayoutToPanelBudget('4', 2, true)).toBe('2v')
+    expect(clampLayoutToPanelBudget('4', 2, false)).toBe('2h')
+  })
+
+  it('falls to a single globe when even two are too many', () => {
+    expect(clampLayoutToPanelBudget('4', 1, true)).toBe('1')
+    expect(clampLayoutToPanelBudget('2v', 1, false)).toBe('1')
+  })
+
+  it('never reduces a two-panel layout under a two-panel budget', () => {
+    // Both 2h and 2v cost two decoders, so neither should be rewritten
+    // into the other just because the budget is exactly two.
+    expect(clampLayoutToPanelBudget('2v', 2, false)).toBe('2v')
+    expect(clampLayoutToPanelBudget('2h', 2, true)).toBe('2h')
+  })
+})
+
+// ---------------------------------------------------------------------------
 // setPanelTimeNotice
 // ---------------------------------------------------------------------------
 
@@ -688,6 +726,158 @@ describe('ViewportManager.setPanelLegend', () => {
     vm.setAllLegendsVisible(true)
     const legend0 = grid.querySelectorAll('[data-viewport-index="0"] .panel-legend')[0] as HTMLElement
     expect(legend0.classList.contains('hidden')).toBe(false)
+    vm.dispose()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The live panel budget (terraviz#230)
+//
+// `clampLayoutToPanelBudget` above is pure and tested in isolation. These
+// cover the part that actually prevents the crash: that the manager
+// consults the budget on both entry points a four-globe request can
+// arrive through — `init` for a deep link, `setLayout` for a tour. Every
+// other test in this file runs at the default desktop size, where the
+// clamp is a no-op, so removing either call site would leave the pure
+// tests passing and the tab crashing.
+// ---------------------------------------------------------------------------
+
+describe('ViewportManager panel budget', () => {
+  const spies: Array<{ mockRestore(): void }> = []
+
+  function stubViewport(width: number, height: number): void {
+    spies.push(vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(width))
+    spies.push(vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(height))
+  }
+
+  afterEach(() => {
+    for (const s of spies.splice(0)) s.mockRestore()
+  })
+
+  it('boots a deep-linked four-globe layout as two stacked on a portrait phone', () => {
+    stubViewport(393, 852)
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '4')
+
+    expect(vm.getLayout()).toBe('2v')
+    expect(vm.getAll()).toHaveLength(2)
+    expect(grid.querySelectorAll('.map-viewport')).toHaveLength(2)
+    vm.dispose()
+  })
+
+  it('boots it as two side-by-side on the same phone rotated', () => {
+    stubViewport(852, 393)
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '4')
+
+    expect(vm.getLayout()).toBe('2h')
+    expect(vm.getAll()).toHaveLength(2)
+    vm.dispose()
+  })
+
+  it('reduces a tour four-globe request to two', () => {
+    // The reported crash path: the tour asks for four without knowing
+    // what it is running on.
+    stubViewport(393, 852)
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '1')
+    vm.setLayout('4', 'tour')
+
+    expect(vm.getLayout()).toBe('2v')
+    expect(vm.getAll()).toHaveLength(2)
+    expect(grid.querySelectorAll('.map-viewport')).toHaveLength(2)
+    vm.dispose()
+  })
+
+  it('honours four globes on a desktop through both paths', () => {
+    stubViewport(1440, 900)
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '4')
+    expect(vm.getAll()).toHaveLength(4)
+    vm.dispose()
+
+    const grid2 = makeGrid()
+    const vm2 = new ViewportManager()
+    vm2.init(grid2, '1')
+    vm2.setLayout('4', 'tour')
+    expect(vm2.getLayout()).toBe('4')
+    expect(vm2.getAll()).toHaveLength(4)
+    vm2.dispose()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Panel notices — a failed stream outranks a time mismatch
+// ---------------------------------------------------------------------------
+
+describe('ViewportManager panel notices', () => {
+  it('shows the stream notice in place of a time mismatch', () => {
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '2h')
+
+    vm.setPanelTimeNotice(1, 'Aug 5, 2026')
+    const notice = grid.querySelectorAll('.map-viewport')[1].querySelector('.panel-time-notice')!
+    expect(notice.textContent).toContain('Aug 5, 2026')
+
+    // The failure explains the mismatch; showing the symptom over the
+    // cause would be a downgrade.
+    vm.setPanelStreamNotice(1, true)
+    expect(notice.textContent).not.toContain('Aug 5, 2026')
+    expect(notice.classList.contains('hidden')).toBe(false)
+    vm.dispose()
+  })
+
+  it('keeps the stream notice when the time notice is cleared', () => {
+    // A dead stream does not come back to life because the transport moved.
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '2h')
+
+    vm.setPanelStreamNotice(1, true)
+    vm.setPanelTimeNotice(1, null)
+
+    const notice = grid.querySelectorAll('.map-viewport')[1].querySelector('.panel-time-notice')!
+    expect(notice.classList.contains('hidden')).toBe(false)
+    vm.dispose()
+  })
+
+  it('falls back to the time mismatch once the stream notice clears', () => {
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '2h')
+
+    vm.setPanelTimeNotice(1, 'Aug 5, 2026')
+    vm.setPanelStreamNotice(1, true)
+    vm.setPanelStreamNotice(1, false)
+
+    const notice = grid.querySelectorAll('.map-viewport')[1].querySelector('.panel-time-notice')!
+    expect(notice.textContent).toContain('Aug 5, 2026')
+    vm.dispose()
+  })
+
+  it('hides the notice when neither cause is active', () => {
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '2h')
+
+    vm.setPanelStreamNotice(1, true)
+    vm.setPanelStreamNotice(1, false)
+
+    const notice = grid.querySelectorAll('.map-viewport')[1].querySelector('.panel-time-notice')!
+    expect(notice.classList.contains('hidden')).toBe(true)
+    vm.dispose()
+  })
+
+  it('is inert for a slot that does not exist', () => {
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '1')
+    expect(() => vm.setPanelStreamNotice(3, true)).not.toThrow()
     vm.dispose()
   })
 })

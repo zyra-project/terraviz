@@ -13,6 +13,8 @@ import {
   MIN_PLAYBACK_RATE,
   MAX_PLAYBACK_RATE,
   SIBLING_MIN_READY_STATE,
+  SIBLING_HARD_SEEK_THRESHOLD_S,
+  SIBLING_SEEK_EPS_S,
   inferDisplayInterval,
   getSunPosition,
 } from './time'
@@ -594,6 +596,75 @@ describe('computeSiblingSyncCorrection', () => {
     expect(c.position).toBe('inside')
     expect(c.targetTime).toBeCloseTo(0, 5)
     expect(c.shouldSeek).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// SIBLING_SEEK_EPS_S — a seek not worth issuing
+// ---------------------------------------------------------------------------
+describe('SIBLING_SEEK_EPS_S', () => {
+  // From a browser capture: four panels aligned at 0.5820 of a ~29s
+  // clip, pressing play moved the siblings to 0.5822 and cost five
+  // seconds of frozen panel. That move is this many seconds of video:
+  const POINTLESS_MOVE_S = 0.0002 * 29
+  const ONE_FRAME_AT_30FPS_S = 1 / 30
+
+  it('forgives a move smaller than the one that cost five seconds', () => {
+    expect(POINTLESS_MOVE_S).toBeLessThan(SIBLING_SEEK_EPS_S)
+  })
+
+  it('stays under a frame, so a skipped seek never changes what is shown', () => {
+    // The panel must still land on the frame it would have seeked to;
+    // the epsilon buys nothing if it can straddle two frames.
+    expect(SIBLING_SEEK_EPS_S).toBeLessThan(ONE_FRAME_AT_30FPS_S)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// SIBLING_HARD_SEEK_THRESHOLD_S — pinned to two measured numbers
+// ---------------------------------------------------------------------------
+describe('SIBLING_HARD_SEEK_THRESHOLD_S', () => {
+  // Both figures come from a browser capture of a 4-globe Climate
+  // Futures session: ~29s clips over 85 model years, sampled at 2 Hz.
+  const STEADY_STATE_DRIFT_S = 0.026
+  const POST_STALL_OFFSET_S = 0.35
+
+  const start = new Date('2015-12-31T00:00:00Z')
+  const end = new Date('2100-12-31T00:00:00Z')
+  const rangeMs = end.getTime() - start.getTime()
+  const mid = () => new Date((start.getTime() + end.getTime()) / 2)
+
+  const atDrift = (driftS: number) => computeSiblingSyncCorrection({
+    date: mid(),
+    sibCurrentTime: 15 - driftS,   // behind by driftS on a 30s video
+    sibDuration: 30,
+    sibStart: start,
+    sibEnd: end,
+    primaryDuration: 30,
+    primaryRangeMs: rangeMs,
+    hardSeekThresholdS: SIBLING_HARD_SEEK_THRESHOLD_S,
+  })
+
+  it('leaves steady-state drift to the rate trim', () => {
+    // Seeking here is the per-frame flicker terraviz#229 fixed. The
+    // threshold has to stay clear of what normal playback produces.
+    const c = atDrift(STEADY_STATE_DRIFT_S)
+    expect(c.shouldSeek).toBe(false)
+    expect(c.rate).toBeGreaterThan(1)   // trimmed up to catch back up
+  })
+
+  it('snaps out the offset a post-scrub buffering stall leaves', () => {
+    // ~2s at HAVE_METADATA while the primary keeps playing. Under the
+    // old 0.5s threshold this fell to the trim, which closes it at
+    // ~0.029 s/s — about twelve seconds of staggered globes.
+    expect(atDrift(POST_STALL_OFFSET_S).shouldSeek).toBe(true)
+  })
+
+  it('keeps usable margin on both sides rather than sitting near either', () => {
+    // A threshold that merely separates the two numbers would be one
+    // slow device away from being wrong in either direction.
+    expect(SIBLING_HARD_SEEK_THRESHOLD_S).toBeGreaterThan(STEADY_STATE_DRIFT_S * 3)
+    expect(SIBLING_HARD_SEEK_THRESHOLD_S).toBeLessThan(POST_STALL_OFFSET_S / 2)
   })
 })
 
