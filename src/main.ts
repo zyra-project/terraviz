@@ -14,7 +14,7 @@ import './styles/index.css'
 
 import { HLSService } from './services/hlsService'
 import { dataService, PreviewFetchError } from './services/dataService'
-import { formatDate, videoTimeToDate, dateToVideoTime, computeSiblingSyncCorrection, SIBLING_MIN_READY_STATE, SIBLING_HARD_SEEK_THRESHOLD_S, verifySiblingTime, shownFrameTime, isSubDailyPeriod, getSunPosition, inferDisplayInterval } from './utils/time'
+import { formatDate, videoTimeToDate, dateToVideoTime, computeSiblingSyncCorrection, SIBLING_MIN_READY_STATE, SIBLING_HARD_SEEK_THRESHOLD_S, SIBLING_SEEK_EPS_S, verifySiblingTime, shownFrameTime, isSubDailyPeriod, getSunPosition, inferDisplayInterval } from './utils/time'
 import { logger } from './utils/logger'
 import type { AppState, VideoTextureHandle, TourFile, Dataset } from './types'
 
@@ -149,6 +149,16 @@ const CLOUD_TEXTURE_WEIGHT = 0.2
 const LOADING_BASE_PROGRESS = 20
 const LOADING_TEXTURE_RANGE = 70
 const LOADING_HIDE_DELAY_MS = 300
+
+/**
+ * How long to let a requested redraw land before a panel that is showing
+ * the wrong frame is reported as such.
+ *
+ * `needsUpdate` schedules a repaint, so the upload takes a frame or two.
+ * Generous next to that, and short enough to be imperceptible against
+ * the settle delay that precedes it.
+ */
+const SIBLING_REPAIR_CONFIRM_MS = 120
 
 /**
  * Root application class that boots the WebGL globe, loads datasets,
@@ -291,6 +301,19 @@ class InteractiveSphere {
   /** Per-slot record of which siblings currently carry a time notice,
    *  so clearing them while playing costs one array scan and no DOM. */
   private siblingTimeNoticed: boolean[] = []
+  /**
+   * Per-slot abort handle for an armed `seeked`-driven texture upload.
+   *
+   * Non-null means one is already armed, so a second seek in the same
+   * frame does not stack another listener. Aborting both removes the
+   * listener and clears that state in one step, which matters because
+   * the two must never disagree: a slot left marked armed after its
+   * video is gone can never arm again, and would silently lose the
+   * upload-on-seek fix for the rest of the session.
+   */
+  private siblingSeekUploads: Array<AbortController | null> = []
+  /** Pending re-check after a repair attempt — see `verifySiblingTimes`. */
+  private siblingRepairTimer: ReturnType<typeof setTimeout> | null = null
 
   /**
    * Convenience getter returning the primary viewport's renderer.
@@ -2776,6 +2799,7 @@ class InteractiveSphere {
       for (let i = newCount; i < oldCount; i++) {
         const panel = this.panelStates[i]
         if (!panel) continue
+        this.cancelSiblingSeekUpload(i)
         if (panel.videoTexture) { panel.videoTexture.dispose() }
         if (panel.hlsService) { panel.hlsService.destroy() }
       }
@@ -3029,7 +3053,7 @@ class InteractiveSphere {
 
           if (position === 'inside') {
             this.viewports.setOutOfRange(i, false)
-            sibVideo.currentTime = targetTime
+            this.alignSiblingTo(i, sibVideo, targetTime)
             if (mirrorPlayState) {
               if (primaryVideo.paused && !sibVideo.paused) {
                 sibVideo.pause()
@@ -3039,7 +3063,7 @@ class InteractiveSphere {
             }
           } else {
             this.viewports.setOutOfRange(i, true)
-            sibVideo.currentTime = targetTime
+            this.alignSiblingTo(i, sibVideo, targetTime)
             if (!sibVideo.paused) sibVideo.pause()
           }
         } else {
@@ -3053,8 +3077,7 @@ class InteractiveSphere {
           }
         }
 
-        const sibTex = sibPanel?.videoTexture
-        if (sibTex) sibTex.needsUpdate = true
+        this.uploadSiblingFrameOnSeek(i, sibVideo)
       }
     }
 
@@ -3169,8 +3192,7 @@ class InteractiveSphere {
       // it lands will still see and correct.
       if (shouldSeek && !sibVideo.seeking) {
         sibVideo.currentTime = targetTime
-        const sibTex = sibPanel?.videoTexture
-        if (sibTex) sibTex.needsUpdate = true
+        this.uploadSiblingFrameOnSeek(i, sibVideo)
       }
 
       if (position === 'inside') {
@@ -3195,6 +3217,97 @@ class InteractiveSphere {
   }
 
   /**
+   * Move a sibling to a target position — but only if it is not already
+   * there.
+   *
+   * A seek is expensive in a way the old unconditional write assumed it
+   * was not. Browser capture of a 4-globe session: four panels already
+   * aligned at 0.5820 of their duration, pressing play seeked the three
+   * siblings to 0.5822 — a fifth of one frame — and left all three at
+   * `HAVE_METADATA` for five seconds, frozen on their previous frame
+   * while the primary played on. Every play, pause and scrub was paying
+   * that, because `seekSiblingsToDate` wrote `currentTime` whether or
+   * not it changed anything.
+   *
+   * Within {@link SIBLING_SEEK_EPS_S} the panel is on the same frame it
+   * would seek to, so the seek is skipped — but the texture is still
+   * nudged, since being on the right frame and *showing* it are
+   * different claims, and the second is the one that keeps failing.
+   */
+  private alignSiblingTo(slot: number, video: HTMLVideoElement, targetTime: number): void {
+    if (Math.abs(video.currentTime - targetTime) <= SIBLING_SEEK_EPS_S) {
+      const tex = this.panelStates[slot]?.videoTexture
+      if (tex) tex.needsUpdate = true
+      return
+    }
+    video.currentTime = targetTime
+    this.uploadSiblingFrameOnSeek(slot, video)
+  }
+
+  /**
+   * Upload a sibling's frame once its seek has actually landed.
+   *
+   * Setting `needsUpdate` straight after writing `currentTime` schedules
+   * a repaint that arrives before the seek completes, so it uploads the
+   * frame the panel was *already* showing and clears the one-shot flag.
+   * The video is then paused, `!paused` is false, and the repaint
+   * heartbeat in `earthTileLayer` does not run — nothing re-uploads,
+   * ever. The panel keeps its pre-seek frame for good while its clock
+   * reads the right time, which is how a globe ends up two hours behind
+   * the label with no way back.
+   *
+   * Measured seeks complete in ~2 ms against locally buffered media,
+   * which is why this never showed up in instrumented tests; against
+   * real HLS a sibling can hold `HAVE_METADATA` for ~2 s, and the
+   * repaint wins every time.
+   *
+   * `seeked` only fires once the data is there, so the upload it arms
+   * cannot land early. The texture is looked up when the event fires
+   * rather than captured, so a dataset swap in between retargets it
+   * instead of writing through a stale handle.
+   */
+  private uploadSiblingFrameOnSeek(slot: number, video: HTMLVideoElement): void {
+    const tex = this.panelStates[slot]?.videoTexture
+    // Still worth the immediate hint: a seek that needs no data never
+    // fires `seeked`, and this is the only upload it will get.
+    if (tex) tex.needsUpdate = true
+    if (!video.seeking || this.siblingSeekUploads[slot]) return
+
+    const armed = new AbortController()
+    this.siblingSeekUploads[slot] = armed
+    video.addEventListener('seeked', () => {
+      this.siblingSeekUploads[slot] = null
+      // Looked up now rather than captured, so a dataset swap between
+      // arming and firing retargets this instead of writing through a
+      // handle that no longer belongs to the panel.
+      const current = this.panelStates[slot]?.videoTexture
+      if (current) current.needsUpdate = true
+    }, { once: true, signal: armed.signal })
+  }
+
+  /**
+   * Drop any armed upload for a slot, or for every slot.
+   *
+   * Called wherever a panel's video goes away. `seeked` never fires on a
+   * destroyed element, so without this the slot stays marked armed
+   * forever and refuses to arm again — the tour swaps sibling datasets a
+   * dozen times, so the fix would quietly stop working panel by panel.
+   */
+  private cancelSiblingSeekUpload(slot?: number): void {
+    if (slot === undefined) {
+      for (const armed of this.siblingSeekUploads) armed?.abort()
+      this.siblingSeekUploads = []
+      if (this.siblingRepairTimer !== null) {
+        clearTimeout(this.siblingRepairTimer)
+        this.siblingRepairTimer = null
+      }
+      return
+    }
+    this.siblingSeekUploads[slot]?.abort()
+    this.siblingSeekUploads[slot] = null
+  }
+
+  /**
    * Read back whether every sibling actually shows the date the shared
    * time label claims, and mark the ones that don't.
    *
@@ -3213,7 +3326,17 @@ class InteractiveSphere {
    * controller for the playhead, and a panel that cannot reach the
    * labelled moment should say so rather than silently retry.
    */
-  private verifySiblingTimes(): void {
+  private verifySiblingTimes(afterRepair = false): void {
+    if (this.siblingRepairTimer !== null) {
+      clearTimeout(this.siblingRepairTimer)
+      this.siblingRepairTimer = null
+    }
+    // A re-check that arrives after the transport moved again describes
+    // nothing; the moving-clear path owns the notices from here.
+    const primaryVideo = this.panelStates[this.viewports.getPrimaryIndex()]?.hlsService?.getVideo?.() ?? null
+    if (afterRepair && (!primaryVideo || !primaryVideo.paused || primaryVideo.seeking)) return
+
+    let repairing = false
     const labelDate = this.assertedLabelDate
     // Nothing is being asserted (no dataset, or no temporal range), so
     // there is no claim for a panel to contradict.
@@ -3262,13 +3385,39 @@ class InteractiveSphere {
         continue
       }
 
+      // The panel is showing the wrong frame. Before saying so, ask for
+      // a redraw — the overwhelmingly common cause is a texture left
+      // behind a clock that is already correct, and one upload fixes
+      // that whatever produced it. This is not the correction
+      // `verifySiblingTime`'s contract rules out: that is about seeking,
+      // which would fight the sync controller for the playhead. Nothing
+      // here moves a playhead; it repaints what the video already holds.
+      const tex = this.panelStates[i]?.videoTexture
+      if (!afterRepair && tex) {
+        tex.needsUpdate = true
+        repairing = true
+        continue
+      }
+
       const showTime = ds.period
         ? isSubDailyPeriod(ds.period)
         : (this.playback.displayInterval?.showTime ?? false)
       this.setSiblingTimeNotice(i, formatDate(verdict.shownDate, showTime))
       logger.debug(
-        `[App] Panel ${i} is ${Math.round(verdict.driftMs / 1000)}s of real time off the label`,
+        `[App] Panel ${i} is ${Math.round(verdict.driftMs / 1000)}s of real time off the label`
+        + (afterRepair ? ' and did not repaint' : ''),
       )
+    }
+
+    // Confirm the repair rather than assuming it. A notice is only
+    // earned by a panel that stayed wrong after being asked to redraw,
+    // which keeps the ribbon meaning "I could not fix this" instead of
+    // flashing up for every transient staleness.
+    if (repairing) {
+      this.siblingRepairTimer = setTimeout(() => {
+        this.siblingRepairTimer = null
+        this.verifySiblingTimes(true)
+      }, SIBLING_REPAIR_CONFIRM_MS)
     }
   }
 
@@ -3327,6 +3476,7 @@ class InteractiveSphere {
     // on the next settle.
     this.clearSiblingTimeNotices()
     this.siblingTimeNoticed = []
+    this.cancelSiblingSeekUpload()
     // And the settle detector has to forget where it was, for the reason
     // its own docs give: it reports a position once, so a new primary
     // paused at the same `currentTime` — the normal case for
@@ -3363,6 +3513,10 @@ class InteractiveSphere {
     const targetSlot = slot ?? this.viewports.getPrimaryIndex()
     const panel = this.panelStates[targetSlot]
     if (!panel) return
+
+    // Before anything else: this slot's video is about to be destroyed,
+    // and an armed listener on it would never fire.
+    this.cancelSiblingSeekUpload(targetSlot)
 
     const isPrimary = targetSlot === this.viewports.getPrimaryIndex()
     if (isPrimary) {
