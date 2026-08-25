@@ -408,6 +408,15 @@ export class HLSService {
                   logger.warn(`[HLS] Media error at held level ${pinnedLevel + 1}, dropping to ${pinnedLevel}`)
                   this.hls.nextLevel = pinnedLevel
                 } else if (this.hls && this.hls.currentLevel > 0) {
+                  // One-way, and deliberately so: nothing lifts this cap
+                  // again for the life of the instance. A device that
+                  // failed to decode a rung once will usually fail on it
+                  // again, and re-raising the ceiling on a clean recovery
+                  // would walk straight back into the same wall — each
+                  // round costing another decode failure and another
+                  // recoverMediaError, against a retry budget of
+                  // MAX_ERROR_RETRIES before the stream is given up as
+                  // dead. Ratcheting down is the cheaper mistake.
                   const safeLevel = this.hls.currentLevel - 1
                   logger.warn(`[HLS] Media error at level ${this.hls.currentLevel}, capping to ${safeLevel}`)
                   this.hls.autoLevelCapping = safeLevel
