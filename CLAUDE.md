@@ -146,7 +146,7 @@ npm run screenshots:smoke   # gating interaction tests (search, Orbit, nav)
 | `src/services/earthTileLayer.ts` | CustomLayerInterface — day/night blend, clouds, specular, sun, skybox |
 | `src/services/dataService.ts` | Fetches SOS catalog, merges enriched metadata, 1-hour cache |
 | `src/services/datasetLoader.ts` | Loads a dataset onto the globe (HLS or image); manages info panel |
-| `src/services/hlsService.ts` | HLS.js wrapper — adaptive bitrate streaming via Vimeo proxy |
+| `src/services/hlsService.ts` | HLS.js wrapper — adaptive bitrate streaming via Vimeo proxy. Also holds a rendition for short looping assets: hls.js's ABR cannot converge on a 2-3 s loop of one or two fragments (its sampler floors every measurement window at 50 ms, so a 0.2 s leading fragment can never *measure* a fast link; and its fetch-duration test weighs a level's ~1.2 s average fragment against the 0.2 s actually buffered, so every rung fails and ABR steps down a rung per playlist load). Once the asset is fully buffered nothing requests another fragment, so the floor stuck for the instance's lifetime — a 4096x2048 source played at 1440x720 on gigabit with the asset cached. `measuredBandwidthBps` reads the true transfer rate off the throwaway probe fragment and `selectRendition` picks the best rung that fits it under `autoLevelCapping`; long assets are left to ABR |
 | `src/services/docentService.ts` | Orbit orchestrator — hybrid LLM + local engine |
 | `src/services/docentContext.ts` | LLM system prompt builder, history compression, tool definition |
 | `src/services/docentEngine.ts` | Local keyword-based fallback engine |
