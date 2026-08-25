@@ -65,11 +65,11 @@ const RENDITION_BANDWIDTH_MARGIN = 0.8
  * Floor on the measurement window, in milliseconds.
  *
  * A fragment served from cache can land inside one `performance.now()`
- * tick, which would divide by zero. Clamping instead of discarding is
- * deliberate: an asset that arrives that fast is cached or on a very
- * fast link, and in both cases the top rung is the right answer. This
- * is much smaller than hls.js's own 50 ms floor, which is the bug we
- * are working around rather than a value to copy.
+ * tick, which would divide by zero. Clamped rather than discarded
+ * because a cache hit still has to produce *some* figure — but see
+ * `measuredBandwidthBps` for why that figure is not trustworthy on its
+ * own. This is much smaller than hls.js's own 50 ms floor, which is the
+ * bug we are working around rather than a value to copy.
  */
 const MIN_PROBE_WINDOW_MS = 0.5
 
@@ -95,6 +95,21 @@ export interface FragmentLoadTiming {
  * then looks unaffordable forever. Measured on a gigabit link with the
  * asset cached: hls.js recorded 7.9 Mbps where the transfer ran at
  * roughly 394 Mbps.
+ *
+ * A caveat the caller has to handle: this measures *transfer*, not
+ * network. A fragment served from the browser cache reports cache
+ * speed, and a cache hit on one rung says nothing about the link or
+ * about whether any other rung is cached. The case that matters is
+ * concrete — before this fix every visitor was pinned to the floor, so
+ * a returning viewer has the floor rung cached and nothing else. The
+ * probe hits that cache, reports hundreds of Mbps, and the top rung
+ * gets chosen over whatever the connection actually is. Measured: a
+ * cached 49 KB probe read 656 Mbps on a link running at 3 Mbps.
+ *
+ * There is no reliable way to tell a cache hit from a fast link here —
+ * the assets are cross-origin, so Resource Timing reports
+ * `transferSize: 0` either way — so the caller verifies against the
+ * first real transfer instead of trying to detect it.
  *
  * Returns null when the stats cannot support a measurement at all.
  */
@@ -343,11 +358,27 @@ export class HLSService {
         // fragment the viewer actually sees arrive at the chosen rung.
         // That keeps the whole asset at one resolution instead of
         // switching mid-loop.
-        let renditionChosen = false
-        // -1 until the handler below picks a rung.
-        let pinnedLevel = -1
+        //
+        // The probe is trusted once and then checked. It can be served
+        // from cache — and because every visitor was pinned to the floor
+        // before this fix, a returning viewer has exactly the probe's
+        // rung cached and nothing above it. A cache hit reads as
+        // hundreds of Mbps whatever the link is doing, so taking it at
+        // face value would fetch the top rung over a slow connection and
+        // stall. Measured: a cached probe read 656 Mbps on a 3 Mbps
+        // link, and playback stalled.
+        //
+        // So the first real fragment — larger, and at the held rung
+        // rather than the probe's — gets measured too, and the hold is
+        // corrected down if that transfer cannot carry it. Only
+        // downward: an upward correction would risk a second flip, and
+        // the cost of guessing low is quality rather than a stall. One
+        // correction, then the decision is final.
+        let renditionSettled = false
+        // -1 until the handler below holds a rung.
+        let heldLevel = -1
         this.hls.on(Hls.Events.FRAG_LOADED, (_event, data) => {
-          if (renditionChosen || !this.hls) return
+          if (renditionSettled || !this.hls) return
           const frag = data.frag
           // Long assets have the fragments ABR needs; leave them to it.
           const totalDuration = this.hls.levels[frag.level]?.details?.totalduration ?? 0
@@ -356,24 +387,38 @@ export class HLSService {
           const measured = measuredBandwidthBps(frag.stats)
           if (measured === null) return
 
-          const level = selectRendition(
-            this.hls.levels.map(l => l.bitrate),
-            measured,
-            this.hls.autoLevelCapping
-          )
+          const bitrates = this.hls.levels.map(l => l.bitrate)
+          const level = selectRendition(bitrates, measured, this.hls.autoLevelCapping)
           if (level < 0) return
 
-          renditionChosen = true
-          pinnedLevel = level
-          // Assigning `nextLevel` also turns hls.js's auto mode off,
-          // which is the point: there is nothing left for it to adapt
-          // to once the asset is buffered.
-          this.hls.nextLevel = level
-          const chosen = this.hls.levels[level]
-          logger.info(
-            `[HLS] Measured ${Math.round(measured / 1000)} kbps over ${frag.stats.loaded} B; ` +
-            `holding level ${level} (${chosen.width}x${chosen.height}, ${chosen.bitrate} bps)`
-          )
+          const describe = (i: number): string => {
+            const l = this.hls!.levels[i]
+            return `level ${i} (${l.width}x${l.height}, ${l.bitrate} bps)`
+          }
+          const kbps = Math.round(measured / 1000)
+
+          if (heldLevel === -1) {
+            heldLevel = level
+            // Assigning `nextLevel` also turns hls.js's auto mode off,
+            // which is the point: there is nothing left for it to adapt
+            // to once the asset is buffered.
+            this.hls.nextLevel = level
+            logger.info(`[HLS] Probe ${kbps} kbps over ${frag.stats.loaded} B; holding ${describe(level)}`)
+            return
+          }
+
+          // The confirming transfer. Whatever it says, stop here.
+          renditionSettled = true
+          if (bitrates[level] < bitrates[heldLevel]) {
+            logger.info(
+              `[HLS] Confirming transfer ${kbps} kbps over ${frag.stats.loaded} B ` +
+              `cannot carry ${describe(heldLevel)}; dropping to ${describe(level)}`
+            )
+            heldLevel = level
+            this.hls.nextLevel = level
+          } else {
+            logger.info(`[HLS] Confirming transfer ${kbps} kbps; keeping ${describe(heldLevel)}`)
+          }
         })
 
         let networkRecoveries = 0
@@ -403,10 +448,14 @@ export class HLSService {
                 // `autoLevelCapping` only constrains auto mode, so
                 // capping there would silently do nothing and the
                 // instance would keep failing to decode the same level.
-                if (this.hls && pinnedLevel > 0) {
-                  pinnedLevel -= 1
-                  logger.warn(`[HLS] Media error at held level ${pinnedLevel + 1}, dropping to ${pinnedLevel}`)
-                  this.hls.nextLevel = pinnedLevel
+                if (this.hls && heldLevel > 0) {
+                  heldLevel -= 1
+                  // A decode failure outranks the bandwidth measurement,
+                  // so this drop is final — no later confirming transfer
+                  // gets to reconsider it.
+                  renditionSettled = true
+                  logger.warn(`[HLS] Media error at held level ${heldLevel + 1}, dropping to ${heldLevel}`)
+                  this.hls.nextLevel = heldLevel
                 } else if (this.hls && this.hls.currentLevel > 0) {
                   // One-way, and deliberately so: nothing lifts this cap
                   // again for the life of the instance. A device that

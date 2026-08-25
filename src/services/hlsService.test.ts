@@ -696,15 +696,50 @@ describe('HLSService rendition hold', () => {
     expect(hlsMock.instance!.nextLevel).toBe(1)
   })
 
-  it('chooses once and ignores later fragments', async () => {
+  it('keeps the held rung when the confirming transfer carries it', async () => {
     await armed(LADDER, SHORT)
     hlsMock.fire('hlsFragLoaded', probe(49_258, 4))
     expect(hlsMock.instance!.nextLevel).toBe(2)
-    // A later, slower fragment must not re-open the decision: the asset
-    // is buffered by now and a switch would only flip resolution
-    // part-way through the loop.
-    hlsMock.fire('hlsFragLoaded', probe(49_258, 500))
+    // The first real fragment, also fast: nothing to correct.
+    hlsMock.fire('hlsFragLoaded', probe(292_344, 4, 2))
     expect(hlsMock.instance!.nextLevel).toBe(2)
+  })
+
+  it('settles after one correction and ignores everything later', async () => {
+    await armed(LADDER, SHORT)
+    hlsMock.fire('hlsFragLoaded', probe(49_258, 4))
+    hlsMock.fire('hlsFragLoaded', probe(292_344, 4, 2))
+    // Once settled the decision is final: the asset is buffered by now
+    // and a further switch would only flip resolution mid-loop.
+    hlsMock.fire('hlsFragLoaded', probe(49_258, 5_000))
+    expect(hlsMock.instance!.nextLevel).toBe(2)
+  })
+
+  it('never corrects upward', async () => {
+    await armed(LADDER, SHORT)
+    // A slow probe holds the floor...
+    hlsMock.fire('hlsFragLoaded', probe(49_258, 145))
+    expect(hlsMock.instance!.nextLevel).toBe(0)
+    // ...and a fast confirming transfer does not raise it. Going up
+    // would cost a second resolution flip to gain quality on an asset
+    // that is nearly buffered already.
+    hlsMock.fire('hlsFragLoaded', probe(1_103_952, 4, 0))
+    expect(hlsMock.instance!.nextLevel).toBe(0)
+  })
+
+  // The regression a reviewer caught: a cache hit measures cache speed,
+  // not link speed. Before this fix every visitor was pinned to the
+  // floor, so a returning viewer has the probe's rung cached and
+  // nothing above it — the probe reads hundreds of Mbps on a link that
+  // cannot carry the top rung, and playback stalls.
+  it('corrects down when a cached probe overstated a slow link', async () => {
+    await armed(LADDER, SHORT)
+    // 49_258 B out of cache in 4 ms reads as ~98 Mbps.
+    hlsMock.fire('hlsFragLoaded', probe(49_258, 4))
+    expect(hlsMock.instance!.nextLevel).toBe(2)
+    // The first uncached fragment tells the truth: ~3 Mbps.
+    hlsMock.fire('hlsFragLoaded', probe(292_344, 790, 2))
+    expect(hlsMock.instance!.nextLevel).toBe(0)
   })
 
   it('leaves a long asset to hls.js', async () => {
@@ -732,6 +767,7 @@ describe('HLSService rendition hold', () => {
     // would have been a silent no-op and the decode wall would repeat.
     await armed(LADDER, SHORT)
     hlsMock.fire('hlsFragLoaded', probe(49_258, 4))
+    hlsMock.fire('hlsFragLoaded', probe(292_344, 4, 2))
     expect(hlsMock.instance!.nextLevel).toBe(2)
 
     hlsMock.instance!.currentLevel = 2
