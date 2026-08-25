@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { HLSService } from './hlsService'
+import { HLSService, measuredBandwidthBps, selectRendition } from './hlsService'
 
 // ---------------------------------------------------------------------------
 // Mock hls.js — we test HLSService logic, not the HLS library itself
@@ -9,7 +9,14 @@ import { HLSService } from './hlsService'
 // promise) and only then ERROR — which is the whole subject below.
 const hlsMock = vi.hoisted(() => ({
   handlers: new Map<string, (e: string, d: unknown) => void>(),
-  instance: null as null | { startLoad: ReturnType<typeof vi.fn>; recoverMediaError: ReturnType<typeof vi.fn> },
+  instance: null as null | {
+    startLoad: ReturnType<typeof vi.fn>
+    recoverMediaError: ReturnType<typeof vi.fn>
+    levels: Array<{ width: number; height: number; bitrate: number; details?: { totalduration: number } }>
+    currentLevel: number
+    nextLevel: number
+    autoLevelCapping: number
+  },
   reset(): void {
     this.handlers.clear()
     this.instance = null
@@ -32,8 +39,9 @@ vi.mock('hls.js', () => {
         on: vi.fn((event: string, cb: (e: string, d: unknown) => void) => {
           hlsMock.handlers.set(event, cb)
         }),
-        levels: [],
+        levels: [] as Array<{ width: number; height: number; bitrate: number; details?: { totalduration: number } }>,
         currentLevel: 0,
+        nextLevel: -1,
         autoLevelCapping: -1,
         audioTracks: [],
         startLoad: vi.fn(),
@@ -47,6 +55,7 @@ vi.mock('hls.js', () => {
       Events: {
         MANIFEST_PARSED: 'hlsManifestParsed',
         LEVEL_SWITCHED: 'hlsLevelSwitched',
+        FRAG_LOADED: 'hlsFragLoaded',
         ERROR: 'hlsError',
       },
       ErrorTypes: {
@@ -536,5 +545,209 @@ describe('HLSService after a rejected load', () => {
     video.dispatchEvent(new Event('error'))
 
     expect(seen).toEqual([{ type: 'native', details: 'mp4ErrorAfterLoad' }])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// measuredBandwidthBps — reading a transfer rate off one fragment
+// ---------------------------------------------------------------------------
+// The figures below are the ones measured in the browser against a
+// reproduction of the catalog's fragment layout (a 0.2 s leading
+// fragment ahead of a 2.23 s one). They are what hls.js's own sampler
+// gets wrong, so they are worth pinning down here.
+describe('measuredBandwidthBps', () => {
+  const stats = (loaded: number, first: number, end: number) =>
+    ({ loaded, loading: { start: 0, first, end } })
+
+  it('measures from first byte to last, not from request start', () => {
+    // 100_000 B over 100 ms of transfer = 8 Mbps. Counting the 400 ms
+    // of latency ahead of it would report 1.6 Mbps instead.
+    expect(measuredBandwidthBps(stats(100_000, 400, 500))).toBeCloseTo(8_000_000, 0)
+  })
+
+  it('reports the real rate where hls.js’s 50 ms floor would not', () => {
+    // The reproduction: a 49_258 B probe fragment that transferred in
+    // 4 ms. hls.js records 49_258 * 8 / 0.05 = 7.88 Mbps and pins the
+    // stream to the lowest rung; the transfer actually ran at ~98 Mbps.
+    const measured = measuredBandwidthBps(stats(49_258, 0, 4))!
+    expect(measured).toBeCloseTo(98_516_000, 0)
+    expect(measured).toBeGreaterThan(49_258 * 8 / 0.05)
+  })
+
+  it('clamps a cached sub-millisecond load rather than discarding it', () => {
+    // The reported bug was measured with the asset already cached, so
+    // this path has to yield a fast answer, not no answer.
+    const measured = measuredBandwidthBps(stats(49_258, 12, 12))
+    expect(measured).not.toBeNull()
+    expect(measured!).toBeGreaterThan(100_000_000)
+  })
+
+  it('falls back to request start when no first-byte time was recorded', () => {
+    expect(measuredBandwidthBps(stats(100_000, 0, 100))).toBeCloseTo(8_000_000, 0)
+  })
+
+  it('returns null when there is nothing to measure', () => {
+    expect(measuredBandwidthBps(stats(0, 0, 100))).toBeNull()
+    expect(measuredBandwidthBps(stats(NaN, 0, 100))).toBeNull()
+    expect(measuredBandwidthBps(stats(100, 0, NaN))).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// selectRendition — which rung the measured rate can afford
+// ---------------------------------------------------------------------------
+describe('selectRendition', () => {
+  // The ladder from the reported dataset, cheapest first.
+  const LADDER = [4_000_000, 8_000_000, 25_000_000]
+
+  it('takes the top rung on a fast link', () => {
+    expect(selectRendition(LADDER, 400_000_000, -1)).toBe(2)
+  })
+
+  it('takes the floor on a link that affords nothing above it', () => {
+    // ~3 Mbps measured: even the 4 Mbps rung is unaffordable, but
+    // playing the cheapest is better than playing nothing.
+    expect(selectRendition(LADDER, 2_800_000, -1)).toBe(0)
+  })
+
+  it('leaves headroom rather than picking a rung it exactly matches', () => {
+    // 25 Mbps measured cannot carry the 25 Mbps rung with margin.
+    expect(selectRendition(LADDER, 25_000_000, -1)).toBe(1)
+    expect(selectRendition(LADDER, 31_250_000, -1)).toBe(2)
+  })
+
+  it('never exceeds the mobile screen-size cap', () => {
+    // A fast phone still must not decode the 4K rung.
+    expect(selectRendition(LADDER, 400_000_000, 1)).toBe(1)
+    expect(selectRendition(LADDER, 400_000_000, 0)).toBe(0)
+  })
+
+  it('falls back to the cheapest rung within the cap', () => {
+    expect(selectRendition(LADDER, 1_000, 1)).toBe(0)
+  })
+
+  it('picks by bitrate, not by array position', () => {
+    // Guards the selection against an unsorted level array.
+    expect(selectRendition([25_000_000, 4_000_000, 8_000_000], 400_000_000, -1)).toBe(0)
+    expect(selectRendition([25_000_000, 4_000_000, 8_000_000], 12_000_000, -1)).toBe(2)
+  })
+
+  it('returns -1 when there are no levels', () => {
+    expect(selectRendition([], 400_000_000, -1)).toBe(-1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Holding a rendition for a short looping asset
+//
+// The defect this covers: a 4096x2048 source decoding at 1440x720 on a
+// gigabit link with the asset cached, and never stepping up — because
+// hls.js's ABR cannot converge on a 2-3 s loop of one or two fragments.
+// ---------------------------------------------------------------------------
+
+describe('HLSService rendition hold', () => {
+  // The ladder and fragment layout from the reported dataset.
+  const LADDER = [
+    { width: 1440, height: 720, bitrate: 4_000_000 },
+    { width: 2160, height: 1080, bitrate: 8_000_000 },
+    { width: 4096, height: 2048, bitrate: 25_000_000 },
+  ]
+  const SHORT = { totalduration: 2.433 }
+
+  /** A FRAG_LOADED payload for the throwaway probe fragment. */
+  const probe = (loaded: number, ms: number, level = 0) => ({
+    frag: { level, stats: { loaded, loading: { start: 0, first: 0, end: ms } } },
+  })
+
+  const armed = async (
+    levels: Array<{ width: number; height: number; bitrate: number }>,
+    details: { totalduration: number } | undefined,
+    cap = -1
+  ) => {
+    hlsMock.reset()
+    const { default: Hls } = await import('hls.js')
+    vi.mocked(Hls.isSupported).mockReturnValue(true)
+    const svc = new HLSService()
+    const p = svc.loadStream('https://example.com/s.m3u8', document.createElement('video'))
+    hlsMock.instance!.levels = levels.map(l => ({ ...l, details }))
+    hlsMock.instance!.autoLevelCapping = cap
+    hlsMock.fire('hlsManifestParsed', { levels })
+    await p
+    return svc
+  }
+
+  it('holds the top rung when the probe transferred fast', async () => {
+    await armed(LADDER, SHORT)
+    // 49_258 B in 4 ms — the measurement hls.js floors to 7.9 Mbps.
+    hlsMock.fire('hlsFragLoaded', probe(49_258, 4))
+    expect(hlsMock.instance!.nextLevel).toBe(2)
+  })
+
+  it('holds the floor when the probe transferred slowly', async () => {
+    await armed(LADDER, SHORT)
+    // The same fragment over a ~3 Mbps link.
+    hlsMock.fire('hlsFragLoaded', probe(49_258, 145))
+    expect(hlsMock.instance!.nextLevel).toBe(0)
+  })
+
+  it('respects the mobile screen-size cap', async () => {
+    await armed(LADDER, SHORT, 1)
+    hlsMock.fire('hlsFragLoaded', probe(49_258, 4))
+    expect(hlsMock.instance!.nextLevel).toBe(1)
+  })
+
+  it('chooses once and ignores later fragments', async () => {
+    await armed(LADDER, SHORT)
+    hlsMock.fire('hlsFragLoaded', probe(49_258, 4))
+    expect(hlsMock.instance!.nextLevel).toBe(2)
+    // A later, slower fragment must not re-open the decision: the asset
+    // is buffered by now and a switch would only flip resolution
+    // part-way through the loop.
+    hlsMock.fire('hlsFragLoaded', probe(49_258, 500))
+    expect(hlsMock.instance!.nextLevel).toBe(2)
+  })
+
+  it('leaves a long asset to hls.js', async () => {
+    // Long streams have the fragments ABR needs, so nothing is held.
+    await armed(LADDER, { totalduration: 3600 })
+    hlsMock.fire('hlsFragLoaded', probe(49_258, 4))
+    expect(hlsMock.instance!.nextLevel).toBe(-1)
+  })
+
+  it('leaves the stream alone when the duration is unknown', async () => {
+    await armed(LADDER, undefined)
+    hlsMock.fire('hlsFragLoaded', probe(49_258, 4))
+    expect(hlsMock.instance!.nextLevel).toBe(-1)
+  })
+
+  it('leaves the stream alone when the fragment yields no measurement', async () => {
+    await armed(LADDER, SHORT)
+    hlsMock.fire('hlsFragLoaded', probe(0, 4))
+    expect(hlsMock.instance!.nextLevel).toBe(-1)
+  })
+
+  it('drops a rung on a media error instead of capping a disabled ABR', async () => {
+    // Holding a rendition turns hls.js's auto mode off, and
+    // `autoLevelCapping` only constrains auto mode — so the old cap
+    // would have been a silent no-op and the decode wall would repeat.
+    await armed(LADDER, SHORT)
+    hlsMock.fire('hlsFragLoaded', probe(49_258, 4))
+    expect(hlsMock.instance!.nextLevel).toBe(2)
+
+    hlsMock.instance!.currentLevel = 2
+    hlsMock.fire('hlsError', { fatal: true, type: 'mediaError', details: 'bufferAppendError' })
+    expect(hlsMock.instance!.nextLevel).toBe(1)
+    expect(hlsMock.instance!.recoverMediaError).toHaveBeenCalled()
+
+    hlsMock.fire('hlsError', { fatal: true, type: 'mediaError', details: 'bufferAppendError' })
+    expect(hlsMock.instance!.nextLevel).toBe(0)
+  })
+
+  it('still caps ABR on a media error when no rendition is held', async () => {
+    await armed(LADDER, { totalduration: 3600 })
+    hlsMock.instance!.currentLevel = 2
+    hlsMock.fire('hlsError', { fatal: true, type: 'mediaError', details: 'bufferAppendError' })
+    expect(hlsMock.instance!.autoLevelCapping).toBe(1)
+    expect(hlsMock.instance!.nextLevel).toBe(-1)
   })
 })
