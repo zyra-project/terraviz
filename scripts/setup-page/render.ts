@@ -31,6 +31,7 @@ import { STAFF_POLICY_NAME, AUTOMATION_POLICY_NAME } from '../lib/setup/access'
 import { UPSTREAM_PINNED_IDS } from '../lib/setup/wrangler-toml'
 import { NODE_DOWNLOAD_URL, requiredNodeLabel } from '../lib/node-version'
 import { CHECKED_ON, D1_PRICING, freeVideoDatasets, GITHUB_ACTIONS, R2_PRICING, REFERENCE_NODE } from './pricing'
+import { headerFor } from '../check-license-headers'
 import { actionLabel, docsLabel } from './shell'
 import {
   PHASES,
@@ -1316,6 +1317,7 @@ export function renderSetupPage(opts: RenderOptions): string {
   crossCheck()
 
   const head = `<!doctype html>
+${headerFor('setup.html').join('\n')}
 <html lang="en">
 <head>
 <meta charset="utf-8"/>

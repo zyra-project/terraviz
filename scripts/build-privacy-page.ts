@@ -29,6 +29,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { marked } from 'marked'
+import { headerFor } from './check-license-headers'
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..')
 const REPO_ROOT = resolve(HERE, '..')
@@ -240,6 +241,7 @@ export function renderPrivacyPage(markdown: string): string {
   }
   return [
     '<!DOCTYPE html>',
+    ...headerFor('privacy.html'),
     '<html lang="en">',
     '<head>',
     '  <meta charset="UTF-8" />',

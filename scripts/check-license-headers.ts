@@ -223,6 +223,22 @@ export function headerLines(style: CommentStyle): string[] {
 }
 
 /**
+ * The header block for a named file, ready to splice into a generator's output.
+ *
+ * Generated-and-committed files (`public/privacy.html`, `public/setup.html`,
+ * `schema/catalog-schema.sql`) are checked like any other source file, so their
+ * generators have to emit the header too. They call this rather than spelling
+ * the two lines out, so changing the holder stays one edit here — a generator
+ * carrying its own literal copy would re-emit the stale one on every
+ * regeneration, and "regenerate" would stop being the fix.
+ */
+export function headerFor(file: string): string[] {
+  const style = commentStyle(file)
+  if (style === null) throw new Error(`no comment style is defined for ${file}`)
+  return headerLines(style)
+}
+
+/**
  * Is the header actually AT THE TOP, rather than merely mentioned near it?
  *
  * Position is the whole point — see the module comment. Both lines are matched
