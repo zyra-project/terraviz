@@ -3,6 +3,7 @@
   "version": "0.6.0",
   "type": "module",
   "description": "Terraviz \u2014 WebGL globe with adaptive bitrate environmental data streaming",
+  "license": "Apache-2.0",
   "bin": {
     "terraviz": "./bin/terraviz.cjs"
   },

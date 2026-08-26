@@ -2,6 +2,7 @@
 name = "tauri-plugin-apple-intelligence"
 version = "0.1.0"
 description = "Tauri plugin bridging Apple's Foundation Models framework for on-device LLM inference"
+license = "Apache-2.0"
 authors = ["Zyra Project"]
 edition = "2021"
 
