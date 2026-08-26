@@ -881,3 +881,83 @@ describe('ViewportManager panel notices', () => {
     vm.dispose()
   })
 })
+
+// ---------------------------------------------------------------------------
+// WebGL context loss
+//
+// The notice is DOM rather than WebGL, so it still draws over a canvas
+// whose context is gone — which is the only reason a device with no
+// console can report this at all.
+// ---------------------------------------------------------------------------
+
+describe('ViewportManager display notices', () => {
+  it('shows the display notice and clears it on restore', () => {
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '2h')
+
+    vm.setPanelDisplayNotice(1, true)
+    const notice = grid.querySelectorAll('.map-viewport')[1].querySelector('.panel-time-notice')!
+    expect(notice.classList.contains('hidden')).toBe(false)
+    const lostText = notice.textContent
+
+    vm.setPanelDisplayNotice(1, false)
+    expect(notice.classList.contains('hidden')).toBe(true)
+    expect(lostText).toBeTruthy()
+    vm.dispose()
+  })
+
+  it('outranks a failed stream', () => {
+    // A dead context takes the whole globe; a dead stream takes one
+    // layer of it. The larger explanation wins.
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '2h')
+
+    vm.setPanelStreamNotice(1, true)
+    const notice = grid.querySelectorAll('.map-viewport')[1].querySelector('.panel-time-notice')!
+    const streamText = notice.textContent
+
+    vm.setPanelDisplayNotice(1, true)
+    expect(notice.textContent).not.toBe(streamText)
+    vm.dispose()
+  })
+
+  it('falls back to the stream notice when the context returns', () => {
+    // Restoring the context does not mend the stream underneath it.
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '2h')
+
+    vm.setPanelStreamNotice(1, true)
+    const notice = grid.querySelectorAll('.map-viewport')[1].querySelector('.panel-time-notice')!
+    const streamText = notice.textContent
+
+    vm.setPanelDisplayNotice(1, true)
+    vm.setPanelDisplayNotice(1, false)
+    expect(notice.textContent).toBe(streamText)
+    expect(notice.classList.contains('hidden')).toBe(false)
+    vm.dispose()
+  })
+
+  it('outranks a time mismatch too', () => {
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '2h')
+
+    vm.setPanelTimeNotice(1, 'Aug 5, 2026')
+    vm.setPanelDisplayNotice(1, true)
+
+    const notice = grid.querySelectorAll('.map-viewport')[1].querySelector('.panel-time-notice')!
+    expect(notice.textContent).not.toContain('Aug 5, 2026')
+    vm.dispose()
+  })
+
+  it('is inert for a slot that does not exist', () => {
+    const grid = makeGrid()
+    const vm = new ViewportManager()
+    vm.init(grid, '1')
+    expect(() => vm.setPanelDisplayNotice(3, true)).not.toThrow()
+    vm.dispose()
+  })
+})

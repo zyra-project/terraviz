@@ -408,6 +408,24 @@ export class MapRenderer implements GlobeRenderer {
       canvasId?: string
       slotIndex?: number
       getLayerId?: () => string | null
+      /**
+       * Fired when this panel's WebGL context is lost, and again when
+       * the browser restores it.
+       *
+       * A lost context invalidates every GPU resource behind this
+       * globe. MapLibre rebuilds its own on restore — which is why the
+       * basemap tiles come back — but `earthTileLayer` is a custom
+       * layer holding its textures and programs in closures, and
+       * nothing rebuilds those. The panel therefore comes back with
+       * tiles and no data, permanently.
+       *
+       * This reports the event; it does not repair it. MapLibre's own
+       * docs say custom layers "should appropriately handle
+       * `MapContextEvent` with `webglcontextlost` and
+       * `webglcontextrestored`" — this is the detection half of doing
+       * that.
+       */
+      onContextChange?: (lost: boolean) => void
       /** MapLibre projection. Defaults to `'globe'` for the main
        *  3D globe; the §6.9 catalog Map view passes `'mercator'`
        *  for a flat world map. */
@@ -472,6 +490,22 @@ export class MapRenderer implements GlobeRenderer {
         duration: 2000,
       })
     }
+    // Loud on purpose, and at a level production does not filter: a
+    // lost context is invisible from inside the app otherwise, and the
+    // symptom a viewer reports — "the globe went black" — names no
+    // cause. There is no console on the device this was found on.
+    this.map.on('webglcontextlost', () => {
+      logger.error(`[Map] WebGL context lost on panel ${this.slotIndex} — every GPU resource for this globe is now invalid`)
+      options?.onContextChange?.(true)
+    })
+    this.map.on('webglcontextrestored', () => {
+      // A warning rather than info: the context is back, but the custom
+      // layer's textures and programs are not, so this panel is still
+      // broken. Reporting it as recovery would be a lie.
+      logger.warn(`[Map] WebGL context restored on panel ${this.slotIndex} — MapLibre resources only; the dataset layer is not rebuilt`)
+      options?.onContextChange?.(false)
+    })
+
     this.map.on('dblclick', resetView)
 
     // Emit `camera_settled` after every user-driven move ends.
