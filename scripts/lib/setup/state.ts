@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Resumable state for `npm run setup` — the machine-readable form of
  * the worksheet in `docs/SELF_HOSTING.md`.

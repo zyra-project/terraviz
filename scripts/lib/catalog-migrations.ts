@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Helpers shared between `dump-catalog-schema.ts` and the migration
  * smoke test. Centralising "where the migrations live" and "how to

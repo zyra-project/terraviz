@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Maps `DatasetRow` + `DecorationRows` to the wire `Dataset` shape
  * that frontend consumers expect.

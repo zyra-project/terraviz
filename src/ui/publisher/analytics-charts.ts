@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Hand-rolled SVG chart helpers for the `/publish/analytics` tab
  * (Phase B of `docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md`).

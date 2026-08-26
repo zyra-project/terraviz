@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * STATES table — the persistent-state vocabulary for the Orbit character.
  *

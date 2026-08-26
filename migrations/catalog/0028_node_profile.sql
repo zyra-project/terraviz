@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0028_node_profile.sql — Phase 3d — the node / host-organization
 -- profile (`docs/CURRENT_EVENTS_PLAN.md` §7 companion work;
 -- `docs/CATALOG_PUBLISHING_TOOLS.md`).

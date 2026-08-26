@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Spatial placement — anchor the globe to a real-world surface in
  * AR mode via WebXR `hit-test`.

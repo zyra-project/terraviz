@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Helpers for locating the local D1 SQLite file Wrangler maintains
  * under `.wrangler/state/v3/d1/`. Used by `seed-catalog.ts` and the

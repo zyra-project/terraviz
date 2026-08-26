@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Verifies that an 8-bit value survives the H.264 round trip intact —
  * the precondition for `docs/DATA_ENCODED_VIDEO_PLAN.md`, where luma

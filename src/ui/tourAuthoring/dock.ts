@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Floating tour-authoring dock — attaches to the regular SPA chrome
  * when the user opens `/?tourEdit=<id>` (or `=new`). First commit

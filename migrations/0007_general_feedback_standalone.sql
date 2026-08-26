@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- Extend general_feedback for the standalone TerraViz build's in-app
 -- feedback widget (POST /api/feedback with source
 -- "terraviz-standalone"). Submissions land in the same queue the

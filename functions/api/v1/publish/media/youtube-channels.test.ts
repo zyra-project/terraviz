@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Tests for the YouTube channel allowlist routes (task: media
  * suggestion engine): list (defaults + custom), add-by-URL with

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Hands-free realtime voice session controller (Phase 3, slice 4a).
  *

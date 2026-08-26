@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * build-qa-index.ts — Fetches the HuggingFace Q&A dataset, filters to
  * datasets that exist in the app catalog, and outputs a compact JSON index.

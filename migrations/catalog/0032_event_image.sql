@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- Story media for current events (task: story media).
 --
 -- `image_url` holds the story's own lead image — the RSS/Atom item's

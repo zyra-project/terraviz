@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * GET /api/v1/node-profile — the public host-organization identity
  * (Phase 3d follow-up; org logo on the public blog surface).

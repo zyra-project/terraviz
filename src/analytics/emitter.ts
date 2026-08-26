@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Telemetry emitter — batched event queue with tier-gated emission
  * and a pluggable network transport.

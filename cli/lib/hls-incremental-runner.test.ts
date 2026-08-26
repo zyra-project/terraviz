@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Tests for `cli/lib/hls-incremental-runner.ts` — the incremental
  * transcode orchestration (`docs/INCREMENTAL_HLS_PLAN.md` Stages 2+3).

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Tests for the NHC CurrentStorms proxy (task: media suggestion
  * engine) — privileged gate, storm trimming, KV cache semantics, and

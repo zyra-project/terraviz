@@ -1,4 +1,7 @@
 #!/usr/bin/env tsx
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Generates `public/setup.html` — the guided install console served
  * at `/setup`, alongside `/privacy` and `/design-preview`.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Cloudflare's published rates, and the arithmetic the cost estimate
  * runs on them.

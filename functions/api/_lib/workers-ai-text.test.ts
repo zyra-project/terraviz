@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Unit tests for the shared Workers AI reply-envelope extraction.
  * The envelope cases mirror what has been observed live: classic

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Returns a debounced version of the given function that delays invocation
  * until `delayMs` milliseconds have elapsed since the last call.

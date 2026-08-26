@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0009_auxiliary_assets.sql — Phase 3b — restore three SOS fields the
 -- Phase 1d import dropped on the floor, and add a fourth auxiliary
 -- asset column whose URL we'll migrate to R2.

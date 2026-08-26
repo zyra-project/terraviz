@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Content-addressed frame store helpers, runner side
  * (`docs/INCREMENTAL_FRAME_UPLOAD_PLAN.md`).

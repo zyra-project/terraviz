@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Typed API wrappers for the Zyra workflow surface (Phase Z2 of
  * `docs/ZYRA_INTEGRATION_PLAN.md`) — thin layer over

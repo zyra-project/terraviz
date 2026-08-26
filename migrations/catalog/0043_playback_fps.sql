@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- Per-dataset playback speed for image-sequence datasets.
 --
 -- The HLS encode is normalised to 30 fps output catalog-wide, because

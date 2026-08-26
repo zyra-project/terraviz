@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Phase 1d/C — verifies the SOS importer's data_ref pass-through.
  *

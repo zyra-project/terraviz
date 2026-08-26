@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0020_analytics_errors_rollup.sql — error-breakdown rollup for the
 -- /publish/analytics Overview section (Phase B follow-up of
 -- docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md).

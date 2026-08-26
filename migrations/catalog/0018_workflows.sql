@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0018_workflows.sql — Phase Z1 of docs/ZYRA_INTEGRATION_PLAN.md —
 -- D1-resident Zyra workflow definitions + per-execution run rows.
 --

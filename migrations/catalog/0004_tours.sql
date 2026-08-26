@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0004_tours.sql — Phase 1a — tours + tour_dataset_refs.
 --
 -- Tours are stored as references to JSON blobs in R2 (or, in

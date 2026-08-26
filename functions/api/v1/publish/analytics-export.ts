@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * /api/v1/publish/analytics-export — the nightly analytics export
  * tick (Phase A of `docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md`).

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Unit tests for the shared video-source refresh job — fetch → parse →
  * embed → upsert → prune, plus the skip-reembed-on-unchanged path,

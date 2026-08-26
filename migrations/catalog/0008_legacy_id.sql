@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0008_legacy_id.sql — Phase 1d — provenance + idempotency for SOS bulk import.
 --
 -- Adds the `legacy_id` column to `datasets`. Phase 1d's bulk

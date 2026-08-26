@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Screenshot Service — captures the globe canvas (and optionally the
  * surrounding UI) as a compressed JPEG data URL.

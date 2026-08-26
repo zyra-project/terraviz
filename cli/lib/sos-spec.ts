@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * SOS-spec preflight for runner-produced MP4s — graduated from the
  * Z0 spike into shared form for the Phase Z1 runner

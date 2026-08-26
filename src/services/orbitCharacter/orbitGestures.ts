@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * GESTURES — transient overlays that play OVER the active state, then
  * yield control back. One at a time; new triggers while one is playing

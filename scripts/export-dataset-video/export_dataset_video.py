@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The Zyra Project
+
 """Export a data-encoded catalog dataset as a standalone colour MP4 + SOS sidecars.
 
 A dataset published with `renderEncoding: "data-luma"` ships frames whose luma

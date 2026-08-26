@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * The data-encoded video sidecar — the palette and scale that turn a
  * grayscale frame back into colour and numbers at display time.

@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 // PostToolUse hook: lint GitHub Actions workflows at edit time, so a
 // broken expression or a bad `runs-on` surfaces now rather than from the
 // Actionlint job in ci.yml after a push.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * GET /api/v1/publish/feeds/preview — dry-run a feed URL
  * (`docs/CURRENT_EVENTS_PLAN.md` §9).

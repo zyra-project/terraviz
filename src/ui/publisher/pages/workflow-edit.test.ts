@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { errorArea, renderWorkflowEditPage } from './workflow-edit'
 import { WORKFLOW_TEMPLATES } from '../workflow-templates'

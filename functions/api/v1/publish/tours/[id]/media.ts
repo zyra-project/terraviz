@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * POST /api/v1/publish/tours/{id}/media — upload an image for a
  * tour's media rail (task: tour media authoring).

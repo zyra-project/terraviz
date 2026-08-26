@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Resolve a `vimeo:<id>` reference to a source MP4 download URL.
  *

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Tests for `cli/lib/frames-publish.ts` — publishing a runner's
  * padded frame directory as an image-sequence asset

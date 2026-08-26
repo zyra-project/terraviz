@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Placeholder support for Zyra workflow pipeline args (the follow-up
  * to array args — `docs/ZYRA_INTEGRATION_PLAN.md` §Pipeline arg

@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0016_node_identity_singleton.sql — enforce the node_identity
 -- singleton invariant at the schema level.
 --

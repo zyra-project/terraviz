@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Renders `public/setup.html` from the setup tool's own modules plus
  * the editorial content in `content.ts`.

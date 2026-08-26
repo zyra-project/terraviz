@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Shared helpers for the Orbit voice Pages Functions
  * (`/api/voice/transcribe`, `/api/voice/synthesize`).

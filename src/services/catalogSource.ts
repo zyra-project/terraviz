@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 import { logger } from '../utils/logger'
 import { reportError } from '../analytics'
 

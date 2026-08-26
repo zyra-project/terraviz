@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * "Right now" hero panel UI — Phase 7 §9.1 of
  * `docs/WEB_CATALOG_FEATURES_PLAN.md`.

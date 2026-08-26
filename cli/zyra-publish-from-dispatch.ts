@@ -1,4 +1,7 @@
 #!/usr/bin/env -S npx tsx
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * `zyra-publish-from-dispatch` — the runner CLI for Phase Z1 of
  * `docs/ZYRA_INTEGRATION_PLAN.md`, invoked by the `zyra-run`

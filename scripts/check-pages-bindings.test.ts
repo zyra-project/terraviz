@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Unit coverage for the bindings audit. The diff function is pure
  * (expected manifest + ProjectBindings → DiffEntry list), so most

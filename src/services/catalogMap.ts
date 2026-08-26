@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Catalog Map view — pure transform from a filtered catalog to one
  * rectangular bbox overlay per dataset with geographic coverage.

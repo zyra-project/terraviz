@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Visit memory — a local-only log of which datasets the user has
  * opened, persisted to localStorage. Powers the "Continue exploring"

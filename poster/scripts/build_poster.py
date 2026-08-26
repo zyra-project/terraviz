@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The Zyra Project
+
 # Apache-2.0
 """Build poster/index.html from poster/sections/*.
 

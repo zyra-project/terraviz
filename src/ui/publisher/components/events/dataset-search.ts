@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Shared catalog-search helpers for the Events tab's dataset-pairing UIs
  * (the new-event drawer's "Pair datasets" pane and the detail pane's

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Push per-string metadata from `locales/_explanations.json` to
  * Weblate's "Explanation" field via the REST API.

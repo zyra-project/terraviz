@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * QA Service — loads and queries the preprocessed Q&A knowledge base.
  *

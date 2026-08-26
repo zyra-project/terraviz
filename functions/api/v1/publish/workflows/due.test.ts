@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Wire-level tests for GET /api/v1/publish/workflows/due — the
  * scheduler tick's query (issue #307). This is the route the

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * In-VR tour control strip — a small floating panel with prev /
  * play-pause / next / stop buttons plus a "step N / M" counter.

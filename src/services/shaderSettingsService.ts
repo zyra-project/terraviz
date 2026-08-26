@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Shader-settings service — the runtime side of the §7.2 globe-
  * shader uniforms. Persists the user's specular-strength preset

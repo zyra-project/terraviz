@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0022_analytics_phase_e_rollups.sql — Phase E coverage rollups
 -- (docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md). Closes the remaining
 -- Grafana → /publish/analytics parity gaps: performance, Orbit cost,

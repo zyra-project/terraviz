@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * /api/v1/publish/featured-hero — the "Right now" hero admin write API
  * (Phase B of `docs/HERO_ADMIN_SCOPING.md`).

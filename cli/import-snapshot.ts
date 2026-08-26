@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * `terraviz import-snapshot` — one-shot bulk importer for the legacy
  * SOS catalog snapshot.

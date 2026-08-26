@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Deep Link Handler — responds to zyra:// URLs and https://terraviz.zyra-project.org/dataset/* links.
  *

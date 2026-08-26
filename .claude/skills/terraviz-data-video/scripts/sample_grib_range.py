@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The Zyra Project
+
 """Sample the value distribution of one GRIB2 record from an open S3 URL.
 
 Confirms a `convert-format --pattern` regex matches exactly one record, and

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * In-VR tour overlay manager — floating CanvasTexture and
  * VideoTexture panels that replace the 2D tour-overlay DOM surface

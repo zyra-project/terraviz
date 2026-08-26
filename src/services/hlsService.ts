@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * HLS streaming service - fetches manifests from video proxy and manages HLS playback
  */

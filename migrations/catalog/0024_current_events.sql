@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0024_current_events.sql — Current Events ↔ Real-Time Data, data
 -- layer (see docs/CURRENT_EVENTS_PLAN.md).
 --

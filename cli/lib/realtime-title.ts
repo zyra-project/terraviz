@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Heuristic to detect "real-time" SOS rows by title — the rows
  * whose Vimeo source is re-uploaded on a recurring (typically

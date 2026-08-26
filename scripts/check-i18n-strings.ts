@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Static check: hard-coded user-facing strings in `src/ui/` and
  * `src/services/docent*.ts`.

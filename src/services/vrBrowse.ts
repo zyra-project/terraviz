@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * In-VR dataset browse panel — a floating CanvasTexture panel that
  * renders the dataset catalog so the user can switch datasets

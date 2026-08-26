@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * `terraviz list-realtime-r2` — find migrated rows whose Vimeo
  * source is on a daily re-upload cadence, and recover the original

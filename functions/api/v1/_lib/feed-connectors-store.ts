@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * D1 store for the current-events feed-connector registry
  * (`migrations/catalog/0026_feed_connectors.sql`;

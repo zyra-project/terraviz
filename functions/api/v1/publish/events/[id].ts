@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * POST /api/v1/publish/events/:id — submit a curator review for one
  * current event (`docs/CURRENT_EVENTS_PLAN.md` §5).

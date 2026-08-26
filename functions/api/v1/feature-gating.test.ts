@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * The off-behavior matrix for per-node feature toggles — one place
  * that pins down what every gated surface serves while its feature

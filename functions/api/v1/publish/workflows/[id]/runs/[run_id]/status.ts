@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * POST /api/v1/publish/workflows/{id}/runs/{run_id}/status — runner
  * lifecycle callbacks (Phase Z1, `docs/ZYRA_INTEGRATION_PLAN.md`

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Test helpers — adapters that let Vitest exercise the catalog
  * route handlers against real SQL (better-sqlite3) and an

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Wire-level tests for GET /api/v1/publish/feedback (Phase C of
  * `docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md`).
