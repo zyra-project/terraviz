@@ -270,9 +270,11 @@ export class HLSService {
           // Only a stream that actually loaded can fail *later*. If this
           // promise rejected, the caller owns that failure and is
           // already handling it — `datasetLoader` falls back to the
-          // progressive MP4 through this very service and video, and
-          // `loadDirect` does not tear the hls.js instance down, so the
-          // abandoned stream goes on emitting into here. Reporting those
+          // progressive MP4 through this very service and video.
+          // `loadDirect` now tears this instance down on the way in, but
+          // that is its choice to make, not a guarantee this branch may
+          // lean on: anything still emitting here after a rejection
+          // belongs to a stream nobody is watching, and reporting it
           // would mark a healthy fallback as terminally failed.
           if (loaded) this.reportFatal({ type, details })
           return
@@ -501,6 +503,27 @@ export class HLSService {
    */
   loadDirect(mp4Url: string, video: HTMLVideoElement): Promise<void> {
     return new Promise((resolve, reject) => {
+      // Tear down any hls.js instance before taking this element over.
+      //
+      // The path that matters is the fallback: `datasetLoader` catches a
+      // `loadStream` rejection and calls this with the same service and
+      // the same video. `attachMedia` runs before the manifest is
+      // parsed, and `loadStream` only ever rejects before that, so by
+      // the time we arrive hls.js reliably owns a MediaSource attached
+      // to this element, along with its loaders and timers. Reassigning
+      // `video.src` below points the element at the MP4 and leaves all
+      // of that alive with nothing referencing it — an orphan per
+      // fallback, on the memory budget that already crashes phones at
+      // three concurrent decoders (terraviz#230).
+      //
+      // Before the assignment, deliberately: `destroy()` detaches media,
+      // which clears `src` on the element and can raise `error` on it.
+      // Doing it first means neither can touch what we set up below.
+      if (this.hls) {
+        this.hls.destroy()
+        this.hls = null
+      }
+
       // Same settle-once shape as `loadStream`, for the same reason:
       // this is the path a failed HLS stream falls back *to*, so it
       // dying quietly after load leaves a panel with nothing left.

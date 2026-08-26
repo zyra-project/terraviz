@@ -12,6 +12,7 @@ const hlsMock = vi.hoisted(() => ({
   instance: null as null | {
     startLoad: ReturnType<typeof vi.fn>
     recoverMediaError: ReturnType<typeof vi.fn>
+    destroy: ReturnType<typeof vi.fn>
     levels: Array<{ width: number; height: number; bitrate: number; details?: { totalduration: number } }>
     currentLevel: number
     nextLevel: number
@@ -785,5 +786,106 @@ describe('HLSService rendition hold', () => {
     hlsMock.fire('hlsError', { fatal: true, type: 'mediaError', details: 'bufferAppendError' })
     expect(hlsMock.instance!.autoLevelCapping).toBe(1)
     expect(hlsMock.instance!.nextLevel).toBe(-1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The fallback takes the element over cleanly
+//
+// `attachMedia` runs before the manifest is parsed and `loadStream` only
+// rejects before that, so on the fallback path hls.js reliably owns a
+// MediaSource attached to the element `loadDirect` is about to point at
+// an MP4. Leaving it behind orphans it.
+// ---------------------------------------------------------------------------
+
+describe('HLSService.loadDirect teardown', () => {
+  const NETWORK = { fatal: true, type: 'networkError', details: 'fragLoadError' }
+
+  beforeEach(async () => {
+    hlsMock.reset()
+    const { default: Hls } = await import('hls.js')
+    vi.mocked(Hls.isSupported).mockReturnValue(true)
+  })
+
+  it('destroys the abandoned instance the fallback inherits', async () => {
+    const svc = new HLSService()
+    const video = document.createElement('video')
+    const p = svc.loadStream('https://example.com/s.m3u8', video)
+    for (let i = 0; i < 4; i++) hlsMock.fire('hlsError', NETWORK)
+    await expect(p).rejects.toThrow('HLS network error')
+
+    const instance = hlsMock.instance
+    expect(instance?.destroy).not.toHaveBeenCalled()
+
+    const direct = svc.loadDirect('https://example.com/v.mp4', video)
+    expect(instance?.destroy).toHaveBeenCalledTimes(1)
+
+    video.dispatchEvent(new Event('loadedmetadata'))
+    await expect(direct).resolves.toBeUndefined()
+  })
+
+  it('points the element at the MP4 after tearing hls.js down, not before', async () => {
+    // Ordering matters: `destroy()` detaches media, which clears `src`.
+    const svc = new HLSService()
+    const video = document.createElement('video')
+    const p = svc.loadStream('https://example.com/s.m3u8', video)
+    for (let i = 0; i < 4; i++) hlsMock.fire('hlsError', NETWORK)
+    await expect(p).rejects.toThrow()
+
+    const order: string[] = []
+    hlsMock.instance!.destroy.mockImplementation(() => order.push('destroy'))
+    const src = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src')
+    Object.defineProperty(video, 'src', {
+      configurable: true,
+      set(v: string) { order.push('src'); src?.set?.call(this, v) },
+      get() { return src?.get?.call(this) },
+    })
+
+    svc.loadDirect('https://example.com/v.mp4', video)
+    expect(order).toEqual(['destroy', 'src'])
+  })
+
+  it('is a no-op when there is no instance to tear down', async () => {
+    // The other two callers: a local file and a manifest with no HLS.
+    const svc = new HLSService()
+    const video = document.createElement('video')
+    const direct = svc.loadDirect('https://example.com/v.mp4', video)
+    video.dispatchEvent(new Event('loadedmetadata'))
+    await expect(direct).resolves.toBeUndefined()
+  })
+
+  it('still reports a failure of the MP4 it fell back to', async () => {
+    // Regression guard: tearing hls.js down must not take the
+    // fallback's own error reporting with it.
+    const svc = new HLSService()
+    const video = document.createElement('video')
+    const p = svc.loadStream('https://example.com/s.m3u8', video)
+    for (let i = 0; i < 4; i++) hlsMock.fire('hlsError', NETWORK)
+    await expect(p).rejects.toThrow()
+
+    const direct = svc.loadDirect('https://example.com/v.mp4', video)
+    video.dispatchEvent(new Event('loadedmetadata'))
+    await direct
+
+    const seen: unknown[] = []
+    svc.onFatalError((e) => seen.push(e))
+    video.dispatchEvent(new Event('error'))
+    expect(seen).toEqual([{ type: 'native', details: 'mp4ErrorAfterLoad' }])
+  })
+
+  it('leaves destroy() safe to call afterwards', async () => {
+    const svc = new HLSService()
+    const video = svc.createVideo()
+    const p = svc.loadStream('https://example.com/s.m3u8', video)
+    for (let i = 0; i < 4; i++) hlsMock.fire('hlsError', NETWORK)
+    await expect(p).rejects.toThrow()
+
+    const direct = svc.loadDirect('https://example.com/v.mp4', video)
+    video.dispatchEvent(new Event('loadedmetadata'))
+    await direct
+
+    // `this.hls` is already null — destroy must not double-tear it.
+    expect(() => svc.destroy()).not.toThrow()
+    expect(hlsMock.instance?.destroy).toHaveBeenCalledTimes(1)
   })
 })
