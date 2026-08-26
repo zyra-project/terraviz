@@ -530,9 +530,13 @@ export class HLSService {
       let settled = false
       video.src = mp4Url
       video.addEventListener('loadedmetadata', () => {
-        logger.info('[HLS] Direct MP4 loaded, duration:', video.duration)
+        // Guard before the log, not after: an `error` that already
+        // rejected leaves this arriving late, and announcing a load
+        // that failed is worst exactly when someone is reading the log
+        // to find out why.
         if (settled) return
         settled = true
+        logger.info('[HLS] Direct MP4 loaded, duration:', video.duration)
         resolve()
       }, { once: true })
       video.addEventListener('error', () => {

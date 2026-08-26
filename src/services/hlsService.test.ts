@@ -888,4 +888,22 @@ describe('HLSService.loadDirect teardown', () => {
     expect(() => svc.destroy()).not.toThrow()
     expect(hlsMock.instance?.destroy).toHaveBeenCalledTimes(1)
   })
+
+  it('does not announce a load that already failed', async () => {
+    // `error` rejects, then `loadedmetadata` arrives late. The log is a
+    // diagnostic surface; claiming success there is worse than silence.
+    const svc = new HLSService()
+    const video = document.createElement('video')
+    const logged: unknown[] = []
+    const { logger } = await import('../utils/logger')
+    const spy = vi.spyOn(logger, 'info').mockImplementation((...a) => { logged.push(a) })
+
+    const p = svc.loadDirect('https://example.com/v.mp4', video)
+    video.dispatchEvent(new Event('error'))
+    await expect(p).rejects.toThrow('Failed to load MP4 directly')
+    video.dispatchEvent(new Event('loadedmetadata'))
+
+    expect(logged.flat().some((x) => String(x).includes('Direct MP4 loaded'))).toBe(false)
+    spy.mockRestore()
+  })
 })
