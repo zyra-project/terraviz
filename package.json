@@ -36,6 +36,7 @@
     "check:css-logical": "npx tsx scripts/check-css-logical.ts",
     "check:doc-freshness": "npx tsx scripts/check-doc-freshness.ts",
     "check:lfs": "npx tsx scripts/check-lfs.ts",
+    "check:license": "npx tsx scripts/check-license-headers.ts",
     "check:tick-drain": "npx tsx scripts/check-tick-drain.ts",
     "type-check": "npm run locales && npm run check:i18n-strings && npm run check:migrations && npm run check:doc-coverage && npm run check:css-logical && npm run check:tick-drain && npm run check:protocol-schemas && tsc --noEmit && tsc --noEmit -p functions/tsconfig.json && tsc --noEmit -p cli/tsconfig.json && tsc --noEmit -p scripts/tsconfig.setup-page.json",
     "terraviz": "tsx cli/terraviz.ts",
