@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * PCM audio helpers for the realtime WebSocket STT path (Phase 3).
  *

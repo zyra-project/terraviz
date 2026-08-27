@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- Organization logo for the node profile (Phase 3d follow-up).
 --
 -- `logo_ref` holds an `r2:<key>` handle pointing at a content-addressed

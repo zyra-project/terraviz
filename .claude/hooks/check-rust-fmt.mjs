@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 // PostToolUse hook: tell you when the Rust source drifts out of rustfmt.
 //
 // The desktop app's Rust backend is the least-linted code in the repo:

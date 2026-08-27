@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Wire-level tests for /api/v1/publish/workflows/{id} — read + edit
  * (issue #307). PATCH owns the save-time `next_run_at` recompute

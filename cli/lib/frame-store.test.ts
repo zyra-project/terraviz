@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Tests for `cli/lib/frame-store.ts` — the runner-side content-
  * addressed frame key helpers + the pure mark-and-sweep selection.

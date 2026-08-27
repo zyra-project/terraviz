@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Workers AI reply-envelope extraction, shared by every server-side
  * consumer of `env.AI.run()` (the Orbit chat proxy, current-events

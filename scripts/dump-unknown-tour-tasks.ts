@@ -1,4 +1,7 @@
 #!/usr/bin/env tsx
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Inspector for the unknown-task types surfaced by
  * `sweep-tour-parser.ts`. Sweeps every SOS tour.json again and,

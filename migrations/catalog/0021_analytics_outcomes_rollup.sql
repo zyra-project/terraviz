@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0021_analytics_outcomes_rollup.sql — outcome-dimension rollup for
 -- true funnels on /publish/analytics (follow-up to 0019/0020,
 -- docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md).

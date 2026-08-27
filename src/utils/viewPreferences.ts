@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * View preferences persistence — user choices about what parts of
  * the UI to show alongside the globe. Covers the Dataset info panel,

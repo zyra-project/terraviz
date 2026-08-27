@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Auto-generated current-events tour (`docs/CURRENT_EVENTS_PLAN.md` §7)
  * — turn an approved event + its vetted dataset pairings into a

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * /api/v1/publish/events — the current-events review queue + ingestion
  * sink (`docs/CURRENT_EVENTS_PLAN.md` §5, §9).

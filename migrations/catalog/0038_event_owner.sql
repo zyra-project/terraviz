@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0038_event_owner.sql — ownership for current events.
 --
 -- Publishers get the same "read all, write own" access to events that

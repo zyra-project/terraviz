@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0023_publisher_roles_two_tier.sql — formalize the publisher role
 -- taxonomy into a two-tier human model.
 --

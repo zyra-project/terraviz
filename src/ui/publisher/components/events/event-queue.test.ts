@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 import { describe, it, expect, vi } from 'vitest'
 import { renderEventQueue } from './event-queue'
 import type { ReviewEvent, ReviewLink } from './events-model'

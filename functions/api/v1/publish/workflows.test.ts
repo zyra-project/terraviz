@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Wire-level tests for /api/v1/publish/workflows — list + create
  * (issue #307). Create is the allowlist's front door: pipeline JSON

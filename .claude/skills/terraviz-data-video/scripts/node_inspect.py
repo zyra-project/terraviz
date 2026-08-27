@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The Zyra Project
+
 """Inspect a live TerraViz node's public catalog — no auth required.
 
 Three jobs, all of which beat guessing:

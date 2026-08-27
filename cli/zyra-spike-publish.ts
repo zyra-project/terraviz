@@ -1,4 +1,7 @@
 #!/usr/bin/env -S npx tsx
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * `zyra-spike-publish` — Phase Z0 spike (docs/ZYRA_INTEGRATION_PLAN.md).
  *

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Wire tests for the video-proxy — the allowlist gate (only hosts a
  * registered enabled source serves), Range + CORS passthrough, and the

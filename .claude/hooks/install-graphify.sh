@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The Zyra Project
+
 # SessionStart hook: ensure the `graphify` CLI is available so the
 # vendored `/graphify` skill (.claude/skills/graphify/) can shell out
 # to it in Claude Code web sessions.

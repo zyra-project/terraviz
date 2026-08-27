@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright 2026 The Zyra Project */
+
 /*
  * Tour-authoring dock — Phase 3pt/A. Floats over the SPA chrome
  * when the URL carries `?tourEdit=`. The dock is fixed top-right

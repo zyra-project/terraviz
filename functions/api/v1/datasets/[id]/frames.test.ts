@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 import { describe, expect, it } from 'vitest'
 import { onRequestGet } from './frames'
 import { asD1, makeCtx, makeKV, seedFixtures } from '../../_lib/test-helpers'

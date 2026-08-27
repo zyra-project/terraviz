@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Apple Intelligence Provider — on-device LLM via the Foundation Models framework.
  *

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * POST/DELETE /api/v1/publish/media/video-sources/:id — per-source
  * mutations for the video-sitemap registry (task: video-sitemap media

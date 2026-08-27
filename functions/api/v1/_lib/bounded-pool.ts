@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Tiny bounded-concurrency helper for parallelizable async work
  * that can't safely fan-out to N at once.

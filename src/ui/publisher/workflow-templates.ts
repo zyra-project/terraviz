@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Curated workflow templates + stage snippets for the guided
  * authoring form (Phase Z3 of `docs/ZYRA_INTEGRATION_PLAN.md`).

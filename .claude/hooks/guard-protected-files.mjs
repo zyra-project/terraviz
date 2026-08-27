@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 // PreToolUse hook: refuse edits that are known to destroy work.
 //
 // Two classes of path, both documented in CLAUDE.md but until now

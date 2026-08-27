@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Loopback hostname check — shared by the publish middleware's
  * `DEV_BYPASS_ACCESS=true` gate and the asset-complete handler's

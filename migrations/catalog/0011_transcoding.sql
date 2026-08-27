@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0011_transcoding.sql — Phase 3pd — async video transcode state.
 --
 -- The publisher portal's video-upload flow lands the source MP4 in

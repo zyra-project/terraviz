@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * `terraviz import-events` — ingest current events into the catalog
  * (`docs/CURRENT_EVENTS_PLAN.md` §9).

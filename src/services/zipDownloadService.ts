@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Zip Download Service — web-only "package a dataset as a .zip"
  * entry point for §8.2 of `WEB_CATALOG_FEATURES_PLAN.md`.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Helpers shared by the Phase 3pg/B `/frames` endpoints.
  *

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * UI-scale service — the runtime side of the `--ui-scale` token
  * (§7.1). Reads the persisted preference, applies it as an inline

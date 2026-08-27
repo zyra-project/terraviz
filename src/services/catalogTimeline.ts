@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Catalog Timeline view — pure transform from a filtered catalog
  * to one row per dataset on a shared time axis.

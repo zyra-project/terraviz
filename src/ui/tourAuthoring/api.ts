@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Phase 3pt/E — publisher-side API client for the tour-authoring
  * dock. Thin wrapper over the shared `publisherGet` /

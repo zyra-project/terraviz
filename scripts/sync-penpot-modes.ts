@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * scripts/sync-penpot-modes.ts — Penpot mode-override seeder.
  *

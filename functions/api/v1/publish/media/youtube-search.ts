@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * GET /api/v1/publish/media/youtube-search?q=… — agency-YouTube video
  * search for the Events-tab media-suggestion pane (task: media

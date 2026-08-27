@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * WAF skip rules — `SELF_HOSTING.md` Phase 13.2 and 13.3.
  *

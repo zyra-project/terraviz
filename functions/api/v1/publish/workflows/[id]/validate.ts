@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * POST /api/v1/publish/workflows/{id}/validate — static dry-run
  * (Phase Z1, `docs/ZYRA_INTEGRATION_PLAN.md` §API surface).

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Playlist UI — manager panel + the small "Add to playlist"
  * popover surfaced from browse cards and the dataset info panel.

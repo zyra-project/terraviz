@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 import { describe, it, expect, vi, afterEach } from 'vitest'
 
 // Force the MapRenderer to be absent so the tests exercise the DOM

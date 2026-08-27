@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Tests for the blog editor page — the Generate flow filling the
  * content fields, Save composing the create body from the grounding

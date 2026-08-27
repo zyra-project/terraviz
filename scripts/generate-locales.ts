@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Generate `src/i18n/messages.ts` (+ one `messages.<locale>.ts` per
  * non-source locale) from `locales/*.json`, AND rewrite each

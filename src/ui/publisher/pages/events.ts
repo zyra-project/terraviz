@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * /publish/events — the current-events review queue, redesigned as
  * **Direction A: a master–detail triage queue**

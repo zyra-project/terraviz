@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * General Feedback Service — posts app-level feedback (bug reports,
  * feature requests, other) to /api/general-feedback.

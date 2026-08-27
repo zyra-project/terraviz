@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Encode a directory of single-band GeoTIFFs into a data-encoded video
  * plus the matching `color_scale` sidecar.

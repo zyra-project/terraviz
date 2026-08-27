@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0013_asset_uploads_frame_count.sql — Phase 3pf — image-sequence
 -- upload provenance on `asset_uploads`.
 --

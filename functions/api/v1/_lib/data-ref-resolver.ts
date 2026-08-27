@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Build the {@link DataRefResolver} the catalog read-paths pass into
  * {@link serializeDataset} so tour rows can surface a fetchable

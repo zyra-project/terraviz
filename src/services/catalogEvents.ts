@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Catalog **events** view — pure transform from the public approved
  * events + the currently-visible dataset set to the overlay model the

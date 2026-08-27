@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Isolines over a data-encoded frame — the A5 half of
  * `docs/DATA_ANALYSIS_PLAN.md`.

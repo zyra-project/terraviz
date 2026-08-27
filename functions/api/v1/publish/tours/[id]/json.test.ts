@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Wire-level tests for /api/v1/publish/tours/{id}/json.
  * Phase 3pt/E — the autosave + reopen endpoints.

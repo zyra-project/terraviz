@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Fetch a URL as a Blob with byte-level progress reporting.
  * Falls back to a plain fetch if the response has no Content-Length or ReadableStream.

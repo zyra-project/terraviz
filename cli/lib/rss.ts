@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Generic RSS 2.0 / Atom → current-event mapper (pure).
  *

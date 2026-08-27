@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0017_hero_override.sql — Phase 7 §9.1 — the "Right now" hero
 -- override, set from the publisher portal (see
 -- docs/HERO_ADMIN_SCOPING.md).

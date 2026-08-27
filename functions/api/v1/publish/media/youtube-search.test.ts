@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Tests for the agency-YouTube search proxy (task: media suggestion
  * engine) — privilege gate, key-absence/off behaviour, allowlist

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Idempotent resource provisioning for `npm run setup`
  * (`SELF_HOSTING.md` Phase 2).

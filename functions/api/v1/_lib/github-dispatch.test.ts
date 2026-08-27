@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Unit tests for `github-dispatch.ts`. The integration coverage
  * (the /complete handler firing the dispatch and stamping

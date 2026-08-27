@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Single source of truth for ULID minting on the publisher write
  * paths. Crockford-base32, 26 chars, time-prefixed: the first 10

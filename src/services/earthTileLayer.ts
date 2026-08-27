@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Earth tile layer — Day/night, clouds, and specular effects for MapLibre globe.
  *

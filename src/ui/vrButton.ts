@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Single "Enter immersive mode" button — adapts to whatever the
  * device supports.

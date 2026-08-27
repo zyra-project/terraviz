@@ -481,6 +481,34 @@ When you find issues, note:
 - **NASA GIBS**: https://nasa-gibs.github.io/gibs-api-docs/
 - **HLS.js Docs**: https://hlsjs.readthedocs.io/
 
+## 📄 License
+
+TerraViz is licensed under the [Apache License, Version 2.0](LICENSE). `NOTICE` carries the
+attribution notice that licence requires downstream users to preserve.
+
+Every source file opens with a two-line SPDX header, so a scanner can read the licence off
+any file on its own rather than inferring it from the repository root:
+
+```
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+```
+
+```bash
+npm run check:license           # verify every source file has it (runs inside `npm run type-check`)
+npm run check:license -- --fix  # insert or repair it — idempotent, never stacks
+```
+
+`--fix` picks the comment syntax for each file kind and places the header below any line that
+must come first (a `#!` shebang, an HTML doctype, `// swift-tools-version:`). The same check
+verifies that `LICENSE`, `NOTICE`, `package.json`, `CITATION.cff` and both Cargo manifests all
+name the same licence and holder, so the metadata downstream tools actually read cannot drift
+from the file headers. Coverage and the reasoning behind it are documented at the top of
+[`scripts/check-license-headers.ts`](scripts/check-license-headers.ts).
+
+Copyright holder and citation credit are separate: `The Zyra Project` holds copyright in the
+code, and [`CITATION.cff`](CITATION.cff) records who to cite for the software as scholarship.
+
 ---
 
 **Created**: March 20, 2026

@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0027_event_inference.sql — AI-inferred field provenance on current
 -- events (docs/CURRENT_EVENTS_PLAN.md §9, feeds slice C).
 --

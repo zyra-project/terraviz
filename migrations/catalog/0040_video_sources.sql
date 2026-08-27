@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- Non-YouTube video-suggestion sources (task: video-sitemap media
 -- source). The counterpart of `feed_connectors` (which ingests *events*)
 -- and `youtube_channels` (which filters a live YouTube search): a node's

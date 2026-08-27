@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 import { describe, expect, it } from 'vitest'
 import {
   isMostlyQuotation,
@@ -66,6 +69,19 @@ describe('stripHtmlToProse', () => {
   it('does not weld an unpunctuated paragraph onto the next', () => {
     const out = stripHtmlToProse('<p>What it costs</p><p>Less than you think.</p>')
     expect(sentences(out)).toHaveLength(2)
+  })
+
+  it('does not double-unescape an entity the document spells out', () => {
+    // `&amp;lt;` is how a page writes a literal `&lt;` for the reader. Decoding
+    // `&amp;` before `&lt;` turns it into a real `<`, which then reads as a tag
+    // rather than as the text the author wrote.
+    expect(stripHtmlToProse('<p>Write &amp;lt;p&amp;gt; to show a tag.</p>')).toBe(
+      'Write &lt;p&gt; to show a tag.',
+    )
+  })
+
+  it('still decodes a plain ampersand', () => {
+    expect(stripHtmlToProse('<p>Search &amp; rescue.</p>')).toBe('Search & rescue.')
   })
 
   it('replaces code spans rather than reading them as words', () => {

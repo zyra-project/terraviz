@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Unit tests for the feed-connector registry store, run against the
  * real migration SQL via the `asD1` / `seedFixtures` harness — which

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 import { vi } from 'vitest'
 
 // happy-dom does not implement the Canvas 2D API. Stub it globally so any

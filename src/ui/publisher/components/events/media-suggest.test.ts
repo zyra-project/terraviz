@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Tests for the media-suggestion builders (task: media suggestion
  * engine) — the Worldview snapshot candidate's geometry, date, and
