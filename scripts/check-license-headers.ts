@@ -267,12 +267,25 @@ export function addHeader(file: string, text: string, style: CommentStyle): stri
   const rest = lines.slice(skip)
 
   // Consume a header that is already there but wrong, so repair never stacks.
-  const staleSpdx = new RegExp(`^${escapeRe(style.open)}\\s*${escapeRe(SPDX)}`)
-  const anyCopyright = new RegExp(`^${escapeRe(style.open)}\\s*Copyright\\b`)
+  //
+  // Matched on the comment MARKER rather than on `style.open`, which carries a
+  // trailing space. Requiring that space verbatim made `//SPDX-License-Identifier:
+  // Apache-2.0` — the same header a space short — invisible to the repair, so
+  // `--fix` prepended a second one above it. The check rejects that line (it is
+  // not the exact expected text), which is right; what was wrong is that the
+  // repair could not then put it right. Every comment style was affected.
+  const marker = escapeRe(style.open.trimEnd())
+  const staleSpdx = new RegExp(`^${marker}\\s*${escapeRe(SPDX)}`)
+  const anyCopyright = new RegExp(`^${marker}\\s*Copyright\\b`)
   if (staleSpdx.test(rest[0] ?? '')) {
     rest.shift()
     if (anyCopyright.test(rest[0] ?? '')) rest.shift()
   }
+  // A copyright line with no SPDX line above it is deliberately NOT consumed.
+  // Ours never appears that way, so such a line is somebody else's notice —
+  // vendored code, or a file with third-party provenance — and silently
+  // replacing it with our holder is the one failure worse than a missing
+  // header. `EXEMPT` is the intended answer for those files.
 
   // A prologue is already followed by a blank line in some files. Do not leave
   // two, and do not leave zero.

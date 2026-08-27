@@ -303,6 +303,49 @@ describe('--fix is idempotent and repairs rather than stacks', () => {
     expect(after).toContain(' * What this file is for.')
   })
 
+  it('repairs a header written without the space after the comment marker', () => {
+    // Found in review. The repair used to match `style.open` verbatim, trailing
+    // space included, so a header one space short was invisible to it and
+    // `--fix` prepended a second one above the first.
+    const before = `//${SPDX}\n//${COPYRIGHT}\n\nexport const x = 1\n`
+    const after = addHeader('a.ts', before, slash)
+    expect(after.split('\n').filter(l => l.includes(SPDX))).toHaveLength(1)
+    expect(hasHeader('a.ts', after, slash)).toBe(true)
+  })
+
+  it('repairs a marker-without-space header in EVERY comment style', () => {
+    // The bug was in the shared code path, so one style passing proves nothing.
+    const cases: Array<[string, string]> = [
+      ['a.ts', `//${SPDX}\n//${COPYRIGHT}\n\nexport const x = 1\n`],
+      ['a.css', `/*${SPDX}*/\n/*${COPYRIGHT}*/\n\nbody { color: red }\n`],
+      ['a.py', `#${SPDX}\n#${COPYRIGHT}\n\nimport sys\n`],
+      ['a.html', `<!--${SPDX}-->\n<!--${COPYRIGHT}-->\n\n<div></div>\n`],
+      ['a.sql', `--${SPDX}\n--${COPYRIGHT}\n\nSELECT 1;\n`],
+    ]
+    for (const [file, before] of cases) {
+      const style = commentStyle(file)!
+      const after = addHeader(file, before, style)
+      expect(after.split('\n').filter(l => l.includes(SPDX)), file).toHaveLength(1)
+      expect(hasHeader(file, after, style), file).toBe(true)
+    }
+  })
+
+  it('repairs a header written with extra spaces after the marker', () => {
+    const before = `//   ${SPDX}\n//   ${COPYRIGHT}\n\nexport const x = 1\n`
+    const after = addHeader('a.ts', before, slash)
+    expect(after.split('\n').filter(l => l.includes(SPDX))).toHaveLength(1)
+    expect(hasHeader('a.ts', after, slash)).toBe(true)
+  })
+
+  it('does NOT consume a bare copyright line that is not ours', () => {
+    // A copyright with no SPDX line above it is somebody else's notice, and
+    // quietly overwriting it with our holder is worse than a missing header.
+    // Such files belong in EXEMPT; the repair must not eat the line meanwhile.
+    const before = `// Copyright 2019 Some Other Author\n\nexport const x = 1\n`
+    const after = addHeader('a.ts', before, slash)
+    expect(after).toContain('Copyright 2019 Some Other Author')
+  })
+
   it('repairs a stale holder instead of stacking a second header above it', () => {
     const before = `// ${SPDX}\n// Copyright 2024 Somebody Else\n\nexport const x = 1\n`
     const after = addHeader('a.ts', before, slash)
