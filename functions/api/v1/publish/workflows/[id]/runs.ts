@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * GET /api/v1/publish/workflows/{id}/runs — run history (Phase Z1,
  * `docs/ZYRA_INTEGRATION_PLAN.md` §API surface). Newest first,

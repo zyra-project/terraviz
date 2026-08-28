@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * `terraviz migrate-r2-assets` — migrate auxiliary asset URLs
  * (thumbnail / legend / caption / color-table) from NOAA-hosted

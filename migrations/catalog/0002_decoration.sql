@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0002_decoration.sql — Phase 1a — many-to-many decoration tables.
 --
 -- Each table is keyed by dataset_id with ON DELETE CASCADE so a

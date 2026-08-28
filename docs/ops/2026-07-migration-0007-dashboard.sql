@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- Migration 0007 applied via the Cloudflare dashboard D1 console
 -- (Storage & Databases → D1 → sphere-feedback → Console), for deploys
 -- where running `wrangler d1 migrations apply FEEDBACK_DB --remote`

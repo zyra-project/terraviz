@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * D1 reader / writer for the user-administration surface
  * (`/api/v1/publish/publishers/**`). Mirrors the shape of

@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0026_feed_connectors.sql — node-configurable current-events feed
 -- registry (docs/CURRENT_EVENTS_PLAN.md §9, the Phase-3 feed console).
 --

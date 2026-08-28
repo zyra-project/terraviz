@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Per-node feature-toggle constants shared by the publisher API
  * (`functions/`) and the portal + public SPA (`src/`). Mirrors the

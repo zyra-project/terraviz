@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Shared types + pure helpers for the Events-tab redesign
  * (`docs/events-tab-handoff/EVENTS_TAB_IMPLEMENTATION_BRIEF.md`). The

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Tests for the blog authoring list — the public "View post" link on
  * published rows (and its absence on drafts).

@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0005_publishers_audit.sql — Phase 1a — publishers + audit_events.
 --
 -- publishers is the row a Cloudflare Access middleware JIT-creates

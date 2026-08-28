@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 // Apache-2.0
 //
 // Export the §8 "Tap to place Earth on your desk" model.

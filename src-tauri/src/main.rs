@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 // Desktop binary entry point. Mobile (iOS / Android) does not use this file —
 // it loads `terraviz_lib::run` directly via `tauri::mobile_entry_point`.
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * R2-backed frame cache for real-time Zyra workflow runs
  * (`docs/ZYRA_INTEGRATION_PLAN.md` §Real-time frame store, stage 1).

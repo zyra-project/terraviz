@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Tests for the tour media rail — the responsive, layout-owned home
  * for positionless `showImage` / `playVideo` overlays (task: tour

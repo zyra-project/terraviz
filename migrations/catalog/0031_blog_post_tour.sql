@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- Companion-tour linkage for blog posts (task: blog ↔ tour).
 --
 -- `tour_id` holds the tours-row ULID of the post's AI-generated

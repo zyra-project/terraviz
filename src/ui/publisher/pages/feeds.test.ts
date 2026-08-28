@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Tests for the /publish/feeds console — privileged gate, connector
  * rows (state + bookkeeping), preset gallery add/added states,

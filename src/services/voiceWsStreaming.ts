@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Realtime WebSocket streaming STT engine (Phase 3) — live interim
  * transcripts over Cloudflare's Deepgram Nova-3/Flux endpoint.

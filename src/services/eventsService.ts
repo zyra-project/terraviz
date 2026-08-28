@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Client for the public approved-events list (`GET /api/v1/events`) — the
  * data behind the catalog Map / Timeline event overlays

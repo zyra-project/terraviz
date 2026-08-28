@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Publish a directory of frames as an image-sequence asset
  * (`docs/ZYRA_INTEGRATION_PLAN.md` §Real-time frame store, stage 3 —

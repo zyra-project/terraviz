@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Shared i18n bootstrap for entry points (`main.ts`, `orbitMain.ts`,
  * future entries). Synchronously initializes the runtime in English,

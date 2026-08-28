@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * The data behind Orbit's answers about values (`docs/DATA_ANALYSIS_PLAN.md`
  * §A6, Group D).

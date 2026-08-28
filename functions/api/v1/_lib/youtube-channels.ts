@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Reputable-channel allowlist for the agency-YouTube media source
  * (task: media suggestion engine).

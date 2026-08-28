@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0001_init.sql — Phase 1a — node_identity + datasets core.
 --
 -- Establishes the node identity row (one row, ULID-keyed) and the

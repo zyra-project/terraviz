@@ -1,4 +1,7 @@
 #!/usr/bin/env -S npx tsx
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * `transcode-from-dispatch` — invoked by the `transcode-hls` GitHub
  * Actions workflow when the publisher portal fires a

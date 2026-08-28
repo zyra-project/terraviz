@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * In-AR DOM zoom slider for screen-tap and transient-pointer devices.
  *

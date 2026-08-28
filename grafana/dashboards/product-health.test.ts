@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Structural validation for the Product Health dashboard's
  * migration row (Phase 3 commit G).

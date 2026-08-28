@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0014_datasets_frame_metadata.sql — Phase 3pf — image-sequence
 -- frame metadata on the `datasets` row.
 --

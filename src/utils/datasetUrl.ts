@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Dataset URL grammar — the single place that knows how a dataset is
  * named in a URL and how a URL reference resolves back to a catalog

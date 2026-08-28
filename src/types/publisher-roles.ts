@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Publisher roles & capabilities — the single source of truth for the
  * portal's authorization model, shared by the Cloudflare Pages

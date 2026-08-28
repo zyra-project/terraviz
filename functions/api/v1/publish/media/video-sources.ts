@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * GET/POST /api/v1/publish/media/video-sources — the node's registry of
  * non-YouTube Video Sitemaps for the media-suggestion engine (task:

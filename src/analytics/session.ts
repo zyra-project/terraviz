@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Session lifecycle helper — builds the `session_start` event from
  * runtime signals, then registers a `pagehide` listener that emits

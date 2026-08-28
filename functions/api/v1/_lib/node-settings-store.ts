@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * `node_settings` singleton row helpers
  * (`migrations/catalog/0037_node_settings.sql`) — the per-node

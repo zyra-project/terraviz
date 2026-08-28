@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Shared current-events ingestion logic — the parse + upsert + match
  * core used by both the create route (`POST /api/v1/publish/events`,

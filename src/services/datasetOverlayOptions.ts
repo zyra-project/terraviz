@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Pure helpers for the Phase 3e dataset-overlay rendering path.
  *

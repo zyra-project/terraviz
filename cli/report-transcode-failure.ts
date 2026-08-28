@@ -1,4 +1,7 @@
 #!/usr/bin/env -S npx tsx
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * `report-transcode-failure` — releases a dataset's `transcoding` lock
  * when the `transcode-hls` job fails or times out.

@@ -2,6 +2,7 @@
 name = "terraviz"
 version = "0.1.0"
 description = "Terraviz — NOAA Science On a Sphere desktop app"
+license = "Apache-2.0"
 authors = ["Zyra Project"]
 edition = "2021"
 

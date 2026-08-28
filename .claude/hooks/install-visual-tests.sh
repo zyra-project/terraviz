@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The Zyra Project
+
 # SessionStart hook: prime the Playwright-based visual-testing surface
 # (npm run screenshots:* — see scripts/screenshots/ and
 # docs/VISUAL_REPORT_PLAN.md) so a fresh web-session container is

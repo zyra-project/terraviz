@@ -207,6 +207,9 @@ Real work, correctly not now.
   is on-hardware validation, which needs hardware time rather than a
   roadmap slot.
 
+### Installation displays — LED spheres, domes, and projector walls
+The people standing in front of a physical Science On a Sphere are the audience this project was named for, and today it cannot drive one. A second window rendering a projection-correct equirectangular view of the same globe the operator is steering would let a museum run the whole exhibit from this app — and the same plumbing serves planetarium domes, edge-blended projector arrays, and a presenter mirroring onto a lecture-hall wall. Design doc: [`docs/MULTI_MONITOR_PLAN.md`](docs/MULTI_MONITOR_PLAN.md) (desktop only; planned, not built).
+
 ---
 
 ## What shipped

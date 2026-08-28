@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Atmospheric scattering constants and GLSL snippets, shared between
  * the boot Earth (MapLibre custom layer in `earthTileLayer.ts`) and

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Unit tests for the current-events ingestion core
  * (`docs/CURRENT_EVENTS_PLAN.md` §9) — focused on the hand-picked

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Tests for `cli/lib/migration-telemetry.ts` (Phase 3 commit C helper).
  *

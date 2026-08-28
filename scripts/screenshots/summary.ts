@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * PR-comment / job-summary markdown for the visual report (Phase V5).
  *

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Typed errors used by the storage helpers (`r2-store.ts`,
  * `stream-store.ts`) so the route handlers can distinguish

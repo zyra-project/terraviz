@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * GET /api/v1/blog/:slug — one published post, hydrated for the public
  * page (Phase 3d).

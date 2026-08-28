@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Wire-level tests for GET /api/v1/featured-event — the public read of
  * the event that headlines the "Right now" hero.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * scripts/check-pages-bindings.ts — audit Pages bindings against
  * the expected manifest.

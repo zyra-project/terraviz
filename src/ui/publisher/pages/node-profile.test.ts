@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Tests for the /publish/node-profile page — form rendering from the
  * stored profile, the privileged gate, and the PUT body the Save

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 // LLM API key storage. Desktop platforms (macOS, Windows, Linux) and iOS use
 // the OS keychain via the `keyring` crate. Android has no `keyring` backend
 // yet — see docs/MOBILE_APP_PLAN.md for the deferred secure-storage TODO. The

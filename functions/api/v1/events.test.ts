@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Wire-level tests for GET /api/v1/events — the public list of approved
  * current events for the catalog Map/Timeline overlays.

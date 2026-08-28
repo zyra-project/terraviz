@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 import { defineConfig, loadEnv } from 'vite'
 import path from 'path'
 import { readFileSync } from 'fs'

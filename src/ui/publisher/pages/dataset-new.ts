@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * /publish/datasets/new — thin page wrapper around the shared
  * dataset form. The bulk of the form (cards, validators, submit

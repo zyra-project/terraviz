@@ -1,4 +1,7 @@
 #!/usr/bin/env tsx
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Sweep probe: fetch every SOS tour.json referenced by
  * `public/assets/sos-dataset-list.json` (`runTourOnLoad` field),

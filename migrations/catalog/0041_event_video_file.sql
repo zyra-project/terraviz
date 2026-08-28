@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- Direct-file video for current events (task: video-sitemap media
 -- source). Sibling of `video_embed_url` (migration 0034), which holds a
 -- YouTube nocookie EMBED url rendered as an iframe. `video_file_url`

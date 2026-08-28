@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- Alt text for the event story image (task: media suggestion engine;
 -- media accessibility).
 --

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Minimal ISO 8601 duration parser scoped to the shapes the catalog's
  * `period` column carries. Phase 3pg/B uses it to turn a sequence

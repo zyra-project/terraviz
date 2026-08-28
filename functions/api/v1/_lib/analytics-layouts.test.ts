@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Round-trip tests for the analytics layout registry: every event
  * type is encoded through the REAL `toDataPoint()` from

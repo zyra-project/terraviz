@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- Cover image for blog posts (task: blog suggested media).
 --
 -- `cover_image_url` holds the post's own lead image — a curator pick

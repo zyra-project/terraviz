@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * check-migrations-additive — CI guard for auto-applied D1 migrations.
  *

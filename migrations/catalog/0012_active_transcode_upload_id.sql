@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0012_active_transcode_upload_id.sql — Phase 3pd-followup —
 -- bind the active transcode to a specific asset_uploads row.
 --

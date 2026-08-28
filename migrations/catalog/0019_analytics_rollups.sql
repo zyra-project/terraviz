@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0019_analytics_rollups.sql — Phase A of
 -- docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md — long-term analytics
 -- rollup tables fed by the nightly export job

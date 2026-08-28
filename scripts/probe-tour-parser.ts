@@ -1,4 +1,7 @@
 #!/usr/bin/env tsx
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * One-shot probe: fetch a real SOS tour.json and run it through
  * the Phase 3c parser to verify the classification + asset

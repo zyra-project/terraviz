@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Tools Menu UI — single wrench-icon button plus a collapsible popover
  * that hosts every map-related toggle, the viewport layout picker,

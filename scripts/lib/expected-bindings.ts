@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Expected binding manifest for the production Cloudflare Pages
  * project. The check-pages-bindings script (Phase 1f/B) diffs the

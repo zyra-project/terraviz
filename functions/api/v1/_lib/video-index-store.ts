@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * D1 store for the materialized, embedded video index (`video_index`,
  * migration 0040; task: video-sitemap media source).

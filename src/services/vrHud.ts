@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Floating in-VR HUD — a small panel with dataset title, play/pause
  * button, and exit-VR button. Rendered as a `CanvasTexture` on a

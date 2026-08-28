@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Schedule math for Zyra workflows (Phase Z1,
  * `docs/ZYRA_INTEGRATION_PLAN.md` §Data model).

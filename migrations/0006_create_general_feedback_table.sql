@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- Create general_feedback table for app-level user reports
 -- (bug reports, feature requests, other feedback) — kept separate from
 -- the AI response feedback table since the shape and constraints differ.

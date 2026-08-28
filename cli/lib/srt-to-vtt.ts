@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * SRT → WebVTT converter. Phase 3b uses this inline during the
  * caption-asset migration so every caption in R2 ends up as

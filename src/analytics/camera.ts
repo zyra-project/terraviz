@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Shared `camera_settled` helper — one emit path, one rounding
  * contract, one throttle budget for both the 2D MapLibre surface

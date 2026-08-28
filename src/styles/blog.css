@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright 2026 The Zyra Project */
+
 /* Public blog surface (/blog, /blog/:slug) — Phase 3d.
    Static content pages: a readable measure on the app's dark theme,
    logical inline properties throughout (RTL-safe). */

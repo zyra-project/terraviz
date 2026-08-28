@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Unit tests for the generic RSS 2.0 / Atom → current-event mapper.
  * Fixtures mirror the real feed shapes the preset catalog points at:
