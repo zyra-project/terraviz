@@ -876,28 +876,50 @@ ownership of the playhead. It reports; the controller steers.
 
 Every decoder cap in the codebase today is **per window**, and
 outputs are the first thing that breaks that assumption.
-`MAX_PANELS = 4` (`src/services/vrScene.ts:83`) records the
-reason in its docstring — *"Quest 2 has 1-2 H.264 decoders; 4 at
-the 4K/8K tier will push those hard"* — and the 2D
-`viewportManager` drives the same 1/2/4 ladder. Neither knows
-the other window exists.
 
-Four control panels plus four outputs is up to **eight
-concurrent hardware decoders on one GPU**. The ceiling is on
-decoders *existing*, not on frames being drawn, so it cannot be
+`maxVideoPanelsForViewport()`
+(`src/utils/deviceCapability.ts:81`) is the live one: pure,
+order-independent, returning `MAX_VIDEO_PANELS_PHONE = 2`
+(`:70`) when the viewport's *shorter* edge is ≤ 600 px and
+`UNCAPPED_VIDEO_PANELS = 4` (`:73`) otherwise.
+`maxVideoPanels()` (`:88`) applies it to
+`window.innerWidth / innerHeight` — **the calling window's own
+viewport**, which is precisely the blind spot. An output on a
+4K monitor answers "4" no matter what the control window is
+already holding. (`MAX_PANELS = 4` in
+`src/services/vrScene.ts:83` is a separate VR-side cap with the
+same shape.)
+
+Its docstring (`deviceCapability.ts:57-69`) is worth reading
+before designing around it. Measured on an iPhone 16 against
+the Climate Futures tour: four globes with no datasets is fine,
+four with *image* datasets is fine, and video dies somewhere
+between the second and third decoder — **while still loading,
+before anything animates**. The conclusion it draws is the one
+that governs here:
+
+> the ceiling is on video decoders *existing*, not on playback,
+> panel count, or WebGL contexts, and there is no window in
+> which to intervene once the layout has asked for four.
+> See terraviz#230.
+
+So four control panels plus four outputs is up to **eight
+concurrent decoders on one machine**, and the failure cannot be
 handled reactively: there is no degraded mode to fall back to
-and no window in which to notice, just a process that goes away
-(terraviz#230). On an installation that is the whole exhibit
-going dark.
+and no moment in which to notice, just a process that goes
+away. On an installation that is the whole exhibit going dark,
+in front of visitors, with the operator's own window taking it
+down.
 
 v1 therefore gives the manager a single budget spanning every
 window it has spawned:
 
 | | |
 |---|---|
-| **Budget** | `MAX_CONCURRENT_DECODERS`, default 4, lowered per-machine in the Outputs panel for hardware known to be tighter |
-| **Counted** | one per video dataset in the control window's panels, plus one per output currently showing a video dataset. Image datasets and the calibration pattern cost nothing. |
-| **Enforced** | at both spawn time and layout change — whichever action would cross the budget is refused, with a message naming what to close first |
+| **Budget** | `MAX_CONCURRENT_DECODERS`, seeded from the control window's own `maxVideoPanels()` so the existing phone/desktop policy still applies, and lowered per-machine in the Outputs panel for hardware known to be tighter |
+| **Counted** | one per video dataset in the control window's panels, plus one per output currently showing a video dataset. Image datasets and the calibration pattern cost nothing — matching the measurement, which found four image panels fine and three video ones fatal. |
+| **Enforced** | at both spawn time and layout change — whichever action would cross the budget is refused, with a message naming what to close first. Enforced *before* the decoder is built, since after is too late. |
+| **Not enforced** | by an output asking `maxVideoPanels()` itself. That reads the output's own viewport and would answer 4 on any monitor worth attaching, which is the bug. The manager owns the count; outputs are told. |
 | **Not enforced** | by killing an existing decoder. Silently tearing down a running output to make room for a control-window layout change is the worse failure. |
 
 The honest cost: on the default budget, an operator running 4
@@ -2315,6 +2337,7 @@ be needed:
 | `src/services/datasetOverlayOptions.ts` | `overlayOptionsFromDataset` and `isEarthBody` — the overlay bundle the broadcast carries. |
 | `src/services/colorScaleDisplay.ts` | `ColorScaleDisplay` and `buildDisplayLut` — the mirrored display transform. |
 | `src/services/hlsService.ts:47,431` | The retry budget that already exists, so the output does not add a second one. |
+| `src/utils/deviceCapability.ts:57-90` | `maxVideoPanels` and the terraviz#230 measurement behind it — the per-window cap the cross-window budget has to replace. |
 
 ---
 
