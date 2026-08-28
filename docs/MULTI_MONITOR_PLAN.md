@@ -154,14 +154,18 @@ literally pass the primary's `<video>` to the output window.
 
 For v1: the output window receives the dataset URL from the
 control window via Tauri events, creates its own `HLSService`,
-and decodes independently. The control window broadcasts
-`currentTime` and `paused` once per second; the output runs a
-three-region correction algorithm (tolerance / soft `playbackRate`
-nudge / hard seek with hysteresis) — see §3 "Playback sync
-algorithm" for the exact thresholds, transitions, and edge
-cases. Drift is typically <100 ms in practice — imperceptible
-on an LED sphere where each pixel covers a non-trivial physical
-area.
+and decodes independently. The control window broadcasts the
+primary's **date**, duration, range, `playbackRate` and paused
+flag; the output feeds those to
+`computeSiblingSyncCorrection()` (`src/utils/time.ts:294-350`)
+— the same pure control law multi-globe sibling sync already
+uses — and applies the rate trim or seek it returns. See §3
+"Playback sync algorithm" for the call, the `readyState` gate,
+and the read-back verification layer that sits beside it.
+
+An output is, to that function, just another sibling viewport;
+the only thing genuinely new here is that it lives in a second
+window.
 
 A future Phase 5 polish (see Roadmap) could introduce a shared
 GPU texture handle to eliminate the second decoder. We don't
@@ -518,103 +522,279 @@ a `requestAnimationFrame` driver that early-outs on a
 The output's local `<video>` element drives the texture and
 decodes independently of the control window's video (see
 "§1 constraint #4" above — separate webview, separate DOM,
-separate decoder). We
-have to keep it within ~200 ms of the broadcast `currentTime`
-without making the correction itself perceptible. A hard
-`videoEl.currentTime = ...` reseek every second would jitter
-the texture; an unbounded soft `playbackRate` adjustment would
-take minutes to converge from a multi-second drift.
+separate decoder). Keeping the two within a couple of frames
+of each other, without the correction itself becoming visible,
+is the whole problem.
 
-The compromise is a three-region algorithm with hysteresis,
-applied each time a `{ playback: { currentTime, paused } }`
-diff arrives (~1 Hz):
+**`main` already solves it, and already solves it as a pure
+function.** `computeSiblingSyncCorrection()`
+(`src/utils/time.ts:294-350`) was extracted from multi-globe
+sibling drift correction (terraviz#132) precisely so the
+control law could be unit-tested away from the DOM. It takes
+plain numbers and `Date`s, returns
+`{ position, targetTime, rate, shouldSeek }`, and touches no
+renderer, no video element, and no app state. An output window
+in a second webview can import and call it unchanged — it is a
+sibling viewport in every sense that matters to the maths, just
+one that happens to live in another window.
+
+So this section specifies **what to feed it and what to do with
+its answer**. It does not restate a control law. An earlier
+draft of this plan re-derived one — a three-region
+tolerance / soft-nudge / hard-seek scheme with its own
+hysteresis pair and its own constants — and that is deleted. It
+was worse than the shipped function in four specific ways, each
+of which reuse fixes for free:
+
+| The re-derived scheme | `computeSiblingSyncCorrection` |
+|---|---|
+| Synced raw `currentTime` | Syncs a real-world **date**, so it still works when the two elements have different durations or different temporal ranges |
+| Hard-wrote `playbackRate = 1.0` on every correction | Takes `primaryPlaybackRate` and scales the pacing ratio by it — the tour-rate race below |
+| Fixed ±5 % nudge behind a 100 ms / 50 ms hysteresis pair | Proportional rate trim (gain 0.5, capped at ±25 %), so there is no hysteresis state to flap and no band to tune |
+| Froze correction below `readyState` 3 | Steers from `HAVE_METADATA` (1) — see "The `readyState` gate" below |
+
+#### What the broadcast carries
+
+Not `currentTime`. The `playback` block of the mirrored state
+becomes the four things the function needs about the primary,
+plus the pause flag:
+
+| Field | Type | Why |
+|---|---|---|
+| `playback.date` | ISO 8601 string | The real-world instant the primary is showing. This is the sync target; the output deserialises it to a `Date`. |
+| `playback.paused` | boolean | Unchanged. |
+| `playback.playbackRate` | number | The primary's **current** rate, not an assumed `1.0`. See below. |
+| `primary.duration` | seconds | The primary video's duration. |
+| `primary.rangeMs` | number | The primary dataset's temporal span, `end - start` in ms. |
+
+The output supplies the other half of the call from what it
+already knows locally — its own `videoEl.currentTime`, its own
+`duration`, and its own dataset's `start` / `end`.
+
+Sending a date rather than a playhead is what makes the
+broadcast **self-describing**. A `currentTime` is only
+meaningful against one specific element: if the output rebuilt
+its HLS instance, landed on a different rendition, or is a diff
+behind on a dataset change, applying a raw playhead silently
+shows the wrong moment with no way to notice. A date is
+checkable — and it is exactly what the read-back layer below
+needs. In the common mirroring case the two ranges are
+identical and the pacing ratio is 1; that is the degenerate
+case of the general one, not a different code path.
+
+**`playbackRate` is not optional, and its absence is a bug we
+have already shipped once.** The tour engine's `frameRate` task
+computes `rate = requestedFps / datasetFps`, clamped to
+`[0.03, 4]` (`src/services/tourEngine.ts:946-957`) and applies
+it to the primary alone — a 5 fps request against a 30 fps
+dataset is 0.167×. An output that assumes 1.0 runs ~6× fast,
+races ahead, hard-seeks back, and repeats, for the whole tour.
+That is terraviz#229 reproduced in a second window, and it
+collides head-on with this plan's own tour-integration section.
+The function's `primaryPlaybackRate` parameter exists for
+exactly this and defaults to 1 only for callers that genuinely
+have no rate to report.
+
+#### The call
 
 ```ts
-// Pseudocode in output/datasetMirror.ts, called per playback diff.
-const local = videoEl.currentTime
-const drift = local - broadcast.currentTime  // +ahead, -behind
-const abs = Math.abs(drift)
+// src/output/datasetMirror.ts — on each playback diff, and per
+// rAF while playing.
+import {
+  computeSiblingSyncCorrection,
+  SIBLING_MIN_READY_STATE,
+} from '../utils/time'
 
-if (paused) {
+if (!videoEl || videoEl.readyState < SIBLING_MIN_READY_STATE) return
+if (!(videoEl.duration > 0)) return
+
+const { position, targetTime, rate, shouldSeek } = computeSiblingSyncCorrection({
+  date: new Date(state.playback.date),
+  sibCurrentTime: videoEl.currentTime,
+  sibDuration: videoEl.duration,
+  sibStart, sibEnd,                        // this output's own range
+  primaryDuration: state.primary.duration,
+  primaryRangeMs: state.primary.rangeMs,
+  hardSeekThresholdS: HARD_SEEK_THRESHOLD_S,
+  primaryPlaybackRate: state.playback.playbackRate,
+})
+
+if (position !== 'inside' || state.playback.paused) {
   if (!videoEl.paused) videoEl.pause()
-  return                               // suspend correction while paused
-}
-if (videoEl.paused) videoEl.play()     // unpause if needed
-
-if (abs >= HARD_SEEK_THRESHOLD) {       // 2.0 s
-  videoEl.currentTime = broadcast.currentTime
-  videoEl.playbackRate = 1.0
-  state.correcting = false
+  if (shouldSeek) videoEl.currentTime = targetTime
   return
 }
-
-if (state.correcting) {
-  // Inner band: drift converged; release the rate adjustment.
-  if (abs < INNER_HYSTERESIS) {        // 50 ms
-    videoEl.playbackRate = 1.0
-    state.correcting = false
-  }
-  return
-}
-
-if (abs >= OUTER_HYSTERESIS) {          // 100 ms
-  // Soft nudge: 5 % rate change in the catch-up direction.
-  videoEl.playbackRate = drift > 0 ? 0.95 : 1.05
-  state.correcting = true
-}
+if (videoEl.paused) void videoEl.play()
+videoEl.playbackRate = rate
+if (shouldSeek) videoEl.currentTime = targetTime
 ```
 
-Three regions:
+The three state changes the earlier draft handled with special
+cases — operator pause, operator seek, re-entry from
+out-of-range — are not special cases here. A pause is the
+`paused` branch; a seek is simply a large `error` that trips
+`shouldSeek`; an out-of-range date returns
+`position !== 'inside'` and pins the output to its nearest
+boundary frame. Only a dataset change still needs its own path
+(tear down the HLS instance, build a new one, then let the
+first correction land once metadata is in).
 
-| Region | Drift | Action |
-|---|---|---|
-| **Tolerance** | < 100 ms | No action — within decoder jitter and below perceptual threshold |
-| **Soft nudge** | 100 ms – 2 s | `playbackRate = 0.95` (ahead) / `1.05` (behind). Held until drift drops below 50 ms (inner hysteresis), then `playbackRate = 1.0` |
-| **Hard seek** | ≥ 2 s | `videoEl.currentTime = broadcast.currentTime`. Visible jump but the alternative (soft catch-up at 5 %/s for >40 s) is worse |
+`hardSeekThresholdS` is a caller parameter rather than a
+constant inside `time.ts`, deliberately — the threshold is a
+policy the caller owns. The control window passes
+`SIBLING_HARD_SEEK_THRESHOLD_S = 0.5` (`src/main.ts:164`), whose
+docstring records why: below it the proportional rate trim
+closes drift smoothly, and a hard seek interrupts decode and
+flickers the panel (terraviz#229), so it should fire only for a
+real desync. An output should pass the same value, for the same
+reason and with more at stake — a flicker an operator would
+shrug at is a flicker across an 8K LED sphere in a gallery.
 
-The hysteresis pair (100 ms enter, 50 ms exit) prevents
-flapping between the tolerance band and soft-nudge region. The
-5 % rate cap is below the perceptual threshold for most
-viewers — speech intelligibility is the most sensitive cue and
-typically tolerates ±6-10 %; video alone tolerates more.
-Convergence time scales with starting drift: 100 ms → 2 s,
-1 s → 20 s, both well under the 2 s hard-seek threshold.
+#### The `readyState` gate
 
-**State changes that bypass the algorithm:**
+Steer from `readyState >= SIBLING_MIN_READY_STATE`, importing
+the constant rather than re-declaring the number.
 
-- **Operator pauses** (`paused` flips to true) → `videoEl.pause()`
-  immediately. Drift correction suspended until unpause.
-- **Operator seeks** (the playback diff carries a discontinuity
-  in `currentTime` — detected as `|local - broadcast| > 5 s`
-  while operator was already in the tolerance band on the
-  previous tick) → hard seek to broadcast `currentTime`,
-  reset rate.
-- **Dataset change** → tear down the HLS instance, start a
-  new one; sync to broadcast `currentTime` once `'canplay'`
-  fires.
-- **HLS buffering / stall** (`videoEl.readyState < 3`) →
-  freeze drift state; resume correction once `readyState >= 3`.
-  Avoids spurious "behind" drift readings during stalls.
+The earlier draft froze correction below `readyState` 3
+(`HAVE_FUTURE_DATA`) to avoid "spurious behind-drift readings
+during stalls". That gate is **stricter than the value `main`
+documents as a bug**, and on a looping installation asset it is
+the difference between a sphere that wraps and a sphere that
+stops. `SIBLING_MIN_READY_STATE = 1`
+(`src/utils/time.ts:228`) carries a standing warning against
+raising it (`time.ts:200-227`):
 
-**What's not the algorithm's job:**
+> **Do not raise this to `HAVE_CURRENT_DATA` (2).** That is
+> where it sat until it caused the loop-wrap stall.
+
+The mechanism: the auto-loop pauses the primary just short of
+`duration`, which parks every sibling at that same near-end
+position, and a MediaSource-backed element seeked to within
+roughly one segment of its buffered end sits at `HAVE_METADATA`
+indefinitely. The gate then skips exactly the element that is
+stuck, at exactly the moment it needs seeking home. Measured in
+Chromium, a `currentTime` write recovers such an element in
+≤16 ms; skipping it strands the panel until the browser
+re-buffers on its own.
+
+A draft gate of 3 is two steps past the value that broke, so it
+fails in the same way and sooner. It would strand a looping
+output at *every* wrap — which, for a 30-second SOS loop
+running unattended in a gallery, means a black or frozen sphere
+within the first minute and no operator watching to notice.
+`HAVE_NOTHING` (0) stays excluded, because `duration` is `NaN`
+there and would poison the mapping.
+
+#### Read-back verification
+
+`currentTime` is valid for *steering* and invalid for
+*asserting that a panel shows the right frame*. `main` learned
+this the hard way and carries a separate layer for it;
+an output needs the same one, and needs it more, because
+nobody is looking at the sphere.
+
+`shownFrameTime()` (`src/utils/time.ts:398`) documents the two
+ways the element's clock lies about the picture: a seek reads
+back its target instantly while the element is still buffering,
+and a surface whose repaint chain has broken keeps advancing
+its clock over a texture that stopped updating. Both report
+perfect alignment from `currentTime` while showing a stale
+frame. The second is not hypothetical here — it is precisely
+what this plan's own "early-out when nothing changed" render
+loop (see "Per-frame flow inside the output window") produces
+if the early-out and the texture upload ever disagree.
+
+So the output carries a second, independent layer:
+
+1. Record `uploadedFrameTime` — the playhead at the moment a
+   frame was actually written into the Three.js texture, not
+   the moment it was requested.
+2. Once per second (not per frame), call `verifySiblingTime()`
+   (`src/utils/time.ts:442`) with
+   `sibFrameTime: shownFrameTime(uploadedFrameTime, videoEl.currentTime)`
+   and the broadcast date as `labelDate`.
+3. `alignment: 'aligned'` → nothing. `'uncovered'` → nothing;
+   the date is outside this output's range and the pinned
+   boundary frame is correct. `'off'` → force a texture upload
+   (repaint repair), and if it is still `'off'` on three
+   consecutive checks, report `output_frame_stale` to the
+   manager, which renders a health badge in the Outputs panel.
+
+**This layer never seeks.** `verifySiblingTime`'s docstring is
+explicit that it is a verification and not a correction, because
+re-seeking from here would fight the sync controller for
+ownership of the playhead. It reports; the controller steers.
+
+#### Cross-window decoder budget
+
+Every decoder cap in the codebase today is **per window**, and
+outputs are the first thing that breaks that assumption.
+`MAX_PANELS = 4` (`src/services/vrScene.ts:80`) records the
+reason in its docstring — *"Quest 2 has 1-2 H.264 decoders; 4 at
+the 4K/8K tier will push those hard"* — and the 2D
+`viewportManager` drives the same 1/2/4 ladder. Neither knows
+the other window exists.
+
+Four control panels plus four outputs is up to **eight
+concurrent hardware decoders on one GPU**. The ceiling is on
+decoders *existing*, not on frames being drawn, so it cannot be
+handled reactively: there is no degraded mode to fall back to
+and no window in which to notice, just a process that goes away
+(terraviz#230). On an installation that is the whole exhibit
+going dark.
+
+v1 therefore gives the manager a single budget spanning every
+window it has spawned:
+
+| | |
+|---|---|
+| **Budget** | `MAX_CONCURRENT_DECODERS`, default 4, lowered per-machine in the Outputs panel for hardware known to be tighter |
+| **Counted** | one per video dataset in the control window's panels, plus one per output currently showing a video dataset. Image datasets and the calibration pattern cost nothing. |
+| **Enforced** | at both spawn time and layout change — whichever action would cross the budget is refused, with a message naming what to close first |
+| **Not enforced** | by killing an existing decoder. Silently tearing down a running output to make room for a control-window layout change is the worse failure. |
+
+The honest cost: on the default budget, an operator running 4
+globes cannot also add a video output, and an operator with an
+output live cannot switch to the 4-globe layout. That is a real
+restriction and it will be the first thing anyone hits. It is
+still the right trade — a refused layout change is recoverable
+in one click, and a decoder-ceiling crash takes the installation
+down mid-session with no recovery at all. Phase 5's
+shared-GPU-texture work is what actually lifts the ceiling
+rather than rationing under it.
+
+#### What's not the algorithm's job
 
 - A/V sync within a single decoder — the browser's `<video>`
   handles that. We only correct between decoders.
 - Cross-output coherence — outputs A and B both sync to the
-  control window, not to each other. Worst case they're each
-  100 ms off the control window in opposite directions, so
-  200 ms apart. Acceptable on physically-separated outputs;
-  if it ever isn't (twin-LED-sphere installation), Phase 5's
+  control window's date, not to each other. Because they share
+  a target rather than chaining, their worst-case separation is
+  bounded by twice the hard-seek threshold rather than
+  compounding. Acceptable on physically-separated outputs; if it
+  ever isn't (twin-LED-sphere installation), Phase 5's
   shared-GPU-texture work eliminates the second decoder.
+- Re-deriving any part of the control law. If the sync
+  behaviour needs to change, it changes in
+  `computeSiblingSyncCorrection` and both the control window and
+  every output inherit it — that single-source property is the
+  main reason for this rewrite.
 
 Constants live in `src/output/datasetMirror.ts` as named
-exports for tests:
+exports for tests. Note what is *not* here: no tolerance band,
+no hysteresis pair, no nudge magnitude, and no local
+`readyState` number — those all belong to `time.ts` now.
 
 ```ts
-export const TOLERANCE_MS = 100
-export const HARD_SEEK_THRESHOLD_MS = 2000
-export const INNER_HYSTERESIS_MS = 50
-export const SOFT_NUDGE_RATE = 0.05  // ±5 %
+/** Mirrors `SIBLING_HARD_SEEK_THRESHOLD_S` (`src/main.ts:164`) so
+ *  an output and a control-window panel correct identically. */
+export const HARD_SEEK_THRESHOLD_S = 0.5
+/** Read-back cadence. Once per second, never per frame. */
+export const VERIFY_INTERVAL_MS = 1000
+/** Consecutive `'off'` verdicts before reporting a stale frame. */
+export const STALE_FRAME_STRIKES = 3
+/** Cross-window ceiling — see "Cross-window decoder budget". */
+export const MAX_CONCURRENT_DECODERS = 4
 ```
 
 ### Failure recovery
