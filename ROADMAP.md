@@ -77,6 +77,9 @@ Many classrooms — and much of the world — don't have reliable broadband. Off
 ### Embeddability
 Educators should be able to drop a single dataset view into their own site with one line of HTML. An embeddable iframe mode would let the project spread through the tools teachers already use, rather than asking them to send students to a separate URL.
 
+### Installation displays — LED spheres, domes, and projector walls
+The people standing in front of a physical Science On a Sphere are the audience this project was named for, and today it cannot drive one. A second window rendering a projection-correct equirectangular view of the same globe the operator is steering would let a museum run the whole exhibit from this app — and the same plumbing serves planetarium domes, edge-blended projector arrays, and a presenter mirroring onto a lecture-hall wall. Design doc: [`docs/MULTI_MONITOR_PLAN.md`](docs/MULTI_MONITOR_PLAN.md) (desktop only; planned, not built).
+
 ---
 
 *The project exists because the inspiration that Science on a Sphere creates shouldn't be limited by where you happen to be standing. This roadmap is about closing the remaining gaps.*

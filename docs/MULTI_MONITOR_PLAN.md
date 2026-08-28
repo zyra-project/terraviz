@@ -10,6 +10,40 @@ similar 2:1-input device.
 Status: **draft for review.** Nothing implemented; this document
 exists to align scope and architecture before any code lands.
 
+**Last reviewed:** 2026-08-28 (reconciled against `main` @ `965d231`
+after ~200 PRs of drift; every `src/` citation below was verified
+against that commit).
+
+> **The line numbers in this doc are pinned to that commit and will
+> drift.** They already have once: in the nine commits between #395
+> and #404, `SIBLING_HARD_SEEK_THRESHOLD_S` changed file *and* value
+> while every other citation moved between +3 and +40 lines. A pass
+> that trusted stale line numbers drew two confidently wrong
+> conclusions. Re-verify against the tip before acting on any
+> citation here; the symbol names have been stable, the lines have
+> not.
+
+**Revisit when any of the following becomes true:**
+
+- Any ladder commit lands. Once code exists, this doc's claims about
+  `src/` are checkable against it rather than asserted, and the
+  sections describing what "must be added" become history.
+- The spike on Open Question 1 comes back negative — if borderless
+  fullscreen on a non-primary monitor does not work on a target
+  Linux compositor, the ladder's shape changes, not just its
+  timeline.
+- `computeSiblingSyncCorrection`, `SIBLING_MIN_READY_STATE`,
+  `SIBLING_HARD_SEEK_THRESHOLD_S` or `SIBLING_SEEK_EPS_S` change
+  signature or value. §3 delegates to all four rather than
+  restating them, so a change upstream silently changes this plan.
+- `globeThumbnail.ts` changes shape. The "Prior art" section and the
+  rescoping of delivery steps 2-4 both rest on it.
+- Tauri's capability model changes across a major version, or the
+  four permissions §6 asks for stop being the right set.
+- Six months pass with no implementation started. The `src/`
+  citations drift with every release whether or not anyone is
+  reading them.
+
 The motivating use cases are concrete and somewhat narrow:
 
 1. **Science On a Sphere–style LED globe.** The control window
