@@ -157,7 +157,7 @@ control window via Tauri events, creates its own `HLSService`,
 and decodes independently. The control window broadcasts the
 primary's **date**, duration, range, `playbackRate` and paused
 flag; the output feeds those to
-`computeSiblingSyncCorrection()` (`src/utils/time.ts:294-350`)
+`computeSiblingSyncCorrection()` (`src/utils/time.ts:334-390`)
 — the same pure control law multi-globe sibling sync already
 uses — and applies the rate trim or seek it returns. See §3
 "Playback sync algorithm" for the call, the `readyState` gate,
@@ -386,10 +386,10 @@ sequence:
 
 | `globeThumbnail.ts` | Output window |
 |---|---|
-| Lazy-imports Three.js behind a `loadThree` seam (`:195-197`), mirroring the VR / Orbit pattern so the portal bundle is unchanged until used | Same lazy import, same reason — see §7 |
+| Lazy-imports Three.js behind a `loadThree` seam (`:198-200`), mirroring the VR / Orbit pattern so the portal bundle is unchanged until used | Same lazy import, same reason — see §7 |
 | Builds `createPhotorealEarth` **in dataset mode**: data lit uniformly, no day/night terminator | Same, for a loaded dataset |
 | Wraps a 2:1 equirectangular frame onto a sphere from an `HTMLImageElement`, `HTMLCanvasElement` or `ImageBitmap` | Same, from a `VideoTexture` or decoded image |
-| Honours `lonOrigin`, `isFlippedInY`, `boundingBox` (regional data clipped over a base Earth) and non-Earth bodies via `isEarthBody` (`:320`) | Exactly the overlay contract above |
+| Honours `lonOrigin`, `isFlippedInY`, `boundingBox` (regional data clipped over a base Earth) and non-Earth bodies via `isEarthBody` (`:323`) | Exactly the overlay contract above |
 | Renders to an offscreen target and reads the result out | Renders to the 2:1 framebuffer the equirect pass consumes |
 
 The one thing it does *not* share is the projection: it frames
@@ -435,11 +435,11 @@ broadcast as a diff whenever it changes. v1 captures:
 
 An earlier draft of this plan carried a bare `dataset.bbox`.
 `main` has a richer contract for exactly this handoff:
-`DatasetOverlayOptions` (`src/types/index.ts:369-392`) is
+`DatasetOverlayOptions` (`src/types/index.ts:372-395`) is
 `boundingBox` + `lonOrigin` + `isFlippedInY` + `celestialBody` +
 `colorScale` + `datasetId` / `datasetTitle`, built once by
 `overlayOptionsFromDataset()`
-(`src/services/datasetOverlayOptions.ts:64`) and handed to every
+(`src/services/datasetOverlayOptions.ts:67`) and handed to every
 render surface the app has. Broadcast the whole object.
 
 This is not tidiness. Each field it carries is a UV or shading
@@ -467,12 +467,12 @@ they are the primary use case for a value-carrying LED sphere.
 For a data-encoded dataset the texture's luma *is* the
 normalised value rather than a colour, and `colorScale` is
 documented as *"the field that carries data-encoded mode to all
-four render surfaces"* (`src/types/index.ts:374-380`). It rides
+four render surfaces"* (`src/types/index.ts:377-383`). It rides
 along inside `DatasetOverlayOptions` above, so the output gets
 it for free — but the **display transform on top of it does
 not**, and that is a separate broadcast field.
 
-`mapRenderer.setColorScaleDisplay()` (`src/services/mapRenderer.ts:1087`) applies the operator's
+`mapRenderer.setColorScaleDisplay()` (`src/services/mapRenderer.ts:1090`) applies the operator's
 palette swap, contrast stretch and value threshold by rebuilding
 the 256×1 LUT the shader samples. Without mirroring it, an
 operator who switches the control globe to magma leaves the LED
@@ -482,10 +482,10 @@ indication which one is "right".
 
 `ColorScaleDisplay` is a flat POJO —
 `{ palette, stretch: { lo, hi }, threshold: { min, max } }`
-(`src/services/colorScaleDisplay.ts:46-54`) — so it serialises
+(`src/services/colorScaleDisplay.ts:49-57`) — so it serialises
 as-is with no conversion, and the output rebuilds its own LUT
 through the same `buildDisplayLut`
-(`src/services/colorScaleDisplay.ts:130`) the control window uses. Two
+(`src/services/colorScaleDisplay.ts:133`) the control window uses. Two
 properties carry over and both matter on a sphere:
 
 - Alpha always comes from the dataset's own ramp, so a
@@ -498,9 +498,9 @@ properties carry over and both matter on a sphere:
 
 The "idle state renders the photoreal Earth" default now needs
 a caveat: `celestialBody` exists, and `isEarthBody()`
-(`src/services/datasetOverlayOptions.ts:35`) is the gate the
+(`src/services/datasetOverlayOptions.ts:38`) is the gate the
 render surfaces check. `photorealEarth.ts` already consults it
-in two places (`:1257`, `:1272`), and `mapRenderer` at `:1455`.
+in two places (`:1260`, `:1275`), and `mapRenderer` at `:1458`.
 
 So for a Mars or Moon dataset the output must suppress the
 Earth-specific decoration the same way the existing surfaces do
@@ -508,7 +508,7 @@ Earth-specific decoration the same way the existing surfaces do
 terminator are all wrong on another body, and a bbox-clipped
 overlay must not reveal a base *Earth* underneath. The idle
 state (no dataset loaded) stays photoreal Earth; it is only the
-loaded-dataset path that has to ask. `globeThumbnail.ts:320`
+loaded-dataset path that has to ask. `globeThumbnail.ts:323`
 shows the exact predicate to copy:
 `!!overlay?.boundingBox && isEarthBody(overlay.celestialBody)`.
 
@@ -650,7 +650,7 @@ is the whole problem.
 
 **`main` already solves it, and already solves it as a pure
 function.** `computeSiblingSyncCorrection()`
-(`src/utils/time.ts:294-350`) was extracted from multi-globe
+(`src/utils/time.ts:334-390`) was extracted from multi-globe
 sibling drift correction (terraviz#132) precisely so the
 control law could be unit-tested away from the DOM. It takes
 plain numbers and `Date`s, returns
@@ -673,6 +673,7 @@ of which reuse fixes for free:
 | Synced raw `currentTime` | Syncs a real-world **date**, so it still works when the two elements have different durations or different temporal ranges |
 | Hard-wrote `playbackRate = 1.0` on every correction | Takes `primaryPlaybackRate` and scales the pacing ratio by it — the tour-rate race below |
 | Fixed ±5 % nudge behind a 100 ms / 50 ms hysteresis pair | Proportional rate trim (gain 0.5, capped at ±25 %), so there is no hysteresis state to flap and no band to tune |
+| Hard-seeked at 2000 ms | Uses `SIBLING_HARD_SEEK_THRESHOLD_S` = 0.15 s, a measured value — 13× smaller, and 4× below a number already tried and rejected as too high |
 | Froze correction below `readyState` 3 | Steers from `HAVE_METADATA` (1) — see "The `readyState` gate" below |
 
 #### What the broadcast carries
@@ -707,7 +708,7 @@ case of the general one, not a different code path.
 **`playbackRate` is not optional, and its absence is a bug we
 have already shipped once.** The tour engine's `frameRate` task
 computes `rate = requestedFps / datasetFps`, clamped to
-`[0.03, 4]` (`src/services/tourEngine.ts:946-957`) and applies
+`[0.03, 4]` (`src/services/tourEngine.ts:949-960`) and applies
 it to the primary alone — a 5 fps request against a 30 fps
 dataset is 0.167×. An output that assumes 1.0 runs ~6× fast,
 races ahead, hard-seeks back, and repeats, for the whole tour.
@@ -725,6 +726,7 @@ have no rate to report.
 import {
   computeSiblingSyncCorrection,
   SIBLING_MIN_READY_STATE,
+  SIBLING_HARD_SEEK_THRESHOLD_S,
 } from '../utils/time'
 
 if (!videoEl || videoEl.readyState < SIBLING_MIN_READY_STATE) return
@@ -737,7 +739,7 @@ const { position, targetTime, rate, shouldSeek } = computeSiblingSyncCorrection(
   sibStart, sibEnd,                        // this output's own range
   primaryDuration: state.primary.duration,
   primaryRangeMs: state.primary.rangeMs,
-  hardSeekThresholdS: HARD_SEEK_THRESHOLD_S,
+  hardSeekThresholdS: SIBLING_HARD_SEEK_THRESHOLD_S,
   primaryPlaybackRate: state.playback.playbackRate,
 })
 
@@ -761,16 +763,39 @@ boundary frame. Only a dataset change still needs its own path
 (tear down the HLS instance, build a new one, then let the
 first correction land once metadata is in).
 
-`hardSeekThresholdS` is a caller parameter rather than a
-constant inside `time.ts`, deliberately — the threshold is a
-policy the caller owns. The control window passes
-`SIBLING_HARD_SEEK_THRESHOLD_S = 0.5` (`src/main.ts:164`), whose
-docstring records why: below it the proportional rate trim
-closes drift smoothly, and a hard seek interrupts decode and
-flickers the panel (terraviz#229), so it should fire only for a
-real desync. An output should pass the same value, for the same
-reason and with more at stake — a flicker an operator would
-shrug at is a flicker across an 8K LED sphere in a gallery.
+`hardSeekThresholdS` is a call parameter, but the **value is
+not the output's to choose**. Import
+`SIBLING_HARD_SEEK_THRESHOLD_S` from `time.ts:259` — it is
+`0.15`, and its docstring says outright that it lives beside the
+control law rather than in `main.ts` "so the value can be tested
+against those two numbers directly". Two browser measurements
+from a 4-globe session fix it:
+
+| Measurement | Value | What it constrains |
+|---|---|---|
+| Steady-state drift under the rate trim | ≈ 0.026 s | The threshold must sit well **above** this or it seeks continuously — the terraviz#229 flicker |
+| Post-stall offset after a scrub | ≈ 0.35 s | The threshold must sit **below** this so it snaps out in one frame instead of being trimmed away |
+
+At 0.15 s the margins are ~5.8× and ~2.3×. The previous **0.5 s**
+cleared the first but sat above the second, leaving a post-scrub
+offset to the trim — which closes 0.35 s at ~0.029 s/s, or
+about twelve seconds of visibly staggered globes after every
+scrub.
+
+This is worth dwelling on, because the earlier draft of this
+plan proposed **2000 ms** — 13× the shipped value, and 4× above
+a number already measured and rejected for being too high. On a
+control window that is twelve-plus seconds of staggered panels
+per scrub; on an 8K LED sphere in a gallery it is the same
+error, larger, with nobody able to explain it. Mirroring the
+constant locally would let the two drift apart silently, so
+import it.
+
+The out-of-range boundary pin uses `SIBLING_SEEK_EPS_S = 0.02`
+(`time.ts:296`) for the same reason — its docstring records a
+capture where a fifth-of-a-frame seek left three siblings at
+`HAVE_METADATA` for five seconds. Import that too rather than
+inventing an epsilon.
 
 #### The `readyState` gate
 
@@ -783,8 +808,8 @@ during stalls". That gate is **stricter than the value `main`
 documents as a bug**, and on a looping installation asset it is
 the difference between a sphere that wraps and a sphere that
 stops. `SIBLING_MIN_READY_STATE = 1`
-(`src/utils/time.ts:228`) carries a standing warning against
-raising it (`time.ts:200-227`):
+(`src/utils/time.ts:231`) carries a standing warning against
+raising it (`time.ts:203-230`):
 
 > **Do not raise this to `HAVE_CURRENT_DATA` (2).** That is
 > where it sat until it caused the loop-wrap stall.
@@ -815,7 +840,7 @@ this the hard way and carries a separate layer for it;
 an output needs the same one, and needs it more, because
 nobody is looking at the sphere.
 
-`shownFrameTime()` (`src/utils/time.ts:398`) documents the two
+`shownFrameTime()` (`src/utils/time.ts:438`) documents the two
 ways the element's clock lies about the picture: a seek reads
 back its target instantly while the element is still buffering,
 and a surface whose repaint chain has broken keeps advancing
@@ -832,7 +857,7 @@ So the output carries a second, independent layer:
    frame was actually written into the Three.js texture, not
    the moment it was requested.
 2. Once per second (not per frame), call `verifySiblingTime()`
-   (`src/utils/time.ts:442`) with
+   (`src/utils/time.ts:482`) with
    `sibFrameTime: shownFrameTime(uploadedFrameTime, videoEl.currentTime)`
    and the broadcast date as `labelDate`.
 3. `alignment: 'aligned'` → nothing. `'uncovered'` → nothing;
@@ -851,7 +876,7 @@ ownership of the playhead. It reports; the controller steers.
 
 Every decoder cap in the codebase today is **per window**, and
 outputs are the first thing that breaks that assumption.
-`MAX_PANELS = 4` (`src/services/vrScene.ts:80`) records the
+`MAX_PANELS = 4` (`src/services/vrScene.ts:83`) records the
 reason in its docstring — *"Quest 2 has 1-2 H.264 decoders; 4 at
 the 4K/8K tier will push those hard"* — and the 2D
 `viewportManager` drives the same 1/2/4 ladder. Neither knows
@@ -903,14 +928,20 @@ rather than rationing under it.
   main reason for this rewrite.
 
 Constants live in `src/output/datasetMirror.ts` as named
-exports for tests. Note what is *not* here: no tolerance band,
-no hysteresis pair, no nudge magnitude, and no local
-`readyState` number — those all belong to `time.ts` now.
+exports for tests. The list is short on purpose — note what is
+*not* here: no tolerance band, no hysteresis pair, no nudge
+magnitude, no `readyState` number, and **no threshold**. Every
+one of those is a tuned value in `time.ts` with measurements
+behind it, and a local copy is a copy that drifts.
 
 ```ts
-/** Mirrors `SIBLING_HARD_SEEK_THRESHOLD_S` (`src/main.ts:164`) so
- *  an output and a control-window panel correct identically. */
-export const HARD_SEEK_THRESHOLD_S = 0.5
+// Imported, never re-declared — see "The call" above.
+import {
+  SIBLING_MIN_READY_STATE,
+  SIBLING_HARD_SEEK_THRESHOLD_S,
+  SIBLING_SEEK_EPS_S,
+} from '../utils/time'
+
 /** Read-back cadence. Once per second, never per frame. */
 export const VERIFY_INTERVAL_MS = 1000
 /** Consecutive `'off'` verdicts before reporting a stale frame. */
@@ -918,6 +949,11 @@ export const STALE_FRAME_STRIKES = 3
 /** Cross-window ceiling — see "Cross-window decoder budget". */
 export const MAX_CONCURRENT_DECODERS = 4
 ```
+
+Only the last three are genuinely this feature's to own, and
+that is the right ratio: the sync behaviour is inherited, and
+what an output adds is a read-back cadence and a budget that no
+single window could have needed.
 
 ### Failure recovery
 
@@ -962,7 +998,7 @@ raw `Hls.Events.ERROR` the output subscribes to itself.
 draft of this plan specified 3 attempts at 1 s / 2 s / 4 s
 backoff. That layer was both redundant and inert, because
 `hlsService` already retries internally before it ever
-rejects (`src/services/hlsService.ts:31, 127`):
+rejects (`src/services/hlsService.ts:47, 431`):
 
 | Error type | What `hlsService` already does | Budget |
 |---|---|---|
@@ -1059,10 +1095,10 @@ That absence matters more with outputs than without, because
 outputs push against a ceiling the app is already close to.
 Context-creating sites on `main` today: one per MapLibre
 `MapRenderer` (up to 4 in a 4-globe layout), plus
-`vrSession.ts:529`, `globeThumbnail.ts:269`,
-`orbitCharacter/index.ts:154`, `glLumaSampler.ts:131` (one
+`vrSession.ts:532`, `globeThumbnail.ts:272`,
+`orbitCharacter/index.ts:157`, `glLumaSampler.ts:134` (one
 page-shared instance via `getSharedLumaSampler()`), and
-`perfSampler.ts:268`. Each output window adds one more. Browsers
+`perfSampler.ts:271`. Each output window adds one more. Browsers
 cap live contexts per process and **silently evict the oldest**
 when the cap is crossed — so on a loaded machine the first
 symptom of "too many outputs" is a context-lost event on a
@@ -2275,10 +2311,10 @@ be needed:
 | File | Why |
 |---|---|
 | `src/services/globeThumbnail.ts` | Prior art for the whole output-side scene build — see "Prior art" above. Substantially delivery steps 2-4. |
-| `src/utils/time.ts:294-350` | `computeSiblingSyncCorrection` — the playback control law, called not restated. `:228` for the `readyState` gate, `:398` / `:442` for the read-back layer. |
+| `src/utils/time.ts:334-390` | `computeSiblingSyncCorrection` — the playback control law, called not restated. `:231` for the `readyState` gate, `:259` for the hard-seek threshold, `:438` / `:482` for the read-back layer. |
 | `src/services/datasetOverlayOptions.ts` | `overlayOptionsFromDataset` and `isEarthBody` — the overlay bundle the broadcast carries. |
 | `src/services/colorScaleDisplay.ts` | `ColorScaleDisplay` and `buildDisplayLut` — the mirrored display transform. |
-| `src/services/hlsService.ts:31,127` | The retry budget that already exists, so the output does not add a second one. |
+| `src/services/hlsService.ts:47,431` | The retry budget that already exists, so the output does not add a second one. |
 
 ---
 
