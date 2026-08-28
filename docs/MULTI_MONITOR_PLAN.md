@@ -1004,10 +1004,37 @@ the persisted `{ x, y }` of that monitor (matched by
 
 #### 5. GPU context loss
 
+> **This case is net-new infrastructure, not an incremental
+> addition.** An earlier draft of this plan listed it beside
+> the other five as though it were extending something. There
+> is **no `webglcontextlost` or `webglcontextrestored`
+> handling anywhere in `src/` today** — zero matches across
+> the whole tree. Nothing in the app has ever survived a lost
+> context; it has only ever been a thing that happens and
+> ends the session. Scope commit 13 accordingly, and expect
+> the recovery path to need its own tests and its own manual
+> verification (a forced context loss via
+> `WEBGL_lose_context`), because there is no existing
+> behaviour to regress against.
+
+That absence matters more with outputs than without, because
+outputs push against a ceiling the app is already close to.
+Context-creating sites on `main` today: one per MapLibre
+`MapRenderer` (up to 4 in a 4-globe layout), plus
+`vrSession.ts:529`, `globeThumbnail.ts:269`,
+`orbitCharacter/index.ts:154`, `glLumaSampler.ts:131` (one
+page-shared instance via `getSharedLumaSampler()`), and
+`perfSampler.ts:268`. Each output window adds one more. Browsers
+cap live contexts per process and **silently evict the oldest**
+when the cap is crossed — so on a loaded machine the first
+symptom of "too many outputs" is a context-lost event on a
+window nobody touched, which is exactly the path with no
+handling.
+
 **Detection.** Output's canvas listens for
 `webglcontextlost` and `webglcontextrestored`. Triggers
 include driver crash, OS sleep / wake, GPU hot-reset
-under memory pressure.
+under memory pressure, and eviction as above.
 
 **Recovery.** On `webglcontextlost`:
 `event.preventDefault()` to allow restoration; mark
@@ -1025,6 +1052,18 @@ installation logging.
 If `webglcontextrestored` doesn't fire within 30 s (some
 drivers don't recover): log + remove the output record;
 operator manually re-adds.
+
+Two scoping notes for whoever builds this:
+
+- The rebuild must go through the *same* boot path the
+  window already uses, not a parallel "restore" path.
+  A second code path that only runs after a rare event is a
+  path that silently rots.
+- Work on context-loss detection for the control window is in
+  flight separately. If it lands first, this case becomes a
+  consumer of that infrastructure rather than the place it is
+  invented — check before building, and prefer sharing the
+  detection seam over duplicating it.
 
 #### 6. Manager / control window crash with outputs alive
 
