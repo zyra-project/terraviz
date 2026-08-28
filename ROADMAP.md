@@ -6,10 +6,12 @@ still ahead. It is organised around the two walls named in
 public, and the one between a publisher and their audience — because
 that is the split that now decides what gets built.
 
-**Last reviewed:** 2026-08-26 (rewrite: the previous version tracked
+**Last reviewed:** 2026-08-28 (rewrite: the previous version tracked
 a 2026-era viewer backlog that has since shipped out from under it,
 and never adopted the catalog backend, publisher portal or federation
-work that has been the bulk of the project's activity since).
+work that has been the bulk of the project's activity since. Revised
+on 2026-08-28 to fold in the installation-display entry that landed
+with [#205](https://github.com/zyra-project/terraviz/pull/205)).
 
 **Revisit when any of the following becomes true:**
 
@@ -22,8 +24,9 @@ work that has been the bulk of the project's activity since).
 - Any §8 decision in
   [`docs/architecture/federation-scoping.md`](docs/architecture/federation-scoping.md)
   changes, or that doc passes its own "Supersedes when" condition.
-- A second SOS-class installation partner arrives, which would pull
-  the installation-output work out of *Deferred*.
+- Installation-display work starts, which turns
+  [`docs/MULTI_MONITOR_PLAN.md`](docs/MULTI_MONITOR_PLAN.md) from
+  intent into description and changes what that entry should say.
 
 ---
 
@@ -71,6 +74,25 @@ highest-leverage unfinished item on the viewer side.
 *Residual on the desktop equivalent, for contrast:* desktop has the
 full path — signed builds, updater key, `latest.json`, draft release.
 Mobile needs the same and has none of it.
+
+### Installation displays — LED spheres, domes, and projector walls
+
+The people standing in front of a physical Science On a Sphere are the
+audience this project was named for, and today it cannot drive one. A
+second window rendering a projection-correct equirectangular view of
+the same globe the operator is steering would let a museum run the
+whole exhibit from this app — and the same plumbing serves planetarium
+domes, edge-blended projector arrays, and a presenter mirroring onto a
+lecture-hall wall.
+
+Desktop only, planned, no code yet. The design doc is
+[`docs/MULTI_MONITOR_PLAN.md`](docs/MULTI_MONITOR_PLAN.md), and two
+things in it bind on work you might do first: it needs four capability
+grants `src-tauri/capabilities/default.json` does not carry today (see
+its §6 before adding any window or webview permission), and its §3
+delegates playback sync to `computeSiblingSyncCorrection` and the
+sibling constants in `src/utils/time.ts` rather than restating them —
+so changing those changes the plan.
 
 ### Localization beyond the UI chrome — L2 and L3
 
@@ -194,10 +216,6 @@ a decision rather than an oversight.
 
 Real work, correctly not now.
 
-- **Installation-grade multi-output** (LED sphere / operator control
-  window). Scoped in depth, motivated by a narrow and concrete set
-  of installations. Waiting on a second partner site to justify the
-  surface area.
 - **Orbit avatar in VR** (VR plan Phase 4). The `OrbitController`
   character exists and works on the standalone page; embedding it in
   the WebXR scene was attempted and abandoned mid-debug. Worth
@@ -206,9 +224,6 @@ Real work, correctly not now.
   landed, including wake-word and realtime streaming. What remains
   is on-hardware validation, which needs hardware time rather than a
   roadmap slot.
-
-### Installation displays — LED spheres, domes, and projector walls
-The people standing in front of a physical Science On a Sphere are the audience this project was named for, and today it cannot drive one. A second window rendering a projection-correct equirectangular view of the same globe the operator is steering would let a museum run the whole exhibit from this app — and the same plumbing serves planetarium domes, edge-blended projector arrays, and a presenter mirroring onto a lecture-hall wall. Design doc: [`docs/MULTI_MONITOR_PLAN.md`](docs/MULTI_MONITOR_PLAN.md) (desktop only; planned, not built).
 
 ---
 
