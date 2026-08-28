@@ -373,6 +373,42 @@ touching the output rendering code. See Phase 5.
                        (state diffs, ~1 msg per state change)
 ```
 
+### Prior art: `globeThumbnail.ts`
+
+Read `src/services/globeThumbnail.ts` before writing any of the
+output-side rendering. It already ships this plan's core move,
+in production, for the publisher portal's `thumbnail_ref`
+generator — and it was written after this plan was first
+drafted, so none of the design below was able to account for it.
+
+What it does, and what the output window needs, are the same
+sequence:
+
+| `globeThumbnail.ts` | Output window |
+|---|---|
+| Lazy-imports Three.js behind a `loadThree` seam (`:195-197`), mirroring the VR / Orbit pattern so the portal bundle is unchanged until used | Same lazy import, same reason — see §7 |
+| Builds `createPhotorealEarth` **in dataset mode**: data lit uniformly, no day/night terminator | Same, for a loaded dataset |
+| Wraps a 2:1 equirectangular frame onto a sphere from an `HTMLImageElement`, `HTMLCanvasElement` or `ImageBitmap` | Same, from a `VideoTexture` or decoded image |
+| Honours `lonOrigin`, `isFlippedInY`, `boundingBox` (regional data clipped over a base Earth) and non-Earth bodies via `isEarthBody` (`:320`) | Exactly the overlay contract above |
+| Renders to an offscreen target and reads the result out | Renders to the 2:1 framebuffer the equirect pass consumes |
+
+The one thing it does *not* share is the projection: it frames
+the sphere with an orthographic camera to get a round globe,
+where an output ray-marches every (lon, lat) of a 2:1
+framebuffer. That difference is genuinely this plan's work. The
+scene assembly in front of it is not.
+
+Concretely, this is most of delivery steps 2-4 already written
+and already tested. Treat those steps as "extract and reuse the
+`globeThumbnail` scene-building path behind a shared helper,
+then add the equirect pass" rather than as a from-scratch build,
+and prefer widening the existing seams (`loadThree`,
+`createPhotorealEarth`) over introducing parallel ones. The
+risk this retires is the boring, expensive kind: UV orientation,
+flip handling, bbox clipping and body-specific shading are all
+places where an independent re-derivation would look right and
+be subtly wrong on a subset of the catalog.
+
 ### Globe state — what gets mirrored
 
 The control window's `MultiOutputManager` maintains a
@@ -1727,8 +1763,8 @@ without rolling the whole feature back.
 |---|---|---|---|
 | 1 | `multi-output: scaffold plan + protocol types` | This doc, `multiOutput/protocol.ts` | No |
 | 2 | `multi-output: equirect RTT shader (unit tests + visual fixture)` | `src/output/equirectRtt.ts` and a tiny test page that loads a known sphere texture and verifies the shader produces the expected equirectangular pixels. Lands as a standalone module; not yet wired up. | No |
-| 3 | `multi-output: output window entry + Three.js scene scaffold` | `src/output/main.ts`, `src/output/datasetMirror.ts`, `src/output/output.html`, `src/output/output.css`, Vite multi-entry config. Output bundle builds; loadable as a static page; renders a default photoreal Earth with no dataset, no IPC. | No |
-| 4 | `multi-output: layer stack + dataset overlay` | `src/output/layerStack.ts`. Static fixture page can now load a fake dataset + fake layer stack and render it. Still no IPC. | No |
+| 3 | `multi-output: output window entry + Three.js scene scaffold` | `src/output/main.ts`, `src/output/datasetMirror.ts`, `src/output/output.html`, `src/output/output.css`, Vite multi-entry config. Output bundle builds; loadable as a static page; renders a default photoreal Earth with no dataset, no IPC. **Start from `globeThumbnail.ts`'s scene-building path** rather than a fresh assembly — see "Prior art". | No |
+| 4 | `multi-output: layer stack + dataset overlay` | `src/output/layerStack.ts`. Static fixture page can now load a fake dataset + fake layer stack and render it. The overlay path consumes a whole `DatasetOverlayOptions` (`lonOrigin` / `isFlippedInY` / `boundingBox` / `celestialBody` / `colorScale`) plus a `ColorScaleDisplay`, reusing `globeThumbnail.ts`'s handling rather than re-deriving the UV maths. Still no IPC. | No |
 | 5 | `multi-output: Tauri capabilities for multi-window` | Two halves. **`capabilities/default.json`** gains `core:webview:allow-create-webview-window`, `core:window:allow-close`, `allow-destroy`, `allow-set-decorations` — without these the manager cannot spawn or tear down an output at all (see §6). **`capabilities/output.json`** is new, scoped to `output-*`, granting only IPC + self-driven window controls + HTTPS fetch. `mobile.json` untouched. | No |
 | 6 | `multi-output: state aggregator + protocol implementation` | `multiOutput/manager.ts`, `multiOutput/stateAggregator.ts`. Manager constructible but not yet instantiated. | No |
 | 7 | `multi-output: emit dataset:loaded + layer events from main.ts` | Refactor of `datasetLoader` and `main.ts` to fire events the aggregator can subscribe to. Today's `panelStates` consumers keep working. | No |
@@ -2217,6 +2253,24 @@ renderer somewhere" — which we don't. Direct RTT.
   non-primary slots (Phase 3).
 - `docs/ANALYTICS_CONTRIBUTING.md` — must-read before adding
   any output-window events (Open Questions §3).
+- `docs/DATA_ENCODED_VIDEO_PLAN.md` — the `ColorScale` /
+  `RenderEncoding` sidecar contract behind the `colorScale`
+  field the mirrored state now carries.
+- `docs/DATA_ANALYSIS_PLAN.md` §A1 — the display-transform
+  model (`ColorScaleDisplay`, `buildDisplayLut`) the output
+  mirrors, including the rule that a display transform never
+  changes a reported value.
+
+**Source to read before implementing**, in the order it will
+be needed:
+
+| File | Why |
+|---|---|
+| `src/services/globeThumbnail.ts` | Prior art for the whole output-side scene build — see "Prior art" above. Substantially delivery steps 2-4. |
+| `src/utils/time.ts:294-350` | `computeSiblingSyncCorrection` — the playback control law, called not restated. `:228` for the `readyState` gate, `:398` / `:442` for the read-back layer. |
+| `src/services/datasetOverlayOptions.ts` | `overlayOptionsFromDataset` and `isEarthBody` — the overlay bundle the broadcast carries. |
+| `src/services/colorScaleDisplay.ts` | `ColorScaleDisplay` and `buildDisplayLut` — the mirrored display transform. |
+| `src/services/hlsService.ts:31,127` | The retry budget that already exists, so the output does not add a second one. |
 
 ---
 
