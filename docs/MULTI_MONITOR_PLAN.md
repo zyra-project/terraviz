@@ -582,10 +582,12 @@ two-way binding.
 5. Output emits `output_ready` so the manager knows it's
    listening. Manager replies with a full state snapshot.
 6. Output applies the snapshot: loads the dataset texture via
-   `datasetMirror`, builds the layer stack via `layerStack`,
-   sets playback to the broadcast `currentTime`. Begins
-   rendering the equirect RTT each frame and presenting it
-   to the canvas.
+   `datasetMirror` (with the broadcast `DatasetOverlayOptions`
+   and `ColorScaleDisplay`), builds the layer stack via
+   `layerStack`, and takes its first correction from
+   `computeSiblingSyncCorrection` against the broadcast date
+   once metadata is in. Begins rendering the equirect RTT each
+   frame and presenting it to the canvas.
 7. Done.
 
 ### Per-state-change flow
@@ -2175,16 +2177,22 @@ renderer somewhere" — which we don't. Direct RTT.
    view the primary panel is showing. Direct tour-→output
    tasks (a hypothetical `setOutput`) are deferred to Phase 4
    gated on real museum-kiosk demand.
-7. **CONUS-bbox UV transform exactness.** The MapLibre globe
-   places non-global rasters using a known UV transform that
-   accounts for the dataset's projection (typically EPSG:4326
-   or EPSG:3857). The Three.js output must match exactly or
-   the output sphere shows the data shifted relative to what
-   the operator sees on screen. Acceptance criterion:
-   side-by-side a CONUS-bbox dataset on the control globe
-   and on the output, verify alignment to ≤1 px at 4K. The
-   test fixture for commit 2 should include a CONUS-bbox
-   reference rendering.
+7. **CONUS-bbox UV transform exactness.** *Largely resolved
+   upstream since this was written.* The transform is no
+   longer something the output has to match by
+   re-derivation: `DatasetOverlayOptions` carries
+   `boundingBox` / `lonOrigin` / `isFlippedInY` to every
+   render surface, and `globeThumbnail.ts` already applies
+   that bundle to a Three.js sphere off the same data —
+   which is the output's exact problem, minus the
+   projection. Carry the bundle and reuse that path (see
+   "Prior art") and the question mostly answers itself.
+
+   What remains open is verification rather than design, and
+   it is still worth doing: side-by-side a CONUS-bbox
+   dataset on the control globe and on the output, verify
+   alignment to ≤1 px at 4K. The test fixture for commit 2
+   should include a CONUS-bbox reference rendering.
 8. **Multi-layer z-fighting.** Stacked sphere shells at radii
    1.000 / 1.001 / 1.002 may z-fight on some GPUs at 4K+
    render targets. Mitigation: render order + `depthWrite:
@@ -2539,6 +2547,64 @@ telemetry event fires (visible in the console batch when
     same level as before commit 14's pattern was loaded
     via `chrome://gpu` on the output's webview).
 
+### Playback sync + data-encoded (commits 3, 9, 13)
+
+These carry an `S` prefix rather than continuing the run of
+numbers above, so that adding them does not renumber the
+thirty-odd steps other sections cross-reference by number.
+Each one exists because §3's rewrite makes a claim that is
+cheap to assert and easy to get wrong.
+
+**S1. Tour playback rate.** Start a tour whose step carries a
+`frameRate` task (`5 fps` against a 30 fps dataset → 0.167×).
+The output must slow with the control window and stay locked
+for the whole step. **Failure signature to watch for:** the
+output racing ahead, snapping back, and repeating — that is
+`playbackRate` missing from the broadcast, i.e. terraviz#229
+reproduced in a second window.
+
+**S2. Loop wrap, unattended.** Load a short looping asset
+(≤30 s) and let it wrap at least twenty times with nobody
+touching the control window. Every wrap must carry the output
+around with it. **Failure signature:** the output freezing at
+or near the end of the loop and never coming back — the
+`readyState` gate set above `SIBLING_MIN_READY_STATE`.
+
+**S3. Differing ranges.** With the output mirroring a dataset
+whose temporal range and duration differ from the primary's,
+scrub the control window across the range. The output tracks
+by date, not by playhead. Out-of-range dates leave it pinned
+to its nearest boundary frame rather than jumping to 0.
+
+**S4. Read-back honesty.** With playback paused mid-range,
+compare the frame on the sphere against the control window's
+label. Then force a texture-upload stall (throttle the
+output's network, or pause its rAF via devtools) and confirm
+the output reports `output_frame_stale` and shows a health
+badge — rather than reporting itself aligned because
+`currentTime` kept advancing.
+
+**S5. Decoder budget.** With the control window in the
+4-globe layout and all four panels on video datasets, attempt
+to add a video output. It must be refused with a message
+naming what to close, **not** crash and **not** silently tear
+down a panel. Then close two panels and confirm the output
+spawns. Repeat in the other order (output live, then switch to
+4 globes) — the layout change is the thing refused that time.
+
+**S6. Palette mirroring.** On a data-encoded dataset, change
+the palette (source → magma), then the contrast stretch, then
+a value threshold. Each must reach the sphere. Confirm the
+thresholded region reads as absent rather than as a colour,
+and that the hover readout on the control window reports the
+same physical value before and after — a display transform
+never changes a reported value.
+
+**S7. Non-Earth body.** Load a Mars or Moon dataset. The
+output must not paint night lights, specular ocean, clouds, or
+a day/night terminator, and a bbox-clipped overlay must not
+reveal a base Earth underneath.
+
 ### Cross-platform parity
 
 46. Repeat steps 4–18 (basic happy path) on a Windows
@@ -2556,3 +2622,21 @@ Playwright-driven automation against the Tauri test
 harness once the panel ships. Failure-recovery cases
 (31–38) involve OS-level kills and network manipulation —
 keep them manual for v1.
+
+Of the sync steps, S1, S3 and S6 automate cleanly. S2 needs
+real elapsed time and is better run as a soak. S5 is worth
+automating at the manager level even though the crash it
+guards against cannot itself be asserted — the point is that
+the refusal fires, not that the ceiling is reached.
+
+Note that the control law underneath S1–S3 is already unit-
+tested on `main` as `computeSiblingSyncCorrection`, so these
+steps are integration checks on the *wiring* — the broadcast
+carrying the right fields, the gate at the right threshold —
+not on the maths. Do not re-test the maths here; extend
+`time.ts`'s own tests if the law itself needs to change.
+
+Per CLAUDE.md's "Waiting in tests", any async assertion in
+this set must anchor on a signal via `until()` from
+`src/test-utils.ts` rather than a fixed number of event-loop
+turns — `check:tick-drain` fails the build otherwise.
