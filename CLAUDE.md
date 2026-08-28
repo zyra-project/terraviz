@@ -918,6 +918,23 @@ Tauri v2. Three CI/CD workflows:
 
 The desktop app shares 100% of the TypeScript source. Desktop-only behaviour is gated at runtime via `window.__TAURI__`. The `src-tauri/` directory contains the Rust backend.
 
+> **Planned — multi-monitor / LED-sphere output.** A second Tauri
+> webview rendering a projection-correct equirectangular view of the
+> live globe state, for Science On a Sphere installations, domes and
+> projector arrays. Design doc:
+> [`docs/MULTI_MONITOR_PLAN.md`](docs/MULTI_MONITOR_PLAN.md) — **planned,
+> no code yet**, so treat it as intent rather than description.
+>
+> Two things there bind on work you might do first. It needs four
+> capability grants `default.json` does not carry today
+> (`core:webview:allow-create-webview-window`, `core:window:allow-close`,
+> `allow-destroy`, `allow-set-decorations`) — read its §6 before
+> adding any window or webview permission, since the ACL is checked
+> against the *calling* window, not the target. And its §3 delegates
+> playback sync to `computeSiblingSyncCorrection` and the sibling
+> constants in `src/utils/time.ts` rather than restating them, so
+> changing those changes the plan.
+
 ### Rust module map
 
 | File | Responsibility |
