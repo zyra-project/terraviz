@@ -383,14 +383,98 @@ broadcast as a diff whenever it changes. v1 captures:
 |---|---|---|
 | `dataset.id`, `dataset.url` | `datasetLoader` | dataset load / unload |
 | `dataset.kind` (image / video) | `datasetLoader` | dataset load |
-| `dataset.bbox` (or `null` for global) | enriched dataset metadata | dataset load |
-| `playback.currentTime` | `playbackController` | per-second tick (video only) |
+| `dataset.overlay` (the whole `DatasetOverlayOptions`) | `overlayOptionsFromDataset()` | dataset load — see "Carry the overlay bundle" below |
+| `dataset.duration` (seconds) / `dataset.rangeMs` | `datasetLoader` + enriched metadata | dataset load — inputs to `computeSiblingSyncCorrection`, see §3 "Playback sync algorithm" |
+| `display` (the `ColorScaleDisplay` POJO) | `colorbarUI` → `mapRenderer.setColorScaleDisplay()` | palette / stretch / threshold change |
+| `playback.date` (ISO 8601) | `playbackController` | per-second tick (video only) |
 | `playback.paused` | `playbackController` | play / pause action |
+| `playback.playbackRate` | `playbackController` (set by `tourEngine`'s `frameRate` task) | rate change — **not** assumed 1.0, see §3 |
 | `layers[]` (stacked-layer ids and z-order) | new `layerStack` state in `main.ts` | layer add / remove / reorder |
 | `time.simulationDate` | playback engine | date label tick |
 | `view.dayNight` (toggle on/off) | Tools menu | toggle change |
 | `view.cameraOffset` (Vector3) | Manager (computed from MapLibre camera) | default-on for SOS LED sphere outputs in v1; can be disabled per output. Pinned to `(0,0,0)` when tracking is off, which produces a uniform 1:1 equirectangular unwrap. See §3.5. |
 | `view.split` (boolean) | Outputs panel toggle | per-output flag. When on, the area of focus is mirrored to the opposite hemisphere of the physical LED sphere — matches existing SOS sphere-split behavior. See §3.5. |
+
+#### Carry the overlay bundle, don't re-derive it
+
+An earlier draft of this plan carried a bare `dataset.bbox`.
+`main` has a richer contract for exactly this handoff:
+`DatasetOverlayOptions` (`src/types/index.ts:369-392`) is
+`boundingBox` + `lonOrigin` + `isFlippedInY` + `celestialBody` +
+`colorScale` + `datasetId` / `datasetTitle`, built once by
+`overlayOptionsFromDataset()`
+(`src/services/datasetOverlayOptions.ts:64`) and handed to every
+render surface the app has. Broadcast the whole object.
+
+This is not tidiness. Each field it carries is a UV or shading
+decision the output would otherwise have to re-derive from the
+catalog row and get wrong independently:
+
+- `lonOrigin` — datasets whose texture does not start at −180°.
+- `isFlippedInY` — datasets stored bottom-up.
+- `boundingBox` — regional data clipped over a base Earth
+  rather than stretched across the sphere. This is most of
+  Open Question 7 (CONUS-bbox exactness to ≤1 px): the maths
+  is already written and already agrees with the live globe,
+  so an output that reuses the bundle inherits the answer
+  instead of re-litigating it.
+- `datasetId` / `datasetTitle` — so a *frame* can say what it
+  is. The debug overlay and any failure report should
+  attribute themselves to the dataset the texture actually
+  came from, not to whatever app state currently says.
+
+#### Data-encoded video
+
+Data-encoded datasets were absent from this plan entirely, and
+they are the primary use case for a value-carrying LED sphere.
+
+For a data-encoded dataset the texture's luma *is* the
+normalised value rather than a colour, and `colorScale` is
+documented as *"the field that carries data-encoded mode to all
+four render surfaces"* (`src/types/index.ts:374-380`). It rides
+along inside `DatasetOverlayOptions` above, so the output gets
+it for free — but the **display transform on top of it does
+not**, and that is a separate broadcast field.
+
+`mapRenderer.setColorScaleDisplay()` (`src/services/mapRenderer.ts:1087`) applies the operator's
+palette swap, contrast stretch and value threshold by rebuilding
+the 256×1 LUT the shader samples. Without mirroring it, an
+operator who switches the control globe to magma leaves the LED
+sphere on viridis — the two surfaces disagree about what the
+same data looks like, in front of an audience, with no
+indication which one is "right".
+
+`ColorScaleDisplay` is a flat POJO —
+`{ palette, stretch: { lo, hi }, threshold: { min, max } }`
+(`src/services/colorScaleDisplay.ts:46-54`) — so it serialises
+as-is with no conversion, and the output rebuilds its own LUT
+through the same `buildDisplayLut`
+(`src/services/colorScaleDisplay.ts:130`) the control window uses. Two
+properties carry over and both matter on a sphere:
+
+- Alpha always comes from the dataset's own ramp, so a
+  thresholded region reads as absent rather than as a colour.
+- **A display transform never changes a reported value.** The
+  sphere may be recoloured; the numbers behind it are the same
+  ones the control window is reporting.
+
+#### Non-Earth bodies
+
+The "idle state renders the photoreal Earth" default now needs
+a caveat: `celestialBody` exists, and `isEarthBody()`
+(`src/services/datasetOverlayOptions.ts:35`) is the gate the
+render surfaces check. `photorealEarth.ts` already consults it
+in two places (`:1257`, `:1272`), and `mapRenderer` at `:1455`.
+
+So for a Mars or Moon dataset the output must suppress the
+Earth-specific decoration the same way the existing surfaces do
+— night lights, specular ocean, clouds, and the day/night
+terminator are all wrong on another body, and a bbox-clipped
+overlay must not reveal a base *Earth* underneath. The idle
+state (no dataset loaded) stays photoreal Earth; it is only the
+loaded-dataset path that has to ask. `globeThumbnail.ts:320`
+shows the exact predicate to copy:
+`!!overlay?.boundingBox && isEarthBody(overlay.celestialBody)`.
 
 The SOS output **does** track the operator's MapLibre camera
 by default in v1: zooming in the control window concentrates
