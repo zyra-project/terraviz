@@ -176,20 +176,27 @@ need it for v1.
 ```
 
 Output windows are new labels — `output-1`, `output-2`, etc. —
-and won't inherit `default`'s permissions unless we either:
+and won't inherit `default`'s permissions. Two separate
+problems follow, and v1 has to solve **both**:
 
-- Broaden `windows` to `["main", "output-*"]` (glob supported in
-  Tauri capabilities), or
-- Author a separate, narrower capability file
-  (`capabilities/output.json`) that grants only what the output
-  window actually needs (window controls, http for HLS, no
-  filesystem, no keychain).
+1. **The manager needs new grants.** Creating, closing and
+   decorating an output window are permissions the main window
+   does not currently hold. Because cross-window commands are
+   ACL-checked against the *caller*, these go in
+   `default.json`. See §6 for the exact list and the mechanism.
+2. **The outputs need their own, narrower capability.** A new
+   `capabilities/output.json` scoped to `["output-*"]` grants
+   the output only what it self-drives. Output windows have no
+   reason to read the keychain or invoke download commands, so
+   giving them no surface area limits the blast radius if a
+   malicious dataset URL ever exploits the output webview.
 
-The narrower capability is the right choice — output windows
-have no reason to read the keychain or invoke download
-commands, and giving them no surface area limits the blast
-radius if a malicious dataset URL ever exploits the output
-webview. See §5 ("MVP scope") for the exact permission set.
+The glob assumption holds: `tauri-utils`' capability schema
+documents `windows` as *"List of windows that are affected by
+this capability. Can be a glob pattern."* (`acl/capability.rs`),
+so `"windows": ["output-*"]` is valid.
+
+The exact permission set is in §3 "Output capability spec".
 
 ### 6. Tauri's window-creation API is JS-side
 
@@ -199,14 +206,72 @@ all to create output windows in v1 — the control window's TS
 service spawns and tears them down via this API, and IPC events
 flow via `getCurrent().emit(...)` (JS side, window-to-window).
 
-Already-granted Tauri permissions cover the required ops:
+**The permissions to do that are not granted today.** Two
+corrections to an earlier draft of this section, both verified
+against `origin/main`:
 
-- `core:window:default` — create / destroy / show / hide
-- `core:window:allow-set-fullscreen` — borderless fullscreen
-- `core:window:allow-set-size` — explicit size for non-fullscreen
-- `core:window:allow-set-position` — pin to monitor X/Y
-- `core:window:allow-available-monitors` — enumerate monitors
-- `core:window:allow-current-monitor` — detect which monitor
+**Window creation is a `webview` permission, not a `window`
+one.** `WebviewWindow.new()` invokes
+`plugin:webview|create_webview_window`, which requires
+`core:webview:allow-create-webview-window`. That string appears
+in no capability file in the repo.
+
+**`core:window:default` is read-only.** It contains getters plus
+`allow-current-monitor` / `allow-available-monitors` /
+`allow-primary-monitor`. It does **not** contain `allow-close`,
+`allow-destroy`, `allow-show`, `allow-hide`, or any `set-*`.
+Likewise `core:webview:default` is only
+`allow-get-all-webviews`, `allow-webview-position`,
+`allow-webview-size`, `allow-internal-toggle-devtools`.
+
+What `capabilities/default.json` grants today (lines 7-27):
+`core:default`, `core:window:default`,
+`core:window:allow-set-fullscreen`, `allow-set-size`,
+`allow-set-position`, `allow-available-monitors`,
+`allow-current-monitor`, `updater:default`, and a scoped
+`http:default`. Note that `core:default` already expands to
+`{plugin}:default` for all nine core plugins, so the explicit
+`core:window:default` / `allow-available-monitors` /
+`allow-current-monitor` lines are redundant — worth removing
+while editing the file.
+
+So v1 must **add** to `capabilities/default.json`:
+
+| Permission | Needed for |
+|---|---|
+| `core:webview:allow-create-webview-window` | `WebviewWindow.new()` — spawn an output |
+| `core:window:allow-close` | Graceful teardown of an output |
+| `core:window:allow-destroy` | Forced teardown after a crash or GPU-loss timeout |
+| `core:window:allow-set-decorations` | Drop the title bar (§3.6 fullscreen toggle) |
+
+`allow-set-fullscreen`, `allow-set-size`, `allow-set-position`,
+`allow-available-monitors`, and `allow-current-monitor` are
+already present and sufficient. They are also currently **dead
+grants** — nothing in `src/` calls any window or monitor API
+today (see §"Modified modules").
+
+**These grants belong to the *caller*, not the target.** Tauri's
+window commands are `fn $cmd(window: Window<R>, label:
+Option<String>)` → `get_window(window, label)`
+(`tauri/src/window/plugin.rs:13-37`). The `label` argument
+retargets the acted-on window with **no ACL check against the
+target's capability**; the check runs entirely against the
+capability set of the window making the call. A narrow
+`output.json` therefore does nothing to restrain the manager,
+and — more importantly — putting `close` / `set-fullscreen` /
+`set-decorations` *only* in `output.json` would cause every
+manager-initiated operation on `output-N` to be **denied**.
+
+The split that actually works:
+
+- **`default.json` (the manager)** — gains the four permissions
+  in the table above. This is what makes cross-window control
+  possible at all.
+- **`output.json` (the outputs)** — stays narrow, and is about
+  limiting what a *compromised output* can reach, not about
+  restraining the manager. It grants the output only what it
+  self-drives: F11 fullscreen on itself, its own graceful
+  close, IPC, and HTTPS fetch. See §3 "Output capability spec".
 
 ### 7. Vite multi-entry build
 
@@ -214,8 +279,40 @@ The output window loads a separate HTML page (`output.html`)
 so its JS bundle is decoupled from the heavy main app — no
 MapLibre, no UI shell, no Orbit, no analytics emitter (until
 we decide what to do about telemetry, see Open Questions).
-Vite supports this via `rollupOptions.input` with multiple
-entries.
+
+**The build is already multi-entry** — `vite.config.ts:49-54`
+declares two inputs today:
+
+```js
+rollupOptions: { input: {
+  main:  path.resolve(__dirname, 'src/index.html'),
+  orbit: path.resolve(__dirname, 'src/orbit.html'),
+} }
+```
+
+So this is an **addition to the existing object**, not a new
+`rollupOptions.input` block. Writing one from scratch would
+silently drop the `orbit` entry and break the Orbit character
+page.
+
+Two consequences of the existing config:
+
+- **`root: './src'`** (`vite.config.ts:41`) means every entry
+  HTML must live under `src/`. The output page is therefore
+  `src/output/output.html`, not `output/output.html` at repo
+  root — and its module tag is a root-relative
+  `<script type="module" src="./main.ts">`, matching how
+  `src/index.html:291` references `src/main.ts`.
+- Because the bundle now lives under `src/`, it falls inside
+  **`check:doc-coverage`** scope — every module needs a
+  CLAUDE.md row in the same commit that adds it. See
+  "Acceptance for each commit".
+
+`src/orbit.html` is the working precedent to copy. Note it
+carries the SPDX header (lines 2-3), a
+`<link rel="manifest" … crossorigin="use-credentials">`
+(line 14), and `<meta name="robots" content="noindex">`
+(line 17) — an output page wants all three.
 
 The output bundle's runtime dependency is **Three.js** (lazy-
 loaded, same chunk that VR already pulls — HTTP-cached from
@@ -315,11 +412,11 @@ two-way binding.
 | `src/services/multiOutput/protocol.ts` | Shared TS types for control↔output IPC events. Imported by both bundles. Single source of truth for the state schema above. |
 | `src/services/multiOutput/stateAggregator.ts` | Subscribes to dataset / playback / layer / time / view events, builds the state snapshot, emits diffs |
 | `src/ui/outputUI.ts` | Tools → Outputs panel — list current outputs, "Add output" button, per-output config menu (monitor, mode, "Track operator camera" toggle, "Split sphere" toggle, "Rotation offset (°)" numeric + slider, "Calibration" submenu with test-pattern selector, debug overlay), per-output health badge (healthy / stale / stalled / monitor-missing — see "Failure recovery") |
-| `output/main.ts` | Output window entry. Creates Three.js renderer, builds `photorealEarth` scene + dataset overlay + layer stack, runs equirect RTT each frame, displays to a full-bleed canvas. Wires `webglcontextlost` / `webglcontextrestored` listeners and an IPC-silence watchdog (5 s tolerance, stale state thereafter — see "Failure recovery") |
-| `output/equirectRtt.ts` | Equirectangular render-to-texture pass — single fragment shader. Applies the per-output `uRotationOffsetRad` longitude rotation first (see "Calibration tooling"), then raycasts from a configurable camera offset (`uCameraOffset`, derived from the operator's MapLibre camera by default; see §3.5) at every (lon, lat) of the output framebuffer. Supports split mode (`uSplit`) that mirrors the area of focus to the antipodal hemisphere of the LED sphere. |
-| `output/datasetMirror.ts` | Output-side companion to control-window `datasetLoader` — given a `dataset.url` + `dataset.kind` + `dataset.bbox`, builds a Three.js texture (image or HLS-driven VideoTexture) and a UV transform. Owns the playback sync state machine (see "Playback sync algorithm") and the HLS fatal-error retry loop (3× exponential backoff, freeze last good frame during retry — see "Failure recovery"). Recognises the `__terraviz_calibration__` sentinel dataset id and renders a procedural test pattern (~80 lines of GLSL) instead of fetching content (see "Calibration tooling") |
-| `output/layerStack.ts` | Builds and updates the multi-shell sphere stack from the layers state diff |
-| `output/output.html` + `output/output.css` | Output window markup and styling — black body, no cursor, full-bleed canvas |
+| `src/output/main.ts` | Output window entry. Creates Three.js renderer, builds `photorealEarth` scene + dataset overlay + layer stack, runs equirect RTT each frame, displays to a full-bleed canvas. Wires `webglcontextlost` / `webglcontextrestored` listeners and an IPC-silence watchdog (5 s tolerance, stale state thereafter — see "Failure recovery") |
+| `src/output/equirectRtt.ts` | Equirectangular render-to-texture pass — single fragment shader. Applies the per-output `uRotationOffsetRad` longitude rotation first (see "Calibration tooling"), then raycasts from a configurable camera offset (`uCameraOffset`, derived from the operator's MapLibre camera by default; see §3.5) at every (lon, lat) of the output framebuffer. Supports split mode (`uSplit`) that mirrors the area of focus to the antipodal hemisphere of the LED sphere. |
+| `src/output/datasetMirror.ts` | Output-side companion to control-window `datasetLoader` — given a `dataset.url` + `dataset.kind` + `dataset.bbox`, builds a Three.js texture (image or HLS-driven VideoTexture) and a UV transform. Owns the playback sync state machine (see "Playback sync algorithm") and the HLS fatal-error retry loop (3× exponential backoff, freeze last good frame during retry — see "Failure recovery"). Recognises the `__terraviz_calibration__` sentinel dataset id and renders a procedural test pattern (~80 lines of GLSL) instead of fetching content (see "Calibration tooling") |
+| `src/output/layerStack.ts` | Builds and updates the multi-shell sphere stack from the layers state diff |
+| `src/output/output.html` + `src/output/output.css` | Output window markup and styling — black body, no cursor, full-bleed canvas |
 | `src-tauri/capabilities/output.json` | Narrow capability scoped to `output-*` window labels. Allows: event listen / unlisten / emit / emit-to (IPC with manager); window current-monitor / is-decorated / is-fullscreen / set-fullscreen / set-decorations / close; HTTP fetch on `https://*` only with localhost explicitly denied. Excludes: `core:default`, `core:window:default`, window creation, updater, filesystem, asset protocol, shell, dialog, clipboard, all Tauri command `invoke`. Full enumeration + rationale in §3 "Output capability spec". |
 
 ### Modified modules
@@ -333,9 +430,10 @@ two-way binding.
 | `src/types/index.ts` | Add `OutputAddedEvent` / `OutputRemovedEvent` / `OutputFailureEvent` interfaces; append to the `TelemetryEvent` union; tier choice is essential — none belong in `TIER_B_EVENT_TYPES` (see "Telemetry" decision in Open Questions §3) |
 | `src/analytics/perfSampler.ts` | When outputs are active, extend the existing 60 s `perf_sample` event with `output_count` and `sync_delta_p95_ms` fields (no new event type) |
 | `src/ui/toolsMenuUI.ts` | Add "Outputs" entry that opens the new Outputs panel; add a "Fullscreen" toggle that calls `getCurrentWindow().setFullscreen()` + `setDecorations()` and persists to localStorage (see §3.6) |
-| `src-tauri/src/main.rs` | Parse `--kiosk` argv flag and `TERRAVIZ_KIOSK=1` env var in `setup()`; apply fullscreen + decorationless before first paint when set (see §3.6) |
-| `src-tauri/capabilities/default.json` | Add `core:window:allow-set-decorations` (`core:window:allow-set-fullscreen` is already granted; `set-decorations` is not in the default set and is required so the runtime fullscreen toggle can also drop the title bar) |
-| `vite.config.ts` | Add `rollupOptions.input` with `main` and `output` entries |
+| `src-tauri/src/lib.rs` | Parse the `--kiosk` argv flag and `TERRAVIZ_KIOSK=1` env var in `setup()`; apply fullscreen + decorationless before first paint when set (see §3.6). **Not `main.rs`** — that is now a 12-line shim (`fn main() { terraviz_lib::run() }`) and all builder/setup logic lives in `lib.rs` so mobile can share it. Must be `#[cfg(desktop)]`-gated so it does not compile into the iOS/Android cdylib |
+| `src-tauri/capabilities/default.json` | Add `core:webview:allow-create-webview-window`, `core:window:allow-close`, `core:window:allow-destroy`, `core:window:allow-set-decorations`. The first three are what make spawning and tearing down an output possible at all; the fourth lets the fullscreen toggle drop the title bar. Optionally drop the redundant `core:window:default` / `allow-available-monitors` / `allow-current-monitor` lines already implied by `core:default`. See §6 |
+| `src-tauri/capabilities/mobile.json` | **No change** — multi-output is desktop-only and must not widen the mobile surface |
+| `vite.config.ts` | **Add** an `output` entry to the existing `rollupOptions.input` object (which already declares `main` and `orbit`) pointing at `src/output/output.html`. Do not author a fresh `rollupOptions.input` — that would drop `orbit`. See §7 |
 | `package.json` | No new runtime deps for v1 (Three.js already a runtime dep for VR) |
 
 ### Boot flow (v1, SOS equirectangular mode)
@@ -353,7 +451,7 @@ two-way binding.
    `position: { x, y }` (the chosen monitor's top-left), and a
    navigation URL pointing at the bundled `output.html`. Tauri
    creates the window on the target monitor.
-4. Output window boots `output/main.ts`. Page renders a black
+4. Output window boots `src/output/main.ts`. Page renders a black
    background. Lazy-imports Three.js. Builds `photorealEarth`
    into a hidden scene. Allocates a 2:1 framebuffer at the
    target resolution (e.g. 4096×2048 for an 8K LED sphere).
@@ -509,7 +607,7 @@ Convergence time scales with starting drift: 100 ms → 2 s,
   if it ever isn't (twin-LED-sphere installation), Phase 5's
   shared-GPU-texture work eliminates the second decoder.
 
-Constants live in `output/datasetMirror.ts` as named
+Constants live in `src/output/datasetMirror.ts` as named
 exports for tests:
 
 ```ts
@@ -815,16 +913,26 @@ every window can present a clean fullscreen surface:
    survives relaunch — a one-time toggle for an operator who
    uses the control display itself as a capture source.
 
-3. **Kiosk-launch flag.** `--kiosk` CLI argument parsed in
-   `src-tauri/src/main.rs` and an equivalent
-   `TERRAVIZ_KIOSK=1` environment variable. Either path causes
-   `tauri::Builder::default().setup()` to apply
-   `set_fullscreen(true)` + `set_decorations(false)` on the
-   main window before the first paint. Useful for unattended
-   installations: drop a `.desktop` autostart entry, the app
-   launches straight into the final state on boot. Exit via
-   Cmd/Ctrl+Q (already wired) or by SIGTERM from the
-   installation's process supervisor.
+3. **Kiosk-launch flag.** `--kiosk` CLI argument and an
+   equivalent `TERRAVIZ_KIOSK=1` environment variable, parsed
+   in **`src-tauri/src/lib.rs`** — not `main.rs`, which is now
+   a 12-line shim (`fn main() { terraviz_lib::run() }`) with
+   all builder and `setup()` logic moved into `lib.rs` so the
+   mobile entry point can share it. Either path causes
+   `setup()` to apply `set_fullscreen(true)` +
+   `set_decorations(false)` on the main window before the
+   first paint.
+
+   The parse and the calls must sit behind `#[cfg(desktop)]`.
+   `lib.rs` compiles into the iOS/Android cdylib as well, and
+   neither argv flags nor a decorationless fullscreen toggle
+   mean anything there — an ungated version would be dead
+   weight at best and a build break at worst.
+
+   Useful for unattended installations: drop a `.desktop`
+   autostart entry and the app launches straight into the
+   final state on boot. Exit via Cmd/Ctrl+Q (already wired)
+   or by SIGTERM from the installation's process supervisor.
 
 4. **F11 on every window.** Both control and output windows
    wire a global keydown handler that intercepts F11 and
@@ -915,6 +1023,16 @@ network fetch + minimal window controls. No filesystem,
 no keychain, no Tauri commands, no ability to spawn more
 windows.
 
+**What this file does *not* do is restrain the manager.**
+Tauri checks a cross-window command against the **caller's**
+capability, not the target's (§6). So the permissions the
+manager needs to spawn, close, and decorate `output-N` live
+in `default.json`; the grants below cover only what the
+output window invokes **on itself** — F11 fullscreen, its
+own graceful close, IPC, and HTTPS fetch. Reading this file
+as the security boundary for manager→output operations is a
+mistake; it is the boundary for output→everything-else.
+
 Full enumeration:
 
 ```json
@@ -968,7 +1086,7 @@ Full enumeration:
 | Excluded | Reason |
 |---|---|
 | `core:default` | Grants `invoke` to all Tauri commands (download_manager, keychain, tile_cache, asset protocol). Output never invokes commands; all coordination flows through events. |
-| `core:window:default` | Includes `set-size` / `set-position`. Output's geometry is set by the manager at spawn and shouldn't change at runtime — drift would unsync the LED-sphere placement. |
+| `core:window:default` | Not because it is dangerous — it is read-only (getters + monitor queries), so including it would be harmless. Excluded for reviewability: enumerating the four getters the output actually uses makes the intent auditable, and keeps a future Tauri release quietly widening the `default` bundle from widening this file with it. |
 | `core:webview:allow-create-webview-window` | Output cannot spawn more windows. Only the manager (in the main window) creates output windows. |
 | `updater:default` | Auto-update is a main-window concern — Tauri restarts the app on update, taking outputs down with it. |
 | `core:fs:*`, `core:path:*` | Output streams from the network. No need to read local files — the bundled `output.html` is loaded from the asset protocol scope of the main bundle, not via fs APIs. |
@@ -988,6 +1106,26 @@ broadcasts to all listeners. Inter-output IPC is not a
 v1 requirement (per the failure-recovery non-goal "cross-
 output coherence" — outputs sync independently to control).
 
+**Existing Rust events fan out to every window.** Four call
+sites use `AppHandle::emit`, which broadcasts to all webviews
+rather than targeting one: `native_panic` (`lib.rs:121`),
+`download-progress` (`download_manager.rs:291`),
+`download-complete` (`download_manager.rs:321`), and
+`download-error` (`download_commands.rs:69`). An output window
+will receive all four. None is harmful — the output simply has
+no listener registered for them — but it means the output's
+event surface is wider than this capability file suggests, and
+a future Rust-side event carrying sensitive payload would reach
+outputs by default. Two consequences:
+
+- The manager's own state sync must use `emitTo(label, …)`,
+  not `emit(…)`, so the control window does not receive its
+  own broadcasts back. `core:event:allow-emit-to` is already
+  implied by `core:default` on the main window.
+- Worth a follow-up (not v1-blocking) to narrow those four
+  Rust sites to `emit_to("main", …)`, since all four are
+  addressed to the control window in practice.
+
 **Asset protocol scope on the main bundle is unchanged.**
 The existing `tauri.conf.json` scope of `$APPDATA/**` and
 `$APPLOCALDATA/**` for downloaded datasets stays — the
@@ -1000,7 +1138,7 @@ fails closed.
 **Security review checklist for `output.json` (PR-time):**
 
 - [ ] No `core:default` (broad; would grant `invoke`)
-- [ ] No `core:window:default` (broad; would grant set-size/set-position)
+- [ ] No `core:window:default` (read-only, but enumerate explicitly so a future widening of the bundle doesn't widen this file)
 - [ ] No `*:allow-create-webview-window` (output cannot spawn windows)
 - [ ] No `updater:*` (main-window concern)
 - [ ] No `core:fs:*` / `core:path:*` (output streams from network only)
@@ -1056,7 +1194,7 @@ so the operator can verify those primitives by zooming in
 on the control globe and watching how the pattern
 distributes across the LED sphere.
 
-Implementation: `output/datasetMirror.ts` recognises a
+Implementation: `src/output/datasetMirror.ts` recognises a
 sentinel dataset id (`__terraviz_calibration__`). When that
 id arrives in a state diff, the mirror builds a procedural
 texture in a Three.js `WebGLRenderTarget` driven by a single
@@ -1263,19 +1401,19 @@ without rolling the whole feature back.
 | # | Commit | What lands | User-reachable? |
 |---|---|---|---|
 | 1 | `multi-output: scaffold plan + protocol types` | This doc, `multiOutput/protocol.ts` | No |
-| 2 | `multi-output: equirect RTT shader (unit tests + visual fixture)` | `output/equirectRtt.ts` and a tiny test page that loads a known sphere texture and verifies the shader produces the expected equirectangular pixels. Lands as a standalone module; not yet wired up. | No |
-| 3 | `multi-output: output window entry + Three.js scene scaffold` | `output/main.ts`, `output/datasetMirror.ts`, `output/output.html`, `output/output.css`, Vite multi-entry config. Output bundle builds; loadable as a static page; renders a default photoreal Earth with no dataset, no IPC. | No |
-| 4 | `multi-output: layer stack + dataset overlay` | `output/layerStack.ts`. Static fixture page can now load a fake dataset + fake layer stack and render it. Still no IPC. | No |
-| 5 | `multi-output: narrow Tauri capability for output-* windows` | `capabilities/output.json` granting only http + window controls. | No |
+| 2 | `multi-output: equirect RTT shader (unit tests + visual fixture)` | `src/output/equirectRtt.ts` and a tiny test page that loads a known sphere texture and verifies the shader produces the expected equirectangular pixels. Lands as a standalone module; not yet wired up. | No |
+| 3 | `multi-output: output window entry + Three.js scene scaffold` | `src/output/main.ts`, `src/output/datasetMirror.ts`, `src/output/output.html`, `src/output/output.css`, Vite multi-entry config. Output bundle builds; loadable as a static page; renders a default photoreal Earth with no dataset, no IPC. | No |
+| 4 | `multi-output: layer stack + dataset overlay` | `src/output/layerStack.ts`. Static fixture page can now load a fake dataset + fake layer stack and render it. Still no IPC. | No |
+| 5 | `multi-output: Tauri capabilities for multi-window` | Two halves. **`capabilities/default.json`** gains `core:webview:allow-create-webview-window`, `core:window:allow-close`, `allow-destroy`, `allow-set-decorations` — without these the manager cannot spawn or tear down an output at all (see §6). **`capabilities/output.json`** is new, scoped to `output-*`, granting only IPC + self-driven window controls + HTTPS fetch. `mobile.json` untouched. | No |
 | 6 | `multi-output: state aggregator + protocol implementation` | `multiOutput/manager.ts`, `multiOutput/stateAggregator.ts`. Manager constructible but not yet instantiated. | No |
 | 7 | `multi-output: emit dataset:loaded + layer events from main.ts` | Refactor of `datasetLoader` and `main.ts` to fire events the aggregator can subscribe to. Today's `panelStates` consumers keep working. | No |
 | 8 | `multi-output: wire MultiOutputManager into main.ts boot` | Manager instantiated; subscribes to events. No UI to spawn windows yet, so still invisible. | No |
 | 9 | `multi-output: add Tools → Outputs panel` | `outputUI.ts`, Tools menu entry. **First user-reachable commit.** Operator can add and remove SOS equirectangular outputs. | **Yes** |
 | 10 | `multi-output: persist + restore outputs across launches` | localStorage config, opt-in restore on boot, monitor-name matching. | Yes (additive) |
 | 11 | `multi-output: per-output debug overlay + framebuffer resolution picker` | Resolution picker in panel, debug HUD with dataset id, sync delta, and fps. | Yes (additive) |
-| 12 | `multi-output: fullscreen toggle + kiosk launch + F11 on every window` | `Tools → Fullscreen` toggle in `toolsMenuUI.ts` (persisted), F11 keydown handler on control + output windows, `--kiosk` argv parse and `TERRAVIZ_KIOSK=1` env var read in `src-tauri/src/main.rs` applying fullscreen + decorationless before first paint, `core:window:allow-set-decorations` added to `capabilities/default.json`, 3-second idle cursor-hide on the control window when fullscreen. See §3.6. | Yes (additive) |
+| 12 | `multi-output: fullscreen toggle + kiosk launch + F11 on every window` | `Tools → Fullscreen` toggle in `toolsMenuUI.ts` (persisted), F11 keydown handler on control + output windows, `--kiosk` argv parse and `TERRAVIZ_KIOSK=1` env var read in `src-tauri/src/lib.rs` (**not** `main.rs`, now a 12-line shim) behind `#[cfg(desktop)]`, applying fullscreen + decorationless before first paint, 3-second idle cursor-hide on the control window when fullscreen. See §3.6. | Yes (additive) |
 | 13 | `multi-output: failure recovery — crashes, stalls, GPU loss, monitor unplug` | Manager gains crash detection (no-graceful-close window destroy → toast + record removal), 3-strikes-per-monitor crash storm guard, 2 s `availableMonitors()` poll for unplug detection, `getAll()` boot scan to reattach orphaned `output-*` windows after a control-window crash. Output gains `webglcontextlost` / `webglcontextrestored` listeners with full scene rebuild, IPC-silence watchdog (5 s → stale state, 60 s → orphan), HLS fatal-error retry (3× backoff with frozen last-good-frame). Outputs panel renders per-output health badges (healthy / stale / stalled / monitor-missing). New Tier A `output_failure` event fired from manager via `analytics/emitter.ts` with `{ kind, retries, recovered }` (Open Question 3 decided). See §3 "Failure recovery". | Yes (additive) |
-| 14 | `multi-output: calibration tooling — test pattern + rotation offset` | `output/datasetMirror.ts` recognises the `__terraviz_calibration__` sentinel id and renders a procedural test pattern (8-step grayscale ramp at the equator, RGB color bars at lat ±30°, lat/lon graticule with color-coded equator + prime meridian, named anchor crosshairs, N/S pole labels, live resolution counter — ~80 LOC GLSL). `output/equirectRtt.ts` adds the `uRotationOffsetRad` longitude rotation applied before the camera-offset ray-march. `outputUI.ts` adds the per-output "Rotation offset (°)" numeric + slider and a "Calibration" submenu. Persisted config gains `rotationOffsetDeg`. See §3 "Calibration tooling". | Yes (additive) |
+| 14 | `multi-output: calibration tooling — test pattern + rotation offset` | `src/output/datasetMirror.ts` recognises the `__terraviz_calibration__` sentinel id and renders a procedural test pattern (8-step grayscale ramp at the equator, RGB color bars at lat ±30°, lat/lon graticule with color-coded equator + prime meridian, named anchor crosshairs, N/S pole labels, live resolution counter — ~80 LOC GLSL). `src/output/equirectRtt.ts` adds the `uRotationOffsetRad` longitude rotation applied before the camera-offset ray-march. `outputUI.ts` adds the per-output "Rotation offset (°)" numeric + slider and a "Calibration" submenu. Persisted config gains `rotationOffsetDeg`. See §3 "Calibration tooling". | Yes (additive) |
 
 **Backout plan.** Reverting commit 9 leaves all the plumbing in
 place (manager, output bundle, capability) but removes the
@@ -1305,7 +1443,29 @@ automatically. The basic state-mirroring path is unaffected.
 
 **Acceptance for each commit:**
 
-- `npm run type-check` passes.
+- `npm run type-check` passes. **This is no longer just `tsc`** —
+  it chains eight repo gates before the four compiler passes:
+
+  ```
+  locales → check:i18n-strings → check:migrations
+  → check:doc-coverage → check:css-logical → check:tick-drain
+  → check:license → check:protocol-schemas → 4× tsc
+  ```
+
+  Four of those bind directly on this feature and are easy to
+  trip late:
+
+  | Gate | What it means here |
+  |---|---|
+  | `check:i18n-strings` | Gates `src/ui/` for hard-coded user-facing text. Every string in the Outputs panel — the health badges, "Rotation offset (°)", the crash / monitor-disconnect toasts, the close prompt — must route through `t()` with locale entries added in the same commit. This plan was written with no i18n awareness; treat every quoted UI string in it as pseudocode. |
+  | `check:doc-coverage` | Every module under `src/` must appear in CLAUDE.md by full repo-relative path. Because the output bundle now lives at `src/output/…` (§7), each commit that adds a module must add its CLAUDE.md row in the *same* commit or CI goes red. |
+  | `check:license` | SPDX + copyright header required on every `.ts`, `.rs`, `.css`, `.html`, `.js`, matched positionally. So `src/output/output.html`, `output.css`, and every new `.ts` need one. `capabilities/output.json` does not — `.json` is exempt. |
+  | `check:css-logical` | Bans physical inline-axis properties. `output.css` must use logical properties (`inline-start`, `block-end`, …). |
+
+  `check:tick-drain` additionally bans turn-counting waits in
+  tests — the async tests below must use `until()` from
+  `src/test-utils.ts` rather than fixed tick counts.
+
 - `npm run test` passes. New unit tests for `equirectRtt`
   (visual fixture comparing output pixels to a known-good
   reference at low resolution), `stateAggregator` (event
@@ -1544,6 +1704,17 @@ renderer somewhere" — which we don't. Direct RTT.
 
 ## Non-goals
 
+- **Mobile (iOS / Android).** Since this plan was first
+  drafted, mobile became a shipped target: `bundle.iOS` /
+  `bundle.android` in `tauri.conf.json`, a `deep-link` plugin,
+  a separate `capabilities/mobile.json`, target-gated Cargo
+  dependencies, and a `mobile.yml` workflow. Multi-output is
+  **desktop-only and must not widen the mobile surface**.
+  Concretely: `mobile.json` gains no permissions; the kiosk
+  argv/env parse in `lib.rs` sits behind `#[cfg(desktop)]`;
+  and the Outputs entry in the Tools menu stays gated on the
+  existing desktop check, since `availableMonitors()` and
+  `WebviewWindow.new()` have no meaning on a phone.
 - **Live screen capture for streaming** (Twitch / OBS / Zoom).
   Different problem space; users already have OBS for that.
 - **Remote-display / screen-sharing protocols** (RDP, VNC).
