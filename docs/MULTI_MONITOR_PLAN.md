@@ -418,7 +418,7 @@ two-way binding.
 | `src/ui/outputUI.ts` | Tools → Outputs panel — list current outputs, "Add output" button, per-output config menu (monitor, mode, "Track operator camera" toggle, "Split sphere" toggle, "Rotation offset (°)" numeric + slider, "Calibration" submenu with test-pattern selector, debug overlay), per-output health badge (healthy / stale / stalled / monitor-missing — see "Failure recovery") |
 | `src/output/main.ts` | Output window entry. Creates Three.js renderer, builds `photorealEarth` scene + dataset overlay + layer stack, runs equirect RTT each frame, displays to a full-bleed canvas. Wires `webglcontextlost` / `webglcontextrestored` listeners and an IPC-silence watchdog (5 s tolerance, stale state thereafter — see "Failure recovery") |
 | `src/output/equirectRtt.ts` | Equirectangular render-to-texture pass — single fragment shader. Applies the per-output `uRotationOffsetRad` longitude rotation first (see "Calibration tooling"), then raycasts from a configurable camera offset (`uCameraOffset`, derived from the operator's MapLibre camera by default; see §3.5) at every (lon, lat) of the output framebuffer. Supports split mode (`uSplit`) that mirrors the area of focus to the antipodal hemisphere of the LED sphere. |
-| `src/output/datasetMirror.ts` | Output-side companion to control-window `datasetLoader` — given a `dataset.url` + `dataset.kind` + `dataset.bbox`, builds a Three.js texture (image or HLS-driven VideoTexture) and a UV transform. Owns the playback sync state machine (see "Playback sync algorithm") and the HLS fatal-error retry loop (3× exponential backoff, freeze last good frame during retry — see "Failure recovery"). Recognises the `__terraviz_calibration__` sentinel dataset id and renders a procedural test pattern (~80 lines of GLSL) instead of fetching content (see "Calibration tooling") |
+| `src/output/datasetMirror.ts` | Output-side companion to control-window `datasetLoader` — given a `dataset.url` + `dataset.kind` + `dataset.bbox`, builds a Three.js texture (image or HLS-driven VideoTexture) and a UV transform. Owns the playback sync seam (feeds `computeSiblingSyncCorrection` and the read-back verification layer — see "Playback sync algorithm") and the single stream rebuild on a `loadStream()` rejection, freezing the last good frame throughout (see "Failure recovery"; there is deliberately no retry ladder here — `hlsService` owns that). Recognises the `__terraviz_calibration__` sentinel dataset id and renders a procedural test pattern (~80 lines of GLSL) instead of fetching content (see "Calibration tooling") |
 | `src/output/layerStack.ts` | Builds and updates the multi-shell sphere stack from the layers state diff |
 | `src/output/output.html` + `src/output/output.css` | Output window markup and styling — black body, no cursor, full-bleed canvas |
 | `src-tauri/capabilities/output.json` | Narrow capability scoped to `output-*` window labels. Allows: event listen / unlisten / emit / emit-to (IPC with manager); window current-monitor / is-decorated / is-fullscreen / set-fullscreen / set-decorations / close; HTTP fetch on `https://*` only with localhost explicitly denied. Excludes: `core:default`, `core:window:default`, window creation, updater, filesystem, asset protocol, shell, dialog, clipboard, all Tauri command `invoke`. Full enumeration + rationale in §3 "Output capability spec". |
@@ -831,23 +831,45 @@ driver suspicion. Counter resets at next launch.
 
 #### 2. HLS stream errors
 
-**Detection.** HLS.js fires `Hls.Events.ERROR` with
-`fatal: true`. The output's `datasetMirror` listens.
+**Detection.** The output builds its video through the same
+`HLSService` the control window uses, so a fatal error
+surfaces as a **rejection from `loadStream()`** — not as a
+raw `Hls.Events.ERROR` the output subscribes to itself.
 
-**Recovery.** Tear down the HLS instance, wait
-exponential backoff (1 s, 2 s, 4 s), rebuild from the
-same URL. Up to 3 attempts. **The texture freezes on the
-last good frame during retry** — the LED sphere shows the
-most recent imagery rather than going black.
+**There is no retry ladder here, deliberately.** An earlier
+draft of this plan specified 3 attempts at 1 s / 2 s / 4 s
+backoff. That layer was both redundant and inert, because
+`hlsService` already retries internally before it ever
+rejects (`src/services/hlsService.ts:31, 127`):
 
-After 3 failures: keep the texture frozen, emit
-`output_dataset_stalled` to the manager. Manager surfaces
-a status badge on that output in the Outputs panel.
-Operator must manually reload the dataset (which triggers
-a fresh HLS instance via the normal dataset-change path).
+| Error type | What `hlsService` already does | Budget |
+|---|---|---|
+| `NETWORK_ERROR` | `startLoad()` | `MAX_ERROR_RETRIES = 3` |
+| `MEDIA_ERROR` | caps `autoLevelCapping` one rung below the failing level, then `recoverMediaError()` | `MAX_ERROR_RETRIES = 3` |
+| other fatal | rejects immediately | — |
 
-Non-fatal HLS errors (single-segment 404, transient 5xx)
-are handled by HLS.js itself and never reach this layer.
+The promise rejects only *after* that budget is spent. So a
+retry in `datasetMirror` would re-run a torn instance whose
+recovery paths are already exhausted — it changes nothing
+except latency. Stacked, the two ladders would give up to
+nine load attempts and ~7 s of added silence before the
+sphere is told anything is wrong.
+
+**Recovery.** One rebuild, not a ladder: `destroy()` the
+`HLSService` and call `loadStream` fresh. That is the only
+action that differs from what already failed — it buys a new
+`Hls` instance with a reset ABR cap and a re-fetched
+manifest. If the rebuild also rejects, stop.
+
+**The texture freezes on the last good frame throughout** —
+the LED sphere shows the most recent imagery rather than
+going black. Then emit `output_dataset_stalled` to the
+manager, which surfaces a status badge on that output in the
+Outputs panel. The operator reloads the dataset manually,
+which takes the normal dataset-change path.
+
+Non-fatal HLS errors (single-segment 404, transient 5xx) are
+handled inside hls.js and never reach either layer.
 
 #### 3. IPC channel goes silent
 
@@ -946,7 +968,7 @@ once the operator's relaunch completes.
 | Failure | Detection | Auto-recovery | Audience-visible? | Operator-visible? |
 |---|---|---|---|---|
 | Output crash | Window destroy w/o graceful close | None | Output goes black | Toast + log; can re-add manually |
-| HLS stream error | `Hls.Events.ERROR fatal:true` | 3× backoff retry (1, 2, 4 s) | Frozen last good frame during retry | Status badge; manual reload after retries exhausted |
+| HLS stream error | `loadStream()` rejects (after `hlsService`'s own 3 retries) | One `destroy()` + fresh `loadStream` | Frozen last good frame throughout | Status badge; manual reload if the rebuild also fails |
 | IPC silence | 5 s no diff | Render from last state indefinitely | Last good content stays visible | Stale badge in Outputs panel |
 | Monitor unplug | 2 s `availableMonitors()` poll | None (OS handles window placement) | OS-dependent (auto-move or phantom) | Toast; close prompt after 60 s |
 | GPU context loss | `webglcontextlost` event | Rebuild scene on restore (30 s timeout) | Black until restore | Recovery event logged |
@@ -1592,7 +1614,7 @@ without rolling the whole feature back.
 | 10 | `multi-output: persist + restore outputs across launches` | localStorage config, opt-in restore on boot, monitor-name matching. | Yes (additive) |
 | 11 | `multi-output: per-output debug overlay + framebuffer resolution picker` | Resolution picker in panel, debug HUD with dataset id, sync delta, and fps. | Yes (additive) |
 | 12 | `multi-output: fullscreen toggle + kiosk launch + F11 on every window` | `Tools → Fullscreen` toggle in `toolsMenuUI.ts` (persisted), F11 keydown handler on control + output windows, `--kiosk` argv parse and `TERRAVIZ_KIOSK=1` env var read in `src-tauri/src/lib.rs` (**not** `main.rs`, now a 12-line shim) behind `#[cfg(desktop)]`, applying fullscreen + decorationless before first paint, 3-second idle cursor-hide on the control window when fullscreen. See §3.6. | Yes (additive) |
-| 13 | `multi-output: failure recovery — crashes, stalls, GPU loss, monitor unplug` | Manager gains crash detection (no-graceful-close window destroy → toast + record removal), 3-strikes-per-monitor crash storm guard, 2 s `availableMonitors()` poll for unplug detection, `getAll()` boot scan to reattach orphaned `output-*` windows after a control-window crash. Output gains `webglcontextlost` / `webglcontextrestored` listeners with full scene rebuild, IPC-silence watchdog (5 s → stale state, 60 s → orphan), HLS fatal-error retry (3× backoff with frozen last-good-frame). Outputs panel renders per-output health badges (healthy / stale / stalled / monitor-missing). New Tier A `output_failure` event fired from manager via `analytics/emitter.ts` with `{ kind, retries, recovered }` (Open Question 3 decided). See §3 "Failure recovery". | Yes (additive) |
+| 13 | `multi-output: failure recovery — crashes, stalls, GPU loss, monitor unplug` | Manager gains crash detection (no-graceful-close window destroy → toast + record removal), 3-strikes-per-monitor crash storm guard, 2 s `availableMonitors()` poll for unplug detection, `getAll()` boot scan to reattach orphaned `output-*` windows after a control-window crash. Output gains `webglcontextlost` / `webglcontextrestored` listeners with full scene rebuild, IPC-silence watchdog (5 s → stale state, 60 s → orphan), one HLS stream rebuild on a `loadStream()` rejection with frozen last-good-frame (no retry ladder — `hlsService` already spends a 3× budget before rejecting). Outputs panel renders per-output health badges (healthy / stale / stalled / monitor-missing). New Tier A `output_failure` event fired from manager via `analytics/emitter.ts` with `{ kind, retries, recovered }` (Open Question 3 decided). See §3 "Failure recovery". | Yes (additive) |
 | 14 | `multi-output: calibration tooling — test pattern + rotation offset` | `src/output/datasetMirror.ts` recognises the `__terraviz_calibration__` sentinel id and renders a procedural test pattern (8-step grayscale ramp at the equator, RGB color bars at lat ±30°, lat/lon graticule with color-coded equator + prime meridian, named anchor crosshairs, N/S pole labels, live resolution counter — ~80 LOC GLSL). `src/output/equirectRtt.ts` adds the `uRotationOffsetRad` longitude rotation applied before the camera-offset ray-march. `outputUI.ts` adds the per-output "Rotation offset (°)" numeric + slider and a "Calibration" submenu. Persisted config gains `rotationOffsetDeg`. See §3 "Calibration tooling". | Yes (additive) |
 
 **Backout plan.** Reverting commit 9 leaves all the plumbing in
@@ -2044,8 +2066,9 @@ renderer somewhere" — which we don't. Direct RTT.
 - **Silent installation degradation.** A long-running install
   that hits a network blip, driver hiccup, or monitor-cable
   jiggle could degrade silently if failure paths aren't
-  designed in. Mitigated by §3 "Failure recovery" — bounded
-  retries, last-good-frame freezing during HLS retry, IPC
+  designed in. Mitigated by §3 "Failure recovery" — a bounded
+  stream rebuild over `hlsService`'s own retry budget,
+  last-good-frame freezing throughout, IPC
   staleness surfacing, GPU context loss recovery, control-
   window crash reattachment via boot scan. Risk remaining:
   a class of failure we haven't anticipated reaches the
