@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Topical + temporal + geo matcher for current events (see
  * `docs/CURRENT_EVENTS_PLAN.md` §4). Given a current event and the
