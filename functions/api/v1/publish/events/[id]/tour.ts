@@ -1,6 +1,3 @@
-// SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The Zyra Project
-
 /**
  * POST /api/v1/publish/events/:id/tour — generate an editable tour
  * draft from a current event (`docs/CURRENT_EVENTS_PLAN.md` §7).
@@ -25,6 +22,8 @@ import type { PublisherData } from '../../_middleware'
 import { getEffectiveFeatures } from '../../../_lib/node-settings-store'
 import { writeAuditEvent } from '../../../_lib/audit-store'
 import { canMutateEvent, getCurrentEvent, listLinksForEvent } from '../../../_lib/events-store'
+import { getDecorations, type DecorationRows } from '../../../_lib/catalog-store'
+import { orderTourStops, type StopCandidate } from '../../../_lib/tour-stop-order'
 import { resolveHttpAssetUrl } from '../../../_lib/r2-public-url'
 import { createDraftTour, writeTourDraftJson } from '../../../_lib/tour-mutations'
 import {
@@ -50,7 +49,14 @@ function jsonError(status: number, error: string, message: string): Response {
  *  datasets never become stops — and the visibility filter runs over the
  *  whole candidate pool BEFORE the stop cap, so a hidden top-scored link
  *  yields the next visible one rather than a hole (or a spurious
- *  `no_datasets`). */
+ *  `no_datasets`).
+ *
+ *  Order comes from `orderTourStops` rather than the match ranking
+ *  (`docs/TOUR_DIRECTION_PLAN.md` D1): the strongest pairing still
+ *  opens, but the stops after it trade a little match score for not
+ *  looking like the stop before. Four visible candidates sharing a
+ *  facet and a bounding box used to run back to back purely because
+ *  the matcher scored them together. */
 async function resolveStopDatasets(
   db: D1Database,
   eventId: string,
@@ -69,31 +75,76 @@ async function resolveStopDatasets(
   const placeholders = pool.map(() => '?').join(', ')
   const res = await db
     .prepare(
-      `SELECT id, title, start_time, end_time, format, thumbnail_ref FROM datasets
+      `SELECT id, title, start_time, end_time, format, thumbnail_ref,
+              bbox_n, bbox_s, bbox_w, bbox_e FROM datasets
         WHERE id IN (${placeholders})
           AND published_at IS NOT NULL
           AND is_hidden = 0
           AND retracted_at IS NULL`,
     )
     .bind(...pool.map(l => l.dataset_id))
-    .all<{ id: string; title: string; start_time: string | null; end_time: string | null; format: string | null; thumbnail_ref: string | null }>()
+    .all<{
+      id: string
+      title: string
+      start_time: string | null
+      end_time: string | null
+      format: string | null
+      thumbnail_ref: string | null
+      bbox_n: number | null
+      bbox_s: number | null
+      bbox_w: number | null
+      bbox_e: number | null
+    }>()
   const byId = new Map((res.results ?? []).map(r => [r.id, r]))
-  // Preserve the score order the pool established; cap AFTER the
-  // visibility filter so the draft always gets the best visible stops.
-  const out: EventTourDataset[] = []
-  for (const link of pool) {
-    const row = byId.get(link.dataset_id)
-    if (row) {
-      out.push({
-        id: row.id,
-        title: row.title,
-        startTime: row.start_time,
-        endTime: row.end_time,
-        format: row.format,
-        thumbnailUrl: resolveThumb(row.thumbnail_ref),
-      })
-      if (out.length === MAX_TOUR_STOPS) break
+
+  // Visible candidates only, in link order — the sequencer re-orders,
+  // but it must never be handed a dataset that failed the filter.
+  const visible = pool.map(l => byId.get(l.dataset_id)).filter(r => r !== undefined)
+  if (visible.length === 0) return []
+
+  // Facets for the variety signal, through the existing batched
+  // decoration loader (it chunks against D1's bind budget already).
+  // A failure here degrades to score order rather than sinking the
+  // tour: worse sequencing beats no tour.
+  let decorations = new Map<string, DecorationRows>()
+  try {
+    decorations = await getDecorations(db, visible.map(r => r.id))
+  } catch {
+    decorations = new Map()
+  }
+
+  const scoreByDataset = new Map(pool.map(l => [l.dataset_id, l.match_score]))
+  const candidates: StopCandidate[] = visible.map(row => {
+    const decoration = decorations.get(row.id)
+    const hasBbox =
+      row.bbox_n !== null && row.bbox_s !== null && row.bbox_w !== null && row.bbox_e !== null
+    return {
+      id: row.id,
+      matchScore: scoreByDataset.get(row.id) ?? null,
+      categories: (decoration?.categories ?? []).map(c => `${c.facet}:${c.value}`),
+      keywords: decoration?.keywords ?? [],
+      bbox: hasBbox
+        ? { n: row.bbox_n!, s: row.bbox_s!, w: row.bbox_w!, e: row.bbox_e! }
+        : null,
     }
+  })
+
+  // Cap AFTER the visibility filter so the draft always gets the best
+  // visible stops, and after ordering so the cap keeps a varied four
+  // rather than the four the matcher happened to rank together.
+  const ordered = orderTourStops(candidates, { limit: MAX_TOUR_STOPS })
+  const out: EventTourDataset[] = []
+  for (const id of ordered) {
+    const row = byId.get(id)
+    if (!row) continue
+    out.push({
+      id: row.id,
+      title: row.title,
+      startTime: row.start_time,
+      endTime: row.end_time,
+      format: row.format,
+      thumbnailUrl: resolveThumb(row.thumbnail_ref),
+    })
   }
   return out
 }

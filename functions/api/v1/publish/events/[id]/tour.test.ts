@@ -1,6 +1,3 @@
-// SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The Zyra Project
-
 /**
  * Wire-level tests for POST /api/v1/publish/events/:id/tour — the
  * generate-a-tour-draft action.
@@ -180,6 +177,58 @@ describe('POST /api/v1/publish/events/:id/tour', () => {
     const meta = JSON.parse(audit!.metadata_json) as { tour_id: string; stops: string[] }
     expect(meta.tour_id).toBe(body.tour.id)
     expect(meta.stops).toEqual([DS_0, DS_1])
+  })
+
+  // D1 shot sequencing (`docs/TOUR_DIRECTION_PLAN.md`). The fixtures
+  // all carry the same facets, so these two tests differ only in
+  // whether one dataset is made distinct — the control proves the
+  // sequencer is inert without a variety signal, and the second
+  // proves it fires when there is one.
+  it('keeps score order when every candidate looks alike', async () => {
+    const { env, bucket } = setupEnv()
+    const id = (await insertCurrentEvent(env.CATALOG_DB, SAMPLE)).id
+    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_0, matchScore: 0.95 })
+    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_2, matchScore: 0.6 })
+    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_1, matchScore: 0.55 })
+
+    const res = await tourPost(ctx({ env, id }))
+    expect(res.status).toBe(201)
+    const { tour } = await readJson<{ tour: { id: string } }>(res)
+    const file = JSON.parse(bucket.puts.get(`tours/${tour.id}/draft.json`)!) as {
+      tourTasks: TourTaskDef[]
+    }
+    const loads = file.tourTasks.filter(t => 'loadDataset' in t) as Array<{
+      loadDataset: { id: string }
+    }>
+    expect(loads.map(l => l.loadDataset.id)).toEqual([DS_0, DS_2, DS_1])
+  })
+
+  it('lifts a distinct dataset ahead of a near-duplicate of the opening stop', async () => {
+    const { env, bucket, sqlite } = setupEnv()
+    const id = (await insertCurrentEvent(env.CATALOG_DB, SAMPLE)).id
+    // Same scores as the control above: DS_2 out-scores DS_1.
+    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_0, matchScore: 0.95 })
+    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_2, matchScore: 0.6 })
+    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_1, matchScore: 0.55 })
+
+    // DS_0 and DS_2 keep the shared fixture facets; DS_1 becomes the
+    // odd one out, so it is the only stop that does not look like the
+    // opener.
+    sqlite.prepare(`UPDATE dataset_categories SET value = 'Oceans' WHERE dataset_id = ?`).run(DS_1)
+    sqlite.prepare(`UPDATE dataset_keywords SET keyword = 'salinity' WHERE dataset_id = ?`).run(DS_1)
+
+    const res = await tourPost(ctx({ env, id }))
+    expect(res.status).toBe(201)
+    const { tour } = await readJson<{ tour: { id: string } }>(res)
+    const file = JSON.parse(bucket.puts.get(`tours/${tour.id}/draft.json`)!) as {
+      tourTasks: TourTaskDef[]
+    }
+    const loads = file.tourTasks.filter(t => 'loadDataset' in t) as Array<{
+      loadDataset: { id: string }
+    }>
+    // The strongest match still opens; the lower-scored DS_1 takes the
+    // second slot because DS_2 is a twin of the opener.
+    expect(loads.map(l => l.loadDataset.id)).toEqual([DS_0, DS_1, DS_2])
   })
 
   it('uses the vetted story image as the tour thumbnail; none stays null', async () => {
