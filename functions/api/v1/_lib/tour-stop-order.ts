@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Shot sequencing for generated event tours
  * (`docs/TOUR_DIRECTION_PLAN.md` D1).

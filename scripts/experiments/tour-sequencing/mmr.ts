@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * The shipped `orderTourStops` loop, parameterised by similarity so the
  * variety-signal sweep can swap the signal without re-deriving the
