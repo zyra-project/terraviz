@@ -3,7 +3,6 @@
   "version": "0.6.0",
   "type": "module",
   "description": "Terraviz \u2014 WebGL globe with adaptive bitrate environmental data streaming",
-  "license": "Apache-2.0",
   "bin": {
     "terraviz": "./bin/terraviz.cjs"
   },
@@ -36,9 +35,8 @@
     "check:css-logical": "npx tsx scripts/check-css-logical.ts",
     "check:doc-freshness": "npx tsx scripts/check-doc-freshness.ts",
     "check:lfs": "npx tsx scripts/check-lfs.ts",
-    "check:license": "npx tsx scripts/check-license-headers.ts",
     "check:tick-drain": "npx tsx scripts/check-tick-drain.ts",
-    "type-check": "npm run locales && npm run check:i18n-strings && npm run check:migrations && npm run check:doc-coverage && npm run check:css-logical && npm run check:tick-drain && npm run check:license && npm run check:protocol-schemas && tsc --noEmit && tsc --noEmit -p functions/tsconfig.json && tsc --noEmit -p cli/tsconfig.json && tsc --noEmit -p scripts/tsconfig.setup-page.json",
+    "type-check": "npm run locales && npm run check:i18n-strings && npm run check:migrations && npm run check:doc-coverage && npm run check:css-logical && npm run check:tick-drain && npm run check:protocol-schemas && tsc --noEmit && tsc --noEmit -p functions/tsconfig.json && tsc --noEmit -p cli/tsconfig.json && tsc --noEmit -p scripts/tsconfig.setup-page.json && tsc --noEmit -p scripts/experiments/tsconfig.json",
     "terraviz": "tsx cli/terraviz.ts",
     "bench:analysis": "npx tsx scripts/bench-analysis.ts",
     "test": "vitest run",

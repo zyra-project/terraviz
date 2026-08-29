@@ -1,0 +1,9 @@
+{
+  "//": "The experiment harness imports functions/ modules, so it needs the Workers types. Without this file scripts/experiments/ was type-checked by nothing — the root tsconfig includes only src/ — which is how a bounding-box key mismatch (north/south/west/east against an EventBoundingBox of {n,s,w,e}) reached a reported result.",
+  "extends": "../../functions/tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["**/*.ts", "../../functions/api/v1/_lib/**/*.ts", "../../src/types/index.ts"],
+  "exclude": ["../../node_modules", "../../dist"]
+}
