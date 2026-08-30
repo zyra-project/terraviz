@@ -163,7 +163,7 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
 
   await writeAuditEvent(db, {
     actor_kind: 'publisher',
-    actor_id: publisher?.id ?? null,
+    actor_id: publisher.id,
     action: 'event.refreshed',
     subject_kind: 'event',
     subject_id: null,

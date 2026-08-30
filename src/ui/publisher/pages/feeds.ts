@@ -630,7 +630,7 @@ function renderConsole(
     customPreview.panel,
   )
 
-  // ── Card 4: agency-YouTube channel allowlist ───────────────────
+  // ── Media tab, card 1: agency-YouTube channel allowlist ────────
   // When the channels endpoint is unavailable (older deploy), the
   // Media channels tab shows a note instead of an allowlist UI whose
   // Add/Remove would 404.
@@ -659,7 +659,7 @@ function renderConsole(
     ]),
   ])
 
-  // ── Card 4: re-score events ────────────────────────────────────
+  // ── News tab, card 4: re-score events ──────────────────────────
   // The matcher runs on ingest and on a curator date/geometry edit, so
   // a scoring change leaves every event its feed has already dropped
   // holding a score no code produces any more. This walks them.
@@ -670,6 +670,9 @@ function renderConsole(
   // would be a lie and the tail of a long backlog unreachable.
   let rematchCursor: string | null = null
   const rematchBtn = el('button', {
+    // Stable handle for the smoke check: the label is i18n copy and a
+    // reworded string should not fail a structural assertion.
+    id: 'feeds-rematch-run',
     type: 'button',
     className: 'publisher-button',
     textContent: t('publisher.feeds.rematch.action'),

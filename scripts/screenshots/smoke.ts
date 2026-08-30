@@ -384,7 +384,7 @@ const checks: Check[] = [
       // only way an operator recovers scores after a scoring change,
       // so its absence from this page is a regression worth catching
       // here rather than the next time the matcher changes.
-      const rematch = page.locator('button', { hasText: 'Re-score events now' }).first()
+      const rematch = page.locator('#feeds-rematch-run')
       await rematch.waitFor({ timeout: 5_000 })
       assert(await rematch.isEnabled(), 'the re-score button should start enabled')
     },

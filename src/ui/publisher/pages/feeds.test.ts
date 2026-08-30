@@ -446,11 +446,9 @@ describe('renderFeedsPage', () => {
 
     const clickRematch = async (fetchFn: ReturnType<typeof vi.fn>): Promise<void> => {
       await renderFeedsPage(mount, { fetchFn: fetchFn as unknown as typeof fetch })
-      const btn = Array.from(mount.querySelectorAll('button')).find(
-        b => b.textContent === 'Re-score events now',
-      ) as HTMLButtonElement
+      const btn = mount.querySelector('#feeds-rematch-run') as HTMLButtonElement | null
       expect(btn).toBeTruthy()
-      btn.click()
+      btn!.click()
     }
 
     it('walks every page and totals the result', async () => {
@@ -507,9 +505,7 @@ describe('renderFeedsPage', () => {
       // Walk ran to completion, so the cursor rewinds: a later click
       // must start from the top rather than resume past the end.
       const before = calls().length
-      const btn = Array.from(mount.querySelectorAll('button')).find(
-        b => b.textContent === 'Re-score events now',
-      ) as HTMLButtonElement
+      const btn = mount.querySelector('#feeds-rematch-run') as HTMLButtonElement
       btn.click()
       await until(() => calls().length > before, 'the second walk to start')
       expect(JSON.parse(String((calls()[before][1] as RequestInit).body))).toEqual({ unscoredOnly: false })
@@ -522,9 +518,7 @@ describe('renderFeedsPage', () => {
         () => (mount.textContent ?? '').includes('Could not re-score'),
         'the rematch error to render',
       )
-      const btn = Array.from(mount.querySelectorAll('button')).find(
-        b => b.textContent === 'Re-score events now',
-      ) as HTMLButtonElement
+      const btn = mount.querySelector('#feeds-rematch-run') as HTMLButtonElement
       expect(btn.disabled).toBe(false)
     })
 
@@ -533,7 +527,7 @@ describe('renderFeedsPage', () => {
       routes['/api/v1/publish/me'] = { body: { role: 'author', is_admin: false } }
       routes['/api/v1/publish/feeds'] = { status: 403, body: { error: 'forbidden_role' } }
       await renderFeedsPage(mount, { fetchFn: mockFetch(routes) })
-      expect(mount.textContent).not.toContain('Re-score events now')
+      expect(mount.querySelector('#feeds-rematch-run')).toBeNull()
     })
   })
 })
