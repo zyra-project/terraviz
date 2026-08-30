@@ -58,17 +58,29 @@
 -- decision, not the matcher's, and this migration has no business
 -- reversing one.
 --
+-- The WHERE clause changes nothing about the outcome and a good deal
+-- about the cost: without it every row is rewritten, including rows
+-- already NULL, so re-running rewrites the whole table to no effect and
+-- a first run pays for rows it has no work to do on. With it the
+-- statement touches only rows that still carry a value, and a second
+-- run reports zero changes rather than merely producing zero
+-- difference. On a node whose link table has grown, that is the
+-- difference between a brief write lock and a long one.
+--
 -- Idempotent, and a no-op on a fresh node with no events yet.
 --
 -- Marked reviewed-destructive deliberately, even though
 -- `check:migrations` would not have asked. Its DESTRUCTIVE list catches
--- `DELETE FROM` but not `UPDATE`, so an unqualified UPDATE that clears
--- two columns on every row passes a gate built to stop exactly that
--- kind of change. The marker records that a human weighed the data
--- loss rather than that a tool failed to notice it.
+-- `DELETE FROM` but not `UPDATE`, so an UPDATE that clears two columns
+-- on every row carrying them passes a gate built to stop exactly that
+-- kind of change — the WHERE clause narrows what is written, not what
+-- is destroyed. The marker records that a human weighed the data loss
+-- rather than that a tool failed to notice it.
 --
 -- destructive: reviewed
 
 UPDATE event_dataset_links
 SET match_score = NULL,
-    signals_json = NULL;
+    signals_json = NULL
+WHERE match_score IS NOT NULL
+   OR signals_json IS NOT NULL;
