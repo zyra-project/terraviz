@@ -403,8 +403,11 @@ export function buildDatasetTerms(parts: {
  * Without this every shared token counted the same, so a dataset could
  * top a hurricane event on `coast`, `are` and `expected` — three words
  * of abstract prose — while every hurricane-titled dataset sat below
- * it. Smoothed so a term in every dataset is worth ~0 and a term in one
- * dataset is worth ~ln(N).
+ * it. `log(1 + N/df)`: a term in every dataset is worth `log(2)` ≈ 0.69
+ * — a floor rather than zero, so a ubiquitous term still counts a
+ * little — and a term in one dataset is worth `log(1 + N)`. Over 180
+ * candidates that is roughly a 7.5x spread between the most common term
+ * and the rarest, and that ratio is what does the work.
  */
 export function buildIdf(datasets: readonly MatchDataset[]): Map<string, number> {
   const df = new Map<string, number>()
@@ -569,8 +572,11 @@ export function proposeMatches(
   const minScore = opts.minScore ?? DEFAULT_MIN_SCORE
   const limit = opts.limit ?? DEFAULT_MATCH_LIMIT
   // One pass over the candidate set gives every term its rarity, so a
-  // shared word is scored by how much it actually distinguishes.
-  const idf = buildIdf(datasets)
+  // shared word is scored by how much it actually distinguishes. Skipped
+  // when the event has no topic terms: `scoreMatch` ignores the lexical
+  // signal entirely on that path, so building the map would sweep every
+  // candidate's term set to produce a value nothing reads.
+  const idf = event.terms && event.terms.size > 0 ? buildIdf(datasets) : undefined
   return datasets
     .map(d => scoreMatch(event, d, opts.nowMs, idf))
     .filter(m => m.score >= minScore)
