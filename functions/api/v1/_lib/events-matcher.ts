@@ -397,16 +397,111 @@ export function buildDatasetTerms(parts: {
 }
 
 /**
- * Topical score in [0, 1] from the overlap of the event's (expanded)
- * topic terms with the dataset's subject terms. 0 means no shared
- * subject (the dataset is filtered out); a single shared term already
- * clears the default threshold so a clearly-related dataset surfaces,
- * with more overlap ranking higher.
+ * Inverse document frequency over the candidate set: how much evidence
+ * one shared term is worth.
+ *
+ * Without this every shared token counted the same, so a dataset could
+ * top a hurricane event on `coast`, `are` and `expected` — three words
+ * of abstract prose — while every hurricane-titled dataset sat below
+ * it. `log(1 + N/df)`: a term in every dataset is worth `log(2)` ≈ 0.69
+ * — a floor rather than zero, so a ubiquitous term still counts a
+ * little — and a term in one dataset is worth `log(1 + N)`. Over 180
+ * candidates that is roughly a 7.5x spread between the most common term
+ * and the rarest, and that ratio is what does the work.
  */
-export function scoreLexical(eventTerms: ReadonlySet<string>, datasetTerms: ReadonlySet<string>): number {
-  let overlap = 0
-  for (const t of datasetTerms) if (eventTerms.has(t)) overlap++
-  return overlap === 0 ? 0 : Math.min(1, 0.5 + 0.2 * overlap)
+export function buildIdf(datasets: readonly MatchDataset[]): Map<string, number> {
+  const df = new Map<string, number>()
+  for (const d of datasets) {
+    for (const term of d.subjectTerms ?? EMPTY_TERMS) {
+      df.set(term, (df.get(term) ?? 0) + 1)
+    }
+  }
+  const n = Math.max(1, datasets.length)
+  const idf = new Map<string, number>()
+  for (const [term, count] of df) idf.set(term, Math.log(1 + n / count))
+  return idf
+}
+
+/**
+ * Topical score in [0, 1]: the IDF-weighted cosine similarity between
+ * the event's (expanded) topic terms and the dataset's subject terms.
+ * 0 means no shared subject and the dataset is filtered out.
+ *
+ * This replaced `min(1, 0.5 + 0.2 * overlap)`, which had three faults
+ * that compounded. It **saturated at three shared terms**, so a quarter
+ * of the catalogue scored exactly 1.0 against a typical event and the
+ * signal carried no ordering information across them. It counted a raw
+ * overlap, so **a long abstract beat a precise title** — a dataset
+ * pooling ~100 prose tokens outranked one whose title named the subject.
+ * And it **weighted every term equally**, so glue words that survived
+ * the short stopword list counted as topical evidence.
+ *
+ * Cosine fixes all three at once: it never saturates, the dataset's own
+ * term mass sits in the denominator so verbosity stops paying, and IDF
+ * makes a rare shared term (`aurora`, `tsunami`) worth far more than a
+ * common one (`temperature`, `global`). `idf` is optional so a caller
+ * scoring a single pair without corpus statistics still gets sane
+ * unweighted cosine rather than a fabricated ranking.
+ */
+/**
+ * The IDF-weighted cosine a genuinely strong topical match reaches, used
+ * to map cosine onto the 0-1 scale the rest of the system already
+ * speaks.
+ *
+ * This calibration is not cosmetic. `match_score` is stored on
+ * `event_dataset_links` and drives the curator UI: the Match Badge
+ * percentage and the "Approve all >= 90%" shortcut
+ * (`AUTO_PAIR_THRESHOLD`). Raw cosines over sparse term sets run an
+ * order of magnitude lower than the old saturating score, so shipping
+ * them unscaled would silently retire that shortcut. Normalising by the
+ * best match in each candidate set would do the opposite and make every
+ * event's top link auto-pairable, including events with nothing
+ * relevant in the catalogue at all.
+ *
+ * An absolute reference keeps the threshold meaning what a curator
+ * thinks it means: a weak event scores low and proposes nothing, rather
+ * than promoting the best of a bad set. Measured over the live 180-row
+ * catalogue, clearly-correct matches reach 0.12-0.21 (wildfire smoke
+ * 0.207, sea ice 0.167, drought 0.139, tsunami 0.133, hurricane 0.121)
+ * while events with no true match top out at 0.08-0.11. 0.2 puts the
+ * first group near 1.0 and leaves the second below the floor.
+ */
+export const LEXICAL_REFERENCE = 0.20
+
+export function scoreLexical(
+  eventTerms: ReadonlySet<string>,
+  datasetTerms: ReadonlySet<string>,
+  idf?: ReadonlyMap<string, number>,
+): number {
+  if (eventTerms.size === 0 || datasetTerms.size === 0) return 0
+  const weight = (term: string): number => idf?.get(term) ?? 1
+  let shared = 0
+  let eventMass = 0
+  let datasetMass = 0
+  for (const term of eventTerms) {
+    // Every event term counts toward the denominator, including the
+    // ones TOPIC_EXPANSIONS added and no dataset can match.
+    //
+    // Restricting this to terms present in the corpus was tried and
+    // reverted: it made an event whose vocabulary barely intersects the
+    // catalogue look *perfectly* covered. A "severe storm" event whose
+    // only answerable term was `cloud` scored a cloud dataset at 1.0,
+    // because the query had been quietly redefined as the one word the
+    // corpus happened to contain. Depressing scores for unmatched
+    // expansion terms is the lesser fault, and it is uniform across
+    // candidates so it does not distort ranking.
+    const w = weight(term)
+    eventMass += w * w
+    if (datasetTerms.has(term)) shared += w * w
+  }
+  if (shared === 0) return 0
+  for (const term of datasetTerms) {
+    const w = weight(term)
+    datasetMass += w * w
+  }
+  if (eventMass === 0 || datasetMass === 0) return 0
+  const cosine = shared / Math.sqrt(eventMass * datasetMass)
+  return Math.min(1, cosine / LEXICAL_REFERENCE)
 }
 
 /**
@@ -427,12 +522,13 @@ export function scoreMatch(
   event: MatchEvent,
   dataset: MatchDataset,
   nowMs: number,
+  idf?: ReadonlyMap<string, number>,
 ): MatchResult {
   const geo = scoreGeo(event, dataset.boundingBox)
   const temporal = scoreTemporal(event, dataset, nowMs)
   const lexical =
     event.terms && event.terms.size > 0
-      ? scoreLexical(event.terms, dataset.subjectTerms ?? EMPTY_TERMS)
+      ? scoreLexical(event.terms, dataset.subjectTerms ?? EMPTY_TERMS, idf)
       : null
   const semantic = dataset.semantic ?? null
   // Topical relevance drives the score; it's the blend of the curated
@@ -447,7 +543,13 @@ export function scoreMatch(
       return { datasetId: dataset.id, score: 0, signals: { geo, temporal, lexical, semantic } }
     }
     let score = topical * (TOPICAL_BASE + (1 - TOPICAL_BASE) * (temporal ?? 0))
-    if (isLiveDataset(dataset, nowMs)) score = Math.min(1, score + LIVE_BONUS)
+    // Boost toward 1 rather than adding and clamping. An additive bonus
+    // has no headroom once the score reaches 1, so a live dataset and an
+    // equally-topical static one tie there — the preference silently
+    // vanishes exactly for the strongest matches. Scaling the remaining
+    // distance keeps live strictly ahead at every score below 1 and can
+    // never exceed 1, so no clamp is needed.
+    if (isLiveDataset(dataset, nowMs)) score += (1 - score) * LIVE_BONUS
     if (geo !== null) score = (score + geo) / 2
     return { datasetId: dataset.id, score, signals: { geo, temporal, lexical, semantic } }
   }
@@ -469,8 +571,14 @@ export function proposeMatches(
 ): MatchResult[] {
   const minScore = opts.minScore ?? DEFAULT_MIN_SCORE
   const limit = opts.limit ?? DEFAULT_MATCH_LIMIT
+  // One pass over the candidate set gives every term its rarity, so a
+  // shared word is scored by how much it actually distinguishes. Skipped
+  // when the event has no topic terms: `scoreMatch` ignores the lexical
+  // signal entirely on that path, so building the map would sweep every
+  // candidate's term set to produce a value nothing reads.
+  const idf = event.terms && event.terms.size > 0 ? buildIdf(datasets) : undefined
   return datasets
-    .map(d => scoreMatch(event, d, opts.nowMs))
+    .map(d => scoreMatch(event, d, opts.nowMs, idf))
     .filter(m => m.score >= minScore)
     .sort((a, b) => b.score - a.score || a.datasetId.localeCompare(b.datasetId))
     .slice(0, limit)
