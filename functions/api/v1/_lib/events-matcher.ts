@@ -283,7 +283,6 @@ const STOPWORDS = new Set([
  */
 const TOPIC_EXPANSIONS: Record<string, readonly string[]> = {
   storm: ['cloud', 'precipitation', 'rain', 'wind', 'cyclone', 'hurricane', 'typhoon', 'lightning', 'weather'],
-  severe: ['storm', 'cloud', 'precipitation', 'wind'],
   hurricane: ['cyclone', 'cloud', 'precipitation', 'wind', 'storm'],
   cyclone: ['hurricane', 'cloud', 'wind', 'storm'],
   typhoon: ['cyclone', 'cloud', 'wind', 'storm'],
@@ -297,10 +296,52 @@ const TOPIC_EXPANSIONS: Record<string, readonly string[]> = {
   iceberg: ['ice', 'sea', 'polar', 'ocean'],
   ice: ['snow', 'sea', 'polar'],
   snow: ['ice', 'cover', 'cold'],
+  aurora: ['solar', 'magnetosphere', 'ionosphere', 'space'],
   earthquake: ['seismic', 'ground'],
   landslide: ['precipitation', 'ground', 'soil'],
-  flow: ['lava', 'thermal'],
 }
+
+/** Space-weather vocabulary. A geomagnetic storm is an event in the
+ *  magnetosphere, not the troposphere, and the datasets that speak to it
+ *  are solar and auroral ones. */
+const SPACE_WEATHER = ['aurora', 'magnetosphere', 'ionosphere', 'solar', 'space', 'plasma'] as const
+
+/**
+ * Two-word topics whose meaning is not the sum of their words.
+ *
+ * {@link TOPIC_EXPANSIONS} is keyed on single tokens, which is fine while
+ * a word means one thing. It is wrong for a word that names a different
+ * phenomenon depending on what precedes it: a *geomagnetic storm* is a
+ * space-weather event, and expanding it to `cloud` / `precipitation` /
+ * `rain` sent every solar-storm alert looking for weather data. The
+ * word alone cannot tell you which; the pair can.
+ *
+ * `expand` adds the phrase's own vocabulary. `suppress` names single
+ * tokens whose {@link TOPIC_EXPANSIONS} entry must NOT fire for this
+ * event — the constituent token itself is still kept as a term, so a
+ * literal word match still counts and IDF still weighs it; only the
+ * misleading expansion is withheld.
+ *
+ * Keyed in the stemmed form {@link tokenize} produces, and matched on
+ * adjacent tokens within a single field, so a title ending "solar" and a
+ * summary opening "storm" never pair up.
+ */
+const TOPIC_PHRASES: readonly {
+  readonly phrase: readonly [string, string]
+  readonly expand: readonly string[]
+  readonly suppress?: readonly string[]
+}[] = [
+  { phrase: ['geomagnetic', 'storm'], expand: SPACE_WEATHER, suppress: ['storm'] },
+  { phrase: ['solar', 'storm'], expand: SPACE_WEATHER, suppress: ['storm'] },
+  { phrase: ['magnetic', 'storm'], expand: SPACE_WEATHER, suppress: ['storm'] },
+  { phrase: ['solar', 'flare'], expand: SPACE_WEATHER },
+  { phrase: ['coronal', 'mass'], expand: SPACE_WEATHER },
+  // `flow` used to expand to lava/thermal on its own, which fired on
+  // river flow, ocean flow and traffic flow alike. It earns the volcanic
+  // reading only in these pairs.
+  { phrase: ['lava', 'flow'], expand: ['lava', 'thermal', 'volcano', 'eruption'] },
+  { phrase: ['pyroclastic', 'flow'], expand: ['ash', 'thermal', 'volcano', 'eruption'] },
+]
 
 /** Light plural→singular stem (no full stemmer) for plural/singular
  *  bridging: handles `-oes` (volcanoes→volcano), `-ies` (anomalies→
@@ -325,9 +366,11 @@ export function tokenize(text: string | null | undefined): string[] {
 /**
  * Build the event's topic-term set: tokens from its title + summary +
  * category values + keywords, each expanded with related topic terms via
- * {@link TOPIC_EXPANSIONS}. Category values ("Severe Storms") and the
- * title carry the signal; the expansion is what connects them to
- * dataset subjects ("cloud", "precipitation").
+ * {@link TOPIC_EXPANSIONS}, after {@link TOPIC_PHRASES} has had a chance
+ * to add a two-word topic's own vocabulary and withhold a single word's
+ * misleading one. Category values ("Severe Storms") and the title carry
+ * the signal; the expansion is what connects them to dataset subjects
+ * ("cloud", "precipitation").
  */
 export function buildEventTerms(parts: {
   title?: string | null
@@ -335,18 +378,45 @@ export function buildEventTerms(parts: {
   categoryValues?: readonly string[]
   keywords?: readonly string[]
 }): Set<string> {
+  const fields = [
+    parts.title,
+    parts.summary,
+    ...(parts.categoryValues ?? []),
+    ...(parts.keywords ?? []),
+  ]
+  const tokenized = fields.map(tokenize)
+
+  // Pass 1: phrases. Adjacency is checked per field, but a suppression
+  // it triggers applies to the whole event — a title reading
+  // "Geomagnetic storm" must also stop the bare "Storms" category value
+  // from dragging in precipitation.
   const set = new Set<string>()
-  const add = (text: string | null | undefined): void => {
-    for (const t of tokenize(text)) {
+  const suppressed = new Set<string>()
+  for (const tokens of tokenized) {
+    for (const { phrase, expand, suppress } of TOPIC_PHRASES) {
+      if (!hasAdjacentPair(tokens, phrase)) continue
+      for (const e of expand) set.add(e)
+      for (const t of suppress ?? []) suppressed.add(t)
+    }
+  }
+
+  // Pass 2: tokens, expanded unless a phrase withheld the expansion.
+  for (const tokens of tokenized) {
+    for (const t of tokens) {
       set.add(t)
+      if (suppressed.has(t)) continue
       for (const e of TOPIC_EXPANSIONS[t] ?? []) set.add(e)
     }
   }
-  add(parts.title)
-  add(parts.summary)
-  for (const v of parts.categoryValues ?? []) add(v)
-  for (const k of parts.keywords ?? []) add(k)
   return set
+}
+
+/** Do `tokens` contain `pair` as consecutive entries? */
+function hasAdjacentPair(tokens: readonly string[], pair: readonly [string, string]): boolean {
+  for (let i = 0; i + 1 < tokens.length; i++) {
+    if (tokens[i] === pair[0] && tokens[i + 1] === pair[1]) return true
+  }
+  return false
 }
 
 /**
