@@ -703,6 +703,52 @@ export async function insertProposedLinkIfAbsent(
   return (res.meta?.changes ?? 0) > 0
 }
 
+/**
+ * Event ids to re-score, in a keyset page ordered by event id.
+ *
+ * Exists because a scoring change invalidates stored `match_score`
+ * values wholesale and nothing re-scores an event on its own unless its
+ * feed still carries it (see `runMatcherForEvent`'s callers). Migration
+ * `0044` cleared the scores the pre-IDF formula produced; this is how
+ * they come back.
+ *
+ * **Keyset, not offset, and that is the whole point.** The obvious
+ * selector — "events with a NULL-scored link" — shrinks as it is
+ * worked, which looks self-limiting until an event scores nothing at
+ * all. Its links stay NULL, it is selected again on the next call, and
+ * a caller looping "until nothing needs re-scoring" never terminates.
+ * Paging by `after` (an id strictly greater than the last one seen)
+ * advances whatever the matcher decides, so the walk always finishes.
+ * Event ids are ULIDs, so ascending id is a stable total order.
+ *
+ * `unscoredOnly` (the default) selects only events holding at least one
+ * link with no score — the post-migration case. Pass `false` to walk
+ * every event regardless, which is what a future formula change wants:
+ * there the stored scores are present but wrong, so nothing is NULL to
+ * select on.
+ */
+export async function listEventIdsToRescore(
+  db: D1Database,
+  opts: { limit?: number; after?: string | null; unscoredOnly?: boolean } = {},
+): Promise<string[]> {
+  const limit = Math.max(1, Math.min(opts.limit ?? 25, 100))
+  const after = opts.after ?? ''
+  const unscoredOnly = opts.unscoredOnly !== false
+  const sql = unscoredOnly
+    ? `SELECT DISTINCT l.event_id AS id
+         FROM event_dataset_links l
+        WHERE l.match_score IS NULL
+          AND l.event_id > ?
+        ORDER BY l.event_id
+        LIMIT ?`
+    : `SELECT id FROM current_events
+        WHERE id > ?
+        ORDER BY id
+        LIMIT ?`
+  const res = await db.prepare(sql).bind(after, limit).all<{ id: string }>()
+  return (res.results ?? []).map(r => r.id)
+}
+
 /** List the links for an event, optionally filtered by status. */
 export async function listLinksForEvent(
   db: D1Database,
