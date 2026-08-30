@@ -38,6 +38,7 @@ const ME_ENDPOINT = '/api/v1/publish/me'
 const FEEDS_ENDPOINT = '/api/v1/publish/feeds'
 const PREVIEW_ENDPOINT = '/api/v1/publish/feeds/preview'
 const REFRESH_ENDPOINT = '/api/v1/publish/events/refresh'
+const REMATCH_ENDPOINT = '/api/v1/publish/events/rematch'
 const YOUTUBE_CHANNELS_ENDPOINT = '/api/v1/publish/media/youtube-channels'
 const VIDEO_SOURCES_ENDPOINT = '/api/v1/publish/media/video-sources'
 const VIDEO_SOURCES_REFRESH_ENDPOINT = '/api/v1/publish/media/video-sources/refresh'
@@ -45,6 +46,17 @@ const VIDEO_SOURCES_REFRESH_ENDPOINT = '/api/v1/publish/media/video-sources/refr
 interface MeResponse {
   role: string
   is_admin: boolean
+}
+
+/** One page of {@link REMATCH_ENDPOINT}. The endpoint is bounded per
+ *  request and resumed by `nextCursor`; the card below walks the pages. */
+interface RematchResponse {
+  scanned: number
+  rescored: number
+  failed: number
+  failedIds: string[]
+  nextCursor: string | null
+  done: boolean
 }
 
 interface FeedRow {
@@ -647,7 +659,83 @@ function renderConsole(
     ]),
   ])
 
-  const newsPanel = el('div', { className: 'publisher-feeds-panel' }, [yourFeeds, suggested, custom])
+  // ── Card 4: re-score events ────────────────────────────────────
+  // The matcher runs on ingest and on a curator date/geometry edit, so
+  // a scoring change leaves every event its feed has already dropped
+  // holding a score no code produces any more. This walks them.
+  const rematchStatus = el('p', { className: 'publisher-feeds-status', role: 'status' })
+  const rematchBtn = el('button', {
+    type: 'button',
+    className: 'publisher-button',
+    textContent: t('publisher.feeds.rematch.action'),
+  }) as HTMLButtonElement
+
+  rematchBtn.addEventListener('click', () => {
+    rematchBtn.disabled = true
+    rematchStatus.classList.remove('publisher-feeds-status-error')
+    rematchStatus.textContent = t('publisher.feeds.rematch.running')
+
+    // Walk the pages. The endpoint bounds each request and hands back a
+    // cursor; looping here is what turns that into "re-score the
+    // backlog". `pages` is a belt-and-braces stop: the cursor already
+    // guarantees forward progress, but a client loop against a remote
+    // endpoint should never be able to spin without bound.
+    const MAX_PAGES = 200
+    let cursor: string | null = null
+    let scanned = 0
+    let rescored = 0
+    let failed = 0
+
+    const step = (pages: number): void => {
+      if (pages > MAX_PAGES) {
+        rematchBtn.disabled = false
+        rematchStatus.textContent = t('publisher.feeds.rematch.partial', {
+          scanned: String(scanned),
+          rescored: String(rescored),
+          failed: String(failed),
+        })
+        return
+      }
+      void publisherSend<RematchResponse>(
+        REMATCH_ENDPOINT,
+        cursor === null ? {} : { after: cursor },
+        { method: 'POST', fetchFn: options.fetchFn },
+      ).then(res => {
+        if (!res.ok) {
+          rematchBtn.disabled = false
+          rematchStatus.classList.add('publisher-feeds-status-error')
+          rematchStatus.textContent = t('publisher.feeds.rematch.error')
+          return
+        }
+        scanned += res.data.scanned
+        rescored += res.data.rescored
+        failed += res.data.failed
+        if (res.data.done) {
+          rematchBtn.disabled = false
+          rematchStatus.textContent = t('publisher.feeds.rematch.done', {
+            scanned: String(scanned),
+            rescored: String(rescored),
+            failed: String(failed),
+          })
+          return
+        }
+        // Progress between pages, so a long backlog doesn't look hung.
+        rematchStatus.textContent = t('publisher.feeds.rematch.progress', { scanned: String(scanned) })
+        cursor = res.data.nextCursor
+        step(pages + 1)
+      })
+    }
+    step(1)
+  })
+
+  const rematch = card(
+    heading(t('publisher.feeds.rematch.title')),
+    el('p', { className: 'publisher-feeds-intro', textContent: t('publisher.feeds.rematch.intro') }),
+    el('div', { className: 'publisher-feeds-actions' }, [rematchBtn]),
+    rematchStatus,
+  )
+
+  const newsPanel = el('div', { className: 'publisher-feeds-panel' }, [yourFeeds, suggested, custom, rematch])
   const mediaPanel = el('div', { className: 'publisher-feeds-panel' }, mediaContent)
   mediaPanel.hidden = true
 
