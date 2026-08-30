@@ -481,9 +481,38 @@ describe('renderFeedsPage', () => {
       )
       const calls = fetchFn.mock.calls.filter(c => String(c[0]).includes('/events/rematch'))
       expect(calls).toHaveLength(2)
-      // First page starts the walk with no cursor; the second resumes.
-      expect(JSON.parse(String((calls[0][1] as RequestInit).body))).toEqual({})
-      expect(JSON.parse(String((calls[1][1] as RequestInit).body))).toEqual({ after: 'EVT025' })
+      // Every page asks for the full walk, not just the unscored rows:
+      // a stale score is present-but-wrong rather than NULL, so the
+      // unscored-only filter would skip what this button is for.
+      expect(JSON.parse(String((calls[0][1] as RequestInit).body))).toEqual({ unscoredOnly: false })
+      // First page starts with no cursor; the second resumes past it.
+      expect(JSON.parse(String((calls[1][1] as RequestInit).body))).toEqual({
+        unscoredOnly: false,
+        after: 'EVT025',
+      })
+    })
+
+    it('resumes from the page cap on a second click, and rewinds once finished', async () => {
+      // "Run again to continue" has to be true. A cursor scoped to the
+      // click handler would restart at the top and strand the tail of a
+      // long backlog no matter how often it was clicked.
+      const page = (cursor: string, done: boolean) => ({
+        body: { scanned: 1, rescored: 1, failed: 0, failedIds: [], nextCursor: done ? null : cursor, done },
+      })
+      const fetchFn = rematchFetch([page('EVT001', false), page('', true)])
+      await clickRematch(fetchFn)
+      await until(() => (mount.textContent ?? '').includes('Re-scored'), 'the first walk to finish')
+
+      const calls = () => fetchFn.mock.calls.filter(c => String(c[0]).includes('/events/rematch'))
+      // Walk ran to completion, so the cursor rewinds: a later click
+      // must start from the top rather than resume past the end.
+      const before = calls().length
+      const btn = Array.from(mount.querySelectorAll('button')).find(
+        b => b.textContent === 'Re-score events now',
+      ) as HTMLButtonElement
+      btn.click()
+      await until(() => calls().length > before, 'the second walk to start')
+      expect(JSON.parse(String((calls()[before][1] as RequestInit).body))).toEqual({ unscoredOnly: false })
     })
 
     it('surfaces a failure and re-enables the button', async () => {

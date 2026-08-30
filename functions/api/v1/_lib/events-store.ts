@@ -722,10 +722,24 @@ export async function insertProposedLinkIfAbsent(
  * Event ids are ULIDs, so ascending id is a stable total order.
  *
  * `unscoredOnly` (the default) selects only events holding at least one
- * link with no score — the post-migration case. Pass `false` to walk
- * every event regardless, which is what a future formula change wants:
- * there the stored scores are present but wrong, so nothing is NULL to
- * select on.
+ * link with no score — the cheap first pass straight after a migration
+ * that cleared them.
+ *
+ * **It is a prioritisation filter, not a work queue that empties.** A
+ * curator's hand-picked pairing is written by
+ * {@link insertProposedLinkIfAbsent} with a NULL `match_score` *by
+ * design* — it is a human decision, not a matcher output, and the
+ * matcher only ever fills that score in if it independently proposes
+ * the same dataset. So an event with a hand-added link the matcher
+ * would not pick keeps a NULL link forever and is selected by this
+ * predicate on every future call. A walk still terminates (the cursor
+ * sees to that), but the *set* never drains to empty, and re-running
+ * repeats the full matcher cost on those events.
+ *
+ * Pass `false` to walk every event regardless. That is the honest
+ * choice after a formula change — the stored scores are present but
+ * wrong, so there is nothing NULL to select on — and it is what the
+ * portal's re-score card sends.
  */
 export async function listEventIdsToRescore(
   db: D1Database,

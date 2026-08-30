@@ -31,10 +31,19 @@
  * should cost that event's re-score, not the other twenty-four in the
  * page. Failures are counted and named in the response.
  *
- * Privileged-only (admin / service), and feature-gated on `events` the
- * way `refresh.ts` is: off means a 200 no-op carrying the same field
- * names with `skipped: 'feature_disabled'`, never a 4xx, so a caller
- * looping over pages does not have to special-case a disabled node.
+ * Privileged-only (admin / service). Feature-gating is the
+ * middleware's: `/api/v1/publish/events` is a gated prefix, and this
+ * route is deliberately NOT added to `FEATURE_GATE_EXEMPT_PATHS`, so a
+ * node with events off answers 403 here. That exemption list exists for
+ * the two cron-invoked routes, where a middleware 403 would turn a
+ * GitHub Actions run red every cycle; this route is driven by an admin
+ * clicking a button on a page that itself does not render when events
+ * is off, so there is no cron to keep green and nothing to special-case.
+ *
+ * An in-route `getEffectiveFeatures` check was written here first and
+ * removed: the middleware answers before the handler runs, so it was
+ * unreachable, and it made the route document a 200-no-op contract it
+ * could not honour.
  *
  * Static `rematch` segment, so Pages routes it ahead of the sibling
  * `[id]` review-submit handler.
@@ -42,7 +51,6 @@
 
 import type { CatalogEnv } from '../../_lib/env'
 import type { PublisherData } from '../_middleware'
-import { getEffectiveFeatures } from '../../_lib/node-settings-store'
 import { isPrivileged } from '../../_lib/publisher-store'
 import { writeAuditEvent } from '../../_lib/audit-store'
 import { listEventIdsToRescore } from '../../_lib/events-store'
@@ -127,12 +135,6 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
 
   const parsed = await readBody(context.request)
   if ('error' in parsed) return jsonError(400, 'invalid_body', parsed.error)
-
-  // Same shape as a real run so a paging caller can treat it as a
-  // terminal page rather than an error.
-  if (!(await getEffectiveFeatures(context.env)).events) {
-    return json({ scanned: 0, rescored: 0, failed: 0, failedIds: [], nextCursor: null, done: true, skipped: 'feature_disabled' })
-  }
 
   const db = context.env.CATALOG_DB
   const limit = parsed.limit ?? DEFAULT_LIMIT

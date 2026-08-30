@@ -664,6 +664,11 @@ function renderConsole(
   // a scoring change leaves every event its feed has already dropped
   // holding a score no code produces any more. This walks them.
   const rematchStatus = el('p', { className: 'publisher-feeds-status', role: 'status' })
+  // Survives across clicks on purpose: when the walk stops at its page
+  // cap it says "run again to continue", and a cursor scoped to the
+  // click handler would restart at the beginning instead — the message
+  // would be a lie and the tail of a long backlog unreachable.
+  let rematchCursor: string | null = null
   const rematchBtn = el('button', {
     type: 'button',
     className: 'publisher-button',
@@ -681,7 +686,6 @@ function renderConsole(
     // guarantees forward progress, but a client loop against a remote
     // endpoint should never be able to spin without bound.
     const MAX_PAGES = 200
-    let cursor: string | null = null
     let scanned = 0
     let rescored = 0
     let failed = 0
@@ -698,7 +702,12 @@ function renderConsole(
       }
       void publisherSend<RematchResponse>(
         REMATCH_ENDPOINT,
-        cursor === null ? {} : { after: cursor },
+        // Every event, not just the ones missing a score. The card
+        // promises to fix *stale* scores after a formula change, and a
+        // stale score is present-but-wrong rather than NULL, so the
+        // unscored-only filter would skip exactly the rows this button
+        // exists for. It also never drains — see listEventIdsToRescore.
+        { unscoredOnly: false, ...(rematchCursor === null ? {} : { after: rematchCursor }) },
         { method: 'POST', fetchFn: options.fetchFn },
       ).then(res => {
         if (!res.ok) {
@@ -711,6 +720,9 @@ function renderConsole(
         rescored += res.data.rescored
         failed += res.data.failed
         if (res.data.done) {
+          // Finished: rewind, so a later click re-scores from the top
+          // rather than resuming past the end and reporting nothing.
+          rematchCursor = null
           rematchBtn.disabled = false
           rematchStatus.textContent = t('publisher.feeds.rematch.done', {
             scanned: String(scanned),
@@ -721,7 +733,7 @@ function renderConsole(
         }
         // Progress between pages, so a long backlog doesn't look hung.
         rematchStatus.textContent = t('publisher.feeds.rematch.progress', { scanned: String(scanned) })
-        cursor = res.data.nextCursor
+        rematchCursor = res.data.nextCursor
         step(pages + 1)
       })
     }
