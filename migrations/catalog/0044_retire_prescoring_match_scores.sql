@@ -59,6 +59,15 @@
 -- reversing one.
 --
 -- Idempotent, and a no-op on a fresh node with no events yet.
+--
+-- Marked reviewed-destructive deliberately, even though
+-- `check:migrations` would not have asked. Its DESTRUCTIVE list catches
+-- `DELETE FROM` but not `UPDATE`, so an unqualified UPDATE that clears
+-- two columns on every row passes a gate built to stop exactly that
+-- kind of change. The marker records that a human weighed the data
+-- loss rather than that a tool failed to notice it.
+--
+-- destructive: reviewed
 
 UPDATE event_dataset_links
 SET match_score = NULL,
