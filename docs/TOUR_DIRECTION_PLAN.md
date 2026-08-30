@@ -83,10 +83,17 @@ obligations, which are not onerous but are not optional either:
 | State changes | Any modified file must carry a prominent notice that we changed it |
 | Carry NOTICE | tubeviz's `NOTICE` ("tubeviz, Copyright 2026 tubeviz contributors") must be reproduced in our own NOTICE if we redistribute its work |
 
-Concretely, that means a `NOTICE` file at the TerraViz root (we do not have one
-yet) and a short attribution block naming tubeviz, its copyright line, and the
-files taken. [`CONTRIBUTING.md`](../CONTRIBUTING.md) already requires exactly
-this of third-party code, and Apache-2.0 is the compatible case it names.
+Concretely, that means appending a short attribution block to the
+[`NOTICE`](../NOTICE) file already at the TerraViz root, naming tubeviz, its
+copyright line, and the files taken. [`CONTRIBUTING.md`](../CONTRIBUTING.md)
+already requires exactly this of third-party code, and Apache-2.0 is the
+compatible case it names.
+
+Appending is safe: `NOTICE` describes its own copyright line as the single
+source of truth for *this project's* attribution, and `check:license` enforces
+that by substring — it asserts the holder constant appears in the file, not that
+the file contains nothing else. A third-party block below the existing text
+neither breaks the check nor weakens the claim it verifies.
 
 ### Why we still mostly won't import
 
