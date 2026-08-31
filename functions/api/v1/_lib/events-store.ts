@@ -239,9 +239,12 @@ export interface NewEventDatasetLink {
    *  to `signals_json`. */
   signals?: unknown
   status?: EventLinkStatus
-  /** Defaults to 'matcher' — this is the matcher's write path. Set on
-   *  insert only; the upsert below never rewrites it. */
-  source?: LinkSource
+  /** Required, deliberately. An earlier revision defaulted this to
+   *  'matcher' and the ingest path's hand-pick seed — which does not
+   *  pass one — silently stamped every curator pairing as machine-made,
+   *  corrupting the exact field this column exists to record. Set on
+   *  insert only; the upsert never rewrites it. */
+  source: LinkSource
   /** The matcher build writing `matchScore`. Refreshed on every upsert,
    *  because it describes the score rather than the row. */
   scorerVersion?: string | null
@@ -675,7 +678,10 @@ export async function getEventDecorations(
  * at exactly the moment the row starts looking machine-made.
  *
  * `scorer_version` is refreshed, because unlike `source` it describes
- * the SCORE rather than the row, and the score is what just changed.
+ * the SCORE rather than the row, and the score is what just changed —
+ * but only when the caller supplies one. A caller that upserts without
+ * scoring must not silently un-version a score somebody else wrote,
+ * which is what an unguarded `excluded.scorer_version` did.
  */
 export async function upsertEventDatasetLink(
   db: D1Database,
@@ -689,7 +695,7 @@ export async function upsertEventDatasetLink(
        ON CONFLICT(event_id, dataset_id) DO UPDATE SET
          match_score    = excluded.match_score,
          signals_json   = excluded.signals_json,
-         scorer_version = excluded.scorer_version`,
+         scorer_version = COALESCE(excluded.scorer_version, event_dataset_links.scorer_version)`,
     )
     .bind(
       input.eventId,
@@ -700,7 +706,7 @@ export async function upsertEventDatasetLink(
       now,
       null,
       null,
-      input.source ?? 'matcher',
+      input.source,
       input.scorerVersion ?? null,
     )
     .run()

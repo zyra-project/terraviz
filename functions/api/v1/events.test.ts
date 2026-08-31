@@ -59,7 +59,7 @@ async function seedApproved(env: { CATALOG_DB: D1Database }) {
     publishedAt: new Date().toISOString(),
     geometry: { point: { lat: 29, lon: -89 } },
   })
-  await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_0, matchScore: 0.9 })
+  await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_0, matchScore: 0.9 , source: 'matcher' })
   await setEventStatus(env.CATALOG_DB, id, 'approved', 'PUB1')
   await setLinkStatus(env.CATALOG_DB, id, DS_0, 'approved', 'PUB1')
   return id

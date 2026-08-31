@@ -21,7 +21,10 @@
 -- in the table because nothing recorded which formula produced which
 -- value, so a change to one scorer meant discarding the work of all of
 -- them. That is the blunt instrument this column replaces: a future
--- scoring change can invalidate `scorer_version < N` and leave the rest.
+-- scoring change can invalidate the versions it actually
+-- supersedes — `scorer_version IN (…)`, or `IS NOT 'the-new-one'` —
+-- and leave the rest. Not `< N`: these are opaque build strings, and
+-- the constant's own docstring says never to order them.
 --
 --   source          TEXT — 'matcher' | 'curator'. Who created the ROW,
 --                          not who last touched it. A curator's pick

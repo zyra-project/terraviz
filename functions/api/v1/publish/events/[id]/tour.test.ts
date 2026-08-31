@@ -133,7 +133,7 @@ describe('POST /api/v1/publish/events/:id/tour', () => {
   it('400 no_datasets when the only linked dataset is hidden', async () => {
     const { env, sqlite } = setupEnv()
     const id = (await insertCurrentEvent(env.CATALOG_DB, SAMPLE)).id
-    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_0, matchScore: 0.9 })
+    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_0, matchScore: 0.9 , source: 'matcher' })
     sqlite.prepare('UPDATE datasets SET is_hidden = 1 WHERE id = ?').run(DS_0)
     const res = await tourPost(ctx({ env, id }))
     expect(res.status).toBe(400)
@@ -143,8 +143,8 @@ describe('POST /api/v1/publish/events/:id/tour', () => {
   it('201: creates a draft tour whose tasks carry the event geometry, time, and captions', async () => {
     const { env, bucket, sqlite } = setupEnv()
     const id = (await insertCurrentEvent(env.CATALOG_DB, SAMPLE)).id
-    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_0, matchScore: 0.9 })
-    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_1, matchScore: 0.5 })
+    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_0, matchScore: 0.9 , source: 'matcher' })
+    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_1, matchScore: 0.5 , source: 'matcher' })
 
     const res = await tourPost(ctx({ env, id }))
     expect(res.status).toBe(201)
@@ -187,7 +187,7 @@ describe('POST /api/v1/publish/events/:id/tour', () => {
     const withImage = (
       await insertCurrentEvent(env.CATALOG_DB, { ...SAMPLE, imageUrl: 'https://img.example.org/delta.jpg' })
     ).id
-    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: withImage, datasetId: DS_0, matchScore: 0.9 })
+    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: withImage, datasetId: DS_0, matchScore: 0.9 , source: 'matcher' })
     const res = await tourPost(ctx({ env, id: withImage }))
     expect(res.status).toBe(201)
     const { tour } = await readJson<{ tour: { id: string } }>(res)
@@ -199,7 +199,7 @@ describe('POST /api/v1/publish/events/:id/tour', () => {
     // Imageless event → thumbnail stays null (the card renders bare,
     // same as before).
     const bare = (await insertCurrentEvent(env.CATALOG_DB, SAMPLE)).id
-    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: bare, datasetId: DS_1, matchScore: 0.9 })
+    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: bare, datasetId: DS_1, matchScore: 0.9 , source: 'matcher' })
     const res2 = await tourPost(ctx({ env, id: bare }))
     const { tour: tour2 } = await readJson<{ tour: { id: string } }>(res2)
     const row2 = sqlite
@@ -214,8 +214,8 @@ describe('POST /api/v1/publish/events/:id/tour', () => {
     // the next visible one, not a hole or a spurious no_datasets.
     const { env, bucket, sqlite } = setupEnv()
     const id = (await insertCurrentEvent(env.CATALOG_DB, SAMPLE)).id
-    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_0, matchScore: 0.99 })
-    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_1, matchScore: 0.3 })
+    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_0, matchScore: 0.99 , source: 'matcher' })
+    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_1, matchScore: 0.3 , source: 'matcher' })
     sqlite.prepare('UPDATE datasets SET is_hidden = 1 WHERE id = ?').run(DS_0)
 
     const res = await tourPost(ctx({ env, id }))
@@ -229,8 +229,8 @@ describe('POST /api/v1/publish/events/:id/tour', () => {
   it('prefers approved links over proposed ones', async () => {
     const { env, bucket } = setupEnv()
     const id = (await insertCurrentEvent(env.CATALOG_DB, SAMPLE)).id
-    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_0, matchScore: 0.95 })
-    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_1, matchScore: 0.4 })
+    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_0, matchScore: 0.95 , source: 'matcher' })
+    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_1, matchScore: 0.4 , source: 'matcher' })
     await setLinkStatus(env.CATALOG_DB, id, DS_1, 'approved', ADMIN.id)
 
     const res = await tourPost(ctx({ env, id }))
@@ -246,7 +246,7 @@ describe('POST /api/v1/publish/events/:id/tour', () => {
   it('rejected links never become stops', async () => {
     const { env } = setupEnv()
     const id = (await insertCurrentEvent(env.CATALOG_DB, SAMPLE)).id
-    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_2, matchScore: 0.9 })
+    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_2, matchScore: 0.9 , source: 'matcher' })
     await setLinkStatus(env.CATALOG_DB, id, DS_2, 'rejected', ADMIN.id)
     const res = await tourPost(ctx({ env, id }))
     expect(res.status).toBe(400)

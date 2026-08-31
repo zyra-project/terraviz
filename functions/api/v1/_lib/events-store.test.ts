@@ -226,7 +226,7 @@ describe('insertProposedLinkIfAbsent', () => {
     const datasetId = seededDatasetId(0)
 
     // A matcher link already exists with a real score.
-    await upsertEventDatasetLink(db, { eventId, datasetId, matchScore: 0.9 })
+    await upsertEventDatasetLink(db, { eventId, datasetId, matchScore: 0.9, source: 'matcher' })
     // Adding the same dataset again does nothing (returns false) and keeps the score.
     expect(await insertProposedLinkIfAbsent(db, eventId, datasetId)).toBe(false)
     expect((await listLinksForEvent(db, eventId))[0].match_score).toBeCloseTo(0.9)
@@ -249,6 +249,7 @@ describe('link provenance (0045)', () => {
       eventId,
       datasetId: seededDatasetId(0),
       matchScore: 0.9,
+      source: 'matcher',
       scorerVersion: 'test-v1',
     })
     await insertProposedLinkIfAbsent(db, eventId, seededDatasetId(1))
@@ -284,6 +285,7 @@ describe('link provenance (0045)', () => {
       eventId,
       datasetId,
       matchScore: 0.77,
+      source: 'matcher',
       scorerVersion: 'test-v2',
     })
 
@@ -295,14 +297,36 @@ describe('link provenance (0045)', () => {
     expect(link.scorer_version).toBe('test-v2')
   })
 
+  it('never clears a version the caller did not supply', async () => {
+    // The defect: a caller that upserts without scoring (the ingest
+    // path's hand-pick seed used to) set scorer_version = NULL on a row
+    // somebody else had scored, un-versioning a live score and
+    // defeating invalidation-by-version entirely.
+    const { db } = freshDb()
+    const { id: eventId } = await insertCurrentEvent(db, sampleEvent())
+    const datasetId = seededDatasetId(0)
+
+    await upsertEventDatasetLink(db, {
+      eventId,
+      datasetId,
+      matchScore: 0.8,
+      source: 'matcher',
+      scorerVersion: 'stamped',
+    })
+    // A later upsert that carries no version at all.
+    await upsertEventDatasetLink(db, { eventId, datasetId, matchScore: 0.8, source: 'matcher' })
+
+    expect((await listLinksForEvent(db, eventId))[0].scorer_version).toBe('stamped')
+  })
+
   it('a re-score refreshes the version without disturbing status or provenance', async () => {
     const { db } = freshDb()
     const { id: eventId } = await insertCurrentEvent(db, sampleEvent())
     const datasetId = seededDatasetId(0)
 
-    await upsertEventDatasetLink(db, { eventId, datasetId, matchScore: 0.6, scorerVersion: 'old' })
+    await upsertEventDatasetLink(db, { eventId, datasetId, matchScore: 0.6, source: 'matcher', scorerVersion: 'old' })
     await setLinkStatus(db, eventId, datasetId, 'approved', 'PUB1')
-    await upsertEventDatasetLink(db, { eventId, datasetId, matchScore: 0.82, scorerVersion: 'new' })
+    await upsertEventDatasetLink(db, { eventId, datasetId, matchScore: 0.82, source: 'matcher', scorerVersion: 'new' })
 
     const link = (await listLinksForEvent(db, eventId))[0]
     expect(link.status).toBe('approved')
@@ -323,6 +347,7 @@ describe('event_dataset_links', () => {
       datasetId,
       matchScore: 0.82,
       signals: { geo: 0.9, temporal: 0.7, semantic: null },
+      source: 'matcher',
     })
 
     const forEvent = await listLinksForEvent(db, eventId)
@@ -341,8 +366,8 @@ describe('event_dataset_links', () => {
     const { id: eventId } = await insertCurrentEvent(db, sampleEvent())
     const datasetId = seededDatasetId(0)
 
-    await upsertEventDatasetLink(db, { eventId, datasetId, matchScore: 0.4 })
-    await upsertEventDatasetLink(db, { eventId, datasetId, matchScore: 0.95 })
+    await upsertEventDatasetLink(db, { eventId, datasetId, matchScore: 0.4 , source: 'matcher' })
+    await upsertEventDatasetLink(db, { eventId, datasetId, matchScore: 0.95 , source: 'matcher' })
 
     const links = await listLinksForEvent(db, eventId)
     expect(links).toHaveLength(1)
@@ -354,12 +379,12 @@ describe('event_dataset_links', () => {
     const { id: eventId } = await insertCurrentEvent(db, sampleEvent())
     const datasetId = seededDatasetId(0)
 
-    await upsertEventDatasetLink(db, { eventId, datasetId, matchScore: 0.4 })
+    await upsertEventDatasetLink(db, { eventId, datasetId, matchScore: 0.4 , source: 'matcher' })
     await setLinkStatus(db, eventId, datasetId, 'approved', 'PUB1', '2026-06-11T00:00:00.000Z')
 
     // Matcher re-run on an ingest refresh: same status argument the
     // matcher passes ('proposed'), a new score.
-    await upsertEventDatasetLink(db, { eventId, datasetId, matchScore: 0.95, status: 'proposed' })
+    await upsertEventDatasetLink(db, { eventId, datasetId, matchScore: 0.95, status: 'proposed' , source: 'matcher' })
 
     const [link] = await listLinksForEvent(db, eventId)
     expect(link.status).toBe('approved') // curator decision survived
@@ -371,7 +396,7 @@ describe('event_dataset_links', () => {
     const { db } = freshDb()
     const { id: eventId } = await insertCurrentEvent(db, sampleEvent())
     const datasetId = seededDatasetId(1)
-    await upsertEventDatasetLink(db, { eventId, datasetId, matchScore: 0.6 })
+    await upsertEventDatasetLink(db, { eventId, datasetId, matchScore: 0.6 , source: 'matcher' })
 
     expect(await listLinksForDataset(db, datasetId, { status: 'approved' })).toHaveLength(0)
     await setLinkStatus(db, eventId, datasetId, 'approved', 'PUB1', '2026-06-11T00:00:00.000Z')
@@ -386,7 +411,7 @@ describe('event_dataset_links', () => {
     const { db } = freshDb()
     const { id: eventId } = await insertCurrentEvent(db, sampleEvent())
     const datasetId = seededDatasetId(0)
-    await upsertEventDatasetLink(db, { eventId, datasetId })
+    await upsertEventDatasetLink(db, { eventId, datasetId , source: 'matcher' })
 
     await setLinkStatus(db, eventId, datasetId, 'approved', 'PUB1')
     await setLinkStatus(db, eventId, datasetId, 'rejected', 'PUB1')
@@ -402,7 +427,7 @@ describe('ON DELETE CASCADE', () => {
   it('deleting an event clears its links and decorations', async () => {
     const { sqlite, db } = freshDb()
     const { id: eventId } = await insertCurrentEvent(db, sampleEvent())
-    await upsertEventDatasetLink(db, { eventId, datasetId: seededDatasetId(0) })
+    await upsertEventDatasetLink(db, { eventId, datasetId: seededDatasetId(0) , source: 'matcher' })
 
     sqlite.prepare('DELETE FROM current_events WHERE id = ?').run(eventId)
 
@@ -416,7 +441,7 @@ describe('ON DELETE CASCADE', () => {
     const { sqlite, db } = freshDb()
     const { id: eventId } = await insertCurrentEvent(db, sampleEvent())
     const datasetId = seededDatasetId(0)
-    await upsertEventDatasetLink(db, { eventId, datasetId })
+    await upsertEventDatasetLink(db, { eventId, datasetId , source: 'matcher' })
 
     sqlite.prepare('DELETE FROM datasets WHERE id = ?').run(datasetId)
 
@@ -528,8 +553,8 @@ describe('bulk review-queue reads', () => {
     const { db } = freshDb()
     const a = await insertCurrentEvent(db, { ...sampleEvent(), title: 'A', keywords: ['hurricane'] })
     const b = await insertCurrentEvent(db, { ...sampleEvent(), title: 'B', categories: {}, keywords: [] })
-    await upsertEventDatasetLink(db, { eventId: a.id, datasetId: seededDatasetId(0), matchScore: 0.9 })
-    await upsertEventDatasetLink(db, { eventId: a.id, datasetId: seededDatasetId(1), matchScore: 0.5 })
+    await upsertEventDatasetLink(db, { eventId: a.id, datasetId: seededDatasetId(0), matchScore: 0.9 , source: 'matcher' })
+    await upsertEventDatasetLink(db, { eventId: a.id, datasetId: seededDatasetId(1), matchScore: 0.5 , source: 'matcher' })
 
     const links = await listLinksForEvents(db, [a.id, b.id])
     expect(links.get(a.id)!.map(l => l.dataset_id)).toEqual([seededDatasetId(0), seededDatasetId(1)]) // score order
@@ -556,7 +581,7 @@ describe('getFeaturedEvent', () => {
       ...sampleEvent(),
       publishedAt: opts.publishedAt ?? '2026-06-20T00:00:00.000Z',
     })
-    await upsertEventDatasetLink(db, { eventId: id, datasetId, matchScore: 0.9 })
+    await upsertEventDatasetLink(db, { eventId: id, datasetId, matchScore: 0.9 , source: 'matcher' })
     if (opts.approveEvent ?? true) await setEventStatus(db, id, 'approved', 'PUB1')
     if (opts.approveLink ?? true) await setLinkStatus(db, id, datasetId, 'approved', 'PUB1')
     return id
@@ -630,7 +655,7 @@ describe('listPublicEvents', () => {
       publishedAt: opts.publishedAt ?? '2026-06-20T00:00:00.000Z',
       geometry: opts.geometry,
     })
-    await upsertEventDatasetLink(db, { eventId: id, datasetId, matchScore: 0.9 })
+    await upsertEventDatasetLink(db, { eventId: id, datasetId, matchScore: 0.9 , source: 'matcher' })
     if (opts.approveEvent ?? true) await setEventStatus(db, id, 'approved', 'PUB1')
     if (opts.approveLink ?? true) await setLinkStatus(db, id, datasetId, 'approved', 'PUB1')
     return id
@@ -682,7 +707,7 @@ describe('listPublicEvents', () => {
     ): Promise<string> {
       const datasetId = seededDatasetId(opts.datasetIndex ?? 0)
       const { id } = await insertCurrentEvent(db, { ...sampleEvent(), publishedAt: opts.publishedAt ?? '2026-06-20T00:00:00.000Z' })
-      await upsertEventDatasetLink(db, { eventId: id, datasetId, matchScore: 0.9 })
+      await upsertEventDatasetLink(db, { eventId: id, datasetId, matchScore: 0.9 , source: 'matcher' })
       if (opts.approveEvent ?? true) await setEventStatus(db, id, 'approved', 'PUB1')
       if (opts.approveLink ?? true) await setLinkStatus(db, id, datasetId, 'approved', 'PUB1')
       return id
