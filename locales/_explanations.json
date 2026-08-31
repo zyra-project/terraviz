@@ -157,7 +157,7 @@
   "publisher.datasets.tabs.aria": "ARIA label for the lifecycle filter tablist on /publish/datasets. Read by screen readers; not visible text.",
   "publisher.error.detailsSummary": "Label on the <details> disclosure widget the portal renders alongside a server-error message. Expanding reveals the HTTP status code and the raw server response body — the operator-debugging affordance. Keep short.",
   "publisher.error.statusLine": "Format string for the HTTP status line inside the server-error details disclosure. Preserve {status}.",
-  "publisher.events.bulkApprove": "Button that approves every dataset pairing scoring ≥90%. Preserve {count} (how many will be approved).",
+  "publisher.events.bulkApprove": "{threshold} is the auto-pair percentage (a number, e.g. 80) and {count} how many datasets the click would pair. The threshold is interpolated rather than written into the text so the label cannot drift from the value the button actually uses. Keep both placeholders.",
   "publisher.events.bulkApproved": "Confirmation after the bulk-approve action. Preserve {count}.",
   "publisher.events.inferred.date": "Lowercase fragment named inside the AI-inferred badge, joined with commas (e.g. 'date, location'). Keep it short and lowercase if your language allows.",
   "publisher.events.inferred.location": "Lowercase fragment named inside the AI-inferred badge, joined with commas (e.g. 'date, location'). Keep it short and lowercase if your language allows.",

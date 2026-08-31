@@ -111,7 +111,7 @@ describe('autoPairTargets', () => {
     const event = {
       links: [
         link({ datasetId: 'strong', score: 0.98, status: 'proposed' }), // ✓ 98
-        link({ datasetId: 'exactly', score: AUTO_PAIR_THRESHOLD / 100, status: 'proposed' }), // ✓ 90
+        link({ datasetId: 'exactly', score: AUTO_PAIR_THRESHOLD / 100, status: 'proposed' }), // ✓ exactly at the bar
         link({ datasetId: 'mid', score: 0.68, status: 'proposed' }), // ✗ below
         link({ datasetId: 'already', score: 0.99, status: 'approved' }), // ✗ not proposed
         link({ datasetId: 'noscore', score: null, status: 'proposed' }), // ✗ null
@@ -126,11 +126,15 @@ describe('autoPairTargets', () => {
   })
 
   it('compares the raw score, not the rounded display percent', () => {
-    // 0.895 rounds to 90% for display but is below a 90% approval bar.
+    // Half a display-point under the bar rounds *to* the bar but must
+    // not clear it. Derived from the constant rather than written out:
+    // the property holds at any threshold, and hardcoding the numbers
+    // is what coupled this test to 90 and broke it when the bar moved.
+    const bar = AUTO_PAIR_THRESHOLD / 100
     const event = {
       links: [
-        link({ datasetId: 'justUnder', score: 0.895, status: 'proposed' }),
-        link({ datasetId: 'justOver', score: 0.905, status: 'proposed' }),
+        link({ datasetId: 'justUnder', score: bar - 0.005, status: 'proposed' }),
+        link({ datasetId: 'justOver', score: bar + 0.005, status: 'proposed' }),
       ],
     }
     expect(autoPairTargets(event)).toEqual(['justOver'])
