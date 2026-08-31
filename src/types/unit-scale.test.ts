@@ -32,8 +32,27 @@ describe('chooseUnitRescale', () => {
     expect(chooseUnitRescale('kg m-3', 2e-7)).toEqual({ shift: 9, units: 'µg m-3' })
   })
 
-  it('turns a column loading into milligrams', () => {
+  it('turns vertically integrated smoke into milligrams', () => {
+    // The column-loading sibling of the case above, and the same
+    // problem: `kg m-2` with a p99.9 around 5e-4. The whole plausible
+    // band for this field — background through heavy plume — lands in
+    // mg m-2, so the legend reads 0 to 500 rather than 0 to 0.0005.
     expect(chooseUnitRescale('kg m-2', 5e-4)).toEqual({ shift: 6, units: 'mg m-2' })
+    expect(chooseUnitRescale('kg m-2', 2e-4)?.units).toBe('mg m-2')
+    expect(chooseUnitRescale('kg m-2', 7e-4)?.units).toBe('mg m-2')
+    expect(chooseUnitRescale('kg m-2', 1e-6)?.units).toBe('mg m-2')
+  })
+
+  it('agrees with the quantisation step the plan doc quotes', () => {
+    // `docs/DATA_ENCODED_VIDEO_PLAN.md` states the shipped column
+    // dataset's encoder RMSE as "1.96 mg m-2 against a 1.96 mg m-2
+    // quantisation" — a number its author reached by converting out of
+    // `kg m-2` by hand, because that is the unit the field is legible
+    // in. Landing on the same one is the check that this module picks
+    // what a person would have picked.
+    const shown = toDisplayUnits(scale({ vmin: 0, vmax: 5e-4, units: 'kg m-2' }))
+    expect(shown.units).toBe('mg m-2')
+    expect((shown.vmax - shown.vmin) / 255).toBeCloseTo(1.96, 2)
   })
 
   it('aims for the [1, 1000) decade rather than the nearest prefix', () => {
