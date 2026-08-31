@@ -240,6 +240,78 @@ describe('insertProposedLinkIfAbsent', () => {
   })
 })
 
+describe('link provenance (0045)', () => {
+  it('stamps the matcher on its own writes and the curator on a hand-pick', async () => {
+    const { db } = freshDb()
+    const { id: eventId } = await insertCurrentEvent(db, sampleEvent())
+
+    await upsertEventDatasetLink(db, {
+      eventId,
+      datasetId: seededDatasetId(0),
+      matchScore: 0.9,
+      scorerVersion: 'test-v1',
+    })
+    await insertProposedLinkIfAbsent(db, eventId, seededDatasetId(1))
+
+    const links = await listLinksForEvent(db, eventId)
+    const machine = links.find(l => l.dataset_id === seededDatasetId(0))!
+    const human = links.find(l => l.dataset_id === seededDatasetId(1))!
+
+    expect(machine.source).toBe('matcher')
+    expect(machine.scorer_version).toBe('test-v1')
+    // A hand-pick is a human decision with no matcher score behind it,
+    // so it carries no scorer version — and that pairing of
+    // source='curator' with a NULL score is exactly what a cleanup
+    // sweep must not mistake for a retired proposal.
+    expect(human.source).toBe('curator')
+    expect(human.scorer_version).toBeNull()
+    expect(human.match_score).toBeNull()
+  })
+
+  it('a later matcher pass scores a curator pick without claiming it', async () => {
+    // The case the whole column exists for. A curator picks a dataset
+    // by hand; the matcher later proposes the same one independently
+    // and refreshes its score. `source` must still say 'curator' — it
+    // records who created the row, and overwriting it would erase the
+    // one fact a sweep needs at exactly the moment the row starts
+    // looking machine-made.
+    const { db } = freshDb()
+    const { id: eventId } = await insertCurrentEvent(db, sampleEvent())
+    const datasetId = seededDatasetId(0)
+
+    await insertProposedLinkIfAbsent(db, eventId, datasetId)
+    await upsertEventDatasetLink(db, {
+      eventId,
+      datasetId,
+      matchScore: 0.77,
+      scorerVersion: 'test-v2',
+    })
+
+    const link = (await listLinksForEvent(db, eventId))[0]
+    expect(link.source).toBe('curator')
+    // The score and its version do refresh: they describe the score,
+    // not the row.
+    expect(link.match_score).toBeCloseTo(0.77)
+    expect(link.scorer_version).toBe('test-v2')
+  })
+
+  it('a re-score refreshes the version without disturbing status or provenance', async () => {
+    const { db } = freshDb()
+    const { id: eventId } = await insertCurrentEvent(db, sampleEvent())
+    const datasetId = seededDatasetId(0)
+
+    await upsertEventDatasetLink(db, { eventId, datasetId, matchScore: 0.6, scorerVersion: 'old' })
+    await setLinkStatus(db, eventId, datasetId, 'approved', 'PUB1')
+    await upsertEventDatasetLink(db, { eventId, datasetId, matchScore: 0.82, scorerVersion: 'new' })
+
+    const link = (await listLinksForEvent(db, eventId))[0]
+    expect(link.status).toBe('approved')
+    expect(link.source).toBe('matcher')
+    expect(link.scorer_version).toBe('new')
+    expect(link.match_score).toBeCloseTo(0.82)
+  })
+})
+
 describe('event_dataset_links', () => {
   it('upserts a link and reads it back from both directions', async () => {
     const { db } = freshDb()

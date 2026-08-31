@@ -142,7 +142,17 @@ export interface EventDatasetLinkRow {
   created_at: string
   approved_at: string | null
   approved_by: string | null
+  /** Who created the row. NULL on every row predating `0045`, which is
+   *  the honest answer — see that migration on why no backfill exists. */
+  source: LinkSource | null
+  /** The matcher build that wrote `match_score`, or NULL when none has. */
+  scorer_version: string | null
 }
+
+/** Where a link came from. The matcher proposed it, or a curator picked
+ *  it by hand — a distinction the table could not previously make, and
+ *  the one a cleanup sweep needs before it can delete anything. */
+export type LinkSource = 'matcher' | 'curator'
 
 /** Per-event decoration vocabulary. `categories` collapses to a
  *  per-facet array, matching the dataset wire shape. */
@@ -229,6 +239,12 @@ export interface NewEventDatasetLink {
    *  to `signals_json`. */
   signals?: unknown
   status?: EventLinkStatus
+  /** Defaults to 'matcher' — this is the matcher's write path. Set on
+   *  insert only; the upsert below never rewrites it. */
+  source?: LinkSource
+  /** The matcher build writing `matchScore`. Refreshed on every upsert,
+   *  because it describes the score rather than the row. */
+  scorerVersion?: string | null
 }
 
 const EVENT_COLUMNS = `id, origin_node, title, summary, source_name, source_url,
@@ -237,7 +253,7 @@ const EVENT_COLUMNS = `id, origin_node, title, summary, source_name, source_url,
   status, created_at, updated_at, reviewed_at, reviewed_by, inferred_fields, image_url, image_alt, video_embed_url, owner_id, video_file_url`
 
 const LINK_COLUMNS = `event_id, dataset_id, match_score, signals_json,
-  status, created_at, approved_at, approved_by`
+  status, created_at, approved_at, approved_by, source, scorer_version`
 
 /** Max bind variables per chunked `IN (…)` query — mirrors
  *  `catalog-store.ts`'s `D1_BIND_BATCH`. */
@@ -651,6 +667,15 @@ export async function getEventDecorations(
  * demoted back to `proposed`. The `status` argument therefore only
  * applies to a brand-new link (insert), which defaults to `proposed`;
  * status transitions go through {@link setLinkStatus}.
+ *
+ * `source` follows the same preservation rule as `status`: it records
+ * who created the ROW, so a curator's hand-pick that the matcher later
+ * proposes independently stays `'curator'`. Overwriting it would erase
+ * the one fact a cleanup sweep needs — that a human chose this pairing —
+ * at exactly the moment the row starts looking machine-made.
+ *
+ * `scorer_version` is refreshed, because unlike `source` it describes
+ * the SCORE rather than the row, and the score is what just changed.
  */
 export async function upsertEventDatasetLink(
   db: D1Database,
@@ -660,10 +685,11 @@ export async function upsertEventDatasetLink(
   await db
     .prepare(
       `INSERT INTO event_dataset_links (${LINK_COLUMNS})
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(event_id, dataset_id) DO UPDATE SET
-         match_score  = excluded.match_score,
-         signals_json = excluded.signals_json`,
+         match_score    = excluded.match_score,
+         signals_json   = excluded.signals_json,
+         scorer_version = excluded.scorer_version`,
     )
     .bind(
       input.eventId,
@@ -674,6 +700,8 @@ export async function upsertEventDatasetLink(
       now,
       null,
       null,
+      input.source ?? 'matcher',
+      input.scorerVersion ?? null,
     )
     .run()
 }
@@ -695,7 +723,7 @@ export async function insertProposedLinkIfAbsent(
   const res = await db
     .prepare(
       `INSERT INTO event_dataset_links (${LINK_COLUMNS})
-       VALUES (?, ?, NULL, NULL, 'proposed', ?, NULL, NULL)
+       VALUES (?, ?, NULL, NULL, 'proposed', ?, NULL, NULL, 'curator', NULL)
        ON CONFLICT(event_id, dataset_id) DO NOTHING`,
     )
     .bind(eventId, datasetId, now)
