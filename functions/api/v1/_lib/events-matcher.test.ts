@@ -264,6 +264,72 @@ describe('topical signal', () => {
     expect(terms.has('precipitation')).toBe(true)
   })
 
+  it('a geomagnetic storm does not drag in weather vocabulary', () => {
+    // `storm` alone expands to cloud / precipitation / rain, which is
+    // right for a thunderstorm and wrong for an event in the
+    // magnetosphere. The pair decides which reading applies.
+    const space = buildEventTerms({ title: 'Severe geomagnetic storm watch' })
+    expect(space.has('precipitation')).toBe(false)
+    expect(space.has('cloud')).toBe(false)
+    expect(space.has('hurricane')).toBe(false)
+    // The literal word survives — only its expansion is withheld.
+    expect(space.has('storm')).toBe(true)
+    // ...and the right vocabulary arrives in its place.
+    expect(space.has('aurora')).toBe(true)
+    expect(space.has('magnetosphere')).toBe(true)
+
+    // The ordinary reading is untouched.
+    const weather = buildEventTerms({ title: 'Severe storm over the Gulf' })
+    expect(weather.has('precipitation')).toBe(true)
+    expect(weather.has('cloud')).toBe(true)
+  })
+
+  it('suppression from one field applies to the whole event', () => {
+    // Adjacency is per-field, but the conclusion is not: a title that
+    // establishes the space-weather reading must also stop a bare
+    // "Storms" category value expanding into precipitation.
+    const terms = buildEventTerms({
+      title: 'Geomagnetic storm reaches G4',
+      categoryValues: ['Storms'],
+    })
+    expect(terms.has('precipitation')).toBe(false)
+    expect(terms.has('aurora')).toBe(true)
+  })
+
+  it('does not pair a phrase across two fields', () => {
+    // "solar" ending the title and "storm" opening the summary are not
+    // the phrase "solar storm", and must not suppress the weather
+    // expansion of a genuine storm event.
+    const terms = buildEventTerms({ title: 'Panels go solar', summary: 'Storm damage reported' })
+    expect(terms.has('precipitation')).toBe(true)
+  })
+
+  it('flow only reads as volcanic in a volcanic phrase', () => {
+    // `flow` used to expand to lava/thermal unconditionally, so a river
+    // story matched volcano datasets.
+    const river = buildEventTerms({ title: 'Record river flow after heavy rain' })
+    expect(river.has('lava')).toBe(false)
+
+    const lava = buildEventTerms({ title: 'Lava flow reaches the coast' })
+    expect(lava.has('lava')).toBe(true)
+    expect(lava.has('thermal')).toBe(true)
+    expect(lava.has('eruption')).toBe(true)
+  })
+
+  it('severe no longer imports storm vocabulary into unrelated hazards', () => {
+    // `severe` is an intensity word, not a topic. Expanding it to
+    // storm/cloud/precipitation made every severe drought and severe
+    // earthquake look like a weather event.
+    const drought = buildEventTerms({ title: 'Severe drought grips the basin' })
+    expect(drought.has('cloud')).toBe(false)
+    expect(drought.has('wind')).toBe(false)
+    // Drought's own expansion is intact.
+    expect(drought.has('soil')).toBe(true)
+    expect(drought.has('vegetation')).toBe(true)
+    // And "Severe Storms" still reaches weather data, via `storm`.
+    expect(buildEventTerms({ categoryValues: ['Severe Storms'] }).has('precipitation')).toBe(true)
+  })
+
   it('scoreLexical rises with overlap and is 0 with none', () => {
     const ev = buildEventTerms({ categoryValues: ['Severe Storms'] })
     expect(scoreLexical(ev, buildDatasetTerms({ title: 'Cloud cover' }))).toBeGreaterThan(0)

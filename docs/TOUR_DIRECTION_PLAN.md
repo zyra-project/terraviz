@@ -83,10 +83,17 @@ obligations, which are not onerous but are not optional either:
 | State changes | Any modified file must carry a prominent notice that we changed it |
 | Carry NOTICE | tubeviz's `NOTICE` ("tubeviz, Copyright 2026 tubeviz contributors") must be reproduced in our own NOTICE if we redistribute its work |
 
-Concretely, that means a `NOTICE` file at the TerraViz root (we do not have one
-yet) and a short attribution block naming tubeviz, its copyright line, and the
-files taken. [`CONTRIBUTING.md`](../CONTRIBUTING.md) already requires exactly
-this of third-party code, and Apache-2.0 is the compatible case it names.
+Concretely, that means appending a short attribution block to the
+[`NOTICE`](../NOTICE) file already at the TerraViz root, naming tubeviz, its
+copyright line, and the files taken. [`CONTRIBUTING.md`](../CONTRIBUTING.md)
+already requires exactly this of third-party code, and Apache-2.0 is the
+compatible case it names.
+
+Appending is safe: `NOTICE` describes its own copyright line as the single
+source of truth for *this project's* attribution, and `check:license` enforces
+that by substring — it asserts the holder constant appears in the file, not that
+the file contains nothing else. A third-party block below the existing text
+neither breaks the check nor weakens the claim it verifies.
 
 ### Why we still mostly won't import
 
@@ -123,7 +130,7 @@ answers differently per target:
 
 ## 4. Candidate features
 
-### D1 — Shot sequencing for generated tours — **shipped**
+### D1 — Shot sequencing for generated tours — **prototyped, not merged**
 
 **What.** A pure `orderTourStops(candidates, opts)` that chooses the *order* of
 matched datasets rather than accepting the matcher's ranking: the strongest
@@ -131,13 +138,25 @@ match opens, and each stop after it is the candidate with the best blend of its
 own score and its dissimilarity from what has already been shown (facet and
 keyword Jaccard, bbox IoU, adjacency weighted above the whole selection).
 
-**Where.** [`tour-stop-order.ts`](../functions/api/v1/_lib/tour-stop-order.ts),
-consumed by `resolveStopDatasets` in
+**Where.** `functions/api/v1/_lib/tour-stop-order.ts` (not yet in the tree — see
+**Status** below), consumed by `resolveStopDatasets` in
 [`publish/events/[id]/tour.ts`](../functions/api/v1/publish/events/[id]/tour.ts).
 Pure transform, no I/O — the shape
 [`catalogEvents.ts`](../src/services/catalogEvents.ts) and
 [`catalogGraph.ts`](../src/services/catalogGraph.ts) already follow, and
 directly unit-testable on literal candidates.
+
+**Status.** Written and unit-tested, parked on a branch, **not merged**. The
+transform does what it says; what has not happened is the part that would
+justify turning it on — a blind judging pass over real events establishing that
+the resequenced order reads better than plain score order. The harness for that
+(`scripts/experiments/tour-sequencing/`) exists and its
+matcher-evaluation half landed with the lexical-score fix; the sequencing half
+has not been run to a result anyone has judged. Until it has, `0.45` for the
+variety weight is a defensible guess, not a measurement, and shipping a
+reordering on a guess trades a problem we can see (adjacent near-duplicates) for
+one we cannot (a tour whose second stop no longer follows from its first). This
+document lands ahead of the code deliberately.
 
 **Two corrections found while building it.**
 
@@ -164,8 +183,9 @@ a reason to end strong emerges later it can be added behind its own option.
 **Cost.** Low. Metadata only: no GPU, no new storage, no migration. The match
 score already exists.
 
-**Recommendation.** Build first. It is the cheapest of the four and fixes the
-most visible problem.
+**Recommendation.** Build first — it is the cheapest of the four and fixes the
+most visible problem — but land it behind the judging pass above, not ahead of
+it.
 
 ### D2 — Dataset descriptor, static and live
 
@@ -296,7 +316,7 @@ of both.
 
 | Phase | Contents | Gate |
 |---|---|---|
-| 1 | **D1** shot sequencing | **Shipped.** Pure transform + tests; no schema change |
+| 1 | **D1** shot sequencing | Pure transform + tests written; **gated on a blind judging pass**. No schema change |
 | 2 | **D4** usable range | Migration + portal control + three clamps |
 | 3 | **D2** descriptor, static path | Depends on D4 for accuracy; publish-time only |
 | 4 | **D3** data-driven pacing | Parked; needs a Zyra temporal-profile stage |

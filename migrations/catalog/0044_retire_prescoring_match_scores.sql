@@ -1,0 +1,86 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
+-- Retire match scores produced by the pre-IDF topical formula.
+--
+-- `scoreLexical` used to be `min(1, 0.5 + 0.2 * overlap)`, which
+-- saturated at three shared terms: measured against the live 180-row
+-- catalogue, ~25% of datasets scored exactly 1.0 against a typical
+-- event. It is now an IDF-weighted cosine calibrated against
+-- LEXICAL_REFERENCE, on which a clearly-correct match lands near 1.0
+-- and a weak one near zero. The topical term set changed again when
+-- TOPIC_PHRASES stopped `storm` / `flow` / `severe` expanding in the
+-- wrong context.
+--
+-- Rows written before those changes are on a different scale, and they
+-- share a table and an ORDER BY with rows written after. `match_score`
+-- is read as `ORDER BY match_score DESC` in six places and drives both
+-- the Match Badge percentage and the portal's "Approve all >= 90%"
+-- shortcut (AUTO_PAIR_THRESHOLD). The stale rows are the inflated
+-- ones, so they sort *above* correctly-scored new ones and are
+-- precisely the rows that trip the shortcut. Leaving them is not a
+-- cosmetic problem: it is a one-click approval driven by a number no
+-- code produces any more.
+--
+-- NULL rather than DELETE. A `proposed` link is a candidate a curator
+-- may still want to look at. Deleting empties the review queue, and for
+-- an event whose feed has already dropped it the candidate never comes
+-- back. NULL keeps the row: the badge renders "—" on a neutral tone,
+-- SQLite orders NULL below every real value under DESC so unscored
+-- links sink to the bottom, and `autoPairTargets` already excludes a
+-- null score explicitly ("null-composite links never auto-pair"). The
+-- curator sees "not scored", which is true, instead of "100%", which
+-- is not.
+--
+-- `signals_json` goes with it. The badge's Topic / Time / Geo facets
+-- read the per-signal values out of that column, so clearing only the
+-- composite would leave "Topic 100%" beside a composite of "—" — and
+-- the topical signal is the one that changed.
+--
+-- Blanket, not selective, because nothing in the row says which
+-- formula produced it. There is no `scored_at` or `scorer_version`
+-- column, and `created_at` is the first-proposal time rather than the
+-- last scoring time: `upsertEventDatasetLink`'s ON CONFLICT clause
+-- refreshes `match_score` and `signals_json` and deliberately leaves
+-- `created_at` alone. The cost is re-deriving the handful of scores
+-- written since the new formula deployed, which the next ingest does
+-- anyway.
+--
+-- What does not come back on its own: `runMatcherForEvent` fires on
+-- ingest (including re-ingest of an event its feed still carries) and
+-- on a curator edit to `occurred_start` or `geometry`. An event that
+-- has aged out of its feed is never re-scored, so its links stay
+-- unscored until someone edits it. That is the intended resting state
+-- — an old event marked "not scored" rather than carrying a number
+-- from a formula that no longer exists.
+--
+-- Status is untouched: an `approved` or `rejected` link is a curator's
+-- decision, not the matcher's, and this migration has no business
+-- reversing one.
+--
+-- The WHERE clause changes nothing about the outcome and a good deal
+-- about the cost: without it every row is rewritten, including rows
+-- already NULL, so re-running rewrites the whole table to no effect and
+-- a first run pays for rows it has no work to do on. With it the
+-- statement touches only rows that still carry a value, and a second
+-- run reports zero changes rather than merely producing zero
+-- difference. On a node whose link table has grown, that is the
+-- difference between a brief write lock and a long one.
+--
+-- Idempotent, and a no-op on a fresh node with no events yet.
+--
+-- Marked reviewed-destructive deliberately, even though
+-- `check:migrations` would not have asked. Its DESTRUCTIVE list catches
+-- `DELETE FROM` but not `UPDATE`, so an UPDATE that clears two columns
+-- on every row carrying them passes a gate built to stop exactly that
+-- kind of change — the WHERE clause narrows what is written, not what
+-- is destroyed. The marker records that a human weighed the data loss
+-- rather than that a tool failed to notice it.
+--
+-- destructive: reviewed
+
+UPDATE event_dataset_links
+SET match_score = NULL,
+    signals_json = NULL
+WHERE match_score IS NOT NULL
+   OR signals_json IS NOT NULL;
