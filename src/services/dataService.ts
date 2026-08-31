@@ -21,6 +21,7 @@ import {
   type ColorScale,
   type RenderEncoding,
 } from '../types/color-scale'
+import { toDisplayUnits } from '../types/unit-scale'
 import { isLiveCadence, parseISO8601Duration, safePeriodMs } from '../utils/time'
 import { resolveDatasetRef } from '../utils/datasetUrl'
 import { logger } from '../utils/logger'
@@ -420,15 +421,26 @@ function wireToDataset(d: WireDataset): Dataset {
   }
 }
 
-/** Accept the `renderEncoding` / `colorScale` pair only when both
- *  halves are present and the sidecar parses. */
+/**
+ * Accept the `renderEncoding` / `colorScale` pair only when both
+ * halves are present and the sidecar parses.
+ *
+ * This is also the one seam where a scale is restated in readable
+ * units. Everything downstream — colorbar, hover readout, Analyze,
+ * contours, CSV, Orbit's measurement tools, the VR label — derives its
+ * numbers through `lumaToValue` and labels them with `scale.units`, so
+ * rewriting the pair here is the whole of the change for all of them.
+ * Doing it per-surface instead would be the same arithmetic written a
+ * dozen times, and the first one anybody forgot would be a globe
+ * reporting `µg m-3` beside a CSV reporting `kg m-3`.
+ */
 function dataEncodingFromWire(
   d: WireDataset,
 ): { renderEncoding?: RenderEncoding; colorScale?: ColorScale } {
   if (d.renderEncoding !== RENDER_ENCODING_DATA_LUMA) return {}
   const colorScale = parseColorScale(d.colorScale)
   if (!colorScale) return {}
-  return { renderEncoding: RENDER_ENCODING_DATA_LUMA, colorScale }
+  return { renderEncoding: RENDER_ENCODING_DATA_LUMA, colorScale: toDisplayUnits(colorScale) }
 }
 
 /**

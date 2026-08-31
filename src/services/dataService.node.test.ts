@@ -97,6 +97,80 @@ describe('DataService — node-mode', () => {
     expect(datasets[0].id).toBe('DS001')
   })
 
+  it('restates a data-encoded scale in units a person would read', async () => {
+    // The RRFS near-surface smoke case: the model file states the
+    // field in `kg m-3` over a range whose top is 2e-7, so every
+    // surface downstream of this boundary would print six leading
+    // zeros. It is the same measurement as 0 to 200 µg m-3, and this
+    // is the one seam that says so.
+    vi.stubGlobal(
+      'fetch',
+      mockNodeCatalog([
+        {
+          id: 'RRFS_SMOKE',
+          title: 'Near-surface smoke',
+          format: 'video/mp4',
+          dataLink: '/api/v1/datasets/RRFS_SMOKE/manifest',
+          renderEncoding: 'data-luma',
+          colorScale: {
+            stops: [
+              { t: 0, rgba: [255, 255, 255, 0] },
+              { t: 1, rgba: [90, 30, 10, 255] },
+            ],
+            vmin: 0,
+            vmax: 2e-7,
+            units: 'kg m-3',
+            dataMinLuma: 12,
+          },
+        },
+      ]),
+    )
+    const svc = new DataService()
+    const smoke = (await svc.fetchDatasets()).find(d => d.id === 'RRFS_SMOKE')!
+
+    expect(smoke.renderEncoding).toBe('data-luma')
+    expect(smoke.colorScale?.vmin).toBe(0)
+    expect(smoke.colorScale?.vmax).toBe(200)
+    expect(smoke.colorScale?.units).toBe('µg m-3')
+    // The publisher's own units survive as provenance for the CSV.
+    expect(smoke.colorScale?.sourceUnits).toBe('kg m-3')
+    // Luma-space fields describe the transport, not the quantity, so a
+    // change of unit must leave them exactly as published.
+    expect(smoke.colorScale?.dataMinLuma).toBe(12)
+    expect(smoke.colorScale?.stops).toHaveLength(2)
+  })
+
+  it('leaves a scale that already reads well exactly as published', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockNodeCatalog([
+        {
+          id: 'SST',
+          title: 'Sea surface temperature',
+          format: 'video/mp4',
+          dataLink: '/api/v1/datasets/SST/manifest',
+          renderEncoding: 'data-luma',
+          colorScale: {
+            stops: [
+              { t: 0, rgba: [0, 0, 80, 255] },
+              { t: 1, rgba: [255, 240, 200, 255] },
+            ],
+            vmin: 271,
+            vmax: 305,
+            units: 'K',
+          },
+        },
+      ]),
+    )
+    const svc = new DataService()
+    const sst = (await svc.fetchDatasets()).find(d => d.id === 'SST')!
+
+    expect(sst.colorScale?.vmin).toBe(271)
+    expect(sst.colorScale?.vmax).toBe(305)
+    expect(sst.colorScale?.units).toBe('K')
+    expect(sst.colorScale?.sourceUnits).toBeUndefined()
+  })
+
   it('injects the built-in sample tours so they show up in browse', async () => {
     vi.stubGlobal('fetch', mockNodeCatalog([]))
     const svc = new DataService()

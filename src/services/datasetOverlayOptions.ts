@@ -17,7 +17,8 @@
  */
 
 import type { Dataset, DatasetOverlayOptions } from '../types'
-import { RENDER_ENCODING_DATA_LUMA, type ColorScale } from '../types/color-scale'
+import { RENDER_ENCODING_DATA_LUMA } from '../types/color-scale'
+import type { DisplayColorScale } from '../types/unit-scale'
 
 /**
  * Is a `celestialBody` string the SOS convention for "Earth"?
@@ -93,7 +94,7 @@ export function overlayOptionsFromDataset(
 /** The palette, but only for a dataset that actually declares itself
  *  data-encoded. A `colorScale` without `renderEncoding` is inert by
  *  contract, so it must not reach a shader. */
-function dataEncodedScale(dataset: Dataset): ColorScale | undefined {
+function dataEncodedScale(dataset: Dataset): DisplayColorScale | undefined {
   if (dataset.renderEncoding !== RENDER_ENCODING_DATA_LUMA) return undefined
   return dataset.colorScale
 }

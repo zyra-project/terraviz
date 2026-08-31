@@ -78,11 +78,20 @@ clipping. Cross-check against a sibling dataset via `node_inspect.py reference`.
 
 Note that `vmax` is no longer merely cosmetic once a dataset is data-encoded: it
 *is* the calibration. Anything above it clamps to full luma and then reads back
-wrong under the cursor. Also weigh **unit readability** — a column-mass field in
-`kg m-2` reports as `0.0000124` on hover, which is technically right and
-practically unreadable; an optical-depth field (AOD, dimensionless ~0–2) or a
-rescaled unit reads far better. Zyra has no unit-scaling process command, so if
-readability matters, pick the variable accordingly at step 2.
+wrong under the cursor.
+
+**State `vmin`/`vmax`/`units` in the source data's own units — do not
+pre-convert them for readability.** TerraViz restates the scale at display time
+(`src/types/unit-scale.ts`): a sidecar saying `0` to `2e-7 kg m-3` is shown as
+`0` to `200 µg m-3` on the colorbar, on hover, in Analyze and in the CSV, with
+the publisher's units kept as provenance. Converting in the pipeline instead
+puts a number in the catalog that no longer matches the GRIB2 record it came
+from, and buys nothing. Two things still worth checking: the display step only
+fires for a unit an SI prefix attaches to (`%`, `1`, `ppbv`, `AOD` and other
+dimensionless fields are left as-is, so choose the variable with that in mind),
+and it needs the unit string to be well-formed — `kg m-3`, `kg/m3` and
+`mol m-2` all parse, a leading factor carrying an exponent (`m2 s-1`) is
+deliberately refused.
 
 ### 4. Write the pipeline
 Start from [assets/model-cycle-data-encoded.template.yaml](assets/model-cycle-data-encoded.template.yaml)

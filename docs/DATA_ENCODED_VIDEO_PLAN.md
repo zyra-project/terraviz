@@ -471,6 +471,78 @@ extracting. `vrInteraction.pickHit`'s globe branch (`:629-637`) discards
 `globeHits[0].uv`, which THREE populates for free; keeping it removes the need
 for separate maths.
 
+### Units a person would read
+
+**As built, the SPA restates the scale before anything prints a number
+from it** (`src/types/unit-scale.ts`, applied in
+`dataService.dataEncodingFromWire`).
+
+The problem is the one every model file has. RRFS near-surface smoke is
+stated in `kg m-3`, because that is what the modelling centre works in,
+so its range runs `0` to `2e-7` and the legend reads `0.0000001`,
+`0.0000002`. The rest of the world writes that field as `0` to
+`200 µg m-3`. Nothing is wrong with the sidecar — the numbers are exact
+and the palette is right — and yet every surface that quotes one is
+unreadable, from the colorbar ticks to the sentence Orbit speaks.
+
+The fix is a **change of unit, not of measurement**: pick the SI prefix
+that lands the range in `[1, 1000)`, shift `vmin`/`vmax` by that power
+of ten, and relabel. `2e-7 kg m-3` and `200 µg m-3` are the same
+quantity, so the shader, the probe, the statistics, the contours and
+the CSV are all correct afterwards without being touched — they derive
+values through `lumaToValue` and label them with `scale.units`, and
+both moved together.
+
+Four properties are load-bearing:
+
+- **One seam.** It runs where the catalog becomes a `Dataset`, so
+  everything downstream inherits it. The alternative — each surface
+  converting for itself — is the same arithmetic a dozen times, and the
+  first one anybody forgets is a globe reporting `µg m-3` beside a CSV
+  reporting `kg m-3`.
+- **Display-only, never written back.** What zyra encoded and the
+  publisher pasted is what D1 stores and what the wire serves. A
+  federated peer, a re-encode and an export all still see the
+  publisher's own numbers. `DisplayColorScale` is deliberately a
+  browser-side type rather than an optional field on the wire
+  `ColorScale`, so the display concern cannot leak into
+  `public/schema/v1/dataset.schema.json` and tell peers the server
+  might emit something it never emits.
+- **Luma-space fields do not move.** `stops`, `transparentRange` and
+  `dataMinLuma` are positions in the code range, and a change of unit
+  says nothing about where data starts or which band is too faint to
+  draw.
+- **It refuses more than it accepts.** Base units are an allowlist
+  matched whole-token-first, so `mol` is a mole rather than a
+  milli-`ol` and `min` is left alone entirely; a leading factor
+  carrying an exponent (`m2 s-1`) is refused rather than guessed at,
+  since shifting a prefix on a squared term moves the value by twice
+  the shift; and a range already inside `[0.01, 1e6)` is left exactly
+  as published, so `K` stays `K` and `hPa` stays `hPa`. Prefixes are
+  accepted broadly on input (`hPa`, `cm`) and emitted only in
+  multiples of three, because `dag m-3` reads as a typo.
+
+Two smaller consequences. The CSV header gains `source_units` when a
+restatement happened, because the export is the artefact somebody
+checks a claim against — quite possibly against the model output itself
+— and `µg m-3` and `kg m-3` are the same measurement only if the file
+says which it is. And the publisher form's sidecar preview names both
+forms, so an author finds out what viewers will see at paste time
+rather than by loading the dataset and wondering what happened to it.
+
+This also removes the pull behind a documented Orbit failure
+(`docentAnalysisTools.ts`): asked about a column loading in `kg m-2`,
+the model answered in "micrograms per cubic metre", substituting a unit
+it had seen a thousand times for smoke. The sidecar now says `mg m-2`
+itself, so the familiar unit and the true one are no longer orders of
+magnitude apart.
+
+**Out of scope, deliberately.** This makes the *numbers* readable, not
+the *words*. Turning `µg m-3` into "micrograms per cubic metre", or the
+range into "none / some / dense", is a plain-language layer over the
+same field — a separate, translatable, publisher-authored thing, not a
+property of the unit string.
+
 ---
 
 ## Sequencing

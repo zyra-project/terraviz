@@ -41,6 +41,7 @@ import { renderMarkdown } from '../../../services/markdownRenderer'
 import type { PublisherDatasetDetail } from '../types'
 import type { DatasetOverlayOptions } from '../../../types'
 import { parseColorScale, RENDER_ENCODING_DATA_LUMA } from '../../../types/color-scale'
+import { toDisplayUnits } from '../../../types/unit-scale'
 import { ROUTE_CHANGE_START_EVENT } from '../router'
 
 export type DatasetFormMode = 'create' | 'edit'
@@ -1811,12 +1812,25 @@ function dataEncodingFieldset(state: FormState, update: () => void): HTMLElement
       return
     }
     status.className = 'publisher-form-help'
-    status.textContent = interpolate(t('publisher.datasetForm.encoding.colorScaleValid'), {
+    let text = interpolate(t('publisher.datasetForm.encoding.colorScaleValid'), {
       vmin: String(parsed.vmin),
       vmax: String(parsed.vmax),
-      units: parsed.units ?? '—',
+      units: parsed.units ?? '—', // i18n-exempt: an em dash placeholder, not a word
       stops: String(parsed.stops.length),
     })
+    // A range like `0` to `2e-7 kg m-3` is restated for viewers as `0`
+    // to `200 µg m-3`, and the publisher should find that out here
+    // rather than from the live globe. Saying it only when it happens
+    // keeps the common case a single line.
+    const readable = toDisplayUnits(parsed)
+    if (readable.sourceUnits) {
+      text += ` ${interpolate(t('publisher.datasetForm.encoding.colorScaleReadable'), {
+        vmin: String(readable.vmin),
+        vmax: String(readable.vmax),
+        units: readable.units ?? '',
+      })}`
+    }
+    status.textContent = text
   }
   // Validity at render time. The upload gate was decided against this
   // value, so when editing flips it the form has to re-render or the

@@ -45,7 +45,7 @@ import {
   displayColorAtValue,
   type ColorScaleDisplay,
 } from '../services/colorScaleDisplay'
-import type { ColorScale } from '../types/color-scale'
+import type { DisplayColorScale } from '../types/unit-scale'
 import type { DatasetOverlayOptions } from '../types'
 import { getRegionNames, resolveRegion } from '../data/regions'
 import {
@@ -68,7 +68,7 @@ export interface AnalyzeSource {
    *  null when nothing analysable is loaded. */
   frame(): {
     snapshot: LumaSnapshot
-    scale: ColorScale
+    scale: DisplayColorScale
     options: DatasetOverlayOptions
   } | null
   /** The box currently on screen, for "what I can see". */
@@ -170,7 +170,7 @@ export type AnalyzeScope =
 
 let source: AnalyzeSource | null = null
 let scope: AnalyzeScope = { kind: 'dataset' }
-let lastResult: { stats: RegionStats; hist: LumaHistogram; scale: ColorScale } | null = null
+let lastResult: { stats: RegionStats; hist: LumaHistogram; scale: DisplayColorScale } | null = null
 /**
  * The texel window the region statistics were computed over.
  *
@@ -185,7 +185,7 @@ let lastResult: { stats: RegionStats; hist: LumaHistogram; scale: ColorScale } |
  * take to mean "no window". Only read when `lastResult` is set.
  */
 let lastWindow: TexelWindow | undefined
-let lastZonal: { samples: ZonalSample[]; scale: ColorScale } | null = null
+let lastZonal: { samples: ZonalSample[]; scale: DisplayColorScale } | null = null
 let lastTrigger: HTMLElement | null = null
 let root: HTMLElement | null = null
 /** The dataset the numbers on screen were computed from. */
@@ -224,7 +224,7 @@ let contourRedrawPending = false
  * fields.
  */
 const CONTOUR_LEVEL_TARGET = 5
-let lastTransect: { samples: TransectSample[]; scale: ColorScale } | null = null
+let lastTransect: { samples: TransectSample[]; scale: DisplayColorScale } | null = null
 /**
  * The frame everything on screen was computed from.
  *
@@ -236,7 +236,7 @@ let lastTransect: { samples: TransectSample[]; scale: ColorScale } | null = null
  */
 let lastFrame: {
   snapshot: LumaSnapshot
-  scale: ColorScale
+  scale: DisplayColorScale
   options: DatasetOverlayOptions
 } | null = null
 
@@ -648,7 +648,7 @@ function refresh(body: HTMLElement): void {
 function renderRegionBlock(
   body: HTMLElement,
   src: AnalyzeSource,
-  frame: { snapshot: LumaSnapshot; scale: ColorScale; options: DatasetOverlayOptions },
+  frame: { snapshot: LumaSnapshot; scale: DisplayColorScale; options: DatasetOverlayOptions },
 ): void {
   const { snapshot, scale, options } = frame
   const scoped = boundsForScope(scope, src)
@@ -706,7 +706,7 @@ function renderRegionBlock(
  */
 function renderZonalSection(
   host: HTMLElement,
-  frame: { snapshot: LumaSnapshot; scale: ColorScale; options: DatasetOverlayOptions },
+  frame: { snapshot: LumaSnapshot; scale: DisplayColorScale; options: DatasetOverlayOptions },
   window: TexelWindow | undefined,
 ): void {
   const { snapshot, scale, options } = frame
@@ -1233,7 +1233,7 @@ function renderCoverage(stats: RegionStats): HTMLElement {
  * honest resolution), so the reader is told what a bar actually covers
  * rather than left to infer it from an unlabelled axis.
  */
-function renderHistogramCaption(scale: ColorScale): HTMLElement {
+function renderHistogramCaption(scale: DisplayColorScale): HTMLElement {
   const p = document.createElement('p')
   p.className = 'analyze-caption'
   p.textContent = t('analyze.histogram.caption', {
@@ -1250,7 +1250,7 @@ function renderHistogramCaption(scale: ColorScale): HTMLElement {
  * honest floor on any single value here. Saying so on the surface is
  * the difference between a statistic and a claim.
  */
-function renderPrecisionNote(scale: ColorScale): HTMLElement {
+function renderPrecisionNote(scale: DisplayColorScale): HTMLElement {
   const step = Math.abs(scale.vmax - scale.vmin) / 255
   const p = document.createElement('p')
   p.className = 'analyze-precision'
