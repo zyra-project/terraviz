@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 // Tauri app entry point — shared between desktop and mobile (iOS / Android).
 // Desktop launches via `main.rs` which calls `run()`; mobile launches via the
 // `mobile_entry_point` macro below, which the OS-native host (Android JNI or

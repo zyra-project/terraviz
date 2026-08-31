@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Curated feed-preset catalog for the portal feeds page
  * (`docs/CURRENT_EVENTS_PLAN.md` §9).

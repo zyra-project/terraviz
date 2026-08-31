@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Topical + temporal + geo matcher for current events (see
  * `docs/CURRENT_EVENTS_PLAN.md` §4). Given a current event and the
@@ -62,6 +65,29 @@ import { queryEmbedding, VECTORIZE_MAX_TOP_K, type VectorizeEnv } from './vector
  *  lexical/temporal, exactly as before Phase 2. Mirrors
  *  `search-datasets.ts`'s `SearchDatasetsEnv`. */
 export type MatcherEnv = EmbeddingEnv & VectorizeEnv
+
+/**
+ * Identifies the scoring build that produced a stored `match_score`,
+ * written to `event_dataset_links.scorer_version`.
+ *
+ * **Bump this whenever a change would move existing scores** — the
+ * topical formula, the signal blend, `LEXICAL_REFERENCE`, the topic
+ * expansions, the semantic weight. Not for a refactor that cannot move
+ * a number.
+ *
+ * It exists because migration `0044` had to clear every score in the
+ * table: nothing recorded which formula produced which value, so
+ * changing one scorer meant discarding all of them, and every event
+ * whose feed had dropped it then sat unscored until someone re-ran the
+ * matcher by hand. With a version stamped per row, a future change
+ * invalidates only what it invalidates.
+ *
+ * A date-ish string rather than an integer so the value carries meaning
+ * on sight. Compared for equality and set membership, never ordered —
+ * ordering opaque build strings is a trap, and 'unversioned' rows
+ * (everything predating `0045`) have no place in such an order anyway.
+ */
+export const SCORER_VERSION = '2026.08-idf-phrases'
 
 /** Default minimum combined score for a proposed link. */
 export const DEFAULT_MIN_SCORE = 0.5
@@ -280,7 +306,6 @@ const STOPWORDS = new Set([
  */
 const TOPIC_EXPANSIONS: Record<string, readonly string[]> = {
   storm: ['cloud', 'precipitation', 'rain', 'wind', 'cyclone', 'hurricane', 'typhoon', 'lightning', 'weather'],
-  severe: ['storm', 'cloud', 'precipitation', 'wind'],
   hurricane: ['cyclone', 'cloud', 'precipitation', 'wind', 'storm'],
   cyclone: ['hurricane', 'cloud', 'wind', 'storm'],
   typhoon: ['cyclone', 'cloud', 'wind', 'storm'],
@@ -294,10 +319,52 @@ const TOPIC_EXPANSIONS: Record<string, readonly string[]> = {
   iceberg: ['ice', 'sea', 'polar', 'ocean'],
   ice: ['snow', 'sea', 'polar'],
   snow: ['ice', 'cover', 'cold'],
+  aurora: ['solar', 'magnetosphere', 'ionosphere', 'space'],
   earthquake: ['seismic', 'ground'],
   landslide: ['precipitation', 'ground', 'soil'],
-  flow: ['lava', 'thermal'],
 }
+
+/** Space-weather vocabulary. A geomagnetic storm is an event in the
+ *  magnetosphere, not the troposphere, and the datasets that speak to it
+ *  are solar and auroral ones. */
+const SPACE_WEATHER = ['aurora', 'magnetosphere', 'ionosphere', 'solar', 'space', 'plasma'] as const
+
+/**
+ * Two-word topics whose meaning is not the sum of their words.
+ *
+ * {@link TOPIC_EXPANSIONS} is keyed on single tokens, which is fine while
+ * a word means one thing. It is wrong for a word that names a different
+ * phenomenon depending on what precedes it: a *geomagnetic storm* is a
+ * space-weather event, and expanding it to `cloud` / `precipitation` /
+ * `rain` sent every solar-storm alert looking for weather data. The
+ * word alone cannot tell you which; the pair can.
+ *
+ * `expand` adds the phrase's own vocabulary. `suppress` names single
+ * tokens whose {@link TOPIC_EXPANSIONS} entry must NOT fire for this
+ * event — the constituent token itself is still kept as a term, so a
+ * literal word match still counts and IDF still weighs it; only the
+ * misleading expansion is withheld.
+ *
+ * Keyed in the stemmed form {@link tokenize} produces, and matched on
+ * adjacent tokens within a single field, so a title ending "solar" and a
+ * summary opening "storm" never pair up.
+ */
+const TOPIC_PHRASES: readonly {
+  readonly phrase: readonly [string, string]
+  readonly expand: readonly string[]
+  readonly suppress?: readonly string[]
+}[] = [
+  { phrase: ['geomagnetic', 'storm'], expand: SPACE_WEATHER, suppress: ['storm'] },
+  { phrase: ['solar', 'storm'], expand: SPACE_WEATHER, suppress: ['storm'] },
+  { phrase: ['magnetic', 'storm'], expand: SPACE_WEATHER, suppress: ['storm'] },
+  { phrase: ['solar', 'flare'], expand: SPACE_WEATHER },
+  { phrase: ['coronal', 'mass'], expand: SPACE_WEATHER },
+  // `flow` used to expand to lava/thermal on its own, which fired on
+  // river flow, ocean flow and traffic flow alike. It earns the volcanic
+  // reading only in these pairs.
+  { phrase: ['lava', 'flow'], expand: ['lava', 'thermal', 'volcano', 'eruption'] },
+  { phrase: ['pyroclastic', 'flow'], expand: ['ash', 'thermal', 'volcano', 'eruption'] },
+]
 
 /** Light plural→singular stem (no full stemmer) for plural/singular
  *  bridging: handles `-oes` (volcanoes→volcano), `-ies` (anomalies→
@@ -322,9 +389,11 @@ export function tokenize(text: string | null | undefined): string[] {
 /**
  * Build the event's topic-term set: tokens from its title + summary +
  * category values + keywords, each expanded with related topic terms via
- * {@link TOPIC_EXPANSIONS}. Category values ("Severe Storms") and the
- * title carry the signal; the expansion is what connects them to
- * dataset subjects ("cloud", "precipitation").
+ * {@link TOPIC_EXPANSIONS}, after {@link TOPIC_PHRASES} has had a chance
+ * to add a two-word topic's own vocabulary and withhold a single word's
+ * misleading one. Category values ("Severe Storms") and the title carry
+ * the signal; the expansion is what connects them to dataset subjects
+ * ("cloud", "precipitation").
  */
 export function buildEventTerms(parts: {
   title?: string | null
@@ -332,18 +401,45 @@ export function buildEventTerms(parts: {
   categoryValues?: readonly string[]
   keywords?: readonly string[]
 }): Set<string> {
+  const fields = [
+    parts.title,
+    parts.summary,
+    ...(parts.categoryValues ?? []),
+    ...(parts.keywords ?? []),
+  ]
+  const tokenized = fields.map(tokenize)
+
+  // Pass 1: phrases. Adjacency is checked per field, but a suppression
+  // it triggers applies to the whole event — a title reading
+  // "Geomagnetic storm" must also stop the bare "Storms" category value
+  // from dragging in precipitation.
   const set = new Set<string>()
-  const add = (text: string | null | undefined): void => {
-    for (const t of tokenize(text)) {
+  const suppressed = new Set<string>()
+  for (const tokens of tokenized) {
+    for (const { phrase, expand, suppress } of TOPIC_PHRASES) {
+      if (!hasAdjacentPair(tokens, phrase)) continue
+      for (const e of expand) set.add(e)
+      for (const t of suppress ?? []) suppressed.add(t)
+    }
+  }
+
+  // Pass 2: tokens, expanded unless a phrase withheld the expansion.
+  for (const tokens of tokenized) {
+    for (const t of tokens) {
       set.add(t)
+      if (suppressed.has(t)) continue
       for (const e of TOPIC_EXPANSIONS[t] ?? []) set.add(e)
     }
   }
-  add(parts.title)
-  add(parts.summary)
-  for (const v of parts.categoryValues ?? []) add(v)
-  for (const k of parts.keywords ?? []) add(k)
   return set
+}
+
+/** Do `tokens` contain `pair` as consecutive entries? */
+function hasAdjacentPair(tokens: readonly string[], pair: readonly [string, string]): boolean {
+  for (let i = 0; i + 1 < tokens.length; i++) {
+    if (tokens[i] === pair[0] && tokens[i + 1] === pair[1]) return true
+  }
+  return false
 }
 
 /**
@@ -394,16 +490,111 @@ export function buildDatasetTerms(parts: {
 }
 
 /**
- * Topical score in [0, 1] from the overlap of the event's (expanded)
- * topic terms with the dataset's subject terms. 0 means no shared
- * subject (the dataset is filtered out); a single shared term already
- * clears the default threshold so a clearly-related dataset surfaces,
- * with more overlap ranking higher.
+ * Inverse document frequency over the candidate set: how much evidence
+ * one shared term is worth.
+ *
+ * Without this every shared token counted the same, so a dataset could
+ * top a hurricane event on `coast`, `are` and `expected` — three words
+ * of abstract prose — while every hurricane-titled dataset sat below
+ * it. `log(1 + N/df)`: a term in every dataset is worth `log(2)` ≈ 0.69
+ * — a floor rather than zero, so a ubiquitous term still counts a
+ * little — and a term in one dataset is worth `log(1 + N)`. Over 180
+ * candidates that is roughly a 7.5x spread between the most common term
+ * and the rarest, and that ratio is what does the work.
  */
-export function scoreLexical(eventTerms: ReadonlySet<string>, datasetTerms: ReadonlySet<string>): number {
-  let overlap = 0
-  for (const t of datasetTerms) if (eventTerms.has(t)) overlap++
-  return overlap === 0 ? 0 : Math.min(1, 0.5 + 0.2 * overlap)
+export function buildIdf(datasets: readonly MatchDataset[]): Map<string, number> {
+  const df = new Map<string, number>()
+  for (const d of datasets) {
+    for (const term of d.subjectTerms ?? EMPTY_TERMS) {
+      df.set(term, (df.get(term) ?? 0) + 1)
+    }
+  }
+  const n = Math.max(1, datasets.length)
+  const idf = new Map<string, number>()
+  for (const [term, count] of df) idf.set(term, Math.log(1 + n / count))
+  return idf
+}
+
+/**
+ * Topical score in [0, 1]: the IDF-weighted cosine similarity between
+ * the event's (expanded) topic terms and the dataset's subject terms.
+ * 0 means no shared subject and the dataset is filtered out.
+ *
+ * This replaced `min(1, 0.5 + 0.2 * overlap)`, which had three faults
+ * that compounded. It **saturated at three shared terms**, so a quarter
+ * of the catalogue scored exactly 1.0 against a typical event and the
+ * signal carried no ordering information across them. It counted a raw
+ * overlap, so **a long abstract beat a precise title** — a dataset
+ * pooling ~100 prose tokens outranked one whose title named the subject.
+ * And it **weighted every term equally**, so glue words that survived
+ * the short stopword list counted as topical evidence.
+ *
+ * Cosine fixes all three at once: it never saturates, the dataset's own
+ * term mass sits in the denominator so verbosity stops paying, and IDF
+ * makes a rare shared term (`aurora`, `tsunami`) worth far more than a
+ * common one (`temperature`, `global`). `idf` is optional so a caller
+ * scoring a single pair without corpus statistics still gets sane
+ * unweighted cosine rather than a fabricated ranking.
+ */
+/**
+ * The IDF-weighted cosine a genuinely strong topical match reaches, used
+ * to map cosine onto the 0-1 scale the rest of the system already
+ * speaks.
+ *
+ * This calibration is not cosmetic. `match_score` is stored on
+ * `event_dataset_links` and drives the curator UI: the Match Badge
+ * percentage and the "Approve all >= 90%" shortcut
+ * (`AUTO_PAIR_THRESHOLD`). Raw cosines over sparse term sets run an
+ * order of magnitude lower than the old saturating score, so shipping
+ * them unscaled would silently retire that shortcut. Normalising by the
+ * best match in each candidate set would do the opposite and make every
+ * event's top link auto-pairable, including events with nothing
+ * relevant in the catalogue at all.
+ *
+ * An absolute reference keeps the threshold meaning what a curator
+ * thinks it means: a weak event scores low and proposes nothing, rather
+ * than promoting the best of a bad set. Measured over the live 180-row
+ * catalogue, clearly-correct matches reach 0.12-0.21 (wildfire smoke
+ * 0.207, sea ice 0.167, drought 0.139, tsunami 0.133, hurricane 0.121)
+ * while events with no true match top out at 0.08-0.11. 0.2 puts the
+ * first group near 1.0 and leaves the second below the floor.
+ */
+export const LEXICAL_REFERENCE = 0.20
+
+export function scoreLexical(
+  eventTerms: ReadonlySet<string>,
+  datasetTerms: ReadonlySet<string>,
+  idf?: ReadonlyMap<string, number>,
+): number {
+  if (eventTerms.size === 0 || datasetTerms.size === 0) return 0
+  const weight = (term: string): number => idf?.get(term) ?? 1
+  let shared = 0
+  let eventMass = 0
+  let datasetMass = 0
+  for (const term of eventTerms) {
+    // Every event term counts toward the denominator, including the
+    // ones TOPIC_EXPANSIONS added and no dataset can match.
+    //
+    // Restricting this to terms present in the corpus was tried and
+    // reverted: it made an event whose vocabulary barely intersects the
+    // catalogue look *perfectly* covered. A "severe storm" event whose
+    // only answerable term was `cloud` scored a cloud dataset at 1.0,
+    // because the query had been quietly redefined as the one word the
+    // corpus happened to contain. Depressing scores for unmatched
+    // expansion terms is the lesser fault, and it is uniform across
+    // candidates so it does not distort ranking.
+    const w = weight(term)
+    eventMass += w * w
+    if (datasetTerms.has(term)) shared += w * w
+  }
+  if (shared === 0) return 0
+  for (const term of datasetTerms) {
+    const w = weight(term)
+    datasetMass += w * w
+  }
+  if (eventMass === 0 || datasetMass === 0) return 0
+  const cosine = shared / Math.sqrt(eventMass * datasetMass)
+  return Math.min(1, cosine / LEXICAL_REFERENCE)
 }
 
 /**
@@ -424,12 +615,13 @@ export function scoreMatch(
   event: MatchEvent,
   dataset: MatchDataset,
   nowMs: number,
+  idf?: ReadonlyMap<string, number>,
 ): MatchResult {
   const geo = scoreGeo(event, dataset.boundingBox)
   const temporal = scoreTemporal(event, dataset, nowMs)
   const lexical =
     event.terms && event.terms.size > 0
-      ? scoreLexical(event.terms, dataset.subjectTerms ?? EMPTY_TERMS)
+      ? scoreLexical(event.terms, dataset.subjectTerms ?? EMPTY_TERMS, idf)
       : null
   const semantic = dataset.semantic ?? null
   // Topical relevance drives the score; it's the blend of the curated
@@ -444,7 +636,13 @@ export function scoreMatch(
       return { datasetId: dataset.id, score: 0, signals: { geo, temporal, lexical, semantic } }
     }
     let score = topical * (TOPICAL_BASE + (1 - TOPICAL_BASE) * (temporal ?? 0))
-    if (isLiveDataset(dataset, nowMs)) score = Math.min(1, score + LIVE_BONUS)
+    // Boost toward 1 rather than adding and clamping. An additive bonus
+    // has no headroom once the score reaches 1, so a live dataset and an
+    // equally-topical static one tie there — the preference silently
+    // vanishes exactly for the strongest matches. Scaling the remaining
+    // distance keeps live strictly ahead at every score below 1 and can
+    // never exceed 1, so no clamp is needed.
+    if (isLiveDataset(dataset, nowMs)) score += (1 - score) * LIVE_BONUS
     if (geo !== null) score = (score + geo) / 2
     return { datasetId: dataset.id, score, signals: { geo, temporal, lexical, semantic } }
   }
@@ -466,8 +664,14 @@ export function proposeMatches(
 ): MatchResult[] {
   const minScore = opts.minScore ?? DEFAULT_MIN_SCORE
   const limit = opts.limit ?? DEFAULT_MATCH_LIMIT
+  // One pass over the candidate set gives every term its rarity, so a
+  // shared word is scored by how much it actually distinguishes. Skipped
+  // when the event has no topic terms: `scoreMatch` ignores the lexical
+  // signal entirely on that path, so building the map would sweep every
+  // candidate's term set to produce a value nothing reads.
+  const idf = event.terms && event.terms.size > 0 ? buildIdf(datasets) : undefined
   return datasets
-    .map(d => scoreMatch(event, d, opts.nowMs))
+    .map(d => scoreMatch(event, d, opts.nowMs, idf))
     .filter(m => m.score >= minScore)
     .sort((a, b) => b.score - a.score || a.datasetId.localeCompare(b.datasetId))
     .slice(0, limit)
@@ -639,6 +843,8 @@ export async function runMatcherForEvent(
         matchScore: m.score,
         signals: m.signals,
         status: 'proposed',
+        source: 'matcher',
+        scorerVersion: SCORER_VERSION,
       },
       stamp,
     )

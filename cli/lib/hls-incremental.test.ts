@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Tests for `cli/lib/hls-incremental.ts` — the pure core of
  * incremental HLS re-encoding (`docs/INCREMENTAL_HLS_PLAN.md`).

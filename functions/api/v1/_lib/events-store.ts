@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * `current_events` + `event_dataset_links` data access.
  *
@@ -139,7 +142,17 @@ export interface EventDatasetLinkRow {
   created_at: string
   approved_at: string | null
   approved_by: string | null
+  /** Who created the row. NULL on every row predating `0045`, which is
+   *  the honest answer — see that migration on why no backfill exists. */
+  source: LinkSource | null
+  /** The matcher build that wrote `match_score`, or NULL when none has. */
+  scorer_version: string | null
 }
+
+/** Where a link came from. The matcher proposed it, or a curator picked
+ *  it by hand — a distinction the table could not previously make, and
+ *  the one a cleanup sweep needs before it can delete anything. */
+export type LinkSource = 'matcher' | 'curator'
 
 /** Per-event decoration vocabulary. `categories` collapses to a
  *  per-facet array, matching the dataset wire shape. */
@@ -226,6 +239,15 @@ export interface NewEventDatasetLink {
    *  to `signals_json`. */
   signals?: unknown
   status?: EventLinkStatus
+  /** Required, deliberately. An earlier revision defaulted this to
+   *  'matcher' and the ingest path's hand-pick seed — which does not
+   *  pass one — silently stamped every curator pairing as machine-made,
+   *  corrupting the exact field this column exists to record. Set on
+   *  insert only; the upsert never rewrites it. */
+  source: LinkSource
+  /** The matcher build writing `matchScore`. Refreshed on every upsert,
+   *  because it describes the score rather than the row. */
+  scorerVersion?: string | null
 }
 
 const EVENT_COLUMNS = `id, origin_node, title, summary, source_name, source_url,
@@ -234,7 +256,7 @@ const EVENT_COLUMNS = `id, origin_node, title, summary, source_name, source_url,
   status, created_at, updated_at, reviewed_at, reviewed_by, inferred_fields, image_url, image_alt, video_embed_url, owner_id, video_file_url`
 
 const LINK_COLUMNS = `event_id, dataset_id, match_score, signals_json,
-  status, created_at, approved_at, approved_by`
+  status, created_at, approved_at, approved_by, source, scorer_version`
 
 /** Max bind variables per chunked `IN (…)` query — mirrors
  *  `catalog-store.ts`'s `D1_BIND_BATCH`. */
@@ -648,6 +670,34 @@ export async function getEventDecorations(
  * demoted back to `proposed`. The `status` argument therefore only
  * applies to a brand-new link (insert), which defaults to `proposed`;
  * status transitions go through {@link setLinkStatus}.
+ *
+ * `source` records who created the ROW, so a curator's hand-pick that
+ * the matcher later proposes independently stays `'curator'`.
+ * Overwriting it would erase the one fact a cleanup sweep needs — that
+ * a human chose this pairing — at exactly the moment the row starts
+ * looking machine-made.
+ *
+ * It fills an UNKNOWN one, though, which is the difference between a
+ * column that works and one that does not. Set only on insert, it never
+ * populated at all: on a node whose links already exist every write
+ * takes this conflict branch, so a full re-score of 10,755 live links
+ * left every single `source` NULL while `scorer_version` filled in —
+ * same rows, same write, one column in the DO UPDATE and one not. The
+ * sweep it exists for could never have run.
+ *
+ * `COALESCE(existing, excluded)` keeps a known provenance and labels an
+ * unknown one. The cost is that a pre-`0045` hand-pick the matcher also
+ * proposes gets stamped `'matcher'` — a real mislabel, but a harmless
+ * one for the purpose: that same write gives the row a score, and the
+ * sweep is `source = 'matcher' AND match_score IS NULL`. The rows at
+ * risk of being mislabelled are exactly the rows it would never
+ * delete.
+ *
+ * `scorer_version` is refreshed, because unlike `source` it describes
+ * the SCORE rather than the row, and the score is what just changed —
+ * but only when the caller supplies one. A caller that upserts without
+ * scoring must not silently un-version a score somebody else wrote,
+ * which is what an unguarded `excluded.scorer_version` did.
  */
 export async function upsertEventDatasetLink(
   db: D1Database,
@@ -657,10 +707,12 @@ export async function upsertEventDatasetLink(
   await db
     .prepare(
       `INSERT INTO event_dataset_links (${LINK_COLUMNS})
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(event_id, dataset_id) DO UPDATE SET
-         match_score  = excluded.match_score,
-         signals_json = excluded.signals_json`,
+         match_score    = excluded.match_score,
+         signals_json   = excluded.signals_json,
+         source         = COALESCE(event_dataset_links.source, excluded.source),
+         scorer_version = COALESCE(excluded.scorer_version, event_dataset_links.scorer_version)`,
     )
     .bind(
       input.eventId,
@@ -671,6 +723,8 @@ export async function upsertEventDatasetLink(
       now,
       null,
       null,
+      input.source,
+      input.scorerVersion ?? null,
     )
     .run()
 }
@@ -692,12 +746,72 @@ export async function insertProposedLinkIfAbsent(
   const res = await db
     .prepare(
       `INSERT INTO event_dataset_links (${LINK_COLUMNS})
-       VALUES (?, ?, NULL, NULL, 'proposed', ?, NULL, NULL)
+       VALUES (?, ?, NULL, NULL, 'proposed', ?, NULL, NULL, 'curator', NULL)
        ON CONFLICT(event_id, dataset_id) DO NOTHING`,
     )
     .bind(eventId, datasetId, now)
     .run()
   return (res.meta?.changes ?? 0) > 0
+}
+
+/**
+ * Event ids to re-score, in a keyset page ordered by event id.
+ *
+ * Exists because a scoring change invalidates stored `match_score`
+ * values wholesale and nothing re-scores an event on its own unless its
+ * feed still carries it (see `runMatcherForEvent`'s callers). Migration
+ * `0044` cleared the scores the pre-IDF formula produced; this is how
+ * they come back.
+ *
+ * **Keyset, not offset, and that is the whole point.** The obvious
+ * selector — "events with a NULL-scored link" — shrinks as it is
+ * worked, which looks self-limiting until an event scores nothing at
+ * all. Its links stay NULL, it is selected again on the next call, and
+ * a caller looping "until nothing needs re-scoring" never terminates.
+ * Paging by `after` (an id strictly greater than the last one seen)
+ * advances whatever the matcher decides, so the walk always finishes.
+ * Event ids are ULIDs, so ascending id is a stable total order.
+ *
+ * `unscoredOnly` (the default) selects only events holding at least one
+ * link with no score — the cheap first pass straight after a migration
+ * that cleared them.
+ *
+ * **It is a prioritisation filter, not a work queue that empties.** A
+ * curator's hand-picked pairing is written by
+ * {@link insertProposedLinkIfAbsent} with a NULL `match_score` *by
+ * design* — it is a human decision, not a matcher output, and the
+ * matcher only ever fills that score in if it independently proposes
+ * the same dataset. So an event with a hand-added link the matcher
+ * would not pick keeps a NULL link forever and is selected by this
+ * predicate on every future call. A walk still terminates (the cursor
+ * sees to that), but the *set* never drains to empty, and re-running
+ * repeats the full matcher cost on those events.
+ *
+ * Pass `false` to walk every event regardless. That is the honest
+ * choice after a formula change — the stored scores are present but
+ * wrong, so there is nothing NULL to select on — and it is what the
+ * portal's re-score card sends.
+ */
+export async function listEventIdsToRescore(
+  db: D1Database,
+  opts: { limit?: number; after?: string | null; unscoredOnly?: boolean } = {},
+): Promise<string[]> {
+  const limit = Math.max(1, Math.min(opts.limit ?? 25, 100))
+  const after = opts.after ?? ''
+  const unscoredOnly = opts.unscoredOnly !== false
+  const sql = unscoredOnly
+    ? `SELECT DISTINCT l.event_id AS id
+         FROM event_dataset_links l
+        WHERE l.match_score IS NULL
+          AND l.event_id > ?
+        ORDER BY l.event_id
+        LIMIT ?`
+    : `SELECT id FROM current_events
+        WHERE id > ?
+        ORDER BY id
+        LIMIT ?`
+  const res = await db.prepare(sql).bind(after, limit).all<{ id: string }>()
+  return (res.results ?? []).map(r => r.id)
 }
 
 /** List the links for an event, optionally filtered by status. */

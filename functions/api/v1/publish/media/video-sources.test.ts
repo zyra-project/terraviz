@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Wire-level tests for the video-source registry surface:
  * GET/POST /video-sources, POST/DELETE /video-sources/:id,

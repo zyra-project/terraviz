@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * openWakeWord ONNX scorer (Phase 3.5) — the on-device backend that
  * turns mic audio into per-frame wake-word scores for

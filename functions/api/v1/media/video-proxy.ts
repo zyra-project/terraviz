@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * GET/HEAD /api/v1/media/video-proxy?url=<mp4> — a CORS-adding,
  * Range-passing stream proxy for direct video files from registered

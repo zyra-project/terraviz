@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Browse UI — dataset discovery panel with multi-select chip
  * filters, search, sort, and card rendering.

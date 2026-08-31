@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * DOM walker that translates HTML markup carrying `data-i18n*`
  * attributes. Run once after DOMContentLoaded and again before each

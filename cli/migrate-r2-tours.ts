@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * `terraviz migrate-r2-tours` — migrate SOS tour.json files
  * (and their sibling assets: overlay images, narrated audio,

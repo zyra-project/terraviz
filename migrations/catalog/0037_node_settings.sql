@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0037_node_settings.sql — per-node feature toggles.
 --
 -- A TerraViz node doesn't have to run every feature: a museum may

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Turn the declared binding manifest into a Cloudflare Pages PATCH
  * body (`SELF_HOSTING.md` Phase 8).

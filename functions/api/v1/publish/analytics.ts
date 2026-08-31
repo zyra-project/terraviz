@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * GET /api/v1/publish/analytics — data facade for the
  * `/publish/analytics` admin tab (Phase B of

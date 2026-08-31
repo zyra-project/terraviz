@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { hashFileSha256, renderAssetUploader } from './asset-uploader'
 import { ROUTE_CHANGE_START_EVENT } from '../router'

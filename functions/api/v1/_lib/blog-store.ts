@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * `blog_posts` data access (`migrations/catalog/0029_blog_posts.sql`)
  * — Phase 3d curator-authored blog posts.

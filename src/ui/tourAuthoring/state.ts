@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * In-memory tour-authoring state — the dock reads / writes here as
  * the publisher captures tasks; the autosave manager

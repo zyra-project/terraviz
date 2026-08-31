@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Playback controls: play/pause, scrubbing, step, rewind, captions, and the playback loop.
  *

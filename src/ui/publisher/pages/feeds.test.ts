@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Tests for the /publish/feeds console — privileged gate, connector
  * rows (state + bookkeeping), preset gallery add/added states,
@@ -8,6 +11,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderFeedsPage } from './feeds'
 import { fetchFeatures, resetFeaturesCache } from '../features'
 import { FEED_PRESETS } from '../feed-presets'
+import { until } from '../../../test-utils'
 
 interface RouteSpec { status?: number; body?: unknown }
 
@@ -413,5 +417,162 @@ describe('renderFeedsPage', () => {
         c => String(c[0]).endsWith('/video-sources/refresh') && c[1]?.method === 'POST',
       ),
     ).toBe(true)
+  })
+
+  describe('re-score events', () => {
+    /** A fetch stub that serves a scripted sequence of rematch pages
+     *  while every other route keeps its static body. */
+    function rematchFetch(pages: { status?: number; body?: unknown }[]) {
+      const routes = baseRoutes()
+      let call = 0
+      const base = mockFetch(routes)
+      return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url)
+        if (path.includes('/events/rematch')) {
+          const page = pages[Math.min(call, pages.length - 1)]
+          call += 1
+          const status = page.status ?? 200
+          return {
+            ok: status >= 200 && status < 300,
+            status,
+            type: 'basic',
+            json: async () => page.body ?? {},
+            text: async () => JSON.stringify(page.body ?? {}),
+          } as unknown as Response
+        }
+        return base(input, init)
+      })
+    }
+
+    const clickRematch = async (fetchFn: ReturnType<typeof vi.fn>): Promise<void> => {
+      await renderFeedsPage(mount, { fetchFn: fetchFn as unknown as typeof fetch })
+      const btn = mount.querySelector('#feeds-rematch-run') as HTMLButtonElement | null
+      expect(btn).toBeTruthy()
+      btn!.click()
+    }
+
+    it('walks every page and totals the result', async () => {
+      // Two full pages then a short one. The card must sum across all
+      // three rather than report only the last.
+      const fetchFn = rematchFetch([
+        { body: { scanned: 25, rescored: 25, failed: 0, failedIds: [], nextCursor: 'EVT025', done: false } },
+        { body: { scanned: 25, rescored: 24, failed: 1, failedIds: ['EVT030'], nextCursor: 'EVT050', done: false } },
+        { body: { scanned: 4, rescored: 4, failed: 0, failedIds: [], nextCursor: null, done: true } },
+      ])
+      await clickRematch(fetchFn)
+      await until(
+        () => (mount.textContent ?? '').includes('Re-scored'),
+        'the rematch walk to finish',
+      )
+      expect(mount.textContent).toContain('Re-scored 53 of 54 events. 1 failed.')
+    })
+
+    it('passes the cursor back on the next page', async () => {
+      const fetchFn = rematchFetch([
+        { body: { scanned: 25, rescored: 25, failed: 0, failedIds: [], nextCursor: 'EVT025', done: false } },
+        { body: { scanned: 1, rescored: 1, failed: 0, failedIds: [], nextCursor: null, done: true } },
+      ])
+      await clickRematch(fetchFn)
+      await until(
+        () => (mount.textContent ?? '').includes('Re-scored'),
+        'the rematch walk to finish',
+      )
+      const calls = fetchFn.mock.calls.filter(c => String(c[0]).includes('/events/rematch'))
+      expect(calls).toHaveLength(2)
+      // Every page asks for the full walk, not just the unscored rows:
+      // a stale score is present-but-wrong rather than NULL, so the
+      // unscored-only filter would skip what this button is for.
+      expect(JSON.parse(String((calls[0][1] as RequestInit).body))).toEqual({ unscoredOnly: false })
+      // First page starts with no cursor; the second resumes past it.
+      expect(JSON.parse(String((calls[1][1] as RequestInit).body))).toEqual({
+        unscoredOnly: false,
+        after: 'EVT025',
+      })
+    })
+
+    it('resumes from the page cap on a second click, and rewinds once finished', async () => {
+      // "Run again to continue" has to be true. A cursor scoped to the
+      // click handler would restart at the top and strand the tail of a
+      // long backlog no matter how often it was clicked.
+      const page = (cursor: string, done: boolean) => ({
+        body: { scanned: 1, rescored: 1, failed: 0, failedIds: [], nextCursor: done ? null : cursor, done },
+      })
+      const fetchFn = rematchFetch([page('EVT001', false), page('', true)])
+      await clickRematch(fetchFn)
+      await until(() => (mount.textContent ?? '').includes('Re-scored'), 'the first walk to finish')
+
+      const calls = () => fetchFn.mock.calls.filter(c => String(c[0]).includes('/events/rematch'))
+      // Walk ran to completion, so the cursor rewinds: a later click
+      // must start from the top rather than resume past the end.
+      const before = calls().length
+      const btn = mount.querySelector('#feeds-rematch-run') as HTMLButtonElement
+      btn.click()
+      await until(() => calls().length > before, 'the second walk to start')
+      expect(JSON.parse(String((calls()[before][1] as RequestInit).body))).toEqual({ unscoredOnly: false })
+    })
+
+    it('a resumed walk reports the cumulative total, not just the resumed part', async () => {
+      // The exact sequence that misreported in production: a page fails
+      // mid-walk (a backgrounded tab drops the request), the operator
+      // clicks again, and the walk resumes from the kept cursor. The
+      // totals must span both attempts — scoping them to the click
+      // while the cursor outlived it announced the resumed part as if
+      // it were the whole catalogue.
+      const page = (scanned: number, cursor: string | null, done: boolean) => ({
+        body: { scanned, rescored: scanned, failed: 0, failedIds: [], nextCursor: cursor, done },
+      })
+      const fetchFn = rematchFetch([
+        page(25, 'EVT025', false),
+        { status: 500, body: { error: 'server' } }, // tab backgrounded
+        page(25, 'EVT050', false),
+        page(10, null, true),
+      ])
+      await clickRematch(fetchFn)
+      await until(() => (mount.textContent ?? '').includes('Stopped after'), 'the interrupted run to report')
+      // It says what was kept, not that nothing happened.
+      expect(mount.textContent).toContain('Stopped after 25 events')
+
+      const btn = mount.querySelector('#feeds-rematch-run') as HTMLButtonElement
+      expect(btn.disabled).toBe(false)
+      btn.click()
+      await until(() => (mount.textContent ?? '').includes('Re-scored'), 'the resumed run to finish')
+
+      // 25 before the failure + 35 after = 60, not the 35 this run saw.
+      expect(mount.textContent).toContain('Re-scored 60 of 60 events')
+    })
+
+    it('a completed walk resets the totals, so the next run does not inherit them', async () => {
+      const page = (scanned: number, done: boolean) => ({
+        body: { scanned, rescored: scanned, failed: 0, failedIds: [], nextCursor: done ? null : 'EVT025', done },
+      })
+      const fetchFn = rematchFetch([page(5, true), page(7, true)])
+      await clickRematch(fetchFn)
+      await until(() => (mount.textContent ?? '').includes('Re-scored'), 'the first walk')
+      expect(mount.textContent).toContain('Re-scored 5 of 5 events')
+
+      const btn = mount.querySelector('#feeds-rematch-run') as HTMLButtonElement
+      btn.click()
+      await until(() => (mount.textContent ?? '').includes('Re-scored 7'), 'the second walk')
+      expect(mount.textContent).toContain('Re-scored 7 of 7 events')
+    })
+
+    it('surfaces a failure and re-enables the button', async () => {
+      const fetchFn = rematchFetch([{ status: 500, body: { error: 'server' } }])
+      await clickRematch(fetchFn)
+      await until(
+        () => (mount.textContent ?? '').includes('Could not re-score'),
+        'the rematch error to render',
+      )
+      const btn = mount.querySelector('#feeds-rematch-run') as HTMLButtonElement
+      expect(btn.disabled).toBe(false)
+    })
+
+    it('is absent for a non-privileged caller', async () => {
+      const routes = baseRoutes()
+      routes['/api/v1/publish/me'] = { body: { role: 'author', is_admin: false } }
+      routes['/api/v1/publish/feeds'] = { status: 403, body: { error: 'forbidden_role' } }
+      await renderFeedsPage(mount, { fetchFn: mockFetch(routes) })
+      expect(mount.querySelector('#feeds-rematch-run')).toBeNull()
+    })
   })
 })

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * GET /api/v1/publish/media/video-suggest?q=<story text> — ranked
  * non-YouTube video suggestions for an event or blog (task: video-sitemap

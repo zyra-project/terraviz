@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 // PostToolUse hook: remind you to add a module-map row when you create
 // a new module, instead of finding out from CI after a push.
 //

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * AI date/location enrichment for ingested current events — feeds
  * slice C (`docs/CURRENT_EVENTS_PLAN.md` §9).

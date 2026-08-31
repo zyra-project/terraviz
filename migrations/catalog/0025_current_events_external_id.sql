@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0025_current_events_external_id.sql — dedupe key for ingested events
 -- (see docs/CURRENT_EVENTS_PLAN.md §9, ingestion).
 --

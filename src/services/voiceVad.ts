@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Local voice-activity detection (VAD) for Phase 3 hands-free voice.
  *

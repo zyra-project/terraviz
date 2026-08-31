@@ -1,5 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 import { describe, it, expect, vi } from 'vitest'
 import { renderEventDetail } from './event-detail'
+import { AUTO_PAIR_THRESHOLD } from './events-model'
 import type { ReviewEvent, ReviewLink } from './events-model'
 
 function okFetch() {
@@ -516,5 +520,23 @@ describe('renderEventDetail — generate tour', () => {
     const status = pane.querySelector('.publisher-events-tour-status') as HTMLElement
     expect(status.textContent).toBe('No visible dataset pairings.')
     expect(status.classList.contains('publisher-events-status-error')).toBe(true)
+  })
+})
+
+describe('renderEventDetail — bulk approve label', () => {
+  it('shows the live threshold rather than a number baked into the string', () => {
+    // The defect this guards: the label used to read "Approve all ≥90%"
+    // as literal copy, so moving AUTO_PAIR_THRESHOLD changed which
+    // links the button paired without changing what it claimed to pair.
+    // A one-constant change was not one constant.
+    const pane = renderEventDetail(
+      event({ links: [link('a'), link('b')] }),
+      { fetchFn: okFetch() } as never,
+    )
+    const bulk = Array.from(pane.querySelectorAll('button')).find(b =>
+      (b.textContent ?? '').startsWith('Approve all'),
+    )
+    expect(bulk).toBeTruthy()
+    expect(bulk!.textContent).toContain(`≥${AUTO_PAIR_THRESHOLD}%`)
   })
 })

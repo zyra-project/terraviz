@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * scripts/clean-d1-state.ts — cross-platform `rm -rf` for the
  * Wrangler local D1 directory.

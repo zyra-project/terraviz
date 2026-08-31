@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Frame-query resolution shared between Orbit (chat marker
  * parsing) and the dataset loader (clicking a frame button).

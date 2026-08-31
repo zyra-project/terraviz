@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * /api/v1/publish/blog — the blog authoring list + create (Phase 3d;
  * `docs/CURRENT_EVENTS_PLAN.md` §7 companion work).

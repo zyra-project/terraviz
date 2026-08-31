@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Tests for the og:image fallback (task: story media) — the pure
  * meta-tag extraction and the bounded article fetch (stubbed; the

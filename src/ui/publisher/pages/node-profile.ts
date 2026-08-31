@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * /publish/node-profile — edit the node / host-organization profile
  * (Phase 3d; the "about the host" context AI-generated drafts ground

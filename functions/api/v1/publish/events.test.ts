@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Wire-level tests for GET /api/v1/publish/events — the current-events
  * review queue.
@@ -136,6 +139,7 @@ describe('GET /api/v1/publish/events', () => {
       datasetId: DS_0,
       matchScore: 0.9,
       signals: { geo: null, temporal: 1 },
+      source: 'matcher',
     })
 
     const res = await eventsGet(ctx({ env }))

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Positional blob/double layouts for every telemetry event type —
  * the decode side of `toDataPoint()` in `functions/api/ingest.ts`.

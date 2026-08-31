@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * check-tick-drain — reject "wait by counting event-loop turns" in tests.
  *

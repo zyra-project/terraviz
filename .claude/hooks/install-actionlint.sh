@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The Zyra Project
+
 # SessionStart hook: make `actionlint` available so the PostToolUse hook
 # .claude/hooks/check-actionlint.mjs can lint workflow edits locally
 # instead of waiting for the Actionlint job in ci.yml.

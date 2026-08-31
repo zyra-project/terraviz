@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * `terraviz migrate-r2-hls` — migrate legacy `vimeo:<id>` data_refs
  * to R2-hosted HLS bundles for 4K spherical streaming.

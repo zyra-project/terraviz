@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Fails when a stylesheet uses a physical inline-axis property where a
  * logical one belongs.

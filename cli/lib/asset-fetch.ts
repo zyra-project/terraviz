@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * HTTP fetch helper for the Phase 3b asset migration. Pulls the
  * bytes of a thumbnail / legend / caption / color-table image from

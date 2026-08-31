@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Wake-word detection (Phase 3.5) — "Hey Orbit" arms hands-free
  * listening without a tap, the committed exhibit affordance

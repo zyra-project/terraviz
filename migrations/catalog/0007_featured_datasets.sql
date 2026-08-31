@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0007_featured_datasets.sql — Phase 1b — operator-curated featured list.
 --
 -- Powers the docent's `list_featured_datasets` LLM tool (per

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Hand-rolled argv parser for the `terraviz` CLI. Avoids a
  * `commander` / `yargs` dependency for what is, in the end, three

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Cloudflare-edge voice engines (Phase 2) — STT via Whisper and TTS
  * via MeloTTS/Aura, talking to the `/api/voice/*` Pages Functions.

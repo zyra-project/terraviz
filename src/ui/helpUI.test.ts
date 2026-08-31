@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // Mock chatUI so importing helpUI doesn't pull in the full chat module

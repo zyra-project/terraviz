@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { ErrorEvent as TelemetryErrorEvent, ErrorDetailEvent } from '../types'
 import { flush, resetForTests as resetEmitter } from './emitter'

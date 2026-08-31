@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The Zyra Project
+
 """Render a colorbar legend PNG (opaque white background) for a data-encoded dataset.
 
 TerraViz on `main` has no auto gradient legend — the colorbar comes from a

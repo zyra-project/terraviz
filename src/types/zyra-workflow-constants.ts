@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Constants shared by the publisher API (`functions/`), the GHA
  * runner CLI (`cli/`), and the portal (`src/`) for the Zyra

@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- Add tags column for quick-select feedback tags
 ALTER TABLE feedback ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';
 

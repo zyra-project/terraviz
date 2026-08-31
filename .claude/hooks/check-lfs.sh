@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The Zyra Project
+
 # SessionStart hook: surface Git LFS files that are still pointer stubs.
 #
 # A clone made without git-lfs leaves 131-byte text files where the

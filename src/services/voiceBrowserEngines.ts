@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Browser Web Speech engines — the Phase 1 STT/TTS implementations
  * that register against `voiceService`'s resolver.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * R2 public domain + CORS policy — `SELF_HOSTING.md` Phase 13.1.
  *

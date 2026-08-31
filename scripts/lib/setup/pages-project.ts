@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Pages project + custom domain — `SELF_HOSTING.md` Phase 5.
  *

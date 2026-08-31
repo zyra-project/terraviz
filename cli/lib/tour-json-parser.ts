@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * SOS tour.json parser — discovers every URL-bearing field in a
  * tour file and classifies it for migration.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderDatasetEditPage } from './dataset-edit'
 import type { PublisherDatasetDetail } from '../types'

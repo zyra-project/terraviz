@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * D1 store for the video-suggestion source registry (`video_sources`,
  * migration 0040; task: video-sitemap media source). Each row is one

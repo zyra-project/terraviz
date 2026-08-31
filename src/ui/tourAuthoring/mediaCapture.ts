@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Pure capture helpers for the dock's Media group (task: tour media
  * authoring). Builds positionless `showImage` / `showVideo` tasks —

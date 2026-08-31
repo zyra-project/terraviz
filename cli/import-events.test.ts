@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 import { describe, it, expect, vi } from 'vitest'
 import { runImportEvents } from './import-events'
 import type { CommandContext } from './commands'

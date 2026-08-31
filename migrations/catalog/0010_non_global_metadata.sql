@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0010_non_global_metadata.sql — Phase 3d — non-global data fidelity
 -- (bounding box, non-Earth body, image orientation).
 --

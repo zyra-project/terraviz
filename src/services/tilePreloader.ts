@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Eagerly fetches low-zoom GIBS tiles so they are warm in the browser / SW cache
  * before the user rotates the globe. At z0-z3 there are only 85 tiles per layer

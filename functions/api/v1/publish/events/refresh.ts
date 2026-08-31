@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * POST /api/v1/publish/events/refresh — on-demand current-events
  * ingestion (`docs/CURRENT_EVENTS_PLAN.md` §9).

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Unit tests for the current-events geo/temporal matcher. The pure
  * scoring functions are exercised directly; `runMatcherForEvent` runs
@@ -20,6 +23,7 @@ import {
   buildDatasetTerms,
   buildEventEmbeddingText,
   blendTopical,
+  buildIdf,
   scoreLexical,
   SEMANTIC_WEIGHT,
   TEMPORAL_HORIZON_MS,
@@ -260,6 +264,72 @@ describe('topical signal', () => {
     expect(terms.has('precipitation')).toBe(true)
   })
 
+  it('a geomagnetic storm does not drag in weather vocabulary', () => {
+    // `storm` alone expands to cloud / precipitation / rain, which is
+    // right for a thunderstorm and wrong for an event in the
+    // magnetosphere. The pair decides which reading applies.
+    const space = buildEventTerms({ title: 'Severe geomagnetic storm watch' })
+    expect(space.has('precipitation')).toBe(false)
+    expect(space.has('cloud')).toBe(false)
+    expect(space.has('hurricane')).toBe(false)
+    // The literal word survives — only its expansion is withheld.
+    expect(space.has('storm')).toBe(true)
+    // ...and the right vocabulary arrives in its place.
+    expect(space.has('aurora')).toBe(true)
+    expect(space.has('magnetosphere')).toBe(true)
+
+    // The ordinary reading is untouched.
+    const weather = buildEventTerms({ title: 'Severe storm over the Gulf' })
+    expect(weather.has('precipitation')).toBe(true)
+    expect(weather.has('cloud')).toBe(true)
+  })
+
+  it('suppression from one field applies to the whole event', () => {
+    // Adjacency is per-field, but the conclusion is not: a title that
+    // establishes the space-weather reading must also stop a bare
+    // "Storms" category value expanding into precipitation.
+    const terms = buildEventTerms({
+      title: 'Geomagnetic storm reaches G4',
+      categoryValues: ['Storms'],
+    })
+    expect(terms.has('precipitation')).toBe(false)
+    expect(terms.has('aurora')).toBe(true)
+  })
+
+  it('does not pair a phrase across two fields', () => {
+    // "solar" ending the title and "storm" opening the summary are not
+    // the phrase "solar storm", and must not suppress the weather
+    // expansion of a genuine storm event.
+    const terms = buildEventTerms({ title: 'Panels go solar', summary: 'Storm damage reported' })
+    expect(terms.has('precipitation')).toBe(true)
+  })
+
+  it('flow only reads as volcanic in a volcanic phrase', () => {
+    // `flow` used to expand to lava/thermal unconditionally, so a river
+    // story matched volcano datasets.
+    const river = buildEventTerms({ title: 'Record river flow after heavy rain' })
+    expect(river.has('lava')).toBe(false)
+
+    const lava = buildEventTerms({ title: 'Lava flow reaches the coast' })
+    expect(lava.has('lava')).toBe(true)
+    expect(lava.has('thermal')).toBe(true)
+    expect(lava.has('eruption')).toBe(true)
+  })
+
+  it('severe no longer imports storm vocabulary into unrelated hazards', () => {
+    // `severe` is an intensity word, not a topic. Expanding it to
+    // storm/cloud/precipitation made every severe drought and severe
+    // earthquake look like a weather event.
+    const drought = buildEventTerms({ title: 'Severe drought grips the basin' })
+    expect(drought.has('cloud')).toBe(false)
+    expect(drought.has('wind')).toBe(false)
+    // Drought's own expansion is intact.
+    expect(drought.has('soil')).toBe(true)
+    expect(drought.has('vegetation')).toBe(true)
+    // And "Severe Storms" still reaches weather data, via `storm`.
+    expect(buildEventTerms({ categoryValues: ['Severe Storms'] }).has('precipitation')).toBe(true)
+  })
+
   it('scoreLexical rises with overlap and is 0 with none', () => {
     const ev = buildEventTerms({ categoryValues: ['Severe Storms'] })
     expect(scoreLexical(ev, buildDatasetTerms({ title: 'Cloud cover' }))).toBeGreaterThan(0)
@@ -277,9 +347,92 @@ describe('topical signal', () => {
     expect(scoreMatch(event, unrelated, NOW).score).toBe(0)
   })
 
+  it('does not saturate: more shared terms keeps raising the score', () => {
+    // The previous formula was min(1, 0.5 + 0.2 * overlap), so three
+    // shared terms pinned it at 1.0 and every dataset beyond that was
+    // indistinguishable. Measured on the live catalogue, ~25% of rows
+    // scored exactly 1.0 against a typical event.
+    const event = buildEventTerms({ title: 'Wildfire smoke over the northern Rockies' })
+    const corpus = [
+      // Abstracts included: 79% of real catalogue rows have one, and a
+      // title-only dataset has so few terms that its cosine clamps.
+      { id: 'a', subjectTerms: buildDatasetTerms({ title: 'Smoke forecast', abstract: 'Gridded product distributed for research and situational awareness, updated on a regular cadence with quality control applied across coverage regions and archived for retrospective analysis.' }) },
+      { id: 'b', subjectTerms: buildDatasetTerms({ title: 'Wildfire smoke forecast', abstract: 'Gridded product distributed for research and situational awareness, updated on a regular cadence with quality control applied across coverage regions and archived for retrospective analysis.' }) },
+      { id: 'c', subjectTerms: buildDatasetTerms({ title: 'Wildfire smoke over northern terrain', abstract: 'Gridded product distributed for research and situational awareness, updated on a regular cadence with quality control applied across coverage regions and archived for retrospective analysis.' }) },
+      { id: 'd', subjectTerms: buildDatasetTerms({ title: 'Sea surface salinity', abstract: 'Gridded product distributed for research and situational awareness, updated on a regular cadence with quality control applied across coverage regions and archived for retrospective analysis.' }) },
+    ]
+    // Filler so the candidate set is big enough for cosines to land
+    // below the calibration ceiling, where the ordering is visible.
+    const filler = [
+      'Bathymetry seafloor elevation grid', 'Population density gridded estimates',
+      'Solar irradiance spectral measurements', 'Earthquake epicentres catalogue',
+      'Vegetation index seasonal composite', 'Carbon dioxide concentration model',
+      'Aurora electrojet indices', 'Snow cover extent daily',
+      'Ocean currents surface drift', 'Lightning strike density climatology',
+    ].map((title, i) => ({ id: `x${i}`, subjectTerms: buildDatasetTerms({ title }) }))
+    const idf = buildIdf([...corpus, ...filler])
+    const s = corpus.map(c => scoreLexical(event, c.subjectTerms, idf))
+    expect(s[0]).toBeGreaterThan(0)
+    // Two shared terms beat one. Under the old formula these were
+    // 0.7 and 0.9, and anything from three terms up was flat at 1.0.
+    expect(s[1]).toBeGreaterThan(s[0])
+    // `c` is a near-verbatim restatement of the event, so it reaching
+    // the calibration ceiling is correct rather than a saturation bug —
+    // the distinction is that it takes a near-perfect match to get
+    // there now, where three incidental words used to be enough.
+    expect(s[2]).toBeGreaterThanOrEqual(s[1])
+    expect(s[3]).toBe(0)
+  })
+
+  it('weights a rare shared term above a common one', () => {
+    // `aurora` appears once in the corpus; `temperature` in every row.
+    // Sharing the rare word should count for more than sharing the
+    // ubiquitous one — without IDF both were worth exactly the same,
+    // which is how glue words became topical evidence.
+    const corpus = [
+      { id: 'rare', subjectTerms: buildDatasetTerms({ title: 'Aurora temperature' }) },
+      { id: 'common1', subjectTerms: buildDatasetTerms({ title: 'Ocean temperature' }) },
+      { id: 'common2', subjectTerms: buildDatasetTerms({ title: 'Land temperature' }) },
+      { id: 'common3', subjectTerms: buildDatasetTerms({ title: 'Air temperature' }) },
+    ]
+    const idf = buildIdf(corpus)
+    expect(idf.get('aurora')!).toBeGreaterThan(idf.get('temperature')!)
+    const event = buildEventTerms({ title: 'Aurora temperature' })
+    expect(scoreLexical(event, corpus[0].subjectTerms, idf)).toBeGreaterThan(
+      scoreLexical(event, corpus[1].subjectTerms, idf),
+    )
+  })
+
+  it('does not let a long abstract outrank a precise title', () => {
+    // The failure this replaced: a dataset pooling ~100 tokens of prose
+    // beat every on-topic dataset on three incidental words. The
+    // dataset's own term mass now sits in the denominator, so padding
+    // stops paying.
+    const event = buildEventTerms({ title: 'Hurricane in the Gulf' })
+    const precise = { id: 'precise', subjectTerms: buildDatasetTerms({ title: 'Hurricane tracks' }) }
+    const padded = {
+      id: 'padded',
+      subjectTerms: buildDatasetTerms({
+        title: 'Ocean carbon exchange',
+        abstract:
+          'This dataset covers the gulf and coastal margins where fluxes are expected to vary, including shelf regions, estuaries, upwelling zones, seasonal stratification, biological productivity, and long term monitoring across many basins worldwide.',
+      }),
+    }
+    const idf = buildIdf([precise, padded])
+    expect(scoreLexical(event, precise.subjectTerms, idf)).toBeGreaterThan(
+      scoreLexical(event, padded.subjectTerms, idf),
+    )
+  })
+
   it('ranks an overlapping real-time dataset above an equally-topical static one', () => {
+    // Against a varied corpus — the regime production actually runs in,
+    // where a cosine lands mid-range instead of at the 1.0 ceiling.
     const event = { occurredStart: '2026-06-25T00:00:00Z', terms: buildEventTerms({ title: 'Severe storm' }) }
-    const subjectTerms = buildDatasetTerms({ title: 'Cloud imagery' })
+    const subjectTerms = buildDatasetTerms({
+      title: 'Cloud imagery',
+      abstract:
+        'Visible and infrared imagery of cloud cover captured by geostationary platforms, updated continuously for forecasting across ocean and land regions.',
+    })
     const live: MatchDataset = { id: 'live', startTime: '2026-01-01T00:00:00Z', period: 'PT15M', subjectTerms }
     const stat: MatchDataset = {
       id: 'static',
@@ -287,7 +440,41 @@ describe('topical signal', () => {
       endTime: '2026-06-30T00:00:00Z',
       subjectTerms,
     }
-    expect(scoreMatch(event, live, NOW).score).toBeGreaterThan(scoreMatch(event, stat, NOW).score)
+    const filler = [
+      'Sea surface salinity from orbital radiometers',
+      'Global vegetation index seasonal composite',
+      'Earthquake epicentres catalogue historical',
+      'Aurora oval auroral electrojet indices',
+      'Carbon dioxide concentration model output',
+      'Bathymetry seafloor elevation grid',
+      'Population density gridded estimates',
+      'Solar irradiance spectral measurements',
+    ].map((title, i) => ({ id: `f${i}`, subjectTerms: buildDatasetTerms({ title }) }))
+    const idf = buildIdf([live, stat, ...filler])
+    expect(scoreMatch(event, live, NOW, idf).score).toBeGreaterThan(
+      scoreMatch(event, stat, NOW, idf).score,
+    )
+  })
+
+  it('never lets the liveness boost push a score past 1, and never inverts the order', () => {
+    // Regression guard for the additive-bonus-with-clamp shape: at
+    // score 1 there was no headroom left, so `min(1, score + BONUS)`
+    // returned 1 for both and the preference vanished precisely for
+    // the strongest matches. The multiplicative form keeps live ahead
+    // wherever the score is below 1.
+    const event = { occurredStart: '2026-06-25T00:00:00Z', terms: buildEventTerms({ title: 'Severe storm' }) }
+    const subjectTerms = buildDatasetTerms({ title: 'Storm cloud precipitation wind imagery' })
+    const live: MatchDataset = { id: 'live', startTime: '2026-01-01T00:00:00Z', period: 'PT15M', subjectTerms }
+    const stat: MatchDataset = {
+      id: 'static',
+      startTime: '2026-06-20T00:00:00Z',
+      endTime: '2026-06-30T00:00:00Z',
+      subjectTerms,
+    }
+    const liveScore = scoreMatch(event, live, NOW).score
+    const statScore = scoreMatch(event, stat, NOW).score
+    expect(liveScore).toBeLessThanOrEqual(1)
+    expect(liveScore).toBeGreaterThanOrEqual(statScore)
   })
 })
 
@@ -409,7 +596,14 @@ describe('runMatcherForEvent', () => {
   })
 
   it('runs pure lexical/temporal (semantic null) when the env is unconfigured', async () => {
-    const sqlite = seedFixtures({ count: 1 })
+    // A realistic candidate count, not one row. The topical score is an
+    // IDF-weighted cosine over the candidate set, so a single-dataset
+    // corpus gives every term the same rarity and an event whose terms
+    // are mostly TOPIC_EXPANSIONS bridges scores below the floor. That
+    // small-catalogue behaviour is real and documented on
+    // LEXICAL_REFERENCE — a brand-new node with a handful of datasets
+    // may need a lower reference — but it is not what this test is for.
+    const sqlite = seedFixtures({ count: 12 })
     const db = asD1(sqlite)
     sqlite
       .prepare(`UPDATE datasets SET start_time = ?, end_time = NULL, period = ?, title = ? WHERE id = ?`)
@@ -428,7 +622,10 @@ describe('runMatcherForEvent', () => {
   })
 
   it('skips hidden / unpublished / retracted datasets', async () => {
-    const sqlite = seedFixtures({ count: 3 })
+    // 12 rows, of which three are made to match and two of those are
+    // disqualified. The extra rows exist so the surviving candidate set
+    // is a realistic size — see the note on the previous test.
+    const sqlite = seedFixtures({ count: 12 })
     const db = asD1(sqlite)
     // All three would match (topically + temporally); disqualify two.
     for (let i = 0; i < 3; i++) {

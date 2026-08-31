@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Unit tests for `publisher-mutations` — the user-administration
  * store helper. Covers list filters + pagination, the partial-update

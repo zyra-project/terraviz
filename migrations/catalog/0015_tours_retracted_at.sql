@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0015_tours_retracted_at.sql — Phase 3pt/G follow-up — add the
 -- `retracted_at` column to `tours` so a publisher can take a
 -- tour off the public surface without hard-deleting it.

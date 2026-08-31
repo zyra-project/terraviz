@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Telemetry public surface. Call sites should import only from this
  * barrel — the individual modules may be reorganized without

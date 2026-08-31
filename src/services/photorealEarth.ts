@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Photorealistic Earth — extracted from `vrScene.ts` so the same stack
  * can be reused outside VR (the Orbit-character standalone page is the

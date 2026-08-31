@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * In-VR dataset time label — a small floating panel that sits
  * above the globe and always billboards to face the user.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Unit tests for the current-events ingestion core
  * (`docs/CURRENT_EVENTS_PLAN.md` §9) — focused on the hand-picked
@@ -108,6 +111,21 @@ describe('ingestEvent — manual pairings', () => {
       expect(linkIds).toContain(dsId)
       expect(links.find(l => l.dataset_id === dsId)!.status).toBe('proposed')
     }
+  })
+
+  it("stamps hand-picked datasets as the curator's, not the matcher's", async () => {
+    // The defect this guards: the seed used to go through the matcher's
+    // upsert, which defaults `source`, so every drawer hand-pick landed
+    // labelled 'matcher'. That is the precise field the column exists
+    // to record, corrupted by the column's own write path — and a later
+    // cleanup keyed on source = 'matcher' would then delete the
+    // curator's own choices.
+    const { db } = freshDb()
+    const picked = seededDatasetId(0)
+    const { id } = await ingest(db, [picked])
+
+    const link = (await listLinksForEvent(db, id)).find(l => l.dataset_id === picked)!
+    expect(link.source).toBe('curator')
   })
 
   it('drops unknown and hidden dataset ids (no dangling link / FK throw)', async () => {

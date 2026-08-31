@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Media suggestions for the Events tab (task: media suggestion
  * engine) — candidate builders the detail pane renders as a

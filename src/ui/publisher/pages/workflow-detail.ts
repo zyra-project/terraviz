@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * `/publish/workflows/{id}` — workflow detail + run history
  * (Phase Z2 of `docs/ZYRA_INTEGRATION_PLAN.md`).

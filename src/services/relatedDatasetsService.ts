@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Client for the semantic "more like this" related-datasets endpoint
  * (`GET /api/v1/datasets/:id/related`). This is the network-backed,

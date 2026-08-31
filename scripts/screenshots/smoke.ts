@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Smoke / interaction tests (Phase V8).
  *
@@ -377,6 +380,13 @@ const checks: Check[] = [
         (await page.locator('.publisher-feeds-preview-item').count()) >= 3,
         'the feed preview should list the fixture items',
       )
+      // The admin-only re-score card is present and enabled. It is the
+      // only way an operator recovers scores after a scoring change,
+      // so its absence from this page is a regression worth catching
+      // here rather than the next time the matcher changes.
+      const rematch = page.locator('#feeds-rematch-run')
+      await rematch.waitFor({ timeout: 5_000 })
+      assert(await rematch.isEnabled(), 'the re-score button should start enabled')
     },
   },
   {

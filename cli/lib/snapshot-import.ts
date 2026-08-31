@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Pure row-mapping helpers for the SOS catalog snapshot importer.
  *

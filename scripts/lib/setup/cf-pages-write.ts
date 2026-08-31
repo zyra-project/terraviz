@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Cloudflare Pages project write client — the one thing wrangler
  * cannot do (`SELF_HOSTING.md` Phase 8).

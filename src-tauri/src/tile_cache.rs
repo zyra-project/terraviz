@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};

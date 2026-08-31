@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Wire-level tests for the feed-connector CRUD surface —
  * GET/POST /api/v1/publish/feeds and POST/DELETE /api/v1/publish/feeds/:id.

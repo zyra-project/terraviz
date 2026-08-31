@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Dataset loading — fetching, displaying info, and wiring up image/video datasets.
  *

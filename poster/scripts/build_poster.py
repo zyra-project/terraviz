@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The Zyra Project
+
 # Apache-2.0
 """Build poster/index.html from poster/sections/*.
 
@@ -16,6 +19,7 @@ Stdlib only; no third-party dependencies. Runs from anywhere:
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -35,11 +39,33 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+# Matches the two-line SPDX header that every source file carries (see
+# scripts/check-license-headers.ts), in either the HTML or the CSS comment
+# style, plus the blank line under it.
+_LICENSE_HEADER = re.compile(
+    r"\A(?:<!--|/\*)\s*SPDX-License-Identifier:[^\n]*\n"
+    r"(?:<!--|/\*)\s*Copyright[^\n]*\n\s*\n",
+)
+
+
+def _read_partial(path: Path) -> str:
+    """Read a fragment, dropping its licence header.
+
+    Every partial under sections/ carries the repository's SPDX header, and
+    every one of them is concatenated into a single document. Kept, they would
+    put nineteen identical copyright blocks inside one page. _head.html is
+    deliberately NOT read through here: it leads the output, so its header
+    becomes the built page's one header, sitting under the doctype exactly
+    where the check expects it.
+    """
+    return _LICENSE_HEADER.sub("", _read(path), count=1)
+
+
 def build() -> None:
     head = _read(SECTIONS / "_head.html")
-    styles = _read(SECTIONS / "_styles.css")
-    body_open = _read(SECTIONS / "_body-open.html")
-    footer = _read(SECTIONS / "_footer.html")
+    styles = _read_partial(SECTIONS / "_styles.css")
+    body_open = _read_partial(SECTIONS / "_body-open.html")
+    footer = _read_partial(SECTIONS / "_footer.html")
 
     if CSS_MARKER not in head:
         sys.exit(
@@ -58,7 +84,7 @@ def build() -> None:
     parts: list[str] = [head_with_css.rstrip(), body_open.rstrip()]
     for section in sections:
         parts.append(f"\n  <!-- {section.name} -->")
-        parts.append(_read(section).rstrip())
+        parts.append(_read_partial(section).rstrip())
     parts.append(footer.rstrip())
 
     output = "\n".join(parts) + "\n"

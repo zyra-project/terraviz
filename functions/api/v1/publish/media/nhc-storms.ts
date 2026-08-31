@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * GET /api/v1/publish/media/nhc-storms — same-origin proxy over NHC's
  * CurrentStorms.json (task: media suggestion engine).

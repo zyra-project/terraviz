@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * @vitest-environment happy-dom
  */
@@ -69,6 +72,21 @@ describe('renderMatchBadge', () => {
     const composite = badge.querySelector('.publisher-events-match-composite')!
     expect(composite.textContent).toBe('61%')
     expect(composite.className).toContain('publisher-events-match-composite-mid')
+  })
+
+  it('renders a fully unscored link without implying a score', () => {
+    // The state migration 0044 leaves behind: match_score and
+    // signals_json both NULL, because the formula that produced them no
+    // longer exists. Every facet and the composite must read "—" on the
+    // neutral tone — a 0% would be a claim the row does not support.
+    const badge = renderMatchBadge({ topic: null, time: null, geo: null, composite: null })
+    for (const tag of badge.querySelectorAll('.publisher-events-match-tag')) {
+      expect(tag.textContent).toMatch(/—$/)
+      expect(tag.className).toContain('publisher-events-match-tag-na')
+    }
+    const composite = badge.querySelector('.publisher-events-match-composite')!
+    expect(composite.textContent).toBe('—')
+    expect(composite.className).not.toContain('publisher-events-match-composite-strong')
   })
 
   it('gives every tag + the composite an accessible label', () => {

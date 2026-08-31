@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * /api/v1/publish/node-profile/logo — upload / remove the
  * organization logo (Phase 3d follow-up; task: org logo on the

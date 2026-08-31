@@ -17,6 +17,24 @@ work.
   ensure it is compatible with the Apache License, Version 2.0 and include proper attribution as required by the original license.
 - No CLA is required at this time; contributions are accepted under the project's Apache License terms.
 - This project enforces the Developer Certificate of Origin (DCO). All commits must include a Signed-off-by trailer.
+- **Every source file carries a two-line SPDX header**, and `npm run check:license` (part of `type-check`)
+  fails CI when one is missing:
+
+  ```
+  // SPDX-License-Identifier: Apache-2.0
+  // Copyright 2026 The Zyra Project
+  ```
+
+  Never hand-write these across a batch of files — `npm run check:license -- --fix` inserts the header
+  in the right comment syntax for each file kind, below any line that must come first (a shebang, a
+  doctype, `// swift-tools-version:`). Re-running it is safe: it repairs a wrong header rather than
+  stacking a second one on top.
+
+  The year may widen (`2026-2027`) but the holder is pinned. `The Zyra Project` is the copyright holder;
+  `CITATION.cff` separately records who to cite, and the two are deliberately different fields. Changing
+  the holder is one edit to the `COPYRIGHT` constant in `scripts/check-license-headers.ts` plus a
+  `--fix` — the same check verifies `LICENSE`, `NOTICE`, `package.json`, `CITATION.cff` and both Cargo
+  manifests still agree with it.
 
 If you have questions about licensing or attribution, please open an issue before submitting your PR.
 
@@ -130,6 +148,10 @@ Open issues at <https://github.com/zyra-project/terraviz/issues>.
   `functions/` and `cli/`. `npm run check:doc-coverage` (part of
   `type-check`) fails CI otherwise. For a module that genuinely needs no
   row, add a `// doc-exempt: <reason>` comment to its source.
+- **Licence headers**: a new source file needs the two-line SPDX header before CI will accept it. See
+  *License and Contributor Terms* above; `npm run check:license -- --fix` writes it for you. The check
+  reads untracked files too, so a file you have written but not yet `git add`ed fails locally rather
+  than surprising you in CI.
 - **Rust** (desktop app): follow the existing patterns in `src-tauri/src/`.
   Run `cargo fmt` and `cargo clippy` before submitting changes.
 - Check `package.json` for the available `scripts` (lint, format, type-check,

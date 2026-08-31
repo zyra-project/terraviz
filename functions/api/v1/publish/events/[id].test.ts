@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Wire-level tests for POST /api/v1/publish/events/:id — the curator
  * review-submit.
@@ -80,7 +83,7 @@ const SAMPLE = {
 
 async function seedEventWithLink(env: { CATALOG_DB: D1Database }) {
   const id = (await insertCurrentEvent(env.CATALOG_DB, SAMPLE)).id
-  await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_0, matchScore: 0.9 })
+  await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_0, matchScore: 0.9 , source: 'matcher' })
   return id
 }
 
@@ -110,7 +113,7 @@ describe('POST /api/v1/publish/events/:id', () => {
   it('lets an author approve their OWN event (publish.own)', async () => {
     const { env } = setupEnv()
     const id = (await insertCurrentEvent(env.CATALOG_DB, { ...SAMPLE, ownerId: PUBLISHER.id })).id
-    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_0, matchScore: 0.9 })
+    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_0, matchScore: 0.9 , source: 'matcher' })
     const res = await reviewPost(ctx({ env, id, publisher: PUBLISHER, body: { event: 'approve' } }))
     expect(res.status).toBe(200)
     expect((await getCurrentEvent(env.CATALOG_DB, id))!.status).toBe('approved')
@@ -119,7 +122,7 @@ describe('POST /api/v1/publish/events/:id', () => {
   it('lets a contributor edit its OWN event metadata but not approve it', async () => {
     const { env } = setupEnv()
     const id = (await insertCurrentEvent(env.CATALOG_DB, { ...SAMPLE, ownerId: CONTRIBUTOR.id })).id
-    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_0, matchScore: 0.9 })
+    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_0, matchScore: 0.9 , source: 'matcher' })
     // Edits-only submit (no decision) → allowed.
     const edit = await reviewPost(
       ctx({ env, id, publisher: CONTRIBUTOR, body: { edits: { occurredStart: '2026-06-26T00:00:00Z' } } }),
@@ -135,7 +138,7 @@ describe('POST /api/v1/publish/events/:id', () => {
     const { env } = setupEnv()
     // Seed an event already owned by the admin.
     const id = (await insertCurrentEvent(env.CATALOG_DB, { ...SAMPLE, ownerId: 'PUB-ADMIN' })).id
-    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_0, matchScore: 0.9 })
+    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_0, matchScore: 0.9 , source: 'matcher' })
     const res = await reviewPost(ctx({ env, id, publisher: PUBLISHER, body: { event: 'approve' } }))
     expect(res.status).toBe(403)
     expect((JSON.parse(await res.text()) as { error: string }).error).toBe('forbidden_owner')
@@ -145,7 +148,7 @@ describe('POST /api/v1/publish/events/:id', () => {
     const { env } = setupEnv()
     // Event already owned by the publisher; an admin re-review must not steal it.
     const id = (await insertCurrentEvent(env.CATALOG_DB, { ...SAMPLE, ownerId: PUBLISHER.id })).id
-    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_0, matchScore: 0.9 })
+    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_0, matchScore: 0.9 , source: 'matcher' })
     const res = await reviewPost(ctx({ env, id, body: { event: 'approve' } })) // ctx defaults to ADMIN
     expect(res.status).toBe(200)
     const row = await getCurrentEvent(env.CATALOG_DB, id)
@@ -189,7 +192,7 @@ describe('POST /api/v1/publish/events/:id', () => {
   it('applies per-link decisions in the same submit', async () => {
     const { env } = setupEnv()
     const id = await seedEventWithLink(env)
-    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_1, matchScore: 0.6 })
+    await upsertEventDatasetLink(env.CATALOG_DB, { eventId: id, datasetId: DS_1, matchScore: 0.6 , source: 'matcher' })
 
     const res = await reviewPost(
       ctx({

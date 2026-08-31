@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Repoint the fork-pinned resource IDs in `wrangler.toml`
  * (`SELF_HOSTING.md` Phase 3).

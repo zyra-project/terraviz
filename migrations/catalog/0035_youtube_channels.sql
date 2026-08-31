@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- Operator-configurable agency-YouTube channel allowlist (task: media
 -- suggestion engine — YouTube source).
 --

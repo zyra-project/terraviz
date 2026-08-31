@@ -105,6 +105,7 @@ TypeScript SPA built with Vite and MapLibre GL JS. Deployed on Cloudflare Pages 
 npm run dev          # dev server (localhost:5173)
 npm run build        # tokens + tsc + vite build
 npm run type-check   # tsc --noEmit (must pass before committing)
+npm run check:license -- --fix   # insert the SPDX header into new files
 npm run test         # vitest run
 npm run tokens       # regenerate src/styles/tokens.css from tokens/*.json
 npm run setup        # provision a self-hosted node (plan by default)
@@ -285,7 +286,7 @@ npm run screenshots:smoke   # gating interaction tests (search, Orbit, nav)
 | `src/ui/publisher/components/sidebar.ts` | Glass-surface left sidebar — grouped section nav (Catalog / Newsroom / Insights / Settings) with a standalone Overview entry, an Events count badge, and a user-identity footer (signed-in user's avatar + name + role + Sign out) |
 | `src/ui/publisher/components/error-card.ts` | Shared error-card renderer used by every portal page |
 | `src/ui/publisher/components/events/match-badge.ts` | Events-tab **Match Badge** primitive — Topic/Time/Geo facet tags + composite %, threshold-toned (`docs/events-tab-handoff/EVENTS_TAB_IMPLEMENTATION_BRIEF.md` §5) |
-| `src/ui/publisher/components/events/events-model.ts` | Events-tab wire types + pure helpers (`AUTO_PAIR_THRESHOLD`, `autoPairTargets`, `compositePercent`, `locatorPoint`, `primaryCategory`) shared by the queue/detail components |
+| `src/ui/publisher/components/events/events-model.ts` | Events-tab wire types + pure helpers (`AUTO_PAIR_THRESHOLD`, `autoPairTargets`, `compositePercent`, `locatorPoint`, `primaryCategory`, `scenarioFamily`) shared by the queue/detail components. `autoPairTargets` pairs at most one scenario variant per family — `scenarioFamily` strips a trailing `SSP2 (Moderate)` / `RCP8.5` so three projections of one field cannot be approved by a single click, while a titled series (`Tsunami Historical Series: Chile - 1960`) is deliberately never grouped |
 | `src/ui/publisher/components/events/dataset-search.ts` | Shared catalog-search helpers for the Events-tab pairing UIs (`loadPublishedDatasets` paginated fetch + `filterDatasetsByTitle`) — used by the new-event drawer's pair pane and the detail pane's "+ Add dataset" control |
 | `src/ui/publisher/components/events/event-queue.ts` | Events-tab Direction A **left master list** — one row per event (status dot + title + `source · N datasets to review`), selection-highlighted |
 | `src/ui/publisher/components/events/media-suggest.ts` | Events-tab **media suggestions** — image-candidate builders for imageless events: the pure NASA Worldview Snapshots source (keyless, public-domain satellite imagery for the event's bbox + date) and the fetched Wikimedia Commons nearby-photos source (geosearch, kept only when public-domain/CC0 — the stored `image_url` carries no attribution field), and the hazard-gated USGS ShakeMap (fdsnws two-step, earthquake events) + NHC forecast-cone (CurrentStorms via the same-origin proxy, storm-name match) sources + the agency-YouTube VIDEO source (via the key-gated `youtube-search` proxy → curator-picked nocookie embed stored on `video_embed_url`, framed by the generated tour); the detail pane's "Use as event image" writes the pick through the review endpoint's `edits.imageUrl` |
@@ -386,6 +387,58 @@ as `i18n-exempt:`.
 - Matching is on the **full repo-relative path**, because the
   backend's route layout repeats basenames across directories
   (multiple `[id].ts`, `manifest.ts`, `publish.ts`).
+
+### Licence headers
+
+Every source file opens with a two-line SPDX header, below any line
+that must come first:
+
+```ts
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+```
+
+`npm run check:license` (in the `type-check` chain) fails CI on a file
+without one. **Never hand-write these across a batch of files** —
+`npm run check:license -- --fix` writes the header in the right comment
+syntax for each kind (`//`, `/* */`, `#`, `<!-- -->`, `--`) and places
+it below a shebang, a doctype, an XML declaration, a PEP 263 coding
+line, or Package.swift's `// swift-tools-version:`. Re-running is safe:
+it repairs a wrong header in place rather than stacking a second one.
+
+Three properties are load-bearing and easy to break by "simplifying"
+the tool:
+
+- **Position, not search.** The two lines are matched at the exact index
+  a prologue leaves free. A check that merely scans the top of a file
+  for the strings passes any file that *talks* about them — which is
+  exactly `scripts/check-license-headers.ts` and its test, the two files
+  a lost header would be least visible in.
+- **The year moves, the holder does not.** `2026-2027` passes; a
+  different holder fails. Loosening the holder makes the check useless
+  for the only drift worth catching.
+- **Untracked files are scanned.** `git ls-files` alone would let a file
+  you have written but not `git add`ed pass locally and fail in CI.
+
+Coverage is every text source kind with a comment syntax. `.json` (no
+comments), `.md` (prose) and `.yml`/`.toml` (configuration — their
+`license` field is checked instead) are out by decision; the reasoning
+is in the tool's header comment, which is the place to read before
+widening or narrowing the set.
+
+The `COPYRIGHT` constant in `scripts/check-license-headers.ts` is the
+single source of truth. The same check verifies `LICENSE`, `NOTICE`,
+`package.json`, `CITATION.cff` and both Cargo manifests still name it,
+so changing the holder is one edit plus a `--fix` rather than a sweep
+nothing verifies. Three generated-and-committed files
+(`public/privacy.html`, `public/setup.html`,
+`schema/catalog-schema.sql`) import `headerFor()` so their generators
+emit the same constant — a literal copy in a generator would re-emit
+the stale header on every run.
+
+Copyright holder and citation credit are separate fields: `CITATION.cff`
+credits the author, `NOTICE` and the headers record the holder. Don't
+collapse them.
 
 ### Architecture graph (`/graphify`)
 
@@ -864,6 +917,23 @@ Tauri v2. Three CI/CD workflows:
 ## Desktop App (Tauri v2)
 
 The desktop app shares 100% of the TypeScript source. Desktop-only behaviour is gated at runtime via `window.__TAURI__`. The `src-tauri/` directory contains the Rust backend.
+
+> **Planned — multi-monitor / LED-sphere output.** A second Tauri
+> webview rendering a projection-correct equirectangular view of the
+> live globe state, for Science On a Sphere installations, domes and
+> projector arrays. Design doc:
+> [`docs/MULTI_MONITOR_PLAN.md`](docs/MULTI_MONITOR_PLAN.md) — **planned,
+> no code yet**, so treat it as intent rather than description.
+>
+> Two things there bind on work you might do first. It needs four
+> capability grants `default.json` does not carry today
+> (`core:webview:allow-create-webview-window`, `core:window:allow-close`,
+> `allow-destroy`, `allow-set-decorations`) — read its §6 before
+> adding any window or webview permission, since the ACL is checked
+> against the *calling* window, not the target. And its §3 delegates
+> playback sync to `computeSiblingSyncCorrection` and the sibling
+> constants in `src/utils/time.ts` rather than restating them, so
+> changing those changes the plan.
 
 ### Rust module map
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Tests for the publisher-API auth middleware.
  *
@@ -295,6 +298,16 @@ describe('featureForPath', () => {
     expect(featureForPath('/api/v1/publish/featured-hero')).toBe('hero')
     // And analytics-export is not swallowed by the analytics prefix.
     expect(featureForPath('/api/v1/publish/analytics-export')).toBeNull()
+  })
+
+  it('gates events/rematch — it is admin-driven, not cron-invoked', () => {
+    // Sits beside the exempt `events/refresh` and is deliberately not
+    // exempt with it. The exemption exists so a GitHub Actions cron
+    // does not go red on a node with events off; rematch is clicked by
+    // an admin on a page that does not render when events is off, so
+    // the plain 403 is right. Asserted here because the route file
+    // cannot show it — a reader there sees no gate at all.
+    expect(featureForPath('/api/v1/publish/events/rematch')).toBe('events')
   })
 
   it('exempts the cron-invoked paths', () => {

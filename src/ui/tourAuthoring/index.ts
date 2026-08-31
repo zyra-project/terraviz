@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Tour-authoring public surface — consumed by `src/main.ts` to
  * detect the `?tourEdit=` URL param and mount the dock.

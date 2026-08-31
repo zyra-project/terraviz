@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- Data-encoded video (docs/DATA_ENCODED_VIDEO_PLAN.md).
 --
 -- Every dataset published so far is a *picture*: the values were

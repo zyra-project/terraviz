@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * The handoff report — every value the operator has to put somewhere
  * this tool cannot reach.

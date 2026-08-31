@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Tests for POST /api/v1/publish/blog/generate — the AI blog-draft
  * endpoint (Phase 3d).

@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0003_renditions.sql — Phase 1a — dataset_renditions.
 --
 -- One row per encoded rendition. Phase 1a leaves this empty for

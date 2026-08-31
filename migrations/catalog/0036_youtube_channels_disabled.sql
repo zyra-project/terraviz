@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- Per-node disable list for the built-in agency-YouTube channels (task:
 -- media suggestion engine — YouTube source).
 --

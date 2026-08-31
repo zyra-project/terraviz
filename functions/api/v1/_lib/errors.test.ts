@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Tests for the typed-error helpers in `errors.ts`. The
  * `safeErrorReason` reducer is the security-relevant piece: it is

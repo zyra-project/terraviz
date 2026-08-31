@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 // Service Worker — cache-first strategy for static GIBS tiles and textures.
 // These assets never change (Blue Marble 2004, Black Marble 2016), so we cache
 // indefinitely and serve from cache on every subsequent request.

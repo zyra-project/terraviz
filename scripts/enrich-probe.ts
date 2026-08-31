@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Pre-merge probe for the slice-C AI date/location enrichment
  * (`functions/api/v1/_lib/events-enrich.ts`).

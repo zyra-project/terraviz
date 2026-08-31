@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Shared types + pure helpers for the Events-tab redesign
  * (`docs/events-tab-handoff/EVENTS_TAB_IMPLEMENTATION_BRIEF.md`). The
@@ -85,8 +88,21 @@ export interface EventsResponse {
  * Composite match ≥ this percent (display scale) is auto-suggested as
  * paired when the curator approves the event; the rest stay "suggested"
  * for a manual look. Single named constant per the brief §5.
+ *
+ * **This number is scale-dependent and has to be re-measured whenever
+ * the matcher's scoring changes.** It was 90 against the old saturating
+ * topical score, which pinned about a quarter of the catalogue at
+ * exactly 1.0 and fired this shortcut on all 118 events then in the
+ * queue. After the switch to an IDF-weighted cosine, a re-score of the
+ * live catalogue put 3 links out of 3,355 at or above 0.90 — so 90 had
+ * quietly retired the very shortcut it exists to enable.
+ *
+ * 80 catches 56 of those 3,355. The next rung down, 70, catches 469 —
+ * roughly one scored link in seven, which is too many to hand to a
+ * single click on a control whose whole promise is that the curator
+ * need not look. Selective, not decorative, is the bar.
  */
-export const AUTO_PAIR_THRESHOLD = 90
+export const AUTO_PAIR_THRESHOLD = 80
 
 /** Composite match for a link on the display 0–100 scale (or null). */
 export function compositePercent(link: ReviewLink): number | null {
@@ -94,21 +110,79 @@ export function compositePercent(link: ReviewLink): number | null {
 }
 
 /**
- * The dataset ids that "Approve all ≥90%" should pair: still-proposed
+ * A dataset title with a trailing climate-scenario qualifier removed, or
+ * null when it has none.
+ *
+ * Scenario variants of one field — `Climate Model - Sea Ice
+ * Concentration: SSP1 (Low)` / `SSP2 (Moderate)` / `SSP5 (Very High)` —
+ * are the same globe three times to a viewer. They also score
+ * identically against an event, so they clear any threshold together.
+ *
+ * Deliberately narrow. Grouping on the text before a colon would be
+ * catalogue-agnostic and wrong: it collapses `Tsunami Historical
+ * Series: Chile - 1960` with `… Japan - 2011`, which are eight distinct
+ * events a curator may well want individually. Nothing lexical
+ * separates "same field, different scenario" from "same series,
+ * different event" — only the scenario vocabulary does, so that is what
+ * this matches. Against the live 180-row catalogue it groups exactly
+ * the 12 SSP datasets into 4 families and leaves everything else alone.
+ */
+export function scenarioFamily(title: string | null | undefined): string | null {
+  if (!title) return null
+  const stem = title.replace(SCENARIO_SUFFIX, '')
+  if (stem === title) return null
+  const trimmed = stem.replace(/[\s:\-–—]+$/, '').trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+/** Trailing `SSP2 (Moderate)` / `RCP8.5` and the separator before it. */
+const SCENARIO_SUFFIX = /[\s:\-–—]*\b(?:SSP|RCP)\s*\d+(?:\.\d+)?\b(?:\s*\([^)]*\))?\s*$/i
+
+/**
+ * The dataset ids the bulk-approve control should pair: still-proposed
  * links whose composite clears {@link AUTO_PAIR_THRESHOLD}. Already
  * approved/rejected links are left as-is; null-composite links never
  * auto-pair (a human decides).
+ *
+ * At most one scenario variant per family is returned — the
+ * highest-scoring, ties broken on dataset id so the choice is stable.
+ * Measured against 118 real NASA EONET events, 36 of the 45 links this
+ * shortcut would pair were three SSP siblings clearing together on 12
+ * sea-ice events, so one click paired three near-identical projections
+ * of one field. The others stay `proposed` rather than being rejected:
+ * a curator who wants a second scenario can still pair it by hand. The
+ * shortcut gets more conservative; nobody loses a choice.
  */
 export function autoPairTargets(
   event: Pick<ReviewEvent, 'links'>,
   threshold: number = AUTO_PAIR_THRESHOLD,
 ): string[] {
-  return event.links
+  const eligible = event.links
     .filter(l => l.status === 'proposed')
     // Compare the RAW 0–1 score against the threshold, not the rounded
     // display percent — an approval shortcut must be conservative, so a
-    // link at 0.895 (rounds to 90) stays below a 90% threshold.
+    // link at 0.795 (rounds to 80) stays below an 80% threshold.
     .filter(l => l.score != null && Number.isFinite(l.score) && l.score >= threshold / 100)
+
+  const bestOfFamily = new Map<string, ReviewLink>()
+  for (const link of eligible) {
+    const family = scenarioFamily(link.datasetTitle)
+    if (family === null) continue
+    const held = bestOfFamily.get(family)
+    if (
+      !held ||
+      (link.score ?? 0) > (held.score ?? 0) ||
+      ((link.score ?? 0) === (held.score ?? 0) && link.datasetId < held.datasetId)
+    ) {
+      bestOfFamily.set(family, link)
+    }
+  }
+
+  return eligible
+    .filter(l => {
+      const family = scenarioFamily(l.datasetTitle)
+      return family === null || bestOfFamily.get(family) === l
+    })
     .map(l => l.datasetId)
 }
 

@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0006_asset_uploads.sql — Phase 1b — pending asset-upload tracking.
 --
 -- Tracks the lifecycle of every browser/CLI upload from "we minted a

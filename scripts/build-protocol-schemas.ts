@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Protocol schema generator — pins the PUBLIC wire contract as
  * versioned JSON Schema.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 // doc-exempt: test infrastructure, not an app module — same category as
 // test-setup.ts, which check-doc-coverage excludes by name.
 

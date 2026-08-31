@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The Zyra Project
+
 # SessionStart hook: surface planning docs whose `Last reviewed:` date
 # has aged out, before their directives get applied.
 #

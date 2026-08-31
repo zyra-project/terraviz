@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 /**
  * Regression test for the D1 bind-variable cliff in `getDecorations`.
  *

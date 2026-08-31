@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Zyra Project
+
 //! Tauri Plugin: Apple Intelligence
 //!
 //! Bridges Apple's Foundation Models framework (iOS 26+ / macOS 26+) into the

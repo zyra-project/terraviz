@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
 -- 0039_publisher_roles_five.sql — canonical five-role names.
 --
 -- Renames the two legacy publisher role strings to their canonical
