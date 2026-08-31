@@ -211,3 +211,44 @@ describeUpstream('the committed wrangler.toml (upstream only)', () => {
     expect(config).toContain(UPSTREAM_PINNED_IDS.catalogKv)
   })
 })
+
+/**
+ * Fork repo hygiene — the mirror image of the block above.
+ *
+ * Phase 3 of the install guide repoints these four bindings at the
+ * fork's own resources and says the result "diverges from upstream,
+ * permanently. That is the intended end state, not drift to be
+ * tidied up." Every sync from upstream therefore has to preserve
+ * them, and the failure mode is silent: a merge that resolves this
+ * file in upstream's favour leaves a fork that builds, deploys, and
+ * runs `wrangler d1 migrations apply` against *upstream's* database.
+ *
+ * The upstream block cannot catch that — it is skipped precisely
+ * where this matters. So the fork asserts the negative: no binding
+ * still names an upstream ID.
+ *
+ * Gated the same narrow way, and for the same reason: assert only
+ * where we can prove which repo we are. A bare "not upstream" would
+ * fire on a fresh fork that has not reached Phase 3 yet, which is
+ * the complaint the block above exists to remember.
+ */
+const FORK_REPO = 'noaa-gsl/terraviz'
+const onFork = slug === FORK_REPO
+
+const describeFork = onFork ? describe : describe.skip
+
+describeFork('the committed wrangler.toml (this fork only)', () => {
+  it('has not been repointed back at upstream by a sync', () => {
+    const pinned = stillPinnedUpstream(realConfig())
+    expect(
+      pinned,
+      pinned.length === 0
+        ? ''
+        : `${pinned.join(', ')} still name upstream's resources. A merge from `
+          + 'upstream resolved wrangler.toml the wrong way. Restore this '
+          + "fork's IDs (git log -- wrangler.toml, or npm run setup -- "
+          + '--apply --only=wrangler-toml) before deploying or running '
+          + 'migrations — they would otherwise target upstream.',
+    ).toEqual([])
+  })
+})
