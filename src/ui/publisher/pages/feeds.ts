@@ -664,11 +664,23 @@ function renderConsole(
   // a scoring change leaves every event its feed has already dropped
   // holding a score no code produces any more. This walks them.
   const rematchStatus = el('p', { className: 'publisher-feeds-status', role: 'status' })
-  // Survives across clicks on purpose: when the walk stops at its page
-  // cap it says "run again to continue", and a cursor scoped to the
-  // click handler would restart at the beginning instead — the message
-  // would be a lie and the tail of a long backlog unreachable.
+  // Survives across clicks on purpose: a walk that stops early — the
+  // page cap, or a failed request when the tab is backgrounded — says
+  // "run again to continue", and a cursor scoped to the click handler
+  // would restart at the beginning instead, making the message a lie
+  // and the tail of a long backlog unreachable.
+  //
+  // The totals live out here WITH the cursor because they are one piece
+  // of state. Scoping them to the click while the cursor outlived it
+  // meant a resumed walk counted only the resumed part and then
+  // reported it as a total: a run interrupted at 150 of 821 and
+  // restarted announced "Re-scored 671 of 671 events", which reads as
+  // the whole catalogue and was not. Reset happens where the cursor
+  // rewinds, so the two can never disagree again.
   let rematchCursor: string | null = null
+  let rematchScanned = 0
+  let rematchRescored = 0
+  let rematchFailed = 0
   const rematchBtn = el('button', {
     // Stable handle for the smoke check: the label is i18n copy and a
     // reworded string should not fail a structural assertion.
@@ -689,17 +701,14 @@ function renderConsole(
     // guarantees forward progress, but a client loop against a remote
     // endpoint should never be able to spin without bound.
     const MAX_PAGES = 200
-    let scanned = 0
-    let rescored = 0
-    let failed = 0
 
     const step = (pages: number): void => {
       if (pages > MAX_PAGES) {
         rematchBtn.disabled = false
         rematchStatus.textContent = t('publisher.feeds.rematch.partial', {
-          scanned: String(scanned),
-          rescored: String(rescored),
-          failed: String(failed),
+          scanned: String(rematchScanned),
+          rescored: String(rematchRescored),
+          failed: String(rematchFailed),
         })
         return
       }
@@ -714,28 +723,40 @@ function renderConsole(
         { method: 'POST', fetchFn: options.fetchFn },
       ).then(res => {
         if (!res.ok) {
+          // The cursor is deliberately kept, so clicking again resumes.
+          // Say so: a backgrounded tab drops an in-flight page, and a
+          // bare "could not re-score" reads as "nothing happened" when
+          // hundreds of events may already be done.
           rematchBtn.disabled = false
           rematchStatus.classList.add('publisher-feeds-status-error')
-          rematchStatus.textContent = t('publisher.feeds.rematch.error')
+          rematchStatus.textContent =
+            rematchScanned > 0
+              ? t('publisher.feeds.rematch.errorResumable', { scanned: String(rematchScanned) })
+              : t('publisher.feeds.rematch.error')
           return
         }
-        scanned += res.data.scanned
-        rescored += res.data.rescored
-        failed += res.data.failed
+        rematchScanned += res.data.scanned
+        rematchRescored += res.data.rescored
+        rematchFailed += res.data.failed
         if (res.data.done) {
-          // Finished: rewind, so a later click re-scores from the top
-          // rather than resuming past the end and reporting nothing.
-          rematchCursor = null
-          rematchBtn.disabled = false
-          rematchStatus.textContent = t('publisher.feeds.rematch.done', {
-            scanned: String(scanned),
-            rescored: String(rescored),
-            failed: String(failed),
+          // Finished: rewind cursor and totals together, so a later
+          // click re-scores from the top rather than resuming past the
+          // end, and counts from zero rather than adding to this run.
+          const summary = t('publisher.feeds.rematch.done', {
+            scanned: String(rematchScanned),
+            rescored: String(rematchRescored),
+            failed: String(rematchFailed),
           })
+          rematchCursor = null
+          rematchScanned = 0
+          rematchRescored = 0
+          rematchFailed = 0
+          rematchBtn.disabled = false
+          rematchStatus.textContent = summary
           return
         }
         // Progress between pages, so a long backlog doesn't look hung.
-        rematchStatus.textContent = t('publisher.feeds.rematch.progress', { scanned: String(scanned) })
+        rematchStatus.textContent = t('publisher.feeds.rematch.progress', { scanned: String(rematchScanned) })
         rematchCursor = res.data.nextCursor
         step(pages + 1)
       })

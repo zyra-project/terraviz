@@ -511,6 +511,51 @@ describe('renderFeedsPage', () => {
       expect(JSON.parse(String((calls()[before][1] as RequestInit).body))).toEqual({ unscoredOnly: false })
     })
 
+    it('a resumed walk reports the cumulative total, not just the resumed part', async () => {
+      // The exact sequence that misreported in production: a page fails
+      // mid-walk (a backgrounded tab drops the request), the operator
+      // clicks again, and the walk resumes from the kept cursor. The
+      // totals must span both attempts — scoping them to the click
+      // while the cursor outlived it announced the resumed part as if
+      // it were the whole catalogue.
+      const page = (scanned: number, cursor: string | null, done: boolean) => ({
+        body: { scanned, rescored: scanned, failed: 0, failedIds: [], nextCursor: cursor, done },
+      })
+      const fetchFn = rematchFetch([
+        page(25, 'EVT025', false),
+        { status: 500, body: { error: 'server' } }, // tab backgrounded
+        page(25, 'EVT050', false),
+        page(10, null, true),
+      ])
+      await clickRematch(fetchFn)
+      await until(() => (mount.textContent ?? '').includes('Stopped after'), 'the interrupted run to report')
+      // It says what was kept, not that nothing happened.
+      expect(mount.textContent).toContain('Stopped after 25 events')
+
+      const btn = mount.querySelector('#feeds-rematch-run') as HTMLButtonElement
+      expect(btn.disabled).toBe(false)
+      btn.click()
+      await until(() => (mount.textContent ?? '').includes('Re-scored'), 'the resumed run to finish')
+
+      // 25 before the failure + 35 after = 60, not the 35 this run saw.
+      expect(mount.textContent).toContain('Re-scored 60 of 60 events')
+    })
+
+    it('a completed walk resets the totals, so the next run does not inherit them', async () => {
+      const page = (scanned: number, done: boolean) => ({
+        body: { scanned, rescored: scanned, failed: 0, failedIds: [], nextCursor: done ? null : 'EVT025', done },
+      })
+      const fetchFn = rematchFetch([page(5, true), page(7, true)])
+      await clickRematch(fetchFn)
+      await until(() => (mount.textContent ?? '').includes('Re-scored'), 'the first walk')
+      expect(mount.textContent).toContain('Re-scored 5 of 5 events')
+
+      const btn = mount.querySelector('#feeds-rematch-run') as HTMLButtonElement
+      btn.click()
+      await until(() => (mount.textContent ?? '').includes('Re-scored 7'), 'the second walk')
+      expect(mount.textContent).toContain('Re-scored 7 of 7 events')
+    })
+
     it('surfaces a failure and re-enables the button', async () => {
       const fetchFn = rematchFetch([{ status: 500, body: { error: 'server' } }])
       await clickRematch(fetchFn)

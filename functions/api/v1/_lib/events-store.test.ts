@@ -297,6 +297,37 @@ describe('link provenance (0045)', () => {
     expect(link.scorer_version).toBe('test-v2')
   })
 
+  it('fills an unknown source but never overwrites a known one', async () => {
+    // Set only on insert, `source` never populated on a live node: every
+    // write to an existing pair takes the conflict branch. A full
+    // re-score left 10,755 links with source NULL and scorer_version
+    // set — the sweep the column exists for could not have run.
+    const { db } = freshDb()
+    const { id: eventId } = await insertCurrentEvent(db, sampleEvent())
+    const unknown = seededDatasetId(0)
+    const known = seededDatasetId(1)
+
+    // A pre-0045 row: exists, no provenance.
+    await db
+      .prepare(
+        `INSERT INTO event_dataset_links (event_id, dataset_id, match_score, status, created_at)
+         VALUES (?, ?, 0.5, 'proposed', 't')`,
+      )
+      .bind(eventId, unknown)
+      .run()
+    // And a row whose provenance is already recorded.
+    await insertProposedLinkIfAbsent(db, eventId, known)
+
+    await upsertEventDatasetLink(db, { eventId, datasetId: unknown, matchScore: 0.7, source: 'matcher' })
+    await upsertEventDatasetLink(db, { eventId, datasetId: known, matchScore: 0.7, source: 'matcher' })
+
+    const links = await listLinksForEvent(db, eventId)
+    // Unknown gets labelled...
+    expect(links.find(l => l.dataset_id === unknown)!.source).toBe('matcher')
+    // ...and a curator's own choice is still never claimed.
+    expect(links.find(l => l.dataset_id === known)!.source).toBe('curator')
+  })
+
   it('never clears a version the caller did not supply', async () => {
     // The defect: a caller that upserts without scoring (the ingest
     // path's hand-pick seed used to) set scorer_version = NULL on a row

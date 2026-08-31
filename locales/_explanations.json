@@ -179,6 +179,7 @@
   "publisher.feeds.lastRun.error": "Feed-row status line when the last ingest attempt failed. Preserve {detail} (a short technical failure description).",
   "publisher.feeds.lastRun.ok": "Feed-row status line after a successful ingest. Preserve {when} (a date-time string).",
   "publisher.feeds.rematch.done": "{rescored} of {scanned} events were re-scored; {failed} could not be. Keep all three placeholders.",
+  "publisher.feeds.rematch.errorResumable": "Shown when re-scoring fails partway through — commonly because the tab was backgrounded and dropped a request. {scanned} is how many events were already done; progress is kept and running again resumes from there rather than restarting. Keep the placeholder.",
   "publisher.feeds.rematch.partial": "Shown when the client stops paging at its safety limit before the server said it was finished. Keep all three placeholders.",
   "publisher.feeds.rematch.progress": "{scanned} is a running count across several server requests; the work is paged. Keep the placeholder.",
   "publisher.feeds.runDone": "Summary after running all enabled feeds. Preserve {created}, {refreshed}, and {failed} (counts).",

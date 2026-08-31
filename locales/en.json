@@ -1347,6 +1347,7 @@
   "publisher.feeds.rematch.action": "Re-score events now",
   "publisher.feeds.rematch.done": "Re-scored {rescored} of {scanned} events. {failed} failed.",
   "publisher.feeds.rematch.error": "Could not re-score events.",
+  "publisher.feeds.rematch.errorResumable": "Stopped after {scanned} events — the rest are still to do. Run it again to continue from there.",
   "publisher.feeds.rematch.intro": "Events are scored against the catalog when they arrive, and again if you edit their date or location. After a scoring change, events their feed has already dropped keep the old scores until you re-score them here. Safe to run at any time; it never changes a pairing you have approved or rejected.",
   "publisher.feeds.rematch.partial": "Stopped after re-scoring {rescored} of {scanned} events ({failed} failed). Run again to continue.",
   "publisher.feeds.rematch.progress": "Re-scoring… {scanned} events so far.",
