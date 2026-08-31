@@ -16,6 +16,7 @@ import {
   bboxOverlap,
   DEFAULT_VARIETY_WEIGHT,
   orderTourStops,
+  poolWeights,
   stopSimilarity,
   type StopCandidate,
 } from './tour-stop-order'
@@ -166,5 +167,108 @@ describe('stopSimilarity', () => {
   it('scores an empty facet list as no evidence, not as a match', () => {
     const bare = candidate('bare', 1)
     expect(stopSimilarity(bare, bare)).toBe(0)
+  })
+})
+
+describe('poolWeights', () => {
+  const BOX = { n: 10, s: 0, w: 0, e: 10 }
+
+  it('drops a signal no pair can be scored on and redistributes its weight', () => {
+    // A whole-Earth catalogue: categories and keywords everywhere, not
+    // one declared extent. The declared 0.5/0.3/0.2 becomes 0.625/0.375.
+    const w = poolWeights([
+      candidate('a', 1, ['Theme:Ocean'], ['sst']),
+      candidate('b', 1, ['Theme:Land'], ['ndvi']),
+    ])
+    expect(w.bbox).toBe(0)
+    expect(w.category).toBeCloseTo(0.625, 6)
+    expect(w.keyword).toBeCloseTo(0.375, 6)
+    expect(w.category + w.keyword + w.bbox).toBeCloseTo(1, 6)
+  })
+
+  it('keeps the declared proportions when every signal is carried', () => {
+    const w = poolWeights([
+      candidate('a', 1, ['Theme:Ocean'], ['sst'], BOX),
+      candidate('b', 1, ['Theme:Land'], ['ndvi'], BOX),
+    ])
+    expect(w.category).toBeCloseTo(0.5, 6)
+    expect(w.keyword).toBeCloseTo(0.3, 6)
+    expect(w.bbox).toBeCloseTo(0.2, 6)
+  })
+
+  it('needs two carriers, because similarity is pairwise', () => {
+    // One dataset with a box can never be scored against anything, so
+    // the signal is dead however present it looks.
+    const w = poolWeights([
+      candidate('a', 1, ['Theme:Ocean'], ['sst'], BOX),
+      candidate('b', 1, ['Theme:Land'], ['ndvi']),
+    ])
+    expect(w.bbox).toBe(0)
+  })
+
+  it('does not count an antimeridian-wrapping box as a carrier', () => {
+    // bboxOverlap declines to score a wrapping box, so counting it
+    // would reserve weight for a term that can only ever return 0.
+    const wrapping = { n: 10, s: 0, w: 170, e: -170 }
+    const w = poolWeights([
+      candidate('a', 1, ['Theme:Ocean'], ['sst'], wrapping),
+      candidate('b', 1, ['Theme:Land'], ['ndvi'], wrapping),
+    ])
+    expect(w.bbox).toBe(0)
+  })
+
+  it('returns all-zero when the pool carries nothing comparable', () => {
+    const w = poolWeights([candidate('a', 1), candidate('b', 0.5)])
+    expect(w).toEqual({ category: 0, keyword: 0, bbox: 0 })
+  })
+
+  it('identical datasets read as identical on a pool with no extents', () => {
+    // The property the whole change exists for. Under fixed weights a
+    // pair of indistinguishable datasets topped out at 0.8 similarity
+    // on a whole-Earth catalogue, because the bbox term could only
+    // ever contribute 0 — so the maximum possible penalty was 20%
+    // weaker than the same varietyWeight buys on a regional node.
+    const twin = (id: string, bbox: StopCandidate['bbox']): StopCandidate =>
+      candidate(id, 1, ['Theme:Ocean', 'Region:Polar'], ['sst', 'anomaly'], bbox)
+
+    const globalPool = [twin('a', null), twin('b', null)]
+    const globalSim = stopSimilarity(globalPool[0], globalPool[1], poolWeights(globalPool))
+
+    const regionalPool = [twin('a', BOX), twin('b', BOX)]
+    const regionalSim = stopSimilarity(regionalPool[0], regionalPool[1], poolWeights(regionalPool))
+
+    // Both catalogues now agree that indistinguishable is 1.0, which is
+    // what makes varietyWeight portable between them.
+    expect(globalSim).toBeCloseTo(1, 6)
+    expect(regionalSim).toBeCloseTo(1, 6)
+
+    // And the unadapted blend is what it used to be — the 0.8 ceiling
+    // this replaces, kept as the record of what changed.
+    expect(stopSimilarity(globalPool[0], globalPool[1])).toBeCloseTo(0.8, 6)
+  })
+
+  it('orderTourStops uses the pool weights, not the declared ones', () => {
+    // Pins the wiring, which the poolWeights tests above cannot: the
+    // function could compute correct weights and never pass them down.
+    //
+    // Scores normalise to strong 1.0 / twin 0.8 / other 0.0, and `twin`
+    // is indistinguishable from `strong`. At variety 0.45 the second
+    // slot is decided by 0.55*score - 0.45*similarity:
+    //
+    //   adapted (0.625/0.375, no bbox): twin = 0.44 - 0.450 = -0.010
+    //   declared (0.5/0.3/0.2 with a dead bbox term): twin = 0.44 - 0.360 = 0.080
+    //   other, either way:                                   = 0.000
+    //
+    // So the deflated blend keeps the near-duplicate and the adapted
+    // one rejects it — exactly the softened variety this change fixes.
+    const pool = [
+      candidate('strong', 1.0, ['Theme:Ocean'], ['sst']),
+      candidate('twin', 0.9, ['Theme:Ocean'], ['sst']),
+      candidate('other', 0.5, ['Theme:Fire'], ['smoke']),
+    ]
+    expect(orderTourStops(pool, { limit: 2, varietyWeight: DEFAULT_VARIETY_WEIGHT })).toEqual([
+      'strong',
+      'other',
+    ])
   })
 })

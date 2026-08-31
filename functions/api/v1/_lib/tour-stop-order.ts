@@ -106,12 +106,94 @@ export function bboxOverlap(
   return union <= 0 ? 0 : inter / union
 }
 
-/** How alike two candidates look to someone watching them in sequence, 0…1. */
-export function stopSimilarity(a: StopCandidate, b: StopCandidate): number {
+/** The similarity blend's weights, normalised to sum to 1 (or all zero
+ *  when the pool carries no usable signal at all). */
+export interface SimilarityWeights {
+  category: number
+  keyword: number
+  bbox: number
+}
+
+/** The declared weights, for a caller that wants the unadapted blend. */
+export const DEFAULT_SIMILARITY_WEIGHTS: SimilarityWeights = {
+  category: W_CATEGORY,
+  keyword: W_KEYWORD,
+  bbox: W_BBOX,
+}
+
+/** A usable box: present, and not the antimeridian-wrapping case
+ *  {@link bboxOverlap} declines to score. */
+function hasUsableBbox(c: StopCandidate): boolean {
+  return c.bbox !== null && c.bbox.w <= c.bbox.e
+}
+
+/**
+ * The similarity weights this pool can actually support, renormalised
+ * to sum to 1.
+ *
+ * A signal no pair in the pool can be scored on is not a weak signal,
+ * it is an absent one, and leaving its weight in the blend silently
+ * caps every similarity below 1. That matters because
+ * {@link orderTourStops} subtracts `varietyWeight * penalty` from a
+ * match score that IS normalised across the pool: normalising one side
+ * of that subtraction and not the other makes `varietyWeight` mean
+ * different things on different catalogues. On a whole-Earth catalogue
+ * where nothing declares an extent, the bbox term is always 0, so
+ * similarity tops out at 0.8 and variety pushes ~20% softer than the
+ * same constant does on a regional node whose datasets all carry
+ * boxes. Same weight, different sequencer.
+ *
+ * Redistributing here fixes that without configuration: a node keeps
+ * whatever signals its catalogue populates, at their declared
+ * proportions, and the dead ones stop taking up room.
+ *
+ * **Per pool, deliberately — never per pair.** Renormalising for each
+ * pair would make a comparison drawn from one signal look exactly as
+ * confident as one drawn from three, which is the mistake the matcher
+ * already made once and reverted (see `scoreLexical`'s note on
+ * restricting the term set to what the corpus can answer). A single
+ * denominator across the run keeps every pair mutually comparable,
+ * which is all the selection loop needs.
+ *
+ * A signal is live at **two** carriers, not one: similarity is pairwise,
+ * so a lone dataset with a bounding box can never be scored against
+ * anything. Two carriers whose boxes happen not to overlap still score
+ * 0 — but that 0 is evidence they are geographically unrelated, which
+ * is worth having, and is a different thing from having no box at all.
+ */
+export function poolWeights(candidates: readonly StopCandidate[]): SimilarityWeights {
+  let categoryCarriers = 0
+  let keywordCarriers = 0
+  let bboxCarriers = 0
+  for (const c of candidates) {
+    if (c.categories.length > 0) categoryCarriers += 1
+    if (c.keywords.length > 0) keywordCarriers += 1
+    if (hasUsableBbox(c)) bboxCarriers += 1
+  }
+  const category = categoryCarriers >= 2 ? W_CATEGORY : 0
+  const keyword = keywordCarriers >= 2 ? W_KEYWORD : 0
+  const bbox = bboxCarriers >= 2 ? W_BBOX : 0
+  const total = category + keyword + bbox
+  // Nothing to compare on. Every pair scores 0, variety goes inert and
+  // the selection falls back to match order — the honest outcome when
+  // the catalogue gives the sequencer nothing to work with.
+  if (total === 0) return { category: 0, keyword: 0, bbox: 0 }
+  return { category: category / total, keyword: keyword / total, bbox: bbox / total }
+}
+
+/**
+ * How alike two candidates look to someone watching them in sequence,
+ * 0…1, under `weights` — normally {@link poolWeights} for the run.
+ */
+export function stopSimilarity(
+  a: StopCandidate,
+  b: StopCandidate,
+  weights: SimilarityWeights = DEFAULT_SIMILARITY_WEIGHTS,
+): number {
   return (
-    W_CATEGORY * jaccard(a.categories, b.categories) +
-    W_KEYWORD * jaccard(a.keywords, b.keywords) +
-    W_BBOX * bboxOverlap(a.bbox, b.bbox)
+    weights.category * jaccard(a.categories, b.categories) +
+    weights.keyword * jaccard(a.keywords, b.keywords) +
+    weights.bbox * bboxOverlap(a.bbox, b.bbox)
   )
 }
 
@@ -150,6 +232,9 @@ export function orderTourStops(
 
   const variety = Math.min(1, Math.max(0, options.varietyWeight ?? DEFAULT_VARIETY_WEIGHT))
   const score = normalizedScores(candidates)
+  // Computed once for the run: the penalty has to be on the same scale
+  // as the normalised score it is subtracted from.
+  const weights = poolWeights(candidates)
   const byId = new Map(candidates.map(c => [c.id, c]))
   const remaining = [...candidates].sort((a, b) => {
     const delta = (score.get(b.id) ?? 0) - (score.get(a.id) ?? 0)
@@ -166,9 +251,9 @@ export function orderTourStops(
     let bestValue = -Infinity
     for (let i = 0; i < remaining.length; i++) {
       const candidate = remaining[i]
-      const adjacent = stopSimilarity(previous, candidate)
+      const adjacent = stopSimilarity(previous, candidate, weights)
       let total = 0
-      for (const chosen of selected) total += stopSimilarity(chosen, candidate)
+      for (const chosen of selected) total += stopSimilarity(chosen, candidate, weights)
       const mean = total / selected.length
       const penalty = W_ADJACENT * adjacent + W_SELECTED * mean
       const value = (1 - variety) * (score.get(candidate.id) ?? 0) - variety * penalty
