@@ -671,11 +671,27 @@ export async function getEventDecorations(
  * applies to a brand-new link (insert), which defaults to `proposed`;
  * status transitions go through {@link setLinkStatus}.
  *
- * `source` follows the same preservation rule as `status`: it records
- * who created the ROW, so a curator's hand-pick that the matcher later
- * proposes independently stays `'curator'`. Overwriting it would erase
- * the one fact a cleanup sweep needs — that a human chose this pairing —
- * at exactly the moment the row starts looking machine-made.
+ * `source` records who created the ROW, so a curator's hand-pick that
+ * the matcher later proposes independently stays `'curator'`.
+ * Overwriting it would erase the one fact a cleanup sweep needs — that
+ * a human chose this pairing — at exactly the moment the row starts
+ * looking machine-made.
+ *
+ * It fills an UNKNOWN one, though, which is the difference between a
+ * column that works and one that does not. Set only on insert, it never
+ * populated at all: on a node whose links already exist every write
+ * takes this conflict branch, so a full re-score of 10,755 live links
+ * left every single `source` NULL while `scorer_version` filled in —
+ * same rows, same write, one column in the DO UPDATE and one not. The
+ * sweep it exists for could never have run.
+ *
+ * `COALESCE(existing, excluded)` keeps a known provenance and labels an
+ * unknown one. The cost is that a pre-`0045` hand-pick the matcher also
+ * proposes gets stamped `'matcher'` — a real mislabel, but a harmless
+ * one for the purpose: that same write gives the row a score, and the
+ * sweep is `source = 'matcher' AND match_score IS NULL`. The rows at
+ * risk of being mislabelled are exactly the rows it would never
+ * delete.
  *
  * `scorer_version` is refreshed, because unlike `source` it describes
  * the SCORE rather than the row, and the score is what just changed —
@@ -695,6 +711,7 @@ export async function upsertEventDatasetLink(
        ON CONFLICT(event_id, dataset_id) DO UPDATE SET
          match_score    = excluded.match_score,
          signals_json   = excluded.signals_json,
+         source         = COALESCE(event_dataset_links.source, excluded.source),
          scorer_version = COALESCE(excluded.scorer_version, event_dataset_links.scorer_version)`,
     )
     .bind(
