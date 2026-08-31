@@ -146,6 +146,37 @@ Pure transform, no I/O — the shape
 [`catalogGraph.ts`](../src/services/catalogGraph.ts) already follow, and
 directly unit-testable on literal candidates.
 
+**The similarity blend adapts to the catalogue.** Weights are declared
+category 0.50 / keyword 0.30 / bbox 0.20, but a signal no pair in the
+pool can be scored on is an absent signal rather than a weak one, and
+leaving its weight in the blend caps every similarity below 1. That is
+not cosmetic: `orderTourStops` subtracts `varietyWeight × penalty` from
+a match score that *is* normalised across the pool, so normalising one
+side of the subtraction and not the other makes `varietyWeight` mean
+different things on different nodes. Measured on the live catalogue,
+18 of 164 linked datasets declare an extent — both sides carry one in
+roughly 1 pair in 80 — so the geographic term contributed almost nothing
+while holding a fifth of the budget, and variety pushed about 20% softer
+than the same constant buys on a regional node whose datasets all carry
+boxes.
+
+`poolWeights` renormalises over the signals a run's candidates actually
+carry, once per run. A whole-Earth catalogue keeps category and keyword
+at their declared proportions; a regional downstream node keeps all
+three. No configuration, and nothing tuned to one catalogue's shape —
+which matters because TerraViz is built to be forked, and the nodes
+where geography carries the most information are exactly the ones this
+node's data cannot speak for. Deliberately per pool and never per pair:
+renormalising per pair would make a comparison drawn from one signal
+look as confident as one drawn from three, the mistake the matcher made
+and reverted in `scoreLexical`.
+
+**Judging must cover both catalogue shapes.** Tuning the variety weight
+on this node alone would calibrate it for a global corpus and ship it
+wrong for the regional ones. If a downstream catalogue can be
+snapshotted into `scripts/experiments/tour-sequencing/`, both arms
+should be judged against both corpora before a number is chosen.
+
 **Status.** Written and unit-tested, parked on a branch, **not merged**. The
 transform does what it says; what has not happened is the part that would
 justify turning it on — a blind judging pass over real events establishing that
