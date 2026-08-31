@@ -88,8 +88,21 @@ export interface EventsResponse {
  * Composite match ≥ this percent (display scale) is auto-suggested as
  * paired when the curator approves the event; the rest stay "suggested"
  * for a manual look. Single named constant per the brief §5.
+ *
+ * **This number is scale-dependent and has to be re-measured whenever
+ * the matcher's scoring changes.** It was 90 against the old saturating
+ * topical score, which pinned about a quarter of the catalogue at
+ * exactly 1.0 and fired this shortcut on all 118 events then in the
+ * queue. After the switch to an IDF-weighted cosine, a re-score of the
+ * live catalogue put 3 links out of 3,355 at or above 0.90 — so 90 had
+ * quietly retired the very shortcut it exists to enable.
+ *
+ * 80 catches 56 of those 3,355. The next rung down, 70, catches 469 —
+ * roughly one scored link in seven, which is too many to hand to a
+ * single click on a control whose whole promise is that the curator
+ * need not look. Selective, not decorative, is the bar.
  */
-export const AUTO_PAIR_THRESHOLD = 90
+export const AUTO_PAIR_THRESHOLD = 80
 
 /** Composite match for a link on the display 0–100 scale (or null). */
 export function compositePercent(link: ReviewLink): number | null {
@@ -126,7 +139,7 @@ export function scenarioFamily(title: string | null | undefined): string | null 
 const SCENARIO_SUFFIX = /[\s:\-–—]*\b(?:SSP|RCP)\s*\d+(?:\.\d+)?\b(?:\s*\([^)]*\))?\s*$/i
 
 /**
- * The dataset ids that "Approve all ≥90%" should pair: still-proposed
+ * The dataset ids the bulk-approve control should pair: still-proposed
  * links whose composite clears {@link AUTO_PAIR_THRESHOLD}. Already
  * approved/rejected links are left as-is; null-composite links never
  * auto-pair (a human decides).
@@ -148,7 +161,7 @@ export function autoPairTargets(
     .filter(l => l.status === 'proposed')
     // Compare the RAW 0–1 score against the threshold, not the rounded
     // display percent — an approval shortcut must be conservative, so a
-    // link at 0.895 (rounds to 90) stays below a 90% threshold.
+    // link at 0.795 (rounds to 80) stays below an 80% threshold.
     .filter(l => l.score != null && Number.isFinite(l.score) && l.score >= threshold / 100)
 
   const bestOfFamily = new Map<string, ReviewLink>()

@@ -9,7 +9,8 @@
  *   - **Event level** (the heavy decision): "Surface this event?" with a
  *     primary **Approve** + danger **Reject** — the most prominent block.
  *   - **Dataset level** (lighter): per-pairing ✓ / ✕ icon buttons, plus a
- *     **"Approve all ≥90%"** bulk action over the auto-pair set.
+ *     **bulk approve** action over the auto-pair set (the label
+ *     carries the live {@link AUTO_PAIR_THRESHOLD}).
  *
  * Both post to `POST /api/v1/publish/events/:id` (`{ event }` /
  * `{ links: [...] }`). A live MapLibre locator mounts into the
@@ -26,6 +27,7 @@ import { loadPublishedDatasets, filterDatasetsByTitle } from './dataset-search'
 import type { PublisherDataset } from '../../types'
 import {
   autoPairTargets,
+  AUTO_PAIR_THRESHOLD,
   locatorPoint,
   type EventStatus,
   type LinkStatus,
@@ -823,10 +825,13 @@ export function renderEventDetail(event: ReviewEvent, cb: EventDetailCallbacks):
     const bulkBtn = document.createElement('button')
     bulkBtn.type = 'button'
     bulkBtn.className = 'publisher-button publisher-button-small publisher-events-bulk-btn'
-    bulkBtn.textContent = t('publisher.events.bulkApprove', { count: String(targets.length) })
+    bulkBtn.textContent = t('publisher.events.bulkApprove', {
+      threshold: String(AUTO_PAIR_THRESHOLD),
+      count: String(targets.length),
+    })
     bulkBtn.addEventListener('click', () => {
       // Recompute against the live link statuses: a curator may have
-      // rejected a ≥90% link since render, and that decision must win.
+      // rejected an auto-pairable link since render, and that decision must win.
       const current = autoPairTargets(event)
       if (current.length === 0) {
         bulkBtn.remove()
