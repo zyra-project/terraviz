@@ -24,7 +24,7 @@ import {
   findEventByExternal,
   updateCurrentEventContent,
   insertCurrentEvent,
-  upsertEventDatasetLink,
+  insertProposedLinkIfAbsent,
   type CurrentEventRow,
   type EventGeometry,
   type NewCurrentEvent,
@@ -363,9 +363,17 @@ export async function ingestEvent(
 
   // Seed the hand-picked pairings before the matcher so an overlapping
   // dataset's link is refreshed (not clobbered) with real signals.
+  //
+  // `insertProposedLinkIfAbsent`, not the matcher's upsert: these are
+  // the drawer's hand-picks, so they must be stamped `source:
+  // 'curator'`, and an existing row must be left entirely alone. The
+  // upsert used to be called here with neither a score nor a version,
+  // which on a row the matcher had already scored cleared both — the
+  // ordering comment above is the workaround that repaired it on the
+  // next line. Inserting-if-absent removes the need for the repair.
   const manualIds = await filterVisibleDatasetIds(db, opts.manualDatasetIds ?? [])
   for (const datasetId of manualIds) {
-    await upsertEventDatasetLink(db, { eventId: id, datasetId, status: 'proposed' })
+    await insertProposedLinkIfAbsent(db, id, datasetId)
   }
 
   const matches = await runMatcherForEvent(db, id, { env: opts.env })

@@ -66,6 +66,29 @@ import { queryEmbedding, VECTORIZE_MAX_TOP_K, type VectorizeEnv } from './vector
  *  `search-datasets.ts`'s `SearchDatasetsEnv`. */
 export type MatcherEnv = EmbeddingEnv & VectorizeEnv
 
+/**
+ * Identifies the scoring build that produced a stored `match_score`,
+ * written to `event_dataset_links.scorer_version`.
+ *
+ * **Bump this whenever a change would move existing scores** — the
+ * topical formula, the signal blend, `LEXICAL_REFERENCE`, the topic
+ * expansions, the semantic weight. Not for a refactor that cannot move
+ * a number.
+ *
+ * It exists because migration `0044` had to clear every score in the
+ * table: nothing recorded which formula produced which value, so
+ * changing one scorer meant discarding all of them, and every event
+ * whose feed had dropped it then sat unscored until someone re-ran the
+ * matcher by hand. With a version stamped per row, a future change
+ * invalidates only what it invalidates.
+ *
+ * A date-ish string rather than an integer so the value carries meaning
+ * on sight. Compared for equality and set membership, never ordered —
+ * ordering opaque build strings is a trap, and 'unversioned' rows
+ * (everything predating `0045`) have no place in such an order anyway.
+ */
+export const SCORER_VERSION = '2026.08-idf-phrases'
+
 /** Default minimum combined score for a proposed link. */
 export const DEFAULT_MIN_SCORE = 0.5
 
@@ -820,6 +843,8 @@ export async function runMatcherForEvent(
         matchScore: m.score,
         signals: m.signals,
         status: 'proposed',
+        source: 'matcher',
+        scorerVersion: SCORER_VERSION,
       },
       stamp,
     )

@@ -1,0 +1,72 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright 2026 The Zyra Project
+
+-- Where an event-dataset link came from, and which scorer produced its
+-- score.
+--
+-- `event_dataset_links` records what a link *is* and nothing about
+-- where it came from, and two separate problems trace back to that
+-- single gap.
+--
+-- The first is cleanup. A curator's hand-picked pairing is written by
+-- `insertProposedLinkIfAbsent` with a NULL `match_score` — deliberately,
+-- because it is a human decision rather than a matcher output — and a
+-- matcher proposal the current formula no longer endorses also sits at
+-- NULL, because `runMatcherForEvent` upserts what it proposes and never
+-- retires what it does not. On the live node those are 7,361 rows that
+-- nothing can safely distinguish: the obvious "delete the unscored
+-- proposals" sweep would take out hand-picks nobody has reviewed yet.
+--
+-- The second is invalidation. Migration `0044` had to clear every score
+-- in the table because nothing recorded which formula produced which
+-- value, so a change to one scorer meant discarding the work of all of
+-- them. That is the blunt instrument this column replaces: a future
+-- scoring change can invalidate the versions it actually
+-- supersedes — `scorer_version IN (…)`, or `IS NOT 'the-new-one'` —
+-- and leave the rest. Not `< N`: these are opaque build strings, and
+-- the constant's own docstring says never to order them.
+--
+--   source          TEXT — 'matcher' | 'curator'. Who created the ROW,
+--                          not who last touched it. A curator's pick
+--                          that the matcher later also proposes stays
+--                          'curator': the upsert refreshes the score and
+--                          leaves provenance alone, the same way it
+--                          already leaves `status` and `created_at`.
+--
+--   scorer_version  TEXT — the matcher build that wrote `match_score`,
+--                          or NULL when no matcher has scored the row.
+--                          TEXT rather than INTEGER so a version can
+--                          carry meaning ('2026.08-idf') rather than
+--                          being a number nobody can decode two years
+--                          on. Compared for equality and set membership,
+--                          never ordered — an ordering over opaque build
+--                          strings would be a trap.
+--
+-- **No backfill, and none is possible.** Every existing row gets NULL on
+-- both columns, which is the honest state: nothing in the data says
+-- whether a given unscored link came from a curator or a retired
+-- proposal, and inventing a guess (say, from `created_at` clustering)
+-- would make a destructive sweep look safe on evidence that does not
+-- support it. So this does not retroactively rescue the 7,361 already
+-- there — it stops the next 7,361 accumulating, and from here a sweep
+-- keyed on `source = 'matcher'` is sound.
+--
+-- One cosmetic consequence, called out because the repo documents the
+-- hazard elsewhere and this migration is what triggers it here. SQLite
+-- splices an added column onto the last column-def line of the stored
+-- CREATE TABLE text, so in the regenerated `schema/catalog-schema.sql`
+-- snapshot these two columns land on `approved_by`'s line and its
+-- trailing `-- publishers.id (audit)` comment now reads as if it
+-- documented `scorer_version`. It does not. `0028` and `0036` avoid
+-- this by putting the last column's comment on the line above; `0024`
+-- did not, and that cannot be corrected now — rewriting an applied
+-- migration's text would change the CREATE TABLE text on a fresh node
+-- while leaving every existing one alone, so the snapshot would stop
+-- describing the nodes that matter.
+--
+-- Additive, nullable, no default, no index — neither column is a query
+-- predicate today, and both are read only as part of a row already
+-- selected by its primary key.
+
+ALTER TABLE event_dataset_links ADD COLUMN source TEXT;
+ALTER TABLE event_dataset_links ADD COLUMN scorer_version TEXT;

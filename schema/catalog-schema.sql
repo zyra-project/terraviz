@@ -358,7 +358,7 @@ CREATE TABLE event_dataset_links (
   status       TEXT NOT NULL DEFAULT 'proposed', -- proposed | approved | rejected
   created_at   TEXT NOT NULL,                   -- ISO 8601
   approved_at  TEXT,                            -- ISO 8601, null until approved
-  approved_by  TEXT,                            -- publishers.id (audit)
+  approved_by  TEXT, source TEXT, scorer_version TEXT,                            -- publishers.id (audit)
   PRIMARY KEY (event_id, dataset_id),
   FOREIGN KEY (event_id)    REFERENCES current_events(id) ON DELETE CASCADE,
   FOREIGN KEY (dataset_id)  REFERENCES datasets(id)       ON DELETE CASCADE,
