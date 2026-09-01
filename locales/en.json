@@ -965,6 +965,7 @@
   "publisher.datasetForm.encoding.colorScaleInvalid": "This is not a valid colour scale. It needs at least two stops and a vmin and vmax that differ.",
   "publisher.datasetForm.encoding.colorScaleLabel": "Colour scale (JSON)",
   "publisher.datasetForm.encoding.colorScalePlaceholder": "Paste the color_scale.json produced alongside the video",
+  "publisher.datasetForm.encoding.colorScaleReadable": "Viewers see this as {vmin} to {vmax} {units} — the same values, restated so the legend reads without leading zeros.",
   "publisher.datasetForm.encoding.colorScaleRequired": "A colour scale is required for a data-encoded video — without it the values cannot be read back.",
   "publisher.datasetForm.encoding.colorScaleValid": "Valid: {stops} stops, {vmin} to {vmax} {units}.",
   "publisher.datasetForm.encoding.dataEncodedHelp": "Choose this before uploading. Brightness carries the measured value rather than a colour, so the globe can show real numbers on hover and you can re-colour the dataset without re-encoding it. Changing this after the video is processed will not re-process it.",

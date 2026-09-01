@@ -6,8 +6,9 @@
  */
 
 import type { ColorScale, RenderEncoding } from './color-scale'
+import type { DisplayColorScale } from './unit-scale'
 
-export type { ColorScale, RenderEncoding }
+export type { ColorScale, DisplayColorScale, RenderEncoding }
 
 /**
  * Supported dataset formats.
@@ -165,7 +166,7 @@ export interface Dataset {
   /** Palette + scale for a `data-luma` dataset. Present only
    * alongside `renderEncoding`; both are dropped together if
    * either is missing or the sidecar fails to parse. */
-  colorScale?: ColorScale
+  colorScale?: DisplayColorScale
 
   // Enriched metadata (from sos_dataset_metadata.json cross-reference)
   enriched?: EnrichedMetadata
@@ -380,7 +381,7 @@ export interface DatasetOverlayOptions {
    *  means the texture is already a picture and is drawn as-is.
    *  This is the field that carries data-encoded mode to all four
    *  render surfaces. */
-  colorScale?: ColorScale
+  colorScale?: DisplayColorScale
   /** Which dataset these options were built from.
    *
    *  Carried so a *frame* can say what it is, rather than a reader
