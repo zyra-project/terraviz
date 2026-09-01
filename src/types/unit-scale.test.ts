@@ -110,6 +110,20 @@ describe('chooseUnitRescale', () => {
     expect(chooseUnitRescale('kg2 m-3', 2e-7)).toBeNull()
   })
 
+  it('survives the stray whitespace of a hand-pasted sidecar', () => {
+    // A sidecar is JSON somebody pasted into a textarea, and a leading
+    // space is invisible there. Untrimmed it made the restatement
+    // silently not happen — indistinguishable from a unit no prefix
+    // attaches to — and a trailing one rode into the emitted label.
+    for (const units of [' kg m-3', 'kg m-3 ', '  kg m-3  ']) {
+      expect(chooseUnitRescale(units, 2e-7), JSON.stringify(units))
+        .toEqual({ shift: 9, units: 'µg m-3' })
+    }
+    // Whitespace does not turn a refusal into an acceptance.
+    expect(chooseUnitRescale('   ', 2e-7)).toBeNull()
+    expect(chooseUnitRescale('min ', 2e-7)).toBeNull()
+  })
+
   it('refuses a string that does not start with a factor', () => {
     expect(chooseUnitRescale('/m3', 2e-7)).toBeNull()
     expect(chooseUnitRescale('per m3', 2e-7)).toBeNull()

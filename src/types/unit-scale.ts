@@ -174,8 +174,14 @@ export function shiftDecimalExponent(value: number, shift: number): number {
  * refusal for anything whose shape this module does not understand.
  */
 function splitLeadingFactor(units: string): [string, string] | null {
-  const match = /^([^\s/*·]+)([\s\S]*)$/.exec(units)
-  return match ? [match[1], match[2]] : null
+  // Trimmed first, because a sidecar is hand-pasted JSON and a stray
+  // space is invisible in the field it was pasted into. Untrimmed,
+  // a leading one makes the whole restatement silently not happen —
+  // the worst failure shape available here, since the dataset then
+  // looks exactly like one whose units no prefix attaches to — and a
+  // trailing one rides along into the emitted label.
+  const match = /^([^\s/*·]+)([\s\S]*)$/.exec(units.trim())
+  return match ? [match[1], match[2].trimEnd()] : null
 }
 
 /**
