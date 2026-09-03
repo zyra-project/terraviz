@@ -204,6 +204,69 @@ async function cmd<T>(name: string, args?: Record<string, unknown>): Promise<T> 
   return invoke(name, args) as Promise<T>
 }
 
+/**
+ * Commands whose failure has already been reported. A denied capability
+ * or a missing plugin fails identically on every call, and `getDownload`
+ * runs once per dataset load — so without this, one diagnosis becomes a
+ * wall of identical lines in a four-globe layout.
+ */
+const reportedCmdFailures = new Set<string>()
+
+/**
+ * Run a **read-only** download-manager command, resolving to `fallback`
+ * when it fails for any reason.
+ *
+ * `fallback` is the same value each of these already returns when
+ * downloads are unavailable (`if (!IS_TAURI) return null`), so this is
+ * not a new claim about the user's data — it extends the existing
+ * "no download capability here" answer to a case the guard cannot catch.
+ * `IS_TAURI` is true in *every* Tauri window, including one whose
+ * capability file omits these commands: the guard passes, the invoke is
+ * ACL-denied, and the promise rejects.
+ *
+ * A rejection is what actually hurts, because every caller awaits these
+ * unguarded, at the top of a path that then does not run:
+ *
+ * - `datasetLoader.ts` awaits `getDownload` as the **first statement**
+ *   of both the image and the video load path, so a rejection throws out
+ *   of `loadDataset` before it does anything — the symptom is "datasets
+ *   don't load", with nothing naming permissions.
+ * - `downloadUI.ts`'s `renderPanel` awaits `listDownloads`, so a
+ *   rejection leaves the panel's `innerHTML` unset: a blank box.
+ * - `browseUI.ts` awaits `getDownload` inside the loop that paints
+ *   download badges, so one rejection stops the whole loop.
+ *
+ * Resolving instead means the app falls back to the network and the user
+ * sees their dataset, while the log names the cause once. Multi-window
+ * work makes that cause likelier rather than rarer — every window added
+ * is a new capability surface (`docs/MULTI_MONITOR_PLAN.md` §6).
+ *
+ * Deliberately **not** applied to the mutating commands
+ * (`downloadDataset` / `cancelDownload` / `deleteDownload`). A download
+ * the user explicitly asked for must surface its failure; silently
+ * reporting success is the worse outcome there.
+ */
+async function cmdOrFallback<T>(
+  name: string,
+  fallback: T,
+  args?: Record<string, unknown>,
+): Promise<T> {
+  try {
+    return await cmd<T>(name, args)
+  } catch (err) {
+    if (!reportedCmdFailures.has(name)) {
+      reportedCmdFailures.add(name)
+      logger.warn(
+        `[Download] '${name}' failed; treating it as "no local copy". ` +
+        'In a Tauri window this usually means the window\'s capability file ' +
+        'does not grant the download commands. ' +
+        `Cause: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
+    return fallback
+  }
+}
+
 // --- Public API ---
 
 /** Check if we're running in a desktop context that supports downloads. */
@@ -712,13 +775,13 @@ export async function cancelDownload(datasetId: string): Promise<void> {
 /** List all downloaded datasets. */
 export async function listDownloads(): Promise<DownloadedDataset[]> {
   if (!IS_TAURI) return []
-  return cmd<DownloadedDataset[]>('list_downloads')
+  return cmdOrFallback<DownloadedDataset[]>('list_downloads', [])
 }
 
 /** Check if a specific dataset is downloaded. */
 export async function getDownload(datasetId: string): Promise<DownloadedDataset | null> {
   if (!IS_TAURI) return null
-  return cmd<DownloadedDataset | null>('get_download', { datasetId })
+  return cmdOrFallback<DownloadedDataset | null>('get_download', null, { datasetId })
 }
 
 /** Delete a downloaded dataset. */
@@ -730,19 +793,19 @@ export async function deleteDownload(datasetId: string): Promise<void> {
 /** Get the local file path for a downloaded asset. */
 export async function getDownloadPath(datasetId: string, filename: string): Promise<string | null> {
   if (!IS_TAURI) return null
-  return cmd<string | null>('get_download_path', { datasetId, filename })
+  return cmdOrFallback<string | null>('get_download_path', null, { datasetId, filename })
 }
 
 /** Get total disk usage of all downloaded datasets. */
 export async function getDownloadsSize(): Promise<number> {
   if (!IS_TAURI) return 0
-  return cmd<number>('get_downloads_size')
+  return cmdOrFallback<number>('get_downloads_size', 0)
 }
 
 /** Check if a download is currently in progress. */
 export async function isDownloading(datasetId: string): Promise<boolean> {
   if (!IS_TAURI) return false
-  return cmd<boolean>('is_downloading', { datasetId })
+  return cmdOrFallback<boolean>('is_downloading', false, { datasetId })
 }
 
 /** Listen for download progress events. Returns an unsubscribe function. */
