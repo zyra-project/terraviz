@@ -938,33 +938,93 @@ that governs here:
 > See terraviz#230.
 
 So four control panels plus four outputs is up to **eight
-concurrent decoders on one machine**, and the failure cannot be
-handled reactively: there is no degraded mode to fall back to
-and no moment in which to notice, just a process that goes
-away. On an installation that is the whole exhibit going dark,
-in front of visitors, with the operator's own window taking it
-down.
+concurrent decoders on one machine**.
 
-v1 therefore gives the manager a single budget spanning every
-window it has spawned:
+##### What a throwaway spike measured, and what it changed
+
+An earlier draft of this section reasoned from the phone
+measurement to a fixed cross-window budget of 4, and described
+the failure as a hard crash boundary on any machine. A
+throwaway spike (Windows 11, Intel Raptor Lake-S + **RTX 4090
+Laptop**, three monitors, packaged desktop build, real
+`HLSService` → hls.js → MSE playback) tested that directly.
+Both runs used 8192×4096 render targets — 128 MiB apiece, the
+top rung of the resolution picker — with only the output count
+differing:
+
+| Live outputs | Render targets held | Steady fps | Δframes / 3 s | Dropped | Media clock |
+|---|---|---|---|---|---|
+| 8 | 1 GB | 30.7 | +92 | 0 | 1.00× realtime |
+| 16 | **2 GB** | **30.7** | **+92** | **0** | **1.00× realtime** |
+
+Sixteen outputs, each holding a WebGL2 context, a 128 MiB
+render target and a live decoder, at **full source frame rate,
+exactly realtime, nothing dropped** — and *identical* to the
+eight-output case, not merely close. Four times the budget this
+section proposed, at four times the default pixels, with no
+measurable sustained cost.
+
+Three corrections follow, and they matter more than the number:
+
+- **A fixed budget of 4 is wrong on this class of hardware.**
+  It is at least 4× too conservative. The phone measurement is
+  sound *about a phone*; it does not transfer.
+- **The failure shape is hardware-dependent, not just the
+  threshold.** The crash-boundary framing above is inherited
+  from a phone. This machine was never taken close enough to
+  find its limit, so whether it fails as a cliff or a gradient
+  is **unknown** here — an honest gap, not a resolved one. A
+  design that assumes a cliff will watch for the wrong symptom
+  on desktop hardware.
+- **The real cost is at spawn time, not in steady state.**
+  Sixteen outputs took ~160 ms longer to reach full rate than
+  eight (five cumulative frames). Every window still got there.
+  A budget sized for sustained capacity solves a problem this
+  hardware does not have.
+
+Two methodological notes worth keeping, because both changed a
+conclusion:
+
+- **A cumulative frame count cannot measure throughput.** A
+  single reading taken a fixed interval after playback *starts*
+  folds in startup latency; it showed a spurious ⅓ drop that
+  vanished once two samples were differenced. Steady-state fps
+  must come from a delta over wall-clock, not from a total.
+- **`droppedVideoFrames` is not a sufficient health signal.**
+  It was 0 in every run, including the one that looked
+  degraded. Frame *production rate* and a media-clock-vs-wall
+  ratio are what actually move.
+
+**These numbers are from one 4090 laptop.** A museum is far
+likelier to deploy an Intel-iGPU NUC, and on that hardware the
+cliff this section originally described may well be real.
+Treating 16 as a new constant would repeat the original mistake
+with a different number.
+
+##### The budget v1 actually ships
+
+v1 gives the manager a single budget spanning every window it
+has spawned. The **mechanism below survives the spike
+unchanged; only its value and its health signal move.**
 
 | | |
 |---|---|
-| **Budget** | `MAX_CONCURRENT_DECODERS`, seeded from the control window's own `maxVideoPanels()` so the existing phone/desktop policy still applies, and lowered per-machine in the Outputs panel for hardware known to be tighter |
-| **Counted** | one per video dataset in the control window's panels, plus one per output currently showing a video dataset. Image datasets and the calibration pattern cost nothing — matching the measurement, which found four image panels fine and three video ones fatal. |
+| **Budget** | `DEFAULT_CONCURRENT_DECODERS`, seeded from the control window's own `maxVideoPanels()` and **raised on hardware that demonstrates headroom**, rather than fixed in source. A constant either cripples a 4090 or crashes an NUC. |
+| **Counted** | one per video dataset in the control window's panels, plus one per output currently showing a video dataset. Image datasets and the calibration pattern cost nothing — matching both measurements, which found image panels free and video panels the binding constraint. |
 | **Enforced** | at both spawn time and layout change — whichever action would cross the budget is refused, with a message naming what to close first. Enforced *before* the decoder is built, since after is too late. |
+| **Health signal** | steady-state frame rate and media-clock-vs-wall ratio, sampled as a delta. **Not** a dropped-frame counter, which stayed at 0 through every condition the spike could produce. |
+| **Spawn pacing** | outputs restored on boot, or added in a batch, are staggered rather than created simultaneously. Startup contention is the one cost the spike could actually measure. |
 | **Not enforced** | by an output asking `maxVideoPanels()` itself. That reads the output's own viewport and would answer 4 on any monitor worth attaching, which is the bug. The manager owns the count; outputs are told. |
 | **Not enforced** | by killing an existing decoder. Silently tearing down a running output to make room for a control-window layout change is the worse failure. |
 
-The honest cost: on the default budget, an operator running 4
-globes cannot also add a video output, and an operator with an
-output live cannot switch to the 4-globe layout. That is a real
-restriction and it will be the first thing anyone hits. It is
-still the right trade — a refused layout change is recoverable
-in one click, and a decoder-ceiling crash takes the installation
-down mid-session with no recovery at all. Phase 5's
-shared-GPU-texture work is what actually lifts the ceiling
-rather than rationing under it.
+The honest cost, on a machine whose budget really is 4: an
+operator running 4 globes cannot also add a video output. That
+is a real restriction and it will be the first thing anyone
+hits on constrained hardware. It is still the right trade —
+a refused layout change is recoverable in one click, and a
+decoder-ceiling crash takes the installation down mid-session
+with no recovery at all. Phase 5's shared-GPU-texture work is
+what actually lifts the ceiling rather than rationing under it.
 
 #### What's not the algorithm's job
 
@@ -1002,8 +1062,14 @@ import {
 export const VERIFY_INTERVAL_MS = 1000
 /** Consecutive `'off'` verdicts before reporting a stale frame. */
 export const STALE_FRAME_STRIKES = 3
-/** Cross-window ceiling — see "Cross-window decoder budget". */
-export const MAX_CONCURRENT_DECODERS = 4
+/**
+ * Cross-window ceiling — see "Cross-window decoder budget".
+ * A conservative *seed*, not a measured limit: one 4090 laptop ran
+ * sixteen 8192x4096 outputs at full rate. Raised per-machine from the
+ * Outputs panel and persisted with the layout, because a constant here
+ * either cripples that machine or crashes an iGPU NUC.
+ */
+export const DEFAULT_CONCURRENT_DECODERS = 4
 ```
 
 Only the last three are genuinely this feature's to own, and
