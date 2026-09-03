@@ -1375,8 +1375,10 @@ After 60 s gone, manager surfaces a confirmation in the
 Outputs panel: "Output {label}'s monitor is gone. Close
 output?" — manual action only. On reconnect, manager
 detects the monitor reappearing, moves the window back to
-the persisted `{ x, y }` of that monitor (matched by
-`monitorName`), and clears the toast.
+the persisted `{ x, y }` of that monitor (matched on
+`monitorName` **and** `monitorOrigin` — see §3 "Persistence";
+a reconnect is exactly the event that reshuffles Windows
+display names), and clears the toast.
 
 #### 5. GPU context loss
 
@@ -1712,7 +1714,7 @@ what an SOS sphere will see" workflows.
 interface PersistedOutputConfig {
   outputs: Array<{
     label: string             // 'output-1' | 'output-2' | …
-    monitorName: string       // OS-reported name; matched on next boot
+    monitorName: string       // OS-reported name; matched WITH monitorOrigin, never alone
     monitorOrigin: { x: number; y: number } // physical, SIGNED — see "Monitor geometry"
     mode: 'sos-equirect'      // future: 'fisheye' | 'mirrored' | …
     framebufferSize: { width: number; height: number } // e.g. 4096×2048
@@ -1727,10 +1729,12 @@ interface PersistedOutputConfig {
 
 On launch, if `autoRestoreOnLaunch === true`, the manager waits
 for the OS to report monitors (~50 ms after boot), tries to
-match each persisted output to a current monitor by name, and
-recreates the windows. If the monitor is gone (laptop unplugged
-from a kiosk dock), the entry is logged and the window is
-skipped — not silently moved to a different monitor.
+match each persisted output to a current monitor on **both**
+`monitorName` and `monitorOrigin`, and recreates the windows. If
+no monitor matches on both — it is gone (laptop unplugged from a
+kiosk dock), or only the name matches — the entry is logged and
+the window is skipped, not silently moved to a different
+monitor.
 
 **Monitor names are less stable than that reads.** Windows
 reports `\\.\DISPLAY1`, `\\.\DISPLAY2`, `\\.\DISPLAY3` — names that
@@ -2154,7 +2158,7 @@ without rolling the whole feature back.
 | 7 | `multi-output: emit dataset:loaded + layer events from main.ts` | Refactor of `datasetLoader` and `main.ts` to fire events the aggregator can subscribe to. Today's `panelStates` consumers keep working. | No |
 | 8 | `multi-output: wire MultiOutputManager into main.ts boot` | Manager instantiated; subscribes to events. No UI to spawn windows yet, so still invisible. | No |
 | 9 | `multi-output: add Tools → Outputs panel` | `outputUI.ts`, Tools menu entry. **First user-reachable commit.** Operator can add and remove SOS equirectangular outputs. | **Yes** |
-| 10 | `multi-output: persist + restore outputs across launches` | localStorage config, opt-in restore on boot, monitor-name matching. | Yes (additive) |
+| 10 | `multi-output: persist + restore outputs across launches` | localStorage config, opt-in restore on boot, and monitor matching on **both** name and signed physical origin — a name-only match is treated as a monitor the manager does not recognise and skipped, because Windows display names are positional and reassignable (see §3 "Persistence"). | Yes (additive) |
 | 11 | `multi-output: per-output debug overlay + framebuffer resolution picker` | Resolution picker in panel, debug HUD with dataset id, sync delta, fps, and the WebGL **renderer string** — the last so an operator can see which GPU the webview actually got, which on a hybrid-graphics machine is decided by the driver rather than by the app (see Risks). | Yes (additive) |
 | 12 | `multi-output: fullscreen toggle + kiosk launch + F11 on every window` | `Tools → Fullscreen` toggle in `toolsMenuUI.ts` (persisted), F11 keydown handler on control + output windows, `--kiosk` argv parse and `TERRAVIZ_KIOSK=1` env var read in `src-tauri/src/lib.rs` (**not** `main.rs`, now a 12-line shim) behind `#[cfg(desktop)]`, applying fullscreen + decorationless before first paint, 3-second idle cursor-hide on the control window when fullscreen. See §3.6. | Yes (additive) |
 | 13 | `multi-output: failure recovery — crashes, stalls, GPU loss, monitor unplug` | Manager gains crash detection (no-graceful-close window destroy → toast + record removal), 3-strikes-per-monitor crash storm guard, 2 s `availableMonitors()` poll for unplug detection, `getAll()` boot scan to reattach orphaned `output-*` windows after a control-window crash. Output gains `webglcontextlost` / `webglcontextrestored` listeners with full scene rebuild, IPC-silence watchdog (5 s → stale state, 60 s → orphan), one HLS stream rebuild on a `loadStream()` rejection with frozen last-good-frame (no retry ladder — `hlsService` already spends a 3× budget before rejecting). Outputs panel renders per-output health badges (healthy / stale / stalled / monitor-missing). New Tier A `output_failure` event fired from manager via `analytics/emitter.ts` with `{ kind, retries, recovered }` (Open Question 3 decided). See §3 "Failure recovery". | Yes (additive) |
@@ -2725,6 +2729,7 @@ const outputs: PersistedOutputConfig = {
     {
       label: 'output-1',
       monitorName: 'DELL-SOS-DRIVER',
+      monitorOrigin: { x: -1680, y: 383 },  // physical, signed
       mode: 'sos-equirect',
       framebufferSize: { width: 4096, height: 2048 },
       trackOperatorCamera: true,   // see §3.5
