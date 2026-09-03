@@ -2,15 +2,21 @@
 // Copyright 2026 The Zyra Project
 
 /**
- * Tests for downloadService — asset resolution, input shaping, and utilities.
+ * Tests for downloadService — asset resolution, input shaping, utilities,
+ * and the read commands' fallback behaviour.
  *
- * The Tauri command wrappers (listDownloads, deleteDownload, etc.) are thin
- * pass-throughs and are not tested here. Focus is on the pure logic:
- * formatBytes, video/image asset resolution, caption URL proxying, and the
- * DownloadInput shape sent to the backend.
+ * Most of this file covers the pure logic: formatBytes, video/image asset
+ * resolution, caption URL proxying, and the DownloadInput shape sent to the
+ * backend.
+ *
+ * The Tauri command wrappers used to be thin pass-throughs. The read ones no
+ * longer are — they resolve to a neutral value when the invoke fails, so that
+ * a denied capability cannot throw out of `datasetLoader`'s load path. The
+ * last describe block covers that, and pins the mutating commands as still
+ * rejecting, which is the half that must not drift.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   classifySourceOfTruth,
   expandFrameAssets,
@@ -664,5 +670,85 @@ describe('isZipDownloadable', () => {
     expect(isZipDownloadable({
       id: 'D', title: 'T', format: 'tour/json' as any, dataLink: '/api/v1/datasets/D/manifest',
     } as Dataset)).toBe(false)
+  })
+})
+
+// --- Read commands: failure resolves to a neutral value ---
+
+/**
+ * `downloadService` reads `window.__TAURI__` and kicks off its plugin
+ * imports at module-load time, so each of these tests has to set the
+ * global and re-import the module rather than importing it at the top.
+ */
+async function loadWithInvoke(invokeImpl: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>) {
+  vi.resetModules()
+  vi.doMock('@tauri-apps/api/core', () => ({ invoke: invokeImpl }))
+  vi.doMock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) }))
+  ;(window as unknown as { __TAURI__?: unknown }).__TAURI__ = { ipc: {} }
+  return await import('./downloadService')
+}
+
+describe('read commands when the invoke fails', () => {
+  afterEach(() => {
+    delete (window as unknown as { __TAURI__?: unknown }).__TAURI__
+    vi.doUnmock('@tauri-apps/api/core')
+    vi.doUnmock('@tauri-apps/api/event')
+    vi.resetModules()
+  })
+
+  it('resolves getDownload to null instead of rejecting', async () => {
+    const svc = await loadWithInvoke(async () => {
+      throw new Error('get_download not allowed. Permissions associated with this command: allow-get-download')
+    })
+    // The assertion that matters is that this does not throw: datasetLoader
+    // awaits it as the first statement of both load paths.
+    await expect(svc.getDownload('any-id')).resolves.toBeNull()
+  })
+
+  it('resolves the other reads to their no-downloads values', async () => {
+    const svc = await loadWithInvoke(async () => { throw new Error('denied') })
+    await expect(svc.listDownloads()).resolves.toEqual([])
+    await expect(svc.getDownloadPath('id', 'file.mp4')).resolves.toBeNull()
+    await expect(svc.getDownloadsSize()).resolves.toBe(0)
+    await expect(svc.isDownloading('id')).resolves.toBe(false)
+  })
+
+  it('still returns real values when the invoke succeeds', async () => {
+    // A fallback that swallowed the happy path too would pass every
+    // assertion above while breaking offline playback entirely.
+    const record = { dataset_id: 'D', primary_file: 'clip.mp4', total_bytes: 42 }
+    const svc = await loadWithInvoke(async (cmd) => {
+      if (cmd === 'get_download') return record
+      if (cmd === 'get_downloads_size') return 4096
+      if (cmd === 'is_downloading') return true
+      return null
+    })
+    await expect(svc.getDownload('D')).resolves.toEqual(record)
+    await expect(svc.getDownloadsSize()).resolves.toBe(4096)
+    await expect(svc.isDownloading('D')).resolves.toBe(true)
+  })
+
+  it('reports each failing command once, not once per call', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const svc = await loadWithInvoke(async () => { throw new Error('denied') })
+    await svc.getDownload('a')
+    await svc.getDownload('b')
+    await svc.getDownload('c')
+    const forGetDownload = warn.mock.calls.filter(c => String(c[0]).includes('get_download'))
+    expect(forGetDownload).toHaveLength(1)
+
+    // A different command is a different diagnosis and still reports.
+    await svc.getDownloadsSize()
+    expect(warn.mock.calls.filter(c => String(c[0]).includes('get_downloads_size'))).toHaveLength(1)
+    warn.mockRestore()
+  })
+
+  it('leaves the mutating commands rejecting', async () => {
+    // A download the user asked for must surface its failure. If this
+    // ever starts resolving, the UI reports success for work that did
+    // not happen.
+    const svc = await loadWithInvoke(async () => { throw new Error('denied') })
+    await expect(svc.deleteDownload('id')).rejects.toThrow('denied')
+    await expect(svc.cancelDownload('id')).rejects.toThrow('denied')
   })
 })
