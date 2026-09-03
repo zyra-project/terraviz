@@ -311,6 +311,58 @@ The split that actually works:
   self-drives: F11 fullscreen on itself, its own graceful
   close, IPC, and HTTPS fetch. See §3 "Output capability spec".
 
+**All of the above is now verified, not just reasoned.** A
+throwaway spike ran it on Windows 11: `WebviewWindow.new()`
+succeeded with the four grants and no ACL error, and the narrow
+output capability was sufficient for everything an output
+self-drives — every window getter returned a real value and
+`emitTo('main')` reached the control page. All 28 `core:`
+identifiers across both files exist in Tauri 2.11.2's own
+permission tables, which removes a whole class of false
+negative: a spawn failure on someone's machine is not a
+misspelled permission name.
+
+That check also settled the `core:window:default` reading
+against the shipped tables rather than against a code reading.
+Of the twelve `core:window:*` permissions the output file
+enumerates, exactly **one** — `allow-close` — reaches beyond
+the `default` bundle; the other eleven are getters already
+inside it. Keep the enumeration anyway rather than collapsing
+it to the bundle: the point of that file is reviewability, so a
+future Tauri release quietly widening `default` cannot widen
+this file along with it.
+
+**Capabilities are compiled into the binary.** `tauri-build`
+does emit `cargo:rerun-if-changed=capabilities`
+(`tauri-build-2.6.2/src/acl.rs:427`), but that only fires when
+cargo actually runs — so a `dev:desktop` session started
+*before* a capability edit keeps enforcing the old ACL, and the
+edit looks like it did nothing. **Restart `dev:desktop` after
+touching any capability file.** This cost real debugging time
+in the spike, twice.
+
+**A missing grant does not announce itself. It looks like a
+data bug.** `datasetLoader` awaits `getDownload(dataset.id)` as
+the *first* step of both the image and the video load path
+(`src/services/datasetLoader.ts:126`, `:272`). That helper
+guards on `IS_TAURI` but does not catch a rejected invoke
+(`downloadService.ts:719-722`). In any Tauri window whose
+capability is not in effect, `IS_TAURI` is still true, the
+invoke is ACL-denied, the promise rejects, and `loadDataset`
+throws before doing anything else — so the symptom is "datasets
+don't load", with no mention of permissions anywhere in it.
+
+To be exact about the evidence: this is a code reading, not an
+observed failure. The spike's own "the spawned window won't
+load datasets" turned out to be a dead `VITE_DEV_API_TARGET`
+proxy, and a preflight window proved its capability was live.
+The mechanism is still real, and this feature walks straight
+into it — **the plan adds windows, and every added window is a
+new capability surface.** Make the helper defensive before
+commit 5: a denied invoke should resolve to "no local copy" and
+log the denial, not reject into a caller that reads it as a
+missing dataset.
+
 ### 7. Vite multi-entry build
 
 The output window loads a separate HTML page (`output.html`)
@@ -583,6 +635,7 @@ two-way binding.
 |---|---|
 | `src/main.ts` | Boot `MultiOutputManager`; wire it to dataset / playback / layer / **camera** events |
 | `src/services/datasetLoader.ts` | Emit a `dataset:loaded` event the manager subscribes to |
+| `src/services/downloadService.ts` | Make `getDownload` defensive: catch a rejected invoke and resolve to "no local copy", logging the denial. Today it rejects, and `datasetLoader` awaits it as the first step of both load paths (`:126`, `:272`), so a missing capability in a new window surfaces as "datasets don't load" with no mention of permissions. Land this **before** commit 5. See §6 |
 | `src/services/mapRenderer.ts` | Emit a debounced `camera:moved` event with `{ lng, lat, zoom }` so the manager can derive `view.cameraOffset` for outputs that track operator camera |
 | `src/ui/playbackController.ts` | Forward play / pause / scrubber events to the state aggregator |
 | `src/types/index.ts` | Add `OutputAddedEvent` / `OutputRemovedEvent` / `OutputFailureEvent` interfaces; append to the `TelemetryEvent` union; tier choice is essential — none belong in `TIER_B_EVENT_TYPES` (see "Telemetry" decision in Open Questions §3) |
@@ -2342,14 +2395,24 @@ renderer somewhere" — which we don't. Direct RTT.
 
 ## Open questions
 
-1. **Tauri window stacking on Linux.** Some compositors
-   (sway, certain GNOME setups) treat fullscreen popups
-   differently than Windows / macOS. Need to test on at
-   least one Wayland and one X11 setup before declaring v1
-   done. The monitor-unplug failure case (§3 "Failure
-   recovery", case 4) also varies by compositor — pin down
-   the actual behavior on the target install platforms as
-   part of the same test pass.
+1. **Tauri window stacking on Linux — narrowed to Linux.**
+   *Windows is answered.* A spike put borderless fullscreen
+   output windows on both non-primary monitors of a
+   three-monitor Windows 11 desk: `isDecorated: false`,
+   `isFullscreen: true`, exact placement including a negative
+   origin, and coverage over the taskbar rather than
+   confinement to the work area. See "Monitor geometry and
+   placement".
+
+   That says nothing about Linux, which was always the risky
+   half. Some compositors (sway, certain GNOME setups) treat
+   fullscreen popups differently from Windows / macOS. Still
+   need at least one Wayland and one X11 setup before
+   declaring v1 done. The monitor-unplug failure case (§3
+   "Failure recovery", case 4) also varies by compositor —
+   pin down the actual behavior on the target install
+   platforms as part of the same test pass. macOS is
+   untested too.
 2. **What to do when the operator opens an output but no
    dataset is loaded?** Default: render the photoreal Earth
    with day/night and atmosphere — a "live Earth" idle state.
