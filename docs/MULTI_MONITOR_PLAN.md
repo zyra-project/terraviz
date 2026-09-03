@@ -40,7 +40,7 @@ and have not been re-verified since).
 - `globeThumbnail.ts` changes shape. The "Prior art" section and the
   rescoping of delivery steps 2-4 both rest on it.
 - Tauri's capability model changes across a major version, or the
-  four permissions §6 asks for stop being the right set.
+  permissions §6 asks for stop being the right set.
 - Six months pass with no implementation started. The `src/`
   citations drift with every release whether or not anyone is
   reading them.
@@ -56,7 +56,7 @@ is not part of the delivery ladder.
 
 | Assumption | Where | Verdict |
 |---|---|---|
-| The four new capability grants are sufficient to spawn a window | §6 | **Confirmed** |
+| The proposed capability grants are sufficient to spawn a window | §6 | **Confirmed** for the four the spike ran. A fifth (`allow-show`) was added afterwards, from a code reading, and is **untested** |
 | The narrow output capability is sufficient for what an output self-drives | §3 "Output capability spec" | **Confirmed** |
 | `core:window:default` carries no `set-*` and no `allow-close` | §6 | **Confirmed** against Tauri 2.11.2's own tables |
 | Borderless fullscreen lands on a non-primary monitor | Open Question 1 | **Confirmed on Windows.** Linux and macOS untested |
@@ -304,7 +304,8 @@ What `capabilities/default.json` grants today (lines 7-27):
 `allow-current-monitor` lines are redundant — worth removing
 while editing the file.
 
-So v1 must **add** to `capabilities/default.json`:
+So v1 must **add** five permissions to
+`capabilities/default.json`:
 
 | Permission | Needed for |
 |---|---|
@@ -312,6 +313,7 @@ So v1 must **add** to `capabilities/default.json`:
 | `core:window:allow-close` | Graceful teardown of an output |
 | `core:window:allow-destroy` | Forced teardown after a crash or GPU-loss timeout |
 | `core:window:allow-set-decorations` | Drop the title bar (§3.6 fullscreen toggle) |
+| `core:window:allow-show` | Reveal an output after it has been placed. Outputs are spawned `visible: false` and positioned through the physical setters before being shown, because `WindowOptions` has no physical placement option — see "Monitor geometry and placement" |
 
 `allow-set-fullscreen`, `allow-set-size`, `allow-set-position`,
 `allow-available-monitors`, and `allow-current-monitor` are
@@ -333,7 +335,7 @@ manager-initiated operation on `output-N` to be **denied**.
 
 The split that actually works:
 
-- **`default.json` (the manager)** — gains the four permissions
+- **`default.json` (the manager)** — gains the permissions
   in the table above. This is what makes cross-window control
   possible at all.
 - **`output.json` (the outputs)** — stays narrow, and is about
@@ -344,7 +346,8 @@ The split that actually works:
 
 **All of the above is now verified, not just reasoned.** A
 throwaway spike ran it on Windows 11: `WebviewWindow.new()`
-succeeded with the four grants and no ACL error, and the narrow
+succeeded with the four grants the spike carried and no ACL
+error, and the narrow
 output capability was sufficient for everything an output
 self-drives — every window getter returned a real value and
 `emitTo('main')` reached the control page. All 28 `core:`
@@ -352,6 +355,12 @@ identifiers across both files exist in Tauri 2.11.2's own
 permission tables, which removes a whole class of false
 negative: a spawn failure on someone's machine is not a
 misspelled permission name.
+
+The fifth grant, `core:window:allow-show`, is **not** covered by
+that result — it was added after the spike, from a reading of
+Tauri's `WindowOptions` type, and nothing has executed it. It is
+the one line of §6 still in the state the rest of the section
+was in before the spike ran.
 
 That check also settled the `core:window:default` reading
 against the shipped tables rather than against a code reading.
@@ -673,7 +682,7 @@ two-way binding.
 | `src/analytics/perfSampler.ts` | When outputs are active, extend the existing 60 s `perf_sample` event with `output_count` and `sync_delta_p95_ms` fields (no new event type) |
 | `src/ui/toolsMenuUI.ts` | Add "Outputs" entry that opens the new Outputs panel; add a "Fullscreen" toggle that calls `getCurrentWindow().setFullscreen()` + `setDecorations()` and persists to localStorage (see §3.6) |
 | `src-tauri/src/lib.rs` | Parse the `--kiosk` argv flag and `TERRAVIZ_KIOSK=1` env var in `setup()`; apply fullscreen + decorationless before first paint when set (see §3.6). **Not `main.rs`** — that is now a 12-line shim (`fn main() { terraviz_lib::run() }`) and all builder/setup logic lives in `lib.rs` so mobile can share it. Must be `#[cfg(desktop)]`-gated so it does not compile into the iOS/Android cdylib |
-| `src-tauri/capabilities/default.json` | Add `core:webview:allow-create-webview-window`, `core:window:allow-close`, `core:window:allow-destroy`, `core:window:allow-set-decorations`. The first three are what make spawning and tearing down an output possible at all; the fourth lets the fullscreen toggle drop the title bar. Optionally drop the redundant `core:window:default` / `allow-available-monitors` / `allow-current-monitor` lines already implied by `core:default`. See §6 |
+| `src-tauri/capabilities/default.json` | Add `core:webview:allow-create-webview-window`, `core:window:allow-close`, `core:window:allow-destroy`, `core:window:allow-set-decorations`, `core:window:allow-show`. The first three are what make spawning and tearing down an output possible at all; the fourth lets the fullscreen toggle drop the title bar; the fifth reveals an output once it has been placed, since placement cannot be expressed at construction time. Optionally drop the redundant `core:window:default` / `allow-available-monitors` / `allow-current-monitor` lines already implied by `core:default`. See §6 |
 | `src-tauri/capabilities/mobile.json` | **No change** — multi-output is desktop-only and must not widen the mobile surface |
 | `vite.config.ts` | **Add** an `output` entry to the existing `rollupOptions.input` object (which already declares `main` and `orbit`) pointing at `src/output/output.html`. Do not author a fresh `rollupOptions.input` — that would drop `orbit`. See §7 |
 | `package.json` | No new runtime deps for v1 (Three.js already a runtime dep for VR) |
@@ -689,10 +698,14 @@ two-way binding.
    resolution + position diagram). User picks a monitor and a
    mode (v1: only "SOS Equirectangular" available).
 3. Manager calls `WebviewWindow.new('output-1', {...})` with
-   `decorations: false`, `fullscreen: true`,
-   `position: { x, y }` (the chosen monitor's top-left), and a
-   navigation URL pointing at the bundled `output.html`. Tauri
-   creates the window on the target monitor.
+   `decorations: false`, **`visible: false`**, and a navigation
+   URL pointing at the bundled `output.html` — then places it
+   with `setPosition(new PhysicalPosition(...))` +
+   `setSize(new PhysicalSize(...))`, calls `setFullscreen(true)`,
+   and only then `show()`. Neither position nor fullscreen is a
+   constructor option here, and the order matters: see "Monitor
+   geometry and placement" for why, and for the fifth capability
+   grant it costs.
 4. Output window boots `src/output/main.ts`. Page renders a black
    background. Lazy-imports Three.js. Builds `photorealEarth`
    into a hidden scene. Allocates a 2:1 framebuffer at the
@@ -736,9 +749,39 @@ and the obvious code works. On a HiDPI monitor — or, worse, a
 mixed-DPI desk where the scale factor differs *between*
 monitors — passing a physical origin into a logical option puts
 the output window on the wrong monitor, which reads as "the
-feature is broken" rather than as a units bug. Construct a
-`PhysicalPosition` / `PhysicalSize` explicitly instead of
-relying on the bare numbers agreeing.
+feature is broken" rather than as a units bug.
+
+**There is no physical option at construction.** `WindowOptions`
+types `x` / `y` / `width` / `height` as bare `number`, documented
+as logical pixels; only `setPosition` / `setSize` accept
+`PhysicalPosition` / `PhysicalSize`
+(`@tauri-apps/api/window.d.ts`). So the placement cannot be
+expressed in one call, and boot-flow step 3 spawns the window
+and then corrects it:
+
+1. `WebviewWindow.new('output-N', { …, visible: false })` —
+   **hidden**, and without `fullscreen: true`, since fullscreen
+   before placement fullscreens onto whichever monitor the
+   window happened to land on.
+2. `setPosition(new PhysicalPosition(mon.position.x,
+   mon.position.y))` then `setSize(new PhysicalSize(…))` — both
+   already granted (§6), and both take the monitor's numbers
+   unconverted, which is the point: no `scaleFactor` arithmetic
+   means no `scaleFactor` bug.
+3. `setFullscreen(true)`, then `show()`.
+
+That ordering needs a **fifth** capability grant that the table
+in §6 did not have: `core:window:allow-show`. `visible: false`
+is a constructor option and free, but bringing the window back
+is a command, and `core:window:default` is getters only — its
+28 identifiers include `allow-is-visible` but no `allow-show`.
+Verified against Tauri 2.11.2's own permission table.
+
+Creating the window visible and letting it jump is the
+alternative, and it costs the grant but shows the operator a
+window sliding across the desk on every spawn — on a capture
+feed, that is a visible artifact at exactly the moment an
+installation is being set up.
 
 The spike could not test that second case: all three monitors
 reported `scaleFactor: 1`, so the two coordinate spaces were
@@ -1702,10 +1745,11 @@ skip it, log it, and let the operator re-pick. Restoring the
 wrong monitor silently is worse than restoring nothing.
 
 Store the origin **signed** and as reported — physical pixels,
-negative x included. See "Monitor geometry and placement" for
-why a persisted position that has been through a logical
-conversion cannot be compared against a fresh `Monitor.position`
-on a HiDPI desk.
+negative x included, exactly as `availableMonitors()` gave them.
+A value that has been through a logical conversion cannot be
+compared against a fresh `Monitor.position` on a HiDPI desk, and
+per "Monitor geometry and placement" nothing in the placement
+path needs the converted form anyway.
 
 Restores are also **staggered, not simultaneous** — the one
 cost the decoder-budget spike could actually measure was
@@ -2105,7 +2149,7 @@ without rolling the whole feature back.
 | 2 | `multi-output: equirect RTT shader (unit tests + visual fixture)` | `src/output/equirectRtt.ts` and a tiny test page that loads a known sphere texture and verifies the shader produces the expected equirectangular pixels. Lands as a standalone module; not yet wired up. | No |
 | 3 | `multi-output: output window entry + Three.js scene scaffold` | `src/output/main.ts`, `src/output/datasetMirror.ts`, `src/output/output.html`, `src/output/output.css`, Vite multi-entry config. Output bundle builds; loadable as a static page; renders a default photoreal Earth with no dataset, no IPC. **Start from `globeThumbnail.ts`'s scene-building path** rather than a fresh assembly — see "Prior art". | No |
 | 4 | `multi-output: layer stack + dataset overlay` | `src/output/layerStack.ts`. Static fixture page can now load a fake dataset + fake layer stack and render it. The overlay path consumes a whole `DatasetOverlayOptions` (`lonOrigin` / `isFlippedInY` / `boundingBox` / `celestialBody` / `colorScale`) plus a `ColorScaleDisplay`, reusing `globeThumbnail.ts`'s handling rather than re-deriving the UV maths. Still no IPC. | No |
-| 5 | `multi-output: Tauri capabilities for multi-window` | Two halves. **`capabilities/default.json`** gains `core:webview:allow-create-webview-window`, `core:window:allow-close`, `allow-destroy`, `allow-set-decorations` — without these the manager cannot spawn or tear down an output at all (see §6). **`capabilities/output.json`** is new, scoped to `output-*`, granting only IPC + self-driven window controls + HTTPS fetch. `mobile.json` untouched. | No |
+| 5 | `multi-output: Tauri capabilities for multi-window` | Two halves. **`capabilities/default.json`** gains `core:webview:allow-create-webview-window`, `core:window:allow-close`, `allow-destroy`, `allow-set-decorations`, `allow-show` — without these the manager cannot spawn, place, reveal or tear down an output at all (see §6). **`capabilities/output.json`** is new, scoped to `output-*`, granting only IPC + self-driven window controls + HTTPS fetch. `mobile.json` untouched. | No |
 | 6 | `multi-output: state aggregator + protocol implementation` | `multiOutput/manager.ts`, `multiOutput/stateAggregator.ts`. Manager constructible but not yet instantiated. | No |
 | 7 | `multi-output: emit dataset:loaded + layer events from main.ts` | Refactor of `datasetLoader` and `main.ts` to fire events the aggregator can subscribe to. Today's `panelStates` consumers keep working. | No |
 | 8 | `multi-output: wire MultiOutputManager into main.ts boot` | Manager instantiated; subscribes to events. No UI to spawn windows yet, so still invisible. | No |
