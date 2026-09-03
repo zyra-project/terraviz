@@ -10,11 +10,12 @@ similar 2:1-input device.
 Status: **draft for review.** Nothing implemented; this document
 exists to align scope and architecture before any code lands.
 
-**Last reviewed:** 2026-08-28 (reconciled against `main` @ `965d231`
-after ~200 PRs of drift; every `src/` citation below was verified
-against that commit).
+**Last reviewed:** 2026-09-03 (amended from a throwaway platform
+spike — see "What has actually been executed" below. The `src/`
+citations were verified against `main` @ `965d231` on 2026-08-28
+and have not been re-verified since).
 
-> **The line numbers in this doc are pinned to that commit and will
+> **The line numbers in this doc are pinned to `965d231` and will
 > drift.** They already have once: in the nine commits between #395
 > and #404, `SIBLING_HARD_SEEK_THRESHOLD_S` changed file *and* value
 > while every other citation moved between +3 and +40 lines. A pass
@@ -28,10 +29,10 @@ against that commit).
 - Any ladder commit lands. Once code exists, this doc's claims about
   `src/` are checkable against it rather than asserted, and the
   sections describing what "must be added" become history.
-- The spike on Open Question 1 comes back negative — if borderless
+- Open Question 1 comes back negative **on Linux**. Windows is
+  answered; the Linux half was always the risky one. If borderless
   fullscreen on a non-primary monitor does not work on a target
-  Linux compositor, the ladder's shape changes, not just its
-  timeline.
+  compositor, the ladder's shape changes, not just its timeline.
 - `computeSiblingSyncCorrection`, `SIBLING_MIN_READY_STATE`,
   `SIBLING_HARD_SEEK_THRESHOLD_S` or `SIBLING_SEEK_EPS_S` change
   signature or value. §3 delegates to all four rather than
@@ -43,6 +44,36 @@ against that commit).
 - Six months pass with no implementation started. The `src/`
   citations drift with every release whether or not anyone is
   reading them.
+
+### What has actually been executed
+
+Until 2026-09-03 this document had been rewritten twice without
+a single one of its platform assumptions being run. A throwaway
+spike (Windows 11, Intel Raptor Lake-S + RTX 4090 Laptop, three
+monitors, packaged build) executed the load-bearing ones. It
+shared no code with `src/services`, was wired into nothing, and
+is not part of the delivery ladder.
+
+| Assumption | Where | Verdict |
+|---|---|---|
+| The four new capability grants are sufficient to spawn a window | §6 | **Confirmed** |
+| The narrow output capability is sufficient for what an output self-drives | §3 "Output capability spec" | **Confirmed** |
+| `core:window:default` carries no `set-*` and no `allow-close` | §6 | **Confirmed** against Tauri 2.11.2's own tables |
+| Borderless fullscreen lands on a non-primary monitor | Open Question 1 | **Confirmed on Windows.** Linux and macOS untested |
+| Multiple WebGL2 contexts + decoders survive | §3 "Cross-window decoder budget" | **Confirmed, and the budget was wrong** — 16 outputs at 8192×4096 ran at full rate |
+| Logical / physical coordinates place the window correctly | "Monitor geometry and placement" | **Untested** — every monitor was `scaleFactor: 1` |
+
+Four things the spike found that the plan did not predict are
+folded into the sections above: signed monitor origins, GPU
+selection being a driver-level decision the app cannot make,
+an ACL denial presenting as "datasets don't load", and video
+datasets being unloadable in `dev:desktop` at all.
+
+**Everything measured came from one 4090 laptop.** A museum is
+likelier to deploy an Intel-iGPU NUC. Numbers here bound what is
+*possible*, not what is *portable*.
+
+---
 
 The motivating use cases are concrete and somewhat narrow:
 
