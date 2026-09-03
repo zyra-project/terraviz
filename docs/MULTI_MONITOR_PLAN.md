@@ -10,11 +10,12 @@ similar 2:1-input device.
 Status: **draft for review.** Nothing implemented; this document
 exists to align scope and architecture before any code lands.
 
-**Last reviewed:** 2026-08-28 (reconciled against `main` @ `965d231`
-after ~200 PRs of drift; every `src/` citation below was verified
-against that commit).
+**Last reviewed:** 2026-09-03 (amended from a throwaway platform
+spike — see "What has actually been executed" below. The `src/`
+citations were verified against `main` @ `965d231` on 2026-08-28
+and have not been re-verified since).
 
-> **The line numbers in this doc are pinned to that commit and will
+> **The line numbers in this doc are pinned to `965d231` and will
 > drift.** They already have once: in the nine commits between #395
 > and #404, `SIBLING_HARD_SEEK_THRESHOLD_S` changed file *and* value
 > while every other citation moved between +3 and +40 lines. A pass
@@ -28,10 +29,10 @@ against that commit).
 - Any ladder commit lands. Once code exists, this doc's claims about
   `src/` are checkable against it rather than asserted, and the
   sections describing what "must be added" become history.
-- The spike on Open Question 1 comes back negative — if borderless
+- Open Question 1 comes back negative **on Linux**. Windows is
+  answered; the Linux half was always the risky one. If borderless
   fullscreen on a non-primary monitor does not work on a target
-  Linux compositor, the ladder's shape changes, not just its
-  timeline.
+  compositor, the ladder's shape changes, not just its timeline.
 - `computeSiblingSyncCorrection`, `SIBLING_MIN_READY_STATE`,
   `SIBLING_HARD_SEEK_THRESHOLD_S` or `SIBLING_SEEK_EPS_S` change
   signature or value. §3 delegates to all four rather than
@@ -39,10 +40,42 @@ against that commit).
 - `globeThumbnail.ts` changes shape. The "Prior art" section and the
   rescoping of delivery steps 2-4 both rest on it.
 - Tauri's capability model changes across a major version, or the
-  four permissions §6 asks for stop being the right set.
+  permissions §6 asks for stop being the right set.
 - Six months pass with no implementation started. The `src/`
   citations drift with every release whether or not anyone is
   reading them.
+
+### What has actually been executed
+
+Until 2026-09-03 this document had been rewritten twice without
+a single one of its platform assumptions being run. A throwaway
+spike (Windows 11, Intel Raptor Lake-S + RTX 4090 Laptop, three
+monitors, packaged build) executed the load-bearing ones. It
+shared no code with `src/services`, was wired into nothing, and
+is not part of the delivery ladder.
+
+| Assumption | Where | Verdict |
+|---|---|---|
+| The proposed capability grants are sufficient to spawn a window | §6 | **Confirmed** for the four the spike ran. A fifth (`allow-show`) was added afterwards, from a code reading, and is **untested** |
+| The narrow output capability is sufficient for what an output self-drives | §3 "Output capability spec" | **Confirmed** |
+| `core:window:default` carries no `set-*` and no `allow-close` | §6 | **Confirmed** against Tauri 2.11.2's own tables |
+| Borderless fullscreen lands on a non-primary monitor | Open Question 1 | **Confirmed on Windows.** Linux and macOS untested |
+| Multiple WebGL2 contexts + decoders survive | §3 "Cross-window decoder budget" | **Confirmed, and the budget was wrong** — 16 outputs at 8192×4096 ran at full rate |
+| Logical / physical coordinates place the window correctly | "Monitor geometry and placement" | **Untested** — every monitor was `scaleFactor: 1` |
+
+Four things the spike found that the plan did not predict are
+folded into the sections above: signed monitor origins, GPU
+selection being a driver-level decision the app cannot make,
+an ACL denial presenting as "datasets don't load" (in a window
+running the main app bundle — **not** in v1's outputs, which
+run `datasetMirror` and invoke no commands), and video datasets
+being unloadable in `dev:desktop` at all.
+
+**Everything measured came from one 4090 laptop.** A museum is
+likelier to deploy an Intel-iGPU NUC. Numbers here bound what is
+*possible*, not what is *portable*.
+
+---
 
 The motivating use cases are concrete and somewhat narrow:
 
@@ -273,7 +306,8 @@ What `capabilities/default.json` grants today (lines 7-27):
 `allow-current-monitor` lines are redundant — worth removing
 while editing the file.
 
-So v1 must **add** to `capabilities/default.json`:
+So v1 must **add** five permissions to
+`capabilities/default.json`:
 
 | Permission | Needed for |
 |---|---|
@@ -281,6 +315,7 @@ So v1 must **add** to `capabilities/default.json`:
 | `core:window:allow-close` | Graceful teardown of an output |
 | `core:window:allow-destroy` | Forced teardown after a crash or GPU-loss timeout |
 | `core:window:allow-set-decorations` | Drop the title bar (§3.6 fullscreen toggle) |
+| `core:window:allow-show` | Reveal an output after it has been placed. Outputs are spawned `visible: false` and positioned through the physical setters before being shown, because `WindowOptions` has no physical placement option — see "Monitor geometry and placement" |
 
 `allow-set-fullscreen`, `allow-set-size`, `allow-set-position`,
 `allow-available-monitors`, and `allow-current-monitor` are
@@ -302,7 +337,7 @@ manager-initiated operation on `output-N` to be **denied**.
 
 The split that actually works:
 
-- **`default.json` (the manager)** — gains the four permissions
+- **`default.json` (the manager)** — gains the permissions
   in the table above. This is what makes cross-window control
   possible at all.
 - **`output.json` (the outputs)** — stays narrow, and is about
@@ -310,6 +345,86 @@ The split that actually works:
   restraining the manager. It grants the output only what it
   self-drives: F11 fullscreen on itself, its own graceful
   close, IPC, and HTTPS fetch. See §3 "Output capability spec".
+
+**All of the above is now verified, not just reasoned.** A
+throwaway spike ran it on Windows 11: `WebviewWindow.new()`
+succeeded with the four grants the spike carried and no ACL
+error, and the narrow
+output capability was sufficient for everything an output
+self-drives — every window getter returned a real value and
+`emitTo('main')` reached the control page. All 28 `core:`
+identifiers across both files exist in Tauri 2.11.2's own
+permission tables, which removes a whole class of false
+negative: a spawn failure on someone's machine is not a
+misspelled permission name.
+
+The fifth grant, `core:window:allow-show`, is **not** covered by
+that result — it was added after the spike, from a reading of
+Tauri's `WindowOptions` type, and nothing has executed it. It is
+the one line of §6 still in the state the rest of the section
+was in before the spike ran.
+
+That check also settled the `core:window:default` reading
+against the shipped tables rather than against a code reading.
+Of the twelve `core:window:*` permissions the output file
+enumerates, exactly **one** — `allow-close` — reaches beyond
+the `default` bundle; the other eleven are getters already
+inside it. Keep the enumeration anyway rather than collapsing
+it to the bundle: the point of that file is reviewability, so a
+future Tauri release quietly widening `default` cannot widen
+this file along with it.
+
+**Capabilities are compiled into the binary.** `tauri-build`
+does emit `cargo:rerun-if-changed=capabilities`
+(`tauri-build-2.6.2/src/acl.rs:427`), but that only fires when
+cargo actually runs — so a `dev:desktop` session started
+*before* a capability edit keeps enforcing the old ACL, and the
+edit looks like it did nothing. **Restart `dev:desktop` after
+touching any capability file.** This cost real debugging time
+in the spike, twice.
+
+**A missing grant does not announce itself. It looks like a
+data bug.** `datasetLoader` awaits `getDownload(dataset.id)` as
+the *first* step of both the image and the video load path
+(`src/services/datasetLoader.ts:126`, `:272`). That helper
+guards on `IS_TAURI` but does not catch a rejected invoke
+(`downloadService.ts:719-722`). In any Tauri window whose
+capability is not in effect, `IS_TAURI` is still true, the
+invoke is ACL-denied, the promise rejects, and `loadDataset`
+throws before doing anything else — so the symptom is "datasets
+don't load", with no mention of permissions anywhere in it.
+
+**v1's own outputs do not hit this**, and an earlier draft of
+this section wrongly implied they do. Outputs run
+`src/output/datasetMirror.ts`, not `datasetLoader`, and
+§"Output capability spec" grants them no Tauri commands at all —
+they fetch over the network by design. So the hazard is not
+"this feature walks into it". It is narrower and still worth
+writing down: **any window running the main app bundle walks
+into it**, which is what the spike's own `spike-app-*` preflight
+windows were, and what a Phase 4 mirrored mode reusing the main
+bundle would be.
+
+To be exact about the evidence: this is a code reading, not an
+observed failure. The spike's own "the spawned window won't
+load datasets" turned out to be a dead `VITE_DEV_API_TARGET`
+proxy, and a preflight window proved its capability was live.
+
+The fix landed separately, on `main`, because the bug is not
+multi-window-specific and is reachable today: the read commands
+resolve to their no-downloads value and log the denial once
+rather than rejecting. Three surfaces were affected, not one —
+`datasetLoader`'s two load paths, `downloadUI`'s `renderPanel`
+(which left the panel blank), and `browseUI`'s badge loop. The
+mutating commands still reject, deliberately.
+
+That fix catches every rejection, not only ACL-shaped ones,
+which does mean a genuine index or I/O failure now degrades and
+logs rather than throwing. The trade is deliberate: the caller
+is asking "is there a local copy?", "I cannot tell" is
+operationally the same answer as "no", and the alternative is
+matching on Tauri's denial string, which is not a stable
+contract.
 
 ### 7. Vite multi-entry build
 
@@ -583,13 +698,14 @@ two-way binding.
 |---|---|
 | `src/main.ts` | Boot `MultiOutputManager`; wire it to dataset / playback / layer / **camera** events |
 | `src/services/datasetLoader.ts` | Emit a `dataset:loaded` event the manager subscribes to |
+| `src/services/downloadService.ts` | **Already landed on `main`, separately from this ladder** — the read commands resolve to their no-downloads value and log a denial once instead of rejecting, so a window without the download grants degrades rather than throwing out of `loadDataset`. Listed here because §6 explains why it matters to multi-window work, not because this feature has to do it. See §6 |
 | `src/services/mapRenderer.ts` | Emit a debounced `camera:moved` event with `{ lng, lat, zoom }` so the manager can derive `view.cameraOffset` for outputs that track operator camera |
 | `src/ui/playbackController.ts` | Forward play / pause / scrubber events to the state aggregator |
 | `src/types/index.ts` | Add `OutputAddedEvent` / `OutputRemovedEvent` / `OutputFailureEvent` interfaces; append to the `TelemetryEvent` union; tier choice is essential — none belong in `TIER_B_EVENT_TYPES` (see "Telemetry" decision in Open Questions §3) |
 | `src/analytics/perfSampler.ts` | When outputs are active, extend the existing 60 s `perf_sample` event with `output_count` and `sync_delta_p95_ms` fields (no new event type) |
 | `src/ui/toolsMenuUI.ts` | Add "Outputs" entry that opens the new Outputs panel; add a "Fullscreen" toggle that calls `getCurrentWindow().setFullscreen()` + `setDecorations()` and persists to localStorage (see §3.6) |
 | `src-tauri/src/lib.rs` | Parse the `--kiosk` argv flag and `TERRAVIZ_KIOSK=1` env var in `setup()`; apply fullscreen + decorationless before first paint when set (see §3.6). **Not `main.rs`** — that is now a 12-line shim (`fn main() { terraviz_lib::run() }`) and all builder/setup logic lives in `lib.rs` so mobile can share it. Must be `#[cfg(desktop)]`-gated so it does not compile into the iOS/Android cdylib |
-| `src-tauri/capabilities/default.json` | Add `core:webview:allow-create-webview-window`, `core:window:allow-close`, `core:window:allow-destroy`, `core:window:allow-set-decorations`. The first three are what make spawning and tearing down an output possible at all; the fourth lets the fullscreen toggle drop the title bar. Optionally drop the redundant `core:window:default` / `allow-available-monitors` / `allow-current-monitor` lines already implied by `core:default`. See §6 |
+| `src-tauri/capabilities/default.json` | Add `core:webview:allow-create-webview-window`, `core:window:allow-close`, `core:window:allow-destroy`, `core:window:allow-set-decorations`, `core:window:allow-show`. The first three are what make spawning and tearing down an output possible at all; the fourth lets the fullscreen toggle drop the title bar; the fifth reveals an output once it has been placed, since placement cannot be expressed at construction time. Optionally drop the redundant `core:window:default` / `allow-available-monitors` / `allow-current-monitor` lines already implied by `core:default`. See §6 |
 | `src-tauri/capabilities/mobile.json` | **No change** — multi-output is desktop-only and must not widen the mobile surface |
 | `vite.config.ts` | **Add** an `output` entry to the existing `rollupOptions.input` object (which already declares `main` and `orbit`) pointing at `src/output/output.html`. Do not author a fresh `rollupOptions.input` — that would drop `orbit`. See §7 |
 | `package.json` | No new runtime deps for v1 (Three.js already a runtime dep for VR) |
@@ -605,10 +721,14 @@ two-way binding.
    resolution + position diagram). User picks a monitor and a
    mode (v1: only "SOS Equirectangular" available).
 3. Manager calls `WebviewWindow.new('output-1', {...})` with
-   `decorations: false`, `fullscreen: true`,
-   `position: { x, y }` (the chosen monitor's top-left), and a
-   navigation URL pointing at the bundled `output.html`. Tauri
-   creates the window on the target monitor.
+   `decorations: false`, **`visible: false`**, and a navigation
+   URL pointing at the bundled `output.html` — then places it
+   with `setPosition(new PhysicalPosition(...))` +
+   `setSize(new PhysicalSize(...))`, calls `setFullscreen(true)`,
+   and only then `show()`. Neither position nor fullscreen is a
+   constructor option here, and the order matters: see "Monitor
+   geometry and placement" for why, and for the fifth capability
+   grant it costs.
 4. Output window boots `src/output/main.ts`. Page renders a black
    background. Lazy-imports Three.js. Builds `photorealEarth`
    into a hidden scene. Allocates a 2:1 framebuffer at the
@@ -623,6 +743,89 @@ two-way binding.
    once metadata is in. Begins rendering the equirect RTT each
    frame and presenting it to the canvas.
 7. Done.
+
+### Monitor geometry and placement
+
+Step 3 above says "the chosen monitor's top-left" as though
+that were a single unambiguous number. A throwaway spike that
+spawned real windows across a three-monitor Windows 11 desk
+found two ways it is not.
+
+**Monitor origins are signed.** `\\.\DISPLAY1` on the test
+machine sits at **x = −1680** — the primary is 0,0 and anything
+to its left is negative. That is an ordinary desk, not an edge
+case. Placement itself worked: `outerPosition` came back
+`−1680,383` and `2560,381`, matching both non-primary monitors
+exactly. What it constrains is narrower and easier to get
+wrong — placement arithmetic must not assume a non-negative
+origin, the persisted config must store `x`/`y` **signed**, and
+the picker's position diagram has to translate the whole
+virtual-desktop rectangle rather than treating the primary
+monitor as its own origin.
+
+**`Monitor` positions are physical; window options are
+logical.** `availableMonitors()` reports `position` and `size`
+in **physical** pixels, while `WebviewWindow.new`'s `x` / `y` /
+`width` / `height` are **logical**; the two differ by that
+monitor's `scaleFactor`. On a uniform-scale desk they coincide
+and the obvious code works. On a HiDPI monitor — or, worse, a
+mixed-DPI desk where the scale factor differs *between*
+monitors — passing a physical origin into a logical option puts
+the output window on the wrong monitor, which reads as "the
+feature is broken" rather than as a units bug.
+
+**There is no physical option at construction.** `WindowOptions`
+types `x` / `y` / `width` / `height` as bare `number`, documented
+as logical pixels; only `setPosition` / `setSize` accept
+`PhysicalPosition` / `PhysicalSize`
+(`@tauri-apps/api/window.d.ts`). So the placement cannot be
+expressed in one call, and boot-flow step 3 spawns the window
+and then corrects it:
+
+1. `WebviewWindow.new('output-N', { …, visible: false })` —
+   **hidden**, and without `fullscreen: true`, since fullscreen
+   before placement fullscreens onto whichever monitor the
+   window happened to land on.
+2. `setPosition(new PhysicalPosition(mon.position.x,
+   mon.position.y))` then `setSize(new PhysicalSize(…))` — both
+   already granted (§6), and both take the monitor's numbers
+   unconverted, which is the point: no `scaleFactor` arithmetic
+   means no `scaleFactor` bug.
+3. `setFullscreen(true)`, then `show()`.
+
+That ordering needs a **fifth** capability grant that the table
+in §6 did not have: `core:window:allow-show`. `visible: false`
+is a constructor option and free, but bringing the window back
+is a command, and `core:window:default` is getters only — its
+28 identifiers include `allow-is-visible` but no `allow-show`.
+Verified against Tauri 2.11.2's own permission table.
+
+Creating the window visible and letting it jump is the
+alternative, and it costs the grant but shows the operator a
+window sliding across the desk on every spawn — on a capture
+feed, that is a visible artifact at exactly the moment an
+installation is being set up.
+
+The spike could not test that second case: all three monitors
+reported `scaleFactor: 1`, so the two coordinate spaces were
+numerically identical and a wrong conversion would have passed
+unnoticed. **Mixed-DPI placement is unverified**, and it is the
+likeliest placement bug in v1. It is cheap to get right up
+front and expensive to find later, since the failure needs
+hardware the developer may not have.
+
+Two placement results did come back clean and are worth
+recording, because both were open:
+
+- **Borderless fullscreen lands correctly on a non-primary
+  monitor** — `isDecorated: false`, `isFullscreen: true` on
+  both secondary displays. This is Open Question 1, answered
+  for Windows.
+- **Fullscreen escapes the taskbar.** The primary monitor's
+  `workArea` is 2560×**1392** against a `outerSize` of
+  2560×**1440**: the window covers the taskbar rather than
+  being confined below it, which is exactly what a
+  capture-clean output surface needs.
 
 ### Per-state-change flow
 
@@ -938,33 +1141,93 @@ that governs here:
 > See terraviz#230.
 
 So four control panels plus four outputs is up to **eight
-concurrent decoders on one machine**, and the failure cannot be
-handled reactively: there is no degraded mode to fall back to
-and no moment in which to notice, just a process that goes
-away. On an installation that is the whole exhibit going dark,
-in front of visitors, with the operator's own window taking it
-down.
+concurrent decoders on one machine**.
 
-v1 therefore gives the manager a single budget spanning every
-window it has spawned:
+##### What a throwaway spike measured, and what it changed
+
+An earlier draft of this section reasoned from the phone
+measurement to a fixed cross-window budget of 4, and described
+the failure as a hard crash boundary on any machine. A
+throwaway spike (Windows 11, Intel Raptor Lake-S + **RTX 4090
+Laptop**, three monitors, packaged desktop build, real
+`HLSService` → hls.js → MSE playback) tested that directly.
+Both runs used 8192×4096 render targets — 128 MiB apiece, the
+top rung of the resolution picker — with only the output count
+differing:
+
+| Live outputs | Render targets held | Steady fps | Δframes / 3 s | Dropped | Media clock |
+|---|---|---|---|---|---|
+| 8 | 1 GB | 30.7 | +92 | 0 | 1.00× realtime |
+| 16 | **2 GB** | **30.7** | **+92** | **0** | **1.00× realtime** |
+
+Sixteen outputs, each holding a WebGL2 context, a 128 MiB
+render target and a live decoder, at **full source frame rate,
+exactly realtime, nothing dropped** — and *identical* to the
+eight-output case, not merely close. Four times the budget this
+section proposed, at four times the default pixels, with no
+measurable sustained cost.
+
+Three corrections follow, and they matter more than the number:
+
+- **A fixed budget of 4 is wrong on this class of hardware.**
+  It is at least 4× too conservative. The phone measurement is
+  sound *about a phone*; it does not transfer.
+- **The failure shape is hardware-dependent, not just the
+  threshold.** The crash-boundary framing above is inherited
+  from a phone. This machine was never taken close enough to
+  find its limit, so whether it fails as a cliff or a gradient
+  is **unknown** here — an honest gap, not a resolved one. A
+  design that assumes a cliff will watch for the wrong symptom
+  on desktop hardware.
+- **The real cost is at spawn time, not in steady state.**
+  Sixteen outputs took ~160 ms longer to reach full rate than
+  eight (five cumulative frames). Every window still got there.
+  A budget sized for sustained capacity solves a problem this
+  hardware does not have.
+
+Two methodological notes worth keeping, because both changed a
+conclusion:
+
+- **A cumulative frame count cannot measure throughput.** A
+  single reading taken a fixed interval after playback *starts*
+  folds in startup latency; it showed a spurious ⅓ drop that
+  vanished once two samples were differenced. Steady-state fps
+  must come from a delta over wall-clock, not from a total.
+- **`droppedVideoFrames` is not a sufficient health signal.**
+  It was 0 in every run, including the one that looked
+  degraded. Frame *production rate* and a media-clock-vs-wall
+  ratio are what actually move.
+
+**These numbers are from one 4090 laptop.** A museum is far
+likelier to deploy an Intel-iGPU NUC, and on that hardware the
+cliff this section originally described may well be real.
+Treating 16 as a new constant would repeat the original mistake
+with a different number.
+
+##### The budget v1 actually ships
+
+v1 gives the manager a single budget spanning every window it
+has spawned. The **mechanism below survives the spike
+unchanged; only its value and its health signal move.**
 
 | | |
 |---|---|
-| **Budget** | `MAX_CONCURRENT_DECODERS`, seeded from the control window's own `maxVideoPanels()` so the existing phone/desktop policy still applies, and lowered per-machine in the Outputs panel for hardware known to be tighter |
-| **Counted** | one per video dataset in the control window's panels, plus one per output currently showing a video dataset. Image datasets and the calibration pattern cost nothing — matching the measurement, which found four image panels fine and three video ones fatal. |
+| **Budget** | `DEFAULT_CONCURRENT_DECODERS`, seeded from the control window's own `maxVideoPanels()` and **raised on hardware that demonstrates headroom**, rather than fixed in source. A constant either cripples a 4090 or crashes an NUC. |
+| **Counted** | one per video dataset in the control window's panels, plus one per output currently showing a video dataset. Image datasets and the calibration pattern cost nothing — matching both measurements, which found image panels free and video panels the binding constraint. |
 | **Enforced** | at both spawn time and layout change — whichever action would cross the budget is refused, with a message naming what to close first. Enforced *before* the decoder is built, since after is too late. |
+| **Health signal** | steady-state frame rate and media-clock-vs-wall ratio, sampled as a delta. **Not** a dropped-frame counter, which stayed at 0 through every condition the spike could produce. |
+| **Spawn pacing** | outputs restored on boot, or added in a batch, are staggered rather than created simultaneously. Startup contention is the one cost the spike could actually measure. |
 | **Not enforced** | by an output asking `maxVideoPanels()` itself. That reads the output's own viewport and would answer 4 on any monitor worth attaching, which is the bug. The manager owns the count; outputs are told. |
 | **Not enforced** | by killing an existing decoder. Silently tearing down a running output to make room for a control-window layout change is the worse failure. |
 
-The honest cost: on the default budget, an operator running 4
-globes cannot also add a video output, and an operator with an
-output live cannot switch to the 4-globe layout. That is a real
-restriction and it will be the first thing anyone hits. It is
-still the right trade — a refused layout change is recoverable
-in one click, and a decoder-ceiling crash takes the installation
-down mid-session with no recovery at all. Phase 5's
-shared-GPU-texture work is what actually lifts the ceiling
-rather than rationing under it.
+The honest cost, on a machine whose budget really is 4: an
+operator running 4 globes cannot also add a video output. That
+is a real restriction and it will be the first thing anyone
+hits on constrained hardware. It is still the right trade —
+a refused layout change is recoverable in one click, and a
+decoder-ceiling crash takes the installation down mid-session
+with no recovery at all. Phase 5's shared-GPU-texture work is
+what actually lifts the ceiling rather than rationing under it.
 
 #### What's not the algorithm's job
 
@@ -1002,8 +1265,14 @@ import {
 export const VERIFY_INTERVAL_MS = 1000
 /** Consecutive `'off'` verdicts before reporting a stale frame. */
 export const STALE_FRAME_STRIKES = 3
-/** Cross-window ceiling — see "Cross-window decoder budget". */
-export const MAX_CONCURRENT_DECODERS = 4
+/**
+ * Cross-window ceiling — see "Cross-window decoder budget".
+ * A conservative *seed*, not a measured limit: one 4090 laptop ran
+ * sixteen 8192x4096 outputs at full rate. Raised per-machine from the
+ * Outputs panel and persisted with the layout, because a constant here
+ * either cripples that machine or crashes an iGPU NUC.
+ */
+export const DEFAULT_CONCURRENT_DECODERS = 4
 ```
 
 Only the last three are genuinely this feature's to own, and
@@ -1129,8 +1398,10 @@ After 60 s gone, manager surfaces a confirmation in the
 Outputs panel: "Output {label}'s monitor is gone. Close
 output?" — manual action only. On reconnect, manager
 detects the monitor reappearing, moves the window back to
-the persisted `{ x, y }` of that monitor (matched by
-`monitorName`), and clears the toast.
+the persisted `{ x, y }` of that monitor (matched on
+`monitorName` **and** `monitorOrigin` — see §3 "Persistence";
+a reconnect is exactly the event that reshuffles Windows
+display names), and clears the toast.
 
 #### 5. GPU context loss
 
@@ -1156,10 +1427,28 @@ Context-creating sites on `main` today: one per MapLibre
 page-shared instance via `getSharedLumaSampler()`), and
 `perfSampler.ts:271`. Each output window adds one more. Browsers
 cap live contexts per process and **silently evict the oldest**
-when the cap is crossed — so on a loaded machine the first
-symptom of "too many outputs" is a context-lost event on a
-window nobody touched, which is exactly the path with no
-handling.
+when the cap is crossed — so the first symptom of "too many
+contexts" is a context-lost event on a surface nobody touched,
+which is exactly the path with no handling.
+
+**Where that cap actually binds is narrower than it reads**,
+and a spike measured the difference. The cap is *per process*.
+On Windows, WebView2 gives every Tauri window its own process,
+so sixteen output windows are sixteen separate context budgets
+of one each — the spike ran exactly that, sixteen live WebGL2
+contexts holding a 128 MiB render target apiece, with no
+eviction. Adding outputs does **not** push the control window
+toward its own cap on that platform.
+
+What does push it is the control window's own list above: four
+`MapRenderer`s plus Orbit plus the shared luma sampler plus the
+perf sampler, all in one process. That is the crowded surface,
+and it is crowded whether or not any output exists. macOS is
+the case to watch, because WKWebView may share a process across
+windows and would then put outputs back inside the control
+window's budget; it is untested. So keep the recovery path —
+eviction is real — but stop attributing it to output count on
+Windows.
 
 **Detection.** Output's canvas listens for
 `webglcontextlost` and `webglcontextrestored`. Triggers
@@ -1448,7 +1737,8 @@ what an SOS sphere will see" workflows.
 interface PersistedOutputConfig {
   outputs: Array<{
     label: string             // 'output-1' | 'output-2' | …
-    monitorName: string       // OS-reported name; matched on next boot
+    monitorName: string       // OS-reported name; matched WITH monitorOrigin, never alone
+    monitorOrigin: { x: number; y: number } // physical, SIGNED — see "Monitor geometry"
     mode: 'sos-equirect'      // future: 'fisheye' | 'mirrored' | …
     framebufferSize: { width: number; height: number } // e.g. 4096×2048
     trackOperatorCamera: boolean // default true; see §3.5
@@ -1457,15 +1747,50 @@ interface PersistedOutputConfig {
     debugOverlay: boolean
   }>
   autoRestoreOnLaunch: boolean // default false; opt-in
+  /**
+   * This machine's decoder ceiling. Seeded from
+   * DEFAULT_CONCURRENT_DECODERS and raised by the operator once
+   * they have measured the machine — see "Cross-window decoder
+   * budget". Machine-scoped rather than per-output, because it
+   * is a property of the hardware, not of any one window; it is
+   * therefore the one field here that must NOT be copied when a
+   * config is moved between machines.
+   */
+  concurrentDecoderBudget: number
 }
 ```
 
 On launch, if `autoRestoreOnLaunch === true`, the manager waits
 for the OS to report monitors (~50 ms after boot), tries to
-match each persisted output to a current monitor by name, and
-recreates the windows. If the monitor is gone (laptop unplugged
-from a kiosk dock), the entry is logged and the window is
-skipped — not silently moved to a different monitor.
+match each persisted output to a current monitor on **both**
+`monitorName` and `monitorOrigin`, and recreates the windows. If
+no monitor matches on both — it is gone (laptop unplugged from a
+kiosk dock), or only the name matches — the entry is logged and
+the window is skipped, not silently moved to a different
+monitor.
+
+**Monitor names are less stable than that reads.** Windows
+reports `\\.\DISPLAY1`, `\\.\DISPLAY2`, `\\.\DISPLAY3` — names that
+are *positional*, assigned by the OS and reassignable across an
+unplug/replug or a driver update. Matching on the name alone
+can therefore restore an output onto a different physical
+monitor while looking like it worked, which is the failure this
+paragraph was written to avoid. `monitorOrigin` is stored
+alongside the name so a restore can require **both** to agree,
+and treat a name-only match as a monitor it does not recognise:
+skip it, log it, and let the operator re-pick. Restoring the
+wrong monitor silently is worse than restoring nothing.
+
+Store the origin **signed** and as reported — physical pixels,
+negative x included, exactly as `availableMonitors()` gave them.
+A value that has been through a logical conversion cannot be
+compared against a fresh `Monitor.position` on a HiDPI desk, and
+per "Monitor geometry and placement" nothing in the placement
+path needs the converted form anyway.
+
+Restores are also **staggered, not simultaneous** — the one
+cost the decoder-budget spike could actually measure was
+startup contention. See "Cross-window decoder budget".
 
 ### Output capability spec
 
@@ -1770,8 +2095,10 @@ What must work:
 - **Tools → Outputs panel** with a monitor picker and an "Add
   output" button. One mode available: SOS Equirectangular.
 - **Borderless fullscreen output windows** on user-chosen
-  monitors. Multiple simultaneous outputs supported (each on a
-  distinct monitor; cap at 4).
+  monitors. Multiple simultaneous outputs supported, each on a
+  distinct monitor — so the practical v1 ceiling is however
+  many monitors the workstation has, bounded by the decoder
+  budget rather than by a constant of 4.
 - **Equirectangular composite render.** Output runs a parallel
   Three.js scene with `photorealEarth` + the active dataset
   overlay + the multi-layer stack, renders to a 2:1
@@ -1794,6 +2121,14 @@ What must work:
   antipodal LED-sphere hemisphere — see §3.5), toggle debug
   overlay (shows current dataset id, sync delta, fps in the
   corner — useful for installation calibration), close.
+- **Decoder budget (machine-scoped).** A numeric field showing
+  the current ceiling, seeded from `DEFAULT_CONCURRENT_DECODERS`,
+  with the count in use beside it ("3 of 4 decoders"). Raising it
+  is how an operator who has measured their machine stops being
+  rationed at a constant sized for a phone; the field carries the
+  debug overlay's steady-fps reading as the thing to watch while
+  doing so. Persisted per machine, never exported with a config.
+  See "Cross-window decoder budget".
 - **Optional persistence.** A "Restore outputs on launch"
   checkbox. Off by default.
 - **Clean teardown.** Closing an output disposes the Three.js
@@ -1859,16 +2194,17 @@ without rolling the whole feature back.
 | 2 | `multi-output: equirect RTT shader (unit tests + visual fixture)` | `src/output/equirectRtt.ts` and a tiny test page that loads a known sphere texture and verifies the shader produces the expected equirectangular pixels. Lands as a standalone module; not yet wired up. | No |
 | 3 | `multi-output: output window entry + Three.js scene scaffold` | `src/output/main.ts`, `src/output/datasetMirror.ts`, `src/output/output.html`, `src/output/output.css`, Vite multi-entry config. Output bundle builds; loadable as a static page; renders a default photoreal Earth with no dataset, no IPC. **Start from `globeThumbnail.ts`'s scene-building path** rather than a fresh assembly — see "Prior art". | No |
 | 4 | `multi-output: layer stack + dataset overlay` | `src/output/layerStack.ts`. Static fixture page can now load a fake dataset + fake layer stack and render it. The overlay path consumes a whole `DatasetOverlayOptions` (`lonOrigin` / `isFlippedInY` / `boundingBox` / `celestialBody` / `colorScale`) plus a `ColorScaleDisplay`, reusing `globeThumbnail.ts`'s handling rather than re-deriving the UV maths. Still no IPC. | No |
-| 5 | `multi-output: Tauri capabilities for multi-window` | Two halves. **`capabilities/default.json`** gains `core:webview:allow-create-webview-window`, `core:window:allow-close`, `allow-destroy`, `allow-set-decorations` — without these the manager cannot spawn or tear down an output at all (see §6). **`capabilities/output.json`** is new, scoped to `output-*`, granting only IPC + self-driven window controls + HTTPS fetch. `mobile.json` untouched. | No |
+| 5 | `multi-output: Tauri capabilities for multi-window` | Two halves. **`capabilities/default.json`** gains `core:webview:allow-create-webview-window`, `core:window:allow-close`, `allow-destroy`, `allow-set-decorations`, `allow-show` — without these the manager cannot spawn, place, reveal or tear down an output at all (see §6). **`capabilities/output.json`** is new, scoped to `output-*`, granting only IPC + self-driven window controls + HTTPS fetch. `mobile.json` untouched. | No |
 | 6 | `multi-output: state aggregator + protocol implementation` | `multiOutput/manager.ts`, `multiOutput/stateAggregator.ts`. Manager constructible but not yet instantiated. | No |
 | 7 | `multi-output: emit dataset:loaded + layer events from main.ts` | Refactor of `datasetLoader` and `main.ts` to fire events the aggregator can subscribe to. Today's `panelStates` consumers keep working. | No |
 | 8 | `multi-output: wire MultiOutputManager into main.ts boot` | Manager instantiated; subscribes to events. No UI to spawn windows yet, so still invisible. | No |
 | 9 | `multi-output: add Tools → Outputs panel` | `outputUI.ts`, Tools menu entry. **First user-reachable commit.** Operator can add and remove SOS equirectangular outputs. | **Yes** |
-| 10 | `multi-output: persist + restore outputs across launches` | localStorage config, opt-in restore on boot, monitor-name matching. | Yes (additive) |
-| 11 | `multi-output: per-output debug overlay + framebuffer resolution picker` | Resolution picker in panel, debug HUD with dataset id, sync delta, and fps. | Yes (additive) |
+| 10 | `multi-output: persist + restore outputs across launches` | localStorage config, opt-in restore on boot, and monitor matching on **both** name and signed physical origin — a name-only match is treated as a monitor the manager does not recognise and skipped, because Windows display names are positional and reassignable (see §3 "Persistence"). | Yes (additive) |
+| 11 | `multi-output: per-output debug overlay + framebuffer + decoder-budget controls` | Resolution picker in panel, the machine-scoped **decoder-budget field** (seeded from `DEFAULT_CONCURRENT_DECODERS`, persisted, shown as "N of M decoders") that makes the per-machine budget in §3 actually settable — without it the budget is a constant wearing a different name — debug HUD with dataset id, sync delta, fps, and the WebGL **renderer string** — the last so an operator can see which GPU the webview actually got, which on a hybrid-graphics machine is decided by the driver rather than by the app (see Risks). | Yes (additive) |
 | 12 | `multi-output: fullscreen toggle + kiosk launch + F11 on every window` | `Tools → Fullscreen` toggle in `toolsMenuUI.ts` (persisted), F11 keydown handler on control + output windows, `--kiosk` argv parse and `TERRAVIZ_KIOSK=1` env var read in `src-tauri/src/lib.rs` (**not** `main.rs`, now a 12-line shim) behind `#[cfg(desktop)]`, applying fullscreen + decorationless before first paint, 3-second idle cursor-hide on the control window when fullscreen. See §3.6. | Yes (additive) |
 | 13 | `multi-output: failure recovery — crashes, stalls, GPU loss, monitor unplug` | Manager gains crash detection (no-graceful-close window destroy → toast + record removal), 3-strikes-per-monitor crash storm guard, 2 s `availableMonitors()` poll for unplug detection, `getAll()` boot scan to reattach orphaned `output-*` windows after a control-window crash. Output gains `webglcontextlost` / `webglcontextrestored` listeners with full scene rebuild, IPC-silence watchdog (5 s → stale state, 60 s → orphan), one HLS stream rebuild on a `loadStream()` rejection with frozen last-good-frame (no retry ladder — `hlsService` already spends a 3× budget before rejecting). Outputs panel renders per-output health badges (healthy / stale / stalled / monitor-missing). New Tier A `output_failure` event fired from manager via `analytics/emitter.ts` with `{ kind, retries, recovered }` (Open Question 3 decided). See §3 "Failure recovery". | Yes (additive) |
 | 14 | `multi-output: calibration tooling — test pattern + rotation offset` | `src/output/datasetMirror.ts` recognises the `__terraviz_calibration__` sentinel id and renders a procedural test pattern (8-step grayscale ramp at the equator, RGB color bars at lat ±30°, lat/lon graticule with color-coded equator + prime meridian, named anchor crosshairs, N/S pole labels, live resolution counter — ~80 LOC GLSL). `src/output/equirectRtt.ts` adds the `uRotationOffsetRad` longitude rotation applied before the camera-offset ray-march. `outputUI.ts` adds the per-output "Rotation offset (°)" numeric + slider and a "Calibration" submenu. Persisted config gains `rotationOffsetDeg`. See §3 "Calibration tooling". | Yes (additive) |
+| 15 | `multi-output: operator runbook` | `docs/MULTI_MONITOR_OPERATIONS.md` — the deployment half this plan has so far deferred, and which a spike showed is not optional. Covers: **checking which GPU the webview actually got** (the renderer string surfaced by commit 11's debug overlay) and the per-OS override for a hybrid-graphics machine, since the app's own `powerPreference` is inert and a silent landing on the iGPU is undiagnosable from logs; **measuring this machine's decoder budget** rather than trusting a constant, and entering it in the Outputs panel's budget field (commit 11); disabling screen savers and display sleep (Open Question 5's documented half); the kiosk autostart entry from §3.6; and what each Outputs-panel health badge means in front of an audience. No code. | **Yes** (docs) |
 
 **Backout plan.** Reverting commit 9 leaves all the plumbing in
 place (manager, output bundle, capability) but removes the
@@ -2200,14 +2536,24 @@ renderer somewhere" — which we don't. Direct RTT.
 
 ## Open questions
 
-1. **Tauri window stacking on Linux.** Some compositors
-   (sway, certain GNOME setups) treat fullscreen popups
-   differently than Windows / macOS. Need to test on at
-   least one Wayland and one X11 setup before declaring v1
-   done. The monitor-unplug failure case (§3 "Failure
-   recovery", case 4) also varies by compositor — pin down
-   the actual behavior on the target install platforms as
-   part of the same test pass.
+1. **Tauri window stacking on Linux — narrowed to Linux.**
+   *Windows is answered.* A spike put borderless fullscreen
+   output windows on both non-primary monitors of a
+   three-monitor Windows 11 desk: `isDecorated: false`,
+   `isFullscreen: true`, exact placement including a negative
+   origin, and coverage over the taskbar rather than
+   confinement to the work area. See "Monitor geometry and
+   placement".
+
+   That says nothing about Linux, which was always the risky
+   half. Some compositors (sway, certain GNOME setups) treat
+   fullscreen popups differently from Windows / macOS. Still
+   need at least one Wayland and one X11 setup before
+   declaring v1 done. The monitor-unplug failure case (§3
+   "Failure recovery", case 4) also varies by compositor —
+   pin down the actual behavior on the target install
+   platforms as part of the same test pass. macOS is
+   untested too.
 2. **What to do when the operator opens an output but no
    dataset is loaded?** Default: render the photoreal Earth
    with day/night and atmosphere — a "live Earth" idle state.
@@ -2305,17 +2651,58 @@ renderer somewhere" — which we don't. Direct RTT.
 - **Tauri webview process limits.** Tauri spins up a webview
   process per window. On Windows with WebView2, each window
   is its own process; macOS with WKWebView may share. Memory
-  scales linearly. Realistic ceiling: 4-6 outputs per
-  workstation. We cap at 4 in v1.
-- **GPU memory pressure.** Each output holds: a 4K sphere
-  texture (or two for multi-layer), a 4K equirect
-  framebuffer, plus Three.js scene resources. At 4 outputs
-  that's ~1 GB of GPU memory. Workstation GPUs handle it;
-  the cap matters.
-- **HLS decode pressure.** 4 simultaneous 4K HLS decodes is a
-  lot. Most discrete GPUs handle it; integrated GPUs might
-  not. The Tools panel should warn if the user adds a 4th
-  output, citing hardware requirements.
+  scales linearly. An earlier draft put the realistic ceiling
+  at 4-6 outputs per workstation; a spike ran **sixteen** on a
+  4090 laptop with no measurable sustained cost, so the number
+  was a guess and is withdrawn rather than replaced. The risk
+  that remains is real but different: the ceiling is
+  **hardware-specific and unknown until measured on the
+  deployment machine**, which is a provisioning question, not
+  a constant. See "Cross-window decoder budget".
+- **GPU memory pressure.** Each output holds a sphere texture
+  (or two for multi-layer), an equirect framebuffer, and
+  Three.js scene resources. Sixteen outputs at 8192×4096 held
+  2 GB of render targets alone and stayed at full rate — on a
+  4090. A museum NUC has an order of magnitude less to give,
+  and the resolution picker multiplies it: the same sixteen
+  outputs at 2048×1024 would be 128 MB. Resolution, not output
+  count, is the lever operators should reach for first.
+- **HLS decode pressure.** Sixteen simultaneous decodes ran at
+  30.7 fps, 1.00× realtime, zero dropped — so "4 is a lot" was
+  wrong on that hardware and may still be right on an iGPU.
+  The Tools panel warning therefore cannot key off a fixed
+  count. Warn against the machine's own budget, and surface
+  the health signal that actually moves under load —
+  steady-state frame rate and media-clock drift, **not** a
+  dropped-frame counter, which stayed at 0 through every
+  condition the spike could produce.
+- **Which GPU the app lands on is not the app's to decide.** A
+  spike on a hybrid-graphics laptop first reported
+  `ANGLE (Intel, Intel(R) UHD Graphics …)` on a machine with an
+  RTX 4090 — a completely different budget for both the
+  equirect render targets and the video decoders (Quick Sync vs
+  NVDEC), which is this section's whole subject. It moved to
+  the 4090 only when the operator changed the NVIDIA Control
+  Panel's preferred adapter.
+
+  `probeGpuSelection()` then settled the confound inside a
+  single run: `high-performance` and `low-power` returned the
+  **same** adapter, `powerPreferenceWorks: false`. The app's
+  request is inert on that machine — the driver decides above
+  it. An earlier note in the spike proposing
+  `additional_browser_args` with `--force-high-performance-gpu`
+  is superseded by that measurement and should **not** be
+  written into this plan as a fix; there is no
+  environment-variable escape hatch either, as neither wry nor
+  tauri reads one.
+
+  The risk this leaves is a deployment one: an unattended
+  installation can silently land on the iGPU, run at a fraction
+  of the capacity it was provisioned for, and be undiagnosable
+  from logs. Mitigations are to surface the renderer string in
+  the Outputs panel's debug overlay so an operator can *see*
+  which GPU is in use, and to document the per-OS override in
+  the runbook (commit 15).
 - **Operator confusion.** "Where did my video go?" is a real
   question if a user accidentally triggers fullscreen on the
   primary monitor. Borderless fullscreen output windows must
@@ -2383,6 +2770,7 @@ const outputs: PersistedOutputConfig = {
     {
       label: 'output-1',
       monitorName: 'DELL-SOS-DRIVER',
+      monitorOrigin: { x: -1680, y: 383 },  // physical, signed
       mode: 'sos-equirect',
       framebufferSize: { width: 4096, height: 2048 },
       trackOperatorCamera: true,   // see §3.5
@@ -2392,6 +2780,7 @@ const outputs: PersistedOutputConfig = {
     },
   ],
   autoRestoreOnLaunch: true,
+  concurrentDecoderBudget: 4,  // seeded; raised per machine
 }
 ```
 
@@ -2418,12 +2807,35 @@ overlay added in commit 11). Failure-recovery actions emit
 exactly one `output_failure` Tier A telemetry event per
 occurrence (verify via `VITE_TELEMETRY_CONSOLE=true`).
 
+> **Any step involving a video dataset needs
+> `npm run build:desktop`, not `npm run dev:desktop`.** A spike
+> hit this and spent real time on it. The CDN serving the HLS
+> assets applies an origin allowlist, and it carries
+> `tauri.localhost` (the packaged build's origin) but **not**
+> `http://localhost:5173` (the dev server's). The shipped path
+> is `HLSService` → hls.js → MSE, which fetches the manifest and
+> every segment over XHR and is therefore fully CORS-gated, so
+> in `dev:desktop` a video dataset cannot load *at all* — not in
+> the control window, not in an output.
+>
+> Two corollaries. **Image datasets do work in dev**, and they
+> cost a WebGL context while creating no decoder, so the dev
+> loop still answers the context half of any ceiling question.
+> And a plain `<video src=…>` pointed at the same URL **will**
+> play in dev, because media elements are not CORS-gated unless
+> `crossOrigin` is set — which makes it a trap, not a
+> workaround: it proves nothing about the pipeline
+> `datasetMirror` actually uses. Nothing client-side changes
+> either fact.
+
 ### Commit 9 — Tools → Outputs panel (first user-reachable)
 
 **Pre-flight:**
 
 1. Both monitors connected; `npm run build:desktop` artifact
-   launched (or `npm run dev:desktop` for iteration).
+   launched. `npm run dev:desktop` is fine for iterating on
+   window management and image datasets, but **not** for any
+   video step — see the note above.
 2. Telemetry tier set to Essential (default).
 3. Console open via F12 on the control window for log inspection.
 
@@ -2513,7 +2925,11 @@ occurrence (verify via `VITE_TELEMETRY_CONSOLE=true`).
 
 22. Toggle "Debug overlay" on for the running output. HUD
     appears in a corner showing dataset id, sync delta (ms),
-    and fps. Numbers update at ~2 Hz.
+    fps, and the WebGL renderer string. Numbers update at
+    ~2 Hz. On a hybrid-graphics machine, check the renderer
+    string names the discrete GPU — a spike found the webview
+    silently on the iGPU of a machine with a 4090, and the
+    app cannot choose for itself (see Risks).
 23. Change the output's framebuffer resolution from
     4096×2048 to 8192×4096 via the panel. The output rebuilds
     its framebuffer; debug overlay reports the new
@@ -2684,6 +3100,17 @@ naming what to close, **not** crash and **not** silently tear
 down a panel. Then close two panels and confirm the output
 spawns. Repeat in the other order (output live, then switch to
 4 globes) — the layout change is the thing refused that time.
+
+**S5b. A raised budget is honoured.** Everything in S5 exercises
+the seeded value of 4, which a constant would also pass — so it
+does not test that the budget is settable at all. In the Outputs
+panel raise the decoder budget to 6, then repeat S5's first
+half: the 4-globe video layout must now accept two video
+outputs rather than refusing the first. Quit and relaunch; the
+budget is still 6 and the same two outputs still spawn. Lower it
+back to 4 with those outputs live — the existing ones are
+**not** torn down (§3 forbids killing a running decoder to make
+room), and the next spawn is refused.
 
 **S6. Palette mirroring.** On a data-encoded dataset, change
 the palette (source → magma), then the contrast stretch, then
