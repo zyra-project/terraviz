@@ -624,6 +624,59 @@ two-way binding.
    frame and presenting it to the canvas.
 7. Done.
 
+### Monitor geometry and placement
+
+Step 3 above says "the chosen monitor's top-left" as though
+that were a single unambiguous number. A throwaway spike that
+spawned real windows across a three-monitor Windows 11 desk
+found two ways it is not.
+
+**Monitor origins are signed.** `\\.\DISPLAY1` on the test
+machine sits at **x = −1680** — the primary is 0,0 and anything
+to its left is negative. That is an ordinary desk, not an edge
+case. Placement itself worked: `outerPosition` came back
+`−1680,383` and `2560,381`, matching both non-primary monitors
+exactly. What it constrains is narrower and easier to get
+wrong — placement arithmetic must not assume a non-negative
+origin, the persisted config must store `x`/`y` **signed**, and
+the picker's position diagram has to translate the whole
+virtual-desktop rectangle rather than treating the primary
+monitor as its own origin.
+
+**`Monitor` positions are physical; window options are
+logical.** `availableMonitors()` reports `position` and `size`
+in **physical** pixels, while `WebviewWindow.new`'s `x` / `y` /
+`width` / `height` are **logical**; the two differ by that
+monitor's `scaleFactor`. On a uniform-scale desk they coincide
+and the obvious code works. On a HiDPI monitor — or, worse, a
+mixed-DPI desk where the scale factor differs *between*
+monitors — passing a physical origin into a logical option puts
+the output window on the wrong monitor, which reads as "the
+feature is broken" rather than as a units bug. Construct a
+`PhysicalPosition` / `PhysicalSize` explicitly instead of
+relying on the bare numbers agreeing.
+
+The spike could not test that second case: all three monitors
+reported `scaleFactor: 1`, so the two coordinate spaces were
+numerically identical and a wrong conversion would have passed
+unnoticed. **Mixed-DPI placement is unverified**, and it is the
+likeliest placement bug in v1. It is cheap to get right up
+front and expensive to find later, since the failure needs
+hardware the developer may not have.
+
+Two placement results did come back clean and are worth
+recording, because both were open:
+
+- **Borderless fullscreen lands correctly on a non-primary
+  monitor** — `isDecorated: false`, `isFullscreen: true` on
+  both secondary displays. This is Open Question 1, answered
+  for Windows.
+- **Fullscreen escapes the taskbar.** The primary monitor's
+  `workArea` is 2560×**1392** against a `outerSize` of
+  2560×**1440**: the window covers the taskbar rather than
+  being confined below it, which is exactly what a
+  capture-clean output surface needs.
+
 ### Per-state-change flow
 
 State diffs are broadcast on change, not on a polling clock:
@@ -1515,6 +1568,7 @@ interface PersistedOutputConfig {
   outputs: Array<{
     label: string             // 'output-1' | 'output-2' | …
     monitorName: string       // OS-reported name; matched on next boot
+    monitorOrigin: { x: number; y: number } // physical, SIGNED — see "Monitor geometry"
     mode: 'sos-equirect'      // future: 'fisheye' | 'mirrored' | …
     framebufferSize: { width: number; height: number } // e.g. 4096×2048
     trackOperatorCamera: boolean // default true; see §3.5
@@ -1532,6 +1586,28 @@ match each persisted output to a current monitor by name, and
 recreates the windows. If the monitor is gone (laptop unplugged
 from a kiosk dock), the entry is logged and the window is
 skipped — not silently moved to a different monitor.
+
+**Monitor names are less stable than that reads.** Windows
+reports `\\.\DISPLAY1`, `\\.\DISPLAY2`, `\\.\DISPLAY3` — names that
+are *positional*, assigned by the OS and reassignable across an
+unplug/replug or a driver update. Matching on the name alone
+can therefore restore an output onto a different physical
+monitor while looking like it worked, which is the failure this
+paragraph was written to avoid. `monitorOrigin` is stored
+alongside the name so a restore can require **both** to agree,
+and treat a name-only match as a monitor it does not recognise:
+skip it, log it, and let the operator re-pick. Restoring the
+wrong monitor silently is worse than restoring nothing.
+
+Store the origin **signed** and as reported — physical pixels,
+negative x included. See "Monitor geometry and placement" for
+why a persisted position that has been through a logical
+conversion cannot be compared against a fresh `Monitor.position`
+on a HiDPI desk.
+
+Restores are also **staggered, not simultaneous** — the one
+cost the decoder-budget spike could actually measure was
+startup contention. See "Cross-window decoder budget".
 
 ### Output capability spec
 
