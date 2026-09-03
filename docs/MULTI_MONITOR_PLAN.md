@@ -66,8 +66,10 @@ is not part of the delivery ladder.
 Four things the spike found that the plan did not predict are
 folded into the sections above: signed monitor origins, GPU
 selection being a driver-level decision the app cannot make,
-an ACL denial presenting as "datasets don't load", and video
-datasets being unloadable in `dev:desktop` at all.
+an ACL denial presenting as "datasets don't load" (in a window
+running the main app bundle — **not** in v1's outputs, which
+run `datasetMirror` and invoke no commands), and video datasets
+being unloadable in `dev:desktop` at all.
 
 **Everything measured came from one 4090 laptop.** A museum is
 likelier to deploy an Intel-iGPU NUC. Numbers here bound what is
@@ -392,16 +394,37 @@ invoke is ACL-denied, the promise rejects, and `loadDataset`
 throws before doing anything else — so the symptom is "datasets
 don't load", with no mention of permissions anywhere in it.
 
+**v1's own outputs do not hit this**, and an earlier draft of
+this section wrongly implied they do. Outputs run
+`src/output/datasetMirror.ts`, not `datasetLoader`, and
+§"Output capability spec" grants them no Tauri commands at all —
+they fetch over the network by design. So the hazard is not
+"this feature walks into it". It is narrower and still worth
+writing down: **any window running the main app bundle walks
+into it**, which is what the spike's own `spike-app-*` preflight
+windows were, and what a Phase 4 mirrored mode reusing the main
+bundle would be.
+
 To be exact about the evidence: this is a code reading, not an
 observed failure. The spike's own "the spawned window won't
 load datasets" turned out to be a dead `VITE_DEV_API_TARGET`
 proxy, and a preflight window proved its capability was live.
-The mechanism is still real, and this feature walks straight
-into it — **the plan adds windows, and every added window is a
-new capability surface.** Make the helper defensive before
-commit 5: a denied invoke should resolve to "no local copy" and
-log the denial, not reject into a caller that reads it as a
-missing dataset.
+
+The fix landed separately, on `main`, because the bug is not
+multi-window-specific and is reachable today: the read commands
+resolve to their no-downloads value and log the denial once
+rather than rejecting. Three surfaces were affected, not one —
+`datasetLoader`'s two load paths, `downloadUI`'s `renderPanel`
+(which left the panel blank), and `browseUI`'s badge loop. The
+mutating commands still reject, deliberately.
+
+That fix catches every rejection, not only ACL-shaped ones,
+which does mean a genuine index or I/O failure now degrades and
+logs rather than throwing. The trade is deliberate: the caller
+is asking "is there a local copy?", "I cannot tell" is
+operationally the same answer as "no", and the alternative is
+matching on Tauri's denial string, which is not a stable
+contract.
 
 ### 7. Vite multi-entry build
 
@@ -675,7 +698,7 @@ two-way binding.
 |---|---|
 | `src/main.ts` | Boot `MultiOutputManager`; wire it to dataset / playback / layer / **camera** events |
 | `src/services/datasetLoader.ts` | Emit a `dataset:loaded` event the manager subscribes to |
-| `src/services/downloadService.ts` | Make `getDownload` defensive: catch a rejected invoke and resolve to "no local copy", logging the denial. Today it rejects, and `datasetLoader` awaits it as the first step of both load paths (`:126`, `:272`), so a missing capability in a new window surfaces as "datasets don't load" with no mention of permissions. Land this **before** commit 5. See §6 |
+| `src/services/downloadService.ts` | **Already landed on `main`, separately from this ladder** — the read commands resolve to their no-downloads value and log a denial once instead of rejecting, so a window without the download grants degrades rather than throwing out of `loadDataset`. Listed here because §6 explains why it matters to multi-window work, not because this feature has to do it. See §6 |
 | `src/services/mapRenderer.ts` | Emit a debounced `camera:moved` event with `{ lng, lat, zoom }` so the manager can derive `view.cameraOffset` for outputs that track operator camera |
 | `src/ui/playbackController.ts` | Forward play / pause / scrubber events to the state aggregator |
 | `src/types/index.ts` | Add `OutputAddedEvent` / `OutputRemovedEvent` / `OutputFailureEvent` interfaces; append to the `TelemetryEvent` union; tier choice is essential — none belong in `TIER_B_EVENT_TYPES` (see "Telemetry" decision in Open Questions §3) |
