@@ -1328,10 +1328,28 @@ Context-creating sites on `main` today: one per MapLibre
 page-shared instance via `getSharedLumaSampler()`), and
 `perfSampler.ts:271`. Each output window adds one more. Browsers
 cap live contexts per process and **silently evict the oldest**
-when the cap is crossed — so on a loaded machine the first
-symptom of "too many outputs" is a context-lost event on a
-window nobody touched, which is exactly the path with no
-handling.
+when the cap is crossed — so the first symptom of "too many
+contexts" is a context-lost event on a surface nobody touched,
+which is exactly the path with no handling.
+
+**Where that cap actually binds is narrower than it reads**,
+and a spike measured the difference. The cap is *per process*.
+On Windows, WebView2 gives every Tauri window its own process,
+so sixteen output windows are sixteen separate context budgets
+of one each — the spike ran exactly that, sixteen live WebGL2
+contexts holding a 128 MiB render target apiece, with no
+eviction. Adding outputs does **not** push the control window
+toward its own cap on that platform.
+
+What does push it is the control window's own list above: four
+`MapRenderer`s plus Orbit plus the shared luma sampler plus the
+perf sampler, all in one process. That is the crowded surface,
+and it is crowded whether or not any output exists. macOS is
+the case to watch, because WKWebView may share a process across
+windows and would then put outputs back inside the control
+window's budget; it is untested. So keep the recovery path —
+eviction is real — but stop attributing it to output count on
+Windows.
 
 **Detection.** Output's canvas listens for
 `webglcontextlost` and `webglcontextrestored`. Triggers
@@ -1965,8 +1983,10 @@ What must work:
 - **Tools → Outputs panel** with a monitor picker and an "Add
   output" button. One mode available: SOS Equirectangular.
 - **Borderless fullscreen output windows** on user-chosen
-  monitors. Multiple simultaneous outputs supported (each on a
-  distinct monitor; cap at 4).
+  monitors. Multiple simultaneous outputs supported, each on a
+  distinct monitor — so the practical v1 ceiling is however
+  many monitors the workstation has, bounded by the decoder
+  budget rather than by a constant of 4.
 - **Equirectangular composite render.** Output runs a parallel
   Three.js scene with `photorealEarth` + the active dataset
   overlay + the multi-layer stack, renders to a 2:1
@@ -2510,17 +2530,31 @@ renderer somewhere" — which we don't. Direct RTT.
 - **Tauri webview process limits.** Tauri spins up a webview
   process per window. On Windows with WebView2, each window
   is its own process; macOS with WKWebView may share. Memory
-  scales linearly. Realistic ceiling: 4-6 outputs per
-  workstation. We cap at 4 in v1.
-- **GPU memory pressure.** Each output holds: a 4K sphere
-  texture (or two for multi-layer), a 4K equirect
-  framebuffer, plus Three.js scene resources. At 4 outputs
-  that's ~1 GB of GPU memory. Workstation GPUs handle it;
-  the cap matters.
-- **HLS decode pressure.** 4 simultaneous 4K HLS decodes is a
-  lot. Most discrete GPUs handle it; integrated GPUs might
-  not. The Tools panel should warn if the user adds a 4th
-  output, citing hardware requirements.
+  scales linearly. An earlier draft put the realistic ceiling
+  at 4-6 outputs per workstation; a spike ran **sixteen** on a
+  4090 laptop with no measurable sustained cost, so the number
+  was a guess and is withdrawn rather than replaced. The risk
+  that remains is real but different: the ceiling is
+  **hardware-specific and unknown until measured on the
+  deployment machine**, which is a provisioning question, not
+  a constant. See "Cross-window decoder budget".
+- **GPU memory pressure.** Each output holds a sphere texture
+  (or two for multi-layer), an equirect framebuffer, and
+  Three.js scene resources. Sixteen outputs at 8192×4096 held
+  2 GB of render targets alone and stayed at full rate — on a
+  4090. A museum NUC has an order of magnitude less to give,
+  and the resolution picker multiplies it: the same sixteen
+  outputs at 2048×1024 would be 128 MB. Resolution, not output
+  count, is the lever operators should reach for first.
+- **HLS decode pressure.** Sixteen simultaneous decodes ran at
+  30.7 fps, 1.00× realtime, zero dropped — so "4 is a lot" was
+  wrong on that hardware and may still be right on an iGPU.
+  The Tools panel warning therefore cannot key off a fixed
+  count. Warn against the machine's own budget, and surface
+  the health signal that actually moves under load —
+  steady-state frame rate and media-clock drift, **not** a
+  dropped-frame counter, which stayed at 0 through every
+  condition the spike could produce.
 - **Operator confusion.** "Where did my video go?" is a real
   question if a user accidentally triggers fullscreen on the
   primary monitor. Borderless fullscreen output windows must
