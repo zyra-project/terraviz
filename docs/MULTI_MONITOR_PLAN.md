@@ -2080,10 +2080,11 @@ without rolling the whole feature back.
 | 8 | `multi-output: wire MultiOutputManager into main.ts boot` | Manager instantiated; subscribes to events. No UI to spawn windows yet, so still invisible. | No |
 | 9 | `multi-output: add Tools → Outputs panel` | `outputUI.ts`, Tools menu entry. **First user-reachable commit.** Operator can add and remove SOS equirectangular outputs. | **Yes** |
 | 10 | `multi-output: persist + restore outputs across launches` | localStorage config, opt-in restore on boot, monitor-name matching. | Yes (additive) |
-| 11 | `multi-output: per-output debug overlay + framebuffer resolution picker` | Resolution picker in panel, debug HUD with dataset id, sync delta, and fps. | Yes (additive) |
+| 11 | `multi-output: per-output debug overlay + framebuffer resolution picker` | Resolution picker in panel, debug HUD with dataset id, sync delta, fps, and the WebGL **renderer string** — the last so an operator can see which GPU the webview actually got, which on a hybrid-graphics machine is decided by the driver rather than by the app (see Risks). | Yes (additive) |
 | 12 | `multi-output: fullscreen toggle + kiosk launch + F11 on every window` | `Tools → Fullscreen` toggle in `toolsMenuUI.ts` (persisted), F11 keydown handler on control + output windows, `--kiosk` argv parse and `TERRAVIZ_KIOSK=1` env var read in `src-tauri/src/lib.rs` (**not** `main.rs`, now a 12-line shim) behind `#[cfg(desktop)]`, applying fullscreen + decorationless before first paint, 3-second idle cursor-hide on the control window when fullscreen. See §3.6. | Yes (additive) |
 | 13 | `multi-output: failure recovery — crashes, stalls, GPU loss, monitor unplug` | Manager gains crash detection (no-graceful-close window destroy → toast + record removal), 3-strikes-per-monitor crash storm guard, 2 s `availableMonitors()` poll for unplug detection, `getAll()` boot scan to reattach orphaned `output-*` windows after a control-window crash. Output gains `webglcontextlost` / `webglcontextrestored` listeners with full scene rebuild, IPC-silence watchdog (5 s → stale state, 60 s → orphan), one HLS stream rebuild on a `loadStream()` rejection with frozen last-good-frame (no retry ladder — `hlsService` already spends a 3× budget before rejecting). Outputs panel renders per-output health badges (healthy / stale / stalled / monitor-missing). New Tier A `output_failure` event fired from manager via `analytics/emitter.ts` with `{ kind, retries, recovered }` (Open Question 3 decided). See §3 "Failure recovery". | Yes (additive) |
 | 14 | `multi-output: calibration tooling — test pattern + rotation offset` | `src/output/datasetMirror.ts` recognises the `__terraviz_calibration__` sentinel id and renders a procedural test pattern (8-step grayscale ramp at the equator, RGB color bars at lat ±30°, lat/lon graticule with color-coded equator + prime meridian, named anchor crosshairs, N/S pole labels, live resolution counter — ~80 LOC GLSL). `src/output/equirectRtt.ts` adds the `uRotationOffsetRad` longitude rotation applied before the camera-offset ray-march. `outputUI.ts` adds the per-output "Rotation offset (°)" numeric + slider and a "Calibration" submenu. Persisted config gains `rotationOffsetDeg`. See §3 "Calibration tooling". | Yes (additive) |
+| 15 | `multi-output: operator runbook` | `docs/MULTI_MONITOR_OPERATIONS.md` — the deployment half this plan has so far deferred, and which a spike showed is not optional. Covers: **checking which GPU the webview actually got** (the renderer string surfaced by commit 11's debug overlay) and the per-OS override for a hybrid-graphics machine, since the app's own `powerPreference` is inert and a silent landing on the iGPU is undiagnosable from logs; **measuring this machine's decoder budget** rather than trusting a constant, and where the resulting number is entered; disabling screen savers and display sleep (Open Question 5's documented half); the kiosk autostart entry from §3.6; and what each Outputs-panel health badge means in front of an audience. No code. | **Yes** (docs) |
 
 **Backout plan.** Reverting commit 9 leaves all the plumbing in
 place (manager, output bundle, capability) but removes the
@@ -2555,6 +2556,33 @@ renderer somewhere" — which we don't. Direct RTT.
   steady-state frame rate and media-clock drift, **not** a
   dropped-frame counter, which stayed at 0 through every
   condition the spike could produce.
+- **Which GPU the app lands on is not the app's to decide.** A
+  spike on a hybrid-graphics laptop first reported
+  `ANGLE (Intel, Intel(R) UHD Graphics …)` on a machine with an
+  RTX 4090 — a completely different budget for both the
+  equirect render targets and the video decoders (Quick Sync vs
+  NVDEC), which is this section's whole subject. It moved to
+  the 4090 only when the operator changed the NVIDIA Control
+  Panel's preferred adapter.
+
+  `probeGpuSelection()` then settled the confound inside a
+  single run: `high-performance` and `low-power` returned the
+  **same** adapter, `powerPreferenceWorks: false`. The app's
+  request is inert on that machine — the driver decides above
+  it. An earlier note in the spike proposing
+  `additional_browser_args` with `--force-high-performance-gpu`
+  is superseded by that measurement and should **not** be
+  written into this plan as a fix; there is no
+  environment-variable escape hatch either, as neither wry nor
+  tauri reads one.
+
+  The risk this leaves is a deployment one: an unattended
+  installation can silently land on the iGPU, run at a fraction
+  of the capacity it was provisioned for, and be undiagnosable
+  from logs. Mitigations are to surface the renderer string in
+  the Outputs panel's debug overlay so an operator can *see*
+  which GPU is in use, and to document the per-OS override in
+  the runbook (commit 15).
 - **Operator confusion.** "Where did my video go?" is a real
   question if a user accidentally triggers fullscreen on the
   primary monitor. Borderless fullscreen output windows must
@@ -2752,7 +2780,11 @@ occurrence (verify via `VITE_TELEMETRY_CONSOLE=true`).
 
 22. Toggle "Debug overlay" on for the running output. HUD
     appears in a corner showing dataset id, sync delta (ms),
-    and fps. Numbers update at ~2 Hz.
+    fps, and the WebGL renderer string. Numbers update at
+    ~2 Hz. On a hybrid-graphics machine, check the renderer
+    string names the discrete GPU — a spike found the webview
+    silently on the iGPU of a machine with a 4090, and the
+    app cannot choose for itself (see Risks).
 23. Change the output's framebuffer resolution from
     4096×2048 to 8192×4096 via the panel. The output rebuilds
     its framebuffer; debug overlay reports the new
