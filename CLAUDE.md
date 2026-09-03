@@ -142,6 +142,7 @@ npm run screenshots:smoke   # gating interaction tests (search, Orbit, nav)
 |---|---|
 | `src/main.ts` | App entry — boots MapLibre renderer, orchestrates dataset loading |
 | `src/types/index.ts` | All shared types (`Dataset`, `ChatMessage`, `AppState`, `DocentConfig`…) |
+| `src/services/multiOutput/protocol.ts` | Control ↔ output IPC contract for the multi-monitor output windows (`docs/MULTI_MONITOR_PLAN.md` §3) — the mirrored globe-state schema, the two event channels, the `output-*` window-label grammar the Tauri capability glob depends on, and the three timings both sides must agree on. Types, names and numbers only: imported by both bundles, so it holds no DOM, no Tauri import and no behaviour. Deliberately does **not** re-declare the sync constants (`SIBLING_*` live in `src/utils/time.ts`, and a copy is a copy that drifts) or the decoder budget. Playback crosses as an **ISO date plus `playbackRate`**, never a raw `currentTime`: a playhead is meaningful only against one media element, and an assumed rate of 1 is terraviz#229 in a second window |
 | `src/services/mapRenderer.ts` | MapLibre GL JS globe — GIBS tiles, navigation, markers, terrain |
 | `src/services/viewportManager.ts` | Multi-globe orchestrator — 1/2/4 synchronised MapRenderer instances in a CSS grid, camera lockstep, panel promotion |
 | `src/services/earthTileLayer.ts` | CustomLayerInterface — day/night blend, clouds, specular, sun, skybox |
