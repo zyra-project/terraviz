@@ -105,7 +105,10 @@ SCHEMA_BASE_URL=https://terraviz.example.org/schema/v1 npm run gen:protocol-sche
   `properties.datetime`, `assets[]`, `links[]`, `properties.terraviz:*`).
   Those are **additive** fields — when they land, `dataset.schema.json`
   grows and the CHANGELOG notes it; today's schema captures the
-  pre-STAC reality.
+  pre-STAC reality. The repository-grounded
+  [metadata and STAC audit](../metadata/README.md) evaluates that plan,
+  maps the current fields to STAC 1.1.0, and recommends a separate
+  projection so unknown extent and resource granularity remain explicit.
 
 ## See also
 
