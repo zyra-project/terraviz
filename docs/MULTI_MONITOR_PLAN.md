@@ -1724,6 +1724,16 @@ interface PersistedOutputConfig {
     debugOverlay: boolean
   }>
   autoRestoreOnLaunch: boolean // default false; opt-in
+  /**
+   * This machine's decoder ceiling. Seeded from
+   * DEFAULT_CONCURRENT_DECODERS and raised by the operator once
+   * they have measured the machine — see "Cross-window decoder
+   * budget". Machine-scoped rather than per-output, because it
+   * is a property of the hardware, not of any one window; it is
+   * therefore the one field here that must NOT be copied when a
+   * config is moved between machines.
+   */
+  concurrentDecoderBudget: number
 }
 ```
 
@@ -2088,6 +2098,14 @@ What must work:
   antipodal LED-sphere hemisphere — see §3.5), toggle debug
   overlay (shows current dataset id, sync delta, fps in the
   corner — useful for installation calibration), close.
+- **Decoder budget (machine-scoped).** A numeric field showing
+  the current ceiling, seeded from `DEFAULT_CONCURRENT_DECODERS`,
+  with the count in use beside it ("3 of 4 decoders"). Raising it
+  is how an operator who has measured their machine stops being
+  rationed at a constant sized for a phone; the field carries the
+  debug overlay's steady-fps reading as the thing to watch while
+  doing so. Persisted per machine, never exported with a config.
+  See "Cross-window decoder budget".
 - **Optional persistence.** A "Restore outputs on launch"
   checkbox. Off by default.
 - **Clean teardown.** Closing an output disposes the Three.js
@@ -2159,11 +2177,11 @@ without rolling the whole feature back.
 | 8 | `multi-output: wire MultiOutputManager into main.ts boot` | Manager instantiated; subscribes to events. No UI to spawn windows yet, so still invisible. | No |
 | 9 | `multi-output: add Tools → Outputs panel` | `outputUI.ts`, Tools menu entry. **First user-reachable commit.** Operator can add and remove SOS equirectangular outputs. | **Yes** |
 | 10 | `multi-output: persist + restore outputs across launches` | localStorage config, opt-in restore on boot, and monitor matching on **both** name and signed physical origin — a name-only match is treated as a monitor the manager does not recognise and skipped, because Windows display names are positional and reassignable (see §3 "Persistence"). | Yes (additive) |
-| 11 | `multi-output: per-output debug overlay + framebuffer resolution picker` | Resolution picker in panel, debug HUD with dataset id, sync delta, fps, and the WebGL **renderer string** — the last so an operator can see which GPU the webview actually got, which on a hybrid-graphics machine is decided by the driver rather than by the app (see Risks). | Yes (additive) |
+| 11 | `multi-output: per-output debug overlay + framebuffer + decoder-budget controls` | Resolution picker in panel, the machine-scoped **decoder-budget field** (seeded from `DEFAULT_CONCURRENT_DECODERS`, persisted, shown as "N of M decoders") that makes the per-machine budget in §3 actually settable — without it the budget is a constant wearing a different name — debug HUD with dataset id, sync delta, fps, and the WebGL **renderer string** — the last so an operator can see which GPU the webview actually got, which on a hybrid-graphics machine is decided by the driver rather than by the app (see Risks). | Yes (additive) |
 | 12 | `multi-output: fullscreen toggle + kiosk launch + F11 on every window` | `Tools → Fullscreen` toggle in `toolsMenuUI.ts` (persisted), F11 keydown handler on control + output windows, `--kiosk` argv parse and `TERRAVIZ_KIOSK=1` env var read in `src-tauri/src/lib.rs` (**not** `main.rs`, now a 12-line shim) behind `#[cfg(desktop)]`, applying fullscreen + decorationless before first paint, 3-second idle cursor-hide on the control window when fullscreen. See §3.6. | Yes (additive) |
 | 13 | `multi-output: failure recovery — crashes, stalls, GPU loss, monitor unplug` | Manager gains crash detection (no-graceful-close window destroy → toast + record removal), 3-strikes-per-monitor crash storm guard, 2 s `availableMonitors()` poll for unplug detection, `getAll()` boot scan to reattach orphaned `output-*` windows after a control-window crash. Output gains `webglcontextlost` / `webglcontextrestored` listeners with full scene rebuild, IPC-silence watchdog (5 s → stale state, 60 s → orphan), one HLS stream rebuild on a `loadStream()` rejection with frozen last-good-frame (no retry ladder — `hlsService` already spends a 3× budget before rejecting). Outputs panel renders per-output health badges (healthy / stale / stalled / monitor-missing). New Tier A `output_failure` event fired from manager via `analytics/emitter.ts` with `{ kind, retries, recovered }` (Open Question 3 decided). See §3 "Failure recovery". | Yes (additive) |
 | 14 | `multi-output: calibration tooling — test pattern + rotation offset` | `src/output/datasetMirror.ts` recognises the `__terraviz_calibration__` sentinel id and renders a procedural test pattern (8-step grayscale ramp at the equator, RGB color bars at lat ±30°, lat/lon graticule with color-coded equator + prime meridian, named anchor crosshairs, N/S pole labels, live resolution counter — ~80 LOC GLSL). `src/output/equirectRtt.ts` adds the `uRotationOffsetRad` longitude rotation applied before the camera-offset ray-march. `outputUI.ts` adds the per-output "Rotation offset (°)" numeric + slider and a "Calibration" submenu. Persisted config gains `rotationOffsetDeg`. See §3 "Calibration tooling". | Yes (additive) |
-| 15 | `multi-output: operator runbook` | `docs/MULTI_MONITOR_OPERATIONS.md` — the deployment half this plan has so far deferred, and which a spike showed is not optional. Covers: **checking which GPU the webview actually got** (the renderer string surfaced by commit 11's debug overlay) and the per-OS override for a hybrid-graphics machine, since the app's own `powerPreference` is inert and a silent landing on the iGPU is undiagnosable from logs; **measuring this machine's decoder budget** rather than trusting a constant, and where the resulting number is entered; disabling screen savers and display sleep (Open Question 5's documented half); the kiosk autostart entry from §3.6; and what each Outputs-panel health badge means in front of an audience. No code. | **Yes** (docs) |
+| 15 | `multi-output: operator runbook` | `docs/MULTI_MONITOR_OPERATIONS.md` — the deployment half this plan has so far deferred, and which a spike showed is not optional. Covers: **checking which GPU the webview actually got** (the renderer string surfaced by commit 11's debug overlay) and the per-OS override for a hybrid-graphics machine, since the app's own `powerPreference` is inert and a silent landing on the iGPU is undiagnosable from logs; **measuring this machine's decoder budget** rather than trusting a constant, and entering it in the Outputs panel's budget field (commit 11); disabling screen savers and display sleep (Open Question 5's documented half); the kiosk autostart entry from §3.6; and what each Outputs-panel health badge means in front of an audience. No code. | **Yes** (docs) |
 
 **Backout plan.** Reverting commit 9 leaves all the plumbing in
 place (manager, output bundle, capability) but removes the
@@ -2739,6 +2757,7 @@ const outputs: PersistedOutputConfig = {
     },
   ],
   autoRestoreOnLaunch: true,
+  concurrentDecoderBudget: 4,  // seeded; raised per machine
 }
 ```
 
@@ -3058,6 +3077,17 @@ naming what to close, **not** crash and **not** silently tear
 down a panel. Then close two panels and confirm the output
 spawns. Repeat in the other order (output live, then switch to
 4 globes) — the layout change is the thing refused that time.
+
+**S5b. A raised budget is honoured.** Everything in S5 exercises
+the seeded value of 4, which a constant would also pass — so it
+does not test that the budget is settable at all. In the Outputs
+panel raise the decoder budget to 6, then repeat S5's first
+half: the 4-globe video layout must now accept two video
+outputs rather than refusing the first. Quit and relaunch; the
+budget is still 6 and the same two outputs still spawn. Lower it
+back to 4 with those outputs live — the existing ones are
+**not** torn down (§3 forbids killing a running decoder to make
+room), and the next spawn is refused.
 
 **S6. Palette mirroring.** On a data-encoded dataset, change
 the palette (source → magma), then the contrast stretch, then
