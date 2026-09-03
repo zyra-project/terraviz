@@ -2685,12 +2685,35 @@ overlay added in commit 11). Failure-recovery actions emit
 exactly one `output_failure` Tier A telemetry event per
 occurrence (verify via `VITE_TELEMETRY_CONSOLE=true`).
 
+> **Any step involving a video dataset needs
+> `npm run build:desktop`, not `npm run dev:desktop`.** A spike
+> hit this and spent real time on it. The CDN serving the HLS
+> assets applies an origin allowlist, and it carries
+> `tauri.localhost` (the packaged build's origin) but **not**
+> `http://localhost:5173` (the dev server's). The shipped path
+> is `HLSService` → hls.js → MSE, which fetches the manifest and
+> every segment over XHR and is therefore fully CORS-gated, so
+> in `dev:desktop` a video dataset cannot load *at all* — not in
+> the control window, not in an output.
+>
+> Two corollaries. **Image datasets do work in dev**, and they
+> cost a WebGL context while creating no decoder, so the dev
+> loop still answers the context half of any ceiling question.
+> And a plain `<video src=…>` pointed at the same URL **will**
+> play in dev, because media elements are not CORS-gated unless
+> `crossOrigin` is set — which makes it a trap, not a
+> workaround: it proves nothing about the pipeline
+> `datasetMirror` actually uses. Nothing client-side changes
+> either fact.
+
 ### Commit 9 — Tools → Outputs panel (first user-reachable)
 
 **Pre-flight:**
 
 1. Both monitors connected; `npm run build:desktop` artifact
-   launched (or `npm run dev:desktop` for iteration).
+   launched. `npm run dev:desktop` is fine for iterating on
+   window management and image datasets, but **not** for any
+   video step — see the note above.
 2. Telemetry tier set to Essential (default).
 3. Console open via F12 on the control window for log inspection.
 
