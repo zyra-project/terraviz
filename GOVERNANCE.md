@@ -110,6 +110,55 @@ which the canonical repository moved.
   ______________________ are maintained. Neither requires permission and
   neither is treated as a signal of distrust.
 
+## Transferring canonical status
+
+Hosting organizations change. This section says how canonical status moves, so
+that a host which can no longer carry the project can hand it off cleanly
+rather than leaving it to decay in place. It is succession planning, not a
+prediction about any particular host.
+
+**Canonical status is a bundle, not a repository.** A transfer that moves only
+the git history orphans the rest. The full inventory:
+
+| Item | Where it lives today |
+|---|---|
+| Git history, branches, tags | The canonical repository |
+| Issue and pull request history | The canonical repository |
+| Release artifacts and signed builds | GitHub Releases |
+| Archival deposits and the concept DOI | Zenodo, under a named owner account |
+| The `TerraViz` name and any marks | See §Name and marks |
+| Published contracts: `/schema/v1`, the embed URL grammar, the federation feed | Served by the canonical node |
+| The default node origin compiled into the WordPress plugin and CLI | Plugin settings default, `VITE_*` build config |
+| Package names the CLI publishes under | npm |
+| Documentation domain and redirects | DNS |
+
+Each row needs an owner on the receiving side before the transfer is complete.
+A transfer that leaves any row pointing at the old host is unfinished.
+
+**Who decides.** The active maintainers, after consulting node operators known
+to be running TerraViz. The outgoing host may nominate a successor but does not
+choose alone, because the case this section exists for is a host that has
+stopped participating.
+
+**Dormancy backstop.** If the canonical repository goes twelve months with no
+release and no maintainer response to a written request, canonical status
+lapses and any active node operator may declare a successor by publishing a
+fork, notifying the other operators, and updating the published contracts. This
+clause exists because the realistic failure is not a hostile host but an absent
+one, and a procedure that requires the absent party to act would not work.
+
+**Sequence.** Written notice to maintainers and known operators. A named
+successor. The inventory above transferred row by row, with each row confirmed.
+Redirects published. The previous location archived read-only rather than
+deleted, so existing links keep resolving.
+
+**What does not transfer.** Node operators' forks, their catalogs, their data,
+and their domains. Those were never the canonical host's to move, and a change
+of canonical host should be invisible to a node that does not want to follow
+it. That is the point of the federation design.
+
+*Revisit when:* a transfer is proposed, or the inventory above changes.
+
 ## Downstream forks
 
 Node operators fork and run TerraViz freely under Apache-2.0. No notification,
