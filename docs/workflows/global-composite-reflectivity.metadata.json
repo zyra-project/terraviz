@@ -1,0 +1,14 @@
+{
+  "title": "Simulated Global Radar — 2-Day Forecast",
+  "abstract": "A worldwide forecast of where rain, snow and thunderstorms will be falling over the next two days. The colours are the ones you already know from a weather radar map: blues and greens for light precipitation, yellows and oranges for heavy rain, reds for the most intense cores. Hover anywhere to read the value in dBZ — the decibel scale radar meteorologists use for how strongly precipitation reflects a radar beam. Nothing here was measured by an actual radar. The field is what a radar *would* see if one were parked at that spot, computed from a global weather model that resolves weather systems at about 28 km. At that scale the model represents storms statistically rather than one at a time, so expect broad, smooth precipitation shields rather than individual thunderstorms — the large-scale picture is reliable, a single cell on the map is not. Updated every six hours, hourly out to two days.",
+  "categories": ["Atmosphere"],
+  "keywords": ["reflectivity", "radar", "precipitation", "storms", "forecast", "real-time", "GFS"],
+  "start_time": "{{valid_iso:PT6H:PT6H}}",
+  "end_time": "{{valid_iso:PT6H:PT6H:PT48H}}",
+  "period": "PT1H",
+  "organization": "NOAA",
+  "attribution_text": "NOAA/NWS/NCEP Global Forecast System (GFS), composite reflectivity (REFC), 0.25° — via the NOAA Open Data Dissemination programme.",
+  "website_link": "https://www.ncei.noaa.gov/products/weather-climate-models/global-forecast",
+  "license_statement": "Produced by the U.S. National Weather Service. As a work of the U.S. Government it is in the public domain and may be used without restriction; NOAA asks that it be credited and not presented in a way that implies NOAA endorsement.",
+  "license_url": "https://www.weather.gov/disclaimer"
+}
