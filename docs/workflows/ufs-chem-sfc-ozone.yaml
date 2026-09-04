@@ -1,0 +1,170 @@
+# UFS-Chem global surface ozone -- data-encoded globe dataset.
+#
+# Design notes: ../UFS_CHEM_SFC_OZONE_PLAN.md
+# Calibrated from a real OPeNDAP probe of the 2026-08-17 00z cycle.
+#
+# ---------------------------------------------------------------------------
+# PREREQUISITE: this consumes MIRRORED frames, not GSL THREDDS directly.
+#
+# Two independent reasons the source cannot be read from here:
+#   1. gsl.noaa.gov 403s CI egress (plan B1).
+#   2. Even reachable, zyra cannot subset it. `extract-variable` is GRIB2-only
+#      with no level selector, and `convert-format` reads whole-file bytes
+#      (NetCDF -> GeoTIFF is not a supported path). One cycle is 121 x 2.21 GB
+#      = ~267 GB holding a ~36 MB animation. See plan §3.6.
+#
+# So a NOAA-side step subsets first, over OPeNDAP:
+#
+#   python3 scripts/mirror-ufs-ozone.py --date <YYYYMMDD> --step 3 --to-ppbv \
+#       --out ./ozone-frames
+#
+# That writes one ~3.7 MB GeoTIFF per frame on a regular 1440x720 EPSG:4326
+# grid, named by valid time, with ppm converted to ppbv (zyra cannot rescale).
+#
+# Publish that directory where CI can read it and replace every
+# REPLACE-WITH-MIRROR-BASE below with its host.
+#
+# NOTE: there is deliberately NO `reproject` stage. The mirror already emits
+# the target grid, because a Gaussian latitude axis cannot be expressed in a
+# GeoTIFF geotransform -- so the regrid has to happen at the point the data is
+# still on its native coordinates. Doing it there costs ONE resampling instead
+# of two. This is a documented deviation from "reprojection lives in Zyra".
+# ---------------------------------------------------------------------------
+#
+# DATA-ENCODED CONTRACT: heatmap carries data_encoded + color_scale_file + a
+# cmap_inline palette (a named --cmap is IGNORED), and NO width/height/basemap.
+# Output is the frame set, not an MP4, so the HLS transcode is the only lossy
+# generation over luma whose values ARE the data.
+#
+# 41 frames, 3-hourly f000-f120 (5-day forecast).
+
+stages:
+  # 1. Pull the mirrored frames. Batch --inputs names each output by its URL
+  #    basename, so /work/tif/<valid-time>.tif falls out automatically.
+  - stage: acquire
+    command: http
+    args:
+      output_dir: /work/tif
+      inputs:
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT3H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT6H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT9H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT12H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT15H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT18H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT21H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT24H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT27H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT30H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT33H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT36H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT39H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT42H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT45H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT48H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT51H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT54H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT57H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT60H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT63H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT66H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT69H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT72H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT75H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT78H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT81H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT84H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT87H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT90H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT93H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT96H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT99H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT102H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT105H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT108H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT111H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT114H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT117H}}.tif'
+        - 'https://REPLACE-WITH-MIRROR-BASE/ufs-chem-ozone/{{cycle_date:P1D:PT30H}}/{{valid_compact:P1D:PT30H:PT120H}}.tif'
+
+  # 2. The data-encoded render, straight off the mirrored grid.
+  - stage: visualize
+    command: heatmap
+    args:
+      inputs:
+        - /work/tif/{{valid_compact:P1D:PT30H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT3H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT6H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT9H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT12H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT15H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT18H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT21H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT24H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT27H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT30H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT33H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT36H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT39H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT42H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT45H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT48H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT51H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT54H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT57H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT60H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT63H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT66H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT69H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT72H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT75H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT78H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT81H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT84H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT87H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT90H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT93H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT96H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT99H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT102H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT105H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT108H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT111H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT114H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT117H}}.tif
+        - /work/tif/{{valid_compact:P1D:PT30H:PT120H}}.tif
+      output_dir: /work/images/frames
+      data_encoded: true
+      color_scale_file: /work/color-scale.json   # OUTPUT -- heatmap writes it
+      units: 'ppbv'
+      # Ozone is NOT an aerosol. Measured surface field: mean 22.1, p50 22.0,
+      # p99.9 49.3, max 59.6 ppbv -- a large non-zero global background, not
+      # plumes on clean air. transparent_range 0 keeps the whole field visible;
+      # the aerosol convention of 12 would erase most of the atmosphere.
+      cmap_inline: '{"type":"continuous","base":"YlOrRd","transparent_range":0,"blend_range":8,"overall_alpha":0.92}'
+      vmin: 0
+      vmax: 120         # ppbv. Sampled across the real forecast (f000..f120):
+                        # most frames peak near 60-67, but f012 reaches 109.6 in
+                        # a midday photochemical episode. 80 would have clipped
+                        # exactly the exceedances that matter most.
+                        #
+                        # vmax is calibration, not aesthetics: anything above it
+                        # clamps and then reads back WRONG under the cursor. The
+                        # background (mean 22) sitting at 18% of scale is fine --
+                        # the colorbar's range control restretches the DISPLAY
+                        # client-side without touching the stored values, which
+                        # is the whole point of data-encoding.
+      # NO width/height (forbidden with data_encoded), NO basemap.
+
+  # 3. Derive the dataset time range from the valid-time frame names.
+  - stage: process
+    command: scan-frames
+    args:
+      frames_dir: /work/images/frames
+      datetime_format: '%Y%m%dT%H%M%S'
+      period_seconds: 10800
+      output: /work/frames-meta.json
+
+# Publish the FRAME SET (plan §4.5). Set playback_fps on the dataset row, or
+# 41 frames play in about a second.
