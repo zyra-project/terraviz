@@ -1,0 +1,23 @@
+{
+  "title": "Radar Reflectivity Forecast — United States (RRFS)",
+  "abstract": "Where it is raining, snowing and storming across the United States, forecast every fifteen minutes for the next eighteen hours.\n\nThis is simulated radar — the same composite reflectivity picture a national radar mosaic shows, but run forward in time by the forecast model. Blue and green are light precipitation, yellow and orange are heavy rain, and red and pink are the cores of severe storms, where hail is likely. Clear air is left transparent.\n\nThe forecast begins fifteen minutes ahead of the model's start time and runs eighteen hours out. The further ahead it goes, the less the exact position of any individual storm should be trusted — the pattern is more reliable than the placement.\n\nSeventy-two fifteen-minute steps on the NOAA Rapid Refresh Forecast System's 3 km CONUS domain, refreshed every hour. Frames are data-encoded: the brightness of each pixel carries the measured value, so hovering reports reflectivity in dBZ rather than a colour.",
+  "keywords": [
+    "radar",
+    "reflectivity",
+    "precipitation",
+    "storms",
+    "severe weather",
+    "forecast",
+    "RRFS",
+    "CONUS",
+    "United States",
+    "NOAA"
+  ],
+  "start_time": "{{data_start}}",
+  "end_time": "{{data_end}}",
+  "period": "PT15M",
+  "organization": "NOAA National Weather Service",
+  "attribution_text": "NOAA/NWS/NCEP Rapid Refresh Forecast System (RRFS) v1.0, distributed via NOAA Open Data Dissemination on AWS.",
+  "license_statement": "Output of the NOAA Rapid Refresh Forecast System (RRFS), produced by NOAA/NWS/NCEP. As a work of the United States Government it is not subject to domestic copyright protection under 17 U.S.C. § 105 and may be freely used and redistributed. Provided without warranty; not for use as the sole basis of operational or safety-of-life decisions.",
+  "website_link": "https://registry.opendata.aws/noaa-rrfs/"
+}
