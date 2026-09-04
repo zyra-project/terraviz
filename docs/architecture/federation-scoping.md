@@ -11,6 +11,11 @@ commit `3cff1c4`. Companion to
 **Last reviewed:** 2026-05-04 (initial scoping interview with Eric;
 §8 decisions captured in commit `c98bfc1`).
 
+**Decision amended:** 2026-09-04 (the §8-change revisit trigger fired;
+§7 Directive 3 and §8 decision 5 were revised by the
+[metadata and STAC audit](../metadata/README.md). This amendment reviewed
+only the STAC direction; all other §8 decisions retain the review date above.)
+
 **Revisit when any of the following becomes true:**
 
 - Phase 4 federation ships in production. At that point this doc
@@ -824,6 +829,14 @@ the protocol honest as the implementation evolves.
 
 ### Directive 3 — Land STAC alignment in the wire serializer, not as a follow-up
 
+> **Superseded 2026-09-04.** The
+> [metadata and STAC audit](../metadata/README.md#relationship-to-earlier-decisions)
+> replaces this native-wire mechanism with a separate D1-backed STAC Core
+> 1.1.0 projection. The text below is retained as decision history and as the
+> rationale for avoiding a post-launch federation schema break; it is no
+> longer implementation guidance. Current direction is recorded in §8
+> decision 5.
+
 `CATALOG_BACKEND_PLAN.md:264-309` commits to the wire `Dataset`
 being a valid STAC Item profile. Today
 `functions/api/v1/_lib/dataset-serializer.ts` emits none of the
@@ -982,9 +995,14 @@ known-good shape.
 
 ### 5. STAC alignment status
 
-**Still planned for Phase 4 — §7 Directive 3 stands enforceable.**
-The wire `Dataset` lands as a STAC Item profile in the same PR as
-the federation feed, not as a follow-up.
+**Revised 2026-09-04 — decoupled from Phase 4.** The
+[metadata and STAC audit](../metadata/README.md#relationship-to-earlier-decisions)
+supersedes §7 Directive 3's native-wire mechanism. `WireDataset`,
+`/api/v1/catalog`, and signed federation feeds remain native; a separate
+D1-backed STAC Core 1.1.0 projection publishes Collections and eligible
+Items. Because that projection does not change the federation feed, shipping
+it later cannot create the peer schema break that the original directive was
+designed to prevent.
 
 ### 6. Headcount and ETA for Phase 4 federation
 

@@ -20,6 +20,34 @@ This preserves current clients while providing a standards-oriented surface
 whose provenance, spatial coverage, temporal coverage, licensing, and assets
 can be stricter than the presentation model.
 
+## Relationship to earlier decisions
+
+This recommendation intentionally changes the STAC direction recorded in two
+earlier planning documents:
+
+- [`../architecture/federation-scoping.md`](../architecture/federation-scoping.md)
+  Section 7, Directive 3 and Section 8, decision 5 require the native wire
+  `Dataset` to become a STAC Item profile in the same change as the federation
+  feed.
+- [`../CATALOG_BACKEND_PLAN.md`](../CATALOG_BACKEND_PLAN.md) under "STAC
+  alignment" makes the same wire-profile decision, pins STAC 1.0.0, treats
+  `/api/v1/catalog` and signed feeds as STAC Collections, and explicitly
+  declines Collection hierarchy as the primary resource model.
+
+This document supersedes those choices of serializer boundary, resource
+granularity, and STAC version. The revised decision is to keep `WireDataset`,
+`/api/v1/catalog`, and signed federation feeds native, then publish a separate
+D1-backed STAC Core 1.1.0 projection with explicit Collections and eligible
+Items. It does not change the federation handshake, signing, transport,
+schema-versioning, or conformance requirements.
+
+The compatibility invariant behind the earlier decision still holds: a peer
+must not receive required STAC fields only after it has begun consuming the
+native federation feed. The separate projection satisfies that invariant by
+construction because it never adds those fields to the feed. STAC resources
+can therefore ship and evolve under their own routes and schemas without a
+federation wire-format break.
+
 ## Executive summary
 
 There are two active metadata worlds in the repository:
