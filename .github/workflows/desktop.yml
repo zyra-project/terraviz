@@ -47,6 +47,21 @@ concurrency:
 permissions:
   contents: read
 
+# The SPA build runs *inside* tauri-action, via the
+# `beforeBuildCommand` in tauri.conf.json — there is no `npm run build`
+# step here to hang an `env:` on, the way ci.yml does. A workflow-level
+# block reaches it anyway (the environment inherits down into the
+# subprocess) and covers all three tauri-action invocations below
+# without repeating itself. Same shape release.yml already uses for the
+# signing key.
+env:
+  # A fork whose node never held the legacy SOS datasets sets this
+  # Variable to 'false' so its desktop builds drop the two bundled
+  # sample tours, matching what ci.yml does for the web bundle. Unset
+  # evaluates to '' — which is not 'false' — so this repo's builds keep
+  # them.
+  VITE_SAMPLE_TOURS: ${{ vars.VITE_SAMPLE_TOURS }}
+
 jobs:
   desktop-build:
     strategy:
