@@ -683,8 +683,12 @@ describe('isZipDownloadable', () => {
 /**
  * The invoke the mocked plugin delegates to. Swapped per test.
  *
- * The mock itself is registered ONCE, at the top of the file, rather
- * than re-registered per test. An earlier version used `vi.doMock` in
+ * The mock itself is registered ONCE, at file scope, rather than
+ * re-registered per test. It sits here beside the tests that use it
+ * rather than beside the imports: `vi.mock` is hoisted above every
+ * import at transform time, so its placement in the source is a
+ * readability choice and its effect is the same wherever it appears.
+ * An earlier version used `vi.doMock` in
  * a helper and `vi.doUnmock` in `afterEach`, and that churn raced: the
  * first `loadWithInvoke` in the block got its mock, later ones
  * intermittently did not, leaving `invoke` null. Because
