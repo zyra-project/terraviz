@@ -957,7 +957,8 @@ The desktop app shares 100% of the TypeScript source. Desktop-only behaviour is 
 | File | Purpose |
 |---|---|
 | `src-tauri/tauri.conf.json` | Window config, updater (pubkey + endpoint), asset protocol scope, bundle targets |
-| `src-tauri/capabilities/default.json` | Permission policies — HTTP allowlist (localhost, Ollama/LM Studio/llama.cpp ports, HTTPS), updater, window controls |
+| `src-tauri/capabilities/default.json` | Permission policies for the main window, which is also the multi-output manager — HTTP allowlist (localhost, Ollama/LM Studio/llama.cpp ports, HTTPS), updater, window controls, and the webview/window grants that let it spawn, place, reveal and tear down `output-*` windows |
+| `src-tauri/capabilities/output.json` | Narrow capability scoped to the `output-*` window glob — IPC listen/emit, the window getters and setters an output drives **on itself**, and HTTPS fetch with localhost explicitly denied. No `core:default`, so no Tauri command `invoke` at all. It is defence in depth against a compromised output, **not** a restraint on the manager: Tauri checks window commands against the *calling* window, so putting the manager's grants here instead would deny every manager-initiated operation on an output |
 | `src-tauri/Cargo.toml` | Rust dependencies — tauri, reqwest, keyring, tauri-plugin-http, tauri-plugin-updater |
 
 ### Tauri patterns used in the frontend

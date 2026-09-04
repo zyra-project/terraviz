@@ -1,0 +1,31 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-utils/schema.json",
+  "identifier": "output",
+  "description": "Capability scoped to output-* windows. Narrowed for defence in depth: if an output is compromised (an XSS via a malicious dataset URL, a shader bug, a webview vulnerability) the blast radius is network fetch plus the window controls it drives on itself. No core:default, so no Tauri command invoke at all; no filesystem, no keychain, no asset protocol, no shell, no dialog, no clipboard, no updater, no window creation, no localhost HTTP. This does NOT restrain the manager: Tauri checks window commands against the CALLING window, so the manager's grants live in default.json.",
+  "platforms": ["macOS", "windows", "linux"],
+  "windows": ["output-*"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:event:allow-emit",
+    "core:event:allow-emit-to",
+
+    "core:window:allow-current-monitor",
+    "core:window:allow-is-decorated",
+    "core:window:allow-is-fullscreen",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-set-decorations",
+    "core:window:allow-close",
+
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://*" }
+      ],
+      "deny": [
+        { "url": "http://localhost:*" },
+        { "url": "http://127.0.0.1:*" }
+      ]
+    }
+  ]
+}
