@@ -140,6 +140,8 @@ interface Viewport {
   noticeDate: string | null
   /** True once this panel's stream has failed terminally. */
   streamFailed: boolean
+  /** True while this panel's WebGL context is known to be broken. */
+  displayLost: boolean
   /** Floating per-panel colorbar for data-encoded datasets. Replaced
    *  wholesale rather than mutated, because a display change alters the
    *  gradient, the ticks and the accessible name together. */
@@ -368,6 +370,21 @@ export class ViewportManager {
   }
 
   /**
+   * Mark a panel whose WebGL context has been lost.
+   *
+   * Cleared when the browser restores the context — but restoring is
+   * not repairing: MapLibre rebuilds its own resources and the custom
+   * layer's are still gone. Until that half exists, the notice
+   * clearing means "the context came back", not "the globe works".
+   */
+  setPanelDisplayNotice(slot: number, lost: boolean): void {
+    const vp = this.viewports[slot]
+    if (!vp) return
+    vp.displayLost = lost
+    this.renderPanelNotice(slot)
+  }
+
+  /**
    * Mark a panel whose stream has failed terminally.
    *
    * Distinct from the time notice because the cause is knowable and
@@ -394,11 +411,16 @@ export class ViewportManager {
     const vp = this.viewports[slot]
     if (!vp) return
 
-    const text = vp.streamFailed
-      ? t('viewport.panel.streamFailed')
-      : vp.noticeDate
-        ? t('viewport.panel.timeMismatch', { date: vp.noticeDate })
-        : null
+    // Ordered by how much of the panel each explains. A dead context
+    // takes the whole globe with it, so it outranks a dead stream,
+    // which in turn outranks a frame that is merely behind the label.
+    const text = vp.displayLost
+      ? t('viewport.panel.displayLost')
+      : vp.streamFailed
+        ? t('viewport.panel.streamFailed')
+        : vp.noticeDate
+          ? t('viewport.panel.timeMismatch', { date: vp.noticeDate })
+          : null
 
     if (!text) {
       if (vp.timeNotice) vp.timeNotice.classList.add('hidden')
@@ -583,7 +605,14 @@ export class ViewportManager {
     const getLayerId = this.callbacks.getLayerIdForSlot
       ? () => this.callbacks.getLayerIdForSlot!(index)
       : undefined
-    renderer.init(container, { canvasId, slotIndex: index, getLayerId })
+    renderer.init(container, {
+      canvasId,
+      slotIndex: index,
+      getLayerId,
+      // The notice is DOM, not WebGL, so it still draws over a dead
+      // canvas — which is the whole reason it can report this at all.
+      onContextChange: (lost) => this.setPanelDisplayNotice(index, lost),
+    })
 
     // Primary-indicator pill: shown on every panel, numbered 1-based.
     // Click on a non-primary pill promotes that panel to primary. The
@@ -623,7 +652,7 @@ export class ViewportManager {
     const onMove = () => this.syncCameras(index)
     renderer.getMap()?.on('move', onMove)
 
-    this.viewports.push({ index, container, renderer, indicator, legend: null, colorbar: null, timeNotice: null, noticeDate: null, streamFailed: false, onMove })
+    this.viewports.push({ index, container, renderer, indicator, legend: null, colorbar: null, timeNotice: null, noticeDate: null, streamFailed: false, displayLost: false, onMove })
   }
 
   private destroyViewport(vp: Viewport): void {
