@@ -88,7 +88,7 @@ This transition does **not**:
 
 ---
 
-## The seven conditions
+## The nine conditions
 
 Each is stated as something verifiable. "Promised" is not "verified." The
 pre-cutover checklist in Phase T2 is where each gets checked.
@@ -473,5 +473,5 @@ deploys green from a scratch remote, and the outside forks have been notified.
 | DOC/NOAA ethics | | | |
 
 *This document is not an agreement until this block is complete. Conditions 1
-through 7 are the terms; the phases are the sequence. If a condition cannot be
+through 9 are the terms; the phases are the sequence. If a condition cannot be
 met, record why here rather than dropping it.*
