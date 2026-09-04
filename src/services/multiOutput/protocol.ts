@@ -142,7 +142,8 @@ export interface MirroredPlayback {
   playbackRate: number
 }
 
-/** One shell in the stacked-layer render. Array order *is* z-order. */
+/** One layer of the composite. Array order *is* z-order — there is no
+ *  depth buffer to disagree with it (`src/output/layerStack.ts`). */
 export interface MirroredLayer {
   id: string
   datasetId: string

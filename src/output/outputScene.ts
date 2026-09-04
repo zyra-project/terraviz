@@ -32,16 +32,22 @@
  * second Earth-tile loader is exactly the duplicated-and-subtly-wrong
  * work the Prior-art section warns about.
  *
- * **Unresolved, and deliberately not guessed at here:** day/night
- * terminator, atmosphere shells and clouds live in `photorealEarth`'s
- * *material*, not in a texture, so they do not come along for free. On
- * this reading they would have to be reimplemented inside the equirect
- * fragment shader, which is the re-derivation the plan otherwise
- * forbids. That is a real design fork and it is commit 3/4 scope, not
- * something to settle silently in a scaffold — see the commit message.
- * Until it is settled this renders the diffuse only, which is correct
- * for a loaded dataset (data is lit uniformly, exactly as
- * `globeThumbnail` does it) and incomplete for the idle Earth.
+ * **The fork this scaffold left open is now settled**, in the plan's
+ * "What the equirect path does to the Earth decoration". Day/night
+ * terminator, clouds and night lights live in `photorealEarth`'s
+ * *material* rather than in a texture, so they do not arrive for free
+ * — but they are cheap rather than a re-derivation: the terminator is
+ * `dot(hit, uSunDir)` because the ray-march's hit point on the unit
+ * sphere already *is* the surface normal, and the other two are
+ * samplers. Specular, atmosphere, ground shadow and the sun sprite do
+ * not cross at all, and are not meant to: each depends on a viewer or
+ * a silhouette, and an equirectangular unwrap has neither.
+ *
+ * None of that is implemented here yet — this still renders the
+ * diffuse only, which is correct for a loaded dataset (data is lit
+ * uniformly, exactly as `globeThumbnail` does it) and incomplete for
+ * the idle Earth. What changed is that finishing it is now a known
+ * small job rather than an open question.
  */
 
 import {
