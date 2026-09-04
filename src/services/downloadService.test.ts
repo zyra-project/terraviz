@@ -680,10 +680,43 @@ describe('isZipDownloadable', () => {
  * imports at module-load time, so each of these tests has to set the
  * global and re-import the module rather than importing it at the top.
  */
+/**
+ * The invoke the mocked plugin delegates to. Swapped per test.
+ *
+ * The mock itself is registered ONCE, at file scope, rather than
+ * re-registered per test. It sits here beside the tests that use it
+ * rather than beside the imports: `vi.mock` is hoisted above every
+ * import at transform time, so its placement in the source is a
+ * readability choice and its effect is the same wherever it appears.
+ * An earlier version used `vi.doMock` in
+ * a helper and `vi.doUnmock` in `afterEach`, and that churn raced: the
+ * first `loadWithInvoke` in the block got its mock, later ones
+ * intermittently did not, leaving `invoke` null. Because
+ * `downloadService`'s `tauriReady` ends in `.catch(() => false)`, that
+ * failure was silent — every command rejected with 'Tauri not
+ * available' instead of the mock's error, so the test reported the
+ * wrong contract broken. It passed in isolation and failed roughly one
+ * full-suite run in four.
+ */
+let mockInvoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> = async () => {
+  throw new Error('no invoke impl set for this test')
+}
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (cmd: string, args?: Record<string, unknown>) => mockInvoke(cmd, args),
+}))
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: async () => () => {},
+}))
+
+/**
+ * `downloadService` reads `window.__TAURI__` and kicks off its plugin
+ * imports at module-load time, so each test has to set the global and
+ * re-import the module rather than importing it at the top.
+ */
 async function loadWithInvoke(invokeImpl: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>) {
+  mockInvoke = invokeImpl
   vi.resetModules()
-  vi.doMock('@tauri-apps/api/core', () => ({ invoke: invokeImpl }))
-  vi.doMock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) }))
   ;(window as unknown as { __TAURI__?: unknown }).__TAURI__ = { ipc: {} }
   return await import('./downloadService')
 }
@@ -691,8 +724,6 @@ async function loadWithInvoke(invokeImpl: (cmd: string, args?: Record<string, un
 describe('read commands when the invoke fails', () => {
   afterEach(() => {
     delete (window as unknown as { __TAURI__?: unknown }).__TAURI__
-    vi.doUnmock('@tauri-apps/api/core')
-    vi.doUnmock('@tauri-apps/api/event')
     vi.resetModules()
   })
 
