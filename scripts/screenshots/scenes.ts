@@ -31,6 +31,7 @@ import type { Page } from 'playwright'
 
 import { gotoApp } from './core/browser'
 import type { FixtureRule } from './core/fixtures'
+import type { Box } from './core/types'
 import { analyticsFixtures, feedbackFixtures } from './fixtures/admin'
 import { catalogReportFixtures } from './fixtures/catalog'
 import { blogPublicFixtures, publisherFixtures } from './fixtures/publisher'
@@ -195,6 +196,56 @@ async function openDataEncodedDataset(page: Page): Promise<void> {
   // browse overlay up and no globe behind it.
   await card.locator('.browse-card-load').click()
   await page.locator('.panel-colorbar').first().waitFor({ state: 'visible' })
+}
+
+/**
+ * Pick a point on `canvas` at the given fractions, moved clear of a
+ * fixed overlay panel if it would otherwise land on it.
+ *
+ * Exported for tests: a click that lands on a panel instead of the map
+ * fails as a bare 30-second `waitFor` timeout on whatever the map was
+ * supposed to produce, which says nothing about the cause. That is not
+ * hypothetical — see `analyze-panel`, where it broke one viewport for
+ * a week and froze the whole repository's visual baseline.
+ *
+ * A point that would not land on the panel is returned untouched, so a
+ * layout the panel does not cover is unaffected pixel for pixel. Only
+ * one that would land on it takes `fy` of the clear strip above the
+ * panel instead. Only the strip *above* is used: these panels anchor
+ * to the bottom edge, so below is where there is nothing.
+ *
+ * "Would land on it" tests both axes. Testing x alone is not a
+ * conservative approximation of that — it moves points that share the
+ * panel's columns while sitting well above its top edge, which for a
+ * bottom-anchored panel is most of the canvas above it.
+ */
+export function pointClearOfPanel(
+  canvas: Box,
+  panel: Box | null,
+  fx: number,
+  fy: number,
+  minClear = 120,
+): { x: number; y: number } {
+  const x = canvas.x + canvas.width * fx
+  const y = canvas.y + canvas.height * fy
+  if (panel === null) return { x, y }
+
+  const onPanel =
+    x >= panel.x && x <= panel.x + panel.width &&
+    y >= panel.y && y <= panel.y + panel.height
+  if (!onPanel) return { x, y }
+
+  const clear = panel.y - canvas.y
+  if (clear < minClear) {
+    throw new Error(
+      `pointClearOfPanel: only ${Math.round(clear)}px of canvas is clear of the ` +
+        `panel (need ${minClear}px). The panel has grown or the viewport has ` +
+        'shrunk; give the scene its own geometry rather than widening this ' +
+        'threshold — a click that lands on the panel fails as an unrelated ' +
+        'timeout somewhere downstream.',
+    )
+  }
+  return { x, y: canvas.y + clear * fy }
 }
 
 export const scenes: Scene[] = [
@@ -428,8 +479,33 @@ export const scenes: Scene[] = [
       const globe = page.locator('.map-viewport canvas').first()
       const box = await globe.boundingBox()
       if (!box) throw new Error('analyze-panel: no globe canvas to click')
-      await page.mouse.click(box.x + box.width * 0.4, box.y + box.height * 0.38)
-      await page.mouse.click(box.x + box.width * 0.6, box.y + box.height * 0.56)
+
+      // The panel is `position: fixed` *over* the globe, so a point
+      // chosen as a fraction of the canvas can land on the panel rather
+      // than the map — and then the map never sees the click, no
+      // endpoint is set, and the wait below times out 30 s later saying
+      // only that `.analyze-transect` never appeared.
+      //
+      // That is not hypothetical: it is why this scene failed at the
+      // mobile viewport on every run from at least 2026-08-30. At
+      // ≤600px `analyze.css` swaps the panel to `inset-inline`, so it
+      // spans the full width instead of sitting in the bottom-right
+      // corner, and at its `max-block-size` of 34rem it covers y≈284
+      // to 828 of an 844px-tall viewport. Both old points (38% and 56%
+      // of the canvas) sat inside that. On desktop the same points are
+      // far to the *left* of a 352px-wide panel, which is why only one
+      // viewport ever broke — and why a hardcoded pair of fractions is
+      // the wrong shape for this: it encodes one viewport's layout.
+      //
+      // So derive the points from where the panel actually is. A point
+      // that would not land on the panel keeps its original position
+      // (desktop is unchanged, pixel for pixel); one that would land on
+      // it is placed in the clear strip above it instead.
+      const panel = await page.locator('.analyze-panel').boundingBox()
+      const a = pointClearOfPanel(box, panel, 0.4, 0.38)
+      const b = pointClearOfPanel(box, panel, 0.6, 0.56)
+      await page.mouse.click(a.x, a.y)
+      await page.mouse.click(b.x, b.y)
       await page.locator('.analyze-transect').waitFor({ state: 'visible' })
     },
   },
