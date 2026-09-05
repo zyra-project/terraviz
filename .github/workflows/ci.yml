@@ -278,12 +278,24 @@ jobs:
           # /luma-check/, and reaching it from a phone (iOS Safari is
           # the one browser the LAN-bound --serve mode often cannot
           # reach) means having this link to hand.
+          #
+          # The output page is listed for the same reason and one more:
+          # it renders GLSL that no unit test can execute, so opening it
+          # is the only check that a shader actually compiles. It is
+          # also the page a local dev server is *worst* at serving —
+          # its base texture is a Git LFS asset, and a checkout without
+          # `git lfs pull` returns a pointer stub as 200 image/jpeg, so
+          # the page goes black with nothing in the network tab to say
+          # why. This job checks out with `lfs: true`, so the preview
+          # cannot reproduce that false negative.
+          # No `.html`: Pages 308-redirects /output/output.html.
           if [ -n "$PREVIEW_URL" ]; then
             {
               echo "### Deployed"
               echo ""
               echo "- $PREVIEW_URL"
               echo "- Luma range check: $PREVIEW_URL/luma-check/page.html"
+              echo "- Multi-monitor output: $PREVIEW_URL/output/output"
             } >> "$GITHUB_STEP_SUMMARY"
           fi
         env:

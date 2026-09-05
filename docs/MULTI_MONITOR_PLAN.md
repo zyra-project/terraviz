@@ -170,13 +170,21 @@ Three.js was already chosen for the VR system (`vrSession.ts`
 produces a fully composited Earth sphere (diffuse, night
 lights, specular, atmosphere, clouds, sun) used by both VR and
 the Orbit character page. The output system reuses that
-factory directly. We add:
+factory as a **texture provider** — its progressive 2K → 4K →
+8K base diffuse, and the loader behind it — rather than
+rendering its mesh, because on this path the fragment shader
+*is* the renderer. Which of its effects survive that, and why
+the ones that don't are incoherent on an LED sphere rather
+than merely unported, is "What the equirect path does to the
+Earth decoration" below. We add:
 
-- A dataset-texture overlay layer (already done by `vrScene.ts`
-  on top of `photorealEarth`).
-- A multi-layer stack support for overlapping datasets (new —
-  semi-transparent sphere shells at radii 1.000, 1.001, 1.002,
-  …).
+- A dataset-texture overlay layer (`vrScene.ts` does the
+  equivalent on top of `photorealEarth`'s mesh; here it is one
+  more sampler in the composite).
+- Multi-layer stack support for overlapping datasets (new —
+  layers composite in array order inside the single fragment
+  shader, so there are no stacked shells and no depth buffer
+  to fight over).
 - An equirectangular render-to-texture pass (new — single
   fragment shader; ~80 LOC).
 
@@ -195,8 +203,9 @@ flavors:
   For each output pixel `(u,v) ∈ [0,1]²`, compute the world
   direction `(lon, lat) = (u·2π − π, v·π − π/2)`, raycast that
   direction *from a configurable camera position* (default
-  `(0,0,0)` — the sphere center) against the sphere stack,
-  sample each layer's composited texture at the hit point. One
+  `(0,0,0)` — the sphere center) against the unit sphere,
+  sample every layer at the hit point and composite them in
+  order. One
   pass, native 2:1 output, no pole artifacts. The camera
   position is a shader uniform; v1 pins it to the origin but
   Phase 2+ uses a non-zero offset to implement zoom — see
@@ -502,9 +511,9 @@ touching the output rendering code. See Phase 5.
 │                                        │    │                                  │
 │ MapLibre canvas + DOM UI               │    │ Three.js WebGLRenderer (headless)│
 │  └─ ViewportManager (1/2/4 globes)     │    │  ┌────────────────────────────┐  │
-│  └─ datasetLoader.{loadImage,loadVideo}│    │  │ photorealEarth sphere      │  │
+│  └─ datasetLoader.{loadImage,loadVideo}│    │  │ photorealEarth base texture│  │
 │                                        │    │  │  + dataset texture overlay │  │
-│ + new MultiOutputManager service       │    │  │  + multi-layer shells      │  │
+│ + new MultiOutputManager service       │    │  │  + layer composite, max 4  │  │
 │  ├─ enumerate monitors                 │ ──>│  └────────────────────────────┘  │
 │  ├─ spawn/destroy WebviewWindow        │evt │             │                    │
 │  ├─ broadcast globe state diff         │    │             ▼                    │
@@ -557,6 +566,73 @@ risk this retires is the boring, expensive kind: UV orientation,
 flip handling, bbox clipping and body-specific shading are all
 places where an independent re-derivation would look right and
 be subtly wrong on a subset of the catalog.
+
+### What the equirect path does to the Earth decoration
+
+Constraint 3 has a consequence the rest of this plan was written
+without. If the equirect pass ray-marches an analytic sphere and
+samples layer textures at the hit point, then **the fragment
+shader is the renderer** — there is no rasterised mesh, no scene
+camera, and no depth buffer. `photorealEarth` is therefore
+consumed as a *texture provider* (its progressive 2K → 4K → 8K
+base diffuse, and the loader that fetches it) rather than as a
+sphere to draw.
+
+That reads at first like a porting cost: reimplement
+`photorealEarth`'s material inside the equirect shader, which is
+exactly the re-derivation the Prior-art section forbids. Sorting
+its effects by *what each one actually depends on* shows it is
+not a porting question at all.
+
+| Effect | Depends on | On an equirect output |
+|---|---|---|
+| Base diffuse | an equirect texture | **Crosses.** Already the sampled layer. |
+| Night lights | an equirect texture, gated by the terminator | **Crosses.** A second sampler and a multiply. |
+| Day/night terminator | `dot(surfaceNormal, sunDir)` | **Crosses, in one line.** In a ray-march the hit point on the unit sphere *is* the normal, so `vNdotL` (`photorealEarth.ts:566`) is `dot(hit, uSunDir)`. |
+| Clouds | an equirect texture on a shell at 1.005 | **Crosses.** Another layer in the composite. |
+| Specular ocean | the **viewer's** position — `rayDir = normalize(fragKm - camKm)` (`:870`) | **Meaningless.** |
+| Atmosphere shells | the **silhouette** — the shell exists "so the shell's silhouette is the limb of the atmosphere proper" (`:148-151`) | **Meaningless.** |
+| Ground shadow | a scene to cast onto | **Meaningless.** |
+| Sun sprite | a billboard in world space | **Meaningless.** |
+
+The four that do not cross are not blocked; they are
+**incoherent on this surface**. An equirectangular unwrap shows
+every point of the sphere at once, so it has no limb and no
+silhouette — the "edge" of an LED sphere is wherever a visitor
+happens to be standing, and it moves as they walk. Likewise
+there is no single viewer to compute a specular highlight for.
+Baking either in would paint a fixed ring or glare spot onto the
+physical surface, in a place that is only correct from one
+vantage point. That is worse than omitting them: it is a
+rendering artifact that reads as a data feature.
+
+So the split is not three-cross-four-lose. It is: **everything
+that is a property of the sphere's surface crosses, and
+everything that is a property of looking at a sphere from
+outside does not, because nobody looks at an LED sphere from
+outside.**
+
+Two consequences.
+
+**Open Question 2 is decided by it.** It had the no-dataset
+default rendering "the photoreal Earth with day/night and
+atmosphere — the same scene is already running; just don't add
+a dataset overlay. Free." The scene is not already running as a
+mesh, so it is not free — but what it costs is one dot product
+and two extra samplers, and what it drops, atmosphere, should
+not have been there. The idle state is diffuse + night lights +
+clouds + terminator, and that is the correct picture rather
+than a degraded one. OQ2 is marked DECIDED accordingly.
+
+**Vector overlays are the real constraint this path imposes**,
+and they are not on this list. Borders, graticules and labels
+(Phase 2) are *geometry*, not raster: nothing about them is
+addressable by lat/lon lookup. On the equirect path they must
+either be rasterised into an equirect texture first, or drawn
+analytically in the shader — feasible for a graticule, not for
+coastlines. That is a genuine cost of choosing direct RTT, and
+it is worth naming here rather than discovering it in Phase 2.
+
 
 ### Globe state — what gets mirrored
 
@@ -688,7 +764,7 @@ two-way binding.
 | `src/output/main.ts` | Output window entry. Creates Three.js renderer, builds `photorealEarth` scene + dataset overlay + layer stack, runs equirect RTT each frame, displays to a full-bleed canvas. Wires `webglcontextlost` / `webglcontextrestored` listeners and an IPC-silence watchdog (5 s tolerance, stale state thereafter — see "Failure recovery") |
 | `src/output/equirectRtt.ts` | Equirectangular render-to-texture pass — single fragment shader. Applies the per-output `uRotationOffsetRad` longitude rotation first (see "Calibration tooling"), then raycasts from a configurable camera offset (`uCameraOffset`, derived from the operator's MapLibre camera by default; see §3.5) at every (lon, lat) of the output framebuffer. Supports split mode (`uSplit`) that mirrors the area of focus to the antipodal hemisphere of the LED sphere. |
 | `src/output/datasetMirror.ts` | Output-side companion to control-window `datasetLoader` — given a `dataset.url` + `dataset.kind` + `dataset.bbox`, builds a Three.js texture (image or HLS-driven VideoTexture) and a UV transform. Owns the playback sync seam (feeds `computeSiblingSyncCorrection` and the read-back verification layer — see "Playback sync algorithm") and the single stream rebuild on a `loadStream()` rejection, freezing the last good frame throughout (see "Failure recovery"; there is deliberately no retry ladder here — `hlsService` owns that). Recognises the `__terraviz_calibration__` sentinel dataset id and renders a procedural test pattern (~80 lines of GLSL) instead of fetching content (see "Calibration tooling") |
-| `src/output/layerStack.ts` | Builds and updates the multi-shell sphere stack from the layers state diff |
+| `src/output/layerStack.ts` | Builds the dataset overlay and layer stack the equirect pass composites — bbox clipping, the `lonOrigin` shift, `isFlippedInY`, and the data-encoded palette LUT, folded into `equirectRtt`'s fragment shader by `buildOutputFragmentShader`. Layers composite in array order inside that one shader, so there is no shell stack and no depth buffer. Slots are unrolled at build time (GLSL ES 1.00 has no dynamic sampler indexing) and capped at `MAX_OUTPUT_LAYERS` |
 | `src/output/output.html` + `src/output/output.css` | Output window markup and styling — black body, no cursor, full-bleed canvas |
 | `src-tauri/capabilities/output.json` | Narrow capability scoped to `output-*` window labels. Allows: event listen / unlisten / emit / emit-to (IPC with manager); window current-monitor / is-decorated / is-fullscreen / set-fullscreen / set-decorations / close; HTTP fetch on `https://*` only with localhost explicitly denied. Excludes: `core:default`, `core:window:default`, window creation, updater, filesystem, asset protocol, shell, dialog, clipboard, all Tauri command `invoke`. Full enumeration + rationale in §3 "Output capability spec". |
 
@@ -730,9 +806,12 @@ two-way binding.
    geometry and placement" for why, and for the fifth capability
    grant it costs.
 4. Output window boots `src/output/main.ts`. Page renders a black
-   background. Lazy-imports Three.js. Builds `photorealEarth`
-   into a hidden scene. Allocates a 2:1 framebuffer at the
-   target resolution (e.g. 4096×2048 for an 8K LED sphere).
+   background. Lazy-imports Three.js. Asks `photorealEarth`
+   for its base diffuse texture (progressive 2K → 4K → 8K)
+   rather than for a sphere to draw — see "What the equirect
+   path does to the Earth decoration". Allocates a 2:1
+   framebuffer at the target resolution (e.g. 4096×2048 for an
+   8K LED sphere).
 5. Output emits `output_ready` so the manager knows it's
    listening. Manager replies with a full state snapshot.
 6. Output applies the snapshot: loads the dataset texture via
@@ -833,12 +912,12 @@ State diffs are broadcast on change, not on a polling clock:
 
 - **Dataset load** → manager broadcasts `{ dataset: { id,
   url, kind, bbox } }`. Output's `datasetMirror` swaps the
-  sphere overlay texture; for video, it tears down the old
-  HLS instance and starts a new one.
+  overlay texture the composite samples; for video, it tears
+  down the old HLS instance and starts a new one.
 - **Layer add / remove / reorder** → manager broadcasts the
   full ordered `layers[]` array (small enough that diffing
-  is overkill). Output's `layerStack` rebuilds the shell
-  stack accordingly.
+  is overkill). Output's `layerStack` rebuilds the shader's
+  slot bindings accordingly.
 - **Play / pause / seek** → manager broadcasts the discrete
   event. Output's video element pipes through.
 - **Per-second timecode** → manager broadcasts
@@ -846,7 +925,10 @@ State diffs are broadcast on change, not on a polling clock:
   the drift-correction algorithm — see "Playback sync
   algorithm" below.
 - **Day/night toggle** → manager broadcasts the new state.
-  Output flips the photoreal Earth's day/night shader uniform.
+  Output flips the terminator term in the equirect shader —
+  the one line of `photorealEarth`'s day/night shading that
+  survives the unwrap (see "What the equirect path does to the
+  Earth decoration").
 - **Output close** → output emits `output_closed` (or the
   manager observes the WebviewWindow close event). Manager
   drops the record.
@@ -861,10 +943,13 @@ of truth.
    diffs are coalesced).
 2. If `dataset.kind === 'video'` and a video element exists,
    call `videoTexture.needsUpdate = true`.
-3. Update the photoreal Earth's sun position from
-   `time.simulationDate` (uses existing `getSunPosition()`
-   helper from `utils/time.ts`).
-4. Render the sphere stack to the equirectangular framebuffer
+3. Update the equirect shader's `uSunDir` from
+   `time.simulationDate` (uses the existing `getSunPosition()`
+   helper at `utils/time.ts:646`, the same one
+   `photorealEarth` calls). No mesh normal is needed: the
+   ray-march's hit point on the unit sphere *is* the normal,
+   so the terminator is one dot product against it.
+4. Render the layer composite to the equirect framebuffer
    with the current `uCameraOffset` uniform (derived from the
    operator's MapLibre camera when "Track operator camera" is
    on for this output; `vec3(0)` when off) and `uSplit` flag.
@@ -1462,7 +1547,7 @@ framebuffer are gone; output renders nothing until
 restored.
 
 On `webglcontextrestored`: rebuild the Three.js scene
-from scratch (textures, framebuffer, sphere stack) using
+from scratch (textures, framebuffer, layer composite) using
 the fresh state snapshot the manager re-pushes. Same code
 path as boot, just without recreating the window. Output
 emits `output_gpu_recovered` to the manager for
@@ -2100,12 +2185,13 @@ What must work:
   many monitors the workstation has, bounded by the decoder
   budget rather than by a constant of 4.
 - **Equirectangular composite render.** Output runs a parallel
-  Three.js scene with `photorealEarth` + the active dataset
-  overlay + the multi-layer stack, renders to a 2:1
-  framebuffer at the configured resolution.
+  Three.js renderer whose one fragment-shader pass composites
+  `photorealEarth`'s base texture, the active dataset overlay
+  and the layer stack straight into a 2:1 framebuffer at the
+  configured resolution.
 - **Multi-layer stack support.** When the operator stacks
   multiple datasets in the control window's primary panel,
-  the output mirrors the same z-ordered shell stack. (v1
+  the output composites them in the same order. (v1
   reuses the control window's existing layer state — adding
   per-layer opacity controls is out of scope; we surface what
   the operator already configured.)
@@ -2296,16 +2382,29 @@ the lat/lon target, with a configurable cap on angular
 velocity. ~30 LOC.
 
 In the same phase, country borders + gridlines on the sphere.
-Committed approach: pull the existing MapLibre vector borders
-source, build a Three.js `LineSegments` mesh from the resulting
-GeoJSON-equivalent line geometry, drape it on a sphere shell at
-radius 1.0005, render alongside the photoreal Earth. ~300 LOC.
+The approach recorded here was: pull the existing MapLibre
+vector borders source, build a Three.js `LineSegments` mesh
+from the resulting GeoJSON-equivalent line geometry, drape it
+on a sphere shell at radius 1.0005, render alongside the
+photoreal Earth. ~300 LOC. Its rejected alternative was
+pre-rendering borders to an equirectangular raster overlay PNG
+— cheaper at runtime but without zoom-aware label thinning,
+dynamic styling, or per-dataset highlight overlays.
 
-Rejected alternative: pre-rendering borders to an equirectangular
-raster overlay PNG. Cheaper at runtime but doesn't support
-zoom-aware label thinning, dynamic styling, or per-dataset
-highlight overlays — all of which become natural extensions
-once line geometry is in place.
+**That comparison assumed a mesh, and §3 removed it.** There is
+no shell at radius 1.0005 to drape geometry on and nothing to
+render "alongside": the equirect pass composites raster samples
+in one fragment shader. So the two options are not as scored
+above. Raster-first is now the *cheap* option rather than the
+compromised one, because an equirect PNG is simply another
+sampler; and keeping line geometry means either rasterising it
+into an equirect texture each time the styling changes, or
+drawing it analytically in the shader — tractable for a
+graticule, not for coastlines. This is the constraint named in
+"What the equirect path does to the Earth decoration", and it
+is the one place in the plan where choosing direct RTT costs
+something real. Phase 2 re-decides it on those terms; v1 is
+unaffected, since borders were already out of scope.
 
 Place labels (text-along-curve) is harder; ship-conditional on
 demand.
@@ -2555,10 +2654,16 @@ renderer somewhere" — which we don't. Direct RTT.
    platforms as part of the same test pass. macOS is
    untested too.
 2. **What to do when the operator opens an output but no
-   dataset is loaded?** Default: render the photoreal Earth
-   with day/night and atmosphere — a "live Earth" idle state.
-   The same scene is already running; just don't add a
-   dataset overlay. Free.
+   dataset is loaded? — DECIDED.** Default: a "live Earth"
+   idle state of base diffuse + night lights + clouds +
+   terminator, which is what survives the unwrap. Not
+   atmosphere: an equirectangular image has no limb for an
+   atmosphere shell to be the silhouette of, so painting one
+   in would put a fixed ring on the physical sphere. Nor is
+   it free — the scene is not already running as a mesh — but
+   the cost is one dot product and two extra samplers over
+   the pass that has to run anyway. See "What the equirect
+   path does to the Earth decoration".
 3. **Telemetry — DECIDED.** The output window itself emits
    nothing. Telemetry from a capture-clean LED-sphere
    surface would also be a capture-clean policy violation
@@ -2631,11 +2736,21 @@ renderer somewhere" — which we don't. Direct RTT.
    dataset on the control globe and on the output, verify
    alignment to ≤1 px at 4K. The test fixture for commit 2
    should include a CONUS-bbox reference rendering.
-8. **Multi-layer z-fighting.** Stacked sphere shells at radii
-   1.000 / 1.001 / 1.002 may z-fight on some GPUs at 4K+
-   render targets. Mitigation: render order + `depthWrite:
-   false` on overlays. Verify on at least one Intel iGPU and
-   one AMD discrete GPU.
+8. **Multi-layer z-fighting — DISSOLVED.** The worry was that
+   stacked sphere shells at radii 1.000 / 1.001 / 1.002 would
+   z-fight on some GPUs at 4K+ render targets. There are no
+   shells. The equirect pass has no mesh and no depth buffer,
+   so layers composite in array order inside the single
+   fragment shader (see "What the equirect path does to the
+   Earth decoration") — an array index is not something a
+   driver can disagree about, and there is nothing to verify
+   per-GPU.
+
+   What replaces it as the real ceiling is sampler count.
+   WebGL guarantees only 8 fragment texture units, and the
+   base map plus each layer's texture and its palette LUT all
+   want one; hence `MAX_OUTPUT_LAYERS = 4`, which also happens
+   to match the control window's own 4-globe ceiling.
 
 ---
 

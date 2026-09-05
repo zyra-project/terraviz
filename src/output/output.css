@@ -1,0 +1,37 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright 2026 The Zyra Project */
+
+/*
+ * The output window is a capture surface. Everything here exists to
+ * make sure nothing but the projection reaches the signal: no chrome,
+ * no cursor, no scrollbars, no flash of any colour but black between
+ * load and first frame.
+ */
+
+html,
+body.output-body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  /* A stationary cursor in the corner of a captured signal is exactly
+     the artifact operators are trying to avoid, and an output window
+     is never interacted with. Hidden outright rather than on an idle
+     timer, which is what the control window uses. */
+  cursor: none;
+}
+
+#output-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* The drawing buffer is a 2:1 equirectangular framebuffer sized to
+     the target device, independent of this element's size — a 1080p
+     preview monitor can host a 4096x2048 output. `object-fit` keeps
+     the aspect honest while it is being previewed rather than
+     stretching the projection to the window. */
+  object-fit: contain;
+  background: #000;
+}
