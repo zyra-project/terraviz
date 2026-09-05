@@ -74,3 +74,29 @@ export function toMirroredDataset(
     overlay: overlayForMirror(dataset),
   }
 }
+
+/**
+ * What a panel's `(dataset, mediaDatasetId)` pair says about whether it
+ * can be mirrored.
+ *
+ * - `empty` — nothing loaded; an output should show the idle Earth.
+ * - `ready` — the row and the pixels agree, so the frame can be described.
+ * - `unsettled` — they disagree. The panel's `dataset` is assigned before
+ *   a load is attempted and stays set when one fails, while one is in
+ *   flight, and for a `tour/json` row that paints nothing — in each case
+ *   the panel still holds the *previous* dataset's pixels. Mirroring
+ *   from the row alone would put one dataset's texture under another's
+ *   bbox, `lonOrigin`, flip and palette, labelled with the wrong title.
+ *
+ * Split out of `main.ts` because it is the one piece of that wiring with
+ * a wrong answer available, and `main.ts` has no exports to test through.
+ */
+export type PanelMirrorState = 'empty' | 'ready' | 'unsettled'
+
+export function panelMirrorState(
+  datasetId: string | null | undefined,
+  mediaDatasetId: string | null,
+): PanelMirrorState {
+  if (!datasetId) return mediaDatasetId === null ? 'empty' : 'unsettled'
+  return mediaDatasetId === datasetId ? 'ready' : 'unsettled'
+}

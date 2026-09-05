@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { Dataset } from '../../types'
-import { overlayForMirror, toMirroredDataset } from './mirrorState'
+import { overlayForMirror, panelMirrorState, toMirroredDataset } from './mirrorState'
 
 /** The common case: a global, prime-meridian, unflipped Earth picture —
  *  the one `overlayOptionsFromDataset` deliberately returns `undefined`
@@ -63,5 +63,36 @@ describe('toMirroredDataset', () => {
     // the HTML as a texture — a failure that surfaces far from here.
     // `null` is already the schema's "nothing loaded".
     expect(toMirroredDataset(plainDataset(), 'image', url)).toBeNull()
+  })
+})
+
+describe('panelMirrorState', () => {
+  it('is empty only when the panel holds neither a row nor pixels', () => {
+    expect(panelMirrorState(null, null)).toBe('empty')
+    expect(panelMirrorState(undefined, null)).toBe('empty')
+  })
+
+  it('is ready when the row and the pixels are the same dataset', () => {
+    expect(panelMirrorState('A', 'A')).toBe('ready')
+  })
+
+  it('is unsettled when a load failed or is still in flight', () => {
+    // `dataset` is assigned before the load is attempted, so a failure
+    // leaves row B paired with dataset A's pixels. Mirroring that would
+    // draw A under B's geometry and call it B.
+    expect(panelMirrorState('B', 'A')).toBe('unsettled')
+    // Nothing has painted for this row yet.
+    expect(panelMirrorState('B', null)).toBe('unsettled')
+  })
+
+  it('is unsettled for a tour row sitting over a previous dataset', () => {
+    // A `tour/json` row sets `dataset` and paints nothing, so the panel
+    // still shows the earlier dataset. Reporting `empty` here would
+    // blank the sphere while the operator watches the tour run.
+    expect(panelMirrorState('TOUR', 'PREVIOUS')).toBe('unsettled')
+  })
+
+  it('is unsettled mid-teardown, when pixels outlive the row', () => {
+    expect(panelMirrorState(null, 'A')).toBe('unsettled')
   })
 })

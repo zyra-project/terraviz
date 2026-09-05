@@ -108,7 +108,10 @@ import { flyToOnGlobe, isVrActive } from './services/vrSession'
 import type { VrDatasetTexture } from './services/vrScene'
 import { overlayOptionsFromDataset } from './services/datasetOverlayOptions'
 import { publishGlobeState } from './services/multiOutput/globeStateEvents'
-import { toMirroredDataset } from './services/multiOutput/mirrorState'
+import {
+  panelMirrorState,
+  toMirroredDataset,
+} from './services/multiOutput/mirrorState'
 import {
   startMultiOutput,
   type MultiOutputBootHandle,
@@ -193,10 +196,28 @@ interface PanelState {
    * loading into this panel. Used to compute `layer_unloaded.dwell_ms`.
    * Null when the panel is empty (default Earth). */
   loadedAt: number | null
+  /**
+   * Which dataset the panel's `image` / `hlsService` actually belongs to.
+   *
+   * Not the same question as `dataset`, which is assigned *before* the
+   * load is attempted and stays set when one fails, when one is still in
+   * flight, and for a `tour/json` row that never paints anything. The
+   * two disagreeing is what lets a mirrored frame carry one dataset's
+   * identity over another's pixels, so anything describing what is on
+   * screen must compare them rather than trusting `dataset` alone.
+   */
+  mediaDatasetId: string | null
 }
 
 function createPanelState(): PanelState {
-  return { dataset: null, hlsService: null, videoTexture: null, image: null, loadedAt: null }
+  return {
+    dataset: null,
+    hlsService: null,
+    videoTexture: null,
+    image: null,
+    loadedAt: null,
+    mediaDatasetId: null,
+  }
 }
 
 /** Map a dataset-load trigger to the analytics tour-source enum.
@@ -1138,7 +1159,10 @@ class InteractiveSphere {
       } else if (dataService.isImageDataset(dataset)) {
         const img = await loadImageDataset(dataset, targetRenderer, this.appState, this.isMobile, loaderCallbacks)
         if (gen !== this.loadGeneration) return
-        if (this.panelStates[targetSlot]) this.panelStates[targetSlot].image = img
+        if (this.panelStates[targetSlot]) {
+          this.panelStates[targetSlot].image = img
+          this.panelStates[targetSlot].mediaDatasetId = dataset.id
+        }
         this.emitLayerLoaded(dataset, targetSlot, trigger, 'image', Date.now() - loadStartWall)
       } else if (dataService.isVideoDataset(dataset)) {
         // Clear any previously-cached image element for this slot —
@@ -1156,7 +1180,7 @@ class InteractiveSphere {
           result.hlsService.destroy()
           return
         }
-        this.storePanelVideoResult(targetSlot, result)
+        this.storePanelVideoResult(targetSlot, result, dataset.id)
         this.attachPrimaryVideoSync()
         this.doStartPlaybackLoop()
         this.emitLayerLoaded(dataset, targetSlot, trigger, 'hls', Date.now() - loadStartWall)
@@ -1357,7 +1381,10 @@ class InteractiveSphere {
         dataset, targetRenderer, this.appState, this.isMobile, tourLoaderCallbacks,
         { isPrimary: isPrimarySlot },
       )
-      if (this.panelStates[targetSlot]) this.panelStates[targetSlot].image = img
+      if (this.panelStates[targetSlot]) {
+        this.panelStates[targetSlot].image = img
+        this.panelStates[targetSlot].mediaDatasetId = dataset.id
+      }
       this.emitLayerLoaded(dataset, targetSlot, 'tour', 'image', Date.now() - tourLoadStartWall)
     } else if (dataService.isVideoDataset(dataset)) {
       // Clear any previously-cached image element for this slot —
@@ -1369,7 +1396,7 @@ class InteractiveSphere {
         dataset, targetRenderer, this.appState, this.isMobile, this.playback, tourLoaderCallbacks,
         { isPrimary: isPrimarySlot },
       )
-      this.storePanelVideoResult(targetSlot, result)
+      this.storePanelVideoResult(targetSlot, result, dataset.id)
       if (isPrimarySlot) {
         this.attachPrimaryVideoSync()
         this.doStartPlaybackLoop()
@@ -2236,26 +2263,48 @@ class InteractiveSphere {
    * control window's job. It cannot be read back off the media element:
    * on the hls.js path `video.src` is a `blob:` MediaSource handle.
    *
-   * A tour row is neither an image nor a video and mirrors as `null`:
-   * a tour is a script this window runs, and what an output should show
-   * is whatever that script loads, which arrives here as its own load.
+   * **`dataset` alone is not what the panel is showing.** It is assigned
+   * before the load is attempted, so it stays set when a load fails,
+   * while one is in flight, and for a `tour/json` row that paints
+   * nothing at all — in each case the panel still holds the *previous*
+   * dataset's pixels. Publishing from `dataset` and `image` together
+   * without checking they agree is how an output ends up rendering one
+   * dataset's texture under another's bbox, `lonOrigin`, flip and
+   * palette, labelled with the wrong title. `mediaDatasetId` records
+   * which dataset the media actually belongs to, and the three cases
+   * below are what that comparison yields.
    */
   private publishMirroredDataset(): void {
     const panel = this.panelStates[this.viewports.getPrimaryIndex()]
     const dataset = panel?.dataset ?? null
-    if (!panel || !dataset) {
+    const settled = panelMirrorState(dataset?.id, panel?.mediaDatasetId ?? null)
+
+    // Genuinely empty — the panel is back to the default Earth, and an
+    // output should follow it there.
+    if (!panel || settled === 'empty') {
       publishGlobeState({ dataset: null })
       return
     }
+
+    // Row and pixels disagree: a load failed or is still in flight, a
+    // teardown is half-done, or the primary holds a tour row whose
+    // script has not loaded anything yet. Publish NOTHING rather than
+    // guessing. `null` would blank the sphere while the operator is
+    // still looking at the old dataset, and the row would mislabel the
+    // old pixels — so the honest move is to leave the output showing
+    // what it has until the panel settles, which fires this again.
+    if (settled === 'unsettled' || !dataset) return
+
     const kind = dataService.isVideoDataset(dataset)
       ? 'video'
       : dataService.isImageDataset(dataset)
         ? 'image'
         : null
-    if (kind === null) {
-      publishGlobeState({ dataset: null })
-      return
-    }
+    // Unreachable while `mediaDatasetId` is only set beside real pixels
+    // (a tour row never paints), but a format that mirrors as neither
+    // kind must not be guessed at either.
+    if (kind === null) return
+
     const url = kind === 'video'
       ? panel.hlsService?.getSourceUrl() ?? null
       : panel.image?.src ?? null
@@ -3014,11 +3063,15 @@ class InteractiveSphere {
   private storePanelVideoResult(
     slot: number,
     result: { hlsService: HLSService; videoTexture: VideoTextureHandle },
+    datasetId: string,
   ): void {
     const panel = this.panelStates[slot]
     if (!panel) return
     panel.hlsService = result.hlsService
     panel.videoTexture = result.videoTexture
+    // Recorded with the stream, not with the catalog row: this is the
+    // claim "the pixels on this panel are this dataset's".
+    panel.mediaDatasetId = datasetId
 
     // A stream that dies after load used to say nothing at all, which
     // left this panel holding a frame for good while the shared time
@@ -3683,6 +3736,7 @@ class InteractiveSphere {
     // texture.
     panel.dataset = null
     panel.image = null
+    panel.mediaDatasetId = null
     // After the clear, not before: `emitLayerUnloadedForSlot` runs while
     // the panel still holds the outgoing row (it reports on it), so
     // publishing there would restate the dataset being removed.
@@ -3986,6 +4040,7 @@ class InteractiveSphere {
       if (panel.hlsService) { panel.hlsService.destroy(); panel.hlsService = null }
       panel.dataset = null
       panel.image = null
+      panel.mediaDatasetId = null
       const renderer = this.viewports.getRendererAt(i)
       if (renderer instanceof MapRenderer) {
         renderer.setDatasetCredits(null)
