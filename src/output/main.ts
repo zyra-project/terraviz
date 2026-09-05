@@ -33,6 +33,10 @@ async function boot(): Promise<void> {
   let dirty = true
 
   const tick = (now: number): void => {
+    // The scene reports its own changes — today, the CDN texture
+    // upgrading 2K → 4K → 8K after first paint. Without this the
+    // upgrade waits out the 1 Hz static floor and pops on a projector.
+    dirty = scene.consumeDirty() || dirty
     if (shouldRenderFrame({ kind, sinceLastFrameMs: now - lastFrame, dirty })) {
       scene.render()
       lastFrame = now

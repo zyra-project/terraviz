@@ -5,9 +5,12 @@
  * Tests for the output scene's pure logic, plus a regression guard on
  * the Vite entry list.
  *
- * The Three.js construction itself needs a GL context and is not
- * covered here; what is covered is the framebuffer sizing, the loop's
- * draw decision, and the build-config trap the plan calls out by name.
+ * The Three.js construction needs no GL context here: both seams
+ * (`loadThree`, `createEarth`) are injectable, so the scene is built
+ * against fakes. That matters — the sampler once shipped bound to
+ * `null`, rendering a black page while the module header claimed it
+ * drew the Earth, and it survived because nothing in this file had
+ * ever built a scene at all.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -20,8 +23,9 @@ import {
   shouldRenderFrame,
   VIDEO_FRAME_MS,
   STATIC_FRAME_MS,
+  createOutputScene,
 } from './outputScene'
-import { EQUIRECT_ASPECT } from './equirectRtt'
+import { EQUIRECT_ASPECT, EQUIRECT_UNIFORMS } from './equirectRtt'
 
 describe('resolveFramebufferSize', () => {
   it('keeps every rung 2:1', () => {
@@ -76,6 +80,167 @@ describe('frame pacing', () => {
   it('draws video roughly every 33 ms', () => {
     expect(shouldRenderFrame({ kind: 'video', sinceLastFrameMs: 20, dirty: false })).toBe(false)
     expect(shouldRenderFrame({ kind: 'video', sinceLastFrameMs: 34, dirty: false })).toBe(true)
+  })
+})
+
+describe('the sphere texture binding', () => {
+  // This whole block exists because of a regression that shipped: the
+  // sampler was left bound to `null`, so the page rendered black while
+  // the module header said it rendered the Earth. Nothing here had
+  // ever *built* a scene, so nothing caught it. Black is the worst
+  // placeholder on an output — indistinguishable from a dropped upload
+  // or a lost context, the failure the 1 Hz floor exists to surface.
+
+  interface FakeTexture { readonly id: string }
+
+  function fakeThree() {
+    const uniformsSeen: Array<Record<string, { value: unknown }>> = []
+    const disposed: string[] = []
+    const THREE_ = {
+      WebGLRenderer: class {
+        setSize(): void {}
+        setClearColor(): void {}
+        render(): void {}
+        dispose(): void { disposed.push('renderer') }
+        forceContextLoss(): void {}
+      },
+      Scene: class { add(): void {} },
+      OrthographicCamera: class {},
+      Vector3: class {
+        constructor(public x = 0, public y = 0, public z = 0) {}
+        set(x: number, y: number, z: number): void {
+          this.x = x; this.y = y; this.z = z
+        }
+      },
+      ShaderMaterial: class {
+        uniforms: Record<string, { value: unknown }>
+        constructor(args: { uniforms: Record<string, { value: unknown }> }) {
+          this.uniforms = args.uniforms
+          uniformsSeen.push(args.uniforms)
+        }
+        dispose(): void { disposed.push('material') }
+      },
+      PlaneGeometry: class { dispose(): void { disposed.push('geometry') } },
+      // Retains its constructor args, as the real Mesh does: `dispose()`
+      // reaches through `quad.geometry`, and a fake that drops them
+      // would make the teardown path untestable.
+      Mesh: class {
+        frustumCulled = true
+        constructor(
+          public geometry: { dispose(): void },
+          public material: { dispose(): void },
+        ) {}
+      },
+    }
+    return { THREE_: THREE_ as never, uniformsSeen, disposed }
+  }
+
+  function fakeEarth(base: FakeTexture, upgrade?: FakeTexture) {
+    let subscriber: ((t: unknown) => void) | null = null
+    const earthDisposed = { value: false }
+    const unsubscribed = { value: false }
+    const createEarth = ((_three: unknown, options: Record<string, boolean>) => {
+      return {
+        baseEarthTexture: base,
+        baseDiffuseTexture: null,
+        optionsSeen: options,
+        onBaseDiffuseChange(cb: (t: unknown) => void) {
+          subscriber = cb
+          return () => { unsubscribed.value = true }
+        },
+        dispose() { earthDisposed.value = true },
+      }
+    }) as never
+    return {
+      createEarth,
+      upgradeNow: () => subscriber?.(upgrade),
+      earthDisposed,
+      unsubscribed,
+    }
+  }
+
+  const canvas = () => ({}) as HTMLCanvasElement
+
+  it('binds a real texture from the first frame, never null', async () => {
+    const three = fakeThree()
+    const base: FakeTexture = { id: 'base-2k' }
+    const earth = fakeEarth(base)
+
+    await createOutputScene(
+      { canvas: canvas() },
+      { loadThree: async () => three.THREE_, createEarth: earth.createEarth },
+    )
+
+    const uniforms = three.uniformsSeen[0]
+    expect(uniforms[EQUIRECT_UNIFORMS.sphereTexture].value).toBe(base)
+    expect(uniforms[EQUIRECT_UNIFORMS.sphereTexture].value).not.toBeNull()
+  })
+
+  it('builds the Earth as a texture provider, with every mesh-only effect off', async () => {
+    const three = fakeThree()
+    let seen: Record<string, boolean> | undefined
+    const createEarth = ((_t: unknown, options: Record<string, boolean>) => {
+      seen = options
+      return {
+        baseEarthTexture: { id: 'base' },
+        baseDiffuseTexture: null,
+        onBaseDiffuseChange: () => () => {},
+        dispose() {},
+      }
+    }) as never
+
+    await createOutputScene(
+      { canvas: canvas() },
+      { loadThree: async () => three.THREE_, createEarth },
+    )
+
+    // The equirect pass never rasterises a mesh, so anything that only
+    // exists on one is built and thrown away — and half of them are
+    // meaningless on an unwrap anyway.
+    expect(seen).toEqual({
+      includeLighting: false,
+      includeAtmosphere: false,
+      includeClouds: false,
+      includeSun: false,
+      includeShadow: false,
+    })
+  })
+
+  it('swaps the sampler when the CDN upgrades, and reports itself dirty', async () => {
+    const three = fakeThree()
+    const base: FakeTexture = { id: 'base-2k' }
+    const better: FakeTexture = { id: 'diffuse-8k' }
+    const earth = fakeEarth(base, better)
+
+    const scene = await createOutputScene(
+      { canvas: canvas() },
+      { loadThree: async () => three.THREE_, createEarth: earth.createEarth },
+    )
+
+    expect(scene.consumeDirty()).toBe(false)
+    earth.upgradeNow()
+
+    const uniforms = three.uniformsSeen[0]
+    expect(uniforms[EQUIRECT_UNIFORMS.sphereTexture].value).toBe(better)
+    // Without the dirty flag the upgrade waits out the 1 Hz static
+    // floor and pops on a projector.
+    expect(scene.consumeDirty()).toBe(true)
+    // Read once and cleared, so one upgrade cannot force every frame.
+    expect(scene.consumeDirty()).toBe(false)
+  })
+
+  it('unsubscribes and disposes the Earth before dropping the GL context', async () => {
+    const three = fakeThree()
+    const earth = fakeEarth({ id: 'base' })
+
+    const scene = await createOutputScene(
+      { canvas: canvas() },
+      { loadThree: async () => three.THREE_, createEarth: earth.createEarth },
+    )
+    scene.dispose()
+
+    expect(earth.unsubscribed.value).toBe(true)
+    expect(earth.earthDisposed.value).toBe(true)
   })
 })
 

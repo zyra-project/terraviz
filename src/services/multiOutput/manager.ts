@@ -260,8 +260,12 @@ export class MultiOutputManager {
     record.view = { ...record.view, ...view }
     if (!record.ready) return
     const { view: shared } = this.aggregator.current()
+    // `bump()`, not `sequence()`: this is a new event for this output,
+    // and re-using the number it has already applied loses to it under
+    // most-recent-wins coalescing — which would make the toggle look
+    // inert, the exact failure this method exists to prevent.
     await this.emit(record, {
-      seq: this.aggregator.sequence(),
+      seq: this.aggregator.bump(),
       full: false,
       state: projectState({ view: shared }, record.view),
     })

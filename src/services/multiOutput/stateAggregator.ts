@@ -253,6 +253,29 @@ export class StateAggregator {
   }
 
   /**
+   * Advance the sequence without changing the state, and return the new
+   * value.
+   *
+   * For a message that is a genuine new event for **one** output but
+   * not a change to shared state — today, only the per-output view
+   * projection when the operator toggles that output's own settings.
+   * Such a message still has to out-rank every diff that output has
+   * already applied, and re-using the current `seq` does not: the
+   * output coalesces most-recent-wins, so an equal number loses and the
+   * update is silently dropped.
+   *
+   * The cost is that the other outputs see a **gap** in the sequence.
+   * That is deliberate and safe: `seq` is an ordering key, not a
+   * delivery counter, and nothing on either side infers loss from a
+   * skipped number. Do not add a gap detector without first giving
+   * per-output messages their own sequence space.
+   */
+  bump(): number {
+    this.seq += 1
+    return this.seq
+  }
+
+  /**
    * Drop back to the initial state and restart the sequence.
    *
    * The counterpart to the protocol's "it resets on manager restart,

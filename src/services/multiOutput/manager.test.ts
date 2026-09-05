@@ -326,6 +326,44 @@ describe('broadcast', () => {
     expect((fake.emitted[0].payload.state as { view: { cameraOffset: unknown } }).view.cameraOffset)
       .toEqual({ x: 0, y: 0, z: 0 })
   })
+
+  it('stamps the view push with a seq that outranks what the output already applied', async () => {
+    const fake = createFakeHost()
+    const manager = new MultiOutputManager(fake.host)
+    await manager.start()
+    await manager.addOutput({ monitorIndex: 0, view: { trackCamera: true } })
+    fake.send(ready('output-1'))
+    await manager.applyState({
+      view: { dayNight: true, cameraOffset: { x: 0.5, y: 0, z: 0 }, split: false },
+    })
+    const lastApplied = fake.emitted[fake.emitted.length - 1].payload.seq
+
+    await manager.setOutputView('output-1', { trackCamera: false })
+
+    // Re-using `lastApplied` would lose under most-recent-wins
+    // coalescing and the toggle would silently do nothing.
+    const pushed = fake.emitted[fake.emitted.length - 1].payload.seq
+    expect(pushed).toBeGreaterThan(lastApplied)
+  })
+
+  it('keeps the sequence monotonic across interleaved view pushes and diffs', async () => {
+    const fake = createFakeHost()
+    const manager = new MultiOutputManager(fake.host)
+    await manager.start()
+    await manager.addOutput({ monitorIndex: 0 })
+    fake.send(ready('output-1'))
+    fake.emitted.length = 0
+
+    await manager.applyState({ simulationDate: '2026-01-01T00:00:00Z' })
+    await manager.setOutputView('output-1', { split: true })
+    await manager.applyState({ simulationDate: '2026-01-02T00:00:00Z' })
+
+    const seqs = fake.emitted.map(e => e.payload.seq)
+    expect(seqs).toHaveLength(3)
+    for (let i = 1; i < seqs.length; i++) {
+      expect(seqs[i]).toBeGreaterThan(seqs[i - 1])
+    }
+  })
 })
 
 describe('event routing', () => {

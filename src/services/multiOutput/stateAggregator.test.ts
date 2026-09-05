@@ -176,6 +176,27 @@ describe('sequence numbers', () => {
     expect((snap.state as MirroredGlobeState).layers).toEqual([])
   })
 
+  it('bump() advances the sequence without touching the state', () => {
+    const agg = new StateAggregator()
+    agg.apply({ dataset: DATASET })
+    const before = agg.current()
+
+    expect(agg.bump()).toBe(2)
+    expect(agg.sequence()).toBe(2)
+    expect(agg.current()).toEqual(before)
+    // And the next real change keeps going up, so a bumped message and
+    // the diff after it can never collide.
+    expect(agg.apply({ simulationDate: '2026-06-06T00:00:00Z' })!.seq).toBe(3)
+  })
+
+  it('bump() outranks the diff an output has already applied', () => {
+    const agg = new StateAggregator()
+    const applied = agg.apply({ dataset: DATASET })!
+    // The failure this exists to prevent: an equal seq loses under
+    // most-recent-wins coalescing, so the message is silently dropped.
+    expect(agg.bump()).toBeGreaterThan(applied.seq)
+  })
+
   it('reset() returns to the initial state and restarts the sequence', () => {
     const agg = new StateAggregator()
     agg.apply({ dataset: DATASET })
