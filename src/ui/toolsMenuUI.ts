@@ -159,6 +159,17 @@ export interface ToolsMenuCallbacks {
    *  closePopover() before the dialog opens, so it isn't a
    *  reliable focus target). */
   onOpenCredits?: (trigger: HTMLElement) => void
+  /**
+   * User clicked Outputs — open the multi-monitor Outputs panel
+   * (`docs/MULTI_MONITOR_PLAN.md` rung 9).
+   *
+   * Absent renders no entry at all, which is how the web build stays
+   * unchanged: outputs are desktop-only, and `main.ts` supplies this
+   * only when the boot handle reports itself available. Same shape as
+   * `onOpenCredits` — the callback's presence *is* the feature gate, so
+   * there is no second place for the two to disagree.
+   */
+  onOpenOutputs?: (trigger: HTMLElement) => void
   /** Announce something for screen readers. */
   announce?: (message: string) => void
   /** Get the currently loaded dataset (used by the Share action).
@@ -189,7 +200,7 @@ export function initToolsMenu(
 
   const gateMeetOrbit = isTauri()
 
-  const { onSetLayout, onOpenBrowse, onOpenOrbitSettings, onToggleDatasetInfo, onToggleLegend, onOpenCredits, announce } = callbacks
+  const { onSetLayout, onOpenBrowse, onOpenOrbitSettings, onToggleDatasetInfo, onToggleLegend, onOpenCredits, onOpenOutputs, announce } = callbacks
   const currentLayout = viewports.getLayout()
   // A phone cannot hold four video decoders — the third crashes the tab
   // while still loading (terraviz#230) — so the option is turned off
@@ -338,6 +349,14 @@ export function initToolsMenu(
           <span class="tools-menu-item-label">${tHtml('tools.actions.playlists')}</span>
         </button>
       </section>
+      ${onOpenOutputs ? `
+      <section class="tools-menu-section" aria-label="${tAttr('tools.section.outputs.aria')}">
+        <h4 class="tools-menu-section-title">${tHtml('tools.section.outputs')}</h4>
+        <button type="button" class="tools-menu-item" id="tools-menu-outputs">
+          <span class="tools-menu-item-check" aria-hidden="true"></span>
+          <span class="tools-menu-item-label">${tHtml('tools.actions.outputs')}</span>
+        </button>
+      </section>` : ''}
       <section class="tools-menu-section" aria-label="${tAttr('tools.section.orbit.aria')}">
         <h4 class="tools-menu-section-title">${tHtml('tools.section.orbit')}</h4>
         <button type="button" class="tools-menu-item" id="tools-menu-orbit-settings">
@@ -635,6 +654,18 @@ export function initToolsMenu(
       // above, so it can't reliably receive focus on close.
       onOpenCredits(toggleBtn)
       announce?.(t('tools.announce.creditsOpened'))
+    })
+  }
+
+  if (onOpenOutputs) {
+    const outputsBtn = document.getElementById('tools-menu-outputs') as HTMLButtonElement | null
+    outputsBtn?.addEventListener('click', () => {
+      closePopover()
+      // The always-visible toggle button, not the menu item: closePopover
+      // has just hidden the item, so it cannot take focus back when the
+      // panel closes. Same reasoning as Credits above.
+      onOpenOutputs(toggleBtn)
+      announce?.(t('tools.announce.outputsOpened'))
     })
   }
 

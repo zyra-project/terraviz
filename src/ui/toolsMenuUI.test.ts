@@ -533,6 +533,34 @@ describe('Tools menu callbacks', () => {
     expect(onOpenCredits.mock.calls[0][0]).toBe(document.getElementById('tools-menu-toggle'))
     expect(isToolsMenuOpen()).toBe(false)
   })
+
+  it('renders no Outputs section without onOpenOutputs — the web build sees nothing', () => {
+    const vm = makeViewports(1)
+    initToolsMenu(vm as any, { getCurrentDataset: () => null })
+
+    // The callback's presence *is* the desktop gate, so its absence has
+    // to take the whole section with it, not just leave a dead item.
+    expect(document.getElementById('tools-menu-outputs')).toBeNull()
+    expect(document.body.textContent).not.toContain('Outputs')
+  })
+
+  it('renders the Outputs button and invokes onOpenOutputs with the Tools toggle as trigger', () => {
+    const vm = makeViewports(1)
+    const onOpenOutputs = vi.fn()
+    initToolsMenu(vm as any, { onOpenOutputs, getCurrentDataset: () => null })
+
+    const outputsBtn = document.getElementById('tools-menu-outputs') as HTMLButtonElement | null
+    expect(outputsBtn).not.toBeNull()
+
+    ;(document.getElementById('tools-menu-toggle') as HTMLButtonElement).click()
+    outputsBtn!.click()
+
+    expect(onOpenOutputs).toHaveBeenCalledTimes(1)
+    // The toggle, not the menu item: closePopover has already hidden the
+    // item, so it cannot receive focus back when the panel closes.
+    expect(onOpenOutputs.mock.calls[0][0]).toBe(document.getElementById('tools-menu-toggle'))
+    expect(isToolsMenuOpen()).toBe(false)
+  })
 })
 
 // ---------------------------------------------------------------------------
