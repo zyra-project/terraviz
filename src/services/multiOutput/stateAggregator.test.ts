@@ -140,6 +140,33 @@ describe('apply', () => {
     expect(agg.apply({ dataset: shifted })).not.toBeNull()
   })
 
+  it('stores a copy, so a caller mutating its own object cannot go unnoticed', () => {
+    const agg = new StateAggregator()
+    const layers: MirroredLayer[] = [LAYER]
+    agg.apply({ layers })
+
+    // A caller that pushes onto the array it already handed over would
+    // otherwise hit the `a === b` fast path: the aggregator's "previous"
+    // value *is* the mutated one, so the diff is silently absorbed and
+    // the outputs keep rendering one layer forever.
+    layers.push({ ...LAYER, id: 'l-2' })
+    const msg = agg.apply({ layers })
+
+    expect(msg).not.toBeNull()
+    expect((msg!.state as MirroredGlobeState).layers).toHaveLength(2)
+  })
+
+  it('does not expose its internals for outside mutation', () => {
+    const agg = new StateAggregator()
+    agg.apply({ dataset: DATASET })
+    const held = agg.current().dataset!
+
+    // Same hazard from the other direction: the stored object must not
+    // be the caller's, or a later edit of theirs rewrites our state.
+    expect(held).not.toBe(DATASET)
+    expect(held).toEqual(DATASET)
+  })
+
   it('detects a null → value transition and back', () => {
     const agg = new StateAggregator()
     expect(agg.apply({ playback: { date: '2026-01-01T00:00:00Z', paused: false, playbackRate: 1 } })).not.toBeNull()

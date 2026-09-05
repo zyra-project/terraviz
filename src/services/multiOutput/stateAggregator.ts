@@ -156,8 +156,17 @@ function sameValue(a: unknown, b: unknown): boolean {
   return keys.every(k => hasOwn(y, k) && sameValue(x[k], y[k]))
 }
 
-/** Every top-level key of the mirrored state, so `apply` can walk a
- *  patch without trusting its shape. */
+/**
+ * Every top-level key of the mirrored state, so `apply` can walk a
+ * patch without trusting its shape.
+ *
+ * The two guards below make this list **exhaustive at compile time**.
+ * Without them a key added to `MirroredGlobeState` type-checks
+ * everywhere and is simply never diffed — the output would only ever
+ * learn about it from a `full()` snapshot, so the bug would look like
+ * "that setting takes a second to apply" rather than like a missing
+ * case.
+ */
 const STATE_KEYS = [
   'dataset',
   'primary',
@@ -166,7 +175,26 @@ const STATE_KEYS = [
   'layers',
   'simulationDate',
   'view',
-] as const
+] as const satisfies readonly (keyof MirroredGlobeState)[]
+
+/**
+ * Compile-time proof that `STATE_KEYS` names every key.
+ *
+ * `Exclude` is empty — `never` — only when nothing is missing, so the
+ * `extends never` constraint fails to satisfy the moment a key is added
+ * to `MirroredGlobeState` without being listed above.
+ *
+ * It has to be a *constraint* rather than a value. The obvious version,
+ * `const _: MissingStateKey[] = []`, compiles happily whatever the type
+ * resolves to, because an empty array literal is assignable to every
+ * array type — a guard that reads correctly and checks nothing. (It was
+ * written that way first, and only caught by deleting a key to see the
+ * build stay green.)
+ */
+type AssertNoneMissing<T extends never> = T
+type _StateKeysAreExhaustive = AssertNoneMissing<
+  Exclude<keyof MirroredGlobeState, (typeof STATE_KEYS)[number]>
+>
 
 /**
  * Fold one key of a patch into the state, recording it in `changed`.
@@ -194,9 +222,31 @@ function foldKey<K extends keyof MirroredGlobeState>(
   // arrive naming a key that is not there.
   if (next === undefined) return false
   if (sameValue(state[key], next)) return false
-  state[key] = next
-  changed[key] = next
+  // Stored as a **copy**, not by reference. Holding the caller's object
+  // means a later in-place mutation of it also mutates the state we
+  // compare against, so the next `apply()` hits the `a === b` fast path
+  // and the change is silently absorbed — the outputs keep rendering
+  // the old value with nothing on either side able to notice. Every
+  // value here is structured-clone-safe by contract (`protocol.ts`),
+  // which is exactly what makes this the cheap fix rather than a
+  // convention nobody can enforce.
+  const stored = clone(next)
+  state[key] = stored
+  changed[key] = stored
   return true
+}
+
+/**
+ * Deep copy of a mirrored-state value.
+ *
+ * `structuredClone` where the runtime has it; every value crossing this
+ * module is plain JSON-shaped data, so the JSON round trip is an exact
+ * fallback rather than an approximation.
+ */
+function clone<T>(value: T): T {
+  if (value === null || typeof value !== 'object') return value
+  if (typeof structuredClone === 'function') return structuredClone(value)
+  return JSON.parse(JSON.stringify(value)) as T
 }
 
 export class StateAggregator {

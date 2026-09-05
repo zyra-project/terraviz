@@ -62,6 +62,7 @@ import {
   type MirroredGlobeState,
   type OutputEvent,
   type OutputMode,
+  type OutputStateMessage,
 } from './protocol'
 import {
   DEFAULT_VIEW_SETTINGS,
@@ -147,6 +148,15 @@ export class MultiOutputManager {
   private readonly handles = new Map<string, OutputWindowHandle>()
 
   private unlisten: (() => void) | null = null
+  /**
+   * Set **synchronously** by `start()`, before it awaits.
+   *
+   * `unlisten` alone cannot guard re-entry: it is only assigned once
+   * `host.listen` resolves, so two concurrent `start()` calls both see
+   * `null`, both subscribe, and `stop()` then unlistens one of them and
+   * leaves the other delivering into a manager that believes it stopped.
+   */
+  private starting = false
   private timer: ReturnType<typeof setInterval> | null = null
   private nextIndex = 1
 
@@ -163,11 +173,23 @@ export class MultiOutputManager {
    * enumeration, no IPC.
    */
   async start(): Promise<void> {
-    if (this.unlisten) return
-    this.unlisten = await this.host.listen(OUTPUT_EVENT, payload => {
-      this.handleOutputEvent(payload)
-    })
-    this.timer ??= setInterval(() => void this.tick(), STATE_TICK_MS)
+    if (this.starting || this.unlisten) return
+    this.starting = true
+    try {
+      const unlisten = await this.host.listen(OUTPUT_EVENT, payload => {
+        this.handleOutputEvent(payload)
+      })
+      // `stop()` may have run while the subscribe was in flight. Honour
+      // it rather than installing a listener nobody asked for.
+      if (!this.starting) {
+        unlisten()
+        return
+      }
+      this.unlisten = unlisten
+      this.timer ??= setInterval(() => void this.tick(), STATE_TICK_MS)
+    } finally {
+      this.starting = false
+    }
   }
 
   /** Stop listening and stop ticking. Does **not** close outputs: an
@@ -175,6 +197,8 @@ export class MultiOutputManager {
    *  behaviour for an audience mid-session (see the protocol's
    *  `IPC_ORPHAN_MS`). Use `closeAll()` to tear them down. */
   stop(): void {
+    // Clearing this cancels a `start()` still awaiting its subscribe.
+    this.starting = false
     this.unlisten?.()
     this.unlisten = null
     if (this.timer !== null) {
@@ -210,16 +234,34 @@ export class MultiOutputManager {
     const label = outputLabel(this.nextIndex++)
     const handle = await this.host.createWindow(label, OUTPUT_ENTRY_URL)
 
-    // Order is load-bearing — see the module header.
-    await handle.setPosition(monitor.position.x, monitor.position.y)
-    await handle.setSize(monitor.size.width, monitor.size.height)
-    await handle.setFullscreen(true)
-    await handle.show()
+    try {
+      // Order is load-bearing — see the module header.
+      await handle.setPosition(monitor.position.x, monitor.position.y)
+      await handle.setSize(monitor.size.width, monitor.size.height)
+      await handle.setFullscreen(true)
+      await handle.show()
+    } catch (err) {
+      // The window already exists but never reached `records`/`handles`,
+      // so nothing else can ever reach it — `closeAll()` included. On an
+      // installation that is a hidden, undecorated window the operator
+      // cannot get rid of without killing the app. Close it here, then
+      // let the caller see the original failure.
+      try {
+        await handle.close()
+      } catch (closeErr) {
+        logger.warn(`[multiOutput] could not close half-spawned ${label}:`, closeErr)
+      }
+      throw err
+    }
 
     const record: OutputRecord = {
       label,
       mode: options.mode ?? 'sos-equirect',
-      view: { ...DEFAULT_VIEW_SETTINGS, ...options.view },
+      // Spread-with-`undefined` would let `{ trackCamera: undefined }`
+      // overwrite the default with `undefined` — the same hazard
+      // `foldKey` guards against in the aggregator, and it would pin the
+      // output to a centred camera for no stated reason.
+      view: { ...DEFAULT_VIEW_SETTINGS, ...definedOnly(options.view) },
       monitor,
       ready: false,
       lastEvent: null,
@@ -234,9 +276,19 @@ export class MultiOutputManager {
    *  the panel's remove button race, and neither should throw. */
   async removeOutput(label: string): Promise<void> {
     const handle = this.handles.get(label)
+    if (handle) {
+      // Close *before* forgetting it. A rejection is absorbed rather
+      // than propagated: the manager has no retry to offer until commit
+      // 13, and letting it escape would reject the whole of
+      // `closeAll()`, so one stuck window would strand every other.
+      try {
+        await handle.close()
+      } catch (err) {
+        logger.warn(`[multiOutput] close failed for ${label}, dropping record anyway:`, err)
+      }
+    }
     this.handles.delete(label)
     this.records.delete(label)
-    if (handle) await handle.close()
   }
 
   async closeAll(): Promise<void> {
@@ -282,6 +334,12 @@ export class MultiOutputManager {
   async applyState(patch: Partial<MirroredGlobeState>): Promise<void> {
     const message = this.aggregator.apply(patch)
     if (!message) return
+    await this.broadcast(message)
+  }
+
+  /** Send one message to every ready output, projected through that
+   *  output's own view settings. */
+  private async broadcast(message: OutputStateMessage): Promise<void> {
     await Promise.all(
       this.readyRecords().map(record =>
         this.emit(record, {
@@ -295,15 +353,40 @@ export class MultiOutputManager {
   /**
    * The per-second timecode tick.
    *
-   * Currently a no-op beyond re-offering the current state: the clock
-   * that advances `playback.date` lives in the control window's
-   * playback path, which commit 7 wires to `applyState`. The tick runs
-   * unconditionally because `StateAggregator.apply` returns `null` when
-   * nothing changed, so a paused globe costs one structural compare a
-   * second rather than a broadcast.
+   * This is a **heartbeat**, not a change notification, and the
+   * distinction is load-bearing. `protocol.ts` defines `IPC_STALE_MS`
+   * (5 s) as the silence after which an output declares the link stale
+   * and the Outputs panel badges it — measured against this
+   * `STATE_TICK_MS` cadence. So the tick must put something on the wire
+   * every second whether or not anything changed. It once called
+   * `applyState({})`, which can never produce a diff, so the cadence
+   * the staleness detector measures against did not exist at all and
+   * any paused or static globe would have gone stale after five
+   * seconds.
+   *
+   * When there *is* no change the heartbeat carries a full snapshot
+   * rather than an empty ping. It costs the same round trip, and it
+   * makes the link self-healing: an output that missed a diff — a
+   * dropped message, a reload, a webview the OS suspended — is
+   * resynced within a second instead of holding a wrong frame until
+   * the next unrelated change. A second message shape would buy
+   * nothing and would be one more thing for the output to handle.
    */
   async tick(): Promise<void> {
-    await this.applyState({})
+    const message = this.aggregator.apply({})
+    if (message) {
+      await this.broadcast(message)
+      return
+    }
+    const snapshot = this.aggregator.full()
+    await Promise.all(
+      this.readyRecords().map(record =>
+        this.emit(record, {
+          ...snapshot,
+          state: projectState(snapshot.state, record.view),
+        }),
+      ),
+    )
   }
 
   /** The current shared state, for the panel's debug readout. */
@@ -362,6 +445,24 @@ export class MultiOutputManager {
       record.ready = false
     }
   }
+}
+
+/**
+ * Drop keys whose value is `undefined`, so a spread cannot overwrite a
+ * default with nothing.
+ *
+ * `{ ...DEFAULTS, ...partial }` treats an explicitly-`undefined` field
+ * as a value and clobbers the default with it — which is how a caller
+ * spreading an optional field ends up pinning an output's camera off
+ * without ever having said so.
+ */
+function definedOnly<T extends object>(partial: T | undefined): Partial<T> {
+  if (!partial) return {}
+  const out: Partial<T> = {}
+  for (const [k, v] of Object.entries(partial)) {
+    if (v !== undefined) (out as Record<string, unknown>)[k] = v
+  }
+  return out
 }
 
 /** Narrow an IPC payload to an `OutputEvent`, or `null`. */

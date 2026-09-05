@@ -57,10 +57,29 @@ interface Emitted {
   payload: OutputStateMessage
 }
 
-function createFakeHost(monitors: OutputMonitor[] = MONITORS) {
+/** One live subscription. A **list**, not a map keyed by event name:
+ *  keying by name silently collapses a double registration, which is
+ *  precisely the bug this fake once hid — `start()` raced with itself
+ *  and the "is idempotent" test could not see it. */
+interface Registration {
+  event: string
+  handler: (payload: unknown) => void
+  active: boolean
+}
+
+interface FakeOptions {
+  monitors?: OutputMonitor[]
+  /** Reject from this stage of the spawn sequence onward. */
+  failAt?: 'setPosition' | 'setSize' | 'setFullscreen' | 'show'
+  /** Make `close()` reject, as a window whose process already died does. */
+  failClose?: boolean
+}
+
+function createFakeHost(options: FakeOptions = {}) {
+  const monitors = options.monitors ?? MONITORS
   const calls: string[] = []
   const emitted: Emitted[] = []
-  const listeners = new Map<string, (payload: unknown) => void>()
+  const registrations: Registration[] = []
   const closed: string[] = []
 
   const host: MultiOutputHost = {
@@ -68,13 +87,18 @@ function createFakeHost(monitors: OutputMonitor[] = MONITORS) {
 
     async createWindow(label, url) {
       calls.push(`create:${label}:${url}`)
+      const step = async (name: string, note: string) => {
+        calls.push(note)
+        if (options.failAt === name) throw new Error(`${name} rejected`)
+      }
       const handle: OutputWindowHandle = {
-        setPosition: async (x, y) => void calls.push(`setPosition:${label}:${x},${y}`),
-        setSize: async (w, h) => void calls.push(`setSize:${label}:${w}x${h}`),
-        setFullscreen: async on => void calls.push(`setFullscreen:${label}:${on}`),
-        show: async () => void calls.push(`show:${label}`),
+        setPosition: (x, y) => step('setPosition', `setPosition:${label}:${x},${y}`),
+        setSize: (w, h) => step('setSize', `setSize:${label}:${w}x${h}`),
+        setFullscreen: on => step('setFullscreen', `setFullscreen:${label}:${on}`),
+        show: () => step('show', `show:${label}`),
         close: async () => {
           calls.push(`close:${label}`)
+          if (options.failClose) throw new Error('close rejected')
           closed.push(label)
         },
       }
@@ -86,17 +110,29 @@ function createFakeHost(monitors: OutputMonitor[] = MONITORS) {
     },
 
     async listen(event, handler) {
-      listeners.set(event, handler)
-      return () => listeners.delete(event)
+      const registration: Registration = { event, handler, active: true }
+      registrations.push(registration)
+      return () => { registration.active = false }
     },
   }
 
-  /** Deliver an output→manager event, as the IPC channel would. */
+  /** Deliver an output→manager event, as the IPC channel would. A
+   *  doubly-registered listener therefore delivers twice — visible. */
   const send = (event: OutputEvent) => {
-    for (const handler of listeners.values()) handler(event)
+    for (const r of registrations) if (r.active) r.handler(event)
   }
 
-  return { host, calls, emitted, listeners, closed, send }
+  return {
+    host,
+    calls,
+    emitted,
+    closed,
+    send,
+    /** How many subscriptions are currently live. */
+    activeListeners: () => registrations.filter(r => r.active).length,
+    /** How many were ever created, live or not. */
+    totalListeners: () => registrations.length,
+  }
 }
 
 const ready = (label: string): OutputEvent => ({
@@ -176,6 +212,47 @@ describe('spawn sequence', () => {
     expect(fake.calls).toEqual([])
     expect(manager.outputs()).toEqual([])
   })
+
+  it.each(['setPosition', 'setSize', 'setFullscreen', 'show'] as const)(
+    'closes the window when %s rejects, instead of leaking it',
+    async failAt => {
+      const fake = createFakeHost({ failAt })
+      const manager = new MultiOutputManager(fake.host)
+
+      await expect(manager.addOutput({ monitorIndex: 0 })).rejects.toThrow(`${failAt} rejected`)
+
+      // Without this the window exists but never reaches records/handles,
+      // so nothing can ever reach it — on an installation that is a
+      // hidden, undecorated window you cannot close without killing the
+      // app. It must be gone, and leave no half-record behind.
+      expect(fake.closed).toEqual(['output-1'])
+      expect(manager.outputs()).toEqual([])
+    },
+  )
+
+  it('surfaces the original failure even if the cleanup close also fails', async () => {
+    const fake = createFakeHost({ failAt: 'show', failClose: true })
+    const manager = new MultiOutputManager(fake.host)
+
+    // The caller needs to know why the spawn failed, not why the
+    // tidy-up did.
+    await expect(manager.addOutput({ monitorIndex: 0 })).rejects.toThrow('show rejected')
+    expect(manager.outputs()).toEqual([])
+  })
+
+  it('ignores an explicitly-undefined view setting rather than overwriting the default', async () => {
+    const fake = createFakeHost()
+    const manager = new MultiOutputManager(fake.host)
+
+    // What a spread of an optional field produces. It must not pin the
+    // output to a centred camera by accident.
+    const record = await manager.addOutput({
+      monitorIndex: 0,
+      view: { trackCamera: undefined as unknown as boolean },
+    })
+
+    expect(record.view.trackCamera).toBe(true)
+  })
 })
 
 describe('removal', () => {
@@ -197,6 +274,20 @@ describe('removal', () => {
     // The operator closing a window by hand and the panel's remove
     // button race; neither may throw.
     await expect(manager.removeOutput('output-9')).resolves.toBeUndefined()
+  })
+
+  it('drops the record even when close rejects, and does not strand the others', async () => {
+    const fake = createFakeHost({ failClose: true })
+    const manager = new MultiOutputManager(fake.host)
+    await manager.addOutput({ monitorIndex: 0 })
+    await manager.addOutput({ monitorIndex: 1 })
+
+    // A rejecting close must not escape: closeAll() runs these in
+    // parallel, so one stuck window would reject the whole thing and
+    // strand every other output's teardown.
+    await expect(manager.closeAll()).resolves.toBeUndefined()
+    expect(manager.outputs()).toEqual([])
+    expect(fake.calls.filter(c => c.startsWith('close:'))).toHaveLength(2)
   })
 
   it('closeAll tears down every output', async () => {
@@ -257,7 +348,7 @@ describe('broadcast', () => {
     expect(fake.emitted.every(e => e.payload.full === false)).toBe(true)
   })
 
-  it('broadcasts nothing when the state did not actually change', async () => {
+  it('broadcasts nothing from applyState when the state did not actually change', async () => {
     const fake = createFakeHost()
     const manager = new MultiOutputManager(fake.host)
     await manager.start()
@@ -266,6 +357,81 @@ describe('broadcast', () => {
     fake.emitted.length = 0
 
     await manager.applyState({ simulationDate: null })
+
+    expect(fake.emitted).toEqual([])
+  })
+})
+
+describe('the heartbeat', () => {
+  it('puts something on the wire every tick, even with nothing changed', async () => {
+    const fake = createFakeHost()
+    const manager = new MultiOutputManager(fake.host)
+    await manager.start()
+    await manager.addOutput({ monitorIndex: 0 })
+    fake.send(ready('output-1'))
+    fake.emitted.length = 0
+
+    await manager.tick()
+
+    // `IPC_STALE_MS` (5s) is measured against the STATE_TICK_MS cadence.
+    // A tick that emits nothing means that cadence does not exist, and
+    // every output badges itself stale on a paused or static globe.
+    expect(fake.emitted).toHaveLength(1)
+    expect(fake.emitted[0].event).toBe(OUTPUT_STATE_EVENT)
+  })
+
+  it('carries a full snapshot when idle, so a missed diff self-heals', async () => {
+    const fake = createFakeHost()
+    const manager = new MultiOutputManager(fake.host)
+    await manager.start()
+    await manager.addOutput({ monitorIndex: 0 })
+    fake.send(ready('output-1'))
+    await manager.applyState({ simulationDate: '2026-07-07T00:00:00Z' })
+    fake.emitted.length = 0
+
+    await manager.tick()
+
+    const msg = fake.emitted[0].payload
+    expect(msg.full).toBe(true)
+    expect(msg.state).toMatchObject({ simulationDate: '2026-07-07T00:00:00Z' })
+  })
+
+  it('sends the diff rather than a snapshot when something did change', async () => {
+    const fake = createFakeHost()
+    const manager = new MultiOutputManager(fake.host)
+    await manager.start()
+    await manager.addOutput({ monitorIndex: 0 })
+    fake.send(ready('output-1'))
+    fake.emitted.length = 0
+
+    await manager.applyState({ simulationDate: '2026-08-08T00:00:00Z' })
+
+    expect(fake.emitted[0].payload.full).toBe(false)
+  })
+
+  it('projects the heartbeat per output like any other message', async () => {
+    const fake = createFakeHost()
+    const manager = new MultiOutputManager(fake.host)
+    await manager.start()
+    await manager.addOutput({ monitorIndex: 0, view: { trackCamera: false } })
+    fake.send(ready('output-1'))
+    await manager.applyState({
+      view: { dayNight: true, cameraOffset: { x: 0.6, y: 0, z: 0 }, split: false },
+    })
+    fake.emitted.length = 0
+
+    await manager.tick()
+
+    const state = fake.emitted[0].payload.state as { view: { cameraOffset: unknown } }
+    expect(state.view.cameraOffset).toEqual({ x: 0, y: 0, z: 0 })
+  })
+
+  it('does not beat at an output that is not ready', async () => {
+    const fake = createFakeHost()
+    const manager = new MultiOutputManager(fake.host)
+    await manager.start()
+    await manager.addOutput({ monitorIndex: 0 })
+
     await manager.tick()
 
     expect(fake.emitted).toEqual([])
@@ -386,7 +552,7 @@ describe('event routing', () => {
     await manager.addOutput({ monitorIndex: 0 })
 
     for (const bad of [null, undefined, 'output_ready', 42, {}, { type: 'output_ready' }, { label: 'output-1' }, { type: 'output_ready', label: 'main' }]) {
-      for (const handler of fake.listeners.values()) handler(bad)
+      fake.send(bad as never)
     }
 
     expect(manager.outputs()[0].ready).toBe(false)
@@ -444,6 +610,35 @@ describe('lifecycle', () => {
     }
   })
 
+  it('start() called concurrently still registers exactly one listener', async () => {
+    const fake = createFakeHost()
+    const manager = new MultiOutputManager(fake.host)
+
+    // Sequential calls were already guarded; *concurrent* ones were not,
+    // because the guard read `unlisten` only after awaiting the
+    // subscribe. Both saw null, both subscribed, and `stop()` then left
+    // one live — delivering into a manager that believed it had stopped.
+    await Promise.all([manager.start(), manager.start(), manager.start()])
+
+    expect(fake.totalListeners()).toBe(1)
+
+    // One delivery, not three.
+    await manager.addOutput({ monitorIndex: 0 })
+    fake.send(ready('output-1'))
+    expect(fake.emitted).toHaveLength(1)
+  })
+
+  it('a stop() during an in-flight start() leaves nothing listening', async () => {
+    const fake = createFakeHost()
+    const manager = new MultiOutputManager(fake.host)
+
+    const starting = manager.start()
+    manager.stop()
+    await starting
+
+    expect(fake.activeListeners()).toBe(0)
+  })
+
   it('stop() unlistens and leaves outputs running', async () => {
     const fake = createFakeHost()
     const manager = new MultiOutputManager(fake.host)
@@ -454,7 +649,7 @@ describe('lifecycle', () => {
 
     // An output that keeps showing its last state is correct for an
     // audience mid-session; tearing it down is closeAll()'s job.
-    expect(fake.listeners.size).toBe(0)
+    expect(fake.activeListeners()).toBe(0)
     expect(fake.closed).toEqual([])
     expect(manager.outputs()).toHaveLength(1)
   })
@@ -467,7 +662,7 @@ describe('lifecycle', () => {
     void new MultiOutputManager(fake.host)
 
     expect(monitors).not.toHaveBeenCalled()
-    expect(fake.listeners.size).toBe(0)
+    expect(fake.activeListeners()).toBe(0)
     expect(fake.calls).toEqual([])
   })
 })
