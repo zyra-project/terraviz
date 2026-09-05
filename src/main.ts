@@ -109,6 +109,10 @@ import type { VrDatasetTexture } from './services/vrScene'
 import { overlayOptionsFromDataset } from './services/datasetOverlayOptions'
 import { publishGlobeState } from './services/multiOutput/globeStateEvents'
 import { toMirroredDataset } from './services/multiOutput/mirrorState'
+import {
+  startMultiOutput,
+  type MultiOutputBootHandle,
+} from './services/multiOutput/bootMultiOutput'
 import { resolveFrameQuery } from './utils/frames'
 import { initTourAuthoring } from './ui/tourAuthoring'
 import { bootstrapI18n } from './i18n/bootstrap'
@@ -319,6 +323,14 @@ class InteractiveSphere {
   private siblingSeekUploads: Array<AbortController | null> = []
   /** Pending re-check after a repair attempt — see `verifySiblingTimes`. */
   private siblingRepairTimer: ReturnType<typeof setTimeout> | null = null
+  /**
+   * The multi-monitor output link (`docs/MULTI_MONITOR_PLAN.md` §3).
+   *
+   * Desktop-only and inert on web — the gate is inside
+   * `startMultiOutput`, which returns a shared no-op handle there.
+   * Held as a field only so `dispose()` can detach it.
+   */
+  private multiOutput: MultiOutputBootHandle | null = null
 
   /**
    * Convenience getter returning the primary viewport's renderer.
@@ -448,6 +460,12 @@ class InteractiveSphere {
         legend: this.viewPrefs.legendVisible,
       })
       initDownloadUI().catch(err => logger.warn('[App] Download UI init failed:', err))
+      // Mirror globe state to any multi-monitor outputs. Returns
+      // synchronously, so the subscription is installed before the
+      // first dataset load below can publish; spawning windows and
+      // opening the IPC link are later rungs, so this costs a
+      // listener and nothing else.
+      this.multiOutput = startMultiOutput()
       // Web-only zip-download dialog (§8.2). Mounting is cheap and
       // safe on desktop too; the opener affordances are the gate.
       initDownloadDialogUI({ announce: (msg) => this.announce(msg) })
@@ -3977,6 +3995,8 @@ class InteractiveSphere {
 
   /** Clean up all resources: video streams, textures, and every viewport renderer. */
   dispose(): void {
+    this.multiOutput?.stop()
+    this.multiOutput = null
     this.teardownAllPanelResources()
     this.viewports.dispose()
     this.panelStates = []
