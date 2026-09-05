@@ -164,6 +164,18 @@ export function selectRendition(
 
 export class HLSService {
   private hls: Hls | null = null
+  /**
+   * The manifest / file URL this service was last pointed at.
+   *
+   * Recorded because the multi-monitor output needs the URL the
+   * *control* window resolved (`MirroredDataset.url` — the control
+   * window owns variant choice and offline-cache lookup, and an output
+   * never resolves one itself). It cannot be read back off the element:
+   * on the hls.js path `video.src` is a `blob:` MediaSource handle, and
+   * on the native path `currentSrc` is only populated once the media
+   * has been selected.
+   */
+  private sourceUrl: string | null = null
   video: HTMLVideoElement | null = null
   private fatalErrorHandler: ((error: HlsFatalError) => void) | null = null
   private pendingFatalError: HlsFatalError | null = null
@@ -254,6 +266,7 @@ export class HLSService {
    * Load an HLS stream into the video element
    */
   loadStream(hlsUrl: string, video: HTMLVideoElement, mobile = false): Promise<void> {
+    this.sourceUrl = hlsUrl
     return new Promise((resolve, reject) => {
       // This promise settles on `MANIFEST_PARSED`, so anything that
       // fails later has no caller left to reject to. Route every
@@ -505,6 +518,7 @@ export class HLSService {
    * Load a direct MP4 file (fallback when HLS fails)
    */
   loadDirect(mp4Url: string, video: HTMLVideoElement): Promise<void> {
+    this.sourceUrl = mp4Url
     return new Promise((resolve, reject) => {
       // Tear down any hls.js instance before taking this element over.
       //
@@ -558,6 +572,17 @@ export class HLSService {
   /** Return the underlying video element, or null if not yet created. */
   getVideo(): HTMLVideoElement | null {
     return this.video
+  }
+
+  /**
+   * The URL this service was last pointed at, or null before any load.
+   *
+   * Set by `loadStream` / `loadDirect` on entry rather than on success,
+   * so the fallback path reports the MP4 it fell back *to* rather than
+   * the manifest that failed.
+   */
+  getSourceUrl(): string | null {
+    return this.sourceUrl
   }
 
   /** Video duration in seconds. */

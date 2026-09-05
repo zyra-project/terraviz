@@ -168,6 +168,51 @@ describe('HLSService.destroy', () => {
 })
 
 // ---------------------------------------------------------------------------
+// HLSService.getSourceUrl
+//
+// The multi-monitor output is told which URL to fetch by the *control*
+// window, because that window owns variant choice and offline-cache
+// lookup (`MirroredDataset.url`). It cannot be recovered from the
+// element afterwards: on the hls.js path `video.src` is a `blob:`
+// MediaSource handle, so the service has to remember what it was given.
+// ---------------------------------------------------------------------------
+
+describe('HLSService.getSourceUrl', () => {
+  it('is null before any load', () => {
+    expect(new HLSService().getSourceUrl()).toBeNull()
+  })
+
+  it('reports the manifest a stream load was pointed at', async () => {
+    const { default: Hls } = await import('hls.js')
+    vi.mocked(Hls.isSupported).mockReturnValueOnce(false)
+
+    const svc = new HLSService()
+    const video = document.createElement('video')
+    // Rejects (no HLS support here), which is the point: the URL is
+    // recorded on entry, so a load that never succeeds still says what
+    // it was asked for.
+    await expect(svc.loadStream('https://example.com/stream.m3u8', video)).rejects.toThrow()
+
+    expect(svc.getSourceUrl()).toBe('https://example.com/stream.m3u8')
+  })
+
+  it('reports the MP4 a fallback landed on, not the manifest that failed', async () => {
+    const { default: Hls } = await import('hls.js')
+    vi.mocked(Hls.isSupported).mockReturnValueOnce(false)
+
+    const svc = new HLSService()
+    const video = document.createElement('video')
+    await expect(svc.loadStream('https://example.com/stream.m3u8', video)).rejects.toThrow()
+    // `datasetLoader` catches that rejection and retries direct MP4 on
+    // the same service. An output told the manifest URL here would
+    // fetch the thing this window just proved it could not play.
+    void svc.loadDirect('https://example.com/fallback.mp4', video)
+
+    expect(svc.getSourceUrl()).toBe('https://example.com/fallback.mp4')
+  })
+})
+
+// ---------------------------------------------------------------------------
 // HLSService.loadStream — rejects when HLS is unsupported
 // ---------------------------------------------------------------------------
 describe('HLSService.loadStream — unsupported browser', () => {

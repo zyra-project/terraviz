@@ -107,6 +107,8 @@ import { initVrButton } from './ui/vrButton'
 import { flyToOnGlobe, isVrActive } from './services/vrSession'
 import type { VrDatasetTexture } from './services/vrScene'
 import { overlayOptionsFromDataset } from './services/datasetOverlayOptions'
+import { publishGlobeState } from './services/multiOutput/globeStateEvents'
+import { toMirroredDataset } from './services/multiOutput/mirrorState'
 import { resolveFrameQuery } from './utils/frames'
 import { initTourAuthoring } from './ui/tourAuthoring'
 import { bootstrapI18n } from './i18n/bootstrap'
@@ -2198,6 +2200,50 @@ class InteractiveSphere {
     }
   }
 
+  /**
+   * Publish the primary panel's dataset to any multi-monitor outputs
+   * (`docs/MULTI_MONITOR_PLAN.md` §3).
+   *
+   * Reads current state rather than taking the changed slot, and is
+   * called from every path that can change *which dataset the primary
+   * is showing* — a load, an unload, and panel promotion, which changes
+   * it without either. Over-calling is free: the aggregator drops a
+   * patch whose value is structurally identical, so a load into a
+   * non-primary slot costs one comparison and sends nothing. Missing a
+   * call is the only failure with a cost, which is why this reads the
+   * world instead of being told about it.
+   *
+   * The URL is the one *this* window resolved — after offline-cache
+   * lookup and variant probing — because the protocol makes that the
+   * control window's job. It cannot be read back off the media element:
+   * on the hls.js path `video.src` is a `blob:` MediaSource handle.
+   *
+   * A tour row is neither an image nor a video and mirrors as `null`:
+   * a tour is a script this window runs, and what an output should show
+   * is whatever that script loads, which arrives here as its own load.
+   */
+  private publishMirroredDataset(): void {
+    const panel = this.panelStates[this.viewports.getPrimaryIndex()]
+    const dataset = panel?.dataset ?? null
+    if (!panel || !dataset) {
+      publishGlobeState({ dataset: null })
+      return
+    }
+    const kind = dataService.isVideoDataset(dataset)
+      ? 'video'
+      : dataService.isImageDataset(dataset)
+        ? 'image'
+        : null
+    if (kind === null) {
+      publishGlobeState({ dataset: null })
+      return
+    }
+    const url = kind === 'video'
+      ? panel.hlsService?.getSourceUrl() ?? null
+      : panel.image?.src ?? null
+    publishGlobeState({ dataset: toMirroredDataset(dataset, kind, url) })
+  }
+
   /** Emit a `layer_loaded` event and remember when the slot filled so
    * the matching `layer_unloaded` can report dwell_ms. */
   private emitLayerLoaded(
@@ -2219,6 +2265,10 @@ class InteractiveSphere {
       trigger,
       load_ms: Math.max(0, Math.round(loadMs)),
     })
+    // Both load paths funnel through here, after the panel has been
+    // given its image / HLS service — so this is the first point at
+    // which the resolved URL an output needs actually exists.
+    this.publishMirroredDataset()
   }
 
   /** Emit `layer_unloaded` for whatever dataset currently occupies
@@ -2932,6 +2982,11 @@ class InteractiveSphere {
       }
     }
     this.announce(newDataset ? `Active panel: ${newDataset.title}` : `Panel ${newIndex + 1} active`)
+
+    // Promotion changes which dataset the primary is showing without
+    // any load or unload, so an output driven only by those two would
+    // keep showing the demoted panel's row indefinitely.
+    this.publishMirroredDataset()
   }
 
   /**
@@ -3610,6 +3665,10 @@ class InteractiveSphere {
     // texture.
     panel.dataset = null
     panel.image = null
+    // After the clear, not before: `emitLayerUnloadedForSlot` runs while
+    // the panel still holds the outgoing row (it reports on it), so
+    // publishing there would restate the dataset being removed.
+    this.publishMirroredDataset()
     const renderer = this.viewports.getRendererAt(slot)
     if (renderer instanceof MapRenderer) {
       // Drop the panel's dataset-credits phantom source so Tools
