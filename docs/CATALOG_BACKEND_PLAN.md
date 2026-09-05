@@ -271,6 +271,14 @@ the same origin.
 
 ### STAC alignment
 
+> **Decision update (2026-09-04).** The
+> [metadata and STAC audit](metadata/README.md#relationship-to-earlier-decisions)
+> supersedes the native-wire design below. `WireDataset`, `/api/v1/catalog`,
+> and signed federation feeds remain native. A separate D1-backed STAC Core
+> 1.1.0 projection publishes explicit Collections and eligible Items; STAC API
+> 1.0.0 conformance remains a later, separately tested phase. The previous
+> design is retained below as decision history, not implementation guidance.
+
 A catalog protocol that ignores the existing scientific-data
 ecosystem will be siloed by default. The relevant standards:
 
@@ -284,10 +292,9 @@ ecosystem will be siloed by default. The relevant standards:
 - **schema.org/Dataset** — what Google Dataset Search consumes.
   Trivial to emit as JSON-LD on dataset pages; ~30 lines.
 
-**Decision: Terraviz's wire `Dataset` is a STAC Item profile.** Not
-strict STAC (we keep our existing fields users already depend on)
-but a valid STAC Item when projected through a small mapping.
-Concretely:
+**Previous decision (superseded): Terraviz's wire `Dataset` is a STAC Item
+profile.** Not strict STAC (we keep our existing fields users already depend
+on) but a valid STAC Item when projected through a small mapping. Concretely:
 
 - Required STAC fields are populated or computed:
   - `type: "Feature"`, `stac_version: "1.0.0"`
