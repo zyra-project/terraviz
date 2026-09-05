@@ -73,6 +73,24 @@ export interface MultiOutputBootOptions {
 
 export interface MultiOutputBootHandle {
   /**
+   * Whether this build can have outputs at all.
+   *
+   * Synchronous, unlike `ready`, and that is the point: the Tools menu
+   * decides whether to *render* the Outputs entry while it builds its
+   * markup, long before any host could resolve. Gating on `ready` would
+   * mean a menu item that appears a moment after the menu does.
+   *
+   * It reports the gate this module already applied rather than letting
+   * the caller re-derive it — a second `window.__TAURI__` test elsewhere
+   * is a copy that drifts, and it would ignore an `isDesktop` override,
+   * so a test could never drive the whole chain.
+   *
+   * `true` does not promise a working host: it says the desktop gate
+   * passed. A host that then fails to build leaves `ready` resolving to
+   * `null`, which is the panel's problem to report, not the menu's.
+   */
+  available: boolean
+  /**
    * Resolves to the manager once its host is built, or `null` when the
    * feature is off (web) or the host could not be created.
    *
@@ -87,6 +105,7 @@ export interface MultiOutputBootHandle {
 /** The web/disabled handle. Shared because it holds no state — there is
  *  nothing to detach from and nothing to stop. */
 const INERT: MultiOutputBootHandle = {
+  available: false,
   ready: Promise.resolve(null),
   stop: () => {},
 }
@@ -180,6 +199,7 @@ export function startMultiOutput(
   })()
 
   const handle: MultiOutputBootHandle = {
+    available: true,
     ready,
     stop() {
       stopped = true

@@ -90,6 +90,10 @@ describe('startMultiOutput — disabled', () => {
     // the web bundle paying for a feature it cannot have.
     expect(() => publishGlobeState({ simulationDate: '2026-01-01T00:00:00.000Z' })).not.toThrow()
   })
+
+  it('reports itself unavailable, so no Outputs entry is offered', () => {
+    expect(start({ isDesktop: false }).available).toBe(false)
+  })
 })
 
 describe('startMultiOutput — enabled', () => {
@@ -160,6 +164,28 @@ describe('startMultiOutput — enabled', () => {
 
     expect(probe).toHaveBeenCalledTimes(1)
     expect(manager!.currentState().dataset?.id).toBe('BEFORE_STOP')
+  })
+
+  it('reports itself available synchronously, before any host resolves', () => {
+    const { createHost } = deferredHost()
+
+    // Synchronous on purpose: the Tools menu reads this while building
+    // its markup. Nothing is released, so the host is still pending.
+    expect(start({ ...DESKTOP, createHost }).available).toBe(true)
+  })
+
+  it('stays available when the host fails — the panel reports that, not the menu', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const createHost = vi.fn(() => Promise.reject(new Error('no tauri here')))
+
+    const handle = start({ ...DESKTOP, createHost })
+
+    // `available` is the desktop gate, not a health check. Flipping it
+    // on a failed host would hide the menu entry that is the only place
+    // an operator could be told outputs are unavailable — and the retry
+    // path means the next open may well succeed.
+    await expect(handle.ready).resolves.toBeNull()
+    expect(handle.available).toBe(true)
   })
 
   it('degrades to null when the host factory rejects', async () => {
