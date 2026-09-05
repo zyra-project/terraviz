@@ -327,9 +327,10 @@ export class MultiOutputManager {
    * Fold a state change in and broadcast the diff.
    *
    * The single entry point for everything the control window knows —
-   * dataset loads, layer edits, playback, palette, camera. Commit 7
-   * gives `main.ts` and `datasetLoader` the events that call it;
-   * nothing does yet.
+   * dataset loads, layer edits, playback, palette, camera. Rung 7 gave
+   * `main.ts` the events, and rung 8's `bootMultiOutput` subscribes them
+   * to this method; today only `dataset` is actually published, so the
+   * other keys still arrive from nowhere.
    */
   async applyState(patch: Partial<MirroredGlobeState>): Promise<void> {
     const message = this.aggregator.apply(patch)

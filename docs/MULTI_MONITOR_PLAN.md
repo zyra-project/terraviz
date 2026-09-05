@@ -2295,9 +2295,15 @@ without rolling the whole feature back.
 **Backout plan.** Reverting commit 9 leaves all the plumbing in
 place (manager, output bundle, capability) but removes the
 operator's ability to spawn windows. Control window behaviour
-is unchanged from pre-feature. Reverting commits 6-8 removes
-the manager itself — everything else still type-checks because
-nothing on the hot path imports from `multiOutput/`. Reverting
+is unchanged from pre-feature. Reverting commit 8 alone removes
+the manager's only caller: `main.ts` loses one import, one field,
+one call and one `dispose()` line, and `bootMultiOutput.ts`
+disappears with nothing else referencing it. A full 6-8 revert
+has one more step than this paragraph originally claimed — it
+must also remove rung 7's publish calls, because `main.ts` now
+imports `globeStateEvents` and `mirrorState` and calls
+`publishMirroredDataset()` from three sites. The rest still
+type-checks. Reverting
 commits 2-4 removes the output bundle — the unused build
 artifacts disappear; nothing else changes. Reverting commit 12
 removes the control-window fullscreen toggle, F11 handler, and
