@@ -88,6 +88,18 @@ describe('pointClearOfPanel', () => {
       .toEqual(before(DESKTOP, 0.6, 0.56))
   })
 
+  it('leaves a point that shares the panel\'s columns but sits above it', () => {
+    // Regression: the first version tested x-overlap only, so a point
+    // in the panel's columns was moved even when it was already well
+    // above the panel's top edge. For a bottom-anchored panel that is
+    // most of the canvas above it — (1296, 180) against a panel
+    // starting at y=340 was being dragged up to y=68 for nothing.
+    const p = pointClearOfPanel(DESKTOP, DESKTOP_PANEL, 0.9, 0.2)
+
+    expect(onPanel(p, DESKTOP_PANEL)).toBe(false)
+    expect(p).toEqual({ x: 1440 * 0.9, y: 900 * 0.2 })
+  })
+
   it('lifts a point that would land on a full-width panel', () => {
     const a = pointClearOfPanel(MOBILE, MOBILE_PANEL, 0.4, 0.38)
     const b = pointClearOfPanel(MOBILE, MOBILE_PANEL, 0.6, 0.56)

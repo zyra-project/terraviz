@@ -31,6 +31,7 @@ import type { Page } from 'playwright'
 
 import { gotoApp } from './core/browser'
 import type { FixtureRule } from './core/fixtures'
+import type { Box } from './core/types'
 import { analyticsFixtures, feedbackFixtures } from './fixtures/admin'
 import { catalogReportFixtures } from './fixtures/catalog'
 import { blogPublicFixtures, publisherFixtures } from './fixtures/publisher'
@@ -197,14 +198,6 @@ async function openDataEncodedDataset(page: Page): Promise<void> {
   await page.locator('.panel-colorbar').first().waitFor({ state: 'visible' })
 }
 
-/** A Playwright bounding box — the shape `Locator.boundingBox()` returns. */
-export interface Box {
-  x: number
-  y: number
-  width: number
-  height: number
-}
-
 /**
  * Pick a point on `canvas` at the given fractions, moved clear of a
  * fixed overlay panel if it would otherwise land on it.
@@ -215,11 +208,16 @@ export interface Box {
  * hypothetical — see `analyze-panel`, where it broke one viewport for
  * a week and froze the whole repository's visual baseline.
  *
- * A point whose x misses the panel keeps its `fy` of the full canvas,
- * so a layout the panel does not reach is unaffected pixel for pixel.
- * One that would land on the panel takes `fy` of the clear strip above
- * it instead. Only the strip *above* is used: these panels anchor to
- * the bottom edge, so below is where there is nothing.
+ * A point that would not land on the panel is returned untouched, so a
+ * layout the panel does not cover is unaffected pixel for pixel. Only
+ * one that would land on it takes `fy` of the clear strip above the
+ * panel instead. Only the strip *above* is used: these panels anchor
+ * to the bottom edge, so below is where there is nothing.
+ *
+ * "Would land on it" tests both axes. Testing x alone is not a
+ * conservative approximation of that — it moves points that share the
+ * panel's columns while sitting well above its top edge, which for a
+ * bottom-anchored panel is most of the canvas above it.
  */
 export function pointClearOfPanel(
   canvas: Box,
@@ -229,9 +227,15 @@ export function pointClearOfPanel(
   minClear = 120,
 ): { x: number; y: number } {
   const x = canvas.x + canvas.width * fx
-  const overlapsX = panel !== null && x >= panel.x && x <= panel.x + panel.width
-  const clearBottom = overlapsX ? panel.y : canvas.y + canvas.height
-  const clear = clearBottom - canvas.y
+  const y = canvas.y + canvas.height * fy
+  if (panel === null) return { x, y }
+
+  const onPanel =
+    x >= panel.x && x <= panel.x + panel.width &&
+    y >= panel.y && y <= panel.y + panel.height
+  if (!onPanel) return { x, y }
+
+  const clear = panel.y - canvas.y
   if (clear < minClear) {
     throw new Error(
       `pointClearOfPanel: only ${Math.round(clear)}px of canvas is clear of the ` +
@@ -494,9 +498,9 @@ export const scenes: Scene[] = [
       // the wrong shape for this: it encodes one viewport's layout.
       //
       // So derive the points from where the panel actually is. A point
-      // whose x misses the panel keeps its original y (desktop is
-      // unchanged, pixel for pixel); one that would land on the panel
-      // is placed in the clear strip above it instead.
+      // that would not land on the panel keeps its original position
+      // (desktop is unchanged, pixel for pixel); one that would land on
+      // it is placed in the clear strip above it instead.
       const panel = await page.locator('.analyze-panel').boundingBox()
       const a = pointClearOfPanel(box, panel, 0.4, 0.38)
       const b = pointClearOfPanel(box, panel, 0.6, 0.56)
