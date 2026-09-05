@@ -143,8 +143,24 @@ jobs:
           if-no-files-found: warn
 
       # Publish the baseline that future PRs diff against. Main only.
+      #
+      # `workflow_dispatch` is included so the baseline can be refreshed
+      # deliberately, without waiting for the next merge. That matters
+      # when the baseline and the PR captures disagree for a reason that
+      # is not any PR's doing: until it is re-published, *every* open PR
+      # carries the same phantom diffs, and the report trains people to
+      # ignore it. Before this, the only refresh was a push to main, so
+      # dispatching ran the whole capture and silently skipped the one
+      # step worth dispatching for.
+      #
+      # The **ref** guard is the load-bearing half and is deliberately
+      # outside the event check: a dispatch from a feature branch must
+      # not overwrite the baseline with that branch's pixels, which
+      # would make its changes invisible to every later PR.
       - name: Publish baseline
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: >-
+          github.ref == 'refs/heads/main'
+          && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: actions/upload-artifact@v4
         with:
           name: visual-baseline
