@@ -174,6 +174,27 @@ describe('startMultiOutput — enabled', () => {
     expect(() => publishGlobeState(datasetPatch('IGNORED'))).not.toThrow()
   })
 
+  it('can retry after the host factory rejects', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const failing = vi.fn(() => Promise.reject(new Error('chunk load failed')))
+    const first = start({ ...DESKTOP, createHost: failing })
+    await expect(first.ready).resolves.toBeNull()
+
+    // The failure path must release the module sentinel. Without that the
+    // dead handle stays installed and a transient chunk-load failure costs
+    // the whole session its outputs with no way back.
+    const { release, createHost } = deferredHost()
+    const second = start({ ...DESKTOP, createHost })
+    release()
+
+    expect(second).not.toBe(first)
+    // Awaited before asserting the call: the manager module is imported
+    // dynamically now, so the host factory is invoked a microtask later
+    // rather than synchronously.
+    await expect(second.ready).resolves.not.toBeNull()
+    expect(createHost).toHaveBeenCalledTimes(1)
+  })
+
   it('opens no link and enumerates no monitors at boot', async () => {
     const { host, release, createHost } = deferredHost()
     const handle = start({ ...DESKTOP, createHost })
