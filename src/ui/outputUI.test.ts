@@ -45,6 +45,7 @@ function record(label: string, on: OutputMonitor): OutputRecord {
  */
 function fakeManager(monitors: OutputMonitor[] = [monitor()]) {
   const records: OutputRecord[] = []
+  let restoreOnLaunch = false
   const mgr = {
     start: vi.fn(async () => {}),
     listMonitors: vi.fn(async () => monitors),
@@ -64,6 +65,10 @@ function fakeManager(monitors: OutputMonitor[] = [monitor()]) {
       const rec = records.find(r => r.label === label)
       if (rec) Object.assign(rec.view, view)
     }),
+    isRestoreOnLaunch: vi.fn(() => restoreOnLaunch),
+    setRestoreOnLaunch: vi.fn((enabled: boolean) => {
+      restoreOnLaunch = enabled
+    }),
   }
   return { mgr: mgr as unknown as OutputPanelManager, raw: mgr, records }
 }
@@ -77,7 +82,7 @@ function mount(mgr: OutputPanelManager | null): void {
  *  real thing. Anchor on the section headings rather than on whatever a
  *  case is about to assert, so the assertion stays meaningful. */
 function painted(): boolean {
-  return document.querySelectorAll('.output-section').length >= 2
+  return document.querySelectorAll('.output-section').length >= 3
 }
 
 const $ = <T extends Element>(sel: string): T | null => document.querySelector<T>(sel)
@@ -307,6 +312,38 @@ describe('the Outputs panel', () => {
     // does not even pay for the monitor enumeration.
     expect(raw.listMonitors).not.toHaveBeenCalled()
     expect($('.output-panel')).toBeNull()
+  })
+
+  it('shows the launch opt-in off by default', async () => {
+    const { mgr } = fakeManager()
+    mount(mgr)
+
+    await until(painted, 'the panel body')
+    // Off by default on purpose: an operator who added an output once,
+    // on a laptop later taken home, should not have a window try to
+    // open on a projector that is not there.
+    expect($<HTMLInputElement>('#output-restore-launch')!.checked).toBe(false)
+  })
+
+  it('writes the launch opt-in straight through', async () => {
+    const { mgr, raw } = fakeManager()
+    mount(mgr)
+    await until(painted, 'the panel body')
+
+    const box = $<HTMLInputElement>('#output-restore-launch')!
+    box.checked = true
+    box.dispatchEvent(new Event('change'))
+
+    expect(raw.setRestoreOnLaunch).toHaveBeenCalledWith(true)
+  })
+
+  it('reflects an opt-in the manager already had', async () => {
+    const { mgr, raw } = fakeManager()
+    raw.isRestoreOnLaunch.mockReturnValue(true)
+    mount(mgr)
+
+    await until(painted, 'the panel body')
+    expect($<HTMLInputElement>('#output-restore-launch')!.checked).toBe(true)
   })
 
   it('reopening does not leave two panels stacked', async () => {

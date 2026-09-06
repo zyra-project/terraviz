@@ -539,6 +539,8 @@
   "outputs.monitors.empty": "No displays were detected.",
   "outputs.monitors.label": "Display",
   "outputs.monitors.title": "Add an output",
+  "outputs.restoreOnLaunch": "Restore outputs on launch",
+  "outputs.restoreOnLaunch.hint": "Reopen these outputs automatically next time, on the same displays.",
   "outputs.singleMonitor": "Only one display was detected. An output fills the display it opens on, so it will cover this window.",
   "outputs.title": "Outputs",
   "outputs.unavailable": "Outputs are unavailable in this session.",

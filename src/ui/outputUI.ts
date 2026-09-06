@@ -48,7 +48,7 @@ import type { OutputViewSettings } from '../services/multiOutput/stateAggregator
  * A structural subset rather than `MultiOutputManager` itself: a class
  * with private fields is typed **nominally** in TypeScript, so a fake
  * could not satisfy that type without being a real instance — which
- * needs a host, which needs Tauri. Naming the five methods the panel
+ * needs a host, which needs Tauri. Naming the seven methods the panel
  * actually calls keeps the test fake small and states the surface this
  * file depends on, which is the part that must not grow quietly.
  */
@@ -59,6 +59,8 @@ export interface OutputPanelManager {
   addOutput(options: AddOutputOptions): Promise<OutputRecord>
   removeOutput(label: string): Promise<void>
   setOutputView(label: string, view: Partial<OutputViewSettings>): Promise<void>
+  isRestoreOnLaunch(): boolean
+  setRestoreOnLaunch(enabled: boolean): void
 }
 
 export interface OutputPanelSource {
@@ -209,7 +211,49 @@ async function refresh(body: HTMLElement): Promise<void> {
   if (token !== refreshToken) return
 
   const records = mgr.outputs()
-  replace(body, buildAdder(mgr, monitors, records, body), buildList(mgr, records, body))
+  replace(
+    body,
+    buildAdder(mgr, monitors, records, body),
+    buildList(mgr, records, body),
+    buildLaunchSection(mgr),
+  )
+}
+
+/**
+ * The "Restore outputs on launch" opt-in (rung 10).
+ *
+ * Off by default and deliberately so: an operator who added an output
+ * once, on a laptop they later took home, should not have a window try
+ * to open on a projector that is not there. It is also what keeps the
+ * plan's "an install that never enabled outputs pays nothing" true —
+ * with this off, boot enumerates no monitor and opens no IPC link.
+ *
+ * Writes straight through rather than on a Save button: there is one
+ * setting, and its effect is a launch away.
+ */
+function buildLaunchSection(mgr: OutputPanelManager): HTMLElement {
+  const section = document.createElement('section')
+  section.className = 'output-section'
+
+  const label = document.createElement('label')
+  label.className = 'output-toggle'
+
+  const box = document.createElement('input')
+  box.type = 'checkbox'
+  box.className = 'output-toggle-box'
+  box.id = 'output-restore-launch'
+  box.checked = mgr.isRestoreOnLaunch()
+  box.addEventListener('change', () => {
+    mgr.setRestoreOnLaunch(box.checked)
+  })
+
+  const text = document.createElement('span')
+  text.className = 'output-toggle-label'
+  text.textContent = t('outputs.restoreOnLaunch')
+
+  label.append(box, text)
+  section.append(label, message(t('outputs.restoreOnLaunch.hint'), 'output-note'))
+  return section
 }
 
 function buildAdder(

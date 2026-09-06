@@ -22,11 +22,22 @@
  * So the composition lives here, `main.ts` calls it once, and the parts
  * either side stay ignorant of each other.
  *
- * **`start()` is deliberately never called.** It opens the Tauri IPC
+ * **`start()` is never called from here.** It opens the Tauri IPC
  * listener and installs the 1 Hz heartbeat; boot must do neither, since
- * an app with no outputs would be paying for a link nobody is on. Rung 9
- * — the first commit that can actually spawn an output — is what starts
- * it.
+ * an app with no outputs would be paying for a link nobody is on. Two
+ * things start it, both only once there is an output to talk to: the
+ * Outputs panel on the operator's first Add (rung 9), and
+ * `restoreOutputs()` when a previous launch left outputs configured and
+ * the operator opted in (rung 10).
+ *
+ * `restoreOutputs()` *is* called from here, unconditionally, and that is
+ * cheap by construction — it returns before enumerating a monitor or
+ * opening the link unless both those conditions hold. Testing the opt-in
+ * here instead would put a second reader on the same flag, free to
+ * disagree with the manager's. It is deliberately **not** awaited into
+ * `ready`: restored outputs are paced ~250 ms apart to keep spawn
+ * contention off the critical path, and blocking the handle on that
+ * would put the stagger straight back onto it.
  *
  * **Subscription is synchronous; the host is not.** `createTauriHost()`
  * awaits three dynamic imports, and `subscribeGlobeState` deliberately
@@ -186,6 +197,19 @@ export function startMultiOutput(
       // aggregator synchronously before its first await, so a loop of
       // un-awaited calls still applies them in order.
       for (const patch of queued.splice(0)) forward(manager, patch)
+      // Unconditional, and cheap by construction: `restoreOutputs`
+      // returns before enumerating a monitor or opening the IPC link
+      // unless the operator opted in *and* left something configured.
+      // Putting the opt-in test here instead would be a second reader
+      // of the same flag, free to disagree with the manager's.
+      //
+      // Not awaited into `ready`: an operator's three projectors are
+      // paced ~250 ms apart, and blocking the handle on that would
+      // block whatever boot does next behind a stagger that exists to
+      // keep spawns *off* the critical path.
+      void manager.restoreOutputs().catch(err => {
+        logger.warn('[multiOutput] restore failed:', err)
+      })
       return manager
     } catch (err) {
       logger.warn(
