@@ -21,10 +21,17 @@ import { OUTPUT_STATE_EVENT, type OutputEvent, type OutputStateMessage } from '.
 import {
   MultiOutputManager,
   OUTPUT_ENTRY_URL,
+  type MultiOutputDeps,
   type MultiOutputHost,
   type OutputMonitor,
   type OutputWindowHandle,
 } from './manager'
+import {
+  OUTPUT_RESTORE_STAGGER_MS,
+  defaultOutputConfig,
+  type OutputConfigStore,
+  type PersistedOutputConfig,
+} from './outputPersistence'
 
 /** A three-monitor desk shaped like the spike's: the primary at the
  *  origin, one to its **left** at a negative x, one to its right. */
@@ -135,6 +142,42 @@ function createFakeHost(options: FakeOptions = {}) {
   }
 }
 
+/**
+ * An in-memory config store.
+ *
+ * Every manager in this file gets one. The default store is backed by
+ * `localStorage`, which happy-dom provides and shares across cases — so
+ * without this, one test's outputs would be visible to the next, and a
+ * restore test would read whatever ran before it.
+ */
+function memoryStore(initial?: Partial<PersistedOutputConfig>): OutputConfigStore & {
+  current: () => PersistedOutputConfig
+  writes: number
+} {
+  let config: PersistedOutputConfig = { ...defaultOutputConfig(), ...initial }
+  let writes = 0
+  return {
+    read: () => structuredClone(config),
+    write: next => {
+      config = structuredClone(next)
+      writes++
+    },
+    current: () => structuredClone(config),
+    get writes() {
+      return writes
+    },
+  }
+}
+
+/** Construct a manager with an isolated store and a free stagger. */
+function makeManager(host: MultiOutputHost, deps: MultiOutputDeps = {}): MultiOutputManager {
+  return new MultiOutputManager(host, {
+    store: deps.store ?? memoryStore(),
+    sleep: deps.sleep ?? (async () => {}),
+    ...deps,
+  })
+}
+
 const ready = (label: string): OutputEvent => ({
   type: 'output_ready',
   label,
@@ -145,7 +188,7 @@ const ready = (label: string): OutputEvent => ({
 describe('spawn sequence', () => {
   it('places, sizes, fullscreens and only then shows', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
 
     await manager.addOutput({ monitorIndex: 0 })
 
@@ -160,7 +203,7 @@ describe('spawn sequence', () => {
 
   it('passes a signed origin through unchanged', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
 
     await manager.addOutput({ monitorIndex: 1 })
 
@@ -169,7 +212,7 @@ describe('spawn sequence', () => {
 
   it('passes physical pixels through without a scaleFactor conversion', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
 
     await manager.addOutput({ monitorIndex: 2 })
 
@@ -182,7 +225,7 @@ describe('spawn sequence', () => {
 
   it('mints labels the capability glob matches, incrementing per output', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
 
     const a = await manager.addOutput({ monitorIndex: 0 })
     const b = await manager.addOutput({ monitorIndex: 1 })
@@ -193,7 +236,7 @@ describe('spawn sequence', () => {
 
   it('does not reuse a label after a removal', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
 
     await manager.addOutput({ monitorIndex: 0 })
     await manager.removeOutput('output-1')
@@ -206,7 +249,7 @@ describe('spawn sequence', () => {
 
   it('rejects a monitor index that is not there, without creating a window', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
 
     await expect(manager.addOutput({ monitorIndex: 7 })).rejects.toThrow(/no monitor at index 7/)
     expect(fake.calls).toEqual([])
@@ -217,7 +260,7 @@ describe('spawn sequence', () => {
     'closes the window when %s rejects, instead of leaking it',
     async failAt => {
       const fake = createFakeHost({ failAt })
-      const manager = new MultiOutputManager(fake.host)
+      const manager = makeManager(fake.host)
 
       await expect(manager.addOutput({ monitorIndex: 0 })).rejects.toThrow(`${failAt} rejected`)
 
@@ -232,7 +275,7 @@ describe('spawn sequence', () => {
 
   it('surfaces the original failure even if the cleanup close also fails', async () => {
     const fake = createFakeHost({ failAt: 'show', failClose: true })
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
 
     // The caller needs to know why the spawn failed, not why the
     // tidy-up did.
@@ -242,7 +285,7 @@ describe('spawn sequence', () => {
 
   it('ignores an explicitly-undefined view setting rather than overwriting the default', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
 
     // What a spread of an optional field produces. It must not pin the
     // output to a centred camera by accident.
@@ -258,7 +301,7 @@ describe('spawn sequence', () => {
 describe('removal', () => {
   it('closes the window and drops the record', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
 
     await manager.addOutput({ monitorIndex: 0 })
     await manager.removeOutput('output-1')
@@ -269,7 +312,7 @@ describe('removal', () => {
 
   it('is a no-op for a label that is already gone', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
 
     // The operator closing a window by hand and the panel's remove
     // button race; neither may throw.
@@ -278,7 +321,7 @@ describe('removal', () => {
 
   it('drops the record even when close rejects, and does not strand the others', async () => {
     const fake = createFakeHost({ failClose: true })
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
     await manager.addOutput({ monitorIndex: 0 })
     await manager.addOutput({ monitorIndex: 1 })
 
@@ -292,7 +335,7 @@ describe('removal', () => {
 
   it('closeAll tears down every output', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
 
     await manager.addOutput({ monitorIndex: 0 })
     await manager.addOutput({ monitorIndex: 1 })
@@ -306,7 +349,7 @@ describe('removal', () => {
 describe('broadcast', () => {
   it('sends nothing to an output that has not announced output_ready', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
     await manager.start()
     await manager.addOutput({ monitorIndex: 0 })
 
@@ -317,7 +360,7 @@ describe('broadcast', () => {
 
   it('replies to output_ready with a full snapshot', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
     await manager.start()
     await manager.addOutput({ monitorIndex: 0 })
     await manager.applyState({ simulationDate: '2026-01-01T00:00:00Z' })
@@ -334,7 +377,7 @@ describe('broadcast', () => {
 
   it('sends diffs to every ready output once they are ready', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
     await manager.start()
     await manager.addOutput({ monitorIndex: 0 })
     await manager.addOutput({ monitorIndex: 1 })
@@ -350,7 +393,7 @@ describe('broadcast', () => {
 
   it('broadcasts nothing from applyState when the state did not actually change', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
     await manager.start()
     await manager.addOutput({ monitorIndex: 0 })
     fake.send(ready('output-1'))
@@ -365,7 +408,7 @@ describe('broadcast', () => {
 describe('the heartbeat', () => {
   it('puts something on the wire every tick, even with nothing changed', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
     await manager.start()
     await manager.addOutput({ monitorIndex: 0 })
     fake.send(ready('output-1'))
@@ -382,7 +425,7 @@ describe('the heartbeat', () => {
 
   it('carries a full snapshot when idle, so a missed diff self-heals', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
     await manager.start()
     await manager.addOutput({ monitorIndex: 0 })
     fake.send(ready('output-1'))
@@ -398,7 +441,7 @@ describe('the heartbeat', () => {
 
   it('sends the diff rather than a snapshot when something did change', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
     await manager.start()
     await manager.addOutput({ monitorIndex: 0 })
     fake.send(ready('output-1'))
@@ -411,7 +454,7 @@ describe('the heartbeat', () => {
 
   it('projects the heartbeat per output like any other message', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
     await manager.start()
     await manager.addOutput({ monitorIndex: 0, view: { trackCamera: false } })
     fake.send(ready('output-1'))
@@ -428,7 +471,7 @@ describe('the heartbeat', () => {
 
   it('does not beat at an output that is not ready', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
     await manager.start()
     await manager.addOutput({ monitorIndex: 0 })
 
@@ -439,7 +482,7 @@ describe('the heartbeat', () => {
 
   it('projects the view per output', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
     await manager.start()
     await manager.addOutput({ monitorIndex: 0, view: { trackCamera: true } })
     await manager.addOutput({ monitorIndex: 1, view: { trackCamera: false } })
@@ -460,7 +503,7 @@ describe('the heartbeat', () => {
 
   it('every output on one change carries the same seq', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
     await manager.start()
     await manager.addOutput({ monitorIndex: 0 })
     await manager.addOutput({ monitorIndex: 1 })
@@ -476,7 +519,7 @@ describe('the heartbeat', () => {
 
   it('pushes a fresh view when one output toggles camera tracking', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
     await manager.start()
     await manager.addOutput({ monitorIndex: 0, view: { trackCamera: true } })
     fake.send(ready('output-1'))
@@ -495,7 +538,7 @@ describe('the heartbeat', () => {
 
   it('stamps the view push with a seq that outranks what the output already applied', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
     await manager.start()
     await manager.addOutput({ monitorIndex: 0, view: { trackCamera: true } })
     fake.send(ready('output-1'))
@@ -514,7 +557,7 @@ describe('the heartbeat', () => {
 
   it('keeps the sequence monotonic across interleaved view pushes and diffs', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
     await manager.start()
     await manager.addOutput({ monitorIndex: 0 })
     fake.send(ready('output-1'))
@@ -535,7 +578,7 @@ describe('the heartbeat', () => {
 describe('event routing', () => {
   it('drops an event whose label names no live output', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
     await manager.start()
     await manager.addOutput({ monitorIndex: 0 })
 
@@ -547,7 +590,7 @@ describe('event routing', () => {
 
   it('drops a payload that is not a well-formed event', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
     await manager.start()
     await manager.addOutput({ monitorIndex: 0 })
 
@@ -561,7 +604,7 @@ describe('event routing', () => {
 
   it('records the last event for a live output', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
     await manager.start()
     await manager.addOutput({ monitorIndex: 0 })
 
@@ -577,7 +620,7 @@ describe('event routing', () => {
 
   it('stops sending diffs to an output that announced it is closing', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
     await manager.start()
     await manager.addOutput({ monitorIndex: 0 })
     fake.send(ready('output-1'))
@@ -595,7 +638,7 @@ describe('lifecycle', () => {
     vi.useFakeTimers()
     try {
       const fake = createFakeHost()
-      const manager = new MultiOutputManager(fake.host)
+      const manager = makeManager(fake.host)
       const listen = vi.spyOn(fake.host, 'listen')
 
       await manager.start()
@@ -612,7 +655,7 @@ describe('lifecycle', () => {
 
   it('start() called concurrently still registers exactly one listener', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
 
     // Sequential calls were already guarded; *concurrent* ones were not,
     // because the guard read `unlisten` only after awaiting the
@@ -630,7 +673,7 @@ describe('lifecycle', () => {
 
   it('a stop() during an in-flight start() leaves nothing listening', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
 
     const starting = manager.start()
     manager.stop()
@@ -641,7 +684,7 @@ describe('lifecycle', () => {
 
   it('stop() unlistens and leaves outputs running', async () => {
     const fake = createFakeHost()
-    const manager = new MultiOutputManager(fake.host)
+    const manager = makeManager(fake.host)
     await manager.start()
     await manager.addOutput({ monitorIndex: 0 })
 
@@ -659,10 +702,299 @@ describe('lifecycle', () => {
     const monitors = vi.spyOn(fake.host, 'availableMonitors')
     // Construction alone is what boot does before the operator has
     // ever enabled outputs; the plan requires it to cost nothing.
-    void new MultiOutputManager(fake.host)
+    void makeManager(fake.host)
 
     expect(monitors).not.toHaveBeenCalled()
     expect(fake.activeListeners()).toBe(0)
     expect(fake.calls).toEqual([])
+  })
+})
+
+describe('persistence', () => {
+  it('records an added output so the next launch can bring it back', async () => {
+    const fake = createFakeHost()
+    const store = memoryStore()
+    const manager = makeManager(fake.host, { store })
+
+    await manager.addOutput({ monitorIndex: 1 })
+
+    // The left-hand monitor's signed origin, stored as reported. A
+    // value that had been through a logical conversion could not be
+    // compared against a fresh `Monitor.position` on a HiDPI desk.
+    expect(store.current().outputs).toEqual([
+      {
+        label: 'output-1',
+        monitorName: '\\\\.\\DISPLAY1',
+        monitorOrigin: { x: -1680, y: 383 },
+        mode: 'sos-equirect',
+        trackOperatorCamera: true,
+        split: false,
+      },
+    ])
+  })
+
+  it('forgets a removed output', async () => {
+    const fake = createFakeHost()
+    const store = memoryStore()
+    const manager = makeManager(fake.host, { store })
+    await manager.addOutput({ monitorIndex: 0 })
+    await manager.addOutput({ monitorIndex: 1 })
+
+    await manager.removeOutput('output-1')
+
+    expect(store.current().outputs.map(o => o.label)).toEqual(['output-2'])
+  })
+
+  it('records a view toggle even before the output has announced itself', async () => {
+    const fake = createFakeHost()
+    const store = memoryStore()
+    const manager = makeManager(fake.host, { store })
+    await manager.addOutput({ monitorIndex: 0 })
+
+    // Deliberately no `output_ready`. A toggle flipped while the window
+    // is still booting is still the operator's choice, and one that
+    // vanished at relaunch would be very hard to report.
+    await manager.setOutputView('output-1', { split: true })
+
+    expect(store.current().outputs[0].split).toBe(true)
+  })
+
+  it('keeps the operator opt-in when records change', async () => {
+    const fake = createFakeHost()
+    const store = memoryStore({ autoRestoreOnLaunch: true })
+    const manager = makeManager(fake.host, { store })
+
+    await manager.addOutput({ monitorIndex: 0 })
+
+    expect(store.current().autoRestoreOnLaunch).toBe(true)
+  })
+
+  it('round-trips the restore-on-launch flag', () => {
+    const store = memoryStore()
+    const manager = makeManager(createFakeHost().host, { store })
+
+    expect(manager.isRestoreOnLaunch()).toBe(false)
+    manager.setRestoreOnLaunch(true)
+    expect(manager.isRestoreOnLaunch()).toBe(true)
+    expect(store.current().autoRestoreOnLaunch).toBe(true)
+  })
+})
+
+describe('restoreOutputs', () => {
+  const persistedOn = (label: string, monitor: OutputMonitor) => ({
+    label,
+    monitorName: monitor.name,
+    monitorOrigin: { x: monitor.position.x, y: monitor.position.y },
+    mode: 'sos-equirect' as const,
+    trackOperatorCamera: true,
+    split: false,
+  })
+
+  it('costs nothing when the operator never opted in', async () => {
+    const fake = createFakeHost()
+    const monitors = vi.spyOn(fake.host, 'availableMonitors')
+    const store = memoryStore({
+      autoRestoreOnLaunch: false,
+      outputs: [persistedOn('output-1', MONITORS[0])],
+    })
+
+    const restored = await makeManager(fake.host, { store }).restoreOutputs()
+
+    // The plan's boot flow step 1: an install that has not enabled
+    // outputs enumerates no monitors and opens no IPC link.
+    expect(restored).toEqual([])
+    expect(monitors).not.toHaveBeenCalled()
+    expect(fake.activeListeners()).toBe(0)
+    expect(fake.calls).toEqual([])
+  })
+
+  it('costs nothing when opted in with nothing configured', async () => {
+    const fake = createFakeHost()
+    const monitors = vi.spyOn(fake.host, 'availableMonitors')
+    const store = memoryStore({ autoRestoreOnLaunch: true, outputs: [] })
+
+    await makeManager(fake.host, { store }).restoreOutputs()
+
+    expect(monitors).not.toHaveBeenCalled()
+    expect(fake.activeListeners()).toBe(0)
+  })
+
+  it('brings back an output on the monitor it was on, with its settings', async () => {
+    const fake = createFakeHost()
+    const store = memoryStore({
+      autoRestoreOnLaunch: true,
+      outputs: [{ ...persistedOn('output-1', MONITORS[1]), trackOperatorCamera: false, split: true }],
+    })
+
+    const restored = await makeManager(fake.host, { store }).restoreOutputs()
+
+    expect(restored).toHaveLength(1)
+    expect(restored[0].view).toEqual({ trackCamera: false, split: true })
+    // The same spawn sequence a fresh output goes through — the order
+    // is the correctness, so restore must not have its own copy of it.
+    expect(fake.calls).toEqual([
+      `create:output-1:${OUTPUT_ENTRY_URL}`,
+      'setPosition:output-1:-1680,383',
+      'setSize:output-1:1680x1050',
+      'setFullscreen:output-1:true',
+      'show:output-1',
+    ])
+  })
+
+  it('opens the IPC link before the first restored window boots', async () => {
+    const fake = createFakeHost()
+    const store = memoryStore({
+      autoRestoreOnLaunch: true,
+      outputs: [persistedOn('output-1', MONITORS[0])],
+    })
+
+    const manager = makeManager(fake.host, { store })
+    const listenersAtSpawn: number[] = []
+    vi.spyOn(fake.host, 'createWindow').mockImplementation(async label => {
+      listenersAtSpawn.push(fake.activeListeners())
+      return {
+        setPosition: async () => {},
+        setSize: async () => {},
+        setFullscreen: async () => {},
+        show: async () => {},
+        close: async () => { fake.closed.push(label) },
+      }
+    })
+
+    await manager.restoreOutputs()
+
+    // A restored output emits `output_ready` as it boots. A listener
+    // installed after the spawn races the window it is for.
+    expect(listenersAtSpawn).toEqual([1])
+  })
+
+  it('skips a monitor that matches by name alone, and says so', async () => {
+    // The same display name at a different origin: the machine has been
+    // rearranged, or a driver reassigned the positional names.
+    const moved = { ...MONITORS[0], position: { x: 4096, y: 0 } }
+    const fake = createFakeHost({ monitors: [moved] })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const store = memoryStore({
+      autoRestoreOnLaunch: true,
+      outputs: [persistedOn('output-1', MONITORS[0])],
+    })
+
+    const restored = await makeManager(fake.host, { store }).restoreOutputs()
+
+    // Restoring onto it would put a projector on the wrong monitor with
+    // nothing on screen to say so.
+    expect(restored).toEqual([])
+    expect(fake.calls).toEqual([])
+    expect(warn).toHaveBeenCalled()
+  })
+
+  it('restores the outputs whose monitors are present and skips the rest', async () => {
+    const fake = createFakeHost({ monitors: [MONITORS[0], MONITORS[2]] })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const store = memoryStore({
+      autoRestoreOnLaunch: true,
+      outputs: [
+        persistedOn('output-1', MONITORS[0]),
+        persistedOn('output-2', MONITORS[1]), // unplugged
+        persistedOn('output-3', MONITORS[2]),
+      ],
+    })
+
+    const restored = await makeManager(fake.host, { store }).restoreOutputs()
+
+    // An installation with three projectors must not lose all three
+    // because one was unplugged.
+    expect(restored.map(r => r.label)).toEqual(['output-1', 'output-3'])
+  })
+
+  it('keeps going when one window refuses to spawn', async () => {
+    const fake = createFakeHost()
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const store = memoryStore({
+      autoRestoreOnLaunch: true,
+      outputs: [persistedOn('output-1', MONITORS[0]), persistedOn('output-2', MONITORS[1])],
+    })
+    const real = fake.host.createWindow.bind(fake.host)
+    let first = true
+    vi.spyOn(fake.host, 'createWindow').mockImplementation(async (label, url) => {
+      if (first) {
+        first = false
+        throw new Error('webview creation refused')
+      }
+      return real(label, url)
+    })
+
+    const restored = await makeManager(fake.host, { store }).restoreOutputs()
+
+    expect(restored.map(r => r.label)).toEqual(['output-2'])
+  })
+
+  it('paces the spawns rather than firing them together', async () => {
+    const fake = createFakeHost()
+    const sleep = vi.fn(async () => {})
+    const store = memoryStore({
+      autoRestoreOnLaunch: true,
+      outputs: [
+        persistedOn('output-1', MONITORS[0]),
+        persistedOn('output-2', MONITORS[1]),
+        persistedOn('output-3', MONITORS[2]),
+      ],
+    })
+
+    await makeManager(fake.host, { store, sleep }).restoreOutputs()
+
+    // Startup contention is the one cost the spike could measure — and
+    // only *between* spawns, so a single output pays nothing.
+    expect(sleep.mock.calls).toEqual([
+      [OUTPUT_RESTORE_STAGGER_MS],
+      [OUTPUT_RESTORE_STAGGER_MS],
+    ])
+  })
+
+  it('does not pace a single restored output', async () => {
+    const fake = createFakeHost()
+    const sleep = vi.fn(async () => {})
+    const store = memoryStore({
+      autoRestoreOnLaunch: true,
+      outputs: [persistedOn('output-1', MONITORS[0])],
+    })
+
+    await makeManager(fake.host, { store, sleep }).restoreOutputs()
+
+    expect(sleep).not.toHaveBeenCalled()
+  })
+
+  it('advances the label counter past what it restored', async () => {
+    const fake = createFakeHost()
+    const store = memoryStore({
+      autoRestoreOnLaunch: true,
+      outputs: [persistedOn('output-1', MONITORS[0]), persistedOn('output-2', MONITORS[1])],
+    })
+    const manager = makeManager(fake.host, { store })
+    await manager.restoreOutputs()
+
+    const added = await manager.addOutput({ monitorIndex: 2 })
+
+    // Minting `output-1` again would address a window already on screen
+    // — two records, one window, and the other unreachable.
+    expect(added.label).toBe('output-3')
+    expect(manager.outputs().map(o => o.label)).toEqual(['output-1', 'output-2', 'output-3'])
+  })
+
+  it('rewrites the config with what actually came up', async () => {
+    const fake = createFakeHost({ monitors: [MONITORS[0]] })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const store = memoryStore({
+      autoRestoreOnLaunch: true,
+      outputs: [persistedOn('output-1', MONITORS[0]), persistedOn('output-2', MONITORS[1])],
+    })
+
+    await makeManager(fake.host, { store }).restoreOutputs()
+
+    // The unplugged entry is dropped rather than retried every launch.
+    // The operator re-picks the display, which is also the only way
+    // they find out it moved.
+    expect(store.current().outputs.map(o => o.label)).toEqual(['output-1'])
+    expect(store.current().autoRestoreOnLaunch).toBe(true)
   })
 })

@@ -52,6 +52,26 @@ export function outputLabel(index: number): string {
 }
 
 /**
+ * The index in an output label, or `null` if it does not carry one.
+ *
+ * The inverse of `outputLabel`, and it lives beside it so the grammar
+ * has one home rather than a mint here and an ad-hoc parse at the call
+ * site. Rung 10 needs it to advance the label counter past a restored
+ * set, so a fresh Add cannot mint a label that collides with a window
+ * already on screen.
+ *
+ * Strict about what it accepts: `output-01` and `output-1x` are not
+ * labels this module would ever have minted, and reading an index out
+ * of them would be inventing one.
+ */
+export function outputLabelIndex(label: string): number | null {
+  if (!isOutputLabel(label)) return null
+  const suffix = label.slice(OUTPUT_LABEL_PREFIX.length)
+  if (!/^[1-9][0-9]*$/.test(suffix)) return null
+  return Number(suffix)
+}
+
+/**
  * True if `label` names an output window.
  *
  * Used by the manager's boot scan over `WebviewWindow.getAll()` to tell

@@ -14,6 +14,7 @@ import { describe, it, expect } from 'vitest'
 import {
   OUTPUT_LABEL_PREFIX,
   outputLabel,
+  outputLabelIndex,
   isOutputLabel,
   isFullState,
   STATE_TICK_MS,
@@ -32,6 +33,20 @@ describe('window labels', () => {
   it('round-trips every minted label through the recogniser', () => {
     for (let i = 1; i <= 16; i++) {
       expect(isOutputLabel(outputLabel(i))).toBe(true)
+    }
+  })
+
+  it('reads an index back out of a minted label', () => {
+    for (let i = 1; i <= 16; i++) {
+      expect(outputLabelIndex(outputLabel(i))).toBe(i)
+    }
+  })
+
+  it('refuses to read an index out of a label it would never mint', () => {
+    // Inventing one would feed the counter that decides whether a fresh
+    // Add collides with a restored window already on screen.
+    for (const label of ['output-01', 'output-1x', 'output-', 'output-0', 'main']) {
+      expect(outputLabelIndex(label)).toBeNull()
     }
   })
 
