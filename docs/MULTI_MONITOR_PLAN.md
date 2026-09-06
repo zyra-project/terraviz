@@ -2524,6 +2524,24 @@ change — swap `equirectRtt.ts` for `fisheyeRtt.ts` with a
 different `(u,v) → direction` mapping. ~50 LOC, no architecture
 change.
 
+**That estimate holds for a dome and not for a projector**, and the
+distinction was missing when it was written. A dome camera sits at the
+sphere's centre like the equirect one, so it inherits `equirectRtt`'s
+standing assumption — the camera is strictly inside, therefore every
+ray hits, therefore the shader has no miss branch. A projector sits
+*outside*: its rays can miss, and the ones that hit have two
+intersections where the near one is wanted. `MAX_CAMERA_OFFSET = 0.85`
+exists to hold that invariant, so a projector mode changes the module
+rather than parameterising it. See §"Driving other display geometries".
+
+**And for a real rig, prefer consuming a warp file to writing the
+shader at all.** The same section records why: v1's equirect output is
+already what the SOS ecosystem ingests, and `zyra-project/sphere-sim`
+emits Bourke warp-and-blend files whose `u,v` are equirect coordinates.
+That path skips the fisheye maths, the calibration and the blending
+together, and is what the effort estimate below should be weighed
+against.
+
 The off-center camera plumbing (§3.5) already exists from v1
 — the LED sphere uses it as its primary mode — so the dome
 gets it for free. Phase 2's add is a **smoothing filter** on
@@ -2593,6 +2611,33 @@ Architecture additions:
 This is genuinely ambitious and overlaps with what purpose-
 built planetarium drivers do. **Gated on real-world demand**,
 not a speculative build.
+
+**Most of the above is now a file format rather than a feature.** A
+Bourke warp mesh carries geometry *and* blend per projector, which
+subsumes `srcRect` / `dstRect` / `blendMask` and removes the reason to
+build a blend-mask authoring tool — the calibration solver in
+`zyra-project/sphere-sim` produces the mesh from camera images, which
+is a better answer than dragging blend curves by hand. What survives
+from the list above is per-output fixed-slot binding (unrelated to
+geometry) and per-output colour correction (a projector-gamma problem a
+warp file does not address).
+
+Two things this rung would have to get right, recorded in §"Driving
+other display geometries" and repeated here because this is where they
+would bite:
+
+- A calibration describes **one shared framebuffer with normalized
+  per-projector viewport rects, bottom-left origin**. Rungs 9-10 spawn
+  N independent windows. Mapping between the two is small and silent
+  when wrong — every projector mis-cropped, reading as a calibration
+  error rather than a parsing one.
+- An arbitrary **surface mesh is a typed-array sidecar**, not JSON.
+  Rung 10's persisted config lives in `localStorage`; a 5 MB mesh does
+  not go there. A rig config needs a file reference.
+
+The honest gate remains real-world demand, but the *shape* of the work
+has changed from "build a projector driver" to "consume an interchange
+format and get two coordinate conventions right".
 
 ### Phase 4 — mirrored / cloned mode
 
