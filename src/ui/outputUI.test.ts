@@ -314,6 +314,50 @@ describe('the Outputs panel', () => {
     expect($('.output-panel')).toBeNull()
   })
 
+  it('names each output by the display the picker offered, not a constant', async () => {
+    // Linux reports `name: null` often enough that this is the common
+    // case there, not an edge one. A hardcoded index labelled every
+    // unnamed display "Display 1": two outputs, one name, and two Remove
+    // buttons with the same accessible name.
+    const { mgr } = fakeManager([
+      monitor({ name: null }),
+      monitor({ name: null, position: { x: 1920, y: 0 } }),
+    ])
+    mount(mgr)
+    await until(painted, 'the panel body')
+
+    $<HTMLButtonElement>('.output-add-btn')!.click()
+    await until(() => $('.output-item') !== null, 'the first row')
+    $<HTMLButtonElement>('.output-add-btn')!.click()
+    await until(() => $$('.output-item').length === 2, 'the second row')
+
+    const names = $$('.output-item-name').map(n => n.textContent)
+    expect(names).toEqual(['Display 1', 'Display 2'])
+    // The accessible name has to distinguish them too — it is the only
+    // thing a screen-reader user has to tell the two Remove buttons apart.
+    const removeLabels = ($$('.output-item-remove') as HTMLElement[]).map(b =>
+      b.getAttribute('aria-label'),
+    )
+    expect(new Set(removeLabels).size).toBe(2)
+  })
+
+  it('falls back to the origin for a display unplugged since the spawn', async () => {
+    const gone = monitor({ name: null, position: { x: 1920, y: 0 } })
+    const { mgr, raw, records } = fakeManager([monitor({ name: null }), gone])
+    mount(mgr)
+    await until(painted, 'the panel body')
+    records.push(record('output-9', gone))
+    // The display is no longer enumerated, so it has no index to name it
+    // by. The signed origin is unique and stays true with nothing plugged
+    // in; naming the state properly is rung 13.
+    raw.listMonitors.mockResolvedValue([monitor({ name: null })])
+
+    openOutputUI()
+
+    await until(() => $('.output-item') !== null, 'the row for the gone display')
+    expect($('.output-item-name')!.textContent).toBe('Display at 1920, 0')
+  })
+
   it('shows the launch opt-in off by default', async () => {
     const { mgr } = fakeManager()
     mount(mgr)
@@ -344,6 +388,19 @@ describe('the Outputs panel', () => {
 
     await until(painted, 'the panel body')
     expect($<HTMLInputElement>('#output-restore-launch')!.checked).toBe(true)
+  })
+
+  it('renders the unavailable state when opened before it was wired', async () => {
+    // Copilot read `source?.manager().catch(...)` as calling `.catch()`
+    // on `undefined`. Optional chaining short-circuits the *whole* chain,
+    // so the expression is `undefined` and `.catch` is never reached —
+    // but the path was genuinely untested, which is why this exists.
+    // `resetOutputUIForTests` in afterEach leaves `source` null.
+    openOutputUI()
+
+    await until(() => $('.output-note') !== null, 'the unavailable note')
+    expect($('.output-panel')).not.toBeNull()
+    expect($('.output-monitor-select')).toBeNull()
   })
 
   it('reopening does not leave two panels stacked', async () => {

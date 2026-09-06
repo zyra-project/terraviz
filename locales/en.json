@@ -536,6 +536,7 @@
   "outputs.monitor.option": "{name} — {width}×{height}",
   "outputs.monitor.optionInUse": "{name} — {width}×{height} (already in use)",
   "outputs.monitor.unnamed": "Display {index}",
+  "outputs.monitor.unnamedAt": "Display at {x}, {y}",
   "outputs.monitors.empty": "No displays were detected.",
   "outputs.monitors.label": "Display",
   "outputs.monitors.title": "Add an output",

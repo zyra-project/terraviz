@@ -108,6 +108,37 @@ function monitorName(monitor: OutputMonitor, index: number): string {
   return monitor.name ?? t('outputs.monitor.unnamed', { index: index + 1 })
 }
 
+/**
+ * The name to show for an output's monitor.
+ *
+ * Resolved against the **current enumeration** rather than from the
+ * record alone, so a row reads with the same string the picker offered
+ * — the operator chose "Display 2", so the row has to say "Display 2".
+ *
+ * The record cannot answer this by itself: `availableMonitors()` reports
+ * `name: null` often enough on Linux that the fallback carries the
+ * enumeration index, and a record holds no index. Passing a constant
+ * there (this was `0`) labels *every* unnamed display "Display 1", which
+ * makes two outputs indistinguishable and gives their Remove buttons the
+ * same accessible name.
+ *
+ * A monitor absent from the enumeration has been unplugged since the
+ * output was spawned. Its index is gone, so the signed origin stands in:
+ * unique, and true whether or not anything is plugged into it. Naming
+ * that state properly is rung 13's health badges.
+ */
+function monitorRowName(
+  monitor: OutputMonitor,
+  monitors: readonly OutputMonitor[],
+): string {
+  const index = monitors.findIndex(m => monitorKey(m) === monitorKey(monitor))
+  if (index >= 0) return monitorName(monitors[index], index)
+  return (
+    monitor.name ??
+    t('outputs.monitor.unnamedAt', { x: monitor.position.x, y: monitor.position.y })
+  )
+}
+
 let source: OutputPanelSource | null = null
 let root: HTMLElement | null = null
 let lastTrigger: HTMLElement | null = null
@@ -224,7 +255,7 @@ async function refresh(body: HTMLElement): Promise<void> {
   replace(
     body,
     buildAdder(mgr, monitors, records, body),
-    buildList(mgr, records, body),
+    buildList(mgr, records, monitors, body),
     buildLaunchSection(mgr),
   )
 }
@@ -385,6 +416,7 @@ async function add(
 function buildList(
   mgr: OutputPanelManager,
   records: OutputRecord[],
+  monitors: readonly OutputMonitor[],
   body: HTMLElement,
 ): HTMLElement {
   const section = document.createElement('section')
@@ -402,7 +434,7 @@ function buildList(
   const list = document.createElement('ul')
   list.className = 'output-list'
   for (const record of records) {
-    list.appendChild(buildRow(mgr, record, body))
+    list.appendChild(buildRow(mgr, record, monitors, body))
   }
   section.appendChild(list)
   return section
@@ -411,6 +443,7 @@ function buildList(
 function buildRow(
   mgr: OutputPanelManager,
   record: OutputRecord,
+  monitors: readonly OutputMonitor[],
   body: HTMLElement,
 ): HTMLElement {
   const item = document.createElement('li')
@@ -425,7 +458,8 @@ function buildRow(
   // The monitor's own name, not the window label: `output-1` is the IPC
   // address and means nothing to an operator standing at a rack asking
   // which projector this is.
-  name.textContent = monitorName(record.monitor, 0)
+  const displayName = monitorRowName(record.monitor, monitors)
+  name.textContent = displayName
 
   const meta = document.createElement('span')
   meta.className = 'output-item-meta'
@@ -441,7 +475,7 @@ function buildRow(
   remove.textContent = t('outputs.item.remove')
   remove.setAttribute(
     'aria-label',
-    t('outputs.item.removeAria', { monitor: monitorName(record.monitor, 0) }),
+    t('outputs.item.removeAria', { monitor: displayName }),
   )
   remove.addEventListener('click', () => {
     void removeOutput(mgr, record.label, remove, body)
