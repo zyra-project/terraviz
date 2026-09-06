@@ -2368,6 +2368,152 @@ automatically. The basic state-mirroring path is unaffected.
 
 ---
 
+## Driving other display geometries
+
+**Status: study, no code. Written after rung 10 shipped, and after
+reading the sister project.** Nothing here changes v1, and none of it
+is scheduled — Phases 2 and 3 below are where it would land, and both
+are amended against it.
+
+The question this answers is one a reader of the delivery ladder will
+have: **is equirectangular assumed?** Partly. It is worth being precise
+about which layers assume it, because the answer decides how much any
+other geometry costs.
+
+| Layer | Equirect-specific? |
+|---|---|
+| `protocol.ts` — `MirroredGlobeState` | **No.** Dataset, playback, palette, layers, date: what the globe *shows*, not how it is projected. `OutputMode` is already a field on `OutputReadyEvent` |
+| `manager.ts` | **No.** Stores `mode`, persists it, passes it to `spawn()`, never branches on it. Every output gets the same `output.html` |
+| `outputPersistence.ts` | **No**, beyond refusing an unrecognised `mode` — deliberately, so a newer build's mode is not spawned as an equirect |
+| `outputUI.ts` | **No.** The mode picker is absent only because a one-option select is dead UI |
+| `layerStack.ts` | **No.** Composites base Earth + overlay + layers to a colour at a surface point. Projection-independent |
+| `outputScene.ts` + `equirectRtt.ts` | **Yes, hard-wired.** Unconditional 2:1 framebuffer, fullscreen quad, ray-march. The scene never reads `mode` — it *reports* one and nothing routes on it inbound |
+
+So `OutputMode` is a real extension point that is plumbed everywhere
+except the renderer. The seam is already in the right place:
+`equirectRtt` answers "which surface point is this pixel", `layerStack`
+answers "what colour is that point". Another geometry replaces the
+first and keeps the second.
+
+### The flat case: N monitors each showing the globe
+
+A video wall where one window is one monitor, each showing the ordinary
+globe — a cloned or side-by-side view rather than a projection surface.
+
+**Do not ray-march for this.** The ray-march exists because
+equirectangular is not a projection any rasteriser can do natively. A
+perspective view *is*, so this mode uses Three's normal pipeline with a
+camera per output, and the inside/outside question below never arises.
+That means reversing one v1 decision locally: `outputScene` consumes
+`photorealEarth` as a **texture provider** with every mesh-only effect
+switched off at construction, because the equirect pass is the renderer.
+A perspective mode wants the mesh and those effects back, so that
+switch becomes conditional on mode.
+
+Also: `resolveFramebufferSize` snaps to 2:1 rungs. A flat mode wants the
+monitor's own aspect, so it needs a non-2:1 path.
+
+Cost: widen `OutputMode`, a per-output camera azimuth, a branch in
+`outputScene`, the two changes above. Manager, protocol, persistence,
+panel and sync are untouched. This is the cheapest non-equirect mode by
+a wide margin and it is **not** what an SOS installation needs.
+
+### The projector case, and the invariant it breaks
+
+A real Science On a Sphere rig is four projectors *outside* the sphere,
+each with a fisheye lens, overlapping and edge-blended.
+
+`equirectRtt` cannot be pointed at that by changing a parameter.
+`MAX_CAMERA_OFFSET = 0.85` exists to keep the camera strictly **inside**
+the sphere, and the shader has no miss branch *because* every ray then
+hits. A projector two or three radii away has rays that miss entirely,
+and rays that hit have two intersections where the near one is wanted.
+That is a change to the module the plan calls "the maths", and it is the
+one place where "swap the projection shader" understates the work.
+
+Related: rung 14's `uRotationOffsetRad` is a longitude offset. A
+projector needs full position, orientation and a lens model.
+
+### The interchange that avoids all of it
+
+v1 already emits equirectangular frames, and **equirectangular is what
+the SOS ecosystem ingests** — it is why this repo's catalog is 2:1 and
+why `layerStack` and `datasetProbe` do equirect UV maths. So the
+existing output can feed SOS software, a warping appliance, or a
+projector's own geometry-correction and edge-blend engine with no new
+code at all. For a real installation that is the first thing to try,
+because per-projector warp is a solved problem sitting in hardware a
+site is likely already buying.
+
+The sister project [`zyra-project/sphere-sim`](https://github.com/zyra-project/sphere-sim)
+makes a second option real: `packages/sim/src/warp.ts` writes Paul
+Bourke warp-and-blend files — per projector, per node `(x, y, u, v, i)`,
+where `u,v` is the texel that belongs at that node and `i` is the blend
+multiplier. Geometry and blend in one file, deliberately. For a sphere
+those `u,v` are equirectangular coordinates, so **the two projects
+already meet at the frame v1 produces.**
+
+Consuming one is small: parse the text format, build a cols×rows mesh
+(positions from `x,y`, UVs from `u,v`, intensity as a vertex attribute),
+draw it with the equirect frame as texture, skip nodes written
+`-1 -1 -1`. terraviz never models the projector, so the miss-branch
+problem above does not arise — the trace happened offline.
+
+The layering also composes: `cameraOffset` and `split` act on the
+equirect **content**, the warp acts on the rig **geometry**. Orthogonal,
+so operator zoom keeps working through a warped output.
+
+**Two findings from reading sphere-sim that a naive integration would
+get wrong:**
+
+1. **SOS is one framebuffer, not N windows.** `RigCalibration` carries a
+   single shared `framebuffer`, and each projector holds a *normalized
+   viewport rect* into it — "SOS drives all projectors from one X screen
+   split 2x2. Origin is bottom-left". Rungs 9-10 built the opposite:
+   N independent fullscreen windows. Both are legitimate and ours is
+   arguably better on a modern OS, but a calibration file is expressed
+   in theirs, so consuming one means mapping viewport rects onto
+   windows. Getting it wrong silently mis-crops every projector — a
+   failure that reads as "calibration is slightly off" rather than "we
+   misread the file". And bottom-left origin against our top-left is one
+   sign from a vertically mirrored rig.
+2. **An arbitrary surface arrives as a binary sidecar, not more JSON.**
+   `packages/calibration/src/mesh.ts` (`sphere-sim/surface-mesh@1`) sits
+   *beside* the sphere field rather than replacing it, and is
+   deliberately typed arrays: a 100k-triangle model is ~5 MB as
+   `Float64Array` and ~40 MB as JSON text. Rung 10 persists config as
+   JSON in `localStorage`, which is the wrong home for that. A rig
+   config would need a file reference, not an embedded blob.
+
+Note also that a warp file for a **non-sphere** carries the model's own
+UV layout, and `buildWarpExport` refuses a mesh with no UV set. So
+"drop a GLB and drive it from terraviz" additionally requires rendering
+into that model's UV space, which is a different job from what the
+output does today. The sphere path has no such gap.
+
+### The risk to design around
+
+Both halves are currently validated against themselves rather than
+against hardware. sphere-sim's recovery figures are solver-vs-simulator
+with injected noise; its `validation/` directory is explicitly
+"plausibility only — no metric, no gate, no score". And nothing in this
+plan has run on a second monitor. Composing two unvalidated halves
+makes a first-light failure hard to attribute between them.
+
+The cheap mitigation is to make an output able to display a warp file's
+own test pattern, so the warp can be judged before the globe is in it —
+which is also what rung 14's calibration tooling wants anyway.
+
+**Interchange, not a code dependency.** sphere-sim's architecture is a
+boundary lint whose whole purpose is stopping two models from sharing
+implementation; importing it would drag a research instrument into a
+display app's render path. The warp file is what it is for. Consuming a
+standard format also keeps terraviz able to take warps from other
+tools — and MPCDI, which `warp.ts` names as the right second target,
+becomes additive rather than a rewrite.
+
+---
+
 ## Roadmap after MVP
 
 ### Phase 2 — fisheye / dome projection + vector overlays + dome camera-tracking polish
