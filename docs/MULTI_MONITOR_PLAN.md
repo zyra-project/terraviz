@@ -2284,8 +2284,8 @@ without rolling the whole feature back.
 | 6 | `multi-output: state aggregator + protocol implementation` | `multiOutput/manager.ts`, `multiOutput/stateAggregator.ts`. Manager constructible but not yet instantiated. | No |
 | 7 | `multi-output: emit dataset:loaded + layer events from main.ts` | Refactor of `datasetLoader` and `main.ts` to fire events the aggregator can subscribe to. Today's `panelStates` consumers keep working. | No |
 | 8 | `multi-output: wire MultiOutputManager into main.ts boot` | Manager instantiated; subscribes to events. No UI to spawn windows yet, so still invisible. | No |
-| 9 | `multi-output: add Tools → Outputs panel` | `outputUI.ts`, Tools menu entry. **First user-reachable commit.** Operator can add and remove SOS equirectangular outputs. | **Yes** |
-| 10 | `multi-output: persist + restore outputs across launches` | localStorage config, opt-in restore on boot, and monitor matching on **both** name and signed physical origin — a name-only match is treated as a monitor the manager does not recognise and skipped, because Windows display names are positional and reassignable (see §3 "Persistence"). | Yes (additive) |
+| 9 | `multi-output: add Tools → Outputs panel` | **Landed.** `outputUI.ts`, Tools menu entry. **First user-reachable commit.** Operator can add and remove SOS equirectangular outputs, and set each one's "Track operator camera" / "Split sphere". Mode is *shown*, not picked — v1 has one, and a one-option select is dead UI. The occupied-monitor guard lives in the panel because `addOutput` accepts any index; it keys on name **and** signed origin so rung 10's restore matching reuses the same identity. `manager.start()` is called on the first add and awaited before the spawn (the output emits `output_ready` as it boots), and never stopped on removal. Deferred to their own rungs: rename and persistence (10), framebuffer resolution / decoder budget / debug overlay (11), health badges and reacting to an output the operator closed by hand (13). | **Yes** |
+| 10 | `multi-output: persist + restore outputs across launches` | **Landed.** `outputPersistence.ts` (versioned localStorage config, fail-closed parse, the match rule), `manager.restoreOutputs()`, boot wiring, and the panel's opt-in checkbox. Monitor matching is on **both** name and signed physical origin — a name-only match is a monitor the manager does not recognise, skipped and logged, because Windows display names are positional and reassignable (see §3 "Persistence"). Restore is per-output-fail-safe (a gone monitor or a refused window loses one output, not the set), paced by `OUTPUT_RESTORE_STAGGER_MS` between spawns, starts the IPC link before the first one, reuses persisted labels and advances the counter past them, then rewrites the config with what actually came up. Two departures from the schema above: a `version` field, because without one a future incompatible change cannot tell an old blob from a corrupt one and this blob spawns windows; and `framebufferSize` / `rotationOffsetDeg` / `debugOverlay` / `concurrentDecoderBudget` are **absent** until the rungs that read them (11, 14) — inventing defaults now would guess at what those rungs want. | Yes (additive) |
 | 11 | `multi-output: per-output debug overlay + framebuffer + decoder-budget controls` | Resolution picker in panel, the machine-scoped **decoder-budget field** (seeded from `DEFAULT_CONCURRENT_DECODERS`, persisted, shown as "N of M decoders") that makes the per-machine budget in §3 actually settable — without it the budget is a constant wearing a different name — debug HUD with dataset id, sync delta, fps, and the WebGL **renderer string** — the last so an operator can see which GPU the webview actually got, which on a hybrid-graphics machine is decided by the driver rather than by the app (see Risks). | Yes (additive) |
 | 12 | `multi-output: fullscreen toggle + kiosk launch + F11 on every window` | `Tools → Fullscreen` toggle in `toolsMenuUI.ts` (persisted), F11 keydown handler on control + output windows, `--kiosk` argv parse and `TERRAVIZ_KIOSK=1` env var read in `src-tauri/src/lib.rs` (**not** `main.rs`, now a 12-line shim) behind `#[cfg(desktop)]`, applying fullscreen + decorationless before first paint, 3-second idle cursor-hide on the control window when fullscreen. See §3.6. | Yes (additive) |
 | 13 | `multi-output: failure recovery — crashes, stalls, GPU loss, monitor unplug` | Manager gains crash detection (no-graceful-close window destroy → toast + record removal), 3-strikes-per-monitor crash storm guard, 2 s `availableMonitors()` poll for unplug detection, `getAll()` boot scan to reattach orphaned `output-*` windows after a control-window crash. Output gains `webglcontextlost` / `webglcontextrestored` listeners with full scene rebuild, IPC-silence watchdog (5 s → stale state, 60 s → orphan), one HLS stream rebuild on a `loadStream()` rejection with frozen last-good-frame (no retry ladder — `hlsService` already spends a 3× budget before rejecting). Outputs panel renders per-output health badges (healthy / stale / stalled / monitor-missing). New Tier A `output_failure` event fired from manager via `analytics/emitter.ts` with `{ kind, retries, recovered }` (Open Question 3 decided). See §3 "Failure recovery". | Yes (additive) |
@@ -2368,6 +2368,152 @@ automatically. The basic state-mirroring path is unaffected.
 
 ---
 
+## Driving other display geometries
+
+**Status: study, no code. Written after rung 10 shipped, and after
+reading the sister project.** Nothing here changes v1, and none of it
+is scheduled — Phases 2 and 3 below are where it would land, and both
+are amended against it.
+
+The question this answers is one a reader of the delivery ladder will
+have: **is equirectangular assumed?** Partly. It is worth being precise
+about which layers assume it, because the answer decides how much any
+other geometry costs.
+
+| Layer | Equirect-specific? |
+|---|---|
+| `protocol.ts` — `MirroredGlobeState` | **No.** Dataset, playback, palette, layers, date: what the globe *shows*, not how it is projected. `OutputMode` is already a field on `OutputReadyEvent` |
+| `manager.ts` | **No.** Stores `mode`, persists it, passes it to `spawn()`, never branches on it. Every output gets the same `output.html` |
+| `outputPersistence.ts` | **No**, beyond refusing an unrecognised `mode` — deliberately, so a newer build's mode is not spawned as an equirect |
+| `outputUI.ts` | **No.** The mode picker is absent only because a one-option select is dead UI |
+| `layerStack.ts` | **No.** Composites base Earth + overlay + layers to a colour at a surface point. Projection-independent |
+| `outputScene.ts` + `equirectRtt.ts` | **Yes, hard-wired.** Unconditional 2:1 framebuffer, fullscreen quad, ray-march. The scene never reads `mode` — it *reports* one and nothing routes on it inbound |
+
+So `OutputMode` is a real extension point that is plumbed everywhere
+except the renderer. The seam is already in the right place:
+`equirectRtt` answers "which surface point is this pixel", `layerStack`
+answers "what colour is that point". Another geometry replaces the
+first and keeps the second.
+
+### The flat case: N monitors each showing the globe
+
+A video wall where one window is one monitor, each showing the ordinary
+globe — a cloned or side-by-side view rather than a projection surface.
+
+**Do not ray-march for this.** The ray-march exists because
+equirectangular is not a projection any rasteriser can do natively. A
+perspective view *is*, so this mode uses Three's normal pipeline with a
+camera per output, and the inside/outside question below never arises.
+That means reversing one v1 decision locally: `outputScene` consumes
+`photorealEarth` as a **texture provider** with every mesh-only effect
+switched off at construction, because the equirect pass is the renderer.
+A perspective mode wants the mesh and those effects back, so that
+switch becomes conditional on mode.
+
+Also: `resolveFramebufferSize` snaps to 2:1 rungs. A flat mode wants the
+monitor's own aspect, so it needs a non-2:1 path.
+
+Cost: widen `OutputMode`, a per-output camera azimuth, a branch in
+`outputScene`, the two changes above. Manager, protocol, persistence,
+panel and sync are untouched. This is the cheapest non-equirect mode by
+a wide margin and it is **not** what an SOS installation needs.
+
+### The projector case, and the invariant it breaks
+
+A real Science On a Sphere rig is four projectors *outside* the sphere,
+each with a fisheye lens, overlapping and edge-blended.
+
+`equirectRtt` cannot be pointed at that by changing a parameter.
+`MAX_CAMERA_OFFSET = 0.85` exists to keep the camera strictly **inside**
+the sphere, and the shader has no miss branch *because* every ray then
+hits. A projector two or three radii away has rays that miss entirely,
+and rays that hit have two intersections where the near one is wanted.
+That is a change to the module the plan calls "the maths", and it is the
+one place where "swap the projection shader" understates the work.
+
+Related: rung 14's `uRotationOffsetRad` is a longitude offset. A
+projector needs full position, orientation and a lens model.
+
+### The interchange that avoids all of it
+
+v1 already emits equirectangular frames, and **equirectangular is what
+the SOS ecosystem ingests** — it is why this repo's catalog is 2:1 and
+why `layerStack` and `datasetProbe` do equirect UV maths. So the
+existing output can feed SOS software, a warping appliance, or a
+projector's own geometry-correction and edge-blend engine with no new
+code at all. For a real installation that is the first thing to try,
+because per-projector warp is a solved problem sitting in hardware a
+site is likely already buying.
+
+The sister project [`zyra-project/sphere-sim`](https://github.com/zyra-project/sphere-sim)
+makes a second option real: `packages/sim/src/warp.ts` writes Paul
+Bourke warp-and-blend files — per projector, per node `(x, y, u, v, i)`,
+where `u,v` is the texel that belongs at that node and `i` is the blend
+multiplier. Geometry and blend in one file, deliberately. For a sphere
+those `u,v` are equirectangular coordinates, so **the two projects
+already meet at the frame v1 produces.**
+
+Consuming one is small: parse the text format, build a cols×rows mesh
+(positions from `x,y`, UVs from `u,v`, intensity as a vertex attribute),
+draw it with the equirect frame as texture, skip nodes written
+`-1 -1 -1`. terraviz never models the projector, so the miss-branch
+problem above does not arise — the trace happened offline.
+
+The layering also composes: `cameraOffset` and `split` act on the
+equirect **content**, the warp acts on the rig **geometry**. Orthogonal,
+so operator zoom keeps working through a warped output.
+
+**Two findings from reading sphere-sim that a naive integration would
+get wrong:**
+
+1. **SOS is one framebuffer, not N windows.** `RigCalibration` carries a
+   single shared `framebuffer`, and each projector holds a *normalized
+   viewport rect* into it — "SOS drives all projectors from one X screen
+   split 2x2. Origin is bottom-left". Rungs 9-10 built the opposite:
+   N independent fullscreen windows. Both are legitimate and ours is
+   arguably better on a modern OS, but a calibration file is expressed
+   in theirs, so consuming one means mapping viewport rects onto
+   windows. Getting it wrong silently mis-crops every projector — a
+   failure that reads as "calibration is slightly off" rather than "we
+   misread the file". And bottom-left origin against our top-left is one
+   sign from a vertically mirrored rig.
+2. **An arbitrary surface arrives as a binary sidecar, not more JSON.**
+   `packages/calibration/src/mesh.ts` (`sphere-sim/surface-mesh@1`) sits
+   *beside* the sphere field rather than replacing it, and is
+   deliberately typed arrays: a 100k-triangle model is ~5 MB as
+   `Float64Array` and ~40 MB as JSON text. Rung 10 persists config as
+   JSON in `localStorage`, which is the wrong home for that. A rig
+   config would need a file reference, not an embedded blob.
+
+Note also that a warp file for a **non-sphere** carries the model's own
+UV layout, and `buildWarpExport` refuses a mesh with no UV set. So
+"drop a GLB and drive it from terraviz" additionally requires rendering
+into that model's UV space, which is a different job from what the
+output does today. The sphere path has no such gap.
+
+### The risk to design around
+
+Both halves are currently validated against themselves rather than
+against hardware. sphere-sim's recovery figures are solver-vs-simulator
+with injected noise; its `validation/` directory is explicitly
+"plausibility only — no metric, no gate, no score". And nothing in this
+plan has run on a second monitor. Composing two unvalidated halves
+makes a first-light failure hard to attribute between them.
+
+The cheap mitigation is to make an output able to display a warp file's
+own test pattern, so the warp can be judged before the globe is in it —
+which is also what rung 14's calibration tooling wants anyway.
+
+**Interchange, not a code dependency.** sphere-sim's architecture is a
+boundary lint whose whole purpose is stopping two models from sharing
+implementation; importing it would drag a research instrument into a
+display app's render path. The warp file is what it is for. Consuming a
+standard format also keeps terraviz able to take warps from other
+tools — and MPCDI, which `warp.ts` names as the right second target,
+becomes additive rather than a rewrite.
+
+---
+
 ## Roadmap after MVP
 
 ### Phase 2 — fisheye / dome projection + vector overlays + dome camera-tracking polish
@@ -2377,6 +2523,24 @@ composited sphere. Producing fisheye output is a one-shader
 change — swap `equirectRtt.ts` for `fisheyeRtt.ts` with a
 different `(u,v) → direction` mapping. ~50 LOC, no architecture
 change.
+
+**That estimate holds for a dome and not for a projector**, and the
+distinction was missing when it was written. A dome camera sits at the
+sphere's centre like the equirect one, so it inherits `equirectRtt`'s
+standing assumption — the camera is strictly inside, therefore every
+ray hits, therefore the shader has no miss branch. A projector sits
+*outside*: its rays can miss, and the ones that hit have two
+intersections where the near one is wanted. `MAX_CAMERA_OFFSET = 0.85`
+exists to hold that invariant, so a projector mode changes the module
+rather than parameterising it. See §"Driving other display geometries".
+
+**And for a real rig, prefer consuming a warp file to writing the
+shader at all.** The same section records why: v1's equirect output is
+already what the SOS ecosystem ingests, and `zyra-project/sphere-sim`
+emits Bourke warp-and-blend files whose `u,v` are equirect coordinates.
+That path skips the fisheye maths, the calibration and the blending
+together, and is what the effort estimate below should be weighed
+against.
 
 The off-center camera plumbing (§3.5) already exists from v1
 — the LED sphere uses it as its primary mode — so the dome
@@ -2447,6 +2611,33 @@ Architecture additions:
 This is genuinely ambitious and overlaps with what purpose-
 built planetarium drivers do. **Gated on real-world demand**,
 not a speculative build.
+
+**Most of the above is now a file format rather than a feature.** A
+Bourke warp mesh carries geometry *and* blend per projector, which
+subsumes `srcRect` / `dstRect` / `blendMask` and removes the reason to
+build a blend-mask authoring tool — the calibration solver in
+`zyra-project/sphere-sim` produces the mesh from camera images, which
+is a better answer than dragging blend curves by hand. What survives
+from the list above is per-output fixed-slot binding (unrelated to
+geometry) and per-output colour correction (a projector-gamma problem a
+warp file does not address).
+
+Two things this rung would have to get right, recorded in §"Driving
+other display geometries" and repeated here because this is where they
+would bite:
+
+- A calibration describes **one shared framebuffer with normalized
+  per-projector viewport rects, bottom-left origin**. Rungs 9-10 spawn
+  N independent windows. Mapping between the two is small and silent
+  when wrong — every projector mis-cropped, reading as a calibration
+  error rather than a parsing one.
+- An arbitrary **surface mesh is a typed-array sidecar**, not JSON.
+  Rung 10's persisted config lives in `localStorage`; a 5 MB mesh does
+  not go there. A rig config needs a file reference.
+
+The honest gate remains real-world demand, but the *shape* of the work
+has changed from "build a projector driver" to "consume an interchange
+format and get two coordinate conventions right".
 
 ### Phase 4 — mirrored / cloned mode
 

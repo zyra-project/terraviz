@@ -35,6 +35,7 @@ import {
 } from './services/playlistPlayback'
 import { updateMapControlsPosition } from './ui/mapControlsUI'
 import { initToolsMenu, syncToolsMenuState, syncToolsMenuLayout, pulseBrowseButton } from './ui/toolsMenuUI'
+import { closeOutputUI, initOutputUI, openOutputUI } from './ui/outputUI'
 import { openCreditsPanel } from './ui/creditsPanel'
 import { initChatUI, openChat, openChatSettings, notifyDatasetChanged, showChatTrigger, hideChatTrigger, closeChat, flushPendingGlobeActions } from './ui/chatUI'
 import { loadViewPreferences, saveViewPreferences, type ViewPreferences } from './utils/viewPreferences'
@@ -453,11 +454,28 @@ class InteractiveSphere {
       this.panelStates = Array.from({ length: this.viewports.getPanelCount() }, createPanelState)
       const primary = this.viewports.getPrimary()
       if (!primary) throw new Error('Viewport manager failed to create a primary renderer')
+      // Mirror globe state to any multi-monitor outputs. Returns
+      // synchronously, so the subscription is installed before the
+      // first dataset load below can publish; opening the IPC link and
+      // spawning windows wait for the operator to add an output, so
+      // until then this costs a listener and nothing else.
+      //
+      // Ahead of `initToolsMenu` because the menu decides whether to
+      // render its Outputs entry while it builds its markup, and that
+      // decision reads `available` off this handle.
+      this.multiOutput = startMultiOutput()
+      initOutputUI({ manager: () => this.multiOutput?.ready ?? Promise.resolve(null) })
       initToolsMenu(this.viewports, {
         onSetLayout: (layout) => this.viewports.setLayout(layout),
         onOpenBrowse: () => this.openBrowsePanel(),
         onOpenOrbitSettings: () => openChatSettings(),
         onOpenCredits: (trigger) => openCreditsPanel(this.viewports, trigger),
+        // Desktop-only: on web `startMultiOutput` hands back the shared
+        // inert handle, this is `undefined`, and the menu renders no
+        // Outputs section at all.
+        onOpenOutputs: this.multiOutput.available
+          ? (trigger) => { openOutputUI(trigger) }
+          : undefined,
         onToggleDatasetInfo: (visible) => this.setDatasetInfoVisible(visible),
         onToggleLegend: (visible) => this.setLegendVisible(visible),
         announce: (msg) => this.announce(msg),
@@ -481,12 +499,6 @@ class InteractiveSphere {
         legend: this.viewPrefs.legendVisible,
       })
       initDownloadUI().catch(err => logger.warn('[App] Download UI init failed:', err))
-      // Mirror globe state to any multi-monitor outputs. Returns
-      // synchronously, so the subscription is installed before the
-      // first dataset load below can publish; spawning windows and
-      // opening the IPC link are later rungs, so this costs a
-      // listener and nothing else.
-      this.multiOutput = startMultiOutput()
       // Web-only zip-download dialog (§8.2). Mounting is cheap and
       // safe on desktop too; the opener affordances are the gate.
       initDownloadDialogUI({ announce: (msg) => this.announce(msg) })
@@ -4050,6 +4062,9 @@ class InteractiveSphere {
 
   /** Clean up all resources: video streams, textures, and every viewport renderer. */
   dispose(): void {
+    // Before the handle goes: the panel holds a document-level keydown
+    // listener, and it reads through `this.multiOutput`.
+    closeOutputUI()
     this.multiOutput?.stop()
     this.multiOutput = null
     this.teardownAllPanelResources()

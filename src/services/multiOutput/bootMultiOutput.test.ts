@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Zyra Project
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   resetMultiOutputBootForTests,
@@ -70,6 +70,24 @@ function start(options: Parameters<typeof startMultiOutput>[0]): MultiOutputBoot
   return handle
 }
 
+/**
+ * `restoreOutputs` on the real manager, spied at the prototype.
+ *
+ * The boot module constructs the manager itself — that is what it is
+ * for — so there is no instance to inject into. Stubbing it also keeps
+ * these cases off the persistence path: the default store is
+ * localStorage-backed and happy-dom shares it across files.
+ */
+let restoreSpy = vi.fn(async () => [])
+
+beforeEach(async () => {
+  const mod = await import('./manager')
+  restoreSpy = vi.fn(async () => [])
+  vi.spyOn(mod.MultiOutputManager.prototype, 'restoreOutputs').mockImplementation(
+    restoreSpy as unknown as typeof mod.MultiOutputManager.prototype.restoreOutputs,
+  )
+})
+
 afterEach(() => {
   for (const handle of handles) handle.stop()
   handles = []
@@ -89,6 +107,10 @@ describe('startMultiOutput — disabled', () => {
     // The publisher must be untouched: a listener attached here would be
     // the web bundle paying for a feature it cannot have.
     expect(() => publishGlobeState({ simulationDate: '2026-01-01T00:00:00.000Z' })).not.toThrow()
+  })
+
+  it('reports itself unavailable, so no Outputs entry is offered', () => {
+    expect(start({ isDesktop: false }).available).toBe(false)
   })
 })
 
@@ -162,6 +184,28 @@ describe('startMultiOutput — enabled', () => {
     expect(manager!.currentState().dataset?.id).toBe('BEFORE_STOP')
   })
 
+  it('reports itself available synchronously, before any host resolves', () => {
+    const { createHost } = deferredHost()
+
+    // Synchronous on purpose: the Tools menu reads this while building
+    // its markup. Nothing is released, so the host is still pending.
+    expect(start({ ...DESKTOP, createHost }).available).toBe(true)
+  })
+
+  it('stays available when the host fails — the panel reports that, not the menu', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const createHost = vi.fn(() => Promise.reject(new Error('no tauri here')))
+
+    const handle = start({ ...DESKTOP, createHost })
+
+    // `available` is the desktop gate, not a health check. Flipping it
+    // on a failed host would hide the menu entry that is the only place
+    // an operator could be told outputs are unavailable — and the retry
+    // path means the next open may well succeed.
+    await expect(handle.ready).resolves.toBeNull()
+    expect(handle.available).toBe(true)
+  })
+
   it('degrades to null when the host factory rejects', async () => {
     const createHost = vi.fn(() => Promise.reject(new Error('no tauri here')))
     vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -207,6 +251,34 @@ describe('startMultiOutput — enabled', () => {
     expect(host.listen).not.toHaveBeenCalled()
     expect(host.availableMonitors).not.toHaveBeenCalled()
     expect(host.createWindow).not.toHaveBeenCalled()
+  })
+
+  it('asks the manager to restore, and does not block ready on it', async () => {
+    const { release, createHost } = deferredHost()
+    const handle = start({ ...DESKTOP, createHost })
+    release()
+
+    const manager = await handle.ready
+
+    // Unconditional: the opt-in test lives in the manager, so there is
+    // only one reader of that flag. `ready` resolving without waiting
+    // for the restore is the point — restored outputs are paced apart,
+    // and awaiting them would put that stagger on the boot path.
+    expect(manager).not.toBeNull()
+    expect(restoreSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('survives a restore that rejects', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    restoreSpy.mockRejectedValueOnce(new Error('monitor enumeration failed'))
+    const { release, createHost } = deferredHost()
+
+    const handle = start({ ...DESKTOP, createHost })
+    release()
+
+    // An unhandled rejection here would surface as a boot-time error
+    // for a feature the operator may not even use.
+    await expect(handle.ready).resolves.not.toBeNull()
   })
 
   it('is idempotent — a second call reuses the first link', async () => {

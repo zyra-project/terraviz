@@ -59,6 +59,7 @@ import {
   STATE_TICK_MS,
   isOutputLabel,
   outputLabel,
+  outputLabelIndex,
   type MirroredGlobeState,
   type OutputEvent,
   type OutputMode,
@@ -70,6 +71,13 @@ import {
   projectState,
   type OutputViewSettings,
 } from './stateAggregator'
+import {
+  OUTPUT_RESTORE_STAGGER_MS,
+  createOutputConfigStore,
+  matchMonitorIndex,
+  toPersistedOutput,
+  type OutputConfigStore,
+} from './outputPersistence'
 import { logger } from '../../utils/logger'
 
 /** Where the output bundle lands in the build. `vite.config.ts` roots
@@ -113,6 +121,14 @@ export interface MultiOutputHost {
 }
 
 // --- Output records ---
+
+/** Injectable collaborators. Both default to the real thing; tests
+ *  override them so persistence needs no browser and the restore
+ *  stagger costs no wall-clock. */
+export interface MultiOutputDeps {
+  store?: OutputConfigStore
+  sleep?: (ms: number) => Promise<void>
+}
 
 /** What the operator chose when adding an output. */
 export interface AddOutputOptions {
@@ -160,8 +176,23 @@ export class MultiOutputManager {
   private timer: ReturnType<typeof setInterval> | null = null
   private nextIndex = 1
 
-  constructor(host: MultiOutputHost) {
+  /**
+   * The persisted configuration.
+   *
+   * The manager owns this because it owns `records`, which is exactly
+   * what gets persisted. Any other owner would have to be told when a
+   * record changes, and every call site that forgot would be a config
+   * that silently stopped tracking reality.
+   */
+  private readonly store: OutputConfigStore
+  /** Injectable so the restore stagger is testable without spending it. */
+  private readonly sleep: (ms: number) => Promise<void>
+
+  constructor(host: MultiOutputHost, deps: MultiOutputDeps = {}) {
     this.host = host
+    this.store = deps.store ?? createOutputConfigStore()
+    this.sleep =
+      deps.sleep ?? (ms => new Promise<void>(resolve => setTimeout(resolve, ms)))
   }
 
   /**
@@ -231,7 +262,35 @@ export class MultiOutputManager {
       )
     }
 
-    const label = outputLabel(this.nextIndex++)
+    const record = await this.spawn(
+      outputLabel(this.nextIndex++),
+      monitor,
+      options.mode ?? 'sos-equirect',
+      { ...DEFAULT_VIEW_SETTINGS, ...definedOnly(options.view) },
+    )
+    this.persist()
+    return record
+  }
+
+  /**
+   * Create, place, reveal and record one output window.
+   *
+   * Shared by `addOutput` and `restoreOutputs` so a restored output goes
+   * through the exact spawn sequence a fresh one does. Two copies of a
+   * sequence whose *order* is the correctness (see the module header)
+   * is two places for that order to drift.
+   *
+   * Takes a `label` rather than minting one, because restore reuses the
+   * label an output had last launch: `output-1` then keeps meaning the
+   * same display across launches, which is what makes it worth anything
+   * in a log or in rung 13's health badges.
+   */
+  private async spawn(
+    label: string,
+    monitor: OutputMonitor,
+    mode: OutputMode,
+    view: OutputViewSettings,
+  ): Promise<OutputRecord> {
     const handle = await this.host.createWindow(label, OUTPUT_ENTRY_URL)
 
     try {
@@ -256,12 +315,8 @@ export class MultiOutputManager {
 
     const record: OutputRecord = {
       label,
-      mode: options.mode ?? 'sos-equirect',
-      // Spread-with-`undefined` would let `{ trackCamera: undefined }`
-      // overwrite the default with `undefined` — the same hazard
-      // `foldKey` guards against in the aggregator, and it would pin the
-      // output to a centred camera for no stated reason.
-      view: { ...DEFAULT_VIEW_SETTINGS, ...definedOnly(options.view) },
+      mode,
+      view,
       monitor,
       ready: false,
       lastEvent: null,
@@ -289,6 +344,7 @@ export class MultiOutputManager {
     }
     this.handles.delete(label)
     this.records.delete(label)
+    this.persist()
   }
 
   async closeAll(): Promise<void> {
@@ -310,6 +366,11 @@ export class MultiOutputManager {
     const record = this.records.get(label)
     if (!record) return
     record.view = { ...record.view, ...view }
+    // Persisted before the ready gate: the setting is the operator's
+    // choice whether or not the output has announced itself yet, and a
+    // toggle flipped during boot that vanished at relaunch would be a
+    // very hard thing to report.
+    this.persist()
     if (!record.ready) return
     const { view: shared } = this.aggregator.current()
     // `bump()`, not `sequence()`: this is a new event for this output,
@@ -321,6 +382,92 @@ export class MultiOutputManager {
       full: false,
       state: projectState({ view: shared }, record.view),
     })
+  }
+
+  /**
+   * Recreate the outputs a previous launch left configured.
+   *
+   * Returns without enumerating a single monitor or opening the IPC
+   * link unless the operator opted in *and* there is something to
+   * restore — the plan's boot flow step 1, and the reason this is safe
+   * to call unconditionally at boot.
+   *
+   * Every failure is per-output. A monitor that has gone, or one that
+   * matches by name alone, is skipped and logged; a window that refuses
+   * to spawn is logged and the rest still come up. An installation with
+   * three projectors should not lose all three because one was
+   * unplugged.
+   */
+  async restoreOutputs(): Promise<OutputRecord[]> {
+    const config = this.store.read()
+    if (!config.autoRestoreOnLaunch || config.outputs.length === 0) return []
+
+    // Before the first spawn, for the same reason the panel awaits it
+    // there: a restored output emits `output_ready` as it boots, and a
+    // listener installed afterwards races the window it is for.
+    await this.start()
+
+    const monitors = await this.host.availableMonitors()
+    const restored: OutputRecord[] = []
+    for (const output of config.outputs) {
+      const index = matchMonitorIndex(output, monitors)
+      if (index === null) {
+        logger.warn(
+          `[multiOutput] not restoring ${output.label}: no monitor matches ` +
+            `${output.monitorName ?? '(unnamed)'} at ` +
+            `${output.monitorOrigin.x},${output.monitorOrigin.y}`,
+        )
+        continue
+      }
+      // Paced, not fired together: startup contention is the one cost
+      // the spike could actually measure. Only *between* spawns, so a
+      // single restored output pays nothing.
+      if (restored.length > 0) await this.sleep(OUTPUT_RESTORE_STAGGER_MS)
+      try {
+        restored.push(
+          await this.spawn(output.label, monitors[index], output.mode, {
+            trackCamera: output.trackOperatorCamera,
+            split: output.split,
+          }),
+        )
+      } catch (err) {
+        logger.warn(`[multiOutput] could not restore ${output.label}:`, err)
+      }
+    }
+
+    // Past every label now in use, so the operator's next Add cannot
+    // mint one that collides with a restored window.
+    for (const record of restored) {
+      const index = outputLabelIndex(record.label)
+      if (index !== null) this.nextIndex = Math.max(this.nextIndex, index + 1)
+    }
+    // Rewrites the file with exactly what came up. An entry that could
+    // not be restored is therefore dropped rather than retried forever
+    // — the operator re-picks the display, which is also the only way
+    // they learn it moved.
+    this.persist()
+    return restored
+  }
+
+  /** Write the current records to the persisted config, preserving the
+   *  operator's opt-in flag. */
+  private persist(): void {
+    const config = this.store.read()
+    this.store.write({
+      ...config,
+      outputs: [...this.records.values()].map(r =>
+        toPersistedOutput(r.label, r.monitor, r.mode, r.view),
+      ),
+    })
+  }
+
+  /** Whether outputs come back on the next launch. */
+  isRestoreOnLaunch(): boolean {
+    return this.store.read().autoRestoreOnLaunch
+  }
+
+  setRestoreOnLaunch(enabled: boolean): void {
+    this.store.write({ ...this.store.read(), autoRestoreOnLaunch: enabled })
   }
 
   /**
