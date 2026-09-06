@@ -2,7 +2,12 @@
 
 **Status:** Analysis and implementation proposal
 **Audit date:** 2026-09-03
+**Last reviewed:** 2026-09-06
 **Standards target:** STAC core 1.1.0; STAC API 1.0.0 only in a later API phase
+
+**Revisit when:** Phase 4 federation ships; a deployed D1 catalog materially
+diverges from the checked-in SOS snapshot; a stable STAC core release supersedes
+1.1.0; or the native-wire versus separate-projection decision changes.
 
 ## Purpose
 
@@ -170,11 +175,17 @@ asset references into URLs. It also:
 - flattens categories, keywords, related resources, and developers under
   `enriched`.
 
-The current TypeScript `DatasetRow` and `WireDataset` declarations do not
-surface all columns already present in the schema, including several media
-intrinsics, checksums, sphere thumbnails, and rendition details. A STAC
-adapter built by translating `WireDataset` would therefore discard useful
-metadata before mapping starts.
+The current TypeScript types expose different subsets of the stored metadata.
+`DatasetRow` carries `content_digest`, `source_digest`, and both sphere
+thumbnail references, but not `auxiliary_digests` or the media intrinsics
+(`width`, `height`, render dimensions, color space, bit depth, HDR transfer,
+alpha fields, and primary codec). `WireDataset` omits those intrinsics, the
+sphere thumbnails, `content_digest`, and auxiliary digests; `source_digest`
+appears only as the conditional image-sequence `framesDigest`. The backend has
+no row type or reader for `dataset_renditions` at all. A STAC adapter built by
+translating `WireDataset` would therefore discard useful metadata before
+mapping starts, while rendition support requires a new read path rather than
+simple plumbing.
 
 The STAC read model should select the necessary D1 columns and joins directly,
 or introduce a richer internal row type shared by the STAC serializers. It
@@ -186,7 +197,9 @@ should not depend on the native public response as an intermediate format.
 to the rest of the application. During that process it can:
 
 - normalize `image/jpg` and `images/jpg` to `image/jpeg`;
-- replace a missing bounding box with the whole-world box for map display;
+- replace a missing bounding box with the whole-world box on every runtime
+  `Dataset`, so all downstream consumers lose the distinction between unknown
+  and global coverage;
 - parse and reject malformed data-encoding sidecars;
 - restate physical units into more readable display units;
 - inject bundled sample tours;
@@ -214,7 +227,7 @@ database.
 | Rows with an abstract | 88 (43.1%) |
 | Rows with start and end fields | 85 (41.7%) |
 | Rows with a period | 73 (35.8%) |
-| Rows with bounding metadata | 27 (13.2%) |
+| Rows with bounding metadata | 27 (13.2%): 26 whole-world, 1 regional |
 | Rows with probing metadata | 19 (9.3%) |
 | Rows explicitly naming a celestial body | 22 (10.8%) |
 | Rows with a thumbnail | 200 (98.0%) |
@@ -242,9 +255,9 @@ paths.
 
 ### Legacy quality risks
 
-1. **Sparse measured extent.** Only 27 rows carry bounding metadata. The
-   viewer's global fallback cannot be reused as evidence that the other rows
-   cover the world.
+1. **Sparse measured extent.** Only 27 rows carry bounding metadata; 26 are the
+  exact whole-world box and only one is regional. The runtime's global
+  fallback cannot be reused as evidence that the other rows cover the world.
 2. **Sparse temporal meaning.** A valid STAC Item requires a searchable time or
    a complete interval. Publication and import timestamps are not substitutes
    for the time represented by the data.
@@ -366,8 +379,9 @@ native grid; they do not change the GeoJSON coordinate system.
 | `node_identity.node_id` | Root Catalog `id` | Stable node identity |
 | `node_identity.display_name` | Root Catalog `title` | Direct |
 | `node_identity.description` | Root Catalog `description` | Supply a non-empty fallback if absent |
-| Dataset `id` | Item `id` | Direct for one-item products; derive immutable revision/frame IDs when split |
-| Dataset `slug` | Collection `id` input | Prefix with a stable node namespace for global uniqueness |
+| Dataset `id` | Collection `id` input | Prefix the immutable ULID with a stable node namespace for global uniqueness |
+| Immutable revision or frame identity | Item `id` | Use a persisted source identity; do not derive it from a mutable slug |
+| Dataset `slug` | Collection alias URL input | Keep human-readable discovery URLs separate from canonical identity |
 | `title` | Collection `title`; Item `properties.title` | Direct |
 | `abstract` | Collection `description`; Item `properties.description` | Collection description must be non-empty |
 | `legacy_id` | `terraviz:legacy_id` | Preserve migration provenance; do not use as canonical identity |
@@ -551,7 +565,7 @@ shape, not generated output from a current record.
   "stac_extensions": [
     "https://stac-extensions.github.io/scientific/v1.0.0/schema.json"
   ],
-  "id": "zyra-project-noaa-ssta",
+  "id": "zyra-project-01JXYZ",
   "title": "Sea Surface Temperature Anomaly",
   "description": "A time series of global sea surface temperature anomaly visualizations.",
   "keywords": ["ocean", "sea surface temperature", "anomaly"],
@@ -585,7 +599,7 @@ shape, not generated output from a current record.
   "links": [
     {
       "rel": "self",
-      "href": "https://example.org/api/v1/stac/collections/zyra-project-noaa-ssta",
+      "href": "https://example.org/api/v1/stac/collections/zyra-project-01JXYZ",
       "type": "application/json"
     },
     {
@@ -600,7 +614,7 @@ shape, not generated output from a current record.
     },
     {
       "rel": "item",
-      "href": "https://example.org/api/v1/stac/collections/zyra-project-noaa-ssta/items/01JXYZ",
+      "href": "https://example.org/api/v1/stac/collections/zyra-project-01JXYZ/items/01KREV",
       "type": "application/geo+json"
     }
   ]
@@ -613,11 +627,9 @@ shape, not generated output from a current record.
 {
   "type": "Feature",
   "stac_version": "1.1.0",
-  "stac_extensions": [
-    "https://terraviz.zyra-project.org/schema/stac/terraviz/v1.0.0/schema.json"
-  ],
-  "id": "01JXYZ",
-  "collection": "zyra-project-noaa-ssta",
+  "stac_extensions": [],
+  "id": "01KREV",
+  "collection": "zyra-project-01JXYZ",
   "bbox": [-180, -90, 180, 90],
   "geometry": {
     "type": "Polygon",
@@ -632,15 +644,12 @@ shape, not generated output from a current record.
     "created": "2026-05-16T18:10:00Z",
     "updated": "2026-05-16T18:12:00Z",
     "title": "Sea Surface Temperature Anomaly",
-    "keywords": ["ocean", "sea surface temperature", "anomaly"],
-    "terraviz:cadence": "PT1H",
-    "terraviz:render_encoding": "data-luma",
-    "terraviz:playback_fps": 30
+    "keywords": ["ocean", "sea surface temperature", "anomaly"]
   },
   "links": [
     {
       "rel": "self",
-      "href": "https://example.org/api/v1/stac/collections/zyra-project-noaa-ssta/items/01JXYZ",
+      "href": "https://example.org/api/v1/stac/collections/zyra-project-01JXYZ/items/01KREV",
       "type": "application/geo+json"
     },
     {
@@ -650,12 +659,12 @@ shape, not generated output from a current record.
     },
     {
       "rel": "parent",
-      "href": "https://example.org/api/v1/stac/collections/zyra-project-noaa-ssta",
+      "href": "https://example.org/api/v1/stac/collections/zyra-project-01JXYZ",
       "type": "application/json"
     },
     {
       "rel": "collection",
-      "href": "https://example.org/api/v1/stac/collections/zyra-project-noaa-ssta",
+      "href": "https://example.org/api/v1/stac/collections/zyra-project-01JXYZ",
       "type": "application/json"
     },
     {
@@ -686,6 +695,11 @@ shape, not generated output from a current record.
   }
 }
 ```
+
+The Item is deliberately core-only: it does not declare the proposed
+Terraviz extension or include `terraviz:*` fields because that schema URL is
+not published yet. Add those fields and the version-pinned extension URI
+together once the extension exists and validates.
 
 ## Proposed implementation architecture
 
@@ -881,7 +895,8 @@ The key design decisions to resolve before implementation are:
 1. Which existing rows are durable products, atomic assets, or presentation
    artifacts?
 2. What source or curator action is sufficient to declare global coverage?
-3. How are Collection IDs kept stable across slug changes and federation?
+3. What stable node namespace prefixes the immutable dataset ULID in a
+  Collection ID, and which alias links preserve old slug URLs?
 4. What creates an immutable Item revision for a workflow-published dataset?
 5. Which rendition is primary, and which are alternates?
 6. Are records without meaningful represented time omitted, represented as
