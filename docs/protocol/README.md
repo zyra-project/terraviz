@@ -99,16 +99,12 @@ SCHEMA_BASE_URL=https://terraviz.example.org/schema/v1 npm run gen:protocol-sche
   what Directive 2 warns against. It joins this directory in the same
   PR that lands the federation feed routes (federation-scoping.md §7
   Directive 2).
-- **STAC alignment.** Directive 3 commits the wire `Dataset` to
-  becoming a valid [STAC](https://stacspec.org/) Item profile in the
-  Phase 4 serializer (`type`, `stac_version`, `bbox`, `geometry`,
-  `properties.datetime`, `assets[]`, `links[]`, `properties.terraviz:*`).
-  Those are **additive** fields — when they land, `dataset.schema.json`
-  grows and the CHANGELOG notes it; today's schema captures the
-  pre-STAC reality. The repository-grounded
-  [metadata and STAC audit](../metadata/README.md) evaluates that plan,
-  maps the current fields to STAC 1.1.0, and recommends a separate
-  projection so unknown extent and resource granularity remain explicit.
+- **STAC projection.** The repository-grounded
+  [metadata and STAC audit](../metadata/README.md) supersedes Directive 3's
+  earlier native-wire plan. `WireDataset`, `/api/v1/catalog`, signed
+  federation feeds, and their `schema/v1` contracts remain native. Separate
+  STAC 1.1.0 routes and schemas project eligible D1 records as explicit
+  Collections and Items, so `dataset.schema.json` does not gain STAC fields.
 
 ## See also
 
