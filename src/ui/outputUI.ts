@@ -3,7 +3,7 @@
 
 /**
  * The Outputs panel (Tools → Outputs) — `docs/MULTI_MONITOR_PLAN.md`
- * §"Delivery plan" rung 9, and the first commit of the multi-monitor
+ * §"Delivery plan" rungs 9-10, and the first part of the multi-monitor
  * feature an operator can see.
  *
  * Rungs 1-8 built a manager that can spawn output windows, a protocol
@@ -31,6 +31,16 @@
  * `close()` rejected is still out there, and cutting the heartbeat would
  * strand it on its last frame with no way back. `dispose()` already
  * tears the link down through the boot handle.
+ *
+ * **The "Restore outputs on launch" opt-in (rung 10) is off by default,
+ * and that is a decision rather than caution.** An operator who added an
+ * output once, on a laptop they later took home, should not have a
+ * window try to open on a projector that is not there. It is also what
+ * keeps the plan's "an install that never enabled outputs pays nothing"
+ * true one step further out: with it off, boot enumerates no monitor and
+ * opens no IPC link. The panel only reads and writes the flag — the
+ * restore itself, and the decision not to run one, belong to the manager
+ * so there is a single reader of it.
  */
 
 import { t } from '../i18n'
