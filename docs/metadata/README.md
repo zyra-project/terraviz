@@ -452,8 +452,11 @@ Before the first public route exposes that column, explicitly describe its
 public purpose in both the `init-node --description` CLI help and
 [the self-hosting guide](../SELF_HOSTING.md). Include an upgrade notice telling
 existing operators to review and replace or clear any internal prose before
-enabling the publishing release. The current help and guide do not give that
-warning; this is a publication prerequisite, not a claim that they already do.
+enabling the publishing release. Phase 0 now supplies that warning in CLI
+help and before an `init-node` write, with review/replace/clear instructions in
+[the upgrade notice](../SELF_HOSTING.md#91-existing-nodes-review-descriptions-before-stac-publication).
+The eventual publishing release must repeat the notice in its upgrade guidance;
+the preparation work does not itself enable public exposure.
 Do not silently expose old values on upgrade. This notice is separate from
 the approval machinery for private `node_profile` fields.
 
@@ -1002,6 +1005,15 @@ part of Phase 1's critical path. This is a plan decision, not a claim that the
 field is already public or that publication code exists.
 
 ### Phase 0: policy and remediation
+
+**Implementation progress (2026-09-11):** the first slice implements item 8's
+preparation notices in CLI help/runtime output and the self-hosting guide,
+including the SQL bootstrap path. Tests cover authenticated inspection,
+replacement, clearing, malformed CLI input, and the unchanged anonymous
+well-known response. No storage, public schema, or STAC route was added.
+Items 1–7 remain outstanding, and the Phase 2 release must repeat the upgrade
+notice before publishing existing descriptions. This is not completion of
+Phase 0 as a whole or permission to begin public STAC exposure.
 
 1. Add explicit metadata provenance for bounding boxes: measured, declared
    global, imported, inferred, or unknown.

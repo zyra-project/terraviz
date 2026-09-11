@@ -107,4 +107,22 @@ describe('GET /.well-known/terraviz.json', () => {
     expect(second.status).toBe(304)
     expect(second.headers.get('etag')).toBe(etag)
   })
+
+  it('does not publish stored descriptions or change the public ETag when they change', async () => {
+    const sqlite = seedFixtures({ count: 0 })
+    try {
+      const env = { CATALOG_DB: asD1(sqlite), CATALOG_KV: makeKV() }
+      sqlite.prepare('UPDATE node_identity SET description = ?').run('Internal legacy prose')
+      const first = await onRequestGet(makeCtx({ env }))
+      const firstBody = await readJson<WellKnownBody>(first)
+      expect(firstBody).not.toHaveProperty('description')
+      expect(JSON.stringify(firstBody)).not.toContain('Internal legacy prose')
+      sqlite.prepare('UPDATE node_identity SET description = ?').run('Public ocean-science catalog.')
+      const second = await onRequestGet(makeCtx({ env }))
+      expect(await readJson<WellKnownBody>(second)).toEqual(firstBody)
+      expect(second.headers.get('etag')).toBe(first.headers.get('etag'))
+    } finally {
+      sqlite.close()
+    }
+  })
 })

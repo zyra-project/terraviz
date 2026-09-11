@@ -27,6 +27,11 @@
  * `npm run gen:node-key`) when present. It is required the first time
  * a node is provisioned; on a later update it can be omitted to keep
  * the existing key.
+ *
+ * Description is intended public metadata for the future STAC
+ * Catalog, not private authoring context. Until that route ships,
+ * it remains on the authenticated publisher API only. Omitting
+ * --description clears the stored value (unlike --public-key).
  */
 
 import { readFileSync } from 'node:fs'
@@ -74,6 +79,16 @@ export async function runInitNode(ctx: CommandContext): Promise<number> {
     return 2
   }
 
+  // A bare --description (or --no-description) parses as a boolean.
+  // Do not mistake it for omission and silently clear existing prose.
+  if (ctx.args.options.description !== undefined && description === undefined) {
+    ctx.stderr.write(
+      '--description requires a text value. Use --description="public text" ' +
+        'to replace it, or omit --description to clear it.\n',
+    )
+    return 2
+  }
+
   // Resolve the public key: explicit flag wins; otherwise read the
   // file (an explicitly-named file that's missing is an error; the
   // default file being absent is fine — it just means "update, keep
@@ -99,6 +114,17 @@ export async function runInitNode(ctx: CommandContext): Promise<number> {
         return 2
       }
     }
+  }
+
+  // Keep notices off stdout so --json remains machine-readable, and
+  // never echo potentially internal legacy prose into the warning.
+  ctx.stderr.write(
+    'Notice: node descriptions are intended public metadata for the future STAC Catalog. ' +
+      'Do not include secrets or internal prose; this release does not publish the field. ' +
+      'Review existing values before upgrading to a release that exposes STAC.\n',
+  )
+  if (description === undefined) {
+    ctx.stderr.write('Notice: omitting --description clears any stored node description.\n')
   }
 
   const result = await ctx.client.setNodeIdentity<IdentityEnvelope>({

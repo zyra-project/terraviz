@@ -727,6 +727,14 @@ Commands:
                                       default; the key is required on first
                                       provision. Needs an admin or service-token
                                       auth (the same token import-snapshot uses).
+                                      --description is intended public metadata
+                                      for the future STAC Catalog (max 2048 chars).
+                                      No secrets or internal prose. This release
+                                      does not publish it; review existing values
+                                      before upgrading to one that does.
+                                      Omitting --description clears the stored
+                                      description; omitting --contact clears the
+                                      contact email. See SELF_HOSTING Phase 9.1.
 
   import-snapshot [--list=<path>] [--enriched=<path>] [--dry-run]
                                       One-shot bulk import of the legacy SOS
