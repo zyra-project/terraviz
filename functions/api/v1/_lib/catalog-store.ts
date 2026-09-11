@@ -20,6 +20,7 @@
  */
 
 import { newUlid } from './ulid'
+import type { BboxProvenance, ResourceKind, TemporalSemantics } from './validators'
 
 export interface DatasetRow {
   id: string
@@ -75,7 +76,8 @@ export interface DatasetRow {
   /** Geographic bounding box (NSWE in degrees) for the dataset's
    * spatial extent. Phase 3d promoted these from the legacy
    * `bounding_variables` JSON column to typed REALs; consumers
-   * MUST read the typed fields. NULL on rows with global extent.
+  * MUST read the typed fields. NULL means unknown extent, NOT
+  * measured or declared global coverage.
    * Validation: n/s in [-90, 90], w/e in [-180, 180], n >= s.
    * The SPA's regional projection feature (Phase 3e) wraps the
    * dataset texture to this bbox; rows with all four NULL get
@@ -84,6 +86,13 @@ export interface DatasetRow {
   bbox_s: number | null
   bbox_w: number | null
   bbox_e: number | null
+  /** Internal annotations, also readable through the authenticated publisher
+   * detail's dataset row. Never added to native WireDataset. */
+  bbox_provenance: BboxProvenance
+  bbox_evidence: string | null
+  temporal_semantics: TemporalSemantics
+  temporal_evidence: string | null
+  resource_kind: ResourceKind
   /** Celestial body the dataset visualises. NULL means Earth (the
    * common case). Non-Earth values surface as a SPA hint to swap
    * the base globe texture (Phase 3e). Verbatim SOS strings —

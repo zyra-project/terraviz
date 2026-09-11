@@ -20,7 +20,7 @@
  *   - retractDataset stamps retracted_at + invalidates KV.
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { PublisherRow } from './publisher-store'
 import {
   canMutateDataset,
@@ -37,11 +37,14 @@ import {
   retractDataset,
   updateDataset,
 } from './dataset-mutations'
-import { asD1, makeKV, seedFixtures } from './test-helpers'
+import { asD1, makeCtx, makeKV, seedFixtures } from './test-helpers'
+import type { DatasetDraftBody } from './validators'
+import { onRequestGet as getPublisherDetail } from '../publish/datasets/[id]'
 import { CapturingJobQueue, SyncJobQueue } from './job-queue'
 import { SNAPSHOT_KEY } from './snapshot'
 import { __clearMockStore, queryEmbedding, type VectorizeEnv } from './vectorize-store'
 import { embedDatasetText } from './embeddings'
+import { abandonTranscoding, revertTranscodingStamp, stampTranscodingForVideoSource, type AssetUploadRow } from './asset-uploads'
 
 const ADMIN: PublisherRow = {
   id: 'PUB-ADMIN',
@@ -76,6 +79,359 @@ function setupEnv() {
   const env = { CATALOG_DB: asD1(sqlite), CATALOG_KV: makeKV() }
   return { sqlite, env }
 }
+
+describe('metadata provenance persistence and PATCH merge', () => {
+  const world = { n: 90, s: -90, w: -180, e: 180 }
+  const regional = { n: 40, s: 20, w: 170, e: -170 }
+  const assertion: DatasetDraftBody = {
+    title: 'Annotated source', format: 'image/png', data_ref: 'url:https://example.com/data.png',
+    license_statement: 'Source license statement',
+    bounding_box: world, bbox_provenance: 'declared_global', bbox_evidence: 'Source specifies a global domain',
+    start_time: '2024-02-29T00:00:00Z', end_time: '2024-03-01T00:00:00Z',
+    temporal_semantics: 'represented', temporal_evidence: 'Source observation times', resource_kind: 'product',
+  }
+  async function create(body: DatasetDraftBody = assertion) {
+    const { env, sqlite } = setupEnv()
+    const result = await createDataset(env, PUBLISHER, body)
+    if (!result.ok) throw new Error(JSON.stringify(result.errors))
+    return { env, sqlite, row: result.dataset, id: result.dataset.id }
+  }
+
+  it('defaults even global-looking and timestamped new rows to unknown', async () => {
+    const { env, id, row } = await create({
+      title: 'Legacy source', format: 'tour/json', bounding_box: world,
+      start_time: '2024-02-29T00:00:00Z', end_time: '2024-03-01T00:00:00Z', period: 'P1D',
+      data_ref: 'url:https://example.com/tour.json', license_statement: 'Native license',
+    })
+    expect(row).toMatchObject({ bbox_provenance: 'unknown', bbox_evidence: null, temporal_semantics: 'unknown', temporal_evidence: null, resource_kind: 'unknown' })
+    expect(await publishDataset(env, id)).toMatchObject({ ok: true })
+    const published = await getDatasetById(env.CATALOG_DB, id)
+    expect(published?.published_at).toBeTruthy()
+    expect(published).toMatchObject({ temporal_semantics: 'unknown', start_time: row.start_time, end_time: row.end_time, period: 'P1D' })
+  })
+
+  it.each(['measured', 'imported', 'inferred', 'declared_global'] as const)('persists explicit %s assertions and reads them on the authenticated detail row', async bbox_provenance => {
+    const { env, id } = await create({ ...assertion, bbox_provenance })
+    const context = makeCtx<'id'>({ env, params: { id } })
+    context.data = { publisher: PUBLISHER }
+    const response = await getPublisherDetail(context)
+    expect(response.status).toBe(200)
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store')
+    expect(await response.json()).toMatchObject({ dataset: {
+      bbox_provenance, bbox_evidence: assertion.bbox_evidence, temporal_semantics: 'represented',
+      temporal_evidence: assertion.temporal_evidence, resource_kind: 'product', can_edit: true,
+    } })
+  })
+
+  it('preserves assertions on unrelated patches and unchanged bounds/time submissions', async () => {
+    const { env, id } = await create()
+    const result = await updateDataset(env, PUBLISHER, id, { title: 'Renamed dataset', bounding_box: world, start_time: assertion.start_time, end_time: assertion.end_time })
+    expect(result).toMatchObject({ ok: true, dataset: { title: 'Renamed dataset', bbox_provenance: 'declared_global', bbox_evidence: assertion.bbox_evidence, temporal_semantics: 'represented', temporal_evidence: assertion.temporal_evidence } })
+  })
+
+  it('allows assertions against existing bounds/time/evidence rather than requiring a full PATCH', async () => {
+    const { env, id } = await create({ ...assertion, bbox_provenance: 'unknown', temporal_semantics: 'unknown' })
+    const result = await updateDataset(env, PUBLISHER, id, { bbox_provenance: 'measured', temporal_semantics: 'represented' })
+    expect(result).toMatchObject({ ok: true, dataset: { bbox_provenance: 'measured', temporal_semantics: 'represented' } })
+  })
+
+  it.each([
+    { bounding_box: regional, bbox_provenance: 'declared_global' },
+    { bounding_box: null, bbox_provenance: 'measured' },
+    { bbox_evidence: null }, { bbox_evidence: '' },
+    { temporal_evidence: null }, { temporal_evidence: '  ' },
+    { start_time: null, temporal_semantics: 'represented' },
+    { end_time: null, temporal_semantics: 'represented' },
+    { end_time: '2023-01-01T00:00:00Z', temporal_semantics: 'represented' },
+    { start_time: '2024-02-30T00:00:00Z', temporal_semantics: 'represented' },
+  ] satisfies DatasetDraftBody[])('rejects invalid merged claims atomically: %j', async patch => {
+    const { env, id, row } = await create()
+    const result = await updateDataset(env, PUBLISHER, id, { ...patch, title: 'Must not persist', tags: ['must-not-persist'] })
+    expect(result).toMatchObject({ ok: false, status: 400 })
+    expect(await getDatasetById(env.CATALOG_DB, id)).toEqual(row)
+    expect(await env.CATALOG_DB.prepare('SELECT * FROM dataset_tags WHERE dataset_id = ?').bind(id).all()).toMatchObject({ results: [] })
+  })
+
+  it('invalidates spatial claims on changed bounds even if evidence alone is supplied', async () => {
+    const { env, id } = await create()
+    const result = await updateDataset(env, PUBLISHER, id, { bounding_box: regional, bbox_evidence: 'Cannot retain this without reasserting provenance' })
+    expect(result).toMatchObject({ ok: true, dataset: { bbox_n: 40, bbox_s: 20, bbox_w: 170, bbox_e: -170, bbox_provenance: 'unknown', bbox_evidence: null, temporal_semantics: 'represented' } })
+  })
+
+  it.each([
+    { start_time: '2024-03-01T00:00:00Z' }, { end_time: '2024-03-02T00:00:00Z' },
+    { start_time: null }, { end_time: null }, { period: 'PT1H' },
+  ] satisfies DatasetDraftBody[])('invalidates temporal claims/evidence on changed time: %j', async patch => {
+    const { env, id } = await create()
+    const result = await updateDataset(env, PUBLISHER, id, { ...patch, temporal_evidence: 'Not a renewed assertion' })
+    expect(result).toMatchObject({ ok: true, dataset: { temporal_semantics: 'unknown', temporal_evidence: null, bbox_provenance: 'declared_global' } })
+  })
+
+  it('null-clears whole bounds without inventing global and clears all enum annotations to unknown', async () => {
+    const { env, id } = await create()
+    expect(await updateDataset(env, PUBLISHER, id, { bounding_box: null })).toMatchObject({ ok: true, dataset: { bbox_n: null, bbox_s: null, bbox_w: null, bbox_e: null, bbox_provenance: 'unknown', bbox_evidence: null } })
+    expect(await updateDataset(env, PUBLISHER, id, { bbox_provenance: null, temporal_semantics: null, resource_kind: null })).toMatchObject({ ok: true, dataset: { bbox_provenance: 'unknown', bbox_evidence: null, temporal_semantics: 'unknown', temporal_evidence: null, resource_kind: 'unknown', start_time: assertion.start_time, end_time: assertion.end_time } })
+  })
+
+  it('rejects partial box clears instead of erasing the other corners', async () => {
+    const { env, id, row } = await create()
+    const patch = { bounding_box: { n: null } } as unknown as DatasetDraftBody
+    expect(await updateDataset(env, PUBLISHER, id, patch)).toMatchObject({ ok: false, status: 400 })
+    expect(await getDatasetById(env.CATALOG_DB, id)).toEqual(row)
+  })
+
+  it('never fills missing corners or asserts provenance for old unknown rows', async () => {
+    const { env, id, sqlite } = await create({ title: 'Unknown domain', format: 'image/png' })
+    sqlite.prepare('UPDATE datasets SET bbox_n = 20 WHERE id = ?').run(id)
+    expect(await updateDataset(env, PUBLISHER, id, { title: 'Still unknown' })).toMatchObject({ ok: true, dataset: { bbox_n: 20, bbox_s: null, bbox_w: null, bbox_e: null, bbox_provenance: 'unknown' } })
+    expect(await updateDataset(env, PUBLISHER, id, { bbox_provenance: 'imported', bbox_evidence: 'Incomplete source' })).toMatchObject({ ok: false, status: 400 })
+  })
+
+  it('allows reasserting valid replacement metadata with evidence and classifying presentations', async () => {
+    const { env, id } = await create()
+    const result = await updateDataset(env, PUBLISHER, id, {
+      bounding_box: regional, bbox_provenance: 'measured', bbox_evidence: '  New spatial source  ',
+      start_time: '2024-03-01T00:00:00Z', temporal_semantics: 'represented', temporal_evidence: 'New instant source',
+      resource_kind: 'presentation',
+    })
+    expect(result).toMatchObject({ ok: true, dataset: { bbox_provenance: 'measured', bbox_evidence: 'New spatial source', temporal_semantics: 'represented', temporal_evidence: 'New instant source', resource_kind: 'presentation' } })
+  })
+
+  it('blocks a metadata assertion if a concurrent writer changes its validation inputs', async () => {
+    const { env, id } = await create()
+    const prepare = env.CATALOG_DB.prepare.bind(env.CATALOG_DB)
+    const spy = vi.spyOn(env.CATALOG_DB, 'prepare').mockImplementation(sql => {
+      if (sql.startsWith('UPDATE datasets SET bbox_provenance')) {
+        env.CATALOG_DB.raw().prepare('UPDATE datasets SET bbox_n = 50 WHERE id = ?').run(id)
+      }
+      return prepare(sql)
+    })
+    try {
+      expect(await updateDataset(env, PUBLISHER, id, { bbox_provenance: 'declared_global' })).toMatchObject({ ok: false, status: 409, errors: [expect.objectContaining({ code: 'concurrent_update' })] })
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it.each([
+    { data_ref: 'url:https://example.com/different.png' },
+    { format: 'image/jpeg' },
+  ] satisfies DatasetDraftBody[])('resets source annotations and digests on an explicit identity change: %j', async patch => {
+    const { env, sqlite, id } = await create()
+    sqlite.prepare('UPDATE datasets SET source_digest = ?, content_digest = ? WHERE id = ?')
+      .run('sha256:old-source', 'sha256:old-content', id)
+    expect(await updateDataset(env, PUBLISHER, id, patch)).toMatchObject({ ok: true, dataset: {
+      bbox_provenance: 'unknown', bbox_evidence: null,
+      temporal_semantics: 'unknown', temporal_evidence: null, resource_kind: 'unknown',
+      source_digest: null, content_digest: null,
+      bbox_n: 90, start_time: assertion.start_time, end_time: assertion.end_time,
+    } })
+  })
+
+  it('preserves assertions and verified digests on an unchanged source submission', async () => {
+    const { env, sqlite, id } = await create()
+    sqlite.prepare('UPDATE datasets SET source_digest = ? WHERE id = ?').run('sha256:source', id)
+    expect(await updateDataset(env, PUBLISHER, id, { data_ref: assertion.data_ref, format: assertion.format }))
+      .toMatchObject({ ok: true, dataset: {
+        bbox_provenance: 'declared_global', bbox_evidence: assertion.bbox_evidence,
+        temporal_semantics: 'represented', temporal_evidence: assertion.temporal_evidence,
+        resource_kind: 'product', source_digest: 'sha256:source',
+      } })
+  })
+
+  it.each([
+    { bounding_box: regional, bbox_provenance: 'measured' },
+    { end_time: '2024-03-02T00:00:00Z', temporal_semantics: 'represented' },
+    { period: 'PT1H', temporal_semantics: 'represented' },
+    { data_ref: 'url:https://example.com/new.png', bbox_provenance: 'declared_global' },
+    { format: 'image/jpeg', temporal_semantics: 'represented' },
+  ] satisfies DatasetDraftBody[])('requires supplied evidence rather than inheriting it across a change: %j', async patch => {
+    const { env, id, row } = await create()
+    expect(await updateDataset(env, PUBLISHER, id, patch)).toMatchObject({ ok: false, status: 400 })
+    expect(await getDatasetById(env.CATALOG_DB, id)).toEqual(row)
+  })
+
+  it('accepts explicit source reassertions, including unchanged evidence supplied deliberately', async () => {
+    const { env, id } = await create()
+    expect(await updateDataset(env, PUBLISHER, id, {
+      data_ref: 'url:https://example.com/rehosted.png',
+      bbox_provenance: assertion.bbox_provenance, bbox_evidence: assertion.bbox_evidence,
+      temporal_semantics: assertion.temporal_semantics, temporal_evidence: assertion.temporal_evidence,
+      resource_kind: 'product',
+    })).toMatchObject({ ok: true, dataset: {
+      bbox_provenance: 'declared_global', bbox_evidence: assertion.bbox_evidence,
+      temporal_semantics: 'represented', temporal_evidence: assertion.temporal_evidence, resource_kind: 'product',
+    } })
+  })
+
+  it.each([
+    "data_ref = 'url:https://example.com/concurrent.png'",
+    "format = 'image/jpeg'",
+    "source_digest = 'sha256:new-source'",
+    "content_digest = 'sha256:new-content'",
+    'transcoding = 1',
+    'frame_count = 8',
+  ])('rejects an assertion when source validation inputs change concurrently: %s', async change => {
+    const { env, sqlite, id } = await create()
+    const prepare = env.CATALOG_DB.prepare.bind(env.CATALOG_DB)
+    const spy = vi.spyOn(env.CATALOG_DB, 'prepare').mockImplementation(sql => {
+      if (sql.startsWith('UPDATE datasets SET')) sqlite.prepare(`UPDATE datasets SET ${change} WHERE id = ?`).run(id)
+      return prepare(sql)
+    })
+    try {
+      expect(await updateDataset(env, PUBLISHER, id, { bbox_provenance: 'measured', tags: ['not-written'] }))
+        .toMatchObject({ ok: false, status: 409, errors: [expect.objectContaining({ code: 'concurrent_update' })] })
+      expect(sqlite.prepare('SELECT * FROM dataset_tags WHERE dataset_id = ?').all(id)).toEqual([])
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('does not overwrite a concurrent source swap with a formerly unchanged source submission', async () => {
+    const { env, sqlite, id } = await create()
+    const prepare = env.CATALOG_DB.prepare.bind(env.CATALOG_DB)
+    const spy = vi.spyOn(env.CATALOG_DB, 'prepare').mockImplementation(sql => {
+      if (sql.startsWith('UPDATE datasets SET')) {
+        sqlite.prepare("UPDATE datasets SET data_ref = 'url:https://example.com/new.png' WHERE id = ?").run(id)
+      }
+      return prepare(sql)
+    })
+    try {
+      expect(await updateDataset(env, PUBLISHER, id, { data_ref: assertion.data_ref }))
+        .toMatchObject({ ok: false, status: 409 })
+      expect(sqlite.prepare('SELECT data_ref FROM datasets WHERE id = ?').get(id))
+        .toEqual({ data_ref: 'url:https://example.com/new.png' })
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  describe('source assertions during a pending transcode', () => {
+    const now = '2026-09-11T00:00:00Z'
+    const digest = `sha256:${'b'.repeat(64)}`
+    const unknown = {
+      bbox_provenance: 'unknown', bbox_evidence: null,
+      temporal_semantics: 'unknown', temporal_evidence: null,
+    }
+    function upload(id: string): AssetUploadRow {
+      return {
+        id: 'UP-METADATA-PENDING', dataset_id: id, publisher_id: PUBLISHER.id,
+        kind: 'data', target: 'r2', target_ref: 'r2:replacement-source-B',
+        mime: 'video/mp4', declared_size: 1234, claimed_digest: digest,
+        status: 'pending', failure_reason: null, created_at: now, completed_at: null, frame_count: null,
+      }
+    }
+
+    it.each(['rollback', 'published-abandon'] as const)('rejects B assertions before %s restores/retains source A', async failure => {
+      const { env, sqlite, id, row } = await create({ ...assertion, format: 'video/mp4', data_ref: 'r2:source-A' })
+      if (failure === 'published-abandon') expect(await publishDataset(env, id)).toMatchObject({ ok: true })
+      const replacement = upload(id)
+      expect(await stampTranscodingForVideoSource(env.CATALOG_DB, id, replacement, now)).toBe(1)
+      const pending = await getDatasetById(env.CATALOG_DB, id)
+      expect(pending).toMatchObject({ ...unknown, transcoding: 1 })
+      expect(await updateDataset(env, PUBLISHER, id, {
+        bbox_provenance: 'measured', bbox_evidence: 'Replacement B bounds',
+        temporal_semantics: 'represented', temporal_evidence: 'Replacement B acquisition',
+        resource_kind: 'product', start_time: now, end_time: now,
+        title: 'Must not persist', tags: ['must-not-persist'],
+      })).toMatchObject({ ok: false, status: 409, errors: expect.arrayContaining([
+        expect.objectContaining({ field: 'bbox_provenance', code: 'transcoding_in_progress' }),
+        expect.objectContaining({ field: 'temporal_semantics', code: 'transcoding_in_progress' }),
+        expect.objectContaining({ field: 'resource_kind', code: 'transcoding_in_progress' }),
+      ]) })
+      expect(await getDatasetById(env.CATALOG_DB, id)).toEqual(pending)
+      expect(sqlite.prepare('SELECT * FROM dataset_tags WHERE dataset_id = ?').all(id)).toEqual([])
+      if (failure === 'rollback') {
+        expect(await revertTranscodingStamp(env.CATALOG_DB, id, replacement, row, now)).toBe(1)
+      } else {
+        expect(await abandonTranscoding(env.CATALOG_DB, id, replacement.id, now)).toBe(1)
+      }
+      expect(await getDatasetById(env.CATALOG_DB, id)).toMatchObject({
+        ...unknown, data_ref: 'r2:source-A', transcoding: null,
+        start_time: assertion.start_time, end_time: assertion.end_time,
+      })
+      // Conservative unknown provenance does not block native publication.
+      expect(await publishDataset(env, id)).toMatchObject({ ok: true })
+    })
+
+    it.each([
+      { bbox_provenance: 'measured' }, { bbox_provenance: 'declared_global' },
+      { bbox_provenance: 'imported' }, { bbox_provenance: 'inferred' },
+      { temporal_semantics: 'represented' },
+      { resource_kind: 'product' }, { resource_kind: 'presentation' },
+      { bbox_evidence: 'Replacement bounds evidence only' },
+      { temporal_evidence: 'Replacement time evidence only' },
+      { bbox_provenance: 'unknown', bbox_evidence: 'Staged replacement bounds' },
+      { temporal_semantics: null, temporal_evidence: 'Staged replacement time' },
+    ] satisfies DatasetDraftBody[])('rejects setting/reaffirming an assertion or evidence even for same-source transcodes: %j', async patch => {
+      const { env, sqlite, id } = await create({ ...assertion, format: 'video/mp4' })
+      sqlite.prepare('UPDATE datasets SET source_digest = ? WHERE id = ?').run(digest, id)
+      expect(await stampTranscodingForVideoSource(env.CATALOG_DB, id, upload(id), now)).toBe(1)
+      const pending = await getDatasetById(env.CATALOG_DB, id)
+      expect(pending).toMatchObject({ bbox_provenance: assertion.bbox_provenance, temporal_semantics: 'represented' })
+      expect(await updateDataset(env, PUBLISHER, id, patch)).toMatchObject({
+        ok: false, status: 409, errors: expect.arrayContaining([expect.objectContaining({ code: 'transcoding_in_progress' })]),
+      })
+      expect(await getDatasetById(env.CATALOG_DB, id)).toEqual(pending)
+    })
+
+    it.each([null, 'unknown'] as const)('allows clearing assertions to %s and unrelated edits while pending', async cleared => {
+      const { env, sqlite, id } = await create({ ...assertion, format: 'video/mp4' })
+      sqlite.prepare('UPDATE datasets SET source_digest = ? WHERE id = ?').run(digest, id)
+      await stampTranscodingForVideoSource(env.CATALOG_DB, id, upload(id), now)
+      expect(await updateDataset(env, PUBLISHER, id, { title: 'Safe unrelated edit' })).toMatchObject({
+        ok: true, dataset: { bbox_provenance: assertion.bbox_provenance, temporal_semantics: 'represented', resource_kind: 'product' },
+      })
+      expect(await updateDataset(env, PUBLISHER, id, {
+        bbox_provenance: cleared, bbox_evidence: null,
+        temporal_semantics: cleared, temporal_evidence: null, resource_kind: cleared,
+      })).toMatchObject({ ok: true, dataset: { ...unknown, resource_kind: 'unknown', transcoding: 1 } })
+      expect(await updateDataset(env, PUBLISHER, id, { bbox_evidence: '', temporal_evidence: '  ' }))
+        .toMatchObject({ ok: true, dataset: unknown })
+    })
+
+    it.each([
+      { bbox_provenance: 'measured' }, { temporal_semantics: 'represented' },
+      { resource_kind: 'product' }, { bbox_evidence: 'Concurrent bounds' },
+      { temporal_evidence: 'Concurrent time' },
+    ] satisfies DatasetDraftBody[])('atomically rejects a real same-source stamp after the metadata read: %j', async patch => {
+      const { env, sqlite, id } = await create({ ...assertion, format: 'video/mp4', data_ref: 'r2:source-A' })
+      // Published + same bytes: stamp preserves data_ref and all assertions,
+      // so the pending lifecycle comparison must still detect this race.
+      expect(await publishDataset(env, id)).toMatchObject({ ok: true })
+      sqlite.prepare('UPDATE datasets SET source_digest = ? WHERE id = ?').run(digest, id)
+      const prepare = env.CATALOG_DB.prepare.bind(env.CATALOG_DB)
+      const spy = vi.spyOn(env.CATALOG_DB, 'prepare').mockImplementation(sql => {
+        const statement = prepare(sql)
+        if (sql.startsWith('UPDATE datasets SET')) {
+          const bind = statement.bind.bind(statement)
+          vi.spyOn(statement, 'bind').mockImplementation((...values) => {
+            const bound = bind(...values)
+            const run = bound.run.bind(bound)
+            vi.spyOn(bound, 'run').mockImplementation(async () => {
+              expect(await stampTranscodingForVideoSource(asD1(sqlite), id, upload(id), now)).toBe(1)
+              return run()
+            })
+            return bound
+          })
+        }
+        return statement
+      })
+      try {
+        expect(await updateDataset(env, PUBLISHER, id, { ...patch, title: 'Must not persist', tags: ['not-written'] }))
+          .toMatchObject({ ok: false, status: 409, errors: [expect.objectContaining({ code: 'concurrent_update' })] })
+        expect(await getDatasetById(env.CATALOG_DB, id)).toMatchObject({
+          title: assertion.title, data_ref: 'r2:source-A', transcoding: 1,
+          bbox_provenance: assertion.bbox_provenance, bbox_evidence: assertion.bbox_evidence,
+          temporal_semantics: assertion.temporal_semantics, temporal_evidence: assertion.temporal_evidence,
+        })
+        expect(sqlite.prepare('SELECT * FROM dataset_tags WHERE dataset_id = ?').all(id)).toEqual([])
+      } finally {
+        spy.mockRestore()
+      }
+    })
+  })
+})
 
 describe('createDataset', () => {
   it('inserts a draft with derived slug, decoration rows, and publisher_id', async () => {
