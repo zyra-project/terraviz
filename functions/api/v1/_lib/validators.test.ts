@@ -15,9 +15,104 @@ import {
   __internal,
   validateDraftCreate,
   validateDraftUpdate,
+  validateMetadataAnnotations,
+  type DatasetDraftBody,
   validateForPublish,
   validateTourDraft,
 } from './validators'
+
+describe('metadata annotations', () => {
+  const draft = { title: 'A dataset', format: 'image/png' }
+  const world = { n: 90, s: -90, w: -180, e: 180 }
+  const regional = { n: 30, s: -20, w: 170, e: -170 }
+  const represented: DatasetDraftBody = {
+    temporal_semantics: 'represented', temporal_evidence: 'Observation timestamps in the source file.',
+    start_time: '2024-02-29T00:00:00Z', end_time: '2024-03-01T00:00:00Z',
+  }
+
+  it('keeps legacy null/global-looking bounds and timestamps valid without inventing claims', () => {
+    expect(validateDraftCreate({ ...draft, bounding_box: null })).toEqual([])
+    expect(validateDraftCreate({ ...draft, bounding_box: world, start_time: '2026-01-01T00:00:00Z' })).toEqual([])
+    expect(validateDraftCreate({ ...draft, bbox_provenance: null, temporal_semantics: null, resource_kind: null })).toEqual([])
+  })
+
+  for (const field of ['bbox_provenance', 'temporal_semantics', 'resource_kind'] as const) {
+    it.each([false, 42, {}, [], '', 'bogus'])(`rejects invalid ${field}: %j`, value => {
+      const body = { ...draft, [field]: value } as DatasetDraftBody
+      for (const validate of [validateDraftCreate, validateDraftUpdate]) {
+        expect(validate(body)).toEqual(expect.arrayContaining([
+          expect.objectContaining({ field, code: typeof value === 'string' ? 'invalid_value' : 'invalid_type' }),
+        ]))
+      }
+    })
+  }
+
+  for (const field of ['bbox_evidence', 'temporal_evidence'] as const) {
+    it(`bounds ${field} and accepts null without coercing nonstrings`, () => {
+      expect(validateDraftCreate({ ...draft, [field]: 'x'.repeat(2048) })).toEqual([])
+      expect(validateDraftCreate({ ...draft, [field]: 'x'.repeat(2049) })).toContainEqual(expect.objectContaining({ field, code: 'too_long' }))
+      for (const value of [1, false, {}, []]) {
+        expect(validateDraftUpdate({ [field]: value } as DatasetDraftBody)).toContainEqual(expect.objectContaining({ field, code: 'invalid_type' }))
+      }
+      expect(validateDraftUpdate({ [field]: null })).toEqual([])
+    })
+  }
+
+  it.each(['measured', 'imported', 'inferred'] as const)('requires complete finite bounds and evidence for %s', bbox_provenance => {
+    const claim = { ...draft, bbox_provenance, bbox_evidence: 'Source inventory', bounding_box: regional }
+    expect(validateDraftCreate(claim)).toEqual([])
+    expect(validateDraftCreate({ ...claim, bounding_box: null })).not.toEqual([])
+    expect(validateDraftCreate({ ...claim, bounding_box: { ...regional, n: NaN } })).not.toEqual([])
+    expect(validateDraftCreate({ ...claim, bbox_evidence: ' \n\t' })).toContainEqual(expect.objectContaining({ field: 'bbox_evidence', code: 'required' }))
+    expect(validateDraftCreate({ ...claim, bbox_evidence: null })).not.toEqual([])
+  })
+
+  it('accepts declared_global only for complete exact world bounds plus evidence', () => {
+    const claim: DatasetDraftBody = { ...draft, bbox_provenance: 'declared_global', bbox_evidence: 'Curator confirmed global domain', bounding_box: world }
+    expect(validateDraftCreate(claim)).toEqual([])
+    for (const bounding_box of [null, regional, { ...world, n: 89.999 }, { ...world, w: 180, e: -180 }, { n: 90 }]) {
+      expect(validateDraftCreate({ ...claim, bounding_box } as DatasetDraftBody)).not.toEqual([])
+    }
+    expect(validateDraftCreate({ ...claim, bbox_evidence: '' })).not.toEqual([])
+  })
+
+  it('accepts represented intervals and equal-endpoint instants, including equivalent fractional formatting', () => {
+    expect(validateDraftCreate({ ...draft, ...represented })).toEqual([])
+    expect(validateDraftCreate({ ...draft, ...represented, end_time: represented.start_time })).toEqual([])
+    expect(validateDraftCreate({ ...draft, ...represented, start_time: '2024-02-29T00:00:00Z', end_time: '2024-02-29T00:00:00.000Z' })).toEqual([])
+  })
+
+  it.each([
+    undefined, null, '', '2023-02-29T00:00:00Z', '2024-02-30T00:00:00Z',
+    '2024-02-29T24:00:00Z', '2024-13-01T00:00:00Z', '2024-02-29',
+    '2024-02-29T00:00:60Z', '2024-02-29T00:00:00+00:00',
+  ])('rejects missing or invalid represented endpoint %j', value => {
+    expect(validateDraftCreate({ ...draft, ...represented, start_time: value })).not.toEqual([])
+    expect(validateDraftCreate({ ...draft, ...represented, end_time: value })).not.toEqual([])
+  })
+
+  it('rejects reversed represented intervals, schedule-only claims, and missing evidence', () => {
+    expect(validateDraftCreate({ ...draft, ...represented, end_time: '2024-02-28T00:00:00Z' })).not.toEqual([])
+    expect(validateDraftCreate({ ...draft, temporal_semantics: 'represented', period: 'P1D', temporal_evidence: 'Daily schedule' })).not.toEqual([])
+    expect(validateDraftCreate({ ...draft, ...represented, temporal_evidence: ' ' })).not.toEqual([])
+    expect(validateDraftCreate({ ...draft, ...represented, start_time: '2024-02-29T00:00:00.0002Z', end_time: '2024-02-29T00:00:00.0001Z' })).not.toEqual([])
+  })
+
+  it.each(['unknown', 'publication', 'schedule'] as const)('does not impose represented-time requirements on %s', temporal_semantics => {
+    expect(validateDraftCreate({ ...draft, temporal_semantics, period: 'P1D' })).toEqual([])
+  })
+
+  it.each(['unknown', 'product', 'presentation'] as const)('accepts explicit resource_kind %s independently of format', resource_kind => {
+    expect(validateDraftCreate({ ...draft, resource_kind })).toEqual([])
+  })
+
+  it('defers PATCH claim dependencies to merged validation', () => {
+    expect(validateDraftUpdate({ bbox_provenance: 'measured' })).toEqual([])
+    expect(validateDraftUpdate({ temporal_semantics: 'represented' })).toEqual([])
+    expect(validateMetadataAnnotations({ bbox_provenance: 'measured' })).not.toEqual([])
+    expect(validateMetadataAnnotations({ temporal_semantics: 'represented' })).not.toEqual([])
+  })
+})
 
 describe('hasControlChars', () => {
   it('allows ordinary text and ws (HT/LF/CR)', () => {

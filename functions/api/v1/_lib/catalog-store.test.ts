@@ -15,8 +15,78 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { getDecorations, getPublicDataset, listPublicDatasets } from './catalog-store'
+import Database from 'better-sqlite3'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { listMigrations, MIGRATIONS_DIR, renderSchemaSnapshot, SCHEMA_SNAPSHOT_PATH } from '../../../../scripts/lib/catalog-migrations'
+import { getDecorations, getNodeIdentity, getPublicDataset, listPublicDatasets } from './catalog-store'
 import { asD1, seedFixtures } from './test-helpers'
+import { serializeDataset } from './dataset-serializer'
+
+describe('metadata annotation migration and internal reads', () => {
+  it('backfills every legacy row to unknown without changing bounds, timestamps, or licenses', () => {
+    const sqlite = new Database(':memory:')
+    try {
+      const migration = '0054_metadata_provenance.sql'
+      for (const name of listMigrations().filter(name => name < migration)) {
+        sqlite.exec(readFileSync(join(MIGRATIONS_DIR, name), 'utf8'))
+      }
+      const insert = sqlite.prepare(`INSERT INTO datasets
+        (id, slug, origin_node, title, format, data_ref, bbox_n, bbox_s, bbox_w, bbox_e,
+         start_time, end_time, period, created_at, updated_at, published_at, license_statement)
+        VALUES (?, ?, 'NODE000', 'Legacy', 'image/png', 'url:https://example.com/image.png', ?, ?, ?, ?,
+          '2024-01-01T00:00:00Z', '2024-01-02T00:00:00Z', 'P1D', '2026-01-01', '2026-02-01', '2026-03-01', 'Keep license')`)
+      insert.run('unknown', 'unknown', null, null, null, null)
+      insert.run('global', 'global', 90, -90, -180, 180)
+      insert.run('partial', 'partial', 10, null, null, null)
+      const before = sqlite.prepare('SELECT * FROM datasets ORDER BY id').all()
+      sqlite.exec(readFileSync(join(MIGRATIONS_DIR, migration), 'utf8'))
+      const after = sqlite.prepare('SELECT * FROM datasets ORDER BY id').all()
+      expect(after).toEqual(before.map(row => ({
+        ...(row as object), bbox_provenance: 'unknown', bbox_evidence: null,
+        temporal_semantics: 'unknown', temporal_evidence: null, resource_kind: 'unknown',
+      })))
+    } finally {
+      sqlite.close()
+    }
+  })
+
+  it('enforces enum/default and evidence-size constraints with real migrations', () => {
+    const sqlite = seedFixtures({ count: 1 })
+    try {
+      for (const field of ['bbox_provenance', 'temporal_semantics', 'resource_kind']) {
+        expect(() => sqlite.prepare(`UPDATE datasets SET ${field} = ?`).run('invalid')).toThrow()
+        expect(() => sqlite.prepare(`UPDATE datasets SET ${field} = NULL`).run()).toThrow()
+      }
+      for (const field of ['bbox_evidence', 'temporal_evidence']) {
+        expect(() => sqlite.prepare(`UPDATE datasets SET ${field} = ?`).run('x'.repeat(2049))).toThrow()
+        expect(() => sqlite.prepare(`UPDATE datasets SET ${field} = ?`).run('x'.repeat(2048))).not.toThrow()
+      }
+      expect(renderSchemaSnapshot(sqlite)).toBe(readFileSync(SCHEMA_SNAPSHOT_PATH, 'utf8'))
+    } finally {
+      sqlite.close()
+    }
+  })
+
+  it('reads annotations internally while leaving native serialization exactly unchanged', async () => {
+    const sqlite = seedFixtures({ count: 1 })
+    try {
+      const db = asD1(sqlite)
+      const [before] = await listPublicDatasets(db)
+      expect(before).toMatchObject({ bbox_provenance: 'unknown', temporal_semantics: 'unknown', resource_kind: 'unknown', bbox_n: null, start_time: null })
+      const identity = (await getNodeIdentity(db))!
+      const decoration = (await getDecorations(db, [before.id])).get(before.id)!
+      const wireBefore = serializeDataset(before, decoration, identity)
+      sqlite.prepare(`UPDATE datasets SET bbox_provenance = 'unknown', bbox_evidence = 'Needs curator review',
+        temporal_semantics = 'publication', temporal_evidence = 'Release date only', resource_kind = 'presentation'`).run()
+      const after = (await getPublicDataset(db, before.id))!
+      expect(after).toMatchObject({ bbox_evidence: 'Needs curator review', temporal_semantics: 'publication', temporal_evidence: 'Release date only', resource_kind: 'presentation' })
+      expect(serializeDataset(after, decoration, identity)).toEqual(wireBefore)
+    } finally {
+      sqlite.close()
+    }
+  })
+})
 
 describe('getDecorations — D1 bind-variable chunking (1d/K)', () => {
   it('returns decorations for every id when N > the per-statement bind cap', async () => {

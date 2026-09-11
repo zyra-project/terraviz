@@ -25,6 +25,8 @@ import { runImportSnapshot } from './import-snapshot'
 import type { CommandContext } from './commands'
 import type { TerravizClient } from './lib/client'
 import { parseArgs } from './lib/args'
+import baseline from '../public/assets/sos-enrichment-crosswalk.json'
+import type { SnapshotCrosswalk } from './lib/snapshot-crosswalk'
 
 interface BufStream {
   write(chunk: string): boolean
@@ -126,12 +128,18 @@ const AUX_SNAPSHOT_FIXTURE = {
 
 const ENRICHED_FIXTURE = [
   {
+    url: 'https://sos.noaa.gov/catalog/datasets/hurricane-season-2024',
     title: 'Hurricane Season - 2024',
     description: 'Long-form description from the enriched metadata.',
     keywords: ['hurricane', 'atlantic'],
     categories: { Air: ['Hurricanes'] },
   },
 ]
+
+const CROSSWALK_FIXTURE: SnapshotCrosswalk = {
+  ...baseline as unknown as SnapshotCrosswalk,
+  mappings: [['INTERNAL_SOS_768', ENRICHED_FIXTURE[0].url]],
+}
 
 interface FakeClientHandles {
   list: ReturnType<typeof vi.fn>
@@ -288,7 +296,7 @@ function fakeClient(opts: FakeClientOptions = {}): { client: TerravizClient; han
 function makeCtx(
   client: TerravizClient,
   flags: Record<string, string | boolean> = {},
-  options: { snapshot?: typeof SNAPSHOT_FIXTURE } = {},
+  options: { snapshot?: typeof SNAPSHOT_FIXTURE; crosswalk?: unknown; enriched?: unknown } = {},
 ): { ctx: CommandContext; out: BufStream; err: BufStream } {
   const out = makeStream()
   const err = makeStream()
@@ -302,13 +310,51 @@ function makeCtx(
   const snapshot = options.snapshot ?? SNAPSHOT_FIXTURE
   const readFile = (path: string): string => {
     if (path.endsWith('sos-dataset-list.json')) return JSON.stringify(snapshot)
-    if (path.endsWith('sos_dataset_metadata.json')) return JSON.stringify(ENRICHED_FIXTURE)
+    if (path.endsWith('sos_dataset_metadata.json')) return JSON.stringify(options.enriched ?? ENRICHED_FIXTURE)
+    if (path.endsWith('sos-enrichment-crosswalk.json') || path.endsWith('custom-crosswalk.json')) return JSON.stringify(options.crosswalk ?? CROSSWALK_FIXTURE)
     throw new Error(`unexpected read: ${path}`)
   }
   return { ctx: { client, args, stdout: out, stderr: err, readFile }, out, err }
 }
 
 describe('runImportSnapshot', () => {
+  it('honors --crosswalk and does not fall back to titles for an explicitly empty mapping', async () => {
+    const { client, handles } = fakeClient()
+    const { ctx, out } = makeCtx(client, { crosswalk: 'custom-crosswalk.json' }, {
+      crosswalk: { ...CROSSWALK_FIXTURE, mappings: [] },
+    })
+    expect(await runImportSnapshot(ctx)).toBe(0)
+    expect(handles.createDataset.mock.calls[0][0].abstract).toBe(SNAPSHOT_FIXTURE.datasets[0].abstractTxt)
+    expect(out.text()).toContain('matched=0 unmapped=3 ambiguous=0 invalid=0')
+  })
+
+  it.each([
+    ['invalid schema', {}, ENRICHED_FIXTURE],
+    ['duplicate crosswalk', { ...CROSSWALK_FIXTURE, mappings: [...CROSSWALK_FIXTURE.mappings, ...CROSSWALK_FIXTURE.mappings] }, ENRICHED_FIXTURE],
+    ['missing source', CROSSWALK_FIXTURE, []],
+    ['duplicate source', CROSSWALK_FIXTURE, [...ENRICHED_FIXTURE, ...ENRICHED_FIXTURE]],
+  ])('rejects %s before making any API calls', async (_name, crosswalk, enriched) => {
+    const { client, handles } = fakeClient()
+    const { ctx, err } = makeCtx(client, {}, { crosswalk, enriched })
+    expect(await runImportSnapshot(ctx)).toBe(2)
+    expect(handles.list).not.toHaveBeenCalled()
+    expect(handles.createDataset).not.toHaveBeenCalled()
+    expect(err.text()).toContain('Crosswalk validation failed')
+  })
+
+  it('fails closed if the default checked-in crosswalk cannot be read', async () => {
+    const { client, handles } = fakeClient()
+    const { ctx, err } = makeCtx(client)
+    const read = ctx.readFile!
+    ctx.readFile = path => {
+      if (path.endsWith('sos-enrichment-crosswalk.json')) throw new Error('missing crosswalk')
+      return read(path)
+    }
+    expect(await runImportSnapshot(ctx)).toBe(2)
+    expect(handles.list).not.toHaveBeenCalled()
+    expect(err.text()).toContain('missing crosswalk')
+  })
+
   it('--dry-run prints the plan and never mutates', async () => {
     const { client, handles } = fakeClient()
     const { ctx, out, err } = makeCtx(client, { 'dry-run': true })
@@ -321,6 +367,7 @@ describe('runImportSnapshot', () => {
     expect(out.text()).toContain('new rows to publish:   2')
     expect(out.text()).toContain('unsupported_format')
     expect(out.text()).toContain('Dry run')
+    expect(out.text()).toContain('Crosswalk validation: matched=1 unmapped=2 ambiguous=0 invalid=0')
     expect(err.text()).toBe('')
   })
 
@@ -337,6 +384,10 @@ describe('runImportSnapshot', () => {
     expect(firstBody.title).toBe('Hurricane Season - 2024')
     expect(firstBody.format).toBe('video/mp4')
     expect(firstBody.data_ref).toBe('vimeo:1107911993')
+    expect(firstBody.abstract).toBe(ENRICHED_FIXTURE[0].description)
+    expect(firstBody.temporal_semantics).toBe('unknown')
+    expect(firstBody.temporal_evidence).toContain('Not verified as represented time')
+    expect(firstBody.resource_kind).toBe('unknown')
     // The second is the image row.
     const secondBody = handles.createDataset.mock.calls[1][0] as Record<string, unknown>
     expect(secondBody.legacy_id).toBe('INTERNAL_SOS_770')
@@ -543,6 +594,8 @@ describe('runImportSnapshot --update-existing (3b/C)', () => {
     expect(Object.keys(calledBody).sort()).toEqual(
       [
         'bounding_box',
+        'bbox_provenance',
+        'bbox_evidence',
         'celestial_body',
         'color_table_ref',
         'lon_origin',
@@ -560,6 +613,11 @@ describe('runImportSnapshot --update-existing (3b/C)', () => {
       w: -134.099,
       e: -60.9016,
     })
+    expect(calledBody.bbox_provenance).toBe('imported')
+    expect(calledBody.bbox_evidence).toContain('INTERNAL_SOS_811')
+    // Do not reset reviewed temporal/resource assertions on existing rows.
+    expect(calledBody.temporal_semantics).toBeUndefined()
+    expect(calledBody.resource_kind).toBeUndefined()
     expect(calledBody.celestial_body).toBe('Mars')
     expect(calledBody.radius_mi).toBe(2106.1)
     expect(calledBody.lon_origin).toBe(180)

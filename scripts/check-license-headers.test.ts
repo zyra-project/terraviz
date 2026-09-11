@@ -60,6 +60,18 @@ describe('matched by position, not searched for', () => {
     expect(hasHeader('a.ts', `${header('a.ts')}\n\nexport const x = 1\n`, slash)).toBe(true)
   })
 
+  it.each(['a.ts', 'a.css', 'a.py', 'a.html', 'a.sql'])('accepts CRLF headers in %s without weakening position checks', file => {
+    const text = `${header(file)}\n\nbody\n`.replace(/\n/g, '\r\n')
+    const style = commentStyle(file)!
+    expect(hasHeader(file, text, style)).toBe(true)
+    expect(hasHeader(file, `\r\n${text}`, style)).toBe(false)
+  })
+
+  it('accepts a CRLF header below a required shebang', () => {
+    const text = `#!/usr/bin/env node\n${header('a.ts')}\n\nexport {}\n`.replace(/\n/g, '\r\n')
+    expect(hasHeader('a.ts', text, slash)).toBe(true)
+  })
+
   it('REJECTS a file that merely talks about the header', () => {
     // The shape of this test file and of the tool itself. A "does the top of
     // the file contain these strings" check passes this; that is the bug.

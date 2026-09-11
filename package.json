@@ -92,6 +92,7 @@
     "html2canvas": "^1.4.1",
     "jszip": "^3.10.1",
     "maplibre-gl": "^5.21.1",
+    "spdx-expression-parse": "^5.0.0",
     "three": "^0.183.2",
     "tsx": "^4.21.0",
     "yaml": "^2.9.0"
@@ -118,6 +119,7 @@
     "@types/geojson": "^7946.0.16",
     "@types/node": "^20.10.0",
     "@types/pngjs": "^6.0.5",
+    "@types/spdx-expression-parse": "^4.0.0",
     "@types/three": "^0.183.1",
     "@vitest/coverage-v8": "^4.1.0",
     "axe-core": "^4.12.1",

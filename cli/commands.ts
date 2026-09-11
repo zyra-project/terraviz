@@ -736,12 +736,31 @@ Commands:
                                       description; omitting --contact clears the
                                       contact email. See SELF_HOSTING Phase 9.1.
 
-  import-snapshot [--list=<path>] [--enriched=<path>] [--dry-run]
+  metadata-audit <catalog-export.json> [--strict]
+                                      Offline JSON readiness census of canonical
+                                      enriched D1 rows (not public WireDataset).
+                                      Join workflow ownership and persisted item
+                                      identities in the export when applicable.
+                                      No credentials, database, or network reads.
+                                      Candidates only, not STAC validation.
+                                      --strict exits 1 for excluded/unresolved;
+                                      invalid input exits 2. Always prints JSON.
+  metadata-audit --snapshot [--list=<path>] [--enriched=<path>]
+                 [--crosswalk=<path>] [--strict]
+                                      Map local committed SOS JSON + crosswalk.
+                                      No invented D1 identity; not a deployed
+                                      catalog census. Defaults: public/assets.
+
+  import-snapshot [--list=<path>] [--enriched=<path>] [--crosswalk=<path>]
+                  [--dry-run]
                                       One-shot bulk import of the legacy SOS
                                       catalog snapshot. Idempotent — re-running
                                       skips rows whose legacy_id is already
                                       published. Always run with --dry-run
                                       first to see the plan.
+                                      --crosswalk defaults to the committed
+                                      public/assets/sos-enrichment-crosswalk.json
+                                      stable-ID mapping; no title fallback.
   import-snapshot --reindex [--dry-run]
                                       Walk every published dataset and re-enqueue
                                       its embed job. Use after wiring up

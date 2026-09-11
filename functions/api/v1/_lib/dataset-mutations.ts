@@ -44,6 +44,7 @@ import {
   validateDraftCreate,
   validateDraftUpdate,
   validateForPublish,
+  validateMetadataAnnotations,
   type DatasetDraftBody,
   type ValidationError,
 } from './validators'
@@ -438,8 +439,9 @@ export async function createDataset(
          bbox_n, bbox_s, bbox_w, bbox_e,
          celestial_body, radius_mi, lon_origin, is_flipped_in_y,
          render_encoding, color_scale, playback_fps,
+         bbox_provenance, bbox_evidence, temporal_semantics, temporal_evidence, resource_kind,
          schema_version, created_at, updated_at, published_at, publisher_id
-       ) VALUES (?,?,(SELECT node_id FROM node_identity LIMIT 1),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       ) VALUES (?,?,(SELECT node_id FROM node_identity LIMIT 1),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     )
     .bind(
       id,
@@ -509,6 +511,11 @@ export async function createDataset(
       // becomes an ffmpeg argument and the chunk-grid divisor, and a 0
       // reaching either is worse than a rejected write.
       sanePlaybackFps(body.playback_fps),
+      body.bbox_provenance ?? 'unknown',
+      normalizeOptionalString(body.bbox_evidence),
+      body.temporal_semantics ?? 'unknown',
+      normalizeOptionalString(body.temporal_evidence),
+      body.resource_kind ?? 'unknown',
       1,
       now,
       now,
@@ -546,6 +553,85 @@ export async function updateDataset(
 
   const db = env.CATALOG_DB!
 
+  // Validate the final metadata state, not just this partial request. In
+  // particular, clearing evidence alone must not leave an asserted claim.
+  const currentMetadata = await getDatasetForPublisher(db, publisher, id)
+  if (!currentMetadata) {
+    return { ok: false, status: 404, errors: [{ field: 'id', code: 'not_found', message: 'Dataset not found.' }] }
+  }
+  // A pending stamp does not identify which source a PATCH describes: failure
+  // may restore/retain the old asset. Refuse assertions (even same-value
+  // reaffirmations or evidence-only edits) until it settles. Clearing remains
+  // allowed, and untouched facts survive verified same-source re-encoding.
+  // All these inputs make metadataTouched true below; its atomic comparison
+  // includes transcoding + active upload so a stamp after this read also fails.
+  if (currentMetadata.transcoding === 1) {
+    const assertionFields = [
+      ...(['bbox_provenance', 'temporal_semantics', 'resource_kind'] as const).filter(
+        field => body[field] != null && body[field] !== 'unknown',
+      ),
+      ...(['bbox_evidence', 'temporal_evidence'] as const).filter(
+        field => normalizeOptionalString(body[field]) !== null,
+      ),
+    ]
+    if (assertionFields.length) {
+      return {
+        ok: false, status: 409,
+        errors: assertionFields.map(field => ({
+          field, code: 'transcoding_in_progress',
+          message: 'Cannot assert source metadata while a transcode is in flight. Wait for it to finish, then retry.',
+        })),
+      }
+    }
+  }
+  // A publisher's explicit source swap can designate a different product.
+  // Internal upload/transcode transitions have their own source-aware policy.
+  const formatChanges = body.format !== undefined && body.format !== currentMetadata.format
+  const dataRefChanges = body.data_ref !== undefined && body.data_ref !== currentMetadata.data_ref
+  const sourceChanged = formatChanges || dataRefChanges
+  const bboxTouched = sourceChanged || body.bounding_box !== undefined || body.bbox_provenance !== undefined || body.bbox_evidence !== undefined
+  const timeTouched = sourceChanged || body.start_time !== undefined || body.end_time !== undefined || body.period !== undefined ||
+    body.temporal_semantics !== undefined || body.temporal_evidence !== undefined
+  const metadataTouched = bboxTouched || timeTouched || body.resource_kind !== undefined ||
+    body.format !== undefined || body.data_ref !== undefined
+  const bboxChanged = body.bounding_box !== undefined && (
+    (body.bounding_box?.n ?? null) !== currentMetadata.bbox_n ||
+    (body.bounding_box?.s ?? null) !== currentMetadata.bbox_s ||
+    (body.bounding_box?.w ?? null) !== currentMetadata.bbox_w ||
+    (body.bounding_box?.e ?? null) !== currentMetadata.bbox_e
+  )
+  const timeChanged = (['start_time', 'end_time', 'period'] as const).some(
+    field => body[field] !== undefined && body[field] !== currentMetadata[field],
+  )
+  const resetBbox = (bboxChanged || sourceChanged) && body.bbox_provenance === undefined
+  const resetTime = (timeChanged || sourceChanged) && body.temporal_semantics === undefined
+  const mergedMetadata: DatasetDraftBody = {
+    // A partially populated legacy row must fail a new assertion rather
+    // than having missing corners silently filled with world bounds.
+    bounding_box: body.bounding_box !== undefined ? body.bounding_box :
+      currentMetadata.bbox_n !== null && currentMetadata.bbox_s !== null &&
+      currentMetadata.bbox_w !== null && currentMetadata.bbox_e !== null ? {
+        n: currentMetadata.bbox_n, s: currentMetadata.bbox_s,
+        w: currentMetadata.bbox_w, e: currentMetadata.bbox_e,
+      } : null,
+    bbox_provenance: resetBbox ? 'unknown' : body.bbox_provenance !== undefined
+      ? body.bbox_provenance ?? 'unknown' : currentMetadata.bbox_provenance,
+    bbox_evidence: resetBbox ? null : body.bbox_evidence !== undefined
+      ? normalizeOptionalString(body.bbox_evidence)
+      : bboxChanged || sourceChanged || body.bbox_provenance === null || body.bbox_provenance === 'unknown' ? null : currentMetadata.bbox_evidence,
+    start_time: body.start_time !== undefined ? body.start_time : currentMetadata.start_time,
+    end_time: body.end_time !== undefined ? body.end_time : currentMetadata.end_time,
+    period: body.period !== undefined ? body.period : currentMetadata.period,
+    temporal_semantics: resetTime ? 'unknown' : body.temporal_semantics !== undefined
+      ? body.temporal_semantics ?? 'unknown' : currentMetadata.temporal_semantics,
+    temporal_evidence: resetTime ? null : body.temporal_evidence !== undefined
+      ? normalizeOptionalString(body.temporal_evidence)
+      : timeChanged || sourceChanged || body.temporal_semantics === null || body.temporal_semantics === 'unknown' ? null : currentMetadata.temporal_evidence,
+    resource_kind: body.resource_kind !== undefined ? body.resource_kind ?? 'unknown' : sourceChanged ? 'unknown' : currentMetadata.resource_kind,
+  }
+  const metadataErrors = validateMetadataAnnotations(mergedMetadata)
+  if (metadataErrors.length) return { ok: false, status: 400, errors: metadataErrors }
+
   // Asset-coupled field guard: refuse `format` or `data_ref`
   // mutations while the row is mid-transcode. Without these an
   // editor could
@@ -573,26 +659,7 @@ export async function updateDataset(
   // submissions (the form re-serializes every field on save,
   // including format/data_ref, so a save that doesn't touch
   // those fields still has them in the body).
-  const guardableFieldsInBody =
-    body.format !== undefined || body.data_ref !== undefined
-  let currentForGuard:
-    | { format: string; data_ref: string; transcoding: number | null }
-    | null = null
-  if (guardableFieldsInBody) {
-    currentForGuard =
-      (await db
-        .prepare('SELECT format, data_ref, transcoding FROM datasets WHERE id = ?')
-        .bind(id)
-        .first<{ format: string; data_ref: string; transcoding: number | null }>()) ?? null
-  }
-  const formatChanges =
-    body.format !== undefined && currentForGuard !== null && body.format !== currentForGuard.format
-  const dataRefChanges =
-    body.data_ref !== undefined &&
-    currentForGuard !== null &&
-    body.data_ref !== currentForGuard.data_ref
-
-  if (currentForGuard?.transcoding === 1) {
+  if (currentMetadata.transcoding === 1) {
     if (formatChanges) {
       return {
         ok: false,
@@ -635,6 +702,22 @@ export async function updateDataset(
   function set(col: string, v: unknown): void {
     sets.push(`${col} = ?`)
     binds.push(v)
+  }
+
+  if (bboxTouched) {
+    set('bbox_provenance', mergedMetadata.bbox_provenance)
+    set('bbox_evidence', mergedMetadata.bbox_evidence)
+  }
+  if (timeTouched) {
+    set('temporal_semantics', mergedMetadata.temporal_semantics)
+    set('temporal_evidence', mergedMetadata.temporal_evidence)
+  }
+  if (sourceChanged || body.resource_kind !== undefined) set('resource_kind', mergedMetadata.resource_kind)
+  if (sourceChanged) {
+    // Verified byte identities belong to the old source too. Upload writers
+    // must not use a leftover digest to preserve claims for a different asset.
+    set('source_digest', null)
+    set('content_digest', null)
   }
 
   if (body.title !== undefined) set('title', body.title)
@@ -789,12 +872,41 @@ export async function updateDataset(
   if (needsTranscodingGuard) {
     whereSql += ' AND (transcoding IS NULL OR transcoding = 0)'
   }
+  // A workflow/publisher can change metadata between the SELECT and UPDATE.
+  // Compare the inputs to merged validation atomically (IS is null-safe),
+  // rather than applying a previously validated claim to a different row.
+  const metadataBinds: unknown[] = []
+  if (metadataTouched) {
+    for (const field of [
+      'format', 'data_ref', 'source_digest', 'content_digest',
+      'transcoding', 'active_transcode_upload_id',
+      'frame_count', 'frame_extension', 'frame_source_filenames_ref',
+      'bbox_n', 'bbox_s', 'bbox_w', 'bbox_e', 'bbox_provenance', 'bbox_evidence',
+      'start_time', 'end_time', 'period', 'temporal_semantics', 'temporal_evidence', 'resource_kind',
+    ] as const) {
+      whereSql += ` AND ${field} IS ?`
+      metadataBinds.push(currentMetadata[field])
+    }
+  }
 
   if (sets.length) {
     const result = await db
       .prepare(`UPDATE datasets SET ${sets.join(', ')} ${whereSql}`)
-      .bind(...binds, id)
+      .bind(...binds, id, ...metadataBinds)
       .run()
+    if (metadataTouched && (result.meta?.changes ?? 0) === 0) {
+      // Preserve the existing transcode conflict envelope when that guard
+      // failed; a stale source/metadata snapshot is a separate retry reason.
+      const transcodeConflict = needsTranscodingGuard &&
+        (await db.prepare('SELECT transcoding FROM datasets WHERE id = ?')
+          .bind(id).first<{ transcoding: number | null }>())?.transcoding
+      if (!transcodeConflict) {
+        return {
+          ok: false, status: 409,
+          errors: [{ field: 'metadata', code: 'concurrent_update', message: 'Dataset changed during metadata validation. Reload and retry.' }],
+        }
+      }
+    }
     if (needsTranscodingGuard && (result.meta?.changes ?? 0) === 0) {
       // The JS pre-check passed but the UPDATE filtered the row
       // out — a concurrent stamp landed between SELECT and
