@@ -119,6 +119,12 @@ export interface OutputPanelSource {
  * two machines can both report `\\.\DISPLAY1` for different panels.
  *
  * Exported for the test, and for rung 10 to reuse rather than re-derive.
+ *
+ * **`outputHealth.monitorKeyOf` is the same function, deliberately
+ * duplicated** — read its docstring before "fixing" this. The panel
+ * needs this at runtime and every `multiOutput/` import here is
+ * type-only, so sharing one definition would put the IPC contract into
+ * the web entry chunk. Change both or neither.
  */
 export function monitorKey(monitor: OutputMonitor): string {
   return `${monitor.name ?? ''}@${monitor.position.x},${monitor.position.y}`

@@ -38,6 +38,8 @@ function record(label: string, on: OutputMonitor): OutputRecord {
     monitor: on,
     ready: false,
     lastEvent: null,
+    departing: false,
+    announcedClosing: false,
   }
 }
 

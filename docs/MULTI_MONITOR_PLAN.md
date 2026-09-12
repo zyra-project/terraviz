@@ -1737,6 +1737,44 @@ recurring crashes and obscures installation health.
 
 #### 1. Output webview crashes
 
+> **Landed.** `outputHealth.ts` (classification + crash-storm
+> guard), `OutputWindowHandle.onDestroyed`, the manager's
+> `handleDeparture`, and the output's `output_closing`
+> announcement. What is *not* here yet is the toast — the app has
+> no toast primitive, so the panel learns through
+> `onOutputsChanged` and an open panel repaints; a toast is its
+> own change. The `output_failure` / `output_removed` telemetry
+> below **has** since landed (`outputTelemetry.ts`), so step 31's
+> telemetry half is now checkable: a crash fires exactly one
+> `output_removed` with `reason: 'crash'` and one `output_failure`
+> with `kind: 'crash'`, `retries: 0`, `recovered: false` — zero and
+> false because this case's own row in the summary table gives a
+> crash no auto-recovery at all.
+>
+> One rule this case needs that the plan did not state: a
+> departure is persisted **only when it was deliberate**. A
+> hand-close rewrites the stored config without that output; a
+> crash leaves it in. The operator still wants a crashed output —
+> the display or the driver took it away — so dropping it would
+> turn a four-projector installation into a three-projector one
+> at the next launch, silently. It also bounds what an ordinary
+> quit can cost: `quit_app` is `app.exit(0)`, not a per-window
+> close, so if Tauri delivers each output's destroy to the
+> control window before the process goes, every one reads as a
+> crash (no `output_closing` precedes them). Unverified either
+> way on hardware — **worth a step in the next Appendix B pass:
+> quit with three outputs up, relaunch, confirm all three come
+> back.** With the split the worst that costs is some telemetry.
+>
+> One thing the build clarified about the detection rule. The
+> plan says the absence of a graceful ping distinguishes a crash
+> from an operator close, which is right, but it leaves out that
+> **the manager's own close produces both signals at once**:
+> Remove in the panel calls `close()`, which fires the output's
+> close-requested handler, which emits `output_closing`. So the
+> manager's intent has to be checked *before* the announcement,
+> not after, or every removal is logged as a hand-close.
+
 **Detection.** Manager listens for `WebviewWindow` close
 events. A crash arrives as a `WindowEvent::Destroyed`
 without a corresponding `output_closing` graceful-shutdown
@@ -2651,7 +2689,7 @@ without rolling the whole feature back.
 | 12a | `multi-output: window chrome — fullscreen, decorations, F11, idle cursor` | **Landed.** `src/services/windowChrome.ts` (shared by both windows), the F11 handler, the idle-cursor rule in `base.css`, and the upgrade of the Tools bar's existing fullscreen button. Two findings worth recording. First, §3.6 mechanism 2 was **already half-built**: a fullscreen button has shipped since §3.3, driving `document.requestFullscreen` directly — which is the whole answer in a browser and half of it in a packaged app, since it fullscreens the *webview* while leaving the native title bar and border in the captured signal. The button was upgraded rather than joined by a second one. Second, that same button read its label off `document.fullscreenElement`, which stays **null** when the native window goes fullscreen — so on desktop it would have offered "Enter fullscreen" over a window already in it, and F11 changes the state without `fullscreenchange` firing at all; the controller is now what it reads. Fullscreen and decorations are one operation because `setFullscreen(true)` alone leaves the title bar on some window managers and removes it on others, and decorations follow rather than lead so a failed fullscreen cannot strand an operator with an unmovable undecorated window. The desktop host is built **synchronously** and imports Tauri on first use, because the Tools menu reads the state while laying out its markup. F11 on an output passes `initial: true` and persists nothing — an output is fullscreen by construction and a title bar borrowed for calibration must not come back next launch. | Yes (additive) |
 | 12b | `multi-output: kiosk launch flag` | **Landed.** `--kiosk` and `TERRAVIZ_KIOSK=1` parsed in `src-tauri/src/lib.rs` (`main.rs` was already the 12-line shim this section predicted), applied in `setup()` behind `#[cfg(desktop)]`. "Before first paint" is **best-effort**, not guaranteed: `setup()` is the earliest point an `AppHandle` exists, and the static alternative in `tauri.conf.json` cannot be conditional on a flag. `TERRAVIZ_KIOSK=0` and an empty value mean *off* — a deployment templating one unit file across several machines sets the variable explicitly to disable kiosk, so the value is matched against an allowlist rather than tested for presence. The flag beats a falsy environment, since an operator adding it to one launch is deciding now while the environment is the installation's default. Decorations drop only after fullscreen succeeds, and every failure is logged and swallowed. One thing this rung had to add on the **TypeScript** side: the kiosk flag makes the native window fullscreen without the JS controller knowing, so `WindowChromeHost` gained an async `queryFullscreen()` seeded once at construction — without it the Tools button offers "Enter fullscreen" over a kiosk window and the first press is a no-op. That needs `core:window:allow-is-fullscreen`, added to `default.json` (`output.json` already had it). | Yes (additive) |
 | 12c | `multi-output: the Earth decoration the equirect path can carry` | The three effects §"What the equirect path does to the Earth decoration" says **cross** — day/night terminator, night lights, clouds — wired into `layerStack`'s fragment shader. **Landed.** Specified here first, then built exactly as specified, which is why the first hardware session's flat diffuse Earth is now day/night-shaded with city lights and cloud cover. Not a research question: the terminator is `dot(hit, uSunDir)` (the ray-march's hit point on the unit sphere *is* the normal), night lights are a second sampler gated by it, clouds are one more layer in a composite that already unrolls slots. The sun direction comes from `getSunPosition` in `src/utils/time.ts`, which the control globe already uses, so the two cannot disagree about where the sun is. **The four that do not cross stay out** — specular, atmosphere *shells*, ground shadow, sun sprite are not deferred, they are incoherent on this surface, and baking one in paints a fixed glare spot or limb ring onto a physical sphere in a place correct from exactly one vantage point. That is a rendering artifact that reads as a data feature, which is worse than its absence. So "as realistic as possible" on a sphere **is** diffuse + night lights + clouds + terminator; this rung is the whole of it. **Amended after this rung shipped:** the atmosphere's *shell* stays out for the reason above, but its **disc tint** was later found to cross — pinned to nadir the scattering integral is a function of sun angle alone, with no silhouette to be wrong about. That is what made the output's ocean black beside a blue one. It is not a fifth effect sneaking back in; it is the sharper test (what does this become at nadir?) applied to a row this table got half right. | Yes (additive) |
-| 13 | `multi-output: failure recovery — crashes, stalls, GPU loss, monitor unplug` | Manager gains crash detection (no-graceful-close window destroy → toast + record removal), 3-strikes-per-monitor crash storm guard, 2 s `availableMonitors()` poll for unplug detection, `getAll()` boot scan to reattach orphaned `output-*` windows after a control-window crash. Output gains `webglcontextlost` / `webglcontextrestored` listeners with full scene rebuild, IPC-silence watchdog (5 s → stale state, 60 s → orphan), one HLS stream rebuild on a `loadStream()` rejection with frozen last-good-frame (no retry ladder — `hlsService` already spends a 3× budget before rejecting). Outputs panel renders per-output health badges (healthy / stale / stalled / monitor-missing). New Tier A `output_failure` event fired from manager via `analytics/emitter.ts` with `{ kind, retries, recovered }` (Open Question 3 decided). See §3 "Failure recovery". | Yes (additive) |
+| 13 | `multi-output: failure recovery — crashes, stalls, GPU loss, monitor unplug` | Manager gains crash detection (no-graceful-close window destroy → toast + record removal), 3-strikes-per-monitor crash storm guard, 2 s `availableMonitors()` poll for unplug detection, `getAll()` boot scan to reattach orphaned `output-*` windows after a control-window crash. Output gains `webglcontextlost` / `webglcontextrestored` listeners with full scene rebuild, IPC-silence watchdog (5 s → stale state, 60 s → orphan), one HLS stream rebuild on a `loadStream()` rejection with frozen last-good-frame (no retry ladder — `hlsService` already spends a 3× budget before rejecting). Outputs panel renders per-output health badges (healthy / stale / stalled / monitor-missing). New Tier A `output_failure` event fired from manager via `analytics/emitter.ts` with `{ kind, retries, recovered }` (Open Question 3 decided). See §3 "Failure recovery". **Landed so far: 13a** (crash-vs-hand-close classification, the storm guard, record removal, `onOutputsChanged` for the panel) and **13b** (all three Tier A events, `outputTelemetry.ts`). Still open: health badges, the IPC-silence watchdog, the unplug poll, the single HLS rebuild, GPU context loss, the orphan boot scan, the toast (no toast primitive exists), and the `perf_sample` extension (needs an `OutputEvent` arm carrying drift — see Open Question 3). | Yes (additive) |
 | 14 | `multi-output: calibration tooling — test pattern + rotation offset` | `src/output/datasetMirror.ts` recognises the `__terraviz_calibration__` sentinel id and renders a procedural test pattern (8-step grayscale ramp at the equator, RGB color bars at lat ±30°, lat/lon graticule with color-coded equator + prime meridian, named anchor crosshairs, N/S pole labels, live resolution counter — ~80 LOC GLSL). `src/output/equirectRtt.ts` adds the `uRotationOffsetRad` longitude rotation applied before the camera-offset ray-march. `outputUI.ts` adds the per-output "Rotation offset (°)" numeric + slider and a "Calibration" submenu. Persisted config gains `rotationOffsetDeg`. See §3 "Calibration tooling". | Yes (additive) |
 | 15 | `multi-output: operator runbook` | `docs/MULTI_MONITOR_OPERATIONS.md` — the deployment half this plan has so far deferred, and which a spike showed is not optional. Covers: **checking which GPU the webview actually got** (the renderer string surfaced by commit 11's debug overlay) and the per-OS override for a hybrid-graphics machine, since the app's own `powerPreference` is inert and a silent landing on the iGPU is undiagnosable from logs; **measuring this machine's decoder budget** rather than trusting a constant, and entering it in the Outputs panel's budget field (commit 11); disabling screen savers and display sleep (Open Question 5's documented half); the kiosk autostart entry from §3.6; and what each Outputs-panel health badge means in front of an audience. No code. | **Yes** (docs) |
 
@@ -3401,7 +3439,49 @@ renderer somewhere" — which we don't. Direct RTT.
    the cost is one dot product and two extra samplers over
    the pass that has to run anyway. See "What the equirect
    path does to the Earth decoration".
-3. **Telemetry — DECIDED.** The output window itself emits
+3. **Telemetry — DECIDED, and landed** (rung 13b:
+   `src/services/multiOutput/outputTelemetry.ts`, wired from the
+   manager; positional layouts in `docs/ANALYTICS_QUERIES.md`,
+   panels in `grafana/dashboards/product-health.json`). The
+   schema below shipped as written, with three notes the build
+   added rather than changed. `output_added` is emitted from the
+   manager's private `spawn()` rather than from `addOutput`, so a
+   launch-time **restore** reports exactly as an operator's Add
+   does — the event describes an output existing, not a gesture,
+   and one call site is what makes that true by construction.
+   `framebuffer_bucket` snaps **down** to a rung, matching what
+   `outputScene` actually renders, so a `4k` bucket can never
+   stand for a window running 8K. And the reason enum's
+   `rejected-by-storm-guard` is emitted where it reads oddest and
+   means most — a spawn the guard refuses — because on a restore
+   that *is* a configured output that never came back. A spawn
+   the **decoder budget** refuses is deliberately not reported:
+   the panel already shows "N of M in use" and disables Add, and
+   an affordance the operator can see beats a report after the
+   fact. Only `kind: 'crash'` has a detector today; the other
+   four arrive with cases 2-5, one `emit()` each.
+
+   > **Re-identification, considered and accepted.** Review
+   > raised the one thing here that is not settled by the
+   > per-field invariants. `monitor_index` and
+   > `framebuffer_bucket` are each low-entropy and correctly
+   > bucketed, but on a *restore* they are read out of the
+   > persisted config and re-emitted **identically at every
+   > launch** — the output count, their indices and their rungs
+   > form a launch-stable tuple, on a population of
+   > multi-monitor desktop installs that is small. No new
+   > persistent identifier was added, so no escalation trigger
+   > in `ANALYTICS_CONTRIBUTING.md` fires, and the rotating
+   > in-memory session id is unchanged. The decision is that
+   > this is proportionate: it describes an *installation*
+   > rather than a person, and it adds a couple of bits over
+   > `os` / `screen_class` / `country`, which are already
+   > stable across launches for the same machine. Recorded here
+   > rather than left to be inferred from a module header,
+   > because the next person to add a field to these events
+   > should be adding it to a tuple whose shape someone has
+   > already looked at.
+   The output window itself emits
    nothing. Telemetry from a capture-clean LED-sphere
    surface would also be a capture-clean policy violation
    (§3.6) — outputs phone nothing home. Three new events
@@ -3410,8 +3490,21 @@ renderer somewhere" — which we don't. Direct RTT.
    - `output_added` — fields: `mode` (`'sos-equirect'`),
      `framebuffer_bucket` (`'1k' | '2k' | '4k' | '8k'`
      bucketed to avoid identifying exact resolutions),
-     `monitor_index` (0 = primary, 1+ = secondaries — never
-     the OS-reported monitor name).
+     `monitor_index` (the position in the monitor
+     enumeration — never the OS-reported monitor name).
+     **Corrected from "0 = primary, 1+ = secondaries",
+     which is not what shipped and would mislead an
+     analyst.** Index 0 is the first display
+     `availableMonitors()` returns, which is the primary on
+     Windows by definition and usually on macOS, but on X11
+     is whatever the enumeration happens to list first —
+     `xrandr --primary` can mark any of them. `outputUI`
+     asks the platform which is primary rather than
+     inferring it, for exactly that reason, and no
+     telemetry field carries the answer: a "primary vs
+     secondary" slice over this field would be quietly
+     wrong on the installations most likely to be running
+     a sphere.
    - `output_removed` — fields: `mode`, `reason`
      (`'operator-close' | 'crash' | 'monitor-gone' |
      'gpu-loss-timeout' | 'rejected-by-storm-guard'`).
@@ -3429,7 +3522,23 @@ renderer somewhere" — which we don't. Direct RTT.
    sample includes `output_count` and `sync_delta_p95_ms`
    (95th percentile of `local - broadcast` over the sample
    window). No new event type, just additional fields on a
-   tier-A event that already ships. Per
+   tier-A event that already ships.
+
+   > **Not landed with 13b, and it needs a decision first.**
+   > `output_count` is a read off `records`. `sync_delta_p95_ms`
+   > is not: the drift is measured *in the output*, by
+   > `outputSync` against its own decoder's `currentTime`, and
+   > there is no path back — every `OutputEvent` variant reports
+   > a state change, none carries a measurement. The control
+   > window cannot derive it either, since only the output knows
+   > where its own video is. So this needs a new `OutputEvent`
+   > arm carrying the drift `outputSync` already returns and
+   > rung 11's HUD already shows. That is a protocol change and
+   > its own commit, and it does **not** breach "outputs phone
+   > nothing home": the report goes to the manager over IPC, and
+   > the manager is what talks to the network. Landing it with
+   > case 3 (IPC silence) is the natural pairing — that case
+   > adds output→manager traffic anyway. Per
    `docs/ANALYTICS_CONTRIBUTING.md`'s reviewer checklist:
    none of these new fields require hashing (no free-text)
    or sanitisation; tier choice is essential because
@@ -3679,6 +3788,79 @@ occurrence (verify via `VITE_TELEMETRY_CONSOLE=true`).
 > workaround: it proves nothing about the pipeline
 > `datasetMirror` actually uses. Nothing client-side changes
 > either fact.
+
+### Results: first pass — Windows, 2026-09-11
+
+**This is not the qualification.** The preamble above says a
+dual-monitor Linux workstation gates it; this pass ran on
+Windows, which is **step 46**, parity. It happened first
+because that is the hardware that existed, which is a
+reasonable thing to do and a bad thing to forget: the Linux
+gate is still open, and nothing below should be read as
+clearing it.
+
+Setup, from step 1: control window on display 3, output
+3840x2160 on display 2, rendered 2:1. Telemetry on Essential.
+Devtools reachable with F12.
+
+**What ran.** Numbered steps 1-4, 7-8, 10-13a, 15-20 and 22-30,
+plus supplementary S1, S2, S6 and S7. Twenty-eight of those
+passed. Five failed: **5**, **13**, **29**, **S1** and **S2**.
+
+**Not run, and why.** Step 6 and step 21 both need the
+secondary physically disconnected, which the session did not
+do. Step 9's health badge and S4's stale-frame reporting are
+rung 13, which is not built. Step 14 is blocked on a control
+window that can stack datasets at all (see 14a). S3, S5 and
+S5b were not reached.
+
+**Measurements worth keeping.** Step 12b read a sync delta
+ranging -1 ms to about -30 ms at 30 fps against a 4096x2048
+framebuffer, on a global video over sixty seconds — comfortably
+inside the 200 ms p95 the acceptance criteria ask for, and the
+number to compare the next pass against. Step 12a passed, so
+`syncByRatio` carries a dataset with no time axis on real
+hardware. Step 13a passed, so a bbox lands where it should:
+the failure in step 13 was lighting and playback, not
+placement.
+
+**The five failures, and what came of them.** All are fixed in
+code and **none is confirmed on hardware** — that is what the
+next pass is for.
+
+| Step | Reported | Cause | Fixed by |
+|---|---|---|---|
+| 5 | No position diagram; nothing marked primary | Never built; the step described an intent | `880ba315` — the diagram, and primary asked of the platform rather than inferred |
+| 13 | Dataset still lit with day/night on the output | The decoration composited *under* the layers, which only hides it for opaque global coverage | `64256a1c` — the Earth treatment is idle-only |
+| 13 | "Playback seems to struggle", sync a permanent dash | Seek loop: a seek slower than the settle window earns another, and the element is mid-seek on ~99% of frames | `fa7a29ee` + `d5516a3e` — the seek-cost floor, and the bounds lifted while paused |
+| 18 | Closing the output restored normal playback on the **control** window | Same loop, plus a playhead diff forcing a redraw at the control window's frame rate | `fa7a29ee`, `9c139d22` |
+| 29 | Ctrl+Q did nothing | Never bound; the step asserted it as if it existed | `e7b021db` |
+| S1, S2 | "Sync seems to break" / shows a dash | The same seek loop, seen through a HUD that could not say why | `fa7a29ee`, plus the HUD naming the reason beside the dash |
+
+Step 18 is worth reading twice. It is recorded as a *pass* —
+the output closed cleanly — and the sentence that matters is
+the aside about the control window recovering. A checklist step
+passing while its note describes a defect is the shape of thing
+to watch for in the next pass.
+
+**S7 and step 13 are the same bug from two sides,** which is
+the most useful thing this pass produced. S7 passed: a Mars
+dataset showed no terminator, no night lights, no clouds. It
+passed for exactly the reason step 13 failed — under-composited
+decoration *is* invisible beneath an opaque global texture, and
+a Mars dataset is one. The rule only broke for the translucent
+bbox overlay in step 13. A pass and a failure agreeing on the
+mechanism is stronger evidence than either alone, and it is why
+`64256a1c` gates on the slot count rather than tuning the
+blend.
+
+**What the next pass has to cover**, beyond re-running 5, 13,
+18, 29, S1 and S2 against the fixes: the steps this one did not
+reach (6, 21, S3), and then the Linux run that actually
+qualifies. Steps 12c and 13b were added afterwards to make the
+sync field and the bbox-video case answerable rather than
+ambiguous; 5a was added because "nothing marked primary" is a
+pass on X11 and a failure on the other two.
 
 ### Commit 9 — Tools → Outputs panel (first user-reachable)
 
@@ -3940,7 +4122,16 @@ occurrence (verify via `VITE_TELEMETRY_CONSOLE=true`).
     hatch). F11 again: title bar disappears.
 29. **Kiosk launch.** Quit. Launch with `--kiosk` (or
     `TERRAVIZ_KIOSK=1` env). Control window is fullscreen +
-    decorationless from first paint. Cmd/Ctrl+Q exits cleanly.
+    decorationless from first paint. Ctrl+Q exits cleanly (Cmd+Q
+    on macOS, which the system menu already provides — Ctrl+Q is
+    bound on all three platforms and Cmd+Q is deliberately left
+    to the OS rather than handled twice). The first pass recorded
+    this as a failure — "Ctrl-Q doesn't seem to do anything,
+    Alt-F4 does" — and it was right: the step asserted the
+    shortcut as if it existed and nothing bound it. Alt+F4 is the
+    Windows answer and there is no portable one, which is why a
+    kiosk window with no close button, no title bar and no menu
+    bar needed this.
     Then open Tools: the fullscreen button must already read
     "Exit fullscreen" — that is `queryFullscreen()` seeding the
     controller from a window Rust made fullscreen before any of

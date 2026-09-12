@@ -98,6 +98,23 @@ export interface OutputLinkHost {
   monitorName(): Promise<string | null>
   listen(event: string, handler: (payload: unknown) => void): Promise<() => void>
   emit(event: string, payload: unknown): Promise<void>
+  /**
+   * Called when this window is *about* to close — Alt+F4, a window
+   * manager's close button, the title bar an operator got back with
+   * F11 — with a chance to speak before it goes (rung 13).
+   *
+   * This is the only thing that separates an operator closing an output
+   * by hand from that output crashing. The manager classifies a destroy
+   * it did not ask for as a crash unless an `output_closing` arrived
+   * first, because a killed process cannot report its own death — so
+   * without this hook every deliberate close is logged as a crash, and
+   * three of them in a minute blocklist a perfectly good monitor.
+   *
+   * Optional, and its absence degrades exactly that far: the link still
+   * works, closes are merely misread. That is the right failure for a
+   * host that has no such notion (the static fixture page has none).
+   */
+  onCloseRequested?(handler: () => void): Promise<void>
 }
 
 /** What one accepted (or rejected) message did to the held state. */
@@ -403,6 +420,18 @@ export async function connectOutputLink(
     }
   })
 
+  // Announce the close before announcing readiness, so a window torn
+  // down during a slow boot still says so. `emit` is fired and not
+  // awaited: the window is closing underneath it and there is no later
+  // point at which awaiting could help — the manager either receives it
+  // before the destroy or classifies a crash, which is the documented
+  // failure direction.
+  await host.onCloseRequested?.(() => {
+    void host
+      .emit(OUTPUT_EVENT, { type: 'output_closing', label: host.label })
+      .catch(err => logger.warn('[output] could not announce the close:', err))
+  })
+
   // After both listeners, never before: the manager answers this by
   // sending the first full snapshot and this window's config straight
   // away.
@@ -476,6 +505,13 @@ export async function createTauriLinkHost(): Promise<OutputLinkHost> {
     },
     async emit(event, payload) {
       await eventApi.emit(event, payload)
+    },
+    async onCloseRequested(handler) {
+      // Deliberately not `preventDefault()`-ing the close. The operator
+      // asked for this window to go and it goes; the announcement is a
+      // courtesy to the manager, not a veto, and a hook that could
+      // block would be a hook that can strand an undecorated window.
+      await self.onCloseRequested(() => handler())
     },
   }
 }

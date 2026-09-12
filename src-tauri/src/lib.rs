@@ -62,6 +62,31 @@ fn __dev_force_panic() {
     }
 }
 
+/// Exit the application.
+///
+/// Exists for the keyboard quit a kiosk window has no other way to
+/// reach (`docs/MULTI_MONITOR_PLAN.md` §3.6, rung 9 step 29). Launched
+/// with `--kiosk` the main window is fullscreen and decorationless, so
+/// there is no close button and no title bar to right-click; Alt+F4 is
+/// a Windows answer and the checklist asks for Ctrl+Q everywhere.
+///
+/// A command rather than `tauri-plugin-process` because this is the
+/// only thing the app would use that plugin for, and rather than a
+/// menu accelerator because a window with no menu bar — which is what
+/// kiosk mode is — does not reliably fire one.
+///
+/// **Who may call it is already decided by the capability split.**
+/// `invoke` needs `core:default`, which `capabilities/default.json`
+/// grants the main window and `capabilities/output.json` deliberately
+/// withholds. So an output cannot quit the installation even if its
+/// webview is compromised, and that is structural rather than a
+/// convention the caller has to keep. The `windowChrome` hotkey is
+/// wired only in the control window on top of that.
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
 /// CLI flag and environment variable that launch straight into kiosk
 /// mode (`docs/MULTI_MONITOR_PLAN.md` §3.6 mechanism 3).
 ///
@@ -230,6 +255,7 @@ pub fn run() {
             download_commands::get_download_path,
             download_commands::get_downloads_size,
             download_commands::is_downloading,
+            quit_app,
             __dev_force_panic,
         ])
         .run(tauri::generate_context!())

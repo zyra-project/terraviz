@@ -93,6 +93,17 @@ export interface WindowChromeHost {
    * Optional: the DOM host answers synchronously and needs none.
    */
   queryFullscreen?(): Promise<boolean | null>
+  /**
+   * End the application.
+   *
+   * **Optional, and its absence is the web build's safety.** A browser
+   * tab cannot close itself unasked, and Ctrl+Q is Firefox's own quit —
+   * binding it there would either do nothing or take the browser down.
+   * The DOM host therefore does not implement this, and
+   * `createQuitHotkey` is inert without it by construction rather than
+   * by a second platform test at the call site.
+   */
+  quit?(): Promise<void>
 }
 
 /** The same desktop gate `bootMultiOutput` and the output entry apply. */
@@ -180,6 +191,84 @@ export function isFullscreenHotkey(ev: KeyboardEvent): boolean {
     !ev.shiftKey &&
     !ev.defaultPrevented
   )
+}
+
+/**
+ * Is this the quit hotkey?
+ *
+ * Ctrl+Q, and the clauses are the ones `isFullscreenHotkey` learned the
+ * hard way plus one this key needs more than F11 does. `repeat` matters
+ * here in a way it does not for a toggle: holding the keys down on a
+ * toggle strobes a window, while holding them on *this* queues a second
+ * exit behind the one already tearing the process down.
+ *
+ * **Ctrl only, never Cmd.** macOS already quits on Cmd+Q through the
+ * standard application menu, so binding it here would put two handlers
+ * on one keystroke and race the OS for it. Ctrl+Q is unbound on macOS
+ * and is the muscle memory operators bring from the other two
+ * platforms, so it is wired everywhere and Cmd+Q is left to the system.
+ * That is also why `metaKey` is an explicit no rather than an omission:
+ * Ctrl+Cmd+Q must reach the OS untouched.
+ */
+export function isQuitHotkey(ev: KeyboardEvent): boolean {
+  return (
+    // Lower-cased because `key` follows the shift state, and compared
+    // rather than read off `code` so a non-QWERTY layout gets the key
+    // its legend shows.
+    ev.key.toLowerCase() === 'q' &&
+    ev.ctrlKey &&
+    !ev.repeat &&
+    !ev.altKey &&
+    !ev.metaKey &&
+    !ev.shiftKey &&
+    !ev.defaultPrevented
+  )
+}
+
+export interface QuitHotkeyOptions {
+  host: WindowChromeHost
+  /** Where the handler is attached. Injectable so a test needs no
+   *  page, the same seam the fullscreen controller uses. */
+  target?: Pick<EventTarget, 'addEventListener' | 'removeEventListener'> | null
+}
+
+/**
+ * Bind Ctrl+Q to ending the application (rung 9 step 29).
+ *
+ * The checklist asserted "Cmd/Ctrl+Q exits cleanly" as if it already
+ * existed; nothing bound it. It matters for the kiosk launch
+ * specifically: `--kiosk` brings the window up fullscreen and
+ * decorationless, so there is no close button, no title bar to
+ * right-click, and no menu bar. Alt+F4 answers that on Windows and
+ * nothing answers it portably.
+ *
+ * Wired in the control window only. An output keeps F11 as its escape
+ * hatch — recover the title bar, then close the one window — because
+ * ending the whole installation from the projector is not what an
+ * operator at the sphere means by "get me out of this". The capability
+ * split enforces the same thing a layer down: an output has no
+ * `core:default`, so its `quit` would be refused even if it were wired.
+ *
+ * Returns a disposer.
+ */
+export function createQuitHotkey(options: QuitHotkeyOptions): () => void {
+  const target = options.target ?? (typeof window !== 'undefined' ? window : null)
+  const quit = options.host.quit
+
+  const onKeyDown = (ev: Event): void => {
+    if (!isQuitHotkey(ev as KeyboardEvent)) return
+    // Nothing to do and nothing to claim: on the web this is Firefox's
+    // own quit, and swallowing it would be a worse answer than leaving
+    // it alone.
+    if (!quit) return
+    // Claimed only once we know we are acting on it, so a modified or
+    // repeated Ctrl+Q still reaches whatever else wanted it.
+    ;(ev as KeyboardEvent).preventDefault()
+    void quit().catch(err => logger.warn('[windowChrome] could not exit:', err))
+  }
+
+  target?.addEventListener('keydown', onKeyDown)
+  return () => target?.removeEventListener('keydown', onKeyDown)
 }
 
 export interface FullscreenController {
@@ -367,6 +456,21 @@ export function createDesktopChromeHost(): WindowChromeHost {
       // `core:window:allow-is-fullscreen` is granted to `main` and to
       // `output-*`. A refusal costs the seeded state, not the feature.
       return win ? await win.isFullscreen() : dom.isFullscreen()
+    },
+    async quit() {
+      // Not `getCurrentWindow().close()`: Tauri exits when the *last*
+      // window closes, and an installation with outputs up has several,
+      // so closing the control window would leave the app running with
+      // its operator surface gone — worse than doing nothing.
+      //
+      // `invoke` needs `core:default`, which `default.json` grants the
+      // main window and `output.json` withholds, so this resolves in
+      // the control window and is refused in an output. That refusal is
+      // the point rather than a limitation, and it is why the failure
+      // is logged rather than thrown: a hotkey that cannot fire should
+      // not take down the render loop that heard it.
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('quit_app')
     },
   }
 }

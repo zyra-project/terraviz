@@ -164,6 +164,7 @@ must be corrected.
 | `vr_interaction` | **B** | `src/services/vrInteraction.ts` (per-gesture, throttled) |
 | `error_detail` | **B** | `src/analytics/errorCapture.ts` (adds sanitized stack) |
 | `tour_question_answered` | **B** | `src/services/tourEngine.ts` |
+| `output_added` / `output_removed` / `output_failure` | A | `src/services/multiOutput/manager.ts` via `src/services/multiOutput/outputTelemetry.ts` — the multi-monitor control window. The **output windows emit nothing**: §3.6 of `MULTI_MONITOR_PLAN.md` keeps them capture-clean, and the two failures an output could report about itself (a crash, an IPC silence) are the two it cannot. Categorical fields only — the framebuffer is a rung name and the monitor an enumeration index, never a display name |
 | `voice_interaction` | **B** | `src/ui/chatUI.ts` (Orbit voice STT/TTS — no transcript or audio, only provider / lang / duration / success; hands-free turns carry `trigger` = `open-mic`/`push-to-talk`/`wake-word`, a `wake-word` turn with `success:false` is a false fire, and a TTS barge-in sets `interrupted` — the §10.4 exhibit-tuning numbers) |
 
 Per-event field documentation lives in the type definitions

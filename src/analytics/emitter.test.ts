@@ -2,7 +2,7 @@
 // Copyright 2026 The Zyra Project
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import type { LayerLoadedEvent, DwellEvent, FeedbackEvent } from '../types'
+import type { LayerLoadedEvent, DwellEvent, FeedbackEvent, TelemetryEvent } from '../types'
 import {
   emit,
   flush,
@@ -55,6 +55,24 @@ function feedback(): FeedbackEvent {
   }
 }
 
+/** The three multi-monitor output events. Desktop-only in practice,
+ *  which is exactly why their gating is worth asserting here rather
+ *  than only against `tierGate()`: nothing in the multiOutput suites
+ *  touches the real queue, so without this nobody checks that an
+ *  installation-health event actually survives the default tier. */
+function outputEvents(): TelemetryEvent[] {
+  return [
+    {
+      event_type: 'output_added',
+      mode: 'sos-equirect',
+      framebuffer_bucket: '4k',
+      monitor_index: 1,
+    },
+    { event_type: 'output_removed', mode: 'sos-equirect', reason: 'crash' },
+    { event_type: 'output_failure', kind: 'crash', retries: 0, recovered: false },
+  ]
+}
+
 // --- Tests ---
 
 describe('emitter — tier gate', () => {
@@ -86,6 +104,29 @@ describe('emitter — tier gate', () => {
     emit(layerLoaded())
     emit(dwell())
     expect(size()).toBe(2)
+  })
+
+  it('queues the multi-monitor output events on essential', () => {
+    // The tier choice for these is load-bearing: the whole argument
+    // for Tier A is that an operator running a museum sphere needs a
+    // crash to be visible, and Research is an opt-in nearly none of
+    // them will find. Asserted at the emit boundary, not against
+    // `tierGate()` — the multiOutput suites stub this module out, so
+    // this is the only place the real queue sees them.
+    setTier('essential')
+    for (const event of outputEvents()) emit(event)
+    expect(size()).toBe(3)
+    expect(flush().map(e => e.event_type)).toEqual([
+      'output_added',
+      'output_removed',
+      'output_failure',
+    ])
+  })
+
+  it('drops the multi-monitor output events when tier is off', () => {
+    setTier('off')
+    for (const event of outputEvents()) emit(event)
+    expect(size()).toBe(0)
   })
 
   it('tierGate is a pure function of tier + event type', () => {

@@ -37,6 +37,7 @@ import {
   type OutputGlobeState,
   type OutputStateMessage,
 } from '../services/multiOutput/protocol'
+import { until } from '../test-utils'
 
 function dataset(id: string): MirroredDataset {
   return {
@@ -598,5 +599,43 @@ describe('changesPicture', () => {
     // together. Testing `some` rather than `every` is what keeps that
     // load from being suppressed by the two keys beside it.
     expect(changesPicture(['playback', 'dataset'] as StateKey[])).toBe(true)
+  })
+})
+
+describe('announcing a close (rung 13)', () => {
+  it('emits output_closing when the window is asked to close', async () => {
+    // The only thing separating an operator's Alt+F4 from a crash. A
+    // killed process cannot report its own death, so without this
+    // announcement every deliberate close is logged as a crash — and
+    // three in a minute blocklist a working monitor.
+    const host = fakeHost()
+    // A holder rather than a bare `let`: TypeScript narrows a variable
+    // assigned only inside a callback to its initialiser, and would
+    // reject the call below as unreachable.
+    const closer: { fire?: () => void } = {}
+    host.onCloseRequested = async handler => {
+      closer.fire = handler
+    }
+    await connectOutputLink(host)
+    const before = host.emit.mock.calls.length
+
+    closer.fire?.()
+    await until(
+      () => host.emit.mock.calls.length > before,
+      'the closing announcement',
+    )
+
+    expect(host.emit.mock.calls.at(-1)?.[1]).toMatchObject({
+      type: 'output_closing',
+      label: host.label,
+    })
+  })
+
+  it('connects on a host that has no close notion at all', async () => {
+    // The static fixture page. Losing the announcement costs a
+    // misclassified close, never the link.
+    const host = fakeHost()
+    delete host.onCloseRequested
+    await expect(connectOutputLink(host)).resolves.toBeTruthy()
   })
 })

@@ -125,6 +125,7 @@ import {
 import {
   createFullscreenController,
   createIdleCursor,
+  createQuitHotkey,
   resolveChromeHost,
   restoreOnLaunch,
   type FullscreenController,
@@ -4212,10 +4213,14 @@ class InteractiveSphere {
    * `restoreOnLaunch` holds both halves of that test.
    */
   private initWindowChrome(): void {
-    const fullscreen = createFullscreenController({
-      host: resolveChromeHost(),
-      persist: true,
-    })
+    const host = resolveChromeHost()
+    const fullscreen = createFullscreenController({ host, persist: true })
+    // Ctrl+Q, the control window only. A kiosk launch leaves no close
+    // button, no title bar and no menu bar, so without this the only
+    // way out on Linux is a window-manager binding that may not exist.
+    // Inert on the web by construction: the DOM host implements no
+    // `quit`, which is what stops this swallowing Firefox's own Ctrl+Q.
+    createQuitHotkey({ host })
     const idleCursor = createIdleCursor()
     // Only while fullscreen: hiding the pointer of a windowed app the
     // operator is still driving would be a bug, not a feature.

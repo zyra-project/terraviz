@@ -413,6 +413,46 @@ PCVR session and buckets as `pcvr`).
 `error_detail` adds a `stack` blob at `blob9` (sanitized stack
 frame list).
 
+### `output_added` / `output_removed` / `output_failure` (Tier A)
+
+Multi-monitor output windows
+(`docs/MULTI_MONITOR_PLAN.md` §3, rung 13). All three fire from the
+**control window** — an output window emits nothing, ever, because §3.6
+keeps it capture-clean. Categorical fields only: no free text to hash,
+no coordinates to round, no device string. The one field that could
+identify hardware is `monitor_index`, an index into the enumeration,
+never the OS-reported display name.
+
+| Position | Field (output_added) | Field (output_removed) | Field (output_failure) |
+|---|---|---|---|
+| `blob5` | `framebuffer_bucket` (`1k` / `2k` / `4k` / `8k`) | `mode` | `kind` |
+| `blob6` | `mode` (`sos-equirect`) | `reason` | `recovered` (`true` / `false`) |
+| `double1` | `client_offset_ms` | `client_offset_ms` | `client_offset_ms` |
+| `double2` | `monitor_index` | — | `retries` |
+
+`output_removed.reason` is one of `operator-close`, `crash`,
+`monitor-gone`, `gpu-loss-timeout`, `rejected-by-storm-guard`.
+`operator-close` covers both halves of a deliberate close (the Outputs
+panel's Remove and the window's own close button) — the manager keeps
+those apart internally, but the interesting split for a dashboard is
+deliberate-versus-not. `rejected-by-storm-guard` is a **configured**
+output that never came back, so it has no paired `output_added`.
+
+`output_failure.kind` is one of `crash`, `hls-stalled`, `ipc-silence`,
+`gpu-loss`, `monitor-unplug`. A crash emits **both** an
+`output_removed` (reason `crash`) and an `output_failure` (kind
+`crash`) — the first answers "how many outputs stopped and why", the
+second "how healthy is this installation".
+
+> **Landed so far:** `crash` is the only `kind` with a detector, and
+> `monitor-gone` / `gpu-loss-timeout` are the only `reason`s without
+> one. The enums are complete now so a dashboard pinned to them does
+> not have to change when failure-recovery cases 2-5 ship.
+
+A framebuffer width that is not a rung on the ladder reports the rung
+**below** it, matching what `outputScene` actually renders — so a
+`4k` bucket never means a window running 8K.
+
 ### Tier B catalog (research mode only)
 
 Tier B events (`dwell`, `orbit_*`, `browse_search`, `vr_interaction`,

@@ -231,7 +231,8 @@ describe('product-health dashboard — Phase 3b asset migration row', () => {
     // and see the new content:
     //   - 3c/F: version 9 (tour migration row)
     //   - 3pa/F: version 10 (publisher portal row)
-    expect(dashboard.version).toBe(10)
+    //   - multi-monitor rung 13: version 11 (output row)
+    expect(dashboard.version).toBe(11)
   })
 })
 
@@ -349,6 +350,76 @@ describe('product-health dashboard — Phase 3pa publisher row', () => {
         if (sql.includes('route')) {
           expect(sql).toMatch(/blob5\s+AS\s+route/)
         }
+      }
+    }
+  })
+})
+
+
+describe('product-health dashboard — multi-monitor output row (rung 13)', () => {
+  const dashboard = load()
+  const outputPanels = dashboard.panels.filter(p =>
+    p.title.startsWith('Multi-monitor outputs'),
+  )
+
+  it('exposes the three output panels', () => {
+    expect(outputPanels).toHaveLength(3)
+    const titles = outputPanels.map(p => p.title).sort()
+    expect(titles).toEqual([
+      'Multi-monitor outputs — failures by kind',
+      'Multi-monitor outputs — removals by reason',
+      'Multi-monitor outputs — windows opened per day by framebuffer bucket',
+    ])
+  })
+
+  it('places the row below the publisher row rather than on top of it', () => {
+    const ys = new Set(outputPanels.map(p => p.gridPos.y))
+    expect(ys.size).toBe(1)
+    // The publisher-portal row sits at y=58 and is 8 tall.
+    expect([...ys][0]).toBe(66)
+  })
+
+  it('pins one output event type per panel', () => {
+    const pinned = outputPanels.map(p => {
+      const sql = p.targets[0].url_options?.data ?? ''
+      return /blob1 = '(output_[a-z]+)'/.exec(sql)?.[1]
+    })
+    expect(pinned.sort()).toEqual(['output_added', 'output_failure', 'output_removed'])
+  })
+
+  it('reads each field at its alphabetical position', () => {
+    // Walking each event's own fields alphabetically, after the four
+    // server-stamped blobs and excluding `event_type`. A field added
+    // ahead of one of these shifts it and fails here rather than
+    // silently re-labelling a dashboard column.
+    //
+    //   output_added:   client_offset_ms → double1
+    //                   framebuffer_bucket → blob5
+    //                   mode → blob6
+    //                   monitor_index → double2
+    //   output_removed: client_offset_ms → double1
+    //                   mode → blob5, reason → blob6
+    //   output_failure: client_offset_ms → double1
+    //                   kind → blob5, recovered → blob6, retries → double2
+    const byEvent = (type: string) =>
+      outputPanels.find(p => (p.targets[0].url_options?.data ?? '').includes(`'${type}'`))!
+        .targets[0].url_options!.data!
+
+    expect(byEvent('output_added')).toMatch(/blob5\s+AS\s+framebuffer_bucket/)
+    expect(byEvent('output_removed')).toMatch(/blob6\s+AS\s+reason/)
+    expect(byEvent('output_failure')).toMatch(/blob5\s+AS\s+kind/)
+    expect(byEvent('output_failure')).toMatch(/blob6\s+AS\s+recovered/)
+    expect(byEvent('output_failure')).toMatch(/double2\)\s+AS\s+max_retries/)
+  })
+
+  it('never reads a blob position these events do not fill', () => {
+    // Each carries two own-string fields, so blob7 and beyond hold
+    // whatever the last truncation left. Reading one would render a
+    // column of another event's data with a confident heading.
+    for (const panel of outputPanels) {
+      for (const target of panel.targets) {
+        const sql = target.url_options?.data ?? ''
+        expect(sql).not.toMatch(/blob([7-9]|1\d)\b/)
       }
     }
   })

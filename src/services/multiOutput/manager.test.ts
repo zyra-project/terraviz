@@ -16,7 +16,15 @@
  * without three monitors.
  */
 
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+
+// The manager reports to telemetry through `outputTelemetry`, which
+// emits through this barrel. Stubbed rather than left real so the
+// payloads can be asserted, and so a case that is not about telemetry
+// does not queue events into a shared emitter for the next one to see.
+vi.mock('../../analytics', () => ({ emit: vi.fn() }))
+
+import { emit } from '../../analytics'
 import {
   DEFAULT_FRAMEBUFFER_WIDTH,
   OUTPUT_RENDER_CONFIG_EVENT,
@@ -39,6 +47,15 @@ import {
   type OutputConfigStore,
   type PersistedOutputConfig,
 } from './outputPersistence'
+import { CRASH_STORM_LIMIT } from './outputHealth'
+
+/** Telemetry payloads of one event type, in the order they were sent. */
+function reported(eventType: string): Record<string, unknown>[] {
+  return vi
+    .mocked(emit)
+    .mock.calls.map(([event]) => event as unknown as Record<string, unknown>)
+    .filter(event => event.event_type === eventType)
+}
 
 /** A three-monitor desk shaped like the spike's: the primary at the
  *  origin, one to its **left** at a negative x, one to its right. */
@@ -119,6 +136,8 @@ function createFakeHost(options: FakeOptions = {}) {
   const emitted: Emitted[] = []
   const registrations: Registration[] = []
   const closed: string[] = []
+  /** Per-label destroy handlers, so a test can fire one. */
+  const destroyers = new Map<string, () => void>()
 
   const host: MultiOutputHost = {
     availableMonitors: async () => monitors,
@@ -146,6 +165,12 @@ function createFakeHost(options: FakeOptions = {}) {
           if (options.failClose) throw new Error('close rejected')
           closed.push(label)
         },
+        // Captured rather than ignored so a test can destroy a window
+        // the way the OS would — which is the only way to reach the
+        // crash path at all.
+        onDestroyed: async handler => {
+          destroyers.set(label, handler)
+        },
       }
       return handle
     },
@@ -172,6 +197,8 @@ function createFakeHost(options: FakeOptions = {}) {
     calls,
     emitted,
     closed,
+    /** Destroy a window the way the OS does. */
+    destroy: (label: string) => destroyers.get(label)?.(),
     send,
     /** How many subscriptions are currently live. */
     activeListeners: () => registrations.filter(r => r.active).length,
@@ -1100,6 +1127,7 @@ describe('restoreOutputs', () => {
         setFullscreen: async () => {},
         show: async () => {},
         close: async () => { fake.closed.push(label) },
+        onDestroyed: async () => {},
       }
     })
 
@@ -1262,5 +1290,365 @@ describe('restoreOutputs', () => {
     // they find out it moved.
     expect(store.current().outputs.map(o => o.label)).toEqual(['output-1'])
     expect(store.current().autoRestoreOnLaunch).toBe(true)
+  })
+})
+
+/**
+ * Departures (rung 13, failure recovery case 1).
+ *
+ * Before this the manager recorded output events and acted on none, so
+ * a window that went away stayed in `records` — still receiving diffs,
+ * still holding a decoder slot, still listed in the panel. Every case
+ * here is a way that shows up in front of an audience.
+ */
+describe('an output window that goes away', () => {
+  it('drops a crashed output from the records', async () => {
+    const fake = createFakeHost()
+    const manager = makeManager(fake.host)
+    await manager.addOutput({ monitorIndex: 0 })
+    expect(manager.outputs()).toHaveLength(1)
+
+    // Destroyed having said nothing — a killed webview process.
+    fake.destroy('output-1')
+
+    expect(manager.outputs()).toHaveLength(0)
+  })
+
+  it('frees the crashed output’s decoder slot', async () => {
+    // The reason a lingering record is not merely untidy: it counts
+    // against the budget, so an operator replacing a crashed output can
+    // be refused on behalf of a window that no longer exists.
+    const fake = createFakeHost()
+    const manager = makeManager(fake.host, {
+      machineDecoderBudget: () => 2,
+      controlPanels: () => 1,
+    })
+    await manager.addOutput({ monitorIndex: 0 })
+    expect(manager.decoderLoad().used).toBe(2)
+
+    fake.destroy('output-1')
+
+    expect(manager.decoderLoad().used).toBe(1)
+  })
+
+  it('stops broadcasting to a window that is gone', async () => {
+    const fake = createFakeHost()
+    const manager = makeManager(fake.host)
+    await manager.addOutput({ monitorIndex: 0 })
+    fake.emitted.length = 0
+
+    fake.destroy('output-1')
+    await manager.applyState({ simulationDate: '2026-01-01T00:00:00.000Z' })
+
+    expect(fake.emitted).toHaveLength(0)
+  })
+
+  it('tells an operator’s own close apart from a crash', async () => {
+    // An output closed with Alt+F4 announces itself first. Both end in
+    // a destroy, and only the announcement separates them — which is
+    // why the output emits `output_closing` at all.
+    //
+    // Two things make this assertion mean something. The link has to be
+    // **open**, or the announcement reaches nobody and the departure is
+    // a silent destroy — the exact case this is meant to tell apart.
+    // And it has to run the guard's full count: one misread close looks
+    // identical to one correctly-read close, because a single crash
+    // does not blocklist anything.
+    const fake = createFakeHost()
+    const manager = makeManager(fake.host)
+    await manager.start()
+
+    for (let i = 0; i < CRASH_STORM_LIMIT; i++) {
+      const record = await manager.addOutput({ monitorIndex: 0 })
+      fake.send({ type: 'output_closing', label: record.label })
+      fake.destroy(record.label)
+      expect(manager.outputs()).toHaveLength(0)
+    }
+
+    // Three deliberate closes must not blocklist a perfectly good
+    // monitor — an operator rearranging their displays would lock
+    // themselves out of one.
+    await expect(manager.addOutput({ monitorIndex: 0 })).resolves.toBeTruthy()
+  })
+
+  it('does not treat its own close as a crash', async () => {
+    const fake = createFakeHost()
+    const manager = makeManager(fake.host)
+
+    for (let i = 0; i < CRASH_STORM_LIMIT; i++) {
+      const record = await manager.addOutput({ monitorIndex: 0 })
+      await manager.removeOutput(record.label)
+      // The destroy arrives after the close resolves, as it does in
+      // Tauri — the record is already gone and there is nothing to
+      // classify.
+      fake.destroy(record.label)
+    }
+
+    // Removing three outputs is not a storm. If it were, an operator
+    // rearranging their displays would lock themselves out.
+    await expect(manager.addOutput({ monitorIndex: 0 })).resolves.toBeTruthy()
+  })
+
+  it('refuses a monitor that crashed three outputs in a minute', async () => {
+    const fake = createFakeHost()
+    const manager = makeManager(fake.host)
+
+    for (let i = 0; i < CRASH_STORM_LIMIT; i++) {
+      const record = await manager.addOutput({ monitorIndex: 0 })
+      fake.destroy(record.label)
+    }
+
+    await expect(manager.addOutput({ monitorIndex: 0 })).rejects.toThrow(/refusing outputs/)
+  })
+
+  it('blocks only the monitor that did it', async () => {
+    const fake = createFakeHost()
+    const manager = makeManager(fake.host)
+
+    for (let i = 0; i < CRASH_STORM_LIMIT; i++) {
+      const record = await manager.addOutput({ monitorIndex: 0 })
+      fake.destroy(record.label)
+    }
+
+    // The other display is fine and must stay usable — the whole point
+    // of keying the guard.
+    await expect(manager.addOutput({ monitorIndex: 1 })).resolves.toBeTruthy()
+  })
+
+  it('keeps a crashed output in the config, so a relaunch brings it back', async () => {
+    // The operator still wants that output — the display took it away.
+    // Dropping it turns a four-projector installation into a
+    // three-projector one silently, which is the invisible failure this
+    // module is written against. It also bounds what an ordinary quit
+    // can cost: `quit_app` is `app.exit(0)`, so if Tauri delivers the
+    // destroys here first they all read as crashes, and without this
+    // rule every shutdown would wipe the restore config.
+    const fake = createFakeHost()
+    const store = memoryStore({ autoRestoreOnLaunch: true })
+    const manager = makeManager(fake.host, { store })
+    await manager.addOutput({ monitorIndex: 0 })
+    expect(store.current().outputs).toHaveLength(1)
+
+    fake.destroy('output-1')
+
+    expect(manager.outputs()).toHaveLength(0)
+    expect(store.current().outputs.map(o => o.label)).toEqual(['output-1'])
+  })
+
+  it('drops an output the operator closed by hand from the config', async () => {
+    // The other half, and the reason the rule is a split rather than
+    // "never persist a departure": a deliberate close that came back
+    // next launch would look broken rather than honoured.
+    const fake = createFakeHost()
+    const store = memoryStore({ autoRestoreOnLaunch: true })
+    const manager = makeManager(fake.host, { store })
+    await manager.start()
+    await manager.addOutput({ monitorIndex: 0 })
+    expect(store.current().outputs).toHaveLength(1)
+
+    fake.send({ type: 'output_closing', label: 'output-1' })
+    fake.destroy('output-1')
+
+    expect(store.current().outputs).toEqual([])
+  })
+
+  it('notifies a listener so an open panel can repaint', async () => {
+    // Without this a crash is invisible until the panel is reopened.
+    const fake = createFakeHost()
+    const manager = makeManager(fake.host)
+    await manager.addOutput({ monitorIndex: 0 })
+    const seen = vi.fn()
+    manager.onOutputsChanged(seen)
+
+    fake.destroy('output-1')
+
+    expect(seen).toHaveBeenCalledTimes(1)
+  })
+
+  it('survives a listener that throws', async () => {
+    const fake = createFakeHost()
+    const manager = makeManager(fake.host)
+    await manager.addOutput({ monitorIndex: 0 })
+    manager.onOutputsChanged(() => {
+      throw new Error('panel exploded')
+    })
+
+    expect(() => fake.destroy('output-1')).not.toThrow()
+    expect(manager.outputs()).toHaveLength(0)
+  })
+})
+
+describe('telemetry', () => {
+  beforeEach(() => {
+    vi.mocked(emit).mockClear()
+  })
+
+  it('reports an add with a bucket and a monitor index', async () => {
+    const fake = createFakeHost()
+    const manager = makeManager(fake.host)
+
+    await manager.addOutput({ monitorIndex: 2, render: { framebufferWidth: 8192 } })
+
+    expect(reported('output_added')).toEqual([
+      {
+        event_type: 'output_added',
+        mode: 'sos-equirect',
+        framebuffer_bucket: '8k',
+        monitor_index: 2,
+      },
+    ])
+  })
+
+  it('reports a restored output too', async () => {
+    // The event describes an output existing rather than an operator
+    // gesture, and an installation that brings four back every launch
+    // is the population this is Tier A for. Emitting from `spawn()`
+    // is what makes that true by construction rather than by someone
+    // remembering to add a second call.
+    const fake = createFakeHost()
+    const store = memoryStore({
+      autoRestoreOnLaunch: true,
+      outputs: [
+        {
+          label: 'output-1',
+          monitorName: MONITORS[1].name,
+          monitorOrigin: { x: MONITORS[1].position.x, y: MONITORS[1].position.y },
+          mode: 'sos-equirect' as const,
+          trackOperatorCamera: true,
+          split: false,
+          framebufferWidth: 4096,
+          debugOverlay: false,
+        },
+      ],
+    })
+
+    await makeManager(fake.host, { store }).restoreOutputs()
+
+    expect(reported('output_added')).toEqual([
+      {
+        event_type: 'output_added',
+        mode: 'sos-equirect',
+        framebuffer_bucket: '4k',
+        monitor_index: 1,
+      },
+    ])
+  })
+
+  it('reports a Remove as an operator close, exactly once', async () => {
+    const fake = createFakeHost()
+    const manager = makeManager(fake.host)
+    const record = await manager.addOutput({ monitorIndex: 0 })
+
+    await manager.removeOutput(record.label)
+    // The destroy lands afterwards, as Tauri delivers it. The record is
+    // already gone, so there is nothing left to classify — and nothing
+    // to report a second time.
+    fake.destroy(record.label)
+
+    expect(reported('output_removed')).toEqual([
+      { event_type: 'output_removed', mode: 'sos-equirect', reason: 'operator-close' },
+    ])
+  })
+
+  it('says nothing for a second Remove of the same label', async () => {
+    // `removeOutput` is documented safe to call twice — the panel's
+    // button and a hand-close race — so a repeat must not invent a
+    // second removal.
+    const fake = createFakeHost()
+    const manager = makeManager(fake.host)
+    const record = await manager.addOutput({ monitorIndex: 0 })
+
+    await manager.removeOutput(record.label)
+    await manager.removeOutput(record.label)
+
+    expect(reported('output_removed')).toHaveLength(1)
+  })
+
+  it('reports a hand-close as an operator close, and not as a failure', async () => {
+    const fake = createFakeHost()
+    const manager = makeManager(fake.host)
+    // `output_closing` arrives over the IPC link, so the link has to be
+    // open for the announcement to be heard at all — without this the
+    // departure is a silent destroy and classifies as a crash.
+    await manager.start()
+    await manager.addOutput({ monitorIndex: 0 })
+
+    fake.send({ type: 'output_closing', label: 'output-1' })
+    fake.destroy('output-1')
+
+    expect(reported('output_removed')).toEqual([
+      { event_type: 'output_removed', mode: 'sos-equirect', reason: 'operator-close' },
+    ])
+    expect(reported('output_failure')).toEqual([])
+  })
+
+  it('reports a crash as both a removal and a failure', async () => {
+    // Two events rather than one: the removal answers "how many
+    // outputs stopped, and why", the failure answers "how healthy is
+    // this installation". A dashboard asks those separately.
+    const fake = createFakeHost()
+    const manager = makeManager(fake.host)
+    await manager.addOutput({ monitorIndex: 0 })
+
+    fake.destroy('output-1')
+
+    expect(reported('output_removed')).toEqual([
+      { event_type: 'output_removed', mode: 'sos-equirect', reason: 'crash' },
+    ])
+    expect(reported('output_failure')).toEqual([
+      { event_type: 'output_failure', kind: 'crash', retries: 0, recovered: false },
+    ])
+  })
+
+  it('reports a spawn the storm guard refused', async () => {
+    const fake = createFakeHost()
+    const manager = makeManager(fake.host)
+    for (let i = 0; i < CRASH_STORM_LIMIT; i++) {
+      const record = await manager.addOutput({ monitorIndex: 0 })
+      fake.destroy(record.label)
+    }
+    vi.mocked(emit).mockClear()
+
+    await expect(manager.addOutput({ monitorIndex: 0 })).rejects.toThrow(/refusing outputs/)
+
+    expect(reported('output_removed')).toEqual([
+      {
+        event_type: 'output_removed',
+        mode: 'sos-equirect',
+        reason: 'rejected-by-storm-guard',
+      },
+    ])
+    // No add to pair it with — the window was never created.
+    expect(reported('output_added')).toEqual([])
+  })
+
+  it('says nothing when the decoder budget refuses a spawn', async () => {
+    // The decided reason enum has no value for it, and rightly: the
+    // panel already shows "N of M in use" and disables Add, so a spent
+    // budget is an affordance rather than something to report after
+    // the fact.
+    const fake = createFakeHost()
+    const manager = makeManager(fake.host, {
+      machineDecoderBudget: () => 1,
+      controlPanels: () => 1,
+    })
+
+    await expect(manager.addOutput({ monitorIndex: 0 })).rejects.toThrow(/decoder budget/)
+
+    expect(vi.mocked(emit)).not.toHaveBeenCalled()
+  })
+
+  it('puts no monitor name and no window label on the wire', async () => {
+    // The one field that could identify hardware is reported as an
+    // index. A regression here is invisible in the app and permanent
+    // in the warehouse.
+    const fake = createFakeHost()
+    const manager = makeManager(fake.host)
+    await manager.addOutput({ monitorIndex: 1 })
+    fake.destroy('output-1')
+
+    const payloads = JSON.stringify(vi.mocked(emit).mock.calls)
+    expect(payloads).not.toContain('DISPLAY')
+    expect(payloads).not.toContain('output-1')
   })
 })

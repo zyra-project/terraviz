@@ -9,7 +9,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 10,
+  "version": 11,
   "refresh": "5m",
   "time": {
     "from": "now-7d",
@@ -1261,6 +1261,180 @@
             {
               "selector": "loads",
               "text": "loads",
+              "type": "number"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Multi-monitor outputs — windows opened per day by framebuffer bucket",
+      "description": "Rung 13: output_added, one per output window that came up — an operator's Add and a launch-time restore alike, since both go through the manager's single spawn(). Desktop only, and expected to be near-zero except on the handful of installations driving a Science On a Sphere display, a dome, or a projector array; a step change on one of those is worth asking about. blob5 is the framebuffer bucket (1k/2k/4k/8k) rather than a pixel count, snapped DOWN to the rung the window actually renders — a 4k bar never hides an 8k window. AE positional layout: blob1=event_type, blob5=framebuffer_bucket, blob6=mode, double2=monitor_index (framebuffer_bucket < mode < monitor_index alphabetically).",
+      "gridPos": {
+        "x": 0,
+        "y": 66,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/sql",
+          "url_options": {
+            "method": "POST",
+            "data": "SELECT toStartOfDay(timestamp) AS day, blob5 AS framebuffer_bucket, count() AS outputs FROM terraviz_events WHERE blob1 = 'output_added' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY day, framebuffer_bucket ORDER BY day, framebuffer_bucket",
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
+          },
+          "parser": "backend",
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "day",
+              "text": "day",
+              "type": "timestamp"
+            },
+            {
+              "selector": "framebuffer_bucket",
+              "text": "framebuffer_bucket",
+              "type": "string"
+            },
+            {
+              "selector": "outputs",
+              "text": "outputs",
+              "type": "number"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "type": "table",
+      "title": "Multi-monitor outputs — removals by reason",
+      "description": "Rung 13: output_removed grouped by why the window stopped running. 'operator-close' is the healthy steady state (both the Outputs panel's Remove and the window's own close button — the manager keeps those apart internally, the useful split here is deliberate-versus-not). Anything else is worth reading beside the failures panel: 'crash' pairs with an output_failure, and 'rejected-by-storm-guard' is a CONFIGURED output that never came back, so it has no paired output_added and a rising count means a monitor is refusing to hold a window. AE positional layout: blob5=mode, blob6=reason.",
+      "gridPos": {
+        "x": 12,
+        "y": 66,
+        "w": 6,
+        "h": 8
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/sql",
+          "url_options": {
+            "method": "POST",
+            "data": "SELECT blob6 AS reason, count() AS removals FROM terraviz_events WHERE blob1 = 'output_removed' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY reason ORDER BY removals DESC",
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
+          },
+          "parser": "backend",
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "reason",
+              "text": "reason",
+              "type": "string"
+            },
+            {
+              "selector": "removals",
+              "text": "removals",
+              "type": "number"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "type": "table",
+      "title": "Multi-monitor outputs — failures by kind",
+      "description": "Rung 13: output_failure, the installation-health half. Split by kind and by whether the output carried on afterwards, with the worst retry count seen — bounded auto-recovery collapses into one event carrying its count, so a flapping installation shows a rising max_retries rather than a rising event rate. Today only kind='crash' has a detector (and reports retries=0, recovered=false, because §3's table gives a crash no auto-recovery); hls-stalled / ipc-silence / gpu-loss / monitor-unplug arrive with failure-recovery cases 2-5 and need no change here. AE positional layout: blob5=kind, blob6=recovered ('true'/'false'), double2=retries.",
+      "gridPos": {
+        "x": 18,
+        "y": 66,
+        "w": 6,
+        "h": 8
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/sql",
+          "url_options": {
+            "method": "POST",
+            "data": "SELECT blob5 AS kind, blob6 AS recovered, count() AS failures, max(double2) AS max_retries FROM terraviz_events WHERE blob1 = 'output_failure' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY kind, recovered ORDER BY failures DESC",
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
+          },
+          "parser": "backend",
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "kind",
+              "text": "kind",
+              "type": "string"
+            },
+            {
+              "selector": "recovered",
+              "text": "recovered",
+              "type": "string"
+            },
+            {
+              "selector": "failures",
+              "text": "failures",
+              "type": "number"
+            },
+            {
+              "selector": "max_retries",
+              "text": "max_retries",
               "type": "number"
             }
           ]

@@ -19,7 +19,9 @@ import {
   createDomChromeHost,
   createFullscreenController,
   createIdleCursor,
+  createQuitHotkey,
   isFullscreenHotkey,
+  isQuitHotkey,
   readFullscreenPreference,
   writeFullscreenPreference,
   type ChromeStorage,
@@ -521,5 +523,130 @@ describe('createIdleCursor', () => {
     // photographs it.
     expect(CURSOR_IDLE_MS).toBeGreaterThanOrEqual(2000)
     expect(CURSOR_IDLE_MS).toBeLessThanOrEqual(6000)
+  })
+})
+
+/**
+ * The quit hotkey (rung 9 step 29).
+ *
+ * The checklist asserted "Cmd/Ctrl+Q exits cleanly" as if it existed;
+ * nothing bound it. What makes it worth testing rather than eyeballing
+ * is that every wrong answer here is expensive in one direction or the
+ * other: a hotkey that fires when it should not ends a show, and one
+ * that does not fire leaves a kiosk window with no way out.
+ */
+describe('isQuitHotkey', () => {
+  const q = (over: Partial<KeyboardEvent> = {}): KeyboardEvent =>
+    key({ key: 'q', ctrlKey: true, ...over })
+
+  it('accepts Ctrl+Q', () => {
+    expect(isQuitHotkey(q())).toBe(true)
+  })
+
+  it('accepts the shifted-looking key a caps-lock keyboard reports', () => {
+    // `key` follows the shift state, so a caps-locked keyboard sends
+    // 'Q' with shiftKey false. Comparing case-sensitively would leave
+    // that operator with no way out of a kiosk window.
+    expect(isQuitHotkey(q({ key: 'Q' }))).toBe(true)
+  })
+
+  it('ignores Q on its own', () => {
+    expect(isQuitHotkey(q({ ctrlKey: false }))).toBe(false)
+  })
+
+  it('leaves Cmd+Q to the operating system', () => {
+    // macOS already quits on Cmd+Q through the standard application
+    // menu. Answering it here would put two handlers on one keystroke.
+    expect(isQuitHotkey(q({ ctrlKey: false, metaKey: true }))).toBe(false)
+    expect(isQuitHotkey(q({ metaKey: true }))).toBe(false)
+  })
+
+  it('ignores a held key, because a second exit is not a no-op', () => {
+    // The clause that matters more here than on a toggle: holding F11
+    // strobes a window, holding this queues another exit behind the one
+    // already tearing the process down.
+    expect(isQuitHotkey(q({ repeat: true }))).toBe(false)
+  })
+
+  it('ignores other modifiers and an already-handled event', () => {
+    expect(isQuitHotkey(q({ altKey: true }))).toBe(false)
+    expect(isQuitHotkey(q({ shiftKey: true }))).toBe(false)
+    expect(isQuitHotkey(q({ defaultPrevented: true }))).toBe(false)
+  })
+})
+
+describe('createQuitHotkey', () => {
+  const press = (fire: (type: string, ev: unknown) => void, over: Partial<KeyboardEvent> = {}) =>
+    fire('keydown', key({ key: 'q', ctrlKey: true, ...over }))
+
+  function host(over: Partial<WindowChromeHost> = {}): WindowChromeHost {
+    return {
+      setFullscreen: async () => {},
+      setDecorations: async () => {},
+      isFullscreen: () => false,
+      ...over,
+    }
+  }
+
+  it('ends the application on Ctrl+Q', () => {
+    const quit = vi.fn(async () => {})
+    const { target, fire } = fakeTarget()
+    createQuitHotkey({ host: host({ quit }), target })
+
+    press(fire)
+
+    expect(quit).toHaveBeenCalledTimes(1)
+  })
+
+  it('is inert on a host that cannot quit, and does not swallow the key', () => {
+    // The web build. Ctrl+Q is Firefox's own quit, so claiming it there
+    // would be a worse answer than leaving it alone — which is why the
+    // DOM host implements no `quit` and this needs no platform test.
+    const preventDefault = vi.fn()
+    const { target, fire } = fakeTarget()
+    createQuitHotkey({ host: host(), target })
+
+    fire('keydown', key({ key: 'q', ctrlKey: true, preventDefault }))
+
+    expect(preventDefault).not.toHaveBeenCalled()
+  })
+
+  it('claims the key only when it is acting on it', () => {
+    const quit = vi.fn(async () => {})
+    const preventDefault = vi.fn()
+    const { target, fire } = fakeTarget()
+    createQuitHotkey({ host: host({ quit }), target })
+
+    // A modified press must still reach whatever else wanted it.
+    fire('keydown', key({ key: 'q', ctrlKey: true, shiftKey: true, preventDefault }))
+    expect(preventDefault).not.toHaveBeenCalled()
+    expect(quit).not.toHaveBeenCalled()
+
+    fire('keydown', key({ key: 'q', ctrlKey: true, preventDefault }))
+    expect(preventDefault).toHaveBeenCalledTimes(1)
+  })
+
+  it('survives a refused quit rather than throwing into the loop', () => {
+    // An output would be refused by the capability split — no
+    // `core:default`, so no `invoke` at all. A hotkey that cannot fire
+    // must not take down the render loop that heard it.
+    const quit = vi.fn(async () => {
+      throw new Error('forbidden')
+    })
+    const { target, fire } = fakeTarget()
+    createQuitHotkey({ host: host({ quit }), target })
+
+    expect(() => press(fire)).not.toThrow()
+  })
+
+  it('stops listening once disposed', () => {
+    const quit = vi.fn(async () => {})
+    const { target, fire } = fakeTarget()
+    const dispose = createQuitHotkey({ host: host({ quit }), target })
+
+    dispose()
+    press(fire)
+
+    expect(quit).not.toHaveBeenCalled()
   })
 })

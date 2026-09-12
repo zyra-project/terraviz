@@ -7,6 +7,11 @@
 
 import type { ColorScale, RenderEncoding } from './color-scale'
 import type { DisplayColorScale } from './unit-scale'
+// Imported rather than restated so the telemetry `mode` field cannot
+// name a geometry the wire format does not have (or miss one it
+// gains). Type-only, so nothing about the shared type barrel reaches
+// the multi-output feature at runtime.
+import type { OutputMode } from '../services/multiOutput/protocol'
 
 export type { ColorScale, DisplayColorScale, RenderEncoding }
 
@@ -1196,6 +1201,24 @@ export type ErrorSource =
   | 'caught' | 'window_error' | 'unhandledrejection'
   | 'console_error' | 'console_warn' | 'tauri_panic'
 
+// --- Multi-monitor output (docs/MULTI_MONITOR_PLAN.md rung 13) ---
+
+/** A framebuffer rung by name. The exact pixel width is a machine
+ *  fingerprint; which rung an installation chose is the question. */
+export type FramebufferBucket = '1k' | '2k' | '4k' | '8k'
+/** Why an output stopped running — or, for the storm guard, never
+ *  started. `gpu-loss-timeout` and `monitor-gone` are declared now and
+ *  fire when failure-recovery cases 4 and 5 land, so the enum does not
+ *  have to change under a dashboard that already queries it. */
+export type OutputRemovedReason =
+  | 'operator-close' | 'crash' | 'monitor-gone'
+  | 'gpu-loss-timeout' | 'rejected-by-storm-guard'
+/** The six failure modes §3 enumerates, minus the two that are the
+ *  control window's own (a manager crash cannot report itself). Only
+ *  `crash` has a detector today; the rest land with cases 2-5. */
+export type OutputFailureKind =
+  | 'crash' | 'hls-stalled' | 'ipc-silence' | 'gpu-loss' | 'monitor-unplug'
+
 // --- Base event shape ---
 
 /** Fields every event carries. `client_offset_ms` is stamped by the
@@ -1804,6 +1827,72 @@ export interface PublisherActionEvent extends TelemetryEventBase {
   dataset_id: string
 }
 
+/**
+ * Multi-monitor output telemetry (`docs/MULTI_MONITOR_PLAN.md` §3
+ * "Failure recovery", Open Question 3 — decided; rung 13).
+ *
+ * Three events, all Tier A, all emitted by the **control window**.
+ * The output windows themselves emit nothing, and that is a policy
+ * rather than an omission: §3.6's capture-clean rule exists because
+ * the common installation pattern is an HDMI capture card taking a
+ * monitor as input, so anything an output does is on the sphere in
+ * front of an audience — and an output phoning home would be the
+ * same class of leak one layer down. The control window can see
+ * everything worth reporting anyway.
+ *
+ * Tier A because the motivation is installation health, not user
+ * research: an operator running a museum sphere wants a crash to be
+ * visible, and an event that only ships for the fraction of users
+ * who opted into Research would answer "how often do outputs
+ * crash?" with a number nobody can act on. Nothing here is free
+ * text, a coordinate, or a device string, so none of the hashing,
+ * sanitising or rounding invariants apply — every field is a small
+ * categorical enum or a count. The one field that *could* have
+ * identified hardware, the monitor, is reported as an index into the
+ * enumeration and never as the OS-reported display name.
+ */
+export interface OutputAddedEvent extends TelemetryEventBase {
+  event_type: 'output_added'
+  /** Projection geometry the window was spawned as. One value today;
+   *  the field exists for the same reason the wire format's does. */
+  mode: OutputMode
+  /** Framebuffer width as a rung name rather than a pixel count.
+   *  Bucketed because the exact number is a machine fingerprint the
+   *  question ("do installations run big frames?") does not need. */
+  framebuffer_bucket: FramebufferBucket
+  /** Index into the monitor enumeration — 0 is the first enumerated
+   *  display, not necessarily the OS's primary. Never the monitor's
+   *  name, which is a user-set string on macOS and a model number on
+   *  plenty of Windows machines. */
+  monitor_index: number
+}
+
+export interface OutputRemovedEvent extends TelemetryEventBase {
+  event_type: 'output_removed'
+  mode: OutputMode
+  /** Why it stopped running. `operator-close` covers both halves of
+   *  a deliberate close — the panel's Remove button and the window's
+   *  own close — because the distinction matters to the manager's
+   *  bookkeeping and not to anyone reading a dashboard.
+   *  `rejected-by-storm-guard` is a configured output that never
+   *  came back, which is a removal from the operator's side even
+   *  though no window existed to close. */
+  reason: OutputRemovedReason
+}
+
+export interface OutputFailureEvent extends TelemetryEventBase {
+  event_type: 'output_failure'
+  kind: OutputFailureKind
+  /** Recovery attempts made before this fired. Bounded auto-recovery
+   *  collapses into one event carrying its count rather than one
+   *  event per attempt, so a flapping installation reports a rising
+   *  number instead of a rising rate. */
+  retries: number
+  /** True if the output carried on afterwards; false if the failure
+   *  was escalated to the operator. */
+  recovered: boolean
+}
+
 // --- Tier B events ---
 
 export interface DwellEvent extends TelemetryEventBase {
@@ -2076,6 +2165,9 @@ export type TelemetryEvent =
   | MigrationR2ToursEvent
   | PublisherPortalLoadedEvent
   | PublisherActionEvent
+  | OutputAddedEvent
+  | OutputRemovedEvent
+  | OutputFailureEvent
   // Tier B
   | DwellEvent
   | PublisherValidationFailedEvent
