@@ -4392,6 +4392,69 @@ the next pass starts from the right question.
 
 from here.
 
+#### Addendum — the RGB comparison, same session
+
+Check 1 came back, and it splits the problem in two. An ordinary
+RGB dataset on the same output, same framebuffer:
+
+| | dataset | fps | sync |
+|---|---|---|---|
+| data-encoded | 4096x2048 single rung | 16.9 | cycles dash ↔ thousands of ms |
+| ordinary RGB | full ABR ladder | 18.8 | **-24 ms** |
+
+**The sync half is content-specific.** −24 ms is comfortably
+inside the 150 ms hard-seek threshold — the correction is doing
+its job, on the same machine, the same window and the same
+framebuffer that cannot hold sync on data-encoded video. So the
+drift is not a property of the output as such.
+
+**The fps half is not**, and that correction matters more than
+the entry above gives it room for. 18.8 against 16.9 is the same
+number, so the ceiling is **general to video on an output**, and
+the paragraph above explaining it by the single-rung ladder is
+wrong as stated. The likelier reading is that the ladder never
+engages here at all: `selectRendition` picks the best rung the
+measured bandwidth allows, and on a fast local link with the
+asset cached — exactly the case `hlsService`'s own docstring
+describes — that is the top rung for *both*. So both are
+probably decoding 4096x2048, and `DATA_ENCODED_RENDITIONS`
+explains why data-encoded content can never drop *below* that,
+not why RGB is equally slow.
+
+**What is left to explain the two halves separately:**
+
+- **fps**, common to both: a cost paid per drawn frame that does
+  not depend on the content. 18.8 fps is ~53 ms a frame, which
+  at 60 Hz is landing on every third or fourth callback — the
+  loop is a plain rAF gated at `VIDEO_FRAME_MS` (33.3 ms), so
+  hitting 30 only needs each frame under ~16.7 ms. Tens of
+  milliseconds for a ray-march at this size on a 4090 is far
+  more than the shader should cost, which points at the
+  per-frame `VideoTexture` upload — a 4096x2048 YUV→RGB
+  transfer through ANGLE/D3D11, a path that is fast when it is
+  zero-copy and very slow when it is not.
+- **sync**, data-encoded only: decode, and the mechanism that
+  fits at equal resolution *and* equal CRF is **entropy**. A
+  data-encoded frame is a noise-like gradient field with poor
+  inter-frame prediction; an SOS RGB animation is a largely
+  static basemap with smooth overlay motion. At the same quality
+  target the first carries far more residual per frame and costs
+  more to decode. Hypothesis, not measured.
+
+**Also reported and unexplained:** RGB datasets *sometimes*
+freeze too. Not reproduced here, no HUD capture of one, and
+nothing above predicts it — recorded so it is not lost.
+
+**The next check isolates the fps half and takes one drag.**
+Unload the dataset, then drag the control globe continuously and
+read the output's fps. `shouldRenderFrame` returns true whenever
+`dirty` is set, bypassing the frame cap, so a moving camera makes
+the output redraw on **every** rAF callback with the full
+ray-march and Earth decoration and **no video upload at all**.
+Near 60 there means the shader is cheap and the upload is the
+whole cost; near 18 means it is the shader, and neither a
+rendition change nor a decode change will help.
+
 ### Commit 9 — Tools → Outputs panel (first user-reachable)
 
 **Pre-flight:**

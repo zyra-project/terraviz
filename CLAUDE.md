@@ -1067,20 +1067,30 @@ The desktop app shares 100% of the TypeScript source. Desktop-only behaviour is 
 > which is the question `acl_tests` structurally cannot answer; and
 > dropping the framebuffer 8192→4096 left fps at ~17 either way, so
 > the seek-recovery on a data-encoded video is **not** fill rate. What
-> holds that loop at ~59 ms a frame is unestablished, but the leading
-> explanation is **structural and specific to data-encoded video**:
-> `DATA_ENCODED_RENDITIONS` is a single rung at 4096x2048, because an
-> ABR ladder is incoherent when luma *is* the measurement — so such a
-> dataset decodes 8.4M pixels a frame on every window with nothing to
-> fall back to, while an ordinary RGB dataset drops to 2160x1080 or
-> 1440x720 under `selectRendition`. Decode and the per-frame
-> `VideoTexture` upload both scale with that, and neither scales with
-> the framebuffer. The sync field **cycles** dash ↔ thousands of ms in
-> both passes rather than holding a number, so the seek loop is not
-> closed — and cannot be closed in `outputSync`, since an output that
-> plays slower than the primary regenerates the drift whichever way
-> the threshold falls. Do not re-run the framebuffer experiment; the
-> open check is an ordinary RGB dataset on the same output. Rung 12's kiosk flag has a narrower gap:
+> holds that loop at ~53 ms a frame is unestablished, and the RGB
+> comparison splits the problem in two. **fps is general to video on
+> an output** — an ordinary RGB dataset reads 18.8 against the
+> data-encoded 16.9 — so it is a per-drawn-frame cost independent of
+> content, and the per-frame `VideoTexture` upload (4096x2048
+> YUV→RGB through ANGLE/D3D11) is the candidate, since the loop only
+> needs each frame under ~16.7 ms to hold 30. **sync is
+> data-encoded-only**: RGB holds −24 ms, comfortably inside the
+> 150 ms threshold, on the same window and framebuffer that cannot
+> hold sync on data-encoded video — which points at decode, plausibly
+> entropy, since a data-encoded frame is a noise-like gradient field
+> while an SOS animation is a static basemap with smooth motion. The
+> sync field **cycles** dash ↔ thousands of ms there rather than
+> holding a number, so the seek loop is not closed — and cannot be
+> closed in `outputSync`, since an output that plays slower than the
+> primary regenerates the drift whichever way the threshold falls.
+> `DATA_ENCODED_RENDITIONS` (a single rung at 4096x2048, because an
+> ABR ladder is incoherent when luma *is* the measurement) explains
+> why such a dataset can never drop *below* full resolution, not why
+> RGB is equally slow — `selectRendition` likely picks the top rung
+> for both on a fast link. Do not re-run the framebuffer experiment;
+> the open check is to unload the dataset and drag the control globe,
+> which makes the output redraw every rAF (`dirty` bypasses the cap)
+> with no video upload at all. Rung 12's kiosk flag has a narrower gap:
 > it **compiles** — `desktop.yml` builds `src-tauri/` on macOS, Windows
 > and Ubuntu on every PR, and CodeQL analyses the Rust — and its
 > argument and environment *parsing* is unit-tested, but `apply_kiosk`'s
