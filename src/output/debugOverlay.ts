@@ -27,7 +27,11 @@
  *   divided by an assumed interval. The spike behind the decoder budget
  *   found that a cumulative count taken a fixed time after playback
  *   *starts* folds in startup latency and showed a spurious ⅓ drop that
- *   vanished once two samples were differenced.
+ *   vanished once two samples were differenced. It is a measure of
+ *   *pacing*, not of capacity: the loop caps video at 30, floors static
+ *   content at 1 Hz, and draws on every callback while the camera is
+ *   moving — in which case the ceiling is the control window's own
+ *   render rate, since that is what sets `dirty`.
  * - **gpu** — the unmasked WebGL renderer string. The app cannot choose
  *   its GPU: a spike found the webview silently on the iGPU of a machine
  *   with a 4090, `powerPreference` is inert, and neither wry nor tauri
@@ -138,6 +142,24 @@ export function formatOverlay(reading: DebugOverlayReading): string[] {
  * folds in however long the first frame took, which is exactly the
  * measurement error the decoder-budget spike chased before differencing
  * two samples made it vanish.
+ *
+ * The window is **held open until it contains a frame**, and that is not
+ * a refinement — it is the difference between this field working and
+ * lying. The loop floors a static output at 1 Hz while the HUD samples
+ * about twice a second, so roughly half of all windows on a correctly
+ * idling output hold no drawn frame at all; closing those would divide
+ * zero by the window and report exactly `0.0`. That is the reading a
+ * *black projector* gives, which is the one state the 1 Hz floor exists
+ * to make visible and the one `render()`-skipped-while-lost is written
+ * to produce (rung 13, case 5). Found on hardware: an operator dragged
+ * the control globe, stopped, and watched a healthy output report zero.
+ *
+ * What is reported while the window stays open is the upper bound the
+ * wait implies: no frame has arrived in `elapsed`, so the rate is below
+ * `1000 / elapsed`, and that decays — 2, 1, 0.5, 0.25 — as the silence
+ * grows. A genuine stall therefore still collapses toward zero, just
+ * continuously rather than by flicker, and can be told from an idle
+ * output holding steady near 1.
  */
 export interface FpsMeter {
   /** Call once per rendered frame. */
@@ -157,7 +179,14 @@ export function createFpsMeter(): FpsMeter {
     },
     sample(now) {
       if (since === null || now <= since) return last
-      last = (frames * 1000) / (now - since)
+      const elapsed = now - since
+      // Empty window: hold it open rather than reporting a hard zero,
+      // and report the bound the wait implies. See the header — this is
+      // what keeps a 1 Hz idle output distinguishable from a dead one.
+      // `Math.min` because no frame arrived, so the rate cannot have
+      // risen since the last reading.
+      if (frames === 0) return (last = Math.min(last, 1000 / elapsed))
+      last = (frames * 1000) / elapsed
       frames = 0
       since = now
       return last

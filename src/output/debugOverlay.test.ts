@@ -176,6 +176,50 @@ describe('createFpsMeter', () => {
   it('reads zero before any frame has been drawn', () => {
     expect(createFpsMeter().sample(1000)).toBe(0)
   })
+
+  it('does not report zero for an output drawing at the 1 Hz floor', () => {
+    // The defect this exists for, found on hardware: a static output
+    // draws once a second and the HUD samples about twice a second, so
+    // roughly every other window holds no frame. Closing those reported
+    // `0.0` — the same reading a black projector gives, which is the one
+    // state the 1 Hz floor and the skip-while-lost rule exist to make
+    // visible.
+    const meter = createFpsMeter()
+    let nextDraw = 0
+    const readings: number[] = []
+    for (let now = 0; now <= 6000; now += 500) {
+      if (now >= nextDraw) {
+        meter.tick(now)
+        nextDraw = now + 1000
+      }
+      readings.push(meter.sample(now))
+    }
+    // The first sample lands at the same instant as the first frame and
+    // has no window yet; everything after it must be a live reading.
+    const settled = readings.slice(1)
+    expect(settled.every(r => r > 0)).toBe(true)
+    // And in the right neighbourhood of the truth — one frame a second.
+    // Not exactly 1: a window shorter than the frame period reports the
+    // frame it happens to contain over its own length, so the value
+    // rides between the true rate and twice it.
+    expect(Math.min(...settled)).toBeGreaterThanOrEqual(0.9)
+    expect(Math.max(...settled)).toBeLessThanOrEqual(2.1)
+  })
+
+  it('decays toward zero while nothing is drawn', () => {
+    // The other half of the same rule: holding the window open must not
+    // hold the *value* open, or a stalled output would report its last
+    // healthy rate forever — the invisible failure the HUD is for.
+    const meter = createFpsMeter()
+    meter.tick(0)
+    meter.tick(33)
+    const first = meter.sample(66)
+    expect(first).toBeGreaterThan(10)
+    const later = [1000, 5000, 20000].map(now => meter.sample(now))
+    expect(later[0]).toBeLessThan(first)
+    expect(later[1]).toBeLessThan(later[0])
+    expect(later[2]).toBeLessThan(0.1)
+  })
 })
 
 function fakeDom() {
