@@ -4224,7 +4224,7 @@ next pass is for.
 |---|---|---|---|
 | 5 | No position diagram; nothing marked primary | Never built; the step described an intent | `880ba315` — the diagram, and primary asked of the platform rather than inferred |
 | 13 | Dataset still lit with day/night on the output | The decoration composited *under* the layers, which only hides it for opaque global coverage | `64256a1c` — the Earth treatment is idle-only |
-| 13 | "Playback seems to struggle", sync a permanent dash | Seek loop: a seek slower than the settle window earns another, and the element is mid-seek on ~99% of frames | `fa7a29ee` + `d5516a3e` — the seek-cost floor, and the bounds lifted while paused |
+| 13 | "Playback seems to struggle", sync mostly a dash | Seek loop: a seek slower than the settle window earns another, and the element is mid-seek on ~99% of frames | `fa7a29ee` + `d5516a3e` — the seek-cost floor, and the bounds lifted while paused. **Not closed** — the second pass found the field still cycling dash ↔ thousands of ms, so the loop persists at a slower cadence; see that entry |
 | 18 | Closing the output restored normal playback on the **control** window | Same loop, plus a playhead diff forcing a redraw at the control window's frame rate | `fa7a29ee`, `9c139d22` |
 | 29 | Ctrl+Q did nothing | Never bound; the step asserted it as if it existed | `e7b021db` |
 | S1, S2 | "Sync seems to break" / shows a dash | The same seek loop, seen through a HUD that could not say why | `fa7a29ee`, plus the HUD naming the reason beside the dash |
@@ -4299,57 +4299,97 @@ silently on the integrated part of a machine with a 4090 and
 undiagnosable from logs. A ~17 fps ceiling on a 4090 is a much
 sharper finding than the same number on an unknown adapter.
 
-**What is left standing.** Two costs are per frame and
-indifferent to the framebuffer:
+**The sync field cycles; it is not a standing offset.** The
+`+7557 ms` above is one sample. Across both passes the field
+alternates between a dash and a figure in the thousands, which
+means the element is repeatedly entering and leaving a seek —
+so the seek loop is **not** fixed, and an earlier draft of this
+entry claiming the seek-cost floor had stopped it was wrong.
+The first pass's table below calls it "a permanent dash"; that
+is the same imprecision and the same behaviour.
 
-- **The per-frame texture upload.** `VideoTexture` re-uploads
-  the decoded frame on every draw, and that scales with the
-  *source* resolution, not the framebuffer — ~8.4M texels a
-  frame for a 4096x2048 data-encoded source, in a second
-  webview, while the control window decodes the same asset in
-  the first.
-- **Decode itself**, in the same place for the same reason.
+What the floor plausibly changed is the *cadence*. The
+simulation behind `fa7a29ee` had the element mid-seek on ~99%
+of frames; a cycle measured in tens of seconds is a different
+duty cycle of the same shape. The mechanism that fits: the
+output plays slower than the primary, drift accumulates past
+the threshold, a hard seek fires (dash), the seek lands, and
+the drift begins accumulating again from ~0. At 16.9 fps
+against a 30 fps source the output sheds ~0.44 s of content a
+second, which reaches 7.5 s in about seventeen — the right
+order for what the HUD shows.
 
-The sync figure follows from either. An output that cannot
-sustain 1x loses ground continuously, and the trim has no
-headroom to give it back: `SYNC_MAX_RATE_TRIM` is 0.25, so the
-correction can ask for at most 1.25x, and 1.25x of a rate the
-decoder cannot reach is still a rate it cannot reach.
+**The consequence is the important part: no sync policy can fix
+this.** `outputSync` can seek or decline to seek; seeking gives
+the oscillation observed, declining gives a standing offset,
+and neither is in step, because the content is not being played
+at the primary's rate. `SYNC_MAX_RATE_TRIM` is 0.25, so the
+correction can ask for at most 1.25x — and 1.25x of a rate the
+pipeline cannot reach is still a rate it cannot reach. Anything
+done in that module is rearranging which wrong answer is shown.
 
-The *shape* of the failure has changed for the better, though,
-and that part is a result rather than a symptom. The first pass
-showed a permanent dash because the element was mid-seek on
-~99% of frames; this one reports a number, so the seek-cost
-floor (`fa7a29ee`) did stop the loop. What replaced it is a
-large standing offset — which is the floor working as designed.
-`seekCostFloorS` is `lastSeekCostS x rate x 1.5` and applies
-permanently, so one costly seek can raise the threshold past
-7.5 s and the correction then declines to seek at all. That is
-right when a seek would land further behind than it started,
-and wrong when nothing else will ever close the gap. Which of
-those is happening here is readable off the HUD and was not
-read.
+**A likely cause, and it is structural rather than a mystery.**
+Data-encoded datasets ship **one** rendition. `DATA_ENCODED_RENDITIONS`
+in `cli/lib/ffmpeg-hls.ts` is a single rung at 4096x2048, with
+the reasoning already written there: the ABR ladder trades
+picture quality for bandwidth and that trade is incoherent when
+luma *is* the measurement, since the 1080p and 720p rungs would
+hand a client averaged values nobody measured. Ordinary RGB
+datasets get the full `DEFAULT_RENDITIONS` ladder — 4096x2048,
+2160x1080, 1440x720 — and `hlsService.selectRendition` picks by
+measured bandwidth.
 
-**Three checks, cheapest first, none needing new code:**
+So an ordinary dataset on a desk monitor is very often decoding
+1.5M or 1.0M pixels a frame, and a data-encoded one is decoding
+**8.4M, always, on every window, with nothing to fall back to**.
+That cost is indifferent to the framebuffer, which is exactly
+the signature this pass measured. It is not that the video is
+greyscale — the transport is ordinary H.264 and flat chroma
+compresses *better* — it is that "data-encoded" means full
+resolution by design.
 
-1. **Watch `sync` for 30-60 s.** Growing means the output
-   cannot sustain the rate. Stable means a fixed offset the
-   floor is declining to seek away. Oscillating means a loop
-   after all.
-2. **Read the control window's own fps on the same asset.**
-   Also near 17 means the ceiling is decode and is shared; a
-   steady 30 means it is something the output does and the
-   control window does not, which points at the upload.
-3. **Load a lower-resolution source** — a 2048x1024 dataset, or
-   an image dataset, which costs a context and no decoder. fps
-   jumping to 30 confirms the ceiling scales with the source.
+Two costs follow from the frame size, and the two HUD numbers
+point at different ones:
 
-**If either reading holds this is a capability ceiling, not a
-bug**, and it lands on exactly the content an SOS installation
-runs. That makes it a Phase 5 question — a lower mirrored
-rendition for outputs, or `outputScene` uploading on decoder
-advance rather than on every draw — rather than something to
-tune. Not established yet; recorded so the next pass starts
+- **Decode** is what the *sync* figure implicates. A slow render
+  loop does not move a `<video>`'s playhead — the element
+  advances on its own clock — so a drift this large means the
+  element itself is stalling.
+- **The per-frame texture upload** is what the *fps* figure
+  implicates: `VideoTexture` re-uploads the decoded frame on
+  every draw, ~8.4M texels here, in a second webview while the
+  control window decodes the same asset in the first.
+
+They may share one main-thread cause; nothing here separates
+them.
+
+**Two checks, both one click, neither needing code:**
+
+1. **Load an ordinary RGB video dataset on the same output.**
+   If fps goes to 30 and sync settles, the ceiling tracks
+   rendition size and the single-rung ladder is what puts
+   data-encoded content over it. This is the sharpest test and
+   it directly answers "is this a data-driven video problem".
+2. **Read the control window's own fps on the same
+   data-encoded asset.** Also near 17 means the ceiling is
+   decode and both windows share it; a steady 30 means it is
+   something the output does that the control window does not.
+
+(The first pass's "watch sync for 30-60 s" is answered: it
+oscillates.)
+
+**If check 1 comes back as expected this is a capability
+ceiling, not a bug** — and it lands on precisely the content an
+SOS installation runs, since data-encoded video is the reason
+the feature exists. That makes it a Phase 5 design question
+rather than something to tune, with two shapes worth weighing:
+a mirrored rendition for outputs that is *explicitly* a display
+copy and never a measurement (the values would still be read
+off the control window, which keeps `DATA_ENCODED_RENDITIONS`'
+premise intact), or `outputScene` uploading on decoder advance
+rather than on every draw. Neither is established; recorded so
+the next pass starts from the right question.
+
 from here.
 
 ### Commit 9 — Tools → Outputs panel (first user-reachable)
