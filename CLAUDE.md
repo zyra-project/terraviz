@@ -1087,10 +1087,23 @@ The desktop app shares 100% of the TypeScript source. Desktop-only behaviour is 
 > ABR ladder is incoherent when luma *is* the measurement) explains
 > why such a dataset can never drop *below* full resolution, not why
 > RGB is equally slow — `selectRendition` likely picks the top rung
-> for both on a fast link. Do not re-run the framebuffer experiment;
-> the open check is to unload the dataset and drag the control globe,
-> which makes the output redraw every rAF (`dirty` bypasses the cap)
-> with no video upload at all. Rung 12's kiosk flag has a narrower gap:
+> for both on a fast link. Do not re-run the framebuffer experiment,
+> and do not re-run the drag either: it came back at ~30 fps, and that
+> number is **confounded** — `bindOperatorCamera` fires once per
+> rendered frame of the *primary*, so a drag paces the output at the
+> control window's render rate and the reading is `min(capacity,
+> publish rate)`. It bounds the idle path at ≤ ~33 ms a frame and
+> isolates nothing. Every frame number the HUD carried was a *pacing*
+> measurement for the same class of reason, which is why it now also
+> carries **draw** — mean ms inside `scene.render()` — and why the open
+> check is now a reading rather than an experiment: with a video
+> loaded, `draw` near 50 ms means the per-frame texture upload is the
+> whole cost (the framebuffer already showed it is not fill rate), and
+> `draw` near 4 ms means the loop is being paced into 19 fps by
+> something outside the draw. The drag also found the fps field
+> reading `0.0` for a correctly idling output, since a 1 Hz draw
+> against a ~500 ms window leaves half the windows empty — the reading
+> a black projector gives, now fixed by holding the window open. Rung 12's kiosk flag has a narrower gap:
 > it **compiles** — `desktop.yml` builds `src-tauri/` on macOS, Windows
 > and Ubuntu on every PR, and CodeQL analyses the Rust — and its
 > argument and environment *parsing* is unit-tested, but `apply_kiosk`'s
