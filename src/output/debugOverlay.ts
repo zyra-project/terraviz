@@ -31,7 +31,21 @@
  *   *pacing*, not of capacity: the loop caps video at 30, floors static
  *   content at 1 Hz, and draws on every callback while the camera is
  *   moving — in which case the ceiling is the control window's own
- *   render rate, since that is what sets `dirty`.
+ *   render rate, since that is what sets `dirty`. Which is why the
+ *   next field exists.
+ * - **draw** — the mean wall-clock time spent inside `scene.render()`,
+ *   over the frames since the last reading. The one number here that
+ *   answers "can this window keep up" independently of what is asking
+ *   it to. Two hardware passes failed to separate a slow shader from a
+ *   slow texture upload because every reading available was a *pacing*
+ *   measurement bounded by something other than the draw: fps under
+ *   video is capped at 30, fps on static content is floored at 1, and
+ *   fps during a drag is ceilinged by the control window's publish
+ *   rate. See the plan's Appendix B. This measures the draw itself.
+ *   CPU-side, so a frame whose GPU work overruns its submission is
+ *   charged to whichever later call blocks on the queue rather than to
+ *   itself — over a window that is the same total, which is why the
+ *   field is a mean and not a per-frame figure.
  * - **gpu** — the unmasked WebGL renderer string. The app cannot choose
  *   its GPU: a spike found the webview silently on the iGPU of a machine
  *   with a 4090, `powerPreference` is inert, and neither wry nor tauri
@@ -85,6 +99,10 @@ export interface DebugOverlayReading {
    *  forecast as "sync just shows a dash" with no way to tell which. */
   syncKind: SyncKind | null
   fps: number
+  /** Mean milliseconds spent inside `scene.render()` since the last
+   *  reading, or `null` before the first frame. The capacity number —
+   *  see the header. */
+  drawMs: number | null
   /** What the output believes about its link to the control window
    *  (rung 13, case 3). Shown because it separates the two questions
    *  an operator in front of a frozen sphere actually has — "is the
@@ -114,7 +132,7 @@ export interface DebugOverlayReading {
  * hunting a lead output that is actually late.
  */
 export function formatOverlay(reading: DebugOverlayReading): string[] {
-  const { datasetId, driftS, fps, gpu, gpuState, framebuffer, syncKind, link } = reading
+  const { datasetId, driftS, drawMs, fps, gpu, gpuState, framebuffer, syncKind, link } = reading
   const sync =
     driftS === null
       ? `sync  —${syncKind ? ` ${syncKind}` : ''}`
@@ -130,6 +148,13 @@ export function formatOverlay(reading: DebugOverlayReading): string[] {
     // the link that supplies the target went quiet four seconds ago.
     `link  ${link}`,
     `fps   ${fps.toFixed(1)}`,
+    // Directly under `fps`, and read against it: fps says how often this
+    // window painted, `draw` says how long a paint costs. A 30 next to a
+    // 4 ms is a window with headroom; a 19 next to a 53 ms is one that
+    // cannot keep up, and the two are indistinguishable from fps alone.
+    // A dash before the first frame, never a zero — a zero-millisecond
+    // draw is a claim, and "not measured yet" is the truth.
+    `draw  ${drawMs === null ? '—' : `${drawMs.toFixed(1)} ms`}`,
     `buf   ${framebuffer.width}×${framebuffer.height}`,
     `gpu   ${gpu ?? 'unreported'}${gpuState === 'live' ? '' : ` — context ${gpuState}`}`,
   ]
@@ -189,6 +214,53 @@ export function createFpsMeter(): FpsMeter {
       last = (frames * 1000) / elapsed
       frames = 0
       since = now
+      return last
+    },
+  }
+}
+
+/**
+ * Mean time spent drawing, over the frames since the last reading.
+ *
+ * Separate from `FpsMeter` rather than folded into it, because the two
+ * answer opposite questions and only one of them is bounded by the
+ * loop's own pacing. fps is how often this window painted, which the
+ * frame gate caps, the static rung floors and — while the camera is
+ * moving — the *control window's* render rate ceilings, since that is
+ * what sets `dirty`. None of those touch how long a paint takes. Two
+ * hardware passes went by without being able to tell a slow shader from
+ * a slow texture upload, and this is the reading that separates them.
+ *
+ * Holds its last value across a window with no frames, for `FpsMeter`'s
+ * reason inverted: a mean over nothing is not zero, it is unknown, and
+ * an idle output draws once a second so the next window will have one.
+ */
+export interface DrawTimer {
+  /** Call once per drawn frame, with the time `render()` took. */
+  record(durationMs: number): void
+  /** Mean milliseconds per drawn frame since the previous `sample()`;
+   *  `null` before any frame has been drawn. */
+  sample(): number | null
+}
+
+export function createDrawTimer(): DrawTimer {
+  let totalMs = 0
+  let frames = 0
+  let last: number | null = null
+  return {
+    record(durationMs) {
+      // A clock that went backwards (a suspended machine, a coarsened
+      // timer) would otherwise drag the mean below zero and read as a
+      // free draw, which is the one answer this field must never give.
+      if (!Number.isFinite(durationMs) || durationMs < 0) return
+      totalMs += durationMs
+      frames++
+    },
+    sample() {
+      if (frames === 0) return last
+      last = totalMs / frames
+      totalMs = 0
+      frames = 0
       return last
     },
   }

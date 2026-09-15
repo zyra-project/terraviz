@@ -15,6 +15,7 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   OVERLAY_REFRESH_MS,
   createDebugOverlay,
+  createDrawTimer,
   createFpsMeter,
   formatOverlay,
   type DebugOverlayReading,
@@ -26,6 +27,7 @@ function reading(over: Partial<DebugOverlayReading> = {}): DebugOverlayReading {
     driftS: 0,
     syncKind: 'playing',
     fps: 30,
+    drawMs: 4.2,
     link: 'live',
     gpu: 'NVIDIA GeForce RTX 4090 Laptop GPU',
     gpuState: 'live',
@@ -145,6 +147,20 @@ describe('formatOverlay', () => {
       ),
     ).toContain('8192×4096')
   })
+
+  it('shows the draw cost beside the frame rate, and a dash before the first frame', () => {
+    // The pair is the point: 30 fps next to 4 ms is a window with
+    // headroom, 19 next to 53 ms is one that cannot keep up, and fps
+    // alone cannot tell those apart because it is capped, floored and —
+    // while the camera moves — ceilinged by the control window.
+    expect(formatOverlay(reading({ drawMs: 52.7 })).find(l => l.startsWith('draw'))).toContain(
+      '52.7 ms',
+    )
+    const unmeasured = formatOverlay(reading({ drawMs: null })).find(l => l.startsWith('draw'))
+    expect(unmeasured).toContain('—')
+    // Never a zero: that would be a claim about a draw nobody timed.
+    expect(unmeasured).not.toContain('0.0')
+  })
 })
 
 describe('createFpsMeter', () => {
@@ -219,6 +235,49 @@ describe('createFpsMeter', () => {
     expect(later[0]).toBeLessThan(first)
     expect(later[1]).toBeLessThan(later[0])
     expect(later[2]).toBeLessThan(0.1)
+  })
+})
+
+describe('createDrawTimer', () => {
+  it('means the frames in the window, and starts over on each reading', () => {
+    const timer = createDrawTimer()
+    timer.record(10)
+    timer.record(20)
+    expect(timer.sample()).toBeCloseTo(15, 5)
+    // A fast window after a slow one must read fast — the whole point of
+    // the field is to catch a draw cost changing when a dataset loads.
+    timer.record(2)
+    timer.record(4)
+    expect(timer.sample()).toBeCloseTo(3, 5)
+  })
+
+  it('reads nothing at all before the first frame', () => {
+    // A dash, never a zero: a zero-millisecond draw is a claim, and
+    // "not measured yet" is the truth.
+    expect(createDrawTimer().sample()).toBeNull()
+  })
+
+  it('holds its last value across a window with no frames', () => {
+    // Unlike fps, a mean over nothing is not a small number — it is
+    // unknown. And a static output draws once a second, so the next
+    // window will have one.
+    const timer = createDrawTimer()
+    timer.record(8)
+    expect(timer.sample()).toBeCloseTo(8, 5)
+    expect(timer.sample()).toBeCloseTo(8, 5)
+  })
+
+  it('ignores a negative or non-finite duration', () => {
+    // A clock that went backwards would otherwise drag the mean under
+    // zero and report a free draw, which is the one answer this field
+    // must never give.
+    const timer = createDrawTimer()
+    timer.record(-5)
+    timer.record(Number.NaN)
+    expect(timer.sample()).toBeNull()
+    timer.record(6)
+    timer.record(-100)
+    expect(timer.sample()).toBeCloseTo(6, 5)
   })
 })
 
