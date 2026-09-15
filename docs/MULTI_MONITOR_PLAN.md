@@ -4254,6 +4254,104 @@ sync field and the bbox-video case answerable rather than
 ambiguous; 5a was added because "nothing marked primary" is a
 pass on X11 and a failure on the other two.
 
+### Results: second pass — Windows, 2026-09-15
+
+Not a checklist run: two targeted checks against fixes that
+landed since the first pass, one of which came back negative
+and is the more useful of the two. Same machine, same caveat —
+Windows is step 46, parity. The Linux gate is still open and
+nothing here touches it.
+
+**Closing an output is confirmed on hardware.** Remove tears
+the window down. That is `7d3cb393` and its replacement
+`f9aa1475` — a self-only `close_self` command, after review
+found a blanket `core:window:allow-destroy` reaches every
+window rather than the calling one — and it is the one question
+`acl_tests` cannot answer: `tauri::test`'s `MockRuntime`
+settles whether the ACL permits the invoke, never whether the
+window goes away. It does.
+
+**The framebuffer hypothesis is dead.** The first pass left an
+output at 8192x4096 running 18 fps and falling into
+seek-recovery on a regional data-encoded video, and the
+diagnosis recorded on PR #439 was fill rate, on the arithmetic
+that 8192x4096 is 33.5M fragments against 4096x2048's 8.4M.
+Re-running the same content one rung down:
+
+| | framebuffer | fps | sync | link |
+|---|---|---|---|---|
+| first pass | 8192x4096 | 18 | seek-recovery, several thousand ms | not read |
+| this pass | 4096x2048 | 16.9 | +7557 ms | live |
+
+A 4x cut in fragments bought nothing, and the second number is
+marginally *worse*. Whatever holds this loop at ~17 fps — about
+59 ms a frame — does not scale with the framebuffer, so it is
+not the ray-march. The #439 diagnosis was wrong; this is the
+entry that says so, and the next pass should not spend the
+framebuffer picker on it again.
+
+**The `gpu` field paid for itself by ruling something out.**
+The readout is `ANGLE (NVIDIA, NVIDIA GeForce RTX 4090 Laptop
+GPU (0x00002717) Direct3D11 vs_5_0 ps_5_0, D3D11)` — the
+discrete 4090, not the iGPU. That is precisely the failure
+rung 11 added the field for, since a spike had found a webview
+silently on the integrated part of a machine with a 4090 and
+undiagnosable from logs. A ~17 fps ceiling on a 4090 is a much
+sharper finding than the same number on an unknown adapter.
+
+**What is left standing.** Two costs are per frame and
+indifferent to the framebuffer:
+
+- **The per-frame texture upload.** `VideoTexture` re-uploads
+  the decoded frame on every draw, and that scales with the
+  *source* resolution, not the framebuffer — ~8.4M texels a
+  frame for a 4096x2048 data-encoded source, in a second
+  webview, while the control window decodes the same asset in
+  the first.
+- **Decode itself**, in the same place for the same reason.
+
+The sync figure follows from either. An output that cannot
+sustain 1x loses ground continuously, and the trim has no
+headroom to give it back: `SYNC_MAX_RATE_TRIM` is 0.25, so the
+correction can ask for at most 1.25x, and 1.25x of a rate the
+decoder cannot reach is still a rate it cannot reach.
+
+The *shape* of the failure has changed for the better, though,
+and that part is a result rather than a symptom. The first pass
+showed a permanent dash because the element was mid-seek on
+~99% of frames; this one reports a number, so the seek-cost
+floor (`fa7a29ee`) did stop the loop. What replaced it is a
+large standing offset — which is the floor working as designed.
+`seekCostFloorS` is `lastSeekCostS x rate x 1.5` and applies
+permanently, so one costly seek can raise the threshold past
+7.5 s and the correction then declines to seek at all. That is
+right when a seek would land further behind than it started,
+and wrong when nothing else will ever close the gap. Which of
+those is happening here is readable off the HUD and was not
+read.
+
+**Three checks, cheapest first, none needing new code:**
+
+1. **Watch `sync` for 30-60 s.** Growing means the output
+   cannot sustain the rate. Stable means a fixed offset the
+   floor is declining to seek away. Oscillating means a loop
+   after all.
+2. **Read the control window's own fps on the same asset.**
+   Also near 17 means the ceiling is decode and is shared; a
+   steady 30 means it is something the output does and the
+   control window does not, which points at the upload.
+3. **Load a lower-resolution source** — a 2048x1024 dataset, or
+   an image dataset, which costs a context and no decoder. fps
+   jumping to 30 confirms the ceiling scales with the source.
+
+**If either reading holds this is a capability ceiling, not a
+bug**, and it lands on exactly the content an SOS installation
+runs. That makes it a Phase 5 question — a lower mirrored
+rendition for outputs, or `outputScene` uploading on decoder
+advance rather than on every draw — rather than something to
+tune. Not established yet; recorded so the next pass starts
+from here.
+
 ### Commit 9 — Tools → Outputs panel (first user-reachable)
 
 **Pre-flight:**

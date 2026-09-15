@@ -1054,14 +1054,25 @@ The desktop app shares 100% of the TypeScript source. Desktop-only behaviour is 
 > Tauri process, so killing it takes the outputs with it and smoke step
 > 35's `kill -9` could not have reproduced what it described. The
 > plan's toast is still missing, and still for the same reason: the app
-> has no toast primitive. **One hardware pass has
+> has no toast primitive. **Two hardware passes have
 > happened and the Linux gate is still open** — see the Appendix B
-> results log. The debug HUD (rung 11) is what made that pass
-> answerable, and it earned itself: step 12b's `-1 ms to -30 ms at
+> results log. The debug HUD (rung 11) is what made both answerable,
+> and it earned itself twice: step 12b's `-1 ms to -30 ms at
 > 30 fps, buffer 4096x2048` is the baseline the next pass compares
-> against, and the *absence* of a reason beside a dashed sync field is
+> against, the *absence* of a reason beside a dashed sync field is
 > what left "sync just shows a dash" ambiguous for a week — which is
-> why the field now names why it has no number. Rung 12's kiosk flag has a narrower gap:
+> why the field now names why it has no number — and the **gpu** field
+> then ruled out the risk it was added for, reading a discrete 4090
+> rather than the iGPU. The second pass confirmed one thing and
+> refuted one: an output **closes** on hardware through `close_self`,
+> which is the question `acl_tests` structurally cannot answer; and
+> dropping the framebuffer 8192→4096 left fps at ~17 either way, so
+> the seek-recovery on a data-encoded video is **not** fill rate. What
+> holds that loop at ~59 ms a frame is unestablished — the per-frame
+> `VideoTexture` upload and decode are the candidates left, both
+> scaling with the *source* rather than the framebuffer, and Appendix
+> B names the three readings that separate them. Do not re-run the
+> framebuffer experiment. Rung 12's kiosk flag has a narrower gap:
 > it **compiles** — `desktop.yml` builds `src-tauri/` on macOS, Windows
 > and Ubuntu on every PR, and CodeQL analyses the Rust — and its
 > argument and environment *parsing* is unit-tested, but `apply_kiosk`'s
