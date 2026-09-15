@@ -29,7 +29,12 @@
 import './output.css'
 import { CALIBRATION_OVERLAY, createCalibrationCache } from './calibrationPattern'
 import { createDatasetMirror } from './datasetMirror'
-import { OVERLAY_REFRESH_MS, createDebugOverlay, createFpsMeter } from './debugOverlay'
+import {
+  OVERLAY_REFRESH_MS,
+  createDebugOverlay,
+  createDrawTimer,
+  createFpsMeter,
+} from './debugOverlay'
 import {
   STATE_KEYS,
   changesPicture,
@@ -78,6 +83,13 @@ async function boot(): Promise<void> {
   const fpsMeter = createFpsMeter()
   let fps = 0
   let lastFpsSample = 0
+  /** How long a draw actually costs, which fps cannot say: it is capped
+   *  at 30 by the frame gate, floored at 1 Hz by the static rung, and
+   *  while the camera moves it is ceilinged by the *control* window's
+   *  render rate, because that is what sets `dirty`. Sampled on the same
+   *  timer as fps so the two are read as one pair. */
+  const drawTimer = createDrawTimer()
+  let drawMs: number | null = null
   /** The last correction `outputSync` computed, reported by the HUD
    *  rather than recomputed there — see `SyncOutcome.driftS`. */
   let lastSync: SyncOutcome | null = null
@@ -136,6 +148,7 @@ async function boot(): Promise<void> {
     driftS: lastSync?.driftS ?? null,
     syncKind: lastSync?.kind ?? null,
     fps,
+    drawMs,
     // Read, never evaluated: `linkHealth()` is the pure getter, so
     // painting the HUD cannot itself send a health-check ping. The
     // evaluation happens once per frame in the loop below.
@@ -396,7 +409,14 @@ async function boot(): Promise<void> {
       scene.gpuState() !== 'lost' &&
       shouldRenderFrame({ kind, sinceLastFrameMs: now - lastFrame, dirty })
     ) {
+      // Timed here rather than inside the scene: the scene has no HUD
+      // and no reason to learn about one, and this is the only place
+      // that knows a frame was actually drawn. `performance.now()`
+      // rather than the rAF timestamp, which is the frame's *start* and
+      // would measure the whole callback.
+      const drawStart = performance.now()
       scene.render()
+      drawTimer.record(performance.now() - drawStart)
       // Counted on drawn frames, not on rAF callbacks: the question the
       // HUD answers is whether this output is painting, and for static
       // content the honest answer is the 1 Hz floor rather than the
@@ -412,6 +432,7 @@ async function boot(): Promise<void> {
     // average over however long it was hidden.
     if (now - lastFpsSample >= OVERLAY_REFRESH_MS) {
       fps = fpsMeter.sample(now)
+      drawMs = drawTimer.sample()
       lastFpsSample = now
     }
     requestAnimationFrame(tick)
