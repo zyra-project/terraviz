@@ -6,8 +6,8 @@
  *
  * Reads a parsed SOS dataset list (the shape of
  * `public/assets/sos-dataset-list.json`) plus the enriched metadata
- * file (`public/assets/sos_dataset_metadata.json`), merges them the
- * way `src/services/dataService.ts` does today, and emits a list of
+ * file (`public/assets/sos_dataset_metadata.json`), joins ONLY through
+ * an explicit stable-ID crosswalk, and emits a list of
  * outcomes — one per SOS row — that's either a publisher-API draft
  * body ready to POST, or a skip with a reason.
  *
@@ -40,8 +40,10 @@
  *   - color_table_ref  ← SOS colorTableLink (Phase 3b restore)
  *   - probing_info     ← SOS probingInfo, JSON-stringified
  *                       (Phase 3b restore)
- *   - bounding_variables ← SOS boundingVariables, JSON-stringified
- *                          (Phase 3b restore)
+ *   - bounding_box     ← explicit SOS boundingVariables, typed NSWE
+ *   - bbox_provenance / bbox_evidence ← imported, only with explicit bounds
+ *   - temporal_semantics ← unknown; source timestamps are unverified
+ *   - resource_kind    ← presentation for tour/json, otherwise unknown
  *   - start_time/end_time ← SOS, normalised to ISO-Z
  *   - period, weight, run_tour_on_load ← SOS, pass-through
  *   - is_hidden        ← SOS `isHidden` (preserves SOS curation flag)
@@ -55,6 +57,11 @@
  */
 
 import { validateDraftCreate, type DatasetDraftBody } from '../../functions/api/v1/_lib/validators'
+import { isOperationalId, resolveCrosswalk, type CrosswalkReport, type SnapshotCrosswalk } from './snapshot-crosswalk'
+
+// Deferred runtime compatibility: src/services/dataService.ts still performs
+// its legacy viewer-only title merge. This authoritative importer deliberately
+// does not share that join; migrating the native runtime is a separate task.
 
 // --- Source-shape mirrors -----------------------------------------
 
@@ -140,6 +147,7 @@ export interface RawEnrichedEntry {
 // --- Outcome shape ------------------------------------------------
 
 export type SkipReason =
+  | 'missing_id'
   | 'missing_title'
   | 'missing_data_link'
   | 'unsupported_format'
@@ -154,7 +162,7 @@ export interface MappedDraft {
 }
 
 export interface SkippedRow {
-  /** SOS `id` if present; falls back to a synthetic placeholder. */
+  /** SOS `id` if present; diagnostic placeholder only for a missing identity. */
   legacyId: string
   reason: SkipReason
   /** Human-readable detail — for `--dry-run` and importer logs. */
@@ -167,6 +175,7 @@ export type ImportOutcome =
 
 export interface ImportPlan {
   outcomes: ImportOutcome[]
+  crosswalk: CrosswalkReport
   counts: {
     ok: number
     skipped: Record<SkipReason, number>
@@ -202,26 +211,6 @@ const DEFAULT_LICENSE_STATEMENT =
   'see the linked website for attribution and redistribution rules.'
 
 // --- Helpers ------------------------------------------------------
-
-/** Mirror of `dataService.normalizeTitle` — used for enriched-row matching. */
-export function normalizeTitle(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/\s*\(movie\)\s*/g, '')
-    .replace(/[^\w\s]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-/** Build the title→enriched lookup index. Last-write-wins on duplicate titles. */
-export function buildEnrichedIndex(entries: RawEnrichedEntry[]): Map<string, RawEnrichedEntry> {
-  const map = new Map<string, RawEnrichedEntry>()
-  for (const e of entries) {
-    if (!e.title) continue
-    map.set(normalizeTitle(e.title), e)
-  }
-  return map
-}
 
 /**
  * Map a SOS `dataLink` to a `data_ref` scheme. Phase 1b's manifest
@@ -418,7 +407,8 @@ function clipCategories(
 // --- Per-row mapper -----------------------------------------------
 
 /**
- * Map a single SOS entry to a publisher-API draft body.
+ * Map a single SOS entry to a publisher-API draft body. The enrichment argument
+ * must already be identity-resolved; use mapSnapshot for unjoined inputs.
  *
  * Returns `{ kind: 'ok' }` for a row that passes
  * `validateDraftCreate`, or `{ kind: 'skipped' }` with the failure
@@ -431,7 +421,10 @@ export function mapSnapshotEntry(
   sos: RawSosEntry,
   enriched: RawEnrichedEntry | undefined,
 ): ImportOutcome {
-  const legacyId = sos.id || `UNKNOWN_${normalizeTitle(sos.title || '').slice(0, 32)}`
+  const legacyId = isOperationalId(sos.id) ? sos.id : '<missing>'
+  if (!isOperationalId(sos.id)) {
+    return { kind: 'skipped', row: { legacyId, reason: 'missing_id' } }
+  }
 
   if (!sos.title || !sos.title.trim()) {
     return { kind: 'skipped', row: { legacyId, reason: 'missing_title' } }
@@ -454,6 +447,8 @@ export function mapSnapshotEntry(
     data_ref: mapDataRef(dataLink),
     visibility: 'public',
     license_statement: DEFAULT_LICENSE_STATEMENT,
+    temporal_semantics: 'unknown',
+    resource_kind: format === 'tour/json' ? 'presentation' : 'unknown',
   }
 
   const abstract = clipString(enriched?.description, ABSTRACT_MAX) ?? clipString(sos.abstractTxt, ABSTRACT_MAX)
@@ -491,7 +486,11 @@ export function mapSnapshotEntry(
   // results drop the box entirely (a half-bbox is worse than no
   // bbox — the publisher API validator would reject it anyway).
   const bbox = parseBoundingBox(sos.boundingVariables)
-  if (bbox) draft.bounding_box = bbox
+  if (bbox) {
+    draft.bounding_box = bbox
+    draft.bbox_provenance = 'imported'
+    draft.bbox_evidence = `SOS operational snapshot ${legacyId}: explicit boundingVariables ${JSON.stringify(bbox)}; imported source bounds, not independently measured.`
+  }
 
   // Phase 3d: non-Earth body metadata. Empty / whitespace
   // celestialBody is treated as Earth (snapshot reality — some
@@ -515,6 +514,9 @@ export function mapSnapshotEntry(
   if (start) draft.start_time = start
   const end = toIsoZ(sos.endTime)
   if (end) draft.end_time = end
+  if (start || end) {
+    draft.temporal_evidence = `SOS operational snapshot ${legacyId}: startTime=${sos.startTime || '(absent)'}, endTime=${sos.endTime || '(absent)'}. Source timestamps retained for compatibility; timezone-less values assumed UTC. Not verified as represented time; temporal_semantics remains unknown.`
+  }
 
   const period = clipString(sos.period, 100)
   if (period) draft.period = period
@@ -554,20 +556,23 @@ export function mapSnapshotEntry(
 // --- Whole-snapshot mapper ----------------------------------------
 
 /**
- * Map a parsed SOS snapshot to an import plan. De-duplicates by
- * SOS `id` (the upstream catalog has at least one repeated id —
- * see `seed-catalog.ts:170` — and first-wins keeps re-runs stable).
+ * Map a parsed SOS snapshot to an import plan. Crosswalk is mandatory; there
+ * is no title fallback. All occurrences of duplicate operational IDs skip,
+ * so input reordering cannot choose which source row becomes authoritative.
  */
 export function mapSnapshot(
   sosList: RawSosEntry[],
   enrichedList: RawEnrichedEntry[],
+  crosswalk: SnapshotCrosswalk,
 ): ImportPlan {
-  const enrichedIndex = buildEnrichedIndex(enrichedList)
-  const seen = new Set<string>()
+  const resolved = resolveCrosswalk(sosList, enrichedList, crosswalk)
+  const occurrences = new Map<string, number>()
+  for (const sos of sosList) occurrences.set(sos.id, (occurrences.get(sos.id) ?? 0) + 1)
   const outcomes: ImportOutcome[] = []
   const counts: ImportPlan['counts'] = {
     ok: 0,
     skipped: {
+      missing_id: 0,
       missing_title: 0,
       missing_data_link: 0,
       unsupported_format: 0,
@@ -577,8 +582,8 @@ export function mapSnapshot(
   }
 
   for (const sos of sosList) {
-    if (sos.id) {
-      if (seen.has(sos.id)) {
+    if (isOperationalId(sos.id)) {
+      if (occurrences.get(sos.id)! > 1) {
         outcomes.push({
           kind: 'skipped',
           row: { legacyId: sos.id, reason: 'duplicate_id' },
@@ -586,15 +591,14 @@ export function mapSnapshot(
         counts.skipped.duplicate_id++
         continue
       }
-      seen.add(sos.id)
     }
 
-    const enriched = sos.title ? enrichedIndex.get(normalizeTitle(sos.title)) : undefined
+    const enriched = resolved.byOperationalId.get(sos.id)
     const outcome = mapSnapshotEntry(sos, enriched)
     outcomes.push(outcome)
     if (outcome.kind === 'ok') counts.ok++
     else counts.skipped[outcome.row.reason]++
   }
 
-  return { outcomes, counts }
+  return { outcomes, counts, crosswalk: resolved.report }
 }

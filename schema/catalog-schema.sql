@@ -338,7 +338,7 @@ CREATE TABLE datasets (
 
   published_at       TEXT,
   retracted_at       TEXT,
-  publisher_id       TEXT, legacy_id TEXT, color_table_ref TEXT, probing_info TEXT, bbox_n REAL, bbox_s REAL, bbox_w REAL, bbox_e REAL, celestial_body TEXT, radius_mi REAL, lon_origin REAL, is_flipped_in_y INTEGER, transcoding INTEGER, active_transcode_upload_id TEXT, frame_count INTEGER, frame_extension TEXT, frame_source_filenames_ref TEXT, render_encoding TEXT, color_scale TEXT, playback_fps REAL,
+  publisher_id       TEXT, legacy_id TEXT, color_table_ref TEXT, probing_info TEXT, bbox_n REAL, bbox_s REAL, bbox_w REAL, bbox_e REAL, celestial_body TEXT, radius_mi REAL, lon_origin REAL, is_flipped_in_y INTEGER, transcoding INTEGER, active_transcode_upload_id TEXT, frame_count INTEGER, frame_extension TEXT, frame_source_filenames_ref TEXT, render_encoding TEXT, color_scale TEXT, playback_fps REAL, bbox_provenance TEXT NOT NULL DEFAULT 'unknown' CHECK (bbox_provenance IN ('unknown', 'measured', 'declared_global', 'imported', 'inferred')), bbox_evidence TEXT CHECK (bbox_evidence IS NULL OR length(bbox_evidence) <= 2048), temporal_semantics TEXT NOT NULL DEFAULT 'unknown' CHECK (temporal_semantics IN ('unknown', 'represented', 'publication', 'schedule')), temporal_evidence TEXT CHECK (temporal_evidence IS NULL OR length(temporal_evidence) <= 2048), resource_kind TEXT NOT NULL DEFAULT 'unknown' CHECK (resource_kind IN ('unknown', 'product', 'presentation')),
   FOREIGN KEY (publisher_id) REFERENCES publishers(id)
 );
 

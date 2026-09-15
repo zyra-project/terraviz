@@ -245,7 +245,8 @@ export function headerFor(file: string): string[] {
  * in place, at the first index a prologue leaves free.
  */
 export function hasHeader(file: string, text: string, style: CommentStyle): boolean {
-  const lines = text.split('\n')
+  // Windows checkouts have CRLF delimiters, not different licence text.
+  const lines = text.split(/\r?\n/)
   const skip = prologueLines(file, text)
   return lines[skip] === spdxLine(style) && copyrightRe(style).test(lines[skip + 1] ?? '')
 }

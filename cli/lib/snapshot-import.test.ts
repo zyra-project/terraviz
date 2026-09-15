@@ -3,16 +3,16 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  buildEnrichedIndex,
   mapDataRef,
   mapFormat,
   mapSnapshot,
   mapSnapshotEntry,
-  normalizeTitle,
   pickDataLink,
   type RawEnrichedEntry,
   type RawSosEntry,
 } from './snapshot-import'
+import baseline from '../../public/assets/sos-enrichment-crosswalk.json'
+import type { SnapshotCrosswalk } from './snapshot-crosswalk'
 
 const sample: RawSosEntry = {
   id: 'INTERNAL_SOS_768',
@@ -40,13 +40,11 @@ const sampleEnriched: RawEnrichedEntry = {
   date_added: '2024-12-01',
 }
 
-describe('normalizeTitle', () => {
-  it('lower-cases, strips punctuation, and collapses whitespace', () => {
-    expect(normalizeTitle('Hurricane Season - 2024')).toBe('hurricane season 2024')
-    expect(normalizeTitle('Sea Level Rise (Movie)')).toBe('sea level rise')
-    expect(normalizeTitle('  Argo  Buoys  ')).toBe('argo buoys')
-  })
-})
+const crosswalk: SnapshotCrosswalk = {
+  ...baseline as unknown as SnapshotCrosswalk,
+  mappings: [[sample.id, sampleEnriched.url!]],
+}
+const emptyCrosswalk: SnapshotCrosswalk = { ...crosswalk, mappings: [] }
 
 describe('mapDataRef', () => {
   it('extracts the vimeo id from a vimeo URL', () => {
@@ -80,19 +78,6 @@ describe('mapFormat', () => {
     expect(mapFormat('satellites/tle')).toBeNull()
     expect(mapFormat('assetbundle')).toBeNull()
     expect(mapFormat('application/vnd.google-earth.kml')).toBeNull()
-  })
-})
-
-describe('buildEnrichedIndex', () => {
-  it('keys by normalized title and skips title-less entries', () => {
-    const index = buildEnrichedIndex([
-      sampleEnriched,
-      { description: 'orphan' } as RawEnrichedEntry,
-    ])
-    expect(index.size).toBe(1)
-    expect(index.get('hurricane season 2024')?.description).toBe(
-      sampleEnriched.description,
-    )
   })
 })
 
@@ -191,14 +176,12 @@ describe('mapSnapshotEntry — skip paths', () => {
     expect(outcome.row.details).toBe('image/dds')
   })
 
-  it('synthesises a placeholder legacyId when SOS id is missing', () => {
+  it('skips missing identity rather than synthesising an ID from the title', () => {
     const outcome = mapSnapshotEntry(
       { ...sample, id: '', title: 'Anonymous Row' } as RawSosEntry,
       undefined,
     )
-    expect(outcome.kind).toBe('ok')
-    if (outcome.kind !== 'ok') return
-    expect(outcome.row.legacyId).toMatch(/^UNKNOWN_anonymous row$/)
+    expect(outcome).toEqual({ kind: 'skipped', row: { legacyId: '<missing>', reason: 'missing_id' } })
   })
 })
 
@@ -272,34 +255,34 @@ describe('mapSnapshot — whole-snapshot orchestration', () => {
       { ...sample, id: 'INTERNAL_SOS_003', format: 'assetbundle',
         dataLink: 'https://example.org/x.bundle' },
     ]
-    const plan = mapSnapshot(list, [sampleEnriched])
+    const plan = mapSnapshot(list, [sampleEnriched], crosswalk)
     expect(plan.counts.ok).toBe(2)
     expect(plan.counts.skipped.missing_title).toBe(1)
     expect(plan.counts.skipped.unsupported_format).toBe(1)
     expect(plan.outcomes).toHaveLength(4)
   })
 
-  it('first-wins on duplicate SOS ids', () => {
+  it('skips every duplicate SOS id rather than selecting by order', () => {
     const list: RawSosEntry[] = [
       sample,
       { ...sample, title: 'Hurricane Season - 2024 (revised)' },
     ]
-    const plan = mapSnapshot(list, [])
-    expect(plan.counts.ok).toBe(1)
-    expect(plan.counts.skipped.duplicate_id).toBe(1)
+    const plan = mapSnapshot(list, [], emptyCrosswalk)
+    expect(plan.counts.ok).toBe(0)
+    expect(plan.counts.skipped.duplicate_id).toBe(2)
+    expect(mapSnapshot([...list].reverse(), [], emptyCrosswalk)).toEqual(plan)
     const dup = plan.outcomes[1]
     expect(dup.kind).toBe('skipped')
     if (dup.kind !== 'skipped') return
     expect(dup.row.reason).toBe('duplicate_id')
   })
 
-  it('joins enriched metadata by normalized title', () => {
+  it('joins by stable identity even after both titles change', () => {
     const renamed: RawSosEntry = {
       ...sample,
-      id: 'INTERNAL_SOS_999',
-      title: 'Hurricane Season - 2024',
+      title: 'An independently renamed operational title',
     }
-    const plan = mapSnapshot([renamed], [sampleEnriched])
+    const plan = mapSnapshot([renamed], [{ ...sampleEnriched, title: 'Unrelated new enrichment title' }], crosswalk)
     expect(plan.counts.ok).toBe(1)
     const ok = plan.outcomes[0]
     if (ok.kind !== 'ok') throw new Error('expected ok')
@@ -308,11 +291,80 @@ describe('mapSnapshot — whole-snapshot orchestration', () => {
   })
 
   it('produces an empty plan for an empty input list', () => {
-    const plan = mapSnapshot([], [])
+    const plan = mapSnapshot([], [], emptyCrosswalk)
     expect(plan.outcomes).toEqual([])
     expect(plan.counts.ok).toBe(0)
     expect(plan.counts.skipped.duplicate_id).toBe(0)
   })
+})
+
+describe('stable-ID enrichment never falls back', () => {
+  it.each([
+    ['missing mapping', [sampleEnriched], emptyCrosswalk],
+    ['missing source identity', [{ ...sampleEnriched, url: undefined }], crosswalk],
+    ['duplicate source identity', [sampleEnriched, { ...sampleEnriched, description: 'Wrong record' }], crosswalk],
+    ['duplicate crosswalk entry', [sampleEnriched], { ...crosswalk, mappings: [...crosswalk.mappings, ...crosswalk.mappings] }],
+    ['absent target', [{ ...sampleEnriched, url: sampleEnriched.url + '-different' }], crosswalk],
+  ] as const)('%s keeps operational metadata only', (_label, enriched, mapping) => {
+    const plan = mapSnapshot([sample], [...enriched], mapping as SnapshotCrosswalk)
+    const outcome = plan.outcomes[0]
+    if (outcome.kind !== 'ok') throw new Error('expected operational draft')
+    expect(outcome.row.draft.abstract).toBe(sample.abstractTxt)
+    expect(outcome.row.draft.categories).toBeUndefined()
+    expect(outcome.row.draft.keywords).toBeUndefined()
+    expect(plan.crosswalk.matched).toBe(0)
+  })
+
+  it('does not equate an enrichment sos_id or a matching title with an operational id', () => {
+    const enriched = { ...sampleEnriched, sos_id: sample.id }
+    const plan = mapSnapshot([sample], [enriched], emptyCrosswalk)
+    expect(plan.crosswalk.matched).toBe(0)
+  })
+})
+
+describe('Phase0 import evidence contract', () => {
+  it('marks only explicit source bounds as imported, including explicit global bounds', () => {
+    const outcome = mapSnapshotEntry({ ...sample, boundingVariables: { n: 90, s: -90, w: -180, e: 180 } }, undefined)
+    if (outcome.kind !== 'ok') throw new Error('expected draft')
+    expect(outcome.row.draft.bbox_provenance).toBe('imported')
+    expect(outcome.row.draft.bbox_evidence).toContain('explicit boundingVariables')
+    expect(outcome.row.draft.bbox_evidence).toContain(sample.id)
+    expect(outcome.row.draft.bbox_evidence).toContain('not independently measured')
+  })
+
+  it.each([undefined, { n: 90, s: -90 }, { n: 'bad', s: -90, w: -180, e: 180 }])(
+    'does not invent bounds or evidence for absent/invalid bounds', boundingVariables => {
+      const outcome = mapSnapshotEntry({ ...sample, boundingVariables }, undefined)
+      if (outcome.kind !== 'ok') throw new Error('expected draft')
+      expect(outcome.row.draft.bounding_box).toBeUndefined()
+      expect(outcome.row.draft.bbox_provenance).toBeUndefined()
+      expect(outcome.row.draft.bbox_evidence).toBeUndefined()
+    },
+  )
+
+  it('retains timestamps as evidence without claiming represented time', () => {
+    const outcome = mapSnapshotEntry(sample, sampleEnriched)
+    if (outcome.kind !== 'ok') throw new Error('expected draft')
+    expect(outcome.row.draft.temporal_semantics).toBe('unknown')
+    expect(outcome.row.draft.temporal_evidence).toContain(sample.startTime)
+    expect(outcome.row.draft.temporal_evidence).toContain('Not verified as represented time')
+    expect(outcome.row.draft.temporal_evidence).not.toContain(sampleEnriched.date_added)
+  })
+
+  it('does not substitute enrichment publication dates for missing source timestamps', () => {
+    const outcome = mapSnapshotEntry({ ...sample, startTime: '', endTime: '' }, sampleEnriched)
+    if (outcome.kind !== 'ok') throw new Error('expected draft')
+    expect(outcome.row.draft.temporal_semantics).toBe('unknown')
+    expect(outcome.row.draft.temporal_evidence).toBeUndefined()
+  })
+
+  it.each(['image/png', 'image/jpeg', 'image/webp', 'video/mp4', 'tour/json'])(
+    'does not infer scientific resource kind from %s', format => {
+      const outcome = mapSnapshotEntry({ ...sample, format }, undefined)
+      if (outcome.kind !== 'ok') throw new Error('expected draft')
+      expect(outcome.row.draft.resource_kind).toBe(format === 'tour/json' ? 'presentation' : 'unknown')
+    },
+  )
 })
 
 describe('pickDataLink (3b/B)', () => {

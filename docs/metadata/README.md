@@ -10,6 +10,14 @@ extension ownership, and vocabulary interoperability for
 [issue #428](https://github.com/zyra-project/terraviz/issues/428); not a new
 review of the full census or standards registry).
 
+**Phase 0 implementation added:** 2026-09-11 in
+[PR #433](https://github.com/zyra-project/terraviz/pull/433), steps 1–7 plus
+the retained step 8 notices. See the
+[implementation matrix and operational remediation](PHASE0_IMPLEMENTATION.md).
+This updates implementation status and the local importer inventory, not the
+full standards review above. Policy defaults await maintainer merge approval;
+no STAC resources are published and scientific curation remains outstanding.
+
 **Revisit when:** Phase 4 federation ships; a deployed D1 catalog materially
 diverges from the checked-in SOS snapshot; a stable STAC core release supersedes
 1.1.0; or the native-wire versus separate-projection decision changes.
@@ -65,9 +73,10 @@ There are two active metadata worlds in the repository:
 1. The default, D1-backed node catalog is the durable publishing system. It
    stores normalized dataset facts, decorations, media references, lifecycle
    state, licensing, checksums, and node provenance.
-2. The legacy SOS path combines an operational JSON catalog with a richer
-   descriptive JSON file by normalized title. It remains available as a
-   fallback and is also the source for the bulk snapshot importer.
+2. The legacy SOS viewer path combines an operational JSON catalog with a
+  richer descriptive JSON file by normalized title for compatibility. The
+  authoritative bulk snapshot importer reads those same files but now joins
+  only through a persisted stable-ID crosswalk, with no title fallback.
 
 A third representation, the SPA `Dataset` type, is a runtime and display
 model. It applies defaults, converts units, injects tours, and can synthesize
@@ -85,9 +94,9 @@ currently STAC compliant:
   endpoints are implemented.
 - Spatial and temporal metadata are too sparse to publish every current record
   as an honest STAC Item.
-- The current planning text assumes every dataset row should become an Item.
-  That loses the distinction between a durable product or series and an atomic
-  observation, revision, or frame.
+- Earlier planning assumed every dataset row should become an Item. Phase 0
+  now distinguishes product identity and persisted frame/revision identity in
+  pure readiness checks; the actual STAC projection remains Phase 1 work.
 
 The safe migration is additive: retain the native catalog, create explicit
 Collection and Item granularity, remediate metadata where needed, and expose
@@ -124,7 +133,8 @@ flowchart LR
 |---|---|---|---|
 | SOS operational catalog | `public/assets/sos-dataset-list.json` | Legacy media, display, temporal, probing, and globe fields | Upstream snapshot; not canonical after import |
 | SOS enrichment catalog | `public/assets/sos_dataset_metadata.json` | Descriptions, categories, keywords, developers, related resources | Supplemental legacy source |
-| Snapshot mapping | `cli/lib/snapshot-import.ts` | Normalizes both legacy files into publisher drafts | Import boundary |
+| Stable enrichment crosswalk | [SOS crosswalk](../../public/assets/sos-enrichment-crosswalk.json) | Operational ID → exact enrichment source URL; bootstrap candidates pinned for PR review | Explicit importer identity link, not scientific verification |
+| Snapshot mapping | [snapshot importer](../../cli/lib/snapshot-import.ts) | Normalizes both legacy files into publisher drafts using the crosswalk; duplicate operational IDs withheld | Import boundary; no title fallback |
 | Publisher input | `DatasetDraftBody` in `functions/api/v1/_lib/validators.ts` | Create, edit, and publish contract | Write-side contract |
 | Durable dataset row | `datasets` in `schema/catalog-schema.sql` | Canonical normalized facts and lifecycle | Primary system of record |
 | Node organization profile | `node_profile` via `functions/api/v1/_lib/node-profile-store.ts` | Operator-authored organization name, mission, about text, regional focus, links, and logo | Stored profile is not automatically public; see the node-profile publication policy below |
@@ -145,6 +155,12 @@ The `datasets` table contains the core facts needed for a STAC projection:
 - Description: `title`, `abstract`, `organization`, and `website_link`.
 - Temporal coverage: `start_time`, `end_time`, and ISO 8601 `period`.
 - Spatial coverage: typed north, south, west, and east bounding columns.
+- Phase 0 annotations: `bbox_provenance`, `bbox_evidence`,
+  `temporal_semantics`, `temporal_evidence`, and `resource_kind`, persisted by
+  [migration 0054](../../migrations/catalog/0054_metadata_provenance.sql) with
+  unknown/null defaults, not a scientific backfill. Workflow ownership and
+  immutable frame/revision annotations used by the offline audit are caller
+  enrichment, not additional dataset columns.
 - Asset references: primary data, thumbnails, sphere thumbnails, legend,
   caption, and color-table references.
 - Media intrinsics: encoded and render dimensions, color space, bit depth,
@@ -193,6 +209,10 @@ translating `WireDataset` would therefore discard useful metadata before
 mapping starts, while rendition support requires a new read path rather than
 simple plumbing.
 
+The five Phase 0 provenance/resource annotations are also intentionally absent
+from `WireDataset`. Publisher writes and canonical D1 reads carry them; native
+public schema/serializer changes are not part of Phase 0.
+
 The STAC read model should select the necessary D1 columns and joins directly,
 or introduce a richer internal row type shared by the STAC serializers. It
 should not depend on the native public response as an intermediate format.
@@ -218,9 +238,11 @@ extent" are different claims.
 
 ## Checked-in legacy metadata audit
 
-The following census describes the two committed SOS JSON files as of the
-audit date. It does not claim to describe the contents of a deployed D1
-database.
+The following **historical raw-source census (2026-09-03)** describes the two
+committed SOS JSON files at the audit date, not a deployed D1 database. Its
+title-match measurement describes the old join, not the current authoritative
+importer. For the 2026-09-11 crosswalk/import/readiness counts, use the
+[updated local inventory](PHASE0_IMPLEMENTATION.md#checked-in-baseline).
 
 | Measurement | Result |
 |---|---:|
@@ -239,25 +261,31 @@ database.
 | Rows with a thumbnail | 200 (98.0%) |
 | Rows with a website link | 188 (92.2%) |
 
-The normalized-title join has no collision among the 520 enrichment records,
-but the operational snapshot has two normalized-title collision groups. More
-importantly, 67 operational rows do not match enrichment at all. Title-based
-matching is therefore useful migration logic, not a durable relational key.
+At that audit, the normalized-title join had no collision among the 520
+enrichment records, but the operational snapshot had two normalized-title
+collision groups and 67 unmatched rows. Phase 0 confines title matching to a
+one-time offline candidate bootstrap reviewed in the PR; it is not scientific
+verification or a durable relational key. Import now resolves explicit
+operational IDs to exact enrichment source URLs. The viewer's legacy title
+merge remains unchanged.
 
-Running the actual `mapSnapshot()` implementation over the committed files
-produces 195 valid publisher drafts and these nine exclusions:
+The **pre-Phase-0 mapper** produced 195 valid publisher drafts and these nine
+exclusions (historical comparison only):
 
 | Skip reason | Count | Detail |
 |---|---:|---|
 | Missing data link | 5 | No playable source to publish |
 | Unsupported format | 2 | One KML row and one DDS row |
-| Duplicate ID | 1 | First occurrence wins |
+| Duplicate ID | 1 | Historical first-occurrence-wins behavior; now removed |
 | Invalid after mapping | 1 | `end_time` precedes `start_time` |
 
 The one `images/jpg` spelling is not rejected. `mapFormat()` deliberately
-normalizes both legacy JPEG spellings to `image/jpeg`. The focused importer
-suite currently contains 41 passing tests covering these mappings and skip
-paths.
+normalizes both legacy JPEG spellings to `image/jpeg`. The current mapper
+instead retains **194 drafts and skips 10 rows**, withholding **both** copies
+of `INTERNAL_SOS_766_ONLINE`; it does not silently choose one. The crosswalk's
+136 unique mapping pairs cover 137 raw rows, but only 131 retained drafts
+receive enrichment after mapper skips. See the updated inventory for the
+separate readiness denominator and reasons; no deployed census is implied.
 
 ### Legacy quality risks
 
@@ -405,7 +433,11 @@ native grid; they do not change the GeoJSON coordinate system.
 
 ### Node profile and publication policy
 
-**Status: proposed design for review; no new public fields are implemented.**
+**Status: design with Phase 0 input contracts implemented; no new public fields.**
+The [step 7 decision record](NODE_METADATA_POLICY.md) selects the exact
+permissions, review, and cache defaults for maintainer ratification on merge.
+Snapshot storage, publication UI, and richer public serialization remain future
+work; the following mapping describes that future surface.
 Node identity and operator-authored organization metadata have different jobs:
 `node_identity` anchors stable IDs and node naming; `node_profile` explains
 the institution and its holdings. Updating the latter must not rename a
@@ -452,8 +484,11 @@ Before the first public route exposes that column, explicitly describe its
 public purpose in both the `init-node --description` CLI help and
 [the self-hosting guide](../SELF_HOSTING.md). Include an upgrade notice telling
 existing operators to review and replace or clear any internal prose before
-enabling the publishing release. The current help and guide do not give that
-warning; this is a publication prerequisite, not a claim that they already do.
+enabling the publishing release. Phase 0 now supplies that warning in CLI
+help and before an `init-node` write, with review/replace/clear instructions in
+[the upgrade notice](../SELF_HOSTING.md#91-existing-nodes-review-descriptions-before-stac-publication).
+The eventual publishing release must repeat the notice in its upgrade guidance;
+the preparation work does not itself enable public exposure.
 Do not silently expose old values on upgrade. This notice is separate from
 the approval machinery for private `node_profile` fields.
 
@@ -470,9 +505,11 @@ Before enabling the richer mapping, add an operator-reviewed public profile
 selection with a preview and explicit publish/unpublish action. Prefer a
 published snapshot separate from the authoring row: existing rows start with
 no approval for currently private fields, and editing private draft prose
-must not silently update the published copy. Storage and permission details
-remain a Phase 0 decision. The existing public organization-name/logo behavior
-and native endpoint shape are unchanged unless separately reviewed.
+must not silently update the published copy. Storage and permission policy is
+specified in the [decision record](NODE_METADATA_POLICY.md), with ratification
+pending maintainer merge approval and implementation deferred. The existing
+public organization-name/logo behavior and native endpoint shape are unchanged
+unless separately reviewed.
 
 Recommended snapshot behavior is field-level selection followed by atomic
 publication of that selection. Unpublishing selected fields produces a new
@@ -480,8 +517,8 @@ public revision without them; it does not delete the authoring row or restore
 an older snapshot that might disclose a previously withdrawn value. Operators
 explicitly assign link purposes in the preview; no URL-pattern or label-based
 heuristic infers an organization/about relation. These selections and their
-publication permissions require policy design in Phase 0 and separate storage
-and portal implementation before the optional richer profile mapping is
+publication permissions follow the Phase 0 decision record and require separate
+storage and portal implementation before the optional richer profile mapping is
 enabled; they do not block the identity-only Phase 1 projection.
 The current profile row does not store a logo MIME type: the resolver must
 provide verified asset metadata or omit the optional link `type`, not guess.
@@ -502,6 +539,9 @@ lifetime and test both CDN and application-cache behavior.
 | D1 field | STAC destination | Policy |
 |---|---|---|
 | Four bbox columns | Item `bbox` and `geometry`; Collection `extent.spatial` | Use only when complete and sourced |
+| `bbox_provenance`, `bbox_evidence` | Internal readiness gate | Measured or exact declared-global bounds need evidence; imported/inferred bounds require review; unknown does not become global |
+| `temporal_semantics`, `temporal_evidence` | Internal readiness gate | Only evidenced represented time becomes Item time; publication/schedule/unknown do not |
+| `resource_kind` | Internal eligibility gate | Explicit product assertion required for candidates; presentations excluded, unknown requires review |
 | `start_time == end_time` | Item `properties.datetime` | A genuine instant may use one timestamp |
 | `start_time`, `end_time` | `datetime: null`, `start_datetime`, `end_datetime` | Use a range when the asset represents an interval |
 | `period` | `terraviz:cadence` | A duration between frames/updates is not an extent |
@@ -539,11 +579,14 @@ STAC puts the governing license on the Collection:
 - `rights_holder` and `attribution_text` can remain in a versioned Terraviz
   extension until an appropriate stable standard field is adopted.
 
-The current publisher validator checks that either an SPDX field or a free-text
-statement is present, but it does not validate an SPDX expression. STAC export
-must add that validation. A value of `other` without a license link or license
-text grants no explicit public right under the STAC guidance and should fail a
-public-export readiness check.
+The native publisher validator still checks that either an SPDX field or a
+free-text statement is present without parsing SPDX. Phase 0 adds **separate
+strict SPDX readiness/audit checks**, not stricter native license publication.
+Malformed SPDX does not fall back to text; every `LicenseRef` needs explicit
+per-reference evidence. Text-only `other` can be a metadata candidate, but is
+flagged `license_text_asset_pending`; safe URL syntax is still
+`license_link_unverified`. Later public export must expose the license text or
+verify the public link. Candidate status is not STAC validation or legal curation.
 
 ### Assets and media
 
@@ -690,10 +733,13 @@ remain retrievable by independent clients, but a later remote outage must not
 make a serializer silently skip validation. The same reviewed schema snapshot
 must validate the emitted resource deterministically.
 
-No node-extension storage, registry, or passthrough support exists yet. The
-prefix convention, owner migration rules, and exact fail/omit policy need
-ratification before Phase 1; these defaults describe the safe boundary, not a
-new federation transport contract.
+No node-extension registry storage or passthrough support exists yet. Phase 0's
+[pure policy contracts](../../functions/api/v1/_lib/metadata-policy.ts) now
+validate supplied registrations and return omit/withhold/pending-serializer
+decisions, never permission to emit. The [decision record](NODE_METADATA_POLICY.md)
+selects prefix, ownership, immutability, and fail/omit rules for ratification on
+maintainer merge approval. Schema-byte verification and runtime schema
+validation remain future gates, not a new federation transport contract.
 
 ### Node-local vocabularies
 
@@ -735,9 +781,12 @@ concept; that permits a shared discovery filter, not a merge of dataset
 identities or a transfer of one node's extent/license/provider metadata.
 
 The tradeoff is deliberate: local authoring remains flexible, while reliable
-cross-node filters require curation. Whether to offer an optional project
-starter vocabulary, how mappings are reviewed, and which standards/schema
-carry the descriptor remain open Phase 0 decisions.
+cross-node filters require curation. The [Phase 0 decision record](NODE_METADATA_POLICY.md)
+selects strict plain JSON (not JSON-LD), no starter vocabulary in this rollout,
+two-actor operator review, and explicit SKOS mapping relations. Pure descriptor
+and mixed-origin reference contracts are implemented, with ratification pending
+merge. Public descriptor schemas, storage, routes, and companion extension
+fields remain Phase 1/2 work, not already published standards claims.
 
 ## Representative STAC resources
 
@@ -1003,6 +1052,19 @@ field is already public or that publication code exists.
 
 ### Phase 0: policy and remediation
 
+**Implementation progress (2026-09-11, PR #433):** steps 1–7 now have the
+additive provenance migration and source-aware write lifecycle, pure strict
+license/identity/readiness contracts, offline audit and inventory, stable-ID
+import crosswalk, and step 7 policy record/input validators. Item 8's existing
+CLI/runtime/self-hosting notices and tests are retained, including the SQL
+bootstrap path and unchanged anonymous well-known response. See the
+[implementation matrix](PHASE0_IMPLEMENTATION.md#implementation-matrix) for
+implemented versus operational/future work. Apply migration 0054 before new
+code; policy defaults become ratified only on maintainer merge approval.
+Scientific remediation and a deployed-catalog audit are not complete. No STAC
+builder, public schema, route, or native public wire change is included; the
+Phase 2 release must repeat the description notice before publication.
+
 1. Add explicit metadata provenance for bounding boxes: measured, declared
    global, imported, inferred, or unknown.
 2. Distinguish represented time from publication time and workflow schedule.
@@ -1169,29 +1231,34 @@ origin and identity after both contracts are stable.
 | Node extensions collide or pass through unchecked | Fields change meaning or bypass validation | Owner/schema-qualified registration; reserved prefixes; report unknown fields |
 | Treating local facets or keywords as universal | Misleading cross-node filters and aggregation | Versioned vocabulary provenance and explicit curated concept mappings |
 
-The key design decisions to resolve before implementation are:
+The original design questions below now split into implemented Phase 0
+contracts, maintainer-ratification gates, and later projection/curation work:
 
 1. Which existing rows are durable products, atomic assets, or presentation
    artifacts?
 2. What source or curator action is sufficient to declare global coverage?
-3. What stable node namespace prefixes the immutable dataset ULID in a
-  Collection ID, and which alias links preserve old slug URLs?
+3. Phase 0 selects persisted `origin_node` as the namespace prefix for the
+  immutable dataset ULID. Which alias links preserve old slug URLs remains
+  a projection decision; aliases must not change canonical identity.
 4. What creates an immutable Item revision for a workflow-published dataset?
 5. Which rendition is primary, and which are alternates?
 6. Are records without meaningful represented time omitted, represented as
    standalone Collections, or curated with domain-specific time semantics?
 7. Is non-Earth support valuable enough to own and validate a Solar System
    profile, or should those records remain native-only?
-8. Which currently private profile values can an operator publish, under which
-   permission, and how is the reviewed snapshot stored, previewed, and revoked?
-9. What node-extension prefix convention and schema-ownership/migration rules
-   should be adopted? Ratify whether unknown prefixes are omitted with a
-   report, which values require withholding a resource, and when a local
-   field should become a shared `terraviz:*` field.
-10. Should facets remain declared node-local vocabularies with optional concept
-    mappings (recommended), or use a controlled project list? Select the
-    descriptor schema/link relation, per-resource vocabulary references,
-    keyword provenance representation, and mapping-review responsibility.
+8. The [step 7 record](NODE_METADATA_POLICY.md) selects private-profile values,
+  operator authority, two-actor review, snapshot/revocation and bounded-cache
+  policy for ratification on maintainer merge. Storage, preview and public
+  publication implementation remain optional future work.
+9. The same record selects extension prefix, ownership/migration and fail/omit
+  rules, backed by pure input contracts. Schema-byte/runtime validation and
+  public schema hosting remain later gates; shared `terraviz:*` adoption still
+  requires project review.
+10. The record selects plain-JSON node-local vocabularies, explicit reviewed
+   mappings and per-resource references, not a controlled project list or
+   JSON-LD. Public descriptor schema/link relations and companion extension
+   serialization remain Phase 1/2 design work. These selected defaults are
+   not already ratified before maintainer merge approval.
 
 ## Definition of done
 

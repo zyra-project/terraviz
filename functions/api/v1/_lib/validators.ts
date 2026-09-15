@@ -51,6 +51,14 @@ const FORMAT_VALUES = new Set([
 const SLUG_RE = /^[a-z][a-z0-9-]{2,63}$/
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/
 
+export type BboxProvenance = 'unknown' | 'measured' | 'declared_global' | 'imported' | 'inferred'
+export type TemporalSemantics = 'unknown' | 'represented' | 'publication' | 'schedule'
+export type ResourceKind = 'unknown' | 'product' | 'presentation'
+
+const BBOX_PROVENANCE_VALUES = new Set(['unknown', 'measured', 'declared_global', 'imported', 'inferred'])
+const TEMPORAL_SEMANTICS_VALUES = new Set(['unknown', 'represented', 'publication', 'schedule'])
+const RESOURCE_KIND_VALUES = new Set(['unknown', 'product', 'presentation'])
+
 export interface ValidationError {
   field: string
   code: string
@@ -81,7 +89,15 @@ export interface DatasetDraftBody {
    * spatial extent. Phase 3d replaced the 3b `bounding_variables`
    * JSON string with this typed object. Validation: n/s in
    * [-90, 90], w/e in [-180, 180], n >= s. */
-  bounding_box?: { n: number; s: number; w: number; e: number }
+  bounding_box?: { n: number; s: number; w: number; e: number } | null
+  /** Optional assertions. Null resets enums to unknown; omission preserves
+   * them on PATCH unless the underlying bounds/time change. Evidence is
+   * curator/source text, not a trusted or fetched URL. */
+  bbox_provenance?: BboxProvenance | null
+  bbox_evidence?: string | null
+  temporal_semantics?: TemporalSemantics | null
+  temporal_evidence?: string | null
+  resource_kind?: ResourceKind | null
   /** Celestial body the dataset visualises. Free-form string
    * (Earth / Mars / Moon / Sun / …) bounded to 64 chars. NULL /
    * empty == Earth. */
@@ -108,9 +124,9 @@ export interface DatasetDraftBody {
    *  sequence wants a readable speed too. */
   playback_fps?: number | null
   website_link?: string
-  start_time?: string
-  end_time?: string
-  period?: string
+  start_time?: string | null
+  end_time?: string | null
+  period?: string | null
   weight?: number
   visibility?: string
   is_hidden?: boolean
@@ -587,13 +603,84 @@ function validateIsoDate(field: string, value: unknown, errors: ValidationError[
   }
 }
 
+/** Strict calendar validation for represented-time claims only. Do not
+ * reinterpret legacy timestamps, publication dates, or schedule strings.
+ * Date.parse alone accepts impossible dates such as February 30. */
+function isRepresentedTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string' || !ISO_DATE_RE.test(value)) return false
+  const millis = Date.parse(value)
+  if (!Number.isFinite(millis)) return false
+  return new Date(millis).toISOString().slice(0, 19) === value.slice(0, 19)
+}
+
+/** Keep sub-millisecond precision and compare equivalent forms (.0 / no
+ * fraction) equally. Inputs have already passed the UTC syntax check. */
+function utcTimestampKey(value: string): string {
+  const fraction = value.slice(19, -1).replace(/0+$/, '').replace(/\.$/, '')
+  return value.slice(0, 19) + fraction
+}
+
+function validateMetadataEnum(
+  field: string, value: unknown, values: Set<string>, errors: ValidationError[],
+): void {
+  if (value == null) return
+  if (typeof value !== 'string') {
+    errors.push(err(field, 'invalid_type', `${field} must be a string or null.`))
+  } else if (!values.has(value)) {
+    errors.push(err(field, 'invalid_value', `${field} must be one of: ${[...values].join(', ')}.`))
+  }
+}
+
+/** On create validate claims immediately. PATCH first validates field shapes,
+ * then dataset-mutations validates claims against the merged persisted row.
+ * Equal endpoints encode an instant; one endpoint is not a complete claim. */
+export function validateMetadataAnnotations(
+  body: DatasetDraftBody, checkClaims = true,
+): ValidationError[] {
+  const errors: ValidationError[] = []
+  validateMetadataEnum('bbox_provenance', body.bbox_provenance, BBOX_PROVENANCE_VALUES, errors)
+  validateMetadataEnum('temporal_semantics', body.temporal_semantics, TEMPORAL_SEMANTICS_VALUES, errors)
+  validateMetadataEnum('resource_kind', body.resource_kind, RESOURCE_KIND_VALUES, errors)
+  validateOptionalString('bbox_evidence', body.bbox_evidence, 2048, errors)
+  validateOptionalString('temporal_evidence', body.temporal_evidence, 2048, errors)
+  if (!checkClaims) return errors
+
+  if (body.bbox_provenance && body.bbox_provenance !== 'unknown' &&
+      BBOX_PROVENANCE_VALUES.has(body.bbox_provenance)) {
+    if (body.bounding_box == null) {
+      errors.push(err('bounding_box', 'required', 'An asserted bbox provenance requires complete bounds.'))
+    } else {
+      validateBoundingBox(body.bounding_box, errors)
+      const b = body.bounding_box
+      if (body.bbox_provenance === 'declared_global' &&
+          (b.n !== 90 || b.s !== -90 || b.w !== -180 || b.e !== 180)) {
+        errors.push(err('bbox_provenance', 'invalid_value', 'declared_global requires exact whole-world bounds (90, -90, -180, 180).'))
+      }
+    }
+    if (typeof body.bbox_evidence !== 'string' || !body.bbox_evidence.trim()) {
+      errors.push(err('bbox_evidence', 'required', 'An asserted bbox provenance requires nonempty evidence.'))
+    }
+  }
+  if (body.temporal_semantics === 'represented') {
+    if (!isRepresentedTimestamp(body.start_time) || !isRepresentedTimestamp(body.end_time)) {
+      errors.push(err('temporal_semantics', 'invalid_time', 'Represented time requires valid start/end UTC timestamps; use equal endpoints for an instant.'))
+    } else if (utcTimestampKey(body.end_time) < utcTimestampKey(body.start_time)) {
+      errors.push(err('end_time', 'before_start', 'end_time must be ≥ start_time.'))
+    }
+    if (typeof body.temporal_evidence !== 'string' || !body.temporal_evidence.trim()) {
+      errors.push(err('temporal_evidence', 'required', 'Represented time requires nonempty evidence.'))
+    }
+  }
+  return errors
+}
+
 function validateTimeRange(body: DatasetDraftBody, errors: ValidationError[]): void {
   validateIsoDate('start_time', body.start_time, errors)
   validateIsoDate('end_time', body.end_time, errors)
   if (
     body.start_time &&
     body.end_time &&
-    body.start_time > body.end_time
+    Date.parse(body.start_time) > Date.parse(body.end_time)
   ) {
     errors.push(err('end_time', 'before_start', 'end_time must be ≥ start_time.'))
   }
@@ -664,6 +751,7 @@ function validateStringArray(
  */
 export function validateDraftCreate(body: DatasetDraftBody): ValidationError[] {
   const errors: ValidationError[] = []
+  errors.push(...validateMetadataAnnotations(body))
   validateTitle(body.title, errors)
   validateFormat(body.format, errors, /* required */ true)
   validateSlug(body.slug, errors, /* required */ false)
@@ -712,6 +800,7 @@ export function validateDraftCreate(body: DatasetDraftBody): ValidationError[] {
  */
 export function validateDraftUpdate(body: DatasetDraftBody): ValidationError[] {
   const errors: ValidationError[] = []
+  errors.push(...validateMetadataAnnotations(body, false))
   if (body.title !== undefined) validateTitle(body.title, errors)
   if (body.format !== undefined) validateFormat(body.format, errors, /* required */ false)
   if (body.slug !== undefined) validateSlug(body.slug, errors, /* required */ false)

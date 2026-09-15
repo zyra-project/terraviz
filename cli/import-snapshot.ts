@@ -39,7 +39,7 @@
  * import.
  *
  * Inputs default to the snapshot files committed under
- * `public/assets/`; `--list` and `--enriched` override the paths so
+ * `public/assets/`; `--list`, `--enriched`, and `--crosswalk` override paths so
  * a self-hosting operator can point the importer at a fork of the
  * catalog without re-rolling the binary.
  */
@@ -54,9 +54,11 @@ import {
   type RawEnrichedEntry,
   type RawSosEntry,
 } from './lib/snapshot-import'
+import type { SnapshotCrosswalk } from './lib/snapshot-crosswalk'
 
 const DEFAULT_LIST_PATH = 'public/assets/sos-dataset-list.json'
 const DEFAULT_ENRICHED_PATH = 'public/assets/sos_dataset_metadata.json'
+const DEFAULT_CROSSWALK_PATH = 'public/assets/sos-enrichment-crosswalk.json'
 
 /** Page size for the legacy_id index build. The publisher API caps at 200. */
 const LIST_PAGE_LIMIT = 200
@@ -170,6 +172,8 @@ const BACKFILL_FIELDS = [
   'color_table_ref',
   'probing_info',
   'bounding_box',
+  'bbox_provenance',
+  'bbox_evidence',
   'celestial_body',
   'radius_mi',
   'lon_origin',
@@ -276,6 +280,7 @@ function summarisePlan(
       `  skipped (mapping):     ${plan.outcomes.length - okRows.length}\n`,
   )
   for (const reason of [
+    'missing_id',
     'missing_title',
     'missing_data_link',
     'unsupported_format',
@@ -292,6 +297,7 @@ export async function runImportSnapshot(ctx: CommandContext): Promise<number> {
   const enrichedPath = resolve(
     getString(ctx.args.options, 'enriched') ?? DEFAULT_ENRICHED_PATH,
   )
+  const crosswalkPath = resolve(getString(ctx.args.options, 'crosswalk') ?? DEFAULT_CROSSWALK_PATH)
   const dryRun = getBool(ctx.args.options, 'dry-run')
   const reindex = getBool(ctx.args.options, 'reindex')
   const updateExisting = getBool(ctx.args.options, 'update-existing')
@@ -303,9 +309,11 @@ export async function runImportSnapshot(ctx: CommandContext): Promise<number> {
   // --- Stage 1 — load + map ----------------------------------------
   let sosWrap: { datasets: RawSosEntry[] }
   let enriched: RawEnrichedEntry[]
+  let crosswalk: SnapshotCrosswalk
   try {
     sosWrap = readJson<{ datasets: RawSosEntry[] }>(ctx, listPath)
     enriched = readJson<RawEnrichedEntry[]>(ctx, enrichedPath)
+    crosswalk = readJson<SnapshotCrosswalk>(ctx, crosswalkPath)
   } catch (e) {
     ctx.stderr.write(`${e instanceof Error ? e.message : String(e)}\n`)
     return 2
@@ -319,7 +327,15 @@ export async function runImportSnapshot(ctx: CommandContext): Promise<number> {
     return 2
   }
 
-  const plan = mapSnapshot(sosWrap.datasets, enriched)
+  const plan = mapSnapshot(sosWrap.datasets, enriched, crosswalk)
+  const report = plan.crosswalk
+  ctx.stdout.write(`Crosswalk validation: matched=${report.matched} unmapped=${report.unmapped} ambiguous=${report.ambiguous} invalid=${report.invalid}\n`)
+  if (report.unmapped_ids.length) ctx.stdout.write(`  unmapped IDs: ${report.unmapped_ids.join(', ')}\n`)
+  if (report.invalid || report.ambiguous) {
+    for (const issue of report.issues) ctx.stderr.write(`  ${issue}\n`)
+    ctx.stderr.write('Crosswalk validation failed; no API calls made. Review the offline crosswalk before importing.\n')
+    return 2
+  }
 
   // --- Stage 2 — build the legacy_id index ------------------------
   const index = await buildLegacyIdIndex(ctx)

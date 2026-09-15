@@ -845,11 +845,13 @@ export async function stampTranscodingForVideoSource(
   //     allowed a stamp to take over a stuck transcoding=1 row,
   //     which could start a second workflow alongside whatever
   //     workflow left the row in that shape. PR #112 followup.
+  const metadata = sourceMetadataReset(upload.claimed_digest)
   const result = await db
     .prepare(
       `UPDATE datasets
          SET transcoding = 1,
              active_transcode_upload_id = ?,
+             ${metadata.sql},
              data_ref = CASE WHEN published_at IS NULL THEN '' ELSE data_ref END,
              source_digest = ?,
              content_digest = CASE WHEN published_at IS NULL THEN NULL ELSE content_digest END,
@@ -857,7 +859,7 @@ export async function stampTranscodingForVideoSource(
        WHERE id = ?
          AND (COALESCE(transcoding, 0) = 0 OR active_transcode_upload_id = ?)`,
     )
-    .bind(upload.id, upload.claimed_digest, now, datasetId, upload.id)
+    .bind(upload.id, ...metadata.binds, upload.claimed_digest, now, datasetId, upload.id)
     .run()
   return result.meta?.changes ?? 0
 }
@@ -910,11 +912,13 @@ export async function stampTranscodingForFrameSource(
   // frame_extension, frame_source_filenames_ref) atomically when
   // the bundle is ready. Phase 3pf-review/E — Copilot
   // discussion suppressed-confidence #3.
+  const metadata = sourceMetadataReset(upload.claimed_digest)
   const result = await db
     .prepare(
       `UPDATE datasets
          SET transcoding = 1,
              active_transcode_upload_id = ?,
+             ${metadata.sql},
              data_ref = CASE WHEN published_at IS NULL THEN '' ELSE data_ref END,
              source_digest = ?,
              content_digest = CASE WHEN published_at IS NULL THEN NULL ELSE content_digest END,
@@ -927,6 +931,7 @@ export async function stampTranscodingForFrameSource(
     )
     .bind(
       upload.id,
+      ...metadata.binds,
       upload.claimed_digest,
       frameCount,
       frameExtension,
@@ -1033,6 +1038,9 @@ export async function revertTranscodingStamp(
   prior: TranscodingStampSnapshot,
   now: string,
 ): Promise<number> {
+  // Do not resurrect annotations invalidated when a distinct source was
+  // accepted. A curator may have edited them since the stamp; restoring an
+  // old snapshot could overwrite that decision. Unknown is the safe fallback.
   const result = await db
     .prepare(
       `UPDATE datasets
@@ -1232,28 +1240,31 @@ function buildApplyAssetStatement(
   now: string,
 ): D1PreparedStatement {
   if (upload.kind === 'data') {
+    const metadata = sourceMetadataReset(verifiedDigest)
     if (upload.target === 'stream') {
       return db
         .prepare(
           `UPDATE datasets
              SET data_ref = ?,
+                 ${metadata.sql},
                  source_digest = ?,
                  content_digest = NULL,
                  updated_at = ?
            WHERE id = ?`,
         )
-        .bind(upload.target_ref, verifiedDigest, now, datasetId)
+        .bind(upload.target_ref, ...metadata.binds, verifiedDigest, now, datasetId)
     }
     return db
       .prepare(
         `UPDATE datasets
            SET data_ref = ?,
+               ${metadata.sql},
                content_digest = ?,
                source_digest = NULL,
                updated_at = ?
          WHERE id = ?`,
       )
-      .bind(upload.target_ref, verifiedDigest, now, datasetId)
+      .bind(upload.target_ref, ...metadata.binds, verifiedDigest, now, datasetId)
   }
 
   // Auxiliary asset — stamp `*_ref` + atomically merge into the
@@ -1271,6 +1282,31 @@ function buildApplyAssetStatement(
        WHERE id = ?`,
     )
     .bind(upload.target_ref, verifiedDigest, now, datasetId)
+}
+
+/** Trusted upload boundary: invalidate source-bound facts atomically when
+ * replacing an attached source, not when merely changing its encoding/ref.
+ * Equal source/content digests prove byte identity; an absent digest does not.
+ * First attachment preserves metadata authored for that pending source.
+ * Transcode completion/rollback only move representations; they must not
+ * invalidate a same-source re-encode. New-source stamps clear early (even on
+ * published rows), preferring temporarily unknown facts to stale evidence.
+ * resource_kind survives uploads within a product; explicit publisher source/
+ * format PATCHes can designate a different product and reset it separately.
+ * Keep future raw bounds/time SQL writers equally explicit about invalidation:
+ * the schema cannot distinguish omitted assertions from same-value reassertions.
+ */
+function sourceMetadataReset(digest: string): { sql: string; binds: string[] } {
+  const defaults = {
+    bbox_provenance: "'unknown'", bbox_evidence: 'NULL',
+    temporal_semantics: "'unknown'", temporal_evidence: 'NULL',
+  }
+  return {
+    sql: Object.entries(defaults).map(([field, fallback]) =>
+      `${field} = CASE WHEN (data_ref = '' AND source_digest IS NULL AND content_digest IS NULL) OR source_digest = ? OR content_digest = ? THEN ${field} ELSE ${fallback} END`,
+    ).join(', '),
+    binds: Object.keys(defaults).flatMap(() => [digest, digest]),
+  }
 }
 
 const AUX_REF_COLUMN: Record<Exclude<AssetKind, 'data'>, string> = {

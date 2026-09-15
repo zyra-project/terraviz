@@ -1467,6 +1467,7 @@ npm run terraviz -- init-node \
   --client-secret "$CF_ACCESS_CLIENT_SECRET" \
   --display-name "Terraviz — Your Org" \
   --base-url "https://<W2>" \
+  --description "Public environmental datasets from Your Org." \
   --contact ops@your-org.org
 ```
 
@@ -1474,8 +1475,24 @@ It reads `node-public-key.txt` (`W17`) automatically, and writes
 through the publisher API — so it needs only the service token from
 Phase 6.3, no `wrangler` or direct D1 access. It's idempotent:
 re-running updates the row in place, preserving `node_id` so
-existing `origin_node` references stay valid, and keeping the
-existing key unless you pass `--public-key`.
+existing `origin_node` references stay valid. It keeps the existing
+key when no key flag or default key file supplies a replacement.
+
+**The node description is intended public metadata**, not private authoring
+context. Use a short public-facing sentence (at most 2048 characters); do not
+put secrets, internal notes, or unpublished plans in it. This release stores
+the field and returns it through the authenticated publisher API, but does
+not expose it in the anonymous well-known document or a STAC route. The
+planned STAC release will use it directly as the root Catalog description,
+without a profile-approval step. This is separate from the private
+`node_profile.mission` and `about_md` publication policy.
+
+**Update semantics:** re-running `init-node` without `--description` **clears**
+the stored description; omitting `--contact` also clears the contact email.
+Pass both values again when you want to keep them. Unlike these fields, an
+omitted public key is preserved only when no default key file is found — if
+`node-public-key.txt` exists, it is read and sent again. Check that it is the
+correct key before updating an existing node.
 
 **Gate:**
 
@@ -1486,6 +1503,9 @@ curl -s https://<W2>/.well-known/terraviz.json | head -c 200
 
 <details>
 <summary>Fallback: write the row directly with wrangler</summary>
+
+The description literal below has the same intended-public meaning and
+upgrade-review requirement as `--description`; SQL provisioning is not exempt.
 
 ```bash
 wrangler d1 execute sphere-feedback --remote --config wrangler.toml \
@@ -1506,6 +1526,41 @@ If you later rotate the keypair, push the new public half to remote
 D1 too — `init-node … --public-key ed25519:…`. `gen:node-key` only
 updates your local copy.
 </details>
+
+## 9.1 Existing nodes: review descriptions before STAC publication
+
+**Upgrade notice:** earlier versions did not explain that this field was
+intended to become public. Before deploying the first release that serves
+STAC, review every node's stored description, including values entered through
+the fallback SQL. Replace internal prose with a public summary or clear it.
+This preparation release does **not** publish existing values; the STAC
+publishing release must repeat this notice in its upgrade instructions.
+
+1. Inspect the stored identity through the existing authenticated endpoint
+  using the service token from Phase 6.3 (or a signed-in publisher session).
+  Review the response locally; do not paste internal prose into a public
+  issue or a shared log. The anonymous well-known endpoint does not show it.
+
+  ```bash
+  curl --fail --silent --show-error \
+    -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+    -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+    "$TERRAVIZ_SERVER/api/v1/publish/node-identity"
+  ```
+
+2. To replace the description, repeat the `init-node` command above with a
+  public `--description`. Use the **current** display name, base URL, and
+  contact from the read, not the example placeholders. A write requires an
+  admin or service token. Check the default key file as noted above so this
+  update does not accidentally rotate the node key.
+3. To clear the description, run that same command **without** the
+  `--description` option; it stores `null`. Keep `--contact` if you want to
+  preserve the email. A bare `--description` is an error, not a clear request;
+  `--description=` stores an empty string instead of `null`.
+4. Repeat the authenticated read to verify the saved text or `null` and the
+  unchanged node ID/public key. A cleared description will use the generic
+  STAC fallback, not private mission/about text. This does not require a
+  profile snapshot or a change to the well-known wire format.
 
 ---
 

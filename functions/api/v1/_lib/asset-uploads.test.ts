@@ -21,6 +21,13 @@ import { describe, expect, it } from 'vitest'
 import { freshMigratedDb } from '../../../../scripts/lib/catalog-migrations'
 import { asD1 } from './test-helpers'
 import {
+  abandonTranscoding,
+  applyAssetToDataset,
+  clearTranscoding,
+  revertTranscodingStamp,
+  stampTranscodingForFrameSource,
+  stampTranscodingForVideoSource,
+  type AssetUploadRow,
   extForMime,
   FRAME_VERIFY_SAMPLE_SIZE,
   getAssetUpload,
@@ -591,6 +598,127 @@ describe('asset_uploads row helpers', () => {
     const after = await getAssetUpload(d1, 'UP003')
     expect(after?.status).toBe('failed')
     expect(after?.failure_reason).toBe('digest_mismatch')
+  })
+})
+
+describe('asset source provenance invalidation', () => {
+  const id = 'DS001AAAAAAAAAAAAAAAAAAAAA'
+  const now = '2026-04-29T12:01:00.000Z'
+  const annotations = {
+    bbox_provenance: 'declared_global', bbox_evidence: 'Source global domain',
+    temporal_semantics: 'represented', temporal_evidence: 'Source observation times', resource_kind: 'product',
+  }
+  const unknown = {
+    bbox_provenance: 'unknown', bbox_evidence: null,
+    temporal_semantics: 'unknown', temporal_evidence: null, resource_kind: 'product',
+  }
+  function setup() {
+    const db = makeDb()
+    db.sqlite.prepare(`UPDATE datasets SET
+      bbox_n = 90, bbox_s = -90, bbox_w = -180, bbox_e = 180,
+      bbox_provenance = ?, bbox_evidence = ?, temporal_semantics = ?, temporal_evidence = ?, resource_kind = ?,
+      start_time = '2024-01-01T00:00:00Z', end_time = '2024-01-02T00:00:00Z', period = 'PT1H',
+      data_ref = 'r2:old-source', source_digest = NULL, content_digest = NULL WHERE id = ?`)
+      .run(...Object.values(annotations), id)
+    const upload: AssetUploadRow = {
+      id: 'UP-METADATA', dataset_id: id, publisher_id: 'PUB001', kind: 'data', target: 'r2',
+      target_ref: 'r2:new-source', mime: 'video/mp4', declared_size: 1234,
+      claimed_digest: HAPPY_DIGEST, status: 'pending', failure_reason: null,
+      created_at: now, completed_at: null, frame_count: null,
+    }
+    const read = () => db.sqlite.prepare('SELECT * FROM datasets WHERE id = ?').get(id)
+    return { ...db, upload, read }
+  }
+  for (const path of ['r2', 'stream', 'video', 'frames'] as const) {
+    async function apply(db: ReturnType<typeof setup>) {
+      if (path === 'video') return stampTranscodingForVideoSource(db.d1, id, db.upload, now)
+      if (path === 'frames') return stampTranscodingForFrameSource(db.d1, id, db.upload, 8, 'png', 'r2:frames.json', now)
+      return applyAssetToDataset(db.d1, id, { ...db.upload, target: path }, HAPPY_DIGEST, now)
+    }
+
+    it.each([null, now])(`${path}: clears old evidence on a distinct/unknown source for published_at=%s`, async published => {
+      const db = setup()
+      db.sqlite.prepare('UPDATE datasets SET published_at = ? WHERE id = ?').run(published, id)
+      await apply(db)
+      expect(db.read()).toMatchObject({ ...unknown,
+        bbox_n: 90, bbox_s: -90, bbox_w: -180, bbox_e: 180,
+        start_time: '2024-01-01T00:00:00Z', end_time: '2024-01-02T00:00:00Z', period: 'PT1H',
+      })
+    })
+
+    it.each(['source_digest', 'content_digest'] as const)(`${path}: retains facts when %s proves identical source bytes`, async column => {
+      const db = setup()
+      db.sqlite.prepare(`UPDATE datasets SET ${column} = ? WHERE id = ?`).run(HAPPY_DIGEST, id)
+      await apply(db)
+      expect(db.read()).toMatchObject(annotations)
+      if (path === 'video' || path === 'frames') {
+        await clearTranscoding(db.d1, id, db.upload.id, 'r2:new-encoding/master.m3u8', now,
+          path === 'frames' ? { frame_count: 8, frame_extension: 'png', frame_source_filenames_ref: 'r2:frames.json' } : null)
+        expect(db.read()).toMatchObject({ ...annotations, content_digest: null, data_ref: 'r2:new-encoding/master.m3u8' })
+      }
+    })
+
+    it(`${path}: preserves metadata authored before first attachment`, async () => {
+      const db = setup()
+      db.sqlite.prepare("UPDATE datasets SET data_ref = '' WHERE id = ?").run(id)
+      await apply(db)
+      expect(db.read()).toMatchObject(annotations)
+    })
+
+    it(`${path}: an empty ref with a prior source digest is not a first attachment`, async () => {
+      const db = setup()
+      db.sqlite.prepare("UPDATE datasets SET data_ref = '', source_digest = ? WHERE id = ?")
+        .run(`sha256:${'b'.repeat(64)}`, id)
+      await apply(db)
+      expect(db.read()).toMatchObject(unknown)
+    })
+
+    it(`${path}: does not mistake the same reference with changed bytes for the same source`, async () => {
+      const db = setup()
+      db.sqlite.prepare('UPDATE datasets SET data_ref = ?, content_digest = ? WHERE id = ?')
+        .run(db.upload.target_ref, `sha256:${'b'.repeat(64)}`, id)
+      await apply(db)
+      expect(db.read()).toMatchObject(unknown)
+    })
+  }
+
+  it('leaves source assertions intact when an auxiliary asset changes', async () => {
+    const db = setup()
+    await applyAssetToDataset(db.d1, id, { ...db.upload, kind: 'legend' }, HAPPY_DIGEST, now)
+    expect(db.read()).toMatchObject(annotations)
+  })
+
+  it('does not invalidate evidence when a stale transcode stamp is rejected', async () => {
+    const db = setup()
+    db.sqlite.prepare("UPDATE datasets SET transcoding = 1, active_transcode_upload_id = 'OTHER' WHERE id = ?").run(id)
+    expect(await stampTranscodingForVideoSource(db.d1, id, db.upload, now)).toBe(0)
+    expect(db.read()).toMatchObject(annotations)
+  })
+
+  it('does not resurrect old assertions on dispatch rollback after a distinct-source stamp', async () => {
+    const db = setup()
+    await stampTranscodingForVideoSource(db.d1, id, db.upload, now)
+    await revertTranscodingStamp(db.d1, id, db.upload, {
+      data_ref: 'r2:old-source', content_digest: null, source_digest: null,
+      frame_count: null, frame_extension: null, frame_source_filenames_ref: null,
+    }, now)
+    expect(db.read()).toMatchObject({ ...unknown, data_ref: 'r2:old-source', transcoding: null })
+  })
+
+  it.each(['rollback', 'abandon'] as const)('preserves verified same-source facts after %s instead of unconditionally clearing on failure', async failure => {
+    const db = setup()
+    db.sqlite.prepare('UPDATE datasets SET published_at = ?, source_digest = ? WHERE id = ?')
+      .run(now, HAPPY_DIGEST, id)
+    expect(await stampTranscodingForVideoSource(db.d1, id, db.upload, now)).toBe(1)
+    if (failure === 'rollback') {
+      expect(await revertTranscodingStamp(db.d1, id, db.upload, {
+        data_ref: 'r2:old-source', content_digest: null, source_digest: HAPPY_DIGEST,
+        frame_count: null, frame_extension: null, frame_source_filenames_ref: null,
+      }, now)).toBe(1)
+    } else {
+      expect(await abandonTranscoding(db.d1, id, db.upload.id, now)).toBe(1)
+    }
+    expect(db.read()).toMatchObject({ ...annotations, data_ref: 'r2:old-source', transcoding: null })
   })
 })
 
