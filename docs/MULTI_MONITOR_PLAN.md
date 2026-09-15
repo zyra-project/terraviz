@@ -4455,6 +4455,89 @@ Near 60 there means the shader is cheap and the upload is the
 whole cost; near 18 means it is the shader, and neither a
 rendition change nor a decode change will help.
 
+> **Superseded — the check ran and the dichotomy was wrong.** A
+> moving camera makes the output redraw on every callback, but the
+> callbacks that set `dirty` arrive at the *control window's*
+> render rate, so the reading is bounded by that and not only by
+> this window. See the next addendum.
+
+#### Addendum — the idle drag, same session
+
+Check 2 came back: **~30 fps while dragging the control globe with
+no dataset loaded, and 0 the moment the drag stopped.** Two
+findings, and the first is that the check does not measure what the
+entry above said it measures.
+
+**The drag test is confounded, and the dichotomy above is false.**
+`bindOperatorCamera` hooks the primary map's `move`, which fires
+**once per rendered frame of the control globe** — so the output's
+`dirty` flag is set at the *primary's* render rate, not at its own.
+What the output reports while dragging is therefore `min(its own
+draw capacity, the control window's render rate)`, and 30 fps
+cannot tell those apart: a control globe painting MapLibre plus
+`earthTileLayer`'s whole pass chain at 30 would produce exactly
+this reading on an output capable of two hundred. "Near 60 means
+the shader is cheap; near 18 means it is the shader" assumed the
+output was the only thing being measured. It was not.
+
+**What the reading does establish** is a floor: the idle path —
+full ray-march, Earth decoration, atmosphere LUT, no layer —
+sustains **at least** 30 fps, so it costs **at most** ~33 ms a
+frame. That is a bound, not a measurement of it.
+
+**Combined with a measurement already in hand, it is still enough
+to move the fps question.** The 8192 → 4096 comparison above left
+fps at ~17 either way. 8192 is four times the fragments of 4096, so
+a shader-bound loop would have run roughly four times slower there;
+it did not move at all. Fill rate is therefore not what holds the
+loaded loop at ~53 ms a frame, which makes the drag test's 30 far
+more likely to be the publish-rate ceiling than a shader cost. The
+remaining candidate is unchanged and better supported: **a
+per-frame cost proportional to the video's own resolution rather
+than the framebuffer's** — the `VideoTexture` upload (4096x2048
+YUV→RGB through ANGLE/D3D11), or the decode feeding it.
+
+**Second finding: the HUD reads `fps 0.0` for a correctly idling
+output**, which is a defect in the instrument, not in the output.
+With no dataset `contentKindFor` returns static, the loop draws at
+the 1 Hz floor, and `createFpsMeter` averaged over the ~500 ms
+window between samples — so roughly every other window held no
+drawn frame at all and divided zero by its own length. That
+collapses the one distinction the floor exists to preserve: an
+output that never redraws cannot tell a dropped upload or a lost
+context from a correct frame, which is also the reading case 5
+deliberately produces by skipping the frame rather than
+drawing-and-counting it. Fixed: the window is now held open until
+it contains a frame, and what is reported meanwhile is the bound
+the silence implies (`1000 / elapsed`, minimum'd with the last
+reading), so a stall still collapses toward zero — continuously
+instead of by flicker — while an idle output holds near 1.
+
+**And the instrument the last three checks were missing has been
+added rather than worked around.** Every frame number on this HUD
+was a *pacing* measurement, bounded by something other than the
+draw — capped at 30 by the frame gate, floored at 1 Hz by the
+static rung, ceilinged by the publisher during a drag — so none of
+them could ever isolate capacity, and three hardware readings were
+spent discovering that one at a time. The HUD now carries **draw**,
+the mean wall-clock time inside `scene.render()` over the frames
+since the last reading, directly under **fps**. It answers "can
+this window keep up" on any content, with no drag and no second
+window involved.
+
+**So the next pass reads one pair of numbers rather than running an
+experiment.** With a data-encoded video loaded and playing, read
+**fps** and **draw** together:
+
+| draw | means |
+|---|---|
+| ~50 ms | the draw is the whole cost. Since the framebuffer does not matter (8192 ≈ 4096), that is the texture upload, and the fix is upstream of this repo's shader — a smaller decode, or a path that does not round-trip YUV→RGB per frame |
+| ~4 ms | the draw is nearly free and the loop is being *paced* into 19 fps by something outside it: the steer, the seek loop, or rAF itself being throttled |
+
+Then unload the dataset and read **draw** again with nothing
+loaded. That is the idle shader's true per-frame cost, with no
+publish rate in the way — the number the drag was reaching for.
+
 ### Commit 9 — Tools → Outputs panel (first user-reachable)
 
 **Pre-flight:**
