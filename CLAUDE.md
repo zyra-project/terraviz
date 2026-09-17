@@ -1096,12 +1096,23 @@ The desktop app shares 100% of the TypeScript source. Desktop-only behaviour is 
 > publish rate)`. It bounds the idle path at ≤ ~33 ms a frame and
 > isolates nothing. Every frame number the HUD carried was a *pacing*
 > measurement for the same class of reason, which is why it now also
-> carries **draw** — mean ms inside `scene.render()` — and why the open
-> check is now a reading rather than an experiment: with a video
-> loaded, `draw` near 50 ms means the per-frame texture upload is the
-> whole cost (the framebuffer already showed it is not fill rate), and
-> `draw` near 4 ms means the loop is being paced into 19 fps by
-> something outside the draw. The drag also found the fps field
+> carries **draw** — mean ms inside `scene.render()` — and the reading came back
+> **under a millisecond**, on a data-encoded video and on an idle
+> globe alike — so the render is not CPU-bound, and nothing else on
+> the per-callback path can absorb the missing ~35 ms either. That
+> retracts a third hypothesis rather than settling the question:
+> `render()` *submits* and the GPU executes afterwards, so an
+> overrunning GPU blocks at buffer swap — between rAF callbacks,
+> where nothing in this code times it — and reads under a millisecond
+> here exactly like a fast one. The HUD therefore now carries **raf**
+> beside fps, the offered callback rate against the taken one, which
+> is the fork: `raf` ~60 against `fps` ~19 is this loop declining to
+> draw on callbacks it is getting (ours, in `shouldRenderFrame` or
+> `contentKindFor`), while ~19 against ~19 is a browser not offering
+> them, putting the cost outside this JS — and then the 8192 ≈ 4096
+> invariance matters again, since it says the cost does not scale
+> with our fragment count. Read it on a data-encoded video, an RGB
+> video, and an idle drag. The drag also found the fps field
 > reading `0.0` for a correctly idling output, since a 1 Hz draw
 > against a ~500 ms window leaves half the windows empty — the reading
 > a black projector gives, now fixed by holding the window open. Rung 12's kiosk flag has a narrower gap:

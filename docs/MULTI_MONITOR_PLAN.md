@@ -4534,9 +4534,67 @@ experiment.** With a data-encoded video loaded and playing, read
 | ~50 ms | the draw is the whole cost. Since the framebuffer does not matter (8192 ≈ 4096), that is the texture upload, and the fix is upstream of this repo's shader — a smaller decode, or a path that does not round-trip YUV→RGB per frame |
 | ~4 ms | the draw is nearly free and the loop is being *paced* into 19 fps by something outside it: the steer, the seek loop, or rAF itself being throttled |
 
+> **Answered, and the table is only half right.** `draw` came back
+> **under a millisecond** on both a data-encoded video and an idle
+> globe — well past the second row. But the first row's reasoning
+> does not simply invert, because a sub-millisecond draw does not
+> exonerate the GPU. See the next addendum.
+
 Then unload the dataset and read **draw** again with nothing
 loaded. That is the idle shader's true per-frame cost, with no
 publish rate in the way — the number the drag was reaching for.
+
+#### Addendum — the draw cost, 2026-09-17
+
+**`draw` reads under a millisecond — with a data-encoded video
+loaded, and with nothing loaded at all.** Both cases, always.
+
+**The good half:** the render is not CPU-bound. Uniform writes, the
+per-frame sun, the draw-call submission and whatever `texImage2D`
+costs the CPU are together under 1 ms, at 4096x2048, with a video
+layer composited. Nothing else on the per-callback path can absorb
+the missing 35 ms a frame either — `link.state()` returns a held
+reference rather than a copy, `mirror.sync` is arithmetic over the
+element, `checkHealth` is an integer compare.
+
+**The half that retracts the entry above.** That entry's table said
+a small `draw` would mean "the loop is being *paced* into 19 fps by
+something outside it", and the field's own docstring said an
+overrunning GPU would still show up in a window's mean, "charged to
+whichever later call blocks on the queue". **Both are wrong for a
+browser.** `render()` *submits*; the GPU executes afterwards. When
+GPU work overruns the budget the CPU does not block inside
+`render()` — it blocks at buffer swap, which the compositor owns
+and which happens **between** rAF callbacks, inside nothing this
+code times. So a GPU-bound output reads under a millisecond here,
+exactly like a fast one. The field rules out CPU cost in the draw
+and is blind to the GPU; the docstring and the module-map row now
+say so.
+
+That is the third hypothesis this log has retracted on the fps
+question — fill rate, then the single-rung ladder, now the texture
+upload as a *CPU* cost — and the pattern in all three is the same:
+a reading was treated as a measurement of the output's capacity
+when it was bounded by something else.
+
+**So the instrument gained the denominator it was missing.** The
+HUD's fps line now carries **raf** beside **fps**: how often the
+browser *offered* a callback against how often the loop *took* one.
+Ticked first thing in the callback, before any work. It is the fork
+every reading so far has been missing, and it has an action on each
+side:
+
+| reading | means | what to do |
+|---|---|---|
+| `raf` ~60, `fps` ~19 | the callbacks are arriving and this loop is declining to draw on them | a bug in `shouldRenderFrame` or in what `contentKindFor` reports — ours to fix, in this repo |
+| `raf` ~19, `fps` ~19 | the loop draws on essentially every callback it gets; the browser is only offering 19 | the cost is outside this JS — GPU execution, compositing a 4096x2048 canvas, or present. Then the 8192 ≈ 4096 invariance matters again: it says the cost does not scale with *our* fragment count, which points at the video upload or decode rather than the raster |
+
+One reading already leans: the idle drag sustained ~30 fps, which
+needs at least 30 callbacks a second, so whatever throttles the
+video case is not a fixed cap on the window. **Read `raf` in three
+states** — a data-encoded video playing, an ordinary RGB video
+playing, and idle while dragging the control globe — and the fork
+resolves for both content kinds at once.
 
 ### Commit 9 — Tools → Outputs panel (first user-reachable)
 
