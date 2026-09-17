@@ -1123,9 +1123,30 @@ The desktop app shares 100% of the TypeScript source. Desktop-only behaviour is 
 > 30 fps and leaves it **zero headroom** now that every callback
 > draws. Check the output monitor's refresh rate before blaming the
 > app; it belongs in rung 15's runbook beside the GPU-selection check.
-> **Sync is untouched by any of this** and is now reported bad on both
-> content kinds: draw rate and playhead drift are independent, so the
-> open reading is the sync field after the gate fix. The drag also found the fps field
+> **Sync then came back into the healthy regime** at 60 Hz —
+> consistently under 50 ms on both content kinds, comfortably inside
+> the 150 ms hard-seek threshold, so the correction converges on rate
+> trim and never seeks. That ends the seek loop three entries chased.
+> It also corrects a claim made one entry earlier: *draw* rate and
+> drift are independent, but **callback** rate is not, and two paths
+> carry it — `steer()` runs per rAF callback on the output, and
+> `publishPlaybackMirror` rides the primary's own rAF loop on the
+> control window, so a 60 Hz control window publishes a playhead half
+> as stale. Both windows moved 30→60 at once, so the two mechanisms
+> are not separated. **`fps` is the outstanding confirmation** — at
+> `raf` 60 the gate should hold it at 30 — and so is which monitor's
+> refresh binds, since the display was raised to 60 *and* the windows
+> swapped monitors in the same step. The 60 Hz mode costs desktop
+> resolution and **nothing on the sphere**: the framebuffer is the
+> picker's, not the window's. The whole path runs through a **Dell
+> dock over USB-C**, which is why Windows names Intel UHD as the
+> display's adapter while the HUD reads a 4090 — the 4090 renders,
+> the iGPU scans out, and a cross-adapter copy sits per-frame in the
+> region `draw` cannot see. A dock is also a shared DisplayPort budget
+> that renegotiates modes when another monitor appears, which is how a
+> 4K panel lands at 30 Hz silently. Runbook item beside the
+> GPU-selection check: an output monitor wants a direct cable from the
+> discrete GPU, not a dock. The drag also found the fps field
 > reading `0.0` for a correctly idling output, since a 1 Hz draw
 > against a ~500 ms window leaves half the windows empty — the reading
 > a black projector gives, now fixed by holding the window open. Rung 12's kiosk flag has a narrower gap:

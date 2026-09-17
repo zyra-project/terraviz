@@ -4659,6 +4659,90 @@ play the asset at the primary's rate regenerates the drift whatever
 field on both kinds after this fix**, with the refresh rate of the
 output monitor noted alongside it.
 
+> **Half wrong, and the next addendum says how.** *Draw* rate and
+> drift are independent; **callback** rate is not. `steer()` runs once
+> per rAF callback on the output, and `publishPlaybackMirror` rides
+> the primary's own loop on the control window — so the callback rate
+> sets both how often the correction is applied and how stale the
+> target it aims at is.
+
+#### Addendum — 60 Hz, and sync in the healthy regime
+
+First reading after the frame-gate fix, with the **output on the
+4K Dell (Display 3, the primary) and the control window moved to a
+different monitor**:
+
+| state | `raf` | `sync` |
+|---|---|---|
+| idle, no dataset | 60 | — |
+| ordinary RGB video | 60 | consistently **< 50 ms** |
+| data-encoded video | 60 | consistently **< 50 ms** |
+
+**Sync is in the regime it is supposed to be in.** Under 50 ms is
+comfortably inside `SIBLING_HARD_SEEK_THRESHOLD_S` (150 ms), which
+means the correction is converging on **rate trim and never
+seeking** — the end of the seek loop that three entries above chased
+through a settle window, a cost floor, and two content-specific
+hypotheses. It is worse than the first pass's −1 to −30 ms and
+better than anything since; at a 30 fps output, 50 ms is about one
+and a half frames of offset.
+
+**And it corrects the entry above.** That entry said the gate fix
+was not expected to move sync, because "draw rate and playhead drift
+are independent". Draw rate is. **Callback rate is not**, and two
+paths carry it:
+
+- On the output, `steer()` runs once per rAF callback — so the
+  correction is computed and applied twice as often at 60 Hz as at
+  30, and the control law's rate trim converges proportionally
+  faster.
+- On the control window, `publishPlaybackMirror` runs from the
+  primary's own playback loop, which is rAF-driven. A control window
+  at 60 Hz publishes the playhead every ~16.7 ms instead of every
+  ~33.3 ms, so the target the output steers toward is half as stale
+  before it is even sent.
+
+Both windows moved from 30 Hz to 60 in this reading, so both
+mechanisms fired at once. That is the fourth correction this log has
+had to make on the frame-rate question, and the shape is familiar:
+a claim about one variable stated as though it covered the whole
+loop.
+
+**Two things this reading does not establish, and both matter for
+the runbook.**
+
+- **`fps` was not reported**, and it is the number that confirms the
+  gate fix rather than merely being consistent with it. At `raf` 60
+  the nearest-deadline gate should hold `fps` at **30** — the cap
+  working, drawing on every other callback. Outstanding.
+- **Two changes were made at once**: the display went to 60 Hz *and*
+  the output moved onto it while the control window moved off. So
+  this cannot separate "a window is paced by its own monitor" from
+  "Chromium paces every window off the primary's vsync". The
+  practical guidance is therefore the conservative one: **check the
+  refresh rate of the output's monitor and of the primary**, because
+  which one binds is unresolved.
+
+**A note on resolution, since the 60 Hz mode costs some.** It costs
+nothing on the sphere: the framebuffer is set by the Outputs panel's
+own picker and `setSize(w, h, false)` leaves the window alone, so a
+4096x2048 projection renders at 4096x2048 whatever the desktop is
+running at — `output.css` letterboxes with `object-fit: contain`.
+Refresh rate is worth more than desktop pixels on an output.
+
+**And the link this was reached through is a finding of its own.**
+The display is attached through a **Dell dock over USB-C**, which
+Windows reports as *Connected to Intel(R) UHD Graphics* while the
+HUD's `gpu` field reads a discrete 4090. Both are true: the 4090
+renders and the integrated GPU scans out, with a cross-adapter copy
+per frame in between — in exactly the region a sub-millisecond
+`draw` cannot see into. A dock is also a shared DisplayPort
+bandwidth budget that renegotiates modes when another monitor is
+plugged in, which is how a 4K panel ends up at 30 Hz with nothing on
+screen to say so. **Rung 15's runbook gets this beside the
+GPU-selection check: an output monitor wants a direct cable from the
+discrete GPU, not a dock.**
+
 ### Commit 9 — Tools → Outputs panel (first user-reachable)
 
 **Pre-flight:**
