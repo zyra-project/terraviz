@@ -28,6 +28,7 @@ function reading(over: Partial<DebugOverlayReading> = {}): DebugOverlayReading {
     syncKind: 'playing',
     fps: 30,
     drawMs: 4.2,
+    rafHz: 60,
     link: 'live',
     gpu: 'NVIDIA GeForce RTX 4090 Laptop GPU',
     gpuState: 'live',
@@ -146,6 +147,22 @@ describe('formatOverlay', () => {
         l.startsWith('buf'),
       ),
     ).toContain('8192×4096')
+  })
+
+  it('shows the offered callback rate beside the taken frame rate', () => {
+    // 19 of 60 and 19 of 19 are different faults with different owners:
+    // the first is this loop declining to draw on callbacks it is
+    // getting, the second is a browser that is not offering them. Two
+    // hardware passes could not tell those apart, and `draw` alone
+    // cannot either — an overrunning GPU blocks at present, between
+    // callbacks, where only this number moves.
+    const starved = formatOverlay(reading({ fps: 18.8, rafHz: 19.1 })).find(l => l.startsWith('fps'))
+    expect(starved).toContain('18.8')
+    expect(starved).toContain('19.1')
+    const declining = formatOverlay(reading({ fps: 18.8, rafHz: 59.7 })).find(l =>
+      l.startsWith('fps'),
+    )
+    expect(declining).toContain('59.7')
   })
 
   it('shows the draw cost beside the frame rate, and a dash before the first frame', () => {

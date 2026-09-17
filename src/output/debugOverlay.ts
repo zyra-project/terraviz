@@ -42,10 +42,24 @@
  *   video is capped at 30, fps on static content is floored at 1, and
  *   fps during a drag is ceilinged by the control window's publish
  *   rate. See the plan's Appendix B. This measures the draw itself.
- *   CPU-side, so a frame whose GPU work overruns its submission is
- *   charged to whichever later call blocks on the queue rather than to
- *   itself — over a window that is the same total, which is why the
- *   field is a mean and not a per-frame figure.
+ *   CPU-side, and that bound is sharper than it first reads: `render()`
+ *   *submits*, the GPU executes afterwards, and when GPU work overruns
+ *   the budget the CPU does not block inside `render()` — it blocks at
+ *   buffer swap, which in a browser is the compositor's business and
+ *   happens between rAF callbacks, never inside anything this module
+ *   times. So a GPU-bound output reads **under a millisecond here**.
+ *   What the field rules out is CPU cost in the draw; what it cannot
+ *   see is the GPU, which is why the next field exists.
+ * - **raf** — how often the browser is calling the render loop at all,
+ *   beside **fps**, which is how often the loop chose to draw. The two
+ *   together are the fork every earlier reading was missing. `raf` near
+ *   60 beside an `fps` of 19 means the callbacks are arriving and this
+ *   app is declining to draw on them — a bug in the loop's own frame
+ *   decision. `raf` near 19 means the loop draws on essentially every
+ *   callback it gets and the browser is only offering 19: the cost is
+ *   outside this JS entirely — GPU execution, compositing the
+ *   framebuffer, or present — which is exactly the region a
+ *   sub-millisecond `draw` cannot see into.
  * - **gpu** — the unmasked WebGL renderer string. The app cannot choose
  *   its GPU: a spike found the webview silently on the iGPU of a machine
  *   with a 4090, `powerPreference` is inert, and neither wry nor tauri
@@ -103,6 +117,11 @@ export interface DebugOverlayReading {
    *  reading, or `null` before the first frame. The capacity number —
    *  see the header. */
   drawMs: number | null
+  /** Render-loop callbacks per second — the *offered* rate, against
+   *  `fps`'s taken one. See the header: the pair is the fork between a
+   *  loop that is declining to draw and a browser that is not asking
+   *  it to. */
+  rafHz: number
   /** What the output believes about its link to the control window
    *  (rung 13, case 3). Shown because it separates the two questions
    *  an operator in front of a frozen sphere actually has — "is the
@@ -132,7 +151,8 @@ export interface DebugOverlayReading {
  * hunting a lead output that is actually late.
  */
 export function formatOverlay(reading: DebugOverlayReading): string[] {
-  const { datasetId, driftS, drawMs, fps, gpu, gpuState, framebuffer, syncKind, link } = reading
+  const { datasetId, driftS, drawMs, fps, gpu, gpuState, framebuffer, rafHz, syncKind, link } =
+    reading
   const sync =
     driftS === null
       ? `sync  —${syncKind ? ` ${syncKind}` : ''}`
@@ -147,7 +167,10 @@ export function formatOverlay(reading: DebugOverlayReading): string[] {
     // drift the correction cannot fix means something different when
     // the link that supplies the target went quiet four seconds ago.
     `link  ${link}`,
-    `fps   ${fps.toFixed(1)}`,
+    // The offered rate rides the same line as the taken one, because
+    // neither number means much alone: 19 of 60 and 19 of 19 are
+    // different faults with different owners.
+    `fps   ${fps.toFixed(1)}  (raf ${rafHz.toFixed(1)})`,
     // Directly under `fps`, and read against it: fps says how often this
     // window painted, `draw` says how long a paint costs. A 30 next to a
     // 4 ms is a window with headroom; a 19 next to a 53 ms is one that

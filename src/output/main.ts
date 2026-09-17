@@ -90,6 +90,16 @@ async function boot(): Promise<void> {
    *  timer as fps so the two are read as one pair. */
   const drawTimer = createDrawTimer()
   let drawMs: number | null = null
+  /** How often the browser calls this loop, against how often the loop
+   *  draws. Ticked on every callback rather than on drawn frames, which
+   *  is the whole point: `fps` is the rate this app *took* and this is
+   *  the rate it was *offered*, and the first reading is unreadable
+   *  without the second. A sub-millisecond `draw` rules out CPU cost in
+   *  the render; it says nothing about the GPU, because an overrunning
+   *  GPU blocks at present — between callbacks, where it shows up here
+   *  and nowhere else. */
+  const rafMeter = createFpsMeter()
+  let rafHz = 0
   /** The last correction `outputSync` computed, reported by the HUD
    *  rather than recomputed there — see `SyncOutcome.driftS`. */
   let lastSync: SyncOutcome | null = null
@@ -149,6 +159,7 @@ async function boot(): Promise<void> {
     syncKind: lastSync?.kind ?? null,
     fps,
     drawMs,
+    rafHz,
     // Read, never evaluated: `linkHealth()` is the pure getter, so
     // painting the HUD cannot itself send a health-check ping. The
     // evaluation happens once per frame in the loop below.
@@ -385,6 +396,9 @@ async function boot(): Promise<void> {
   }
 
   const tick = (now: number): void => {
+    // First thing in the callback, and before any early return could be
+    // added below it: this counts callbacks, not work done in them.
+    rafMeter.tick(now)
     for (const steer of steerers) steer()
     // The scene reports its own changes — today, the CDN texture
     // upgrading 2K → 4K → 8K after first paint. Without this the
@@ -432,6 +446,7 @@ async function boot(): Promise<void> {
     // average over however long it was hidden.
     if (now - lastFpsSample >= OVERLAY_REFRESH_MS) {
       fps = fpsMeter.sample(now)
+      rafHz = rafMeter.sample(now)
       drawMs = drawTimer.sample()
       lastFpsSample = now
     }
