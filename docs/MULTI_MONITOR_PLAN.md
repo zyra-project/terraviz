@@ -4589,12 +4589,75 @@ side:
 | `raf` ~60, `fps` ~19 | the callbacks are arriving and this loop is declining to draw on them | a bug in `shouldRenderFrame` or in what `contentKindFor` reports — ours to fix, in this repo |
 | `raf` ~19, `fps` ~19 | the loop draws on essentially every callback it gets; the browser is only offering 19 | the cost is outside this JS — GPU execution, compositing a 4096x2048 canvas, or present. Then the 8192 ≈ 4096 invariance matters again: it says the cost does not scale with *our* fragment count, which points at the video upload or decode rather than the raster |
 
+> **Answered, by a third shape neither row predicted: `raf` 30.0,
+> `fps` ~22.** The loop is offered 30 callbacks a second and takes 22
+> of them — so it is the first row in kind (ours to fix) at a rate
+> the second row's reasoning never considered. See the next addendum.
+
 One reading already leans: the idle drag sustained ~30 fps, which
 needs at least 30 callbacks a second, so whatever throttles the
 video case is not a fixed cap on the window. **Read `raf` in three
 states** — a data-encoded video playing, an ordinary RGB video
 playing, and idle while dragging the control globe — and the fork
 resolves for both content kinds at once.
+
+#### Addendum — the callback rate, 2026-09-17
+
+| state | `raf` | `fps` |
+|---|---|---|
+| idle, no dataset | 30.0 | 1.0 |
+| data-encoded video | 30.0 | ~22 |
+| ordinary RGB video | 30.0 | ~22 |
+
+**The idle row is the control and it is correct**: 30 callbacks
+offered, one drawn, which is the static floor doing exactly its job
+— and reading `1.0` rather than the `0.0` it reported two days ago.
+
+**The video rows are a bug in this repo, and the gate is where it
+lives.** The browser offers callbacks 33.33 ms apart. `VIDEO_FRAME_MS`
+is 33.33 ms. So `sinceLastFrameMs >= frameIntervalMs` came down to
+jitter in the last decimal, and every callback that fell short waited
+a whole further one — a 33 ms frame becoming a 67 ms frame. Mixed,
+that is ~22 fps against 30 offered, which is the number on the glass.
+
+**This is what three passes of content-specific hypotheses were
+chasing.** Fill rate, the single-rung rendition ladder, the
+`VideoTexture` upload — each was proposed to explain a ceiling that
+turns out to have no content term in it at all, which is why RGB and
+data-encoded read the same 22 every time they were compared. The
+mechanism is arithmetic between two constants.
+
+Fixed by asking the right question: not *has the interval elapsed*
+but **is this callback closer to the target than the next one will
+be** — `sinceLastFrame + offered/2 >= target`. No tolerance constant,
+since the offered interval is the scale the comparison belongs at,
+and it resolves at every refresh rate.
+
+**But `raf` 30.0 is itself a finding, and it is not ours.** A browser
+schedules rAF on the compositor's frame clock, so 30.0 — flat, in all
+three states, independent of load — is the **display** saying 30, not
+the GPU struggling. The usual cause is a 4K monitor negotiating 30 Hz
+over HDMI 1.4. Two consequences:
+
+- **The output can never exceed 30 fps on that monitor**, which is
+  the target anyway — but it means **zero headroom**: with the gate
+  fixed, every single callback must now draw a 4096x2048 ray-march.
+  If the picture stutters after this fix, that is the first thing it
+  means.
+- **Check the output monitor's refresh rate before blaming the app.**
+  This belongs in rung 15's runbook beside the GPU-selection check,
+  for the same reason: an installation can run at half its provisioned
+  frame rate with nothing on screen to say so.
+
+**What this does not explain is sync**, now reported bad on *both*
+content kinds where RGB previously held −24 ms. Draw rate and playhead
+drift are independent — `currentTime` advances on the wall clock
+however often the sphere is painted — so the gate fix is not expected
+to move it, and the entry above still stands: an output that cannot
+play the asset at the primary's rate regenerates the drift whatever
+`outputSync`'s threshold policy does. **The next reading is the sync
+field on both kinds after this fix**, with the refresh rate of the
+output monitor noted alongside it.
 
 ### Commit 9 — Tools → Outputs panel (first user-reachable)
 

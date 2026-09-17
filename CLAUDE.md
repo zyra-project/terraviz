@@ -1106,13 +1106,26 @@ The desktop app shares 100% of the TypeScript source. Desktop-only behaviour is 
 > where nothing in this code times it — and reads under a millisecond
 > here exactly like a fast one. The HUD therefore now carries **raf**
 > beside fps, the offered callback rate against the taken one, which
-> is the fork: `raf` ~60 against `fps` ~19 is this loop declining to
-> draw on callbacks it is getting (ours, in `shouldRenderFrame` or
-> `contentKindFor`), while ~19 against ~19 is a browser not offering
-> them, putting the cost outside this JS — and then the 8192 ≈ 4096
-> invariance matters again, since it says the cost does not scale
-> with our fragment count. Read it on a data-encoded video, an RGB
-> video, and an idle drag. The drag also found the fps field
+> was the fork, and it **closed the fps question**: hardware read
+> `raf` **30.0 flat** in all three states with `fps` ~22 on both video
+> kinds and 1.0 idle. The loop was being offered 30 callbacks a second
+> and taking 22, because `VIDEO_FRAME_MS` is 33.33 ms and so is a
+> 30 Hz display's callback interval — a plain `>=` came down to jitter
+> in the last decimal, and every callback that fell short waited a
+> whole further one. Arithmetic between two constants, with no content
+> term, which is why RGB and data-encoded read the same 22 every time
+> they were compared and why fill rate, the rendition ladder and the
+> texture upload were each proposed and each wrong. Fixed by making
+> `shouldRenderFrame` a nearest-deadline test. **`raf` 30.0 is a
+> second, separate finding and not ours**: rAF rides the compositor's
+> frame clock, so a flat 30 independent of load is the *display*
+> saying 30 — usually 4K over HDMI 1.4 — which caps that output at
+> 30 fps and leaves it **zero headroom** now that every callback
+> draws. Check the output monitor's refresh rate before blaming the
+> app; it belongs in rung 15's runbook beside the GPU-selection check.
+> **Sync is untouched by any of this** and is now reported bad on both
+> content kinds: draw rate and playhead drift are independent, so the
+> open reading is the sync field after the gate fix. The drag also found the fps field
 > reading `0.0` for a correctly idling output, since a 1 Hz draw
 > against a ~500 ms window leaves half the windows empty — the reading
 > a black projector gives, now fixed by holding the window open. Rung 12's kiosk flag has a narrower gap:
