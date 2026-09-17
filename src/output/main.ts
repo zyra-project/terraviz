@@ -100,6 +100,10 @@ async function boot(): Promise<void> {
    *  and nowhere else. */
   const rafMeter = createFpsMeter()
   let rafHz = 0
+  /** When the previous callback ran, so the frame gate knows how often
+   *  it is being *offered* one. Without it the gate aliases against a
+   *  display whose refresh equals the cap — see `shouldRenderFrame`. */
+  let lastCallback: number | null = null
   /** The last correction `outputSync` computed, reported by the HUD
    *  rather than recomputed there — see `SyncOutcome.driftS`. */
   let lastSync: SyncOutcome | null = null
@@ -399,6 +403,11 @@ async function boot(): Promise<void> {
     // First thing in the callback, and before any early return could be
     // added below it: this counts callbacks, not work done in them.
     rafMeter.tick(now)
+    // Zero on the very first callback, which reduces the gate to the
+    // plain `>=` it used to be for exactly one tick — harmless, since
+    // that tick draws on `dirty` anyway.
+    const sinceLastCallbackMs = lastCallback === null ? 0 : now - lastCallback
+    lastCallback = now
     for (const steer of steerers) steer()
     // The scene reports its own changes — today, the CDN texture
     // upgrading 2K → 4K → 8K after first paint. Without this the
@@ -421,7 +430,7 @@ async function boot(): Promise<void> {
     // paints immediately.
     if (
       scene.gpuState() !== 'lost' &&
-      shouldRenderFrame({ kind, sinceLastFrameMs: now - lastFrame, dirty })
+      shouldRenderFrame({ kind, sinceLastFrameMs: now - lastFrame, sinceLastCallbackMs, dirty })
     ) {
       // Timed here rather than inside the scene: the scene has no HUD
       // and no reason to learn about one, and this is the only place

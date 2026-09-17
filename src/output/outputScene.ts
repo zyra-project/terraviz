@@ -164,6 +164,13 @@ export interface FrameDecisionState {
   kind: OutputContentKind
   /** ms since the last frame was drawn. */
   sinceLastFrameMs: number
+  /**
+   * ms since the previous render-loop callback — how often the browser
+   * is *offering* a frame. Required rather than optional, because a
+   * default of zero is exactly the bug this field was added to fix and
+   * a silent default is how a call site inherits it.
+   */
+  sinceLastCallbackMs: number
   /** Set by a state diff, a texture upload, or a resize. */
   dirty: boolean
 }
@@ -177,10 +184,32 @@ export interface FrameDecisionState {
  * 1 Hz rather than never, so a dropped texture upload or a lost
  * context surfaces as a stale frame the read-back layer can catch
  * rather than as a loop that has quietly stopped.
+ *
+ * ## Why this is a nearest-deadline test rather than `>=`
+ *
+ * A plain `sinceLastFrameMs >= frameIntervalMs` **aliases** against a
+ * display whose refresh equals the cap, and hardware found it: an
+ * output on a 30 Hz monitor was offered 30 callbacks a second — 33.33
+ * ms apart — against a video interval of 33.33 ms, so whether a
+ * callback cleared the gate came down to jitter in the last decimal.
+ * The ones that missed waited a whole further callback, turning a
+ * 33 ms frame into a 67 ms one, and the loop settled at ~22 fps on a
+ * link that was being offered exactly 30. Identical on RGB and
+ * data-encoded video, because nothing about it depends on content.
+ *
+ * So the question is not "has the interval elapsed" but **"is this
+ * callback closer to the target than the next one will be"** — draw
+ * when waiting would overshoot by more than drawing now undershoots.
+ * That is `sinceLastFrame + offered/2 >= target`, and it needs no
+ * tolerance constant because the offered interval *is* the scale the
+ * comparison should be made at. It resolves correctly at every rate: a
+ * 30 Hz display draws on every callback, 60 Hz on every other, 120 Hz
+ * on every fourth, and a 1 Hz static floor still lands on the callback
+ * nearest the second rather than the first one past it.
  */
 export function shouldRenderFrame(state: FrameDecisionState): boolean {
   if (state.dirty) return true
-  return state.sinceLastFrameMs >= frameIntervalMs(state.kind)
+  return state.sinceLastFrameMs + state.sinceLastCallbackMs / 2 >= frameIntervalMs(state.kind)
 }
 
 // --- Scene construction ---

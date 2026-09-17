@@ -33,6 +33,9 @@ import { getSunPosition } from '../utils/time'
 import { until } from '../test-utils'
 import { DECORATION_UNIFORMS } from './layerStack'
 import { NADIR_LUT_SIZE } from './atmosphereNadir'
+
+/** A 60 Hz display's callback interval, the ordinary case. */
+const AT_60_HZ = 1000 / 60
 import { DEFAULT_FRAMEBUFFER_WIDTH } from '../services/multiOutput/protocol'
 
 describe('resolveFramebufferSize', () => {
@@ -102,11 +105,25 @@ describe('frame pacing', () => {
   })
 
   it('draws immediately when something changed, whatever the pace', () => {
-    expect(shouldRenderFrame({ kind: 'image', sinceLastFrameMs: 0, dirty: true })).toBe(true)
+    expect(
+      shouldRenderFrame({
+        kind: 'image',
+        sinceLastFrameMs: 0,
+        sinceLastCallbackMs: AT_60_HZ,
+        dirty: true,
+      }),
+    ).toBe(true)
   })
 
   it('skips an unchanged static frame inside its interval', () => {
-    expect(shouldRenderFrame({ kind: 'image', sinceLastFrameMs: 500, dirty: false })).toBe(false)
+    expect(
+      shouldRenderFrame({
+        kind: 'image',
+        sinceLastFrameMs: 500,
+        sinceLastCallbackMs: AT_60_HZ,
+        dirty: false,
+      }),
+    ).toBe(false)
   })
 
   it('still draws a static frame once its interval elapses', () => {
@@ -114,12 +131,80 @@ describe('frame pacing', () => {
     // redraws cannot tell a dropped upload or a lost context from a
     // correct frame, so the read-back layer would have nothing to
     // catch. 1 Hz keeps it observable.
-    expect(shouldRenderFrame({ kind: 'image', sinceLastFrameMs: 1000, dirty: false })).toBe(true)
+    expect(
+      shouldRenderFrame({
+        kind: 'image',
+        sinceLastFrameMs: 1000,
+        sinceLastCallbackMs: AT_60_HZ,
+        dirty: false,
+      }),
+    ).toBe(true)
   })
 
   it('draws video roughly every 33 ms', () => {
-    expect(shouldRenderFrame({ kind: 'video', sinceLastFrameMs: 20, dirty: false })).toBe(false)
-    expect(shouldRenderFrame({ kind: 'video', sinceLastFrameMs: 34, dirty: false })).toBe(true)
+    expect(
+      shouldRenderFrame({
+        kind: 'video',
+        sinceLastFrameMs: 20,
+        sinceLastCallbackMs: AT_60_HZ,
+        dirty: false,
+      }),
+    ).toBe(false)
+    expect(
+      shouldRenderFrame({
+        kind: 'video',
+        sinceLastFrameMs: 34,
+        sinceLastCallbackMs: AT_60_HZ,
+        dirty: false,
+      }),
+    ).toBe(true)
+  })
+
+  // Simulate a loop being offered callbacks at a fixed rate and count
+  // how many it draws on, which is the only way to see the aliasing:
+  // every individual decision below looks defensible in isolation.
+  function drawnPerSecond(offeredHz: number, kind: 'video' | 'image'): number {
+    const offered = 1000 / offeredHz
+    let lastFrame = 0
+    let drawn = 0
+    for (let i = 1; i <= offeredHz; i++) {
+      const now = i * offered
+      if (
+        shouldRenderFrame({
+          kind,
+          sinceLastFrameMs: now - lastFrame,
+          sinceLastCallbackMs: offered,
+          dirty: false,
+        })
+      ) {
+        drawn++
+        lastFrame = now
+      }
+    }
+    return drawn
+  }
+
+  it('draws on every callback when the display refreshes at the cap', () => {
+    // The bug hardware found. A 30 Hz monitor offers callbacks 33.33 ms
+    // apart against a 33.33 ms video interval, so a plain `>=` came down
+    // to jitter in the last decimal — and the callbacks that missed
+    // waited a whole further one, turning a 33 ms frame into a 67 ms
+    // frame. The loop settled at ~22 fps while being offered exactly 30,
+    // identically on RGB and data-encoded video.
+    expect(drawnPerSecond(30, 'video')).toBe(30)
+  })
+
+  it('still caps a faster display at the video rate', () => {
+    // The other half: the gate must not simply pass everything. 60 Hz
+    // draws every other callback, 120 Hz every fourth.
+    expect(drawnPerSecond(60, 'video')).toBe(30)
+    expect(drawnPerSecond(120, 'video')).toBe(30)
+  })
+
+  it('holds the static floor at 1 Hz whatever the display does', () => {
+    expect(drawnPerSecond(30, 'image')).toBe(1)
+    expect(drawnPerSecond(60, 'image')).toBe(1)
+    expect(drawnPerSecond(144, 'image')).toBe(1)
   })
 })
 
