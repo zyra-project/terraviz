@@ -354,6 +354,8 @@ export async function upsertNodeIdentity(
  * is in place so federation subscribers (Phase 4) and CLI sync
  * jobs can rely on it.
  */
+export const PUBLIC_DATASET_PREDICATE = "visibility = 'public' AND is_hidden = 0 AND retracted_at IS NULL AND published_at IS NOT NULL"
+
 export async function listPublicDatasets(
   db: D1Database,
   options: { since?: string } = {},
@@ -378,13 +380,8 @@ export async function listPublicDatasets(
   // the caller). Found during a production smoke test where a
   // draft "Test 1" appeared alongside published datasets in the
   // SPA's browse panel.
-  const where = [
-    'visibility = ?',
-    'is_hidden = 0',
-    'retracted_at IS NULL',
-    'published_at IS NOT NULL',
-  ]
-  const binds: unknown[] = ['public']
+  const where = [PUBLIC_DATASET_PREDICATE]
+  const binds: unknown[] = []
   if (since) {
     where.push('updated_at > ?')
     binds.push(since)
@@ -407,9 +404,7 @@ export async function getPublicDataset(
   return db
     .prepare(
       `SELECT * FROM datasets
-       WHERE id = ? AND visibility = 'public'
-         AND is_hidden = 0 AND retracted_at IS NULL
-         AND published_at IS NOT NULL
+       WHERE id = ? AND ${PUBLIC_DATASET_PREDICATE}
        LIMIT 1`,
     )
     .bind(id)

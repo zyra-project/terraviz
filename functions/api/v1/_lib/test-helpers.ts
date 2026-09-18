@@ -98,6 +98,10 @@ export function asD1(db: Database.Database): D1Database & FakeD1Bindings {
       for (const stmt of statements) {
         const internal = stmt as unknown as { __sql: string; __binds: unknown[] }
         const prepared = db.prepare(internal.__sql)
+        if (prepared.reader) {
+          results.push({ success: true, results: prepared.all(...internal.__binds), meta: {} } as unknown as D1Response)
+          continue
+        }
         const info = internal.__binds.length
           ? prepared.run(...internal.__binds)
           : prepared.run()
@@ -120,6 +124,7 @@ export function asD1(db: Database.Database): D1Database & FakeD1Bindings {
   return {
     prepare: (sql: string) => wrapStmt(sql),
     batch,
+    withSession: vi.fn(() => ({ prepare: (sql: string) => wrapStmt(sql), batch })),
     raw: () => db,
   } as unknown as D1Database & FakeD1Bindings
 }

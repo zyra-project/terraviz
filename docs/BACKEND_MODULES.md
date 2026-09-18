@@ -33,6 +33,8 @@ Phase 2 opt-in public projection:
 | File | Responsibility |
 |---|---|
 | `functions/api/v1/_lib/stac-publication.ts` | Public STAC adapters, fresh D1-dependent content-addressed KV snapshots and internal exclusion reasons; richer profile fields remain disabled |
+| `functions/api/v1/_lib/stac-publication-store.ts` | Primary-backed transactional STAC snapshot: canonical public predicate, ordered decorations/renditions, workflow ownership, identity and public-only branding in one D1 batch |
+| `functions/api/v1/_lib/stac-assets.ts` | Bounded anonymous HEAD verification of stable HTTPS assets on explicitly trusted origins; no redirects, cookies or credential forwarding; fail-closed MIME/reachability evidence |
 | `functions/api/v1/_lib/stac-http.ts` | Core-resource routing, bounded cursor pagination, media types, revalidated ETags and non-cacheable errors; no STAC API conformance claim |
 | `functions/api/v1/stac/[[path]].ts` | Opt-in public STAC route boundary; unavailable inputs fail closed |
 | `functions/schema/stac/terraviz/v1.0.0/schema.json.ts` | Immutable public Terraviz extension schema, sourced directly from the reviewed local schema |

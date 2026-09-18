@@ -2,9 +2,10 @@
 // Copyright 2026 The Zyra Project
 
 import type { CatalogEnv } from './env'
-import { buildStacCatalog, buildStacProduct, isPublicStacUrl, type StacProduct, type StacResolvers } from './stac-builders'
-import { readStacModel, type StacDatasetReadModel, type StacNodeContext } from './stac-read-model'
-import { resolveHttpAssetUrl } from './r2-public-url'
+import { buildStacCatalog, buildStacProduct, isPublicStacUrl, type StacProduct, type StacResolvers, type StacResolvedAsset } from './stac-builders'
+import { type StacDatasetReadModel, type StacNodeContext } from './stac-read-model'
+import { readStacPublicationInput } from './stac-publication-store'
+import { verifyStacAssets } from './stac-assets'
 import { computeEtag } from './snapshot'
 import type { StacCatalog } from './stac-types'
 
@@ -19,44 +20,33 @@ export function stacBaseUrl(base: string): string {
   return `${base.replace(/\/$/, '')}/api/v1/stac`
 }
 
-function mediaType(href: string): string | null {
-  const extension = new URL(href).pathname.split('.').pop()?.toLowerCase()
-  return ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp',
-    m3u8: 'application/vnd.apple.mpegurl', mp4: 'video/mp4', vtt: 'text/vtt',
-    json: 'application/json', html: 'text/html', txt: 'text/plain' } as Record<string, string>)[extension ?? ''] ?? null
-}
-
-export function stacResolvers(env: CatalogEnv, node: StacNodeContext, dataset?: StacDatasetReadModel): StacResolvers {
+export function stacResolvers(node: StacNodeContext, assets: Map<string, StacResolvedAsset>, dataset?: StacDatasetReadModel): StacResolvers {
   const base = stacBaseUrl(node.identity.base_url)
   return {
     resource: (kind, id) => kind === 'catalog' ? base
       : kind === 'manifest' ? `${node.identity.base_url.replace(/\/$/, '')}/api/v1/datasets/${encodeURIComponent(id)}/manifest`
         : `${base}/${kind === 'collection' ? 'collections' : 'items'}/${encodeURIComponent(id)}`,
     asset: (ref, purpose) => {
-      const href = resolveHttpAssetUrl(env, ref.startsWith('url:') ? ref.slice(4) : ref)
-      if (!href || !isPublicStacUrl(href)) return null
-      const rendition = dataset?.renditions.find(entry => `rendition-${entry.rendition_id}` === purpose && entry.ref === ref)
-      const type = rendition?.mime_type ?? (purpose === 'data' && dataset && !href.endsWith('.m3u8') ? dataset.row.format : mediaType(href))
-      if (!type) return null
-      return { href, type, sourceRef: ref, anonymous: true as const,
-        ...(ref.startsWith('r2:') ? { hostedBy: node.identity.node_id } : {}) }
+      const asset = assets.get(ref)
+      if (!asset) return null
+      if (purpose === 'data' && dataset) {
+        const format = dataset.row.format.toLowerCase()
+        if (!dataset.row.data_ref.startsWith('url:') && !dataset.row.data_ref.startsWith('r2:')) return null
+        if (!(format.startsWith('image/') && asset.type.startsWith('image/'))
+          && !(format.startsWith('video/') && (asset.type === 'video/mp4' || /mpegurl$/.test(asset.type)))) return null
+      }
+      return asset
     },
   }
 }
 
 export async function readStacPublication(env: CatalogEnv): Promise<StacPublication> {
   if (!env.CATALOG_DB) throw new Error('Missing catalog database')
-  const model = await readStacModel(env.CATALOG_DB)
+  const model = await readStacPublicationInput(env.CATALOG_DB)
   if (!model.node) throw new Error('Missing node identity')
-  const branding = await env.CATALOG_DB.prepare('SELECT org_name, logo_ref FROM node_profile WHERE id = 1')
-    .first<{ org_name: string; logo_ref: string | null }>()
-  if (branding) {
-    model.node.publicOrgName = branding.org_name
-    const href = resolveHttpAssetUrl(env, branding.logo_ref)
-    const type = href && isPublicStacUrl(href) ? mediaType(href) : null
-    if (href && type?.startsWith('image/')) model.node.publicLogo = { href, type }
-  }
-  const seed = JSON.stringify({ version: 1, model, r2: env.R2_PUBLIC_BASE ?? null })
+  const branding = model.branding
+  if (branding) model.node.publicOrgName = branding.org_name
+  const seed = JSON.stringify({ version: 2, model, r2: env.R2_PUBLIC_BASE ?? null, origins: env.STAC_ASSET_ORIGINS ?? null })
   const key = `stac:publication:v1:${(await computeEtag(seed)).replace(/"/g, '')}`
   if (env.CATALOG_KV) {
     try {
@@ -66,12 +56,19 @@ export async function readStacPublication(env: CatalogEnv): Promise<StacPublicat
   }
   const products: StacProduct[] = []
   const report: StacPublication['report'] = []
+  const assets = await verifyStacAssets(env, model)
+  const logo = branding?.logo_ref ? assets.get(branding.logo_ref) : undefined
+  if (logo?.type.startsWith('image/')) {
+    model.node.publicLogo = { href: logo.href, type: logo.type }
+    assets.set(logo.href, { ...logo, sourceRef: logo.href })
+  }
+  const resolvers = stacResolvers(model.node, assets)
   for (const dataset of model.datasets) {
-    const result = buildStacProduct(dataset, model.node, stacResolvers(env, model.node, dataset))
+    const result = buildStacProduct(dataset, model.node, stacResolvers(model.node, assets, dataset))
     report.push({ id: dataset.row.id, included: result.ok, reasons: result.reasons })
     if (result.ok) products.push(result.value)
   }
-  const catalog = buildStacCatalog(model.node, stacResolvers(env, model.node), products)
+  const catalog = buildStacCatalog(model.node, resolvers, products)
   if (!catalog.ok) throw new Error(`Invalid STAC catalog: ${catalog.reasons.join(',')}`)
   const publication = { catalog: catalog.value, products, report }
   if (env.CATALOG_KV) {

@@ -18,6 +18,10 @@
 4. Set `STAC_ENABLED=true` only after these prerequisites. HTTP `Link` discovery
    on the well-known response is enabled together with the resource routes.
    The well-known JSON and native protocol schemas remain unchanged.
+   Set `STAC_ASSET_ORIGINS` to a comma-separated list of trusted exact HTTPS
+   origins for direct assets, license text and branding. The configured public
+   R2 origin is also trusted. Only name public hosts you control or explicitly
+   trust; this is an outbound-network allowlist, not a client-supplied filter.
 5. Verify the root, traverse its links and audit asset reachability before
    announcing the surface to external consumers. Unset the flag to disable it.
 
@@ -46,6 +50,23 @@ branding and public R2 configuration. Old keys expire after five minutes and
 are unreachable after an input change, even if KV deletion is delayed. This
 trades D1 reads for immediate access/branding invalidation; it does not claim
 the native catalog's KV-only hot-path performance.
+
+The public snapshot is one transactional D1 batch in a `first-primary` session,
+including identity, all decorations/media, workflow ownership and public
+branding. It uses the exact native public/published/not-hidden/not-retracted
+predicate. A write committed before that batch is visible immediately; a write
+concurrent with it is reflected on the next revalidation. This is snapshot
+consistency, not an impossible promise to revoke bytes already in flight.
+
+On a cache miss assets must pass anonymous HEAD with a real Content-Type.
+Only explicit HTTPS origins are probed, with no redirects or cookies, a
+three-second per-request timeout and a maximum of 40 distinct URL probes per
+snapshot build. Unverified assets (including budget overflow and HEAD-unsupported
+servers) are withheld, not advertised speculatively. Verification is retained
+with the five-minute snapshot; later external outages are caught by the audit
+or the next rebuild, not treated as a permanent availability guarantee. Large
+catalogs needing more probes require a separately reviewed persisted verification
+worker; this release deliberately fails closed at its bounded request budget.
 
 The initial resolver supports durable direct URLs and configured public R2
 assets. Unsupported/unresolved delivery schemes are withheld rather than
