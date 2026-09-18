@@ -34,6 +34,7 @@
 import { CatalogEnv } from '../api/v1/_lib/env'
 import { getNodeIdentity, IDENTITY_MISSING_MESSAGE } from '../api/v1/_lib/catalog-store'
 import { computeEtag } from '../api/v1/_lib/snapshot'
+import { isPublicStacUrl } from '../api/v1/_lib/stac-builders'
 
 const CACHE_CONTROL = 'public, max-age=300, stale-while-revalidate=600'
 const CONTENT_TYPE = 'application/json; charset=utf-8'
@@ -108,19 +109,21 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
 
   const body = JSON.stringify(doc)
   const etag = await computeEtag(body)
+  const discovery = new Headers({ ETag: etag, 'Cache-Control': CACHE_CONTROL })
+  if (context.env.STAC_ENABLED === 'true' && isPublicStacUrl(identity.base_url)) {
+    discovery.set('Link', `<${identity.base_url.replace(/\/$/, '')}/api/v1/stac>; rel="related"; type="application/json"; title="STAC Catalog"`)
+    discovery.set('Cache-Control', 'public, no-cache, must-revalidate')
+  }
   if (context.request.headers.get('if-none-match') === etag) {
     return new Response(null, {
       status: 304,
-      headers: { ETag: etag, 'Cache-Control': CACHE_CONTROL },
+      headers: discovery,
     })
   }
 
+  discovery.set('Content-Type', CONTENT_TYPE)
   return new Response(body, {
     status: 200,
-    headers: {
-      'Content-Type': CONTENT_TYPE,
-      ETag: etag,
-      'Cache-Control': CACHE_CONTROL,
-    },
+    headers: discovery,
   })
 }

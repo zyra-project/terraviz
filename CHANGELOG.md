@@ -16,6 +16,17 @@ referenced in [`README.md`](README.md).
 
 ---
 
+## Unreleased - Metadata Phase 2
+
+- STAC core 1.1.0 resources are opt-in via `STAC_ENABLED=true`; this is not
+  a STAC API conformance claim. Existing native JSON contracts are unchanged.
+- **Before enabling:** review, replace or clear `node_identity.description`.
+  It becomes the public root Catalog description. Upgrading alone leaves the
+  routes disabled; private profile mission/about fields remain private.
+- Deploy and verify the versioned extension schema first, then enable resource
+  publication and HTTP `Link` discovery. See the
+  [rollout instructions](docs/metadata/PHASE2_IMPLEMENTATION.md).
+
 ## Unreleased - Metadata Phase 0 review fixes
 
 - `metadata-audit` drains piped JSON before exiting, including strict failure

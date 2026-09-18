@@ -22,6 +22,13 @@ that's a bug in this document — please file it.
 
 Two companion reads:
 
+- Enabling STAC publication: follow the
+  [Phase 2 rollout](metadata/PHASE2_IMPLEMENTATION.md). Routes default off.
+  Review, replace or clear existing `node_identity.description` before setting
+  `STAC_ENABLED=true`; that text will become publicly readable. Verify the
+  extension schema deployment before enabling discovery. This does not publish
+  private mission/about profile prose.
+
 - [`CATALOG_BACKEND_DEVELOPMENT.md`](CATALOG_BACKEND_DEVELOPMENT.md)
   — contributor setup for hacking on the backend, not deploying it.
 - [`ANALYTICS_CONTRIBUTING.md`](ANALYTICS_CONTRIBUTING.md) — if

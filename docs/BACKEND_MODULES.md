@@ -28,6 +28,15 @@ Phase 1 internal projection modules (no public routes):
 | `functions/api/v1/_lib/stac-schema.ts` | Offline draft-07 schema validator: SHA-256 verified bytes, bounded local references, cycle/unresolved-reference rejection and no network resolver |
 | `functions/api/v1/_lib/stac-test-helpers.ts` | Shared canonical SQLite fixture for projection and schema tests; never imported by production modules |
 
+Phase 2 opt-in public projection:
+
+| File | Responsibility |
+|---|---|
+| `functions/api/v1/_lib/stac-publication.ts` | Public STAC adapters, fresh D1-dependent content-addressed KV snapshots and internal exclusion reasons; richer profile fields remain disabled |
+| `functions/api/v1/_lib/stac-http.ts` | Core-resource routing, bounded cursor pagination, media types, revalidated ETags and non-cacheable errors; no STAC API conformance claim |
+| `functions/api/v1/stac/[[path]].ts` | Opt-in public STAC route boundary; unavailable inputs fail closed |
+| `functions/schema/stac/terraviz/v1.0.0/schema.json.ts` | Immutable public Terraviz extension schema, sourced directly from the reviewed local schema |
+
 | File | Responsibility |
 |---|---|
 | `cli/commands.ts` | Command implementations for the `terraviz` CLI |
