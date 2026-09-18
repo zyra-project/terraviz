@@ -1175,14 +1175,20 @@ The desktop app shares 100% of the TypeScript source. Desktop-only behaviour is 
 > so on WebKitGTK the one mitigation for the iGPU risk names nothing,
 > on the platform SOS installations run; the Linux check has to move
 > outside the app (`glxinfo`, `nvidia-smi`). And **HLS did not play
-> at all**: `Hls.isSupported()` is false, most likely because
-> WebKitGTK answers `isTypeSupported` through GStreamer and a default
-> Ubuntu lacks the H.264 plugin sets (`gstreamer1.0-libav`,
-> `-plugins-bad`, `-plugins-ugly`). If the codec packages fix it that
-> is a documented prerequisite; if they do not, MSE is off in that
-> build and **every HLS dataset is unplayable on Linux**, outputs
-> included, which is larger than this feature. Both are in Appendix
-> B with their outcome tables. The 60 Hz mode costs desktop
+> at all**: `Hls.isSupported()` was false, because WebKitGTK answers
+> `isTypeSupported` through GStreamer and a default Ubuntu lacks the
+> H.264 plugin sets (`gstreamer1.0-libav`, `-plugins-bad`,
+> `-plugins-ugly`). Installing them **settled the large half**: MSE
+> is on in that build, so the escalation case — every HLS dataset
+> unplayable on Linux, outputs included — does not hold, and the
+> codec set is a documented prerequisite for any Linux deploy. It
+> did not settle the small half. The failure moved to
+> `datasetLoader`'s 20 s `canplay` timeout with no fatal hls.js
+> error logged, so support is there and playback is not; the
+> `WEBKIT_DISABLE_COMPOSITING_MODE=1` workaround that was exported
+> to get the window on screen is the first suspect, since video on
+> WebKitGTK renders through the compositing path. All three are in
+> Appendix B with their outcome tables. The 60 Hz mode costs desktop
 > resolution and **nothing on the sphere**: the framebuffer is the
 > picker's, not the window's. The whole path runs through a **Dell
 > dock over USB-C**, which is why Windows names Intel UHD as the

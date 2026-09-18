@@ -4960,6 +4960,61 @@ Worth stating plainly either way: **the desktop app's primary
 dataset format did not play on a freshly provisioned Linux
 machine**, and nothing in the repo told anyone it needed to.
 
+**Addendum — the codecs fixed support, not playback.** With the
+GStreamer sets installed the error moved:
+
+```
+[App] Error: Video took too long to load — check your connection and try again
+  … enqueueJob / datasetLoader.ts:350
+```
+
+That line is the 20 s `canplay` timeout, and **where it is not**
+carries most of the information. `loadStream` settles on
+`MANIFEST_PARSED`, so reaching a wait for `canplay` at all means
+`Hls.isSupported()` now answers true, hls.js initialised, attached
+the media element, and parsed the manifest. The fallback warning
+(`HLS failed, falling back to direct MP4`) is gone from the
+console, and so is the `[HLS] Fatal error:` line that every fatal
+hls.js error logs. So the escalation row above is **ruled out** —
+MSE is on in that WebKitGTK build, and the codec set is the
+prerequisite the first row predicted. Rung 15's runbook gains the
+package list either way.
+
+What is left is narrower and still open: the element never reaches
+`readyState >= 3` inside 20 s, with hls.js reporting no fatal
+error. Three candidates, in the order worth testing:
+
+- **The compositing workaround.** `WEBKIT_DISABLE_COMPOSITING_MODE=1`
+  was exported to get the window on screen under X11, and video on
+  WebKitGTK renders through the accelerated compositing path. It is
+  the one thing in that environment present by accident rather than
+  by design, and the Wayland backend that fixed the window may not
+  need it.
+- **A fragment that never arrives.** A network failure *after*
+  `MANIFEST_PARSED` cannot reach the MP4 fallback — the promise has
+  settled, so `fail()` routes it to `reportFatal` instead of
+  rejecting — and surfaces as exactly this timeout and nothing else.
+  It would still log a fatal line, which the console does not show,
+  so this is the weakest of the three.
+- **Software decode of a 4096x2048 stream**, with no hardware
+  decoder under WSLg. Slow rather than broken, and 20 s is a lot of
+  slow.
+
+One console line separates a feed problem from a decode one, run
+after the error card appears:
+
+```js
+const v = document.querySelector('video')
+console.log(v.readyState, v.networkState, v.error,
+            v.buffered.length ? [v.buffered.start(0), v.buffered.end(0)] : 'nothing buffered')
+```
+
+`readyState 0` with nothing buffered is a feed problem; data
+buffered with `readyState` stuck at 1 (`HAVE_METADATA`) is a decode
+problem. Only the third candidate is WSL-specific, which is what
+makes this worth carrying to the dual-monitor Linux box rather than
+closing here.
+
 ### Commit 9 — Tools → Outputs panel (first user-reachable)
 
 **Pre-flight:**
