@@ -1,8 +1,16 @@
 # Phase 2: Browsable Core Resources
 
-**Status:** Implementation in progress; deployment opt-in required
+**Status:** Implemented; deployment opt-in required
 **Last reviewed:** 2026-09-18
 **Revisit when:** Public profile snapshots, custom registry storage or immutable history ships.
+
+| Step | Implementation |
+|---|---|
+| 1 | Opt-in core routes, independent content-addressed KV/ETags, public schema and notices |
+| 2 | Atomic primary-backed public read, strict readiness and bounded asset verification |
+| 3 | Authenticated no-store operator report including excluded non-public rows |
+| 4 | Persisted-row route/schema, pagination, media and cache invalidation regressions |
+| 5 | Offline CI traversal tests and opt-in scheduled live reachability audit |
 
 ## Rollout
 
@@ -105,3 +113,30 @@ R2 changes, visibility withdrawal with warm KV, and KV/D1 failure behavior.
 The pinned official core and extension validator also validates actual HTTP
 output, not only hand-built projection fixtures. Richer mapping invalidation
 tests remain deferred together with those disabled mappings.
+
+## Reachability Audit
+
+Run `npm run audit:stac` with `STAC_AUDIT_ROOT` set to the enabled HTTPS root.
+Set `STAC_AUDIT_ORIGINS` to comma-separated trusted asset and contextual-link
+origins. The root origin and the project/adopted-extension schema origins are
+included automatically. No credentials are read or forwarded. These variables
+are operator configuration, never copied from an untrusted dataset.
+
+The audit traverses same-root resource and pagination links, checks declared
+media types and self links, fetches declared schemas and verifies their IDs,
+compares the Terraviz schema with the reviewed local document, and performs
+anonymous HEAD checks for Assets and supporting links. Redirects are failures,
+not silently followed. Requests have a ten-second deadline; JSON is bounded to
+2 MiB; traversal is capped at 1000 documents, 1000 assets and 32 schemas.
+Exhausting a cap is a failed audit, not a successful truncated report. Output
+is machine-readable JSON and any issue exits nonzero. This is a core-resource
+health audit, not an STAC API conformance test or proof of scientific accuracy.
+
+The normal CI Vitest suite runs `scripts/audit-stac.test.ts` against real local
+route handlers and controlled failures, without network dependence. The
+`STAC Resource Audit` workflow also supports weekly/manual live runs. Configure
+repository variables `STAC_AUDIT_ROOT` and `STAC_AUDIT_ORIGINS` only after
+publication is enabled. Without a root it is explicitly skipped. Each run
+retains its JSON report for 30 days; a failed audit is a failing Actions job.
+No deployment flag, repository variable or production data is changed by this
+implementation PR. The first live audit remains an operator rollout task.

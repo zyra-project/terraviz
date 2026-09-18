@@ -1110,6 +1110,11 @@ private mission/about prose. No STAC route or new public field is exposed.
 
 ### Phase 2: browsable core resources
 
+**Implementation:** [Phase 2 implementation and rollout](PHASE2_IMPLEMENTATION.md)
+records the five steps, opt-in gate, operator report, cache contract and audits.
+Deployment remains disabled by default; the implementation is not evidence of
+an enabled production endpoint or a completed live asset audit.
+
 Publish `node_identity.description` as the root Catalog description using the
 Phase 1 builder, after the notice and upgrade prerequisites in Phase 0 item 8.
 No per-node profile approval or well-known schema change is required. Richer

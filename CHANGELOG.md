@@ -26,6 +26,12 @@ referenced in [`README.md`](README.md).
 - Deploy and verify the versioned extension schema first, then enable resource
   publication and HTTP `Link` discovery. See the
   [rollout instructions](docs/metadata/PHASE2_IMPLEMENTATION.md).
+- Active admin/service operators can read `/api/v1/publish/stac-report` before
+  enabling publication. It reports exclusions without caching private data.
+- Set trusted `STAC_ASSET_ORIGINS` for bounded anonymous media verification.
+  Unsupported or unverified assets remain excluded with diagnostic reasons.
+- `npm run audit:stac` and the opt-in weekly `STAC Resource Audit` workflow
+  check resource traversal, schema identity and anonymous asset reachability.
 
 ## Unreleased - Metadata Phase 0 review fixes
 
