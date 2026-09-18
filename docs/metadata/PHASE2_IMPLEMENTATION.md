@@ -92,3 +92,16 @@ This endpoint is always `private, no-store`, never reads or writes the public
 KV snapshot, and does not return private titles, source URLs, draft prose or
 review identities. It evaluates current state rather than claiming that every
 excluded row can be automatically repaired.
+
+## Regression Coverage
+
+Route tests compose persisted valid ULIDs, migrated SQLite, the atomic D1
+adapter, asset verification, builders and HTTP responses. They cover media
+types, canonical absolute links, standalone resources, bounded pagination,
+collection membership, unsupported API paths, weak/list/wildcard conditional
+GET, node-description changes, logo replacement/removal, private draft
+non-dependencies, dataset/decorations/renditions/delivery changes, deployment
+R2 changes, visibility withdrawal with warm KV, and KV/D1 failure behavior.
+The pinned official core and extension validator also validates actual HTTP
+output, not only hand-built projection fixtures. Richer mapping invalidation
+tests remain deferred together with those disabled mappings.
