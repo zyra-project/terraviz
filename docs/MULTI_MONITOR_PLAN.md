@@ -5174,6 +5174,61 @@ second engine, the expensive thing is the upload rather than the
 shader, and the iGPU risk is real and undetectable from inside the
 app on Linux.
 
+**Addendum — the discrete GPU is unreachable here, and WSL is out
+of road.** `MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA` does select the
+discrete card at the Mesa level:
+
+```
+OpenGL renderer string: D3D12 (NVIDIA GeForce RTX 4090 Laptop GPU)
+```
+
+`glxinfo` is content on it. **TerraViz dies at launch**:
+
+```
+double free or corruption (!prev)
+```
+
+Controlled: same shell, `WEBKIT_DISABLE_DMABUF_RENDERER` and
+`WEBKIT_DISABLE_COMPOSITING_MODE` both confirmed empty so the
+`env -u` in the first attempt was a no-op, and the identical
+command without the adapter override runs fine. One variable. The
+first attempt bundled three changes and proved nothing; that is
+recorded because it is the same mistake the fill-rate, rendition
+and texture-upload hypotheses each made, and it is apparently easy
+to repeat.
+
+The asymmetry is the interesting part — a trivial single-context
+GLX client is fine on that adapter and a multi-context,
+multi-threaded webview heap-corrupts on it — which points at Mesa's
+d3d12 driver or WSLg rather than at this repo. Unproven: nobody has
+taken a backtrace (`gdb -batch -ex run -ex bt --args …`), and it is
+not worth an hour here, because of what follows.
+
+**Three configurations, none both stable and representative:**
+
+| Config | Result |
+|---|---|
+| X11 | aborts on the second window (`xcb_xlib_threads_sequence_lost`) |
+| Wayland + iGPU | runs; 302 ms draw, wrong GPU, no second display |
+| Wayland + discrete | heap corruption at launch |
+
+So the 302 ms can no longer be decomposed into *adapter* versus
+*transport* in this environment at all: the experiment that would
+separate them is the one that crashes. Every further hour here buys
+numbers attributable to the translation layer rather than to the
+app.
+
+**Stop here.** A VM with two virtual displays has been the right
+intermediate target since the first WSL entry, and this is the
+point where it stops being a nice-to-have: the remaining Linux
+questions — does an output place correctly on a second monitor,
+does the frame gate hold, what does `draw` read on a real GPU —
+each need a real window manager and a real second display, and none
+of them needs WSL. What WSL *did* earn: the codec prerequisite, the
+preroll deadlock and its fix, the font prerequisite, the frame gate
+confirmed on a second engine, and the iGPU hazard shown to be
+undetectable from inside the app.
+
 #### Finding — every icon in the app is tofu on Linux, 2026-09-18
 
 With the codec set installed and the two `datasetLoader` fixes in,

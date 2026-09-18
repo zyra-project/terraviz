@@ -1202,8 +1202,30 @@ The desktop app shares 100% of the TypeScript source. Desktop-only behaviour is 
 > is the first suspect), and **4096x2048**, since ABR served
 > `2160x1080` and `isTypeSupported` answers for Baseline 3.0
 > whatever the stream is — the case with no fallback, because
-> `DATA_ENCODED_RENDITIONS` is a single rung by design. All of it
-> is in Appendix B. The 60 Hz mode costs desktop
+> `DATA_ENCODED_RENDITIONS` is a single rung by design. **The
+> HUD then read the whole picture on Linux**, with the frame-gate
+> fix in: `fps == raf` in all four states, so the gate is correct
+> on a second engine rather than assumed fixed; and `draw` is ~0
+> whenever no new video frame exists (idle — which still draws the
+> *full* Earth decoration — or seeking) and large only when one
+> advances, scaling with the **source** resolution (302 ms at
+> 4096x2048, 57.5 ms at 2160x1080). So the expensive thing is the
+> per-frame texture upload, not the ray-march. That also corrects
+> this map's `draw` row: "a GPU-bound output reads under a
+> millisecond" is **ANGLE-specific**, and on WebKitGTK the path is
+> synchronous and the cost sits inside the call. And `glxinfo`
+> caught what the app cannot: `D3D12 (Intel(R) UHD Graphics)` —
+> §Risks' **iGPU hazard firing silently**, on a machine with a
+> 4090, with the one in-app mitigation reading `Apple GPU` and
+> naming nothing. Selecting the discrete card
+> (`MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA`) works for `glxinfo`
+> and **crashes this app** with a heap abort, so the 302 ms cannot
+> be decomposed into adapter versus transport here. Three WSL
+> configurations, none both stable and representative — X11 aborts
+> on the second window, Wayland+iGPU runs on the wrong GPU with no
+> second display, Wayland+discrete heap-corrupts. **WSL is done**;
+> the remaining Linux questions need a VM with two virtual
+> displays or the real box. All of it is in Appendix B. The 60 Hz mode costs desktop
 > resolution and **nothing on the sphere**: the framebuffer is the
 > picker's, not the window's. The whole path runs through a **Dell
 > dock over USB-C**, which is why Windows names Intel UHD as the
