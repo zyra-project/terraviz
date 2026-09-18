@@ -18,7 +18,7 @@ export interface StacPublicationInput extends StacReadModel {
   branding: { org_name: string; logo_ref: string | null } | null
 }
 
-export async function readStacPublicationInput(db: D1Database): Promise<StacPublicationInput> {
+export async function readStacPublicationInput(db: D1Database, includeNonPublic = false): Promise<StacPublicationInput> {
   const session = db.withSession('first-primary')
   const results = await session.batch([
     session.prepare('SELECT node_id, display_name, base_url, description, contact_email, public_key, created_at FROM node_identity LIMIT 1'),
@@ -34,7 +34,7 @@ export async function readStacPublicationInput(db: D1Database): Promise<StacPubl
         'ref', ref, 'mime_type', mime_type, 'content_digest', content_digest, 'created_at', created_at))
         FROM (SELECT * FROM dataset_renditions WHERE dataset_id = datasets.id ORDER BY rendition_id)) AS stac_renditions,
       EXISTS(SELECT 1 FROM workflows WHERE target_dataset_id = datasets.id) AS stac_workflow
-      FROM datasets WHERE ${PUBLIC_DATASET_PREDICATE} ORDER BY id`),
+      FROM datasets WHERE ${includeNonPublic ? '1 = 1' : PUBLIC_DATASET_PREDICATE} ORDER BY id`),
     session.prepare('SELECT org_name, logo_ref FROM node_profile WHERE id = 1'),
   ])
   if (results.some(result => !result.success)) throw new Error('STAC snapshot read failed')

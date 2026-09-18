@@ -60,7 +60,7 @@ consistency, not an impossible promise to revoke bytes already in flight.
 
 On a cache miss assets must pass anonymous HEAD with a real Content-Type.
 Only explicit HTTPS origins are probed, with no redirects or cookies, a
-three-second per-request timeout and a maximum of 40 distinct URL probes per
+three-second per-request timeout, a fifteen-second build deadline and a maximum of 40 distinct URL probes per
 snapshot build. Unverified assets (including budget overflow and HEAD-unsupported
 servers) are withheld, not advertised speculatively. Verification is retained
 with the five-minute snapshot; later external outages are caught by the audit
@@ -75,3 +75,20 @@ playback manifest is a separate metadata Asset. Origin links are not guessed.
 Sequences and recurring outputs remain withheld until Phase 3 persists their
 immutable identities. Richer profile/extension/vocabulary mappings stay
 disabled until their storage, permissions and publication tests exist.
+
+## Operator Report
+
+`GET /api/v1/publish/stac-report` uses the existing Cloudflare Access publisher
+middleware and additionally requires an active admin or service operator. It
+works with public STAC disabled, so remediation can precede opt-in. The response
+is versioned JSON: `schema_version`, `publication_enabled`, `totals` and sorted
+`records` with immutable `id`, `included` and machine-readable `reasons`.
+Non-public rows receive `not_public`; their assets are never probed. Scientific
+readiness reasons are preserved. Unresolved primary assets also carry concrete
+verification reasons such as `asset_origin_untrusted`, `asset_http_403`,
+`asset_probe_failed` or `asset_probe_budget_exceeded`.
+
+This endpoint is always `private, no-store`, never reads or writes the public
+KV snapshot, and does not return private titles, source URLs, draft prose or
+review identities. It evaluates current state rather than claiming that every
+excluded row can be automatically repaired.
