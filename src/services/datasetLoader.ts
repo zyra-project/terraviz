@@ -302,6 +302,49 @@ export function waitForDecodableFrame(
   })
 }
 
+/**
+ * The earliest instant this element can actually show.
+ *
+ * Normally `0`, and on every engine that buffers from the start of the
+ * asset this is `0` by construction — which is what makes it safe to
+ * rewind through rather than to a literal zero. WebKitGTK measured
+ * `buffered [6.0, 94.1]` against a 94.1 s asset: the first six seconds
+ * never appended, and `readyState` is defined at the *playback
+ * position*, so parking the playhead at 0 leaves a decodable element
+ * stalled on a hole with nothing to show and no error to report. That
+ * is the same failure `waitForDecodableFrame` exists for, reached from
+ * the other side — a load that now succeeds and then rewinds into the
+ * gap it just played out of.
+ *
+ * Six seconds into a 24-hour animation is a visible offset and a far
+ * better answer than a frozen first frame. The cause of the hole is
+ * unestablished (`buffered` is the browser's intersection across
+ * source buffers, so a misaligned audio track is the first suspect),
+ * and this does not pretend to fix it — it declines to park where
+ * nothing can be decoded, which is correct whatever the cause.
+ *
+ * Note this covers the *load* path only. A native `loop` restart
+ * returns to 0 through the media element itself, where nothing here
+ * can intercept it.
+ */
+export function playableStart(buffered: TimeRanges): number {
+  let earliest = Number.POSITIVE_INFINITY
+  for (let i = 0; i < buffered.length; i++) {
+    const start = buffered.start(i)
+    const end = buffered.end(i)
+    // An empty range holds no frame, so it is not somewhere to park —
+    // and skipping it *before* the comparisons is the correctness: a
+    // zero-length range at the origin otherwise wins `earliest` and
+    // this returns the exact spot it exists to avoid.
+    if (end <= start) continue
+    // Zero is inside a real range: the ordinary case on every engine
+    // that buffers from the start, and the one not to perturb.
+    if (start <= 0) return 0
+    earliest = Math.min(earliest, start)
+  }
+  return Number.isFinite(earliest) ? earliest : 0
+}
+
 export function pickDirectFile(files: VideoProxyFile[]): VideoProxyFile | undefined {
   return files.find(f => f.quality === '1080p' && f.link)
     ?? files.find(f => f.quality === '720p' && f.link)
@@ -422,7 +465,7 @@ export async function loadVideoDataset(
       }
     })
     video.pause()
-    video.currentTime = 0
+    video.currentTime = playableStart(video.buffered)
   } catch {
     // Autoplay blocked — texture will update when user presses play
   }

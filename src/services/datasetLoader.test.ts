@@ -2,7 +2,7 @@
 // Copyright 2026 The Zyra Project
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { displayDatasetInfo, pickDirectFile, waitForDecodableFrame } from './datasetLoader'
+import { displayDatasetInfo, pickDirectFile, playableStart, waitForDecodableFrame } from './datasetLoader'
 import type { Dataset } from '../types'
 import { until } from '../test-utils'
 
@@ -652,5 +652,47 @@ describe('waitForDecodableFrame', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+// ---------------------------------------------------------------------------
+// playableStart
+// ---------------------------------------------------------------------------
+
+function ranges(...pairs: Array<[number, number]>): TimeRanges {
+  return {
+    length: pairs.length,
+    start: (i: number) => pairs[i][0],
+    end: (i: number) => pairs[i][1],
+  } as unknown as TimeRanges
+}
+
+describe('playableStart', () => {
+  it('is zero when the asset is buffered from the start', () => {
+    expect(playableStart(ranges([0, 94.1]))).toBe(0)
+  })
+
+  it('is zero before anything is buffered, so a fresh element is untouched', () => {
+    expect(playableStart(ranges())).toBe(0)
+  })
+
+  // The regression. WebKitGTK measured [6.0, 94.1] on a 94.1 s asset;
+  // rewinding to 0 parks a decodable element on a hole, which reads
+  // exactly like a frozen first frame and reports nothing.
+  it('skips a hole at the head rather than parking the playhead in it', () => {
+    expect(playableStart(ranges([5.999999, 94.099999]))).toBeCloseTo(5.999999)
+  })
+
+  it('takes the earliest range when several are buffered', () => {
+    expect(playableStart(ranges([40, 50], [6, 12]))).toBe(6)
+  })
+
+  it('still answers zero when a range merely touches it', () => {
+    expect(playableStart(ranges([0, 0.5], [6, 94.1]))).toBe(0)
+  })
+
+  // A zero-length range at the origin contains no frame, so it is not
+  // somewhere to park: `end > 0` is what rules it out.
+  it('ignores an empty range at the origin', () => {
+    expect(playableStart(ranges([0, 0], [6, 94.1]))).toBe(6)
   })
 })
