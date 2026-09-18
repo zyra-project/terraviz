@@ -4743,6 +4743,66 @@ screen to say so. **Rung 15's runbook gets this beside the
 GPU-selection check: an output monitor wants a direct cable from the
 discrete GPU, not a dock.**
 
+#### Addendum — confirmed on the glass, 2026-09-18
+
+Three HUD captures, output on the 4K display at 60 Hz, control
+window on another monitor:
+
+| state | `data` | `sync` | `fps` (raf) | `draw` |
+|---|---|---|---|---|
+| idle, no dataset | — | — not-ready | **1.0** (60.0) | 0.2 ms |
+| data-encoded video | `01KYK82V…` | **+0 ms** | **30.0** (60.0) | 0.3 ms |
+| ordinary RGB video | `01KQG62X…` | **−9 ms** | **29.0** (60.0) | 0.4 ms |
+
+`gpu` reads `ANGLE (NVIDIA, NVIDIA GeForce RTX 4090 Laptop GPU
+(0x00002717) Direct3D11 vs_5_0 ps_5_0, D3D11)` on all three.
+
+**The frame gate is confirmed, not merely consistent.** 30 of 60 is
+the video cap drawing on every other callback; 1 of 60 is the static
+floor drawing once a second. Both are now what the arithmetic says
+rather than what the jitter allowed — the reading that was 22 of 30
+two entries ago. The RGB row's 29.0 is one draw shy inside a 500 ms
+sample window, which is the window boundary rather than a miss.
+
+**The sync loop is closed on both content kinds.** `+0 ms` and
+`−9 ms` are better than the "under 50" reported from the same
+session and comparable to the very first hardware pass's −1 to
+−30 ms — on the data-encoded asset that was cycling dash ↔ several
+thousand ms two passes ago, and that three separate mechanisms were
+built to chase (the seek-settle window, the seek-cost floor, and the
+`syncByRatio` path). None of those was the cause. The cause was a
+frame gate aliasing against a 30 Hz display, and a control window
+publishing the playhead at 30 Hz into it.
+
+**`draw` is 0.2–0.4 ms in every state**, including with a 4096x2048
+video composited. The render was never the cost, which is what the
+field was added to establish and what it now says three times over.
+
+**And the two adapters are both confirmed, separately.** The
+*render* adapter is the discrete 4090 through ANGLE/D3D11 — so the
+plan's §Risks iGPU hazard did not fire here. The *scanout* adapter
+is the Intel UHD Windows named on the display page, because the
+panel hangs off a USB-C dock. Both true at once; the cross-adapter
+copy between them is the per-frame cost `draw` structurally cannot
+see, and it evidently is not binding at this resolution.
+
+**What this does not settle.**
+
+- **The Linux gate is still open.** This is a fourth Windows sitting;
+  Appendix B qualifies on a dual-monitor Linux workstation and that
+  run has not happened.
+- **Which of the two 30→60 changes carried sync** — the gate fix on
+  the output, or the control window publishing twice as often — is
+  still entangled, and is no longer worth separating now that the
+  outcome is right.
+- **One sitting, not a soak.** Nothing here says what an hour of
+  continuous playback in front of an audience does.
+
+With that, the frame-rate thread that has run through five
+consecutive addenda is closed, and the open items revert to the ones
+it displaced: rung 15's runbook, the §6 app-command ACL, rung 13's
+remaining failure-recovery slices, and the Linux qualification.
+
 ### Commit 9 — Tools → Outputs panel (first user-reachable)
 
 **Pre-flight:**

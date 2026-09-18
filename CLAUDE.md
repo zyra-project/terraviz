@@ -1133,10 +1133,24 @@ The desktop app shares 100% of the TypeScript source. Desktop-only behaviour is 
 > `publishPlaybackMirror` rides the primary's own rAF loop on the
 > control window, so a 60 Hz control window publishes a playhead half
 > as stale. Both windows moved 30→60 at once, so the two mechanisms
-> are not separated. **`fps` is the outstanding confirmation** — at
-> `raf` 60 the gate should hold it at 30 — and so is which monitor's
-> refresh binds, since the display was raised to 60 *and* the windows
-> swapped monitors in the same step. The 60 Hz mode costs desktop
+> are not separated — and no longer need to be, because **the HUD
+> then confirmed it on the glass**: at `raf` 60, idle reads `fps` 1.0
+> (the static floor), a data-encoded video reads **30.0 with
+> `sync +0 ms`**, and an RGB video reads 29.0 with **−9 ms**, `draw`
+> 0.2–0.4 ms throughout. That is the gate drawing on every other
+> callback by arithmetic rather than by jitter, and it closes the
+> seek loop on **both** content kinds — the same asset that cycled
+> dash ↔ several thousand ms two passes earlier, and which the
+> seek-settle window, the seek-cost floor and `syncByRatio` were each
+> built to chase. None of those was the cause; a frame gate aliasing
+> against a 30 Hz display was, with a control window publishing the
+> playhead at 30 Hz into it. `gpu` also settles the **render**
+> adapter: `ANGLE (NVIDIA, NVIDIA GeForce RTX 4090 Laptop GPU …
+> Direct3D11)`, so §Risks' iGPU hazard did not fire here even though
+> Windows names Intel UHD for the *display* — two adapters, both
+> true, the dock in between. Still unsettled: the **Linux gate**, and
+> what an hour of continuous playback does, since this is one sitting
+> rather than a soak. The 60 Hz mode costs desktop
 > resolution and **nothing on the sphere**: the framebuffer is the
 > picker's, not the window's. The whole path runs through a **Dell
 > dock over USB-C**, which is why Windows names Intel UHD as the
