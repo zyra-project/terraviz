@@ -1166,7 +1166,23 @@ The desktop app shares 100% of the TypeScript source. Desktop-only behaviour is 
 > Appendix B's "second-window abort" entry for the outcome table. A
 > **VM with two virtual displays** is the cheaper intermediate target
 > WSL should have been: real window manager, real monitor enumeration
-> and placement, no useful performance numbers. The 60 Hz mode costs desktop
+> and placement, no useful performance numbers. **The Wayland backend
+> then answered it**: the output spawned with no abort, so Tauri/GTK
+> multi-window is *not* broken on Linux and the X11 path is what
+> needs separating. Two further Linux gaps came out of the same
+> sitting, and **neither is a WSL artifact**. The HUD's **gpu** field
+> reads `Apple GPU` — WebKit sanitises `WEBGL_debug_renderer_info`,
+> so on WebKitGTK the one mitigation for the iGPU risk names nothing,
+> on the platform SOS installations run; the Linux check has to move
+> outside the app (`glxinfo`, `nvidia-smi`). And **HLS did not play
+> at all**: `Hls.isSupported()` is false, most likely because
+> WebKitGTK answers `isTypeSupported` through GStreamer and a default
+> Ubuntu lacks the H.264 plugin sets (`gstreamer1.0-libav`,
+> `-plugins-bad`, `-plugins-ugly`). If the codec packages fix it that
+> is a documented prerequisite; if they do not, MSE is off in that
+> build and **every HLS dataset is unplayable on Linux**, outputs
+> included, which is larger than this feature. Both are in Appendix
+> B with their outcome tables. The 60 Hz mode costs desktop
 > resolution and **nothing on the sphere**: the framebuffer is the
 > picker's, not the window's. The whole path runs through a **Dell
 > dock over USB-C**, which is why Windows names Intel UHD as the

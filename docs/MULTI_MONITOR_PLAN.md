@@ -4859,12 +4859,106 @@ before any frame-rate reading. Three outcomes:
 | aborts on X11, not on Wayland | backend-specific; worth a real fix, and `GDK_BACKEND` becomes a runbook line |
 | aborts on both | candidate 2. The feature is blocked on Linux until it is fixed, and that outranks every other open item |
 
+> **Answered under WSL, and it is the middle row.** Relaunched on
+> the **Wayland** backend, the output window spawned with no abort.
+> So **candidate 2 is out** — Tauri/GTK multi-window is not broken
+> on Linux, which was the outcome that would have blocked the whole
+> feature. What remains is X11-path-specific, between candidates 1
+> and 3, and still worth separating on real hardware since plenty of
+> SOS machines run X11 sessions. The immediate consequence is a
+> runbook line rather than a code change: **launch under Wayland**,
+> and if an installation must run X11, this is the first thing to
+> re-test.
+
 **Also worth carrying:** WSLg presents one virtual display, so
 nothing about monitor enumeration, placement, signed origins or the
 occupied-monitor guard was exercised. A **VM with two virtual
 displays** would reach all of those and is the cheaper intermediate
 target this detour should have used — real window manager, real
 multi-monitor logic, no useful performance numbers.
+
+#### Finding — the `gpu` field does not work on Linux, 2026-09-18
+
+The same WSL launch read:
+
+```
+gpu   Apple GPU
+```
+
+on a Windows laptop with a discrete RTX 4090 and no Apple hardware
+within a hundred miles. There is no route by which that names real
+silicon. **WebKit sanitises `WEBGL_debug_renderer_info`** for
+fingerprinting resistance and returns a generic string — Safari
+reports "Apple GPU", and WebKitGTK inherits it from shared WebCore.
+
+**This defeats the field's entire purpose on the platform that
+matters most.** Rung 11's `gpu` row exists as *the* mitigation for a
+risk the app cannot fix: a spike found the webview silently on the
+iGPU of a machine with a 4090, `powerPreference` is inert, and
+neither wry nor tauri reads an override — so an installation can run
+at a fraction of its provisioned capacity, undiagnosable from logs.
+On Windows it did its job and ruled that risk out. **On Linux it
+will read "Apple GPU" on every machine**, and the SOS installations
+this feature is for are Linux.
+
+No code change is proposed: the field reports what WebGL gives it,
+and there is nothing better to read from inside the webview.
+What changes is **rung 15's runbook**, which must carry the Linux
+procedure explicitly rather than pointing at the HUD:
+
+| platform | how to check which GPU the webview got |
+|---|---|
+| Windows | the HUD's `gpu` field — names the adapter (`ANGLE (NVIDIA, … Direct3D11)`) |
+| Linux | **from outside the app**: `glxinfo \| grep -i renderer`, or `nvidia-smi` while it runs to see whether the process is on the discrete card |
+
+Worth keeping beside the dock finding, which is the same shape: a
+diagnostic that reads one thing while the signal path does another.
+
+#### Finding — no HLS on a default Linux install, 2026-09-18
+
+Loading an HLS dataset (air traffic) on the same WSL build:
+
+```
+[App] HLS failed, falling back to direct MP4: Error: HLS is not supported in this browser
+Uncaught: No playable video source found
+```
+
+**The second error is a consequence, not a second fault.**
+`loadStream` reaches its `else` branch — `Hls.isSupported()` false
+*and* `canPlayType('application/vnd.apple.mpegurl')` false — and
+throws `hlsUnsupported`. `datasetLoader` catches it and asks
+`pickDirectFile(manifest.files)` for a progressive file; this
+dataset is HLS-only through the Vimeo proxy and has none, so the
+fallback has nothing to offer and throws. The fallback behaved
+correctly; it was handed an empty cupboard.
+
+**The real fault is `Hls.isSupported()`, and the likely cause is
+packaging rather than the engine.** hls.js requires MSE *and* that
+`isTypeSupported` answer true for H.264/AAC. WebKitGTK answers that
+through **GStreamer**, and a default Ubuntu install ships neither
+`gstreamer1.0-libav` nor the bad/ugly plugin sets that carry H.264.
+So the first thing to try is one apt line:
+
+```
+gstreamer1.0-plugins-good gstreamer1.0-plugins-bad
+gstreamer1.0-plugins-ugly gstreamer1.0-libav
+```
+
+**Unlike the two findings above, this one has nothing to do with
+WSL** — MSE availability and GStreamer codecs are properties of the
+WebKitGTK build and the installed packages. It will reproduce on
+bare-metal Linux with a default install.
+
+**Two outcomes, very different in weight:**
+
+| after installing the codec set | means |
+|---|---|
+| HLS plays | a **prerequisite**, not a defect. Rung 15's runbook gains a package list, and so does any `.deb` dependency declaration |
+| `Hls.isSupported()` still false | MSE is off in that WebKitGTK build, and **every HLS dataset is unplayable on Linux** — including on every output, since `datasetMirror` loads the same way. That is larger than this feature and would need answering before any SOS deployment |
+
+Worth stating plainly either way: **the desktop app's primary
+dataset format did not play on a freshly provisioned Linux
+machine**, and nothing in the repo told anyone it needed to.
 
 ### Commit 9 — Tools → Outputs panel (first user-reachable)
 
