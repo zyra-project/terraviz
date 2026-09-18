@@ -1184,11 +1184,25 @@ The desktop app shares 100% of the TypeScript source. Desktop-only behaviour is 
 > codec set is a documented prerequisite for any Linux deploy. It
 > did not settle the small half. The failure moved to
 > `datasetLoader`'s 20 s `canplay` timeout with no fatal hls.js
-> error logged, so support is there and playback is not; the
-> `WEBKIT_DISABLE_COMPOSITING_MODE=1` workaround that was exported
-> to get the window on screen is the first suspect, since video on
-> WebKitGTK renders through the compositing path. All three are in
-> Appendix B with their outcome tables. The 60 Hz mode costs desktop
+> error logged, so support is there and playback is not — and the
+> console then read `readyState 1`, `error null`, `buffered
+> [6.0, 94.1]` against a `duration` of 94.1. Eighty-eight seconds
+> appended cleanly, so the connection the error message names is
+> fine and the fault is a pipeline that **parses without
+> prerolling**: WebKit computes `buffered` from parsed samples
+> rather than from decodability. Two things follow. The element
+> sits at 0 in a six-second hole at the head, and `readyState` is
+> defined at the *playback position*, so `canplay` cannot fire and
+> the timeout was never beatable by waiting — the loader's wait
+> tests `readyState >= 3` and `canplay`, both position-relative,
+> and notices no buffered range the playhead is outside of. But
+> seeking into the buffered range still read 1, so the hole is not
+> the whole fault: `isTypeSupported` answered true for
+> `avc1.42E01E` (Baseline 3.0) while the asset is 4096x2048 High
+> profile, and a codec registry more optimistic than the installed
+> decoders gives exactly this. A smaller HLS dataset playing would
+> make it a resolution ceiling rather than an MSE fault. All of it
+> is in Appendix B. The 60 Hz mode costs desktop
 > resolution and **nothing on the sphere**: the framebuffer is the
 > picker's, not the window's. The whole path runs through a **Dell
 > dock over USB-C**, which is why Windows names Intel UHD as the

@@ -5015,6 +5015,73 @@ problem. Only the third candidate is WSL-specific, which is what
 makes this worth carrying to the dual-monitor Linux box rather than
 closing here.
 
+**It read as the decode case, and all three candidates above are
+retired.** From the console, on the failing load:
+
+```
+readyState 1   networkState 2   error null   buffered [5.999999, 94.099999]
+duration 94.1  currentTime 0
+```
+
+Eighty-eight seconds of media appended cleanly, `duration` known,
+no error, hls.js reporting nothing fatal. So MSE works in that
+build, GStreamer parsed the init segment, fragments arrive and
+appends succeed — which rules out the compositing workaround, the
+fragment that never arrives, and decode being merely *slow*. It is
+also why `buffered` is the reading worth taking first on any future
+report of this: the error message names the connection, and the
+connection is fine.
+
+Two facts then separate. `duration` is **94.1** and the buffer ends
+at 94.1, so the timeline is not shifted — the first six seconds
+simply never appended, and the element sits at 0 in that hole.
+`readyState` is defined at the *current playback position*, so a
+hole at the playhead pins it at `HAVE_METADATA` however much is
+buffered further on: **`canplay` cannot fire, and the 20 s timeout
+was never going to be beaten by waiting longer.** Not slow, stuck.
+The wait at `datasetLoader.ts` tests `readyState >= 3` and listens
+for `canplay`, both position-relative, with nothing that notices a
+buffered range the playhead is outside of.
+
+But the hole is not the whole fault. Seeking to 10 — well inside
+the buffered range — still read `readyState 1` half a second later,
+so data at the playhead is not sufficient either. Both facts point
+at the same place: WebKit computes `buffered` from *parsed samples*,
+not from decodability, so a pipeline that parses and never prerolls
+fills a buffer and holds `HAVE_METADATA` exactly like this. What
+`isTypeSupported` answered true for is `avc1.42E01E` — Baseline
+Level 3.0 — while the asset is 4096x2048, which is High profile at
+Level 5.1 or 5.2. A codec registry more optimistic than the
+installed decoder set would produce precisely this pair of
+readings.
+
+The hole has its own candidate worth keeping separate: `buffered`
+on the element is the browser's **intersection** across source
+buffers, so an audio track starting at a different time from the
+video track offsets it. That is also the reason a missing AAC
+decoder would present as a video problem.
+
+Next, and cheap. In the app:
+
+```js
+const v = document.querySelector('video')
+v.play().catch(e => console.log('play rejected', e.name, e.message))
+setTimeout(() => console.log('readyState', v.readyState, 'paused', v.paused,
+  'size', v.videoWidth + 'x' + v.videoHeight,
+  'decoded', v.getVideoPlaybackQuality?.().totalVideoFrames,
+  'buffered', v.buffered.length ? [v.buffered.start(0), v.buffered.end(0)] : 'none'), 1500)
+```
+
+`videoWidth` 0 means the video track never initialised;
+`videoWidth` 4096 with `totalVideoFrames` 0 means the SPS parsed
+and no frame was produced, which is the decoder; anything reaching
+`readyState` 4 means it was a preroll gate and the fix is in the
+loader's wait. Outside it, `gst-inspect-1.0 avdec_h264` and a
+`gst-launch-1.0` decode of one fragment answer the same question
+without the browser in the way. And one dataset comparison is worth
+more than either: **a smaller HLS dataset that plays** makes this a
+resolution or profile ceiling rather than an MSE fault.
+
 ### Commit 9 — Tools → Outputs panel (first user-reachable)
 
 **Pre-flight:**
