@@ -1,0 +1,39 @@
+name: STAC Resource Audit
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 6 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stac-resource-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    if: vars.STAC_AUDIT_ROOT != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Traverse published resources and verify anonymous assets
+        env:
+          STAC_AUDIT_ROOT: ${{ vars.STAC_AUDIT_ROOT }}
+          STAC_AUDIT_ORIGINS: ${{ vars.STAC_AUDIT_ORIGINS }}
+        run: npm run --silent audit:stac > stac-audit.json
+      - name: Retain machine-readable audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stac-audit
+          path: stac-audit.json
+          if-no-files-found: warn
+          retention-days: 30

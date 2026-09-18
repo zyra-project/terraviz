@@ -18,6 +18,10 @@
  * type error against an undefined.
  */
 export interface CatalogEnv {
+  /** Opt in only after reviewing the node description and verifying the published STAC schema. */
+  STAC_ENABLED?: string
+  /** Comma-separated HTTPS origins permitted for anonymous STAC asset probes; public R2 is also allowed. */
+  STAC_ASSET_ORIGINS?: string
   /** D1 database holding the catalog tables (Phase 1a +). */
   CATALOG_DB?: D1Database
   /** KV namespace caching the rendered catalog response. */

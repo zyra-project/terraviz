@@ -54,6 +54,7 @@
     "report:plain-language": "npx tsx scripts/check-plain-language.ts --report",
     "gen:protocol-schemas": "npx tsx scripts/build-protocol-schemas.ts",
     "check:protocol-schemas": "npx tsx scripts/build-protocol-schemas.ts --check",
+    "audit:stac": "tsx scripts/audit-stac.ts",
     "dev:functions": "wrangler pages dev public --ip 0.0.0.0 --port 8788",
     "dev:functions:ai": "wrangler pages dev public --ip 0.0.0.0 --port 8788 --ai AI",
     "db:migrate": "wrangler d1 migrations apply CATALOG_DB --local",

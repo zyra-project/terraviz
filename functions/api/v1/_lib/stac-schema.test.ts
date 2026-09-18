@@ -3,11 +3,14 @@
 
 import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import Ajv from 'ajv'
 import { addStacFormats, createStacSchemaValidator, type StacSchemaSource } from './stac-schema'
 import { buildStacCatalog, buildStacProduct, TERRAVIZ_SCHEMA } from './stac-builders'
-import { stacFixture } from './stac-test-helpers'
+import { stacFixture, stacRouteFixture } from './stac-test-helpers'
+import { onRequestGet } from '../stac/[[path]]'
+import { makeCtx } from './test-helpers'
+import { readStacPublication } from './stac-publication'
 
 function source(bytes: Uint8Array, uri = TERRAVIZ_SCHEMA): StacSchemaSource {
   return { uri, bytes, sha256: 'sha256:' + createHash('sha256').update(bytes).digest('hex') }
@@ -89,6 +92,24 @@ describe('official STAC 1.1.0 contracts', () => {
     ajv.addSchema(JSON.parse(bytes.toString()), entry.uri)
   }
   ajv.addSchema(JSON.parse(readFileSync('docs/metadata/schemas/terraviz-v1.0.0.json', 'utf8')))
+
+  it('validates real persisted read-model to HTTP output against core and every declared schema', async () => {
+    const { sqlite, env } = stacRouteFixture()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { headers: { 'Content-Type': 'image/png' } })))
+    try {
+      const publication = await readStacPublication(env)
+      for (const document of [publication.catalog, publication.products[0].collection!, publication.products[0].item!]) {
+        const response = await onRequestGet(makeCtx({ env, url: document.links.find(link => link.rel === 'self')!.href }) as never)
+        expect(response.status).toBe(200)
+        const output = await response.json()
+        const kind = document.type === 'Feature' ? 'item' : document.type.toLowerCase()
+        for (const uri of [`https://schemas.stacspec.org/v1.1.0/${kind}-spec/json-schema/${kind}.json`, ...document.stac_extensions]) {
+          const validate = ajv.getSchema(uri)!
+          expect(validate(output), JSON.stringify(validate.errors)).toBe(true)
+        }
+      }
+    } finally { sqlite.close(); vi.unstubAllGlobals() }
+  })
 
   it.each(['https://node.example/with space', 'https://node.example/tab\tpath', 'https://node.example/new\nline'])('uses the same rejecting format checks in official and local validators: %j', async href => {
     const { node, resolvers } = await stacFixture()
