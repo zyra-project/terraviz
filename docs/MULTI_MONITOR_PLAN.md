@@ -5110,6 +5110,60 @@ same box rather than assumed:
   design. Load a data-encoded dataset on the Linux box before
   concluding that HLS works there.
 
+#### Finding — every icon in the app is tofu on Linux, 2026-09-18
+
+With the codec set installed and the two `datasetLoader` fixes in,
+a dataset loads on Linux — and the transport bar renders as a row
+of empty boxes. Browse, play, step, rewind, fast-forward, mute: all
+tofu. The text beside them ("Browse", "CC", the colorbar numbers)
+renders correctly, so a font is resolving; it just has none of
+these glyphs.
+
+**The app ships no font and no icon set.** Every control is a
+Unicode symbol written as an HTML entity in `src/index.html` —
+`&#x23EE;` rewind, `&#x25B6;` play, `&#x23E9;` step forward,
+`&#x1F507;` mute, twenty-one in all, each followed by `&#xFE0E;`
+(variation selector 15) to ask for the monochrome text glyph rather
+than the emoji one. There is no `@font-face`, no bundled `.woff`,
+no Google Fonts link anywhere in `src/`. The stack is
+`-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
+Ubuntu, Cantarell, sans-serif`, so whether an icon appears is
+entirely a property of the operating system's installed fonts.
+
+That works by accident on the two platforms it was developed on.
+macOS resolves these through Apple Symbols, Windows through Segoe
+UI Symbol. A minimal Ubuntu has neither, and the media-control
+block (U+23E9-U+23EE) lives in **Noto Sans Symbols 2**, which is
+not in a default install; U+1F507 needs an emoji font on top of
+that.
+
+**On the box, the prerequisite is one apt line**, beside the
+GStreamer one:
+
+```
+fonts-noto-core fonts-noto-color-emoji fonts-dejavu-core
+```
+
+**As a product matter it is larger than that, and it lands on the
+platform SOS installations run.** A projector rig provisioned from
+a minimal image shows an operator a transport bar of empty
+rectangles — every control unlabelled, with no error and nothing on
+screen to explain it. Three ways out, in increasing order of cost
+and correctness:
+
+| Approach | Cost | Verdict |
+|---|---|---|
+| Document the font packages as a Linux prerequisite | one line in rung 15's runbook | necessary now, insufficient alone — it fails silently on any box that missed it |
+| Add `'Noto Sans Symbols 2', 'DejaVu Sans'` to the stack | one line of CSS | **does nothing** on a box that lacks them, and fontconfig already falls back across whatever *is* installed; it buys the appearance of a fix |
+| Replace the entities with inline SVG | a UI change across ~21 controls | the actual answer — no font dependency, scales crisply, themes with `currentColor`, and it is what the rest of the app's chrome already does |
+
+The SVG migration is **not** multi-monitor work and should not be
+folded into this plan's ladder; it is recorded here because this is
+where it was found and because rung 15's runbook needs the apt line
+either way. The same reasoning as the GStreamer codecs one entry
+up: a prerequisite is worth writing down, and is not a substitute
+for the app not needing it.
+
 ### Commit 9 — Tools → Outputs panel (first user-reachable)
 
 **Pre-flight:**
