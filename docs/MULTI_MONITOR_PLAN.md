@@ -4803,6 +4803,69 @@ consecutive addenda is closed, and the open items revert to the ones
 it displaced: rung 15's runbook, the §6 app-command ACL, rung 13's
 remaining failure-recovery slices, and the Linux qualification.
 
+#### Open — second-window abort under WSL, 2026-09-18
+
+**Not a qualifying run, and recorded anyway because of what it
+might mean.** The Linux build was exercised under WSL2 + WSLg to
+check that it compiles and boots at all. It does: the control
+window renders, the catalog populates, the browse overlay and
+chips lay out correctly. Adding an **output** aborted the process:
+
+```
+[xcb] Unknown sequence number while processing queue
+[xcb] Most likely this is a multi-threaded client and XInitThreads has not been called
+[xcb] Aborting, sorry about that.
+terraviz: ../../src/xcb_io.c:278: poll_for_event:
+  Assertion `!xcb_xlib_threads_sequence_lost' failed.
+```
+
+The output window appeared **white** first, then the abort — so it
+was created and mapped, its webview never painted, and the process
+died around the placement calls. Launched with `GDK_BACKEND=x11`,
+which was itself needed to get the control window to appear
+reliably.
+
+**Three candidates, unseparated:**
+
+1. **XWayland under WSLg.** Not a normal X server, and the control
+   window needed a `wsl --shutdown` and a forced backend before it
+   would map at all.
+2. **Tauri/GTK multi-window on X11 generally.** GTK3 requires GDK
+   calls on the main thread and Tauri marshals window creation
+   across IPC to get there; anything touching X off-thread aborts
+   exactly like this. **This one would be a real Linux bug.**
+3. **`setFullscreen` specifically.** The spawn sequence is
+   create-hidden → `setPosition` → `setSize` → `setFullscreen` →
+   `show`, and WSLg's RAIL mode has no notion of a fullscreen
+   display, making that the least well-defined of the five calls
+   under this compositor.
+
+**No fix is proposed and none should be written yet.** The obvious
+one — `XInitThreads()` at startup in `lib.rs` — means adding an X11
+dependency to work around a crash whose cause is unattributed, in
+an environment that cannot qualify anything. That is the shape of
+mistake this appendix has spent five entries recording.
+
+**What it changes is the order of the Linux pass.** If candidate 2
+holds, the feature does not work on Linux at all: the app dies the
+moment an operator adds an output, on the platform SOS
+installations run. So on the dual-monitor Linux workstation, **add
+one output before anything else** — before the smoke checklist,
+before any frame-rate reading. Three outcomes:
+
+| on real Linux | means |
+|---|---|
+| no abort | WSLg's X path. Delete this entry, proceed with the checklist |
+| aborts on X11, not on Wayland | backend-specific; worth a real fix, and `GDK_BACKEND` becomes a runbook line |
+| aborts on both | candidate 2. The feature is blocked on Linux until it is fixed, and that outranks every other open item |
+
+**Also worth carrying:** WSLg presents one virtual display, so
+nothing about monitor enumeration, placement, signed origins or the
+occupied-monitor guard was exercised. A **VM with two virtual
+displays** would reach all of those and is the cheaper intermediate
+target this detour should have used — real window manager, real
+multi-monitor logic, no useful performance numbers.
+
 ### Commit 9 — Tools → Outputs panel (first user-reachable)
 
 **Pre-flight:**

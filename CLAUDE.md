@@ -1150,7 +1150,23 @@ The desktop app shares 100% of the TypeScript source. Desktop-only behaviour is 
 > Windows names Intel UHD for the *display* — two adapters, both
 > true, the dock in between. Still unsettled: the **Linux gate**, and
 > what an hour of continuous playback does, since this is one sitting
-> rather than a soak. The 60 Hz mode costs desktop
+> rather than a soak. **And the Linux gate now has a named first
+> step.** A WSL2/WSLg build boots and renders the control window
+> correctly, but **adding an output aborts the process** on an Xlib
+> threading assertion (`xcb_xlib_threads_sequence_lost`, "XInitThreads
+> has not been called"), with the output window white before the
+> abort. Three unseparated candidates — WSLg's XWayland, Tauri/GTK
+> multi-window on X11 generally, or `setFullscreen` under RAIL — and
+> the middle one would mean the feature does not work on Linux at all.
+> **No fix belongs in the tree yet**: `XInitThreads()` in `lib.rs`
+> would add an X11 dependency to work around an unattributed crash in
+> an environment that qualifies nothing. What it changes is ordering —
+> on the dual-monitor Linux box, **add one output before anything
+> else**, ahead of the smoke checklist and any frame-rate reading. See
+> Appendix B's "second-window abort" entry for the outcome table. A
+> **VM with two virtual displays** is the cheaper intermediate target
+> WSL should have been: real window manager, real monitor enumeration
+> and placement, no useful performance numbers. The 60 Hz mode costs desktop
 > resolution and **nothing on the sphere**: the framebuffer is the
 > picker's, not the window's. The whole path runs through a **Dell
 > dock over USB-C**, which is why Windows names Intel UHD as the
