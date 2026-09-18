@@ -2,7 +2,7 @@
 // Copyright 2026 The Zyra Project
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { displayDatasetInfo, pickDirectFile } from './datasetLoader'
+import { displayDatasetInfo, pickDirectFile, waitForDecodableFrame } from './datasetLoader'
 import type { Dataset } from '../types'
 import { until } from '../test-utils'
 
@@ -554,5 +554,103 @@ describe('pickDirectFile', () => {
 
   it('returns undefined for an empty list so the caller can name the failure', () => {
     expect(pickDirectFile([])).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// waitForDecodableFrame
+// ---------------------------------------------------------------------------
+
+/**
+ * The two engine behaviours this function sits between. A
+ * `prerolling` element reaches `canplay` on its own; a `passive` one
+ * only ever does so once something plays it, which is WebKitGTK and
+ * which deadlocked a wait that ran before the caller's own `play()`.
+ */
+function fakeVideo(kind: 'prerolling' | 'passive' | 'dead', readyState = 0) {
+  const listeners = new Map<string, Set<() => void>>()
+  const video = {
+    readyState,
+    playCalls: 0,
+    addEventListener(type: string, fn: () => void) {
+      if (!listeners.has(type)) listeners.set(type, new Set())
+      listeners.get(type)!.add(fn)
+      if (type === 'canplay' && kind === 'prerolling') queueMicrotask(() => video.fire('canplay'))
+    },
+    removeEventListener(type: string, fn: () => void) {
+      listeners.get(type)?.delete(fn)
+    },
+    fire(type: string) {
+      for (const fn of [...(listeners.get(type) ?? [])]) fn()
+    },
+    listenerCount(type: string) {
+      return listeners.get(type)?.size ?? 0
+    },
+    play() {
+      video.playCalls++
+      if (kind === 'passive') queueMicrotask(() => video.fire('canplay'))
+      return Promise.resolve()
+    },
+  }
+  return video
+}
+
+describe('waitForDecodableFrame', () => {
+  it('resolves without playing when the element is already decodable', async () => {
+    const video = fakeVideo('prerolling', 4)
+    await waitForDecodableFrame(video as unknown as HTMLVideoElement)
+    expect(video.playCalls).toBe(0)
+  })
+
+  it('resolves on canplay from an engine that preroll s by itself', async () => {
+    const video = fakeVideo('prerolling')
+    await waitForDecodableFrame(video as unknown as HTMLVideoElement)
+    expect(video.listenerCount('canplay')).toBe(0)
+  })
+
+  // The regression. A passive engine emits `canplay` only in response
+  // to being played, so a wait that does not nudge never resolves and
+  // the caller's own `play()` — which comes after this wait — can
+  // never run. Measured on WebKitGTK: 88 s buffered, readyState 1.
+  it('nudges a passive engine into prerolling rather than waiting for it', async () => {
+    const video = fakeVideo('passive')
+    await waitForDecodableFrame(video as unknown as HTMLVideoElement)
+    expect(video.playCalls).toBe(1)
+  })
+
+  it('survives a rejected play() and still resolves if canplay arrives', async () => {
+    const video = fakeVideo('prerolling')
+    video.play = () => {
+      video.playCalls++
+      return Promise.reject(new Error('NotAllowedError'))
+    }
+    await waitForDecodableFrame(video as unknown as HTMLVideoElement)
+    expect(video.playCalls).toBe(1)
+  })
+
+  it('rejects and unhooks when no frame ever becomes decodable', async () => {
+    vi.useFakeTimers()
+    try {
+      const video = fakeVideo('dead')
+      const settled = waitForDecodableFrame(video as unknown as HTMLVideoElement, 20000)
+      const seen = settled.catch((e: Error) => e)
+      await vi.advanceTimersByTimeAsync(20000)
+      const err = await seen
+      expect((err as Error).message).toMatch(/took too long/)
+      expect(video.listenerCount('canplay')).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('clears the timeout once a frame arrives', async () => {
+    vi.useFakeTimers()
+    try {
+      const video = fakeVideo('passive')
+      await waitForDecodableFrame(video as unknown as HTMLVideoElement, 20000)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

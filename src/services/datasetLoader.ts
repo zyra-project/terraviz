@@ -248,6 +248,60 @@ function tryLoadImage(urls: string[]): Promise<HTMLImageElement> {
  *
  * A `link` is the only field playing it actually requires.
  */
+/**
+ * Wait until `video` holds a frame the texture path can upload.
+ *
+ * The obvious shape — listen for `canplay`, time out — **deadlocks on
+ * WebKitGTK**, which is the whole reason this is a named function
+ * rather than an inline promise. Chrome, Firefox and Safari preroll a
+ * media pipeline as soon as data is appended, so `canplay` arrives
+ * unprompted; WebKitGTK waits to be asked, so an element nobody has
+ * played never leaves `HAVE_METADATA` and this wait waits for
+ * something its own caller was going to trigger a few lines later.
+ * Measured on Ubuntu under WSLg: `readyState` 1 with 88 s buffered, a
+ * known duration, no media error and no fatal hls.js event — and
+ * `readyState` 4 with frames decoding the moment `play()` was called
+ * by hand. It presents as a connection failure and is an ordering
+ * bug.
+ *
+ * So the pipeline is **nudged**: muted playback is started and the
+ * element is left running, because the caller plays it immediately
+ * afterwards to capture a first frame, then pauses and rewinds. A
+ * rejected `play()` costs the nudge and nothing else — and an
+ * autoplay policy strict enough to refuse a muted element belongs to
+ * an engine that preroll s on its own, which is the case the nudge is
+ * not needed for.
+ *
+ * `readyState >= 3` is checked first because an already-decodable
+ * element must not be played at all: the fast path is a dataset
+ * switching back to media still warm in the element.
+ */
+export function waitForDecodableFrame(
+  video: HTMLVideoElement,
+  timeoutMs: number = VIDEO_LOAD_TIMEOUT_MS,
+): Promise<void> {
+  if (video.readyState >= 3) return Promise.resolve()
+
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      video.removeEventListener('canplay', onCanPlay)
+      reject(new Error('Video took too long to load — check your connection and try again'))
+    }, timeoutMs)
+
+    function onCanPlay(): void {
+      video.removeEventListener('canplay', onCanPlay)
+      // Cleared rather than left to fire into a settled promise: the
+      // reject is harmless by then, but a live 20 s timer per load is
+      // not nothing on a tour stepping through datasets.
+      clearTimeout(timer)
+      resolve()
+    }
+
+    video.addEventListener('canplay', onCanPlay)
+    void video.play().catch(() => {})
+  })
+}
+
 export function pickDirectFile(files: VideoProxyFile[]): VideoProxyFile | undefined {
   return files.find(f => f.quality === '1080p' && f.link)
     ?? files.find(f => f.quality === '720p' && f.link)
@@ -336,21 +390,7 @@ export async function loadVideoDataset(
     }
   }
 
-  await new Promise<void>((resolve, reject) => {
-    const onCanPlay = () => {
-      video.removeEventListener('canplay', onCanPlay)
-      resolve()
-    }
-    if (video.readyState >= 3) {
-      resolve()
-    } else {
-      video.addEventListener('canplay', onCanPlay)
-      setTimeout(() => {
-        video.removeEventListener('canplay', onCanPlay)
-        reject(new Error('Video took too long to load — check your connection and try again'))
-      }, VIDEO_LOAD_TIMEOUT_MS)
-    }
-  })
+  await waitForDecodableFrame(video)
 
   // Infer display interval from time range + video duration.
   // Only the primary panel's load drives the shared playback state.

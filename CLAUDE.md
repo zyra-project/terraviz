@@ -167,7 +167,7 @@ npm run screenshots:smoke   # gating interaction tests (search, Orbit, nav)
 | `src/services/viewportManager.ts` | Multi-globe orchestrator — 1/2/4 synchronised MapRenderer instances in a CSS grid, camera lockstep, panel promotion |
 | `src/services/earthTileLayer.ts` | CustomLayerInterface — day/night blend, clouds, specular, sun, skybox |
 | `src/services/dataService.ts` | Fetches SOS catalog, merges enriched metadata, 1-hour cache |
-| `src/services/datasetLoader.ts` | Loads a dataset onto the globe (HLS or image); manages info panel |
+| `src/services/datasetLoader.ts` | Loads a dataset onto the globe (HLS or image); manages info panel. `waitForDecodableFrame` is exported for the reason `pickDirectFile` is — it is where a wrong answer lives. It **nudges** the element with a muted `play()` rather than only listening for `canplay`, because WebKitGTK does not preroll a media pipeline until something plays it, and this wait runs *before* the `video.play()` that captures the first frame: on that engine each waited for the other, and a load with 88 s buffered and no error failed after 20 s naming the user's connection. Chrome, Firefox and Safari preroll on append, which is why one engine deadlocked and three did not. `readyState >= 3` short-circuits first so an element still warm from the previous dataset is not played, and a rejected `play()` costs the nudge alone — an autoplay policy strict enough to refuse a muted element belongs to an engine that needs no nudge |
 | `src/services/hlsService.ts` | HLS.js wrapper — adaptive bitrate streaming via Vimeo proxy. Also holds a rendition for short looping assets: hls.js's ABR cannot converge on a 2-3 s loop of one or two fragments (its sampler floors every measurement window at 50 ms, so a 0.2 s leading fragment can never *measure* a fast link; and its fetch-duration test weighs a level's ~1.2 s average fragment against the 0.2 s actually buffered, so every rung fails and ABR steps down a rung per playlist load). Once the asset is fully buffered nothing requests another fragment, so the floor stuck for the instance's lifetime — a 4096x2048 source played at 1440x720 on gigabit with the asset cached. `measuredBandwidthBps` reads the true transfer rate off the throwaway probe fragment and `selectRendition` picks the best rung that fits it under `autoLevelCapping`; long assets are left to ABR |
 | `src/services/docentService.ts` | Orbit orchestrator — hybrid LLM + local engine |
 | `src/services/docentContext.ts` | LLM system prompt builder, history compression, tool definition |
@@ -1182,26 +1182,27 @@ The desktop app shares 100% of the TypeScript source. Desktop-only behaviour is 
 > is on in that build, so the escalation case — every HLS dataset
 > unplayable on Linux, outputs included — does not hold, and the
 > codec set is a documented prerequisite for any Linux deploy. It
-> did not settle the small half. The failure moved to
-> `datasetLoader`'s 20 s `canplay` timeout with no fatal hls.js
-> error logged, so support is there and playback is not — and the
-> console then read `readyState 1`, `error null`, `buffered
-> [6.0, 94.1]` against a `duration` of 94.1. Eighty-eight seconds
-> appended cleanly, so the connection the error message names is
-> fine and the fault is a pipeline that **parses without
-> prerolling**: WebKit computes `buffered` from parsed samples
-> rather than from decodability. Two things follow. The element
-> sits at 0 in a six-second hole at the head, and `readyState` is
-> defined at the *playback position*, so `canplay` cannot fire and
-> the timeout was never beatable by waiting — the loader's wait
-> tests `readyState >= 3` and `canplay`, both position-relative,
-> and notices no buffered range the playhead is outside of. But
-> seeking into the buffered range still read 1, so the hole is not
-> the whole fault: `isTypeSupported` answered true for
-> `avc1.42E01E` (Baseline 3.0) while the asset is 4096x2048 High
-> profile, and a codec registry more optimistic than the installed
-> decoders gives exactly this. A smaller HLS dataset playing would
-> make it a resolution ceiling rather than an MSE fault. All of it
+> did not settle the small half, and the small half turned out to be
+> **ours**. The failure moved to `datasetLoader`'s 20 s `canplay`
+> timeout with `readyState 1`, `error null` and 88 s buffered — and
+> `play()` by hand put it at `readyState 4` decoding frames.
+> WebKitGTK does not preroll a pipeline until something plays it,
+> and `loadVideoDataset` waited for `canplay` *before* the
+> `video.play()` a few lines below, so on that one engine each
+> waited for the other. Chrome, Firefox and Safari preroll on
+> append, which is why three engines were fine and one deadlocked,
+> and why an ordering bug presented as a connection failure. Fixed
+> by `waitForDecodableFrame`, which **nudges** — muted playback
+> started and left running, since the caller plays the element
+> immediately afterwards anyway — and short-circuits on
+> `readyState >= 3` so a warm element is never played. Two things
+> that reading did *not* settle, both open on the Linux box: the
+> six-second hole at the head of `buffered` (the browser's
+> intersection across source buffers, so a misaligned audio track
+> is the first suspect), and **4096x2048**, since ABR served
+> `2160x1080` and `isTypeSupported` answers for Baseline 3.0
+> whatever the stream is — the case with no fallback, because
+> `DATA_ENCODED_RENDITIONS` is a single rung by design. All of it
 > is in Appendix B. The 60 Hz mode costs desktop
 > resolution and **nothing on the sphere**: the framebuffer is the
 > picker's, not the window's. The whole path runs through a **Dell

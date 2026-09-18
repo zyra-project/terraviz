@@ -5061,26 +5061,54 @@ buffers, so an audio track starting at a different time from the
 video track offsets it. That is also the reason a missing AAC
 decoder would present as a video problem.
 
-Next, and cheap. In the app:
+**Resolved: WebKitGTK does not preroll until `play()`.** Calling
+`play()` by hand on the stalled element:
 
-```js
-const v = document.querySelector('video')
-v.play().catch(e => console.log('play rejected', e.name, e.message))
-setTimeout(() => console.log('readyState', v.readyState, 'paused', v.paused,
-  'size', v.videoWidth + 'x' + v.videoHeight,
-  'decoded', v.getVideoPlaybackQuality?.().totalVideoFrames,
-  'buffered', v.buffered.length ? [v.buffered.start(0), v.buffered.end(0)] : 'none'), 1500)
+```
+readyState 4   paused false   size 2160x1080   decoded 579
 ```
 
-`videoWidth` 0 means the video track never initialised;
-`videoWidth` 4096 with `totalVideoFrames` 0 means the SPS parsed
-and no frame was produced, which is the decoder; anything reaching
-`readyState` 4 means it was a preroll gate and the fix is in the
-loader's wait. Outside it, `gst-inspect-1.0 avdec_h264` and a
-`gst-launch-1.0` decode of one fragment answer the same question
-without the browser in the way. And one dataset comparison is worth
-more than either: **a smaller HLS dataset that plays** makes this a
-resolution or profile ceiling rather than an MSE fault.
+Decodable, playing, frames coming out. Nothing is wrong with the
+codecs, the profile, the resolution or the position — the pipeline
+sat at `HAVE_METADATA` because **nothing had asked it to start**,
+and `loadVideoDataset`'s ordering makes that unrecoverable: the wait
+for `canplay` runs *before* the `video.play()` a few lines below it,
+so on an engine that preroll s only on demand each waits for the
+other. Chrome, Firefox and Safari preroll as soon as data is
+appended, which is why one engine deadlocks and three do not, and
+why it presents as a connection failure.
+
+Fixed by extracting `waitForDecodableFrame` and having it **nudge**:
+muted playback is started and left running, since the caller plays
+the element immediately afterwards anyway to capture a first frame.
+`readyState >= 3` still short-circuits, so an element still warm
+from a previous dataset is not played. A rejected `play()` costs the
+nudge and nothing else — an autoplay policy strict enough to refuse
+a muted element belongs to an engine that preroll s on its own. The
+regression test is the deadlock itself: a fake element that emits
+`canplay` only in response to being played, which hangs the old
+shape until the timeout.
+
+**Two things this did not settle**, and both should be read off the
+same box rather than assumed:
+
+- **The six-second hole is still unexplained.** `buffered` began at
+  6.0 against a `duration` of 94.1 before any seek, and the element
+  now plays past it because the nudge starts it, but an element
+  parked at 0 in a hole is a second latent failure. `buffered` on
+  the element is the browser's **intersection** across source
+  buffers, so an audio track starting at a different time from the
+  video offsets it — the first thing to check, and worth comparing
+  against the same dataset on Windows.
+- **Nothing about 4096x2048 was exercised.** The element reported
+  `2160x1080`: hls.js's ABR picked a lower rung, as it is left to do
+  for any asset past `SHORT_ASSET_MAX_DURATION`. `isTypeSupported`
+  answers for `avc1.42E01E` (Baseline 3.0) whatever the stream is,
+  so a High-profile Level 5.x ceiling on WebKitGTK remains untested
+  — and it is exactly the case with no fallback, since
+  `DATA_ENCODED_RENDITIONS` is a **single** rung at 4096x2048 by
+  design. Load a data-encoded dataset on the Linux box before
+  concluding that HLS works there.
 
 ### Commit 9 — Tools → Outputs panel (first user-reachable)
 
