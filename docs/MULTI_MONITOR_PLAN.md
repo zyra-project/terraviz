@@ -5137,12 +5137,37 @@ block (U+23E9-U+23EE) lives in **Noto Sans Symbols 2**, which is
 not in a default install; U+1F507 needs an emoji font on top of
 that.
 
-**On the box, the prerequisite is one apt line**, beside the
-GStreamer one:
+**On the box the prerequisite is an apt line**, beside the GStreamer
+one — but it took two passes to get right, and the second half is
+the part nobody would derive from the symptom:
 
 ```
-fonts-noto-core fonts-noto-color-emoji fonts-dejavu-core
+fonts-noto-core fonts-noto-color-emoji fonts-dejavu-core fonts-symbola
 ```
+
+The twenty-one codepoints split into **two dependency classes**, and
+installing for the first leaves the second still broken:
+
+| Class | Codepoints | Needs |
+|---|---|---|
+| BMP symbols | `21E5` `23E9`-`23EE` `23F8` `23F9` `25B6` `2699` `2715` `27A4` | DejaVu Sans / Noto Sans Symbols 2 — ordinary font packages |
+| Astral-plane emoji | `1F4AC` chat, `1F507` mute, `1F5D1` delete, `1F97D` VR | a **monochrome** emoji font |
+
+After the first three packages the transport bar came back and the
+four above U+FFFF were still tofu. The reason is the variation
+selector: every icon is written `&#x1F4AC;&#xFE0E;`, and `FE0E` is
+**VS15**, which asks for the *text* presentation. `fonts-noto-color-emoji`
+supplies the **colour** glyph, so WebKit — honouring VS15 by
+preferring a text-presentation font — can decline it and fall
+through to tofu. An emoji font installed, and still no glyph.
+`fc-list :charset=1F4AC family` tells you which case a box is in.
+
+Worth recording because the obvious fix is wrong: **dropping the
+`&#xFE0E;` would also make the glyph appear**, and would give
+macOS and Windows colour emoji where they currently render
+restrained monochrome glyphs matching the rest of the chrome. A
+cartoon speech balloon in an operator UI is a regression, not a
+repair.
 
 **As a product matter it is larger than that, and it lands on the
 platform SOS installations run.** A projector rig provisioned from
