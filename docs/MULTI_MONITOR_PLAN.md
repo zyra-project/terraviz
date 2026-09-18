@@ -5110,6 +5110,70 @@ same box rather than assumed:
   design. Load a data-encoded dataset on the Linux box before
   concluding that HLS works there.
 
+#### Finding — the iGPU hazard fired, on Linux, invisibly, 2026-09-18
+
+Four HUD readings from one sitting, with the frame-gate fix in:
+
+| State | sync | draw | fps / raf |
+|---|---|---|---|
+| Idle, no data | not-ready | **0.0 ms** | 1.0 / 58.7 |
+| Smoke, seeking | seeking | **0.4 ms** | 12.4 / 12.4 |
+| Air Traffic playing (2160x1080) | +69 ms | **57.5 ms** | 14.0 / 14.0 |
+| Smoke playing (4096x2048) | -1267 ms | **302 ms** | 2.9 / 2.9 |
+
+**`fps == raf` in all four**, so the frame gate is innocent here —
+it takes every callback offered. That is the Windows bug ruled out
+on a second platform rather than assumed fixed.
+
+**The cost is the per-frame video texture upload, not the
+ray-march**, and idle is what proves it: an idle output draws the
+*full* Earth decoration — terminator, night lights, clouds,
+atmosphere LUT — over the same 4096x2048 framebuffer, and reads
+**0.0 ms**. Draw is ~0 whenever no new video frame exists (idle, or
+seeking) and large exactly when one is advancing, scaling with the
+**source** resolution: 4096x2048 is 3.6x the pixels of 2160x1080,
+and 302/57.5 is 5.3x.
+
+**`draw` is more informative on Linux than on Windows, and the
+module map's claim about it was ANGLE-specific.** It said a
+GPU-bound output reads under a millisecond because `render()`
+submits and the block lands at buffer swap between callbacks. True
+of ANGLE/D3D11; false on WebKitGTK, where the path is synchronous
+and 302 of a 345 ms callback interval sits *inside* `scene.render()`.
+Corrected in CLAUDE.md.
+
+**And `glxinfo` caught what the app cannot see:**
+
+```
+OpenGL renderer string: D3D12 (Intel(R) UHD Graphics)
+```
+
+Not llvmpipe — hardware, through WSLg's D3D12 gallium translation
+— but the **integrated** GPU, on a machine with an RTX 4090. This
+is §Risks' iGPU hazard firing, and firing *silently*: the `gpu`
+field exists precisely to catch it, and on WebKitGTK it reads
+`Apple GPU` and names nothing. So the one in-app mitigation for
+this risk is blind on the platform SOS installations run, and the
+check must be `glxinfo -B` outside the app. That upgrades the
+earlier "gpu field does not work on Linux" entry from a cosmetic
+gap to a **missed detection of the exact failure it was written
+for**.
+
+Two things stay unseparated and should not be conflated when this
+is re-run on real hardware: the adapter (iGPU vs discrete) and the
+transport (WSLg's D3D12 layer, plus `WEBKIT_DISABLE_DMABUF_RENDERER=1`
+if it is still exported from the X11 window workaround, which
+forces frames through a CPU copy instead of a shared buffer).
+`MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA` selects the discrete card
+under WSLg and isolates the first.
+
+**None of these numbers qualifies anything.** A dual-monitor Linux
+workstation remains the gate. What this sitting establishes is
+narrower and still worth having: the frame gate is correct on a
+second engine, the expensive thing is the upload rather than the
+shader, and the iGPU risk is real and undetectable from inside the
+app on Linux.
+
 #### Finding — every icon in the app is tofu on Linux, 2026-09-18
 
 With the codec set installed and the two `datasetLoader` fixes in,
