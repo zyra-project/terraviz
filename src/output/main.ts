@@ -156,6 +156,25 @@ async function boot(): Promise<void> {
   // callback twice a second — `refresh` returns before reading anything
   // while hidden — and in exchange the toggle is instant, which is what
   // an operator standing at the sphere is actually doing with it.
+  /**
+   * Has the render loop reported in recently enough to be believed?
+   *
+   * Every frame number below is written *by* the loop and read by the
+   * HUD's own ~2 Hz timer, which keeps running when the loop does not.
+   * So a window the browser has stopped offering callbacks to — an
+   * occluded output, a stalled compositor, a display gone to sleep —
+   * repaints the last healthy reading forever over a frozen sphere,
+   * which is the invisible failure this HUD exists to remove, arriving
+   * from the one direction neither the gpu field nor the link field
+   * covers.
+   *
+   * Three sample windows rather than one, so an ordinary late callback
+   * cannot blank the fields; nothing recovers a loop that has genuinely
+   * stopped, so there is no hurry to declare it.
+   */
+  const loopReportedRecently = (): boolean =>
+    performance.now() - lastFpsSample < OVERLAY_REFRESH_MS * 3
+
   const overlay = createDebugOverlay(() => ({
     // The mirror, not the link: what this window decoded, not what the
     // control window last said. During a load those differ, and the
@@ -166,9 +185,14 @@ async function boot(): Promise<void> {
       : (mirror.currentDataset()?.id ?? null),
     driftS: lastSync?.driftS ?? null,
     syncKind: lastSync?.kind ?? null,
-    fps,
+    // Zeroed rather than held when the loop has gone quiet: these two
+    // are the liveness pair, and a stale 30 is the one answer they must
+    // never give. `drawMs` is not zeroed — it answers *capacity*, and
+    // "the last frame we drew cost 4 ms" stays true after the frames
+    // stop.
+    fps: loopReportedRecently() ? fps : 0,
     drawMs,
-    rafHz,
+    rafHz: loopReportedRecently() ? rafHz : 0,
     // Read, never evaluated: `linkHealth()` is the pure getter, so
     // painting the HUD cannot itself send a health-check ping. The
     // evaluation happens once per frame in the loop below.
