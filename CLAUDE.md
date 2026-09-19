@@ -1225,7 +1225,21 @@ The desktop app shares 100% of the TypeScript source. Desktop-only behaviour is 
 > on the second window, Wayland+iGPU runs on the wrong GPU with no
 > second display, Wayland+discrete heap-corrupts. **WSL is done**;
 > the remaining Linux questions need a VM with two virtual
-> displays or the real box. All of it is in Appendix B. The 60 Hz mode costs desktop
+> displays or the real box. All of it is in Appendix B.
+> **Rung 15 has since landed** —
+> [`docs/MULTI_MONITOR_OPERATIONS.md`](docs/MULTI_MONITOR_OPERATIONS.md),
+> the operator runbook, which is where every finding above stops
+> being an Appendix B addendum and becomes something the person
+> provisioning a sphere will actually read. Its organising idea is
+> that almost everything that went wrong on hardware was
+> **invisible** — a correct-looking picture at a fraction of the
+> provisioned capacity, a monitor silently at half its refresh
+> rate, a transport bar of empty boxes — so it is mostly a list of
+> things to *look at*, ordered so the §1 checks change what you
+> conclude from everything after them. It is the one doc to update
+> when a hardware pass finds something an operator would need; the
+> plan's Appendix B remains the evidence log, and the two are not
+> the same audience. The 60 Hz mode costs desktop
 > resolution and **nothing on the sphere**: the framebuffer is the
 > picker's, not the window's. The whole path runs through a **Dell
 > dock over USB-C**, which is why Windows names Intel UHD as the
