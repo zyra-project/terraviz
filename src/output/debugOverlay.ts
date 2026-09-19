@@ -220,9 +220,24 @@ export function createFpsMeter(): FpsMeter {
   let frames = 0
   let since: number | null = null
   let last = 0
+  /** The previous `sample()` found an empty window and held it open, so
+   *  `since` is older than one window and is measuring silence. */
+  let starved = false
   return {
     tick(now) {
-      if (since === null) since = now
+      // A window held open by silence must not then be *charged* for it.
+      // `sample()` deliberately leaves `since` alone while no frame
+      // arrives, so without this the first frame after an outage lands
+      // in a window that already spans the whole outage: ten seconds
+      // dark followed by a healthy 30 fps reported 1.4 fps, and an
+      // operator reading that concludes the output is still broken.
+      // The window therefore restarts at the frame that ended the
+      // silence, which is the only instant this meter can honestly
+      // measure from.
+      if (since === null || starved) {
+        since = now
+        starved = false
+      }
       frames++
     },
     sample(now) {
@@ -233,7 +248,10 @@ export function createFpsMeter(): FpsMeter {
       // what keeps a 1 Hz idle output distinguishable from a dead one.
       // `Math.min` because no frame arrived, so the rate cannot have
       // risen since the last reading.
-      if (frames === 0) return (last = Math.min(last, 1000 / elapsed))
+      if (frames === 0) {
+        starved = true
+        return (last = Math.min(last, 1000 / elapsed))
+      }
       last = (frames * 1000) / elapsed
       frames = 0
       since = now

@@ -253,6 +253,28 @@ describe('createFpsMeter', () => {
     expect(later[1]).toBeLessThan(later[0])
     expect(later[2]).toBeLessThan(0.1)
   })
+
+  it('reports the real rate again once an output recovers', () => {
+    // The other side of holding the window open, and the reason the
+    // hold needs a matching release. `sample()` leaves `since` alone
+    // while no frame arrives, so without a restart the first window
+    // after an outage spans the outage as well: ten seconds of a lost
+    // context followed by a healthy 30 fps read as 1.4, and an operator
+    // reading that concludes the output is still dark.
+    const meter = createFpsMeter()
+    meter.tick(0)
+    meter.tick(33)
+    expect(meter.sample(66)).toBeGreaterThan(10)
+
+    // Ten seconds with nothing drawn, sampled throughout as the HUD
+    // does.
+    for (let now = 500; now <= 10000; now += 500) meter.sample(now)
+    expect(meter.sample(10000)).toBeLessThan(1)
+
+    // Recovery: a full 30 fps second.
+    for (let i = 0; i < 30; i++) meter.tick(10000 + i * (1000 / 30))
+    expect(meter.sample(11000)).toBeCloseTo(30, 0)
+  })
 })
 
 describe('createDrawTimer', () => {
