@@ -9,7 +9,7 @@
  * dataset winning a race, or a decoder left running after teardown.
  */
 
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 
 import {
   createDatasetMirror,
@@ -308,5 +308,88 @@ describe('isHlsManifest', () => {
   it('rejects a progressive file', () => {
     expect(isHlsManifest('https://cdn.example/a.mp4')).toBe(false)
     expect(isHlsManifest('https://cdn.example/m3u8.mp4')).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// createDefaultMediaLoader
+// ---------------------------------------------------------------------------
+
+/**
+ * The real loader is where the output meets an engine. On WebKitGTK a
+ * loaded stream is not a decodable one and never becomes one unless
+ * something plays it — and nothing on this path would have, because
+ * `outputSync` plays only while the control window is playing and in
+ * range. An operator setting up a show with the transport paused got a
+ * blank sphere with no error anywhere.
+ */
+describe('createDefaultMediaLoader', () => {
+  function mockHls(): { played: () => number; paused: () => number } {
+    let played = 0
+    let paused = 0
+    vi.resetModules()
+    vi.doMock('../services/hlsService', () => ({
+      HLSService: class {
+        createVideo(): HTMLVideoElement {
+          const el = document.createElement('video')
+          // A passive engine: `canplay` only ever arrives in response
+          // to being played. Chrome and Firefox would have fired it
+          // unprompted, which is why this went unseen on three engines.
+          Object.defineProperty(el, 'readyState', { value: 0, writable: true })
+          el.play = () => {
+            played++
+            queueMicrotask(() => el.dispatchEvent(new Event('canplay')))
+            return Promise.resolve()
+          }
+          el.pause = () => {
+            paused++
+          }
+          return el
+        }
+        loadStream(): Promise<void> {
+          return Promise.resolve()
+        }
+        loadDirect(): Promise<void> {
+          return Promise.resolve()
+        }
+        destroy(): void {}
+      },
+    }))
+    return { played: () => played, paused: () => paused }
+  }
+
+  afterEach(() => {
+    vi.resetModules()
+    vi.doUnmock('../services/hlsService')
+  })
+
+  it('prerolls the element rather than handing back one that never decodes', async () => {
+    const counts = mockHls()
+    const { createDefaultMediaLoader } = await import('./datasetMirror')
+
+    await createDefaultMediaLoader().load({
+      kind: 'video',
+      url: 'https://cdn.example/a.m3u8',
+      overlay: { datasetId: 'd', datasetTitle: 'D' },
+    } as never)
+
+    expect(counts.played()).toBe(1)
+  })
+
+  // The playhead belongs to `outputSync`, which decides play/pause from
+  // the control window's transport. A loader that left the element
+  // running would have the output playing ahead of a paused operator
+  // until the next steer caught it.
+  it('leaves the element paused for outputSync to steer', async () => {
+    const counts = mockHls()
+    const { createDefaultMediaLoader } = await import('./datasetMirror')
+
+    await createDefaultMediaLoader().load({
+      kind: 'video',
+      url: 'https://cdn.example/a.m3u8',
+      overlay: { datasetId: 'd', datasetTitle: 'D' },
+    } as never)
+
+    expect(counts.paused()).toBe(1)
   })
 })

@@ -48,6 +48,7 @@
 import { createPlayheadSync, type SyncInputs, type SyncOutcome, type SyncTarget } from './outputSync'
 import type { MirroredDataset } from '../services/multiOutput/protocol'
 import { logger } from '../utils/logger'
+import { waitForDecodableFrame } from '../utils/mediaReadiness'
 
 /** One loaded dataset's media, and how to let go of it. */
 export interface MediaSource {
@@ -213,6 +214,18 @@ export function createDefaultMediaLoader(): MediaLoader {
         await (isHlsManifest(ds.url)
           ? hls.loadStream(ds.url, video)
           : hls.loadDirect(ds.url, video))
+        // A loaded stream is not a decodable one, and on WebKitGTK it
+        // is not even on its way to being one: that engine does not
+        // preroll a pipeline until something plays it. Nothing here
+        // would have. `outputSync` calls `play()` only on the branch
+        // where the control window is *playing and in range* — so an
+        // output whose operator loads a dataset with the transport
+        // paused, the ordinary way a show is set up before an
+        // audience, sat at `HAVE_METADATA` and uploaded a blank
+        // texture to the sphere for the life of the window. The
+        // element then goes back to being `outputSync`'s to steer,
+        // which is what `pauseWhenReady` is for.
+        await waitForDecodableFrame(video, { pauseWhenReady: true })
       } catch (err) {
         hls.destroy()
         throw err
