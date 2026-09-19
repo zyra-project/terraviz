@@ -15,6 +15,7 @@ import type { Dataset, AppState, GlobeRenderer, VideoTextureHandle } from '../ty
 import { overlayOptionsFromDataset } from './datasetOverlayOptions'
 import { formatDate, isSubDailyPeriod, inferDisplayInterval } from '../utils/time'
 import { logger } from '../utils/logger'
+import { waitForDecodableFrame, playableStart } from '../utils/mediaReadiness'
 import { escapeHtml, escapeAttr } from '../ui/domUtils'
 import { closeChat } from '../ui/chatUI'
 import type { PlaybackState } from '../ui/playbackController'
@@ -76,7 +77,6 @@ async function localFileUrl(path: string): Promise<string> {
 // --- Dataset loader constants ---
 const DESCRIPTION_MAX_LENGTH = 600
 const DESCRIPTION_MIN_CUT = 200
-const VIDEO_LOAD_TIMEOUT_MS = 20000
 const FIRST_FRAME_FALLBACK_MS = 150
 const SCRUBBER_MAX = '1000'
 
@@ -234,7 +234,6 @@ function tryLoadImage(urls: string[]): Promise<HTMLImageElement> {
 
 // --- Video loading ---
 
-/** Load a video dataset via HLS streaming, set up the video texture, and configure playback controls. */
 /**
  * Choose a directly-playable file from a manifest's `files[]`.
  *
@@ -248,103 +247,6 @@ function tryLoadImage(urls: string[]): Promise<HTMLImageElement> {
  *
  * A `link` is the only field playing it actually requires.
  */
-/**
- * Wait until `video` holds a frame the texture path can upload.
- *
- * The obvious shape — listen for `canplay`, time out — **deadlocks on
- * WebKitGTK**, which is the whole reason this is a named function
- * rather than an inline promise. Chrome, Firefox and Safari preroll a
- * media pipeline as soon as data is appended, so `canplay` arrives
- * unprompted; WebKitGTK waits to be asked, so an element nobody has
- * played never leaves `HAVE_METADATA` and this wait waits for
- * something its own caller was going to trigger a few lines later.
- * Measured on Ubuntu under WSLg: `readyState` 1 with 88 s buffered, a
- * known duration, no media error and no fatal hls.js event — and
- * `readyState` 4 with frames decoding the moment `play()` was called
- * by hand. It presents as a connection failure and is an ordering
- * bug.
- *
- * So the pipeline is **nudged**: muted playback is started and the
- * element is left running, because the caller plays it immediately
- * afterwards to capture a first frame, then pauses and rewinds. A
- * rejected `play()` costs the nudge and nothing else — and an
- * autoplay policy strict enough to refuse a muted element belongs to
- * an engine that preroll s on its own, which is the case the nudge is
- * not needed for.
- *
- * `readyState >= 3` is checked first because an already-decodable
- * element must not be played at all: the fast path is a dataset
- * switching back to media still warm in the element.
- */
-export function waitForDecodableFrame(
-  video: HTMLVideoElement,
-  timeoutMs: number = VIDEO_LOAD_TIMEOUT_MS,
-): Promise<void> {
-  if (video.readyState >= 3) return Promise.resolve()
-
-  return new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      video.removeEventListener('canplay', onCanPlay)
-      reject(new Error('Video took too long to load — check your connection and try again'))
-    }, timeoutMs)
-
-    function onCanPlay(): void {
-      video.removeEventListener('canplay', onCanPlay)
-      // Cleared rather than left to fire into a settled promise: the
-      // reject is harmless by then, but a live 20 s timer per load is
-      // not nothing on a tour stepping through datasets.
-      clearTimeout(timer)
-      resolve()
-    }
-
-    video.addEventListener('canplay', onCanPlay)
-    void video.play().catch(() => {})
-  })
-}
-
-/**
- * The earliest instant this element can actually show.
- *
- * Normally `0`, and on every engine that buffers from the start of the
- * asset this is `0` by construction — which is what makes it safe to
- * rewind through rather than to a literal zero. WebKitGTK measured
- * `buffered [6.0, 94.1]` against a 94.1 s asset: the first six seconds
- * never appended, and `readyState` is defined at the *playback
- * position*, so parking the playhead at 0 leaves a decodable element
- * stalled on a hole with nothing to show and no error to report. That
- * is the same failure `waitForDecodableFrame` exists for, reached from
- * the other side — a load that now succeeds and then rewinds into the
- * gap it just played out of.
- *
- * Six seconds into a 24-hour animation is a visible offset and a far
- * better answer than a frozen first frame. The cause of the hole is
- * unestablished (`buffered` is the browser's intersection across
- * source buffers, so a misaligned audio track is the first suspect),
- * and this does not pretend to fix it — it declines to park where
- * nothing can be decoded, which is correct whatever the cause.
- *
- * Note this covers the *load* path only. A native `loop` restart
- * returns to 0 through the media element itself, where nothing here
- * can intercept it.
- */
-export function playableStart(buffered: TimeRanges): number {
-  let earliest = Number.POSITIVE_INFINITY
-  for (let i = 0; i < buffered.length; i++) {
-    const start = buffered.start(i)
-    const end = buffered.end(i)
-    // An empty range holds no frame, so it is not somewhere to park —
-    // and skipping it *before* the comparisons is the correctness: a
-    // zero-length range at the origin otherwise wins `earliest` and
-    // this returns the exact spot it exists to avoid.
-    if (end <= start) continue
-    // Zero is inside a real range: the ordinary case on every engine
-    // that buffers from the start, and the one not to perturb.
-    if (start <= 0) return 0
-    earliest = Math.min(earliest, start)
-  }
-  return Number.isFinite(earliest) ? earliest : 0
-}
-
 export function pickDirectFile(files: VideoProxyFile[]): VideoProxyFile | undefined {
   return files.find(f => f.quality === '1080p' && f.link)
     ?? files.find(f => f.quality === '720p' && f.link)
@@ -352,6 +254,7 @@ export function pickDirectFile(files: VideoProxyFile[]): VideoProxyFile | undefi
     ?? files.find(f => f.link)
 }
 
+/** Load a video dataset via HLS streaming, set up the video texture, and configure playback controls. */
 export async function loadVideoDataset(
   dataset: Dataset,
   renderer: GlobeRenderer,

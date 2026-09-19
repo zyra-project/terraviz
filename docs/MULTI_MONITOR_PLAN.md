@@ -5073,7 +5073,7 @@ codecs, the profile, the resolution or the position — the pipeline
 sat at `HAVE_METADATA` because **nothing had asked it to start**,
 and `loadVideoDataset`'s ordering makes that unrecoverable: the wait
 for `canplay` runs *before* the `video.play()` a few lines below it,
-so on an engine that preroll s only on demand each waits for the
+so on an engine that prerolls only on demand each waits for the
 other. Chrome, Firefox and Safari preroll as soon as data is
 appended, which is why one engine deadlocks and three do not, and
 why it presents as a connection failure.
@@ -5084,7 +5084,7 @@ the element immediately afterwards anyway to capture a first frame.
 `readyState >= 3` still short-circuits, so an element still warm
 from a previous dataset is not played. A rejected `play()` costs the
 nudge and nothing else — an autoplay policy strict enough to refuse
-a muted element belongs to an engine that preroll s on its own. The
+a muted element belongs to an engine that prerolls on its own. The
 regression test is the deadlock itself: a fake element that emits
 `canplay` only in response to being played, which hangs the old
 shape until the timeout.
