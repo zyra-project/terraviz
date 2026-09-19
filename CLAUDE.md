@@ -1117,7 +1117,11 @@ The desktop app shares 100% of the TypeScript source. Desktop-only behaviour is 
 > term, which is why RGB and data-encoded read the same 22 every time
 > they were compared and why fill rate, the rendition ladder and the
 > texture upload were each proposed and each wrong. Fixed by making
-> `shouldRenderFrame` a nearest-deadline test. **`raf` 30.0 is a
+> `shouldRenderFrame` a nearest-deadline test — and then again in
+> review, when a sweep found that test correct only at exact multiples
+> of 30 and wrong at 48, 50, 75, 144 and 165, because it measured from
+> the last *draw* and so discarded the phase. The deadline is now
+> carried; see the `outputScene` row. **`raf` 30.0 is a
 > second, separate finding and not ours**: rAF rides the compositor's
 > frame clock, so a flat 30 independent of load is the *display*
 > saying 30 — usually 4K over HDMI 1.4 — which caps that output at

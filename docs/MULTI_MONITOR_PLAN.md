@@ -4713,8 +4713,19 @@ the runbook.**
 
 - **`fps` was not reported**, and it is the number that confirms the
   gate fix rather than merely being consistent with it. At `raf` 60
-  the nearest-deadline gate should hold `fps` at **30** — the cap
-  working, drawing on every other callback. Outstanding.
+  the gate should hold `fps` at **30** — the cap working, drawing on
+  every other callback. Outstanding.
+
+  A later review pass found this reading would have confirmed less
+  than it looked: 60 Hz is an exact multiple of the cap, and so were
+  the only other rates the gate was measured or tested at. A sweep in
+  simulation put the nearest-deadline version at 25 fps on a 75 Hz
+  display, 24 and 25 on 48 and 50, and *over* the cap on 33/35/40/100
+  — because it measured from the last draw rather than from a carried
+  deadline, which throws the phase away every frame. Fixed properly
+  there; the consequence for hardware is that **a frame-rate reading
+  taken at 30, 60 or 120 Hz does not generalise**, and a box running
+  48, 50 or 75 is worth a reading of its own.
 - **Two changes were made at once**: the display went to 60 Hz *and*
   the output moved onto it while the control window moved off. So
   this cannot separate "a window is paced by its own monitor" from

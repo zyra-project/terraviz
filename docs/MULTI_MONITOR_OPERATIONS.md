@@ -45,7 +45,15 @@ to look.
 | Platform | How to check |
 |---|---|
 | Windows, macOS | Turn on the debug overlay (Outputs panel → Debug overlay) and read the **gpu** field on the output itself |
-| **Linux** | `glxinfo -B \| grep -iE "renderer\|device"` — **the in-app field does not work here** |
+| **Linux** | `glxinfo` (below) — **the in-app field does not work here** |
+
+On Linux, from a terminal with the same environment the app will
+launch in:
+
+```bash
+sudo apt install mesa-utils          # provides glxinfo
+glxinfo -B | grep -iE "renderer|device"
+```
 
 That Linux exception is not a nicety. WebKitGTK sanitises the
 WebGL renderer string, so the **gpu** field reads `Apple GPU` on
@@ -108,7 +116,8 @@ frequently separate from the power settings.
 
 Two package sets. Neither is installed by default on Ubuntu, and
 **both fail silently in ways that do not look like missing
-packages.**
+packages.** Add `mesa-utils` while you are here — §1.1's GPU check
+needs `glxinfo`, and on Linux that check is the only one there is.
 
 ### 2.1 Media codecs — without these, no video plays at all
 
@@ -286,7 +295,10 @@ gpu    ANGLE (NVIDIA, NVIDIA GeForce RTX 4090 …)
   output is floored at 1 Hz deliberately, so that an output which
   never redraws can still be told apart from a correct frame.
 - `29.0 (raf 60.0)` with video is correct — the loop caps at 30.
-- `22 (raf 30.0)` is a display running at 30 Hz. See §1.2.
+- `30.0 (raf 30.0)` is a display running at 30 Hz. The output is
+  drawing on every callback it is offered and has **no headroom
+  left** — anything that slows a frame now costs you frames. See
+  §1.2.
 - `19 (raf 60.0)` is the loop declining callbacks it is being
   offered — that is a fault in the app, not your installation.
 
