@@ -46,6 +46,7 @@ import {
   contentKindFor,
   createOutputScene,
   shouldRenderFrame,
+  advanceFrameDeadline,
   type OutputLayerInput,
 } from './outputScene'
 import type { LinkHealth } from './linkWatchdog'
@@ -75,7 +76,11 @@ async function boot(): Promise<void> {
    *  fixture page, where the loop is just the idle Earth. */
   const steerers: (() => void)[] = []
 
-  let lastFrame = 0
+  /** When the next frame is due, carried across callbacks rather than
+   *  re-derived from the last draw. That is what keeps the rate right
+   *  on a display whose refresh is not a multiple of the cap — see
+   *  `shouldRenderFrame`. Zero until the first draw sets it. */
+  let dueMs = 0
   // First tick always draws: nothing has been shown yet, and a black
   // canvas is indistinguishable from a failed boot on a projector.
   let dirty = true
@@ -421,16 +426,16 @@ async function boot(): Promise<void> {
     // A lost context draws nothing — Three's renderer returns from
     // `render()` immediately once it has seen `webglcontextlost`. The
     // call is therefore harmless and the *bookkeeping after it* is not:
-    // ticking the fps meter, clearing `dirty` and advancing `lastFrame`
-    // for a frame that reached no pixels makes the HUD report a healthy
-    // 30 fps over a black projector, which is the precise shape of
-    // invisible failure this whole rung exists to remove. So the frame
-    // is skipped rather than drawn-and-counted: fps falls to 0 on the
-    // next sample, `dirty` survives the outage, and the restore above
-    // paints immediately.
+    // ticking the fps meter, clearing `dirty` and advancing the frame
+    // deadline for a frame that reached no pixels makes the HUD report
+    // a healthy 30 fps over a black projector, which is the precise
+    // shape of invisible failure this whole rung exists to remove. So
+    // the frame is skipped rather than drawn-and-counted: fps falls to
+    // 0 on the next sample, `dirty` survives the outage, and the
+    // restore above paints immediately.
     if (
       scene.gpuState() !== 'lost' &&
-      shouldRenderFrame({ kind, sinceLastFrameMs: now - lastFrame, sinceLastCallbackMs, dirty })
+      shouldRenderFrame({ kind, nowMs: now, dueMs, sinceLastCallbackMs, dirty })
     ) {
       // Timed here rather than inside the scene: the scene has no HUD
       // and no reason to learn about one, and this is the only place
@@ -445,7 +450,7 @@ async function boot(): Promise<void> {
       // content the honest answer is the 1 Hz floor rather than the
       // display's refresh rate.
       fpsMeter.tick(now)
-      lastFrame = now
+      dueMs = advanceFrameDeadline(dueMs, now, kind)
       dirty = false
     }
     // Sampled from the rAF loop rather than from the HUD's reader, so

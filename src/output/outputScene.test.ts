@@ -21,6 +21,7 @@ import {
   resolveFramebufferSize,
   frameIntervalMs,
   shouldRenderFrame,
+  advanceFrameDeadline,
   VIDEO_FRAME_MS,
   STATIC_FRAME_MS,
   contentKindFor,
@@ -34,9 +35,10 @@ import { until } from '../test-utils'
 import { DECORATION_UNIFORMS } from './layerStack'
 import { NADIR_LUT_SIZE } from './atmosphereNadir'
 
+import { DEFAULT_FRAMEBUFFER_WIDTH } from '../services/multiOutput/protocol'
+
 /** A 60 Hz display's callback interval, the ordinary case. */
 const AT_60_HZ = 1000 / 60
-import { DEFAULT_FRAMEBUFFER_WIDTH } from '../services/multiOutput/protocol'
 
 describe('resolveFramebufferSize', () => {
   it('keeps every rung 2:1', () => {
@@ -108,7 +110,8 @@ describe('frame pacing', () => {
     expect(
       shouldRenderFrame({
         kind: 'image',
-        sinceLastFrameMs: 0,
+        nowMs: 0,
+        dueMs: 1000,
         sinceLastCallbackMs: AT_60_HZ,
         dirty: true,
       }),
@@ -119,7 +122,8 @@ describe('frame pacing', () => {
     expect(
       shouldRenderFrame({
         kind: 'image',
-        sinceLastFrameMs: 500,
+        nowMs: 500,
+        dueMs: 1000,
         sinceLastCallbackMs: AT_60_HZ,
         dirty: false,
       }),
@@ -134,54 +138,90 @@ describe('frame pacing', () => {
     expect(
       shouldRenderFrame({
         kind: 'image',
-        sinceLastFrameMs: 1000,
+        nowMs: 1000,
+        dueMs: 1000,
         sinceLastCallbackMs: AT_60_HZ,
         dirty: false,
       }),
     ).toBe(true)
   })
 
-  it('draws video roughly every 33 ms', () => {
+  it('draws a frame that is nearly due rather than waiting a whole callback', () => {
+    // Nearest deadline: 4 ms short of due with a 16.7 ms callback
+    // interval, so waiting overshoots by 12.7 and drawing undershoots
+    // by 4.
     expect(
       shouldRenderFrame({
         kind: 'video',
-        sinceLastFrameMs: 20,
+        nowMs: 29,
+        dueMs: 33,
+        sinceLastCallbackMs: AT_60_HZ,
+        dirty: false,
+      }),
+    ).toBe(true)
+    expect(
+      shouldRenderFrame({
+        kind: 'video',
+        nowMs: 20,
+        dueMs: 33,
         sinceLastCallbackMs: AT_60_HZ,
         dirty: false,
       }),
     ).toBe(false)
+  })
+
+  // Static → video: the deadline standing was set a whole second out
+  // and the content has started moving. Without this the first video
+  // frame waits out the static floor.
+  it('does not hold a video frame behind a deadline set for static content', () => {
     expect(
       shouldRenderFrame({
         kind: 'video',
-        sinceLastFrameMs: 34,
+        nowMs: 10,
+        dueMs: 1000,
         sinceLastCallbackMs: AT_60_HZ,
         dirty: false,
       }),
     ).toBe(true)
   })
 
+  describe('advanceFrameDeadline', () => {
+    it('moves on from the deadline met, not from when it was met', () => {
+      // The whole mechanism. Drawing 4 ms early must not push the next
+      // frame 4 ms late as well, or the error compounds every frame and
+      // the rate drifts off the cap.
+      expect(advanceFrameDeadline(33, 29, 'video')).toBeCloseTo(33 + VIDEO_FRAME_MS)
+    })
+
+    it('does not let a display slower than the cap accumulate debt', () => {
+      // 20 Hz offers a callback every 50 ms against a 33.33 ms
+      // interval, so the deadline can never be met. Unclamped it would
+      // fall further behind for as long as the installation runs. It
+      // changes no decision — every callback draws either way.
+      expect(advanceFrameDeadline(33, 200, 'video')).toBe(200)
+    })
+  })
+
   // Simulate a loop being offered callbacks at a fixed rate and count
-  // how many it draws on, which is the only way to see the aliasing:
-  // every individual decision below looks defensible in isolation.
-  function drawnPerSecond(offeredHz: number, kind: 'video' | 'image'): number {
+  // how many it draws on. This is the only way to see the aliasing:
+  // every individual decision looks defensible in isolation, and the
+  // shipped behaviour was wrong at most refresh rates while passing a
+  // test that sampled 30, 60 and 120.
+  function drawnPerSecond(offeredHz: number, kind: 'video' | 'image', seconds = 4): number {
     const offered = 1000 / offeredHz
-    let lastFrame = 0
+    // The real loop's very first tick always draws, on `dirty`, and
+    // that is what sets the first deadline. Priming it here keeps the
+    // count measuring the steady state rather than that one frame.
+    let dueMs = advanceFrameDeadline(0, 0, kind)
     let drawn = 0
-    for (let i = 1; i <= offeredHz; i++) {
+    for (let i = 1; i <= Math.round(offeredHz * seconds); i++) {
       const now = i * offered
-      if (
-        shouldRenderFrame({
-          kind,
-          sinceLastFrameMs: now - lastFrame,
-          sinceLastCallbackMs: offered,
-          dirty: false,
-        })
-      ) {
+      if (shouldRenderFrame({ kind, nowMs: now, dueMs, sinceLastCallbackMs: offered, dirty: false })) {
         drawn++
-        lastFrame = now
+        dueMs = advanceFrameDeadline(dueMs, now, kind)
       }
     }
-    return drawn
+    return drawn / seconds
   }
 
   it('draws on every callback when the display refreshes at the cap', () => {
@@ -194,11 +234,25 @@ describe('frame pacing', () => {
     expect(drawnPerSecond(30, 'video')).toBe(30)
   })
 
-  it('still caps a faster display at the video rate', () => {
-    // The other half: the gate must not simply pass everything. 60 Hz
-    // draws every other callback, 120 Hz every fourth.
-    expect(drawnPerSecond(60, 'video')).toBe(30)
-    expect(drawnPerSecond(120, 'video')).toBe(30)
+  // The sweep, rather than three samples. The first fix passed at 30,
+  // 60 and 120 — every exact multiple of the cap — and was wrong almost
+  // everywhere else, because measuring from the last *draw* throws the
+  // phase away and leaves the rate decided by where `interval / offered`
+  // falls against a half-integer. Measured on the shipped version: 75 Hz
+  // gave 25 fps, 48 and 50 gave 24 and 25, 144 and 165 gave 28.8 and
+  // 28.7, and 33 / 35 / 40 / 100 drew on every callback, running over
+  // the cap they exist to respect.
+  it.each([30, 33, 35, 40, 45, 48, 50, 55, 60, 75, 90, 100, 120, 144, 165, 240])(
+    'holds ~30 fps on a %i Hz display',
+    hz => {
+      expect(drawnPerSecond(hz, 'video')).toBeCloseTo(30, 0)
+    },
+  )
+
+  it('falls back to the display rate below the cap rather than stalling', () => {
+    // 24 Hz cannot produce 30 frames. Every callback should draw.
+    expect(drawnPerSecond(24, 'video')).toBe(24)
+    expect(drawnPerSecond(20, 'video')).toBe(20)
   })
 
   it('holds the static floor at 1 Hz whatever the display does', () => {
