@@ -12,6 +12,7 @@ import type { AppState, Dataset } from '../types'
 import { logger } from '../utils/logger'
 import { proxyCaptionUrl } from '../utils/captionProxy'
 import { t } from '../i18n'
+import { playableStart } from '../utils/mediaReadiness'
 import { reportError } from '../analytics'
 
 // --- Playback constants ---
@@ -82,7 +83,12 @@ export function startPlaybackLoop(
           state.loopPauseTimer = setTimeout(() => {
             state.loopPauseTimer = null
             if (hlsService && appState.isPlaying) {
-              video.currentTime = 0
+              // Not a literal 0: on an engine that left a hole at the
+              // head of `buffered`, restarting there parks the playhead
+              // where nothing can be decoded, so the loop that had been
+              // playing correctly freezes on its second pass with no
+              // error. See `playableStart`.
+              video.currentTime = playableStart(video.buffered)
               video.play().catch(() => {})
             }
           }, LOOP_RESTART_DELAY_MS)
@@ -149,7 +155,10 @@ export function rewind(
   announce: (msg: string) => void,
 ): void {
   if (!hlsService) return
-  hlsService.currentTime = 0
+  // The earliest instant that actually holds a frame, which is 0 on
+  // every engine that buffers from the start — see `playableStart`.
+  const video = hlsService.getVideo()
+  hlsService.currentTime = video ? playableStart(video.buffered) : 0
   hlsService.pause()
   appState.isPlaying = false
   updatePlayButton(true)

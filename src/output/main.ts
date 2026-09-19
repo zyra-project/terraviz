@@ -29,7 +29,12 @@
 import './output.css'
 import { CALIBRATION_OVERLAY, createCalibrationCache } from './calibrationPattern'
 import { createDatasetMirror } from './datasetMirror'
-import { OVERLAY_REFRESH_MS, createDebugOverlay, createFpsMeter } from './debugOverlay'
+import {
+  OVERLAY_REFRESH_MS,
+  createDebugOverlay,
+  createDrawTimer,
+  createFpsMeter,
+} from './debugOverlay'
 import {
   STATE_KEYS,
   changesPicture,
@@ -41,6 +46,7 @@ import {
   contentKindFor,
   createOutputScene,
   shouldRenderFrame,
+  advanceFrameDeadline,
   type OutputLayerInput,
 } from './outputScene'
 import type { LinkHealth } from './linkWatchdog'
@@ -70,7 +76,11 @@ async function boot(): Promise<void> {
    *  fixture page, where the loop is just the idle Earth. */
   const steerers: (() => void)[] = []
 
-  let lastFrame = 0
+  /** When the next frame is due, carried across callbacks rather than
+   *  re-derived from the last draw. That is what keeps the rate right
+   *  on a display whose refresh is not a multiple of the cap — see
+   *  `shouldRenderFrame`. Zero until the first draw sets it. */
+  let dueMs = 0
   // First tick always draws: nothing has been shown yet, and a black
   // canvas is indistinguishable from a failed boot on a projector.
   let dirty = true
@@ -78,6 +88,27 @@ async function boot(): Promise<void> {
   const fpsMeter = createFpsMeter()
   let fps = 0
   let lastFpsSample = 0
+  /** How long a draw actually costs, which fps cannot say: it is capped
+   *  at 30 by the frame gate, floored at 1 Hz by the static rung, and
+   *  while the camera moves it is ceilinged by the *control* window's
+   *  render rate, because that is what sets `dirty`. Sampled on the same
+   *  timer as fps so the two are read as one pair. */
+  const drawTimer = createDrawTimer()
+  let drawMs: number | null = null
+  /** How often the browser calls this loop, against how often the loop
+   *  draws. Ticked on every callback rather than on drawn frames, which
+   *  is the whole point: `fps` is the rate this app *took* and this is
+   *  the rate it was *offered*, and the first reading is unreadable
+   *  without the second. A sub-millisecond `draw` rules out CPU cost in
+   *  the render; it says nothing about the GPU, because an overrunning
+   *  GPU blocks at present — between callbacks, where it shows up here
+   *  and nowhere else. */
+  const rafMeter = createFpsMeter()
+  let rafHz = 0
+  /** When the previous callback ran, so the frame gate knows how often
+   *  it is being *offered* one. Without it the gate aliases against a
+   *  display whose refresh equals the cap — see `shouldRenderFrame`. */
+  let lastCallback: number | null = null
   /** The last correction `outputSync` computed, reported by the HUD
    *  rather than recomputed there — see `SyncOutcome.driftS`. */
   let lastSync: SyncOutcome | null = null
@@ -125,6 +156,25 @@ async function boot(): Promise<void> {
   // callback twice a second — `refresh` returns before reading anything
   // while hidden — and in exchange the toggle is instant, which is what
   // an operator standing at the sphere is actually doing with it.
+  /**
+   * Has the render loop reported in recently enough to be believed?
+   *
+   * Every frame number below is written *by* the loop and read by the
+   * HUD's own ~2 Hz timer, which keeps running when the loop does not.
+   * So a window the browser has stopped offering callbacks to — an
+   * occluded output, a stalled compositor, a display gone to sleep —
+   * repaints the last healthy reading forever over a frozen sphere,
+   * which is the invisible failure this HUD exists to remove, arriving
+   * from the one direction neither the gpu field nor the link field
+   * covers.
+   *
+   * Three sample windows rather than one, so an ordinary late callback
+   * cannot blank the fields; nothing recovers a loop that has genuinely
+   * stopped, so there is no hurry to declare it.
+   */
+  const loopReportedRecently = (): boolean =>
+    performance.now() - lastFpsSample < OVERLAY_REFRESH_MS * 3
+
   const overlay = createDebugOverlay(() => ({
     // The mirror, not the link: what this window decoded, not what the
     // control window last said. During a load those differ, and the
@@ -135,7 +185,14 @@ async function boot(): Promise<void> {
       : (mirror.currentDataset()?.id ?? null),
     driftS: lastSync?.driftS ?? null,
     syncKind: lastSync?.kind ?? null,
-    fps,
+    // Zeroed rather than held when the loop has gone quiet: these two
+    // are the liveness pair, and a stale 30 is the one answer they must
+    // never give. `drawMs` is not zeroed — it answers *capacity*, and
+    // "the last frame we drew cost 4 ms" stays true after the frames
+    // stop.
+    fps: loopReportedRecently() ? fps : 0,
+    drawMs,
+    rafHz: loopReportedRecently() ? rafHz : 0,
     // Read, never evaluated: `linkHealth()` is the pure getter, so
     // painting the HUD cannot itself send a health-check ping. The
     // evaluation happens once per frame in the loop below.
@@ -372,6 +429,14 @@ async function boot(): Promise<void> {
   }
 
   const tick = (now: number): void => {
+    // First thing in the callback, and before any early return could be
+    // added below it: this counts callbacks, not work done in them.
+    rafMeter.tick(now)
+    // Zero on the very first callback, which reduces the gate to the
+    // plain `>=` it used to be for exactly one tick — harmless, since
+    // that tick draws on `dirty` anyway.
+    const sinceLastCallbackMs = lastCallback === null ? 0 : now - lastCallback
+    lastCallback = now
     for (const steer of steerers) steer()
     // The scene reports its own changes — today, the CDN texture
     // upgrading 2K → 4K → 8K after first paint. Without this the
@@ -385,24 +450,31 @@ async function boot(): Promise<void> {
     // A lost context draws nothing — Three's renderer returns from
     // `render()` immediately once it has seen `webglcontextlost`. The
     // call is therefore harmless and the *bookkeeping after it* is not:
-    // ticking the fps meter, clearing `dirty` and advancing `lastFrame`
-    // for a frame that reached no pixels makes the HUD report a healthy
-    // 30 fps over a black projector, which is the precise shape of
-    // invisible failure this whole rung exists to remove. So the frame
-    // is skipped rather than drawn-and-counted: fps falls to 0 on the
-    // next sample, `dirty` survives the outage, and the restore above
-    // paints immediately.
+    // ticking the fps meter, clearing `dirty` and advancing the frame
+    // deadline for a frame that reached no pixels makes the HUD report
+    // a healthy 30 fps over a black projector, which is the precise
+    // shape of invisible failure this whole rung exists to remove. So
+    // the frame is skipped rather than drawn-and-counted: fps falls to
+    // 0 on the next sample, `dirty` survives the outage, and the
+    // restore above paints immediately.
     if (
       scene.gpuState() !== 'lost' &&
-      shouldRenderFrame({ kind, sinceLastFrameMs: now - lastFrame, dirty })
+      shouldRenderFrame({ kind, nowMs: now, dueMs, sinceLastCallbackMs, dirty })
     ) {
+      // Timed here rather than inside the scene: the scene has no HUD
+      // and no reason to learn about one, and this is the only place
+      // that knows a frame was actually drawn. `performance.now()`
+      // rather than the rAF timestamp, which is the frame's *start* and
+      // would measure the whole callback.
+      const drawStart = performance.now()
       scene.render()
+      drawTimer.record(performance.now() - drawStart)
       // Counted on drawn frames, not on rAF callbacks: the question the
       // HUD answers is whether this output is painting, and for static
       // content the honest answer is the 1 Hz floor rather than the
       // display's refresh rate.
       fpsMeter.tick(now)
-      lastFrame = now
+      dueMs = advanceFrameDeadline(dueMs, now, kind)
       dirty = false
     }
     // Sampled from the rAF loop rather than from the HUD's reader, so
@@ -412,6 +484,8 @@ async function boot(): Promise<void> {
     // average over however long it was hidden.
     if (now - lastFpsSample >= OVERLAY_REFRESH_MS) {
       fps = fpsMeter.sample(now)
+      rafHz = rafMeter.sample(now)
+      drawMs = drawTimer.sample()
       lastFpsSample = now
     }
     requestAnimationFrame(tick)

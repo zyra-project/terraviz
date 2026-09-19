@@ -162,8 +162,18 @@ export function frameIntervalMs(kind: OutputContentKind): number {
 
 export interface FrameDecisionState {
   kind: OutputContentKind
-  /** ms since the last frame was drawn. */
-  sinceLastFrameMs: number
+  /** The rAF timestamp for this callback. */
+  nowMs: number
+  /** When the next frame is due — the last answer `advanceFrameDeadline`
+   *  gave, carried across callbacks by the loop. */
+  dueMs: number
+  /**
+   * ms since the previous render-loop callback — how often the browser
+   * is *offering* a frame. Required rather than optional, because a
+   * default of zero is exactly the bug this field was added to fix and
+   * a silent default is how a call site inherits it.
+   */
+  sinceLastCallbackMs: number
   /** Set by a state diff, a texture upload, or a resize. */
   dirty: boolean
 }
@@ -172,15 +182,78 @@ export interface FrameDecisionState {
  * Should the loop draw this tick?
  *
  * Two independent reasons to draw, and both matter: something changed
- * (`dirty`), or enough time has passed that a *playing* video has a
- * new frame to show. A static output that nothing has touched draws at
- * 1 Hz rather than never, so a dropped texture upload or a lost
- * context surfaces as a stale frame the read-back layer can catch
- * rather than as a loop that has quietly stopped.
+ * (`dirty`), or a *playing* video's next frame is due. A static output
+ * that nothing has touched draws at 1 Hz rather than never, so a
+ * dropped texture upload or a lost context surfaces as a stale frame
+ * the read-back layer can catch rather than as a loop that has quietly
+ * stopped.
+ *
+ * ## Why this is a deadline, and why the deadline is carried
+ *
+ * A plain `sinceLastFrame >= interval` **aliases** against a display
+ * whose refresh equals the cap, and hardware found it: an output on a
+ * 30 Hz monitor was offered 30 callbacks a second — 33.33 ms apart —
+ * against a video interval of 33.33 ms, so whether a callback cleared
+ * the gate came down to jitter in the last decimal. The ones that
+ * missed waited a whole further callback, turning a 33 ms frame into a
+ * 67 ms one, and the loop settled at ~22 fps while being offered
+ * exactly 30.
+ *
+ * The first fix asked the better question — *is this callback closer to
+ * the target than the next one will be* — but asked it of
+ * `sinceLastFrame`, which is measured from the **previous draw**. That
+ * throws the phase away every frame, so the answer is still a knife
+ * edge wherever `interval / offered` lands near a half-integer, and
+ * simulation over a sweep of refresh rates says the edge is where most
+ * real displays are: 75 Hz gave 25 fps, 48 and 50 gave 24 and 25, 144
+ * and 165 gave 28.8 and 28.7, and 33 / 35 / 40 / 100 drew on *every*
+ * callback and so ran over the cap they exist to respect. Only exact
+ * multiples of 30 — 30, 60, 90, 120, 240 — came out right, which is
+ * exactly the set the original tests sampled.
+ *
+ * So the deadline is carried instead of re-derived. `advanceFrameDeadline`
+ * moves it on by one whole interval from **where it was due**, not from
+ * when the frame happened to be drawn, so an early or late draw costs
+ * that frame's phase rather than the rate: at 45 Hz the loop alternates
+ * one and two callbacks per draw and averages 30. A tie in the last
+ * decimal now changes which side of a boundary one frame lands on, and
+ * nothing else — which is what removes the whole class of bug rather
+ * than moving it to a different refresh rate.
  */
 export function shouldRenderFrame(state: FrameDecisionState): boolean {
   if (state.dirty) return true
-  return state.sinceLastFrameMs >= frameIntervalMs(state.kind)
+  const interval = frameIntervalMs(state.kind)
+  // The deadline was set for a slower kind and the content has since
+  // started moving (static → video). It cannot legitimately sit more
+  // than one interval out — a draw is at most half an *offered*
+  // interval early, and the offered interval is itself at most one
+  // whole interval when the display is slower than the cap — so this
+  // can only mean the interval just shrank, where holding the old
+  // deadline would stall the first video frame by up to a second.
+  if (state.dueMs - state.nowMs > interval) return true
+  // Nearest deadline: draw when waiting for the next callback would
+  // overshoot by more than drawing now undershoots. No tolerance
+  // constant, because the offered interval is the scale the comparison
+  // belongs at.
+  return state.dueMs - state.nowMs <= state.sinceLastCallbackMs / 2
+}
+
+/**
+ * When the frame after this one is due.
+ *
+ * One whole interval on from the deadline just met, **not** from the
+ * moment it was met — that is the entire mechanism above, and the
+ * reason the rate survives a display whose refresh is not a multiple
+ * of the cap.
+ *
+ * The clamp to `nowMs` is for the other direction: a display slower
+ * than the cap can never meet the deadline, and an unclamped one would
+ * accumulate debt for as long as the installation runs. It changes no
+ * decision — every callback draws either way — only the size of the
+ * number.
+ */
+export function advanceFrameDeadline(dueMs: number, nowMs: number, kind: OutputContentKind): number {
+  return Math.max(dueMs + frameIntervalMs(kind), nowMs)
 }
 
 // --- Scene construction ---

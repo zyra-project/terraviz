@@ -15,6 +15,7 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   OVERLAY_REFRESH_MS,
   createDebugOverlay,
+  createDrawTimer,
   createFpsMeter,
   formatOverlay,
   type DebugOverlayReading,
@@ -26,6 +27,8 @@ function reading(over: Partial<DebugOverlayReading> = {}): DebugOverlayReading {
     driftS: 0,
     syncKind: 'playing',
     fps: 30,
+    drawMs: 4.2,
+    rafHz: 60,
     link: 'live',
     gpu: 'NVIDIA GeForce RTX 4090 Laptop GPU',
     gpuState: 'live',
@@ -145,6 +148,36 @@ describe('formatOverlay', () => {
       ),
     ).toContain('8192×4096')
   })
+
+  it('shows the offered callback rate beside the taken frame rate', () => {
+    // 19 of 60 and 19 of 19 are different faults with different owners:
+    // the first is this loop declining to draw on callbacks it is
+    // getting, the second is a browser that is not offering them. Two
+    // hardware passes could not tell those apart, and `draw` alone
+    // cannot either — an overrunning GPU blocks at present, between
+    // callbacks, where only this number moves.
+    const starved = formatOverlay(reading({ fps: 18.8, rafHz: 19.1 })).find(l => l.startsWith('fps'))
+    expect(starved).toContain('18.8')
+    expect(starved).toContain('19.1')
+    const declining = formatOverlay(reading({ fps: 18.8, rafHz: 59.7 })).find(l =>
+      l.startsWith('fps'),
+    )
+    expect(declining).toContain('59.7')
+  })
+
+  it('shows the draw cost beside the frame rate, and a dash before the first frame', () => {
+    // The pair is the point: 30 fps next to 4 ms is a window with
+    // headroom, 19 next to 53 ms is one that cannot keep up, and fps
+    // alone cannot tell those apart because it is capped, floored and —
+    // while the camera moves — ceilinged by the control window.
+    expect(formatOverlay(reading({ drawMs: 52.7 })).find(l => l.startsWith('draw'))).toContain(
+      '52.7 ms',
+    )
+    const unmeasured = formatOverlay(reading({ drawMs: null })).find(l => l.startsWith('draw'))
+    expect(unmeasured).toContain('—')
+    // Never a zero: that would be a claim about a draw nobody timed.
+    expect(unmeasured).not.toContain('0.0')
+  })
 })
 
 describe('createFpsMeter', () => {
@@ -175,6 +208,115 @@ describe('createFpsMeter', () => {
 
   it('reads zero before any frame has been drawn', () => {
     expect(createFpsMeter().sample(1000)).toBe(0)
+  })
+
+  it('does not report zero for an output drawing at the 1 Hz floor', () => {
+    // The defect this exists for, found on hardware: a static output
+    // draws once a second and the HUD samples about twice a second, so
+    // roughly every other window holds no frame. Closing those reported
+    // `0.0` — the same reading a black projector gives, which is the one
+    // state the 1 Hz floor and the skip-while-lost rule exist to make
+    // visible.
+    const meter = createFpsMeter()
+    let nextDraw = 0
+    const readings: number[] = []
+    for (let now = 0; now <= 6000; now += 500) {
+      if (now >= nextDraw) {
+        meter.tick(now)
+        nextDraw = now + 1000
+      }
+      readings.push(meter.sample(now))
+    }
+    // The first sample lands at the same instant as the first frame and
+    // has no window yet; everything after it must be a live reading.
+    const settled = readings.slice(1)
+    expect(settled.every(r => r > 0)).toBe(true)
+    // And in the right neighbourhood of the truth — one frame a second.
+    // Not exactly 1: a window shorter than the frame period reports the
+    // frame it happens to contain over its own length, so the value
+    // rides between the true rate and twice it.
+    expect(Math.min(...settled)).toBeGreaterThanOrEqual(0.9)
+    expect(Math.max(...settled)).toBeLessThanOrEqual(2.1)
+  })
+
+  it('decays toward zero while nothing is drawn', () => {
+    // The other half of the same rule: holding the window open must not
+    // hold the *value* open, or a stalled output would report its last
+    // healthy rate forever — the invisible failure the HUD is for.
+    const meter = createFpsMeter()
+    meter.tick(0)
+    meter.tick(33)
+    const first = meter.sample(66)
+    expect(first).toBeGreaterThan(10)
+    const later = [1000, 5000, 20000].map(now => meter.sample(now))
+    expect(later[0]).toBeLessThan(first)
+    expect(later[1]).toBeLessThan(later[0])
+    expect(later[2]).toBeLessThan(0.1)
+  })
+
+  it('reports the real rate again once an output recovers', () => {
+    // The other side of holding the window open, and the reason the
+    // hold needs a matching release. `sample()` leaves `since` alone
+    // while no frame arrives, so without a restart the first window
+    // after an outage spans the outage as well: ten seconds of a lost
+    // context followed by a healthy 30 fps read as 1.4, and an operator
+    // reading that concludes the output is still dark.
+    const meter = createFpsMeter()
+    meter.tick(0)
+    meter.tick(33)
+    expect(meter.sample(66)).toBeGreaterThan(10)
+
+    // Ten seconds with nothing drawn, sampled throughout as the HUD
+    // does.
+    for (let now = 500; now <= 10000; now += 500) meter.sample(now)
+    expect(meter.sample(10000)).toBeLessThan(1)
+
+    // Recovery: a full 30 fps second.
+    for (let i = 0; i < 30; i++) meter.tick(10000 + i * (1000 / 30))
+    expect(meter.sample(11000)).toBeCloseTo(30, 0)
+  })
+})
+
+describe('createDrawTimer', () => {
+  it('means the frames in the window, and starts over on each reading', () => {
+    const timer = createDrawTimer()
+    timer.record(10)
+    timer.record(20)
+    expect(timer.sample()).toBeCloseTo(15, 5)
+    // A fast window after a slow one must read fast — the whole point of
+    // the field is to catch a draw cost changing when a dataset loads.
+    timer.record(2)
+    timer.record(4)
+    expect(timer.sample()).toBeCloseTo(3, 5)
+  })
+
+  it('reads nothing at all before the first frame', () => {
+    // A dash, never a zero: a zero-millisecond draw is a claim, and
+    // "not measured yet" is the truth.
+    expect(createDrawTimer().sample()).toBeNull()
+  })
+
+  it('holds its last value across a window with no frames', () => {
+    // Unlike fps, a mean over nothing is not a small number — it is
+    // unknown. And a static output draws once a second, so the next
+    // window will have one.
+    const timer = createDrawTimer()
+    timer.record(8)
+    expect(timer.sample()).toBeCloseTo(8, 5)
+    expect(timer.sample()).toBeCloseTo(8, 5)
+  })
+
+  it('ignores a negative or non-finite duration', () => {
+    // A clock that went backwards would otherwise drag the mean under
+    // zero and report a free draw, which is the one answer this field
+    // must never give.
+    const timer = createDrawTimer()
+    timer.record(-5)
+    timer.record(Number.NaN)
+    expect(timer.sample()).toBeNull()
+    timer.record(6)
+    timer.record(-100)
+    expect(timer.sample()).toBeCloseTo(6, 5)
   })
 })
 

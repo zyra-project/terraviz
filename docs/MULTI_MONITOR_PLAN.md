@@ -3083,7 +3083,7 @@ without rolling the whole feature back.
 | 12c | `multi-output: the Earth decoration the equirect path can carry` | The three effects §"What the equirect path does to the Earth decoration" says **cross** — day/night terminator, night lights, clouds — wired into `layerStack`'s fragment shader. **Landed.** Specified here first, then built exactly as specified, which is why the first hardware session's flat diffuse Earth is now day/night-shaded with city lights and cloud cover. Not a research question: the terminator is `dot(hit, uSunDir)` (the ray-march's hit point on the unit sphere *is* the normal), night lights are a second sampler gated by it, clouds are one more layer in a composite that already unrolls slots. The sun direction comes from `getSunPosition` in `src/utils/time.ts`, which the control globe already uses, so the two cannot disagree about where the sun is. **The four that do not cross stay out** — specular, atmosphere *shells*, ground shadow, sun sprite are not deferred, they are incoherent on this surface, and baking one in paints a fixed glare spot or limb ring onto a physical sphere in a place correct from exactly one vantage point. That is a rendering artifact that reads as a data feature, which is worse than its absence. So "as realistic as possible" on a sphere **is** diffuse + night lights + clouds + terminator; this rung is the whole of it. **Amended after this rung shipped:** the atmosphere's *shell* stays out for the reason above, but its **disc tint** was later found to cross — pinned to nadir the scattering integral is a function of sun angle alone, with no silhouette to be wrong about. That is what made the output's ocean black beside a blue one. It is not a fifth effect sneaking back in; it is the sharper test (what does this become at nadir?) applied to a row this table got half right. | Yes (additive) |
 | 13 | `multi-output: failure recovery — crashes, stalls, GPU loss, monitor unplug` | Manager gains crash detection (no-graceful-close window destroy → toast + record removal), 3-strikes-per-monitor crash storm guard, 2 s `availableMonitors()` poll for unplug detection, `getAll()` boot scan to reattach orphaned `output-*` windows after a control-window **page reload or webview failure** — not a crash of the process, which takes every window with it; see case 6, which corrects this. Output gains `webglcontextlost` / `webglcontextrestored` listeners with full scene rebuild, IPC-silence watchdog (5 s → stale state, 60 s → orphan), one HLS stream rebuild on a `loadStream()` rejection with frozen last-good-frame (no retry ladder — `hlsService` already spends a 3× budget before rejecting). Outputs panel renders per-output health badges (healthy / stale / stalled / monitor-missing). New Tier A `output_failure` event fired from manager via `analytics/emitter.ts` with `{ kind, retries, recovered }` (Open Question 3 decided). See §3 "Failure recovery". **Landed so far: 13a** (crash-vs-hand-close classification, the storm guard, record removal, `onOutputsChanged` for the panel), **13b** (all three Tier A events, `outputTelemetry.ts`), **case 3** (the output's `linkWatchdog`, the manager's `output_health_check` resync, the panel's stale badge and its announcement) and **case 6** (`adoptOrphanedOutputs`, `OUTPUT_REATTACH_EVENT`, chained ahead of the restore at boot) and **case 5's detection and reporting** (`outputScene.gpuState()`, `output_gpu_lost` / `output_gpu_recovered`, the `gpu-lost` badge and the `gpu-loss` Tier A failure — much smaller than this row implied, because Three's `WebGLRenderer` already does the `preventDefault()` and the GL rebuild; see case 5). Still open: the unplug poll, the single HLS rebuild, case 5's 30 s no-restore timeout and its `gpu-loss-timeout` removal, the toast (no toast primitive exists), and the `perf_sample` extension (needs an `OutputEvent` arm carrying drift — see Open Question 3). | Yes (additive) |
 | 14 | `multi-output: calibration tooling — test pattern + rotation offset` | `src/output/datasetMirror.ts` recognises the `__terraviz_calibration__` sentinel id and renders a procedural test pattern (8-step grayscale ramp at the equator, RGB color bars at lat ±30°, lat/lon graticule with color-coded equator + prime meridian, named anchor crosshairs, N/S pole labels, live resolution counter — ~80 LOC GLSL). `src/output/equirectRtt.ts` adds the `uRotationOffsetRad` longitude rotation applied before the camera-offset ray-march. `outputUI.ts` adds the per-output "Rotation offset (°)" numeric + slider and a "Calibration" submenu. Persisted config gains `rotationOffsetDeg`. See §3 "Calibration tooling". **Landed, in two slices, and the second is built differently from this row.** **14a** is the rotation offset end to end: `uRotationOffsetRad` and its TS mirror, `rotationOffsetDeg` through `OutputViewSettings` and the persisted config, the degrees→radians conversion in `projectView`, and the panel's slider-plus-number. **14b** is the test pattern, as `src/output/calibrationPattern.ts` — a **2:1 canvas installed in an ordinary overlay slot**, not the ~80 LOC of GLSL this row specifies, and a **per-output switch on the render-config channel**, not the `__terraviz_calibration__` sentinel dataset. Both departures are argued at the top of §3 "Calibration tooling": a shader pattern would bypass the very sampling path it is meant to prove, and a sentinel dataset would put the pattern on every output at once — plus on the control window's own globe, which is where the operator is reading the rotation they are turning. There is no "Calibration submenu"; it is one toggle sitting directly above the rotation control it is used with. The pattern is the one operator choice in the panel that deliberately does **not** persist. | Yes (additive) |
-| 15 | `multi-output: operator runbook` | `docs/MULTI_MONITOR_OPERATIONS.md` — the deployment half this plan has so far deferred, and which a spike showed is not optional. Covers: **checking which GPU the webview actually got** (the renderer string surfaced by commit 11's debug overlay) and the per-OS override for a hybrid-graphics machine, since the app's own `powerPreference` is inert and a silent landing on the iGPU is undiagnosable from logs; **measuring this machine's decoder budget** rather than trusting a constant, and entering it in the Outputs panel's budget field (commit 11); disabling screen savers and display sleep (Open Question 5's documented half); the kiosk autostart entry from §3.6; and what each Outputs-panel health badge means in front of an audience. No code. | **Yes** (docs) |
+| 15 | `multi-output: operator runbook` | **Landed** — [`docs/MULTI_MONITOR_OPERATIONS.md`](MULTI_MONITOR_OPERATIONS.md), the deployment half this plan had deferred, and which a spike showed is not optional. It covers everything below and four things the ladder could not have predicted, all of them from hardware and all of them **silent** failures: the **gpu** field being unreadable on Linux (so §1.1's check moves outside the app, on the platform SOS installations most often run), the output monitor's **refresh rate** as a hard ceiling on its frame rate with a dock as the usual cause, and two Linux package prerequisites — GStreamer codecs, without which no HLS dataset plays, and fonts in two classes, without which every control renders as an empty box. Originally scoped as: Covers: **checking which GPU the webview actually got** (the renderer string surfaced by commit 11's debug overlay) and the per-OS override for a hybrid-graphics machine, since the app's own `powerPreference` is inert and a silent landing on the iGPU is undiagnosable from logs; **measuring this machine's decoder budget** rather than trusting a constant, and entering it in the Outputs panel's budget field (commit 11); disabling screen savers and display sleep (Open Question 5's documented half); the kiosk autostart entry from §3.6; and what each Outputs-panel health badge means in front of an audience. No code. | **Yes** (docs) |
 
 **Backout plan.** Reverting commit 9 leaves all the plumbing in
 place (manager, output bundle, capability) but removes the
@@ -4224,7 +4224,7 @@ next pass is for.
 |---|---|---|---|
 | 5 | No position diagram; nothing marked primary | Never built; the step described an intent | `880ba315` — the diagram, and primary asked of the platform rather than inferred |
 | 13 | Dataset still lit with day/night on the output | The decoration composited *under* the layers, which only hides it for opaque global coverage | `64256a1c` — the Earth treatment is idle-only |
-| 13 | "Playback seems to struggle", sync a permanent dash | Seek loop: a seek slower than the settle window earns another, and the element is mid-seek on ~99% of frames | `fa7a29ee` + `d5516a3e` — the seek-cost floor, and the bounds lifted while paused |
+| 13 | "Playback seems to struggle", sync mostly a dash | Seek loop: a seek slower than the settle window earns another, and the element is mid-seek on ~99% of frames | `fa7a29ee` + `d5516a3e` — the seek-cost floor, and the bounds lifted while paused. **Not closed** — the second pass found the field still cycling dash ↔ thousands of ms, so the loop persists at a slower cadence; see that entry |
 | 18 | Closing the output restored normal playback on the **control** window | Same loop, plus a playhead diff forcing a redraw at the control window's frame rate | `fa7a29ee`, `9c139d22` |
 | 29 | Ctrl+Q did nothing | Never bound; the step asserted it as if it existed | `e7b021db` |
 | S1, S2 | "Sync seems to break" / shows a dash | The same seek loop, seen through a HUD that could not say why | `fa7a29ee`, plus the HUD naming the reason beside the dash |
@@ -4253,6 +4253,1071 @@ qualifies. Steps 12c and 13b were added afterwards to make the
 sync field and the bbox-video case answerable rather than
 ambiguous; 5a was added because "nothing marked primary" is a
 pass on X11 and a failure on the other two.
+
+### Results: second pass — Windows, 2026-09-15
+
+Not a checklist run: two targeted checks against fixes that
+landed since the first pass, one of which came back negative
+and is the more useful of the two. Same machine, same caveat —
+Windows is step 46, parity. The Linux gate is still open and
+nothing here touches it.
+
+**Closing an output is confirmed on hardware.** Remove tears
+the window down. That is `7d3cb393` and its replacement
+`f9aa1475` — a self-only `close_self` command, after review
+found a blanket `core:window:allow-destroy` reaches every
+window rather than the calling one — and it is the one question
+`acl_tests` cannot answer: `tauri::test`'s `MockRuntime`
+settles whether the ACL permits the invoke, never whether the
+window goes away. It does.
+
+**The framebuffer hypothesis is dead.** The first pass left an
+output at 8192x4096 running 18 fps and falling into
+seek-recovery on a regional data-encoded video, and the
+diagnosis recorded on PR #439 was fill rate, on the arithmetic
+that 8192x4096 is 33.5M fragments against 4096x2048's 8.4M.
+Re-running the same content one rung down:
+
+| | framebuffer | fps | sync | link |
+|---|---|---|---|---|
+| first pass | 8192x4096 | 18 | seek-recovery, several thousand ms | not read |
+| this pass | 4096x2048 | 16.9 | +7557 ms | live |
+
+A 4x cut in fragments bought nothing, and the second number is
+marginally *worse*. Whatever holds this loop at ~17 fps — about
+59 ms a frame — does not scale with the framebuffer, so it is
+not the ray-march. The #439 diagnosis was wrong; this is the
+entry that says so, and the next pass should not spend the
+framebuffer picker on it again.
+
+**The `gpu` field paid for itself by ruling something out.**
+The readout is `ANGLE (NVIDIA, NVIDIA GeForce RTX 4090 Laptop
+GPU (0x00002717) Direct3D11 vs_5_0 ps_5_0, D3D11)` — the
+discrete 4090, not the iGPU. That is precisely the failure
+rung 11 added the field for, since a spike had found a webview
+silently on the integrated part of a machine with a 4090 and
+undiagnosable from logs. A ~17 fps ceiling on a 4090 is a much
+sharper finding than the same number on an unknown adapter.
+
+**The sync field cycles; it is not a standing offset.** The
+`+7557 ms` above is one sample. Across both passes the field
+alternates between a dash and a figure in the thousands, which
+means the element is repeatedly entering and leaving a seek —
+so the seek loop is **not** fixed, and an earlier draft of this
+entry claiming the seek-cost floor had stopped it was wrong.
+The first pass's table below calls it "a permanent dash"; that
+is the same imprecision and the same behaviour.
+
+What the floor plausibly changed is the *cadence*. The
+simulation behind `fa7a29ee` had the element mid-seek on ~99%
+of frames; a cycle measured in tens of seconds is a different
+duty cycle of the same shape. The mechanism that fits: the
+output plays slower than the primary, drift accumulates past
+the threshold, a hard seek fires (dash), the seek lands, and
+the drift begins accumulating again from ~0. At 16.9 fps
+against a 30 fps source the output sheds ~0.44 s of content a
+second, which reaches 7.5 s in about seventeen — the right
+order for what the HUD shows.
+
+**The consequence is the important part: no sync policy can fix
+this.** `outputSync` can seek or decline to seek; seeking gives
+the oscillation observed, declining gives a standing offset,
+and neither is in step, because the content is not being played
+at the primary's rate. `SYNC_MAX_RATE_TRIM` is 0.25, so the
+correction can ask for at most 1.25x — and 1.25x of a rate the
+pipeline cannot reach is still a rate it cannot reach. Anything
+done in that module is rearranging which wrong answer is shown.
+
+**A likely cause, and it is structural rather than a mystery.**
+Data-encoded datasets ship **one** rendition. `DATA_ENCODED_RENDITIONS`
+in `cli/lib/ffmpeg-hls.ts` is a single rung at 4096x2048, with
+the reasoning already written there: the ABR ladder trades
+picture quality for bandwidth and that trade is incoherent when
+luma *is* the measurement, since the 1080p and 720p rungs would
+hand a client averaged values nobody measured. Ordinary RGB
+datasets get the full `DEFAULT_RENDITIONS` ladder — 4096x2048,
+2160x1080, 1440x720 — and `hlsService.selectRendition` picks by
+measured bandwidth.
+
+So an ordinary dataset on a desk monitor is very often decoding
+1.5M or 1.0M pixels a frame, and a data-encoded one is decoding
+**8.4M, always, on every window, with nothing to fall back to**.
+That cost is indifferent to the framebuffer, which is exactly
+the signature this pass measured. It is not that the video is
+greyscale — the transport is ordinary H.264 and flat chroma
+compresses *better* — it is that "data-encoded" means full
+resolution by design.
+
+Two costs follow from the frame size, and the two HUD numbers
+point at different ones:
+
+- **Decode** is what the *sync* figure implicates. A slow render
+  loop does not move a `<video>`'s playhead — the element
+  advances on its own clock — so a drift this large means the
+  element itself is stalling.
+- **The per-frame texture upload** is what the *fps* figure
+  implicates: `VideoTexture` re-uploads the decoded frame on
+  every draw, ~8.4M texels here, in a second webview while the
+  control window decodes the same asset in the first.
+
+They may share one main-thread cause; nothing here separates
+them.
+
+**Two checks, both one click, neither needing code:**
+
+1. **Load an ordinary RGB video dataset on the same output.**
+   If fps goes to 30 and sync settles, the ceiling tracks
+   rendition size and the single-rung ladder is what puts
+   data-encoded content over it. This is the sharpest test and
+   it directly answers "is this a data-driven video problem".
+2. **Read the control window's own fps on the same
+   data-encoded asset.** Also near 17 means the ceiling is
+   decode and both windows share it; a steady 30 means it is
+   something the output does that the control window does not.
+
+(The first pass's "watch sync for 30-60 s" is answered: it
+oscillates.)
+
+**If check 1 comes back as expected this is a capability
+ceiling, not a bug** — and it lands on precisely the content an
+SOS installation runs, since data-encoded video is the reason
+the feature exists. That makes it a Phase 5 design question
+rather than something to tune, with two shapes worth weighing:
+a mirrored rendition for outputs that is *explicitly* a display
+copy and never a measurement (the values would still be read
+off the control window, which keeps `DATA_ENCODED_RENDITIONS`'
+premise intact), or `outputScene` uploading on decoder advance
+rather than on every draw. Neither is established; recorded so
+the next pass starts from the right question.
+
+from here.
+
+#### Addendum — the RGB comparison, same session
+
+Check 1 came back, and it splits the problem in two. An ordinary
+RGB dataset on the same output, same framebuffer:
+
+| | dataset | fps | sync |
+|---|---|---|---|
+| data-encoded | 4096x2048 single rung | 16.9 | cycles dash ↔ thousands of ms |
+| ordinary RGB | full ABR ladder | 18.8 | **-24 ms** |
+
+**The sync half is content-specific.** −24 ms is comfortably
+inside the 150 ms hard-seek threshold — the correction is doing
+its job, on the same machine, the same window and the same
+framebuffer that cannot hold sync on data-encoded video. So the
+drift is not a property of the output as such.
+
+**The fps half is not**, and that correction matters more than
+the entry above gives it room for. 18.8 against 16.9 is the same
+number, so the ceiling is **general to video on an output**, and
+the paragraph above explaining it by the single-rung ladder is
+wrong as stated. The likelier reading is that the ladder never
+engages here at all: `selectRendition` picks the best rung the
+measured bandwidth allows, and on a fast local link with the
+asset cached — exactly the case `hlsService`'s own docstring
+describes — that is the top rung for *both*. So both are
+probably decoding 4096x2048, and `DATA_ENCODED_RENDITIONS`
+explains why data-encoded content can never drop *below* that,
+not why RGB is equally slow.
+
+**What is left to explain the two halves separately:**
+
+- **fps**, common to both: a cost paid per drawn frame that does
+  not depend on the content. 18.8 fps is ~53 ms a frame, which
+  at 60 Hz is landing on every third or fourth callback — the
+  loop is a plain rAF gated at `VIDEO_FRAME_MS` (33.3 ms), so
+  hitting 30 only needs each frame under ~16.7 ms. Tens of
+  milliseconds for a ray-march at this size on a 4090 is far
+  more than the shader should cost, which points at the
+  per-frame `VideoTexture` upload — a 4096x2048 YUV→RGB
+  transfer through ANGLE/D3D11, a path that is fast when it is
+  zero-copy and very slow when it is not.
+- **sync**, data-encoded only: decode, and the mechanism that
+  fits at equal resolution *and* equal CRF is **entropy**. A
+  data-encoded frame is a noise-like gradient field with poor
+  inter-frame prediction; an SOS RGB animation is a largely
+  static basemap with smooth overlay motion. At the same quality
+  target the first carries far more residual per frame and costs
+  more to decode. Hypothesis, not measured.
+
+**Also reported and unexplained:** RGB datasets *sometimes*
+freeze too. Not reproduced here, no HUD capture of one, and
+nothing above predicts it — recorded so it is not lost.
+
+**The next check isolates the fps half and takes one drag.**
+Unload the dataset, then drag the control globe continuously and
+read the output's fps. `shouldRenderFrame` returns true whenever
+`dirty` is set, bypassing the frame cap, so a moving camera makes
+the output redraw on **every** rAF callback with the full
+ray-march and Earth decoration and **no video upload at all**.
+Near 60 there means the shader is cheap and the upload is the
+whole cost; near 18 means it is the shader, and neither a
+rendition change nor a decode change will help.
+
+> **Superseded — the check ran and the dichotomy was wrong.** A
+> moving camera makes the output redraw on every callback, but the
+> callbacks that set `dirty` arrive at the *control window's*
+> render rate, so the reading is bounded by that and not only by
+> this window. See the next addendum.
+
+#### Addendum — the idle drag, same session
+
+Check 2 came back: **~30 fps while dragging the control globe with
+no dataset loaded, and 0 the moment the drag stopped.** Two
+findings, and the first is that the check does not measure what the
+entry above said it measures.
+
+**The drag test is confounded, and the dichotomy above is false.**
+`bindOperatorCamera` hooks the primary map's `move`, which fires
+**once per rendered frame of the control globe** — so the output's
+`dirty` flag is set at the *primary's* render rate, not at its own.
+What the output reports while dragging is therefore `min(its own
+draw capacity, the control window's render rate)`, and 30 fps
+cannot tell those apart: a control globe painting MapLibre plus
+`earthTileLayer`'s whole pass chain at 30 would produce exactly
+this reading on an output capable of two hundred. "Near 60 means
+the shader is cheap; near 18 means it is the shader" assumed the
+output was the only thing being measured. It was not.
+
+**What the reading does establish** is a floor: the idle path —
+full ray-march, Earth decoration, atmosphere LUT, no layer —
+sustains **at least** 30 fps, so it costs **at most** ~33 ms a
+frame. That is a bound, not a measurement of it.
+
+**Combined with a measurement already in hand, it is still enough
+to move the fps question.** The 8192 → 4096 comparison above left
+fps at ~17 either way. 8192 is four times the fragments of 4096, so
+a shader-bound loop would have run roughly four times slower there;
+it did not move at all. Fill rate is therefore not what holds the
+loaded loop at ~53 ms a frame, which makes the drag test's 30 far
+more likely to be the publish-rate ceiling than a shader cost. The
+remaining candidate is unchanged and better supported: **a
+per-frame cost proportional to the video's own resolution rather
+than the framebuffer's** — the `VideoTexture` upload (4096x2048
+YUV→RGB through ANGLE/D3D11), or the decode feeding it.
+
+**Second finding: the HUD reads `fps 0.0` for a correctly idling
+output**, which is a defect in the instrument, not in the output.
+With no dataset `contentKindFor` returns static, the loop draws at
+the 1 Hz floor, and `createFpsMeter` averaged over the ~500 ms
+window between samples — so roughly every other window held no
+drawn frame at all and divided zero by its own length. That
+collapses the one distinction the floor exists to preserve: an
+output that never redraws cannot tell a dropped upload or a lost
+context from a correct frame, which is also the reading case 5
+deliberately produces by skipping the frame rather than
+drawing-and-counting it. Fixed: the window is now held open until
+it contains a frame, and what is reported meanwhile is the bound
+the silence implies (`1000 / elapsed`, minimum'd with the last
+reading), so a stall still collapses toward zero — continuously
+instead of by flicker — while an idle output holds near 1.
+
+**And the instrument the last three checks were missing has been
+added rather than worked around.** Every frame number on this HUD
+was a *pacing* measurement, bounded by something other than the
+draw — capped at 30 by the frame gate, floored at 1 Hz by the
+static rung, ceilinged by the publisher during a drag — so none of
+them could ever isolate capacity, and three hardware readings were
+spent discovering that one at a time. The HUD now carries **draw**,
+the mean wall-clock time inside `scene.render()` over the frames
+since the last reading, directly under **fps**. It answers "can
+this window keep up" on any content, with no drag and no second
+window involved.
+
+**So the next pass reads one pair of numbers rather than running an
+experiment.** With a data-encoded video loaded and playing, read
+**fps** and **draw** together:
+
+| draw | means |
+|---|---|
+| ~50 ms | the draw is the whole cost. Since the framebuffer does not matter (8192 ≈ 4096), that is the texture upload, and the fix is upstream of this repo's shader — a smaller decode, or a path that does not round-trip YUV→RGB per frame |
+| ~4 ms | the draw is nearly free and the loop is being *paced* into 19 fps by something outside it: the steer, the seek loop, or rAF itself being throttled |
+
+> **Answered, and the table is only half right.** `draw` came back
+> **under a millisecond** on both a data-encoded video and an idle
+> globe — well past the second row. But the first row's reasoning
+> does not simply invert, because a sub-millisecond draw does not
+> exonerate the GPU. See the next addendum.
+
+Then unload the dataset and read **draw** again with nothing
+loaded. That is the idle shader's true per-frame cost, with no
+publish rate in the way — the number the drag was reaching for.
+
+#### Addendum — the draw cost, 2026-09-17
+
+**`draw` reads under a millisecond — with a data-encoded video
+loaded, and with nothing loaded at all.** Both cases, always.
+
+**The good half:** the render is not CPU-bound. Uniform writes, the
+per-frame sun, the draw-call submission and whatever `texImage2D`
+costs the CPU are together under 1 ms, at 4096x2048, with a video
+layer composited. Nothing else on the per-callback path can absorb
+the missing 35 ms a frame either — `link.state()` returns a held
+reference rather than a copy, `mirror.sync` is arithmetic over the
+element, `checkHealth` is an integer compare.
+
+**The half that retracts the entry above.** That entry's table said
+a small `draw` would mean "the loop is being *paced* into 19 fps by
+something outside it", and the field's own docstring said an
+overrunning GPU would still show up in a window's mean, "charged to
+whichever later call blocks on the queue". **Both are wrong for a
+browser.** `render()` *submits*; the GPU executes afterwards. When
+GPU work overruns the budget the CPU does not block inside
+`render()` — it blocks at buffer swap, which the compositor owns
+and which happens **between** rAF callbacks, inside nothing this
+code times. So a GPU-bound output reads under a millisecond here,
+exactly like a fast one. The field rules out CPU cost in the draw
+and is blind to the GPU; the docstring and the module-map row now
+say so.
+
+That is the third hypothesis this log has retracted on the fps
+question — fill rate, then the single-rung ladder, now the texture
+upload as a *CPU* cost — and the pattern in all three is the same:
+a reading was treated as a measurement of the output's capacity
+when it was bounded by something else.
+
+**So the instrument gained the denominator it was missing.** The
+HUD's fps line now carries **raf** beside **fps**: how often the
+browser *offered* a callback against how often the loop *took* one.
+Ticked first thing in the callback, before any work. It is the fork
+every reading so far has been missing, and it has an action on each
+side:
+
+| reading | means | what to do |
+|---|---|---|
+| `raf` ~60, `fps` ~19 | the callbacks are arriving and this loop is declining to draw on them | a bug in `shouldRenderFrame` or in what `contentKindFor` reports — ours to fix, in this repo |
+| `raf` ~19, `fps` ~19 | the loop draws on essentially every callback it gets; the browser is only offering 19 | the cost is outside this JS — GPU execution, compositing a 4096x2048 canvas, or present. Then the 8192 ≈ 4096 invariance matters again: it says the cost does not scale with *our* fragment count, which points at the video upload or decode rather than the raster |
+
+> **Answered, by a third shape neither row predicted: `raf` 30.0,
+> `fps` ~22.** The loop is offered 30 callbacks a second and takes 22
+> of them — so it is the first row in kind (ours to fix) at a rate
+> the second row's reasoning never considered. See the next addendum.
+
+One reading already leans: the idle drag sustained ~30 fps, which
+needs at least 30 callbacks a second, so whatever throttles the
+video case is not a fixed cap on the window. **Read `raf` in three
+states** — a data-encoded video playing, an ordinary RGB video
+playing, and idle while dragging the control globe — and the fork
+resolves for both content kinds at once.
+
+#### Addendum — the callback rate, 2026-09-17
+
+| state | `raf` | `fps` |
+|---|---|---|
+| idle, no dataset | 30.0 | 1.0 |
+| data-encoded video | 30.0 | ~22 |
+| ordinary RGB video | 30.0 | ~22 |
+
+**The idle row is the control and it is correct**: 30 callbacks
+offered, one drawn, which is the static floor doing exactly its job
+— and reading `1.0` rather than the `0.0` it reported two days ago.
+
+**The video rows are a bug in this repo, and the gate is where it
+lives.** The browser offers callbacks 33.33 ms apart. `VIDEO_FRAME_MS`
+is 33.33 ms. So `sinceLastFrameMs >= frameIntervalMs` came down to
+jitter in the last decimal, and every callback that fell short waited
+a whole further one — a 33 ms frame becoming a 67 ms frame. Mixed,
+that is ~22 fps against 30 offered, which is the number on the glass.
+
+**This is what three passes of content-specific hypotheses were
+chasing.** Fill rate, the single-rung rendition ladder, the
+`VideoTexture` upload — each was proposed to explain a ceiling that
+turns out to have no content term in it at all, which is why RGB and
+data-encoded read the same 22 every time they were compared. The
+mechanism is arithmetic between two constants.
+
+Fixed by asking the right question: not *has the interval elapsed*
+but **is this callback closer to the target than the next one will
+be** — `sinceLastFrame + offered/2 >= target`. No tolerance constant,
+since the offered interval is the scale the comparison belongs at,
+and it resolves at every refresh rate.
+
+**But `raf` 30.0 is itself a finding, and it is not ours.** A browser
+schedules rAF on the compositor's frame clock, so 30.0 — flat, in all
+three states, independent of load — is the **display** saying 30, not
+the GPU struggling. The usual cause is a 4K monitor negotiating 30 Hz
+over HDMI 1.4. Two consequences:
+
+- **The output can never exceed 30 fps on that monitor**, which is
+  the target anyway — but it means **zero headroom**: with the gate
+  fixed, every single callback must now draw a 4096x2048 ray-march.
+  If the picture stutters after this fix, that is the first thing it
+  means.
+- **Check the output monitor's refresh rate before blaming the app.**
+  This belongs in rung 15's runbook beside the GPU-selection check,
+  for the same reason: an installation can run at half its provisioned
+  frame rate with nothing on screen to say so.
+
+**What this does not explain is sync**, now reported bad on *both*
+content kinds where RGB previously held −24 ms. Draw rate and playhead
+drift are independent — `currentTime` advances on the wall clock
+however often the sphere is painted — so the gate fix is not expected
+to move it, and the entry above still stands: an output that cannot
+play the asset at the primary's rate regenerates the drift whatever
+`outputSync`'s threshold policy does. **The next reading is the sync
+field on both kinds after this fix**, with the refresh rate of the
+output monitor noted alongside it.
+
+> **Half wrong, and the next addendum says how.** *Draw* rate and
+> drift are independent; **callback** rate is not. `steer()` runs once
+> per rAF callback on the output, and `publishPlaybackMirror` rides
+> the primary's own loop on the control window — so the callback rate
+> sets both how often the correction is applied and how stale the
+> target it aims at is.
+
+#### Addendum — 60 Hz, and sync in the healthy regime
+
+First reading after the frame-gate fix, with the **output on the
+4K Dell (Display 3, the primary) and the control window moved to a
+different monitor**:
+
+| state | `raf` | `sync` |
+|---|---|---|
+| idle, no dataset | 60 | — |
+| ordinary RGB video | 60 | consistently **< 50 ms** |
+| data-encoded video | 60 | consistently **< 50 ms** |
+
+**Sync is in the regime it is supposed to be in.** Under 50 ms is
+comfortably inside `SIBLING_HARD_SEEK_THRESHOLD_S` (150 ms), which
+means the correction is converging on **rate trim and never
+seeking** — the end of the seek loop that three entries above chased
+through a settle window, a cost floor, and two content-specific
+hypotheses. It is worse than the first pass's −1 to −30 ms and
+better than anything since; at a 30 fps output, 50 ms is about one
+and a half frames of offset.
+
+**And it corrects the entry above.** That entry said the gate fix
+was not expected to move sync, because "draw rate and playhead drift
+are independent". Draw rate is. **Callback rate is not**, and two
+paths carry it:
+
+- On the output, `steer()` runs once per rAF callback — so the
+  correction is computed and applied twice as often at 60 Hz as at
+  30, and the control law's rate trim converges proportionally
+  faster.
+- On the control window, `publishPlaybackMirror` runs from the
+  primary's own playback loop, which is rAF-driven. A control window
+  at 60 Hz publishes the playhead every ~16.7 ms instead of every
+  ~33.3 ms, so the target the output steers toward is half as stale
+  before it is even sent.
+
+Both windows moved from 30 Hz to 60 in this reading, so both
+mechanisms fired at once. That is the fourth correction this log has
+had to make on the frame-rate question, and the shape is familiar:
+a claim about one variable stated as though it covered the whole
+loop.
+
+**Two things this reading does not establish, and both matter for
+the runbook.**
+
+- **`fps` was not reported**, and it is the number that confirms the
+  gate fix rather than merely being consistent with it. At `raf` 60
+  the gate should hold `fps` at **30** — the cap working, drawing on
+  every other callback. Outstanding.
+
+  A later review pass found this reading would have confirmed less
+  than it looked: 60 Hz is an exact multiple of the cap, and so were
+  the only other rates the gate was measured or tested at. A sweep in
+  simulation put the nearest-deadline version at 25 fps on a 75 Hz
+  display, 24 and 25 on 48 and 50, and *over* the cap on 33/35/40/100
+  — because it measured from the last draw rather than from a carried
+  deadline, which throws the phase away every frame. Fixed properly
+  there; the consequence for hardware is that **a frame-rate reading
+  taken at 30, 60 or 120 Hz does not generalise**, and a box running
+  48, 50 or 75 is worth a reading of its own.
+- **Two changes were made at once**: the display went to 60 Hz *and*
+  the output moved onto it while the control window moved off. So
+  this cannot separate "a window is paced by its own monitor" from
+  "Chromium paces every window off the primary's vsync". The
+  practical guidance is therefore the conservative one: **check the
+  refresh rate of the output's monitor and of the primary**, because
+  which one binds is unresolved.
+
+**A note on resolution, since the 60 Hz mode costs some.** It costs
+nothing on the sphere: the framebuffer is set by the Outputs panel's
+own picker and `setSize(w, h, false)` leaves the window alone, so a
+4096x2048 projection renders at 4096x2048 whatever the desktop is
+running at — `output.css` letterboxes with `object-fit: contain`.
+Refresh rate is worth more than desktop pixels on an output.
+
+**And the link this was reached through is a finding of its own.**
+The display is attached through a **Dell dock over USB-C**, which
+Windows reports as *Connected to Intel(R) UHD Graphics* while the
+HUD's `gpu` field reads a discrete 4090. Both are true: the 4090
+renders and the integrated GPU scans out, with a cross-adapter copy
+per frame in between — in exactly the region a sub-millisecond
+`draw` cannot see into. A dock is also a shared DisplayPort
+bandwidth budget that renegotiates modes when another monitor is
+plugged in, which is how a 4K panel ends up at 30 Hz with nothing on
+screen to say so. **Rung 15's runbook gets this beside the
+GPU-selection check: an output monitor wants a direct cable from the
+discrete GPU, not a dock.**
+
+#### Addendum — confirmed on the glass, 2026-09-18
+
+Three HUD captures, output on the 4K display at 60 Hz, control
+window on another monitor:
+
+| state | `data` | `sync` | `fps` (raf) | `draw` |
+|---|---|---|---|---|
+| idle, no dataset | — | — not-ready | **1.0** (60.0) | 0.2 ms |
+| data-encoded video | `01KYK82V…` | **+0 ms** | **30.0** (60.0) | 0.3 ms |
+| ordinary RGB video | `01KQG62X…` | **−9 ms** | **29.0** (60.0) | 0.4 ms |
+
+`gpu` reads `ANGLE (NVIDIA, NVIDIA GeForce RTX 4090 Laptop GPU
+(0x00002717) Direct3D11 vs_5_0 ps_5_0, D3D11)` on all three.
+
+**The frame gate is confirmed, not merely consistent.** 30 of 60 is
+the video cap drawing on every other callback; 1 of 60 is the static
+floor drawing once a second. Both are now what the arithmetic says
+rather than what the jitter allowed — the reading that was 22 of 30
+two entries ago. The RGB row's 29.0 is one draw shy inside a 500 ms
+sample window, which is the window boundary rather than a miss.
+
+**The sync loop is closed on both content kinds.** `+0 ms` and
+`−9 ms` are better than the "under 50" reported from the same
+session and comparable to the very first hardware pass's −1 to
+−30 ms — on the data-encoded asset that was cycling dash ↔ several
+thousand ms two passes ago, and that three separate mechanisms were
+built to chase (the seek-settle window, the seek-cost floor, and the
+`syncByRatio` path). None of those was the cause. The cause was a
+frame gate aliasing against a 30 Hz display, and a control window
+publishing the playhead at 30 Hz into it.
+
+**`draw` is 0.2–0.4 ms in every state**, including with a 4096x2048
+video composited. The render was never the cost, which is what the
+field was added to establish and what it now says three times over.
+
+**And the two adapters are both confirmed, separately.** The
+*render* adapter is the discrete 4090 through ANGLE/D3D11 — so the
+plan's §Risks iGPU hazard did not fire here. The *scanout* adapter
+is the Intel UHD Windows named on the display page, because the
+panel hangs off a USB-C dock. Both true at once; the cross-adapter
+copy between them is the per-frame cost `draw` structurally cannot
+see, and it evidently is not binding at this resolution.
+
+**What this does not settle.**
+
+- **The Linux gate is still open.** This is a fourth Windows sitting;
+  Appendix B qualifies on a dual-monitor Linux workstation and that
+  run has not happened.
+- **Which of the two 30→60 changes carried sync** — the gate fix on
+  the output, or the control window publishing twice as often — is
+  still entangled, and is no longer worth separating now that the
+  outcome is right.
+- **One sitting, not a soak.** Nothing here says what an hour of
+  continuous playback in front of an audience does.
+
+With that, the frame-rate thread that has run through five
+consecutive addenda is closed, and the open items revert to the ones
+it displaced: rung 15's runbook, the §6 app-command ACL, rung 13's
+remaining failure-recovery slices, and the Linux qualification.
+
+#### Open — second-window abort under WSL, 2026-09-18
+
+**Not a qualifying run, and recorded anyway because of what it
+might mean.** The Linux build was exercised under WSL2 + WSLg to
+check that it compiles and boots at all. It does: the control
+window renders, the catalog populates, the browse overlay and
+chips lay out correctly. Adding an **output** aborted the process:
+
+```
+[xcb] Unknown sequence number while processing queue
+[xcb] Most likely this is a multi-threaded client and XInitThreads has not been called
+[xcb] Aborting, sorry about that.
+terraviz: ../../src/xcb_io.c:278: poll_for_event:
+  Assertion `!xcb_xlib_threads_sequence_lost' failed.
+```
+
+The output window appeared **white** first, then the abort — so it
+was created and mapped, its webview never painted, and the process
+died around the placement calls. Launched with `GDK_BACKEND=x11`,
+which was itself needed to get the control window to appear
+reliably.
+
+**Three candidates, unseparated:**
+
+1. **XWayland under WSLg.** Not a normal X server, and the control
+   window needed a `wsl --shutdown` and a forced backend before it
+   would map at all.
+2. **Tauri/GTK multi-window on X11 generally.** GTK3 requires GDK
+   calls on the main thread and Tauri marshals window creation
+   across IPC to get there; anything touching X off-thread aborts
+   exactly like this. **This one would be a real Linux bug.**
+3. **`setFullscreen` specifically.** The spawn sequence is
+   create-hidden → `setPosition` → `setSize` → `setFullscreen` →
+   `show`, and WSLg's RAIL mode has no notion of a fullscreen
+   display, making that the least well-defined of the five calls
+   under this compositor.
+
+**No fix is proposed and none should be written yet.** The obvious
+one — `XInitThreads()` at startup in `lib.rs` — means adding an X11
+dependency to work around a crash whose cause is unattributed, in
+an environment that cannot qualify anything. That is the shape of
+mistake this appendix has spent five entries recording.
+
+**What it changes is the order of the Linux pass.** If candidate 2
+holds, the feature does not work on Linux at all: the app dies the
+moment an operator adds an output, on the platform SOS
+installations run. So on the dual-monitor Linux workstation, **add
+one output before anything else** — before the smoke checklist,
+before any frame-rate reading. Three outcomes:
+
+| on real Linux | means |
+|---|---|
+| no abort | WSLg's X path. Delete this entry, proceed with the checklist |
+| aborts on X11, not on Wayland | backend-specific; worth a real fix, and `GDK_BACKEND` becomes a runbook line |
+| aborts on both | candidate 2. The feature is blocked on Linux until it is fixed, and that outranks every other open item |
+
+> **Answered under WSL, and it is the middle row.** Relaunched on
+> the **Wayland** backend, the output window spawned with no abort.
+> So **candidate 2 is out** — Tauri/GTK multi-window is not broken
+> on Linux, which was the outcome that would have blocked the whole
+> feature. What remains is X11-path-specific, between candidates 1
+> and 3, and still worth separating on real hardware since plenty of
+> SOS machines run X11 sessions. The immediate consequence is a
+> runbook line rather than a code change: **launch under Wayland**,
+> and if an installation must run X11, this is the first thing to
+> re-test.
+
+**Also worth carrying:** WSLg presents one virtual display, so
+nothing about monitor enumeration, placement, signed origins or the
+occupied-monitor guard was exercised. A **VM with two virtual
+displays** would reach all of those and is the cheaper intermediate
+target this detour should have used — real window manager, real
+multi-monitor logic, no useful performance numbers.
+
+#### Finding — the `gpu` field does not work on Linux, 2026-09-18
+
+The same WSL launch read:
+
+```
+gpu   Apple GPU
+```
+
+on a Windows laptop with a discrete RTX 4090 and no Apple hardware
+within a hundred miles. There is no route by which that names real
+silicon. **WebKit sanitises `WEBGL_debug_renderer_info`** for
+fingerprinting resistance and returns a generic string — Safari
+reports "Apple GPU", and WebKitGTK inherits it from shared WebCore.
+
+**This defeats the field's entire purpose on the platform that
+matters most.** Rung 11's `gpu` row exists as *the* mitigation for a
+risk the app cannot fix: a spike found the webview silently on the
+iGPU of a machine with a 4090, `powerPreference` is inert, and
+neither wry nor tauri reads an override — so an installation can run
+at a fraction of its provisioned capacity, undiagnosable from logs.
+On Windows it did its job and ruled that risk out. **On Linux it
+will read "Apple GPU" on every machine**, and the SOS installations
+this feature is for are Linux.
+
+No code change is proposed: the field reports what WebGL gives it,
+and there is nothing better to read from inside the webview.
+What changes is **rung 15's runbook**, which must carry the Linux
+procedure explicitly rather than pointing at the HUD:
+
+| platform | how to check which GPU the webview got |
+|---|---|
+| Windows | the HUD's `gpu` field — names the adapter (`ANGLE (NVIDIA, … Direct3D11)`) |
+| Linux | **from outside the app**: `glxinfo \| grep -i renderer`, or `nvidia-smi` while it runs to see whether the process is on the discrete card |
+
+Worth keeping beside the dock finding, which is the same shape: a
+diagnostic that reads one thing while the signal path does another.
+
+#### Finding — no HLS on a default Linux install, 2026-09-18
+
+Loading an HLS dataset (air traffic) on the same WSL build:
+
+```
+[App] HLS failed, falling back to direct MP4: Error: HLS is not supported in this browser
+Uncaught: No playable video source found
+```
+
+**The second error is a consequence, not a second fault.**
+`loadStream` reaches its `else` branch — `Hls.isSupported()` false
+*and* `canPlayType('application/vnd.apple.mpegurl')` false — and
+throws `hlsUnsupported`. `datasetLoader` catches it and asks
+`pickDirectFile(manifest.files)` for a progressive file; this
+dataset is HLS-only through the Vimeo proxy and has none, so the
+fallback has nothing to offer and throws. The fallback behaved
+correctly; it was handed an empty cupboard.
+
+**The real fault is `Hls.isSupported()`, and the likely cause is
+packaging rather than the engine.** hls.js requires MSE *and* that
+`isTypeSupported` answer true for H.264/AAC. WebKitGTK answers that
+through **GStreamer**, and a default Ubuntu install ships neither
+`gstreamer1.0-libav` nor the bad/ugly plugin sets that carry H.264.
+So the first thing to try is one apt line:
+
+```
+gstreamer1.0-plugins-good gstreamer1.0-plugins-bad
+gstreamer1.0-plugins-ugly gstreamer1.0-libav
+```
+
+**Unlike the two findings above, this one has nothing to do with
+WSL** — MSE availability and GStreamer codecs are properties of the
+WebKitGTK build and the installed packages. It will reproduce on
+bare-metal Linux with a default install.
+
+**Two outcomes, very different in weight:**
+
+| after installing the codec set | means |
+|---|---|
+| HLS plays | a **prerequisite**, not a defect. Rung 15's runbook gains a package list, and so does any `.deb` dependency declaration |
+| `Hls.isSupported()` still false | MSE is off in that WebKitGTK build, and **every HLS dataset is unplayable on Linux** — including on every output, since `datasetMirror` loads the same way. That is larger than this feature and would need answering before any SOS deployment |
+
+Worth stating plainly either way: **the desktop app's primary
+dataset format did not play on a freshly provisioned Linux
+machine**, and nothing in the repo told anyone it needed to.
+
+**Addendum — the codecs fixed support, not playback.** With the
+GStreamer sets installed the error moved:
+
+```
+[App] Error: Video took too long to load — check your connection and try again
+  … enqueueJob / datasetLoader.ts:350
+```
+
+That line is the 20 s `canplay` timeout, and **where it is not**
+carries most of the information. `loadStream` settles on
+`MANIFEST_PARSED`, so reaching a wait for `canplay` at all means
+`Hls.isSupported()` now answers true, hls.js initialised, attached
+the media element, and parsed the manifest. The fallback warning
+(`HLS failed, falling back to direct MP4`) is gone from the
+console, and so is the `[HLS] Fatal error:` line that every fatal
+hls.js error logs. So the escalation row above is **ruled out** —
+MSE is on in that WebKitGTK build, and the codec set is the
+prerequisite the first row predicted. Rung 15's runbook gains the
+package list either way.
+
+What is left is narrower and still open: the element never reaches
+`readyState >= 3` inside 20 s, with hls.js reporting no fatal
+error. Three candidates, in the order worth testing:
+
+- **The compositing workaround.** `WEBKIT_DISABLE_COMPOSITING_MODE=1`
+  was exported to get the window on screen under X11, and video on
+  WebKitGTK renders through the accelerated compositing path. It is
+  the one thing in that environment present by accident rather than
+  by design, and the Wayland backend that fixed the window may not
+  need it.
+- **A fragment that never arrives.** A network failure *after*
+  `MANIFEST_PARSED` cannot reach the MP4 fallback — the promise has
+  settled, so `fail()` routes it to `reportFatal` instead of
+  rejecting — and surfaces as exactly this timeout and nothing else.
+  It would still log a fatal line, which the console does not show,
+  so this is the weakest of the three.
+- **Software decode of a 4096x2048 stream**, with no hardware
+  decoder under WSLg. Slow rather than broken, and 20 s is a lot of
+  slow.
+
+One console line separates a feed problem from a decode one, run
+after the error card appears:
+
+```js
+const v = document.querySelector('video')
+console.log(v.readyState, v.networkState, v.error,
+            v.buffered.length ? [v.buffered.start(0), v.buffered.end(0)] : 'nothing buffered')
+```
+
+`readyState 0` with nothing buffered is a feed problem; data
+buffered with `readyState` stuck at 1 (`HAVE_METADATA`) is a decode
+problem. Only the third candidate is WSL-specific, which is what
+makes this worth carrying to the dual-monitor Linux box rather than
+closing here.
+
+**It read as the decode case, and all three candidates above are
+retired.** From the console, on the failing load:
+
+```
+readyState 1   networkState 2   error null   buffered [5.999999, 94.099999]
+duration 94.1  currentTime 0
+```
+
+Eighty-eight seconds of media appended cleanly, `duration` known,
+no error, hls.js reporting nothing fatal. So MSE works in that
+build, GStreamer parsed the init segment, fragments arrive and
+appends succeed — which rules out the compositing workaround, the
+fragment that never arrives, and decode being merely *slow*. It is
+also why `buffered` is the reading worth taking first on any future
+report of this: the error message names the connection, and the
+connection is fine.
+
+Two facts then separate. `duration` is **94.1** and the buffer ends
+at 94.1, so the timeline is not shifted — the first six seconds
+simply never appended, and the element sits at 0 in that hole.
+`readyState` is defined at the *current playback position*, so a
+hole at the playhead pins it at `HAVE_METADATA` however much is
+buffered further on: **`canplay` cannot fire, and the 20 s timeout
+was never going to be beaten by waiting longer.** Not slow, stuck.
+The wait at `datasetLoader.ts` tests `readyState >= 3` and listens
+for `canplay`, both position-relative, with nothing that notices a
+buffered range the playhead is outside of.
+
+But the hole is not the whole fault. Seeking to 10 — well inside
+the buffered range — still read `readyState 1` half a second later,
+so data at the playhead is not sufficient either. Both facts point
+at the same place: WebKit computes `buffered` from *parsed samples*,
+not from decodability, so a pipeline that parses and never prerolls
+fills a buffer and holds `HAVE_METADATA` exactly like this. What
+`isTypeSupported` answered true for is `avc1.42E01E` — Baseline
+Level 3.0 — while the asset is 4096x2048, which is High profile at
+Level 5.1 or 5.2. A codec registry more optimistic than the
+installed decoder set would produce precisely this pair of
+readings.
+
+The hole has its own candidate worth keeping separate: `buffered`
+on the element is the browser's **intersection** across source
+buffers, so an audio track starting at a different time from the
+video track offsets it. That is also the reason a missing AAC
+decoder would present as a video problem.
+
+**Resolved: WebKitGTK does not preroll until `play()`.** Calling
+`play()` by hand on the stalled element:
+
+```
+readyState 4   paused false   size 2160x1080   decoded 579
+```
+
+Decodable, playing, frames coming out. Nothing is wrong with the
+codecs, the profile, the resolution or the position — the pipeline
+sat at `HAVE_METADATA` because **nothing had asked it to start**,
+and `loadVideoDataset`'s ordering makes that unrecoverable: the wait
+for `canplay` runs *before* the `video.play()` a few lines below it,
+so on an engine that prerolls only on demand each waits for the
+other. Chrome, Firefox and Safari preroll as soon as data is
+appended, which is why one engine deadlocks and three do not, and
+why it presents as a connection failure.
+
+Fixed by extracting `waitForDecodableFrame` and having it **nudge**:
+muted playback is started and left running, since the caller plays
+the element immediately afterwards anyway to capture a first frame.
+`readyState >= 3` still short-circuits, so an element still warm
+from a previous dataset is not played. A rejected `play()` costs the
+nudge and nothing else — an autoplay policy strict enough to refuse
+a muted element belongs to an engine that prerolls on its own. The
+regression test is the deadlock itself: a fake element that emits
+`canplay` only in response to being played, which hangs the old
+shape until the timeout.
+
+**Two things this did not settle**, and both should be read off the
+same box rather than assumed:
+
+- **The six-second hole is still unexplained.** `buffered` began at
+  6.0 against a `duration` of 94.1 before any seek, and the element
+  now plays past it because the nudge starts it, but an element
+  parked at 0 in a hole is a second latent failure. `buffered` on
+  the element is the browser's **intersection** across source
+  buffers, so an audio track starting at a different time from the
+  video offsets it — the first thing to check, and worth comparing
+  against the same dataset on Windows.
+- **Nothing about 4096x2048 was exercised.** The element reported
+  `2160x1080`: hls.js's ABR picked a lower rung, as it is left to do
+  for any asset past `SHORT_ASSET_MAX_DURATION`. `isTypeSupported`
+  answers for `avc1.42E01E` (Baseline 3.0) whatever the stream is,
+  so a High-profile Level 5.x ceiling on WebKitGTK remains untested
+  — and it is exactly the case with no fallback, since
+  `DATA_ENCODED_RENDITIONS` is a **single** rung at 4096x2048 by
+  design. Load a data-encoded dataset on the Linux box before
+  concluding that HLS works there.
+
+#### Finding — the iGPU hazard fired, on Linux, invisibly, 2026-09-18
+
+Four HUD readings from one sitting, with the frame-gate fix in:
+
+| State | sync | draw | fps / raf |
+|---|---|---|---|
+| Idle, no data | not-ready | **0.0 ms** | 1.0 / 58.7 |
+| Smoke, seeking | seeking | **0.4 ms** | 12.4 / 12.4 |
+| Air Traffic playing (2160x1080) | +69 ms | **57.5 ms** | 14.0 / 14.0 |
+| Smoke playing (4096x2048) | -1267 ms | **302 ms** | 2.9 / 2.9 |
+
+**`fps == raf` in all four**, so the frame gate is innocent here —
+it takes every callback offered. That is the Windows bug ruled out
+on a second platform rather than assumed fixed.
+
+**The cost is the per-frame video texture upload, not the
+ray-march**, and idle is what proves it: an idle output draws the
+*full* Earth decoration — terminator, night lights, clouds,
+atmosphere LUT — over the same 4096x2048 framebuffer, and reads
+**0.0 ms**. Draw is ~0 whenever no new video frame exists (idle, or
+seeking) and large exactly when one is advancing, scaling with the
+**source** resolution: 4096x2048 is 3.6x the pixels of 2160x1080,
+and 302/57.5 is 5.3x.
+
+**`draw` is more informative on Linux than on Windows, and the
+module map's claim about it was ANGLE-specific.** It said a
+GPU-bound output reads under a millisecond because `render()`
+submits and the block lands at buffer swap between callbacks. True
+of ANGLE/D3D11; false on WebKitGTK, where the path is synchronous
+and 302 of a 345 ms callback interval sits *inside* `scene.render()`.
+Corrected in CLAUDE.md.
+
+**And `glxinfo` caught what the app cannot see:**
+
+```
+OpenGL renderer string: D3D12 (Intel(R) UHD Graphics)
+```
+
+Not llvmpipe — hardware, through WSLg's D3D12 gallium translation
+— but the **integrated** GPU, on a machine with an RTX 4090. This
+is §Risks' iGPU hazard firing, and firing *silently*: the `gpu`
+field exists precisely to catch it, and on WebKitGTK it reads
+`Apple GPU` and names nothing. So the one in-app mitigation for
+this risk is blind on the platform SOS installations run, and the
+check must be `glxinfo -B` outside the app. That upgrades the
+earlier "gpu field does not work on Linux" entry from a cosmetic
+gap to a **missed detection of the exact failure it was written
+for**.
+
+Two things stay unseparated and should not be conflated when this
+is re-run on real hardware: the adapter (iGPU vs discrete) and the
+transport (WSLg's D3D12 layer, plus `WEBKIT_DISABLE_DMABUF_RENDERER=1`
+if it is still exported from the X11 window workaround, which
+forces frames through a CPU copy instead of a shared buffer).
+`MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA` selects the discrete card
+under WSLg and isolates the first.
+
+**None of these numbers qualifies anything.** A dual-monitor Linux
+workstation remains the gate. What this sitting establishes is
+narrower and still worth having: the frame gate is correct on a
+second engine, the expensive thing is the upload rather than the
+shader, and the iGPU risk is real and undetectable from inside the
+app on Linux.
+
+**Addendum — the discrete GPU is unreachable here, and WSL is out
+of road.** `MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA` does select the
+discrete card at the Mesa level:
+
+```
+OpenGL renderer string: D3D12 (NVIDIA GeForce RTX 4090 Laptop GPU)
+```
+
+`glxinfo` is content on it. **TerraViz dies at launch**:
+
+```
+double free or corruption (!prev)
+```
+
+Controlled: same shell, `WEBKIT_DISABLE_DMABUF_RENDERER` and
+`WEBKIT_DISABLE_COMPOSITING_MODE` both confirmed empty so the
+`env -u` in the first attempt was a no-op, and the identical
+command without the adapter override runs fine. One variable. The
+first attempt bundled three changes and proved nothing; that is
+recorded because it is the same mistake the fill-rate, rendition
+and texture-upload hypotheses each made, and it is apparently easy
+to repeat.
+
+The asymmetry is the interesting part — a trivial single-context
+GLX client is fine on that adapter and a multi-context,
+multi-threaded webview heap-corrupts on it — which points at Mesa's
+d3d12 driver or WSLg rather than at this repo. Unproven: nobody has
+taken a backtrace (`gdb -batch -ex run -ex bt --args …`), and it is
+not worth an hour here, because of what follows.
+
+**Three configurations, none both stable and representative:**
+
+| Config | Result |
+|---|---|
+| X11 | aborts on the second window (`xcb_xlib_threads_sequence_lost`) |
+| Wayland + iGPU | runs; 302 ms draw, wrong GPU, no second display |
+| Wayland + discrete | heap corruption at launch |
+
+So the 302 ms can no longer be decomposed into *adapter* versus
+*transport* in this environment at all: the experiment that would
+separate them is the one that crashes. Every further hour here buys
+numbers attributable to the translation layer rather than to the
+app.
+
+**Stop here.** A VM with two virtual displays has been the right
+intermediate target since the first WSL entry, and this is the
+point where it stops being a nice-to-have: the remaining Linux
+questions — does an output place correctly on a second monitor,
+does the frame gate hold, what does `draw` read on a real GPU —
+each need a real window manager and a real second display, and none
+of them needs WSL. What WSL *did* earn: the codec prerequisite, the
+preroll deadlock and its fix, the font prerequisite, the frame gate
+confirmed on a second engine, and the iGPU hazard shown to be
+undetectable from inside the app.
+
+#### Finding — every icon in the app is tofu on Linux, 2026-09-18
+
+With the codec set installed and the two `datasetLoader` fixes in,
+a dataset loads on Linux — and the transport bar renders as a row
+of empty boxes. Browse, play, step, rewind, fast-forward, mute: all
+tofu. The text beside them ("Browse", "CC", the colorbar numbers)
+renders correctly, so a font is resolving; it just has none of
+these glyphs.
+
+**The app ships no font and no icon set.** Every control is a
+Unicode symbol written as an HTML entity in `src/index.html` —
+`&#x23EE;` rewind, `&#x25B6;` play, `&#x23E9;` step forward,
+`&#x1F507;` mute, twenty-one in all, each followed by `&#xFE0E;`
+(variation selector 15) to ask for the monochrome text glyph rather
+than the emoji one. There is no `@font-face`, no bundled `.woff`,
+no Google Fonts link anywhere in `src/`. The stack is
+`-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
+Ubuntu, Cantarell, sans-serif`, so whether an icon appears is
+entirely a property of the operating system's installed fonts.
+
+That works by accident on the two platforms it was developed on.
+macOS resolves these through Apple Symbols, Windows through Segoe
+UI Symbol. A minimal Ubuntu has neither, and the media-control
+block (U+23E9-U+23EE) lives in **Noto Sans Symbols 2**, which is
+not in a default install; U+1F507 needs an emoji font on top of
+that.
+
+**On the box the prerequisite is an apt line**, beside the GStreamer
+one — but it took two passes to get right, and the second half is
+the part nobody would derive from the symptom:
+
+```
+fonts-noto-core fonts-noto-color-emoji fonts-dejavu-core fonts-symbola
+```
+
+The twenty-one codepoints split into **two dependency classes**, and
+installing for the first leaves the second still broken:
+
+| Class | Codepoints | Needs |
+|---|---|---|
+| BMP symbols | `21E5` `23E9`-`23EE` `23F8` `23F9` `25B6` `2699` `2715` `27A4` | DejaVu Sans / Noto Sans Symbols 2 — ordinary font packages |
+| Astral-plane emoji | `1F4AC` chat, `1F507` mute, `1F5D1` delete, `1F97D` VR | a **monochrome** emoji font |
+
+After the first three packages the transport bar came back and the
+four above U+FFFF were still tofu. The reason is the variation
+selector: every icon is written `&#x1F4AC;&#xFE0E;`, and `FE0E` is
+**VS15**, which asks for the *text* presentation. `fonts-noto-color-emoji`
+supplies the **colour** glyph, so WebKit — honouring VS15 by
+preferring a text-presentation font — can decline it and fall
+through to tofu. An emoji font installed, and still no glyph.
+`fc-list :charset=1F4AC family` tells you which case a box is in.
+
+Worth recording because the obvious fix is wrong: **dropping the
+`&#xFE0E;` would also make the glyph appear**, and would give
+macOS and Windows colour emoji where they currently render
+restrained monochrome glyphs matching the rest of the chrome. A
+cartoon speech balloon in an operator UI is a regression, not a
+repair.
+
+**As a product matter it is larger than that, and it lands on the
+platform SOS installations run.** A projector rig provisioned from
+a minimal image shows an operator a transport bar of empty
+rectangles — every control unlabelled, with no error and nothing on
+screen to explain it. Three ways out, in increasing order of cost
+and correctness:
+
+| Approach | Cost | Verdict |
+|---|---|---|
+| Document the font packages as a Linux prerequisite | one line in rung 15's runbook | necessary now, insufficient alone — it fails silently on any box that missed it |
+| Add `'Noto Sans Symbols 2', 'DejaVu Sans'` to the stack | one line of CSS | **does nothing** on a box that lacks them, and fontconfig already falls back across whatever *is* installed; it buys the appearance of a fix |
+| Replace the entities with inline SVG | a UI change across ~21 controls | the actual answer — no font dependency, scales crisply, themes with `currentColor`, and it is what the rest of the app's chrome already does |
+
+The SVG migration is **not** multi-monitor work and should not be
+folded into this plan's ladder; it is recorded here because this is
+where it was found and because rung 15's runbook needs the apt line
+either way. The same reasoning as the GStreamer codecs one entry
+up: a prerequisite is worth writing down, and is not a substitute
+for the app not needing it.
 
 ### Commit 9 — Tools → Outputs panel (first user-reachable)
 

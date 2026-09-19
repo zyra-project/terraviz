@@ -15,6 +15,7 @@ import type { Dataset, AppState, GlobeRenderer, VideoTextureHandle } from '../ty
 import { overlayOptionsFromDataset } from './datasetOverlayOptions'
 import { formatDate, isSubDailyPeriod, inferDisplayInterval } from '../utils/time'
 import { logger } from '../utils/logger'
+import { waitForDecodableFrame, playableStart } from '../utils/mediaReadiness'
 import { escapeHtml, escapeAttr } from '../ui/domUtils'
 import { closeChat } from '../ui/chatUI'
 import type { PlaybackState } from '../ui/playbackController'
@@ -76,7 +77,6 @@ async function localFileUrl(path: string): Promise<string> {
 // --- Dataset loader constants ---
 const DESCRIPTION_MAX_LENGTH = 600
 const DESCRIPTION_MIN_CUT = 200
-const VIDEO_LOAD_TIMEOUT_MS = 20000
 const FIRST_FRAME_FALLBACK_MS = 150
 const SCRUBBER_MAX = '1000'
 
@@ -234,7 +234,6 @@ function tryLoadImage(urls: string[]): Promise<HTMLImageElement> {
 
 // --- Video loading ---
 
-/** Load a video dataset via HLS streaming, set up the video texture, and configure playback controls. */
 /**
  * Choose a directly-playable file from a manifest's `files[]`.
  *
@@ -255,6 +254,7 @@ export function pickDirectFile(files: VideoProxyFile[]): VideoProxyFile | undefi
     ?? files.find(f => f.link)
 }
 
+/** Load a video dataset via HLS streaming, set up the video texture, and configure playback controls. */
 export async function loadVideoDataset(
   dataset: Dataset,
   renderer: GlobeRenderer,
@@ -268,157 +268,156 @@ export async function loadVideoDataset(
   const hlsService = new HLSService()
   const video = hlsService.createVideo()
 
-  // Check for offline-cached version first
-  const dl = await getDownload(dataset.id)
-  const localVideoPath = dl ? await getDownloadPath(dataset.id, dl.primary_file) : null
-
-  if (localVideoPath) {
-    logger.info(`[App] Loading video from offline cache: ${localVideoPath}`)
-    await hlsService.loadDirect(await localFileUrl(localVideoPath), video)
-  } else {
-    let manifest: VideoProxyResponse
-    if (isManifestUrl(dataset.dataLink)) {
-      // Node-mode: fetch the manifest envelope directly. The backend
-      // (`functions/api/v1/datasets/[id]/manifest.ts`) returns a
-      // shape that's structurally identical to `VideoProxyResponse`
-      // for the fields the HLS path actually consumes (`hls`,
-      // `files[]`, `duration`, `title`, `id`) MINUS `dash` and
-      // PLUS a `kind: 'video' | 'image'` discriminator. Validate
-      // `kind` first so an image dataset routed to the video loader
-      // fails fast with a clear error rather than throwing at
-      // `manifest.files.find(...)` later.
-      const res = await apiFetch(dataset.dataLink, { headers: { Accept: 'application/json' } })
-      if (!res.ok) throw new Error(`Manifest fetch failed: ${res.status} ${res.statusText}`)
-      const envelope = (await res.json()) as Omit<VideoProxyResponse, 'dash'> & {
-        kind: 'video' | 'image'
-      }
-      if (envelope.kind !== 'video') {
-        throw new Error(`Expected a video manifest; got kind=${envelope.kind}.`)
-      }
-      // Backfill `dash` so the type matches downstream consumers
-      // that only read it via index-access; HLS.js never looks at
-      // it, the desktop offline path doesn't either.
-      manifest = { ...envelope, dash: '' }
-    } else {
-      const vimeoId = dataService.extractVimeoId(dataset.dataLink)
-      if (!vimeoId) throw new Error(`Could not extract Vimeo ID from: ${dataset.dataLink}`)
-      manifest = await hlsService.fetchManifest(vimeoId)
-    }
-    logger.info('[App] Video manifest received:', { duration: manifest.duration, qualities: manifest.files.length })
-
-    // An empty `hls` is a *choice*, not a failure. The manifest route
-    // emits one for a single-file MP4 reference — `url:<href>` and a
-    // non-`.m3u8` `r2:<key>` both land in `externalVideoManifest` — and
-    // its comment says the frontend "picks up `files[0].link`" instead.
-    // That contract was never honoured here: progressive was reachable
-    // only by throwing through the HLS path, which cost three separate
-    // things. hls.js treats an empty source as a fatal network error and
-    // the handler below *retries* it before rejecting, so a designed
-    // path burned retries and called `reportError('hls', …)` on every
-    // load. Worse, Safari answers `canPlayType('…mpegurl')` truthy, so
-    // an empty URL took the native branch as `video.src = ''`, which is
-    // not guaranteed to fire `error` — a load that may never settle
-    // either way, on the platform that most needs this path.
-    if (!manifest.hls) {
-      const direct = pickDirectFile(manifest.files)
-      if (!direct) throw new Error('Manifest declared no HLS stream and no playable file')
-      logger.info('[App] Manifest is single-file; loading progressive MP4 directly')
-      await hlsService.loadDirect(direct.link, video)
-    } else {
-      try {
-        await hlsService.loadStream(manifest.hls, video, isMobile)
-      } catch (hlsError) {
-        logger.warn('[App] HLS failed, falling back to direct MP4:', hlsError)
-        const mp4File = pickDirectFile(manifest.files)
-        if (!mp4File) throw new Error('No playable video source found')
-        await hlsService.loadDirect(mp4File.link, video)
-      }
-    }
-  }
-
-  await new Promise<void>((resolve, reject) => {
-    const onCanPlay = () => {
-      video.removeEventListener('canplay', onCanPlay)
-      resolve()
-    }
-    if (video.readyState >= 3) {
-      resolve()
-    } else {
-      video.addEventListener('canplay', onCanPlay)
-      setTimeout(() => {
-        video.removeEventListener('canplay', onCanPlay)
-        reject(new Error('Video took too long to load — check your connection and try again'))
-      }, VIDEO_LOAD_TIMEOUT_MS)
-    }
-  })
-
-  // Infer display interval from time range + video duration.
-  // Only the primary panel's load drives the shared playback state.
-  // Pass `period` and `frames.count` so the cadence matches the
-  // imagery rather than the ms-per-frame estimate — fixes the
-  // climate-dataset label-crawl bug (Plan §5.1).
-  if (isPrimary) {
-    if (dataset.startTime && dataset.endTime) {
-      const start = new Date(dataset.startTime)
-      const end = new Date(dataset.endTime)
-      playbackState.displayInterval = inferDisplayInterval(start, end, video.duration, {
-        period: dataset.period,
-        frameCount: dataset.frames?.count,
-      })
-      logger.info('[App] Inferred display interval:', playbackState.displayInterval)
-    } else {
-      playbackState.displayInterval = null
-    }
-  }
-
-  // Force first frame decode before attaching to the sphere
+  // Everything below is inside a `try` because `hlsService` reaches
+  // the caller only on success — so every throw between here and the
+  // return leaks it, with no handle left anywhere to destroy it. That
+  // was survivable while the element merely sat idle. It is not now:
+  // `waitForDecodableFrame` nudges the pipeline with `play()`, so a
+  // load that then times out leaves a *playing* element holding a
+  // decoder slot and a network fetch for the life of the window,
+  // after the operator has been told the load failed.
   try {
-    await video.play()
-    await new Promise<void>((resolve) => {
-      if ('requestVideoFrameCallback' in video) {
-        (video as any).requestVideoFrameCallback(() => resolve())
+    // Check for offline-cached version first
+    const dl = await getDownload(dataset.id)
+    const localVideoPath = dl ? await getDownloadPath(dataset.id, dl.primary_file) : null
+
+    if (localVideoPath) {
+      logger.info(`[App] Loading video from offline cache: ${localVideoPath}`)
+      await hlsService.loadDirect(await localFileUrl(localVideoPath), video)
+    } else {
+      let manifest: VideoProxyResponse
+      if (isManifestUrl(dataset.dataLink)) {
+        // Node-mode: fetch the manifest envelope directly. The backend
+        // (`functions/api/v1/datasets/[id]/manifest.ts`) returns a
+        // shape that's structurally identical to `VideoProxyResponse`
+        // for the fields the HLS path actually consumes (`hls`,
+        // `files[]`, `duration`, `title`, `id`) MINUS `dash` and
+        // PLUS a `kind: 'video' | 'image'` discriminator. Validate
+        // `kind` first so an image dataset routed to the video loader
+        // fails fast with a clear error rather than throwing at
+        // `manifest.files.find(...)` later.
+        const res = await apiFetch(dataset.dataLink, { headers: { Accept: 'application/json' } })
+        if (!res.ok) throw new Error(`Manifest fetch failed: ${res.status} ${res.statusText}`)
+        const envelope = (await res.json()) as Omit<VideoProxyResponse, 'dash'> & {
+          kind: 'video' | 'image'
+        }
+        if (envelope.kind !== 'video') {
+          throw new Error(`Expected a video manifest; got kind=${envelope.kind}.`)
+        }
+        // Backfill `dash` so the type matches downstream consumers
+        // that only read it via index-access; HLS.js never looks at
+        // it, the desktop offline path doesn't either.
+        manifest = { ...envelope, dash: '' }
       } else {
-        setTimeout(resolve, FIRST_FRAME_FALLBACK_MS)
+        const vimeoId = dataService.extractVimeoId(dataset.dataLink)
+        if (!vimeoId) throw new Error(`Could not extract Vimeo ID from: ${dataset.dataLink}`)
+        manifest = await hlsService.fetchManifest(vimeoId)
       }
-    })
-    video.pause()
-    video.currentTime = 0
-  } catch {
-    // Autoplay blocked — texture will update when user presses play
-  }
+      logger.info('[App] Video manifest received:', { duration: manifest.duration, qualities: manifest.files.length })
 
-  // Show mute button only when the stream has audio. Only the primary
-  // drives the singular mute button visibility — non-primary videos
-  // share the same mute control, so skip if we're not primary.
-  // (The primary's hls service always wins the button.)
-  if (isPrimary) {
-    const muteBtn = document.getElementById('mute-btn') as HTMLElement | null
-    if (muteBtn) {
-      muteBtn.style.display = hlsService.hasAudio ? '' : 'none'
+      // An empty `hls` is a *choice*, not a failure. The manifest route
+      // emits one for a single-file MP4 reference — `url:<href>` and a
+      // non-`.m3u8` `r2:<key>` both land in `externalVideoManifest` — and
+      // its comment says the frontend "picks up `files[0].link`" instead.
+      // That contract was never honoured here: progressive was reachable
+      // only by throwing through the HLS path, which cost three separate
+      // things. hls.js treats an empty source as a fatal network error and
+      // the handler below *retries* it before rejecting, so a designed
+      // path burned retries and called `reportError('hls', …)` on every
+      // load. Worse, Safari answers `canPlayType('…mpegurl')` truthy, so
+      // an empty URL took the native branch as `video.src = ''`, which is
+      // not guaranteed to fire `error` — a load that may never settle
+      // either way, on the platform that most needs this path.
+      if (!manifest.hls) {
+        const direct = pickDirectFile(manifest.files)
+        if (!direct) throw new Error('Manifest declared no HLS stream and no playable file')
+        logger.info('[App] Manifest is single-file; loading progressive MP4 directly')
+        await hlsService.loadDirect(direct.link, video)
+      } else {
+        try {
+          await hlsService.loadStream(manifest.hls, video, isMobile)
+        } catch (hlsError) {
+          logger.warn('[App] HLS failed, falling back to direct MP4:', hlsError)
+          const mp4File = pickDirectFile(manifest.files)
+          if (!mp4File) throw new Error('No playable video source found')
+          await hlsService.loadDirect(mp4File.link, video)
+        }
+      }
     }
-  }
 
-  const videoTexture = renderer.setVideoTexture(video, overlayOptionsFromDataset(dataset))
-  videoTexture.needsUpdate = true
+    await waitForDecodableFrame(video)
 
-  // Scrubber + playback transport are singular — primary only.
-  if (isPrimary) {
-    const scrubber = document.getElementById('scrubber') as HTMLInputElement
-    if (scrubber) {
-      scrubber.max = SCRUBBER_MAX
-      scrubber.value = '0'
+    // Infer display interval from time range + video duration.
+    // Only the primary panel's load drives the shared playback state.
+    // Pass `period` and `frames.count` so the cadence matches the
+    // imagery rather than the ms-per-frame estimate — fixes the
+    // climate-dataset label-crawl bug (Plan §5.1).
+    if (isPrimary) {
+      if (dataset.startTime && dataset.endTime) {
+        const start = new Date(dataset.startTime)
+        const end = new Date(dataset.endTime)
+        playbackState.displayInterval = inferDisplayInterval(start, end, video.duration, {
+          period: dataset.period,
+          frameCount: dataset.frames?.count,
+        })
+        logger.info('[App] Inferred display interval:', playbackState.displayInterval)
+      } else {
+        playbackState.displayInterval = null
+      }
     }
 
-    callbacks.showPlaybackControls(true)
-    updatePlayButton(true)
-
-    if (dataset.closedCaptionLink) {
-      loadCaptions(video, dataset.closedCaptionLink, playbackState)
+    // Force first frame decode before attaching to the sphere
+    try {
+      await video.play()
+      await new Promise<void>((resolve) => {
+        if ('requestVideoFrameCallback' in video) {
+          (video as any).requestVideoFrameCallback(() => resolve())
+        } else {
+          setTimeout(resolve, FIRST_FRAME_FALLBACK_MS)
+        }
+      })
+      video.pause()
+      video.currentTime = playableStart(video.buffered)
+    } catch {
+      // Autoplay blocked — texture will update when user presses play
     }
-  }
 
-  logger.info('[App] Video dataset loaded, duration:', video.duration, 's')
-  return { hlsService, videoTexture }
+    // Show mute button only when the stream has audio. Only the primary
+    // drives the singular mute button visibility — non-primary videos
+    // share the same mute control, so skip if we're not primary.
+    // (The primary's hls service always wins the button.)
+    if (isPrimary) {
+      const muteBtn = document.getElementById('mute-btn') as HTMLElement | null
+      if (muteBtn) {
+        muteBtn.style.display = hlsService.hasAudio ? '' : 'none'
+      }
+    }
+
+    const videoTexture = renderer.setVideoTexture(video, overlayOptionsFromDataset(dataset))
+    videoTexture.needsUpdate = true
+
+    // Scrubber + playback transport are singular — primary only.
+    if (isPrimary) {
+      const scrubber = document.getElementById('scrubber') as HTMLInputElement
+      if (scrubber) {
+        scrubber.max = SCRUBBER_MAX
+        scrubber.value = '0'
+      }
+
+      callbacks.showPlaybackControls(true)
+      updatePlayButton(true)
+
+      if (dataset.closedCaptionLink) {
+        loadCaptions(video, dataset.closedCaptionLink, playbackState)
+      }
+    }
+
+    logger.info('[App] Video dataset loaded, duration:', video.duration, 's')
+    return { hlsService, videoTexture }
+  } catch (err) {
+    hlsService.destroy()
+    throw err
+  }
 }
 
 // --- Dataset info panel ---

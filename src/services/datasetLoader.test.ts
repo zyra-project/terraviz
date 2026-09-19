@@ -556,3 +556,74 @@ describe('pickDirectFile', () => {
     expect(pickDirectFile([])).toBeUndefined()
   })
 })
+
+// ---------------------------------------------------------------------------
+// loadVideoDataset — failure cleanup
+// ---------------------------------------------------------------------------
+
+/**
+ * `hlsService` is handed to the caller only on success, so every throw
+ * before the return leaves it unreachable. Since the pipeline nudge, an
+ * unreachable one is also *playing*: it holds a decoder slot and a
+ * network fetch for the life of the window, after the operator has been
+ * shown a load failure.
+ */
+describe('loadVideoDataset — failure cleanup', () => {
+  afterEach(() => {
+    vi.resetModules()
+    vi.doUnmock('./hlsService')
+    vi.doUnmock('./downloadService')
+  })
+
+  async function loadAndCatch(): Promise<{ destroyed: number; err: unknown }> {
+    let destroyed = 0
+    // Before the mocks, not after: the static import at the top of this
+    // file already put the real module in the registry, so a dynamic
+    // import would hand back that copy with its real dependencies.
+    vi.resetModules()
+    vi.doMock('./hlsService', () => ({
+      HLSService: class {
+        hasAudio = false
+        createVideo() {
+          return document.createElement('video')
+        }
+        destroy() {
+          destroyed++
+        }
+      },
+    }))
+    // The earliest awaited call in the function, so the throw lands
+    // before any source exists — the case with the least to clean up
+    // and therefore the one most likely to be left uncleaned.
+    vi.doMock('./downloadService', () => ({
+      getDownload: () => Promise.reject(new Error('index unreadable')),
+      getDownloadPath: () => Promise.resolve(null),
+      isZipDownloadable: () => false,
+    }))
+    const { loadVideoDataset } = await import('./datasetLoader')
+    let err: unknown
+    try {
+      await loadVideoDataset(
+        makeDataset(),
+        {} as never,
+        {} as never,
+        false,
+        {} as never,
+        {} as never,
+      )
+    } catch (e) {
+      err = e
+    }
+    return { destroyed, err }
+  }
+
+  it('destroys the service it created when the load throws', async () => {
+    const { destroyed } = await loadAndCatch()
+    expect(destroyed).toBe(1)
+  })
+
+  it('still reports the failure to the caller', async () => {
+    const { err } = await loadAndCatch()
+    expect((err as Error).message).toBe('index unreadable')
+  })
+})

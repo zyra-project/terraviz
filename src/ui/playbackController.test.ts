@@ -47,6 +47,14 @@ function makeAppState(overrides: Partial<AppState> = {}): AppState {
   }
 }
 
+function timeRanges(...pairs: Array<[number, number]>): TimeRanges {
+  return {
+    length: pairs.length,
+    start: (i: number) => pairs[i][0],
+    end: (i: number) => pairs[i][1],
+  } as unknown as TimeRanges
+}
+
 function makeMockHls(overrides: Record<string, any> = {}) {
   return {
     paused: true,
@@ -60,6 +68,7 @@ function makeMockHls(overrides: Record<string, any> = {}) {
       currentTime: overrides.currentTime ?? 0,
       duration: overrides.duration ?? 60,
       readyState: 4,
+      buffered: overrides.buffered ?? timeRanges([0, 60]),
     }),
     video: {
       muted: false,
@@ -197,6 +206,26 @@ describe('rewind', () => {
     expect(hls.pause).toHaveBeenCalled()
     expect(appState.isPlaying).toBe(false)
     expect(state.scrubbing).toBe(true)
+  })
+
+  // A literal 0 puts the playhead back in the hole the load correctly
+  // stepped over — the element stalls with no frame and no error, which
+  // is what a frozen picture looks like. See `playableStart`.
+  it('rewinds to the first buffered instant, not past a hole at the head', () => {
+    const hls = makeMockHls({ buffered: timeRanges([6, 94.1]) })
+
+    rewind(hls, makeAppState({ isPlaying: true }), createPlaybackState(), vi.fn())
+
+    expect(hls.currentTime).toBe(6)
+  })
+
+  it('still rewinds to zero when there is no element to ask', () => {
+    const hls = makeMockHls({ currentTime: 30 })
+    hls.getVideo = vi.fn().mockReturnValue(null)
+
+    rewind(hls, makeAppState({ isPlaying: true }), createPlaybackState(), vi.fn())
+
+    expect(hls.currentTime).toBe(0)
   })
 })
 
