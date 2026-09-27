@@ -4,7 +4,9 @@ name: Visual report
 # collects per-scene problems (console/page errors, failed requests,
 # optional axe a11y), and on pull requests pixel-diffs against the
 # baseline from the latest main run. Produces a browsable HTML report
-# (the `visual-report` artifact) and an advisory PR comment.
+# (the `visual-report` artifact) and an advisory PR comment — or, on a
+# PR from a fork, whose token cannot comment, the same summary on the
+# run page.
 #
 # Deliberately SEPARATE from sync-weblate-screenshots.yml: that workflow
 # feeds translators and must never write to Weblate from a PR; this one
@@ -35,7 +37,8 @@ concurrency:
   cancel-in-progress: true
 
 # Read the repo + write PR comments. The Cloudflare deploy uses its own
-# API token, not GITHUB_TOKEN.
+# API token, not GITHUB_TOKEN. A PR from a fork gets a read-only token
+# whatever this block asks for — see the comment step.
 permissions:
   contents: read
   pull-requests: write
@@ -177,14 +180,30 @@ jobs:
         # report.json), still write a marker-bearing placeholder so the
         # comment step stays robust. `--silent` keeps npm's lifecycle
         # banner out of the comment body.
+        #
+        # The same text is appended to the job summary, which needs no
+        # write access — so a PR from a fork, whose comment step is
+        # skipped below, still gets it on the run page, one click from
+        # the check.
         run: |
           npm run --silent screenshots:summary > report-out/pr-comment.md || {
             printf '%s\n' '<!-- visual-report -->' '_Visual report summary unavailable — see the run log._' \
               > report-out/pr-comment.md
           }
+          cat report-out/pr-comment.md >> "$GITHUB_STEP_SUMMARY"
 
+      # A pull_request run from a fork gets a read-only GITHUB_TOKEN
+      # whatever `permissions:` asks for, so posting the comment 403s.
+      # Unguarded, that failed this advisory job on every fork PR, after
+      # the capture, diff and artifact upload had all succeeded (#452).
+      # Full names are compared rather than reading `head.repo.fork`:
+      # that flag is true for every PR when this repository is itself a
+      # fork, which is how docs/SELF_HOSTING.md has people run it. A
+      # deleted head repository reads as null and is skipped too.
       - name: Post / update PR comment
-        if: github.event_name == 'pull_request'
+        if: >-
+          github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/github-script@v7
         with:
           script: |

@@ -553,9 +553,10 @@ All capture commands run against a dev server on `:4173`
 (`npm run dev -- --port 4173`). CI is
 [`.github/workflows/visual-report.yml`](.github/workflows/visual-report.yml):
 PRs get an advisory `visual-report` artifact + comment (diffed against
-the latest `main` baseline) and a gating smoke job; `main` publishes the
-baseline and deploys the report. The Weblate sync
-(`sync-weblate-screenshots.yml`) is deliberately separate.
+the latest `main` baseline; a PR from a fork, whose token cannot
+comment, gets the summary on the run page instead) and a gating smoke
+job; `main` publishes the baseline and deploys the report. The Weblate
+sync (`sync-weblate-screenshots.yml`) is deliberately separate.
 
 - **Scenes** are the one human-maintained list:
   [`scripts/screenshots/scenes.ts`](scripts/screenshots/scenes.ts)
