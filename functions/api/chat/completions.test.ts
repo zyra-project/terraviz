@@ -434,6 +434,32 @@ describe('POST /api/chat/completions — streaming transform', () => {
     expect(sse).toContain('data: [DONE]')
   })
 
+  it('cancels the upstream stream when the client goes away', async () => {
+    const encoder = new TextEncoder()
+    const upstreamCancel = vi.fn()
+    let sent = false
+    // One token, then an upstream still generating: the next read never
+    // settles, as with a model partway through its answer.
+    const upstream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent) return new Promise<void>(() => {})
+        sent = true
+        controller.enqueue(encoder.encode('data: {"response":"Hi"}\n\n'))
+      },
+      cancel: upstreamCancel,
+    })
+    const run = vi.fn(async () => new Response(upstream))
+
+    const res = await onRequestPost(ctx({ body, run }))
+    const reader = res.body!.getReader()
+    const first = await reader.read()
+    expect(contentOf(new TextDecoder().decode(first.value))).toBe('Hi')
+
+    await reader.cancel('client gone')
+
+    expect(upstreamCancel).toHaveBeenCalledWith('client gone')
+  })
+
   it('flushes a final event that arrives without a trailing newline', async () => {
     const run = vi.fn(async () => new Response(upstreamOf([
       'data: {"response":"no newline"}',

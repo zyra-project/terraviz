@@ -616,6 +616,12 @@ async function streamResponse(
         if (emitLines(lines, controller)) return
       }
     },
+    // The client went away — its timeout aborted the request, or the page
+    // closed. Pass that on, so the model stops generating into a stream
+    // nobody reads and spending neurons on it.
+    cancel(reason) {
+      return reader.cancel(reason)
+    },
   })
 
   return new Response(transformed, {
