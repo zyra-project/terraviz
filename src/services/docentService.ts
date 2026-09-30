@@ -24,7 +24,11 @@ import {
 } from './docentAnalysisTools'
 import { fetchApprovedEvents, type PublicEvent } from './eventsService'
 import { parseIntent, generateResponse, searchDatasets, evaluateAutoLoad } from './docentEngine'
-import { clearDegraded as clearDegradedState, markDegraded as markDegradedState } from './docentDegradedState'
+import {
+  clearDegraded as clearDegradedState,
+  markDegraded as markDegradedState,
+  type DegradedReason,
+} from './docentDegradedState'
 import { apiFetch } from './catalogSource'
 import { ensureLoaded as ensureQALoaded, getRelevantQA } from './qaService'
 import { resolveRegion, boundsToGeoJSON } from '../data/regions'
@@ -262,13 +266,35 @@ const DEFAULT_CONFIG: DocentConfig = {
   voiceHandsFree: 'off',
 }
 
+/** Whether two configs send chat requests to a different place or model. */
+function llmEndpointChanged(before: DocentConfig, after: DocentConfig): boolean {
+  return (
+    before.apiUrl !== after.apiUrl ||
+    before.apiKey !== after.apiKey ||
+    before.model !== after.model ||
+    before.enabled !== after.enabled
+  )
+}
+
 /** Yielded by the service during response generation */
 export type DocentStreamChunk =
   | { type: 'delta'; text: string }
   | { type: 'action'; action: ChatAction }
   | { type: 'auto-load'; action: ChatAction; alternatives: ChatAction[] }
   | { type: 'rewrite'; text: string }
-  | { type: 'done'; fallback: boolean; llmContext?: LLMContextSnapshot }
+  | {
+      type: 'done'
+      fallback: boolean
+      /**
+       * Why *this* turn fell back to the local engine, when the cause is
+       * known and is not the operator's LLM settings. Per turn on purpose:
+       * the session-wide degraded flag outlives the turn that set it, so
+       * it can't say whether a later fallback is the quota again or a
+       * wrong URL or key (#456).
+       */
+      fallbackReason?: DegradedReason
+      llmContext?: LLMContextSnapshot
+    }
 
 /**
  * Load docent config from localStorage, merging with defaults.
@@ -330,6 +356,15 @@ export async function loadConfigWithKey(): Promise<DocentConfig> {
  *   preventing programmatic saves (model auto-persist, etc.) from erasing it.
  */
 export function saveConfig(config: DocentConfig, persistApiKey = false): void {
+  // New LLM settings are a new provider as far as the degraded badge is
+  // concerned: an operator who switches away from a spent Workers AI
+  // budget and then mistypes the URL or key must not see the quota
+  // blamed for it (#456). If the budget really is still spent, the next
+  // turn sets the flag again straight away. Only the fields that decide
+  // where chat requests go count — the vision toggle and the model
+  // auto-persist also save, and should not clear a badge that is right.
+  if (llmEndpointChanged(loadConfig(), config)) clearDegradedState()
+
   const writeLocal = (cfg: DocentConfig) => {
     try {
       localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(cfg))
@@ -1443,6 +1478,8 @@ export async function* processMessage(
   mapViewContext?: MapViewContext | null,
 ): AsyncGenerator<DocentStreamChunk> {
   const cfg = config ?? await loadConfigWithKey()
+  /** Set when this turn's LLM path was refused for quota; see `fallbackReason`. */
+  let fallbackReason: DegradedReason | undefined
 
   // --- Phase 3/4: Run local engine instantly for immediate results ---
   const intent = parseIntent(input)
@@ -1662,7 +1699,11 @@ export async function* processMessage(
         }
       }
       yield { type: 'delta', text: localResponse.text }
-      yield { type: 'done', fallback: true }
+      yield {
+        type: 'done',
+        fallback: true,
+        ...(preSearchResult.degraded === 'quota_exhausted' ? { fallbackReason: 'quota_exhausted' as const } : {}),
+      }
       return
     }
 
@@ -2153,6 +2194,7 @@ export async function* processMessage(
                 if (chunk.code === 'quota_exhausted') {
                   markDegradedState('quota_exhausted')
                   quotaExhausted = true
+                  fallbackReason = 'quota_exhausted'
                 }
                 break toolLoop
 
@@ -2406,5 +2448,5 @@ export async function* processMessage(
   // Local text fallback (actions already yielded above)
   logger.warn('[Docent] Using local engine for text')
   yield { type: 'delta', text: localResponse.text }
-  yield { type: 'done', fallback: true }
+  yield { type: 'done', fallback: true, ...(fallbackReason ? { fallbackReason } : {}) }
 }
