@@ -112,12 +112,14 @@ function createHarness(
   const hudMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.01, 0.01))
   hudMesh.position.set(0, 50, 0)
   hudMesh.updateMatrixWorld()
+  const hiddenCaption = new THREE.Mesh()
+  hiddenCaption.visible = false
   const actions: VrBrowseAction[] = []
   const ctx: VrInteractionContext = {
     scene: new THREE.Scene(),
     globe: new THREE.Mesh(),
     getAllGlobes: () => [],
-    hud: { mesh: hudMesh, hitTest: () => null } as unknown as VrHudHandle,
+    hud: { mesh: hudMesh, captionMesh: hiddenCaption, hitTest: () => null } as unknown as VrHudHandle,
     browse,
     tourControls: { isVisible: () => false, mesh: new THREE.Mesh() } as unknown as VrTourControlsHandle,
     tourOverlay: {

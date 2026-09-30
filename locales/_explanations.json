@@ -275,6 +275,11 @@
   "vr.loading.failed": "Status line on the in-VR loading screen when the dataset's video failed to load; the loading screen then fades out to a placeholder globe. Keep short — drawn into a fixed-size canvas under a progress bar.",
   "vr.loading.ready": "Status line on the in-VR loading screen when the dataset is showing on the globe, just before the loading screen fades out. Single short word — drawn into a fixed-size canvas under a progress bar.",
   "vr.loading.timedOut": "Status line on the in-VR loading screen when the dataset has not appeared after several seconds; the loading screen then fades out to a placeholder globe while loading continues in the background. Keep short — drawn into a fixed-size canvas under a progress bar.",
+  "vr.voice.error": "Caption under the in-VR/AR control bar when Orbit's speech recognition failed (no microphone permission, no speech engine). Two short sentences; the second tells the user how to retry. Rendered on a narrow strip — keep it brief.",
+  "vr.voice.listening": "Label on the in-VR/AR caption strip while the microphone is capturing a question for Orbit. One or two words; the live transcript appears under it.",
+  "vr.voice.listeningHint": "Shown under the Listening label before any speech is heard. Invites a question and says the mic button sends it. Keep it to one line of about 60 characters.",
+  "vr.voice.speaker": "Label naming the speaker on the in-VR/AR caption strip when Orbit's reply is shown. Orbit is the digital docent's name — do not translate it.",
+  "vr.voice.thinking": "Label on the in-VR/AR caption strip while Orbit is composing a reply; the user's question is shown under it. One or two words.",
   "vr.zoomSlider.aria": "ARIA label for the in-AR vertical zoom slider on phones. Describes its function for screen readers; not visible text.",
   "vr.zoomSlider.label": "Visible label printed above the in-AR zoom slider on phones. Single short word — the column it sits in is narrow.",
   "vr.zoomSlider.title": "Tooltip on the in-AR zoom slider when hovered with a pointer. Brief — appears as a native browser tooltip."
