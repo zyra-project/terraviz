@@ -46,14 +46,20 @@ const QUOTA_PATTERNS: RegExp[] = [
  * Returns true when the error looks like a Workers AI quota /
  * neuron-budget exhaustion. Pattern-based; conservative on false
  * positives. Accepts any caught value (Error / string / unknown).
+ *
+ * A message that is itself a JSON error body is reduced to its
+ * error text first (`workersAiErrorMessage`), here rather than in
+ * each caller, so no caller can forget: the patterns must match the
+ * error, not a `request_id` that happens to contain `4006`.
  */
 export function isWorkersAiQuotaError(err: unknown): boolean {
-  const message =
+  const raw =
     err instanceof Error
       ? err.message
       : typeof err === 'string'
         ? err
         : ''
+  const message = workersAiErrorMessage(raw)
   if (!message) return false
   return QUOTA_PATTERNS.some(re => re.test(message))
 }
@@ -63,7 +69,8 @@ export function isWorkersAiQuotaError(err: unknown): boolean {
  * reporting it.
  *
  * `isWorkersAiQuotaError` is pattern-based, so it must only ever see
- * the platform's error *message*: run over a whole JSON envelope,
+ * the platform's error *message* (it applies this itself): run over
+ * a whole JSON envelope,
  * `\b4006\b` also matches a `request_id` such as
  * `9f1c2b7a-3e5d-4006-…`, and a 400 "No such model" came back as
  * `quota_exhausted`. A JSON object body is reduced to its error

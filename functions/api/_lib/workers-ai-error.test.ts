@@ -53,6 +53,15 @@ describe('isWorkersAiQuotaError', () => {
     expect(isWorkersAiQuotaError(null)).toBe(false)
     expect(isWorkersAiQuotaError({ message: '4006' })).toBe(false)
   })
+
+  it('classifies a JSON error body by its error, not its request id', () => {
+    // #457: every caller passes the caught error as is, so the reduction
+    // has to happen in here for all of them.
+    const notQuota = '{"errors":[{"code":5007,"message":"No such model"}],"request_id":"9f1c2b7a-3e5d-4006-8a1b-2c3d4e5f6a7b"}'
+    expect(isWorkersAiQuotaError(new Error(notQuota))).toBe(false)
+    expect(isWorkersAiQuotaError(notQuota)).toBe(false)
+    expect(isWorkersAiQuotaError(new Error('{"errors":[{"code":4006,"message":"daily free allocation used"}]}'))).toBe(true)
+  })
 })
 
 describe('workersAiErrorMessage', () => {
@@ -65,10 +74,12 @@ describe('workersAiErrorMessage', () => {
 
   it('keeps a request_id out of what the classifier sees', () => {
     // The body that came back as quota_exhausted: `\b4006\b` matched the
-    // standalone "4006" group of the request id, not the error.
+    // standalone "4006" group of the request id, not the error. The
+    // classifier now reduces the body itself (#457), so it is not fooled
+    // even when handed the whole envelope.
     const body = '{"errors":[{"code":5007,"message":"No such model"}],' +
       '"request_id":"9f1c2b7a-3e5d-4006-8a1b-2c3d4e5f6a7b"}'
-    expect(isWorkersAiQuotaError(body)).toBe(true)
+    expect(isWorkersAiQuotaError(body)).toBe(false)
     const message = workersAiErrorMessage(body)
     expect(message).toBe('5007: No such model')
     expect(isWorkersAiQuotaError(message)).toBe(false)
