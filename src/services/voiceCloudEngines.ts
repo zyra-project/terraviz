@@ -65,6 +65,108 @@ function noteKill(res: Response, code: string | undefined): void {
 // ---------------------------------------------------------------------------
 
 let currentAudio: HTMLAudioElement | null = null
+/**
+ * The request for the sentence `speak()` is waiting on. A prefetched
+ * sentence leaves the map below when its turn comes, so this is how
+ * `cancel()` still reaches its request.
+ */
+let currentRequest: AbortController | null = null
+
+/**
+ * Bumped by `cancel()`. A `speak()` whose synthesis was in flight when
+ * Stop was pressed checks it after the response lands and stays silent,
+ * rather than playing a sentence the user already stopped.
+ */
+let ttsGeneration = 0
+
+/**
+ * Synthesis requests started ahead of their turn by `prefetch()`, keyed
+ * by language + text. A reply is spoken sentence by sentence, and each
+ * `/synthesize` round trip takes 1.5-2.3 s on Workers AI (measured
+ * against a production deploy) — so without this, every sentence
+ * boundary is a silence that long while the next one is fetched. With
+ * it, the next sentence synthesizes while the current one plays.
+ */
+const prefetched = new Map<string, { audio: Promise<Synthesized>; abort: AbortController }>()
+/**
+ * Upper bound on requests started ahead — a cancelled reply abandons at
+ * most this many, plus the one for the sentence `speak()` is waiting on.
+ */
+const MAX_PREFETCHED = 3
+/** Retry a transient upstream failure once; only a gateway-class status is worth it. */
+const RETRYABLE_STATUS = new Set([500, 502, 504])
+const RETRY_DELAY_MS = 300
+
+/**
+ * The server answered, and the answer was no (a 4xx, or the kill
+ * switch). Kept apart from `null`, which is a failure that may pass
+ * (gateway errors, a dropped connection, Stop): only that one is worth
+ * asking about again.
+ */
+const REFUSED = Symbol('refused')
+type Synthesized = string | null | typeof REFUSED
+
+const prefetchKey = (text: string, lang: string): string => `${lang}\u0000${text}`
+
+/**
+ * POST one sentence to `/synthesize`, returning its base64 audio, null
+ * for a failure that may pass, or {@link REFUSED} (soft-fail: this runs
+ * inside the TTS queue chain, where a throw would reject the chain and
+ * wedge the Stop-speaking UI). One retry on a
+ * gateway error or a dropped connection: the endpoint answers 502 on a
+ * transient Workers AI failure, and without the retry that sentence is
+ * silently skipped mid-reply. Not once `signal` is aborted, though: a
+ * retry after Stop would be a second billed synthesis for audio nobody
+ * will hear.
+ */
+async function synthesize(text: string, lang: string, signal: AbortSignal): Promise<Synthesized> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await retryPause(signal)
+    if (signal.aborted) return null
+    let res: Response
+    try {
+      res = await fetch(SYNTHESIZE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, lang }),
+        signal,
+      })
+    } catch (err) {
+      if (signal.aborted) return null
+      logger.warn('[voice] cloud TTS request failed', err)
+      continue
+    }
+    if (!res.ok) {
+      if (RETRYABLE_STATUS.has(res.status)) continue
+      noteKill(res, await readCode(res))
+      return REFUSED
+    }
+    try {
+      const data = await res.json() as { audio?: string; format?: string }
+      return data.audio ?? null
+    } catch (err) {
+      // Stopped while the body was still downloading: not a bad response.
+      if (signal.aborted) return null
+      logger.warn('[voice] cloud TTS response parse failed', err)
+      return null
+    }
+  }
+  return null
+}
+
+/**
+ * The pause before the retry. It ends early when the request is aborted,
+ * so a stopped `speak()` settles at once instead of sitting out the
+ * delay — the chat's TTS chain, and the dataset audio it keeps ducked,
+ * wait on it.
+ */
+function retryPause(signal: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (signal.aborted) { resolve(); return }
+    const timer = setTimeout(resolve, RETRY_DELAY_MS)
+    signal.addEventListener('abort', () => { clearTimeout(timer); resolve() }, { once: true })
+  })
+}
 
 function playDataUrl(url: string): Promise<void> {
   return new Promise<void>((resolve) => {
@@ -93,36 +195,42 @@ export const cloudTtsEngine: TtsEngine = {
   isAvailable: () => !IS_TAURI && !cloudVoiceDisabled,
   speak: async (text, opts) => {
     if (cloudVoiceDisabled || !text) return
-    let res: Response
-    try {
-      res = await fetch(SYNTHESIZE_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, lang: opts.lang }),
-      })
-    } catch (err) {
-      logger.warn('[voice] cloud TTS request failed', err)
-      return
+    const generation = ttsGeneration
+    const key = prefetchKey(text, opts.lang)
+    const ahead = prefetched.get(key)
+    prefetched.delete(key)
+    const abort = ahead?.abort ?? new AbortController()
+    currentRequest = abort
+    let audio = await (ahead?.audio ?? synthesize(text, opts.lang, abort.signal))
+    // A prefetch makes both of its attempts early, while the previous
+    // sentence plays. If both failed, ask again now that it is this
+    // sentence's turn rather than leave a gap in the reply — unless Stop
+    // was pressed or the server turned voice off in the meantime. A
+    // refusal (a spent quota, a rate limit) is an answer, not a failure:
+    // asking again would only repeat it.
+    if (audio === null && ahead && generation === ttsGeneration && !cloudVoiceDisabled) {
+      audio = await synthesize(text, opts.lang, abort.signal)
     }
-    if (!res.ok) {
-      noteKill(res, await readCode(res))
-      return
-    }
-    // Soft-fail a bad body — this runs inside the TTS queue chain, so a
-    // throw here would reject the chain and wedge the Stop-speaking UI.
-    let data: { audio?: string; format?: string }
-    try {
-      data = await res.json()
-    } catch (err) {
-      logger.warn('[voice] cloud TTS response parse failed', err)
-      return
-    }
-    if (!data.audio) return
-    await playDataUrl(`data:audio/mpeg;base64,${data.audio}`)
+    if (currentRequest === abort) currentRequest = null
+    // Stopped while this sentence was being synthesized: stay silent.
+    if (typeof audio !== 'string' || !audio || generation !== ttsGeneration) return
+    await playDataUrl(`data:audio/mpeg;base64,${audio}`)
+  },
+  prefetch: (text, opts) => {
+    if (cloudVoiceDisabled || !text) return
+    const key = prefetchKey(text, opts.lang)
+    if (prefetched.has(key) || prefetched.size >= MAX_PREFETCHED) return
+    const abort = new AbortController()
+    prefetched.set(key, { audio: synthesize(text, opts.lang, abort.signal), abort })
   },
   cancel: () => {
+    ttsGeneration++
     currentAudio?.pause()
     currentAudio = null
+    currentRequest?.abort()
+    currentRequest = null
+    for (const { abort } of prefetched.values()) abort.abort()
+    prefetched.clear()
   },
 }
 
