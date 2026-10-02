@@ -165,7 +165,7 @@ describe('STAC public routes', () => {
     } finally { sqlite.close() }
   })
 
-  it.each(['search', 'conformance', 'collections/missing', 'items/missing', 'collections/missing/items'])('returns no-store 404 for unsupported or missing %s', async path => {
+  it.each(['collections/missing', 'items/missing', 'collections/missing/items'])('returns no-store 404 for unsupported or missing %s', async path => {
     const { sqlite, env } = stacRouteFixture()
     try {
       const response = await onRequestGet(makeCtx({ env, url: `https://node.example/api/v1/stac/${path}` }) as never)
@@ -211,14 +211,15 @@ describe('STAC public routes', () => {
         expect(response.status).toBe(200)
         expect(response.headers.get('content-type')).toContain(document.type === 'Feature' ? 'application/geo+json' : 'application/json')
         const result = await response.json() as StacCatalog | StacCollection | StacItem
-        expect(result).toEqual(document)
+        expect(result).toMatchObject({ ...document, links: expect.arrayContaining(document.links) })
         expect(result.links.every(link => new URL(link.href).protocol === 'https:')).toBe(true)
         expect(result.links.find(link => link.rel === 'self')?.href).toBe(self.href)
-        expect(JSON.stringify(result)).not.toMatch(/spoof\.example|conformsTo/)
+        expect(JSON.stringify(result)).not.toMatch(/spoof\.example/)
       }
       const product = publication.products[0]
       const alias = `https://node.example/api/v1/stac/collections/${product.collection!.id}/items/${product.item!.id}`
-      expect(await (await onRequestGet(makeCtx({ env, url: alias }) as never)).json()).toEqual(product.item)
+      expect(await (await onRequestGet(makeCtx({ env, url: alias }) as never)).json()).toEqual({ ...product.item,
+        links: product.item!.links.map(link => link.rel === 'self' ? { ...link, href: alias } : link) })
     } finally { sqlite.close() }
   })
 
@@ -245,7 +246,7 @@ describe('STAC public routes', () => {
     } finally { sqlite.close() }
   })
 
-  it.each(['limit=0', 'limit=101', 'limit=-1', 'limit=1.5', 'limit=abc', 'cursor=unknown', 'bbox=0,0,1,1'])('rejects malformed/unsupported listing query %s', async query => {
+  it.each(['limit=0', 'limit=-1', 'limit=1.5', 'limit=abc', 'cursor=unknown', 'bbox=0,0,1'])('rejects malformed/unsupported listing query %s', async query => {
     const { sqlite, env } = stacRouteFixture()
     try {
       const response = await onRequestGet(makeCtx({ env, url: `https://node.example/api/v1/stac/items?${query}` }) as never)

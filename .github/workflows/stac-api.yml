@@ -1,0 +1,67 @@
+name: STAC API Conformance
+
+on:
+  pull_request:
+    paths:
+      - 'functions/api/v1/_lib/stac*'
+      - 'functions/api/v1/stac/**'
+      - 'migrations/catalog/**'
+      - '.github/workflows/stac-api.yml'
+      - 'package*.json'
+      - 'scripts/stac-*.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: astral-sh/setup-uv@v6
+      - run: npm ci
+      - name: Official STAC API 1.0.0 validator
+        env:
+          STAC_EXTERNAL: 'true'
+        run: npm run test -- functions/api/v1/stac/external.test.ts
+
+  clients:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: astral-sh/setup-uv@v6
+      - run: npm ci
+      - name: Prepare pinned STAC Browser
+        run: |
+          git clone --depth 1 --branch v5.1.0 https://github.com/radiantearth/stac-browser.git .wrangler/stac-browser
+          npm ci --prefix .wrangler/stac-browser
+          SB_historyMode='hash' npm run build --prefix .wrangler/stac-browser
+          npx playwright install --with-deps chromium
+      - name: Install QGIS provider
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-qgis
+      - name: Real clients and independent index ingestion
+        env:
+          STAC_CLIENTS: 'true'
+          STAC_BROWSER_DIST: '.wrangler/stac-browser/dist'
+          STAC_QGIS_PYTHON: '/usr/bin/python3'
+        run: npm run test -- functions/api/v1/stac/clients.test.ts
+      - name: Retain browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stac-browser-client
+          path: .wrangler/stac-browser-item.png
+          if-no-files-found: warn

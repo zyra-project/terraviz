@@ -33,7 +33,7 @@ describe('STAC traversal and reachability audit', () => {
       if (failNext) expect(report.issues).toEqual([
         expect.objectContaining({ code: 'document_http_503' }), expect.objectContaining({ code: 'document_http_503' }),
       ])
-      else expect(report).toMatchObject({ documents: 1 + count * 4 + 4 + (count > 50 ? 2 : 0), assets: count + 1, schemas: 1, issues: [] })
+      else expect(report).toMatchObject({ documents: 1 + count * 3 + 2 + (count > 50 ? 2 : 0), assets: count + 1, schemas: 1, issues: [] })
       const urls = fetchImpl.mock.calls.map(([input]) => new URL(String(input)))
       expect(urls.some(url => url.pathname === '/api/v1/stac/collections')).toBe(true)
       expect(urls.some(url => url.pathname === '/api/v1/stac/items')).toBe(true)

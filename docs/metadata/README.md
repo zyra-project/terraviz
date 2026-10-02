@@ -1148,6 +1148,9 @@ the four step commits, immutable storage contract and rollout limits.
 
 ### Phase 4: STAC API 1.0.0
 
+**Implementation:** [Phase 4 implementation](PHASE4_IMPLEMENTATION.md) records
+the HTTP contracts, indexed search, external validator results and client checks.
+
 1. Implement the required Core and OGC API Features conformance classes.
 2. Add `/conformance` and service description resources.
 3. Implement Item Search over D1, including geometry and datetime indexes.

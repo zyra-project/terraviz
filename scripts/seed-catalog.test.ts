@@ -107,6 +107,10 @@ const EXPECTED_INDEXES = [
   'idx_workflow_runs_active',
   'idx_workflow_runs_workflow',
   'idx_workflows_due',
+  'stac_datasets_datetime',
+  'stac_datasets_geometry',
+  'stac_history_geometry',
+  'stac_history_items_datetime',
   'stac_history_items_publication',
   'stac_history_publications_dataset',
 ]
