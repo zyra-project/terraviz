@@ -3736,10 +3736,11 @@ declaration:
 
 - **In a bundle.** A `layout.json` that states what `(u, v)` address
   must say `equirectangular`, and is refused for anything else. sphere-sim
-  writes no such field yet (see "Upstream requests"). One that states
-  nothing reads as before. That leaves one route open: a sphere-sim
-  bundle for a model whose own UV set is a fisheye, as a domemaster
-  dome's is. It stays open until sphere-sim states the frame.
+  writes no such field yet; sphere-sim#57 asks for it (see "Upstream
+  requests"). One that states nothing reads as before. That leaves one
+  route open: a sphere-sim bundle for a model whose own UV set is a
+  fisheye, as a domemaster dome's is. It stays open until sphere-sim
+  states the frame.
 - **For anything without a layout,** the operator's answer to the
   question states the frame as well as the place.
 
@@ -4568,9 +4569,10 @@ rotation in it. Its bundles carry a root `layout.json`,
   changes no pixel, so one set placed either way is one set.
 - **What `(u, v)` address, where the layout says so** (`uv`, added
   2026-10-02): `equirectangular`, or the import is refused.
-  - sphere-sim writes no such field yet. A request drafted the same day
-    asks for it under this name, `equirectangular` for the analytic
-    sphere and the model's own UV set for a `.glb`.
+  - sphere-sim writes no such field yet.
+    [zyra-project/sphere-sim#57](https://github.com/zyra-project/sphere-sim/issues/57),
+    filed the same day, asks for it under this name: `equirectangular`
+    for the analytic sphere, and `model` for a `.glb`'s own UV set.
   - This build reads it ahead of its writer. It is the one field inside
     `@1` not ignored when unknown, because ignoring it is the misreading.
   - A layout without it reads as before (§"Which surfaces").

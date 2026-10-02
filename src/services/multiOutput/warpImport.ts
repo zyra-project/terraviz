@@ -256,8 +256,9 @@ type LayoutParse =
  * a reader that picked one would be the misplacement the file ends.
  * Fields this build does not know are ignored: sphere-sim adds fields
  * within a format and bumps it only for ones a reader would misread. `uv`
- * is the one added field read ahead of its writer, because ignoring it is
- * the misreading: where present it must say `equirectangular`.
+ * is the one added field read ahead of its writer (sphere-sim#57), because
+ * ignoring it is the misreading: where present it must say
+ * `equirectangular`.
  * Whether the viewports fit the framebuffer and share no pixels is
  * `placeWarpSet`'s, run on the paired set after this.
  */
