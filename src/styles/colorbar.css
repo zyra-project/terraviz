@@ -44,6 +44,9 @@
   font-size: 0.6875rem;
   text-align: start;
   cursor: default;
+  /* Steps aside with the globe it belongs to (`src/ui/globePanelOffset.ts`). */
+  translate: var(--panel-push-view, 0px) 0;
+  transition: translate 0.65s cubic-bezier(0.45, 0, 0.15, 1);
 }
 
 /* Mirrors `.map-viewport:last-child .panel-legend` — clears the Tools
@@ -54,7 +57,7 @@
 
 button.panel-colorbar {
   cursor: pointer;
-  transition: border-color 120ms ease, transform 120ms ease;
+  transition: border-color 120ms ease, transform 120ms ease, translate 0.65s cubic-bezier(0.45, 0, 0.15, 1);
 }
 
 button.panel-colorbar:hover,
@@ -274,6 +277,7 @@ button.panel-colorbar:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .panel-colorbar,
   button.panel-colorbar {
     transition: none;
   }

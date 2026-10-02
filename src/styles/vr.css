@@ -37,7 +37,16 @@
     cursor: pointer;
     min-height: calc(36px * var(--ui-scale));
     pointer-events: auto;
-    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    /* Steps aside for the browse panel and the Tools popover, in step
+       with them and the globe (`src/ui/globePanelOffset.ts`). */
+    translate: var(--panel-push-top, 0px) 0;
+    transition: background 0.15s, color 0.15s, border-color 0.15s, translate 0.65s cubic-bezier(0.45, 0, 0.15, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #vr-enter-btn {
+        transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
 }
 
 #vr-enter-btn:hover,
@@ -57,8 +66,9 @@
 }
 
 /* Respect the app's other mode-style overlays. Hide the button when
-   the browse overlay is open so it doesn't float over that content. */
-body.browse-open #vr-enter-btn {
+   the browse overlay is open so it doesn't float over that content —
+   unless it has stepped aside and stands beside the panel instead. */
+body.browse-open:not(.buttons-beside-panel) #vr-enter-btn {
     display: none;
 }
 

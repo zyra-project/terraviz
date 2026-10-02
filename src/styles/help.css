@@ -27,7 +27,15 @@
     cursor: pointer;
     min-height: calc(36px * var(--ui-scale));
     pointer-events: auto;
-    transition: color 0.15s, border-color 0.15s;
+    /* Steps aside for the browse panel and the Tools popover, in step
+       with them and the globe (`src/ui/globePanelOffset.ts`). */
+    translate: var(--panel-push-top, 0px) 0;
+    transition: color 0.15s, border-color 0.15s, translate 0.65s cubic-bezier(0.45, 0, 0.15, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+    #help-trigger {
+        transition: color 0.15s, border-color 0.15s;
+    }
 }
 #help-trigger:hover,
 #help-trigger:focus-visible {
@@ -39,7 +47,9 @@
     font-size: calc(0.95rem * var(--ui-scale));
     line-height: 1;
 }
-body.browse-open #help-trigger,
+/* Hidden under the browse panel only where it cannot stand beside it
+   (`buttons-beside-panel`: it has stepped aside instead). */
+body.browse-open:not(.buttons-beside-panel) #help-trigger,
 body.tour-authoring-open #help-trigger {
     display: none;
 }

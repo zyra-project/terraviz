@@ -8,6 +8,20 @@
 
 /* --- Transport controls --- */
 
+/* The transport steps aside for the browse panel with the Tools bar
+   above it, in step with it and the globe
+   (`src/ui/globePanelOffset.ts` sets the distance). Not for the Tools
+   popover, which opens above the bar and does not reach down here. */
+#playback-controls {
+    translate: var(--panel-push-bar, 0px) 0;
+    transition: translate 0.65s cubic-bezier(0.45, 0, 0.15, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+    #playback-controls {
+        transition: none;
+    }
+}
+
 .transport-btn {
     min-width: var(--component-playback-transport-btn-min-width);
     padding: calc(0.3rem * var(--ui-scale)) calc(0.4rem * var(--ui-scale));
@@ -38,10 +52,21 @@
     -webkit-backdrop-filter: var(--glass-blur);
     border: 1px solid var(--white-o08);
     border-radius: var(--component-playback-time-label-radius);
+    /* Steps aside for the browse panel and the Tools popover, in step
+       with them and the globe (`src/ui/globePanelOffset.ts`). */
+    translate: var(--panel-push-top, 0px) 0;
+    transition: translate 0.65s cubic-bezier(0.45, 0, 0.15, 1);
 }
-/* When the browse overlay is open, the help trigger is hidden,
-   so let the time label return to the corner. */
-body.browse-open #time-label {
+@media (prefers-reduced-motion: reduce) {
+    #time-label {
+        transition: none;
+    }
+}
+/* When the browse overlay is open and the help trigger is hidden
+   under it, let the time label return to the corner. Where the
+   corner has stepped aside instead (`buttons-beside-panel`), the
+   trigger is still there and the label keeps its place beside it. */
+body.browse-open:not(.buttons-beside-panel) #time-label {
     inset-inline-end: calc(0.75rem * var(--ui-scale));
 }
 

@@ -34,9 +34,10 @@ import {
   skipNext as skipNextPlaylistEntry,
 } from './services/playlistPlayback'
 import { updateMapControlsPosition } from './ui/mapControlsUI'
-import { initToolsMenu, syncToolsMenuState, syncToolsMenuLayout, pulseBrowseButton } from './ui/toolsMenuUI'
+import { initToolsMenu, closeToolsMenu, syncToolsMenuState, syncToolsMenuLayout, pulseBrowseButton } from './ui/toolsMenuUI'
 import { closeOutputUI, initOutputUI, openOutputUI } from './ui/outputUI'
 import { openCreditsPanel } from './ui/creditsPanel'
+import { initGlobePanelOffset } from './ui/globePanelOffset'
 import { initChatUI, openChat, openChatSettings, notifyDatasetChanged, showChatTrigger, hideChatTrigger, closeChat, flushPendingGlobeActions } from './ui/chatUI'
 import { loadViewPreferences, saveViewPreferences, type ViewPreferences } from './utils/viewPreferences'
 import { renderColorbar, openDisplayControls, closeDisplayControls } from './ui/colorbarUI'
@@ -505,7 +506,14 @@ class InteractiveSphere {
       this.initWindowChrome()
       initToolsMenu(this.viewports, {
         onSetLayout: (layout) => this.viewports.setLayout(layout),
-        onOpenBrowse: () => this.openBrowsePanel(),
+        // The Browse button closes the panel it opened, as the
+        // Tools button does. Through the panel's own close button, so
+        // both ways out are the same one (hide, announce).
+        onOpenBrowse: () => {
+          const close = document.getElementById('browse-close')
+          if (document.body.classList.contains('browse-open') && close) close.click()
+          else this.openBrowsePanel()
+        },
         onOpenOrbitSettings: () => openChatSettings(),
         onOpenCredits: (trigger) => openCreditsPanel(this.viewports, trigger),
         // Desktop-only: on web `startMultiOutput` hands back the shared
@@ -3944,6 +3952,23 @@ class InteractiveSphere {
     })
 
     document.getElementById('home-btn')?.addEventListener('click', () => this.goHome())
+    // The globe moves aside for the browse panel and the Tools popover,
+    // to the middle of what they leave free.
+    const mapGrid = document.getElementById('map-grid')
+    if (mapGrid) {
+      initGlobePanelOffset({
+        grid: mapGrid,
+        resizeMaps: () => {
+          for (const renderer of this.viewports.getAll()) {
+            // `redraw` paints now rather than on the next frame.
+            renderer.getMap()?.resize().redraw()
+          }
+        },
+        // Through the panel's own close button: hide and announce.
+        closeBrowse: () => document.getElementById('browse-close')?.click(),
+        closeTools: closeToolsMenu,
+      })
+    }
 
     // Browse panel opens via the Tools menu's Browse button (see
     // openBrowsePanel). No standalone peek-out toggle tab.
