@@ -125,6 +125,46 @@ const DATASETS: WireDatasetFixture[] = [
   },
 ]
 
+/** 96 distinct Category tags — enough that the browse tag cloud wraps
+ *  to about six rows in the 1440px catalog layout. The cloud is only
+ *  clamped when the 2-row preview saves more room than its toggle
+ *  takes, and a cloud of three or four rows (48 tags here, or the
+ *  production catalog's ~57) doesn't get there at this width. */
+const TAG_CLOUD_TAGS = [
+  'Atmosphere', 'Ocean', 'Land', 'Water', 'Air', 'Snow and Ice',
+  'Weather', 'Climate', 'Hurricanes', 'Sea Surface Temperature', 'Carbon Cycle', 'Biosphere',
+  'Earthquakes', 'Volcanoes', 'Fires', 'Aerosols', 'Precipitation', 'Wind',
+  'Clouds', 'Space', 'Moon', 'Mars', 'Human Impact', 'Population',
+  'Agriculture', 'Drought', 'Floods', 'Glaciers', 'Sea Level', 'Ocean Currents',
+  'Coral Reefs', 'Fisheries', 'Air Quality', 'Ozone', 'Greenhouse Gases', 'Solar System',
+  'Sun', 'Plate Tectonics', 'Tsunamis', 'El Niño', 'Monsoons', 'Tornadoes',
+  'Lightning', 'Night Lights', 'Urbanization', 'Deforestation', 'Wildlife Migration', 'Permafrost',
+  'Sea Ice', 'Ice Sheets', 'Snow Cover', 'Soil Moisture', 'Groundwater', 'Rivers',
+  'Lakes', 'Wetlands', 'Forests', 'Grasslands', 'Deserts', 'Mountains',
+  'Coastlines', 'Islands', 'Estuaries', 'Phytoplankton', 'Marine Mammals', 'Sea Turtles',
+  'Seabirds', 'Sharks', 'Ocean Acidification', 'Salinity', 'Tides', 'Waves',
+  'Storm Surge', 'Heat Waves', 'Cold Fronts', 'Jet Stream', 'Trade Winds', 'Cyclones',
+  'Dust Storms', 'Volcanic Ash', 'Methane', 'Nitrogen Dioxide', 'Water Vapor', 'Radiation',
+  'Aurora', 'Magnetic Field', 'Solar Wind', 'Eclipses', 'Planets', 'Asteroids',
+  'Shipping Routes', 'Air Traffic', 'Energy', 'Land Cover', 'Land Use', 'Topography',
+]
+
+/** Twenty-four rows carrying four tags each, so every tag in
+ *  {@link TAG_CLOUD_TAGS} shows up as a chip. */
+const TAG_CLOUD_DATASETS: WireDatasetFixture[] = Array.from({ length: 24 }, (_, i) => {
+  const tags = TAG_CLOUD_TAGS.slice(i * 4, i * 4 + 4)
+  return {
+    id: `INTERNAL_TAG_CLOUD_${String(i + 1).padStart(2, '0')}`,
+    title: `${tags[0]} Overview`,
+    format: 'image/png',
+    dataLink: '/assets/equirect-sample.png',
+    organization: 'NOAA',
+    abstractTxt: `A sample row tagged ${tags.join(', ')}.`,
+    tags,
+    boundingBox: WORLDWIDE,
+  }
+})
+
 /** Route-stub rules for the catalog + tours endpoints. */
 export function catalogFixtures(): FixtureRule[] {
   return [
@@ -177,5 +217,21 @@ export function catalogReportFixtures(): FixtureRule[] {
     // exactly as it does against a backend without embeddings.
     { url: '/related', json: { datasets: [], degraded: true } },
     { url: '/api/', passthrough: true },
+  ]
+}
+
+/**
+ * {@link catalogReportFixtures} with a 96-tag catalog, for the one
+ * visual-report scene that captures the browse tag cloud's clamp.
+ *
+ * The shared fixture's handful of tags never wraps past two rows, so
+ * no other scene renders the clamp. Serving the long catalog only
+ * here leaves every existing scene's baseline alone. Rules match in
+ * order, so this catalog rule shadows the shared one.
+ */
+export function catalogTagCloudReportFixtures(): FixtureRule[] {
+  return [
+    { url: '/api/v1/catalog', json: { datasets: TAG_CLOUD_DATASETS } },
+    ...catalogReportFixtures(),
   ]
 }
