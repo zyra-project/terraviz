@@ -11,9 +11,23 @@ import {
   clearChat,
   notifyDatasetChanged,
   submitFeedback,
+  getImmersiveVoiceState,
+  toggleImmersiveVoice,
+  endImmersiveVoice,
 } from './chatUI'
 import type { ChatCallbacks } from './chatUI'
-import { loadConfig } from '../services/docentService'
+import { loadConfig, saveConfig } from '../services/docentService'
+import { t } from '../i18n'
+import { until } from '../test-utils'
+import {
+  createFakeSttEngine,
+  registerSttEngine,
+  registerTtsEngine,
+  resetVoiceEngines,
+  type SttEngine,
+  type SttStartOptions,
+  type TtsEngine,
+} from '../services/voiceService'
 import {
   clearDegraded,
   markDegraded,
@@ -1365,5 +1379,469 @@ describe('§A6 — the Analyze chip', () => {
     clearChat()
     const view = await renderChip({ type: 'show-analysis', scope: 'view' })
     expect(view!.textContent).not.toBe(whole!.textContent)
+  })
+})
+
+describe('immersive voice (VR/AR HUD)', () => {
+  // `local` sorts first in the `auto` resolution order, so these fakes
+  // win over whatever the browser registers at init.
+  function fakeTts(spoken: string[]) {
+    return {
+      provider: 'local' as const,
+      supportsLanguage: () => true,
+      isAvailable: () => true,
+      speak: async (text: string): Promise<void> => { spoken.push(text) },
+      cancel: vi.fn<() => void>(),
+    } satisfies TtsEngine
+  }
+
+  /** An STT engine that reports a partial and waits for stop() to commit it. */
+  function heldSttEngine(partial: string): SttEngine {
+    return {
+      provider: 'local',
+      supportsLanguage: () => true,
+      isAvailable: () => true,
+      start: (opts: SttStartOptions) => {
+        queueMicrotask(() => opts.onResult({ transcript: partial, isFinal: false }))
+        return {
+          stop: () => {
+            opts.onResult({ transcript: partial, isFinal: true })
+            opts.onEnd()
+          },
+        }
+      },
+    }
+  }
+
+  async function replyWith(...chunks: Array<Record<string, unknown>>): Promise<void> {
+    const { processMessage } = await import('../services/docentService')
+    vi.mocked(processMessage).mockImplementation(async function* () {
+      for (const chunk of chunks) yield chunk as never
+      yield { type: 'done' as const, fallback: false }
+    })
+  }
+
+  const LOAD_ICE = { type: 'action', action: { type: 'load-dataset', datasetId: 'DS_ICE', datasetTitle: 'Sea Ice' } }
+
+  /**
+   * How many sends have run to their last step. `handleSend` announces
+   * this when it is done, so it anchors a "didn't happen" assertion on
+   * the chain having finished rather than on a count of event-loop turns.
+   */
+  function sendsFinished(cb: MockCallbacks): number {
+    return cb.announce.mock.calls.filter((c) => c[0] === t('chat.announce.docentResponded')).length
+  }
+
+  /**
+   * Whether a turn has restored the ducked dataset audio. It does that
+   * once its speech has drained, so this anchors "nothing more was
+   * spoken" where the send finishing would come too early.
+   */
+  function audioRestored(cb: MockCallbacks): boolean {
+    return (cb.onVoiceAudioFocus as ReturnType<typeof vi.fn>).mock.calls.some((c) => c[0] === false)
+  }
+
+  function sendFromPanel(text: string): void {
+    ;(document.getElementById('chat-input') as HTMLTextAreaElement).value = text
+    ;(document.getElementById('chat-send') as HTMLButtonElement).click()
+  }
+
+  beforeEach(() => {
+    resetVoiceEngines()
+    endImmersiveVoice()
+  })
+
+  afterEach(() => {
+    resetVoiceEngines()
+    endImmersiveVoice()
+  })
+
+  it('offers no voice when no STT engine resolves, so the HUD hides its mic', () => {
+    initChatUI(makeCallbacks())
+    expect(getImmersiveVoiceState()).toBeNull()
+  })
+
+  it('runs a whole spoken turn: listen, send, speak, then let the caption linger', async () => {
+    const spoken: string[] = []
+    registerSttEngine(createFakeSttEngine({ provider: 'local', transcript: 'show me sea ice' }))
+    registerTtsEngine(fakeTts(spoken))
+    await replyWith({ type: 'delta', text: 'Here is sea ice. It shrinks every summer.' })
+    initChatUI(makeCallbacks())
+    expect(getImmersiveVoiceState()).toEqual({ phase: 'idle', caption: '' })
+
+    toggleImmersiveVoice()
+    expect(getImmersiveVoiceState()?.phase).toBe('listening')
+
+    await vi.waitFor(() => expect(spoken).toHaveLength(2))
+    await vi.waitFor(() => expect(getImmersiveVoiceState()?.phase).toBe('idle'))
+    expect(getMessages()[0]).toMatchObject({ role: 'user', text: 'show me sea ice' })
+    // Spoken although voiceAutoSpeak is off: voice in, voice out.
+    expect(loadConfig().voiceAutoSpeak).toBe(false)
+    expect(spoken).toEqual(['Here is sea ice.', 'It shrinks every summer.'])
+    // The last sentence stays readable for a moment, then clears.
+    expect(getImmersiveVoiceState()?.caption).toBe('It shrinks every summer.')
+    expect(getImmersiveVoiceState(Date.now() + 60_000)).toEqual({ phase: 'idle', caption: '' })
+  })
+
+  it('leaves a panel turn silent when auto-speak is off', async () => {
+    const spoken: string[] = []
+    registerTtsEngine(fakeTts(spoken))
+    await replyWith({ type: 'delta', text: 'Here is sea ice.' })
+    const cb = makeCallbacks()
+    initChatUI(cb)
+    sendFromPanel('show me sea ice')
+    await until(() => sendsFinished(cb) === 1, 'the send finished')
+    await until(() => audioRestored(cb), 'the turn drained')
+    expect(getMessages()[1]?.text).toBe('Here is sea ice.')
+    expect(spoken).toEqual([])
+  })
+
+  it('carries out the first Load in the reply, since no one can tap it in the headset', async () => {
+    registerSttEngine(createFakeSttEngine({ provider: 'local', transcript: 'show me sea ice' }))
+    await replyWith({ type: 'delta', text: 'Sea ice is a good fit.' }, LOAD_ICE)
+    const cb = makeCallbacks()
+    initChatUI(cb)
+
+    toggleImmersiveVoice()
+    await vi.waitFor(() => expect(cb.onLoadDataset).toHaveBeenCalledWith('DS_ICE'))
+    expect(cb.onLoadDataset).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not swap the dataset the reply is about for a related one it also suggests', async () => {
+    // Orbit often attaches a Load for the dataset being viewed. The
+    // reply's first Load is the rule, and that one is already showing.
+    registerSttEngine(createFakeSttEngine({ provider: 'local', transcript: 'what am I looking at' }))
+    await replyWith(
+      { type: 'delta', text: 'This is sea surface temperature. Sea ice is related.' },
+      { type: 'action', action: { type: 'load-dataset', datasetId: 'DS_SST', datasetTitle: 'Sea Surface Temperature' } },
+      LOAD_ICE,
+      { type: 'action', action: { type: 'fly-to', lat: 10, lon: 20 } },
+    )
+    const cb = makeCallbacks()
+    cb.getCurrentDataset.mockReturnValue({ id: 'DS_SST' })
+    initChatUI(cb)
+
+    toggleImmersiveVoice()
+    await until(() => sendsFinished(cb) === 1, 'the send finished')
+    expect(cb.onLoadDataset).not.toHaveBeenCalled()
+    // Nothing is loading, so the reply's fly-to has no load to wait for.
+    expect(cb.onFlyTo).toHaveBeenCalledWith(10, 20, undefined)
+  })
+
+  it('holds the fly-to until the Load it carried out lands', async () => {
+    registerSttEngine(createFakeSttEngine({ provider: 'local', transcript: 'show me sea ice' }))
+    await replyWith(
+      { type: 'delta', text: 'Sea ice is a good fit.' },
+      LOAD_ICE,
+      { type: 'action', action: { type: 'fly-to', lat: 10, lon: 20 } },
+    )
+    const cb = makeCallbacks()
+    cb.getCurrentDataset.mockReturnValue({ id: 'DS_SST' })
+    initChatUI(cb)
+
+    toggleImmersiveVoice()
+    await until(() => sendsFinished(cb) === 1, 'the send finished')
+    expect(cb.onLoadDataset.mock.calls).toEqual([['DS_ICE']])
+    // The host flushes it once the dataset is on the globe, as after a click.
+    expect(cb.onFlyTo).not.toHaveBeenCalled()
+  })
+
+  it('leaves the Load as a button on a panel turn', async () => {
+    await replyWith({ type: 'delta', text: 'Sea ice is a good fit.' }, LOAD_ICE)
+    const cb = makeCallbacks()
+    initChatUI(cb)
+    sendFromPanel('show me sea ice')
+    await until(() => sendsFinished(cb) === 1, 'the send finished')
+    expect(getMessages()[1]?.actions).toHaveLength(1)
+    expect(cb.onLoadDataset).not.toHaveBeenCalled()
+  })
+
+  it('does not load an alternative over a dataset the turn already auto-loaded', async () => {
+    registerSttEngine(createFakeSttEngine({ provider: 'local', transcript: 'show me sea ice' }))
+    await replyWith({
+      type: 'auto-load',
+      action: { type: 'load-dataset', datasetId: 'DS_ICE', datasetTitle: 'Sea Ice' },
+      alternatives: [{ type: 'load-dataset', datasetId: 'DS_SNOW', datasetTitle: 'Snow Cover' }],
+    })
+    const cb = makeCallbacks()
+    initChatUI(cb)
+
+    toggleImmersiveVoice()
+    await vi.waitFor(() => expect(getMessages()).toHaveLength(2))
+    await vi.waitFor(() => expect(getImmersiveVoiceState()?.phase).toBe('idle'))
+    expect(cb.onLoadDataset.mock.calls).toEqual([['DS_ICE']])
+  })
+
+  it('captions the live transcript, and a second tap sends what was heard', async () => {
+    registerSttEngine(heldSttEngine('where is the ozone hole'))
+    await replyWith({ type: 'delta', text: 'Over Antarctica.' })
+    initChatUI(makeCallbacks())
+
+    toggleImmersiveVoice()
+    await vi.waitFor(() => expect(getImmersiveVoiceState()).toEqual({ phase: 'listening', caption: 'where is the ozone hole' }))
+
+    toggleImmersiveVoice()
+    await vi.waitFor(() => expect(getMessages()[0]?.text).toBe('where is the ozone hole'))
+  })
+
+  it('shows thinking after the send tap while the engine is still transcribing', async () => {
+    // Cloud STT has no live transcript: stop() uploads the recording,
+    // and the session only ends when the transcription comes back.
+    let answer: () => void = () => {}
+    registerSttEngine({
+      provider: 'local',
+      supportsLanguage: () => true,
+      isAvailable: () => true,
+      start: (opts) => ({
+        stop: () => {
+          answer = () => {
+            opts.onResult({ transcript: 'where is the ozone hole', isFinal: true })
+            opts.onEnd()
+          }
+        },
+      }),
+    })
+    await replyWith({ type: 'delta', text: 'Over Antarctica.' })
+    const cb = makeCallbacks()
+    initChatUI(cb)
+
+    toggleImmersiveVoice()
+    expect(getImmersiveVoiceState()?.phase).toBe('listening')
+    toggleImmersiveVoice()
+    // Not "Listening… tap the mic to send" for the whole upload.
+    expect(getImmersiveVoiceState()).toEqual({ phase: 'thinking', caption: '' })
+
+    answer()
+    await until(() => sendsFinished(cb) === 1, 'the send finished')
+    expect(getMessages()[0]).toMatchObject({ role: 'user', text: 'where is the ozone hole' })
+  })
+
+  it('shows the reply as the caption when no voice can speak it', async () => {
+    registerSttEngine(createFakeSttEngine({ provider: 'local', transcript: 'show me sea ice' }))
+    await replyWith({ type: 'delta', text: 'Here is **sea ice**.' })
+    initChatUI(makeCallbacks())
+
+    toggleImmersiveVoice()
+    await vi.waitFor(() => expect(getMessages()).toHaveLength(2))
+    await vi.waitFor(() => expect(getImmersiveVoiceState()?.phase).toBe('idle'))
+    expect(getImmersiveVoiceState()?.caption).toBe('Here is sea ice.')
+  })
+
+  it('ends the turn quietly when nothing was heard', async () => {
+    registerSttEngine(createFakeSttEngine({ provider: 'local', transcript: '' }))
+    initChatUI(makeCallbacks())
+
+    toggleImmersiveVoice()
+    await vi.waitFor(() => expect(getImmersiveVoiceState()).toEqual({ phase: 'idle', caption: '' }))
+    expect(getMessages()).toHaveLength(0)
+  })
+
+  it('reports a recognition error on the HUD for a moment', async () => {
+    registerSttEngine({
+      provider: 'local',
+      supportsLanguage: () => true,
+      isAvailable: () => true,
+      start: (opts) => {
+        queueMicrotask(() => { opts.onError(new Error('not-allowed')); opts.onEnd() })
+        return { stop: () => {} }
+      },
+    })
+    initChatUI(makeCallbacks())
+
+    toggleImmersiveVoice()
+    await vi.waitFor(() => expect(getImmersiveVoiceState()?.phase).toBe('error'))
+    expect(getImmersiveVoiceState(Date.now() + 60_000)?.phase).toBe('idle')
+  })
+
+  it('can try again after an engine that fails inside start()', () => {
+    // The browser engine reports the error and ends before start()
+    // returns when `rec.start()` throws. The session it then hands back
+    // is already over, and must not be kept as the live one.
+    const start = vi.fn((opts: SttStartOptions) => {
+      opts.onError(new Error('not-allowed'))
+      opts.onEnd()
+      return { stop: () => {} }
+    })
+    registerSttEngine({ provider: 'local', supportsLanguage: () => true, isAvailable: () => true, start })
+    initChatUI(makeCallbacks())
+
+    toggleImmersiveVoice()
+    expect(getImmersiveVoiceState()?.phase).toBe('error')
+    toggleImmersiveVoice()
+    toggleImmersiveVoice()
+    expect(start).toHaveBeenCalledTimes(3)
+    expect(getImmersiveVoiceState()?.phase).toBe('error')
+  })
+
+  it('stops speaking when the mic is tapped mid-reply', async () => {
+    let finish: () => void = () => {}
+    const tts = fakeTts([])
+    tts.speak = () => new Promise<void>((resolve) => { finish = resolve })
+    tts.cancel.mockImplementation(() => finish())
+    registerSttEngine(createFakeSttEngine({ provider: 'local', transcript: 'tell me about El Niño' }))
+    registerTtsEngine(tts)
+    await replyWith({ type: 'delta', text: 'El Niño warms the Pacific. It shifts rainfall worldwide.' })
+    initChatUI(makeCallbacks())
+
+    toggleImmersiveVoice()
+    await vi.waitFor(() => expect(getImmersiveVoiceState()?.phase).toBe('speaking'))
+    toggleImmersiveVoice()
+    expect(tts.cancel).toHaveBeenCalled()
+    await vi.waitFor(() => expect(getImmersiveVoiceState()?.phase).toBe('idle'))
+  })
+
+  it('goes back to thinking when speech is stopped while the reply is still streaming', async () => {
+    // Sentences are spoken as they arrive, so the stop tap can land
+    // before the model has finished — here the stream stays open after
+    // two sentences.
+    const { processMessage } = await import('../services/docentService')
+    let release: () => void = () => {}
+    vi.mocked(processMessage).mockImplementation(async function* () {
+      yield { type: 'delta' as const, text: 'El Niño warms the Pacific. It shifts rainfall worldwide.' }
+      await new Promise<void>((r) => { release = r })
+      yield { type: 'delta' as const, text: ' It also weakens the trade winds.' }
+      yield { type: 'done' as const, fallback: false }
+    })
+    let finish: () => void = () => {}
+    const spoken: string[] = []
+    const tts = fakeTts(spoken)
+    tts.speak = (text: string) => {
+      spoken.push(text)
+      return new Promise<void>((resolve) => { finish = resolve })
+    }
+    tts.cancel.mockImplementation(() => finish())
+    const stt = createFakeSttEngine({ provider: 'local', transcript: 'tell me about El Niño' })
+    const start = vi.spyOn(stt, 'start')
+    registerSttEngine(stt)
+    registerTtsEngine(tts)
+    initChatUI(makeCallbacks())
+
+    toggleImmersiveVoice()
+    await until(() => getImmersiveVoiceState()?.phase === 'speaking', 'Orbit speaking the first sentence')
+    toggleImmersiveVoice()
+    expect(tts.cancel).toHaveBeenCalled()
+    // Silenced, but the reply is still on its way: there is nothing
+    // left to stop, and a new question can't start yet either.
+    expect(getImmersiveVoiceState()?.phase).toBe('thinking')
+    toggleImmersiveVoice()
+    expect(getImmersiveVoiceState()?.phase).toBe('thinking')
+    expect(start).toHaveBeenCalledTimes(1)
+
+    release()
+    await until(() => getImmersiveVoiceState()?.phase === 'idle', 'the turn ended with the stream')
+    expect(spoken).toEqual(['El Niño warms the Pacific.'])
+  })
+
+  it('keeps a HUD turn alive when the reply it interrupted finishes draining', async () => {
+    // A panel reply is still being read aloud when the HUD mic is
+    // tapped — asked in 2D, then entered VR while Orbit was talking.
+    let finish: () => void = () => {}
+    const tts = fakeTts([])
+    const speak = vi.fn<(text: string) => Promise<void>>()
+      .mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve }))
+      .mockResolvedValue(undefined)
+    tts.speak = speak
+    tts.cancel.mockImplementation(() => finish())
+    registerSttEngine(heldSttEngine('show me sea ice'))
+    registerTtsEngine(tts)
+    saveConfig({ ...loadConfig(), voiceAutoSpeak: true })
+    await replyWith({ type: 'delta', text: 'Oceans cover most of the planet.' })
+    const cb = makeCallbacks()
+    initChatUI(cb)
+    sendFromPanel('tell me about the oceans')
+    await until(() => speak.mock.calls.length === 1, 'the panel reply being read aloud')
+
+    toggleImmersiveVoice()
+    expect(getImmersiveVoiceState()?.phase).toBe('listening')
+    // The barge-in cancelled the old speech; its turn restores the
+    // ducked audio when that drains, and must end nothing else.
+    await until(() => audioRestored(cb), 'the old reply drained')
+    expect(getImmersiveVoiceState()?.phase).toBe('listening')
+
+    // So the turn is still the HUD's: its reply's Load is carried out.
+    await replyWith({ type: 'delta', text: 'Sea ice is a good fit.' }, LOAD_ICE)
+    toggleImmersiveVoice()
+    await until(() => sendsFinished(cb) === 2, 'the HUD turn finished')
+    expect(cb.onLoadDataset.mock.calls).toEqual([['DS_ICE']])
+  })
+
+  it('stops listening without sending when the immersive session ends', async () => {
+    const held = heldSttEngine('hello')
+    const sessionEnded = vi.fn()
+    registerSttEngine({
+      ...held,
+      start: (opts) => held.start({ ...opts, onEnd: () => { opts.onEnd(); sessionEnded() } }),
+    })
+    initChatUI(makeCallbacks())
+    toggleImmersiveVoice()
+    await vi.waitFor(() => expect(getImmersiveVoiceState()?.caption).toBe('hello'))
+    endImmersiveVoice()
+    expect(getImmersiveVoiceState()).toEqual({ phase: 'idle', caption: '' })
+    // The session committed "hello" and ran to its end — the point
+    // where a transcript is normally sent.
+    expect(sessionEnded).toHaveBeenCalledTimes(1)
+    // Left in the input for the 2D user to send or discard.
+    expect(getMessages()).toHaveLength(0)
+    expect((document.getElementById('chat-input') as HTMLTextAreaElement).value).toBe('hello')
+  })
+
+  /** A HUD question whose reply is held back until `release()`. */
+  async function askWithReplyHeld(text: string): Promise<{ cb: MockCallbacks; spoken: string[]; release: () => void }> {
+    const { processMessage } = await import('../services/docentService')
+    let release: () => void = () => {}
+    vi.mocked(processMessage).mockImplementation(async function* () {
+      await new Promise<void>((r) => { release = r })
+      yield { type: 'delta' as const, text }
+      yield { type: 'done' as const, fallback: false }
+    })
+    const spoken: string[] = []
+    registerSttEngine(createFakeSttEngine({ provider: 'local', transcript: 'show me sea ice' }))
+    registerTtsEngine(fakeTts(spoken))
+    const cb = makeCallbacks()
+    initChatUI(cb)
+    toggleImmersiveVoice()
+    await until(() => getImmersiveVoiceState()?.phase === 'thinking', 'the question was sent')
+    return { cb, spoken, release: () => release() }
+  }
+
+  it('does not read the reply aloud in 2D when the session ends mid-reply with auto-speak off', async () => {
+    const { cb, spoken, release } = await askWithReplyHeld('Here is sea ice.')
+    expect(loadConfig().voiceAutoSpeak).toBe(false)
+
+    endImmersiveVoice()
+    release()
+    await until(() => audioRestored(cb), 'the turn drained')
+    // The reply still lands in the chat; auto-speak governs the panel.
+    expect(getMessages()[1]?.text).toBe('Here is sea ice.')
+    expect(spoken).toEqual([])
+  })
+
+  it('keeps reading the reply when the session ends mid-reply with auto-speak on', async () => {
+    saveConfig({ ...loadConfig(), voiceAutoSpeak: true })
+    const { cb, spoken, release } = await askWithReplyHeld('Here is sea ice.')
+
+    endImmersiveVoice()
+    release()
+    await until(() => audioRestored(cb), 'the turn drained')
+    expect(spoken).toEqual(['Here is sea ice.'])
+  })
+
+  it('ignores a tap while Orbit is still thinking', async () => {
+    const { processMessage } = await import('../services/docentService')
+    let release: () => void = () => {}
+    vi.mocked(processMessage).mockImplementation(async function* () {
+      await new Promise<void>((r) => { release = r })
+      yield { type: 'done' as const, fallback: false }
+    })
+    registerSttEngine(createFakeSttEngine({ provider: 'local', transcript: 'show me sea ice' }))
+    saveConfig({ ...loadConfig(), voiceAutoSpeak: false })
+    initChatUI(makeCallbacks())
+
+    toggleImmersiveVoice()
+    await vi.waitFor(() => expect(getImmersiveVoiceState()?.phase).toBe('thinking'))
+    toggleImmersiveVoice()
+    expect(getImmersiveVoiceState()?.phase).toBe('thinking')
+    release()
+    await vi.waitFor(() => expect(getImmersiveVoiceState()?.phase).toBe('idle'))
   })
 })

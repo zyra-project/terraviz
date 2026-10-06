@@ -20,7 +20,7 @@
 
 import type * as THREE from 'three'
 import { createVrScene, type VrSceneHandle, type VrDatasetTexture } from './vrScene'
-import { createVrHud, type VrHudHandle } from './vrHud'
+import { createVrHud, HUD_CAPTION_DROP, type VrHudHandle, type VrVoiceState } from './vrHud'
 import { createVrBrowse, type VrBrowseHandle } from './vrBrowse'
 import { createVrTourControls, type VrTourControlsHandle } from './vrTourControls'
 import { createVrTourOverlay, type VrTourOverlayHandle } from './vrTourOverlay'
@@ -63,6 +63,34 @@ import {
  */
 /** 1x1 scratch canvas for the in-VR readout. Module-scoped and reused
  *  so a per-frame probe allocates nothing. */
+
+/** Where the dataset HUD floats, as an offset from the globe. */
+export const VR_HUD_OFFSET = { x: 0, y: -0.65, z: 0.15 } as const
+
+/**
+ * How far the tour-control strip's centre sits below the HUD's, down
+ * the HUD's own plane: the 15 cm that clears the bar, plus the reach
+ * of the caption strip that hangs under the bar during an Orbit voice
+ * turn. The caption's share is permanent rather than applied only
+ * while a caption shows — a strip that moved when a reply finished
+ * would slide out from under a controller aimed at it.
+ */
+export const VR_TOUR_CONTROLS_DROP = 0.15 + HUD_CAPTION_DROP
+
+/**
+ * Hang the tour-control strip under the HUD, close enough to feel like
+ * part of the same control cluster. It continues the HUD's plane
+ * instead of taking a world offset and its own turn toward the viewer:
+ * the HUD is tilted up at whoever is looking, so the caption under it
+ * swings toward them, and a strip placed straight down in the world
+ * ends up behind the caption from a standing eye height. In one plane
+ * the three never overlap, from any height and at any globe zoom.
+ * Call after the HUD has been placed for the frame.
+ */
+export function placeTourControlsUnderHud(tourControls: THREE.Object3D, hud: THREE.Object3D): void {
+  tourControls.position.set(0, -VR_TOUR_CONTROLS_DROP, 0).applyQuaternion(hud.quaternion).add(hud.position)
+  tourControls.quaternion.copy(hud.quaternion)
+}
 
 /**
  * How often the VR probe actually samples, in ms.
@@ -236,6 +264,16 @@ export interface VrSessionContext {
   tourNext(): void
   /** Stop the running tour entirely. No-op if no tour is active. */
   tourStop(): void
+
+  // --- Phase 5: Orbit voice (docs/ORBIT_VOICE_PLAN.md §5.4) ---
+  /**
+   * Orbit's voice turn for the HUD mic + caption strip, polled per XR
+   * frame. Null — or the member absent, for a host without Orbit —
+   * hides the mic. main.ts wires it to chatUI's getImmersiveVoiceState.
+   */
+  getVoiceState?(): VrVoiceState | null
+  /** The HUD mic was tapped: start listening, send, or stop speaking, depending on the turn. */
+  toggleVoice?(): void
 
   /** Optional — fired after the session ends + resources are torn down. */
   onSessionEnd?: () => void
@@ -929,6 +967,7 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     panelCount: ctx.getPanelCount(),
     primaryIndex: ctx.getPrimaryIndex(),
     browseOpen: browse.isVisible(),
+    voice: ctx.getVoiceState?.() ?? null,
   })
 
   // XRControllerModelFactory was imported earlier (before scene
@@ -1063,6 +1102,12 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
         // feeds `hud.setState({ browseOpen })` each frame, so the
         // next render shows the button in its active-state color.
         browse.setVisible(!browse.isVisible())
+      } else if (action === 'voice') {
+        // Orbit's mic. Called straight from the select handler rather
+        // than deferred, so the tap is as close to a user gesture as
+        // the session allows — starting capture and unlocking speech
+        // output can both depend on one.
+        ctx.toggleVoice?.()
       } else if (action === 'exit-vr') {
         // Programmatic exit — fires the 'end' event, which routes
         // through the same teardown path as headset-initiated exits.
@@ -1223,17 +1268,9 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
   let lastBrowseVisible = false
   const BROWSE_POLL_INTERVAL_MS = 1000
 
-  const hudOffset = new THREE_.Vector3(0, -0.65, 0.15)
+  const hudOffset = new THREE_.Vector3(VR_HUD_OFFSET.x, VR_HUD_OFFSET.y, VR_HUD_OFFSET.z)
   const placeOffset = new THREE_.Vector3(0, -0.5, 0.15)
   const browseOffset = new THREE_.Vector3(0.7, 0, 0.3)
-  /**
-   * Tour-control strip sits just below the dataset HUD, close
-   * enough to feel like part of the same control cluster. The
-   * HUD itself is at globe + (0, -0.65, 0.15); this offset keeps
-   * the same x/z and adds another ~12 cm of y-drop so the two
-   * panels don't overlap even when the user has zoomed the globe.
-   */
-  const tourControlsOffset = new THREE_.Vector3(0, -0.80, 0.15)
   /** Scratch reused per-frame for position math; avoids GC churn. */
   const scratchPos = new THREE_.Vector3()
   /** Scratch vector reused every frame by the billboard-lookAt block below. */
@@ -1342,6 +1379,7 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
       browseOpen: active.browse.isVisible(),
       probeReadout: readVrProbe(active.interaction, ctx, now),
       notice: loadingHandover.dataMissing ? dataNotLoadedNotice : null,
+      voice: ctx.getVoiceState?.() ?? null,
     })
 
     // Tour strip mirrors the engine state. Always poll; the strip's
@@ -1441,6 +1479,8 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
     // stay facing -z world and end up edge-on to the viewer. Same
     // pattern as vrTimeLabel above and the tour-overlay's
     // world-anchor billboard — user always sees panels face-on.
+    // The tour strip gets there by way of the HUD, whose plane it
+    // continues (placeTourControlsUnderHud).
     active.camera.getWorldPosition(scratchCamPos)
 
     scratchPos.copy(active.scene.globe.position).add(hudOffset)
@@ -1452,9 +1492,7 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
       active.browse.mesh.lookAt(scratchCamPos)
     }
     if (active.tourControls.isVisible()) {
-      scratchPos.copy(active.scene.globe.position).add(tourControlsOffset)
-      active.tourControls.mesh.position.copy(scratchPos)
-      active.tourControls.mesh.lookAt(scratchCamPos)
+      placeTourControlsUnderHud(active.tourControls.mesh, active.hud.mesh)
     }
     if (active.placement) {
       scratchPos.copy(active.scene.globe.position).add(placeOffset)
