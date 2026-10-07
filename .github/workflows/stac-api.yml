@@ -1,0 +1,87 @@
+name: STAC API Conformance
+
+on:
+  pull_request:
+    paths:
+      - 'functions/api/v1/_lib/stac*'
+      - 'functions/api/v1/stac/**'
+      - 'docs/metadata/schemas/**'
+      - 'migrations/catalog/**'
+      - '.github/workflows/stac-api.yml'
+      - 'package*.json'
+      - 'scripts/stac-*.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          version: '0.11.29'
+      - run: npm ci
+      - name: Official STAC API 1.0.0 validator
+        env:
+          STAC_EXTERNAL: 'true'
+        run: npm run test -- functions/api/v1/stac/external.test.ts
+
+  clients:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          version: '0.11.29'
+      - run: npm ci
+      - name: Prepare pinned STAC Browser
+        env:
+          STAC_BROWSER_COMMIT: c78b78f3434fdd34d4192f7044194dae6a15172d
+        run: |
+          git init .wrangler/stac-browser
+          git -C .wrangler/stac-browser remote add origin https://github.com/radiantearth/stac-browser.git
+          git -C .wrangler/stac-browser fetch --depth 1 origin "$STAC_BROWSER_COMMIT"
+          git -C .wrangler/stac-browser checkout --detach FETCH_HEAD
+          test "$(git -C .wrangler/stac-browser rev-parse HEAD)" = "$STAC_BROWSER_COMMIT"
+          npm ci --ignore-scripts --prefix .wrangler/stac-browser
+          SB_historyMode='hash' npm run build --prefix .wrangler/stac-browser
+          npx playwright install --with-deps chromium
+      - name: Install QGIS provider
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-qgis
+      - name: Real clients and independent index ingestion
+        env:
+          STAC_CLIENTS: 'true'
+          STAC_BROWSER_DIST: '.wrangler/stac-browser/dist'
+          STAC_QGIS_PYTHON: '/usr/bin/python3'
+        run: npm run test -- functions/api/v1/stac/clients.test.ts
+      - name: Retain browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stac-browser-client
+          path: .wrangler/stac-browser-*.png
+          if-no-files-found: warn
+          retention-days: 7

@@ -17,6 +17,8 @@ export interface StacLink {
   href: string
   type?: string
   title?: string
+  method?: 'GET' | 'POST'
+  body?: Record<string, unknown>
 }
 export interface StacAsset extends StacExtensionFields {
   href: string

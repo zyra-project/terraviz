@@ -11,3 +11,11 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
     return stacError(503, 'stac_unavailable')
   }
 }
+
+export const onRequestHead = onRequestGet
+
+export const onRequestPost = onRequestGet
+
+export const onRequestOptions = onRequestGet
+
+export const onRequest = onRequestGet

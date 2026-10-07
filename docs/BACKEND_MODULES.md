@@ -36,8 +36,9 @@ Phase 2 opt-in public projection:
 | `functions/api/v1/_lib/stac-publication-store.ts` | Primary-backed transactional STAC snapshot; dataset-scoped capture mode reads one row with decorations and no history |
 | `functions/api/v1/_lib/stac-assets.ts` | Bounded anonymous HEAD verification on trusted origins; persisted capture-time frame evidence is rechecked against current origin policy and excluded from the public request probe budget |
 | `functions/api/v1/_lib/stac-history.ts` | Opt-in, failure-isolated capture; immutable scientific frame identities, conditional atomic snapshot writes, live access/rights overlays, and Collection extent aggregation |
-| `functions/api/v1/_lib/stac-http.ts` | Core-resource routing, bounded cursor pagination, media types, revalidated ETags and non-cacheable errors; no STAC API conformance claim |
+| `functions/api/v1/_lib/stac-http.ts` | STAC API 1.0 routing and publication-backed search, deterministic keyset pagination, credential-free CORS, media types, revalidated GET/HEAD ETags and non-cacheable errors/POST results |
 | `functions/api/v1/stac/[[path]].ts` | Opt-in public STAC route boundary; unavailable inputs fail closed |
+| `functions/api/v1/stac/client-fixture.ts` | Test-only real HTTP server over migrated SQLite and saved frames for external validator/client interoperability; optionally serves a separately built STAC Browser |
 | `functions/api/v1/publish/stac-report.ts` | Authenticated admin/service-only, no-store STAC inclusion/exclusion report over all rows; no private URLs, titles or cached operator data |
 | `functions/api/v1/publish/stac-lineage.ts` | Admin/service-only paginated lineage inventory and immutable, reviewed source-evidence backfill per saved publication; bounded requests, idempotent writes, Processing remains disabled |
 | `functions/schema/stac/terraviz/v1.0.0/schema.json.ts` | Immutable public Terraviz extension schema, sourced directly from the reviewed local schema |
@@ -210,6 +211,9 @@ Phase 2 opt-in public projection:
 
 | File | Responsibility |
 |---|---|
+| `functions/api/v1/_lib/stac-query.ts` | Bounded STAC API query parsing, inclusive spatial/temporal predicates and request-local distinct-footprint intersection reuse |
+| `functions/api/v1/_lib/stac-service.ts` | STAC API landing-page links, validated conformance allowlist, OpenAPI 3.0 and human service documentation |
+| `functions/api/v1/_lib/stac-search.ts` | Read-only Item Search filtering the authoritative verified publication; bounded JSON POST decoding |
 | `functions/api/_lib/workers-ai-error.ts` | Workers AI error classification helper for Phase 1f/D's quota guard rail |
 | `functions/api/_lib/workers-ai-text.ts` | Workers AI reply-envelope extraction shared by every server-side `env.AI.run()` consumer (Orbit chat proxy, events enrichment, event-tour captions) — `extractModelText` / `extractModelToolCalls` tolerate both the classic `{ response, tool_calls }` shape and the OpenAI-compatible `{ choices: [{ message }] }` envelope newer models emit |
 | `functions/api/v1/_lib/access-auth.ts` | Cloudflare Access JWT verification |

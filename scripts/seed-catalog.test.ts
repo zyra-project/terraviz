@@ -145,6 +145,17 @@ describe('catalog migrations', () => {
     db.close()
   })
 
+  it.each(['now', 'NOW'])('does not introduce nondeterministic date indexes blocking legacy %s writes', value => {
+    const db = freshMigratedDb()
+    try {
+      expect(() => db.prepare(`INSERT INTO datasets (id,slug,origin_node,title,format,data_ref,created_at,updated_at,start_time,end_time)
+        VALUES ('LEGACY','legacy','NODE000','Legacy dates','image/png','url:https://example.test/image.png','2026-01-01','2026-01-01',?,?)`)
+        .run(value, value)).not.toThrow()
+      expect(() => db.prepare('UPDATE datasets SET start_time=?,end_time=? WHERE id=?').run(value, value, 'LEGACY')).not.toThrow()
+      expect(db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND lower(sql) LIKE '%julianday%'").all()).toEqual([])
+    } finally { db.close() }
+  })
+
   it('produce a schema that matches the checked-in catalog-schema.sql', () => {
     const db = freshMigratedDb()
     const generated = renderSchemaSnapshot(db)
