@@ -1504,11 +1504,12 @@ async function handleSend(): Promise<void> {
             ).trim()
             updateStreamingMessage(docentMsg)
           }
-          // Not while a degraded reason is set: the badge already says
-          // why the answer is offline (e.g. "quota reached"), and "Check
-          // LLM settings" would send the operator after settings that
-          // are fine.
-          if (chunk.fallback && docentMsg.text && getDegradedReason() === null) {
+          // Not when this turn fell back for the quota: the badge
+          // already says so, and "Check LLM settings" would send the
+          // operator after settings that are fine. Decided per turn, not
+          // from the session-wide badge, which can still be up from an
+          // earlier turn when this one failed for another reason (#456).
+          if (chunk.fallback && docentMsg.text && chunk.fallbackReason !== 'quota_exhausted') {
             const hint = t(isLocalDev ? 'chat.fallback.localDev' : 'chat.fallback.production')
             docentMsg.text += `\n\n*${hint}*`
             updateStreamingMessage(docentMsg)

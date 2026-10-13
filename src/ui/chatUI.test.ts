@@ -258,11 +258,11 @@ describe('degraded-mode badge', () => {
   // `fallback: true`. The badge already says why; the generic "AI service
   // unavailable — … Check LLM settings." hint would contradict it and send
   // the operator after settings that are fine.
-  async function sendFallbackTurn(): Promise<string> {
+  async function sendFallbackTurn(fallbackReason?: 'quota_exhausted'): Promise<string> {
     const { processMessage } = await import('../services/docentService')
     vi.mocked(processMessage).mockImplementation(async function* () {
       yield { type: 'delta' as const, text: 'Offline answer.' }
-      yield { type: 'done' as const, fallback: true }
+      yield { type: 'done' as const, fallback: true, ...(fallbackReason ? { fallbackReason } : {}) }
     })
     initChatUI(makeCallbacks())
     openChat()
@@ -280,10 +280,20 @@ describe('degraded-mode badge', () => {
 
   it('shows the badge instead of the settings hint on a degraded fallback', async () => {
     markDegraded('quota_exhausted')
-    const text = await sendFallbackTurn()
+    const text = await sendFallbackTurn('quota_exhausted')
     expect(badgeEl()).not.toBeNull()
     expect(text).toBe('Offline answer.')
     expect(text).not.toMatch(/AI service unavailable/)
+  })
+
+  it('keeps the settings hint when this turn failed for another reason, badge or not (#456)', async () => {
+    // The badge is still up from an earlier quota turn, but this turn's
+    // fallback didn't come from the quota (say the operator switched
+    // providers and mistyped the key), so the settings are the thing to
+    // check.
+    markDegraded('quota_exhausted')
+    const text = await sendFallbackTurn()
+    expect(text).toMatch(/AI service unavailable/)
   })
 
   it('keeps the settings hint on a fallback with no degraded reason', async () => {

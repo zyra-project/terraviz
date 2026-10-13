@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { Dataset, ChatMessage, DocentConfig } from '../types'
 import { processMessage, loadConfig, saveConfig, getDefaultConfig, validateAndCleanText, captureViewContext, readCurrentTime, executeSearchDatasets, executeListFeaturedDatasets, executeSearchEvents, clearPreSearchCache } from './docentService'
 import type { PublicEvent } from './eventsService'
-import { getDegradedReason, resetForTests as resetDegradedForTests } from './docentDegradedState'
+import { getDegradedReason, markDegraded as markDegradedState, resetForTests as resetDegradedForTests } from './docentDegradedState'
 import type { DocentStreamChunk } from './docentService'
 
 vi.mock('./llmProvider', () => ({
@@ -374,8 +374,9 @@ describe('processMessage — quota-exhausted LLM errors', () => {
 
     expect(mockedStream).toHaveBeenCalledTimes(1)
     expect(getDegradedReason()).toBe('quota_exhausted')
-    const done = chunks.find(c => c.type === 'done') as { type: 'done'; fallback: boolean }
+    const done = chunks.find(c => c.type === 'done') as { type: 'done'; fallback: boolean; fallbackReason?: string }
     expect(done.fallback).toBe(true)
+    expect(done.fallbackReason).toBe('quota_exhausted')
   })
 
   it('does not retry a quota error that arrives on a tool round', async () => {
@@ -401,8 +402,9 @@ describe('processMessage — quota-exhausted LLM errors', () => {
 
     expect(callCount).toBe(2)
     expect(getDegradedReason()).toBe('quota_exhausted')
-    const done = chunks.find(c => c.type === 'done') as { type: 'done'; fallback: boolean }
+    const done = chunks.find(c => c.type === 'done') as { type: 'done'; fallback: boolean; fallbackReason?: string }
     expect(done.fallback).toBe(true)
+    expect(done.fallbackReason).toBe('quota_exhausted')
   })
 
   it('still retries an error that is not quota', async () => {
@@ -413,10 +415,14 @@ describe('processMessage — quota-exhausted LLM errors', () => {
     })
     mockedStream.mockClear()
 
-    await run('hello')
+    const chunks = await run('hello')
 
     expect(mockedStream).toHaveBeenCalledTimes(2)
     expect(getDegradedReason()).toBeNull()
+    // A fallback for any other reason names none, so the UI keeps the
+    // "Check LLM settings" hint — even while an earlier turn's badge is up.
+    const done = chunks.find(c => c.type === 'done') as { type: 'done'; fallbackReason?: string }
+    expect(done.fallbackReason).toBeUndefined()
   })
 })
 
@@ -722,9 +728,11 @@ describe('processMessage — pre-search injection (1d/AC)', () => {
     expect(mockedStream).not.toHaveBeenCalled()
     // The terminal chunk must mark this turn as a fallback.
     const done = chunks.find(c => c.type === 'done') as
-      | { type: 'done'; fallback: boolean }
+      | { type: 'done'; fallback: boolean; fallbackReason?: string }
       | undefined
     expect(done?.fallback).toBe(true)
+    // Search refused for quota, so this turn's fallback is the quota's (#456).
+    expect(done?.fallbackReason).toBe('quota_exhausted')
     // None of the emitted text should be the LLM's stub.
     const text = chunks
       .filter(c => c.type === 'delta')
@@ -1380,6 +1388,25 @@ describe('config management', () => {
     const loaded = loadConfig()
     expect(loaded.apiUrl).toBe('https://api.openai.com/v1')
     expect(loaded.model).toBe('gpt-4')
+  })
+
+  it('clears the degraded badge when the LLM endpoint changes, not on other saves (#456)', () => {
+    const base: DocentConfig = { ...getDefaultConfig(), apiUrl: '/api', model: 'llama-4-scout' }
+    saveConfig(base)
+
+    markDegradedState('quota_exhausted')
+    // The vision toggle and the model auto-persist save too; a badge that
+    // is right must survive them.
+    saveConfig({ ...base, visionEnabled: !base.visionEnabled })
+    expect(getDegradedReason()).toBe('quota_exhausted')
+
+    // Switching provider after a spent budget: the quota no longer applies.
+    saveConfig({ ...base, apiUrl: 'https://api.openai.com/v1', apiKey: 'sk-typo' }, true)
+    expect(getDegradedReason()).toBeNull()
+
+    markDegradedState('quota_exhausted')
+    saveConfig({ ...base, apiUrl: 'https://api.openai.com/v1', apiKey: 'sk-typo', model: 'gpt-4o' }, true)
+    expect(getDegradedReason()).toBeNull()
   })
 
   it('getDefaultConfig returns a copy', () => {
