@@ -489,6 +489,45 @@ describe('processMessage — pre-search injection (1d/AC)', () => {
     expect(userMessageContent).toContain('Hurricane Season - 2024')
   })
 
+  it('asks for current events while the pre-search is still running, not after it', async () => {
+    // Both are awaited before the model is called; back to back they
+    // were ~1-1.6 s of a voice turn's silence on a production deploy.
+    const { resetEventsCacheForTests } = await import('./eventsService')
+    resetEventsCacheForTests()
+    const { streamChat } = await import('./llmProvider')
+    vi.mocked(streamChat).mockImplementation(async function* () {
+      yield { type: 'done' as const }
+    })
+
+    const order: string[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input.toString()
+      if (url.includes('/api/v1/search')) {
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        order.push('search answered')
+        return new Response(JSON.stringify({ datasets: [] }), { status: 200 })
+      }
+      if (url.includes('/api/v1/events')) {
+        order.push('events requested')
+        return new Response(JSON.stringify({ events: [] }), { status: 200 })
+      }
+      return new Response('not found', { status: 404 })
+    })
+
+    const config: DocentConfig = {
+      apiUrl: 'http://localhost:11434/v1',
+      apiKey: '',
+      model: 'test',
+      enabled: true,
+      readingLevel: 'general',
+      visionEnabled: false,
+    }
+    for await (const _chunk of processMessage('show me datasets about hurricanes', [], datasets, null, config)) { /* drain */ }
+
+    // Serial code asks for events only after the search has answered.
+    expect(order).toEqual(['events requested', 'search answered'])
+  })
+
   it('does not inject [RELEVANT DATASETS] for non-discovery (knowledge) queries', async () => {
     // Knowledge questions ("what are hurricanes") shouldn't burn
     // the pre-search round-trip. parseIntent classifies them as

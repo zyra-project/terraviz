@@ -13,7 +13,9 @@ import {
   submitFeedback,
 } from './chatUI'
 import type { ChatCallbacks } from './chatUI'
-import { loadConfig } from '../services/docentService'
+import { loadConfig, saveConfig } from '../services/docentService'
+import { registerTtsEngine, resetVoiceEngines, type TtsEngine } from '../services/voiceService'
+import { until } from '../test-utils'
 import {
   clearDegraded,
   markDegraded,
@@ -1365,5 +1367,92 @@ describe('§A6 — the Analyze chip', () => {
     clearChat()
     const view = await renderChip({ type: 'show-analysis', scope: 'view' })
     expect(view!.textContent).not.toBe(whole!.textContent)
+  })
+})
+
+describe('spoken replies: synthesis ahead of playback', () => {
+  afterEach(() => resetVoiceEngines())
+
+  const REPLY = 'One is first. Two comes next. Three is later. Four is last.'
+
+  /** A TTS engine whose sentences keep playing until the test finishes them. */
+  function registerHeldEngine() {
+    const finishers: Array<() => void> = []
+    const speak = vi.fn((_text: string) => new Promise<void>((resolve) => { finishers.push(resolve) }))
+    const prefetch = vi.fn((_text: string) => {})
+    // `local` sorts first in `auto`, ahead of whatever the browser registers.
+    registerTtsEngine({
+      provider: 'local',
+      supportsLanguage: () => true,
+      isAvailable: () => true,
+      speak,
+      prefetch,
+      cancel: vi.fn(),
+    } satisfies TtsEngine)
+    const prepared = () => new Set(prefetch.mock.calls.map(([text]) => text))
+    return { finishers, speak, prefetch, prepared }
+  }
+
+  /** Where the first call with `text` falls in the order all mocks were called. */
+  function calledAt(fn: { mock: { calls: string[][]; invocationCallOrder: number[] } }, text: string): number {
+    return fn.mock.invocationCallOrder[fn.mock.calls.findIndex(([said]) => said === text)]!
+  }
+
+  async function sendForReply(): Promise<void> {
+    const { processMessage } = await import('../services/docentService')
+    vi.mocked(processMessage).mockImplementation(async function* () {
+      yield { type: 'delta' as const, text: REPLY }
+      yield { type: 'done' as const, fallback: false }
+    })
+    initChatUI(makeCallbacks())
+    ;(document.getElementById('chat-input') as HTMLTextAreaElement).value = 'tell me a story'
+    ;(document.getElementById('chat-send') as HTMLButtonElement).click()
+  }
+
+  it('asks the engine to prepare the next sentences while the current one plays', async () => {
+    const { finishers, speak, prefetch, prepared } = registerHeldEngine()
+    saveConfig({ ...loadConfig(), voiceAutoSpeak: true })
+    await sendForReply()
+
+    // The first sentence is playing and hasn't finished...
+    await vi.waitFor(() => expect(speak).toHaveBeenCalledTimes(1))
+    expect(speak.mock.calls[0]![0]).toBe('One is first.')
+    // ...and the two after it are already being prepared, but no further.
+    expect(prepared()).toEqual(new Set(['One is first.', 'Two comes next.', 'Three is later.']))
+    // It was started before the lookahead moved along, so the engine had
+    // let go of it by then and needed no room for it.
+    expect(calledAt(speak, 'One is first.')).toBeLessThan(calledAt(prefetch, 'Three is later.'))
+
+    // Each sentence that starts moves the lookahead along by one.
+    finishers[0]!()
+    await vi.waitFor(() => expect(speak).toHaveBeenCalledTimes(2))
+    expect(prepared().has('Four is last.')).toBe(true)
+  })
+
+  it('prepares the next sentences when a message is replayed from its Speak button', async () => {
+    const { finishers, speak, prefetch, prepared } = registerHeldEngine()
+    await sendForReply()
+    // The reply is complete once Send is enabled again and its Speak button is up.
+    const send = document.getElementById('chat-send') as HTMLButtonElement
+    const speakButton = (): HTMLButtonElement | null => document.querySelector('.chat-speak-btn')
+    await until(() => !send.disabled && speakButton() !== null, 'the finished reply')
+    // Auto-speak is off, so nothing has been said or prepared so far.
+    expect(speak).not.toHaveBeenCalled()
+    expect(prefetch).not.toHaveBeenCalled()
+
+    speakButton()!.click()
+
+    // The first sentence starts inside the tap, with the two after it
+    // being prepared and no further.
+    expect(speak.mock.calls.map(([text]) => text)).toEqual(['One is first.'])
+    expect(prepared()).toEqual(new Set(['Two comes next.', 'Three is later.']))
+
+    // Each sentence that starts moves the lookahead along by one, and
+    // starts before it does.
+    finishers[0]!()
+    await until(() => speak.mock.calls.length === 2, 'the second sentence to start')
+    expect(speak.mock.calls[1]![0]).toBe('Two comes next.')
+    expect(prepared().has('Four is last.')).toBe(true)
+    expect(calledAt(speak, 'Two comes next.')).toBeLessThan(calledAt(prefetch, 'Four is last.'))
   })
 })

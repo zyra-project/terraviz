@@ -1601,6 +1601,13 @@ export async function* processMessage(
       intent.type === 'search' || intent.type === 'category' || intent.type === 'related'
     const preSearchQuery =
       intent.type === 'search' ? intent.query : intent.type === 'category' ? intent.category : input
+    // Approved current events are needed below whatever the search
+    // returns, so their request starts now and runs alongside it rather
+    // than after it. Measured on a production deploy, the two were
+    // ~0.5-1.1 s and ~0.5 s back to back before the model was even
+    // called. fetchApprovedEvents never rejects (it degrades to []), so
+    // the degraded early return below can safely leave it unawaited.
+    const approvedEventsPending = fetchApprovedEvents()
     const preSearchResult = needsPreSearch
       ? await executeSearchDatasets({ query: preSearchQuery, limit: 5 }, cfg)
       : { datasets: [] as SearchDatasetsHit[] }
@@ -1669,8 +1676,9 @@ export async function* processMessage(
     // Approved current events (curator-gated) for the [CURRENT EVENTS]
     // injection, the `search_events` tool, and `<<EVENT:ID>>` validation.
     // Cached 60 s in eventsService and degrades to [] on any failure, so a
-    // deploy without the events endpoint is a silent no-op here.
-    const approvedEvents = await fetchApprovedEvents()
+    // deploy without the events endpoint is a silent no-op here. Started
+    // above, alongside the pre-search.
+    const approvedEvents = await approvedEventsPending
 
     let preSearchContext = ''
     if (preSearchHits.length > 0) {

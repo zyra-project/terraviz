@@ -139,6 +139,13 @@ export interface TtsEngine {
   isAvailable(caps: VoiceCapabilities): boolean
   /** Resolves when the utterance finishes (or is cancelled). */
   speak(text: string, options: TtsSpeakOptions): Promise<void>
+  /**
+   * Optional: start preparing an utterance that `speak()` will be asked
+   * for soon, so it is ready when its turn comes. Idempotent per text;
+   * `cancel()` discards anything prepared. An engine whose speech starts
+   * instantly (the browser's) has no reason to implement it.
+   */
+  prefetch?(text: string, options: TtsSpeakOptions): void
   /** Stop any in-flight speech immediately (barge-in / Stop control). */
   cancel(): void
 }
