@@ -34,7 +34,7 @@ import type { FixtureRule } from './core/fixtures'
 import type { ExpectedBadResponse } from './core/signals'
 import type { Box } from './core/types'
 import { analyticsFixtures, feedbackFixtures } from './fixtures/admin'
-import { catalogReportFixtures } from './fixtures/catalog'
+import { catalogReportFixtures, catalogTagCloudReportFixtures } from './fixtures/catalog'
 import { blogPublicFixtures, publisherConflictFixtures, publisherFixtures } from './fixtures/publisher'
 
 export interface Scene {
@@ -290,6 +290,29 @@ export const scenes: Scene[] = [
       await rail.waitFor({ state: 'visible' })
       await rail.locator('.browse-chip[data-facet]').first().click()
       await rail.locator('.browse-chip[aria-pressed="true"]').first().waitFor()
+    },
+  },
+  {
+    name: 'browse-tag-cloud',
+    description:
+      'Browse overlay with a long (96-tag) Category cloud — clamped to a 2-row preview with "Show more" on desktop, one sideways-scrolling row on phones',
+    // Same re-rolling hero as catalog-landing.
+    masks: ['#hero-panel'],
+    // Its own long catalog, so the other catalog scenes keep their
+    // baselines.
+    fixtures: catalogTagCloudReportFixtures(),
+    crop: '#browse-filter-rail',
+    async setup(page) {
+      await openCatalog(page)
+      const rail = page.locator('#browse-filter-rail')
+      await rail.locator('[data-tag-cloud]').waitFor({ state: 'visible' })
+      // Desktop: wait for the measured clamp and its toggle. At phone
+      // widths the row stays one scrolling line with no toggle, which
+      // is what that capture should show.
+      if ((page.viewportSize()?.width ?? 0) >= 769) {
+        await rail.locator('[data-tag-cloud].is-clamped').waitFor()
+        await rail.locator('[data-tag-cloud-toggle]').waitFor({ state: 'visible' })
+      }
     },
   },
   {

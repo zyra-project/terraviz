@@ -132,6 +132,8 @@
   "browse.filter.recentlyViewed.label": "Recently viewed",
   "browse.filter.tags.aria": "Filter by category",
   "browse.filter.tags.label": "Category",
+  "browse.filter.tags.less": "Show fewer",
+  "browse.filter.tags.more": "Show more",
   "browse.filters.toggle.aria": "Show or hide the filter panel",
   "browse.filters.toggle.label": "Filters",
   "browse.graph.empty": "No datasets match the current filters — adjust the chip rail to see the graph.",

@@ -3,6 +3,8 @@
 
 import { describe, expect, it } from 'vitest'
 
+import { matchFixture, type FixtureRule } from './core/fixtures'
+import { catalogReportFixtures } from './fixtures/catalog'
 import { scenes, pointClearOfPanel } from './scenes'
 
 describe('screenshot scene manifest', () => {
@@ -47,6 +49,24 @@ describe('screenshot scene manifest', () => {
         'help-panel',
       ]),
     )
+  })
+
+  it('gives the tag-cloud scene its own long catalog, leaving the shared one alone', () => {
+    // The browse tag cloud only clamps past 2 rows, which the shared
+    // fixture's few tags never reach — so the clamp scene serves its
+    // own catalog, and the other catalog scenes' baselines stay put.
+    const tagsIn = (rules: FixtureRule[]): Set<string> => {
+      const res = matchFixture(rules, 'http://localhost/api/v1/catalog', 'GET')
+      const body = JSON.parse(res?.body ?? '{}') as { datasets?: { tags?: string[] }[] }
+      return new Set((body.datasets ?? []).flatMap((d) => d.tags ?? []))
+    }
+    const scene = scenes.find((s) => s.name === 'browse-tag-cloud')
+    expect(scene?.fixtures).toBeDefined()
+    expect(tagsIn(scene!.fixtures!).size).toBeGreaterThanOrEqual(13)
+
+    const landing = scenes.find((s) => s.name === 'catalog-landing')
+    expect(tagsIn(landing!.fixtures!)).toEqual(tagsIn(catalogReportFixtures()))
+    expect(tagsIn(catalogReportFixtures()).size).toBeLessThan(13)
   })
 
   it('covers the globe-overlay surfaces', () => {
