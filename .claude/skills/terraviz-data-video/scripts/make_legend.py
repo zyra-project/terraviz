@@ -45,10 +45,42 @@ def main():
     ap.add_argument("--out", default="legend.png")
     a = ap.parse_args()
 
-    # Tick labels: share a x10^-n exponent so the numbers stay short.
+    # A colorbar over an empty range says nothing, and the tick-decimal maths
+    # below divides by the range. Reject it here with a readable message
+    # rather than dying on an inf/nan conversion further down.
+    if a.vmax <= a.vmin:
+        ap.error(
+            f"--vmax ({a.vmax:g}) must be greater than --vmin ({a.vmin:g}); "
+            "a colorbar needs a non-empty range"
+        )
+
+    # Tick labels share one power-of-ten exponent so the numbers stay short.
+    # It is usually negative (column mass density lives at 1e-4), but a large
+    # enough vmax factors out a positive one instead.
+    #
+    # Only factor the exponent out when the plain numbers would actually be
+    # unwieldy. Applied unconditionally it destroys human-scale ranges: a
+    # 0..120 index at x10^2 rounds to "0 0 1 1". Column mass density (3e-4)
+    # still needs it, so the rule is on magnitude, not on units.
     exp = int(np.floor(np.log10(a.vmax))) if a.vmax > 0 else 0
+    if -2 <= exp <= 3:
+        exp = 0
     scale = 10.0 ** exp
     ticks = np.linspace(a.vmin, a.vmax, 4)
+    scaled = ticks / scale
+
+    # Fewest decimals whose labels stay distinct AND sit within 2% of the bar
+    # from the tick they label. Deciding on the step size alone is not enough:
+    # it reads fine when the scaled ticks are round (0/40/80/120 -> "0 40 80
+    # 120") but mislabels an uneven range, because a step above 1 does not
+    # imply integer ticks. vmax 50000 scales to 0/1.67/3.33/5 and rounded to
+    # "0 2 3 5", printing "2" a fifth of the bar away from where 2 falls.
+    span = scaled[-1] - scaled[0]
+    for decimals in range(4):
+        rounded = np.round(scaled, decimals)
+        if (len(set(rounded)) == len(rounded)
+                and np.abs(rounded - scaled).max() <= 0.02 * span):
+            break
 
     fig = plt.figure(figsize=(9.0, 2.2), dpi=150)
     fig.patch.set_facecolor("white")
@@ -57,7 +89,7 @@ def main():
         ax, cmap=plt.get_cmap(a.cmap),
         norm=colors.Normalize(a.vmin, a.vmax), orientation="horizontal")
     cb.set_ticks(ticks)
-    cb.set_ticklabels([f"{t/scale:.0f}" for t in ticks])
+    cb.set_ticklabels([f"{t/scale:.{decimals}f}" for t in ticks])
     cb.ax.tick_params(labelsize=12, color="#333", labelcolor="#222", length=5, width=1)
     cb.outline.set_edgecolor("#333"); cb.outline.set_linewidth(1)
 
