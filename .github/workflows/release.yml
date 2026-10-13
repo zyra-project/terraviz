@@ -32,6 +32,11 @@ permissions:
 env:
   TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
   TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+  # Shipped releases have to agree with the CI builds in desktop.yml
+  # and the web bundle in ci.yml, or a fork's tagged installer would
+  # carry sample tours its nightly builds dropped. Unset evaluates to
+  # '' — which is not 'false' — so this repo's releases keep them.
+  VITE_SAMPLE_TOURS: ${{ vars.VITE_SAMPLE_TOURS }}
 
 jobs:
   # --- Bump version and create tag (manual dispatch only) ---

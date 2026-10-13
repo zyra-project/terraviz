@@ -46,6 +46,14 @@ concurrency:
 permissions:
   contents: read
 
+# Reaches the `npx tauri {android,ios} build` steps below, which run
+# the SPA build through tauri.conf.json's `beforeBuildCommand`. See
+# desktop.yml for why this is workflow-level rather than per-step.
+env:
+  # Mirrors desktop.yml and ci.yml. Unset evaluates to '' — which is
+  # not 'false' — so this repo's builds keep the sample tours.
+  VITE_SAMPLE_TOURS: ${{ vars.VITE_SAMPLE_TOURS }}
+
 jobs:
   android-build:
     name: Build (Android)
