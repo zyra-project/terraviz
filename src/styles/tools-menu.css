@@ -17,8 +17,17 @@
     padding: 0;
     pointer-events: auto;
     z-index: 10;
+    /* Steps aside for the browse panel, in step with it and the globe
+       (`src/ui/globePanelOffset.ts` sets the distance). */
+    translate: var(--panel-push-bar, 0px) 0;
+    transition: translate 0.65s cubic-bezier(0.45, 0, 0.15, 1);
 }
 #map-controls.hidden { display: none; }
+@media (prefers-reduced-motion: reduce) {
+    #map-controls {
+        transition: none;
+    }
+}
 
 .tools-menu-btn {
     display: inline-flex;
@@ -47,7 +56,9 @@
     border-color: rgba(77, 166, 255, 0.45);
 }
 .tools-menu-btn[aria-expanded="true"],
-.tools-menu-btn[aria-pressed="true"] {
+.tools-menu-btn[aria-pressed="true"],
+/* The Browse button, while its panel is open. */
+body.browse-open .tools-menu-browse {
     background: var(--accent-o18);
     color: var(--color-accent);
     border-color: var(--color-accent);
@@ -104,15 +115,19 @@
     bottom: calc(100% + calc(0.5rem * var(--ui-scale)));
     inset-inline-end: 0;
     min-width: var(--component-tools-menu-popover-min-width);
-    max-width: calc(100vw - calc(1.5rem * var(--ui-scale)));
+    /* A menu, not a page: whatever a section puts in it, it stays a
+       column beside the globe. */
+    max-width: min(calc(100vw - calc(1.5rem * var(--ui-scale))), calc(340px * var(--ui-scale)));
     /* Cap the popover to the space above the Tools bar so a tall
        menu (many sections, or a large --ui-scale) scrolls inside
        the popover instead of overflowing off the top of the
        screen. Mirrors the chat/Orbit panel's bounded-height +
        scrollable-body pattern. The subtracted offset leaves room
-       for the Tools bar below (#map-controls bottom 3.2rem + the
-       button), the 0.5rem gap above it, and a small top margin. */
-    max-height: calc(100vh - calc(7rem * var(--ui-scale)));
+       for the Tools bar below (wherever `updateMapControlsPosition`
+       put it: `--map-controls-bottom`, which grows with the playback
+       transport under the bar), the button, the 0.5rem gap above it,
+       and a small top margin. */
+    max-height: calc(100vh - var(--map-controls-bottom, calc(3.2rem * var(--ui-scale))) - calc(3.8rem * var(--ui-scale)));
     padding: calc(0.75rem * var(--ui-scale));
     background: rgba(13, 13, 18, 0.94);
     backdrop-filter: blur(14px);
@@ -127,8 +142,39 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    /* Slides in from the inline-end edge and out to it, in step with
+       the globe moving aside (`src/ui/globePanelOffset.ts`). `display`
+       is in the list so the popover is still there to slide out after
+       `.hidden` lands; `@starting-style` is where it slides in from. */
+    transition:
+        transform 0.65s cubic-bezier(0.45, 0, 0.15, 1),
+        opacity 0.65s cubic-bezier(0.45, 0, 0.15, 1),
+        display 0.65s allow-discrete;
 }
-.tools-menu-popover.hidden { display: none; }
+.tools-menu-popover.hidden {
+    display: none;
+    opacity: 0;
+    transform: translateX(calc(100% + 1.5rem * var(--ui-scale)));
+    /* On its way out it must not take the click meant for the globe. */
+    pointer-events: none;
+}
+:root[dir="rtl"] .tools-menu-popover.hidden {
+    transform: translateX(calc(-100% - 1.5rem * var(--ui-scale)));
+}
+@starting-style {
+    .tools-menu-popover {
+        opacity: 0;
+        transform: translateX(calc(100% + 1.5rem * var(--ui-scale)));
+    }
+    :root[dir="rtl"] .tools-menu-popover {
+        transform: translateX(calc(-100% - 1.5rem * var(--ui-scale)));
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .tools-menu-popover {
+        transition: none;
+    }
+}
 
 .tools-menu-popover-header {
     display: flex;
@@ -276,6 +322,12 @@
 .tools-menu-language-select {
     flex: 1;
     min-width: 0;
+    /* A select is as wide as its longest option, and `min-width: 0`
+       only lets it shrink once laid out: it still counts at full width
+       when the popover sizes itself to its content. One long option
+       name makes the whole popover two or three times as wide.
+       From zero, `flex: 1` grows it to the row. */
+    width: 0;
     padding: calc(0.4rem * var(--ui-scale)) calc(1.6rem * var(--ui-scale)) calc(0.4rem * var(--ui-scale)) calc(0.55rem * var(--ui-scale));
     font: inherit;
     font-size: calc(0.78rem * var(--ui-scale));
@@ -434,6 +486,6 @@
        built-in fallback (0px when unsupported), so this matches the
        base rule on non-notched devices. */
     .tools-menu-popover {
-        max-height: calc(100vh - calc(7rem * var(--ui-scale)) - env(safe-area-inset-bottom));
+        max-height: calc(100vh - var(--map-controls-bottom, calc(3.2rem * var(--ui-scale))) - calc(3.8rem * var(--ui-scale)) - env(safe-area-inset-bottom));
     }
 }

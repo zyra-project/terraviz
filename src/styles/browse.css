@@ -53,11 +53,25 @@
     flex-direction: column;
     overflow: visible;
     border-inline-start: 1px solid var(--white-o08);
-    transition: transform 0.3s ease;
+    /* Same time and curve as the globe moving aside for it
+       (`src/ui/globePanelOffset.ts`), so the panel reads as pushing
+       the globe. `display` is in the list so the panel is still there
+       to slide out after `.hidden` lands; `@starting-style` below is
+       where it slides in from. */
+    transition:
+        transform 0.65s cubic-bezier(0.45, 0, 0.15, 1),
+        display 0.65s allow-discrete;
 }
 
-#browse-overlay.collapsed {
+#browse-overlay.collapsed,
+#browse-overlay.hidden {
     transform: translateX(100%);
+}
+
+@starting-style {
+    #browse-overlay {
+        transform: translateX(100%);
+    }
 }
 
 /* RTL flips the slide direction so the panel still slides off
@@ -65,8 +79,21 @@
    panel on the left in RTL, and translateX is screen-coord
    (not direction-aware), so we need an explicit override.
    See `docs/I18N_PLAN.md` §L1.5 for the broader RTL audit. */
-:root[dir="rtl"] #browse-overlay.collapsed {
+:root[dir="rtl"] #browse-overlay.collapsed,
+:root[dir="rtl"] #browse-overlay.hidden {
     transform: translateX(-100%);
+}
+
+@starting-style {
+    :root[dir="rtl"] #browse-overlay {
+        transform: translateX(-100%);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #browse-overlay {
+        transition: none;
+    }
 }
 
 #browse-inner {
@@ -1665,8 +1692,18 @@ body.browse-view-map .browse-title {
         padding-bottom: env(safe-area-inset-bottom, 0px);
     }
 
-    #browse-overlay.collapsed {
+    #browse-overlay.collapsed,
+    #browse-overlay.hidden,
+    :root[dir="rtl"] #browse-overlay.collapsed,
+    :root[dir="rtl"] #browse-overlay.hidden {
         transform: translateY(100%);
+    }
+
+    @starting-style {
+        #browse-overlay,
+        :root[dir="rtl"] #browse-overlay {
+            transform: translateY(100%);
+        }
     }
 
     #browse-grid {
@@ -1702,6 +1739,8 @@ body.catalog-empty #browse-overlay {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
     border-inline-start: none;
+    /* The whole surface, not a panel beside the globe: nothing to slide past. */
+    transition: none;
 }
 
 /* Catalog mode at desktop widths — the overlay spans the whole

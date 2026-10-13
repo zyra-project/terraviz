@@ -277,12 +277,11 @@ describe('Meet Orbit link', () => {
     expect(document.getElementById('tools-menu-orbit-settings')).toBeTruthy()
   })
 
-  it('closes the popover and announces when clicked', () => {
+  it('announces when clicked and, on a desktop window, leaves the popover open', () => {
     const announce = vi.fn()
     const vm = makeViewports(1)
     initToolsMenu(vm as any, { getCurrentDataset: () => null, announce })
 
-    // Open the popover so we can observe the close.
     ;(document.getElementById('tools-menu-toggle') as HTMLButtonElement).click()
     expect(isToolsMenuOpen()).toBe(true)
 
@@ -290,8 +289,24 @@ describe('Meet Orbit link', () => {
     // jsdom doesn't navigate on anchor click; the handler still runs.
     link.click()
 
-    expect(isToolsMenuOpen()).toBe(false)
+    expect(isToolsMenuOpen()).toBe(true)
     expect(announce).toHaveBeenCalledWith('Opening Orbit character page in new tab')
+  })
+
+  it('closes the popover when clicked on a narrow window', () => {
+    const width = vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(600)
+    try {
+      const vm = makeViewports(1)
+      initToolsMenu(vm as any, { getCurrentDataset: () => null })
+
+      ;(document.getElementById('tools-menu-toggle') as HTMLButtonElement).click()
+      expect(isToolsMenuOpen()).toBe(true)
+
+      ;(document.getElementById('tools-menu-meet-orbit') as HTMLAnchorElement).click()
+      expect(isToolsMenuOpen()).toBe(false)
+    } finally {
+      width.mockRestore()
+    }
   })
 })
 
@@ -333,15 +348,32 @@ describe('Tools menu open/close', () => {
     expect(isToolsMenuOpen()).toBe(false)
   })
 
-  it('closes the popover on outside click', () => {
+  it('stays open on an outside click on a desktop window', () => {
     const vm = makeViewports(1)
     initToolsMenu(vm as any)
     ;(document.getElementById('tools-menu-toggle') as HTMLButtonElement).click()
     expect(isToolsMenuOpen()).toBe(true)
 
-    // Outside click — dispatch on body, outside #map-controls
+    // Outside click — dispatch on body, outside #map-controls. The
+    // popover is a panel beside the globe there; only its own button,
+    // its ✕ and Escape close it.
     document.body.click()
-    expect(isToolsMenuOpen()).toBe(false)
+    expect(isToolsMenuOpen()).toBe(true)
+  })
+
+  it('closes on an outside click on a narrow window, where it covers the screen', () => {
+    const width = vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(600)
+    try {
+      const vm = makeViewports(1)
+      initToolsMenu(vm as any)
+      ;(document.getElementById('tools-menu-toggle') as HTMLButtonElement).click()
+      expect(isToolsMenuOpen()).toBe(true)
+
+      document.body.click()
+      expect(isToolsMenuOpen()).toBe(false)
+    } finally {
+      width.mockRestore()
+    }
   })
 
   it('stays open on clicks inside the popover', () => {
@@ -354,6 +386,21 @@ describe('Tools menu open/close', () => {
     section.click()
 
     expect(isToolsMenuOpen()).toBe(true)
+  })
+
+  it('leaves Escape to a dialog that has the focus', () => {
+    const vm = makeViewports(1)
+    initToolsMenu(vm as any)
+    ;(document.getElementById('tools-menu-toggle') as HTMLButtonElement).click()
+
+    // A dialog opened from the menu, holding the focus outside #map-controls.
+    const inDialog = document.createElement('button')
+    document.body.appendChild(inDialog)
+    inDialog.focus()
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(isToolsMenuOpen()).toBe(true)
+    inDialog.remove()
   })
 
   it('closes on Escape key', () => {
@@ -543,8 +590,26 @@ describe('Tools menu callbacks', () => {
     ;(document.getElementById('tools-menu-orbit-settings') as HTMLButtonElement).click()
 
     expect(onOpenOrbitSettings).toHaveBeenCalledTimes(1)
-    // Popover closes after opening settings
-    expect(isToolsMenuOpen()).toBe(false)
+    // On a desktop window the popover stays: choosing an option does
+    // not dismiss the panel it was chosen from.
+    expect(isToolsMenuOpen()).toBe(true)
+  })
+
+  it('closes the popover behind what an option opens on a narrow window', () => {
+    const width = vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(600)
+    try {
+      const vm = makeViewports(1)
+      const onOpenOrbitSettings = vi.fn()
+      initToolsMenu(vm as any, { onOpenOrbitSettings, getCurrentDataset: () => null })
+
+      ;(document.getElementById('tools-menu-toggle') as HTMLButtonElement).click()
+      ;(document.getElementById('tools-menu-orbit-settings') as HTMLButtonElement).click()
+
+      expect(onOpenOrbitSettings).toHaveBeenCalledTimes(1)
+      expect(isToolsMenuOpen()).toBe(false)
+    } finally {
+      width.mockRestore()
+    }
   })
 
   it('calls onSetLayout and updates active layout button when picker is used', () => {
@@ -595,7 +660,7 @@ describe('Tools menu callbacks', () => {
 
     expect(onOpenCredits).toHaveBeenCalledTimes(1)
     expect(onOpenCredits.mock.calls[0][0]).toBe(document.getElementById('tools-menu-toggle'))
-    expect(isToolsMenuOpen()).toBe(false)
+    expect(isToolsMenuOpen()).toBe(true)
   })
 
   it('renders no Outputs section without onOpenOutputs — the web build sees nothing', () => {
@@ -620,10 +685,11 @@ describe('Tools menu callbacks', () => {
     outputsBtn!.click()
 
     expect(onOpenOutputs).toHaveBeenCalledTimes(1)
-    // The toggle, not the menu item: closePopover has already hidden the
-    // item, so it cannot receive focus back when the panel closes.
+    // The toggle, not the menu item: on a narrow window the popover has
+    // closed and hidden the item, so it cannot receive focus back when
+    // the panel closes.
     expect(onOpenOutputs.mock.calls[0][0]).toBe(document.getElementById('tools-menu-toggle'))
-    expect(isToolsMenuOpen()).toBe(false)
+    expect(isToolsMenuOpen()).toBe(true)
   })
 })
 

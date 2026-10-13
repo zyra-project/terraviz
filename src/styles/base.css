@@ -50,6 +50,10 @@ button:hover {
     height: 100%;
     position: relative;
     overflow: hidden;
+    /* `clip` where supported: `hidden` is still a scroll container, and
+       focusing the Tools popover while it slides in from beyond the
+       edge would scroll the whole UI sideways to meet it. */
+    overflow: clip;
 }
 
 canvas {
@@ -62,6 +66,48 @@ canvas {
 /* Multi-viewport grid. In single-viewport mode it's just one
    cell; ViewportManager rewrites grid-template for 1/2h/2v/4
    layouts. Sits behind #ui in z-order so overlays stay on top. */
+/* Whatever else is anchored to the inline-end side steps aside for the
+   browse panel and the Tools popover, on the same time and curve as the
+   panels and the globe. `src/ui/globePanelOffset.ts` sets the distances:
+   `--panel-push-top` for what floats over the window, `--panel-push-view`
+   for what belongs to the single globe's own panel (zero while several
+   globes share the window). `:where()` keeps this at zero specificity,
+   so a component that has its own transition keeps it and simply moves
+   without the glide. The corner buttons, the Tools bar, the transport,
+   the legend and the colorbar carry the same two lines in their own
+   rules, where their transitions are. */
+:where(
+    .analyze-panel,
+    .output-panel,
+    .colorbar-controls,
+    #download-manager,
+    #zip-download-dialog,
+    .tour-media-rail,
+    .tour-authoring-dock
+) {
+    translate: var(--panel-push-top, 0px) 0;
+    transition: translate 0.65s cubic-bezier(0.45, 0, 0.15, 1);
+}
+:where(.maplibregl-ctrl-top-right, .maplibregl-ctrl-bottom-right) {
+    translate: var(--panel-push-view, 0px) 0;
+    transition: translate 0.65s cubic-bezier(0.45, 0, 0.15, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+    :where(
+        .analyze-panel,
+        .output-panel,
+        .colorbar-controls,
+        #download-manager,
+        #zip-download-dialog,
+        .tour-media-rail,
+        .tour-authoring-dock,
+        .maplibregl-ctrl-top-right,
+        .maplibregl-ctrl-bottom-right
+    ) {
+        transition: none;
+    }
+}
+
 #map-grid {
     position: absolute;
     top: 0;
@@ -181,7 +227,14 @@ canvas {
     border-radius: calc(6px * var(--ui-scale));
     cursor: zoom-in;
     pointer-events: auto;
-    transition: border-color 0.15s, background 0.15s;
+    /* Steps aside with the globe it belongs to (`src/ui/globePanelOffset.ts`). */
+    translate: var(--panel-push-view, 0px) 0;
+    transition: border-color 0.15s, background 0.15s, translate 0.65s cubic-bezier(0.45, 0, 0.15, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+    .panel-legend {
+        transition: border-color 0.15s, background 0.15s;
+    }
 }
 .panel-legend:hover {
     background: rgba(13, 13, 18, 0.95);

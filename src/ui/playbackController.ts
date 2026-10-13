@@ -14,6 +14,7 @@ import { proxyCaptionUrl } from '../utils/captionProxy'
 import { t } from '../i18n'
 import { playableStart } from '../utils/mediaReadiness'
 import { reportError } from '../analytics'
+import { updateMapControlsPosition } from './mapControlsUI'
 
 // --- Playback constants ---
 const LOOP_RESTART_DELAY_MS = 2000
@@ -461,8 +462,29 @@ export function seekToDate(
 // --- Info panel positioning ---
 
 /**
- * Observe the info panel and shift #playback-controls up as it expands.
- * Only applies on portrait mobile (≤600px width).
+ * Whether the transport, once it has stepped aside for the browse panel
+ * (`--panel-push-bar`, set by globePanelOffset.ts), lands on the info
+ * panel in the other bottom corner. Measured from where it will rest,
+ * not where it is mid-slide.
+ */
+export function transportMeetsInfoPanel(
+  controls: { left: number; right: number },
+  slid: number,
+  push: number,
+  info: { left: number; right: number },
+  gap: number,
+): boolean {
+  const left = controls.left - slid + push
+  const right = controls.right - slid + push
+  return left < info.right + gap && right > info.left - gap
+}
+
+/**
+ * Observe the info panel and shift #playback-controls up over it where
+ * the two would otherwise share the bottom edge: on portrait mobile
+ * (≤600px width) while the panel is expanded, and on a desktop window
+ * too narrow to hold both side by side once the browse panel has pushed
+ * the transport over.
  */
 export function initPlaybackPositioning(): void {
   const infoPanel = document.getElementById('info-panel')
@@ -473,15 +495,47 @@ export function initPlaybackPositioning(): void {
     if (!controls) return
     const isPortraitMobile = window.innerWidth <= 600
       && window.matchMedia('(orientation: portrait)').matches
-    if (infoPanel.classList.contains('expanded') && isPortraitMobile) {
-      const h = infoPanel.getBoundingClientRect().height
-      controls.style.bottom = `${h + 12}px`
-    } else {
-      controls.style.bottom = '0.75rem'
+    const info = infoPanel.getBoundingClientRect()
+    const push = parseFloat(document.documentElement.style.getPropertyValue('--panel-push-bar')) || 0
+    const box = controls.getBoundingClientRect()
+    const slid = parseFloat(getComputedStyle(controls).translate ?? '') || 0
+    // What lives in the other bottom corner: the info panel, and the
+    // chat trigger that rides above it (or sits there alone when the
+    // panel is switched off). The transport goes over whichever of
+    // them the push would land it on.
+    let clearOf = Infinity
+    if (push !== 0 && box.width > 0) {
+      for (const el of [infoPanel, document.getElementById('chat-trigger')]) {
+        if (!el || el.classList.contains('hidden')) continue
+        const there = el.getBoundingClientRect()
+        if (there.width > 0 && transportMeetsInfoPanel(box, slid, push, there, 8)) {
+          clearOf = Math.min(clearOf, there.top)
+        }
+      }
     }
+    let next = '0.75rem'
+    if (clearOf !== Infinity) {
+      const floor = controls.offsetParent?.getBoundingClientRect().bottom ?? window.innerHeight
+      next = `${Math.round(floor - clearOf) + 8}px`
+    } else if (infoPanel.classList.contains('expanded') && isPortraitMobile) {
+      next = `${Math.round(info.height) + 12}px`
+    }
+    if (controls.style.bottom === next) return
+    controls.style.bottom = next
+    // The Tools bar rests on the transport, wherever that now is.
+    updateMapControlsPosition()
   }
 
   new ResizeObserver(update).observe(infoPanel)
+  // The push is a custom property on the root; the info panel is shown
+  // and hidden by class.
+  const changes = new MutationObserver(update)
+  changes.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] })
+  changes.observe(infoPanel, { attributes: true, attributeFilter: ['class'] })
+  // The chat trigger is moved by inline style as the info panel grows.
+  const chatTrigger = document.getElementById('chat-trigger')
+  if (chatTrigger) changes.observe(chatTrigger, { attributes: true, attributeFilter: ['class', 'style'] })
+  window.addEventListener('resize', update)
 }
 
 // --- Playback state reset ---

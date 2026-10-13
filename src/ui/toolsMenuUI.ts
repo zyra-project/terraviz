@@ -431,7 +431,7 @@ export function initToolsMenu(
 
   browseBtn.addEventListener('click', (ev) => {
     ev.stopPropagation()
-    closePopover()
+    closePopoverWhereItCovers()
     onOpenBrowse?.()
   })
 
@@ -459,7 +459,7 @@ export function initToolsMenu(
   const fullscreenBtn = document.getElementById('tools-menu-fullscreen') as HTMLButtonElement | null
   fullscreenBtn?.addEventListener('click', (ev) => {
     ev.stopPropagation()
-    closePopover()
+    // Fullscreen changes the window, not what is open in it.
     void toggleFullscreen()
   })
   // Adopted before the first sync, so the button's initial label
@@ -488,13 +488,19 @@ export function initToolsMenu(
       if (!target) return
       const host = document.getElementById('map-controls')
       if (host && host.contains(target)) return
-      closePopover()
+      closePopoverWhereItCovers()
     })
     // Escape closes the popover. Stop propagation so other handlers
     // (tour engine, chat) don't interpret the same keypress.
     document.addEventListener('keydown', (ev) => {
       if (!isOpen) return
       if (ev.key === 'Escape') {
+        // The popover stays open behind a dialog opened from it. Escape
+        // pressed in that dialog (or in the browse panel's search box)
+        // is for whatever has the focus, not for the menu.
+        const focused = document.activeElement
+        const host = document.getElementById('map-controls')
+        if (focused && focused !== document.body && host && !host.contains(focused)) return
         ev.stopPropagation()
         closePopover()
         const toggle = document.getElementById('tools-menu-toggle') as HTMLButtonElement | null
@@ -525,7 +531,7 @@ export function initToolsMenu(
   // announce for screen readers. No-op when Meet Orbit is gated off
   // (desktop build).
   meetOrbitLink?.addEventListener('click', () => {
-    closePopover()
+    closePopoverWhereItCovers()
     announce?.(t('tools.announce.meetOrbit'))
   })
 
@@ -658,7 +664,7 @@ export function initToolsMenu(
   })
 
   shareBtn.addEventListener('click', async () => {
-    closePopover()
+    closePopoverWhereItCovers()
     const dataset = callbacks.getCurrentDataset?.()
     if (!dataset) {
       announce?.(t('tools.announce.noDatasetToShare'))
@@ -674,13 +680,13 @@ export function initToolsMenu(
   })
 
   orbitSettingsBtn.addEventListener('click', () => {
-    closePopover()
+    closePopoverWhereItCovers()
     onOpenOrbitSettings?.()
   })
 
   const playlistsBtn = document.getElementById('tools-menu-playlists') as HTMLButtonElement | null
   playlistsBtn?.addEventListener('click', () => {
-    closePopover()
+    closePopoverWhereItCovers()
     openPlaylistManager()
   })
 
@@ -691,7 +697,7 @@ export function initToolsMenu(
   if (onOpenCredits) {
     const creditsBtn = document.getElementById('tools-menu-credits') as HTMLButtonElement | null
     creditsBtn?.addEventListener('click', () => {
-      closePopover()
+      closePopoverWhereItCovers()
       // Pass the Tools toggle button (which stays visible as the
       // popover's anchor) as the credits panel's focus-restore
       // target. The menu item itself is hidden by closePopover()
@@ -704,7 +710,7 @@ export function initToolsMenu(
   if (onOpenOutputs) {
     const outputsBtn = document.getElementById('tools-menu-outputs') as HTMLButtonElement | null
     outputsBtn?.addEventListener('click', () => {
-      closePopover()
+      closePopoverWhereItCovers()
       // The always-visible toggle button, not the menu item: closePopover
       // has just hidden the item, so it cannot take focus back when the
       // panel closes. Same reasoning as Credits above.
@@ -715,14 +721,14 @@ export function initToolsMenu(
 
   const analyzeBtn = document.getElementById('tools-menu-analyze') as HTMLButtonElement | null
   analyzeBtn?.addEventListener('click', () => {
-    closePopover()
+    closePopoverWhereItCovers()
     openAnalyzeUI(analyzeBtn)
     announce?.(t('tools.announce.analyzeOpened'))
   })
 
   const privacyBtn = document.getElementById('tools-menu-privacy') as HTMLButtonElement | null
   privacyBtn?.addEventListener('click', () => {
-    closePopover()
+    closePopoverWhereItCovers()
     openPrivacyUI(privacyBtn)
     announce?.(t('tools.announce.privacyOpened'))
   })
@@ -768,6 +774,20 @@ function openPopover(): void {
   close?.focus()
 }
 
+/**
+ * Close the popover only where it would be in the way.
+ *
+ * On a desktop window the popover is a panel beside the globe: the
+ * globe, the corner buttons and the browse panel all make room for it
+ * (`globePanelOffset.ts`), so it stays until its own button, its ✕ or
+ * Escape closes it — choosing an option, opening a dialog from it or
+ * clicking elsewhere leaves it as it is. On a narrow window it covers
+ * most of the screen, and whatever was just opened would be under it.
+ */
+function closePopoverWhereItCovers(): void {
+  if (window.innerWidth <= 768) closePopover()
+}
+
 /** Close the popover. */
 function closePopover(): void {
   const popover = document.getElementById('tools-menu-popover')
@@ -776,6 +796,14 @@ function closePopover(): void {
   popover.classList.add('hidden')
   toggle.setAttribute('aria-expanded', 'false')
   isOpen = false
+}
+
+/**
+ * Close the popover from outside the menu: `globePanelOffset.ts` does
+ * when the browse panel has just opened and the window cannot hold both.
+ */
+export function closeToolsMenu(): void {
+  if (isOpen) closePopover()
 }
 
 /** Whether the popover is currently open — used by tests. */
