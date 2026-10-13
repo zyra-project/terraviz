@@ -12,9 +12,9 @@
  * user isn't on a tour, the mesh is invisible and its UV hit-test
  * short-circuits.
  *
- * Positioning is the caller's job: `vrSession` tracks the strip to
- * a world-space offset below the main HUD so the two controls read
- * as a cluster. Kept as a separate mesh (rather than extending
+ * Positioning is the caller's job: `vrSession` hangs the strip below
+ * the main HUD, in the HUD's plane and clear of its caption strip, so
+ * the controls read as a cluster. Kept as a separate mesh (rather than extending
  * `vrHud.ts`) so the dataset HUD's geometry stays untouched —
  * growing the HUD plane would start occluding the globe's bottom
  * edge for the common case where no tour is active.

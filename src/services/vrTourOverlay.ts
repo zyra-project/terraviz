@@ -592,9 +592,10 @@ function htmlToPlainText(raw: string): string {
  * lines. Respects hard newlines from the caption. Bails out if a
  * single word doesn't fit rather than overflowing the panel — the
  * word is truncated with an ellipsis so at least the first syllables
- * are readable.
+ * are readable. Exported for the HUD's caption strip (`vrHud`), which
+ * wraps the same way and then caps the line count.
  */
-function wrapText(
+export function wrapText(
   ctx: CanvasRenderingContext2D,
   text: string,
   maxWidth: number,

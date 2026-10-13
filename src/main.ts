@@ -37,7 +37,7 @@ import { updateMapControlsPosition } from './ui/mapControlsUI'
 import { initToolsMenu, syncToolsMenuState, syncToolsMenuLayout, pulseBrowseButton } from './ui/toolsMenuUI'
 import { closeOutputUI, initOutputUI, openOutputUI } from './ui/outputUI'
 import { openCreditsPanel } from './ui/creditsPanel'
-import { initChatUI, openChat, openChatSettings, notifyDatasetChanged, showChatTrigger, hideChatTrigger, closeChat, flushPendingGlobeActions } from './ui/chatUI'
+import { initChatUI, openChat, openChatSettings, notifyDatasetChanged, showChatTrigger, hideChatTrigger, closeChat, flushPendingGlobeActions, getImmersiveVoiceState, toggleImmersiveVoice, endImmersiveVoice } from './ui/chatUI'
 import { loadViewPreferences, saveViewPreferences, type ViewPreferences } from './utils/viewPreferences'
 import { renderColorbar, openDisplayControls, closeDisplayControls } from './ui/colorbarUI'
 import {
@@ -2669,7 +2669,14 @@ class InteractiveSphere {
         this.stopTour()
       },
 
+      // --- Phase 5 Orbit voice ---
+      // The HUD mic drives the same voice stack as the chat panel's mic;
+      // chatUI owns the turn (see toggleImmersiveVoice).
+      getVoiceState: () => getImmersiveVoiceState(),
+      toggleVoice: () => toggleImmersiveVoice(),
+
       onSessionEnd: () => {
+        endImmersiveVoice()
         this.announce('Exited VR')
         // Resume the 2D perf sampler now that VR has handed the
         // GPU back. The sampler stayed paused for the duration of

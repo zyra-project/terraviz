@@ -574,6 +574,7 @@ export function createVrInteraction(
 
   function pickHit(controller: THREE.XRTargetRaySpace):
     | { kind: 'hud'; action: VrHudAction }
+    | { kind: 'hud-caption' }
     | { kind: 'browse'; action: VrBrowseAction; uv: THREE.Vector2 }
     | { kind: 'browse-scroll'; uv: THREE.Vector2 }
     | { kind: 'tour-control'; action: VrTourControlsAction }
@@ -588,6 +589,17 @@ export function createVrInteraction(
     if (hudHits.length > 0 && hudHits[0].uv) {
       const action = ctx.hud.hitTest({ x: hudHits[0].uv.x, y: hudHits[0].uv.y })
       if (action) return { kind: 'hud', action }
+    }
+
+    // The caption strip under the HUD. It has no buttons, but while it
+    // shows it is drawn over whatever is behind it, so the ray stops
+    // here: a tap on the caption — to dismiss it, say — must not press
+    // a tour button or grab a globe the user can't see. Tested as its
+    // own mesh rather than by making the HUD raycast above recursive,
+    // because `hitTest` would read a caption UV as a bar button.
+    const caption = ctx.hud.captionMesh
+    if (caption.visible && ctx.hud.mesh.visible && raycaster.intersectObject(caption, false).length > 0) {
+      return { kind: 'hud-caption' }
     }
 
     // Browse panel — checked before globe so the user can interact
@@ -924,6 +936,9 @@ export function createVrInteraction(
       hudArmed[index] = hit.action
       return
     }
+
+    // Nothing to arm: the caption only absorbs the press.
+    if (hit.kind === 'hud-caption') return
 
     if (hit.kind === 'browse' || hit.kind === 'browse-scroll') {
       // Card / chip / close presses arm here and fire on release. A
@@ -1372,13 +1387,16 @@ export function createVrInteraction(
   function updateRayVisuals(): void {
     // Reuse one closure-scoped array, clear-and-push each frame so
     // we don't allocate at XR frame rate. Includes every globe in
-    // the layout (so the dot snaps to secondaries), the HUD, the
-    // browse panel (when visible), and the AR Place button (when
-    // visible).
+    // the layout (so the dot snaps to secondaries), the HUD and its
+    // caption strip (while one shows), the browse panel (when
+    // visible), and the AR Place button (when visible).
     rayTargets.length = 0
     const allGlobes = ctx.getAllGlobes()
     for (let i = 0; i < allGlobes.length; i++) rayTargets.push(allGlobes[i])
     rayTargets.push(ctx.hud.mesh)
+    if (ctx.hud.captionMesh.visible && ctx.hud.mesh.visible) {
+      rayTargets.push(ctx.hud.captionMesh)
+    }
     if (ctx.browse.isVisible()) {
       rayTargets.push(ctx.browse.mesh)
     }

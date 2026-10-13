@@ -414,6 +414,18 @@ Mirror the existing `visionEnabled` toggle pattern (~`chatUI.ts:432`):
   same `voiceService` — voice is *more* compelling in immersive
   mode (hands occupied, no keyboard). Spatial audio for Orbit's
   voice is a VR-specific stretch.
+- **Shipped — the HUD mic.** The in-VR/AR HUD carries a mic button
+  and a caption strip (`vrHud.ts`), driven through chatUI's
+  `toggleImmersiveVoice` / `getImmersiveVoiceState` over the Phase 1
+  single-tap path. A turn started there is spoken whatever the
+  auto-speak setting (the panel isn't visible), carries out the
+  reply's first Load, and captions the sentence being spoken. The
+  mic appears only where an STT engine resolves — on a headset
+  browser without Web Speech recognition that means pinning the
+  cloud provider in chat settings before entering. Not yet:
+  hands-free (open-mic / wake-word) turns inside the session keep
+  panel semantics, and there is no spatial audio or character
+  animation.
 
 ### 5.5 i18n & a11y
 
@@ -508,7 +520,7 @@ requirement** that pulls realtime ahead of on-device).
 | **3 — Realtime / hands-free** *(committed — exhibit req.; **largely shipped**)* | **Shipped:** local VAD gating before any audio streams, listening indicator + mute, **barge-in** ("Stop speaking" → "interrupt"), dataset-audio ducking, both **open-mic** and **push-to-talk**, browser (continuous Web Speech) + **Cloudflare Whisper (VAD-segmented)** streaming engines, and the **recognition-language override** (`voiceLang`). **Remaining:** the true **WebSocket** path (Deepgram **Flux** turn detection + **Nova-3/Flux** streaming partials) for live interim transcripts, and streaming-turn telemetry. | web + desktop | WS proxy / Realtime | edge inference |
 | **3.5 — Wake-word** *(committed)* | "Hey Orbit" off-the-shelf small wake model to arm listening hands-free in the exhibit. | web + desktop | local / WS | edge inference |
 | **4 — On-device / private** | WebGPU Whisper + local TTS (`transformers.js`); Apple Speech/AVSpeechSynthesizer on macOS Tauri; "private mode." | web (WebGPU) + desktop | none (local) | none |
-| **5 — Character & VR** | Orbit-character speaking animation / amplitude lip-sync; wire `voiceService` into the VR docent (`VR_INVESTIGATION_PLAN.md` §5); optional spatial audio. | web + VR | reuse | reuse |
+| **5 — Character & VR** *(VR voice started)* | Orbit-character speaking animation / amplitude lip-sync; wire `voiceService` into the VR docent (`VR_INVESTIGATION_PLAN.md` §5); optional spatial audio. **Shipped:** the HUD mic + caption strip (§5.4). | web + VR | reuse | reuse |
 
 **Stretch / explicitly deferred:** tour **narration** via TTS,
 voice-driven catalog search (noted as a Phase 3 stretch in the VR

@@ -2,8 +2,9 @@
 // Copyright 2026 The Zyra Project
 
 /**
- * Floating in-VR HUD — a small panel with dataset title, play/pause
- * button, and exit-VR button. Rendered as a `CanvasTexture` on a
+ * Floating in-VR HUD — a small panel with dataset title, play/pause,
+ * mute, Orbit's mic, browse and exit-VR buttons, and a caption strip
+ * under it for Orbit's voice turns. Rendered as a `CanvasTexture` on a
  * `PlaneGeometry` so we can use familiar 2D canvas drawing (text,
  * icons) instead of spinning up another shader for UI work.
  *
@@ -17,6 +18,8 @@
  */
 
 import type * as THREE from 'three'
+import { t } from '../i18n'
+import { wrapText } from './vrTourOverlay'
 
 /** World-space size of the HUD plane. Wide strip that tucks below the globe. */
 const HUD_WIDTH = 0.6
@@ -49,24 +52,59 @@ const CANVAS_HEIGHT = 256
  * All regions are full-height bands; users don't need fine-grained
  * vertical targeting for buttons this small.
  *
- * Layout when a video dataset is loaded:
- *   [play-pause] [mute] [ title ...  ] [browse] [exit]
- *     0.00-0.14   .14-.28   0.28-0.64    0.64-    0.82-
- *                                         0.82     1.00
+ * Layout when a video dataset is loaded and Orbit voice is available:
+ *   [play-pause] [mute] [ title ... ] [voice] [browse] [exit]
+ *     0.00-0.12  .12-.24  0.24-0.58   .58-.72  .72-.86  .86-1.00
  *
  * The title shrank from 46 % of the bar to 36 % to fit the mute
  * button next to play-pause — those two are a logical group
- * ("audio/video playback controls") so they belong together.
+ * ("audio/video playback controls") so they belong together. The
+ * Orbit mic then took 0.14 by narrowing every button a little rather
+ * than the title a lot: the title keeps 34 %. Without voice the title
+ * runs on over the mic's band, the way it runs left over play/pause
+ * and mute for an image dataset.
  */
 const BUTTON_LAYOUT = {
-  playPause: { uMin: 0.0, uMax: 0.14 },
-  mute: { uMin: 0.14, uMax: 0.28 },
-  browse: { uMin: 0.64, uMax: 0.82 },
-  exit: { uMin: 0.82, uMax: 1.0 },
-  // 0.28-0.64 is the dataset title — non-interactive.
+  playPause: { uMin: 0.0, uMax: 0.12 },
+  mute: { uMin: 0.12, uMax: 0.24 },
+  voice: { uMin: 0.58, uMax: 0.72 },
+  browse: { uMin: 0.72, uMax: 0.86 },
+  exit: { uMin: 0.86, uMax: 1.0 },
+  // The title fills what's left between mute and the next button — non-interactive.
 } as const
 
-export type VrHudAction = 'play-pause' | 'mute' | 'browse' | 'exit-vr'
+/**
+ * The caption strip under the HUD that carries Orbit's side of a voice
+ * turn. A child of the HUD mesh, so it follows the HUD through
+ * placement and hides with it during the loading scene. It has no
+ * buttons: `vrInteraction` raycasts it on its own (the HUD raycast is
+ * non-recursive, and `hitTest` only knows the bar's UVs) and lets a
+ * tap on a visible caption stop there.
+ */
+const CAPTION_HEIGHT = 0.1125
+const CAPTION_GAP = 0.01
+const CAPTION_CANVAS_HEIGHT = 192
+
+/**
+ * How far the caption strip reaches below the bar's bottom edge.
+ * `vrSession` hangs the tour-control strip this much further down the
+ * HUD's plane so the two never share the space under the bar.
+ */
+export const HUD_CAPTION_DROP = CAPTION_GAP + CAPTION_HEIGHT
+
+export type VrHudAction = 'play-pause' | 'mute' | 'voice' | 'browse' | 'exit-vr'
+
+/**
+ * Orbit's voice turn as the HUD draws it — structurally the chat
+ * module's `ImmersiveVoiceState`, restated here so the VR modules don't
+ * import the chat UI. `idle` with a caption is a finished reply that
+ * is still lingering.
+ */
+export type VrVoicePhase = 'idle' | 'listening' | 'thinking' | 'speaking' | 'error'
+export interface VrVoiceState {
+  phase: VrVoicePhase
+  caption: string
+}
 
 export interface VrHudState {
   /** Title shown in the middle of the panel. Null/empty renders "No dataset". */
@@ -107,11 +145,62 @@ export interface VrHudState {
    * for the data. The readout takes the slot when both are set.
    */
   notice?: string | null
+  /**
+   * Orbit's voice turn. Null/absent when no speech recognition is
+   * available for the active locale — the mic is then not drawn and
+   * its band goes back to the title, rather than offering a dead
+   * button.
+   */
+  voice?: VrVoiceState | null
+}
+
+/**
+ * Map a UV point on the HUD to the button under it, for the state the
+ * HUD is showing. Pure, so the layout is testable without a canvas.
+ */
+export function hudActionAt(state: VrHudState, uv: { x: number; y: number }): VrHudAction | null {
+  const { x: u, y: v } = uv
+  if (v < 0 || v > 1) return null
+  const within = (band: { uMin: number; uMax: number }): boolean => u >= band.uMin && u <= band.uMax
+  if (state.hasVideo && within(BUTTON_LAYOUT.playPause)) return 'play-pause'
+  if (state.hasVideo && within(BUTTON_LAYOUT.mute)) return 'mute'
+  if (state.voice && within(BUTTON_LAYOUT.voice)) return 'voice'
+  if (within(BUTTON_LAYOUT.browse)) return 'browse'
+  if (within(BUTTON_LAYOUT.exit)) return 'exit-vr'
+  return null
+}
+
+/**
+ * What the caption strip says for a voice state — a short label and
+ * the text under it — or null when there's nothing to show and the
+ * strip hides. Pure for the same reason as {@link hudActionAt}.
+ */
+export function voiceCaption(voice: VrVoiceState | null | undefined): { label: string; text: string } | null {
+  if (!voice) return null
+  switch (voice.phase) {
+    case 'listening':
+      return { label: t('vr.voice.listening'), text: voice.caption || t('vr.voice.listeningHint') }
+    case 'thinking':
+      return { label: t('vr.voice.thinking'), text: voice.caption }
+    case 'speaking':
+      return { label: t('vr.voice.speaker'), text: voice.caption }
+    case 'error':
+      return { label: t('vr.voice.speaker'), text: t('vr.voice.error') }
+    case 'idle':
+      return voice.caption ? { label: t('vr.voice.speaker'), text: voice.caption } : null
+  }
 }
 
 export interface VrHudHandle {
   /** The Three.js mesh — add to the scene, no further handling needed. */
   readonly mesh: THREE.Mesh
+  /**
+   * The caption strip — a child of {@link mesh}, visible only while a
+   * voice turn has something to say. Exposed so `vrInteraction` can
+   * stop a ray on it: it is drawn over whatever is behind it, and a
+   * tap there must not press something the user can't see.
+   */
+  readonly captionMesh: THREE.Mesh
   /** Update visible state. Triggers a canvas redraw. */
   setState(state: VrHudState): void
   /**
@@ -245,7 +334,7 @@ function drawCanvas(
   // character-by-character until it does. Fine for typical dataset
   // names (< 40 chars); a longer implementation would binary-search.
   const titleUMin = state.hasVideo ? BUTTON_LAYOUT.mute.uMax : 0
-  const titleUMax = BUTTON_LAYOUT.browse.uMin
+  const titleUMax = state.voice ? BUTTON_LAYOUT.voice.uMin : BUTTON_LAYOUT.browse.uMin
   const titleMaxWidth = (titleUMax - titleUMin) * w * 0.92
   const titleCenterX = ((titleUMin + titleUMax) / 2) * w
   let title = titleText
@@ -278,6 +367,9 @@ function drawCanvas(
     }
     ctx.fillText(text, titleCenterX, h / 2 + 30)
   }
+
+  // --- Orbit voice button ---
+  if (state.voice) drawVoiceButton(ctx, state.voice.phase, h)
 
   // --- Browse button (three horizontal bars, "list" glyph) ---
   // Highlights in accent when the panel is currently open so the
@@ -340,6 +432,117 @@ function drawCanvas(
 }
 
 /**
+ * The mic, coloured by what a tap will do next: text colour to start,
+ * red while listening (tap sends), dimmed accent while Orbit thinks
+ * (tap does nothing), and a stop square while Orbit speaks (tap stops).
+ */
+function drawVoiceButton(ctx: CanvasRenderingContext2D, phase: VrVoicePhase, h: number): void {
+  const cx = ((BUTTON_LAYOUT.voice.uMin + BUTTON_LAYOUT.voice.uMax) / 2) * CANVAS_WIDTH
+  const cy = h / 2
+  if (phase === 'speaking') {
+    ctx.fillStyle = 'rgba(77, 166, 255, 0.95)' // --color-accent
+    ctx.fillRect(cx - 26, cy - 26, 52, 52)
+    return
+  }
+  const colour = phase === 'listening'
+    ? '#ff6b6b'
+    : phase === 'thinking'
+      ? 'rgba(77, 166, 255, 0.55)'
+      : 'rgba(232, 234, 240, 0.85)' // --color-text, as browse and exit
+  if (phase === 'listening') {
+    // A ring behind the mic: "on air", visible at a glance in the headset.
+    ctx.strokeStyle = colour
+    ctx.lineWidth = 5
+    ctx.beginPath()
+    ctx.arc(cx, cy, 58, 0, Math.PI * 2)
+    ctx.stroke()
+  }
+  ctx.fillStyle = colour
+  ctx.strokeStyle = colour
+  ctx.lineWidth = 7
+  ctx.lineCap = 'round'
+  // Capsule
+  const capW = 30
+  const capH = 56
+  const capTop = cy - 44
+  ctx.beginPath()
+  ctx.arc(cx, capTop + capW / 2, capW / 2, Math.PI, 0)
+  ctx.lineTo(cx + capW / 2, capTop + capH - capW / 2)
+  ctx.arc(cx, capTop + capH - capW / 2, capW / 2, 0, Math.PI)
+  ctx.closePath()
+  ctx.fill()
+  // Cradle, stem and base
+  ctx.beginPath()
+  ctx.arc(cx, capTop + capH - capW / 2, 26, 0.15 * Math.PI, 0.85 * Math.PI)
+  ctx.moveTo(cx, capTop + capH + 12)
+  ctx.lineTo(cx, cy + 40)
+  ctx.moveTo(cx - 18, cy + 40)
+  ctx.lineTo(cx + 18, cy + 40)
+  ctx.stroke()
+}
+
+/**
+ * Break `text` into at most `maxLines` lines that fit `maxWidth`,
+ * ending the last with an ellipsis when the text runs over.
+ *
+ * Words wrap as they do on the tour panels (`wrapText`, which also
+ * shortens a word too wide for a line of its own — a URL, say). Text
+ * with no spaces at all has no words to wrap: Japanese and Chinese are
+ * written that way, and as one "word" a whole reply would be cut down
+ * to a single line. That is broken by character instead.
+ */
+function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, maxLines: number): string[] {
+  // One paragraph: a caption is a sentence, and a hard break inside it
+  // would spend one of very few lines.
+  const flat = text.replace(/\s+/g, ' ').trim()
+  const lines = flat.includes(' ') ? wrapText(ctx, flat, maxWidth) : wrapByCharacter(ctx, flat, maxWidth)
+  if (lines.length <= maxLines) return lines
+  const kept = lines.slice(0, maxLines)
+  let last = kept[maxLines - 1]!.replace(/…$/, '')
+  while (last.length > 1 && ctx.measureText(`${last}…`).width > maxWidth) last = last.slice(0, -1)
+  kept[maxLines - 1] = `${last.trimEnd()}…`
+  return kept
+}
+
+/** Fill each line with as many characters as fit — for text without spaces. */
+function wrapByCharacter(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+  const lines: string[] = []
+  let line = ''
+  // By code point, so a surrogate pair is never split across lines.
+  for (const char of text) {
+    if (line && ctx.measureText(line + char).width > maxWidth) {
+      lines.push(line)
+      line = char
+    } else {
+      line += char
+    }
+  }
+  if (line) lines.push(line)
+  return lines
+}
+
+function drawCaption(ctx: CanvasRenderingContext2D, caption: { label: string; text: string }): void {
+  const w = CANVAS_WIDTH
+  const h = CAPTION_CANVAS_HEIGHT
+  ctx.clearRect(0, 0, w, h)
+  ctx.fillStyle = 'rgba(13, 13, 18, 0.85)'
+  ctx.fillRect(0, 0, w, h)
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)'
+  ctx.lineWidth = 2
+  ctx.strokeRect(1, 1, w - 2, h - 2)
+  const padX = 28
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'middle'
+  ctx.fillStyle = '#4da6ff' // --color-accent
+  ctx.font = '600 30px system-ui, -apple-system, sans-serif'
+  ctx.fillText(caption.label, padX, 34)
+  ctx.fillStyle = '#e8eaf0' // --color-text
+  ctx.font = '500 38px system-ui, -apple-system, sans-serif'
+  const lines = wrapLines(ctx, caption.text, w - padX * 2, 2)
+  lines.forEach((line, i) => ctx.fillText(line, padX, 92 + i * 56))
+}
+
+/**
  * Build the HUD. Caller is responsible for adding `handle.mesh` to
  * the scene, calling `setState()` when dataset or play state changes,
  * and calling `dispose()` on session end.
@@ -372,6 +575,31 @@ export function createVrHud(THREE_: typeof THREE): VrHudHandle {
   mesh.position.set(HUD_POSITION.x, HUD_POSITION.y, HUD_POSITION.z)
   mesh.renderOrder = 10
 
+  // Caption strip, hung just below the bar (below rather than above so
+  // it never covers the globe). Hidden until a voice turn has something
+  // to say.
+  const captionCanvas = document.createElement('canvas')
+  captionCanvas.width = CANVAS_WIDTH
+  captionCanvas.height = CAPTION_CANVAS_HEIGHT
+  const captionCtx = captionCanvas.getContext('2d')
+  if (!captionCtx) throw new Error('[VR HUD] 2D canvas context unavailable')
+  const captionTexture = new THREE_.CanvasTexture(captionCanvas)
+  captionTexture.colorSpace = THREE_.SRGBColorSpace
+  captionTexture.minFilter = THREE_.LinearFilter
+  captionTexture.magFilter = THREE_.LinearFilter
+  const captionMaterial = new THREE_.MeshBasicMaterial({
+    map: captionTexture,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+  })
+  const captionGeometry = new THREE_.PlaneGeometry(HUD_WIDTH, CAPTION_HEIGHT)
+  const captionMesh = new THREE_.Mesh(captionGeometry, captionMaterial)
+  captionMesh.position.set(0, -(HUD_HEIGHT / 2 + CAPTION_GAP + CAPTION_HEIGHT / 2), 0)
+  captionMesh.renderOrder = 10
+  captionMesh.visible = false
+  mesh.add(captionMesh)
+
   // Mutable state; the canvas redraw is idempotent, so tracking the
   // current state here means setState() can skip redraws when nothing
   // changed (cheap but a nice win during typical playback).
@@ -390,11 +618,20 @@ export function createVrHud(THREE_: typeof THREE): VrHudHandle {
     texture.needsUpdate = true
   }
 
+  function redrawCaption() {
+    const caption = voiceCaption(currentState.voice)
+    captionMesh.visible = caption !== null
+    if (!caption) return
+    drawCaption(captionCtx!, caption)
+    captionTexture.needsUpdate = true
+  }
+
   // Initial paint so the HUD isn't blank for the first frame.
   redraw()
 
   return {
     mesh,
+    captionMesh,
 
     setState(state) {
       const changed =
@@ -405,42 +642,38 @@ export function createVrHud(THREE_: typeof THREE): VrHudHandle {
         state.panelCount !== currentState.panelCount ||
         state.primaryIndex !== currentState.primaryIndex ||
         state.browseOpen !== currentState.browseOpen ||
+        // Normalised so an omitted readout and an explicit null don't
+        // count as a change — vrSession's first setState omits it.
+        (state.probeReadout ?? null) !== (currentState.probeReadout ?? null) ||
         (state.notice ?? null) !== (currentState.notice ?? null)
-      if (!changed) return
+      // The caption only redraws when the voice turn moves on — the
+      // state object itself is new every frame.
+      const prevVoice = currentState.voice ?? null
+      const nextVoice = state.voice ?? null
+      const voiceChanged =
+        (prevVoice === null) !== (nextVoice === null) ||
+        prevVoice?.phase !== nextVoice?.phase ||
+        prevVoice?.caption !== nextVoice?.caption
+      if (!changed && !voiceChanged) return
+      // The bar draws the mic's phase and yields the mic's band to the
+      // title when voice comes or goes; the caption text is the strip's alone.
+      const barChanged = changed || (prevVoice === null) !== (nextVoice === null) || prevVoice?.phase !== nextVoice?.phase
       currentState = state
-      redraw()
+      if (barChanged) redraw()
+      if (voiceChanged) redrawCaption()
     },
 
     hitTest(uv) {
-      const { x: u, y: v } = uv
-      if (v < 0 || v > 1) return null
-      if (
-        currentState.hasVideo &&
-        u >= BUTTON_LAYOUT.playPause.uMin &&
-        u <= BUTTON_LAYOUT.playPause.uMax
-      ) {
-        return 'play-pause'
-      }
-      if (
-        currentState.hasVideo &&
-        u >= BUTTON_LAYOUT.mute.uMin &&
-        u <= BUTTON_LAYOUT.mute.uMax
-      ) {
-        return 'mute'
-      }
-      if (u >= BUTTON_LAYOUT.browse.uMin && u <= BUTTON_LAYOUT.browse.uMax) {
-        return 'browse'
-      }
-      if (u >= BUTTON_LAYOUT.exit.uMin && u <= BUTTON_LAYOUT.exit.uMax) {
-        return 'exit-vr'
-      }
-      return null
+      return hudActionAt(currentState, uv)
     },
 
     dispose() {
       texture.dispose()
       material.dispose()
       geometry.dispose()
+      captionTexture.dispose()
+      captionMaterial.dispose()
+      captionGeometry.dispose()
     },
   }
 }

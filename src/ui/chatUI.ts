@@ -26,7 +26,7 @@ import { isAvailable as isAppleIntelligenceAvailable } from '../services/appleIn
 import { setLogLevel, logger } from '../utils/logger'
 import { emit, startDwell, type DwellHandle } from '../analytics'
 import { enMessages, t, getLocale, type MessageKey } from '../i18n'
-import { resolveSttEngine, resolveTtsEngine, resolveStreamingSttEngine, voiceSupportForLocale, splitIntoSpokenChunks, baseLanguage, listVoiceLanguageOptions, type SttSession, type TtsEngine } from '../services/voiceService'
+import { resolveSttEngine, resolveTtsEngine, resolveStreamingSttEngine, voiceSupportForLocale, splitIntoSpokenChunks, toSpokenForm, baseLanguage, listVoiceLanguageOptions, type SttSession, type TtsEngine } from '../services/voiceService'
 import { HandsFreeController, isWakeWordConfigured } from './voiceHandsFree'
 import { registerBrowserVoiceEngines, primeBrowserTts, listBrowserVoices, curateVoices, onBrowserVoicesChanged } from '../services/voiceBrowserEngines'
 import { registerCloudVoiceEngines } from '../services/voiceCloudEngines'
@@ -117,6 +117,35 @@ let ttsEmitted = false
  * started — otherwise a prior reply's pending promise could hide the
  * Stop control or enqueue speech into the current session. */
 let ttsSessionId = 0
+
+/**
+ * Immersive voice (ORBIT_VOICE_PLAN.md Phase 5) — a voice turn started
+ * from the VR/AR HUD, where the chat panel is not visible. Only the
+ * turn the HUD started is tracked; the 2D panel's own voice path is
+ * unchanged. See {@link toggleImmersiveVoice}.
+ */
+let immersiveTurn = false
+/**
+ * Which turn is live — bumped each time the HUD starts one. A reply's
+ * speech can outlast its turn (a barge-in cancels it, and its cleanup
+ * runs when the cancelled speech drains), so whatever ends a turn names
+ * the turn it means and leaves a newer one alone.
+ */
+let immersiveTurnId = 0
+let immersivePhase: 'listening' | 'thinking' | 'speaking' = 'listening'
+/**
+ * Transcript while listening, the question while thinking, the sentence
+ * being spoken after — which stays up once the user stops the speech.
+ */
+let immersiveCaption = ''
+/** When the last immersive turn ended — its caption lingers briefly after. */
+let immersiveEndedAt = 0
+/** When the last immersive turn failed (no engine, STT error). */
+let immersiveErrorAt = 0
+/** Whether an STT engine resolves for the active locale — cached by updateMicVisibility, read per XR frame. */
+let voiceInputAvailable = false
+/** How long a finished turn's caption (or an error) stays on the HUD. */
+const IMMERSIVE_LINGER_MS = 6000
 
 /** Globe-control actions deferred until a load-dataset action in the same message completes. */
 let pendingGlobeActions: ChatAction[] = []
@@ -734,10 +763,13 @@ function revealWakeWordOption(): void {
 
 /** Show the mic only when an STT engine resolves for the active locale (§3 matrix). */
 function updateMicVisibility(): void {
-  const btn = document.getElementById('chat-mic')
-  if (!btn) return
   const cfg = loadConfig()
   const support = voiceSupportForLocale(cfg.voiceLang || getLocale(), cfg.voiceProvider ?? 'auto')
+  // Cached before the button lookup: the immersive HUD asks every XR
+  // frame, and has no #chat-mic of its own.
+  voiceInputAvailable = !!support.stt
+  const btn = document.getElementById('chat-mic')
+  if (!btn) return
   btn.style.display = support.stt ? 'flex' : 'none'
 }
 
@@ -843,12 +875,19 @@ function startListening(): void {
   sttSuppressAutoSend = false
   let sawFinal = false
   let sttError = false
+  // An engine may end before start() returns — the browser engine does
+  // when `rec.start()` throws. The session it hands back is then
+  // already over; keeping it would leave both mics toggling a dead
+  // session until the page reloads.
+  let ended = false
+  // The immersive turn this mic was opened for, if the HUD opened it.
+  const turnId = immersiveTurnId
   const startedAt = Date.now()
   const provider = engine.provider
   const langBase = baseLanguage(lang)
   setMicListening(true)
   callbacks?.announce(t('chat.announce.voiceListening'))
-  sttSession = engine.start({
+  const session = engine.start({
     lang,
     interim: true,
     // Fill the input live so the user sees what's being heard and
@@ -858,18 +897,29 @@ function startListening(): void {
       input.style.height = 'auto'
       input.style.height = Math.min(input.scrollHeight, 96) + 'px'
       if (result.isFinal) sawFinal = true
+      if (immersiveTurn) immersiveCaption = result.transcript
     },
     onError: (err) => {
       logger.warn('[voice] STT error', err)
       sttError = true
       endListening()
+      failImmersiveTurn(turnId)
       callbacks?.announce(t('chat.announce.voiceError'))
     },
     onEnd: () => {
+      ended = true
       const hadFinal = sawFinal
       const suppressed = sttSuppressAutoSend
       sttSuppressAutoSend = false
       endListening()
+      // Auto-send on a committed transcript (push-to-talk turn) —
+      // unless an error was reported (could be partial/wrong) or a
+      // manual send already terminated this session. Decided once:
+      // the turn either goes on to a reply or ends here, never both.
+      const willSend = hadFinal && !sttError && !suppressed && !!input.value.trim()
+      // Nothing heard, or the send already happened elsewhere: the
+      // immersive turn ends here rather than waiting on a reply.
+      if (!willSend) finishImmersiveTurn(turnId)
       // Tier B: no transcript text — only provider/lang/duration/success.
       emit({
         event_type: 'voice_interaction',
@@ -880,12 +930,10 @@ function startListening(): void {
         lang: langBase,
         success: hadFinal && !sttError,
       })
-      // Auto-send on a committed transcript (push-to-talk turn) —
-      // unless an error was reported (could be partial/wrong) or a
-      // manual send already terminated this session.
-      if (hadFinal && !sttError && !suppressed && input.value.trim()) void handleSend()
+      if (willSend) void handleSend()
     },
   })
+  if (!ended) sttSession = session
 }
 
 /** Stop capture; the engine's `onEnd` resets the UI (and may auto-send). */
@@ -906,6 +954,129 @@ function setMicListening(on: boolean): void {
   btn.title = on ? t('chat.voice.titleListening') : t('chat.voice.title')
 }
 
+// --- Immersive voice (VR/AR HUD) — ORBIT_VOICE_PLAN.md Phase 5 ---
+
+/**
+ * What the VR/AR HUD shows for Orbit's voice. `idle` with a non-empty
+ * caption is a finished reply lingering for {@link IMMERSIVE_LINGER_MS}.
+ */
+export interface ImmersiveVoiceState {
+  phase: 'idle' | 'listening' | 'thinking' | 'speaking' | 'error'
+  caption: string
+}
+
+/**
+ * The HUD's view of the voice turn, or `null` when no STT engine
+ * resolves for the active locale (the HUD then hides its mic rather
+ * than offering a dead button — same rule as the panel's mic).
+ * Polled every XR frame, so it reads cached state only.
+ */
+export function getImmersiveVoiceState(now: number = Date.now()): ImmersiveVoiceState | null {
+  if (!voiceInputAvailable) return null
+  if (immersiveTurn) return { phase: immersivePhase, caption: immersiveCaption }
+  if (immersiveErrorAt && now - immersiveErrorAt < IMMERSIVE_LINGER_MS) return { phase: 'error', caption: '' }
+  const lingering = immersiveEndedAt > 0 && now - immersiveEndedAt < IMMERSIVE_LINGER_MS
+  return { phase: 'idle', caption: lingering ? immersiveCaption : '' }
+}
+
+/**
+ * The HUD mic button. One control for the whole turn, because a
+ * headset has no second button to spare:
+ *
+ * - idle → start listening (the Phase 1 single-tap path);
+ * - listening → stop, and send what was heard;
+ * - speaking → stop speaking (barge-in);
+ * - thinking → ignored; a reply in flight can't be recalled.
+ *
+ * A turn started here differs from a panel turn in two ways, both
+ * because the panel isn't visible in an immersive session: the reply
+ * is spoken even when auto-speak is off (voice in, voice out), and the
+ * reply's first Load is carried out rather than left as a button no
+ * one can tap. With hands-free open-mic / wake-word live, the tap
+ * mutes and unmutes that session instead, as the panel mic does.
+ */
+export function toggleImmersiveVoice(): void {
+  if (!callbacks) return
+  // The HUD tap is the user gesture — unlock TTS now so the reply,
+  // which arrives later and off-gesture, can still be spoken.
+  primeBrowserTts()
+  const mode = loadConfig().voiceHandsFree ?? 'off'
+  if ((mode === 'open-mic' || mode === 'wake-word') && handsFree?.isActive()) {
+    toggleListening()
+    return
+  }
+  if (sttSession) {
+    stopListening()
+    // An engine that answers later keeps the session open after the
+    // tap — cloud STT uploads and transcribes before it ends. That wait
+    // is already Orbit's, so the HUD stops inviting another tap to send.
+    if (sttSession && immersiveTurn) immersivePhase = 'thinking'
+    return
+  }
+  if (immersiveTurn && immersivePhase === 'speaking') {
+    stopSpeaking()
+    // Sentences are spoken as they stream in, so the stop can land
+    // before the reply has finished. Nothing more of it will be spoken,
+    // but it can't be recalled either: the HUD is back to thinking until
+    // the stream closes and handleSend ends the turn. Once it has
+    // closed, the stop is the end of the turn.
+    if (isStreaming) immersivePhase = 'thinking'
+    else finishImmersiveTurn(immersiveTurnId)
+    return
+  }
+  if (isStreaming) return
+  immersiveTurn = true
+  immersiveTurnId++
+  immersivePhase = 'listening'
+  immersiveCaption = ''
+  immersiveEndedAt = 0
+  immersiveErrorAt = 0
+  startListening()
+  // No engine resolved, or the input is missing: startListening
+  // returned without a session, and the HUD has to say so.
+  if (!sttSession) failImmersiveTurn(immersiveTurnId)
+}
+
+/**
+ * Forget any immersive turn — call when the VR/AR session ends. A
+ * listen the HUD started is stopped without sending: the user left the
+ * place they were speaking to, so what was heard stays in the chat
+ * input for them to send or discard. A reply already in flight still
+ * lands in the chat — and is read aloud there only if auto-speak is on:
+ * the turn's forced speech was for the headset, and ends with it.
+ */
+export function endImmersiveVoice(): void {
+  if (immersiveTurn && sttSession) {
+    sttSuppressAutoSend = true
+    stopListening()
+  }
+  // beginSpeaking already picked an engine for this turn, so clearing
+  // the turn alone wouldn't stop pumpSpeech reading the reply out in 2D.
+  if (immersiveTurn && !loadConfig().voiceAutoSpeak) stopSpeaking()
+  immersiveTurn = false
+  immersiveCaption = ''
+  immersiveEndedAt = 0
+  immersiveErrorAt = 0
+}
+
+/**
+ * End turn `turnId` — a no-op when that turn is no longer the live one
+ * (or, for a panel send's `null`, was never an immersive turn at all).
+ */
+function finishImmersiveTurn(turnId: number | null): void {
+  if (!immersiveTurn || turnId !== immersiveTurnId) return
+  immersiveTurn = false
+  immersiveEndedAt = Date.now()
+}
+
+/** As {@link finishImmersiveTurn}, but the HUD reports a failure. */
+function failImmersiveTurn(turnId: number | null): void {
+  if (!immersiveTurn || turnId !== immersiveTurnId) return
+  immersiveTurn = false
+  immersiveCaption = ''
+  immersiveErrorAt = Date.now()
+}
+
 // --- Voice output (TTS auto-speak) — ORBIT_VOICE_PLAN.md §1.1, §2 ---
 
 /**
@@ -917,7 +1088,9 @@ function beginSpeaking(): void {
   stopSpeaking()
   ttsSessionId++
   const cfg = loadConfig()
-  if (!cfg.voiceAutoSpeak) { ttsEngine = null; return }
+  // An immersive turn is spoken regardless: the panel that would show
+  // the reply isn't visible in the headset.
+  if (!cfg.voiceAutoSpeak && !immersiveTurn) { ttsEngine = null; return }
   // Runs in the send-click / Enter gesture task — unlock iOS audio
   // before the (later, async) real speech fires.
   primeBrowserTts()
@@ -969,7 +1142,15 @@ function pumpSpeech(fullText: string, final: boolean): void {
     const sentence = sentences[i]
     if (!sentence) continue
     emitTtsOnce()
-    ttsChain = ttsChain.then(() => (speakingActive && session === ttsSessionId ? engine.speak(sentence, { lang, rate, voice }) : undefined))
+    ttsChain = ttsChain.then(() => {
+      if (!(speakingActive && session === ttsSessionId)) return undefined
+      // The HUD captions the sentence as it is spoken, not as it streams.
+      if (immersiveTurn) {
+        immersivePhase = 'speaking'
+        immersiveCaption = sentence
+      }
+      return engine.speak(sentence, { lang, rate, voice })
+    })
   }
   spokenChunkCount = Math.max(spokenChunkCount, upto)
   if (final) {
@@ -1300,6 +1481,13 @@ async function handleSend(): Promise<void> {
     setVoiceAudioFocus(false)
     return
   }
+  // The immersive turn this send answers. A send from the panel has
+  // none, so its cleanup below can't end a turn the HUD starts later.
+  const sendTurnId = immersiveTurn ? immersiveTurnId : null
+  if (immersiveTurn) {
+    immersivePhase = 'thinking'
+    immersiveCaption = text
+  }
 
   // Add user message
   const userMsg: ChatMessage = {
@@ -1353,6 +1541,10 @@ async function handleSend(): Promise<void> {
   const turnSpeakId = ttsSessionId
   const turnStartedAt = Date.now()
   let streamFinishReason: 'stop' | 'length' | 'tool_calls' | 'error' = 'stop'
+  // An auto-load already put a dataset on the globe; its alternatives
+  // then stream in as load-dataset actions, and an immersive turn must
+  // not "carry out" one of those over the top of it.
+  let autoLoaded = false
 
   try {
     // Capture globe screenshot + overlay context only when vision mode and LLM are both active
@@ -1465,6 +1657,7 @@ async function handleSend(): Promise<void> {
           // Auto-load the top result immediately
           const autoAction = chunk.action
           if (autoAction.type === 'load-dataset') {
+            autoLoaded = true
             callbacks.onLoadDataset(autoAction.datasetId)
             if (!docentMsg.text) {
               const altHint = chunk.alternatives.length > 0 ? t('chat.autoLoad.altHint') : ''
@@ -1526,9 +1719,27 @@ async function handleSend(): Promise<void> {
           // globe sat still because the same reply also recommended a
           // different dataset and the fly-to was queued behind it.
           flushMeasurementGlobeActions()
-          if (loadActions.length === 0 || allAlreadyLoaded) {
+          // No one can tap a Load button in the headset, so an immersive
+          // turn does what the tap would — for the reply's first Load
+          // only, never a later one: Orbit often leads with a Load for
+          // the dataset being viewed and then suggests a related one,
+          // and carrying that out would replace what the user asked about.
+          const firstLoad = immersiveTurn && !autoLoaded ? loadActions[0] : undefined
+          // The first Load is the dataset already showing: tapping it
+          // would change nothing, so nothing is loaded. The deferred
+          // fly-to / seek then has no load to wait for — the other Loads
+          // can't be tapped either — and runs now, as it does when every
+          // Load is already on the globe.
+          const firstLoadShowing = firstLoad?.type === 'load-dataset' && firstLoad.datasetId === currentDataset?.id
+          if (loadActions.length === 0 || allAlreadyLoaded || firstLoadShowing) {
             flushPendingGlobeActions()
           } else {
+            if (firstLoad?.type === 'load-dataset') {
+              // The host flushes the deferred fly-to / seek once the
+              // dataset lands (flushPendingGlobeActions), as after a click.
+              callbacks.onLoadDataset(firstLoad.datasetId)
+              callbacks.announce(t('chat.announce.loading'))
+            }
             // A load is pending, so the deferred set-time seek hasn't run —
             // it flushes once the user taps Load. Any set-time error stamped
             // by the streaming eager dry-check is therefore premature (the
@@ -1560,15 +1771,22 @@ async function handleSend(): Promise<void> {
   setSendEnabled(true)
   // Speak any remaining (final) sentence and let the queue drain.
   pumpSpeech(docentMsg.text, true)
+  // Nothing was queued for speech (no TTS engine for this locale), so
+  // the caption is the only place an immersive reply can be read.
+  if (immersiveTurn && spokenChunkCount === 0) immersiveCaption = toSpokenForm(docentMsg.text)
   // Resume hands-free listening only once any spoken reply has finished
   // draining (ttsChain), so the open mic doesn't capture Orbit's voice.
   // When auto-speak is off, ttsChain is already resolved → immediate.
   // Restore the ducked dataset audio at the same point. Skip if a newer
   // turn has since started speaking — it now owns the mic/ducking.
+  // A barge-in doesn't bump ttsSessionId, so this also runs after the
+  // HUD mic has cancelled this reply to start the next turn; the turn
+  // id keeps it from ending that one.
   void ttsChain.finally(() => {
     if (turnSpeakId !== ttsSessionId) return
     handsFree?.setBusy(false)
     setVoiceAudioFocus(false)
+    finishImmersiveTurn(sendTurnId)
   })
 
   // Clean up empty actions array
