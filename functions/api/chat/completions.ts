@@ -341,9 +341,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   } catch (err) {
     // The one place the upstream-failure contract is built: the
     // binding's throws, the tool shim and the raw streaming path all
-    // land here. A thrown message can itself be a JSON error body, so
-    // it goes through `workersAiErrorMessage` before the quota
-    // patterns see it — they must match the error, not a request id.
+    // land here. A thrown message can itself be a JSON error body;
+    // `workersAiErrorMessage` reduces it to the error it names, for the
+    // message the client is told (`isWorkersAiQuotaError` does the same
+    // reduction itself before matching).
     const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : ''
     const message = workersAiErrorMessage(raw) || 'Internal server error'
     // Phase 1f/D — surface Workers AI quota exhaustion as a typed

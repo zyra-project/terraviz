@@ -45,6 +45,13 @@ function aiOk(result: Record<string, unknown>): VoiceEnv {
   return { AI: { run: async () => result } }
 }
 
+function aiThrows(message: string): VoiceEnv {
+  return { AI: { run: async () => { throw new Error(message) } } }
+}
+
+/** A non-quota failure whose request id contains 4006 (#457). */
+const REQUEST_ID_BODY = '{"errors":[{"code":5007,"message":"No such model"}],"request_id":"9f1c2b7a-3e5d-4006-8a1b-2c3d4e5f6a7b"}'
+
 describe('_voice-lib', () => {
   it('isVoiceKilled honours deny values only', () => {
     expect(isVoiceKilled({ KILL_VOICE: '1' })).toBe(true)
@@ -100,6 +107,18 @@ describe('transcribe', () => {
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ text: 'show me sea ice' })
   })
+
+  it('reports a spent quota as 429 quota_exhausted', async () => {
+    const res = await req(aiThrows('4006: daily free allocation used'))
+    expect(res.status).toBe(429)
+    expect((await res.json() as { code: string }).code).toBe('quota_exhausted')
+  })
+
+  it('does not read a request id in a JSON error body as a spent quota', async () => {
+    const res = await req(aiThrows(REQUEST_ID_BODY))
+    expect(res.status).toBe(502)
+    expect((await res.json() as { code: string }).code).toBe('inference_error')
+  })
 })
 
 describe('synthesize', () => {
@@ -130,6 +149,18 @@ describe('synthesize', () => {
   it('returns 503 when KILL_VOICE is set', async () => {
     const res = await req({ ...aiOk({ audio: 'AAA' }), KILL_VOICE: 'true' }, { text: 'Hi' })
     expect(res.status).toBe(503)
+  })
+
+  it('reports a spent quota as 429 quota_exhausted', async () => {
+    const res = await req(aiThrows('4006: daily free allocation used'), { text: 'Hi' })
+    expect(res.status).toBe(429)
+    expect((await res.json() as { code: string }).code).toBe('quota_exhausted')
+  })
+
+  it('does not read a request id in a JSON error body as a spent quota', async () => {
+    const res = await req(aiThrows(REQUEST_ID_BODY), { text: 'Hi' })
+    expect(res.status).toBe(502)
+    expect((await res.json() as { code: string }).code).toBe('inference_error')
   })
 })
 

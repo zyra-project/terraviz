@@ -169,6 +169,22 @@ describe('searchDatasets — early exits', () => {
     const result = await searchDatasets(env, { query: 'hurricane' })
     expect(result).toEqual({ datasets: [], degraded: 'quota_exhausted' })
   })
+
+  it('does not read a request id in a JSON error body as a spent quota (#457)', async () => {
+    const db = seed([{ id: 'DS001', title: 'Hurricane' }])
+    const ai = {
+      run: async () => {
+        throw new Error('{"errors":[{"code":5007,"message":"No such model"}],"request_id":"9f1c2b7a-3e5d-4006-8a1b-2c3d4e5f6a7b"}')
+      },
+    }
+    const env = {
+      CATALOG_DB: asD1(db),
+      AI: ai,
+      MOCK_VECTORIZE: 'true',
+    } as unknown as SearchDatasetsEnv
+    // Not quota, so the error propagates as it does for any other failure.
+    await expect(searchDatasets(env, { query: 'hurricane' })).rejects.toThrow('No such model')
+  })
 })
 
 describe('searchDatasets — happy path', () => {
