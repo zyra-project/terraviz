@@ -220,13 +220,22 @@ const ORIGIN_ERROR_KEYS = {
   shared_host: 'publisher.nodeProfile.embedding.error.sharedHost',
 } as const satisfies Record<EmbedOriginErrorCode, string>
 
-/** The tokens the `file:` strings name. Placeholders rather than
- *  literals, so a translation cannot space the colon (French puts a
- *  space before one) and an RTL sentence cannot move it. */
-const FILE_TOKENS = { entry: isolate(FILE_SOURCE), scheme: isolate('file://') } // i18n-exempt: literal tokens
+/** The literal tokens the card's strings name. Placeholders rather
+ *  than text, so a translation cannot alter them (French spaces a
+ *  colon, which breaks `file:`) and an RTL sentence cannot move their
+ *  edge punctuation: each ends in `:`, `//` or `--`, which the bidi
+ *  algorithm lays out by the Arabic around it rather than the letters
+ *  beside it. An example address needs neither, since it starts and
+ *  ends with a letter. */
+const LITERAL_TOKENS = {
+  entry: isolate(FILE_SOURCE),
+  scheme: isolate('file://'), // i18n-exempt: literal token
+  https: isolate('https://'), // i18n-exempt: literal token
+  punycode: isolate('xn--'), // i18n-exempt: literal token
+}
 
 function originErrorText(code: string, fallback: string): string {
-  if (code in ORIGIN_ERROR_KEYS) return t(ORIGIN_ERROR_KEYS[code as EmbedOriginErrorCode], FILE_TOKENS)
+  if (code in ORIGIN_ERROR_KEYS) return t(ORIGIN_ERROR_KEYS[code as EmbedOriginErrorCode], LITERAL_TOKENS)
   return fallback
 }
 
@@ -386,7 +395,7 @@ export function buildEmbeddingCard(options: EmbeddingCardOptions): HTMLElement {
   )
   if (options.canEdit) {
     originsBlock.append(
-      el('p', { className: 'publisher-nodeprofile-hint', id: originsHintId, textContent: t('publisher.nodeProfile.embedding.origins.hint') }),
+      el('p', { className: 'publisher-nodeprofile-hint', id: originsHintId, textContent: t('publisher.nodeProfile.embedding.origins.hint', LITERAL_TOKENS) }),
     )
   }
 
@@ -490,7 +499,7 @@ export function buildEmbeddingCard(options: EmbeddingCardOptions): HTMLElement {
     // Save, and most admins never need `file:`.
     const fileHelp = el('details', { className: 'publisher-nodeprofile-embed-file' }, [
       el('summary', { textContent: t('publisher.nodeProfile.embedding.origins.file.summary') }),
-      el('p', { className: 'publisher-nodeprofile-hint', textContent: t('publisher.nodeProfile.embedding.origins.file.how', FILE_TOKENS) }),
+      el('p', { className: 'publisher-nodeprofile-hint', textContent: t('publisher.nodeProfile.embedding.origins.file.how', LITERAL_TOKENS) }),
       el('p', { className: 'publisher-nodeprofile-hint', textContent: t('publisher.nodeProfile.embedding.origins.file.risk') }),
     ])
     originsBlock.append(list, addButton, atMax, fileHelp)
@@ -504,7 +513,7 @@ export function buildEmbeddingCard(options: EmbeddingCardOptions): HTMLElement {
     // `file:` is not a site, so say what it admits.
     if (saved.origins.includes(FILE_SOURCE)) {
       originsBlock.append(
-        el('p', { className: 'publisher-nodeprofile-hint', textContent: t('publisher.nodeProfile.embedding.origins.file.readOnly', FILE_TOKENS) }),
+        el('p', { className: 'publisher-nodeprofile-hint', textContent: t('publisher.nodeProfile.embedding.origins.file.readOnly', LITERAL_TOKENS) }),
       )
     }
   }

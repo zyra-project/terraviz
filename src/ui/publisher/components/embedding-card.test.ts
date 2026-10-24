@@ -254,7 +254,7 @@ describe('buildEmbeddingCard', () => {
     const errorId = bad.getAttribute('aria-describedby')!.split(' ')[0]
     const error = document.getElementById(errorId)!
     expect(error.hidden).toBe(false)
-    expect(error.textContent).toBe('A site must start with https://.')
+    expect(error.textContent).toBe('A site must start with \u2068https://\u2069.')
     expect(document.activeElement).toBe(bad)
     expect(view.puts()).toHaveLength(0)
     // Typing clears the error.
@@ -262,6 +262,25 @@ describe('buildEmbeddingCard', () => {
     bad.dispatchEvent(new Event('input'))
     expect(bad.hasAttribute('aria-invalid')).toBe(false)
     expect(error.hidden).toBe(true)
+  })
+
+  it('isolates every literal token that ends in punctuation, so an RTL sentence cannot move it', () => {
+    const view = mount(LIST)
+    const group = view.q<HTMLElement>('.publisher-nodeprofile-embed-list')!
+    expect(document.getElementById(group.getAttribute('aria-describedby')!)!.textContent).toMatch(
+      /^One site per row: \u2068https:\/\/\u2069 and the host name/,
+    )
+    const errorFor = (raw: string): string => {
+      view.inputs()[1].value = raw
+      view.save()!.click()
+      return document.getElementById(view.inputs()[1].getAttribute('aria-describedby')!.split(' ')[0])!.textContent!
+    }
+    expect(errorFor('https://example.org/embed')).toBe(
+      'Enter only \u2068https://\u2069 and the host, with no path or trailing slash.',
+    )
+    expect(errorFor('https://bücher.example')).toBe(
+      'Enter the punycode form (starting \u2068xn--\u2069) of an international domain name.',
+    )
   })
 
   it('refuses a duplicate by naming the row it repeats', () => {
