@@ -283,6 +283,24 @@ describe('buildEmbeddingCard', () => {
     )
   })
 
+  it('accepts a token copied out of its own text, which carries the isolate marks', async () => {
+    const view = mount(LIST)
+    // What a mouse selection of the hint's or the disclosure's token copies.
+    view.inputs()[0].value = '\u2068https://\u2069www.example.org'
+    view.inputs()[1].value = '\u2068file:\u2069'
+    view.save()!.click()
+    await until(() => view.puts().length === 1, 'the PUT')
+    expect(view.puts()[0].body).toEqual({ embedding: { mode: 'list', origins: ['https://www.example.org', 'file:'] } })
+  })
+
+  it('still refuses any other direction control, which can make a row show what it does not hold', () => {
+    const view = mount(LIST)
+    view.inputs()[1].value = 'https://\u202Egro.elpmaxe'
+    view.save()!.click()
+    expect(view.inputs()[1].getAttribute('aria-invalid')).toBe('true')
+    expect(view.puts()).toHaveLength(0)
+  })
+
   it('refuses a duplicate by naming the row it repeats', () => {
     const view = mount(LIST)
     view.inputs()[1].value = 'https://WWW.example.org'

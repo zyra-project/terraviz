@@ -1668,7 +1668,7 @@
   "publisher.nodeProfile.embedding.error.host": "Enter a valid host name, such as www.example.org.",
   "publisher.nodeProfile.embedding.error.ipOrSingleLabel": "Enter a full domain name, such as www.example.org. A single-word host or an IP address is refused.",
   "publisher.nodeProfile.embedding.error.keyword": "Enter a site address, not a policy keyword such as * or self.",
-  "publisher.nodeProfile.embedding.error.notAscii": "Enter the punycode form (starting {punycode}) of an international domain name.",
+  "publisher.nodeProfile.embedding.error.notAscii": "Enter the punycode form (starting {prefix}) of an international domain name.",
   "publisher.nodeProfile.embedding.error.notHttps": "A site must start with {https}.",
   "publisher.nodeProfile.embedding.error.path": "Enter only {https} and the host, with no path or trailing slash.",
   "publisher.nodeProfile.embedding.error.port": "A port must be a number from 1 to 65535.",

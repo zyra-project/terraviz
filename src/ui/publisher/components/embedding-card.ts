@@ -225,14 +225,24 @@ const ORIGIN_ERROR_KEYS = {
  *  colon, which breaks `file:`) and an RTL sentence cannot move their
  *  edge punctuation: each ends in `:`, `//` or `--`, which the bidi
  *  algorithm lays out by the Arabic around it rather than the letters
- *  beside it. An example address needs neither, since it starts and
- *  ends with a letter. */
+ *  beside it. An example address needs no isolate while it stays in
+ *  Latin letters, which its translator note asks: it starts and ends
+ *  with a letter, so it keeps its order unaided. */
 const LITERAL_TOKENS = {
   entry: isolate(FILE_SOURCE),
   scheme: isolate('file://'), // i18n-exempt: literal token
   https: isolate('https://'), // i18n-exempt: literal token
-  punycode: isolate('xn--'), // i18n-exempt: literal token
+  prefix: isolate('xn--'), // i18n-exempt: literal token
 }
+
+/** What {@link isolate} wraps a token in. Copying `file:` or
+ *  `https://` out of the card's own text copies these too, and the
+ *  validator rightly refuses them (`not_ascii`), so a row drops them
+ *  before it is checked, as it drops surrounding spaces. Only these
+ *  two: any other direction control can make what a field shows
+ *  differ from what it holds, and stays refused. The server's
+ *  validator is unchanged and refuses all of them. */
+const ISOLATE_MARKS = /[\u2068\u2069]/g
 
 function originErrorText(code: string, fallback: string): string {
   if (code in ORIGIN_ERROR_KEYS) return t(ORIGIN_ERROR_KEYS[code as EmbedOriginErrorCode], LITERAL_TOKENS)
@@ -612,7 +622,7 @@ export function buildEmbeddingCard(options: EmbeddingCardOptions): HTMLElement {
       if (mode === 'list') {
         const seen = new Set<string>()
         for (const entry of rows) {
-          const value = entry.input.value.trim()
+          const value = entry.input.value.replace(ISOLATE_MARKS, '').trim()
           if (value === '') {
             setRowError(entry, null)
             continue
