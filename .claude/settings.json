@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-protected-files.mjs\""
+            "command": "node \"./$(git rev-parse --show-cdup).claude/hooks/guard-protected-files.mjs\""
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/check-doc-coverage.mjs\""
+            "command": "node \"./$(git rev-parse --show-cdup).claude/hooks/check-doc-coverage.mjs\""
           }
         ]
       },
@@ -26,11 +26,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/check-rust-fmt.mjs\""
+            "command": "node \"./$(git rev-parse --show-cdup).claude/hooks/check-rust-fmt.mjs\""
           },
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/check-actionlint.mjs\""
+            "command": "node \"./$(git rev-parse --show-cdup).claude/hooks/check-actionlint.mjs\""
           }
         ]
       }
