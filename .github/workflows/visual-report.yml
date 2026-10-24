@@ -25,6 +25,11 @@ on:
       - 'index.html'
       - 'scripts/screenshots/**'
       - '.github/workflows/visual-report.yml'
+      # The lockfile picks the Playwright, and so the Chromium, that
+      # renders every shot. A bump there must run the smoke gate on
+      # its PR and re-publish the baseline once merged, or every later
+      # PR diffs against pixels from the old browser.
+      - 'package-lock.json'
   pull_request:
     paths: *visual_paths
 
