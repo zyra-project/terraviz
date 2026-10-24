@@ -122,7 +122,8 @@ or both:
 - **Free text is hashed or never sent.** Search queries → 12-hex
   SHA-256 prefix (`src/analytics/hash.ts`). Error messages →
   sanitized `message_class` only (URLs, emails, UUIDs, digit runs,
-  file paths stripped at `src/analytics/errorCapture.ts`).
+  file paths stripped at `src/analytics/errorCapture.ts`). Console
+  output is not captured at all.
 - **Lat/lon rounded to 3 decimals.** Camera-settled events
   (`src/analytics/camera.ts`) round before emit. ~111 m precision —
   enough for "what region was the user looking at", not enough to
@@ -162,7 +163,7 @@ must be corrected.
 | `tour_started` / `tour_task_fired` / `tour_paused` / `tour_resumed` / `tour_ended` | A | `src/services/tourEngine.ts` |
 | `vr_session_started` / `vr_session_ended` / `vr_placement` | A | `src/services/vrSession.ts`, `src/services/vrPlacement.ts` |
 | `perf_sample` | A | `src/analytics/perfSampler.ts` |
-| `error` | A | `src/analytics/errorCapture.ts` |
+| `error` | A | `src/analytics/errorCapture.ts` — `reportError()` from call sites (`tile` / `hls` / `llm` / `download` / `caption`), plus the global `error` / `unhandledrejection` handlers (`uncaught`) and, on desktop, the Tauri `native_panic` listener, both attached in `src/main.ts`'s `initialize()` as soon as the transport is set. The global handlers drop errors raised by a browser extension or another site's script, judged by origin. **Console output is not captured** — see the note under this table |
 | `feedback` | A | `src/ui/helpUI.ts` (in-app form) + `src/ui/chatUI.ts` (Orbit thumbs) |
 | `dwell` | **B** | `src/analytics/dwell.ts` (panel + dataset dwell, called by chat / browse / info / tools UI) |
 | `orbit_interaction` / `orbit_turn` / `orbit_tool_call` / `orbit_load_followed` / `orbit_correction` | **B** | `src/ui/chatUI.ts`, `src/services/docentService.ts`, `src/services/datasetLoader.ts` |
@@ -171,10 +172,27 @@ must be corrected.
 | `catalog_timeline_brush_applied` | **B** | `src/ui/catalogTimelineUI.ts` (per-minute throttled, numeric-only payload) |
 | `catalog_map_region_drawn` | **B** | `src/ui/catalogMapUI.ts` (per-minute throttled, numeric-only payload, 3-decimal rounded bounds) |
 | `vr_interaction` | **B** | `src/services/vrInteraction.ts` (per-gesture, throttled) |
-| `error_detail` | **B** | `src/analytics/errorCapture.ts` (adds sanitized stack) |
+| `error_detail` | **B** | `src/analytics/errorCapture.ts` (adds sanitized stack; same sources as `error`, and only when the error carries a stack) |
 | `tour_question_answered` | **B** | `src/services/tourEngine.ts` |
 | `output_added` / `output_removed` / `output_failure` | A | `src/services/multiOutput/manager.ts` via `src/services/multiOutput/outputTelemetry.ts` — the multi-monitor control window. The **output windows emit nothing**: §3.6 of `MULTI_MONITOR_PLAN.md` keeps them capture-clean, and the two failures an output could report about itself (a crash, an IPC silence) are the two it cannot. Categorical fields only — the framebuffer is a rung name (or `native` for a `projector-warp` output, which draws projector rasters rather than an equirect frame, so no rung describes it) and the monitor an enumeration index, never a display name |
 | `voice_interaction` | **B** | `src/ui/chatUI.ts` (Orbit voice STT/TTS — no transcript or audio, only provider / lang / duration / success; hands-free turns carry `trigger` = `open-mic`/`push-to-talk`/`wake-word`, a `wake-word` turn with `success:false` is a false fire, and a TTS barge-in sets `interrupted` — the §10.4 exhibit-tuning numbers) |
+
+**Why there is no console capture.** `ANALYTICS_IMPLEMENTATION_PLAN.md`
+proposed patching `console.error` / `console.warn` into `error`
+(category `console`). It was never installed, and when error capture
+was finally wired at boot the patch was removed rather than turned
+on. The sanitizer was built for exception messages; the app's own
+log lines interpolate whatever their author had to hand, and some of
+it is what telemetry promises never to send — the multi-output
+manager logs a monitor's OS display name, which `output_*` events
+reduce to an enumeration index precisely so the name stays on the
+machine. HLS.js and shader-compile failures already reach
+`reportError()` from their own call sites with a real category.
+MapLibre's do not: nothing listens for its `error` event, so it logs
+to the console instead. That gap wants a `map.on('error')` listener
+with a category, not a patch that carries every other log line with
+it. Re-adding console capture needs a design that does not depend on
+every log line being safe to ship.
 
 Per-event field documentation lives in the type definitions
 (`src/types/index.ts` lines 685–1023) and the query reference

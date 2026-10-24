@@ -399,7 +399,7 @@ PCVR session and buckets as `pcvr`).
 | `double3` | `frame_time_p95_ms` |
 | `double4` | `jsheap_mb` (`0` on non-Chromium engines where `performance.memory` is unavailable; filter `double4 > 0` to scope to supported browsers) |
 
-### `error` (Tier A) / `error_detail` (Tier B)
+### `error` (Tier A)
 
 | Position | Field |
 |---|---|
@@ -410,8 +410,21 @@ PCVR session and buckets as `pcvr`).
 | `double1` | `client_offset_ms` |
 | `double2` | `count_in_batch` |
 
-`error_detail` adds a `stack` blob at `blob9` (sanitized stack
-frame list).
+### `error_detail` (Tier B)
+
+Not `error` plus a blob: it has no `code`, so every field after
+`category` sits one position earlier than in `error`. Machine copy:
+`functions/api/v1/_lib/analytics-layouts.ts`.
+
+| Position | Field |
+|---|---|
+| `blob5` | `category` |
+| `blob6` | `frames_json` (JSON array of `{fn}`, ≤ 10 frames, function names only) |
+| `blob7` | `message_class` (sanitized, ≤ 80 chars) |
+| `blob8` | `source` |
+| `blob9` | `stack_signature` (12 hex, non-cryptographic dedup hash) |
+| `double1` | `client_offset_ms` |
+| `double2` | `count_in_batch` |
 
 ### `output_added` / `output_removed` / `output_failure` (Tier A)
 

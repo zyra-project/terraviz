@@ -257,12 +257,19 @@ footer.site-footer {
       in front of an audience, so nothing runs in them that does not
       need to</li>
       <li>When something goes wrong — a classification of the error (tile
-      fetch, video stream, AI model, uncaught exception, browser-console
-      message, or native crash on desktop), a short sanitized summary of
-      the error class (with URLs, emails, numeric tokens and file paths
-      stripped out before it leaves your device), and a count of
-      repeats. <strong>No raw stack traces, no URLs, no full error messages,
-      no line numbers</strong> at this level</li>
+      fetch, video stream, AI model, data download, captions, an error
+      nothing in the app caught, or a native crash on desktop), a short
+      error code where there is one (such as an HTTP status), and the
+      first line of the error&#39;s message, cut to 80 characters. Before
+      it leaves your device, that line has URLs, file paths, email
+      addresses, network addresses, long numbers, tokens and keys, and
+      any quoted text containing a space stripped out. Each distinct
+      error is sent at most three times per session, and at most 30
+      errors in all. <strong>No stack traces, no URLs, no line numbers,
+      nothing past the first line</strong> at this level. Errors raised by
+      browser extensions or by other sites&#39; scripts are dropped, and
+      the messages the app writes to your browser&#39;s developer console
+      are <strong>not</strong> collected</li>
       <li>When you submit feedback — that you did, and which category (bug,
       feature, other, thumbs-up, thumbs-down). The <em>content</em> of your
       feedback is stored separately — see section 4</li>
@@ -350,6 +357,10 @@ footer.site-footer {
       </ul>
       <hr>
       <h3>Crash reports (separate, per-crash consent)</h3>
+      <p><strong>Not available yet.</strong> The app does not ask for crash reports today;
+      this section describes how it will work when it does. It is separate
+      from the automatic error events in section 2, which follow the mode
+      you chose there and need no prompt.</p>
       <p>If Terraviz crashes in a way you notice — the globe goes
       blank, the app freezes, or a failure dialog appears — we may ask
       you if you want to send a crash report for <em>that specific crash</em>.
@@ -359,8 +370,6 @@ footer.site-footer {
       <ul>
       <li>The classified error information described above</li>
       <li>A sanitized stack from the crash</li>
-      <li>A buffer of recent error and warning messages from your current
-      session, with the same sanitization applied</li>
       <li>Any text you optionally type into the &quot;what were you doing?&quot; box</li>
       <li>A screenshot, only if you opt to attach one</li>
       </ul>

@@ -59,6 +59,7 @@ import {
   createFetchTransport,
   emit,
   initSession,
+  installErrorCapture,
   pauseForVrEntry,
   resumeForVrExit,
   setTransport,
@@ -662,6 +663,17 @@ class InteractiveSphere {
       if (TELEMETRY_BUILD_ENABLED && !TELEMETRY_CONSOLE_MODE) {
         setTransport(createFetchTransport())
       }
+      // Error capture (uncaught errors, unhandled rejections, desktop
+      // Rust panics) right behind the transport: not before it, since
+      // a report queued earlier is drained unsent if boot stops short
+      // of this line, and on desktop it stops `setTransport` replaying
+      // the previous session's persisted queue, which it only does into
+      // an empty one; and not after `initialize()` returns, since the
+      // catalog fetch, the `?dataset=` load and the deep links below are
+      // the likeliest place for an uncaught error. Console mode installs
+      // too, so a dev sees what would be sent. `install()` itself
+      // declines on a silenced path.
+      if (TELEMETRY_BUILD_ENABLED) installErrorCapture()
       logger.info('[App] Using MapLibre renderer (layout: %s)', initialLayout)
 
       // Wire up lat/lng display (bind to primary; secondary panels don't

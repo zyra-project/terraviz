@@ -1194,12 +1194,13 @@ export type VrExitReason = 'user' | 'error' | 'session_lost'
 export type VrGesture = 'drag' | 'pinch' | 'thumbstick_zoom' | 'flick_spin' | 'hud_tap'
 /** Specular-strength presets surfaced in Tools → Display (§7.2). */
 export type SpecularPreset = 'none' | 'default' | 'comfortable'
+/** No `console` category: the console is not captured, and why is in
+ *  `src/analytics/errorCapture.ts`'s header. */
 export type ErrorCategory =
   | 'tile' | 'hls' | 'llm' | 'download' | 'vr' | 'tour' | 'caption'
-  | 'uncaught' | 'console' | 'native_panic'
+  | 'uncaught' | 'native_panic'
 export type ErrorSource =
-  | 'caught' | 'window_error' | 'unhandledrejection'
-  | 'console_error' | 'console_warn' | 'tauri_panic'
+  | 'caught' | 'window_error' | 'unhandledrejection' | 'tauri_panic'
 
 // --- Multi-monitor output (docs/MULTI_MONITOR_PLAN.md rung 13) ---
 
@@ -2075,7 +2076,9 @@ export interface ErrorDetailEvent extends TelemetryEventBase {
   category: ErrorCategory
   source: ErrorSource
   message_class: string
-  /** SHA-256 of normalized stack, first 12 hex. */
+  /** 12 hex of a non-cryptographic hash (`errorCapture`'s djb2-style
+   * `shortHash`) of the normalized frames — a dedup identity, not a
+   * digest, so nothing should rely on it resisting collisions. */
   stack_signature: string
   /** Sanitized stack frames — function names only, no URLs or line
    * numbers. Max 10 frames. */

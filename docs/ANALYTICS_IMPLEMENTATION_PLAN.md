@@ -242,8 +242,8 @@ without storing free text. The full text never leaves the client.
 | Event | Tier | `blobs[]` | `doubles[]` |
 |---|---|---|---|
 | `perf_sample` | A | `event_type`, `surface` (`map`/`vr`), `webgl_renderer_hash` (SHA-256 of `WEBGL_debug_renderer_info`, first 8 hex) | `fps_median_10s`, `frame_time_p95_ms`, `jsheap_mb` (nullable) |
-| `error` | A | `event_type`, `category` (`tile`/`hls`/`llm`/`download`/`vr`/`tour`/`caption`/`uncaught`/`console`/`native_panic`), `source` (`caught`/`window_error`/`unhandledrejection`/`console_error`/`console_warn`/`tauri_panic`), `code` (HTTP status or classified enum), `message_class` (sanitized first line, ≤ 80 chars) | `count_in_batch` (for deduped repeats) |
-| `error_detail` | **B** | `event_type`, `category`, `source`, `message_class`, `stack_signature` (SHA-256 of normalized stack, first 12 hex), `frames_json` (compact array of `{fn, line}` pairs, function names only, max 10 frames) | `count_in_batch` |
+| `error` | A | `event_type`, `category` (`tile`/`hls`/`llm`/`download`/`vr`/`tour`/`caption`/`uncaught`/~~`console`~~/`native_panic`), `source` (`caught`/`window_error`/`unhandledrejection`/~~`console_error`/`console_warn`~~/`tauri_panic`) — the struck values were never built; see the status note under "Console and crash capture" —, `code` (HTTP status or classified enum), `message_class` (sanitized first line, ≤ 80 chars) | `count_in_batch` (for deduped repeats) |
+| `error_detail` | **B** | `event_type`, `category`, `source`, `message_class`, `stack_signature` (12 hex of a non-cryptographic djb2-style hash of the normalized frames, as built — a dedup identity, not a digest), `frames_json` (compact array of `{fn}` objects, function names only, max 10 frames; line numbers are dropped, as the sanitization rules below require) | `count_in_batch` |
 
 Two-tier error model — the same pipeline, two different emission paths:
 
@@ -269,6 +269,20 @@ emitter, so the tier gate applies once at the end.
 | `console.error` / `console.warn` monkey-patch | Library-internal errors that log but don't throw (MapLibre, HLS.js, Three.js, Tauri plugins) | `console_error` / `console_warn` | same |
 | Explicit call sites — `reportError(category, err)` | Caught errors that the code wants to report | `caught` | Throughout services — the classification pattern we already planned |
 | Rust `std::panic::set_hook` → `emit_to('native_panic')` | Tauri main-process and webview panics | `tauri_panic` | `src-tauri/src/main.rs` |
+
+> **Status (2026-10): the console row was not built.** `install()`
+> shipped in Commit 2 but nothing called it until 2026-10, so none
+> of the global mechanisms ran. When it was wired at boot
+> (`src/main.ts`), the console patch was removed instead of turned
+> on: the app's own log lines interpolate values the sanitizer cannot
+> recognise — the multi-output manager logs a monitor's OS display
+> name, which the `output_*` events deliberately reduce to an index.
+> Commit 9 moved the app's own `console.error` sites onto
+> `reportError()`, and HLS.js and shader-compile failures report from
+> call sites; MapLibre's `error` event still has no listener, a gap
+> for a listener rather than a patch. There is no `console` category
+> or `console_*` source. Reasoning in `docs/ANALYTICS.md` under the
+> event catalog.
 
 #### Sanitization (runs before emission, for both tiers)
 
@@ -630,7 +644,7 @@ event in Tier B silently drops if the user is on Tier A.
 | `vr_placement` | A | `src/services/vrPlacement.ts` | On Place-button tap (success + persist flag) |
 | `vr_interaction` | B | `src/services/vrInteraction.ts` | Throttled bucket per gesture type |
 | `perf_sample` | A | `src/analytics/emitter.ts` | 60-second rolling FPS sampler; emit one event per minute active |
-| `error` | A | `src/analytics/errorCapture.ts` + call sites | Install global `error`, `unhandledrejection` handlers at boot. Monkey-patch `console.error` / `console.warn`. Classified call sites use `reportError(category, err)` |
+| `error` | A | `src/analytics/errorCapture.ts` + call sites | Install global `error`, `unhandledrejection` handlers at boot. ~~Monkey-patch `console.error` / `console.warn`~~ — not built; see the status note under "Console and crash capture". Classified call sites use `reportError(category, err)` |
 | `error_detail` | B | `src/analytics/errorCapture.ts` | Same capture points as `error`, upgraded output when Tier B is active |
 | `error` (`tauri_panic`) | A | `src-tauri/src/main.rs` | `std::panic::set_hook` → `app.emit_to('native_panic', payload)` → JS handler forwards to emitter |
 | `dwell` (chat / info panel / tools / browse) | B | `src/ui/*.ts` | `trackDwell()` helper — start on open, stop on close/visibilitychange |
