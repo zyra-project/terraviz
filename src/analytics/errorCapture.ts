@@ -13,11 +13,15 @@
  *   3. Explicit call sites — reportError(category, err) from code
  *      that wants to report a caught failure
  *
- * 1 and 2 are attached by `install()`, which `src/main.ts` calls at
- * boot on the SPA path. Nothing else installs them: the publisher
- * portal and the blog return before that point, and an output window
- * boots from its own entry and emits nothing (MULTI_MONITOR_PLAN.md
- * §3.6).
+ * 1 and 2 are attached by `install()`, which `src/main.ts` calls on
+ * the SPA path once the app has initialized. Nothing else installs
+ * them: the publisher portal and the blog return before that point,
+ * and an output window boots from its own entry and emits nothing
+ * (MULTI_MONITOR_PLAN.md §3.6). The global handlers see every error
+ * on the page, not only ours, so they drop what a browser extension
+ * or another site's script raised (`isForeignError`) — the policy
+ * says those are dropped entirely, and each would also spend a slot
+ * of the per-session cap.
  *
  * The console is deliberately **not** patched, though the plan
  * proposed it. Exception messages are what the sanitizer was built
@@ -27,11 +31,12 @@
  * manager logs a monitor's OS display name and its origin, which
  * `outputTelemetry` reports as an enumeration index precisely so the
  * name never leaves the machine, and no pattern rule can tell a
- * display name from prose. The value it was for has gone elsewhere
- * too: the library errors it targeted (MapLibre, HLS.js, shader
- * compiles) reach `reportError` from their own call sites with a real
- * category, where a patch would report them twice and spend the
- * per-session cap on the app's own diagnostics.
+ * display name from prose. HLS.js failures and our own shader
+ * compiles already reach `reportError` from their call sites with a
+ * real category, where a patch would report them twice. MapLibre's do
+ * not — nothing listens for its `error` event, so it logs to the
+ * console instead — and that gap wants a listener with a category, not
+ * a patch that would carry every other log line with it.
  *
  * Privacy discipline is non-negotiable: message text is sanitized
  * (URLs, emails, UUIDs, digit runs, file paths stripped) and
@@ -63,6 +68,16 @@ export const TIER_B_CAP_TOTAL = 10
 export const MESSAGE_CLASS_MAX = 80
 export const MAX_FRAMES = 10
 export const STACK_SIGNATURE_HEX_LEN = 12
+/** Distinct signatures the occurrence counter remembers. It is bumped
+ * before any cap applies, so with a global handler live, an error
+ * whose message varies per frame would otherwise grow it for the life
+ * of a kiosk that runs for days. */
+export const MAX_TRACKED_SIGNATURES = 256
+
+/** `code` reaches Tier A verbatim, and the global handlers let any
+ * thrower set it, so only short identifier-shaped values pass:
+ * `ERR_NETWORK`, `404`, a DOMException's number. */
+const CODE_PATTERN = /^[A-Za-z0-9_.-]{1,32}$/
 
 // --- Internal state (reset via resetForTests) ---
 
@@ -75,7 +90,8 @@ interface CaptureState {
    * desktop / mobile when the panic-hook listener installs; null on
    * web and on environments where the lazy import fails. */
   tauriUnlisten: (() => void) | null
-  /** Per-signature total occurrence count. */
+  /** Per-signature total occurrence count, for at most
+   * `MAX_TRACKED_SIGNATURES` signatures. */
   sigCounts: Map<string, number>
   /** Emissions so far, keyed by `${tier}|${sig}` where tier is 'A' or 'B'. */
   sigEmissions: Map<string, number>
@@ -135,11 +151,13 @@ export function install(): void {
   if (typeof window !== 'undefined') {
     const onError: EventListener = (event) => {
       const ee = event as ErrorEvent
+      if (isForeignError(stackOf(ee.error), ee.filename)) return
       const err = ee.error ?? ee.message
       reportError('uncaught', err, 'window_error')
     }
     const onRejection: EventListener = (event) => {
       const re = event as PromiseRejectionEvent
+      if (isForeignError(stackOf(re.reason))) return
       reportError('uncaught', re.reason, 'unhandledrejection')
     }
     window.addEventListener('error', onError)
@@ -263,9 +281,19 @@ export function sanitizeMessage(raw: string): string {
   msg = msg.replace(/\S*\/(src\/[\w./-]+)/g, '$1')
   msg = msg.replace(/\S*\/(node_modules\/[\w./-]+)/g, '$1')
 
-  // Absolute filesystem paths NOT already normalized above.
+  // Home directories first. The segment after `/home/`, `/Users/` or
+  // `C:\Users\` is the account name, and an account name can hold a
+  // space (`C:\Users\John Smith`), which the general rule below stops
+  // at — leaving the surname behind. So that segment runs to the next
+  // separator or quote, then the path's remainder to whitespace. An
+  // unquoted home directory followed by prose loses the prose too;
+  // stripping too much is the safe way to be wrong.
+  msg = msg.replace(/\/(?:home|Users)\/[^/'"`]+(?:\/[^\s'"`]*)?/g, '<path>')
+  msg = msg.replace(/\b[A-Z]:\\Users\\[^\\'"`]+(?:\\[^\s'"`]*)?/gi, '<path>')
+
+  // Other absolute filesystem paths NOT already normalized above.
   msg = msg.replace(
-    /\/(?:home|Users|var|tmp|root|usr|opt|etc|private)\/[^\s'"`]+/g,
+    /\/(?:var|tmp|root|usr|opt|etc|private)\/[^\s'"`]+/g,
     '<path>',
   )
   msg = msg.replace(/\b[A-Z]:\\[^\s'"`]+/g, '<path>')
@@ -344,6 +372,11 @@ export function normalizeStack(stack: string | undefined | null): {
 }
 
 function parseFrameLine(line: string): NormalizedFrame | null {
+  const parts = splitFrameLine(line)
+  return parts ? classifyFrame(parts.fn, parts.url) : null
+}
+
+function splitFrameLine(line: string): { fn: string; url: string } | null {
   const trimmed = line.trim()
   if (!trimmed) return null
 
@@ -351,31 +384,61 @@ function parseFrameLine(line: string): NormalizedFrame | null {
   // or                   "    at url:line:col"
   let match = /^at\s+(?:(.+?)\s+\()?(.+?)(?::\d+:\d+)?\)?$/.exec(trimmed)
   if (match) {
-    const fn = (match[1] ?? '<anonymous>').trim()
-    const url = (match[2] ?? '').trim()
-    return classifyFrame(fn, url)
+    return { fn: (match[1] ?? '<anonymous>').trim(), url: (match[2] ?? '').trim() }
   }
 
   // Safari / Firefox: "functionName@url:line:col"
   match = /^(.*?)@(.+?)(?::\d+:\d+)?$/.exec(trimmed)
   if (match) {
-    const fn = (match[1] || '<anonymous>').trim()
-    const url = (match[2] ?? '').trim()
-    return classifyFrame(fn, url)
+    return { fn: (match[1] || '<anonymous>').trim(), url: (match[2] ?? '').trim() }
   }
 
   return null
 }
 
+function isExtensionUrl(url: string): boolean {
+  return EXTENSION_URL_PATTERNS.some((pat) => pat.test(url))
+}
+
 function classifyFrame(fn: string, url: string): NormalizedFrame {
   // Browser-extension frames are dropped at the source
-  for (const pat of EXTENSION_URL_PATTERNS) {
-    if (pat.test(url)) return { fn: '<external>', src: 'external' }
-  }
+  if (isExtensionUrl(url)) return { fn: '<external>', src: 'external' }
   for (const pat of OWN_URL_PATTERNS) {
     if (pat.test(url)) return { fn: sanitizeFunctionName(fn), src: 'own' }
   }
   return { fn: '<external>', src: 'external' }
+}
+
+/** True when an error that reached a global handler was raised by a
+ * browser extension or by another site's script rather than by this
+ * app: the script it came from is an extension, the frame it was
+ * thrown in is an extension's, or no frame of its stack is ours. An
+ * error with no stack to read is kept, since nothing says whose it
+ * is. Only the global handlers ask — an explicit `reportError` is our
+ * own code reporting itself. Never throws: it runs inside an `error`
+ * listener, where a throw would raise the event it is handling. */
+export function isForeignError(
+  stack: string | undefined | null,
+  filename?: string,
+): boolean {
+  try {
+    if (typeof filename === 'string' && isExtensionUrl(filename)) return true
+    if (typeof stack !== 'string' || !stack) return false
+    const frames = stack.split('\n').map(splitFrameLine)
+      .filter((f): f is { fn: string; url: string } => f !== null)
+    if (frames.length === 0) return false
+    if (isExtensionUrl(frames[0].url)) return true
+    return !frames.some((f) => classifyFrame(f.fn, f.url).src === 'own')
+  } catch {
+    return false
+  }
+}
+
+/** The stack of a thrown value, read without assuming it is an
+ * `Error` from this realm. */
+function stackOf(thrown: unknown): string | undefined {
+  const stack = (thrown as { stack?: unknown } | null | undefined)?.stack
+  return typeof stack === 'string' ? stack : undefined
 }
 
 function sanitizeFunctionName(fn: string): string {
@@ -427,7 +490,8 @@ function extractFields(err: unknown): {
     return {
       message: err.message || err.name || 'Error',
       stack: err.stack,
-      code: typeof maybeCode === 'string' || typeof maybeCode === 'number'
+      code: (typeof maybeCode === 'string' || typeof maybeCode === 'number') &&
+        CODE_PATTERN.test(String(maybeCode))
         ? String(maybeCode)
         : undefined,
     }
@@ -448,8 +512,12 @@ function extractFields(err: unknown): {
 function emitNormalized(n: NormalizedError): void {
   const sig = `${n.category}|${n.source}|${n.messageClass}|${n.stackSignature ?? ''}`
 
-  const prevCount = state.sigCounts.get(sig) ?? 0
-  state.sigCounts.set(sig, prevCount + 1)
+  const prevCount = state.sigCounts.get(sig)
+  if (prevCount !== undefined) {
+    state.sigCounts.set(sig, prevCount + 1)
+  } else if (state.sigCounts.size < MAX_TRACKED_SIGNATURES) {
+    state.sigCounts.set(sig, 1)
+  }
 
   // Tier A emission (always emits up to caps; the event-level tier
   // gate in the emitter filters Off / Essential / Research).

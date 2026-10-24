@@ -19,6 +19,8 @@ import {
   TIER_A_CAP_TOTAL,
   TIER_B_CAP_PER_SIG,
   MESSAGE_CLASS_MAX,
+  MAX_TRACKED_SIGNATURES,
+  isForeignError,
 } from './errorCapture'
 
 function resetAll(): void {
@@ -138,6 +140,26 @@ describe('sanitizeMessage', () => {
       label: 'token inside URL is stripped as part of the URL',
       input: 'https://example.com/auth?token=eyJhbGciOiJIUzI1NiJ9.aaa failed',
       expected: '<url> failed',
+    },
+    {
+      label: 'account name with a space in a Unix home path is stripped whole',
+      input: 'cannot open /Users/jane doe/Library/x.db',
+      expected: 'cannot open <path>',
+    },
+    {
+      label: 'account name with a space in a Windows profile path is stripped whole',
+      input: 'access denied C:\\Users\\John Smith\\AppData\\Local\\x.txt',
+      expected: 'access denied <path>',
+    },
+    {
+      label: 'quoted home path ends at its quote, keeping the text after',
+      input: 'failed to read "/home/ann lee/notes.txt": not found',
+      expected: 'failed to read "<path>": not found',
+    },
+    {
+      label: 'in-repo normalization leaves no part of a spaced account name behind',
+      input: 'TypeError in /home/john smith/repo/src/services/foo.ts',
+      expected: 'TypeError in <path>',
     },
   ]
 
@@ -374,6 +396,30 @@ describe('reportError', () => {
     expect(details.length).toBe(TIER_B_CAP_PER_SIG)
   })
 
+  it('stops remembering new signatures past MAX_TRACKED_SIGNATURES', () => {
+    // An error whose message varies per frame must not grow the
+    // counter for the life of the page.
+    for (let i = 0; i < MAX_TRACKED_SIGNATURES + 10; i++) {
+      reportError('tile', `varying-${i}`, 'caught')
+    }
+    reportError('tile', 'varying-0', 'caught')
+    expect(__getSigCount('tile', 'caught', 'varying-0')).toBe(2)
+    expect(__getSigCount('tile', 'caught', `varying-${MAX_TRACKED_SIGNATURES - 1}`)).toBe(1)
+    expect(__getSigCount('tile', 'caught', `varying-${MAX_TRACKED_SIGNATURES}`)).toBe(0)
+  })
+
+  it('passes an identifier-shaped code and replaces anything else', () => {
+    setTier('essential')
+    const withCode = (code: unknown) => Object.assign(new Error(`code ${String(code)}`), { code })
+    reportError('download', withCode('ERR_NETWORK'), 'caught')
+    reportError('download', withCode(18), 'caught')
+    reportError('download', withCode('see /home/alice for details'), 'caught')
+    reportError('download', withCode('x'.repeat(33)), 'caught')
+    const codes = (flush().filter((e) => e.event_type === 'error') as TelemetryErrorEvent[])
+      .map((e) => e.code)
+    expect(codes).toEqual(['ERR_NETWORK', '18', 'unknown', 'unknown'])
+  })
+
   it('reentrant guard — no recursion if reporter calls itself', () => {
     // Simulate a reporter-internal error by monkey-patching
     // sanitizeMessage to throw. Reporter must silently drop.
@@ -391,12 +437,26 @@ describe('reportError', () => {
 // install / uninstall — global handlers
 // ─────────────────────────────────────────────────────────────────────
 
+const OWN_FRAME = '    at fn (http://localhost/src/foo.ts:1:1)'
+
 /** Fire an uncaught error at `window` the way the browser would. */
-function dispatchWindowError(message: string): void {
+function dispatchWindowError(
+  message: string,
+  { frames = [OWN_FRAME], filename }: { frames?: string[]; filename?: string } = {},
+): void {
   const err = new Error(message)
-  err.stack = `Error: ${message}\n    at fn (http://localhost/src/foo.ts:1:1)`
+  err.stack = [`Error: ${message}`, ...frames].join('\n')
   // happy-dom dispatches ErrorEvent
-  window.dispatchEvent(new window.ErrorEvent('error', { error: err, message }))
+  window.dispatchEvent(new window.ErrorEvent('error', { error: err, message, filename }))
+}
+
+/** Fire an unhandled rejection. happy-dom does not expose
+ * PromiseRejectionEvent as a constructor, so a plain Event carries
+ * `reason` — the handler reads it regardless of the prototype. */
+function dispatchRejection(reason: unknown): void {
+  const event = new Event('unhandledrejection') as Event & { reason: unknown }
+  event.reason = reason
+  window.dispatchEvent(event)
 }
 
 describe('install / uninstall', () => {
@@ -459,16 +519,55 @@ describe('install / uninstall', () => {
 
   it('captures unhandledrejection', () => {
     install()
-    // happy-dom does not expose PromiseRejectionEvent as a
-    // constructor. Dispatch a plain Event with `reason` attached —
-    // the capture handler reads `reason` off the event regardless of
-    // the prototype.
-    const event = new Event('unhandledrejection') as Event & { reason: unknown }
-    event.reason = new Error('rejection')
-    window.dispatchEvent(event)
+    dispatchRejection(new Error('rejection'))
     const drained = flush()
     const errs = drained.filter((e) => e.event_type === 'error') as TelemetryErrorEvent[]
     expect(errs.some((e) => e.source === 'unhandledrejection')).toBe(true)
+  })
+
+  // Each foreign case is followed by one of ours, so an empty result
+  // means the foreign one was dropped, not that nothing was listening.
+  const messagesAfter = (): string[] =>
+    (flush().filter((e) => e.event_type === 'error') as TelemetryErrorEvent[])
+      .map((e) => e.message_class)
+
+  it('drops a window error from a browser extension script', () => {
+    install()
+    dispatchWindowError('autofill failed', {
+      frames: [],
+      filename: 'chrome-extension://abcdef/content.js',
+    })
+    dispatchWindowError('ours')
+    expect(messagesAfter()).toEqual(['ours'])
+  })
+
+  it('drops an error thrown in an extension frame, even when our code called it', () => {
+    install()
+    dispatchWindowError('patched fetch threw', {
+      frames: ['    at wrapped (moz-extension://abc/inject.js:1:1)', OWN_FRAME],
+    })
+    dispatchWindowError('ours')
+    expect(messagesAfter()).toEqual(['ours'])
+  })
+
+  it('drops a rejection whose stack has no frame of ours', () => {
+    install()
+    const foreign = new Error('third party')
+    foreign.stack = 'Error: third party\n    at x (https://evil.example/s.js:1:1)'
+    dispatchRejection(foreign)
+    dispatchRejection(new Error('ours'))
+    expect(messagesAfter()).toEqual(['ours'])
+  })
+
+  it('keeps an uncaught value with no stack to attribute', () => {
+    install()
+    dispatchRejection('plain string reason')
+    expect(messagesAfter()).toEqual(['plain string reason'])
+  })
+
+  it('isForeignError never throws, whatever it is handed', () => {
+    expect(isForeignError(42 as unknown as string)).toBe(false)
+    expect(isForeignError(undefined, 42 as unknown as string)).toBe(false)
   })
 
   it('install is idempotent', () => {
@@ -509,14 +608,18 @@ describe('boot wiring', () => {
   })
 
   it('installs capture in the boot handler, behind the build flag', () => {
-    expect(boot).toMatch(/if\s*\(\s*TELEMETRY_BUILD_ENABLED\s*\)\s*installErrorCapture\(\)/)
+    expect(boot).toMatch(/if\s*\(\s*TELEMETRY_BUILD_ENABLED\s*\)\s*\{\s*installErrorCapture\(\)/)
   })
 
-  it('installs after the portal and blog return, and before the app boots', () => {
+  it('installs only after the app has initialized, which sets the transport', () => {
+    // Earlier, a queued report would be drained unsent if boot stopped
+    // short of `setTransport`, and on desktop would stop the previous
+    // session's persisted queue from being replayed at all.
     const at = boot.indexOf('installErrorCapture()')
     expect(boot.indexOf('bootPublisherPortal()')).toBeLessThan(at)
     expect(boot.indexOf('bootBlogPage()')).toBeLessThan(at)
-    expect(at).toBeLessThan(boot.indexOf('app.initialize()'))
+    expect(boot.indexOf('app.initialize()')).toBeLessThan(at)
+    expect(source.match(/installErrorCapture\(\)/g)).toHaveLength(1)
   })
 })
 

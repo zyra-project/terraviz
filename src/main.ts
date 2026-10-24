@@ -4373,16 +4373,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     return
   }
 
-  // Uncaught errors, unhandled rejections and (desktop) Rust panics
-  // into the `error` stream. Ahead of `initialize()` rather than beside
-  // the session below: boot starts work it does not await (tile
-  // fetches, plugin loads, deep links), and the Rust panic hook is live
-  // from Tauri's setup, so every moment before this listener attaches
-  // is a panic dropped. Behind the build flag, like the transport, so a
-  // telemetry-free build carries none of it; `install()` itself
-  // declines on a silenced path.
-  if (TELEMETRY_BUILD_ENABLED) installErrorCapture()
-
   const app = new InteractiveSphere()
   app.setupEventListeners()
   await app.initialize()
@@ -4393,7 +4383,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   // subsequent event carries a non-zero client_offset_ms relative to
   // it. The hook itself is best-effort — if telemetry is off (tier
   // or compile flag) the emit() calls inside no-op.
+  //
+  // Error capture (uncaught errors, unhandled rejections, desktop Rust
+  // panics) installs here too, and not earlier, because `initialize()`
+  // is what sets the transport. A report queued before then is drained
+  // unsent if boot stops short of it. On desktop it does worse:
+  // `setTransport` only replays the previous session's persisted queue
+  // into an empty one, and the next good send clears that copy. A panic
+  // during boot still reaches the Tauri log through the default hook.
   if (TELEMETRY_BUILD_ENABLED) {
+    installErrorCapture()
     void initSession()
     startPerfSampler()
   }

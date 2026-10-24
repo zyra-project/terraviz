@@ -163,7 +163,7 @@ must be corrected.
 | `tour_started` / `tour_task_fired` / `tour_paused` / `tour_resumed` / `tour_ended` | A | `src/services/tourEngine.ts` |
 | `vr_session_started` / `vr_session_ended` / `vr_placement` | A | `src/services/vrSession.ts`, `src/services/vrPlacement.ts` |
 | `perf_sample` | A | `src/analytics/perfSampler.ts` |
-| `error` | A | `src/analytics/errorCapture.ts` — `reportError()` from call sites (`tile` / `hls` / `llm` / `download` / `caption`), plus the global `error` / `unhandledrejection` handlers (`uncaught`) and, on desktop, the Tauri `native_panic` listener, both attached at boot by `src/main.ts`. **Console output is not captured** — see the note under this table |
+| `error` | A | `src/analytics/errorCapture.ts` — `reportError()` from call sites (`tile` / `hls` / `llm` / `download` / `caption`), plus the global `error` / `unhandledrejection` handlers (`uncaught`) and, on desktop, the Tauri `native_panic` listener, both attached by `src/main.ts` once the app has initialized. The global handlers drop errors raised by a browser extension or another site's script. **Console output is not captured** — see the note under this table |
 | `feedback` | A | `src/ui/helpUI.ts` (in-app form) + `src/ui/chatUI.ts` (Orbit thumbs) |
 | `dwell` | **B** | `src/analytics/dwell.ts` (panel + dataset dwell, called by chat / browse / info / tools UI) |
 | `orbit_interaction` / `orbit_turn` / `orbit_tool_call` / `orbit_load_followed` / `orbit_correction` | **B** | `src/ui/chatUI.ts`, `src/services/docentService.ts`, `src/services/datasetLoader.ts` |
@@ -186,10 +186,13 @@ log lines interpolate whatever their author had to hand, and some of
 it is what telemetry promises never to send — the multi-output
 manager logs a monitor's OS display name, which `output_*` events
 reduce to an enumeration index precisely so the name stays on the
-machine. The library errors the patch was meant to catch (MapLibre,
-HLS.js, shader compiles) already reach `reportError()` from their own
-call sites with a real category. Re-adding it needs a design that
-does not depend on every log line being safe to ship.
+machine. HLS.js and shader-compile failures already reach
+`reportError()` from their own call sites with a real category.
+MapLibre's do not: nothing listens for its `error` event, so it logs
+to the console instead. That gap wants a `map.on('error')` listener
+with a category, not a patch that carries every other log line with
+it. Re-adding console capture needs a design that does not depend on
+every log line being safe to ship.
 
 Per-event field documentation lives in the type definitions
 (`src/types/index.ts` lines 685–1023) and the query reference
