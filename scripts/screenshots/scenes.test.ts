@@ -125,42 +125,44 @@ describe('pointClearOfPanel', () => {
 })
 
 describe('waitForBrowseView', () => {
-  /** A page whose DOM holds exactly the given (container-scoped) selectors. */
+  /** A page whose DOM holds exactly the given (container-scoped) selectors.
+   *  A wait for something absent fails at once, standing in for its timeout. */
   function fakePage(present: string[]) {
-    const waited: Array<{ selectors: string[]; timeout?: number }> = []
     const locator = (sel: string) => ({
       sel,
       count: async () => (present.includes(sel) ? 1 : 0),
       or: (other: { sel: string }) => ({
         first: () => ({
-          async waitFor(opts?: { timeout?: number }) {
-            waited.push({ selectors: [sel, other.sel], timeout: opts?.timeout })
+          async waitFor() {
             if (!present.includes(sel) && !present.includes(other.sel)) throw new Error('Timeout')
           },
         }),
       }),
     })
-    return { page: { locator } as unknown as Page, waited }
+    return { locator } as unknown as Page
   }
 
-  it('waits on the view and its error inside the container, with a 30s budget', async () => {
-    const { page, waited } = fakePage(['#browse-map .browse-map-legend'])
-    await waitForBrowseView(page, '#browse-map', '.browse-map-legend', '.browse-map-status-error')
-    expect(waited).toEqual([
-      {
-        selectors: ['#browse-map .browse-map-legend', '#browse-map .browse-map-status-error'],
-        timeout: 30_000,
-      },
-    ])
+  it('resolves once the view has mounted inside its container', async () => {
+    const page = fakePage(['#browse-map .browse-map-legend'])
+    await expect(
+      waitForBrowseView(page, '#browse-map', '.browse-map-legend', '.browse-map-status-error'),
+    ).resolves.toBeUndefined()
+  })
+
+  it('does not take a legend outside the container for the view', async () => {
+    const page = fakePage(['.browse-map-legend'])
+    await expect(
+      waitForBrowseView(page, '#browse-map', '.browse-map-legend', '.browse-map-status-error'),
+    ).rejects.toThrow('Timeout')
   })
 
   it('throws, naming the container, when the view drew its error status', async () => {
     // The error replaces the placeholder and nothing retries it, so a
     // scene that waited on the legend alone would sit out the full 30s
-    // and then report a selector, not the failed import.
-    const { page } = fakePage(['#browse-graph .browse-graph-status-error'])
+    // and then report a selector, not the failed mount.
+    const page = fakePage(['#browse-graph .browse-graph-status-error'])
     await expect(
       waitForBrowseView(page, '#browse-graph', '.browse-graph-legend', '.browse-graph-status-error'),
-    ).rejects.toThrow(/#browse-graph: the view's chunk failed to load/)
+    ).rejects.toThrow(/#browse-graph: the view failed to load or mount/)
   })
 })

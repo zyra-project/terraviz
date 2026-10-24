@@ -124,12 +124,15 @@ async function openCatalog(page: Page): Promise<void> {
  *
  * `browseUI` unhides the view's container while it still holds a
  * "Loading … view" status, and swaps that for the view only once the
- * view's chunk has loaded, or for an error status if the import failed.
- * So `:not(.hidden)` on the container proves nothing about what is in
- * it. Waits for `mounted`, an element only the mounted view draws, with
- * the 30s budget the smoke check gives the Timeline. The error status is
- * terminal (only another toggle retries), so it is thrown as soon as it
- * appears rather than left to time out on a selector it will never show.
+ * view's chunk has loaded, or for an error status if the import or the
+ * view's constructor threw (a MapLibre map that cannot get a WebGL
+ * context lands there too). So `:not(.hidden)` on the container proves
+ * nothing about what is in it. Waits for `mounted`, an element only the
+ * mounted view draws, with the 30s budget the smoke check gives the
+ * Timeline. The error status is terminal (only another toggle retries),
+ * so it is thrown as soon as it appears rather than left to time out on
+ * a selector it will never show. The message has to say it all: both
+ * capturers print only a failed scene's message, not the page console.
  */
 export async function waitForBrowseView(
   page: Page,
@@ -141,8 +144,8 @@ export async function waitForBrowseView(
   await page.locator(`${container} ${mounted}`).or(failed).first().waitFor({ timeout: 30_000 })
   if (await failed.count()) {
     throw new Error(
-      `${container}: the view's chunk failed to load, and browseUI drew its ` +
-        'error status instead of the view. See the console for the import error.',
+      `${container}: the view failed to load or mount (its chunk's import, or ` +
+        'its constructor, threw), and browseUI drew its error status in place of it.',
     )
   }
 }
@@ -400,7 +403,11 @@ export const scenes: Scene[] = [
       // Same race as the Graph scene: the container is unhidden over the
       // "Loading map view…" placeholder, before the lazy catalogMapUI
       // chunk mounts. The legend is drawn with the toolbar, before
-      // MapLibre starts, and stays up whatever the catalog holds.
+      // MapLibre starts, and stays up whatever the catalog holds. It
+      // proves the view mounted, not that MapLibre's `load` has fired:
+      // the coverage overlays, the all-global banner and footnote, and
+      // the auto-ticked "Include global" wait on that, and offline it
+      // may never come, so this capture can still lack them.
       await waitForBrowseView(page, '#browse-map', '.browse-map-legend', '.browse-map-status-error')
     },
   },
