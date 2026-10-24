@@ -254,7 +254,7 @@ describe('buildEmbeddingCard', () => {
     const errorId = bad.getAttribute('aria-describedby')!.split(' ')[0]
     const error = document.getElementById(errorId)!
     expect(error.hidden).toBe(false)
-    expect(error.textContent).toBe('A site must start with \u2068https://\u2069.')
+    expect(error.textContent).toBe('A site must start with https://.')
     expect(document.activeElement).toBe(bad)
     expect(view.puts()).toHaveLength(0)
     // Typing clears the error.
@@ -264,11 +264,11 @@ describe('buildEmbeddingCard', () => {
     expect(error.hidden).toBe(true)
   })
 
-  it('isolates every literal token that ends in punctuation, so an RTL sentence cannot move it', () => {
+  it('puts every literal token that ends in punctuation in its own element, so an RTL sentence cannot move it', () => {
     const view = mount(LIST)
     const group = view.q<HTMLElement>('.publisher-nodeprofile-embed-list')!
     expect(document.getElementById(group.getAttribute('aria-describedby')!)!.textContent).toMatch(
-      /^One site per row: \u2068https:\/\/\u2069 and the host name/,
+      /^One site per row: https:\/\/ and the host name/,
     )
     const errorFor = (raw: string): string => {
       view.inputs()[1].value = raw
@@ -276,28 +276,36 @@ describe('buildEmbeddingCard', () => {
       return document.getElementById(view.inputs()[1].getAttribute('aria-describedby')!.split(' ')[0])!.textContent!
     }
     expect(errorFor('https://example.org/embed')).toBe(
-      'Enter only \u2068https://\u2069 and the host, with no path or trailing slash.',
+      'Enter only https:// and the host, with no path or trailing slash.',
     )
     expect(errorFor('https://bücher.example')).toBe(
-      'Enter the punycode form (starting \u2068xn--\u2069) of an international domain name.',
+      'Enter the punycode form (starting xn--) of an international domain name.',
     )
   })
 
-  it('accepts a token copied out of its own text, which carries the isolate marks', async () => {
-    const view = mount(LIST)
-    // What a mouse selection of the hint's or the disclosure's token copies.
-    view.inputs()[0].value = '\u2068https://\u2069www.example.org'
-    view.inputs()[1].value = '\u2068file:\u2069'
+  it('sets each token and value in its own left-to-right element, with no isolate characters to copy', async () => {
+    const view = mount(LIST, { live: { xfo: 'SAMEORIGIN' } })
+    choose(view.radio('list'))
+    view.inputs()[1].value = 'https://WWW.example.org'
     view.save()!.click()
-    await until(() => view.puts().length === 1, 'the PUT')
-    expect(view.puts()[0].body).toEqual({ embedding: { mode: 'list', origins: ['https://www.example.org', 'file:'] } })
+    await until(() => view.qa('.publisher-nodeprofile-embed-finding').length > 0, 'the readout')
+    // HTML isolates an element carrying dir, so these hold their order
+    // in an RTL sentence without U+2068/U+2069 in the text, which a
+    // braille display shows as escapes and a copy carries into a row.
+    expect(view.card.textContent).not.toMatch(/[\u2066-\u2069]/)
+    const ltr = view.qa('.publisher-nodeprofile-hint span[dir="ltr"], .publisher-nodeprofile-embed-error span[dir="ltr"], .publisher-nodeprofile-embed-finding span[dir="ltr"]')
+    expect(ltr.map(span => span.textContent)).toEqual(
+      expect.arrayContaining(['https://', 'file://', 'file:', 'https://www.example.org', 'SAMEORIGIN']),
+    )
   })
 
-  it('still refuses any other direction control, which can make a row show what it does not hold', () => {
+  it('refuses a row holding a direction control, which can make it show what it does not hold', () => {
     const view = mount(LIST)
-    view.inputs()[1].value = 'https://\u202Egro.elpmaxe'
-    view.save()!.click()
-    expect(view.inputs()[1].getAttribute('aria-invalid')).toBe('true')
+    for (const raw of ['https://\u202Egro.elpmaxe', '\u2068file:\u2069']) {
+      view.inputs()[1].value = raw
+      view.save()!.click()
+      expect(view.inputs()[1].getAttribute('aria-invalid')).toBe('true')
+    }
     expect(view.puts()).toHaveLength(0)
   })
 
@@ -308,7 +316,7 @@ describe('buildEmbeddingCard', () => {
     expect(view.inputs()[1].getAttribute('aria-invalid')).toBe('true')
     const error = document.getElementById(view.inputs()[1].getAttribute('aria-describedby')!.split(' ')[0])!
     // It quotes the site, which stays right if rows above are removed.
-    expect(error.textContent).toBe('This repeats \u2068https://www.example.org\u2069, listed above.')
+    expect(error.textContent).toBe('This repeats https://www.example.org, listed above.')
     expect(view.puts()).toHaveLength(0)
   })
 
@@ -433,9 +441,9 @@ describe('buildEmbeddingCard', () => {
     expect(help.open).toBe(false)
     expect(help.querySelector('summary')!.textContent).toBe('Allow a page opened from a file')
     expect(Array.from(help.querySelectorAll('p'), p => p.textContent)).toEqual([
-      'A page opened from a file has an address starting \u2068file://\u2069 and no site to list. ' +
-        'To allow one, add a row with only \u2068file:\u2069 in it. ' +
-        'That is the word file followed by a colon, not \u2068file://\u2069 or a path.',
+      'A page opened from a file has an address starting file:// and no site to list. ' +
+        'To allow one, add a row with only file: in it. ' +
+        'That is the word file followed by a colon, not file:// or a path.',
       'Any page opened from a file can then embed this node, not only yours. ' +
         'Chrome, Edge and other Chromium browsers allow this. Test any other browser before you rely on it.',
     ])
@@ -453,7 +461,7 @@ describe('buildEmbeddingCard', () => {
       view.save()!.click()
       const error = document.getElementById(view.inputs()[1].getAttribute('aria-describedby')!.split(' ')[0])!
       expect(error.textContent).toBe(
-        'Enter only \u2068file:\u2069, the word file followed by a colon, to allow pages opened from a file. ' +
+        'Enter only file:, the word file followed by a colon, to allow pages opened from a file. ' +
           'That allows every such page, not only yours.',
       )
       expect(view.puts()).toHaveLength(0)
@@ -470,7 +478,7 @@ describe('buildEmbeddingCard', () => {
       'https://www.example.org',
       'file:',
     ])
-    const note = view.qa('p').find(p => p.textContent === '\u2068file:\u2069 in this list lets any page opened from a file embed this node.')
+    const note = view.qa('p').find(p => p.textContent === 'file: in this list lets any page opened from a file embed this node.')
     expect(note).toBeDefined()
     expect(view.q('.publisher-nodeprofile-embed-readonly')!.compareDocumentPosition(note!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
@@ -530,7 +538,7 @@ describe('buildEmbeddingCard: what this node sends now', () => {
     // The header value is isolated, so it keeps its order in a
     // right-to-left sentence.
     expect(view.q('.publisher-nodeprofile-embed-finding-warn')?.textContent).toContain(
-      'X-Frame-Options: \u2068SAMEORIGIN\u2069',
+      'X-Frame-Options: SAMEORIGIN',
     )
     view.qa<HTMLButtonElement>('button').find(b => b.textContent === 'Check again')!.click()
     const liveStatus = view.q('.publisher-nodeprofile-embed-live [role="status"]')!
@@ -544,7 +552,7 @@ describe('buildEmbeddingCard: what this node sends now', () => {
     await until(() => view.qa('.publisher-nodeprofile-embed-finding').length === 2, 'the readout')
     const findings = view.qa('.publisher-nodeprofile-embed-finding')
     expect(findings[0].textContent).toBe('This matches the saved setting.')
-    expect(findings[1].textContent).toContain('X-Frame-Options: ⁨SAMEORIGIN⁩')
+    expect(findings[1].textContent).toContain('X-Frame-Options: SAMEORIGIN')
     expect(findings[1].textContent).toContain('Current browsers ignore this node')
     expect(view.qa('.publisher-nodeprofile-embed-finding-warn')).toHaveLength(0)
     // A check the user asks for announces both, the verdict first.
