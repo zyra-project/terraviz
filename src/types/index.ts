@@ -2076,7 +2076,9 @@ export interface ErrorDetailEvent extends TelemetryEventBase {
   category: ErrorCategory
   source: ErrorSource
   message_class: string
-  /** SHA-256 of normalized stack, first 12 hex. */
+  /** 12 hex of a non-cryptographic hash (`errorCapture`'s djb2-style
+   * `shortHash`) of the normalized frames — a dedup identity, not a
+   * digest, so nothing should rely on it resisting collisions. */
   stack_signature: string
   /** Sanitized stack frames — function names only, no URLs or line
    * numbers. Max 10 frames. */
