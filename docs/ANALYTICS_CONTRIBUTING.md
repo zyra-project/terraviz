@@ -165,9 +165,14 @@ existing ones shifts every later position.
 | Is it a sanitized stack trace (vs. just an error category)? | Yes |
 | Is it none of the above — a coarse operational counter? | **Tier A** |
 
-`session_end`'s whole-app session length (`duration_ms`,
-`visible_ms`) is Tier A by decision despite the dwell row; the
-reasoning is in [`PRIVACY_ANALYSIS.md`](PRIVACY_ANALYSIS.md) §7a.
+Three Tier A fields time something despite the dwell row:
+`session_end`'s `duration_ms` / `visible_ms`,
+`layer_unloaded.dwell_ms` and `tour_task_fired.task_dwell_ms`.
+Only `session_end`'s case is written up, in
+[`PRIVACY_ANALYSIS.md`](PRIVACY_ANALYSIS.md) §7a, and it rests on
+two properties: it names no surface, and other Tier A rows
+(`client_offset_ms`, `perf_sample`) already reveal it. A new
+duration field can cite that precedent only if it shares both.
 
 When in doubt, default to Tier B. Promoting B → A later is a
 schema decision (still ok), but accidentally shipping a

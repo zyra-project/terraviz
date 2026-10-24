@@ -169,7 +169,7 @@ entropy. Per-event:
 
 | Event | Identifying fields beyond `session_id` | Notes |
 |---|---|---|
-| `session_end` | `exit_reason` (3 vals), `duration_ms`, `event_count`, `visible_ms` | Behavioural; ~5–10 bits over the session. Once per session, whole-app totals. `visible_ms` is bounded by `duration_ms` and differs from it only by the time before the page was first shown (the end fires on the first hide), so it adds little. Tier choice: §7a |
+| `session_end` | `exit_reason` (2 vals sent; `clean` is declared but never emitted), `duration_ms`, `event_count`, `visible_ms` | Behavioural; ~5–10 bits over the session. Once per session, measured up to the first hide. `visible_ms` is bounded by `duration_ms`; the gap is boot time (the visible clock starts in `initSession()`, after `app.initialize()`) plus any time in a background tab before first shown. `session_start.client_offset_ms` already carries roughly the boot time, so it adds little. Tier choice: §7a |
 | `layer_loaded` / `layer_unloaded` | `layer_id` (~50 datasets), `trigger`/`reason` | ~6 bits per load; **sequence** is the main fingerprint |
 | `camera_settled` | rounded lat/lon (~3 decimals), zoom, bearing, pitch | See §2c — the high-volume event |
 | `map_click` | rounded lat/lon, `hit_kind`, `hit_id` | Same lat/lon precision as camera |
@@ -669,29 +669,46 @@ Three candidates we examined:
 - **`session_end`** carries `duration_ms` and `visible_ms`, which
   sit close to `dwell` — and `ANALYTICS_CONTRIBUTING.md`'s tier
   table sends "how long the user dwelled on something" to Tier B.
-  It stays Tier A because what makes `dwell` sensitive is absent
-  here. `dwell` says *which* surface held attention (chat vs
-  browse vs a named dataset) and fires repeatedly, so its
-  sequence is a behavioural fingerprint; `session_end` is one row
+  It stays Tier A on two grounds, both about sensitivity rather
+  than usefulness.
+
+  *It names nothing.* `dwell` says *which* surface held attention
+  (chat vs browse vs a named dataset) and fires repeatedly, so its
+  sequence is a behavioural fingerprint. `session_end` is one row
   per session (`session.ts` coalesces repeat `pagehide` /
-  `visibilitychange`), names no surface, and reports whole-app
-  totals, so there is no sequence to fingerprint. It is coarser
-  than durations Tier A already carries: `layer_unloaded.dwell_ms`
-  per dataset and `tour_task_fired.task_dwell_ms` per tour task.
-  Its live use is operational. The publisher portal's Overview
-  shows a node's total and per-day view time, summed from
-  `visible_ms` (`analytics-export.ts` rolls it up and
-  `analytics-query.ts` reads it back), and on Tier B that number
-  would cover only Research opt-ins. It is also a health signal:
-  a release that boots but leaves people nothing to do (a blank
-  globe, a catalog that will not load) shows up as sessions
-  ending in seconds, whether or not anything raised an error. The
-  weak spot is honest to name: `ANALYTICS_QUESTIONS.md` also
-  reads session length as an *engagement* number, which §6c says
-  Tier A is not for. The case
-  for Tier A rests on the operational and health uses, not that
-  one. Incremental entropy is in §2b. **Tier A, deliberately**,
-  and disclosed in `PRIVACY.md` §2 Mode 1.
+  `visibilitychange`) and names no surface. It is coarser than
+  durations Tier A already carries: `layer_unloaded.dwell_ms` per
+  dataset and `tour_task_fired.task_dwell_ms` per tour task.
+
+  *Tier A already reveals it.* Every row carries
+  `client_offset_ms`, the time since the session began, so the
+  last row a session sends bounds its length. `perf_sample` fires
+  once per visible minute and pauses while the page is hidden
+  (`perfSampler.ts`), which gives visible time to within about a
+  minute, over every visible stretch rather than only the first.
+  Moving `session_end` to Tier B would withhold almost nothing.
+
+  Its one live consumer is a usage figure, not a health check:
+  the Overview section of `/publish/analytics` shows total and
+  per-day view time, summed from `visible_ms`
+  (`analytics-export.ts` rolls it up, `analytics-query.ts` reads
+  it back). No Grafana panel reads `session_end`, and the
+  `duration_ms` percentiles are rolled up but never read back.
+  That use, and `ANALYTICS_QUESTIONS.md`'s reading of session
+  length as engagement, sit outside §6c's "does the build work",
+  so they are not part of the case for Tier A. Two fields have no
+  consumer at all, `event_count` and `exit_reason`, and are
+  candidates for removal under data minimisation. `exit_reason`
+  also cannot tell a close from a tab switch: both usually reach
+  it as `visibilitychange`.
+
+  **Revisit when** the event changes to measure past the first
+  hide. The values stop there today, which is part of why they
+  are coarse; summed across every visible stretch, `visible_ms`
+  becomes a fuller attention measure and both this tier and the
+  `PRIVACY.md` wording need another look. Incremental entropy is
+  in §2b. **Tier A, deliberately**, and disclosed in `PRIVACY.md`
+  §2 Mode 1.
 
 - **`map_click`** carries lat/lon at the same precision as
   `camera_settled` and is plausibly more discretionary (a
