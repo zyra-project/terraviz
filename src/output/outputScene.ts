@@ -468,6 +468,14 @@ export interface OutputScene {
    */
   setFramebufferWidth(width: number): void
   /**
+   * Replace the cloud image — a refresh, since the upstream image is
+   * replaced every ten minutes and the first load is otherwise the only
+   * one (`docs/SECOND_LIFE_COMPAT.md` §7 item 8). The old texture is
+   * freed and the next frame draws the new one without waiting out the
+   * 1 Hz static floor.
+   */
+  setCloudImage(image: TexImageSource): void
+  /**
    * Draw this warp set, or — for `null` or a set the warp check refuses
    * — nothing, which is what a `projector-warp` window with no usable
    * set must show: an unwarped frame across calibrated projectors is
@@ -980,17 +988,25 @@ export async function createOutputScene(
   // costs the clouds and nothing else — an Earth without them is a
   // correct picture, and an output that refused to boot is not.
   const loadCloudImage = deps.loadCloudImage ?? defaultLoadCloudImage
+  /** Bind a cloud image, freeing the one it replaces — the first load
+   *  and every refresh after it take the same path. */
+  const installCloud = (img: TexImageSource): void => {
+    if (disposed) return
+    const tex = new (THREE_ as unknown as {
+      Texture: new (i: unknown) => TextureLike & { needsUpdate: boolean }
+    }).Texture(img)
+    tex.needsUpdate = true
+    const replaced = cloudTexture
+    cloudTexture = tex
+    uniforms[DECORATION_UNIFORMS.cloudMap].value = tex
+    uniforms[DECORATION_UNIFORMS.hasCloud].value = 1
+    replaced?.dispose()
+    textureUpgraded = true
+  }
   void loadCloudImage()
     .then((img: TexImageSource | null) => {
-      if (!img || disposed) return
-      const tex = new (THREE_ as unknown as {
-        Texture: new (i: unknown) => TextureLike & { needsUpdate: boolean }
-      }).Texture(img)
-      tex.needsUpdate = true
-      cloudTexture = tex
-      uniforms[DECORATION_UNIFORMS.cloudMap].value = tex
-      uniforms[DECORATION_UNIFORMS.hasCloud].value = 1
-      textureUpgraded = true
+      // A refresh that landed first already holds a newer image.
+      if (img && !cloudTexture) installCloud(img)
     })
     .catch((err: unknown) => logger.warn('[Output] cloud texture unavailable:', err))
 
@@ -1157,6 +1173,9 @@ export async function createOutputScene(
       // A composite change that did not also upgrade a texture would
       // otherwise wait out the 1 Hz static floor before appearing.
       textureUpgraded = true
+    },
+    setCloudImage(image) {
+      installCloud(image)
     },
     setFramebufferWidth(width) {
       // A warp window sizes itself from its canvas; the ladder is

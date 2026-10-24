@@ -1351,6 +1351,48 @@ describe('the sphere texture binding', () => {
       expect(scene.consumeDirty()).toBe(true)
     })
 
+    it('swaps in a refreshed cloud image, freeing the one it replaces', async () => {
+      // The upstream image is replaced every ten minutes; a page left
+      // open would otherwise show the sky from whenever it loaded.
+      const three = fakeThree()
+      const earth = fakeEarth({ id: 'base' } as FakeTexture)
+      const first = { id: 'clouds-1' } as unknown as TexImageSource
+      const second = { id: 'clouds-2' } as unknown as TexImageSource
+      const scene = await createOutputScene(
+        { canvas: canvas() },
+        { loadThree: async () => three.THREE_, createEarth: earth.createEarth, loadCloudImage: async () => first },
+      )
+      await until(() => three.uniformsSeen[0][DECORATION_UNIFORMS.hasCloud].value === 1, 'the first clouds')
+      scene.consumeDirty()
+      const texturesBefore = three.disposed.filter(d => d === 'texture').length
+
+      scene.setCloudImage(second)
+
+      const u = three.uniformsSeen[0]
+      expect((u[DECORATION_UNIFORMS.cloudMap].value as { image: unknown }).image).toBe(second)
+      expect(three.disposed.filter(d => d === 'texture').length).toBe(texturesBefore + 1)
+      expect(scene.consumeDirty()).toBe(true)
+    })
+
+    it('keeps a refresh that lands before the first load does', async () => {
+      const three = fakeThree()
+      const earth = fakeEarth({ id: 'base' } as FakeTexture)
+      let releaseFirst: (img: TexImageSource) => void = () => {}
+      const fresh = { id: 'fresh' } as unknown as TexImageSource
+      const scene = await createOutputScene(
+        { canvas: canvas() },
+        {
+          loadThree: async () => three.THREE_,
+          createEarth: earth.createEarth,
+          loadCloudImage: () => new Promise(resolve => { releaseFirst = resolve }),
+        },
+      )
+      scene.setCloudImage(fresh)
+      releaseFirst({ id: 'stale' } as unknown as TexImageSource)
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect((three.uniformsSeen[0][DECORATION_UNIFORMS.cloudMap].value as { image: unknown }).image).toBe(fresh)
+    })
+
     it('renders a correct Earth when the cloud asset will not load', async () => {
       // An output that refused to boot over a missing decoration texture
       // would be a worse failure than one without clouds.

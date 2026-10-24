@@ -2,8 +2,26 @@
 // Copyright 2026 The Zyra Project
 
 // TerraViz in-world probe - the shared-media half of the kit.
-// Results and what they mean: docs/SECOND_LIFE_COMPAT.md, sections 3-5.
-// How to run it: scripts/second-life-probe/README.md.
+//
+// ABOUT TERRAVIZ
+// TerraViz is a free, open-source globe for environmental data, most of
+// it from NOAA's Science On a Sphere collection. It runs in a web browser
+// and as a desktop app, and any museum, lab or school can run its own
+// copy of the service, called a node.
+//   The app:     https://terraviz.zyra-project.org
+//   The source:  https://github.com/zyra-project/terraviz
+//
+// WHAT THIS IS FOR
+// Testing, from inside Second Life, what TerraViz can do here: whether a
+// viewer's built-in browser runs WebGL and plays TerraViz's video, how a
+// sphere wraps a picture, and whether a change to the part of an address
+// after # reaches the page without a reload. It is a test kit, not an
+// exhibit: its test page renders only for the object's owner. For a
+// globe that visitors see, use terraviz-globe.lsl, in a sphere of its own.
+//   What the tests found, and the plan they led to (sections 3-5, 7):
+//     https://github.com/zyra-project/terraviz/blob/main/docs/SECOND_LIFE_COMPAT.md
+//   How to run it, and how to read what it says:
+//     https://github.com/zyra-project/terraviz/blob/main/scripts/second-life-probe/README.md
 //
 // terraviz-probe.lsl is generated from probe.template.lsl and probe.html
 // by `npx tsx scripts/second-life-probe`. Edit those two, never the
@@ -22,6 +40,7 @@
 //   /7 video    a real TerraViz video (Hurricane Season 2024), if it can play
 //   /7 app      the actual TerraViz web app
 //   /7 sos      TerraViz's LED-sphere output page: a live, correctly wrapped Earth
+//               (terraviz-globe.lsl puts datasets on the same page)
 //   /7 soak     keep WebGL drawing and report every 10 s until it stops
 //   /7 soak2d   the same animation without WebGL - the comparison for soak
 //   /7 globe    stand the sphere's poles upright and rotate its texture 90

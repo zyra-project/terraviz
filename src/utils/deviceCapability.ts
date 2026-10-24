@@ -110,6 +110,17 @@ export function getCloudTextureUrl(): string {
 }
 
 /**
+ * Cloud texture URL for a frame of known width, for the output page,
+ * which knows exactly how wide it draws. Up to a 2048-wide frame the
+ * 4096 image already holds more detail than can be shown, at a fifth
+ * of the size; there is no 2048 image (`docs/SECOND_LIFE_COMPAT.md`
+ * §7 item 8).
+ */
+export function cloudTextureUrlForWidth(frameWidth: number): string {
+  return `${CLOUD_TEXTURE_BASE}/clouds_${frameWidth <= 2048 ? 4096 : 8192}.jpg`
+}
+
+/**
  * Country-borders overlay texture (equirectangular PNG with black
  * lines on transparent background). Served from the same CloudFront
  * basemaps path the Earth diffuse / lights textures use

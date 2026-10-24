@@ -869,8 +869,12 @@ export interface OutputHealthCheckEvent extends OutputEventBase {
   silentMs: number
 }
 
-/** The output's own stream stalled — distinct from the link going
- *  quiet, and the manager badges the two differently. */
+/** The output's own stream died: it would not load while still the
+ *  dataset asked for, or hls.js spent its retries after it had
+ *  (`datasetMirror`). Distinct from the link going quiet. The manager
+ *  reports it as `output_failure` with `kind: 'hls-stalled'`, at most
+ *  once per output per dataset. It does not badge it yet; the panel
+ *  shows nothing for it. */
 export interface OutputDatasetStalledEvent extends OutputEventBase {
   type: 'output_dataset_stalled'
   datasetId: string | null

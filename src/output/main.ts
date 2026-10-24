@@ -24,11 +24,23 @@
  * inside the hard-seek threshold it only trims the rate — so calling it
  * every frame is what keeps a sphere in step rather than sawtoothing
  * between diffs.
+ *
+ * **Off desktop, the page's own address is the control window**
+ * (`docs/SECOND_LIFE_COMPAT.md` §7). With no Tauri there is nothing to
+ * link to — in Second Life every visitor's viewer runs its own copy —
+ * so a `sos-equirect` page reads what to show from its URL
+ * (`webMode.ts`), fetches the dataset itself (`webDataset.ts`), steers
+ * to the shared clock in the address (`webClock.ts`), and re-reads it
+ * on every `hashchange`, which a browser applies without a reload. A
+ * bare address is the idle Earth it always was.
  */
 
 import './output.css'
 import { CALIBRATION_OVERLAY, MAX_PATTERN_WIDTH, createCalibrationCache } from './calibrationPattern'
-import { createDatasetMirror } from './datasetMirror'
+import { createCloudRefresh } from './cloudRefresh'
+import { createDatasetMirror, createDefaultMediaLoader } from './datasetMirror'
+import { readWebSettings, type WebOutputSettings } from './webMode'
+import { createWebOutput, followAddress, framebufferFor } from './webOutput'
 import {
   OVERLAY_REFRESH_MS,
   createDebugOverlay,
@@ -53,10 +65,13 @@ import type { LinkHealth } from './linkWatchdog'
 import type { SyncOutcome } from './outputSync'
 import { createFullscreenController, resolveChromeHost } from '../services/windowChrome'
 import {
+  DEFAULT_FRAMEBUFFER_WIDTH,
   outputModeFromQuery,
+  type MirroredDataset,
   type OutputGlobeState,
   type OutputRenderConfig,
 } from '../services/multiOutput/protocol'
+import { cloudTextureUrlForWidth } from '../utils/deviceCapability'
 import { logger } from '../utils/logger'
 
 /** The same gate `bootMultiOutput` applies on the control side. */
@@ -86,8 +101,55 @@ async function boot(): Promise<void> {
     return
   }
 
-  const scene = await createOutputScene({ canvas, mode })
-  const mirror = createDatasetMirror()
+  // The web mode's settings are read before the scene exists, so the
+  // first frame is already the right size. Desktop gets its size from
+  // the manager's render config instead, once the link attaches.
+  const web = !isDesktop() && mode === 'sos-equirect'
+  const webSettings: WebOutputSettings | null = web
+    ? readWebSettings(window.location.search, window.location.hash)
+    : null
+  /** The page as displayed, in device pixels: what a web output's frame
+   *  is sized to when its address names no `width`. */
+  const displaySizePx = (): { width: number; height: number } => {
+    const ratio = window.devicePixelRatio || 1
+    return { width: canvas.clientWidth * ratio, height: canvas.clientHeight * ratio }
+  }
+  const firstWidth = webSettings ? framebufferFor(webSettings, displaySizePx()) : undefined
+
+  // The clouds follow the frame's width and the producer's schedule
+  // (`cloudRefresh.ts`), on desktop and web alike — an installation
+  // left running all day has the same stale sky a web page does.
+  let sceneRef: Awaited<ReturnType<typeof createOutputScene>> | null = null
+  const clouds = createCloudRefresh({
+    url: () => cloudTextureUrlForWidth(sceneRef?.size.width ?? firstWidth ?? DEFAULT_FRAMEBUFFER_WIDTH),
+    onImage: image => sceneRef?.setCloudImage(image),
+  })
+
+  const scene = await createOutputScene(
+    { canvas, mode, framebufferWidth: firstWidth },
+    { loadCloudImage: () => clouds.first() },
+  )
+  sceneRef = scene
+  clouds.start()
+  /** Where this window's stream errors go: nowhere until something takes
+   *  them. On desktop the link takes a stream that died, so the control
+   *  window can report it; on the web the page's own telemetry takes
+   *  every fatal error. Nothing here sends anything itself. */
+  const streamReports: {
+    error: (err: Error) => void
+    failed: (ds: MirroredDataset) => void
+  } = { error: () => {}, failed: () => {} }
+  // A web output caps its video at its own frame, because every visitor
+  // streams their own copy. A desktop output is unchanged.
+  const mirror = createDatasetMirror({
+    loader: createDefaultMediaLoader({
+      maxVideoWidth: web ? () => scene.size.width : undefined,
+      reportStreamError: err => streamReports.error(err),
+      onStreamFailed: ds => streamReports.failed(ds),
+    }),
+    // A video that would not load, while still the one asked for.
+    onLoadFailed: ds => streamReports.failed(ds),
+  })
   /** Per-frame work the link installs, if it attached. Empty on the web
    *  fixture page, where the loop is just the idle Earth. */
   const steerers: (() => void)[] = []
@@ -288,6 +350,11 @@ async function boot(): Promise<void> {
 
       scene.onGpuStateChange(state => link.reportGpuState(state))
 
+      // A stream that died, for the control window to report as an
+      // `output_failure`. Bound here rather than with the loader because a
+      // stream loads only once the link has delivered a dataset.
+      streamReports.failed = ds => link.reportStreamFailure(ds.id)
+
       /**
        * Rebuild the composite from whatever the mirror currently holds.
        *
@@ -455,6 +522,39 @@ async function boot(): Promise<void> {
       // the missing output is reported (rung 13's health badges).
       logger.error('[Output] could not attach to the control window:', err)
     }
+  }
+
+  if (webSettings) {
+    // See `webOutput.ts`: the address is this window's control window.
+    const webOutput = createWebOutput({
+      mirror,
+      scene,
+      setDebug: on => overlay.setVisible(on),
+      setFill: on => document.body.classList.toggle('output-fit-fill', on),
+      displaySizePx,
+      markDirty: () => {
+        dirty = true
+      },
+      // The page reports for itself only in web mode, where no control
+      // window can, and only once an address turns it on (`telemetry=1`).
+      // A desktop output window never gets here, so it loads no
+      // telemetry code at all.
+      loadTelemetry: () =>
+        import('./webTelemetry')
+          .then(m => m.startWebTelemetry())
+          .catch(err => {
+            logger.warn('[Output] telemetry did not start:', err)
+            return null
+          }),
+    })
+    streamReports.error = err => webOutput.reportStreamError(err)
+    // Read again, not `webSettings`: that reading sized the first frame,
+    // and a `#` change may have landed while the scene was loading.
+    // After this, every `#` change a controller makes is applied live.
+    followAddress(window, settings => webOutput.apply(settings))
+    steerers.push(() => {
+      lastSync = webOutput.steer()
+    })
   }
 
   const tick = (now: number): void => {

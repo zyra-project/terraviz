@@ -232,7 +232,8 @@ describe('product-health dashboard — Phase 3b asset migration row', () => {
     //   - 3c/F: version 9 (tour migration row)
     //   - 3pa/F: version 10 (publisher portal row)
     //   - multi-monitor rung 13: version 11 (output row)
-    expect(dashboard.version).toBe(11)
+    //   - Second Life phase 1: version 12 (globe row)
+    expect(dashboard.version).toBe(12)
   })
 })
 
@@ -422,5 +423,54 @@ describe('product-health dashboard — multi-monitor output row (rung 13)', () =
         expect(sql).not.toMatch(/blob([7-9]|1\d)\b/)
       }
     }
+  })
+})
+
+describe('product-health dashboard — globe (web output) row', () => {
+  const dashboard = load()
+  const globePanels = dashboard.panels.filter(p => p.title.startsWith('Globes (web output)'))
+  const sql = (title: string) => globePanels.find(p => p.title.endsWith(title))!.targets[0].url_options!.data!
+
+  it('exposes the two globe panels on their own row, below the output row', () => {
+    expect(globePanels.map(p => p.title).sort()).toEqual([
+      'Globes (web output) — datasets shown',
+      'Globes (web output) — errors by code',
+    ])
+    const ys = new Set(globePanels.map(p => p.gridPos.y))
+    expect([...ys]).toEqual([74])
+  })
+
+  it('reads layer_loaded at its alphabetical positions, filtered to the output trigger', () => {
+    // layer_loaded: layer_id → blob5, layer_source → blob6,
+    // slot_index → blob7, trigger → blob8, load_ms → double2.
+    const shown = sql('datasets shown')
+    expect(shown).toMatch(/blob1 = 'layer_loaded'/)
+    expect(shown).toMatch(/blob8 = 'output'/)
+    expect(shown).toMatch(/blob5\s+AS\s+dataset/)
+    expect(shown).toMatch(/blob6\s+AS\s+source/)
+    expect(shown).toMatch(/\(double2\)\s+AS\s+median_load_ms/)
+  })
+
+  it('reads error at its alphabetical positions, filtered to the output category', () => {
+    // error: category → blob5, code → blob6, message_class → blob7.
+    const errors = sql('errors by code')
+    expect(errors).toMatch(/blob1 = 'error'/)
+    expect(errors).toMatch(/blob5 = 'output'/)
+    expect(errors).toMatch(/blob6\s+AS\s+code/)
+    expect(errors).toMatch(/blob7\s+AS\s+message_class/)
+  })
+
+  it("keeps a globe's traffic out of the app's panels", () => {
+    // layer_loaded: trigger → blob8. error: category → blob5. A busy
+    // region would otherwise move the app's load times, load-source mix
+    // and error rate. Globes send no session_start, so the session
+    // panels need no filter.
+    const sqlOf = (title: string) =>
+      dashboard.panels.find(p => p.title.startsWith(title))!.targets[0].url_options!.data!
+    for (const title of ['Layer load p95', 'Load source mix']) {
+      expect(sqlOf(title)).toMatch(/blob1 = 'layer_loaded' AND blob8 != 'output'/)
+    }
+    expect(sqlOf('Errors by category')).toMatch(/blob1 = 'error' AND blob5 != 'output'/)
+    expect(sqlOf('Errors per session')).toMatch(/blob1 = 'error' AND blob5 != 'output'/)
   })
 })

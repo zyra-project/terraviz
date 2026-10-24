@@ -151,8 +151,8 @@ must be corrected.
 
 | Event | Tier | Where it fires |
 |---|---|---|
-| `session_start` / `session_end` | A | `src/analytics/session.ts` |
-| `layer_loaded` / `layer_unloaded` | A | `src/services/datasetLoader.ts` |
+| `session_start` / `session_end` | A | `src/analytics/session.ts`. The output page in web mode (a globe's texture, such as a Second Life prim) sends **neither**: a session start would put a visitor's locale, OS and screen beside the moment they arrived, which a land owner's log of avatar arrivals could be matched against, and a session's length on a globe is how long a passer-by stood near it. A globe's visitors are counted instead as the distinct session ids on its `layer_loaded` rows (the maintainer's decision, 24 October 2026) |
+| `layer_loaded` / `layer_unloaded` | A | `src/services/datasetLoader.ts`. The output page in web mode emits `layer_loaded` alone, with `trigger: 'output'`, when its address's dataset reaches the glass (`src/output/webTelemetry.ts`). It reports **only in the first minute after the page loads** (page time, so a late `#telemetry=1` reports nothing), at most 30 times, and sends nothing after about 66 s even on a retry, with no leave-time beacon, and only when the globe's address says `telemetry=1` and the browser does not set Global Privacy Control: later events would show how long a visitor stood near the globe, and who stood there together. It sends no `layer_unloaded` |
 | `camera_settled` | A | `src/services/mapRenderer.ts` (2D) + `src/services/vrInteraction.ts` (VR/AR) |
 | `map_click` | A | `src/services/mapRenderer.ts` |
 | `viewport_focus` / `layout_changed` | A | `src/services/viewportManager.ts` |
@@ -162,7 +162,7 @@ must be corrected.
 | `tour_started` / `tour_task_fired` / `tour_paused` / `tour_resumed` / `tour_ended` | A | `src/services/tourEngine.ts` |
 | `vr_session_started` / `vr_session_ended` / `vr_placement` | A | `src/services/vrSession.ts`, `src/services/vrPlacement.ts` |
 | `perf_sample` | A | `src/analytics/perfSampler.ts` |
-| `error` | A | `src/analytics/errorCapture.ts` |
+| `error` | A | `src/analytics/errorCapture.ts`. The output page in web mode reports under `category: 'output'` (`src/output/webTelemetry.ts`), in the same first minute and under the same switch as its `layer_loaded`, with `code` one of `not_found` / `not_playable` / `bad_response` / `http` / `network` / `media` for a dataset that would not show (its first failure, not each retry) and `stream` for every fatal stream error hls.js reports, recovered or not. The message is fixed per code, so the address's text never reaches the wire, and the stack is dropped, so no `error_detail` follows. A stream that will not load reports both: its `stream` rows, then one `media` row |
 | `feedback` | A | `src/ui/helpUI.ts` (in-app form) + `src/ui/chatUI.ts` (Orbit thumbs) |
 | `dwell` | **B** | `src/analytics/dwell.ts` (panel + dataset dwell, called by chat / browse / info / tools UI) |
 | `orbit_interaction` / `orbit_turn` / `orbit_tool_call` / `orbit_load_followed` / `orbit_correction` | **B** | `src/ui/chatUI.ts`, `src/services/docentService.ts`, `src/services/datasetLoader.ts` |
@@ -173,7 +173,7 @@ must be corrected.
 | `vr_interaction` | **B** | `src/services/vrInteraction.ts` (per-gesture, throttled) |
 | `error_detail` | **B** | `src/analytics/errorCapture.ts` (adds sanitized stack) |
 | `tour_question_answered` | **B** | `src/services/tourEngine.ts` |
-| `output_added` / `output_removed` / `output_failure` | A | `src/services/multiOutput/manager.ts` via `src/services/multiOutput/outputTelemetry.ts` — the multi-monitor control window. The **output windows emit nothing**: §3.6 of `MULTI_MONITOR_PLAN.md` keeps them capture-clean, and the two failures an output could report about itself (a crash, an IPC silence) are the two it cannot. Categorical fields only — the framebuffer is a rung name (or `native` for a `projector-warp` output, which draws projector rasters rather than an equirect frame, so no rung describes it) and the monitor an enumeration index, never a display name |
+| `output_added` / `output_removed` / `output_failure` | A | `src/services/multiOutput/manager.ts` via `src/services/multiOutput/outputTelemetry.ts` — the multi-monitor control window. The **desktop output windows emit nothing**: §3.6 of `MULTI_MONITOR_PLAN.md` keeps them capture-clean, and the two failures an output could report about itself (a crash, an IPC silence) are the two it cannot. One they can, a stream that died, they tell the control window over IPC (`output_dataset_stalled`), which reports `output_failure` with `kind: 'hls-stalled'`. The output page in **web mode** has no control window and reports for itself (the three rows above). Categorical fields only — the framebuffer is a rung name (or `native` for a `projector-warp` output, which draws projector rasters rather than an equirect frame, so no rung describes it) and the monitor an enumeration index, never a display name |
 | `voice_interaction` | **B** | `src/ui/chatUI.ts` (Orbit voice STT/TTS — no transcript or audio, only provider / lang / duration / success; hands-free turns carry `trigger` = `open-mic`/`push-to-talk`/`wake-word`, a `wake-word` turn with `success:false` is a false fire, and a TTS barge-in sets `interrupted` — the §10.4 exhibit-tuning numbers) |
 
 Per-event field documentation lives in the type definitions

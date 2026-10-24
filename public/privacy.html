@@ -206,7 +206,7 @@ footer.site-footer {
       <h3>Mode 1 — Essential (on by default)</h3>
       <p>Small, anonymous events about the health of the app:</p>
       <ul>
-      <li>That the app started — with the app version, platform bucket
+      <li><p>That the app started — with the app version, platform bucket
       (web / desktop / mobile), operating-system family only (macOS,
       Windows, Linux, iOS, or Android — never the version), your
       browser&#39;s language setting, three <strong>bucketed</strong> screen signals
@@ -223,22 +223,30 @@ footer.site-footer {
       staff single-sign-on header (set by Cloudflare&#39;s edge when a
       Zyra-Project staff member is signed in via our internal auth
       layer; the authenticated email itself is <strong>never</strong> stored —
-      only the boolean)</li>
-      <li>That a data layer was loaded — which layer, whether it came from the
-      network or a local cache, how long it took</li>
-      <li>That a data layer was unloaded — which layer, how long you viewed it</li>
-      <li>Where on the globe the camera settled — the map&#39;s center latitude,
+      only the boolean)</p>
+      </li>
+      <li><p>That a data layer was loaded — which layer, whether it came from the
+      network or a local cache, how long it took</p>
+      </li>
+      <li><p>That a data layer was unloaded — which layer, how long you viewed it</p>
+      </li>
+      <li><p>Where on the globe the camera settled — the map&#39;s center latitude,
       longitude, zoom, and bearing after you stop panning. Coordinates are
-      rounded to roughly 100 metres</li>
-      <li>When you click on the map — latitude and longitude of the click (also
-      rounded), and whether you clicked a marker, a region, or the surface</li>
-      <li>When you change layouts, open the tools menu, or change a setting —
-      the name of the setting only, never its content</li>
-      <li>When you start, skip, or complete a tour — which tour, which task,
-      how long each task held attention</li>
-      <li>When you enter or exit VR / AR mode — duration and exit reason,
-      approximate frame rate</li>
-      <li><strong>Desktop app only</strong> — when you open or close one of the
+      rounded to roughly 100 metres</p>
+      </li>
+      <li><p>When you click on the map — latitude and longitude of the click (also
+      rounded), and whether you clicked a marker, a region, or the surface</p>
+      </li>
+      <li><p>When you change layouts, open the tools menu, or change a setting —
+      the name of the setting only, never its content</p>
+      </li>
+      <li><p>When you start, skip, or complete a tour — which tour, which task,
+      how long each task held attention</p>
+      </li>
+      <li><p>When you enter or exit VR / AR mode — duration and exit reason,
+      approximate frame rate</p>
+      </li>
+      <li><p><strong>Desktop app only</strong> — when you open or close one of the
       multi-monitor projection windows used to drive a Science On a
       Sphere display, a dome, or a projector array: which projection
       geometry it used, which framebuffer size <em>class</em> it ran at (a
@@ -255,22 +263,70 @@ footer.site-footer {
       windows themselves send
       nothing at all: they are usually being filmed by a capture card
       in front of an audience, so nothing runs in them that does not
-      need to</li>
-      <li>When something goes wrong — a classification of the error (tile
+      need to. When one cannot play its video, it tells the app over the
+      private connection it gets its picture by, and the app records a
+      one-word category for that, never which dataset it was</p>
+      </li>
+      <li><p><strong>A globe that shows only the picture</strong> — a page we serve for a
+      globe in a virtual world such as Second Life, or for a kiosk
+      screen, with no app around it. Such a page records nothing unless
+      whoever controls the globe&#39;s address turned it on, by adding
+      <code>telemetry=1</code>. We ask anyone who does to say so where the globe is.
+      It also records nothing if your browser sends Global Privacy Control.
+      When it is on, and only in the <strong>first minute</strong> after your browser or
+      viewer loads the page, it records:</p>
+      <ul>
+      <li>which dataset the globe showed, and how long it took to appear;</li>
+      <li>if the dataset or its video ran into trouble, even trouble it
+      recovered from, a one-word reason and the same sanitized error
+      summary as below, without the stack detail that Research mode would
+      otherwise add.</li>
+      </ul>
+      <p>That is all. It records nothing that says the page started (no
+      operating system, language or screen) and nothing after its first
+      minute. It sends nothing after a little over a minute either, even if
+      sending failed, and it drops what is still waiting when you leave, so
+      nothing shows how long you stayed near the globe. It never records the
+      globe&#39;s address, where the globe is, who set it up, or who is looking
+      at it.</p>
+      <p>Like every event, these carry the time they arrived, the country your
+      request came from, and a session ID. On a globe the country is your
+      real-world country, not where your avatar is, because your viewer
+      fetches the page from your own computer, and the time is close to
+      when you arrived. If the people who run a globe&#39;s region also run the
+      TerraViz node it reports to, they hold these rows, and they could
+      match that country to an avatar their region recorded arriving at that
+      time. A globe whose address is changed before its <code>#</code> reloads the page
+      in every viewer, and each reload reports again as a new session, so we
+      ask owners of measured globes to change only what comes after the <code>#</code>.</p>
+      <p>The page has no Privacy panel and shows no notice. An Off setting you
+      chose in the app applies to such a page only in the same browser, and
+      only when the page comes from the same web address origin (the same
+      scheme, host and port), as a kiosk&#39;s might. A virtual world&#39;s viewer
+      keeps its own browser, so there your control is the viewer&#39;s media
+      settings, which stop the globe&#39;s page from loading at all, picture
+      included</p>
+      </li>
+      <li><p>When something goes wrong — a classification of the error (tile
       fetch, video stream, AI model, uncaught exception, browser-console
-      message, or native crash on desktop), a short sanitized summary of
+      message, native crash on desktop, or a globe&#39;s page), a short sanitized summary of
       the error class (with URLs, emails, numeric tokens and file paths
       stripped out before it leaves your device), and a count of
       repeats. <strong>No raw stack traces, no URLs, no full error messages,
-      no line numbers</strong> at this level</li>
-      <li>When you submit feedback — that you did, and which category (bug,
+      no line numbers</strong> at this level</p>
+      </li>
+      <li><p>When you submit feedback — that you did, and which category (bug,
       feature, other, thumbs-up, thumbs-down). The <em>content</em> of your
-      feedback is stored separately — see section 4</li>
+      feedback is stored separately — see section 4</p>
+      </li>
       </ul>
       <p>Every event is tagged with a <strong>session ID</strong> — a random identifier
       generated when you open the app and discarded when you close it. It is
-      never written to disk, never linked to anything about you, and
-      regenerates fresh on every launch.</p>
+      never written to disk, never linked by us to anything about you, and
+      regenerates fresh on every launch. It does tie together the events of
+      one session: on a globe, everything one visit sent in its first minute.
+      Like the rest of a row, it can be matched by someone who holds other
+      records of you, as the globe item above describes.</p>
       <h3>Mode 2 — Research (opt-in only)</h3>
       <p>If you turn Research mode on, we additionally record:</p>
       <ul>

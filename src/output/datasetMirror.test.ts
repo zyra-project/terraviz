@@ -171,6 +171,37 @@ describe('swapping', () => {
   })
 })
 
+describe('a load that fails', () => {
+  // From the desktop review: an operator clicking through the catalog
+  // leaves loads behind, and their failures say nothing about the output.
+  it('is reported only while it is still the dataset asked for', async () => {
+    const { loader, pending } = deferredLoader()
+    const failed: string[] = []
+    const mirror = createDatasetMirror({ loader, onLoadFailed: ds => failed.push(ds.id) })
+
+    const a = mirror.apply(dataset({ id: 'A', url: 'https://cdn.example/a.m3u8' }))
+    await until(() => pending.length === 1, 'A to start loading')
+    const b = mirror.apply(dataset({ id: 'B', url: 'https://cdn.example/b.m3u8' }))
+    await until(() => pending.length === 2, 'B to start loading')
+    pending[0].reject(new Error('A timed out'))
+    pending[1].reject(new Error('B timed out'))
+    await Promise.all([a, b])
+
+    expect(failed).toEqual(['B'])
+  })
+
+  it('is not reported for an image, which is not a stream', async () => {
+    const { loader, pending } = deferredLoader()
+    const failed: string[] = []
+    const mirror = createDatasetMirror({ loader, onLoadFailed: ds => failed.push(ds.id) })
+    const done = mirror.apply(dataset({ id: 'I', url: 'https://cdn.example/i.jpg', kind: 'image' }))
+    await until(() => pending.length === 1, 'the image to start loading')
+    pending[0].reject(new Error('404'))
+    await done
+    expect(failed).toEqual([])
+  })
+})
+
 describe('racing loads', () => {
   it('lets the newest apply win, whatever order they resolve in', async () => {
     const { loader, pending, disposed, source } = deferredLoader()
@@ -191,6 +222,44 @@ describe('racing loads', () => {
     expect(mirror.currentDataset()?.id).toBe('B')
     expect(mirror.current()?.element).toEqual({ tag: 'B' })
     // The loser is released rather than leaked — it holds a decoder.
+    expect(disposed).toEqual(['A'])
+  })
+
+  // Found in review. Asking for the dataset already on screen needs no
+  // load, and that early return used to skip the generation, so a load
+  // still in flight was not superseded. It then installed and released
+  // the picture the operator had gone back to.
+  it('lets a return to the dataset on screen supersede a load in flight', async () => {
+    const { loader, pending, disposed, source } = deferredLoader()
+    const mirror = createDatasetMirror({ loader })
+    const x = dataset({ id: 'X', url: 'https://cdn.example/x.m3u8' })
+    const xLoad = mirror.apply(x)
+    await until(() => pending.length === 1, 'X to start loading')
+    pending[0].resolve(source('X'))
+    await xLoad
+
+    const aLoad = mirror.apply(dataset({ id: 'A', url: 'https://cdn.example/a.m3u8' }))
+    await until(() => pending.length === 2, 'A to start loading')
+    await mirror.apply(x)
+    pending[1].resolve(source('A'))
+    await aLoad
+
+    expect(mirror.currentDataset()?.id).toBe('X')
+    expect(mirror.current()?.element).toEqual({ tag: 'X' })
+    expect(disposed).toEqual(['A'])
+  })
+
+  it('lets an apply of nothing supersede a load in flight, from idle', async () => {
+    const { loader, pending, disposed, source } = deferredLoader()
+    const mirror = createDatasetMirror({ loader })
+    const aLoad = mirror.apply(dataset({ id: 'A', url: 'https://cdn.example/a.m3u8' }))
+    await until(() => pending.length === 1, 'A to start loading')
+    await mirror.apply(null)
+    pending[0].resolve(source('A'))
+    await aLoad
+
+    expect(mirror.current()).toBeNull()
+    expect(mirror.currentDataset()).toBeNull()
     expect(disposed).toEqual(['A'])
   })
 })
@@ -324,12 +393,24 @@ describe('isHlsManifest', () => {
  * blank sphere with no error anywhere.
  */
 describe('createDefaultMediaLoader', () => {
-  function mockHls(): { played: () => number; paused: () => number } {
+  function mockHls(opts: { loadRejects?: boolean; heldFatal?: boolean } = {}): {
+    played: () => number
+    paused: () => number
+    constructedWith: unknown[]
+    /** Fire the stream's terminal error, as hls.js does once its retry
+     *  budget is spent after loading. */
+    die: () => void
+  } {
     let played = 0
     let paused = 0
+    const constructedWith: unknown[] = []
+    let fatal: ((e: { type: string; details: string }) => void) | null = null
     vi.resetModules()
     vi.doMock('../services/hlsService', () => ({
       HLSService: class {
+        constructor(opts?: unknown) {
+          constructedWith.push(opts)
+        }
         createVideo(): HTMLVideoElement {
           const el = document.createElement('video')
           // A passive engine: `canplay` only ever arrives in response
@@ -347,15 +428,26 @@ describe('createDefaultMediaLoader', () => {
           return el
         }
         loadStream(): Promise<void> {
-          return Promise.resolve()
+          return opts.loadRejects ? Promise.reject(new Error('networkError: manifestLoadError')) : Promise.resolve()
         }
         loadDirect(): Promise<void> {
           return Promise.resolve()
         }
+        onFatalError(handler: typeof fatal): void {
+          fatal = handler
+          // As `HLSService` does: an error held while nobody listened is
+          // handed over the moment someone does.
+          if (opts.heldFatal) handler?.({ type: 'networkError', details: 'fragLoadError' })
+        }
         destroy(): void {}
       },
     }))
-    return { played: () => played, paused: () => paused }
+    return {
+      played: () => played,
+      paused: () => paused,
+      constructedWith,
+      die: () => fatal?.({ type: 'networkError', details: 'fragLoadError' }),
+    }
   }
 
   afterEach(() => {
@@ -391,5 +483,142 @@ describe('createDefaultMediaLoader', () => {
     } as never)
 
     expect(counts.paused()).toBe(1)
+  })
+
+  // A web output streams one copy per visitor, so it caps the rendition
+  // at its framebuffer. A desktop output passes nothing and is unchanged.
+  it('hands the frame width to the stream, read at load time', async () => {
+    mockHls()
+    const calls: unknown[][] = []
+    const { HLSService } = await import('../services/hlsService')
+    HLSService.prototype.loadStream = function (...args: unknown[]) {
+      calls.push(args)
+      return Promise.resolve()
+    } as never
+    const { createDefaultMediaLoader } = await import('./datasetMirror')
+    let width: number | undefined = 2048
+    const loader = createDefaultMediaLoader({ maxVideoWidth: () => width })
+    const ds = { kind: 'video', url: 'https://cdn.example/a.m3u8', overlay: {} } as never
+
+    await loader.load(ds)
+    width = 4096
+    await loader.load(ds)
+    await createDefaultMediaLoader().load(ds)
+
+    expect(calls.map(args => args[3])).toEqual([2048, 4096, undefined])
+  })
+
+  // An output emits no telemetry (`outputTelemetry.ts`). The stream's
+  // own fatal-error report is the one path that would have, from every
+  // desktop output and every Second Life visitor's copy.
+  it('builds a stream that reports its errors to nobody', async () => {
+    const counts = mockHls()
+    // Any route to telemetry the reporter might take. A reporter that
+    // only *returns* nothing would pass without these (found in review).
+    const analytics = { reportError: vi.fn(), emit: vi.fn() }
+    vi.doMock('../analytics', () => analytics)
+    try {
+      const { createDefaultMediaLoader } = await import('./datasetMirror')
+      await createDefaultMediaLoader().load({ kind: 'video', url: 'https://cdn.example/a.m3u8', overlay: {} } as never)
+
+      const opts = counts.constructedWith[0] as { reportError?: (err: Error) => void } | undefined
+      expect(opts?.reportError).toBeTypeOf('function')
+      opts?.reportError?.(new Error('networkError: fragLoadError'))
+      // The anchor for "not called": a reporter that went through the
+      // lazy import `hlsService` uses would have registered its callback
+      // before this import, so it has run by the time this resolves.
+      const reached = await import('../analytics')
+      expect(reached.reportError).toBe(analytics.reportError)
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(analytics.reportError).not.toHaveBeenCalled()
+      expect(analytics.emit).not.toHaveBeenCalled()
+    } finally {
+      vi.doUnmock('../analytics')
+    }
+  })
+
+  // Where they go instead is the window's choice: the web output's own
+  // telemetry takes every fatal error, a desktop output's link takes a
+  // stream that died.
+  it("hands every fatal error to the window's reporter", async () => {
+    const counts = mockHls()
+    const { createDefaultMediaLoader } = await import('./datasetMirror')
+    const errors: Error[] = []
+    await createDefaultMediaLoader({ reportStreamError: err => errors.push(err) }).load({
+      kind: 'video',
+      url: 'https://cdn.example/a.m3u8',
+      overlay: {},
+    } as never)
+
+    const opts = counts.constructedWith[0] as { reportError?: (err: Error) => void }
+    opts.reportError?.(new Error('mediaError: bufferStalledError'))
+    expect(errors.map(e => e.message)).toEqual(['mediaError: bufferStalledError'])
+  })
+
+  it('leaves a stream that would not load to the mirror to report', async () => {
+    // Only the mirror knows whether that load was still wanted. Reported
+    // here as well, a superseded load's failure would count twice, or at
+    // all.
+    const counts = mockHls({ loadRejects: true })
+    const { createDefaultMediaLoader } = await import('./datasetMirror')
+    const failed: string[] = []
+    const ds = { id: 'd-1', kind: 'video', url: 'https://cdn.example/a.m3u8', overlay: {} } as never
+
+    await expect(createDefaultMediaLoader({ onStreamFailed: d => failed.push(d.id) }).load(ds)).rejects.toThrow()
+    // A fatal error the destroyed stream replays afterwards is not one.
+    counts.die()
+    expect(failed).toEqual([])
+  })
+
+  it('rejects a stream that died while it loaded, leaving it to the mirror', async () => {
+    // hls.js held the error until a handler was registered, which is
+    // before the mirror knows whether it still wants this stream. As a
+    // failed load, it is the mirror's to report or not.
+    mockHls({ heldFatal: true })
+    const { createDefaultMediaLoader } = await import('./datasetMirror')
+    const failed: string[] = []
+    const ds = { id: 'd-1', kind: 'video', url: 'https://cdn.example/a.m3u8', overlay: {} } as never
+
+    await expect(createDefaultMediaLoader({ onStreamFailed: d => failed.push(d.id) }).load(ds)).rejects.toThrow(
+      /died while it loaded/,
+    )
+    expect(failed).toEqual([])
+  })
+
+  it("keeps a throwing reporter out of the stream's recovery", async () => {
+    const counts = mockHls()
+    const { createDefaultMediaLoader } = await import('./datasetMirror')
+    const loader = createDefaultMediaLoader({
+      reportStreamError: () => {
+        throw new Error('reporter broke')
+      },
+      onStreamFailed: () => {
+        throw new Error('reporter broke')
+      },
+    })
+    await loader.load({ id: 'd-1', kind: 'video', url: 'https://cdn.example/a.m3u8', overlay: {} } as never)
+    const opts = counts.constructedWith[0] as { reportError: (err: Error) => void }
+    expect(() => opts.reportError(new Error('networkError: fragLoadError'))).not.toThrow()
+    expect(() => counts.die()).not.toThrow()
+  })
+
+  it('says once that a loaded stream died, and nothing once it was let go', async () => {
+    const counts = mockHls()
+    const { createDefaultMediaLoader } = await import('./datasetMirror')
+    const failed: string[] = []
+    const loader = createDefaultMediaLoader({ onStreamFailed: d => failed.push(d.id) })
+    const ds = { id: 'd-1', kind: 'video', url: 'https://cdn.example/a.m3u8', overlay: {} } as never
+
+    await loader.load(ds)
+    counts.die()
+    counts.die()
+    expect(failed).toEqual(['d-1'])
+
+    // A stream disposed because the dataset changed was replaced, which
+    // is not a failure.
+    const second = await loader.load({ ...(ds as object), id: 'd-2' } as never)
+    second.dispose()
+    counts.die()
+    expect(failed).toEqual(['d-1'])
   })
 })

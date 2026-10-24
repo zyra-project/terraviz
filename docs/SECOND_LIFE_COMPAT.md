@@ -991,10 +991,74 @@ Things this touches beyond the code:
   objects will depend on them. They belong in
   [`EMBED_URL_GRAMMAR.md`](EMBED_URL_GRAMMAR.md), versioned the same
   way, which brings in the TerraViz Federation Reviewer.
-- **The output still emits no telemetry.** The multi-monitor design
-  keeps outputs silent so nothing leaks into a captured signal, and a
-  web output page should keep that rule rather than phone home from
-  every visitor's viewer.
+- **The web output page can report its own Essential telemetry, when
+  the globe's owner turns it on.** This reverses what the plan first
+  said here, at the maintainer's request on 24 October 2026, because a
+  globe's use is worth counting the way the app's is: which datasets
+  are shown on globes, by how many visitors, and what fails there. The multi-monitor design keeps
+  *desktop* outputs silent, and they still are: their control window
+  reports for them, including a stream that died, which they now tell
+  it over IPC. A web output has no control window, so it reports for
+  itself (`src/output/webTelemetry.ts`):
+  - **Off unless the owner turns it on with `telemetry=1`.** This was
+    the maintainer's choice over on-by-default. The page loads for
+    everyone in range of a globe and shows no notice, and anyone can
+    point a globe at a public node. Every event carries a timestamp
+    and a country, and land owners commonly log avatar arrivals, so
+    anyone holding both could attach a country to a named avatar in a
+    quiet region. Opt-in keeps that to globes someone chose to measure,
+    whose owners can say so in-world. Embed mode's rule (the page that
+    places TerraViz owns consent) was the first model; it fits poorly
+    here, because a globe's visitor neither went to the page nor can see
+    a notice on it.
+  - **Two things, in the first minute only.** `layer_loaded` with
+    `trigger: 'output'` when a dataset reaches the picture, and `error`
+    under `category: 'output'` with a one-word `code`, both within
+    sixty seconds of the page loading, and nothing sent after about 66
+    s even on a retry. The privacy review found two problems with the
+    first version, and the maintainer chose this design over keeping a
+    slimmed session event:
+    - **No session event.** `session_start` put the visitor's locale, OS
+      and screen beside their arrival time, which is the match an
+      arrival log invites.
+    - **The first minute, in page time.** Every event carries its time
+      since the page started reporting, and a copy keeps running for as
+      long as its visitor stays. So later rows, a batch retried after an
+      outage, or the batch sent as the page closes would each bound how
+      long a visitor stayed. Copies reporting one change together link
+      visitors who were together. Counting from page load, rather than
+      from a later `#telemetry=1`, keeps a late switch-on from opening a
+      minute on every copy in range at once.
+
+    Visitors are still countable, as the distinct session ids on these
+    rows.
+  - **Steer a measured globe after the `#`.** A change before it
+    reloads every viewer's copy at once, and each reload starts a new
+    session and a new first minute. That brings back the "who was
+    together" link, and a chain of sessions that bounds a stay. The
+    maintainer chose to document this rather than keep a marker on the
+    visitor's device, since this page shows no notice. On a
+    query-steered globe, distinct session ids overcount visitors.
+  - **Never the address's text,** the globe's location, or anything
+    about who set it up or who is looking. `layer_id` is the id the
+    node returned, and a record without one is refused. An error's
+    message is fixed text per code, and its stack is dropped, so no
+    Research-tier `error_detail` follows.
+  - **What is left is country and arrival time.** The server stamps
+    country on every event, and a row from the first minute is close
+    to the arrival. With a venue's arrival log that can still attach a
+    real-world country to a named avatar. A venue that runs its own node
+    holds the raw rows and can do this for its own globes, which the
+    maintainer accepted on the record. Removing country would change the
+    ingest path, which is an escalation, so it is not done
+    (`PRIVACY_ANALYSIS.md` §9k).
+  - **The visitor's controls are thin.** A Second Life viewer keeps its
+    own browser, so an Off setting from the app never reaches it. The
+    viewer's media settings can stop the page loading, picture and all.
+    Global Privacy Control, where a viewer sends it, turns it off.
+  - **Volume is bounded.** At most 30 `layer_loaded` per copy (a
+    controller script sets that rate, not a visitor), and the error
+    reporter's per-signature caps on a dataset that keeps failing.
 - **Video CORS travels with the node.** A page on
   `terraviz.zyra-project.org` can play that node's streams; a partner
   node's output page needs its own video host to allow it.
@@ -1007,6 +1071,167 @@ it too. It is best landed first, so the page can be tested against it.
 It doesn't have to be, though, because a page that finds no pointer
 reads upstream. Item 7 waits for the `#` test, and the test should run
 before Phase 1 starts (§9).
+
+**Status, 24 October 2026: Phase 1's page half is built** (branch
+`claude/terraviz-second-life-compat-us9ba4`). The `#` test hasn't run
+in-world yet, so this was built on the page half working whichever way
+it comes out. The parameters are in
+[`EMBED_URL_GRAMMAR.md`](EMBED_URL_GRAMMAR.md) as an additive v1
+change. Four review agents read it twice, and their findings are
+fixed, or listed below with the reason they are not. This was AI
+review, and no person outside the session that wrote it has reviewed it
+yet.
+- **Items 1–3, 5 and 6 are in.** The parameters are `dataset`,
+  `fit=fill`, `width` and `rotation`. The video stream is capped at the
+  narrowest rendition at least as wide as the picture.
+  `src/output/webMode.ts` reads the address, `webDataset.ts` asks the
+  node for the dataset, and `webOutput.ts` puts them together.
+  - **`rotation` names the longitude at the centre of the picture.**
+    The first version passed it straight to the scene, whose offset
+    turns the picture the other way, so `rotation=90` showed 90°W.
+  - **An address with no `width` gets the narrowest size that covers
+    the page as displayed**, up to 4096. A Second Life face is at most
+    2048 wide, so a globe gets the 2160 stream rather than the
+    27.7 Mbps 4096 one without anyone writing `width=2048`.
+- **Item 4 changed in two places.** The clock is in the address as
+  planned (`t`, `at`, `rate`, `paused`), read again on every change to
+  the part after `#`, and paused copies seek to the exact time.
+  - **Dated, not by ratio.** Playing copies were to reuse
+    `syncByRatio`, but the first browser run showed that path holds
+    whatever offset its seek leaves: 2.7 s, and a different amount on
+    every visitor's copy. The clip's own seconds now go to the dated
+    law, `computeSiblingSyncCorrection`, which trims the offset away.
+  - **Round the loop.** That law measures error along a line, and
+    these clips loop. Just past a wrap it read a copy 0.7 s behind as
+    15 s ahead, and trimmed the wrong way. The law now sees the video
+    measured round the loop (`src/output/webClock.ts`).
+  - **Measured:** against a local file, a copy settles within a few
+    milliseconds in about ten seconds, across the loop point too.
+  - **Not measured on TerraViz's stream.** The build sandbox's network
+    gave about 4.5 Mbps, below the 9 Mbps rendition, so the video kept
+    stalling. Its proxy hands each transfer over whole, which the
+    player's bandwidth probe reads as a fast link, so the player never
+    stepped down to a rendition the link could carry. A visitor on a
+    slow connection would step down, but stall the same way below the
+    lowest one.
+- **Copies converge when something fails.** A dataset that will not
+  show leaves the live Earth up on every copy. Before, a copy that had
+  been showing A kept it while a fresh one showed nothing. A failure
+  that may pass is retried, every 5 minutes at the slowest, so copies
+  can differ for up to that long after the node recovers. An image tries
+  its other sizes, and a video its single file, before giving up, as the
+  main app does. A stream that fails *after* it started playing is not
+  noticed: it keeps its last frame, which is the multi-monitor plan's
+  rung 13 (a stream rebuild) for desktop and web alike.
+- **Item 8, the page's half, is partly in.** The output re-fetches its
+  clouds on the producer's schedule, timed from the image's own
+  `Last-Modified` so visitors' copies change together. It fetches the
+  4096 image for pictures up to 2048 wide (`src/output/cloudRefresh.ts`).
+  It does this on desktop too.
+  - **Reading TerraViz's copy and the cloud-address setting are left
+    to the cloud-copy change,** because there is no copy to read yet.
+    Until then every page reads upstream, which is the fallback the
+    plan already gives it.
+  - **The copy can make visitors' clocks irrelevant here.** Each copy
+    times its next check from its own computer's clock, so a clock
+    that is wrong costs alignment with other visitors (bounded, never
+    the refresh itself). The response's `Date` header would remove
+    that, but a page can read it only if the server exposes it.
+    TerraViz's copy can expose it (`Access-Control-Expose-Headers`).
+- **Telemetry, added in the same PR.** With `telemetry=1` the page
+  reports the two Essential events listed under "Things this touches"
+  above, in its first minute only. The control window now reports a
+  desktop output's dead stream as `output_failure` with `kind:
+  'hls-stalled'`. The privacy policy, its analysis (§9k), the analytics
+  catalog, the query reference and a dashboard row (Globes) cover them.
+  Nothing has been sent from a real globe yet.
+- **An in-world script to smoke-test it**,
+  [`terraviz-globe.lsl`](../scripts/second-life-probe/README.md#the-globe),
+  writes these addresses from chat commands: setup before the `#`, the
+  dataset, clock, width, rotation and debug readout after it. It is
+  checked with `lslint`, and `globe.test.ts` holds the keys and values
+  it writes, and which half of the address each goes in, to what
+  `webMode.ts` reads. With telemetry on it refuses to steer before the
+  `#`, which the privacy policy asks of a measured globe. It hasn't run
+  in-world yet.
+- **"How close is close"** (above) now has numbers to answer it with:
+  milliseconds once settled, and seconds after a seek, for as long as
+  the visitor's connection can play the stream at all. One exception:
+  on a short loop, a seek costing a third of the clip or more (a slow
+  first seek, with its network fetch) ends seeking for that copy, since
+  round the loop no error is ever bigger than the floor that seek sets.
+  The copy then converges by speeding up alone, which takes up to about
+  twice the clip's length, around half a minute for a 16 s loop.
+  Capping the floor was tried and does not help: a cap just under half
+  the clip lets almost nothing through, and a lower one brings back the
+  seek loop on the slow links that make seeks slow.
+- **"What does a visitor see when their viewer can't keep up?"**
+  (above) is still Eric's to answer, and the Video Streaming Engineer's
+  review gave a recommendation for it. Today a copy of a long clip on a
+  link too slow for its rendition seeks every few seconds, landing
+  behind each time; a short loop stops seeking and speeds up instead
+  (above). Either way the rate trim asks for up to 25% more bandwidth
+  exactly when there is too little. The recommendation is to give up
+  resolution first, then smooth motion, and never show the wrong
+  moment:
+  - **Short loops: buffer, then join.** Hold the frame at the clock's
+    target while the clip downloads in order, then join with one seek
+    inside what is buffered. From then on the link no longer matters.
+  - **Long clips:** let hls.js adapt, trim upward only with a segment
+    buffered ahead, and aim each seek at where the target will be when
+    it lands, on a segment boundary.
+  - **Below the lowest rendition: step.** Pause, and every few seconds
+    seek exactly to the clock's target, so visitors see the right moment
+    at a low frame rate.
+  - **A lower rendition**, around 1024×512 at 1.5–2 Mbps, would suit
+    1024-wide faces and slow links. Data-encoded datasets have one
+    rendition by design, so they would always need buffering or stepping.
+- **Found in review and not yet done:**
+  - **Each copy loops on its own idea of the clip's length.** With
+    hls.js, `duration` is the playlist's total until the stream ends,
+    then the furthest buffered end across tracks, so it can differ
+    between copies, and on one copy before and after its last segment.
+    Copies then wrap on different periods, and the gap grows with
+    every loop since the `at` anchor, not since the page loaded: in
+    simulation, a 1 ms difference on a 16 s loop with a day-old anchor
+    put copies 5.4 s apart. A copy's own target also jumps when its
+    `duration` updates. The difference is unmeasured: logging
+    `duration` before and after the last segment on the production
+    stream would settle it. The fix is one period every copy agrees on
+    whichever rendition it plays, such as the playlist's total
+    duration, used both where the target wraps (`clockTargetS`) and
+    where the error is measured round the loop (`loopView`).
+  - **A copy that fell back to a video's single file stays on it.**
+    Its stream is not tried again once the file has loaded, and the clock
+    wraps on each element's own length. If the file and the stream differ
+    in length, that copy loops on a different period from the others,
+    the same drift as above, and the same fix (one agreed period) covers
+    it.
+  - **Startup costs a segment it throws away.** hls.js downloads a
+    probe segment to measure bandwidth, about 3.4 MB at 1440, before
+    loading from the start and then seeking to the clock.
+    - Starting at the clock's target saves bytes only on a long clip.
+      On a short loop every segment is fetched anyway, so what it
+      saves is time to the first correct frame.
+    - Skipping the probe is not free in general, because `hlsService`
+      keeps it so a short loop buffers at one resolution. It is free
+      when the cap leaves one rendition, which the new default makes
+      common: a 1024 face caps to the bottom rendition (1440×720), and
+      the probe then downloads the very segment fetched again next.
+    - Data-encoded streams have no probe, since hls.js skips it for a
+      single rendition.
+  - **Credit.** A CC-BY dataset on a prim reaches every visitor with no
+    credit, because the page shows nothing but the picture. The Phase 2
+    controller's hover text could carry it. That's a decision for the
+    maintainer.
+  - **The manifest has no published schema**, and the output page is
+    now a third reader of it. A `manifest.schema.json` beside the other
+    v1 schemas would pin what Second Life globes rely on.
+  - **No way to tell whether a node supports web mode.** An older node
+    ignores the parameters and shows the live Earth.
+  - **No test pins the overlay** against the control window's
+    `overlayForMirror(wireToDataset(…))`. A renamed wire field would not
+    fail type-check in `webDataset.ts`, which reads fields by name.
 
 ---
 
@@ -1059,6 +1284,8 @@ costs every visitor a reload, and so whether Phase 2 needs a server.
 **Phase 1 — the output page's web mode** (§7, items 1–6 and the page's
 half of 8). One code PR. It turns the idle-Earth globe into a TerraViz
 dataset globe that every visitor sees in step, under current clouds.
+*Built, apart from reading the cloud copy; see the status note at the
+end of §7.*
 
 **Phase 2 — an in-world globe controller.** An LSL object that applies
 the §5 recipe, sets the media at 2048×1024 and spins the globe. It also
@@ -1068,6 +1295,14 @@ after the last visitor leaves. Each control rewrites the media address,
 and the media itself stays non-interactive so that the controls are the
 only way in.
 It is the in-world half of Phase 1.
+*A smoke-test script exists, not the controller.*
+[`terraviz-globe.lsl`](../scripts/second-life-probe/README.md#the-globe)
+does the recipe, the media, the spin, pause, jump, rate, rotation and
+dataset switching. It is driven by its owner in chat, with
+non-interactive media. It has no presenter list, no controls visitors
+can touch, and no automatic return to the live Earth after the last
+visitor leaves (`/8 earth` is the owner's, by hand), which all wait on
+the open questions in §7 item 4.
 
 **Phase 3 — the resolved-hero endpoint** (Option A), when someone wants
 a "Right now" kiosk.

@@ -860,6 +860,67 @@ call sites use a fixed enum in practice but the type does
 not enforce it. A future call site that passes user input
 into `key` would emit free text. Same shape of risk as 9g.
 
+### 9k. A globe's page, and the venue that logs arrivals
+
+The output page in web mode is a globe's texture, such as a Second
+Life prim (`src/output/webTelemetry.ts`). Every visitor's viewer
+loads its own copy when the avatar comes into range, with no notice
+and no Privacy panel. Adversary 1c's model runs the other way here.
+The adversary is a venue that logs avatar arrivals by name, which
+Second Life land owners commonly do, and they already know *who* and
+*when*. What they would learn from our data is the visitor's
+real-world attributes: country, locale, OS. Second Life hides those,
+and the viewer fetches the page from the visitor's own computer. A
+crowd of "web sessions that minute" is the wrong yardstick, too: once
+a row is known to be a globe's, it hides among the few avatars in
+range, not among everyone.
+
+The design minimises rather than relies on bucketing (the maintainer's
+decisions, 24 October 2026, after the privacy review):
+
+- **Off unless the globe's owner turns it on** (`telemetry=1`), and
+  never with Global Privacy Control set.
+- **No `session_start` or `session_end`.** No OS, locale, screen or
+  VR class leaves a globe, and no session length.
+- **Only the first minute after the page loads**, in page time, so a
+  late `#telemetry=1` reports nothing rather than opening a minute on
+  every copy in range at once. `client_offset_ms` is on every row, so
+  later events would bound how long a visitor stayed.
+- **Nothing sent after the window plus one batch interval**
+  (`WEB_OUTPUT_SEND_DEADLINE_MS`, about 66 s). After it the transport
+  reports `permanent`, so a batch retried through an outage is dropped
+  rather than landing minutes later as proof the page was still open.
+  The page never uses the leave-time beacon, which would date a short
+  stay's departure.
+
+**What remains, and is accepted** (the maintainer's decisions):
+
+- **Country and arrival time.** `layer_loaded` and `error` rows carry
+  the server-stamped country and an arrival time to within about 66 s.
+  Together with a venue's arrival log, that can attach a real-world
+  **country** to a named avatar in a quiet region. Removing country for
+  this page would change the ingest path (a new route, or not stamping a
+  field), which is an escalation under `ANALYTICS_CONTRIBUTING.md`, so
+  it is not done.
+- **The realistic adversary is the venue running its own node.** It
+  holds the raw Analytics Engine rows and its own arrival log, so it can
+  run that match for its own globes. The record accepts this; restricting
+  raw-row access for globe rows would be infrastructure work.
+- **Who was together is narrowed, not removed.** Visitors who arrive
+  within a minute of each other and see the same dataset change can
+  still be linked by its timing.
+- **Reloads.** A change before the `#` reloads every viewer's copy at
+  once. Each reload is a new session with a new first minute, which
+  reports together on every copy, and a chain of sessions from one
+  country bounds a stay. Owners of measured globes are asked to steer
+  after the `#` (`EMBED_URL_GRAMMAR.md`), and the privacy policy says
+  what a query-steered globe does. Counting visitors as distinct session
+  ids overcounts on such a globe.
+
+The opt-in narrows the exposure to globes someone chose to measure.
+That someone may be the venue itself, so the request that owners
+disclose in-world is the visitor's only notice.
+
 ---
 
 ## 10. Comparison to formal frameworks

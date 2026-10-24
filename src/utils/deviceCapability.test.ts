@@ -3,6 +3,7 @@
 
 import { describe, it, expect } from 'vitest'
 import {
+  cloudTextureUrlForWidth,
   maxVideoPanelsForViewport,
   MAX_VIDEO_PANELS_PHONE,
   UNCAPPED_VIDEO_PANELS,
@@ -51,5 +52,20 @@ describe('maxVideoPanelsForViewport', () => {
     // The threshold has to sit in that gap rather than near either end.
     expect(maxVideoPanelsForViewport(440, 956)).toBe(MAX_VIDEO_PANELS_PHONE)
     expect(maxVideoPanelsForViewport(744, 1133)).toBe(UNCAPPED_VIDEO_PANELS)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// cloudTextureUrlForWidth — the cloud image a frame can use
+// ---------------------------------------------------------------------------
+describe('cloudTextureUrlForWidth', () => {
+  it('takes the 4096 image up to a 2048-wide frame, where it already holds more than can be shown', () => {
+    expect(cloudTextureUrlForWidth(1024)).toMatch(/\/clouds_4096\.jpg$/)
+    expect(cloudTextureUrlForWidth(2048)).toMatch(/\/clouds_4096\.jpg$/)
+  })
+
+  it('takes the 8192 image for anything wider', () => {
+    expect(cloudTextureUrlForWidth(4096)).toMatch(/\/clouds_8192\.jpg$/)
+    expect(cloudTextureUrlForWidth(8192)).toMatch(/\/clouds_8192\.jpg$/)
   })
 })

@@ -108,10 +108,52 @@ Small, anonymous events about the health of the app:
   windows themselves send
   nothing at all: they are usually being filmed by a capture card
   in front of an audience, so nothing runs in them that does not
-  need to
+  need to. When one cannot play its video, it tells the app over the
+  private connection it gets its picture by, and the app records a
+  one-word category for that, never which dataset it was
+- **A globe that shows only the picture** — a page we serve for a
+  globe in a virtual world such as Second Life, or for a kiosk
+  screen, with no app around it. Such a page records nothing unless
+  whoever controls the globe's address turned it on, by adding
+  `telemetry=1`. We ask anyone who does to say so where the globe is.
+  It also records nothing if your browser sends Global Privacy Control.
+  When it is on, and only in the **first minute** after your browser or
+  viewer loads the page, it records:
+  - which dataset the globe showed, and how long it took to appear;
+  - if the dataset or its video ran into trouble, even trouble it
+    recovered from, a one-word reason and the same sanitized error
+    summary as below, without the stack detail that Research mode would
+    otherwise add.
+
+  That is all. It records nothing that says the page started (no
+  operating system, language or screen) and nothing after its first
+  minute. It sends nothing after a little over a minute either, even if
+  sending failed, and it drops what is still waiting when you leave, so
+  nothing shows how long you stayed near the globe. It never records the
+  globe's address, where the globe is, who set it up, or who is looking
+  at it.
+
+  Like every event, these carry the time they arrived, the country your
+  request came from, and a session ID. On a globe the country is your
+  real-world country, not where your avatar is, because your viewer
+  fetches the page from your own computer, and the time is close to
+  when you arrived. If the people who run a globe's region also run the
+  TerraViz node it reports to, they hold these rows, and they could
+  match that country to an avatar their region recorded arriving at that
+  time. A globe whose address is changed before its `#` reloads the page
+  in every viewer, and each reload reports again as a new session, so we
+  ask owners of measured globes to change only what comes after the `#`.
+
+  The page has no Privacy panel and shows no notice. An Off setting you
+  chose in the app applies to such a page only in the same browser, and
+  only when the page comes from the same web address origin (the same
+  scheme, host and port), as a kiosk's might. A virtual world's viewer
+  keeps its own browser, so there your control is the viewer's media
+  settings, which stop the globe's page from loading at all, picture
+  included
 - When something goes wrong — a classification of the error (tile
   fetch, video stream, AI model, uncaught exception, browser-console
-  message, or native crash on desktop), a short sanitized summary of
+  message, native crash on desktop, or a globe's page), a short sanitized summary of
   the error class (with URLs, emails, numeric tokens and file paths
   stripped out before it leaves your device), and a count of
   repeats. **No raw stack traces, no URLs, no full error messages,
@@ -122,8 +164,11 @@ Small, anonymous events about the health of the app:
 
 Every event is tagged with a **session ID** — a random identifier
 generated when you open the app and discarded when you close it. It is
-never written to disk, never linked to anything about you, and
-regenerates fresh on every launch.
+never written to disk, never linked by us to anything about you, and
+regenerates fresh on every launch. It does tie together the events of
+one session: on a globe, everything one visit sent in its first minute.
+Like the rest of a row, it can be matched by someone who holds other
+records of you, as the globe item above describes.
 
 ### Mode 2 — Research (opt-in only)
 

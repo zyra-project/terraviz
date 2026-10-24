@@ -2,8 +2,20 @@
 // Copyright 2026 The Zyra Project
 
 // TerraViz in-world probe - the network half of the kit.
-// Results and what they mean: docs/SECOND_LIFE_COMPAT.md section 4.1.
 //
+// ABOUT TERRAVIZ
+// TerraViz is a free, open-source globe for environmental data, most of
+// it from NOAA's Science On a Sphere collection. It runs in a web browser
+// and as a desktop app, and any museum, lab or school can run its own
+// copy of the service, called a node.
+//   The app:     https://terraviz.zyra-project.org
+//   The source:  https://github.com/zyra-project/terraviz
+//   What this script found (section 4.1), and the plan it led to:
+//     https://github.com/zyra-project/terraviz/blob/main/docs/SECOND_LIFE_COMPAT.md
+//   How to run it:
+//     https://github.com/zyra-project/terraviz/blob/main/scripts/second-life-probe/README.md
+//
+// WHAT THIS IS FOR
 // Asks a TerraViz node for two replies from inside Second Life and says
 // what came back: whether the region's servers can reach the node at
 // all (it sits behind Cloudflare), whether LSL reads its JSON natively,

@@ -36,6 +36,14 @@ body.output-body {
   background: #000;
 }
 
+/* `?fit=fill` (web mode, `src/output/webMode.ts`). A page used as a
+   texture — Second Life shared media on a sphere — is often not 2:1,
+   and letterboxing it there paints black bands across the poles. The
+   frame is still drawn at its own 2:1 size; only the display stretches. */
+body.output-fit-fill #output-canvas {
+  object-fit: fill;
+}
+
 /*
  * The debug HUD (`docs/MULTI_MONITOR_PLAN.md` rung 11).
  *

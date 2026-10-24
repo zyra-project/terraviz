@@ -34,6 +34,7 @@ function record(over: Partial<OutputRecord> = {}): OutputRecord {
     ready: true,
     lastHealthCheckAtMs: null,
     gpuLost: false,
+    stallReportedFor: null,
     health: 'live',
     lastEvent: null,
     departing: false,

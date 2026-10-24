@@ -656,3 +656,32 @@ describe('data-encoded video (renderEncoding / colorScale)', () => {
     expect(wire.colorScale).toBeUndefined()
   })
 })
+
+describe('serializeDataset — what the Second Life globe script reads', () => {
+  // scripts/second-life-probe/terraviz-globe.lsl reads only the first
+  // 2048 bytes of GET /api/v1/datasets/:id, since a whole record can cost
+  // an LSL script twice its size in memory. It cuts that at `,"format":"`,
+  // parses what is before as an object of id, slug and title, and reads
+  // the format after it to refuse anything but an image or a video. So it
+  // depends on this field order, which is not part of the published
+  // contract (docs/protocol/). This pins the one reader that does: a
+  // reorder that fails here needs that script changed with it.
+  it('puts id, slug, title and format first, inside 2048 bytes', () => {
+    // The longest title and slug the validators allow, at three bytes a
+    // character, the most a JavaScript string's code unit can cost.
+    const title = '€'.repeat(200)
+    const slug = `s${'a'.repeat(63)}`
+    const wire = serializeDataset(
+      fakeRow({ id: '01KQG611HF8YXJNRBEHT0757KT', slug, title, format: 'tour/json' }),
+      emptyDecoration,
+      fakeIdentity,
+      passthroughResolver,
+    )
+    // What the route sends: functions/api/v1/datasets/[id].ts.
+    const head = new TextDecoder().decode(new TextEncoder().encode(JSON.stringify(wire)).slice(0, 2048))
+    const cut = head.indexOf(',"format":"')
+    expect(cut).toBeGreaterThan(0)
+    expect(JSON.parse(`${head.slice(0, cut)}}`)).toEqual({ id: '01KQG611HF8YXJNRBEHT0757KT', slug, title })
+    expect(head.slice(cut + ',"format":"'.length)).toMatch(/^tour\/json"/)
+  })
+})

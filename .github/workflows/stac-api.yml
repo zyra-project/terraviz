@@ -41,7 +41,9 @@ jobs:
         run: npm run test -- functions/api/v1/stac/external.test.ts
 
   clients:
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: Playwright 1.60 cannot install Chromium
+    # on the 26.04 image that label now points at. See visual-report.yml.
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4

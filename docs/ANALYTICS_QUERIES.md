@@ -162,7 +162,7 @@ the four server-stamped blobs. Order is alphabetical by field name
 | `blob5` | `layer_id` |
 | `blob6` | `layer_source` (`network` / `cache` / `hls` / `image`) |
 | `blob7` | `slot_index` |
-| `blob8` | `trigger` (`browse` / `orbit` / `tour` / `url` / `default`) |
+| `blob8` | `trigger` (`browse` / `orbit` / `tour` / `url` / `default` / `output`, the last a dataset an output page's address named, on a globe in web mode, reported only in that page's first minute; a globe sends no `session_start`, so count its visitors as `count(DISTINCT index1)` over these rows) |
 | `double1` | `client_offset_ms` |
 | `double2` | `load_ms` |
 
@@ -413,6 +413,20 @@ PCVR session and buckets as `pcvr`).
 `error_detail` adds a `stack` blob at `blob9` (sanitized stack
 frame list).
 
+`category = 'output'` is the output page in web mode, kept apart from
+`hls` so a globe's visitors do not count against the app's stream
+health. Its `code` is bounded: `not_found` / `not_playable` /
+`bad_response` / `http` / `network` / `media` for a dataset that would
+not show, and `stream` for every fatal stream error hls.js reports,
+recovered or not (its `message_class` is hls.js's own error names), so
+a stream that will not load appears under both: its `stream` rows,
+then one `media` row. Only globes whose address says `telemetry=1`
+report at all, and only in the first minute after the page loads,
+with nothing sent after about 66 s. Their errors carry no stack, so no `error_detail` follows.
+Desktop output windows never emit an
+`error`: a stream that dies there arrives as `output_failure` with
+`kind = 'hls-stalled'`, below.
+
 ### `output_added` / `output_removed` / `output_failure` (Tier A)
 
 Multi-monitor output windows
@@ -451,10 +465,14 @@ output that never came back, so it has no paired `output_added`.
 `crash`) — the first answers "how many outputs stopped and why", the
 second "how healthy is this installation".
 
-> **Landed so far:** three `kind`s have detectors — `crash`,
+> **Landed so far:** four `kind`s have detectors — `crash`,
 > `ipc-silence` (case 6's boot scan; `recovered` says whether the
-> orphan answered the poke) and `gpu-loss` (case 5). `hls-stalled` and
-> `monitor-unplug` arrive with cases 2 and 4. Of the `reason`s, only
+> orphan answered the poke), `gpu-loss` (case 5) and `hls-stalled`: an
+> output's stream would not load while still the dataset asked for, or
+> died after loading once hls.js had spent its retries. At most one row
+> per output per dataset, with `retries: 0` (the app's attempts; hls.js's
+> own inside the output are not counted) and `recovered: false`, since
+> nothing rebuilds the stream yet (case 2's rebuild). `monitor-unplug` arrives with case 4. Of the `reason`s, only
 > `gpu-loss-timeout` is still without a detector — `monitor-gone` got
 > one with case 6. The enums were complete from the start, so a
 > dashboard pinned to them has not had to change as these landed.

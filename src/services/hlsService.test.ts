@@ -2,7 +2,8 @@
 // Copyright 2026 The Zyra Project
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { HLSService, measuredBandwidthBps, selectRendition } from './hlsService'
+import { HLSService, capLevelForWidth, measuredBandwidthBps, selectRendition } from './hlsService'
+import { until } from '../test-utils'
 
 // ---------------------------------------------------------------------------
 // Mock hls.js — we test HLSService logic, not the HLS library itself
@@ -71,6 +72,11 @@ vi.mock('hls.js', () => {
 
   return { default: MockHls }
 })
+
+// The Tier A `error` report a fatal stream error makes. Mocked so a test
+// can tell the default reporter from an injected one.
+const analyticsMock = vi.hoisted(() => ({ reportError: vi.fn() }))
+vi.mock('../analytics', () => analyticsMock)
 
 // ---------------------------------------------------------------------------
 // HLSService — property defaults and lifecycle
@@ -283,6 +289,43 @@ describe('HLSService fatal errors after load', () => {
     // Recovery is in progress — not something to report yet.
     expect(hlsMock.instance?.startLoad).toHaveBeenCalledTimes(3)
     expect(seen).toEqual([])
+  })
+
+  it('reports a terminal error as telemetry by default', async () => {
+    // Its own details string: earlier tests' reports resolve late, and
+    // must not be mistaken for this one.
+    const OWN = { fatal: true, type: 'networkError', details: 'defaultReporterCase' }
+    analyticsMock.reportError.mockClear()
+    const svc = new HLSService()
+    await loadAndSettle(svc)
+    hlsMock.fire('hlsError', OWN)
+    // Asynchronous: the analytics package is imported when a stream
+    // fails, not with this module.
+    const mine = () =>
+      analyticsMock.reportError.mock.calls.some(([, e]) => (e as Error).message === 'networkError: defaultReporterCase')
+    await until(mine, 'the error report')
+    expect(analyticsMock.reportError).toHaveBeenCalledWith('hls', new Error('networkError: defaultReporterCase'))
+  })
+
+  it('reports to the injected reporter instead, when given one', async () => {
+    // The multi-monitor output's case: it emits no telemetry.
+    analyticsMock.reportError.mockClear()
+    const reported: Error[] = []
+    const svc = new HLSService({ reportError: err => reported.push(err) })
+    await loadAndSettle(svc)
+    hlsMock.fire('hlsError', { fatal: true, type: 'networkError', details: 'injectedCase' })
+    expect(reported.map(e => e.message)).toEqual(['networkError: injectedCase'])
+    // The default report is asynchronous, so "not called" needs an
+    // anchor: a service on the default reporter fails too, and once its
+    // report has arrived the injected one's would have as well. Both use
+    // details strings of their own, since earlier tests' reports can
+    // still be landing.
+    const anchor = new HLSService()
+    await loadAndSettle(anchor)
+    hlsMock.fire('hlsError', { fatal: true, type: 'mediaError', details: 'anchorCase' })
+    const messages = () => analyticsMock.reportError.mock.calls.map(([, e]) => (e as Error).message)
+    await until(() => messages().includes('mediaError: anchorCase'), 'the default report')
+    expect(messages()).not.toContain('networkError: injectedCase')
   })
 
   it('reports a terminal media error too', async () => {
@@ -953,5 +996,66 @@ describe('HLSService.loadDirect teardown', () => {
 
     expect(logged.flat().some((x) => String(x).includes('Direct MP4 loaded'))).toBe(false)
     spy.mockRestore()
+  })
+})
+
+describe('capLevelForWidth', () => {
+  // TerraViz's own ladder for a data video (docs/SECOND_LIFE_COMPAT.md §11).
+  const WIDTHS = [1440, 2160, 4096]
+
+  it('stops at the narrowest level still as wide as the frame', () => {
+    expect(capLevelForWidth(WIDTHS, 2048)).toBe(1)
+    expect(capLevelForWidth(WIDTHS, 2160)).toBe(1)
+    expect(capLevelForWidth(WIDTHS, 1024)).toBe(0)
+    expect(capLevelForWidth(WIDTHS, 4096)).toBe(2)
+  })
+
+  it('does not cap when every level is narrower than the frame', () => {
+    expect(capLevelForWidth(WIDTHS, 8192)).toBe(-1)
+  })
+
+  // No test for unordered levels: hls.js sorts them by height before
+  // this runs, and an index cap on an unordered ladder would still let
+  // wider levels below it through. The one that stood here passed on a
+  // property the cap does not have (found in review).
+
+  it('ignores levels that state no width', () => {
+    expect(capLevelForWidth([0, NaN], 2048)).toBe(-1)
+  })
+})
+
+describe('HLSService.loadStream — maxWidth', () => {
+  const LADDER = [
+    { width: 1440, height: 720, bitrate: 4_000_000 },
+    { width: 2160, height: 1080, bitrate: 8_000_000 },
+    { width: 4096, height: 2048, bitrate: 25_000_000 },
+  ]
+
+  async function load(maxWidth: number | undefined, startingCap = -1): Promise<number> {
+    hlsMock.reset()
+    const { default: Hls } = await import('hls.js')
+    vi.mocked(Hls.isSupported).mockReturnValue(true)
+    const p = new HLSService().loadStream('https://example.com/s.m3u8', document.createElement('video'), false, maxWidth)
+    hlsMock.instance!.levels = LADDER
+    hlsMock.instance!.autoLevelCapping = startingCap
+    hlsMock.fire('hlsManifestParsed', { levels: LADDER })
+    await p
+    return hlsMock.instance!.autoLevelCapping
+  }
+
+  it('caps a 2048-wide frame at the 2160x1080 rung', async () => {
+    expect(await load(2048)).toBe(1)
+  })
+
+  it('leaves the cap alone without a frame width', async () => {
+    expect(await load(undefined)).toBe(-1)
+  })
+
+  it('leaves the cap alone when every rung is narrower than the frame', async () => {
+    expect(await load(8192)).toBe(-1)
+  })
+
+  it('keeps a tighter cap that was already set', async () => {
+    expect(await load(4096, 0)).toBe(0)
   })
 })

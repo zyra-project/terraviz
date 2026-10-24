@@ -339,6 +339,14 @@ export interface OutputRecord {
    */
   gpuLost: boolean
   /**
+   * The dataset this output last reported a dead stream for, or `null`.
+   * One `hls-stalled` row per output per dataset, cleared when the
+   * control window publishes a dataset. The output already sends one
+   * per stream; this is the bound for an output that does not, a buggy
+   * future rebuild loop or a compromised window. Not persisted.
+   */
+  stallReportedFor: string | null
+  /**
    * The badge, derived from `ready`, `lastHealthCheckAtMs` and
    * `gpuLost`, and kept current by the heartbeat.
    *
@@ -607,6 +615,7 @@ export class MultiOutputManager {
       lastEvent: null,
       lastHealthCheckAtMs: null,
       gpuLost: false,
+      stallReportedFor: null,
       health: 'starting',
       departing: false,
       announcedClosing: false,
@@ -1017,6 +1026,7 @@ export class MultiOutputManager {
         lastEvent: null,
         lastHealthCheckAtMs: null,
         gpuLost: false,
+        stallReportedFor: null,
         health: 'starting',
         departing: false,
         announcedClosing: false,
@@ -1234,6 +1244,9 @@ export class MultiOutputManager {
    * other keys still arrive from nowhere.
    */
   async applyState(patch: Partial<MirroredGlobeState>): Promise<void> {
+    // A new dataset is a new stream on every output, owed its own report
+    // if it dies.
+    if ('dataset' in patch) for (const record of this.records.values()) record.stallReportedFor = null
     const message = this.aggregator.apply(patch)
     if (!message) return
     await this.broadcast(message)
@@ -1638,6 +1651,25 @@ export class MultiOutputManager {
         reportOutputFailure({ kind: 'gpu-loss', retries: 1, recovered: true })
       }
       record.gpuLost = false
+    }
+    if (event.type === 'output_dataset_stalled') {
+      // The output's stream died: it would not load while still wanted,
+      // or hls.js spent its retry budget after it had (`datasetMirror`).
+      // The output keeps its last frame and nothing rebuilds the stream
+      // yet, which is rung 13's single HLS rebuild, so `0` and `false`
+      // are literal. `retries` counts what this side attempted, which is
+      // nothing; hls.js's own recoveries happen inside the output and are
+      // not counted.
+      //
+      // Not from a window on its way out, whose stream ending is the
+      // close, and at most once per output per dataset (`stallReportedFor`).
+      const datasetId = typeof event.datasetId === 'string' ? event.datasetId.slice(0, 64) : null
+      const key = datasetId ?? ''
+      if (!record.departing && !record.announcedClosing && record.stallReportedFor !== key) {
+        record.stallReportedFor = key
+        logger.error(`[multiOutput] ${event.label} could not play ${datasetId ?? 'its dataset'}`)
+        reportOutputFailure({ kind: 'hls-stalled', retries: 0, recovered: false })
+      }
     }
     // A ping and an announcement are served by **one** path, not two.
     // Both prove the same thing — the window is up and listening — and
