@@ -14,8 +14,8 @@
  *      that wants to report a caught failure
  *
  * 1 and 2 are attached by `install()`, which `src/main.ts` calls on
- * the SPA path once the app has initialized. Nothing else installs
- * them: the publisher portal and the blog return before that point,
+ * the SPA path as soon as boot has set the transport. Nothing else
+ * installs them: the publisher portal and the blog never boot the app,
  * and an output window boots from its own entry and emits nothing
  * (MULTI_MONITOR_PLAN.md §3.6). The global handlers see every error
  * on the page, not only ours, so they drop what a browser extension
@@ -57,7 +57,7 @@ import type {
   ErrorEvent as TelemetryErrorEvent,
   ErrorDetailEvent,
 } from '../types'
-import { emit, isSilencedPath } from './emitter'
+import { emit, isSilencedPath, tierGate } from './emitter'
 
 // --- Caps (docs/ANALYTICS_IMPLEMENTATION_PLAN.md) ---
 
@@ -66,6 +66,8 @@ export const TIER_A_CAP_TOTAL = 30
 export const TIER_B_CAP_PER_SIG = 1
 export const TIER_B_CAP_TOTAL = 10
 export const MESSAGE_CLASS_MAX = 80
+/** How much of a message's first line the sanitizer reads. */
+export const SANITIZE_INPUT_MAX = 1024
 export const MAX_FRAMES = 10
 export const STACK_SIGNATURE_HEX_LEN = 12
 /** Distinct signatures the occurrence counter remembers. It is bumped
@@ -151,6 +153,11 @@ export function install(): void {
   if (typeof window !== 'undefined') {
     const onError: EventListener = (event) => {
       const ee = event as ErrorEvent
+      // Chrome raises this whenever a ResizeObserver callback resizes
+      // what it observes, which five UI modules can. It is benign, has
+      // no stack to attribute, and would otherwise be the commonest
+      // `uncaught` report and spend the session's cap on nothing.
+      if (typeof ee.message === 'string' && /^ResizeObserver loop\b/.test(ee.message)) return
       if (isForeignError(stackOf(ee.error), ee.filename)) return
       const err = ee.error ?? ee.message
       reportError('uncaught', err, 'window_error')
@@ -189,8 +196,12 @@ function attachTauriPanicListener(): void {
     void mod
       .listen<NativePanicPayload>('native_panic', (event) => {
         const payload = event.payload
-        const message = payload?.location
-          ? `${payload.message} (${payload.location})`
+        // The hook sends `file:line`. The file says which module
+        // panicked; the line is what the policy promises Tier A never
+        // carries, and the digit rule only strips runs of six.
+        const where = payload?.location?.replace(/:\d+(?::\d+)?$/, '')
+        const message = where
+          ? `${payload?.message} (${where})`
           : payload?.message ?? '<unknown native panic>'
         reportError('native_panic', message, 'tauri_panic')
       })
@@ -253,18 +264,21 @@ export function sanitizeMessage(raw: string): string {
   if (typeof raw !== 'string') return ''
   if (raw === 'Script error.' || raw === 'Script error') return ''
 
-  let msg = raw
+  // Take the first line before any other rule — a multi-line stack
+  // trace in a message collapses to just the top-line summary — and
+  // only so much of it: every rule below runs over text any thrower on
+  // the page controls, and the output keeps 80 characters anyway.
+  let msg = (raw.split(/[\r\n]/)[0] ?? '').slice(0, SANITIZE_INPUT_MAX)
 
   // URLs — handle before path/digit rules so :port and ?query don't
-  // match those patterns.
-  msg = msg.replace(/https?:\/\/\S+/gi, '<url>')
-  msg = msg.replace(/\btauri:\/\/\S+/gi, '<url>')
-  msg = msg.replace(/\bfile:\/\/\S+/gi, '<url>')
+  // match those patterns. Any scheme, not a list: `zyra://` deep links,
+  // `wss://` with a token, `asset://localhost/%2FUsers%2F…` (what
+  // `convertFileSrc` returns on macOS and Linux) all carry something.
+  msg = msg.replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, '<url>')
+  msg = msg.replace(/\bdata:[^\s'"`]+/gi, '<url>')
   msg = msg.replace(/\basset\.localhost\/\S+/gi, '<url>')
-
-  // Take the first line before any other rule — a multi-line stack
-  // trace in a message collapses to just the top-line summary.
-  msg = msg.split(/[\r\n]/)[0] ?? ''
+  // A relative URL with a query string (`/api/v1/search?q=…`).
+  msg = msg.replace(/(^|[\s('"`=])\/[^\s'"`?]*\?[^\s'"`]+/g, '$1<url>')
 
   // Emails — local@domain.tld
   msg = msg.replace(/\b[\w._%+-]+@[\w.-]+\.[A-Za-z]{2,}\b/g, '<email>')
@@ -277,26 +291,67 @@ export function sanitizeMessage(raw: string): string {
 
   // Normalize in-repo paths FIRST — strip any prefix up to `src/` or
   // `node_modules/` so local and CI paths compare equal. Run before
-  // the absolute-path rule so those tokens survive.
-  msg = msg.replace(/\S*\/(src\/[\w./-]+)/g, '$1')
-  msg = msg.replace(/\S*\/(node_modules\/[\w./-]+)/g, '$1')
+  // the absolute-path rule so those tokens survive. Anchored to the
+  // start of a token: unanchored, a long token with no `/src/` in it
+  // costs quadratic time, and an 80 KB rejection reason held the main
+  // thread for eight seconds.
+  msg = msg.replace(/(?<!\S)\S*\/(src\/[\w./-]+)/g, '$1')
+  msg = msg.replace(/(?<!\S)\S*\/(node_modules\/[\w./-]+)/g, '$1')
 
   // Home directories first. The segment after `/home/`, `/Users/` or
   // `C:\Users\` is the account name, and an account name can hold a
-  // space (`C:\Users\John Smith`), which the general rule below stops
-  // at — leaving the surname behind. So that segment runs to the next
-  // separator or quote, then the path's remainder to whitespace. An
-  // unquoted home directory followed by prose loses the prose too;
+  // space (`C:\Users\John Smith`) or an apostrophe (`O'Brien`), where
+  // the general rule below stops — leaving the surname behind. So that
+  // segment runs to the next separator or quote (an apostrophe only
+  // ends it before a non-letter), then the path's remainder to
+  // whitespace. Windows separators may arrive doubled, as JSON and
+  // Rust's `{:?}` write them. Mounted volumes are named the same way.
+  // An unquoted home directory followed by prose loses the prose too;
   // stripping too much is the safe way to be wrong.
-  msg = msg.replace(/\/(?:home|Users)\/[^/'"`]+(?:\/[^\s'"`]*)?/g, '<path>')
-  msg = msg.replace(/\b[A-Z]:\\Users\\[^\\'"`]+(?:\\[^\s'"`]*)?/gi, '<path>')
-
-  // Other absolute filesystem paths NOT already normalized above.
   msg = msg.replace(
-    /\/(?:var|tmp|root|usr|opt|etc|private)\/[^\s'"`]+/g,
+    /\/(?:home|Users|Volumes|media)\/(?:[^/'"`]|'(?=\w))+(?:\/[^\s'"`]*)?/g,
+    '<path>',
+  )
+  msg = msg.replace(
+    /\b[A-Z]:\\+Users\\+(?:[^\\'"`]|'(?=\w))+(?:\\[^\s'"`]*)?/gi,
+    '<path>',
+  )
+
+  // Other absolute filesystem paths NOT already normalized above, and
+  // UNC shares (`\\fs01\profiles$\jsmith\…`, a roaming profile).
+  msg = msg.replace(
+    /\/(?:var|tmp|root|usr|opt|etc|private|mnt|run)\/[^\s'"`]+/g,
     '<path>',
   )
   msg = msg.replace(/\b[A-Z]:\\[^\s'"`]+/g, '<path>')
+  msg = msg.replace(/(?<!\S)\\\\[^'"`]+/g, '<path>')
+
+  // Addresses on the visitor's own network: an Ollama box at
+  // `192.168.1.23:11434`, a laptop at `erics-macbook-pro.local`.
+  msg = msg.replace(/\b\d{1,3}(?:\.\d{1,3}){3}(?::\d{1,5})?\b/g, '<ip>')
+  msg = msg.replace(
+    /\b[\w-]+(?:\.[\w-]+)*\.(?:local|lan|internal|localdomain|home\.arpa)\b/gi,
+    '<host>',
+  )
+
+  // Opaque tokens — API keys, JWT segments, ULIDs: one word of 20+
+  // characters that is mostly random. Digits and mixed case are the
+  // tell; Chrome's `ERR_HTTP2_PROTOCOL_ERROR` is long but has neither
+  // much of the one nor any of the other, and stays.
+  msg = msg.replace(/(?<![\w-])[\w-]{20,}(?![\w-])/g, (word) =>
+    looksLikeToken(word) ? '<token>' : word)
+
+  // Quoted text that holds a space is someone's words, not an
+  // identifier — an engine echoing a value back (V8's `Cannot create
+  // property 'role' on string 'what is the flood risk at…'`). Quoted
+  // identifiers (`reading 'addEventListener'`) carry the diagnosis and
+  // stay. The opening quote must follow a delimiter and the closing
+  // one precede another, so a contraction's apostrophe opens nothing.
+  msg = msg.replace(
+    /(^|[\s(,:=[])(['"`])((?:(?!\2)[^\r\n])*)\2(?=$|[\s),.:;!?\]])/g,
+    (match, pre: string, quote: string, body: string) =>
+      /\s/.test(body) ? `${pre}${quote}<str>${quote}` : match,
+  )
 
   // Long digit runs (6+) — IDs, timestamps, tokens
   msg = msg.replace(/\b\d{6,}\b/g, '<num>')
@@ -308,6 +363,11 @@ export function sanitizeMessage(raw: string): string {
     msg = msg.slice(0, MESSAGE_CLASS_MAX - 3) + '...'
   }
   return msg
+}
+
+function looksLikeToken(word: string): boolean {
+  const digits = word.replace(/\D/g, '').length
+  return digits >= 3 || (digits > 0 && /[a-z]/.test(word) && /[A-Z]/.test(word))
 }
 
 // --- Stack normalization ---
@@ -343,13 +403,7 @@ export function normalizeStack(stack: string | undefined | null): {
   frames: NormalizedFrame[]
 } | null {
   if (!stack || typeof stack !== 'string') return null
-  const lines = stack.split('\n')
-  const raw: NormalizedFrame[] = []
-
-  for (const line of lines) {
-    const frame = parseFrameLine(line)
-    if (frame) raw.push(frame)
-  }
+  const raw = stackFrames(stack).map((f) => classifyFrame(f.fn, f.url))
   if (raw.length === 0) return null
 
   // Collapse consecutive externals into a single <external> marker.
@@ -371,29 +425,49 @@ export function normalizeStack(stack: string | undefined | null): {
   return { signature, frames }
 }
 
-function parseFrameLine(line: string): NormalizedFrame | null {
-  const parts = splitFrameLine(line)
-  return parts ? classifyFrame(parts.fn, parts.url) : null
+interface RawFrame {
+  fn: string
+  url: string
 }
 
-function splitFrameLine(line: string): { fn: string; url: string } | null {
-  const trimmed = line.trim()
-  if (!trimmed) return null
-
-  // Chrome / Node format: "    at functionName (url:line:col)"
-  // or                   "    at url:line:col"
-  let match = /^at\s+(?:(.+?)\s+\()?(.+?)(?::\d+:\d+)?\)?$/.exec(trimmed)
-  if (match) {
-    return { fn: (match[1] ?? '<anonymous>').trim(), url: (match[2] ?? '').trim() }
+/** The frames of a stack, and nothing else. V8 (Chrome, Edge, the
+ * Windows webview, Node) opens a stack with `Name: message`, every
+ * line of the message included, and Safari / Firefox frames are
+ * `fn@url` — so read naively, a message holding `jane@school` parses
+ * as a frame named after the text before the `@`, lands in
+ * `frames_json` with only its spaces removed, and never meets the
+ * sanitizer. A stack with any `at` frame is therefore read as V8:
+ * from its first frame on, `at` lines only. */
+function stackFrames(stack: string): RawFrame[] {
+  const lines = stack.split('\n').map((l) => l.trim()).filter(Boolean)
+  const firstV8 = lines.findIndex((l) => /^at\s/.test(l))
+  if (firstV8 >= 0) {
+    return lines.slice(firstV8).map(splitV8Frame).filter((f): f is RawFrame => f !== null)
   }
+  return lines.map(splitAtSignFrame).filter((f): f is RawFrame => f !== null)
+}
 
-  // Safari / Firefox: "functionName@url:line:col"
-  match = /^(.*?)@(.+?)(?::\d+:\d+)?$/.exec(trimmed)
-  if (match) {
-    return { fn: (match[1] || '<anonymous>').trim(), url: (match[2] ?? '').trim() }
-  }
+/** Chrome / Node: "at functionName (url:line:col)" or "at url:line:col". */
+function splitV8Frame(line: string): RawFrame | null {
+  const match = /^at\s+(?:(.+?)\s+\()?(.+?)(?::\d+:\d+)?\)?$/.exec(line)
+  if (!match) return null
+  return { fn: (match[1] ?? '<anonymous>').trim(), url: (match[2] ?? '').trim() }
+}
 
-  return null
+/** Safari / Firefox: "functionName@url:line:col". */
+function splitAtSignFrame(line: string): RawFrame | null {
+  const match = /^(.*?)@(.+?)(?::\d+:\d+)?$/.exec(line)
+  if (!match) return null
+  return { fn: (match[1] || '<anonymous>').trim(), url: (match[2] ?? '').trim() }
+}
+
+/** A location with no slash names no script: V8's `<anonymous>` and
+ * `native`, WebKit's `[native code]`, Firefox's `debugger eval code`.
+ * `classifyFrame` counts these as ours, which is right for reporting
+ * the function name, but they say nothing about whose code was
+ * running, so `isForeignError` steps over them. */
+function isBuiltinLocation(url: string): boolean {
+  return /^[^/]*$/.test(url)
 }
 
 function isExtensionUrl(url: string): boolean {
@@ -411,12 +485,15 @@ function classifyFrame(fn: string, url: string): NormalizedFrame {
 
 /** True when an error that reached a global handler was raised by a
  * browser extension or by another site's script rather than by this
- * app: the script it came from is an extension, the frame it was
- * thrown in is an extension's, or no frame of its stack is ours. An
- * error with no stack to read is kept, since nothing says whose it
- * is. Only the global handlers ask — an explicit `reportError` is our
- * own code reporting itself. Never throws: it runs inside an `error`
- * listener, where a throw would raise the event it is handling. */
+ * app: the script it came from is an extension, the first frame with a
+ * script location is an extension's, or no such frame is ours.
+ * Built-in frames (`JSON.parse`, `[native code]`) are stepped over, so
+ * an extension that throws inside `JSON.parse` is still the
+ * extension's. An error with no located frame is kept, since nothing
+ * says whose it is. Only the global handlers ask — an explicit
+ * `reportError` is our own code reporting itself. Never throws: it
+ * runs inside an `error` listener, where a throw would raise the event
+ * it is handling. */
 export function isForeignError(
   stack: string | undefined | null,
   filename?: string,
@@ -424,21 +501,43 @@ export function isForeignError(
   try {
     if (typeof filename === 'string' && isExtensionUrl(filename)) return true
     if (typeof stack !== 'string' || !stack) return false
-    const frames = stack.split('\n').map(splitFrameLine)
-      .filter((f): f is { fn: string; url: string } => f !== null)
-    if (frames.length === 0) return false
-    if (isExtensionUrl(frames[0].url)) return true
-    return !frames.some((f) => classifyFrame(f.fn, f.url).src === 'own')
+    const located = stackFrames(stack).filter((f) => !isBuiltinLocation(f.url))
+    if (located.length === 0) return false
+    if (isExtensionUrl(located[0].url)) return true
+    return !located.some((f) => isFirstPartyLocation(f.url))
   } catch {
     return false
   }
 }
 
+/** Whether a frame's script is this app's. Asked by origin, not by
+ * path: the bundle's directory is a build setting a self-hoster may
+ * change, and the dev server serves `src/` from its root, so neither
+ * `/assets/` nor `/src/` appears in every URL of ours — while a
+ * third-party script can sit under either. Cloudflare's own injected
+ * scripts share the origin under `/cdn-cgi/` and are not ours. A
+ * location with no web origin (a file path, as test runs report) is
+ * judged by the repo directories in it. */
+function isFirstPartyLocation(url: string): boolean {
+  const origin = typeof location !== 'undefined' ? location.origin : ''
+  if (origin && origin !== 'null' && url.startsWith(`${origin}/`)) {
+    return !url.startsWith(`${origin}/cdn-cgi/`)
+  }
+  if (/^(?:tauri:\/\/|https?:\/\/tauri\.localhost\/)/i.test(url)) return true
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(url) && !/^file:/i.test(url)) return false
+  return /\/(?:src|node_modules)\//.test(url)
+}
+
 /** The stack of a thrown value, read without assuming it is an
- * `Error` from this realm. */
+ * `Error` from this realm. Never throws: reading `.stack` off a
+ * revoked Proxy or a cross-origin window does. */
 function stackOf(thrown: unknown): string | undefined {
-  const stack = (thrown as { stack?: unknown } | null | undefined)?.stack
-  return typeof stack === 'string' ? stack : undefined
+  try {
+    const stack = (thrown as { stack?: unknown } | null | undefined)?.stack
+    return typeof stack === 'string' ? stack : undefined
+  } catch {
+    return undefined
+  }
 }
 
 function sanitizeFunctionName(fn: string): string {
@@ -519,11 +618,17 @@ function emitNormalized(n: NormalizedError): void {
     state.sigCounts.set(sig, 1)
   }
 
-  // Tier A emission (always emits up to caps; the event-level tier
-  // gate in the emitter filters Off / Essential / Research).
+  // Tier A emission, up to the caps. The emitter applies the tier gate
+  // again; asking it here first is so a report the tier drops does not
+  // spend the cap — or a visitor who turns telemetry on mid-session
+  // finds the budget already used by reports nobody sent.
   const keyA = `A|${sig}`
   const emittedA = state.sigEmissions.get(keyA) ?? 0
-  if (emittedA < TIER_A_CAP_PER_SIG && state.tierATotal < TIER_A_CAP_TOTAL) {
+  if (
+    tierGate('error') &&
+    emittedA < TIER_A_CAP_PER_SIG &&
+    state.tierATotal < TIER_A_CAP_TOTAL
+  ) {
     const event: TelemetryErrorEvent = {
       event_type: 'error',
       category: n.category,
@@ -537,13 +642,17 @@ function emitNormalized(n: NormalizedError): void {
     state.tierATotal++
   }
 
-  // Tier B emission — dropped silently at the emitter if tier !==
-  // 'research'. Only emit if we actually have a stack; no stack ==
+  // Tier B emission — only on 'research', by the same gate and for the
+  // same reason. Only emit if we actually have a stack; no stack ==
   // no useful error_detail.
   if (n.stackSignature === null || n.frames.length === 0) return
   const keyB = `B|${sig}`
   const emittedB = state.sigEmissions.get(keyB) ?? 0
-  if (emittedB < TIER_B_CAP_PER_SIG && state.tierBTotal < TIER_B_CAP_TOTAL) {
+  if (
+    tierGate('error_detail') &&
+    emittedB < TIER_B_CAP_PER_SIG &&
+    state.tierBTotal < TIER_B_CAP_TOTAL
+  ) {
     const event: ErrorDetailEvent = {
       event_type: 'error_detail',
       category: n.category,

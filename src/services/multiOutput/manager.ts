@@ -586,8 +586,13 @@ export class MultiOutputManager {
       // guard. An interactive Add refused here is the same sentence
       // with a shorter gap in it.
       reportOutputRemoved({ mode, reason: 'rejected-by-storm-guard' })
+      // No monitor name in the text: every caller catches this today,
+      // but one that did not would hand it to the uncaught-error
+      // report, and the display name is what `outputTelemetry` keeps
+      // off the wire. The operator chose the monitor, so "this" is
+      // enough on the panel; a restore logs the output's label beside it.
       throw new Error(
-        `monitor ${monitor.name ?? 'unnamed'} is refusing outputs this session ` +
+        'this monitor is refusing outputs this session ' +
           '(it crashed three of them in a minute; relaunch to reset)',
       )
     }

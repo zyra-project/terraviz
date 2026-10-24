@@ -163,7 +163,7 @@ must be corrected.
 | `tour_started` / `tour_task_fired` / `tour_paused` / `tour_resumed` / `tour_ended` | A | `src/services/tourEngine.ts` |
 | `vr_session_started` / `vr_session_ended` / `vr_placement` | A | `src/services/vrSession.ts`, `src/services/vrPlacement.ts` |
 | `perf_sample` | A | `src/analytics/perfSampler.ts` |
-| `error` | A | `src/analytics/errorCapture.ts` — `reportError()` from call sites (`tile` / `hls` / `llm` / `download` / `caption`), plus the global `error` / `unhandledrejection` handlers (`uncaught`) and, on desktop, the Tauri `native_panic` listener, both attached by `src/main.ts` once the app has initialized. The global handlers drop errors raised by a browser extension or another site's script. **Console output is not captured** — see the note under this table |
+| `error` | A | `src/analytics/errorCapture.ts` — `reportError()` from call sites (`tile` / `hls` / `llm` / `download` / `caption`), plus the global `error` / `unhandledrejection` handlers (`uncaught`) and, on desktop, the Tauri `native_panic` listener, both attached in `src/main.ts`'s `initialize()` as soon as the transport is set. The global handlers drop errors raised by a browser extension or another site's script, judged by origin. **Console output is not captured** — see the note under this table |
 | `feedback` | A | `src/ui/helpUI.ts` (in-app form) + `src/ui/chatUI.ts` (Orbit thumbs) |
 | `dwell` | **B** | `src/analytics/dwell.ts` (panel + dataset dwell, called by chat / browse / info / tools UI) |
 | `orbit_interaction` / `orbit_turn` / `orbit_tool_call` / `orbit_load_followed` / `orbit_correction` | **B** | `src/ui/chatUI.ts`, `src/services/docentService.ts`, `src/services/datasetLoader.ts` |

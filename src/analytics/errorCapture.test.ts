@@ -161,6 +161,66 @@ describe('sanitizeMessage', () => {
       input: 'TypeError in /home/john smith/repo/src/services/foo.ts',
       expected: 'TypeError in <path>',
     },
+    {
+      label: "account name with an apostrophe is stripped whole",
+      input: "denied C:\\Users\\Sean O'Brien\\AppData\\x.txt",
+      expected: 'denied <path>',
+    },
+    {
+      label: 'doubled Windows separators, as JSON and Rust write them',
+      input: 'denied C:\\\\Users\\\\John Smith\\\\AppData\\\\x.txt',
+      expected: 'denied <path>',
+    },
+    {
+      label: 'a mounted volume name is stripped like an account name',
+      input: 'cannot open /Volumes/Jane Drive/data.nc',
+      expected: 'cannot open <path>',
+    },
+    {
+      label: 'UNC share path is stripped',
+      input: 'cannot open \\\\fs01\\profiles$\\jsmith42\\x.db',
+      expected: 'cannot open <path>',
+    },
+    {
+      label: 'any scheme is a URL, not only http',
+      input: 'bad link zyra://dataset/X?lat=40.01 and asset://localhost/%2FUsers%2Fjsmith%2Fx',
+      expected: 'bad link <url> and <url>',
+    },
+    {
+      label: 'relative URL with a query string is stripped',
+      input: 'GET /api/v1/search?q=flooding+near+412+Elm failed',
+      expected: 'GET <url> failed',
+    },
+    {
+      label: 'LAN address and local hostname are stripped',
+      input: 'cannot reach 192.168.1.23:11434 or erics-macbook-pro.local',
+      expected: 'cannot reach <ip> or <host>',
+    },
+    {
+      label: 'opaque token is stripped',
+      input: 'Incorrect API key sk-proj-a1B2c3D4e5F6g7H8i9J0 provided',
+      expected: 'Incorrect API key <token> provided',
+    },
+    {
+      label: 'a long identifier-like error code survives the token rule',
+      input: 'net::ERR_HTTP2_PROTOCOL_ERROR',
+      expected: 'net::ERR_HTTP2_PROTOCOL_ERROR',
+    },
+    {
+      label: 'quoted text with a space, an echoed value, is stripped',
+      input: "Cannot create property 'role' on string 'what is the flood risk at my house'",
+      expected: "Cannot create property 'role' on string '<str>'",
+    },
+    {
+      label: 'quoted identifiers stay',
+      input: "Cannot read properties of undefined (reading 'addEventListener')",
+      expected: "Cannot read properties of undefined (reading 'addEventListener')",
+    },
+    {
+      label: 'apostrophes in contractions open no quote',
+      input: "can't load the dataset's frames",
+      expected: "can't load the dataset's frames",
+    },
   ]
 
   for (const { label, input, expected } of cases) {
@@ -168,6 +228,17 @@ describe('sanitizeMessage', () => {
       expect(sanitizeMessage(input)).toBe(expected)
     })
   }
+
+  it('reads a bounded prefix, so a huge message cannot stall the page', () => {
+    // Unbounded, an 80 KB token with no `/src/` in it took eight
+    // seconds on the path-normalization rule. The bound is generous:
+    // bounded, this is well under a millisecond.
+    const huge = 'x'.repeat(80_000)
+    const started = performance.now()
+    const out = sanitizeMessage(huge)
+    expect(performance.now() - started).toBeLessThan(1000)
+    expect(out.length).toBe(MESSAGE_CLASS_MAX)
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────
@@ -241,6 +312,18 @@ describe('normalizeStack', () => {
     const s1 = 'at foo (http://localhost/src/a.ts:1:1)'
     const s2 = 'at bar (http://localhost/src/b.ts:2:2)'
     expect(normalizeStack(s1)!.signature).not.toBe(normalizeStack(s2)!.signature)
+  })
+
+  it('never reads a V8 message line as a frame', () => {
+    // V8 opens a stack with the message, every line of it. A line with
+    // an `@` in it is the Safari frame shape, and its text would land
+    // in frames_json as a function name, unsanitized.
+    const stack = [
+      'Error: invalid contact jane.doe@school',
+      'second line with secret jdoe@corp',
+      '    at submit (https://example.org/assets/main.js:1:1)',
+    ].join('\n')
+    expect(normalizeStack(stack)!.frames.map((f) => f.fn)).toEqual(['submit'])
   })
 
   it('caps the frame list at the configured max', () => {
@@ -408,6 +491,15 @@ describe('reportError', () => {
     expect(__getSigCount('tile', 'caught', `varying-${MAX_TRACKED_SIGNATURES}`)).toBe(0)
   })
 
+  it('does not spend the cap on reports the tier drops', () => {
+    setTier('off')
+    for (let i = 0; i < TIER_A_CAP_TOTAL; i++) reportError('tile', `while-off-${i}`, 'caught')
+    setTier('essential')
+    reportError('tile', 'after turning on', 'caught')
+    const errs = flush().filter((e) => e.event_type === 'error') as TelemetryErrorEvent[]
+    expect(errs.map((e) => e.message_class)).toEqual(['after turning on'])
+  })
+
   it('passes an identifier-shaped code and replaces anything else', () => {
     setTier('essential')
     const withCode = (code: unknown) => Object.assign(new Error(`code ${String(code)}`), { code })
@@ -437,7 +529,9 @@ describe('reportError', () => {
 // install / uninstall — global handlers
 // ─────────────────────────────────────────────────────────────────────
 
-const OWN_FRAME = '    at fn (http://localhost/src/foo.ts:1:1)'
+/** A frame from the built bundle, served by this page's own origin —
+ * what production stacks look like. */
+const OWN_FRAME = `    at fn (${location.origin}/assets/main-B1x2y3z4.js:1:1)`
 
 /** Fire an uncaught error at `window` the way the browser would. */
 function dispatchWindowError(
@@ -507,11 +601,7 @@ describe('install / uninstall', () => {
 
   it('captures window.error via the global handler', () => {
     install()
-    const err = new Error('uncaught')
-    err.stack = 'Error: uncaught\n    at fn (http://localhost/src/foo.ts:1:1)'
-    // happy-dom dispatches ErrorEvent
-    const event = new window.ErrorEvent('error', { error: err, message: err.message })
-    window.dispatchEvent(event)
+    dispatchWindowError('uncaught')
     const drained = flush()
     const errs = drained.filter((e) => e.event_type === 'error') as TelemetryErrorEvent[]
     expect(errs.some((e) => e.source === 'window_error')).toBe(true)
@@ -565,9 +655,22 @@ describe('install / uninstall', () => {
     expect(messagesAfter()).toEqual(['plain string reason'])
   })
 
-  it('isForeignError never throws, whatever it is handed', () => {
-    expect(isForeignError(42 as unknown as string)).toBe(false)
-    expect(isForeignError(undefined, 42 as unknown as string)).toBe(false)
+  it('drops the benign ResizeObserver loop error', () => {
+    install()
+    window.dispatchEvent(new window.ErrorEvent('error', {
+      message: 'ResizeObserver loop completed with undelivered notifications.',
+    }))
+    dispatchWindowError('ours')
+    expect(messagesAfter()).toEqual(['ours'])
+  })
+
+  it('survives a rejection reason whose stack cannot be read', () => {
+    install()
+    const { proxy, revoke } = Proxy.revocable({}, {})
+    revoke()
+    dispatchRejection(proxy)
+    dispatchWindowError('ours')
+    expect(messagesAfter()).toContain('ours')
   })
 
   it('install is idempotent', () => {
@@ -586,6 +689,54 @@ describe('install / uninstall', () => {
     dispatchWindowError('after uninstall')
     expect(flush()).toEqual([])
   })
+
+  it('isForeignError never throws, whatever it is handed', () => {
+    expect(isForeignError(42 as unknown as string)).toBe(false)
+    expect(isForeignError(undefined, 42 as unknown as string)).toBe(false)
+  })
+})
+
+describe('isForeignError — whose code threw', () => {
+  const stack = (...frames: string[]) => ['Error: x', ...frames].join('\n')
+  const at = (url: string) => `    at f (${url}:1:1)`
+
+  it('reads our own origin as ours, whatever the path', () => {
+    // The dev server serves `src/` from its root, so a dev URL has no
+    // `/src/` in it; a self-hoster may move the bundle off `/assets/`.
+    expect(isForeignError(stack(at(`${location.origin}/ui/browseUI.ts`)))).toBe(false)
+    expect(isForeignError(stack(at(`${location.origin}/static/main.js`)))).toBe(false)
+  })
+
+  it('reads another origin as foreign, even under /assets/', () => {
+    expect(isForeignError(stack(at('https://cdn.example.com/assets/widget.js')))).toBe(true)
+  })
+
+  it("reads Cloudflare's injected scripts as foreign though same-origin", () => {
+    expect(isForeignError(stack(at(`${location.origin}/cdn-cgi/scripts/beacon.js`)))).toBe(true)
+  })
+
+  it('steps over built-in frames to find the extension beneath', () => {
+    expect(isForeignError(stack(
+      '    at JSON.parse (<anonymous>)',
+      at('chrome-extension://abc/content.js'),
+      OWN_FRAME,
+    ))).toBe(true)
+  })
+
+  it('does not count a built-in frame as ours', () => {
+    expect(isForeignError(stack(
+      at('https://static.cloudflareinsights.com/beacon.min.js'),
+      '    at Array.forEach (<anonymous>)',
+    ))).toBe(true)
+    // WebKit's shape for the same thing.
+    expect(isForeignError(
+      'forEach@[native code]\nrun@https://other.example/x.js:1:1',
+    )).toBe(true)
+  })
+
+  it('keeps a stack of built-ins alone, which names nobody', () => {
+    expect(isForeignError(stack('    at JSON.parse (<anonymous>)'))).toBe(false)
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────
@@ -601,25 +752,30 @@ describe('boot wiring', () => {
   // reach. Comments are stripped so prose quoting the call cannot pass.
   const source = readFileSync(resolve(process.cwd(), 'src/main.ts'), 'utf-8')
     .replace(/\/\/[^\n]*/g, '')
-  const boot = source.slice(source.indexOf("addEventListener('DOMContentLoaded'"))
+  const TRANSPORT = 'setTransport(createFetchTransport())'
+  const INSTALL = 'installErrorCapture()'
+  const DATASETS = 'await this.loadDatasets()'
 
-  it('finds the boot handler', () => {
-    expect(boot).toContain('app.initialize()')
+  it('finds every anchor these tests order against', () => {
+    // An anchor renamed away would make `indexOf` return -1 and the
+    // ordering below pass for any placement.
+    for (const anchor of [TRANSPORT, INSTALL, DATASETS]) expect(source).toContain(anchor)
+    expect(source.split(INSTALL)).toHaveLength(2)
   })
 
-  it('installs capture in the boot handler, behind the build flag', () => {
-    expect(boot).toMatch(/if\s*\(\s*TELEMETRY_BUILD_ENABLED\s*\)\s*\{\s*installErrorCapture\(\)/)
+  it('installs behind the build flag', () => {
+    expect(source).toMatch(/if\s*\(\s*TELEMETRY_BUILD_ENABLED\s*\)\s*installErrorCapture\(\)/)
   })
 
-  it('installs only after the app has initialized, which sets the transport', () => {
-    // Earlier, a queued report would be drained unsent if boot stopped
-    // short of `setTransport`, and on desktop would stop the previous
-    // session's persisted queue from being replayed at all.
-    const at = boot.indexOf('installErrorCapture()')
-    expect(boot.indexOf('bootPublisherPortal()')).toBeLessThan(at)
-    expect(boot.indexOf('bootBlogPage()')).toBeLessThan(at)
-    expect(boot.indexOf('app.initialize()')).toBeLessThan(at)
-    expect(source.match(/installErrorCapture\(\)/g)).toHaveLength(1)
+  it('installs right behind the transport, ahead of the catalog load', () => {
+    // Before the transport, a queued report is drained unsent if boot
+    // stops short of it, and on desktop it stops the previous session's
+    // persisted queue being replayed. After `initialize()` returns, the
+    // catalog fetch, the `?dataset=` load and the deep links — the
+    // likeliest uncaught errors of a session — have already happened.
+    const at = source.indexOf(INSTALL)
+    expect(source.indexOf(TRANSPORT)).toBeLessThan(at)
+    expect(at).toBeLessThan(source.indexOf(DATASETS))
   })
 })
 
@@ -674,7 +830,9 @@ describe('tauri native_panic listener', () => {
     expect(errs).toHaveLength(1)
     expect(errs[0].category).toBe('native_panic')
     expect(errs[0].source).toBe('tauri_panic')
-    expect(errs[0].message_class.length).toBeGreaterThan(0)
+    // The module stays; its line number does not reach Tier A.
+    expect(errs[0].message_class).toContain('lib.rs')
+    expect(errs[0].message_class).not.toContain(':42')
   })
 
   it('handles a panic payload with no location field', async () => {

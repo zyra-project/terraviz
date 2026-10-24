@@ -663,6 +663,17 @@ class InteractiveSphere {
       if (TELEMETRY_BUILD_ENABLED && !TELEMETRY_CONSOLE_MODE) {
         setTransport(createFetchTransport())
       }
+      // Error capture (uncaught errors, unhandled rejections, desktop
+      // Rust panics) right behind the transport: not before it, since
+      // a report queued earlier is drained unsent if boot stops short
+      // of this line, and on desktop it stops `setTransport` replaying
+      // the previous session's persisted queue, which it only does into
+      // an empty one; and not after `initialize()` returns, since the
+      // catalog fetch, the `?dataset=` load and the deep links below are
+      // the likeliest place for an uncaught error. Console mode installs
+      // too, so a dev sees what would be sent. `install()` itself
+      // declines on a silenced path.
+      if (TELEMETRY_BUILD_ENABLED) installErrorCapture()
       logger.info('[App] Using MapLibre renderer (layout: %s)', initialLayout)
 
       // Wire up lat/lng display (bind to primary; secondary panels don't
@@ -4383,16 +4394,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // subsequent event carries a non-zero client_offset_ms relative to
   // it. The hook itself is best-effort — if telemetry is off (tier
   // or compile flag) the emit() calls inside no-op.
-  //
-  // Error capture (uncaught errors, unhandled rejections, desktop Rust
-  // panics) installs here too, and not earlier, because `initialize()`
-  // is what sets the transport. A report queued before then is drained
-  // unsent if boot stops short of it. On desktop it does worse:
-  // `setTransport` only replays the previous session's persisted queue
-  // into an empty one, and the next good send clears that copy. A panic
-  // during boot still reaches the Tauri log through the default hook.
   if (TELEMETRY_BUILD_ENABLED) {
-    installErrorCapture()
     void initSession()
     startPerfSampler()
   }

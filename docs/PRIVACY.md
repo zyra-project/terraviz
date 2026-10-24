@@ -110,13 +110,19 @@ Small, anonymous events about the health of the app:
   in front of an audience, so nothing runs in them that does not
   need to
 - When something goes wrong — a classification of the error (tile
-  fetch, video stream, AI model, an error nothing in the app caught,
-  or a native crash on desktop), a short sanitized summary of the
-  error class (with URLs, emails, numeric tokens and file paths
-  stripped out before it leaves your device), and a count of
-  repeats. **No raw stack traces, no URLs, no full error messages,
-  no line numbers** at this level. The messages the app writes to
-  your browser's developer console are **not** collected
+  fetch, video stream, AI model, data download, captions, an error
+  nothing in the app caught, or a native crash on desktop), a short
+  error code where there is one (such as an HTTP status), and the
+  first line of the error's message, cut to 80 characters. Before
+  it leaves your device, that line has URLs, file paths, email
+  addresses, network addresses, long numbers, tokens and keys, and
+  any quoted text containing a space stripped out. Each distinct
+  error is sent at most three times per session, and at most 30
+  errors in all. **No stack traces, no URLs, no line numbers,
+  nothing past the first line** at this level. Errors raised by
+  browser extensions or by other sites' scripts are dropped, and
+  the messages the app writes to your browser's developer console
+  are **not** collected
 - When you submit feedback — that you did, and which category (bug,
   feature, other, thumbs-up, thumbs-down). The *content* of your
   feedback is stored separately — see section 4
@@ -214,6 +220,11 @@ covered in sections 4 and 5:
 
 ### Crash reports (separate, per-crash consent)
 
+**Not available yet.** The app does not ask for crash reports today;
+this section describes how it will work when it does. It is separate
+from the automatic error events in section 2, which follow the mode
+you chose there and need no prompt.
+
 If Terraviz crashes in a way you notice — the globe goes
 blank, the app freezes, or a failure dialog appears — we may ask
 you if you want to send a crash report for *that specific crash*.
@@ -224,8 +235,6 @@ If you do send a crash report, it includes:
 
 - The classified error information described above
 - A sanitized stack from the crash
-- A buffer of recent error and warning messages from your current
-  session, with the same sanitization applied
 - Any text you optionally type into the "what were you doing?" box
 - A screenshot, only if you opt to attach one
 
