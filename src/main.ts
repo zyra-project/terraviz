@@ -59,6 +59,7 @@ import {
   createFetchTransport,
   emit,
   initSession,
+  installErrorCapture,
   pauseForVrEntry,
   resumeForVrExit,
   setTransport,
@@ -4371,6 +4372,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     await bootBlogPage()
     return
   }
+
+  // Uncaught errors, unhandled rejections and (desktop) Rust panics
+  // into the `error` stream. Ahead of `initialize()` rather than beside
+  // the session below: boot starts work it does not await (tile
+  // fetches, plugin loads, deep links), and the Rust panic hook is live
+  // from Tauri's setup, so every moment before this listener attaches
+  // is a panic dropped. Behind the build flag, like the transport, so a
+  // telemetry-free build carries none of it; `install()` itself
+  // declines on a silenced path.
+  if (TELEMETRY_BUILD_ENABLED) installErrorCapture()
 
   const app = new InteractiveSphere()
   app.setupEventListeners()

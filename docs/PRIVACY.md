@@ -110,12 +110,13 @@ Small, anonymous events about the health of the app:
   in front of an audience, so nothing runs in them that does not
   need to
 - When something goes wrong — a classification of the error (tile
-  fetch, video stream, AI model, uncaught exception, browser-console
-  message, or native crash on desktop), a short sanitized summary of
-  the error class (with URLs, emails, numeric tokens and file paths
+  fetch, video stream, AI model, an error nothing in the app caught,
+  or a native crash on desktop), a short sanitized summary of the
+  error class (with URLs, emails, numeric tokens and file paths
   stripped out before it leaves your device), and a count of
   repeats. **No raw stack traces, no URLs, no full error messages,
-  no line numbers** at this level
+  no line numbers** at this level. The messages the app writes to
+  your browser's developer console are **not** collected
 - When you submit feedback — that you did, and which category (bug,
   feature, other, thumbs-up, thumbs-down). The *content* of your
   feedback is stored separately — see section 4

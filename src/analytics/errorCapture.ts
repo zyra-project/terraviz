@@ -2,30 +2,48 @@
 // Copyright 2026 The Zyra Project
 
 /**
- * Error and console capture pipeline.
+ * Error capture pipeline.
  *
  * Three input sources funnel through a shared sanitize → dedup →
  * emit path:
  *
  *   1. Global uncaught handlers — window.error, unhandledrejection
- *   2. Monkey-patched console.error / console.warn — catches
- *      library-internal errors that log but never throw (MapLibre,
- *      HLS.js, Three.js, Tauri plugins)
+ *   2. The Tauri `native_panic` event, emitted by the Rust panic hook
+ *      in src-tauri/src/lib.rs (desktop only)
  *   3. Explicit call sites — reportError(category, err) from code
  *      that wants to report a caught failure
+ *
+ * 1 and 2 are attached by `install()`, which `src/main.ts` calls at
+ * boot on the SPA path. Nothing else installs them: the publisher
+ * portal and the blog return before that point, and an output window
+ * boots from its own entry and emits nothing (MULTI_MONITOR_PLAN.md
+ * §3.6).
+ *
+ * The console is deliberately **not** patched, though the plan
+ * proposed it. Exception messages are what the sanitizer was built
+ * for; log lines are not. The app's own `logger.warn` / `logger.error`
+ * lines interpolate whatever the author had to hand, and some of it
+ * is exactly what telemetry promises never to send: the multi-output
+ * manager logs a monitor's OS display name and its origin, which
+ * `outputTelemetry` reports as an enumeration index precisely so the
+ * name never leaves the machine, and no pattern rule can tell a
+ * display name from prose. The value it was for has gone elsewhere
+ * too: the library errors it targeted (MapLibre, HLS.js, shader
+ * compiles) reach `reportError` from their own call sites with a real
+ * category, where a patch would report them twice and spend the
+ * per-session cap on the app's own diagnostics.
  *
  * Privacy discipline is non-negotiable: message text is sanitized
  * (URLs, emails, UUIDs, digit runs, file paths stripped) and
  * truncated to 80 chars before emit; stack frames outside our own
  * namespace collapse to `<external>`; line/column numbers are
- * dropped. See docs/PRIVACY.md "Crash reports" and
+ * dropped. See docs/PRIVACY.md §2 and
  * docs/ANALYTICS_IMPLEMENTATION_PLAN.md "Console and crash capture"
  * for the full spec.
  *
  * Reporter-internal discipline: a reentrant guard prevents the
  * pipeline from recursing into itself if the reporter's own code
- * throws or calls console.error. The original console references
- * are always used for dev logging inside the reporter.
+ * throws.
  */
 
 import type {
@@ -34,7 +52,7 @@ import type {
   ErrorEvent as TelemetryErrorEvent,
   ErrorDetailEvent,
 } from '../types'
-import { emit } from './emitter'
+import { emit, isSilencedPath } from './emitter'
 
 // --- Caps (docs/ANALYTICS_IMPLEMENTATION_PLAN.md) ---
 
@@ -51,8 +69,6 @@ export const STACK_SIGNATURE_HEX_LEN = 12
 interface CaptureState {
   installed: boolean
   insideCapture: boolean
-  originalConsoleError: typeof console.error | null
-  originalConsoleWarn: typeof console.warn | null
   windowErrorHandler: EventListener | null
   rejectionHandler: EventListener | null
   /** Tauri event-listener detacher returned by `listen()`. Set on
@@ -71,8 +87,6 @@ function createState(): CaptureState {
   return {
     installed: false,
     insideCapture: false,
-    originalConsoleError: null,
-    originalConsoleWarn: null,
     windowErrorHandler: null,
     rejectionHandler: null,
     tauriUnlisten: null,
@@ -108,10 +122,14 @@ export function reportError(
   }
 }
 
-/** Install global handlers and patch the console. Safe to call
- * multiple times; becomes a no-op after the first successful call. */
+/** Install the global handlers and the Tauri panic listener. Safe to
+ * call multiple times; becomes a no-op after the first successful
+ * call. Declines on a silenced path (the privacy page), where every
+ * report would be dropped at `emit()` anyway, and does not latch
+ * there, so a later call from a page that may emit still installs. */
 export function install(): void {
   if (state.installed) return
+  if (isSilencedPath()) return
   state.installed = true
 
   if (typeof window !== 'undefined') {
@@ -128,21 +146,6 @@ export function install(): void {
     window.addEventListener('unhandledrejection', onRejection)
     state.windowErrorHandler = onError
     state.rejectionHandler = onRejection
-  }
-
-  if (typeof console !== 'undefined') {
-    state.originalConsoleError = console.error
-    state.originalConsoleWarn = console.warn
-    const origErr = state.originalConsoleError
-    const origWarn = state.originalConsoleWarn
-    console.error = (...args: unknown[]): void => {
-      origErr.apply(console, args)
-      reportError('console', stringifyArgs(args), 'console_error')
-    }
-    console.warn = (...args: unknown[]): void => {
-      origWarn.apply(console, args)
-      reportError('console', stringifyArgs(args), 'console_warn')
-    }
   }
 
   // Tauri native panic listener. Lazy-imported behind the existing
@@ -200,7 +203,7 @@ interface NativePanicPayload {
   location: string | null
 }
 
-/** Remove global handlers and restore the original console. */
+/** Remove the global handlers and the Tauri panic listener. */
 export function uninstall(): void {
   if (!state.installed) return
   state.installed = false
@@ -214,10 +217,6 @@ export function uninstall(): void {
     }
   }
 
-  if (state.originalConsoleError) console.error = state.originalConsoleError
-  if (state.originalConsoleWarn) console.warn = state.originalConsoleWarn
-  state.originalConsoleError = null
-  state.originalConsoleWarn = null
   state.windowErrorHandler = null
   if (state.tauriUnlisten) {
     state.tauriUnlisten()
@@ -491,18 +490,6 @@ function emitNormalized(n: NormalizedError): void {
     emit(event)
     state.sigEmissions.set(keyB, emittedB + 1)
     state.tierBTotal++
-  }
-}
-
-function stringifyArgs(args: unknown[]): string {
-  if (args.length === 0) return ''
-  const first = args[0]
-  if (first instanceof Error) return first.message || first.name || 'Error'
-  if (typeof first === 'string') return first
-  try {
-    return String(first)
-  } catch {
-    return 'console'
   }
 }
 

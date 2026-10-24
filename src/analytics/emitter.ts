@@ -63,8 +63,10 @@ const SILENCED_PATHS: ReadonlySet<string> = new Set([
 
 /** True when the current page is a no-emit surface. Reads
  * `location.pathname` defensively so non-DOM environments (early
- * Node, isolated unit tests) don't blow up. */
-function isSilencedPath(): boolean {
+ * Node, isolated unit tests) don't blow up. Exported so
+ * `errorCapture.install()` can decline to attach listeners on a page
+ * whose every report would be dropped here anyway. */
+export function isSilencedPath(): boolean {
   if (typeof location === 'undefined') return false
   return SILENCED_PATHS.has(location.pathname)
 }

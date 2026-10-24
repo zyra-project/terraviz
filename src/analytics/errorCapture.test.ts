@@ -2,6 +2,8 @@
 // Copyright 2026 The Zyra Project
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import type { ErrorEvent as TelemetryErrorEvent, ErrorDetailEvent } from '../types'
 import { flush, resetForTests as resetEmitter } from './emitter'
 import { setTier } from './config'
@@ -386,38 +388,61 @@ describe('reportError', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────
-// install / uninstall — global handlers + console patches
+// install / uninstall — global handlers
 // ─────────────────────────────────────────────────────────────────────
+
+/** Fire an uncaught error at `window` the way the browser would. */
+function dispatchWindowError(message: string): void {
+  const err = new Error(message)
+  err.stack = `Error: ${message}\n    at fn (http://localhost/src/foo.ts:1:1)`
+  // happy-dom dispatches ErrorEvent
+  window.dispatchEvent(new window.ErrorEvent('error', { error: err, message }))
+}
 
 describe('install / uninstall', () => {
   beforeEach(() => resetAll())
   afterEach(() => uninstall())
 
-  it('patches console.error but preserves the original output', () => {
-    const origCalls: unknown[][] = []
-    const origError = console.error
-    console.error = (...args: unknown[]) => {
-      origCalls.push(args)
-    }
+  it('leaves console.error and console.warn untouched', () => {
+    const before = { error: console.error, warn: console.warn }
     install()
-    console.error('something broke')
-    // Original reference must still receive the call so devs see the
-    // message in the dev console.
-    expect(origCalls.length).toBe(1)
-    expect(origCalls[0][0]).toBe('something broke')
-    // Restore before uninstall's sequence
-    uninstall()
-    console.error = origError
+    expect(console.error).toBe(before.error)
+    expect(console.warn).toBe(before.warn)
   })
 
-  it('captures console.warn into the telemetry stream', () => {
-    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  it('reports nothing for console output', () => {
+    // The app's own log lines interpolate values the sanitizer cannot
+    // recognise (a monitor's display name, for one), so a console line
+    // must never reach the stream. The window error after it proves the
+    // pipeline was live while the console lines went by.
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     install()
-    console.warn('deprecated API usage')
-    const drained = flush()
-    const errs = drained.filter((e) => e.event_type === 'error') as TelemetryErrorEvent[]
-    expect(errs.some((e) => e.source === 'console_warn')).toBe(true)
-    spy.mockRestore()
+    console.error('[multiOutput] output-2 crashed on DELL U2720Q')
+    console.warn('[multiOutput] not restoring output-1: no monitor matches LG HDR 4K')
+    dispatchWindowError('boom')
+    const errs = flush().filter((e) => e.event_type === 'error') as TelemetryErrorEvent[]
+    expect(errs.map((e) => e.source)).toEqual(['window_error'])
+    errSpy.mockRestore()
+    warnSpy.mockRestore()
+  })
+
+  it('declines on the privacy page, and does not latch there', () => {
+    const originalPath = window.location.pathname
+    try {
+      window.history.pushState(null, '', '/privacy')
+      install()
+      window.history.pushState(null, '', '/')
+      dispatchWindowError('missed')
+      expect(flush()).toEqual([])
+      // A later call from a page that may emit still installs.
+      install()
+      dispatchWindowError('caught')
+      const errs = flush().filter((e) => e.event_type === 'error') as TelemetryErrorEvent[]
+      expect(errs.map((e) => e.message_class)).toEqual(['caught'])
+    } finally {
+      window.history.pushState(null, '', originalPath)
+    }
   })
 
   it('captures window.error via the global handler', () => {
@@ -447,30 +472,51 @@ describe('install / uninstall', () => {
   })
 
   it('install is idempotent', () => {
-    // Silence the original console before install so the patched
-    // layer has a noop to delegate to; otherwise the test output
-    // picks up the log. Spying after install would replace the
-    // patched function and bypass the reporter entirely.
-    const origError = console.error
-    console.error = () => {}
     install()
     install() // second call must be a no-op
-    console.error('once')
-    const drained = flush()
-    const errs = drained.filter((e) => e.event_type === 'error')
-    // Clean up before asserting so a failure doesn't leave state
-    uninstall()
-    console.error = origError
-    // If install wrapped twice, a single call would report twice.
+    dispatchWindowError('once')
+    // If install attached twice, one error would report twice: the
+    // per-signature cap is 3, so the second copy would not be dropped.
+    const errs = flush().filter((e) => e.event_type === 'error')
     expect(errs.length).toBe(1)
   })
 
-  it('uninstall restores the original console.error', () => {
-    const before = console.error
+  it('uninstall detaches the global handlers', () => {
     install()
-    expect(console.error).not.toBe(before)
     uninstall()
-    expect(console.error).toBe(before)
+    dispatchWindowError('after uninstall')
+    expect(flush()).toEqual([])
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// Boot wiring — who calls install()
+// ─────────────────────────────────────────────────────────────────────
+
+describe('boot wiring', () => {
+  // This pipeline once shipped with its own tests and no caller, so no
+  // `uncaught` or `native_panic` report was ever sent while three docs
+  // described them. `main.ts` boots on import and exports nothing, so
+  // the call is pinned in its source — the technique
+  // `mapRendererProbeSource.test.ts` uses for code a unit test cannot
+  // reach. Comments are stripped so prose quoting the call cannot pass.
+  const source = readFileSync(resolve(process.cwd(), 'src/main.ts'), 'utf-8')
+    .replace(/\/\/[^\n]*/g, '')
+  const boot = source.slice(source.indexOf("addEventListener('DOMContentLoaded'"))
+
+  it('finds the boot handler', () => {
+    expect(boot).toContain('app.initialize()')
+  })
+
+  it('installs capture in the boot handler, behind the build flag', () => {
+    expect(boot).toMatch(/if\s*\(\s*TELEMETRY_BUILD_ENABLED\s*\)\s*installErrorCapture\(\)/)
+  })
+
+  it('installs after the portal and blog return, and before the app boots', () => {
+    const at = boot.indexOf('installErrorCapture()')
+    expect(boot.indexOf('bootPublisherPortal()')).toBeLessThan(at)
+    expect(boot.indexOf('bootBlogPage()')).toBeLessThan(at)
+    expect(at).toBeLessThan(boot.indexOf('app.initialize()'))
   })
 })
 

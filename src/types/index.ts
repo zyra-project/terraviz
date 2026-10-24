@@ -1194,12 +1194,13 @@ export type VrExitReason = 'user' | 'error' | 'session_lost'
 export type VrGesture = 'drag' | 'pinch' | 'thumbstick_zoom' | 'flick_spin' | 'hud_tap'
 /** Specular-strength presets surfaced in Tools → Display (§7.2). */
 export type SpecularPreset = 'none' | 'default' | 'comfortable'
+/** No `console` category: the console is not captured, and why is in
+ *  `src/analytics/errorCapture.ts`'s header. */
 export type ErrorCategory =
   | 'tile' | 'hls' | 'llm' | 'download' | 'vr' | 'tour' | 'caption'
-  | 'uncaught' | 'console' | 'native_panic'
+  | 'uncaught' | 'native_panic'
 export type ErrorSource =
-  | 'caught' | 'window_error' | 'unhandledrejection'
-  | 'console_error' | 'console_warn' | 'tauri_panic'
+  | 'caught' | 'window_error' | 'unhandledrejection' | 'tauri_panic'
 
 // --- Multi-monitor output (docs/MULTI_MONITOR_PLAN.md rung 13) ---
 
