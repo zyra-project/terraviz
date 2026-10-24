@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Zyra Project
 
+import type { Page } from 'playwright'
 import { describe, expect, it } from 'vitest'
 
-import { scenes, pointClearOfPanel } from './scenes'
+import { scenes, pointClearOfPanel, waitForBrowseView } from './scenes'
 
 describe('screenshot scene manifest', () => {
   it('covers the high-traffic surface (~15–30 scenes)', () => {
@@ -120,5 +121,46 @@ describe('pointClearOfPanel', () => {
     // the original bug take a week to find.
     const tall = { x: 0, y: 40, width: 390, height: 800 }
     expect(() => pointClearOfPanel(MOBILE, tall, 0.5, 0.5)).toThrow(/only 40px of canvas is clear/)
+  })
+})
+
+describe('waitForBrowseView', () => {
+  /** A page whose DOM holds exactly the given (container-scoped) selectors. */
+  function fakePage(present: string[]) {
+    const waited: Array<{ selectors: string[]; timeout?: number }> = []
+    const locator = (sel: string) => ({
+      sel,
+      count: async () => (present.includes(sel) ? 1 : 0),
+      or: (other: { sel: string }) => ({
+        first: () => ({
+          async waitFor(opts?: { timeout?: number }) {
+            waited.push({ selectors: [sel, other.sel], timeout: opts?.timeout })
+            if (!present.includes(sel) && !present.includes(other.sel)) throw new Error('Timeout')
+          },
+        }),
+      }),
+    })
+    return { page: { locator } as unknown as Page, waited }
+  }
+
+  it('waits on the view and its error inside the container, with a 30s budget', async () => {
+    const { page, waited } = fakePage(['#browse-map .browse-map-legend'])
+    await waitForBrowseView(page, '#browse-map', '.browse-map-legend', '.browse-map-status-error')
+    expect(waited).toEqual([
+      {
+        selectors: ['#browse-map .browse-map-legend', '#browse-map .browse-map-status-error'],
+        timeout: 30_000,
+      },
+    ])
+  })
+
+  it('throws, naming the container, when the view drew its error status', async () => {
+    // The error replaces the placeholder and nothing retries it, so a
+    // scene that waited on the legend alone would sit out the full 30s
+    // and then report a selector, not the failed import.
+    const { page } = fakePage(['#browse-graph .browse-graph-status-error'])
+    await expect(
+      waitForBrowseView(page, '#browse-graph', '.browse-graph-legend', '.browse-graph-status-error'),
+    ).rejects.toThrow(/#browse-graph: the view's chunk failed to load/)
   })
 })

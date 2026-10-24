@@ -120,6 +120,34 @@ async function openCatalog(page: Page): Promise<void> {
 }
 
 /**
+ * Wait for a lazily mounted Browse view to replace its placeholder.
+ *
+ * `browseUI` unhides the view's container while it still holds a
+ * "Loading … view" status, and swaps that for the view only once the
+ * view's chunk has loaded, or for an error status if the import failed.
+ * So `:not(.hidden)` on the container proves nothing about what is in
+ * it. Waits for `mounted`, an element only the mounted view draws, with
+ * the 30s budget the smoke check gives the Timeline. The error status is
+ * terminal (only another toggle retries), so it is thrown as soon as it
+ * appears rather than left to time out on a selector it will never show.
+ */
+export async function waitForBrowseView(
+  page: Page,
+  container: string,
+  mounted: string,
+  error: string,
+): Promise<void> {
+  const failed = page.locator(`${container} ${error}`)
+  await page.locator(`${container} ${mounted}`).or(failed).first().waitFor({ timeout: 30_000 })
+  if (await failed.count()) {
+    throw new Error(
+      `${container}: the view's chunk failed to load, and browseUI drew its ` +
+        'error status instead of the view. See the console for the import error.',
+    )
+  }
+}
+
+/**
  * Open a publisher-portal route.
  *
  * The portal lives behind Cloudflare Access with a Pages-Functions
@@ -337,6 +365,13 @@ export const scenes: Scene[] = [
       await openCatalog(page)
       await page.locator('#browse-view-mode [data-view-mode="graph"]').click()
       await page.locator('#browse-graph:not(.hidden)').waitFor()
+      // The container is unhidden while it still holds the "Loading
+      // graph view…" placeholder, before the lazy catalogGraphUI chunk
+      // mounts, so a cold runner can capture the placeholder. The diff
+      // masks #browse-graph, but the Weblate capture and the axe scan do
+      // not. Wait for the toolbar legend, which only the mounted view
+      // draws, and which stays up when the filtered catalog is empty.
+      await waitForBrowseView(page, '#browse-graph', '.browse-graph-legend', '.browse-graph-status-error')
     },
   },
   {
@@ -362,6 +397,11 @@ export const scenes: Scene[] = [
       await openCatalog(page)
       await page.locator('#browse-view-mode [data-view-mode="map"]').click()
       await page.locator('#browse-map:not(.hidden)').waitFor()
+      // Same race as the Graph scene: the container is unhidden over the
+      // "Loading map view…" placeholder, before the lazy catalogMapUI
+      // chunk mounts. The legend is drawn with the toolbar, before
+      // MapLibre starts, and stays up whatever the catalog holds.
+      await waitForBrowseView(page, '#browse-map', '.browse-map-legend', '.browse-map-status-error')
     },
   },
 
