@@ -165,6 +165,10 @@ existing ones shifts every later position.
 | Is it a sanitized stack trace (vs. just an error category)? | Yes |
 | Is it none of the above — a coarse operational counter? | **Tier A** |
 
+`session_end`'s whole-app session length (`duration_ms`,
+`visible_ms`) is Tier A by decision despite the dwell row; the
+reasoning is in [`PRIVACY_ANALYSIS.md`](PRIVACY_ANALYSIS.md) §7a.
+
 When in doubt, default to Tier B. Promoting B → A later is a
 schema decision (still ok), but accidentally shipping a
 sensitive event as Tier A means it leaked from every user who

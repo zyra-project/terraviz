@@ -77,6 +77,12 @@ Small, anonymous events about the health of the app:
   Zyra-Project staff member is signed in via our internal auth
   layer; the authenticated email itself is **never** stored —
   only the boolean)
+- When you close the app, or the first time you switch away from
+  it — how long it had been open, how much of that time it was
+  visible rather than sitting in a background tab or minimized,
+  how many of these events it had recorded, and whether it was
+  closed or only switched away from. This is recorded once per
+  session, as totals for the whole app — not broken down by panel
 - That a data layer was loaded — which layer, whether it came from the
   network or a local cache, how long it took
 - That a data layer was unloaded — which layer, how long you viewed it
