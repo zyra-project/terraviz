@@ -39,7 +39,7 @@
  * read-only view is a courtesy rather than the control.
  */
 
-import { t } from '../../../i18n'
+import { t, type MessageKey } from '../../../i18n'
 import {
   EMBED_MODES,
   FILE_SOURCE,
@@ -220,13 +220,28 @@ const ORIGIN_ERROR_KEYS = {
   shared_host: 'publisher.nodeProfile.embedding.error.sharedHost',
 } as const satisfies Record<EmbedOriginErrorCode, string>
 
-/** The tokens the `file:` strings name. Placeholders rather than
- *  literals, so a translation cannot space the colon (French puts a
- *  space before one) and an RTL sentence cannot move it. */
-const FILE_TOKENS = { entry: isolate(FILE_SOURCE), scheme: isolate('file://') } // i18n-exempt: literal tokens
+/** The literal tokens the card's strings name. Placeholders rather
+ *  than text, so a translation cannot alter them (French spaces a
+ *  colon, which breaks `file:`), and set by {@link sentence} in an
+ *  element of their own, so an RTL sentence cannot move their edge
+ *  punctuation: each ends in `:`, `//` or `--`, which the bidi
+ *  algorithm lays out by the Arabic around it rather than the letters
+ *  beside it. An example address stays literal while it stays in
+ *  Latin letters, which its translator note asks: it starts and ends
+ *  with a letter, so it keeps its order unaided. */
+const LITERAL_TOKENS = {
+  entry: FILE_SOURCE,
+  scheme: 'file://', // i18n-exempt: literal token
+  https: 'https://', // i18n-exempt: literal token
+  prefix: 'xn--', // i18n-exempt: literal token
+}
 
-function originErrorText(code: string, fallback: string): string {
-  if (code in ORIGIN_ERROR_KEYS) return t(ORIGIN_ERROR_KEYS[code as EmbedOriginErrorCode], FILE_TOKENS)
+/** What a row error or a finding says: plain text, or a
+ *  {@link sentence}. */
+type Message = string | Node[]
+
+function originError(code: string, fallback: string): Message {
+  if (code in ORIGIN_ERROR_KEYS) return sentence(ORIGIN_ERROR_KEYS[code as EmbedOriginErrorCode], LITERAL_TOKENS)
   return fallback
 }
 
@@ -240,19 +255,24 @@ const IS_WARNING = {
   extra: true,
 } satisfies Record<LiveFinding['kind'], boolean>
 
-function findingText(finding: LiveFinding): string {
+function findingMessage(finding: LiveFinding): Node[] {
   switch (finding.kind) {
     case 'ok':
-      return t('publisher.nodeProfile.embedding.live.ok')
+      return sentence('publisher.nodeProfile.embedding.live.ok')
     case 'pending':
-      return t('publisher.nodeProfile.embedding.live.pending')
+      return sentence('publisher.nodeProfile.embedding.live.pending')
     case 'xfo':
-      return t('publisher.nodeProfile.embedding.live.xfo', { value: isolate(finding.value) })
+      return sentence('publisher.nodeProfile.embedding.live.xfo', { value: finding.value })
     case 'xfo-ignored':
-      return t('publisher.nodeProfile.embedding.live.xfoIgnored', { value: isolate(finding.value) })
+      return sentence('publisher.nodeProfile.embedding.live.xfoIgnored', { value: finding.value })
     case 'extra':
-      return t('publisher.nodeProfile.embedding.live.extra', { value: isolate(finding.value) })
+      return sentence('publisher.nodeProfile.embedding.live.extra', { value: finding.value })
   }
+}
+
+/** What a {@link Message} reads as, for a status region. */
+function messageText(message: Message): string {
+  return typeof message === 'string' ? message : message.map(node => node.textContent ?? '').join('')
 }
 
 // ----- DOM -----
@@ -260,7 +280,7 @@ function findingText(finding: LiveFinding): string {
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   props: Partial<HTMLElementTagNameMap[K]> & { className?: string } = {},
-  children: (HTMLElement | string)[] = [],
+  children: (Node | string)[] = [],
 ): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag)
   Object.assign(node, props)
@@ -270,10 +290,33 @@ function el<K extends keyof HTMLElementTagNameMap>(
 
 let cardCount = 0
 
-/** Unicode first-strong isolate: a header value or a URL keeps its own
- *  left-to-right order inside a translated right-to-left sentence. */
-function isolate(value: string): string {
-  return `\u2068${value}\u2069`
+/**
+ * A translated sentence as nodes, with each value it names (a URL, a
+ * header value, a literal token) in a `<span dir="ltr">`. HTML isolates
+ * an element that carries `dir`, so the value keeps its own
+ * left-to-right order inside a right-to-left sentence. It replaced
+ * U+2068/U+2069 isolate characters in the text, which did the same for
+ * layout but reached assistive technology and the clipboard: a braille
+ * display showed each as an eight-cell escape, character navigation
+ * read "symbol 2068", and a token copied from the card carried them
+ * into a row, which refused it as non-ASCII. The W3C's advice is the
+ * same: use markup where it is available. A placeholder with no value
+ * given stays as written, as `interpolate` leaves it.
+ */
+function sentence(key: MessageKey, values: Readonly<Record<string, string>> = {}): Node[] {
+  const template = t(key)
+  const nodes: Node[] = []
+  let at = 0
+  for (const match of template.matchAll(/\{(\w+)\}/g)) {
+    const value = values[match[1]]
+    const index = match.index ?? 0
+    if (value === undefined) continue
+    if (index > at) nodes.push(document.createTextNode(template.slice(at, index)))
+    nodes.push(el('span', { dir: 'ltr', textContent: value }))
+    at = index + match[0].length
+  }
+  if (at < template.length) nodes.push(document.createTextNode(template.slice(at)))
+  return nodes
 }
 
 /** A button that stays focusable while its action runs. Setting
@@ -386,7 +429,7 @@ export function buildEmbeddingCard(options: EmbeddingCardOptions): HTMLElement {
   )
   if (options.canEdit) {
     originsBlock.append(
-      el('p', { className: 'publisher-nodeprofile-hint', id: originsHintId, textContent: t('publisher.nodeProfile.embedding.origins.hint') }),
+      el('p', { className: 'publisher-nodeprofile-hint', id: originsHintId }, sentence('publisher.nodeProfile.embedding.origins.hint', LITERAL_TOKENS)),
     )
   }
 
@@ -431,8 +474,8 @@ export function buildEmbeddingCard(options: EmbeddingCardOptions): HTMLElement {
     atMax.hidden = !full
   }
 
-  const setRowError = (entry: OriginRow, message: string | null): void => {
-    entry.error.textContent = message ?? ''
+  const setRowError = (entry: OriginRow, message: Message | null): void => {
+    entry.error.replaceChildren(...(typeof message === 'string' ? [message] : (message ?? [])))
     entry.error.hidden = message === null
     if (message === null) entry.input.removeAttribute('aria-invalid')
     else entry.input.setAttribute('aria-invalid', 'true')
@@ -490,7 +533,7 @@ export function buildEmbeddingCard(options: EmbeddingCardOptions): HTMLElement {
     // Save, and most admins never need `file:`.
     const fileHelp = el('details', { className: 'publisher-nodeprofile-embed-file' }, [
       el('summary', { textContent: t('publisher.nodeProfile.embedding.origins.file.summary') }),
-      el('p', { className: 'publisher-nodeprofile-hint', textContent: t('publisher.nodeProfile.embedding.origins.file.how', FILE_TOKENS) }),
+      el('p', { className: 'publisher-nodeprofile-hint' }, sentence('publisher.nodeProfile.embedding.origins.file.how', LITERAL_TOKENS)),
       el('p', { className: 'publisher-nodeprofile-hint', textContent: t('publisher.nodeProfile.embedding.origins.file.risk') }),
     ])
     originsBlock.append(list, addButton, atMax, fileHelp)
@@ -504,7 +547,7 @@ export function buildEmbeddingCard(options: EmbeddingCardOptions): HTMLElement {
     // `file:` is not a site, so say what it admits.
     if (saved.origins.includes(FILE_SOURCE)) {
       originsBlock.append(
-        el('p', { className: 'publisher-nodeprofile-hint', textContent: t('publisher.nodeProfile.embedding.origins.file.readOnly', FILE_TOKENS) }),
+        el('p', { className: 'publisher-nodeprofile-hint' }, sentence('publisher.nodeProfile.embedding.origins.file.readOnly', LITERAL_TOKENS)),
       )
     }
   }
@@ -558,13 +601,16 @@ export function buildEmbeddingCard(options: EmbeddingCardOptions): HTMLElement {
       )
       liveFindings.replaceChildren(
         ...findings.map(finding =>
-          el('li', {
-            className: IS_WARNING[finding.kind] ? 'publisher-nodeprofile-embed-finding publisher-nodeprofile-embed-finding-warn' : 'publisher-nodeprofile-embed-finding',
-            textContent: findingText(finding),
-          }),
+          el(
+            'li',
+            {
+              className: IS_WARNING[finding.kind] ? 'publisher-nodeprofile-embed-finding publisher-nodeprofile-embed-finding-warn' : 'publisher-nodeprofile-embed-finding',
+            },
+            findingMessage(finding),
+          ),
         ),
       )
-      if (announce) liveStatus.textContent = findings.map(findingText).join(' ')
+      if (announce) liveStatus.textContent = findings.map(finding => messageText(findingMessage(finding))).join(' ')
     } catch {
       liveValues.replaceChildren()
       liveFindings.replaceChildren(
@@ -609,12 +655,12 @@ export function buildEmbeddingCard(options: EmbeddingCardOptions): HTMLElement {
             continue
           }
           const result = validateEmbedOrigin(value)
-          let message: string | null = null
+          let message: Message | null = null
           // A duplicate quotes the site it repeats rather than a row
           // number, which a removal above would make wrong.
-          if (!result.ok) message = originErrorText(result.code, result.message)
+          if (!result.ok) message = originError(result.code, result.message)
           else if (seen.has(result.value)) {
-            message = t('publisher.nodeProfile.embedding.error.duplicate', { site: isolate(result.value) })
+            message = sentence('publisher.nodeProfile.embedding.error.duplicate', { site: result.value })
           } else seen.add(result.value)
           setRowError(entry, message)
           if (message !== null) firstInvalid ??= entry
@@ -668,7 +714,7 @@ export function buildEmbeddingCard(options: EmbeddingCardOptions): HTMLElement {
               const match = /^embedding\.origins\[(\d+)\]$/.exec(error.field)
               const target = match ? sent[Number(match[1])]?.entry : undefined
               if (!target) continue
-              setRowError(target, originErrorText(error.code, error.message))
+              setRowError(target, originError(error.code, error.message))
               if (!placed) target.input.focus()
               placed = true
             }
