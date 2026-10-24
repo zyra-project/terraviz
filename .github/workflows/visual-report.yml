@@ -53,7 +53,15 @@ jobs:
     name: Smoke / interaction tests
     runs-on: ubuntu-latest
     steps:
+      # No job here pushes, so the token is not left in .git/config for
+      # `npm ci`'s install scripts and the dev server to read. That
+      # matters since lockfile-only PRs (Dependabot's security updates
+      # among them) reach this workflow, which grants pull-requests:
+      # write. The steps that call the API take the token as an action
+      # input, not from git.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -77,7 +85,10 @@ jobs:
     name: Capture + diff + report
     runs-on: ubuntu-latest
     steps:
+      # Credentials not persisted; see the smoke job.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
