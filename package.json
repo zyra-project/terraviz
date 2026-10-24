@@ -141,7 +141,7 @@
     "happy-dom": "^20.8.9",
     "marked": "^18.0.2",
     "pixelmatch": "^7.2.0",
-    "playwright": "^1.60.0",
+    "playwright": "^1.61.1",
     "pngjs": "^7.0.0",
     "sharp": "^0.35.5",
     "style-dictionary": "^5.5.3",
