@@ -66,7 +66,7 @@ Phase 2 opt-in public projection:
 | `cli/lib/r2-frames.ts` | R2-backed frame cache for real-time Zyra workflow runs — restore/save a dataset's frames under `workflow-frames/{dataset_id}/` with window-only prune (`docs/ZYRA_INTEGRATION_PLAN.md` §Real-time frame store) |
 | `cli/lib/r2-upload.ts` | R2 S3-API bulk uploader for HLS bundles |
 | `cli/lib/realtime-title.ts` | Heuristic to detect "real-time" SOS rows by title — the rows whose Vimeo source is re-uploaded on a recurring (typically daily) cadence by NOAA's automation |
-| `cli/lib/snapshot-import.ts` | Pure SOS snapshot-to-draft mapper; explicit stable-ID crosswalk, all duplicate operational rows withheld, conservative imported bounds and unknown represented-time/resource assertions |
+| `cli/lib/snapshot-import.ts` | Pure SOS snapshot-to-draft mapper; explicit stable-ID crosswalk, all duplicate operational rows withheld, conservative imported bounds and unknown represented-time/resource assertions; `organization` stored as plain text (SOS writes it as HTML), cut at a word with an ellipsis when its names still exceed the 100-character cap |
 | `cli/lib/snapshot-crosswalk.ts` | Stable operational-ID → exact enrichment-source-URL resolution with collision checks; separate offline title-bootstrap candidate generator, never a runtime import fallback |
 | `cli/lib/sos-spec.ts` | ffprobe wrapper + SOS-spec assertion (4096×2048 2:1, 30 fps, h264) shared by the Z0 spike and the Z1 runner |
 | `cli/lib/srt-to-vtt.ts` | SRT → WebVTT converter |

@@ -3,15 +3,20 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  fitAtWord,
   mapDataRef,
   mapFormat,
+  mapOrganization,
   mapSnapshot,
   mapSnapshotEntry,
+  organizationText,
   pickDataLink,
+  previousOrganization,
   type RawEnrichedEntry,
   type RawSosEntry,
 } from './snapshot-import'
 import baseline from '../../public/assets/sos-enrichment-crosswalk.json'
+import snapshot from '../../public/assets/sos-dataset-list.json'
 import type { SnapshotCrosswalk } from './snapshot-crosswalk'
 
 const sample: RawSosEntry = {
@@ -242,6 +247,128 @@ describe('mapSnapshotEntry — clipping to validator caps', () => {
     expect(outcome.kind).toBe('ok')
     if (outcome.kind !== 'ok') return
     expect(outcome.row.draft.title!.length).toBe(200)
+  })
+})
+
+describe('mapSnapshotEntry — organization', () => {
+  // Earthquakes - 2001-2015 (01KQG62M0Z3EC0T9EXFH1MVXDV on the node):
+  // plain text, 104 characters, stored as "… NASA Blue Marble G".
+  const EARTHQUAKES = 'NOAA Pacific Tsunami Warning Center, USGS National Earthquake Information Center, NASA Blue Marble GEBCO'
+  // Tsunami Historical Series: Cascadia - 1700, cut inside its second
+  // tag: stored as `…Center</a>, <a href="https://visibl`.
+  const CASCADIA = '<a href="https://ptwc.weather.gov/">NOAA Pacific Tsunami Warning Center</a>, <a href="https://visibleearth.nasa.gov/">NASA Blue Marble</a>, <a href="https://www.gebco.net/data_and_products/gridded_bathymetry_data/gebco_30_second_grid/">GEBCO</a>'
+  // Tsunami Historical Series: Chile - 1960, and six more like it:
+  // 244 characters of HTML, 104 of names.
+  const CHILE = '<a href="https://ptwc.weather.gov/">NOAA Pacific Tsunami Warning Center</a>, USGS National Earthquake Information Center, NASA Blue Marble <a href="https://www.gebco.net/data_and_products/gridded_bathymetry_data/gebco_30_second_grid/">GEBCO</a>'
+
+  function organizationOf(organization: string): string | undefined {
+    const outcome = mapSnapshotEntry({ ...sample, organization }, undefined)
+    expect(outcome.kind).toBe('ok')
+    return outcome.kind === 'ok' ? outcome.row.draft.organization : undefined
+  }
+
+  it('cuts Earthquakes at a word, with an ellipsis, rather than at "Blue Marble G"', () => {
+    expect(EARTHQUAKES).toHaveLength(104)
+    expect(previousOrganization(EARTHQUAKES)).toBe(EARTHQUAKES.slice(0, 100))
+    expect(organizationOf(EARTHQUAKES)).toBe(
+      'NOAA Pacific Tsunami Warning Center, USGS National Earthquake Information Center, NASA Blue Marble…',
+    )
+  })
+
+  it('keeps an HTML organization that was cut inside a tag whole, as its names', () => {
+    expect(previousOrganization(CASCADIA)).toMatch(/<a href="https:\/\/visibl$/)
+    expect(organizationOf(CASCADIA)).toBe('NOAA Pacific Tsunami Warning Center, NASA Blue Marble, GEBCO')
+  })
+
+  it('measures an HTML organization by its names, then cuts those at a word', () => {
+    expect(CHILE).toHaveLength(244)
+    expect(organizationText(CHILE)).toBe(EARTHQUAKES)
+    expect(organizationOf(CHILE)).toBe(organizationOf(EARTHQUAKES))
+  })
+
+  it('reads a short HTML organization as its text', () => {
+    expect(organizationOf('NOAA <a href="https://www.gfdl.noaa.gov/">GFDL</a>')).toBe('NOAA GFDL')
+    expect(organizationOf('<a href =  "https://www.mmedia.is/~bjj/planetary_maps.html"> Bjorn  Jonsson</a>'))
+      .toBe('Bjorn Jonsson')
+  })
+
+  it('reads `&nbsp` with no semicolon, as two SOS rows write it', () => {
+    expect(organizationOf(
+      'Cassini and Voyager &nbsp <a  href = "https://laps.noaa.gov/albers/sos/sos.html#ENCELADUS" target = "blank"> Image details</a>',
+    )).toBe('Cassini and Voyager Image details')
+  })
+
+  it('leaves a plain organization that fits as it was', () => {
+    expect(organizationOf('NOAA')).toBe('NOAA')
+    expect(organizationOf('  NOAA/PMEL  ')).toBe('NOAA/PMEL')
+  })
+
+  it('omits an organization that is markup with no text', () => {
+    expect(organizationOf('<a href="https://example.org/"></a>')).toBeUndefined()
+    expect(mapOrganization(undefined)).toBeUndefined()
+  })
+
+  it('reads entities after the tags are out, and once', () => {
+    expect(organizationText('Earth &amp; Space &lt;b&gt;Lab&lt;/b&gt;')).toBe('Earth & Space <b>Lab</b>')
+    expect(organizationText('AT&amp;amp;T')).toBe('AT&amp;T')
+    expect(organizationText('O&#39;Brien &#x2014; NOAA')).toBe("O'Brien — NOAA")
+    expect(organizationText('R&D &bogus; &#0;')).toBe('R&D &bogus; &#0;')
+  })
+
+  it('keeps a `<` that starts no tag, and drops a tag left open', () => {
+    expect(organizationText('PM < 2.5 Working Group')).toBe('PM < 2.5 Working Group')
+    expect(organizationText('NOAA <a href="https://visibl')).toBe('NOAA')
+  })
+
+  it('runs inline tags into their words and puts a space for any other', () => {
+    expect(organizationText('NOAA <b>GFDL</b>, NASA')).toBe('NOAA GFDL, NASA')
+    expect(organizationText('NOAA<br>NASA<br/>ESA')).toBe('NOAA NASA ESA')
+    expect(organizationText('H<sub>2</sub>O Lab')).toBe('H2O Lab')
+  })
+
+  it('maps every organization in the committed snapshot to text within the cap', () => {
+    const rows = (snapshot as unknown as { datasets: RawSosEntry[] }).datasets
+    let cut = 0
+    for (const row of rows) {
+      const mapped = mapOrganization(row.organization)
+      if (mapped === undefined) continue
+      expect(mapped.length).toBeLessThanOrEqual(100)
+      expect(mapped).not.toMatch(/<[A-Za-z/!]|&nbsp/)
+      const text = organizationText(row.organization!)
+      if (mapped === text) continue
+      // Anything shorter than its text is marked, and is the text's start.
+      expect(mapped.endsWith('…')).toBe(true)
+      expect(text.startsWith(mapped.slice(0, -1))).toBe(true)
+      cut++
+    }
+    // Earthquakes and the seven Tsunami Historical Series rows: 104
+    // characters of names each. The other 11 that were cut at 100 fit
+    // once their markup is out.
+    expect(cut).toBe(8)
+  })
+})
+
+describe('fitAtWord', () => {
+  it('returns text that fits unchanged', () => {
+    expect(fitAtWord('NOAA', 4)).toBe('NOAA')
+  })
+
+  it('counts the ellipsis inside the budget', () => {
+    expect(fitAtWord('alpha beta gamma', 15)).toBe('alpha beta…')
+    expect(fitAtWord('alpha beta gamma', 15).length).toBeLessThanOrEqual(15)
+  })
+
+  it('drops a separator left dangling before the ellipsis', () => {
+    expect(fitAtWord('NOAA Center, USGS Earthquakes', 15)).toBe('NOAA Center…')
+    expect(fitAtWord('NOAA Center & USGS Earthquakes', 16)).toBe('NOAA Center…')
+  })
+
+  it('cuts mid-word, still marked, when the last word would cost over half the budget', () => {
+    expect(fitAtWord('NOAA Supercalifragilisticexpialidocious', 20)).toBe('NOAA Supercalifragi…')
+  })
+
+  it('never splits a surrogate pair', () => {
+    expect(fitAtWord('𝔸𝔹𝔺𝔻', 4)).toBe('𝔸…')
   })
 })
 

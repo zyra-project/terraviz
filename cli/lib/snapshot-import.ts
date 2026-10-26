@@ -32,7 +32,9 @@
  *                       form and would otherwise drop). See
  *                       `pickDataLink`.
  *   - abstract         ← enriched.description ?? SOS abstractTxt
- *   - organization     ← SOS organization
+ *   - organization     ← SOS organization, as plain text, cut at a word
+ *                       with an ellipsis if it still exceeds 100 chars
+ *                       (see `mapOrganization`)
  *   - website_link     ← SOS websiteLink
  *   - thumbnail_ref    ← SOS thumbnailLink
  *   - legend_ref       ← SOS legendLink
@@ -356,6 +358,84 @@ function clipString(value: unknown, max: number): string | undefined {
   return trimmed.length > max ? trimmed.slice(0, max) : trimmed
 }
 
+/** Tags a browser draws inline, so they run into the words beside them.
+ *  Any other tag stands for a space. */
+const INLINE_TAGS = new Set(['a', 'abbr', 'b', 'em', 'font', 'i', 'small', 'span', 'strong', 'sub', 'sup', 'u'])
+
+const NAMED_ENTITIES: Readonly<Record<string, string>> = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+}
+
+/** What a cut leaves dangling before its ellipsis: "Center, …" reads
+ *  as a list with a missing item, "Center…" as a cut name. */
+const DANGLING = /[\s,;:/&(–—-]+$/
+
+/**
+ * An SOS organization as plain text. 42 of the snapshot's 171 are
+ * HTML (`<a href="…">Name</a>, …`), and every reader of the row treats
+ * the field as text: the info panel and browse card escape it, STAC
+ * puts it in `providers[].name`, the exhibit card strips it. Stored as
+ * markup it showed as markup, and it spent the 100-character cap on
+ * URLs: the Tsunami Historical Series credit is 244 characters of HTML
+ * and 104 of names.
+ *
+ * A tag is a `<` before a letter, `/` or `!`, up to its `>` (one left
+ * open runs to the end); any other `<` is text. The link text stays and
+ * the URL goes, which costs no reader anything, since none of them drew
+ * the link. Entities are read after the tags are out, and once, so
+ * `&lt;b&gt;` stays the text "<b>". `&nbsp` with no semicolon is how two
+ * SOS rows write it. Runs of white space fold to one space.
+ */
+export function organizationText(source: string): string {
+  const text = source.replace(/<[A-Za-z/!][^>]*(?:>|$)/g, tag => {
+    const name = tag.match(/^<\/?\s*([A-Za-z][A-Za-z0-9]*)/)?.[1]?.toLowerCase()
+    return name && INLINE_TAGS.has(name) ? '' : ' '
+  })
+  return text
+    .replace(/&(#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});?/g, (whole, body: string) => {
+      if (body[0] !== '#') return Object.hasOwn(NAMED_ENTITIES, body) ? NAMED_ENTITIES[body] : whole
+      const code = body[1] === 'x' || body[1] === 'X' ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10)
+      const readable = code >= 0x20 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff)
+      return readable ? String.fromCodePoint(code) : whole
+    })
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * `text` in at most `max` characters: whole if it fits, else cut at the
+ * last word that leaves room for an ellipsis, which says it was cut. A
+ * word is only given up for if it would cost more than half the budget,
+ * in which case the cut falls mid-word, still with the ellipsis.
+ */
+export function fitAtWord(text: string, max: number): string {
+  if (text.length <= max) return text
+  let end = max - 1
+  // Never half of a surrogate pair.
+  if (/[\ud800-\udbff]/.test(text[end - 1])) end -= 1
+  const space = text.lastIndexOf(' ', end)
+  if (space > end / 2) end = space
+  return text.slice(0, end).replace(DANGLING, '') + '…'
+}
+
+/** The organization a row carries: plain text, cut at a word if it must be. */
+export function mapOrganization(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const text = organizationText(value)
+  return text ? fitAtWord(text, ORGANIZATION_MAX) : undefined
+}
+
+/**
+ * The organization this mapper wrote before 26 October 2026: the source
+ * trimmed and cut at 100 characters, markup and all, with no mark that
+ * it was cut. `import-snapshot --repair-organization` rewrites a stored
+ * value only while it still equals this, so a value a publisher has
+ * since edited is left alone.
+ */
+export function previousOrganization(value: unknown): string | undefined {
+  return clipString(value, ORGANIZATION_MAX)
+}
+
 /** Clip an array of strings to (maxItems, perItemMax); drops empties. */
 function clipStringArray(
   values: string[] | undefined,
@@ -454,7 +534,7 @@ export function mapSnapshotEntry(
   const abstract = clipString(enriched?.description, ABSTRACT_MAX) ?? clipString(sos.abstractTxt, ABSTRACT_MAX)
   if (abstract) draft.abstract = abstract
 
-  const organization = clipString(sos.organization, ORGANIZATION_MAX)
+  const organization = mapOrganization(sos.organization)
   if (organization) draft.organization = organization
 
   const websiteLink = clipString(sos.websiteLink, 1024)
