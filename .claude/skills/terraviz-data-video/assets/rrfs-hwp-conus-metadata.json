@@ -1,0 +1,12 @@
+{
+  "title": "Wildfire Potential — Hourly Forecast, United States (RRFS)",
+  "abstract": "Where conditions favour wildfire growth over the next three and a half days.\n\nThis is a forecast of fire potential, not of fire itself. It combines the near-surface weather that drives fire behaviour — wind, temperature, humidity — with the state of the fuels on the ground, into a single hourly index. Bright areas are where a fire, if one starts or is already burning, would find conditions to grow and spread. Dark, clear areas are where conditions are unfavourable. The index is unitless: higher means more favourable to fire, and it is best read as a relative picture across the map and across the day rather than as an absolute measure.\n\nIt is also the fire-side companion to the smoke maps. NOAA's Rapid Refresh Forecast System uses this same quantity to decide how much smoke to emit, so this is the upstream of what the whole-column and near-surface smoke forecasts show drifting downwind.\n\nThe forecast is rebuilt four times a day and steps hour by hour across the continental United States. Hover anywhere on the map to read the forecast value at that spot.\n\nForecast valid {{valid_iso:PT6H:PT6H}} to {{valid_iso:PT6H:PT6H:PT84H}}.",
+  "keywords": ["wildfire", "fire weather", "fire danger", "forecast", "real-time", "RRFS"],
+  "start_time": "{{valid_iso:PT6H:PT6H}}",
+  "end_time": "{{valid_iso:PT6H:PT6H:PT84H}}",
+  "period": "PT1H",
+  "organization": "NOAA National Weather Service",
+  "attribution_text": "NOAA/NWS/NCEP Rapid Refresh Forecast System (RRFS), distributed via NOAA Open Data Dissemination on AWS.",
+  "website_link": "https://registry.opendata.aws/noaa-rrfs/",
+  "license_statement": "Output of the NOAA Rapid Refresh Forecast System (RRFS), produced by NOAA/NWS/NCEP. As a work of the United States Government it is not subject to domestic copyright protection under 17 U.S.C. § 105 and may be freely used and redistributed. Provided without warranty; not for use as the sole basis of operational or safety-of-life decisions."
+}
