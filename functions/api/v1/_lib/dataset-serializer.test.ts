@@ -14,6 +14,8 @@
  * the fall-back behaviour when the resolver is absent.
  */
 
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   serializeDataset,
@@ -654,5 +656,44 @@ describe('data-encoded video (renderEncoding / colorScale)', () => {
     const wire = serializeDataset(fakeRow(over), emptyDecoration, fakeIdentity)
     expect(wire.renderEncoding).toBeUndefined()
     expect(wire.colorScale).toBeUndefined()
+  })
+})
+
+describe('serializeDataset — what the Second Life globe scripts read', () => {
+  // scripts/second-life-probe/terraviz-globe.lsl reads only the first
+  // CHECK_MAX bytes of GET /api/v1/datasets/:id, since a whole record can
+  // cost an LSL script twice its size in memory, and the exhibit's globe
+  // script, which once had this check, ran out of memory in-world with
+  // web replies in hand and now makes no request at all. It cuts that
+  // at `,"format":"`, parses what is before as an object of id, slug and
+  // title, and reads the format after it to refuse anything but an image
+  // or a video. So it depends on this field order, which is not part of
+  // the published contract (docs/protocol/README.md). This pins it: a
+  // reorder that fails here needs the script changed with it.
+  // The exhibit's info script leans on the order further down the record,
+  // which scripts/second-life-exhibit/exhibit.test.ts pins.
+  it.each([
+    'scripts/second-life-probe/terraviz-globe.lsl',
+  ])('puts id, slug, title and format first, inside what %s reads', script => {
+    const source = readFileSync(resolve(process.cwd(), script), 'utf8')
+    const max = Number(source.match(/^integer\s+CHECK_MAX\s*=\s*(\d+);/m)?.[1])
+    expect(max).toBeGreaterThan(0)
+    expect(source).toContain('[HTTP_BODY_MAXLENGTH, CHECK_MAX]')
+    // The longest title and slug the validators allow, at three bytes a
+    // character, the most a JavaScript string's code unit can cost.
+    const title = '€'.repeat(200)
+    const slug = `s${'a'.repeat(63)}`
+    const wire = serializeDataset(
+      fakeRow({ id: '01KQG611HF8YXJNRBEHT0757KT', slug, title, format: 'tour/json' }),
+      emptyDecoration,
+      fakeIdentity,
+      passthroughResolver,
+    )
+    // What the route sends: functions/api/v1/datasets/[id].ts.
+    const head = new TextDecoder().decode(new TextEncoder().encode(JSON.stringify(wire)).slice(0, max))
+    const cut = head.indexOf(',"format":"')
+    expect(cut).toBeGreaterThan(0)
+    expect(JSON.parse(`${head.slice(0, cut)}}`)).toEqual({ id: '01KQG611HF8YXJNRBEHT0757KT', slug, title })
+    expect(head.slice(cut + ',"format":"'.length)).toMatch(/^tour\/json"/)
   })
 })

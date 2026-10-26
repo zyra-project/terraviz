@@ -5077,6 +5077,24 @@ renderer somewhere" — which we don't. Direct RTT.
      attempts collapse into a single event with `retries`
      populated.
 
+     > **`hls-stalled` has a detector (24 October 2026).** An
+     > output's stream that would not load while it was still the
+     > dataset asked for, or that died after loading once hls.js
+     > had spent its retries, is reported by the output over IPC as
+     > `output_dataset_stalled` (declared in `protocol.ts` from the
+     > start and unused until now). The manager emits at most one
+     > row per output per published dataset, only for a stall naming
+     > that dataset, and none from a window that is closing. Each row
+     > carries `retries: 0` and `recovered: false`, and those are
+     > literal: nothing on the control side retries, and the single
+     > HLS rebuild this rung plans is still unbuilt. A load the
+     > operator had already moved on from is not reported: its
+     > failure says nothing about the output. hls.js's own recoveries happen
+     > inside the output and are not counted. The output still
+     > emits nothing itself. The web output page is the exception
+     > to that rule, because it has no control window: see
+     > `SECOND_LIFE_COMPAT.md` §7.
+
    Plus a per-minute extension to the existing `perf_sample`
    on the control window: when outputs are active, the
    sample includes `output_count` and `sync_delta_p95_ms`
@@ -5680,6 +5698,10 @@ it contains a frame, and what is reported meanwhile is the bound
 the silence implies (`1000 / elapsed`, minimum'd with the last
 reading), so a stall still collapses toward zero — continuously
 instead of by flicker — while an idle output holds near 1.
+(Superseded in October 2026: with the window restarted at the frame
+that ended a silence, a reading one callback after a floor frame
+divided one frame by ~17 ms and read 58.8, by simulation of the loop.
+The meter now measures between frames; see `createFpsMeter`.)
 
 **And the instrument the last three checks were missing has been
 added rather than worked around.** Every frame number on this HUD

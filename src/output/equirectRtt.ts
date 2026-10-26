@@ -48,6 +48,14 @@
  */
 export const MAX_CAMERA_OFFSET = 0.85
 
+/**
+ * The MapLibre zoom at which `cameraOffsetForCamera` reaches the cap
+ * above (`1 − 1/(zoom + 1)` = `MAX_CAMERA_OFFSET`), about 5.67: past it a
+ * zoom magnifies no further. A web output clamps an address's zoom here,
+ * so a move between two zooms past it is not a motion nobody can see.
+ */
+export const MAX_CAMERA_ZOOM = 1 / (1 - MAX_CAMERA_OFFSET) - 1
+
 /** Output framebuffers are 2:1. Width / height. */
 export const EQUIRECT_ASPECT = 2
 

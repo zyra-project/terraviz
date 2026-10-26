@@ -217,77 +217,91 @@ export function formatOverlay(reading: DebugOverlayReading): string[] {
 }
 
 /**
- * Frames per second over a wall-clock window.
+ * Frames per second, measured **between frames**: the frame-to-frame
+ * intervals since the last reading, over the time they span.
  *
  * A delta, never a total: a cumulative count divided by time-since-start
  * folds in however long the first frame took, which is exactly the
  * measurement error the decoder-budget spike chased before differencing
  * two samples made it vanish.
  *
- * The window is **held open until it contains a frame**, and that is not
- * a refinement — it is the difference between this field working and
- * lying. The loop floors a static output at 1 Hz while the HUD samples
- * about twice a second, so roughly half of all windows on a correctly
- * idling output hold no drawn frame at all; closing those would divide
- * zero by the window and report exactly `0.0`. That is the reading a
- * *black projector* gives, which is the one state the 1 Hz floor exists
- * to make visible and the one `render()`-skipped-while-lost is written
- * to produce (rung 13, case 5). Found on hardware: an operator dragged
- * the control globe, stopped, and watched a healthy output report zero.
+ * Between frames, not between readings, and that took three goes. The
+ * loop floors a static output at 1 Hz while the HUD reads about twice a
+ * second, so about half the readings on a correctly idling output have
+ * no frame since the last. Counting frames over the reading's own
+ * window closed those at exactly `0.0`, the reading a *black projector*
+ * gives, which is the one state the 1 Hz floor exists to make visible
+ * (found on hardware). Holding the window open until a frame arrived
+ * fixed that, and restarting it at the frame that ended a silence kept
+ * an outage from being charged to the recovery. But at the floor every
+ * frame ends a silence, so a reading one callback after the frame
+ * divided one frame by ~17 ms and read 58.8, and no reading at the floor
+ * came out below about 1.9 (both worked out in review by simulation of
+ * this loop). Time between frames has neither problem: a reading with
+ * no new interval keeps the last rate, and the floor reads 1.0 whenever
+ * the reading lands.
  *
- * What is reported while the window stays open is the upper bound the
- * wait implies: no frame has arrived in `elapsed`, so the rate is below
- * `1000 / elapsed`, and that decays — 2, 1, 0.5, 0.25 — as the silence
- * grows. A genuine stall therefore still collapses toward zero, just
- * continuously rather than by flicker, and can be told from an idle
- * output holding steady near 1.
+ * A gap longer than `FPS_OUTAGE_MS` is an outage, not a pace. The
+ * measurement starts again at the frame after it, so ten seconds of a
+ * lost context followed by a healthy 30 fps reads 30 rather than 2.7,
+ * and the gap itself is charged to the reading the way a silence is.
+ * Both meters are read in the callback that ticked them, so without
+ * that the gap was never seen: callbacks throttled to one every 2.5 s
+ * read the last healthy rate, and a tab coming back from hiding read
+ * the rate it left with (found in review).
+ *
+ * While nothing is drawn the reading is held to the bound the silence
+ * implies: no frame in `elapsed` ms means the rate is below
+ * `1000 / elapsed`. At the floor that bound never falls under the
+ * measured 1.0, and in a real stall it decays (2, 1, 0.5, 0.25), so a
+ * dead output still collapses toward zero, continuously rather than by
+ * flicker. One frame is not a rate, so until a second frame arrives the
+ * reading is zero, which on a static output is the first second after
+ * boot.
  */
 export interface FpsMeter {
   /** Call once per rendered frame. */
   tick(now: number): void
-  /** Frames per second since the previous `sample()`. */
+  /** Frames per second over the frames since the previous `sample()`. */
   sample(now: number): number
 }
 
+/**
+ * A gap between frames longer than this is an outage rather than a
+ * pace. Twice the 1 Hz static floor, so the slowest pace the loop keeps
+ * on purpose is never mistaken for one.
+ */
+export const FPS_OUTAGE_MS = 2000
+
 export function createFpsMeter(): FpsMeter {
-  let frames = 0
-  let since: number | null = null
+  /** The frame the current measurement opens on, and the latest since. */
+  let first: number | null = null
+  let latest: number | null = null
+  /** Frame-to-frame intervals between `first` and `latest`. */
+  let intervals = 0
   let last = 0
-  /** The previous `sample()` found an empty window and held it open, so
-   *  `since` is older than one window and is measuring silence. */
-  let starved = false
   return {
     tick(now) {
-      // A window held open by silence must not then be *charged* for it.
-      // `sample()` deliberately leaves `since` alone while no frame
-      // arrives, so without this the first frame after an outage lands
-      // in a window that already spans the whole outage: ten seconds
-      // dark followed by a healthy 30 fps reported 1.4 fps, and an
-      // operator reading that concludes the output is still broken.
-      // The window therefore restarts at the frame that ended the
-      // silence, which is the only instant this meter can honestly
-      // measure from.
-      if (since === null || starved) {
-        since = now
-        starved = false
+      if (first === null || latest === null || now - latest > FPS_OUTAGE_MS) {
+        if (latest !== null) last = Math.min(last, 1000 / (now - latest))
+        first = now
+        intervals = 0
+      } else {
+        intervals++
       }
-      frames++
+      latest = now
     },
     sample(now) {
-      if (since === null || now <= since) return last
-      const elapsed = now - since
-      // Empty window: hold it open rather than reporting a hard zero,
-      // and report the bound the wait implies. See the header — this is
-      // what keeps a 1 Hz idle output distinguishable from a dead one.
-      // `Math.min` because no frame arrived, so the rate cannot have
-      // risen since the last reading.
-      if (frames === 0) {
-        starved = true
-        return (last = Math.min(last, 1000 / elapsed))
+      if (first === null || latest === null) return last
+      if (intervals > 0 && latest > first) {
+        last = (intervals * 1000) / (latest - first)
+        first = latest
+        intervals = 0
       }
-      last = (frames * 1000) / elapsed
-      frames = 0
-      since = now
+      // No frame since `latest`, so the rate is below what the wait
+      // allows. `Math.min` keeps a stall falling rather than holding the
+      // last healthy rate on screen over a frozen sphere.
+      if (now > latest) last = Math.min(last, 1000 / (now - latest))
       return last
     },
   }

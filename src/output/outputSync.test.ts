@@ -16,12 +16,15 @@ import { describe, it, expect } from 'vitest'
 import {
   OUTPUT_SEEK_SETTLE_MS,
   SEEK_COST_MARGIN,
+  STEER_GAP_DISCARD_MS,
+  STEER_PACE_WINDOW,
   createPlayheadSync,
   seekCostFloorS,
   syncVideoToState,
   type SyncInputs,
   type SyncTarget,
 } from './outputSync'
+import { STATIC_FRAME_MS } from './outputScene'
 import { SIBLING_HARD_SEEK_THRESHOLD_S, SIBLING_MIN_READY_STATE } from '../utils/time'
 import type { MirroredDataset } from '../services/multiOutput/protocol'
 
@@ -464,6 +467,119 @@ describe('createPlayheadSync', () => {
     expect(controller.sync(video, state).seeked).toBe(true)
   })
 
+  it('treats a seek the caller noted as its own, settle window and all', () => {
+    // The web clock's turn at a loop's seam: made on the element directly,
+    // and without the note the next call seeked again for the restart.
+    let now = 0
+    const controller = createPlayheadSync(() => now)
+    const video = target({ currentTime: 50 - BEHIND_S })
+    const state = inputs()
+    controller.noteSeek(video)
+    now = 10
+    expect(controller.sync(video, state).seeked).toBe(false)
+    // Past the window, an error past the threshold is corrected again.
+    now = OUTPUT_SEEK_SETTLE_MS + 20
+    video.currentTime = 50 - BEHIND_S
+    expect(controller.sync(video, state).seeked).toBe(true)
+  })
+
+  /** Frames at 16 ms from `from` to `to`, the element seeking until the last. */
+  function standStill(controller: ReturnType<typeof createPlayheadSync>, video: SyncTarget, clock: { now: number }, to: number) {
+    ;(video as { seeking: boolean }).seeking = true
+    while (clock.now + 16 < to) {
+      clock.now += 16
+      controller.sync(video, inputs())
+    }
+    clock.now = to
+    ;(video as { seeking: boolean }).seeking = false
+    controller.sync(video, inputs())
+  }
+
+  it("measures a noted seek's cost into the floor", () => {
+    const clock = { now: 0 }
+    const controller = createPlayheadSync(() => clock.now)
+    const video = target({ currentTime: 50 })
+    controller.sync(video, inputs())
+    clock.now = 16
+    controller.noteSeek(video)
+    // The turn stands still for 1.2 s before the element plays on.
+    standStill(controller, video, clock, 1216)
+    // Past the window, half a second out is under that cost's floor, so
+    // the law trims rather than seek into another 1.2 s stall.
+    clock.now += OUTPUT_SEEK_SETTLE_MS
+    video.currentTime = 49.5
+    const out = controller.sync(video, inputs())
+    expect(out.seeked).toBe(false)
+    expect(video.playbackRate).toBeGreaterThan(1)
+  })
+
+  it("starts a new element's measurement at the note, not at its first sync", () => {
+    const clock = { now: 0 }
+    const controller = createPlayheadSync(() => clock.now)
+    const first = target({ currentTime: 10 })
+    expect(controller.sync(first, inputs()).seeked).toBe(true)
+    standStill(controller, first, clock, 1200)
+
+    // A new element, turned at once. Without taking it as the element
+    // being steered, its first sync would forget the note and seek again.
+    const second = target({ currentTime: 50 - BEHIND_S })
+    clock.now += 16
+    controller.noteSeek(second)
+    clock.now += 16
+    expect(controller.sync(second, inputs()).seeked).toBe(false)
+  })
+
+  it('times a noted seek made on the first call after a stop', () => {
+    // Steering stopped (a hidden tab), and the first thing on the way back
+    // was the caller's own seek. Measured from the last `sync`, the next
+    // call read the gap as a stop and dropped the seek unmeasured, so a
+    // slow restart left no floor and the law seeked again (found in
+    // review).
+    const clock = { now: 0 }
+    const controller = createPlayheadSync(() => clock.now)
+    const video = target({ currentTime: 50 })
+    controller.sync(video, inputs())
+    clock.now = 60_000
+    controller.noteSeek(video)
+    standStill(controller, video, clock, 61_200)
+    clock.now += OUTPUT_SEEK_SETTLE_MS
+    video.currentTime = 49.5
+    expect(controller.sync(video, inputs()).seeked).toBe(false)
+  })
+
+  it('times a noted seek made on the first call after a pause', () => {
+    // A pause clears the call time on purpose, so the pause is not an
+    // interval; the seek that ends it still is one to time.
+    const clock = { now: 0 }
+    const controller = createPlayheadSync(() => clock.now)
+    const video = target({ currentTime: 50 })
+    controller.sync(video, inputs())
+    controller.dropPendingSeek()
+    clock.now = 30_000
+    controller.noteSeek(video)
+    standStill(controller, video, clock, 31_200)
+    clock.now += OUTPUT_SEEK_SETTLE_MS
+    video.currentTime = 49.5
+    expect(controller.sync(video, inputs()).seeked).toBe(false)
+  })
+
+  it("does not carry the last element's cost to a new one's note", () => {
+    const clock = { now: 0 }
+    const controller = createPlayheadSync(() => clock.now)
+    const first = target({ currentTime: 10 })
+    expect(controller.sync(first, inputs()).seeked).toBe(true)
+    standStill(controller, first, clock, 1200)
+
+    // The new element's note is dropped across a stop, so it has no cost
+    // of its own yet. Half a second out past the window is then an
+    // ordinary seek, not one held off by the first element's 1.2 s.
+    const second = target({ currentTime: 49.5 })
+    clock.now += 16
+    controller.noteSeek(second)
+    clock.now += 5_000
+    expect(controller.sync(second, inputs()).seeked).toBe(true)
+  })
+
   it('does not start the window on a call that did not seek', () => {
     // Stamping every call would suppress the *first* seek after a quiet
     // period, which is the one that matters.
@@ -760,6 +876,338 @@ describe('the measurement belongs to one element', () => {
     // so the output would sit where it loaded and never be corrected.
     expect(out.seeked).toBe(true)
     expect(second.currentTime).toBeCloseTo(50)
+  })
+
+  it('drops a seek left outstanding across a gap in steering, rather than timing the gap', () => {
+    // A hidden tab stops the loop with a seek in flight. Closed on the
+    // first frame back, the gap was recorded as the seek's cost and the
+    // floor stopped the element seeking for good (found in review).
+    let clock = 0
+    const playhead = createPlayheadSync(() => clock)
+    const video = target({ currentTime: 10 })
+    expect(playhead.sync(video, inputs()).seeked).toBe(true)
+    ;(video as { seeking: boolean }).seeking = true
+
+    clock += 60_000
+    ;(video as { seeking: boolean }).seeking = false
+    // Back, and 5 s out: an ordinary correction, not one under a 90 s floor.
+    video.currentTime = 45
+    expect(playhead.sync(video, inputs()).seeked).toBe(true)
+  })
+
+  /** A loop that has been steering at `frameMs` for a while. */
+  function runningLoop(frameMs: number, video: SyncTarget) {
+    let clock = 0
+    const playhead = createPlayheadSync(() => clock)
+    for (let i = 0; i < 10; i++) {
+      clock += frameMs
+      playhead.sync(video, inputs())
+    }
+    return {
+      playhead,
+      advance(ms: number) {
+        clock += ms
+      },
+    }
+  }
+
+  /**
+   * Seek 40 s, let `gapMs` pass with the seek in flight, then come back
+   * 5 s out. True when that comes back as a seek: the gap was a stop and
+   * was not timed. Timed, a gap of 3.3 s or more sets a floor over 5 s.
+   */
+  function seekAcrossGap(loop: ReturnType<typeof runningLoop>, video: SyncTarget, gapMs: number, frameMs: number) {
+    loop.advance(frameMs)
+    video.currentTime = 10
+    expect(loop.playhead.sync(video, inputs()).seeked).toBe(true)
+    ;(video as { seeking: boolean }).seeking = true
+    loop.advance(gapMs)
+    ;(video as { seeking: boolean }).seeking = false
+    video.currentTime = 45
+    return loop.playhead.sync(video, inputs()).seeked
+  }
+
+  it('drops a seek across a stop on a loop that has a pace, and on a second stop soon after', () => {
+    // The plain case the 60 s test above reaches only before the loop
+    // has a pace: real loops always have one by then. The second stop
+    // comes two frames after the first, so the first is still in the
+    // window: one stop must not move the pace. A mean or a maximum
+    // would put this threshold above 10 s.
+    const video = target({ currentTime: 50 })
+    const loop = runningLoop(16, video)
+    expect(seekAcrossGap(loop, video, 60_000, 16)).toBe(true)
+    loop.advance(16)
+    loop.playhead.sync(video, inputs())
+    expect(seekAcrossGap(loop, video, 10_000, 16)).toBe(true)
+  })
+
+  it('drops a seek across a stop that comes straight after another', () => {
+    // Back for one frame, then gone again: the second gap is the very
+    // next interval. A pace read off the last interval alone would take
+    // the first stop as the loop's pace and time the second.
+    const video = target({ currentTime: 50 })
+    const loop = runningLoop(16, video)
+    expect(seekAcrossGap(loop, video, 60_000, 16)).toBe(true)
+    // That call seeked again, and the loop stops at once.
+    ;(video as { seeking: boolean }).seeking = true
+    loop.advance(10_000)
+    ;(video as { seeking: boolean }).seeking = false
+    video.currentTime = 45
+    expect(loop.playhead.sync(video, inputs()).seeked).toBe(true)
+  })
+
+  it('drops a seek across a stop on a slow loop', () => {
+    // 20 s on a 1.5 s loop is a stop at four times the pace; a factor
+    // near 20 would time it.
+    const video = target({ currentTime: 50 })
+    const loop = runningLoop(1_500, video)
+    expect(seekAcrossGap(loop, video, 20_000, 1_500)).toBe(true)
+  })
+
+  it('drops a seek when the element is still seeking as the loop comes back from a stop', () => {
+    // The stop is the gap, whether or not the seek has landed by the
+    // first call back. Waiting for it to land would time the whole gap.
+    const video = target({ currentTime: 50 })
+    const loop = runningLoop(16, video)
+    loop.advance(16)
+    video.currentTime = 10
+    expect(loop.playhead.sync(video, inputs()).seeked).toBe(true)
+    ;(video as { seeking: boolean }).seeking = true
+    loop.advance(60_000)
+    loop.playhead.sync(video, inputs())
+    loop.advance(16)
+    ;(video as { seeking: boolean }).seeking = false
+    video.currentTime = 45
+    expect(loop.playhead.sync(video, inputs()).seeked).toBe(true)
+  })
+
+  it('keeps timing seeks on a slow loop whose frames jitter', () => {
+    // Frames 1.35 to 1.65 s apart. A gap a little over the pace is a
+    // slow frame, not a stop; a factor near 1 would drop it.
+    let clock = 0
+    const playhead = createPlayheadSync(() => clock)
+    const video = target({ currentTime: 50 })
+    for (const ms of [1_350, 1_650, 1_400, 1_600, 1_500, 1_450, 1_550, 1_380, 1_620]) {
+      clock += ms
+      playhead.sync(video, inputs())
+    }
+    clock += 1_500
+    video.currentTime = 10
+    expect(playhead.sync(video, inputs()).seeked).toBe(true)
+    ;(video as { seeking: boolean }).seeking = true
+    clock += 1_650
+    playhead.sync(video, inputs())
+    ;(video as { seeking: boolean }).seeking = false
+    clock += 1_650
+    // 3.3 s of seek measured, a 4.95 s floor: 2 s out is trimmed.
+    video.currentTime = 48
+    expect(playhead.sync(video, inputs()).seeked).toBe(false)
+  })
+
+  it('takes the new pace within a window when a loop slows', () => {
+    // A long run at 60 Hz, then 1.5 s frames. Within eight of them the
+    // pace is the new one, and a seek is timed rather than dropped.
+    const video = target({ currentTime: 50 })
+    let clock = 0
+    const playhead = createPlayheadSync(() => clock)
+    for (let i = 0; i < 600; i++) {
+      clock += 16
+      playhead.sync(video, inputs())
+    }
+    // Eight, written out: a loop bound to the constant would follow a
+    // wrong window and pass whatever it was.
+    expect(STEER_PACE_WINDOW).toBe(8)
+    for (let i = 0; i < 8; i++) {
+      clock += 1_500
+      playhead.sync(video, inputs())
+    }
+    clock += 1_500
+    video.currentTime = 10
+    expect(playhead.sync(video, inputs()).seeked).toBe(true)
+    ;(video as { seeking: boolean }).seeking = true
+    clock += 1_500
+    playhead.sync(video, inputs())
+    ;(video as { seeking: boolean }).seeking = false
+    clock += 1_500
+    // 3 s of seek measured, a 4.5 s floor: 2 s out is trimmed.
+    video.currentTime = 48
+    expect(playhead.sync(video, inputs()).seeked).toBe(false)
+  })
+
+  it('times a seek when an idle loop turns into slow video frames', () => {
+    // WebKitGTK: idle callbacks at 16 ms, then 350 ms each once a
+    // 4096x2048 video advances. The first of those follows a 16 ms pace,
+    // so only the base keeps it from reading as a stop.
+    const video = target({ currentTime: 50 })
+    const loop = runningLoop(16, video)
+    loop.advance(16)
+    video.currentTime = 10
+    expect(loop.playhead.sync(video, inputs()).seeked).toBe(true)
+    ;(video as { seeking: boolean }).seeking = true
+    for (let i = 0; i < 4; i++) {
+      loop.advance(350)
+      loop.playhead.sync(video, inputs())
+    }
+    ;(video as { seeking: boolean }).seeking = false
+    loop.advance(350)
+    // 1.75 s of seek measured, a 2.6 s floor: 1.2 s out is trimmed.
+    video.currentTime = 48.8
+    expect(loop.playhead.sync(video, inputs()).seeked).toBe(false)
+  })
+
+  it('keeps the base at least the static frame interval', () => {
+    // Below it, a static draw costing more than the base once a second
+    // would be a stop every second, and drop every seek.
+    expect(STEER_GAP_DISCARD_MS).toBeGreaterThanOrEqual(STATIC_FRAME_MS)
+  })
+
+  it('drops the long first draw after a load rather than timing it into the seek', () => {
+    // On desktop a long first frame (shader compile, first upload),
+    // estimated at 1 to 3 s, follows the new element's first seek. Timed
+    // in, it set a floor that slowed every later scrub; dropped, the next
+    // scrub just seeks. The 1.5 s case pins the base well under 2.4 s.
+    for (const { drawMs, scrubS } of [
+      { drawMs: 2_500, scrubS: 3 },
+      { drawMs: 1_500, scrubS: 2 },
+    ]) {
+      const video = target({ currentTime: 50 })
+      const loop = runningLoop(16, video)
+      loop.advance(16)
+      video.currentTime = 10
+      loop.playhead.sync(video, inputs())
+      ;(video as { seeking: boolean }).seeking = true
+      loop.advance(drawMs)
+      ;(video as { seeking: boolean }).seeking = false
+      loop.playhead.sync(video, inputs())
+      loop.advance(2_000)
+      video.currentTime = 50 - scrubS
+      expect(loop.playhead.sync(video, inputs()).seeked).toBe(true)
+    }
+  })
+
+  it('takes a pace on a loop slower than the base, and times its seeks', () => {
+    const video = target({ currentTime: 50 })
+    const loop = runningLoop(3_500, video)
+    loop.advance(3_500)
+    video.currentTime = 10
+    expect(loop.playhead.sync(video, inputs()).seeked).toBe(true)
+    ;(video as { seeking: boolean }).seeking = true
+    loop.advance(3_500)
+    loop.playhead.sync(video, inputs())
+    ;(video as { seeking: boolean }).seeking = false
+    loop.advance(3_500)
+    // 7 s of seek measured, a 10.5 s floor: 5 s out is trimmed.
+    video.currentTime = 45
+    expect(loop.playhead.sync(video, inputs()).seeked).toBe(false)
+  })
+
+  it('does not count the gaps after a deliberate drop as the loop pace', () => {
+    // Paused and resumed one frame at a time: each resume's gap is a
+    // pause, not an interval, and must not slow the pace until a real
+    // stop is timed (found in review).
+    const video = target({ currentTime: 50 })
+    const loop = runningLoop(16, video)
+    for (const gapMs of [2_900, 2_900, 4_200, 6_700, 5_000, 5_000, 5_000, 5_000]) {
+      loop.playhead.dropPendingSeek()
+      loop.advance(gapMs)
+      loop.playhead.sync(video, inputs())
+    }
+    video.currentTime = 10
+    loop.playhead.sync(video, inputs())
+    ;(video as { seeking: boolean }).seeking = true
+    loop.advance(8_000)
+    ;(video as { seeking: boolean }).seeking = false
+    video.currentTime = 45
+    expect(loop.playhead.sync(video, inputs()).seeked).toBe(true)
+  })
+
+  it('still times a seek on a loop whose every frame is slow', () => {
+    // A software-rendered loop at 1.5 s a frame. A fixed one-second gap
+    // rule dropped every seek here, and seeked on every frame.
+    let clock = 0
+    const playhead = createPlayheadSync(() => clock)
+    const video = target({ currentTime: 50 })
+    for (let i = 0; i < 5; i++) {
+      clock += 1_500
+      playhead.sync(video, inputs())
+    }
+    clock += 1_500
+    video.currentTime = 10
+    expect(playhead.sync(video, inputs()).seeked).toBe(true)
+    ;(video as { seeking: boolean }).seeking = true
+    clock += 1_500
+    playhead.sync(video, inputs())
+    ;(video as { seeking: boolean }).seeking = false
+    clock += 1_500
+    // 3 s of seek measured, a 4.5 s floor, so 2 s out is trimmed.
+    video.currentTime = 48
+    expect(playhead.sync(video, inputs()).seeked).toBe(false)
+  })
+
+  it('is not thrown by two calls in one instant on a slow loop', () => {
+    // A 0 ms interval in the window. The pace as the shortest interval
+    // read that as the loop's pace, so every 1.5 s frame was a stop and
+    // the seek was dropped.
+    let clock = 0
+    const playhead = createPlayheadSync(() => clock)
+    const video = target({ currentTime: 50 })
+    for (let i = 0; i < 5; i++) {
+      clock += 1_500
+      playhead.sync(video, inputs())
+    }
+    // The 0 ms interval, deliberately: no clock advance.
+    playhead.sync(video, inputs())
+    clock += 1_500
+    video.currentTime = 10
+    expect(playhead.sync(video, inputs()).seeked).toBe(true)
+    ;(video as { seeking: boolean }).seeking = true
+    clock += 1_500
+    playhead.sync(video, inputs())
+    ;(video as { seeking: boolean }).seeking = false
+    clock += 1_500
+    video.currentTime = 48
+    expect(playhead.sync(video, inputs()).seeked).toBe(false)
+  })
+
+  it('keeps the floor it measured when a pending seek is dropped on purpose', () => {
+    let clock = 0
+    const playhead = createPlayheadSync(() => clock)
+    const video = target({ currentTime: 10 })
+    playhead.sync(video, inputs())
+    ;(video as { seeking: boolean }).seeking = true
+    for (let ms = 0; ms < 2_000; ms += 100) {
+      clock += 100
+      playhead.sync(video, inputs())
+    }
+    ;(video as { seeking: boolean }).seeking = false
+    clock += 100
+    playhead.sync(video, inputs())
+    // A second seek, dropped before it lands.
+    video.currentTime = 10
+    clock += 100
+    expect(playhead.sync(video, inputs()).seeked).toBe(true)
+    playhead.dropPendingSeek()
+    clock += 100
+    // The 2.1 s floor measured before still holds: 1 s out is trimmed.
+    video.currentTime = 49
+    expect(playhead.sync(video, inputs()).seeked).toBe(false)
+  })
+
+  it('still times a seek served while steering ran', () => {
+    let clock = 0
+    const playhead = createPlayheadSync(() => clock)
+    const video = target({ currentTime: 10 })
+    playhead.sync(video, inputs())
+    ;(video as { seeking: boolean }).seeking = true
+    for (let ms = 0; ms < 2_000; ms += 100) {
+      clock += 100
+      playhead.sync(video, inputs())
+    }
+    ;(video as { seeking: boolean }).seeking = false
+    clock += 100
+    // 2.1 s of seek: a 3.15 s floor, so 1 s out is trimmed, not seeked.
+    video.currentTime = 49
+    expect(playhead.sync(video, inputs()).seeked).toBe(false)
   })
 })
 

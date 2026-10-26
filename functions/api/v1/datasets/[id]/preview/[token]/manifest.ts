@@ -90,7 +90,7 @@ export const onRequestGet: PagesFunction<CatalogEnv, Params> = async context => 
     .first<DatasetRow>()
   if (!row) return jsonError(404, 'not_found', `Dataset ${id} not found.`)
 
-  const result = await resolveManifest(row, context.env)
+  const result = await resolveManifest(row, context.env, undefined, p => context.waitUntil(p))
   if ('error' in result) {
     return jsonError(result.error.status, result.error.code, result.error.message)
   }

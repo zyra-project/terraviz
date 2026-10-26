@@ -657,6 +657,12 @@ Stream on day one.
 All routes live under `functions/api/v1/**`. The `/v1/` prefix is
 load-bearing: the federation protocol pins it, and we will add `/v2/`
 side-by-side rather than mutate `/v1/` once peers start consuming it.
+One exception, by design: the exhibit reads in the table below live
+under `functions/api/exhibit/v1/`, versioned on their own, so the
+protocol's eventual 410 on `/api/v1/` never reaches a script in Second
+Life that can't be updated. Their shared code stays in
+`functions/api/v1/_lib/`, which a `/v1/` retirement must therefore
+keep.
 
 ### Public read API (anonymous)
 
@@ -671,6 +677,7 @@ side-by-side rather than mutate `/v1/` once peers start consuming it.
 | `GET /api/v1/tours/{id}/assets/{key}` | Tour overlay assets (images, audio) — proxied/signed from R2. |
 | `GET /api/v1/search?q=...` | Public full-text search against title / abstract / keywords. Phase 1a uses D1 LIKE; Phase 1b swaps in Vectorize semantic search behind the same URL once the embedding pipeline lands (see "Docent integration"). The docent's `search_datasets` LLM tool is a separate, server-internal call site against the same Vectorize index — not exposed under this URL. |
 | `GET /.well-known/terraviz.json` | Service discovery. Returns node identity, public key, supported `/v1/` endpoints, federation policy. |
+| `GET /api/exhibit/v1/datasets/{id}`, `GET /api/exhibit/v1/datasets`, `GET /api/exhibit/v1/tags` | The exhibit reads: a dataset's card, a page of a menu, and the categories, each inside a byte budget it states (2,048, 1,024 and 2,048 bytes), for callers that can afford little, of which the Second Life exhibit globe is the first. Convenience reads of nodes running this codebase, not part of the federation protocol, with their own contract for scripts already rezzed: additive only, no field changes meaning, a breaking change gets a new path (`/api/exhibit/v2/`) and `/api/exhibit/v1/` stays. Versioned outside `/api/v1/` so the protocol's eventual 410 on that prefix never reaches a script that can't be updated. Design in [`SECOND_LIFE_COMPAT.md`](SECOND_LIFE_COMPAT.md) §9 Phase 2, rules in `functions/api/v1/_lib/exhibit-reads.ts`. |
 
 `Dataset` on the wire is the existing TypeScript shape plus a small
 additive set:
@@ -924,6 +931,40 @@ and an optional MP4 fallback. `datasetLoader.ts` swaps its current
 `fetch('/api/v1/datasets/{id}/manifest')`. Same JSON shape minus
 `dash` (we don't use it) and minus `files[]` for restricted videos
 where signed-URL semantics make a long-lived MP4 link a leak.
+
+A video manifest's `duration` is the clip's length in seconds, as a
+number that is never negative and often has a fraction. **0 means
+unknown**, and a reader must treat it that way. A reader has to
+expect 0 from:
+- a `stream:` asset or a single file;
+- a `vimeo:` asset the proxy gave no usable length for;
+- an `r2:` bundle whose playlists can't state one (a live playlist, or
+  one the node can't parse);
+- an older node;
+- a node whose bucket could not be read just then, which makes the 0
+  temporary. That manifest is served with a 15-second cache
+  (`max-age=15`) instead of the usual five minutes. The header is the
+  only way to tell, so a reader that needs the length should ask
+  again later after any 0.
+
+For a bundle the node hosts itself (`r2:` HLS) it is the bundle's own
+playlists' `#EXTINF`s summed, to the microsecond
+(`functions/api/v1/_lib/hls-duration.ts`). That is the period a web
+output's copies loop on (`src/output/webClock.ts`), which is the
+playlist's total rather than the element's `duration`: once a stream
+has buffered to its end, `duration` is the latest end of every track,
+and measured in Chromium that ran 21 to 40 ms past the sum on the
+bundles carrying AAC. For `vimeo:` it is Vimeo's
+figure, which is whole seconds and so can be up to a second off the
+length a player reads from the stream itself (12 for a clip that plays
+12.1). A reader that loops the clip and needs the two to agree should
+not trust it for a `vimeo:` asset; the exhibit's card does the
+summing for it (`exactDuration`, `readVimeoDuration`), reading the
+Vimeo stream's own playlists. Browsers ignore it, since a player
+reads the length from the playlist. Second Life info scripts from
+before the exhibit's card used it to turn a clip position
+into a date ([`SECOND_LIFE_COMPAT.md`](SECOND_LIFE_COMPAT.md) §7
+item 4).
 
 #### Cutover bridge
 

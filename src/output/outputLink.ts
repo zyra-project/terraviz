@@ -452,6 +452,13 @@ export interface OutputLink {
    */
   reportGpuState(state: GpuContextState): void
   /**
+   * Tell the control window this window's stream died, so it can report
+   * it: an output emits no telemetry of its own (`outputTelemetry.ts`).
+   * `datasetMirror` calls it once per stream. Fired, never awaited, for
+   * `reportGpuState`'s reason.
+   */
+  reportStreamFailure(datasetId: string | null): void
+  /**
    * Called after this window re-announces itself to a manager that
    * poked it (case 6's `OUTPUT_REATTACH_EVENT`).
    *
@@ -672,6 +679,12 @@ export async function connectOutputLink(
           label: host.label,
         })
         .catch(err => logger.warn('[output] could not report the GPU state:', err))
+    },
+    reportStreamFailure(datasetId) {
+      if (stopped) return
+      void host
+        .emit(OUTPUT_EVENT, { type: 'output_dataset_stalled', label: host.label, datasetId })
+        .catch(err => logger.warn('[output] could not report a stream failure:', err))
     },
     async stop() {
       if (stopped) return

@@ -1,0 +1,128 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Zyra Project -->
+<!-- Embedded in terraviz-probe.lsl verbatim: no double quotes or backslashes (see build.ts). -->
+<html><head><meta charset=utf-8><title>TerraViz probe</title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;color:#fff;font:1.6vw monospace}
+.full{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:fill}
+#t{position:absolute;left:30%;top:22%;width:40%;background:rgba(0,0,0,.75);padding:.5em;white-space:pre-wrap}
+#w{position:absolute;left:47%;bottom:4%;width:6%;height:12%}
+#m{position:absolute;left:4%;bottom:4%;width:20%}
+</style></head><body>
+<canvas id=g class=full width=2048 height=1024></canvas>
+<div id=t>TerraViz probe: starting</div>
+<script>
+var NL=String.fromCharCode(10),Q=String.fromCharCode(34),R=[],sent=0;
+var T=document.getElementById('t'),MODE=location.search.slice(1).split('&')[0],HERE=location.href;
+var TV_IMG='https://d3sik7mbbzunjo.cloudfront.net/land/earth_night/2012/nightlights_2048.jpg';
+var TV_HLS='https://video.zyra-project.org/videos/01KQG611HF8YXJNRBEHT0757KT/master.m3u8';
+var OPEN_HLS='https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8';
+var HLSJS='https://cdn.jsdelivr.net/npm/hls.js@1.6.15/dist/hls.min.js';
+function a(k,v){R.push(k+': '+v);T.textContent=R.slice(-14).join(NL)}
+function md(m){a('mode',m+(location.hash?' '+location.hash:''))}
+function send(){var s=R.slice(sent);sent=R.length;if(s.length)fetch(HERE,{method:'POST',body:s.join('~')}).catch(function(){})}
+window.onerror=function(m){a('page error',m);send()};
+function el(tag,id,cls){var e=document.createElement(tag);if(id)e.id=id;if(cls)e.className=cls;document.body.appendChild(e);return e}
+function grat(c){
+ var W=c.canvas.width,H=c.canvas.height,k=W/1024,i,C=['#be3232','#325abe','#32a03c','#d29614'];
+ function font(px){c.font='bold '+Math.round(px*k)+'px sans-serif'}
+ c.fillStyle=C[0];c.fillRect(0,0,W/2,H/2);c.fillStyle=C[1];c.fillRect(W/2,0,W/2,H/2);
+ c.fillStyle=C[2];c.fillRect(0,H/2,W/2,H/2);c.fillStyle=C[3];c.fillRect(W/2,H/2,W/2,H/2);
+ c.strokeStyle='#fff';c.lineWidth=2*k;
+ for(i=0;i<=12;i++){c.beginPath();c.moveTo(i*W/12,0);c.lineTo(i*W/12,H);c.stroke()}
+ for(i=0;i<=6;i++){c.beginPath();c.moveTo(0,i*H/6);c.lineTo(W,i*H/6);c.stroke()}
+ c.lineWidth=6*k;c.strokeStyle='#ff0';c.beginPath();c.moveTo(0,H/2);c.lineTo(W,H/2);c.stroke();
+ c.strokeStyle='#0ff';c.beginPath();c.moveTo(W/2,0);c.lineTo(W/2,H);c.stroke();
+ c.fillStyle='#fff';font(26);
+ [['180W',0],['90W',W/4],['0',W/2],['90E',3*W/4]].forEach(function(p){c.fillText(p[0],p[1]+6*k,H/2-10*k)});
+ font(20);
+ [['60N',H/6],['30N',H/3],['30S',2*H/3],['60S',5*H/6]].forEach(function(p){c.fillText(p[0],W/2+6*k,p[1]-6*k)});
+ c.fillText('NORTH POLE',W/2+6*k,24*k);c.fillText('SOUTH POLE',W/2+6*k,H-8*k);
+ font(26);
+ [['NW',W/8,H/8],['NE',5*W/8,H/8],['SW',W/8,5*H/8],['SE',5*W/8,5*H/8]].forEach(function(p){c.fillText(p[0],p[1],p[2]+20*k)});
+}
+function gl(t){try{return document.createElement('canvas').getContext(t)}catch(e){return null}}
+function ty(v,s){return (window.MediaSource&&MediaSource.isTypeSupported(s)?'MSE yes':'MSE no')+', video tag '+(v.canPlayType(s)||'no')}
+function mp4(s){return 'video/mp4; codecs='+Q+s+Q}
+function mkVideo(id,cls){var v=el('video',id,cls);v.muted=true;v.loop=true;v.autoplay=true;v.playsInline=true;return v}
+function loadHls(cb){if(window.Hls)return cb();var s=document.createElement('script');s.src=HLSJS;s.onload=cb;s.onerror=function(){a('hls.js','could not load from jsdelivr');send()};document.head.appendChild(s)}
+function play(v,url,label,next){
+ var done=false,h=null;
+ function fin(msg){if(done)return;done=true;var ok=msg.indexOf('PLAYING')==0;if(h&&!ok){h.destroy();h=null}a(label,msg);send();if(next&&!ok)next()}
+ v.onerror=function(){fin('failed, media error '+(v.error?v.error.code:'?'))};
+ if(url.indexOf('NATIVE:')==0){v.src=url.slice(7)}
+ else{v.removeAttribute('src');if(!window.Hls||!Hls.isSupported())return fin('hls.js not supported');
+  h=new Hls();h.on(Hls.Events.ERROR,function(e,d){if(d.fatal)fin('failed, '+d.type+' / '+d.details)});
+  h.loadSource(url);h.attachMedia(v)}
+ var p=v.play();if(p)p.catch(function(){});
+ setTimeout(function(){fin(v.currentTime>0.5?'PLAYING '+v.videoWidth+'x'+v.videoHeight+' at t='+v.currentTime.toFixed(1)+'s':'stalled at t='+v.currentTime.toFixed(1)+'s')},15000);
+}
+function probe(){
+ grat(document.getElementById('g').getContext('2d'));
+ md('probe');
+ a('chrome',(navigator.userAgent.split('Chrome/')[1]||'?').split(' ')[0]);
+ a('viewport',innerWidth+'x'+innerHeight+' at '+devicePixelRatio+'x');
+ var v=document.createElement('video');
+ a('MediaSource',!!window.MediaSource);
+ a('H.264 720p (TerraViz)',ty(v,mp4('avc1.4d4020')));
+ a('H.264 4K (TerraViz)',ty(v,mp4('avc1.4d4033')));
+ a('AAC',ty(v,'audio/mp4; codecs='+Q+'mp4a.40.2'+Q));
+ a('VP9',ty(v,'video/webm; codecs='+Q+'vp9'+Q));
+ a('AV1',ty(v,mp4('av01.0.05M.08')));
+ a('native HLS',v.canPlayType('application/vnd.apple.mpegurl')||'no');
+ send();
+ var g1=gl('webgl'),g2=gl('webgl2'),x=g2||g1;
+ a('WebGL 1',!!g1);a('WebGL 2',!!g2);
+ if(x){var d=x.getExtension('WEBGL_debug_renderer_info');a('GPU',d?x.getParameter(d.UNMASKED_RENDERER_WEBGL):x.getParameter(x.RENDERER))}
+ send();
+ frames();
+}
+function frames(){
+ var w=el('canvas','w'),c=null,n=0,lost=0,ok='not reached',stop=false;
+ w.width=64;w.height=64;
+ try{c=w.getContext('webgl2')||w.getContext('webgl')}catch(e){}
+ if(!c){a('webgl frames','no context');send();return hlsTest()}
+ w.addEventListener('webglcontextlost',function(){lost++});
+ (function f(){if(!c.isContextLost()){var k=(n%60)/60;c.clearColor(k,1-k,0.5,1);c.clear(c.COLOR_BUFFER_BIT);
+  if(n==30){var p=new Uint8Array(4);c.readPixels(0,0,1,1,c.RGBA,c.UNSIGNED_BYTE,p);ok=p[3]==255?'ok':'failed'}
+  n++}if(!stop)requestAnimationFrame(f)})();
+ setTimeout(function(){stop=true;a('webgl frames',n+' in 10s, context lost '+lost+'x, readback '+ok);send();hlsTest()},10000);
+}
+function soak(kind){
+ grat(document.getElementById('g').getContext('2d'));
+ md('soak '+kind);send();
+ var w=el('canvas','w'),c=null,n=0,lost=0,t0=performance.now();
+ w.width=64;w.height=64;
+ if(kind=='webgl'){try{c=w.getContext('webgl2')}catch(e){}
+  if(!c){a('soak webgl','no WebGL 2 context');send();return}
+  w.addEventListener('webglcontextlost',function(){lost++})}
+ else c=w.getContext('2d');
+ (function f(){var k=(n%60)/60;
+  if(kind=='webgl'){if(!c.isContextLost()){c.clearColor(k,1-k,0.5,1);c.clear(c.COLOR_BUFFER_BIT);n++}}
+  else{c.fillStyle='rgb('+Math.round(255*k)+','+Math.round(255*(1-k))+',128)';c.fillRect(0,0,64,64);n++}
+  requestAnimationFrame(f)})();
+ setInterval(function(){a('soak '+kind,Math.round((performance.now()-t0)/1000)+'s, '+n+' frames, context lost '+lost+'x, viewport '+innerWidth+'x'+innerHeight);send()},10000);
+}
+function hlsTest(){loadHls(function(){play(mkVideo('m'),OPEN_HLS,'hls.js test stream')})}
+function image(){
+ md('image');
+ var i=el('img',null,'full');
+ i.onload=function(){a('TerraViz image','loaded '+i.naturalWidth+'x'+i.naturalHeight);send();T.style.display='none'};
+ i.onerror=function(){a('TerraViz image','failed to load');send()};
+ i.src=TV_IMG;
+}
+function video(){
+ md('video');
+ var v=mkVideo(null,'full');
+ function viaOpen(){play(v,OPEN_HLS,'test stream via hls.js (not TerraViz data)')}
+ function viaHlsjs(){loadHls(function(){play(v,TV_HLS,'TerraViz stream via hls.js',viaOpen)})}
+ if(v.canPlayType('application/vnd.apple.mpegurl'))play(v,'NATIVE:'+TV_HLS,'TerraViz stream, native HLS',viaHlsjs);
+ else{a('native HLS','no');send();viaHlsjs()}
+ setTimeout(function(){T.style.display='none'},40000);
+}
+window.onhashchange=function(){var v=document.querySelector('video');
+ a('hash',location.hash+(v?', video t='+v.currentTime.toFixed(1)+'s, '+(v.paused?'paused':'playing')+', readyState '+v.readyState:', no video'));send()};
+if(MODE=='image')image();else if(MODE=='video')video();
+else if(MODE=='soak')soak('webgl');else if(MODE=='soak2d')soak('2d');else probe();
+</script></body></html>

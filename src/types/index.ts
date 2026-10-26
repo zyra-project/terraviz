@@ -1180,7 +1180,9 @@ export type ScreenClass = 'mobile' | 'tablet' | '1080p' | '2k' | '4k+'
 export type BuildChannel = 'public' | 'internal' | 'canary'
 export type VrCapability = 'none' | 'vr' | 'ar' | 'both'
 export type LayerSource = 'network' | 'cache' | 'hls' | 'image'
-export type LoadTrigger = 'browse' | 'orbit' | 'tour' | 'url' | 'default'
+/** `'output'`: shown by the output page because its address named the
+ * dataset. Whoever set up the globe chose it, not a visitor. */
+export type LoadTrigger = 'browse' | 'orbit' | 'tour' | 'url' | 'default' | 'output'
 export type UnloadReason = 'replaced' | 'home' | 'tour' | 'manual'
 export type FeedbackContext = 'general' | 'ai_response'
 export type FeedbackKind = 'bug' | 'feature' | 'other' | 'thumbs_up' | 'thumbs_down'
@@ -1194,9 +1196,12 @@ export type VrExitReason = 'user' | 'error' | 'session_lost'
 export type VrGesture = 'drag' | 'pinch' | 'thumbstick_zoom' | 'flick_spin' | 'hud_tap'
 /** Specular-strength presets surfaced in Tools → Display (§7.2). */
 export type SpecularPreset = 'none' | 'default' | 'comfortable'
+/** `'output'` is every error the output page reports in web mode, its
+ * streams' included: kept apart from `'hls'` so a globe's visitors do not
+ * count against the app's stream health. `code` says which kind. */
 export type ErrorCategory =
   | 'tile' | 'hls' | 'llm' | 'download' | 'vr' | 'tour' | 'caption'
-  | 'uncaught' | 'console' | 'native_panic'
+  | 'uncaught' | 'console' | 'native_panic' | 'output'
 export type ErrorSource =
   | 'caught' | 'window_error' | 'unhandledrejection'
   | 'console_error' | 'console_warn' | 'tauri_panic'
@@ -1890,7 +1895,11 @@ export interface OutputFailureEvent extends TelemetryEventBase {
   /** Recovery attempts made before this fired. Bounded auto-recovery
    *  collapses into one event carrying its count rather than one
    *  event per attempt, so a flapping installation reports a rising
-   *  number instead of a rising rate. */
+   *  number instead of a rising rate. For `hls-stalled` it is the
+   *  attempts the app made, which is none yet (rung 13's rebuild is
+   *  unbuilt). hls.js's own retries inside the output's player are
+   *  not counted: they are up to three per error type before the
+   *  stream is given up, and the output does not report them. */
   retries: number
   /** True if the output carried on afterwards; false if the failure
    *  was escalated to the operator. */

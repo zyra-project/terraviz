@@ -21,13 +21,15 @@
  *     what the frontend expects.
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  TRANSIENT_CACHE_CONTROL,
   imageVariants,
   onRequestGet,
   parseDataRef,
   resolveManifest,
 } from './manifest'
+import { resetHlsDurationsForTests } from '../../_lib/hls-duration'
 import {
   asD1,
   makeCtx,
@@ -92,6 +94,11 @@ describe('imageVariants', () => {
 })
 
 describe('GET /api/v1/datasets/{id}/manifest', () => {
+  beforeEach(() => {
+    // A settled length is remembered per isolate, so no test may see
+    // another's.
+    resetHlsDurationsForTests()
+  })
   afterEach(() => {
     vi.unstubAllGlobals()
   })
@@ -173,16 +180,35 @@ describe('GET /api/v1/datasets/{id}/manifest', () => {
     expect(res.headers.get('cache-control')).toContain('max-age=300')
     const body = await readJson<VideoBody>(res)
     expect(body.kind).toBe('video')
+    // Vimeo's own id, never the dataset's: the exhibit's older info scripts
+    // trust a manifest's length only when its id is the dataset's, which
+    // is how they tell Vimeo's whole seconds from the node's own reading
+    // (docs/protocol/README.md). "Fixing" this would undo that.
     expect(body.id).toBe('100')
     expect(body.title).toBe('Upstream Title')
     expect(body.duration).toBe(600)
     expect(body.hls).toBe('https://cdn.test/hls.m3u8')
     expect(body.files).toHaveLength(1)
     expect(body.files[0]).toMatchObject({ quality: '720p', link: 'https://cdn.test/720.mp4' })
+    // Pinned for the exhibit's older info scripts, as in the HLS case.
+    expect(Object.keys(body).slice(0, 4)).toEqual(['kind', 'id', 'title', 'duration'])
     // The frontend never used `dash`; manifest must drop it so the
     // wire shape is the union the frontend expects in Commit H.
     expect((body as unknown as { dash?: string }).dash).toBeUndefined()
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads an unusable Vimeo duration as unknown, since the field is never negative', async () => {
+    const sqlite = seedFixtures({ count: 1 })
+    const env = { CATALOG_DB: asD1(sqlite), CATALOG_KV: makeKV(), VIDEO_PROXY_BASE }
+    for (const duration of [-5, '600', null]) {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => new Response(JSON.stringify({ id: '100', duration, hls: 'https://cdn.test/hls.m3u8' }))),
+      )
+      const res = await onRequestGet(makeCtx<'id'>({ env, params: { id: 'DS000AAAAAAAAAAAAAAAAAAAAA' } }))
+      expect((await readJson<VideoBody>(res)).duration, JSON.stringify(duration)).toBe(0)
+    }
   })
 
   it('returns 502 when the video proxy fails', async () => {
@@ -399,6 +425,126 @@ describe('GET /api/v1/datasets/{id}/manifest', () => {
     // the same R2 prefix; the SPA's hlsService.ts consumes
     // `hls` and walks from there.
     expect(body.files).toEqual([])
+    // No bucket binding here, so the length is unknown: 0, as before.
+    expect((body as { duration?: number }).duration).toBe(0)
+    // Copies of the Second Life exhibit's info script from before the
+    // exhibit reads find `id` and `duration` in the first 4,096 bytes
+    // (1,024 in later copies), and can't be updated once rezzed, so the
+    // leading keys are pinned while they may still read this way
+    // (docs/protocol/README.md).
+    expect(Object.keys(body).slice(0, 4)).toEqual(['kind', 'id', 'title', 'duration'])
+  })
+
+  it('reports an r2: HLS bundle’s length from its own playlists', async () => {
+    const sqlite = seedFixtures({ count: 1 })
+    sqlite
+      .prepare(
+        `UPDATE datasets SET
+            data_ref = 'r2:videos/DS000AAAAAAAAAAAAAAAAAAAAA/master.m3u8',
+            format = 'video/mp4'
+         WHERE slug = 'dataset-0'`,
+      )
+      .run()
+    const playlists: Record<string, string> = {
+      'videos/DS000AAAAAAAAAAAAAAAAAAAAA/master.m3u8':
+        '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-STREAM-INF:BANDWIDTH=9000000,RESOLUTION=2160x1080,CODECS="avc1.4d4032"\nstream_0/playlist.m3u8\n',
+      'videos/DS000AAAAAAAAAAAAAAAAAAAAA/stream_0/playlist.m3u8':
+        '#EXTM3U\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXTINF:6.000000,\nsegment_000.ts\n#EXTINF:4.500000,\nsegment_001.ts\n#EXT-X-ENDLIST\n',
+    }
+    const reads: string[] = []
+    const CATALOG_R2 = {
+      async get(key: string) {
+        reads.push(key)
+        const text = playlists[key]
+        return text === undefined ? null : { size: text.length, text: async () => text }
+      },
+    } as unknown as R2Bucket
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: makeKV(),
+      R2_PUBLIC_BASE: 'https://video.example.com',
+      CATALOG_R2,
+    }
+    const ctx = makeCtx<'id'>({ env, params: { id: 'DS000AAAAAAAAAAAAAAAAAAAAA' } })
+    const res = await onRequestGet(ctx)
+    expect(res.status).toBe(200)
+    const body = await readJson<{ duration: number; hls: string }>(res)
+    expect(body.duration).toBe(10.5)
+    expect(body.hls).toBe('https://video.example.com/videos/DS000AAAAAAAAAAAAAAAAAAAAA/master.m3u8')
+    // The master and its conventional first variant, read together.
+    expect([...reads].sort()).toEqual([
+      'videos/DS000AAAAAAAAAAAAAAAAAAAAA/master.m3u8',
+      'videos/DS000AAAAAAAAAAAAAAAAAAAAA/stream_0/playlist.m3u8',
+    ])
+    // A settled reading keeps the endpoint's usual caching.
+    expect(res.headers.get('cache-control')).toContain('max-age=')
+
+    // A bundle with a sound track has the same sum: its element runs a
+    // frame or two past it in a browser, but a web output loops on the
+    // playlist's total, not the element's.
+    playlists['videos/DS000AAAAAAAAAAAAAAAAAAAAA/master.m3u8'] =
+      playlists['videos/DS000AAAAAAAAAAAAAAAAAAAAA/master.m3u8'].replace('avc1.4d4032', 'avc1.4d4032,mp4a.40.2')
+    resetHlsDurationsForTests()
+    const withAudio = await readJson<{ duration: number }>(await onRequestGet(makeCtx<'id'>({ env, params: { id: 'DS000AAAAAAAAAAAAAAAAAAAAA' } })))
+    expect(withAudio.duration).toBe(10.5)
+  })
+
+  it('still answers 200 with duration 0 when R2 fails, and is not cached', async () => {
+    const sqlite = seedFixtures({ count: 1 })
+    sqlite
+      .prepare(
+        `UPDATE datasets SET
+            data_ref = 'r2:videos/DS000AAAAAAAAAAAAAAAAAAAAA/01FAILING/master.m3u8',
+            format = 'video/mp4'
+         WHERE slug = 'dataset-0'`,
+      )
+      .run()
+    const CATALOG_R2 = {
+      async get() {
+        throw new Error('R2 unavailable')
+      },
+    } as unknown as R2Bucket
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: makeKV(),
+      R2_PUBLIC_BASE: 'https://video.example.com',
+      CATALOG_R2,
+    }
+    const ctx = makeCtx<'id'>({ env, params: { id: 'DS000AAAAAAAAAAAAAAAAAAAAA' } })
+    const res = await onRequestGet(ctx)
+    expect(res.status).toBe(200)
+    const body = await readJson<{ duration: number; hls: string }>(res)
+    expect(body.duration).toBe(0)
+    expect(body.hls).toContain('01FAILING/master.m3u8')
+    // Cached briefly, so no viewer keeps a 0 that would read
+    // differently a moment later, and a 304 says the same.
+    expect(res.headers.get('cache-control')).toBe(TRANSIENT_CACHE_CONTROL)
+    const etag = res.headers.get('etag')!
+    const again = await onRequestGet(
+      makeCtx<'id'>({ env, params: { id: 'DS000AAAAAAAAAAAAAAAAAAAAA' }, headers: { 'if-none-match': etag } }),
+    )
+    expect(again.status).toBe(304)
+    expect(again.headers.get('cache-control')).toBe(TRANSIENT_CACHE_CONTROL)
+  })
+
+  it('hands the length read to waitUntil, so a late read can still be remembered', async () => {
+    const sqlite = seedFixtures({ count: 1 })
+    sqlite
+      .prepare(
+        `UPDATE datasets SET
+            data_ref = 'r2:videos/DS000AAAAAAAAAAAAAAAAAAAAA/master.m3u8',
+            format = 'video/mp4'
+         WHERE slug = 'dataset-0'`,
+      )
+      .run()
+    const CATALOG_R2 = { async get() { return null } } as unknown as R2Bucket
+    const env = { CATALOG_DB: asD1(sqlite), CATALOG_KV: makeKV(), R2_PUBLIC_BASE: 'https://video.example.com', CATALOG_R2 }
+    const ctx = makeCtx<'id'>({ env, params: { id: 'DS000AAAAAAAAAAAAAAAAAAAAA' } })
+    const waitUntil = vi.fn()
+    ;(ctx as { waitUntil: (p: Promise<unknown>) => void }).waitUntil = waitUntil
+    expect((await onRequestGet(ctx)).status).toBe(200)
+    expect(waitUntil).toHaveBeenCalledTimes(1)
+    expect(waitUntil.mock.calls[0][0]).toBeInstanceOf(Promise)
   })
 
   it('falls back to single-file MP4 for r2: video data_refs that do not end in .m3u8', async () => {
@@ -584,7 +730,19 @@ describe('resolveManifest (unit)', () => {
     if ('manifest' in result) {
       expect(result.manifest.kind).toBe('video')
     }
-    expect(fetchImpl).toHaveBeenCalledWith('https://test/video/7')
+    // The proxy never redirects, so a redirect is not followed off its host.
+    expect(fetchImpl).toHaveBeenCalledWith('https://test/video/7', { redirect: 'manual' })
+  })
+
+  it('never sends the proxy an id that is not one', async () => {
+    const fetchImpl = vi.fn(async () => new Response('{}'))
+    const result = await resolveManifest(
+      { id: 'DSXXX', format: 'video/mp4', data_ref: 'vimeo:../../admin' },
+      { VIDEO_PROXY_BASE: 'https://test/video' },
+      fetchImpl as unknown as typeof fetch,
+    )
+    expect('manifest' in result).toBe(false)
+    expect(fetchImpl).not.toHaveBeenCalled()
   })
 })
 

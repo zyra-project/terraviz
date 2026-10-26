@@ -932,6 +932,41 @@ describe('reporting the GPU context (rung 13, case 5)', () => {
   })
 })
 
+describe('reporting a stream that died', () => {
+  // The output emits no telemetry of its own. It tells the control
+  // window, and the control window reports it.
+  it('tells the control window which dataset could not play', async () => {
+    const host = fakeHost()
+    const link = await connectOutputLink(host)
+    host.emit.mockClear()
+
+    link.reportStreamFailure('ds-7')
+
+    expect(host.emit.mock.calls).toEqual([
+      [OUTPUT_EVENT, { type: 'output_dataset_stalled', label: 'output-3', datasetId: 'ds-7' }],
+    ])
+  })
+
+  it('does not throw when the report cannot be delivered', async () => {
+    const host = fakeHost()
+    const link = await connectOutputLink(host)
+    host.emit.mockRejectedValue(new Error('channel gone'))
+
+    expect(() => link.reportStreamFailure('ds-7')).not.toThrow()
+  })
+
+  it('stays quiet once the link is stopped', async () => {
+    const host = fakeHost()
+    const link = await connectOutputLink(host)
+    await link.stop()
+    host.emit.mockClear()
+
+    link.reportStreamFailure('ds-7')
+
+    expect(host.emit).not.toHaveBeenCalled()
+  })
+})
+
 describe('re-announcing on a poke (rung 13, case 6 + case 5)', () => {
   it('notifies subscribers after the re-announcement, not before', async () => {
     // The manager drops an event whose label has no record, so the

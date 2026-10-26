@@ -79,6 +79,49 @@ SCHEMA_BASE_URL=https://terraviz.example.org/schema/v1 npm run gen:protocol-sche
   of the JSON keeps the artifact small and stable (a comment edit
   doesn't churn the contract).
 - **Deterministic output (`sortProps`)** so the drift diff is stable.
+  That orders the *schema's* properties, not the wire's.
+- **Key order, whitespace and byte offsets on the wire are not part of
+  the contract.** A consumer parses the JSON; a producer that orders
+  keys differently is conformant. Promising an order would make every
+  new field a contract decision for every producer. Three LSL scripts
+  in Second Life are **not conformant readers**, and are supported only
+  against a node running this codebase's serializer: they can afford
+  only the start of a record, so they read by position. The probe
+  kit's globe script reads `id`, `slug`, `title` and `format` from the
+  first 1,024 bytes (2,048 in its earliest copies, as in the exhibit's
+  globe script's, which no longer reads at all). Copies of the exhibit's
+  info script from before it read the exhibit's card (below) read
+  twelve text and time fields from before `createdAt`, within the first
+  9,000 bytes in the earliest copies and 3,072 in later ones, and a
+  video manifest's `duration` and, in all but the earliest, its `id`,
+  trusting the duration only when that id is the dataset's, which a
+  Vimeo row's manifest replaces with Vimeo's. Those reads are of the
+  manifest's first 1,024 to 4,096 bytes. Pointed at a node that orders
+  keys differently, they can miss fields. They read under `/api/v1/`,
+  so they will meet that prefix's 410 one day whatever is pinned.
+  [`dataset-serializer.test.ts`](../../functions/api/v1/_lib/dataset-serializer.test.ts)
+  and
+  [`exhibit.test.ts`](../../scripts/second-life-exhibit/exhibit.test.ts)
+  pin the record's order, and
+  [`manifest.test.ts`](../../functions/api/v1/datasets/[id]/manifest.test.ts)
+  the manifest's leading keys and a Vimeo manifest's own id, so a
+  reorder fails a test rather than a globe. Copies once rezzed can't be updated remotely, so these pins
+  stay while old copies may still read this way.
+- **The exhibit reads are where an LSL script should read instead:**
+  `GET /api/exhibit/v1/datasets/{id}`, `GET /api/exhibit/v1/datasets`
+  and `GET /api/exhibit/v1/tags`, small replies within byte budgets
+  they state, with their own contract for scripts already rezzed:
+  additive only, no field changes meaning, a breaking change gets a
+  new path, `/api/exhibit/v2/`, and `/api/exhibit/v1/` stays. Their
+  version is their own, outside
+  `/api/v1/`, so the 410 this protocol's `/api/v1/` answers once a
+  later major version has run its window never reaches a script that
+  can't be updated ([`exhibit-reads.ts`](../../functions/api/v1/_lib/exhibit-reads.ts),
+  [`SECOND_LIFE_COMPAT.md`](../SECOND_LIFE_COMPAT.md) §9 Phase 2). They
+  are convenience reads of nodes running this codebase from October
+  2026 on, not part of the federation protocol, and not in
+  `public/schema/v1/`. A node without them answers their paths with
+  the app's page and a 200, which a script has to tell from a reply.
 
 ## Versioning
 

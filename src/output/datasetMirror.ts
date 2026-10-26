@@ -59,6 +59,11 @@ export interface MediaSource {
   /** The steerable half — `null` for a still image, which has no
    *  playhead to correct. */
   readonly video: SyncTarget | null
+  /** The length every copy of this media loops on, when the source
+   *  states one: an HLS stream's playlist total
+   *  (`HLSService.playlistDurationS`). `null`, or absent, and a clock
+   *  loops on the element's own `duration`. */
+  readonly loopS?: () => number | null
   dispose(): void
 }
 
@@ -95,8 +100,33 @@ export function needsReload(
   return current.url !== next.url || current.kind !== next.kind
 }
 
+/**
+ * The dataset a stream that died after loading is showing now, for its
+ * report. A stream is kept across a dataset that changes only metadata
+ * (`needsReload`), and the mirror takes the new dataset's id at once,
+ * while the loader's report names the one the stream loaded under. The
+ * control window counts only a stall for the dataset it published, so
+ * that report was dropped (found in review). The mirror's dataset when
+ * the two share a file, else the one the stream loaded under.
+ */
+export function datasetShowing(
+  loadedAs: MirroredDataset,
+  current: MirroredDataset | null,
+): MirroredDataset {
+  return current && !needsReload(loadedAs, current) ? current : loadedAs
+}
+
 export function createDatasetMirror(
-  deps: { loader?: MediaLoader; nowMs?: () => number } = {},
+  deps: {
+    loader?: MediaLoader
+    nowMs?: () => number
+    /** A video that would not load, while it was still the dataset
+     *  asked for. A load a newer `apply` superseded is not reported: an
+     *  operator clicking through the catalog leaves loads behind, and
+     *  their failures (contention, a timeout on a dataset already left)
+     *  say nothing about the output. */
+    onLoadFailed?: (dataset: MirroredDataset) => void
+  } = {},
 ): DatasetMirror {
   const loader = deps.loader ?? createDefaultMediaLoader()
   // Holds the one thing the pure sync layer cannot: when it last
@@ -125,6 +155,13 @@ export function createDatasetMirror(
     async apply(next) {
       if (disposed) return
 
+      // Every apply is the newest, including one that needs no load:
+      // going back to the dataset on screen, or to nothing from idle,
+      // must supersede a load still in flight. Bumped after the early
+      // return, that load installed anyway and released the picture
+      // the caller had just gone back to (found in review).
+      const mine = ++generation
+
       if (!needsReload(dataset, next)) {
         // Same pixels, new metadata — keep the decoder, take the
         // overlay. The scene re-reads `currentDataset()` for its
@@ -132,8 +169,6 @@ export function createDatasetMirror(
         dataset = next
         return
       }
-
-      const mine = ++generation
 
       if (!next) {
         dataset = null
@@ -151,6 +186,7 @@ export function createDatasetMirror(
         // health badge and one stream rebuild; for now the honest
         // behaviour is to keep showing the last thing that worked.
         logger.error(`[output] could not load ${next.id}:`, err)
+        if (mine === generation && !disposed && next.kind === 'video') deps.onLoadFailed?.(next)
         return
       }
 
@@ -201,18 +237,63 @@ export function isHlsManifest(url: string): boolean {
  * `HLSService` arrives through a dynamic import so an output showing
  * image datasets never pays for hls.js — the same lazy-seam discipline
  * `outputScene` uses for Three and `photorealEarth`.
+ *
+ * `maxVideoWidth`, when given, is read at each load and caps the HLS
+ * renditions at the narrowest one that still fills that width. The web
+ * output passes its framebuffer width, because every visitor streams
+ * their own copy; a desktop output passes nothing and is unchanged.
+ *
+ * Stream errors go where the window says, never to the default
+ * reporter. `HLSService` left at its default posts a Tier A `error` from
+ * whatever page it runs in, and a desktop output emits nothing of its own
+ * (`outputTelemetry.ts`). So `reportStreamError` is handed every fatal
+ * error the stream reports, recovered or not, and is silent unless given;
+ * the web output gives it the page's own telemetry. `onStreamFailed` is
+ * called once per loaded stream that dies, when it has spent its retry
+ * budget (`HLSService.onFatalError`). A stream that would not load at
+ * all is the mirror's to report (`onLoadFailed`), because only the
+ * mirror knows whether that load was still wanted. A desktop output
+ * gives both to the link, and the control window reports them.
  */
-export function createDefaultMediaLoader(): MediaLoader {
+export interface DefaultMediaLoaderOptions {
+  maxVideoWidth?: () => number | undefined
+  reportStreamError?: (err: Error) => void
+  onStreamFailed?: (ds: MirroredDataset) => void
+}
+
+export function createDefaultMediaLoader(opts: DefaultMediaLoaderOptions = {}): MediaLoader {
   return {
     async load(ds) {
       if (ds.kind === 'image') return loadImageSource(ds.url)
 
       const { HLSService } = await import('../services/hlsService')
-      const hls = new HLSService()
+      // The window's hooks never throw into the stream: this one runs
+      // inside hls.js's error handler, ahead of its recovery.
+      const hls = new HLSService({
+        reportError: err => {
+          try {
+            opts.reportStreamError?.(err)
+          } catch {
+            // A report that failed must not cost the recovery.
+          }
+        },
+      })
       const video = hls.createVideo()
+      // Once per stream, and never after it was let go: a disposed stream
+      // was replaced, which is not a failure.
+      let done = false
+      const failed = (): void => {
+        if (done) return
+        done = true
+        try {
+          opts.onStreamFailed?.(ds)
+        } catch {
+          // The report is the caller's; the stream is still this loader's.
+        }
+      }
       try {
         await (isHlsManifest(ds.url)
-          ? hls.loadStream(ds.url, video)
+          ? hls.loadStream(ds.url, video, false, opts.maxVideoWidth?.())
           : hls.loadDirect(ds.url, video))
         // A loaded stream is not a decodable one, and on WebKitGTK it
         // is not even on its way to being one: that engine does not
@@ -227,14 +308,36 @@ export function createDefaultMediaLoader(): MediaLoader {
         // which is what `pauseWhenReady` is for.
         await waitForDecodableFrame(video, { pauseWhenReady: true })
       } catch (err) {
+        // The mirror reports a failed load, if it still wanted it.
+        done = true
         hls.destroy()
         throw err
+      }
+      // A fatal error hls.js held while the stream loaded replays the
+      // moment a handler is registered, before the mirror has decided
+      // whether it still wants this stream. That is a failed load, so it
+      // rejects like one, and the mirror reports it only if it is current.
+      let loading = true
+      let diedLoading = false
+      hls.onFatalError(() => {
+        if (loading) diedLoading = true
+        else failed()
+      })
+      loading = false
+      if (diedLoading) {
+        done = true
+        hls.destroy()
+        throw new Error('the stream died while it loaded')
       }
       return {
         kind: 'video',
         element: video,
         video,
-        dispose: () => hls.destroy(),
+        loopS: () => hls.playlistDurationS(),
+        dispose: () => {
+          done = true
+          hls.destroy()
+        },
       }
     },
   }

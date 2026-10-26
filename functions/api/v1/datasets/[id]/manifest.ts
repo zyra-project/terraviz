@@ -38,16 +38,31 @@
  * Wire shape:
  *   - Video: matches the existing `VideoProxyResponse` shape
  *     (`{ id, title, duration, hls, files }`) so `hlsService.ts`
- *     consumes it unchanged once Commit H lands.
+ *     consumes it unchanged once Commit H lands. `duration` is the
+ *     clip's length in seconds, never negative and often with a
+ *     fraction, or 0 when the node doesn't know it, which can be for
+ *     a moment as well as for good:
+ *     Vimeo's figure for `vimeo:` (whole seconds, so up to a second
+ *     off what a player reads from the stream), the sum of the bundle's own
+ *     `#EXTINF`s for `r2:` HLS (`_lib/hls-duration.ts`), the period a
+ *     web output loops on, and 0 for `stream:` and single files.
+ *     Browsers ignore it, since a player reads the length from the
+ *     playlist. Second Life info scripts from before the exhibit's
+ *     card read it to turn a clip position into a date; the card's
+ *     `exactDuration` is what one reads now.
  *   - Image: `{ kind: "image", variants: [{ width, url }], fallback }`
  *     per `CATALOG_BACKEND_PLAN.md` "Image datasets (R2 + Cloudflare
  *     Images)". Phase 2 enriches this with real Cloudflare Images
  *     variant URLs; Phase 1a fakes it with the suffix-mangled ladder
  *     to keep the frontend identical.
  *
- * Caching: ETag-driven 304 + a 5-minute edge cache. The Vimeo proxy
- * signs MP4 URLs with a ~1-hour TTL, so a few-minute edge cache is
- * generous-enough headroom without serving expired URLs.
+ * Caching: ETag-driven 304 + a 5-minute `Cache-Control`. The Vimeo
+ * proxy signs MP4 URLs with a ~1-hour TTL, so a few minutes is
+ * generous-enough headroom without serving expired URLs. A manifest
+ * whose `duration` could not be read for a passing reason (an R2 error
+ * or the time limit) is cached for `TRANSIENT_CACHE_CONTROL`'s 15 s
+ * instead, so no viewer keeps the 0 for long, while a bucket that
+ * stays slow still can't take caching away from every load.
  */
 
 import { CatalogEnv } from '../../_lib/env'
@@ -61,8 +76,14 @@ import { isConfigurationError } from '../../_lib/errors'
 import { streamPlaybackUrl } from '../../_lib/stream-store'
 import { computeEtag } from '../../_lib/snapshot'
 import { encodeR2Key, resolveR2HlsPublicUrl, resolveR2PublicUrl } from '../../_lib/r2-public-url'
+import { readHlsDuration } from '../../_lib/hls-duration'
+import { DEFAULT_VIDEO_PROXY_BASE, fetchVimeoManifest, type VideoManifest } from '../../_lib/video-proxy'
 
 const CACHE_CONTROL = 'public, max-age=300, stale-while-revalidate=600'
+
+/** For a manifest whose `duration` is 0 only for now: an R2 error or
+ *  the read's time limit (`_lib/hls-duration.ts`). */
+export const TRANSIENT_CACHE_CONTROL = 'public, max-age=15'
 
 /** Phase Z4 (docs/ZYRA_INTEGRATION_PLAN.md): rows with a LIVE
  *  update cadence re-bind to their newest upload bundle faster — a
@@ -88,25 +109,6 @@ export function cacheControlFor(
   return now - end <= 2 * seconds * 1000 ? CACHE_CONTROL_REALTIME : CACHE_CONTROL
 }
 const CONTENT_TYPE = 'application/json; charset=utf-8'
-const DEFAULT_VIDEO_PROXY_BASE = 'https://video-proxy.zyra-project.org/video'
-
-interface VideoProxyFile {
-  quality: string
-  width?: number
-  height?: number
-  size: number
-  type: string
-  link: string
-}
-
-interface VideoManifest {
-  kind: 'video'
-  id: string
-  title: string
-  duration: number
-  hls: string
-  files: VideoProxyFile[]
-}
 
 interface ImageManifest {
   kind: 'image'
@@ -156,42 +158,6 @@ export function imageVariants(href: string): ImageManifest {
 }
 
 /**
- * Resolve a `vimeo:<id>` to a `VideoManifest` by calling the
- * upstream proxy. The proxy returns the existing
- * `{ id, title, duration, hls, dash, files }` shape; we drop `dash`
- * (the frontend never used it) and stamp `kind: "video"` so the
- * union discriminator is in place for forward compatibility.
- *
- * On upstream failure we return null and the caller surfaces a 502
- * — this path is one of the few in the catalog backend that has a
- * hard external dependency, so a clear error envelope is worth more
- * than a half-rendered manifest.
- */
-async function fetchVimeoManifest(
-  vimeoId: string,
-  proxyBase: string,
-  fetchImpl: typeof fetch,
-): Promise<VideoManifest | null> {
-  const upstream = await fetchImpl(`${proxyBase}/${vimeoId}`)
-  if (!upstream.ok) return null
-  const data = (await upstream.json()) as {
-    id: string
-    title?: string
-    duration?: number
-    hls: string
-    files?: VideoProxyFile[]
-  }
-  return {
-    kind: 'video',
-    id: data.id,
-    title: data.title ?? '',
-    duration: data.duration ?? 0,
-    hls: data.hls,
-    files: data.files ?? [],
-  }
-}
-
-/**
  * Wrap a single `url:<href>` video reference (e.g., a direct MP4)
  * in a video-shaped manifest with one entry in `files`. `hls` is
  * empty — the frontend's `hlsService.loadDirect` path picks up
@@ -220,7 +186,13 @@ export async function resolveManifest(
   row: { id: string; format: string; data_ref: string },
   env: CatalogEnv,
   fetchImpl: typeof fetch = fetch,
-): Promise<{ manifest: Manifest } | { error: { status: number; code: string; message: string } }> {
+  /** The request's `waitUntil`, so an `r2:` HLS length read that
+   *  misses its time limit can still be remembered. */
+  waitUntil?: (promise: Promise<unknown>) => void,
+): Promise<
+  | { manifest: Manifest; transient?: true }
+  | { error: { status: number; code: string; message: string } }
+> {
   const parsed = parseDataRef(row.data_ref)
   if (!parsed) {
     return {
@@ -376,15 +348,19 @@ export async function resolveManifest(
             },
           }
         }
+        // From the bundle's own playlists; 0 whenever they can't say,
+        // which is what this branch always reported before.
+        const length = await readHlsDuration(env.CATALOG_R2, parsed.value, { waitUntil })
         return {
           manifest: {
             kind: 'video',
             id: row.id,
             title: '',
-            duration: 0,
+            duration: length.seconds,
             hls,
             files: [],
           },
+          ...(length.settled ? {} : { transient: true as const }),
         }
       }
       // Non-HLS video sitting on R2 (rare — direct MP4 hosted on
@@ -445,14 +421,14 @@ export const onRequestGet: PagesFunction<CatalogEnv, 'id'> = async context => {
   }
   if (!row) return jsonError(404, 'not_found', `Dataset ${id} not found.`)
 
-  const result = await resolveManifest(row, context.env)
+  const result = await resolveManifest(row, context.env, undefined, p => context.waitUntil(p))
   if ('error' in result) {
     return jsonError(result.error.status, result.error.code, result.error.message)
   }
 
   const body = JSON.stringify(result.manifest)
   const etag = await computeEtag(body)
-  const cacheControl = cacheControlFor(row)
+  const cacheControl = result.transient ? TRANSIENT_CACHE_CONTROL : cacheControlFor(row)
   if (context.request.headers.get('if-none-match') === etag) {
     return new Response(null, {
       status: 304,

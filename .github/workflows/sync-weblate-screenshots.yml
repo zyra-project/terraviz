@@ -61,7 +61,9 @@ permissions:
 jobs:
   screenshots:
     name: Capture + push screenshots
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: Playwright 1.60 cannot install Chromium
+    # on the 26.04 image that label now points at. See visual-report.yml.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -180,9 +180,14 @@ export interface FrameDecisionState {
   kind: OutputContentKind
   /** The rAF timestamp for this callback. */
   nowMs: number
-  /** When the next frame is due — the last answer `advanceFrameDeadline`
-   *  gave, carried across callbacks by the loop. */
+  /** When the next frame is due — from the last answer
+   *  `advanceFrameDeadline` gave, carried across callbacks by the loop. */
   dueMs: number
+  /** The interval `dueMs` was set for: the frame interval of the kind
+   *  drawn when the deadline last moved, 0 before the first draw. A
+   *  deadline is stale only when it was set for a slower kind than the
+   *  one now showing — see `isStaleDeadline`. */
+  dueIntervalMs: number
   /**
    * ms since the previous render-loop callback — how often the browser
    * is *offering* a frame. Required rather than optional, because a
@@ -235,18 +240,24 @@ export interface FrameDecisionState {
  * decimal now changes which side of a boundary one frame lands on, and
  * nothing else — which is what removes the whole class of bug rather
  * than moving it to a different refresh rate.
+ *
+ * Carried only for the frames it paces, though, which took a third go.
+ * A draw made because something changed is **out of band**, and moving
+ * the deadline on from where it was due then put it more than one
+ * interval out, which the stale-deadline clause then read as an
+ * interval that just shrank and drew at once. That draw moved it out
+ * again, so one dataset load, `#` change or camera move left the loop
+ * drawing on every callback for good: 60 fps over a paused frame, the
+ * static floor and a playing video alike, found from a Second Life
+ * globe's readout and reproduced in simulation. `advanceFrameDeadline`
+ * now tells the three kinds of draw apart (see there).
  */
 export function shouldRenderFrame(state: FrameDecisionState): boolean {
   if (state.dirty) return true
-  const interval = frameIntervalMs(state.kind)
-  // The deadline was set for a slower kind and the content has since
-  // started moving (static → video). It cannot legitimately sit more
-  // than one interval out — a draw is at most half an *offered*
-  // interval early, and the offered interval is itself at most one
-  // whole interval when the display is slower than the cap — so this
-  // can only mean the interval just shrank, where holding the old
-  // deadline would stall the first video frame by up to a second.
-  if (state.dueMs - state.nowMs > interval) return true
+  // The content has started moving (static → video) under a deadline
+  // set a second out; holding it would stall the first video frame by
+  // up to that long.
+  if (isStaleDeadline(state)) return true
   // Nearest deadline: draw when waiting for the next callback would
   // overshoot by more than drawing now undershoots. No tolerance
   // constant, because the offered interval is the scale the comparison
@@ -255,21 +266,78 @@ export function shouldRenderFrame(state: FrameDecisionState): boolean {
 }
 
 /**
- * When the frame after this one is due.
+ * A deadline set for a slower kind than the one now showing, and still
+ * more than one of this kind's intervals out: the interval shrank
+ * (static → video), and the deadline is the old kind's, not this one's.
+ * One already within an interval of the new kind is kept, so the first
+ * video frame lands on the phase it was going to have rather than at
+ * once.
  *
- * One whole interval on from the deadline just met, **not** from the
- * moment it was met — that is the entire mechanism above, and the
- * reason the rate survives a display whose refresh is not a multiple
- * of the cap.
- *
- * The clamp to `nowMs` is for the other direction: a display slower
- * than the cap can never meet the deadline, and an unclamped one would
- * accumulate debt for as long as the installation runs. It changes no
- * decision — every callback draws either way — only the size of the
- * number.
+ * The label is the half that matters. Distance alone was the first
+ * version, and a paced draw can legitimately leave the next deadline a
+ * little more than an interval out (it may be up to half a callback
+ * early); a callback that then came soon after read that as stale and
+ * drew again. A cadence alternating short and long callbacks did that
+ * on every pair, 66 fps on a 165 Hz display against a cap of 30 (found
+ * in review by simulation). Only a deadline set for a longer interval
+ * can be stale.
  */
-export function advanceFrameDeadline(dueMs: number, nowMs: number, kind: OutputContentKind): number {
-  return Math.max(dueMs + frameIntervalMs(kind), nowMs)
+function isStaleDeadline(state: Omit<FrameDecisionState, 'dirty'>): boolean {
+  const interval = frameIntervalMs(state.kind)
+  return state.dueIntervalMs > interval && state.dueMs - state.nowMs > interval
+}
+
+/** A deadline and the interval it was set for, which the loop carries
+ *  whole from one draw to the next. */
+export type FrameDeadline = Pick<FrameDecisionState, 'dueMs' | 'dueIntervalMs'>
+
+/**
+ * When the frame after this one is due, given a frame just drawn. Takes
+ * the state `shouldRenderFrame` was given, so the two agree on which
+ * draws were paced, and returns the deadline with the interval it was
+ * set for, so the label changes only when the deadline moves. The loop
+ * once set the two itself, in an order that mattered and that nothing
+ * tested: labelled first, a stale draw read as out of band and the first
+ * video frame waited up to a second (found in review).
+ *
+ * Three kinds of draw, told apart by where the deadline stood:
+ *
+ * - **Paced**: the deadline had arrived, which is `shouldRenderFrame`'s
+ *   own test. The next is one whole interval on from the deadline just
+ *   met, **not** from the moment it was met — that is the entire
+ *   mechanism above, and the reason the rate survives a display whose
+ *   refresh is not a multiple of the cap. A deadline already behind is
+ *   clamped to `nowMs`, so a display slower than the cap draws on
+ *   every callback without accumulating debt for as long as the
+ *   installation runs, and a hitch costs one catch-up frame on the next
+ *   callback rather than the frame it delayed. One more than
+ *   `STATIC_FRAME_MS` behind is a gap in drawing, not a hitch (a hidden
+ *   tab, a lost context), and starts again one interval from now: there
+ *   the catch-up was a second frame back to back. Restarting after any
+ *   lateness, the first fix for that, dropped the owed frame on every
+ *   hitch, and a loaded host read 24–27 fps (found in review).
+ * - **Out of band**: drawn early because something changed. The paced
+ *   frame it came ahead of is still owed, so its deadline stands, and
+ *   so does the interval it was set for.
+ *   Moving it on an interval from where it was due put it more than an
+ *   interval out, and the runaway that started is the third paragraph
+ *   above.
+ * - **Stale**: the deadline was set for a slower kind and sits more
+ *   than one of this kind's intervals out (`isStaleDeadline`), which is
+ *   static → video. It starts again from now; carrying it on would
+ *   leave it out of reach for good. So does the first draw, which has
+ *   no deadline to carry.
+ */
+export function advanceFrameDeadline(state: Omit<FrameDecisionState, 'dirty'>): FrameDeadline {
+  const interval = frameIntervalMs(state.kind)
+  const fromNow = { dueMs: state.nowMs + interval, dueIntervalMs: interval }
+  if (state.dueIntervalMs === 0 || isStaleDeadline(state)) return fromNow
+  if (state.dueMs - state.nowMs > state.sinceLastCallbackMs / 2) {
+    return { dueMs: state.dueMs, dueIntervalMs: state.dueIntervalMs }
+  }
+  const next = state.dueMs + interval
+  if (state.nowMs - next > STATIC_FRAME_MS) return fromNow
+  return { dueMs: Math.max(next, state.nowMs), dueIntervalMs: interval }
 }
 
 // --- Scene construction ---
@@ -467,6 +535,14 @@ export interface OutputScene {
    * re-picking the current rung does not reallocate a 128 MiB buffer.
    */
   setFramebufferWidth(width: number): void
+  /**
+   * Replace the cloud image — a refresh, since the upstream image is
+   * replaced every ten minutes and the first load is otherwise the only
+   * one (`docs/SECOND_LIFE_COMPAT.md` §7 item 8). The old texture is
+   * freed and the next frame draws the new one without waiting out the
+   * 1 Hz static floor.
+   */
+  setCloudImage(image: TexImageSource): void
   /**
    * Draw this warp set, or — for `null` or a set the warp check refuses
    * — nothing, which is what a `projector-warp` window with no usable
@@ -980,17 +1056,25 @@ export async function createOutputScene(
   // costs the clouds and nothing else — an Earth without them is a
   // correct picture, and an output that refused to boot is not.
   const loadCloudImage = deps.loadCloudImage ?? defaultLoadCloudImage
+  /** Bind a cloud image, freeing the one it replaces — the first load
+   *  and every refresh after it take the same path. */
+  const installCloud = (img: TexImageSource): void => {
+    if (disposed) return
+    const tex = new (THREE_ as unknown as {
+      Texture: new (i: unknown) => TextureLike & { needsUpdate: boolean }
+    }).Texture(img)
+    tex.needsUpdate = true
+    const replaced = cloudTexture
+    cloudTexture = tex
+    uniforms[DECORATION_UNIFORMS.cloudMap].value = tex
+    uniforms[DECORATION_UNIFORMS.hasCloud].value = 1
+    replaced?.dispose()
+    textureUpgraded = true
+  }
   void loadCloudImage()
     .then((img: TexImageSource | null) => {
-      if (!img || disposed) return
-      const tex = new (THREE_ as unknown as {
-        Texture: new (i: unknown) => TextureLike & { needsUpdate: boolean }
-      }).Texture(img)
-      tex.needsUpdate = true
-      cloudTexture = tex
-      uniforms[DECORATION_UNIFORMS.cloudMap].value = tex
-      uniforms[DECORATION_UNIFORMS.hasCloud].value = 1
-      textureUpgraded = true
+      // A refresh that landed first already holds a newer image.
+      if (img && !cloudTexture) installCloud(img)
     })
     .catch((err: unknown) => logger.warn('[Output] cloud texture unavailable:', err))
 
@@ -1157,6 +1241,9 @@ export async function createOutputScene(
       // A composite change that did not also upgrade a texture would
       // otherwise wait out the 1 Hz static floor before appearing.
       textureUpgraded = true
+    },
+    setCloudImage(image) {
+      installCloud(image)
     },
     setFramebufferWidth(width) {
       // A warp window sizes itself from its canvas; the ladder is

@@ -1297,6 +1297,138 @@ describe('a lost GPU context (rung 13, case 5)', () => {
   })
 })
 
+describe('a stream that died on an output', () => {
+  // The output emits nothing of its own (`outputTelemetry.ts`); it tells
+  // the manager, and the manager reports it.
+  const dataset = (id: string) => ({
+    id,
+    url: `https://example.com/${id}.m3u8`,
+    kind: 'video' as const,
+    overlay: { datasetId: id },
+    startTime: null,
+    endTime: null,
+  })
+  const stalledRows = () =>
+    vi
+      .mocked(emit)
+      .mock.calls.map(c => c[0])
+      .filter(e => e.event_type === 'output_failure')
+  async function outputShowing(id: string) {
+    const fake = createFakeHost()
+    const manager = makeManager(fake.host)
+    await manager.start()
+    await manager.addOutput({ monitorIndex: 0 })
+    fake.send(ready('output-1'))
+    await manager.applyState({ dataset: dataset(id) })
+    vi.mocked(emit).mockClear()
+    return { fake, manager }
+  }
+
+  it('reports one output_failure for each stream the output says died', async () => {
+    const { fake } = await outputShowing('ds-1')
+
+    fake.send({ type: 'output_dataset_stalled', label: 'output-1', datasetId: 'ds-1' })
+
+    // Nothing on this side retried or recovered it, so `0` and `false`
+    // are literal. The dataset id stays out of the event.
+    expect(stalledRows()).toEqual([{ event_type: 'output_failure', kind: 'hls-stalled', retries: 0, recovered: false }])
+  })
+
+  it('ignores one from a label it does not know', async () => {
+    const { fake } = await outputShowing('ds-1')
+
+    fake.send({ type: 'output_dataset_stalled', label: 'output-9', datasetId: 'ds-1' })
+
+    expect(vi.mocked(emit)).not.toHaveBeenCalled()
+  })
+
+  it('reports at most once per output per dataset, and again for a new dataset', async () => {
+    // The bound for an output that does not keep to one per stream: a
+    // buggy rebuild loop, or a compromised window.
+    const { fake, manager } = await outputShowing('ds-1')
+
+    for (let i = 0; i < 5; i++) fake.send({ type: 'output_dataset_stalled', label: 'output-1', datasetId: 'ds-1' })
+    expect(stalledRows()).toHaveLength(1)
+
+    // The control window publishes a dataset: a new stream on every
+    // output, owed its own report.
+    await manager.applyState({ dataset: dataset('ds-2') })
+    fake.send({ type: 'output_dataset_stalled', label: 'output-1', datasetId: 'ds-2' })
+    expect(stalledRows()).toHaveLength(2)
+  })
+
+  it('does not reopen the bound when the output changes the id it names', async () => {
+    // The id is the output's to choose. Keyed on it, alternating two
+    // reopened the bound on every message (found in review).
+    const { fake } = await outputShowing('ds-a')
+
+    for (const datasetId of ['ds-a', 'ds-b', 'ds-a', null, 'ds-b', 'ds-a']) {
+      fake.send({ type: 'output_dataset_stalled', label: 'output-1', datasetId })
+    }
+    expect(stalledRows()).toHaveLength(1)
+  })
+
+  it('does not let a late stall for the last dataset take the next one\'s report', async () => {
+    // A stall for A crossing the publication of B in flight: counted, it
+    // would set the bound B's own stall then meets (found in review).
+    const { fake, manager } = await outputShowing('ds-a')
+    await manager.applyState({ dataset: dataset('ds-b') })
+
+    fake.send({ type: 'output_dataset_stalled', label: 'output-1', datasetId: 'ds-a' })
+    expect(stalledRows()).toEqual([])
+
+    fake.send({ type: 'output_dataset_stalled', label: 'output-1', datasetId: 'ds-b' })
+    expect(stalledRows()).toHaveLength(1)
+  })
+
+  it('does not reopen the bound for anything the output says', async () => {
+    // An announcement, a health check and a reattach reply are the
+    // output's word too: clearing on one would let it announce, stall,
+    // announce, stall.
+    const { fake } = await outputShowing('ds-1')
+    fake.send({ type: 'output_dataset_stalled', label: 'output-1', datasetId: 'ds-1' })
+    fake.send(ready('output-1'))
+    fake.send({ type: 'output_health_check', label: 'output-1', silentMs: 5000 })
+    fake.send({ type: 'output_dataset_stalled', label: 'output-1', datasetId: 'ds-1' })
+    expect(stalledRows()).toHaveLength(1)
+  })
+
+  it('does not reopen it for a dataset republished unchanged', async () => {
+    // `main.ts` republishes the primary's dataset unchanged on a load
+    // into another panel, its unload and a promotion. No output builds a
+    // stream for those.
+    const { fake, manager } = await outputShowing('ds-1')
+    fake.send({ type: 'output_dataset_stalled', label: 'output-1', datasetId: 'ds-1' })
+    await manager.applyState({ dataset: dataset('ds-1') })
+    // Beside a key that did change, so the publish is not a no-op: what
+    // counts is whether the dataset changed, not whether it was sent.
+    await manager.applyState({ dataset: dataset('ds-1'), simulationDate: '2026-01-01T00:00:00Z' })
+    fake.send({ type: 'output_dataset_stalled', label: 'output-1', datasetId: 'ds-1' })
+    expect(stalledRows()).toHaveLength(1)
+  })
+
+  it('counts nothing that names no dataset, or one with nothing published', async () => {
+    const { fake, manager } = await outputShowing('ds-1')
+    fake.send({ type: 'output_dataset_stalled', label: 'output-1', datasetId: null })
+    expect(stalledRows()).toEqual([])
+
+    await manager.applyState({ dataset: null })
+    fake.send({ type: 'output_dataset_stalled', label: 'output-1', datasetId: 'ds-1' })
+    expect(stalledRows()).toEqual([])
+  })
+
+  it('does not report one from a window on its way out', async () => {
+    // Its stream ending is the close.
+    const { fake } = await outputShowing('ds-1')
+    fake.send({ type: 'output_closing', label: 'output-1' })
+    vi.mocked(emit).mockClear()
+
+    fake.send({ type: 'output_dataset_stalled', label: 'output-1', datasetId: 'ds-1' })
+
+    expect(stalledRows()).toEqual([])
+  })
+})
+
 describe('lifecycle', () => {
   it('start() is idempotent — one listener, one timer', async () => {
     vi.useFakeTimers()

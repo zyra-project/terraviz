@@ -18,7 +18,9 @@ store, workflow run rows, the preset catalog, curator review
 queues, the provider-agnostic Orbit client with tool-call support —
 mean every idea below is *existing structured data + one narrow
 model call + an existing gate*. None requires a new agent surface,
-a vendor SDK, or a new write path.
+a vendor SDK, or a new write path. #10 is the one exception to the
+shape: it needs a new endpoint, because its caller is a script that
+can't use the browser's contract, and it says why.
 
 ## For consumers
 
@@ -120,6 +122,50 @@ as accept-or-ignore suggestions inside the dataset form, where the
 review gate is the human already sitting there.
 **Rides:** dataset form + PATCH surface. **Gate:** every
 suggestion is a click the author makes; nothing lands unattended.
+
+## For in-world exhibits
+
+### 10. Orbit at an in-world globe
+
+A visitor at a Second Life globe asks a question, and the globe answers
+and switches dataset for everyone standing at it. The plan is
+[`SECOND_LIFE_COMPAT.md`](SECOND_LIFE_COMPAT.md); its §8 says why
+today's chat endpoint can't serve a script: the prompt is built in the
+browser, the endpoint requires an allowed `Origin`, and its rate limit
+is per IP, while every script on a simulator host shares one. So this
+is the one entry here that needs a new endpoint. The model call behind
+it is the one Orbit's chat already makes. The visitor-facing version
+that needs nothing is already available: the full app with `chat=1` on
+a flat panel (that doc's Option E), where each conversation is private.
+**Rides:** the node's own catalog + the Workers AI path in
+`functions/api/chat/completions.ts` + Phase 2's in-world controller.
+**Contract:** the script sends a question and the current dataset id.
+The node builds Orbit's prompt itself and returns a short answer and at
+most one dataset id. It checks that id against its catalog: images and
+videos only, never a tour or a URL.
+**Gate:** the node's Orbit toggle and an exhausted model quota both
+fall back to what Phase 2 already gives a visitor: the dataset menu,
+the notecard and the abstract in chat.
+**Untrusted input:** a visitor's question never reaches the globe. Only
+a checked dataset id does, and it obeys the same presenter-list and
+short-hold rules as a touch, so a question during a talk can't change
+the picture.
+**Privacy:** a question comes in only explicitly, by touching "Ask
+Orbit" and typing into a text box. The script never listens to nearby
+chat, since Second Life's rules restrict relaying people's chat
+without consent. Avatar names stay out of what is sent. It needs an
+in-world disclosure, and `PRIVACY.md` would have to cover visitor
+questions going to Workers AI.
+**Abuse and cost:** an endpoint with no `Origin` check is a free model
+for anyone on the internet, not only in Second Life. It needs
+credentials per globe and a cap per globe. The AI-Generated Code
+Security Auditor and the Privacy Engineer review it.
+**Form:** one completion call with a fixed flowchart, so no agent. It
+is the shape [`AGENT_SDK_EVALUATION.md`](AGENT_SDK_EVALUATION.md)
+settles for Orbit.
+**Effort:** a plan section first, then one endpoint and the
+controller's "Ask Orbit" menu entry. It waits on Phase 2, whose touch,
+presenter and hold rules it uses.
 
 ## Sequencing lean
 

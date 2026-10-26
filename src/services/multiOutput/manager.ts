@@ -339,6 +339,23 @@ export interface OutputRecord {
    */
   gpuLost: boolean
   /**
+   * Whether this output has reported a dead stream since the control
+   * window last published a dataset. One `hls-stalled` row per output
+   * per published dataset. The output already sends one per stream;
+   * this is the bound for an output that does not, a buggy future
+   * rebuild loop or a compromised window. A latch rather than the id
+   * the output names, because that id is the output's to choose: keyed
+   * on it, alternating two ids reopened the bound on every message
+   * (found in review). Only a publication that changes the dataset,
+   * which this side makes, clears it. Nothing the output sends does: an
+   * announcement, a health check or a reattach reply is the output's
+   * word too, and clearing on one would let it announce, stall,
+   * announce, stall. A stream rebuilt under one publication (a reloaded
+   * output page, rung 13's rebuild) therefore reports once, not per
+   * stream. Not persisted.
+   */
+  stallReported: boolean
+  /**
    * The badge, derived from `ready`, `lastHealthCheckAtMs` and
    * `gpuLost`, and kept current by the heartbeat.
    *
@@ -607,6 +624,7 @@ export class MultiOutputManager {
       lastEvent: null,
       lastHealthCheckAtMs: null,
       gpuLost: false,
+      stallReported: false,
       health: 'starting',
       departing: false,
       announcedClosing: false,
@@ -1017,6 +1035,7 @@ export class MultiOutputManager {
         lastEvent: null,
         lastHealthCheckAtMs: null,
         gpuLost: false,
+        stallReported: false,
         health: 'starting',
         departing: false,
         announcedClosing: false,
@@ -1236,6 +1255,13 @@ export class MultiOutputManager {
   async applyState(patch: Partial<MirroredGlobeState>): Promise<void> {
     const message = this.aggregator.apply(patch)
     if (!message) return
+    // A new dataset is a new stream on every output, owed its own report
+    // if it dies. Only a change counts: `main.ts` republishes the
+    // primary's dataset unchanged (a load into another panel, its
+    // unload, a promotion), the aggregator drops that, and no output
+    // builds a stream for it. Before the await, so no output event can
+    // see the new dataset with the old latch.
+    if ('dataset' in message.state) for (const record of this.records.values()) record.stallReported = false
     await this.broadcast(message)
   }
 
@@ -1638,6 +1664,36 @@ export class MultiOutputManager {
         reportOutputFailure({ kind: 'gpu-loss', retries: 1, recovered: true })
       }
       record.gpuLost = false
+    }
+    if (event.type === 'output_dataset_stalled') {
+      // The output's stream died: it would not load while still wanted,
+      // or hls.js spent its retry budget after it had (`datasetMirror`).
+      // The output keeps its last frame and nothing rebuilds the stream
+      // yet, which is rung 13's single HLS rebuild, so `0` and `false`
+      // are literal. `retries` counts what this side attempted, which is
+      // nothing; hls.js's own recoveries happen inside the output and are
+      // not counted.
+      //
+      // Not from a window on its way out, whose stream ending is the
+      // close, and at most once per output per published dataset
+      // (`stallReported`). Only a stall for the dataset this side has
+      // published counts: one for the dataset before, crossing the
+      // publication in flight, would otherwise take the new dataset's
+      // report (found in review). The id is the output's word, so it can
+      // match the publication or not and decides nothing else.
+      const datasetId = typeof event.datasetId === 'string' ? event.datasetId : null
+      const published = this.aggregator.current().dataset?.id ?? null
+      if (
+        !record.departing &&
+        !record.announcedClosing &&
+        !record.stallReported &&
+        datasetId !== null &&
+        datasetId === published
+      ) {
+        record.stallReported = true
+        logger.error(`[multiOutput] ${event.label} could not play ${datasetId.slice(0, 64)}`)
+        reportOutputFailure({ kind: 'hls-stalled', retries: 0, recovered: false })
+      }
     }
     // A ping and an announcement are served by **one** path, not two.
     // Both prove the same thing — the window is up and listening — and

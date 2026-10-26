@@ -17,6 +17,7 @@ import {
   createDebugOverlay,
   createDrawTimer,
   createFpsMeter,
+  FPS_OUTAGE_MS,
   formatOverlay,
   formatWarpLine,
   type DebugOverlayReading,
@@ -187,23 +188,24 @@ describe('createFpsMeter', () => {
     // long the first frame took. That is the measurement error the
     // decoder-budget spike chased before differencing two samples.
     const meter = createFpsMeter()
-    meter.tick(0)
-    // A slow first second: 5 frames.
-    for (let i = 1; i < 5; i++) meter.tick(i * 200)
+    // A slow first second: a frame every 200 ms.
+    for (let t = 0; t <= 1000; t += 200) meter.tick(t)
     expect(meter.sample(1000)).toBeCloseTo(5, 5)
 
     // A fast second: 30 frames. A since-the-start meter would report
-    // ~17.5 here; the delta reports the truth.
-    for (let i = 0; i < 30; i++) meter.tick(1000 + i * 33)
-    expect(meter.sample(2000)).toBeCloseTo(30, 5)
+    // ~17.6 here; the delta reports the truth.
+    for (let t = 1033; t <= 1990; t += 33) meter.tick(t)
+    expect(meter.sample(2000)).toBeCloseTo(30, 0)
   })
 
   it('holds its last value rather than dividing by zero', () => {
     const meter = createFpsMeter()
     meter.tick(100)
-    meter.sample(200)
-    // Same instant twice — a zero window would be Infinity or NaN on
-    // screen, which reads as a broken output rather than a fast one.
+    meter.tick(100)
+    // Two frames at one instant, read at that instant — a zero span
+    // would be Infinity or NaN on screen, which reads as a broken
+    // output rather than a fast one.
+    expect(Number.isFinite(meter.sample(100))).toBe(true)
     expect(Number.isFinite(meter.sample(200))).toBe(true)
   })
 
@@ -211,38 +213,33 @@ describe('createFpsMeter', () => {
     expect(createFpsMeter().sample(1000)).toBe(0)
   })
 
-  it('does not report zero for an output drawing at the 1 Hz floor', () => {
-    // The defect this exists for, found on hardware: a static output
-    // draws once a second and the HUD samples about twice a second, so
-    // roughly every other window holds no frame. Closing those reported
-    // `0.0` — the same reading a black projector gives, which is the one
-    // state the 1 Hz floor and the skip-while-lost rule exist to make
-    // visible.
+  // The loop draws a static output once a second and reads the meter
+  // about twice a second, from whichever callback comes next. Wherever
+  // the readings land against the frames, the floor must read 1. A meter
+  // that counted over the reading's own window read 0.0 on every other
+  // reading (found on hardware); one that restarted at the frame ending
+  // a silence read 58.8 when a reading came one callback after the frame
+  // (worked out in review by simulating the loop; offset 17 here).
+  it.each([0, 17, 167, 499])('reads the 1 Hz floor as 1 with readings %i ms after each frame', offset => {
     const meter = createFpsMeter()
-    let nextDraw = 0
+    const events: Array<[number, 'frame' | 'read']> = []
+    for (let t = 0; t <= 8000; t += 1000) events.push([t, 'frame'])
+    for (let t = offset; t <= 8000; t += 500) events.push([t, 'read'])
+    // Frame first at a tie, as the loop draws before it reads.
+    events.sort((a, b) => a[0] - b[0] || (a[1] === 'frame' ? -1 : 1))
     const readings: number[] = []
-    for (let now = 0; now <= 6000; now += 500) {
-      if (now >= nextDraw) {
-        meter.tick(now)
-        nextDraw = now + 1000
-      }
-      readings.push(meter.sample(now))
+    for (const [t, what] of events) {
+      if (what === 'frame') meter.tick(t)
+      else if (t >= 1000) readings.push(meter.sample(t))
+      else meter.sample(t)
     }
-    // The first sample lands at the same instant as the first frame and
-    // has no window yet; everything after it must be a live reading.
-    const settled = readings.slice(1)
-    expect(settled.every(r => r > 0)).toBe(true)
-    // And in the right neighbourhood of the truth — one frame a second.
-    // Not exactly 1: a window shorter than the frame period reports the
-    // frame it happens to contain over its own length, so the value
-    // rides between the true rate and twice it.
-    expect(Math.min(...settled)).toBeGreaterThanOrEqual(0.9)
-    expect(Math.max(...settled)).toBeLessThanOrEqual(2.1)
+    expect(Math.min(...readings)).toBeGreaterThanOrEqual(0.9)
+    expect(Math.max(...readings)).toBeLessThanOrEqual(1.1)
   })
 
   it('decays toward zero while nothing is drawn', () => {
-    // The other half of the same rule: holding the window open must not
-    // hold the *value* open, or a stalled output would report its last
+    // The other half of the same rule: keeping the last rate must not
+    // hold it on screen, or a stalled output would report its last
     // healthy rate forever — the invisible failure the HUD is for.
     const meter = createFpsMeter()
     meter.tick(0)
@@ -255,26 +252,65 @@ describe('createFpsMeter', () => {
     expect(later[2]).toBeLessThan(0.1)
   })
 
-  it('reports the real rate again once an output recovers', () => {
-    // The other side of holding the window open, and the reason the
-    // hold needs a matching release. `sample()` leaves `since` alone
-    // while no frame arrives, so without a restart the first window
-    // after an outage spans the outage as well: ten seconds of a lost
-    // context followed by a healthy 30 fps read as 1.4, and an operator
-    // reading that concludes the output is still dark.
+  it.each([3000, 10000])('reports the real rate again after a %i ms outage', outageMs => {
+    // An outage is not charged to the recovery: ten seconds of a lost
+    // context followed by a healthy 30 fps once read as 1.4, and an
+    // operator reading that concludes the output is still dark.
     const meter = createFpsMeter()
     meter.tick(0)
     meter.tick(33)
     expect(meter.sample(66)).toBeGreaterThan(10)
 
-    // Ten seconds with nothing drawn, sampled throughout as the HUD
-    // does.
-    for (let now = 500; now <= 10000; now += 500) meter.sample(now)
-    expect(meter.sample(10000)).toBeLessThan(1)
+    // Nothing drawn, sampled throughout as the HUD does.
+    for (let now = 500; now <= outageMs; now += 500) meter.sample(now)
+    expect(meter.sample(outageMs)).toBeLessThan(1)
 
     // Recovery: a full 30 fps second.
-    for (let i = 0; i < 30; i++) meter.tick(10000 + i * (1000 / 30))
-    expect(meter.sample(11000)).toBeCloseTo(30, 0)
+    for (let i = 0; i < 30; i++) meter.tick(outageMs + i * (1000 / 30))
+    expect(meter.sample(outageMs + 1000)).toBeCloseTo(30, 0)
+  })
+
+  it('does not count frames from before an outage after it', () => {
+    // Frames drawn after the last reading, then an outage: the
+    // measurement after it starts at the first frame back.
+    const meter = createFpsMeter()
+    meter.tick(0)
+    meter.tick(33)
+    meter.sample(40)
+    meter.tick(66)
+    meter.tick(100)
+    let lastFrame = 0
+    for (let i = 0; i < 30; i++) meter.tick((lastFrame = 5000 + i * (1000 / 30)))
+    // Read at the last frame, where the silence bound cannot clamp an
+    // inflated count back down to the truth.
+    expect(meter.sample(lastFrame)).toBeCloseTo(30, 5)
+  })
+
+  it('charges an outage to the reading taken in the callback that ends it', () => {
+    // Both meters are read in the callback that ticked them, so the gap
+    // must show on its own, with no reading inside it: callbacks
+    // throttled to one every 2.5 s, and a tab back from a minute hidden.
+    const throttled = createFpsMeter()
+    for (let i = 0; i <= 60; i++) throttled.tick(i * (1000 / 60))
+    throttled.sample(1000)
+    for (let t = 3500; t <= 13500; t += 2500) {
+      throttled.tick(t)
+      expect(throttled.sample(t)).toBeCloseTo(0.4, 5)
+    }
+
+    const hidden = createFpsMeter()
+    for (let i = 0; i <= 60; i++) hidden.tick(i * (1000 / 60))
+    expect(hidden.sample(1000)).toBeCloseTo(60, 0)
+    hidden.tick(61000)
+    expect(hidden.sample(61000)).toBeLessThan(0.1)
+  })
+
+  it('charges a gap up to the outage threshold to the rate', () => {
+    // A pause shorter than an outage is a slow pace, and reads as one.
+    const meter = createFpsMeter()
+    meter.tick(0)
+    meter.tick(FPS_OUTAGE_MS)
+    expect(meter.sample(FPS_OUTAGE_MS)).toBeCloseTo(1000 / FPS_OUTAGE_MS, 5)
   })
 })
 

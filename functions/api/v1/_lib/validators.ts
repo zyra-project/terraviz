@@ -48,7 +48,7 @@ export const FORMAT_VALUES: ReadonlySet<string> = new Set([
   'tour/json',
 ])
 
-const SLUG_RE = /^[a-z][a-z0-9-]{2,63}$/
+export const SLUG_RE = /^[a-z][a-z0-9-]{2,63}$/
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/
 
 export type BboxProvenance = 'unknown' | 'measured' | 'declared_global' | 'imported' | 'inferred'

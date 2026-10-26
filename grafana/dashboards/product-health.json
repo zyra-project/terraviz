@@ -9,7 +9,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 11,
+  "version": 12,
   "refresh": "5m",
   "time": {
     "from": "now-7d",
@@ -50,7 +50,7 @@
       "id": 1,
       "type": "timeseries",
       "title": "Sessions per day",
-      "description": "Distinct session_id per day. Filtered to $environment, excludes internal staff when $internal=false.",
+      "description": "Distinct session_id per day. Filtered to $environment, excludes internal staff when $internal=false. A globe (the output page in web mode) sends no session_start, so this counts app sessions only.",
       "gridPos": {
         "x": 0,
         "y": 0,
@@ -161,7 +161,7 @@
       "id": 3,
       "type": "table",
       "title": "Layer load p95 — top 25 datasets",
-      "description": "p50 and p95 load time per dataset, network/HLS only (cache hits excluded).",
+      "description": "p50 and p95 load time per dataset, network/HLS only (cache hits excluded). Globe traffic (the output page in web mode) is left out; the Globes row shows it.",
       "gridPos": {
         "x": 0,
         "y": 8,
@@ -185,7 +185,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT blob5 AS layer_id, quantile(0.50)(double2) AS p50_ms, quantile(0.95)(double2) AS p95_ms, count() AS load_count FROM terraviz_events WHERE blob1 = 'layer_loaded' AND blob2 = '$environment' AND blob4 = '$internal' AND blob6 != 'cache' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY layer_id HAVING load_count > 10 ORDER BY p95_ms DESC LIMIT 25",
+            "data": "SELECT blob5 AS layer_id, quantile(0.50)(double2) AS p50_ms, quantile(0.95)(double2) AS p95_ms, count() AS load_count FROM terraviz_events WHERE blob1 = 'layer_loaded' AND blob8 != 'output' AND blob2 = '$environment' AND blob4 = '$internal' AND blob6 != 'cache' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY layer_id HAVING load_count > 10 ORDER BY p95_ms DESC LIMIT 25",
             "headers": [
               {
                 "key": "Content-Type",
@@ -224,7 +224,7 @@
       "id": 4,
       "type": "piechart",
       "title": "Load source mix",
-      "description": "How layers were loaded — network fetch vs local cache vs HLS vs raw image.",
+      "description": "How layers were loaded — network fetch vs local cache vs HLS vs raw image. Globe traffic (the output page in web mode) is left out; the Globes row shows it.",
       "gridPos": {
         "x": 12,
         "y": 8,
@@ -248,7 +248,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT blob6 AS source, count() AS loads FROM terraviz_events WHERE blob1 = 'layer_loaded' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY source ORDER BY loads DESC",
+            "data": "SELECT blob6 AS source, count() AS loads FROM terraviz_events WHERE blob1 = 'layer_loaded' AND blob8 != 'output' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY source ORDER BY loads DESC",
             "headers": [
               {
                 "key": "Content-Type",
@@ -277,7 +277,7 @@
       "id": 5,
       "type": "stat",
       "title": "Errors per session (last 24h)",
-      "description": "Total error events divided by distinct session count. Production-only; staff sessions excluded.",
+      "description": "Total error events divided by distinct session count. Production-only; staff sessions excluded. Globe errors (category 'output') are left out of the numerator; globes send no session_start, so they are not in the denominator either.",
       "gridPos": {
         "x": 18,
         "y": 8,
@@ -301,7 +301,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "WITH s AS (SELECT count(DISTINCT index1) AS n FROM terraviz_events WHERE blob1 = 'session_start' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > NOW() - INTERVAL '1' DAY), e AS (SELECT count() AS n FROM terraviz_events WHERE blob1 = 'error' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > NOW() - INTERVAL '1' DAY) SELECT e.n / s.n AS errors_per_session FROM s, e",
+            "data": "WITH s AS (SELECT count(DISTINCT index1) AS n FROM terraviz_events WHERE blob1 = 'session_start' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > NOW() - INTERVAL '1' DAY), e AS (SELECT count() AS n FROM terraviz_events WHERE blob1 = 'error' AND blob5 != 'output' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > NOW() - INTERVAL '1' DAY) SELECT e.n / s.n AS errors_per_session FROM s, e",
             "headers": [
               {
                 "key": "Content-Type",
@@ -325,7 +325,7 @@
       "id": 6,
       "type": "barchart",
       "title": "Errors by category × source",
-      "description": "Last 7 days of error events, grouped by classified category and originating source.",
+      "description": "Last 7 days of error events, grouped by classified category and originating source. Globe traffic (the output page in web mode) is left out; the Globes row shows it.",
       "gridPos": {
         "x": 18,
         "y": 13,
@@ -349,7 +349,7 @@
           "url": "/sql",
           "url_options": {
             "method": "POST",
-            "data": "SELECT blob5 AS category, blob8 AS source, count() AS occurrences FROM terraviz_events WHERE blob1 = 'error' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY category, source ORDER BY occurrences DESC",
+            "data": "SELECT blob5 AS category, blob8 AS source, count() AS occurrences FROM terraviz_events WHERE blob1 = 'error' AND blob5 != 'output' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY category, source ORDER BY occurrences DESC",
             "headers": [
               {
                 "key": "Content-Type",
@@ -1382,7 +1382,7 @@
       "id": 25,
       "type": "table",
       "title": "Multi-monitor outputs — failures by kind",
-      "description": "Rung 13: output_failure, the installation-health half. Split by kind and by whether the output carried on afterwards, with the worst retry count seen — bounded auto-recovery collapses into one event carrying its count, so a flapping installation shows a rising max_retries rather than a rising event rate. Detectors so far: kind='crash' (retries=0, recovered=false — §3's table gives a crash no auto-recovery), 'ipc-silence' from case 6's boot scan (recovered=true when the orphan answered the poke, false when it did not), and 'gpu-loss' from case 5, which is the one kind that emits a PAIR: the loss emits retries=0/recovered=false and a recovery emits retries=1/recovered=true, so incidents = the recovered=false rows and an incident that never came back has only its opening row. The retries=1 credits the browser plus Three's initGLContext(), the only thing that retries. hls-stalled / monitor-unplug arrive with cases 2 and 4 and need no change here. AE positional layout: blob5=kind, blob6=recovered ('true'/'false'), double2=retries.",
+      "description": "Rung 13: output_failure, the installation-health half. Split by kind and by whether the output carried on afterwards, with the worst retry count seen — bounded auto-recovery collapses into one event carrying its count, so a flapping installation shows a rising max_retries rather than a rising event rate. Detectors so far: kind='crash' (retries=0, recovered=false — §3's table gives a crash no auto-recovery), 'ipc-silence' from case 6's boot scan (recovered=true when the orphan answered the poke, false when it did not), and 'gpu-loss' from case 5, which is the one kind that emits a PAIR: the loss emits retries=0/recovered=false and a recovery emits retries=1/recovered=true, so incidents = the recovered=false rows and an incident that never came back has only its opening row. The retries=1 credits the browser plus Three's initGLContext(), the only thing that retries. kind='hls-stalled' (retries=0, recovered=false, one row per stream): an output's stream would not load, or died after hls.js spent its retries, which the output tells the control window over IPC rather than reporting itself. monitor-unplug arrives with case 4 and needs no change here. AE positional layout: blob5=kind, blob6=recovered ('true'/'false'), double2=retries.",
       "gridPos": {
         "x": 18,
         "y": 66,
@@ -1435,6 +1435,132 @@
             {
               "selector": "max_retries",
               "text": "max_retries",
+              "type": "number"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "type": "table",
+      "title": "Globes (web output) — datasets shown",
+      "description": "The output page in web mode: a globe's texture, such as a Second Life prim, reporting for itself because no control window drives it. One layer_loaded per dataset that reached the glass with trigger='output' (at most 30 per copy, since a script cycling the address sets that rate), counted per dataset with the distinct session ids on those rows — one per visitor's copy of the page, and a new one whenever the address's query changes and reloads it, so 'sessions' is an upper bound on visitors. Only globes whose owner turned telemetry on (telemetry=1) report at all, and each copy reports only in its first minute, so this counts what visitors found on arrival at measured globes, and undercounts datasets shown later in a long presentation. Globes send no session_start. layer_id is the id the node returned, never the address's text. Desktop output windows never emit this: the control window's own layer_loaded already counts that view. AE positional layout: blob5=layer_id, blob6=layer_source, blob8=trigger, double2=load_ms.",
+      "gridPos": {
+        "x": 0,
+        "y": 74,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/sql",
+          "url_options": {
+            "method": "POST",
+            "data": "SELECT blob5 AS dataset, blob6 AS source, count() AS shown, count(DISTINCT index1) AS sessions, quantile(0.50)(double2) AS median_load_ms FROM terraviz_events WHERE blob1 = 'layer_loaded' AND blob8 = 'output' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY dataset, source ORDER BY shown DESC LIMIT 50",
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
+          },
+          "parser": "backend",
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "dataset",
+              "text": "dataset",
+              "type": "string"
+            },
+            {
+              "selector": "source",
+              "text": "source",
+              "type": "string"
+            },
+            {
+              "selector": "shown",
+              "text": "shown",
+              "type": "number"
+            },
+            {
+              "selector": "sessions",
+              "text": "sessions",
+              "type": "number"
+            },
+            {
+              "selector": "median_load_ms",
+              "text": "median_load_ms",
+              "type": "number"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 27,
+      "type": "table",
+      "title": "Globes (web output) — errors by code",
+      "description": "error rows with category='output', the output page in web mode, kept apart from category='hls' so a globe's visitors do not count against the app's stream health. code is bounded: not_found / not_playable / bad_response / http / network / media for a dataset that would not show (its first failure per address change, not each retry), and stream for every fatal stream error hls.js reports, recovered or not, whose message_class is hls.js's own error names. A stream that will not load shows up under both: its stream rows, then one media row for the dataset. A rising not_found means a globe's address names a dataset the node no longer has. AE positional layout: blob5=category, blob6=code, blob7=message_class.",
+      "gridPos": {
+        "x": 12,
+        "y": 74,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/sql",
+          "url_options": {
+            "method": "POST",
+            "data": "SELECT blob6 AS code, blob7 AS message_class, count() AS errors FROM terraviz_events WHERE blob1 = 'error' AND blob5 = 'output' AND blob2 = '$environment' AND blob4 = '$internal' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY code, message_class ORDER BY errors DESC LIMIT 50",
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
+          },
+          "parser": "backend",
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "code",
+              "text": "code",
+              "type": "string"
+            },
+            {
+              "selector": "message_class",
+              "text": "message_class",
+              "type": "string"
+            },
+            {
+              "selector": "errors",
+              "text": "errors",
               "type": "number"
             }
           ]

@@ -120,6 +120,7 @@ describe('frame pacing', () => {
         kind: 'image',
         nowMs: 0,
         dueMs: 1000,
+        dueIntervalMs: STATIC_FRAME_MS,
         sinceLastCallbackMs: AT_60_HZ,
         dirty: true,
       }),
@@ -132,6 +133,7 @@ describe('frame pacing', () => {
         kind: 'image',
         nowMs: 500,
         dueMs: 1000,
+        dueIntervalMs: STATIC_FRAME_MS,
         sinceLastCallbackMs: AT_60_HZ,
         dirty: false,
       }),
@@ -148,6 +150,7 @@ describe('frame pacing', () => {
         kind: 'image',
         nowMs: 1000,
         dueMs: 1000,
+        dueIntervalMs: STATIC_FRAME_MS,
         sinceLastCallbackMs: AT_60_HZ,
         dirty: false,
       }),
@@ -163,6 +166,7 @@ describe('frame pacing', () => {
         kind: 'video',
         nowMs: 29,
         dueMs: 33,
+        dueIntervalMs: VIDEO_FRAME_MS,
         sinceLastCallbackMs: AT_60_HZ,
         dirty: false,
       }),
@@ -172,6 +176,7 @@ describe('frame pacing', () => {
         kind: 'video',
         nowMs: 20,
         dueMs: 33,
+        dueIntervalMs: VIDEO_FRAME_MS,
         sinceLastCallbackMs: AT_60_HZ,
         dirty: false,
       }),
@@ -187,10 +192,43 @@ describe('frame pacing', () => {
         kind: 'video',
         nowMs: 10,
         dueMs: 1000,
+        dueIntervalMs: STATIC_FRAME_MS,
         sinceLastCallbackMs: AT_60_HZ,
         dirty: false,
       }),
     ).toBe(true)
+  })
+
+  it('does not read a deadline set for this kind as stale, however far out', () => {
+    // A paced draw can be up to half a callback early, leaving the next
+    // deadline a little more than an interval out. Read as stale, a
+    // callback soon after drew again, and a cadence alternating short
+    // and long callbacks did that on every pair.
+    expect(
+      shouldRenderFrame({
+        kind: 'video',
+        nowMs: 0,
+        dueMs: VIDEO_FRAME_MS + 6,
+        dueIntervalMs: VIDEO_FRAME_MS,
+        sinceLastCallbackMs: 3.33,
+        dirty: false,
+      }),
+    ).toBe(false)
+  })
+
+  it('keeps a static deadline already within one video interval when a video starts', () => {
+    // The first video frame lands on the phase it was going to have,
+    // rather than at once.
+    expect(
+      shouldRenderFrame({
+        kind: 'video',
+        nowMs: 0,
+        dueMs: 20,
+        dueIntervalMs: STATIC_FRAME_MS,
+        sinceLastCallbackMs: AT_60_HZ,
+        dirty: false,
+      }),
+    ).toBe(false)
   })
 
   describe('advanceFrameDeadline', () => {
@@ -198,15 +236,81 @@ describe('frame pacing', () => {
       // The whole mechanism. Drawing 4 ms early must not push the next
       // frame 4 ms late as well, or the error compounds every frame and
       // the rate drifts off the cap.
-      expect(advanceFrameDeadline(33, 29, 'video')).toBeCloseTo(33 + VIDEO_FRAME_MS)
+      const next = advanceFrameDeadline({
+        kind: 'video',
+        nowMs: 29,
+        dueMs: 33,
+        dueIntervalMs: VIDEO_FRAME_MS,
+        sinceLastCallbackMs: AT_60_HZ,
+      })
+      expect(next.dueMs).toBeCloseTo(33 + VIDEO_FRAME_MS)
+      expect(next.dueIntervalMs).toBe(VIDEO_FRAME_MS)
     })
 
     it('does not let a display slower than the cap accumulate debt', () => {
       // 20 Hz offers a callback every 50 ms against a 33.33 ms
       // interval, so the deadline can never be met. Unclamped it would
-      // fall further behind for as long as the installation runs. It
-      // changes no decision — every callback draws either way.
-      expect(advanceFrameDeadline(33, 200, 'video')).toBe(200)
+      // fall further behind for as long as the installation runs.
+      expect(
+        advanceFrameDeadline({ kind: 'video', nowMs: 200, dueMs: 33, dueIntervalMs: VIDEO_FRAME_MS, sinceLastCallbackMs: 50 })
+          .dueMs,
+      ).toBe(200)
+    })
+
+    it('starts one interval from now when the deadline fell more than a second behind', () => {
+      // Callbacks kept coming while nothing drew (a lost context), or
+      // stopped (a hidden tab). Clamped to now, the next callback would
+      // draw a second frame back to back.
+      expect(
+        advanceFrameDeadline({ kind: 'image', nowMs: 10000, dueMs: 3000, dueIntervalMs: STATIC_FRAME_MS, sinceLastCallbackMs: AT_60_HZ })
+          .dueMs,
+      ).toBe(10000 + STATIC_FRAME_MS)
+    })
+
+    it('sets the first deadline one interval after the first draw', () => {
+      // Boot: there is no deadline yet, and `performance.now()` is
+      // already well past zero.
+      expect(
+        advanceFrameDeadline({ kind: 'image', nowMs: 800, dueMs: 0, dueIntervalMs: 0, sinceLastCallbackMs: 0 }),
+      ).toEqual({ dueMs: 800 + STATIC_FRAME_MS, dueIntervalMs: STATIC_FRAME_MS })
+    })
+
+    it('leaves the deadline where it was after an out-of-band draw', () => {
+      // Drawn half a second early because something changed. The paced
+      // frame is still owed at 1000, and moving the deadline on to 2000
+      // put it more than an interval out, which `shouldRenderFrame`
+      // reads as stale and draws at once, for good.
+      expect(
+        advanceFrameDeadline({ kind: 'image', nowMs: 500, dueMs: 1000, dueIntervalMs: STATIC_FRAME_MS, sinceLastCallbackMs: AT_60_HZ }),
+      ).toEqual({ dueMs: 1000, dueIntervalMs: STATIC_FRAME_MS })
+      expect(
+        advanceFrameDeadline({ kind: 'video', nowMs: 10, dueMs: 33, dueIntervalMs: VIDEO_FRAME_MS, sinceLastCallbackMs: AT_60_HZ }),
+      ).toEqual({ dueMs: 33, dueIntervalMs: VIDEO_FRAME_MS })
+    })
+
+    it('keeps the interval a deadline was set for through an out-of-band draw', () => {
+      // A video paused and a change drawn before the owed video frame:
+      // the deadline stands, so its label does too. Relabelled to the
+      // static interval, a later switch back to video could read it as
+      // stale when it is not, and the reverse order of the two updates
+      // made a stale draw read as out of band (found in review).
+      expect(
+        advanceFrameDeadline({ kind: 'image', nowMs: 10, dueMs: 33, dueIntervalMs: VIDEO_FRAME_MS, sinceLastCallbackMs: AT_60_HZ }),
+      ).toEqual({ dueMs: 33, dueIntervalMs: VIDEO_FRAME_MS })
+    })
+
+    it('starts a stale deadline again from now', () => {
+      // A deadline a second out, set for static content, with the
+      // content now moving: the interval just shrank (static → video).
+      const next = advanceFrameDeadline({
+        kind: 'video',
+        nowMs: 10,
+        dueMs: 1000,
+        dueIntervalMs: STATIC_FRAME_MS,
+        sinceLastCallbackMs: AT_60_HZ,
+      })
+      expect(next.dueMs).toBeCloseTo(10 + VIDEO_FRAME_MS)
+      expect(next.dueIntervalMs).toBe(VIDEO_FRAME_MS)
     })
   })
 
@@ -220,17 +324,145 @@ describe('frame pacing', () => {
     // The real loop's very first tick always draws, on `dirty`, and
     // that is what sets the first deadline. Priming it here keeps the
     // count measuring the steady state rather than that one frame.
-    let dueMs = advanceFrameDeadline(0, 0, kind)
+    let deadline = advanceFrameDeadline({ kind, nowMs: 0, dueMs: 0, dueIntervalMs: 0, sinceLastCallbackMs: 0 })
     let drawn = 0
     for (let i = 1; i <= Math.round(offeredHz * seconds); i++) {
-      const now = i * offered
-      if (shouldRenderFrame({ kind, nowMs: now, dueMs, sinceLastCallbackMs: offered, dirty: false })) {
+      const state = { kind, nowMs: i * offered, ...deadline, sinceLastCallbackMs: offered }
+      if (shouldRenderFrame({ ...state, dirty: false })) {
         drawn++
-        dueMs = advanceFrameDeadline(dueMs, now, kind)
+        deadline = advanceFrameDeadline(state)
       }
     }
     return drawn / seconds
   }
+
+  /**
+   * The real loop, as main.ts drives it: a first tick on `dirty`, then
+   * callbacks at `offeredHz`, with the content's kind and any changes
+   * given over time. Returns the draws in each whole second.
+   */
+  function drawsEachSecond(
+    offeredHz: number,
+    kindAt: (nowMs: number) => 'idle' | 'image' | 'video',
+    dirtyAt: number[],
+    seconds: number,
+    /**
+     * When callback `i` arrives; a steady display by default. Computed
+     * rather than accumulated, so a callback due on a second boundary is
+     * counted in the second it opens rather than drifting either side.
+     */
+    callbackAt: (i: number) => number = i => i * (1000 / offeredHz),
+  ): number[] {
+    const counts = new Array<number>(seconds).fill(0)
+    let deadline = { dueMs: 0, dueIntervalMs: 0 }
+    let last: number | null = null
+    const pending = [...dirtyAt]
+    let dirty = true
+    for (let i = 0, now = 0; now < seconds * 1000; now = callbackAt(++i)) {
+      const since = last === null ? 0 : now - last
+      last = now
+      while (pending.length > 0 && pending[0] <= now) {
+        pending.shift()
+        dirty = true
+      }
+      const kind = kindAt(now)
+      const state = { kind, nowMs: now, ...deadline, sinceLastCallbackMs: since }
+      if (shouldRenderFrame({ ...state, dirty })) {
+        counts[Math.floor(now / 1000)]++
+        deadline = advanceFrameDeadline(state)
+        dirty = false
+      }
+    }
+    return counts
+  }
+
+  // What the sweep above never did: something changing. A single
+  // change used to leave the loop drawing on every callback for good,
+  // which a Second Life globe's readout showed as 60 fps over a paused
+  // frame. One extra frame for the change, then the pace again.
+  it.each([30, 45, 60, 75, 144])('goes back to the static floor after a change at %i Hz', hz => {
+    const counts = drawsEachSecond(hz, () => 'image', [2500], 8)
+    // The floor's own frame and the change's, and no more.
+    expect(counts[2]).toBe(2)
+    expect(counts.slice(3)).toEqual([1, 1, 1, 1, 1])
+  })
+
+  it.each([30, 45, 60, 75, 144])('holds ~30 fps through changes to a playing video at %i Hz', hz => {
+    const changes = [1510, 2020, 2500, 4333]
+    const counts = drawsEachSecond(hz, () => 'video', changes, 8)
+    // A second with changes in it draws the cap and one frame per change
+    // at most: the changes do not move the pace on.
+    counts.forEach((n, second) => {
+      const inSecond = changes.filter(t => Math.floor(t / 1000) === second).length
+      expect(n, `second ${second}`).toBeLessThanOrEqual(Math.min(hz, 30) + inSecond + 1)
+    })
+    for (const n of counts.slice(5)) expect(n).toBeGreaterThanOrEqual(29)
+    for (const n of counts.slice(5)) expect(n).toBeLessThanOrEqual(31)
+  })
+
+  it.each([30, 45, 60, 75, 144])('settles to ~30 fps when a still frame starts playing at %i Hz', hz => {
+    // The stale-deadline case: a second out when the content starts
+    // moving. Carried on, it stayed out of reach and every callback drew.
+    const counts = drawsEachSecond(hz, now => (now < 2500 ? 'image' : 'video'), [], 8)
+    // Half a second of video at the cap and the floor's frame before it:
+    // not every callback until the old deadline comes round.
+    expect(counts[2]).toBeLessThanOrEqual(Math.min(hz, 30) / 2 + 2)
+    for (const n of counts.slice(4)) expect(n).toBeGreaterThanOrEqual(29)
+    for (const n of counts.slice(4)) expect(n).toBeLessThanOrEqual(31)
+  })
+
+  it('drops to the static floor when a playing video pauses', () => {
+    const counts = drawsEachSecond(60, now => (now < 2500 ? 'video' : 'image'), [2500], 8)
+    expect(counts.slice(4)).toEqual([1, 1, 1, 1])
+  })
+
+  // Callbacks that alternate short and long: a paced draw half a
+  // callback early, then a callback soon after. A deadline judged stale
+  // by distance alone drew on every one of these pairs, 66 fps on a
+  // 165 Hz display offering 1 and 4 vsyncs in turn, and 75 on a cadence
+  // of 3.3 then 23.3 ms (found in review by simulation).
+  // A callback `short` ms after each one `long` ms after the last.
+  const alternating = (short: number, long: number) => (i: number) =>
+    Math.floor(i / 2) * (short + long) + (i % 2) * short
+  const total = (counts: number[]) => counts.reduce((a, b) => a + b, 0)
+  it.each([
+    ['165 Hz, 1 and 4 vsyncs in turn', alternating(1000 / 165, 4000 / 165)],
+    ['3.3 then 23.3 ms', alternating(3.33, 23.33)],
+  ])('holds the cap and the floor on a cadence alternating %s', (_label, at) => {
+    // Totals over seven seconds rather than each second: a draw half a
+    // callback either side of a boundary moves a frame between seconds.
+    expect(total(drawsEachSecond(60, () => 'video', [], 8, at).slice(1))).toBeGreaterThanOrEqual(208)
+    expect(total(drawsEachSecond(60, () => 'video', [], 8, at).slice(1))).toBeLessThanOrEqual(212)
+    expect(total(drawsEachSecond(60, () => 'image', [], 8, at).slice(1))).toBeGreaterThanOrEqual(6)
+    expect(total(drawsEachSecond(60, () => 'image', [], 8, at).slice(1))).toBeLessThanOrEqual(8)
+  })
+
+  // Callbacks stop at 2 s (a hidden tab, a lost context) and resume at
+  // 10 s. The deadline is then eight seconds behind, and set to the
+  // moment of return it made the next callback draw as well: two frames
+  // back to back after every gap, and after boot.
+  const gapAt60 = (i: number) => (i <= 120 ? i * (1000 / 60) : 10000 + (i - 121) * (1000 / 60))
+  it('draws once on return from a gap in the callbacks, then holds the floor', () => {
+    const counts = drawsEachSecond(60, () => 'image', [], 13, gapAt60)
+    expect(counts.slice(10)).toEqual([1, 1, 1])
+  })
+
+  // A loaded host: callbacks that hitch, one in five arriving three
+  // vsyncs late. The frame a hitch delays is caught up on the next
+  // callback; restarting the deadline after any lateness dropped it,
+  // and this read 25.7 (found in review).
+  const hitchEveryFifth = (i: number) => (Math.floor(i / 5) * 7 + (i % 5)) * (1000 / 60)
+  it('holds the cap through callbacks that hitch', () => {
+    const counts = drawsEachSecond(60, () => 'video', [], 8, hitchEveryFifth)
+    expect(total(counts.slice(1))).toBeGreaterThanOrEqual(208)
+    expect(total(counts.slice(1))).toBeLessThanOrEqual(212)
+  })
+
+  it('holds the cap on return from a gap in the callbacks', () => {
+    const counts = drawsEachSecond(60, () => 'video', [], 13, gapAt60)
+    for (const n of counts.slice(10)) expect(n).toBeLessThanOrEqual(30)
+    for (const n of counts.slice(10)) expect(n).toBeGreaterThanOrEqual(29)
+  })
 
   it('draws on every callback when the display refreshes at the cap', () => {
     // The bug hardware found. A 30 Hz monitor offers callbacks 33.33 ms
@@ -1349,6 +1581,48 @@ describe('the sphere texture binding', () => {
       const u = three.uniformsSeen[0]
       expect((u[DECORATION_UNIFORMS.cloudMap].value as { image: unknown }).image).toBe(image)
       expect(scene.consumeDirty()).toBe(true)
+    })
+
+    it('swaps in a refreshed cloud image, freeing the one it replaces', async () => {
+      // The upstream image is replaced every ten minutes; a page left
+      // open would otherwise show the sky from whenever it loaded.
+      const three = fakeThree()
+      const earth = fakeEarth({ id: 'base' } as FakeTexture)
+      const first = { id: 'clouds-1' } as unknown as TexImageSource
+      const second = { id: 'clouds-2' } as unknown as TexImageSource
+      const scene = await createOutputScene(
+        { canvas: canvas() },
+        { loadThree: async () => three.THREE_, createEarth: earth.createEarth, loadCloudImage: async () => first },
+      )
+      await until(() => three.uniformsSeen[0][DECORATION_UNIFORMS.hasCloud].value === 1, 'the first clouds')
+      scene.consumeDirty()
+      const texturesBefore = three.disposed.filter(d => d === 'texture').length
+
+      scene.setCloudImage(second)
+
+      const u = three.uniformsSeen[0]
+      expect((u[DECORATION_UNIFORMS.cloudMap].value as { image: unknown }).image).toBe(second)
+      expect(three.disposed.filter(d => d === 'texture').length).toBe(texturesBefore + 1)
+      expect(scene.consumeDirty()).toBe(true)
+    })
+
+    it('keeps a refresh that lands before the first load does', async () => {
+      const three = fakeThree()
+      const earth = fakeEarth({ id: 'base' } as FakeTexture)
+      let releaseFirst: (img: TexImageSource) => void = () => {}
+      const fresh = { id: 'fresh' } as unknown as TexImageSource
+      const scene = await createOutputScene(
+        { canvas: canvas() },
+        {
+          loadThree: async () => three.THREE_,
+          createEarth: earth.createEarth,
+          loadCloudImage: () => new Promise(resolve => { releaseFirst = resolve }),
+        },
+      )
+      scene.setCloudImage(fresh)
+      releaseFirst({ id: 'stale' } as unknown as TexImageSource)
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect((three.uniformsSeen[0][DECORATION_UNIFORMS.cloudMap].value as { image: unknown }).image).toBe(fresh)
     })
 
     it('renders a correct Earth when the cloud asset will not load', async () => {
