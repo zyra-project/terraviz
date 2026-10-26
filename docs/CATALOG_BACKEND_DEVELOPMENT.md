@@ -713,9 +713,10 @@ npm run terraviz -- import-snapshot \
 ```
 
 The dry run lists every row it would rewrite, with the stored value
-and the new one. On the committed snapshot that is up to 43 rows: the
-42 HTML organizations and Earthquakes 2001-2015. Drop `--dry-run` to
-apply. It PATCHes `organization` alone, through the API, so the
+and the new one. On the committed snapshot that is 40 rows if none
+was edited: Earthquakes 2001-2015 and the 39 importable rows with an
+HTML organization (three more are 3D rows the importer skips for
+having no data link). Drop `--dry-run` to apply. It PATCHes `organization` alone, through the API, so the
 catalog snapshot is invalidated and each row re-embedded as for any
 edit; it imports nothing. A stored value is rewritten only while it
 still equals what the old importer wrote from this snapshot. Rows a
