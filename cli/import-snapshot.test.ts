@@ -126,6 +126,31 @@ const AUX_SNAPSHOT_FIXTURE = {
   ],
 }
 
+/**
+ * `--repair-organization` fixture: organizations as the SOS snapshot
+ * writes them, for rows imported before the mapper read them as text.
+ */
+const EARTHQUAKES_ORG = 'NOAA Pacific Tsunami Warning Center, USGS National Earthquake Information Center, NASA Blue Marble GEBCO'
+const CASCADIA_ORG = '<a href="https://ptwc.weather.gov/">NOAA Pacific Tsunami Warning Center</a>, <a href="https://visibleearth.nasa.gov/">NASA Blue Marble</a>, <a href="https://www.gebco.net/data_and_products/gridded_bathymetry_data/gebco_30_second_grid/">GEBCO</a>'
+const GFDL_ORG = 'NOAA <a href="https://www.gfdl.noaa.gov/">GFDL</a>'
+const ORG_SNAPSHOT_FIXTURE = {
+  datasets: [
+    { id: 'INTERNAL_SOS_643_VIDEO', title: 'Earthquakes - 2001-2015', format: 'video/mp4', dataLink: 'https://vimeo.com/643643643', organization: EARTHQUAKES_ORG },
+    { id: 'INTERNAL_SOS_590_VIDEO', title: 'Tsunami Historical Series: Cascadia - 1700', format: 'video/mp4', dataLink: 'https://vimeo.com/590590590', organization: CASCADIA_ORG },
+    { id: 'INTERNAL_SOS_438_VIDEO', title: 'Climate Model: Temperature Change (RCP 8.5) - 2006 - 2100', format: 'video/mp4', dataLink: 'https://vimeo.com/438438438', organization: GFDL_ORG },
+    { id: 'INTERNAL_SOS_768', title: 'Hurricane Season - 2024', format: 'video/mp4', dataLink: 'https://vimeo.com/1107911993', organization: 'NOAA' },
+    { id: 'INTERNAL_SOS_999_VIDEO', title: 'Not Yet Imported', format: 'video/mp4', dataLink: 'https://vimeo.com/999999999', organization: GFDL_ORG },
+  ],
+}
+
+/** What each row of `ORG_SNAPSHOT_FIXTURE` was stored as: the old 100-character clip. */
+const ORG_STORED_BEFORE = [
+  { id: 'DS_QUAKES', legacy_id: 'INTERNAL_SOS_643_VIDEO', organization: EARTHQUAKES_ORG.slice(0, 100) },
+  { id: 'DS_CASCADIA', legacy_id: 'INTERNAL_SOS_590_VIDEO', organization: CASCADIA_ORG.slice(0, 100) },
+  { id: 'DS_GFDL', legacy_id: 'INTERNAL_SOS_438_VIDEO', organization: GFDL_ORG },
+  { id: 'DS_HURRICANE', legacy_id: 'INTERNAL_SOS_768', organization: 'NOAA' },
+]
+
 const ENRICHED_FIXTURE = [
   {
     url: 'https://sos.noaa.gov/catalog/datasets/hurricane-season-2024',
@@ -151,7 +176,7 @@ interface FakeClientHandles {
 
 interface FakeClientOptions {
   /** Pre-seeded legacy_id → dataset_id pairs returned by `list`. */
-  existing?: Array<{ id: string; legacy_id: string; published_at?: string | null }>
+  existing?: Array<{ id: string; legacy_id: string; published_at?: string | null; organization?: string | null }>
   /** Override `createDataset` to return a 409 conflict. */
   createConflictFor?: Set<string>
   /** Override `publishDataset` to fail with a 400 for these dataset ids. */
@@ -183,6 +208,7 @@ function fakeClient(opts: FakeClientOptions = {}): { client: TerravizClient; han
           legacy_id: e.legacy_id,
           published_at:
             e.published_at === undefined ? '2026-04-30T00:00:00.000Z' : e.published_at,
+          organization: e.organization ?? null,
         })),
         next_cursor: null,
       },
@@ -296,7 +322,7 @@ function fakeClient(opts: FakeClientOptions = {}): { client: TerravizClient; han
 function makeCtx(
   client: TerravizClient,
   flags: Record<string, string | boolean> = {},
-  options: { snapshot?: typeof SNAPSHOT_FIXTURE; crosswalk?: unknown; enriched?: unknown } = {},
+  options: { snapshot?: { datasets: unknown[] }; crosswalk?: unknown; enriched?: unknown } = {},
 ): { ctx: CommandContext; out: BufStream; err: BufStream } {
   const out = makeStream()
   const err = makeStream()
@@ -711,5 +737,103 @@ describe('runImportSnapshot --update-existing (3b/C)', () => {
     expect(out.text()).toContain('bounding_box')
     expect(out.text()).toContain('celestial_body')
     expect(out.text()).toContain('Dry run')
+  })
+})
+
+describe('runImportSnapshot --repair-organization', () => {
+  // Rows imported before the mapper read an organization as text hold
+  // the old 100-character clip: "… NASA Blue Marble G", or a cut tag.
+
+  it('--dry-run lists each rewrite and never PATCHes', async () => {
+    const { client, handles } = fakeClient({ existing: ORG_STORED_BEFORE })
+    const { ctx, out } = makeCtx(
+      client,
+      { 'repair-organization': true, 'dry-run': true },
+      { snapshot: ORG_SNAPSHOT_FIXTURE },
+    )
+    const code = await runImportSnapshot(ctx)
+    expect(code).toBe(0)
+    expect(handles.updateDataset).not.toHaveBeenCalled()
+    expect(handles.createDataset).not.toHaveBeenCalled()
+    const text = out.text()
+    expect(text).toContain('imported rows checked: 4')
+    expect(text).toContain('already current:       1')
+    expect(text).toContain('to rewrite:            3')
+    expect(text).toContain('[INTERNAL_SOS_643_VIDEO] DS_QUAKES')
+    expect(text).toContain('NASA Blue Marble G"')
+    expect(text).toContain('NASA Blue Marble…"')
+    expect(text).toContain('Dry run')
+  })
+
+  it('PATCHes organization alone on each untouched row, and imports nothing', async () => {
+    const { client, handles } = fakeClient({ existing: ORG_STORED_BEFORE })
+    const { ctx, out } = makeCtx(client, { 'repair-organization': true }, { snapshot: ORG_SNAPSHOT_FIXTURE })
+    const code = await runImportSnapshot(ctx)
+    expect(code).toBe(0)
+    expect(handles.updateDataset.mock.calls).toEqual([
+      ['DS_QUAKES', { organization: 'NOAA Pacific Tsunami Warning Center, USGS National Earthquake Information Center, NASA Blue Marble…' }],
+      ['DS_CASCADIA', { organization: 'NOAA Pacific Tsunami Warning Center, NASA Blue Marble, GEBCO' }],
+      ['DS_GFDL', { organization: 'NOAA GFDL' }],
+    ])
+    // INTERNAL_SOS_999_VIDEO was never imported: a repair does not import it.
+    expect(handles.createDataset).not.toHaveBeenCalled()
+    expect(handles.publishDataset).not.toHaveBeenCalled()
+    expect(out.text()).toContain('rewritten:             3')
+  })
+
+  it('leaves an organization a publisher edited since the import, and says so', async () => {
+    const { client, handles } = fakeClient({
+      existing: ORG_STORED_BEFORE.map(row =>
+        row.id === 'DS_GFDL' ? { ...row, organization: 'NOAA Geophysical Fluid Dynamics Laboratory' } : row),
+    })
+    const { ctx, out } = makeCtx(client, { 'repair-organization': true }, { snapshot: ORG_SNAPSHOT_FIXTURE })
+    const code = await runImportSnapshot(ctx)
+    expect(code).toBe(0)
+    expect(handles.updateDataset.mock.calls.map(([id]) => id)).toEqual(['DS_QUAKES', 'DS_CASCADIA'])
+    expect(out.text()).toContain('edited, left as is:    1')
+    expect(out.text()).toContain('[INTERNAL_SOS_438_VIDEO] DS_GFDL left as is')
+  })
+
+  it('is a no-op on a re-run, once the rows hold the new mapping', async () => {
+    const { client, handles } = fakeClient({
+      existing: [
+        { id: 'DS_QUAKES', legacy_id: 'INTERNAL_SOS_643_VIDEO', organization: 'NOAA Pacific Tsunami Warning Center, USGS National Earthquake Information Center, NASA Blue Marble…' },
+        { id: 'DS_CASCADIA', legacy_id: 'INTERNAL_SOS_590_VIDEO', organization: 'NOAA Pacific Tsunami Warning Center, NASA Blue Marble, GEBCO' },
+        { id: 'DS_GFDL', legacy_id: 'INTERNAL_SOS_438_VIDEO', organization: 'NOAA GFDL' },
+      ],
+    })
+    const { ctx, out } = makeCtx(client, { 'repair-organization': true }, { snapshot: ORG_SNAPSHOT_FIXTURE })
+    const code = await runImportSnapshot(ctx)
+    expect(code).toBe(0)
+    expect(handles.updateDataset).not.toHaveBeenCalled()
+    expect(out.text()).toContain('already current:       3')
+    expect(out.text()).toContain('to rewrite:            0')
+  })
+
+  it('a PATCH failure is reported and trips the exit code; the rest still run', async () => {
+    const { client, handles } = fakeClient({
+      existing: ORG_STORED_BEFORE,
+      updateFailFor: new Set(['DS_QUAKES']),
+    })
+    const { ctx, out, err } = makeCtx(client, { 'repair-organization': true }, { snapshot: ORG_SNAPSHOT_FIXTURE })
+    const code = await runImportSnapshot(ctx)
+    expect(code).toBe(1)
+    expect(handles.updateDataset).toHaveBeenCalledTimes(3)
+    expect(err.text()).toContain('[INTERNAL_SOS_643_VIDEO] organization repair failed (503)')
+    expect(out.text()).toContain('rewritten:             2')
+    expect(out.text()).toContain('failed:                1')
+  })
+
+  it('refuses to run beside --update-existing', async () => {
+    const { client, handles } = fakeClient({ existing: ORG_STORED_BEFORE })
+    const { ctx, err } = makeCtx(
+      client,
+      { 'repair-organization': true, 'update-existing': true },
+      { snapshot: ORG_SNAPSHOT_FIXTURE },
+    )
+    const code = await runImportSnapshot(ctx)
+    expect(code).toBe(2)
+    expect(handles.list).not.toHaveBeenCalled()
+    expect(err.text()).toContain('--repair-organization runs on its own')
   })
 })

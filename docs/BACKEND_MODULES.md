@@ -47,7 +47,7 @@ Phase 2 opt-in public projection:
 |---|---|
 | `cli/commands.ts` | Command implementations for the `terraviz` CLI |
 | `cli/import-events.ts` | `terraviz import-events` — ingest current events from NASA EONET into the catalog as proposed events (`docs/CURRENT_EVENTS_PLAN.md` §9) |
-| `cli/import-snapshot.ts` | `terraviz import-snapshot` — one-shot bulk importer for the legacy SOS catalog snapshot |
+| `cli/import-snapshot.ts` | `terraviz import-snapshot` — one-shot bulk importer for the legacy SOS catalog snapshot; `--repair-organization` rewrites the `organization` of rows imported before the mapper read it as text, only where the stored value is still the old raw cut |
 | `cli/init-node.ts` | `terraviz init-node` — provision (or update) this node's identity |
 | `cli/lib/args.ts` | Hand-rolled argv parser for the `terraviz` CLI |
 | `cli/lib/asset-fetch.ts` | HTTP fetch helper for the Phase 3b asset migration |

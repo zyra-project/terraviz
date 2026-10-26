@@ -695,6 +695,35 @@ Inspect the plan, then drop `--dry-run` to land 192 rows
 idempotent via the `legacy_id` column — re-running is a no-op on
 rows already imported.
 
+**Rows imported before 26 October 2026** hold `organization` as the
+importer used to write it: cut at 100 characters as it came, with no
+mark of the cut, often mid-word ("… NASA Blue Marble G") and, since
+42 SOS organizations are HTML, often mid-tag (`…<a href="https://visibl`).
+The importer now stores the organization's text and cuts it at a
+word with an ellipsis. A re-import skips those rows and
+`--update-existing` leaves `organization` alone, so rewrite them with
+the repair mode:
+
+```
+npm run terraviz -- import-snapshot \
+  --server https://your-domain \
+  --client-id $CF_ACCESS_CLIENT_ID \
+  --client-secret $CF_ACCESS_CLIENT_SECRET \
+  --repair-organization --dry-run
+```
+
+The dry run lists every row it would rewrite, with the stored value
+and the new one. On the committed snapshot that is up to 43 rows: the
+42 HTML organizations and Earthquakes 2001-2015. Drop `--dry-run` to
+apply. It PATCHes `organization` alone, through the API, so the
+catalog snapshot is invalidated and each row re-embedded as for any
+edit; it imports nothing. A stored value is rewritten only while it
+still equals what the old importer wrote from this snapshot. Rows a
+publisher edited since show as `edited, left as is` and are not
+touched. Re-running is a no-op on rows already rewritten. Run it from
+the same snapshot files the rows were imported from (the defaults
+under `public/assets/`), or the comparison reports them as edited.
+
 #### Step 8 — Verify the public surface
 
 ```

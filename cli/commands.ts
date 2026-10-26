@@ -767,6 +767,12 @@ Commands:
                                       its embed job. Use after wiring up
                                       Vectorize on a catalog that was already
                                       populated, or for a model-version bump.
+  import-snapshot --repair-organization [--dry-run]
+                                      Rewrite the organization of rows already
+                                      imported to the importer's current mapping
+                                      (text, cut at a word). Only rows still
+                                      holding the old raw cut; publisher edits
+                                      are left. Imports nothing.
 
   import-events [--source-url=<url>] [--file=<path>] [--pace-ms=N]
                 [--dry-run]
