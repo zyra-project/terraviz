@@ -360,11 +360,41 @@ function clipString(value: unknown, max: number): string | undefined {
 
 /** Tags a browser draws inline, so they run into the words beside them.
  *  Any other tag stands for a space. */
-const INLINE_TAGS = new Set(['a', 'abbr', 'b', 'em', 'font', 'i', 'small', 'span', 'strong', 'sub', 'sup', 'u'])
+const INLINE_TAGS = new Set([
+  'a', 'abbr', 'b', 'cite', 'code', 'em', 'font', 'i', 'mark', 'q', 's', 'small', 'span', 'strong',
+  'sub', 'sup', 'time', 'u', 'wbr',
+])
 
+/** A comment, or a `<` before a letter, `/` or `!` up to its `>`, past
+ *  any `>` inside a quoted attribute. Either one left open runs to the
+ *  end, as a browser reads it. */
+const TAG = /<!--[\s\S]*?(?:-->|$)|<[A-Za-z/!](?:"[^"]*(?:"|$)|'[^']*(?:'|$)|[^>"'])*(?:>|$)/g
+
+const ENTITY = /&(#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});?/g
+
+/** The named entities the exhibit reads decode (`exhibit-text.ts`):
+ *  the ones the catalog's text uses and the common ones beside them. */
 const NAMED_ENTITIES: Readonly<Record<string, string>> = {
   amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+  mdash: '—', ndash: '–', hellip: '…', middot: '·', bull: '•',
+  lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”',
+  deg: '°', micro: 'µ', times: '×', divide: '÷', plusmn: '±',
+  copy: '©', reg: '®', trade: '™', sup2: '²', sup3: '³',
+  frac12: '½', frac14: '¼', frac34: '¾', eacute: 'é', ntilde: 'ñ',
 }
+
+/** A code point an entity may stand for: white space, which then folds,
+ *  or a character that draws. Control codes, C1 included, and lone
+ *  surrogates stay written as they were. */
+function readableCodePoint(code: number): boolean {
+  if (code === 0x09 || code === 0x0a || code === 0x0d) return true
+  if (code < 0x20 || (code >= 0x7f && code <= 0x9f)) return false
+  return code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff)
+}
+
+/** Where a cut may fall: before a space or a separator, so the text
+ *  before it ends on a whole word. */
+const WORD_BREAK = /[\s,;:/]/
 
 /** What a cut leaves dangling before its ellipsis: "Center, …" reads
  *  as a list with a missing item, "Center…" as a cut name. */
@@ -379,42 +409,46 @@ const DANGLING = /[\s,;:/&(–—-]+$/
  * URLs: the Tsunami Historical Series credit is 244 characters of HTML
  * and 104 of names.
  *
- * A tag is a `<` before a letter, `/` or `!`, up to its `>` (one left
- * open runs to the end); any other `<` is text. The link text stays and
- * the URL goes, which costs no reader anything, since none of them drew
- * the link. Entities are read after the tags are out, and once, so
- * `&lt;b&gt;` stays the text "<b>". `&nbsp` with no semicolon is how two
- * SOS rows write it. Runs of white space fold to one space.
+ * Tags are read as a browser reads them (`TAG`): a `<` before a letter,
+ * `/` or `!` opens one, so `PM < 2.5` is text while `Values <Annual` is
+ * a tag left open, which a browser would not draw either. The link text
+ * stays and the URL goes, which costs no reader anything, since none of
+ * them drew the link. Entities are read after the tags are out, and
+ * once, so `&lt;b&gt;` stays the text "<b>". `&nbsp` with no semicolon
+ * is how two SOS rows write it; a name not in `NAMED_ENTITIES` is left
+ * as written. Runs of white space fold to one space.
  */
 export function organizationText(source: string): string {
-  const text = source.replace(/<[A-Za-z/!][^>]*(?:>|$)/g, tag => {
+  const text = source.replace(TAG, tag => {
     const name = tag.match(/^<\/?\s*([A-Za-z][A-Za-z0-9]*)/)?.[1]?.toLowerCase()
     return name && INLINE_TAGS.has(name) ? '' : ' '
   })
   return text
-    .replace(/&(#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});?/g, (whole, body: string) => {
+    .replace(ENTITY, (whole, body: string) => {
       if (body[0] !== '#') return Object.hasOwn(NAMED_ENTITIES, body) ? NAMED_ENTITIES[body] : whole
       const code = body[1] === 'x' || body[1] === 'X' ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10)
-      const readable = code >= 0x20 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff)
-      return readable ? String.fromCodePoint(code) : whole
+      return readableCodePoint(code) ? String.fromCodePoint(code) : whole
     })
     .replace(/\s+/g, ' ')
     .trim()
 }
 
 /**
- * `text` in at most `max` characters: whole if it fits, else cut at the
- * last word that leaves room for an ellipsis, which says it was cut. A
- * word is only given up for if it would cost more than half the budget,
- * in which case the cut falls mid-word, still with the ellipsis.
+ * `text` in at most `max` characters: whole if it fits, else cut after
+ * the last whole word that leaves room for an ellipsis, which says it
+ * was cut. A word ends at a space or a separator (`WORD_BREAK`), so
+ * "Gamma, Delta" can cut after "Gamma". A word is only given up for if
+ * it would cost more than half the budget, in which case the cut falls
+ * mid-word, still with the ellipsis.
  */
 export function fitAtWord(text: string, max: number): string {
   if (text.length <= max) return text
   let end = max - 1
   // Never half of a surrogate pair.
   if (/[\ud800-\udbff]/.test(text[end - 1])) end -= 1
-  const space = text.lastIndexOf(' ', end)
-  if (space > end / 2) end = space
+  let cut = end
+  while (cut > end / 2 && !WORD_BREAK.test(text[cut])) cut--
+  if (cut > end / 2) end = cut
   return text.slice(0, end).replace(DANGLING, '') + '…'
 }
 
@@ -426,9 +460,9 @@ export function mapOrganization(value: unknown): string | undefined {
 }
 
 /**
- * The organization this mapper wrote before 26 October 2026: the source
- * trimmed and cut at 100 characters, markup and all, with no mark that
- * it was cut. `import-snapshot --repair-organization` rewrites a stored
+ * The organization this mapper wrote before it read organizations as
+ * text (October 2026): the source trimmed and cut at 100 characters,
+ * markup and all, with no mark that it was cut. `import-snapshot --repair-organization` rewrites a stored
  * value only while it still equals this, so a value a publisher has
  * since edited is left alone.
  */

@@ -695,10 +695,11 @@ Inspect the plan, then drop `--dry-run` to land 192 rows
 idempotent via the `legacy_id` column — re-running is a no-op on
 rows already imported.
 
-**Rows imported before 26 October 2026** hold `organization` as the
-importer used to write it: cut at 100 characters as it came, with no
-mark of the cut, often mid-word ("… NASA Blue Marble G") and, since
-42 SOS organizations are HTML, often mid-tag (`…<a href="https://visibl`).
+**Rows imported before the October 2026 importer fix** hold
+`organization` as the importer used to write it: cut at 100
+characters as it came, with no mark of the cut, often mid-word
+("… NASA Blue Marble G") and, since 42 SOS organizations are HTML,
+often mid-tag (`…<a href="https://visibl`).
 The importer now stores the organization's text and cuts it at a
 word with an ellipsis. A re-import skips those rows and
 `--update-existing` leaves `organization` alone, so rewrite them with
@@ -716,14 +717,27 @@ The dry run lists every row it would rewrite, with the stored value
 and the new one. On the committed snapshot that is 40 rows if none
 was edited: Earthquakes 2001-2015 and the 39 importable rows with an
 HTML organization (three more are 3D rows the importer skips for
-having no data link). Drop `--dry-run` to apply. It PATCHes `organization` alone, through the API, so the
-catalog snapshot is invalidated and each row re-embedded as for any
-edit; it imports nothing. A stored value is rewritten only while it
-still equals what the old importer wrote from this snapshot. Rows a
-publisher edited since show as `edited, left as is` and are not
-touched. Re-running is a no-op on rows already rewritten. Run it from
-the same snapshot files the rows were imported from (the defaults
-under `public/assets/`), or the comparison reports them as edited.
+having no data link). Drop `--dry-run` to apply.
+
+What the live run does:
+
+- It PATCHes `organization` alone, through the API, so the catalog
+  snapshot is invalidated and each published row re-embedded as for
+  any edit. It imports nothing.
+- It covers every row an import created, drafts and retracted rows
+  included, since a draft left by a failed publish holds the same old
+  value and would put it live when published.
+- A stored value is rewritten only while it still equals what the old
+  importer wrote from this snapshot. Anything else shows as `left as
+  is`: a publisher edited it, or it was imported from another
+  snapshot. Run the repair from the same snapshot files the rows came
+  from (the defaults under `public/assets/`).
+- Each row is read again just before it is written, and one edited
+  since the dry run is left (`changed since the plan was read`). The
+  API has no conditional update, so an edit saved in the round trip
+  between that read and the write would still be overwritten. Run it
+  when no one is editing those rows.
+- Re-running is a no-op on rows already rewritten.
 
 #### Step 8 — Verify the public surface
 

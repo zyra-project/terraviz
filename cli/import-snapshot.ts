@@ -52,6 +52,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { CommandContext } from './commands'
+import type { Result } from './lib/client'
 import { getString, getBool } from './lib/args'
 import {
   mapSnapshot,
@@ -130,9 +131,15 @@ function readJson<T>(ctx: CommandContext, path: string): T {
  * run instead, which prints the existing draft id and gives the
  * operator something actionable to clean up (raised by the 1d/L
  * Copilot review).
+ *
+ * `scope: 'any'` lists every row instead, drafts and retracted ones
+ * included, for `--repair-organization`: a stuck draft holds the same
+ * old organization as a published row, and would put it live when
+ * published.
  */
 async function buildLegacyIdIndex(
   ctx: CommandContext,
+  scope: 'published' | 'any' = 'published',
 ): Promise<Map<string, ExistingRow> | null> {
   const index = new Map<string, ExistingRow>()
   let cursor: string | undefined
@@ -140,7 +147,7 @@ async function buildLegacyIdIndex(
   // dataset-mutations.ts:169) so we don't try to ask for more.
   do {
     const result = await ctx.client.list<DatasetListEnvelope>({
-      status: 'published',
+      status: scope === 'published' ? 'published' : undefined,
       limit: LIST_PAGE_LIMIT,
       cursor,
     })
@@ -321,12 +328,18 @@ export async function runImportSnapshot(ctx: CommandContext): Promise<number> {
   const updateExisting = getBool(ctx.args.options, 'update-existing')
   const repairOrganization = getBool(ctx.args.options, 'repair-organization')
 
+  // A mode flag given a value (`--repair-organization=true`) reads as
+  // unset, and the run would fall through to a full import: refuse it.
+  if (typeof ctx.args.options['repair-organization'] === 'string') {
+    ctx.stderr.write('--repair-organization takes no value.\n')
+    return 2
+  }
+  if (repairOrganization && (updateExisting || reindex)) {
+    ctx.stderr.write('--repair-organization runs on its own; run --update-existing or --reindex separately.\n')
+    return 2
+  }
   if (reindex) {
     return runReindexAll(ctx, dryRun)
-  }
-  if (repairOrganization && updateExisting) {
-    ctx.stderr.write('--repair-organization runs on its own; run --update-existing separately.\n')
-    return 2
   }
 
   // --- Stage 1 — load + map ----------------------------------------
@@ -361,12 +374,13 @@ export async function runImportSnapshot(ctx: CommandContext): Promise<number> {
   }
 
   // --- Stage 2 — build the legacy_id index ------------------------
+  if (repairOrganization) {
+    const every = await buildLegacyIdIndex(ctx, 'any')
+    if (!every) return 1
+    return runRepairOrganization(ctx, sosWrap.datasets, plan, every, dryRun)
+  }
   const index = await buildLegacyIdIndex(ctx)
   if (!index) return 1
-
-  if (repairOrganization) {
-    return runRepairOrganization(ctx, sosWrap.datasets, plan, index, dryRun)
-  }
 
   let alreadyImported = 0
   let backfillCandidates = 0
@@ -498,21 +512,24 @@ export async function runImportSnapshot(ctx: CommandContext): Promise<number> {
 }
 
 /**
- * --repair-organization path. Before 26 October 2026 the mapper cut an
- * SOS organization at 100 characters as it came, markup and all, with
- * no mark that it was cut (`… NASA Blue Marble G`, `…</a>, <a
+ * --repair-organization path. Until October 2026 the mapper cut an SOS
+ * organization at 100 characters as it came, markup and all, with no
+ * mark that it was cut (`… NASA Blue Marble G`, `…</a>, <a
  * href="https://visibl`). It now reads it as text and cuts at a word.
- * This rewrites the rows a previous run imported to match, PATCHing
- * `organization` alone, so the API's own snapshot invalidation and
- * re-embed run as for any edit. Imports nothing.
+ * This rewrites the rows a previous run created to match, drafts
+ * included, PATCHing `organization` alone, so the API's own snapshot
+ * invalidation and re-embed run as for any edit. Imports nothing.
  *
  * Compare-and-swap, because `organization` is a field publishers edit
  * (and `--update-existing` leaves it alone for that reason): a stored
  * value is rewritten only while it still equals what the old mapper
  * wrote from this snapshot (`previousOrganization`). One that equals
  * neither the old mapping nor the new was edited since, or came from
- * another snapshot, and is listed and left as it is. Re-running is a
- * no-op on rows already rewritten.
+ * another snapshot, and is listed and left as it is. Each row is read
+ * again just before it is written, so an edit made after the plan was
+ * listed is left too. The server has no conditional update, so an edit
+ * saved in the round trip between that read and the write would still
+ * be overwritten. Re-running is a no-op on rows already rewritten.
  */
 async function runRepairOrganization(
   ctx: CommandContext,
@@ -523,7 +540,7 @@ async function runRepairOrganization(
 ): Promise<number> {
   const sourceById = new Map(sosRows.map(row => [row.id, row]))
   const repairs: Array<{ legacyId: string; id: string; from: string | null; to: string | null }> = []
-  const edited: Array<{ legacyId: string; id: string }> = []
+  const leftAsIs: Array<{ legacyId: string; id: string }> = []
   let current = 0
   for (const outcome of plan.outcomes) {
     if (outcome.kind !== 'ok') continue
@@ -537,7 +554,7 @@ async function runRepairOrganization(
     }
     const previous = previousOrganization(sourceById.get(legacyId)?.organization) ?? null
     if (existing.organization !== previous) {
-      edited.push({ legacyId, id: existing.id })
+      leftAsIs.push({ legacyId, id: existing.id })
       continue
     }
     repairs.push({ legacyId, id: existing.id, from: existing.organization, to })
@@ -545,38 +562,53 @@ async function runRepairOrganization(
 
   ctx.stdout.write(
     `Organization repair plan:\n` +
-      `  imported rows checked: ${current + repairs.length + edited.length}\n` +
+      `  imported rows checked: ${current + repairs.length + leftAsIs.length}\n` +
       `  already current:       ${current}\n` +
       `  to rewrite:            ${repairs.length}\n` +
-      `  edited, left as is:    ${edited.length}\n`,
+      `  left as is:            ${leftAsIs.length}\n`,
   )
   for (const r of repairs) {
     ctx.stdout.write(`  [${r.legacyId}] ${r.id}\n    from ${JSON.stringify(r.from)}\n    to   ${JSON.stringify(r.to)}\n`)
   }
-  for (const e of edited) {
-    ctx.stdout.write(`  [${e.legacyId}] ${e.id} left as is: stored organization matches neither the old mapping nor the new\n`)
+  for (const e of leftAsIs) {
+    ctx.stdout.write(
+      `  [${e.legacyId}] ${e.id} left as is: stored organization is neither the old mapping nor the new ` +
+        `(edited since import, or imported from another snapshot)\n`,
+    )
   }
   if (dryRun) {
     ctx.stdout.write('\nDry run — no rows will be rewritten. Re-run without --dry-run to apply.\n')
     return 0
   }
 
+  const reportFailure = (legacyId: string, step: string, result: Extract<Result<unknown>, { ok: false }>): void => {
+    ctx.stderr.write(
+      `[${legacyId}] organization repair failed at ${step} (${result.status}): ${result.error}` +
+        (result.message ? ` — ${result.message}` : '') +
+        '\n',
+    )
+    for (const e of result.errors ?? []) ctx.stderr.write(`    ${e.field}: ${e.code} — ${e.message}\n`)
+  }
+
   let rewritten = 0
+  let changedSincePlan = 0
   let failed = 0
   for (const r of repairs) {
+    const fresh = await ctx.client.get<{ dataset: { organization?: string | null } }>(r.id)
+    if (!fresh.ok) {
+      failed++
+      reportFailure(r.legacyId, 'read', fresh)
+      continue
+    }
+    if ((fresh.body.dataset.organization ?? null) !== r.from) {
+      changedSincePlan++
+      ctx.stdout.write(`[${r.legacyId}] ${r.id} changed since the plan was read, left as is\n`)
+      continue
+    }
     const patched = await ctx.client.updateDataset<DatasetEnvelope>(r.id, { organization: r.to })
     if (!patched.ok) {
       failed++
-      ctx.stderr.write(
-        `[${r.legacyId}] organization repair failed (${patched.status}): ${patched.error}` +
-          (patched.message ? ` — ${patched.message}` : '') +
-          '\n',
-      )
-      if (patched.errors?.length) {
-        for (const e of patched.errors) {
-          ctx.stderr.write(`    ${e.field}: ${e.code} — ${e.message}\n`)
-        }
-      }
+      reportFailure(r.legacyId, 'write', patched)
       continue
     }
     rewritten++
@@ -586,6 +618,7 @@ async function runRepairOrganization(
   ctx.stdout.write(
     `\nOrganization repair complete:\n` +
       `  rewritten:             ${rewritten}\n` +
+      `  changed, left as is:   ${changedSincePlan}\n` +
       `  failed:                ${failed}\n`,
   )
   return failed > 0 ? 1 : 0

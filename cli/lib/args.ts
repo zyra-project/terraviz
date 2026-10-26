@@ -40,6 +40,7 @@ export const BOOLEAN_FLAGS = new Set<string>([
   'from-stdin',
   'human',
   'update-existing',
+  'repair-organization',
   'clear-description',
   'clear-contact',
 ])

@@ -315,15 +315,28 @@ describe('mapSnapshotEntry — organization', () => {
     expect(organizationText('R&D &bogus; &#0;')).toBe('R&D &bogus; &#0;')
   })
 
+  it('reads the common named entities, folds white space ones, and leaves control codes', () => {
+    expect(organizationText('Earth &ndash; Space &copy; NOAA&rsquo;s')).toBe('Earth – Space © NOAA’s')
+    expect(organizationText('NOAA&#10;NASA&#9;ESA')).toBe('NOAA NASA ESA')
+    expect(organizationText('NOAA &#150; NASA')).toBe('NOAA &#150; NASA')
+  })
+
   it('keeps a `<` that starts no tag, and drops a tag left open', () => {
     expect(organizationText('PM < 2.5 Working Group')).toBe('PM < 2.5 Working Group')
     expect(organizationText('NOAA <a href="https://visibl')).toBe('NOAA')
+  })
+
+  it('reads a `>` inside a quoted attribute or a comment as part of it', () => {
+    expect(organizationText('<a title="a>b" href="https://example.org/">Name</a>')).toBe('Name')
+    expect(organizationText("<a title='a>b'>Name</a>")).toBe('Name')
+    expect(organizationText('NOAA <!-- a > b --> NASA')).toBe('NOAA NASA')
   })
 
   it('runs inline tags into their words and puts a space for any other', () => {
     expect(organizationText('NOAA <b>GFDL</b>, NASA')).toBe('NOAA GFDL, NASA')
     expect(organizationText('NOAA<br>NASA<br/>ESA')).toBe('NOAA NASA ESA')
     expect(organizationText('H<sub>2</sub>O Lab')).toBe('H2O Lab')
+    expect(organizationText('Super<wbr>computer Center')).toBe('Supercomputer Center')
   })
 
   it('maps every organization in the committed snapshot to text within the cap', () => {
@@ -356,6 +369,11 @@ describe('fitAtWord', () => {
   it('counts the ellipsis inside the budget', () => {
     expect(fitAtWord('alpha beta gamma', 15)).toBe('alpha beta…')
     expect(fitAtWord('alpha beta gamma', 15).length).toBeLessThanOrEqual(15)
+  })
+
+  it('ends a word at a separator as well as at a space', () => {
+    expect(fitAtWord('Alpha Beta Gamma, Delta Epsilon', 17)).toBe('Alpha Beta Gamma…')
+    expect(fitAtWord('University of Minnesota/Institute on the Environment', 30)).toBe('University of Minnesota…')
   })
 
   it('drops a separator left dangling before the ellipsis', () => {

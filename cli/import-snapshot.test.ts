@@ -132,7 +132,10 @@ const AUX_SNAPSHOT_FIXTURE = {
  */
 const EARTHQUAKES_ORG = 'NOAA Pacific Tsunami Warning Center, USGS National Earthquake Information Center, NASA Blue Marble GEBCO'
 const CASCADIA_ORG = '<a href="https://ptwc.weather.gov/">NOAA Pacific Tsunami Warning Center</a>, <a href="https://visibleearth.nasa.gov/">NASA Blue Marble</a>, <a href="https://www.gebco.net/data_and_products/gridded_bathymetry_data/gebco_30_second_grid/">GEBCO</a>'
-const GFDL_ORG = 'NOAA <a href="https://www.gfdl.noaa.gov/">GFDL</a>'
+// As the snapshot writes it, trailing space included: the old mapper
+// trimmed before it cut, so the stored value has none.
+const GFDL_ORG = 'NOAA <a href="https://www.gfdl.noaa.gov/">GFDL</a> '
+const MARKUP_ONLY_ORG = '<a href="https://example.org/"></a>'
 const ORG_SNAPSHOT_FIXTURE = {
   datasets: [
     { id: 'INTERNAL_SOS_643_VIDEO', title: 'Earthquakes - 2001-2015', format: 'video/mp4', dataLink: 'https://vimeo.com/643643643', organization: EARTHQUAKES_ORG },
@@ -145,9 +148,9 @@ const ORG_SNAPSHOT_FIXTURE = {
 
 /** What each row of `ORG_SNAPSHOT_FIXTURE` was stored as: the old 100-character clip. */
 const ORG_STORED_BEFORE = [
-  { id: 'DS_QUAKES', legacy_id: 'INTERNAL_SOS_643_VIDEO', organization: EARTHQUAKES_ORG.slice(0, 100) },
-  { id: 'DS_CASCADIA', legacy_id: 'INTERNAL_SOS_590_VIDEO', organization: CASCADIA_ORG.slice(0, 100) },
-  { id: 'DS_GFDL', legacy_id: 'INTERNAL_SOS_438_VIDEO', organization: GFDL_ORG },
+  { id: 'DS_QUAKES', legacy_id: 'INTERNAL_SOS_643_VIDEO', organization: 'NOAA Pacific Tsunami Warning Center, USGS National Earthquake Information Center, NASA Blue Marble G' },
+  { id: 'DS_CASCADIA', legacy_id: 'INTERNAL_SOS_590_VIDEO', organization: '<a href="https://ptwc.weather.gov/">NOAA Pacific Tsunami Warning Center</a>, <a href="https://visibl' },
+  { id: 'DS_GFDL', legacy_id: 'INTERNAL_SOS_438_VIDEO', organization: 'NOAA <a href="https://www.gfdl.noaa.gov/">GFDL</a>' },
   { id: 'DS_HURRICANE', legacy_id: 'INTERNAL_SOS_768', organization: 'NOAA' },
 ]
 
@@ -172,6 +175,7 @@ interface FakeClientHandles {
   publishDataset: ReturnType<typeof vi.fn>
   reindexDataset: ReturnType<typeof vi.fn>
   updateDataset: ReturnType<typeof vi.fn>
+  get: ReturnType<typeof vi.fn>
 }
 
 interface FakeClientOptions {
@@ -186,6 +190,9 @@ interface FakeClientOptions {
   /** Override `updateDataset` to fail with 503 for these dataset ids
    * (3b/C — exercises the `--update-existing` backfill failure path). */
   updateFailFor?: Set<string>
+  /** What `get` reads for these dataset ids instead of the listed
+   * organization: an edit saved after the list was read. */
+  organizationOnRead?: Record<string, string>
 }
 
 function fakeClient(opts: FakeClientOptions = {}): { client: TerravizClient; handles: FakeClientHandles } {
@@ -305,9 +312,17 @@ function fakeClient(opts: FakeClientOptions = {}): { client: TerravizClient; han
     }
   })
 
+  const get = vi.fn(async (id: string) => {
+    const row = existing.find(e => e.id === id)
+    if (!row) return { ok: false as const, status: 404, error: 'not_found', message: `Dataset ${id} not found.` }
+    const organization = opts.organizationOnRead?.[id] ?? row.organization ?? null
+    return { ok: true as const, status: 200, body: { dataset: { id, legacy_id: row.legacy_id, organization } } }
+  })
+
   const stub = {
     serverUrl: 'http://localhost:8788',
     list,
+    get,
     createDataset,
     publishDataset,
     reindexDataset,
@@ -315,7 +330,7 @@ function fakeClient(opts: FakeClientOptions = {}): { client: TerravizClient; han
   }
   return {
     client: stub as unknown as TerravizClient,
-    handles: { list, createDataset, publishDataset, reindexDataset, updateDataset },
+    handles: { list, createDataset, publishDataset, reindexDataset, updateDataset, get },
   }
 }
 
@@ -790,8 +805,44 @@ describe('runImportSnapshot --repair-organization', () => {
     const code = await runImportSnapshot(ctx)
     expect(code).toBe(0)
     expect(handles.updateDataset.mock.calls.map(([id]) => id)).toEqual(['DS_QUAKES', 'DS_CASCADIA'])
-    expect(out.text()).toContain('edited, left as is:    1')
+    expect(out.text()).toContain('left as is:            1')
     expect(out.text()).toContain('[INTERNAL_SOS_438_VIDEO] DS_GFDL left as is')
+  })
+
+  it('reads each row again before writing it, and leaves one edited after the plan was listed', async () => {
+    const { client, handles } = fakeClient({
+      existing: ORG_STORED_BEFORE,
+      organizationOnRead: { DS_CASCADIA: 'NOAA PTWC, NASA, GEBCO' },
+    })
+    const { ctx, out } = makeCtx(client, { 'repair-organization': true }, { snapshot: ORG_SNAPSHOT_FIXTURE })
+    const code = await runImportSnapshot(ctx)
+    expect(code).toBe(0)
+    expect(handles.get.mock.calls.map(([id]) => id)).toEqual(['DS_QUAKES', 'DS_CASCADIA', 'DS_GFDL'])
+    expect(handles.updateDataset.mock.calls.map(([id]) => id)).toEqual(['DS_QUAKES', 'DS_GFDL'])
+    expect(out.text()).toContain('[INTERNAL_SOS_590_VIDEO] DS_CASCADIA changed since the plan was read, left as is')
+    expect(out.text()).toContain('changed, left as is:   1')
+  })
+
+  it('repairs drafts too, listing every row rather than published ones', async () => {
+    const { client, handles } = fakeClient({
+      existing: ORG_STORED_BEFORE.map(row => (row.id === 'DS_GFDL' ? { ...row, published_at: null } : row)),
+    })
+    const { ctx } = makeCtx(client, { 'repair-organization': true }, { snapshot: ORG_SNAPSHOT_FIXTURE })
+    const code = await runImportSnapshot(ctx)
+    expect(code).toBe(0)
+    expect(handles.list.mock.calls[0][0]).toMatchObject({ status: undefined })
+    expect(handles.updateDataset.mock.calls.map(([id]) => id)).toContain('DS_GFDL')
+  })
+
+  it('clears an organization whose source is markup with no text', async () => {
+    const { client, handles } = fakeClient({
+      existing: [{ id: 'DS_HURRICANE', legacy_id: 'INTERNAL_SOS_768', organization: MARKUP_ONLY_ORG }],
+    })
+    const snapshot = { datasets: [{ ...ORG_SNAPSHOT_FIXTURE.datasets[3], organization: MARKUP_ONLY_ORG }] }
+    const { ctx } = makeCtx(client, { 'repair-organization': true }, { snapshot })
+    const code = await runImportSnapshot(ctx)
+    expect(code).toBe(0)
+    expect(handles.updateDataset.mock.calls).toEqual([['DS_HURRICANE', { organization: null }]])
   })
 
   it('is a no-op on a re-run, once the rows hold the new mapping', async () => {
@@ -819,21 +870,31 @@ describe('runImportSnapshot --repair-organization', () => {
     const code = await runImportSnapshot(ctx)
     expect(code).toBe(1)
     expect(handles.updateDataset).toHaveBeenCalledTimes(3)
-    expect(err.text()).toContain('[INTERNAL_SOS_643_VIDEO] organization repair failed (503)')
+    expect(err.text()).toContain('[INTERNAL_SOS_643_VIDEO] organization repair failed at write (503)')
     expect(out.text()).toContain('rewritten:             2')
     expect(out.text()).toContain('failed:                1')
   })
 
-  it('refuses to run beside --update-existing', async () => {
+  it.each(['update-existing', 'reindex'])('refuses to run beside --%s', async other => {
     const { client, handles } = fakeClient({ existing: ORG_STORED_BEFORE })
     const { ctx, err } = makeCtx(
       client,
-      { 'repair-organization': true, 'update-existing': true },
+      { 'repair-organization': true, [other]: true },
       { snapshot: ORG_SNAPSHOT_FIXTURE },
     )
     const code = await runImportSnapshot(ctx)
     expect(code).toBe(2)
     expect(handles.list).not.toHaveBeenCalled()
     expect(err.text()).toContain('--repair-organization runs on its own')
+  })
+
+  it('refuses a value rather than falling through to a full import', async () => {
+    const { client, handles } = fakeClient({ existing: ORG_STORED_BEFORE })
+    const { ctx, err } = makeCtx(client, { 'repair-organization': 'true' }, { snapshot: ORG_SNAPSHOT_FIXTURE })
+    const code = await runImportSnapshot(ctx)
+    expect(code).toBe(2)
+    expect(handles.list).not.toHaveBeenCalled()
+    expect(handles.createDataset).not.toHaveBeenCalled()
+    expect(err.text()).toContain('--repair-organization takes no value')
   })
 })
