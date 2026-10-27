@@ -13,7 +13,10 @@ import {
 } from './federation-signature'
 import { d1FederationMirrorStore, d1FederationPeerStore } from './federation-mirror-d1'
 import {
+  DISCOVERY_MAX_BYTES,
   feedTarget,
+  fetchPeerDiscovery,
+  isFederationId,
   parsePeerBaseUrl,
   pullPeer,
   type FederationPeer,
@@ -377,5 +380,77 @@ describe('d1FederationPeerStore', () => {
       [PEER_ID, 1],
       ['OTHERPEER', 0],
     ])
+  })
+})
+
+describe('isFederationId', () => {
+  it('admits ids and refuses anything that could reshape a path or header', () => {
+    expect(isFederationId(PEER_ID)).toBe(true)
+    expect(isFederationId('node.example:1')).toBe(true)
+    expect(isFederationId('')).toBe(false)
+    expect(isFederationId('a b')).toBe(false)
+    expect(isFederationId('a/b')).toBe(false)
+    expect(isFederationId('x'.repeat(129))).toBe(false)
+  })
+})
+
+describe('fetchPeerDiscovery', () => {
+  const doc = (over: Record<string, unknown> = {}) => ({
+    node_id: PEER_ID,
+    display_name: 'Peer node',
+    base_url: BASE,
+    public_key: PEER_KEYS.publicWire,
+    federation: { feed: true },
+    ...over,
+  })
+  const serving = (res: Response) => {
+    const fn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe(`${BASE}/.well-known/terraviz.json`)
+      expect(init?.redirect).toBe('manual')
+      return res
+    })
+    return fn as unknown as typeof fetch
+  }
+  const jsonRes = (body: unknown) =>
+    new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+
+  it('reads the claims, normalizing the base URL', async () => {
+    const result = await fetchPeerDiscovery(serving(jsonRes(doc({ base_url: `${BASE}/` }))), BASE)
+    expect(result).toEqual({
+      ok: true,
+      doc: { nodeId: PEER_ID, displayName: 'Peer node', baseUrl: BASE, publicKey: PEER_KEYS.publicWire, feed: true },
+    })
+  })
+
+  it('reads a node that predates the feed field as not serving one', async () => {
+    const { federation: _omit, ...old } = doc()
+    const result = await fetchPeerDiscovery(serving(jsonRes(old)), BASE)
+    expect(result).toMatchObject({ ok: true, doc: { feed: false } })
+  })
+
+  it('refuses a redirect', async () => {
+    const res = new Response(null, { status: 301, headers: { location: 'https://elsewhere.example.org/' } })
+    expect(await fetchPeerDiscovery(serving(res), BASE)).toEqual({ ok: false, error: 'redirect', status: 301 })
+  })
+
+  it('refuses a document over the byte cap', async () => {
+    const res = jsonRes(doc({ display_name: 'x'.repeat(DISCOVERY_MAX_BYTES) }))
+    expect(await fetchPeerDiscovery(serving(res), BASE)).toEqual({ ok: false, error: 'too-large' })
+  })
+
+  it('refuses a document whose id or base URL is malformed', async () => {
+    for (const bad of [doc({ node_id: 'a/b' }), doc({ base_url: 'http://peer.example.org' }), doc({ public_key: 7 }), [doc()]]) {
+      expect(await fetchPeerDiscovery(serving(jsonRes(bad)), BASE)).toEqual({ ok: false, error: 'invalid-body' })
+    }
+    const notJson = new Response('<html>', { status: 200 })
+    expect(await fetchPeerDiscovery(serving(notJson), BASE)).toEqual({ ok: false, error: 'invalid-body' })
+  })
+
+  it('reports a non-200 status', async () => {
+    expect(await fetchPeerDiscovery(serving(new Response('no', { status: 404 })), BASE)).toEqual({
+      ok: false,
+      error: 'http-status',
+      status: 404,
+    })
   })
 })

@@ -70,6 +70,11 @@ export const PULL_TIMEOUT_MS = 15_000
  *  are signed with, which covers ULIDs and the legacy SOS ids. */
 const ID_RE = /^[A-Za-z0-9._:-]{1,128}$/
 
+/** Whether `s` is shaped like a node or dataset id on the wire. */
+export function isFederationId(s: string): boolean {
+  return ID_RE.test(s)
+}
+
 export type PeerStatus = 'active' | 'paused' | 'blocked'
 
 export interface FederationPeer {
@@ -308,7 +313,7 @@ function validateFeedPage(body: unknown, peerId: string): ValidPage {
 }
 
 async function fetchPage(
-  deps: PullDeps,
+  fetchFn: typeof fetch,
   url: string,
   timeoutMs: number,
   maxBodyBytes: number,
@@ -318,7 +323,7 @@ async function fetchPage(
   try {
     let res: Response
     try {
-      res = await deps.fetch(url, {
+      res = await fetchFn(url, {
         method: 'GET',
         redirect: 'manual',
         headers: { Accept: 'application/json' },
@@ -345,6 +350,66 @@ async function fetchPage(
   } finally {
     clearTimeout(timer)
   }
+}
+
+export const DISCOVERY_PATH = '/.well-known/terraviz.json'
+/** A discovery document is a few hundred bytes; this is generous. */
+export const DISCOVERY_MAX_BYTES = 64 * 1024
+
+/** What a peer's discovery document says about it, as checked here. */
+export interface PeerDiscovery {
+  nodeId: string
+  displayName: string
+  /** The document's `base_url`, normalized by `parsePeerBaseUrl`. */
+  baseUrl: string
+  publicKey: string
+  /** `federation.feed`; `false` when the node predates the field. */
+  feed: boolean
+}
+
+export type DiscoveryFailure =
+  | 'network'
+  | 'timeout'
+  | 'redirect'
+  | 'http-status'
+  | 'too-large'
+  | 'invalid-body'
+
+/**
+ * Fetch and check `<origin>/.well-known/terraviz.json`, the same way a
+ * feed page is fetched: no redirects, a byte cap, a timeout. The
+ * document is unsigned, so it is never trusted on its own: the caller
+ * compares it with the node id and key the operator was given out of
+ * band (adding a peer), and only the pinned key is used afterwards.
+ */
+export async function fetchPeerDiscovery(
+  fetchFn: typeof fetch,
+  origin: string,
+  timeoutMs = PULL_TIMEOUT_MS,
+): Promise<{ ok: true; doc: PeerDiscovery } | { ok: false; error: DiscoveryFailure; status?: number }> {
+  let text: string
+  try {
+    ;({ text } = await fetchPage(fetchFn, origin + DISCOVERY_PATH, timeoutMs, DISCOVERY_MAX_BYTES))
+  } catch (err) {
+    if (!(err instanceof PullError)) throw err
+    return { ok: false, error: err.code as DiscoveryFailure, ...(err.status !== undefined ? { status: err.status } : {}) }
+  }
+  let body: unknown
+  try {
+    body = JSON.parse(text)
+  } catch {
+    return { ok: false, error: 'invalid-body' }
+  }
+  if (!isPlainObject(body)) return { ok: false, error: 'invalid-body' }
+  const { node_id: nodeId, display_name: displayName, base_url: rawBase, public_key: publicKey } = body
+  if (typeof nodeId !== 'string' || !ID_RE.test(nodeId)) return { ok: false, error: 'invalid-body' }
+  if (typeof displayName !== 'string' || displayName.length > 200) return { ok: false, error: 'invalid-body' }
+  if (typeof publicKey !== 'string' || publicKey.length > 200) return { ok: false, error: 'invalid-body' }
+  const baseUrl = typeof rawBase === 'string' ? parsePeerBaseUrl(rawBase.replace(/\/$/, '')) : null
+  if (baseUrl === null) return { ok: false, error: 'invalid-body' }
+  const fed = body.federation
+  const feed = isPlainObject(fed) && fed.feed === true
+  return { ok: true, doc: { nodeId, displayName, baseUrl, publicKey, feed } }
 }
 
 /** The text recorded as `last_sync_error`: a code, never response text. */
@@ -409,7 +474,7 @@ export async function pullPeer(
     if (origin === null || publicKey === null) throw new PullError('bad-peer')
     while (result.pages < maxPages) {
       const target = feedTarget(cursor, pageLimit)
-      const { text, signature } = await fetchPage(deps, origin + target, timeoutMs, maxBodyBytes)
+      const { text, signature } = await fetchPage(deps.fetch, origin + target, timeoutMs, maxBodyBytes)
       const verified = await verifyFederationBody(text, signature, {
         publicKey,
         expectedKeyId: peer.id,
