@@ -62,7 +62,7 @@ most 250) and nothing else. An unknown or repeated parameter is a
 accepts one spelling of each request rather than signing pages for
 targets it ignored.
 
-A page is every published row with `visibility = 'public'`, ordered by
+The feed carries public rows only. A page is every published row with `visibility = 'public'`, ordered by
 `(updated_at, id)`, after the cursor and no later than a settle
 watermark 30 s behind now. A row that is currently public under
 `PUBLIC_DATASET_PREDICATE` is sent as a full `WireDataset`; one that is
@@ -74,9 +74,9 @@ write that committed late with an earlier stamp.
 
 Two changes cannot be tombstoned: a hard delete, and a visibility
 change away from `public`, both of which take the row out of the scan.
-A pull with no cursor is therefore a **full sync**, authoritative once
-its last page arrives, and the subscriber drops every row it did not
-see in it. Subscribers should run one periodically.
+A pull with no cursor is therefore a **full sync**. A withdrawn row is
+removed only by a full sync followed by the sweep (Step 5), never by an
+incremental pull. Subscribers should run one periodically.
 
 The route answers 404 unless federation is enabled, 503 when it is
 enabled without a usable abuse contact or when the node cannot sign
@@ -128,13 +128,29 @@ full sync stamps a run id on every row it delivers and keeps it across
 pulls, so a full sync larger than one pull's caps still reconciles
 when it finishes.
 
+**Lease.** Each pull takes a per-peer lease and reads the peer's URL
+and key from its stored row, never from the caller, so two pulls
+cannot interleave pages. The sync route answers 409 while a lease is
+held, and 500 with an audit row on a store error.
+
+**Sweep.** A finished full sync does not delete what it did not see.
+It schedules a sweep, which the next complete incremental pull runs
+once the feed's 30 s settle window has closed, so rows held back by
+the watermark on the last page are not dropped.
+
+`last_sync_at` records the last **attempt**, successful or not; read
+it with `last_sync_error`.
+
 Mirrored rows are stored as the wire carried them, with the signature
 header of the page that delivered them as evidence. They are never
 joined with `datasets` and are not served by any route.
 
 `POST /api/v1/publish/federation/sync` runs one bounded pull now;
-`GET`/`POST /api/v1/publish/federation/peers` list and add peers. Both
-are admin-only and 404 unless federation is enabled.
+`GET`/`POST /api/v1/publish/federation/peers` list and add peers, and
+`DELETE /api/v1/publish/federation/peers/:id` removes one with its
+mirrored rows (404 `peer_not_found`, audited as
+`federation_peer.remove`). All are admin-only and 404 unless
+federation is enabled.
 
 ## Step 6: Conformance
 
@@ -162,8 +178,12 @@ unambiguous to a second implementation.
 
 - **Handshake, HMAC and grants.** Only public rows are federated, and
   only by pull. Nothing grants a peer more than the public catalog.
-- **Scheduled sync.** `sync_interval_minutes` is stored and nothing
-  reads it; pulls are manual.
+- **Scheduled sync.** Pulls are manual. The `sync_interval_minutes`
+  column was removed in review and arrives with the scheduler.
+- **Hardening found in review, not yet built:** a per-peer storage
+  quota; refusing rows whose `originNode` is this node; sanitising a
+  peer's `display_name`; checking the feed's `Content-Type`;
+  verifying the raw body before parsing; caching feed pages.
 - **Serving mirrored rows.** No catalog, search, STAC or Orbit surface
   reads `federated_datasets`, so the `via` link of Step 4 has no
   producer yet.
@@ -175,6 +195,11 @@ unambiguous to a second implementation.
 
 - **Tombstones disclose ids.** The feed sends the id of a public row
   an operator later hid or retracted. The public catalog does not.
+  This includes a row published public but hidden from the start: it
+  was never visible, and its id still reaches every subscriber.
+- **Discovery does not check the key.** `feed: true` reflects
+  configuration; a key that does not match `node_identity` shows only
+  as a 503 from the feed.
 - **`origin_node` is the peer's claim.** It is stored as sent and
   checked against nothing; a peer re-publishing another node's rows
   can name that node.

@@ -196,7 +196,14 @@ the contract is here, because a schema cannot carry it.
   `invalid_limit`, 503 `abuse_contact_missing` for a node switched on
   without an abuse contact, and 503 `binding_missing` /
   `identity_missing` / `signing_key_unavailable` for a node not yet
-  set up to sign.
+  set up to sign, and 500 `unsignable_row` when a row cannot be
+  serialised for signing. Lone surrogates in text are replaced with
+  U+FFFD before signing, so that error means a row the node itself
+  should repair, not a reader fault.
+- **Discovery's `feed: true` is a configuration check.** It says the
+  feed is switched on, has a contact and has a key configured; it does
+  not prove that key matches `node_identity`. A mismatch still answers
+  503 `signing_key_unavailable` at the feed itself.
 
 ## Deferred
 
