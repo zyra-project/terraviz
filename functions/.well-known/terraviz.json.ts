@@ -17,14 +17,24 @@
  *     "schema_versions_supported": [1],
  *     "endpoints": { "catalog": "/api/v1/catalog", ... },
  *     "policy": { "open_subscription": false, ... },
- *     "contact": "ops@example"
+ *     "contact": "ops@example",
+ *     "abuse_contact": "abuse@example",
+ *     "federation": { "feed": true }
  *   }
  *
- * Phase 1a only implements the `catalog` endpoint; `feed` and
- * `handshake` are advertised as forward-compatible placeholders so
- * a federation subscriber's discovery probe sees the canonical
- * paths even before they accept traffic. Phase 4 wires them up
- * without changing the doc shape.
+ * `endpoints` always names all three paths, as it has since Phase 1a:
+ * it says where each one lives, not whether it answers, and readers
+ * already require every key. Whether the signed feed is serving is
+ * `federation.feed` — true only when `FEDERATION_ENABLED` is on and
+ * `FEDERATION_ABUSE_CONTACT` is a usable address, the same test the
+ * feed route makes (`_lib/federation-config.ts`). `handshake` is not
+ * implemented and stays a placeholder. `abuse_contact` is published
+ * whenever it is set, federating or not, and `null` otherwise. Both
+ * fields are additive (metadata Phase 5, step 3); a document from an
+ * older node has neither, which a reader takes as "no feed".
+ *
+ * The document is cached for five minutes, so a node switching
+ * federation on or off is seen by peers within that.
  *
  * Returns 503 with a typed envelope when the catalog DB binding is
  * missing or `node_identity` is unprovisioned, mirroring the
@@ -35,6 +45,7 @@ import { CatalogEnv } from '../api/v1/_lib/env'
 import { getNodeIdentity, IDENTITY_MISSING_MESSAGE } from '../api/v1/_lib/catalog-store'
 import { computeEtag } from '../api/v1/_lib/snapshot'
 import { isPublicStacUrl } from '../api/v1/_lib/stac-builders'
+import { federationState, parseAbuseContact } from '../api/v1/_lib/federation-config'
 
 const CACHE_CONTROL = 'public, max-age=300, stale-while-revalidate=600'
 const CONTENT_TYPE = 'application/json; charset=utf-8'
@@ -59,6 +70,13 @@ export interface WellKnownDoc {
     max_request_rate_per_minute: number
   }
   contact: string | null
+  /** Where to report abuse; `null` when the node has not set one. Absent from older nodes. */
+  abuse_contact?: string | null
+  /** What this node's federation surface is serving. Absent from older nodes, which serve no feed. */
+  federation?: {
+    /** True when `endpoints.feed` answers with signed pages. */
+    feed: boolean
+  }
 }
 
 function jsonError(status: number, error: string, message: string): Response {
@@ -98,13 +116,16 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
       handshake: '/api/v1/federation/handshake',
     },
     policy: {
-      // Federation goes live in Phase 4. Until then, the policy
-      // fields document defaults rather than runtime behaviour.
+      // There is no handshake yet, so nothing subscribes: the feed is
+      // an open read. These fields document defaults rather than
+      // runtime behaviour until subscriptions exist.
       open_subscription: false,
       auto_approve: false,
       max_request_rate_per_minute: 600,
     },
     contact: identity.contact_email,
+    abuse_contact: parseAbuseContact(context.env.FEDERATION_ABUSE_CONTACT),
+    federation: { feed: federationState(context.env).state === 'live' },
   }
 
   const body = JSON.stringify(doc)

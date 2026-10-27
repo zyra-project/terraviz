@@ -146,6 +146,21 @@ the contract is here, because a schema cannot carry it.
   `{"error":"not_found"}` unless `FEDERATION_ENABLED` is exactly
   `true`, so a node that never opted in looks like one that predates
   the route.
+- **No feed without an abuse contact.** A node that turns it on must
+  also set `FEDERATION_ABUSE_CONTACT` to one plain email address
+  (`abuse@example.org`; no display name, no `mailto:`, no list). Until
+  it does, the feed answers 503 `abuse_contact_missing`, because a
+  peer that finds a problem in a federated record needs someone to
+  tell. The address is published as `abuse_contact` in
+  `/.well-known/terraviz.json`.
+- **Discovery says whether it is live.** `/.well-known/terraviz.json`
+  carries `federation: {"feed": true}` only when the feed would answer
+  200, from the same check the route runs, so the two cannot disagree.
+  `endpoints.feed` names where the feed lives whether or not it is on.
+  Both fields are additive and optional on the wire: a reader treats a
+  document without `federation` as a node with no feed. The document
+  is cached for five minutes, so a node switching on can take that
+  long to be seen.
 - **Open, and signed.** Anyone may read it; there is no handshake.
   Every 200 carries a detached Ed25519 signature in
   `Terraviz-Signature: v=1, keyid=<node_id>, created=<unix seconds>,
@@ -178,8 +193,10 @@ the contract is here, because a schema cannot carry it.
   lists.
 - **Errors** are `{error, message?}` with `Cache-Control: no-store`:
   400 `unknown_parameter` / `duplicate_parameter` / `invalid_cursor` /
-  `invalid_limit`, and 503 `binding_missing` / `identity_missing` /
-  `signing_key_unavailable` for a node not yet set up to sign.
+  `invalid_limit`, 503 `abuse_contact_missing` for a node switched on
+  without an abuse contact, and 503 `binding_missing` /
+  `identity_missing` / `signing_key_unavailable` for a node not yet
+  set up to sign.
 
 ## Deferred
 

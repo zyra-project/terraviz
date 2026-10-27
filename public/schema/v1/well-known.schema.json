@@ -65,6 +65,23 @@
         "string",
         "null"
       ]
+    },
+    "abuse_contact": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "federation": {
+      "type": "object",
+      "properties": {
+        "feed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "feed"
+      ]
     }
   },
   "required": [

@@ -35,7 +35,12 @@ function setup(count = 3): { sqlite: Database.Database; env: Record<string, unkn
   sqlite.prepare('UPDATE node_identity SET public_key = ?').run(KEYS.wire)
   return {
     sqlite,
-    env: { CATALOG_DB: asD1(sqlite), FEDERATION_ENABLED: 'true', NODE_ID_PRIVATE_KEY_PEM: KEYS.secret },
+    env: {
+      CATALOG_DB: asD1(sqlite),
+      FEDERATION_ENABLED: 'true',
+      FEDERATION_ABUSE_CONTACT: 'abuse@test.local',
+      NODE_ID_PRIVATE_KEY_PEM: KEYS.secret,
+    },
   }
 }
 
@@ -78,8 +83,26 @@ describe('GET /api/v1/federation/feed — refusals', () => {
     expect(await res.json()).toEqual({ error: 'not_found' })
   })
 
+  it.each([undefined, '', 'not an address', 'Abuse <abuse@test.local>'])(
+    'is 503 when switched on with FEDERATION_ABUSE_CONTACT %j',
+    async contact => {
+      const { env } = setup()
+      const res = await get({ ...env, FEDERATION_ABUSE_CONTACT: contact })
+      expect(res.status).toBe(503)
+      expect(res.headers.get('cache-control')).toBe('no-store')
+      expect(res.headers.get(SIGNATURE_HEADER)).toBeNull()
+      expect(((await res.json()) as { error: string }).error).toBe('abuse_contact_missing')
+    },
+  )
+
+  it('is still 404 when switched off, whatever the abuse contact', async () => {
+    const { env } = setup()
+    const res = await get({ ...env, FEDERATION_ENABLED: 'false', FEDERATION_ABUSE_CONTACT: undefined })
+    expect(res.status).toBe(404)
+  })
+
   it('is 503 without a catalog database', async () => {
-    const res = await get({ FEDERATION_ENABLED: 'true' })
+    const res = await get({ FEDERATION_ENABLED: 'true', FEDERATION_ABUSE_CONTACT: 'abuse@test.local' })
     expect(res.status).toBe(503)
     expect(((await res.json()) as { error: string }).error).toBe('binding_missing')
   })

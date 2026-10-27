@@ -4,7 +4,10 @@
 /**
  * GET /api/v1/federation/feed — the signed public federation feed
  * (metadata Phase 5, step 2). Off unless `FEDERATION_ENABLED` is
- * `'true'`; off, the path answers 404 as though it did not exist.
+ * `'true'`; off, the path answers 404 as though it did not exist. On
+ * but without a usable `FEDERATION_ABUSE_CONTACT`, it answers 503: the
+ * protocol does not let a node federate without one
+ * (`_lib/federation-config.ts`).
  *
  * Query: `since` (a cursor from a previous page; absent is a full sync
  * from the start) and `limit` (1–250, default 100). Any other
@@ -38,6 +41,7 @@ import {
   type FeedSerializer,
 } from '../_lib/federation-feed'
 import { d1FederationFeedStore } from '../_lib/federation-feed-d1'
+import { federationState } from '../_lib/federation-config'
 import {
   importNodePublicKey,
   importNodeSigningKey,
@@ -86,7 +90,15 @@ async function loadSigningKey(secret: string | undefined, publicKey: string): Pr
 
 export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
   const env = context.env
-  if (env.FEDERATION_ENABLED !== 'true') return errorResponse(404, 'not_found')
+  const federation = federationState(env)
+  if (federation.state === 'off') return errorResponse(404, 'not_found')
+  if (federation.state === 'no_abuse_contact') {
+    return errorResponse(
+      503,
+      'abuse_contact_missing',
+      'Federation needs an abuse contact: set FEDERATION_ABUSE_CONTACT to an email address.',
+    )
+  }
   if (!env.CATALOG_DB) {
     return errorResponse(503, 'binding_missing', 'CATALOG_DB binding is not configured on this deployment.')
   }

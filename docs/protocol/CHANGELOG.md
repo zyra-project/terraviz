@@ -22,6 +22,13 @@ major (`/schema/v2/`) and an entry with a migration note.
   `FEDERATION_ENABLED=true`, and every page is signed in the
   `Terraviz-Signature` header. The signature, cursor and tombstone
   rules are in [`README.md`](README.md) §The federation feed.
+- **`well-known.schema.json`** gains two optional fields:
+  `abuse_contact` (string or null — the node's
+  `FEDERATION_ABUSE_CONTACT`, null when unset or unusable) and
+  `federation` (`{feed: boolean}` — true only when the feed answers
+  200). A reader that ignores them is unaffected; a document without
+  `federation` means no feed. The feed refuses to go live without an
+  abuse contact (503 `abuse_contact_missing`).
 
 ## v1 — 2026-07-04
 
