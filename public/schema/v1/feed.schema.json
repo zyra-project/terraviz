@@ -1,0 +1,355 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://terraviz.zyra-project.org/schema/v1/feed.schema.json",
+  "title": "Terraviz federation feed page",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "number"
+    },
+    "node_id": {
+      "type": "string"
+    },
+    "generated_at": {
+      "type": "string"
+    },
+    "cursor": {
+      "type": "string"
+    },
+    "has_more": {
+      "type": "boolean"
+    },
+    "datasets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "dataLink": {
+            "type": "string"
+          },
+          "organization": {
+            "type": "string"
+          },
+          "abstractTxt": {
+            "type": "string"
+          },
+          "thumbnailLink": {
+            "type": "string"
+          },
+          "legendLink": {
+            "type": "string"
+          },
+          "closedCaptionLink": {
+            "type": "string"
+          },
+          "colorTableLink": {
+            "type": "string"
+          },
+          "websiteLink": {
+            "type": "string"
+          },
+          "startTime": {
+            "type": "string"
+          },
+          "endTime": {
+            "type": "string"
+          },
+          "period": {
+            "type": "string"
+          },
+          "weight": {
+            "type": "number"
+          },
+          "isHidden": {
+            "type": "boolean"
+          },
+          "runTourOnLoad": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "enriched": {
+            "type": "object",
+            "properties": {
+              "description": {
+                "type": "string"
+              },
+              "categories": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "keywords": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "relatedDatasets": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title",
+                    "url"
+                  ]
+                }
+              },
+              "datasetDeveloper": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "affiliationUrl": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              },
+              "visDeveloper": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "affiliationUrl": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          },
+          "originNode": {
+            "type": "string"
+          },
+          "originNodeUrl": {
+            "type": "string"
+          },
+          "originDisplayName": {
+            "type": "string"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "federated",
+              "restricted",
+              "private"
+            ]
+          },
+          "schemaVersion": {
+            "type": "number"
+          },
+          "licenseSpdx": {
+            "type": "string"
+          },
+          "licenseUrl": {
+            "type": "string"
+          },
+          "licenseStatement": {
+            "type": "string"
+          },
+          "attributionText": {
+            "type": "string"
+          },
+          "rightsHolder": {
+            "type": "string"
+          },
+          "doi": {
+            "type": "string"
+          },
+          "citationText": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "publishedAt": {
+            "type": "string"
+          },
+          "legacyId": {
+            "type": "string"
+          },
+          "probingInfo": {},
+          "boundingBox": {
+            "type": "object",
+            "properties": {
+              "n": {
+                "type": "number"
+              },
+              "s": {
+                "type": "number"
+              },
+              "w": {
+                "type": "number"
+              },
+              "e": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "n",
+              "s",
+              "w",
+              "e"
+            ]
+          },
+          "celestialBody": {
+            "type": "string"
+          },
+          "radiusMi": {
+            "type": "number"
+          },
+          "lonOrigin": {
+            "type": "number"
+          },
+          "isFlippedInY": {
+            "type": "boolean"
+          },
+          "playbackFps": {
+            "type": "number"
+          },
+          "renderEncoding": {
+            "type": "string",
+            "const": "data-luma"
+          },
+          "colorScale": {
+            "type": "object",
+            "properties": {
+              "stops": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "t": {
+                      "type": "number"
+                    },
+                    "rgba": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      },
+                      "minItems": 4,
+                      "maxItems": 4
+                    }
+                  },
+                  "required": [
+                    "t",
+                    "rgba"
+                  ]
+                }
+              },
+              "vmin": {
+                "type": "number"
+              },
+              "vmax": {
+                "type": "number"
+              },
+              "units": {
+                "type": "string"
+              },
+              "transparentRange": {
+                "type": "number"
+              },
+              "dataMinLuma": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "stops",
+              "vmin",
+              "vmax"
+            ]
+          },
+          "tourJsonUrl": {
+            "type": "string"
+          },
+          "frames": {
+            "type": "object",
+            "properties": {
+              "count": {
+                "type": "number"
+              },
+              "urlTemplate": {
+                "type": "string"
+              },
+              "framesDigest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "count",
+              "urlTemplate"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "title",
+          "format",
+          "dataLink",
+          "originNode",
+          "originNodeUrl",
+          "originDisplayName",
+          "visibility",
+          "schemaVersion",
+          "createdAt",
+          "updatedAt"
+        ]
+      }
+    },
+    "tombstones": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "node_id",
+    "generated_at",
+    "cursor",
+    "has_more",
+    "datasets",
+    "tombstones"
+  ]
+}

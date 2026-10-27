@@ -24,11 +24,14 @@
  *                          and each entry in GET /api/v1/catalog)
  *   - CatalogResponseBody → catalog.schema.json (GET /api/v1/catalog envelope)
  *   - WellKnownDoc      → well-known.schema.json (/.well-known/terraviz.json)
+ *   - FederationFeedBody → feed.schema.json (GET /api/v1/federation/feed,
+ *                          metadata Phase 5; served only on a node with
+ *                          FEDERATION_ENABLED, signed per
+ *                          functions/api/v1/_lib/federation-signature.ts)
  *
- * DEFERRED to Phase 4: the federation feed schema. Its serializer does
- * not exist yet (no functions/api/v1/federation/), so pinning it now
- * would invent a shape and bake in accidents — exactly what Directive 2
- * warns against. See docs/protocol/README.md.
+ * Not pinned here: the handshake and the subscriber's own records. The
+ * handshake is deferred (docs/protocol/README.md), and what a
+ * subscriber stores is its own business, not wire format.
  */
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
@@ -79,6 +82,12 @@ const TARGETS: readonly Target[] = [
     path: 'functions/.well-known/terraviz.json.ts',
     type: 'WellKnownDoc',
     title: 'Terraviz node discovery document',
+  },
+  {
+    file: 'feed.schema.json',
+    path: 'functions/api/v1/_lib/federation-feed.ts',
+    type: 'FederationFeedBody',
+    title: 'Terraviz federation feed page',
   },
 ]
 

@@ -11,6 +11,18 @@ Additive changes (new optional field, new enum value) stay under the
 current major and get an entry here. Breaking changes mint a new
 major (`/schema/v2/`) and an entry with a migration note.
 
+## v1 (additive) — 2026-10-27
+
+- **`feed.schema.json`** — `FederationFeedBody`
+  (`functions/api/v1/_lib/federation-feed.ts`). One page of
+  `GET /api/v1/federation/feed`: `schema_version`, `node_id`,
+  `generated_at`, `cursor`, `has_more`, `datasets[]` (each the full
+  `WireDataset`, inlined) and `tombstones[]` (ids). New file; no
+  existing schema changes. The route is off unless the node sets
+  `FEDERATION_ENABLED=true`, and every page is signed in the
+  `Terraviz-Signature` header. The signature, cursor and tombstone
+  rules are in [`README.md`](README.md) §The federation feed.
+
 ## v1 — 2026-07-04
 
 Initial published contract. Pins the wire shapes that exist today,
