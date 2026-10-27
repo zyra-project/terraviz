@@ -186,6 +186,15 @@ describe('GET /api/v1/federation/feed — pages', () => {
     expect(result).toEqual({ ok: false, reason: 'bad-signature' })
   })
 
+  it('signs a row whose text holds a lone surrogate, replacing it', async () => {
+    const { sqlite, env } = setup()
+    sqlite.prepare('UPDATE datasets SET title = ? WHERE id = ?').run('bad \uD800 title', idOf(0))
+    const res = await get(env)
+    expect(res.status).toBe(200)
+    const body = await verified(res)
+    expect(JSON.stringify(body)).toContain('bad \uFFFD title')
+  })
+
   it('leaves out drafts and non-public rows, and tombstones hidden and retracted ones', async () => {
     const { sqlite, env } = setup(6)
     sqlite.prepare('UPDATE datasets SET published_at = NULL WHERE id = ?').run(idOf(0))

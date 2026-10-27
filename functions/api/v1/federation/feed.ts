@@ -43,6 +43,7 @@ import {
 import { d1FederationFeedStore } from '../_lib/federation-feed-d1'
 import { federationState } from '../_lib/federation-config'
 import {
+  CanonicalJsonError,
   importNodePublicKey,
   importNodeSigningKey,
   signFederationBody,
@@ -52,6 +53,19 @@ import {
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
 const ALLOWED_PARAMS = new Set(['since', 'limit'])
+
+/** Replace lone surrogates in every string with U+FFFD, so a row whose
+ *  text was stored malformed still has a canonical form to sign. */
+function wellFormed<T>(value: T): T {
+  if (typeof value === 'string') return value.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD') as T
+  if (Array.isArray(value)) return value.map(wellFormed) as T
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value)) out[wellFormed(k)] = wellFormed(v)
+    return out as T
+  }
+  return value
+}
 
 function errorResponse(status: number, error: string, message?: string): Response {
   return new Response(JSON.stringify(message ? { error, message } : { error }), {
@@ -139,12 +153,20 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
     )
 
   const nowMs = Date.now()
-  const page = await buildFeedPage(store, { identity, after, limit, nowMs, serialize })
-  const signed = await signFederationBody(page, key, {
-    keyId: identity.node_id,
-    created: Math.floor(nowMs / 1000),
-    target: url.pathname + url.search,
-  })
+  const page = wellFormed(await buildFeedPage(store, { identity, after, limit, nowMs, serialize }))
+  let signed: Awaited<ReturnType<typeof signFederationBody>>
+  try {
+    signed = await signFederationBody(page, key, {
+      keyId: identity.node_id,
+      created: Math.floor(nowMs / 1000),
+      target: url.pathname + url.search,
+    })
+  } catch (error) {
+    if (error instanceof CanonicalJsonError) {
+      return errorResponse(500, 'unsignable_row', 'A row on this page cannot be signed.')
+    }
+    throw error
+  }
   return new Response(signed.text, {
     status: 200,
     headers: {

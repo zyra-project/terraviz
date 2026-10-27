@@ -22,7 +22,7 @@ export interface StacResolvedAsset {
 export interface StacResolvers {
   /** Publication adapters must return deployed, public routes; manifest is the existing native playback manifest, not a STAC endpoint.
    *  `dataset` is the native wire record (`/api/v1/datasets/:id`) and `discovery` the node's `/.well-known/terraviz.json`;
-   *  both are the canonical-origin side of the STAC ↔ native link (metadata Phase 5). Optional so older adapters still build. */
+   *  both are the canonical-origin side of the STAC ↔ native link (metadata Phase 5), linked from the live projection only, never a history item. Optional so older adapters still build. */
   resource(kind: 'catalog' | 'collection' | 'item' | 'manifest' | 'dataset' | 'discovery', id: string): string
   listing?(kind: 'collections' | 'items', collectionId?: string): string
   asset(ref: string, purpose: string): StacResolvedAsset | null
@@ -265,8 +265,9 @@ export function buildStacProduct(model: StacDatasetReadModel, node: StacNodeCont
     try { origin = resolvers.origin?.(row.origin_node, row.id) } catch { return { ok: false, reasons: ['origin_link_unresolved'] } }
     if (!origin || !isPublicStacUrl(origin)) return { ok: false, reasons: ['origin_link_unresolved'] }
     extraLinks.push(link('via', origin))
-  } else {
+  } else if (!model.itemIdentity) {
     // The native record this projection was built from, at its canonical origin; `(origin_node, id)` is the join key.
+    // Live projection only: a history frame or revision is not what the native record now says, so it gets no `alternate`.
     const native = resourceUrl(resolvers, 'dataset', row.id)
     if (native) extraLinks.push({ ...link('alternate', native), title: 'TerraViz native dataset record' })
   }
