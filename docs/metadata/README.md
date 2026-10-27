@@ -565,6 +565,8 @@ lifetime and test both CDN and application-cache behavior.
 | `citation_text` | Scientific Citation `sci:citation` | Direct after review |
 | Related resources | `related`, `derived_from`, or `via` links | Select relation from actual provenance semantics |
 | `website_link` | Usually `via` or `about` link | It is not automatically the data asset |
+| Native record (Phase 5) | Collection and Item `alternate` link to `/api/v1/datasets/:id` | Emitted for rows this node hosts. A mirrored row carries a `via` link to its origin instead and never an `alternate`, since its native record lives on the origin. `(origin node, dataset id)` is the join key between the two representations |
+| Native discovery (Phase 5) | Root catalog `describedby` link to `/.well-known/terraviz.json` | The STAC-to-native direction. The native-to-STAC direction is the discovery document's existing `Link rel="related"` header, so the native JSON body is unchanged |
 
 ### Licensing
 

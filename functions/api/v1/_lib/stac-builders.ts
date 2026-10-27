@@ -20,8 +20,10 @@ export interface StacResolvedAsset {
   byteSize?: number
 }
 export interface StacResolvers {
-  /** Publication adapters must return deployed, public routes; manifest is the existing native playback manifest, not a STAC endpoint. */
-  resource(kind: 'catalog' | 'collection' | 'item' | 'manifest', id: string): string
+  /** Publication adapters must return deployed, public routes; manifest is the existing native playback manifest, not a STAC endpoint.
+   *  `dataset` is the native wire record (`/api/v1/datasets/:id`) and `discovery` the node's `/.well-known/terraviz.json`;
+   *  both are the canonical-origin side of the STAC ↔ native link (metadata Phase 5). Optional so older adapters still build. */
+  resource(kind: 'catalog' | 'collection' | 'item' | 'manifest' | 'dataset' | 'discovery', id: string): string
   listing?(kind: 'collections' | 'items', collectionId?: string): string
   asset(ref: string, purpose: string): StacResolvedAsset | null
   origin?(nodeId: string, datasetId: string): string | null
@@ -129,6 +131,8 @@ export function buildStacCatalog(node: StacNodeContext, resolvers: StacResolvers
   if (!root) return { ok: false, reasons: ['resource_url_invalid'] }
   if (node.customFields?.some(field => field.scope !== 'Catalog')) return { ok: false, reasons: ['custom_field_scope_invalid'] }
   const links = [link('self', root), link('root', root)]
+  const discovery = resourceUrl(resolvers, 'discovery', identity.node_id)
+  if (discovery) links.push({ ...link('describedby', discovery), title: 'TerraViz node discovery document' })
   if (resolvers.listing) {
     const collections = listingUrl(resolvers, 'collections')
     const items = listingUrl(resolvers, 'items')
@@ -261,6 +265,10 @@ export function buildStacProduct(model: StacDatasetReadModel, node: StacNodeCont
     try { origin = resolvers.origin?.(row.origin_node, row.id) } catch { return { ok: false, reasons: ['origin_link_unresolved'] } }
     if (!origin || !isPublicStacUrl(origin)) return { ok: false, reasons: ['origin_link_unresolved'] }
     extraLinks.push(link('via', origin))
+  } else {
+    // The native record this projection was built from, at its canonical origin; `(origin_node, id)` is the join key.
+    const native = resourceUrl(resolvers, 'dataset', row.id)
+    if (native) extraLinks.push({ ...link('alternate', native), title: 'TerraViz native dataset record' })
   }
   extraLinks.sort((first, second) => JSON.stringify(first) < JSON.stringify(second) ? -1 : JSON.stringify(first) > JSON.stringify(second) ? 1 : 0)
   const license = readiness.license.kind === 'spdx' ? row.license_spdx! : 'other'

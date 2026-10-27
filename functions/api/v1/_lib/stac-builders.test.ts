@@ -23,6 +23,17 @@ describe('pure STAC builders', () => {
     expect(buildStacCatalog(node, resolvers)).toMatchObject({ ok: true, value: { description: 'Scientific data catalog for ' + node.identity.display_name + '.' } })
   })
 
+  it('links the root to native discovery and each local product to its native record', async () => {
+    const { model, node, resolvers } = await stacFixture()
+    const root = buildStacCatalog(node, resolvers)
+    expect(root.ok && root.value.links).toContainEqual(expect.objectContaining({ rel: 'describedby', href: 'https://node.example/discovery/NODE000' }))
+    const built = buildStacProduct(model, node, resolvers)
+    if (!built.ok) throw new Error('expected a product')
+    const native = { rel: 'alternate', type: 'application/json', href: `https://node.example/dataset/${model.row.id}` }
+    expect(built.value.collection!.links).toContainEqual(expect.objectContaining(native))
+    expect(built.value.item!.links).toContainEqual(expect.objectContaining(native))
+  })
+
   it('builds deterministic linked resources and separates data from manifest', async () => {
     const { model, node, resolvers } = await stacFixture()
     const built = buildStacProduct(model, node, resolvers)
@@ -236,6 +247,8 @@ describe('eligibility and mapping matrix', () => {
     expect(result.value.collection!.id).toBe(`NODE000-${model.row.id}`)
     expect(result.value.collection!.providers!.filter(provider => provider.roles?.includes('host'))).toHaveLength(hosted ? 1 : 0)
     expect(result.value.collection!.links).toContainEqual(expect.objectContaining({ href: 'https://origin.example/dataset/original' }))
+    // A mirror never claims its own copy is the native record; the origin link is the join.
+    expect(result.value.collection!.links.some(l => l.rel === 'alternate')).toBe(false)
   })
 
   it('omits invalid data-luma pairs without reporting numeric data', async () => {
