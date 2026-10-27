@@ -92,6 +92,7 @@ export type AuditAction =
   | 'blog.unpublish'
   | 'blog.generate'
   | 'federation_peer.add'
+  | 'federation_peer.remove'
   | 'federation_peer.sync'
 
 export interface AuditEventInput {
