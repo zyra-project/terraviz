@@ -25,6 +25,11 @@ on:
       - 'index.html'
       - 'scripts/screenshots/**'
       - '.github/workflows/visual-report.yml'
+      # The lockfile picks the Playwright, and so the Chromium, that
+      # renders every shot. A bump there must run the smoke gate on
+      # its PR and re-publish the baseline once merged, or every later
+      # PR diffs against pixels from the old browser.
+      - 'package-lock.json'
   pull_request:
     paths: *visual_paths
 
@@ -52,7 +57,15 @@ jobs:
     # Playwright release that supports the new image.
     runs-on: ubuntu-24.04
     steps:
+      # No job here pushes, so the token is not left in .git/config for
+      # `npm ci`'s install scripts and the dev server to read. That
+      # matters since lockfile-only PRs (Dependabot's security updates
+      # among them) reach this workflow, which grants pull-requests:
+      # write. The steps that call the API take the token as an action
+      # input, not from git.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -77,7 +90,10 @@ jobs:
     # Pinned for Playwright; see the smoke job.
     runs-on: ubuntu-24.04
     steps:
+      # Credentials not persisted; see the smoke job.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22

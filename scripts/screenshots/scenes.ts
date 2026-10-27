@@ -349,6 +349,12 @@ export const scenes: Scene[] = [
       await openCatalog(page)
       await page.locator('#browse-view-mode [data-view-mode="timeline"]').click()
       await page.locator('#browse-timeline:not(.hidden)').waitFor()
+      // The container is unhidden while it still holds the "Loading
+      // timeline view…" placeholder, before the lazy catalogTimelineUI
+      // chunk mounts. A cold runner captured that placeholder against a
+      // baseline of the mounted view. Wait for the legend, which only the
+      // mounted view draws, with the smoke check's 30s budget.
+      await page.locator('#browse-timeline .browse-timeline-legend').waitFor({ timeout: 30_000 })
     },
   },
   {
