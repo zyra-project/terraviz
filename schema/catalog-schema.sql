@@ -381,6 +381,33 @@ CREATE TABLE featured_datasets (
   FOREIGN KEY (added_by)   REFERENCES publishers(id)
 );
 
+CREATE TABLE federated_datasets (
+  peer_id         TEXT NOT NULL REFERENCES federation_peers(id) ON DELETE CASCADE,
+  remote_id       TEXT NOT NULL,
+  origin_node     TEXT NOT NULL,
+  payload_json    TEXT NOT NULL,
+  feed_signature  TEXT NOT NULL,
+  seen_run        TEXT NOT NULL,
+  fetched_at      TEXT NOT NULL,
+  PRIMARY KEY (peer_id, remote_id)
+);
+
+CREATE TABLE federation_peers (
+  id                    TEXT PRIMARY KEY,
+  base_url              TEXT NOT NULL UNIQUE,
+  display_name          TEXT NOT NULL,
+  public_key            TEXT NOT NULL,
+  status                TEXT NOT NULL DEFAULT 'active'
+                        CHECK (status IN ('active', 'paused', 'blocked')),
+  sync_interval_minutes INTEGER NOT NULL DEFAULT 15,
+  last_sync_at          TEXT,
+  last_sync_cursor      TEXT,
+  last_sync_error       TEXT,
+  full_sync_run         TEXT,
+  created_at            TEXT NOT NULL,
+  updated_at            TEXT NOT NULL
+);
+
 CREATE TABLE feed_connectors (
   id TEXT PRIMARY KEY,                -- ULID for operator-added rows; fixed id for seeds
   kind TEXT NOT NULL,                 -- connector implementation: 'eonet' | 'rss' (later)
@@ -636,6 +663,7 @@ CREATE INDEX idx_datasets_updated_at ON datasets(updated_at);
 CREATE INDEX idx_datasets_visibility ON datasets(visibility, is_hidden, retracted_at);
 CREATE INDEX idx_event_dataset_links_dataset ON event_dataset_links(dataset_id, status);
 CREATE INDEX idx_featured_datasets_position ON featured_datasets(position);
+CREATE INDEX idx_federated_datasets_seen ON federated_datasets(peer_id, seen_run);
 CREATE INDEX idx_feed_connectors_enabled ON feed_connectors(enabled);
 CREATE UNIQUE INDEX idx_node_identity_singleton ON node_identity(singleton);
 CREATE INDEX idx_renditions_dataset ON dataset_renditions(dataset_id);
