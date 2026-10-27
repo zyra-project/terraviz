@@ -12,10 +12,13 @@
  *
  * Admin-only, and a 404 unless `FEDERATION_ENABLED` is `'true'`, by
  * the same gate as `peers.ts`. 404 `peer_not_found` for an unknown
- * peer, 409 `peer_not_active` for one that is paused or blocked. A
- * pull that fails still answers 200: the request succeeded, the peer
- * did not, and the result names why (the same code is stored as the
- * peer's `last_sync_error`).
+ * peer, 409 `peer_not_active` for one that is paused or blocked, 409
+ * `sync_in_progress` while another pull of the same peer holds its
+ * lease. A pull that fails because of the peer still answers 200: the
+ * request succeeded, the peer did not, and the result names why (the
+ * same code is stored as the peer's `last_sync_error`). A failure of
+ * this node's own store answers 500 `sync_failed`, after an audit row
+ * recording `store-error`.
  */
 
 import type { CatalogEnv } from '../../_lib/env'
@@ -62,32 +65,49 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
     return jsonError(409, 'peer_not_active', `This peer is ${peer.status}; it is not pulled.`)
   }
 
-  const result = await pullPeer(
-    peer,
-    {
-      fetch: (input, init) => fetch(input, init),
-      store: d1FederationMirrorStore(db),
-      now: () => Date.now(),
-      newRunId: () => newUlid(),
-    },
-    { full: input.full === true },
-  )
+  const audit = (metadata: Record<string, unknown>) =>
+    writeAuditEvent(db, {
+      actor_kind: 'publisher',
+      actor_id: publisher.id,
+      action: 'federation_peer.sync',
+      subject_kind: 'peer',
+      subject_id: peerId,
+      metadata_json: JSON.stringify(metadata),
+    })
 
-  await writeAuditEvent(db, {
-    actor_kind: 'publisher',
-    actor_id: publisher.id,
-    action: 'federation_peer.sync',
-    subject_kind: 'peer',
-    subject_id: peerId,
-    metadata_json: JSON.stringify({
-      ok: result.ok,
-      ...(result.error ? { error: result.error } : {}),
-      full: result.full,
-      complete: result.complete,
-      upserted: result.upserted,
-      tombstoned: result.tombstoned,
-      reconciled: result.reconciled,
-    }),
+  let result
+  try {
+    result = await pullPeer(
+      peer,
+      {
+        fetch: (input, init) => fetch(input, init),
+        store: d1FederationMirrorStore(db),
+        now: () => Date.now(),
+        newRunId: () => newUlid(),
+      },
+      { full: input.full === true },
+    )
+  } catch (err) {
+    console.error('[federation/sync] store failure', peerId, err)
+    await audit({ ok: false, error: 'store-error' }).catch(() => {})
+    return jsonError(500, 'sync_failed', 'The pull failed on this node; see the logs.')
+  }
+  if (result.error === 'sync-in-progress') {
+    return jsonError(409, 'sync_in_progress', 'Another pull of this peer is running.')
+  }
+  if (result.error === 'peer-not-active') {
+    return jsonError(409, 'peer_not_active', 'This peer is no longer active; it is not pulled.')
+  }
+
+  await audit({
+    ok: result.ok,
+    ...(result.error ? { error: result.error } : {}),
+    full: result.full,
+    complete: result.complete,
+    upserted: result.upserted,
+    tombstoned: result.tombstoned,
+    reconciled: result.reconciled,
+    reconcile_pending: result.reconcilePending,
   })
   return json(200, { result })
 }

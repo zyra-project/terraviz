@@ -27,6 +27,23 @@
 -- across pulls so a full sync larger than one pull's caps still
 -- reconciles when it finishes.
 --
+-- A finished full sync does not delete anything on the spot. The feed
+-- holds back rows changed in its last 30 seconds, so a row edited
+-- while the full sync ran can be missing from it and still exist.
+-- `sweep_run` and `sweep_after` (epoch ms) record the finished run
+-- instead, and the rows it did not deliver are dropped by the first
+-- complete incremental pull that starts after `sweep_after`, whose
+-- feed window covers that settle period. Rows that pull delivers are
+-- stamped with `sweep_run` and so survive.
+--
+-- `sync_lease` and `sync_lease_until` (epoch ms) let one pull at a time
+-- write a peer's mirror. A pull takes the lease with a conditional
+-- UPDATE, and every write it makes checks that it still holds it, so a
+-- second pull, or one whose lease expired, writes nothing.
+--
+-- No scheduler exists yet, so there is no sync-interval column; it is
+-- an `ADD COLUMN` when one lands.
+--
 -- `federated_datasets` holds the peer's rows as the wire carried them.
 -- It is never joined with `datasets`: mirrored rows are the peer's
 -- statement, not this node's catalog. `feed_signature` is the
@@ -44,11 +61,14 @@ CREATE TABLE federation_peers (
   public_key            TEXT NOT NULL,
   status                TEXT NOT NULL DEFAULT 'active'
                         CHECK (status IN ('active', 'paused', 'blocked')),
-  sync_interval_minutes INTEGER NOT NULL DEFAULT 15,
   last_sync_at          TEXT,
   last_sync_cursor      TEXT,
   last_sync_error       TEXT,
   full_sync_run         TEXT,
+  sweep_run             TEXT,
+  sweep_after           INTEGER,
+  sync_lease            TEXT,
+  sync_lease_until      INTEGER,
   created_at            TEXT NOT NULL,
   updated_at            TEXT NOT NULL
 );
@@ -63,5 +83,3 @@ CREATE TABLE federated_datasets (
   fetched_at      TEXT NOT NULL,
   PRIMARY KEY (peer_id, remote_id)
 );
-
-CREATE INDEX idx_federated_datasets_seen ON federated_datasets(peer_id, seen_run);

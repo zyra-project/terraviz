@@ -108,11 +108,11 @@ async function peer(): Promise<FederationPeer> {
   return (await d1FederationPeerStore(db).getPeer(PEER_ID))!
 }
 
-function deps(fetchFn: typeof fetch): PullDeps {
+function deps(fetchFn: typeof fetch, nowMs = NOW_MS): PullDeps {
   return {
     fetch: fetchFn,
     store: d1FederationMirrorStore(db),
-    now: () => NOW_MS,
+    now: () => nowMs,
     newRunId: () => `run-${++runs}`,
   }
 }
@@ -139,7 +139,6 @@ describe('parsePeerBaseUrl', () => {
   it.each([
     ['https://peer.example.org', 'https://peer.example.org'],
     ['https://peer.example.org/', 'https://peer.example.org'],
-    ['https://peer.example.org:8443', 'https://peer.example.org:8443'],
     ['HTTPS://Peer.Example.org', 'https://peer.example.org'],
   ])('accepts %s', (raw, origin) => {
     expect(parsePeerBaseUrl(raw)).toBe(origin)
@@ -151,6 +150,7 @@ describe('parsePeerBaseUrl', () => {
     'https://peer.example.org/catalog',
     'https://peer.example.org/?x=1',
     'https://peer.example.org/#frag',
+    'https://peer.example.org:8443',
     'https://peer.example.org?',
     'https://localhost',
     'https://intranet',
@@ -172,7 +172,7 @@ describe('feedTarget', () => {
 })
 
 describe('pullPeer', () => {
-  it('runs a first pull as a full sync across pages and reconciles', async () => {
+  it('runs a first pull as a full sync across pages and schedules the sweep', async () => {
     await seedMirrored('gone', 'old-run')
     const { fetchFn, targets } = fakePeer(target => {
       if (!target.includes('since=')) {
@@ -183,7 +183,15 @@ describe('pullPeer', () => {
 
     const result = await pullPeer(await peer(), deps(fetchFn))
 
-    expect(result).toMatchObject({ ok: true, full: true, complete: true, pages: 2, upserted: 3, reconciled: 1 })
+    expect(result).toMatchObject({
+      ok: true,
+      full: true,
+      complete: true,
+      pages: 2,
+      upserted: 3,
+      reconciled: 0,
+      reconcilePending: true,
+    })
     expect(targets).toEqual([
       '/api/v1/federation/feed?limit=100',
       `/api/v1/federation/feed?since=${cursor(1)}&limit=100`,
@@ -192,10 +200,13 @@ describe('pullPeer', () => {
       { remote_id: 'a', origin_node: PEER_ID, seen_run: 'run-1' },
       { remote_id: 'b', origin_node: PEER_ID, seen_run: 'run-1' },
       { remote_id: 'c', origin_node: 'OTHERNODE', seen_run: 'run-1' },
+      { remote_id: 'gone', origin_node: PEER_ID, seen_run: 'old-run' },
     ])
     const p = await peer()
     expect(p.lastSyncCursor).toBe(cursor(2))
     expect(p.fullSyncRun).toBeNull()
+    expect(p.sweepRun).toBe('run-1')
+    expect(p.sweepAfterMs).toBeGreaterThan(NOW_MS)
     expect(p.lastSyncError).toBeNull()
     expect(p.lastSyncAt).toBe(new Date(NOW_MS).toISOString())
   })
@@ -229,12 +240,46 @@ describe('pullPeer', () => {
 
     const result = await pullPeer(await peer(), deps(fetchFn), { full: true })
 
-    expect(result).toMatchObject({ ok: true, full: true, reconciled: 1 })
+    expect(result).toMatchObject({ ok: true, full: true, reconciled: 0, reconcilePending: true })
     expect(targets).toEqual(['/api/v1/federation/feed?limit=100'])
-    expect((await mirrored()).map(r => r.remote_id)).toEqual(['a'])
+    expect((await mirrored()).map(r => r.remote_id)).toEqual(['a', 'gone'])
   })
 
-  it('carries a full sync cut short by the page cap into the next pull, then reconciles', async () => {
+  it('sweeps only on a complete incremental pull that starts after the settle window', async () => {
+    await seedMirrored('gone', 'old-run')
+    const { fetchFn } = fakePeer(target =>
+      target.includes('since=')
+        ? { body: page({ cursor: cursor(2), datasets: [ds('late')] }) }
+        : { body: page({ cursor: cursor(1), datasets: [ds('a')] }) },
+    )
+    await pullPeer(await peer(), deps(fetchFn))
+    const after = (await peer()).sweepAfterMs!
+
+    const early = await pullPeer(await peer(), deps(fetchFn, after - 1))
+    expect(early).toMatchObject({ ok: true, full: false, reconciled: 0, reconcilePending: true })
+    expect((await mirrored()).map(r => r.remote_id)).toContain('gone')
+
+    const settled = await pullPeer(await peer(), deps(fetchFn, after))
+    expect(settled).toMatchObject({ ok: true, full: false, reconciled: 1, reconcilePending: false })
+    expect((await mirrored()).map(r => r.remote_id)).toEqual(['a', 'late'])
+    expect((await peer()).sweepRun).toBeNull()
+  })
+
+  it('refuses to start while another pull holds the lease', async () => {
+    const store = d1FederationMirrorStore(db)
+    expect(await store.acquireLease(PEER_ID, 'other', NOW_MS, NOW_MS + 60_000)).not.toBeNull()
+    const { fetchFn, calls } = fakePeer(() => ({ body: page() }))
+    const result = await pullPeer(await peer(), deps(fetchFn))
+    expect(result).toMatchObject({ ok: false, error: 'sync-in-progress' })
+    expect(calls).not.toHaveBeenCalled()
+    expect(await mirrored()).toEqual([])
+
+    // An expired lease is taken over.
+    const later = await pullPeer(await peer(), deps(fetchFn, NOW_MS + 60_000))
+    expect(later.ok).toBe(true)
+  })
+
+  it('carries a full sync cut short by the page cap into the next pull', async () => {
     await seedMirrored('gone', 'old-run')
     let served = 0
     const { fetchFn } = fakePeer(() => {
@@ -251,10 +296,11 @@ describe('pullPeer', () => {
     expect((await mirrored()).map(r => r.remote_id)).toContain('gone')
 
     const second = await pullPeer(await peer(), deps(fetchFn), { maxPages: 2 })
-    expect(second).toMatchObject({ ok: true, full: true, complete: true, pages: 1, reconciled: 1 })
+    expect(second).toMatchObject({ ok: true, full: true, complete: true, pages: 1, reconcilePending: true })
     expect(runs).toBe(1)
-    expect((await mirrored()).map(r => r.remote_id)).toEqual(['d1', 'd2', 'd3'])
+    expect((await mirrored()).map(r => r.remote_id)).toEqual(['d1', 'd2', 'd3', 'gone'])
     expect((await peer()).fullSyncRun).toBeNull()
+    expect((await peer()).sweepRun).toBe('run-1')
   })
 
   it('keeps pages already applied when a later page fails, and does not reconcile', async () => {
@@ -305,7 +351,10 @@ describe('pullPeer', () => {
       expectRefused({ body: page({ schema_version: 2 }) }, 'unsupported-version'))
 
     it('with a malformed cursor', () =>
-      expectRefused({ body: page({ cursor: 'not-a-cursor' }) }, 'invalid-body'))
+      expectRefused({ body: page({ cursor: 'a b' }) }, 'invalid-body'))
+
+    it('with more rows than the page limit asked for', () =>
+      expectRefused({ body: page({ datasets: [ds('a'), ds('b'), ds('c')] }) }, 'invalid-body', { pageLimit: 2 }))
 
     it('with an id both upserted and tombstoned', () =>
       expectRefused({ body: page({ datasets: [ds('a')], tombstones: ['a'] }) }, 'invalid-body'))
@@ -354,8 +403,8 @@ describe('pullPeer', () => {
 
   it('refuses a peer record whose base URL or key is unusable', async () => {
     const { fetchFn, calls } = fakePeer(() => ({ body: page() }))
-    const bad = { ...(await peer()), publicKey: 'ed25519:short' }
-    const result = await pullPeer(bad, deps(fetchFn))
+    await db.prepare("UPDATE federation_peers SET public_key = 'ed25519:short' WHERE id = ?").bind(PEER_ID).run()
+    const result = await pullPeer(await peer(), deps(fetchFn))
     expect(result).toMatchObject({ ok: false, error: 'bad-peer' })
     expect(calls).not.toHaveBeenCalled()
   })

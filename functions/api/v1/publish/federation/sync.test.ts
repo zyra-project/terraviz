@@ -13,7 +13,7 @@ import { generateKeyPairSync } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { onRequestPost } from './sync'
 import { asD1, seedFixtures } from '../../_lib/test-helpers'
-import { d1FederationPeerStore } from '../../_lib/federation-mirror-d1'
+import { d1FederationMirrorStore, d1FederationPeerStore } from '../../_lib/federation-mirror-d1'
 import { encodeFeedCursor } from '../../_lib/federation-feed'
 import {
   SIGNATURE_HEADER,
@@ -164,7 +164,17 @@ describe('POST /api/v1/publish/federation/sync', () => {
       upserted: 2,
       tombstoned: 0,
       reconciled: 0,
+      reconcile_pending: true,
     })
+  })
+
+  it('answers 409 while another pull holds the lease', async () => {
+    const fn = serveFeed([])
+    await d1FederationMirrorStore(asD1(sqlite)).acquireLease(PEER_ID, 'other', Date.now(), Date.now() + 600_000)
+    const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID } }))
+    expect(res.status).toBe(409)
+    expect(await res.json()).toMatchObject({ error: 'sync_in_progress' })
+    expect(fn).not.toHaveBeenCalled()
   })
 
   it('answers 200 with the reason when the peer fails', async () => {

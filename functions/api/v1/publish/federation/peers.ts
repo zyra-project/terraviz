@@ -69,10 +69,10 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
       display_name: p.displayName,
       public_key: p.publicKey,
       status: p.status,
-      sync_interval_minutes: p.syncIntervalMinutes,
       last_sync_at: p.lastSyncAt,
       last_sync_error: p.lastSyncError,
       full_sync_in_progress: p.fullSyncRun !== null,
+      reconcile_pending: p.sweepRun !== null,
       mirrored_count: p.mirroredCount,
     })),
   })

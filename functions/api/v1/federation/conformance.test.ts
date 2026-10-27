@@ -25,7 +25,7 @@ import { asD1, makeCtx, seedFixtures } from '../_lib/test-helpers'
 import { d1FederationMirrorStore, d1FederationPeerStore } from '../_lib/federation-mirror-d1'
 import { pullPeer, type PullOptions } from '../_lib/federation-subscriber'
 
-const ORIGIN = 'https://test.local'
+const ORIGIN = 'https://publisher.example.org'
 const NOW = new Date('2026-02-01T00:00:00.000Z')
 
 function makeKeyPair() {
