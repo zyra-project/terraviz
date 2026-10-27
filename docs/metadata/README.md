@@ -1166,6 +1166,10 @@ cross-origin client checks, and the outstanding Pages CPU rollout gate.
 
 ### Phase 5: federation integration
 
+**Implementation:** [Phase 5 implementation](PHASE5_IMPLEMENTATION.md)
+records the signed public feed, the subscriber, and the STAC-to-native
+links, all behind `FEDERATION_ENABLED`.
+
 Use STAC as an interoperable discovery projection, not as an automatic
 replacement for the native signed federation protocol. Federation also needs
 signatures, cursors, tombstones, grants, peer identity, and revocation behavior
