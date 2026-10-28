@@ -1,0 +1,218 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright 2026 The Zyra Project */
+
+/**
+ * The exhibit's kiosk screen (src/ui/kioskUI.ts): one fixed 2048×1024
+ * stage, the size of the Second Life media face it is drawn on, laid out
+ * in CSS pixels and scaled to any other window by `fit()`. Sizes are
+ * therefore pixels, not rems: they are read from a few metres away on a
+ * screen in a virtual room, so they are large, and they must not move
+ * with a visitor's browser font setting, since a later step maps touches
+ * on the face to places on this stage.
+ *
+ * The look is STYLE_GUIDE.md's: the app's dark background, its blue for
+ * the one accent line and the labels, uppercase spaced titles, and
+ * tabular figures for the date.
+ */
+
+.kiosk-body-page {
+  margin: 0;
+  overflow: hidden;
+  background: var(--color-bg, #0d0d12);
+  color: var(--color-text, #e8eaf0);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* A fixed canvas, placed from its top-left corner by `fit()`'s translate
+   and scale, in either reading direction: the layout inside it follows
+   the page's direction, the canvas itself does not move. */
+.kiosk-stage {
+  position: absolute;
+  inset-block-start: 0;
+  left: 0; /* rtl-exempt: a fixed canvas, translated from the window's top-left corner by fit() */
+  transform-origin: 0 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  padding: 64px 88px 72px;
+  background: var(--color-bg, #0d0d12);
+}
+
+.kiosk-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-block-end: 20px;
+  margin-block-end: 44px;
+  border-block-end: 3px solid var(--color-accent, #4da6ff);
+}
+
+.kiosk-eyebrow,
+.kiosk-brand {
+  margin: 0;
+  font-weight: 300;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.kiosk-eyebrow {
+  font-size: 34px;
+  color: var(--color-accent, #4da6ff);
+}
+
+.kiosk-brand {
+  font-size: 30px;
+  color: var(--color-text-secondary, #bbbbbb);
+}
+
+.kiosk-body {
+  flex: 1;
+  min-block-size: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 620px;
+  gap: 80px;
+}
+
+.kiosk-main {
+  display: flex;
+  flex-direction: column;
+  min-block-size: 0;
+}
+
+.kiosk-title {
+  margin: 0 0 22px;
+  font-size: 76px;
+  font-weight: 500;
+  line-height: 1.08;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+/* Its height is reserved whether or not there is a date yet, so the
+   abstract, fitted to the space below, never moves when one arrives. */
+.kiosk-when {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: baseline;
+  gap: 28px;
+  min-block-size: 64px;
+  margin: 0 0 36px;
+}
+
+.kiosk-date {
+  font-size: 50px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.03em;
+}
+
+.kiosk-state {
+  padding: 6px 22px;
+  border: 2px solid var(--color-accent, #4da6ff);
+  border-radius: 999px;
+  font-size: 28px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-accent, #4da6ff);
+}
+
+/* The font size is set by kioskUI's fit: the largest that holds the
+   abstract, down to a floor below which it is cut with a fade. */
+.kiosk-abstract {
+  flex: 1;
+  min-block-size: 0;
+  overflow: hidden;
+  font-size: 34px;
+  line-height: 1.45;
+  color: var(--color-text-secondary, #bbbbbb);
+  white-space: pre-line;
+}
+
+.kiosk-abstract-cut {
+  -webkit-mask-image: linear-gradient(to bottom, #000 82%, transparent);
+  mask-image: linear-gradient(to bottom, #000 82%, transparent);
+}
+
+.kiosk-side {
+  display: flex;
+  flex-direction: column;
+  gap: 36px;
+  min-block-size: 0;
+}
+
+.kiosk-thumb {
+  inline-size: 100%;
+  max-block-size: 310px;
+  object-fit: contain;
+  border-radius: 12px;
+}
+
+.kiosk-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+}
+
+.kiosk-legend-image {
+  max-inline-size: 100%;
+  max-block-size: 220px;
+  object-fit: contain;
+  align-self: flex-start;
+}
+
+/* The app's colour bar, drawn as it is on the globe's panel, but laid
+   in the column rather than floating over a map. */
+.kiosk-legend .panel-colorbar {
+  position: static;
+  inline-size: 100%;
+  box-sizing: border-box;
+  gap: 12px;
+  /* Room at each end for half a tick label, centred on the bar's ends. */
+  padding: 20px 44px 14px;
+  border-radius: 12px;
+  font-size: 26px;
+  backdrop-filter: none;
+}
+
+.kiosk-legend .panel-colorbar-gradient {
+  block-size: 40px;
+  border-radius: 6px;
+}
+
+.kiosk-legend .panel-colorbar-axis {
+  block-size: 1.3em;
+}
+
+.kiosk-label {
+  display: block;
+  margin-block-end: 6px;
+  font-size: 22px;
+  font-weight: 400;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--color-accent, #4da6ff);
+}
+
+.kiosk-credit,
+.kiosk-license {
+  margin: 0;
+  font-size: 27px;
+  line-height: 1.35;
+  color: var(--color-text-secondary, #bbbbbb);
+  overflow-wrap: anywhere;
+}
+
+.kiosk-license {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  overflow: hidden;
+}

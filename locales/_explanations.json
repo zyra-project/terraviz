@@ -339,5 +339,11 @@
   "publisher.nodeProfile.embedding.live.notSent": "Shown in place of an HTTP header value when the node did not send that header.",
   "publisher.nodeProfile.embedding.presets.summary": "Heading of a collapsed note. Facebook and Claude are product names.",
   "publisher.nodeProfile.embedding.origins.max": "Shown under the Add a site button once the list is full. Preserve {max}, a number.",
-  "publisher.nodeProfile.embedding.error.tooMany": "Preserve {max}, a number."
+  "publisher.nodeProfile.embedding.error.tooMany": "Preserve {max}, a number.",
+  "kiosk.pageTitle": "The browser tab title of the exhibit kiosk screen, a page shown on a screen beside a globe in Second Life. Terraviz is the product name.",
+  "kiosk.earth.about": "Shown on the kiosk screen beside a globe in Second Life when the globe shows the live Earth. \"Touch\" is the name of the item in Second Life’s right-click menu; keep the viewer’s own word for it.",
+  "kiosk.earth.credit": "Names of NASA image products; usually left untranslated.",
+  "kiosk.when.playingAt": "{rate} is the playback speed as a number, for example 2 for twice the clip’s own speed or 0.5 for half. × means \"times\".",
+  "kiosk.when.span": "A span of dates, {start} and {end} each already formatted for the reader’s language.",
+  "kiosk.when.live": "Beside the current date and time, on the screen showing the live Earth, which is how the Earth looks right now."
 }

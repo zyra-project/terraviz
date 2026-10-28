@@ -957,4 +957,42 @@ export const scenes: Scene[] = [
       await page.locator('.publisher-empty').first().waitFor()
     },
   },
+  {
+    name: 'exhibit-kiosk',
+    description:
+      "The Second Life exhibit's kiosk screen (/output/kiosk): a data-encoded dataset paused on the globe's clock, with its colour bar",
+    // Paused, so the date is the same on every run; a playing clock or
+    // the live Earth would date the shot by when it was taken.
+    fixtures: [
+      {
+        url: /\/api\/exhibit\/v1\/datasets\/SMOKE$/,
+        json: {
+          id: 'SMOKE', page: '/dataset/smoke', kind: 'video', showable: true, title: 'Wildfire Smoke',
+          startTime: '2026-10-27T12:00:00Z', endTime: '2026-10-29T12:00:00Z', period: 'PT1H',
+          exactDuration: 96, retry: 0, credit: 'NOAA Global Systems Laboratory', license: 'CC0-1.0',
+          licenseText: '', abstract: '', truncated: false,
+        },
+      },
+      {
+        url: /\/api\/v1\/datasets\/SMOKE$/,
+        json: {
+          id: 'SMOKE',
+          title: 'Wildfire Smoke Forecast, United States',
+          abstractTxt:
+            'Smoke from wildfires carries fine particles far from the fires themselves. This forecast shows the near-surface concentration of fine particulate matter from wildfire smoke across the contiguous United States, hour by hour for the next two days.',
+          thumbnailLink: '/assets/basemaps/earth_diffuse_2048.jpg',
+          renderEncoding: 'data-luma',
+          colorScale: {
+            stops: [{ t: 0, rgba: [255, 255, 229, 0] }, { t: 0.3, rgba: [254, 196, 79, 200] }, { t: 1, rgba: [102, 37, 6, 255] }],
+            vmin: 0, vmax: 2e-7, units: 'kg m-3', transparentRange: 12 / 256,
+          },
+        },
+      },
+    ],
+    requiresFixtures: true,
+    async setup(page) {
+      await gotoApp(page, '/output/kiosk.html#dataset=SMOKE&t=40&paused=1')
+      await page.locator('.kiosk-stage[data-view="dataset"] .panel-colorbar').waitFor()
+    },
+  },
 ]
