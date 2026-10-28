@@ -6,8 +6,9 @@
  * uploader: four levels of detail and a physics shape per piece, into
  * `dae/` beside this script.
  *
- *   npx tsx scripts/second-life-exhibit/mesh/build-meshes.ts          write
- *   npx tsx scripts/second-life-exhibit/mesh/build-meshes.ts --check  compare
+ *   npx tsx scripts/second-life-exhibit/mesh/build-meshes.ts            write
+ *   npx tsx scripts/second-life-exhibit/mesh/build-meshes.ts --check    compare
+ *   npx tsx scripts/second-life-exhibit/mesh/build-meshes.ts --weights  estimate land impact
  *
  * The files are committed so an owner can download and upload them
  * without a toolchain; `--check` (and `mesh.test.ts`) fail when they no
@@ -18,6 +19,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { toCollada, type MaterialColors } from './collada'
 import { LOD_NAMES, pieces } from './pieces'
+import { CALIBRATION, downloadWeight } from './weights'
 
 export const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), 'dae')
 
@@ -45,7 +47,20 @@ export function buildFiles(): Map<string, string> {
   return files
 }
 
+/** Each piece's estimated land impact, and how much of it each level is. */
+function printWeights(): void {
+  for (const p of pieces()) {
+    const e = downloadWeight(p.lods)
+    const levels = e.byLevel.map((w, i) => `${LOD_NAMES[i]} ${(w * CALIBRATION).toFixed(2)}`).join(', ')
+    console.log(`${p.name}: about ${(e.weight * CALIBRATION).toFixed(1)} (${levels})`)
+  }
+}
+
 function main(): void {
+  if (process.argv.includes('--weights')) {
+    printWeights()
+    return
+  }
   const check = process.argv.includes('--check')
   const files = buildFiles()
   if (check) {

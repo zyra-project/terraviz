@@ -9,12 +9,15 @@ first batch: the exhibit globe's stand and the console. The console
 script that makes the buttons work comes later (Phase 5, steps 3–4),
 so for now the console is furniture.
 
-| Piece | What it is | Size, m (X × Y × Z) | Faces | Triangles, high to lowest |
-|---|---|---|---|---|
-| `terraviz-plinth` | The disc the globe's stand sits on, with an inlaid accent ring | 4.200 × 4.200 × 0.070 | 0 body, 1 accent | 1920 / 768 / 288 / 144 |
-| `terraviz-stem` | The stand for a 3 m globe: a lathed stem flaring into a shallow cup, an accent line at its rim | 1.000 × 1.000 × 0.983 | 0 body, 1 accent | 2880 / 1344 / 512 / 176 |
-| `terraviz-console` | Base, flared blade, and a top panel tilted 22° toward the visitor on its +X side | 0.584 × 1.240 × 1.132 | 0 body, 1 panel, 2 accent | 2216 / 856 / 304 / 200 |
-| `terraviz-key` | One console button: a cap for its icon and a ring that lights when pressed | 0.074 × 0.074 × 0.024 | 0 body, 1 cap, 2 ring | 320 / 192 / 96 / 64 |
+| Piece | What it is | Size, m (X × Y × Z) | Faces | Triangles, high to lowest | Land impact |
+|---|---|---|---|---|---|
+| `terraviz-plinth` | The disc the globe's stand sits on, with an inlaid accent ring | 4.200 × 4.200 × 0.070 | 0 body, 1 accent | 1920 / 384 / 128 / 64 | about 3 |
+| `terraviz-stem` | The stand for a 3 m globe: a lathed stem flaring into a shallow cup, an accent line at its rim | 1.000 × 1.000 × 0.983 | 0 body, 1 accent | 2880 / 1344 / 512 / 96 | about 3 |
+| `terraviz-console` | Base, flared blade, and a top panel tilted 22° toward the visitor on its +X side | 0.584 × 1.240 × 1.132 | 0 body, 1 panel, 2 accent | 2216 / 856 / 304 / 52 | about 2 |
+| `terraviz-key` | One console button: a cap for its icon and a ring that lights when pressed | 0.074 × 0.074 × 0.024 | 0 body, 1 cap, 2 ring | 320 / 192 / 96 / 32 | about 0.6, 1 alone |
+
+The land impacts are estimates (see "Land impact" below); the uploader's
+figure is the real one.
 
 The face numbers are the ones you see in-world (in the build tool,
 *Select Face*). Second Life numbers a mesh's faces by sorting their
@@ -36,7 +39,10 @@ In Firestorm or the Second Life viewer: **Build → Upload → Model**.
    pick `terraviz-<piece>-high.dae`. Do the same for **Medium**, **Low**
    and **Lowest** with their files. Don't let the viewer generate them:
    it thins out a thin shape like the stem's column until it vanishes
-   at a distance.
+   at a distance. **Check each slot's triangle count against the table
+   above**: a file in the wrong slot still gets a green tick. The
+   plinth's first upload had the stem's Low file in its Low slot, which
+   only the count (512, not the plinth's own) gave away.
    The uploader stretches every level to fill the high level's
    bounding box, so each file here has that same box; one that came
    out a few millimetres smaller would be drawn a few millimetres
@@ -48,8 +54,8 @@ In Firestorm or the Second Life viewer: **Build → Upload → Model**.
    uploader stretches it to that box anyway.
 3. **Upload options tab.** Scale 1. Leave *Include textures* off;
    the dress script paints the pieces.
-4. **Calculate weights & fee**, check the land impact it reports, and
-   upload. The model's name becomes the object's name; keep it
+4. **Calculate weights & fee**, check the land impact it reports
+   against the table, and upload. The model's name becomes the object's name; keep it
    starting `terraviz-<piece>` until it is dressed.
 
 ## Placing them
@@ -91,6 +97,49 @@ Nothing glows at rest. Full bright keeps the accent the same blue in
 any light, the way the app's one-pixel border is; glow is kept for
 what is live or pressed.
 
+## Land impact
+
+Second Life charges a piece's land impact by its download weight, the
+larger of that and its physics and server weights, which are smaller
+for all of these. It weighs each level of detail by its compressed size
+and by how much of a region sees that level, and a level gives way at a
+distance in proportion to the piece's size. So a small piece pays
+almost entirely for its **lowest** level: a key's lowest shows from
+about 2 m away, the stem's and the console's from about 25 m. The
+plinth, 4.2 m across, pays for its medium, low and lowest levels.
+
+The first uploads, on 28 October 2026, came to:
+
+| Piece | Uploaded | Rebuilt |
+|---|---|---|
+| plinth | 8, with the stem's Low file in its Low slot by mistake | about 3 |
+| stem | 6 | about 3 |
+| console | 6 | about 2 |
+| key | 1 each (about 1.4 before rounding, by the estimate) | about 0.6 |
+
+The rebuilt lower levels are as plain as the distance they are seen
+from allows: square edges on the plinth from 50 m, a simpler outline
+and a square accent ring on the stem from 25 m, a plain panel on the
+console from 25 m (sized to the rounded panel's extents, so the
+bounding box doesn't move), and a four-sided key from 2 m, where a key
+is a few pixels across. Up close nothing changed.
+
+**Linking adds before it rounds**, as residents report it (Second
+Life's own pages describe single objects only): a linked set's download,
+physics and server weights are each summed across its prims, and the
+largest is rounded once. Fifteen keys at about 1.4 each, by the
+estimate, showed 1 apiece on their own but would have come to about 21
+linked into the console; at about 0.6 they come to about 9. Linking
+them is when to check.
+
+`build-meshes.ts --weights` prints each piece's estimate, level by
+level, from [`weights.ts`](weights.ts): Second Life's own arithmetic,
+scaled by the 28 October readings, which came in at 0.76 to 0.87 of it
+(Linden Lab has since cut every mesh's download weight by 15%, and the
+uploader packs each face more tightly than the estimate does). A
+re-upload is a new asset: dress the new pieces, put them where the old
+ones were, and delete the old ones.
+
 ## Changing a piece
 
 Edit [`pieces.ts`](pieces.ts) (or the builders in
@@ -110,7 +159,8 @@ npx tsx scripts/second-life-exhibit/mesh/build-meshes.ts
   which side is out, or a closed shell faces inward;
 - the console's blade no longer reaches up into its panel;
 - the dress script's face table falls out of step with the pieces, or
-  it lights anything at rest.
+  it lights anything at rest;
+- a piece's estimated land impact goes over its budget.
 
 `build-meshes.ts --check` runs the first of those on its own.
 
@@ -130,6 +180,6 @@ hair above the other, which flickers from far off.
 - **The rest of Phase 5's furniture**: the kiosk screen, the pilot's
   seat, the ring console for inside the big sphere, Orbit's body, and
   the rotunda, field and 25 m sphere.
-- **In-world checks**: these have been built and loaded back through
-  three.js's COLLADA loader, not yet uploaded. Their land impact is
-  §10 question 22.
+- **In-world checks** of the rebuilt levels: the uploader took the
+  first build on 28 October 2026 (§10 question 22, "Land impact" above),
+  and the thinner levels are estimates until they are uploaded.

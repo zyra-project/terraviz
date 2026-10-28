@@ -2957,6 +2957,17 @@ the phase works.
 22. **What do the rotunda, the field and the 25 m sphere cost in land
     impact**, and does a sphere whose centre is 23 m up fit the
     parcel's budget? Measured on upload, not estimated.
+    *First readings, 28 October 2026, from the first furniture, not the
+    building:* the uploader took all four pieces, at land impact 8
+    (the plinth, with the stem's Low file in its Low slot by mistake),
+    6 (the stem), 6 (the console) and 1 (each key). Nearly all of it
+    was the lowest levels, which a metre-sized piece shows from about
+    25 m and a key from about 2 m. Rebuilt with plainer lower levels,
+    they estimate at about 3, 3, 2 and 0.6, and fifteen keys linked
+    into the console at about 9 rather than 21
+    (`scripts/second-life-exhibit/mesh/README.md`, "Land impact"). The
+    lesson for the building: a piece's lowest level sets its cost, and
+    `build-meshes.ts --weights` estimates it before an upload.
 
 ---
 

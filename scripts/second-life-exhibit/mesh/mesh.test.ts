@@ -8,6 +8,7 @@ import { buildFiles, OUT_DIR } from './build-meshes'
 import { faceName, toCollada } from './collada'
 import { bounds, filletOutline, lathe, roundedBox, smoothRun, triangleCount, type Part } from './geometry'
 import { BLADE, GLOBE, KEY, KEY_LAYOUT, LOD_NAMES, PANEL, pieces } from './pieces'
+import { downloadWeight, estimatedLandImpact, levelBytes } from './weights'
 
 const DRESS = readFileSync(join(__dirname, 'terraviz-dress.lsl'), 'utf8')
 
@@ -187,6 +188,39 @@ describe('mesh pieces', () => {
       expect(Math.hypot(a.x - b.x, a.y - b.y), `${a.id} / ${b.id}`).toBeGreaterThan(ra + rb + 0.01)
     }
     expect(new Set(KEY_LAYOUT.map(k => k.id)).size).toBe(KEY_LAYOUT.length)
+  })
+})
+
+describe('land impact', () => {
+  // Estimates (weights.ts), calibrated against the pieces uploaded on 28
+  // October 2026, which came in at 6, 8, 6 and 1 before their lower
+  // levels were thinned. A budget broken here is a level grown heavier
+  // than the distance it is seen from needs.
+  const BUDGET: Record<string, number> = { 'terraviz-stem': 3.5, 'terraviz-plinth': 3.5, 'terraviz-console': 2, 'terraviz-key': 0.75 }
+
+  it('keeps each piece within its budget', () => {
+    for (const p of pieces()) {
+      expect(BUDGET[p.name], p.name).toBeDefined()
+      expect(estimatedLandImpact(p.lods), p.name).toBeLessThanOrEqual(BUDGET[p.name])
+    }
+  })
+
+  it('charges a small piece for its lowest level, and a large one for its lower levels', () => {
+    const [stem, plinth, , key] = pieces()
+    const share = (p: typeof key, i: number) => { const e = downloadWeight(p.lods); return e.byLevel[i] / e.weight }
+    // A key's lowest shows from about 2 m away, the stem's from 25 m.
+    expect(share(key, 3)).toBeGreaterThan(0.99)
+    expect(share(stem, 3)).toBeGreaterThan(0.75)
+    // The plinth's medium and low levels show out to 100 m.
+    expect(share(plinth, 3)).toBeLessThan(0.5)
+  })
+
+  it('counts a level by its compressed size, so more triangles cost more', () => {
+    const [stem] = pieces()
+    expect(levelBytes(stem.lods[0])).toBeGreaterThan(levelBytes(stem.lods[3]))
+    // A heavier lowest costs more, all else the same.
+    const heavier = downloadWeight([stem.lods[0], stem.lods[1], stem.lods[2], stem.lods[1]]).weight
+    expect(heavier).toBeGreaterThan(downloadWeight(stem.lods).weight)
   })
 })
 
