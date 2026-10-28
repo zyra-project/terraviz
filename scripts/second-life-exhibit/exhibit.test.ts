@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { serializeDataset } from '../../functions/api/v1/_lib/dataset-serializer'
 import {
+  buildCard,
   CARD_ABSTRACT_CHARS,
   CARD_BUDGET,
   CARD_SKELETON,
@@ -26,6 +27,7 @@ import { onRequestGet as getTags } from '../../functions/api/exhibit/v1/tags'
 import { freshMigratedDb } from '../lib/catalog-migrations'
 import { readWebSettings } from '../../src/output/webMode'
 import { KIOSK_STAGE } from '../../src/ui/kioskUI'
+import { kioskDatasetFrom } from '../../src/output/kioskModel'
 
 // LSL compiles only in-world, so nothing here runs the scripts. What the
 // globe script writes into the page's address is held to the page by
@@ -1525,23 +1527,6 @@ describe("the exhibit's kiosk screen", () => {
     expect(read('../../vite.config.ts')).toContain("kiosk: path.resolve(__dirname, 'src/output/kiosk.html')")
   })
 
-  it("composes addresses the kiosk page reads as the globe's clock", () => {
-    // What the page reads from each: the same clock the globe's page
-    // reads from the globe's address in the same state.
-    const globeClock = (live: string) => readWebSettings('?fit=fill', `#${live}&width=2048&rotation=90`).clock
-    for (const live of [
-      `dataset=${ID}&t=61.2&at=1792865189.482&rate=2`,
-      `dataset=${ID}&t=61.2&at=1792865189.007`,
-      `dataset=${ID}&t=30.5&paused=1`,
-    ]) {
-      const read = readWebSettings('', `#${live}`)
-      expect(read.datasetId, live).toBe(ID)
-      expect(read.clock, live).toEqual(globeClock(live))
-    }
-    expect(readWebSettings('', `#dataset=${ID}&t=30.5&paused=1`).clock)
-      .toEqual({ positionS: 30.5, atUnixS: null, rate: 1, paused: true })
-  })
-
   it('gives no one the media to click, at the size the page draws', () => {
     const media = body(kiosk, 'show()')
     const sent = media.match(/list p = \[([\s\S]*?)\];/)?.[1] ?? ''
@@ -1592,6 +1577,38 @@ describe("the exhibit's kiosk screen", () => {
     const preview = `https://${'a'.repeat(28)}.terraviz.pages.dev`
     const kept = `Counts anonymous use: ${preview}/privacy\n${string('TALK_LINE')}\n${string('TOUCH_LINE')}`
     expect(bytes(kept)).toBeLessThanOrEqual(254)
+  })
+
+  it("reads the node's own card and record, as the producers write them", () => {
+    // Built by the node's code, so a field renamed on either side fails here.
+    const row = fullRow()
+    const card = buildCard({ row, kind: 'video', showable: true, tags: [] } as Parameters<typeof buildCard>[0], { seconds: 96.5, settled: true })
+    const wire = serializeDataset(
+      row,
+      { tags: [], categories: [], keywords: [], developers: [], related: [] },
+      { node_id: 'N', display_name: 'N', base_url: 'https://n.example', description: null, contact_email: null, public_key: 'k', created_at: T },
+    )
+    const json = (v: unknown) => JSON.parse(JSON.stringify(v)) as Record<string, unknown>
+    const ds = kioskDatasetFrom(json(card), json(wire), 'https://n.example/')
+    expect(ds).toMatchObject({
+      id: row.id,
+      title: row.title,
+      abstract: [row.abstract],
+      license: 'CC-BY-4.0',
+      kind: 'video',
+      period: 'P1D',
+      lengthS: 96.5,
+    })
+    // The row is data-encoded, so its legend is its colour scale, parsed.
+    expect(ds.legend?.kind).toBe('scale')
+    expect(ds.thumbnail).toMatch(/^https:\/\//)
+    expect(ds.credit).toBe(card.credit)
+    expect(ds.credit).not.toBe('')
+    expect(ds.startTime?.toISOString()).toBe('2024-06-01T12:00:00.000Z')
+    expect(ds.endTime?.toISOString()).toBe('2024-11-30T12:00:00.000Z')
+    // A dataset the card says the globe can't show is refused.
+    const tour = buildCard({ row, kind: 'tour', showable: false, tags: [] } as Parameters<typeof buildCard>[0], { seconds: 0, settled: true })
+    expect(() => kioskDatasetFrom(json(tour), json(wire), 'https://n.example/')).toThrow(/can't show/)
   })
 
   it('answers on a number of its own, never a retired one', () => {

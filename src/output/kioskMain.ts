@@ -28,13 +28,16 @@ import { readWebSettings } from './webMode'
 const KIOSK_TICK_MS = 250
 
 async function boot(): Promise<void> {
-  await bootstrapI18n()
+  // A screen in English beats a blank one, if the language fails to load.
+  await bootstrapI18n().catch((err: unknown) => logger.warn('[kiosk] languages did not load', err))
   const root = document.getElementById('kiosk')
   if (!root) return
   const screen = mountKiosk(root)
+  // A path in a record is the node's, not this page's.
+  const base = new URL('/', window.location.href).href
   const page = createKioskPage({
     screen,
-    fetchDataset: (id) => fetchKioskDataset(id, { base: window.location.href }),
+    fetchDataset: (id) => fetchKioskDataset(id, { base }),
     log: (message) => logger.warn(message),
   })
   // Listening first, then reading: a `#` change in between is read

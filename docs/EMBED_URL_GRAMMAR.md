@@ -298,14 +298,20 @@ URL of its own:
 https://<terraviz-node>/output/kiosk#<params>
 ```
 
-The path is exactly `/output/kiosk`. It draws a fixed 2048×1024 page
-of text and pictures: the dataset's title, the date the globe shows and
-whether it is playing, its full abstract, its thumbnail, its legend
-(the dataset's legend image, or for a data-encoded dataset its colour
-bar), and its credit and licence. In a window of another shape the
-page is scaled to fit and centred. It is display only: nothing on it
-can be clicked. It plays no video, runs no WebGL and reports no
-telemetry.
+The path is exactly `/output/kiosk`. It shows the dataset's title, the
+date the globe shows and whether it is playing, its full abstract as
+plain text, its thumbnail, its legend (the dataset's legend image, or
+for a data-encoded dataset its colour bar), and its credit and licence.
+In a window at least 2048×1024, the largest media face Second Life
+gives and the one the exhibit's kiosk script asks for, it is a fixed
+page of that size, scaled to fit and centred; in a smaller window, an
+ordinary browser, it is a page that reflows and scrolls. Layout is not
+part of this contract. It is display only: nothing on it can be
+clicked. It plays no video, runs no WebGL and reports no telemetry.
+A node older than this page has no `/output/kiosk`, and a path the site
+doesn't recognise serves the main app, which reports Essential
+telemetry by default; check the node serves the kiosk before putting
+its address on a screen.
 
 **It reads the output page's keys, through the output page's own
 reader**, so a kiosk and a globe given the same keys can't read them
@@ -314,32 +320,56 @@ so a composer may hand it the globe's own fragment:
 
 | Parameter | Effect on the kiosk |
 |---|---|
-| `dataset` | The dataset to describe, read from the node (below). Absent, or an empty `dataset=`, is the live Earth, dated now. The empty form lets a composer keep a `#` in the address on the live Earth. |
-| `t`, `at`, `rate`, `paused` | The globe's clock, exactly as the output page reads it, defaults included. The kiosk shows the date the globe is at: where the clip is, placed on the dataset's span at the cadence its frames step, the same instant and cadence the main app's time label would show. |
+| `dataset` | The dataset to describe, read from the node (below). Absent, an empty `dataset=`, or a value the output page would refuse is the live Earth, dated now, as it is on the globe. The empty form lets a composer keep a `#` in the address on the live Earth. |
+| `t`, `at`, `rate`, `paused` | The globe's clock, exactly as the output page reads it, defaults included. The kiosk shows the date the globe is at: where the clip is, placed on the dataset's span at the cadence its frames step, the instant the main app's time label would show. |
 
+- **Give the kiosk the globe's `at`.** With it, both pages count from the
+  same moment and show the same date. Without it, each page counts from
+  when it read its address, and two pages loaded a second apart are a
+  second apart for good, which on a fast clip is hours of the dataset.
+  The exhibit's scripts always write `at` while a clip plays.
 - **The date is in UTC**, unlike the main app's time label, which uses
   the viewer's zone. Every visitor at a screen runs their own copy, and
-  a presenter pointing at "12:00" needs every copy to say the same. The
-  time of day is shown only for a dataset whose frames step faster than
-  a day.
+  a presenter pointing at "12:00" needs every copy to say the same. It
+  follows the app's rules for when there is a date and when it has a
+  time of day: a video is dated only when the dataset gives both ends
+  of its span, with the time when its stated period is under a day (or,
+  with no period, when its frames step faster than one); a picture shows
+  its date, with the time only when its period is under a day, and
+  where it gives a second date the kiosk shows the span, where the app
+  shows the first. While a clip plays too fast for its date to be read,
+  the kiosk writes a coarser one, the day, the month or the year, so it
+  changes at most about once a second; paused, it is exact.
 - **The clip's length is the node's.** The kiosk plays no video, so it
   takes the length the globe's copies loop on from the node's exhibit
   card (`/api/exhibit/v1/datasets/:id`, its `exactDuration`). While the
-  node can't give one yet, the kiosk shows the dataset's whole span
-  rather than a date from a guessed length, and asks again when the
-  card says to. A picture shows its date, or its span.
-- **What it reads:** the exhibit card, for the length, credit and
-  licence, and the record (`GET /api/v1/datasets/:id`), for the title,
-  full abstract, thumbnail, legend and colour scale. A read that fails
-  is retried after 5 s, 30 s and 2 minutes, then every 5 minutes, while
-  the address still asks for that dataset, except when the node says it
-  has no such dataset. A read that lands after the address moved on is
-  dropped.
+  node is still reading it from the stream's playlists, the kiosk shows
+  the dataset's whole span rather than a date from a guessed length,
+  and reads the card again when it says to, four times at its interval
+  and then every 5 minutes for as long as the dataset is shown. For a
+  video the node has no playlist for, a single file, the card never
+  gives a length, so the kiosk shows the span for as long as it is up.
+- **It describes only what the globe can show.** A dataset the card
+  says the globe can't show (`showable: false`: a tour, or a format the
+  output page doesn't draw) is the live Earth on the kiosk, as on the
+  globe. One the node hasn't got says so, and is not asked for again.
+- **What it reads:** the exhibit card, for the length, whether the
+  globe can show it, the credit and the licence, and the record
+  (`GET /api/v1/datasets/:id`), for the title, full abstract, thumbnail,
+  legend and colour scale. Any other read that fails is retried after
+  5 s, 30 s and 2 minutes, then every 5 minutes, while the address still
+  asks for that dataset. A read that lands after the address moved on
+  is dropped, a failure included.
 - **The query and the fragment are one parameter set**, as on the
   output page: keep a `#` for the whole session, so a change never
   reloads the page.
-- **Labels follow the viewer's browser language**; the dataset's own
-  text is as the node holds it.
+- **Labels are in the viewer's language** where the app has a
+  translation, as the main app chooses it: a language chosen in the
+  main app on the same site, then a `lang` in the query, then the
+  browser's. `lang` is the app's own switch rather than a key of this
+  page, and read only before the `#`, so in Second Life it would set the
+  language for every visitor at the screen; the exhibit's scripts write
+  none. The dataset's own text is as the node holds it.
 
 ```text
 # The live Earth

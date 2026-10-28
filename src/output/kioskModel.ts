@@ -8,21 +8,32 @@
  *
  * Two reads, because each has what the other lacks. The exhibit card
  * (`/api/exhibit/v1/datasets/:id`) has the clip's exact length, which is
- * the period every copy of the globe loops on, and the credit and licence
- * the node composes for the in-world scripts. The record
- * (`/api/v1/datasets/:id`) has the full abstract, the thumbnail, the
- * legend and the colour scale, which a 2 KB card cuts or leaves out.
+ * the period every copy of the globe loops on, whether the globe can show
+ * the dataset at all, and the credit and licence the node composes for
+ * the in-world scripts. The record (`/api/v1/datasets/:id`) has the full
+ * abstract, the thumbnail, the legend and the colour scale, which a 2 KB
+ * card cuts or leaves out.
  *
- * The date is the app's own: `clockTargetS` places the clip where the
- * globe's address says, as the globe page does, and `videoTimeToDate`
- * and `inferDisplayInterval` turn that into the instant and the cadence
- * the control window's time label would show. It is written in UTC,
- * unlike the app's label, which uses the viewer's zone: every visitor at
- * the screen runs their own copy, and a presenter pointing at "12:00"
- * needs every copy to say the same thing.
+ * The abstract is made plain text here (`plainParagraphs`): the node's
+ * SOS abstracts are HTML and the portal's Markdown, and the screen is
+ * read, never clicked, so links and markup have nothing to do on it.
+ *
+ * The date follows the app's time label: `clockTargetS` places the clip
+ * where the globe's address says, as the globe page does, and
+ * `videoTimeToDate` and `inferDisplayInterval` turn that into the instant
+ * and the cadence the control window's label would show, with its rules
+ * for when there is a date at all and when it has a time. Three choices
+ * are the kiosk's own. It is written in UTC, unlike the app's label,
+ * which uses the viewer's zone: every visitor at the screen runs their own
+ * copy, and a presenter pointing at "12:00" needs every copy to say the
+ * same thing. A picture with a start and an end shows the span where the
+ * app shows the start, since a picture of a decade's average is not a
+ * picture of its first day. And while a clip plays too fast for its date
+ * to be read, the date is shown coarser (`dateDetail`), down to the month
+ * or the year, so it changes at most about once a second rather than
+ * flickering several times a second over a frame nobody can read.
  */
-import { t } from '../i18n'
-import { formatDate } from '../i18n/format'
+import { formatDate, formatDateRange } from '../i18n/format'
 import { RENDER_ENCODING_DATA_LUMA, parseColorScale } from '../types/color-scale'
 import { toDisplayUnits, type DisplayColorScale } from '../types/unit-scale'
 import { inferDisplayInterval, isSubDailyPeriod, videoTimeToDate } from '../utils/time'
@@ -31,8 +42,9 @@ import type { WebClock } from './webMode'
 
 type FetchFn = (url: string, init?: RequestInit) => Promise<Response>
 
-/** Why a dataset could not be read: as `webDataset` says it. */
-export type KioskFailure = 'not_found' | 'bad_response' | 'http' | 'network'
+/** Why a dataset could not be shown: as `webDataset` says it, with
+ *  `not_playable` for one the node says the globe can't show. */
+export type KioskFailure = 'not_found' | 'not_playable' | 'bad_response' | 'http' | 'network'
 
 export class KioskDataError extends Error {
   constructor(
@@ -51,9 +63,8 @@ export type KioskLegend = { kind: 'image'; url: string } | { kind: 'scale'; scal
 export interface KioskDataset {
   id: string
   title: string
-  /** The full abstract, as plain text: the app's info panel shows it the
-   *  same way. */
-  abstract: string
+  /** The full abstract, as plain paragraphs. */
+  abstract: string[]
   thumbnail: string | null
   legend: KioskLegend | null
   /** Who to credit, as the node composed it for the exhibit. */
@@ -106,16 +117,105 @@ export function imageAddress(value: unknown, base: string): string | null {
   }
 }
 
+/** Elements that end a paragraph of an HTML abstract. */
+const BLOCKS = new Set([
+  'ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'BR', 'DD', 'DIV', 'DL', 'DT', 'FIGCAPTION', 'FIGURE', 'FOOTER',
+  'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'HEADER', 'HR', 'LI', 'OL', 'P', 'PRE', 'SECTION', 'TABLE', 'TR', 'UL',
+])
+
+/** A paragraph break in the text an HTML walk builds. */
+const BREAK = '\u0000'
+
+/** The text of an HTML abstract, parsed into an inert document: nothing
+ *  in it runs or loads. */
+function htmlText(source: string): string {
+  const doc = new DOMParser().parseFromString(source, 'text/html')
+  const out: string[] = []
+  const walk = (node: Node): void => {
+    for (const child of Array.from(node.childNodes)) {
+      if (child.nodeType === 3) out.push((child.textContent ?? '').replace(/\s+/g, ' '))
+      else if (child.nodeType === 1) {
+        const tag = (child as Element).tagName
+        if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'TEMPLATE') continue
+        const block = BLOCKS.has(tag)
+        if (block) out.push(BREAK)
+        walk(child)
+        if (block) out.push(BREAK)
+      }
+    }
+  }
+  walk(doc.body)
+  return out.join('')
+}
+
+/** What Markdown marks up, taken off, keeping the words: a link's text,
+ *  emphasis, code, a heading's or a quote's marker. An image goes, since
+ *  its text is usually a file name. */
+function markdownText(line: string): string {
+  return line
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/(\*\*|__)(\S(?:.*?\S)?)\1/g, '$2')
+    .replace(/(^|[\s(])[*_](\S(?:[^*_]*?\S)?)[*_](?=[\s).,;:!?]|$)/g, '$1$2')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^\s{0,3}(?:#{1,6}|>)\s+/, '')
+}
+
+/**
+ * An abstract as plain paragraphs. HTML (the node's SOS abstracts) is
+ * read through an inert document, with its block elements as the breaks
+ * and its own line breaks as spaces, since SOS wraps its source at about
+ * seventy columns. Otherwise it is text or Markdown (the portal's): a
+ * blank line ends a paragraph, a list item starts one, and a lone line
+ * break is a space.
+ */
+export function plainParagraphs(source: string): string[] {
+  const raw = source.trim()
+  if (!raw) return []
+  const html = /<[a-z!/]|&(?:#\d+|#x[\da-f]+|[a-z]+);/i.test(raw) && typeof DOMParser !== 'undefined'
+  const paragraphs: string[] = []
+  if (html) {
+    for (const part of htmlText(raw).split(BREAK)) {
+      const words = part.replace(/\s+/g, ' ').trim()
+      if (words) paragraphs.push(words)
+    }
+    return paragraphs
+  }
+  let current: string[] = []
+  const end = (): void => {
+    const words = current.join(' ').replace(/\s+/g, ' ').trim()
+    if (words) paragraphs.push(words)
+    current = []
+  }
+  for (const line of raw.split(/\r?\n/)) {
+    if (line.trim() === '') { end(); continue }
+    const item = /^\s*(?:[-*+]|\d+[.)])\s+/.exec(line)
+    if (item) {
+      end()
+      const marker = /\d/.test(item[0]) ? item[0].trim() + ' ' : '• ' // i18n-exempt: a list bullet, not a word
+      current.push(marker + markdownText(line.slice(item[0].length)))
+      continue
+    }
+    current.push(markdownText(line))
+  }
+  end()
+  return paragraphs
+}
+
 /**
  * The kiosk's dataset from the node's card and record.
  *
  * The title, abstract and images come from the record, the credit,
  * licence, times and length from the card, so each field has one source.
- * A record without an id is refused, as the globe page refuses one.
+ * A record without an id is refused, as the globe page refuses one, and
+ * so is a dataset the card says the globe can't show (a tour, or a format
+ * the globe page doesn't draw), since the globe then shows the live Earth
+ * and the screen says what the globe shows.
  */
 export function kioskDatasetFrom(card: Record<string, unknown>, record: Record<string, unknown>, base: string): KioskDataset {
   const id = text(record.id)
   if (!id) throw new KioskDataError('bad_response', 'the record came back with no id')
+  if (card.showable === false) throw new KioskDataError('not_playable', `the globe can't show ${id}`)
   const scale = record.renderEncoding === RENDER_ENCODING_DATA_LUMA ? parseColorScale(record.colorScale) : null
   const legendImage = imageAddress(record.legendLink, base)
   const legend: KioskLegend | null = scale
@@ -129,7 +229,7 @@ export function kioskDatasetFrom(card: Record<string, unknown>, record: Record<s
   return {
     id,
     title: text(record.title) || text(card.title) || id,
-    abstract: text(record.abstractTxt),
+    abstract: plainParagraphs(typeof record.abstractTxt === 'string' ? record.abstractTxt : ''),
     thumbnail: imageAddress(record.thumbnailLink, base),
     legend,
     credit: text(card.credit),
@@ -185,55 +285,89 @@ export async function fetchKioskDataset(
  * - `playing` / `paused`: a video whose length the node gave, at the
  *   instant the globe's clock puts it, at the cadence its frames step.
  * - `still`: a picture, at its one date (or its span, when it has two).
- * - `span`: a video whose length is not known yet, at its whole span,
- *   since a date guessed from the wrong length would be wrong.
- * - `none`: a dataset with no dates.
+ * - `span`: a video whose length is not known, at its whole span, since a
+ *   date guessed from the wrong length would be wrong.
+ * - `none`: a dataset with no dates, or a video with only one end.
  * - `live`: the live Earth, which is now.
  */
 export interface KioskWhen {
   state: 'playing' | 'paused' | 'still' | 'span' | 'none' | 'live'
-  /** The date, or the span's two ends joined; "" for `none`. */
+  /** The date, or the span; "" for `none`. */
   text: string
   /** The globe's rate, for `playing`. */
   rate: number
 }
 
-/** A date as the kiosk writes it: in UTC, with the time only when the
- *  dataset steps faster than a day. */
-export function kioskDate(date: Date, withTime: boolean): string {
-  return formatDate(date, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    timeZone: 'UTC',
-    ...(withTime ? { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short' } : {}),
-  })
+/** How much of a date is written: to the minute (with the zone), the
+ *  day, the month or the year. */
+export type DateDetail = 'time' | 'day' | 'month' | 'year'
+
+const DETAIL_OPTIONS: Record<DateDetail, Intl.DateTimeFormatOptions> = {
+  time: { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short', timeZone: 'UTC' },
+  day: { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' },
+  month: { year: 'numeric', month: 'short', timeZone: 'UTC' },
+  year: { year: 'numeric', timeZone: 'UTC' },
+}
+
+/** A date as the kiosk writes it: in UTC, to `detail`. */
+export function kioskDate(date: Date, detail: DateDetail): string {
+  return formatDate(date, DETAIL_OPTIONS[detail])
+}
+
+/** A span as the kiosk writes it, the language's own way. */
+export function kioskSpan(start: Date, end: Date, detail: DateDetail): string {
+  return formatDateRange(start, end, DETAIL_OPTIONS[detail])
+}
+
+/** The seconds each detail's last part counts, the month an average one. */
+const DETAIL_S: Record<DateDetail, number> = { time: 60, day: 86_400, month: 2_629_746, year: 31_556_952 }
+
+/**
+ * The finest detail at which a playing clip's date changes at most once
+ * a second: `dataS` seconds of the dataset go by each second, and the
+ * date steps once a frame (`stepS`) or once a unit of the detail,
+ * whichever is longer. Starts from `finest`, the detail the dataset's own
+ * cadence asks for.
+ */
+export function dateDetail(finest: DateDetail, dataS: number, stepS: number): DateDetail {
+  const order: DateDetail[] = ['time', 'day', 'month', 'year']
+  for (const detail of order.slice(order.indexOf(finest))) {
+    if (dataS / Math.max(stepS, DETAIL_S[detail]) <= 1) return detail
+  }
+  return 'year'
 }
 
 /** The live Earth's date: now, to the minute, as its day and night are. */
 export function earthWhen(nowMs: number): KioskWhen {
-  return { state: 'live', text: kioskDate(new Date(nowMs), true), rate: 1 }
+  return { state: 'live', text: kioskDate(new Date(nowMs), 'time'), rate: 1 }
 }
+
+const NONE: KioskWhen = { state: 'none', text: '', rate: 1 }
 
 export function kioskWhen(ds: KioskDataset, clock: WebClock, nowMs: number, readAtMs: number): KioskWhen {
   const start = ds.startTime
-  const end = ds.endTime ?? ds.startTime
-  if (!start || !end) return { state: 'none', text: '', rate: 1 }
+  if (!start) return NONE
+  if (ds.kind !== 'video') {
+    // The app's picture rule: a time only when the stated period is
+    // shorter than a day.
+    const detail: DateDetail = isSubDailyPeriod(ds.period) ? 'time' : 'day'
+    return { state: 'still', text: kioskSpan(start, ds.endTime ?? start, detail), rate: 1 }
+  }
+  // The app dates a video only between its two ends.
+  const end = ds.endTime
+  if (!end) return NONE
   const lengthS = ds.lengthS > 0 ? ds.lengthS : 1
   const interval = inferDisplayInterval(start, end, lengthS, {
     period: ds.period || undefined,
     frameCount: ds.frameCount ?? undefined,
   })
-  // The app's rule: a stated period says, else the cadence does.
-  const withTime = ds.period ? isSubDailyPeriod(ds.period) : interval.showTime
-  const span = (): string => {
-    const a = kioskDate(start, withTime)
-    const b = kioskDate(end, withTime)
-    return a === b ? a : t('kiosk.when.span', { start: a, end: b })
-  }
-  if (ds.kind !== 'video') return { state: 'still', text: span(), rate: 1 }
-  if (ds.lengthS <= 0) return { state: 'span', text: span(), rate: 1 }
+  // The app's video rule: a stated period says, else the cadence does.
+  const finest: DateDetail = (ds.period ? isSubDailyPeriod(ds.period) : interval.showTime) ? 'time' : 'day'
+  if (ds.lengthS <= 0) return { state: 'span', text: kioskSpan(start, end, finest), rate: 1 }
   const at = clockTargetS(clock, nowMs, readAtMs, ds.lengthS)
   const date = videoTimeToDate(at, ds.lengthS, start, end, interval.intervalMs)
-  return { state: clock.paused ? 'paused' : 'playing', text: kioskDate(date, withTime), rate: clock.rate }
+  if (clock.paused) return { state: 'paused', text: kioskDate(date, finest), rate: clock.rate }
+  const dataS = ((end.getTime() - start.getTime()) / 1000 / ds.lengthS) * Math.abs(clock.rate)
+  const detail = dateDetail(finest, dataS, interval.intervalMs / 1000)
+  return { state: 'playing', text: kioskDate(date, detail), rate: clock.rate }
 }

@@ -13,7 +13,7 @@ const clock = (over: Partial<WebClock> = {}): WebClock => ({ positionS: 0, atUni
 const dataset = (id: string, over: Partial<KioskDataset> = {}): KioskDataset => ({
   id,
   title: `Title ${id}`,
-  abstract: '',
+  abstract: [],
   thumbnail: null,
   legend: null,
   credit: '',
@@ -118,39 +118,86 @@ describe('createKioskPage', () => {
     expect(g.timers[0].cleared).toBe(true)
   })
 
-  it('does not ask again for a dataset the node says it has not got', async () => {
+  it('says a dataset the node has not got cannot be found, and does not ask again', async () => {
     const h = harness()
     h.page.apply({ datasetId: 'A', clock: clock() })
     h.reads[0].reject(new KioskDataError('not_found', 'dataset A not found'))
     // The decision to wait or not is made in the same step as this.
-    await until(() => h.last().kind === 'unavailable', 'unavailable')
+    await until(() => h.last().kind === 'notFound', 'not found')
     expect(h.timers).toHaveLength(0)
   })
 
-  it('reads a length the node could not give yet again when it says to, a few times, showing the span meanwhile', async () => {
+  it("shows the live Earth for a dataset the globe can't show, as the globe does", async () => {
+    const h = harness()
+    h.page.apply({ datasetId: 'A', clock: clock() })
+    h.reads[0].reject(new KioskDataError('not_playable', "the globe can't show A"))
+    await until(() => h.last().kind === 'earth', 'the live Earth')
+    expect(h.lastWhen().state).toBe('live')
+    expect(h.timers).toHaveLength(0)
+  })
+
+  it('keeps to the slowest retry once the schedule runs out', async () => {
+    const h = harness()
+    h.page.apply({ datasetId: 'A', clock: clock() })
+    for (let i = 0; i < KIOSK_RETRY_DELAYS_MS.length + 2; i++) {
+      h.reads[i].reject(new KioskDataError('network', 'no answer'))
+      await until(() => h.timers.length === i + 1, `retry ${i + 1}`)
+      h.timers[i].fn()
+    }
+    const slowest = KIOSK_RETRY_DELAYS_MS[KIOSK_RETRY_DELAYS_MS.length - 1]
+    expect(h.timers.map((t) => t.ms)).toEqual([...KIOSK_RETRY_DELAYS_MS, slowest, slowest])
+  })
+
+  it('drops a failure that lands after the address moved on, rather than covering the next dataset with it', async () => {
+    const h = harness()
+    h.page.apply({ datasetId: 'A', clock: clock() })
+    h.page.apply({ datasetId: 'B', clock: clock() })
+    h.reads[1].resolve(dataset('B'))
+    await until(() => h.last().kind === 'dataset', 'B shown')
+    h.reads[0].reject(new KioskDataError('network', 'no answer'))
+    // One more turn for A's failure to run, if it were going to show.
+    await new Promise((r) => setTimeout(r, 0))
+    expect(h.shown.some((v) => v.kind === 'unavailable')).toBe(false)
+    expect(h.last()).toMatchObject({ dataset: { id: 'B' } })
+    expect(h.timers).toHaveLength(0)
+  })
+
+  it('reads a length the node could not give yet again when it says to, then more slowly, for as long as the dataset is up', async () => {
     const h = harness()
     h.page.apply({ datasetId: 'A', clock: clock({ positionS: 50, paused: true }) })
     h.reads[0].resolve(dataset('A', { lengthS: 0, retryS: 15 }))
     await until(() => h.timers.length === 1, 'a length retry')
     expect(h.lastWhen().state).toBe('span')
-    expect(h.timers[0].ms).toBe(15_000)
-    for (let i = 1; i <= KIOSK_LENGTH_RETRIES; i++) {
+    for (let i = 1; i <= KIOSK_LENGTH_RETRIES + 1; i++) {
       h.timers[i - 1].fn()
       h.reads[i].resolve(dataset('A', { lengthS: 0, retryS: 15 }))
-      await until(() => h.shown.filter((v) => v.kind === 'dataset').length === i + 1, `read ${i}`)
+      await until(() => h.timers.length === i + 1, `read ${i}`)
     }
-    // The last read is shown in the same step its retry is decided.
-    expect(h.timers).toHaveLength(KIOSK_LENGTH_RETRIES)
-    // A length read that fails leaves the dataset up.
+    const slowest = KIOSK_RETRY_DELAYS_MS[KIOSK_RETRY_DELAYS_MS.length - 1]
+    expect(h.timers.map((t) => t.ms)).toEqual([...Array(KIOSK_LENGTH_RETRIES).fill(15_000), slowest, slowest])
+    // A re-read with no length draws nothing new.
+    expect(h.shown.filter((v) => v.kind === 'dataset')).toHaveLength(1)
+    // The one that brings it does, and dates the clip.
+    h.timers[h.timers.length - 1].fn()
+    h.reads[h.reads.length - 1].resolve(dataset('A'))
+    await until(() => h.shown.filter((v) => v.kind === 'dataset').length === 2, 'the length arrives')
+    expect(h.lastWhen()).toMatchObject({ state: 'paused', text: 'Jan 6, 2024' })
+  })
+
+  it('leaves the dataset up when a read for its length fails, and asks again later', async () => {
     const g = harness()
     g.page.apply({ datasetId: 'A', clock: clock() })
     g.reads[0].resolve(dataset('A', { lengthS: 0, retryS: 15 }))
     await until(() => g.timers.length === 1, 'a length retry')
     g.timers[0].fn()
     g.reads[1].reject(new KioskDataError('network', 'no answer'))
-    await until(() => g.logs.length === 1, 'the failure handled')
+    await until(() => g.timers.length === 2, 'asked again')
     expect(g.last()).toMatchObject({ kind: 'dataset', dataset: { id: 'A' } })
-    expect(g.timers).toHaveLength(1)
+    expect(g.timers[1].ms).toBe(KIOSK_RETRY_DELAYS_MS[0])
+    g.timers[1].fn()
+    g.reads[2].resolve(dataset('A'))
+    await until(() => g.lastWhen().state !== 'span', 'the length arrives')
+    expect(g.shown.some((v) => v.kind === 'unavailable')).toBe(false)
   })
 
   it('times a clock with no anchor from when this copy read it, and keeps that moment when only the dataset changes', async () => {
@@ -177,5 +224,10 @@ describe('createKioskPage', () => {
     h.reads[0].resolve(dataset('A'))
     await new Promise((r) => setTimeout(r, 0))
     expect(h.shown.filter((v) => v.kind === 'dataset')).toHaveLength(0)
+    const whens = h.whens.length
+    h.page.tick()
+    h.page.apply({ datasetId: 'B', clock: clock() })
+    expect(h.whens).toHaveLength(whens)
+    expect(h.reads).toHaveLength(1)
   })
 })

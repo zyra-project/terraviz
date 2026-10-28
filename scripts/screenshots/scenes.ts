@@ -960,7 +960,7 @@ export const scenes: Scene[] = [
   {
     name: 'exhibit-kiosk',
     description:
-      "The Second Life exhibit's kiosk screen (/output/kiosk): a data-encoded dataset paused on the globe's clock, with its colour bar",
+      "The Second Life exhibit's kiosk screen (/output/kiosk) as a browser window shows it, the reflowing page rather than the 2048x1024 stage Second Life gets: a data-encoded dataset paused on the globe's clock, with its colour bar and an abstract written in HTML, as SOS abstracts are",
     // Paused, so the date is the same on every run; a playing clock or
     // the live Earth would date the shot by when it was taken.
     fixtures: [
@@ -979,7 +979,7 @@ export const scenes: Scene[] = [
           id: 'SMOKE',
           title: 'Wildfire Smoke Forecast, United States',
           abstractTxt:
-            'Smoke from wildfires carries fine particles far from the fires themselves. This forecast shows the near-surface concentration of fine particulate matter from wildfire smoke across the contiguous United States, hour by hour for the next two days.',
+            '<p>Smoke from wildfires carries fine particles far from the fires themselves.\nThis forecast shows the near-surface concentration of fine particulate matter\nfrom wildfire smoke across the contiguous United States, hour by hour for the next two days.</p>\n<p>Made by <a href="https://gsl.noaa.gov/">NOAA&#39;s Global Systems Laboratory</a> &amp; updated hourly.</p>',
           thumbnailLink: '/assets/basemaps/earth_diffuse_2048.jpg',
           renderEncoding: 'data-luma',
           colorScale: {
