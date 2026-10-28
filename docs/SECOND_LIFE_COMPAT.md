@@ -1204,6 +1204,181 @@ The work, smallest first:
    with Second Life. It is a small one, and far more people see this
    case. With the copy in place it uses the same pointer and the same
    fallback as the output page.
+9. **A kiosk screen beside the globe.** *Proposed 28 October, from a
+   conversation with Eric about rebuilding the Science On a Sphere
+   building on NOAA's Virtual Island; not built.* Phase 2 put
+   everything a visitor reads into the scripts: the title, date and
+   credit in hover text, the abstract in a dialog, the catalog in
+   dialog buttons. That is where most of its trouble came from. Every
+   character costs script memory (§9 Phase 2's status notes are mostly
+   Stack-Heap Collisions), hover text holds 254 bytes and looks dated,
+   the abstract was cut to 500 characters to fit, a dialog holds
+   twelve buttons of 24 characters, and a legend can't be shown at all.
+   A web page beside the globe has none of these limits, so the plan
+   moves everything a visitor *reads* there, and leaves the scripts
+   carrying ids and state.
+   - **What it shows.**
+     - *Now showing:* the title, thumbnail, credit and the full
+       abstract, read from the node by the page itself
+       (`GET /api/v1/datasets/:id`), so no script holds the text.
+     - *The legend.* An SOS dataset's own legend image (`legendLink`,
+       `functions/api/v1/_lib/dataset-serializer.ts:380`). A
+       data-encoded dataset has no image; its colour bar is drawn from
+       its colour scale through the same pure functions the app's
+       colorbar uses (`src/services/colorScaleDisplay.ts`), with its
+       units made readable by `toDisplayUnits`
+       (`src/types/unit-scale.ts`). This is the answer to "we need to
+       figure out the legend graphics": in a page a legend is an
+       `<img>`, and a colour bar is a gradient.
+     - *The dataset's date and time,* ticking in step with the globe.
+       The kiosk's address carries the same clock keys as the globe's
+       (`dataset`, `t`, `at`, `rate`, `paused`), and the page turns them
+       into a date through `videoTimeToDate` (`src/utils/time.ts`), the
+       function the control window's own time label uses. The globe and
+       the kiosk then read one clock and can't disagree; today the info
+       script computes the date in LSL, a second implementation.
+     - *The catalog:* a grid of thumbnails a page at a time, with
+       category tabs. A visitor picks one by touching the screen
+       (§9 Phase 5).
+   - **It is display-only, and one screen for everyone.** A page can't
+     tell a script who clicked it: each visitor runs their own copy,
+     the page never learns which avatar is looking at it, and the only
+     thing that leaves a copy is a navigation, which goes to everyone
+     at the screen and arrives without a name (item 4 above). A kiosk
+     that let each visitor browse their own copy and "send" a dataset
+     to the globe would therefore reload everyone's kiosk on every send,
+     and the hold and talk rules couldn't apply, since the script would
+     not know who sent it. So the page draws, and touches go to a
+     script (§9 Phase 5). Everyone at the kiosk sees the same screen,
+     which is how a museum kiosk behaves anyway.
+   - **Each copy can speak its visitor's language.** The address
+     carries state, never text, so the page can draw its labels in the
+     language of the browser it runs in, through the app's i18n layer.
+     That is something hover text and dialogs can't do. Dataset text
+     comes from the node in the catalog's own language until
+     [`I18N_PLAN.md`](I18N_PLAN.md)'s L2–L4 land.
+   - **Its address carries no one.** No avatar name or key goes in it,
+     the same rule as the globe's (§9 Phase 2, "Nothing about a visitor
+     leaves the object"). "The controls are held" is a state; who holds
+     them stays in the object.
+   - **It is a page of its own, not a mode of the output page.** It
+     draws no sphere, so it needs neither Three nor the output's render
+     loop. It would be a new small entry, as `/orbit` is
+     (`src/orbitMain.ts`), with its keys added to
+     [`EMBED_URL_GRAMMAR.md`](EMBED_URL_GRAMMAR.md). Its layout is
+     fixed at one media size (at most 2048 a side, §11), because a
+     script maps touches onto it by position: the regions of the
+     screen and what each does live in one table that the page and the
+     script both carry, held equal by a test, as `exhibit.test.ts`
+     already holds the scripts' message numbers equal.
+   - **It costs a visitor a browser, so it has to be light.** The
+     viewer runs at most 8 web pages at once and gives full priority to
+     the 2 that look largest on screen (item 4, "A field of globes").
+     A full building is up to four: the globe, its inside (item 11),
+     the kiosk and a flat map panel. The
+     kiosk should play no video and run no WebGL, so that when a
+     visitor walks up to read it and it becomes one of their two, it
+     costs them little. A globe that drops priority meanwhile falls
+     back into step when it returns, as item 4 says.
+10. **Motion in the address.** *Proposed 28 October; not built.* Item 7
+    built a camera whose keys name the view the picture comes to rest
+    on, and the page glides there. That makes one change a second look
+    like one motion, but steering is laggy at that rate, and a script
+    can't write faster: `llSetPrimMediaParams` sleeps the script for a
+    second (§11). So the address should carry *motion* as well as
+    position, the idea item 7 left as its next layer.
+    - **A rate beside each view key.** Proposed names, to be settled in
+      the grammar review: `drotation`, `dlat` and `dzoom`, each a change
+      per second in the key it is named for, and `vat`, the moment the
+      view was current. Each copy works out the view as each key plus
+      its rate times the time since then, clamped as the keys already
+      are (`lat` within ±90, `zoom` within the projection's cap), and
+      the heavy-globe glide follows that moving target.
+    - **Pressing a control is then one address change, and releasing it
+      is another.** "Turning east at 20° a second" is written once, and
+      every copy turns smoothly at its own frame rate until "stopped
+      here" arrives. The stop carries a position and no rate, so every
+      copy comes to rest on the same view.
+    - **A motion with no moment is timed from when each copy reads it.**
+      That is the clock's own rule: a clock with no `at` is anchored to
+      when the copy read it (`readAtMs` in `src/output/webClock.ts`).
+      It matters more here than for the clock. The clock relies on
+      visitors' computer clocks being close (item 4); an error of two
+      seconds moves a video two seconds, which nobody sees, but at 20°
+      a second it moves the globe 40°, and a copy with a slow clock
+      would lurch on every press. So a press sends a rate without `vat`
+      and each copy starts turning as it reads it, at most a moment
+      apart. A spin meant to run for hours, where every copy should
+      show the same longitude, sends `vat` and is shared through the
+      wall clock as the dataset clock is. That spin also replaces
+      `llTargetOmega`, which each viewer draws at its own phase.
+    - **The stop is written where the page has got to.** The globe
+      script sleeps a second after the press's change, so a release
+      inside that second is written when it wakes. It writes the
+      position the motion has reached by then, not the position at the
+      release, so the picture eases to a stop rather than turning back.
+      A tap is therefore a short step of about one second's turning,
+      which suits a button.
+    - **Turning goes through the picture, never the prim, once zoom is
+      in use.** Turning the sphere prim is immediate, and every viewer
+      sees one angle. But zoom magnifies whatever is at the front of the
+      *picture*: turn the prim to show Asia and zoom, and the
+      magnified place is the picture's front, now facing away. So a
+      globe that zooms turns through these keys. Tilting the prim, the
+      Phase 2 menu's pole buttons, comes out with them, as Phase 4
+      already planned.
+11. **Both sides of a sphere.** *Proposed 28 October; not built.* NOAA's
+    Virtual Island had a large phantom sphere on its SOS building:
+    from outside a globe, and flown into, a world all round you, which
+    Eric remembers feeling in mouselook like a 360° video. The
+    output's frame is the same projection a 360° video uses, so a
+    visitor at the centre of the sphere sees exactly that.
+    - **Second Life draws a face from one side only**, so from inside
+      an ordinary sphere there is nothing to see. Its newer PBR
+      materials can be double-sided, but they show one picture on both
+      sides, and seen from inside a globe's picture reads mirrored
+      (Madagascar west of Africa).
+    - **A hollow sphere has an inside face of its own.** Hollowed as far
+      as the build tools allow, the sphere is a shell whose inner
+      surface faces in and can carry its own media. The outside keeps
+      the globe as it is. The inside shows the same address, flipped
+      left to right with a negative horizontal repeat
+      (`llScaleTexture(-1.0, 1.0, face)`) and turned as the outside is
+      (the globe script's `upright`). The globe script already relies on
+      media following a face's texture settings, since `upright` turns
+      the texture 90° with media on it, so a flip should follow too.
+      That is untested; if it doesn't, the fallback is a `mirror` key
+      on the page, which is grammar work.
+    - **The inside face is fed by a script of its own, not the globe
+      script.** The globe script is near its memory limit and sleeps a
+      second per media change. A small copy script in the same prim
+      hears every media change (`changed` with `CHANGED_MEDIA`), reads
+      the outside's address and writes it to the inside without
+      `sound` and `telemetry`, so the audio doesn't play twice and no
+      visitor is counted twice. The same script can feed a flat map
+      panel beside the globe: the frame *is* a flat map, so the panel
+      shows the same dataset at the same moment, centred on the same
+      longitude, and keeps only the keys that make sense on a flat
+      surface (`rotation` and its rate; never `lat` or `zoom`, which
+      move the poles and stretch one side).
+    - **Sharpness differs inside.** From the centre of a sphere the
+      2048-wide frame is spread round 360° whatever the sphere's size:
+      about 6 pixels a degree, against about 18 on a visitor's screen
+      at the viewer's default field of view. Outside, a 25 m sphere
+      seen from 40 m away gets about 12. So the inside is soft, as the
+      original was. Splitting the inside into tiles from a mesh with
+      several inward faces would reach about 11 a degree from a
+      4096×2048 source, the largest most datasets have; it needs a key
+      that draws one tile of the frame, and every tile is one more
+      browser per visitor. It waits until the plain inside has been
+      seen.
+    - **Things that bite at that size.** The floor people stand on
+      inside must be a separate object, because phantom applies to a
+      whole linked object and a linked floor would let them fall
+      through. Prim spin (`/9 spin`) must be off, or the walls turn
+      round the people inside. And the info script's hover text sits
+      above the top of the sphere, out of sight from inside and from
+      the ground, which item 9's kiosk replaces.
 
 Things this touches beyond the code:
 
