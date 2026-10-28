@@ -10,7 +10,7 @@
 //   The source:  https://github.com/zyra-project/terraviz
 //
 // WHAT THIS SCRIPT DOES
-// It is one of the exhibit's four scripts, and the one that says what the
+// It is one of the exhibit's five scripts, and the one that says what the
 // globe shows. terraviz-exhibit.lsl tells it what that is after every
 // change. From the node it reads the dataset's card, a reply of at most
 // 2 KB that the node writes for the exhibit, its text already plain and
@@ -65,7 +65,7 @@
 // in, and this script has little room to spare while it reads a card (63
 // KB of 64 in-world on 27 October 2026, with a card filled to 2 KB).
 //
-// The owner can ask "/9 memory": each of the four scripts says how much
+// The owner can ask "/9 memory": each of the five scripts says how much
 // of its 64 KB it uses, and this one also says the most it has used while
 // reading a card or answering "About", which are when it needs the most.
 

@@ -34,20 +34,25 @@ item 4 and §9 Phase 2.
 
 | File | What it is |
 |---|---|
-| `terraviz-exhibit.lsl` | **The globe script.** Owns the address, the clock and the media: the smoke test's globe, taking requests from the others. The only one with settings to edit. |
+| `terraviz-exhibit.lsl` | **The globe script.** Owns the address, the clock and the media: the smoke test's globe, taking requests from the others. The one with settings to edit (the names `/9 show` knows are the owner script's). |
 | `terraviz-exhibit-visitors.lsl` | **The visitors script.** Touches and menus, the hold, talks, and who is at the globe. |
 | `terraviz-exhibit-info.lsl` | **The info script.** The floating text, and "About". |
+| `terraviz-exhibit-owner.lsl` | **The owner script.** Your commands on channel 9: it checks each one, has the globe script make the change, and tells you how it went. |
 | `terraviz-exhibit-menu.lsl` | **The menu script.** The dataset menu from the node's catalog, which the visitors script opens. It goes in a small prim of its own, linked to the globe. |
-| `exhibit.test.ts` | Holds the four scripts to each other and to the node: their link messages, the state they share, the commands a visitor may send, the card fields read, and what the node keeps for copies already rezzed. `../second-life-probe/globe.test.ts` holds the globe script's address to the output page. |
+| `exhibit.test.ts` | Holds the five scripts to each other and to the node: their link messages, the state they share, the commands a visitor may send, the card fields read, and what the node keeps for copies already rezzed. `../second-life-probe/globe.test.ts` holds the globe script's address to the output page. |
 
-A script in Second Life has 64 KB in all, which is why there are four:
+A script in Second Life has 64 KB in all, which is why there are five:
 one script reading what the node says about a dataset while also holding menus,
 notecards and the visitor list would run out. The menu script is the
 fourth because the dataset menu, written into the visitors script first,
 stopped it at once with a Stack-Heap Collision in-world. It is in a prim
 of its own because a web reply reaches every script in the prim that
 asked: in the sphere, the menu's pages stopped the info script the same
-way.
+way. The owner script is the fifth because the globe script had the
+least room of any, 57 KB at rest and up to 60 showing a dataset, with
+the console's controls still to come
+([`docs/SECOND_LIFE_COMPAT.md`](../../docs/SECOND_LIFE_COMPAT.md) §9
+Phase 5): your commands, their help and their wording moved out of it.
 
 ## Before you start
 
@@ -77,10 +82,11 @@ way.
 ## Setting it up
 
 1. Rez a sphere. A default prim sphere is fine.
-2. In its Content tab, make three **New Script**s and replace their
-   text with the globe, visitors and info scripts
+2. In its Content tab, make four **New Script**s and replace their
+   text with the globe, visitors, info and owner scripts
    (`terraviz-exhibit.lsl`, `terraviz-exhibit-visitors.lsl`,
-   `terraviz-exhibit-info.lsl`), one each, saving each. Set `NODE` in
+   `terraviz-exhibit-info.lsl`, `terraviz-exhibit-owner.lsl`), one
+   each, saving each. Set `NODE` in
    the globe script first if you need to. The order doesn't matter:
    each asks the others for what it missed.
 3. Within a few seconds the sphere stands its poles upright and shows
@@ -110,7 +116,7 @@ way.
       **Edit linked** in the build floater, and choose Build → Select
       Linked Parts → Select Next Part (Ctrl+.) until the cube is
       selected: inside the sphere it can't be clicked.
-5. `/9 memory` should answer from all four scripts, the menu script
+5. `/9 memory` should answer from all five scripts, the menu script
    among them. A visitor's Datasets now opens the node's categories.
 6. Add any of the notecards below, and say `/9 presenters` to check what
    was read.
@@ -362,9 +368,10 @@ the owner is told why.
 
 ## The owner's commands
 
-Said in local chat on channel 9, by the object's owner only. The globe
-script takes the smoke test's commands, on 9 rather than 8, so one
-command never reaches both kinds of globe:
+Said in local chat on channel 9, by the object's owner only. The owner
+script hears them, checks each one, has the globe script make the
+change and tells you how it went. They are the smoke test's commands,
+on 9 rather than 8, so one command never reaches both kinds of globe:
 
 `/9 show <name or id>`, `/9 list`, `/9 earth`, `/9 pause`, `/9 play`,
 `/9 jump <s or m:ss>`, `/9 rate <speed>`, `/9 rotation <degrees>`,
@@ -398,7 +405,7 @@ those:
 | `/9 presenters` | What the notecards gave: how many presenters, where the menu comes from, and the settings. |
 | `/9 talk` | Whether a talk is on, and when none is, how many avatars are at the globe. `/9 talk start` and `/9 talk end` start and end one. |
 | `/9 memory` | How much of its 64 KB each script uses. The globe script also says the most it has used showing a dataset, the info script the most reading a card or answering About, and the menu script the most reading the node for a menu. |
-| `/9 help` | The globe script's list. |
+| `/9 help` | The owner script's list. Anything it doesn't know gets the list too. |
 
 ## What leaves the object
 
@@ -429,7 +436,7 @@ You need a second avatar, or a friend, for most of this. Have them
 stand at the globe.
 
 1. **Setup.** `/9 presenters` lists what was read. `/9 memory` should
-   answer from all four scripts. `/9 debug on` should show the readout
+   answer from all five scripts. `/9 debug on` should show the readout
    on the globe.
 2. **Does a left-click reach the script?** The second avatar left-clicks
    the globe. If a menu opens, a left-click works in their viewer and
@@ -507,7 +514,16 @@ each avatar used, and what steps 2, 9 and 11 showed.
 
 ## Things that will trip you up
 
-- **Put the globe's three scripts in the sphere, and in a build make
+- **Updating a globe set up with four scripts: add the owner script
+  first, then replace the globe script.** Before 28 October 2026 the
+  globe script heard your commands itself; the new one doesn't. In
+  between, the owner script beside the old globe script does each
+  command once, since the old one ignores what the owner script hands
+  it, though the help, `/9 list` and a command either refuses answer
+  twice. The other order leaves a while when only `/9 talk`,
+  `/9 presenters` and `/9 memory` answer, though visitors notice
+  nothing either way.
+- **Put the globe's four scripts in the sphere, and in a build make
   the sphere a child prim.** A tilt turns the prim the scripts are in, so as the root
   of a build, with a stand linked to it, the whole build would tip. The
   menu script's cube can be linked anywhere in the build, the root
@@ -515,7 +531,7 @@ each avatar used, and what steps 2, 9 and 11 showed.
   exhibit to an object, though: two globes linked into one build would
   each open the other's menu.
 - **Keep the menu script out of the sphere.** In the sphere with the
-  other three, its pages of the node's catalog would reach the info
+  other four, its pages of the node's catalog would reach the info
   script too, which has little room to spare while it reads a card. So
   a copy there answers nothing, as one left from the build that had it
   there would be: Datasets gives the five built-in datasets after a few

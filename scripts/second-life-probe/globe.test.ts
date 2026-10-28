@@ -46,16 +46,24 @@ const ID = '01KQG611HF8YXJNRBEHT0757KT'
 // script is the smoke test's core, so every check here holds for both.
 // `own` is what one writes after the # and the other doesn't: the
 // exhibit's sound, which the smoke test leaves to the page's silent
-// default.
+// default. `commands` is the script that hears the owner's chat: the
+// smoke test's globe itself, and the exhibit's owner script, which holds
+// the channel and the dataset names for the exhibit's globe.
 const GLOBES = [
-  { name: 'smoke-test', file: './terraviz-globe.lsl', own: [] as string[] },
-  { name: 'exhibit', file: '../second-life-exhibit/terraviz-exhibit.lsl', own: ['sound'] },
+  { name: 'smoke-test', file: './terraviz-globe.lsl', commands: './terraviz-globe.lsl', own: [] as string[] },
+  {
+    name: 'exhibit',
+    file: '../second-life-exhibit/terraviz-exhibit.lsl',
+    commands: '../second-life-exhibit/terraviz-exhibit-owner.lsl',
+    own: ['sound'],
+  },
 ]
 /** Every key some globe writes and not every one does. */
 const OWN = new Set(GLOBES.flatMap((g) => g.own))
 
-describe.each(GLOBES)('second-life $name globe script', ({ file, own }) => {
+describe.each(GLOBES)('second-life $name globe script', ({ file, commands, own }) => {
   const globe = read(file)
+  const chat = read(commands)
   const address = body(globe, 'string address()')
   /** What address() puts before the #: the lines that build `setup`. */
   const setupSegments = segments(address.split('\n').filter((line) => /\bsetup\b/.test(line)).join('\n'))
@@ -67,11 +75,11 @@ describe.each(GLOBES)('second-life $name globe script', ({ file, own }) => {
   it('listens on a channel no other script of the kit uses', () => {
     // An owner's /7 reaches every object of theirs listening on 7, so a
     // globe on the probe's channel would act on the probe's commands.
-    const chan = constant(globe, 'integer', 'CHAN')
+    const chan = constant(chat, 'integer', 'CHAN')
     expect(chan).not.toBe(constant(read('./probe.template.lsl'), 'integer', 'CHAN'))
     expect(chan).not.toBe(constant(read('./node-check.lsl'), 'integer', 'CHAN'))
     for (const other of GLOBES.filter((g) => g.file !== file)) {
-      expect(chan, other.name).not.toBe(constant(read(other.file), 'integer', 'CHAN'))
+      expect(chan, other.name).not.toBe(constant(read(other.commands), 'integer', 'CHAN'))
     }
   })
 
@@ -182,7 +190,7 @@ describe.each(GLOBES)('second-life $name globe script', ({ file, own }) => {
 
   it('knows presets by lowercase names, with ids the page accepts', () => {
     // The listener lowercases the name it looks up, and keeps an id's case.
-    const presets = literals(globe.match(/^list PRESETS = \[([\s\S]*?)\];/m)?.[1] ?? '')
+    const presets = literals(chat.match(/^list PRESETS = \[([\s\S]*?)\];/m)?.[1] ?? '')
     expect(presets.length % 3).toBe(0)
     expect(presets.length).toBeGreaterThan(0)
     const names: string[] = []

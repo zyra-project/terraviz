@@ -25,7 +25,8 @@ seat and optional trackball as §9 Phase 5, four non-goals in §8, and
 §10 questions 14–19. Later the same day, after concept renders reviewed
 with Eric, Phase 5 gained controls inside the sphere, "Orbit comes to
 you", the building with its field, and the furniture's look, with §10
-questions 20–22. Nothing in it is built.) 2026-10-25 (in-world: the exhibit controller from
+questions 20–22. Then the first meshes and Phase 5's first step, the
+owner script, were built; neither has been seen in-world yet.) 2026-10-25 (in-world: the exhibit controller from
 #500 ran, and its scripts ran out of their 64 KB, first the globe
 script and then the info script; fixed in #501, and §9 Phase 2's status
 note updated. The same day, the page camera of §7 item 7 and §9 Phase 4
@@ -1844,22 +1845,24 @@ driven by its owner in chat, with none of the visitor controls.
 
 *How the controller is built* (in
 [`scripts/second-life-exhibit/`](../scripts/second-life-exhibit/README.md)):
-- **Four scripts, talking by link messages: three in the globe prim
+- **Five scripts, talking by link messages: four in the globe prim
   and one in a prim linked to it.** A
   script gets 64 KB in all, and a dataset record costs about 1.8 bytes
   of it per character while held (§4.1). One script doing everything
   would hold a record while it also holds menus, notecards and visitor
-  lists, so the work is split three ways, and since 27 October four,
-  for the dataset menu below, whose script is in a small prim of its
-  own because a web reply reaches every script in the prim that asked:
+  lists, so the work is split three ways; since 27 October four, for
+  the dataset menu below, whose script is in a small prim of its own
+  because a web reply reaches every script in the prim that asked; and
+  since 28 October five, for the owner's commands (Phase 5, step 1):
   - **globe** owns the address, the clock and the media. It is the
     smoke-test script's core and writes the same keys, though since 27
     October not always the same `t` (below), and it is
-    the only script that changes what visitors see. It takes the
-    owner's chat commands, as before, and control requests from the
-    visitors script, and from the info script to put back a dataset the
-    page can't show. After every change it tells the other two what
-    the globe now shows. It asks the node nothing: a web reply goes to
+    the only script that changes what visitors see. It takes control
+    requests from the visitors script, from the info script to put back
+    a dataset the page can't show, and since 28 October the owner's
+    commands from the owner script rather than from chat. After every
+    change it tells the visitors and info scripts what the globe now
+    shows. It asks the node nothing: a web reply goes to
     every script in the prim with a handler for one, and this one has
     the least room. Since 27 October it keeps the clip's position in
     whole microseconds round the loop, once the info script has passed
@@ -1904,6 +1907,13 @@ driven by its owner in chat, with none of the visitor controls.
     exhibit's reads, below). It reads the node itself, from a prim of
     its own linked to the globe, and takes the node and the owner's
     categories from the visitors script each time it opens.
+  - **owner** (since 28 October, Phase 5 step 1) hears the owner's
+    `/9` commands, checks each one, holds the help and the names
+    `/9 show` knows, and hands the command to the globe, which reports
+    how an owner-only one went; what a visitor can also ask for, the
+    globe words itself. It talks on link messages of its own, not the
+    visitors' control, so beside a globe script from before the split
+    each command is done once.
 - **What visitors can do.** A touch opens a menu for whoever touched.
   "About" is always there, since reading changes nothing. The
   controls are pause or play, back and forward ten seconds, start
@@ -2445,6 +2455,8 @@ driven by its owner in chat, with none of the visitor controls.
     3. Phase 4b's buttons, with the owner's chat commands moved to a
        fifth script to give the globe script room. It goes in the globe
        prim, since it neither asks the node nor needs to be apart.
+       *The move was made on its own on 28 October, as Phase 5's first
+       step; the buttons became Phase 5's console.*
   - **The node and the scripts go together.** A TerraViz node without
     these reads answers them with the app's page and a 200, not JSON,
     which Second Life refuses with its own HTTP 415, since the script
@@ -2729,6 +2741,16 @@ rules need and what a page can't supply (§7 item 9).
 Order, each step usable on its own:
 1. **Free the globe script.** The owner commands move to a fifth
    script. Nothing visible changes.
+   *Built on 28 October; not yet run in-world.* The owner script
+   (`terraviz-exhibit-owner.lsl`) hears `/9`, checks each command,
+   hands it to the globe script and words the answer, and holds the
+   help and the names `/9 show` knows. The globe script hears no chat,
+   words only what a visitor can also ask for, and reports how each
+   owner-only command went. They talk on two new link messages rather
+   than the visitors' control, so an owner script beside a globe
+   script from before the split does each command once, not twice.
+   The globe script's source is 6 KB smaller; what that frees of its
+   64 KB is for `/9 memory` in-world to say.
 2. **The kiosk, display only.** One page PR (§7 item 9, with its
    grammar) and the kiosk script showing it. The hover text turns off
    when a kiosk is linked. This alone answers the legend, the dated

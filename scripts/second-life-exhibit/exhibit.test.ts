@@ -28,7 +28,7 @@ import { freshMigratedDb } from '../lib/catalog-migrations'
 // LSL compiles only in-world, so nothing here runs the scripts. What the
 // globe script writes into the page's address is held to the page by
 // ../second-life-probe/globe.test.ts, which checks both globe scripts.
-// These tests hold the exhibit's four scripts to each other and to the
+// These tests hold the exhibit's five scripts to each other and to the
 // node: a link message, a state key or a command one script renamed would
 // leave the others quietly doing nothing, with no error anywhere.
 
@@ -39,7 +39,8 @@ const globe = read('./terraviz-exhibit.lsl')
 const visitors = read('./terraviz-exhibit-visitors.lsl')
 const info = read('./terraviz-exhibit-info.lsl')
 const menu = read('./terraviz-exhibit-menu.lsl')
-const SCRIPTS = { globe, visitors, info, menu }
+const owner = read('./terraviz-exhibit-owner.lsl')
+const SCRIPTS = { globe, visitors, info, menu, owner }
 const readme = read('./README.md')
 const plan = read('../../docs/SECOND_LIFE_COMPAT.md')
 
@@ -192,7 +193,8 @@ describe('second-life exhibit scripts', () => {
     // restart (found in review); a spin, about the region's vertical, waits
     // until it is level.
     expect(body(globe, 'broadcast()')).toContain('"turned", gRotation != gHome || gTilted || gSpin != gOwnerSpin,')
-    expect(body(globe, 'act(key who, integer owner, string msg)')).toContain('if (gTilted) { tell(who, "Not while the globe is tilted')
+    expect(body(globe, 'act(key who, integer owner, string msg)')).toContain('if (gTilted) { report(cmd, ["tilted"]); return; }')
+    expect(body(owner, 'result(string r)')).toContain('if (done == "tilted") say("Not while the globe is tilted')
     const turn = body(visitors, 'turnMenu(key who)')
     expect(turn).toContain('[BTN_NORTH, BTN_SOUTH, BTN_LEVEL, BTN_WEST, BTN_EAST, BTN_MENU], gDlgTurn);')
     expect(visitors).toContain('else if (msg == BTN_SOUTH) ask(who, "tilt south");')
@@ -212,7 +214,7 @@ describe('second-life exhibit scripts', () => {
     expect(globe).not.toContain('llHTTPRequest')
     const act = body(globe, 'act(key who, integer owner, string msg)')
     const show = act.slice(act.indexOf('if (cmd == "show")'), act.indexOf('if (cmd == "earth"'))
-    expect(show).toMatch(/\n\s+show\(who, dataset, described\);/)
+    expect(show).toMatch(/\n\s+show\(who, arg, described\);/)
     // The info script, which reads the card anyway, puts the globe back
     // on the live Earth when the node has no such dataset or it is a tour,
     // as a script's own request, and tells the owner and whoever chose it.
@@ -264,7 +266,8 @@ describe('second-life exhibit scripts', () => {
     expect(statements[0].trim()).toBe('llScriptProfiler(PROFILE_SCRIPT_MEMORY);')
     expect(shown).toMatch(/llScriptProfiler\(PROFILE_NONE\);\n\s+if \(llGetSPMaxMemory\(\) > gPeak\) gPeak = llGetSPMaxMemory\(\);$/)
     expect(shown).not.toContain('return;')
-    expect(act).toContain('KB while showing a dataset')
+    expect(act).toContain('report(cmd, ["ok", llGetUsedMemory() / 1024, gPeak / 1024]);')
+    expect(body(owner, 'result(string r)')).toContain('KB while showing a dataset')
   })
 
   it('read a card once, and copy what it tells a visitor as few times as it can be', () => {
@@ -456,8 +459,8 @@ describe('second-life exhibit scripts', () => {
     expect(count).toBeLessThanOrEqual(12)
   })
 
-  it("offer the globe's own presets when there is no datasets notecard", () => {
-    const presets = literals(globe.match(/^list PRESETS = \[([\s\S]*?)\];/m)?.[1] ?? '')
+  it("offer the owner's presets when there is no datasets notecard", () => {
+    const presets = literals(owner.match(/^list PRESETS = \[([\s\S]*?)\];/m)?.[1] ?? '')
     const menu = literals(visitors.match(/^list\s+DEFAULT_MENU = \[([\s\S]*?)\];/m)?.[1] ?? '')
     const presetIds = presets.filter((_, i) => i % 3 === 1)
     const menuIds = menu.filter((_, i) => i % 2 === 1)
@@ -470,20 +473,33 @@ describe('second-life exhibit scripts', () => {
   })
 
   it('share a channel, and leave each command to the script that answers it', () => {
-    const chan = constant(globe, 'integer', 'CHAN')
+    const chan = constant(owner, 'integer', 'CHAN')
     expect(constant(visitors, 'integer', 'CHAN')).toBe(chan)
     expect(constant(info, 'integer', 'CHAN')).toBe(chan)
     expect(constant(menu, 'integer', 'CHAN')).toBe(chan)
-    // The globe answers anything it doesn't know with its help text, so
-    // it has to stay quiet on the visitors script's commands.
-    expect(body(globe, 'act(key who, integer owner, string msg)')).toMatch(
+    // The globe script hears no chat at all: the owner script hears the
+    // owner and hands it over.
+    expect(globe).not.toMatch(/\bCHAN\b|llListen|\n    listen\(/)
+    // Every script that hears the channel hears only the owner: anyone
+    // else on it could otherwise turn telemetry on or steer the address.
+    // The owner script, which acts on all of it, checks the key again.
+    for (const [name, script] of Object.entries({ owner, visitors, info, menu })) {
+      expect(script, name).toContain('llListen(CHAN, "", llGetOwner(), "");')
+      expect(script.match(/llListen\(CHAN,/g), name).toHaveLength(1)
+    }
+    expect(owner).toMatch(/listen\(integer ch, string name, key id, string msg\)\n\s+\{\n(\s+\/\/[^\n]*\n)*\s+if \(id != llGetOwner\(\)\) return;/)
+    // The owner script answers anything it doesn't know with its help
+    // text, so it has to stay quiet on the visitors script's commands.
+    expect(body(owner, 'command(string msg)')).toMatch(
       /if \(cmd == "talk" \|\| cmd == "presenters"\) return;\n {4}help\(\);/,
     )
     expect(visitors).toMatch(/cmd == "talk"/)
     expect(visitors).toMatch(/cmd == "presenters"/)
-    // All four say how much memory they use, and the menu script nothing
-    // else: it answers no command, so it never asks the globe for one.
+    // All five say how much memory they use, the globe through the owner
+    // script, and the menu script nothing else: it answers no command, so
+    // it never asks the globe for one.
     expect(globe).toMatch(/cmd == "memory"/)
+    expect(owner).toMatch(/cmd == "memory"/)
     expect(visitors).toMatch(/cmd == "memory"/)
     expect(info).toMatch(/!= "memory"/)
     expect(menu).toMatch(/!= "memory"\) return;/)
@@ -605,9 +621,13 @@ describe('second-life exhibit scripts', () => {
     // 2026); the page stays silent unless its address asks.
     expect(constant(globe, 'integer', 'SOUND')).toBe('TRUE')
     expect(body(globe, 'act(key who, integer owner, string msg)')).toMatch(
-      /if \(cmd == "sound"\)\n\s+\{\n\s+if \(larg != "on" && larg != "off"\)[^\n]+\n\s+gSound = \(larg == "on"\);\n\s+if \(commit\(saved\)\)/,
+      /if \(cmd == "sound"\)\n\s+\{\n\s+gSound = \(larg == "on"\);\n\s+if \(commit\(saved\)\) report\(cmd, \["ok", larg\]\);/,
     )
-    expect(globe).toMatch(/llListen\(CHAN, "", llGetOwner\(\), ""\);\n\s+gSound = SOUND;/)
+    // The owner script lets only on and off through.
+    expect(body(owner, 'command(string msg)')).toMatch(
+      /if \(cmd == "debug" \|\| cmd == "sound" \|\| cmd == "telemetry"\)\n\s+\{\n\s+if \(larg != "on" && larg != "off"\)/,
+    )
+    expect(globe).toMatch(/state_entry\(\)\n\s+\{\n\s+gSound = SOUND;/)
     // After the #, so it reloads nobody's page.
     expect(body(globe, 'string address()')).toContain('if (gSound) live += ["sound=1"];')
     // A face that refuses the new address puts the old sound back with
@@ -617,9 +637,113 @@ describe('second-life exhibit scripts', () => {
     const restore = body(globe, 'restore(list s)')
     fields.forEach((field, i) => expect(restore, field).toMatch(new RegExp(`${field} = llList2\\w+\\(s, ${i}\\);`)))
     // And the docs name the command.
-    expect(globe).toMatch(/sound on\|off, telemetry on\|off/)
+    expect(owner).toMatch(/sound on\|off, telemetry on\|off/)
     // In a table, where the README escapes the bar.
     expect(readme).toMatch(/\/9 sound on\\?\|off/)
+  })
+
+  it('hear the owner in the owner script, which has the globe make each change and says how it went', () => {
+    // The owner's commands moved out of the globe script to give it room
+    // (docs/SECOND_LIFE_COMPAT.md §9 Phase 5, step 1). They travel on
+    // numbers of their own, never the visitors' control: a globe script
+    // from before the split answers the owner's chat itself and ignores
+    // them, so a sphere holding both does each command once, not twice.
+    expect(owner).not.toContain('MSG_CONTROL')
+    expect(body(owner, 'ask(string cmd)')).toContain('llMessageLinked(LINK_THIS, MSG_OWNER, cmd, llGetOwner());')
+    for (const name of ['MSG_OWNER', 'MSG_RESULT']) {
+      expect(messages(owner)[name], name).toBeDefined()
+      // Nor the retired relay's, for the same reason.
+      expect(['271006', '271007'], name).not.toContain(messages(owner)[name])
+    }
+    expect(globe).toContain('if (n == MSG_OWNER) { act(llGetOwner(), TRUE, str); return; }')
+    // The two agree on every command, both ways. What a visitor may ask
+    // for too, the owner script hands over as said and the globe words
+    // for whoever asked: those sit before the globe's gate, beside `show`,
+    // the scripts' own `rest` and `length`, and `rate`, which is the
+    // owner's but is turned away there on the live Earth. Everything only
+    // the owner may ask for comes after the gate, and the owner script
+    // takes exactly those.
+    const command = body(owner, 'command(string msg)')
+    const shared = literals(command.match(/llListFindList\(\[([^\]]*)\], \[cmd\]\)/)?.[1] ?? '')
+    const act = body(globe, 'act(key who, integer owner, string msg)')
+    const gate = act.indexOf("// Everything below is the owner's.")
+    expect(gate).toBeGreaterThan(-1)
+    expect(new Set(all(act.slice(0, gate), /cmd == "(\w+)"/g))).toEqual(new Set([...shared, 'show', 'rest', 'length', 'rate']))
+    const ownerOnly = new Set(all(act.slice(gate), /cmd == "(\w+)"/g))
+    const answered = ['show', 'list', 'talk', 'presenters']
+    expect(new Set(all(command, /cmd == "(\w+)"/g).filter((cmd) => !answered.includes(cmd)))).toEqual(ownerOnly)
+    expect(command).toContain('ask("spin 0");')
+    // A name from /9 list goes over as its id and its description, which
+    // the globe titles the dataset with until the node's card says.
+    expect(command).toContain('ask("show " + llList2String(PRESETS, at + 1) + " " + llList2String(PRESETS, at + 2));')
+    // The globe reports each owner-only command, never wording it, and the
+    // owner script words each report, refusal and stopped spin.
+    const result = body(owner, 'result(string r)')
+    for (const cmd of ownerOnly) expect(result, cmd).toContain(`cmd == "${cmd}"`)
+    // The globe's peak is said only once it has shown a dataset.
+    expect(result).toContain('if ((integer)llJsonGetValue(r, [3])) peaked = ')
+    expect(act.slice(gate)).not.toContain('tell(')
+    const outcomes = all(act, /report\(cmd, \["(\w+)"\]\)/g).filter((how) => how !== 'ok')
+    expect(outcomes.sort()).toEqual(['off', 'steer', 'telemetry', 'tilted'])
+    for (const how of outcomes) expect(result, how).toContain(`done == "${how}"`)
+    // Its own checks keep a measured globe's changes after the # whatever
+    // an owner script of another version sends, and round a rate as the
+    // address carries it.
+    expect(act).toMatch(/if \(larg != "hash" && larg != "query"\) return;\n\s+if \(larg == "query" && gTelemetry\) \{ report\(cmd, \["telemetry"\]\); return; \}/)
+    expect(act).toContain('if (larg == "on" && !gHash) { report(cmd, ["steer"]); return; }')
+    expect(act.slice(gate)).toContain('float r = (float)num((float)arg);')
+    // The status the owner script reads is the one the globe sends, field
+    // by field: each field the globe sends, and where the owner script
+    // reads it.
+    const fields: Array<[string, string]> = [
+      ['gDataset', 'if (v != "")'],
+      ['gTitle', 'what = llJsonGetValue(r, [3]) + " at "'],
+      ['num(position(now()))', '" at " + llJsonGetValue(r, [4]) + of'],
+      ['len', 'of = " of " + llJsonGetValue(r, [5])'],
+      ['gPaused', '["playing", "paused"], (integer)llJsonGetValue(r, [6])'],
+      ['num(gRate)', '", rate " + llJsonGetValue(r, [7])'],
+      ['num(gSpin)', '". Spin " + llJsonGetValue(r, [8])'],
+      ['address()', 'Address: " + llJsonGetValue(r, [9])'],
+    ]
+    const status = act.match(/report\(cmd, \["ok", (gDataset, [^\]]*)\]\);/)?.[1] ?? ''
+    expect(status.split(', ')).toEqual(fields.map(([sent]) => sent))
+    expect(result).toContain('string v = llJsonGetValue(r, [2]);')
+    for (const [sent, read] of fields) expect(result, sent).toContain(read)
+    // The owner script checks a command as the globe script would.
+    for (const fn of ['string num(float f)', 'integer isNumber(string s)', 'integer isId(string s)']) {
+      expect(body(owner, fn), fn).toBe(body(globe, fn))
+    }
+    for (const [type, name] of [['float', 'MIN_RATE'], ['float', 'MAX_RATE'], ['string', 'ID_CHARS'], ['integer', 'ID_MAX']]) {
+      expect(constant(owner, type, name), name).toBe(constant(globe, type, name))
+    }
+    // And the globe script holds none of the owner's help, names or wording.
+    expect(globe).not.toMatch(/\bhelp\(\)|PRESETS|Commands on \//)
+  })
+
+  it("word the owner's answers as the smoke-test globe does, for the commands the two share", () => {
+    // The exhibit's owner script and the probe kit's globe answer the
+    // same commands, and an owner who knows one reads the other. These
+    // sentences are each one's, word for word; the exhibit's own (sound,
+    // home, a spin a tilt refuses, the privacy notice) are its alone.
+    const smoke = new Set(literals(read('../second-life-probe/terraviz-globe.lsl')).map((s) => s.replace(/^\[globe\] /, '')))
+    const said = new Set(literals(owner))
+    for (const sentence of [
+      'Show what? /', ' list names a few.', ' list nor a dataset id. Ids are letters, digits, - and _.',
+      'A rate from ', ", where 1 is the clip's own speed.", 'Rate ',
+      'Rotation in degrees east, from -3600 to 3600, like 90 or -75.', ' degrees east is at the centre of the picture.',
+      'Spin in degrees a second, up to 90, like 6 for a turn a minute, or off.', 'Spin off.', 'Spinning at ',
+      'Debug readout ', 'width 1024, or width 2048.', 'Width ', '. The picture changes size at once, and the ',
+      "video's resolution follows at the next dataset.",
+      "Telemetry on. In the first minute after each visitor's page loads, it reports ",
+      'anonymously which dataset it showed and anything that failed, then nothing more. A viewer ',
+      "Telemetry off. Every visitor's page reloaded to pick this up.", ' steer hash first.', ' telemetry off first.',
+      'steer hash, or steer query.', 'Changes now go after the #, which a browser applies without a reload.',
+      'reload on a # change anyway.', 'Showing ', ', rate ', '. Spin ', ' degrees a second. Address: ',
+      'Poles upright, texture turned 90 degrees, spin off.',
+    ]) {
+      expect(said, sentence).toContain(sentence)
+      expect(smoke, sentence).toContain(sentence)
+    }
   })
 
   it('answer each kind of menu on its own channel', () => {
