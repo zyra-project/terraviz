@@ -10,26 +10,33 @@
 // them, and every prim it recognises is painted.
 //
 // It recognises a prim by its name, which the uploader takes from the
-// model's name ("terraviz-stem-high" and the like), so dress a piece
-// before renaming it. A prim whose name starts with none of the names
-// below is left alone and listed.
+// model's name ("terraviz-stem" and the like), so dress a piece before
+// renaming it. A prim is painted as the longest piece name its own name
+// starts with, so a later "terraviz-console-ring" is not taken for the
+// console. A prim whose name starts with none of them is left alone and
+// listed.
 //
-// Faces are numbered in the order the generator writes each piece's
-// materials (`faces` in pieces.ts); mesh.test.ts holds FACES to it.
+// Faces are numbered as pieces.ts lists each piece's materials
+// (`faces`): the generator names them f0-body, f1-accent and so on,
+// because Second Life numbers a mesh's faces by sorting those names.
+// mesh.test.ts holds FACES to pieces.ts.
 //
-// The look is STYLE_GUIDE.md's, as docs/SECOND_LIFE_COMPAT.md §9 Phase 5
-// ("The furniture's look") sets it out: graphite bodies, the app's dark
-// glass for the console's panel, and one accent line per piece in the
-// app's blue, full bright and glowing a little. A key's ring rests grey;
-// the console script lights it when the key is pressed.
+// The look is docs/SECOND_LIFE_COMPAT.md §9 Phase 5's ("The furniture's
+// look"): graphite bodies, the app's dark glass for the console's panel,
+// and one accent line per piece in the app's blue, full bright so it
+// reads as a line of colour in any light. Nothing glows at rest: glow is
+// for what is live or pressed, and the console script lights a key's
+// ring when the key is pressed.
 
-// Colours from tokens/global.json and STYLE_GUIDE.md.
+// The dark glass and the blue are the app's tokens (tokens/global.json).
+// Graphite and the keys' greys are this script's own, lifted a little
+// from the glass so a solid piece reads as an object under the region's
+// light.
 vector GRAPHITE = <0.086, 0.094, 0.122>; // #16181f
-vector PANEL    = <0.063, 0.071, 0.094>; // #101218
+vector PANEL    = <0.051, 0.051, 0.071>; // #0d0d12, --color-bg
 vector KEY      = <0.114, 0.125, 0.161>; // #1d2029
 vector RING     = <0.204, 0.227, 0.278>; // #343a47
 vector ACCENT   = <0.302, 0.651, 1.0>;   // #4da6ff, --color-accent
-float  ACCENT_GLOW = 0.08;
 
 // Each piece's name, then its faces' materials in face order.
 list FACES = [
@@ -43,16 +50,15 @@ list FACES = [
 list look(integer face, string material)
 {
     vector c = GRAPHITE;
-    float glow = 0.0;
     integer bright = FALSE;
     integer shiny = PRIM_SHINY_MEDIUM;
     if (material == "panel") { c = PANEL; shiny = PRIM_SHINY_LOW; }
     else if (material == "cap") { c = KEY; shiny = PRIM_SHINY_LOW; }
     else if (material == "ring") { c = RING; }
-    else if (material == "accent") { c = ACCENT; glow = ACCENT_GLOW; bright = TRUE; shiny = PRIM_SHINY_NONE; }
+    else if (material == "accent") { c = ACCENT; bright = TRUE; shiny = PRIM_SHINY_NONE; }
     return [PRIM_TEXTURE, face, TEXTURE_BLANK, <1.0, 1.0, 0.0>, ZERO_VECTOR, 0.0,
         PRIM_COLOR, face, c, 1.0,
-        PRIM_GLOW, face, glow,
+        PRIM_GLOW, face, 0.0,
         PRIM_FULLBRIGHT, face, bright,
         PRIM_BUMP_SHINY, face, shiny, PRIM_BUMP_NONE];
 }
@@ -60,21 +66,26 @@ list look(integer face, string material)
 // Paints one prim if its name is a piece's; TRUE if it was.
 integer dress(integer link, string name)
 {
+    integer best = -1;
+    integer bestLength = 0;
     integer i;
     for (i = 0; i < llGetListLength(FACES); i += 2)
     {
-        if (llSubStringIndex(name, llList2String(FACES, i)) == 0)
+        string piece = llList2String(FACES, i);
+        if (llStringLength(piece) > bestLength && llSubStringIndex(name, piece) == 0)
         {
-            list materials = llParseString2List(llList2String(FACES, i + 1), [" "], []);
-            list p = [];
-            integer f;
-            for (f = 0; f < llGetListLength(materials); ++f)
-                p += look(f, llList2String(materials, f));
-            llSetLinkPrimitiveParamsFast(link, p);
-            return TRUE;
+            best = i;
+            bestLength = llStringLength(piece);
         }
     }
-    return FALSE;
+    if (best < 0) return FALSE;
+    list materials = llParseString2List(llList2String(FACES, best + 1), [" "], []);
+    list p = [];
+    integer f;
+    for (f = 0; f < llGetListLength(materials); ++f)
+        p += look(f, llList2String(materials, f));
+    llSetLinkPrimitiveParamsFast(link, p);
+    return TRUE;
 }
 
 default

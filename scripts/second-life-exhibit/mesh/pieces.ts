@@ -15,15 +15,23 @@
  * cylinder rather than have the region test every facet.
  *
  * `faces` is the order of the piece's materials, which is the face
- * numbering in-world. The dress script (`terraviz-dress.lsl`) paints by
- * these numbers, and `mesh.test.ts` holds the two equal.
+ * numbering in-world: the COLLADA writer names each face for its place
+ * so Second Life's alphabetical sort keeps this order. The dress script
+ * (`terraviz-dress.lsl`) paints by these numbers, and `mesh.test.ts`
+ * holds the two equal.
+ *
+ * The uploader scales every level, and the physics shape, to fill its
+ * own bounding box, then stretches each to the high level's. So all of
+ * them share the high level's box: segment counts are multiples of four,
+ * which keeps a round piece's extremes in every level, and the physics
+ * shape is built from the high level's bounds.
  *
  * The frame is Second Life's: metres, Z up, +X the front. Second Life
  * centres an upload on its bounding box, so where a piece sits is set
  * in-world, not here; the README gives the heights that line them up.
  */
 import {
-  annulus, box, extrudeYZ, filletOutline, labelQuad, lathe, mergeByMaterial, prism, roundedBox, smoothRun, torus, transform,
+  annulus, bounds, box, extrudeYZ, filletOutline, labelQuad, lathe, mergeByMaterial, prism, roundedBox, smoothRun, torus, transform,
   type Part, type Vec2,
 } from './geometry'
 
@@ -61,70 +69,98 @@ function stemProfile(top: number, samples: number): Vec2[] {
 function stem(): Piece {
   const top = GLOBE.bottom - 0.02
   const faces = ['body', 'accent'] as const
-  const levels: [number, number, number, number][] = [[48, 48, 6, 4], [32, 32, 4, 3], [16, 16, 3, 2], [8, 8, 3, 1]]
+  // The accent's tube keeps a multiple of four sides at every level, so
+  // its top, the stem's highest point, is in each one.
+  const levels: [number, number, number, number][] = [[48, 48, 8, 4], [32, 32, 4, 3], [16, 16, 4, 2], [8, 8, 4, 1]]
+  const lods = levels.map(([seg, ringSeg, tubeSeg, samples]) => mergeByMaterial([
+    lathe('body', stemProfile(top, samples), seg),
+    torus('accent', 0.43, 0.007, top - 0.004, ringSeg, tubeSeg),
+  ]))
+  const b = bounds(lods[0])
   return {
     name: 'terraviz-stem',
     description: `Stand for the ${GLOBE.diameter} m exhibit globe; its cup sits ${num(top)} m up, just under the globe`,
     faces,
-    lods: levels.map(([seg, ringSeg, tubeSeg, samples]) => mergeByMaterial([
-      lathe('body', stemProfile(top, samples), seg),
-      torus('accent', 0.43, 0.007, top - 0.004, ringSeg, tubeSeg),
-    ])),
-    physics: [prism('physics', 0.5, 0, top, 8)],
+    lods,
+    physics: [prism('physics', b.max[0], b.min[2], b.max[2], 8)],
   }
 }
 
 /** The disc the stem stands on, with an accent line inlaid near its edge. */
 function plinth(): Piece {
   const r = 2.1, h = 0.07, e = 0.025
+  const ring = [1.943, 1.957] as const
   const arc = (cz: number, from: number, to: number, steps: number): Vec2[] =>
     Array.from({ length: steps + 1 }, (_, k) => {
       const a = from + ((to - from) * k) / steps
       return [r - e + e * Math.cos(a), cz + e * Math.sin(a)] as Vec2
     })
-  const profile = (steps: number): Vec2[] => [[0, 0], ...arc(e, -Math.PI / 2, 0, steps), ...arc(h - e, 0, Math.PI / 2, steps), [0, h]]
-  // The inlay is a flat ring a hair above the top, not a torus: from any
-  // height a visitor sees the plinth from, it reads the same, at a
-  // twentieth of the triangles. A 4 m piece is seen from far off, and
-  // Second Life charges its land impact by that distance.
-  const levels: [number, number, number][] = [[96, 3, 128], [48, 2, 64], [24, 1, 32], [12, 1, 16]]
+  // The inlay is a band of the top itself, not a ring laid on it: the
+  // body's top stops at the band's outer edge and starts again at its
+  // inner one, all three sharing their seams, so nothing sits at nearly
+  // the same depth as anything else to flicker from far off. Flat rather
+  // than a torus, it reads the same from any height a visitor sees the
+  // plinth from, at a twentieth of the triangles; a 4 m piece is seen
+  // from far off, and Second Life charges its land impact by that.
+  const profile = (steps: number): Vec2[] => [[0, 0], ...arc(e, -Math.PI / 2, 0, steps), ...arc(h - e, 0, Math.PI / 2, steps), [ring[1], h]]
+  const levels: [number, number][] = [[96, 3], [48, 2], [24, 1], [12, 1]]
+  const lods = levels.map(([seg, edgeSteps]) => mergeByMaterial([
+    lathe('body', profile(edgeSteps), seg),
+    annulus('body', 0, ring[0], h, seg),
+    annulus('accent', ring[0], ring[1], h, seg),
+  ]))
+  const b = bounds(lods[0])
   return {
     name: 'terraviz-plinth',
     description: `Plinth ${r * 2} m across and ${h} m high, under the stem`,
     faces: ['body', 'accent'],
-    lods: levels.map(([seg, edgeSteps, ringSeg]) => mergeByMaterial([
-      lathe('body', profile(edgeSteps), seg),
-      annulus('accent', 1.943, 1.957, h + 0.0008, ringSeg),
-    ])),
-    physics: [prism('physics', r, 0, h, 16)],
+    lods,
+    physics: [prism('physics', b.max[0], b.min[2], b.max[2], 16)],
   }
 }
 
-/** The console's top panel: its tilt, size and height, shared with the key layout. */
-export const PANEL = { tilt: 0.38, sizeX: 0.62, sizeY: 1.24, thickness: 0.05, height: 1.0 }
+/**
+ * The console's top panel: its tilt, size, thickness, the height of its
+ * centre, and the radius of its rounded edges. Shared with the key
+ * layout, whose keys stay on the flat top inside those edges.
+ */
+export const PANEL = { tilt: 0.38, sizeX: 0.62, sizeY: 1.24, thickness: 0.05, height: 1.0, radius: 0.02 }
+
+/**
+ * The console's blade, seen from the front: a trapezoid in Y and Z,
+ * `depth` thick along X. Its top runs up into the panel, where the
+ * panel's slab hides it at both faces, so its top corners stay sharp.
+ */
+export const BLADE = { outline: [[-0.13, 0.04], [0.13, 0.04], [0.4, 1.0], [-0.4, 1.0]] as Vec2[], fillets: [0.03, 0.03, 0, 0], depth: 0.1 }
 
 /**
  * The console: a base plate, a flared blade, and a top panel tilted
- * toward the visitor, who stands on the +X side. The panel's upper
- * surface is a face of its own (`panel`), mapped 0..1 so the group
- * labels can be one texture; the accent runs along its front edge.
+ * toward the visitor, who stands on the +X side. The panel's flat top,
+ * inside its rounded edges, is a face of its own (`panel`), mapped 0..1
+ * so the group labels can be one texture; the accent runs along its
+ * front edge.
  */
 function consoleBody(): Piece {
+  // The panel and its accent keep at least one step of rounding at every
+  // level: their tilted edges set the console's bounding box, and a sharp
+  // edge juts a centimetre further than a rounded one.
   const levels = [{ box: 4, fillet: 4 }, { box: 2, fillet: 2 }, { box: 1, fillet: 1 }, { box: 0, fillet: 0 }]
-  const blade: Vec2[] = [[-0.13, 0.04], [0.13, 0.04], [0.4, 0.92], [-0.4, 0.92]]
   const onPanel = (p: Part) => transform(p, { rotateY: PANEL.tilt, translate: [0, 0, PANEL.height] })
+  const flat = (size: number) => size - 2 * PANEL.radius
+  const lods = levels.map(l => mergeByMaterial([
+    transform(roundedBox('body', [0.52, 1.0, 0.04], 0.015, l.box), { translate: [0, 0, 0.02] }),
+    extrudeYZ('body', filletOutline(BLADE.outline, BLADE.fillets, l.fillet), BLADE.depth),
+    onPanel(roundedBox('body', [PANEL.sizeX, PANEL.sizeY, PANEL.thickness], PANEL.radius, Math.max(l.box, 1), true)),
+    onPanel(labelQuad('panel', flat(PANEL.sizeX), flat(PANEL.sizeY), PANEL.thickness / 2)),
+    onPanel(transform(roundedBox('accent', [0.006, 1.12, 0.006], 0.003, Math.min(Math.max(l.box, 1), 2)), { translate: [PANEL.sizeX / 2 + 0.002, 0, 0] })),
+  ]))
+  const b = bounds(lods[0])
   return {
     name: 'terraviz-console',
     description: 'Console: base, blade and a top panel tilted 22 degrees toward the visitor on its +X side',
     faces: ['body', 'panel', 'accent'],
-    lods: levels.map(l => mergeByMaterial([
-      transform(roundedBox('body', [0.52, 1.0, 0.04], 0.015, l.box), { translate: [0, 0, 0.02] }),
-      extrudeYZ('body', filletOutline(blade, 0.03, l.fillet), 0.12),
-      onPanel(roundedBox('body', [PANEL.sizeX, PANEL.sizeY, PANEL.thickness], 0.02, l.box)),
-      onPanel(labelQuad('panel', PANEL.sizeX - 0.02, PANEL.sizeY - 0.04, PANEL.thickness / 2 + 0.0004)),
-      onPanel(transform(roundedBox('accent', [0.006, 1.12, 0.006], 0.003, Math.min(l.box, 2)), { translate: [PANEL.sizeX / 2 + 0.002, 0, 0] })),
-    ])),
-    physics: [box('physics', [-0.34, -0.63, 0], [0.34, 0.63, 1.15])],
+    lods,
+    physics: [box('physics', b.min, b.max)],
   }
 }
 
@@ -136,17 +172,21 @@ function consoleBody(): Piece {
 export const KEY = { radius: 0.036, height: 0.024 }
 function key(): Piece {
   const r = KEY.radius, h = KEY.height
-  const levels = [40, 24, 12, 6]
+  // The body's top lip, the ring and the cap are one flat top in three
+  // bands, sharing their seams.
+  const levels = [40, 24, 12, 8]
+  const lods = levels.map(seg => mergeByMaterial([
+    lathe('body', [[0, 0], [r * 1.03, 0], [r, h], [r * 0.98, h]], seg),
+    annulus('cap', 0, r * 0.86, h, seg),
+    annulus('ring', r * 0.86, r * 0.98, h, seg),
+  ]))
+  const b = bounds(lods[0])
   return {
     name: 'terraviz-key',
     description: `Console button, ${num(r * 2 * 100)} cm across`,
     faces: ['body', 'cap', 'ring'],
-    lods: levels.map(seg => mergeByMaterial([
-      lathe('body', [[0, 0], [r * 1.03, 0], [r, h], [r * 0.98, h]], seg),
-      annulus('cap', 0, r * 0.86, h + 0.0004, seg),
-      annulus('ring', r * 0.86, r * 0.98, h + 0.0004, seg),
-    ])),
-    physics: [box('physics', [-r, -r, 0], [r, r, h])],
+    lods,
+    physics: [box('physics', b.min, b.max)],
   }
 }
 

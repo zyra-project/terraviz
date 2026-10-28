@@ -13,8 +13,8 @@
  * without a toolchain; `--check` (and `mesh.test.ts`) fail when they no
  * longer match what this script builds.
  */
-import { mkdirSync, readFileSync, readdirSync, writeFileSync, existsSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync, existsSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { toCollada, type MaterialColors } from './collada'
 import { LOD_NAMES, pieces } from './pieces'
@@ -28,7 +28,7 @@ export const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), 'dae')
  */
 export const PREVIEW_COLORS: MaterialColors = {
   body: [0.086, 0.094, 0.122],     // #16181f, graphite
-  panel: [0.063, 0.071, 0.094],    // #101218
+  panel: [0.051, 0.051, 0.071],    // #0d0d12, --color-bg
   accent: [0.302, 0.651, 1.0],     // #4da6ff, --color-accent
   cap: [0.114, 0.125, 0.161],      // #1d2029
   ring: [0.204, 0.227, 0.278],     // #343a47
@@ -52,7 +52,8 @@ function main(): void {
     const stale: string[] = []
     for (const [name, text] of files) {
       const path = join(OUT_DIR, name)
-      if (!existsSync(path) || readFileSync(path, 'utf8') !== text) stale.push(name)
+      // A Windows checkout may have rewritten the line endings; that is not staleness.
+      if (!existsSync(path) || readFileSync(path, 'utf8').replace(/\r\n/g, '\n') !== text) stale.push(name)
     }
     const extra = existsSync(OUT_DIR) ? readdirSync(OUT_DIR).filter(f => f.endsWith('.dae') && !files.has(f)) : []
     if (stale.length || extra.length) {
@@ -69,4 +70,16 @@ function main(): void {
   console.log(`wrote ${files.size} files to ${OUT_DIR}`)
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main()
+// Run as a script rather than imported by the test. Both sides are
+// resolved through symlinks, as `gen-node-key.ts` does: compared bare,
+// a path reached through a link (or a drive letter in another case on
+// Windows) reads as an import, and `--check` passes without checking.
+function isInvokedAsScript(): boolean {
+  if (!process.argv[1]) return false
+  try {
+    return realpathSync.native(fileURLToPath(import.meta.url)) === realpathSync.native(resolve(process.argv[1]))
+  } catch {
+    return false
+  }
+}
+if (isInvokedAsScript()) main()

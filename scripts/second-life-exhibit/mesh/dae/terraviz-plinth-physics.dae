@@ -11,7 +11,7 @@
     <up_axis>Z_UP</up_axis>
   </asset>
   <library_effects>
-    <effect id="physics-effect">
+    <effect id="f0-physics-effect">
       <profile_COMMON>
         <technique sid="common">
           <lambert>
@@ -22,7 +22,7 @@
     </effect>
   </library_effects>
   <library_materials>
-    <material id="physics-material" name="physics"><instance_effect url="#physics-effect"/></material>
+    <material id="f0-physics-material" name="f0-physics"><instance_effect url="#f0-physics-effect"/></material>
   </library_materials>
   <library_geometries>
     <geometry id="terraviz-plinth-physics-mesh" name="terraviz-plinth-physics">
@@ -59,7 +59,7 @@
         <vertices id="terraviz-plinth-physics-vertices">
           <input semantic="POSITION" source="#terraviz-plinth-physics-positions"/>
         </vertices>
-        <triangles material="physics" count="64">
+        <triangles material="f0-physics" count="64">
           <input semantic="VERTEX" source="#terraviz-plinth-physics-vertices" offset="0"/>
           <input semantic="NORMAL" source="#terraviz-plinth-physics-normals" offset="1"/>
           <input semantic="TEXCOORD" source="#terraviz-plinth-physics-uvs" offset="2" set="0"/>
@@ -75,7 +75,7 @@
         <instance_geometry url="#terraviz-plinth-physics-mesh" name="terraviz-plinth-physics">
           <bind_material>
             <technique_common>
-              <instance_material symbol="physics" target="#physics-material"/>
+              <instance_material symbol="f0-physics" target="#f0-physics-material"/>
             </technique_common>
           </bind_material>
         </instance_geometry>

@@ -11,7 +11,7 @@
     <up_axis>Z_UP</up_axis>
   </asset>
   <library_effects>
-    <effect id="physics-effect">
+    <effect id="f0-physics-effect">
       <profile_COMMON>
         <technique sid="common">
           <lambert>
@@ -22,13 +22,13 @@
     </effect>
   </library_effects>
   <library_materials>
-    <material id="physics-material" name="physics"><instance_effect url="#physics-effect"/></material>
+    <material id="f0-physics-material" name="f0-physics"><instance_effect url="#f0-physics-effect"/></material>
   </library_materials>
   <library_geometries>
     <geometry id="terraviz-stem-physics-mesh" name="terraviz-stem-physics">
       <mesh>
         <source id="terraviz-stem-physics-positions">
-          <float_array id="terraviz-stem-physics-positions-array" count="162">0 0 0 0.5 0 0 0 0 0 0.35355 0.35355 0 0 0 0 0 0.5 0 0 0 0 -0.35355 0.35355 0 0 0 0 -0.5 0 0 0 0 0 -0.35355 -0.35355 0 0 0 0 0 -0.5 0 0 0 0 0.35355 -0.35355 0 0 0 0 0.5 0 0 0.5 0 0 0.5 0 0.98 0.35355 0.35355 0 0.35355 0.35355 0.98 0 0.5 0 0 0.5 0.98 -0.35355 0.35355 0 -0.35355 0.35355 0.98 -0.5 0 0 -0.5 0 0.98 -0.35355 -0.35355 0 -0.35355 -0.35355 0.98 0 -0.5 0 0 -0.5 0.98 0.35355 -0.35355 0 0.35355 -0.35355 0.98 0.5 0 0 0.5 0 0.98 0.5 0 0.98 0 0 0.98 0.35355 0.35355 0.98 0 0 0.98 0 0.5 0.98 0 0 0.98 -0.35355 0.35355 0.98 0 0 0.98 -0.5 0 0.98 0 0 0.98 -0.35355 -0.35355 0.98 0 0 0.98 0 -0.5 0.98 0 0 0.98 0.35355 -0.35355 0.98 0 0 0.98 0.5 0 0.98 0 0 0.98</float_array>
+          <float_array id="terraviz-stem-physics-positions-array" count="162">0 0 0 0.5 0 0 0 0 0 0.35355 0.35355 0 0 0 0 0 0.5 0 0 0 0 -0.35355 0.35355 0 0 0 0 -0.5 0 0 0 0 0 -0.35355 -0.35355 0 0 0 0 0 -0.5 0 0 0 0 0.35355 -0.35355 0 0 0 0 0.5 0 0 0.5 0 0 0.5 0 0.983 0.35355 0.35355 0 0.35355 0.35355 0.983 0 0.5 0 0 0.5 0.983 -0.35355 0.35355 0 -0.35355 0.35355 0.983 -0.5 0 0 -0.5 0 0.983 -0.35355 -0.35355 0 -0.35355 -0.35355 0.983 0 -0.5 0 0 -0.5 0.983 0.35355 -0.35355 0 0.35355 -0.35355 0.983 0.5 0 0 0.5 0 0.983 0.5 0 0.983 0 0 0.983 0.35355 0.35355 0.983 0 0 0.983 0 0.5 0.983 0 0 0.983 -0.35355 0.35355 0.983 0 0 0.983 -0.5 0 0.983 0 0 0.983 -0.35355 -0.35355 0.983 0 0 0.983 0 -0.5 0.983 0 0 0.983 0.35355 -0.35355 0.983 0 0 0.983 0.5 0 0.983 0 0 0.983</float_array>
           <technique_common>
             <accessor source="#terraviz-stem-physics-positions-array" count="54" stride="3">
               <param name="X" type="float"/>
@@ -48,7 +48,7 @@
           </technique_common>
         </source>
         <source id="terraviz-stem-physics-uvs">
-          <float_array id="terraviz-stem-physics-uvs-array" count="108">0 0 0 0.25253 0.125 0 0.125 0.25253 0.25 0 0.25 0.25253 0.375 0 0.375 0.25253 0.5 0 0.5 0.25253 0.625 0 0.625 0.25253 0.75 0 0.75 0.25253 0.875 0 0.875 0.25253 1 0 1 0.25253 0 0.25253 0 0.74747 0.125 0.25253 0.125 0.74747 0.25 0.25253 0.25 0.74747 0.375 0.25253 0.375 0.74747 0.5 0.25253 0.5 0.74747 0.625 0.25253 0.625 0.74747 0.75 0.25253 0.75 0.74747 0.875 0.25253 0.875 0.74747 1 0.25253 1 0.74747 0 0.74747 0 1 0.125 0.74747 0.125 1 0.25 0.74747 0.25 1 0.375 0.74747 0.375 1 0.5 0.74747 0.5 1 0.625 0.74747 0.625 1 0.75 0.74747 0.75 1 0.875 0.74747 0.875 1 1 0.74747 1 1</float_array>
+          <float_array id="terraviz-stem-physics-uvs-array" count="108">0 0 0 0.25214 0.125 0 0.125 0.25214 0.25 0 0.25 0.25214 0.375 0 0.375 0.25214 0.5 0 0.5 0.25214 0.625 0 0.625 0.25214 0.75 0 0.75 0.25214 0.875 0 0.875 0.25214 1 0 1 0.25214 0 0.25214 0 0.74786 0.125 0.25214 0.125 0.74786 0.25 0.25214 0.25 0.74786 0.375 0.25214 0.375 0.74786 0.5 0.25214 0.5 0.74786 0.625 0.25214 0.625 0.74786 0.75 0.25214 0.75 0.74786 0.875 0.25214 0.875 0.74786 1 0.25214 1 0.74786 0 0.74786 0 1 0.125 0.74786 0.125 1 0.25 0.74786 0.25 1 0.375 0.74786 0.375 1 0.5 0.74786 0.5 1 0.625 0.74786 0.625 1 0.75 0.74786 0.75 1 0.875 0.74786 0.875 1 1 0.74786 1 1</float_array>
           <technique_common>
             <accessor source="#terraviz-stem-physics-uvs-array" count="54" stride="2">
               <param name="S" type="float"/>
@@ -59,7 +59,7 @@
         <vertices id="terraviz-stem-physics-vertices">
           <input semantic="POSITION" source="#terraviz-stem-physics-positions"/>
         </vertices>
-        <triangles material="physics" count="32">
+        <triangles material="f0-physics" count="32">
           <input semantic="VERTEX" source="#terraviz-stem-physics-vertices" offset="0"/>
           <input semantic="NORMAL" source="#terraviz-stem-physics-normals" offset="1"/>
           <input semantic="TEXCOORD" source="#terraviz-stem-physics-uvs" offset="2" set="0"/>
@@ -75,7 +75,7 @@
         <instance_geometry url="#terraviz-stem-physics-mesh" name="terraviz-stem-physics">
           <bind_material>
             <technique_common>
-              <instance_material symbol="physics" target="#physics-material"/>
+              <instance_material symbol="f0-physics" target="#f0-physics-material"/>
             </technique_common>
           </bind_material>
         </instance_geometry>

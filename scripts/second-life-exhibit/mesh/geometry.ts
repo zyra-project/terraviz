@@ -183,10 +183,18 @@ function boxSteps(size: number, radius: number, segments: number): number[] {
  * point into the inner box and pushing it back out by the radius, which
  * makes the corners true quarter-spheres and the faces meet without a
  * seam. Zero segments gives a plain box. UVs are planar per face.
+ *
+ * `openTop` leaves out the flat middle of the +Z face, the rectangle
+ * inside the rounded edges, for a face of another material to fill
+ * exactly (the console's label). Laying that face a hair above a
+ * closed top instead puts two surfaces at nearly one depth, which
+ * flicker against each other from far off.
  */
-export function roundedBox(material: string, size: Vec3, radius: number, segments: number): Part {
+export function roundedBox(material: string, size: Vec3, radius: number, segments: number, openTop = false): Part {
   const p = part(material)
   const r = segments === 0 ? 0 : Math.min(radius, size[0] / 2, size[1] / 2, size[2] / 2)
+  // The flat middle is the same cell across both of the top's axes.
+  const middle = r === 0 ? 0 : segments
   const half: Vec3 = [size[0] / 2, size[1] / 2, size[2] / 2]
   const inner: Vec3 = [half[0] - r, half[1] - r, half[2] - r]
   // Each face: its fixed axis and side, then its two in-plane axes.
@@ -207,7 +215,10 @@ export function roundedBox(material: string, size: Vec3, radius: number, segment
       })
       grid.push(row)
     })
-    for (let i = 0; i < us.length - 1; i++) for (let j = 0; j < vs.length - 1; j++) quad(p, grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1])
+    for (let i = 0; i < us.length - 1; i++) for (let j = 0; j < vs.length - 1; j++) {
+      if (openTop && axis === 2 && side === 1 && i === middle && j === middle) continue
+      quad(p, grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1])
+    }
   }
   return p
 }
@@ -215,16 +226,20 @@ export function roundedBox(material: string, size: Vec3, radius: number, segment
 /**
  * A convex outline with its corners rounded, as points running
  * counter-clockwise. Used for the console's blade, seen from the front.
+ * `radius` is one for every corner or one per corner; a corner given 0
+ * stays sharp.
  */
-export function filletOutline(corners: readonly Vec2[], radius: number, segments: number): Vec2[] {
-  if (segments === 0 || radius === 0) return corners.slice()
+export function filletOutline(corners: readonly Vec2[], radius: number | readonly number[], segments: number): Vec2[] {
+  if (segments === 0) return corners.slice()
   const out: Vec2[] = []
   corners.forEach((c, i) => {
+    const r = typeof radius === 'number' ? radius : radius[i]
+    if (r === 0) { out.push(c); return }
     const prev = corners[(i + corners.length - 1) % corners.length], next = corners[(i + 1) % corners.length]
     const toPrev = norm2([prev[0] - c[0], prev[1] - c[1]]), toNext = norm2([next[0] - c[0], next[1] - c[1]])
     const half = Math.acos(Math.max(-1, Math.min(1, toPrev[0] * toNext[0] + toPrev[1] * toNext[1]))) / 2
-    const back = radius / Math.tan(half)
-    const centreDist = radius / Math.sin(half)
+    const back = r / Math.tan(half)
+    const centreDist = r / Math.sin(half)
     const bis = norm2([toPrev[0] + toNext[0], toPrev[1] + toNext[1]])
     const centre: Vec2 = [c[0] + bis[0] * centreDist, c[1] + bis[1] * centreDist]
     const start: Vec2 = [c[0] + toPrev[0] * back, c[1] + toPrev[1] * back]
@@ -235,7 +250,7 @@ export function filletOutline(corners: readonly Vec2[], radius: number, segments
     if (a1 - a0 > Math.PI) a1 -= Math.PI * 2
     for (let k = 0; k <= segments; k++) {
       const a = a0 + ((a1 - a0) * k) / segments
-      out.push([centre[0] + radius * Math.cos(a), centre[1] + radius * Math.sin(a)])
+      out.push([centre[0] + r * Math.cos(a), centre[1] + r * Math.sin(a)])
     }
   })
   return out

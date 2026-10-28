@@ -3,11 +3,17 @@
 
 /**
  * Writes parts as a COLLADA 1.4.1 document, the format Second Life's mesh
- * uploader reads. One geometry, one `<triangles>` block per part, and the
- * block order is the face numbering in-world: Second Life numbers a
- * mesh's faces in the order its materials appear, and every level of
- * detail of one model must list the same materials in the same order,
- * or the uploader refuses it.
+ * uploader reads. One geometry, one `<triangles>` block per part.
+ *
+ * Second Life numbers a mesh's faces by sorting their material names
+ * alphabetically, ignoring case, not by the order the file lists them
+ * (`LLModel::sortVolumeFacesByMaterialName`, which the viewer's COLLADA
+ * loader calls on every model), and it matches each lower level of
+ * detail to the high one by those names. So each face is named for its
+ * place as well as its material, `f0-body`, `f1-accent`: the sort then
+ * keeps the order the parts arrive in, which is the numbering the dress
+ * script paints by. A piece has at most eight faces, Second Life's
+ * limit, so one digit sorts.
  *
  * Deterministic on purpose. Numbers are written to five places (a
  * hundredth of a millimetre, far below anything Second Life keeps), and
@@ -26,17 +32,23 @@ const num = (x: number): string => {
 }
 const join = (xs: readonly number[]): string => xs.map(num).join(' ')
 
+/** The name Second Life sorts face `index` by: its place, then its material. */
+export function faceName(index: number, material: string): string {
+  return `f${index}-${material}`
+}
+
 export function toCollada(name: string, parts: readonly Part[], colors: MaterialColors = {}): string {
+  if (parts.length > 8) throw new Error(`${name}: ${parts.length} faces; Second Life takes at most 8`)
   const id = name.replace(/[^A-Za-z0-9_-]/g, '_')
   const positions: number[] = [], normals: number[] = [], uvs: number[] = []
-  const blocks = parts.map(p => {
+  const blocks = parts.map((p, face) => {
     const base = positions.length / 3
     positions.push(...p.positions); normals.push(...p.normals); uvs.push(...p.uvs)
     const idx = p.indices.map(i => i + base)
     // Same index for all three inputs: positions, normals and UVs are
     // stored per vertex, side by side.
     const pList = idx.map(i => `${i} ${i} ${i}`).join(' ')
-    return `        <triangles material="${p.material}" count="${idx.length / 3}">
+    return `        <triangles material="${faceName(face, p.material)}" count="${idx.length / 3}">
           <input semantic="VERTEX" source="#${id}-vertices" offset="0"/>
           <input semantic="NORMAL" source="#${id}-normals" offset="1"/>
           <input semantic="TEXCOORD" source="#${id}-uvs" offset="2" set="0"/>
@@ -51,8 +63,8 @@ ${params.map(n => `              <param name="${n}" type="float"/>`).join('\n')}
             </accessor>
           </technique_common>
         </source>`
-  const materials = parts.map(p => p.material)
-  const color = (m: string) => (colors[m] ?? [0.8, 0.8, 0.8]).map(num).join(' ')
+  const materials = parts.map((p, face) => faceName(face, p.material))
+  const color = (face: number) => (colors[parts[face].material] ?? [0.8, 0.8, 0.8]).map(num).join(' ')
   return `<?xml version="1.0" encoding="utf-8"?>
 <!-- ${SPDX} -->
 <!-- ${COPYRIGHT} -->
@@ -66,11 +78,11 @@ ${params.map(n => `              <param name="${n}" type="float"/>`).join('\n')}
     <up_axis>Z_UP</up_axis>
   </asset>
   <library_effects>
-${materials.map(m => `    <effect id="${m}-effect">
+${materials.map((m, face) => `    <effect id="${m}-effect">
       <profile_COMMON>
         <technique sid="common">
           <lambert>
-            <diffuse><color sid="diffuse">${color(m)} 1</color></diffuse>
+            <diffuse><color sid="diffuse">${color(face)} 1</color></diffuse>
           </lambert>
         </technique>
       </profile_COMMON>

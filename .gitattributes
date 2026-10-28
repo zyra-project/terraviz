@@ -53,4 +53,4 @@ public/luma-check/out/*.mp4 -filter -diff -merge
 # committed so an owner can upload them with no toolchain. They are
 # about a megabyte of numbers nobody reviews by eye, so GitHub folds them
 # in a diff; mesh.test.ts checks them against a fresh build instead.
-scripts/second-life-exhibit/mesh/dae/*.dae linguist-generated=true
+scripts/second-life-exhibit/mesh/dae/*.dae linguist-generated=true eol=lf
