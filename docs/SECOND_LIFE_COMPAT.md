@@ -22,7 +22,10 @@ Eric about rebuilding the Science On a Sphere building on NOAA's
 Virtual Island: a kiosk screen, motion in the address and both sides of
 a sphere as §7 items 9–11, an exhibit console of buttons, a pilot's
 seat and optional trackball as §9 Phase 5, four non-goals in §8, and
-§10 questions 14–19. Nothing in it is built.) 2026-10-25 (in-world: the exhibit controller from
+§10 questions 14–19. Later the same day, after concept renders reviewed
+with Eric, Phase 5 gained controls inside the sphere, "Orbit comes to
+you", the building with its field, and the furniture's look, with §10
+questions 20–22. Nothing in it is built.) 2026-10-25 (in-world: the exhibit controller from
 #500 ran, and its scripts ran out of their 64 KB, first the globe
 script and then the info script; fixed in #501, and §9 Phase 2's status
 note updated. The same day, the page camera of §7 item 7 and §9 Phase 4
@@ -2612,10 +2615,116 @@ rules need and what a page can't supply (§7 item 9).
   (§7 item 11). A kiosk in a separate object, such as one in the room
   below a rooftop sphere, would talk by region chat to the globe's own
   key, with an owner check; that waits for a building that needs it.
-- **The furniture.** The kiosk, console, seat and stand should look
-  like TerraViz rather than like default prims: mesh in the app's own
-  look, designed alongside this phase. A brief for it follows
-  separately.
+- **Controls inside the sphere.** *Added later on 28 October, after
+  concept renders reviewed with Eric.* A visitor standing on the floor
+  inside the 25 m sphere (§7 item 11) is about twenty metres above the
+  console and can't see it, so the inside gets its own controls:
+  - *A ring of buttons at waist height* round the middle of the floor:
+    the console's buttons in groups round the ring, so several people
+    can stand at it, and below eye level, so it blocks none of the view.
+    It is the console script with a different mesh.
+  - *The pilot's seat in the middle.* Inside, the seat is the most
+    natural control: sit, the arrow keys turn the world round you, and
+    mouselook looks about.
+  - *Touching the inside wall* opens today's menu, since a touch on
+    either face is a touch on the sphere.
+
+  What a visitor reads reaches them through Orbit's card (below), so no
+  screen stands in the view.
+- **Orbit comes to you.** *Added later on 28 October.* Orbit, the
+  app's companion character (`/orbit`, `src/services/orbitCharacter/`),
+  as an object in the world: a pearl body with two large eyes, two small
+  moons, a warm glow and a sparkle wake. It is not the web page on a
+  screen, because shared media can't be transparent and Orbit would be a
+  character inside a television. Every part has a Second Life
+  equivalent:
+
+  | On the page | In Second Life |
+  |---|---|
+  | Flight ("Fly to Earth") | `llSetKeyframedMotion`: the region moves the object, so every viewer sees one path |
+  | The two moons | Child meshes spun with `llTargetOmega`, drawn smoothly by each viewer |
+  | The sparkle wake | Particles, which stay where they were emitted while the body moves on |
+  | The glow | The prim's glow setting |
+  | Eyes and lids | Pieces turned by script toward the person it attends |
+  | Behaviour and emotion states | A table in its script using the page's names (`IDLE`, `CURIOUS`, `PRESENTING`, `POINTING`, `SLEEPY`…, `orbitStates.ts`) |
+
+  - **Whom it attends.** Whoever holds the controls under the visitors
+    script's hold rule; failing that, whoever last touched anything;
+    failing that, nobody, and it circles the globe. During a talk, the
+    presenter. One Orbit attends one person, which is the hold rule's
+    one operator anyway.
+  - **Where it goes.** About 1.5 m beside that person at head height,
+    facing them, re-aimed every second or two as they move. For a
+    visitor inside the big sphere it flies straight through the
+    phantom shell, which is the point: from the floor inside, an Orbit
+    circling outside can't be seen.
+  - **What it reacts to.** The globe's state, through the same state
+    message the scripts share: curious at a new dataset, pointing while
+    the view turns, presenting during a talk, sleepy when the visitors
+    script counts nobody near.
+  - **A card, if wanted.** A thin panel flying with Orbit shows the
+    kiosk page (§7 item 9) to whoever it attends, display only. It is
+    one more browser for every visitor near it, so it shows only while
+    Orbit is with someone.
+  - **Its own object.** A moving object can't be linked to a still one,
+    so Orbit hears the globe on a private channel, checking the
+    sender's owner, and reads the attended avatar's position itself
+    (`llGetObjectDetails`). The key and the position stay in the
+    objects, the visitors script's rule (§9 Phase 2). It is the first
+    object here that follows a person, which is reason enough to ask
+    in-world whether visitors welcome it (§10 question 20), and to keep
+    the following limited to someone who is using the controls if not.
+  - **No conversation.** Orbit answering visitors in chat is §8's
+    in-world Orbit chatbot, still ruled out, and entry 10 in
+    [`LLM_INTEGRATION_OPPORTUNITIES.md`](LLM_INTEGRATION_OPPORTUNITIES.md).
+    The body asks for no LLM and nothing on the node, and costs a
+    visitor no browser unless the card is showing.
+- **The building.** *Added later on 28 October; concepts rendered and
+  reviewed with Eric, nothing modelled for upload.* Two scales:
+  - **The exhibit globe, about 3 m across, on a stem:** one lathed mesh
+    with an accent line where it meets the globe. Eric chose it over a
+    floating halo and a cradle on three blades.
+  - **The fly-in sphere, 25 m across,** a modern take on the Virtual
+    Island building: hollow (§7 item 11), floating 2.8 m clear of a
+    glass rotunda about 30 m across, whose roof is a ring round a glass
+    oculus. The exhibit globe, the kiosk and the console stand inside
+    the rotunda, under the oculus. The floor inside the sphere puts a
+    standing visitor's eyes at its centre, where the 360° view is
+    undistorted.
+  - **The field: nothing crosses the picture.** The sphere is held,
+    visibly, by a cone of light rising from eight emitter fins round the
+    oculus and narrowing to meet the sphere only within about 14° of the
+    south pole, which from the plaza is the underside. A first version
+    hugged the sphere's lower third and was rejected because it lay over
+    the data. In Second Life the cone is one alpha mesh whose gradient
+    scrolls upward with `llSetTextureAnim`, animated by each viewer at
+    no cost to the region, with glow on the fin tips and particle
+    emitters in them. Overlapping alpha surfaces can draw in the wrong
+    order in Second Life, and the cone, the oculus glass and the
+    particles all overlap, so the cone stays an object of its own
+    (§10 question 21).
+  - **What it costs.** The sphere's centre is about 23 m up, so the
+    plaza looks up at it and sees more of the south. The page's camera
+    (`lat`, §7 item 7) can bring the place being shown down toward the
+    crowd. Prim spin stays off (§7 item 11).
+- **The furniture's look.** *Added later on 28 October.* Taken from
+  [`STYLE_GUIDE.md`](../STYLE_GUIDE.md) and the logo:
+  - graphite bodies and the app's dark glass (`#0d0d12`);
+  - one accent hairline per piece in the app's blue (`#4da6ff`), the
+    app's one-pixel panel border made physical;
+  - glow only where something is live or pressed, as the app highlights
+    on hover and active rather than at rest;
+  - labels in the app's uppercase, widely spaced title style;
+  - the trackball as the logo's blue sphere with its grid lines;
+  - nothing standing in front of a globe.
+
+  As meshes: the kiosk screen is its own face shaped 2:1, so a
+  2048×1024 page fills it exactly; every button is one reused mesh with
+  three faces (a body, an icon cap from one texture sheet, a ring that
+  glows); the console's labels are baked into its texture. Upload-ready
+  COLLADA with simplified distance versions and physics shapes comes
+  after the concepts, with land impact measured in-world rather than
+  estimated (§10 question 22).
 
 Order, each step usable on its own:
 1. **Free the globe script.** The owner commands move to a fifth
@@ -2626,17 +2735,24 @@ Order, each step usable on its own:
    hover text and the 500-character abstract.
 3. **The console's tap buttons.** No page change.
 4. **Motion.** One page PR (§7 item 10, with its grammar), then the hold
-   buttons and the seat. The Phase 2 tilt comes out.
+   buttons and the seat, under the sphere and inside it. The Phase 2
+   tilt comes out.
 5. **Touch on the kiosk.** The catalog grid replaces the visitor menu.
 6. **The copy script** (§7 item 11): the inside of a hollow sphere and
    a flat map panel. Independent of the rest, so it can come at any
    time once the flip is checked in-world (§10 question 17).
-7. **The optional controls**, if the buttons turn out coarse.
+7. **Orbit**: its body, flight, states and attending, with no chat. Its
+   own object, so it can come any time after step 1; the card waits for
+   step 2.
+8. **The building**: the stem stand, the rotunda, the field and the
+   25 m sphere as meshes. The inside of the sphere needs step 6.
+9. **The optional controls**, if the buttons turn out coarse.
 
 Reviewers: the TerraViz Federation Reviewer for each grammar change,
 the Internationalization Engineer and the Section 508 Accessibility
 Specialist for the kiosk page, the Science Communicator for its text,
-the Code Reviewer for the scripts, and the analytics reviewer if the
+the Code Reviewer for the scripts, the Privacy Engineer for Orbit,
+since it reads where a person is, and the analytics reviewer if the
 kiosk ever reports anything. The presenter remote in Phase 4 is not
 replaced: it is the way to steer from outside the world, and the seat
 is the way to steer from inside it.
@@ -2752,7 +2868,8 @@ Numbering is kept from the first version, so a reference like
     has. Firestorm may differ. §7 item 4 says why the clock keeps a
     field in step anyway.
 
-Questions 14–19 come from §9 Phase 5 (28 October). Each is one
+Questions 14–22 come from §9 Phase 5 (28 October; 20–22 from its
+later additions). Each is one
 in-world check, and each decides a design choice rather than whether
 the phase works.
 
@@ -2782,6 +2899,19 @@ the phase works.
     it?** Second Life limits how far apart linked prims can be by their
     sizes. If it can't, the kiosk talks to the globe by region chat
     (§9 Phase 5, "Linked or separate") sooner than planned.
+20. **Does keyframed motion carry Orbit smoothly to a visitor**,
+    through the phantom shell to one inside the sphere, and does it
+    look smooth from 1.5 m away, where the region's updates are easiest
+    to see? The same session asks whether visitors welcome an object
+    that comes to them; if not, Orbit attends only someone using the
+    controls (§9 Phase 5, "Orbit comes to you").
+21. **Do the field's cone, the oculus glass and the particles draw in
+    the right order** on the official viewer and Firestorm, at night and
+    in daylight? Alpha surfaces that overlap are where Second Life's
+    drawing order most often goes wrong.
+22. **What do the rotunda, the field and the 25 m sphere cost in land
+    impact**, and does a sphere whose centre is 23 m up fit the
+    parcel's budget? Measured on upload, not estimated.
 
 ---
 
