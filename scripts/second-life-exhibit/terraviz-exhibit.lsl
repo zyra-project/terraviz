@@ -24,7 +24,9 @@
 //   terraviz-exhibit-menu.lsl      the dataset menu from the node, in a
 //                                  small prim of its own linked to the sphere
 // The first four go in the sphere's Content tab, the menu script in that
-// small prim's.
+// small prim's. An optional sixth, terraviz-exhibit-kiosk.lsl, goes in a
+// flat screen linked to the sphere, and shows what the globe shows there
+// for visitors to read.
 //
 // The sphere's surface shows TerraViz's output page: a web page that
 // draws the whole Earth unwrapped into a flat 2:1 picture, which Second
@@ -388,18 +390,19 @@ restore(list s)
     gSound = llList2Integer(s, 12);
 }
 
-// Tells the visitors and info scripts what the globe shows. The info
-// script times the date from the clip's anchor, so it gets the anchor
-// itself rather than a position that would be stale on arrival. After a
-// pause, a play or a move, the key is whoever asked, and the info
-// script answers them with the date the globe now shows, which this
-// script doesn't know. "turned"
-// is anything the idle return puts back: the owner's rotation, an upright
+// Tells the visitors and info scripts what the globe shows, and a kiosk
+// screen's script, which is in a prim of its own, so this goes to the
+// whole object. The info script and the kiosk time the date from the
+// clip's anchor, so they get the anchor itself rather than a position
+// that would be stale on arrival. After a pause, a play or a move, the
+// key is whoever asked, and the info script answers them with the date
+// the globe now shows, which this script doesn't know. "turned" is
+// anything the idle return puts back: the owner's rotation, an upright
 // sphere, and the owner's spin, which a tilt ends and Upright again
 // doesn't restart.
 broadcast()
 {
-    llMessageLinked(LINK_THIS, MSG_STATE, llList2Json(JSON_OBJECT, [
+    llMessageLinked(LINK_SET, MSG_STATE, llList2Json(JSON_OBJECT, [
         "dataset", gDataset, "title", gTitle,
         "pos", gPos, "atS", gAtS, "atMs", gAtMs, "rate", gRate, "paused", gPaused,
         "telemetry", gTelemetry, "turned", gRotation != gHome || gTilted || gSpin != gOwnerSpin,

@@ -24,11 +24,13 @@ import { asD1, makeCtx } from '../../functions/api/v1/_lib/test-helpers'
 import { onRequestGet as getPage } from '../../functions/api/exhibit/v1/datasets'
 import { onRequestGet as getTags } from '../../functions/api/exhibit/v1/tags'
 import { freshMigratedDb } from '../lib/catalog-migrations'
+import { readWebSettings } from '../../src/output/webMode'
+import { KIOSK_STAGE } from '../../src/ui/kioskUI'
 
 // LSL compiles only in-world, so nothing here runs the scripts. What the
 // globe script writes into the page's address is held to the page by
 // ../second-life-probe/globe.test.ts, which checks both globe scripts.
-// These tests hold the exhibit's five scripts to each other and to the
+// These tests hold the exhibit's six scripts to each other and to the
 // node: a link message, a state key or a command one script renamed would
 // leave the others quietly doing nothing, with no error anywhere.
 
@@ -40,7 +42,8 @@ const visitors = read('./terraviz-exhibit-visitors.lsl')
 const info = read('./terraviz-exhibit-info.lsl')
 const menu = read('./terraviz-exhibit-menu.lsl')
 const owner = read('./terraviz-exhibit-owner.lsl')
-const SCRIPTS = { globe, visitors, info, menu, owner }
+const kiosk = read('./terraviz-exhibit-kiosk.lsl')
+const SCRIPTS = { globe, visitors, info, menu, owner, kiosk }
 const readme = read('./README.md')
 const plan = read('../../docs/SECOND_LIFE_COMPAT.md')
 
@@ -98,10 +101,11 @@ describe('second-life exhibit scripts', () => {
           ([other, s]) => other !== name && new RegExp(`\\bn [!=]= ${sent}\\b`).test(s),
         )
         expect(handlers.length, `${name} sends ${sent}`).toBeGreaterThan(0)
-        // The menu script is in a prim of its own, so what passes between
-        // it and the visitors script goes to the whole object; everything
-        // else stays in the globe's prim.
-        const across = handlers.some(([other]) => other === 'menu') || name === 'menu'
+        // The menu and kiosk scripts are each in a prim of their own, so
+        // what passes between them and the sphere's scripts goes to the
+        // whole object; everything else stays in the globe's prim.
+        const apart = (script: string) => script === 'menu' || script === 'kiosk'
+        const across = handlers.some(([other]) => apart(other)) || apart(name)
         expect(target, `${name} sends ${sent}`).toBe(across ? 'LINK_SET' : 'LINK_THIS')
       }
     }
@@ -112,7 +116,7 @@ describe('second-life exhibit scripts', () => {
     // The keys are the literals; their values are the globe's variables.
     const broadcast = new Set(literals(list))
     expect(broadcast.size).toBeGreaterThan(0)
-    for (const [name, script] of Object.entries({ visitors, info })) {
+    for (const [name, script] of Object.entries({ visitors, info, kiosk })) {
       const read = all(script, /llJsonGetValue\(str, \["(\w+)"\]\)/g)
       expect(read.length, name).toBeGreaterThan(0)
       for (const key of read) expect(broadcast, `${name} reads ${key}`).toContain(key)
@@ -478,8 +482,10 @@ describe('second-life exhibit scripts', () => {
     expect(constant(info, 'integer', 'CHAN')).toBe(chan)
     expect(constant(menu, 'integer', 'CHAN')).toBe(chan)
     // The globe script hears no chat at all: the owner script hears the
-    // owner and hands it over.
+    // owner and hands it over. Nor does the kiosk script, which has
+    // nothing to say to it.
     expect(globe).not.toMatch(/\bCHAN\b|llListen|\n    listen\(/)
+    expect(kiosk).not.toMatch(/\bCHAN\b|llListen|\n    listen\(/)
     // Every script that hears the channel hears only the owner: anyone
     // else on it could otherwise turn telemetry on or steer the address.
     // The owner script, which acts on all of it, checks the key again.
@@ -495,9 +501,9 @@ describe('second-life exhibit scripts', () => {
     )
     expect(visitors).toMatch(/cmd == "talk"/)
     expect(visitors).toMatch(/cmd == "presenters"/)
-    // All five say how much memory they use, the globe through the owner
-    // script, and the menu script nothing else: it answers no command, so
-    // it never asks the globe for one.
+    // All but the kiosk say how much memory they use, the globe through
+    // the owner script, and the menu script nothing else: it answers no
+    // command, so it never asks the globe for one.
     expect(globe).toMatch(/cmd == "memory"/)
     expect(owner).toMatch(/cmd == "memory"/)
     expect(visitors).toMatch(/cmd == "memory"/)
@@ -1464,3 +1470,135 @@ function fullRow(): DatasetRow {
     source_digest: 'abc',
   }
 }
+
+describe("the exhibit's kiosk screen", () => {
+  const address = body(kiosk, 'string address(string str)')
+  const ID = '01KQG611HF8YXJNRBEHT0757KT'
+
+  /** The kiosk's reads of the state, as the globe's own variables they carry, from its broadcast. */
+  function asGlobe(source: string): string {
+    const sent = body(globe, 'broadcast()').match(/llList2Json\(JSON_OBJECT, \[([\s\S]*?)\]\)/)?.[1] ?? ''
+    const vars = Object.fromEntries([...sent.matchAll(/"(\w+)", (\w+)/g)].map((m) => [m[1], m[2]]))
+    return source
+      .replace(/llJsonGetValue\(str, \["(\w+)"\]\)/g, (_m, key: string) => vars[key] ?? `<${key}>`)
+      .replace(/\((?:float|integer|string)\)/g, '')
+      // The locals it reads them into.
+      .replace(/(?<!")\bdataset\b/g, 'gDataset')
+      .replace(/(?<!")\brate\b/g, 'gRate')
+  }
+
+  /** The `key=` value a script appends, up to the next element or the end of the list. */
+  const appended = (source: string, key: string): string | undefined =>
+    source.match(new RegExp(`"${key}=" \\+ (.+?)(?:, "|\\];)`))?.[1]
+
+  it('writes the clock keys the globe writes, in the same way, from the same state', () => {
+    // The page reckons the date from these, as the globe's page reckons
+    // its frame, so the two can't disagree: the same anchor, the same
+    // rounding, the same keys left out.
+    expect(body(kiosk, 'string num(float f)')).toBe(body(globe, 'string num(float f)'))
+    const ours = asGlobe(address)
+    const theirs = asGlobe(body(globe, 'string address()'))
+    for (const key of ['dataset', 't', 'at', 'rate']) {
+      expect(appended(ours, key), key).toBeDefined()
+      expect(appended(ours, key), key).toBe(appended(theirs, key))
+    }
+    expect(ours).toContain('if (gDataset != "")')
+    const clock = (source: string) =>
+      (source.match(/if \(gPaused\)[\s\S]*?\n\s+\}/)?.[0] ?? '')
+        .split('\n').filter((line) => !/^\s*float gRate = gRate;$/.test(line)).join(' ').replace(/\s+/g, ' ')
+    expect(clock(ours)).toContain('live += ["paused=1"]; else {')
+    expect(clock(ours)).toBe(clock(theirs))
+    // Nothing reads a key the broadcast doesn't carry.
+    expect(ours).not.toMatch(/<\w+>/)
+  })
+
+  it('writes only what the kiosk page acts on, all of it after the #', () => {
+    const keys = literals(address).flatMap((l) => l.split('&')).filter((l) => l.includes('='))
+      .map((l) => l.slice(0, l.indexOf('=')))
+    expect(new Set(keys)).toEqual(new Set(['dataset', 't', 'paused', 'at', 'rate']))
+    expect(address).toContain('return node + "/output/kiosk#" + llDumpList2String(live, "&");')
+    // Always something after the #: an empty dataset= is the live Earth.
+    expect(address).toContain('list live = ["dataset=" + dataset];')
+    expect(readWebSettings('', '#dataset=').datasetId).toBeNull()
+    // The page the address names is built.
+    expect(read('../../src/output/kiosk.html')).toContain('./kioskMain.ts')
+    expect(read('../../vite.config.ts')).toContain("kiosk: path.resolve(__dirname, 'src/output/kiosk.html')")
+  })
+
+  it("composes addresses the kiosk page reads as the globe's clock", () => {
+    // What the page reads from each: the same clock the globe's page
+    // reads from the globe's address in the same state.
+    const globeClock = (live: string) => readWebSettings('?fit=fill', `#${live}&width=2048&rotation=90`).clock
+    for (const live of [
+      `dataset=${ID}&t=61.2&at=1792865189.482&rate=2`,
+      `dataset=${ID}&t=61.2&at=1792865189.007`,
+      `dataset=${ID}&t=30.5&paused=1`,
+    ]) {
+      const read = readWebSettings('', `#${live}`)
+      expect(read.datasetId, live).toBe(ID)
+      expect(read.clock, live).toEqual(globeClock(live))
+    }
+    expect(readWebSettings('', `#dataset=${ID}&t=30.5&paused=1`).clock)
+      .toEqual({ positionS: 30.5, atUnixS: null, rate: 1, paused: true })
+  })
+
+  it('gives no one the media to click, at the size the page draws', () => {
+    const media = body(kiosk, 'show()')
+    const sent = media.match(/list p = \[([\s\S]*?)\];/)?.[1] ?? ''
+    expect(sent).toContain('PRIM_MEDIA_PERMS_INTERACT, PRIM_MEDIA_PERM_NONE')
+    expect(sent).toContain('PRIM_MEDIA_PERMS_CONTROL, PRIM_MEDIA_PERM_NONE')
+    expect(sent).toContain('PRIM_MEDIA_CURRENT_URL, url')
+    const call = media.indexOf('llSetPrimMediaParams(FACE, p)')
+    expect(call).toBeGreaterThan(-1)
+    expect(media.slice(media.indexOf('list p ='), call)).not.toMatch(/\bif\b|\bp \+=/)
+    expect(Number(constant(kiosk, 'integer', 'MEDIA_W'))).toBe(KIOSK_STAGE.width)
+    expect(Number(constant(kiosk, 'integer', 'MEDIA_H'))).toBe(KIOSK_STAGE.height)
+    // A face takes no more than 2048 a side.
+    expect(KIOSK_STAGE.width).toBeLessThanOrEqual(2048)
+  })
+
+  it('hears the globe wherever it is linked, and asks for what it missed when it starts', () => {
+    expect(body(globe, 'broadcast()')).toContain('llMessageLinked(LINK_SET, MSG_STATE, ')
+    expect(kiosk).toMatch(/state_entry\(\)\n\s+\{\n\s+gPrims = llGetObjectPrimCount\(llGetKey\(\)\);\n\s+llMessageLinked\(LINK_SET, MSG_KIOSK, "here", NULL_KEY\);\n\s+llMessageLinked\(LINK_SET, MSG_HELLO, "", NULL_KEY\);\n\s+llSetTimerEvent\(WAIT\);/)
+    // Linked or unlinked, it starts over; someone sitting down doesn't count.
+    expect(kiosk).toMatch(/if \(c & CHANGED_LINK\)\n\s+if \(llGetObjectPrimCount\(llGetKey\(\)\) != gPrims\) llResetScript\(\);/)
+    // A burst of changes is one change of media, and a globe that never
+    // speaks is reported to the owner.
+    expect(kiosk).toContain('if (gWant != gShown) llSetTimerEvent(0.2);')
+    expect(kiosk).toMatch(/timer\(\)\n\s+\{\n\s+if \(gWant != ""\) \{ show\(\); return; \}\n\s+llSetTimerEvent\(0\.0\);\n\s+llOwnerSay\(/)
+    expect(body(kiosk, 'show()')).toMatch(/\{\n\s+llSetTimerEvent\(0\.0\);\n\s+if \(gWant == gShown\) return;\n\s+gShown = gWant;/)
+  })
+
+  it("takes the title, date and credit out of the floating text while a kiosk answers, and keeps the rest", () => {
+    // The info script asks when it starts and when the prims change, and
+    // shows the full text until a kiosk answers. Only "here" says one is.
+    expect(info).toMatch(/gPrims = llGetObjectPrimCount\(llGetKey\(\)\);\n\s+llMessageLinked\(LINK_SET, MSG_KIOSK, "\?", NULL_KEY\);/)
+    expect(info).toMatch(/if \(c & CHANGED_LINK\)\n\s+if \(llGetObjectPrimCount\(llGetKey\(\)\) != gPrims\)\n\s+\{\n\s+gPrims = llGetObjectPrimCount\(llGetKey\(\)\);\n\s+gKiosk = FALSE;\n\s+llMessageLinked\(LINK_SET, MSG_KIOSK, "\?", NULL_KEY\);\n\s+hover\(\);\n\s+pace\(\);/)
+    expect(info).toContain('if (str == "here") { gKiosk = TRUE; hover(); pace(); }')
+    expect(all(info, /gKiosk = (\w+);/g).sort()).toEqual(['FALSE', 'TRUE'])
+    expect(kiosk).toContain('if (str == "?") llMessageLinked(LINK_SET, MSG_KIOSK, "here", NULL_KEY);')
+    // What goes, before the lines are laid out; the telemetry notice the
+    // privacy policy asks for, a talk and how to touch the globe stay.
+    const hover = body(info, 'hover()')
+    const cleared = hover.indexOf('if (gKiosk) { title = ""; stamp = ""; credit = ""; }')
+    expect(cleared).toBeGreaterThan(-1)
+    expect(cleared).toBeLessThan(hover.indexOf('string tail = "";'))
+    expect(hover.slice(cleared)).toContain('if (gTelemetry) tail += "\\nCounts anonymous use: " + gNode + "/privacy";')
+    expect(hover).toMatch(/s \+= end;\n(?:\s+\/\/.*\n)*\s+if \(gKiosk\) s = llDeleteSubString\(s, 0, 0\);\n\s+if \(bytes\(s\) > 254\)/)
+    // The date isn't worked out every couple of seconds for nobody.
+    expect(body(info, 'pace()')).toContain('integer moving = !gKiosk && ')
+    // All of what stays fits, whole, on the longest node address the README names.
+    const string = (name: string) => JSON.parse(constant(info, 'string', name)) as string
+    const preview = `https://${'a'.repeat(28)}.terraviz.pages.dev`
+    const kept = `Counts anonymous use: ${preview}/privacy\n${string('TALK_LINE')}\n${string('TOUCH_LINE')}`
+    expect(bytes(kept)).toBeLessThanOrEqual(254)
+  })
+
+  it('answers on a number of its own, never a retired one', () => {
+    expect(messages(kiosk).MSG_KIOSK).toBe('271012')
+    expect(messages(info).MSG_KIOSK).toBe('271012')
+    for (const [name, script] of Object.entries(SCRIPTS)) {
+      for (const value of Object.values(messages(script))) expect(['271006', '271007'], name).not.toContain(value)
+    }
+  })
+})

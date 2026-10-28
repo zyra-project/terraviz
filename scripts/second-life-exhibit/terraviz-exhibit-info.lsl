@@ -29,6 +29,11 @@
 //   48 where both fit, the title's first where they don't, and either is
 //   cut with "..." when it has to be. Nothing else is cut, so the notice
 //   is never lost.
+//   While a kiosk screen is linked (terraviz-exhibit-kiosk.lsl), the
+//   title, the date and the credit are left out, since the screen shows
+//   them in full, and the date stops being worked out every couple of
+//   seconds. This script asks whether a kiosk is linked when it starts
+//   and when a prim is linked or unlinked, and the kiosk answers.
 // - "About", from the touch menu. If the globe holds a notecard named by
 //   the dataset's id, the visitor is given it. Otherwise they get the
 //   abstract, the full credit, the licence and a link to the dataset's
@@ -76,6 +81,7 @@ integer MSG_CONTROL = 271002;  // visitors or info to globe: a control, for the 
 integer MSG_HELLO   = 271003;  // any to globe: say the state again (a script reset)
 integer MSG_TALK    = 271004;  // visitors to info: "1" during a talk, "0" otherwise
 integer MSG_ABOUT   = 271005;  // visitors to info: tell the key about what the globe shows
+integer MSG_KIOSK   = 271012;  // info and kiosk: "?" asks whether a kiosk is linked, "here" says one is
 
 // A card's budget, in bytes. The node keeps every card within it, so a
 // card arrives whole, and a reply cut short isn't one. A request reads one
@@ -113,6 +119,8 @@ integer gPaused;
 integer gTelemetry;
 string  gNode;
 integer gTalk;
+integer gKiosk;        // a kiosk is linked, which shows the title, the date and the credit in full
+integer gPrims;        // the object's prims, not counting anyone sitting on it
 
 // What the node's card says about it.
 string  gFor;          // the dataset the fields below describe
@@ -442,6 +450,9 @@ hover()
             stamp = date();
         }
     }
+    // A linked kiosk shows the title, the date and the credit in full,
+    // so they are left out here, and what the kiosk doesn't say stays.
+    if (gKiosk) { title = ""; stamp = ""; credit = ""; }
     string tail = "";
     if (stamp != "") tail += "\n" + stamp;
     if (gTelemetry) tail += "\nCounts anonymous use: " + gNode + "/privacy";
@@ -467,17 +478,19 @@ hover()
     string s = title + tail;
     if (credit != "") s += "\n" + credit;
     s += end;
+    // With no title, the line break that would follow it leads.
+    if (gKiosk) s = llDeleteSubString(s, 0, 0);
     if (bytes(s) > 254) s = fit(s, 254);
     if (s == gShown) return;
     gShown = s;
     llSetText(s, <1.0, 1.0, 1.0>, 1.0);
 }
 
-// The timer runs while a clip's date moves, and while a request waits to
-// be made again.
+// The timer runs while a clip's date moves in the hover text, and while a
+// request waits to be made again.
 pace()
 {
-    integer moving = gDataset != "" && !gPaused && gDated && gLen > 0 && gFor == gDataset;
+    integer moving = !gKiosk && gDataset != "" && !gPaused && gDated && gLen > 0 && gFor == gDataset;
     if (moving || gRetryAt) llSetTimerEvent(TICK);
     else llSetTimerEvent(0.0);
 }
@@ -751,6 +764,8 @@ default
         llListen(CHAN, "", llGetOwner(), "");
         llSetText("", <1.0, 1.0, 1.0>, 1.0);
         gShown = "";
+        gPrims = llGetObjectPrimCount(llGetKey());
+        llMessageLinked(LINK_SET, MSG_KIOSK, "?", NULL_KEY);
         llMessageLinked(LINK_THIS, MSG_HELLO, "", NULL_KEY);
     }
 
@@ -767,11 +782,28 @@ default
             if (gReq) { gReq = NULL_KEY; later(10); }
             pace();
         }
+        // A prim linked or unlinked, which may be a kiosk: the full text
+        // comes back until a kiosk says it is still here. Someone sitting
+        // down or standing up changes the links too, and the prims not at all.
+        if (c & CHANGED_LINK)
+            if (llGetObjectPrimCount(llGetKey()) != gPrims)
+            {
+                gPrims = llGetObjectPrimCount(llGetKey());
+                gKiosk = FALSE;
+                llMessageLinked(LINK_SET, MSG_KIOSK, "?", NULL_KEY);
+                hover();
+                pace();
+            }
     }
 
     link_message(integer sender, integer n, string str, key id)
     {
         if (n == MSG_TALK) { gTalk = str == "1"; hover(); return; }
+        if (n == MSG_KIOSK)
+        {
+            if (str == "here") { gKiosk = TRUE; hover(); pace(); }
+            return;
+        }
         if (n == MSG_ABOUT)
         {
             llScriptProfiler(PROFILE_SCRIPT_MEMORY);

@@ -1215,7 +1215,9 @@ The work, smallest first:
    fallback as the output page.
 9. **A kiosk screen beside the globe.** *Proposed 28 October, from a
    conversation with Eric about rebuilding the Science On a Sphere
-   building on NOAA's Virtual Island; not built.* Phase 2 put
+   building on NOAA's Virtual Island; its display half built the same
+   day as §9 Phase 5's step 2, and the catalog and touches still to
+   come.* Phase 2 put
    everything a visitor reads into the scripts: the title, date and
    credit in hover text, the abstract in a dialog, the catalog in
    dialog buttons. That is where most of its trouble came from. Every
@@ -2755,6 +2757,24 @@ Order, each step usable on its own:
    grammar) and the kiosk script showing it. The hover text turns off
    when a kiosk is linked. This alone answers the legend, the dated
    hover text and the 500-character abstract.
+   *Built 28 October; not yet tried in-world.* The page is
+   `/output/kiosk` (`src/output/kioskMain.ts`), its address the output
+   page's clock keys and no others
+   ([`EMBED_URL_GRAMMAR.md`](EMBED_URL_GRAMMAR.md), "The kiosk page").
+   The kiosk script (`terraviz-exhibit-kiosk.lsl`) is a sixth, optional
+   script, in the screen, and writes that address from the globe's
+   state message, which now goes to the whole object. The hover text
+   doesn't turn off entirely: it drops the title, the date and the
+   credit, which the screen shows in full, and keeps the telemetry
+   notice the privacy policy asks a measured globe to show where it
+   is, a talk, and how to touch the globe, none of which the page
+   says. The info script asks whether a kiosk is linked when it starts
+   and when a prim is linked or unlinked (`MSG_KIOSK`, 271012), and
+   stops working the date out every couple of seconds while one is.
+   About still gives the abstract, credit and licence in chat, and it
+   stays: the Section 508 review noted that a text-only viewer such as
+   Radegast shows no media, so for a resident using one the hover text
+   and chat are the whole exhibit.
 3. **The console's tap buttons.** No page change.
 4. **Motion.** One page PR (§7 item 10, with its grammar), then the hold
    buttons and the seat, under the sphere and inside it. The Phase 2
