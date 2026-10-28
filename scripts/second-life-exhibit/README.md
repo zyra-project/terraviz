@@ -25,7 +25,8 @@ globe that stays up all the time:
   in the animation, and a short credit. "About" in the menu gives the
   abstract, the full credit and the licence. A kiosk screen beside the
   globe, if you add one, shows all of that in full, with the dataset's
-  legend, and the floating text then leaves it to the screen.
+  legend, and the floating text then leaves the date and the credit to
+  the screen.
 - **It plays a dataset's sound.** The movies have sound tracks, which
   each visitor hears at their own viewer's media volume, fainter with
   distance from the globe. The owner can turn it off.
@@ -129,20 +130,32 @@ shows the page on.
    1. Rez a cube, and in the Object tab set its size to 2 (X), 0.05 (Y)
       and 1 (Z): twice as wide as it is high, since the page is drawn
       2048 by 1024. Place it beside the globe, where visitors can read
-      it.
-   2. In its Content tab, make a **New Script** and replace its text
-      with `terraviz-exhibit-kiosk.lsl`, saving it. The page goes on
-      face 1, the side facing −Y; turn the screen to face the visitors,
-      or set `FACE = 3` at the top of the script for the other side.
-   3. Link it to the sphere as you linked the cube in step 4, so the
-      sphere stays the root. Within a few seconds the screen shows what
-      the globe shows, and the floating text drops the title, the date
-      and the credit, which the screen shows in full. It keeps the
-      telemetry notice while telemetry is on, a talk, and
+      it. The page goes on face 1, the side facing −Y, so turn the
+      screen until that side faces the visitors.
+   2. Link it to the globe **with the screen as the root**: select the
+      sphere, then Shift-click the screen so it is selected last, and
+      choose Build → Link (Ctrl+L). The screen is outlined in yellow.
+      The globe script turns the prim it is in, so a sphere left as the
+      root would swing the screen round the globe with every tilt and
+      spin (the warning under "Things that will trip you up"). If the
+      globe is already part of a build with a stand or a floor as its
+      root, link the screen into that instead, with the root selected
+      last.
+   3. Say `/9 upright` (`/9 home` for a mesh globe), so the sphere's
+      rest is taken again in its new build.
+   4. Edit the screen (now the root, so its Content tab is the one the
+      build floater shows), make a **New Script** and replace its text
+      with `terraviz-exhibit-kiosk.lsl`, saving it. For the screen's
+      other side, set `FACE = 3` at the top of the script first.
+   5. Within a few seconds the screen shows what the globe shows, and
+      the floating text drops the date and the credit, which the screen
+      shows in full. It keeps the title, for anyone whose viewer shows
+      no media, the telemetry notice while telemetry is on, a talk, and
       "Right-click, Touch for more".
-   4. If you see nothing, check that shared media is on in your viewer,
-      and read what the script said in chat: it tells you if no globe
-      answered, or if Second Life refused the face.
+   6. If you see nothing, check that shared media is on in your viewer,
+      and read what the script said in chat: it tells you, after ten
+      seconds, if no globe answered, or at once if Second Life refused
+      the face.
 
 The media is deliberately not clickable, for anyone. A visitor who could
 click it could move it to another page, and their viewer would move it
@@ -540,11 +553,16 @@ stand at the globe.
     should be a colour bar with its units, where Earthquakes had an
     image. Choose Live Earth, and the screen should say what
     the live Earth is. The floating text should keep only the lines
-    step 7 of the setup names throughout. Unlink the screen: the full
-    floating text should come back within a second or two, and the
-    script should tell you that no globe answered. Say which viewer
-    showed the screen, and whether text on it is readable from where a
-    visitor stands.
+    step 7 of the setup names throughout. Turn the globe, tip a pole
+    toward you and stand it Upright again, `/9 spin 10` and
+    `/9 spin 0`: the screen should stay where it is throughout. Take
+    the object into your inventory and rez it again: the screen should
+    face the way it did. Then `/9 memory`: the info script's most is
+    the number to report, since the kiosk added to it. Unlink the
+    screen: the full floating text should come back at once, and after
+    ten seconds the kiosk script should tell you that no globe answered.
+    Say which viewer showed the screen, and whether text on it is
+    readable from where a visitor stands.
 
 When you report results, say which viewer and version (Help → About)
 each avatar used, and what steps 2, 9, 11 and 12 showed.
@@ -562,7 +580,8 @@ each avatar used, and what steps 2, 9, 11 and 12 showed.
   nothing either way.
 - **Put the globe's four scripts in the sphere, and in a build make
   the sphere a child prim.** A tilt turns the prim the scripts are in, so as the root
-  of a build, with a stand linked to it, the whole build would tip. The
+  of a build, with a stand or a kiosk screen linked to it, the whole
+  build would tip, and a spin would swing the screen round the globe. The
   menu script's cube can be linked anywhere in the build, the root
   included; the scripts find each other across the whole object. One
   exhibit to an object, though: two globes linked into one build would
@@ -573,9 +592,10 @@ each avatar used, and what steps 2, 9, 11 and 12 showed.
   after ten seconds. Update the globe script, and reset the kiosk script.
 - **Unlink a kiosk to retire it, rather than deleting its script.** The
   info script asks whether a kiosk is there when it starts and when a
-  prim is linked or unlinked, so a kiosk script deleted from a screen
-  still linked leaves the floating text short until the info script is
-  reset.
+  prim is linked or unlinked, so a kiosk script deleted, stopped or
+  stuck in a screen still linked leaves the floating text short of its
+  date and credit until the info script is reset or a prim is next
+  linked or unlinked.
 - **Keep the menu script out of the sphere.** In the sphere with the
   other four, its pages of the node's catalog would reach the info
   script too, which has little room to spare while it reads a card. So

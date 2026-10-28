@@ -24,19 +24,24 @@
 // the globe shows. Every visitor's viewer loads the page for itself and
 // reads the same address, so everyone at the screen sees the same thing,
 // and nothing about a visitor goes in it. The page plays no video and
-// draws no globe, so it costs a visitor little.
+// draws no globe, so it costs a visitor little. Its `t` can differ from
+// the globe's own by a millisecond, a rounding of the state's six-decimal
+// position, which moves the date only when a frame begins inside it.
 //
-// While a kiosk is linked, the info script leaves the title, the date and
-// the credit out of the floating text over the globe, since the screen
-// shows them in full. It asks whether a kiosk is linked when it starts
-// and when a prim is linked or unlinked, and this script answers, and
-// says so itself when it starts.
+// While a kiosk shows the page, the info script leaves the date and the
+// credit out of the floating text over the globe, since the screen shows
+// them in full, and keeps the title for a visitor whose viewer shows no
+// media. It asks whether a kiosk is linked when it starts and when a prim
+// is linked or unlinked, and this script answers once its face has taken
+// the page, and says so then itself.
 //
-// Like the globe's, the screen's page takes no clicks from anyone: a
-// visitor who could click it could move it to another page, and their
-// viewer would move it for everyone near it. This script takes no touches
-// either, so a touch on the screen goes where a touch on the build's root
-// prim goes, the globe's menu when the sphere is the root.
+// Link the screen as the root of the build, with the sphere a child: the
+// globe script turns the prim it is in, and as the root it would swing
+// the screen round with every tilt and spin. Like the globe's, the
+// screen's page takes no clicks from anyone: a visitor who could click it
+// could move it to another page, and their viewer would move it for
+// everyone near it. This script takes no touches either, so a touch on
+// the screen does nothing yet; touches come in a later step.
 //
 // MORE
 //   Setting up the exhibit, the kiosk included:
@@ -69,6 +74,7 @@ float   WAIT = 10.0;
 
 string  gWant;          // the address the globe's latest state calls for
 string  gShown;         // the address on the face
+integer gLive;          // the face has taken the page, so the floating text can leave it the title's company
 integer gPrims;         // the object's prims, not counting anyone sitting on it
 
 // The globe script's num(), which exhibit.test.ts holds equal to it: a
@@ -120,12 +126,14 @@ string address(string str)
 // Puts the address the globe's latest state calls for on the face, with
 // every setting every time, as the globe script does: a face given only
 // an address takes media's defaults for the rest, which let anyone click
-// it. The call sleeps this script for a second.
+// it. The call sleeps this script for a second. Only an address the face
+// took counts as shown, so one refused is tried again with the next
+// state; and the info script is told a kiosk is here only once a face
+// has taken one, since until then nothing shows what it would leave out.
 show()
 {
     llSetTimerEvent(0.0);
     if (gWant == gShown) return;
-    gShown = gWant;
     string url = gWant;
     list p = [PRIM_MEDIA_CURRENT_URL, url, PRIM_MEDIA_HOME_URL, url,
         PRIM_MEDIA_AUTO_PLAY, TRUE,
@@ -138,8 +146,17 @@ show()
         PRIM_MEDIA_PERMS_CONTROL, PRIM_MEDIA_PERM_NONE];
     integer r = llSetPrimMediaParams(FACE, p);
     if (r != STATUS_OK)
+    {
         llOwnerSay("[exhibit] Kiosk: Second Life refused the media on face " + (string)FACE + " (status "
             + (string)r + "). Set FACE, at the top of the kiosk script, to the screen's face.");
+        return;
+    }
+    gShown = url;
+    if (!gLive)
+    {
+        gLive = TRUE;
+        llMessageLinked(LINK_SET, MSG_KIOSK, "here", NULL_KEY);
+    }
 }
 
 default
@@ -147,7 +164,6 @@ default
     state_entry()
     {
         gPrims = llGetObjectPrimCount(llGetKey());
-        llMessageLinked(LINK_SET, MSG_KIOSK, "here", NULL_KEY);
         llMessageLinked(LINK_SET, MSG_HELLO, "", NULL_KEY);
         llSetTimerEvent(WAIT);
     }
@@ -168,7 +184,7 @@ default
     {
         if (n == MSG_KIOSK)
         {
-            if (str == "?") llMessageLinked(LINK_SET, MSG_KIOSK, "here", NULL_KEY);
+            if (str == "?" && gLive) llMessageLinked(LINK_SET, MSG_KIOSK, "here", NULL_KEY);
             return;
         }
         if (n != MSG_STATE) return;

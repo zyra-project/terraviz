@@ -29,11 +29,13 @@
 //   48 where both fit, the title's first where they don't, and either is
 //   cut with "..." when it has to be. Nothing else is cut, so the notice
 //   is never lost.
-//   While a kiosk screen is linked (terraviz-exhibit-kiosk.lsl), the
-//   title, the date and the credit are left out, since the screen shows
-//   them in full, and the date stops being worked out every couple of
-//   seconds. This script asks whether a kiosk is linked when it starts
-//   and when a prim is linked or unlinked, and the kiosk answers.
+//   While a kiosk screen linked to the globe shows its page
+//   (terraviz-exhibit-kiosk.lsl), the date and the credit are left out,
+//   since the screen shows them in full, and the date stops being worked
+//   out every couple of seconds. The title stays, for a visitor whose
+//   viewer shows no media. This script asks whether a kiosk is there when
+//   it starts and when a prim is linked or unlinked, and the kiosk
+//   answers once its face has taken the page.
 // - "About", from the touch menu. If the globe holds a notecard named by
 //   the dataset's id, the visitor is given it. Otherwise they get the
 //   abstract, the full credit, the licence and a link to the dataset's
@@ -119,7 +121,7 @@ integer gPaused;
 integer gTelemetry;
 string  gNode;
 integer gTalk;
-integer gKiosk;        // a kiosk is linked, which shows the title, the date and the credit in full
+integer gKiosk;        // a linked kiosk shows the page, with the date and the credit in full
 integer gPrims;        // the object's prims, not counting anyone sitting on it
 
 // What the node's card says about it.
@@ -450,9 +452,10 @@ hover()
             stamp = date();
         }
     }
-    // A linked kiosk shows the title, the date and the credit in full,
-    // so they are left out here, and what the kiosk doesn't say stays.
-    if (gKiosk) { title = ""; stamp = ""; credit = ""; }
+    // A kiosk shows the date and the credit in full, so they are left out
+    // here. The title stays, for a visitor whose viewer shows no media,
+    // and so does what the kiosk doesn't say.
+    if (gKiosk) { stamp = ""; credit = ""; }
     string tail = "";
     if (stamp != "") tail += "\n" + stamp;
     if (gTelemetry) tail += "\nCounts anonymous use: " + gNode + "/privacy";
@@ -478,8 +481,6 @@ hover()
     string s = title + tail;
     if (credit != "") s += "\n" + credit;
     s += end;
-    // With no title, the line break that would follow it leads.
-    if (gKiosk) s = llDeleteSubString(s, 0, 0);
     if (bytes(s) > 254) s = fit(s, 254);
     if (s == gShown) return;
     gShown = s;
@@ -786,14 +787,17 @@ default
         // comes back until a kiosk says it is still here. Someone sitting
         // down or standing up changes the links too, and the prims not at all.
         if (c & CHANGED_LINK)
-            if (llGetObjectPrimCount(llGetKey()) != gPrims)
+        {
+            integer prims = llGetObjectPrimCount(llGetKey());
+            if (prims != gPrims)
             {
-                gPrims = llGetObjectPrimCount(llGetKey());
+                gPrims = prims;
                 gKiosk = FALSE;
                 llMessageLinked(LINK_SET, MSG_KIOSK, "?", NULL_KEY);
                 hover();
                 pace();
             }
+        }
     }
 
     link_message(integer sender, integer n, string str, key id)

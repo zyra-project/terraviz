@@ -2762,19 +2762,22 @@ Order, each step usable on its own:
    page's clock keys and no others
    ([`EMBED_URL_GRAMMAR.md`](EMBED_URL_GRAMMAR.md), "The kiosk page").
    The kiosk script (`terraviz-exhibit-kiosk.lsl`) is a sixth, optional
-   script, in the screen, and writes that address from the globe's
-   state message, which now goes to the whole object. The hover text
-   doesn't turn off entirely: it drops the title, the date and the
-   credit, which the screen shows in full, and keeps the telemetry
+   script, in the screen, which is linked as the build's root, since
+   the globe script turns the prim it is in and as the root would swing
+   the screen round with every tilt. It writes that address from the
+   globe's state message, which now goes to the whole object. The hover
+   text doesn't turn off entirely: it drops the date and the credit,
+   which the screen shows in full, and keeps the title, the telemetry
    notice the privacy policy asks a measured globe to show where it
-   is, a talk, and how to touch the globe, none of which the page
-   says. The info script asks whether a kiosk is linked when it starts
-   and when a prim is linked or unlinked (`MSG_KIOSK`, 271012), and
-   stops working the date out every couple of seconds while one is.
-   About still gives the abstract, credit and licence in chat, and it
-   stays: the Section 508 review noted that a text-only viewer such as
-   Radegast shows no media, so for a resident using one the hover text
-   and chat are the whole exhibit.
+   is, a talk, and how to touch the globe. The title stays because the
+   Section 508 review noted that a text-only viewer such as Radegast
+   shows no media, so for a resident using one, or anyone with media
+   off, the hover text and chat are the whole exhibit; About still
+   gives the abstract, credit and licence in chat for the same reason.
+   The info script asks whether a kiosk is there when it starts and
+   when a prim is linked or unlinked (`MSG_KIOSK`, 271012), the kiosk
+   answers only once its face has taken the page, and the date stops
+   being worked out every couple of seconds while one does.
 3. **The console's tap buttons.** No page change.
 4. **Motion.** One page PR (§7 item 10, with its grammar), then the hold
    buttons and the seat, under the sphere and inside it. The Phase 2

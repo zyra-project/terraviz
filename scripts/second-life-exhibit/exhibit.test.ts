@@ -1544,39 +1544,44 @@ describe("the exhibit's kiosk screen", () => {
 
   it('hears the globe wherever it is linked, and asks for what it missed when it starts', () => {
     expect(body(globe, 'broadcast()')).toContain('llMessageLinked(LINK_SET, MSG_STATE, ')
-    expect(kiosk).toMatch(/state_entry\(\)\n\s+\{\n\s+gPrims = llGetObjectPrimCount\(llGetKey\(\)\);\n\s+llMessageLinked\(LINK_SET, MSG_KIOSK, "here", NULL_KEY\);\n\s+llMessageLinked\(LINK_SET, MSG_HELLO, "", NULL_KEY\);\n\s+llSetTimerEvent\(WAIT\);/)
+    expect(kiosk).toMatch(/state_entry\(\)\n\s+\{\n\s+gPrims = llGetObjectPrimCount\(llGetKey\(\)\);\n\s+llMessageLinked\(LINK_SET, MSG_HELLO, "", NULL_KEY\);\n\s+llSetTimerEvent\(WAIT\);/)
     // Linked or unlinked, it starts over; someone sitting down doesn't count.
     expect(kiosk).toMatch(/if \(c & CHANGED_LINK\)\n\s+if \(llGetObjectPrimCount\(llGetKey\(\)\) != gPrims\) llResetScript\(\);/)
     // A burst of changes is one change of media, and a globe that never
     // speaks is reported to the owner.
     expect(kiosk).toContain('if (gWant != gShown) llSetTimerEvent(0.2);')
     expect(kiosk).toMatch(/timer\(\)\n\s+\{\n\s+if \(gWant != ""\) \{ show\(\); return; \}\n\s+llSetTimerEvent\(0\.0\);\n\s+llOwnerSay\(/)
-    expect(body(kiosk, 'show()')).toMatch(/\{\n\s+llSetTimerEvent\(0\.0\);\n\s+if \(gWant == gShown\) return;\n\s+gShown = gWant;/)
+    // Only an address the face took counts as shown, so a refused one is
+    // tried again with the next state.
+    const show = body(kiosk, 'show()')
+    expect(show).toMatch(/\{\n\s+llSetTimerEvent\(0\.0\);\n\s+if \(gWant == gShown\) return;\n\s+string url = gWant;/)
+    expect(show).toMatch(/if \(r != STATUS_OK\)\n\s+\{\n\s+llOwnerSay\([^;]+;\n\s+return;\n\s+\}\n\s+gShown = url;/)
+    expect(all(kiosk, /(gShown = \w+);/g)).toEqual(['gShown = url'])
   })
 
-  it("takes the title, date and credit out of the floating text while a kiosk answers, and keeps the rest", () => {
+  it("takes the date and credit out of the floating text while a kiosk shows them, and keeps the rest", () => {
     // The info script asks when it starts and when the prims change, and
     // shows the full text until a kiosk answers. Only "here" says one is.
     expect(info).toMatch(/gPrims = llGetObjectPrimCount\(llGetKey\(\)\);\n\s+llMessageLinked\(LINK_SET, MSG_KIOSK, "\?", NULL_KEY\);/)
-    expect(info).toMatch(/if \(c & CHANGED_LINK\)\n\s+if \(llGetObjectPrimCount\(llGetKey\(\)\) != gPrims\)\n\s+\{\n\s+gPrims = llGetObjectPrimCount\(llGetKey\(\)\);\n\s+gKiosk = FALSE;\n\s+llMessageLinked\(LINK_SET, MSG_KIOSK, "\?", NULL_KEY\);\n\s+hover\(\);\n\s+pace\(\);/)
+    expect(info).toMatch(/if \(c & CHANGED_LINK\)\n\s+\{\n\s+integer prims = llGetObjectPrimCount\(llGetKey\(\)\);\n\s+if \(prims != gPrims\)\n\s+\{\n\s+gPrims = prims;\n\s+gKiosk = FALSE;\n\s+llMessageLinked\(LINK_SET, MSG_KIOSK, "\?", NULL_KEY\);\n\s+hover\(\);\n\s+pace\(\);/)
     expect(info).toContain('if (str == "here") { gKiosk = TRUE; hover(); pace(); }')
     expect(all(info, /gKiosk = (\w+);/g).sort()).toEqual(['FALSE', 'TRUE'])
-    expect(kiosk).toContain('if (str == "?") llMessageLinked(LINK_SET, MSG_KIOSK, "here", NULL_KEY);')
-    // What goes, before the lines are laid out; the telemetry notice the
-    // privacy policy asks for, a talk and how to touch the globe stay.
+    // The kiosk says it is here only once its face has taken the page,
+    // since until then nothing shows what the floating text leaves out.
+    expect(kiosk).toContain('if (str == "?" && gLive) llMessageLinked(LINK_SET, MSG_KIOSK, "here", NULL_KEY);')
+    expect(body(kiosk, 'show()')).toMatch(/gShown = url;\n\s+if \(!gLive\)\n\s+\{\n\s+gLive = TRUE;\n\s+llMessageLinked\(LINK_SET, MSG_KIOSK, "here", NULL_KEY\);/)
+    expect(all(kiosk, /llMessageLinked\(LINK_SET, MSG_KIOSK, "(\w+)"/g)).toEqual(['here', 'here'])
+    // What goes, before the lines are laid out: the date and the credit.
+    // The title stays, for a visitor whose viewer shows no media, and so
+    // do the telemetry notice the privacy policy asks for, a talk and how
+    // to touch the globe; the layout is the one held to 254 bytes above.
     const hover = body(info, 'hover()')
-    const cleared = hover.indexOf('if (gKiosk) { title = ""; stamp = ""; credit = ""; }')
+    const cleared = hover.indexOf('if (gKiosk) { stamp = ""; credit = ""; }')
     expect(cleared).toBeGreaterThan(-1)
     expect(cleared).toBeLessThan(hover.indexOf('string tail = "";'))
     expect(hover.slice(cleared)).toContain('if (gTelemetry) tail += "\\nCounts anonymous use: " + gNode + "/privacy";')
-    expect(hover).toMatch(/s \+= end;\n(?:\s+\/\/.*\n)*\s+if \(gKiosk\) s = llDeleteSubString\(s, 0, 0\);\n\s+if \(bytes\(s\) > 254\)/)
     // The date isn't worked out every couple of seconds for nobody.
     expect(body(info, 'pace()')).toContain('integer moving = !gKiosk && ')
-    // All of what stays fits, whole, on the longest node address the README names.
-    const string = (name: string) => JSON.parse(constant(info, 'string', name)) as string
-    const preview = `https://${'a'.repeat(28)}.terraviz.pages.dev`
-    const kept = `Counts anonymous use: ${preview}/privacy\n${string('TALK_LINE')}\n${string('TOUCH_LINE')}`
-    expect(bytes(kept)).toBeLessThanOrEqual(254)
   })
 
   it("reads the node's own card and record, as the producers write them", () => {
