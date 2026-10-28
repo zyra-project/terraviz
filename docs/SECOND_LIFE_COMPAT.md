@@ -17,7 +17,12 @@ you don't need it. Every claim about TerraViz cites a file and line.
 Every claim about Second Life cites a public source, the viewer's
 source code, or a test result in §4, all collected in §11.
 
-**Last reviewed:** 2026-10-25 (in-world: the exhibit controller from
+**Last reviewed:** 2026-10-28 (design only, from a conversation with
+Eric about rebuilding the Science On a Sphere building on NOAA's
+Virtual Island: a kiosk screen, motion in the address and both sides of
+a sphere as §7 items 9–11, an exhibit console of buttons, a pilot's
+seat and optional trackball as §9 Phase 5, four non-goals in §8, and
+§10 questions 14–19. Nothing in it is built.) 2026-10-25 (in-world: the exhibit controller from
 #500 ran, and its scripts ran out of their 64 KB, first the globe
 script and then the info script; fixed in #501, and §9 Phase 2's status
 note updated. The same day, the page camera of §7 item 7 and §9 Phase 4
@@ -1743,6 +1748,23 @@ Written down so these don't get re-proposed in six months.
 - **Patching around #5189 inside TerraViz.** Nothing here reproduced
   it, and there is nothing in TerraViz to change if it does fire — it
   is a crash in the viewer's own embedded browser.
+- **A trackball run by Second Life physics.** A physical ball held in
+  place by `llMoveToTarget` should spin when someone grabs it
+  off-centre, but the grab and the hold fight, so it feels springy;
+  avatars walking into it push it; a grab that wins throws it across
+  the region; and only the region simulates it, so a script would still
+  have to read the spin and pass it on. The momentum belongs in the
+  page, where every copy computes it alike (§9 Phase 5, "A trackball").
+- **A kiosk that each visitor browses and sends from.** Sending would
+  have to be a navigation, which reloads everyone's kiosk and arrives
+  with no name, so the hold and talk rules couldn't apply (§7 item 9).
+  A visitor who wants to explore on their own has the full app on a
+  flat panel (Option E).
+- **Double-sided materials for the inside of a sphere.** One picture on
+  both sides reads mirrored from inside. A hollow sphere's own inside
+  face does it instead (§7 item 11).
+- **Visitors' names on the kiosk or in any address.** "The controls are
+  held" is shown; who holds them stays in the object.
 
 ---
 
@@ -2495,6 +2517,9 @@ clunky for presenting:
   Turn east and Turn west, all moving that one camera. The Phase 2
   tilt comes out then. The globe script should keep `lat` within ±90
   itself, since the page reads a latitude past a pole as 0.
+  *Superseded on 28 October by Phase 5's console, whose hold buttons
+  move the same camera through §7 item 10's motion keys. The `lat`
+  clamp and the tilt's removal carry over.*
 - **A presenter remote.** A TerraViz globe the presenter drags and
   zooms like the app, opened from a private link the globe gives them,
   in their own browser, the viewer's built-in one or a HUD. It sends its
@@ -2504,6 +2529,117 @@ clunky for presenting:
   it, a probe settles whether a page in the viewer's browser can reach
   that address and whether the viewer's browser runs the full app; if
   not, the remote goes through the node instead.
+
+**Phase 5 — the exhibit console** (§7 items 9–11). *Proposed 28
+October; not built.* The Phase 2 menu works, but it is a dialog of
+twelve text buttons, and it is the part visitors find clunky. Phase 5
+replaces it with things in the world: a kiosk screen to read, buttons
+to press, and a seat to steer from. Every control still goes through
+the visitors script's hold and talk rules, as the menu's do now, and
+every touch still names the avatar who made it, which is what those
+rules need and what a page can't supply (§7 item 9).
+- **The kiosk screen.** A flat prim showing §7 item 9's page, with a
+  clear prim laid over it to catch touches. The clear prim is there
+  because whether a left-click on a face showing media reaches a script
+  is still unconfirmed (§10 question 14). A clear prim shows no media,
+  so its touches are ordinary ones: `llDetectedTouchST` says where on
+  the screen and `llDetectedKey` says who. The kiosk script maps the
+  spot to the region the page drew there, from the table both carry,
+  and acts. The menu script becomes the kiosk script: it already lives
+  in a child prim and already reads pages of the list, and as a kiosk it
+  carries ids and no titles, since the page draws them. It writes the
+  kiosk's own address, so its one-second sleep runs beside the globe
+  script's rather than after it.
+- **A button console.** Buttons where a control is one action, and
+  hold buttons where it is a motion:
+
+  | Control | Form | What it writes |
+  |---|---|---|
+  | Play/pause, step back and forward, slower and faster | Tap | The clock keys that exist (`paused`, `t`, `rate`) |
+  | The live Earth, previous and next dataset, home view | Tap | One address change each, as the menu does now |
+  | Turn east, west, north and south; zoom in and out | Hold | §7 item 10's motion keys: a rate on press, a stop on release |
+  | The catalog | The kiosk screen | Too many items for buttons |
+
+  - **Feedback is immediate even though the globe is not.** A button
+    glows and sinks the moment it is pressed, since changing a prim's
+    glow or position doesn't sleep a script, so the second the media
+    change takes is hidden behind it. A press the rules refuse (someone
+    else holds the controls, or a talk is on) flashes the button red,
+    where today it is a line in chat.
+  - **One script for the whole console**, finding each button by its
+    link name, so buttons can be added or moved without editing it.
+  - **Icons from one texture sheet**, each button showing its own cell
+    through texture offsets: one upload (§10 question 3), and no hover
+    text.
+  - **A lost release can't spin the globe forever.** `touch` repeats
+    for as long as a button is held. If it stops arriving without a
+    `touch_end`, because the visitor crashed or teleported, the console
+    sends the stop itself.
+- **A pilot's seat for presenters.** Sitting on an object grants its
+  script the sitter's keys without asking (`llTakeControls`), and the
+  `control` event fires for as long as a key is held. Arrows turn the
+  globe and Page Up and Page Down zoom; in mouselook the left and right
+  arrows arrive as strafing and are read as turning too. It is the
+  most responsive control here, it works in every viewer, and it has
+  one operator by construction, which is what the hold rule otherwise
+  has to enforce. During a talk it answers only a presenter.
+- **Optional, only if buttons feel coarse:**
+  - *A trackball.* Not Second Life physics (§8). The script reads the
+    drag: `touch` repeats while the button is held, `llDetectedTouchPos`
+    gives the point under the pointer, and the angle between successive
+    points is the turn. A flick hands over a rate that decays, and the
+    ball spins at the same rate with `llTargetOmega`, drawn by each
+    viewer, so the ball and the picture visibly move together. A live
+    mini-globe on the ball waits on §10 question 14, since its clicks
+    would land on media.
+  - *A zoom lever* swinging on a hinge, with detents at a few zoom
+    levels. It writes the `zoom` the page already takes, and the glide
+    makes one change a second look smooth, so it needs no motion keys.
+  - *A time slider* for scrubbing through a season (`t`), and a shuttle
+    dial for speed (`rate`), both through clock keys that exist.
+- **What the scripts shed.** The info script loses the hover text, the
+  card and the abstract, keeping only the clip length the clock needs,
+  which ends most of the memory pressure Phase 2 fought. The globe
+  script gains the motion keys, so the owner commands move to a fifth
+  script first, as Phase 4 already planned. The globe's state message
+  goes to the whole object (`LINK_SET`) instead of its own prim
+  (`LINK_THIS`), so the kiosk prim hears it. The dialog stays for the
+  owner's commands and as a fallback for visitors.
+- **Linked or separate.** A console and kiosk linked to the globe talk
+  to it by link message, the simplest case and the first one built.
+  Linking a large phantom sphere makes the whole linked object phantom,
+  which is fine for screens, buttons and a seat but not for a floor
+  (§7 item 11). A kiosk in a separate object, such as one in the room
+  below a rooftop sphere, would talk by region chat to the globe's own
+  key, with an owner check; that waits for a building that needs it.
+- **The furniture.** The kiosk, console, seat and stand should look
+  like TerraViz rather than like default prims: mesh in the app's own
+  look, designed alongside this phase. A brief for it follows
+  separately.
+
+Order, each step usable on its own:
+1. **Free the globe script.** The owner commands move to a fifth
+   script. Nothing visible changes.
+2. **The kiosk, display only.** One page PR (§7 item 9, with its
+   grammar) and the kiosk script showing it. The hover text turns off
+   when a kiosk is linked. This alone answers the legend, the dated
+   hover text and the 500-character abstract.
+3. **The console's tap buttons.** No page change.
+4. **Motion.** One page PR (§7 item 10, with its grammar), then the hold
+   buttons and the seat. The Phase 2 tilt comes out.
+5. **Touch on the kiosk.** The catalog grid replaces the visitor menu.
+6. **The copy script** (§7 item 11): the inside of a hollow sphere and
+   a flat map panel. Independent of the rest, so it can come at any
+   time once the flip is checked in-world (§10 question 17).
+7. **The optional controls**, if the buttons turn out coarse.
+
+Reviewers: the TerraViz Federation Reviewer for each grammar change,
+the Internationalization Engineer and the Section 508 Accessibility
+Specialist for the kiosk page, the Science Communicator for its text,
+the Code Reviewer for the scripts, and the analytics reviewer if the
+kiosk ever reports anything. The presenter remote in Phase 4 is not
+replaced: it is the way to steer from outside the world, and the seat
+is the way to steer from inside it.
 
 Options B and D only if a host needs what they uniquely offer: phones
 or no-browser exhibits for B, a self-hosted world for D.
@@ -2616,6 +2752,37 @@ Numbering is kept from the first version, so a reference like
     has. Firestorm may differ. §7 item 4 says why the clock keeps a
     field in step anyway.
 
+Questions 14–19 come from §9 Phase 5 (28 October). Each is one
+in-world check, and each decides a design choice rather than whether
+the phase works.
+
+14. **Does a left-click on a face showing media reach a script?** The
+    viewer's source says it goes to the media, and only right-click →
+    Touch reaches the script (§7 item 4's controller notes). Phase 2's
+    checklist carries the test. If left-clicks do arrive on
+    non-interactive media, the kiosk needs no clear prim over it and a
+    trackball can wear a live mini-globe.
+15. **How often does `touch` fire during a drag?** It decides whether a
+    trackball follows the hand or steps behind it, and how long a held
+    button can go unheard before the console decides its release was
+    lost.
+16. **Does a seat hand over the arrow keys as expected**, in mouselook
+    as well as out of it, and on the official viewer as well as
+    Firestorm?
+17. **Does media follow a negative horizontal repeat on a hollow
+    sphere's inside face?** If not, the inside needs a `mirror` key on
+    the page (§7 item 11). The same session finds the inside face's
+    number, by a touch script reporting `llDetectedTouchFace`.
+18. **Does a visitor inside a hollow sphere also run the outside's
+    page?** The outside is drawn from one side and can't be seen from
+    in there, but whether the viewer ranks it as hidden (question 13)
+    or keeps it running decides whether being inside costs a visitor
+    one browser or two.
+19. **Can a 25 m phantom sphere be linked to a kiosk in the room below
+    it?** Second Life limits how far apart linked prims can be by their
+    sizes. If it can't, the kiosk talks to the globe by region chat
+    (§9 Phase 5, "Linked or separate") sooner than planned.
+
 ---
 
 ## 11. Evidence
@@ -2658,7 +2825,12 @@ Numbering is kept from the first version, so a reference like
 **Constraints**
 - [secondlife/viewer#5189](https://github.com/secondlife/viewer/issues/5189) — the WebGL crash; filed by a Linden Lab developer 28 Dec 2025; `SLPlugin.exe` access violation in `libcef.dll`; CEF 139.0.7258.139, Dullahan 1.24.0; reproduced with the WebGL Aquarium; still open and unassigned as of 23 Oct 2026, stale-labelled Feb 2026
 - [Project Valhalla, 2015](https://modemworld.me/2015/10/08/vallhalla-cef-comes-to-second-life/) — Chrome comes to Second Life's shared media, with a WebGL promise
-- [`llSetPrimMediaParams`](https://wiki.secondlife.com/wiki/LlSetPrimMediaParams) — size parameters, whitelist cap, one-face-per-call, permissions
+- [`llSetPrimMediaParams`](https://wiki.secondlife.com/wiki/LlSetPrimMediaParams) — size parameters, whitelist cap, one-face-per-call, permissions, and a one-second script sleep per call
+- [`llDialog`](https://wiki.secondlife.com/wiki/LlDialog) — at most 12 buttons, each label at most 24 bytes
+- [`llDetectedTouchST`](https://wiki.secondlife.com/wiki/LlDetectedTouchST), [`llDetectedTouchPos`](https://wiki.secondlife.com/wiki/LlDetectedTouchPos), [`llDetectedTouchFace`](https://wiki.secondlife.com/wiki/LlDetectedTouchFace) and the [`touch`](https://wiki.secondlife.com/wiki/Touch) event — where on a face a touch landed, and a `touch` event repeated for as long as the button is held
+- [`llTakeControls`](https://wiki.secondlife.com/wiki/LlTakeControls) and [`llRequestPermissions`](https://wiki.secondlife.com/wiki/LlRequestPermissions) — an avatar sitting on the object grants `PERMISSION_TAKE_CONTROLS` without a dialog; the `control` event reports held keys
+- [`changed`](https://wiki.secondlife.com/wiki/Changed) — `CHANGED_MEDIA` when media on the prim is added, changed or removed
+- [`llScaleTexture`](https://wiki.secondlife.com/wiki/LlScaleTexture) — repeats per face; a negative repeat flips the texture
 - [`llHTTPRequest`](https://wiki.secondlife.com/wiki/LlHTTPRequest) — reply and request size limits, rate limits, timeout, header rules
 - [`llJsonGetValue`](https://wiki.secondlife.com/wiki/LlJsonGetValue) — native JSON parsing in LSL since 20 May 2013 (server 13.05.20)
 - [`llSetContentType`](https://wiki.secondlife.com/wiki/LlSetContentType) and [`llHTTPResponse`](https://wiki.secondlife.com/wiki/LlHTTPResponse) — a script-served page renders as HTML only for the object's owner, in their viewer, in the same region; no size limit beyond script memory; 25 seconds to answer
