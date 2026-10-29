@@ -1542,9 +1542,72 @@ describe("the exhibit's kiosk screen", () => {
     expect(KIOSK_STAGE.width).toBeLessThanOrEqual(2048)
   })
 
+  it('takes over a face that had media before, as the globe does', () => {
+    // A face that had media keeps every setting it isn't given, so a list
+    // of allowed sites left on would block the node's address. It is turned
+    // off first, before the address it would be checked against, and should
+    // the simulator have checked the old list anyway, the face's media is
+    // cleared and set once more, before a refusal is reported.
+    for (const [name, fn] of [['globe', 'integer setMedia()'], ['kiosk', 'show()']] as const) {
+      const media = body(SCRIPTS[name], fn)
+      const sent = media.match(/list p = \[([\s\S]*?)\];/)?.[1] ?? ''
+      expect(sent.trimStart(), name).toMatch(/^PRIM_MEDIA_WHITELIST_ENABLE, FALSE,\s+PRIM_MEDIA_CURRENT_URL, url,/)
+      expect(media, name).toMatch(
+        /integer r = llSetPrimMediaParams\(FACE, p\);\n\s+if \(r == STATUS_WHITELIST_FAILED\)\n\s+\{\n\s+llClearPrimMedia\(FACE\);\n\s+r = llSetPrimMediaParams\(FACE, p\);\n\s+\}\n\s+if \(r != STATUS_OK\)/,
+      )
+    }
+  })
+
+  it("draws the page once across the face, says what it changed, and leaves the rest", () => {
+    const fit = body(kiosk, 'string fit()')
+    // Repeats, offset, rotation and mapping are each set only when off,
+    // since each change sleeps the script, each to a new box's, and each
+    // with what it was, for the owner to put back.
+    expect(fit).toContain('llGetPrimitiveParams([PRIM_TEXTURE, FACE, PRIM_TEXGEN, FACE])')
+    expect(fit).toMatch(/if \(v\.x != 1\.0 \|\| v\.y != 1\.0\)\n\s+\{\n\s+llScaleTexture\(1\.0, 1\.0, FACE\);\n\s+had \+= "repeats "/)
+    expect(fit).toMatch(/if \(v\.x != 0\.0 \|\| v\.y != 0\.0\)\n\s+\{\n\s+llOffsetTexture\(0\.0, 0\.0, FACE\);\n\s+had \+= "offset "/)
+    expect(fit).toMatch(/if \(turn != 0\.0\)\n\s+\{\n\s+llRotateTexture\(0\.0, FACE\);\n\s+had \+= "rotation "/)
+    expect(fit).toMatch(/if \(llList2Integer\(t, 4\) != PRIM_TEXGEN_DEFAULT\)\n\s+\{\n\s+llSetLinkPrimitiveParamsFast\(LINK_THIS, \[PRIM_TEXGEN, FACE, PRIM_TEXGEN_DEFAULT\]\);\n\s+had \+= "planar mapping";/)
+    // Nothing else about the prim is set: not the texture itself, its
+    // colour, transparency, glow or material. Only these setters appear,
+    // and the one parameter list set is the mapping's.
+    expect(new Set(all(kiosk, /\b(llSet\w*|llClear\w*|llScale\w*|llOffset\w*|llRotate\w*)\(/g))).toEqual(
+      new Set(['llSetTimerEvent', 'llSetPrimMediaParams', 'llClearPrimMedia', 'llScaleTexture', 'llOffsetTexture', 'llRotateTexture', 'llSetLinkPrimitiveParamsFast']),
+    )
+    expect(kiosk.match(/llSetLinkPrimitiveParamsFast\(/g)).toHaveLength(1)
+    expect(kiosk).toContain('llSetLinkPrimitiveParamsFast(LINK_THIS, [PRIM_TEXGEN, FACE, PRIM_TEXGEN_DEFAULT]);')
+    // Only a face that took the page is fitted, once a start, and the owner
+    // is told then which face it is, what was changed, and whether the
+    // face's colour or a PBR material would spoil the page.
+    const show = body(kiosk, 'show()')
+    const live = show.slice(show.indexOf('if (!gLive)'))
+    expect(show.indexOf('if (!gLive)')).toBeGreaterThan(show.indexOf('gShown = url;'))
+    expect(kiosk.match(/\bfit\(\);/g)).toHaveLength(1)
+    expect(live).toContain('"[exhibit] Kiosk: showing the page on face " + (string)FACE + "." + fit();')
+    expect(live).toContain('llGetPrimitiveParams([PRIM_COLOR, FACE, PRIM_RENDER_MATERIAL, FACE])')
+    expect(live).toContain('if (llList2Vector(c, 0) != <1.0, 1.0, 1.0> || llList2Float(c, 1) < 1.0)')
+    expect(live).toContain('if (m != "" && m != NULL_KEY)')
+    expect(live).toMatch(/\n\s+llOwnerSay\(say\);\n\s+\}$/)
+  })
+
+  it("waits, and says why, when FACE isn't one of the prim's faces", () => {
+    // A face the prim doesn't have isn't always refused, so the script
+    // checks before it asks the globe for anything.
+    expect(kiosk).toMatch(
+      /state_entry\(\)\n\s+\{\n(\s+\/\/[^\n]*\n)*\s+if \(FACE < 0 \|\| FACE >= llGetNumberOfSides\(\)\)\n\s+\{\n\s+llOwnerSay\([^;]+;\n\s+state noFace;\n\s+\}\n\s+gPrims = /,
+    )
+    // It waits for the script to be saved with another FACE, or for the
+    // prim's shape, and with it its faces, to change.
+    const waiting = kiosk.slice(kiosk.indexOf('\nstate noFace\n'))
+    expect(waiting).toContain('if (c & (CHANGED_OWNER | CHANGED_SHAPE)) llResetScript();')
+    expect(waiting).toContain('on_rez(integer p) { llResetScript(); }')
+    expect(waiting).not.toMatch(/link_message|timer|llSetPrimMediaParams/)
+    expect(kiosk.match(/llOwnerSay\(/g)).toHaveLength(4)
+  })
+
   it('hears the globe wherever it is linked, and asks for what it missed when it starts', () => {
     expect(body(globe, 'broadcast()')).toContain('llMessageLinked(LINK_SET, MSG_STATE, ')
-    expect(kiosk).toMatch(/state_entry\(\)\n\s+\{\n\s+gPrims = llGetObjectPrimCount\(llGetKey\(\)\);\n\s+llMessageLinked\(LINK_SET, MSG_HELLO, "", NULL_KEY\);\n\s+llSetTimerEvent\(WAIT\);/)
+    expect(kiosk).toMatch(/\n\s+\}\n\s+gPrims = llGetObjectPrimCount\(llGetKey\(\)\);\n\s+llMessageLinked\(LINK_SET, MSG_HELLO, "", NULL_KEY\);\n\s+llSetTimerEvent\(WAIT\);/)
     // Linked or unlinked, it starts over; someone sitting down doesn't count.
     expect(kiosk).toMatch(/if \(c & CHANGED_LINK\)\n\s+if \(llGetObjectPrimCount\(llGetKey\(\)\) != gPrims\) llResetScript\(\);/)
     // A burst of changes is one change of media, and a globe that never

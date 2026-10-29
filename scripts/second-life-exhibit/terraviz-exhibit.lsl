@@ -410,12 +410,16 @@ broadcast()
     gBy = NULL_KEY;
 }
 
-// Puts the current state on the face, every setting every time: a face
-// given only an address takes media's defaults for the rest, which let
-// anyone click it, and the owner may have changed the face's media by
-// hand. Sending the rest costs nothing, since the call sleeps the script
-// for a second whatever it carries and a viewer navigates only when the
-// address changed (llviewermedia.cpp).
+// Puts the current state on the face, with every setting that decides who
+// can click it and how it is drawn, every time: a face given only an
+// address takes media's defaults for the rest, which let anyone click
+// it, and the owner may have changed the face's media by hand. Sending
+// the rest costs nothing, since the call sleeps the script for a second
+// whatever it carries and a viewer navigates only when the address
+// changed (llviewermedia.cpp). A list of allowed sites left on the face
+// is turned off first, so the address isn't checked against it; should
+// the simulator check it before turning it off, the face's media is
+// cleared, list and all, and set once more.
 // The media is not interactive for anyone, so no visitor's click can
 // move it to another address: a viewer broadcasts such a navigation to
 // everyone near the globe (docs/SECOND_LIFE_COMPAT.md section 7, item 4).
@@ -423,7 +427,8 @@ broadcast()
 integer setMedia()
 {
     string url = address();
-    list p = [PRIM_MEDIA_CURRENT_URL, url, PRIM_MEDIA_HOME_URL, url,
+    list p = [PRIM_MEDIA_WHITELIST_ENABLE, FALSE,
+        PRIM_MEDIA_CURRENT_URL, url, PRIM_MEDIA_HOME_URL, url,
         PRIM_MEDIA_AUTO_PLAY, TRUE,
         PRIM_MEDIA_AUTO_SCALE, FALSE,
         PRIM_MEDIA_AUTO_ZOOM, FALSE,
@@ -433,6 +438,11 @@ integer setMedia()
         PRIM_MEDIA_PERMS_INTERACT, PRIM_MEDIA_PERM_NONE,
         PRIM_MEDIA_PERMS_CONTROL, PRIM_MEDIA_PERM_NONE];
     integer r = llSetPrimMediaParams(FACE, p);
+    if (r == STATUS_WHITELIST_FAILED)
+    {
+        llClearPrimMedia(FACE);
+        r = llSetPrimMediaParams(FACE, p);
+    }
     if (r != STATUS_OK)
     {
         llOwnerSay("[exhibit] Second Life refused the media (status " + (string)r + "). The globe is unchanged.");

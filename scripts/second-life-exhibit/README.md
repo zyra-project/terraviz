@@ -155,7 +155,42 @@ shows the page on.
    6. If you see nothing, check that shared media is on in your viewer,
       and read what the script said in chat: it tells you, after ten
       seconds, if no globe answered, or at once if Second Life refused
-      the face.
+      the face, or that `FACE` isn't one of the prim's faces. Once the
+      page is up it says which face it is on, and what it changed there.
+
+   **A sign you already have** can be the screen in place of step 1's
+   cube; steps 2 to 6 still apply, with the sign's root selected last
+   when you link. Before you save the kiosk script, find the number of
+   the sign's screen face and set `FACE` to it, since the script takes
+   over the face it names when it starts. A box flattened the other way
+   from step 1's shows its front on face 2 or 4, and a mesh sign numbers
+   its faces its own way. To find the number, put this in the prim with
+   the screen face as a script of its own, right-click the screen and
+   choose Touch, then delete the script:
+
+   ```lsl
+   default { touch_start(integer n) { llOwnerSay("face " + (string)llDetectedTouchFace(0)); } }
+   ```
+
+   In a sign of several prims, the kiosk script goes in that prim too:
+   choose Edit linked parts and select it first. If the screen face
+   isn't the root's, step 4's Content tab is the screen prim's.
+
+   The page is drawn with the face's texture settings, as a picture on
+   it would be. So when the kiosk script first shows the page after it
+   starts, it sets the face's repeats, offset, rotation and mapping to a
+   new box's, and tells you in chat what they were, in case you want
+   them back. It keeps the sign's own texture, which a viewer with media
+   off still shows, but once across the face now, like the page. It
+   turns off any list of allowed sites left on the face's media, too.
+   It leaves the face's colour and transparency, which may be meant, and
+   tells you if they would darken or fade the page (set them to white
+   and 0 on the Texture tab), and likewise if the face has a PBR
+   material, which draws the page with its own settings. A mesh sign
+   whose screen face shows only part of its texture will show only part
+   of the page, whatever its settings: use a cube. And if you tried the
+   script on another face first, the page stays on that face until you
+   remove it there, in the Media tab.
 
 The media is deliberately not clickable, for anyone. A visitor who could
 click it could move it to another page, and their viewer would move it
@@ -544,7 +579,9 @@ stand at the globe.
     playing on, and `/9 sound on` bring it back. Say which viewer, if
     one plays it silent. Then `/9 memory`: the globe script's most while
     showing a dataset is the number to report, since sound added to it.
-12. **The kiosk**, if you made one. Show Earthquakes 2001-15: within a
+12. **The kiosk**, if you made one. When it first shows the page, the
+    kiosk script should say in chat which face the page is on. Show
+    Earthquakes 2001-15: within a
     couple of seconds the screen should show its title, abstract,
     legend and credit, and a date moving with the globe's, the same date
     for both avatars. Pause, and the screen's date should stop on the

@@ -2757,7 +2757,12 @@ Order, each step usable on its own:
    grammar) and the kiosk script showing it. The hover text turns off
    when a kiosk is linked. This alone answers the legend, the dated
    hover text and the 500-character abstract.
-   *Built 28 October; not yet tried in-world.* The page is
+   *Built 28 October, and first tried in-world that day on a new cube,
+   where it showed the page and its date. Put in a sign that had shown
+   a picture of its own, it didn't, for a cause not yet established, so
+   the kiosk script now takes over the face's texture settings and any
+   list of allowed sites left on its media, the two likeliest, and says
+   which face it is on.* The page is
    `/output/kiosk` (`src/output/kioskMain.ts`), its address the output
    page's clock keys and no others
    ([`EMBED_URL_GRAMMAR.md`](EMBED_URL_GRAMMAR.md), "The kiosk page").
