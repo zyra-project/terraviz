@@ -19,8 +19,32 @@
  * The address is checked, not repaired: it is published verbatim in
  * the discovery document, so anything that is not plainly one mailbox
  * (a display name, a list, a `mailto:` URL, whitespace) reads as
- * unset. Pure: no I/O.
+ * unset. The switch/contact check is pure; `loadSigningKey` caches a
+ * WebCrypto key-pair check keyed by both the secret and public key.
  */
+
+import { importNodePublicKey, importNodeSigningKey, signingKeyMatches } from './federation-signature'
+
+let keyCache: { secret: string; publicKey: string; key: CryptoKey | null } | null = null
+
+export function resetFeedSigningKeyCache(): void {
+  keyCache = null
+}
+
+export async function loadSigningKey(secret: string | undefined, publicKey: string): Promise<CryptoKey | null> {
+  if (!secret) return null
+  if (keyCache && keyCache.secret === secret && keyCache.publicKey === publicKey) return keyCache.key
+  let key: CryptoKey | null = null
+  try {
+    const privateKey = await importNodeSigningKey(secret)
+    const advertisedKey = await importNodePublicKey(publicKey)
+    key = await signingKeyMatches(privateKey, advertisedKey) ? privateKey : null
+  } catch {
+    key = null
+  }
+  keyCache = { secret, publicKey, key }
+  return key
+}
 
 /** RFC 5321's limit on a forward path, the most a mailbox can be. */
 const MAX_EMAIL_LENGTH = 254

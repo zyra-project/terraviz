@@ -395,10 +395,10 @@ CREATE TABLE federated_datasets (
 CREATE TABLE federation_peers (
   id                    TEXT PRIMARY KEY,
   base_url              TEXT NOT NULL UNIQUE,
-  display_name          TEXT NOT NULL,
+  display_name          TEXT,
   public_key            TEXT NOT NULL,
   status                TEXT NOT NULL DEFAULT 'active'
-                        CHECK (status IN ('active', 'paused', 'blocked')),
+                        CHECK (status IN ('pending', 'active', 'paused', 'blocked')),
   last_sync_at          TEXT,
   last_sync_cursor      TEXT,
   last_sync_error       TEXT,
@@ -658,6 +658,7 @@ CREATE UNIQUE INDEX idx_current_events_feed_external
 CREATE INDEX idx_current_events_origin_node ON current_events(origin_node);
 CREATE INDEX idx_current_events_owner ON current_events(owner_id);
 CREATE INDEX idx_current_events_status      ON current_events(status, created_at);
+CREATE INDEX idx_datasets_federation_feed ON datasets (visibility, updated_at, id);
 CREATE UNIQUE INDEX idx_datasets_legacy_id
   ON datasets(legacy_id)
   WHERE legacy_id IS NOT NULL;

@@ -14,6 +14,7 @@
  *   - 304 with matching `If-None-Match`.
  */
 
+import { generateKeyPairSync } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { onRequestGet } from './terraviz.json'
 import {
@@ -106,17 +107,33 @@ describe('GET /.well-known/terraviz.json', () => {
   ])('advertises the feed as the feed route serves it: %s', async (_name, flag, contact, feed, abuse) => {
     const sqlite = seedFixtures({ count: 0 })
     try {
+      const { privateKey, publicKey } = generateKeyPairSync('ed25519')
+      const publicDer = publicKey.export({ format: 'der', type: 'spki' })
+      sqlite.prepare('UPDATE node_identity SET public_key = ?').run(`ed25519:${publicDer.subarray(-32).toString('base64')}`)
       const env = {
         CATALOG_DB: asD1(sqlite),
         CATALOG_KV: makeKV(),
         FEDERATION_ENABLED: flag,
         FEDERATION_ABUSE_CONTACT: contact,
+        NODE_ID_PRIVATE_KEY_PEM: privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64'),
       }
       const body = await readJson<WellKnownBody>(await onRequestGet(makeCtx({ env })))
       expect(body.federation).toEqual({ feed })
       expect(body.abuse_contact).toBe(abuse)
       // The paths are where things live, not whether they answer.
       expect(body.endpoints.feed).toBe('/api/v1/federation/feed')
+    } finally {
+      sqlite.close()
+    }
+  })
+
+  it.each([undefined, 'not-a-key'])('does not advertise a feed with signing secret %j', async secret => {
+    const sqlite = seedFixtures({ count: 0 })
+    try {
+      const env = { CATALOG_DB: asD1(sqlite), FEDERATION_ENABLED: 'true',
+        FEDERATION_ABUSE_CONTACT: 'abuse@node.test', NODE_ID_PRIVATE_KEY_PEM: secret }
+      const body = await readJson<WellKnownBody>(await onRequestGet(makeCtx({ env })))
+      expect(body.federation).toEqual({ feed: false })
     } finally {
       sqlite.close()
     }

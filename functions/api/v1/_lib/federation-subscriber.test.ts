@@ -178,7 +178,7 @@ describe('pullPeer', () => {
       if (!target.includes('since=')) {
         return { body: page({ cursor: cursor(1), has_more: true, datasets: [ds('a'), ds('b')] }) }
       }
-      return { body: page({ cursor: cursor(2), has_more: false, datasets: [ds('c', { originNode: 'OTHERNODE' })] }) }
+      return { body: page({ cursor: cursor(2), has_more: false, datasets: [ds('c')] }) }
     })
 
     const result = await pullPeer(await peer(), deps(fetchFn))
@@ -199,7 +199,7 @@ describe('pullPeer', () => {
     expect(await mirrored()).toEqual([
       { remote_id: 'a', origin_node: PEER_ID, seen_run: 'run-1' },
       { remote_id: 'b', origin_node: PEER_ID, seen_run: 'run-1' },
-      { remote_id: 'c', origin_node: 'OTHERNODE', seen_run: 'run-1' },
+      { remote_id: 'c', origin_node: PEER_ID, seen_run: 'run-1' },
       { remote_id: 'gone', origin_node: PEER_ID, seen_run: 'old-run' },
     ])
     const p = await peer()
@@ -232,7 +232,7 @@ describe('pullPeer', () => {
 
   it('restarts from the beginning when a full sync is asked for', async () => {
     await db
-      .prepare('UPDATE federation_peers SET last_sync_cursor = ? WHERE id = ?')
+      .prepare("UPDATE federation_peers SET last_sync_cursor = ?, full_sync_run = 'interrupted' WHERE id = ?")
       .bind(cursor(3), PEER_ID)
       .run()
     await seedMirrored('gone', 'old-run')
@@ -335,6 +335,12 @@ describe('pullPeer', () => {
     it('signed by another key', () =>
       expectRefused({ body: page({ datasets: [ds('a')] }), keyB64: OTHER_KEYS.privateB64 }, 'bad-signature'))
 
+    it.each([undefined, 'OTHERNODE'])('with unverified origin %j', originNode =>
+      expectRefused({ body: page({ datasets: [ds('a', { originNode })] }) }, 'invalid-body'))
+
+    it.each(['.', '..'])('with path-reshaping id %s', id =>
+      expectRefused({ body: page({ datasets: [ds(id)] }) }, 'invalid-body'))
+
     it('signed for another request', () =>
       expectRefused(
         { body: page({ datasets: [ds('a')] }), signTarget: '/api/v1/federation/feed?limit=250' },
@@ -369,7 +375,7 @@ describe('pullPeer', () => {
 
     it('with no signature header', () =>
       expectRefused(
-        { response: new Response(JSON.stringify(page()), { status: 200 }) },
+        { response: new Response(JSON.stringify(page()), { status: 200, headers: { 'content-type': 'application/json' } }) },
         'missing-header',
       ))
 
@@ -381,6 +387,20 @@ describe('pullPeer', () => {
       expect(result).toMatchObject({ ok: false, error: 'redirect', status: 302 })
       expect((await peer()).lastSyncError).toBe('redirect:302')
     })
+  })
+
+  it('rejects a BOM prepended to an otherwise correctly signed HTTP body', async () => {
+    const { fetchFn } = fakePeer(() => ({ body: page({ datasets: [ds('a')] }) }))
+    const network: typeof fetch = async (input, init) => {
+      const response = await fetchFn(input, init)
+      const bytes = new Uint8Array(await response.arrayBuffer())
+      const prefixed = new Uint8Array(bytes.length + 3)
+      prefixed.set([0xef, 0xbb, 0xbf])
+      prefixed.set(bytes, 3)
+      return new Response(prefixed, { status: 200, headers: response.headers })
+    }
+    expect(await pullPeer(await peer(), deps(network))).toMatchObject({ ok: false, error: 'bad-signature' })
+    expect(await mirrored()).toEqual([])
   })
 
   it('reports a network failure', async () => {

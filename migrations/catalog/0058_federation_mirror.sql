@@ -22,7 +22,7 @@
 -- `last_sync_cursor` is the feed cursor of the last page applied, so a
 -- failed pull resumes where it stopped. `full_sync_run` is non-NULL
 -- while a full sync is in progress (the pull that starts from no cursor
--- and ends by dropping every row the peer no longer lists); it carries
+-- and schedules reconciliation of rows the peer no longer lists); it carries
 -- the run id stamped on every row that run has seen, and survives
 -- across pulls so a full sync larger than one pull's caps still
 -- reconciles when it finishes.
@@ -48,8 +48,8 @@
 -- It is never joined with `datasets`: mirrored rows are the peer's
 -- statement, not this node's catalog. `feed_signature` is the
 -- `Terraviz-Signature` header of the page that delivered the row,
--- kept as evidence of what the peer signed; it covers the whole page,
--- so it cannot be re-verified against one row. `seen_run` is the run
+-- kept as diagnostic metadata, not verifiable evidence: the page and
+-- request target are not retained. `seen_run` is the run
 -- that last delivered the row, which is what a full sync reconciles on.
 --
 -- Additive only. No backfill.
@@ -57,10 +57,10 @@
 CREATE TABLE federation_peers (
   id                    TEXT PRIMARY KEY,
   base_url              TEXT NOT NULL UNIQUE,
-  display_name          TEXT NOT NULL,
+  display_name          TEXT,
   public_key            TEXT NOT NULL,
   status                TEXT NOT NULL DEFAULT 'active'
-                        CHECK (status IN ('active', 'paused', 'blocked')),
+                        CHECK (status IN ('pending', 'active', 'paused', 'blocked')),
   last_sync_at          TEXT,
   last_sync_cursor      TEXT,
   last_sync_error       TEXT,
@@ -83,3 +83,5 @@ CREATE TABLE federated_datasets (
   fetched_at      TEXT NOT NULL,
   PRIMARY KEY (peer_id, remote_id)
 );
+
+CREATE INDEX idx_datasets_federation_feed ON datasets (visibility, updated_at, id);

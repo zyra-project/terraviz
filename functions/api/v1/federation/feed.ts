@@ -41,28 +41,45 @@ import {
   type FeedSerializer,
 } from '../_lib/federation-feed'
 import { d1FederationFeedStore } from '../_lib/federation-feed-d1'
-import { federationState } from '../_lib/federation-config'
+import { federationState, loadSigningKey, resetFeedSigningKeyCache as resetSigningKey } from '../_lib/federation-config'
 import {
   CanonicalJsonError,
-  importNodePublicKey,
-  importNodeSigningKey,
+  canonicalJson,
   signFederationBody,
-  signingKeyMatches,
   SIGNATURE_HEADER,
 } from '../_lib/federation-signature'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
 const ALLOWED_PARAMS = new Set(['since', 'limit'])
+const requestRates = new Map<string, { count: number; until: number }>()
+
+export function resetFeedSigningKeyCache(): void {
+  resetSigningKey()
+  requestRates.clear()
+}
+
+function rateLimited(request: Request): boolean {
+  const now = Date.now()
+  const address = request.headers.get('CF-Connecting-IP') ?? 'unknown'
+  let entry = requestRates.get(address)
+  if (!entry || now >= entry.until) {
+    for (const [key, value] of requestRates) {
+      if (now >= value.until) requestRates.delete(key)
+    }
+    if (requestRates.size >= 10_000) return true
+    entry = { count: 0, until: now + 60_000 }
+    requestRates.set(address, entry)
+  }
+  return ++entry.count > 600
+}
 
 /** Replace lone surrogates in every string with U+FFFD, so a row whose
  *  text was stored malformed still has a canonical form to sign. */
-function wellFormed<T>(value: T): T {
+export function wellFormed<T>(value: T): T {
   if (typeof value === 'string') return value.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD') as T
   if (Array.isArray(value)) return value.map(wellFormed) as T
   if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {}
-    for (const [k, v] of Object.entries(value)) out[wellFormed(k)] = wellFormed(v)
-    return out as T
+    return Object.fromEntries(Object.entries(value).map(([key, member]) => [wellFormed(key), wellFormed(member)])) as T
   }
   return value
 }
@@ -74,35 +91,7 @@ function errorResponse(status: number, error: string, message?: string): Respons
   })
 }
 
-// The checked signing key, kept for the isolate's life. Keyed by both
-// strings, so rotating either the secret or the published key is
-// picked up on the next request. A pair that failed is cached as
-// `null` too, so a misconfigured node does not re-run the probe on
-// every request.
-let keyCache: { secret: string; publicKey: string; key: CryptoKey | null } | null = null
-
-/** Test seam: forget the cached signing key. */
-export function resetFeedSigningKeyCache(): void {
-  keyCache = null
-}
-
-async function loadSigningKey(secret: string | undefined, publicKey: string): Promise<CryptoKey | null> {
-  if (!secret) return null
-  if (keyCache && keyCache.secret === secret && keyCache.publicKey === publicKey) return keyCache.key
-  let key: CryptoKey | null = null
-  try {
-    const priv = await importNodeSigningKey(secret)
-    const pub = await importNodePublicKey(publicKey)
-    key = (await signingKeyMatches(priv, pub)) ? priv : null
-    if (!key) console.error('[federation/feed] NODE_ID_PRIVATE_KEY_PEM is not the pair of node_identity.public_key')
-  } catch (err) {
-    console.error('[federation/feed] signing key unavailable:', err instanceof Error ? err.message : 'unknown error')
-  }
-  keyCache = { secret, publicKey, key }
-  return key
-}
-
-export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
+const serveFeed: PagesFunction<CatalogEnv> = async context => {
   const env = context.env
   const federation = federationState(env)
   if (federation.state === 'off') return errorResponse(404, 'not_found')
@@ -112,6 +101,16 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
       'abuse_contact_missing',
       'Federation needs an abuse contact: set FEDERATION_ABUSE_CONTACT to an email address.',
     )
+  }
+  if (!['GET', 'HEAD'].includes(context.request.method)) {
+    const response = errorResponse(405, 'method_not_allowed')
+    response.headers.set('Allow', 'GET, HEAD')
+    return response
+  }
+  if (rateLimited(context.request)) {
+    const response = errorResponse(429, 'rate_limited')
+    response.headers.set('Retry-After', '60')
+    return response
   }
   if (!env.CATALOG_DB) {
     return errorResponse(503, 'binding_missing', 'CATALOG_DB binding is not configured on this deployment.')
@@ -142,15 +141,18 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
   }
 
   const resolveDataRef = makeDataRefResolver(env)
-  const serialize: FeedSerializer = (row, decorations, id) =>
-    serializeDataset(
+  const serialize: FeedSerializer = (row, decorations, id) => {
+    const dataset = wellFormed(serializeDataset(
       row,
       decorations,
       id,
       resolveDataRef,
       ref => resolveAssetRefStrict(env, ref),
       (datasetId, baseUrl) => buildFramesRedirectTemplate(env, baseUrl, datasetId),
-    )
+    ))
+    canonicalJson({ datasets: [dataset] })
+    return dataset
+  }
 
   const nowMs = Date.now()
   const page = wellFormed(await buildFeedPage(store, { identity, after, limit, nowMs, serialize }))
@@ -176,3 +178,19 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
     },
   })
 }
+
+export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
+  let response: Response
+  try {
+    response = await serveFeed(context)
+  } catch {
+    console.error('[federation/feed] publication failed')
+    response = errorResponse(503, 'feed_unavailable')
+  }
+  return context.request.method === 'HEAD'
+    ? new Response(null, { status: response.status, headers: response.headers })
+    : response
+}
+
+export const onRequestHead = onRequestGet
+export const onRequest = onRequestGet

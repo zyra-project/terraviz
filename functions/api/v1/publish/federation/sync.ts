@@ -4,9 +4,8 @@
 /**
  * POST /api/v1/publish/federation/sync — pull one peer's feed now.
  *
- * Metadata Phase 5, step 5b. Body `{ peer_id, full? }`. Runs one
- * bounded `pullPeer` (at most `PULL_MAX_PAGES` pages, each verified
- * against the peer's pinned key) and answers with its `PullResult`.
+ * Metadata Phase 5, step 5b. Body `{ peer_id, full?, page_size? }`.
+ * Reads one page of at most 25 entries and returns snake_case fields.
  * There is no scheduler yet, so this is how a mirror is refreshed;
  * a full sync that runs out of pages resumes on the next call.
  *
@@ -14,8 +13,8 @@
  * the same gate as `peers.ts`. 404 `peer_not_found` for an unknown
  * peer, 409 `peer_not_active` for one that is paused or blocked, 409
  * `sync_in_progress` while another pull of the same peer holds its
- * lease. A pull that fails because of the peer still answers 200: the
- * request succeeded, the peer did not, and the result names why (the
+ * lease. A pull that fails because of the peer answers 503 and
+ * the result names why (the
  * same code is stored as the peer's `last_sync_error`). A failure of
  * this node's own store answers 500 `sync_failed`, after an audit row
  * recording `store-error`.
@@ -46,7 +45,7 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
     return jsonError(400, 'invalid_json', 'Request body must be JSON.')
   }
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
-    return jsonError(400, 'invalid_json', 'Request body must be a JSON object.')
+    return jsonError(400, 'invalid_body', 'Request body must be a JSON object.')
   }
   const input = body as Record<string, unknown>
   const errors: Array<{ field: string; code: string; message: string }> = []
@@ -55,6 +54,9 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
   }
   if (input.full !== undefined && typeof input.full !== 'boolean') {
     errors.push({ field: 'full', code: 'invalid', message: 'Must be true or false.' })
+  }
+  if (input.page_size !== undefined && (!Number.isInteger(input.page_size) || Number(input.page_size) < 1 || Number(input.page_size) > 25)) {
+    errors.push({ field: 'page_size', code: 'invalid', message: 'Must be an integer from 1 to 25.' })
   }
   if (errors.length > 0) return json(400, { errors })
 
@@ -85,7 +87,7 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
         now: () => Date.now(),
         newRunId: () => newUlid(),
       },
-      { full: input.full === true },
+      { full: input.full === true, maxPages: 1, pageLimit: (input.page_size as number | undefined) ?? 25 },
     )
   } catch (err) {
     console.error('[federation/sync] store failure', peerId, err)
@@ -109,5 +111,16 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
     reconciled: result.reconciled,
     reconcile_pending: result.reconcilePending,
   })
-  return json(200, { result })
+  return json(result.ok ? 200 : 503, { result: {
+    ok: result.ok,
+    full: result.full,
+    complete: result.complete,
+    pages: result.pages,
+    upserted: result.upserted,
+    tombstoned: result.tombstoned,
+    reconciled: result.reconciled,
+    reconcile_pending: result.reconcilePending,
+    ...(result.error ? { error: result.error.replaceAll('-', '_') } : {}),
+    ...(result.status !== undefined ? { upstream_status: result.status } : {}),
+  } })
 }

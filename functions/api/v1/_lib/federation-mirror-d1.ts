@@ -30,7 +30,7 @@ import type {
 interface PeerRow {
   id: string
   base_url: string
-  display_name: string
+  display_name: string | null
   public_key: string
   status: PeerStatus
   last_sync_at: string | null
@@ -39,13 +39,14 @@ interface PeerRow {
   full_sync_run: string | null
   sweep_run: string | null
   sweep_after: number | null
+  sync_lease_until: number | null
 }
 
 function toPeer(r: PeerRow): FederationPeer {
   return {
     id: r.id,
     baseUrl: r.base_url,
-    displayName: r.display_name,
+    displayName: r.display_name ?? r.id,
     publicKey: r.public_key,
     status: r.status,
     lastSyncAt: r.last_sync_at,
@@ -54,12 +55,13 @@ function toPeer(r: PeerRow): FederationPeer {
     fullSyncRun: r.full_sync_run,
     sweepRun: r.sweep_run,
     sweepAfterMs: r.sweep_after,
+    syncLeaseExpiresMs: r.sync_lease_until,
   }
 }
 
 const PEER_COLUMNS =
   'id, base_url, display_name, public_key, status, ' +
-  'last_sync_at, last_sync_cursor, last_sync_error, full_sync_run, sweep_run, sweep_after'
+  'last_sync_at, last_sync_cursor, last_sync_error, full_sync_run, sweep_run, sweep_after, sync_lease_until'
 
 export interface NewPeer {
   id: string

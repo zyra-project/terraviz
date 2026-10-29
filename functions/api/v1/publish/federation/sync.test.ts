@@ -6,7 +6,7 @@
  *
  * Coverage: the gate, field errors, an unknown or paused peer, a
  * successful pull against a signed feed (mirror rows and audit row),
- * and a failed pull that still answers 200 with its reason.
+ * and a failed pull that answers 503 with its reason.
  */
 
 import { generateKeyPairSync } from 'node:crypto'
@@ -84,7 +84,7 @@ function ctx(opts: { publisher?: PublisherRow; body?: unknown; rawBody?: string;
 }
 
 /** Stub the global fetch with a peer serving one signed feed page. */
-function serveFeed(datasets: unknown[]) {
+function serveFeed(datasets: unknown[], hasMore = false) {
   const fn = vi.fn(async (req: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(req))
     expect(url.origin).toBe(BASE)
@@ -94,7 +94,7 @@ function serveFeed(datasets: unknown[]) {
       node_id: PEER_ID,
       generated_at: new Date().toISOString(),
       cursor: encodeFeedCursor({ updatedAt: '2026-01-02T00:00:00.000Z', id: 'b' }),
-      has_more: false,
+      has_more: hasMore,
       datasets,
       tombstones: [],
     }
@@ -118,6 +118,37 @@ const auditRows = () =>
     .all() as Array<{ actor_id: string; subject_id: string; metadata_json: string }>
 
 describe('POST /api/v1/publish/federation/sync', () => {
+  it('uses fewer than 50 D1 statements including the route and audit for 25 rows', async () => {
+    const prepare = vi.spyOn(sqlite, 'prepare')
+    const fetchFn = serveFeed(Array.from({ length: 25 }, (_, index) => ({ id: `row-${index}`, originNode: PEER_ID })), true)
+    const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID } }))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ result: { ok: true, pages: 1, complete: false, upserted: 25 } })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    expect(String(fetchFn.mock.calls[0][0])).toContain('limit=25')
+    expect(prepare.mock.calls.length).toBeGreaterThan(25)
+    expect(prepare.mock.calls.length).toBeLessThan(50)
+    prepare.mockRestore()
+  })
+
+  it('rejects invalid page sizes and honors a smaller operator-selected page', async () => {
+    const fetchFn = serveFeed([])
+    for (const page_size of [0, 26, 1.5, '5']) {
+      const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID, page_size } }))
+      expect(res.status).toBe(400)
+    }
+    expect(fetchFn).not.toHaveBeenCalled()
+    expect((await onRequestPost(ctx({ body: { peer_id: PEER_ID, page_size: 5 } }))).status).toBe(200)
+    expect(String(fetchFn.mock.calls[0][0])).toContain('limit=5')
+  })
+
+  it('reports an invalid cursor separately so the operator can restart a full sync', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"invalid_cursor"}', { status: 400, headers: { 'content-type': 'application/json' } })))
+    const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID } }))
+    expect(res.status).toBe(503)
+    expect(await res.json()).toMatchObject({ result: { error: 'invalid_cursor', upstream_status: 400 } })
+  })
+
   it('is a 404 with federation off and a 403 for a non-admin', async () => {
     const fn = serveFeed([])
     expect((await onRequestPost(ctx({ env: { CATALOG_DB: env.CATALOG_DB }, body: { peer_id: PEER_ID } }))).status).toBe(404)
@@ -177,14 +208,14 @@ describe('POST /api/v1/publish/federation/sync', () => {
     expect(fn).not.toHaveBeenCalled()
   })
 
-  it('answers 200 with the reason when the peer fails', async () => {
+  it('answers 503 with the reason when the peer fails', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => new Response('down', { status: 503 })),
     )
     const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID, full: true } }))
-    expect(res.status).toBe(200)
-    expect(await res.json()).toMatchObject({ result: { ok: false, error: 'http-status', status: 503 } })
+    expect(res.status).toBe(503)
+    expect(await res.json()).toMatchObject({ result: { ok: false, error: 'http_status', upstream_status: 503 } })
     expect(JSON.parse(auditRows()[0].metadata_json)).toMatchObject({ ok: false, error: 'http-status' })
     const peer = await d1FederationPeerStore(asD1(sqlite)).getPeer(PEER_ID)
     expect(peer?.lastSyncError).toMatch(/^http-status/)

@@ -13,6 +13,21 @@ major (`/schema/v2/`) and an entry with a migration note.
 
 ## v1 (additive) — 2026-10-27
 
+- **Review corrections:** signed feeds authenticate received bytes
+  before parsing and require canonical-byte equality; the README pins
+  the statement, target normalization, version rules and independent
+  UTF-8/float vector. Hidden ids are not emitted. Discovery readiness
+  includes usable matching keys. Native STAC links are source-metadata
+  `via` links, with the dataset schema profile, not alternates.
+- **`dataset.schema.json`, `catalog.schema.json`, `feed.schema.json`:**
+  optional `enriched.datasetDevelopers` and `visDevelopers` arrays
+  preserve every producer credit. Singular fields retain their legacy
+  last-credit behavior for existing readers. Older readers ignore the
+  arrays; this is additive, not a new identity or signature version.
+  Deploying this serializer does not restamp existing rows: run a
+  one-time full resync to receive previously stored producer credits
+  without waiting for another dataset edit.
+
 - **`feed.schema.json`** — `FederationFeedBody`
   (`functions/api/v1/_lib/federation-feed.ts`). One page of
   `GET /api/v1/federation/feed`: `schema_version`, `node_id`,

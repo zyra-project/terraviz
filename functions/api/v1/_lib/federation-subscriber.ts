@@ -94,14 +94,14 @@ export const PULL_TIMEOUT_MS = 15_000
 
 /** Dataset and node ids the mirror will key on: the alphabet node ids
  *  are signed with, which covers ULIDs and the legacy SOS ids. */
-const ID_RE = /^[A-Za-z0-9._:-]{1,128}$/
+const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
 
 /** Whether `s` is shaped like a node or dataset id on the wire. */
 export function isFederationId(s: string): boolean {
   return ID_RE.test(s)
 }
 
-export type PeerStatus = 'active' | 'paused' | 'blocked'
+export type PeerStatus = 'pending' | 'active' | 'paused' | 'blocked'
 
 export interface FederationPeer {
   /** The peer's `node_id`. */
@@ -122,6 +122,7 @@ export interface FederationPeer {
   sweepRun: string | null
   /** Epoch ms after which an incremental pull may run the sweep. */
   sweepAfterMs: number | null
+  syncLeaseExpiresMs?: number | null
 }
 
 export interface MirroredDataset {
@@ -185,6 +186,7 @@ export type PullFailure =
   | 'timeout'
   | 'redirect'
   | 'http-status'
+  | 'invalid-cursor'
   | 'too-large'
   | 'row-too-large'
   | 'invalid-body'
@@ -317,7 +319,7 @@ async function readCapped(res: Response, maxBytes: number): Promise<string> {
     offset += c.byteLength
   }
   try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
   } catch {
     throw new PullError('invalid-body')
   }
@@ -362,13 +364,8 @@ function validateFeedPage(body: unknown, peerId: string, pageLimit: number): Val
     }
     if (seen.has(d.id)) throw new PullError('invalid-body')
     seen.add(d.id)
-    let originNode = peerId
-    if (d.originNode !== undefined) {
-      if (typeof d.originNode !== 'string' || !ID_RE.test(d.originNode)) {
-        throw new PullError('invalid-body')
-      }
-      originNode = d.originNode
-    }
+    if (d.originNode !== peerId) throw new PullError('invalid-body')
+    const originNode = peerId
     const payloadJson = JSON.stringify(d)
     if (new TextEncoder().encode(payloadJson).byteLength > PULL_MAX_ROW_BYTES) {
       throw new PullError('row-too-large')
@@ -411,8 +408,20 @@ async function fetchPage(
       throw new PullError('redirect', res.status)
     }
     if (res.status !== 200) {
+      if (res.status === 400 && new URL(url).pathname === FEED_PATH) {
+        try {
+          const errorBody: unknown = JSON.parse(await readCapped(res, 4096))
+          if (isPlainObject(errorBody) && errorBody.error === 'invalid_cursor') throw new PullError('invalid-cursor', 400)
+        } catch (error) {
+          if (error instanceof PullError && error.code === 'invalid-cursor') throw error
+        }
+      }
       await res.body?.cancel().catch(() => {})
       throw new PullError('http-status', res.status)
+    }
+    if (res.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') {
+      await res.body?.cancel().catch(() => {})
+      throw new PullError('invalid-body')
     }
     try {
       const text = await readCapped(res, maxBodyBytes)
@@ -477,7 +486,7 @@ export async function fetchPeerDiscovery(
   if (!isPlainObject(body)) return { ok: false, error: 'invalid-body' }
   const { node_id: nodeId, display_name: displayName, base_url: rawBase, public_key: publicKey } = body
   if (typeof nodeId !== 'string' || !ID_RE.test(nodeId)) return { ok: false, error: 'invalid-body' }
-  if (typeof displayName !== 'string' || displayName.length > 200) return { ok: false, error: 'invalid-body' }
+  if (typeof displayName !== 'string' || displayName.length > 200 || /[\x00-\x1f\x7f<>]/.test(displayName)) return { ok: false, error: 'invalid-body' }
   if (typeof publicKey !== 'string' || publicKey.length > 200) return { ok: false, error: 'invalid-body' }
   const baseUrl = typeof rawBase === 'string' ? parsePeerBaseUrl(rawBase.replace(/\/$/, '')) : null
   if (baseUrl === null) return { ok: false, error: 'invalid-body' }
@@ -547,11 +556,15 @@ async function pullUnderLease(
   let runId: string
   let cursor: string | null
   let full: boolean
-  if (peer.fullSyncRun !== null) {
+  if (opts.full) {
+    runId = deps.newRunId()
+    cursor = null
+    full = true
+  } else if (peer.fullSyncRun !== null) {
     runId = peer.fullSyncRun
     cursor = peer.lastSyncCursor
     full = true
-  } else if (opts.full || peer.lastSyncCursor === null) {
+  } else if (peer.lastSyncCursor === null) {
     runId = deps.newRunId()
     cursor = null
     full = true

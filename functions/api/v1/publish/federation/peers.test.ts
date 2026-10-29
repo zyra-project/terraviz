@@ -155,6 +155,13 @@ describe('POST /api/v1/publish/federation/peers', () => {
     expect((await peerRows())[0]).toMatchObject({ base_url: BASE, display_name: 'Ours' })
   })
 
+  it('stores the canonical key when pasted without padding and with a trailing newline', async () => {
+    servePeer(discovery())
+    const res = await onRequestPost(ctx({ method: 'POST', body: input({ public_key: PEER_KEY.replace(/=+$/, '') + '\n' }) }))
+    expect(res.status).toBe(201)
+    expect((await peerRows())[0]).toMatchObject({ public_key: PEER_KEY })
+  })
+
   it('returns field errors without fetching anything', async () => {
     const fn = servePeer(discovery())
     const res = await onRequestPost(
@@ -189,12 +196,15 @@ describe('POST /api/v1/publish/federation/peers', () => {
     expect(fn).not.toHaveBeenCalled()
   })
 
-  it('is a 502 when the discovery document cannot be read', async () => {
+  it('is a 503 when the discovery document cannot be read', async () => {
     servePeer(new Response(null, { status: 302, headers: { location: 'https://evil.example.org/' } }))
     const res = await onRequestPost(ctx({ method: 'POST', body: input() }))
-    expect(res.status).toBe(502)
+    expect(res.status).toBe(503)
     expect(await res.json()).toMatchObject({ error: 'peer_unreachable', reason: 'redirect', status: 302 })
     expect(await peerRows()).toEqual([])
+    const audit = sqlite.prepare("SELECT actor_id, subject_id, metadata_json FROM audit_events WHERE action = 'federation_peer.add'").get() as { actor_id: string; subject_id: string; metadata_json: string }
+    expect(audit).toMatchObject({ actor_id: ADMIN.id, subject_id: PEER_ID })
+    expect(JSON.parse(audit.metadata_json)).toEqual({ outcome: 'refused', reason: 'peer_unreachable' })
   })
 
   it('is a 422 naming each field the discovery document disagrees on', async () => {
@@ -249,6 +259,8 @@ describe('GET /api/v1/publish/federation/peers', () => {
           last_sync_error: null,
           full_sync_in_progress: false,
           reconcile_pending: false,
+          sweep_after: null,
+          sync_lease_expires: null,
           mirrored_count: 0,
         },
       ],

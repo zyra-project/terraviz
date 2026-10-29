@@ -198,7 +198,14 @@ export async function buildFeedPage(
 
   const visible = page.filter(r => r.visible).map(r => r.row)
   const decorations = await store.getDecorations(visible.map(r => r.id))
-  const datasets = visible.map(r => opts.serialize(r, decorations.get(r.id)!, opts.identity))
+  const datasets: WireDataset[] = []
+  for (const row of visible) {
+    try {
+      datasets.push(opts.serialize(row, decorations.get(row.id)!, opts.identity))
+    } catch {
+      console.error('[federation/feed] skipped unserializable row', row.id)
+    }
+  }
   const tombstones = page.filter(r => !r.visible).map(r => r.row.id)
 
   const last = page.length > 0 ? page[page.length - 1].row : null

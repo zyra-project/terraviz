@@ -6,13 +6,18 @@ subscribe, and synchronise catalogs. Companion to
 schema referenced from
 [`CATALOG_DATA_MODEL.md`](CATALOG_DATA_MODEL.md).
 
-> **Superseded in part (Phase 5).** The handshake, the HMAC shared
-> secret and request signing below are not built. What shipped is an
+> **Superseded in part (metadata Phase 5).** The handshake, HMAC shared
+> secret, request signing, signed Catalog responses, per-row digests,
+> key rotation and version negotiation proposed below are not built.
+> What is implemented is an
 > open feed of public rows, each page signed with the node's Ed25519
 > key and pulled by a subscriber that pinned that key out of band —
 > see [`protocol/README.md`](protocol/README.md) §The federation feed
 > and [`metadata/PHASE5_IMPLEMENTATION.md`](metadata/PHASE5_IMPLEMENTATION.md).
-> Read the HMAC design here as a deferred proposal, not the protocol.
+> Read those designs here as deferred proposals, not the protocol.
+> The feed's v1 key id is the node id; rotation needs a v2 contract.
+> The implementation remains a draft pending the PR's governance and
+> deployment gates, not a claim that federation has been enabled.
 
 A node is **discoverable** if it serves a `/.well-known/terraviz.json`
 document. A node is **subscribable** if it accepts handshakes at

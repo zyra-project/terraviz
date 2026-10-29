@@ -697,6 +697,10 @@ function validateCategories(value: unknown, errors: ValidationError[]): void {
   }
   let total = 0
   for (const [facet, values] of Object.entries(value as Record<string, unknown>)) {
+    if (facet === '__proto__' || facet === 'constructor') {
+      errors.push(err(`categories.${facet}`, 'reserved', 'This category facet name is reserved.'))
+      continue
+    }
     if (!Array.isArray(values)) {
       errors.push(err(`categories.${facet}`, 'invalid_type', 'Each facet must be an array of strings.'))
       continue

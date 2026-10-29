@@ -131,6 +131,22 @@ function page(store: FederationFeedStore, after: FeedPosition | null, limit = 10
 }
 
 describe('buildFeedPage', () => {
+  it('skips one unserializable row without blocking progress past it', async () => {
+    const { store } = fakeStore(['A', 'B', 'C'].map(id => row(id, '2026-01-01T00:00:00.000Z')))
+    const body = await buildFeedPage(store, {
+      identity: IDENTITY, after: null, limit: 2, nowMs: NOW_MS,
+      serialize: record => {
+        if (record.id === 'B') throw new Error('poison row')
+        return serialize(record)
+      },
+    })
+    expect(body.datasets.map(record => record.id)).toEqual(['A'])
+    expect(body.has_more).toBe(true)
+    const after = decodeFeedCursor(body.cursor)
+    expect(after?.id).toBe('B')
+    expect((await page(store, after)).datasets.map(record => record.id)).toEqual(['C'])
+  })
+
   it('asks for one row past the limit, up to the settle watermark', async () => {
     const { store, calls } = fakeStore([])
     await page(store, null, 7)

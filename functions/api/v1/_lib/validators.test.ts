@@ -21,6 +21,13 @@ import {
   validateTourDraft,
 } from './validators'
 
+describe('reserved category facets', () => {
+  it.each(['__proto__', 'constructor'])('rejects %s at the writer boundary', facet => {
+    expect(validateDraftUpdate({ categories: { [facet]: ['Ocean'] } }))
+      .toEqual(expect.arrayContaining([expect.objectContaining({ code: 'reserved' })]))
+  })
+})
+
 describe('native timestamp ordering', () => {
   it.each([
     ['.0002Z', '.0001Z', true],

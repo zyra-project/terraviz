@@ -29,9 +29,20 @@ describe('pure STAC builders', () => {
     expect(root.ok && root.value.links).toContainEqual(expect.objectContaining({ rel: 'describedby', href: 'https://node.example/discovery/NODE000' }))
     const built = buildStacProduct(model, node, resolvers)
     if (!built.ok) throw new Error('expected a product')
-    const native = { rel: 'alternate', type: 'application/json', href: `https://node.example/dataset/${model.row.id}` }
+    const native = { rel: 'via', type: `application/json; profile="${node.identity.base_url}/schema/v1/dataset.schema.json"`, href: `https://node.example/dataset/${model.row.id}` }
     expect(built.value.collection!.links).toContainEqual(expect.objectContaining(native))
     expect(built.value.item!.links).toContainEqual(expect.objectContaining(native))
+  })
+
+  it('keeps the native link on a history-backed Collection but not its historical Item', async () => {
+    const { model, node, resolvers } = await stacFixture()
+    model.itemIdentity = { kind: 'frame', persisted_id: 'frame-one' }
+    model.publicationKind = 'sequence'
+    const built = buildStacProduct(model, node, resolvers)
+    if (!built.ok) throw new Error(JSON.stringify(built.reasons))
+    const href = `https://node.example/dataset/${model.row.id}`
+    expect(built.value.collection!.links).toContainEqual(expect.objectContaining({ rel: 'via', href }))
+    expect(built.value.item!.links.some(candidate => candidate.href === href)).toBe(false)
   })
 
   it('builds deterministic linked resources and separates data from manifest', async () => {

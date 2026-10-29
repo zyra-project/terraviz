@@ -45,7 +45,7 @@ import { CatalogEnv } from '../api/v1/_lib/env'
 import { getNodeIdentity, IDENTITY_MISSING_MESSAGE } from '../api/v1/_lib/catalog-store'
 import { computeEtag } from '../api/v1/_lib/snapshot'
 import { isPublicStacUrl } from '../api/v1/_lib/stac-builders'
-import { federationState, parseAbuseContact } from '../api/v1/_lib/federation-config'
+import { federationState, loadSigningKey, parseAbuseContact } from '../api/v1/_lib/federation-config'
 
 const CACHE_CONTROL = 'public, max-age=300, stale-while-revalidate=600'
 const CONTENT_TYPE = 'application/json; charset=utf-8'
@@ -125,7 +125,8 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
     },
     contact: identity.contact_email,
     abuse_contact: parseAbuseContact(context.env.FEDERATION_ABUSE_CONTACT),
-    federation: { feed: federationState(context.env).state === 'live' },
+    federation: { feed: federationState(context.env).state === 'live' &&
+      await loadSigningKey(context.env.NODE_ID_PRIVATE_KEY_PEM, identity.public_key) !== null },
   }
 
   const body = JSON.stringify(doc)

@@ -15,10 +15,12 @@ public-rows-only slice of the protocol in
 `docs/CATALOG_FEDERATION_PROTOCOL.md`; what that document plans and
 this phase leaves out is listed under _Deferred_.
 
-The two scoping gates that `federation-scoping.md` names ahead of
-Phase 4 federation work (the publisher-CLI auth pilot and the Pages
-CPU/D1 measurement) were set aside for this work by the maintainer.
-The scoping document has not been updated to say so.
+`federation-scoping.md` section 7 Directive 5 gates federation merges
+on the publisher CLI being on npm and a partner pilot. The Pages CPU/D1
+measurement is instead metadata Phase 4's STAC rollout gate
+(`PHASE4_IMPLEMENTATION.md`, Rollout Gate). The maintainer has said
+they will record the dated scoping amendment and governance agreement
+on PR #491; this document does not record approval on their behalf.
 
 Everything below is off unless `FEDERATION_ENABLED` is exactly
 `'true'`. With it off, no federation route answers anything but 404,
@@ -40,11 +42,11 @@ The signature covers a domain-separated statement, not the body alone:
 a version tag, the key id, the signing time, the request target (path
 and query) and the SHA-256 of the body's RFC 8785 canonical JSON. The
 target is what stops a validly signed page for one cursor being
-replayed as the answer to another. The verifier re-canonicalizes the
-value it parsed, so what is verified is the object it goes on to use;
-a consequence is that whitespace and key order are not signed, while
-any change of value is. Values with no single canonical form are
-refused on both sides rather than coerced.
+replayed as the answer to another. The verifier authenticates received
+bytes before parsing, then requires canonical-byte equality, rejecting
+duplicate keys and formatting changes. The exact statement and fixed
+UTF-8/float test vector are in `docs/protocol/README.md`. Version 1
+uses `keyid === node_id`; a rotating key namespace requires v2.
 
 Verification refuses, by named reason: a missing or malformed header,
 a key id that is not the pinned peer's, a signature older than 300 s
@@ -62,21 +64,21 @@ most 250) and nothing else. An unknown or repeated parameter is a
 accepts one spelling of each request rather than signing pages for
 targets it ignored.
 
-The feed carries public rows only. A page is every published row with `visibility = 'public'`, ordered by
+The feed carries public, non-hidden rows only. A page is every published row with `visibility = 'public'` and `is_hidden = 0`, ordered by
 `(updated_at, id)`, after the cursor and no later than a settle
 watermark 30 s behind now. A row that is currently public under
 `PUBLIC_DATASET_PREDICATE` is sent as a full `WireDataset`; one that is
-published and public-visibility but hidden or retracted is sent as a
+published and public-visibility but retracted is sent as a
 tombstone, its id alone. Drafts and other visibilities never appear.
 The watermark exists because `updated_at` is stamped by the writer
 rather than by commit order: a cursor that ran up to now would skip a
 write that committed late with an earlier stamp.
 
-Two changes cannot be tombstoned: a hard delete, and a visibility
-change away from `public`, both of which take the row out of the scan.
+Three changes cannot be tombstoned: hiding, a hard delete, and a visibility
+change away from `public`, all of which take the row out of the scan.
 A pull with no cursor is therefore a **full sync**. A withdrawn row is
-removed only by a full sync followed by the sweep (Step 5), never by an
-incremental pull. Subscribers should run one periodically.
+removed by a full sync followed by an incremental sweep (Step 5), not
+an incremental pull alone. Subscribers should run full syncs periodically.
 
 The route answers 404 unless federation is enabled, 503 when it is
 enabled without a usable abuse contact or when the node cannot sign
@@ -86,17 +88,21 @@ key), and signs every 200.
 ## Step 3: Discovery
 
 `federation-config.ts` decides whether this node serves a feed:
-`FEDERATION_ENABLED` is `'true'`, the signing key is configured, and
-`FEDERATION_ABUSE_CONTACT` is a valid contact. Only then does
-`/.well-known/terraviz.json` advertise the feed endpoint and contact.
+`FEDERATION_ENABLED` is `'true'`, the signing key is usable and matches
+the public key, and `FEDERATION_ABUSE_CONTACT` is a valid contact.
+Only then does `/.well-known/terraviz.json` set `federation.feed` true.
+The endpoint path is always listed, and a valid contact is published
+independently of readiness; these fields are not availability claims.
 A node that switched federation on without a contact serves no feed,
 because a peer has no one to report a problem to.
 
 ## Step 4: STAC to native links
 
-The STAC Collection and Item for a row this node hosts carry an
-`alternate` link to `/api/v1/datasets/:id`; a mirrored row would carry
-a `via` link to its origin instead, never an `alternate`. The root
+The live STAC Collection and Item for a row this node hosts carry a
+`via` source-metadata link to `/api/v1/datasets/:id` with the native
+JSON schema profile. A history-backed live Collection keeps it; an
+immutable history Item does not link to today's native record. A
+mirrored row would carry a `via` link to its origin instead. The root
 catalog gains a `describedby` link to `/.well-known/terraviz.json`.
 `(origin node, dataset id)` is the join key between the two
 representations, which is what the metadata plan asked for. See the
@@ -119,7 +125,7 @@ that is stored is the one the operator typed, and every page pulled is
 verified against it. A peer that rotates its key is re-added by an
 operator; nothing re-pins a key automatically.
 
-One pull reads at most 10 pages of 100 rows, each at most 4 MiB with
+The core defaults to at most 8 pages of 100 entries, each at most 4 MiB with
 no row over 1 MiB, with a 15 s timeout per request and no redirects.
 Every page is verified before any of it is applied; a page that fails
 stops the pull with the reason recorded as the peer's
@@ -135,17 +141,25 @@ held, and 500 with an audit row on a store error.
 
 **Sweep.** A finished full sync does not delete what it did not see.
 It schedules a sweep, which the next complete incremental pull runs
-once the feed's 30 s settle window has closed, so rows held back by
+once the feed's 30 s settle window plus 60 s clock-skew allowance have closed, so rows held back by
 the watermark on the last page are not dropped.
 
 `last_sync_at` records the last **attempt**, successful or not; read
 it with `last_sync_error`.
 
 Mirrored rows are stored as the wire carried them, with the signature
-header of the page that delivered them as evidence. They are never
+header of the page that delivered them as diagnostic metadata. They are never
 joined with `datasets` and are not served by any route.
 
-`POST /api/v1/publish/federation/sync` runs one bounded pull now;
+`POST /api/v1/publish/federation/sync` reads one page of at most 25
+entries per invocation (`page_size`: 1-25). Its counted endpoint test
+includes route reads and audit writes and remains below 50 D1 statements.
+It returns snake_case fields and 503 for peer pull failures. `full: true`
+restarts an interrupted full sync; subsequent calls omit `full` to
+continue. An `invalid_cursor` result asks the operator to restart.
+The peer list exposes sweep and lease-expiry epoch milliseconds.
+
+`POST /api/v1/publish/federation/sync` runs this bounded pull now;
 `GET`/`POST /api/v1/publish/federation/peers` list and add peers, and
 `DELETE /api/v1/publish/federation/peers/:id` removes one with its
 mirrored rows (404 `peer_not_found`, audited as
@@ -166,6 +180,29 @@ Both ends are this repository's code, so the harness proves the two
 halves agree with each other, not that the wire format is
 unambiguous to a second implementation.
 
+### Verification Evidence
+
+2026-10-29, Windows/Node 24, base `1b9313f6` plus uncommitted PR #491
+review corrections:
+
+- All changed test files plus STAC publication integration: 12 files,
+  483 tests passed.
+- `npm run test:federation`: 9 files, 258 tests passed, including signed
+  route/subscriber conformance, hidden withdrawals and deferred sweeps.
+- `npm run type-check`: passed, including migration, documentation,
+  license and generated protocol-schema gates.
+- Required read-only reviews: TerraViz Federation Reviewer,
+  Application Security Engineer, API Platform Engineer, Scientific
+  Data Steward and Code Reviewer. Follow-up found no remaining
+  actionable issues after BOM/depth/budget/documentation corrections.
+  Skip-and-log remains the maintainer-requested tradeoff described in
+  the protocol README.
+
+This is AI-assisted review, not independent human approval. No human
+outside the original loop has reviewed this change. WordPress contract
+regeneration/checks and deployed-node tests are unconfirmed. The dated
+scoping amendment and governance agreement remain maintainer-owned.
+
 ## Configuration
 
 | Variable | Effect |
@@ -178,12 +215,11 @@ unambiguous to a second implementation.
 
 - **Handshake, HMAC and grants.** Only public rows are federated, and
   only by pull. Nothing grants a peer more than the public catalog.
-- **Scheduled sync.** Pulls are manual. The `sync_interval_minutes`
-  column was removed in review and arrives with the scheduler.
-- **Hardening found in review, not yet built:** a per-peer storage
-  quota; refusing rows whose `originNode` is this node; sanitising a
-  peer's `display_name`; checking the feed's `Content-Type`;
-  verifying the raw body before parsing; caching feed pages.
+- **Scheduled sync.** Pulls are manual; a sync-interval setting arrives
+  with the scheduler.
+- **Storage and caching.** Per-peer storage quotas and feed-page caching
+  remain deferred. Origin ids must match the pinned peer; display names
+  and JSON media types are checked, and raw bytes are verified first.
 - **Serving mirrored rows.** No catalog, search, STAC or Orbit surface
   reads `federated_datasets`, so the `via` link of Step 4 has no
   producer yet.
@@ -193,20 +229,18 @@ unambiguous to a second implementation.
 
 ## Known disclosures and deviations
 
-- **Tombstones disclose ids.** The feed sends the id of a public row
-  an operator later hid or retracted. The public catalog does not.
-  This includes a row published public but hidden from the start: it
-  was never visible, and its id still reaches every subscriber.
-- **Discovery does not check the key.** `feed: true` reflects
-  configuration; a key that does not match `node_identity` shows only
-  as a 503 from the feed.
-- **`origin_node` is the peer's claim.** It is stored as sent and
-  checked against nothing; a peer re-publishing another node's rows
-  can name that node.
+- **Retractions disclose ids.** A retracted public, non-hidden row
+  produces a tombstone; hidden ids never enter the feed. Previously
+  mirrored hidden rows disappear through full sync plus deferred sweep.
+- **Readiness is not health.** Discovery checks the signing-key pair
+  but may be cached for fifteen minutes, and does not prove D1 health.
+- **Origin is bounded.** Every row must name its serving peer as
+  `originNode`; v1 does not accept relays. Different peers' claims are
+  not deduplicated automatically.
 - **Stored signatures cover pages, not rows.** `feed_signature` is the
   header of the page that delivered a row. Re-verifying it needs that
-  whole page, which is not kept, so it is evidence of where a row came
-  from rather than something a later reader can check on its own.
+  whole page and target, which are not kept. The stored header is
+  diagnostic metadata, not independently verifiable evidence.
 - **Module layout.** The `_lib/federation-*` modules are flat rather
   than the subdirectory `federation-scoping.md` §7 Directive 1
   sketches; the store-interface split it asks for is followed.
@@ -215,3 +249,11 @@ unambiguous to a second implementation.
   out and arrive as `ADD COLUMN` with the code that reads them.
 - **Deployment.** Nothing here has run against a deployed node or
   between two deployments.
+- **Operational bounds.** The 30 s watermark assumes commits settle
+  within that interval. A live row edited in both reconciliation
+  windows can temporarily disappear and return on a later pull;
+  repeated full syncs alone never run the deferred sweep. A cancelled
+  invocation may hold its five-minute lease. Oversized or invalid-id
+  rows stop a page. Edge/WAF rate limits, per-peer quotas, Access
+  cookie/CSRF behavior and off-Cloudflare DNS/address pinning need
+  deployment review before enabling the feature.

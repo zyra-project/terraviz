@@ -43,6 +43,7 @@ let publisher: Database.Database
 let publisherEnv: Record<string, unknown>
 let subscriber: Database.Database
 let tamper: ((text: string) => string) | null
+let run = 0
 
 /** The network: every subscriber request lands on the publisher's handler. */
 const network: typeof fetch = async (input, init) => {
@@ -64,7 +65,6 @@ async function addPeer(publicKey = KEYS.wire) {
 async function pull(opts: PullOptions = {}) {
   const peer = await d1FederationPeerStore(asD1(subscriber)).getPeer('NODE000')
   if (!peer) throw new Error('peer missing')
-  let run = 0
   return pullPeer(
     peer,
     {
@@ -142,12 +142,27 @@ describe('federation conformance: feed route ↔ subscriber engine', () => {
 
     vi.setSystemTime(new Date('2026-02-02T00:00:00.000Z'))
     publisher
-      .prepare("UPDATE datasets SET is_hidden = 1, updated_at = '2026-02-01T12:00:00.000Z' WHERE id = ?")
+      .prepare("UPDATE datasets SET retracted_at = '2026-02-01T12:00:00.000Z', updated_at = '2026-02-01T12:00:00.000Z' WHERE id = ?")
       .run(idOf(1))
     const result = await pull()
     expect(result).toMatchObject({ ok: true, full: false, tombstoned: 1 })
     expect(mirrored().map(r => r.remote_id)).not.toContain(idOf(1))
     expect(mirrored().map(r => r.remote_id)).toEqual(await feedIds())
+  })
+
+  it('hiding discloses no tombstone and removes the mirror only after a full scan and deferred sweep', async () => {
+    await addPeer()
+    expect((await pull()).ok).toBe(true)
+    publisher.prepare('UPDATE datasets SET is_hidden = 1 WHERE id = ?').run(idOf(1))
+    expect(await feedIds()).not.toContain(idOf(1))
+    expect(await pull()).toMatchObject({ ok: true, tombstoned: 0 })
+    expect(mirrored().map(row => row.remote_id)).toContain(idOf(1))
+    expect(await pull({ full: true })).toMatchObject({ ok: true, reconcilePending: true })
+    expect(mirrored().map(row => row.remote_id)).toContain(idOf(1))
+    const pending = subscriber.prepare('SELECT sweep_after FROM federation_peers').get() as { sweep_after: number }
+    vi.setSystemTime(new Date(pending.sweep_after + 1))
+    expect(await pull()).toMatchObject({ ok: true, reconcilePending: false })
+    expect(mirrored().map(row => row.remote_id)).not.toContain(idOf(1))
   })
 
   it('a page altered in transit fails verification and changes nothing', async () => {

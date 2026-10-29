@@ -12,7 +12,8 @@
 import { generateKeyPairSync } from 'node:crypto'
 import type Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { onRequestGet, resetFeedSigningKeyCache } from './feed'
+import { onRequest, onRequestGet, resetFeedSigningKeyCache, wellFormed } from './feed'
+import { onRequest as unimplemented } from './[[path]]'
 import { asD1, makeCtx, seedFixtures } from '../_lib/test-helpers'
 import { encodeFeedCursor, type FederationFeedBody } from '../_lib/federation-feed'
 import { SIGNATURE_HEADER, verifyFederationBody, importNodePublicKey } from '../_lib/federation-signature'
@@ -75,6 +76,49 @@ afterEach(() => {
 })
 
 describe('GET /api/v1/federation/feed — refusals', () => {
+  it('returns JSON for storage errors', async () => {
+    const { env } = setup()
+    const res = await get({ ...env, CATALOG_DB: { prepare() { throw new Error('D1 failure') } } })
+    expect(res.status).toBe(503)
+    expect(await res.json()).toEqual({ error: 'feed_unavailable' })
+  })
+
+  it('handles HEAD and refuses unsupported methods', async () => {
+    const { env } = setup()
+    const head = await onRequest(makeCtx({ url: BASE, method: 'HEAD', env }))
+    expect(head.status).toBe(200)
+    expect(await head.text()).toBe('')
+    const post = await onRequest(makeCtx({ url: BASE, method: 'POST', env }))
+    expect(post.status).toBe(405)
+    expect(post.headers.get('allow')).toBe('GET, HEAD')
+    expect(await post.json()).toEqual({ error: 'method_not_allowed' })
+  })
+
+  it('keeps disabled HEAD and unimplemented federation paths JSON 404', async () => {
+    const head = await onRequest(makeCtx({ url: BASE, method: 'HEAD', env: { FEDERATION_ENABLED: 'false' } }))
+    expect(head.status).toBe(404)
+    expect(head.headers.get('content-type')).toContain('application/json')
+    expect(await head.text()).toBe('')
+    for (const method of ['GET', 'HEAD', 'POST']) {
+      const response = await unimplemented(makeCtx({ url: BASE.replace('/feed', '/handshake'), method, env: {} }))
+      expect(response.status).toBe(404)
+      expect(response.headers.get('cache-control')).toBe('no-store')
+      expect(await response.text()).toBe(method === 'HEAD' ? '' : '{"error":"not_found"}')
+    }
+  })
+
+  it('limits requests before querying D1 regardless of cursor', async () => {
+    const { env } = setup()
+    for (let request = 0; request < 600; request++) {
+      expect((await get(env, '?since=invalid' + request)).status).toBe(400)
+    }
+    const response = await get(env)
+    expect(response.status).toBe(429)
+    expect(response.headers.get('retry-after')).toBe('60')
+    vi.setSystemTime(new Date(NOW.getTime() + 60_000))
+    expect((await get(env)).status).toBe(200)
+  })
+
   it.each([undefined, 'false', 'TRUE', '1'])('is 404 when FEDERATION_ENABLED is %j', async flag => {
     const { env } = setup()
     const res = await get({ ...env, FEDERATION_ENABLED: flag })
@@ -187,15 +231,14 @@ describe('GET /api/v1/federation/feed — pages', () => {
   })
 
   it('signs a row whose text holds a lone surrogate, replacing it', async () => {
-    const { sqlite, env } = setup()
-    sqlite.prepare('UPDATE datasets SET title = ? WHERE id = ?').run('bad \uD800 title', idOf(0))
+    expect(wellFormed({ title: 'bad \uD800 title' })).toEqual({ title: 'bad \uFFFD title' })
+    const { env } = setup()
     const res = await get(env)
     expect(res.status).toBe(200)
-    const body = await verified(res)
-    expect(JSON.stringify(body)).toContain('bad \uFFFD title')
+    await verified(res)
   })
 
-  it('leaves out drafts and non-public rows, and tombstones hidden and retracted ones', async () => {
+  it('leaves out drafts, non-public and hidden rows, and tombstones retracted ones', async () => {
     const { sqlite, env } = setup(6)
     sqlite.prepare('UPDATE datasets SET published_at = NULL WHERE id = ?').run(idOf(0))
     sqlite.prepare("UPDATE datasets SET visibility = 'private' WHERE id = ?").run(idOf(1))
@@ -203,11 +246,21 @@ describe('GET /api/v1/federation/feed — pages', () => {
     sqlite.prepare("UPDATE datasets SET retracted_at = '2026-01-20T00:00:00.000Z' WHERE id = ?").run(idOf(3))
     const body = await verified(await get(env))
     expect(body.datasets.map(d => d.id)).toEqual([idOf(4), idOf(5)])
-    expect(body.tombstones).toEqual([idOf(2), idOf(3)])
+    expect(body.tombstones).toEqual([idOf(3)])
     const text = JSON.stringify(body)
     expect(text).not.toContain(idOf(0))
     expect(text).not.toContain(idOf(1))
+    expect(text).not.toContain(idOf(2))
   })
+
+  it.each(['{"x":1e999}', '['.repeat(70) + '0' + ']'.repeat(70), '{"__proto__":{"a":1}}'])(
+    'does not stall on probing metadata %s', async probing => {
+      const { sqlite, env } = setup()
+      sqlite.prepare('UPDATE datasets SET probing_info = ? WHERE id = ?').run(probing, idOf(0))
+      const body = await verified(await get(env))
+      expect(body.datasets.map(dataset => dataset.id)).toContain(idOf(0))
+    },
+  )
 
   it('pages through rows that share an updated_at', async () => {
     const { sqlite, env } = setup(5)
@@ -241,6 +294,16 @@ describe('GET /api/v1/federation/feed — pages', () => {
     })
     expect(result.ok).toBe(true)
     expect((result as { body: FederationFeedBody }).body.datasets.map(d => d.id)).toEqual([idOf(1)])
+  })
+
+  it.each([60, 61, 62, 63, 64])('keeps rows reachable with probing metadata nested %i levels', async depth => {
+    const { sqlite, env } = setup(2)
+    let probing: unknown = 1
+    for (let level = 0; level < depth; level++) probing = [probing]
+    sqlite.prepare('UPDATE datasets SET probing_info = ? WHERE id = ?').run(JSON.stringify(probing), idOf(0))
+    const body = await verified(await get(env))
+    expect(body.datasets.map(dataset => dataset.id)).toEqual([idOf(0), idOf(1)])
+    expect(body.datasets[0].probingInfo).toEqual(depth <= 60 ? probing : undefined)
   })
 
   it('answers a cursor ahead of the feed with an empty page that keeps it', async () => {

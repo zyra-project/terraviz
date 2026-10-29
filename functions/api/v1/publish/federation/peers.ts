@@ -27,7 +27,7 @@
  * 201 on add, 409 `peer_exists` when the id or base URL is already a
  * peer (this
  * route never overwrites a pinned key), 400 with field errors for bad
- * input, 422 when the peer's discovery document disagrees, 502 when
+ * input, 422 when the peer's discovery document is invalid or disagrees, 503 when
  * it cannot be fetched. `Cache-Control: private, no-store` on every
  * response.
  */
@@ -36,7 +36,7 @@ import type { CatalogEnv } from '../../_lib/env'
 import type { PublisherData } from '../_middleware'
 import { writeAuditEvent } from '../../_lib/audit-store'
 import { getNodeIdentity } from '../../_lib/catalog-store'
-import { importNodePublicKey } from '../../_lib/federation-signature'
+import { normalizeNodePublicKey } from '../../_lib/federation-signature'
 import { d1FederationPeerStore } from '../../_lib/federation-mirror-d1'
 import {
   federationAdminGate,
@@ -73,6 +73,8 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
       last_sync_error: p.lastSyncError,
       full_sync_in_progress: p.fullSyncRun !== null,
       reconcile_pending: p.sweepRun !== null,
+      sweep_after: p.sweepAfterMs,
+      sync_lease_expires: p.syncLeaseExpiresMs ?? null,
       mirrored_count: p.mirroredCount,
     })),
   })
@@ -91,7 +93,7 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
     return jsonError(400, 'invalid_json', 'Request body must be JSON.')
   }
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
-    return jsonError(400, 'invalid_json', 'Request body must be a JSON object.')
+    return jsonError(400, 'invalid_body', 'Request body must be a JSON object.')
   }
   const input = body as Record<string, unknown>
 
@@ -110,9 +112,10 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
   }
   const publicKey = input.public_key
   let keyOk = false
+  let key = ''
   if (typeof publicKey === 'string' && publicKey.length <= 200) {
     try {
-      await importNodePublicKey(publicKey)
+      key = normalizeNodePublicKey(publicKey)
       keyOk = true
     } catch {
       keyOk = false
@@ -123,7 +126,7 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
   }
   let displayName: string | null = null
   if (input.display_name !== undefined) {
-    if (typeof input.display_name !== 'string' || input.display_name.trim().length === 0 || input.display_name.length > MAX_DISPLAY_NAME) {
+    if (typeof input.display_name !== 'string' || input.display_name.trim().length === 0 || input.display_name.length > MAX_DISPLAY_NAME || /[\x00-\x1f\x7f<>]/.test(input.display_name)) {
       errors.push({ field: 'display_name', code: 'invalid', message: `Must be 1–${MAX_DISPLAY_NAME} characters.` })
     } else {
       displayName = input.display_name.trim()
@@ -132,42 +135,58 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
   if (errors.length > 0) return json(400, { errors })
 
   const id = nodeId as string
-  const key = publicKey as string
+  const refused = async (response: Response, reason: string): Promise<Response> => {
+    await writeAuditEvent(db, {
+      actor_kind: 'publisher',
+      actor_id: publisher.id,
+      action: 'federation_peer.add',
+      subject_kind: 'peer',
+      subject_id: id,
+      metadata_json: JSON.stringify({ outcome: 'refused', reason }),
+    })
+    return response
+  }
   const self = await getNodeIdentity(db)
   if (self && self.node_id === id) {
-    return json(400, { errors: [{ field: 'node_id', code: 'self', message: 'A node cannot subscribe to itself.' }] })
+    return refused(json(400, { errors: [{ field: 'node_id', code: 'self', message: 'A node cannot subscribe to itself.' }] }), 'self')
   }
 
   const store = d1FederationPeerStore(db)
   if (await store.getPeer(id)) {
-    return jsonError(409, 'peer_exists', 'This node is already a peer. Its pinned key is not replaced here.')
+    return refused(jsonError(409, 'peer_exists', 'This node is already a peer. Its pinned key is not replaced here.'), 'peer_exists')
   }
 
   // Wrapped rather than passed bare: Workers' fetch throws
   // "Illegal invocation" when called detached from its global.
   const discovery = await fetchPeerDiscovery((i, init) => fetch(i, init), baseUrl!)
   if (!discovery.ok) {
-    return json(502, {
-      error: 'peer_unreachable',
+    const invalid = discovery.error === 'invalid-body' || discovery.error === 'too-large'
+    return refused(json(invalid ? 422 : 503, {
+      error: invalid ? 'peer_invalid_discovery' : 'peer_unreachable',
       reason: discovery.error,
       ...(discovery.status !== undefined ? { status: discovery.status } : {}),
       message: 'The peer\'s /.well-known/terraviz.json could not be read.',
-    })
+    }), invalid ? 'invalid_discovery' : 'peer_unreachable')
   }
   const doc = discovery.doc
   const mismatches: string[] = []
   if (doc.nodeId !== id) mismatches.push('node_id')
-  if (doc.publicKey !== key) mismatches.push('public_key')
+  try {
+    if (normalizeNodePublicKey(doc.publicKey) !== key) mismatches.push('public_key')
+  } catch {
+    mismatches.push('public_key')
+  }
   if (doc.baseUrl !== baseUrl) mismatches.push('base_url')
   if (mismatches.length > 0) {
-    return json(422, {
+    return refused(json(422, {
       error: 'peer_mismatch',
       fields: mismatches,
+      errors: mismatches.map(field => ({ field, code: 'mismatch', message: 'Does not match the peer discovery document.' })),
       message: 'The peer\'s discovery document does not match what was entered.',
-    })
+    }), 'peer_mismatch')
   }
   if (!doc.feed) {
-    return jsonError(422, 'peer_feed_off', 'The peer does not serve a federation feed.')
+    return refused(jsonError(422, 'peer_feed_off', 'The peer does not serve a federation feed.'), 'peer_feed_off')
   }
 
   const name = displayName ?? (doc.displayName.trim() || id)
@@ -176,7 +195,7 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
     new Date().toISOString(),
   )
   if (outcome === 'exists') {
-    return jsonError(409, 'peer_exists', 'A peer with this node id or base URL is already registered.')
+    return refused(jsonError(409, 'peer_exists', 'A peer with this node id or base URL is already registered.'), 'peer_exists')
   }
   await writeAuditEvent(db, {
     actor_kind: 'publisher',

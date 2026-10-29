@@ -18,9 +18,9 @@
  *
  * - **The signed body is RFC 8785 canonical JSON** (`canonicalJson`).
  *   The producer sends exactly the canonical text; the verifier
- *   re-canonicalizes the value it parsed and verifies that, so what is
- *   verified is the object the subscriber goes on to use rather than
- *   bytes it then reinterprets. A value with no single canonical form
+ *   verifies the received bytes before parsing, then requires those
+ *   bytes to equal the canonical form. Duplicate members and changed
+ *   whitespace cannot inherit another body's signature. A value with no single canonical form
  *   (a non-finite number, a lone surrogate, `undefined` in an array, a
  *   `Date`) is refused rather than coerced, because a coercion one side
  *   applies and the other does not is a signature that never verifies.
@@ -45,6 +45,8 @@
  * run in Pages Functions, in the subscriber, and in the conformance
  * harness.
  */
+
+import { ed25519 } from '@noble/curves/ed25519.js'
 
 export const SIGNATURE_HEADER = 'Terraviz-Signature'
 export const SIGNATURE_VERSION = '1'
@@ -206,7 +208,8 @@ export async function importNodeSigningKey(secret: string): Promise<CryptoKey> {
 
 /** Import an `ed25519:<standard-base64>` public key (32 raw bytes), the
  *  format `node_identity.public_key` and the well-known doc carry. */
-export async function importNodePublicKey(wire: string): Promise<CryptoKey> {
+export function normalizeNodePublicKey(input: string): string {
+  const wire = input.trim()
   if (!wire.startsWith(WIRE_KEY_PREFIX)) throw new Error('public key is not ed25519:<base64>')
   let raw: Uint8Array
   try {
@@ -215,6 +218,13 @@ export async function importNodePublicKey(wire: string): Promise<CryptoKey> {
     throw new Error('public key is not base64')
   }
   if (raw.length !== 32) throw new Error('public key is not 32 bytes')
+  const point = ed25519.Point.fromBytes(raw, false)
+  if (point.isSmallOrder()) throw new Error('public key has small order')
+  return WIRE_KEY_PREFIX + bytesToB64(raw)
+}
+
+export async function importNodePublicKey(wire: string): Promise<CryptoKey> {
+  const raw = b64ToBytes(normalizeNodePublicKey(wire).slice(WIRE_KEY_PREFIX.length))
   return crypto.subtle.importKey('raw', raw as BufferSource, { name: ED25519 }, true, ['verify'])
 }
 
@@ -371,27 +381,25 @@ export async function verifyFederationBody(
   if (parsed.created > now + maxSkew) return { ok: false, reason: 'future' }
   if (parsed.created < now - maxAge) return { ok: false, reason: 'stale' }
 
-  let body: unknown
-  let canonical: string
-  try {
-    body = JSON.parse(text)
-    canonical = canonicalJson(body)
-  } catch {
-    return { ok: false, reason: 'malformed-body' }
-  }
-
   const params = { keyId: parsed.keyId, created: parsed.created, target: opts.expectedTarget }
   try {
     checkParams(params)
   } catch {
     return { ok: false, reason: 'bad-signature' }
   }
-  const input = await signingInput(canonical, params)
+  const input = await signingInput(text, params)
   const valid = await crypto.subtle.verify(
     ED25519,
     opts.publicKey,
     parsed.sig as BufferSource,
     input as BufferSource,
   )
-  return valid ? { ok: true, body, created: parsed.created } : { ok: false, reason: 'bad-signature' }
+  if (!valid) return { ok: false, reason: 'bad-signature' }
+  try {
+    const body: unknown = JSON.parse(text)
+    if (text !== canonicalJson(body)) return { ok: false, reason: 'malformed-body' }
+    return { ok: true, body, created: parsed.created }
+  } catch {
+    return { ok: false, reason: 'malformed-body' }
+  }
 }

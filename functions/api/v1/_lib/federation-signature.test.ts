@@ -12,6 +12,7 @@
  */
 
 import { generateKeyPairSync } from 'node:crypto'
+import { ED25519_TORSION_SUBGROUP } from '@noble/curves/ed25519.js'
 import { describe, expect, it } from 'vitest'
 import {
   CanonicalJsonError,
@@ -111,6 +112,21 @@ describe('canonicalJson (RFC 8785)', () => {
 })
 
 describe('keys', () => {
+  it('matches the published UTF-8 feed vector from an independent Node crypto signer', async () => {
+    const text = '{"cursor":"opaque","datasets":[{"colorScale":{"units":"kg m-3","vmax":2e-7,"vmin":0},"id":"sample","originNode":"NODE000","probingInfo":{"nested":[true,null,{"label":"Oc\u00e9an"}]},"title":"A\u00e9rosol"}],"generated_at":"2026-09-22T14:13:20.000Z","has_more":false,"node_id":"NODE000","schema_version":1}'
+    const params = { keyId: 'NODE000', created: 1790086400, target: '/api/v1/federation/feed?limit=25' }
+    const signed = await signFederationBody(JSON.parse(text), await importNodeSigningKey(RFC_PRIVATE_B64), params)
+    expect(signed.text).toBe(text)
+    expect(signed.header).toBe('v=1, keyid=NODE000, created=1790086400, sig=FcqWiT3nDEmUhyHN0p2w_kvsWa8uuX9Wtuw5rbC6P_WxSqkjV8hckjOv4YtV1SIQJ7bxNeyp9je96oWMlaDbAQ')
+    expect(Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))).toString('base64url')).toBe('qBJOVgfc8lKGhbuCyVFWyrYLjjwohaDJWbIT31jfOpM')
+  })
+
+  it('refuses every small-order Ed25519 public key', async () => {
+    for (const point of ED25519_TORSION_SUBGROUP) {
+      await expect(importNodePublicKey(`ed25519:${hex(point).toString('base64')}`)).rejects.toThrow()
+    }
+  })
+
   it('imports a PKCS8 seed to the RFC 8032 key', async () => {
     const { priv, pub } = await rfcKeys()
     const sig = new Uint8Array(await crypto.subtle.sign('Ed25519', priv, new Uint8Array(0)))
@@ -187,7 +203,7 @@ describe('sign and verify', () => {
     expect(result).toEqual({ ok: true, body, created: NOW })
   })
 
-  it('verifies the same value however it was formatted', async () => {
+  it('rejects reformatting of a signed page', async () => {
     const { priv, pub } = await rfcKeys()
     const signed = await signFederationBody(body, priv, PARAMS)
     const reformatted = JSON.stringify(JSON.parse(signed.text), null, 2)
@@ -197,7 +213,7 @@ describe('sign and verify', () => {
       expectedTarget: TARGET,
       now: NOW,
     })
-    expect(result.ok).toBe(true)
+    expect(result).toEqual({ ok: false, reason: 'bad-signature' })
   })
 
   it('refuses to sign a body with no canonical form or a bad parameter', async () => {
@@ -247,8 +263,15 @@ describe('sign and verify', () => {
     it('a body that is not JSON', async () => {
       expect(await verifyWith(s => ({ ...s, text: '{' }))).toEqual({
         ok: false,
-        reason: 'malformed-body',
+        reason: 'bad-signature',
       })
+    })
+
+    it('duplicate keys injected before the original members', async () => {
+      expect(await verifyWith(s => ({
+        ...s,
+        text: '{"datasets":[{"id":"EVIL"}],"tombstones":["X"],' + s.text.slice(1),
+      }))).toEqual({ ok: false, reason: 'bad-signature' })
     })
 
     it('a page signed for another request', async () => {

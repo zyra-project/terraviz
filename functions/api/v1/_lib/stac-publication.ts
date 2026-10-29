@@ -52,7 +52,7 @@ export async function readStacPublication(env: CatalogEnv, options: { operatorRe
   if (!model.node) throw new Error('Missing node identity')
   const branding = model.branding
   if (branding) model.node.publicOrgName = branding.org_name
-  const seed = JSON.stringify({ version: 10, operatorReport: options.operatorReport === true, model, r2: env.R2_PUBLIC_BASE ?? null, origins: env.STAC_ASSET_ORIGINS ?? null })
+  const seed = JSON.stringify({ version: 11, operatorReport: options.operatorReport === true, model, r2: env.R2_PUBLIC_BASE ?? null, origins: env.STAC_ASSET_ORIGINS ?? null })
   const key = `stac:publication:v1:${(await computeEtag(seed)).replace(/"/g, '')}`
   if (env.CATALOG_KV && !options.operatorReport) {
     try {
