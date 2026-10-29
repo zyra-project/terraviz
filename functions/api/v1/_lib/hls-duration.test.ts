@@ -519,6 +519,21 @@ function vimeo(routes: Record<string, Route>) {
   })
 }
 
+/**
+ * A fetch as Workers' own behaves: called as another object's method it
+ * throws, where Node's doesn't care. Every Vimeo read failed on
+ * Cloudflare that way while the tests, run in Node, passed. `inner`
+ * answers, so a test can read what each call was asked.
+ */
+function workersFetch(inner: ReturnType<typeof vimeo>): typeof fetch {
+  return function (this: unknown, input: RequestInfo | URL, init?: RequestInit) {
+    if (this !== undefined && this !== globalThis) {
+      throw new TypeError('Illegal invocation: function called with incorrect `this` reference.')
+    }
+    return inner(input, init)
+  } as typeof fetch
+}
+
 /** An answer that never comes, until the request's signal stops it. */
 const hanging: Route = init => new Promise<Response>((_, reject) => {
   init?.signal?.addEventListener('abort', () => reject(new DOMException('stopped', 'AbortError')))
@@ -565,6 +580,31 @@ describe('readVimeoDuration', () => {
     expect(text).not.toMatch(/pathsig|\?|aab1e50e/)
     return text
   }
+
+  it("calls the fetch it is given as Workers' fetch must be called", async () => {
+    expect(await readVimeoDuration('920241809', PROXY, { fetchImpl: workersFetch(vimeo(vimeoRoutes())) }))
+      .toEqual({ seconds: 12.1, settled: true })
+    expect(logged()).toBe('')
+  })
+
+  it("calls the platform's own fetch, by default, as Workers' fetch must be called", async () => {
+    const inner = vimeo(vimeoRoutes())
+    vi.stubGlobal('fetch', workersFetch(inner))
+    try {
+      expect(await readVimeoDuration('920241809', PROXY)).toEqual({ seconds: 12.1, settled: true })
+      expect(logged()).toBe('')
+      // What wraps the default hands each request's options on: every
+      // request asks not to be redirected, so each hop is checked, and
+      // can be stopped.
+      expect(inner).toHaveBeenCalledTimes(5)
+      for (const [url, init] of inner.mock.calls) {
+        expect(init?.redirect, String(url)).toBe('manual')
+        expect(init?.signal, String(url)).toBeInstanceOf(AbortSignal)
+      }
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
 
   it('reads every variant, where the API gives whole seconds, following the player\'s redirect itself', async () => {
     const fetchImpl = vimeo(vimeoRoutes())

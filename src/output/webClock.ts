@@ -253,7 +253,17 @@ interface LoopView extends SyncTarget {
   periodS: number
 }
 
-function loopView(element: SyncTarget): LoopView {
+/**
+ * `play()`, its refusal handed to `onRefused` rather than left unhandled:
+ * a real element answers with a promise, rejected when the browser won't
+ * play it (an autoplay policy) or when something interrupts it.
+ */
+function play(element: SyncTarget, onRefused: (err: unknown) => void): void {
+  const played = element.play() as unknown
+  if (played && typeof (played as Promise<void>).catch === 'function') (played as Promise<void>).catch(onRefused)
+}
+
+function loopView(element: SyncTarget, onRefused: (err: unknown) => void): LoopView {
   const view = {
     element,
     centreS: 0,
@@ -285,7 +295,7 @@ function loopView(element: SyncTarget): LoopView {
     set playbackRate(rate: number) {
       element.playbackRate = rate
     },
-    play: () => element.play(),
+    play: () => play(element, onRefused),
     pause: () => element.pause(),
   }
   return view
@@ -307,11 +317,15 @@ export function createWebClockSteer(
     /** The playhead layer's own clock, monotonic, for its seek-settle
      *  window and seek-cost measurement. */
     monotonicMs?: () => number
+    /** A `play()` the browser refused or something interrupted, with its
+     *  error: how `webOutput` learns a page may not play aloud. */
+    onPlayRefused?: (err: unknown) => void
   } = {},
 ): WebClockSteer {
   // The web output's own playhead memory. Not the mirror's: that one is
   // handed the real element, and the law here has to see `loopView`.
   const monotonicMs = deps.monotonicMs ?? (() => performance.now())
+  const onRefused = deps.onPlayRefused ?? (() => {})
   const playhead = createPlayheadSync(monotonicMs)
   let view: LoopView | null = null
   /** What turning this element back at the seam last cost: how long it
@@ -343,7 +357,7 @@ export function createWebClockSteer(
 
       if (!clock.paused) {
         held = null
-        if (!view || view.element !== video) view = loopView(video)
+        if (!view || view.element !== video) view = loopView(video, onRefused)
         view.centreS = targetS
         view.periodS = d
 
@@ -390,7 +404,7 @@ export function createWebClockSteer(
           const landingS = landing > end ? 0 : landing
           video.currentTime = landingS
           // After the seek: `play()` on an element at its end rewinds it.
-          if (video.paused) video.play()
+          if (video.paused) play(video, onRefused)
           playhead.noteSeek(view)
           seamCost.pending = { sinceMs: now, landingS }
           return { kind: 'playing', driftS, seeked: true }

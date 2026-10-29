@@ -81,6 +81,13 @@ export interface WebOutputSettings {
   /** Report the page's own telemetry (`webTelemetry.ts`). Off unless
    *  the address turns it on, and followed live like everything else. */
   telemetry: boolean
+  /** Play a video's sound track. Off unless the address turns it on,
+   *  strictly as telemetry is (`sound=off` is muted, since everyone in
+   *  earshot of a globe would pay for a misread), so every address
+   *  without `sound=1` stays silent; followed live. A browser that
+   *  refuses to play aloud without a click leaves the page muted
+   *  (`webOutput`). */
+  sound: boolean
   /** Always a clock: a bare address plays from the start at the clip's
    *  own speed, from when this copy read it. */
   clock: WebClock
@@ -120,8 +127,17 @@ function truthy(params: URLSearchParams, key: string): boolean {
 }
 
 /**
- * Whether the address turns telemetry on: exactly `1` or `true` (any
- * case), and off for anything else or nothing.
+ * Whether the address turns a strict switch on: exactly `1` or `true`
+ * (any case), and off for anything else or nothing. For a switch whose
+ * misreading would cost someone who never chose it.
+ */
+function strictlyOn(params: URLSearchParams, key: string): boolean {
+  const lowered = params.get(key)?.toLowerCase()
+  return lowered === '1' || lowered === 'true'
+}
+
+/**
+ * Whether the address turns telemetry on, strictly (`strictlyOn`).
  *
  * Off by default because the page loads for everyone in range of a
  * globe, who is shown no notice, and anyone can point a globe at a
@@ -132,8 +148,7 @@ function truthy(params: URLSearchParams, key: string): boolean {
  * one fails toward off.
  */
 function telemetryOn(params: URLSearchParams): boolean {
-  const lowered = params.get('telemetry')?.toLowerCase()
-  return lowered === '1' || lowered === 'true'
+  return strictlyOn(params, 'telemetry')
 }
 
 /** A plain decimal: digits, an optional point, an optional leading
@@ -226,6 +241,7 @@ export function readWebSettings(search: string, hash: string): WebOutputSettings
     view: readView(params),
     debug: truthy(params, 'debug'),
     telemetry: telemetryOn(params),
+    sound: strictlyOn(params, 'sound'),
     clock: readClock(params),
   }
 }

@@ -166,6 +166,53 @@ describe('cutProse', () => {
       expect(out, text).toEqual({ text: '', cut: true })
     }
   })
+
+  it('keeps to a count of characters as well as the bytes, whichever binds', () => {
+    // The characters bind: plenty of bytes, twenty UTF-16 units.
+    const byChars = cutProse('word '.repeat(100), 1000, 20)
+    expect(byChars).toEqual({ text: 'word word word...', cut: true })
+    // The bytes bind: three bytes a character, 30 bytes.
+    const byBytes = cutProse('海'.repeat(100), 30, 500)
+    expect(jsonBytes(byBytes.text)).toBeLessThanOrEqual(30)
+    expect(byBytes.text).toBe('海'.repeat(9) + '...')
+    // What fits both is whole, and a count below a grapheme and its "..."
+    // gives nothing, as a cap that small does.
+    expect(cutProse('Short.', 1000, 6)).toEqual({ text: 'Short.', cut: false })
+    expect(cutProse('Longer than three.', 1000, 3)).toEqual({ text: '', cut: true })
+    // A grapheme of two units counts as two, and is never split.
+    expect(cutProse('é'.repeat(100), 1000, 9).text).toBe('é'.repeat(3) + '...')
+  })
+
+  it('cuts as reading the whole text would, for any mix of characters and limits', () => {
+    // A reference that segments everything and walks forward, against the
+    // cut that reads only a head: they must agree whichever limit binds.
+    const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+    const reference = (text: string, cap: number, chars: number): { text: string; cut: boolean } => {
+      const fits = (s: string): boolean => s.length <= chars && jsonBytes(s) <= cap
+      if (fits(text)) return { text, cut: false }
+      if (cap < 4 || chars < 4) return { text: '', cut: text !== '' }
+      const parts = Array.from(segmenter.segment(text), g => g.segment)
+      let lo = 0
+      while (lo < parts.length && fits(parts.slice(0, lo + 1).join('').trimEnd() + '...')) ++lo
+      if (lo === 0) return { text: '', cut: true }
+      let end = lo
+      const space = parts.lastIndexOf(' ', end - 1)
+      if (space > (end * 2) / 3) end = space
+      return { text: parts.slice(0, end).join('').trimEnd() + '...', cut: true }
+    }
+    const pieces = ['a', 'b', ' ', '海', '"', '\\', 'é', 'é', '😀', '👨‍👩‍👧', '🇺🇸']
+    let seed = 20261027
+    const next = (n: number): number => {
+      seed = (seed * 1103515245 + 12345) % 2147483648
+      return seed % n
+    }
+    for (let i = 0; i < 600; i++) {
+      const text = Array.from({ length: next(400) }, () => pieces[next(pieces.length)]).join('')
+      const cap = 1 + next(300)
+      const chars = next(4) === 0 ? Infinity : 1 + next(200)
+      expect(cutProse(text, cap, chars), `${i}: cap ${cap}, chars ${chars}`).toEqual(reference(text, cap, chars))
+    }
+  })
 })
 
 describe('machineValue', () => {

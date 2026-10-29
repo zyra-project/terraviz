@@ -144,6 +144,7 @@ is [`SECOND_LIFE_COMPAT.md`](SECOND_LIFE_COMPAT.md) §10 question 10.
 | `rate` | 0.0834 to 12.8 | Playback speed; `1` is the clip's own. The player's own limits are 0.0625 to 16, and a copy needs room above and below the rate to catch up or fall back, so values outside this narrower range read as `1`. | `1` |
 | `paused` | present | Hold `t` exactly. Every copy shows the same frame. | playing |
 | `telemetry` | `1` or `true` (case-insensitive, untrimmed) to turn it on | Whether the page reports its own anonymous Essential telemetry: which dataset it showed and anything that would not play (below). Followed live, like every other setting. | off |
+| `sound` | `1` or `true` (case-insensitive, untrimmed) to turn it on | Play a video's sound track, in each viewer's own copy of the page. Followed live, so a `#` change turns it on or off without a reload, unless the browser refused it (below). | muted |
 
 - **`dataset` is narrower than the main app's.** The app also resolves
   legacy catalog ids (`INTERNAL_SOS_123`) and slugs; this page asks the
@@ -170,6 +171,23 @@ is [`SECOND_LIFE_COMPAT.md`](SECOND_LIFE_COMPAT.md) §10 question 10.
   numbers here.
 - **`debug` and `paused`** follow the
   [truthy convention](#stability-guarantees) exactly as `embed` does.
+- **Sound is the browser's to allow.** Every video starts muted, which
+  browsers normally let play by itself (one that blocks all autoplay
+  holds the first frame, as it always did), and `sound` unmutes it. A
+  browser whose autoplay policy wants a click before playing aloud
+  refuses, and that copy then plays muted until the page reloads,
+  rather than holding a still frame; Second Life's own viewer lets a
+  page on a prim play aloud by itself. Each copy plays its own sound
+  track, as close to the others as the pictures are: a seek to catch up
+  is a skip in the sound, catching up without one plays it up to a
+  quarter faster or slower for a while, each pass round a loop repeats
+  it, and `rate` changes its speed along with the picture's, within the
+  rates the browser plays sound at (some silence it far from 1).
+- **`sound` fails toward muted**, as `telemetry` fails toward off: only
+  `1` or `true` (case-insensitive, untrimmed) turns it on, so
+  `sound=off`, `=no`, a bare `sound` and an empty value leave the page
+  muted. A misread would cost everyone within earshot of a globe, who
+  never chose it.
 - **Paused is exact; playing is close.** Paused copies seek to `t`
   itself. Playing copies steer their video toward the target with the
   desktop outputs' control law, the short way round the loop. They stay
@@ -302,11 +320,12 @@ https://terraviz.zyra-project.org/?dataset=INTERNAL_SOS_123&embed=1&layout=4
 - **Truthy convention is fixed.** `catalog`, `embed`, and `chat`, and
   the output page's `debug` and `paused`, all treat presence as on and
   only `false`/`0` (case-insensitive, untrimmed) as off. New boolean
-  flags should follow the same convention. The one exception is the
-  output page's `telemetry`, a privacy switch: only `1`/`true`
+  flags should follow the same convention. The two exceptions are the
+  output page's `telemetry`, a privacy switch, and its `sound`, which
+  everyone within earshot of a globe hears: for each, only `1`/`true`
   (case-insensitive, untrimmed) is on, and anything else, presence
-  alone included, is off, because the
-  usual reading would turn it on for `telemetry=off`.
+  alone included, is off, because the usual reading would turn it on
+  for `telemetry=off` or `sound=off`.
 - **Breaking changes bump the version.** Renaming or removing a
   parameter, or changing what an existing value does, is a v2 change
   and appears in the Changelog with a migration note.
@@ -324,6 +343,7 @@ https://terraviz.zyra-project.org/?dataset=INTERNAL_SOS_123&embed=1&layout=4
 | v1 | 2026-10-24 | Additive. The output page (`/output/output`) gains its parameters: `dataset`, `fit`, `width`, `rotation` (the longitude at the picture's centre), `debug`, and the clock `t` / `at` / `rate` / `paused`, each with its own default, read from the query and the fragment alike. No main-app parameter changes. A bare output-page address draws the live Earth it always did, now sized to the page as displayed and with clouds that refresh. Later the same day, also additive: `telemetry=1`, which turns on the page's own Essential telemetry, off by default. It fails toward off rather than following the truthy convention. |
 | v1 | 2026-10-25 | Additive, with one behavior change. The output page gains `lat`, the latitude at the picture's centre, and `zoom`, which magnifies it, through the desktop output's follow turn; a zoom past what the picture can magnify (about 5.67) reads as that most. `rotation` keeps its meaning and draws the same picture at rest as before; at a pole it names the meridian the centre sits on. The behavior change: the three keys name the view the picture comes to rest on, and a change to any of them after the `#` now sets the picture moving, coasting to a stop on the new view like a spun globe on its bearing, instead of jumping there. The first reading of an address, and every view for a viewer whose browser reports reduced motion, still jump. Kept in v1 by the maintainer's decision of 25 October 2026, recorded in #501: the section was a day old, and every known composer writes at most once a second, the Second Life limit. **Migration:** a composer that animated `rotation` by writing it faster than once a second now sees the picture trail by about 0.8 s, and its swings shrink to about 40% at 0.5 Hz; write the view the picture should come to rest on, at most once a second. No main-app parameter changes. |
 | v1 | 2026-10-26 | One behavior change. The output page's clock (`t`, `at`, `rate`, `paused`) wraps on the clip's playlist total, the `#EXTINF`s summed from the first rendition a copy loads, rather than on the video element's `duration`. That `duration` was the same number until a stream had buffered to its end and then the latest end of every track: measured in Chromium, 21 to 40 ms longer on the node's bundles with a sound track. So a copy changed its period partway through, copies on different engines looped on different periods, and the gap grew with every loop since `at`. A copy with no playlist to read a length from (a single file, or a browser playing HLS itself) still wraps on the video's own length. No key, type or range changes. Kept in v1 by the maintainer's decision of 26 October 2026, recorded in #502: the section was two days old, and the old period was never stable even on one copy. **Migration:** nothing for a composer, which writes the same keys. A copy opened before the change keeps the old period until it reloads, so on a bundle with a sound track it can show a different point of the loop from a new copy; any change before the `#` reloads every copy. No main-app parameter changes. The same day, "Paused is exact; playing is close" was reworded to state its limit, which was already so: each pass round the clip restarts the video, so how close playing copies stay depends on the clip's length and the rate, and on a short clip at a high rate they don't settle. No behavior changes with that. |
+| v1 | 2026-10-27 | Additive. The output page gains `sound=1`, which plays a video's sound track. It is muted by default and fails toward muted like `telemetry`, so every address without `sound=1` stays silent; a browser that refuses to play aloud without a click leaves that copy muted until it reloads. A copy loaded before a node deploys this ignores `sound` and stays muted until it reloads, which a `#` change doesn't do, so during a rollout visitors at one globe can hear different things. No main-app parameter changes. |
 
 ---
 
@@ -337,5 +357,5 @@ https://terraviz.zyra-project.org/?dataset=INTERNAL_SOS_123&embed=1&layout=4
 - `src/styles/embed.css` — the chrome-hiding rules `embed=1` switches on
 - `src/output/webMode.ts` — the output page's reader; `webOutput.ts` — how it is applied; `webDataset.ts` — the dataset fetch; `webClock.ts` — the shared clock; `webCamera.ts` — the camera and its glide
 - `scripts/second-life-probe/terraviz-globe.lsl` — an in-world composer of output-page addresses, and of a main-app `/?dataset=` link for visitors. Its `globe.test.ts` fails if a key it writes is renamed or removed, or stops accepting a value the script writes; a change in what a value does is not caught there
-- `scripts/second-life-exhibit/terraviz-exhibit.lsl` — the exhibit's globe script, composing the same output-page addresses with a copy of the smoke-test script's code, held to the page by the same `globe.test.ts`, which likewise doesn't catch a change in what a value does. Its `terraviz-exhibit-info.lsl` gives visitors a main-app `/dataset/<slug>` link, or `/dataset/<id>` for a slug `src/utils/datasetUrl.ts` wouldn't emit
+- `scripts/second-life-exhibit/terraviz-exhibit.lsl` — the exhibit's globe script, composing the same output-page addresses, with `sound=1` besides, from a copy of the smoke-test script's code, held to the page by the same `globe.test.ts`, which likewise doesn't catch a change in what a value does. Unlike the smoke-test script it writes `t` within the clip's loop once it knows the clip's length, from the exhibit card. Its `terraviz-exhibit-info.lsl` gives visitors a main-app `/dataset/<slug>` link, or `/dataset/<id>` for a slug `src/utils/datasetUrl.ts` wouldn't emit
 - [`SECOND_LIFE_COMPAT.md`](SECOND_LIFE_COMPAT.md) §7 — why the output page takes these parameters

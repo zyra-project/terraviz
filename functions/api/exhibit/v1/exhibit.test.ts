@@ -17,16 +17,18 @@ import { asD1, makeCtx } from '../../v1/_lib/test-helpers'
 import { freshMigratedDb } from '../../../../scripts/lib/catalog-migrations'
 import {
   byteLength,
+  CARD_ABSTRACT_CHARS,
   CARD_BUDGET,
   CARD_CAPS,
   CARD_SKELETON,
   exhibitList,
+  listHash,
   LIST_STALE_MS,
   LIST_TTL_MS,
   PAGE_BUDGET,
   PAGE_CAPS,
   PAGE_MAX_OFFSET,
-  PAGE_RESERVED,
+  buildCard,
   buildTags,
   resetExhibitListForTests,
   TAG_CAP,
@@ -185,7 +187,9 @@ afterEach(() => {
 /** The video proxy and Vimeo for one video, as a fetch, the way Vimeo
  *  serves it: the player's address answers 302 with the CDN's, whose
  *  master names video-only variants (`hls-duration.test.ts` has the
- *  fuller playlists and the refusals). */
+ *  fuller playlists and the refusals). Called as another object's
+ *  method it throws, as Workers' fetch does and Node's doesn't: every
+ *  card's Vimeo read failed on Cloudflare that way while these passed. */
 function vimeoFetch(proxy = 'https://video-proxy.zyra-project.org/video') {
   const at = 'https://skyfire.vimeocdn.com/a/b/c/playlist.m3u8'
   const routes: Record<string, () => Response | Promise<Response>> = {
@@ -195,7 +199,10 @@ function vimeoFetch(proxy = 'https://video-proxy.zyra-project.org/video') {
     'https://skyfire.vimeocdn.com/x/media.m3u8?sig=1': () =>
       new Response('#EXTM3U\n#EXTINF:6.000000,\na.mp4\n#EXTINF:6.100000,\nb.mp4\n#EXT-X-ENDLIST\n'),
   }
-  return vi.fn(async (input: RequestInfo | URL) => {
+  return vi.fn(async function (this: unknown, input: RequestInfo | URL) {
+    if (this !== undefined && this !== globalThis) {
+      throw new TypeError('Illegal invocation: function called with incorrect `this` reference.')
+    }
     const route = routes[String(input)]
     if (!route) throw new Error(`unexpected fetch: ${String(input)}`)
     return route()
@@ -393,6 +400,24 @@ describe('GET /api/exhibit/v1/datasets/{id}, the card', () => {
     expect(waitUntil).toHaveBeenCalledTimes(1)
   })
 
+  it('writes the length as a plain decimal of at most six places, which a script reads digit by digit', async () => {
+    // The info script reads exactDuration's whole and fractional digits
+    // into microseconds (scripts/second-life-exhibit), so an exponent or a
+    // seventh place would be misread, by copies that can't be updated.
+    const sqlite = setup([{ id: ULID(1), data_ref: 'r2:videos/DS/U/master.m3u8' }])
+    const [entry] = await exhibitList(asD1(sqlite))
+    const lengths = [1e-6, 0.0000014, 0.1, 1.7, 4.333333333, 12.1, 143.7666721, 717.0333333, 2146.9999994,
+      123456.789012345, 999_999_999.9999994]
+    for (let i = 0; i < 200; i++) lengths.push(10 ** (Math.random() * 15 - 6))
+    for (const seconds of lengths) {
+      const text = JSON.stringify(buildCard(entry, { seconds, settled: true }))
+      const written = text.match(/"exactDuration":([^,}]+)/)?.[1]
+      expect(written, String(seconds)).toMatch(/^(0|[1-9]\d*)(\.\d{1,6})?$/)
+      // Rounded to the microsecond: half of one off, and a double's own error.
+      expect(Math.abs(Number(written) - (seconds < 1e9 ? seconds : 0))).toBeLessThanOrEqual(5e-7 + seconds * 1e-15)
+    }
+  })
+
   it('reads no length for a row the page can\'t show', async () => {
     // The manifest reads the format as written, so this one isn't shown.
     const sqlite = setup([{ id: ULID(1), format: 'Video/MP4', data_ref: 'r2:videos/DS/U/master.m3u8' }])
@@ -513,12 +538,49 @@ describe('GET /api/exhibit/v1/datasets/{id}, the card', () => {
     expect((await card(sqlite, ULID(2))).body).toMatchObject({ abstract: 'Storm...', truncated: true })
   })
 
+  it('sends no more of an abstract than the info script keeps, in characters', async () => {
+    // Its 500: an abstract of exactly 500 is whole, one more is cut, and
+    // one in characters of three bytes that fits is whole too, as every
+    // rezzed copy showed it.
+    const sqlite = setup([
+      { id: ULID(1), abstract: 'x'.repeat(500) },
+      { id: ULID(2), abstract: 'x'.repeat(501) },
+      { id: ULID(3), abstract: '海'.repeat(400) },
+      { id: ULID(4), abstract: '海'.repeat(600) },
+      { id: ULID(5), abstract: 'Clouds over the sea. '.repeat(100) },
+    ])
+    expect((await card(sqlite, ULID(1))).body).toMatchObject({ abstract: 'x'.repeat(500), truncated: false })
+    expect((await card(sqlite, ULID(3))).body).toMatchObject({ abstract: '海'.repeat(400), truncated: false })
+    for (const id of [ULID(2), ULID(4), ULID(5)]) {
+      const { body } = await card(sqlite, id)
+      expect(body.truncated, id).toBe(true)
+      expect(body.abstract.length, id).toBeLessThanOrEqual(CARD_ABSTRACT_CHARS)
+      expect(body.abstract.endsWith('...'), id).toBe(true)
+    }
+    // Within a word of what the script kept: its cut ended at a space at
+    // or before character 500, this one's "..." falls inside the 500.
+    expect((await card(sqlite, ULID(4))).body.abstract.length).toBeGreaterThan(490)
+    // Cut at a word, as before.
+    const source = 'Clouds over the sea. '.repeat(100)
+    const kept = (await card(sqlite, ULID(5))).body.abstract.slice(0, -3)
+    expect(source.startsWith(kept)).toBe(true)
+    expect(source[kept.length]).toBe(' ')
+    expect(kept.length).toBeGreaterThan(480)
+    expect(CARD_ABSTRACT_CHARS).toBe(500)
+  })
+
   it('fills the budget exactly, and counts truncated as the longer of its two values', async () => {
-    // The abstract's room is measured with `false`. A card whose abstract
-    // fits exactly is 2,048 bytes and not truncated; one byte more is cut.
-    const probe = setup([{ id: ULID(1), abstract: 'x' }])
+    // Within its 500 characters the abstract fills the room only in text
+    // of more than a byte a character, beside other fields near their
+    // caps (three bytes a character here; two would do at every cap). The
+    // room is measured with `false`: an abstract that fits exactly gives
+    // 2,048 bytes and isn't truncated, one byte more is cut.
+    const full = { title: 'T'.repeat(200), attribution_text: 'C'.repeat(200), license_statement: 'L'.repeat(400) }
+    const probe = setup([{ id: ULID(1), abstract: 'x', ...full }])
     const room = 2048 - (bytesOf((await card(probe, ULID(1))).text) - 1)
-    const sqlite = setup([{ id: ULID(1), abstract: 'x'.repeat(room) }, { id: ULID(2), abstract: 'x'.repeat(room + 1) }])
+    const fill = (bytes: number) => '海'.repeat(Math.floor(bytes / 3)) + 'x'.repeat(bytes % 3)
+    expect(fill(room + 1).length).toBeLessThanOrEqual(CARD_ABSTRACT_CHARS)
+    const sqlite = setup([{ id: ULID(1), abstract: fill(room), ...full }, { id: ULID(2), abstract: fill(room + 1), ...full }])
     const exact = await card(sqlite, ULID(1))
     expect(bytesOf(exact.text)).toBe(2048)
     expect(exact.body.truncated).toBe(false)
@@ -550,6 +612,7 @@ describe('GET /api/exhibit/v1/datasets/{id}, the card', () => {
       expect(sent, name).toBeLessThanOrEqual(cap)
     }
     expect(jsonBytes(body.abstract)).toBeGreaterThanOrEqual(500)
+    expect(body.abstract.length).toBeLessThanOrEqual(CARD_ABSTRACT_CHARS)
   })
 
   it('states its budgets as the contract does, and fixes them', () => {
@@ -562,7 +625,7 @@ describe('GET /api/exhibit/v1/datasets/{id}, the card', () => {
   it('leaves the abstract room by the sum of the other caps', () => {
     const fixed = byteLength(JSON.parse(CARD_SKELETON))
     const caps = Object.values(CARD_CAPS).reduce((a, b) => a + b, 0)
-    // At least 500 bytes of abstract on any card.
+    // At least 500 bytes of abstract on any card: 724 in fact.
     expect(CARD_BUDGET - fixed - caps).toBeGreaterThanOrEqual(500)
   })
 
@@ -608,8 +671,79 @@ describe('GET /api/exhibit/v1/datasets, a page of the menu', () => {
     const sqlite = setup([{ id: ULID(1) }])
     const { status, body } = await page(sqlite)
     expect(status).toBe(200)
-    expect(Object.keys(body)).toEqual(['total', 'offset', 'limit', 'tag', 'datasets'])
-    expect(body).toEqual({ total: 1, offset: 0, limit: 9, tag: '', datasets: [{ id: ULID(1), title: `Title ${ULID(1)}` }] })
+    expect(Object.keys(body)).toEqual(['total', 'offset', 'limit', 'tag', 'list', 'datasets'])
+    expect(body).toEqual({
+      total: 1, offset: 0, limit: 9, tag: '', list: listHash([ULID(1)]),
+      datasets: [{ id: ULID(1), title: `Title ${ULID(1)}` }],
+    })
+    expect(body.list).toMatch(/^[0-9a-f]{8}$/)
+  })
+
+  it('names the list a page came from, the same on every page of it, and new when its ids change', async () => {
+    const rows = Array.from({ length: 12 }, (_, i) => ({ id: ULID(i + 1), title: `T${String(i).padStart(2, '0')}`, tags: i < 4 ? ['Air'] : [] }))
+    let sqlite = setup(rows)
+    const first = (await page(sqlite)).body
+    // Every page of one list, past the end included, and the ids of every
+    // dataset that matched, in order, not only the page's.
+    expect((await page(sqlite, '?offset=9')).body.list).toBe(first.list)
+    expect((await page(sqlite, '?offset=50')).body.list).toBe(first.list)
+    expect(first.list).toBe(listHash(rows.map(r => r.id)))
+    // Each tag is a list of its own.
+    expect((await page(sqlite, '?tag=Air')).body.list).toBe(listHash(rows.slice(0, 4).map(r => r.id)))
+    // A title that changes without moving its dataset changes nothing.
+    sqlite = setup(rows.map((r, i) => (i === 3 ? { ...r, title: 'T03 again' } : r)))
+    resetExhibitListForTests()
+    expect((await page(sqlite)).body.list).toBe(first.list)
+    // A dataset gone, or one that moved, makes a new list.
+    sqlite = setup(rows.map((r, i) => (i === 3 ? { ...r, retracted: true } : r)))
+    resetExhibitListForTests()
+    expect((await page(sqlite)).body.list).not.toBe(first.list)
+    sqlite = setup(rows.map((r, i) => (i === 11 ? { ...r, weight: 5 } : r)))
+    resetExhibitListForTests()
+    expect((await page(sqlite)).body.list).not.toBe(first.list)
+    // So does a retitle that moves its dataset, since the title orders them.
+    sqlite = setup(rows.map((r, i) => (i === 3 ? { ...r, title: 'A00' } : r)))
+    resetExhibitListForTests()
+    expect((await page(sqlite)).body.list).not.toBe(first.list)
+  })
+
+  it('names the list by what matched alone, not by how it was paged or by rows the page leaves out', async () => {
+    const rows = Array.from({ length: 12 }, (_, i) => ({ id: ULID(i + 1), title: `T${String(i).padStart(2, '0')}`, tags: ['Air'] }))
+    let sqlite = setup(rows)
+    const air = (await page(sqlite, '?tag=Air')).body.list
+    for (const query of ['?tag=Air&limit=1', '?tag=Air&limit=4&offset=3', '?tag=Air&offset=99']) {
+      expect((await page(sqlite, query)).body.list, query).toBe(air)
+    }
+    // Rows a page never lists: a tour, a peer's, one whose reference and
+    // format disagree, one not public, and an id longer than a ULID.
+    sqlite = setup([
+      ...rows,
+      { id: ULID(20), title: 'A tour', format: 'tour/json', data_ref: 'r2:t.json', tags: ['Air'] },
+      { id: ULID(21), title: 'A peer', data_ref: 'peer:NODE1/x', tags: ['Air'] },
+      { id: ULID(22), title: 'A mismatch', format: 'image/png', data_ref: 'vimeo:2', tags: ['Air'] },
+      { id: ULID(23), title: 'Private', visibility: 'private', tags: ['Air'] },
+      { id: `X${'1'.repeat(30)}`, title: 'Long id', tags: ['Air'] },
+    ])
+    resetExhibitListForTests()
+    expect((await page(sqlite, '?tag=Air')).body.list).toBe(air)
+    // A tag joining a dataset changes that tag's list and no other's.
+    sqlite = setup([...rows.map((r, i) => (i < 2 ? { ...r, tags: ['Air', 'Water'] } : r)), { id: ULID(30), title: 'W', tags: ['Water'] }])
+    resetExhibitListForTests()
+    const water = (await page(sqlite, '?tag=Water')).body.list
+    sqlite = setup([...rows.map((r, i) => (i < 3 ? { ...r, tags: ['Air', 'Water'] } : r)), { id: ULID(30), title: 'W', tags: ['Water'] }])
+    resetExhibitListForTests()
+    expect((await page(sqlite, '?tag=Water')).body.list).not.toBe(water)
+    expect((await page(sqlite, '?tag=Air')).body.list).toBe(air)
+  })
+
+  it('computes the list as it always has, so a change to it is deliberate', () => {
+    // FNV-1a over the ids joined by line breaks, as eight lowercase hex
+    // digits, checked against an independent implementation. A reader
+    // never computes it, but a change still costs every visitor paging
+    // at the time a notice that a dataset may have moved.
+    expect(listHash([])).toBe('811c9dc5')
+    expect(listHash(['01KQG611HF8YXJNRBEHT0757KT', '01KQG65ZW1JC7M27EQ1CYD8YZ7'])).toBe('f0832b8f')
+    expect(listHash(['01KQG65ZW1JC7M27EQ1CYD8YZ7', '01KQG611HF8YXJNRBEHT0757KT'])).toBe('ae28ed5b')
   })
 
   it('lists only what the output page can show, in the order browse lists it', async () => {
@@ -704,13 +838,17 @@ describe('GET /api/exhibit/v1/datasets, a page of the menu', () => {
     // nine ids and titles of the most bytes allowed.
     const n = Number('9'.repeat(PAGE_CAPS.number))
     const worst: ExhibitPage = {
-      total: n, offset: n, limit: n, tag: 'x'.repeat(PAGE_CAPS.tag),
+      total: n, offset: n, limit: n, tag: 'x'.repeat(PAGE_CAPS.tag), list: 'x'.repeat(PAGE_CAPS.list),
       datasets: Array.from({ length: 9 }, () => ({ id: 'x'.repeat(PAGE_CAPS.id), title: 'x'.repeat(PAGE_CAPS.title) })),
     }
-    // With room held back for the menu's change signal, which is to ship
-    // with the first menu script.
-    expect(byteLength(worst) + PAGE_RESERVED).toBeLessThanOrEqual(PAGE_BUDGET)
-    expect(PAGE_RESERVED).toBe(Buffer.byteLength(',"list":"0123abcd"'))
+    expect(byteLength(worst)).toBeLessThanOrEqual(PAGE_BUDGET)
+    // As the plan counts it: 982 bytes, leaving 42 for any later field.
+    expect(byteLength(worst)).toBe(982)
+    // `list` spends the 18 bytes the API review held back for it before
+    // any script read a page.
+    expect(Buffer.byteLength(',"list":""') + PAGE_CAPS.list).toBe(18)
+    expect(listHash([])).toHaveLength(PAGE_CAPS.list)
+    expect(listHash(['x'.repeat(26)])).toHaveLength(PAGE_CAPS.list)
     expect(String(PAGE_MAX_OFFSET).length).toBeLessThanOrEqual(PAGE_CAPS.number)
   })
 

@@ -44,12 +44,17 @@ const ID = '01KQG611HF8YXJNRBEHT0757KT'
 
 // Both globe scripts write the page's address, and the exhibit's globe
 // script is the smoke test's core, so every check here holds for both.
+// `own` is what one writes after the # and the other doesn't: the
+// exhibit's sound, which the smoke test leaves to the page's silent
+// default.
 const GLOBES = [
-  { name: 'smoke-test', file: './terraviz-globe.lsl' },
-  { name: 'exhibit', file: '../second-life-exhibit/terraviz-exhibit.lsl' },
+  { name: 'smoke-test', file: './terraviz-globe.lsl', own: [] as string[] },
+  { name: 'exhibit', file: '../second-life-exhibit/terraviz-exhibit.lsl', own: ['sound'] },
 ]
+/** Every key some globe writes and not every one does. */
+const OWN = new Set(GLOBES.flatMap((g) => g.own))
 
-describe.each(GLOBES)('second-life $name globe script', ({ file }) => {
+describe.each(GLOBES)('second-life $name globe script', ({ file, own }) => {
   const globe = read(file)
   const address = body(globe, 'string address()')
   /** What address() puts before the #: the lines that build `setup`. */
@@ -84,9 +89,11 @@ describe.each(GLOBES)('second-life $name globe script', ({ file }) => {
       rate: '2',
       rotation: '90',
       debug: '1',
+      sound: '1',
     }
     const written = segments(address)
-    expect(new Set(written.map((s) => s.key))).toEqual(new Set(Object.keys(samples)))
+    const expected = Object.keys(samples).filter((key) => !OWN.has(key) || own.includes(key))
+    expect(new Set(written.map((s) => s.key))).toEqual(new Set(expected))
     for (const { key, value } of written) {
       // A value written as a literal is checked as written: `telemetry=on`
       // would read as off, and so would `paused=yes` in a page that
@@ -102,7 +109,7 @@ describe.each(GLOBES)('second-life $name globe script', ({ file }) => {
     // measured globe must not reload (docs/PRIVACY.md). telemetry has to
     // be there, since the page counts its minute from when it loaded.
     expect(new Set(setupKeys)).toEqual(new Set(['fit', 'telemetry']))
-    expect(new Set(liveKeys)).toEqual(new Set(['dataset', 't', 'paused', 'at', 'rate', 'width', 'rotation', 'debug']))
+    expect(new Set(liveKeys)).toEqual(new Set(['dataset', 't', 'paused', 'at', 'rate', 'width', 'rotation', 'debug', ...own]))
     // Every key written lands in one half or the other, once: a key on a
     // line naming neither, a continuation of `setup` say, would slip
     // past both lists above.
@@ -126,6 +133,7 @@ describe.each(GLOBES)('second-life $name globe script', ({ file }) => {
       view: { latDeg: 0, lonDeg: 90, zoom: 0 },
       debug: true,
       telemetry: true,
+      sound: false,
       clock: { positionS: 61.2, atUnixS: 1792865189.482, rate: 2, paused: false },
     })
 

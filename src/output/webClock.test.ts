@@ -16,6 +16,7 @@ import {
 import { MAX_WEB_RATE, type WebClock } from './webMode'
 import { SETTLING_SEEK_THRESHOLD_S, syncVideoToState, type SyncTarget } from './outputSync'
 import type { MirroredDataset } from '../services/multiOutput/protocol'
+import { until } from '../test-utils'
 
 const LOADED_AT = 1_761_288_000_000
 
@@ -107,6 +108,28 @@ describe('clipClockInputs', () => {
 
 describe('createWebClockSteer', () => {
   const AT = LOADED_AT / 1000
+
+  it('hands a refused play() to onPlayRefused, never leaving it unhandled', async () => {
+    const refused: unknown[] = []
+    const err = Object.assign(new Error('no sound without a click'), { name: 'NotAllowedError' })
+    const steer = createWebClockSteer({ monotonicMs: () => 0, onPlayRefused: e => refused.push(e) })
+    const v = video({ paused: true, play: vi.fn(() => Promise.reject(err)) })
+    steer.steer(v, clock({ atUnixS: AT }), LOADED_AT, LOADED_AT)
+    expect(v.play).toHaveBeenCalled()
+    await until(() => refused.length === 1, 'the refusal')
+    expect(refused).toEqual([err])
+    // An element whose play() returns nothing, as a test's fake may, is fine.
+    const plain = video({ paused: true })
+    expect(() => steer.steer(plain, clock({ atUnixS: AT }), LOADED_AT, LOADED_AT)).not.toThrow()
+    expect(plain.play).toHaveBeenCalled()
+    // And the seam's own play(), turning a finished element back to the
+    // start, is caught the same way.
+    const finished = video({ duration: 16, currentTime: 16, paused: true, play: vi.fn(() => Promise.reject(err)) })
+    const atSeam = createWebClockSteer({ monotonicMs: () => 0, onPlayRefused: e => refused.push(e) })
+    expect(atSeam.steer(finished, clock({ positionS: 0.1, atUnixS: AT }), LOADED_AT, LOADED_AT).seeked).toBe(true)
+    expect(finished.play).toHaveBeenCalledTimes(1)
+    await until(() => refused.length === 2, 'the seam\'s refusal')
+  })
 
   /** A steer whose playhead layer runs on a clock the test moves. */
   function harness() {

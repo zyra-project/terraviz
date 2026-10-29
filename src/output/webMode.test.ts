@@ -23,6 +23,7 @@ describe('readWebSettings', () => {
       view: { latDeg: 0, lonDeg: 0, zoom: 0 },
       debug: false,
       telemetry: false,
+      sound: false,
       clock: { positionS: 0, atUnixS: null, rate: 1, paused: false },
     })
   })
@@ -84,6 +85,22 @@ describe('readWebSettings', () => {
     // Exactly `embedMode`'s reading, which does not trim: a padded zero
     // is not one of the two opt-outs.
     expect(readWebSettings('?debug=%200', '').debug).toBe(true)
+  })
+
+  it('reads sound as muted unless the address turns it on, strictly', () => {
+    // Off by default, so every address without it stays silent.
+    expect(readWebSettings('', '').sound).toBe(false)
+    for (const on of ['?sound=1', '?sound=true', '?sound=TRUE']) {
+      expect(readWebSettings(on, '').sound, on).toBe(true)
+    }
+    // Like telemetry, and unlike debug or paused: read the usual way,
+    // `sound=off` would play aloud for everyone within earshot.
+    for (const off of ['?sound', '?sound=0', '?sound=false', '?sound=off', '?sound=no', '?sound=', '?sound=%201']) {
+      expect(readWebSettings(off, '').sound, off).toBe(false)
+    }
+    // Followed after the #, like any setting a session changes.
+    expect(readWebSettings('?fit=fill', '#sound=1').sound).toBe(true)
+    expect(readWebSettings('?sound=1', '#sound=0').sound).toBe(false)
   })
 
   it('reads the telemetry switch as off unless the address turns it on', () => {

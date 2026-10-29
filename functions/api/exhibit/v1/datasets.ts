@@ -5,8 +5,14 @@
  * Cloudflare Pages Function — GET /api/exhibit/v1/datasets
  *
  * A page of the Second Life exhibit's dataset menu, at most `PAGE_BUDGET`
- * bytes: `{ total, offset, limit, tag, datasets: [{ id, title }] }`.
- * `_lib/exhibit-reads.ts` has the contract and the caps.
+ * bytes: `{ total, offset, limit, tag, list, datasets: [{ id, title }] }`.
+ * `list` is eight hex digits naming the list the page came from
+ * (`listHash`): two pages of one tag that differ there may have skipped
+ * or repeated a dataset between them. It is opaque and a notice only: it
+ * can alternate between two values for a minute after a change, and no
+ * request can ask for a particular list, so a reader that started over
+ * whenever it changed could loop. `_lib/exhibit-reads.ts` has the contract
+ * and the caps.
  *
  * Only the datasets the output page can show, in the order the app's
  * browse lists them. Query parameters, each optional, and an empty one

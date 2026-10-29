@@ -12,8 +12,9 @@ The [probe kit's globe](../second-life-probe/README.md#the-globe) is the
 smoke test: its owner drives it in chat. This folder is the exhibit, a
 globe that stays up all the time:
 
-- **Anyone who walks up can use it.** A touch opens a menu of datasets
-  and controls, and everyone at the globe sees what they choose.
+- **Anyone who walks up can use it.** A touch opens a menu of datasets,
+  read from the node's catalog by category, and controls, and everyone
+  at the globe sees what they choose.
 - **Two visitors don't fight over it.** Whoever acts holds the globe for
   a minute after their last choice, and anyone else is told who has it.
 - **A presenter can take it over for a talk.** The presenters are named
@@ -23,6 +24,9 @@ globe that stays up all the time:
 - **It says what it shows.** The floating text gives the title, the date
   in the animation, and a short credit. "About" in the menu gives the
   abstract, the full credit and the licence.
+- **It plays a dataset's sound.** The movies have sound tracks, which
+  each visitor hears at their own viewer's media volume, fainter with
+  distance from the globe. The owner can turn it off.
 
 Why it works this way, and what was decided when, is in
 [`docs/SECOND_LIFE_COMPAT.md`](../../docs/SECOND_LIFE_COMPAT.md), §7
@@ -30,14 +34,20 @@ item 4 and §9 Phase 2.
 
 | File | What it is |
 |---|---|
-| `terraviz-exhibit.lsl` | **The globe script.** Owns the address, the clock and the media: the smoke test's globe, taking requests from the other two. The only one with settings to edit. |
+| `terraviz-exhibit.lsl` | **The globe script.** Owns the address, the clock and the media: the smoke test's globe, taking requests from the others. The only one with settings to edit. |
 | `terraviz-exhibit-visitors.lsl` | **The visitors script.** Touches and menus, the hold, talks, and who is at the globe. |
 | `terraviz-exhibit-info.lsl` | **The info script.** The floating text, and "About". |
-| `exhibit.test.ts` | Holds the three scripts to each other and to the node: their link messages, the state they share, the commands a visitor may send, the card fields read, and what the node keeps for copies already rezzed. `../second-life-probe/globe.test.ts` holds the globe script's address to the output page. |
+| `terraviz-exhibit-menu.lsl` | **The menu script.** The dataset menu from the node's catalog, which the visitors script opens. It goes in a small prim of its own, linked to the globe. |
+| `exhibit.test.ts` | Holds the four scripts to each other and to the node: their link messages, the state they share, the commands a visitor may send, the card fields read, and what the node keeps for copies already rezzed. `../second-life-probe/globe.test.ts` holds the globe script's address to the output page. |
 
-A script in Second Life has 64 KB in all, which is why there are three:
+A script in Second Life has 64 KB in all, which is why there are four:
 one script reading what the node says about a dataset while also holding menus,
-notecards and the visitor list would run out.
+notecards and the visitor list would run out. The menu script is the
+fourth because the dataset menu, written into the visitors script first,
+stopped it at once with a Stack-Heap Collision in-world. It is in a prim
+of its own because a web reply reaches every script in the prim that
+asked: in the sphere, the menu's pages stopped the info script the same
+way.
 
 ## Before you start
 
@@ -49,7 +59,9 @@ notecards and the visitor list would run out.
 - **Which node the globe shows.** `NODE`, at the top of
   `terraviz-exhibit.lsl`, is `https://terraviz.zyra-project.org`. The
   probe kit's README says how to point it at a preview deploy instead.
-  The other two scripts take the node from the globe script.
+  The other scripts take the node from the globe script: the visitors
+  and info scripts as it changes, and the menu script from the visitors
+  script each time a visitor opens the menu.
 - **A node with the exhibit's reads.** The info script reads a dataset's
   card, a reply of at most 2 KB that the node writes for this exhibit
   (`/api/exhibit/v1/datasets/<id>`). A node that predates the cards
@@ -57,21 +69,50 @@ notecards and the visitor list would run out.
   Functions are down; Second Life refuses a page where JSON was asked
   for, with its own HTTP 415. The floating text then shows the title alone and
   "About" gives the dataset's page. The info script asks again a minute
-  later, and after four tries tells you once.
+  later, and after four tries tells you once. The dataset menu comes
+  from the same node (`/api/exhibit/v1/tags` and
+  `/api/exhibit/v1/datasets`); a node without it gives visitors the five
+  built-in datasets, and you are told once.
 
 ## Setting it up
 
 1. Rez a sphere. A default prim sphere is fine.
 2. In its Content tab, make three **New Script**s and replace their
-   text with the three `.lsl` files here, one each, saving each. Set
-   `NODE` in the globe script first if you need to. The order doesn't
-   matter: each asks the others for what it missed.
+   text with the globe, visitors and info scripts
+   (`terraviz-exhibit.lsl`, `terraviz-exhibit-visitors.lsl`,
+   `terraviz-exhibit-info.lsl`), one each, saving each. Set `NODE` in
+   the globe script first if you need to. The order doesn't matter:
+   each asks the others for what it missed.
 3. Within a few seconds the sphere stands its poles upright and shows
    the live Earth, and the floating text gives the live Earth's line
    and its credit. Chat shows the visitors script's
    summary of what the notecards gave: with none, no presenters and the
-   five built-in datasets.
-4. Add any of the notecards below, and say `/9 presenters` to check what
+   dataset menu from the node's catalog.
+4. Make the menu script's prim, a small cube hidden inside the sphere:
+   1. Rez a cube (Build, then the cube in the Create tab, then click
+      the ground).
+   2. In the build floater's Object tab, set its size to 0.1 in all
+      three, and its position to the sphere's (copy the three numbers
+      from the sphere's Object tab).
+   3. In the Texture tab, set Transparency to 100, so nothing shows if
+      the sphere is ever smaller than the cube or see-through.
+   4. In its Content tab, make a **New Script** and replace its text
+      with `terraviz-exhibit-menu.lsl`, saving it. Its name doesn't
+      matter: the script gives the cube the sphere's name the first
+      time a visitor opens the menu, since a menu is headed with the
+      name of the prim it comes from.
+   5. Link the cube to the sphere: with the cube selected, Shift-click
+      the sphere, so it is selected last, and choose Build → Link
+      (Ctrl+L). The prim selected last becomes the root, so the sphere
+      stays the root and moving it moves the cube with it. The sphere
+      is outlined in yellow and the cube in blue.
+   6. To reach the cube's Content tab later, edit the sphere, tick
+      **Edit linked** in the build floater, and choose Build → Select
+      Linked Parts → Select Next Part (Ctrl+.) until the cube is
+      selected: inside the sphere it can't be clicked.
+5. `/9 memory` should answer from all four scripts, the menu script
+   among them. A visitor's Datasets now opens the node's categories.
+6. Add any of the notecards below, and say `/9 presenters` to check what
    was read.
 
 The media is deliberately not clickable, for anyone. A visitor who could
@@ -88,7 +129,7 @@ menu that opens is theirs alone:
 | Button | Who gets it | What it does |
 |---|---|---|
 | About | everyone | The abstract, credit and licence, in their own chat, or a notecard the owner wrote. |
-| Datasets | whoever may act | The menu of datasets, nine to a page. |
+| Datasets | whoever may act | The node's categories, then a category's datasets, nine to a page, numbered, with the titles in the menu's text. With a `datasets` notecard, its own list instead. |
 | Pause / Play | whoever may act, a dataset showing | Every visitor stops on, or starts from, the same frame. The reply gives the date the globe shows, where the info script knows it: not for a dataset with no dates, nor for a video whose exact length the node can't read. |
 | Back 10 s, Forward 10 s, Start over | the same | Move through the animation. |
 | Live Earth | the same | Back to today's clouds and the real day and night. |
@@ -182,9 +223,17 @@ an image, it shows the dataset's range instead. The length is the one
 the node reads from the stream's own playlists, its own HLS bundle's or
 a Vimeo stream's, such as Sea temperature's: Vimeo's API gives whole
 seconds, which isn't quite the stream's, and a date worked out from it
-would drift from the picture with every loop. Every visitor's copy of
-the page loops on that same length, read from the stream it plays. A
-video with no playlist to read, a single file, shows its range. When
+would drift from the picture with every loop. A visitor's copy of the
+page that reads the stream's playlist, through hls.js, loops on that
+same length; one playing the stream itself, or a single file, loops on
+the video's own, which can differ by a few hundredths of a second. The
+info script tells the globe script the length too, and both count the
+clip in whole microseconds round the loop, so the date keeps to the
+picture however long the globe is left playing, and a pause, a move or
+a change of rate puts a copy on a length of its own back in step. A
+video with no playlist to read, a single file, shows its range, and so
+does a clip of 2147 s or more, too long for the scripts to count in
+microseconds (the node's longest was 717 s in October 2026). When
 the node couldn't read
 the length in time, the card says when to ask again, and the info
 script does. A card the node fails to send, an error or a
@@ -219,9 +268,39 @@ Brent Resident
 `Brent Resident` is read as `brent`, which is what Second Life calls
 that avatar now.
 
+### The menu without one: the node's catalog
+
+Without a `datasets` notecard, Datasets reads the menu from the node, so
+a dataset published there reaches the globe with nothing typed. It opens
+the node's categories, with how many datasets each has, and "All
+datasets", since some are in none. A category opens its datasets nine
+to a page, in the order the app's browse lists them. On a page the
+buttons are numbers and the titles are in the menu's text: most titles
+are longer than a button's 24 bytes. The numbers count from the
+category's first dataset, 10 to 18 on its second page, so a button
+pressed on an older menu answers nothing rather than the wrong dataset.
+A category's button is its name when every name on that page fits one.
+Only datasets the globe can show are offered: images and videos, never
+tours. The floating text and About name a chosen dataset by its full
+title, though the menu cut it to fit.
+
+The menu script shows it and reads it from the node, asking only for a
+category and where a page starts. The categories are kept ten minutes,
+and a categories menu answered after they changed is shown again. If
+the node's catalog changes while a visitor pages through, the menu says
+a dataset may have moved between pages. When the node can't give
+the menu (Second Life is limiting the object's web requests, the node
+answers with an error, or it is a node from before October 2026 with no
+menu to give), the visitor gets the five built-in datasets below, and
+you are told once why, until the node answers again. They get them too
+if the menu script doesn't answer the visitors script within a few
+seconds, because it isn't in the object or has stopped, and you are told
+that once.
+
 ### `datasets`
 
-The menu, one `Name = dataset id` a line, in the order it shows them. A
+A menu of your own in place of the node's catalog, for an exhibit with a
+theme, one `Name = dataset id` a line, in the order it shows them. A
 dataset's id is 26 capital letters and digits, its `id` in the node's
 catalog (`https://terraviz.zyra-project.org/api/v1/catalog`, searched
 for the title). A TerraViz link's `/dataset/` part is usually the
@@ -238,7 +317,8 @@ Earthquakes 2001-15 = 01KQG62M0Z3EC0T9EXFH1MVXDV
 Nighttime lights = 01KQG629957NPZN7NTW4VK6FW0
 ```
 
-That is also the menu without the notecard. A line that isn't
+Those five are also the built-in datasets, offered when the node can't
+give its menu. A line that isn't
 `Name = id`, with an id of letters, digits, `-` and `_`, is left out,
 and so is a name that cuts to a menu button's own (`< Previous`,
 `Next >`, `Main menu`). The owner is told which.
@@ -252,6 +332,7 @@ radius = 15
 idle minutes = 5
 hold seconds = 60
 talk minutes = 2
+categories = Water, Air
 ```
 
 | Setting | What it is | Allowed |
@@ -260,8 +341,12 @@ talk minutes = 2
 | `idle minutes` | how long after the last visitor leaves before the live Earth comes back | 1 to 1440 |
 | `hold seconds` | how long a visitor holds the globe after their last choice | 10 to 3600 |
 | `talk minutes` | how long with no presenter at the globe before a talk ends | 1 to 120 |
+| `categories` | which of the node's categories the menu offers, in that order, by name in any case, between commas, with `All datasets` among them if you want it (all of them, with "All datasets"). The visitors script reads it and hands it to the menu script, which can't read the sphere's notecards from its own prim | names the node has |
 
-A value outside its range is ignored, with a word to the owner.
+A value outside its range is ignored, with a word to the owner. A
+category the node doesn't have is left out of the menu; with none of
+them left, visitors get the built-in datasets and you are told.
+`categories` has no effect with a `datasets` notecard.
 
 ### A notecard named by a dataset's id
 
@@ -308,10 +393,11 @@ those:
 | `/9 turn <degrees>` | Turns the globe that far east, the way the Earth turns, or west for a negative number, as the menu's turn buttons do. Unlike `/9 rotation`, it doesn't move where the globe goes back to. |
 | `/9 tilt south`, `/9 tilt north` | Tips that pole 30° toward you, as the menu's pole buttons do for a visitor. |
 | `/9 level` | Stands a tipped globe back up, as it was at rest. |
+| `/9 sound on\|off` | Whether a dataset's sound track plays, for every visitor, without reloading anyone's page while changes go after the # (the default; under `/9 steer query` it reloads them as every change does). On when the globe starts, unless `SOUND`, at the top of the globe script, is `FALSE`, which makes a silent exhibit last through resets. Each visitor hears their own copy, at their viewer's media volume, so it is as in step as the pictures are: a seek to catch up is a skip in the sound, catching up without one plays it up to a quarter faster or slower for a while, and a short loop repeats its sound every pass. A browser that won't play aloud without a click plays the picture muted; Second Life's viewers don't ask (Firestorm 7.2.4 played a movie aloud with nothing clicked, 27 October). |
 | `/9 home` | Makes the sphere's rotation now its rest, for a globe you have turned by hand or a mesh globe with its own mapping. The rest is kept in the object, so a reset doesn't lose it. On a default sphere `/9 upright` does this too, and a reset stands it upright as always. |
-| `/9 presenters` | What the notecards gave: how many presenters and datasets, and the four settings. |
+| `/9 presenters` | What the notecards gave: how many presenters, where the menu comes from, and the settings. |
 | `/9 talk` | Whether a talk is on, and when none is, how many avatars are at the globe. `/9 talk start` and `/9 talk end` start and end one. |
-| `/9 memory` | How much of its 64 KB each script uses. The globe script also says the most it has used showing a dataset, and the info script the most reading a card or answering About. |
+| `/9 memory` | How much of its 64 KB each script uses. The globe script also says the most it has used showing a dataset, the info script the most reading a card or answering About, and the menu script the most reading the node for a menu. |
 | `/9 help` | The globe script's list. |
 
 ## What leaves the object
@@ -324,7 +410,10 @@ lasts, and anyone with a menu open by key, for the five minutes the
 menu answers. The info script keeps the key of the last
 visitor who asked for "About", so a double press is answered once, and
 the key of whoever chose the dataset showing, until the node has said
-whether the globe can show it. It tells a visitor about a dataset in
+whether the globe can show it. The menu script reads the dataset menu
+from the node asking only for a category and where a page starts, never
+who asked, and keeps the page a visitor has open, for four visitors at
+most, while their menu answers. It tells a visitor about a dataset in
 their own chat, which no one else sees. A tilt reads the position of whoever asked, once, to aim at them.
 Nothing is kept across a reset.
 
@@ -339,15 +428,20 @@ floating text and the object's description say so while it is on.
 You need a second avatar, or a friend, for most of this. Have them
 stand at the globe.
 
-1. **Setup.** `/9 presenters` lists what was read. `/9 debug on` should
-   show the readout on the globe.
+1. **Setup.** `/9 presenters` lists what was read. `/9 memory` should
+   answer from all four scripts. `/9 debug on` should show the readout
+   on the globe.
 2. **Does a left-click reach the script?** The second avatar left-clicks
    the globe. If a menu opens, a left-click works in their viewer and
    the floating text's "Right-click" is more than they need. If not,
    that is what the plan expected, and a touchable stand beside the
    globe is the remedy, which isn't built. Say which viewer it was.
 3. **A visitor's menu.** They right-click and Touch: About, Datasets and
-   the controls. They choose Datasets and Earthquakes 2001-15. Everyone
+   the controls. They choose Datasets: the node's categories should
+   open, with a count beside each, and All datasets. They choose a
+   category, page with Next > and < Previous, and go back with
+   Categories. Then All datasets, and Earthquakes 2001-15 by its
+   number. Everyone
    at the globe should see it start, and the floating text should show
    its title, a date moving from 1 Jan 2001 to 2 Dec 2015 across the
    three-minute clip, updated every couple of seconds, and a credit
@@ -387,20 +481,49 @@ stand at the globe.
    minutes. The floating text and About should lead with "Hurricane
    Maria - 2017", the card's title, not the id. The floating text
    should show a date and a UTC time, from 17 Sep 2017, 00:00 UTC to
-   25 Sep 2017, 23:45 UTC across the clip. Choose About, then
-   `/9 memory`. Every script should report well under 64 KB. The peaks
-   are the numbers that matter, the globe script's while showing a
-   dataset and the info script's while reading a card or answering
-   About: say what they were.
+   25 Sep 2017, 23:45 UTC across the clip. Choose About, then open
+   Datasets and page through a category or two, then `/9 memory`. Every
+   script should report well under 64 KB. The peaks are the numbers that
+   matter, the globe script's while showing a dataset, the info
+   script's while reading a card or answering About, and the menu
+   script's while reading the node for a menu: say what they were.
+
+10. **Without the menu script.** Open the cube's menu script and untick
+    Running. A visitor's Datasets should give the five built-in
+    datasets within about eleven seconds, and you should be told once
+    that the menu script didn't answer. Tick Running again, and
+    Datasets should open the node's categories, with no second menu.
+11. **Sound.** Show a movie, `/9 show 01KQG621GKSF0R9Q74AAE5QFV0`
+    (HOLOSCENES / Little Boxes). Both avatars should hear it with
+    nothing clicked, louder near the globe and quieter walking away, and
+    the second avatar's own media volume should change only what they
+    hear. Then `/9 sound off`: it should go quiet with the picture
+    playing on, and `/9 sound on` bring it back. Say which viewer, if
+    one plays it silent. Then `/9 memory`: the globe script's most while
+    showing a dataset is the number to report, since sound added to it.
 
 When you report results, say which viewer and version (Help → About)
-each avatar used, and what steps 2 and 9 showed.
+each avatar used, and what steps 2, 9 and 11 showed.
 
 ## Things that will trip you up
 
-- **Put the scripts in the sphere, and in a build make the sphere a
-  child prim.** A tilt turns the prim the scripts are in, so as the root
-  of a build, with a stand linked to it, the whole build would tip.
+- **Put the globe's three scripts in the sphere, and in a build make
+  the sphere a child prim.** A tilt turns the prim the scripts are in, so as the root
+  of a build, with a stand linked to it, the whole build would tip. The
+  menu script's cube can be linked anywhere in the build, the root
+  included; the scripts find each other across the whole object. One
+  exhibit to an object, though: two globes linked into one build would
+  each open the other's menu.
+- **Keep the menu script out of the sphere.** In the sphere with the
+  other three, its pages of the node's catalog would reach the info
+  script too, which has little room to spare while it reads a card. So
+  a copy there answers nothing, as one left from the build that had it
+  there would be: Datasets gives the five built-in datasets after a few
+  seconds' wait, and you are told once that the menu script didn't
+  answer. Two "Menu script" lines from `/9 memory` mean a copy is still
+  in the sphere: delete it there and keep the cube's. The same happens
+  while the cube's copy is missing or stopped, and the menu script and
+  the visitors script are best updated together.
 
 - **A script stops for good at 64 KB.** It reports a Stack-Heap
   Collision and does nothing more until it is reset, and a script with
@@ -408,16 +531,58 @@ each avatar used, and what steps 2 and 9 showed.
   the globe script rested at 62 KB and the other two at about 50, and
   every web reply goes to every script in the sphere with a handler for
   one. A copy a script makes counts too, until Second Life collects it.
-  So only the info script asks the node anything, the globe script
+  So in the sphere only the info script asks the node anything, the globe script
   shows a choice without checking it first, and the info script reads
   the node's card for a dataset, at most 2 KB with its text already
   plain, rather than the dataset's record. Before the card, `/9 memory`
   read in-world: the globe script 54 KB, and at most 57 while showing a
   dataset; the info script 55, and at most 58 while reading the first
-  3 KB of a record or answering About; the visitors script 49. The
-  info script reading the card hasn't been measured in-world yet, which
-  step 9 of the smoke test does. About 6 KB at each script's busiest is
-  all there was, so code added to any of them needs measuring again.
+  3 KB of a record or answering About; the visitors script 49. With the
+  card and the clip clock both scripts gained on 27 October, it read
+  that day: the globe script 57 KB, and at most 59 while showing a
+  dataset; the info script 48, and at most 52 while reading a card or
+  answering About; the visitors script 49. The globe script, with 5 KB
+  left at its busiest, has the least room, so code that could go in
+  another script should, and code added to any of them needs measuring
+  again (step 9 of the smoke test). The dataset menu, added the same
+  day, went into the visitors script first and stopped it at once with
+  a Stack-Heap Collision, so it became a fourth script, the menu
+  script, which reads the node itself, from a prim of its own so that
+  no reply of its reaches a script in the sphere. What crosses between
+  the prims is a link message of a line or two: the node and the
+  categories one way, a choice the other. The info script then stopped
+  three times reading the card of a dataset chosen from the menu. Most
+  likely the cause was an older copy of it still in the globe, from the
+  first menu build, about 90 lines longer: it rested at 56 KB, and
+  replaced, at 49, and it hasn't stopped since. Likely rather than
+  proven: that afternoon the current copy climbed about 12 KB above its
+  rest on a 2 KB card, which from 56 would have reached 68, but that
+  morning it climbed 4 KB on Hurricane Maria's 1.9 KB card, which would
+  have reached only 60, a difference the cards' sizes don't explain
+  (garbage Second Life hasn't yet collected counts in a peak). That day
+  `/9 memory` read, with the menu in its own prim: the globe script 57
+  KB, and at most 60 while showing a dataset; the info script 51, and
+  **at most 63** while reading the card of Clouds (colorized) -
+  Real-time, filled to 2 KB, or answering About (one peak covers both);
+  the visitors script 49; the menu script 44, and at most 48 while
+  reading the node for a menu. A card is held whole while it is read,
+  and that card's abstract was 1,496 characters, of which the info
+  script keeps 500, so the node now sends no more than those 500
+  characters, and that card is about 1 KB. Most cards are now about
+  that size, since most abstracts are longer than 500 characters. With
+  them `/9 memory` read, after a reset, cards read and About answered:
+  the globe script 57 KB, and at most 60 while showing a dataset; the
+  info script 51, and **at most 57** while reading a card or answering
+  About, 7 KB to spare where it had 1; the visitors script 52; the menu
+  script 44, and at most 51 while reading the node for a menu. With
+  sound added, in Firestorm, it read: the globe script 57 KB, and at
+  most 60 while showing a movie, unchanged; the info script 51, and at
+  most 59; the menu script 44, and at most 53; the visitors script 52.
+  The globe script, with 4 KB to spare at its busiest, has the least
+  room of those that report a peak, the info script next with 5; the
+  visitors script reports none. So a script copied from an older build is the
+  first thing to rule out after a collision: open it and check the
+  first lines say what this README's file does.
 - **The info script checks a choice after it is shown.** For a second or
   two, a dataset the node doesn't have, or one the page can't show, is in every visitor's
   page address, and the page shows the live Earth while it fails. With
@@ -431,16 +596,25 @@ each avatar used, and what steps 2 and 9 showed.
 - **A long dataset name in `datasets` is cut** to a button's 24 bytes.
   Two names that cut alike answer as the first.
 - **The date is UTC**, and follows the clip as the region's clock says:
-  a second or so from the picture while playing, exact when paused. On
-  a clip left looping for hours it can drift further, since the script
-  wraps on the length the node reports and each viewer's page on the
-  video's own, which can differ slightly (`SECOND_LIFE_COMPAT.md` §7).
+  a second or so from the picture while playing, exact when paused. It
+  doesn't drift further on a clip left looping, since the scripts count
+  it in whole numbers round the one length the node reads, which is the
+  length a viewer's page loops on when it plays the stream through
+  hls.js. That rests on the node's length matching the page's to the
+  microsecond, which holds for a playlist that writes its segments'
+  lengths to six places, as TerraViz's own bundles and Vimeo's streams
+  do. A video with no length to read, or one of 2147 s or more, shows
+  its range, and its clock, kept in a float, is about 10 ms out after a
+  day of play and a third of a second after a month, which a pause, a
+  move or a change of rate shows.
 - **Long text is cut.** The node cuts what doesn't fit a card at a
   word, ending `...`: a credit past 200 bytes, a licence statement past
-  400 with its address, and the abstract to what the rest of the card
-  leaves. The info script keeps the first 500 characters of the
-  abstract, which cuts most of them (135 of the 143 on the node in
-  October 2026). "About" then says the rest is at the dataset's page.
+  400 with its address, and the abstract past the 500 characters the
+  info script keeps, or what the rest of the card leaves if that is
+  less, which cuts most of them (135 of the 143 on the node in October
+  2026). A node from before 27 October sends the abstract to what the
+  rest of the card leaves, and the info script cuts it to 500 itself.
+  "About" then says the rest is at the dataset's page.
   A date or a period is never cut: one the node couldn't read whole is
   left out, and the floating text shows no date, or a yearly dataset's
   date to the day.

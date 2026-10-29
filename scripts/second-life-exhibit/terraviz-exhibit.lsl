@@ -14,13 +14,16 @@
 //   The source:  https://github.com/zyra-project/terraviz
 //
 // WHAT THIS SCRIPT DOES
-// It is one of three scripts that make a sphere a TerraViz exhibit: a
+// It is one of four scripts that make a sphere a TerraViz exhibit: a
 // globe that stays up all the time, that anyone who walks up can use, and
 // that a presenter can take over for a talk.
 //   terraviz-exhibit.lsl           this one: what the globe shows
 //   terraviz-exhibit-visitors.lsl  touches, menus, talks, who is nearby
 //   terraviz-exhibit-info.lsl      the floating text, and "About"
-// All three go in the sphere's Content tab.
+//   terraviz-exhibit-menu.lsl      the dataset menu from the node, in a
+//                                  small prim of its own linked to the sphere
+// The first three go in the sphere's Content tab, the menu script in that
+// small prim's.
 //
 // The sphere's surface shows TerraViz's output page: a web page that
 // draws the whole Earth unwrapped into a flat 2:1 picture, which Second
@@ -31,7 +34,11 @@
 // This script is the only one that sets that address. The visitors script
 // asks it for changes, as the info script does to put back a dataset the
 // page can't show, and it tells the other two what the globe shows after
-// each one.
+// each one. The info script also tells it how long the clip is, so that a
+// pause, a nudge or a change of rate lands on the frame the copies show
+// however long the globe has played (position()): every copy that loops
+// on the stream's playlist total, and one looping on a length of its own
+// is brought back into step.
 //
 // Changes go after the address's #, which a web browser applies without
 // reloading the page. Firestorm 7.2.4 was seen to do the same in-world.
@@ -63,6 +70,7 @@
 //                          west. Visitors' Turn east and Turn west buttons do this.
 //   /9 spin <degrees/s>    turn the whole sphere; /9 spin off stops it
 //   /9 debug on|off        TerraViz's diagnostic readout, drawn on the globe
+//   /9 sound on|off        a dataset's sound track; on at the start unless SOUND below says not
 //   /9 width 1024|2048     the picture's resolution
 //   /9 telemetry on|off    anonymous counts (reloads every visitor's page)
 //   /9 steer hash|query    where changes go in the address (see above)
@@ -73,7 +81,7 @@
 //   /9 level               stand a tilted sphere back as it was
 //   /9 home                make the sphere's rotation now its rest, which a reset keeps
 //   /9 upright             stand the poles upright again
-//   /9 memory              each of the three scripts says how much of its 64 KB it uses
+//   /9 memory              each of the four scripts says how much of its 64 KB it uses
 // The visitors script answers /9 talk and /9 presenters too.
 //
 // TELEMETRY
@@ -85,6 +93,15 @@
 // is on. The floating text and the object's description say the globe is
 // measured, as the policy also asks.
 //
+// SOUND
+// A dataset with a sound track plays it in each visitor's own viewer, at
+// their media volume and fainter with distance from the globe, so each
+// hears their own copy, as in step as the pictures are. A seek to catch
+// up is a skip in the sound, catching up without one plays it up to a
+// quarter faster or slower for a while, and a short loop repeats its
+// sound every pass. "/9 sound off" silences the globe until a reset, with
+// no reload while changes go after the #; SOUND below sets how it starts.
+//
 // Channel 9 rather than the smoke-test globe's 8 or the probe's 7, so one
 // command never reaches two kinds of object at once.
 
@@ -94,9 +111,10 @@ string  NODE = "https://terraviz.zyra-project.org";
 integer CHAN = 9;
 integer FACE = 0;              // a sphere has only face 0
 integer UPRIGHT_ON_START = TRUE; // FALSE for a mesh globe with its own mapping
+integer SOUND = TRUE;          // FALSE for a globe that starts silent
 
-// The link messages the three scripts share. The numbers are arbitrary;
-// all three must agree, and exhibit.test.ts holds them to it.
+// The link messages the three scripts in the sphere share. The numbers are
+// arbitrary; all three must agree, and exhibit.test.ts holds them to it.
 integer MSG_STATE   = 271001;  // globe to all: what the globe shows, as JSON
 integer MSG_CONTROL = 271002;  // visitors or info to globe: a control, for the key who asked
 integer MSG_HELLO   = 271003;  // any to globe: say the state again (a script reset)
@@ -139,6 +157,8 @@ integer gAtS;           // the anchor, when gPos was current: Unix seconds
 integer gAtMs;          // and milliseconds
 float   gRate = 1.0;
 integer gPaused;
+integer gLen;           // the clip's length in microseconds, from the info script, 0 while unknown
+string  gLenFor;        // the dataset gLen is for
 float   gRotation;      // degrees east at the picture's centre, [0, 360)
 float   gHome;          // the owner's rotation, which a visitor's turn doesn't outlast
 rotation gHomeRot;      // the sphere's own rotation at rest, upright, in its build
@@ -149,6 +169,7 @@ float   gOwnerSpin;     // the owner's /9 spin, which the idle return brings bac
 string  HOME_KEY = "terraviz:home";   // where the rest is kept, in the object, across resets
 integer gDebug;
 integer gTelemetry;
+integer gSound;
 integer gWidth = 2048;
 integer gHash = TRUE;   // changes go after the #
 
@@ -160,7 +181,7 @@ help()
 {
     llOwnerSay("[exhibit] Commands on /" + (string)CHAN + ": show <name or id>, list, earth, pause, play, "
         + "jump <s or m:ss>, rate <speed>, rotation <degrees>, turn <degrees east>, tilt south|north, level, home, spin <degrees/s or off>, debug on|off, "
-        + "width 1024|2048, telemetry on|off, steer hash|query, status, upright, memory, talk, presenters");
+        + "width 1024|2048, sound on|off, telemetry on|off, steer hash|query, status, upright, memory, talk, presenters");
 }
 
 // Tells whoever asked. The owner hears it privately wherever they are; a
@@ -222,17 +243,60 @@ anchor()
 reanchor()
 {
     list t = now();
-    if (!gPaused) gPos += since(t) * gRate;
+    gPos = position(t);
     gAtS = llList2Integer(t, 0);
     gAtMs = llList2Integer(t, 1);
 }
 
-// Where the clip is now, unwrapped: the page wraps it round the clip,
-// whose length only the page and the manifest know.
-float position()
+// Where the clip is at `t`, a now() reading. Round the loop once the info
+// script has said how long the clip is, in whole microseconds (loopUs).
+// Until then, and for a clip it can't say, unwrapped, as the page wraps it
+// round the clip itself, and in a float, which holds a day's play to about
+// 10 ms and a month's only to a third of a second.
+float position(list t)
 {
+    if (gLen > 0 && gLenFor == gDataset) return (float)loopUs(t, gLen) / 1000000.0;
     if (gPaused) return gPos;
-    return gPos + since(now()) * gRate;
+    return gPos + since(t) * gRate;
+}
+
+// Where the clip is at `t`, a now() reading, in microseconds round a loop
+// of `d`: the anchor's position plus the time since it at the rate, in
+// whole numbers. Worked in floats the sum lost about 10 ms a day of play,
+// a third of a second a month and more at a higher rate, so the date in
+// the floating text drifted from the picture on a globe left playing, and
+// a pause landed off the frame every copy was showing. The rate has the
+// address's three places, so a millisecond of it is a whole number of
+// microseconds of clip. The info script keeps the same copy, which
+// exhibit.test.ts holds the two to, and runs.
+integer loopUs(list t, integer d)
+{
+    integer s = llList2Integer(t, 0) - gAtS;
+    integer ms = llList2Integer(t, 1) - gAtMs;
+    if (ms < 0) { s -= 1; ms += 1000; }
+    if (gPaused) { s = 0; ms = 0; }
+    integer r = llRound(gRate * 1000.0);
+    // The anchor's position, wrapped first in a float for one set past the
+    // loop, by a jump (up to 100000 s) or before the length was known:
+    // within a few milliseconds there, and tens of microseconds otherwise.
+    float f = (float)d / 1000000.0;
+    integer p = llRound((gPos - f * llFloor(gPos / f)) * 1000000.0) % d;
+    if (p < 0) p += d;
+    integer a = s % d;
+    if (a < 0) a += d;
+    integer b = (1000 * r) % d;
+    // p plus a times b, round d, a bit of b at a time, so that nothing
+    // leaves an integer's range.
+    while (b)
+    {
+        if (b & 1) { p += a - d; if (p < 0) p += d; }
+        a += a - d;
+        if (a < 0) a += d;
+        b = b >> 1;
+    }
+    p += (ms * r) % d - d;
+    if (p < 0) p += d;
+    return p;
 }
 
 // An angle in [0, 360), at the three places the address carries.
@@ -245,8 +309,9 @@ float degrees(float r)
 
 // A plain decimal with at most three places, as the page reads numbers:
 // no exponent, no padding. LSL's own (string) gives six places. A
-// float's fraction coarsens as it grows, to about 8 ms once a clip has
-// played for a day at full speed, which the page does not notice.
+// float's fraction coarsens as it grows: the position, kept round the loop
+// once the clip's length is known, holds to tens of microseconds, and
+// unwrapped, without one, to about 8 ms after a day's play at full speed.
 string num(float f)
 {
     string sign = "";
@@ -329,6 +394,7 @@ string address()
     }
     live += ["width=" + (string)gWidth, "rotation=" + num(gRotation)];
     if (gDebug) live += ["debug=1"];
+    if (gSound) live += ["sound=1"];
     string sep = "#";
     if (!gHash) sep = "&";
     return NODE + "/output/output?" + setup + sep + llDumpList2String(live, "&");
@@ -336,7 +402,7 @@ string address()
 
 list snapshot()
 {
-    return [gDataset, gTitle, gPos, gAtS, gAtMs, gRate, gPaused, gRotation, gDebug, gTelemetry, gWidth, gHash];
+    return [gDataset, gTitle, gPos, gAtS, gAtMs, gRate, gPaused, gRotation, gDebug, gTelemetry, gWidth, gHash, gSound];
 }
 
 restore(list s)
@@ -353,6 +419,7 @@ restore(list s)
     gTelemetry = llList2Integer(s, 9);
     gWidth = llList2Integer(s, 10);
     gHash = llList2Integer(s, 11);
+    gSound = llList2Integer(s, 12);
 }
 
 // Tells the other two scripts what the globe shows. The info script times
@@ -603,6 +670,16 @@ act(key who, integer owner, string msg)
         show(who, dataset, described);
         return;
     }
+    // The clip's length in microseconds and the dataset it is for, from the
+    // info script, which reads it from the node's card, so that the clock
+    // can be kept round the loop (position()). Only the scripts send it,
+    // and 0, for none, each time the info script starts on a dataset.
+    if (cmd == "length" && who == NULL_KEY)
+    {
+        gLen = (integer)arg;
+        gLenFor = llList2String(w, 2);
+        return;
+    }
     // "rest" is the visitors script's own return, once nobody has been at
     // the globe for a while: the live Earth, turned back to the owner's
     // rotation. Only the scripts send it, with no key. The info script's
@@ -657,6 +734,9 @@ act(key who, integer owner, string msg)
     }
     if (cmd == "jump" || cmd == "restart" || cmd == "nudge")
     {
+        // One reading of the clock for where the clip is and the new anchor,
+        // as in reanchor(), so the clip skips nothing between them.
+        list t = now();
         float to = 0.0;
         if (cmd == "jump")
         {
@@ -670,13 +750,19 @@ act(key who, integer owner, string msg)
         else if (cmd == "nudge")
         {
             if (!isNumber(arg) || llFabs((float)arg) > NUDGE_MAX) { tell(who, "Nudge by how many seconds?"); return; }
-            // From where the clip is now, never before its start. Past its
-            // end the page wraps round it.
-            to = position() + (float)arg;
-            if (to < 0.0) to = 0.0;
+            to = position(t) + (float)arg;
         }
+        // Round the loop once its length is known, as the page plays it,
+        // so a copy on a period of its own lands in step with the rest too:
+        // back past the start goes round to the loop's end. A float holds a
+        // jump to 100000 s wrapped to a few milliseconds. Before the length
+        // is known, never before the start, and past the end the page wraps.
+        float len = (float)gLen / 1000000.0;
+        if (gLen > 0 && gLenFor == gDataset) to -= len * (float)llFloor(to / len);
+        else if (to < 0.0) to = 0.0;
         gPos = to;
-        anchor();
+        gAtS = llList2Integer(t, 0);
+        gAtMs = llList2Integer(t, 1);
         gBy = who;
         commit(saved);
         return;
@@ -789,6 +875,13 @@ act(key who, integer owner, string msg)
         if (commit(saved)) tell(who, "Debug readout " + larg + ".");
         return;
     }
+    if (cmd == "sound")
+    {
+        if (larg != "on" && larg != "off") { tell(who, "sound on, or sound off."); return; }
+        gSound = (larg == "on");
+        if (commit(saved)) tell(who, "Sound " + larg + ".");
+        return;
+    }
     if (cmd == "width")
     {
         if (arg != "1024" && arg != "2048") { tell(who, "width 1024, or width 2048."); return; }
@@ -839,8 +932,14 @@ act(key who, integer owner, string msg)
     {
         string what = "the live Earth";
         if (gDataset != "")
-            what = gTitle + " at " + num(position()) + " s, " + llList2String(["playing", "paused"], gPaused)
+        {
+            // The clip's length, once the info script has said it, which is
+            // also how the owner tells the clock is kept round the loop.
+            string of = "";
+            if (gLen > 0 && gLenFor == gDataset) of = " of " + num((float)gLen / 1000000.0);
+            what = gTitle + " at " + num(position(now())) + of + " s, " + llList2String(["playing", "paused"], gPaused)
                 + ", rate " + num(gRate);
+        }
         tell(who, "Showing " + what + ". Spin " + num(gSpin) + " degrees a second. Address: " + address());
         return;
     }
@@ -878,6 +977,7 @@ default
     state_entry()
     {
         llListen(CHAN, "", llGetOwner(), "");
+        gSound = SOUND;
         while (llGetSubString(NODE, -1, -1) == "/") NODE = llDeleteSubString(NODE, -1, -1);
         if (llGetObjectName() == "Object") llSetObjectName("TerraViz globe");
         if (UPRIGHT_ON_START) { upright(); home(); }

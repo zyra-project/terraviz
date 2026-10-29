@@ -10,7 +10,7 @@
 //   The source:  https://github.com/zyra-project/terraviz
 //
 // WHAT THIS SCRIPT DOES
-// It is one of the exhibit's three scripts, and the one that deals with
+// It is one of the exhibit's four scripts, and the one that deals with
 // people. terraviz-exhibit.lsl decides what the globe shows, and this one
 // decides who may change it:
 // - A touch opens a menu for whoever touched. "About" is always there.
@@ -43,13 +43,17 @@
 //   presenters  one username a line, such as eric.hackathorn. A legacy
 //               name such as "Eric Hackathorn" works too. A display name
 //               never does: anyone can take one.
-//   datasets    the menu, one "Name = dataset id" a line, in the order it
-//               shows them. Without it the menu offers five built in.
+//   datasets    a menu of its own, one "Name = dataset id" a line, in the
+//               order it shows them. Without it, Datasets opens the node's
+//               catalog, which terraviz-exhibit-menu.lsl shows from a small
+//               prim of its own linked to the globe; five built in stand in
+//               when the node can't give it, or that script doesn't answer.
 //   settings    "name = value" lines, any of:
 //                 radius = 15         metres from the globe's surface that count as at it
 //                 idle minutes = 5    before the live Earth comes back
 //                 hold seconds = 60   one visitor's hold after acting
 //                 talk minutes = 2    no presenter nearby ends a talk
+//               and "categories", which this script hands the menu script.
 //
 // Nothing about a visitor leaves the object. Who is at the globe is read
 // from the region every few seconds and kept only as a count and a time.
@@ -62,13 +66,19 @@
 
 integer CHAN = 9;
 
-// The link messages the three scripts share. exhibit.test.ts holds the
-// numbers to the globe script's.
+// The link messages the three scripts in the sphere share. exhibit.test.ts
+// holds the numbers to the globe script's.
 integer MSG_STATE   = 271001;  // globe to all: what the globe shows, as JSON
 integer MSG_CONTROL = 271002;  // visitors or info to globe: a control, for the key who asked
 integer MSG_HELLO   = 271003;  // any to globe: say the state again (a script reset)
 integer MSG_TALK    = 271004;  // visitors to info: "1" during a talk, "0" otherwise
 integer MSG_ABOUT   = 271005;  // visitors to info: tell the key about what the globe shows
+// The menu script's two, sent to the whole object (LINK_SET), since that
+// script is in a prim of its own. New numbers, never the earlier relay's
+// (271006, 271007), so a prim holding scripts of both builds can't take
+// one message for the other.
+integer MSG_MENU_OPEN = 271008;  // visitors to menu: the node, the categories and when, in lines; open the menu for the key
+integer MSG_MENU_DONE = 271009;  // menu to visitors: "open", then "show <id> <title>", "main" or "datasets", for the key
 
 // The settings, and what the "settings" notecard may set them to.
 float   gRadius = 15.0;
@@ -81,7 +91,8 @@ integer gTalkS = 120;
 string  ID_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
 integer ID_MAX = 128;
 
-// The menu without a "datasets" notecard: the globe script's presets.
+// The menu when there is no "datasets" notecard and the node can't give
+// one: the globe script's presets.
 list    DEFAULT_MENU = [
     "Hurricanes 2024",      "01KQG611HF8YXJNRBEHT0757KT",
     "Sea temperature",      "01KQG65ZW1JC7M27EQ1CYD8YZ7",
@@ -94,6 +105,7 @@ float   TICK = 5.0;          // how often presence, holds and talks are checked
 integer PAGE = 9;            // datasets a menu page shows, beside its three moves
 integer CTX_TTL = 300;       // seconds a menu stays answerable after it opened
 integer CTX_MAX = 8;         // menus open at once
+integer MENU_WAIT = 6;       // seconds the menu script has to say it opened the node's menu, checked every TICK
 float   NUDGE = 10.0;
 integer TURN = 30;           // degrees a turn button turns the globe
 
@@ -127,6 +139,11 @@ integer gTurned;             // a visitor turned or tilted the globe from the ow
 
 list    gPresenters;         // usernames, lowercase
 list    gMenu;               // name, id, name, id...
+integer gLive;               // no "datasets" notecard: the menu is the node's catalog
+string  gNode;               // the node the globe shows, handed to the menu script
+string  gCategories;         // the settings notecard's "categories", as written, handed to it too
+list    gOpening;            // who the menu script was asked to open the node's menu for, and when
+integer gNoMenu;             // the owner has been told the menu script didn't answer
 integer gTalk;
 integer gTalkSeen;           // when a presenter was last at the globe
 key     gHolder = NULL_KEY;
@@ -150,6 +167,7 @@ integer gLine;
 key     gCardReq;
 list    gNewPresenters;
 list    gNewMenu;
+string  gNewCategories;
 float   gNewRadius;          // the settings being read, applied once all are in
 integer gNewIdleS;
 integer gNewHoldS;
@@ -418,6 +436,19 @@ check()
         release();
         llMessageLinked(LINK_THIS, MSG_CONTROL, "rest", NULL_KEY);
     }
+    // The menu script didn't say it opened the node's menu: it isn't in
+    // the object, is in the globe's prim, has stopped, or the region is too
+    // busy for it to answer in time. The visitor gets the built-in datasets.
+    while (gOpening != [] && t - llList2Integer(gOpening, 1) >= MENU_WAIT)
+    {
+        key v = llList2Key(gOpening, 0);
+        gOpening = llDeleteSubList(gOpening, 0, 1);
+        if (!gNoMenu)
+            llOwnerSay("[exhibit] The menu script didn't answer in time, so visitors get the built-in datasets. It goes in a "
+                + "small prim linked to the globe, and must be running: see the README. A very busy region can also delay it.");
+        gNoMenu = TRUE;
+        datasetsMenu(v, 0);
+    }
 }
 
 // A setting from the "settings" notecard, kept only within its range.
@@ -426,6 +457,14 @@ setting(string line)
     integer eq = llSubStringIndex(line, "=");
     if (eq < 1) return;
     string name = llToLower(llStringTrim(llGetSubString(line, 0, eq - 1), STRING_TRIM));
+    // The menu script's, which this script hands it as written. (Guarded,
+    // since a backwards range means everything outside it.)
+    if (name == "categories")
+    {
+        gNewCategories = "";
+        if (eq < llStringLength(line) - 1) gNewCategories = llStringTrim(llGetSubString(line, eq + 1, -1), STRING_TRIM);
+        return;
+    }
     float v = (float)llStringTrim(llGetSubString(line, eq + 1, -1), STRING_TRIM);
     if (name == "radius" && v >= 2.0 && v <= 96.0) gNewRadius = v;
     else if (name == "idle minutes" && v >= 1.0 && v <= 1440.0) gNewIdleS = (integer)(v * 60.0);
@@ -454,7 +493,11 @@ nextCard()
     gRadius = gNewRadius; gIdleS = gNewIdleS; gHoldS = gNewHoldS; gTalkS = gNewTalkS;
     gPresenters = gNewPresenters;
     gMenu = gNewMenu;
-    if (gMenu == []) gMenu = DEFAULT_MENU;
+    // No datasets from the notecard, or no notecard: the node's catalog,
+    // with the built-in datasets behind it.
+    gLive = gMenu == [];
+    if (gLive) gMenu = DEFAULT_MENU;
+    gCategories = gNewCategories;
     llOwnerSay("[exhibit] " + summary());
 }
 
@@ -463,14 +506,16 @@ readCards()
     gCard = 0;
     gNewPresenters = [];
     gNewMenu = [];
+    gNewCategories = "";
     gNewRadius = 15.0; gNewIdleS = 300; gNewHoldS = 60; gNewTalkS = 120;
     nextCard();
 }
 
 string summary()
 {
-    string menu = (string)(llGetListLength(gMenu) / 2) + " datasets in the menu";
-    if (llGetInventoryType("datasets") != INVENTORY_NOTECARD) menu += " (the built-in five: no \"datasets\" notecard)";
+    string menu = (string)(llGetListLength(gMenu) / 2) + " datasets in the menu, from the \"datasets\" notecard";
+    if (gLive) menu = "the dataset menu from the node's catalog (the built-in five when the node can't give it)";
+    if (gLive && gCategories != "") menu += ", in the categories " + gCategories;
     return (string)llGetListLength(gPresenters) + " presenters, " + menu + ". At the globe means within "
         + (string)((integer)gRadius) + " m of its surface. The live Earth returns " + (string)(gIdleS / 60) + " min after the last "
         + "visitor leaves. A hold lasts " + (string)gHoldS + " s, and a talk ends after " + (string)(gTalkS / 60)
@@ -559,6 +604,23 @@ default
             llMessageLinked(LINK_THIS, MSG_TALK, llList2String(["0", "1"], gTalk), NULL_KEY);
             return;
         }
+        if (n == MSG_MENU_DONE)
+        {
+            // The menu script is there and running.
+            integer o = llListFindList(gOpening, [id]);
+            if (o != -1) gOpening = llDeleteSubList(gOpening, o, o + 1);
+            gNoMenu = FALSE;
+            if (str == "open") return;
+            if (str == "main") { mainMenu(id); return; }
+            // The node gave no menu: the built-in datasets.
+            if (str == "datasets") { datasetsMenu(id, 0); return; }
+            // A choice from the node's menu, held to the hold and any talk
+            // as one from the notecard's is.
+            if (llGetSubString(str, 0, 4) != "show ") return;
+            if (!mayAct(id)) { llRegionSayTo(id, 0, whyNot()); return; }
+            ask(id, str);
+            return;
+        }
         if (n != MSG_STATE) return;
         string dataset = llJsonGetValue(str, ["dataset"]);
         if (dataset == JSON_INVALID) return;
@@ -566,6 +628,8 @@ default
         gTitle = llJsonGetValue(str, ["title"]);
         gPaused = (integer)llJsonGetValue(str, ["paused"]);
         gTurned = (integer)llJsonGetValue(str, ["turned"]);
+        gNode = llJsonGetValue(str, ["node"]);
+        if (gNode == JSON_INVALID) gNode = "";
         // Any change restarts the idle clock, so a choice made from beyond
         // the radius isn't undone at the next check.
         gLastSeen = unix();
@@ -644,7 +708,18 @@ default
         // checked again: a hold or a talk may have started since it opened.
         if (!mayAct(who)) { llRegionSayTo(who, 0, whyNot()); return; }
 
-        if (msg == BTN_DATASETS) { datasetsMenu(who, 0); return; }
+        if (msg == BTN_DATASETS)
+        {
+            // Without a datasets notecard, the menu script's: the node's catalog.
+            if (!gLive) { datasetsMenu(who, 0); return; }
+            // When it was asked, so it doesn't answer once the built-in datasets are near.
+            llMessageLinked(LINK_SET, MSG_MENU_OPEN, gNode + "\n" + gCategories + "\n" + (string)unix(), who);
+            integer o = llListFindList(gOpening, [who]);
+            if (o != -1) gOpening = llDeleteSubList(gOpening, o, o + 1);
+            gOpening += [who, unix()];
+            if (llGetListLength(gOpening) > CTX_MAX * 2) gOpening = llDeleteSubList(gOpening, 0, 1);
+            return;
+        }
         if (msg == BTN_PAUSE) { ask(who, "pause"); return; }
         if (msg == BTN_PLAY) { ask(who, "play"); return; }
         if (msg == BTN_BACK) { ask(who, "nudge -" + (string)((integer)NUDGE)); return; }

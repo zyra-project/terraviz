@@ -69,16 +69,18 @@ const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
 
 /**
  * Characters of a source read at most. A card's longest value, the
- * abstract, holds under 2,048 bytes of plain text, and 8,192 characters of
- * the SOS catalog's HTML give more than that.
+ * abstract, holds under 2,048 bytes of plain text (and since 27 October
+ * 2026 at most 500 characters), and 8,192 characters of the SOS catalog's
+ * HTML give more than that.
  */
 export const SOURCE_MAX = 8192
 
 /**
  * Characters of a source read as Markdown at most. On the node in October
  * 2026 the first 3,072 characters of every longer abstract gave at least
- * 2,844 bytes of text, more than a card holds, and a hostile 3,072 parse
- * in about 7 ms where 8,192 took 40.
+ * 2,844 bytes of text, more than a card holds (and far more than the 500
+ * characters it has kept since 27 October), and a hostile 3,072 parse in
+ * about 7 ms where 8,192 took 40.
  */
 export const MARKDOWN_SOURCE_MAX = 3072
 
@@ -227,26 +229,31 @@ export function exhibitPlainText(value: string | null | undefined, options: { ma
 }
 
 /**
- * `text` in at most `cap` bytes as sent, cut at a word where one is in
- * the last third and ending `...`, and whether it was cut. It cuts between
- * graphemes, so an accent or an emoji sequence stays whole, and gives ""
- * when not even one fits beside the `...`.
+ * `text` in at most `cap` bytes as sent and, given `chars`, at most that
+ * many UTF-16 units (JavaScript's `length`, never fewer than a script's
+ * `llStringLength` counts), cut at a word where one is in the last third
+ * and ending `...`, and whether it was cut. It cuts between graphemes, so
+ * an accent or an emoji sequence stays whole, and gives "" when not even
+ * one fits beside the `...`. One cut for both limits, since cutting twice
+ * could cut into the first cut's `...`.
  */
-export function cutProse(text: string, cap: number): { text: string; cut: boolean } {
-  if (jsonBytes(text) <= cap) return { text, cut: false }
-  if (cap < 4) return { text: '', cut: text !== '' }
-  // Every UTF-16 unit costs at least a byte as sent, so nothing past the
-  // first `cap` of them can be in the result: segment only a head a little
-  // longer. A grapheme the slice split ends past the cap, so no prefix
-  // that fits can hold it.
-  const head = text.length > cap + 64 ? text.slice(0, cap + 64) : text
+export function cutProse(text: string, cap: number, chars = Infinity): { text: string; cut: boolean } {
+  const fits = (s: string): boolean => s.length <= chars && jsonBytes(s) <= cap
+  if (fits(text)) return { text, cut: false }
+  if (cap < 4 || chars < 4) return { text: '', cut: text !== '' }
+  // Every UTF-16 unit costs at least a byte as sent, and one of `chars`,
+  // so nothing past the first `most` of them can be in the result: segment
+  // only a head a little longer. A grapheme the slice split ends past the
+  // limit, so no prefix that fits can hold it.
+  const most = Math.min(cap, chars)
+  const head = text.length > most + 64 ? text.slice(0, most + 64) : text
   const parts = Array.from(graphemes.segment(head), g => g.segment)
   // The longest prefix whose cut form fits, found by halving.
   let lo = 0
   let hi = parts.length
   while (lo < hi) {
     const mid = Math.ceil((lo + hi) / 2)
-    if (jsonBytes(parts.slice(0, mid).join('').trimEnd() + '...') <= cap) lo = mid
+    if (fits(parts.slice(0, mid).join('').trimEnd() + '...')) lo = mid
     else hi = mid - 1
   }
   if (lo === 0) return { text: '', cut: true }

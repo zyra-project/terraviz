@@ -4,13 +4,31 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { serializeDataset } from '../../functions/api/v1/_lib/dataset-serializer'
-import { CARD_BUDGET, CARD_SKELETON } from '../../functions/api/v1/_lib/exhibit-reads'
+import {
+  CARD_ABSTRACT_CHARS,
+  CARD_BUDGET,
+  CARD_SKELETON,
+  PAGE_BUDGET,
+  PAGE_CAPS,
+  PAGE_MAX_LIMIT,
+  parsePageQuery,
+  resetExhibitListForTests,
+  TAG_CAP,
+  TAGS_BUDGET,
+  TAGS_MAX,
+  type ExhibitPage,
+  type ExhibitTags,
+} from '../../functions/api/v1/_lib/exhibit-reads'
 import type { DatasetRow } from '../../functions/api/v1/_lib/catalog-store'
+import { asD1, makeCtx } from '../../functions/api/v1/_lib/test-helpers'
+import { onRequestGet as getPage } from '../../functions/api/exhibit/v1/datasets'
+import { onRequestGet as getTags } from '../../functions/api/exhibit/v1/tags'
+import { freshMigratedDb } from '../lib/catalog-migrations'
 
 // LSL compiles only in-world, so nothing here runs the scripts. What the
 // globe script writes into the page's address is held to the page by
 // ../second-life-probe/globe.test.ts, which checks both globe scripts.
-// These tests hold the exhibit's three scripts to each other and to the
+// These tests hold the exhibit's four scripts to each other and to the
 // node: a link message, a state key or a command one script renamed would
 // leave the others quietly doing nothing, with no error anywhere.
 
@@ -20,7 +38,8 @@ const read = (file: string): string =>
 const globe = read('./terraviz-exhibit.lsl')
 const visitors = read('./terraviz-exhibit-visitors.lsl')
 const info = read('./terraviz-exhibit-info.lsl')
-const SCRIPTS = { globe, visitors, info }
+const menu = read('./terraviz-exhibit-menu.lsl')
+const SCRIPTS = { globe, visitors, info, menu }
 const readme = read('./README.md')
 const plan = read('../../docs/SECOND_LIFE_COMPAT.md')
 
@@ -71,11 +90,18 @@ describe('second-life exhibit scripts', () => {
 
   it('send every message to a script that handles it', () => {
     for (const [name, script] of Object.entries(SCRIPTS)) {
-      for (const sent of new Set(all(script, /llMessageLinked\(LINK_THIS, (MSG_\w+)/g))) {
+      const sends = [...script.matchAll(/llMessageLinked\((LINK_\w+), (MSG_\w+)/g)]
+      expect(sends.length, name).toBeGreaterThan(0)
+      for (const [, target, sent] of sends) {
         const handlers = Object.entries(SCRIPTS).filter(
           ([other, s]) => other !== name && new RegExp(`\\bn [!=]= ${sent}\\b`).test(s),
         )
         expect(handlers.length, `${name} sends ${sent}`).toBeGreaterThan(0)
+        // The menu script is in a prim of its own, so what passes between
+        // it and the visitors script goes to the whole object; everything
+        // else stays in the globe's prim.
+        const across = handlers.some(([other]) => other === 'menu') || name === 'menu'
+        expect(target, `${name} sends ${sent}`).toBe(across ? 'LINK_SET' : 'LINK_THIS')
       }
     }
   })
@@ -90,6 +116,10 @@ describe('second-life exhibit scripts', () => {
       expect(read.length, name).toBeGreaterThan(0)
       for (const key of read) expect(broadcast, `${name} reads ${key}`).toContain(key)
     }
+    // The menu script, in a prim of its own, hears the state only through
+    // the visitors script, which reads the node from it.
+    expect(menu).not.toMatch(/MSG_STATE|MSG_HELLO|llJsonGetValue\(str/)
+    expect(all(visitors, /llJsonGetValue\(str, \["(\w+)"\]\)/g)).toContain('node')
   })
 
   it('ask the globe only for what it lets a visitor do', () => {
@@ -222,10 +252,12 @@ describe('second-life exhibit scripts', () => {
     // gate in the globe script.
     expect(act.indexOf('if (cmd == "earth"')).toBeLessThan(act.indexOf("// Everything below is the owner's."))
     // The info script reads a card, which the node keeps within its budget,
-    // and keeps a little of the abstract.
+    // and keeps a little of the abstract. The node sends no more of it than
+    // that: the card is held whole while it is read, and the info script
+    // reached 63 KB of 64 in-world when an abstract filled the card.
     expect(Number(constant(info, 'integer', 'CARD_MAX'))).toBe(CARD_BUDGET)
     expect(CARD_BUDGET).toBe(2048)
-    expect(Number(constant(info, 'integer', 'ABSTRACT_MAX'))).toBeLessThanOrEqual(500)
+    expect(Number(constant(info, 'integer', 'ABSTRACT_MAX'))).toBe(CARD_ABSTRACT_CHARS)
     // And the globe says how full showing a dataset left it.
     const shown = body(globe, 'show(key who, string id, string title)')
     const statements = shown.slice(shown.indexOf('{') + 1).split('\n').filter((line) => line.trim() !== '' && !/^\s*\/\//.test(line))
@@ -268,7 +300,12 @@ describe('second-life exhibit scripts', () => {
     // a notecard's or a preset's name is the owner's choice and stays.
     expect(body(globe, 'show(key who, string id, string title)')).toContain('if (gTitle == "") gTitle = id;')
     const name = body(info, 'string called()')
-    expect(name).toContain('if ((gTitle == "" || gTitle == gDataset) && gFor == gDataset && gCardTitle != "") return gCardTitle;')
+    expect(name).toMatch(/if \(gFor == gDataset && gCardTitle != ""\)\n\s+\{\n\s+if \(gTitle == "" \|\| gTitle == gDataset\) return gCardTitle;/)
+    // The live menu's title, which the node cut to 48 bytes with "...",
+    // gives way to the card's, which is the same title whole or cut far
+    // later; a name the owner gave doesn't.
+    expect(name).toContain('if (n > 3 && llGetSubString(gTitle, -3, -1) == "..."')
+    expect(name).toContain('&& llSubStringIndex(gCardTitle, llGetSubString(gTitle, 0, n - 4)) == 0) return gCardTitle;')
     expect(body(info, 'hover()')).toContain('string title = called();')
     const about = body(info, 'about(key av)')
     expect(about).toContain('string title = called();')
@@ -335,7 +372,7 @@ describe('second-life exhibit scripts', () => {
     // since (integer) of a JSON true reads 0.
     expect(typeof shape.exactDuration).toBe('number')
     expect(typeof shape.retry).toBe('number')
-    expect(card).toContain('gDuration = (float)value(b, "exactDuration");')
+    expect(card).toContain('list x = llParseString2List(value(b, "exactDuration"), ["."], []);')
     expect(card).toContain('integer retry = (integer)value(b, "retry");')
     expect(typeof shape.truncated).toBe('boolean')
     expect(card).toContain('gCut = llJsonGetValue(b, ["truncated"]) == JSON_TRUE;')
@@ -343,7 +380,7 @@ describe('second-life exhibit scripts', () => {
     // The card's page is a path on the node, as its dataset link.
     expect(card).toContain('if (llGetSubString(gPage, 0, 0) != "/") gPage = "/dataset/" + gDataset;')
     // A length the node didn't settle is asked for again when it says.
-    expect(card).toContain('if (gVideo && gDuration == 0.0 && retry > 0) later(retry);')
+    expect(card).toContain('if (gVideo && gLen == 0 && retry > 0) later(retry);')
     expect(info).toContain('gNode + "/api/exhibit/v1/datasets/" + llEscapeURL(gDataset)')
   })
 
@@ -372,7 +409,7 @@ describe('second-life exhibit scripts', () => {
     // The date at the position broadcast, not a second later: the globe
     // takes it before setting the media, which takes a second.
     expect(moved).toMatch(
-      /integer paused = gPaused;\n\s+gPaused = TRUE;\n\s+if \(gFor == gDataset && gDuration > 0\.0\) d = date\(\);\n\s+gPaused = paused;/,
+      /integer paused = gPaused;\n\s+gPaused = TRUE;\n\s+if \(gFor == gDataset && gLen > 0\) d = date\(\);\n\s+gPaused = paused;/,
     )
     expect(moved).toContain('if (d != "") s = "Paused at " + d + ".";')
     expect(moved).toContain('if (d != "") s = "Playing from " + d + ".";')
@@ -400,6 +437,11 @@ describe('second-life exhibit scripts', () => {
     expect(labels.length).toBeGreaterThan(10)
     for (const label of labels) expect(bytes(label), label).toBeLessThanOrEqual(24)
     expect(new Set(labels).size).toBe(labels.length)
+    // The menu script's too, and its moves are the visitors script's.
+    const own = Object.fromEntries([...menu.matchAll(/^string\s+(BTN_\w+) = "([^"]*)";/gm)].map((m) => [m[1], m[2]]))
+    for (const label of Object.values(own)) expect(bytes(label), label).toBeLessThanOrEqual(24)
+    expect(new Set(Object.values(own)).size).toBe(Object.keys(own).length)
+    for (const name of ['BTN_PREV', 'BTN_NEXT', 'BTN_MENU']) expect(own[name], name).toBe(constant(visitors, 'string', name).replace(/"/g, ''))
   })
 
   it('never offer more than a menu holds', () => {
@@ -431,6 +473,7 @@ describe('second-life exhibit scripts', () => {
     const chan = constant(globe, 'integer', 'CHAN')
     expect(constant(visitors, 'integer', 'CHAN')).toBe(chan)
     expect(constant(info, 'integer', 'CHAN')).toBe(chan)
+    expect(constant(menu, 'integer', 'CHAN')).toBe(chan)
     // The globe answers anything it doesn't know with its help text, so
     // it has to stay quiet on the visitors script's commands.
     expect(body(globe, 'act(key who, integer owner, string msg)')).toMatch(
@@ -438,10 +481,13 @@ describe('second-life exhibit scripts', () => {
     )
     expect(visitors).toMatch(/cmd == "talk"/)
     expect(visitors).toMatch(/cmd == "presenters"/)
-    // All three say how much memory they use.
+    // All four say how much memory they use, and the menu script nothing
+    // else: it answers no command, so it never asks the globe for one.
     expect(globe).toMatch(/cmd == "memory"/)
     expect(visitors).toMatch(/cmd == "memory"/)
     expect(info).toMatch(/!= "memory"/)
+    expect(menu).toMatch(/!= "memory"\) return;/)
+    expect(menu).not.toContain('MSG_CONTROL')
   })
 
   it('read the notecards and settings the docs name', () => {
@@ -452,7 +498,7 @@ describe('second-life exhibit scripts', () => {
       expect(plan, card).toContain(`\`${card}\``)
     }
     const settings = all(body(visitors, 'setting(string line)'), /name == "([^"]+)"/g)
-    expect(settings).toEqual(['radius', 'idle minutes', 'hold seconds', 'talk minutes'])
+    expect(settings).toEqual(['categories', 'radius', 'idle minutes', 'hold seconds', 'talk minutes'])
     for (const name of settings) {
       expect(readme, name).toContain(`${name} = `)
       expect(plan, name).toContain(`\`${name}\``)
@@ -548,6 +594,32 @@ describe('second-life exhibit scripts', () => {
     expect(constant(visitors, 'string', 'ID_CHARS')).toBe(constant(globe, 'string', 'ID_CHARS'))
     expect(constant(visitors, 'integer', 'ID_MAX')).toBe(constant(globe, 'integer', 'ID_MAX'))
     expect(body(visitors, 'integer isId(string s)')).toBe(body(globe, 'integer isId(string s)'))
+    // And the menu script, from the node's pages.
+    expect(constant(menu, 'string', 'ID_CHARS')).toBe(constant(globe, 'string', 'ID_CHARS'))
+    expect(constant(menu, 'integer', 'ID_MAX')).toBe(constant(globe, 'integer', 'ID_MAX'))
+    expect(body(menu, 'integer isId(string s)')).toBe(body(globe, 'integer isId(string s)'))
+  })
+
+  it('start with sound as SOUND says, and let the owner turn it on and off without a reload', () => {
+    // On by default for the exhibit (the maintainer's call, 27 October
+    // 2026); the page stays silent unless its address asks.
+    expect(constant(globe, 'integer', 'SOUND')).toBe('TRUE')
+    expect(body(globe, 'act(key who, integer owner, string msg)')).toMatch(
+      /if \(cmd == "sound"\)\n\s+\{\n\s+if \(larg != "on" && larg != "off"\)[^\n]+\n\s+gSound = \(larg == "on"\);\n\s+if \(commit\(saved\)\)/,
+    )
+    expect(globe).toMatch(/llListen\(CHAN, "", llGetOwner\(\), ""\);\n\s+gSound = SOUND;/)
+    // After the #, so it reloads nobody's page.
+    expect(body(globe, 'string address()')).toContain('if (gSound) live += ["sound=1"];')
+    // A face that refuses the new address puts the old sound back with
+    // everything else: the snapshot and its restore agree, field by field.
+    const fields = (globe.match(/return \[(gDataset[^\]]*)\];/)?.[1] ?? '').split(',').map((f) => f.trim())
+    expect(fields).toContain('gSound')
+    const restore = body(globe, 'restore(list s)')
+    fields.forEach((field, i) => expect(restore, field).toMatch(new RegExp(`${field} = llList2\\w+\\(s, ${i}\\);`)))
+    // And the docs name the command.
+    expect(globe).toMatch(/sound on\|off, telemetry on\|off/)
+    // In a table, where the README escapes the bar.
+    expect(readme).toMatch(/\/9 sound on\\?\|off/)
   })
 
   it('answer each kind of menu on its own channel', () => {
@@ -557,8 +629,635 @@ describe('second-life exhibit scripts', () => {
     expect(visitors).toContain('llTextBox(who, "Jump to where in the clip? Seconds, like 90, or minutes and seconds, like 1:30.", gDlgJump);')
     expect(body(visitors, 'turnMenu(key who)')).toContain('gDlgTurn);')
     expect(visitors).toMatch(/gDlgSets = gDlg \+ 1;\n\s+gDlgJump = gDlg \+ 2;\n\s+gDlgTurn = gDlg \+ 3;/)
+    // The node's menu is the menu script's, on channels of its own.
+    expect(body(menu, 'kindsMenu(key who, integer page)')).toContain('menu(who, text, b, gDlgKinds);')
+    expect(body(menu, 'livePage(key who, string body)')).toContain('menu(who, text, b, gDlgLive);')
+    for (const channel of ['gDlgKinds', 'gDlgLive']) expect(menu).toContain(`llListen(${channel}, "", NULL_KEY, "");`)
+    expect(menu).toMatch(/gDlgKinds = -4 - \(integer\)llFrand\(1000000000\.0\);\n\s+gDlgLive = gDlgKinds - 1;/)
     // Every channel the menus use stays negative, where no avatar can chat.
     expect(visitors).toMatch(/gDlg = -4 - /)
+  })
+})
+
+describe("the exhibit's dataset menu", () => {
+  const ID = (n: number) => `01KQG611HF8YXJNRBEHT0757${String(n).padStart(2, '0')}`
+
+  /** The node's real replies, from a catalog of datasets with the longest
+   *  titles and tags a page or the categories carry. */
+  async function served(): Promise<{ page: ExhibitPage; tags: ExhibitTags }> {
+    resetExhibitListForTests()
+    const sqlite = freshMigratedDb()
+    sqlite.prepare(`INSERT INTO node_identity (node_id, display_name, base_url, public_key, created_at)
+                    VALUES ('NODE000', 'T', 'https://t', 'k', ?)`).run(T)
+    sqlite.prepare(`INSERT INTO publishers (id, email, display_name, role, status, created_at)
+                    VALUES ('PUB001', 'p@t', 'P', 'admin', 'active', ?)`).run(T)
+    for (let i = 0; i < 12; i++) {
+      sqlite.prepare(`INSERT INTO datasets (id, slug, origin_node, title, abstract, format, data_ref, weight, visibility,
+                        is_hidden, schema_version, created_at, updated_at, published_at, publisher_id)
+                      VALUES (?, ?, 'NODE000', ?, 'A.', 'video/mp4', 'vimeo:1', 0, 'public', 0, 1, ?, ?, ?, 'PUB001')`)
+        .run(ID(i), `d-${i}`, `${'A long title '.repeat(15)}${i}`, T, T, T)
+      for (let j = 0; j < 3; j++) {
+        sqlite.prepare('INSERT INTO dataset_tags (dataset_id, tag) VALUES (?, ?)')
+          .run(ID(i), `${String(i * 3 + j).padStart(2, '0')}${' Category'.repeat(5)}`.slice(0, TAG_CAP))
+      }
+    }
+    const env = { CATALOG_DB: asD1(sqlite) }
+    const pageText = await (await getPage(makeCtx({ url: 'https://t/api/exhibit/v1/datasets?limit=9&offset=0&tag=', env }) as never)).text()
+    const tagsText = await (await getTags(makeCtx({ url: 'https://t/api/exhibit/v1/tags', env }) as never)).text()
+    return { page: JSON.parse(pageText) as ExhibitPage, tags: JSON.parse(tagsText) as ExhibitTags }
+  }
+
+  const listen = (): string => menu.slice(menu.indexOf('    listen(integer ch, string name, key who, string msg)'))
+  const kindsAnswer = (): string => listen().slice(listen().indexOf('if (ch == gDlgKinds)'), listen().indexOf('if (ch != gDlgLive) return;'))
+  const pageAnswer = (): string => listen().slice(listen().indexOf('if (ch != gDlgLive) return;'))
+
+  const opened = (): string => menu.slice(menu.indexOf('    link_message('), menu.indexOf('    http_response('))
+
+  it('is a script in a prim of its own, which the visitors script opens and hands back to', () => {
+    // The visitors script had no room for it, and in the globe's prim its
+    // web replies reached the info script too: two Stack-Heap Collisions
+    // in-world, 27 October. The visitors script keeps the switch and the
+    // hand-back; the info script never sees a page.
+    expect(visitors).not.toContain('kindsMenu')
+    expect(all(info, /"(\/api\/[^"]*)"/g)).toEqual(['/api/exhibit/v1/datasets/'])
+    expect(info).not.toContain('/api/exhibit/v1/tags')
+    expect(visitors).toContain('gLive = gMenu == [];')
+    expect(visitors).toContain('if (gLive) gMenu = DEFAULT_MENU;')
+    expect(visitors).toMatch(/if \(msg == BTN_DATASETS\)\n\s+\{\n(?:\s+\/\/.*\n)*\s+if \(!gLive\) \{ datasetsMenu\(who, 0\); return; \}\n(?:\s+\/\/.*\n)*\s+llMessageLinked\(LINK_SET, MSG_MENU_OPEN, gNode \+ "\\n" \+ gCategories \+ "\\n" \+ \(string\)unix\(\), who\);/)
+    // Datasets is offered only to a visitor who may act, so the menu
+    // script is opened only for one.
+    expect(visitors.indexOf("if (!mayAct(who)) { llRegionSayTo(who, 0, whyNot()); return; }\n\n        if (msg == BTN_DATASETS)")).toBeGreaterThan(-1)
+    // It says at once that it is there, before anything it can fail at,
+    // unless it is in the visitors script's own prim, where its replies
+    // would reach the info script, or asked too long ago.
+    expect(opened()).toMatch(/if \(n != MSG_MENU_OPEN \|\| sender == llGetLinkNumber\(\)\) return;\n\s+list w = llParseStringKeepNulls\(str, \["\\n"\], \[\]\);\n(?:\s+\/\/.*\n)*\s+if \(llGetListLength\(w\) > 2\)\n\s+if \(unix\(\) - \(integer\)llList2String\(w, 2\) >= OPEN_LATE\) return;\n(?:\s+\/\/.*\n)*\s+done\(id, "open"\);/)
+    expect(opened()).toMatch(/open\(id\);\n\s+\}\s*$/)
+    // What comes back: the main menu, the built-in datasets, or a choice,
+    // which the visitors script holds to the hold and any talk, and which
+    // is only ever a show.
+    const back = visitors.slice(visitors.indexOf('if (n == MSG_MENU_DONE)'), visitors.indexOf('if (n != MSG_STATE) return;'))
+    expect(back).toMatch(/gOpening = llDeleteSubList\(gOpening, o, o \+ 1\);\n\s+gNoMenu = FALSE;\n\s+if \(str == "open"\) return;/)
+    expect(back).toContain('if (str == "main") { mainMenu(id); return; }')
+    expect(back).toContain('if (str == "datasets") { datasetsMenu(id, 0); return; }')
+    expect(back).toMatch(/if \(llGetSubString\(str, 0, 4\) != "show "\) return;\n\s+if \(!mayAct\(id\)\) \{ llRegionSayTo\(id, 0, whyNot\(\)\); return; \}\n\s+ask\(id, str\);/)
+    expect(all(menu, /done\((?:who|id), "(\w+)/g).sort()).toEqual(['datasets', 'main', 'open', 'show'])
+    // The numbers are new, so a prim still holding the earlier build's
+    // menu relay can't take one message for the other.
+    expect(Object.values(messages(menu)).sort()).toEqual(['271008', '271009'])
+  })
+
+  it('gives the visitor the built-in datasets when the menu script never answers, and tells the owner once', () => {
+    const fallback = body(visitors, 'check()')
+    expect(fallback).toMatch(/while \(gOpening != \[\] && t - llList2Integer\(gOpening, 1\) >= MENU_WAIT\)\n\s+\{\n\s+key v = llList2Key\(gOpening, 0\);\n\s+gOpening = llDeleteSubList\(gOpening, 0, 1\);\n\s+if \(!gNoMenu\)\n\s+llOwnerSay\([^;]+;\n\s+gNoMenu = TRUE;\n\s+datasetsMenu\(v, 0\);/)
+    expect(fallback).toContain('see the README')
+    // One wait a visitor, and a bounded number in all.
+    const open = visitors.slice(visitors.indexOf('if (msg == BTN_DATASETS)'), visitors.indexOf('if (msg == BTN_PAUSE)'))
+    expect(open).toMatch(/if \(o != -1\) gOpening = llDeleteSubList\(gOpening, o, o \+ 1\);\n\s+gOpening \+= \[who, unix\(\)\];\n\s+if \(llGetListLength\(gOpening\) > CTX_MAX \* 2\) gOpening = llDeleteSubList\(gOpening, 0, 1\);/)
+    // It is checked every TICK, so a visitor whose menu script is missing
+    // waits at most MENU_WAIT + TICK seconds.
+    const wait = Number(constant(visitors, 'integer', 'MENU_WAIT'))
+    expect(wait + Number(constant(visitors, 'float', 'TICK'))).toBeLessThanOrEqual(11)
+    // Both menus only in a region slower than the margin: the menu script
+    // answers only while the request is under OPEN_LATE whole seconds old,
+    // so before OPEN_LATE seconds have passed (and for at least OPEN_LATE
+    // - 1, room for a busy region), and the visitors script gives its own
+    // at MENU_WAIT whole seconds, at or after floor(asked) + MENU_WAIT.
+    // Both read the region's clock, so an answer has over MENU_WAIT -
+    // OPEN_LATE seconds to arrive first.
+    const late = Number(constant(menu, 'integer', 'OPEN_LATE'))
+    expect(late).toBeGreaterThanOrEqual(3)
+    expect(wait - late).toBeGreaterThanOrEqual(3)
+    for (let asked = 0; asked < 1; asked += 0.05) {
+      for (let answered = asked; answered < asked + 4; answered += 0.05) {
+        if (Math.floor(answered) - Math.floor(asked) >= late) continue // not answered
+        for (let check = asked; check < asked + 6; check += 0.05) {
+          if (Math.floor(check) - Math.floor(asked) >= wait) {
+            expect(check - answered, `${asked} ${answered} ${check}`).toBeGreaterThan(wait - late - 1e-9)
+            break
+          }
+        }
+      }
+    }
+  })
+
+  it("answers a menu for as long as the docs say, and as nobody else's", () => {
+    // Five minutes from the last menu shown, though the timer that forgets
+    // it runs once a minute.
+    expect(Number(constant(menu, 'integer', 'CTX_TTL'))).toBe(300)
+    expect(listen()).toContain('if (at == -1 || at % 3 != 0 || unix() - llList2Integer(gCtx, at + 2) > CTX_TTL) return;')
+    expect(readme.replace(/\s+/g, ' ')).toContain('for the five minutes the menu answers')
+    // Headed with the globe's name, as the visitors script's menus are.
+    expect(opened()).toMatch(/string name = llGetLinkName\(sender\);\n\s+if \(llGetObjectName\(\) != name\) llSetObjectName\(name\);/)
+  })
+
+  it('tells the owner once why the node gave no menu, and gives the visitor the built-in five', () => {
+    const failed = body(menu, 'liveFailed(key who, string why)')
+    expect(failed).toMatch(
+      /if \(!gTold\)\n\s+llOwnerSay\([^;]+;\n\s+gTold = TRUE;\n\s+done\(who, "datasets"\);/,
+    )
+    // A visitor sent to the last page and then failed isn't held as sent,
+    // so their next page past the end is asked for again.
+    expect(failed).toMatch(/integer asked = llListFindList\(gRefetched, \[who\]\);\n\s+if \(asked != -1\) gRefetched = llDeleteSubList\(gRefetched, asked, asked\);/)
+    // Until the node gives a menu again, and of categories it lacks once a
+    // settings notecard, not at every refresh of them; and of a new node's
+    // or new categories' trouble.
+    expect(body(menu, 'livePage(key who, string body)')).toContain('gTold = FALSE;')
+    expect(body(menu, 'tagsRead(key who, string body)')).toContain('if (kinds() != []) gTold = FALSE;')
+    expect(opened()).toMatch(/gKindsAt = unix\(\);\n\s+gTold = FALSE;/)
+    expect(opened()).toMatch(/if \(node != gNode\)\n\s+\{[^}]*gTold = FALSE;/)
+    // Every failure has its reason: no node yet, a request throttled, a
+    // reply that isn't JSON, and one that isn't a menu this script reads.
+    const failure = body(menu, 'string failure(integer status)')
+    for (const status of ['-1', '0', '200', '415']) expect(failure).toContain(`status == ${status}`)
+    const read = body(menu, 'read(key who, string path, integer budget)')
+    expect(read).toContain('if (gNode == "") { liveFailed(who, failure(0)); return; }')
+    expect(read).toContain('if (req == NULL_KEY) { liveFailed(who, failure(-1)); return; }')
+    // The owner's categories narrow it, by name and in any case, "All
+    // datasets" among them if named.
+    const kinds = body(menu, 'list kinds()')
+    expect(kinds).toContain('if (llToLower(t) == c && llListFindList(out, [t]) == -1) out += [t];')
+    expect(kinds).toContain('if (c == llToLower(BTN_ALL) && llListFindList(out, [""]) == -1) out += [""];')
+  })
+
+  it('reads the node at addresses it takes, one read at a time a visitor, within each budget', () => {
+    const read = body(menu, 'read(key who, string path, integer budget)')
+    expect(read).toContain('key req = llHTTPRequest(gNode + path, [HTTP_METHOD, "GET", HTTP_ACCEPT, "application/json",')
+    expect(read).toContain('HTTP_BODY_MAXLENGTH, budget + 1]')
+    expect(body(menu, 'open(key who)')).toContain('read(who, "/api/exhibit/v1/tags", TAGS_BYTES);')
+    expect(body(menu, 'askPage(key who, string tag, integer offset)')).toContain(
+      'read(who, "/api/exhibit/v1/datasets?limit=9&offset=" + (string)offset + "&tag=" + llEscapeURL(tag), PAGE_BYTES);',
+    )
+    // A reply of exactly the budget can't read as cut.
+    expect(Number(constant(menu, 'integer', 'PAGE_BYTES'))).toBe(PAGE_BUDGET)
+    expect(Number(constant(menu, 'integer', 'TAGS_BYTES'))).toBe(TAGS_BUDGET)
+    // Nine a page, which the node pages that far, and nine numbers with
+    // three moves are a whole menu.
+    const page = Number(constant(menu, 'integer', 'PAGE'))
+    expect(page).toBe(9)
+    expect(page).toBeLessThanOrEqual(PAGE_MAX_LIMIT)
+    expect(page + 3).toBeLessThanOrEqual(12)
+    // llEscapeURL writes a space as %20 and anything past ASCII as its
+    // UTF-8 bytes, which the node reads back as the tag it listed.
+    for (const query of ['limit=9&offset=0&tag=', 'limit=9&offset=27&tag=Snow%20and%20Ice', `limit=9&offset=9&tag=${encodeURIComponent('海'.repeat(13))}`]) {
+      expect('message' in parsePageQuery(new URLSearchParams(query)), query).toBe(false)
+    }
+    // One read in flight a visitor, and a bounded number in all. A menu
+    // shown without a read forgets the one in flight too, or its reply
+    // would land over the menu the visitor has by then.
+    expect(body(menu, 'drop(key who)')).toMatch(/integer at = llListFindList\(gReqs, \[who\]\);\n\s+if \(at != -1 && at % 2 == 1\) gReqs = llDeleteSubList\(gReqs, at - 1, at\);/)
+    expect(read).toMatch(/remember\(who, pageOf\(who\)\);\n\s+drop\(who\);/)
+    expect(body(menu, 'kindsMenu(key who, integer page)')).toMatch(/\{\n(?:\s+\/\/.*\n)*\s+drop\(who\);/)
+    expect(listen()).toContain('if (msg == BTN_MENU) { drop(who); done(who, "main"); return; }')
+    expect(read).toContain('while (llGetListLength(gReqs) > CTX_MAX * 2) gReqs = llDeleteSubList(gReqs, 0, 1);')
+    // A reply this script didn't ask for is set aside at once; so is one
+    // for a menu that has closed.
+    const reply = menu.slice(menu.indexOf('    http_response('), menu.indexOf('    listen('))
+    expect(reply).toMatch(/integer at = llListFindList\(gReqs, \[req\]\);\n\s+if \(at == -1 \|\| at % 2 != 0\) return;/)
+    expect(reply).toMatch(/at = llListFindList\(gCtx, \[who\]\);\n\s+if \(at == -1 \|\| at % 3 != 0\) return;/)
+    expect(info).toMatch(/http_response\(key req, integer status, list meta, string body\)\n\s+\{\n\s+if \(req != gReq\) return;/)
+    // In the globe's prim only the info script has a handler: every reply
+    // reaches every script there that has one.
+    expect(globe).not.toContain('http_response')
+    expect(visitors).not.toContain('http_response')
+  })
+
+  it("reads only what the node's replies carry", async () => {
+    const { page, tags } = await served()
+    // Every value read is a value in a real reply, an index the script
+    // counts with read at 0.
+    const paths = all(menu, /(?:value\(body, |llJsonGetValue\(body, )\[([^\]]*)\]/g)
+    expect(paths.length).toBeGreaterThan(8)
+    for (const path of paths) {
+      const steps = path.split(',').map((s) => s.trim()).map((s) => (s.startsWith('"') ? JSON.parse(s) : 0))
+      const from = steps[0] === 'tags' ? tags : page
+      let value: unknown = from
+      for (const step of steps) value = (value as Record<string | number, unknown>)[step]
+      expect(value, path).toBeDefined()
+      expect(typeof value === 'object' && value !== null, `${path} is a value`).toBe(false)
+    }
+    // No more than a reply can hold, which the node never exceeds.
+    expect(body(menu, 'tagsRead(key who, string body)')).toContain(`while (i < ${TAGS_MAX} && `)
+    expect(body(menu, 'tagsRead(key who, string body)')).toContain(`if (t != "" && llStringLength(t) <= ${TAG_CAP})`)
+    expect(page.datasets.length).toBe(9)
+    expect(tags.tags.length).toBeGreaterThan(9)
+  })
+
+  it('keeps a few pages as the node sent them, for menus still open, and measures what they cost', () => {
+    expect(Number(constant(menu, 'integer', 'LIVE_PAGES'))).toBe(4)
+    // A page within its 1 KB budget, at two bytes a character: 8 KB at most.
+    expect(Number(constant(menu, 'integer', 'LIVE_PAGES')) * PAGE_BUDGET * 2).toBeLessThanOrEqual(8192)
+    const live = body(menu, 'livePage(key who, string body)')
+    expect(live).toContain('gPages += [who, tag, from, body];')
+    expect(live).toContain('while (llGetListLength(gPages) > LIVE_PAGES * 4) gPages = llDeleteSubList(gPages, 0, 3);')
+    // Ids the globe takes, no more than a page holds, each id and title
+    // within the node's caps, or it isn't a page.
+    expect(live).toMatch(/while \(ok && n <= PAGE && llJsonValueType\(body, \["datasets", n\]\) != JSON_INVALID\)\n\s+\{\n\s+string id = value\(body, \["datasets", n, "id"\]\);\n\s+ok = isId\(id\) && llStringLength\(id\) <= (\d+) && llStringLength\(value\(body, \["datasets", n, "title"\]\)\) <= (\d+);/)
+    const [, idCap, titleCap] = live.match(/llStringLength\(id\) <= (\d+) && llStringLength\(value\(body, \["datasets", n, "title"\]\)\) <= (\d+)/) ?? []
+    // The node's caps are bytes, and a character takes at least one.
+    expect(Number(idCap)).toBe(PAGE_CAPS.id)
+    expect(Number(titleCap)).toBe(PAGE_CAPS.title)
+    expect(live).toContain('if (!ok || n > PAGE) { liveFailed(who, failure(200)); return; }')
+    // A page goes with the menu that showed it, and so does being sent to
+    // the last page.
+    expect(menu).toContain('if (llListFindList(gCtx, [llList2Key(gPages, i)]) == -1) gPages = llDeleteSubList(gPages, i, i + 3);')
+    expect(menu).toContain('if (llListFindList(gCtx, [llList2Key(gRefetched, i)]) == -1) gRefetched = llDeleteSubList(gRefetched, i, i);')
+    // A read keeps the visitor's menu answerable until its reply.
+    expect(body(menu, 'read(key who, string path, integer budget)')).toContain('remember(who, pageOf(who));')
+    // /9 memory says the most it took, as the other scripts do.
+    expect(menu).toMatch(/llScriptProfiler\(PROFILE_SCRIPT_MEMORY\);\n[\s\S]*?llScriptProfiler\(PROFILE_NONE\);\n\s+if \(llGetSPMaxMemory\(\) > gPeak\) gPeak = llGetSPMaxMemory\(\);/)
+    expect(menu).toContain('KB while reading the node for a menu')
+    // Text never asks fit for less than nothing, which would never end.
+    expect(body(menu, 'string fit(string s, integer max)')).toMatch(/\{\n(?:\s+\/\/.*\n)*\s+if \(max < 1\) return "";/)
+  })
+
+  it('answers every button with the row or category printed beside it, on every page, paging round at both ends', () => {
+    // The expressions the script numbers, answers and pages with, pinned
+    // here and then run: nothing else in this file executes them.
+    const live = body(menu, 'livePage(key who, string body)')
+    const kinds = body(menu, 'kindsMenu(key who, integer page)')
+    const pageAns = pageAnswer()
+    const kindsAns = kindsAnswer()
+    expect(live).toContain('string number = (string)(offset + i + 1);')
+    expect(pageAns).toContain('integer row = (integer)msg - 1 - offset;')
+    expect(pageAns).toContain('if ((string)(row + 1 + offset) != msg || row < 0 || llJsonValueType(body, ["datasets", row]) == JSON_INVALID) return;')
+    expect(pageAns).toContain('done(who, "show " + value(body, ["datasets", row, "id"]) + " " + value(body, ["datasets", row, "title"]));')
+    expect(pageAns).toMatch(/offset \+= PAGE;\n\s+if \(offset >= total\) offset = 0;/)
+    expect(pageAns).toMatch(/offset -= PAGE;\n\s+if \(offset < 0\) offset = \(total - 1\) \/ PAGE \* PAGE;/)
+    expect(kinds).toContain('string number = (string)(page * PAGE + i + 1);')
+    expect(kindsAns).toContain('integer i = (integer)msg - 1;')
+    expect(kindsAns).toContain('i += page * PAGE;')
+    expect(kindsAns).toContain('if (i >= 0 && i < llGetListLength(k)) askPage(who, llList2String(k, i), 0);')
+
+    const PAGE = 9
+    /** The page answer, as the pinned lines run it: the row shown, or null. */
+    const choose = (rows: string[], offset: number, msg: string): string | null => {
+      const row = (Number.parseInt(msg, 10) || 0) - 1 - offset
+      if (String(row + 1 + offset) !== msg || row < 0 || row >= rows.length) return null
+      return rows[row]
+    }
+    for (const total of [1, 8, 9, 10, 17, 18, 19, 27, 175]) {
+      const rowsAll = Array.from({ length: total }, (_, k) => `row ${k}`)
+      const seen: string[] = []
+      let offset = 0
+      for (let step = 0; step < Math.ceil(total / PAGE); step++) {
+        const rows = rowsAll.slice(offset, offset + PAGE)
+        for (let i = 0; i < rows.length; i++) {
+          // Printed beside the button, and what the button answers.
+          expect(choose(rows, offset, String(offset + i + 1)), `${total}: ${offset + i + 1}`).toBe(rows[i])
+          seen.push(rows[i])
+        }
+        // A number from another page of the same category answers nothing.
+        expect(choose(rows, offset, String(offset + rows.length + 1))).toBeNull()
+        if (offset > 0) expect(choose(rows, offset, String(offset))).toBeNull()
+        expect(choose(rows, offset, '01')).toBeNull()
+        offset += PAGE
+        if (offset >= total) offset = 0
+      }
+      // Next visits every row once and comes back to the first page.
+      expect(seen).toEqual(rowsAll)
+      expect(offset).toBe(0)
+      // Previous from the first page goes to the last, which holds 1 to 9.
+      const last = Math.trunc((total - 1) / PAGE) * PAGE
+      expect(total - last).toBeGreaterThan(0)
+      expect(total - last).toBeLessThanOrEqual(PAGE)
+    }
+    // Categories: a number counts from the first category on every page.
+    const k = Array.from({ length: 23 }, (_, n) => `cat ${n}`)
+    for (let page = 0; page * PAGE < k.length; page++) {
+      for (let i = 0; i < PAGE && page * PAGE + i < k.length; i++) {
+        expect(k[Number.parseInt(String(page * PAGE + i + 1), 10) - 1]).toBe(k[page * PAGE + i])
+      }
+    }
+  })
+
+  it('shows categories again, rather than answering, once they have changed since they were shown', () => {
+    const ans = kindsAnswer()
+    expect(ans).toContain('if (gKindsAt > llList2Integer(gCtx, at + 2)) { kindsMenu(who, page); return; }')
+    expect(ans.indexOf('gKindsAt >')).toBeLessThan(ans.indexOf('askPage('))
+    // They change when the node's or the owner's do, and only then.
+    expect(body(menu, 'tagsRead(key who, string body)')).toContain('if (llDumpList2String(kinds(), "\\n") != before) gKindsAt = gTagsAt;')
+    expect(opened()).toMatch(/if \(cats != gCats\)\n\s+\{\n\s+gCats = cats;[\s\S]*?gKindsAt = unix\(\);/)
+  })
+
+  it("says when the list changed between two pages of a category, and doesn't start over", () => {
+    const live = body(menu, 'livePage(key who, string body)')
+    expect(live).toMatch(
+      /if \(llList2String\(gPages, at \+ 1\) == tag && from != "" && was != "" && was != from\)\n\s+text \+= " A dataset may have moved between pages since the last one.";/,
+    )
+    // Only while paging: the categories forget the page a visitor had.
+    expect(body(menu, 'kindsMenu(key who, integer page)')).toContain('if (at != -1 && at % 4 == 0) gPages = llDeleteSubList(gPages, at, at + 3);')
+    // Two isolates can hold lists a minute apart: a menu that started over
+    // at every change might never page forward. Only a page past the end,
+    // as one can be once the catalog has shrunk, asks for another: the
+    // last, once a visitor, so a node echoing other offsets isn't asked
+    // for ever.
+    expect(all(live, /askPage\(who, (.*)\);/g)).toEqual(['tag, (total - 1) / PAGE * PAGE'])
+    expect(live).toContain('integer asked = llListFindList(gRefetched, [who]);')
+    expect(live).toMatch(/if \(total > 0 && asked == -1\)\n\s+\{\n\s+gRefetched \+= \[who\];/)
+    // A category emptied since it was listed goes back to the categories,
+    // unless it was the only one, which would open it again.
+    expect(live).toContain('if (tag != "" && llGetListLength(kinds()) > 1)')
+  })
+
+  it('names a category button only when every name on its page fits one whole and none repeats', () => {
+    const named = body(menu, 'integer named(list tags)')
+    expect(named).toContain('list seen = [BTN_PREV, BTN_NEXT, BTN_MENU];')
+    expect(named).toContain('if (label(l) != l || llListFindList(seen, [l]) != -1) return FALSE;')
+    // The menu and its answer decide it from the same page of the same list.
+    expect(body(menu, 'kindsMenu(key who, integer page)')).toContain('list tags = llList2List(k, page * PAGE, page * PAGE + PAGE - 1);')
+    expect(body(menu, 'kindsMenu(key who, integer page)')).toContain('integer byName = named(tags);')
+    const ans = kindsAnswer()
+    expect(ans).toContain('list tags = llList2List(k, page * PAGE, page * PAGE + PAGE - 1);')
+    expect(ans).toContain('if (named(tags))')
+    // "All datasets" is the empty tag, so a category of that name is
+    // another button, and one alone opens at once.
+    expect(body(menu, 'list kinds()')).toContain('if (gCategories == []) return [""] + tags;')
+    expect(body(menu, 'kindsMenu(key who, integer page)')).toContain('if (count == 1) { askPage(who, llList2String(k, 0), 0); return; }')
+  })
+
+  it('takes the node and the categories from the visitors script each time it opens, and forgets a node it no longer shows', () => {
+    // A script reads notecards from its own prim alone, so the settings
+    // notecard's categories come with the node, as the visitors script
+    // read them.
+    expect(menu).not.toMatch(/llGetNotecardLine|llGetInventory|dataserver/)
+    expect(body(visitors, 'setting(string line)')).toMatch(
+      /if \(name == "categories"\)\n\s+\{\n\s+gNewCategories = "";\n\s+if \(eq < llStringLength\(line\) - 1\) gNewCategories = llStringTrim\(llGetSubString\(line, eq \+ 1, -1\), STRING_TRIM\);\n\s+return;/,
+    )
+    expect(body(visitors, 'nextCard()')).toContain('gCategories = gNewCategories;')
+    expect(body(visitors, 'readCards()')).toContain('gNewCategories = "";')
+    const state = opened()
+    expect(state).toContain('list w = llParseStringKeepNulls(str, ["\\n"], []);')
+    expect(state).toContain('string node = llList2String(w, 0);')
+    expect(state).toContain('string cats = llList2String(w, 1);')
+    // The node's categories, pages and reads are of the node they came from.
+    expect(state).toMatch(/if \(node != gNode\)\n\s+\{\n\s+gTagsAt = 0;\n\s+gTags = \[\];\n\s+gPages = \[\];\n\s+gReqs = \[\];\n\s+gRefetched = \[\];/)
+    // A state without a node hands over none, which the menu reports.
+    expect(visitors).toMatch(/gNode = llJsonGetValue\(str, \["node"\]\);\n\s+if \(gNode == JSON_INVALID\) gNode = "";/)
+    // Names between commas, trimmed, none empty.
+    expect(state).toContain('list parts = llParseString2List(cats, [","], []);')
+    expect(state).toContain('if (c != "") gCategories += [c];')
+  })
+})
+
+/** An LSL integer: 32 bits, signed. */
+function int32(value: number): number {
+  if (!Number.isInteger(value) || value < -(2 ** 31) || value > 2 ** 31 - 1) {
+    throw new RangeError(`${value} is not an LSL integer`)
+  }
+  return value
+}
+
+/**
+ * What the translated statements call: LSL's, with every integer checked.
+ * llRound and llFloor take a float, so their argument is rounded to 32
+ * bits as LSL rounds it.
+ */
+const LSL = {
+  int32,
+  // A product of two integers, which LSL would wrap past 32 bits.
+  mul: (a: number, b: number): number => int32(a * b),
+  round: (x: number): number => int32(Math.round(Math.fround(x))),
+  floor: (x: number): number => int32(Math.floor(Math.fround(x))),
+}
+
+/** The left and right of the products allowed to stay unchecked: floats'. */
+const FLOAT_TIMES_LEFT = /(?:\bgRate|\bf|\)) $/
+const FLOAT_TIMES_RIGHT = /^ (?:1000\.0|1000000\.0|lsl\.floor\()/
+
+/**
+ * Translates the statements of a whole-number LSL function into JS. Every
+ * value given to an integer, and every product of two integers, is
+ * checked against 32 bits rather than wrapped. Floats are rounded to 32
+ * bits where LSL's types force it (declarations, casts, and llRound's and
+ * llFloor's arguments); a step in between runs wider, as Mono may run it.
+ * It knows only what the scripts' clock arithmetic uses, and fails closed:
+ * a product it can't tell is a float's throws rather than going unchecked.
+ */
+function translate(statements: string): string {
+  const js = statements
+    .replace(/\/\/.*$/gm, '')
+    .replace(/\b(?:(integer|float) )?([A-Za-z_]\w*) (\+=|-=|=) ([^;]+);/g, (_m, type: string | undefined, name: string, op: string, value: string) => {
+      if (type === 'integer') return `let ${name} = lsl.int32(${value});`
+      if (type === 'float') return `let ${name} = Math.fround(${value});`
+      if (op === '=') return `${name} = lsl.int32(${value});`
+      return `${name} = lsl.int32(${name} ${op[0]} (${value}));`
+    })
+    // Integer times integer: names and whole literals, not a float's
+    // literal (1000.0) nor a call's name.
+    .replace(/\b([a-z]\w*|\d+) \* ([a-z]\w*|\d+)\b(?![.(])/g, 'lsl.mul($1, $2)')
+    .replace(/llList2Integer\(t, (\d)\)/g, 't[$1]')
+    .replace(/\(float\)(\w+)/g, 'Math.fround($1)')
+    .replace(/\bllRound\(/g, 'lsl.round(')
+    .replace(/\bllFloor\(/g, 'lsl.floor(')
+  for (let i = js.indexOf('*'); i !== -1; i = js.indexOf('*', i + 1)) {
+    if (!FLOAT_TIMES_LEFT.test(js.slice(0, i)) || !FLOAT_TIMES_RIGHT.test(js.slice(i + 1))) {
+      throw new Error(`a product the translation can't check: ${js.slice(Math.max(0, i - 20), i + 20)}`)
+    }
+  }
+  return js
+}
+
+type LoopUs = (now: [number, number], d: number, clock: {
+  gPos: number, gAtS: number, gAtMs: number, gRate: number, gPaused: number
+}) => number
+
+/** One script's loopUs, runnable. */
+function loopUsOf(script: string): LoopUs {
+  const source = body(script, 'integer loopUs(list t, integer d)')
+  const run = new Function('t', 'd', 'gPos', 'gAtS', 'gAtMs', 'gRate', 'gPaused', 'lsl',
+    translate(source.slice(source.indexOf('{') + 1)))
+  return (now, d, c) => run(now, d, Math.fround(c.gPos), c.gAtS, c.gAtMs, Math.fround(c.gRate), c.gPaused, LSL)
+}
+
+/** Where the clip is, in microseconds round the loop, worked exactly. */
+function exactUs(now: [number, number], d: number, c: Parameters<LoopUs>[2]): number {
+  const D = BigInt(d)
+  let us = BigInt(Math.round(c.gPos * 1e6))
+  if (!c.gPaused) {
+    const ms = BigInt(now[0] - c.gAtS) * 1000n + BigInt(now[1] - c.gAtMs)
+    us += ms * BigInt(Math.round(c.gRate * 1000))
+  }
+  return Number(((us % D) + D) % D)
+}
+
+describe("the exhibit's clip clock", () => {
+  const SIGNATURE = 'integer loopUs(list t, integer d)'
+  const loopUs = loopUsOf(globe)
+  // An anchor in October 2026, and the node's clips: 1.7 s (Drought), 4.3 s
+  // (Ocean Circulation), a Vimeo stream's 12.1 and 143.766672, the node's
+  // longest at 717, and the longest the info script keeps.
+  const AT: [number, number] = [1_792_500_000, 640]
+  const LENGTHS = [1_700_000, 4_333_333, 12_100_000, 143_766_672, 717_033_333, 2_146_999_999]
+  const RATES = [0.084, 0.25, 1, 2.5, 4, 12.8]
+  const DAY = 86_400
+
+  it('is one copy in the globe and info scripts', () => {
+    expect(body(info, SIGNATURE)).toBe(body(globe, SIGNATURE))
+  })
+
+  it('is exact to the microsecond however long the globe has played, at any rate, in 32-bit integers', () => {
+    // A float lost about 10 ms a day of play at 1x, a third of a second a
+    // month, and seconds at a higher rate. Ten years keeps short of 2038,
+    // when Unix seconds outgrow an LSL integer.
+    for (const d of LENGTHS) {
+      for (const gRate of RATES) {
+        // Some land on a millisecond below the anchor's, which borrows a second.
+        for (const [s, ms] of [[0, 0], [0, 1], [1, 360], [DAY, 359], [30 * DAY, 0], [365 * DAY + 7, 999], [3653 * DAY, 123]]) {
+          const now: [number, number] = [AT[0] + s + Math.floor((AT[1] + ms) / 1000), (AT[1] + ms) % 1000]
+          const clock = { gPos: 0, gAtS: AT[0], gAtMs: AT[1], gRate, gPaused: 0 }
+          expect(loopUs(now, d, clock), `${d} us at ${gRate}x after ${s} s ${ms} ms`).toBe(exactUs(now, d, clock))
+        }
+      }
+    }
+  })
+
+  it("adds the time since the anchor to the anchor's own position", () => {
+    // Positions a float holds exactly, so the reference is exact too.
+    for (const gPos of [0.5, 3.25, 11.875]) {
+      const clock = { gPos, gAtS: AT[0], gAtMs: AT[1], gRate: 2.5, gPaused: 0 }
+      const now: [number, number] = [AT[0] + 9 * DAY, 17]
+      expect(loopUs(now, 12_100_000, clock)).toBe(exactUs(now, 12_100_000, clock))
+    }
+  })
+
+  it('wraps an anchor set past the loop before it counts in microseconds', () => {
+    // As by a jump before the clip's length was known: 99999.5 s is past
+    // what an integer holds in microseconds, and about as far as the globe
+    // jumps. Wrapped in a float, it lands within the float's error in the
+    // clip's length times the loops. Under 5 ms with the products as wide
+    // as this translation runs them, under 8 ms with each rounded to 32
+    // bits (reckoned in review across the node's lengths): Mono doesn't
+    // say which, and either is under a frame.
+    expect(body(globe, 'act(key who, integer owner, string msg)')).toContain('if (to < 0.0 || to > 100000.0)')
+    for (const d of [1_700_000, 12_100_000, 717_033_333]) {
+      const clock = { gPos: 99_999.5, gAtS: AT[0], gAtMs: AT[1], gRate: 1, gPaused: 0 }
+      const now: [number, number] = [AT[0] + 3, AT[1]]
+      const got = loopUs(now, d, clock)
+      expect(got).toBeGreaterThanOrEqual(0)
+      expect(got).toBeLessThan(d)
+      const off = Math.abs(got - exactUs(now, d, clock))
+      expect(Math.min(off, d - off)).toBeLessThan(8_000)
+    }
+  })
+
+  it('takes nothing the translation can\'t check', () => {
+    // A product that leaves 32 bits in LSL but not in a JS double would
+    // otherwise pass: these each throw at translation.
+    for (const product of ['p = (p + (a * (1000 * r)) % d) % d;', 'p = (p + (a*1000*r) % d) % d;', 'p = (p + a * K * r) % d;']) {
+      expect(() => translate(product), product).toThrow(/can't check/)
+    }
+  })
+
+  it('counts a region clock behind the anchor backwards, round the loop', () => {
+    const clock = { gPos: 2, gAtS: AT[0], gAtMs: AT[1], gRate: 1, gPaused: 0 }
+    const now: [number, number] = [AT[0] - 5, 100]
+    expect(loopUs(now, 4_333_333, clock)).toBe(exactUs(now, 4_333_333, clock))
+  })
+
+  it('holds a paused clip where it was paused, however long ago', () => {
+    const clock = { gPos: 3.25, gAtS: AT[0], gAtMs: AT[1], gRate: 4, gPaused: 1 }
+    expect(loopUs([AT[0] + 400 * DAY, 5], 12_100_000, clock)).toBe(3_250_000)
+  })
+
+  it('reads the length from the card in microseconds, and tells the globe, which keeps it for that dataset alone', () => {
+    const card = body(info, 'card(string b, integer cut)')
+    const list = 'list x = llParseString2List(value(b, "exactDuration"), ["."], []);'
+    const from = card.indexOf(list) + list.length
+    const parse = card.slice(from, card.indexOf(';', card.indexOf('if (w >= 0', from)) + 1)
+    // LSL's (integer) of a string reads its leading digits, and 0 for none.
+    const js = translate(parse
+      .replace(/\(integer\)llList2String\(x, 0\)/, '(Number.parseInt(x[0] ?? "", 10) || 0)')
+      .replace('llList2String(x, 0) == (string)w', '(x[0] ?? "") === String(w)')
+      .replace('(integer)llGetSubString(llList2String(x, 1) + "000000", 0, 5)',
+        '(Number.parseInt(((x[1] ?? "") + "000000").slice(0, 6), 10) || 0)')
+      .replace(/\bgLen\b/g, 'len'))
+    expect(js).not.toMatch(/\bll[A-Z]|\(integer\)/)
+    // llParseString2List drops the empty pieces.
+    const run = new Function('value', 'lsl',
+      `const x = value.split(".").filter((p) => p !== "");\nlet len;\n${js}\nreturn len;`)
+    const micros = (value: string): number => run(value, LSL)
+    expect(micros('0')).toBe(0)
+    expect(micros('12')).toBe(12_000_000)
+    expect(micros('12.1')).toBe(12_100_000)
+    expect(micros('0.5')).toBe(500_000)
+    expect(micros('143.766672')).toBe(143_766_672)
+    expect(micros('717.033333')).toBe(717_033_333)
+    expect(micros('2146.999999')).toBe(2_146_999_999)
+    // Past what an integer holds, and anything that isn't a plain length:
+    // (integer)"-0" is 0, which alone would let "-0.5" read as half a second.
+    expect(micros('2147')).toBe(0)
+    expect(micros('-1')).toBe(0)
+    expect(micros('-0.5')).toBe(0)
+    expect(micros('1e3')).toBe(0)
+    expect(micros('')).toBe(0)
+    expect(card).toContain('if (gLen > 0) llMessageLinked(LINK_THIS, MSG_CONTROL, "length " + (string)gLen + " " + gDataset, NULL_KEY);')
+
+    // The globe takes it only from the scripts, and only for the dataset
+    // it names, so a length for one dataset never times another.
+    const act = body(globe, 'act(key who, integer owner, string msg)')
+    expect(act).toMatch(/if \(cmd == "length" && who == NULL_KEY\)\n\s+\{\n\s+gLen = \(integer\)arg;\n\s+gLenFor = llList2String\(w, 2\);\n\s+return;/)
+    expect(body(globe, 'float position(list t)')).toContain('if (gLen > 0 && gLenFor == gDataset) return (float)loopUs(t, gLen) / 1000000.0;')
+    expect(body(info, 'string date()')).toContain('float f = (float)loopUs(now(), gLen) / (float)gLen;')
+  })
+
+  it('tells the globe there is no length each time it starts on a dataset, so one shown again never keeps an old one', () => {
+    // Found in review (#504): A's card gives a length, the globe shows
+    // Earth, then A again, and A's card now gives none, its media
+    // replaced by a single file, or the read failing. The globe keeps a
+    // length by the dataset it names, so unless told otherwise it would
+    // wrap A's moves on the old one while the page loops on another.
+    const none = 'llMessageLinked(LINK_THIS, MSG_CONTROL, "length 0 " + gDataset, NULL_KEY);'
+    const forget = body(info, 'forget()')
+    const tellsNone = forget.includes(none)
+    expect(tellsNone).toBe(true)
+    // forget() runs whenever the dataset isn't the one last read (pinned
+    // above), which Earth between two showings of A makes true twice.
+
+    // The exchange as the scripts make it: forget() and card() send what
+    // is pinned here and above, and the globe keeps it as its handler does.
+    const state = { dataset: '', len: 0, lenFor: '' }
+    const take = (msg: string) => {
+      const w = msg.split(' ').filter(p => p !== '')
+      state.len = Number.parseInt(w[1] ?? '', 10) || 0
+      state.lenFor = w[2] ?? ''
+    }
+    const show = (id: string, cardLen: number) => {
+      state.dataset = id
+      if (tellsNone) take(`length 0 ${id}`)
+      if (cardLen > 0) take(`length ${cardLen} ${id}`)
+    }
+    const exact = () => state.len > 0 && state.lenFor === state.dataset
+    show('A', 12_100_000)
+    expect(exact()).toBe(true)
+    show('', 0)
+    expect(exact()).toBe(false)
+    show('A', 0)
+    expect(exact()).toBe(false)
+    show('A', 143_766_672)
+    expect(state).toEqual({ dataset: 'A', len: 143_766_672, lenFor: 'A' })
+  })
+
+  it('moves the anchor without losing the time it takes to', () => {
+    // One reading of the clock, so the clip doesn't skip the moment
+    // between reading where it is and moving the anchor there.
+    const reanchor = body(globe, 'reanchor()')
+    expect(reanchor.match(/now\(\)/g)).toHaveLength(1)
+    expect(reanchor).toContain('gPos = position(t);')
+    const act = body(globe, 'act(key who, integer owner, string msg)')
+    const move = act.slice(act.indexOf('if (cmd == "jump" || cmd == "restart" || cmd == "nudge")'), act.indexOf('if (cmd == "tilt")'))
+    expect(move.match(/now\(\)/g)).toHaveLength(1)
+    expect(move).not.toContain('anchor();')
+    expect(move).toContain('to = position(t) + (float)arg;')
+    expect(move).toMatch(/gAtS = llList2Integer\(t, 0\);\n\s+gAtMs = llList2Integer\(t, 1\);/)
+  })
+
+  it('wraps a jump or a nudge round the loop once the length is known, and never before the start without one', () => {
+    // So a copy looping on a length of its own is brought back into step
+    // by a move as by a pause, and back past the start goes to the end.
+    const act = body(globe, 'act(key who, integer owner, string msg)')
+    expect(act).toMatch(
+      /if \(gLen > 0 && gLenFor == gDataset\) to -= len \* \(float\)llFloor\(to \/ len\);\n\s+else if \(to < 0\.0\) to = 0\.0;\n\s+gPos = to;/,
+    )
   })
 })
 

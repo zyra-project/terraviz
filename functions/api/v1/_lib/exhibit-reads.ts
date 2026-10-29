@@ -71,7 +71,8 @@ export const PAGE_MAX_LIMIT = 9
 export const PAGE_MAX_OFFSET = 100_000
 export const TAGS_MAX = 30
 
-/** A card's caps, in bytes as sent. The abstract takes what's left. */
+/** A card's caps, in bytes as sent. The abstract takes what's left, within
+ *  `CARD_ABSTRACT_CHARS`. */
 export const CARD_CAPS = {
   id: 64,
   page: 9 + 64, // "/dataset/" and a slug or an id
@@ -89,6 +90,21 @@ export const CARD_CAPS = {
   truncated: 5,
 } as const
 
+/**
+ * The most of an abstract a card sends, in characters: the 500 the info
+ * script keeps (its `ABSTRACT_MAX`, which every copy that reads a card has
+ * had), so the script never cuts it again and About shows nearly what it
+ * showed: the node's `...` falls inside the 500, so a short word or two
+ * can go, and in a long run with no space the node cuts within it where
+ * the script cut at a space before it. Counted in UTF-16 units, which is
+ * what a script holds, two bytes each, and never fewer than it counts. A
+ * reply is held whole while it is read: in-world on 27 October 2026 the
+ * info script reached 63 KB of its 64 reading a card filled to 2,048 bytes
+ * by an abstract of 1,496 characters, of which it kept 500, or answering
+ * About.
+ */
+export const CARD_ABSTRACT_CHARS = 500
+
 /** A tag longer than this is left out of `tags` rather than cut, and a
  *  page asked for one is a 400. At 40, thirty tags fit `TAGS_BUDGET` by
  *  their caps alone. */
@@ -96,10 +112,11 @@ export const TAG_CAP = 40
 
 /**
  * A page's caps: the id a ULID's 26, a title the 48 a dialog can list nine
- * of, the echoed tag, and `total`, `offset` and `limit`, whole numbers of
- * at most six digits (`PAGE_MAX_OFFSET`, and a catalog under a million).
+ * of, the echoed tag, `total`, `offset` and `limit`, whole numbers of at
+ * most six digits (`PAGE_MAX_OFFSET`, and a catalog under a million), and
+ * `list`, eight hex digits (`listHash`).
  */
-export const PAGE_CAPS = { id: 26, title: 48, tag: TAG_CAP, number: 6 } as const
+export const PAGE_CAPS = { id: 26, title: 48, tag: TAG_CAP, number: 6, list: 8 } as const
 
 /** How long one isolate keeps its list. */
 export const LIST_TTL_MS = 60_000
@@ -108,12 +125,6 @@ export const LIST_TTL_MS = 60_000
  *  (`stale-while-revalidate=300`), since a dataset withdrawn meanwhile can
  *  stay in pages that long. */
 export const LIST_STALE_MS = 5 * 60_000
-
-/** Bytes of `PAGE_BUDGET` held back for the menu's change signal, a short
- *  hash of the matching list (`,"list":"<8 hex>"`), which is to ship with
- *  the first menu script (`docs/SECOND_LIFE_COMPAT.md`). Nothing else may
- *  spend them. */
-export const PAGE_RESERVED = 18
 
 /** Seconds a script waits before asking again for a length that didn't settle. */
 export const RETRY_SECONDS = 15
@@ -147,6 +158,7 @@ export interface ExhibitPage {
   offset: number
   limit: number
   tag: string
+  list: string
   datasets: Array<{ id: string; title: string }>
 }
 
@@ -348,8 +360,8 @@ export function pagePath(row: Pick<DatasetRow, 'id' | 'slug'>): string {
 export function buildCard(entry: ListEntry, length: HlsDurationReading): ExhibitCard {
   const { row } = entry
   let truncated = false
-  const fit = (prose: { text: string; cut: boolean }, cap: number): string => {
-    const cut = cutProse(prose.text, cap)
+  const fit = (prose: { text: string; cut: boolean }, cap: number, chars?: number): string => {
+    const cut = cutProse(prose.text, cap, chars)
     if (cut.cut || prose.cut) truncated = true
     return cut.text
   }
@@ -391,9 +403,10 @@ export function buildCard(entry: ListEntry, length: HlsDurationReading): Exhibit
     truncated: false,
   }
   // The abstract takes whatever the rest leaves, counted with `false`,
-  // the longer of the two values `truncated` can end as.
+  // the longer of the two values `truncated` can end as, and no more than
+  // the characters the info script keeps.
   const room = CARD_BUDGET - byteLength({ ...card, truncated: false })
-  card.abstract = fit(exhibitProse(row.abstract, { markdown: true }), room)
+  card.abstract = fit(exhibitProse(row.abstract, { markdown: true }), room, CARD_ABSTRACT_CHARS)
   card.truncated = truncated
   return card
 }
@@ -402,6 +415,32 @@ export interface PageQuery {
   tag: string
   offset: number
   limit: number
+}
+
+/**
+ * Which list a page came from, as eight hex digits: FNV-1a over the ids of
+ * every dataset that matched, in order. **Opaque, and a notice only.** A
+ * reader compares it for equality between two pages of one tag, never
+ * computes it: two that differ came from different lists, so paging between
+ * them may have skipped or repeated a dataset. Isolates can hold lists up
+ * to `LIST_TTL_MS` apart (`LIST_STALE_MS` while reads fail), so after a
+ * change it can alternate between two values on consecutive requests, and
+ * no request can ask for a particular list: a reader that started over, or
+ * asked again, whenever it changed could loop. It also changes when the
+ * match or the order does without the catalog changing (a deploy, a
+ * runtime's collation). The ids alone, so a retitle that leaves a dataset
+ * in place changes nothing; one that moves it does. Never empty, since no
+ * datasets hash to `811c9dc5`; a page without it is from a node older than
+ * the field.
+ */
+export function listHash(ids: string[]): string {
+  let h = 0x811c9dc5
+  const s = ids.join('\n')
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return (h >>> 0).toString(16).padStart(8, '0')
 }
 
 export function buildPage(list: ListEntry[], query: PageQuery): ExhibitPage {
@@ -413,6 +452,7 @@ export function buildPage(list: ListEntry[], query: PageQuery): ExhibitPage {
     offset: query.offset,
     limit: query.limit,
     tag,
+    list: listHash(matching.map(e => e.row.id)),
     datasets: matching.slice(query.offset, query.offset + query.limit).map(e => ({
       id: e.row.id,
       title: cutProse(exhibitPlainText(e.row.title), PAGE_CAPS.title).text,

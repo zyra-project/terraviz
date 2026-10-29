@@ -84,8 +84,8 @@ export function waitForDecodableFrame(
     }
 
     video.addEventListener('canplay', onCanPlay)
-    // Muted so no autoplay policy has grounds to refuse, and because an
-    // output on a projector must never make a sound.
+    // Muted so no autoplay policy has grounds to refuse. Sound is the
+    // caller's to turn on afterwards: the web output's address may.
     video.muted = true
     void video.play().catch(() => {})
   })

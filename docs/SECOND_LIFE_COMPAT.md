@@ -1626,7 +1626,12 @@ info script copies as little as it can while it reads. The maintainer
 then used the exhibit for a while with no further stop, and `/9 memory`
 read the globe script at 54 KB (57 at most, showing a dataset), the info
 script at 55 (58 at most, reading a record or answering About) and the
-visitors script at 49: about 6 KB of room at each script's busiest. The
+visitors script at 49: about 6 KB of room at each script's busiest.
+With the card (#502) and the clip clock (#504) it read, on 27 October,
+the globe script at 57 KB (59 at most, showing a dataset), the info
+script at 48 (52 at most, reading a card or answering About) and the
+visitors script at 49: the card saved the info script more than the
+clock cost it, and the globe script, at 5 KB of room, has the least. The
 checklist has not been run in full. Beyond that run, what has been checked is the
 scripts' syntax (lslint), their date arithmetic against the calendar for
 every day from year 1 to 2100, and, by tests, that the scripts agree with
@@ -1639,20 +1644,45 @@ driven by its owner in chat, with none of the visitor controls.
 
 *How the controller is built* (in
 [`scripts/second-life-exhibit/`](../scripts/second-life-exhibit/README.md)):
-- **Three scripts in the globe prim, talking by link messages.** A
+- **Four scripts, talking by link messages: three in the globe prim
+  and one in a prim linked to it.** A
   script gets 64 KB in all, and a dataset record costs about 1.8 bytes
   of it per character while held (§4.1). One script doing everything
   would hold a record while it also holds menus, notecards and visitor
-  lists, so the work is split three ways:
+  lists, so the work is split three ways, and since 27 October four,
+  for the dataset menu below, whose script is in a small prim of its
+  own because a web reply reaches every script in the prim that asked:
   - **globe** owns the address, the clock and the media. It is the
-    smoke-test script's core, unchanged in what it writes, and it is
+    smoke-test script's core and writes the same keys, though since 27
+    October not always the same `t` (below), and it is
     the only script that changes what visitors see. It takes the
     owner's chat commands, as before, and control requests from the
     visitors script, and from the info script to put back a dataset the
     page can't show. After every change it tells the other two what
     the globe now shows. It asks the node nothing: a web reply goes to
     every script in the prim with a handler for one, and this one has
-    the least room.
+    the least room. Since 27 October it keeps the clip's position in
+    whole microseconds round the loop, once the info script has passed
+    on the card's `exactDuration`, and the info script works out the
+    date the same way. Both had added the time since the anchor in an
+    LSL float, which lost about 10 ms a day of play at the clip's speed
+    and a third of a second a month, a second a month at 4×. So the
+    floating text's date drifted from the picture on a globe left
+    playing, and a pause landed off the frame every copy showed. The
+    `t` it writes on a pause, a move or a change of rate is now within
+    the loop, and a copy looping on a length of its own (one playing
+    the stream itself) is brought back into step by each. The exactness
+    rests on the card's length being the page's to the microsecond,
+    which holds for playlists that write lengths to six places, as
+    TerraViz's bundles and Vimeo's streams do; one written finer could
+    differ by half a microsecond a loop. A clip of 2147 s or more is
+    too long to count in microseconds and shows its range, its clock
+    kept in the float as before (the node's longest was 717 s). Each
+    time the info script starts on a dataset it tells the globe there
+    is no length until the card says, so a dataset shown again never
+    runs on a length its card has stopped giving (found in review). The
+    arithmetic is tested by translating the scripts' own function into
+    JavaScript, with every integer held to 32 bits.
   - **visitors** owns people. It turns touches into menus, keeps the
     presenter list, runs talks and the short hold, watches who is at
     the globe, and asks the globe to go back to the live Earth once
@@ -1668,6 +1698,12 @@ driven by its owner in chat, with none of the visitor controls.
     date the globe now shows. When the node has no such dataset, or
     it is a tour, it puts the globe back on the live Earth and says
     so.
+  - **menu** owns the dataset menu read from the node's catalog, which
+    the visitors script opens for whoever chooses Datasets when the
+    globe has no `datasets` notecard ("The menu", step 2 of the
+    exhibit's reads, below). It reads the node itself, from a prim of
+    its own linked to the globe, and takes the node and the owner's
+    categories from the visitors script each time it opens.
 - **What visitors can do.** A touch opens a menu for whoever touched.
   "About" is always there, since reading changes nothing. The
   controls are pause or play, back and forward ten seconds, start
@@ -1693,16 +1729,56 @@ driven by its owner in chat, with none of the visitor controls.
   when its holder leaves the globe. Presenters also get "Start talk"
   and "End talk", and "Jump to", which takes a time. A presenter can
   start a talk whoever holds the globe. A visitor
-  doesn't change the rate, the width or the telemetry, which stay the
-  owner's, in chat. Nor does a turn change the owner's rotation: that
-  is where the globe goes back to, upright and with the live Earth,
-  once the last visitor has gone.
+  doesn't change the rate, the width, the sound or the telemetry, which
+  stay the owner's, in chat. Nor does a turn change the owner's
+  rotation: that is where the globe goes back to, upright and with the
+  live Earth, once the last visitor has gone.
+- **Sound (added 27 October).** The movies in the catalog have sound
+  tracks (24 datasets titled "(movie)" in October), and the page had
+  always played muted.
+  - **The page.** The page gained `sound=1`, off when absent and for
+    anything but `1` or `true`, as `telemetry` is, so every address and
+    globe without it stays silent and `sound=off` never plays aloud
+    (`docs/EMBED_URL_GRAMMAR.md`).
+  - **The exhibit globe.** It writes `sound=1` after the `#` (before it
+    under `/9 steer query`, where every change reloads) unless the owner
+    says `/9 sound off`, or sets `SOUND` to `FALSE` for a globe
+    that starts silent. The maintainer chose on 27 October to have it
+    on by default for the exhibit, and owner-only rather than a
+    visitor's button, since everyone at the globe hears it.
+  - **Why it plays with nobody clicking.** Second Life's viewer starts
+    its embedded browser with unmuted autoplay allowed:
+    `settings.autoplay_without_gesture = true` in
+    `indra/media_plugins/cef/media_plugin_cef.cpp`, which Dullahan turns
+    into Chromium's `--autoplay-policy=no-user-gesture-required`.
+    In-world, the full app's panel played a movie's sound once
+    unmuted, and on 27 October the exhibit globe, in Firestorm 7.2.4
+    (built from Linden's code), played HOLOSCENES / Little Boxes aloud
+    with nothing clicked; `/9 sound off` silenced it with the picture
+    playing on, and `/9 sound on` brought it back. Linden's own viewer
+    is confirmed by its source alone. With sound added, `/9 memory` read
+    the globe script 57 KB, at most 60 showing the movie, as before; the
+    info script 51, at most 59; the menu script 44, at most 53; the
+    visitors script 52.
+  - **When a browser refuses.** A browser that wants a click first
+    pauses an element unmuted while it plays, saying nothing, and
+    refuses the next `play()`; the page then plays muted for the rest of
+    its life rather than holding a still frame.
+  - **What visitors hear.** Each visitor hears their own copy, at their
+    viewer's media volume and fainter with distance, as close to the
+    others as the pictures are. A seek to catch up is a skip in the
+    sound, catching up without one plays it up to a quarter faster or
+    slower for a while (the control law's rate trim), and a short loop
+    repeats its sound every pass.
 - **Notecards in the globe, all optional, re-read when they change:**
   - `presenters`: one username a line. A legacy name such as "Eric
     Hackathorn" is read as its username. A display name never is.
-  - `datasets`: the menu, one `Name = id` a line. Without it the menu
-    offers the smoke-test script's five.
-  - `settings`: the four numbers, as `name = value` lines:
+  - `datasets`: a menu of the owner's own, one `Name = id` a line.
+    Without it the menu is the node's catalog, by category ("The menu"
+    under the exhibit's reads, below), with the smoke-test script's five
+    standing in when the node can't give it.
+  - `settings`: the four numbers and the categories, as `name = value`
+    lines:
     - `radius`: the distance that counts as at the globe, in metres
       (15);
     - `idle minutes`: how long after the last visitor leaves before
@@ -1711,6 +1787,8 @@ driven by its owner in chat, with none of the visitor controls.
       last action (60);
     - `talk minutes`: how long with no presenter at the globe before a
       talk ends (2).
+    - `categories`: which of the node's categories the menu offers, by
+      name and in that order, such as `Water, Air` (all of them).
   - a notecard named by a dataset's id, given to a visitor who asks
     about that dataset in place of the chat abstract.
 - **The exhibit's own reads from the node** (designed 25 October and
@@ -1779,7 +1857,11 @@ driven by its owner in chat, with none of the visitor controls.
       is kept to the millisecond), or `""`. `period` is an ISO 8601
       duration the node could parse, or `""`.
     - `exactDuration` is the clip's exact length in seconds, the one
-      the page loops on, or 0 when the node has none. **0 means only
+      the page loops on, or 0 when the node has none. It is written as
+      a plain decimal of at most six places, never with an exponent,
+      since the info script reads its digits into whole microseconds
+      (since 27 October), and a test on the node holds it to that form.
+      **0 means only
       that**: which rows have a length is the node's to widen, and
       neither value says where a video is hosted. Today the length is
       read from the stream's own playlists, for an HLS bundle the node
@@ -1849,8 +1931,12 @@ driven by its owner in chat, with none of the visitor controls.
       dataset published a moment ago is found, and one retracted a
       moment ago is a 404.
   - **`GET /api/exhibit/v1/datasets?tag=&offset=&limit=`, a page of
-    the menu:** `{ total, offset, limit, tag, datasets: [{ id, title
-    }] }`.
+    the menu:** `{ total, offset, limit, tag, list, datasets: [{ id,
+    title }] }`.
+    - `list` names the list the page came from, eight hex digits (below,
+      under what it costs the node). Added 27 October with the first
+      menu script, so a page from a node deployed between 26 and 27
+      October has none; when present it is never empty.
     - The datasets the output page can show: an image or video format
       whose data reference the manifest can resolve. So no tours, no
       `peer:` rows, and no row whose reference and format disagree.
@@ -1888,8 +1974,10 @@ driven by its owner in chat, with none of the visitor controls.
       so the loop that drops whole tags from the least common end
       until the reply fits is a guard; `more: true` says when tags
       were left.
-    - A tag's `count` equals the page's `total` for that tag, which a
-      test holds.
+    - A tag's `count` equals the page's `total` for that tag from the
+      same isolate's list, which a test holds. The tags carry no `list`
+      and a script keeps them ten minutes, so "Water (12)" followed by
+      "1 to 9 of 11" is expected after a change.
     - It is a resource of its own, not a parameter of the page, so
       each path keeps one budget.
   - **Budgets, proved by arithmetic:** every field has a cap counted
@@ -1897,10 +1985,22 @@ driven by its owner in chat, with none of the visitor controls.
     included, and a reply's budget is their sum: a card at most 2,048
     bytes, a page 1,024, the tags 2,048.
     - The page holds by construction: nine 26-byte ids, nine 48-byte
-      titles, a 40-byte tag, six-digit numbers and the envelope come
-      to 964 bytes.
-    - The card's fixed fields take about 200 bytes, and the abstract
-      what's left.
+      titles, a 40-byte tag, six-digit numbers, an eight-digit `list`
+      and the envelope come to 982 bytes, which leaves 42 for any
+      later field.
+    - The card's fixed fields take about 200 bytes, and its other fields'
+      caps come to 1,324 bytes with them, so the abstract always has at
+      least 724, and takes what is left, within the 500 characters the
+      info script keeps (since 27 October; counted in UTF-16 units, what a
+      script holds and never fewer than it counts). Before that it took
+      everything left, up to 2,048 bytes in all, of which the script
+      threw away all but 500 characters, while holding the whole reply:
+      in-world, the info script reached 63 KB of its 64 reading a card
+      whose abstract was 1,496 characters, or answering About. An English
+      card is now about 1 KB; one in a script of three bytes a character
+      can still fill the budget, since 500 such characters are 1,500
+      bytes, and a field added later should be weighed against the 63 KB
+      as well as the budget.
     - Tests sum the caps, and hold each reply with worst-case data:
       CJK, quotes, control characters, padded titles. The first menu
       read's review found two ways past its budget, a title padded
@@ -1941,14 +2041,26 @@ driven by its owner in chat, with none of the visitor controls.
     - So a retracted dataset can stay in pages for up to a minute, or
       five while reads fail, and pages from different isolates can come
       from lists as far apart, so a page can skip or repeat a row. Its
-      card is a 404 at once, and the output page refuses it. The menu
-      should learn to notice the change, and the API review set three
-      conditions for the field that will say so: a `list`, a short hash
-      of the matching datasets' ids in order rather than the page's
-      alone; 18 bytes of the page's budget held for it now
-      (`PAGE_RESERVED`), which nothing else may spend; and shipped
-      before or with the first menu script, since a rezzed one can't
-      learn it later.
+      card is a 404 at once, and the output page refuses it. The API
+      review set three conditions for the field that says so: a `list`,
+      a short hash of the matching datasets' ids in order rather than
+      the page's alone; 18 bytes of the page's budget held for it, which
+      nothing else could spend; and shipped before or with the first
+      menu script, since a rezzed one can't learn it later. It shipped
+      with that script on 27 October, spending exactly the 18 bytes.
+      **It is opaque and a notice only** (the API review of the built
+      field): a reader compares it for equality between two pages of one
+      tag and never computes it, though today it is FNV-1a over the ids
+      (`listHash`). Isolates can hold lists a minute apart, five while
+      reads fail, so after a change it can alternate between two values
+      on consecutive requests, and no request can ask for a particular
+      list; a reader that started over or asked again whenever it changed
+      could loop, and a rezzed one couldn't be fixed. It can also change
+      with no change to the catalog, when a deploy or the runtime's
+      collation changes the match or the order. The ids alone, so a
+      retitle that leaves a dataset in place changes nothing, and one
+      that moves it does. How the menu uses it is under "The menu" in the
+      steps below.
     - Cloudflare doesn't store a Function's reply at its edge, so
       `Cache-Control` saves the node nothing; it is for browsers:
       `public, max-age=60`, and `no-store` for a card with a `retry`
@@ -1997,16 +2109,142 @@ driven by its owner in chat, with none of the visitor controls.
     1. The info script reads the card in place of the record and the
        manifest: one request, or a second after a `retry`, about 4 KB
        held where the record took 6, and no JSON or HTML code of its
-       own. Done 26 October, 185 lines shorter; `/9 memory` in-world is
-       still to measure.
-    2. The menu. The info script stays the only script with an
-       `http_response`. It reads pages for the visitors script and
-       relays their ids and titles. A link message reaches every
-       script in the prim with a handler for one, the globe script
-       included, so the relay is as compact as it can be, or the
-       visitors script moves to a child prim of its own.
+       own. Done 26 October, 185 lines shorter; measured in-world on 27
+       October at 48 KB, at most 52 reading a card or answering About
+       (the exhibit README), before the menu's own steps below.
+    2. The menu (built 27 October, on the design of 25 October, as a
+       fourth script after the first build overflowed the visitors
+       script in-world, and moved the same day into a prim of its own;
+       measured in-world that day, below). The maintainer chose on
+       25 October a menu read live
+       from the node over two cheaper alternatives: a page on the node
+       that writes the `datasets` notecard, which the owner would redo
+       for every catalog change, and notecard lines taking the app's
+       dataset links, still a hand-made list. So a dataset published on
+       the node reaches the globe with nothing typed.
+       - **In-world:** Datasets opens the node's categories, with how
+         many datasets each has, and "All datasets", since some are in
+         none (twelve of 175 in October). A category opens its
+         datasets nine to a page. On a page the buttons are numbers and
+         the menu's text lists the titles: a button holds 24 bytes, 115
+         of the 175 titles were longer, and 20 came out the same when
+         cut to fit. The numbers count from the category's first
+         dataset, 10 to 18 on its second page, so a button pressed on an
+         older page of a visitor's isn't taken for one on the page they
+         have now (found in review). A category's button is its name
+         where every name on that page fits a button whole, and a number
+         counted from the first category otherwise; a categories menu
+         answered after the categories changed is shown again rather
+         than answered. A choice goes to the globe as `show <id>
+         <title>`, as the notecard menu's does, and the globe checks it
+         with the node. The title is the page's, which the node cuts to
+         48 bytes, so the info script names the dataset by the card's
+         title instead wherever the page's is that title cut.
+       - **The owner's say:** a `datasets` notecard still replaces the
+         live menu with its own list, for an exhibit with a theme, and
+         `categories` in `settings` narrows the live menu to those
+         named, in the owner's order and whatever their case, "All
+         datasets" among them if named. When the node can't give the
+         menu (no node yet, Second Life throttling the object's
+         requests, an error, or a reply that isn't a menu, as from a
+         node older than these reads), the visitor gets the built-in
+         five, and the owner is told why once, until the node answers
+         again; told of categories it lacks once, not at every refresh.
+         A category emptied since it was listed sends the visitor back
+         to the categories.
+       - **A script of its own, in a prim of its own, which reads the
+         node itself.** It went into the visitors script first, the
+         info script reading the node and relaying each reply in lines,
+         and in-world the visitors script stopped at once with a
+         Stack-Heap Collision (27 October): the menu had taken it past
+         64 KB before it held a page. So the menu became a fourth
+         script, `terraviz-exhibit-menu`, with the visitors and info
+         scripts as they were but for a few lines. In the globe prim
+         beside them it read the node with its own `http_response`, on
+         the reasoning that each reply was within 2 KB and set aside at
+         once by the scripts that hadn't asked. In-world the info
+         script then stopped the same way while reading the card of a
+         dataset chosen from the menu (Age of the Seafloor). A reply
+         that reaches a script that didn't ask is still copied into
+         that script's memory before it is set aside, and counts there
+         until Second Life collects it, so the menu's replies were taken
+         for the cause and the menu script moved to a small prim linked
+         to the globe, where only its own replies reach it, and this
+         step's first rule, that in the globe prim only the info script
+         has an `http_response`, stands. The info script went on
+         stopping with the menu out of its prim, though. Most likely the
+         cause was an older copy of it still in the globe, from the
+         first menu build, about 90 lines longer: it rested at 56 KB,
+         and replaced, at 49, and it hasn't stopped since. Likely, not
+         proven: the current copy climbed 12 KB above its rest on a 2 KB
+         card that afternoon, which from 56 reaches 68, but 4 KB on a
+         1.9 KB card that morning, which reaches 60. So the move is
+         not shown to have been needed. It stays, because the info
+         script had no room for anyone else's replies while cards were
+         2 KB: with the menu in its own prim, `/9 memory` read the globe
+         script 57 KB, at most 60 showing a dataset; the info script 51,
+         **at most 63** reading a card filled to 2 KB (Clouds
+         (colorized) - Real-time) or answering About, one peak covering
+         both; the visitors script 49; the menu script 44, at most 48
+         reading the node. A card is held whole while it is read, and
+         the info script keeps 500 characters of an abstract that filled
+         the card's rest, so the card now sends no more than those 500
+         ("Budgets", above), about 1 KB for that card. With cards that
+         size the info script read 51 KB, and **at most 57** reading
+         cards and answering About, 7 KB to spare where it had 1; the
+         menu script at most 51, the globe script still at most 60. The
+         visitors script opens it
+         (`MSG_MENU_OPEN`, to the whole object since the scripts are in
+         different prims) for a visitor who may act, handing it the
+         node, which it reads from the globe script's state, and the
+         `categories` line of the `settings` notecard as written, since
+         a script reads notecards only in its own prim. The menu script
+         says at once that it opened (`MSG_MENU_DONE`, `open`), and
+         later hands back a choice, which the visitors script holds to
+         the hold and any talk as it does the notecard menu's, or the
+         main menu, or the built-in datasets. When no `open` comes
+         within six seconds (seen at the visitors script's next
+         five-second check), the menu script missing, stopped or held
+         up by a busy region, the visitor gets the built-in datasets and
+         the owner is told once. The open carries when it was asked,
+         and the menu script leaves one three whole seconds old
+         unanswered, so it answers for two to three seconds and an
+         answer has over three seconds to arrive before the built-in
+         datasets; both scripts read the region's clock, and only a
+         region slower than that shows both. An open with no time, from
+         a visitors script of the in-prim build, is answered. A copy of
+         the menu script left in the globe's prim answers nothing, so
+         an owner upgrading from the in-prim build is told to move it,
+         and its replies stay out of the info script's little room. The two messages have numbers of their own
+         (271008, 271009), not the in-prim build's, so a globe still
+         holding that build's copy can't take one message for the
+         other. The menu script gives its prim the globe's name, which
+         heads its menus. One exhibit to an object: two globes linked
+         into one build would each open the other's menu (found in
+         review). It asks the node
+         only for a category and where a page starts, one read in
+         flight a visitor, so a slow reply to a read they have since
+         replaced opens nothing, and a new node starts its categories
+         and pages afresh.
+       - **Kept, and for how long:** the categories for ten minutes,
+         about 0.2 KB in October and 2.4 KB at their caps; the page a
+         visitor has open, as the node sent it, while their menu stays
+         answerable (five minutes), for at most four visitors at once,
+         the oldest giving way, each within its 1 KB budget. Outside a
+         talk only the visitor holding the globe and the owner can open
+         Datasets, and a visitor whose page gave way gets the categories
+         again. The menu script's `/9 memory` says the most it used
+         reading the node for a menu, as the other scripts say theirs.
+       - **The page's `list`** (below) says two pages of one category
+         came from different lists. While a visitor pages through one,
+         the menu then says a dataset may have moved between pages, and
+         doesn't start over: pages from two isolates can come from lists
+         a minute apart, so a menu that started over at every change
+         might never page forward. A page past the end asks for the last
+         page, once.
     3. Phase 4b's buttons, with the owner's chat commands moved to a
-       fourth script to give the globe script room.
+       fifth script to give the globe script room. It goes in the globe
+       prim, since it neither asks the node nor needs to be apart.
   - **The node and the scripts go together.** A TerraViz node without
     these reads answers them with the app's page and a 200, not JSON,
     which Second Life refuses with its own HTTP 415, since the script

@@ -42,6 +42,16 @@
  * keeps its last frame and reports nothing; noticing that and rebuilding
  * the stream is the multi-monitor plan's rung 13, for desktop and web
  * alike. A short loop is safe once it is fully buffered.
+ *
+ * **Sound is the address's, unless the browser refuses it.** Every
+ * element is loaded muted, which browsers normally let play by itself,
+ * and `steer` unmutes it while the address says `sound`. A browser whose
+ * autoplay policy wants a click first pauses an element unmuted while it
+ * plays, saying nothing, and refuses the next `play()` with a
+ * `NotAllowedError`; the page then plays muted for the rest of its life,
+ * since that browser would refuse again, rather than holding a still
+ * frame. Second Life's own viewer lets a page on a prim play aloud by
+ * itself.
  */
 
 import type { DatasetMirror } from './datasetMirror'
@@ -186,11 +196,41 @@ export function createWebOutput(deps: WebOutputDeps): WebOutput {
   const reducedMotion =
     deps.reducedMotion ??
     (() => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches)
-  const clockSteer = createWebClockSteer()
+  /** Whether this page's browser refused to play aloud. */
+  let soundRefused = false
+  const clockSteer = createWebClockSteer({
+    onPlayRefused: err => {
+      // Only a refusal to play aloud: a play() a pause or a new source
+      // interrupts is rejected too, as an AbortError.
+      if ((err as { name?: unknown } | null)?.name !== 'NotAllowedError') return
+      const media = mirror.current()
+      if (media?.kind === 'video' && !(media.element as HTMLVideoElement).muted) soundRefused = true
+    },
+  })
   const camera = createViewGlide()
 
   let current: WebOutputSettings | null = null
   let disposed = false
+
+  /**
+   * The video as loud as the address and the browser allow. On every
+   * apply, since `steer` runs on animation frames, which a browser stops
+   * for a hidden page while its sound plays on, so a `#sound=0` arriving
+   * then waited until the page was drawn again (found in review). And on
+   * every frame, for an element loaded since, which arrives muted, and to
+   * mute one the browser has refused before the clock asks it to play
+   * again. The recovery rests on the clock asking a paused, playing-clock
+   * element to play on every frame (`syncVideoToState`): the unmute's own
+   * pause is silent, and only that next `play()` is refused. The default
+   * loader hands the same element as `element` and `video`.
+   */
+  const applySound = (): void => {
+    const media = mirror.current()
+    if (!current || media?.kind !== 'video') return
+    const element = media.element as HTMLVideoElement
+    const muted = !current.sound || soundRefused
+    if (element.muted !== muted) element.muted = muted
+  }
   /** The page's telemetry, once an address has turned it on. */
   let telemetry: Promise<WebTelemetry | null> | null = null
   /**
@@ -314,6 +354,7 @@ export function createWebOutput(deps: WebOutputDeps): WebOutput {
         telemetry = deps.loadTelemetry().catch(() => null)
       }
       if (!previous || !sameClock(next.clock, previous.clock)) clockReadAtMs = nowMs()
+      applySound()
       if (!previous || next.datasetId !== previous.datasetId) showDataset(next.datasetId)
       deps.markDirty()
     },
@@ -340,6 +381,7 @@ export function createWebOutput(deps: WebOutputDeps): WebOutput {
         wasSeeking = false
         return NOT_READY
       }
+      applySound()
       const before = video.currentTime
       // The stream's own period, where it states one: copies agree on it
       // wherever the renditions do.

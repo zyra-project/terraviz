@@ -397,7 +397,12 @@ async function fetchPlaylist(read: RemoteRead, address: URL): Promise<{ text: st
       return null
     }
     read.fetches++
-    const res = await read.fetchImpl(url.href, { redirect: 'manual', signal: read.signal })
+    // Called plainly, never as `read.fetchImpl(...)`: Workers' fetch throws
+    // "Illegal invocation" when called as another object's method, which
+    // Node allows, so every Vimeo length read failed on Cloudflare while
+    // every test passed (found in-world, 27 October 2026).
+    const fetchImpl = read.fetchImpl
+    const res = await fetchImpl(url.href, { redirect: 'manual', signal: read.signal })
     if ([301, 302, 303, 307, 308].includes(res.status)) {
       await discard(res)
       const location = res.headers.get('location')
@@ -588,7 +593,9 @@ export async function readVimeoDuration(
   options: ReadVimeoDurationOptions = {},
 ): Promise<HlsDurationReading> {
   if (!isVimeoId(vimeoId)) return { seconds: 0, settled: true }
-  const fetchImpl = options.fetchImpl ?? fetch
+  // Wrapped, so the platform's fetch is called plainly however a caller
+  // holds it (Workers' throws when called as another object's method).
+  const fetchImpl = options.fetchImpl ?? ((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init))
   const refuse: Refusal = why => console.warn(`[hls-duration] Vimeo ${vimeoId}: ${why}, so its length reads as unknown`)
   const once = async (): Promise<number> => {
     // Whatever the reading started stops at the first failure, a refusal
